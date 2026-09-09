@@ -91,10 +91,26 @@
  *
  * over D display decades, which is the same log axis the page's own
  * density plot uses, so the render and the plot agree by construction.
- * γ shapes how much of the faint outer exosphere survives. Both are
- * reported by `getScaleInfo()` and the legend prints them: it is a
- * display transform, not a change to the physics, and it must stay
- * labelled.
+ *
+ * γ shapes how much of the faint outer exosphere survives, and it is the
+ * one knob here that is a judgement rather than a measurement. Displayed
+ * brightness by tangent altitude at D=10, gain 0.90:
+ *
+ *     γ        80    200   400   800  1400  1950 km
+ *     1.15    0.90  0.51  0.34  0.16  0.09  0.02
+ *     0.95    0.90  0.56  0.41  0.22  0.13  0.04   ← shipped
+ *     0.80    0.90  0.60  0.46  0.27  0.18  0.06
+ *
+ * 1.15 was tried first and crushed the 800–2000 km halo to almost
+ * nothing: the render read as a bright ring with empty space above it,
+ * when in fact the exosphere is the largest part of what is being drawn.
+ * 0.95 keeps the limb exactly as bright — the base is pinned by the
+ * reference — and lifts the outer band into view. Below ~0.8 the faint
+ * end starts washing out the star field.
+ *
+ * D and γ are both reported by `getScaleInfo()` and the legend prints
+ * them: it is a display transform, not a change to the physics, and it
+ * must stay labelled.
  *
  * THE TWO COMPONENTS COLOUR THEMSELVES DIFFERENTLY, ON PURPOSE
  * ────────────────────────────────────────────────────────────
@@ -462,7 +478,7 @@ export class AtmosphereVolume {
                 uGlowRefLog:    { value: 0 },
                 uDecades:       { value: 10 },
                 uGlowDecades:   { value: 2.2 },
-                uGamma:         { value: 1.15 },
+                uGamma:         { value: 0.95 },
                 uSteps:         { value: quality },
                 uDensityGain:   { value: 0.90 },
                 uAirglowGain:   { value: 0.95 },
