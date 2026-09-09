@@ -31,6 +31,7 @@ import {
     airglowColumn, buildAtmosphereLUT, probeProfile,
     tangentAltitudeKm, localSolarTime, bulgeLocalSolarTime,
     diurnalContrast, R_EARTH_KM, MODEL_FLOOR_KM, MODEL_CEIL_KM,
+    geoFromVectors, buildFieldLUT,
 } from '../js/upper-atmosphere-column.js';
 import { density, exosphereTempK } from '../js/upper-atmosphere-engine.js';
 
@@ -319,10 +320,34 @@ t('every non-visible layer is flagged so consumers can disclose false colour', (
     }
 });
 
-t('visibleOnly drops the UV/IR layers', () => {
-    assert.ok(airglowAt(1400, { visibleOnly: true }).total
-            < airglowAt(1400).total,
-        'the geocorona must vanish from the visible-only sum');
+t('VISIBLE WEIGHTING IS WHAT MAKES THE BAND GREEN', () => {
+    // Weighted by raw VER the band comes out ORANGE, because OH Meinel
+    // outshines everything by an order of magnitude in total photons —
+    // but ~98 % of that is at 1.5-2.0 µm. This is the gate on that.
+    const band = airglowAt(97);
+    assert.ok(band.rgb[1] > band.rgb[0] && band.rgb[1] > band.rgb[2],
+        `97 km visible colour ${band.rgb.map(v => v.toFixed(2))} should be `
+      + `green-dominant`);
+    assert.ok(band.rgbPhysical[0] > band.rgbPhysical[1],
+        'the all-photon colour is red-dominant — that is the trap');
+    // The dim base of the band, below the green peak, stays warm.
+    const base = airglowAt(87);
+    assert.ok(base.rgb[0] > base.rgb[1],
+        `87 km should read red-brown, got ${base.rgb.map(v => v.toFixed(2))}`);
+});
+
+t('the geocorona contributes NOTHING visible', () => {
+    const hi = airglowAt(1400);
+    assert.ok(hi.total > 0, 'it still emits — in the far ultraviolet');
+    assert.ok(hi.visibleTotal < hi.total * 1e-6,
+        `visible fraction ${(hi.visibleTotal / hi.total).toExponential(1)} — a `
+      + `UV line must not light the render as if the eye could see it`);
+});
+
+t('visible and physical totals are both reported and differ', () => {
+    const g = airglowAt(87);
+    assert.ok(g.total > g.visibleTotal * 10,
+        'OH is far brighter in total photons than in visible ones');
 });
 
 t('storm brightens the aurorally-coupled lines and leaves OH alone', () => {
@@ -500,6 +525,104 @@ t('local solar time wraps cleanly across the dateline', () => {
         const lst = localSolarTime(lon, 170);
         assert.ok(lst >= 0 && lst < 24, `lst=${lst} at lon=${lon}`);
     }
+});
+
+console.log('\n── 10. the shader mirror: scene vectors → (lat, LST) ──');
+
+// Scene convention, copied from the globe's _subSolarToVec3.
+function vec(latDeg, lonDeg) {
+    const c = Math.cos(latDeg * DEG);
+    return [c * Math.cos(lonDeg * DEG), Math.sin(latDeg * DEG), c * Math.sin(lonDeg * DEG)];
+}
+
+t('latitude round-trips through the scene frame', () => {
+    for (const lat of [-80, -35, 0, 12, 67, 89]) {
+        const { latDeg } = geoFromVectors(vec(lat, 137), vec(0, 0));
+        assert.ok(Math.abs(latDeg - lat) < 1e-6, `${latDeg} ≠ ${lat}`);
+    }
+});
+
+t('LST MATCHES localSolarTime — this is the sign gate', () => {
+    // If the hour angle were measured about +north instead of −north the
+    // bulge would land on the morning side and nothing else in the render
+    // would look different. Check the full longitude circle at several
+    // sub-solar longitudes.
+    for (const subLon of [-160, -45, 0, 77, 179]) {
+        const sun = vec(0, subLon);
+        for (let lon = -180; lon < 180; lon += 11) {
+            const got = geoFromVectors(vec(23, lon), sun).lstHr;
+            const want = localSolarTime(lon, subLon);
+            const d = Math.min(Math.abs(got - want), 24 - Math.abs(got - want));
+            assert.ok(d < 1e-6,
+                `subLon=${subLon} lon=${lon}: shader mirror says ${got.toFixed(3)} h, `
+              + `kernel says ${want.toFixed(3)} h`);
+        }
+    }
+});
+
+t('a point 90° EAST of the sub-solar meridian reads 18 h, not 6 h', () => {
+    const lst = geoFromVectors(vec(0, 90), vec(0, 0)).lstHr;
+    assert.ok(Math.abs(lst - 18) < 1e-6,
+        `got ${lst.toFixed(2)} h — east of the sub-solar point is AFTERNOON`);
+});
+
+t('poles return noon rather than NaN', () => {
+    const { lstHr } = geoFromVectors([0, 1, 0], vec(0, 0));
+    assert.ok(Number.isFinite(lstHr), 'LST at the pole must stay finite');
+});
+
+t('the sub-solar point itself is local noon at any declination', () => {
+    for (const decl of [-23, 0, 23]) {
+        const sun = vec(decl, -30);
+        const { lstHr } = geoFromVectors(vec(decl, -30), sun);
+        assert.ok(Math.abs(lstHr - 12) < 1e-4, `decl=${decl}: ${lstHr}`);
+    }
+});
+
+console.log('\n── 11. the 2-D field LUT the shader samples ──');
+
+t('field LUT is finite, normalised, and monotone in altitude', () => {
+    const lut = buildFieldLUT({ altBins: 48, tinfBins: 12 });
+    assert.equal(lut.data.length, 48 * 12 * 4);
+    for (let i = 0; i < lut.data.length; i++) {
+        assert.ok(Number.isFinite(lut.data[i]), `non-finite at ${i}`);
+        assert.ok(lut.data[i] >= -1e-6 && lut.data[i] <= 1 + 1e-6, `${lut.data[i]} at ${i}`);
+    }
+    // Density must fall with altitude at every T∞ row.
+    for (let j = 0; j < 12; j++) {
+        for (let i = 1; i < 48; i++) {
+            const a = lut.data[(j * 48 + i - 1) * 4];
+            const b = lut.data[(j * 48 + i) * 4];
+            assert.ok(b <= a + 1e-7, `row ${j} rises from bin ${i - 1} to ${i}`);
+        }
+    }
+});
+
+t('LUT REPRODUCES THE ENGINE — the shader is not a second model', () => {
+    const lut = buildFieldLUT({ altBins: 192, tinfBins: 32 });
+    const span = lut.spanDecades;
+    for (const [i, j] of [[40, 8], [96, 16], [150, 25]]) {
+        const altKm = lut.minKm + (lut.maxKm - lut.minKm) * (i / (lut.altBins - 1));
+        const Tinf = lut.tinfMin + (lut.tinfMax - lut.tinfMin) * (j / (lut.tinfBins - 1));
+        const v = lut.data[(j * lut.altBins + i) * 4];
+        const fromLut = Math.pow(10, lut.logRhoMin + v * span);
+        const fromEngine = density({ altitudeKm: altKm, f107Sfu: 150, ap: 15, TinfK: Tinf }).rho;
+        const err = Math.abs(fromLut - fromEngine) / fromEngine;
+        assert.ok(err < 1e-4,
+            `alt=${altKm.toFixed(0)} T∞=${Tinf.toFixed(0)}: LUT ${fromLut.toExponential(3)} `
+          + `vs engine ${fromEngine.toExponential(3)}`);
+    }
+});
+
+t('THE BULGE IS ALTITUDE-DEPENDENT — a flat multiplier could not do this', () => {
+    // Same ΔT∞ at two altitudes gives very different density responses.
+    // This is the reason the renderer carries a 2-D LUT instead of a
+    // "bulge multiplier" uniform.
+    const resp = (altKm) => density({ altitudeKm: altKm, f107Sfu: 150, ap: 15, TinfK: 1400 }).rho
+                          / density({ altitudeKm: altKm, f107Sfu: 150, ap: 15, TinfK: 900 }).rho;
+    assert.ok(resp(120) < 1.1, `at 120 km the response should be ~flat, got ${resp(120).toFixed(2)}×`);
+    assert.ok(resp(400) > 2, `at 400 km it should be strong, got ${resp(400).toFixed(2)}×`);
+    assert.ok(resp(400) > resp(120) * 2, 'the altitude dependence is the whole point');
 });
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} upper-atmosphere-column: ${pass} passed, ${fail} failed\n`);

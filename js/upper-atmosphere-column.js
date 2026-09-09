@@ -355,6 +355,16 @@ export function densityFieldAt({
  *              colour of the wavelength. Lyman-α is UV: its colour is a
  *              FALSE-COLOUR mapping and every consumer must say so.
  *   visible    is this emission visible to the human eye?
+ *   visibleFraction
+ *              fraction of this layer's emission that lands in the visible
+ *              band. THIS IS WHAT MAKES THE RENDER LOOK RIGHT. Weighting
+ *              the display colour by raw `ver` makes the airglow band
+ *              ORANGE, because OH Meinel outshines every other layer by
+ *              an order of magnitude in total photons — but ~98 % of that
+ *              is at 1.5–2.0 µm and invisible. Weighted by visible photons
+ *              the band comes out green-dominant at 92–105 km over a dim
+ *              red-brown base at 87 km, which is what the band looks like
+ *              in every astronaut photograph of the limb.
  *   apGain     fractional brightening per unit Ap (auroral coupling)
  *   f107Gain   fractional brightening per SFU above 150 (EUV coupling)
  */
@@ -364,6 +374,7 @@ export const AIRGLOW_LAYERS = Object.freeze([
         peakKm: 87, fwhmKm: 8, ver: 8000,
         rgb: [1.00, 0.42, 0.26], visible: true,
         apGain: 0.0000, f107Gain: 0.0000,
+        visibleFraction: 0.02,   // Only the high-Δv bands at 600-800 nm reach the eye.
         note: 'Hydroxyl vibrational bands from H + O₃. Peak emission is '
             + 'near-IR; the visible tail is the dim red-brown floor of the '
             + 'airglow band.',
@@ -373,6 +384,7 @@ export const AIRGLOW_LAYERS = Object.freeze([
         peakKm: 92, fwhmKm: 10, ver: 120,
         rgb: [1.00, 0.78, 0.36], visible: true,
         apGain: 0.0000, f107Gain: 0.0000,
+        visibleFraction: 1.00,   // A visible-light resonance line.
         note: 'Sodium layer fed by meteoric ablation — the same atoms '
             + 'sodium laser guide stars excite.',
     },
@@ -381,6 +393,7 @@ export const AIRGLOW_LAYERS = Object.freeze([
         peakKm: 94, fwhmKm: 12, ver: 1500,
         rgb: [1.00, 0.55, 0.42], visible: false,
         apGain: 0.0000, f107Gain: 0.0000,
+        visibleFraction: 0.05,   // 762 nm sits at the far red edge of vision.
         note: 'O₂(b¹Σ) band from three-body recombination. Just past the '
             + 'red limit of vision.',
     },
@@ -389,6 +402,7 @@ export const AIRGLOW_LAYERS = Object.freeze([
         peakKm: 97, fwhmKm: 10, ver: 900,
         rgb: [0.42, 1.00, 0.62], visible: true,
         apGain: 0.0022, f107Gain: 0.0010,
+        visibleFraction: 1.00,   // The green line, squarely in the eye's peak response.
         note: 'The green line. Barth-mechanism recombination of atomic '
             + 'oxygen. This is the sharp green band on the limb in ISS '
             + 'photographs, and the same transition the aurora emits.',
@@ -398,6 +412,7 @@ export const AIRGLOW_LAYERS = Object.freeze([
         peakKm: 250, fwhmKm: 90, ver: 60,
         rgb: [1.00, 0.30, 0.34], visible: true,
         apGain: 0.0040, f107Gain: 0.0016,
+        visibleFraction: 1.00,   // 630 nm, deep red but visible.
         note: 'F-region red line from dissociative recombination of O₂⁺. '
             + 'Broad, faint, and the first thing to brighten when the '
             + 'thermosphere is disturbed.',
@@ -407,6 +422,7 @@ export const AIRGLOW_LAYERS = Object.freeze([
         peakKm: 1400, fwhmKm: 2200, ver: 25,
         rgb: [0.55, 0.62, 1.00], visible: false,
         apGain: 0.0000, f107Gain: 0.0026,
+        visibleFraction: 0.00,   // Far ultraviolet. Nothing reaches the eye at all.
         note: 'Resonantly scattered solar Lyman-α from the hydrogen '
             + 'exosphere. FALSE COLOUR — this is far ultraviolet and is '
             + 'invisible to the eye. It extends well past this page\'s '
@@ -418,18 +434,23 @@ export const AIRGLOW_LAYERS = Object.freeze([
  * Airglow volume emission rate at one altitude, summed over layers.
  *
  * Each layer is a Gaussian in altitude about its observed peak, scaled by
- * its activity gains. Returns the total and a luminance-weighted colour so
- * a renderer can shade the emitting band without re-deriving the mix.
+ * its activity gains.
  *
- * @param {object} [opts]
- * @param {boolean} [opts.visibleOnly=false]  drop the UV/IR layers
+ * TWO totals come back and they answer different questions:
+ *   total         physical volume emission rate over ALL wavelengths
+ *   visibleTotal  the part of it in the visible band
+ * and correspondingly `rgbPhysical` (all-photon weighted, a false colour)
+ * and `rgb` (visible-photon weighted, what an eye would see). A renderer
+ * claiming to show what the limb looks like must use the visible pair;
+ * see `visibleFraction` in the layer table for why this is not a detail.
  */
-export function airglowAt(altKm, { f107Sfu = 150, ap = 15, visibleOnly = false } = {}) {
-    let total = 0;
-    const rgb = [0, 0, 0];
+export function airglowAt(altKm, { f107Sfu = 150, ap = 15 } = {}) {
+    let total = 0;             // physical VER sum, all layers
+    let visibleTotal = 0;      // the part in the visible band
+    const rgb = [0, 0, 0];     // visible-weighted — "what you would see"
+    const rgbPhysical = [0, 0, 0];
     const byLayer = {};
     for (const L of AIRGLOW_LAYERS) {
-        if (visibleOnly && !L.visible) { byLayer[L.id] = 0; continue; }
         const sigma = L.fwhmKm / 2.3548;          // FWHM → Gaussian σ
         const d = (altKm - L.peakKm) / sigma;
         const shape = Math.exp(-0.5 * d * d);
@@ -437,14 +458,18 @@ export function airglowAt(altKm, { f107Sfu = 150, ap = 15, visibleOnly = false }
             + L.apGain   * Math.max(0, ap)
             + L.f107Gain * (f107Sfu - 150);
         const v = L.ver * shape * Math.max(0, gain);
+        const vv = v * L.visibleFraction;
         byLayer[L.id] = v;
         total += v;
-        rgb[0] += v * L.rgb[0];
-        rgb[1] += v * L.rgb[1];
-        rgb[2] += v * L.rgb[2];
+        visibleTotal += vv;
+        for (let k = 0; k < 3; k++) {
+            rgb[k] += vv * L.rgb[k];
+            rgbPhysical[k] += v * L.rgb[k];
+        }
     }
-    if (total > 0) { rgb[0] /= total; rgb[1] /= total; rgb[2] /= total; }
-    return { total, rgb, byLayer };
+    if (visibleTotal > 0) for (let k = 0; k < 3; k++) rgb[k] /= visibleTotal;
+    if (total > 0) for (let k = 0; k < 3; k++) rgbPhysical[k] /= total;
+    return { total, visibleTotal, rgb, rgbPhysical, byLayer };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -569,7 +594,7 @@ export function limbPathEquivalentKm(altKm, { f107Sfu = 150, ap = 15, TinfK = nu
  */
 export function airglowColumn({
     tangentAltKm, f107Sfu = 150, ap = 15, steps = 64,
-    ceilKm = MODEL_CEIL_KM, visibleOnly = false,
+    ceilKm = MODEL_CEIL_KM,
 }) {
     const hT = Math.max(MODEL_FLOOR_KM, tangentAltKm);
     if (hT >= ceilKm) return { brightness: 0, rgb: [0, 0, 0] };
@@ -580,13 +605,14 @@ export function airglowColumn({
     let total = 0;
     const rgb = [0, 0, 0];
     const ds = sMax / steps;
-    let prev = airglowAt(hT, { f107Sfu, ap, visibleOnly });
+    let prev = airglowAt(hT, { f107Sfu, ap });
     for (let i = 1; i <= steps; i++) {
         const h = Math.sqrt(rT * rT + (ds * i) * (ds * i)) - R_EARTH_KM;
-        const cur = airglowAt(h, { f107Sfu, ap, visibleOnly });
-        total += 0.5 * (cur.total + prev.total) * ds;
+        const cur = airglowAt(h, { f107Sfu, ap });
+        total += 0.5 * (cur.visibleTotal + prev.visibleTotal) * ds;
         for (let k = 0; k < 3; k++) {
-            rgb[k] += 0.5 * (cur.total * cur.rgb[k] + prev.total * prev.rgb[k]) * ds;
+            rgb[k] += 0.5 * (cur.visibleTotal * cur.rgb[k]
+                           + prev.visibleTotal * prev.rgb[k]) * ds;
         }
         prev = cur;
     }
@@ -625,8 +651,8 @@ export const SPECIES_RGB = Object.freeze({
  *   a    log-density emission weight, normalised over the band
  *
  * Row 1 — airglow:
- *   rgb  luminance-weighted emission colour
- *   a    emission rate normalised over the band
+ *   rgb  VISIBLE-photon-weighted emission colour (see `visibleFraction`)
+ *   a    visible-band emission rate, normalised over the band
  *
  * `logRhoMin`/`logRhoMax` are returned so the shader can undo the
  * normalisation, and so instruments can label a colour bar honestly.
@@ -638,7 +664,6 @@ export const SPECIES_RGB = Object.freeze({
 export function buildAtmosphereLUT({
     f107Sfu = 150, ap = 15, bins = 128,
     minKm = MODEL_FLOOR_KM, maxKm = MODEL_CEIL_KM,
-    visibleOnly = false,
 } = {}) {
     const rows = 2;
     const data = new Float32Array(bins * rows * 4);
@@ -664,14 +689,14 @@ export function buildAtmosphereLUT({
             r += w * c[0]; g += w * c[1]; b += w * c[2]; wsum += w;
         }
         cols[i] = wsum > 0 ? [r / wsum, g / wsum, b / wsum] : [1, 1, 1];
-        glow[i] = airglowAt(altKm, { f107Sfu, ap, visibleOnly });
+        glow[i] = airglowAt(altKm, { f107Sfu, ap });
     }
 
     const logs = rho.map(v => Math.log10(Math.max(v, 1e-30)));
     const logRhoMax = Math.max(...logs);
     const logRhoMin = Math.min(...logs);
     const span = Math.max(logRhoMax - logRhoMin, 1e-6);
-    const airglowMax = Math.max(...glow.map(g => g.total), 1e-9);
+    const airglowMax = Math.max(...glow.map(g => g.visibleTotal), 1e-9);
 
     for (let i = 0; i < bins; i++) {
         const o0 = i * 4;
@@ -684,7 +709,7 @@ export function buildAtmosphereLUT({
         data[o1 + 0] = glow[i].rgb[0];
         data[o1 + 1] = glow[i].rgb[1];
         data[o1 + 2] = glow[i].rgb[2];
-        data[o1 + 3] = glow[i].total / airglowMax;
+        data[o1 + 3] = glow[i].visibleTotal / airglowMax;
     }
 
     return {
@@ -715,7 +740,8 @@ export function probeProfile({
         const g = airglowAt(altKm, { f107Sfu, ap });
         out.push({
             altKm, rho: rec.rho, T: rec.T, H_km: rec.H_km,
-            airglow: g.total,
+            airglow: g.visibleTotal,
+            airglowAll: g.total,
         });
     }
     return out;
@@ -772,5 +798,112 @@ export function diurnalContrast({
         hotRho: hot.rho, coldRho: cold.rho,
         lstMax, lstMin,
         TinfHot: hot.Tinf, TinfCold: cold.Tinf,
+    };
+}
+
+/**
+ * (latitude, local solar time) at a scene-space point.
+ *
+ * ═══ THE GLSL IN `upper-atmosphere-volume.js` MIRRORS THIS FUNCTION. ═══
+ * They must change together. This one is the oracle — it is the one with
+ * a test — and `tests/upper-atmosphere-column.mjs` checks it against
+ * `localSolarTime` on the same geometry so a sign error cannot ship.
+ *
+ * The scene convention (set by `_subSolarToVec3` in the globe module) is
+ *     x = cos(lat)·cos(lon),  y = sin(lat),  z = cos(lat)·sin(lon)
+ * so +Y is the north pole and longitude increases from +X toward +Z —
+ * i.e. CLOCKWISE seen from +Y, which is why the hour angle is measured
+ * about −north and not +north. Getting that sign wrong puts the diurnal
+ * bulge on the morning side, where it is not, and nothing else in the
+ * render looks any different.
+ *
+ * @param {number[]} p    position (need not be normalised)
+ * @param {number[]} sun  sub-solar direction (unit)
+ * @param {number[]} north north-pole axis (unit; +Y in this scene)
+ * @returns {{ latDeg:number, lstHr:number }}
+ */
+export function geoFromVectors(p, sun, north = [0, 1, 0]) {
+    const [px, py, pz] = p, [sx, sy, sz] = sun, [nx, ny, nz] = north;
+    const pl = Math.hypot(px, py, pz) || 1;
+    const ux = px / pl, uy = py / pl, uz = pz / pl;
+
+    const latDeg = Math.asin(Math.max(-1, Math.min(1, ux * nx + uy * ny + uz * nz))) / DEG;
+
+    // Project both directions onto the equatorial plane.
+    const pn = ux * nx + uy * ny + uz * nz;
+    let ex = ux - pn * nx, ey = uy - pn * ny, ez = uz - pn * nz;
+    const sn = sx * nx + sy * ny + sz * nz;
+    let fx = sx - sn * nx, fy = sy - sn * ny, fz = sz - sn * nz;
+    const el = Math.hypot(ex, ey, ez), fl = Math.hypot(fx, fy, fz);
+    // At a pole the meridian is undefined; local time is meaningless there
+    // and the caller should not be reading it. Noon is the least surprising
+    // answer and keeps the shader branch-free.
+    if (el < 1e-9 || fl < 1e-9) return { latDeg, lstHr: 12 };
+    ex /= el; ey /= el; ez /= el;
+    fx /= fl; fy /= fl; fz /= fl;
+
+    // Signed angle from the sub-solar meridian to this one, about −north.
+    const cx = fy * ez - fz * ey;
+    const cy = fz * ex - fx * ez;
+    const cz = fx * ey - fy * ex;
+    const sinA = -(cx * nx + cy * ny + cz * nz);
+    const cosA = fx * ex + fy * ey + fz * ez;
+    const hourDeg = Math.atan2(sinA, cosA) / DEG;
+    return { latDeg, lstHr: (12 + hourDeg / 15 + 24) % 24 };
+}
+
+/**
+ * 2-D lookup table over (altitude, T∞) for the volumetric renderer.
+ *
+ * This is what lets the shader show the diurnal bulge and the auroral
+ * inflation WITHOUT a second density model and WITHOUT an invented
+ * "bulge multiplier". The shader computes the local T∞ from the same
+ * Jacchia formula this module exports, looks the density up in this
+ * table, and gets the engine's own answer back — heavy/light differential
+ * expansion included. A multiplier could not do that: the response to a
+ * given ΔT∞ is strongly altitude-dependent (≈1.0× at 120 km, ≈1.7× at
+ * 400 km for the same 500 K), which is precisely the structure that makes
+ * the bulge visible at orbital altitudes and invisible at the mesopause.
+ *
+ * Values are normalised log₁₀ ρ over the WHOLE table so the shader can
+ * recover ρ/ρ_max as 10^((v − 1)·span).
+ *
+ * @returns {{ data:Float32Array, altBins:number, tinfBins:number,
+ *             minKm:number, maxKm:number, tinfMin:number, tinfMax:number,
+ *             logRhoMin:number, logRhoMax:number, spanDecades:number }}
+ */
+export function buildFieldLUT({
+    f107Sfu = 150, ap = 15,
+    altBins = 96, tinfBins = 24,
+    minKm = MODEL_FLOOR_KM, maxKm = MODEL_CEIL_KM,
+    tinfMin = 400, tinfMax = 3000,
+} = {}) {
+    const logs = new Float32Array(altBins * tinfBins);
+    let lo = Infinity, hi = -Infinity;
+    for (let j = 0; j < tinfBins; j++) {
+        const Tinf = tinfMin + (tinfMax - tinfMin) * (j / (tinfBins - 1));
+        for (let i = 0; i < altBins; i++) {
+            const altKm = minKm + (maxKm - minKm) * (i / (altBins - 1));
+            const rho = density({ altitudeKm: altKm, f107Sfu, ap, TinfK: Tinf }).rho;
+            const l = Math.log10(Math.max(rho, 1e-30));
+            logs[j * altBins + i] = l;
+            if (l < lo) lo = l;
+            if (l > hi) hi = l;
+        }
+    }
+    const span = Math.max(hi - lo, 1e-6);
+    // RGBA so it can go straight into a THREE.DataTexture without a
+    // format branch; only R is read by the shader.
+    const data = new Float32Array(altBins * tinfBins * 4);
+    for (let k = 0; k < altBins * tinfBins; k++) {
+        const v = (logs[k] - lo) / span;
+        data[k * 4] = v;
+        data[k * 4 + 1] = v;
+        data[k * 4 + 2] = v;
+        data[k * 4 + 3] = 1;
+    }
+    return {
+        data, altBins, tinfBins, minKm, maxKm, tinfMin, tinfMax,
+        logRhoMin: lo, logRhoMax: hi, spanDecades: span,
     };
 }

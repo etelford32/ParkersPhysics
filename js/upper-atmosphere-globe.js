@@ -52,6 +52,12 @@ import { buildSatelliteModel, buildSatelliteModelLow }
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
     from './upper-atmosphere-layers.js';
+// Continuous volumetric atmosphere. This is the DEFAULT render of the
+// 80-2000 km column; the five gradient shells below stay as the A/B
+// reference and the low-end fallback. Both paths are live — see
+// setAtmosphereRender().
+import { AtmosphereVolume, VOLUME_QUALITY }
+    from './upper-atmosphere-volume.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
@@ -419,8 +425,13 @@ const SUN_FRAG = /* glsl */`
         // FBM at half scale picks out broad active-region brightening.
         vec3 p = normalize(vPosW) * 4.5;
         float gran   = fbm(p + vec3(0.0, uTime * 0.04, 0.0));
-        float active = fbm(p * 0.6 + vec3(uTime * 0.02, 0.0, uTime * 0.015));
-        float surf   = mix(gran, active, 0.45);
+        // NOT 'active' — that is a reserved word in GLSL ES and this
+        // shader has failed to compile since it shipped, which left the
+        // Sun rendering on three.js's error-fallback material. The
+        // compiler points at the declaration line, so it reads like a
+        // problem with fbm() rather than with the variable's name.
+        float arGlow = fbm(p * 0.6 + vec3(uTime * 0.02, 0.0, uTime * 0.015));
+        float surf   = mix(gran, arGlow, 0.45);
 
         // Limb darkening: the disc edge cools toward orange/red; the
         // centre reads white-hot. Boost the darkening exponent slightly
@@ -558,6 +569,7 @@ export class AtmosphereGlobe {
         this._initScene();
         this._buildEarth();
         this._buildLayerShells();
+        this._buildAtmosphereVolume();
         this._buildDensitySubShells();
         this._buildIsodensitySurfaces();
         this._buildLayerParticles();
@@ -959,6 +971,12 @@ export class AtmosphereGlobe {
             }
         }
 
+        // Volumetric atmosphere: rebuild the (altitude × T∞) and altitude
+        // LUTs for the new state. ~5 ms — profile change only, never per
+        // frame. The march reads density straight out of these, so this is
+        // what makes a storm visibly inflate the rendered column.
+        this._volume?.setState({ f107, ap });
+
         // Drag-forecast overlay: physics has just refreshed, so per-layer
         // dρ/dt can be recomputed against the previous push and broadcast.
         this._refreshDragHistory();
@@ -1110,7 +1128,14 @@ export class AtmosphereGlobe {
     setVisibility({ satellites = true, shells = true, solarWind = true,
                     particles = true, vectorFields, cascade = true } = {}) {
         if (this._satGroup)      this._satGroup.visible      = satellites;
-        if (this._shellGroup)    this._shellGroup.visible    = shells;
+        // `shells` is the page's "atmosphere layer on/off" toggle, and it
+        // predates there being two renderers for it. Route it through the
+        // render mode rather than writing _shellGroup.visible directly:
+        // with the volume active, poking the shell group back on stacks a
+        // second additive pass over the same physical column and doubles
+        // the limb. _applyAtmosphereVisibility owns the exclusivity.
+        this._shellsWanted = !!shells;
+        this._applyAtmosphereVisibility();
         if (this._swGroup)       this._swGroup.visible       = solarWind;
         if (this._particleGroup) this._particleGroup.visible = particles;
         if (this._cascade)       this._cascade.setVisible(cascade);
@@ -1205,6 +1230,7 @@ export class AtmosphereGlobe {
     }
 
     dispose() {
+        this._volume?.dispose();
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
         if (this._debrisRefreshTimer) {
@@ -1358,6 +1384,64 @@ export class AtmosphereGlobe {
         }
         this._scene.add(this._shellGroup);
     }
+
+    // ── Continuous volumetric atmosphere ─────────────────────────────────────
+    // One ray-march through the whole column instead of five discrete
+    // spheres. The shells shaded by local rho at each layer's mid-altitude,
+    // which cannot produce limb brightening: that is a geometric property
+    // of the integral ∫ρ dl, not of the local density. See the header of
+    // upper-atmosphere-volume.js.
+    //
+    // The two renderers are MUTUALLY EXCLUSIVE — running both stacks two
+    // additive passes over the same physical column and doubles the limb.
+    // setAtmosphereRender() owns that exclusivity; don't toggle the groups
+    // directly.
+
+    _buildAtmosphereVolume() {
+        this._volume = new AtmosphereVolume(this._scene, {
+            sunDir: this._sunDir,
+            quality: VOLUME_QUALITY.medium,
+            f107: 150, ap: 15,
+        });
+        this._atmoRender = 'volume';
+        this._shellsWanted = true;
+        this._applyAtmosphereVisibility();
+    }
+
+    /**
+     * Choose which atmosphere renderer is live: 'volume' (continuous
+     * ray-march, default) or 'shells' (the five discrete gradient shells).
+     * Exactly one is ever visible.
+     */
+    setAtmosphereRender(mode) {
+        if (mode !== 'volume' && mode !== 'shells') return;
+        this._atmoRender = mode;
+        this._applyAtmosphereVisibility();
+    }
+
+    /** The one place that decides which atmosphere renderer is on screen. */
+    _applyAtmosphereVisibility() {
+        const wanted = this._shellsWanted !== false;
+        const onVolume = wanted && this._atmoRender === 'volume';
+        this._volume?.setVisible(onVolume);
+        if (this._shellGroup) this._shellGroup.visible = wanted && !onVolume;
+    }
+    getAtmosphereRender() { return this._atmoRender ?? 'volume'; }
+
+    /** Toggle the two physically distinct components of the volume render. */
+    setVolumeComponents({ density, airglow } = {}) {
+        if (density !== undefined) this._volume?.setDensityVisible(density);
+        if (airglow !== undefined) this._volume?.setAirglowVisible(airglow);
+    }
+    getVolumeComponents() {
+        return this._volume?.getComponentVisibility() ?? { density: false, airglow: false };
+    }
+
+    /** 'column' | 'composition' | 'anomaly' */
+    setVolumeMode(mode) { this._volume?.setMode(mode); }
+    getVolumeMode() { return this._volume?.getMode() ?? 'column'; }
+    setVolumeQuality(steps) { this._volume?.setQuality(steps); }
+    getVolumeScaleInfo() { return this._volume?.getScaleInfo() ?? null; }
 
     // ── Density sub-shells ───────────────────────────────────────────────────
     // The five gradient shells answer "which regime am I in"; the sub-shells
@@ -3633,6 +3717,12 @@ export class AtmosphereGlobe {
                 this._fields[id].setSunDir?.(this._sunDir);
             }
         }
+        // Volumetric atmosphere: the diurnal bulge is anchored to the
+        // sub-solar direction, and its mean-preserving normaliser depends
+        // on the solar declination — push both.
+        this._volume?.setSunDir(this._sunDir);
+        this._volume?.setSunDeclination(ssp.lat);
+
         // Drag-forecast overlay: tangent wind is sun-relative.
         this._dragOverlay?.setSunDir?.(this._sunDir);
         // Magnetic-field cascade: sun direction biases the dayside-vs-
@@ -4005,6 +4095,9 @@ export class AtmosphereGlobe {
                 sh.material.uniforms.uCameraPos.value.copy(this._camera.position);
             }
         }
+        // The volumetric march is camera-origin: every fragment casts its
+        // ray from here, so this uniform is not optional.
+        this._volume?.update(this._camera);
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.
@@ -4108,6 +4201,21 @@ export class AtmosphereGlobe {
      */
     _fadeShellsForCameraAltitude() {
         const altKm = this.getCameraAltitudeKm();
+
+        // Same problem for the volume: a camera deep inside the column
+        // looks outward through the densest part of it and the additive
+        // march saturates to a wall. Ease the whole render down as the
+        // camera descends through the band rather than switching it off,
+        // so the transition reads as flying into thickening air.
+        if (this._volume) {
+            const target = altKm > 900 ? 1.0
+                         : altKm > 200 ? 0.35 + 0.65 * ((altKm - 200) / 700)
+                         : 0.35;
+            const cur = this._volumeFade ?? 1;
+            this._volumeFade = cur + (target - cur) * 0.12;
+            this._volume.setFade(this._volumeFade);
+        }
+
         for (const sh of this._shells) {
             const ud = sh.userData;
             const inside = altKm >= ud.minKm && altKm <= ud.maxKm;
