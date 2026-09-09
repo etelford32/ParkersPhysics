@@ -74,6 +74,11 @@ import { SubstormController } from './upper-atmosphere-substorm.js';
 import { getTimeBus } from './upper-atmosphere-time-bus.js';
 import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint } from './sun-altitude.js';
+import { geoFromVectors } from './upper-atmosphere-column.js';
+// On-canvas analysis overlay (altitude ruler · limb probe · diurnal
+// compass). Deliberately three-free — it takes geometry through the
+// hooks below and its physics from the node-tested kernel.
+import { AtmosphereInstruments } from './upper-atmosphere-instruments.js';
 
 // Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
 // frame. Convention: scene +Y is the geographic north pole; lon=0 (Greenwich)
@@ -607,6 +612,7 @@ export class AtmosphereGlobe {
         this._initControls();
         this._initResize();
         this._initTooltip();
+        this._initInstruments();
 
         this._clock = new THREE.Clock();
         this._animate = this._animate.bind(this);
@@ -976,6 +982,15 @@ export class AtmosphereGlobe {
         // frame. The march reads density straight out of these, so this is
         // what makes a storm visibly inflate the rendered column.
         this._volume?.setState({ f107, ap });
+        // Let the page's legend re-read the display-scale numbers, which
+        // are derived from the LUTs that just rebuilt. Without this the
+        // legend would keep printing the boot-time scale after a storm
+        // preset changed it.
+        try {
+            window.dispatchEvent(new CustomEvent('ua-profile-ready', {
+                detail: { f107, ap, scale: this._volume?.getScaleInfo?.() ?? null },
+            }));
+        } catch (_) { /* SSR / no-window */ }
 
         // Drag-forecast overlay: physics has just refreshed, so per-layer
         // dρ/dt can be recomputed against the previous push and broadcast.
@@ -1231,6 +1246,7 @@ export class AtmosphereGlobe {
 
     dispose() {
         this._volume?.dispose();
+        this._instruments?.dispose();
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
         if (this._debrisRefreshTimer) {
@@ -3722,6 +3738,7 @@ export class AtmosphereGlobe {
         // on the solar declination — push both.
         this._volume?.setSunDir(this._sunDir);
         this._volume?.setSunDeclination(ssp.lat);
+        this._sunDeclDeg = ssp.lat;
 
         // Drag-forecast overlay: tangent wind is sun-relative.
         this._dragOverlay?.setSunDir?.(this._sunDir);
@@ -3820,6 +3837,190 @@ export class AtmosphereGlobe {
             layerThicknessKm: layer ? Math.max(1, layer.maxKm - layer.minKm) : null,
         });
         return { ...phys, layer };
+    }
+
+    _initInstruments() {
+        const host = this.canvas.parentElement;
+        if (!host) return;
+        if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+        this._instruments = new AtmosphereInstruments(host, {
+            globe: this,
+            // The instruments read state from the globe rather than from
+            // the page so the page bootstrap needs no new wiring and the
+            // two can never disagree about which (F10.7, Ap) is live.
+            getState: () => ({
+                f107:       this._state?.f107 ?? 150,
+                ap:         this._state?.ap ?? 15,
+                altitudeKm: this._currentAltKm ?? 400,
+                sunDeclDeg: this._sunDeclDeg ?? 0,
+            }),
+        });
+    }
+
+    setInstrumentsEnabled(on) { this._instruments?.setEnabled(on); }
+    getInstrumentsEnabled()   { return this._instruments?.getEnabled() ?? false; }
+    setLimbProbeEnabled(on)   { this._instruments?.setProbeEnabled(on); }
+    getLimbProbeEnabled()     { return this._instruments?.getProbeEnabled() ?? false; }
+    getLimbProbe()            { return this._instruments?.getProbe() ?? null; }
+
+    // ── Geometry hooks for the on-canvas instruments ─────────────────────────
+    // upper-atmosphere-instruments.js draws a 2-D overlay above the WebGL
+    // canvas and needs two things from the scene: where a world point lands
+    // on screen, and what atmosphere a given screen pixel is looking
+    // through. Both live here rather than in the overlay so the overlay
+    // stays free of three.js — the physics it reports then comes from the
+    // node-tested kernel, and nothing about it needs a GPU to verify.
+
+    /**
+     * World point → canvas pixel. `behind` is true when the point is
+     * behind the camera, where the perspective divide flips the sign and a
+     * naive projection silently draws the marker mirrored across the
+     * screen centre.
+     */
+    projectToScreen(x, y, z) {
+        const v = new THREE.Vector3(x, y, z);
+        v.project(this._camera);
+        const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+        // project() divides by w; when the point is behind the camera that
+        // divide is by a negative number.
+        const dir = new THREE.Vector3(x, y, z).sub(this._camera.position);
+        const fwd = new THREE.Vector3();
+        this._camera.getWorldDirection(fwd);
+        return {
+            x: (v.x * 0.5 + 0.5) * w,
+            y: (-v.y * 0.5 + 0.5) * h,
+            behind: dir.dot(fwd) <= 0,
+        };
+    }
+
+    /**
+     * What is this screen pixel looking through?
+     *
+     * Returns the view ray's tangent geometry: the altitude of its closest
+     * approach to the Earth's centre, the world point where that happens,
+     * and the (latitude, local solar time) there — which is what makes the
+     * probe able to report the LOCAL density rather than the spherically
+     * symmetric one.
+     *
+     * `hitsPlanet` distinguishes a ray that meets the solid Earth (the
+     * disc) from one that passes over the limb. For a disc ray the
+     * "tangent altitude" is below the surface and meaningless; the surface
+     * intersection is reported instead, so the probe can say what the
+     * column above that surface point is.
+     *
+     * @param {number} nx normalised device x, −1…+1
+     * @param {number} ny normalised device y, −1…+1
+     */
+    probeScreenRay(nx, ny) {
+        const cam = this._camera;
+        const origin = cam.position.clone();
+        const dir = new THREE.Vector3(nx, ny, 0.5)
+            .unproject(cam).sub(origin).normalize();
+
+        // Closest approach of the ray to the origin (Earth centre).
+        const tClose = -origin.dot(dir);
+        const camAltKm = (origin.length() - 1) * R_EARTH_KM;
+
+        // Does it meet the planet? |perpendicular distance| < 1 R⊕ and the
+        // approach is in front of us.
+        const perp = origin.clone().addScaledVector(dir, Math.max(tClose, 0));
+        const perpR = tClose > 0 ? perp.length() : origin.length();
+        const hitsPlanet = tClose > 0 && perpR < 1.0;
+
+        let point, altKm;
+        if (hitsPlanet) {
+            // Near intersection with the unit sphere.
+            const b = origin.dot(dir);
+            const c = origin.lengthSq() - 1;
+            const disc = Math.max(0, b * b - c);
+            const t = -b - Math.sqrt(disc);
+            point = origin.clone().addScaledVector(dir, t);
+            altKm = 0;
+        } else if (tClose > 0) {
+            point = perp;
+            altKm = (perpR - 1) * R_EARTH_KM;
+        } else {
+            // Looking away from the planet entirely — the ray only
+            // recedes, so its closest approach is the camera itself.
+            point = origin.clone();
+            altKm = camAltKm;
+        }
+
+        const geo = geoFromVectors(
+            [point.x, point.y, point.z],
+            [this._sunDir.x, this._sunDir.y, this._sunDir.z],
+        );
+        return {
+            tangentAltKm: altKm,
+            hitsPlanet,
+            withinModel: altKm <= 2000,
+            point: { x: point.x, y: point.y, z: point.z },
+            latDeg: geo.latDeg,
+            lstHr: geo.lstHr,
+            camAltKm,
+        };
+    }
+
+    /**
+     * Screen RADII of the limb at a set of altitudes, plus the disc centre.
+     *
+     * Returns radii rather than points so the overlay can hang its ruler
+     * along whatever screen bearing is least cluttered without this method
+     * needing to know anything about the page's chrome.
+     *
+     * The radius for altitude h is the projected distance from the disc
+     * centre to the silhouette of the sphere of radius (1 + h/R⊕) — the
+     * point where the view ray is TANGENT to that sphere, which is what
+     * "the limb at h" means. Using the silhouette rather than a fixed
+     * world direction is what keeps the ticks on the limb as the camera
+     * orbits.
+     *
+     * Off-centre the silhouette of a sphere under perspective is a slight
+     * ellipse, so one radius is an approximation away from the view axis.
+     * At any framing where the whole planet is visible the error is well
+     * under a pixel; a ruler is not a measurement instrument here, it is a
+     * legend for the render's vertical axis.
+     */
+    limbTicks(altitudesKm) {
+        const cam = this._camera.position.clone();
+        const d = cam.length();
+        const centre = this.projectToScreen(0, 0, 0);
+        if (!Number.isFinite(d) || d <= 0 || centre.behind) {
+            return { centre: null, ticks: [] };
+        }
+        const camDir = cam.clone().normalize();
+        // Any direction perpendicular to the view axis works for measuring
+        // the silhouette radius.
+        let side = new THREE.Vector3(0, 1, 0)
+            .sub(camDir.clone().multiplyScalar(camDir.y));
+        if (side.lengthSq() < 1e-8) side = new THREE.Vector3(1, 0, 0);
+        side.normalize();
+
+        const ticks = [];
+        for (const altKm of altitudesKm) {
+            const r = 1 + altKm / R_EARTH_KM;
+            if (r >= d) continue;                 // camera inside this shell
+            const cosA = r / d;
+            const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
+            const p = camDir.clone().multiplyScalar(r * cosA)
+                .addScaledVector(side, r * sinA);
+            const scr = this.projectToScreen(p.x, p.y, p.z);
+            if (scr.behind) continue;
+            ticks.push({
+                altKm,
+                screenRadius: Math.hypot(scr.x - centre.x, scr.y - centre.y),
+            });
+        }
+        // Surface radius too, so the overlay can anchor the ruler's base.
+        const cosS = 1 / d, sinS = Math.sqrt(Math.max(0, 1 - cosS * cosS));
+        const ps = camDir.clone().multiplyScalar(cosS).addScaledVector(side, sinS);
+        const ss = this.projectToScreen(ps.x, ps.y, ps.z);
+        return {
+            centre: { x: centre.x, y: centre.y },
+            surfaceRadius: ss.behind ? null
+                : Math.hypot(ss.x - centre.x, ss.y - centre.y),
+            ticks,
+        };
     }
 
     _initResize() {
@@ -4191,6 +4392,11 @@ export class AtmosphereGlobe {
         }
 
         this._renderer.render(this._scene, this._camera);
+
+        // 2-D instrument overlay, drawn after the GL frame so its ruler and
+        // probe sit on top of what was just rendered. Its expensive parts
+        // self-gate on the pointer and state actually having moved.
+        this._instruments?.draw();
     }
 
     /**
