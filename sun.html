@@ -1132,8 +1132,20 @@ import './js/telemetry.js';
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-nanoflares" checked>
-                        <label for="tog-nanoflares">Nanoflares (loop sparks)</label>
+                        <label for="tog-nanoflares">Nanoflares (Parker 1988)</label>
                     </div>
+                    <!-- The nanoflare power-law index. Not a look-and-feel
+                         slider: α decides whether the population can pay the
+                         corona's energy bill at all (Hudson 1991), and the
+                         published measurements straddle the threshold — see
+                         ALPHA_REFERENCES in js/sun-nanoflares.js. -->
+                    <div class="ctrl" title="Power-law index of dN/dE ∝ E^−α. Above 2, the unresolved small events carry the energy budget and nanoflares can heat the corona; below 2, the large events do and they cannot (Hudson 1991).">
+                        <label>Nanoflare α</label>
+                        <input type="range" id="sl-nano-alpha" min="1.4" max="2.8" step="0.05" value="2.0" list="nano-alpha-refs">
+                        <span class="vdisp" id="disp-nano-alpha">2.00</span>
+                    </div>
+                    <datalist id="nano-alpha-refs"></datalist>
+                    <div id="nano-readout" style="font-size:10.5px;line-height:1.5;opacity:.85;margin:2px 0 8px 2px"></div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-prom" checked>
                         <label for="tog-prom">Prominences / filaments</label>
@@ -1724,6 +1736,10 @@ import { initSunWatch } from './js/sun-watch.js';
 import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
 import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
 import { SunObserved, VIEW_MODE_CHANNEL, REAL_TIME_ROT_MUL, solarEphemeris } from './js/sun-observed.js';
+import {
+    nanoflareState, nanoflareUniform, sampleEnergy,
+    AlphaMonitor, HEATING_REQUIREMENT, E_MIN_ERG, E_MAX_ERG, ALPHA_REFERENCES,
+} from './js/sun-nanoflares.js';
 
 
 // PANEL
@@ -2253,6 +2269,14 @@ const uniforms = {
     u_fluidDebug:        { value: 0.0 },
     u_showSpots:         { value: 1.0 },   // 1 = show sunspots, 0 = hide
     u_showFlares:        { value: 1.0 },   // 1 = show flares,   0 = hide
+    // ── Nanoflare population (js/sun-nanoflares.js) ───────────────────────
+    // (α, log2 E_MIN, log2 E_MAX, rate multiplier) — packed by nanoflareUniform().
+    // The shader draws energies from this bounded power law with the SAME
+    // inverse transform the kernel uses, so the population it renders really
+    // does carry the index the readout reports.
+    u_nano:              { value: new THREE.Vector4(2.0, Math.log2(E_MIN_ERG), Math.log2(E_MAX_ERG), 1.0) },
+    u_nanoOn:            { value: 1.0 },
+    u_nanoGain:          { value: 1.0 },   // display brightness — a rendering choice, disclosed as one
     // ── OBSERVED disk (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1) — the live SDO
     // frame wrapped on the Earth-facing hemisphere; js/sun-observed.js drives
     // these. u_obsOn is never 1 with a null texture (the chip must not lie).
@@ -2263,7 +2287,22 @@ const uniforms = {
     u_obsGeom:           { value: new THREE.Vector4(0.5, 0.5, 0.465, 0) },  // (cx, 1−cy, r, −): disk in texture space
     u_obsB0:             { value: 0.0 },   // heliographic latitude of disk centre, radians
     u_obsKind:           { value: 0.0 },   // 0 HMI continuum · 1 AIA EUV · 2 HMI magnetogram
-    u_obsTint:           { value: new THREE.Vector3(1.25, 1.02, 0.70) },  // greyscale HMI → the page's photosphere palette (tune on hardware)
+    u_obsTint:           { value: new THREE.Vector3(1.25, 1.02, 0.70) },  // legacy tint — only reached when u_obsFuse is 0 (uncalibrated frame)
+    // Measured photometry of the current frame (js/sun-observed.js
+    // calibrateDisk): x = I0 (disk-centre LINEAR luminance), yz = the frame's
+    // own 2-term limb law (u1, u2), w = its resolved contrast sigma.
+    u_obsCal:            { value: new THREE.Vector4(1.0, 0.0, 0.0, 0.0) },
+    // The browse product's colour LUT, normalised to unit luminance. (1,1,1)
+    // for a greyscale frame, warm for NASA's gold-colorized HMIIC. Divided out
+    // so the page's palette is applied ONCE.
+    u_obsChroma:         { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+    u_obsFuse:           { value: 0.0 },   // 1 = calibration succeeded → photometric fusion path
+    // Trim between the model's quiet-Sun level and the observation's. 1.0 is
+    // the exact match by construction (obsRel ≈ 1 ⇒ the observed hemisphere
+    // renders the model's own smooth photosphere); this exists so the seam can
+    // be re-measured on hardware without touching the shader. Verified at 1.0
+    // by tests/sun-visual.spec.js's terminator-continuity gate.
+    u_obsLevel:          { value: 1.0 },
     u_obsGrid:           { value: 1.0 },   // faint 15° graticule on the UNOBSERVED hemisphere
     u_kcorona:           { value: 1.0 },   // Phase 3 — white-light Thomson K + dust F corona (coronaFS); 0 disables
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
@@ -2592,6 +2631,9 @@ const sunFS = /* glsl */`
     uniform float u_rot;
     uniform float u_showSpots;
     uniform float u_showFlares;
+    uniform vec4  u_nano;       // (alpha, log2 Emin, log2 Emax, rate multiplier)
+    uniform float u_nanoOn;
+    uniform float u_nanoGain;
     // Observed disk (js/sun-observed.js — the module header documents the geometry)
     uniform float     u_obsOn;
     uniform sampler2D u_obsTex;
@@ -2602,6 +2644,17 @@ const sunFS = /* glsl */`
     uniform float     u_obsKind;
     uniform vec3      u_obsTint;
     uniform float     u_obsGrid;
+    uniform vec4      u_obsCal;      // (I0, u1, u2, sigma) — measured, see calibrateDisk
+    uniform vec3      u_obsChroma;   // the frame's own colour LUT, unit luminance
+    uniform float     u_obsFuse;     // 1 = photometric fusion, 0 = legacy tint
+    uniform float     u_obsLevel;    // model↔observation level trim (1.0 = matched)
+
+    // Below this Earth-μ the browse frame's own limb law is too steep to
+    // divide by (2-term laws fall to a few % and the JPEG floor takes over),
+    // so the de-limb-darkening is evaluated at the floor and the cross-fade
+    // to the model has already begun. Mirrors MU_FIT_FLOOR's intent in
+    // js/sun-observed.js — the region the fit itself declines to trust.
+    const float OBS_MU_FLOOR = 0.14;
     uniform float u_f107_norm;       // F10.7 solar cycle proxy [0-1]: 0=min, 1=max
     uniform float u_electron_norm;   // GOES >2MeV electron flux [0-1]
     uniform float u_proton_norm;     // GOES >10MeV proton flux [0-1]
@@ -2828,7 +2881,7 @@ const sunFS = /* glsl */`
         float diffRot  = 1.0 - 0.19 * sinLat2 - 0.09 * sinLat2 * sinLat2;
         float rotLon   = lon + u_time * 0.014 * u_rot * diffRot;
 
-        // ── OBSERVED disk sample (Phase 1) ────────────────────────────────
+        // ── OBSERVED disk sample (Phase 1) + photometric fusion (Phase 2b) ─
         // De-rotate this fragment to the observation epoch with the SAME
         // rotation the AR slots apply (x = c·x0 − s·z0, z = s·x0 + c·z0 about
         // +y by u_time·0.014·u_rot·diffRot — see the u_arSpots fill), tilt
@@ -2837,8 +2890,34 @@ const sunFS = /* glsl */`
         // the near side, a soft roll-off over the last 0.08 of q.z into the
         // procedural limb fringe, 0 on the far side. The frame's own limb
         // darkening is real — no shading is layered over an observed pixel.
+        //
+        // THE SEAM. The observed hemisphere is pinned to the Sun–Earth line;
+        // the camera is not. Orbit ~30° off it and the disk used to split into
+        // two unrelated halves along a hard terminator, because a browse frame
+        // carries its limb darkening baked in at the EARTH's μ while the model
+        // applies Neckel & Labs at the VIEWER's μ. Same point on the Sun, two
+        // different angles, two different brightnesses, one hard edge.
+        //
+        // So we do not draw the frame's pixels as radiometry — a browse JPEG's
+        // absolute level and colour LUT are display choices, not measurements.
+        // What IS a measurement is the frame's RELATIVE structure: how much
+        // brighter or darker the Sun is than its own smooth limb-darkened disk.
+        // obsRel is exactly that, dimensionless and ~1 on the quiet Sun:
+        //
+        //     obsRel = L(pixel) / (I0 · limbLaw(μ_Earth))
+        //
+        // with I0 and the law MEASURED per refresh (js/sun-observed.js
+        // calibrateDisk) and the frame's own colour LUT divided out first, so
+        // a gold-colorized HMIIC and a greyscale fixture give the SAME field.
+        // The renderer then draws that structure on the model's own calibrated,
+        // tonemapped photosphere, so the two hemispheres agree at the
+        // terminator by construction instead of by a hand-tuned constant.
+        // Shape and relative intensity are untouched — the observation still
+        // owns every feature on the near side (plan §5).
         float obsW   = 0.0;
         vec3  obsRGB = vec3(0.0);
+        float obsRel = 1.0;   // dimensionless observed contrast; 1 = quiet Sun
+        float obsMuE = 1.0;
         float gridLon = lon;
         if (u_obsOn > 0.5) {
             float ra = u_time * 0.014 * u_rot * diffRot;
@@ -2853,7 +2932,35 @@ const sunFS = /* glsl */`
                 vec3 a = texture2D(u_obsTex,  tuv).rgb;
                 vec3 b = texture2D(u_obsPrev, tuv).rgb;
                 obsRGB = mix(b, a, u_obsFade);
-                obsW   = smoothstep(0.0, 0.08, q.z);
+                // q.z IS μ as seen from Earth — the cosine of the angle between
+                // the surface normal and the Sun–Earth line — which is the
+                // angle the frame's limb darkening was imprinted at.
+                obsMuE = q.z;
+                // Hand off to the model over the outer annulus rather than at
+                // the mathematical limb: below μ ≈ 0.14 a 1024-px browse frame
+                // is a few foreshortened pixels per degree and dividing by its
+                // limb law amplifies JPEG ringing into a bright rim.
+                //
+                // The WIDTH of that handoff rides how hard the re-projection is
+                // working. At the default camera the viewer IS the observer:
+                // mu == obsMuE, the correction is the identity, and the frame
+                // is trusted all the way out — a wide fade there would throw
+                // away the outer 6 % of a disk we are looking straight at.
+                // Orbit away and the two angles diverge; the far edge of the
+                // frame is then being stretched across a limb it never saw, so
+                // the fade opens up and the model takes over gently instead of
+                // at an edge. stretch is exactly that divergence.
+                float stretch = clamp(abs(mu - q.z) * 2.0, 0.0, 1.0);
+                obsW   = smoothstep(0.01, mix(0.14, 0.55, stretch), q.z);
+                if (u_obsFuse > 0.5) {
+                    // Strip the browse LUT, then normalise by the measured
+                    // envelope at THIS fragment's Earth-μ.
+                    vec3  lin = obsRGB / max(u_obsChroma, vec3(1e-3));
+                    float L   = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+                    float xE  = 1.0 - clamp(max(obsMuE, OBS_MU_FLOOR), 0.0, 1.0);
+                    float ldE = max(0.02, 1.0 - u_obsCal.y * xE - u_obsCal.z * xE * xE);
+                    obsRel    = clamp(L / max(u_obsCal.x * ldE, 1e-4), 0.0, 6.0);
+                }
             }
         }
         // Combined rotation factor used by all texture-scrolling terms below
@@ -2971,29 +3078,93 @@ const sunFS = /* glsl */`
         float sgNet = smoothstep(0.18, 0.42, sgCell.y - sgCell.x);
         float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * (0.35 + 0.65 * sgNet) * 0.55;
 
-        // ── Nanoflare / microflare transient brightenings ─────────────────────
-        // Small-scale magnetic reconnection events (Parker 1988).
-        // Concentrated in/around the active-region footpoints (Parker 1988),
-        // firing as impulsive hot bursts -- not scattered at random.
+        // ── NANOFLARES — a population, not a twinkle ──────────────────────────
+        //
+        // Physics + statistics live in the PURE kernel js/sun-nanoflares.js
+        // (node-gated); this draws the population that kernel specifies. Read
+        // that header before touching any of this — in particular the α = 2
+        // threshold, which is the whole reason the layer exists.
+        //
+        // WHAT THIS REPLACED, AND WHY. The old term put a handful of sites
+        // inside each active region on a pow(sin, 9) clock. Two things were
+        // wrong with it as physics:
+        //   • it fired ONLY inside active regions, which inverts Parker's
+        //     (1988) hypothesis — the proposal is about the QUIET corona,
+        //     where convection braids the field everywhere and the ubiquitous
+        //     small events do the heating. A spotless Sun went dark.
+        //   • every event was the same size, so the population had no energy
+        //     distribution and therefore no α — and α is the one number that
+        //     decides whether nanoflares can heat the corona at all.
+        //
+        // Now: sites are seeded over the whole surface, WEIGHTED by where the
+        // field is actually braided (the supergranular network lanes, plus a
+        // large boost in plage / AR), and each site draws an energy from the
+        // bounded power law dN/dE ∝ E^−α by inverse transform — the same
+        // transform the kernel uses, so the rendered population really does
+        // carry the index the control reports. Energy then sets BOTH the peak
+        // brightness and, through T ∝ E^β, the duration: big events are rare,
+        // bright and slow; small ones are everywhere, faint and quick. That
+        // contrast IS the α = 2 argument made visible.
+        //
+        // u_nano = (α, log2 E_MIN, log2 E_MAX, rate multiplier) — packed by
+        // nanoflareUniform(); u_nanoGain is the display brightness, which is a
+        // rendering choice and is disclosed as one.
         float microflare = 0.0;
         vec3  nfUnit = normalize(vPosition);
-        for (int k = 0; k < 8; k++) {
-            if (k >= u_arSpotCount) break;
-            vec3  arP   = normalize(u_arSpots[k].xyz);
-            float arInt = abs(u_arSpots[k].w);
-            float cosA  = dot(nfUnit, arP);
-            if (cosA < 0.88) continue;                  // only in/near the active region
-            float ang   = acos(clamp(cosA, -1.0, 1.0));
-            // Several reconnection sites sprinkled through the AR footpoints.
-            vec3  site  = vPosition * 34.0 + vec3(float(k) * 7.3);
-            float spot  = smoothstep(0.78, 0.94, vnoise(site));
-            // Impulsive flare lightcurve: each site on its own fast clock,
-            // sharp rise then quick decay (pow(sin,9) = a hot spike + tail).
-            float ph    = vnoise(site * 1.7) * 31.0;
-            float flash = pow(max(0.0, sin(u_time * (2.4 + arInt * 4.0) + ph)), 9.0);
-            // Footpoint gating: brightest at the AR core, fading outward.
-            float gate  = exp(-ang * ang / (0.008 + 0.020 * arInt));
-            microflare += spot * flash * gate * (0.6 + arInt);
+        if (u_nanoOn > 0.5) {
+            float nfA = u_nano.x;
+            // Site lattice, fine enough that a granule-scale event is a point
+            // at the framings this page uses.
+            vec3  nfP    = vPosition * 46.0;
+            vec3  nfCell = floor(nfP);
+            float h0 = hash(nfCell);
+            float h1 = hash(nfCell + vec3(19.3, 7.1, 3.7));
+            float h2 = hash(nfCell + vec3(3.1, 27.7, 11.9));
+
+            // WHERE the field is braided. Network lanes carry the quiet-Sun
+            // population; plage and AR cores carry the active one. Both are
+            // present at once — that is the point.
+            float braid = 0.25 + 0.75 * sgNet;
+            float arBoost = 1.0;
+            for (int k = 0; k < 8; k++) {
+                if (k >= u_arSpotCount) break;
+                vec3  arP  = normalize(u_arSpots[k].xyz);
+                float ang  = acos(clamp(dot(nfUnit, arP), -1.0, 1.0));
+                float w    = exp(-ang * ang / (0.010 + 0.030 * abs(u_arSpots[k].w)));
+                arBoost   += w * 11.0;                 // AR corona runs ~30x the quiet losses
+            }
+            // Occurrence: the rate multiplier thins or thickens the lattice.
+            float occupancy = clamp(0.030 * braid * arBoost * u_nano.w, 0.0, 0.85);
+            float live = step(h0, occupancy);
+
+            // ── GLSL MIRROR of sun-nanoflares.js sampleEnergy — change both
+            // together. Works in log2(E): the bounds span four decades and the
+            // DIFFERENCE B − A loses the small end entirely in linear float32.
+            float p  = 1.0 - nfA;
+            float A  = exp2(u_nano.y * p);
+            float B  = exp2(u_nano.z * p);
+            float lE = log2(max(A + h1 * (B - A), 1e-30)) / p;      // log2(E/erg)
+            float eN = clamp((lE - u_nano.y) / max(u_nano.z - u_nano.y, 1e-3), 0.0, 1.0);
+
+            // Duration from the same energy: T ∝ E^0.33, so the loudest events
+            // also linger. Normalised so a mid-range event lasts ~1 sim-second.
+            float dur   = 0.35 + 2.6 * pow(max(eN, 1e-4), 0.33 * 4.0 * 0.75);
+            float phase = fract(u_time / dur + h2);
+            // Impulsive rise, exponential cool — the flare lightcurve shape,
+            // not a sine. Rise is ~8 % of the event, decay fills the rest.
+            float rise  = smoothstep(0.0, 0.08, phase);
+            float cool  = exp(-(phase - 0.08) * 6.0) * step(0.08, phase);
+            float light = rise * (phase < 0.08 ? 1.0 : cool);
+
+            // Peak brightness ∝ energy, compressed for display (four decades
+            // cannot be shown linearly). Radius grows slowly with energy.
+            float amp   = pow(max(eN, 1e-4), 0.55);
+            float rad   = 0.18 + 0.42 * amp;
+            vec3  local = fract(nfP) - vec3(0.5);
+            float d     = length(local) / rad;
+            float core  = exp(-d * d * 3.0);
+
+            microflare = live * core * light * amp * u_nanoGain;
         }
         microflare = min(microflare, 1.5);
 
@@ -3398,6 +3569,27 @@ const sunFS = /* glsl */`
             col.b *= 1.0 - dispB;
         }
 
+        // ── OBSERVED disk composite (white light) — BEFORE the tonemap ────
+        // Order is load-bearing. This used to composite AFTER acesFilm, so the
+        // model half went through the filmic curve and the observed half did
+        // not: the observation rendered flat and desaturated beside it, which
+        // was the second of the three cliffs at the terminator. Compositing in
+        // linear HDR means ONE tone curve runs over both halves.
+        //
+        // The observed hemisphere is the model's own smooth photosphere
+        // — same blackbody, same Neckel & Labs at the VIEWER's μ, so it is
+        // continuous with the far side across the terminator — modulated by
+        // obsRel, the observation's measured contrast. Every feature on the
+        // near side is the frame's; none of the level, palette or view
+        // geometry is. u_obsFuse = 0 (a frame we could not calibrate) falls
+        // back to the legacy tint so a degraded frame still draws.
+        if (u_obsOn > 0.5 && u_viewMode < 0.5) {
+            vec3 obsPhoto = (u_obsFuse > 0.5)
+                ? baseCol * limb * obsRel * u_obsLevel
+                : obsRGB * u_obsTint;
+            col = mix(col, obsPhoto, obsW);
+        }
+
         // ── ACES filmic tonemap — Tier-A HDR roll-off ─────────────────────────
         // Compresses bright flare/limb/AR-stack regions onto a graceful curve
         // so they saturate cream-white instead of pure-white, lifting shoulder
@@ -3406,14 +3598,11 @@ const sunFS = /* glsl */`
         // the bloom-accumulated output).
         col = acesFilm(col * 0.95) * 1.18;
 
-        // ── OBSERVED disk composite (white light) ─────────────────────────
-        // The observed pixel replaces the procedural photosphere wherever it
-        // exists; only a tint maps the greyscale HMI continuum onto the page's
-        // palette. Nothing procedural may change an observed pixel's colour
-        // or shape (plan §5). EUV / magnetogram modes composite below.
+        // The live flare event overlay rides ON TOP of the observed disk (an
+        // event marker, not a recolouring of an observed pixel) — after the
+        // curve, as it was.
         if (u_obsOn > 0.5 && u_viewMode < 0.5) {
-            col = mix(col, obsRGB * u_obsTint, obsW);
-            col += flareAdd * obsW * 0.7;     // live flare event overlay on the observed disk
+            col += flareAdd * obsW * 0.7;
         }
         // ── EUV / magnetogram wavelength views ─────────────────────────────
         // Recolour the whole disc to an SDO channel, synthesised from structural
@@ -3477,7 +3666,22 @@ const sunFS = /* glsl */`
             if (u_viewMode < 5.5) euv *= (1.0 - umbra * 0.85);          // sunspots read dark in EUV too
             // OBSERVED channel frame (AIA / HMI magnetogram) on the near side;
             // the synthetic ramp stays as the far-side fill + offline fallback.
-            if (u_obsOn > 0.5) euv = mix(euv, obsRGB, obsW);
+            // Same μ re-projection as white light, but the CHANNEL COLOUR is
+            // the information in an EUV frame, so it is never remapped: only
+            // the level is corrected from the Earth's μ to the viewer's, using
+            // the frame's own measured law (AIA fits limb BRIGHTENING, i.e.
+            // negative coefficients — one machinery, both instruments).
+            if (u_obsOn > 0.5) {
+                vec3 obsCh = obsRGB;
+                if (u_obsFuse > 0.5) {
+                    float xE = 1.0 - clamp(max(obsMuE, OBS_MU_FLOOR), 0.0, 1.0);
+                    float xV = 1.0 - clamp(max(mu,     OBS_MU_FLOOR), 0.0, 1.0);
+                    float ldE = max(0.02, 1.0 - u_obsCal.y * xE - u_obsCal.z * xE * xE);
+                    float ldV = max(0.02, 1.0 - u_obsCal.y * xV - u_obsCal.z * xV * xV);
+                    obsCh *= clamp(ldV / ldE, 0.25, 4.0);
+                }
+                euv = mix(euv, obsCh, obsW);
+            }
             col = euv;
         }
 
@@ -3542,7 +3746,12 @@ scene.add(sunLOD);
 // ── GPU thermal-convection solver -> drives the photosphere granulation ──
 let solarFluid = null;
 try {
-    solarFluid = new SolarFluid(THREE, renderer, { size: 192, iters: 20 });
+    // iters 20 -> 26: the pressure solve only started CONVERGING once the
+    // divergence/gradient stencils were made adjoint (js/solar-fluid.js
+    // DIVERGENCE_FS), and a converging solve is worth iterating. Measured on
+    // the 192² grid: residual |div| 0.43 -> 0.21 between 20 and 40 iterations,
+    // where before the fix it did not move at all. 26 is the knee.
+    solarFluid = new SolarFluid(THREE, renderer, { size: 192, iters: 26 });
     solarFluid.prewarm(renderer, 40);
     uniforms.u_fluidTex.value = solarFluid.getTexture();
     uniforms.u_fluidOn.value  = 1.0;
@@ -6491,6 +6700,80 @@ const LOOP_FS = /* glsl */`
     }
 `;
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  NANOFLARE POPULATION — one α for the whole page
+// ═══════════════════════════════════════════════════════════════════════════
+// Physics + statistics: js/sun-nanoflares.js (PURE, node-gated by
+// tests/sun-nanoflares.mjs). Read that header first — especially the α = 2
+// threshold, which is the reason this layer is worth having.
+//
+// THREE consumers, ONE kernel:
+//   • the photospheric population in sunFS (u_nano), which draws energies with
+//     the kernel's own inverse transform;
+//   • the loop-anchored Poisson sparks (`_sampleNanoflareEnergy`);
+//   • the SOC avalanche grid — whose α is EMERGENT, so it is MEASURED
+//     (`_nanoAlphaMon`) rather than set.
+// The heating budget the HUD reports covers all of them.
+//
+// `_nanoAlphaSet` is the user's chosen index; `_nanoState` is what the live
+// F10.7 + AR areas make of it. Both are recomputed by `_refreshNanoflares()`.
+let _nanoAlphaSet = 2.0;                        // the control's α; 2.0 = the heating threshold
+let _nanoState    = nanoflareState({ alpha: 2.0 });
+// Measures α back out of whichever driver is running. Its bounds are OPEN
+// because the two drivers report in different units — the loop sparks in erg,
+// the SOC grid in its own stress units — and a power-law index is invariant
+// under E -> cE, so `fit()`'s autoRange (which uses the range the sample
+// itself spans) is what makes the number meaningful. Only one driver is active
+// per page load (`?nanoflare=`), so the window never mixes them.
+const _nanoAlphaMon = new AlphaMonitor({ eMin: Number.MIN_VALUE, eMax: Infinity });
+let _nanoF107     = 150;
+let _nanoAreaMh   = 0;
+
+/** Recompute the population from the control + whatever the feeds have said. */
+function _refreshNanoflares() {
+    _nanoState = nanoflareState({ f107: _nanoF107, arAreaMh: _nanoAreaMh, alpha: _nanoAlphaSet });
+    const [a, lmin, lmax, mult] = nanoflareUniform(_nanoState);
+    uniforms.u_nano.value.set(a, lmin, lmax, mult);
+    _renderNanoflareReadout();
+}
+
+/** The HUD line. Says what is chosen, what is measured, and what it buys. */
+function _renderNanoflareReadout() {
+    const el = document.getElementById('nano-readout');
+    if (!el) return;
+    const s = _nanoState;
+    const measured = _nanoAlphaMon.fit();
+    const budget = s.budgetQuiet;
+    const share = (s.smallEventShare * 100).toFixed(0);
+    // α = 2 exactly is Hudson's knife edge — the energy is spread evenly over
+    // every decade — and saying "falls short" there would misreport a boundary
+    // as a verdict.
+    const verdict = Math.abs(s.alpha - 2.0) < 0.03
+        ? `Hudson's threshold exactly — the budget is spread evenly across every decade`
+        : s.alpha > 2.0
+        ? `unresolved events carry ${share}% of the budget — nanoflares can heat the corona`
+        : `large events carry ${100 - +share}% of the budget — nanoflares fall short`;
+    // The SOC grid's own index, quoted ONLY when the fit means something.
+    // fitAlphaMLE withholds it on three separate grounds and the line says
+    // which: too few events (below ~50 the spread on α is wider than the whole
+    // published range), a Kolmogorov–Smirnov distance that says the avalanche
+    // sizes are not power-law distributed at all, or a likelihood that ran to
+    // the edge of its search. A confident wrong index here would be worse than
+    // no index, because it would look like a measurement.
+    const socLine = measured.ok
+        ? `<span class="dim">SOC grid measures</span> α<sub>obs</sub> = <b>${measured.alpha.toFixed(2)}</b>`
+          + ` <span class="dim">(${measured.n} events, KS ${measured.ks.toFixed(3)})</span>`
+        : measured.n < 50
+        ? `<span class="dim">SOC grid measuring… (${measured.n}/50 events)</span>`
+        : `<span class="dim">SOC grid: ${measured.n} cascades · avalanche sizes not power-law`
+          + ` (KS ${measured.ks.toFixed(2)})</span>`;
+    el.innerHTML =
+        `α = <b>${s.alpha.toFixed(2)}</b> · ${verdict}<br>` +
+        `<span class="dim">quiet-corona budget</span> <b>×${budget.toFixed(2)}</b> ` +
+        `<span class="dim">of Withbroe &amp; Noyes ${(HEATING_REQUIREMENT.quiet / 1e5).toFixed(0)}×10⁵ erg cm⁻² s⁻¹</span><br>` +
+        socLine;
+}
+
 // ─── NANOFLARES (Phase 1: loop-anchored Poisson sparks) ──────────────────────
 // Tiny stochastic heating events fired along every coronal loop. Each loop
 // has its own Poisson timer; events are drawn from a power-law energy
@@ -6503,7 +6786,9 @@ const LOOP_FS = /* glsl */`
 // peak size, lifetime, and rapid-rise/exp-decay envelope mimicking
 // observed EUV nanoflare lightcurves.
 const NANOFLARE_POOL_SIZE   = 768;   // total simultaneous sparks
-const NANOFLARE_ALPHA       = 2.2;   // power-law slope (typical observed range 1.8–2.5)
+// Display energy range for a spark's size/colour/lifetime. The PHYSICAL energy
+// range is the kernel's (10²³–10²⁷ erg); this is the 0–1 normalisation the
+// sprite code has always worked in, kept so the visual tuning below survives.
 const NANOFLARE_E_MIN       = 0.001;
 const NANOFLARE_E_MAX       = 1.0;
 
@@ -6540,14 +6825,24 @@ let _nanoflareSystem = null;
 let _nanoflareHost   = null;   // co-rotating parent group for spark Points (always exists)
 let _coronalLoopCurves = [];   // per-loop: { points: Vec3[], rate, nextEventT }
 
-// Inverse-CDF sampling of dN/dE ∝ E^-α on [emin, emax].
+// ── ONE nanoflare energy distribution for the whole page ──────────────────
+// This used to be a second, independent inverse-CDF with its own hard-coded
+// α = 2.2, alongside the shader's own ad-hoc term — three places to disagree
+// about the same physics. It now goes through js/sun-nanoflares.js like
+// everything else, so the α on the control drives the photospheric population,
+// the loop sparks and the reported heating budget together.
+//
+// The kernel works in erg over four decades; the sprite code works in a 0–1
+// display energy. The map between them is the LOG position in the range, which
+// preserves the power law exactly (a monotone re-parameterisation of E cannot
+// change which events are rare).
 function _sampleNanoflareEnergy() {
-    const a1 = 1 - NANOFLARE_ALPHA;
-    const u  = Math.random();
-    const lo = Math.pow(NANOFLARE_E_MIN, a1);
-    const hi = Math.pow(NANOFLARE_E_MAX, a1);
-    return Math.pow(lo + u * (hi - lo), 1 / a1);
+    const E = sampleEnergy(Math.random(), _nanoState.alpha);
+    const t = (Math.log(E) - Math.log(E_MIN_ERG)) / (Math.log(E_MAX_ERG) - Math.log(E_MIN_ERG));
+    _nanoAlphaMon.push(E);
+    return NANOFLARE_E_MIN * Math.pow(NANOFLARE_E_MAX / NANOFLARE_E_MIN, t);
 }
+
 
 function _initNanoflareSystem() {
     if (_nanoflareSystem) return;
@@ -6711,6 +7006,19 @@ function _updateNanoflares(t) {
             const ev = events[i];
             _spawnNanoflareAtSurface(ev.lat, ev.lon, ev.energy);
         }
+        // The SOC grid's power-law index is EMERGENT — it falls out of the
+        // avalanche dynamics and is not dialled in — so the page MEASURES the
+        // index the avalanches produce and scores that, instead of forcing α on
+        // a model whose whole point is that α emerges.
+        //
+        // ONE push per CASCADE, carrying the cascade's total released energy.
+        // Pushing per spawned spark instead measured single-cell excesses,
+        // which are all within a whisker of the toppling threshold: a narrow,
+        // non-power-law sample that pinned the estimator at its search bound.
+        // (It was refused rather than printed — that is what the KS and
+        // at-bound guards in fitAlphaMLE are for — but a refused measurement is
+        // still a measurement not made.)
+        if (_nanoflareSOC.lastCascadeEnergy > 0) _nanoAlphaMon.push(_nanoflareSOC.lastCascadeEnergy);
     }
 
     // ── Per-spark envelope update ──
@@ -6829,6 +7137,25 @@ const SOC_RELAX    = 0.55;          // field relaxation factor on avalanche
 const SOC_DIFF     = 0.012;         // background ohmic diffusion per step
 const SOC_INJECT   = 0.0040;        // background stress injection per sim-second
 const SOC_AR_BOOST = 0.085;         // AR injection rate per unit area
+// Fraction of a toppling cell's excess handed to its four neighbours; the rest
+// dissipates.
+//
+// MEASURED, 2026-09-09, and recorded so it is not re-tried blind. The α monitor
+// says this grid's AVALANCHE SIZES ARE NOT POWER-LAW DISTRIBUTED: the best
+// bounded-power-law fit sits at the estimator's lower search bound with a
+// Kolmogorov–Smirnov distance of ~0.45, over ~180 cascades. The obvious
+// suspect was dissipation — SOC is scale-free only when redistribution is
+// (near-)conservative — so this was swept 0.65 → 0.85 → 0.95 → 1.00 with the
+// monitor reset between runs. IT MADE NO DIFFERENCE (KS 0.46 / 0.52 / 0.42 /
+// 0.48, α pinned at the bound throughout). So conservativeness is not what is
+// missing here. Two remaining suspects, neither investigated:
+//   • the stress reset is to a FIXED S_CRIT·0.85 regardless of how much the
+//     cell was carrying, so released energy is decoupled from redistribution;
+//   • the driver is 24 smooth Lorenz attractors, which is spatially correlated
+//     — cells tip in synchronised groups rather than in scale-free cascades.
+// Until one of those is addressed the page reports the statistics honestly
+// rather than quoting an index it cannot support.
+let SOC_PROPAGATE = 0.65;
 const SOC_MAX_PASSES   = 10;
 const SOC_MAX_EVENTS   = 60;        // hard cap on events per frame (prevents pool churn)
 
@@ -6864,6 +7191,27 @@ class NanoflareSOC {
         for (let i = 0; i < SOC_TOTAL; i++) {
             this.Bt[i] = (Math.random() - 0.5) * 0.10;
             this.Bp[i] = (Math.random() - 0.5) * 0.10;
+        }
+
+        // SEED THE STRESS FIELD AT THE CRITICAL STATE, not at zero.
+        //
+        // A self-organized-criticality system is DEFINED by its statistically
+        // stationary critical state — that is the attractor, and it is the only
+        // part of the run whose event statistics mean anything. Loading up to it
+        // from S = 0 is a transient nobody wants to watch, and here it is a long
+        // one: background injection is SOC_INJECT = 0.004 per sim-second against
+        // SOC_S_CRIT = 0.85, so the first avalanche is ~212 sim-seconds away —
+        // three and a half minutes of a nanoflare layer doing nothing, and three
+        // and a half minutes before the α measurement has a single event to fit
+        // (measured; the layer read as broken).
+        //
+        // The seed is a spread BELOW critical, not a flat value at it: a uniform
+        // field would tip over everywhere at once on the first injection and
+        // open with one enormous synchronised avalanche, which is the opposite
+        // of the intended statistics. The spread desynchronises the cells so the
+        // system arrives in its stationary state instead of ringing into it.
+        for (let i = 0; i < SOC_TOTAL; i++) {
+            this.S[i] = SOC_S_CRIT * (0.40 + 0.55 * Math.random());
         }
 
         // Index helpers
@@ -7060,6 +7408,18 @@ class NanoflareSOC {
         events.length = 0;
         const S = this.S, Bt = this.Bt, Bp = this.Bp;
         let pass = 0, unstable = true;
+        // TOTAL energy released by this cascade, summed over every cell that
+        // topples across every pass.
+        //
+        // THIS, not a single cell's excess, is the avalanche size — and the
+        // avalanche size is the quantity flare statistics are about. An SOC
+        // system's power law lives in how far a cascade PROPAGATES; the excess
+        // one cell happens to be carrying when it tips is always within a
+        // whisker of the threshold, so its distribution is narrow and is not a
+        // power law at all. Measuring per-cell excesses is how the α estimator
+        // first got fed a degenerate sample (it pinned at the search bound and
+        // the KS guard refused it, correctly).
+        let released = 0;
 
         while (unstable && pass < SOC_MAX_PASSES) {
             unstable = false;
@@ -7069,6 +7429,7 @@ class NanoflareSOC {
                     if (S[i] <= SOC_S_CRIT) continue;
                     unstable = true;
                     const excess = S[i] - SOC_S_CRIT;
+                    released += excess;
 
                     // Field relaxation (local potential-field projection)
                     const iN = (row + 1) * SOC_LON + col;
@@ -7087,7 +7448,7 @@ class NanoflareSOC {
                     // Push a fraction of excess to neighbours — propagates the
                     // avalanche front. Coefficient < 1 means SOC dissipates;
                     // the rest is emitted as the nanoflare.
-                    const propagate = excess * 0.65;
+                    const propagate = excess * SOC_PROPAGATE;
                     const share = propagate * 0.25;
                     S[iN] += share;
                     S[iS] += share;
@@ -7107,6 +7468,12 @@ class NanoflareSOC {
             }
             pass++;
         }
+        // Published for the α monitor: one number per cascade, in the model's
+        // own stress units. The units do not matter — a power-law index is
+        // invariant under E → cE, which is why AlphaMonitor fits over the range
+        // the sample itself spans (js/sun-nanoflares.js, `autoRange`).
+        this.lastCascadeEnergy = released;
+        this.cascades = (this.cascades || 0) + (released > 0 ? 1 : 0);
         return events;
     }
 
@@ -8218,7 +8585,38 @@ document.getElementById('tog-corona').addEventListener('change', e => {
 });
 document.getElementById('tog-loops').addEventListener('change',  e => { if (loopGroup)  loopGroup.visible  = e.target.checked; });
 document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
+    // The toggle owns the WHOLE nanoflare chain — the loop sparks AND the
+    // photospheric population — so "off" means off, not "off in one layer".
     if (_nanoflareSystem?.points) _nanoflareSystem.points.visible = e.target.checked;
+    uniforms.u_nanoOn.value = e.target.checked ? 1.0 : 0.0;
+});
+// Tick marks on the α slider at the published measurements, so the control
+// reads as "where in the literature are you standing" rather than a free knob.
+(function _seedNanoAlphaRefs() {
+    const dl = document.getElementById('nano-alpha-refs');
+    if (!dl) return;
+    for (const r of ALPHA_REFERENCES) {
+        const o = document.createElement('option');
+        o.value = String(r.alpha);
+        o.label = r.label;
+        dl.appendChild(o);
+    }
+    _refreshNanoflares();
+    // The SOC grid's measured α needs events to accumulate, so the readout is
+    // re-rendered on a slow tick rather than per frame — this line changes on
+    // the timescale of the avalanches, not the timescale of the renderer.
+    setInterval(_renderNanoflareReadout, 2000);
+})();
+document.getElementById('sl-nano-alpha')?.addEventListener('input', function () {
+    _nanoAlphaSet = +this.value;
+    const d = document.getElementById('disp-nano-alpha');
+    if (d) d.textContent = _nanoAlphaSet.toFixed(2);
+    // α changes the population's statistics, so the measurement of the OLD one
+    // is no longer about the Sun on screen. Clearing the window is the honest
+    // move; letting it average across the change would report a number that
+    // describes neither regime.
+    _nanoAlphaMon.reset();
+    _refreshNanoflares();
 });
 document.getElementById('tog-prom').addEventListener('change',   e => { if (promGroup)  promGroup.visible  = e.target.checked; });
 document.getElementById('tog-tr').addEventListener('change', e => {
@@ -11587,6 +11985,13 @@ function _onSwpcUpdate_atmosphere(ev) {
     const xray = sw.xray_flux ?? 1e-7;
     _atmXrayFlux = xray;
     _atmF107 = sw.f107_flux ?? 150;
+    // Nanoflare drive: the rate scales with the free magnetic energy convection
+    // is braiding into the field, which nothing measures directly. F10.7 and the
+    // reported sunspot areas are the page's two live PROXIES for it, and
+    // js/sun-nanoflares.js says so where it uses them.
+    _nanoF107 = sw.f107_flux ?? _nanoF107;
+    _nanoAreaMh = (liveRegions || []).reduce((a, r) => a + (Number(r.area) || 0), 0);
+    _refreshNanoflares();
     _atmKp = sw.kp ?? 2;
 
     // Estimate coronal temperature from X-ray flux:
@@ -11767,6 +12172,25 @@ window.__sun = {
     },
     get frames() { return renderer.info.render.frame; },
     get watch() { return window.__sunWatch; },           // Sun Watch dock handle
+    // Nanoflare population: the state the kernel computed, and the index the
+    // SOC avalanche grid is actually producing (measured, not set).
+    get nanoflares() {
+        return {
+            set: _nanoAlphaSet,
+            state: _nanoState,
+            measured: _nanoAlphaMon.fit(),
+            events: _nanoAlphaMon.total,
+            uniform: uniforms.u_nano.value.toArray(),
+            on: uniforms.u_nanoOn.value,
+            driver: _NANOFLARE_DRIVER,
+            propagate: SOC_PROPAGATE,
+            setPropagate: (v) => { SOC_PROPAGATE = v; },
+            resetMonitor: () => _nanoAlphaMon.reset(),
+            sparksVisible: !!_nanoflareSystem?.points?.visible,
+            liveSparks: _nanoflareSystem?.liveCount ?? 0,
+            loopCurves: _coronalLoopCurves.length,
+        };
+    },
     // Observed-disk hooks (SUN_VISUALS_WORLD_CLASS_PLAN.md Phases 0–1)
     get observed() { return sunObserved ? sunObserved.getState() : null; },   // provenance snapshot
     get observedCtl() { return sunObserved; },
