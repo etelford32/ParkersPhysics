@@ -225,40 +225,46 @@ export function losUnitFromVoid(voidData = BOOTES_VOID, cosmo = COSMOLOGY) {
  * `massHintMsun` is an order-of-magnitude M₂₀₀ used only for RELATIVE
  * weighting between anchors. It is explicitly not a measurement and the page
  * never prints it as one.
+ *
+ * `shortName` is what the 3D stage prints beside each cluster. It is separate
+ * from `name` because a label reading "Coma Cluster (Abell 1656)" is wider than
+ * the object it points at and, at nine of them, the render becomes a wall of
+ * text with a starburst somewhere behind it. The full name stays for prose and
+ * for anywhere the identification actually matters.
  */
 export const NEIGHBOUR_ANCHORS = Object.freeze([
     {
-        id: 'a1656', name: 'Coma Cluster (Abell 1656)', kind: 'cluster',
+        id: 'a1656', shortName: 'Coma', name: 'Coma Cluster (Abell 1656)', kind: 'cluster',
         raDeg: 194.95, decDeg: 27.98, z: 0.0231, massHintMsun: 1.2e15,
         note: 'The dominant node of the Coma supercluster, on the near wall.',
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a1367', name: 'Leo Cluster (Abell 1367)', kind: 'cluster',
+        id: 'a1367', shortName: 'Leo / A1367', name: 'Leo Cluster (Abell 1367)', kind: 'cluster',
         raDeg: 176.12, decDeg: 19.83, z: 0.0216, massHintMsun: 3.0e14,
         note: 'The other end of the Coma–A1367 filament of the CfA2 Great Wall.',
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a2199', name: 'Abell 2199', kind: 'cluster',
+        id: 'a2199', shortName: 'A2199', name: 'Abell 2199', kind: 'cluster',
         raDeg: 247.15, decDeg: 39.55, z: 0.0302, massHintMsun: 4.0e14,
         note: 'Hercules supercluster core, on the far-eastern side.',
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a2151', name: 'Hercules Cluster (Abell 2151)', kind: 'cluster',
+        id: 'a2151', shortName: 'Hercules', name: 'Hercules Cluster (Abell 2151)', kind: 'cluster',
         raDeg: 241.30, decDeg: 17.75, z: 0.0367, massHintMsun: 2.0e14,
         note: 'Hercules supercluster, south-east of the void.',
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a1795', name: 'Abell 1795', kind: 'cluster',
+        id: 'a1795', shortName: 'A1795', name: 'Abell 1795', kind: 'cluster',
         raDeg: 207.25, decDeg: 26.58, z: 0.0625, massHintMsun: 6.0e14,
         note: 'At the void redshift, south-west on the sky — a wall node.',
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a2065', name: 'Abell 2065', kind: 'cluster',
+        id: 'a2065', shortName: 'Corona Borealis', name: 'Abell 2065', kind: 'cluster',
         raDeg: 230.62, decDeg: 27.71, z: 0.0726, massHintMsun: 6.0e14,
         note: 'Corona Borealis supercluster — the nearest massive structure '
             + 'behind and south of the void, and the one that dominates the '
@@ -266,19 +272,19 @@ export const NEIGHBOUR_ANCHORS = Object.freeze([
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a2061', name: 'Abell 2061', kind: 'cluster',
+        id: 'a2061', shortName: 'A2061', name: 'Abell 2061', kind: 'cluster',
         raDeg: 230.34, decDeg: 30.65, z: 0.0784, massHintMsun: 5.0e14,
         note: 'Corona Borealis supercluster member.',
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a2142', name: 'Abell 2142', kind: 'cluster',
+        id: 'a2142', shortName: 'A2142', name: 'Abell 2142', kind: 'cluster',
         raDeg: 239.58, decDeg: 27.23, z: 0.0904, massHintMsun: 1.3e15,
         note: 'Massive merging cluster beyond the void’s far wall.',
         source: 'Abell catalogue / NED',
     },
     {
-        id: 'a2255', name: 'Abell 2255', kind: 'cluster',
+        id: 'a2255', shortName: 'A2255', name: 'Abell 2255', kind: 'cluster',
         raDeg: 258.19, decDeg: 64.06, z: 0.0806, massHintMsun: 5.0e14,
         note: 'High-declination node north-east of the void.',
         source: 'Abell catalogue / NED',

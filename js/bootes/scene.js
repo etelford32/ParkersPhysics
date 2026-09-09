@@ -35,12 +35,89 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createCameraRig } from './camera.js';
+import { buildScaleRefs } from './scale-refs.js';
 
 /** Mpc per scene unit. Only conversion in the file. */
 export const SCENE_SCALE = 20;
 
 const mpc = (v) => v / SCENE_SCALE;
+
+/**
+ * A soft round dot, generated once and shared by every Points material.
+ *
+ * WITHOUT IT, POINTS ARE SQUARES. `PointsMaterial` draws an untextured point as
+ * a hard axis-aligned quad, and with `sizeAttenuation` on there is no upper
+ * bound on how large that quad gets — so the "inside the void" viewpoint, where
+ * the camera sits 20 Mpc from tracers that are metres away in scene units,
+ * rendered the galaxy field as a scatter of fat white rectangles. A radial
+ * alpha falloff makes the same geometry read as a soft glow at every distance,
+ * which is both what a galaxy should look like and the cheapest possible fix
+ * (one 64×64 texture, no shader).
+ */
+let dotTexture = null;
+function softDot() {
+    if (dotTexture) return dotTexture;
+    const size = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,.85)');
+    g.addColorStop(0.7, 'rgba(255,255,255,.22)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    dotTexture = new THREE.CanvasTexture(c);
+    dotTexture.colorSpace = THREE.SRGBColorSpace;
+    return dotTexture;
+}
+
+/**
+ * Fade a line material out as it approaches the camera.
+ *
+ * NOT A MAGNITUDE CHANGE, AND THAT DISTINCTION IS THE WHOLE POINT. Arrow LENGTH
+ * encodes field strength and must never respond to the camera. What responds is
+ * ALPHA: an arrow whose tail is two Mpc from the eye is drawn as a streak across
+ * the entire frame, edge-on and unreadable, and it hides the structure behind
+ * it. That is the "inside the void" viewpoint's whole failure mode — the camera
+ * sits at 0.22 R_eff and the innermost sample shell is right against the lens.
+ *
+ * Fading them is the same move a volume renderer makes at its near plane, and
+ * it is honest in a way that shortening them would not be: every arrow still
+ * has exactly the length its magnitude earned, and the ones you cannot read are
+ * simply not drawn on top of the ones you can.
+ *
+ * Implemented with onBeforeCompile rather than a custom ShaderMaterial so the
+ * material keeps three's own colour management and fog handling — a hand-rolled
+ * replacement is how the vertex colours stop matching the charts.
+ */
+function applyNearFade(material, near0, near1) {
+    material.onBeforeCompile = (shader) => {
+        shader.uniforms.uNearFade = { value: new THREE.Vector2(near0, near1) };
+        shader.vertexShader = shader.vertexShader
+            .replace('void main() {', 'varying float vCamDist;\nvoid main() {')
+            .replace('#include <fog_vertex>',
+                '#include <fog_vertex>\n\tvCamDist = -mvPosition.z;');
+        shader.fragmentShader = shader.fragmentShader
+            .replace('void main() {',
+                'uniform vec2 uNearFade;\nvarying float vCamDist;\nvoid main() {')
+            // AFTER <opaque_fragment>, not before. That chunk ends with
+            //     gl_FragColor = vec4( outgoingLight, diffuseColor.a );
+            // so anything written to gl_FragColor ahead of it is discarded.
+            // The first version of this prepended the multiply, compiled
+            // cleanly, produced no warning and had exactly zero effect — the
+            // arrows were identical with the fade set to 7 Mpc and to 9999.
+            .replace('#include <opaque_fragment>',
+                '#include <opaque_fragment>\n'
+                + '\tgl_FragColor.a *= smoothstep(uNearFade.x, uNearFade.y, vCamDist);');
+    };
+    // Materials that share a program are cached by their compile key; bumping
+    // this makes three rebuild rather than reuse an unfaded program.
+    material.customProgramCacheKey = () => `nearfade-${near0}-${near1}`;
+    return material;
+}
 
 /** Blue → white → orange, matching the charts' void/wall pair. */
 function rampColor(t, out = new THREE.Color()) {
@@ -59,7 +136,11 @@ function rampColor(t, out = new THREE.Color()) {
  * A page that hard-fails on no-WebGL loses the science along with the picture.
  */
 export function createBootesScene(canvas, {
-    onHover = null,
+    rEffMpc = 91.6,
+    losUnit = [0, 0, 1],
+    onPose = null,
+    onViewpoint = null,
+    onFocus = null,
 } = {}) {
     let renderer;
     try {
@@ -73,16 +154,15 @@ export function createBootesScene(canvas, {
     renderer.setClearColor(0x03010e, 0);
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 400);
-    camera.position.set(mpc(210), mpc(150), mpc(240));
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 600);
 
-    const controls = new OrbitControls(camera, canvas);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.06;
-    controls.minDistance = mpc(40);
-    controls.maxDistance = mpc(900);
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.32;
+    // The camera rig owns OrbitControls, the viewpoints, the keyboard and
+    // click-to-focus. Read its header before touching camera.up.
+    const rig = createCameraRig({
+        canvas, camera, toScene: mpc, fromScene: (u) => u * SCENE_SCALE,
+        rEffMpc, losUnit, onPose, onViewpoint, onFocus,
+    });
+    const controls = rig.controls;
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.75));
     const key = new THREE.DirectionalLight(0xffffff, 0.5);
@@ -96,6 +176,7 @@ export function createBootesScene(canvas, {
         shell: new THREE.Group(),
         field: new THREE.Group(),
         markers: new THREE.Group(),
+        refs: new THREE.Group(),
     };
     Object.values(groups).forEach(g => scene.add(g));
 
@@ -110,17 +191,26 @@ export function createBootesScene(canvas, {
     }
 
     // ── The void shell + its wall, drawn once ───────────────────────────────
+    let shellWire = null;
+    let shellRadiusScene = 0;
+
     function buildShell(rEffMpc, rsMpc) {
         clear(groups.shell);
+        shellRadiusScene = mpc(rEffMpc);
         // R_eff: a faint wireframe sphere. Deliberately NOT a solid surface —
         // the void has no boundary, it has a profile, and a hard surface is
         // the single most common way these renders lie about what a void is.
-        const wire = new THREE.Mesh(
-            new THREE.SphereGeometry(mpc(rEffMpc), 48, 32),
+        //
+        // 32×16 segments, not 48×32: from anywhere near the shell the far half
+        // of the mesh fills the frame, and a dense wireframe stops reading as
+        // "a sphere at this radius" and starts reading as "a lattice", which is
+        // a structure the model does not have.
+        shellWire = new THREE.Mesh(
+            new THREE.SphereGeometry(shellRadiusScene, 32, 16),
             new THREE.MeshBasicMaterial({
-                color: 0x4fc3f7, wireframe: true, transparent: true, opacity: 0.075,
+                color: 0x4fc3f7, wireframe: true, transparent: true, opacity: 0.07,
             }));
-        groups.shell.add(wire);
+        groups.shell.add(shellWire);
         // The zero crossing r_s, where δ changes sign: the honest "edge".
         const cross = new THREE.Mesh(
             new THREE.SphereGeometry(mpc(rsMpc), 64, 40),
@@ -152,8 +242,8 @@ export function createBootesScene(canvas, {
         geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         const mat = new THREE.PointsMaterial({
             size: 0.085, vertexColors: true, transparent: true, opacity: 0.9,
-            sizeAttenuation: true, depthWrite: false,
-            blending: THREE.AdditiveBlending,
+            sizeAttenuation: true, depthWrite: false, map: softDot(),
+            alphaTest: 0.02, blending: THREE.AdditiveBlending,
         });
         groups.tracers.add(track(new THREE.Points(geo, mat)));
     }
@@ -171,9 +261,10 @@ export function createBootesScene(canvas, {
         });
         const lg = new THREE.BufferGeometry();
         lg.setAttribute('position', new THREE.BufferAttribute(segs, 3));
-        groups.web.add(track(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
-            color: 0xff9a56, transparent: true, opacity: 0.34,
-        }))));
+        groups.web.add(track(new THREE.LineSegments(lg, applyNearFade(
+            new THREE.LineBasicMaterial({
+                color: 0xff9a56, transparent: true, opacity: 0.34,
+            }), mpc(4), mpc(16)))));
 
         // Nodes. Point size cannot vary per-vertex in PointsMaterial without a
         // custom shader, so mass is encoded in BRIGHTNESS instead — which is
@@ -194,37 +285,52 @@ export function createBootesScene(canvas, {
         ng.setAttribute('color', new THREE.BufferAttribute(nc, 3));
         groups.web.add(track(new THREE.Points(ng, new THREE.PointsMaterial({
             size: 0.34, vertexColors: true, transparent: true, opacity: 0.95,
-            sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false,
+            sizeAttenuation: true, map: softDot(), alphaTest: 0.02,
+            blending: THREE.AdditiveBlending, depthWrite: false,
         }))));
     }
 
     // ── Named anchors + the line of sight ───────────────────────────────────
-    function buildMarkers(anchors, losUnit, rEffMpc) {
-        clear(groups.markers);
-        // The sightline back to the Milky Way, drawn out to 1.6 R_eff so it
-        // reads as a direction rather than as a structure.
-        const l = mpc(rEffMpc * 1.6);
-        const losGeo = new THREE.BufferGeometry();
-        losGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-            0, 0, 0, losUnit[0] * l, losUnit[1] * l, losUnit[2] * l,
-        ]), 3));
-        groups.markers.add(track(new THREE.Line(losGeo, new THREE.LineBasicMaterial({
-            color: 0xc792ea, transparent: true, opacity: 0.5,
-        }))));
+    let refsHandle = null;
+    let labelsVisible = true;
 
-        if (!anchors?.length) return;
-        const ap = new Float32Array(anchors.length * 3);
-        anchors.forEach((a, i) => {
-            ap[i * 3] = mpc(a.offsetMpc[0]);
-            ap[i * 3 + 1] = mpc(a.offsetMpc[1]);
-            ap[i * 3 + 2] = mpc(a.offsetMpc[2]);
+    /**
+     * The measured objects and the ruler.
+     *
+     * Both live here because they answer the same question — "how big is this,
+     * and what in it is real?" The nine catalogued clusters are the only
+     * observed positions in the scene, so they are the only things labelled by
+     * name; everything else is model and the page says so.
+     */
+    function buildMarkers(anchors, losUnitVec, rEff) {
+        clear(groups.markers);
+
+        // Cluster dots. The sightline itself is drawn by the scale refs, which
+        // owns every distance cue in one place.
+        if (anchors?.length) {
+            const s = mpc(1);
+            const ap = new Float32Array(anchors.length * 3);
+            anchors.forEach((a, i) => {
+                ap[i * 3] = a.offsetMpc[0] * s;
+                ap[i * 3 + 1] = a.offsetMpc[1] * s;
+                ap[i * 3 + 2] = a.offsetMpc[2] * s;
+            });
+            const ag = new THREE.BufferGeometry();
+            ag.setAttribute('position', new THREE.BufferAttribute(ap, 3));
+            groups.markers.add(track(new THREE.Points(ag, new THREE.PointsMaterial({
+                color: 0xffffff, size: 0.5, transparent: true, opacity: 0.95,
+                sizeAttenuation: true, map: softDot(), alphaTest: 0.02,
+                depthWrite: false,
+            }))));
+        }
+
+        refsHandle = buildScaleRefs(groups.refs, {
+            rEffMpc: rEff, toScene: mpc, losUnit: losUnitVec,
+            anchors: anchors ?? [], showLabels: labelsVisible,
         });
-        const ag = new THREE.BufferGeometry();
-        ag.setAttribute('position', new THREE.BufferAttribute(ap, 3));
-        groups.markers.add(track(new THREE.Points(ag, new THREE.PointsMaterial({
-            color: 0xffffff, size: 0.55, transparent: true, opacity: 0.9,
-            sizeAttenuation: true, depthWrite: false,
-        }))));
+        rig.setPickables((anchors ?? []).map(a => ({
+            id: a.id, name: a.name, positionMpc: a.offsetMpc, radiusMpc: a.radiusMpc,
+        })));
     }
 
     /**
@@ -233,9 +339,33 @@ export function createBootesScene(canvas, {
      * chose — passed in rather than computed here so the legend and the arrows
      * cannot disagree about what "full length" means.
      */
-    function buildField(samples, maxMagnitude, { arrowMpc = 17 } = {}) {
+    let lastField = null;
+    let arrowMpcInUse = 0;
+
+    /**
+     * Arrow length in Mpc, as a function of how far out the camera is.
+     *
+     * THIS IS A GLYPH ZOOM, NOT A MAGNITUDE CHANGE, and the distinction is the
+     * only reason it is allowed. Every arrow in a frame is drawn with the same
+     * magnitude→length mapping, so their RELATIVE lengths — the only thing
+     * length is claiming — are untouched; what changes is the size of the
+     * symbol, exactly as a map's symbols resize with its zoom. The alternative
+     * is a single fixed length that is a hairline at 360 Mpc out and a
+     * screen-crossing streak from inside the void, which is what shipped first.
+     *
+     * Clamped at both ends: below ~5 Mpc an arrow has no readable direction,
+     * above ~26 Mpc the field turns back into a thicket.
+     */
+    function arrowLengthFor(cameraDistanceMpc) {
+        return Math.max(5, Math.min(26, cameraDistanceMpc * 0.075));
+    }
+
+    function buildField(samples, maxMagnitude, { arrowMpc = null } = {}) {
         clear(groups.field);
-        if (!samples?.length || !(maxMagnitude > 0)) return;
+        if (!samples?.length || !(maxMagnitude > 0)) { lastField = null; return; }
+        lastField = { samples, maxMagnitude };
+        arrowMpc = arrowMpc ?? arrowLengthFor(camera.position.length() * SCENE_SCALE);
+        arrowMpcInUse = arrowMpc;
         // 3 segments per arrow: the shaft plus two head strokes.
         const verts = new Float32Array(samples.length * 3 * 2 * 3);
         const cols = new Float32Array(samples.length * 3 * 2 * 3);
@@ -282,14 +412,16 @@ export function createBootesScene(canvas, {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(verts.subarray(0, o), 3));
         geo.setAttribute('color', new THREE.BufferAttribute(cols.subarray(0, o), 3));
-        groups.field.add(track(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
-            vertexColors: true, transparent: true, opacity: 0.92,
-        }))));
+        groups.field.add(track(new THREE.LineSegments(geo, applyNearFade(
+            new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, opacity: 0.92,
+            }), mpc(6), mpc(22)))));
     }
 
     // ── Render loop ─────────────────────────────────────────────────────────
     let running = true;
     let visible = true;
+    let frameCount = 0;
     function resize() {
         const w = canvas.clientWidth || 800;
         const h = canvas.clientHeight || 480;
@@ -300,7 +432,24 @@ export function createBootesScene(canvas, {
     function frame() {
         if (!running) return;
         requestAnimationFrame(frame);
-        controls.update();
+        rig.update();
+        // INSIDE THE SHELL, THE SHELL IS NOISE. Seen from within, the far half
+        // of the wireframe covers the whole frame and the reader is looking at
+        // a grid instead of at a void. The range rings and the meridian carry
+        // the scale from in here, so the sphere simply steps aside — it is the
+        // one object whose whole job is to be seen from outside.
+        if (shellWire) shellWire.visible = camera.position.length() > shellRadiusScene * 0.99;
+
+        // Re-scale the arrow glyphs when the camera has moved far enough to
+        // matter. Throttled to every 12th frame and gated on a 15 % change,
+        // because the rebuild walks ~700 samples and doing it on every frame of
+        // a flight is a visible hitch for a change nobody can see.
+        if (lastField && (frameCount++ % 12) === 0) {
+            const want = arrowLengthFor(camera.position.length() * SCENE_SCALE);
+            if (Math.abs(want / arrowMpcInUse - 1) > 0.15) {
+                buildField(lastField.samples, lastField.maxMagnitude, { arrowMpc: want });
+            }
+        }
         // Pause only the GL work when off-screen; controls damping still
         // settles so returning to the tab does not snap the camera.
         if (!visible) return;
@@ -315,22 +464,35 @@ export function createBootesScene(canvas, {
     observer?.observe(canvas);
 
     return {
-        renderer, scene, camera, controls, groups,
+        renderer, scene, camera, controls, groups, rig,
         resize,
         buildShell, buildTracers, buildWeb, buildMarkers, buildField,
-        setLayerVisible(name, on) { if (groups[name]) groups[name].visible = on; },
-        setAutoRotate(on) { controls.autoRotate = on; },
-        frameAll(rEffMpc) {
-            const d = mpc(rEffMpc) * 3.9;
-            camera.position.set(d * 0.72, d * 0.5, d * 0.78);
-            controls.target.set(0, 0, 0);
-            controls.update();
+        setLayerVisible(name, on) {
+            if (groups[name]) groups[name].visible = on;
+            // The ruler follows the shell toggle: hiding the R_eff shell while
+            // leaving its labelled range rings up leaves the labels annotating
+            // nothing, which reads as a broken layer rather than a hidden one.
+            if (name === 'shell' && groups.refs) groups.refs.visible = on;
         },
+        setLabelsVisible(on) {
+            labelsVisible = on;
+            refsHandle?.setLabelsVisible(on);
+            rig.setLabelsFlag(on);
+        },
+        setAutoRotate(on) { rig.setAutoRotate(on); },
+        get autoRotate() { return rig.autoRotate; },
+        goTo: (id, opts) => rig.goTo(id, opts),
+        resetCamera: (opts) => rig.reset(opts),
+        focusOnMpc: (pos, opts) => rig.focusOnMpc(pos, opts),
+        currentPose: () => rig.currentPose(),
+        get arrowLengthMpc() { return arrowMpcInUse; },
+        onLabelToggleRequest: (fn) => rig.onLabelToggleRequest(fn),
+        get activeViewpoint() { return rig.activeViewpoint; },
         dispose() {
             running = false;
             observer?.disconnect();
             Object.values(groups).forEach(clear);
-            controls.dispose();
+            rig.dispose();
             renderer.dispose();
         },
     };

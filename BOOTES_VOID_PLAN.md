@@ -153,6 +153,60 @@ shares no code with the kernel.
 
 ---
 
+## 4a. The stage: a ruler and a camera (2026-09-09)
+
+The first build had neither. The render was a starburst with no scale reference
+at all — nothing said whether it spanned 90 Mpc or 900 — and the camera was a
+bare OrbitControls with a snap-to-default button.
+
+### The ruler
+
+`js/bootes/scale-refs.js`, in three parts that do different jobs:
+
+- **Range rings**, fixed multiples of R_eff on the graticule plane, labelled
+  with both the multiple and the distance. FIXED, never adaptive: a ruler whose
+  tick spacing changes as you zoom is not a ruler, and "two rings out" has to
+  mean the same thing before and after a zoom.
+- **The DOM scale bar**, which IS adaptive and carries the other half of the
+  job — what a screen distance is worth right now. It rounds DOWN to 1/2/5×10ⁿ
+  so it can never overflow the box it was measured against, and it says it is
+  exact at the pivot plane.
+- **Labels on the measured objects only** — the nine catalogued clusters and
+  the sightline. Everything else in the scene is model, so labelling it by name
+  would imply an identification that does not exist.
+
+### The camera
+
+`js/bootes/camera.js` over the pure `js/bootes/camera-math.js`:
+
+- Five viewpoints, **two of them derived from the real oblique sightline**
+  (RA 14ʰ50ᵐ, Dec +46°) rather than from a coordinate axis. Substituting an
+  axis produces a view that looks plausible and shows the wrong projection.
+- Eased flights that interpolate θ, φ and **log**-radius, not Cartesian
+  position — a straight lerp between opposite sides dives through the void.
+- Keyboard, gated on `document.activeElement` so the rail's sliders keep their
+  arrow keys.
+- Double-click-to-focus on the catalogued clusters, by screen-space projection
+  rather than a Points raycast (no threshold to tune per zoom).
+- A live pose readout: distance, azimuth, elevation, field of view.
+
+`camera.up` stays +Y and never changes, so — unlike Mars, the Moon and the
+Stage — this rig never has to rebuild OrbitControls. See its header.
+
+### Bugs found while building it
+
+| Bug | Symptom | Fix |
+|-----|---------|-----|
+| Near-fade injected BEFORE `<opaque_fragment>` | That chunk ends by assigning `gl_FragColor`, so the alpha write was discarded. Compiled clean, no warning, zero effect — identical output with the fade at 7 Mpc and at 9999 | Inject after the chunk |
+| Untextured `PointsMaterial` | Points are hard axis-aligned quads with no size cap, so the inside-the-void viewpoint rendered galaxies as fat white rectangles | One shared soft-dot alpha texture |
+| Wireframe shell seen from inside | The far half fills the frame and reads as a lattice, a structure the model does not have | Hidden once the camera is inside R_eff |
+| Fixed arrow length | A hairline at 360 Mpc out, a screen-crossing streak from inside | Glyph length scales with camera distance — a symbol zoom, not a magnitude change, and disclosed |
+| `across` viewpoint via Gram-Schmidt perpendicular | Landed the camera 62° above the plane; the rings arrived as a steep ellipse | Horizontal perpendicular: still ⟂ the sightline, level horizon |
+| Label wiring spliced inside the debounce callback | The `L` shortcut did nothing on a fresh page and started working only after some other control had been touched | Registered at the top level |
+| `data-bv` collected as key→element | Seven readouts appear twice on purpose; only the last updated | key→LIST, gated by `tests/bootes-void-page.mjs` |
+
+---
+
 ## 5. What is deliberately NOT here
 
 - **No galaxy catalogue.** Astronomy archives are egress-blocked at build time.
@@ -201,8 +255,9 @@ profile in the middle.*
 ```
 node tests/bootes-void-model.mjs      # 17 checks — the physics kernel
 node tests/bootes-web-model.mjs       # 12 checks — the web + published inputs
+node tests/bootes-camera-math.mjs     #  9 checks — the camera + scale arithmetic
 node tests/bootes-void-page.mjs       #  7 checks — the DOM contract
-npx playwright test tests/bootes-void-smoke.spec.js
+npx playwright test tests/bootes-void-smoke.spec.js   # 17 checks
 node tests/site-sections.mjs tests/simulations-catalog.mjs tests/glyphs.mjs
 node scripts/lint-nav.mjs
 ```

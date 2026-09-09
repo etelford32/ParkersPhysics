@@ -107,12 +107,91 @@ body {
 #bv-stage-fallback[hidden] { display:none; }
 #bv-busy[hidden] { display:none; }
 .bv-stage-caption {
-    position:absolute; left:12px; bottom:10px; right:12px;
+    position:absolute; left:12px; bottom:10px; max-width:min(56%,620px);
     font-size:.72rem; color:#8b94ad; line-height:1.5;
     text-shadow:0 1px 6px #03010e; pointer-events:none;
 }
 .bv-stage-caption b { color:#cdd5e4; }
 .bv-stage-caption .bv-max { color:#4fc3f7; }
+
+/* ── Stage HUD: viewpoints, scale bar, camera readout ─────────────────────
+   Everything here is `position:absolute` inside .bv-stage-box and must stay
+   out of the canvas's pointer path except where it is a control — the canvas
+   is a drag surface, and an invisible full-width overlay is the classic way
+   to make a 3D view feel broken. Hence pointer-events:none on the readouts
+   and an explicit re-enable on the buttons. */
+.bv-vpbar {
+    position:absolute; top:10px; left:12px; right:12px;
+    display:flex; flex-wrap:wrap; gap:6px; pointer-events:none;
+}
+.bv-vp {
+    pointer-events:auto;
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(3,1,14,.66); color:#9aa4bd;
+    border:1px solid rgba(90,110,160,.34); border-radius:999px;
+    padding:4px 11px 4px 7px; font:inherit; font-size:.72rem; cursor:pointer;
+    backdrop-filter:blur(3px); transition:border-color .14s, color .14s, background .14s;
+}
+.bv-vp:hover { color:#cdd5e4; border-color:rgba(79,195,247,.5); }
+.bv-vp[aria-pressed="true"] {
+    color:#4fc3f7; border-color:rgba(79,195,247,.65); background:rgba(79,195,247,.14);
+}
+.bv-vp kbd {
+    font:inherit; font-size:.62rem; font-weight:700; line-height:1;
+    background:rgba(90,110,160,.24); color:#7d879e;
+    border-radius:4px; padding:3px 5px; min-width:16px; text-align:center;
+}
+.bv-vp[aria-pressed="true"] kbd { background:rgba(79,195,247,.22); color:#4fc3f7; }
+
+.bv-hud-right {
+    position:absolute; right:12px; bottom:10px;
+    display:flex; flex-direction:column; align-items:flex-end; gap:6px;
+    pointer-events:none; text-shadow:0 1px 6px #03010e;
+}
+.bv-scale { display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
+.bv-scale-track {
+    height:7px; border-left:2px solid #4fc3f7; border-right:2px solid #4fc3f7;
+    border-bottom:2px solid #4fc3f7; min-width:24px;
+}
+#bv-scalebar-fill { display:block; height:100%; width:80px; }
+.bv-scale-label { font-size:.7rem; color:#4fc3f7; font-variant-numeric:tabular-nums; font-weight:600; }
+.bv-scale-note { font-size:.62rem; color:#6f7893; }
+.bv-cam {
+    display:flex; gap:10px; font-size:.68rem; color:#7d879e;
+    font-variant-numeric:tabular-nums;
+}
+.bv-cam b { color:#9aa4bd; font-weight:600; }
+
+#bv-focus {
+    position:absolute; left:12px; top:44px;
+    display:flex; align-items:center; gap:9px;
+    background:rgba(3,1,14,.78); border:1px solid rgba(255,255,255,.22);
+    border-radius:9px; padding:6px 8px 6px 11px; font-size:.72rem; color:#cdd5e4;
+    backdrop-filter:blur(3px);
+}
+#bv-focus[hidden] { display:none; }
+#bv-focus .bv-focus-sub { color:#7d879e; font-size:.66rem; }
+#bv-focus button {
+    background:none; border:1px solid rgba(90,110,160,.4); border-radius:6px;
+    color:#8b94ad; font:inherit; font-size:.66rem; padding:2px 7px; cursor:pointer;
+}
+#bv-focus button:hover { color:#cdd5e4; border-color:rgba(205,213,228,.45); }
+
+.bv-keys { display:grid; gap:3px; font-size:.68rem; color:#7d879e; margin-top:5px; }
+.bv-keys div { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+.bv-keys em { font-style:normal; color:#8b94ad; text-align:right; }
+.bv-keys kbd {
+    font:inherit; font-size:.62rem; font-weight:700;
+    background:rgba(90,110,160,.22); color:#9aa4bd;
+    border-radius:4px; padding:2px 5px; margin-right:3px;
+}
+details.bv-details > summary {
+    cursor:pointer; list-style:none; color:#7d879e;
+    font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; font-weight:700;
+}
+details.bv-details > summary::-webkit-details-marker { display:none; }
+details.bv-details > summary::after { content:' ▾'; color:#5a6ea0; }
+details.bv-details[open] > summary::after { content:' ▴'; }
 #bv-busy {
     position:absolute; top:10px; right:12px; font-size:.68rem; letter-spacing:.08em;
     color:#ffb84d; background:rgba(3,1,14,.72); border:1px solid rgba(255,184,77,.3);
@@ -271,9 +350,37 @@ body {
             does not live in the picture.
         </div>
         <div id="bv-busy" hidden>COMPUTING</div>
+
+        <!-- Viewpoint chips are GENERATED from VIEWPOINTS in
+             js/bootes/camera-math.js so the buttons, the keyboard shortcuts and
+             the camera's own preset list cannot drift apart. -->
+        <div class="bv-vpbar" id="bv-viewpoints" role="group" aria-label="Camera viewpoints"></div>
+
+        <div id="bv-focus" hidden>
+            <span>
+                <b data-bv="focusName">—</b>
+                <span class="bv-focus-sub" data-bv="focusDistance">—</span>
+            </span>
+            <button type="button" id="bv-focus-clear">Release</button>
+        </div>
+
         <div class="bv-stage-caption">
             <b data-bv="fieldMode">—</b> · longest arrow = <span class="bv-max" data-bv="fieldMax">—</span>
             <br><span data-bv="fieldLegend">—</span>
+        </div>
+
+        <div class="bv-hud-right">
+            <div class="bv-cam">
+                <span><b data-bv="camDistance">—</b> out</span>
+                <span>az <b data-bv="camAzimuth">—</b></span>
+                <span>el <b data-bv="camElevation">—</b></span>
+                <span><b data-bv="camFov">—</b> fov</span>
+            </div>
+            <div class="bv-scale">
+                <div class="bv-scale-track"><span id="bv-scalebar-fill"></span></div>
+                <div class="bv-scale-label" data-bv="scaleBarLabel">—</div>
+                <div class="bv-scale-note">at the void centre · rings are fixed R_eff steps</div>
+            </div>
         </div>
     </div>
 
@@ -293,6 +400,8 @@ body {
                 Arrow length is normalised <em>per field</em> — the four differ by more than
                 an order of magnitude, so one absolute scale would render three of them
                 invisible. Directions are comparable across modes; magnitudes are printed.
+                The glyphs also resize with the camera, like a map's symbols: relative
+                lengths within a frame are untouched, the drawn size is not.
             </p>
         </div>
 
@@ -349,9 +458,19 @@ body {
             <label class="bv-check"><input type="checkbox" data-bv-control="layer:field" checked> Vector field</label>
             <label class="bv-check"><input type="checkbox" data-bv-control="layer:shell" checked> R<sub>eff</sub> shell</label>
             <label class="bv-check"><input type="checkbox" data-bv-control="layer:markers" checked> Clusters &amp; sightline</label>
+            <label class="bv-check"><input type="checkbox" data-bv-control="labels" checked> Scale &amp; name labels</label>
             <label class="bv-check"><input type="checkbox" data-bv-control="redshiftSpace"> Redshift space</label>
             <label class="bv-check"><input type="checkbox" data-bv-control="autorotate" checked> Auto-rotate</label>
-            <button class="bv-btn" id="bv-reframe" type="button">Reframe</button>
+            <button class="bv-btn" id="bv-reframe" type="button">Reset camera</button>
+        </div>
+
+        <div>
+            <h3>Camera</h3>
+            <p class="bv-hint" data-bv="viewpointHint">—</p>
+            <details class="bv-details">
+                <summary>Keyboard</summary>
+                <div class="bv-keys" id="bv-keyhelp"></div>
+            </details>
         </div>
     </aside>
 </section>

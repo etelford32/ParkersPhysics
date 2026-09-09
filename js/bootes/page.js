@@ -50,6 +50,7 @@ import {
     losUnitFromVoid, resolvedAnchors,
 } from '../bootes-void-data.js';
 import { createBootesScene } from './scene.js';
+import { VIEWPOINTS, VIEWPOINT_IDS, KEY_BINDINGS, scaleBar } from './camera-math.js';
 import {
     drawDensity, drawVelocity, drawContinuity, drawInfluence,
     drawRsd, drawLensing, drawIsw, drawCompensation,
@@ -117,10 +118,8 @@ export function initBootesPage(root = document) {
         if (els) for (const el of els) el.textContent = value;
     };
 
-    const canvas = root.querySelector('#bv-stage');
-    const scene = canvas ? createBootesScene(canvas) : null;
     const fallback = root.querySelector('#bv-stage-fallback');
-    if (!scene && fallback) fallback.hidden = false;
+    const canvas = root.querySelector('#bv-stage');
 
     // ── Controls ────────────────────────────────────────────────────────────
     const state = {
@@ -132,12 +131,84 @@ export function initBootesPage(root = document) {
         redshiftSpace: false,
         velocityThresholdKms: 50,
         layers: { tracers: true, web: true, shell: true, field: true, markers: true },
+        labels: true,
     };
 
     const anchors = resolvedAnchors();
     const losUnit = losUnitFromVoid();
     const Z = voidRedshift();
     const rEff = effectiveRadiusMpc();
+
+    // The camera rig is built with the geometry it has to frame — R_eff sets
+    // every viewpoint distance and the sightline defines two of the five
+    // viewpoints outright, so neither can be supplied later. See the header of
+    // bootes/camera-math.js on why the sightline is not a coordinate axis.
+    const scene = canvas ? createBootesScene(canvas, {
+        rEffMpc: rEff,
+        losUnit,
+        onPose: paintPose,
+        onViewpoint: paintViewpoint,
+        onFocus: (hit) => {
+            set('focusName', hit.name);
+            set('focusDistance', `${num(hit.radiusMpc, 0)} Mpc from the void centre`);
+            root.querySelector('#bv-focus')?.removeAttribute('hidden');
+        },
+    }) : null;
+    if (!scene && fallback) fallback.hidden = false;
+
+    // ── Viewpoint buttons, rendered FROM the viewpoint table ────────────────
+    //
+    // Generated rather than written into the markup so the buttons, the
+    // keyboard shortcuts and the camera's own preset list cannot drift apart —
+    // all three read VIEWPOINTS in bootes/camera-math.js. A hand-written button
+    // row is one refactor away from offering a view the camera no longer has.
+    const viewpointHost = root.querySelector('#bv-viewpoints');
+    if (viewpointHost && scene) {
+        viewpointHost.innerHTML = VIEWPOINT_IDS.map(id => {
+            const vp = VIEWPOINTS[id];
+            return `<button type="button" class="bv-vp" data-bv-viewpoint="${id}" `
+                + `title="${vp.hint.replace(/"/g, '&quot;')}">`
+                + `<kbd>${vp.key}</kbd>${vp.label}</button>`;
+        }).join('');
+        viewpointHost.querySelectorAll('[data-bv-viewpoint]').forEach(btn => {
+            btn.addEventListener('click', () => scene.goTo(btn.dataset.bvViewpoint));
+        });
+    }
+
+    const keyHelpHost = root.querySelector('#bv-keyhelp');
+    if (keyHelpHost && scene) {
+        keyHelpHost.innerHTML = KEY_BINDINGS.map(b =>
+            `<div><span>${b.keys.map(k => `<kbd>${k}</kbd>`).join('')}</span>`
+            + `<em>${b.action}</em></div>`).join('');
+    }
+
+    /** The live pose readout and the adaptive scale bar. */
+    function paintPose(pose) {
+        set('camDistance', `${num(pose.distanceMpc, 0)} Mpc`);
+        set('camAzimuth', `${num(pose.azimuthDeg, 0)}°`);
+        set('camElevation', `${pose.elevationDeg >= 0 ? '+' : ''}${num(pose.elevationDeg, 0)}°`);
+        set('camFov', `${num(pose.fovDeg, 0)}°`);
+
+        // THE SCALE BAR IS THE HONEST HALF OF THE RULER. The range rings are
+        // fixed multiples of R_eff so they stay comparable across zooms; this
+        // adapts, so it can say what a screen distance is worth right now. It
+        // is exact at the pivot plane and the label says so.
+        const bar = scaleBar(pose.distanceMpc, pose.fovDeg,
+            canvas?.clientHeight || 480, 150);
+        const fill = root.querySelector('#bv-scalebar-fill');
+        if (bar && fill) {
+            fill.style.width = `${Math.round(bar.px)}px`;
+            set('scaleBarLabel', `${bar.mpc >= 1 ? bar.mpc : bar.mpc.toFixed(1)} Mpc`);
+        }
+    }
+
+    function paintViewpoint(id) {
+        root.querySelectorAll('[data-bv-viewpoint]').forEach(btn => {
+            btn.setAttribute('aria-pressed', String(btn.dataset.bvViewpoint === id));
+        });
+        set('viewpointHint', id ? VIEWPOINTS[id].hint : 'Free camera — drag to orbit, '
+            + 'scroll to zoom, double-click a named cluster to focus on it.');
+    }
 
     // ── Sample points for the 3D vector field ───────────────────────────────
     //
@@ -519,6 +590,10 @@ export function initBootesPage(root = document) {
             } else if (key === 'autorotate') {
                 scene?.setAutoRotate(el.checked);
                 return;
+            } else if (key === 'labels') {
+                state.labels = el.checked;
+                scene?.setLabelsVisible(el.checked);
+                return;
             } else if (key.startsWith('layer:')) {
                 const layer = key.slice(6);
                 state.layers[layer] = el.checked;
@@ -537,7 +612,23 @@ export function initBootesPage(root = document) {
         state.seed = (state.seed * 1103515245 + 12345) % 2147483647;
         scheduleRecompute();
     });
-    root.querySelector('#bv-reframe')?.addEventListener('click', () => scene?.frameAll(rEff));
+    root.querySelector('#bv-reframe')?.addEventListener('click', () => scene?.resetCamera());
+    root.querySelector('#bv-focus-clear')?.addEventListener('click', () => {
+        root.querySelector('#bv-focus')?.setAttribute('hidden', '');
+        scene?.resetCamera();
+    });
+
+    // The L key and the checkbox are two views of ONE flag, and the rig owns
+    // neither — it only asks. Registering this at the top level matters:
+    // an earlier revision spliced it inside the debounce callback, so the
+    // handler existed only after some other control had been touched and the
+    // key silently did nothing on a fresh page.
+    scene?.onLabelToggleRequest((on) => {
+        state.labels = on;
+        scene.setLabelsVisible(on);
+        const box = root.querySelector('[data-bv-control="labels"]');
+        if (box) box.checked = on;
+    });
 
     const onResize = () => {
         scene?.resize();
@@ -546,11 +637,20 @@ export function initBootesPage(root = document) {
     globalThis.addEventListener('resize', onResize);
 
     recompute();
-    scene?.frameAll(rEff);
+    // Snap, do not fly, on boot: a flight from the constructor's placeholder
+    // pose is a camera move nobody asked for and it fights a reader who starts
+    // dragging immediately.
+    scene?.resetCamera({ seconds: 0 });
+    paintViewpoint('survey');
 
     // Test hook, in the shape the rest of this repo uses.
     const api = {
         get state() { return { ...state }; },
+        // The scene handle is exposed for the browser gate: camera pose,
+        // viewpoint flights and layer visibility are only observable from
+        // inside the page, and a test that can only read the DOM cannot tell a
+        // camera that moved from a label that happened to change.
+        get scene() { return scene; },
         get derived() { return derived; },
         recompute,
         setControl(key, value) {

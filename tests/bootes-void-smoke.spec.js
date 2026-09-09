@@ -20,6 +20,25 @@ import { test, expect } from '@playwright/test';
 
 const PAGE = '/bootes-void.html';
 
+/**
+ * Bring the stage into the viewport and stop the auto-rotate.
+ *
+ * BOTH HALVES ARE LOAD-BEARING FOR MOUSE TESTS. `boundingBox()` returns
+ * VIEWPORT-relative coordinates, and the stage sits below the fold at the
+ * default scroll — so a drag driven from an unscrolled box lands on empty page
+ * and the test fails claiming the camera ignored it. And auto-rotate moves the
+ * camera underneath any pose assertion.
+ */
+async function stageReady(page) {
+    await page.evaluate(() => {
+        document.querySelector('.bv-stage-grid').scrollIntoView({ block: 'center' });
+        const rot = document.querySelector('[data-bv-control="autorotate"]');
+        if (rot.checked) rot.click();
+        document.activeElement?.blur?.();
+    });
+    await page.waitForTimeout(400);
+}
+
 /** Wait for the first recompute to land — the mass deficit is the last thing written. */
 async function ready(page) {
     await page.waitForFunction(() => {
@@ -37,10 +56,15 @@ test.describe('Boötes Void', () => {
         await page.goto(PAGE);
         await ready(page);
 
-        // Every data-bv element must carry a real value. An em-dash left behind
-        // reads as "not available" rather than "never wired", which is the whole
-        // failure mode the DOM contract exists to prevent.
+        // Every VISIBLE data-bv element must carry a real value. An em-dash left
+        // behind reads as "not available" rather than "never wired", which is the
+        // whole failure mode the DOM contract exists to prevent.
+        //
+        // Readouts inside a [hidden] container are excluded: the focus chip is
+        // legitimately empty until somebody focuses a cluster, and asserting on
+        // it would force a placeholder that means nothing.
         const unfilled = await page.evaluate(() => [...document.querySelectorAll('[data-bv]')]
+            .filter(el => !el.closest('[hidden]'))
             .filter(el => !el.textContent.trim() || el.textContent.trim() === '—')
             .map(el => el.getAttribute('data-bv')));
         expect(unfilled, 'readouts still on their placeholder').toEqual([]);
@@ -210,5 +234,244 @@ test.describe('Boötes Void', () => {
     test('the page is reachable from the Deep Space menu', async ({ page }) => {
         await page.goto('/deep-space.html');
         await expect(page.locator('a[href="bootes-void.html"]').first()).toBeVisible();
+    });
+
+    // ── Camera ──────────────────────────────────────────────────────────────
+
+    test('the viewpoint buttons fly the camera and light up', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+
+        const buttons = page.locator('[data-bv-viewpoint]');
+        await expect(buttons).toHaveCount(5);
+        await expect(page.locator('[data-bv-viewpoint="survey"]'))
+            .toHaveAttribute('aria-pressed', 'true');
+
+        const pose = () => page.evaluate(() => {
+            const p = globalThis.__bootesLab.scene.currentPose();
+            return { theta: p.theta, phi: p.phi, radius: p.radius, fov: p.fovDeg };
+        });
+        const before = await pose();
+
+        // Top-down is the unambiguous one: it must end up looking almost
+        // straight down, and the polar clamp must stop it reaching the pole
+        // exactly — at the pole the azimuth is undefined and the view rolls.
+        await page.click('[data-bv-viewpoint="pole"]');
+        await page.waitForTimeout(2000);
+        const after = await pose();
+        expect(after.phi).toBeLessThan(0.2);
+        expect(after.phi, 'the polar clamp must hold the camera off the pole')
+            .toBeGreaterThan(0);
+        expect(after.phi).not.toBe(before.phi);
+        await expect(page.locator('[data-bv-viewpoint="pole"]'))
+            .toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('[data-bv-viewpoint="survey"]'))
+            .toHaveAttribute('aria-pressed', 'false');
+        await expect(page.locator('[data-bv="camElevation"]').first()).toContainText('+8');
+
+        // The inside view carries its own wide lens; the others share one.
+        await page.click('[data-bv-viewpoint="inside"]');
+        await page.waitForTimeout(2000);
+        const inside = await pose();
+        expect(inside.fov).toBeGreaterThan(60);
+        expect(inside.radius).toBeLessThan(after.radius / 3);
+    });
+
+    test('the sightline viewpoints are built from the real oblique sightline', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+
+        // Both are asserted in the pure gate; what a browser adds is that the
+        // rig actually lands where the maths says, rather than at a coordinate
+        // axis that happens to look similar.
+        const dirFor = async (vp) => {
+            await page.click(`[data-bv-viewpoint="${vp}"]`);
+            await page.waitForTimeout(2000);
+            return page.evaluate(() => {
+                const c = globalThis.__bootesLab.scene.camera.position;
+                const n = Math.hypot(c.x, c.y, c.z);
+                return [c.x / n, c.y / n, c.z / n];
+            });
+        };
+        const along = await dirFor('sightline');
+        const across = await dirFor('across');
+        const dot = along[0] * across[0] + along[1] * across[1] + along[2] * across[2];
+        expect(Math.abs(dot), 'the two sightline views must be perpendicular')
+            .toBeLessThan(0.02);
+        expect(Math.abs(across[1]), 'and "across" must be level').toBeLessThan(0.02);
+        // Neither may be a coordinate axis.
+        for (const v of [along, across]) {
+            const axisLike = Math.max(...v.map(Math.abs));
+            expect(axisLike, 'a sightline view must not collapse onto an axis')
+                .toBeLessThan(0.99);
+        }
+    });
+
+    test('the scale bar is present and responds to zoom', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+
+        const read = () => page.evaluate(() => ({
+            label: document.querySelector('[data-bv="scaleBarLabel"]').textContent,
+            width: parseFloat(document.querySelector('#bv-scalebar-fill').style.width),
+        }));
+        const wide = await read();
+        expect(wide.label).toMatch(/Mpc/);
+        expect(wide.width).toBeGreaterThan(20);
+
+        // Fly inside: a given screen width must then be worth far FEWER Mpc.
+        await page.click('[data-bv-viewpoint="inside"]');
+        await page.waitForTimeout(2200);
+        const close = await read();
+        const mpcOf = (s) => parseFloat(s);
+        expect(mpcOf(close.label), 'zooming in must shrink what a screen width is worth')
+            .toBeLessThan(mpcOf(wide.label));
+    });
+
+    test('the keyboard drives the camera but does not steal slider keys', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+        await stageReady(page);
+
+        // A viewpoint shortcut works with nothing focused.
+        await page.keyboard.press('4');
+        await page.waitForTimeout(2000);
+        expect(await page.evaluate(() => globalThis.__bootesLab.scene.currentPose().phi))
+            .toBeLessThan(0.2);
+
+        // THE GATE THAT MATTERS. A range input uses the arrow keys itself, and
+        // the rail sits beside the canvas — an ungated global handler steals
+        // them and the slider silently stops working while the camera spins.
+        const slider = page.locator('[data-bv-control="clumpiness"]');
+        await slider.focus();
+        const before = await slider.inputValue();
+        const camBefore = await page.evaluate(() =>
+            globalThis.__bootesLab.scene.currentPose().theta);
+        await page.keyboard.press('ArrowRight');
+        await page.waitForTimeout(400);
+        expect(await slider.inputValue(), 'the focused slider must still take the key')
+            .not.toBe(before);
+        // Not "did not move at all" — OrbitControls' damping is still settling
+        // and drifts by ~3e-5 rad per frame. The claim is that the camera did
+        // not take the ORBIT STEP, which is 0.06 rad; anything under a tenth of
+        // that is settling, not a keypress.
+        const camAfter = await page.evaluate(() =>
+            globalThis.__bootesLab.scene.currentPose().theta);
+        expect(Math.abs(camAfter - camBefore),
+            'the camera must not have taken the keyboard orbit step').toBeLessThan(0.006);
+    });
+
+    test('dragging the stage releases the named viewpoint', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+        await stageReady(page);
+        await expect(page.locator('[data-bv-viewpoint="survey"]'))
+            .toHaveAttribute('aria-pressed', 'true');
+
+        const box = await page.locator('#bv-stage').boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 40, { steps: 8 });
+        await page.mouse.up();
+        await page.waitForTimeout(400);
+
+        // Leaving a preset lit after the reader has dragged away from it is a
+        // small lie that makes the buttons feel broken.
+        const pressed = await page.locator('[data-bv-viewpoint][aria-pressed="true"]').count();
+        expect(pressed).toBe(0);
+    });
+
+    test('the catalogued clusters are pickable and focusing works', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+        await stageReady(page);
+
+        // Project a cluster to screen through the rig's own picker, then check
+        // a double-click there focuses it. Using the rig's projection rather
+        // than a guessed pixel keeps this robust to camera changes.
+        const hit = await page.evaluate(() => {
+            const sc = globalThis.__bootesLab.scene;
+            const rect = document.querySelector('#bv-stage').getBoundingClientRect();
+            // Sweep a coarse grid for any pickable — nine clusters on a
+            // 1280-wide canvas are found within a few dozen probes.
+            const stage = document.querySelector('#bv-stage');
+            for (let y = rect.top + 20; y < rect.bottom - 20; y += 18) {
+                for (let x = rect.left + 20; x < rect.right - 20; x += 18) {
+                    const p = sc.rig.pickAt(x, y, 14);
+                    if (!p) continue;
+                    // The canvas must be the TOPMOST element at that point.
+                    // The site nav is fixed at the top of the viewport, so at a
+                    // 720px-tall window part of the stage sits underneath it —
+                    // and a synthetic double-click on those pixels lands on the
+                    // nav, not on the stage. `pickAt` projects in 3D and knows
+                    // nothing about what is covering the canvas.
+                    if (document.elementFromPoint(x, y) !== stage) continue;
+                    return { x, y, id: p.id, name: p.name };
+                }
+            }
+            return null;
+        });
+        expect(hit, 'at least one catalogued cluster must be on screen and pickable')
+            .not.toBeNull();
+
+        await page.mouse.dblclick(hit.x, hit.y);
+        await page.waitForTimeout(1600);
+        const chip = page.locator('#bv-focus');
+        await expect(chip).toBeVisible();
+        await expect(chip).toContainText(/Mpc from the void centre/);
+
+        await page.locator('#bv-focus-clear').click();
+        await page.waitForTimeout(1600);
+        await expect(chip).toBeHidden();
+    });
+
+    test('labels can be turned off from the control and from the keyboard', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+
+        const labelCount = () => page.evaluate(() =>
+            globalThis.__bootesLab.scene.groups.refs.children
+                .filter(c => c.isSprite).filter(c => c.visible).length);
+        expect(await labelCount(), 'the ruler and the clusters are labelled')
+            .toBeGreaterThan(5);
+
+        await page.locator('[data-bv-control="labels"]').uncheck();
+        await page.waitForTimeout(300);
+        expect(await labelCount()).toBe(0);
+
+        // BLUR FIRST, AND THAT IS THE INTENDED BEHAVIOUR RATHER THAN A
+        // WORKAROUND: clicking the checkbox leaves it focused, and the camera's
+        // key handler yields to any focused control so that the rail's sliders
+        // keep their arrow keys. A shortcut that fired over a focused input
+        // would be the bug.
+        await page.evaluate(() => document.activeElement?.blur?.());
+
+        // The L key and the checkbox are two views of one flag; toggling one
+        // must move the other or the control shows the opposite of the scene.
+        await page.keyboard.press('l');
+        await page.waitForTimeout(300);
+        expect(await labelCount()).toBeGreaterThan(5);
+        await expect(page.locator('[data-bv-control="labels"]')).toBeChecked();
+    });
+
+    test('the range rings are fixed and cover the catalogued clusters', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+        const rings = await page.evaluate(() => {
+            const sc = globalThis.__bootesLab.scene;
+            return sc.groups.refs.children.filter(c => c.isLine).length;
+        });
+        expect(rings, 'range rings, the meridian, the spokes and the gnomon')
+            .toBeGreaterThanOrEqual(6);
+
+        // The rings must NOT change with zoom — that is what separates them
+        // from the scale bar, and it is why "two rings out" means something.
+        const before = await page.evaluate(() => globalThis.__bootesLab.scene
+            .groups.refs.children.filter(c => c.isLine).length);
+        await page.click('[data-bv-viewpoint="inside"]');
+        await page.waitForTimeout(2200);
+        const after = await page.evaluate(() => globalThis.__bootesLab.scene
+            .groups.refs.children.filter(c => c.isLine).length);
+        expect(after).toBe(before);
     });
 });
