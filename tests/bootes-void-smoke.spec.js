@@ -474,4 +474,88 @@ test.describe('Boötes Void', () => {
             .groups.refs.children.filter(c => c.isLine).length);
         expect(after).toBe(before);
     });
+
+    test('a drag cancels a flight in progress instead of being swallowed', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+        await stageReady(page);
+
+        // Start a long flight to the far side, then grab the stage halfway
+        // through. THE CONVENTION (set by js/geomag/core-3d.js for the TIGA 3D
+        // view): any direct manipulation cancels the flight. Swallowing input
+        // for the duration instead means a reader who grabs mid-flight gets
+        // nothing for a second and a bit, which reads as a frozen page.
+        // A DELIBERATELY LONG FLIGHT, driven through the hook rather than by
+        // clicking the button. The default flight is 1.15 s and Playwright's
+        // synthesised drag — boundingBox, move, down, six stepped moves, up —
+        // takes most of that on a software rasteriser, so a button-driven
+        // version raced the flight and sometimes tested a camera that had
+        // already arrived. Six seconds removes the race without changing which
+        // code path is under test: this is the same `endFlight` via the same
+        // capture-phase pointerdown.
+        await page.evaluate(() =>
+            globalThis.__bootesLab.scene.goTo('inside', { seconds: 6 }));
+        await page.waitForTimeout(400);
+        expect(await page.evaluate(() =>
+            globalThis.__bootesLab.scene.rig.isFlying), 'the flight is running').toBe(true);
+
+        const box = await page.locator('#bv-stage').boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 140, box.y + box.height / 2, { steps: 6 });
+        await page.mouse.up();
+        await page.waitForTimeout(250);
+
+        expect(await page.evaluate(() => globalThis.__bootesLab.scene.rig.isFlying),
+            'the drag must have cancelled the flight').toBe(false);
+
+        // STOPPED, NOT COMPLETED — and that has to be measured against the
+        // DESTINATION, not against a radius sampled before the drag. The flight
+        // keeps running while Playwright synthesises the drag (which takes a few
+        // hundred ms), and this one is a log interpolation from ~357 Mpc down to
+        // ~20, so the radius legitimately moves a long way in that window. The
+        // claim is that it never arrived.
+        const dest = await page.evaluate(() => globalThis.__bootesLab.scene
+            .rig.viewpoints.inside.distance * 91.6);
+        const after = await page.evaluate(() => globalThis.__bootesLab.scene
+            .currentPose().radius * 20);
+        expect(after, 'the camera must not have reached the flight destination')
+            .toBeGreaterThan(dest * 2.5);
+
+        // And it must now be STILL — a cancelled flight that is still easing
+        // would keep moving after the pointer is up.
+        await page.waitForTimeout(700);
+        const settled = await page.evaluate(() => globalThis.__bootesLab.scene
+            .currentPose().radius * 20);
+        expect(Math.abs(settled / after - 1),
+            'the camera is at rest once the flight is cancelled').toBeLessThan(0.05);
+
+        // And the drag itself took effect.
+        const pressed = await page.locator('[data-bv-viewpoint][aria-pressed="true"]').count();
+        expect(pressed, 'a cancelled flight is not "at" its viewpoint').toBe(0);
+    });
+
+    test('auto-rotate survives a flight interrupted by another flight', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+        await page.evaluate(() => document.querySelector('.bv-stage-grid')
+            .scrollIntoView({ block: 'center' }));
+        await page.waitForTimeout(300);
+
+        // Auto-rotate is on by default and a flight turns it off for the
+        // duration. Starting a SECOND flight before the first lands used to
+        // capture the mid-flight value — false — and auto-rotate was then
+        // permanently lost, with no symptom except that the stage quietly
+        // stopped turning.
+        expect(await page.evaluate(() => globalThis.__bootesLab.scene.autoRotate)).toBe(true);
+
+        await page.click('[data-bv-viewpoint="pole"]');
+        await page.waitForTimeout(300);
+        await page.click('[data-bv-viewpoint="across"]');
+        await page.waitForTimeout(2200);
+
+        expect(await page.evaluate(() => globalThis.__bootesLab.scene.autoRotate),
+            'auto-rotate must come back after the second flight lands').toBe(true);
+        await expect(page.locator('[data-bv-control="autorotate"]')).toBeChecked();
+    });
 });

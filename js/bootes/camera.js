@@ -155,6 +155,7 @@ export function createCameraRig({
 
     function flyTo(pose, { seconds = 1.15, viewpoint = null } = {}) {
         if (reduceMotion || seconds <= 0) {
+            endFlight();
             applyPose(pose);
             controls.update();
             emitPose();
@@ -167,13 +168,43 @@ export function createCameraRig({
             startedAt: performance.now(),
             durationMs: seconds * 1000,
             viewpoint,
-            wasAutoRotating: controls.autoRotate,
+            // Carried over from an in-flight tween rather than read fresh.
+            // Mid-flight `controls.autoRotate` is already false — we turned it
+            // off — so a second flight started before the first lands would
+            // capture `false` and auto-rotate would be permanently lost with no
+            // way to notice except that the stage quietly stopped turning.
+            wasAutoRotating: tween ? tween.wasAutoRotating : controls.autoRotate,
         };
         // OrbitControls fights direct position writes while it is enabled: its
         // damping integrates towards its own internal spherical, so the camera
         // would be pulled back on every frame of the flight.
         controls.enabled = false;
         controls.autoRotate = false;
+    }
+
+    /**
+     * Stop any flight in progress, leaving the camera exactly where it is and
+     * handing control straight back.
+     *
+     * ANY INPUT CANCELS A FLIGHT — the convention js/geomag/core-3d.js set for
+     * the TIGA 3D view, and it is the right one. Disabling the controls for the
+     * whole flight and swallowing input instead means a reader who grabs the
+     * stage mid-flight gets nothing at all for a second and a bit, which reads
+     * as a frozen page rather than as an animation they are allowed to
+     * interrupt. Cancelling is also the only way a flight can be a *suggestion*
+     * rather than something done to you.
+     */
+    function endFlight() {
+        if (!tween) return;
+        controls.enabled = true;
+        controls.autoRotate = tween.wasAutoRotating;
+        tween = null;
+        // The camera is wherever the tween left it; OrbitControls picks its
+        // spherical up from the actual position on the next update, so there is
+        // nothing to reconcile and no snap.
+        controls.update();
+        emitPose();
+        setViewpointFlag(null);
     }
 
     function goTo(id, opts = {}) {
@@ -230,6 +261,14 @@ export function createCameraRig({
         return best;
     }
 
+    // Any direct manipulation cancels a flight in progress. `capture: true` so
+    // this runs before OrbitControls' own handler, which would otherwise see a
+    // pointerdown while `controls.enabled` was still false and ignore it — the
+    // reader would have to press twice.
+    for (const type of ['pointerdown', 'wheel', 'touchstart']) {
+        canvas.addEventListener(type, endFlight, { capture: true, passive: true });
+    }
+
     canvas.addEventListener('dblclick', (event) => {
         const hit = pickAt(event.clientX, event.clientY);
         if (!hit) return;
@@ -254,6 +293,7 @@ export function createCameraRig({
     const DOLLY_STEP = 1.11;
 
     function orbitBy(dTheta, dPhi) {
+        endFlight();
         const p = currentPose();
         applyPose({ ...p, theta: p.theta + dTheta, phi: clampPolar(p.phi + dPhi) });
         controls.update();
@@ -262,6 +302,7 @@ export function createCameraRig({
     }
 
     function dollyBy(factor) {
+        endFlight();
         const p = currentPose();
         applyPose({
             ...p,
@@ -313,12 +354,11 @@ export function createCameraRig({
             const t = (performance.now() - tween.startedAt) / tween.durationMs;
             if (t >= 1) {
                 applyPose(tween.to);
-                controls.enabled = true;
-                controls.autoRotate = tween.wasAutoRotating;
-                controls.update();
                 const vp = tween.viewpoint;
-                tween = null;
-                emitPose();
+                endFlight();
+                // endFlight clears the viewpoint flag (it is the cancel path);
+                // a flight that RAN TO COMPLETION has arrived at its viewpoint,
+                // so re-assert it afterwards.
                 if (vp) setViewpointFlag(vp);
             } else {
                 applyPose(interpolatePose(tween.from, tween.to, t));
@@ -334,6 +374,7 @@ export function createCameraRig({
     return {
         controls,
         update,
+        endFlight,
         goTo,
         reset,
         focusOnMpc,
