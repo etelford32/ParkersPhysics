@@ -207,15 +207,26 @@ was EarthView-only).
 
 - **`--ev-timebar-h` is the single source of truth for the bar's height**,
   published by a `ResizeObserver` in earth.html next to the hoisted scrub
-  wiring. Everything that has to clear the bar reads it and nothing
-  hard-codes a number: `#feed-error-banner`, `#trip-hud`, `#iss-hud` (the
-  three transient top-centre overlays), `#loc-panel`, `#storm-watch-panel`,
-  the verdict card, and — on phones — `#hud`. The bar is **72–114px** tall
+  wiring. Everything INSIDE `#app` that has to clear the bar reads it and
+  nothing hard-codes a number: `#feed-error-banner`, `#trip-hud`,
+  `#iss-hud` (the three transient top-centre overlays), `#loc-panel`, the
+  verdict card, and — on phones — `#hud`. The bar is **72–114px** tall
   depending on breakpoint, on whether `#tc-buttons-row` wrapped, and on
   whether `#tc-forecast-status` is in flight; the same viewport measured
   79px and 100px across two runs. A constant here is the nav's
   `max-height: 600px` all over again. The CSS carries a 96px fallback for
   the frames before the first observation.
+- **`#storm-watch-panel` is the exception and needs the OTHER var.** It is
+  the one panel here that does not live inside `#app` — it mounts on
+  `<body>` (`storm-watch-panel.js` `mount({ parent = document.body })`), so
+  its `top` is DOCUMENT-space and lands at y=130 while `#app`'s own top band
+  starts at y=82, i.e. 48px higher than every other panel and squarely
+  inside the bar. It therefore reads **`--ev-timebar-bottom`** (the same
+  observer publishes it as `rect.bottom + scrollY`, which is
+  scroll-invariant because `#app` is static in normal flow), and its
+  selector is **`body #storm-watch-panel`** (0,1,0,1). Written `#app
+  #storm-watch-panel` the rule matches NOTHING and fails silently — that
+  was the first attempt, and only the browser gate caught it.
 - **The bar is centred in the band LEFT of `#layer-panel`, not on the
   viewport** — `left:10px` / `right:250px` / `margin-inline:auto` over a
   `width:fit-content` box. There is no `translateX(-50%)` any more.
@@ -229,16 +240,25 @@ was EarthView-only).
   `overflow:hidden` silently ate the −1w edge label and half the clock on
   every phone. `min-width` is therefore `min(360px, …)`, never a bare
   floor wider than the band, and `#tc-buttons-row` wraps.
-- The verdict card / Storm Watch overrides are written `#app #ev-verdict-card`
-  and `#app #storm-watch-panel` (0,2,0,0) because both panels' homes come
-  from stylesheets **injected at mount time**, which beat a same-specificity
-  page rule on cascade order — the ordering already documented in §4.4.
-  The Storm Watch rule is scoped `min-width:641px` so it cannot override
-  that sheet's own ≤640 bottom-sheet geometry back into a floating column.
+- Both overrides need a specificity lift (`#app #ev-verdict-card` at
+  0,2,0,0; `body #storm-watch-panel` at 0,1,0,1) because both panels' homes
+  come from stylesheets **injected at mount time**, which beat a
+  same-specificity page rule on cascade order — the ordering already
+  documented in §4.4. The Storm Watch rule is scoped `min-width:641px` so
+  it cannot override that sheet's own ≤640 bottom-sheet geometry back into
+  a floating column.
+- `#ocean-mode-hint`'s `bottom` offsets (82px desktop / 132px ≤1024) existed
+  ONLY to sit above the bottom-docked bar. They are now 38px / 86px ≤768,
+  clearing `#sw-bar` and the mobile toolbar instead. Anything else found
+  reserving room at the bottom of this page is probably doing the same and
+  is now reserving it against nothing.
 - Gate: `tests/earth-time-controls-position.spec.js` (chrome geometry only,
   no live network). It pins the top dock, zero overlap against every
-  neighbour at five desktop widths plus phone, no horizontal clipping, and
-  that `--ev-timebar-h` matches the rendered height.
+  neighbour at five desktop widths plus phone (both the default and the
+  `?verdict=0` path), no horizontal clipping, and that `--ev-timebar-h`
+  matches the rendered height. Run it after ANY edit to `#time-controls` or
+  to a panel homed in the top band — it is what turns a silently-dead
+  selector into a failing test.
 
 ---
 

@@ -4,7 +4,7 @@
  *
  * #time-controls moved from bottom-centre to the top of #app in 2026-09.
  * The move is one CSS block, but the reason this gate exists is that the
- * bar shares its lane with five other absolutely-positioned things, and
+ * bar shares its lane with seven other absolutely-positioned things, and
  * every one of the collisions below was MEASURED on the live page rather
  * than reasoned about:
  *
@@ -21,14 +21,27 @@
  *   · #hud — only rendered on the ?verdict=0 / card-boot-failure path,
  *     so its 190px lane is reserved only then (and on phones, where it
  *     is full-width, it moves BELOW the bar instead).
+ *   · #loc-panel — home top:110px, and only on the ?verdict=0 path, which
+ *     is also where the bar's band is narrowest (its lane starts after
+ *     #hud at 210px). It wraps to 114px there and reaches y=206 against
+ *     the panel's y=192. Measured overlap at 769-900px.
+ *   · #storm-watch-panel — home top:130px, and the one panel here that
+ *     does NOT live inside #app: it mounts on <body>, so its top is
+ *     document-space and lands at y=130 while #app's top band starts at
+ *     y=82 — 48px higher than every other panel, squarely inside the bar.
+ *     It reads --ev-timebar-bottom, not --ev-timebar-h, and its selector
+ *     is `body #…`; the first attempt wrote `#app #…`, which matches
+ *     nothing and failed silently until this gate caught it.
  *   · #feed-error-banner / #trip-hud / #iss-hud — the three transient
  *     top-centre overlays, all previously at top:10px.
  *   · #sw-bar — the bar used to cover its top 14px at every width,
  *     because bottom:10px + ~72px tall overlaps a bottom:0 / 24px strip.
  *     That one the move simply fixes.
  *
- * Every offset above derives from --ev-timebar-h, published from the
- * bar's MEASURED height (earth.html, next to the scrub wiring). The bar
+ * Every offset above derives from the bar's MEASURED height, published by
+ * one ResizeObserver in earth.html next to the scrub wiring as
+ * --ev-timebar-h (for the chrome inside #app) and --ev-timebar-bottom
+ * (document-space, for the one panel that isn't). The bar
  * is 72–114px tall depending on breakpoint, on whether #tc-buttons-row
  * wrapped, and on whether the forecast-status row is in flight — this
  * spec has measured both 79px and 100px at the same viewport across two
