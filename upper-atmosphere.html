@@ -222,17 +222,86 @@ input[type=range]::-moz-range-thumb {
     #ua-globe-wrap { position:relative; top:auto; }
 }
 #ua-globe { width:100%; height:100%; display:block; }
+/* Legend. It used to be an always-open 10-line monospace block that
+ * covered the lower-left quarter of the render — on a 1366-wide laptop it
+ * overlapped the planet itself. It is now COLLAPSED BY DEFAULT to a single
+ * summary row; the detail is one click away. The canvas is the product
+ * here, and a legend that hides it is not helping anyone read it. */
+/* --ua-atmo-floor is set from JS to the time scrubber's measured height
+ * (see the bootstrap). The scrubber is position:absolute across the full
+ * width of the globe's bottom edge at z-index 5, so anything anchored to
+ * bottom:0 here draws ON TOP OF IT — measured: the legend and the control
+ * row both landed inside the scrubber's box at 1280x720. Measuring rather
+ * than hard-coding because the scrubber's height changes with its rate
+ * chips wrapping. */
 #ua-globe-legend {
-    position:absolute; left:14px; bottom:14px;
-    background:rgba(0,0,0,.55);
+    position:absolute; left:14px;
+    bottom:calc(var(--ua-atmo-floor, 74px) + 38px);
+    max-width:min(340px, 38%);
+    max-height:min(340px, 55%); overflow-y:auto;
+    background:rgba(4,8,20,.74);
+    backdrop-filter:blur(6px);
     border:1px solid rgba(0,200,200,.18);
-    border-radius:8px; padding:8px 10px;
+    border-radius:8px;
     font-size:.66rem; color:#9cc;
-    pointer-events:none;
     line-height:1.5;
-    font-family:monospace;
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    z-index:7;
 }
+#ua-legend-toggle {
+    display:flex; align-items:center; gap:8px;
+    width:100%; padding:6px 10px;
+    background:none; border:0; cursor:pointer;
+    font:inherit; color:#8ce8ff; text-align:left;
+    letter-spacing:.04em;
+}
+#ua-legend-toggle:hover { color:#bff4ff; }
+#ua-legend-toggle .ua-legend-caret {
+    margin-left:auto; opacity:.7; transition:transform .18s;
+}
+#ua-globe-legend[data-open="1"] #ua-legend-toggle .ua-legend-caret {
+    transform:rotate(180deg);
+}
+/* [hidden] must win against the flex/grid display below it — same trap
+ * the Mars feature index hit; an author display rule beats the UA sheet. */
+#ua-legend-body[hidden] { display:none !important; }
+#ua-legend-body {
+    display:grid; grid-template-columns:auto 1fr; gap:2px 10px;
+    padding:2px 10px 9px; border-top:1px solid rgba(0,200,200,.13);
+}
+#ua-legend-body dt { color:#6ce0ff; white-space:nowrap; }
+#ua-legend-body dd { margin:0; color:#9cc; }
 #ua-globe-legend b { color:#0ff; font-weight:600; }
+
+/* Atmosphere render controls — sit under the legend, always visible,
+ * because switching component or view mode is the main way to interrogate
+ * the render and burying it in the side rail hides the instrument. */
+#ua-atmo-controls {
+    position:absolute; left:14px;
+    bottom:var(--ua-atmo-floor, 74px);
+    display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+    z-index:8;
+}
+#ua-atmo-controls .ua-atmo-btn {
+    /* NO text-transform:uppercase here — CSS uppercases 'ρ' to a capital
+       rho, which is drawn identically to a Latin P in most UI fonts, so
+       the button read "P COLUMN". Labels are written as they should
+       appear. */
+    font:600 .64rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing:.04em;
+    padding:5px 8px; border-radius:6px; cursor:pointer;
+    background:rgba(4,8,20,.78); color:#8aa8c4;
+    border:1px solid rgba(120,180,220,.22);
+}
+#ua-atmo-controls .ua-atmo-btn:hover { color:#dff; border-color:rgba(120,220,255,.45); }
+#ua-atmo-controls .ua-atmo-btn[aria-pressed="true"] {
+    color:#04121c; background:#5fd8ff; border-color:#5fd8ff;
+}
+#ua-atmo-controls .ua-atmo-sep { width:1px; height:16px; background:rgba(120,180,220,.25); margin:0 3px; }
+@media (max-width:900px) {
+    #ua-globe-legend { max-width:calc(100% - 28px); }
+    #ua-atmo-controls .ua-atmo-btn { padding:4px 6px; font-size:.58rem; }
+}
 
 /* ─── Camera HUD (top-right of globe) — Phase 25 refresh ── */
 /* The HUD now hosts two control rows (mode + preset/follow) plus the
@@ -2909,30 +2978,38 @@ input[type=range]::-moz-range-thumb {
              page chrome. -->
         <div id="ua-time-scrubber-host" class="ua-pane-analysis"></div>
 
-        <div id="ua-globe-legend">
-            <b>gradient shells</b> · mesosphere → outer exosphere<br>
-            colour = layer · brightness ∝ log ρ · warmth ∝ Ap<br>
-            cyan ring = current altitude · cyan dot = ISS probe<br>
-            <span style="color:#60d8ff">·</span> magnetopause · <span style="color:#ffc070">·</span> bow shock<br>
-            debris dots colored by source family:
-            <span style="color:#ff3060">FY-1C</span>
-            <span style="color:#ff7040">IR-33/C-2251</span>
-            <span style="color:#ff5070">C1408</span>
-            <span style="color:#60d8a0">R/B</span><br>
-            <span style="color:#aac">switch to Fly mode + Visit ISS to see satellite shapes up close</span><br>
-            <span style="color:#9ff">magnetic cascade:</span>
-            <span style="color:#ff8060">L=4 inner-belt</span> ·
-            <span style="color:#ff60a0">L=6 outer-belt</span> ·
-            <span style="color:#80ff80">L=8 oval</span> ·
-            <span style="color:#a0a0ff">L=20 lobe</span><br>
-            <span style="color:#ff60c0">●</span> auroral oval ·
-            <span style="color:#ffe066">●</span> polar cusps ·
-            <span style="color:#9cf">R1/R2 currents</span> (blue=down, red=up)<br>
-            <span style="color:#9eecff">●</span> NLC band (~83 km) ·
-            <span style="color:#c0ff60">●</span> equatorial electrojet (~110 km) ·
-            <span style="color:#ff6dd2">●</span> auroral electrojet ·
-            <span style="color:#fff0a8">●</span> Sq vortices ·
-            <span style="color:#ffd890">·</span> mesospheric meteor flux
+        <!-- Atmosphere render controls. Component toggles + view mode,
+             on the canvas because they ARE the instrument: the density
+             render and the airglow render are different physical claims
+             and being able to separate them is the point. -->
+        <div id="ua-atmo-controls" role="group" aria-label="Atmosphere render">
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-density"
+                    aria-pressed="true"
+                    title="Column density — brightness follows the integral of rho along each view ray. DATA: above 80 km the neutral atmosphere emits no visible light.">ρ column</button>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-airglow"
+                    aria-pressed="true"
+                    title="Airglow emission layers at their observed altitudes — OH 87, Na 92, O2 94, green line 97, red line 250 km. This is what an eye would actually see.">airglow</button>
+            <span class="ua-atmo-sep"></span>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-anomaly"
+                    aria-pressed="false"
+                    title="Colour by the local drag multiplier: local density divided by the spherically symmetric model. Shows the diurnal bulge and auroral inflation directly.">anomaly</button>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-shells"
+                    aria-pressed="false"
+                    title="A/B against the older five discrete gradient shells.">shells</button>
+            <span class="ua-atmo-sep"></span>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-probe"
+                    aria-pressed="true"
+                    title="Limb probe — point anywhere to read the tangent altitude, local density, column and drag multiplier of that view ray.">probe</button>
+        </div>
+
+        <div id="ua-globe-legend" data-open="0">
+            <button type="button" id="ua-legend-toggle"
+                    aria-expanded="false" aria-controls="ua-legend-body">
+                <b>legend</b>
+                <span id="ua-legend-summary">continuous column · log₁₀ scale</span>
+                <span class="ua-legend-caret" aria-hidden="true">▴</span>
+            </button>
+            <dl id="ua-legend-body" hidden></dl>
         </div>
     </section>
 
@@ -2962,6 +3039,10 @@ input[type=range]::-moz-range-thumb {
     // so dragging here retimes the whole page atomically.
     import { TimeScrubber } from './js/upper-atmosphere-time-scrubber.js';
     import { getRealtimeDriver } from './js/upper-atmosphere-realtime.js';
+    // Legend copy lives with the renderer so the two cannot drift — in
+    // particular the DISPLAY TRANSFORM (log decades + gamma) is generated
+    // from the live uniforms, never retyped here.
+    import { volumeLegend } from './js/upper-atmosphere-instruments.js';
 
     const canvas = document.getElementById('ua-globe');
     const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.2 });
@@ -3134,6 +3215,103 @@ input[type=range]::-moz-range-thumb {
 
     // Expose for devtools poking.
     window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber };
+
+    /* ─── Atmosphere render controls + legend ────────────────────
+     * The two component buttons are separate physical claims, not a
+     * style switch: "ρ column" is a data rendering of the column
+     * integral (you could not see it — above 80 km there is no
+     * Rayleigh scattering) and "airglow" is the emission an eye would
+     * actually record. Keeping them independently toggleable is what
+     * lets the page be honest about which one you are looking at.  */
+    (() => {
+        const btn = (id) => document.getElementById(id);
+        const press = (el, on) => el?.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const bDen = btn('ua-atmo-density'), bGlow = btn('ua-atmo-airglow');
+        const bAnom = btn('ua-atmo-anomaly'), bShell = btn('ua-atmo-shells');
+        const bProbe = btn('ua-atmo-probe');
+        if (!bDen) return;
+
+        let density = true, airglow = true, anomaly = false, shells = false;
+
+        const syncLegend = () => {
+            const body = document.getElementById('ua-legend-body');
+            const sum  = document.getElementById('ua-legend-summary');
+            if (!body) return;
+            if (shells) {
+                body.innerHTML =
+                    '<dt>shells</dt><dd>five discrete gradient shells — the '
+                  + 'older renderer, kept for A/B. Hard boundaries at 85 / 250 '
+                  + '/ 600 / 1200 km are NAMES, not physics.</dd>';
+                if (sum) sum.textContent = 'discrete shells (A/B reference)';
+                return;
+            }
+            const legend = volumeLegend(globe.getVolumeScaleInfo?.());
+            body.innerHTML = legend.lines
+                .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+            if (sum) {
+                const sc = globe.getVolumeScaleInfo?.();
+                sum.textContent = anomaly
+                    ? `local ÷ model density · log₁₀ × ${sc?.decades ?? 10}`
+                    : `continuous column · log₁₀ × ${sc?.decades ?? 10}`;
+            }
+        };
+
+        const apply = () => {
+            globe.setAtmosphereRender?.(shells ? 'shells' : 'volume');
+            globe.setVolumeComponents?.({ density, airglow });
+            globe.setVolumeMode?.(anomaly ? 'anomaly' : 'column');
+            press(bDen, density); press(bGlow, airglow);
+            press(bAnom, anomaly); press(bShell, shells);
+            // The component toggles only mean anything for the volume.
+            for (const b of [bDen, bGlow, bAnom]) {
+                b.disabled = shells;
+                b.style.opacity = shells ? '.45' : '';
+            }
+            syncLegend();
+        };
+
+        bDen.addEventListener('click', () => { density = !density; apply(); });
+        bGlow.addEventListener('click', () => { airglow = !airglow; apply(); });
+        bAnom.addEventListener('click', () => { anomaly = !anomaly; apply(); });
+        bShell.addEventListener('click', () => { shells = !shells; apply(); });
+        bProbe?.addEventListener('click', () => {
+            const on = !globe.getLimbProbeEnabled?.();
+            globe.setLimbProbeEnabled?.(on);
+            press(bProbe, on);
+        });
+
+        const legendEl = document.getElementById('ua-globe-legend');
+        const toggle = document.getElementById('ua-legend-toggle');
+        const body = document.getElementById('ua-legend-body');
+        toggle?.addEventListener('click', () => {
+            const open = legendEl.dataset.open !== '1';
+            legendEl.dataset.open = open ? '1' : '0';
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            body.hidden = !open;
+        });
+        apply();
+        // The scale info is only final once the first profile has built the
+        // LUTs, so refresh the legend after the engine's first push.
+        window.addEventListener('ua-profile-ready', syncLegend);
+        setTimeout(syncLegend, 1200);
+
+        // Keep the legend + controls above the time scrubber. The scrubber
+        // spans the full bottom edge of the globe; anything anchored near
+        // bottom:0 draws over it. Measured live so a taller scrubber (its
+        // rate chips wrap on narrow viewports) pushes these up rather than
+        // being covered.
+        const wrap = document.getElementById('ua-globe-wrap');
+        const scrub = document.getElementById('ua-time-scrubber-host');
+        if (wrap && scrub) {
+            const place = () => {
+                const h = scrub.offsetHeight;
+                wrap.style.setProperty('--ua-atmo-floor',
+                    `${h > 0 ? h + 20 : 16}px`);
+            };
+            place();
+            new ResizeObserver(place).observe(scrub);
+        }
+    })();
 
     /* ─── Aside tabs (Controls / Analysis) ──────────────────── */
     const tabBtns  = document.querySelectorAll('#ua-aside-tabs .ua-tab-btn');

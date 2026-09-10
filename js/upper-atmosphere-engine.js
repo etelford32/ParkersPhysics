@@ -541,15 +541,27 @@ function _fractionsAt(altKm) {
 
 /**
  * Evaluate the surrogate at one altitude.
+ *
+ * `TinfK` is an OPTIONAL override for the exospheric temperature. It
+ * exists so upper-atmosphere-column.js can evaluate this same density
+ * code at a *locally* varying T∞ (Jacchia diurnal bulge + auroral Joule
+ * heating) instead of forking a second density implementation. When it
+ * is omitted the function behaves exactly as before — the global
+ * exosphereTempK(F10.7, Ap) is used — so every existing call site is
+ * untouched. There must only ever be ONE density model on this page;
+ * the spatial field is a T∞ field on top of it, not a second model.
+ *
  * @returns {object} {altKm, T, rho, nTotal, H_km, mBar, fractions, n}
  *   where `fractions[species]` is the number-density fraction and
  *   `n[species]` is the species number density (m⁻³).
  */
-export function density({ altitudeKm, f107Sfu, ap }) {
+export function density({ altitudeKm, f107Sfu, ap, TinfK = null }) {
     if (altitudeKm < 80) {
         throw new Error("altitudeKm must be ≥ 80 (thermosphere lower bound)");
     }
-    const Tinf = exosphereTempK(f107Sfu, ap);
+    const Tinf = Number.isFinite(TinfK)
+        ? Math.max(TinfK, 300)
+        : exosphereTempK(f107Sfu, ap);
     // Local kinetic temperature from the Bates (1959) inversion profile —
     // *not* T∞ everywhere. Below ~250 km T(z) is markedly cooler than T∞.
     const T_local = batesTemperature(altitudeKm, Tinf);
