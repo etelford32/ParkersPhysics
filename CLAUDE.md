@@ -79,6 +79,7 @@ This is **parkersphysics.com** — a physics-first space weather forecasting pla
 | Upper Atmosphere Simulator visuals (upper-atmosphere.html: the atmosphere render + on-canvas instruments) | `UPPER_ATMOSPHERE_VISUAL_PLAN.md` (status + §3 the measured rejections), then the `js/upper-atmosphere-column.js` header. THE ONE-MODEL RULE: there is exactly one density model on this page (`upper-atmosphere-engine.js`) and the kernel never re-implements it — it computes a T∞ FIELD (Jacchia-71 diurnal bulge + auroral Joule heating) and feeds it back through the engine's own `density()` via the optional `TinfK` override. Both spatial terms are AREA-MEAN-PRESERVING by construction (the diurnal ratio is divided by its own global mean; the auroral term has zero mean because the engine's `3·Ap` already carries the global response), so turning the field on moves NO number the page already reports — two tests gate that, and "improving" the bulge by scaling it up fails them. DENSITY AND AIRGLOW ARE SEPARATE CLAIMS and must stay separately toggleable: above 80 km there is no Rayleigh scattering, so the density render is DATA VISUALISATION of ∫ρ dl and the legend says you could not see it, while the airglow layers are what an eye records — merging them would make the page imply the first is a photograph. Brightness is a DISCLOSED log₁₀ stretch over ~10 decades (the column really does span that; asinh was tried and mapped everything above 200 km to black — measured). `js/upper-atmosphere-volume.js` MIRRORS three kernel functions in GLSL (`geoFromVectors`, `jacchiaDiurnalRatio`, `auroralHeatingK`) — kernel is the oracle, change both in one commit; the hour-angle sign is a SILENT failure that puts the bulge on the morning side. The shader samples quadratically about the tangent point while the CPU integrator samples UNIFORMLY, and that split is deliberate and per-consumer (uniform trapezoid is 1–2 orders more accurate here via Euler–Maclaurin; the shader instead must not alias a 10 km airglow band across a 10 000 km ray). Airglow colour is weighted by `visibleFraction`, NOT by raw VER — OH Meinel dominates total photons and ~98 % of that is at 1.5–2.0 µm, so VER weighting turns the band orange. `js/upper-atmosphere-instruments.js` is deliberately THREE-FREE (three geometry hooks from the globe, physics from the kernel) so every number it prints is node-tested; the overlay canvas is `pointer-events:none` because OrbitControls and the raycaster both listen underneath it. The probe must keep its two disclosures (a ray ABOVE the 2000 km model ceiling, and the T∞-independent floor below 120 km). **THE MARCH IS EXPENSIVE AND MUST START ON THE CHEAPEST RUNG.** Measured on a software rasteriser at 1280×720: the five shells it replaced cost 355 ms/frame, the march at 28 steps cost 1760, and at 10 steps with the field hoisted 462. Shipping `medium` as the default saturated the main thread and turned the DSMC end-to-end suite — all five tests in 43 s on main — into one blowing a 60 s PER-TEST budget, because the harness's own polling starved; it reached CI as a mysterious timeout, not a failed assertion. `QUALITY_LADDER` therefore starts at its floor and CLIMBS on sustained headroom (the earth.html cloud-governor shape, same reason: a weak renderer entering the expensive path on frame 1 starves the re-evaluation that would demote it), `setQuality()` PINS it, and the browser gate asserts the starting rung. The T∞ field is evaluated ONCE PER FRAGMENT, not per sample — a limb ray's column sits within ~8° of arc of its tangent point, so holding it is accurate and worth 1126→462 ms/frame; the anomaly view reads at the SELECTED ALTITUDE, never the ray's lowest point (below 120 km the ratio is identically 1.00 and the view came out a flat wash). NOTE a PRE-EXISTING bug the governor works around: `_animate` calls `getElapsedTime()` before `getDelta()` and three.js's `getElapsedTime()` consumes the delta, so the `dt` handed to particles / drag tracers / substorm / controls is 0.0000 every frame — documented in the plan §6, deliberately not fixed there. Run `node tests/upper-atmosphere-column.mjs` + `npx playwright test tests/upper-atmosphere-volume.spec.js` after ANY edit |
 | Earth / weather forecast | `WEATHER_FORECAST_PLAN.md`, `EARTH_LOD_NASA_PRECIP_PLAN.md` |
 | EarthView verdict card (earth.html dashboard) | §4.4 below, then `js/verdict-engine.js` + `js/verdict-card.js` headers; run `node tests/verdict-engine.mjs` after engine edits |
+| EarthView time bar / anything homed at the top of `#app` (earth.html) | §4.6 below. The bar is TOP-docked and publishes `--ev-timebar-h`; every neighbour's clearance derives from that ONE measured number, never a constant. Run `npx playwright test tests/earth-time-controls-position.spec.js` after ANY edit to `#time-controls` or to a panel that homes in the top band |
 | EarthView globe markers (location beacon, city dots) | `js/location-beacon.js` + `js/city-markers.js` headers; city data in `js/data/major-cities.js` (run `node tests/major-cities.mjs` after edits); hover/click wiring lives with the shared raycast handlers in earth.html |
 | Space-weather dashboard (space-weather.html: sign-in gate, panel registry, presets, status band) | `SPACE_WEATHER_DASHBOARD_PLAN.md` (§3 gate decisions + §12 phasing), then the `js/space-weather-registry.js` + `js/space-weather-status-band.js` headers. The page is SIGN-IN GATED (authN-only; `?preview=1` and OAuth-hash payloads are deliberate exemptions — read the gate comment in the page before touching it; it FAILS OPEN by design). The registry is drift-gated against the page markup — run `node tests/space-weather-registry.mjs` + `tests/space-weather-status-band.mjs` + `tests/layout-lab.mjs` (+ `tests/threshold-profile.mjs` + `tests/dashboard-sync.mjs` for the D2 layer) after edits; browser gates `tests/space-weather-gate.spec.js` + `tests/space-weather-compose.spec.js` + `tests/space-weather-d2.spec.js`. The §8 threshold profile is ONE line: `js/threshold-profile.js` hands kp off to user_profiles.aurora_kp_threshold (the column alert-engine/account already read) — never add a second threshold store. Per-panel config lives in the panel-config store OUTSIDE the layout doc (sizes-store rationale). Cloud sync (`js/dashboard-sync.js`) is local-first and migration-guarded — `supabase-dashboards-migration.sql` was APPLIED 2026-07-22 on the author's go (the guard stays as defense for other environments). Layout schema is v2 (`{v:2, preset}`) with a PERMANENT v1 migrator — never strand saved layouts. The status band computes nothing: verdict-engine owns the tier/aurora oracles, and the band consumes the ONE flux-rope provider run the page's forecast panel publishes ('flux-rope-forecast' event) — do not add a second ensemble compute. dashboard.html stays the separate account dashboard (bridge tile, no merge). |
 | The Stage (space-weather.html panel `stage`: js/stage/*) | Plan §5, then the `js/stage/{scale,model,stage}.js` headers. scale.js/model.js are PURE and node-gated (`tests/stage-scale.mjs`, `tests/stage-model.mjs` — the latter PINS the view.js mirrors against the committed WASM probes AND the oval-band inversion against verdict-engine magneticLatitude; if either oracle changes, that gate fails until re-sync). model.js builds rope geometry ONLY through the mirrors view.js already exports — do not add a third copy of the kernel math; the renderer samples vertex field color oracle-DIRECT via kernel.fieldAt on the provider's live kernel instance. The S2 stagings consume EXISTING oracles only: the oval band's Kp distribution is the page's 'earth-forecast-update' arp trajectory (never a second Kp model), the drive-ring margin comes from verdict-engine, the heat-shell ratio from upper-atmosphere-engine, asset positions from js/satellite-tracker.js propagate. Spatial dishonesty (compression, body sizes, Earth-local R_E frame — the drawn Earth IS 1 R_E in that frame) lives ONLY in scale.js, disclosed on-stage and removable via the true-scale toggle — never smuggle scale into geometry elsewhere; the geographic/TEME display frames use mean-sun time with documented tolerances — real pass timing stays with js/pass-predictor.js. The τ scrubber dispatches `sw-tau` {tauMs, regime} and picking dispatches `sw-pick` {type, norad?}; dock instruments follow both ONE-WAY (Stage→dock). The three 2D pseudo-views (helio hero, transit, globe) are NOT retired — the S3/D4 parity review (plan §12) documents the per-panel retirement gates; none are met yet. The Stage IS the `?preview=1` attract surface (`data-preview-stage` lives on the stage panel; attract mode auto-flies the stations and ends on the tagline) — signin/index/pricing embed it as lazy iframes. The render loop marches STATE every frame and pauses only GL work when hidden/offscreen — do not move the early-return above the state block (frozen-tween regression). **The stage is Z-UP and `controls` is a `let` that gets REBUILT** — OrbitControls caches its orbit axis from `camera.up` at construction (vendored r160, `OrbitControls.js:177`) and ignores every later assignment, so `camera.up.set(0,0,1)` MUST stay above `createControls()` and My Sky's local-vertical swap MUST call `refreshControlFrame()`. Built in the wrong order it orbited about world +Y in a Z-up scene: dragging tumbled the ecliptic and the gimbal poles sat IN it. Browser gates: `tests/space-weather-stage.spec.js` (incl. the orbit-axis gate — verified to fail on the old ordering) + `tests/space-weather-attract.spec.js`. |
@@ -197,6 +198,68 @@ tooltips at 90+) so grabbing a buried panel surfaces it. Gate:
 - **The top-level items are a LINK plus a separate caret button** (`.nav-drop-btn` is an `<a>` to the section hub; `.nav-drop-toggle` is the disclosure). They are drawn as one segmented chip. Split deliberately: a single control that both navigates and opens a menu has no honest touch behaviour, and keeping the toggle a plain `<button>` leaves the scarred hover/touch detection above untouched. `.nav-drop-btn` is in the mobile "close the panel on tap" selector list *because* it navigates; `.nav-drop-toggle` deliberately is not.
 - **In burger mode `.nav-drop` is an explicit two-column GRID, not a flex row.** On desktop it is inline-flex over two items because the panel is out of flow; on mobile the panel comes back into flow and becomes a third item, and plain `display: flex` lays it out *beside* the caret (measured 213×719 at x=165 instead of 366 wide below the row). Row 2 must be spelled out. When you measure this, wait out the .28s `grid-template-rows` transition — read it at t=0 and every variant looks collapsed.
 - 15 pages still carry inline nav CSS (`ghostCss` in the baseline), some with `display: block !important` on the open dropdown. That bypasses the grid accordion but renders full height, so it is correct-if-unanimated — verified, not assumed. Measure on a *light* page: `index.html` and `sun.html` run live 3D and starve the transition, which reads as a clipped accordion that isn't one.
+
+### 4.6 The EarthView top rail (earth.html `#time-controls`)
+
+The time-scrub bar docks at the **TOP** of `#app` (2026-09; it was
+`bottom:10px` for the page's whole prior life, and `satellites.html` /
+`solar-system.html` still dock their own copies at the bottom — this move
+was EarthView-only).
+
+- **`--ev-timebar-h` is the single source of truth for the bar's height**,
+  published by a `ResizeObserver` in earth.html next to the hoisted scrub
+  wiring. Everything INSIDE `#app` that has to clear the bar reads it and
+  nothing hard-codes a number: `#feed-error-banner`, `#trip-hud`,
+  `#iss-hud` (the three transient top-centre overlays), `#loc-panel`, the
+  verdict card, and — on phones — `#hud`. The bar is **72–114px** tall
+  depending on breakpoint, on whether `#tc-buttons-row` wrapped, and on
+  whether `#tc-forecast-status` is in flight; the same viewport measured
+  79px and 100px across two runs. A constant here is the nav's
+  `max-height: 600px` all over again. The CSS carries a 96px fallback for
+  the frames before the first observation.
+- **`#storm-watch-panel` is the exception and needs the OTHER var.** It is
+  the one panel here that does not live inside `#app` — it mounts on
+  `<body>` (`storm-watch-panel.js` `mount({ parent = document.body })`), so
+  its `top` is DOCUMENT-space and lands at y=130 while `#app`'s own top band
+  starts at y=82, i.e. 48px higher than every other panel and squarely
+  inside the bar. It therefore reads **`--ev-timebar-bottom`** (the same
+  observer publishes it as `rect.bottom + scrollY`, which is
+  scroll-invariant because `#app` is static in normal flow), and its
+  selector is **`body #storm-watch-panel`** (0,1,0,1). Written `#app
+  #storm-watch-panel` the rule matches NOTHING and fails silently — that
+  was the first attempt, and only the browser gate caught it.
+- **The bar is centred in the band LEFT of `#layer-panel`, not on the
+  viewport** — `left:10px` / `right:250px` / `margin-inline:auto` over a
+  `width:fit-content` box. There is no `translateX(-50%)` any more.
+  Viewport-centred, the 585px bar reaches x=805 in a 1025px window while
+  the panel starts at x=785. On the `?verdict=0` path `left` becomes 210px
+  so the legacy `#hud` keeps its lane; that path is also where the band is
+  narrowest, so the bar wraps and reaches the 110/130px panel homes.
+- **`width:fit-content` between two fixed insets is capped by the band**,
+  which is what stops the overflow: docked at the bottom the bar rendered
+  487px wide inside a 390px viewport (x=−49 .. 439) and `#app`'s
+  `overflow:hidden` silently ate the −1w edge label and half the clock on
+  every phone. `min-width` is therefore `min(360px, …)`, never a bare
+  floor wider than the band, and `#tc-buttons-row` wraps.
+- Both overrides need a specificity lift (`#app #ev-verdict-card` at
+  0,2,0,0; `body #storm-watch-panel` at 0,1,0,1) because both panels' homes
+  come from stylesheets **injected at mount time**, which beat a
+  same-specificity page rule on cascade order — the ordering already
+  documented in §4.4. The Storm Watch rule is scoped `min-width:641px` so
+  it cannot override that sheet's own ≤640 bottom-sheet geometry back into
+  a floating column.
+- `#ocean-mode-hint`'s `bottom` offsets (82px desktop / 132px ≤1024) existed
+  ONLY to sit above the bottom-docked bar. They are now 38px / 86px ≤768,
+  clearing `#sw-bar` and the mobile toolbar instead. Anything else found
+  reserving room at the bottom of this page is probably doing the same and
+  is now reserving it against nothing.
+- Gate: `tests/earth-time-controls-position.spec.js` (chrome geometry only,
+  no live network). It pins the top dock, zero overlap against every
+  neighbour at five desktop widths plus phone (both the default and the
+  `?verdict=0` path), no horizontal clipping, and that `--ev-timebar-h`
+  matches the rendered height. Run it after ANY edit to `#time-controls` or
+  to a panel homed in the top band — it is what turns a silently-dead
+  selector into a failing test.
 
 ---
 
