@@ -1005,6 +1005,9 @@ export class AtmosphereGlobe {
      */
     setAltitude(altitudeKm) {
         this._currentAltKm = altitudeKm;
+        // The anomaly view reports the local/model drag multiplier AT the
+        // altitude under examination — follow the slider.
+        this._volume?.setAnomalyAltitude(altitudeKm);
         const r = 1 + altitudeKm / R_EARTH_KM;
         this._ring.scale.set(r, r, r);
 
@@ -1416,7 +1419,11 @@ export class AtmosphereGlobe {
     _buildAtmosphereVolume() {
         this._volume = new AtmosphereVolume(this._scene, {
             sunDir: this._sunDir,
-            quality: VOLUME_QUALITY.medium,
+            // The CHEAPEST rung, deliberately. The governor climbs from
+            // here while the frame interval says there is headroom; naming
+            // `medium` here is what put a 1.8 s frame on every software
+            // renderer and blew the DSMC end-to-end budget.
+            quality: VOLUME_QUALITY.floor,
             f107: 150, ap: 15,
         });
         this._atmoRender = 'volume';
@@ -1455,8 +1462,10 @@ export class AtmosphereGlobe {
 
     /** 'column' | 'composition' | 'anomaly' */
     setVolumeMode(mode) { this._volume?.setMode(mode); }
+    getVolumeAnomalyAltitude() { return this._volume?.getAnomalyAltitude?.() ?? null; }
     getVolumeMode() { return this._volume?.getMode() ?? 'column'; }
     setVolumeQuality(steps) { this._volume?.setQuality(steps); }
+    getVolumeQualityState() { return this._volume?.getQualityState?.() ?? null; }
     getVolumeScaleInfo() { return this._volume?.getScaleInfo() ?? null; }
 
     // ── Density sub-shells ───────────────────────────────────────────────────
@@ -4297,7 +4306,11 @@ export class AtmosphereGlobe {
             }
         }
         // The volumetric march is camera-origin: every fragment casts its
-        // ray from here, so this uniform is not optional.
+        // ray from here, so this uniform is not optional. This call also
+        // ticks the volume's quality governor, which starts on the cheapest
+        // rung and climbs only while the frame interval says there is
+        // headroom — it times itself rather than taking the `dt` above,
+        // which is ~0 every frame (see _governQuality's comment).
         this._volume?.update(this._camera);
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer

@@ -113,6 +113,49 @@ test.describe('upper-atmosphere continuous volume render', () => {
         }
     });
 
+    test('THE MARCH STARTS ON THE CHEAPEST RUNG — the CI-budget gate',
+    async ({ page }) => {
+        // This is a REGRESSION GATE, not a preference. Shipping the ladder's
+        // `medium` rung as the default put a 1.8 s frame on every software
+        // renderer, which saturated the main thread and turned a DSMC
+        // end-to-end suite that ran all five of its tests in 43 s total into
+        // one where individual tests blew a 60 s budget. Measured, on a
+        // software rasteriser at 1280x720:
+        //     old five shells   355 ms/frame
+        //     march @ 28 steps 1760 ms/frame
+        //     march @ 10 steps  462 ms/frame
+        // The governor climbs from the floor on a renderer with headroom;
+        // it must never START above it.
+        await boot(page);
+        const q = await page.evaluate(
+            () => window.__ua.globe.getVolumeQualityState());
+        expect(q.pinned).toBe(false);
+        expect(q.rung).toBeLessThanOrEqual(1);
+        expect(q.steps).toBeLessThanOrEqual(16);
+    });
+
+    test('an explicit quality choice PINS the ladder', async ({ page }) => {
+        await boot(page);
+        await page.evaluate(() => window.__ua.globe.setVolumeQuality(32));
+        await page.waitForTimeout(1500);
+        const q = await page.evaluate(
+            () => window.__ua.globe.getVolumeQualityState());
+        expect(q.pinned).toBe(true);
+        expect(q.steps).toBe(32);
+    });
+
+    test('the anomaly view reads at the selected altitude', async ({ page }) => {
+        // Read at the ray's lowest point it was a flat wash: below ~120 km
+        // the engine's density is T∞-independent, so the ratio is exactly
+        // 1.00 for every ray reaching down there.
+        await boot(page);
+        for (const alt of [250, 400, 900]) {
+            await page.evaluate((a) => window.__ua.globe.setAltitude(a), alt);
+            expect(await page.evaluate(
+                () => window.__ua.globe.getVolumeAnomalyAltitude())).toBe(alt);
+        }
+    });
+
     test('the display scale is reported so the legend can label it',
     async ({ page }) => {
         await boot(page);

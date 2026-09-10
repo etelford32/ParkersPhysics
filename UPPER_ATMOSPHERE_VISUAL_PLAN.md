@@ -161,7 +161,59 @@ integral**, because its band is one or two pixels at whole-globe framing
 and what a camera records there is the integral. Both are argued in the
 module header.
 
-### 3.7 γ = 1.45 crushed the exosphere
+### 3.7 Shipping the ladder's middle rung as the default broke CI
+
+The march is expensive on a software rasteriser. Measured at 1280×720,
+whole-globe framing, median of five interleaved runs:
+
+| render | ms/frame |
+|---|---|
+| old five shells (what this replaced) | 355 |
+| march @ 28 steps (**the first default**) | 1760 |
+| march @ 16 steps | 1311 |
+| march @ 10 steps, field hoisted (**shipped**) | 462 |
+
+A 1.8 s frame does not merely look bad — it saturates the main thread. The
+DSMC end-to-end suite, which had been running **all five of its tests in
+43 s total** on main, started blowing a **60 s per-test** budget, because
+the harness's own polling was starved. Three tests failed; one passed only
+on retry.
+
+Two fixes, both of which had to land:
+
+1. **The ladder starts at its floor and climbs** (`QUALITY_LADDER`,
+   `_governQuality`). Same shape as the cloud-volume governor in
+   earth.html and for the reason recorded there: a weak renderer that
+   enters the expensive path on frame 1 can starve the very re-evaluation
+   that would demote it. `setQuality()` PINS the ladder so an explicit
+   choice cannot be walked back mid-run.
+
+2. **The T∞ field is evaluated ONCE PER FRAGMENT, not per sample.** It was
+   two `pow()`, an `atan()`, an `asin()` and an `exp()` on every one of up
+   to 96 samples. A limb ray's column is concentrated within ±√(2rH) ≈
+   ±900 km of its tangent point — about 8° of arc, half an hour of local
+   solar time — over which the Jacchia term moves well under a percent, so
+   holding it is a good approximation and not a shortcut that changes what
+   is drawn. Worth 1126 → 462 ms/frame at the floor.
+
+The governor **times itself** rather than taking the `dt` from the globe's
+animate loop. See §6.
+
+`tests/upper-atmosphere-volume.spec.js` gates the starting rung. That test
+is the regression gate for this whole section; do not "optimise" it by
+raising the default.
+
+### 3.8 The anomaly view cannot read at the ray's lowest point
+
+That was the first implementation and it produced a flat wash. Below
+~120 km the engine's density does not depend on T∞ at all — turbulent
+mixing clamps it — so the local/model ratio is exactly 1.00 for every ray
+that reaches down there, which is most of the bright inner ring. It now
+reads at the altitude the operator has selected, which is also the better
+question: the view is asking *where* the drag multiplier is high, so
+confounding it with each ray's tangent altitude is the wrong axis.
+
+### 3.9 γ = 1.45 crushed the exosphere
 
 Measured displayed brightness at D=10, γ=1.15, gain 0.90: 80 km → 0.90,
 400 km → 0.34, 1000 km → 0.13, 1950 km → 0.02. That ramp is the halo.
@@ -242,7 +294,32 @@ prints traces to a node-tested function. Keep it that way: if you need a
 
 ---
 
-## 6. Also fixed here
+## 6. A pre-existing bug this work sits on top of, NOT fixed here
+
+`_animate` in `js/upper-atmosphere-globe.js` does:
+
+```js
+const t  = this._clock.getElapsedTime();
+const dt = this._clock.getDelta();
+```
+
+three.js's `Clock.getElapsedTime()` **calls `getDelta()` internally**, so
+the second call returns the microseconds since the first. Measured: `dt`
+is `0.0000` ms on essentially every frame. Every consumer of that `dt` on
+this page — the layer particle systems, the drag-forecast tracer
+advection, the substorm state machine, `controls.update(dt)` — is being
+fed ~zero and is not advancing at the rate its code assumes.
+
+It is **not fixed in this change** on purpose: correcting it would make
+several animations across the page suddenly run at their intended speed
+for the first time, which is a visible behavioural change nobody asked for
+and a poor thing to smuggle into a rendering PR. It is written down here
+so the next session finds it rather than rediscovering it.
+
+The volume's quality governor therefore reads its own clock. A governor
+that silently never ticks is worse than no governor.
+
+## 7. Also fixed here
 
 `SUN_FRAG` in `upper-atmosphere-globe.js` declared a variable named
 `active` — a **reserved word in GLSL ES**. The shader had never compiled
@@ -253,7 +330,7 @@ rather than lived with.
 
 ---
 
-## 7. What is still open
+## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
   travelling atmospheric disturbances that carry the density enhancement
@@ -271,3 +348,10 @@ rather than lived with.
 - **Airglow radiance.** The volume emission rates are order-of-magnitude
   typical values used for *relative* brightness. This is not a radiance
   calculation and the page must not present it as one.
+- **The `dt` bug in §6.** Worth its own change, with the animation-speed
+  consequences looked at deliberately.
+- **Neither of this feature's test files runs in CI.** `nav-lint.yml` runs
+  two node tests; the other ~40 in `tests/` — these two included — are run
+  per the CLAUDE.md table. The DSMC end-to-end workflow is the only CI job
+  that boots this page at all, which is why a 5× frame-cost regression
+  reached CI as a mysterious timeout rather than as a failed assertion.

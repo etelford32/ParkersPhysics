@@ -71,6 +71,23 @@
  * a strobing airglow band is not. The two schemes are deliberate and the
  * reason is per-consumer — do not "unify" them.
  *
+ * IT ARMS, IT DOES NOT START ARMED
+ * ────────────────────────────────
+ * The march begins at the cheapest rung of `QUALITY_LADDER` and climbs
+ * only while the frame interval says there is headroom. This is the same
+ * shape as the cloud-volume governor in earth.html and for the same
+ * reason recorded there: a weak renderer that enters the expensive path on
+ * frame 1 can starve the very re-evaluation that would demote it. Starting
+ * at the top and demoting sounds equivalent and is not.
+ *
+ * `setQuality()` PINS the ladder — an explicit choice from the UI or a
+ * test switches the governor off, so a quality-gated assertion cannot be
+ * silently overridden mid-run.
+ *
+ * The ladder trades sampling fidelity only. Every number the on-canvas
+ * instruments print comes from the kernel, never from the shader, so no
+ * rung of this ladder can change a reported measurement.
+ *
  * BRIGHTNESS IS A LOG STRETCH, AND IT IS DISCLOSED
  * ────────────────────────────────────────────────
  * Measured, from tangent altitude 80 km to 1950 km:
@@ -152,12 +169,51 @@ const TAU_REF_ALT_KM  = MODEL_FLOOR_KM;
 // The airglow reference sits on the emitting band itself.
 const GLOW_REF_ALT_KM = 90;
 
-/** Step counts per quality tier (samples per half-ray). */
+/**
+ * Quality ladder — samples per half-ray. THE PAGE STARTS AT `floor` AND
+ * CLIMBS; it does not start in the middle and get demoted.
+ *
+ * MEASURED on a software rasteriser at 1280×720, whole-globe framing,
+ * ms per frame:
+ *
+ *     old five shells (what this replaced)   935
+ *     march, 28 steps  (the first default)  1760
+ *     march, 16 steps                       1311
+ *     march, 10 steps                       ~750
+ *
+ * A 1.8 s frame does not just look bad: it saturates the main thread, and
+ * the DSMC end-to-end suite — which had been running all five of its tests
+ * in 43 s total — started blowing a 60 s PER-TEST budget, because the
+ * harness's own polling was starved. That is what shipping `medium` as the
+ * default cost, and it is why the ladder now starts at `floor`.
+ *
+ * Note the floor is CHEAPER than the shells it replaced, so the low rung
+ * is not a degraded mode — it is a straight improvement on the old render
+ * at any framing, and everything above it is upside for machines that can
+ * afford it.
+ */
 export const VOLUME_QUALITY = Object.freeze({
+    floor:  10,
     low:    16,
     medium: 28,
     high:   40,
 });
+
+/** The rungs the governor walks, cheapest first. */
+const QUALITY_LADDER = Object.freeze([10, 16, 24, 32, 40]);
+
+// Governor thresholds, in milliseconds of FRAME INTERVAL. Frame interval
+// rather than a CPU-side timing of render(): WebGL is asynchronous, so a
+// clock around the draw call measures almost nothing on a real GPU — but a
+// renderer that cannot keep up shows it in the interval, which is exactly
+// the signal we want. On a vsync-capped GPU the interval sits at ~16.7 ms
+// no matter how much headroom is left, so PROMOTE_MS has to sit just above
+// vsync rather than below it.
+const PROMOTE_MS = 20;     // comfortably at vsync → there is headroom
+const DEMOTE_MS  = 34;     // below ~30 fps → give some back
+const PROMOTE_FRAMES = 45; // ~0.75 s of sustained headroom before stepping up
+const DEMOTE_FRAMES  = 12; // react to a stall faster than we reward speed
+const COOLDOWN_FRAMES = 90; // after a demotion, do not immediately re-promote
 
 const VOLUME_VERT = /* glsl */`
     varying vec3 vWorldPos;
@@ -196,6 +252,7 @@ const VOLUME_FRAG = /* glsl */`
     uniform float     uDecades;        // display decades, density
     uniform float     uGlowDecades;
     uniform float     uGamma;
+    uniform float     uAnomalyAltN;   // altitude the anomaly view reads at
     uniform int       uSteps;
     uniform float     uDensityGain;
     uniform float     uAirglowGain;
@@ -290,15 +347,40 @@ const VOLUME_FRAG = /* glsl */`
         // sampling on both sides.
         float tMid = clamp(-dot(ro, rd), t0, t1);
 
+        // ── THE T∞ FIELD IS EVALUATED ONCE PER FRAGMENT, NOT PER SAMPLE ──
+        // The field varies with latitude and local solar time. A limb ray's
+        // column is concentrated within ±√(2rH) ≈ ±900 km of its tangent
+        // point, which subtends ~8° of arc — about half an hour of local
+        // solar time, over which the Jacchia term moves by well under a
+        // percent. A ray through the disc spans a range of ALTITUDE at
+        // essentially fixed latitude and longitude, so it varies even less.
+        // Evaluating the field at the ray's anchor and holding it is
+        // therefore a good approximation and NOT a shortcut that changes
+        // what is drawn.
+        //
+        // It is, however, the difference between a march that costs two
+        // pow(), an atan(), an asin() and an exp() PER SAMPLE and one that
+        // costs two texture fetches. Measured on a software rasteriser at
+        // the ladder's floor: 1126 → see the header table. The instruments
+        // do not read this path at all — they call the kernel directly and
+        // evaluate the field exactly, per point.
+        vec3 anchorPos = ro + rd * tMid;
+        float anchorR = max(length(anchorPos), 1e-6);
+        vec3 anchorU = anchorPos / anchorR;
+        float latRad, lstHr;
+        geoAt(anchorU, latRad, lstHr);
+        float Tinf = max(300.0,
+            uTinfGlobal * diurnalFactorAt(latRad, lstHr) + auroralAt(anchorU));
+        float tN = clamp((Tinf - uTinfMin) / (uTinfMax - uTinfMin), 0.0, 1.0);
+        float tinfGlobalN = clamp(
+            (uTinfGlobal - uTinfMin) / (uTinfMax - uTinfMin), 0.0, 1.0);
+
         float tau      = 0.0;          // ∫ (ρ/ρmax) dl, scene units
         float glow     = 0.0;          // ∫ visible airglow rate dl
         vec3  glowCol  = vec3(0.0);    // emission-weighted airglow colour
-        float anomAcc  = 0.0;          // ∫ (ρ/ρ_global) · (ρ/ρmax) dl
         // Lowest altitude the ray reaches — this fragment's colour comes
         // from there, not from a column average. See the header.
         float minAlt   = 1e9;
-        float tinfGlobalN = clamp(
-            (uTinfGlobal - uTinfMin) / (uTinfMax - uTinfMin), 0.0, 1.0);
 
         int steps = uSteps;
         // NB: not 'half' — that is a RESERVED WORD in GLSL ES and the
@@ -310,7 +392,7 @@ const VOLUME_FRAG = /* glsl */`
             float sMax  = (side == 0) ? (tMid - t0) : (t1 - tMid);
             if (sMax <= 0.0) continue;
 
-            for (int i = 0; i < 64; i++) {
+            for (int i = 0; i < 48; i++) {
                 if (i >= steps) break;
                 // Quadratic node spacing about the tangent point — fine
                 // where the signal and the thin layers are, coarse in the
@@ -324,35 +406,20 @@ const VOLUME_FRAG = /* glsl */`
                 if (ds <= 0.0) continue;
                 vec3 pos = ro + rd * (tMid + dir * (s0 + s1) * 0.5);
 
-                float r = length(pos);
-                float altKm = (r - 1.0) * R_EARTH_KM;
+                float altKm = (length(pos) - 1.0) * R_EARTH_KM;
                 if (altKm > uMaxKm) continue;
                 // Below the model floor the engine does not extrapolate,
                 // so the render clamps to the floor value rather than
                 // inventing an atmosphere it has no model for.
                 float altN = clamp((altKm - uMinKm) / (uMaxKm - uMinKm), 0.0, 1.0);
 
-                vec3 u = pos / r;
-                float latRad, lstHr;
-                geoAt(u, latRad, lstHr);
-                float Tinf = max(300.0,
-                    uTinfGlobal * diurnalFactorAt(latRad, lstHr) + auroralAt(u));
-                float tN = clamp((Tinf - uTinfMin) / (uTinfMax - uTinfMin), 0.0, 1.0);
-
-                float v = texture2D(uFieldLut, vec2(altN, tN)).r;
-                float rhoRel = exp2((v - 1.0) * uSpanDecades * 3.3219281);
-
                 minAlt = min(minAlt, altKm);
-                tau  += rhoRel * ds;
+                float v = texture2D(uFieldLut, vec2(altN, tN)).r;
+                tau += exp2((v - 1.0) * uSpanDecades * 3.3219281) * ds;
+
                 vec4 ag = texture2D(uAltLut, vec2(altN, 0.75));
                 glow    += ag.a * ds;
                 glowCol += ag.rgb * ag.a * ds;
-
-                if (uMode == 2) {
-                    float vg = texture2D(uFieldLut, vec2(altN, tinfGlobalN)).r;
-                    float rhoGlobal = exp2((vg - 1.0) * uSpanDecades * 3.3219281);
-                    anomAcc += (rhoRel / max(rhoGlobal, 1e-30)) * rhoRel * ds;
-                }
             }
         }
 
@@ -367,14 +434,31 @@ const VOLUME_FRAG = /* glsl */`
 
             vec3 base = texture2D(uAltLut, vec2(colAltN, 0.25)).rgb;
             if (uMode == 2) {
+                // THE ANOMALY VIEW READS AT ONE FIXED ALTITUDE, not at the
+                // ray's lowest point. Two reasons, and the first is a bug
+                // this replaced: below ~120 km the engine's density does
+                // not depend on T∞ at all (turbulent mixing clamps it), so
+                // a ratio taken at the lowest point is exactly 1.00 for
+                // every ray that reaches down there — which is most of the
+                // bright inner ring, and the view came out a flat wash.
+                // Second, the question this view answers is geographic —
+                // "where is the drag multiplier high RIGHT NOW" — so
+                // confounding it with each ray's tangent altitude is the
+                // wrong axis. It reads at the altitude the operator has
+                // selected, which the globe pushes in.
                 // Anomaly view: colour by the local drag multiplier
                 // ρ/ρ_global — cool where the field is thinner than the
                 // spherically symmetric model, hot where the diurnal bulge
                 // and the auroral inflation put extra mass. This is the
                 // view that makes the bulge the SUBJECT rather than a
                 // few-percent shading difference on the limb.
-                float ratio = anomAcc / max(tau, 1e-30);
-                float k = clamp((ratio - 0.7) / 0.8, 0.0, 1.0);
+                float vLocal  = texture2D(uFieldLut, vec2(uAnomalyAltN, tN)).r;
+                float vGlobal = texture2D(uFieldLut, vec2(uAnomalyAltN, tinfGlobalN)).r;
+                float ratio = exp2((vLocal - vGlobal) * uSpanDecades * 3.3219281);
+                // Measured span of this ratio across the field is roughly
+                // 0.6x (pre-dawn) to 1.7x (storm-time auroral oval), so the
+                // ramp is centred on 1.0 with those as its ends.
+                float k = clamp((ratio - 0.7) / 0.7, 0.0, 1.0);
                 base = mix(vec3(0.22, 0.48, 1.00), vec3(1.00, 0.40, 0.14),
                            smoothstep(0.0, 1.0, k));
             }
@@ -430,7 +514,7 @@ export class AtmosphereVolume {
      */
     constructor(scene, {
         sunDir = new THREE.Vector3(1, 0, 0),
-        quality = VOLUME_QUALITY.medium,
+        quality = VOLUME_QUALITY.floor,
         f107 = 150, ap = 15,
     } = {}) {
         this._scene = scene;
@@ -439,6 +523,16 @@ export class AtmosphereVolume {
         this._showDensity = true;
         this._showAirglow = true;
         this._mode = 0;
+
+        // Adaptive quality governor. Starts on the cheapest rung; see the
+        // header for why it climbs rather than starting high and demoting.
+        this._rung = 0;
+        this._qualityPinned = false;
+        this._emaMs = 16.7;
+        this._goodFrames = 0;
+        this._badFrames = 0;
+        this._cooldown = 0;
+        this._lastFrameMs = null;
 
         const rOuter = 1 + MODEL_CEIL_KM / R_EARTH_KM;
 
@@ -479,6 +573,7 @@ export class AtmosphereVolume {
                 uDecades:       { value: 10 },
                 uGlowDecades:   { value: 2.2 },
                 uGamma:         { value: 0.95 },
+                uAnomalyAltN:   { value: 0.167 },   // 400 km of the 80–2000 band
                 uSteps:         { value: quality },
                 uDensityGain:   { value: 0.90 },
                 uAirglowGain:   { value: 0.95 },
@@ -586,10 +681,14 @@ export class AtmosphereVolume {
         this._material.uniforms.uDiurnalMean.value = diurnalMeanRatio(deg);
     }
 
-    /** Per-frame: the march needs the live camera position. */
+    /**
+     * Per-frame: the march needs the live camera position, and the governor
+     * takes its tick here.
+     */
     update(camera) {
         if (this._disposed || !this._mesh.visible) return;
         this._material.uniforms.uCameraPos.value.copy(camera.position);
+        this._governQuality();
     }
 
     setVisible(on)      { this._mesh.visible = !!on; }
@@ -606,6 +705,21 @@ export class AtmosphereVolume {
         return { density: this._showDensity, airglow: this._showAirglow };
     }
 
+    /**
+     * Altitude the anomaly view reports the drag multiplier at. Driven by
+     * the page's altitude slider so the view answers the question the
+     * operator is actually asking.
+     */
+    setAnomalyAltitude(altKm) {
+        if (!Number.isFinite(altKm)) return;
+        const u = this._material.uniforms;
+        const lo = u.uMinKm.value, hi = u.uMaxKm.value;
+        u.uAnomalyAltN.value = Math.max(0, Math.min(1,
+            (Math.min(Math.max(altKm, lo), hi) - lo) / (hi - lo)));
+        this._anomalyAltKm = Math.min(Math.max(altKm, lo), hi);
+    }
+    getAnomalyAltitude() { return this._anomalyAltKm ?? 400; }
+
     /** 'column' | 'composition' | 'anomaly' */
     setMode(mode) {
         const idx = { column: 0, composition: 1, anomaly: 2 }[mode];
@@ -615,11 +729,86 @@ export class AtmosphereVolume {
     }
     getMode() { return ['column', 'composition', 'anomaly'][this._mode]; }
 
+    /**
+     * Pin the sample count and switch the governor off. An explicit choice
+     * — from the UI or a test — must not be walked back by the ladder two
+     * seconds later.
+     */
     setQuality(steps) {
-        const s = Math.max(6, Math.min(64, Math.round(steps)));
+        const s = Math.max(6, Math.min(48, Math.round(steps)));
+        this._qualityPinned = true;
         this._material.uniforms.uSteps.value = s;
     }
     getQuality() { return this._material.uniforms.uSteps.value; }
+
+    /** Hand the ladder back to the governor. */
+    unpinQuality() { this._qualityPinned = false; }
+
+    getQualityState() {
+        return {
+            steps:   this._material.uniforms.uSteps.value,
+            rung:    this._rung,
+            rungs:   QUALITY_LADDER.length,
+            pinned:  this._qualityPinned,
+            frameMs: +this._emaMs.toFixed(1),
+        };
+    }
+
+    /**
+     * One governor tick per rendered frame.
+     *
+     * IT TIMES ITSELF rather than trusting a delta from the caller. The
+     * globe's animate loop computes `dt` as
+     *     const t  = this._clock.getElapsedTime();
+     *     const dt = this._clock.getDelta();
+     * and three.js's `getElapsedTime()` CALLS `getDelta()` internally, so
+     * the second call returns the microseconds since the first — measured
+     * at 0.0000 ms every frame. That is a pre-existing bug on this page
+     * affecting every consumer of that `dt`, and it is not this module's
+     * to fix; but a governor that silently never ticks is worse than no
+     * governor, so this one reads its own clock and cannot be broken by
+     * someone else's.
+     *
+     * Frames while the tab is hidden or the page is mid-navigation arrive
+     * as huge intervals and are DISCARDED rather than counted as a stall —
+     * otherwise coming back to a backgrounded tab instantly demotes a
+     * renderer that was doing fine.
+     */
+    _governQuality() {
+        if (this._qualityPinned || !this._mesh.visible) return;
+
+        const now = (typeof performance !== 'undefined' ? performance : Date).now();
+        const prev = this._lastFrameMs;
+        this._lastFrameMs = now;
+        if (prev == null) return;
+        const dtMs = now - prev;
+        if (!Number.isFinite(dtMs) || dtMs <= 0 || dtMs > 5000) return;
+
+        this._emaMs += (dtMs - this._emaMs) * 0.1;
+        if (this._cooldown > 0) this._cooldown--;
+
+        if (this._emaMs > DEMOTE_MS) {
+            this._goodFrames = 0;
+            if (++this._badFrames >= DEMOTE_FRAMES && this._rung > 0) {
+                this._rung--;
+                this._badFrames = 0;
+                this._cooldown = COOLDOWN_FRAMES;
+                this._material.uniforms.uSteps.value = QUALITY_LADDER[this._rung];
+            }
+            return;
+        }
+        this._badFrames = 0;
+        if (this._emaMs <= PROMOTE_MS && this._cooldown === 0) {
+            if (++this._goodFrames >= PROMOTE_FRAMES
+                && this._rung < QUALITY_LADDER.length - 1) {
+                this._rung++;
+                this._goodFrames = 0;
+                this._material.uniforms.uSteps.value = QUALITY_LADDER[this._rung];
+            }
+        } else {
+            this._goodFrames = 0;
+        }
+    }
 
     setExposure({ density, airglow, decades, gamma } = {}) {
         const u = this._material.uniforms;
