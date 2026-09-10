@@ -52,6 +52,12 @@ import { buildSatelliteModel, buildSatelliteModelLow }
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
     from './upper-atmosphere-layers.js';
+// Continuous volumetric atmosphere. This is the DEFAULT render of the
+// 80-2000 km column; the five gradient shells below stay as the A/B
+// reference and the low-end fallback. Both paths are live — see
+// setAtmosphereRender().
+import { AtmosphereVolume, VOLUME_QUALITY }
+    from './upper-atmosphere-volume.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
@@ -68,6 +74,11 @@ import { SubstormController } from './upper-atmosphere-substorm.js';
 import { getTimeBus } from './upper-atmosphere-time-bus.js';
 import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint } from './sun-altitude.js';
+import { geoFromVectors } from './upper-atmosphere-column.js';
+// On-canvas analysis overlay (altitude ruler · limb probe · diurnal
+// compass). Deliberately three-free — it takes geometry through the
+// hooks below and its physics from the node-tested kernel.
+import { AtmosphereInstruments } from './upper-atmosphere-instruments.js';
 
 // Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
 // frame. Convention: scene +Y is the geographic north pole; lon=0 (Greenwich)
@@ -419,8 +430,13 @@ const SUN_FRAG = /* glsl */`
         // FBM at half scale picks out broad active-region brightening.
         vec3 p = normalize(vPosW) * 4.5;
         float gran   = fbm(p + vec3(0.0, uTime * 0.04, 0.0));
-        float active = fbm(p * 0.6 + vec3(uTime * 0.02, 0.0, uTime * 0.015));
-        float surf   = mix(gran, active, 0.45);
+        // NOT 'active' — that is a reserved word in GLSL ES and this
+        // shader has failed to compile since it shipped, which left the
+        // Sun rendering on three.js's error-fallback material. The
+        // compiler points at the declaration line, so it reads like a
+        // problem with fbm() rather than with the variable's name.
+        float arGlow = fbm(p * 0.6 + vec3(uTime * 0.02, 0.0, uTime * 0.015));
+        float surf   = mix(gran, arGlow, 0.45);
 
         // Limb darkening: the disc edge cools toward orange/red; the
         // centre reads white-hot. Boost the darkening exponent slightly
@@ -558,6 +574,7 @@ export class AtmosphereGlobe {
         this._initScene();
         this._buildEarth();
         this._buildLayerShells();
+        this._buildAtmosphereVolume();
         this._buildDensitySubShells();
         this._buildIsodensitySurfaces();
         this._buildLayerParticles();
@@ -595,6 +612,7 @@ export class AtmosphereGlobe {
         this._initControls();
         this._initResize();
         this._initTooltip();
+        this._initInstruments();
 
         this._clock = new THREE.Clock();
         this._animate = this._animate.bind(this);
@@ -959,6 +977,21 @@ export class AtmosphereGlobe {
             }
         }
 
+        // Volumetric atmosphere: rebuild the (altitude × T∞) and altitude
+        // LUTs for the new state. ~5 ms — profile change only, never per
+        // frame. The march reads density straight out of these, so this is
+        // what makes a storm visibly inflate the rendered column.
+        this._volume?.setState({ f107, ap });
+        // Let the page's legend re-read the display-scale numbers, which
+        // are derived from the LUTs that just rebuilt. Without this the
+        // legend would keep printing the boot-time scale after a storm
+        // preset changed it.
+        try {
+            window.dispatchEvent(new CustomEvent('ua-profile-ready', {
+                detail: { f107, ap, scale: this._volume?.getScaleInfo?.() ?? null },
+            }));
+        } catch (_) { /* SSR / no-window */ }
+
         // Drag-forecast overlay: physics has just refreshed, so per-layer
         // dρ/dt can be recomputed against the previous push and broadcast.
         this._refreshDragHistory();
@@ -972,6 +1005,9 @@ export class AtmosphereGlobe {
      */
     setAltitude(altitudeKm) {
         this._currentAltKm = altitudeKm;
+        // The anomaly view reports the local/model drag multiplier AT the
+        // altitude under examination — follow the slider.
+        this._volume?.setAnomalyAltitude(altitudeKm);
         const r = 1 + altitudeKm / R_EARTH_KM;
         this._ring.scale.set(r, r, r);
 
@@ -1110,7 +1146,14 @@ export class AtmosphereGlobe {
     setVisibility({ satellites = true, shells = true, solarWind = true,
                     particles = true, vectorFields, cascade = true } = {}) {
         if (this._satGroup)      this._satGroup.visible      = satellites;
-        if (this._shellGroup)    this._shellGroup.visible    = shells;
+        // `shells` is the page's "atmosphere layer on/off" toggle, and it
+        // predates there being two renderers for it. Route it through the
+        // render mode rather than writing _shellGroup.visible directly:
+        // with the volume active, poking the shell group back on stacks a
+        // second additive pass over the same physical column and doubles
+        // the limb. _applyAtmosphereVisibility owns the exclusivity.
+        this._shellsWanted = !!shells;
+        this._applyAtmosphereVisibility();
         if (this._swGroup)       this._swGroup.visible       = solarWind;
         if (this._particleGroup) this._particleGroup.visible = particles;
         if (this._cascade)       this._cascade.setVisible(cascade);
@@ -1205,6 +1248,8 @@ export class AtmosphereGlobe {
     }
 
     dispose() {
+        this._volume?.dispose();
+        this._instruments?.dispose();
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
         if (this._debrisRefreshTimer) {
@@ -1358,6 +1403,70 @@ export class AtmosphereGlobe {
         }
         this._scene.add(this._shellGroup);
     }
+
+    // ── Continuous volumetric atmosphere ─────────────────────────────────────
+    // One ray-march through the whole column instead of five discrete
+    // spheres. The shells shaded by local rho at each layer's mid-altitude,
+    // which cannot produce limb brightening: that is a geometric property
+    // of the integral ∫ρ dl, not of the local density. See the header of
+    // upper-atmosphere-volume.js.
+    //
+    // The two renderers are MUTUALLY EXCLUSIVE — running both stacks two
+    // additive passes over the same physical column and doubles the limb.
+    // setAtmosphereRender() owns that exclusivity; don't toggle the groups
+    // directly.
+
+    _buildAtmosphereVolume() {
+        this._volume = new AtmosphereVolume(this._scene, {
+            sunDir: this._sunDir,
+            // The CHEAPEST rung, deliberately. The governor climbs from
+            // here while the frame interval says there is headroom; naming
+            // `medium` here is what put a 1.8 s frame on every software
+            // renderer and blew the DSMC end-to-end budget.
+            quality: VOLUME_QUALITY.floor,
+            f107: 150, ap: 15,
+        });
+        this._atmoRender = 'volume';
+        this._shellsWanted = true;
+        this._applyAtmosphereVisibility();
+    }
+
+    /**
+     * Choose which atmosphere renderer is live: 'volume' (continuous
+     * ray-march, default) or 'shells' (the five discrete gradient shells).
+     * Exactly one is ever visible.
+     */
+    setAtmosphereRender(mode) {
+        if (mode !== 'volume' && mode !== 'shells') return;
+        this._atmoRender = mode;
+        this._applyAtmosphereVisibility();
+    }
+
+    /** The one place that decides which atmosphere renderer is on screen. */
+    _applyAtmosphereVisibility() {
+        const wanted = this._shellsWanted !== false;
+        const onVolume = wanted && this._atmoRender === 'volume';
+        this._volume?.setVisible(onVolume);
+        if (this._shellGroup) this._shellGroup.visible = wanted && !onVolume;
+    }
+    getAtmosphereRender() { return this._atmoRender ?? 'volume'; }
+
+    /** Toggle the two physically distinct components of the volume render. */
+    setVolumeComponents({ density, airglow } = {}) {
+        if (density !== undefined) this._volume?.setDensityVisible(density);
+        if (airglow !== undefined) this._volume?.setAirglowVisible(airglow);
+    }
+    getVolumeComponents() {
+        return this._volume?.getComponentVisibility() ?? { density: false, airglow: false };
+    }
+
+    /** 'column' | 'composition' | 'anomaly' */
+    setVolumeMode(mode) { this._volume?.setMode(mode); }
+    getVolumeAnomalyAltitude() { return this._volume?.getAnomalyAltitude?.() ?? null; }
+    getVolumeMode() { return this._volume?.getMode() ?? 'column'; }
+    setVolumeQuality(steps) { this._volume?.setQuality(steps); }
+    getVolumeQualityState() { return this._volume?.getQualityState?.() ?? null; }
+    getVolumeScaleInfo() { return this._volume?.getScaleInfo() ?? null; }
 
     // ── Density sub-shells ───────────────────────────────────────────────────
     // The five gradient shells answer "which regime am I in"; the sub-shells
@@ -3633,6 +3742,13 @@ export class AtmosphereGlobe {
                 this._fields[id].setSunDir?.(this._sunDir);
             }
         }
+        // Volumetric atmosphere: the diurnal bulge is anchored to the
+        // sub-solar direction, and its mean-preserving normaliser depends
+        // on the solar declination — push both.
+        this._volume?.setSunDir(this._sunDir);
+        this._volume?.setSunDeclination(ssp.lat);
+        this._sunDeclDeg = ssp.lat;
+
         // Drag-forecast overlay: tangent wind is sun-relative.
         this._dragOverlay?.setSunDir?.(this._sunDir);
         // Magnetic-field cascade: sun direction biases the dayside-vs-
@@ -3730,6 +3846,190 @@ export class AtmosphereGlobe {
             layerThicknessKm: layer ? Math.max(1, layer.maxKm - layer.minKm) : null,
         });
         return { ...phys, layer };
+    }
+
+    _initInstruments() {
+        const host = this.canvas.parentElement;
+        if (!host) return;
+        if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+        this._instruments = new AtmosphereInstruments(host, {
+            globe: this,
+            // The instruments read state from the globe rather than from
+            // the page so the page bootstrap needs no new wiring and the
+            // two can never disagree about which (F10.7, Ap) is live.
+            getState: () => ({
+                f107:       this._state?.f107 ?? 150,
+                ap:         this._state?.ap ?? 15,
+                altitudeKm: this._currentAltKm ?? 400,
+                sunDeclDeg: this._sunDeclDeg ?? 0,
+            }),
+        });
+    }
+
+    setInstrumentsEnabled(on) { this._instruments?.setEnabled(on); }
+    getInstrumentsEnabled()   { return this._instruments?.getEnabled() ?? false; }
+    setLimbProbeEnabled(on)   { this._instruments?.setProbeEnabled(on); }
+    getLimbProbeEnabled()     { return this._instruments?.getProbeEnabled() ?? false; }
+    getLimbProbe()            { return this._instruments?.getProbe() ?? null; }
+
+    // ── Geometry hooks for the on-canvas instruments ─────────────────────────
+    // upper-atmosphere-instruments.js draws a 2-D overlay above the WebGL
+    // canvas and needs two things from the scene: where a world point lands
+    // on screen, and what atmosphere a given screen pixel is looking
+    // through. Both live here rather than in the overlay so the overlay
+    // stays free of three.js — the physics it reports then comes from the
+    // node-tested kernel, and nothing about it needs a GPU to verify.
+
+    /**
+     * World point → canvas pixel. `behind` is true when the point is
+     * behind the camera, where the perspective divide flips the sign and a
+     * naive projection silently draws the marker mirrored across the
+     * screen centre.
+     */
+    projectToScreen(x, y, z) {
+        const v = new THREE.Vector3(x, y, z);
+        v.project(this._camera);
+        const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+        // project() divides by w; when the point is behind the camera that
+        // divide is by a negative number.
+        const dir = new THREE.Vector3(x, y, z).sub(this._camera.position);
+        const fwd = new THREE.Vector3();
+        this._camera.getWorldDirection(fwd);
+        return {
+            x: (v.x * 0.5 + 0.5) * w,
+            y: (-v.y * 0.5 + 0.5) * h,
+            behind: dir.dot(fwd) <= 0,
+        };
+    }
+
+    /**
+     * What is this screen pixel looking through?
+     *
+     * Returns the view ray's tangent geometry: the altitude of its closest
+     * approach to the Earth's centre, the world point where that happens,
+     * and the (latitude, local solar time) there — which is what makes the
+     * probe able to report the LOCAL density rather than the spherically
+     * symmetric one.
+     *
+     * `hitsPlanet` distinguishes a ray that meets the solid Earth (the
+     * disc) from one that passes over the limb. For a disc ray the
+     * "tangent altitude" is below the surface and meaningless; the surface
+     * intersection is reported instead, so the probe can say what the
+     * column above that surface point is.
+     *
+     * @param {number} nx normalised device x, −1…+1
+     * @param {number} ny normalised device y, −1…+1
+     */
+    probeScreenRay(nx, ny) {
+        const cam = this._camera;
+        const origin = cam.position.clone();
+        const dir = new THREE.Vector3(nx, ny, 0.5)
+            .unproject(cam).sub(origin).normalize();
+
+        // Closest approach of the ray to the origin (Earth centre).
+        const tClose = -origin.dot(dir);
+        const camAltKm = (origin.length() - 1) * R_EARTH_KM;
+
+        // Does it meet the planet? |perpendicular distance| < 1 R⊕ and the
+        // approach is in front of us.
+        const perp = origin.clone().addScaledVector(dir, Math.max(tClose, 0));
+        const perpR = tClose > 0 ? perp.length() : origin.length();
+        const hitsPlanet = tClose > 0 && perpR < 1.0;
+
+        let point, altKm;
+        if (hitsPlanet) {
+            // Near intersection with the unit sphere.
+            const b = origin.dot(dir);
+            const c = origin.lengthSq() - 1;
+            const disc = Math.max(0, b * b - c);
+            const t = -b - Math.sqrt(disc);
+            point = origin.clone().addScaledVector(dir, t);
+            altKm = 0;
+        } else if (tClose > 0) {
+            point = perp;
+            altKm = (perpR - 1) * R_EARTH_KM;
+        } else {
+            // Looking away from the planet entirely — the ray only
+            // recedes, so its closest approach is the camera itself.
+            point = origin.clone();
+            altKm = camAltKm;
+        }
+
+        const geo = geoFromVectors(
+            [point.x, point.y, point.z],
+            [this._sunDir.x, this._sunDir.y, this._sunDir.z],
+        );
+        return {
+            tangentAltKm: altKm,
+            hitsPlanet,
+            withinModel: altKm <= 2000,
+            point: { x: point.x, y: point.y, z: point.z },
+            latDeg: geo.latDeg,
+            lstHr: geo.lstHr,
+            camAltKm,
+        };
+    }
+
+    /**
+     * Screen RADII of the limb at a set of altitudes, plus the disc centre.
+     *
+     * Returns radii rather than points so the overlay can hang its ruler
+     * along whatever screen bearing is least cluttered without this method
+     * needing to know anything about the page's chrome.
+     *
+     * The radius for altitude h is the projected distance from the disc
+     * centre to the silhouette of the sphere of radius (1 + h/R⊕) — the
+     * point where the view ray is TANGENT to that sphere, which is what
+     * "the limb at h" means. Using the silhouette rather than a fixed
+     * world direction is what keeps the ticks on the limb as the camera
+     * orbits.
+     *
+     * Off-centre the silhouette of a sphere under perspective is a slight
+     * ellipse, so one radius is an approximation away from the view axis.
+     * At any framing where the whole planet is visible the error is well
+     * under a pixel; a ruler is not a measurement instrument here, it is a
+     * legend for the render's vertical axis.
+     */
+    limbTicks(altitudesKm) {
+        const cam = this._camera.position.clone();
+        const d = cam.length();
+        const centre = this.projectToScreen(0, 0, 0);
+        if (!Number.isFinite(d) || d <= 0 || centre.behind) {
+            return { centre: null, ticks: [] };
+        }
+        const camDir = cam.clone().normalize();
+        // Any direction perpendicular to the view axis works for measuring
+        // the silhouette radius.
+        let side = new THREE.Vector3(0, 1, 0)
+            .sub(camDir.clone().multiplyScalar(camDir.y));
+        if (side.lengthSq() < 1e-8) side = new THREE.Vector3(1, 0, 0);
+        side.normalize();
+
+        const ticks = [];
+        for (const altKm of altitudesKm) {
+            const r = 1 + altKm / R_EARTH_KM;
+            if (r >= d) continue;                 // camera inside this shell
+            const cosA = r / d;
+            const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
+            const p = camDir.clone().multiplyScalar(r * cosA)
+                .addScaledVector(side, r * sinA);
+            const scr = this.projectToScreen(p.x, p.y, p.z);
+            if (scr.behind) continue;
+            ticks.push({
+                altKm,
+                screenRadius: Math.hypot(scr.x - centre.x, scr.y - centre.y),
+            });
+        }
+        // Surface radius too, so the overlay can anchor the ruler's base.
+        const cosS = 1 / d, sinS = Math.sqrt(Math.max(0, 1 - cosS * cosS));
+        const ps = camDir.clone().multiplyScalar(cosS).addScaledVector(side, sinS);
+        const ss = this.projectToScreen(ps.x, ps.y, ps.z);
+        return {
+            centre: { x: centre.x, y: centre.y },
+            surfaceRadius: ss.behind ? null
+                : Math.hypot(ss.x - centre.x, ss.y - centre.y),
+            ticks,
+        };
     }
 
     _initResize() {
@@ -4005,6 +4305,13 @@ export class AtmosphereGlobe {
                 sh.material.uniforms.uCameraPos.value.copy(this._camera.position);
             }
         }
+        // The volumetric march is camera-origin: every fragment casts its
+        // ray from here, so this uniform is not optional. This call also
+        // ticks the volume's quality governor, which starts on the cheapest
+        // rung and climbs only while the frame interval says there is
+        // headroom — it times itself rather than taking the `dt` above,
+        // which is ~0 every frame (see _governQuality's comment).
+        this._volume?.update(this._camera);
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.
@@ -4098,6 +4405,11 @@ export class AtmosphereGlobe {
         }
 
         this._renderer.render(this._scene, this._camera);
+
+        // 2-D instrument overlay, drawn after the GL frame so its ruler and
+        // probe sit on top of what was just rendered. Its expensive parts
+        // self-gate on the pointer and state actually having moved.
+        this._instruments?.draw();
     }
 
     /**
@@ -4108,6 +4420,21 @@ export class AtmosphereGlobe {
      */
     _fadeShellsForCameraAltitude() {
         const altKm = this.getCameraAltitudeKm();
+
+        // Same problem for the volume: a camera deep inside the column
+        // looks outward through the densest part of it and the additive
+        // march saturates to a wall. Ease the whole render down as the
+        // camera descends through the band rather than switching it off,
+        // so the transition reads as flying into thickening air.
+        if (this._volume) {
+            const target = altKm > 900 ? 1.0
+                         : altKm > 200 ? 0.35 + 0.65 * ((altKm - 200) / 700)
+                         : 0.35;
+            const cur = this._volumeFade ?? 1;
+            this._volumeFade = cur + (target - cur) * 0.12;
+            this._volume.setFade(this._volumeFade);
+        }
+
         for (const sh of this._shells) {
             const ud = sh.userData;
             const inside = altKm >= ud.minKm && altKm <= ud.maxKm;
