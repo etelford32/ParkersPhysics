@@ -16,6 +16,9 @@
  *   • chipLabel never says OBSERVED in model mode, and reports age / stale
  *   • REAL_TIME_ROT_MUL makes one synodic rotation take 27.2753 d
  *   • the committed fixtures + manifest match the generator's plants
+ *   • calibrateDisk recovers a planted limb law, is BLIND to the browse
+ *     product's colour LUT, and fits limb BRIGHTENING negative (Phase 2b —
+ *     this is the gate on the observed/model seam)
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -27,6 +30,7 @@ import {
     solarEphemeris, heliographicToVec, projectDiskUV, projectToPixel,
     measureDisk, resolveDiskGeometry, rotationDeRotate, slotRotAngle, diffRotFactor,
     freshnessFor, chipLabel, diskFractionFor,
+    calibrateDisk, limbLaw, srgbToLinear, linearToSrgb, luminance,
 } from '../js/sun-observed.js';
 import { renderSyntheticDisk, toGray, PLANTED, FIXTURE_EPOCH_ISO } from '../scripts/lib/sdo-synth.mjs';
 
@@ -211,6 +215,137 @@ ok('tests/fixtures/sdo carries every channel the page wraps + a manifest with th
     // Regenerating must be a no-op on the ground truth (deterministic renderer).
     const again = renderSyntheticDisk('white', { size: manifest.size });
     assert.deepEqual(again.meta.planted, manifest.frames.white.planted);
+});
+
+// ── Frame photometry (Phase 2b: observed ↔ model fusion) ───────────────────
+// These pin the fix for the terminator seam. calibrateDisk works in the space
+// the SHADER sees — the texture is tagged SRGBColorSpace, so texture2D returns
+// srgbToLinear(byte) — hence every synthetic frame below is ENCODED with
+// linearToSrgb. A frame authored with bytes linear in intensity (which is what
+// scripts/lib/sdo-synth.mjs does) is a different, and for this purpose wrong,
+// thing to fit.
+
+/** RGBA frame carrying a known limb law I0·(1 − u1(1−μ) − u2(1−μ)²), optionally colorized. */
+function makeCalFrame({ size = 256, r = 0.465, I0 = 0.82, u1 = 0.88, u2 = -0.23,
+                        chroma = [1, 1, 1], spots = [], speckle = 0 } = {}) {
+    const rgba = new Uint8ClampedArray(size * size * 4);
+    const R = r * size, cx = size / 2, cy = size / 2;
+    let seed = 12345;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+            const rho = Math.hypot(dx, dy) / R;
+            const o = (y * size + x) * 4;
+            rgba[o + 3] = 255;
+            if (rho >= 1) continue;
+            const mu = Math.sqrt(Math.max(0, 1 - rho * rho));
+            let I = I0 * limbLaw(mu, u1, u2);
+            if (speckle) I *= 1 + (rnd() - 0.5) * speckle;
+            for (const s of spots) {
+                const d = Math.hypot(x - s.x, y - s.y) / s.r;
+                if (d < 1) I *= 0.10;                    // a hard umbra: the fit must ignore it
+            }
+            rgba[o]     = linearToSrgb(I * chroma[0]);
+            rgba[o + 1] = linearToSrgb(I * chroma[1]);
+            rgba[o + 2] = linearToSrgb(I * chroma[2]);
+        }
+    }
+    return { rgba, size, geom: { cx: 0.5, cy: 0.5, r } };
+}
+
+ok('calibrateDisk recovers a planted 2-term limb law and the disk-centre level', () => {
+    const f = makeCalFrame({ u1: 0.88, u2: -0.23, I0: 0.82 });
+    const c = calibrateDisk(f.rgba, f.size, f.size, f.geom);
+    assert.ok(c.ok, 'fit converged');
+    assert.ok(Math.abs(c.u1 - 0.88) < 0.05, `u1 ${c.u1}`);
+    assert.ok(Math.abs(c.u2 + 0.23) < 0.06, `u2 ${c.u2}`);
+    assert.ok(Math.abs(c.I0 - 0.82) / 0.82 < 0.04, `I0 ${c.I0}`);
+    // The fitted law reproduces the frame's own profile across the resolved disk.
+    for (const mu of [0.35, 0.5, 0.7, 0.9]) {
+        const want = limbLaw(mu, 0.88, -0.23), got = limbLaw(mu, c.u1, c.u2);
+        assert.ok(Math.abs(got - want) < 0.03, `law at mu=${mu}: ${got} vs ${want}`);
+    }
+});
+
+ok('sunspots do not bend the fit — the per-shell statistic is a median, not a mean', () => {
+    const spots = [{ x: 100, y: 128, r: 13 }, { x: 150, y: 100, r: 10 }];
+    const clean = calibrateDisk(...Object.values(makeCalFrame()).slice(0, 1),
+        256, 256, { cx: 0.5, cy: 0.5, r: 0.465 });
+    const f = makeCalFrame({ spots });
+    const c = calibrateDisk(f.rgba, f.size, f.size, f.geom);
+    assert.ok(Math.abs(c.u1 - clean.u1) < 0.04, `u1 moved ${clean.u1} → ${c.u1}`);
+    assert.ok(Math.abs(c.I0 - clean.I0) / clean.I0 < 0.02, `I0 moved ${clean.I0} → ${c.I0}`);
+});
+
+ok('THE DOUBLE-APPLY GATE: a gold-colorized browse frame yields the same law + the same relative structure as its greyscale twin', () => {
+    // sdo.gsfc.nasa.gov ships latest_*_HMIIC.jpg gold-colorized; our fixtures
+    // are greyscale. Before the calibration, the page applied a fixed warm
+    // u_obsTint to BOTH, gilding the gold one twice. The physics the shader
+    // consumes — I/(I0·limbLaw(μ)) after dividing chroma out — must be
+    // identical for the two.
+    const grey = makeCalFrame({ speckle: 0.18 });
+    const gold = makeCalFrame({ speckle: 0.18, chroma: [1.19, 0.97, 0.55] });
+    const cg = calibrateDisk(grey.rgba, grey.size, grey.size, grey.geom);
+    const cc = calibrateDisk(gold.rgba, gold.size, gold.size, gold.geom);
+
+    assert.ok(Math.abs(cg.chroma[0] - 1) < 0.02 && Math.abs(cg.chroma[2] - 1) < 0.02,
+        `greyscale chroma ≈ (1,1,1), got ${cg.chroma}`);
+    assert.ok(cc.chroma[0] / cc.chroma[2] > 1.7,
+        `gold chroma is warm, got ${cc.chroma}`);
+    assert.ok(Math.abs(cg.u1 - cc.u1) < 0.05 && Math.abs(cg.u2 - cc.u2) < 0.05,
+        `same law: (${cg.u1},${cg.u2}) vs (${cc.u1},${cc.u2})`);
+
+    // The dimensionless field the shader actually draws, sampled on the disk.
+    const rel = (f, c, x, y) => {
+        const o = (y * f.size + x) * 4;
+        const lin = [srgbToLinear(f.rgba[o]), srgbToLinear(f.rgba[o + 1]), srgbToLinear(f.rgba[o + 2])];
+        const L = luminance(lin[0] / c.chroma[0], lin[1] / c.chroma[1], lin[2] / c.chroma[2]);
+        const dx = x + 0.5 - f.size / 2, dy = y + 0.5 - f.size / 2;
+        const mu = Math.sqrt(Math.max(0, 1 - Math.pow(Math.hypot(dx, dy) / (f.geom.r * f.size), 2)));
+        return L / (c.I0 * limbLaw(mu, c.u1, c.u2));
+    };
+    let worst = 0;
+    for (const [x, y] of [[128, 128], [100, 140], [160, 110], [128, 90], [95, 128]]) {
+        const a = rel(grey, cg, x, y), b = rel(gold, cc, x, y);
+        worst = Math.max(worst, Math.abs(a - b) / a);
+        assert.ok(Math.abs(a - 1) < 0.35, `quiet-disk contrast near 1, got ${a}`);
+    }
+    assert.ok(worst < 0.03, `colorization must not change the physics, worst ${worst}`);
+});
+
+ok('limb BRIGHTENING (AIA) fits negative — one machinery covers both instruments', () => {
+    const f = makeCalFrame({ u1: -0.55, u2: -0.40, r: 0.390 });
+    const c = calibrateDisk(f.rgba, f.size, f.size, { cx: 0.5, cy: 0.5, r: 0.390 });
+    assert.ok(c.u1 < -0.3, `u1 negative, got ${c.u1}`);
+    assert.ok(limbLaw(0.25, c.u1, c.u2) > limbLaw(0.95, c.u1, c.u2), 'brighter toward the limb');
+});
+
+ok('calibrateDisk degrades instead of dividing by zero: black frame, tiny disk, missing pixels', () => {
+    const black = new Uint8ClampedArray(64 * 64 * 4);
+    for (let i = 3; i < black.length; i += 4) black[i] = 255;
+    const c1 = calibrateDisk(black, 64, 64, { cx: 0.5, cy: 0.5, r: 0.465 });
+    assert.equal(c1.ok, false);
+    assert.equal(c1.I0, 1);                       // the no-op fallback, never 0
+    assert.deepEqual(c1.chroma, [1, 1, 1]);
+    const c2 = calibrateDisk(black, 64, 64, { cx: 0.5, cy: 0.5, r: 0.001 });
+    assert.equal(c2.ok, false);
+    assert.ok(Number.isFinite(c2.I0) && c2.I0 > 0);
+});
+
+ok('sigma reports the frame’s own resolved contrast (a speckled frame reads higher than a smooth one)', () => {
+    const smooth = makeCalFrame({ speckle: 0 });
+    const rough  = makeCalFrame({ speckle: 0.30 });
+    const cs = calibrateDisk(smooth.rgba, smooth.size, smooth.size, smooth.geom);
+    const cr = calibrateDisk(rough.rgba,  rough.size,  rough.size,  rough.geom);
+    assert.ok(cs.sigma < 0.03, `smooth sigma ${cs.sigma}`);
+    assert.ok(cr.sigma > cs.sigma * 2, `rough sigma ${cr.sigma} vs ${cs.sigma}`);
+});
+
+ok('srgbToLinear / linearToSrgb round-trip within a byte', () => {
+    for (const b of [0, 1, 12, 55, 128, 200, 254, 255]) {
+        assert.ok(Math.abs(linearToSrgb(srgbToLinear(b)) - b) <= 1, `byte ${b}`);
+    }
 });
 
 console.log(`\n${passed} checks passed`);

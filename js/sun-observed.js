@@ -258,6 +258,226 @@ export function resolveDiskGeometry(measured, channel) {
     return { cx: 0.5, cy: 0.5, r: fallback, source: 'fallback' };
 }
 
+// ── Frame photometry (Phase 2b: observed ↔ model fusion) ───────────────────
+//
+// THE SEAM BUG THIS EXISTS TO KILL. The observed hemisphere is pinned to the
+// Sun–Earth line; the camera is not. Orbit ~30° off that line and the disk
+// used to split into two visually unrelated halves along a hard vertical
+// terminator (measured, and gated ever since by tests/sun-fusion.spec.js).
+// Three
+// independent cliffs stacked at that seam:
+//
+//   1. μ MISMATCH. A browse frame has its limb darkening BAKED IN at the
+//      EARTH's μ. The procedural photosphere applies Neckel & Labs at the
+//      VIEWER's μ. Off-axis those are different angles for the same point, so
+//      the frame's dark limb butted against the model's bright disk centre.
+//   2. TONEMAP MISMATCH. The observed pixel was composited AFTER the ACES
+//      curve the model half goes through, so the observation rendered flat
+//      and desaturated next to a filmic model.
+//   3. LUT DOUBLE-APPLY. `u_obsTint` mapped "greyscale HMI → the page's
+//      palette", but sdo.gsfc.nasa.gov's latest_*_HMIIC.jpg is a GOLD-
+//      COLORIZED browse product. The tint gilded an already-gilded frame.
+//      (Our synthetic fixtures ARE greyscale, which is exactly why the bug
+//      never showed up in CI — see tests/fixtures/sdo/README.md.)
+//
+// The fix is to stop treating a browse JPEG as radiometry. Its absolute level
+// and its colour LUT are display choices, not measurements; what IS a
+// measurement is the RELATIVE structure — where the Sun is brighter or darker
+// than its own smooth limb-darkened disk. So we measure the frame's own
+// photometric envelope here and hand the shader a dimensionless contrast
+// field. The renderer then draws that structure on the model's calibrated,
+// tonemapped photosphere, and the two hemispheres agree at the terminator BY
+// CONSTRUCTION rather than by a hand-tuned constant.
+//
+// What is measured (all of it from the frame itself, per refresh):
+//   I0      disk-centre intensity, LINEAR luminance (the sRGB EOTF is undone
+//           here because the texture is tagged SRGBColorSpace, so the shader's
+//           texture2D returns linear — the two must agree or every ratio below
+//           is off by a gamma)
+//   u1,u2   the frame's OWN limb law, least-squares fit of
+//               I(μ)/I0 = 1 − u1(1−μ) − u2(1−μ)²
+//           on μ-binned MEDIANS (medians, not means: sunspots and flare
+//           kernels are outliers we must not fit through). EUV frames are
+//           limb-BRIGHTENED and simply fit negative coefficients — the same
+//           machinery covers both instruments with no special case.
+//   chroma  the frame's colorization, normalised to unit luminance. (1,1,1)
+//           for a greyscale product, ~(1.15,0.98,0.62) for HMIIC gold.
+//           Dividing it out is what stops the double-apply in (3).
+//   sigma   RMS relative contrast of the quiet disk, i.e. how much structure
+//           the frame actually resolves. Reported for provenance only — it is
+//           NOT currently used to trim the model's granulation contrast, and
+//           the two are legitimately different anyway (SDO at ~725 km/px
+//           barely resolves a 1 Mm granule; the model draws them fully).
+//   resid   how well the fitted law reproduces the frame's own shell medians.
+//           This is the gate on `ok`: the shader only needs dividing by the
+//           law to flatten the quiet disk to 1, so goodness of fit — never
+//           agreement with a textbook coefficient — is the right criterion.
+
+/** sRGB electro-optical transfer function — byte → linear 0..1. */
+export function srgbToLinear(c) {
+    const x = c / 255;
+    return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+}
+
+/** Inverse of srgbToLinear — linear 0..1 → byte. (Fixture generators + tests.) */
+export function linearToSrgb(x) {
+    const c = x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(c * 255)));
+}
+
+/** Rec.709 relative luminance of a LINEAR rgb triple. */
+export function luminance(r, g, b) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
+
+/** Two-term limb law I(μ)/I0. Shared with the GLSL mirror in sunFS. */
+export function limbLaw(mu, u1, u2) {
+    const x = 1 - Math.max(0, Math.min(1, mu));
+    return Math.max(0.02, 1 - u1 * x - u2 * x * x);
+}
+
+const MU_BINS = 24;          // μ ∈ (0,1] — ~2.5 % of the radius each near centre
+const MU_FIT_FLOOR = 0.22;   // below this the browse frame is foreshortened mush
+const RESID_MAX = 0.05;      // fit must reproduce the shell medians to 5 % of I0
+
+/**
+ * Measure a decoded frame's photometric envelope. PURE.
+ *
+ * @param {ArrayLike<number>} rgba  row-major RGBA bytes, w·h·4
+ * @param {number} w
+ * @param {number} h
+ * @param {{cx:number, cy:number, r:number}} geom  disk geometry as FRACTIONS of
+ *        the frame (cx/w, cy/h, r/min(w,h)) — i.e. measureDisk's output.
+ * @returns {{I0:number, u1:number, u2:number, sigma:number, chroma:number[],
+ *            resid:number, ok:boolean, samples:number}}
+ *          `ok` means the fitted law reproduces the frame to RESID_MAX; the
+ *          caller must fall back to the legacy tint when it is false, never
+ *          divide by a law that does not describe the frame.
+ */
+export function calibrateDisk(rgba, w, h, geom) {
+    const R = geom.r * Math.min(w, h);
+    const cx = geom.cx * w, cy = geom.cy * h;
+    const fail = { I0: 1, u1: 0, u2: 0, sigma: 0, chroma: [1, 1, 1], resid: 1, ok: false, samples: 0 };
+    if (!(R > 8) || !Number.isFinite(cx) || !Number.isFinite(cy)) return fail;
+
+    // Polar sweep: 96 rays × MU_BINS radial shells. Sampling in μ rather than
+    // in r puts the shells where the law actually varies (μ is flat near the
+    // centre and collapses at the limb), so the fit is not dominated by the
+    // huge-area outer annulus.
+    const bins = Array.from({ length: MU_BINS }, () => []);
+    let sumR = 0, sumG = 0, sumB = 0, nChroma = 0, samples = 0;
+    const RAYS = 96;
+    for (let bi = 0; bi < MU_BINS; bi++) {
+        // Bin centre in μ, mapped back to a radius: r/R = √(1 − μ²).
+        const mu = (bi + 0.5) / MU_BINS;
+        const rad = Math.sqrt(Math.max(0, 1 - mu * mu)) * R;
+        for (let k = 0; k < RAYS; k++) {
+            const a = (k + 0.5) * 2 * Math.PI / RAYS;
+            const x = Math.round(cx + Math.cos(a) * rad);
+            const y = Math.round(cy + Math.sin(a) * rad);
+            if (x < 0 || y < 0 || x >= w || y >= h) continue;
+            const i = (y * w + x) * 4;
+            const lr = srgbToLinear(rgba[i]), lg = srgbToLinear(rgba[i + 1]), lb = srgbToLinear(rgba[i + 2]);
+            const L = luminance(lr, lg, lb);
+            bins[bi].push(L);
+            samples++;
+            if (mu > 0.7) { sumR += lr; sumG += lg; sumB += lb; nChroma++; }
+        }
+    }
+    if (samples < MU_BINS * 8 || !nChroma) return fail;
+
+    // Median per shell — a sunspot or a flare kernel must not bend the law.
+    const med = bins.map((b) => {
+        if (!b.length) return NaN;
+        b.sort((p, q) => p - q);
+        const m = b.length >> 1;
+        return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2;
+    });
+
+    // Guard a frame that is black or unreadable — a failed decode must not
+    // divide by ~0 downstream.
+    if (!Number.isFinite(med[MU_BINS - 1]) || med[MU_BINS - 1] < 0.01) return fail;
+
+    // Least squares on the AFFINE form  I(μ) = a0 + a1·x + a2·x²,  x = 1 − μ,
+    // then I0 = a0, u1 = −a1/a0, u2 = −a2/a0.
+    //
+    // Fitting the intercept rather than reading I0 off the innermost shell is
+    // load-bearing: the top shell sits at μ = 1 − 1/(2·MU_BINS) = 0.979, where
+    // an HMI law is already ~1.8 % below disk centre. Anchoring I0 there and
+    // fitting only (u1,u2) biased u1 low by ~0.07 — measured, and it is a
+    // systematic, so it survived averaging. Three unknowns, 3×3 normal
+    // equations, closed form by Cramer; no solver dependency.
+    const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    const rhs = [0, 0, 0];
+    let nFit = 0;
+    for (let bi = 0; bi < MU_BINS; bi++) {
+        const mu = (bi + 0.5) / MU_BINS;
+        if (mu < MU_FIT_FLOOR || !Number.isFinite(med[bi])) continue;
+        const x = 1 - mu;
+        const basis = [1, x, x * x];
+        for (let a = 0; a < 3; a++) {
+            for (let b = 0; b < 3; b++) M[a][b] += basis[a] * basis[b];
+            rhs[a] += basis[a] * med[bi];
+        }
+        nFit++;
+    }
+    const det3 = (m) =>
+          m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    const sub = (col) => M.map((row, a) => row.map((v, b) => (b === col ? rhs[a] : v)));
+    const D = det3(M);
+    let I0 = med[MU_BINS - 1], u1 = 0, u2 = 0, solved = false;
+    if (nFit >= 4 && Math.abs(D) > 1e-14) {
+        const a0 = det3(sub(0)) / D, a1 = det3(sub(1)) / D, a2 = det3(sub(2)) / D;
+        if (Number.isFinite(a0) && a0 > 0.01) {
+            I0 = a0; u1 = -a1 / a0; u2 = -a2 / a0; solved = true;
+        }
+    }
+    if (!Number.isFinite(I0) || I0 < 0.01) return fail;
+    // The clamp exists only to keep the law from running away on a degenerate
+    // frame — it is deliberately WIDE, because the coefficients measured here
+    // are NOT the physical Neckel & Labs numbers and must not be judged
+    // against them. A browse product carries an arbitrary display stretch on
+    // top of the physics, and it is sampled through the sRGB EOTF (the shader
+    // does the same, which is the whole point), so an HMI frame whose physical
+    // u1 ≈ 0.9 legitimately fits u1 ≈ 1.6 here. Clamping to the physics range
+    // and calling a trim a failure is what disabled fusion on the first
+    // colorized frame it ever saw — measured.
+    const u1c = Math.max(-3.0, Math.min(3.0, u1));
+    const u2c = Math.max(-3.0, Math.min(3.0, u2));
+
+    // Goodness of fit: RMS of the SHELL MEDIANS about the fitted envelope,
+    // relative to I0. This — not agreement with a textbook coefficient — is
+    // what decides whether the fusion path is safe to take, because all the
+    // shader asks of the law is that dividing by it flattens the quiet disk to
+    // 1. A frame the law does not describe falls back to the legacy tint.
+    let rn = 0, racc = 0;
+    for (let bi = 0; bi < MU_BINS; bi++) {
+        const mu = (bi + 0.5) / MU_BINS;
+        if (mu < MU_FIT_FLOOR || !Number.isFinite(med[bi])) continue;
+        const d = (med[bi] - I0 * limbLaw(mu, u1c, u2c)) / I0;
+        racc += d * d; rn++;
+    }
+    const resid = rn ? Math.sqrt(racc / rn) : 1;
+
+    // Quiet-disk contrast: RMS residual about the fitted envelope, inside the
+    // well-resolved annulus only.
+    let n = 0, acc = 0;
+    for (let bi = 0; bi < MU_BINS; bi++) {
+        const mu = (bi + 0.5) / MU_BINS;
+        if (mu < 0.45 || !bins[bi].length) continue;
+        const model = I0 * limbLaw(mu, u1c, u2c);
+        for (const L of bins[bi]) { const d = L / model - 1; acc += d * d; n++; }
+    }
+    const sigma = n ? Math.sqrt(acc / n) : 0;
+
+    // Colorization, normalised to unit luminance so dividing it out changes
+    // hue only and never level.
+    const cl = luminance(sumR / nChroma, sumG / nChroma, sumB / nChroma) || 1;
+    const chroma = [sumR / nChroma / cl, sumG / nChroma / cl, sumB / nChroma / cl];
+
+    return { I0, u1: u1c, u2: u2c, sigma, chroma, resid, samples, ok: solved && resid < RESID_MAX };
+}
+
 // ── Freshness + chip ───────────────────────────────────────────────────────
 
 export const FRESH_WARN_S = 30 * 60;   // matches the pipeline-registry row
@@ -349,7 +569,7 @@ export class SunObserved {
         this.state = {
             mode: 'model', reason: null, channel: 'white', observedAt: null,
             feedDown: false, geometry: null, pAngleApplied: false, b0Deg: 0, pDeg: 0,
-            lastError: null, loads: 0,
+            lastError: null, loads: 0, photometry: null,
         };
         this._timer = null;
         this._fade  = { active: false, t0: 0 };
@@ -415,15 +635,21 @@ export class SunObserved {
             const blob = await res.blob();
             const img  = await decodeImage(blob);
             if (gen !== this._gen && this.channel !== ch) { return null; }
-            const measured = measureImageDisk(img);
-            const geom = resolveDiskGeometry(measured, ch);
+            const read = readFrame(img);
+            const geom = resolveDiskGeometry(read.measured, ch);
+            // Photometry off the SAME readback (see calibrateDisk's header —
+            // this is what keeps the observed and model hemispheres from
+            // splitting along the terminator).
+            const photo = read.rgba
+                ? calibrateDisk(read.rgba, read.size, read.size, geom)
+                : { I0: 1, u1: 0, u2: 0, sigma: 0, chroma: [1, 1, 1], resid: 1, ok: false, samples: 0 };
             const tex = new this.THREE.Texture(img);
             tex.colorSpace = this.THREE.SRGBColorSpace;
             tex.minFilter = this.THREE.LinearMipmapLinearFilter;
             tex.magFilter = this.THREE.LinearFilter;
             tex.anisotropy = 4;
             tex.needsUpdate = true;
-            const frame = { tex, observedAt, geom, bucket, fetchedAt: this.now(), url };
+            const frame = { tex, observedAt, geom, photo, bucket, fetchedAt: this.now(), url };
             const old = this.frames.get(ch);
             this.frames.set(ch, frame);
             this.state.loads++;
@@ -458,10 +684,19 @@ export class SunObserved {
         u.u_obsGeom.value.set(f.geom.cx, 1 - f.geom.cy, f.geom.r, 0);
         u.u_obsB0.value   = eph.b0Deg * DEG;
         u.u_obsKind.value = CHANNELS[ch].kind;
+        // Measured photometry → the fusion uniforms. A frame we could not
+        // calibrate (tainted canvas, black decode) falls back to a flat law,
+        // which makes the re-projection a no-op — the disk still renders, it
+        // just renders exactly the way it did before this phase.
+        const ph = f.photo || { I0: 1, u1: 0, u2: 0, sigma: 0, chroma: [1, 1, 1], resid: 1, ok: false };
+        if (u.u_obsCal)    u.u_obsCal.value.set(ph.I0, ph.u1, ph.u2, ph.sigma);
+        if (u.u_obsChroma) u.u_obsChroma.value.set(ph.chroma[0], ph.chroma[1], ph.chroma[2]);
+        if (u.u_obsFuse)   u.u_obsFuse.value = ph.ok ? 1.0 : 0.0;
         u.u_obsOn.value   = 1.0;
         this._emit({
             mode: 'observed', reason: null, channel: ch, observedAt: f.observedAt,
             geometry: f.geom.source, b0Deg: eph.b0Deg, pDeg: eph.pDeg, pAngleApplied: false,
+            photometry: { I0: ph.I0, u1: ph.u1, u2: ph.u2, sigma: ph.sigma, chroma: ph.chroma, resid: ph.resid, ok: ph.ok },
         });
         // Dispose the frame the cross-fade no longer needs, after it ends.
         if (previousFrame && previousFrame.tex && previousFrame.tex !== f.tex) {
@@ -499,18 +734,32 @@ async function decodeImage(blob) {
     }
 }
 
-/** Downsample to 256² and run measureDisk. Returns null if the canvas is unavailable. */
-export function measureImageDisk(img, size = 256) {
+/**
+ * Downsample to `size`² ONCE and run both the geometry measurement and the
+ * photometric calibration off the same readback — a full-res getImageData per
+ * refresh was 40 ms of main thread on a 4096 frame, and the two passes want
+ * exactly the same pixels. Returns `{ measured, rgba, size }`, or nulls when
+ * the canvas is unavailable / tainted (a CORS-tainted frame must degrade to
+ * the per-instrument fallback, never throw).
+ */
+export function readFrame(img, size = 256) {
     try {
         const c = document.createElement('canvas');
         c.width = c.height = size;
         const x = c.getContext('2d', { willReadFrequently: true });
         x.drawImage(img, 0, 0, size, size);
-        const d = x.getImageData(0, 0, size, size).data;
+        const rgba = x.getImageData(0, 0, size, size).data;
         const gray = new Float32Array(size * size);
-        for (let i = 0, j = 0; i < d.length; i += 4, j++) gray[j] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        return measureDisk(gray, size, size);
+        for (let i = 0, j = 0; i < rgba.length; i += 4, j++) {
+            gray[j] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
+        }
+        return { measured: measureDisk(gray, size, size), rgba, size };
     } catch (_) {
-        return null;
+        return { measured: null, rgba: null, size };
     }
+}
+
+/** Downsample to 256² and run measureDisk. Returns null if the canvas is unavailable. */
+export function measureImageDisk(img, size = 256) {
+    return readFrame(img, size).measured;
 }

@@ -156,6 +156,174 @@ in §1 are locked by the repo owner.*
     the screenshots); the K-corona is deliberately subtle (0.048 of the limb
     brightness at 2 R☉) and needs a GPU + real frames to judge.
 
+- **2026-09-09 — Phase 2b: observed ↔ model photometric fusion (done).**
+  Reported as "the sun visuals are kinda broken now", with a screenshot of the
+  disk split into two unrelated halves along a hard vertical terminator.
+  Reproduced locally (orbit the camera ~55° off the Sun–Earth line with a
+  gold-colorized white-light frame) and traced to **three cliffs stacked on the
+  same edge**:
+  1. **μ MISMATCH.** A browse frame carries its limb darkening baked in at the
+     EARTH's μ; the procedural half applied Neckel & Labs at the VIEWER's μ.
+     Off-axis those are different angles for the same point, so the frame's
+     dark limb butted against the model's bright disk centre.
+  2. **TONEMAP ORDER.** The observed pixel was composited AFTER the ACES curve
+     the model half goes through, so the observation rendered flat and
+     desaturated beside a filmic model.
+  3. **LUT DOUBLE-APPLY.** `u_obsTint` mapped "greyscale HMI → the page's
+     palette", but `sdo.gsfc.nasa.gov/…/latest_1024_HMIIC.jpg` is a GOLD-
+     COLORIZED browse product. Our fixtures are greyscale, which is exactly
+     why CI never saw any of this.
+
+  **The fix stops treating a browse JPEG as radiometry.** Its absolute level
+  and colour LUT are display choices; what IS a measurement is the RELATIVE
+  structure — how much brighter or darker the Sun is than its own smooth
+  limb-darkened disk. `calibrateDisk()` in `js/sun-observed.js` (PURE) measures,
+  per refresh and off the same 256² readback the geometry already used:
+  `I0` (disk-centre LINEAR luminance — the sRGB EOTF is undone because the
+  texture is tagged `SRGBColorSpace`, so the shader's `texture2D` returns
+  linear and the two must agree), the frame's OWN 2-term limb law `(u1,u2)`
+  fitted on μ-binned MEDIANS (medians so a sunspot cannot bend it; the affine
+  form `a0 + a1x + a2x²` with `I0` a FREE parameter, because anchoring `I0` on
+  the innermost shell at μ = 0.979 biased u1 low by 0.07 — a systematic that
+  survives averaging), its `chroma` normalised to unit luminance, its resolved
+  contrast `sigma`, and the fit `resid`. `ok` is gated on the RESIDUAL, never
+  on agreement with a textbook coefficient — a browse product carries an
+  arbitrary display stretch, so an HMI frame whose physical u1 ≈ 0.9
+  legitimately fits ≈ 1.7 here, and clamping to the physics range is what
+  disabled fusion on the first colorized frame it saw.
+
+  sunFS then draws `obsRel = L/(I0·limbLaw(μ_Earth))` — dimensionless, ≈1 on
+  the quiet Sun — on the model's own blackbody × Neckel & Labs at the VIEWER's
+  μ, **before** the tonemap. Structure is 100 % the observation's; level,
+  palette, view geometry and tone curve are the model's, so the hemispheres
+  agree at the terminator by construction rather than by a tuned constant
+  (`u_obsLevel` = 1.0 and is a trim, not a fudge). The handoff WIDTH rides
+  `|μ_view − μ_Earth|`: at the default camera the viewer IS the observer, the
+  correction is the identity and the frame is trusted to the limb; off-axis it
+  opens to 0.55 so the model takes over gently. EUV/magnetogram keep the
+  channel colour untouched and take the μ re-projection only (AIA fits limb
+  BRIGHTENING — negative coefficients — so one machinery covers both
+  instruments). An uncalibratable frame sets `u_obsFuse = 0` and falls back to
+  the legacy tint; the disk still draws.
+
+  **Gate:** `tests/sun-fusion.spec.js` — AZIMUTHAL ASYMMETRY of the rendered
+  disk (every point on a ring is at the same μ and must be at the same level;
+  limb darkening lives ring-to-ring and cancels within a ring; sector MEDIANS
+  and an IQR so a sunspot is a minority and a hemisphere is not). Self-
+  validating: it measures the fused page AND the page with `u_obsFuse` forced
+  to 0. **Inner disk 0.001–0.045 fused vs 0.20–0.31 legacy** — an order of
+  magnitude, and the legacy path is broken at every radius including disk
+  centre. Three metrics were tried and discarded first (5-px window
+  differencing → scored granulation; low-pass + 2nd difference → scored a
+  sunspot; straddling median patches → scored limb darkening); the spec
+  records all three so the next session does not re-derive them.
+  `tests/sun-observed.mjs` 17 → 24 checks, incl. the double-apply gate: a
+  gold-colorized frame and its greyscale twin must yield the same law and the
+  same `obsRel` field to 3 %.
+
+- **2026-09-09 — nanoflares as a population, not a twinkle (done).**
+  `js/sun-nanoflares.js` (PURE, `tests/sun-nanoflares.mjs`, 20 checks). The
+  photosphere shader's old term put a few sites inside each active region on a
+  `pow(sin, 9)` clock: it **fired only inside ARs** (which inverts Parker 1988
+  — the proposal is about the QUIET corona, so a spotless Sun went dark) and
+  had **no energy distribution**, hence no α to report or be wrong about.
+  Now: a bounded power law dN/dE ∝ E^−α over 10²³–10²⁷ erg, sampled by inverse
+  transform, with the duration–energy scaling T ∝ E^0.33; sites seeded over the
+  whole surface weighted by where the field is braided (supergranular network
+  lanes + a large AR boost). The shader uses the kernel's OWN transform, in
+  log2(E) because the four-decade `B − A` loses the small end in float32, so
+  the rendered population really carries the index the readout quotes — and the
+  test measures that slope back out of 400k draws rather than trusting it.
+  **The α = 2 threshold (Hudson 1991) is the point:** below it the large events
+  carry the budget, above it the unresolved small ones do, and the published
+  measurements straddle it (Crosby 1993 ≈ 1.8 … Krucker & Benz 1998 ≈ 2.45,
+  all five on the slider's datalist). The readout scores the population against
+  Withbroe & Noyes (1977) 3 × 10⁵ erg cm⁻² s⁻¹ and names the requirement.
+  ONE kernel now feeds three consumers: the photospheric population, the
+  loop-anchored Poisson sparks (which had a second hard-coded α = 2.2 and its
+  own inverse-CDF), and the SOC avalanche grid — whose α is **EMERGENT**, so it
+  is MEASURED (`AlphaMonitor`, bounded-power-law MLE by ternary search on the
+  exact log-likelihood, NOT a binned log-log regression; the test shows it
+  beating one on the same draw) and reported separately as `α_obs`.
+
+  **Findings from actually measuring it:**
+  - **The SOC grid never reached criticality for most visitors.** Stress was
+    seeded at zero against `SOC_S_CRIT = 0.85` with `SOC_INJECT = 0.004`/sim-s,
+    so the first avalanche was ~212 sim-seconds out — three and a half minutes
+    of a nanoflare layer doing nothing. The stress field is now seeded as a
+    SPREAD below critical (`0.40–0.95 × S_crit`), which is where an SOC system
+    is defined to live anyway; a flat seed at critical would tip everywhere at
+    once and open with one synchronised avalanche, so the spread is the point.
+    Events now start within seconds.
+  - **The monitor was measuring the wrong quantity, then the unit convention.**
+    First it was fed one push per spawned SPARK, i.e. single-cell excesses,
+    which are all within a whisker of the toppling threshold — a narrow,
+    degenerate sample. It now takes one push per CASCADE carrying the cascade's
+    total released energy, which is what flare statistics are about. Second,
+    those energies are in the model's own stress units and span well under the
+    kernel's nominal four decades, so fitting against the nominal range measured
+    the erg mapping rather than the physics (α pinned at the search bound).
+    `fitAlphaMLE` gained `autoRange`, fitting over the range the sample spans —
+    legitimate because a power-law index is invariant under E → cE, which the
+    test asserts directly.
+  - **This grid's avalanche sizes are NOT power-law distributed**, and the page
+    now says so instead of quoting an index. Best bounded-power-law fit sits at
+    the estimator's lower search bound with KS ≈ 0.45 over ~180 cascades. The
+    obvious suspect — dissipation, since SOC is scale-free only under
+    near-conservative redistribution — was swept (`SOC_PROPAGATE` 0.65 → 0.85 →
+    0.95 → 1.00, monitor reset between runs) and **made no difference**
+    (KS 0.46 / 0.52 / 0.42 / 0.48). Recorded at the constant so it is not
+    re-tried blind. Two untested suspects remain: the stress reset is to a fixed
+    `S_CRIT·0.85` regardless of what the cell was carrying (so released energy
+    is decoupled from redistribution), and the driver is 24 smooth Lorenz
+    attractors, which is spatially correlated — cells tip in synchronised groups
+    rather than in scale-free cascades. **Open follow-up.**
+  - `fitAlphaMLE` therefore withholds on three separate grounds and the readout
+    names which: fewer than 50 cascades, a KS distance that says the sample is
+    not a power law, or a likelihood that ran to the edge of its search. The
+    node test feeds it a log-normal to prove the KS guard bites.
+
+- **2026-09-09 — the fluid solver was not enforcing incompressibility (fixed).**
+  Found while gating the convection: `SolarFluid.probe()` reported residual
+  |div| ≈ 1.2 RMS **that did not fall when the Jacobi count was tripled from 20
+  to 60**, which is the signature of a solve that cannot see the error rather
+  than one that has not converged. Cause: divergence and pressure gradient were
+  BOTH central differences, and a central divergence of a central gradient is
+  the WIDE (i±2) Laplacian — a different operator from the compact 5-point one
+  the Jacobi inverts, whose null space is the odd–even checkerboard mode. So
+  grid-scale divergence was invisible to the projection and survived it, every
+  step, since the solver was written. The stencils are now **adjoint**
+  (BACKWARD divergence, FORWARD gradient), which makes `div(grad p)` exactly
+  the compact Laplacian; residual |div| 1.2 → 0.43 at 20 iterations and → 0.21
+  at 40, i.e. it converges now. `iters` 20 → 26 in sun.html. Same class of bug
+  in the curl-noise forcing: its stream-function difference used a fixed
+  ε = 0.012 while the divergence operator used ±1 texel (0.0052), so the
+  "divergence-free" forcing was injecting divergence every step; it now uses
+  the matching central stencil, under which `div(curl ψ)` cancels exactly.
+
+  With the projection actually working, **the surface is now convecting**:
+  `∇·v` targets the local buoyancy `S ∝ (T − ⟨T⟩₃ₓ₃)` instead of 0, because the
+  horizontal divergence of a convecting surface IS the vertical flow underneath
+  it (`∇_h·v_h = −∂w/∂z`) — hot plasma boils OUT of granule centres and drains
+  INTO the lanes. The local high-pass (rather than `T − T₀`) is load-bearing
+  twice: it is zero-mean by construction so the Poisson problem stays solvable
+  with no global reduction, and "buoyant relative to its surroundings" is the
+  physically meaningful statement. Measured correlation between temperature
+  excess and divergence: **0.70 coupled, −0.03 uncoupled**
+  (`tests/sun-convection.spec.js`, which flips the coupling off to prove the
+  gate measures the physics). Also added: explicit thermal diffusion, so the
+  granule scale is a model parameter instead of the semi-Lagrangian's
+  truncation error; and the Snodgrass & Ulrich (1990) differential rotation as
+  a PRESCRIBED mean flow carried in the advection (not added to `vel`, or the
+  projection would spend its iterations re-solving a flow we know in closed
+  form). `probe()` auto-RANGES its two channels in both directions — a single
+  calibration pass cannot fix an already-clipped channel, and that is how the
+  first version of the gate scored a working solver as broken.
+
+  Phase 4's planned `tests/solar-fluid.mjs` divergence assertion is partly
+  discharged by this (measured in-browser rather than in node, because the
+  solver is GPU-only); the cube-sphere domain is still open.
+
 ---
 
 ## 1. Scope & locked decisions
