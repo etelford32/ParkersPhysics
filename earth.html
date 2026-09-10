@@ -1158,7 +1158,10 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
    their expectations (live data) and what the scene is painting
    (synthetic fallback). Click × to dismiss for the session. */
 #feed-error-banner {
-    position: absolute; top: 10px; left: 50%;
+    /* Stacks UNDER the top-docked #time-controls — --ev-timebar-h is the
+       bar's measured height (see the publisher by the scrub wiring); the
+       96px fallback covers the frames before the first observation. */
+    position: absolute; top: calc(var(--ev-timebar-h, 96px) + 20px); left: 50%;
     transform: translateX(-50%);
     z-index: 58;
     background: linear-gradient(90deg, rgba(255,68,34,.95), rgba(255,136,0,.9));
@@ -1227,7 +1230,14 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
    ring + soft inner highlight, so the panel reads as part of the
    simulation rather than a flat overlay. */
 #loc-panel {
-    position:absolute; top:110px; left:10px; z-index:51;
+    /* top clears the top-docked #time-controls — same measured var as the
+       verdict card, which shares this 110px home.  #loc-panel only renders
+       on the ?verdict=0 / card-boot-failure path, and that is exactly the
+       path where the bar's band is narrowest (its lane starts after #hud
+       at 210px), so it wraps to 114px and reaches y=206 against this
+       panel's y=192.  Measured overlap at 769–900px.  The later
+       max-width:768px sheet rules set `top:auto` and still win on order. */
+    position:absolute; top:max(110px, calc(var(--ev-timebar-h, 96px) + 20px)); left:10px; z-index:51;
     /* Hero "spacey" treatment — the loc-panel is the visitor's first-
        contact affordance ("set your location"), so it gets the most
        elaborate surface in the family: teal-mint accent (var(--c-loc))
@@ -1811,7 +1821,10 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 #air-quality-detail .aqd-value { color:#d9f6ff; text-align:right; font-variant-numeric:tabular-nums; }
 #air-quality-detail .aqd-source { color:#53677e; font-size:9px; margin-top:7px; }
 #ocean-mode-hint {
-    position:absolute; z-index:66; left:50%; bottom:82px;
+    /* 82px used to be "clear of the bottom-docked time bar" (bottom:10 +
+       ~72 tall).  The bar is top-docked now, so the hint only has to
+       clear #sw-bar (bottom:0, 24 px tall) with a 14 px gap. */
+    position:absolute; z-index:66; left:50%; bottom:38px;
     display:none; align-items:center; gap:8px;
     transform:translateX(-50%);
     padding:7px 12px; border-radius:999px;
@@ -1824,8 +1837,10 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 #ocean-mode-hint strong { color:#00d4ff; letter-spacing:.04em; }
 #c.ocean-query-active { cursor:crosshair; }
 
-@media (max-width:1024px) {
-    #ocean-mode-hint { bottom:132px; }
+/* ≤768 is where #mobile-toolbar (56 px) appears and #sw-bar moves to
+   bottom:56px / 20 px tall — 56 + 20 + 10 gap. */
+@media (max-width:768px) {
+    #ocean-mode-hint { bottom:86px; }
 }
 
 /* ── Touch optimisations for the pinned event card ─────────────────── */
@@ -1875,7 +1890,8 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 
 /* Trip-mode HUD (shown when ?trip=… is in the URL) */
 #trip-hud {
-    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    /* Same top-centre lane as #feed-error-banner — under the time bar. */
+    position: absolute; top: calc(var(--ev-timebar-h, 96px) + 20px); left: 50%; transform: translateX(-50%);
     display: none; z-index: 70;
     background: rgba(8,10,18,.88); backdrop-filter: blur(10px);
     border: 1px solid rgba(255,200,80,.4); border-radius: 10px;
@@ -1899,7 +1915,8 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 
 /* ISS info overlay (fixed top-center on mobile) */
 #iss-hud {
-    display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    /* Same top-centre lane as #feed-error-banner — under the time bar. */
+    display: none; position: absolute; top: calc(var(--ev-timebar-h, 96px) + 20px); left: 50%; transform: translateX(-50%);
     background: rgba(0,0,0,.78); backdrop-filter: blur(8px);
     border: 1px solid rgba(var(--c-accent-rgb),.25); border-radius: 7px;
     padding: 5px 12px; font-size: 10px; z-index: 55; pointer-events: none;
@@ -2002,8 +2019,9 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 .loc-v { color: #cde0ea; font-weight: 500; font-variant-numeric: tabular-nums; }
 .loc-card.empty .loc-v { color: #446; }
 
-/* ─── Time controls (bottom-centre) ────────────────────────────── */
-/* Same pattern as satellites.html so both pages share muscle memory.
+/* ─── Time controls (top-centre) ───────────────────────────────── */
+/* satellites.html still docks its copy at the bottom; EarthView's moved
+   to the top rail in 2026-09 (the geometry notes are on #time-controls).
    simTimeMs drives sun direction, sub-solar point, sun card, ISS pass
    card, on-globe solar markers, and the 24-h weather replay.  Earth
    ROTATION is intentionally decoupled — see the "Planet rotation"
@@ -2011,20 +2029,43 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
    across a stationary globe.  UI speed presets: 1× (real), 60×
    (1 min/s), 600×, 3600× (1 hr/s). */
 #time-controls {
-    /* 10 px floor above the viewport edge so the bar is never flush with
-       the bottom of #app on any breakpoint — keeps it visually anchored
-       even when window heights are awkward. */
-    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    /* TOP-DOCKED (2026-09, was bottom:10px).  Three things about this
+       geometry are load-bearing and each was MEASURED on the live page:
+
+       1. It is centred BETWEEN left:10px and right:250px — not on the
+          viewport.  `left` + `right` + `margin-inline:auto` over a
+          `width:fit-content` box is what does the centring; there is no
+          translateX here any more.  The 250 px reserves #layer-panel's
+          lane (230 px panel + its 10 px gutter): centred on the viewport
+          instead, this 585 px bar reaches x=805 in a 1025 px window
+          while the panel starts at x=785, and both sit at top:10px.
+       2. `width:fit-content` between two fixed insets is capped by the
+          band, so the bar SHRINKS instead of overflowing.  Pinned to the
+          bottom it used to render 487 px wide inside a 390 px viewport
+          (x=-49 .. 439) and #app's overflow:hidden ate the −1w edge
+          label and half the clock — silently, on every phone.
+       3. min-width is `min(360px, …)`, never a bare 360 px, for the same
+          reason: a floor wider than the band re-creates that clipping.
+
+       Everything that has to clear the bar (the three transient
+       top-centre overlays, and on phones the verdict card and the legacy
+       #hud) reads --ev-timebar-h, published from the bar's MEASURED
+       height — see the publisher next to the scrub wiring. */
+    position: absolute; top: 10px;
+    left: 10px; right: 250px; margin-inline: auto;
+    width: fit-content; min-width: min(360px, calc(100% - 20px));
     z-index: 60;
     background: rgba(0,0,0,.82); backdrop-filter: blur(12px);
     border: 1px solid rgba(var(--c-accent-rgb),.2); border-radius: 9px;
     padding: 6px 8px;
     display: flex; flex-direction: column; align-items: stretch; gap: 5px;
     font-size: 11px;
-    min-width: 360px;
 }
-/* Buttons row keeps the original flex-row behaviour. */
-#tc-buttons-row { display: flex; align-items: center; gap: 3px; }
+/* Buttons row wraps rather than overflowing: it is the widest row in the
+   bar, so its min-content width is what would push the box past its band
+   on a narrow screen.  On desktop there is nothing to wrap and the row
+   renders exactly as before. */
+#tc-buttons-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 3px; }
 .tc-btn {
     background: rgba(0,200,200,.08); border: 1px solid rgba(0,200,200,.18);
     border-radius: 4px; color: #9cc; cursor: pointer;
@@ -2188,18 +2229,30 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 }
 @keyframes tc-fc-spin { to { transform: rotate(360deg); } }
 
-/* On mobile the #mobile-toolbar lives at bottom:0 / height:56px, so the
-   scrub bar rides 8 px above it.  On desktop the toolbar is hidden so
-   bottom:12px is fine. */
+/* Compact ladder.  The bar is top-docked now, so this breakpoint no
+   longer has to dodge the 56-px #mobile-toolbar — it only tightens the
+   chrome so the bar still fits its band beside #layer-panel (which is
+   still a top-right panel down to 768 px). */
 @media (max-width:1024px) {
-    /* 56-px mobile toolbar + 10 px floor = 66 px above the viewport bottom. */
-    #time-controls { bottom: 66px; padding: 4px 6px; font-size: 10px; min-width: 280px; }
+    #time-controls { padding: 4px 6px; font-size: 10px; min-width: min(280px, calc(100% - 20px)); }
     .tc-btn        { min-width: 26px; padding: 3px 6px; font-size: 9px; }
     .tc-display    { min-width: 128px; }
     .tc-time       { font-size: 10px; }
     .tc-offset     { font-size: 8px; }
     #tc-scrub      { min-width: 180px; }
     .tc-scrub-edge { font-size: 8px; min-width: 22px; }
+}
+/* ≤768: #layer-panel is a bottom sheet, so nothing occupies the top-right
+   lane and the bar can centre on the full width again. */
+@media (max-width:768px) {
+    #time-controls { right: 10px; }
+}
+/* >768: #hud (top-left, min-width 160 + chrome ≈ 190 px) is only rendered
+   on the ?verdict=0 / card-boot-failure path, so its lane is reserved
+   ONLY then — reserving it unconditionally would push the bar off-centre
+   for the default configuration, where #hud is display:none. */
+@media (min-width:769px) {
+    body:not(.ev-verdict-solo) #time-controls { left: 210px; }
 }
 
 /* ─── Mobile bottom toolbar ──────────────────────────────────────── */
@@ -2334,6 +2387,56 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
        shown via inline style from the hover raycast, hence !important. */
     #coord-tip { display: none; }
     #city-tip { display: none !important; }
+}
+
+/* ─── Phone: clearing the top-docked time bar ────────────────────── */
+/* Two things home at the top of #app on a phone and would otherwise sit
+   UNDER #time-controls (which is z60, so the z70 card would simply paint
+   over the bar):
+     · the verdict card — the default dashboard, full-width at top:64px;
+     · #hud — full-width at top:8px, but only on the ?verdict=0 /
+       card-boot-failure path (body.ev-verdict-solo hides it otherwise).
+   Both offsets are derived from the bar's MEASURED height rather than a
+   constant, because the bar is 72–114 px tall depending on breakpoint
+   and on whether the forecast-status row is in flight. */
+@media (max-width: 768px) {
+    body:not(.ev-verdict-solo) #hud { top: calc(var(--ev-timebar-h, 96px) + 20px); }
+}
+/* The verdict card's home clears the bar at EVERY width, not just on
+   phones.  Desktop looks safe by inspection — the card is 400 px wide on
+   the left and the bar centres in its band — but they do share the lane
+   at ≤1280 px (bar left edge 228 at 1280, 100 at 1025), and there the
+   card's 110 px home put its top at y=192 against a bar bottom of
+   exactly 192.  Zero clearance: the bar grows ~21 px whenever
+   #tc-forecast-status is in flight, and the card is z70 against the
+   bar's z60, so it would have painted over the speed buttons for the
+   duration of every forecast fetch.  max() keeps the 110 px home wherever
+   the bar is short enough not to matter.
+
+   `#app #ev-verdict-card` is 0,2,0,0 against the card sheet's 0,0,1,0, so
+   it wins regardless of cascade order — js/verdict-card.js injects that
+   sheet at MOUNT time and would otherwise beat a page-level rule on
+   order, the same ordering documented for the storm-watch sheet.
+   Dragging still overrides both: makePanelDraggable writes inline. */
+#app #ev-verdict-card { top: max(110px, calc(var(--ev-timebar-h, 96px) + 20px)); }
+/* Storm Watch homes at top:130px from js/storm-watch-panel.js's injected
+   sheet — beside the card in solo mode, top-left with the card off.  It is
+   the one panel here that does NOT live inside #app: it mounts on <body>,
+   so its `top` is DOCUMENT-space and lands at y=130 while #app's own top
+   band starts at y=82 — i.e. 48 px higher than the other panels and right
+   inside the bar.  Measured overlap at every desktop width.  Hence
+   --ev-timebar-bottom (document-space) rather than --ev-timebar-h, and
+   `body #…` (0,1,0,1) rather than `#app #…`, which never matched at all.
+   Scoped to >640px because that sheet's own ≤640 rule turns the panel into
+   a bottom sheet (top:auto) this would otherwise override back into a
+   floating column. */
+@media (min-width: 641px) {
+    body #storm-watch-panel { top: max(130px, calc(var(--ev-timebar-bottom, 192px) + 10px)); }
+}
+@media (max-width: 640px) {
+    /* Mirrors the card's own calc(100dvh - 120px), rebased on the new
+       top: its 120 = 64 (old phone home) + 56, so 56 + 20 + the bar. */
+    #app #ev-verdict-card { max-height: calc(100dvh - 76px - var(--ev-timebar-h, 96px)); }
 }
 
 @media (max-width: 480px) {
@@ -3896,7 +3999,7 @@ import './js/telemetry.js';
     <!-- Panel backdrop (mobile tap-to-close) -->
     <div id="panel-backdrop"></div>
 
-    <!-- Time-scrub controls (bottom-centre). One simTimeMs variable
+    <!-- Time-scrub controls (top rail of #app). One simTimeMs variable
          drives GMST, sun direction, sub-solar point, sun card, ISS pass
          card, on-globe solar markers, AND (via WeatherFrameResolver)
          24-hour wind/temp/cloud replay.  Press Space to toggle
@@ -13666,6 +13769,54 @@ if (_scrubEl) {
         timeBus.setSimTime(Date.now() + minutesFromNow * 60_000,
                            { fromUser: true });
     });
+}
+
+// ── Top-rail height publication (--ev-timebar-h) ───────────────────────
+// #time-controls docks at the TOP of #app.  Everything that has to clear
+// it reads ONE number from here: the three transient top-centre overlays
+// (#feed-error-banner, #trip-hud, #iss-hud) and, on phones, the verdict
+// card and the legacy #hud.
+//
+// MEASURED, not hard-coded.  The bar is 72–114 px tall depending on
+// breakpoint, on whether #tc-buttons-row wrapped, and on whether the
+// forecast-status row is in flight (it appears and disappears while a
+// chunked triplet is fetching) — a magic constant here is exactly how
+// the nav's `max-height: 600px` silently swallowed 415 px of its own
+// menu.  The CSS carries a 96px fallback for the frames before the first
+// observation lands, and for the no-ResizeObserver path.
+//
+// Hoisted next to the scrub wiring on purpose: if anything later in this
+// module throws, the bar still positions the overlays correctly.
+{
+    const bar = document.getElementById('time-controls');
+    if (bar) {
+        const publishBarHeight = () => {
+            const r = bar.getBoundingClientRect();
+            const h = Math.round(r.height);
+            // A zero height means the bar isn't laid out yet (or is
+            // hidden); keeping the last good value beats writing a 0 that
+            // would slide every overlay up under the bar.
+            if (h > 0) {
+                const root = document.documentElement.style;
+                root.setProperty('--ev-timebar-h', `${h}px`);
+                // Second var for ONE consumer: #storm-watch-panel mounts on
+                // <body> (storm-watch-panel.js `mount({parent = document.body})`),
+                // not inside #app, so its `top` is document-space and the
+                // height alone cannot place it — #app itself starts 82 px
+                // down, under the two site headers.  Scroll-invariant:
+                // #app is static in normal flow, so rect.bottom + scrollY
+                // is the same number whenever the observer happens to fire.
+                root.setProperty('--ev-timebar-bottom',
+                                 `${Math.round(r.bottom + window.scrollY)}px`);
+            }
+        };
+        if (typeof ResizeObserver === 'function') {
+            new ResizeObserver(publishBarHeight).observe(bar);
+        } else {
+            window.addEventListener('resize', publishBarHeight);
+        }
+        publishBarHeight();
+    }
 }
 
 // Subscribe to bus state so external writes (Operations console, or
