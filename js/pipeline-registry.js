@@ -425,6 +425,27 @@ export const PIPELINES = [
       cadence_s: 86_400, prewarm: 'cold', probeTimeoutMs: 20_000,
       warnAgeS: 24 * 3600, critAgeS: 72 * 3600,
       notes: 'Capability probe, not a data feed: the no-coordinate form reports which candidate layer id answered per layer. Amber means at least one of the four mosaics is unreachable and mars.html has fallen back to the bundled 1440x720 Viking texture for it. The tiles themselves are archival and cached immutable for a year.' },
+
+    // ── Small bodies · NEOs (solar-system.html) ────────────────────────────
+    // Both answer 200 with `freshness:'stale'` when JPL is down (the page shows
+    // "feed down", never a stale population). The SBDB / CAD / Sentry /
+    // Fireball schemas are UNVERIFIED (egress-blocked at build time): each
+    // route self-reports `field_map` / `unmapped` per source — one production
+    // request settles them. See api/_lib/neo-sources.js.
+    { id: 'neo-catalog',        label: 'NEO catalogue (SBDB elements)',
+      endpoint: '/api/neo/catalog',
+      probePath: '/api/neo/catalog?tier=pha',
+      category: 'small-bodies', upstream: 'JPL SBDB query API',
+      cadence_s: 86_400, prewarm: 'cold', probeTimeoutMs: 28_000,
+      warnAgeS: 36 * 3600, critAgeS: 5 * 86_400,
+      notes: 'Osculating elements for the whole NEO population, tiered pha|bright|all (~2.5k / ~12k / ~38k rows). The prewarm/probe hits the small PHA tier; the browser climbs the ladder itself. Amber = asteroid query failed (comets/interstellar may still be present). The full-population query is the largest upstream body in the stack (~6 MB from JPL), hence the raised timeout.' },
+
+    { id: 'neo-watch',          label: 'NEO watch (CAD · Sentry · fireballs)',
+      endpoint: '/api/neo/watch',
+      category: 'small-bodies', upstream: 'JPL SSD cad.api · sentry.api · fireball.api',
+      cadence_s: 3_600, prewarm: 'medium', probeTimeoutMs: 20_000,
+      warnAgeS: 3 * 3600, critAgeS: 12 * 3600,
+      notes: 'Close approaches 7 d back → 60 d ahead inside 0.05 AU, the Sentry risk list (top 40 by Palermo scale), last 20 fireballs. Only the CAD table decides freshness; `sources.*` says which of the three failed.' },
 ];
 
 /**
@@ -442,6 +463,7 @@ export const CATEGORIES = [
     { id: 'orbital',       label: 'Orbital · TLE / Launches' },
     { id: 'environment',   label: 'Environment · Air & Fire' },
     { id: 'planetary',     label: 'Planetary · Mars'      },
+    { id: 'small-bodies',  label: 'Small Bodies · NEOs / Comets' },
 ];
 
 export function pipelinesByCategory(catId) {
