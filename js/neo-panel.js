@@ -18,7 +18,7 @@
  */
 
 import { FLAG, LD_AU, formatLD, formatSize, diameterKmFromH, NOTABLES, findNotable } from './neo-orbits.js';
-import { NEO_COLORS, displayName } from './neo-layer.js';
+import { NEO_COLORS, NATURAL_COLORS, displayName } from './neo-layer.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
@@ -93,6 +93,7 @@ export class NeoPanel {
                 <label><input type="checkbox" data-vis="local" checked> Near-Earth frame</label>
                 <label><input type="checkbox" data-vis="radiants" checked> Meteor radiants</label>
                 <label><input type="checkbox" data-vis="orbit" checked> Selected orbit</label>
+                <label title="Natural tints (S/C-type greys, blue-white comets) or the data-viz class palette"><input type="checkbox" data-vis="colorMode"> Colour by class</label>
                 <label>Show <select data-pop>
                     <option value="all">every object loaded</option>
                     <option value="bright">≥140 m + PHAs</option>
@@ -127,6 +128,7 @@ export class NeoPanel {
     _wire() {
         this.root.addEventListener('change', (ev) => {
             const t = ev.target;
+            if (t.dataset.vis === 'colorMode') { this.layer.setVisible({ colorMode: t.checked ? 'class' : 'natural' }); this._renderLegend(); return; }
             if (t.dataset.vis) this.layer.setVisible({ [t.dataset.vis]: t.checked });
             if (t.hasAttribute('data-pop')) this.layer.setVisible({ population: t.value });
         });
@@ -263,11 +265,19 @@ export class NeoPanel {
     }
 
     _renderLegend() {
-        const items = [
+        const classItems = [
             ['pha', 'Potentially hazardous'], ['APO', 'Apollo'], ['ATE', 'Aten'], ['AMO', 'Amor'], ['IEO', 'Atira'],
-            ['comet', 'Comet'], ['interstellar', 'Interstellar'], ['flyby', 'Flyby within ±7 d (pulsing)'], ['ring', 'LD rings around Earth'], ['radiant', 'Meteor radiant (inbound)'],
+            ['comet', 'Comet'], ['interstellar', 'Interstellar'], ['flyby', 'Flyby within ±7 d (breathing halo)'], ['ring', 'LD rings around Earth'], ['radiant', 'Meteor stream (inbound)'],
+        ].map(([k, l]) => [NEO_COLORS[k], l]);
+        const naturalItems = [
+            [NATURAL_COLORS.sType, 'S-type asteroid (reddish grey)'], [NATURAL_COLORS.cType, 'C-type asteroid (dark neutral)'],
+            [NATURAL_COLORS.pha, 'Potentially hazardous (warm bias)'], [NATURAL_COLORS.comet, 'Comet · blue ion tail anti-sunward, warm dust tail lagging'],
+            [NATURAL_COLORS.interstellar, 'Interstellar'], [NATURAL_COLORS.flyby, 'Flyby within ±7 d (breathing halo)'],
+            [NEO_COLORS.ring, 'LD rings around Earth'], [NEO_COLORS.radiant, 'Meteor stream (inbound)'],
         ];
-        this.$('neo-legend').innerHTML = items.map(([k, l]) => `<span><i style="background:${hex(NEO_COLORS[k])}"></i>${l}</span>`).join('');
+        const items = this.layer.visible.colorMode === 'class' ? classItems : naturalItems;
+        this.$('neo-legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${hex(c)}"></i>${l}</span>`).join('')
+            + `<span style="flex-basis:100%;color:#667">Size and brightness follow absolute magnitude (H); comae and tails scale as 1/r².</span>`;
     }
 
     renderNote() {

@@ -43,7 +43,22 @@ import {
     solarLongitudeDeg, activeShowers, nextShower, radiantEclipticUnit,
 } from './neo-orbits.js';
 
+import { rockGeometry, rockMaterial, drawnRockRadius, shapeFor, spinFor, hash32, MeteoroidStream } from './neo-rocks.js';
+
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
+
+// ── Mesh LOD ────────────────────────────────────────────────────────────────
+// A sprite is honest for a 30 m rock two AU away; it is not for the object
+// you locked the camera on. A pool of ROCK_SLOTS rock meshes is assigned, at
+// ~10 Hz, to the selected object, the flybys inside the Earth-local frame and
+// the objects nearest the camera within ROCK_RANGE scene units; their sprites
+// are suppressed while a mesh stands in. Geometries are seeded per object and
+// cached (GEO_CACHE_MAX), so a body always has the same shape.
+const ROCK_SLOTS = 24;
+const ROCK_RANGE = 2.5;
+const GEO_CACHE_MAX = 48;
+const _Y = new THREE.Vector3(0, 1, 0);
+const _qSpin = new THREE.Quaternion();
 
 export const NEO_COLORS = Object.freeze({
     pha:          0xff5a3c,
@@ -61,21 +76,54 @@ export const NEO_COLORS = Object.freeze({
 
 export const NEO_TIER_LADDER = ['pha', 'bright', 'all'];
 
-/** Per-object base point size (CSS px before attenuation). */
+/**
+ * Two palettes. NATURAL (default) is what a camera would record: asteroids
+ * run from S-type reddish-grey to C-type dark neutral (a per-object hash keeps
+ * the mix stable frame to frame), comets are blue-white, interstellar objects
+ * white; a PHA carries a warm bias so hazard stays legible. CLASS is the
+ * data-viz palette the legend names. Brightness and size come from ABSOLUTE
+ * MAGNITUDE either way — Eros (H 10) outshines a 30 m rock (H 28) by eight
+ * magnitudes, and the sprite says so inside the 1.7–5.6 px band a point can
+ * honestly occupy. The sprite itself is a Gaussian core + soft PSF halo,
+ * blended ADDITIVELY so dense regions glow instead of stacking opaque discs.
+ */
+export const NATURAL_COLORS = Object.freeze({
+    sType: 0xd6bb95, cType: 0x9a9691, pha: 0xf0a97c, comet: 0xc4e8ff, interstellar: 0xffffff, flyby: 0xfff0c2,
+});
+function hash01(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 10007) / 10007;
+}
+/** Point size (CSS px before attenuation) from absolute magnitude. */
 function baseSize(el) {
     if (el.flags & FLAG.INTERSTELLAR) return 5.2;
-    if (el.flags & FLAG.COMET) return 4.0;
-    if (el.flags & FLAG.PHA) return 4.2;
-    if (el.H == null) return 2.6;
-    if (el.H < 18) return 3.4;
-    if (el.H <= 22) return 2.6;
-    return 2.0;
+    if (el.flags & FLAG.COMET) return 3.8;
+    const H = el.H ?? 20;
+    return Math.min(5.6, Math.max(1.7, 5.6 - 0.24 * (H - 12)));
 }
-function baseColor(el) {
+/** Base alpha from absolute magnitude — faint rocks are faint. */
+function baseAlpha(el) {
+    if (el.flags & (FLAG.INTERSTELLAR | FLAG.COMET)) return 1;
+    const H = el.H ?? 20;
+    return Math.min(1, Math.max(0.42, 1 - 0.045 * (H - 14)));
+}
+function classColorHex(el) {
     if (el.flags & FLAG.INTERSTELLAR) return NEO_COLORS.interstellar;
     if (el.flags & FLAG.COMET) return NEO_COLORS.comet;
     if (el.flags & FLAG.PHA) return NEO_COLORS.pha;
     return NEO_COLORS[el.cls] ?? NEO_COLORS.other;
+}
+const _cB = new THREE.Color();
+/** Writes the object's colour under `mode` ('natural' | 'class') into `out`; returns `out`. */
+export function colorFor(el, mode, out) {
+    if (mode === 'class') return out.setHex(classColorHex(el));
+    if (el.flags & FLAG.INTERSTELLAR) return out.setHex(NATURAL_COLORS.interstellar);
+    if (el.flags & FLAG.COMET) return out.setHex(NATURAL_COLORS.comet);
+    const t = hash01(String(el.des ?? el.name ?? ''));
+    out.setHex(NATURAL_COLORS.sType).lerp(_cB.setHex(NATURAL_COLORS.cType), 0.25 + 0.6 * t);
+    if (el.flags & FLAG.PHA) out.lerp(_cB.setHex(NATURAL_COLORS.pha), 0.6);
+    return out;
 }
 export function classLabel(el) {
     if (el.flags & FLAG.INTERSTELLAR) return 'Interstellar object';
@@ -84,6 +132,8 @@ export function classLabel(el) {
     return (el.flags & FLAG.PHA) ? `${c} · potentially hazardous` : c;
 }
 export function displayName(el) { return el.name || el.des || '—'; }
+
+const DPR = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
 
 const POINT_VS = /* glsl */`
     attribute vec3  aColor;
@@ -96,11 +146,15 @@ const POINT_VS = /* glsl */`
     varying vec3  vColor;
     varying float vAlpha;
     varying float vPulse;
+    varying float vPx;
     void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        float pulse = 1.0 + aPulse * (0.35 + 0.35 * sin(u_time * 3.0));
-        float att = clamp(u_att / max(-mv.z, 0.05), 0.55, 3.2);
-        gl_PointSize = aSize * pulse * u_dpr * att;
+        // A flyby BREATHES its halo rather than blinking.
+        float pulse = 1.0 + aPulse * (0.18 + 0.18 * sin(u_time * 2.2));
+        float att = clamp(u_att / max(-mv.z, 0.05), 0.6, 2.3);
+        // ×2: the Gaussian core occupies the inner half of the sprite; the rest is halo.
+        gl_PointSize = aSize * pulse * u_dpr * att * 2.0;
+        vPx = gl_PointSize;
         gl_Position = projectionMatrix * mv;
         vColor = aColor; vAlpha = aAlpha; vPulse = aPulse;
     }
@@ -109,13 +163,23 @@ const POINT_FS = /* glsl */`
     varying vec3  vColor;
     varying float vAlpha;
     varying float vPulse;
+    varying float vPx;
     void main() {
-        vec2 c = gl_PointCoord - 0.5;
-        float d = length(c);
-        if (d > 0.5 || vAlpha <= 0.002) discard;
-        float core = smoothstep(0.5, 0.18, d);
-        float halo = vPulse * smoothstep(0.5, 0.0, d) * 0.5;
-        gl_FragColor = vec4(vColor * (1.0 + halo), (core + halo) * vAlpha);
+        if (vAlpha <= 0.002) discard;
+        vec2 c = (gl_PointCoord - 0.5) * 2.0;
+        float d2 = dot(c, c);
+        if (d2 > 1.0) discard;
+        float core = exp(-d2 * 14.0);                  // the point source
+        float glow = exp(-d2 * 3.0) * 0.30;            // soft PSF halo
+        float spikes = 0.0;
+        if (vPx > 9.0) {                               // brightest few: a faint diffraction cross
+            float ax = abs(c.x), ay = abs(c.y);
+            spikes = (pow(max(0.0, 1.0 - ay * 7.0), 2.0) + pow(max(0.0, 1.0 - ax * 7.0), 2.0))
+                   * max(0.0, 1.0 - sqrt(d2)) * 0.22;
+        }
+        float halo = vPulse * exp(-d2 * 1.6) * 0.40;   // flyby breathing halo
+        float a = (core + glow + spikes + halo) * vAlpha;
+        gl_FragColor = vec4(vColor * a, a);            // premultiplied; blended additively
     }
 `;
 
@@ -123,12 +187,80 @@ function makePointsMaterial() {
     return new THREE.ShaderMaterial({
         vertexShader: POINT_VS, fragmentShader: POINT_FS,
         uniforms: {
-            u_dpr:  { value: Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1) },
+            u_dpr:  { value: DPR },
             u_time: { value: 0 },
             u_att:  { value: 30.0 },
         },
-        transparent: true, depthWrite: false, depthTest: true,
+        transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
     });
+}
+
+// ── Comet tails ─────────────────────────────────────────────────────────────
+// Two tails per active comet, as line segments with vertex colours fading to
+// black (additive blend ⇒ fade). ION tail: straight, anti-sunward — the Sun is
+// at the scene origin, so that direction is exact even on the log scale. DUST
+// tail: shorter, lagging behind the motion with a t² curve. Length and coma
+// brightness scale as 1/r² of heliocentric distance, gated below TAIL_MAX_R AU.
+// Lengths are SCENE units and schematic (the radial scale is logarithmic);
+// directions are physical.
+const TAIL_SEG = 12;
+const TAIL_VERTS = 2 * TAIL_SEG * 2;
+const TAIL_MAX_R = 3.5;
+
+// ── Meteoroid streams ───────────────────────────────────────────────────────
+// A shower is drawn as what it is: a stream of particles converging on Earth
+// from the radiant direction at the stream's speed. Everything is in the
+// vertex shader (seed + time), so a stream costs the CPU nothing.
+const STREAM_VS = /* glsl */`
+    attribute float aSeed;
+    attribute vec3  aJitter;
+    uniform vec3  u_dir;
+    uniform float u_time;
+    uniform float u_speed;
+    uniform float u_dpr;
+    varying float vFade;
+    void main() {
+        float s = fract(aSeed + u_time * u_speed);                      // 0 far out → 1 at Earth
+        vec3 p = u_dir * mix(1.25, 0.16, s) + aJitter * (0.05 + 0.13 * (1.0 - s));
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = (2.2 + 2.0 * s) * u_dpr * clamp(30.0 / max(-mv.z, 0.05), 0.6, 2.0);
+        vFade = smoothstep(0.0, 0.12, s) * (1.0 - smoothstep(0.88, 1.0, s));
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+const STREAM_FS = /* glsl */`
+    uniform vec3 u_color;
+    varying float vFade;
+    void main() {
+        vec2 c = (gl_PointCoord - 0.5) * 2.0;
+        float d2 = dot(c, c);
+        if (d2 > 1.0) discard;
+        float a = exp(-d2 * 4.0) * vFade * 0.35;   // faint streaks; the rocks carry the stream
+        gl_FragColor = vec4(u_color * a, a);
+    }
+`;
+function makeStream(count, colorHex) {
+    const g = new THREE.BufferGeometry();
+    const seed = new Float32Array(count), jit = new Float32Array(count * 3), pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+        seed[i] = Math.random();
+        jit[i * 3] = Math.random() * 2 - 1; jit[i * 3 + 1] = Math.random() * 2 - 1; jit[i * 3 + 2] = Math.random() * 2 - 1;
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+    g.setAttribute('aJitter', new THREE.BufferAttribute(jit, 3));
+    const m = new THREE.ShaderMaterial({
+        vertexShader: STREAM_VS, fragmentShader: STREAM_FS,
+        uniforms: {
+            u_dir: { value: new THREE.Vector3(0, 1, 0) }, u_time: { value: 0 }, u_speed: { value: 0.5 },
+            u_dpr: { value: DPR }, u_color: { value: new THREE.Color(colorHex) },
+        },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const pts = new THREE.Points(g, m);
+    pts.frustumCulled = false;
+    pts.renderOrder = 7;
+    return pts;
 }
 
 /** Canvas-text sprite with constant on-screen size. */
@@ -190,7 +322,8 @@ export class NeoLayer extends Emitter {
         };
         this.watch = { approaches: [], sentry: [], fireballs: [], window: null };
         // population: 'all' | 'bright' (H ≤ 22, PHAs, comets, interstellar) | 'pha'
-        this.visible = { asteroids: true, comets: true, population: 'all', local: true, radiants: true, orbit: true, labels: true };
+        // colorMode: 'natural' (S/C-type tints) | 'class' (the legend's data-viz palette)
+        this.visible = { asteroids: true, comets: true, population: 'all', local: true, radiants: true, orbit: true, labels: true, colorMode: 'natural' };
 
         // Frame state from the worker.
         this.frameJd = null;
@@ -218,6 +351,13 @@ export class NeoLayer extends Emitter {
         this._buildLocalFrame();
         this.orbitLine = null;
         this._orbitBuiltJd = null;
+        this.cometTails = null;        // LineSegments: two tails per active comet
+        this._cometIdx = [];           // indices of objects that can grow a tail
+        this.cometTailsActive = 0;
+        this._rockSlots = [];          // { mesh, index, geoKey, shape, spin, isComet }
+        this._geoCache = new Map();    // des → { geo, shape }
+        this._meshed = new Set();      // indices drawn as meshes right now (sprites suppressed)
+        this._rockTick = 0;
         this.anchor = new THREE.Object3D(); this.anchor.name = 'neo-anchor'; this.group.add(this.anchor);
         this.selectedMarker = this._buildSelectedMarker();
         this._labels = new Map();      // key → sprite
@@ -248,6 +388,9 @@ export class NeoLayer extends Emitter {
 
     dispose() {
         this._worker?.terminate();
+        for (const slot of this._rockSlots) slot.mesh.material.dispose();
+        for (const [, g] of this._geoCache) g.geo.dispose();
+        for (const r of this._radiants) r.rocks.dispose();
         this.scene.remove(this.group);
     }
 
@@ -445,7 +588,85 @@ export class NeoLayer extends Emitter {
         this.points.renderOrder = 5;
         this.group.add(this.points);
         this.rGeo = null; this.rHelio = null; this.frameJd = null; this.inZone = []; this.closest = null;
+        this._cometIdx = [];
+        for (let k = 0; k < N; k++) {
+            const el = this.els[k];
+            const cometClass = /^(HYP|COM|JFc|JFC|HTC|ETc|CTc|PAR)$/.test(el.cls || '');
+            if ((el.flags & FLAG.COMET) || ((el.flags & FLAG.INTERSTELLAR) && cometClass)) this._cometIdx.push(k);
+        }
+        this._buildCometTails();
         this._applyStyles();
+    }
+
+    _buildCometTails() {
+        if (this.cometTails) { this.group.remove(this.cometTails); this.cometTails.geometry.dispose(); this.cometTails.material.dispose(); this.cometTails = null; }
+        const n = this._cometIdx.length;
+        this.cometTailsActive = 0;
+        if (!n) return;
+        const V = n * TAIL_VERTS;
+        const g = new THREE.BufferGeometry();
+        this._tailPos = new Float32Array(V * 3);
+        this._tailCol = new Float32Array(V * 3);
+        g.setAttribute('position', new THREE.BufferAttribute(this._tailPos, 3));
+        g.setAttribute('color', new THREE.BufferAttribute(this._tailCol, 3));
+        this.cometTails = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+        this.cometTails.name = 'neo-comet-tails';
+        this.cometTails.frustumCulled = false;
+        this.cometTails.renderOrder = 4;
+        this.group.add(this.cometTails);
+    }
+
+    _writeTail(o, px, py, pz, f, rgb, b) {
+        const pos = this._tailPos, col = this._tailCol;
+        for (let i = 0; i < TAIL_SEG; i++) {
+            const t0 = i / TAIL_SEG, t1 = (i + 1) / TAIL_SEG;
+            const p0 = f(t0), p1 = f(t1);
+            const q = o + i * 6;
+            pos[q] = px + p0[0]; pos[q + 1] = py + p0[1]; pos[q + 2] = pz + p0[2];
+            pos[q + 3] = px + p1[0]; pos[q + 4] = py + p1[1]; pos[q + 5] = pz + p1[2];
+            const f0 = Math.pow(1 - t0, 1.6) * b, f1 = Math.pow(1 - t1, 1.6) * b;
+            col[q] = rgb[0] * f0; col[q + 1] = rgb[1] * f0; col[q + 2] = rgb[2] * f0;
+            col[q + 3] = rgb[0] * f1; col[q + 4] = rgb[1] * f1; col[q + 5] = rgb[2] * f1;
+        }
+    }
+
+    /** Per worker frame: tails + coma for every comet inside TAIL_MAX_R AU. */
+    _refreshCometTails() {
+        if (!this.cometTails || this.frameJd == null) return;
+        const jd = this.frameJd, prec = precessionLongitudeRad(jd);
+        const cp = Math.cos(prec), sp = Math.sin(prec);
+        const pos = this._tailPos, col = this._tailCol;
+        let active = 0, sizeDirty = false;
+        for (let i = 0; i < this._cometIdx.length; i++) {
+            const k = this._cometIdx[i];
+            const o = i * TAIL_VERTS * 3;
+            const el = this.els[k];
+            const r = this.rHelio[k];
+            const vis = this._baseVis ? this._baseVis[k] : 1;
+            const b = vis && r < TAIL_MAX_R ? Math.min(1, 0.9 / (r * r)) : 0;
+            // Coma: the nucleus sprite swells and brightens as 1/r².
+            const sz = baseSize(el) + (b > 0 ? 4.0 * b : 0);
+            if (this._size[k] !== sz) { this._size[k] = sz; sizeDirty = true; }
+            if (b <= 0.01) { pos.fill(0, o, o + TAIL_VERTS * 3); col.fill(0, o, o + TAIL_VERTS * 3); continue; }
+            active++;
+            const px = this._pos[k * 3], py = this._pos[k * 3 + 1], pz = this._pos[k * 3 + 2];
+            const rs = Math.hypot(px, py, pz) || 1;
+            const ax = px / rs, ay = py / rs, az = pz / rs;               // anti-sunward (Sun at origin)
+            const v = propagate(el, jd, true);                              // J2000 AU/day
+            const vx = cp * v.vx - sp * v.vy, vy = sp * v.vx + cp * v.vy;  // → of date
+            const vn = Math.hypot(vx, vy, v.vz) || 1;
+            const wx = vx / vn, wy = v.vz / vn, wz = vy / vn;              // scene axes (x, z, y)
+            const L = Math.min(1.1, Math.max(0.05, 0.32 / (r * r)));
+            this._writeTail(o, px, py, pz, (t) => [ax * t * L, ay * t * L, az * t * L], [0.55, 0.78, 1.0], b);
+            const Ld = L * 0.75, lag = 0.45;
+            this._writeTail(o + TAIL_SEG * 6, px, py, pz,
+                (t) => [(ax * t - wx * lag * t * t) * Ld, (ay * t - wy * lag * t * t) * Ld, (az * t - wz * lag * t * t) * Ld],
+                [1.0, 0.9, 0.72], b * 0.85);
+        }
+        this.cometTailsActive = active;
+        this.cometTails.geometry.attributes.position.needsUpdate = true;
+        this.cometTails.geometry.attributes.color.needsUpdate = true;
+        if (sizeDirty) this.points.geometry.attributes.aSize.needsUpdate = true;
     }
 
     _buildLocalFrame() {
@@ -491,14 +712,19 @@ export class NeoLayer extends Emitter {
     }
 
     _buildSelectedMarker() {
-        const g = new THREE.RingGeometry(0.018, 0.026, 40);
-        const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false, depthTest: false });
-        const mesh = new THREE.Mesh(g, m);
-        mesh.name = 'neo-selected-marker';
-        mesh.visible = false;
-        mesh.renderOrder = 15;
-        this.group.add(mesh);
-        return mesh;
+        // A thin reticle in the object's own colour, not a grey washer.
+        const group = new THREE.Group();
+        group.name = 'neo-selected-marker';
+        const ring = (ri, ro, opacity) => new THREE.Mesh(new THREE.RingGeometry(ri, ro, 64),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity, side: THREE.DoubleSide,
+                depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+        // Hairlines: the lock camera sits ~0.1 unit from the rock, so a ring
+        // 0.0025 thick was a 25 px band.
+        group.add(ring(0.0222, 0.0228, 0.95), ring(0.0300, 0.0303, 0.30));
+        group.visible = false;
+        group.renderOrder = 15;
+        this.group.add(group);
+        return group;
     }
 
     /** Colour / size / base alpha per object from class + toggles + watch highlights. */
@@ -512,7 +738,10 @@ export class NeoLayer extends Emitter {
             if (a.index != null && Math.abs(a.t_ms - nowMs) < 7 * 86400e3) flybySet.add(a.index);
         }
         if (!this._baseVis || this._baseVis.length !== N) this._baseVis = new Float32Array(N);
+        if (!this._baseA || this._baseA.length !== N) this._baseA = new Float32Array(N);
         const pop = this.visible.population;
+        const mode = this.visible.colorMode;
+        const flybyHex = mode === 'class' ? NEO_COLORS.flyby : NATURAL_COLORS.flyby;
         for (let k = 0; k < N; k++) {
             const el = this.els[k];
             const isComet = !!(el.flags & FLAG.COMET), isInter = !!(el.flags & FLAG.INTERSTELLAR), isPha = !!(el.flags & FLAG.PHA);
@@ -526,11 +755,12 @@ export class NeoLayer extends Emitter {
             }
             const flyby = flybySet.has(k);
             if (flyby && this.visible.asteroids) vis = true;   // a flyby this week is always worth drawing
-            c.setHex(flyby ? NEO_COLORS.flyby : baseColor(el));
+            if (flyby) c.setHex(flybyHex); else colorFor(el, mode, c);
             this._col[k * 3] = c.r; this._col[k * 3 + 1] = c.g; this._col[k * 3 + 2] = c.b;
-            this._size[k] = flyby ? 7.0 : baseSize(el);
+            this._size[k] = flyby ? 6.0 : baseSize(el);
             this._pulse[k] = flyby ? 1 : 0;
             this._baseVis[k] = vis ? 1 : 0;
+            this._baseA[k] = flyby ? 1 : baseAlpha(el);
         }
         this.points.geometry.attributes.aColor.needsUpdate = true;
         this.points.geometry.attributes.aSize.needsUpdate = true;
@@ -543,7 +773,8 @@ export class NeoLayer extends Emitter {
         if (!this.points) return;
         const N = this.count;
         for (let k = 0; k < N; k++) {
-            const base = this._baseVis ? this._baseVis[k] : 1;
+            if (this._meshed.has(k)) { this._alpha[k] = 0; continue; }   // a mesh stands in
+            const base = (this._baseVis ? this._baseVis[k] : 1) * (this._baseA ? this._baseA[k] : 1);
             const dLD = this.rGeo ? toLD(this.rGeo[k]) : Infinity;
             const w = this.visible.local ? localFrameWeight(dLD) : 1;
             this._alpha[k] = base * (0.35 + 0.65 * w) * (k === this.selectedIndex ? 1 : 0.9);
@@ -576,6 +807,7 @@ export class NeoLayer extends Emitter {
         this.closest = best >= 0 ? { index: best, dLD: toLD(bestD), dAU: bestD } : null;
         this._refreshAlpha();
         this._refreshLocalInstances();
+        this._refreshCometTails();
         this.emit('frame', { jd: msg.jd, count: N, closest: this.closest, inZone: this.inZone, ms: msg.ms });
     }
 
@@ -600,11 +832,12 @@ export class NeoLayer extends Emitter {
             const g = this.geocentricAt(k, jd);
             const off = geoToLocalScene(g.x, g.y, g.z, this.earthR);
             this._lpos[j * 3] = off.x; this._lpos[j * 3 + 1] = off.y; this._lpos[j * 3 + 2] = off.z;
-            c.setHex(this._flybySet?.has(k) ? NEO_COLORS.flyby : baseColor(el));
+            if (this._flybySet?.has(k)) c.setHex(this.visible.colorMode === 'class' ? NEO_COLORS.flyby : NATURAL_COLORS.flyby);
+            else colorFor(el, this.visible.colorMode, c);
             this._lcol[j * 3] = c.r; this._lcol[j * 3 + 1] = c.g; this._lcol[j * 3 + 2] = c.b;
-            this._lsize[j] = 6.5;
-            this._lpulse[j] = 1;
-            this._lalpha[j] = this.visible.local ? (1 - localFrameWeight(off.dLD)) : 0;
+            this._lsize[j] = 5.2;
+            this._lpulse[j] = 0.8;
+            this._lalpha[j] = this.visible.local && !this._meshed.has(k) ? (1 - localFrameWeight(off.dLD)) : 0;
             // Labels + trails for the nearest few (the selected object already
             // carries the page-level label, so it gets no second one here).
             if (j < 12 && this.visible.local && this.visible.labels && k !== this.selectedIndex) {
@@ -623,7 +856,9 @@ export class NeoLayer extends Emitter {
                     this._labels.set(key, s);
                 }
                 s.position.set(off.x, off.y + 0.02, off.z);
-                s.material.opacity = this._lalpha[j];
+                // The label follows the local-frame weight, NOT the sprite alpha — the
+                // sprite is zeroed while a mesh stands in, the label must stay.
+                s.material.opacity = this.visible.local ? (1 - localFrameWeight(off.dLD)) : 0;
                 s.visible = this._labelVis.objects;
             }
             if (j < 12 && this.visible.local) this._requestTrack(k);
@@ -665,7 +900,18 @@ export class NeoLayer extends Emitter {
         if (line) { this.localGroup.remove(line); line.geometry.dispose(); }
         const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
         const el = this.els[msg.index];
-        line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: this._flybySet?.has(msg.index) ? NEO_COLORS.flyby : baseColor(el), transparent: true, opacity: 0.55, depthWrite: false }));
+        const base = this._flybySet?.has(msg.index)
+            ? _cB.setHex(this.visible.colorMode === 'class' ? NEO_COLORS.flyby : NATURAL_COLORS.flyby)
+            : colorFor(el, this.visible.colorMode, _cB);
+        // Bright at "now" (the middle sample), fading to both ends — a ±3-day exposure.
+        const col = new Float32Array(steps * 3);
+        for (let k = 0; k < steps; k++) {
+            const f = 1 - Math.abs(k / (steps - 1) - 0.5) * 2;
+            const bb = 0.06 + 0.94 * f * f;
+            col[k * 3] = base.r * bb; col[k * 3 + 1] = base.g * bb; col[k * 3 + 2] = base.b * bb;
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        line = new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
         line.name = `neo-trail-${msg.index}`;
         line.userData.jd = msg.jd0 + (steps - 1) * msg.dtDays / 2;
         line.visible = this.visible.local;
@@ -678,6 +924,113 @@ export class NeoLayer extends Emitter {
         this._trails.clear(); this._trackReq.clear();
     }
 
+    // ── Mesh LOD (rock pool) ────────────────────────────────────────────────
+
+    _rockRadius(el) {
+        const d = el.diam ?? diameterKmFromH(el.H) ?? ((el.flags & FLAG.COMET) ? 3 : 0.1);
+        return drawnRockRadius(d);
+    }
+
+    _ensureRockSlots() {
+        if (this._rockSlots.length) return;
+        const placeholder = new THREE.IcosahedronGeometry(1, 0);
+        for (let i = 0; i < ROCK_SLOTS; i++) {
+            const mesh = new THREE.Mesh(placeholder, rockMaterial(0x9a9691));
+            mesh.visible = false; mesh.name = `neo-rock-${i}`; mesh.renderOrder = 8; mesh.frustumCulled = false;
+            this.group.add(mesh);
+            this._rockSlots.push({ mesh, index: -1, geoKey: null, shape: null, spin: null, isComet: false });
+        }
+    }
+
+    _geometryFor(el) {
+        const key = String(el.des ?? el.name);
+        let hit = this._geoCache.get(key);
+        if (!hit) {
+            const seed = hash32(key);
+            const shape = shapeFor(el.des, seed);
+            hit = { geo: rockGeometry({ seed, shape, detail: 7 }), shape };   // three subdivides LINEARLY: 7 ⇒ 1280 faces
+            this._geoCache.set(key, hit);
+            if (this._geoCache.size > GEO_CACHE_MAX) {
+                const first = this._geoCache.keys().next().value;
+                if (first !== key && !this._rockSlots.some(sl => sl.geoKey === first)) { this._geoCache.get(first).geo.dispose(); this._geoCache.delete(first); }
+            }
+        }
+        return { key, ...hit };
+    }
+
+    _isCometLike(el) {
+        return !!(el.flags & FLAG.COMET) || (!!(el.flags & FLAG.INTERSTELLAR) && /^(HYP|COM|JFc|JFC|HTC|ETc|CTc|PAR)$/.test(el.cls || ''));
+    }
+
+    _updateRocks(f) {
+        if (!this.count || !this._pos || !f.camera) return;
+        this._ensureRockSlots();
+        if ((this._rockTick++ % 6) === 0) {
+            const want = [], seen = new Set();
+            const visOf = (k) => (this._baseVis ? this._baseVis[k] : 1);
+            const add = (k) => { if (k != null && k >= 0 && !seen.has(k) && visOf(k)) { seen.add(k); want.push(k); } };
+            add(this.selectedIndex);
+            for (const k of this.inZone.slice(0, 12)) add(k);
+            // Nearest to the camera inside ROCK_RANGE, from the heliocentric-frame positions.
+            const cx = f.camera.position.x, cy = f.camera.position.y, cz = f.camera.position.z;
+            const R2 = ROCK_RANGE * ROCK_RANGE;
+            const near = [];
+            for (let k = 0; k < this.count; k++) {
+                if (!visOf(k)) continue;
+                const dx = this._pos[k * 3] - cx, dy = this._pos[k * 3 + 1] - cy, dz = this._pos[k * 3 + 2] - cz;
+                const d2 = dx * dx + dy * dy + dz * dz;
+                if (d2 > R2) continue;
+                if (near.length < ROCK_SLOTS || d2 < near[near.length - 1].d2) {
+                    let i = near.length; near.push(null);
+                    while (i > 0 && near[i - 1].d2 > d2) { near[i] = near[i - 1]; i--; }
+                    near[i] = { k, d2 };
+                    if (near.length > ROCK_SLOTS) near.pop();
+                }
+            }
+            for (const n of near) { if (want.length >= ROCK_SLOTS) break; add(n.k); }
+            const wantSet = new Set(want);
+            for (const slot of this._rockSlots) if (slot.index >= 0 && !wantSet.has(slot.index)) { slot.index = -1; slot.mesh.visible = false; }
+            const held = new Set(this._rockSlots.map(sl => sl.index));
+            for (const k of want) {
+                if (held.has(k)) continue;
+                const slot = this._rockSlots.find(sl => sl.index < 0);
+                if (!slot) break;
+                const el = this.els[k];
+                const g = this._geometryFor(el);
+                slot.mesh.geometry = g.geo; slot.geoKey = g.key; slot.shape = g.shape;
+                slot.spin = spinFor(el.des, hash32(String(el.des ?? el.name)));
+                slot.isComet = this._isCometLike(el);
+                slot.mesh.material.uniforms.u_base.value.copy(colorFor(el, this.visible.colorMode, _cB)).multiplyScalar(slot.isComet ? 0.55 : 0.9);
+                slot.mesh.material.uniforms.u_glow.value = 0;
+                slot.mesh.scale.setScalar(this._rockRadius(el));
+                slot.index = k;
+                slot.mesh.visible = true;
+                held.add(k);
+            }
+            const meshed = new Set(this._rockSlots.filter(sl => sl.index >= 0).map(sl => sl.index));
+            let changed = meshed.size !== this._meshed.size;
+            if (!changed) for (const k of meshed) if (!this._meshed.has(k)) { changed = true; break; }
+            if (changed) { this._meshed = meshed; this._refreshAlpha(); if (this.rGeo) this._refreshLocalInstances(); }
+        }
+        // Position + spin every frame. Spin is a closed-form function of SIM
+        // time (real period, seeded phase), so it warps and scrubs correctly.
+        const simMs = this._simMs ?? Date.now();
+        for (const slot of this._rockSlots) {
+            if (slot.index < 0) continue;
+            const p = this.drawnPosition(slot.index, slot.mesh.position);
+            if (!p) { slot.mesh.visible = false; continue; }
+            slot.mesh.visible = true;
+            const ang = ((simMs / 3.6e6 / slot.spin.periodH) * Math.PI * 2 + slot.spin.phase) % (Math.PI * 2);
+            // Spin about the body's own symmetry axis (geometry +Y), tilted to the seeded pole.
+            _qSpin.setFromAxisAngle(_Y, ang);
+            slot.mesh.quaternion.setFromUnitVectors(_Y, slot.spin.axis).multiply(_qSpin);
+            if (slot.isComet && this.rHelio) {
+                const r = this.rHelio[slot.index];
+                slot.mesh.material.uniforms.u_glow.value = r < TAIL_MAX_R ? Math.min(1, 0.9 / (r * r)) : 0;
+            }
+        }
+    }
+
     // ── Selection / bodies ──────────────────────────────────────────────────
 
     /** Body object in the shape solar-system.html's selectBody() expects. */
@@ -686,7 +1039,7 @@ export class NeoLayer extends Emitter {
         if (!el) return null;
         let b = this._bodies.get(index);
         if (!b) {
-            b = { name: displayName(el), type: classLabel(el), radius: 0.02, color: baseColor(el), mesh: this.anchor, neoIndex: index, des: el.des, data: {} };
+            b = { name: displayName(el), type: classLabel(el), radius: this._rockRadius(el), color: colorFor(el, this.visible.colorMode, _cB).getHex(), mesh: this.anchor, neoIndex: index, des: el.des, data: {} };
             this._bodies.set(index, b);
         }
         b.data = this.readout(index);
@@ -707,6 +1060,8 @@ export class NeoLayer extends Emitter {
             // setCamLock() reads anchor.position synchronously — seat it now.
             const p = this.drawnPosition(index, this.anchor.position);
             if (p) this.selectedMarker.position.copy(p);
+            const tint = colorFor(this.els[index], this.visible.colorMode, _cB).lerp(_cB.clone().set(0xffffff), 0.35).clone();
+            for (const m of this.selectedMarker.children) m.material.color.copy(tint);
             this._buildOrbit(index);
             const s = makeLabel(displayName(this.els[index]), { color: '#ffffff', size: 21, weight: 600 });
             this.group.add(s); this._labels.set(key, s);
@@ -734,7 +1089,7 @@ export class NeoLayer extends Emitter {
         }
         const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
         const Ctor = el.e < 1 ? THREE.LineLoop : THREE.Line;
-        this.orbitLine = new Ctor(g, new THREE.LineBasicMaterial({ color: baseColor(el), transparent: true, opacity: 0.55, depthWrite: false }));
+        this.orbitLine = new Ctor(g, new THREE.LineBasicMaterial({ color: colorFor(el, this.visible.colorMode, _cB).getHex(), transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
         this.orbitLine.name = 'neo-orbit';
         this.orbitLine.visible = this.visible.orbit;
         this.orbitLine.renderOrder = 3;
@@ -796,7 +1151,9 @@ export class NeoLayer extends Emitter {
         if (this.orbitLine) this.orbitLine.visible = this.visible.orbit;
         this.localGroup.visible = this.visible.local;
         for (const [, line] of this._trails) line.visible = this.visible.local;
-        for (const r of this._radiants) { r.line.visible = this.visible.radiants; r.cone.visible = this.visible.radiants; r.label.visible = this.visible.radiants; }
+        for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.cone.visible = v; r.label.visible = v; r.stream.visible = v; r.rocks.mesh.visible = v; }
+        for (const slot of this._rockSlots) if (slot.index >= 0) slot.mesh.material.uniforms.u_base.value.copy(colorFor(this.els[slot.index], this.visible.colorMode, _cB)).multiplyScalar(slot.isComet ? 0.55 : 0.9);
+        if (this.rGeo) this._refreshCometTails();
         this._applyStyles();
         if (this.rGeo) this._refreshLocalInstances();
     }
@@ -840,7 +1197,9 @@ export class NeoLayer extends Emitter {
         const wantCodes = new Set(want.map(x => x.shower.code));
         for (const r of this._radiants.slice()) {
             if (!wantCodes.has(r.code)) {
-                this.localGroup.remove(r.line, r.cone, r.label); r.line.geometry.dispose(); r.cone.geometry.dispose(); r.label.material.map.dispose();
+                this.localGroup.remove(r.line, r.cone, r.label, r.stream, r.rocks.mesh);
+                r.line.geometry.dispose(); r.cone.geometry.dispose(); r.label.material.map.dispose();
+                r.stream.geometry.dispose(); r.stream.material.dispose(); r.rocks.dispose();
                 this._radiants.splice(this._radiants.indexOf(r), 1);
             }
         }
@@ -858,13 +1217,19 @@ export class NeoLayer extends Emitter {
             const len = tail.length() - head.length();
             const mid = head.clone().add(tail).multiplyScalar(0.5);
             if (!r) {
-                const shaftMat = new THREE.MeshBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.85, depthWrite: false });
-                const line = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, len, 8), shaftMat);
-                const cone = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.11, 12), shaftMat);
+                // A hairline guide with a small head; the STREAM carries the visual weight.
+                const shaftMat = new THREE.MeshBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending });
+                const line = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, len, 6), shaftMat);
+                const cone = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.07, 10), shaftMat);
                 const label = makeLabel(`☄ ${s.name} · ZHR ~${Math.round(s.zhr * x.activity)} · ${s.vKms} km/s`, { color: '#ffd27a', size: 19 });
+                const stream = makeStream(Math.round(70 + 170 * x.activity), 0xfff1c8);
+                // The meteoroids themselves: instanced tumbling rocks on the same cone.
+                const rocks = new MeteoroidStream({ count: Math.round(90 + 130 * x.activity), seed: hash32(s.code) });
                 line.name = `neo-radiant-${s.code}`;
-                this.localGroup.add(line, cone, label);
-                r = { code: s.code, line, cone, label };
+                stream.name = `neo-stream-${s.code}`;
+                rocks.mesh.name = `neo-meteoroids-${s.code}`;
+                this.localGroup.add(line, cone, label, stream, rocks.mesh);
+                r = { code: s.code, line, cone, label, stream, rocks };
                 this._radiants.push(r);
             }
             r.line.position.copy(mid);
@@ -872,8 +1237,11 @@ export class NeoLayer extends Emitter {
             r.cone.position.copy(head);
             r.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
             r.label.position.copy(tail).addScalar(0.02);
+            r.stream.material.uniforms.u_dir.value.copy(dir);
+            r.stream.material.uniforms.u_speed.value = s.vKms / 40;   // faster streams pour in faster
+            r.rocks.setDirection(dir); r.rocks.setSpeed(s.vKms / 40);
             const vis = this.visible.radiants;
-            r.line.visible = vis; r.cone.visible = vis; r.label.visible = vis;
+            r.line.visible = vis; r.cone.visible = vis; r.label.visible = vis; r.stream.visible = vis; r.rocks.mesh.visible = vis;
         }
     }
 
@@ -886,6 +1254,7 @@ export class NeoLayer extends Emitter {
     update(f) {
         this._t = f.t ?? this._t + 0.016;
         this._pointsMat.uniforms.u_time.value = this._t;
+        for (const r of this._radiants) { r.stream.material.uniforms.u_time.value = this._t; r.rocks.update(this._t); }
         this._earthDrawn.copy(f.earthDrawn);
         this._earthOfDate = [f.earthOfDate.x_AU, f.earthOfDate.y_AU, f.earthOfDate.z_AU];
         this._earthFn = f.earthFn ?? this._earthFn;
@@ -910,12 +1279,14 @@ export class NeoLayer extends Emitter {
         if (this._radiantJd == null || Math.abs(f.jd - this._radiantJd) > 0.1) { this._radiantJd = f.jd; this._refreshRadiants(f.jd, f.earthOfDate.lon_rad); }
         // Flyby highlight set depends on the sim date (±7 d) — refresh every sim-day.
         if (this._styleMs == null || Math.abs((this._simMs ?? 0) - this._styleMs) > 86400e3) { this._styleMs = this._simMs ?? 0; if (this.points) this._applyStyles(); }
+        this._updateRocks(f);
         // Selected object: anchor, marker, label, orbit (re-oriented if the date moved a lot).
         if (this.selectedIndex != null) {
             const p = this.drawnPosition(this.selectedIndex, this.anchor.position);
             if (p) {
                 this.selectedMarker.position.copy(p);
-                this.selectedMarker.scale.setScalar(Math.min(8, Math.max(1, (f.camDist ?? 20) * 0.08)));
+                const rr = this._rockRadius(this.els[this.selectedIndex]);
+                this.selectedMarker.scale.setScalar(Math.max(rr * 1.7 / 0.021, Math.min(8, Math.max(1, (f.camDist ?? 20) * 0.08))));
                 this.selectedMarker.lookAt(f.camera ? f.camera.position : new THREE.Vector3(0, 50, 0));
                 const s = this._labels.get('selected');
                 if (s) s.position.set(p.x, p.y + 0.03, p.z);

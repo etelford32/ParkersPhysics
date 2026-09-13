@@ -1899,9 +1899,20 @@ for (let i = 0; i < N_BELT; i++) {
 }
 const beltGeo = new THREE.BufferGeometry();
 beltGeo.setAttribute('position', new THREE.Float32BufferAttribute(beltPos, 3));
+// Soft round sprite for the belt points: an untextured PointsMaterial draws
+// hard squares, which the camera-locked NEO views now bring within a few
+// units of the eye.
+const _beltDot = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.35, 'rgba(255,255,255,0.55)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, 32, 32);
+    const t = new THREE.CanvasTexture(c); t.minFilter = THREE.LinearFilter; return t;
+})();
 const beltMat = new THREE.PointsMaterial({
     color: 0x998877, size: 0.055, transparent: true, opacity: 0.55,
-    sizeAttenuation: true, depthWrite: false,
+    sizeAttenuation: true, depthWrite: false, map: _beltDot, alphaTest: 0.02,
 });
 const asteroidBelt = new THREE.Points(beltGeo, beltMat);
 scene.add(asteroidBelt);
@@ -1948,6 +1959,7 @@ cmeGeo.setAttribute('position', new THREE.Float32BufferAttribute(cmePosArr, 3));
 const cmeMat  = new THREE.PointsMaterial({
     color: 0xffcc66, size: 0.07, transparent: true, opacity: 0.0,
     sizeAttenuation: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    map: _beltDot,
 });
 const cmeMesh = new THREE.Points(cmeGeo, cmeMat);
 scene.add(cmeMesh);
@@ -2073,6 +2085,7 @@ const windMat = new THREE.PointsMaterial({
     vertexColors: true,
     size: 0.055, transparent: true, opacity: 0.45,
     blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+    map: _beltDot,   // soft round dots — untextured points are 30 px squares from a locked-NEO camera
 });
 const windPoints = new THREE.Points(windGeo, windMat);
 scene.add(windPoints);
@@ -2934,6 +2947,10 @@ function _setModeUI() {
  *  Jupiter (radius ≈ 1.4) gets a wider establishing shot. */
 function _lockDistance(body) {
     const r = Math.max(body?.radius ?? 0.05, 0.005);
+    // NEO bodies are rock meshes a few hundredths of a unit across; the 0.35
+    // floor (sized for planets) left them ~40 px. Their floor is the near plane
+    // with margin, so the lock frames the rock (js/neo-rocks.js drawnRockRadius).
+    if (body?.neoIndex != null) return Math.max(r * 7, 0.09);
     return Math.max(r * 8, 0.35);
 }
 
@@ -2943,6 +2960,9 @@ function setCamLock(body) {
     if (!body || !body.mesh) return false;
     cameraMode = 'lock';
     targetBody = body;
+    // OrbitControls clamps the orbit radius: 0.5 is right for planets and far
+    // too far for a rock mesh a few hundredths of a unit across.
+    controls.minDistance = body.neoIndex != null ? 0.03 : 0.5;
     const tp = body.mesh.position;
     // Preserve current view direction; just rescale to the new lock distance.
     const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
@@ -2966,6 +2986,7 @@ function setCam(name) {
     document.getElementById('cam-'+name)?.classList.add('active');
     const p = CAM[name];
     if (!p) return;
+    controls.minDistance = 0.5;
     if (name === 'earth') {
         // Earth moves ~1°/day along its orbit; a FIXED preset only framed the
         // planet for a few weeks a year (it aimed at the +X axis, where Earth

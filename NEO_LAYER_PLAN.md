@@ -81,6 +81,37 @@ through it.
    propagate + frame-derive in 17 ms. Main-thread fallback (no module
    workers) runs at 1 Hz on purpose.
 
+## 2b. Rendering (2026-09, "make it realistic" pass)
+
+- **Bodies are meshes wherever they can have a shape.** `js/neo-rocks.js`
+  builds seeded rocks (lumpy field + craters + a family profile: potato,
+  elongated, contact binary, spinning top, spheroid — Bennu/Ryugu/Didymos
+  are tops, Apophis/Eros elongated, Itokawa/Toutatis contact) with real
+  spin periods where known. A pool of 24 meshes is assigned at ~10 Hz to the
+  selected object, the flybys inside the Earth-local frame and the nearest
+  objects to the camera within 2.5 units; their sprites are suppressed while
+  a mesh stands in. Spin is a closed-form function of SIM time (period ×
+  seeded phase), so warp and scrub stay honest. Rocks light themselves from
+  the Sun direction (the page's PointLight decays physically and leaves 1 AU
+  dim) — same convention as the page's planet shader.
+- **Sprites for the far field only**, sized and brightened by absolute
+  magnitude, additive Gaussian PSF with a faint diffraction cross on the
+  brightest, NATURAL S/C-type tints by default (PHAs warm-biased) with the
+  class palette behind a "Colour by class" toggle.
+- **Comets grow tails**: ion tail straight anti-sunward (exact — the Sun is
+  the scene origin), dust tail lagging the motion with a t² curve, lengths
+  and coma ∝ 1/r² inside 3.5 AU; the nucleus mesh gets a self-lit haze.
+- **Meteor showers are meteoroid streams**: instanced tumbling rocks on a
+  cone converging on Earth at the stream's speed, plus faint streaks and a
+  hairline guide with the label.
+- **`_lockDistance` in the page has an NEO branch** (floor 0.09, not the
+  planets' 0.35): a rock a few hundredths of a unit across was ~40 px at the
+  planet floor. The page's asteroid belt points also got a soft round sprite
+  — untextured `PointsMaterial` squares were suddenly within a few units of
+  the eye in every locked NEO view.
+- **Sizes are a disclosed log map** (`drawnRockRadius`): a 30 m rock and Eros
+  differ 500× in reality and ~4× on screen. Never used for physics.
+
 ## 3. Scars (each was a bug during the build)
 
 - **TDZ abort.** `NeoPanel` renders synchronously in its constructor and
@@ -109,6 +140,10 @@ through it.
   nothing). `setCam('earth')` now frames the drawn Earth wherever it is.
 - **1-px GL lines vanish against the point cloud.** Radiant arrow shafts
   are thin cylinders, not `THREE.Line`.
+- **three's icosahedron `detail` is LINEAR, not recursive.** `detail: 3`
+  gives 162 vertices, not 642; the rocks use 7 (1280 faces).
+- **A label that follows the sprite's alpha disappears when a mesh stands
+  in.** Flyby labels follow the local-frame weight only.
 
 ## 4. Open items
 

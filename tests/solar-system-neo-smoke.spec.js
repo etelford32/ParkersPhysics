@@ -79,6 +79,8 @@ function catalogBody(nowJd) {
     ];
     const cometRows = [
         ['109P', '109P/Swift-Tuttle', null, 'HTC', 'Y', 'N', '.9632', '26.09', '.9595', '113.45', '139.38', '152.98', '5.1', null, String(EPOCH), '.0009', '26'],
+        // 2P/Encke at perihelion AT TEST TIME (epoch = now, M = 0): r = 0.34 AU ⇒ active, with tails.
+        ['2P', '2P/Encke', null, 'ETc', 'Y', 'N', '.848', '2.215', '.336', '11.78', '334.6', '186.5', '0', null, String(nowJd), '.173', '4.8'],
         ['1P', '1P/Halley', null, 'HTC', 'Y', 'N', '.967', '17.83', '.586', '162.26', '58.42', '111.33', '38.4', null, String(EPOCH), '.0744', '11'],
     ];
     const interRows = [
@@ -161,11 +163,11 @@ test.describe('solar-system.html — near-Earth objects', () => {
                 frameMs: L.status.frameMs,
             };
         });
-        expect(state.count).toBe(10);
-        expect(state.drawn).toBe(10);
+        expect(state.count).toBe(11);
+        expect(state.drawn).toBe(11);
         expect(state.catalog).toBe('ready');
         expect(state.worker).toMatch(/ready/);
-        expect(state.hudCount).toBe('10');
+        expect(state.hudCount).toBe('11');
         expect(state.hasComet).toBe(true);
         expect(state.hasInterstellar).toBe(true);
         // The kernel's LOG_SCALE mirrors solar-system.html's simDist — drift here fails the gate.
@@ -208,7 +210,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(s.localDrawn).toBeGreaterThanOrEqual(1);
         // Inside the fade band the heliocentric instance is off; outside it is on.
         expect(s.helioAlpha3).toBe(0);
-        expect(s.helioAlpha30).toBeGreaterThan(0.5);
+        expect(s.helioAlpha30).toBeGreaterThan(0.3);   // H 24 ⇒ a faint sprite, but ON
         expect(s.labels.some(k => k.startsWith('local:'))).toBe(true);
         expect(s.hudClosest).toContain('FLYBY-3LD');
         expect(s.closestBox).toContain('FLYBY-3LD');
@@ -317,6 +319,63 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(inter.orbitPts).toBe(201);   // an open hyperbola, not a loop
         await expect(page.locator('#neo-fireballs .neo-row')).toHaveCount(2);
         await expect(page.locator('#sd-neo-table')).toContainText('Apophis');
+        expect(errors).toEqual([]);
+    });
+
+    test('bodies are meshes up close: selected rock, flyby rocks, instanced meteoroids, comet tails, colour modes', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 20_000 });
+        // A flyby 3 LD out is a lit rock mesh, and its sprite is suppressed.
+        await page.waitForFunction(() => {
+            const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
+            return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible);
+        }, null, { timeout: 20_000 });
+        const rocks = await page.evaluate(() => {
+            const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
+            const slot = L._rockSlots.find(sl => sl.index === i);
+            const j = L._localIndices.indexOf(i);
+            return { verts: slot.mesh.geometry.attributes.position.count, scale: slot.mesh.scale.x, spriteAlpha: L._lalpha[j],
+                atLocal: slot.mesh.position.distanceTo(L.localGroup.position) < 2, meshed: L._meshed.has(i), tails: L.cometTailsActive };
+        });
+        expect(rocks.verts).toBeGreaterThan(500);
+        expect(rocks.scale).toBeGreaterThan(0.009); expect(rocks.scale).toBeLessThan(0.05);
+        expect(rocks.spriteAlpha).toBe(0);
+        expect(rocks.atLocal).toBe(true);
+        expect(rocks.meshed).toBe(true);
+        // Encke at perihelion grows tails.
+        expect(rocks.tails).toBeGreaterThanOrEqual(1);
+        // Selecting Apophis puts a rock at the lock anchor with its real (elongated) family and spin period.
+        await page.evaluate(() => { const b = window.__neoLab.layer.selectByDes('99942'); window.__neoLab.selectBody(b); });
+        await page.waitForFunction(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible); }, null, { timeout: 20_000 });
+        const sel = await page.evaluate(() => {
+            const L = window.__neoLab.layer; const i = L.byDes.get('99942'); const slot = L._rockSlots.find(sl => sl.index === i);
+            return { atAnchor: slot.mesh.position.distanceTo(L.anchor.position) < 1e-6, shape: slot.shape, periodH: slot.spin.periodH,
+                bodyRadius: window.__neoLab.selectedBody.radius, scale: slot.mesh.scale.x };
+        });
+        expect(sel.atAnchor).toBe(true);
+        expect(sel.shape).toBe('elongated');
+        expect(sel.periodH).toBe(30.6);
+        expect(Math.abs(sel.bodyRadius - sel.scale)).toBeLessThan(1e-9);
+        // Meteoroid streams are instanced rock meshes.
+        await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
+        await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 20_000 });
+        const stream = await page.evaluate(() => { const r = window.__neoLab.layer._radiants[0]; return { code: r.code, instanced: !!r.rocks.mesh.isInstancedMesh, count: r.rocks.mesh.count, visible: r.rocks.mesh.visible }; });
+        expect(stream.code).toBe('PER');
+        expect(stream.instanced).toBe(true);
+        expect(stream.count).toBeGreaterThan(100);
+        expect(stream.visible).toBe(true);
+        // Colour modes: natural by default, class palette on request.
+        await page.click('#btn-panel-open');
+        const before = await page.evaluate(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return { mode: L.visible.colorMode, rgb: [L._col[i * 3], L._col[i * 3 + 1], L._col[i * 3 + 2]] }; });
+        expect(before.mode).toBe('natural');
+        await page.check('#neo-toggles input[data-vis="colorMode"]');
+        const after = await page.evaluate(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return { mode: L.visible.colorMode, rgb: [L._col[i * 3], L._col[i * 3 + 1], L._col[i * 3 + 2]] }; });
+        expect(after.mode).toBe('class');
+        expect(after.rgb).not.toEqual(before.rgb);
+        expect(after.rgb[0]).toBeGreaterThan(0.9);   // PHA red
         expect(errors).toEqual([]);
     });
 
