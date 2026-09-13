@@ -22,7 +22,8 @@
  *
  *   in  { type:'frame', id, jd, earth:[x,y,z] }         Earth: AU, ecliptic OF DATE
  *   out { type:'frame', id, jd, count, scene:Float32Array(3N), rHelio:Float32Array(N),
- *         rGeo:Float32Array(N), ms }                     buffers transferred, not copied
+ *         rGeo:Float32Array(N), vmag:Float32Array(N), ms }   buffers transferred, not copied
+ *       vmag is the apparent V magnitude from Earth at jd (IAU H–G; NaN without H)
  *
  *   in  { type:'track', id, index, jd, days, steps, earthAt:[[x,y,z]…] }
  *       Geocentric track of ONE object: `steps` samples across ±`days` around
@@ -77,13 +78,14 @@ function onFrame(msg) {
     const scene = new Float32Array(N * 3);
     const rHelio = new Float32Array(N);
     const rGeo = new Float32Array(N);
+    const vmag = new Float32Array(N);     // apparent V from Earth at jd (NaN without H)
     if (N) {
         propagateColumns(cols, msg.jd, helio);
-        deriveFrames(helio, N, msg.earth, scene, rHelio, rGeo, precessionLongitudeRad(msg.jd));
+        deriveFrames(helio, N, msg.earth, scene, rHelio, rGeo, precessionLongitudeRad(msg.jd), vmag, cols.H, cols.flags);
     }
     postMessage(
-        { type: 'frame', id: msg.id, jd: msg.jd, count: N, scene, rHelio, rGeo, ms: performance.now() - t0 },
-        [scene.buffer, rHelio.buffer, rGeo.buffer],
+        { type: 'frame', id: msg.id, jd: msg.jd, count: N, scene, rHelio, rGeo, vmag, ms: performance.now() - t0 },
+        [scene.buffer, rHelio.buffer, rGeo.buffer, vmag.buffer],
     );
 }
 

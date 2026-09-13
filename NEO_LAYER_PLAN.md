@@ -49,11 +49,11 @@ through it.
    `precessionLongitudeRad(jd)` once per frame; the kernel test shows the
    unrotated error is > 2 LD for an object coincident with Earth.
 3. **Flyby geometry uses Earth's TRUE position, anchored at the DRAWN
-   Earth.** The planets ride mean-motion circles (`angle0` + uniform rate);
-   Earth's equation of centre alone is ±2° ≈ ±13 LD. Geocentric vectors are
-   computed against `earthHeliocentric(jd)` and drawn relative to
-   `earthP.mesh.position`. Numbers are honest; the anchor is a display
-   convention, said so in the panel note.
+   Earth.** Geocentric vectors are computed against `earthHeliocentric(jd)`
+   and drawn relative to `earthP.mesh.position`. Since the 2026-09 accuracy
+   pass the drawn Earth IS its VSOP87D position on the log map (see 2c), so
+   the anchor no longer hides an equation-of-centre error — it only bridges
+   the log radial map to the Moon-compressed local frame.
 4. **The approach LIST is JPL's, not ours.** Two-body propagation from
    osculating elements drifts at arcminutes per year and far faster across a
    planetary encounter. The CAD table (JPL's integrated orbits) is the source
@@ -112,6 +112,48 @@ through it.
 - **Sizes are a disclosed log map** (`drawnRockRadius`): a 30 m rock and Eros
   differ 500× in reality and ~4× on screen. Never used for physics.
 
+## 2c. Accuracy + sizes (2026-09, "too big when zoomed out" pass)
+
+Measured on the 2026-09-13 deploy (42 572 objects loaded — the `tier=all`
+payload and the JPL schemas both resolved in production): the population was
+a wall of 10–25 px blobs at the inner-system zoom and a dozen flyby labels
+sat on a 200 px Earth disc.
+
+- **Planets ride their EPHEMERIDES, not phased circles.** `PLANET_EPH` in the
+  page maps every planet (+ Ceres, new mean elements in `horizons.js`) to its
+  of-date heliocentric function, evaluated every frame and drawn through the
+  kernel's `helioToScene` — the SAME log map the objects use. The circles
+  had Mercury's ±23° / Mars's ±10.6° equation of centre and no radial swing
+  at all, so an accurately propagated NEO sat in the wrong place relative to
+  every inner planet. The orbit ribbon is the sampled TRUE path over one
+  period (`ephemerisPathScene` + `ribbonStrip`), rebuilt on a > 10 yr scrub.
+  The `angle0` block survives only as the fallback for a body with no
+  ephemeris function (none today).
+- **Brightness and size follow the APPARENT magnitude from Earth now**, IAU
+  H–G with G = 0.15 (`apparentMagnitude`, computed per frame in the worker
+  as `vmag`). V 12 → 3.4 px, V ≥ 23 → 1.4 px; alpha 1 at V 14 down to a 0.07
+  haze at V ≥ 27.5 (`MAG_DISPLAY`). A 30 m rock at 0.1 AU and a 5 km one at
+  3 AU can be equally bright — the point is observability, not size. The
+  near-camera growth is now √(12/depth) capped at 1.6× (the linear 0.6–2.3×
+  put everything at 2.3× across the whole inner system).
+- **Rocks are TRUE scale with a disclosed screen-space floor**
+  (`rockDrawRadius`): (D/2)·earthR/R⊕ in the drawn-Earth convention (Eros
+  1.6e-4 units — invisible, correctly), floored at 5 px for the pool and
+  34 px for the selected object so its shape and spin stay inspectable. The
+  card's "Drawn size" row prints ×N. `drawnRockRadius` (the old log map) is
+  gone; `body.radius` handed to the page is the TRUE radius, so
+  `_lockDistance` always lands at its 0.09 floor.
+- **Flyby labels are a zoom LADDER** — built for the nearest 12, shown by
+  rank: 3 while the 20 LD ring is < 45 % of the view, 6 to 90 %, all 12 above
+  (six at 27 % still overlapped in the capture).
+- **Analysis on the card and on the orbit**: apparent V + phase + elongation,
+  speed relative to Earth (Earth's velocity by central difference through the
+  page's own ephemeris), ecliptic λ/β (helio + geo, of date), node crossing
+  distances with the Earth-crossing verdict (band 0.983–1.017 AU), Tisserand
+  T_J, next perihelion date. On the selected orbit: ☊ / ☋ / q marks and a
+  drop line to the ecliptic plane. Every number is a kernel function with a
+  node test; the layer only formats.
+
 ## 3. Scars (each was a bug during the build)
 
 - **TDZ abort.** `NeoPanel` renders synchronously in its constructor and
@@ -144,17 +186,25 @@ through it.
   gives 162 vertices, not 642; the rocks use 7 (1280 faces).
 - **A label that follows the sprite's alpha disappears when a mesh stands
   in.** Flyby labels follow the local-frame weight only.
+- **Absolute magnitude is not brightness.** Sizing sprites by H made the
+  whole 42k population 10–25 px blobs at any zoom; apparent V fixed it.
+- **A pixel floor that scales with distance never shows a shape.** A locked
+  rock at a 5 px floor stays 5 px however far you zoom in (the floor follows
+  the camera). The selected object gets its own 34 px floor for that reason.
+- **Float32 paths in float64 tests.** `ephemerisPathScene` / `ribbonStrip`
+  return Float32Arrays; identities on them hold to ~1e-6, not 1e-9.
 
 ## 4. Open items
 
-- Production self-report: after the first deploy, read
-  `/api/neo/catalog?tier=pha` `groups.*.field_map` and `/api/neo/watch`
-  `sources.*` and trim the candidate lists in `api/_lib/neo-sources.js`.
-  Confirm the interstellar query (`e > 1.1`) returns 1I/2I/3I and nothing
-  else.
-- Vercel edge response size for `tier=all` (~3.4 MB) is untested in
-  production. If it is refused, the page keeps `bright` and says so;
-  the fallback is to serve `all` in two halves (`sb-cdata` on H).
+- Production self-report: the 2026-09-13 deploy loaded 42 572 objects and a
+  populated close-approach list (author's screenshot), so the SBDB and CAD
+  schemas resolved and the `tier=all` payload is fine on the edge. Still to
+  do: read `groups.*.field_map` / `sources.*` once and trim the candidate
+  lists in `api/_lib/neo-sources.js`; confirm the interstellar query
+  (`e > 1.1`) returns 1I/2I/3I and nothing else.
+- Ceres's mean elements are anchored on the 2018-04-28 perihelion from
+  memory (Dawn's extended mission observed it); verify `CERES_EL` against
+  JPL SBDB when egress allows. Expected ~1° 1990–2060.
 - The synthetic flybys in the smoke spec share Earth's mean motion, so
   their geocentric trails are points; a real flyby draws a proper arc.
 - Fireballs are listed, not drawn on the sphere: Earth's drawn rotation is

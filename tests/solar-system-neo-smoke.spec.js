@@ -4,7 +4,8 @@ import {
     composeCatalogResponse, composeWatchResponse,
 } from '../api/_lib/neo-sources.js';
 import { earthHeliocentric, jdNow } from '../js/horizons.js';
-import { precessionLongitudeRad, rotateAboutPole, LD_AU, R2D } from '../js/neo-orbits.js';
+import { precessionLongitudeRad, rotateAboutPole, LD_AU, R2D, helioToScene, logSceneRadius, MAG_DISPLAY } from '../js/neo-orbits.js';
+import * as HZ from '../js/horizons.js';
 
 /**
  * Browser gate for the near-Earth object layer on solar-system.html.
@@ -22,6 +23,10 @@ import { precessionLongitudeRad, rotateAboutPole, LD_AU, R2D } from '../js/neo-o
  *   - the approach list selects an object, the data card fills, the camera
  *     lock anchor follows, and selecting a planet clears it again
  *   - the time controls move the population (a scrub is a real re-propagation)
+ *   - the PLANETS are drawn at their ephemeris positions through the kernel's
+ *     helioToScene (not on phased circles), with true-path orbit ribbons
+ *   - sprites are sized by APPARENT magnitude and pixel-capped, rocks are true
+ *     scale with a disclosed floor, and flyby labels are capped by zoom level
  *   - feeds down ⇒ the page says so, draws nothing, and raises no page error
  *
  * The flyby objects are SYNTHESISED at test time from the page's own VSOP87D
@@ -337,11 +342,17 @@ test.describe('solar-system.html — near-Earth objects', () => {
             const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
             const slot = L._rockSlots.find(sl => sl.index === i);
             const j = L._localIndices.indexOf(i);
+            const cam = window.__neoLab.camPos; const d = Math.hypot(cam[0] - slot.mesh.position.x, cam[1] - slot.mesh.position.y, cam[2] - slot.mesh.position.z);
+            const rk = L._rockRadius(L.els[i], d, i);
             return { verts: slot.mesh.geometry.attributes.position.count, scale: slot.mesh.scale.x, spriteAlpha: L._lalpha[j],
-                atLocal: slot.mesh.position.distanceTo(L.localGroup.position) < 2, meshed: L._meshed.has(i), tails: L.cometTailsActive };
+                atLocal: slot.mesh.position.distanceTo(L.localGroup.position) < 2, meshed: L._meshed.has(i), tails: L.cometTailsActive,
+                expectR: rk.r, rTrue: rk.rTrue, atFloor: rk.atFloor, camDist: d };
         });
         expect(rocks.verts).toBeGreaterThan(500);
-        expect(rocks.scale).toBeGreaterThan(0.009); expect(rocks.scale).toBeLessThan(0.05);
+        // True scale with a 5 px screen-space floor: a 60 m rock from any sane camera distance sits AT the floor.
+        expect(rocks.atFloor).toBe(true);
+        expect(rocks.rTrue).toBeGreaterThan(0); expect(rocks.rTrue).toBeLessThan(1e-5);
+        expect(Math.abs(rocks.scale - rocks.expectR) / rocks.expectR).toBeLessThan(0.05);   // one frame of camera motion at most
         expect(rocks.spriteAlpha).toBe(0);
         expect(rocks.atLocal).toBe(true);
         expect(rocks.meshed).toBe(true);
@@ -353,12 +364,29 @@ test.describe('solar-system.html — near-Earth objects', () => {
         const sel = await page.evaluate(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('99942'); const slot = L._rockSlots.find(sl => sl.index === i);
             return { atAnchor: slot.mesh.position.distanceTo(L.anchor.position) < 1e-6, shape: slot.shape, periodH: slot.spin.periodH,
-                bodyRadius: window.__neoLab.selectedBody.radius, scale: slot.mesh.scale.x };
+                bodyRadius: window.__neoLab.selectedBody.radius, scale: slot.mesh.scale.x, drawn: L._selectedDraw,
+                marks: L._orbitMarks.map(o => o.name), dropVisible: !!L._dropLine?.visible,
+                card: window.__neoLab.layer.readout(i) };
         });
         expect(sel.atAnchor).toBe(true);
         expect(sel.shape).toBe('elongated');
         expect(sel.periodH).toBe(30.6);
-        expect(Math.abs(sel.bodyRadius - sel.scale)).toBeLessThan(1e-9);
+        // The body's radius is the TRUE one (340 m ⇒ 3.2e-6 units); the mesh is drawn at the 34 px selected floor and the card says by how much.
+        expect(sel.bodyRadius).toBeLessThan(1e-5);
+        expect(sel.scale).toBeGreaterThan(sel.bodyRadius * 100);
+        expect(sel.drawn?.index).toBe(await page.evaluate(() => window.__neoLab.layer.byDes.get('99942')));
+        expect(sel.drawn.atFloor).toBe(true);
+        expect(sel.card['Drawn size']).toMatch(/^×[\d,.]+ true size/);
+        // Analysis marks on the orbit (☊ ☋ q: a dot + a label each) and the drop line to the ecliptic.
+        expect(sel.marks.filter(n => n === 'neo-orbit-mark')).toHaveLength(3);
+        expect(sel.marks.filter(n => n === 'neo-orbit-mark-label')).toHaveLength(3);
+        expect(sel.dropVisible).toBe(true);
+        expect(sel.card['Apparent magnitude']).toMatch(/^V \d+\.\d · phase \d+° · elongation \d+°/);
+        expect(sel.card['Node crossings']).toMatch(/☊ 1\.0\d\d AU · ☋ 0\.\d\d\d AU — crosses Earth’s orbit at the ascending node/);
+        expect(sel.card['Tisserand T_J']).toMatch(/asteroidal/);
+        expect(sel.card['Next perihelion']).toMatch(/^\d{4}-\d\d-\d\d · in \d+ d$/);
+        expect(sel.card['Speed relative to Earth']).toMatch(/km\/s$/);
+        expect(sel.card['Ecliptic position (of date)']).toMatch(/helio λ .* β .* · geo λ/);
         // Meteoroid streams are instanced rock meshes.
         await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
         await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 20_000 });
@@ -376,6 +404,51 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(after.mode).toBe('class');
         expect(after.rgb).not.toEqual(before.rgb);
         expect(after.rgb[0]).toBeGreaterThan(0.9);   // PHA red
+        expect(errors).toEqual([]);
+    });
+
+    test('planets ride their ephemerides through the kernel map; sprites are magnitude-sized and pixel-capped; labels cap by zoom', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        const s = await page.evaluate(() => {
+            const lab = window.__neoLab, L = lab.layer;
+            const jd = lab.simJD;
+            const planets = lab.planets().map(p => ({ ...p, eph: lab.planetEph[p.name] ? (() => { const e = lab.planetEph[p.name](jd); return [e.x_AU, e.y_AU, e.z_AU]; })() : null }));
+            const size = L.points.geometry.attributes.aSize.array;
+            let maxAst = 0, maxAll = 0, finiteV = 0;
+            for (let k = 0; k < L.count; k++) {
+                maxAll = Math.max(maxAll, size[k]);
+                if (!(L.els[k].flags & 12) && !L._flybySet?.has(k)) maxAst = Math.max(maxAst, size[k]);   // not comet (4) / interstellar (8) / flyby
+                if (Number.isFinite(L.vmag?.[k])) finiteV++;
+            }
+            const local = [...L._labels.entries()].filter(([k]) => k.startsWith('local:'));
+            return { jd, planets, maxAst, maxAll, finiteV, count: L.count, cap: L._labelCap(), level: L._labelVis.level,
+                localLabels: local.length, visibleLocal: local.filter(([, sp]) => sp.visible).length, uAtt: L._pointsMat.uniforms.u_att.value };
+        });
+        // Every planet with an ephemeris sits exactly where helioToScene puts its of-date position (one frame of clock at most).
+        for (const p of s.planets) {
+            expect(p.eph, p.name).not.toBeNull();
+            const exp = helioToScene(...p.eph);
+            const err = Math.hypot(p.pos[0] - exp.x, p.pos[1] - exp.y, p.pos[2] - exp.z);
+            expect(err, `${p.name} drawn at its ephemeris position`).toBeLessThan(2e-3);
+            expect(p.orbitVerts, `${p.name} orbit ribbon`).toBe(512);   // 256 samples × 2 sides
+            expect(Math.abs(p.orbitJd - s.jd)).toBeLessThan(3652.5 + 1);
+        }
+        // Mercury's radius is its TRUE r on the log map (0.31–0.47 AU), not the circle's 0.387.
+        const merc = s.planets.find(p => p.name === 'Mercury');
+        const mercR = Math.hypot(...merc.pos), mercEph = HZ.mercuryHeliocentric(s.jd);
+        expect(Math.abs(mercR - logSceneRadius(mercEph.dist_AU))).toBeLessThan(2e-3);
+        expect(s.planets.map(p => p.name)).toContain('Ceres');
+        // Sprites: apparent-magnitude sized, capped at MAG_DISPLAY.sizeMaxPx for the population.
+        expect(s.finiteV).toBeGreaterThan(5);
+        expect(s.maxAst).toBeLessThanOrEqual(MAG_DISPLAY.sizeMaxPx + 1e-6);
+        expect(s.maxAll).toBeLessThan(5.0);
+        expect(s.uAtt).toBe(12);
+        // Flyby labels: built for the nearest few, SHOWN only up to the zoom ladder's cap.
+        expect(s.visibleLocal).toBeLessThanOrEqual(s.cap);
+        expect(s.cap).toBeLessThanOrEqual(12);
         expect(errors).toEqual([]);
     });
 

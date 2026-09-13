@@ -329,6 +329,19 @@ const NEPTUNE_EL = {
     adot: 0.00006447, edot: 0.00000818, omegadot: 0.01009, idot: -0.00255, nodedot: -0.00598,
 };
 
+// Ceres — the orrery's one dwarf planet with no VSOP series. Mean elements
+// (J2000 ecliptic, of-date rates negligible over ±50 yr): a 2.7671 AU,
+// e 0.0785, i 10.594°, Ω 80.305°, ω̄ 153.902°. The mean longitude is anchored
+// on the 2018-04-28 perihelion (JD 2458236.5; Dawn's extended mission was
+// timed to observe it) with P = 1681.6 d, so L(J2000) = ω̄ + M(J2000) =
+// 153.902 + 7.47°. Expected accuracy ~1° 1990–2060 — verify against JPL SBDB
+// when egress allows; the previous model was a circle phased at angle 0.
+const CERES_EL = {
+    L0: 161.372, Ldot: 7819.5, a: 2.7671, e: 0.0785,
+    omega: 153.902, i: 10.594, node: 80.305,
+    adot: 0, edot: 0, omegadot: 0, idot: 0, nodedot: 0,
+};
+
 /**
  * Public planet element table — keyed by lowercase body name.
  *
@@ -351,6 +364,7 @@ export const PLANET_ELEMENTS = {
     saturn:  SATURN_EL,
     uranus:  URANUS_EL,
     neptune: NEPTUNE_EL,
+    ceres:   CERES_EL,
 };
 
 /**
@@ -442,6 +456,14 @@ export function uranusHeliocentric(jd = jdNow()) {
  */
 export function neptuneHeliocentric(jd = jdNow()) {
     return neptuneVSOP(jd);
+}
+
+/**
+ * Ceres's heliocentric ecliptic position — mean elements (see CERES_EL).
+ * Accuracy: ~1° for 1990–2060.
+ */
+export function ceresHeliocentric(jd = jdNow()) {
+    return planetHeliocentric(jd, CERES_EL);
 }
 
 // ── NASA JPL Horizons REST API ────────────────────────────────────────────────

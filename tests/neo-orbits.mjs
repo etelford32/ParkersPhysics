@@ -277,3 +277,185 @@ for (const s of METEOR_SHOWERS) {
 }
 
 console.log(`neo-orbits: Kepler ×${6 * 10 + 5 * 8} residuals, Earth-vs-VSOP87D, vis-viva, bulk≡scalar, Moon anchor, ${METEOR_SHOWERS.length} showers — passed`);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Photometry, sizing, analysis, planet paths (2026-09 accuracy pass)
+// ═══════════════════════════════════════════════════════════════════════════
+import {
+    phaseAngleDeg, elongationDeg, hgPhaseFunction, apparentMagnitude, MAG_DISPLAY, magnitudeSizePx, magnitudeAlpha,
+    trueScaleRadius, pixelFloorRadius, rockDrawRadius, EARTH_RADIUS_KM,
+    tisserandJ, JUPITER_A_AU, nodeDistancesAU, earthCrossingNote, nextPerihelionJD, jdToIsoDate, eclipticLonLatDeg,
+    ephemerisPathScene, ribbonStrip,
+} from '../js/neo-orbits.js';
+import { ceresHeliocentric, marsHeliocentric, mercuryHeliocentric, PLANET_ELEMENTS } from '../js/horizons.js';
+
+// ── Apparent magnitude: H–G identities ──────────────────────────────────────
+near(apparentMagnitude(0, 1, 1, 0), 0, 1e-12, 'V = H at r = Δ = 1 AU, α = 0');
+near(hgPhaseFunction(0), 1, 1e-12, 'Φ(0) = 1');
+{
+    const v90 = apparentMagnitude(0, 1, 1, 90);
+    assert.ok(v90 > 3.0 && v90 < 3.4, `α = 90° costs ~3.2 mag for G = 0.15, got ${v90}`);
+    assert.ok(apparentMagnitude(20, 1, 0.01, 0) < apparentMagnitude(20, 1, 0.1, 0), 'closer ⇒ brighter');
+    assert.ok(apparentMagnitude(20, 1, 0.1, 0) < apparentMagnitude(20, 1, 1, 0), 'closer ⇒ brighter (2)');
+    assert.ok(apparentMagnitude(20, 1, 1, 30) > apparentMagnitude(20, 1, 1, 0), 'phase ⇒ fainter');
+    for (let a = 0; a < 150; a += 5) assert.ok(hgPhaseFunction(a + 5) < hgPhaseFunction(a), `Φ monotone at ${a}`);
+    near(apparentMagnitude(10, 2, 1, 0, { comet: true }), 10 + 10 * Math.log10(2), 1e-12, 'comet n = 4 law');
+    assert.equal(apparentMagnitude(null, 1, 1, 0), null, 'no H ⇒ null');
+    assert.equal(apparentMagnitude(20, 0, 1, 0), null, 'r = 0 ⇒ null');
+}
+// Geometry: object beyond Earth on the Sun–Earth line is at opposition (α = 0, ε = 180); between them, α = 180, ε = 0.
+near(phaseAngleDeg(2, 0, 0, 1, 0, 0), 0, 1e-9, 'opposition phase angle');
+near(phaseAngleDeg(0.5, 0, 0, -0.5, 0, 0), 180, 1e-9, 'inferior conjunction phase angle');
+near(elongationDeg(1, 0, 0, 1, 0, 0), 180, 1e-9, 'opposition elongation');
+near(elongationDeg(1, 0, 0, -0.5, 0, 0), 0, 1e-9, 'conjunction elongation');
+near(elongationDeg(1, 0, 0, 0, 1, 0), 90, 1e-9, 'quadrature');
+assert.equal(phaseAngleDeg(0, 0, 0, 1, 0, 0), null, 'degenerate phase ⇒ null');
+
+// ── Display maps: monotone, bounded, defined for unknowns ───────────────────
+{
+    let prevS = Infinity, prevA = Infinity;
+    for (let V = 0; V <= 40; V += 0.5) {
+        const s = magnitudeSizePx(V), a = magnitudeAlpha(V);
+        assert.ok(s <= prevS && a <= prevA, `maps non-increasing at V ${V}`);
+        assert.ok(s >= MAG_DISPLAY.sizeMinPx && s <= MAG_DISPLAY.sizeMaxPx, 'size bounded');
+        assert.ok(a >= MAG_DISPLAY.alphaMin - 1e-12 && a <= 1, 'alpha bounded');
+        prevS = s; prevA = a;
+    }
+    assert.equal(magnitudeSizePx(MAG_DISPLAY.sizeBrightV), MAG_DISPLAY.sizeMaxPx, 'bright end');
+    assert.equal(magnitudeSizePx(40), MAG_DISPLAY.sizeMinPx, 'faint end');
+    near(magnitudeAlpha(40), MAG_DISPLAY.alphaMin, 1e-12, 'alpha floor');
+    assert.equal(magnitudeAlpha(NaN), MAG_DISPLAY.unknownAlpha, 'unknown alpha');
+    assert.ok(magnitudeSizePx(NaN) > MAG_DISPLAY.sizeMinPx, 'unknown size is mid-range');
+}
+// deriveFrames' bulk V is the scalar formula, bit-for-bit in spirit (1e-9 in V).
+{
+    const recs = [
+        { des: 'A', H: 19.7, e: 0.19, a: 0.92, i: 3.3, om: 204, w: 126, ma: 10, epoch: 2461000.5, flags: FLAG.NEO },
+        { des: 'C', H: 8.0, e: 0.6, a: 3.2, i: 12, om: 30, w: 200, ma: 100, epoch: 2461000.5, flags: FLAG.NEO | FLAG.COMET },
+        { des: 'N', e: 0.3, a: 1.5, i: 5, om: 10, w: 20, ma: 30, epoch: 2461000.5, flags: FLAG.NEO },   // no H
+    ];
+    const { cols, els } = prepareColumns(recs);
+    const N = cols.count;
+    const helio = new Float64Array(3 * N), scene = new Float32Array(3 * N), rH = new Float32Array(N), rG = new Float32Array(N), vmag = new Float32Array(N);
+    const jd = 2461030.5;
+    propagateColumns(cols, jd, helio);
+    const E = earthHeliocentric(jd), earth = [E.x_AU, E.y_AU, E.z_AU];
+    const prec = precessionLongitudeRad(jd);
+    deriveFrames(helio, N, earth, scene, rH, rG, prec, vmag, cols.H, cols.flags);
+    for (let k = 0; k < N; k++) {
+        const d = rotateAboutPole(helio[k * 3], helio[k * 3 + 1], helio[k * 3 + 2], prec);
+        const g = { x: d.x - earth[0], y: d.y - earth[1], z: d.z - earth[2] };
+        const alpha = phaseAngleDeg(d.x, d.y, d.z, g.x, g.y, g.z);
+        const V = apparentMagnitude(els[k].H, rH[k], rG[k], alpha, { comet: !!(els[k].flags & FLAG.COMET) });
+        if (V == null) assert.ok(Number.isNaN(vmag[k]), 'no H ⇒ NaN in bulk');
+        else near(vmag[k], V, 1e-4, `bulk V ≡ scalar V for ${els[k].des}`);
+    }
+    assert.ok(Number.isNaN(cols.H[2]), 'missing H stored as NaN');
+}
+
+// ── Sizes: true scale + pixel floor ─────────────────────────────────────────
+near(trueScaleRadius(2 * EARTH_RADIUS_KM), LOCAL_FRAME.earthSceneRadius, 1e-15, 'an Earth-sized body draws at the drawn Earth radius');
+assert.equal(trueScaleRadius(null), 0, 'unknown size ⇒ 0 true radius');
+{
+    // 36 px at 0.09 units, 900 px tall, fov 50°: r/d = (36/900)·2·tan 25°.
+    const floor = pixelFloorRadius(0.09, 36, 900, 50);
+    near(floor / 0.09, (36 / 900) * 2 * Math.tan(25 * Math.PI / 180), 1e-12, 'pixel floor subtends the requested fraction');
+    const rk = rockDrawRadius(0.34, { camDist: 0.09, minPx: 36, viewHeightPx: 900, fovDeg: 50 });
+    assert.ok(rk.atFloor && rk.r === floor, 'a 340 m rock is at the floor from 0.09 units');
+    assert.ok(rk.exaggeration > 100, `and says so (×${rk.exaggeration.toFixed(0)})`);
+    const big = rockDrawRadius(2 * EARTH_RADIUS_KM, { camDist: 0.09, minPx: 36 });
+    assert.ok(!big.atFloor && big.exaggeration === 1, 'a planet-sized body is drawn true');
+    assert.equal(rockDrawRadius(null, { camDist: 0.09 }).exaggeration, null, 'unknown size ⇒ no exaggeration claim');
+}
+
+// ── Orbit analysis identities ───────────────────────────────────────────────
+near(tisserandJ(JUPITER_A_AU, 0, 0), 3, 1e-12, 'Jupiter\'s own orbit: T_J = 3');
+assert.ok(tisserandJ(17.8, 0.967, 162.3) < 2, 'Halley-type: T_J < 2');
+assert.equal(tisserandJ(-1.2, 1.1, 10), null, 'unbound ⇒ null');
+{
+    const el = normalizeElements({ e: 0.191, a: 0.922, i: 3.3, om: 204, w: 126.4, ma: 0, epoch: 2461000.5 }).el;   // Apophis-like
+    const nd = nodeDistancesAU(el);
+    const p = el.a * (1 - el.e * el.e);
+    near(1 / nd.asc + 1 / nd.desc, 2 / p, 1e-12, 'node distances: 1/r_asc + 1/r_desc = 2/p');
+    assert.ok(nd.asc > 0.983 && nd.asc < 1.017, `Apophis-like: ascending node in Earth's band (${nd.asc.toFixed(4)})`);
+    assert.equal(earthCrossingNote(nd), 'crosses Earth’s orbit at the ascending node');
+    const circ = normalizeElements({ e: 0, a: 1.3, i: 10, om: 0, w: 45, ma: 0, epoch: 2461000.5 }).el;
+    const nc = nodeDistancesAU(circ);
+    near(nc.asc, 1.3, 1e-12, 'circle: asc node at a'); near(nc.desc, 1.3, 1e-12, 'circle: desc node at a');
+    assert.equal(earthCrossingNote(nc), 'no node inside Earth’s orbital band');
+    assert.equal(earthCrossingNote({ asc: 1.0, desc: 1.0 }), 'crosses Earth’s orbit at both nodes');
+    const hyp = normalizeElements({ e: 3.2, q: 0.3, i: 90, om: 0, w: 0, tp: 2461000.5 }).el;
+    const nh = nodeDistancesAU(hyp);
+    near(nh.asc, 0.3, 1e-12, 'hyperbola: ν = 0 node at q');
+    assert.equal(nh.desc, null, 'hyperbola: the ν = 180° node is not on the orbit');
+}
+{
+    const el = normalizeElements({ e: 0.2, a: 1, i: 0, om: 0, w: 0, ma: 0, epoch: 2451545 }).el;
+    const P = 2 * Math.PI / el.n;
+    near(nextPerihelionJD(el, 2451545), 2451545, 1e-9, 'at perihelion now');
+    near(nextPerihelionJD(el, 2451545 + 1), 2451545 + P, 1e-6, 'next perihelion one period on');
+    near(nextPerihelionJD(el, 2451545 + 2.5 * P), 2451545 + 3 * P, 1e-6, 'wraps whole periods');
+    const hyp = normalizeElements({ e: 1.5, q: 0.5, i: 0, om: 0, w: 0, tp: 2461000.5 }).el;
+    near(nextPerihelionJD(hyp, 2460000.5), 2461000.5, 1e-9, 'hyperbola: tp ahead');
+    assert.equal(nextPerihelionJD(hyp, 2462000.5), null, 'hyperbola: tp behind ⇒ null');
+    assert.equal(jdToIsoDate(2451545.0), '2000-01-01', 'J2000 noon is 2000-01-01');
+    const ll = eclipticLonLatDeg(0, 1, 0); near(ll.lon, 90, 1e-12, 'lon'); near(ll.lat, 0, 1e-12, 'lat');
+    near(eclipticLonLatDeg(-1, 0, 1).lat, 45, 1e-9, 'lat 45');
+    near(eclipticLonLatDeg(1, -1e-9, 0).lon, 360, 1e-6, 'lon wraps to [0,360)');
+}
+
+// ── Planet paths: the sampled TRUE path lands where the planet is drawn ─────
+{
+    const jd = 2461000.5;
+    const path = ephemerisPathScene(earthHeliocentric, jd, 365.25, 64);
+    assert.equal(path.length, 64 * 3);
+    const R = logSceneRadius(1);
+    for (let k = 0; k < 64; k++) {
+        const r = Math.hypot(path[k * 3], path[k * 3 + 1], path[k * 3 + 2]);
+        assert.ok(Math.abs(r - R) / R < 0.02, `Earth path radius within 2 % of the 1 AU ring at sample ${k}`);
+    }
+    // Sample 0 is half a period before jd, sample 32 is jd itself: opposite sides of the Sun.
+    const dot = path[0] * path[96] + path[2] * path[98];
+    assert.ok(dot < 0, 'half a period apart ⇒ opposite sides');
+    const E = earthHeliocentric(jd), s = helioToScene(E.x_AU, E.y_AU, E.z_AU);
+    near(path[96], s.x, 1e-5, 'the mid sample IS the planet\'s drawn position (x)');
+    near(path[98], s.z, 1e-5, 'the mid sample IS the planet\'s drawn position (z)');
+    // Mercury: the radial swing that the circle model never had.
+    const merc = ephemerisPathScene(mercuryHeliocentric, jd, 87.969, 128);
+    let rMin = Infinity, rMax = 0;
+    for (let k = 0; k < 128; k++) { const r = Math.hypot(merc[k * 3], merc[k * 3 + 1], merc[k * 3 + 2]); rMin = Math.min(rMin, r); rMax = Math.max(rMax, r); }
+    near(rMin, logSceneRadius(0.3075), 0.02, 'Mercury perihelion on the log map');
+    near(rMax, logSceneRadius(0.4667), 0.02, 'Mercury aphelion on the log map');
+    // Ribbon: sides are in-plane, perpendicular to the tangent, of the requested width, and the strip closes.
+    const hw = 0.012;
+    const rib = ribbonStrip(path, hw);
+    assert.equal(rib.positions.length, 64 * 6); assert.equal(rib.indices.length, 64 * 6);
+    for (let i = 0; i < 64; i++) {
+        const ip = (i + 63) % 64, inx = (i + 1) % 64;
+        const t = [path[inx * 3] - path[ip * 3], path[inx * 3 + 1] - path[ip * 3 + 1], path[inx * 3 + 2] - path[ip * 3 + 2]];
+        const d = [rib.positions[i * 6] - rib.positions[i * 6 + 3], rib.positions[i * 6 + 1] - rib.positions[i * 6 + 4], rib.positions[i * 6 + 2] - rib.positions[i * 6 + 5]];
+        near(Math.hypot(...d), 2 * hw, 1e-6, `ribbon width at ${i}`);   // float32 output
+        near(Math.abs(t[0] * d[0] + t[1] * d[1] + t[2] * d[2]) / (Math.hypot(...t) * 2 * hw), 0, 1e-4, `side ⟂ tangent at ${i}`);
+        // Both sides are in the orbital plane: (p × t) · side = 0.
+        const p = [path[i * 3], path[i * 3 + 1], path[i * 3 + 2]];
+        const nrm = [p[1] * t[2] - p[2] * t[1], p[2] * t[0] - p[0] * t[2], p[0] * t[1] - p[1] * t[0]];
+        near(Math.abs(nrm[0] * d[0] + nrm[1] * d[1] + nrm[2] * d[2]) / (Math.hypot(...nrm) * 2 * hw), 0, 1e-4, `side in plane at ${i}`);
+        for (let j = 0; j < 6; j++) assert.ok(rib.indices[i * 6 + j] < 128, 'index in range');
+    }
+}
+// Ceres: the mean elements reproduce perihelion on 2018-04-28 and stay inside q..Q for 60 years.
+{
+    const q = PLANET_ELEMENTS.ceres.a * (1 - PLANET_ELEMENTS.ceres.e), Q = PLANET_ELEMENTS.ceres.a * (1 + PLANET_ELEMENTS.ceres.e);
+    near(ceresHeliocentric(2458236.5).dist_AU, q, 0.002, 'Ceres at perihelion on 2018-04-28');
+    for (let jd = 2451545; jd < 2451545 + 60 * 365.25; jd += 37) {
+        const c = ceresHeliocentric(jd);
+        assert.ok(c.dist_AU >= q - 1e-6 && c.dist_AU <= Q + 1e-6, `Ceres r in [q, Q] at ${jd}`);
+    }
+    const d1 = ceresHeliocentric(2461000.5).lon, d2 = ceresHeliocentric(2461010.5).lon;
+    const rate = (((d2 - d1) % 360) + 360) % 360 / 10;
+    assert.ok(rate > 0.17 && rate < 0.26, `Ceres moves ~0.21°/day (${rate.toFixed(3)})`);
+    // Mars, the same way the page draws it: through helioToScene.
+    const m = marsHeliocentric(2461000.5), sm = helioToScene(m.x_AU, m.y_AU, m.z_AU);
+    near(Math.hypot(sm.x, sm.y, sm.z), logSceneRadius(m.dist_AU), 1e-9, 'planet radius on the log map');
+}
+console.log('neo-orbits photometry / sizing / analysis / planet-path checks passed');

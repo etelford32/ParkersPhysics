@@ -277,7 +277,7 @@ export class NeoPanel {
         ];
         const items = this.layer.visible.colorMode === 'class' ? classItems : naturalItems;
         this.$('neo-legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${hex(c)}"></i>${l}</span>`).join('')
-            + `<span style="flex-basis:100%;color:#667">Size and brightness follow absolute magnitude (H); comae and tails scale as 1/r².</span>`;
+            + `<span style="flex-basis:100%;color:#667">Size and brightness follow the <b>apparent</b> magnitude from Earth now (IAU H–G, G = 0.15): what a telescope could see tonight, not how big the rock is. Meshes are true scale with a screen-space floor, disclosed on the card. Comae and tails scale as 1/r².</span>`;
     }
 
     renderNote() {

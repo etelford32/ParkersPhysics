@@ -366,11 +366,13 @@ export function prepareColumns(records) {
         M0: new Float64Array(N), t0: new Float64Array(N),
         P: new Float64Array(N * 3), Q: new Float64Array(N * 3),
         flags: new Uint8Array(N),
+        H: new Float32Array(N),        // absolute magnitude (NaN when unknown) — feeds the per-frame V
     };
     for (let k = 0; k < N; k++) {
         const el = els[k];
         cols.e[k] = el.e; cols.a[k] = el.a; cols.n[k] = el.n;
         cols.M0[k] = el.M0; cols.t0[k] = el.t0; cols.flags[k] = el.flags;
+        cols.H[k] = el.H == null ? NaN : el.H;
         const B = perifocalBasis(el.i, el.om, el.w);
         cols.P[k * 3] = B.Px; cols.P[k * 3 + 1] = B.Py; cols.P[k * 3 + 2] = B.Pz;
         cols.Q[k * 3] = B.Qx; cols.Q[k * 3 + 1] = B.Qy; cols.Q[k * 3 + 2] = B.Qz;
@@ -413,7 +415,7 @@ export function propagateColumns(cols, jd, helio) {
  * rotation is applied here, once, so `helio` stays J2000 for the readouts.
  * One pass, allocation-free; this is what the worker ships back.
  */
-export function deriveFrames(helio, N, earth, scene, rHelio, rGeo, precRad = 0) {
+export function deriveFrames(helio, N, earth, scene, rHelio, rGeo, precRad = 0, vmag = null, H = null, flags = null) {
     const [ex, ey, ez] = earth;
     const c = Math.cos(precRad), sn = Math.sin(precRad);
     for (let k = 0; k < N; k++) {
@@ -421,10 +423,27 @@ export function deriveFrames(helio, N, earth, scene, rHelio, rGeo, precRad = 0) 
         const x0 = helio[o], y0 = helio[o + 1], z = helio[o + 2];
         const x = c * x0 - sn * y0, y = sn * x0 + c * y0;
         const r = Math.hypot(x, y, z);
+        const gx = x - ex, gy = y - ey, gz = z - ez;
+        const d = Math.hypot(gx, gy, gz);
         rHelio[k] = r;
-        rGeo[k] = Math.hypot(x - ex, y - ey, z - ez);
+        rGeo[k] = d;
         const s = r > 0 ? logSceneRadius(r) / r : 0;
         scene[o] = x * s; scene[o + 1] = z * s; scene[o + 2] = y * s;
+        if (vmag) {
+            // Apparent V from Earth NOW — the one honest brightness for the far
+            // field (see the photometry section). Identical to the scalar
+            // apparentMagnitude(); tests/neo-orbits.mjs pins the two equal.
+            const h = H ? H[k] : NaN;
+            if (Number.isFinite(h) && r > 0 && d > 0) {
+                if (flags && (flags[k] & FLAG.COMET)) {
+                    vmag[k] = h + 5 * Math.log10(d) + 10 * Math.log10(r);
+                } else {
+                    const ca = Math.max(-1, Math.min(1, (x * gx + y * gy + z * gz) / (r * d)));
+                    const alpha = Math.acos(ca) * R2D;
+                    vmag[k] = h + 5 * Math.log10(r * d) - 2.5 * Math.log10(Math.max(hgPhaseFunction(alpha), 1e-12));
+                }
+            } else vmag[k] = NaN;
+        }
     }
 }
 
@@ -623,4 +642,186 @@ export function radiantEclipticUnit(raDeg, decDeg) {
         y:  yq * Math.cos(eps) + zq * Math.sin(eps),
         z: -yq * Math.sin(eps) + zq * Math.cos(eps),
     };
+}
+
+// ── Photometry: what a telescope on Earth sees RIGHT NOW ────────────────────
+// The far field used to size and brighten its sprites by ABSOLUTE magnitude,
+// which made 42 000 objects a wall of 10–25 px blobs at any zoom (measured on
+// the 2026-09-13 deploy). The one honest brightness is the APPARENT V
+// magnitude from Earth at the sim instant — IAU H–G (Bowell et al. 1989):
+//   V = H + 5 log10(r Δ) − 2.5 log10((1−G) Φ1(α) + G Φ2(α)),  G = 0.15
+// so a 30 m rock at 0.1 AU and a 5 km one at 3 AU can be equally bright, and
+// that is the point: brightness now encodes observability, not size. Comets
+// use the total-magnitude power law m = M1 + 5 log10 Δ + 10 log10 r (n = 4).
+// The display maps below turn V into a point size and alpha; both are pure,
+// monotone and bounded, and tests/neo-orbits.mjs pins those bounds.
+export const HG_DEFAULT_G = 0.15;
+export const EARTH_RADIUS_KM = 6371.0088;
+
+/** Phase angle (deg) Sun–object–Earth from the heliocentric and geocentric vectors of the object (any frame, same units). */
+export function phaseAngleDeg(hx, hy, hz, gx, gy, gz) {
+    const r = Math.hypot(hx, hy, hz), d = Math.hypot(gx, gy, gz);
+    if (!(r > 0) || !(d > 0)) return null;
+    const c = (hx * gx + hy * gy + hz * gz) / (r * d);
+    return Math.acos(Math.max(-1, Math.min(1, c))) * R2D;
+}
+/** Solar elongation (deg) as seen from Earth: Earth's heliocentric vector E and the object's geocentric vector g. 0 = at the Sun, 180 = opposition. */
+export function elongationDeg(ex, ey, ez, gx, gy, gz) {
+    const r = Math.hypot(ex, ey, ez), d = Math.hypot(gx, gy, gz);
+    if (!(r > 0) || !(d > 0)) return null;
+    const c = -(ex * gx + ey * gy + ez * gz) / (r * d);
+    return Math.acos(Math.max(-1, Math.min(1, c))) * R2D;
+}
+/** IAU H–G phase function Φ(α) — (1−G)Φ1 + GΦ2. Defined for α ≤ 120°; clamped at 150° where it is already ~0.003. */
+export function hgPhaseFunction(alphaDeg, G = HG_DEFAULT_G) {
+    const t = Math.tan(Math.max(0, Math.min(150, alphaDeg)) * D2R / 2);
+    const phi1 = Math.exp(-3.33 * Math.pow(t, 0.63));
+    const phi2 = Math.exp(-1.87 * Math.pow(t, 1.22));
+    return (1 - G) * phi1 + G * phi2;
+}
+/**
+ * Apparent V magnitude. `H` is the absolute magnitude (a comet's M1 with
+ * `comet: true`), r and Δ in AU, α the phase angle in degrees. null when a
+ * term is missing — the caller decides what "unknown" looks like.
+ */
+export function apparentMagnitude(H, rAU, deltaAU, alphaDeg = 0, opts = {}) {
+    if (!Number.isFinite(H) || !(rAU > 0) || !(deltaAU > 0)) return null;
+    if (opts.comet) return H + 5 * Math.log10(deltaAU) + 10 * Math.log10(rAU);
+    const phi = hgPhaseFunction(Number.isFinite(alphaDeg) ? alphaDeg : 0, opts.G ?? HG_DEFAULT_G);
+    return H + 5 * Math.log10(rAU * deltaAU) - 2.5 * Math.log10(Math.max(phi, 1e-12));
+}
+
+/**
+ * Display maps V → sprite size (CSS px, before DPR and the near-camera
+ * growth) and V → alpha. V 12 is a binocular object, V 23 the survey limit,
+ * V 27.5 fainter than anything that can be observed tonight; the alpha floor
+ * keeps the unobservable 90 % as a haze so the population still reads.
+ */
+export const MAG_DISPLAY = Object.freeze({
+    sizeBrightV: 12, sizeFaintV: 23, sizeMaxPx: 3.4, sizeMinPx: 1.4,
+    alphaBrightV: 14, alphaFaintV: 27.5, alphaMin: 0.10,
+    unknownAlpha: 0.45,          // no H at all (many comets): a mid-grey, never invisible
+});
+export function magnitudeSizePx(V) {
+    const D = MAG_DISPLAY;
+    if (!Number.isFinite(V)) return (D.sizeMaxPx + D.sizeMinPx) / 2;
+    const t = Math.max(0, Math.min(1, (V - D.sizeBrightV) / (D.sizeFaintV - D.sizeBrightV)));
+    return D.sizeMaxPx - (D.sizeMaxPx - D.sizeMinPx) * t;
+}
+export function magnitudeAlpha(V) {
+    const D = MAG_DISPLAY;
+    if (!Number.isFinite(V)) return D.unknownAlpha;
+    const t = Math.max(0, Math.min(1, (V - D.alphaBrightV) / (D.alphaFaintV - D.alphaBrightV)));
+    return 1 - (1 - D.alphaMin) * t;
+}
+
+// ── Sizes: true scale with a pixel floor, exaggeration DISCLOSED ────────────
+// The drawn Earth is 6371 km at LOCAL_FRAME.earthSceneRadius, so a body's
+// true-scale radius in that convention is (D/2)·earthR/R⊕ — Eros is 1.6e-4
+// units, a 30 m flyby 3e-7: invisible, correctly. Rocks are therefore drawn at
+// max(true scale, a floor that subtends `minPx` on screen at the current
+// camera distance); the ratio is reported on the data card as "drawn ×N".
+// Never use these radii for physics.
+export function trueScaleRadius(diamKm, earthR = LOCAL_FRAME.earthSceneRadius) {
+    return Number.isFinite(diamKm) && diamKm > 0 ? (diamKm / 2) * earthR / EARTH_RADIUS_KM : 0;
+}
+/** Scene radius that subtends `minPx` (radius) at `camDist` for a vertical-fov camera over `viewHeightPx`. */
+export function pixelFloorRadius(camDist, minPx, viewHeightPx = 900, fovDeg = 50) {
+    return Math.max(0, camDist) * (minPx / Math.max(1, viewHeightPx)) * 2 * Math.tan(fovDeg * D2R / 2);
+}
+export function rockDrawRadius(diamKm, { camDist = 1, minPx = 5, viewHeightPx = 900, fovDeg = 50, earthR } = {}) {
+    const rTrue = trueScaleRadius(diamKm, earthR);
+    const floor = pixelFloorRadius(camDist, minPx, viewHeightPx, fovDeg);
+    const r = Math.max(rTrue, floor, 1e-7);
+    return { r, rTrue, floor, exaggeration: rTrue > 0 ? r / rTrue : null, atFloor: floor > rTrue };
+}
+
+// ── Orbit analysis (pure; every row on the card comes from here) ────────────
+export const JUPITER_A_AU = 5.2026;
+/** Tisserand parameter w.r.t. Jupiter — T_J > 3 asteroidal, 2–3 Jupiter-family, < 2 Halley-type / long-period. Bound orbits only. */
+export function tisserandJ(a, e, iDeg, aJ = JUPITER_A_AU) {
+    if (!(a > 0) || !(e >= 0) || !(e < 1)) return null;
+    return aJ / a + 2 * Math.cos(iDeg * D2R) * Math.sqrt((a / aJ) * (1 - e * e));
+}
+/** Heliocentric distance (AU) where the orbit pierces the ecliptic: ν = −ω (ascending), 180° − ω (descending). null on an unreachable hyperbolic branch. */
+export function nodeDistancesAU(el) {
+    const p = el.a * (1 - el.e * el.e);
+    const at = (nu) => { const den = 1 + el.e * Math.cos(nu); return den > 1e-9 ? p / den : null; };
+    const w = el.w * D2R;
+    return { asc: at(-w), desc: at(Math.PI - w) };
+}
+/** Earth's heliocentric distance range (perihelion .. aphelion). */
+export const EARTH_ORBIT_RANGE_AU = Object.freeze([0.9833, 1.0167]);
+export function earthCrossingNote(nodes, range = EARTH_ORBIT_RANGE_AU) {
+    const inBand = (r) => r != null && r >= range[0] && r <= range[1];
+    const which = [inBand(nodes.asc) ? 'ascending' : null, inBand(nodes.desc) ? 'descending' : null].filter(Boolean);
+    if (which.length === 2) return 'crosses Earth’s orbit at both nodes';
+    if (which.length === 1) return `crosses Earth’s orbit at the ${which[0]} node`;
+    return 'no node inside Earth’s orbital band';
+}
+/** JD of the next perihelion passage at or after `jd`; null for a hyperbolic orbit already past perihelion. */
+export function nextPerihelionJD(el, jd) {
+    if (!(el.n > 0)) return null;
+    if (el.e < 1) {
+        const M = el.M0 + el.n * (jd - el.t0);
+        const Mw = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        return jd + ((2 * Math.PI - Mw) % (2 * Math.PI)) / el.n;
+    }
+    const tp = el.t0 - el.M0 / el.n;
+    return tp >= jd ? tp : null;
+}
+export function jdToIsoDate(jd) {
+    const ms = (jd - 2440587.5) * 86400e3;
+    return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : '—';
+}
+/** Ecliptic longitude/latitude (deg) of a vector; longitude wrapped to [0, 360). */
+export function eclipticLonLatDeg(x, y, z) {
+    const r = Math.hypot(x, y, z);
+    if (!(r > 0)) return { lon: null, lat: null };
+    return { lon: ((Math.atan2(y, x) * R2D) % 360 + 360) % 360, lat: Math.asin(Math.max(-1, Math.min(1, z / r))) * R2D };
+}
+
+// ── Planet paths for the orrery ─────────────────────────────────────────────
+// The page's planets used to ride mean-motion CIRCLES phased once at load —
+// Mercury's equation of centre alone is ±23°, Mars's ±10.6°, and the radial
+// swing (Mercury 0.31–0.47 AU) did not exist at all, so an NEO drawn from a
+// true Kepler solve sat at the wrong place relative to every inner planet.
+// The planets now follow their ephemeris functions (js/horizons.js) through
+// the SAME helioToScene the objects use, and an orbit ribbon is the sampled
+// TRUE path over one period around the sim date — the line the planet
+// actually traces, no element bookkeeping. Rebuilt every ~10 years of scrub.
+export function ephemerisPathScene(ephFn, jd, periodDays, samples = 256) {
+    const out = new Float32Array(samples * 3);
+    for (let k = 0; k < samples; k++) {
+        const e = ephFn(jd - periodDays / 2 + (k / samples) * periodDays);
+        const s = helioToScene(e.x_AU, e.y_AU, e.z_AU);
+        out[k * 3] = s.x; out[k * 3 + 1] = s.y; out[k * 3 + 2] = s.z;
+    }
+    return out;
+}
+/**
+ * Closed ribbon (triangle strip) around a closed polyline of scene points:
+ * each vertex is offset ±halfWidth along the in-plane side vector
+ * (orbit-plane normal × tangent), so the strip is a flat band in the orbital
+ * plane — the same look as the old RingGeometry annulus, on the true ellipse.
+ */
+export function ribbonStrip(pts, halfWidth) {
+    const n = pts.length / 3;
+    const positions = new Float32Array(n * 6);
+    const indices = new Uint32Array(n * 6);
+    for (let i = 0; i < n; i++) {
+        const ip = (i + n - 1) % n, inx = (i + 1) % n;
+        const px = pts[i * 3], py = pts[i * 3 + 1], pz = pts[i * 3 + 2];
+        let tx = pts[inx * 3] - pts[ip * 3], ty = pts[inx * 3 + 1] - pts[ip * 3 + 1], tz = pts[inx * 3 + 2] - pts[ip * 3 + 2];
+        const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+        let nx = py * tz - pz * ty, ny = pz * tx - px * tz, nz = px * ty - py * tx;   // p × t: plane normal
+        const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+        const sx = ny * tz - nz * ty, sy = nz * tx - nx * tz, sz = nx * ty - ny * tx;   // n × t: in-plane side
+        positions[i * 6]     = px + sx * halfWidth; positions[i * 6 + 1] = py + sy * halfWidth; positions[i * 6 + 2] = pz + sz * halfWidth;
+        positions[i * 6 + 3] = px - sx * halfWidth; positions[i * 6 + 4] = py - sy * halfWidth; positions[i * 6 + 5] = pz - sz * halfWidth;
+        const a = 2 * i, b = 2 * i + 1, c = 2 * inx, d = 2 * inx + 1;
+        indices[i * 6] = a; indices[i * 6 + 1] = b; indices[i * 6 + 2] = c;
+        indices[i * 6 + 3] = b; indices[i * 6 + 4] = d; indices[i * 6 + 5] = c;
+    }
+    return { positions, indices };
 }

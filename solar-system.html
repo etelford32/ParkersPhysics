@@ -748,7 +748,7 @@ import './js/telemetry.js';
         <p><strong style="color:#887">Ephemeris:</strong> Bretagnon & Francou (1988) VSOP87D · Meeus (1998) "Astronomical Algorithms" 2nd ed. · Standish (1992) JPL secular corrections · NASA JPL Horizons REST API (when available)</p>
         <p style="margin-top:4px"><strong style="color:#887">Space Weather:</strong> NOAA SWPC DSCOVR/ACE rtsw_wind_1m + rtsw_mag_1m · GOES X-ray 1-day · Planetary Kp 1-min · NASA DONKI CME/Flares/SEP</p>
         <p style="margin-top:4px"><strong style="color:#887">Planet Data:</strong> NASA Planetary Fact Sheets (rotation, obliquity, radii) · Murray & Dermott (1999) "Solar System Dynamics" (moon orbits) · IAU/IAG 2015 report (pole orientations)</p>
-        <p style="margin-top:4px"><strong style="color:#887">Small Bodies:</strong> NASA/JPL Solar System Dynamics — SBDB Query API (osculating elements, J2000 ecliptic) · Close-Approach Data API · Sentry impact monitor · Fireball API (US Government sensors) · IAU Meteor Data Center / IMO shower list · Two-body propagation on-device (js/neo-orbits.js) with the IAU 1976 general-precession rotation into the ecliptic of date; positions drift from JPL's integrated orbits at ~arcminutes per year and faster across planetary encounters.</p>
+        <p style="margin-top:4px"><strong style="color:#887">Small Bodies:</strong> NASA/JPL Solar System Dynamics — SBDB Query API (osculating elements, J2000 ecliptic) · Close-Approach Data API · Sentry impact monitor · Fireball API (US Government sensors) · IAU Meteor Data Center / IMO shower list · Two-body propagation on-device (js/neo-orbits.js) with the IAU 1976 general-precession rotation into the ecliptic of date; positions drift from JPL's integrated orbits at ~arcminutes per year and faster across planetary encounters. Planets and Ceres are drawn at their ephemeris positions (ecliptic of date) through the same logarithmic radial map, and each orbit ribbon is the sampled true path over one period. Sprite brightness and size follow the apparent V magnitude from Earth (IAU H–G, G = 0.15); rock meshes are true scale with a disclosed screen-space floor.</p>
         <p style="margin-top:4px"><strong style="color:#887">Accuracy Notes:</strong> Planet longitudes accurate to &lt;0.3° for 1800–2200 AD. Earth VSOP87D &lt;1″. Secular precession rates are linear approximations — over millennia, mutual planetary perturbations (especially Jupiter-Saturn great inequality) cause additional drift. Moon orbital elements are mean Keplerian — Laplace resonance perturbations not modeled (~0.5°/yr drift for Io).</p>
     </div>
 
@@ -762,8 +762,9 @@ import { initScaleNav, navigateTo } from './js/scale-nav.js';
 import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric,
          mercuryHeliocentric, venusHeliocentric, marsHeliocentric,
          jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric,
-         neptuneHeliocentric }
+         neptuneHeliocentric, ceresHeliocentric }
     from './js/horizons.js';
+import { helioToScene, ephemerisPathScene, ribbonStrip } from './js/neo-orbits.js';
 import { JUPITER_VERT, JUPITER_FRAG, createJupiterUniforms } from './js/jupiter-shader.js';
 import {
     PLANET_SPIN, ALL_MOONS, PARENT_BODIES,
@@ -1372,17 +1373,52 @@ const PLANETS = [
     },
 ];
 
+// ── Planet ephemerides: the ONE map every drawn planet position comes from ──
+// Mercury–Mars + Ceres: mean elements (Meeus 31.a / Standish); Jupiter–Neptune:
+// truncated VSOP87D; Earth: full VSOP87D. All ecliptic OF DATE, all drawn
+// through the NEO kernel's helioToScene — the same log radial map the object
+// population uses, so a planet and an asteroid at the same (r, λ, β) land on
+// the same pixel. The animate loop evaluates these every frame (≤ 12 µs per
+// planet measured in node). Planets used to ride mean-motion CIRCLES phased
+// once at load: Mercury's equation of centre alone is ±23°, Mars's ±10.6°,
+// and the radial swing did not exist. The angle0 block below is now only the
+// fallback for a body with no ephemeris function.
+const PLANET_EPH = {
+    'Mercury': mercuryHeliocentric, 'Venus': venusHeliocentric,
+    'Earth': earthHeliocentric, 'Mars': marsHeliocentric, 'Ceres': ceresHeliocentric,
+    'Jupiter': jupiterHeliocentric, 'Saturn': saturnHeliocentric,
+    'Uranus': uranusHeliocentric, 'Neptune': neptuneHeliocentric,
+};
+// Orbit ribbon: the planet's TRUE path over one period around `jd`
+// (neo-orbits.js ephemerisPathScene + ribbonStrip), a flat band in the
+// orbital plane like the annulus it replaced. Rebuilt when the scrub moves
+// more than ~10 years so the secular drift of the ellipse stays honest.
+function _rebuildPlanetOrbit(p, jd) {
+    const fn = PLANET_EPH[p.name];
+    let geo;
+    if (fn) {
+        const pts = ephemerisPathScene(fn, jd, p.period * 365.25, 256);
+        const rib = ribbonStrip(pts, 0.012);
+        geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(rib.positions, 3));
+        geo.setIndex(new THREE.BufferAttribute(rib.indices, 1));
+    } else {
+        geo = new THREE.RingGeometry(p.dist - 0.012, p.dist + 0.012, 128);
+        geo.rotateX(Math.PI / 2);
+    }
+    const old = p.orbitMesh.geometry;
+    p.orbitMesh.geometry = geo;
+    if (old) old.dispose();
+    p.orbitJd = jd;
+}
+
 // ── Compute real planet angles from ephemeris at current time ─────────────────
 // Each planet needs an angle0 offset so that (simTime/period)*2π + angle0
 // gives the correct heliocentric ecliptic longitude at the current epoch.
+// (Fallback path only — see PLANET_EPH above.)
 {
     const _jdInit = jdNow();
-    const _ephFns = {
-        'Mercury': mercuryHeliocentric, 'Venus': venusHeliocentric,
-        'Earth': earthHeliocentric, 'Mars': marsHeliocentric,
-        'Jupiter': jupiterHeliocentric, 'Saturn': saturnHeliocentric,
-        'Uranus': uranusHeliocentric, 'Neptune': neptuneHeliocentric,
-    };
+    const _ephFns = PLANET_EPH;
     const _e0Init = earthHeliocentric(_jdInit);
     const _simTimeInit = _e0Init.lon_rad / (Math.PI * 2);
 
@@ -1415,12 +1451,12 @@ const PLANETS = [
 PLANETS.forEach(p => {
     p.dist  = simDist(p.dAU);
 
-    // Orbit ring
-    const og = new THREE.RingGeometry(p.dist - 0.012, p.dist + 0.012, 128);
-    const om = new THREE.MeshBasicMaterial({ color:p.color, transparent:true, opacity:0.18, side:THREE.DoubleSide });
-    const orb = new THREE.Mesh(og, om);
-    orb.rotation.x = Math.PI / 2;
-    scene.add(orb);
+    // Orbit ribbon — the true path (see _rebuildPlanetOrbit).
+    const om = new THREE.MeshBasicMaterial({ color:p.color, transparent:true, opacity:0.18, side:THREE.DoubleSide, depthWrite:false });
+    p.orbitMesh = new THREE.Mesh(new THREE.BufferGeometry(), om);
+    p.orbitMesh.name = `orbit-${p.name.toLowerCase()}`;
+    scene.add(p.orbitMesh);
+    _rebuildPlanetOrbit(p, jdNow());
 
     // Planet sphere — Jupiter gets its own cloud-band shader; others get the
     // general-purpose wind-interaction shader.
@@ -2947,9 +2983,10 @@ function _setModeUI() {
  *  Jupiter (radius ≈ 1.4) gets a wider establishing shot. */
 function _lockDistance(body) {
     const r = Math.max(body?.radius ?? 0.05, 0.005);
-    // NEO bodies are rock meshes a few hundredths of a unit across; the 0.35
-    // floor (sized for planets) left them ~40 px. Their floor is the near plane
-    // with margin, so the lock frames the rock (js/neo-rocks.js drawnRockRadius).
+    // NEO bodies are rock meshes drawn at TRUE scale with a screen-space floor
+    // (js/neo-orbits.js rockDrawRadius): `radius` here is the true one (Eros
+    // 1.6e-4), so the lock always lands at the 0.09 floor, where the selected
+    // rock's 34 px floor makes it inspectable.
     if (body?.neoIndex != null) return Math.max(r * 7, 0.09);
     return Math.max(r * 8, 0.35);
 }
@@ -3322,9 +3359,13 @@ neoLayer.on('catalog', _renderNeoLedger);
 
 // Test / console hook (tests/solar-system-neo-smoke.spec.js reads this).
 window.__neoLab = {
-    layer: neoLayer, panel: neoPanel, simDist, selectBody,
+    layer: neoLayer, panel: neoPanel, simDist, selectBody, helioToScene, planetEph: PLANET_EPH,
     get selectedBody() { return selectedBody; },
     get simJD() { return neoLayer._lastJd; },
+    get camPos() { return camera.position.toArray(); },
+    // Capture/debug hooks (scripts/ + scratch captures): the live camera, controls, presets and planet records.
+    camera, controls, setCam, setCamLock, planetList: PLANETS,
+    planets: () => PLANETS.map(p => ({ name: p.name, pos: p.mesh.position.toArray(), orbitVerts: p.orbitMesh?.geometry?.attributes?.position?.count ?? 0, orbitJd: p.orbitJd ?? null })),
 };
 
 let _prevFrameMs = performance.now();
@@ -3370,8 +3411,18 @@ function animate() {
 
     // Move planets + update wind-shader uniforms
     PLANETS.forEach(p => {
-        const angle = (simTime / p.period) * Math.PI * 2 + (p.angle0 ?? 0);
-        p.mesh.position.set(p.dist * Math.cos(angle), 0, p.dist * Math.sin(angle));
+        const eph = PLANET_EPH[p.name];
+        if (eph) {
+            // True heliocentric position (ecliptic of date) on the log map — the
+            // same helioToScene the NEO population goes through.
+            const e = eph(_simJD);
+            const s = helioToScene(e.x_AU, e.y_AU, e.z_AU);
+            p.mesh.position.set(s.x, s.y, s.z);
+            if (Math.abs(_simJD - p.orbitJd) > 3652.5) _rebuildPlanetOrbit(p, _simJD);
+        } else {
+            const angle = (simTime / p.period) * Math.PI * 2 + (p.angle0 ?? 0);
+            p.mesh.position.set(p.dist * Math.cos(angle), 0, p.dist * Math.sin(angle));
+        }
         // Rotation: use real sidereal period from PLANET_SPIN data
         // Scale by simSpeed so planets spin faster during time warp
         const _sp = PLANET_SPIN[p.name.toLowerCase()];
@@ -3453,6 +3504,7 @@ function animate() {
             jd: _simJD, earthOfDate: _earthNow, earthFn: earthHeliocentric,
             earthDrawn: earthP.mesh.position, t, simMs: _simDateNow.getTime(),
             camera, camDist: camera.position.distanceTo(controls.target),
+            viewH: renderer.domElement.clientHeight || window.innerHeight,
         });
         neoPanel.tick();
         if (selectedBody?.neoIndex != null && _nowMs - _neoCardMs > 500) { _neoCardMs = _nowMs; _renderNeoCard(selectedBody); }

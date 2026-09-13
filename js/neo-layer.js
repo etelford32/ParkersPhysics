@@ -41,9 +41,10 @@ import {
     helioToScene, geoToLocalScene, localSceneRadius, localFrameWeight, precessionLongitudeRad, rotateAboutPole,
     diameterKmFromH, formatSize, formatLD, toLD, speedKms, elementsAgeNote, findNotable, neoClass,
     solarLongitudeDeg, activeShowers, nextShower, radiantEclipticUnit,
+    magnitudeSizePx, magnitudeAlpha, rockDrawRadius, trueScaleRadius, apparentMagnitude, phaseAngleDeg, elongationDeg, tisserandJ, nodeDistancesAU, earthCrossingNote, nextPerihelionJD, jdToIsoDate, eclipticLonLatDeg, positionAtTrueAnomaly, D2R,
 } from './neo-orbits.js';
 
-import { rockGeometry, rockMaterial, drawnRockRadius, shapeFor, spinFor, hash32, MeteoroidStream } from './neo-rocks.js';
+import { rockGeometry, rockMaterial, shapeFor, spinFor, hash32, MeteoroidStream } from './neo-rocks.js';
 
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
 
@@ -56,8 +57,14 @@ const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
 // cached (GEO_CACHE_MAX), so a body always has the same shape.
 const ROCK_SLOTS = 24;
 const ROCK_RANGE = 2.5;
+// Rocks are drawn at TRUE scale with a screen-space floor (neo-orbits.js
+// rockDrawRadius): 5 px for the pool, 34 px for the selected object so its
+// shape and spin are inspectable. The exaggeration is on the data card.
+const ROCK_PX_FLOOR = 5;
+const ROCK_PX_SELECTED = 34;
 const GEO_CACHE_MAX = 48;
 const _Y = new THREE.Vector3(0, 1, 0);
+const _camUp = new THREE.Vector3();
 const _qSpin = new THREE.Quaternion();
 
 export const NEO_COLORS = Object.freeze({
@@ -95,18 +102,22 @@ function hash01(str) {
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
     return ((h >>> 0) % 10007) / 10007;
 }
-/** Point size (CSS px before attenuation) from absolute magnitude. */
-function baseSize(el) {
-    if (el.flags & FLAG.INTERSTELLAR) return 5.2;
-    if (el.flags & FLAG.COMET) return 3.8;
-    const H = el.H ?? 20;
-    return Math.min(5.6, Math.max(1.7, 5.6 - 0.24 * (H - 12)));
+/**
+ * Point size (CSS px before DPR and the near-camera growth) from the APPARENT
+ * magnitude the worker computed for this frame. Absolute magnitude used to
+ * size these, which made 42 000 sprites a wall of 10–25 px blobs at any zoom;
+ * now a sprite is as big and bright as the object is observable from Earth
+ * tonight (neo-orbits.js MAG_DISPLAY). Comets and the interstellar visitors
+ * keep a modest floor so a tail has a nucleus to hang from.
+ */
+function sizeForV(el, V) {
+    if (el.flags & FLAG.INTERSTELLAR) return 3.6;
+    if (el.flags & FLAG.COMET) return Math.max(2.6, magnitudeSizePx(V));
+    return magnitudeSizePx(V);
 }
-/** Base alpha from absolute magnitude — faint rocks are faint. */
-function baseAlpha(el) {
-    if (el.flags & (FLAG.INTERSTELLAR | FLAG.COMET)) return 1;
-    const H = el.H ?? 20;
-    return Math.min(1, Math.max(0.42, 1 - 0.045 * (H - 14)));
+function alphaForV(el, V) {
+    if (el.flags & (FLAG.INTERSTELLAR | FLAG.COMET)) return Math.max(0.6, magnitudeAlpha(V));
+    return magnitudeAlpha(V);
 }
 function classColorHex(el) {
     if (el.flags & FLAG.INTERSTELLAR) return NEO_COLORS.interstellar;
@@ -151,7 +162,9 @@ const POINT_VS = /* glsl */`
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         // A flyby BREATHES its halo rather than blinking.
         float pulse = 1.0 + aPulse * (0.18 + 0.18 * sin(u_time * 2.2));
-        float att = clamp(u_att / max(-mv.z, 0.05), 0.6, 2.3);
+        // Near-camera growth is a square root and capped at 1.6×: the old
+        // linear 0.6–2.3× put every sprite at 2.3× across the whole inner system.
+        float att = clamp(sqrt(u_att / max(-mv.z, 0.05)), 0.75, 1.6);
         // ×2: the Gaussian core occupies the inner half of the sprite; the rest is halo.
         gl_PointSize = aSize * pulse * u_dpr * att * 2.0;
         vPx = gl_PointSize;
@@ -189,7 +202,7 @@ function makePointsMaterial() {
         uniforms: {
             u_dpr:  { value: DPR },
             u_time: { value: 0 },
-            u_att:  { value: 30.0 },
+            u_att:  { value: 12.0 },
         },
         transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
     });
@@ -288,6 +301,19 @@ function makeLabel(text, { color = '#dfe6f0', size = 22, weight = 500 } = {}) {
     return sprite;
 }
 
+let _dotTex = null;
+/** Soft round dot (shared) for the orbit analysis marks. */
+function dotTexture() {
+    if (_dotTex) return _dotTex;
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    rg.addColorStop(0, 'rgba(255,255,255,1)'); rg.addColorStop(0.4, 'rgba(255,255,255,.9)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg; g.fillRect(0, 0, 32, 32);
+    _dotTex = new THREE.CanvasTexture(c);
+    return _dotTex;
+}
+
 /** Simple emitter. */
 class Emitter {
     constructor() { this._l = new Map(); }
@@ -351,6 +377,11 @@ export class NeoLayer extends Emitter {
         this._buildLocalFrame();
         this.orbitLine = null;
         this._orbitBuiltJd = null;
+        this._orbitMarks = [];         // ☊ ☋ q marks on the selected orbit (sprite + label each)
+        this._dropLine = null;         // selected object → ecliptic plane
+        this.vmag = null;              // Float32Array(N): apparent V from Earth this frame
+        this._selectedDraw = null;     // { index, r, rTrue, exaggeration, atFloor } for the card
+        this._camDist = 20; this._viewH = 900; this._fov = 50;
         this.cometTails = null;        // LineSegments: two tails per active comet
         this._cometIdx = [];           // indices of objects that can grow a tail
         this.cometTailsActive = 0;
@@ -456,10 +487,10 @@ export class NeoLayer extends Emitter {
         const mod = await import('./neo-orbits.js');
         if (!this._cols) { const prep = mod.prepareColumns(this.els); this._cols = prep.cols; this._helio = new Float64Array(this.count * 3); }
         const N = this.count;
-        const scene = new Float32Array(N * 3), rHelio = new Float32Array(N), rGeo = new Float32Array(N);
+        const scene = new Float32Array(N * 3), rHelio = new Float32Array(N), rGeo = new Float32Array(N), vmag = new Float32Array(N);
         mod.propagateColumns(this._cols, jd, this._helio);
-        mod.deriveFrames(this._helio, N, this._earthOfDate, scene, rHelio, rGeo, mod.precessionLongitudeRad(jd));
-        this._applyFrame({ jd, count: N, scene, rHelio, rGeo, ms: 0 });
+        mod.deriveFrames(this._helio, N, this._earthOfDate, scene, rHelio, rGeo, mod.precessionLongitudeRad(jd), vmag, this._cols.H, this._cols.flags);
+        this._applyFrame({ jd, count: N, scene, rHelio, rGeo, vmag, ms: 0 });
     }
 
     // ── Data feeds ──────────────────────────────────────────────────────────
@@ -645,7 +676,7 @@ export class NeoLayer extends Emitter {
             const vis = this._baseVis ? this._baseVis[k] : 1;
             const b = vis && r < TAIL_MAX_R ? Math.min(1, 0.9 / (r * r)) : 0;
             // Coma: the nucleus sprite swells and brightens as 1/r².
-            const sz = baseSize(el) + (b > 0 ? 4.0 * b : 0);
+            const sz = sizeForV(el, this._V(k)) + (b > 0 ? 2.2 * b : 0);
             if (this._size[k] !== sz) { this._size[k] = sz; sizeDirty = true; }
             if (b <= 0.01) { pos.fill(0, o, o + TAIL_VERTS * 3); col.fill(0, o, o + TAIL_VERTS * 3); continue; }
             active++;
@@ -757,16 +788,32 @@ export class NeoLayer extends Emitter {
             if (flyby && this.visible.asteroids) vis = true;   // a flyby this week is always worth drawing
             if (flyby) c.setHex(flybyHex); else colorFor(el, mode, c);
             this._col[k * 3] = c.r; this._col[k * 3 + 1] = c.g; this._col[k * 3 + 2] = c.b;
-            this._size[k] = flyby ? 6.0 : baseSize(el);
+            this._size[k] = flyby ? 3.2 : sizeForV(el, this._V(k));
             this._pulse[k] = flyby ? 1 : 0;
             this._baseVis[k] = vis ? 1 : 0;
-            this._baseA[k] = flyby ? 1 : baseAlpha(el);
+            this._baseA[k] = flyby ? 1 : alphaForV(el, this._V(k));
         }
         this.points.geometry.attributes.aColor.needsUpdate = true;
         this.points.geometry.attributes.aSize.needsUpdate = true;
         this.points.geometry.attributes.aPulse.needsUpdate = true;
         this._flybySet = flybySet;
         this._refreshAlpha();
+    }
+
+    /** Apparent V of object k this frame (NaN without H or before the first frame). */
+    _V(k) { return this.vmag ? this.vmag[k] : NaN; }
+
+    /** Per-frame size / base alpha from the worker's apparent magnitudes (flybys keep their highlight). */
+    _refreshPhotometry() {
+        if (!this.points || !this.vmag) return;
+        const N = this.count;
+        for (let k = 0; k < N; k++) {
+            if (this._flybySet?.has(k)) continue;
+            const el = this.els[k], V = this.vmag[k];
+            this._size[k] = sizeForV(el, V);
+            this._baseA[k] = alphaForV(el, V);
+        }
+        this.points.geometry.attributes.aSize.needsUpdate = true;
     }
 
     _refreshAlpha() {
@@ -792,6 +839,7 @@ export class NeoLayer extends Emitter {
         this.points.geometry.computeBoundingSphere();
         this.rGeo = msg.rGeo; this.rHelio = msg.rHelio; this.frameJd = msg.jd;
         this.status.frameMs = msg.ms;
+        if (msg.vmag) { this.vmag = msg.vmag; if (!this._baseA || this._baseA.length !== N) this._baseA = new Float32Array(N).fill(1); this._refreshPhotometry(); }
 
         // In-zone set + closest.
         const maxAU = LOCAL_FRAME.maxLD * LD_AU;
@@ -826,6 +874,12 @@ export class NeoLayer extends Emitter {
         const n = this.inZone.length;
         this._localIndices = this.inZone.slice();
         const keep = new Set();
+        // Labels exist for the nearest 12; how many are SHOWN is the zoom
+        // ladder's call (_labelCap, by rank): 3 when the 20 LD ring is a small
+        // disc, 12 only once it fills most of the view — a dozen constant-
+        // screen-size labels on a 200 px disc is what the 2026-09-13 deploy
+        // screenshot showed.
+        const labelCap = this._labelCap();
         for (let j = 0; j < n; j++) {
             const k = this.inZone[j];
             const el = this.els[k];
@@ -835,8 +889,8 @@ export class NeoLayer extends Emitter {
             if (this._flybySet?.has(k)) c.setHex(this.visible.colorMode === 'class' ? NEO_COLORS.flyby : NATURAL_COLORS.flyby);
             else colorFor(el, this.visible.colorMode, c);
             this._lcol[j * 3] = c.r; this._lcol[j * 3 + 1] = c.g; this._lcol[j * 3 + 2] = c.b;
-            this._lsize[j] = 5.2;
-            this._lpulse[j] = 0.8;
+            this._lsize[j] = 3.2;
+            this._lpulse[j] = 0.5;
             this._lalpha[j] = this.visible.local && !this._meshed.has(k) ? (1 - localFrameWeight(off.dLD)) : 0;
             // Labels + trails for the nearest few (the selected object already
             // carries the page-level label, so it gets no second one here).
@@ -859,7 +913,8 @@ export class NeoLayer extends Emitter {
                 // The label follows the local-frame weight, NOT the sprite alpha — the
                 // sprite is zeroed while a mesh stands in, the label must stay.
                 s.material.opacity = this.visible.local ? (1 - localFrameWeight(off.dLD)) : 0;
-                s.visible = this._labelVis.objects;
+                s.userData.rank = j;
+                s.visible = this._labelVis.objects && j < labelCap;
             }
             if (j < 12 && this.visible.local) this._requestTrack(k);
         }
@@ -872,6 +927,11 @@ export class NeoLayer extends Emitter {
         this.localPoints.geometry.setDrawRange(0, n);
         for (const a of ['position', 'aColor', 'aSize', 'aAlpha', 'aPulse']) this.localPoints.geometry.attributes[a].needsUpdate = true;
         this.localPoints.geometry.computeBoundingSphere();
+    }
+
+    _labelCap() {
+        const lv = this._labelVis.level ?? 0;
+        return lv >= 3 ? 12 : lv === 2 ? 6 : lv === 1 ? 3 : 0;
     }
 
     _requestTrack(index) {
@@ -926,9 +986,16 @@ export class NeoLayer extends Emitter {
 
     // ── Mesh LOD (rock pool) ────────────────────────────────────────────────
 
-    _rockRadius(el) {
+    /**
+     * Drawn radius for a rock: TRUE scale in the drawn-Earth convention with a
+     * screen-space floor — 5 px for the pool, 34 px for the selected object so
+     * its shape and spin can be inspected. Returns rockDrawRadius()'s record;
+     * `.r` is the scale, `.exaggeration` goes on the data card.
+     */
+    _rockRadius(el, camDist = this._camDist, index = null) {
         const d = el.diam ?? diameterKmFromH(el.H) ?? ((el.flags & FLAG.COMET) ? 3 : 0.1);
-        return drawnRockRadius(d);
+        const selected = index != null && index === this.selectedIndex;
+        return rockDrawRadius(d, { camDist, minPx: selected ? ROCK_PX_SELECTED : ROCK_PX_FLOOR, viewHeightPx: this._viewH, fovDeg: this._fov, earthR: this.earthR });
     }
 
     _ensureRockSlots() {
@@ -1002,7 +1069,6 @@ export class NeoLayer extends Emitter {
                 slot.isComet = this._isCometLike(el);
                 slot.mesh.material.uniforms.u_base.value.copy(colorFor(el, this.visible.colorMode, _cB)).multiplyScalar(slot.isComet ? 0.55 : 0.9);
                 slot.mesh.material.uniforms.u_glow.value = 0;
-                slot.mesh.scale.setScalar(this._rockRadius(el));
                 slot.index = k;
                 slot.mesh.visible = true;
                 held.add(k);
@@ -1020,6 +1086,10 @@ export class NeoLayer extends Emitter {
             const p = this.drawnPosition(slot.index, slot.mesh.position);
             if (!p) { slot.mesh.visible = false; continue; }
             slot.mesh.visible = true;
+            // Scale every frame: the floor rides the camera distance to THIS rock.
+            const rk = this._rockRadius(this.els[slot.index], f.camera.position.distanceTo(p), slot.index);
+            slot.mesh.scale.setScalar(rk.r);
+            if (slot.index === this.selectedIndex) this._selectedDraw = { index: slot.index, ...rk };
             const ang = ((simMs / 3.6e6 / slot.spin.periodH) * Math.PI * 2 + slot.spin.phase) % (Math.PI * 2);
             // Spin about the body's own symmetry axis (geometry +Y), tilted to the seeded pole.
             _qSpin.setFromAxisAngle(_Y, ang);
@@ -1039,7 +1109,7 @@ export class NeoLayer extends Emitter {
         if (!el) return null;
         let b = this._bodies.get(index);
         if (!b) {
-            b = { name: displayName(el), type: classLabel(el), radius: this._rockRadius(el), color: colorFor(el, this.visible.colorMode, _cB).getHex(), mesh: this.anchor, neoIndex: index, des: el.des, data: {} };
+            b = { name: displayName(el), type: classLabel(el), radius: this._rockRadius(el, 0.09, index).rTrue || 1e-4, color: colorFor(el, this.visible.colorMode, _cB).getHex(), mesh: this.anchor, neoIndex: index, des: el.des, data: {} };
             this._bodies.set(index, b);
         }
         b.data = this.readout(index);
@@ -1052,6 +1122,9 @@ export class NeoLayer extends Emitter {
         this.selectedIndex = index;
         this._selectedDes = index != null ? this.els[index].des : null;
         if (this.orbitLine) { this.group.remove(this.orbitLine); this.orbitLine.geometry.dispose(); this.orbitLine = null; }
+        this._clearOrbitMarks();
+        if (this._dropLine) this._dropLine.visible = false;
+        this._selectedDraw = null;
         const key = 'selected';
         const old = this._labels.get(key);
         if (old) { this.group.remove(old); old.material.map.dispose(); old.material.dispose(); this._labels.delete(key); }
@@ -1095,6 +1168,58 @@ export class NeoLayer extends Emitter {
         this.orbitLine.renderOrder = 3;
         this.group.add(this.orbitLine);
         this._orbitBuiltJd = jd;
+        this._buildOrbitMarks(el, prec);
+    }
+
+    /**
+     * Analysis marks on the selected orbit: ☊ / ☋ where it pierces the
+     * ecliptic (with the heliocentric distance there — an Earth-crosser is one
+     * whose node sits inside 0.983–1.017 AU) and q, the perihelion. Every
+     * number comes from the kernel (nodeDistancesAU / positionAtTrueAnomaly).
+     */
+    _buildOrbitMarks(el, prec) {
+        this._clearOrbitMarks();
+        const nd = nodeDistancesAU(el);
+        const w = el.w * D2R;
+        const tint = colorFor(el, this.visible.colorMode, _cB).lerp(_cB.clone().set(0xffffff), 0.5).getStyle();
+        const add = (nu, text, color) => {
+            const q = positionAtTrueAnomaly(el, nu);
+            if (!(q.r > 0) || q.r > 60) return;
+            const d = rotateAboutPole(q.x, q.y, q.z, prec);
+            const sc = helioToScene(d.x, d.y, d.z);
+            const dot = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTexture(), color, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, sizeAttenuation: false }));
+            dot.scale.set(0.011, 0.011, 1); dot.position.set(sc.x, sc.y, sc.z); dot.renderOrder = 16; dot.name = 'neo-orbit-mark';
+            const label = makeLabel(text, { color, size: 15 });
+            label.position.set(sc.x, sc.y + 0.012, sc.z); label.name = 'neo-orbit-mark-label';
+            dot.visible = label.visible = this.visible.orbit;
+            this.group.add(dot, label);
+            this._orbitMarks.push(dot, label);
+        };
+        if (nd.asc != null) add(-w, `☊ ${nd.asc.toFixed(3)} AU`, '#9ef0b0');
+        if (nd.desc != null) add(Math.PI - w, `☋ ${nd.desc.toFixed(3)} AU`, '#ffb090');
+        add(0, `q ${el.q.toFixed(3)} AU`, tint);
+    }
+
+    _clearOrbitMarks() {
+        for (const o of this._orbitMarks) { this.group.remove(o); if (o.material.map && o.material.map !== _dotTex) o.material.map.dispose(); o.material.dispose(); }
+        this._orbitMarks = [];
+    }
+
+    /** Vertical from the selected object to the ecliptic plane — the inclination made visible. */
+    _updateDropLine(p, inHelioFrame) {
+        if (!this._dropLine) {
+            const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+            this._dropLine = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending }));
+            this._dropLine.name = 'neo-drop-line'; this._dropLine.renderOrder = 3; this._dropLine.frustumCulled = false;
+            this.group.add(this._dropLine);
+        }
+        const vis = !!p && inHelioFrame && this.visible.orbit;
+        this._dropLine.visible = vis;
+        if (!vis) return;
+        const a = this._dropLine.geometry.attributes.position.array;
+        a[0] = p.x; a[1] = p.y; a[2] = p.z; a[3] = p.x; a[4] = 0; a[5] = p.z;
+        this._dropLine.geometry.attributes.position.needsUpdate = true;
+        this._dropLine.material.color.copy(colorFor(this.els[this.selectedIndex], this.visible.colorMode, _cB));
     }
 
     /** Drawn position of an object right now (local frame when inside the zone). */
@@ -1133,11 +1258,39 @@ export class NeoLayer extends Emitter {
         out['Distance from Earth'] = dGeo != null ? `${formatLD(dGeo)} · ${dGeo.toFixed(4)} AU` : '—';
         out['Distance from Sun'] = `${p.r.toFixed(3)} AU`;
         out['Heliocentric speed'] = `${speedKms(p.vx, p.vy, p.vz).toFixed(1)} km/s`;
+        if (g) {
+            // What a telescope sees now, and where to point it — all from the kernel.
+            const E = this._earthOfDate;
+            const alpha = phaseAngleDeg(g.helio.x, g.helio.y, g.helio.z, g.x, g.y, g.z);
+            const elong = elongationDeg(E[0], E[1], E[2], g.x, g.y, g.z);
+            const V = apparentMagnitude(el.H, p.r, dGeo, alpha, { comet: !!(el.flags & FLAG.COMET) });
+            out['Apparent magnitude'] = (V != null ? `V ${V.toFixed(1)}` : 'no H') + (alpha != null ? ` · phase ${alpha.toFixed(0)}° · elongation ${elong.toFixed(0)}° from the Sun` : '');
+            // Earth's velocity by central difference through the page's own ephemeris; the object's J2000 velocity rotated to date.
+            if (this._earthFn) {
+                const e1 = this._earthFn(jd - 0.05), e2 = this._earthFn(jd + 0.05);
+                const pr = precessionLongitudeRad(jd), c = Math.cos(pr), sn = Math.sin(pr);
+                const vx = c * p.vx - sn * p.vy, vy = sn * p.vx + c * p.vy;
+                const rx = vx - (e2.x_AU - e1.x_AU) / 0.1, ry = vy - (e2.y_AU - e1.y_AU) / 0.1, rz = p.vz - (e2.z_AU - e1.z_AU) / 0.1;
+                out['Speed relative to Earth'] = `${speedKms(rx, ry, rz).toFixed(1)} km/s`;
+            }
+            const hl = eclipticLonLatDeg(g.helio.x, g.helio.y, g.helio.z), gl = eclipticLonLatDeg(g.x, g.y, g.z);
+            out['Ecliptic position (of date)'] = `helio λ ${hl.lon.toFixed(2)}° β ${hl.lat.toFixed(2)}° · geo λ ${gl.lon.toFixed(2)}° β ${gl.lat.toFixed(2)}°`;
+        }
         out['Size'] = el.diam != null ? `${formatSize(el.diam)} (measured)` : (el.H != null ? `${formatSize(dKm)} (from H ${el.H.toFixed(1)}, albedo 0.14 assumed)` : '—');
         out['Orbit a · e · i'] = `${Math.abs(el.a).toFixed(3)} AU · ${el.e.toFixed(4)} · ${el.i.toFixed(2)}°`;
         out['Perihelion · aphelion'] = el.e < 1 ? `${el.q.toFixed(3)} · ${el.Q.toFixed(3)} AU` : `${el.q.toFixed(3)} AU · unbound (e > 1)`;
         out['Period'] = el.per_y != null ? (el.per_y < 2 ? `${(el.per_y * 365.25).toFixed(0)} days` : `${el.per_y.toFixed(2)} yr`) : 'unbound — leaving the Solar System';
+        const nd = nodeDistancesAU(el);
+        out['Node crossings'] = `☊ ${nd.asc != null ? nd.asc.toFixed(3) + ' AU' : '—'} · ☋ ${nd.desc != null ? nd.desc.toFixed(3) + ' AU' : '—'} — ${earthCrossingNote(nd)}`;
+        const tj = tisserandJ(el.a, el.e, el.i);
+        if (tj != null) out['Tisserand T_J'] = `${tj.toFixed(2)} · ${tj > 3 ? 'asteroidal' : tj > 2 ? 'Jupiter-family (comet-like) dynamics' : 'Halley-type / long-period dynamics'}`;
+        const tpj = nextPerihelionJD(el, jd);
+        out['Next perihelion'] = tpj != null ? `${jdToIsoDate(tpj)} · in ${(tpj - jd).toFixed(0)} d` : 'passed — outbound';
         if (el.moid != null) out['Earth MOID'] = `${formatLD(el.moid)} · ${el.moid.toFixed(4)} AU`;
+        const dr = this._selectedDraw && this._selectedDraw.index === index ? this._selectedDraw : null;
+        if (dr) out['Drawn size'] = dr.exaggeration == null ? 'size unknown — a marker, not a shape'
+            : dr.atFloor ? `×${dr.exaggeration >= 100 ? Math.round(dr.exaggeration).toLocaleString() : dr.exaggeration.toFixed(1)} true size (screen-space floor — shape and spin are real, the size is not)`
+            : 'true scale';
         if (next) out['Next close approach'] = `${new Date(next.t_ms).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${formatLD(next.dist_au)} · ${next.v_rel_kms != null ? next.v_rel_kms.toFixed(1) + ' km/s' : ''}`;
         if (sentry) out['Impact monitor'] = `Sentry-listed · Torino ${sentry.ts_max} · Palermo ${sentry.ps_cum} · P(impact) ${sentry.ip != null ? sentry.ip.toExponential(1) : '—'} (${sentry.range ?? '—'})`;
         out['Propagation'] = `${elementsAgeNote(el.epoch, jd)} · JPL SBDB osculating elements`;
@@ -1149,6 +1302,7 @@ export class NeoLayer extends Emitter {
     setVisible(patch) {
         Object.assign(this.visible, patch);
         if (this.orbitLine) this.orbitLine.visible = this.visible.orbit;
+        for (const o of this._orbitMarks) o.visible = this.visible.orbit;
         this.localGroup.visible = this.visible.local;
         for (const [, line] of this._trails) line.visible = this.visible.local;
         for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.cone.visible = v; r.label.visible = v; r.stream.visible = v; r.rocks.mesh.visible = v; }
@@ -1249,7 +1403,7 @@ export class NeoLayer extends Emitter {
 
     /**
      * @param {{ jd:number, earthOfDate:{x_AU,y_AU,z_AU,lon_rad}, earthFn?:(jd)=>object,
-     *           earthDrawn:THREE.Vector3, t:number, simMs?:number, camera?:THREE.Camera, camDist?:number }} f
+     *           earthDrawn:THREE.Vector3, t:number, simMs?:number, camera?:THREE.Camera, camDist?:number, viewH?:number }} f
      */
     update(f) {
         this._t = f.t ?? this._t + 0.016;
@@ -1262,16 +1416,25 @@ export class NeoLayer extends Emitter {
         const jdChanged = this._lastJd == null || Math.abs(f.jd - this._lastJd) > 1e-4;
         this._lastJd = f.jd;
         this.localGroup.position.copy(this._earthDrawn);
+        this._camDist = f.camDist ?? this._camDist;
+        if (f.viewH > 0) this._viewH = f.viewH;
+        if (f.camera?.fov) this._fov = f.camera.fov;
         if (f.camera) {
             const dEarth = Math.max(0.05, f.camera.position.distanceTo(this._earthDrawn));
             const r1 = this.rings[0].r, r20 = this.rings[this.rings.length - 1].r;
             // fov 50°: a radius r at distance d spans ≈ 1.07·r/d of the view height.
             const rings = this.visible.local && r1 / dEarth > 0.02;
-            const objects = this.visible.local && this.visible.labels && r20 / dEarth > 0.08;
-            if (rings !== this._labelVis.rings || objects !== this._labelVis.objects) {
-                this._labelVis = { rings, objects };
+            const frac = r20 / dEarth;
+            // Label LADDER: 0 none · 1 the three closest · 2 six · 3 twelve (see
+            // _labelCap). Six labels at frac 0.27 still overlapped in the capture
+            // (constant-screen-size text on a 300 px disc), hence 0.45 / 0.9.
+            const level = !(this.visible.local && this.visible.labels) ? 0 : frac >= 0.9 ? 3 : frac >= 0.45 ? 2 : frac > 0.08 ? 1 : 0;
+            const objects = level > 0;
+            if (rings !== this._labelVis.rings || objects !== this._labelVis.objects || level !== (this._labelVis.level ?? 0)) {
+                this._labelVis = { rings, objects, level };
                 for (const r of this.rings) r.label.visible = rings;
-                for (const [key, sp] of this._labels) if (key.startsWith('local:')) sp.visible = objects;
+                const cap = this._labelCap();
+                for (const [key, sp] of this._labels) if (key.startsWith('local:')) sp.visible = objects && (sp.userData.rank ?? 0) < cap;
             }
         }
         if (jdChanged) this._requestFrame(false);
@@ -1285,12 +1448,23 @@ export class NeoLayer extends Emitter {
             const p = this.drawnPosition(this.selectedIndex, this.anchor.position);
             if (p) {
                 this.selectedMarker.position.copy(p);
-                const rr = this._rockRadius(this.els[this.selectedIndex]);
-                this.selectedMarker.scale.setScalar(Math.max(rr * 1.7 / 0.021, Math.min(8, Math.max(1, (f.camDist ?? 20) * 0.08))));
+                // The reticle rides the rock's drawn radius (a 34 px floor when
+                // selected), so it is ~58 px at any zoom instead of a 0.35-unit disc.
+                const dCam = f.camera ? f.camera.position.distanceTo(p) : this._camDist;
+                const rr = this._rockRadius(this.els[this.selectedIndex], dCam, this.selectedIndex).r;
+                this.selectedMarker.scale.setScalar(rr * 1.7 / 0.021);
                 this.selectedMarker.lookAt(f.camera ? f.camera.position : new THREE.Vector3(0, 50, 0));
                 const s = this._labels.get('selected');
-                if (s) s.position.set(p.x, p.y + 0.03, p.z);
-            }
+                // Offset along the CAMERA's up, not world +y: from the top view a
+                // world-up offset points at the camera and the label sat on the rock.
+                if (s) {
+                    _camUp.set(0, 1, 0); if (f.camera) _camUp.applyQuaternion(f.camera.quaternion);
+                    s.position.copy(p).addScaledVector(_camUp, rr * 2.4 + dCam * 0.04);
+                }
+                const gsel = this.geocentricAt(this.selectedIndex, f.jd);
+                const inHelio = !gsel || !this.visible.local || localFrameWeight(toLD(Math.hypot(gsel.x, gsel.y, gsel.z))) >= 0.5;
+                this._updateDropLine(p, inHelio);
+            } else this._updateDropLine(null, false);
             if (this._orbitBuiltJd != null && Math.abs(f.jd - this._orbitBuiltJd) > 30) this._buildOrbit(this.selectedIndex);
         }
     }
