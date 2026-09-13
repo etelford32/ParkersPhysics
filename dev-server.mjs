@@ -135,6 +135,8 @@ const API_ROUTES = {
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
     '/api/mars/weather':           'api/mars/weather.js',
+    '/api/neo/catalog':            'api/neo/catalog.js',
+    '/api/neo/watch':              'api/neo/watch.js',
     // /api/mars/route and /api/mars/ephemeris intentionally omitted: the
     // file-based fallback below resolves them, and this table is only for
     // routes that need aliasing.
