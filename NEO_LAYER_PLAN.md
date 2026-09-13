@@ -103,6 +103,12 @@ through it.
   byte-saver has to strip them.
 - **Points raycast sorts along the ray, not across it.** `pick()` re-sorts
   hits by `distanceToRay` so a click means "nearest the cursor".
+- **"Earth View" did not look at Earth.** The page's preset was a fixed
+  camera aimed at the +X axis, where Earth sits in late September; on any
+  other date it framed empty space (the Geminids capture on Dec 14 showed
+  nothing). `setCam('earth')` now frames the drawn Earth wherever it is.
+- **1-px GL lines vanish against the point cloud.** Radiant arrow shafts
+  are thin cylinders, not `THREE.Line`.
 
 ## 4. Open items
 

@@ -853,18 +853,22 @@ export class NeoLayer extends Emitter {
             // Scene axis swap; arrow points INBOUND (meteoroids come from the radiant).
             const dir = new THREE.Vector3(u.x, u.z, u.y);
             const tail = dir.clone().multiplyScalar(1.05), head = dir.clone().multiplyScalar(0.34);
+            // The shaft is a thin cylinder, not a GL line: WebGL lines are 1 px
+            // wide whatever the zoom and vanish against the point cloud.
+            const len = tail.length() - head.length();
+            const mid = head.clone().add(tail).multiplyScalar(0.5);
             if (!r) {
-                const g = new THREE.BufferGeometry().setFromPoints([tail, head]);
-                const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.8, depthWrite: false }));
-                const cone = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 10), new THREE.MeshBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.9, depthWrite: false }));
+                const shaftMat = new THREE.MeshBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.85, depthWrite: false });
+                const line = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, len, 8), shaftMat);
+                const cone = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.11, 12), shaftMat);
                 const label = makeLabel(`☄ ${s.name} · ZHR ~${Math.round(s.zhr * x.activity)} · ${s.vKms} km/s`, { color: '#ffd27a', size: 19 });
                 line.name = `neo-radiant-${s.code}`;
                 this.localGroup.add(line, cone, label);
                 r = { code: s.code, line, cone, label };
                 this._radiants.push(r);
-            } else {
-                r.line.geometry.setFromPoints([tail, head]);
             }
+            r.line.position.copy(mid);
+            r.line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
             r.cone.position.copy(head);
             r.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
             r.label.position.copy(tail).addScalar(0.02);

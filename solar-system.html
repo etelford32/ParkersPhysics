@@ -2966,8 +2966,18 @@ function setCam(name) {
     document.getElementById('cam-'+name)?.classList.add('active');
     const p = CAM[name];
     if (!p) return;
-    camera.position.set(...p.pos);
-    controls.target.set(...p.t);
+    if (name === 'earth') {
+        // Earth moves ~1°/day along its orbit; a FIXED preset only framed the
+        // planet for a few weeks a year (it aimed at the +X axis, where Earth
+        // sits in late September). Frame the planet where it is drawn NOW,
+        // with the preset's original offset.
+        const ep = earthP.mesh.position;
+        camera.position.set(ep.x + 1, 1.0, ep.z + 1);
+        controls.target.copy(ep);
+    } else {
+        camera.position.set(...p.pos);
+        controls.target.set(...p.t);
+    }
     controls.update();
     cameraMode = 'free';
     _setModeUI();
