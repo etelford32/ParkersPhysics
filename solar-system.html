@@ -10,19 +10,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Solar System — Parkers Physics App</title>
 <link rel="canonical" href="https://parkersphysics.com/solar-system.html">
-<meta name="description" content="Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, and the asteroid belt. Keplerian orbits driven by NASA JPL ephemerides.">
+<meta name="description" content="Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, the asteroid belt, and every catalogued near-Earth asteroid and comet propagated live from NASA JPL orbital elements — close approaches, impact-risk monitor, meteor showers and fireballs.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:url" content="https://parkersphysics.com/solar-system.html">
 <meta property="og:title" content="Solar System Orrery — Parkers Physics">
-<meta property="og:description" content="Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, and the asteroid belt. Keplerian orbits driven by NASA JPL ephemerides.">
+<meta property="og:description" content="Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, the asteroid belt, and every catalogued near-Earth asteroid and comet propagated live from NASA JPL orbital elements — close approaches, impact-risk monitor, meteor showers and fireballs.">
 <meta property="og:image" content="https://parkersphysics.com/static/og/solar-system.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Solar System Orrery — Parkers Physics">
-<meta name="twitter:description" content="Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, and the asteroid belt. Keplerian orbits driven by NASA JPL ephemerides.">
+<meta name="twitter:description" content="Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, the asteroid belt, and every catalogued near-Earth asteroid and comet propagated live from NASA JPL orbital elements — close approaches, impact-risk monitor, meteor showers and fireballs.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/solar-system.jpg">
 
 <style>
@@ -351,7 +351,7 @@ nav {
   "@type": "SoftwareApplication",
   "@id": "https://parkersphysics.com/solar-system.html#app",
   "name": "Solar System Orrery",
-  "description": "Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, and the asteroid belt. Keplerian orbits driven by NASA JPL ephemerides.",
+  "description": "Interactive 3D solar-system orrery with the Sun, eight planets, dwarf planets, major moons, the asteroid belt, and every catalogued near-Earth asteroid and comet propagated live from NASA JPL orbital elements — close approaches, impact-risk monitor, meteor showers and fireballs.",
   "url": "https://parkersphysics.com/solar-system.html",
   "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
   "applicationCategory": "EducationalApplication",
@@ -442,6 +442,18 @@ import './js/telemetry.js';
             <div style="display:flex;justify-content:space-between;margin-top:3px;">
                 <span class="dim">CME ETA</span>
                 <span class="val" id="hud-cme-eta" style="color:#334">—</span>
+            </div>
+            <div class="sep"></div>
+            <div style="font-size:9px;color:#334;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">
+                Near-Earth Objects
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <span class="dim">Tracked</span>
+                <span class="val" id="hud-neo-count" style="color:#ffb347">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:8px;">
+                <span class="dim">Closest</span>
+                <span class="val" id="hud-neo-closest" style="color:#ffe9a8;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">—</span>
             </div>
             <div class="sep"></div>
             <div class="dim" style="margin-top:0">Drag · Scroll · Click planet</div>
@@ -616,6 +628,12 @@ import './js/telemetry.js';
                 </div>
             </div>
 
+            <!-- Near-Earth Objects — js/neo-layer.js + js/neo-panel.js -->
+            <div class="sec" id="sec-neo">
+                <div class="sec-hd"><span>☄ Near-Earth Objects</span><span class="arrow">▼</span></div>
+                <div class="sec-bd" id="neo-panel-root"></div>
+            </div>
+
             <!-- Moons quick-select -->
             <div class="sec closed" id="sec-moons">
                 <div class="sec-hd"><span>Moons</span><span class="arrow">▼</span></div>
@@ -640,6 +658,15 @@ import './js/telemetry.js';
                     are retrograde; Nereid traces the most eccentric large-moon orbit
                     in the system (e ≈ 0.75). Solar wind Parker spiral active.
                     Click any body or moon to track it.</p>
+                    <p style="margin-top:5px"><strong>Near-Earth objects:</strong> every
+                    catalogued NEO (asteroids, near-Earth comets, the interstellar
+                    visitors) is propagated two-body from JPL SBDB osculating elements
+                    in a Web Worker, in the ecliptic of date. Inside 20 lunar distances
+                    an object moves to an Earth-anchored frame drawn on the Moon's own
+                    compression (the 1 LD ring passes through the drawn Moon). Close
+                    approaches are JPL's integrated CAD table, the impact monitor is
+                    Sentry, fireballs are US Government sensor reports, and meteor
+                    showers are IAU/IMO stream data keyed to solar longitude.</p>
                 </div>
             </div>
 
@@ -708,12 +735,20 @@ import './js/telemetry.js';
         </div>
     </div>
 
+    <!-- Near-Earth Objects — close-approach ledger (js/neo-layer.js watch feed) -->
+    <div class="sd-card">
+        <h3>Near-Earth Objects <span style="font-weight:400;color:#665;text-transform:none;letter-spacing:0">(JPL close-approach table · Sentry · fireballs)</span></h3>
+        <div id="sd-neo-summary" class="sd-stat"><span class="sd-stat-k">Population</span><span class="sd-stat-v" id="sd-neo-count">loading…</span></div>
+        <div id="sd-neo-table" style="margin-top:8px;font-size:.78rem;color:#ccb">—</div>
+    </div>
+
     <!-- Data Sources -->
     <div class="sd-card" style="font-size:.7rem;color:#665;line-height:1.7">
         <h3>Data Sources & References</h3>
         <p><strong style="color:#887">Ephemeris:</strong> Bretagnon & Francou (1988) VSOP87D · Meeus (1998) "Astronomical Algorithms" 2nd ed. · Standish (1992) JPL secular corrections · NASA JPL Horizons REST API (when available)</p>
         <p style="margin-top:4px"><strong style="color:#887">Space Weather:</strong> NOAA SWPC DSCOVR/ACE rtsw_wind_1m + rtsw_mag_1m · GOES X-ray 1-day · Planetary Kp 1-min · NASA DONKI CME/Flares/SEP</p>
         <p style="margin-top:4px"><strong style="color:#887">Planet Data:</strong> NASA Planetary Fact Sheets (rotation, obliquity, radii) · Murray & Dermott (1999) "Solar System Dynamics" (moon orbits) · IAU/IAG 2015 report (pole orientations)</p>
+        <p style="margin-top:4px"><strong style="color:#887">Small Bodies:</strong> NASA/JPL Solar System Dynamics — SBDB Query API (osculating elements, J2000 ecliptic) · Close-Approach Data API · Sentry impact monitor · Fireball API (US Government sensors) · IAU Meteor Data Center / IMO shower list · Two-body propagation on-device (js/neo-orbits.js) with the IAU 1976 general-precession rotation into the ecliptic of date; positions drift from JPL's integrated orbits at ~arcminutes per year and faster across planetary encounters.</p>
         <p style="margin-top:4px"><strong style="color:#887">Accuracy Notes:</strong> Planet longitudes accurate to &lt;0.3° for 1800–2200 AD. Earth VSOP87D &lt;1″. Secular precession rates are linear approximations — over millennia, mutual planetary perturbations (especially Jupiter-Saturn great inequality) cause additional drift. Moon orbital elements are mean Keplerian — Laplace resonance perturbations not modeled (~0.5°/yr drift for Io).</p>
     </div>
 
@@ -736,6 +771,8 @@ import {
 } from './js/planet-moons.js';
 import { JovianSystem } from './js/jovian-system.js';
 import { EarthSimBridge } from './js/earth-sim-bridge.js';
+import { NeoLayer } from './js/neo-layer.js';
+import { NeoPanel } from './js/neo-panel.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
 initScaleNav('solar');
@@ -1870,6 +1907,19 @@ const asteroidBelt = new THREE.Points(beltGeo, beltMat);
 scene.add(asteroidBelt);
 
 // ═══════════════════════════════════════════════════════
+//  NEAR-EARTH OBJECTS  (js/neo-layer.js — worker-propagated population)
+// ═══════════════════════════════════════════════════════
+// Every catalogued NEO from /api/neo/catalog (tiers pha → bright → all), the
+// JPL close-approach / Sentry / fireball watch from /api/neo/watch. Positions
+// come from js/neo-worker.js each frame; this page only feeds it the sim JD,
+// Earth's true (VSOP87D, of-date) position and the DRAWN Earth position —
+// the Earth-local frame is anchored to where the planet is actually drawn.
+// `earthR` is the anchor for the 1/5/10/20 LD rings (same power law as the
+// Moon's compression in planet-moons.js, minus its clamp).
+const neoLayer = new NeoLayer({ scene, earthR });
+neoLayer.start();
+
+// ═══════════════════════════════════════════════════════
 //  CME BURST SYSTEM
 // ═══════════════════════════════════════════════════════
 // Activated by triggerCME(dir) when the SWPC feed detects a new M/X flare.
@@ -2648,6 +2698,9 @@ const panelType  = document.getElementById('panel-planet-type');
 
 function selectBody(p) {
     selectedBody = p;
+    // A planet / moon / Sun selection clears any NEO selection (orbit line,
+    // marker, label). NEO bodies arrive already selected on the layer.
+    if (!p || p.neoIndex == null) neoLayer.select(null);
     if (!p) {
         hudBody.textContent   = 'Sun';
         panelName.textContent = 'Sun — G2V';
@@ -2713,6 +2766,11 @@ function onPointerDown(e) {
         }
         _lastClickMs   = now;
         _lastClickName = name;
+    } else {
+        // No planet / moon under the cursor — try the NEO point clouds. The pick
+        // radius scales with camera distance so a dot is clickable at every zoom.
+        const nb = neoLayer.pick(raycaster, camera.position.distanceTo(controls.target));
+        if (nb) { neoLayer.select(nb.neoIndex); selectBody(nb); }
     }
 }
 renderer.domElement.addEventListener('pointerdown', onPointerDown);
@@ -3179,6 +3237,65 @@ function tickFPS(){fF++;const n=performance.now();if(n-fT>=500){fEl.textContent=
 // ═══════════════════════════════════════════════════════
 const hudYear = document.getElementById('hud-year');
 
+// ── NEO panel section + data card wiring ──────────────────────────────────
+// Lives here, after the time-base state (`_ephemEpoch`, `simTime`) and the
+// selection helpers are initialised: the panel renders synchronously in its
+// constructor and reads the sim clock, so placing it earlier is a TDZ error
+// that aborts the whole page module (measured).
+const neoPanel = new NeoPanel({
+    layer: neoLayer,
+    root: document.getElementById('neo-panel-root'),
+    hud: { count: document.getElementById('hud-neo-count'), closest: document.getElementById('hud-neo-closest') },
+    onSelect: (body) => { selectBody(body); openPanel(); },
+    getSimMs: () => (_ephemEpoch
+        ? _ephemEpoch.date.getTime() + (simTime - _ephemEpoch.simTime) * 365.25 * 86400e3
+        : Date.now()),
+});
+// Live data card refresh for a selected NEO (distance / speed move with the sim clock).
+let _neoCardMs = 0;
+function _renderNeoCard(body) {
+    if (!body || body.neoIndex == null) return;
+    body.data = neoLayer.readout(body.neoIndex);
+    tbl.innerHTML = Object.entries(body.data)
+        .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+// Bottom-of-page ledger: the next close approaches from JPL's CAD table.
+function _renderNeoLedger() {
+    const countEl = document.getElementById('sd-neo-count');
+    const tableEl = document.getElementById('sd-neo-table');
+    if (!countEl || !tableEl) return;
+    const st = neoLayer.status;
+    countEl.textContent = st.catalog === 'down'
+        ? `feed down — ${st.catalogNote}`
+        : `${neoLayer.count.toLocaleString()} objects (${st.tierLoaded ?? '…'}) · worker ${st.worker}`;
+    const w = neoLayer.watch;
+    if (st.watch === 'down') { tableEl.textContent = `Close-approach table unavailable — ${st.watchNote}`; return; }
+    const nowMs = Date.now();
+    const rows = w.approaches.filter(a => a.t_ms >= nowMs - 86400e3).slice(0, 20);
+    if (!rows.length) { tableEl.textContent = 'No close approaches inside 0.05 AU in the next 60 days.'; return; }
+    const ld = (au) => (au / 0.0025695556).toFixed(2);
+    tableEl.innerHTML = `<table style="width:100%;border-collapse:collapse">
+        <tr style="color:#887;text-align:left"><th style="padding:3px 6px">Object</th><th style="padding:3px 6px">Closest approach (UTC)</th><th style="padding:3px 6px;text-align:right">Miss (LD)</th><th style="padding:3px 6px;text-align:right">Miss (km)</th><th style="padding:3px 6px;text-align:right">v<sub>rel</sub> km/s</th><th style="padding:3px 6px;text-align:right">H</th></tr>
+        ${rows.map(a => `<tr style="border-top:1px solid rgba(255,255,255,.04)">
+            <td style="padding:3px 6px;color:#eee">${a.name}</td>
+            <td style="padding:3px 6px;font-family:monospace">${new Date(a.t_ms).toISOString().slice(0, 16).replace('T', ' ')}</td>
+            <td style="padding:3px 6px;text-align:right;font-family:monospace">${ld(a.dist_au)}</td>
+            <td style="padding:3px 6px;text-align:right;font-family:monospace">${Math.round(a.dist_au * 149597870.7).toLocaleString()}</td>
+            <td style="padding:3px 6px;text-align:right;font-family:monospace">${a.v_rel_kms != null ? a.v_rel_kms.toFixed(1) : '—'}</td>
+            <td style="padding:3px 6px;text-align:right;font-family:monospace">${a.H != null ? a.H.toFixed(1) : '—'}</td></tr>`).join('')}
+    </table>`;
+}
+neoLayer.on('watch', _renderNeoLedger);
+neoLayer.on('population', _renderNeoLedger);
+neoLayer.on('catalog', _renderNeoLedger);
+
+// Test / console hook (tests/solar-system-neo-smoke.spec.js reads this).
+window.__neoLab = {
+    layer: neoLayer, panel: neoPanel, simDist, selectBody,
+    get selectedBody() { return selectedBody; },
+    get simJD() { return neoLayer._lastJd; },
+};
+
 let _prevFrameMs = performance.now();
 function animate() {
     requestAnimationFrame(animate);
@@ -3294,6 +3411,21 @@ function animate() {
     updateCoronalLoops(t);
     updateCoronalRain(sunUniforms.u_flare_str.value);
     updateProminences(t, sunUniforms.u_flare_str.value);
+
+    // ── Near-Earth objects ────────────────────────────────────────────────────
+    // Earth's TRUE position (VSOP87D, ecliptic of date) for the flyby geometry;
+    // the DRAWN Earth for where the local frame is anchored. Must run before the
+    // camera block: a locked NEO's anchor is seated here.
+    {
+        const _earthNow = earthHeliocentric(_simJD);
+        neoLayer.update({
+            jd: _simJD, earthOfDate: _earthNow, earthFn: earthHeliocentric,
+            earthDrawn: earthP.mesh.position, t, simMs: _simDateNow.getTime(),
+            camera, camDist: camera.position.distanceTo(controls.target),
+        });
+        neoPanel.tick();
+        if (selectedBody?.neoIndex != null && _nowMs - _neoCardMs > 500) { _neoCardMs = _nowMs; _renderNeoCard(selectedBody); }
+    }
 
     // ── Camera mode ───────────────────────────────────────────────────────────
     //
@@ -3681,6 +3813,7 @@ swFeed.start();
 
 console.log('%c[Solar System · Celestial Simulator]', 'color:#ffd700;font-weight:bold;font-size:13px');
 console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 33 moons (Galileans via Yoshida-4 N-body) · asteroid belt · CME bursts');
+console.log('  NEOs: JPL SBDB catalogue (pha → bright → all) propagated in js/neo-worker.js · CAD close approaches · Sentry · fireballs · meteor showers');
 console.log('  NOAA SWPC: wind_1m · kp_index · xray_flux · flares_7d · regions · protons · electrons · aurora · alerts · f107');
 console.log('  NASA DONKI: CME Analysis (cone model, ENLIL arrival times) · notifications');
 console.log('  Ephemeris: JPL Horizons (Earth vectors ECLIPJ2000) + Meeus fallback');

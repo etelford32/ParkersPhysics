@@ -47,6 +47,10 @@ const UPSTREAMS = [
     { source: 'mars-mmgis',   url: 'https://mars.nasa.gov/mmgis-maps/M20/Layers/json/M20_waypoints.json', edge_authoritative: true },
     { source: 'mars-rss',     url: 'https://mars.nasa.gov/rss/api/?feed=weather&category=mars2020&feedtype=json', edge_authoritative: true },
     { source: 'jpl-horizons', url: 'https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%27399%27&EPHEM_TYPE=VECTORS&CENTER=%27500@10%27&START_TIME=%272026-01-01%27&STOP_TIME=%272026-01-02%27&STEP_SIZE=%271%20d%27', edge_authoritative: true },
+    // JPL SSD small-body services — proxied by /api/neo/catalog and
+    // /api/neo/watch (solar-system.html NEO layer), so this row IS
+    // authoritative. The cheapest call on that host: one fireball row.
+    { source: 'jpl-ssd-api',  url: 'https://ssd-api.jpl.nasa.gov/fireball.api?limit=1', edge_authoritative: true },
     // Environment upstreams. Both are proxied through the edge
     // (/api/wildfires/events, /api/air-quality/{grid,centers}), so these
     // rows are authoritative for the EarthView pollution/wildfire layers

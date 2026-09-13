@@ -1,0 +1,922 @@
+/**
+ * neo-layer.js — near-Earth objects for solar-system.html
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Draws the whole catalogued near-Earth population (asteroids, near-Earth
+ * comets, the interstellar visitors) at its propagated position for the
+ * orrery's current Julian Day, plus:
+ *
+ *   · an Earth-anchored "near-Earth space" frame — rings at 1/5/10/20 lunar
+ *     distances on the Moon's own compression, with every object currently
+ *     inside 20 LD drawn there with a ±3-day geocentric trail and a label
+ *   · the selected object's full orbit and a camera-lock anchor the page's
+ *     selectBody()/setCamLock() can follow like a planet
+ *   · inbound arrows for the meteor showers active at the sim date (the
+ *     direction meteoroids arrive FROM, at the stream's geocentric speed)
+ *
+ * All orbital arithmetic for the population runs in js/neo-worker.js; this
+ * module owns three.js objects, the data feeds, selection and picking. The
+ * pure kernel (js/neo-orbits.js) is the single copy of every rule below.
+ *
+ * ── The two drawing conventions (read the kernel header first) ────────────
+ * Population points ride the orrery's log radial scale in the ecliptic OF
+ * DATE. Inside LOCAL_FRAME.maxLD of Earth an object is drawn on the local
+ * frame instead, and across LOCAL_FRAME.fadeLD the two instances cross-fade
+ * (alpha only — positions never jump). The page discloses both in the panel.
+ *
+ * ── Data ladder ───────────────────────────────────────────────────────────
+ * /api/neo/catalog?tier=pha → bright → all, in sequence, each REPLACING the
+ * previous (tiers nest). `all` is skipped on save-data connections. A feed
+ * that fails leaves the previous tier on screen and says so in `status`; a
+ * catalogue that never arrives draws NOTHING (never a stale invention).
+ * /api/neo/watch supplies the close-approach table (JPL's integrated orbits,
+ * not our two-body propagation), the Sentry risk list and recent fireballs.
+ *
+ * Browser gate: tests/solar-system-neo-smoke.spec.js (routes mocked).
+ */
+
+import * as THREE from 'three';
+import {
+    FLAG, LD_AU, AU_KM, LOCAL_FRAME, CLASS_LABELS,
+    rowToRecord, normalizeElements, propagate, toOfDate, sampleOrbit,
+    helioToScene, geoToLocalScene, localSceneRadius, localFrameWeight, precessionLongitudeRad, rotateAboutPole,
+    diameterKmFromH, formatSize, formatLD, toLD, speedKms, elementsAgeNote, findNotable, neoClass,
+    solarLongitudeDeg, activeShowers, nextShower, radiantEclipticUnit,
+} from './neo-orbits.js';
+
+const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
+
+export const NEO_COLORS = Object.freeze({
+    pha:          0xff5a3c,
+    APO:          0xffb347,
+    ATE:          0x5be0c8,
+    AMO:          0xc39bff,
+    IEO:          0xff8ad8,
+    comet:        0x7fd7ff,
+    interstellar: 0xffffff,
+    other:        0xa09a8c,
+    flyby:        0xfff2a8,
+    ring:         0x6fa8dc,
+    radiant:      0xffd27a,
+});
+
+export const NEO_TIER_LADDER = ['pha', 'bright', 'all'];
+
+/** Per-object base point size (CSS px before attenuation). */
+function baseSize(el) {
+    if (el.flags & FLAG.INTERSTELLAR) return 5.2;
+    if (el.flags & FLAG.COMET) return 4.0;
+    if (el.flags & FLAG.PHA) return 4.2;
+    if (el.H == null) return 2.6;
+    if (el.H < 18) return 3.4;
+    if (el.H <= 22) return 2.6;
+    return 2.0;
+}
+function baseColor(el) {
+    if (el.flags & FLAG.INTERSTELLAR) return NEO_COLORS.interstellar;
+    if (el.flags & FLAG.COMET) return NEO_COLORS.comet;
+    if (el.flags & FLAG.PHA) return NEO_COLORS.pha;
+    return NEO_COLORS[el.cls] ?? NEO_COLORS.other;
+}
+export function classLabel(el) {
+    if (el.flags & FLAG.INTERSTELLAR) return 'Interstellar object';
+    if (el.flags & FLAG.COMET) return (CLASS_LABELS[el.cls] ?? 'Comet') + ' · near-Earth comet';
+    const c = CLASS_LABELS[el.cls] ?? CLASS_LABELS[neoClass(el.a, el.e)] ?? 'Near-Earth asteroid';
+    return (el.flags & FLAG.PHA) ? `${c} · potentially hazardous` : c;
+}
+export function displayName(el) { return el.name || el.des || '—'; }
+
+const POINT_VS = /* glsl */`
+    attribute vec3  aColor;
+    attribute float aSize;
+    attribute float aAlpha;
+    attribute float aPulse;
+    uniform float u_dpr;
+    uniform float u_time;
+    uniform float u_att;
+    varying vec3  vColor;
+    varying float vAlpha;
+    varying float vPulse;
+    void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float pulse = 1.0 + aPulse * (0.35 + 0.35 * sin(u_time * 3.0));
+        float att = clamp(u_att / max(-mv.z, 0.05), 0.55, 3.2);
+        gl_PointSize = aSize * pulse * u_dpr * att;
+        gl_Position = projectionMatrix * mv;
+        vColor = aColor; vAlpha = aAlpha; vPulse = aPulse;
+    }
+`;
+const POINT_FS = /* glsl */`
+    varying vec3  vColor;
+    varying float vAlpha;
+    varying float vPulse;
+    void main() {
+        vec2 c = gl_PointCoord - 0.5;
+        float d = length(c);
+        if (d > 0.5 || vAlpha <= 0.002) discard;
+        float core = smoothstep(0.5, 0.18, d);
+        float halo = vPulse * smoothstep(0.5, 0.0, d) * 0.5;
+        gl_FragColor = vec4(vColor * (1.0 + halo), (core + halo) * vAlpha);
+    }
+`;
+
+function makePointsMaterial() {
+    return new THREE.ShaderMaterial({
+        vertexShader: POINT_VS, fragmentShader: POINT_FS,
+        uniforms: {
+            u_dpr:  { value: Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1) },
+            u_time: { value: 0 },
+            u_att:  { value: 30.0 },
+        },
+        transparent: true, depthWrite: false, depthTest: true,
+    });
+}
+
+/** Canvas-text sprite with constant on-screen size. */
+function makeLabel(text, { color = '#dfe6f0', size = 22, weight = 500 } = {}) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const font = `${weight} ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.font = font;
+    const w = Math.ceil(ctx.measureText(text).width) + 16, h = size + 12;
+    canvas.width = w; canvas.height = h;
+    ctx.font = font;
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,.9)'; ctx.shadowBlur = 4;
+    ctx.fillStyle = color;
+    ctx.fillText(text, 8, h / 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false, sizeAttenuation: false });
+    const sprite = new THREE.Sprite(mat);
+    // sizeAttenuation:false ⇒ scale is a fraction of the view (≈ scale / (2·tan(fov/2)) of the height).
+    const hFrac = 0.032;
+    sprite.scale.set(hFrac * (w / h), hFrac, 1);
+    sprite.renderOrder = 20;
+    sprite.userData.text = text;
+    return sprite;
+}
+
+/** Simple emitter. */
+class Emitter {
+    constructor() { this._l = new Map(); }
+    on(ev, fn) { if (!this._l.has(ev)) this._l.set(ev, new Set()); this._l.get(ev).add(fn); return () => this._l.get(ev)?.delete(fn); }
+    emit(ev, payload) { for (const fn of (this._l.get(ev) ?? [])) { try { fn(payload); } catch (e) { console.warn('[neo-layer]', ev, e); } } }
+}
+
+export class NeoLayer extends Emitter {
+    /**
+     * @param {{ scene: THREE.Scene, earthR?: number, fetchImpl?: typeof fetch,
+     *           useWorker?: boolean, tiers?: string[], catalogUrl?: string, watchUrl?: string }} opts
+     */
+    constructor(opts) {
+        super();
+        this.scene = opts.scene;
+        this.earthR = opts.earthR ?? LOCAL_FRAME.earthSceneRadius;
+        this._fetch = opts.fetchImpl ?? ((u, o) => fetch(u, o));
+        this.tiers = opts.tiers ?? NEO_TIER_LADDER;
+        this.catalogUrl = opts.catalogUrl ?? '/api/neo/catalog';
+        this.watchUrl = opts.watchUrl ?? '/api/neo/watch';
+        this.useWorker = opts.useWorker ?? true;
+
+        // Population state (index-aligned across els / worker / attributes).
+        this.els = [];                 // normalized element records
+        this.byDes = new Map();        // des → index
+        this.count = 0;
+        this.tier = null;
+        this.status = {
+            catalog: 'loading', catalogNote: 'loading…', tierLoaded: null, tiersPending: [...this.tiers],
+            watch: 'loading', watchNote: 'loading…', worker: 'spawning', frameMs: 0, rejected: {},
+            catalogMeta: null, watchMeta: null,
+        };
+        this.watch = { approaches: [], sentry: [], fireballs: [], window: null };
+        // population: 'all' | 'bright' (H ≤ 22, PHAs, comets, interstellar) | 'pha'
+        this.visible = { asteroids: true, comets: true, population: 'all', local: true, radiants: true, orbit: true, labels: true };
+
+        // Frame state from the worker.
+        this.frameJd = null;
+        this.rGeo = null;              // Float32Array(N), AU
+        this.rHelio = null;
+        this.inZone = [];              // indices with dLD < LOCAL_FRAME.maxLD (sorted by distance)
+        this.closest = null;           // { index, dLD }
+        this._earthOfDate = [1, 0, 0];
+        this._earthDrawn = new THREE.Vector3();
+        this._lastJd = null;
+
+        // Selection.
+        this.selectedIndex = null;
+        this._bodies = new Map();      // index → body object handed to the page
+
+        // three.js objects.
+        this.group = new THREE.Group(); this.group.name = 'neo-layer';
+        this.localGroup = new THREE.Group(); this.localGroup.name = 'neo-local-frame';
+        this.group.add(this.localGroup);
+        this.scene.add(this.group);
+        this._pointsMat = makePointsMaterial();
+        this.points = null;            // heliocentric-frame population
+        this.localPoints = null;       // in-zone instances
+        this._localCap = 64;
+        this._buildLocalFrame();
+        this.orbitLine = null;
+        this._orbitBuiltJd = null;
+        this.anchor = new THREE.Object3D(); this.anchor.name = 'neo-anchor'; this.group.add(this.anchor);
+        this.selectedMarker = this._buildSelectedMarker();
+        this._labels = new Map();      // key → sprite
+        // Labels have constant SCREEN size, so at the top view (camera ~55 units
+        // out) a dozen of them pile onto the Earth disc. Each class is shown
+        // only once the frame it annotates subtends enough of the view (measured
+        // as ring radius / camera-to-Earth distance) — set every frame in update().
+        this._labelVis = { rings: false, objects: false };
+        this._radiants = [];           // { code, line, cone, label }
+        this._trails = new Map();      // index → Line
+        this._trackReq = new Map();    // index → pending id
+
+        // Worker.
+        this._worker = null; this._nextId = 1; this._inFlight = false; this._pendingJd = null;
+        this._mainFallbackNext = 0;
+        this._t = 0;
+    }
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
+
+    /** Kick off the data ladder. Safe to call once. */
+    start() {
+        this._ensureWorker();
+        this._loadWatch();
+        this._loadNextTier();
+        return this;
+    }
+
+    dispose() {
+        this._worker?.terminate();
+        this.scene.remove(this.group);
+    }
+
+    // ── Worker bridge ───────────────────────────────────────────────────────
+
+    _ensureWorker() {
+        if (this._worker || !this.useWorker || typeof Worker === 'undefined') return;
+        try {
+            this._worker = new Worker(WORKER_URL, { type: 'module' });
+        } catch (err) {
+            console.warn('[neo-layer] module worker unsupported, propagating on main thread:', err);
+            this.status.worker = 'main-thread';
+            return;
+        }
+        this._worker.addEventListener('message', (ev) => this._onWorkerMsg(ev.data));
+        this._worker.addEventListener('error', (err) => {
+            console.warn('[neo-layer] worker error:', err.message || err);
+            this.status.worker = 'main-thread';
+            this._worker.terminate(); this._worker = null; this._inFlight = false;
+        });
+    }
+
+    _onWorkerMsg(msg) {
+        if (!msg) return;
+        if (msg.type === 'ready') { this.status.worker = 'ready'; return; }
+        if (msg.type === 'loaded') {
+            this.status.rejected = msg.rejected ?? {};
+            this.status.worker = `ready · ${msg.count.toLocaleString()} objects`;
+            this._inFlight = false;
+            this._requestFrame(true);
+            return;
+        }
+        if (msg.type === 'frame') {
+            this._inFlight = false;
+            if (msg.count === this.count && this.points) this._applyFrame(msg);
+            // Time moved on while we computed — go again immediately.
+            if (this._pendingJd != null && Math.abs(this._pendingJd - msg.jd) > 1e-4) this._requestFrame(true);
+            return;
+        }
+        if (msg.type === 'track') { this._applyTrack(msg); return; }
+        if (msg.type === 'error') { console.warn('[neo-layer] worker:', msg.error); this._inFlight = false; }
+    }
+
+    _requestFrame(force = false) {
+        if (!this.count || this._lastJd == null) return;
+        const jd = this._lastJd;
+        this._pendingJd = jd;
+        if (this._worker) {
+            if (this._inFlight) return;
+            if (!force && this.frameJd != null && Math.abs(jd - this.frameJd) < 1e-4) return;
+            this._inFlight = true;
+            this._worker.postMessage({ type: 'frame', id: this._nextId++, jd, earth: this._earthOfDate });
+            return;
+        }
+        // Main-thread fallback: 1 Hz, so a 38k solve never stalls the render loop for long.
+        const now = performance.now();
+        if (!force && now < this._mainFallbackNext) return;
+        this._mainFallbackNext = now + 1000;
+        this._mainThreadFrame(jd);
+    }
+
+    async _mainThreadFrame(jd) {
+        const mod = await import('./neo-orbits.js');
+        if (!this._cols) { const prep = mod.prepareColumns(this.els); this._cols = prep.cols; this._helio = new Float64Array(this.count * 3); }
+        const N = this.count;
+        const scene = new Float32Array(N * 3), rHelio = new Float32Array(N), rGeo = new Float32Array(N);
+        mod.propagateColumns(this._cols, jd, this._helio);
+        mod.deriveFrames(this._helio, N, this._earthOfDate, scene, rHelio, rGeo, mod.precessionLongitudeRad(jd));
+        this._applyFrame({ jd, count: N, scene, rHelio, rGeo, ms: 0 });
+    }
+
+    // ── Data feeds ──────────────────────────────────────────────────────────
+
+    async _loadJson(url) {
+        const res = await this._fetch(url, { cache: 'default' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+    }
+
+    async _loadNextTier() {
+        const tier = this.status.tiersPending.shift();
+        if (!tier) return;
+        if (tier === 'all' && typeof navigator !== 'undefined' && navigator.connection?.saveData) {
+            this.status.catalogNote += ' · full catalogue skipped (save-data)';
+            this.emit('catalog', this.status);
+            return;
+        }
+        this.status.catalog = this.count ? 'ready' : 'loading';
+        this.status.catalogNote = `loading ${tier}…`;
+        this.emit('catalog', this.status);
+        try {
+            const body = await this._loadJson(`${this.catalogUrl}?tier=${encodeURIComponent(tier)}`);
+            const rows = Array.isArray(body?.rows) ? body.rows : [];
+            if (body?.freshness === 'stale' && rows.length === 0) throw new Error(body.degraded_reason || 'catalogue unavailable');
+            this._ingestCatalog(rows, tier, body);
+            this.status.catalog = 'ready';
+            this.status.catalogNote = body?.freshness === 'stale'
+                ? `partial — ${body.degraded_reason || 'asteroid population unavailable'}`
+                : `${this.count.toLocaleString()} objects · ${body?.tier_label ?? tier}`;
+        } catch (err) {
+            console.warn(`[neo-layer] catalog tier ${tier}:`, err.message);
+            if (!this.count) { this.status.catalog = 'down'; this.status.catalogNote = `feed down — ${err.message}`; }
+            else this.status.catalogNote = `${this.count.toLocaleString()} objects (${this.tier}) · ${tier} failed: ${err.message}`;
+        }
+        this.emit('catalog', this.status);
+        this._loadNextTier();
+    }
+
+    _ingestCatalog(rows, tier, meta) {
+        const els = [];
+        const rejected = {};
+        for (const row of rows) {
+            const r = normalizeElements(rowToRecord(row));
+            if (!r.ok) { rejected[r.reason] = (rejected[r.reason] || 0) + 1; continue; }
+            els.push(r.el);
+        }
+        this.els = els;
+        this.count = els.length;
+        this.tier = tier;
+        this.status.tierLoaded = tier;
+        this.status.rejected = rejected;
+        this.status.catalogMeta = meta ? { generated_at: meta.generated_at, groups: meta.groups, freshness: meta.freshness, tier_label: meta.tier_label } : null;
+        this.byDes = new Map();
+        for (let k = 0; k < els.length; k++) if (els[k].des) this.byDes.set(els[k].des, k);
+        this._cols = null;
+        this._rebuildPoints();
+        const prevSel = this.selectedIndex != null ? this._selectedDes : null;
+        this.selectedIndex = null; this._bodies.clear();
+        this._clearTrails();
+        if (this._worker) {
+            this._inFlight = true;
+            this._worker.postMessage({ type: 'load', id: this._nextId++, records: els.map(el => ({
+                des: el.des, name: el.name, H: el.H, cls: el.cls, flags: el.flags,
+                e: el.e, a: el.a, q: el.q, i: el.i, om: el.om, w: el.w,
+                ma: el.M0 * 180 / Math.PI, epoch: el.t0, tp: el.e >= 1 ? el.t0 : null, moid: el.moid, diam: el.diam,
+            })), reset: true });
+        } else {
+            this._requestFrame(true);
+        }
+        this._resolveWatchIndices();
+        if (prevSel != null && this.byDes.has(prevSel)) this.select(this.byDes.get(prevSel));
+        this.emit('population', { count: this.count, tier });
+    }
+
+    async _loadWatch() {
+        try {
+            const body = await this._loadJson(this.watchUrl);
+            this.watch = {
+                approaches: Array.isArray(body?.approaches) ? body.approaches : [],
+                sentry: Array.isArray(body?.sentry) ? body.sentry : [],
+                fireballs: Array.isArray(body?.fireballs) ? body.fireballs : [],
+                window: body?.window ?? null,
+            };
+            this.status.watchMeta = { generated_at: body?.generated_at, sources: body?.sources, freshness: body?.freshness };
+            const cadDown = body?.freshness === 'stale';
+            this.status.watch = cadDown ? 'down' : 'ready';
+            this.status.watchNote = cadDown
+                ? `approach table down — ${body?.degraded_reason || 'JPL CAD unavailable'}`
+                : `${this.watch.approaches.length} approaches · ${this.watch.sentry.length} risk-listed · ${this.watch.fireballs.length} fireballs`;
+        } catch (err) {
+            console.warn('[neo-layer] watch:', err.message);
+            this.status.watch = 'down';
+            this.status.watchNote = `feed down — ${err.message}`;
+        }
+        this._resolveWatchIndices();
+        this.emit('watch', this.watch);
+    }
+
+    _resolveWatchIndices() {
+        for (const a of this.watch.approaches) a.index = this.byDes.has(a.des) ? this.byDes.get(a.des) : null;
+        for (const s of this.watch.sentry) s.index = this.byDes.has(s.des) ? this.byDes.get(s.des) : null;
+        this._applyStyles();
+    }
+
+    // ── Geometry ────────────────────────────────────────────────────────────
+
+    _rebuildPoints() {
+        if (this.points) { this.group.remove(this.points); this.points.geometry.dispose(); }
+        const N = this.count;
+        const geo = new THREE.BufferGeometry();
+        this._pos = new Float32Array(N * 3);
+        this._col = new Float32Array(N * 3);
+        this._size = new Float32Array(N);
+        this._alpha = new Float32Array(N);
+        this._pulse = new Float32Array(N);
+        geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
+        geo.setAttribute('aColor', new THREE.BufferAttribute(this._col, 3));
+        geo.setAttribute('aSize', new THREE.BufferAttribute(this._size, 1));
+        geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._alpha, 1));
+        geo.setAttribute('aPulse', new THREE.BufferAttribute(this._pulse, 1));
+        geo.setDrawRange(0, N);
+        this.points = new THREE.Points(geo, this._pointsMat);
+        this.points.name = 'neo-points';
+        this.points.frustumCulled = false;
+        this.points.renderOrder = 5;
+        this.group.add(this.points);
+        this.rGeo = null; this.rHelio = null; this.frameJd = null; this.inZone = []; this.closest = null;
+        this._applyStyles();
+    }
+
+    _buildLocalFrame() {
+        // In-zone instances.
+        const cap = this._localCap;
+        const geo = new THREE.BufferGeometry();
+        this._lpos = new Float32Array(cap * 3); this._lcol = new Float32Array(cap * 3);
+        this._lsize = new Float32Array(cap); this._lalpha = new Float32Array(cap); this._lpulse = new Float32Array(cap);
+        geo.setAttribute('position', new THREE.BufferAttribute(this._lpos, 3));
+        geo.setAttribute('aColor', new THREE.BufferAttribute(this._lcol, 3));
+        geo.setAttribute('aSize', new THREE.BufferAttribute(this._lsize, 1));
+        geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._lalpha, 1));
+        geo.setAttribute('aPulse', new THREE.BufferAttribute(this._lpulse, 1));
+        geo.setDrawRange(0, 0);
+        this.localPoints = new THREE.Points(geo, this._pointsMat);
+        this.localPoints.name = 'neo-local-points';
+        this.localPoints.frustumCulled = false;
+        this.localPoints.renderOrder = 6;
+        this.localGroup.add(this.localPoints);
+        this._localIndices = [];
+
+        // Rings at fixed lunar distances — a ruler, so the ticks never move.
+        this.rings = [];
+        const ringLD = [1, 5, 10, 20];
+        for (const [ri, ld] of ringLD.entries()) {
+            const r = localSceneRadius(ld * LD_AU * AU_KM, this.earthR);
+            const n = 128, arr = new Float32Array(n * 3);
+            for (let k = 0; k < n; k++) { const a = (k / n) * Math.PI * 2; arr[k * 3] = r * Math.cos(a); arr[k * 3 + 1] = 0; arr[k * 3 + 2] = r * Math.sin(a); }
+            const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+            const line = new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color: NEO_COLORS.ring, transparent: true, opacity: ld === 1 ? 0.34 : 0.16, depthWrite: false }));
+            line.name = `neo-ring-${ld}ld`;
+            line.renderOrder = 4;
+            this.localGroup.add(line);
+            const label = makeLabel(`${ld} LD`, { color: '#8fb8e8', size: 18 });
+            // Staggered azimuths: at the same azimuth the four labels project onto
+            // one spot whenever the camera looks along the ring plane (Earth View).
+            const az = (45 + ri * 28) * Math.PI / 180;
+            label.position.set(r * Math.cos(az), 0.012, r * Math.sin(az));
+            label.visible = false;
+            this.localGroup.add(label);
+            this.rings.push({ ld, r, line, label });
+        }
+    }
+
+    _buildSelectedMarker() {
+        const g = new THREE.RingGeometry(0.018, 0.026, 40);
+        const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false, depthTest: false });
+        const mesh = new THREE.Mesh(g, m);
+        mesh.name = 'neo-selected-marker';
+        mesh.visible = false;
+        mesh.renderOrder = 15;
+        this.group.add(mesh);
+        return mesh;
+    }
+
+    /** Colour / size / base alpha per object from class + toggles + watch highlights. */
+    _applyStyles() {
+        if (!this.points) return;
+        const N = this.count;
+        const c = new THREE.Color();
+        const flybySet = new Set();
+        const nowMs = this._simMs ?? Date.now();
+        for (const a of this.watch.approaches) {
+            if (a.index != null && Math.abs(a.t_ms - nowMs) < 7 * 86400e3) flybySet.add(a.index);
+        }
+        if (!this._baseVis || this._baseVis.length !== N) this._baseVis = new Float32Array(N);
+        const pop = this.visible.population;
+        for (let k = 0; k < N; k++) {
+            const el = this.els[k];
+            const isComet = !!(el.flags & FLAG.COMET), isInter = !!(el.flags & FLAG.INTERSTELLAR), isPha = !!(el.flags & FLAG.PHA);
+            let vis;
+            if (isComet)      vis = this.visible.comets;
+            else if (isInter) vis = this.visible.asteroids || this.visible.comets;
+            else {
+                vis = this.visible.asteroids;
+                if (pop === 'pha')    vis = vis && isPha;
+                if (pop === 'bright') vis = vis && (isPha || (el.H != null && el.H <= 22));
+            }
+            const flyby = flybySet.has(k);
+            if (flyby && this.visible.asteroids) vis = true;   // a flyby this week is always worth drawing
+            c.setHex(flyby ? NEO_COLORS.flyby : baseColor(el));
+            this._col[k * 3] = c.r; this._col[k * 3 + 1] = c.g; this._col[k * 3 + 2] = c.b;
+            this._size[k] = flyby ? 7.0 : baseSize(el);
+            this._pulse[k] = flyby ? 1 : 0;
+            this._baseVis[k] = vis ? 1 : 0;
+        }
+        this.points.geometry.attributes.aColor.needsUpdate = true;
+        this.points.geometry.attributes.aSize.needsUpdate = true;
+        this.points.geometry.attributes.aPulse.needsUpdate = true;
+        this._flybySet = flybySet;
+        this._refreshAlpha();
+    }
+
+    _refreshAlpha() {
+        if (!this.points) return;
+        const N = this.count;
+        for (let k = 0; k < N; k++) {
+            const base = this._baseVis ? this._baseVis[k] : 1;
+            const dLD = this.rGeo ? toLD(this.rGeo[k]) : Infinity;
+            const w = this.visible.local ? localFrameWeight(dLD) : 1;
+            this._alpha[k] = base * (0.35 + 0.65 * w) * (k === this.selectedIndex ? 1 : 0.9);
+            // Inside the fade band the local instance takes over; in the deep zone the helio instance is off.
+            if (this.visible.local && dLD < LOCAL_FRAME.fadeLD[0]) this._alpha[k] = 0;
+        }
+        this.points.geometry.attributes.aAlpha.needsUpdate = true;
+    }
+
+    /** Frame from the worker: positions, distances, in-zone set, closest, local instances. */
+    _applyFrame(msg) {
+        const N = msg.count;
+        this._pos.set(msg.scene);
+        this.points.geometry.attributes.position.needsUpdate = true;
+        this.points.geometry.computeBoundingSphere();
+        this.rGeo = msg.rGeo; this.rHelio = msg.rHelio; this.frameJd = msg.jd;
+        this.status.frameMs = msg.ms;
+
+        // In-zone set + closest.
+        const maxAU = LOCAL_FRAME.maxLD * LD_AU;
+        const zone = [];
+        let best = -1, bestD = Infinity;
+        for (let k = 0; k < N; k++) {
+            const d = this.rGeo[k];
+            if (d < maxAU && (this._baseVis ? this._baseVis[k] : 1)) zone.push(k);
+            if (d < bestD && (this._baseVis ? this._baseVis[k] : 1)) { bestD = d; best = k; }
+        }
+        zone.sort((a, b) => this.rGeo[a] - this.rGeo[b]);
+        this.inZone = zone.slice(0, this._localCap);
+        this.closest = best >= 0 ? { index: best, dLD: toLD(bestD), dAU: bestD } : null;
+        this._refreshAlpha();
+        this._refreshLocalInstances();
+        this.emit('frame', { jd: msg.jd, count: N, closest: this.closest, inZone: this.inZone, ms: msg.ms });
+    }
+
+    /** Exact geocentric vector for one object at the frame JD (of-date frame). */
+    geocentricAt(index, jd = this.frameJd ?? this._lastJd) {
+        const el = this.els[index];
+        if (!el || jd == null) return null;
+        const p = toOfDate(propagate(el, jd), jd);
+        const e = this._earthOfDate;
+        return { x: p.x - e[0], y: p.y - e[1], z: p.z - e[2], helio: p };
+    }
+
+    _refreshLocalInstances() {
+        const c = new THREE.Color();
+        const jd = this.frameJd;
+        const n = this.inZone.length;
+        this._localIndices = this.inZone.slice();
+        const keep = new Set();
+        for (let j = 0; j < n; j++) {
+            const k = this.inZone[j];
+            const el = this.els[k];
+            const g = this.geocentricAt(k, jd);
+            const off = geoToLocalScene(g.x, g.y, g.z, this.earthR);
+            this._lpos[j * 3] = off.x; this._lpos[j * 3 + 1] = off.y; this._lpos[j * 3 + 2] = off.z;
+            c.setHex(this._flybySet?.has(k) ? NEO_COLORS.flyby : baseColor(el));
+            this._lcol[j * 3] = c.r; this._lcol[j * 3 + 1] = c.g; this._lcol[j * 3 + 2] = c.b;
+            this._lsize[j] = 6.5;
+            this._lpulse[j] = 1;
+            this._lalpha[j] = this.visible.local ? (1 - localFrameWeight(off.dLD)) : 0;
+            // Labels + trails for the nearest few (the selected object already
+            // carries the page-level label, so it gets no second one here).
+            if (j < 12 && this.visible.local && this.visible.labels && k !== this.selectedIndex) {
+                const key = `local:${k}`;
+                keep.add(key);
+                const text = `${displayName(el)} · ${off.dLD < 10 ? off.dLD.toFixed(2) : off.dLD.toFixed(1)} LD`;
+                let s = this._labels.get(key);
+                // A canvas re-raster per worker frame × 12 labels would be the
+                // most expensive thing on the page at warp speed: 4 Hz per label.
+                const nowMs = performance.now();
+                if (!s || (s.userData.text !== text && nowMs - (s.userData.builtAt ?? 0) > 250)) {
+                    if (s) { this.localGroup.remove(s); s.material.map.dispose(); s.material.dispose(); }
+                    s = makeLabel(text, { color: '#ffe9a8', size: 19 });
+                    s.userData.builtAt = nowMs;
+                    this.localGroup.add(s);
+                    this._labels.set(key, s);
+                }
+                s.position.set(off.x, off.y + 0.02, off.z);
+                s.material.opacity = this._lalpha[j];
+                s.visible = this._labelVis.objects;
+            }
+            if (j < 12 && this.visible.local) this._requestTrack(k);
+        }
+        for (const [key, s] of this._labels) {
+            if (key.startsWith('local:') && !keep.has(key)) { this.localGroup.remove(s); s.material.map.dispose(); s.material.dispose(); this._labels.delete(key); }
+        }
+        for (const [k, line] of this._trails) {
+            if (!this.inZone.slice(0, 12).includes(k)) { this.localGroup.remove(line); line.geometry.dispose(); this._trails.delete(k); }
+        }
+        this.localPoints.geometry.setDrawRange(0, n);
+        for (const a of ['position', 'aColor', 'aSize', 'aAlpha', 'aPulse']) this.localPoints.geometry.attributes[a].needsUpdate = true;
+        this.localPoints.geometry.computeBoundingSphere();
+    }
+
+    _requestTrack(index) {
+        if (!this._worker || this._trackReq.has(index)) return;
+        const line = this._trails.get(index);
+        if (line && Math.abs(line.userData.jd - this.frameJd) < 0.5) return;   // rebuilt twice a sim-day at most
+        const days = 3, steps = 49;
+        const jd0 = this.frameJd - days, dt = (2 * days) / (steps - 1);
+        const earthAt = [];
+        for (let k = 0; k < steps; k++) { const e = this._earthFn?.(jd0 + k * dt); earthAt.push(e ? [e.x_AU, e.y_AU, e.z_AU] : this._earthOfDate); }
+        const id = this._nextId++;
+        this._trackReq.set(index, id);
+        this._worker.postMessage({ type: 'track', id, index, jd: this.frameJd, days, steps, earthAt });
+    }
+
+    _applyTrack(msg) {
+        this._trackReq.delete(msg.index);
+        if (!this.els[msg.index]) return;
+        const steps = msg.geo.length / 3;
+        const arr = new Float32Array(steps * 3);
+        for (let k = 0; k < steps; k++) {
+            const off = geoToLocalScene(msg.geo[k * 3], msg.geo[k * 3 + 1], msg.geo[k * 3 + 2], this.earthR);
+            arr[k * 3] = off.x; arr[k * 3 + 1] = off.y; arr[k * 3 + 2] = off.z;
+        }
+        let line = this._trails.get(msg.index);
+        if (line) { this.localGroup.remove(line); line.geometry.dispose(); }
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+        const el = this.els[msg.index];
+        line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: this._flybySet?.has(msg.index) ? NEO_COLORS.flyby : baseColor(el), transparent: true, opacity: 0.55, depthWrite: false }));
+        line.name = `neo-trail-${msg.index}`;
+        line.userData.jd = msg.jd0 + (steps - 1) * msg.dtDays / 2;
+        line.visible = this.visible.local;
+        this.localGroup.add(line);
+        this._trails.set(msg.index, line);
+    }
+
+    _clearTrails() {
+        for (const [, line] of this._trails) { this.localGroup.remove(line); line.geometry.dispose(); }
+        this._trails.clear(); this._trackReq.clear();
+    }
+
+    // ── Selection / bodies ──────────────────────────────────────────────────
+
+    /** Body object in the shape solar-system.html's selectBody() expects. */
+    bodyFor(index) {
+        const el = this.els[index];
+        if (!el) return null;
+        let b = this._bodies.get(index);
+        if (!b) {
+            b = { name: displayName(el), type: classLabel(el), radius: 0.02, color: baseColor(el), mesh: this.anchor, neoIndex: index, des: el.des, data: {} };
+            this._bodies.set(index, b);
+        }
+        b.data = this.readout(index);
+        return b;
+    }
+
+    /** Select by index (or null to clear). Rebuilds the orbit line and marker. */
+    select(index) {
+        if (index != null && !this.els[index]) index = null;
+        this.selectedIndex = index;
+        this._selectedDes = index != null ? this.els[index].des : null;
+        if (this.orbitLine) { this.group.remove(this.orbitLine); this.orbitLine.geometry.dispose(); this.orbitLine = null; }
+        const key = 'selected';
+        const old = this._labels.get(key);
+        if (old) { this.group.remove(old); old.material.map.dispose(); old.material.dispose(); this._labels.delete(key); }
+        this.selectedMarker.visible = index != null;
+        if (index != null) {
+            // setCamLock() reads anchor.position synchronously — seat it now.
+            const p = this.drawnPosition(index, this.anchor.position);
+            if (p) this.selectedMarker.position.copy(p);
+            this._buildOrbit(index);
+            const s = makeLabel(displayName(this.els[index]), { color: '#ffffff', size: 21, weight: 600 });
+            this.group.add(s); this._labels.set(key, s);
+        }
+        this._refreshAlpha();
+        this.emit('select', index != null ? this.bodyFor(index) : null);
+        return index != null ? this.bodyFor(index) : null;
+    }
+
+    selectByDes(des) {
+        const idx = this.byDes.get(String(des));
+        return idx == null ? null : this.select(idx);
+    }
+
+    _buildOrbit(index) {
+        const el = this.els[index];
+        const jd = this._lastJd ?? this.frameJd ?? el.epoch;
+        const pts = sampleOrbit(el, el.e < 1 ? 360 : 200, 60);
+        const prec = precessionLongitudeRad(jd);
+        const arr = new Float32Array(pts.length * 3);
+        for (let k = 0; k < pts.length; k++) {
+            const d = rotateAboutPole(pts[k].x, pts[k].y, pts[k].z, prec);
+            const s = helioToScene(d.x, d.y, d.z);
+            arr[k * 3] = s.x; arr[k * 3 + 1] = s.y; arr[k * 3 + 2] = s.z;
+        }
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+        const Ctor = el.e < 1 ? THREE.LineLoop : THREE.Line;
+        this.orbitLine = new Ctor(g, new THREE.LineBasicMaterial({ color: baseColor(el), transparent: true, opacity: 0.55, depthWrite: false }));
+        this.orbitLine.name = 'neo-orbit';
+        this.orbitLine.visible = this.visible.orbit;
+        this.orbitLine.renderOrder = 3;
+        this.group.add(this.orbitLine);
+        this._orbitBuiltJd = jd;
+    }
+
+    /** Drawn position of an object right now (local frame when inside the zone). */
+    drawnPosition(index, out = new THREE.Vector3()) {
+        const el = this.els[index];
+        if (!el) return null;
+        const jd = this._lastJd ?? this.frameJd;
+        const g = this.geocentricAt(index, jd);
+        if (!g) return null;
+        const dLD = toLD(Math.hypot(g.x, g.y, g.z));
+        const w = this.visible.local ? localFrameWeight(dLD) : 1;
+        if (w < 0.5) {
+            const off = geoToLocalScene(g.x, g.y, g.z, this.earthR);
+            return out.set(this._earthDrawn.x + off.x, this._earthDrawn.y + off.y, this._earthDrawn.z + off.z);
+        }
+        const s = helioToScene(g.helio.x, g.helio.y, g.helio.z);
+        return out.set(s.x, s.y, s.z);
+    }
+
+    /** Live data card rows for the Selected Body table. */
+    readout(index) {
+        const el = this.els[index];
+        if (!el) return {};
+        const jd = this._lastJd ?? this.frameJd ?? el.epoch;
+        const p = propagate(el, jd, true);
+        const g = this.geocentricAt(index, jd);
+        const dGeo = g ? Math.hypot(g.x, g.y, g.z) : null;
+        const notable = findNotable(el);
+        const next = this.watch.approaches.filter(a => a.des === el.des && a.t_ms >= (this._simMs ?? Date.now()) - 86400e3).sort((a, b) => a.t_ms - b.t_ms)[0];
+        const sentry = this.watch.sentry.find(s => s.des === el.des);
+        const dKm = el.diam ?? diameterKmFromH(el.H);
+        const out = {};
+        if (notable) out['Why it matters'] = notable.why;
+        out['Designation'] = el.des ?? '—';
+        out['Class'] = classLabel(el);
+        out['Distance from Earth'] = dGeo != null ? `${formatLD(dGeo)} · ${dGeo.toFixed(4)} AU` : '—';
+        out['Distance from Sun'] = `${p.r.toFixed(3)} AU`;
+        out['Heliocentric speed'] = `${speedKms(p.vx, p.vy, p.vz).toFixed(1)} km/s`;
+        out['Size'] = el.diam != null ? `${formatSize(el.diam)} (measured)` : (el.H != null ? `${formatSize(dKm)} (from H ${el.H.toFixed(1)}, albedo 0.14 assumed)` : '—');
+        out['Orbit a · e · i'] = `${Math.abs(el.a).toFixed(3)} AU · ${el.e.toFixed(4)} · ${el.i.toFixed(2)}°`;
+        out['Perihelion · aphelion'] = el.e < 1 ? `${el.q.toFixed(3)} · ${el.Q.toFixed(3)} AU` : `${el.q.toFixed(3)} AU · unbound (e > 1)`;
+        out['Period'] = el.per_y != null ? (el.per_y < 2 ? `${(el.per_y * 365.25).toFixed(0)} days` : `${el.per_y.toFixed(2)} yr`) : 'unbound — leaving the Solar System';
+        if (el.moid != null) out['Earth MOID'] = `${formatLD(el.moid)} · ${el.moid.toFixed(4)} AU`;
+        if (next) out['Next close approach'] = `${new Date(next.t_ms).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${formatLD(next.dist_au)} · ${next.v_rel_kms != null ? next.v_rel_kms.toFixed(1) + ' km/s' : ''}`;
+        if (sentry) out['Impact monitor'] = `Sentry-listed · Torino ${sentry.ts_max} · Palermo ${sentry.ps_cum} · P(impact) ${sentry.ip != null ? sentry.ip.toExponential(1) : '—'} (${sentry.range ?? '—'})`;
+        out['Propagation'] = `${elementsAgeNote(el.epoch, jd)} · JPL SBDB osculating elements`;
+        return out;
+    }
+
+    // ── Toggles ─────────────────────────────────────────────────────────────
+
+    setVisible(patch) {
+        Object.assign(this.visible, patch);
+        if (this.orbitLine) this.orbitLine.visible = this.visible.orbit;
+        this.localGroup.visible = this.visible.local;
+        for (const [, line] of this._trails) line.visible = this.visible.local;
+        for (const r of this._radiants) { r.line.visible = this.visible.radiants; r.cone.visible = this.visible.radiants; r.label.visible = this.visible.radiants; }
+        this._applyStyles();
+        if (this.rGeo) this._refreshLocalInstances();
+    }
+
+    // ── Picking ─────────────────────────────────────────────────────────────
+
+    /**
+     * @param {THREE.Raycaster} raycaster  already set from the camera
+     * @param {number} camDist            camera → controls.target distance (scales the pick radius)
+     */
+    pick(raycaster, camDist = 20) {
+        if (!this.points) return null;
+        const prevParams = raycaster.params.Points;
+        raycaster.params.Points = { ...(prevParams || {}), threshold: Math.max(0.01, 0.012 * camDist) };
+        const hits = raycaster.intersectObjects([this.localPoints, this.points], false);
+        raycaster.params.Points = prevParams;
+        // Points intersections sort by distance ALONG the ray; a click means "the
+        // one nearest the cursor", which is distanceToRay.
+        hits.sort((a, b) => (a.distanceToRay ?? 0) - (b.distanceToRay ?? 0));
+        for (const h of hits) {
+            if (h.object === this.localPoints) {
+                const k = this._localIndices[h.index];
+                if (k != null && this._lalpha[h.index] > 0.05) return this.bodyFor(k);
+            } else if (h.object === this.points) {
+                if (this._alpha[h.index] > 0.05) return this.bodyFor(h.index);
+            }
+        }
+        return null;
+    }
+
+    // ── Meteor showers ──────────────────────────────────────────────────────
+
+    /** Active showers at the current sim λ☉ (cached per frame). */
+    showers() { return this._showers ?? { active: [], next: null, solarLon: null }; }
+
+    _refreshRadiants(jd, earthLonRad) {
+        const lon = solarLongitudeDeg(earthLonRad);
+        const active = activeShowers(lon);
+        this._showers = { active, next: nextShower(lon), solarLon: lon };
+        const want = active.filter(x => x.activity >= 0.2).slice(0, 3);
+        const wantCodes = new Set(want.map(x => x.shower.code));
+        for (const r of this._radiants.slice()) {
+            if (!wantCodes.has(r.code)) {
+                this.localGroup.remove(r.line, r.cone, r.label); r.line.geometry.dispose(); r.cone.geometry.dispose(); r.label.material.map.dispose();
+                this._radiants.splice(this._radiants.indexOf(r), 1);
+            }
+        }
+        const prec = precessionLongitudeRad(jd);
+        for (const x of want) {
+            const s = x.shower;
+            let r = this._radiants.find(q => q.code === s.code);
+            const u0 = radiantEclipticUnit(s.ra, s.dec);
+            const u = rotateAboutPole(u0.x, u0.y, u0.z, prec);
+            // Scene axis swap; arrow points INBOUND (meteoroids come from the radiant).
+            const dir = new THREE.Vector3(u.x, u.z, u.y);
+            const tail = dir.clone().multiplyScalar(1.05), head = dir.clone().multiplyScalar(0.34);
+            if (!r) {
+                const g = new THREE.BufferGeometry().setFromPoints([tail, head]);
+                const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.8, depthWrite: false }));
+                const cone = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 10), new THREE.MeshBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.9, depthWrite: false }));
+                const label = makeLabel(`☄ ${s.name} · ZHR ~${Math.round(s.zhr * x.activity)} · ${s.vKms} km/s`, { color: '#ffd27a', size: 19 });
+                line.name = `neo-radiant-${s.code}`;
+                this.localGroup.add(line, cone, label);
+                r = { code: s.code, line, cone, label };
+                this._radiants.push(r);
+            } else {
+                r.line.geometry.setFromPoints([tail, head]);
+            }
+            r.cone.position.copy(head);
+            r.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
+            r.label.position.copy(tail).addScalar(0.02);
+            const vis = this.visible.radiants;
+            r.line.visible = vis; r.cone.visible = vis; r.label.visible = vis;
+        }
+    }
+
+    // ── Per-frame update (called from the page's animate loop) ──────────────
+
+    /**
+     * @param {{ jd:number, earthOfDate:{x_AU,y_AU,z_AU,lon_rad}, earthFn?:(jd)=>object,
+     *           earthDrawn:THREE.Vector3, t:number, simMs?:number, camera?:THREE.Camera, camDist?:number }} f
+     */
+    update(f) {
+        this._t = f.t ?? this._t + 0.016;
+        this._pointsMat.uniforms.u_time.value = this._t;
+        this._earthDrawn.copy(f.earthDrawn);
+        this._earthOfDate = [f.earthOfDate.x_AU, f.earthOfDate.y_AU, f.earthOfDate.z_AU];
+        this._earthFn = f.earthFn ?? this._earthFn;
+        this._simMs = f.simMs ?? this._simMs;
+        const jdChanged = this._lastJd == null || Math.abs(f.jd - this._lastJd) > 1e-4;
+        this._lastJd = f.jd;
+        this.localGroup.position.copy(this._earthDrawn);
+        if (f.camera) {
+            const dEarth = Math.max(0.05, f.camera.position.distanceTo(this._earthDrawn));
+            const r1 = this.rings[0].r, r20 = this.rings[this.rings.length - 1].r;
+            // fov 50°: a radius r at distance d spans ≈ 1.07·r/d of the view height.
+            const rings = this.visible.local && r1 / dEarth > 0.02;
+            const objects = this.visible.local && this.visible.labels && r20 / dEarth > 0.08;
+            if (rings !== this._labelVis.rings || objects !== this._labelVis.objects) {
+                this._labelVis = { rings, objects };
+                for (const r of this.rings) r.label.visible = rings;
+                for (const [key, sp] of this._labels) if (key.startsWith('local:')) sp.visible = objects;
+            }
+        }
+        if (jdChanged) this._requestFrame(false);
+        // Radiants ride the sim date (λ☉ moves ~1°/day, cheap to re-evaluate every ~0.1 d).
+        if (this._radiantJd == null || Math.abs(f.jd - this._radiantJd) > 0.1) { this._radiantJd = f.jd; this._refreshRadiants(f.jd, f.earthOfDate.lon_rad); }
+        // Flyby highlight set depends on the sim date (±7 d) — refresh every sim-day.
+        if (this._styleMs == null || Math.abs((this._simMs ?? 0) - this._styleMs) > 86400e3) { this._styleMs = this._simMs ?? 0; if (this.points) this._applyStyles(); }
+        // Selected object: anchor, marker, label, orbit (re-oriented if the date moved a lot).
+        if (this.selectedIndex != null) {
+            const p = this.drawnPosition(this.selectedIndex, this.anchor.position);
+            if (p) {
+                this.selectedMarker.position.copy(p);
+                this.selectedMarker.scale.setScalar(Math.min(8, Math.max(1, (f.camDist ?? 20) * 0.08)));
+                this.selectedMarker.lookAt(f.camera ? f.camera.position : new THREE.Vector3(0, 50, 0));
+                const s = this._labels.get('selected');
+                if (s) s.position.set(p.x, p.y + 0.03, p.z);
+            }
+            if (this._orbitBuiltJd != null && Math.abs(f.jd - this._orbitBuiltJd) > 30) this._buildOrbit(this.selectedIndex);
+        }
+    }
+}
