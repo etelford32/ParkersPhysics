@@ -831,14 +831,17 @@ nav {
 
         // Public hook: called by js/mhd/loader.js consumers (the Flare-Mode
         // module at the bottom of this file). `intensity ∈ [0, 1]` maps to
-        // 0..12 new ejecta per frame, in a tight cone aimed up-and-right
-        // from the star centre. The angle is fixed so users associate the
-        // jet with the visible Jz heatmap in the upper-right of the canvas.
-        window.__pulseFlare = function(intensity) {
+        // 0..12 new ejecta per frame, in a tight cone leaving the disk
+        // RADIALLY at `angle` (canvas radians, 0 = right, −π/2 = up). The
+        // module derives the angle from the flare SITE through
+        // js/flare-geometry.js siteOnDisk2D (north up, west right) so the
+        // jet and the site agree by construction; the fallback keeps the
+        // historical upper-right, where the Jz inset sits.
+        window.__pulseFlare = function(intensity, angle = -Math.PI / 4) {
             if (!isFinite(intensity) || intensity <= 0) return;
             const clamped = Math.min(1.0, intensity);
             const n = Math.round(clamped * 12);
-            const flareAngle = -Math.PI / 4; // upper-right
+            const flareAngle = isFinite(angle) ? angle : -Math.PI / 4;
             for (let i = 0; i < n; i++) {
                 if (flareParticles.length >= MAX_FLARE_PARTICLES) break;
                 const speed = particleSpeed * (2.0 + Math.random() * 2.0);
@@ -1250,6 +1253,25 @@ nav {
     // canvas. Independent of the existing particle simulation — the two
     // share screen real estate but no JS state.
     import { loadMhd } from './js/mhd/loader.js';
+    import { siteOnDisk2D, parkerFootpointLonDeg } from './js/flare-geometry.js';
+
+    // The flare SITE on the 2D disk (north up, west right — the convention
+    // every sun renderer on this site shares). N20 W45 is the upper-right
+    // quadrant, where the Jz inset already lives, and is also near Earth's
+    // Parker-spiral footpoint (~W60 at 400 km/s), i.e. a well-connected
+    // site. The ejecta jet leaves the disk along this site's radial — the
+    // kernel's `angle`, not a hand-picked number. See
+    // SOLAR_FLARE_MODELER_PLAN.md for what this mode does and does not model.
+    const FLARE_SITE = { latDeg: 20, lonDeg: 45 };
+    const FLARE_JET  = siteOnDisk2D(FLARE_SITE.latDeg * Math.PI / 180, FLARE_SITE.lonDeg * Math.PI / 180);
+    window.__star2dFlare = {
+        site: FLARE_SITE,
+        jetAngle: FLARE_JET.angle,
+        mu: FLARE_JET.mu,
+        parkerFootDeg: parkerFootpointLonDeg(400),
+        get running() { return running; },
+        get t() { return mhd ? mhd.time() : null; },
+    };
 
     const overlay  = document.getElementById('flareCanvas');
     const label    = document.getElementById('flareLabel');
@@ -1346,7 +1368,7 @@ nav {
         // wind enhancement.
         if (typeof window.__pulseFlare === 'function') {
             const intensity = Math.min(1.0, mhd.peakVy() / 0.3);
-            window.__pulseFlare(intensity);
+            window.__pulseFlare(intensity, FLARE_JET.angle);
         }
         requestAnimationFrame(loop);
     }

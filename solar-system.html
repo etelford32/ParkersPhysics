@@ -764,6 +764,11 @@ import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric,
          jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric,
          neptuneHeliocentric }
     from './js/horizons.js';
+// Flare-site geometry (js/flare-geometry.js, PURE, node-gated): where an
+// active region or flare sits RELATIVE TO EARTH on this heliocentric stage,
+// and how it co-rotates with the drawn Sun. See the SUN FRAME section.
+import * as FG from './js/flare-geometry.js';
+import { createFlareArcade } from './js/flare-arcade.js';
 import { JUPITER_VERT, JUPITER_FRAG, createJupiterUniforms } from './js/jupiter-shader.js';
 import {
     PLANET_SPIN, ALL_MOONS, PARENT_BODIES,
@@ -1025,6 +1030,60 @@ const sunGeo  = new THREE.SphereGeometry(1.5, 96, 96);
 const sunMat  = new THREE.ShaderMaterial({ vertexShader:sunVS, fragmentShader:sunFS, uniforms:sunUniforms });
 const sunMesh = new THREE.Mesh(sunGeo, sunMat);
 scene.add(sunMesh);
+
+// ═══════════════════════════════════════════════════════
+//  SUN FRAME — everything anchored to the solar surface
+// ═══════════════════════════════════════════════════════
+// Coronal loops, prominences and the flare arcade live in THIS group, whose
+// rotation is copied from sunMesh every frame, so they co-rotate with the
+// sunspots the shader draws (they used to sit in `scene` at a longitude
+// that subtracted the mesh rotation, i.e. world-fixed and 2× off — measured
+// 2026-09-13). A sibling of sunMesh, not a child, so the body raycaster
+// (`intersectObjects(meshes)`, recursive) never hits a loop.
+//
+// Placement rule (js/flare-geometry.js): NOAA's carrington_longitude →
+// Stonyhurst by subtracting L0(now); Stonyhurst → world azimuth = Earth's
+// DRAWN azimuth + lon, counted in the sense the Sun spins (west = ahead);
+// world → object azimuth adds the mesh rotation (three.js makeRotationY
+// maps φ → φ − θ). The Sun spins at its sidereal rate on the sim clock,
+// PROGRADE with the planets' orbits (azimuth increasing) — the wind's Parker
+// spiral already trailed that way; the mesh alone used to turn the other way.
+// The 7.25° axis tilt is not drawn (axis = +y), disclosed in the plan.
+const SUN_SPIN_SIGN = +1;                            // azimuth increasing with time
+const sunFrame = new THREE.Group();
+sunFrame.name = 'sun-frame';
+scene.add(sunFrame);
+// The 3D flare arcade + plume (js/flare-arcade.js). Sized to READ, not to
+// dominate: heights at 0.6× the kernel's drawn heights on a 1.5-unit Sun.
+const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.5, heightScale: 0.6, maxLoops: 9, plumeParticles: 160 });
+sunFrame.add(flareArcade.group);
+// Flare bookkeeping: onset sim-time (the shader's u_time units, 0.01/frame,
+// clamped like the CME particles so a time warp keeps the burst legible).
+const flareState = { set: false, key: null, latRad: 0, stonyLonRad: 0, worldAz: 0, objAz: 0, cls: 'M', t: 0 };
+let _lastPlacedRegions = [];                         // the swpc-update handler's placed ARs (for the test hook)
+let _lastCmeAxisAz = null;                           // world azimuth of the last CME cone axis (for the test hook)
+// Earth's drawn azimuth (from +x toward +z) — the origin of Stonyhurst longitude on this stage.
+function earthDrawnAzimuth() {
+    const p = earthP?.mesh?.position;
+    return p ? Math.atan2(p.z, p.x) : 0;
+}
+/** Stonyhurst (lat, lon) radians → { worldAz, objAz, dir } on this stage, now. */
+function placeStonyhurst(latRad, lonRad) {
+    const dir = FG.heliocentricSiteDirection({ latRad, lonRad, earthAzRad: earthDrawnAzimuth(), spinSign: SUN_SPIN_SIGN });
+    const worldAz = FG.heliocentricAzimuth(dir);
+    return { worldAz, objAz: FG.objectAzimuthForWorld(worldAz, sunMesh.rotation.y), dir };
+}
+/** Point the arcade at a flare: Stonyhurst location + class + age (seconds). */
+function setFlareSite({ latRad, lonRad, cls = 'M', ageS = 0, key = null }) {
+    const p = placeStonyhurst(latRad, lonRad);
+    Object.assign(flareState, { set: true, key, latRad, stonyLonRad: lonRad, worldAz: p.worldAz, objAz: p.objAz, cls: String(cls)[0].toUpperCase() });
+    flareState.t = Math.min(800, Math.max(0, ageS) * 0.35);   // real seconds → sim units (sun.html's replay rule)
+    // The kernel's sun frame has lon = atan2(x, z) (W = +x); this stage's
+    // azimuth runs from +x toward +z, so kernel lon = π/2 − objAz. That is a
+    // mirror of the kernel frame — the whole stage is (its orbits run
+    // clockwise from +y) — so Joy's tilt mirrors with it, consistently.
+    flareArcade.setSite({ latRad, lonRad0: Math.PI / 2 - p.objAz, cls: flareState.cls });
+}
 
 // Sun glow shells
 const sgVS = /* glsl */`
@@ -2275,9 +2334,12 @@ let coronalLoopPhases  = [];
 let coronalLoopCurves  = [];   // CatmullRomCurve3 per loop — sampled by coronal rain
 let coronalLoopArIdx   = [];   // AR index per loop (-1 = quiet-sun background)
 
+// `ars[i].lon_obj` is the OBJECT-space azimuth from placeStonyhurst (the
+// swpc-update handler fills it); `sunRotY` is kept only for the legacy
+// fallback when a caller passes raw Carrington radians.
 function buildCoronalLoops(ars, sunRotY) {
     coronalLoopMeshes.forEach(m => {
-        scene.remove(m);
+        sunFrame.remove(m);
         m.geometry.dispose();
         m.material.dispose();
     });
@@ -2289,7 +2351,7 @@ function buildCoronalLoops(ars, sunRotY) {
     // Active-region loops
     ars.forEach((ar, arIdx) => {
         const lat  = ar.lat_rad;
-        const lon  = ar.lon_rad - sunRotY;
+        const lon  = ar.lon_obj ?? (ar.lon_rad - sunRotY);
         const nL   = ar.is_complex ? 5 : 3;
 
         for (let k = 0; k < nL; k++) {
@@ -2318,7 +2380,7 @@ function buildCoronalLoops(ars, sunRotY) {
             mat.userData.baseOpacity = base;
 
             const mesh = new THREE.Mesh(tube, mat);
-            scene.add(mesh);
+            sunFrame.add(mesh);
             coronalLoopMeshes.push(mesh);
             coronalLoopPhases.push(arIdx * 1.7 + k * 2.3);
             coronalLoopCurves.push(curve);
@@ -2343,7 +2405,7 @@ function buildCoronalLoops(ars, sunRotY) {
         });
         mat.userData.baseOpacity = 0.18;
         const mesh  = new THREE.Mesh(tube, mat);
-        scene.add(mesh);
+        sunFrame.add(mesh);
         coronalLoopMeshes.push(mesh);
         coronalLoopPhases.push(i * 3.14 + 1.1);
         coronalLoopCurves.push(curve);
@@ -2596,7 +2658,7 @@ const arEnergyBuf = new Float32Array(5);
 
 function buildProminences(ars, sunRotY) {
     prominenceMeshes.forEach(m => {
-        scene.remove(m);
+        sunFrame.remove(m);
         m.geometry.dispose();
         m.material.dispose();
     });
@@ -2608,7 +2670,7 @@ function buildProminences(ars, sunRotY) {
         if (!ar.is_complex && arEnergyBuf[idx] < 0.45) return;
 
         const lat   = ar.lat_rad;
-        const lon   = ar.lon_rad - sunRotY;
+        const lon   = ar.lon_obj ?? (ar.lon_rad - sunRotY);
         const energy = Math.min(arEnergyBuf[idx], 1.0);
 
         // Height and width scale with stored energy (flux rope inflating)
@@ -2641,7 +2703,7 @@ function buildProminences(ars, sunRotY) {
 
         [[envGeo, envMat], [coreGeo, coreMat]].forEach(([geo, mat], mi) => {
             const mesh = new THREE.Mesh(geo, mat);
-            scene.add(mesh);
+            sunFrame.add(mesh);
             prominenceMeshes.push(mesh);
             prominencePhases.push(idx * 2.1 + mi * 1.55);
         });
@@ -3327,6 +3389,48 @@ window.__neoLab = {
     get simJD() { return neoLayer._lastJd; },
 };
 
+// Flare / active-region geometry as this page is DRAWING it — every consumer
+// side by side so tests/solar-system-flare.spec.js can assert against
+// js/flare-geometry.js (see the SUN FRAME section).
+window.__solarFlare = {
+    get state() {
+        const wp = new THREE.Vector3();
+        const earthAz = earthDrawnAzimuth();
+        const arcadeGroup = flareArcade.group;
+        arcadeGroup.updateWorldMatrix(true, false);
+        return {
+            spinSign: SUN_SPIN_SIGN,
+            sunRotY: sunMesh.rotation.y,
+            sunFrameRotY: sunFrame.rotation.y,
+            earthAz,
+            earthPos: earthP.mesh.position.toArray(),
+            simSpeed,
+            l0Deg: FG.centralMeridianL0Deg(new Date()),
+            regions: _lastPlacedRegions.map((r, i) => ({
+                lat_rad: r.lat_rad, lon_rad: r.lon_rad, stony_deg: r.stony_deg, world_az: r.world_az, lon_obj: r.lon_obj,
+                slot_lon: i < 5 ? sunUniforms.u_ar_lon.value[i] : null,
+            })),
+            loopMeshes: coronalLoopMeshes.length,
+            loopsInSunFrame: coronalLoopMeshes.filter(m => m.parent === sunFrame).length,
+            flare: flareState.set ? {
+                ...flareState,
+                arcade: flareArcade.state,
+                arcadeSite: flareArcade.site,
+                // World position of the arcade's site radial, read back from the scene graph.
+                siteWorld: (() => {
+                    const s = flareArcade.site;
+                    const p = FG.stonyhurstToUnit(s.latRad, s.lonRad0);
+                    wp.set(p[0] * 1.5, p[1] * 1.5, p[2] * 1.5).applyMatrix4(arcadeGroup.matrixWorld);
+                    return wp.toArray();
+                })(),
+            } : null,
+            cmeActive, cmeAxisAz: _lastCmeAxisAz,
+            parkerFootDeg: FG.parkerFootpointLonDeg(400),
+        };
+    },
+    setSimSpeed: (v) => { simSpeed = +v; },
+};
+
 let _prevFrameMs = performance.now();
 function animate() {
     requestAnimationFrame(animate);
@@ -3385,7 +3489,12 @@ function animate() {
         // Jupiter cloud shader tick
         if (p.jupiterU) p.jupiterU.u_time.value = t;
     });
-    sunMesh.rotation.y += 0.0012;
+    // Solar spin: sidereal 25.38 d on the sim clock, PROGRADE with the
+    // planets' orbits (their azimuth increases with time; makeRotationY(θ)
+    // maps azimuth φ → φ − θ, so θ must DECREASE). Replaces a fixed
+    // 0.0012 rad/frame in the opposite sense (frame-rate bound, retrograde
+    // to the orbits and to the wind's own Parker spiral — measured 2026-09-13).
+    sunMesh.rotation.y -= SUN_SPIN_SIGN * FG.OMEGA_SUN_SIDEREAL * _frameDt * simSpeed;
 
     // ── Moon update (Keplerian for all moons; Yoshida-4 N-body for Galileans)
     // Run the Jovian integrator first so the Galilean overrides are fresh.
@@ -3437,6 +3546,13 @@ function animate() {
     // Advance solar-wind particle stream
     if (windVisible) updateWindParticles();
     if (cmeActive)   updateCME();
+
+    // Sun frame follows the mesh; the flare arcade ages on the clamped clock.
+    sunFrame.rotation.copy(sunMesh.rotation);
+    if (flareState.set) {
+        flareState.t += 0.01 * Math.min(Math.max(simSpeed, 0), 50);
+        flareArcade.update({ tFlare: flareState.t, intensity: sunUniforms.u_flare_str.value, showFlares: 1 });
+    }
 
     // Coronal magnetic structure animation
     updateCoronalLoops(t);
@@ -3634,12 +3750,25 @@ window.addEventListener('swpc-update', (e) => {
     // 3. Sun shader — GOES X-ray intensity + active region positions
     sunUniforms.u_flare_str.value = d.xray_intensity;
 
-    const ars = sw.active_regions;
+    // Active regions: NOAA publishes CARRINGTON longitude (js/swpc-feed.js
+    // fetchRegions), which is fixed to the rotating Sun, not to Earth. Place
+    // each region relative to the DRAWN Earth: Carrington → Stonyhurst via
+    // L0(now), Stonyhurst → world azimuth = Earth's azimuth + lon (west
+    // ahead), world → object azimuth for the shader and the sun-frame
+    // geometry. `lon_obj` / `world_az` ride along for the builders below.
+    const l0Deg = FG.centralMeridianL0Deg(new Date());
+    const ars = (sw.active_regions ?? []).map(ar => {
+        const stonyDeg = Number.isFinite(ar.lon_deg) ? FG.carringtonToStonyhurstDeg(ar.lon_deg, l0Deg)
+                                                    : FG.carringtonToStonyhurstDeg((ar.lon_rad ?? 0) * 180 / Math.PI, l0Deg);
+        const p = placeStonyhurst(ar.lat_rad ?? 0, stonyDeg * Math.PI / 180);
+        return { ...ar, stony_deg: stonyDeg, world_az: p.worldAz, lon_obj: p.objAz };
+    });
+    _lastPlacedRegions = ars;
     sunUniforms.u_ar_count.value  = ars.length;
     for (let i = 0; i < 5; i++) {
         if (i < ars.length) {
             sunUniforms.u_ar_lat.value[i]  = ars[i].lat_rad;
-            sunUniforms.u_ar_lon.value[i]  = ars[i].lon_rad - sunMesh.rotation.y;
+            sunUniforms.u_ar_lon.value[i]  = ars[i].lon_obj;
             sunUniforms.u_ar_area.value[i] = ars[i].area_norm;
         } else {
             sunUniforms.u_ar_lat.value[i]  = 0;
@@ -3653,13 +3782,30 @@ window.addEventListener('swpc-update', (e) => {
     buildProminences(ars, sunMesh.rotation.y);
 
     // Energy accumulator discharge: if any AR is > 0.95 and complex → erupt
+    // (the CME cone is BALLISTIC in world space: world azimuth, not object).
     ars.forEach((ar, idx) => {
         if (arEnergyBuf[idx] > 0.95 && ar.is_complex && !cmeActive) {
             console.log(`[Solar] AR ${ar.region ?? idx} reached torus instability — eruption`);
-            triggerCME({ lat_rad: ar.lat_rad, lon_rad: ar.lon_rad - sunMesh.rotation.y });
+            triggerCME({ lat_rad: ar.lat_rad, lon_rad: ar.world_az });
             arEnergyBuf[idx] = 0.15;  // discharge — some flux remains post-eruption
         }
     });
+
+    // The latest located flare drives the arcade + plume at ITS site. The
+    // unified NOAA+DONKI list is newest-first; only re-seat on a new event
+    // so the arcade keeps ageing instead of restarting every poll.
+    {
+        const f = (sw.flares ?? []).find(x => x?.location) ?? null;
+        const loc = f ? FG.parseStonyhurst(f.location) : null;
+        if (f && loc) {
+            const tMs = f.time instanceof Date ? f.time.getTime() : new Date(f.time).getTime();
+            const key = `${f.cls}|${Number.isFinite(tMs) ? tMs : f.location}`;
+            if (key !== flareState.key) {
+                const ageS = Number.isFinite(tMs) ? Math.max(0, (Date.now() - tMs) / 1000) : 0;
+                setFlareSite({ latRad: loc.latDeg * Math.PI / 180, lonRad: loc.lonDeg * Math.PI / 180, cls: f.cls ?? 'C', ageS, key });
+            }
+        }
+    }
 
     // 4. Planet wind shaders — scale by live solar-wind conditions
     const liveScale = 0.50 + d.wind_speed_norm * 1.50;
@@ -3805,14 +3951,23 @@ window.addEventListener('swpc-update', (e) => {
 
     // 5. CME burst — triggered by new M/X flare OR new Earth-directed DONKI CME
     if ((sw.new_major_flare || sw.new_cme_detected) && !cmeActive) {
-        // Prefer DONKI CME direction (most accurate); fall back to flare location
-        const cmeDir = sw.earth_directed_cme
+        // Prefer DONKI CME direction (most accurate); fall back to flare location.
+        // Both are STONYHURST (west positive, measured from the sub-Earth
+        // meridian): the cone axis is that longitude counted from the drawn
+        // Earth's azimuth, in world space (the burst is ballistic).
+        const stony = sw.earth_directed_cme
             ? { lat_rad: sw.earth_directed_cme.lat_rad, lon_rad: sw.earth_directed_cme.lon_rad }
             : sw.flare_direction;
         const src = sw.new_cme_detected ? `DONKI CME ${Math.round(sw.earth_directed_cme?.speed ?? 0)} km/s`
                                         : `${sw.flare_class} flare`;
         console.log(`[SWPC] ${src} — launching CME burst`);
-        triggerCME(cmeDir);
+        if (stony) {
+            const p = placeStonyhurst(stony.lat_rad ?? 0, stony.lon_rad ?? 0);
+            _lastCmeAxisAz = p.worldAz;
+            triggerCME({ lat_rad: stony.lat_rad ?? 0, lon_rad: p.worldAz });
+        } else {
+            triggerCME(null);
+        }
     }
 
     // 5b. CME transit indicator in HUD — show ETA when an Earth-directed CME is in transit

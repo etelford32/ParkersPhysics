@@ -1740,6 +1740,13 @@ import {
     nanoflareState, nanoflareUniform, sampleEnergy,
     AlphaMonitor, HEATING_REQUIREMENT, E_MIN_ERG, E_MAX_ERG, ALPHA_REFERENCES,
 } from './js/sun-nanoflares.js';
+// Flare-site geometry: the ONE copy of "where is the flare, which way does it
+// face, how does it co-rotate" (js/flare-geometry.js, node-gated). Every
+// rotation on this page — sunFS, the AR slots, the marker groups, the flash
+// rings, the arcade — reads the same accumulator through it. See the
+// FLARE SITE section below and tests/sun-flare-geometry.spec.js.
+import * as FG from './js/flare-geometry.js';
+import { createFlareArcade } from './js/flare-arcade.js';
 
 
 // PANEL
@@ -2320,8 +2327,22 @@ const uniforms = {
     // u_flare_t: simulation-time elapsed since flare onset.  Starts at 999 so
     //            no ribbon is drawn on load; resets to 0 on each new major flare.
     u_flare_lat:         { value: 0.0  },  // radians
-    u_flare_lon:         { value: 0.0  },  // radians
+    u_flare_lon:         { value: 0.0  },  // radians — the CURRENT longitude; JS re-derives it every frame from the epoch site (setFlareSite)
     u_flare_t:           { value: 999.0 }, // simulation-time units (dt=0.01/frame)
+    // PIL orientation at the flare site: angle from local east toward local
+    // north (js/flare-geometry.js pilAngleRad — the Joy's-law PRIOR; the
+    // atlas polylines override it when t_flare_ribbons is active).
+    u_flare_pil:         { value: 0.0  },
+    // THE ONE ROTATION ACCUMULATOR. Equatorial angle (radians) the sim frame
+    // has turned since page load, advanced in animate() at
+    // FG.SIM_ROT_RATE · u_rot per sim unit and mirrored into `solarRotAngle`.
+    // sunFS (granulation scroll, AR spots, observed-frame de-rotation, ribbon
+    // polylines) and every JS marker read THIS, each scaled by its own
+    // latitude's Snodgrass factor. Before it existed the shader turned the
+    // photosphere east at 0.014/unit while the marker groups turned west at
+    // 0.025/unit (measured 2026-09-13) — markers left their sunspots in
+    // seconds of model-mode time.
+    u_rotAngle:          { value: 0.0  },
 
     // Phase 3.1 — PIL-anchored two-ribbon geometry. See js/flare-ribbons.js.
     // The DataTexture is attached lazily on the first ribbon update so
@@ -2660,8 +2681,10 @@ const sunFS = /* glsl */`
     uniform float u_proton_norm;     // GOES >10MeV proton flux [0-1]
     // Flare ribbon uniforms
     uniform float u_flare_lat;       // heliographic latitude of most recent M/X flare (radians)
-    uniform float u_flare_lon;       // heliographic longitude (radians)
+    uniform float u_flare_lon;       // heliographic longitude (radians) — CURRENT frame (JS rotates it each frame)
     uniform float u_flare_t;         // simulation-time elapsed since flare onset (0 = just fired)
+    uniform float u_flare_pil;       // PIL angle at the flare site, from local east toward north (radians)
+    uniform float u_rotAngle;        // equatorial rotation of the sim frame since load (radians) — THE accumulator
 
     // Phase 4.4 — per-AR sunspot slots. xyz = rotated unit-sphere AR
     // position; w = signed area (positive=simple, negative=complex).
@@ -2879,12 +2902,20 @@ const sunFS = /* glsl */`
         // so high-latitude features visibly drift slower than equatorial ones.
         float sinLat2 = sin(lat) * sin(lat);
         float diffRot  = 1.0 - 0.19 * sinLat2 - 0.09 * sinLat2 * sinLat2;
-        float rotLon   = lon + u_time * 0.014 * u_rot * diffRot;
+        // PROGRADE: a surface feature (fixed rotLon) sits at lon = rotLon +
+        // angle, i.e. it moves toward +lon = +x = WEST as u_rotAngle grows —
+        // the sense of the real Sun and of every marker group on the page
+        // (js/flare-geometry.js rotateY, pinned against three.js). The rate
+        // is the convection plan's tuned 0.014/unit, now applied in JS as
+        // FG.SIM_ROT_RATE · u_rot into u_rotAngle (one accumulator, one sign).
+        float rotLon   = lon - u_rotAngle * diffRot;
 
         // ── OBSERVED disk sample (Phase 1) + photometric fusion (Phase 2b) ─
-        // De-rotate this fragment to the observation epoch with the SAME
-        // rotation the AR slots apply (x = c·x0 − s·z0, z = s·x0 + c·z0 about
-        // +y by u_time·0.014·u_rot·diffRot — see the u_arSpots fill), tilt
+        // De-rotate this fragment to the observation epoch with the INVERSE of
+        // the rotation the AR slots apply (the slots are FG.sitePositionAt =
+        // makeRotationY(+u_rotAngle·diffRot); the inverse is R_y(−ra):
+        // x0 = c·x − s·z, z0 = s·x + c·z — js/sun-observed.js rotationDeRotate
+        // is the same expression, node-pinned), tilt
         // into the Earth-view frame by B0, and read the frame orthographically
         // (u = cx + x·r, v = (1−cy) + y·r). obsW is the observed weight: 1 on
         // the near side, a soft roll-off over the last 0.08 of q.z into the
@@ -2920,10 +2951,10 @@ const sunFS = /* glsl */`
         float obsMuE = 1.0;
         float gridLon = lon;
         if (u_obsOn > 0.5) {
-            float ra = u_time * 0.014 * u_rot * diffRot;
+            float ra = u_rotAngle * diffRot;
             float cr = cos(ra), sr = sin(ra);
             vec3  pN = normalize(vPosition);
-            vec3  p0 = vec3(cr * pN.x + sr * pN.z, pN.y, -sr * pN.x + cr * pN.z);
+            vec3  p0 = vec3(cr * pN.x - sr * pN.z, pN.y, sr * pN.x + cr * pN.z);
             gridLon  = atan(p0.x, p0.z);
             float cb = cos(u_obsB0), sb = sin(u_obsB0);
             vec3  q  = vec3(p0.x, p0.y * cb - p0.z * sb, p0.y * sb + p0.z * cb);
@@ -3418,10 +3449,16 @@ const sunFS = /* glsl */`
             // offset N/S from the flare site.
             float rib1, rib2;
             if (u_flare_ribbons_active > 0.5) {
-                // Use the world-space fragment position directly — same
-                // coordinate frame as the WASM-derived ribbon polyline,
-                // so the polyline-distance test discriminates correctly.
-                vec3 p3 = normalize(vPosition);
+                // The atlas polylines are in the EPOCH frame (built from the
+                // AR positions at load); this fragment is in the current
+                // frame. De-rotate it by the flare site's own differential
+                // rate — the inverse of the rotation the JS applies to the
+                // arcade / HXR group — so ribbons stay under their spots.
+                float s2f = sin(u_flare_lat) * sin(u_flare_lat);
+                float raF = u_rotAngle * (1.0 - 0.19 * s2f - 0.09 * s2f * s2f);
+                float crF = cos(raF), srF = sin(raF);
+                vec3  pC  = normalize(vPosition);
+                vec3  p3  = vec3(crF * pC.x - srF * pC.z, pC.y, srF * pC.x + crF * pC.z);
                 float d1 = ribbonDist(p3, 0.0);
                 float d2 = ribbonDist(p3, 1.0);
                 // Width grows with chromospheric evaporation (3D chord
@@ -3430,14 +3467,28 @@ const sunFS = /* glsl */`
                 rib1 = exp(-d1 * d1 / (rWid3 * rWid3));
                 rib2 = exp(-d2 * d2 / (rWid3 * rWid3));
             } else {
-                // Legacy fallback — straight E-W arcs offset N/S in lat.
-                float dlat   = lat - u_flare_lat;                       // N-S offset from flare
-                float dlon_c = (lon - u_flare_lon) * cos(u_flare_lat);  // great-circle-corrected E-W
-                float lonEnv = exp(-dlon_c * dlon_c / (0.10 + u_flare_t * 4.0e-5));
+                // Fallback — two arcs straddling the PIL PRIOR (Joy's law,
+                // js/flare-geometry.js tangentFrame): 'along' runs down the
+                // inversion line, 'across' crosses it. u_flare_pil = 0 is the
+                // old straight E-W pair exactly (along = east, across = north).
+                // The four literals below are MIRRORED by RIBBON in the kernel
+                // and pinned by tests/flare-geometry.mjs — change both.
+                float cfl = cos(u_flare_lat), sfl = sin(u_flare_lat);
+                float cfo = cos(u_flare_lon), sfo = sin(u_flare_lon);
+                vec3  fEast  = vec3(cfo, 0.0, -sfo);
+                vec3  fNorth = vec3(-sfl * sfo, cfl, -sfl * cfo);
+                float cP = cos(u_flare_pil), sP = sin(u_flare_pil);
+                vec3  pilAx  =  cP * fEast + sP * fNorth;
+                vec3  loopAx = -sP * fEast + cP * fNorth;
+                vec3  pF     = normalize(vPosition);
+                float along  = dot(pF, pilAx);
+                float across = dot(pF, loopAx);
+                float alongVar = 0.10 + u_flare_t * 4.0e-5;   // along-PIL envelope variance
+                float lonEnv = exp(-along * along / alongVar);
                 float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
                 float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows
-                rib1 = exp(-pow((dlat - sep) / rWid, 2.0)) * lonEnv;
-                rib2 = exp(-pow((dlat + sep) / rWid, 2.0)) * lonEnv;
+                rib1 = exp(-pow((across - sep) / rWid, 2.0)) * lonEnv;
+                rib2 = exp(-pow((across + sep) / rWid, 2.0)) * lonEnv;
             }
             float ribMask = (rib1 + rib2) * fDecay * 1.25;   // brighter, more defined two-ribbon arcs
             // Colour: UV white at onset → Hα red as it cools
@@ -6616,6 +6667,8 @@ const flareFlashes = [];
     }
 }
 
+// (lat_deg, lon_deg) are EPOCH Stonyhurst degrees — pass `site.latDeg /
+// site.lonDeg0` from setFlareSite(), never a "now" longitude.
 function triggerPositionFlare(lat_deg, lon_deg, cls) {
     const flash   = flareFlashes.find(f => !f.userData.active) ?? flareFlashes[0];
     const peak    = cls === 'X' ? 1.2 : cls === 'M' ? 0.85 : 0.5;
@@ -6623,6 +6676,62 @@ function triggerPositionFlare(lat_deg, lon_deg, cls) {
     const col = cls === 'X' ? 0xffffff : cls === 'M' ? 0xffcc55 : 0xffee88;
     flash.material.color.setHex(col);
     flash.visible = true;
+}
+
+// ─── FLARE SITE — the one record of where the current flare is ──────────────
+// Every flare visual on this page (photosphere / chromosphere / TR / corona
+// shaders, the flash ring, the PIL ribbons + HXR kernels, the 3D arcade and
+// plume, the corona volume's glow) reads its position from THIS object, kept
+// in EPOCH coordinates (Stonyhurst at sim t = 0) and carried to the current
+// frame by the ONE accumulator through js/flare-geometry.js. `u_flare_lon`
+// is re-derived every frame in animate(); nothing else writes it.
+//
+//   setFlareSite(latRad, lonRad, { epoch, cls, complex, pairs })
+//     epoch = false (default): lonRad is where the site is NOW (a NOAA /
+//       DONKI location just received, or a test request) — it is converted
+//       to epoch coordinates so it co-rotates from here on;
+//     epoch = true: lonRad is already an epoch value (an atlas bundle, a
+//       live-region / flare-list entry parsed at load).
+//   Returns { latDeg, lonDeg0 } for triggerPositionFlare / flyToRegion.
+const _Z_UP = new THREE.Vector3(0, 0, 1);
+const flareSite = { latRad: 0, lonRad0: 0, pilAngle: 0, cls: 'M', complex: false, set: false };
+// Epoch-frame group for the site-anchored 3D layers (arcade, plume, HXR
+// kernels): animate() rotates it by FG.siteRotation(solarRotAngle, latRad).
+const _flareSiteGroup = new THREE.Group();
+_flareSiteGroup.name = 'flare-site';
+scene.add(_flareSiteGroup);
+// The 3D post-flare arcade + eruptive plume (js/flare-arcade.js) — draws only
+// kernel numbers; PIL is the Joy's-law PRIOR unless the atlas supplies pairs.
+const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.0, heightScale: 1.0 });
+_flareSiteGroup.add(flareArcade.group);
+
+function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {}) {
+    flareSite.latRad  = latRad;
+    flareSite.lonRad0 = epoch ? lonRad : FG.epochLonFor(lonRad, solarRotAngle, latRad);
+    flareSite.pilAngle = FG.pilAngleRad(latRad);
+    if (cls) flareSite.cls = String(cls)[0].toUpperCase();
+    if (complex !== undefined) flareSite.complex = !!complex;
+    flareSite.set = true;
+    uniforms.u_flare_lat.value = latRad;
+    uniforms.u_flare_lon.value = FG.siteLonAt(flareSite.lonRad0, solarRotAngle, latRad);
+    uniforms.u_flare_pil.value = flareSite.pilAngle;
+    flareArcade.setSite({
+        latRad, lonRad0: flareSite.lonRad0, pilAngle: flareSite.pilAngle,
+        cls: flareSite.cls, complex: flareSite.complex, pairs: pairs ?? null,
+    });
+    return { latDeg: latRad * 180 / Math.PI, lonDeg0: flareSite.lonRad0 * 180 / Math.PI };
+}
+
+/** Per-frame: carry the site to the current frame and drive the arcade. */
+function _tickFlareSite() {
+    if (!flareSite.set) return;
+    uniforms.u_flare_lon.value = FG.siteLonAt(flareSite.lonRad0, solarRotAngle, flareSite.latRad);
+    _flareSiteGroup.rotation.y = FG.siteRotation(solarRotAngle, flareSite.latRad);
+    flareArcade.update({
+        tFlare: uniforms.u_flare_t.value,
+        intensity: uniforms.u_flare_intensity.value,
+        showFlares: uniforms.u_showFlares.value,
+    });
 }
 
 // ─── CORONAL LOOPS ────────────────────────────────────────────────────────────
@@ -7694,7 +7803,7 @@ function buildCoronalLoops() {
                     uPhase:   { value: alfvenPhase },
                 },
             });
-            mat.userData = { baseOp, phase: alfvenPhase };
+            mat.userData = { baseOp, phase: alfvenPhase, latRad: lat_r };   // latRad: this loop's rotation rate (animate)
             loopGroup.add(new THREE.Line(geom, mat));
         }
     });
@@ -7840,7 +7949,9 @@ function _refreshFlareRibbons(latRad, lonRad) {
     // each pair gets two kernels (one per loop foot, opposite ribbons).
     if (_flareHxrModule && _flareRibbonsModule) {
         if (!_flareHxrSystem) {
-            _flareHxrSystem = _flareHxrModule.createHxrKernelSystem({ scene });
+            // Parented to the flare-site group so the kernels co-rotate with
+            // the ribbons/arcade at the site's own rate (they are epoch-frame).
+            _flareHxrSystem = _flareHxrModule.createHxrKernelSystem({ scene: _flareSiteGroup });
         }
         const pairs = _flareRibbonsModule.getCurrentFootpointPairs();
         _flareHxrSystem.update(pairs);
@@ -7908,8 +8019,9 @@ function _eruptNearestFilament() {
 
     // Fire synthetic flare. u_flare_intensity decays exponentially in animate(),
     // but the classifier's wasErupting check holds the bundle in EP for 16 s.
-    uniforms.u_flare_lat.value       = bestLat;
-    uniforms.u_flare_lon.value       = bestLon;
+    // The atlas is built from the load-time AR positions, so (bestLat,
+    // bestLon) are already EPOCH coordinates.
+    setFlareSite(bestLat, bestLon, { epoch: true, cls: 'X' });
     uniforms.u_flare_intensity.value = 1.0;
     uniforms.u_flare_t.value         = 0.0;
     _refreshFlareRibbons(bestLat, bestLon);
@@ -7934,7 +8046,7 @@ function _eruptNearestFilament() {
             time:           uniforms.u_time.value,
             flareIntensity: uniforms.u_flare_intensity.value,
             flareLatRad:    uniforms.u_flare_lat.value,
-            flareLonRad:    uniforms.u_flare_lon.value,
+            flareLonRad:    flareSite.lonRad0,          // atlas bundles are epoch-frame: compare in epoch
         });
         const target = bundles.find(b => b.lineIdx === bestIdx) || bundles[0];
         const metrics = _scorecardModule.computeMetrics({
@@ -8869,7 +8981,7 @@ function animate() {
             time:           uniforms.u_time.value,
             flareIntensity: uniforms.u_flare_intensity.value,
             flareLatRad:    uniforms.u_flare_lat.value,
-            flareLonRad:    uniforms.u_flare_lon.value,
+            flareLonRad:    flareSite.lonRad0,          // atlas bundles are epoch-frame: compare in epoch
         });
         prominenceBundleSystem.update(_promCachedAtlas, _promCachedTextures, {
             activity: uniforms.u_activity.value,
@@ -8878,10 +8990,15 @@ function animate() {
         prominenceBundleSystem.tick(uniforms.u_time.value, camera.position);
     }
 
-    // Accumulate solar rotation to match photosphere UV scroll rate:
-    // Shader shifts UV.x by (u_time * 0.004 * u_rot) per time unit
-    // → rotation angle per frame = dt * 0.004 * u_rot * 2π radians
-    solarRotAngle += dt * 0.004 * uniforms.u_rot.value * Math.PI * 2;
+    // THE ONE ROTATION ACCUMULATOR (see u_rotAngle at the uniforms block).
+    // Equatorial angle, FG.SIM_ROT_RATE · u_rot per sim unit — the same
+    // 0.014 rad/unit sunFS scrolls the photosphere by. Every 3D consumer
+    // scales it by its own latitude through FG.siteRotation; the shader does
+    // the same with its inline Snodgrass factor. Integrated (not u_time ×
+    // rate) so a rotation-slider or Observed toggle change never makes the
+    // spots jump. Sense: +angle = WEST (FG.rotateY ≡ makeRotationY).
+    solarRotAngle += dt * FG.SIM_ROT_RATE * uniforms.u_rot.value;
+    uniforms.u_rotAngle.value = solarRotAngle;
 
     // CME-train overlay follows the scrubbed instant, or the live clock at
     // ● LIVE. Real wall-clock time on purpose — sim-speed scales the visual
@@ -8905,22 +9022,21 @@ function animate() {
     // Phase 4.3 — keep the volumetric corona's per-frame inputs synced.
     // Flare lat/lon as a vec2; GOES X-ray flux normalized by X-class peak.
     if (volumetricCorona) {
-        volumetricCorona.tickFlareLatLon(
-            uniforms.u_flare_lat.value,
-            uniforms.u_flare_lon.value
-        );
+        // Epoch coordinates: the volume's loop density is built from the
+        // load-time atlas, so its flare glow lives in the same frame.
+        volumetricCorona.tickFlareLatLon(flareSite.latRad, flareSite.lonRad0);
         const xrayN = liveXrayFlux ? Math.max(0, Math.min(1, liveXrayFlux / 1e-4)) : 0;
         volumetricCorona.setXrayNorm(xrayN);
     }
 
-    // Phase 4.4 — refresh per-AR sunspot slots. Rotates each AR's heliographic
-    // position to the current frame using its latitude-specific Snodgrass
-    // differential rotation rate so spots co-rotate with the granulation
-    // pattern below them. Up to 8 slots; defensive zero-fill of the rest.
+    // Phase 4.4 — refresh per-AR sunspot slots. Each AR's epoch (load-time
+    // Stonyhurst) position is carried to the current frame by the ONE
+    // accumulator at its own latitude's Snodgrass rate — FG.sitePositionAt,
+    // the same call the marker groups, flash rings and arcade use — so spots
+    // co-rotate with the granulation below them AND with every marker above
+    // them. Up to 8 slots; defensive zero-fill of the rest.
     {
         const slots = uniforms.u_arSpots.value;
-        const tNow  = uniforms.u_time.value;
-        const rotMul = uniforms.u_rot.value;
         let n = 0;
         for (const r of (liveRegions || [])) {
             if (n >= 8) break;
@@ -8928,18 +9044,7 @@ function animate() {
             if (!ll) continue;
             const lat = ll.lat * Math.PI / 180;
             const lon = ll.lon * Math.PI / 180;
-            const sl2 = Math.sin(lat) * Math.sin(lat);
-            const diffRot = 1.0 - 0.19 * sl2 - 0.09 * sl2 * sl2;
-            const rotAng  = tNow * 0.014 * rotMul * diffRot;
-            const cl = Math.cos(lat);
-            // Carrington-fixed heliographic position
-            const x0 = cl * Math.sin(lon);
-            const y  = Math.sin(lat);
-            const z0 = cl * Math.cos(lon);
-            // Rotate by current angle around Y
-            const c = Math.cos(rotAng), s = Math.sin(rotAng);
-            const x = c * x0 - s * z0;
-            const z = s * x0 + c * z0;
+            const [x, y, z] = FG.sitePositionAt(lat, lon, solarRotAngle);
             // Pack: w = signed area (negative for complex β-γ-δ)
             const m = String(r.mag || '').toLowerCase();
             const isComplex = m.includes('delta') || m.includes('gamma') || m.includes('bg');
@@ -8965,6 +9070,9 @@ function animate() {
     if (_flareHxrSystem) {
         _flareHxrSystem.tick(uniforms.u_time.value, uniforms.u_flare_t.value);
     }
+    // Flare site → current frame (u_flare_lon, the site group's rotation) and
+    // the 3D arcade + plume. Runs AFTER the accumulator advanced above.
+    _tickFlareSite();
 
     // Rotate region marker group with the photosphere texture
     const t = uniforms.u_time.value;
@@ -8972,7 +9080,18 @@ function animate() {
     // rotation as the AR markers so the two frames can never drift apart.
     for (const wg of _sunWatchGroups) wg.rotation.y = solarRotAngle;
     if (regionGroup) {
-        regionGroup.rotation.y = solarRotAngle;
+        // Each marker is re-seated at ITS latitude's rate (FG.sitePositionAt)
+        // rather than the group turning by the equatorial angle: a 60° AR
+        // turns 21% slower than the equator, and a group rotation would walk
+        // its marker off the spot the shader draws from the same call.
+        regionGroup.rotation.y = 0;
+        for (const g of regionGroup.children) {
+            const ud = g.userData;
+            if (ud?.lat === undefined) continue;
+            const p = FG.sitePositionAt(ud.lat * Math.PI / 180, ud.lon * Math.PI / 180, solarRotAngle);
+            g.position.set(p[0], p[1], p[2]);
+            g.quaternion.setFromUnitVectors(_Z_UP, g.position.clone().normalize());
+        }
         // Drive marker animation: gentle breath on rings/cross/spike, +
         // radar-ping expansion on pulse rings, + flicker on field bristles.
         regionGroup.children.forEach((obj, i) => {
@@ -9011,10 +9130,12 @@ function animate() {
 
     // Coronal loops — co-rotate with photosphere, pulse opacity, animate Alfvén waves
     if (loopGroup) {
-        loopGroup.rotation.y = solarRotAngle;
+        // Per-loop rotation at the loop's AR latitude (same rule as the markers).
+        loopGroup.rotation.y = 0;
         loopGroup.children.forEach(line => {
             const u = line.material.uniforms;
             if (!u || !u.uTime) return;
+            line.rotation.y = FG.siteRotation(solarRotAngle, line.material.userData.latRad ?? 0);
             u.uTime.value = t;
             const ud = line.material.userData;
             if (ud.baseOp !== undefined)
@@ -9091,9 +9212,9 @@ function animate() {
             eruptionMeshes.splice(i, 1);
             continue;
         }
-        // Rise outward from flare site
+        // Rise outward from flare site (epoch lat/lon carried by the ONE accumulator)
         const lat_r = m.userData.lat_r;
-        const lon_r = m.userData.lon_r + solarRotAngle;
+        const lon_r = FG.siteLonAt(m.userData.lon_r, solarRotAngle, lat_r);
         const origin = new THREE.Vector3(
             Math.cos(lat_r) * Math.sin(lon_r),
             Math.sin(lat_r),
@@ -9160,14 +9281,11 @@ function animate() {
             ring.material.opacity = 0;
             return;
         }
-        // Update position: follow photosphere rotation
+        // Update position: follow the photosphere at THIS latitude's rate
+        // (userData.lat/lon are the EPOCH Stonyhurst position, degrees).
         const lat_r = ring.userData.lat * Math.PI / 180;
-        const lon_r = ring.userData.lon * Math.PI / 180 + solarRotAngle;
-        const pos   = new THREE.Vector3(
-            Math.cos(lat_r) * Math.sin(lon_r),
-            Math.sin(lat_r),
-            Math.cos(lat_r) * Math.cos(lon_r)
-        ).multiplyScalar(1.015);
+        const lon_r = ring.userData.lon * Math.PI / 180;
+        const pos   = new THREE.Vector3(...FG.sitePositionAt(lat_r, lon_r, solarRotAngle)).multiplyScalar(1.015);
         ring.position.copy(pos);
         ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pos.clone().normalize());
         // Animate: fast expand, sharp fade
@@ -9744,7 +9862,9 @@ async function fetchLiveSolarData() {
 // dur:    fly duration in ms
 function flyToRegion(lat, lon, distR = 3.0, frame = 0.0, dur = 900) {
     const lr  = lat * Math.PI / 180;
-    const lnr = lon * Math.PI / 180 + solarRotAngle;
+    // (lat, lon) are EPOCH Stonyhurst degrees (a live-region or flare-list
+    // entry); carry them to the current frame at this latitude's own rate.
+    const lnr = FG.siteLonAt(lon * Math.PI / 180, solarRotAngle, lr);
     const dir = new THREE.Vector3(
         Math.cos(lr) * Math.sin(lnr),
         Math.sin(lr),
@@ -10049,12 +10169,11 @@ function replayRecentFlares() {
         const ageMs = Date.now() - new Date(f.time).getTime();
         const ageSimUnits = Math.min(850, (ageMs / 1000) * 0.35);   // compress real time to sim-time
 
-        // 3D ring flash at this position (visual-only: no intensity — it's historical)
-        triggerPositionFlare(c.lat, c.lon, clsCh);
-
-        // Point shader ribbons at this flare site with appropriate aging
-        uniforms.u_flare_lat.value = lat_r;
-        uniforms.u_flare_lon.value = lon_r;
+        // Point every flare visual at this site (a NOAA location received
+        // now → stored in epoch coordinates) with appropriate aging; the 3D
+        // ring flash is visual-only (no intensity — it's historical).
+        const site = setFlareSite(lat_r, lon_r, { cls: clsCh });
+        triggerPositionFlare(site.latDeg, site.lonDeg0, clsCh);
         uniforms.u_flare_t.value   = ageSimUnits;
     });
 }
@@ -10701,15 +10820,17 @@ window.addEventListener('swpc-update', (ev) => {
             const clsCh = (f.cls ?? f.parsed?.letter ?? 'C')[0]?.toUpperCase() ?? 'C';
             const ageMs  = Date.now() - ft;
             const simAge = Math.min(800, (ageMs / 1000) * 0.35);
-            // Place 3D ring flash at this exact NOAA location
-            triggerPositionFlare(loc.lat, loc.lon, clsCh);
-            // Also drive ribbon shader to this site if it's the newest flare
+            // Place 3D ring flash at this exact NOAA location (received now →
+            // epoch coordinates so it co-rotates from here on)
+            const fLat = loc.lat * Math.PI / 180;
+            const fLon0 = FG.epochLonFor(loc.lon * Math.PI / 180, solarRotAngle, fLat);
+            triggerPositionFlare(loc.lat, fLon0 * 180 / Math.PI, clsCh);
+            // Also drive every flare visual to this site if it's the newest flare
             if (!sw.new_major_flare && ft === Math.max(...sw.recent_flares.map(x => {
                 const xt = x.time instanceof Date ? x.time.getTime() : new Date(x.time).getTime();
                 return xt;
             }))) {
-                uniforms.u_flare_lat.value = loc.lat * Math.PI / 180;
-                uniforms.u_flare_lon.value = loc.lon * Math.PI / 180;
+                setFlareSite(fLat, loc.lon * Math.PI / 180, { cls: clsCh });
                 uniforms.u_flare_t.value   = simAge;
             }
         });
@@ -10729,13 +10850,13 @@ window.addEventListener('swpc-update', (ev) => {
             const lonDeg = lon_r * 180 / Math.PI;
 
             // ── Flare ribbon shader — reset timer to draw ribbons on surface ──
-            uniforms.u_flare_lat.value = lat_r;
-            uniforms.u_flare_lon.value = lon_r;
+            // (received now → epoch coordinates; drives shaders, arcade, ribbons)
+            const site = setFlareSite(lat_r, lon_r, { cls: clsCh });
             uniforms.u_flare_t.value   = 0.0;   // reset: ribbons appear immediately
-            _refreshFlareRibbons(lat_r, lon_r);
+            _refreshFlareRibbons(lat_r, flareSite.lonRad0);
 
             // ── Position-accurate 3D ring flash ──────────────────────────────
-            triggerPositionFlare(latDeg, lonDeg, clsCh);
+            triggerPositionFlare(site.latDeg, site.lonDeg0, clsCh);
 
             // ── Erupting prominence near this flare site ──────────────────────
             eruptNearestProminence(lat_r, lon_r);
@@ -11211,8 +11332,8 @@ function showRegionAnalysis(regData) {
             const flat = +el.dataset.lat, flon = +el.dataset.lon;
             if (!isNaN(flat) && !isNaN(flon)) {
                 flyToRegion(flat, flon);
-                uniforms.u_flare_lat.value = flat * Math.PI / 180;
-                uniforms.u_flare_lon.value = flon * Math.PI / 180;
+                // Flare-list entries were parsed at load: epoch coordinates.
+                setFlareSite(flat * Math.PI / 180, flon * Math.PI / 180, { epoch: true, cls: el.dataset.cls || 'C' });
                 uniforms.u_flare_t.value   = 50;   // show ribbons at a partially-aged state
                 triggerPositionFlare(flat, flon, el.dataset.cls || 'C');
             }
@@ -11285,8 +11406,7 @@ function showFlareAnalysis(f) {
 
     document.getElementById('sap-fly').addEventListener('click', () => {
         flyToRegion(lat, lon);
-        uniforms.u_flare_lat.value = lat * Math.PI / 180;
-        uniforms.u_flare_lon.value = lon * Math.PI / 180;
+        setFlareSite(lat * Math.PI / 180, lon * Math.PI / 180, { epoch: true, cls: tc });   // flare-list entry: epoch
         uniforms.u_flare_t.value   = ageMs != null ? Math.min(800, (ageMs / 1000) * 0.35) : 120;
         triggerPositionFlare(lat, lon, tc);
     });
@@ -11355,8 +11475,7 @@ document.getElementById('flare-list').addEventListener('click', e => {
     if (f) {
         const ageMs  = f.time ? Date.now() - new Date(f.time).getTime() : 0;
         const simAge = Math.min(800, (ageMs / 1000) * 0.35);
-        uniforms.u_flare_lat.value = lat * Math.PI / 180;
-        uniforms.u_flare_lon.value = lon * Math.PI / 180;
+        setFlareSite(lat * Math.PI / 180, lon * Math.PI / 180, { epoch: true, cls: (f.cls ?? 'C')[0] });   // flare-list entry: epoch
         uniforms.u_flare_t.value   = simAge;
         triggerPositionFlare(lat, lon, (f.cls ?? 'C')[0].toUpperCase());
     }
@@ -12084,8 +12203,7 @@ try {
         flyToRegion,
         onFlareSelect: (lat, lon, cls) => {
             flyToRegion(lat, lon);
-            uniforms.u_flare_lat.value = lat * Math.PI / 180;
-            uniforms.u_flare_lon.value = lon * Math.PI / 180;
+            setFlareSite(lat * Math.PI / 180, lon * Math.PI / 180, { epoch: true, cls: (cls || 'C')[0] });   // ledger entry: epoch
             uniforms.u_flare_t.value   = 50;
             triggerPositionFlare(lat, lon, (cls || 'C')[0].toUpperCase());
         },
@@ -12148,18 +12266,47 @@ window.__sun = {
     setRegions: (r) => { liveRegions = r || []; },   // debug/test: inject active regions
     rebuildMarkers: () => buildRegionMarkers(),       // debug/test: rebuild AR markers
     get regionCount() { return liveRegions.length; },
-    testFlare: (cls, latDeg, lonDeg) => {            // debug/test: fire a flare now
+    testFlare: (cls, latDeg, lonDeg) => {            // debug/test: fire a flare NOW at a Stonyhurst location
         const c = (cls || 'X')[0].toUpperCase();
         const la = (latDeg ?? 14), lo = (lonDeg ?? 15);
         const lat = la * Math.PI / 180, lon = lo * Math.PI / 180;
-        uniforms.u_flare_lat.value = lat;
-        uniforms.u_flare_lon.value = lon;
+        const site = setFlareSite(lat, lon, { cls: c });
         uniforms.u_flare_intensity.value = 1.0;
         uniforms.u_flare_t.value = 0.0;
-        try { _refreshFlareRibbons(lat, lon); } catch (e) {}
-        try { triggerPositionFlare(la, lo, c); } catch (e) {}
-        try { eruptNearestProminence(lat, lon); } catch (e) {}
-        try { spawnEruptingProminence(lat, lon, c); } catch (e) {}
+        try { _refreshFlareRibbons(lat, flareSite.lonRad0); } catch (e) {}
+        try { triggerPositionFlare(site.latDeg, site.lonDeg0, c); } catch (e) {}
+        try { eruptNearestProminence(lat, flareSite.lonRad0); } catch (e) {}
+        try { spawnEruptingProminence(lat, flareSite.lonRad0, c); } catch (e) {}
+        return site;
+    },
+    // Flare-site geometry as the page is DRAWING it this frame — every
+    // consumer's answer side by side so tests/sun-flare-geometry.spec.js can
+    // assert they agree with js/flare-geometry.js and with each other.
+    get flareGeometry() {
+        const slotN = uniforms.u_arSpotCount?.value ?? 0;
+        const wp = new THREE.Vector3();
+        return {
+            rotAngle: solarRotAngle,
+            uRotAngle: uniforms.u_rotAngle.value,
+            uRot: uniforms.u_rot.value,
+            simTime: uniforms.u_time.value,
+            site: { ...flareSite },
+            siteNow: flareSite.set ? FG.sitePositionAt(flareSite.latRad, flareSite.lonRad0, solarRotAngle) : null,
+            shaderLat: uniforms.u_flare_lat.value,
+            shaderLon: uniforms.u_flare_lon.value,
+            shaderPil: uniforms.u_flare_pil.value,
+            flareT: uniforms.u_flare_t.value,
+            slots: uniforms.u_arSpots.value.slice(0, slotN).map(v => v.toArray()),
+            markers: (regionGroup?.children ?? []).map(g => {
+                g.getWorldPosition(wp);
+                return { lat: g.userData.lat, lon: g.userData.lon, pos: wp.toArray() };
+            }),
+            flashes: flareFlashes.filter(f => f.userData.active).map(f => ({ lat: f.userData.lat, lon: f.userData.lon, pos: f.position.clone().normalize().toArray() })),
+            siteGroupRotY: _flareSiteGroup.rotation.y,
+            arcade: flareArcade.state,
+            arcadeSite: flareArcade.site,
+            loopRotations: (loopGroup?.children ?? []).slice(0, 4).map(l => ({ latRad: l.material.userData.latRad, rotY: l.rotation.y })),
+        };
     },
     layers: {
         core:         coreMesh,
@@ -12198,6 +12345,7 @@ window.__sun = {
     refreshObserved: () => sunObserved?.refresh(true),
     /** Freeze the sim clock at a fixed u_time so a screenshot is deterministic. */
     freeze: (simTime = 120) => { setSimSpeed(0); uniforms.u_time.value = simTime; },
+    setSimSpeed: (v) => setSimSpeed(+v),
     /** Rolling frame-time statistics (ms) — p50 / p95 over the last 120 frames. */
     get perf() {
         const n = Math.min(_perfN, 120);
