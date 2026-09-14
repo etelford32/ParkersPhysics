@@ -2,7 +2,8 @@
 
 **Page:** `solar-system.html` (4008 lines) + `js/neo-*.js`, `js/flare-*.js`
 **Reviewed:** 2026-09-14, at `8e72cf8` (flare geometry kernel) on a software rasteriser
-**Status:** review complete, nothing implemented. This document is the plan, not a changelog.
+**Status:** review complete. One finding — **L2**, the CME — is now implemented (see §3.2);
+everything else is still the plan.
 
 > **Scope note.** This is a review of the *visuals*, in three areas the author
 > named: the Sun's animation, near-Earth objects, and flare propagation + NEOs
@@ -336,7 +337,16 @@ off) — because the useful thing is not 14 checkboxes, it is three good default
 The two 3D pages that already do this well are `earth.html` (`#layer-panel`) and
 `ring-current.html`; copy the *shape*, not the code.
 
-### 3.2 Flare propagation is a loop, not a propagation — L2
+### 3.2 Flare propagation is a loop, not a propagation — L2 · **IMPLEMENTED 2026-09-14**
+
+> **Status: done, for the modeled path.** `js/orrery-rope-layer.js` now draws the
+> Compounding Watch's own flux-rope surface on the orrery, off the ONE shared
+> provider, on the page's own sim clock. The three problems below are fixed for
+> every CME the ensemble models; the particle burst survives only as the
+> no-DONKI fallback and is suppressed whenever a rope is drawn, so its wrap bug
+> can no longer contradict anything on screen. Gates: `tests/orrery-rope-layer.mjs`
+> (4 800 assertions) + `tests/solar-system-rope.spec.js` (5 browser tests on the
+> REAL committed WASM). The original finding is kept below unedited.
 
 This one matters most for the author's stated framing, because **the page
 announces an arrival time that the picture cannot honour**.
