@@ -10,7 +10,7 @@
  * Two halves, deliberately split:
  *
  *   PURE (node-testable, no DOM / three / fetch — `tests/sun-observed.mjs`):
- *     solarEphemeris(date)          → { b0Deg, pDeg, lambdaDeg }  (Meeus ch. 25/29)
+ *     solarEphemeris(date)          → { b0Deg, pDeg, lambdaDeg, l0Deg, carringtonRotation }  (Meeus ch. 25/29)
  *     heliographicToVec(lat, lon)   → scene unit vector (+z sub-Earth, +y north)
  *     projectDiskUV(p, geom)        → { u, v, zObs, visible }  disk→sphere mapping
  *     measureDisk(gray, w, h)       → { cx, cy, r } in normalised image coords
@@ -96,10 +96,27 @@ export function solarEphemeris(date = new Date()) {
     const x = Math.atan(-Math.cos(lam) * Math.tan(eps));
     const y = Math.atan(-Math.cos(lam - K) * Math.tan(I));
     const b0 = Math.asin(Math.sin(lam - K) * Math.sin(I));
+    // Carrington longitude of the central meridian (Meeus ch. 29): θ is the
+    // sidereal rotation angle since JD 2398220.0, η the longitude of the
+    // sub-Earth point on the Sun's equator measured from the ascending node;
+    // L0 = η − θ. Meeus writes η = arctan(tan(λ'−K) cos I) and leaves the
+    // branch to the reader: the atan2 branch below is 180° from the one his
+    // example uses, so the half-turn is added explicitly. Pinned two ways in
+    // tests/flare-geometry.mjs — example 29.a (1992 Oct 13.0: L0 = 238.63°,
+    // B0 = +5.99°, P = +26.27°) and L0 = 0 at the start of Carrington
+    // rotation 1 (1853 Nov 9, 21:36 UT), which is the definition.
+    const theta = (((jd - 2398220.0) * 360 / 25.38) % 360 + 360) % 360;
+    const eta = Math.atan2(Math.sin(lam - K) * Math.cos(I), Math.cos(lam - K)) / DEG + 180;
+    const l0 = ((eta - theta) % 360 + 360) % 360;
+    // Carrington rotation number: CR 1 began 1853 Nov 9 (JD 2398167.4), one
+    // synodic rotation = 27.2753 d. Integer part only — the fraction is L0.
+    const cr = Math.floor((jd - 2398167.4) / 27.2753) + 1;
     return {
         b0Deg: b0 / DEG,
         pDeg: (x + y) / DEG,
         lambdaDeg: lam / DEG,
+        l0Deg: l0,
+        carringtonRotation: cr,
     };
 }
 
@@ -119,14 +136,19 @@ export function diffRotFactor(latRad) {
 }
 
 /**
- * Inverse of the AR-slot rotation (sun.html ~8360): the slots rotate a
- * Carrington-fixed position by rotAng about +y as x = c·x0 − s·z0,
- * z = s·x0 + c·z0. Given a CURRENT fragment position, return where it was at
- * the observation epoch so the image can be sampled there.
+ * Inverse of the AR-slot rotation. The slots carry an epoch position to the
+ * current frame with js/flare-geometry.js `sitePositionAt` = three.js
+ * makeRotationY(+rotAng): x = c·x0 + s·z0, z = −s·x0 + c·z0 — PROGRADE, a
+ * disk-centre feature moves toward +x (west). Given a CURRENT fragment
+ * position, return where it was at the observation epoch so the image can
+ * be sampled there: R_y(−rotAng), x0 = c·x − s·z, z0 = s·x + c·z. sunFS
+ * carries this same expression inline (the `p0` de-rotation); change both.
+ * (Until 2026-09-13 both turned the other way — east — while every 3D
+ * marker group turned west; tests/flare-geometry.mjs now pins the sense.)
  */
 export function rotationDeRotate(p, rotAng) {
     const c = Math.cos(rotAng), s = Math.sin(rotAng);
-    return [c * p[0] + s * p[2], p[1], -s * p[0] + c * p[2]];
+    return [c * p[0] - s * p[2], p[1], s * p[0] + c * p[2]];
 }
 
 /** rotAng for a fragment latitude at sim time t (mirrors the slot math). */
