@@ -33,6 +33,7 @@
  */
 
 import { API, NOAA, INTERVALS, STORM, STORM_TRIGGERS, TIER, planToTier } from './config.js';
+import { parseStonyhurst } from './flare-geometry.js';
 
 // ── Lazy auth-derived tier ──────────────────────────────────────────────────
 // Read the live auth state from the same localStorage key auth.js writes to.
@@ -239,13 +240,16 @@ function derivedFields(raw) {
     return d;
 }
 
+// Stonyhurst "N12W19" → radians, WEST POSITIVE (the heliographic convention
+// every consumer of flare_direction assumes: sun.html's u_flare_lon, the
+// canvas renderers' `lon_rad: west positive`, the orrery). Until 2026-09-13
+// this returned EAST positive, so every SWPC-driven flare fired on the
+// mirror side of the disk. The ONE parser lives in js/flare-geometry.js
+// (node-pinned); this is a thin adapter to the feed's field names.
 function parseLocation(loc) {
-    if (!loc) return null;
-    const m = loc.match(/([NS])(\d+)([EW])(\d+)/i);
-    if (!m) return null;
-    const lat = parseInt(m[2]) * (m[1].toUpperCase() === 'N' ?  1 : -1);
-    const lon = parseInt(m[4]) * (m[3].toUpperCase() === 'E' ?  1 : -1);
-    return { lat_rad: lat * Math.PI / 180, lon_rad: lon * Math.PI / 180 };
+    const p = parseStonyhurst(loc);
+    if (!p) return null;
+    return { lat_rad: p.latDeg * Math.PI / 180, lon_rad: p.lonDeg * Math.PI / 180 };
 }
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────

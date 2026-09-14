@@ -158,13 +158,17 @@ ok('resolveDiskGeometry: measured when plausible, per-instrument fallback otherw
 });
 
 // ── Rotation ───────────────────────────────────────────────────────────────
-ok('rotationDeRotate inverts the AR-slot rotation (x = c·x0 − s·z0, z = s·x0 + c·z0)', () => {
+ok('rotationDeRotate inverts the PROGRADE AR-slot rotation (makeRotationY(+ra): x = c·x0 + s·z0, z = −s·x0 + c·z0)', () => {
     const p0 = heliographicToVec(15, 20);
     const lat = 15 * DEG;
     const ra = slotRotAngle(123.4, 1.0, lat);
     assert.ok(Math.abs(ra - 123.4 * 0.014 * diffRotFactor(lat)) < 1e-12);
     const c = Math.cos(ra), s = Math.sin(ra);
-    const rotated = [c * p0[0] - s * p0[2], p0[1], s * p0[0] + c * p0[2]];
+    // The slot rotation is js/flare-geometry.js rotateY ≡ three.js makeRotationY(+ra).
+    const rotated = [c * p0[0] + s * p0[2], p0[1], -s * p0[0] + c * p0[2]];
+    // Sense check: a disk-centre feature moves WEST (+x) under the slot rotation.
+    const centre = [c * 0 + s * 1, 0, -s * 0 + c * 1];
+    assert.ok(centre[0] > 0, 'slot rotation carries disk centre toward +x (west)');
     const back = rotationDeRotate(rotated, ra);
     for (let i = 0; i < 3; i++) assert.ok(Math.abs(back[i] - p0[i]) < 1e-12, `component ${i}`);
 });
