@@ -854,11 +854,85 @@ controls.target.set(0, 0, 0);
 // ═══════════════════════════════════════════════════════
 //  SUN  — G2V shader (same pipeline as WR-102)
 // ═══════════════════════════════════════════════════════
+
+// ── X-RAY LEVEL IS NOT EVENT STRENGTH ─────────────────────────────────────
+// js/swpc-feed.js publishes xray_intensity = clamp01((log10(flux) + 9) / 6).
+// That is a LOG LEVEL of the GOES 1-8 A channel, and it is NEVER ZERO:
+//
+//     A1 (background) 1e-8 -> 0.17      M1   1e-5   -> 0.67
+//     B1              1e-7 -> 0.33      X1   1e-4   -> 0.83
+//     C1              1e-6 -> 0.50      X2.8 2.8e-4 -> 0.91
+//
+// The shader below was written as if it ran 0 -> ~0.3, so every term that
+// means "how much is erupting" was reading an ordinary quiet day as a
+// half-strength event, and C-class — which is most days — as a full one. Two
+// terms went past their own zero crossing: the sunspot darkening flipped
+// NEGATIVE above 0.40 and the filament channel became identically 0, which is
+// how the page came to switch off the two features it works hardest to draw
+// (SOLAR_SYSTEM_VISUAL_REVIEW.md S2 — measured: at A-class background the
+// spots were already 42 % erased, and from C1 up the darkest pixel inside a
+// region was BRIGHTER than the quiet photosphere around it).
+//
+// flareExcess() is the quantity those terms actually wanted: 0 at A-class
+// background, 1 at X1, and it keeps climbing above X1 so an X10 (1.26) still
+// outruns an X1. Terms that describe a LEVEL (the standing coronal rim, the
+// network) may legitimately read u_flare_str; terms that describe an EVENT
+// must read this. ONE definition, mirrored into GLSL by interpolation so the
+// two cannot drift.
+const XR_BACKGROUND = 0.17;   // A1, 1e-8 W/m^2 — nothing is happening
+const XR_X1         = 0.83;   // X1, 1e-4 W/m^2
+const flareExcess   = (xr) => Math.max(0, (xr - XR_BACKGROUND) / (XR_X1 - XR_BACKGROUND));
+// ── THE ACTIVE-REGION FIELD, ONE COPY ─────────────────────────────────────
+// Both the photosphere and the chromosphere have to know where the regions
+// are, because S2's rule is that every flare term is weighted by the region it
+// belongs to — and the chromosphere is where flare RIBBONS actually live. The
+// angular-radius formula in particular must not exist twice: sunFS sizes its
+// spots and filament channels with it and the shell weights its ribbons with
+// it, and a drift between them would put the ribbons somewhere the spots are
+// not. The uniform values are shared by reference from sunUniforms.
+const AR_FIELD_GLSL = /* glsl */`
+    uniform int   u_ar_count;
+    uniform float u_ar_lat[5];
+    uniform float u_ar_lon[5];
+    uniform float u_ar_area[5];
+
+    /** Angular radius of region i, radians. */
+    float arRadius(int i) { return 0.10 + u_ar_area[i] * 0.18; }
+
+    /** Unit direction of region i in the body frame. */
+    vec3 arDirection(int i) {
+        float clat = cos(u_ar_lat[i]);
+        return vec3(clat * cos(u_ar_lon[i]), sin(u_ar_lat[i]), clat * sin(u_ar_lon[i]));
+    }
+
+    /** 1 inside a region, falling to 0 at its edge; max over all regions. */
+    float arProximity(vec3 pos) {
+        float near = 0.0;
+        for (int i = 0; i < 5; i++) {
+            if (i >= u_ar_count) break;
+            float angD = acos(clamp(dot(pos, arDirection(i)), -1.0, 1.0));
+            float arR  = arRadius(i);
+            near = max(near, 1.0 - smoothstep(arR * 0.55, arR, angD));
+        }
+        return near;
+    }
+`;
+
+const FLARE_EXCESS_GLSL = /* glsl */`
+    const float XR_BACKGROUND = ${XR_BACKGROUND};
+    const float XR_X1         = ${XR_X1};
+    float flareExcess(float xr) {
+        return max(0.0, (xr - XR_BACKGROUND) / (XR_X1 - XR_BACKGROUND));
+    }
+`;
+
 const sunUniforms = {
     u_time:     { value: 0.0    },
     u_teff:     { value: 5778.0 },
     // ── Live SWPC data ─────────────────────────────────────────────────────
-    // u_flare_str  : normalised GOES X-ray intensity [0,1]  (0=A-class, 0.8=X1)
+    // u_flare_str  : normalised GOES X-ray LEVEL [0,1] — A1 background is 0.17,
+    //                C1 0.50, M1 0.67, X1 0.83. It is never 0 on a live feed;
+    //                event-strength terms go through flareExcess() above.
     // u_ar_count   : number of active regions in the arrays below (0–5)
     // u_ar_lat[5]  : heliographic latitude  (radians, local body frame)
     // u_ar_lon[5]  : heliographic longitude (radians, Carrington − sunMesh.rotation.y)
@@ -881,10 +955,8 @@ const sunFS = /* glsl */`
     uniform float u_time;
     uniform float u_teff;
     uniform float u_flare_str;
-    uniform int   u_ar_count;
-    uniform float u_ar_lat[5];
-    uniform float u_ar_lon[5];
-    uniform float u_ar_area[5];
+${FLARE_EXCESS_GLSL}
+${AR_FIELD_GLSL}
 
     varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
 
@@ -909,6 +981,10 @@ const sunFS = /* glsl */`
         vec3 vDir = normalize(vViewDir);
         vec3 pos  = normalize(vPosition);
 
+        // How much is ERUPTING, as opposed to how bright the X-ray channel is.
+        // 0 on an ordinary A-class day; 1 at X1. See FLARE_EXCESS_GLSL.
+        float flareX = flareExcess(u_flare_str);
+
         // ── Photospheric convection + granulation ─────────────────────────────
         vec3 drift = vec3(u_time*0.012, u_time*0.009, u_time*0.011);
         float conv = fbm(vPosition*0.40 + drift);
@@ -928,10 +1004,92 @@ const sunFS = /* glsl */`
         float dCz = fbm(vPosition*0.40 + vec3(0,0,FD) + drift) - conv;
         float jProx = length(vec3(dCx,dCy,dCz)) / FD;   // proxy for |∇B|
 
+        // ── Where the active regions are ──────────────────────────────────────
+        // THIS BLOCK IS FIRST ON PURPOSE. Every flare term below has to be
+        // weighted by the region it belongs to — that is the whole of S2 — and
+        // arNear is that weight, so it has to exist before the first term
+        // that reads it. Moving this back down silently makes the network and
+        // the coronal shimmer global again.
+        // ── Active-region sunspots / flare brightening / filament channels ─────
+        // Filament channels mark the polarity inversion line (PIL) of each AR.
+        // They are dark elongated features in H-alpha on the disk — the on-disk
+        // counterpart of the prominence seen at the limb.  The PIL runs E-W
+        // through the AR centre (bipole axis perpendicular to PIL).
+        // During a flare the filament is disrupted and the channel brightens
+        // (post-flare loop arcade).
+        float arDark = 0.0, arBrite = 0.0, filDark = 0.0, arNear = 0.0;
+        for (int i = 0; i < 5; i++) {
+            if (i >= u_ar_count) break;
+            vec3 arDir = arDirection(i);
+            float angD = acos(clamp(dot(pos, arDir), -1.0, 1.0));
+            float arR  = arRadius(i);
+            float inAR = 1.0 - smoothstep(arR*0.55, arR, angD);
+            float core = 1.0 - smoothstep(arR*0.15, arR*0.45, angD);
+            // A SUNSPOT DOES NOT DISAPPEAR BECAUSE ITS REGION FLARED. This term
+            // used to carry (1.0 - u_flare_str*2.5), which is negative for any
+            // X-ray level above 0.40 — i.e. from C-class up, most days — and only
+            // 0.575 at A-class background. The spots the shader draws were erased
+            // by the feed being switched on. It has no business reading the flare
+            // at all: a delta-spot region is if anything MORE visible when it is
+            // producing flares, which is why it is producing them.
+            arDark  += inAR * core * 0.5;
+            // AR proximity, for the temperature mix below. This is the weight
+            // that makes a flare an event in one place instead of a light switch
+            // over the whole photosphere.
+            arNear   = max(arNear, inAR);
+
+            // Filament channel: elongated dark absorption along E-W PIL
+            // eastDir = tangent to the latitude circle (increasing longitude)
+            vec3 eastDir  = normalize(vec3(-sin(u_ar_lon[i]), 0.0, cos(u_ar_lon[i])));
+            // northDir ≈ north in the AR tangent plane (for N-S width measurement)
+            vec3 northDir = normalize(cross(arDir, eastDir));
+            // Linearised projected distances from the AR centre along each PIL axis
+            float dNS = abs(dot(pos, northDir));    // cross-PIL (narrow)
+            float dEW = abs(dot(pos, eastDir));     // along-PIL (long)
+            float filW = 0.052 + u_ar_area[i] * 0.030;   // N-S half-width
+            float filL = 0.260 + u_ar_area[i] * 0.140;   // E-W half-length
+            float filMask = (1.0 - smoothstep(filW*0.4, filW, dNS)) *
+                            (1.0 - smoothstep(filL*0.4, filL, dEW));
+            // An eruption THINS a filament, it does not delete the channel, and
+            // the channel is still there afterwards. The old
+            // max(0.0, 1.0 - u_flare_str*2.5) was identically zero above 0.40, so
+            // every filament channel on the disc vanished at C-class.
+            filDark += filMask * (0.28 + u_ar_area[i] * 0.30) * mu
+                       * max(0.35, 1.0 - flareX * 0.6);
+
+            // Post-flare arcade. The continuum brightening a flare really does
+            // produce sits on the RIBBONS, which straddle the polarity inversion
+            // line — the band filMask already describes — not over the whole
+            // region and certainly not over the whole star. So the same band
+            // carries a dark filament when quiet and a bright arcade when it
+            // erupts, which is the sequence a real region goes through.
+            // (1.0 - core) keeps the arcade OFF the umbra. This shader puts the
+            // PIL through the region centre, so the channel and the spot core are
+            // co-located; without this the ribbons re-erased the spot at C-class,
+            // which is the very bug S2 exists to fix (measured: depth −1.5 counts).
+            arBrite += filMask * (1.0 - core) * flareX * 1.8;
+        }
+        bmod = bmod * (1.0 - clamp(arDark, 0.0, 0.95)) + clamp(arBrite, 0.0, 2.0);
+        // Filament channel: cool dense PIL plasma absorbs continuum (dark on disk)
+        bmod *= 1.0 - clamp(filDark, 0.0, 0.56);
+        bmod = clamp(bmod, 0.05, 3.0);
+
         // ── Chromospheric H-alpha network ─────────────────────────────────────
         // Bright web at supergranule boundaries.  Colour = H-alpha 6563 Å (deep red).
         // Intensity proportional to local current density proxy.
-        float netStr = smoothstep(0.55, 1.10, jProx) * (0.18 + u_flare_str * 0.30);
+        // A SUNSPOT UMBRA IS OPTICALLY THICK. arDark peaks at 0.5 in a core, so
+        // this is 1 inside the umbra and 0 outside it, and every AR-local flare
+        // accent below is multiplied by its complement. Without that the accents
+        // are additive terms that do not know the spot is there, and they paint
+        // it out from above: measured, the darkest pixel inside a region rose
+        // from 137 counts at A-class to 198 at X2.8 even after the spot's own
+        // darkening had been made flare-independent. A sunspot does not
+        // disappear because its region flared — including via the glow on top.
+        float umbraLit = 1.0 - clamp(arDark * 2.0, 0.0, 1.0);
+
+        // The flare boost on the network is weighted by arNear: a flare brightens
+        // the chromospheric network of ITS OWN region, not the whole disc.
+        float netStr = smoothstep(0.55, 1.10, jProx) * (0.18 + flareX * arNear * umbraLit * 0.30);
         // Network is most visible at the limb where we look along the surface
         vec3 col = vec3(0.0);
         col += vec3(0.88, 0.22, 0.05) * netStr * limb;
@@ -961,49 +1119,23 @@ const sunFS = /* glsl */`
         float spicule = spLine * (1.0 - mu) * (0.55 + netStr * 1.5);
         col += vec3(0.95, 0.40, 0.12) * spicule;
 
-        // ── Active-region sunspots / flare brightening / filament channels ─────
-        // Filament channels mark the polarity inversion line (PIL) of each AR.
-        // They are dark elongated features in H-alpha on the disk — the on-disk
-        // counterpart of the prominence seen at the limb.  The PIL runs E-W
-        // through the AR centre (bipole axis perpendicular to PIL).
-        // During a flare the filament is disrupted and the channel brightens
-        // (post-flare loop arcade).
-        float arDark = 0.0, arBrite = 0.0, filDark = 0.0;
-        for (int i = 0; i < 5; i++) {
-            if (i >= u_ar_count) break;
-            float clat = cos(u_ar_lat[i]);
-            vec3 arDir = vec3(clat*cos(u_ar_lon[i]), sin(u_ar_lat[i]), clat*sin(u_ar_lon[i]));
-            float angD = acos(clamp(dot(pos, arDir), -1.0, 1.0));
-            float arR  = 0.10 + u_ar_area[i] * 0.18;
-            float inAR = 1.0 - smoothstep(arR*0.55, arR, angD);
-            float core = 1.0 - smoothstep(arR*0.15, arR*0.45, angD);
-            arDark  += inAR * core * (1.0 - u_flare_str*2.5) * 0.5;
-            arBrite += inAR * u_flare_str * 2.2;
-
-            // Filament channel: elongated dark absorption along E-W PIL
-            // eastDir = tangent to the latitude circle (increasing longitude)
-            vec3 eastDir  = normalize(vec3(-sin(u_ar_lon[i]), 0.0, cos(u_ar_lon[i])));
-            // northDir ≈ north in the AR tangent plane (for N-S width measurement)
-            vec3 northDir = normalize(cross(arDir, eastDir));
-            // Linearised projected distances from the AR centre along each PIL axis
-            float dNS = abs(dot(pos, northDir));    // cross-PIL (narrow)
-            float dEW = abs(dot(pos, eastDir));     // along-PIL (long)
-            float filW = 0.052 + u_ar_area[i] * 0.030;   // N-S half-width
-            float filL = 0.260 + u_ar_area[i] * 0.140;   // E-W half-length
-            float filMask = (1.0 - smoothstep(filW*0.4, filW, dNS)) *
-                            (1.0 - smoothstep(filL*0.4, filL, dEW));
-            // Filament vanishes when flare disrupts the flux rope
-            filDark += filMask * (0.28 + u_ar_area[i] * 0.30) * mu
-                       * max(0.0, 1.0 - u_flare_str * 2.5);
-        }
-        bmod = bmod * (1.0 - clamp(arDark, 0.0, 0.95)) + clamp(arBrite, 0.0, 2.0);
-        // Filament channel: cool dense PIL plasma absorbs continuum (dark on disk)
-        bmod *= 1.0 - clamp(filDark, 0.0, 0.56);
-        bmod = clamp(bmod, 0.05, 3.0);
 
         // ── Effective temperature + flare boost ───────────────────────────────
-        float flareTemp = u_teff * (1.0 + u_flare_str * 0.55);
-        vec3  base      = mix(blackbody(u_teff), blackbody(flareTemp), u_flare_str * 0.75);
+        // A real X-class brightens ~1e-4 of the visible disc in white light and
+        // is invisible in the continuum outside the ribbons. This mix used to be
+        // GLOBAL, so an X2.8 reheated the entire photosphere to 8 956 K — the
+        // whole star changed colour and the far field rose 9.6 counts, measured.
+        // arNear confines it to the region that is actually flaring.
+        // The weight is arBrite — the post-flare arcade itself — not mere AR
+        // proximity, because the white-light emission of a flare comes from the
+        // ribbons and footpoints, and a SUNSPOT UMBRA IS THE COOLEST THING ON
+        // THE STAR. Weighted by proximity alone the mix reheated the umbra with
+        // everything else and the spot faded out again as the class rose
+        // (measured: depth 71 counts at A-class down to 9.9 at X2.8). arBrite
+        // already excludes the core, so the ribbons heat and the spot does not.
+        float flareLit  = clamp(arBrite, 0.0, 1.0);
+        float flareTemp = u_teff * (1.0 + flareX * 0.55);
+        vec3  base      = mix(blackbody(u_teff), blackbody(flareTemp), flareLit * 0.75);
 
         // Combine photospheric emission
         col += base * bmod * limb * 1.80;
@@ -1023,16 +1155,24 @@ const sunFS = /* glsl */`
         // The chromosphere/corona interface emits strongly in UV (He II 304Å, etc.)
         // despite being only ~100 km thick.  Visible as a thin blue-white arc at limb.
         float trGlow = pow(1.0 - mu, 7.0) * 0.22;
-        col += vec3(0.50, 0.72, 1.00) * trGlow * (1.0 + u_flare_str * 2.0);
+        col += vec3(0.50, 0.72, 1.00) * trGlow * (1.0 + flareX * arNear * 2.0);
 
         // ── Corona rim glow + Alfvén-wave-heated loops ────────────────────────
+        // The STANDING rim is global — the corona is always there — but its flare
+        // response is not. Both of these are blue-rich, and left global they were
+        // the last thing whitening the far field: B/R ran 0.788 to 0.850 across
+        // A1 → X2.8 with everything else already localised, because a
+        // limb-weighted term still covers a lot of the disc. Post-flare loops
+        // stand over the region that flared.
         float fr   = pow(1.0 - mu, 3.0);
-        float rimT = u_teff * (1.12 + u_flare_str * 0.40);
-        col += blackbody(rimT) * fr * (0.50 + u_flare_str * 0.70);
+        float rimT = u_teff * (1.12 + flareX * arNear * 0.40);
+        col += blackbody(rimT) * fr * (0.50 + flareX * arNear * 0.70);
 
         // Coronal loop shimmer: fine-scale FBM driven by flare activity
-        if (u_flare_str > 0.02) {
-            float cLoop = fbm(vPosition * 6.0 + vec3(u_time * 0.18)) * u_flare_str * 0.35;
+        if (flareX > 0.02) {
+            // Loops belong to active regions, so the shimmer does too — and it
+            // does not shine through the umbra.
+            float cLoop = fbm(vPosition * 6.0 + vec3(u_time * 0.18)) * flareX * arNear * umbraLit * 0.35;
             col += vec3(1.0, 0.82, 0.52) * cLoop;
         }
 
@@ -1199,6 +1339,8 @@ const chromoFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_flare_str;
     varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPosition;
+${FLARE_EXCESS_GLSL}
+${AR_FIELD_GLSL}
 
     float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
     float vn(vec3 p){
@@ -1253,7 +1395,16 @@ const chromoFS = /* glsl */`${TONE_DECODE_GLSL}
         float diskNet = netBright * mu * 0.30 * DISK_VEIL;
 
         // Flare ribbons: during flares, chromosphere lights up in H-alpha
-        float flareRib = u_flare_str * (netBright * 0.6 + hAlpha * 0.4) * DISK_VEIL;
+        // FLARE RIBBONS BELONG TO A REGION. Two things were wrong here: the raw
+        // X-ray level meant an ordinary A-class day lit the whole shell at 0.17
+        // of full ribbon strength, and nothing weighted it by WHERE the flare
+        // was, so an X-class filled in every sunspot umbra on the disc from a
+        // layer floating in front of them (measured: it put the darkest pixel
+        // inside a region ~40 counts brighter than the photosphere below it).
+        // Ribbons are chromospheric, so this shell is the right place to draw
+        // them — but only over the region that is flaring.
+        float flareRib = flareExcess(u_flare_str) * arProximity(normalize(vPosition))
+                       * (netBright * 0.6 + hAlpha * 0.4) * DISK_VEIL;
 
         vec3 col  = vec3(0.90, 0.18, 0.04) * (hAlpha + diskNet + fibLine*0.4 + flareRib);
         col += vec3(0.48, 0.30, 0.92) * (caK + fibLine * rim * 0.15);  // Ca K
@@ -1267,7 +1418,13 @@ const chromoFS = /* glsl */`${TONE_DECODE_GLSL}
         #include <colorspace_fragment>
     }
 `;
-const chromoUniforms = { u_time: sunUniforms.u_time, u_flare_str: sunUniforms.u_flare_str };
+// Shared BY REFERENCE with sunUniforms, so the shell's ribbons and the
+// photosphere's spots can never disagree about where a region is.
+const chromoUniforms = {
+    u_time: sunUniforms.u_time, u_flare_str: sunUniforms.u_flare_str,
+    u_ar_count: sunUniforms.u_ar_count, u_ar_lat: sunUniforms.u_ar_lat,
+    u_ar_lon: sunUniforms.u_ar_lon, u_ar_area: sunUniforms.u_ar_area,
+};
 scene.add(new THREE.Mesh(
     new THREE.SphereGeometry(1.52, 64, 64),
     new THREE.ShaderMaterial({
@@ -3743,8 +3900,13 @@ function animate() {
 
     // Coronal magnetic structure animation
     updateCoronalLoops(t);
-    updateCoronalRain(sunUniforms.u_flare_str.value);
-    updateProminences(t, sunUniforms.u_flare_str.value);
+    // Both of these take the flare as an ENERGY INPUT, so they take the
+    // excess over background: at A-class quiet the old level (0.17) made
+    // coronal rain ~7x more likely than the loops' own stored-energy floor,
+    // so an ordinary day already rained like a moderate flare.
+    const flareX = flareExcess(sunUniforms.u_flare_str.value);
+    updateCoronalRain(flareX);
+    updateProminences(t, flareX);
 
     // ── Near-Earth objects ────────────────────────────────────────────────────
     // Earth's TRUE position (VSOP87D, ecliptic of date) for the flyby geometry;

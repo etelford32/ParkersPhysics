@@ -67,18 +67,30 @@ function collectPageErrors(page) {
     return errors;
 }
 
-/** The feed's event contract (js/swpc-feed.js `_buildState`), at a chosen X-ray level. */
-function swpcState(xrayIntensity, cls) {
+/**
+ * The feed's event contract (js/swpc-feed.js `_buildState`), at a chosen X-ray
+ * level. The regions are planted at STONYHURST longitudes 90° apart (converted
+ * to the Carrington the feed publishes via the page's own L0), so at least one
+ * always lands on the hemisphere the Sun View camera sees. Raw Carrington
+ * longitudes do NOT do this — where they fall depends on the date — and this
+ * spec was flaky for exactly that reason once S2 made the flare local: before
+ * it, an X-class lit the whole disc whether a region was visible or not, so the
+ * σ this measures did not depend on there being anything to see.
+ */
+const AR_STONYHURST = [0, 90, 180, 270];
+function swpcState(xrayIntensity, cls, l0Deg) {
+    const carr = stony => ((stony + l0Deg) % 360 + 360) % 360;
     return {
         __synthetic: true,
         solar_wind: { speed: 450, density: 5, temperature: 8e4, bt: 6, bz: -2, bx: 1, by: 1 },
         kp: 3, xray_flux: 2.8e-4, xray_class: cls, xray_series: [], proton_series: [],
         flare_class: cls, flare_letter: cls[0], flare_time: null,
         flare_location: 'N12W40', flare_watts: 2.8e-4,
-        active_regions: [
-            { region: 14101, lat_deg: 14, lon_deg: 40, lat_rad: 14 * DEG, lon_rad: 40 * DEG, area_norm: 0.6, mag_class: 'beta-gamma-delta', is_complex: true, num_spots: 20 },
-            { region: 14102, lat_deg: -18, lon_deg: 310, lat_rad: -18 * DEG, lon_rad: 310 * DEG, area_norm: 0.35, mag_class: 'beta', is_complex: false, num_spots: 8 },
-        ],
+        active_regions: AR_STONYHURST.map((stony, i) => ({
+            region: 14101 + i, lat_deg: 12, lon_deg: carr(stony),
+            lat_rad: 12 * DEG, lon_rad: carr(stony) * DEG,
+            area_norm: 0.6, mag_class: 'beta-gamma-delta', is_complex: true, num_spots: 20,
+        })),
         flares: [], recent_flares: [],
         derived: {
             wind_speed_norm: 0.5, wind_density_norm: 0.5, bt_norm: 0.5, bz: -2, bz_southward: 0.2,
@@ -121,8 +133,9 @@ async function openPage(page) {
 }
 
 async function setSpaceWeather(page, xrayIntensity, cls) {
+    const l0 = await page.evaluate(() => window.__solarFlare.state.l0Deg);
     await page.evaluate(s => window.dispatchEvent(new CustomEvent('swpc-update', { detail: s })),
-        swpcState(xrayIntensity, cls));
+        swpcState(xrayIntensity, cls, l0));
     await page.waitForTimeout(600);
 }
 
@@ -197,9 +210,15 @@ test.describe('solar-system.html tone mapping', () => {
         expect(flare.sigma, `X2.8: luminance σ over the disc = ${flare.sigma.toFixed(2)} (was 0.00 — a white cut-out)`)
             .toBeGreaterThan(4);
 
-        // A flare is an EVENT: it has to read brighter than the quiet Sun. With
-        // the disc clipped this was unmeasurable — both states were (255,255,255).
-        expect(flare.sigma).toBeGreaterThan(quiet.sigma);
+        // NOTE — there is deliberately no `flare.sigma > quiet.sigma` here. That
+        // assertion lived here while S1 was the only fix and an X-class lit the
+        // WHOLE photosphere, so the flare state trivially had the wider spread.
+        // S2 made the flare local, and a local flare does not have to raise the
+        // spread over the brightest 8 000 pixels of the whole disc — measured
+        // afterwards, quiet σ 12.6 against X-class 9.3, with both far above
+        // their own floors. Whether a flare READS AS AN EVENT is a question
+        // about the flaring region, not about the disc, and it is gated where it
+        // belongs: tests/solar-system-flare-response.spec.js.
 
         expect(errors, errors.join('\n')).toEqual([]);
     });
@@ -242,5 +261,33 @@ test.describe('solar-system.html tone mapping', () => {
 
         expect(checked, 'found the fragment shaders to check').toBe(16);
         expect(offenders, `shaders still on the raw colour pipeline:\n  ${offenders.join('\n  ')}`).toEqual([]);
+    });
+
+    test('no stray backtick has split a GLSL template literal', async () => {
+        // A BACKTICK IN A COMMENT INSIDE A /* glsl */ TEMPLATE LITERAL ENDS IT.
+        // Writing `col` or `arNear` in a shader comment — the obvious way to
+        // name an identifier in prose — terminates the literal, and the rest of
+        // the shader becomes JavaScript. It broke this page three separate times
+        // while S1 and S2 were being written, each time surfacing only as a
+        // mystery "Unexpected identifier" at page load with no line worth
+        // reading. This catches it in Node in milliseconds.
+        //
+        // The test: every /* glsl */ literal must contain something that is
+        // actually GLSL. A split leaves a fragment that is pure prose.
+        const files = ['solar-system.html', 'js/neo-layer.js', 'js/neo-rocks.js',
+                       'js/jupiter-shader.js', 'js/tone-decode.js'];
+        const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+        const split = [];
+        for (const rel of files) {
+            const src = await readFile(path.join(root, rel), 'utf8');
+            const re = /\/\* glsl \*\/`([\s\S]*?)`/g;
+            let m;
+            while ((m = re.exec(src)) !== null) {
+                const body = m[1];
+                const looksLikeGlsl = /\bvoid\s+main\s*\(|gl_FragColor|gl_Position|\b(?:float|vec[234]|mat[234]|bool|int)\s+\w+\s*\(/.test(body);
+                if (!looksLikeGlsl) split.push(`${rel}:${src.slice(0, m.index).split('\n').length}`);
+            }
+        }
+        expect(split, `a /* glsl */ literal with no shader in it — a backtick in a comment probably split it:\n  ${split.join('\n  ')}`).toEqual([]);
     });
 });

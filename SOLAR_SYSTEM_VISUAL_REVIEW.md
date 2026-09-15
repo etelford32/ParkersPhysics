@@ -2,9 +2,9 @@
 
 **Page:** `solar-system.html` (4008 lines) + `js/neo-*.js`, `js/flare-*.js`
 **Reviewed:** 2026-09-14, at `8e72cf8` (flare geometry kernel) on a software rasteriser
-**Status:** review complete. Two findings are now implemented — **L2**, the CME
-(see §3.2), and **S1**, the colour pipeline (see §1.1) — everything else is
-still the plan.
+**Status:** review complete. Three findings are now implemented — **L2**, the
+CME (see §3.2), **S1**, the colour pipeline (see §1.1), and **S2**, the flare
+response (see §1.2) — everything else is still the plan.
 
 > **Scope note.** This is a review of the *visuals*, in three areas the author
 > named: the Sun's animation, near-Earth objects, and flare propagation + NEOs
@@ -206,7 +206,32 @@ is **global**. A real X-class flare brightens ~10⁻⁴ of the visible disc in w
 light and is invisible in the continuum outside the ribbons. Here it reheats the
 entire photosphere to 8 956 K.
 
-**Plan — S2.** Make every flare term spatially weighted by the active region it
+**Plan — S2. ✅ IMPLEMENTED 2026-09-15.** Measured after, four GOES classes with
+four regions planted 90° apart in Stonyhurst so one is always well inside the
+drawn disc. "Spot depth" is the quiet photosphere's median minus the 1st
+percentile inside the region — how dark the umbra is against its surroundings:
+
+| class | spot depth, before | spot depth, after | far-field B/R, before | after |
+|---|---|---|---|---|
+| A1 (background) | 2.1 | **67.3** | 0.7998 | 0.8103 |
+| C1 (a normal day) | **−11.0** | **46.2** | 0.8450 | 0.7939 |
+| M1 | −6.9 | **34.4** | 0.8489 | 0.8313 |
+| X2.8 | −11.8 | **30.4** | 0.8933 | 0.8018 |
+
+A NEGATIVE depth means the darkest pixel inside a region was BRIGHTER than the
+photosphere around it — from C-class up there was no sunspot at all, there was
+an inverted one. Gated by `tests/solar-system-flare-response.spec.js`, verified
+to fail on the pre-fix tree.
+
+**COLOUR IS THE INSTRUMENT FOR LOCALITY, NOT BRIGHTNESS** — that is the one
+measurement lesson here. The bug reheats the photosphere from 5 778 K to
+~8 956 K, and after the ACES shoulder S1 installed, that enormous radiance
+change is only ~10 counts of luminance while the blue-to-red ratio moves
+freely and monotonically (0.7998 → 0.8933 across the four classes). The
+luminance metric could not separate the fix from the bug; the colour one
+separates them by 11×.
+
+Make every flare term spatially weighted by the active region it
 belongs to, and re-scale the thresholds against the real `xray_intensity` range:
 
 - `arDark` loses its `u_flare_str` factor completely — **a sunspot does not
@@ -222,6 +247,35 @@ belongs to, and re-scale the thresholds against the real `xray_intensity` range:
 **This is the fix that makes an X-class flare look like an event instead of a
 lighting change**, and it composes with S1: once the disc is not clipped, a
 *locally* brightened ribbon pair actually reads.
+
+**Four things the plan did not anticipate, each found by measuring:**
+
+1. **"Every flare term" meant more terms than the four bullets.** With the
+   named ones fixed the far field still whitened, because the chromospheric
+   network boost, the coronal-loop shimmer, the transition-region fringe and
+   the corona rim glow were all global too. They are now weighted by `arNear`.
+   The rim was the last one and the largest: it is blue-rich and, being
+   limb-weighted, still covers much of the disc.
+2. **The arcade re-erased the spot.** Brightening on the PIL is right — that is
+   where ribbons are — but this shader runs the PIL through the region centre,
+   so the channel and the spot core are co-located and the ribbons landed on
+   the umbra (depth −1.5 at C1). `arBrite` carries `(1.0 - core)`.
+3. **The accents painted over the umbra from above.** `col +=` terms do not
+   know a spot is there. A sunspot umbra is optically thick, so every AR-local
+   flare accent is multiplied by `umbraLit`; without it the darkest pixel in a
+   region still ran 137 → 198 counts from A-class to X2.8.
+4. **The chromosphere had no idea where the regions were.** Flare ribbons are
+   chromospheric, so that shell is the right place to draw them — but it was
+   lighting every umbra on the disc from in front. `AR_FIELD_GLSL` is now one
+   shared block: both shaders size regions with the same `arRadius`, so the
+   ribbons cannot drift away from the spots.
+
+**A note for whoever writes the next gate.** S2 broke *two assertions in S1's
+own spec*, and both were S1's fault rather than S2's: the regions were planted
+at raw Carrington longitudes (so whether any was visible depended on the date —
+harmless while an X-class lit the whole disc, flaky the moment it did not), and
+it asserted `flare σ > quiet σ`, which is simply not a property a LOCAL flare
+has. Both are fixed and documented in place.
 
 ### 1.3 The corona is two hard-edged spheres — S3
 
@@ -506,7 +560,7 @@ easier to judge.
 |---|---|---|
 | 1 | **U1** (backdrop gate) | One line. Until it is fixed, every visual judgement on this page is made through a 45 % grey filter — including the next four steps'. |
 | 2 | ✅ **S1** (tone mapping + exposure, all shaders, one commit) + its gate — **DONE 2026-09-15** | Nothing else in §1 can be evaluated while the disc is 100 % clipped. Highest leverage on the page. |
-| 3 | **S2** (localise the flare terms) | Depends on S1 to be visible at all. Turns an X-class from a lighting change into an event, and gives the page its sunspots back on ordinary C-class days. |
+| 3 | ✅ **S2** (localise the flare terms) — **DONE 2026-09-15** | Depends on S1 to be visible at all. Turns an X-class from a lighting change into an event, and gives the page its sunspots back on ordinary C-class days. |
 | 4 | **S3** (one integrated corona) + **S5** (wire in the existing ring/ribbon modules) | The bullseye is the most-seen defect; S5 is nearly free once the corona stops drowning it. |
 | 5 | **L1** (layer panel + three presets) | Architecture the rest hangs off; also the honest fix for "too much is on at once". |
 | 6 | **L2** (CME as a propagating front on the sim clock) + its gate | The largest single gain in what the page *says*, and the one place the picture currently contradicts the HUD. |
