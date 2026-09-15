@@ -1747,6 +1747,10 @@ import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { SunPostPass }        from './js/sun-post.js';   // Phase 2 HDR post chain (mip-chain bloom + exposure)
 import { CoronaAccumPass }    from './js/corona-accumulate.js';   // Phase 3 jittered-march temporal integration
 import { rasterizeLoopDensity } from './js/corona-loop-density.js';   // Phase 3 PFSS lines → loop-density volume
+// HEK filament / prominence detections → the volume's COOL-MATERIAL channel.
+// Observed rather than derived because the PFSS atlas has no magnetic dips —
+// read js/hek-filaments.js's header before changing where this comes from.
+import { coolMaterialLines, appendObservedFilaments } from './js/hek-filaments.js';
 import { EUV_CHANNELS, channelResponseAt, N_SPARK_SLOTS, SPARK_R_RSUN } from './js/corona-volumetric.js';   // THE channel response table — nanoflare campfires read it too
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
@@ -6044,6 +6048,52 @@ async function ensureVolumetricCorona() {
     return _volCoronaPromise;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  OBSERVED COOL MATERIAL — filaments and prominences from HEK
+//
+//  The volumetric corona's B channel (js/corona-loop-density.js) carries cool
+//  plasma: dark on the disk in 171/193/211 because it absorbs, bright off the
+//  limb in 304 because it emits. Same material, one density.
+//
+//  IT IS OBSERVED, NOT DERIVED, AND THAT WAS FORCED BY A MEASUREMENT. The
+//  channel was designed to be filled from MAGNETIC DIPS in the PFSS-lite
+//  atlas, which is where real prominence material collects. The atlas has
+//  ZERO dips — measured in every configuration (rust-sunfield
+//  examples/dip_scan.rs) — because it is a POTENTIAL field, and dips deep
+//  enough to hold material need field-aligned currents. So the material comes
+//  from HEK's FI/FA/PG detections instead, which is strictly more honest than
+//  dips in a field that has none.
+//
+//  Failure is quiet and harmless: no HEK answer leaves the B channel empty and
+//  the analytic per-AR filament in the raymarcher draws, as it always did.
+// ═══════════════════════════════════════════════════════════════════════════
+let _hekFilaments = null;      // deduped detections, or null when the feed has not answered
+let _hekState = { count: 0, detectors: [], stale: false, error: null, loaded: false };
+
+async function _refreshHekFilaments() {
+    try {
+        const res = await fetch('/api/hek/filaments', { cache: 'default' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        const d = body?.data || {};
+        _hekFilaments = Array.isArray(d.filaments) ? d.filaments : [];
+        _hekState = {
+            count: _hekFilaments.length,
+            detectors: d.detectors || [],
+            // The route says so itself when rows arrived but no position field
+            // resolved, or when every length hit a clamp bound.
+            stale: body?.freshness === 'stale',
+            note: body?.note ?? null,
+            error: null,
+            loaded: true,
+        };
+    } catch (e) {
+        _hekFilaments = null;
+        _hekState = { count: 0, detectors: [], stale: false, error: String(e?.message || e), loaded: true };
+    }
+    return _hekState;
+}
+
 // Build (or rebuild) the loop-density volume from the PFSS-lite atlas. Runs
 // the WASM tracer on the current AR list + default polar holes; failure
 // (no WASM, no ARs) leaves u_loopOn = 0 and the analytic arcades draw —
@@ -6062,7 +6112,14 @@ async function _rebuildLoopDensity() {
             sourceSurface: Number.isFinite(ssR) ? ssR : 2.5,
             seedsPerAr: 28, seedsGlobal: 192, samplesPerLine: 64, maxLines: 1200,
         });
-        const rast = rasterizeLoopDensity(atlas);
+        // Cool material rides the SAME rasterise as the field lines — one
+        // texture, three channels. The two inputs are independent: HEK can
+        // answer on a spotless Sun the tracer has nothing to trace on, and the
+        // tracer runs on a day HEK is down.
+        const coolLines = _hekFilaments && _hekFilaments.length
+            ? coolMaterialLines(_hekFilaments)
+            : [];
+        const rast = rasterizeLoopDensity(atlas, { coolLines });
         if (_loopDensityTex) _loopDensityTex.dispose();
         _loopDensityTex = new THREE.DataTexture(rast.data, rast.layout.width, rast.layout.height, THREE.RGBAFormat, THREE.UnsignedByteType);
         _loopDensityTex.minFilter = THREE.LinearFilter; _loopDensityTex.magFilter = THREE.LinearFilter;
@@ -6115,7 +6172,11 @@ function _refreshVolumetricCorona() {
     ];
     volumetricCorona.update(ars, holes);
     coronaAccum?.reset();
-    _rebuildLoopDensity();
+    // Fetch HEK once, then rebuild. The volume build is the only consumer, so
+    // a second AR refresh reuses the cached detections rather than re-asking a
+    // catalogue that updates a few times a day.
+    if (!_hekState.loaded) _refreshHekFilaments().then(() => _rebuildLoopDensity());
+    else _rebuildLoopDensity();
 }
 
 // ─── OUTER CORONA / HELIOSPHERE GLOW (r=4.0) ─────────────────────────────────
@@ -8006,26 +8067,66 @@ function buildCoronalLoops() {
 // Co-rotates with photosphere via fieldLineGroup.rotation.y = solarRotAngle.
 let fieldLineGroup = null;
 
-// ── ?debug= — Phase 1 PFSS atlas + Phase 2 prominence-bundle scaffolds ───────
-// Both flags share the same WASM atlas; they're composable:
-//   ?debug=field                — colour-coded field-line LineSegments
-//   ?debug=prominence           — instanced microhair bundles (QP class)
-//   ?debug=field,prominence     — both
-// Prominence quality tier:
-//   ?promq=low|mid|high         — peak active thread budget (default mid)
+// ── PFSS atlas consumers: the prominence bundles (default) + ?debug=field ────
+//   ?debug=field                — colour-coded field-line LineSegments (debug)
+//   ?prom=0                     — turn the prominence bundles OFF
+//   ?promq=low|mid|high         — PIN the thread budget (otherwise governed)
+//
+// THE MICROHAIR BUNDLES ARE ON BY DEFAULT (2026-09-15). They were behind
+// ?debug=prominence, which meant the close-range threads — the thing that
+// makes a filament read as thousands of real strands rather than a smooth
+// blob — were invisible to everyone. Promoted with a GOVERNOR rather than a
+// fixed tier, for the reason earth.html's cloud march and upper-atmosphere's
+// QUALITY_LADDER both record: a weak renderer that enters the expensive path
+// on frame 1 starves the very re-evaluation that would demote it. So the
+// ladder STARTS AT ITS FLOOR and climbs only on sustained headroom;
+// ?promq= pins it and skips the governor entirely.
 const _debugFlagSet = new Set(
     String(new URLSearchParams(location.search).get('debug') || '')
         .toLowerCase().split(/[\s,;]+/).filter(Boolean));
+const _promParams = new URLSearchParams(location.search);
 const DEBUG_FIELD_ATLAS  = _debugFlagSet.has('field');
-const DEBUG_PROMINENCE   = _debugFlagSet.has('prominence') || _debugFlagSet.has('prom');
+/** The bundles are default-ON; ?prom=0 opts out, ?debug=prominence still works. */
+const PROMINENCE_ON      = _promParams.get('prom') !== '0';
+const DEBUG_PROMINENCE   = PROMINENCE_ON;
 const DEBUG_ANY_ATLAS    = DEBUG_FIELD_ATLAS || DEBUG_PROMINENCE;
-const PROMINENCE_QUALITY = (new URLSearchParams(location.search).get('promq') || 'mid').toLowerCase();
+/** Pinned tier, or null to let the governor decide. */
+const PROMINENCE_QUALITY_PIN = (_promParams.get('promq') || '').toLowerCase() || null;
+/** The ladder, cheapest first. Starts at the floor — see the block comment. */
+const PROMINENCE_LADDER = ['low', 'mid', 'high'];
+let _promRung = 0;
+let _promGoodFrames = 0;
+/**
+ * Frame-time budget for climbing a rung, ms. Deliberately generous: this is a
+ * page that already runs a fluid solver, a raymarched corona and a post chain,
+ * so the question is not "is this fast" but "is there room for more threads".
+ */
+const PROM_CLIMB_MS = 22;
+/** Sustained frames under budget before a climb — the cloud-governor shape. */
+const PROM_CLIMB_FRAMES = 90;
+/** One bad p95 demotes immediately; climbing is earned, demotion is not. */
+const PROM_DEMOTE_MS = 40;
+/** Re-classification cadence, ms. See the two-cadence note in animate(). */
+const PROM_CLASSIFY_MS = 250;
+let _promLastClassifyMs = 0;
+/**
+ * Frames the page must already be rendering before the bundles MOUNT.
+ *
+ * The atlas trace, the field textures and the first instance build are a
+ * few hundred ms of main thread between them, and paying that during boot
+ * delays first paint on exactly the machines least able to afford it. Arming
+ * after the page is demonstrably running is the earth.html cloud-governor
+ * rule applied to mount rather than to quality: a feature that can starve the
+ * page must not be the reason the page has not started.
+ */
+const PROM_ARM_FRAMES = 45;
 
 let _fieldAtlasModulePromise   = null;
 let _prominenceModulePromise   = null;
 let debugFieldAtlasGroup       = null;
 let prominenceBundleSystem     = null;
 // per-frame state cache (populated by rebuildDebugFieldAtlas, consumed by animate())
+let _promBundleMod         = null;   // the bundle module, for the quality governor
 let _promCachedAtlas       = null;
 let _promCachedTextures    = null;
 let _promClassifierRef     = null;
@@ -8139,6 +8240,45 @@ function _refreshFlareRibbons(latRad, lonRad) {
     }
 }
 
+/**
+ * Prominence thread-budget governor.
+ *
+ * THE SHAPE IS DELIBERATE and is the same one earth.html's cloud march and
+ * upper-atmosphere's QUALITY_LADDER use, for the same measured reason: a
+ * reactive governor that STARTS on the expensive rung can saturate the main
+ * thread badly enough to starve its own re-evaluation, so it never demotes.
+ * Starting at the floor and climbing only on sustained headroom cannot do
+ * that — the worst case is a page that stays cheap.
+ *
+ * Asymmetric on purpose: a climb must be EARNED (90 sustained frames under
+ * PROM_CLIMB_MS), a demotion is immediate on one bad p95. ?promq= pins the
+ * tier and the governor stands down entirely, which is what makes a
+ * quality-gated feature testable on a software rasteriser that would
+ * otherwise sit on the floor forever.
+ */
+function _promQualityGovernor() {
+    if (PROMINENCE_QUALITY_PIN || !prominenceBundleSystem || !_promBundleMod) return;
+    const n = Math.min(_perfN, 120);
+    if (n < 60) return;                       // not enough history to judge
+    const a = Array.from(_perfRing.subarray(0, n)).sort((x, y) => x - y);
+    const p95 = a[Math.min(a.length - 1, Math.floor(a.length * 0.95))];
+    if (p95 > PROM_DEMOTE_MS && _promRung > 0) {
+        _promRung--;
+        _promGoodFrames = 0;
+        prominenceBundleSystem.setQuality(_promBundleMod.getQualityFromString(PROMINENCE_LADDER[_promRung]));
+        return;
+    }
+    if (p95 <= PROM_CLIMB_MS && _promRung < PROMINENCE_LADDER.length - 1) {
+        if (++_promGoodFrames >= PROM_CLIMB_FRAMES) {
+            _promRung++;
+            _promGoodFrames = 0;
+            prominenceBundleSystem.setQuality(_promBundleMod.getQualityFromString(PROMINENCE_LADDER[_promRung]));
+        }
+    } else if (p95 > PROM_CLIMB_MS) {
+        _promGoodFrames = 0;                  // headroom has to be SUSTAINED
+    }
+}
+
 // ── Manual EP trigger (Phase 2.3) ────────────────────────────────────────────
 // Picks the PIL-anchored bundle whose mid-arclength sample is most aligned
 // with the camera's view direction, then fires a synthetic flare at that
@@ -8152,8 +8292,8 @@ function _eruptNearestFilament() {
     };
 
     if (!_promCachedAtlas || !prominenceBundleSystem) {
-        if (!DEBUG_PROMINENCE) {
-            status('Reload with ?debug=prominence to enable.');
+        if (!PROMINENCE_ON) {
+            status('Prominence bundles are off (?prom=0). Reload without it to enable.');
         } else if (!_promCachedAtlas) {
             status('PIL atlas not ready — wait for the AR feed.');
         } else {
@@ -8247,6 +8387,8 @@ async function rebuildDebugFieldAtlas() {
     if (!DEBUG_ANY_ATLAS || !_fieldAtlasModulePromise) return;
     const mod = await _fieldAtlasModulePromise;
     if (!mod || !scene) return;
+    // One fetch, shared with the corona volume's cool-material channel.
+    if (!_hekState.loaded) await _refreshHekFilaments();
 
     const ars   = mod.arsFromLiveRegions(liveRegions, parseLoc);
     const holes = mod.defaultPolarHoles(uniforms?.u_activity?.value ?? 0.5);
@@ -8257,7 +8399,16 @@ async function rebuildDebugFieldAtlas() {
     };
 
     const t0 = performance.now();
-    const atlas = mod.computeFieldAtlas(ars, holes, params);
+    let atlas = mod.computeFieldAtlas(ars, holes, params);
+    // OBSERVED filaments join the atlas as PIL-seeded closed lines, so the
+    // prominence bundles draw the quiescent polar-crown filaments the tracer
+    // cannot produce (it only walks Br = 0 near an ACTIVE REGION, so without
+    // this the page could only ever show active-region filaments). They carry
+    // arIndex = -1 — nothing pretends a detection came out of the field model.
+    if (_hekFilaments && _hekFilaments.length) {
+        atlas = appendObservedFilaments(
+            atlas, coolMaterialLines(_hekFilaments, { samples: atlas.samplesPerLine }));
+    }
     const textures = mod.buildFieldTextures(atlas);
     const dt = performance.now() - t0;
 
@@ -8282,8 +8433,10 @@ async function rebuildDebugFieldAtlas() {
             if (!prominenceBundleSystem) {
                 prominenceBundleSystem = bMod.createProminenceBundleSystem({
                     scene,
-                    quality: bMod.getQualityFromString(PROMINENCE_QUALITY),
+                    // Floor unless pinned. The governor in animate() climbs.
+                    quality: bMod.getQualityFromString(PROMINENCE_QUALITY_PIN || PROMINENCE_LADDER[0]),
                 });
+                _promBundleMod = bMod;
             }
 
             // Cache for the per-frame classifier tick in animate().
@@ -8597,8 +8750,33 @@ function buildFieldLines() {
     scene.add(fieldLineGroup);
     fieldLineGroup.visible = document.getElementById('tog-fieldlines')?.checked ?? true;
 
-    // Mirror the rebuild trigger into the WASM-driven debug atlas (no-op unless ?debug=field).
-    rebuildDebugFieldAtlas();
+    // Mirror the rebuild trigger into the WASM atlas (the prominence bundles
+    // and ?debug=field). ARMED, not called: the trace + textures + first
+    // instance build are a few hundred ms of main thread, and paying that
+    // during boot delays first paint on exactly the machines least able to
+    // afford it. _armProminenceAtlas() waits until the page is demonstrably
+    // rendering — see PROM_ARM_FRAMES.
+    _armProminenceAtlas();
+}
+
+/**
+ * Build the atlas once the page is already running.
+ *
+ * A rebuild requested before the page is armed is REMEMBERED, not dropped: an
+ * AR feed that lands during boot must still reach the bundles, and silently
+ * losing it would leave the page showing the load-time Sun forever.
+ */
+let _promArmed = false, _promArmPending = false;
+function _armProminenceAtlas() {
+    if (!DEBUG_ANY_ATLAS) return;
+    if (_promArmed) { rebuildDebugFieldAtlas(); return; }
+    _promArmPending = true;
+}
+function _tickProminenceArm() {
+    if (_promArmed || !DEBUG_ANY_ATLAS) return;
+    if (renderer.info.render.frame < PROM_ARM_FRAMES) return;
+    _promArmed = true;
+    if (_promArmPending) { _promArmPending = false; rebuildDebugFieldAtlas(); }
 }
 
 // ─── SOLAR PROMINENCES ────────────────────────────────────────────────────────
@@ -9183,20 +9361,37 @@ function animate() {
     // and class transitions evolve smoothly. Then tick uniforms (time, camera
     // position for the on-disk/limb mode switch). No-op if ?debug=prominence
     // wasn't set or the atlas hasn't been built yet.
+    _tickProminenceArm();
+    // ── Prominence bundles ────────────────────────────────────────────────
+    // TWO CADENCES, and the split is what makes this affordable as a default.
+    // `tick` is a handful of uniform writes and runs every frame. `classify`
+    // + `update` walk every line in the atlas and rewrite the instance
+    // attributes, and they ran EVERY FRAME while this was behind
+    // ?debug=prominence — where exactly one developer paid for it. Promoted to
+    // default it starved the software rasteriser outright: the page could not
+    // reach five frames in forty seconds and the browser suite failed as a
+    // mysterious TIMEOUT rather than as an assertion — the same shape
+    // CLAUDE.md records for the upper-atmosphere march's `medium` default.
+    // Classification changes on the timescale of flares and AR updates, not
+    // frames, so re-running it at 4 Hz loses nothing anyone can see.
     if (prominenceBundleSystem && _promCachedAtlas && _promCachedTextures && _promClassifierRef) {
-        const bundles = _promClassifierRef.classifyBundles({
-            atlas: _promCachedAtlas,
-            liveRegions,
-            time:           uniforms.u_time.value,
-            flareIntensity: uniforms.u_flare_intensity.value,
-            flareLatRad:    uniforms.u_flare_lat.value,
-            flareLonRad:    flareSite.lonRad0,          // atlas bundles are epoch-frame: compare in epoch
-        });
-        prominenceBundleSystem.update(_promCachedAtlas, _promCachedTextures, {
-            activity: uniforms.u_activity.value,
-            bundles,
-        });
+        if (nowMs - _promLastClassifyMs >= PROM_CLASSIFY_MS) {
+            _promLastClassifyMs = nowMs;
+            const bundles = _promClassifierRef.classifyBundles({
+                atlas: _promCachedAtlas,
+                liveRegions,
+                time:           uniforms.u_time.value,
+                flareIntensity: uniforms.u_flare_intensity.value,
+                flareLatRad:    uniforms.u_flare_lat.value,
+                flareLonRad:    flareSite.lonRad0,      // atlas bundles are epoch-frame: compare in epoch
+            });
+            prominenceBundleSystem.update(_promCachedAtlas, _promCachedTextures, {
+                activity: uniforms.u_activity.value,
+                bundles,
+            });
+        }
         prominenceBundleSystem.tick(uniforms.u_time.value, camera.position);
+        _promQualityGovernor();
     }
 
     // THE ONE ROTATION ACCUMULATOR (see u_rotAngle at the uniforms block).
@@ -12572,6 +12767,34 @@ window.__sun = {
     },
     setFlareElapsed: (s) => { _flareElapsedS = Math.max(0, +s || 0); },
     startFlareClock: (cls) => _startFlareClock(cls),
+    // Observed cool material (HEK filaments/prominences → the volume's B channel).
+    // Prominence bundles: the rung the governor is on, and a pin for tests —
+    // a software rasteriser would otherwise sit on the floor forever and the
+    // quality-gated path would never be exercised.
+    get prominence() {
+        return {
+            on: PROMINENCE_ON, mounted: !!prominenceBundleSystem,
+            rung: _promRung, tier: PROMINENCE_LADDER[_promRung], armed: _promArmed,
+            pinned: PROMINENCE_QUALITY_PIN, ladder: [...PROMINENCE_LADDER],
+        };
+    },
+    // Force the mount now, skipping PROM_ARM_FRAMES. A software rasteriser
+    // takes tens of seconds to reach the arming threshold, which spends a
+    // browser test's whole budget waiting rather than checking — the same
+    // reason __marsLab.setQuality carries a lock. Returns the rebuild promise
+    // so a caller can await the atlas trace.
+    armProminence: () => { _promArmed = true; _promArmPending = false; return rebuildDebugFieldAtlas(); },
+    setProminenceQuality: (tier) => {
+        const i = PROMINENCE_LADDER.indexOf(String(tier));
+        if (i < 0 || !prominenceBundleSystem || !_promBundleMod) return false;
+        _promRung = i; _promGoodFrames = 0;
+        prominenceBundleSystem.setQuality(_promBundleMod.getQualityFromString(PROMINENCE_LADDER[i]));
+        return true;
+    },
+    get hek() { return { ..._hekState, filaments: _hekFilaments ? _hekFilaments.length : null }; },
+    refreshHek: () => _refreshHekFilaments(),
+    setHekFilaments: (f) => { _hekFilaments = f; _hekState = { ..._hekState, count: f ? f.length : 0, loaded: true }; },
+    rebuildLoopDensity: () => _rebuildLoopDensity(),
     get offLimb() { return sunOffLimb ? sunOffLimb.getState() : null; },
     get offLimbCtl() { return sunOffLimb; },
     get offLimbMesh() { return sunOffLimb?.mesh ?? null; },

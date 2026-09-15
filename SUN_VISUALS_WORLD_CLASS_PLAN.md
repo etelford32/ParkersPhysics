@@ -508,6 +508,75 @@ in §1 are locked by the repo owner.*
   tolerances went 1.2 % → 0.3 %, which is the accuracy the measurement has
   rather than the slop it used to need.
 
+- **2026-09-15 — Phase 3d: cool material from OBSERVATIONS, and the microhair
+  bundles promoted (done).** The volumetric corona's B channel now carries
+  filaments and prominences as a density: dark on the disk in 171/193/211
+  because it absorbs, bright off the limb in 304 because it emits, one field
+  doing both with real occlusion and parallax. It replaces an analytic per-AR
+  Gaussian that could only ever sit beside an active region, and therefore
+  never had a quiescent polar-crown filament in it.
+
+  **The material is OBSERVED because the model has none to give.** The channel
+  was designed to be filled from magnetic dips; the dip measurement above says
+  there are none, and that is what a potential field IS. So it comes from HEK's
+  FI/FA/PG detections — `js/hek-filaments.js` (PURE, 18 checks) +
+  `/api/hek/filaments`, registered in `js/pipeline-registry.js` and
+  `api/health.js`. That is strictly more honest than dips in a field that has
+  none, and it is the same HEK seeding the owner's own item asked for.
+
+  **Findings:**
+  - **THE KERNEL BELONGS IN `js/`, NOT `api/_lib/`.** It was written in
+    `api/_lib/` alongside the route's other helpers, and `api/` is the
+    serverless directory — Vercel and `dev-server.mjs` do not serve it as
+    static files. sun.html's `import './api/_lib/…'` 404ed, and because the
+    page is ONE module that 404 took the WHOLE PAGE down, not just the layer.
+    It cost a full browser-suite run to find and it arrived as a boot timeout
+    rather than an error. The repo's own convention is the fix (twenty-odd
+    routes already do it): kernel in `js/`, route imports `../../js/…`.
+  - **THE MICROHAIR BUNDLES HAD NEVER COMPILED.** The vertex shader declared
+    `vec3 flat`; that word is an interpolation qualifier in GLSL ES 3.00 and
+    reserved in ES 1.00, so the program never linked and the system has never
+    drawn a single thread since it was written. Nobody saw it because the layer
+    sat behind `?debug=prominence`, so no test and no visitor ever compiled it
+    — the sibling of the scar CLAUDE.md already records about the smoke spec
+    swallowing a broken coronaFS. Renamed to `curtain`, and the browser gate
+    now asserts zero shader errors once the bundles mount.
+    A failed link is also *expensive*: three.js re-logs it every frame, and on
+    a software rasteriser that starved the page so completely that a 90-second
+    `waitForFunction` poll never resolved. The mount itself is cheap —
+    MEASURED on the same rasteriser: trace 5–9 ms, field textures <2 ms,
+    classify 1.5 ms, first instance build 0.5 ms, and a one-off 3.8 s WASM
+    load. So the promotion is affordable; the hang was the bug, not the cost.
+  - **Promoted with a governor, not a tier.** Default ON (`?prom=0` opts out),
+    starting at the FLOOR of a low/mid/high ladder and climbing only on 90
+    sustained frames under 22 ms, demoting immediately above 40 ms —
+    earth.html's cloud-governor shape, for its reason: a weak renderer that
+    enters the expensive rung on frame 1 starves the re-evaluation that would
+    demote it. `?promq=` pins and stands the governor down.
+  - **Two cadences, which is what makes it affordable as a default.**
+    `classify` + `update` walk every atlas line and rewrite the instance
+    attributes, and they ran EVERY FRAME while this was a debug flag — where
+    one developer paid for it. Now 4 Hz; classification changes on the
+    timescale of flares and AR updates, not frames. `tick` stays per-frame.
+    The mount is also ARMED after `PROM_ARM_FRAMES`, so the 3.8 s WASM load is
+    never on the boot path.
+  - **The bundles now show filaments the tracer cannot produce.**
+    `appendObservedFilaments` puts each HEK spine into the atlas as a
+    PIL-seeded closed line with `arIndex = -1` — the marker that says
+    OBSERVED, so nothing pretends a detection came out of the field model. The
+    Rust tracer only walks Br = 0 near an ACTIVE REGION, so without this the
+    page could only ever draw active-region filaments.
+  - **De-duplication is load-bearing, not tidying.** Several detectors see
+    the same filament and each re-publishes it every few hours; splatting all
+    of them stacks 5–10 copies into one voxel column and makes a much-watched
+    structure denser than an unwatched one — the render would encode ATTENTION
+    rather than material. Merged within 8° on the sphere, with the detection
+    count carried so the page can say how many saw it.
+  - A length in the wrong unit lands on a clamp bound and the route reports
+    `freshness: 'stale'` + a note rather than drawing a Sun covered in
+    identical filaments; a row with no position is dropped, never placed at
+    disk centre. Both gated.
+
 - **2026-09-15 — two measurements that CONTRADICT this file's own Phase 3 log.**
   Recorded here because acting on the stale numbers would have re-broken
   working code (CLAUDE.md §5).

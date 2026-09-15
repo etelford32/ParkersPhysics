@@ -92,6 +92,7 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
         u_loopTiles:          { value: new THREE.Vector2(4, 8) },
         u_loopRMax:           { value: CORONA_RADIUS },
         u_loopGain:           { value: 1.0 },
+        u_coolGain:           { value: 1.0 },
         u_jitter:             { value: 0.0 },
         u_marchLegacy:        { value: 0.0 },
     };

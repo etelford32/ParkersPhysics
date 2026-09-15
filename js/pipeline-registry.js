@@ -137,6 +137,14 @@ export const PIPELINES = [
       warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
       notes: 'SPoCA/CHIMERA CH detections for space-weather.html globe + Sun Watch. HEK regularly takes >8 s cold.' },
 
+    { id: 'hek-filaments',      label: 'HEK filaments + prominences',
+      endpoint: '/api/hek/filaments',
+      category: 'events', upstream: 'LMSAL HEK',
+      cadence_s: 21_600, prewarm: 'cold', probeTimeoutMs: 18_000,
+      freshnessExempt: true,   // data.updated only — no top-level age_seconds
+      warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
+      notes: 'FI/FA/PG detections feeding the COOL-MATERIAL channel of sun.html\'s volumetric corona. Observed rather than derived on purpose: the PFSS-lite atlas has ZERO magnetic dips (a potential field cannot hold prominence material), so the channel would be permanently empty if filled from the model — see js/hek-filaments.js. Emits freshness:stale when rows arrive but no position field resolves, so a schema miss does not score as a healthy empty answer.' },
+
     // ── Solar wind ─────────────────────────────────────────────────────────
     { id: 'solar-wind-latest',  label: 'DSCOVR/ACE latest',
       endpoint: '/api/solar-wind/latest',

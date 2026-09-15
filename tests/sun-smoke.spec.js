@@ -790,6 +790,182 @@ test.describe('sun.html smoke', () => {
         expect(typeof gate).toBe('number');
     });
 
+    // ── OBSERVED COOL MATERIAL + the promoted prominence bundles ───────────
+    // The cool-material channel is filled from HEK because the PFSS-lite atlas
+    // has ZERO magnetic dips (a potential field cannot hold prominence
+    // material) — js/hek-filaments.js has the measurement. These gates
+    // pin that the observed detections actually reach the volume and the
+    // bundles, and that a dead HEK degrades quietly instead of emptying the
+    // page.
+
+    test('HEK filaments reach the corona volume and the prominence bundles', async ({ page }) => {
+        await routeAiaToFixtures(page);
+        // Two detections at known places: one quiescent high-latitude filament
+        // (which the AR-only tracer could never produce) and one limb prominence.
+        await page.route('**/api/hek/filaments*', (route) => route.fulfill({
+            status: 200, contentType: 'application/json',
+            body: JSON.stringify({
+                source: 'test', data: {
+                    updated: new Date().toISOString(), window_hours: 48, count: 2,
+                    filaments: [
+                        { event_type: 'FI', lat_deg: 62, lon_deg: 15, length_deg: 34, tilt_deg: 8, frm_name: 'AAFDCC', detections: 3 },
+                        { event_type: 'PG', lat_deg: -68, lon_deg: 190, length_deg: 20, tilt_deg: 0, frm_name: 'AAFDCC', detections: 1 },
+                    ],
+                    field_map: { lat_deg: 'hgs_y', lon_deg: 'hgs_x' },
+                    unmapped_keys: [], counts: { FI: 1, PG: 1 }, detectors: ['AAFDCC'],
+                    length_clamped: 0, dropped: 0, raw_rows: 2,
+                },
+            }),
+        }));
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.selectOption('#view-mode', '2');                 // 171 mounts the volume
+        await page.waitForFunction(() => !!window.__sun.coronaVol, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.hek?.loaded === true, { timeout: BOOT_TIMEOUT_MS });
+
+        const st = await page.evaluate(() => ({ hek: window.__sun.hek, prom: window.__sun.prominence }));
+        expect(st.hek.count).toBe(2);
+        expect(st.hek.error).toBeNull();
+        expect(st.hek.detectors).toContain('AAFDCC');
+
+        // The volume must carry the cool channel. The loop-density build is
+        // async (WASM), so wait for it rather than assuming a frame count.
+        await page.waitForFunction(
+            () => window.__sun.coronaVol?.loopOn === true, { timeout: BOOT_TIMEOUT_MS }).catch(() => {});
+        const vol = await page.evaluate(() => ({
+            loopOn: window.__sun.coronaVol.loopOn,
+            coolGain: window.__sun.coronaVol.uniforms.u_coolGain.value,
+            stats: window.__sun.coronaVol.loopStats || null,
+        }));
+        // The cool channel is live whether or not the WASM tracer produced any
+        // field lines — the two inputs are independent by design.
+        expect(vol.coolGain).toBeGreaterThan(0);
+        if (vol.loopOn) expect(vol.stats?.coolLines ?? 0).toBe(2);
+
+        // And the bundles are ON by default now, on the cheapest rung.
+        expect(st.prom.on).toBe(true);
+        expect(st.prom.rung, 'the ladder starts at its floor').toBe(0);
+        expect(st.prom.tier).toBe('low');
+        expect(st.prom.pinned).toBeNull();
+    });
+
+    test('a dead HEK leaves the page whole — no filaments, no empty corona', async ({ page }) => {
+        await routeAiaToFixtures(page);
+        await page.route('**/api/hek/filaments*', (route) => route.fulfill({
+            status: 502, contentType: 'application/json',
+            body: JSON.stringify({ error: 'upstream_unavailable', detail: 'test: HEK down' }),
+        }));
+        const errors = attachConsoleRecorder(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.selectOption('#view-mode', '2');
+        await page.waitForFunction(() => !!window.__sun.coronaVol, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.hek?.loaded === true, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.frames > 10, { timeout: BOOT_TIMEOUT_MS });
+
+        const st = await page.evaluate(() => ({
+            hek: window.__sun.hek,
+            stats: window.__sun.coronaVol.loopStats || null,
+            frames: window.__sun.frames,
+        }));
+        expect(st.hek.error).not.toBeNull();
+        expect(st.hek.count).toBe(0);
+        // No cool lines, but the corona still renders — the analytic per-AR
+        // filament in the raymarcher is the fallback and is not dead code.
+        expect(st.stats?.coolLines ?? 0).toBe(0);
+        expect(st.frames).toBeGreaterThan(10);
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'a dead HEK is not an error on the page').toHaveLength(0);
+    });
+
+    // Split one URL variant per test ON PURPOSE: three page.goto()s plus an
+    // arming wait blew the 60 s per-test budget on a software rasteriser, and
+    // that reads as a mysterious timeout rather than as a failed assertion.
+    const withShaderWatch = async (page) => {
+        // three.js reports shader errors through console.error; the compile
+        // assertion below needs them in-page.
+        await page.addInitScript(() => {
+            window.__sunShaderErrs = [];
+            const e = console.error;
+            console.error = (...a) => {
+                const t = a.map(String).join(' ');
+                if (/Shader Error|ERROR: 0:|program not valid/.test(t)) window.__sunShaderErrs.push(t.slice(0, 200));
+                e.apply(console, a);
+            };
+        });
+        await routeAiaToFixtures(page);
+        await page.route('**/api/hek/filaments*', (route) => route.fulfill({
+            status: 200, contentType: 'application/json',
+            body: JSON.stringify({ source: 'test', data: { filaments: [], count: 0, detectors: [] } }),
+        }));
+    };
+
+    test('prominence bundles: on by default, at the floor of the ladder', async ({ page }) => {
+        await withShaderWatch(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        const p = await page.evaluate(() => window.__sun.prominence);
+        expect(p.on).toBe(true);
+        expect(p.tier, 'the ladder starts at its floor — a weak renderer that enters the '
+            + 'expensive rung on frame 1 starves the re-evaluation that would demote it').toBe('low');
+        expect(p.rung).toBe(0);
+        expect(p.ladder).toEqual(['low', 'mid', 'high']);
+        expect(p.pinned).toBeNull();
+    });
+
+    test('prominence bundles: THE SHADER COMPILES, and the quality hook works', async ({ page }) => {
+        // The atlas trace + field textures + the first instance build for
+        // ~1500 lines is seconds of main thread on a software rasteriser. This
+        // test deliberately pays that (it is the only way to compile the
+        // program at all), so it gets its own budget instead of eating the
+        // suite's default and failing as a timeout.
+        test.setTimeout(150_000);
+        // IT DID NOT, for the whole life of the feature. The vertex shader
+        // declared `vec3 flat`, and `flat` is an interpolation qualifier in
+        // GLSL ES 3.00 and reserved in ES 1.00, so the program never linked and
+        // the bundles never drew a single thread. Nobody saw it because the
+        // layer was behind ?debug=prominence — no test ever compiled it.
+        // Promoting it to default is what surfaced it; this is what keeps it.
+        await withShaderWatch(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        // The bundles ARM after the page is already rendering (PROM_ARM_FRAMES),
+        // because paying the atlas trace during boot is what starved the
+        // rasteriser when this was first promoted. A software rasteriser takes
+        // tens of seconds to get there, so force it rather than spend the
+        // test's whole budget waiting for a threshold that is not what is
+        // under test here.
+        // Fire, do not await: armProminence() returns the rebuild promise, and
+        // awaiting it across the CDP boundary blocks the evaluate for as long
+        // as the trace takes. Poll the state instead.
+        await page.evaluate(() => { window.__sun.armProminence(); });
+        await page.waitForFunction(() => window.__sun.prominence.mounted === true, { timeout: 90_000 })
+            .catch(() => {});
+        const mounted = await page.evaluate(() => window.__sun.prominence.mounted);
+        if (mounted) {
+            // The hook exists because a software rasteriser never EARNS a
+            // climb, so the quality-gated path would otherwise go untested.
+            expect(await page.evaluate(() => window.__sun.setProminenceQuality('high'))).toBe(true);
+            expect(await page.evaluate(() => window.__sun.prominence.tier)).toBe('high');
+        }
+        const shaderErrs = await page.evaluate(() => window.__sunShaderErrs || []);
+        expect(shaderErrs, 'no shader compiles or links fail once the bundles mount').toEqual([]);
+    });
+
+    test('prominence bundles: ?promq pins the tier and ?prom=0 opts out', async ({ page }) => {
+        await withShaderWatch(page);
+        await page.goto(PAGE + '?promq=high');
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        expect((await page.evaluate(() => window.__sun.prominence)).pinned).toBe('high');
+
+        await page.goto(PAGE + '?prom=0');
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        const off = await page.evaluate(() => window.__sun.prominence);
+        expect(off.on).toBe(false);
+        expect(off.mounted).toBe(false);
+    });
+
     test('off-limb: MODEL mode and a dead feed both remove the layer AND its claim', async ({ page }) => {
         await routeAiaToFixtures(page);
         await page.goto(PAGE);

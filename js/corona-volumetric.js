@@ -196,12 +196,13 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform float u_unrest;             // 0..1 live restlessness (X-ray driven)
 
     // Phase 3 — loop-density slice atlas (js/corona-loop-density.js) + jitter
-    uniform sampler2D u_loopTex;        // tilesX×tilesY height slices of nlon×nlat; R=√closed, G=√open
+    uniform sampler2D u_loopTex;        // tilesX×tilesY height slices of nlon×nlat; R=√closed, G=√open, B=√cool
     uniform float u_loopOn;             // 0 = analytic fallback only
     uniform vec3  u_loopDims;           // (nlon, nlat, nh)
     uniform vec2  u_loopTiles;          // (tilesX, tilesY)
     uniform float u_loopRMax;           // R☉ extent of the volume (2.5)
     uniform float u_loopGain;           // arcade emission gain
+    uniform float u_coolGain;           // observed cool-material (B channel) gain — 0 disables
     uniform float u_jitter;             // per-frame ray-start phase (golden-ratio sequence)
     uniform float u_marchLegacy;        // 1 = the pre-Phase-3 single 12-step chord march (A/B + perf reference)
 
@@ -241,19 +242,19 @@ export const CORONA_VOL_FRAG = /* glsl */`
     // ── Loop-density read (mirrors sampleLoopDensity in corona-loop-density.js)
     // Two bilinear taps on the slice atlas (slices z0 and z0+1) mixed by the
     // fractional slice — trilinear on GLSL ES 1.0 without sampler3D.
-    vec2 loopSlice(vec2 vla, float ih) {
+    vec3 loopSlice(vec2 vla, float ih) {
         float tx = mod(ih, u_loopTiles.x);
         float ty = floor(ih / u_loopTiles.x);
         vec2 dimsLA = u_loopDims.xy;
         vec2 px = (vec2(tx, ty) * dimsLA + clamp(vla + 0.5, vec2(0.5), dimsLA - 0.5)) / (u_loopTiles * dimsLA);
-        return texture2D(u_loopTex, px).rg;
+        return texture2D(u_loopTex, px).rgb;
     }
     // Shell coordinates mirror corona-loop-density.js shellCoords():
     // lon = atan(x, z) (scene convention), lat = asin(y/r), h_n = √((r−1)/(r_max−1)).
-    vec2 loopDensity(vec3 p_local) {
-        if (u_loopOn < 0.5) return vec2(0.0);
+    vec3 loopDensity(vec3 p_local) {
+        if (u_loopOn < 0.5) return vec3(0.0);
         float r = length(p_local);
-        if (r < u_sun_radius || r > u_loopRMax) return vec2(0.0);
+        if (r < u_sun_radius || r > u_loopRMax) return vec3(0.0);
         float lon = atan(p_local.x, p_local.z);
         float lat = asin(clamp(p_local.y / r, -1.0, 1.0));
         float hn  = sqrt(max(r - u_sun_radius, 0.0) / (u_loopRMax - u_sun_radius));
@@ -262,9 +263,9 @@ export const CORONA_VOL_FRAG = /* glsl */`
                       hn * (u_loopDims.z - 1.0));
         float h0 = floor(v.z);
         float fh = v.z - h0;
-        vec2 a = loopSlice(v.xy, h0);
-        vec2 b = loopSlice(v.xy, min(h0 + 1.0, u_loopDims.z - 1.0));
-        vec2 e = mix(a, b, fh);
+        vec3 a = loopSlice(v.xy, h0);
+        vec3 b = loopSlice(v.xy, min(h0 + 1.0, u_loopDims.z - 1.0));
+        vec3 e = mix(a, b, fh);
         return e * e;                    // stored as √density → back to linear
     }
 
@@ -310,7 +311,7 @@ export const CORONA_VOL_FRAG = /* glsl */`
         // Closed-line density lights the real arcades; open-line density
         // darkens the low corona (topological coronal holes). Both fade with
         // altitude like the plasma they trace.
-        vec2 ld = loopDensity(p_local);
+        vec3 ld = loopDensity(p_local);
         if (ld.x > 1e-4) {
             float loopCol = ld.x * exp(-h / 0.45) * u_loopGain
                           * (0.65 + 0.35 * vnoise(p_local * 30.0 + vec3(u_time * 0.03)));   // per-thread variance
@@ -322,6 +323,30 @@ export const CORONA_VOL_FRAG = /* glsl */`
             emission += loopCol * loopResp * 9.0;
         }
         float openHole = clamp(ld.y * 1.4, 0.0, 1.0) * exp(-h / 0.5);
+
+        // ── OBSERVED cool material: filaments and prominences ─────────────
+        // The B channel is HEK's filament / prominence detections splatted as
+        // spine tubes (js/corona-loop-density.js; js/hek-filaments.js).
+        // ONE density, used BOTH ways, which is the whole point of putting it
+        // in the volume:
+        //   • it adds to fil_density, so the front-to-back march ATTENUATES
+        //     everything behind it → the structure reads DARK on the disk in
+        //     171/193/211, where u_filament_opacity is 4–6;
+        //   • it emits at chromospheric temperatures → the same structure
+        //     reads BRIGHT off the limb in 304, where the opacity is 0.5.
+        // A filament and a prominence are the same plasma seen from two
+        // directions, and this is what makes the renderer agree with that.
+        //
+        // The analytic per-AR filament further down is NOT dead code: it is
+        // the offline / feed-down fallback, and it is the only thing that
+        // draws when HEK has nothing. It only ever sat beside an active
+        // region, so it never had a quiescent polar-crown filament in it —
+        // which is exactly what the observed channel adds.
+        if (ld.z > 1e-4) {
+            float coolD = ld.z * u_coolGain;
+            fil_density += coolD;
+            emission    += coolD * channelResponse(4.70) * 2.2;
+        }
 
         // ── Nanoflare sparks as transient hot DEM pulses ──────────────────
         // These used to be additive point SPRITES in sun.html, drawn over
