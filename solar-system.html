@@ -152,6 +152,12 @@ nav {
     padding:10px 14px; font-size:11px; line-height:1.7; pointer-events:none;
     min-width:170px;
 }
+/* The panel itself stays click-through so its dead space never eats a globe
+   drag — that is why #hud is pointer-events:none. But its CONTROLS have to be
+   reachable, and they were not: the Solar Wind checkbox has been inert for as
+   long as it has existed (the canvas takes every click aimed at it). Re-enable
+   on the interactive children only, never on the panel. */
+#hud label, #hud input { pointer-events:auto; }
 #hud h3 { font-size:12px; color:#ffd700; margin-bottom:3px; letter-spacing:.5px; }
 #hud .val { color:#80c8ff; font-weight:600; }
 #hud .dim { color:#555; font-size:10px; }
@@ -411,6 +417,11 @@ import './js/telemetry.js';
                 <label style="cursor:pointer;font-size:10px;color:#888">
                     <input type="checkbox" id="tog-wind" checked style="accent-color:#88ddff;cursor:pointer">
                     Solar Wind
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-top:3px"
+                       title="Modeled CME train drawn as flux-rope surfaces (js/orrery-rope-layer.js) — the Compounding Watch ensemble on this page's clock">
+                    <input type="checkbox" id="tog-ropes" checked style="accent-color:#ffb454;cursor:pointer">
+                    <span style="font-size:10px;color:#ffb454">CME flux ropes</span>
                 </label>
                 <span id="wind-speed-lbl" style="font-size:10px;color:#88ddff;font-weight:600">400 km/s</span>
             </div>
@@ -769,6 +780,8 @@ import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric,
 // and how it co-rotates with the drawn Sun. See the SUN FRAME section.
 import * as FG from './js/flare-geometry.js';
 import { createFlareArcade } from './js/flare-arcade.js';
+import { createOrreryRopeLayer } from './js/orrery-rope-layer.js';
+import { startFluxRopeProvider } from './js/sun-flux-rope.js';
 import { JUPITER_VERT, JUPITER_FRAG, createJupiterUniforms } from './js/jupiter-shader.js';
 import {
     PLANET_SPIN, ALL_MOONS, PARENT_BODIES,
@@ -1057,6 +1070,18 @@ scene.add(sunFrame);
 // dominate: heights at 0.6× the kernel's drawn heights on a 1.5-unit Sun.
 const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.5, heightScale: 0.6, maxLoops: 9, plumeParticles: 160 });
 sunFrame.add(flareArcade.group);
+
+// ── Modeled CME train — the flux-rope surfaces (js/orrery-rope-layer.js) ─────
+// The geometric object the Compounding Watch draws, on this page's clock and
+// this page's radial map. It consumes the ONE shared provider's published
+// forecast and computes no physics; see that module's header for the frame
+// identity (rope heading == flare azimuth, for free) and the mirror/tilt note.
+// NOT a child of sunFrame: ropes are ballistic and must not co-rotate.
+const ropeLayer = createOrreryRopeLayer({
+    THREE, scene, spinSign: SUN_SPIN_SIGN,
+    getEarthAz: () => earthDrawnAzimuth(),
+    host: document.getElementById('canvas-wrap'),
+});
 // Flare bookkeeping: onset sim-time (the shader's u_time units, 0.01/frame,
 // clamped like the CME particles so a time warp keeps the burst legible).
 const flareState = { set: false, key: null, latRad: 0, stonyLonRad: 0, worldAz: 0, objAz: 0, cls: 'M', t: 0 };
@@ -2198,6 +2223,9 @@ let windVisible = true;
 document.getElementById('tog-wind').addEventListener('change', function () {
     windVisible = this.checked;
     windPoints.visible = this.checked;
+});
+document.getElementById('tog-ropes').addEventListener('change', function () {
+    ropeLayer.setVisible(this.checked);
 });
 // Reuse speed slider to also influence the visible wind speed label.
 // Wind-particle phase speed is decoupled from simSpeed magnitude — it only
@@ -3429,6 +3457,16 @@ window.__solarFlare = {
         };
     },
     setSimSpeed: (v) => { simSpeed = +v; },
+    // The page's OWN date jump, so a gate can drive the real clock rather than
+    // poking a layer behind the animate loop's back (which the RAF would then
+    // silently overwrite — tests/solar-system-rope.spec.js was written against
+    // exactly that and measured 0 ropes on a train that was in flight).
+    setSimDate: (d) => { _jumpToDate(d instanceof Date ? d : new Date(d)); },
+    get simDateMs() {
+        return _ephemEpoch
+            ? _ephemEpoch.date.getTime() + (simTime - _ephemEpoch.simTime) * 365.25 * 86400e3
+            : Date.now();
+    },
 };
 
 let _prevFrameMs = performance.now();
@@ -3545,7 +3583,14 @@ function animate() {
 
     // Advance solar-wind particle stream
     if (windVisible) updateWindParticles();
-    if (cmeActive)   updateCME();
+    // The modeled rope train is the truth when the provider has one: it rides
+    // the sim clock, so scrubbing replays the transit and the drawn apex is the
+    // ETA. The particle burst stays as the fallback for a flare with no DONKI
+    // fit, but never draws alongside a rope — two CMEs that disagree is worse
+    // than either alone.
+    ropeLayer.update(_simDateNow.getTime());
+    if (cmeActive && !ropeLayer.active) updateCME();
+    else if (cmeActive && ropeLayer.active) cmeMat.opacity = 0;
 
     // Sun frame follows the mesh; the flare arcade ages on the clamped clock.
     sunFrame.rotation.copy(sunMesh.rotation);
@@ -3997,8 +4042,19 @@ window.addEventListener('swpc-update', (e) => {
 const swFeed = new SpaceWeatherFeed({ pollInterval: 5 * 60 * 1000 });
 swFeed.start();
 
+// ── The ONE shared flux-rope provider ────────────────────────────────────────
+// DONKI catalog → compounding-train selection → seeded joint WASM ensemble
+// (spec §16 interaction ON) → particle-filter conditioning on live L1 Bz. This
+// page runs no physics of its own; it publishes the result on
+// window.__fluxRopeForecast + the 'flux-rope-forecast' event (the convention
+// js/flux-rope-dashboard.js established) and the rope layer draws whatever
+// lands there. First run is deferred so the WASM fetch and the ensemble never
+// compete with the orrery's boot.
+startFluxRopeProvider();
+
 console.log('%c[Solar System · Celestial Simulator]', 'color:#ffd700;font-weight:bold;font-size:13px');
-console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 33 moons (Galileans via Yoshida-4 N-body) · asteroid belt · CME bursts');
+console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 33 moons (Galileans via Yoshida-4 N-body) · asteroid belt');
+console.log('  CME train: flux-rope surfaces from the shared ensemble provider (js/orrery-rope-layer.js) on the sim clock · particle burst is the no-DONKI fallback');
 console.log('  NEOs: JPL SBDB catalogue (pha → bright → all) propagated in js/neo-worker.js · CAD close approaches · Sentry · fireballs · meteor showers');
 console.log('  NOAA SWPC: wind_1m · kp_index · xray_flux · flares_7d · regions · protons · electrons · aurora · alerts · f107');
 console.log('  NASA DONKI: CME Analysis (cone model, ENLIL arrival times) · notifications');
