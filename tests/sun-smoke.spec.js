@@ -347,7 +347,7 @@ test.describe('sun.html smoke', () => {
         expect(st.cls).toContain('prov-observed');
         // Disk geometry is MEASURED from the frame (synthetic HMI: r = 0.465 of the frame).
         expect(st.state.geometry).toBe('measured');
-        expect(Math.abs(st.geom[2] - 0.465)).toBeLessThan(0.465 * 0.012);
+        expect(Math.abs(st.geom[2] - 0.465)).toBeLessThan(0.465 * 0.003);
         // B0 is the ephemeris value for the frame's observation time (today − 7 min).
         expect(Math.abs(st.b0 * 180 / Math.PI - solarEphemeris(new Date()).b0Deg)).toBeLessThan(0.05);
         // Observed ⇒ real-time rotation multiplier, and the HUD says so.
@@ -396,7 +396,11 @@ test.describe('sun.html smoke', () => {
         let s = await obs();
         expect(hits).toContain('171');
         expect(s.kind).toBe(1);
-        expect(Math.abs(s.geomR - 0.390)).toBeLessThan(0.390 * 0.012);
+        // 0.3 % — the accuracy measureDisk now has on an AIA frame (half-maximum
+        // edge at a 512² readback). It was 1.2 % because the old straddling-window
+        // edge on a 256² readback measured AIA 1.4 % too large; see
+        // tests/sun-observed.mjs 'THE DISK EDGE IS MEASURED TO BETTER THAN 0.3 %'.
+        expect(Math.abs(s.geomR - 0.390)).toBeLessThan(0.390 * 0.003);
         expect(s.chip).toMatch(/^OBSERVED · SDO\/AIA 171 Å/);
 
         // Phase 3: the channel view mounts the volumetric AIA corona (it used
@@ -728,6 +732,62 @@ test.describe('sun.html smoke', () => {
             .toBeGreaterThan(added('promX') * 2);
         expect(added('arcade'), `131 arcade WEST not east (west ${added('arcade').toFixed(1)} vs east ${added('arcadeX').toFixed(1)})`)
             .toBeGreaterThan(added('arcadeX') * 2);
+    });
+
+    test('flare DEM: the cooling track reaches the corona shader and sequences the channels', async ({ page }) => {
+        // js/flare-dem.js is node-gated on its own; this checks the WIRING —
+        // that the falling temperature actually arrives at the raymarcher's
+        // u_flare_dem, and that the channel it favours changes with time.
+        // Before this, that uniform was the constant 7.05 for the flare's
+        // whole life and every channel saw it identically from first to last.
+        await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        // Mount the volumetric corona (it is lazy: first channel view).
+        await page.selectOption('#view-mode', '2');            // 171
+        await page.waitForFunction(() => !!window.__sun.coronaVol, { timeout: BOOT_TIMEOUT_MS });
+
+        const quiet = await page.evaluate(() => ({
+            dem: window.__sun.coronaVol.uniforms.u_flare_dem.value.toArray(),
+            state: window.__sun.flareDem,
+        }));
+        // No flare tracked ⇒ the term is exactly what it was before this
+        // change: fixed log T 7.05, zero cooling-envelope amplitude.
+        expect(quiet.state).toBeNull();
+        expect(quiet.dem[0]).toBeCloseTo(7.05, 6);
+        expect(quiet.dem[1]).toBe(0);
+
+        // Start an X1 and sample the track at three times.
+        const seq = await page.evaluate(async () => {
+            window.__sun.startFlareClock('X1');
+            const out = [];
+            for (const t of [60, 600, 1400]) {
+                window.__sun.setFlareElapsed(t);
+                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                out.push({
+                    t,
+                    dem: window.__sun.coronaVol.uniforms.u_flare_dem.value.toArray(),
+                    state: window.__sun.flareDem,
+                });
+            }
+            return out;
+        });
+
+        // The uniform must carry the kernel's number, not a constant.
+        for (const s of seq) {
+            expect(s.dem[0]).toBeCloseTo(s.state.logT, 5);
+            expect(s.dem[1]).toBeCloseTo(s.state.amp, 5);
+        }
+        // AND IT MUST FALL. This is the whole change.
+        expect(seq[0].dem[0]).toBeGreaterThan(seq[1].dem[0]);
+        expect(seq[1].dem[0]).toBeGreaterThan(seq[2].dem[0]);
+        // Early it is flare-hot (131/94 country), late it is at 171's.
+        expect(seq[0].dem[0], 'hot at 1 min').toBeGreaterThan(6.8);
+        expect(seq[2].dem[0], 'cool by ~23 min').toBeLessThan(6.3);
+        // The shader gates the flare on the closed-loop density; with no atlas
+        // the gate opens, so the term must not silently vanish offline.
+        const gate = await page.evaluate(() => window.__sun.coronaVol.uniforms.u_loopOn.value);
+        expect(typeof gate).toBe('number');
     });
 
     test('off-limb: MODEL mode and a dead feed both remove the layer AND its claim', async ({ page }) => {

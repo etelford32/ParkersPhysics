@@ -64,6 +64,7 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
 
         u_regions:            { value: u_regions },
         u_nRegions:           { value: 0 },
+        u_flare_dem:          { value: new THREE.Vector2(7.05, 0.0) },
         u_sparks:             { value: u_sparks },
         u_sparkTP:            { value: u_sparkTP },
         u_nSparks:            { value: 0 },
@@ -237,6 +238,19 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
         /** Sync the (lat, lon) of the most recent flare. */
         tickFlareLatLon(latRad, lonRad) {
             uniforms.u_flare_lon.value.set(latRad, lonRad);
+        },
+
+        /**
+         * The flare's cooling DEM this frame: log10(T/K) and the emission-
+         * measure envelope, from js/flare-dem.js `flareDemState`. Passing a
+         * falling temperature is what sequences the channels; passing a
+         * constant is what the fixed log T 7.05 used to do, and is still the
+         * default when no flare is being tracked.
+         */
+        setFlareDem(logT, amp) {
+            uniforms.u_flare_dem.value.set(
+                Number.isFinite(logT) ? logT : 7.05,
+                Math.max(0, Math.min(1, amp || 0)));
         },
 
         /** Set 0..1 normalized GOES X-ray flux (drives the flare-hot DEM). */

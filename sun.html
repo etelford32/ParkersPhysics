@@ -1770,6 +1770,11 @@ import {
 // FLARE SITE section below and tests/sun-flare-geometry.spec.js.
 import * as FG from './js/flare-geometry.js';
 import { createFlareArcade } from './js/flare-arcade.js';
+// The flare's COOLING DEM (js/flare-dem.js, node-gated): GOES class → peak T
+// → RTV density → conduction+radiation cooling, so 131/94 light first and the
+// 171 post-flare arcade tens of minutes later. Read that header before touching
+// the flare clock below — in particular why the loop has to drain.
+import { goesFluxOf, coolingTrack, flareDemState } from './js/flare-dem.js';
 
 
 // PANEL
@@ -6860,10 +6865,40 @@ scene.add(_flareSiteGroup);
 const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.0, heightScale: 1.0 });
 _flareSiteGroup.add(flareArcade.group);
 
+// ── THE FLARE CLOCK (js/flare-dem.js) ─────────────────────────────────────
+//
+// The cooling cascade is in REAL seconds — 131 within minutes, the 171 arcade
+// ~23 min later — so it is driven by WALL-CLOCK time since onset, scaled by
+// the page's own sim-speed control. Two consequences, both wanted:
+//   • a LIVE GOES flare loaded 20 minutes after its onset shows the 171
+//     post-flare arcade, because that is where the plasma actually is;
+//   • a flare triggered by hand starts at 131 and the user can wind the sim
+//     speed up to watch it cool, rather than the page inventing a timescale.
+// u_time is NOT used here: it is sim units whose rate changes with the
+// Observed toggle (REAL_TIME_ROT_MUL), and a cooling track that sped up 2900×
+// when someone switched to Model mode would be a different claim every time.
+let _flareOnsetMs   = null;   // wall clock at onset
+let _flareLastMs    = null;   // previous frame's stamp for THIS clock (never _perfLast — see animate)
+let _flareElapsedS  = 0;      // sim-scaled seconds since onset
+let _flareTrack     = null;   // cached cooling track (one integration per flare)
+let _flarePeakFlux  = null;   // W m⁻² — the class the track was built for
+
+/** Start (or restart) the cooling track for a flare of GOES class `cls`. */
+function _startFlareClock(cls, fluxHint) {
+    const flux = goesFluxOf(cls) ?? fluxHint ?? liveXrayFlux ?? goesFluxOf('C1');
+    _flarePeakFlux = flux;
+    _flareTrack    = coolingTrack(flux);
+    _flareOnsetMs  = Date.now();
+    _flareLastMs   = null;
+    _flareElapsedS = 0;
+}
+
 function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {}) {
     flareSite.latRad  = latRad;
     flareSite.lonRad0 = epoch ? lonRad : FG.epochLonFor(lonRad, solarRotAngle, latRad);
     flareSite.pilAngle = FG.pilAngleRad(latRad);
+    // A new site with a class is a new event: restart the cooling track.
+    if (cls) _startFlareClock(cls);
     if (cls) flareSite.cls = String(cls)[0].toUpperCase();
     if (complex !== undefined) flareSite.complex = !!complex;
     flareSite.set = true;
@@ -9130,6 +9165,15 @@ function animate() {
     _perfLast = nowMs;
     const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
+    // The flare cooling clock: wall-clock seconds × the sim-speed control. See
+    // _startFlareClock — deliberately NOT u_time, whose rate changes with the
+    // Observed toggle. Its OWN previous-frame stamp: _perfLast has already
+    // been advanced to nowMs a few lines up, so reusing it gives dt = 0 and a
+    // cascade that never advances.
+    if (_flareOnsetMs != null) {
+        if (_flareLastMs != null) _flareElapsedS += Math.min(1.0, (nowMs - _flareLastMs) / 1000) * simSpeed;
+        _flareLastMs = nowMs;
+    }
     if (sunObserved) sunObserved.tick();
     // The plane is pinned to the observer; only its off-axis weight tracks the
     // camera (js/sun-offlimb.js header, point 3).
@@ -9192,6 +9236,15 @@ function animate() {
         volumetricCorona.tickFlareLatLon(flareSite.latRad, flareSite.lonRad0);
         const xrayN = liveXrayFlux ? Math.max(0, Math.min(1, liveXrayFlux / 1e-4)) : 0;
         volumetricCorona.setXrayNorm(xrayN);
+        // The cooling DEM. With no tracked flare this stays at the fixed
+        // log T 7.05 / amp 0 the term carried before, so a quiet Sun renders
+        // exactly as it did.
+        if (_flareTrack && _flarePeakFlux) {
+            const st = flareDemState(_flarePeakFlux, _flareElapsedS, { track: _flareTrack });
+            volumetricCorona.setFlareDem(st.logT, st.amp);
+        } else {
+            volumetricCorona.setFlareDem(7.05, 0);
+        }
     }
 
     // Phase 4.4 — refresh per-AR sunspot slots. Each AR's epoch (load-time
@@ -12509,6 +12562,16 @@ window.__sun = {
     get observedCtl() { return sunObserved; },
     // Off-limb annulus (js/sun-offlimb.js): state for the chip gate, the mesh
     // for the geometry gate (orientation, occlusion, visibility).
+    // Flare cooling track (js/flare-dem.js): the gate drives elapsed time
+    // directly rather than waiting 23 real minutes for the 171 arcade.
+    get flareDem() {
+        return _flareTrack && _flarePeakFlux
+            ? { ...flareDemState(_flarePeakFlux, _flareElapsedS, { track: _flareTrack }),
+                elapsedS: _flareElapsedS, peakFlux: _flarePeakFlux }
+            : null;
+    },
+    setFlareElapsed: (s) => { _flareElapsedS = Math.max(0, +s || 0); },
+    startFlareClock: (cls) => _startFlareClock(cls),
     get offLimb() { return sunOffLimb ? sunOffLimb.getState() : null; },
     get offLimbCtl() { return sunOffLimb; },
     get offLimbMesh() { return sunOffLimb?.mesh ?? null; },

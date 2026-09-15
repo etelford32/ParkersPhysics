@@ -178,6 +178,11 @@ export const CORONA_VOL_FRAG = /* glsl */`
 
     uniform float u_xray_norm;          // 0..1 GOES flux → flare DEM amplitude
     uniform float u_flare_t;            // 0..1 impulsive flare flash decay
+    // (log10 T, amplitude) of the flare's COOLING DEM — js/flare-dem.js.
+    // .x defaults to 7.05, which is the fixed temperature this term used to
+    // carry for its whole life; with a tracked flare it FALLS, which is what
+    // makes 131 and 94 light first and the 171 arcade tens of minutes later.
+    uniform vec2  u_flare_dem;
     uniform float u_activity;           // 0..1 solar-cycle activity → quiet-corona density
     uniform vec2  u_flare_lon;          // (lat_rad, lon_rad) of flare site
 
@@ -480,8 +485,24 @@ export const CORONA_VOL_FRAG = /* glsl */`
             float angF  = acos(cosFA);
             float facingF = step(0.0, cosFA);
             float flareCore = exp(-h / 0.20) * exp(-angF * angF / 0.030) * facingF;
-            float flareAmp  = u_xray_norm * 0.6 + u_flare_t * 0.8;
-            emission += flareCore * flareAmp * channelResponse(7.05) * 30.0;
+            // Three drives, deliberately separate: the live GOES level, the
+            // impulsive flash, and the COOLING TRACK's own emission-measure
+            // envelope (js/flare-dem.js). The last one outlives the soft
+            // X-ray decay on purpose — by the time the plasma has cooled to
+            // 171 temperatures the GOES flux is long back at background, and
+            // driving amplitude from it alone is why the post-flare arcade
+            // could never appear.
+            float flareAmp  = u_xray_norm * 0.6 + u_flare_t * 0.8 + u_flare_dem.y * 0.9;
+            // A FLARE IS A CLOSED-FIELD ARCADE LIGHTING UP, so the hot DEM
+            // rides the closed-line density like the sparks do. The 0.30 floor
+            // is there because the atlas is a coarse PFSS-lite model and a
+            // real flare must not vanish because the tracer put no seed
+            // nearby; with no atlas at all the gate opens to 1.
+            float flareGate = (u_loopOn > 0.5) ? clamp(0.30 + ld.x * 3.0, 0.0, 1.0) : 1.0;
+            // TEMPERATURE FROM THE TRACK, not a constant: this is the whole
+            // change. One response table then decides which channel sees the
+            // flare at this instant.
+            emission += flareCore * flareAmp * flareGate * channelResponse(u_flare_dem.x) * 30.0;
             // Suppress filament near the flare site (filament eruption)
             float erupt_mask = exp(-angF * angF / 0.030) * u_flare_t;
             fil_density *= max(0.0, 1.0 - erupt_mask);

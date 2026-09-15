@@ -31,6 +31,7 @@ import {
     measureDisk, resolveDiskGeometry, rotationDeRotate, slotRotAngle, diffRotFactor,
     freshnessFor, chipLabel, diskFractionFor,
     calibrateDisk, limbLaw, srgbToLinear, linearToSrgb, luminance,
+    readFrame, measureImageDisk,
 } from '../js/sun-observed.js';
 import { renderSyntheticDisk, toGray, PLANTED, FIXTURE_EPOCH_ISO } from '../scripts/lib/sdo-synth.mjs';
 
@@ -350,6 +351,56 @@ ok('srgbToLinear / linearToSrgb round-trip within a byte', () => {
     for (const b of [0, 1, 12, 55, 128, 200, 254, 255]) {
         assert.ok(Math.abs(linearToSrgb(srgbToLinear(b)) - b) <= 1, `byte ${b}`);
     }
+});
+
+ok('THE DISK EDGE IS MEASURED TO BETTER THAN 0.3 % ON BOTH INSTRUMENTS', () => {
+    // An edge is the one thing a downsample destroys, and the two instruments
+    // have OPPOSITE edge shapes: HMI is limb-DARKENED and steps to black; AIA
+    // is limb-BRIGHTENED and steps down into a bright off-limb corona that
+    // then decays. Straddling-window differencing on that sloping background
+    // biased AIA OUTWARD by 1.4 % at the 256² readback the page used to take
+    // — which draws the observed frame 1.4 % too large on the sphere and
+    // misregisters its sunspots against u_arSpots near the limb. HMI, which
+    // ends in a clean step, measured fine at −0.24 %, which is exactly why
+    // this went unnoticed: the white-light path was correct.
+    //
+    // Fixed two ways, and both are pinned here: the edge is now the
+    // HALF-MAXIMUM CROSSING between the local inner and outer levels (which
+    // cancels whatever lies outside the disk), and the geometry readback is
+    // 512² rather than 256².
+    for (const ch of ['304', '171', '193', '211', '131', 'white', 'mag']) {
+        const f = renderSyntheticDisk(ch, { size: 512 });
+        const m = measureDisk(toGray(f.rgb, 512, 512), 512, 512);
+        const err = (m.r - f.meta.geom.r) / f.meta.geom.r;
+        assert.equal(m.ok, true, `${ch} measurement is usable`);
+        assert.ok(Math.abs(err) < 0.003, `${ch}: radius error ${(err * 100).toFixed(2)}%`);
+        assert.ok(Math.abs(m.cx - 0.5) < 0.004 && Math.abs(m.cy - 0.5) < 0.004,
+            `${ch}: centre drifted to (${m.cx.toFixed(4)}, ${m.cy.toFixed(4)})`);
+    }
+});
+
+ok('the geometry readback stays at a resolution that can see an edge', () => {
+    // The 256² default is what made the AIA bias possible; lowering it again
+    // for speed brings the bias back silently, so the default is gated rather
+    // than only commented. (No DOM here, so this reads the contract off the
+    // function rather than calling it — readFrame needs a canvas.)
+    assert.match(readFrame.toString(), /size = 512/, 'readFrame defaults to a 512² readback');
+    assert.match(measureImageDisk.toString(), /size = 512/);
+    // And the bias the resolution protects against is real: at 256² the same
+    // 304 frame measures well outside the 0.3 % the gate above requires.
+    const f = renderSyntheticDisk('304', { size: 512 });
+    const g512 = toGray(f.rgb, 512, 512);
+    const g256 = new Float32Array(256 * 256);
+    for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+        let a = 0;
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) a += g512[(y * 2 + dy) * 512 + x * 2 + dx];
+        g256[y * 256 + x] = a / 4;
+    }
+    const coarse = measureDisk(g256, 256, 256);
+    const fine = measureDisk(g512, 512, 512);
+    const eC = Math.abs(coarse.r - f.meta.geom.r) / f.meta.geom.r;
+    const eF = Math.abs(fine.r - f.meta.geom.r) / f.meta.geom.r;
+    assert.ok(eF < eC, `512² (${(eF * 100).toFixed(2)}%) must beat 256² (${(eC * 100).toFixed(2)}%)`);
 });
 
 console.log(`\n${passed} checks passed`);

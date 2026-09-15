@@ -468,6 +468,46 @@ in §1 are locked by the repo owner.*
     not this cooling coronal plasma; observed 304 post-flare loops are coronal
     rain, past where this model is valid.
 
+- **2026-09-15 — Phase 3c: the flare DEM cools, and a disk-measurement bug the
+  new fixtures exposed (done).** `js/flare-dem.js` is now wired: the corona
+  raymarcher's flare term takes `u_flare_dem` = (log₁₀ T, amplitude) from the
+  cooling track instead of the constant log T 7.05 it carried for a flare's
+  whole life, and the term RIDES THE CLOSED-LOOP DENSITY (a flare is a
+  closed-field arcade lighting up; 0.30 floor because the atlas is coarse and a
+  real flare must not vanish for want of a nearby seed; gate opens to 1 with no
+  atlas). Amplitude takes THREE separate drives — live GOES level, impulsive
+  flash, and the cooling track's own emission-measure envelope — because the
+  last one has to OUTLIVE the soft-X-ray decay: by the time the plasma has
+  cooled to 171 temperatures the GOES flux is back at background, and driving
+  amplitude from it alone is why a post-flare arcade could never appear.
+  The flare clock is WALL-CLOCK seconds × the sim-speed control, deliberately
+  NOT `u_time` — whose rate changes by ~2900× with the Observed toggle, which
+  would make the cooling a different claim every time someone switched mode.
+  A live GOES flare loaded 20 min after onset therefore shows the 171 arcade,
+  because that is where the plasma actually is. Browser gate drives
+  `__sun.setFlareElapsed` rather than waiting 23 real minutes.
+
+  **AND THE FIXTURE CHANGE CAUGHT A REAL BUG IN `measureDisk`.** Once the
+  synthetic AIA frames carried a realistic off-limb corona, the EUV disk
+  measurement came out **1.4 % too large** at the 256² readback the page took
+  — while HMI was fine at −0.24 %. The two instruments have OPPOSITE edge
+  shapes: HMI is limb-darkened and steps to black, AIA is limb-brightened and
+  steps down into a bright corona that then decays, and straddling-window
+  differencing on that sloping background biases outward. The fixed `+1.5` px
+  offset compensating for the window centroid made it worse, because it is an
+  ANGULAR bias that doubles when the frame is read at 256² instead of 512².
+  A 1.4 % radius error draws the observed frame 1.4 % too large on the sphere
+  and misregisters its sunspots against `u_arSpots` near the limb — i.e. it
+  was quietly undoing part of what Phase 1 went to such trouble to lock.
+  Two fixes, both gated: the edge is now the HALF-MAXIMUM CROSSING between the
+  local inner and outer levels (which cancels whatever is outside the disk),
+  and `readFrame`'s geometry readback is 512² rather than 256² — photometry is
+  a set of shell medians and is resolution-insensitive, but an edge is exactly
+  what a downsample destroys, and at 256² one pixel of blur IS one percent of
+  the radius. Every channel now measures to 0.08–0.21 %; the smoke spec's
+  tolerances went 1.2 % → 0.3 %, which is the accuracy the measurement has
+  rather than the slop it used to need.
+
 - **2026-09-15 — two measurements that CONTRADICT this file's own Phase 3 log.**
   Recorded here because acting on the stale numbers would have re-broken
   working code (CLAUDE.md §5).
