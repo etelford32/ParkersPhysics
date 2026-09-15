@@ -44,6 +44,8 @@
  *  Bridson et al. (2007) "Curl-Noise for Procedural Fluid Flow" SIGGRAPH
  */
 
+import { TONE_DECODE_GLSL } from './tone-decode.js';
+
 export const JUPITER_VERT = /* glsl */`
     varying vec3 vNormalView;
     varying vec3 vLocalPos;
@@ -57,7 +59,7 @@ export const JUPITER_VERT = /* glsl */`
     }
 `;
 
-export const JUPITER_FRAG = /* glsl */`
+export const JUPITER_FRAG = /* glsl */`${TONE_DECODE_GLSL}
     precision highp float;
 
     uniform float u_time;        // wall-clock seconds (continuous churn)
@@ -400,6 +402,9 @@ export const JUPITER_FRAG = /* glsl */`
         }
 
         gl_FragColor = vec4(cloudCol * shade, 1.0);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 
