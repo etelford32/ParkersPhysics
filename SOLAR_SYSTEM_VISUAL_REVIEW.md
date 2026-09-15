@@ -2,8 +2,9 @@
 
 **Page:** `solar-system.html` (4008 lines) + `js/neo-*.js`, `js/flare-*.js`
 **Reviewed:** 2026-09-14, at `8e72cf8` (flare geometry kernel) on a software rasteriser
-**Status:** review complete. One finding — **L2**, the CME — is now implemented (see §3.2);
-everything else is still the plan.
+**Status:** review complete. Two findings are now implemented — **L2**, the CME
+(see §3.2), and **S1**, the colour pipeline (see §1.1) — everything else is
+still the plan.
 
 > **Scope note.** This is a review of the *visuals*, in three areas the author
 > named: the Sun's animation, near-Earth objects, and flare propagation + NEOs
@@ -92,20 +93,81 @@ moved the flare-state σ from 0.00 to 0.10 and left the disc 100 % clipped,
 because the input is so far above the curve's working range that ACES cannot
 recover it. **Exposure and curve have to move together.**
 
-**Plan — S1.**
+**Plan — S1. ✅ IMPLEMENTED 2026-09-15.** Measured after, same method
+(brightest 8 000 disc pixels, Sun View, panel closed, 1400 × 900):
+
+| state | disc RGB | luminance σ | R,G at 255 |
+|---|---|---|---|
+| quiet | (247, 212, 193) | **4.91** | **0.7 %** |
+| X2.8 flare | (252, 223, 217) | **6.23** | **1.4 %** |
+
+Gated by `tests/solar-system-tone.spec.js`, which was verified to FAIL on the
+pre-fix tree. Four things were needed, not the three planned — see the notes
+under each step.
+
 1. Add `#include <tonemapping_fragment>` + `#include <colorspace_fragment>` to
    every custom fragment shader on the page, in one commit, so the page stops
    having two colour pipelines.
+   **Done — and there were SIXTEEN, not the 15 counted above: `js/jupiter-shader.js`
+   was missed, and it is shared with `jupiter-system.html`, which declares the
+   same ACES curve and had the same bypass.**
+
+   **1b. THE CHUNKS ALONE MAKE IT WORSE, and this is the step the plan missed.**
+   Both chunks assume the value handed to them is LINEAR RADIANCE. The colour
+   literals in these shaders are not — `vec3(1.0, 0.62, 0.12)` is an sRGB
+   colour picked by eye, exactly like the hex passed to a `MeshBasicMaterial`,
+   and three.js decodes THOSE for you (ColorManagement, default-on since r152)
+   but cannot reach a literal inside a shader. Encoding an encoded value lifts
+   dark channels far more than bright ones (0.12 → 0.43 while 1.0 → 0.93), so
+   the corona, the solar-wind disc and every planet went pale khaki. Captured
+   and compared before/after at four framings. `js/tone-decode.js` is the
+   inverse transfer function; it is applied in all 15 colour-pick shaders and
+   deliberately NOT in `sunFS`, whose output is genuine HDR emission.
 2. In the same commit, bring `sunFS`'s emission into the curve's range: the
    `× 1.80` gain and the additive term weights need re-fitting against a target
    of "quiet disc centre lands near 0.8 in linear, limb near 0.45", not against
    what looks right on a clipped display. Sun.html solved the same problem with
    a real HDR chain (`js/sun-post.js`); the orrery does not need the mip-chain
    bloom, but it does need to stop handing the framebuffer values above 5.
+   **Done — `SUN_EXPOSURE = 0.444` (1.80 × 0.444 = 0.80 at quiet disc centre),
+   fitted offline against three's own ACES implementation and then confirmed in
+   the browser: the disc measures 222 at centre → 207 at 0.98 R, 0 % clipped in
+   BOTH states when rendered alone.**
+
+   **2b. THE DISC WAS NEVER THE ONLY THING PAINTING THE DISC.** With `sunFS`
+   fixed the composite was still 100 % clipped, because the additive layers
+   stacked on top were fitted against the same white cut-out. Isolated by
+   toggling each layer group and re-measuring, the culprits were exactly two:
+
+   - **The heliospheric current sheet.** Its geometry starts at r = 1.9, safely
+     outside the drawn Sun, but the part BETWEEN the camera and the Sun still
+     projects onto the disc, and being additive with `depthWrite: false` it
+     passes the depth test and lands on top — a broad bright wedge and a hard
+     horizontal seam across the star. Alone it took the disc from 0 % clipped
+     to **21 % quiet / 47 % under X-class** and collapsed σ from 3.60 to 0.92.
+     `hcsFS` now fades where its own line of sight passes through the disc on
+     the near side, which is also what an optically thin sheet ten orders
+     fainter than the photosphere actually looks like in front of it.
+   - **The chromosphere shell's on-disk terms** (`diskNet`, `flareRib`): +26
+     counts of red across the whole star at quiet, 31 % clipped under X-class.
+     `DISK_VEIL = 0.42` re-fits those two only — the limb-brightened terms
+     (`hAlpha`, `caK`) and the `fibLine` texture keep their weight, because the
+     shell is limb-brightened by construction and `fibLine` contributes
+     STRUCTURE rather than a wash.
+
 3. Gate it: extend `tests/solar-system-flare.spec.js`, or add a sibling spec,
    with the measurement above — **disc luminance σ > 2 in quiet and > 4 under
    X-class, and R,G clipped on under 20 % of disc pixels**. That test fails today
    and is what stops the fix from being undone.
+   **Done — `tests/solar-system-tone.spec.js`, those exact three thresholds,
+   plus a structural half that asserts all 16 shaders carry both chunks so the
+   NEXT one cannot quietly land on the old pipeline. It reads real framebuffer
+   pixels (a WebGLRenderTarget would not do: three DISABLES tone mapping when
+   the target is not null, which would measure the bug as the fix).**
+
+**What S1 did NOT fix.** The disc under X-class still reads as a global
+brightening rather than an event — that is **S2** below, now visible for the
+first time — and the corona is still the two hard-edged shells of **S3**.
 
 ### 1.2 The flare terms saturate at C-class, so the page never shows a sunspot — S2
 
@@ -443,7 +505,7 @@ easier to judge.
 | # | Work | Why first |
 |---|---|---|
 | 1 | **U1** (backdrop gate) | One line. Until it is fixed, every visual judgement on this page is made through a 45 % grey filter — including the next four steps'. |
-| 2 | **S1** (tone mapping + exposure, all shaders, one commit) + its gate | Nothing else in §1 can be evaluated while the disc is 100 % clipped. Highest leverage on the page. |
+| 2 | ✅ **S1** (tone mapping + exposure, all shaders, one commit) + its gate — **DONE 2026-09-15** | Nothing else in §1 can be evaluated while the disc is 100 % clipped. Highest leverage on the page. |
 | 3 | **S2** (localise the flare terms) | Depends on S1 to be visible at all. Turns an X-class from a lighting change into an event, and gives the page its sunspots back on ordinary C-class days. |
 | 4 | **S3** (one integrated corona) + **S5** (wire in the existing ring/ribbon modules) | The bullseye is the most-seen defect; S5 is nearly free once the corona stops drowning it. |
 | 5 | **L1** (layer panel + three presets) | Architecture the rest hangs off; also the honest fix for "too much is on at once". |

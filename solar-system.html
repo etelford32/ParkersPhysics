@@ -790,6 +790,7 @@ import {
 import { JovianSystem } from './js/jovian-system.js';
 import { EarthSimBridge } from './js/earth-sim-bridge.js';
 import { NeoLayer } from './js/neo-layer.js';
+import { TONE_DECODE_GLSL } from './js/tone-decode.js';
 import { NeoPanel } from './js/neo-panel.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
@@ -1035,11 +1036,45 @@ const sunFS = /* glsl */`
             col += vec3(1.0, 0.82, 0.52) * cLoop;
         }
 
+        // ── Scene exposure → the tone curve ───────────────────────────────────
+        // EVERYTHING ABOVE IS SCENE-REFERRED EMISSION, NOT DISPLAY PIXELS. The
+        // photospheric term alone reaches base.r(1.0) x bmod(<=3.0) x limb(1.0)
+        // x 1.80 = 5.4 before the network, nanoflare, spicule, rim and
+        // transition-region terms are added on top. Written raw to the
+        // framebuffer that is 5.4 clamped to 1.0: measured 2026-09-14, the disc
+        // was 100 % clipped in R and G at all times and the flare-state
+        // luminance sigma across the disc was 0.00 — granulation, sunspots,
+        // filament channels and active regions were all present in the shader
+        // and all of them above the ceiling. The star rendered as a featureless
+        // white cut-out (SOLAR_SYSTEM_VISUAL_REVIEW.md S1).
+        //
+        // SUN_EXPOSURE is the fit that puts the emission INTO the working range
+        // of the ACES curve the two includes below finally apply:
+        //   quiet disc centre  1.80 x SUN_EXPOSURE = 0.80 linear
+        //   quiet at mu = 0.30 x limb(0.594)       = 0.47 linear
+        // which is the review's target. Above ~1.5 the curve's shoulder eats
+        // spatial structure faster than the terms can add it, which is the
+        // mechanism behind the sigma = 0.00.
+        //
+        // EXPOSURE AND CURVE MOVE TOGETHER. An A/B during the review added the
+        // includes ALONE and moved the flare-state sigma only 0.00 -> 0.10,
+        // still 100 % clipped: ACES cannot recover an input that far past its
+        // shoulder. Equally, dropping the exposure without the curve just makes
+        // a dim clipped disc. If you retune one, retune the other and re-run
+        // the gate. Every additive accent term above is weighted RELATIVE to
+        // the 1.80 photospheric gain, so scaling the accumulated col once
+        // here preserves the look and only removes the clipping.
+        const float SUN_EXPOSURE = 0.444;      // 1.80 x 0.444 = 0.80 at centre
+        col *= SUN_EXPOSURE;
+
         gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 
-const sunGeo  = new THREE.SphereGeometry(1.5, 96, 96);
+const SUN_R   = 1.5;                       // drawn photosphere radius, scene units
+const sunGeo  = new THREE.SphereGeometry(SUN_R, 96, 96);
 const sunMat  = new THREE.ShaderMaterial({ vertexShader:sunVS, fragmentShader:sunFS, uniforms:sunUniforms });
 const sunMesh = new THREE.Mesh(sunGeo, sunMat);
 scene.add(sunMesh);
@@ -1115,7 +1150,7 @@ const sgVS = /* glsl */`
     varying vec3 vNormal; varying vec3 vViewDir;
     void main(){ vNormal=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.0); vViewDir=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }
 `;
-const sgInFS = /* glsl */`
+const sgInFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     varying vec3 vNormal; varying vec3 vViewDir;
     void main(){
@@ -1123,14 +1158,20 @@ const sgInFS = /* glsl */`
         float a=pow(rim,1.8)*0.60;
         float p=0.88+0.12*sin(u_time*1.8+0.6);
         gl_FragColor=vec4(1.0,0.62,0.12,a*p);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
-const sgOutFS = /* glsl */`
+const sgOutFS = /* glsl */`${TONE_DECODE_GLSL}
     varying vec3 vNormal; varying vec3 vViewDir;
     void main(){
         float rim=1.0-max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
         float a=pow(rim,3.5)*0.22;
         gl_FragColor=vec4(1.0,0.48,0.06,a);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 [{r:1.9,fs:sgInFS},{r:2.8,fs:sgOutFS}].forEach(({r,fs})=>{
@@ -1154,7 +1195,7 @@ const chromoVS = /* glsl */`
         gl_Position = projectionMatrix * mv;
     }
 `;
-const chromoFS = /* glsl */`
+const chromoFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_flare_str;
     varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPosition;
@@ -1187,11 +1228,32 @@ const chromoFS = /* glsl */`
         float hAlpha = pow(rim, 1.8) * 0.80;
         // Ca II K (3934 Å — violet): even more limb-bright
         float caK    = pow(rim, 3.2) * 0.45;
+        // ── On-disk terms: a veil, not a wash ─────────────────────────────
+        // This shell is ADDITIVE and sits in FRONT of the photosphere, so
+        // every on-disk term lands on top of the disc's own brightness. They
+        // were fitted when that disc was clipped to white and nothing on-disk
+        // could read at all. Against a properly exposed disc the same weights
+        // put +26 counts of red across the whole star, and under X-class the
+        // flare-ribbon term alone clipped 31 % of it — measured
+        // (SOLAR_SYSTEM_VISUAL_REVIEW.md S1).
+        //
+        // The chromosphere is optically thin in the continuum and LIMB-
+        // BRIGHTENED, which is what the comments above already say, so the
+        // limb terms (hAlpha, caK) keep their weight and DISK_VEIL re-fits
+        // only the two that are on-disk by construction. fibLine is left
+        // alone deliberately: it is a thin-line texture over a small fraction
+        // of the surface, so it adds STRUCTURE rather than a wash, and that
+        // structure is half of what the gate measures.
+        //
+        // Making the ribbons LOCAL to the flaring region — so an X-class is
+        // an event and not a lighting change — is finding S2, not this.
+        const float DISK_VEIL = 0.42;
+
         // Network is bright on disk too (plage regions)
-        float diskNet = netBright * mu * 0.30;
+        float diskNet = netBright * mu * 0.30 * DISK_VEIL;
 
         // Flare ribbons: during flares, chromosphere lights up in H-alpha
-        float flareRib = u_flare_str * (netBright * 0.6 + hAlpha * 0.4);
+        float flareRib = u_flare_str * (netBright * 0.6 + hAlpha * 0.4) * DISK_VEIL;
 
         vec3 col  = vec3(0.90, 0.18, 0.04) * (hAlpha + diskNet + fibLine*0.4 + flareRib);
         col += vec3(0.48, 0.30, 0.92) * (caK + fibLine * rim * 0.15);  // Ca K
@@ -1200,6 +1262,9 @@ const chromoFS = /* glsl */`
 
         float alpha = clamp(pow(rim, 1.5)*0.65 + fibLine*0.30 + diskNet*0.25 + flareRib*0.40, 0.0, 0.80);
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const chromoUniforms = { u_time: sunUniforms.u_time, u_flare_str: sunUniforms.u_flare_str };
@@ -1239,7 +1304,7 @@ const planetVS = /* glsl */`
         gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
-const planetFS = /* glsl */`
+const planetFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform vec3  u_base;      // planet base RGB color
     uniform float u_time;      // animation clock
     uniform float u_windStr;   // solar-wind intensity (1/r² scaled)
@@ -1348,6 +1413,9 @@ const planetFS = /* glsl */`
         }
 
         gl_FragColor = vec4(col, 1.0);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 
@@ -1663,7 +1731,7 @@ const msVS = /* glsl */`
         gl_Position  = projectionMatrix * viewMatrix * wp;
     }
 `;
-const msFS = /* glsl */`
+const msFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_kp;
     uniform float u_bz_s;
@@ -1685,6 +1753,9 @@ const msFS = /* glsl */`
         col += vec3(0.55, 0.0, 0.0) * flankM * kpFrac * kpFrac * 0.45;
         float alpha = 0.055 + bow * 0.07 + term * 0.05 + kpFrac * 0.025;
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const msUniforms = {
@@ -1712,7 +1783,7 @@ scene.add(msMesh);
 //    Outer belt (~4.5 Re): mostly relativistic electrons — blue.
 //    Intensity driven by live GOES proton/electron flux from NOAA SWPC.
 // ─────────────────────────────────────────────────────────────────────────────
-const vaBeltFS = /* glsl */`
+const vaBeltFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_intensity;  // 0–1, from live NOAA particle flux
     uniform vec3  u_clr;
@@ -1720,6 +1791,9 @@ const vaBeltFS = /* glsl */`
         float pulse = 0.72 + 0.28 * sin(u_time * 2.1 + gl_FragCoord.x * 0.09);
         float alpha = clamp(u_intensity, 0.03, 1.0) * pulse * 0.28;
         gl_FragColor = vec4(u_clr * (0.8 + u_intensity * 0.7), alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 // Inner proton belt (~1.5 Re radius, 0.3 Re tube thickness)
@@ -1762,7 +1836,7 @@ scene.add(outerBelt);
 //    The ring current is the primary cause of the Dst (now Sym-H) index drop.
 //    Appears only during Kp > 2.5; intensifies strongly with storm level.
 // ─────────────────────────────────────────────────────────────────────────────
-const rcFS = /* glsl */`
+const rcFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_kp;
     void main() {
@@ -1771,6 +1845,9 @@ const rcFS = /* glsl */`
         vec3  col    = mix(vec3(0.55, 0.00, 0.00), vec3(1.00, 0.35, 0.00), kpFrac);
         float alpha  = kpFrac * kpFrac * pulse * 0.28;
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const rcUniforms = { u_time: { value: 0.0 }, u_kp: { value: 0.0 } };
@@ -1792,7 +1869,7 @@ scene.add(ringCurrentMesh);
 //    Brightens to white-blue during X-ray flares (D-layer over-ionization → HF blackout).
 //    Also responds to F10.7 flux (solar cycle EUV proxy).
 // ─────────────────────────────────────────────────────────────────────────────
-const ionoFS = /* glsl */`
+const ionoFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_xray;   // GOES X-ray intensity 0–1
     uniform float u_f107;   // F10.7 radio flux normalised 0–1
     uniform float u_time;
@@ -1802,6 +1879,9 @@ const ionoFS = /* glsl */`
         vec3  col    = mix(vec3(0.15, 0.55, 1.0), vec3(1.0, 0.92, 0.8), u_xray * 0.75);
         float pulse  = 1.0 + 0.04 * sin(u_time * 0.5);
         gl_FragColor = vec4(col * pulse, baseA + flare);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const ionoUni = { u_xray: { value: 0.0 }, u_f107: { value: 0.3 }, u_time: { value: 0.0 } };
@@ -1821,12 +1901,15 @@ scene.add(ionoMesh);
 //    During geomagnetic storms, the outer plasmasphere drains tailward
 //    (plasmaspheric erosion) — modeled as shrinking opacity with Kp.
 // ─────────────────────────────────────────────────────────────────────────────
-const plasmaFS = /* glsl */`
+const plasmaFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_kp;
     void main() {
         float erosion = 1.0 - clamp(u_kp / 8.5, 0.0, 0.80);
         float alpha   = 0.032 * erosion;
         gl_FragColor  = vec4(0.25, 0.80, 1.0, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const plasmaUni = { u_kp: { value: 0.0 } };
@@ -2287,6 +2370,7 @@ const hcsVS = /* glsl */`
     uniform float u_time;
     varying float vR;
     varying float vPhi;
+    varying vec3  vWorld;
     void main() {
         float r   = length(position.xz);
         float phi = atan(position.z, position.x);   // azimuthal angle in XZ plane
@@ -2295,15 +2379,17 @@ const hcsVS = /* glsl */`
         float yHCS = 0.28 * pow(r / 1.90, 0.82) * sin(phi - 0.025 * u_time + 0.35);
         vR   = r;
         vPhi = phi;
-        gl_Position = projectionMatrix * modelViewMatrix
-                    * vec4(position.x, yHCS, position.z, 1.0);
+        vec4 warped = vec4(position.x, yHCS, position.z, 1.0);
+        vWorld = (modelMatrix * warped).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * warped;
     }
 `;
-const hcsFS = /* glsl */`
+const hcsFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_bt_norm;    // total IMF Bt normalised [0,1] from DSCOVR/ACE
     varying float vR;
     varying float vPhi;
+    varying vec3  vWorld;
     void main() {
         // Radial intensity: brighter near sun, fades at outer boundary
         float rFade = 1.0 - smoothstep(8.0, 15.8, vR);
@@ -2316,7 +2402,35 @@ const hcsFS = /* glsl */`
         vec3 col    = mix(inCol, outCol, smoothstep(-0.5, 0.5, sector));
         float bright = 0.40 + u_bt_norm * 0.60;
         float alpha  = rFade * bright * 0.30;
+
+        // ── The sheet may not paint over the photosphere ──────────────────
+        // The geometry starts at r = 1.9, safely outside the drawn Sun, but
+        // the part of it BETWEEN the camera and the Sun still projects onto
+        // the disc — and being additive with depthWrite off, it passes the
+        // depth test and lands on top. At Sun View that put a broad bright
+        // wedge and a hard horizontal seam across the star: measured, it
+        // alone took the disc from 0 % clipped to 21 % quiet and 47 % under
+        // X-class, and collapsed the disc's luminance sigma from 3.60 to
+        // 0.92 (SOLAR_SYSTEM_VISUAL_REVIEW.md S1). Nobody saw it before
+        // because the disc underneath was clipped to white anyway.
+        //
+        // It is also simply not what the sheet looks like: the current sheet
+        // is optically thin and some ten orders of magnitude fainter than
+        // the photosphere, so in front of the disc it is invisible, not
+        // translucent. Fade it out where its own line of sight passes
+        // through the disc AND it is on the near side.
+        vec3  ro    = cameraPosition;
+        vec3  rd    = normalize(vWorld - ro);
+        float tNear = dot(-ro, rd);                       // closest approach to the Sun
+        float dPerp = length(ro + rd * tNear);            // impact parameter of this ray
+        float front = step(dot(vWorld - ro, rd), tNear);  // 1 = nearer than the Sun's centre
+        float offDisc = smoothstep(${SUN_R} * 0.97, ${SUN_R} * 1.30, dPerp);
+        alpha *= mix(1.0, offDisc, front);
+
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const hcsUniforms = {
@@ -2537,7 +2651,7 @@ const rainVS = /* glsl */`
 //
 // Radial profile: tight Gaussian core (optically thick blob body) +
 // broad soft halo (transition region sheath, optically thin).
-const rainFS = /* glsl */`
+const rainFS = /* glsl */`${TONE_DECODE_GLSL}
     varying float vTemp;
     varying float vActive;
     void main() {
@@ -2560,6 +2674,9 @@ const rainFS = /* glsl */`
             : mix(warmCol, hotCol,  (vTemp - 0.5) * 2.0);
 
         gl_FragColor = vec4(col, core + halo);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 
@@ -3467,6 +3584,31 @@ window.__solarFlare = {
             ? _ephemEpoch.date.getTime() + (simTime - _ephemEpoch.simTime) * 365.25 * 86400e3
             : Date.now();
     },
+};
+
+// Colour-pipeline hook (tests/solar-system-tone.spec.js). Every custom shader
+// on this page writes gl_FragColor directly, so none of them saw
+// renderer.toneMapping until the S1 fix; the gate that stops that regressing
+// has to measure real framebuffer pixels, and to do that it needs to know
+// exactly which ones are the Sun's disc rather than the corona shells around
+// it. `discPx` projects the photosphere's own radius through the live camera.
+window.__solarRender = {
+    renderer, camera, sunMesh,
+    /** The drawn photosphere in CSS pixels of the canvas: { cx, cy, r, w, h }. */
+    discPx() {
+        const el = renderer.domElement;
+        const w = el.clientWidth, h = el.clientHeight;
+        camera.updateMatrixWorld();
+        // Offset along the camera's RIGHT vector so the limb point is exactly
+        // perpendicular to the view axis whatever the framing.
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+        const c = sunMesh.position.clone().project(camera);
+        const e = sunMesh.position.clone().addScaledVector(right, SUN_R).project(camera);
+        const cx = (c.x * 0.5 + 0.5) * w, cy = (-c.y * 0.5 + 0.5) * h;
+        const ex = (e.x * 0.5 + 0.5) * w, ey = (-e.y * 0.5 + 0.5) * h;
+        return { cx, cy, r: Math.hypot(ex - cx, ey - cy), w, h };
+    },
+    get flareStr() { return sunUniforms.u_flare_str.value; },
 };
 
 let _prevFrameMs = performance.now();
