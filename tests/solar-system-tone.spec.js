@@ -259,7 +259,8 @@ test.describe('solar-system.html tone mapping', () => {
             }
         }
 
-        expect(checked, 'found the fragment shaders to check').toBe(16);
+        // 15, not 16: S3 replaced the two glow shells with ONE integrated corona.
+        expect(checked, 'found the fragment shaders to check').toBe(15);
         expect(offenders, `shaders still on the raw colour pipeline:\n  ${offenders.join('\n  ')}`).toEqual([]);
     });
 

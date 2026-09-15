@@ -1286,39 +1286,118 @@ function setFlareSite({ latRad, lonRad, cls = 'M', ageS = 0, key = null }) {
 }
 
 // Sun glow shells
-const sgVS = /* glsl */`
-    varying vec3 vNormal; varying vec3 vViewDir;
-    void main(){ vNormal=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.0); vViewDir=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }
+// ── THE CORONA ────────────────────────────────────────────────────────────
+// ONE radially-integrated shell, replacing the two back-side spheres that drew
+// a bullseye (SOLAR_SYSTEM_VISUAL_REVIEW.md S3).
+//
+// WHAT THE OLD PAIR ACTUALLY DID, which is worse than the review's reading of
+// it. Both shells took alpha from pow(rim, n) with
+// rim = 1 - max(dot(normal, viewDir), 0), which the review read as peaking at
+// the sphere's own silhouette. On a BACK-SIDE sphere it does not vary at all:
+// the rendered faces are the far hemisphere, whose outward normals point AWAY
+// from the camera, so the dot product is negative, max() clamps it to 0, and
+// rim is identically 1 over every drawn fragment. The shells were flat plates
+// with hard rims. Measured on the radial profile at Sun View, in units of the
+// drawn disc radius:
+//
+//     1.25 R   132.5      1.95 R   12.6
+//     1.35 R    35.5  <-- cliff       2.05 R    0.0  <-- cliff
+//     1.35-1.85 R  35.52 EXACTLY, five annuli, a constant plate
+//     2.35 -> 3.05 R   0.2 -> 7.8, RISING again: the second shell's own rim
+//
+// A bright annulus, a cliff, a flat plate, a cliff to nothing, a gap, and then
+// a second ring further out. That is a target, not a star.
+//
+// WHAT THIS DRAWS INSTEAD. The K-corona's electron density falls steeply with
+// height; a single power law n(r) ~ r^-2.5 is a fair one-term stand-in for
+// Baumbach-Allen over the 1-3 R_sun range this scene ever shows. For a ray of
+// impact parameter b the line-of-sight column has a closed form,
+//
+//     INTEGRAL (b^2 + z^2)^(-p/2) dz  =  b^(1-p) * sqrt(pi) * G((p-1)/2)/G(p/2)
+//
+// so with p = 2.5 the column falls as b^-1.5 and NO MARCH IS NEEDED — which is
+// the point. sun.html's volumetric corona (js/corona-volumetric.js) is the
+// fidelity reference, but it is a jittered march on its own camera layer with
+// an accumulation buffer, and this page draws the Sun at ~30 px for most of a
+// session. One analytic shell is the right rung here.
+//
+// The density carries an exponential outer cutoff, exp(-(r/CORONA_SCALE)^3),
+// so the profile has a real outer boundary rather than a clipped one. That
+// cutoff is evaluated at the ray's closest approach rather than integrated
+// along it: for a power law this steep the column is concentrated within about
+// one impact parameter of closest approach (the integrand is at half its peak
+// by z = 0.8 b), so holding a slowly varying factor at r = b is a good
+// approximation and a cheap one. It is an approximation, not an identity.
+//
+// THE MESH IS MUCH BIGGER THAN THE CORONA ON PURPOSE. At the mesh radius the
+// column is ~8e-4 of its value at the limb, which is a hundredth of one 8-bit
+// count — the geometry's silhouette cannot become the visual edge, which is
+// the whole failure mode being fixed. Do not shrink the mesh to fit the glow.
+const CORONA_SCALE   = 1.9;   // R_sun — outer scale of the drawn corona
+const CORONA_MESH_R  = 5.8;   // scene units = 3.87 R_sun — the glow is already at the 8-bit floor by 3.2
+const CORONA_SEGS    = 96;    // was 24: the old outer shell read as a 24-gon
+
+const coronaVS = /* glsl */`
+    varying vec3 vWorld;
+    void main(){
+        vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
 `;
-const sgInFS = /* glsl */`${TONE_DECODE_GLSL}
+const coronaFS = /* glsl */`${TONE_DECODE_GLSL}${FLARE_EXCESS_GLSL}
     uniform float u_time;
-    varying vec3 vNormal; varying vec3 vViewDir;
+    uniform float u_flare_str;
+    varying vec3 vWorld;
+
     void main(){
-        float rim=1.0-max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
-        float a=pow(rim,1.8)*0.60;
-        float p=0.88+0.12*sin(u_time*1.8+0.6);
-        gl_FragColor=vec4(1.0,0.62,0.12,a*p);
+        // Impact parameter of this fragment's view ray about the Sun's centre,
+        // which sits at the world origin.
+        vec3  ro = cameraPosition;
+        vec3  rd = normalize(vWorld - ro);
+        float b  = length(ro + rd * dot(-ro, rd)) / ${SUN_R};   // in solar radii
+        b = max(b, 1.0);                                        // the disc is opaque
+
+        // Analytic column for n ~ r^-2.5, with the model's outer cutoff.
+        float column = pow(b, -1.5) * exp(-pow(b / ${CORONA_SCALE}, 3.0));
+
+        // A flare lights the WHOLE corona, and this is the one term on the page
+        // that is legitimately global: S2's rule is about the photosphere's
+        // white light, which comes from the ribbons and nowhere else, whereas
+        // the corona is irradiated as a body. It reads the excess over A-class
+        // background like every other event term.
+        float flareX = flareExcess(u_flare_str);
+        float pulse  = 0.94 + 0.06 * sin(u_time * 1.8 + 0.6);
+
+        // Warm at the base, paler outward: the low corona this page draws is
+        // dominated by the same warm continuum as the limb, while the K-corona
+        // further out is Thomson-scattered photospheric light and near-white.
+        vec3 warm = vec3(1.00, 0.62, 0.12);
+        vec3 pale = vec3(1.00, 0.80, 0.58);
+        vec3 col  = mix(warm, pale, smoothstep(1.0, 2.4, b));
+
+        float a = clamp(column * 0.42 * pulse * (1.0 + flareX * 0.8), 0.0, 1.0);
+        gl_FragColor = vec4(col, a);
         gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
     }
 `;
-const sgOutFS = /* glsl */`${TONE_DECODE_GLSL}
-    varying vec3 vNormal; varying vec3 vViewDir;
-    void main(){
-        float rim=1.0-max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
-        float a=pow(rim,3.5)*0.22;
-        gl_FragColor=vec4(1.0,0.48,0.06,a);
-        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-    }
-`;
-[{r:1.9,fs:sgInFS},{r:2.8,fs:sgOutFS}].forEach(({r,fs})=>{
-    scene.add(new THREE.Mesh(new THREE.SphereGeometry(r,24,24),
-        new THREE.ShaderMaterial({vertexShader:sgVS,fragmentShader:fs,uniforms:sunUniforms,
-            transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.BackSide})));
-});
+const coronaMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(CORONA_MESH_R, CORONA_SEGS, CORONA_SEGS),
+    new THREE.ShaderMaterial({
+        vertexShader: coronaVS, fragmentShader: coronaFS, uniforms: sunUniforms,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.BackSide,
+    })
+);
+coronaMesh.name = 'corona-shell';
+// Additive layers composite order-independently (dst += src*a is commutative,
+// and nothing here writes depth), so this does NOT change the picture — it is
+// declared so the intent survives a future move to a non-additive blend, where
+// it WOULD matter. What actually stopped the corona drowning the modelled
+// physics is the falloff above plus the opacity lift on the loops.
+coronaMesh.renderOrder = -1;
+scene.add(coronaMesh);
 
 // ── Chromosphere shell (r = 1.52) ─────────────────────────────────────────
 // Thin layer between photosphere (r=1.5) and inner corona (r=1.9).
@@ -2698,11 +2777,17 @@ function buildCoronalLoops(ars, sunRotY) {
         const apex  = fp1.clone().add(fp2).normalize().multiplyScalar(1.53 + h);
         const curve = new THREE.CatmullRomCurve3([fp1, apex, fp2], false, 'catmullrom', 0.5);
         const tube  = new THREE.TubeGeometry(curve, 20, 0.004, 4, false);
+        // 0.18 -> 0.30. These are the quiet-sun loops, and under the old
+        // corona they were a few hairlines against a solid orange plate — the
+        // page's modelled physics, drawn as if it were the decoration
+        // (SOLAR_SYSTEM_VISUAL_REVIEW.md S3). The integrated corona above is
+        // now much dimmer here than the flat plate was, so this lift is what
+        // the loops needed rather than a fight against it.
         const mat   = new THREE.MeshBasicMaterial({
-            color: 0x5588ee, transparent: true, opacity: 0.18,
+            color: 0x5588ee, transparent: true, opacity: 0.30,
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
-        mat.userData.baseOpacity = 0.18;
+        mat.userData.baseOpacity = 0.30;
         const mesh  = new THREE.Mesh(tube, mat);
         sunFrame.add(mesh);
         coronalLoopMeshes.push(mesh);
@@ -2990,10 +3075,10 @@ function buildProminences(ars, sunRotY) {
         // Outer coronal sheath: hot blue cavity surrounding the flux rope
         const envGeo = new THREE.TubeGeometry(curve, 44, 0.032, 7, false);
         const envMat = new THREE.MeshBasicMaterial({
-            color: 0x3366dd, transparent: true, opacity: 0.20,
+            color: 0x3366dd, transparent: true, opacity: 0.32,
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
-        envMat.userData.baseOpacity = 0.20;
+        envMat.userData.baseOpacity = 0.32;   // S3: was 0.20, lost inside the old corona plate
 
         // Dense H-alpha core: cool, draped plasma
         const coreGeo = new THREE.TubeGeometry(curve, 44, 0.013, 6, false);

@@ -2,9 +2,9 @@
 
 **Page:** `solar-system.html` (4008 lines) + `js/neo-*.js`, `js/flare-*.js`
 **Reviewed:** 2026-09-14, at `8e72cf8` (flare geometry kernel) on a software rasteriser
-**Status:** review complete. Three findings are now implemented — **L2**, the
-CME (see §3.2), **S1**, the colour pipeline (see §1.1), and **S2**, the flare
-response (see §1.2) — everything else is still the plan.
+**Status:** review complete. Four findings are now implemented — **L2**, the CME
+(see §3.2), **S1**, the colour pipeline (§1.1), **S2**, the flare response
+(§1.2), and **S3**, the corona (§1.3) — everything else is still the plan.
 
 > **Scope note.** This is a review of the *visuals*, in three areas the author
 > named: the Sun's animation, near-Earth objects, and flare propagation + NEOs
@@ -303,7 +303,47 @@ Two further consequences:
   screenshots show the arcade as a few grey hairlines against a solid orange
   plate.
 
-**Plan — S3.** Replace the two shells with **one** radially-integrated corona:
+**Plan — S3. ✅ IMPLEMENTED 2026-09-15.** Gated by
+`tests/solar-system-corona.spec.js`, verified to fail on the pre-fix tree.
+
+**THE SHELLS WERE WORSE THAN THIS FINDING SAYS, and the reason is worth
+keeping.** `pow(rim, n)` does not peak at the sphere's silhouette on a
+BACK-SIDE sphere — it does not vary at all. The rendered faces are the far
+hemisphere, whose outward normals point away from the camera, so
+`dot(normal, viewDir)` is negative, `max(…, 0.0)` clamps it to zero, and `rim`
+is identically 1 over every drawn fragment. Both shells were flat plates with
+hard rims. The radial profile at Sun View, in units of the drawn disc radius,
+with everything but the Sun and its shells hidden:
+
+| radius | before | after |
+|---|---|---|
+| 1.15 R | — | 51.7 |
+| 1.25 R | 132.5 | 43.5 |
+| 1.35 R | **35.5** ← a 73 % cliff in one step | 36.8 |
+| 1.35–1.85 R | **35.52 EXACTLY, five annuli — a plate** | 31.1 → 15.4, falling |
+| 1.95 R | 12.6 | 12.7 |
+| 2.05 R | **0.0** ← a second cliff, to nothing | 10.4 |
+| 2.35 → 3.05 R | **0.2 → 7.8, RISING** — the second shell's own rim | 5.4 → 1.0, falling |
+| 3.25 R | 3.0 | 0.2 |
+
+A bright annulus, a cliff, a flat plate, a cliff to nothing, a gap, and then a
+second ring further out. After: one analytic shell falling monotonically to the
+8-bit floor with no step anywhere.
+
+**THE PROFILE'S END IS THE DENSITY MODEL, NOT THE MESH** — which is the
+property this finding is really about. Verified by moving the mesh from 3.33 to
+3.87 R☉ and re-measuring: the profile did not move by a single count. The gate
+asserts it against the shell's LIVE radius, so shrinking the mesh to fit the
+glow fails there rather than looking tidy.
+
+**Two measurement notes for whoever edits the gate.** The sample is a WEDGE
+about +x, not an annulus: an element screenshot includes whatever DOM is
+painted over the canvas, and past ~2.7 R the bottom overlay alone turned a
+falling profile into a rising one (21 counts in the south sector against 1 in
+the east). And the drawn corona is spherically symmetric by construction, so
+one clean wedge is the whole story.
+
+Replace the two shells with **one** radially-integrated corona:
 
 - a single back-side sphere at a generous radius with a fragment shader that
   integrates a `r^-2.5`-ish density along the view ray and **fades to zero well
@@ -318,6 +358,25 @@ The visual reference is `sun.html`'s volumetric corona
 (`js/corona-volumetric.js`), **but do not import it** — that is a full march on
 camera layer 1 with an accumulation buffer, and the orrery draws the Sun at
 30 px for most of a session. A single integrated shell is the right rung here.
+
+**How it is drawn, and the one approximation in it.** The column has a CLOSED
+FORM, so there is no march at all: for a density n(r) ∝ r^−p and a ray of
+impact parameter b, ∫(b² + z²)^(−p/2) dz = b^(1−p)·√π·Γ((p−1)/2)/Γ(p/2), so at
+p = 2.5 the column falls as b^−1.5. The density carries an exponential outer
+cutoff so the profile has a real boundary rather than a clipped one, and that
+cutoff is evaluated at the ray's closest approach rather than integrated along
+it — for a power law this steep the column is concentrated within about one
+impact parameter of closest approach (the integrand is at half its peak by
+z = 0.8 b), so holding a slowly varying factor at r = b is a good approximation
+and a cheap one. It is an approximation, not an identity, and the shader says so.
+
+**On the `renderOrder` bullet.** It is set, but it is NOT what fixed anything,
+and the plan was wrong to expect it to: these layers are additive with
+`depthWrite: false`, and `dst += src·a` is commutative, so the composite is
+order-independent. What actually stopped the corona drowning the modelled
+physics is the falloff plus the opacity lift (quiet-sun loops 0.18 → 0.30,
+prominence envelopes 0.20 → 0.32). The declaration stays so the intent survives
+a future move to a non-additive blend, where it would matter.
 
 ### 1.4 Smaller Sun findings
 
@@ -561,7 +620,7 @@ easier to judge.
 | 1 | **U1** (backdrop gate) | One line. Until it is fixed, every visual judgement on this page is made through a 45 % grey filter — including the next four steps'. |
 | 2 | ✅ **S1** (tone mapping + exposure, all shaders, one commit) + its gate — **DONE 2026-09-15** | Nothing else in §1 can be evaluated while the disc is 100 % clipped. Highest leverage on the page. |
 | 3 | ✅ **S2** (localise the flare terms) — **DONE 2026-09-15** | Depends on S1 to be visible at all. Turns an X-class from a lighting change into an event, and gives the page its sunspots back on ordinary C-class days. |
-| 4 | **S3** (one integrated corona) + **S5** (wire in the existing ring/ribbon modules) | The bullseye is the most-seen defect; S5 is nearly free once the corona stops drowning it. |
+| 4 | ✅ **S3** (one integrated corona) — **DONE 2026-09-15** — + **S5** (wire in the existing ring/ribbon modules) | The bullseye is the most-seen defect; S5 is nearly free once the corona stops drowning it. |
 | 5 | **L1** (layer panel + three presets) | Architecture the rest hangs off; also the honest fix for "too much is on at once". |
 | 6 | **L2** (CME as a propagating front on the sim clock) + its gate | The largest single gain in what the page *says*, and the one place the picture currently contradicts the HUD. |
 | 7 | **N1 · N2 · N3** (palette affordance, label declutter, selection framing) | Polish on an already-good layer. |
