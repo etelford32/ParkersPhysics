@@ -19,11 +19,13 @@
 //! Source-surface radius is exposed as a parameter so sun.html can wire
 //! it to a UI knob (1.5..3.5 R☉ is a sensible range; standard PFSS = 2.5).
 
-mod vec3;
-mod field;
-mod trace;
-mod seed;
-mod pil;
+// `pub` so tests/ can measure the tracer directly. The WASM surface is still
+// just `compute_field_lines` + `trace_stats`; nothing here is exported to JS.
+pub mod vec3;
+pub mod field;
+pub mod trace;
+pub mod seed;
+pub mod pil;
 
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;

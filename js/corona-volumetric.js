@@ -84,11 +84,57 @@ export const EUV_CHANNELS = {
     '304':   { logT: 4.70, sigma: 0.08, color: [1.00, 0.55, 0.30], photDim: 0.35, filOpacity: 0.5, label: '304 Å · He II · 50 kK · chromo + prom' },
 };
 
+/**
+ * The channel's temperature response at log10(T/K) — the JS mirror of the
+ * GLSL `channelResponse` below, and THE single place the page asks "would
+ * this channel see plasma at this temperature".
+ *
+ * Exported because more than the raymarcher needs it: the photosphere shader's
+ * nanoflare campfires (sun.html sunFS, js/sun-nanoflares.js `peakLogT`) are
+ * weighted by exactly this, so "171 is full of campfires, 131 has almost none"
+ * falls out of ONE table instead of six hand-set constants. Change the table
+ * and every consumer moves together — which is the point.
+ *
+ * Gaussian in log T, as the shader does it. The real AIA responses are bimodal
+ * in places (171 and 131 both have cool secondary peaks); collapsing to the
+ * dominant peak is a deliberate simplification stated in this file's header,
+ * and it is the same simplification on both sides of the mirror.
+ *
+ * @param {number} logT  log10(T/K)
+ * @param {string|{logT:number,sigma:number}} channel  key into EUV_CHANNELS
+ * @returns {number} 0..1
+ */
+export function channelResponseAt(logT, channel) {
+    const ch = typeof channel === 'string' ? EUV_CHANNELS[channel] : channel;
+    if (!ch || !(ch.sigma > 1e-3)) return 0;      // 'white' has no response — a continuum image is not a passband
+    const d = (logT - ch.logT) / ch.sigma;
+    return Math.exp(-0.5 * d * d);
+}
+
 // Number of slots reserved in the shader uniforms for active regions /
 // coronal holes.  Match these to the corresponding caps in sun-shader.js
 // (u_regions array length) and SunSkin.setHoles().
 export const N_AR_SLOTS    = 8;
 export const N_HOLE_SLOTS  = 4;
+/**
+ * Nanoflare spark slots. The population is ~768 live sparks (sun.html's pool),
+ * which cannot go in uniforms — so the volume carries the N BRIGHTEST and the
+ * readout keeps quoting the population's own rate, never the drawn count.
+ * The truncation is a rendering limit and is stated as one; it is not a claim
+ * that the corona has twelve nanoflares in it.
+ */
+export const N_SPARK_SLOTS = 12;
+
+/**
+ * The radius a spark is drawn at, R☉. NOT its physical size — the kernel says
+ * a 10²⁴ erg event is ~1000 km (0.0014 R☉) and the fine march's step here is
+ * ~0.03 R☉, so a true-size spark would fall between two samples and integrate
+ * to nothing. This is the march's own resolution, disclosed, the same way the
+ * photosphere shader's campfire marks sit on a visibility floor. ENERGY is
+ * carried by amplitude and by peak temperature, neither of which is
+ * resolution-limited, so nothing about the physics rides on this number.
+ */
+export const SPARK_R_RSUN = 0.018;
 
 // ── Vertex shader ───────────────────────────────────────────────────────────
 //
@@ -153,6 +199,12 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform float u_loopGain;           // arcade emission gain
     uniform float u_jitter;             // per-frame ray-start phase (golden-ratio sequence)
     uniform float u_marchLegacy;        // 1 = the pre-Phase-3 single 12-step chord march (A/B + perf reference)
+
+    // Nanoflare sparks as transient hot DEM pulses (js/sun-nanoflares.js is
+    // the one oracle for their statistics; sun.html owns the pool).
+    uniform vec4  u_sparks[${N_SPARK_SLOTS}];    // (x, y, z, amplitude 0..1) sun-local R☉
+    uniform vec2  u_sparkTP[${N_SPARK_SLOTS}];   // (log10 T_peak, radius R☉)
+    uniform int   u_nSparks;
 
     varying vec3 vWorldPos;
 
@@ -265,6 +317,33 @@ export const CORONA_VOL_FRAG = /* glsl */`
             emission += loopCol * loopResp * 9.0;
         }
         float openHole = clamp(ld.y * 1.4, 0.0, 1.0) * exp(-h / 0.5);
+
+        // ── Nanoflare sparks as transient hot DEM pulses ──────────────────
+        // These used to be additive point SPRITES in sun.html, drawn over
+        // everything: they could not be occluded by a filament in front of
+        // them, they could not be hidden behind the limb, and they were the
+        // same colour whatever channel you were looking at — which is the one
+        // thing a 10²³–10²⁷ erg event is NOT (see js/sun-nanoflares.js
+        // peakLogT). As DEM pulses inside this march they get all three for
+        // free: front-to-back transmission attenuates them, the photospheric
+        // occluder cuts the ray, and channelResponse decides per channel.
+        //
+        // A spark is a LOOP being heated, so it rides the CLOSED-line density:
+        // where the atlas says there is no closed field there is no loop to
+        // heat. With no atlas at all (offline, CI, no ARs) the gate opens to 1
+        // so the sparks still draw — the same analytic-fallback rule the
+        // arcades follow, because offline must still show a corona.
+        for (int k = 0; k < ${N_SPARK_SLOTS}; k++) {
+            if (k >= u_nSparks) break;
+            float sAmp = u_sparks[k].w;
+            if (sAmp < 0.01) continue;
+            vec3  dsp  = p_local - u_sparks[k].xyz;
+            float sR   = max(u_sparkTP[k].y, 1e-4);
+            float q2   = dot(dsp, dsp) / (sR * sR);
+            if (q2 > 9.0) continue;                       // 3σ — beyond it the Gaussian is 1 %
+            float loopGate = (u_loopOn > 0.5) ? clamp(ld.x * 4.0, 0.12, 1.0) : 1.0;
+            emission += exp(-0.5 * q2) * sAmp * loopGate * channelResponse(u_sparkTP[k].x) * 26.0;
+        }
 
         // ── Combined per-AR contribution ─────────────────────────────────
         for (int k = 0; k < ${N_AR_SLOTS}; k++) {

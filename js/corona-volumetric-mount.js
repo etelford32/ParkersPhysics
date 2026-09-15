@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import {
-    EUV_CHANNELS, N_AR_SLOTS, N_HOLE_SLOTS,
+    EUV_CHANNELS, N_AR_SLOTS, N_HOLE_SLOTS, N_SPARK_SLOTS, SPARK_R_RSUN,
     CORONA_VOL_VERT, CORONA_VOL_FRAG,
 } from './corona-volumetric.js';
 
@@ -41,6 +41,12 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
     for (let i = 0; i < N_AR_SLOTS; i++) u_regions.push(new THREE.Vector4(0, 0, 0, 0));
     const u_holes = [];
     for (let i = 0; i < N_HOLE_SLOTS; i++) u_holes.push(new THREE.Vector4(0, 0, 0, 0));
+    // Nanoflare spark slots — see N_SPARK_SLOTS in corona-volumetric.js for
+    // why there are only a dozen and what the readout quotes instead.
+    const u_sparks = [];
+    for (let i = 0; i < N_SPARK_SLOTS; i++) u_sparks.push(new THREE.Vector4(0, 0, 0, 0));
+    const u_sparkTP = [];
+    for (let i = 0; i < N_SPARK_SLOTS; i++) u_sparkTP.push(new THREE.Vector2(6.0, SPARK_R_RSUN));
 
     // Build the uniform set. Where compatible we share *the same uniform
     // object* with the host page (e.g. u_time, u_activity) so a single
@@ -58,6 +64,9 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
 
         u_regions:            { value: u_regions },
         u_nRegions:           { value: 0 },
+        u_sparks:             { value: u_sparks },
+        u_sparkTP:            { value: u_sparkTP },
+        u_nSparks:            { value: 0 },
         u_holes:              { value: u_holes },
         u_nHoles:             { value: 0 },
 
@@ -199,6 +208,30 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
                 }
             }
             uniforms.u_nHoles.value = hs.length;
+        },
+
+        /**
+         * Hand the volume the brightest live nanoflare sparks, as transient hot
+         * DEM pulses. Positions are SUN-LOCAL WORLD coordinates in R☉ — the
+         * caller must have applied the photosphere's rotation already, because
+         * this shader marches in the world frame and the spark pool lives in a
+         * co-rotating one. Getting that wrong leaves the sparks lagging the
+         * surface they were anchored to.
+         *
+         * @param {Array<{x:number,y:number,z:number,amp:number,logT:number,radius?:number}>} sparks
+         */
+        setSparks(sparks) {
+            const list = (sparks || []).slice(0, N_SPARK_SLOTS);
+            for (let i = 0; i < N_SPARK_SLOTS; i++) {
+                if (i < list.length) {
+                    const s = list[i];
+                    u_sparks[i].set(s.x, s.y, s.z, Math.max(0, Math.min(1, s.amp || 0)));
+                    u_sparkTP[i].set(s.logT ?? 6.0, s.radius ?? SPARK_R_RSUN);
+                } else {
+                    u_sparks[i].set(0, 0, 0, 0);
+                }
+            }
+            uniforms.u_nSparks.value = list.length;
         },
 
         /** Sync the (lat, lon) of the most recent flare. */

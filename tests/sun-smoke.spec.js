@@ -340,7 +340,10 @@ test.describe('sun.html smoke', () => {
         expect(st.kind).toBe(0);
         expect(st.state.channel).toBe('white');
         expect(st.state.pAngleApplied, 'P is exposed, not applied').toBe(false);
-        expect(st.chip).toMatch(/^OBSERVED · SDO\/HMI continuum · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · 7 min old$/);
+        // The chip carries BOTH sources: the disk's provenance, then the
+        // off-limb annulus's (js/sun-offlimb.js). Anchored at the start so the
+        // disk half cannot drift; the suffix is asserted on its own below.
+        expect(st.chip).toMatch(/^OBSERVED · SDO\/HMI continuum · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · 7 min old/);
         expect(st.cls).toContain('prov-observed');
         // Disk geometry is MEASURED from the frame (synthetic HMI: r = 0.465 of the frame).
         expect(st.state.geometry).toBe('measured');
@@ -475,5 +478,291 @@ test.describe('sun.html smoke', () => {
         expect(st.on).toBe(0);
         expect(st.rot).toBe(1);
         expect(st.chip).toMatch(/^MODEL · procedural photosphere$/);
+    });
+
+    // ── OBSERVED OFF-LIMB ANNULUS (js/sun-offlimb.js, plan Phase 3b) ────────
+    // The physics argument is in that module's header: an off-limb EUV pixel
+    // is a line integral and plane-of-sky is its native geometry, so the
+    // 1.0-1.6 R☉ ring of the live 304 + 131 frames is drawn on the plane
+    // through Sun centre normal to the Sun-Earth line. These gates pin the
+    // three things that make that honest rather than decorative: the plane is
+    // in the OBSERVER's frame, it fades when the viewer leaves that frame, and
+    // the chip never claims a layer that is not drawing.
+
+    test('off-limb: both channels load, the plane is normal to the Sun-Earth line, and the chip names them', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        const hits = await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(
+            () => (window.__sun.offLimb?.channels || []).filter(c => c.ok).length === 2,
+            { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.frames > 5, { timeout: BOOT_TIMEOUT_MS });
+
+        expect(hits, 'the layer fetches its own two channels').toEqual(expect.arrayContaining(['304', '131']));
+
+        const st = await page.evaluate(() => {
+            const m = window.__sun.offLimbMesh;
+            // The mesh's +Z is the plane normal by construction (observerBasis).
+            const n = new window.__sun.THREE.Vector3(0, 0, 1).applyQuaternion(m.quaternion);
+            const u = m.material.uniforms;
+            return {
+                state: window.__sun.offLimb,
+                visible: m.visible,
+                normal: n.toArray(),
+                axis: u.u_axis.value,
+                diff: u.u_diff.value,
+                onA: u.u_onA.value, onB: u.u_onB.value,
+                refA: u.u_refA.value, refB: u.u_refB.value,
+                geomA: u.u_geomA.value.toArray(),
+                radial: u.u_radial.value.toArray(),
+                camera: window.__sun.camera.position.toArray(),
+                chip: document.getElementById('sun-provenance').textContent,
+            };
+        });
+
+        expect(st.onA).toBe(1);
+        expect(st.onB).toBe(1);
+        expect(st.visible, 'the annulus draws').toBe(true);
+        // Reference-shell photometry succeeded on both frames — a layer that
+        // could not measure its own unit must NOT draw (the REF_FLOOR guard).
+        expect(st.refA).toBeGreaterThan(0);
+        expect(st.refB).toBeGreaterThan(0);
+
+        // THE PLANE IS IN THE OBSERVER'S FRAME. Its normal is Earth's
+        // direction (0, sin B0, cos B0) — not the camera's, not the sphere's.
+        const b0 = solarEphemeris(new Date()).b0Deg * Math.PI / 180;
+        expect(Math.abs(st.normal[0])).toBeLessThan(1e-6);
+        expect(Math.abs(st.normal[1] - Math.sin(b0))).toBeLessThan(2e-3);
+        expect(Math.abs(st.normal[2] - Math.cos(b0))).toBeLessThan(2e-3);
+
+        // The annulus spans the limb to 1.6 R☉ — the sphere is radius 1, so an
+        // inner radius at or inside 1 would fight the observed disk.
+        expect(st.radial[0]).toBe(1);
+        expect(st.radial[2]).toBeCloseTo(1.6, 6);
+        // The AIA disk fraction is MEASURED per frame (synthetic AIA: 0.390).
+        expect(Math.abs(st.geomA[2] - 0.390)).toBeLessThan(0.390 * 0.02);
+
+        // The load camera sits ON the Sun-Earth line, so the plane-of-sky the
+        // frame encodes IS the viewer's and the layer is at full weight.
+        expect(st.axis).toBeGreaterThan(0.99);
+        expect(st.diff).toBe(0);
+        expect(st.chip).toContain(' · off-limb 304+131');
+
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no errors on the off-limb path').toHaveLength(0);
+    });
+
+    test('off-limb: fades out as the camera leaves the Sun-Earth line, and the chip says so', async ({ page }) => {
+        await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(
+            () => (window.__sun.offLimb?.channels || []).some(c => c.ok), { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.offLimbMesh?.visible === true, { timeout: BOOT_TIMEOUT_MS });
+
+        // Orbit 70° off the Sun-Earth line. The plane is then seen nearly
+        // edge-on: holding the frame there would be a claim about 3-D
+        // structure a plane-of-sky integral does not carry.
+        // autoRotate off first, or the camera drifts back out from under the
+        // assertion while the software rasteriser takes its time.
+        await page.evaluate(() => { window.__sun.controls.autoRotate = false; });
+        await page.evaluate(() => {
+            const r = window.__sun.camera.position.length();
+            const a = 70 * Math.PI / 180;
+            window.__sun.camera.position.set(Math.sin(a) * r, 0, Math.cos(a) * r);
+            window.__sun.camera.lookAt(0, 0, 0);
+        });
+        await page.waitForFunction(() => window.__sun.offLimbMesh?.visible === false, { timeout: BOOT_TIMEOUT_MS });
+        const off = await page.evaluate(() => ({
+            axis: window.__sun.offLimbMesh.material.uniforms.u_axis.value,
+            chip: document.getElementById('sun-provenance').textContent,
+        }));
+        expect(off.axis).toBe(0);
+        // Faded out is NOT the same as absent — the chip must not let a blank
+        // sky imply a quiet Sun.
+        expect(off.chip).toContain('(off-axis)');
+
+        // Back on the line, it comes back. (Not a one-way gate.)
+        await page.evaluate(() => {
+            const r = window.__sun.camera.position.length();
+            window.__sun.camera.position.set(0, 0, r);
+            window.__sun.camera.lookAt(0, 0, 0);
+        });
+        await page.waitForFunction(() => window.__sun.offLimbMesh?.visible === true, { timeout: BOOT_TIMEOUT_MS });
+        const back = await page.evaluate(() => window.__sun.offLimbMesh.material.uniforms.u_axis.value);
+        expect(back).toBeGreaterThan(0.9);
+    });
+
+    test('off-limb: running difference needs two distinct observations and says so until it has them', async ({ page }) => {
+        await routeAiaToFixtures(page);
+        await page.goto(PAGE + '?offlimb=diff');
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(
+            () => (window.__sun.offLimb?.channels || []).some(c => c.ok), { timeout: BOOT_TIMEOUT_MS });
+        const st = await page.evaluate(() => ({
+            diff: window.__sun.offLimbMesh.material.uniforms.u_diff.value,
+            state: window.__sun.offLimb,
+            chip: document.getElementById('sun-provenance').textContent,
+        }));
+        expect(st.diff).toBe(1);
+        // One observation in hand: a difference against itself is not a
+        // difference, and the chip refuses to imply a quiet corona.
+        expect(st.state.diffReady).toBe(false);
+        expect(st.chip).toContain('(awaiting next frame)');
+        expect(st.chip).toMatch(/· off-limb Δ304\+131/);
+    });
+
+    test('off-limb: the PLANTED off-limb features render where the frame put them', async ({ page }) => {
+        // THE END-TO-END GATE. Everything above checks state and uniforms; this
+        // one goes through the real shader to the real pixels, and it is what
+        // catches a handedness error — the class of bug that mirrored every
+        // SWPC flare for months (CLAUDE.md, Stonyhurst is west-positive).
+        //
+        // The fixture generator plants two off-limb features at KNOWN
+        // plane-of-sky positions (scripts/lib/sdo-synth.mjs PLANTED_OFFLIMB):
+        // a 304 prominence off the EAST limb and a 131 arcade off the WEST.
+        // Each must render bright at its own position and not at a
+        // feature-free reference point on the same annulus radius.
+        //
+        // Self-validating: the same measurement runs with the layer OFF, and
+        // the contrast must collapse. A gate that has stopped seeing the layer
+        // fails instead of passing.
+        await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(
+            () => (window.__sun.offLimb?.channels || []).filter(c => c.ok).length === 2,
+            { timeout: BOOT_TIMEOUT_MS });
+        await page.evaluate(() => { window.__sun.controls.autoRotate = false; });
+        await page.waitForFunction(() => window.__sun.frames > 20, { timeout: BOOT_TIMEOUT_MS });
+
+        const PROBES = {
+            prom:   [-1.18,  0.10],      // PROM-E   (304, east limb)
+            arcade: [ 1.14, -0.22],      // ARCADE-W (131, west limb)
+            // Each feature's MIRROR in x. A mapping that flipped handedness
+            // would light these instead. They are far enough from the other
+            // feature (0.32 R☉, >4σ) that neither leaks into the other.
+            promX:   [ 1.18,  0.10],
+            arcadeX: [-1.14, -0.22],
+            refUp:  [ 0.00,  1.18],      // feature-free, same annulus
+            refDn:  [ 0.00, -1.18],
+        };
+
+        /** Plane-of-sky (R☉) → screen pixels, through the page's own camera. */
+        const screenOf = (probes) => page.evaluate(({ probes }) => {
+            const T = window.__sun.THREE, cam = window.__sun.camera;
+            const el = window.__sun.renderer.domElement;
+            const r = el.getBoundingClientRect();
+            const b = window.__sun.offLimbMesh.quaternion;
+            const out = {};
+            for (const [k, [x, y]] of Object.entries(probes)) {
+                // The mesh's own basis IS the plane-of-sky frame, so the probe
+                // goes through the same transform the shader's vPlane does.
+                const v = new T.Vector3(x, y, 0).applyQuaternion(b).project(cam);
+                out[k] = [Math.round((v.x * 0.5 + 0.5) * r.width), Math.round((-v.y * 0.5 + 0.5) * r.height)];
+            }
+            return out;
+        }, { probes });
+
+        /** Median luminance in a small patch of a screenshot, per probe. */
+        const sample = (b64, pts) => page.evaluate(async ({ b64, pts }) => {
+            const img = new Image();
+            await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = 'data:image/png;base64,' + b64; });
+            const c = document.createElement('canvas');
+            c.width = img.width; c.height = img.height;
+            const g = c.getContext('2d', { willReadFrequently: true });
+            g.drawImage(img, 0, 0);
+            const { data, width: W, height: H } = g.getImageData(0, 0, c.width, c.height);
+            const out = {};
+            for (const [k, [px, py]] of Object.entries(pts)) {
+                const vals = [];
+                for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+                    const x = px + dx, y = py + dy;
+                    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+                    const i = (y * W + x) * 4;
+                    vals.push(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]);
+                }
+                vals.sort((a, b) => a - b);
+                out[k] = vals.length ? vals[vals.length >> 1] : 0;
+            }
+            return out;
+        }, { b64, pts });
+
+        // HIDE THE DOM. page.screenshot() captures the page, not the canvas, so
+        // the HUD panels that overlay it land in the measurement — which is
+        // how the first version of this gate read 227 (a bright panel) at a
+        // probe that should have been empty sky. `visibility` is inherited, so
+        // hiding everything and re-showing the canvas leaves the canvas visible
+        // in place with its layout untouched.
+        await page.addStyleTag({ content: 'body *{visibility:hidden!important} canvas{visibility:visible!important}' });
+        const canvas = await page.locator('canvas').first().boundingBox();
+        const pts = await screenOf(PROBES);
+        const on = await sample((await page.screenshot({ clip: canvas })).toString('base64'), pts);
+
+        // Turn the layer off and measure the same pixels. Anything left is the
+        // scene underneath (bloom skirt, K-corona), which is what we divide out.
+        await page.evaluate(() => { window.__sun.offLimbCtl.setEnabled(false); });
+        await page.waitForFunction(() => window.__sun.offLimbMesh.visible === false, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.frames > 30, { timeout: BOOT_TIMEOUT_MS });
+        const off = await sample((await page.screenshot({ clip: canvas })).toString('base64'), pts);
+
+        const added = (k) => Math.max(0, on[k] - off[k]);
+        const ref = Math.max(added('refUp'), added('refDn'), 1e-3);
+        // eslint-disable-next-line no-console
+        console.log('off-limb probes (on/off/added):', Object.fromEntries(
+            Object.keys(PROBES).map(k => [k, [on[k].toFixed(1), off[k].toFixed(1), added(k).toFixed(1)]])));
+
+        // The layer contributes SOMETHING everywhere on the annulus (the quiet
+        // corona is real signal, not zero) …
+        expect(added('refUp'), 'the quiet annulus draws').toBeGreaterThan(0.5);
+        // … and much more where the frame actually has a feature.
+        expect(added('prom') / ref, 'the 304 prominence is on the annulus').toBeGreaterThan(2.0);
+        expect(added('arcade') / ref, 'the 131 arcade is on the annulus').toBeGreaterThan(1.5);
+        // HANDEDNESS. Each feature must beat ITS OWN MIRROR, not the other
+        // feature: the two channels normalise by their own reference shells
+        // (131's quiet corona is fainter, so its feature stands out more), so
+        // comparing them to each other measures the fixture, not the mapping.
+        expect(added('prom'), `304 prominence EAST not west (east ${added('prom').toFixed(1)} vs west ${added('promX').toFixed(1)})`)
+            .toBeGreaterThan(added('promX') * 2);
+        expect(added('arcade'), `131 arcade WEST not east (west ${added('arcade').toFixed(1)} vs east ${added('arcadeX').toFixed(1)})`)
+            .toBeGreaterThan(added('arcadeX') * 2);
+    });
+
+    test('off-limb: MODEL mode and a dead feed both remove the layer AND its claim', async ({ page }) => {
+        await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.offLimbMesh?.visible === true, { timeout: BOOT_TIMEOUT_MS });
+        // Chip click → Model. The annulus is the same observation as the disk,
+        // so it must go with it; an observed ring over a procedural disk would
+        // be the chip lying by omission.
+        await page.click('#sun-provenance');
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'model', { timeout: BOOT_TIMEOUT_MS });
+        const model = await page.evaluate(() => ({
+            visible: window.__sun.offLimbMesh.visible,
+            enabled: window.__sun.offLimb.enabled,
+            chip: document.getElementById('sun-provenance').textContent,
+        }));
+        expect(model.enabled).toBe(false);
+        expect(model.visible).toBe(false);
+        expect(model.chip).not.toContain('off-limb');
+    });
+
+    test('off-limb: a dead feed draws nothing and does not claim a corona', async ({ page }) => {
+        await routeAiaDown(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'model', { timeout: BOOT_TIMEOUT_MS });
+        const st = await page.evaluate(() => ({
+            visible: window.__sun.offLimbMesh?.visible,
+            channels: window.__sun.offLimb?.channels,
+            chip: document.getElementById('sun-provenance').textContent,
+        }));
+        expect(st.visible).toBe(false);
+        expect(st.channels.every(c => !c.ok), 'no channel calibrated').toBe(true);
+        // Feeds down must look down (plan §5.4) — never a quiet sky.
+        expect(st.chip).toMatch(/^MODEL/);
     });
 });

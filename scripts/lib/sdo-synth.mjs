@@ -22,6 +22,43 @@ export const PLANTED = Object.freeze([
     { id: 'AR-C', latDeg: 22, lonDeg: -60, areaMh: 140, polarity: +1 },
 ]);
 
+/**
+ * Planted OFF-LIMB features, in PLANE-OF-SKY coordinates (R☉ from disk centre,
+ * +x image right, +y image up) — the frame the off-limb annulus layer works in
+ * (js/sun-offlimb.js). Ground truth for `tests/sun-smoke.spec.js`: the annulus
+ * must be bright where the generator put a feature and dark a quadrant away,
+ * which is what pins the plane→frame mapping. Heliographic coordinates would
+ * be the wrong frame here — an off-limb pixel is a line integral and does not
+ * belong to a point on the sphere.
+ */
+export const PLANTED_OFFLIMB = Object.freeze([
+    // A 304 Å prominence off the EAST limb (image left), the classic bright arc.
+    { id: 'PROM-E', channel: '304', x: -1.18, y: 0.10, sigma: 0.075, amp: 0.85 },
+    // A 131 Å post-flare loop arcade off the WEST limb (image right).
+    { id: 'ARCADE-W', channel: '131', x: 1.14, y: -0.22, sigma: 0.060, amp: 0.90 },
+]);
+
+/**
+ * Per-channel off-limb corona: amplitude at the limb and an e-folding height.
+ * These are SYNTHETIC stand-ins, but they are the right order for a browse
+ * product: 304 carries a bright narrow limb ring (spicule forest + prominence
+ * material), the coronal channels a fainter, deeper corona, and the flare
+ * channels least of all when nothing is flaring. The first version of this
+ * generator used ONE faint halo (0.10·e^(−6(ρ−1))) for every AIA channel,
+ * which put the 304 reference shell within a code value or two of black —
+ * so js/sun-offlimb.js's calibration refused the frame and the browser gate
+ * failed on 304 while passing on 131. A fixture that cannot exercise the
+ * layer is not a fixture.
+ */
+const OFFLIMB_CORONA = Object.freeze({
+    '304': { amp: 0.42, scale: 0.13 },
+    '171': { amp: 0.26, scale: 0.20 },
+    '193': { amp: 0.24, scale: 0.22 },
+    '211': { amp: 0.22, scale: 0.22 },
+    '131': { amp: 0.14, scale: 0.26 },
+    '94':  { amp: 0.12, scale: 0.26 },
+});
+
 /** Fixture epoch → B0 is what the projection must apply; keep it non-zero. */
 export const FIXTURE_EPOCH_ISO = '2026-09-06T12:00:00Z';
 
@@ -83,7 +120,20 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
                     R = G = B = Math.round(255 * Math.min(1, Math.max(0, m)));
                 }
             } else {                                                  // AIA EUV
-                const halo = rho >= 1 ? 0.10 * Math.exp(-(rho - 1) * 6) : 0;
+                // Off-limb corona + any planted off-limb feature. Optically
+                // thin emission is plane-of-sky, so both are drawn in ρ (the
+                // plane-of-sky radius) and never projected onto the sphere.
+                const oc = OFFLIMB_CORONA[String(channel)] || { amp: 0.18, scale: 0.20 };
+                let halo = 0;
+                if (rho >= 1) {
+                    halo = oc.amp * Math.exp(-(rho - 1) / oc.scale);
+                    for (const f of PLANTED_OFFLIMB) {
+                        if (f.channel !== String(channel)) continue;
+                        // Plane-of-sky offset in R☉: +x image right, +y image up.
+                        const fx = dx / r - f.x, fy = -(dy / r) - f.y;
+                        halo += f.amp * Math.exp(-(fx * fx + fy * fy) / (2 * f.sigma * f.sigma));
+                    }
+                }
                 let I = halo;
                 if (rho < 1) {
                     const mu = Math.sqrt(Math.max(0, 1 - rho * rho));
@@ -113,6 +163,8 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
             synthetic: true, channel: String(channel), code: ch.code, instrument: ch.instrument,
             epoch: FIXTURE_EPOCH_ISO, b0Deg, geom: { cx: geom.cx, cy: geom.cy, r },
             planted: spots.map(s => ({ id: s.id, latDeg: s.latDeg, lonDeg: s.lonDeg, px: s.px, py: s.py, visible: s.visible })),
+            plantedOffLimb: PLANTED_OFFLIMB.filter(f => f.channel === String(channel))
+                .map(f => ({ id: f.id, x: f.x, y: f.y, sigma: f.sigma })),
         },
     };
 }

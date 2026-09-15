@@ -324,6 +324,173 @@ in §1 are locked by the repo owner.*
   discharged by this (measured in-browser rather than in node, because the
   solver is GPU-only); the cube-sphere domain is still open.
 
+- **2026-09-15 — Phase 3b: the OBSERVED corona, off the limb (done).**
+  `js/sun-observed.js` stopped at the limb, so everything the SDO frame carries
+  outside ρ = 1 — prominences, post-flare arcades, streamer bases, every
+  dimming and every eruption — was being thrown away. `js/sun-offlimb.js`
+  (PURE half + `SunOffLimb`; `tests/sun-offlimb.mjs`, 17 checks) draws the
+  1.0–1.6 R☉ annulus of the live **304 + 131** frames on a plane through Sun
+  centre normal to the Sun–Earth line, additively, occluded by the
+  photosphere, with a running-difference mode.
+
+  **Why a plane is the honest place to put it.** An off-limb EUV pixel is not a
+  measurement of a point: it is the line integral of ε along the ray whose
+  closest approach to Sun centre is ρ. Plane-of-sky is its NATIVE geometry, and
+  for a distant observer that plane IS the locus of closest approach — so the
+  integral is drawn where the integral lives. Three consequences, all kept:
+  the sphere OCCLUDES the far half (depth test, which is what makes the layer
+  read as a 3-D object with the Sun in front of it); the plane does NOT
+  co-rotate (a frame is a snapshot in the observer's frame — the Far-Side Watch
+  rule, the clock moves the observer, not the data); and it FADES off-axis via
+  `offAxisWeight`, the plane analogue of the per-fragment `stretch` term the
+  disk fusion already uses. Full weight inside 12°, gone by 55°.
+
+  **Findings:**
+  - **The level reference is NOT `I0`.** The disk divides by the frame's own
+    limb law at disk centre; off the limb there is no limb law, and disk centre
+    is the wrong reference anyway — for 131 the disk is nearly empty while the
+    off-limb arcade is the whole signal, so an I0 ratio would make the layer's
+    brightness a function of the DISK. `calibrateOffLimb` measures the frame's
+    own 1.05–1.15 R☉ REFERENCE SHELL (median, so one bright prominence cannot
+    set the unit) and everything is drawn relative to that. A frame whose shell
+    is black sets `ok = false` and the layer does not draw — dividing by ≈0
+    would amplify JPEG ringing into a convincing corona.
+  - **THERE HAS TO BE A DISPLAY STRETCH, and the first version did not have
+    one.** Normalised by that shell the field spans ~70:1 between quiet corona
+    and bright prominence. No linear gain shows both: hold the prominence and
+    the corona is black, show the corona and every prominence clips. The layer
+    draws √(L/ref) — the same square-root stretch AIA's own off-limb displays
+    use — applied once, after the normalisation, on LUMINANCE (per-channel
+    `pow` desaturates every bright feature toward white, i.e. recolours an
+    observed pixel), and disclosed in the chip tooltip. Note for the next
+    session: the 70:1 is partly the sRGB EOTF the texture tag applies — correct,
+    and required for agreement with the disk path — re-expanding an 8:1 byte
+    range. Do not "fix" the gain by turning it down until the prominences go.
+  - **`REF_FLOOR` was a guess and the guess was wrong.** 2e-3 sat ABOVE what a
+    faint 304 annulus carries, so the 304 channel calibrated only
+    intermittently and the browser gate failed on 304 while passing on 131. It
+    is now DERIVED: two 8-bit code values (`srgbToLinear(2)` ≈ 6.1e-4), which
+    is the smallest signal a browse JPEG can distinguish from black.
+  - **The synthetic fixtures could not exercise the layer.** All six AIA
+    fixtures shared one faint halo (0.10·e^(−6(ρ−1))), which put the 304
+    reference shell within a code value or two of black. `scripts/lib/sdo-synth.mjs`
+    now renders a per-channel off-limb corona (304 bright and narrow, the
+    coronal channels fainter and deeper) plus two PLANTED OFF-LIMB features at
+    known plane-of-sky positions — a 304 prominence off the EAST limb and a
+    131 arcade off the WEST — recorded in the manifest as `plantedOffLimb`.
+    Fixtures regenerated.
+  - **Gate:** five browser tests in `tests/sun-smoke.spec.js`, including an
+    END-TO-END pixel gate that screenshots the page, finds each planted
+    feature's screen position through the page's own camera, and asserts it is
+    bright there and not at its MIRROR position — the handedness check, i.e.
+    the class of bug that mirrored every SWPC flare until 2026-09-13. It
+    measures with the layer on and off and divides out the scene underneath,
+    so a gate that has stopped seeing the layer fails instead of passing.
+    NOTE: comparing the two FEATURES to each other does not work and is not
+    the test — each channel normalises by its own reference shell, so their
+    relative brightness measures the fixture, not the mapping.
+
+- **2026-09-15 — nanoflares moved to where an instrument could see them (done).**
+  Two changes, one idea: a nanoflare is a 10²³–10²⁷ erg CORONAL energy release,
+  so the white-light photospheric continuum cannot see one and each EUV channel
+  sees it only as far as its temperature response reaches the event's own peak
+  temperature.
+  - **Out of white light.** The `col += … microflare …` line in sunFS is
+    deleted. It was painting a 10²³ erg coronal event onto a continuum six to
+    ten orders brighter.
+  - **Into the EUV branches as campfires** (Berghmans et al. 2021,
+    Solar Orbiter/EUI), at network lanes as before, but weighted by the ACTIVE
+    channel's response — `u_nanoChan`, fed from `EUV_CHANNELS` via the new pure
+    `channelResponseAt` in `js/corona-volumetric.js`, which is the raymarcher's
+    own table. White light and the magnetogram carry σ = 0, so the response is
+    identically zero and the campfires vanish there BY THE TABLE, not by a flag.
+  - **`peakLogT` in `js/sun-nanoflares.js`** gives the event a temperature:
+    T ∝ E^0.22 anchored at 1 MK for 10²⁴ erg (RTV family; Aschwanden & Parnell
+    2002), an order-of-magnitude anchor and quoted as one. **The per-channel
+    ordering everyone recognises from AIA movies is then EMERGENT**: the
+    population is dominated by small, cool (log T ≈ 5.8) events, which is 171's
+    peak, so 171 is full of campfires, 193 has fewer, 211 fewer still, and 94 /
+    131 / 304 essentially none. `tests/sun-nanoflares.mjs` MEASURES that
+    ordering out of 60 000 draws, and measures that moving α moves it — which a
+    per-channel constant could not do.
+  - **Size and duration are the kernel's too.** `sizeForKm` (L ∝ E^(1/3),
+    1000 km at 10²⁴ — the bounded population then spans 464–10 000 km and the
+    part α ≈ 2 makes commonest is the observed 400–4000 km campfire range) and
+    the duration law fixed to the kernel's own E^0.33. The line replaced was
+    LINEAR in normalised log-energy: right shape by accident, wrong law,
+    spanning 8.4× where the exponent spans 21×. DISCLOSED FLOOR: a 1000 km
+    campfire is ~0.3 px at the default framing, so the mark has a minimum
+    angular size and the true diameters are quoted in the readout; above
+    ~2×10²⁵ erg the physical size takes over, so relative sizes are real
+    wherever they are resolvable.
+  - **The loop sparks are no longer sprites.** They were additive
+    `THREE.Points` drawn over everything, which made three wrong claims: a
+    spark in front of the limb and one behind it looked identical, a filament
+    between viewer and spark did not attenuate it, and the same gold→teal ramp
+    was used whatever channel was on screen. They are now **transient hot DEM
+    pulses inside the volumetric corona's own front-to-back march**
+    (`u_sparks` / `u_sparkTP`, `setSparks`), so occlusion, extinction and
+    per-channel response come for free, and each pulse RIDES THE CLOSED-LOOP
+    DENSITY — a spark is a loop being heated, so it lights only where the atlas
+    says there is closed field (gate opens to 1 with no atlas, so offline still
+    draws). `NANOFLARE_VS`/`FS` and the Points/Group are deleted, not disabled.
+    Two things are load-bearing in the feed: positions are turned by the page's
+    ONE rotation accumulator through `FG.siteRotation` at the site's own
+    latitude on the way out (the pool is in the co-rotating frame, the march is
+    in the world frame), and the render is TRUNCATED to `N_SPARK_SLOTS` = 12 by
+    the uniform budget, so the readout goes on quoting the POPULATION's rate,
+    never the drawn count. `SPARK_R_RSUN` = 0.018 is the march's resolution,
+    not a nanoflare's size, and says so.
+
+- **2026-09-15 — the flare DEM cools (kernel done; see §9 for the wiring).**
+  `js/flare-dem.js` (PURE, `tests/flare-dem.mjs`, 10 checks). The volumetric
+  corona's flare term was one Gaussian at a FIXED log T 7.05, so every channel
+  saw the flare at the same moment and in the same proportion for its whole
+  life — the one thing a flare visibly does not do. The kernel gives it a
+  temperature that FALLS: peak T from the GOES class (10–25 MK across C–X,
+  Ryan et al. 2012), density from RTV at that temperature, then
+  dT/dt = −T/τ_eff with τ_c (conduction, Culhane et al. 1994) and τ_r
+  (radiation) combined. **The channel cascade is measured, not scripted:**
+  131 → 94 → 211 → 193 → 171, with 131 in the first minutes and the 171
+  post-flare arcade ~23 min later.
+  - **The loop must DRAIN or the cool channels bunch.** At fixed density
+    211/193/171 all peak within 36 s of each other (measured) — which renders
+    as the three cool channels lighting simultaneously, i.e. the original bug
+    moved down the track. With n ∝ T they separate to 961 / 1080 / 1387 s. The
+    full exponent scan (0, ½, 1, 1½) is recorded at the constant; `DRAIN_EXP`
+    = 1 is both the middle of the EBTEL-family range and the value that puts
+    the 171 peak in the observed window, and is labelled as calibrated against
+    that observable. The test re-runs itself with drainage OFF to prove the
+    separation gate is not vacuous.
+  - **304 Å is reported UNREACHABLE, not extrapolated.** The track stops at
+    3×10⁵ K because Λ ∝ T^(−1/2) is a coronal approximation. 304's flare signal
+    on this page is the RIBBONS (`flareAdd`), which are chromospheric and are
+    not this cooling coronal plasma; observed 304 post-flare loops are coronal
+    rain, past where this model is valid.
+
+- **2026-09-15 — two measurements that CONTRADICT this file's own Phase 3 log.**
+  Recorded here because acting on the stale numbers would have re-broken
+  working code (CLAUDE.md §5).
+  1. **"The tracer's AR arcades peak only 0.005–0.008 R☉ up" is wrong** — that
+     is the p10 of the distribution, not the distribution. Measured on the same
+     three planted ARs with the page's own parameters (`cargo test` in
+     `rust-sunfield`, new `tests/loop_geometry.rs`): **p10 0.0058, p50 0.0336,
+     p90 0.1437, max 0.4498 R☉**, i.e. the median arcade is already inside the
+     observed 0.03–0.2 R☉ band and the tall end reaches it comfortably. The
+     scan against AR area (`examples/apex_scan.rs`) shows the same at every
+     area the live feed produces. **The seed ring and burial depth do NOT need
+     raising**, and the four new Rust tests pin that from now on.
+  2. **The PFSS-lite field has NO MAGNETIC DIPS AT ALL.** Zero, in every
+     configuration tried (`examples/dip_scan.rs`): one α region, one δ-spot
+     region, three planted ARs, and two adjacent opposite-polarity regions —
+     the classic filament-channel geometry. This is not a bug, it is what a
+     POTENTIAL field is: dips that hold prominence material require sheared or
+     twisted field, i.e. field-aligned currents, which is exactly why every
+     prominence model (Kuperus–Raadu flux rope, Antiochos sheared arcade) is
+     non-potential. **A prominence channel filled "where atlas lines have
+     magnetic dips" therefore cannot be built on this atlas as it stands** —
+     it would be empty. Open, with the options written up in §9.
+
 ---
 
 ## 1. Scope & locked decisions

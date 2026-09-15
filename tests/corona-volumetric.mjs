@@ -18,6 +18,9 @@ import {
     atlasLayout, atlasPixel, shellCoords, rasterizeLoopDensity, sampleLoopDensity, atlasFromPolylines,
     losConst, kCoronaLos, fCoronaLos, kCoronaGlslConstants, F_LIMB_FRACTION,
 } from '../js/corona-loop-density.js';
+import {
+    EUV_CHANNELS, channelResponseAt, N_SPARK_SLOTS, SPARK_R_RSUN, CORONA_VOL_FRAG,
+} from '../js/corona-volumetric.js';
 
 let passed = 0;
 function ok(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -133,6 +136,55 @@ ok('F-corona: 10 % of K at the limb, b⁻²·³', () => {
     assert.equal(fCoronaLos(1), F_LIMB_FRACTION);
     assert.ok(Math.abs(fCoronaLos(2) - 0.1 * Math.pow(2, -2.3)) < 1e-12);
     assert.ok(fCoronaLos(2) < kCoronaLos(2), 'K still dominates at 2 R☉');
+});
+
+// ── The channel response table, and the spark DEM term that reads it ──────
+
+ok('channelResponseAt mirrors the GLSL channelResponse, including white light', () => {
+    // The shader's version, transcribed:
+    //   if (sigT < 1e-3) return 0; d = (logT - peak)/sigT; return exp(-0.5 d²)
+    for (const [key, ch] of Object.entries(EUV_CHANNELS)) {
+        for (const logT of [4.5, 5.0, 5.85, 6.2, 6.5, 7.0, 7.5]) {
+            const glsl = ch.sigma < 1e-3 ? 0 : Math.exp(-0.5 * (((logT - ch.logT) / ch.sigma) ** 2));
+            assert.ok(Math.abs(channelResponseAt(logT, key) - glsl) < 1e-12, `${key} @ ${logT}`);
+        }
+        // Peak response is at the channel's own temperature, and is 1 there.
+        if (ch.sigma >= 1e-3) assert.ok(Math.abs(channelResponseAt(ch.logT, key) - 1) < 1e-12);
+    }
+    // 'white' is the one that matters for the nanoflare layer: a continuum
+    // image is not a passband, so there is no response and no campfires.
+    assert.equal(channelResponseAt(6.0, 'white'), 0);
+    assert.equal(channelResponseAt(6.0, 'nope'), 0, 'an unknown channel is silent, not NaN');
+});
+
+ok('the spark DEM term is in the march, gated on closed density, and channel-weighted', () => {
+    // These are the three properties that make the sparks better off in the
+    // volume than they were as sprites. Asserted against the shader source
+    // because there is no GL here — a structural gate, but it is what catches
+    // the term being dropped or moved out of demSample.
+    assert.match(CORONA_VOL_FRAG, /uniform\s+vec4\s+u_sparks\[12\]/, 'spark slots declared');
+    assert.match(CORONA_VOL_FRAG, /uniform\s+vec2\s+u_sparkTP\[12\]/, 'per-spark (logT, radius)');
+    assert.match(CORONA_VOL_FRAG, /channelResponse\(u_sparkTP\[k\]\.x\)/, 'weighted by the channel response');
+    assert.match(CORONA_VOL_FRAG, /loopGate\s*=\s*\(u_loopOn > 0\.5\)/, 'rides the closed-loop density');
+    // The term must live inside demSample, which is what the front-to-back
+    // march calls — outside it there is no transmission and no occlusion, and
+    // we are back to sprites with extra steps.
+    const dem = CORONA_VOL_FRAG.slice(
+        CORONA_VOL_FRAG.indexOf('void demSample'), CORONA_VOL_FRAG.indexOf('vec2 raySphere'));
+    assert.ok(dem.includes('u_sparks[k]'), 'the spark loop is inside demSample');
+    // No atlas ⇒ the gate opens, so offline/CI still draws sparks.
+    assert.match(CORONA_VOL_FRAG, /clamp\(ld\.x \* 4\.0, 0\.12, 1\.0\) : 1\.0/, 'analytic fallback keeps them visible');
+});
+
+ok('the spark render radius is the march resolution, not the physical size', () => {
+    // A 10²⁴ erg event is ~1000 km = 0.0014 R☉; the fine march steps at
+    // ~0.03 R☉, so a true-size spark integrates to nothing. The constant must
+    // stay of order the step — and it must stay documented as a resolution,
+    // because it is not a claim about how big a nanoflare is.
+    assert.ok(SPARK_R_RSUN > 0.005 && SPARK_R_RSUN < 0.05,
+        `${SPARK_R_RSUN} R☉ is of order the march step`);
+    assert.ok(SPARK_R_RSUN > 1000 / 695700, 'larger than the physical size it stands in for');
+    assert.ok(N_SPARK_SLOTS >= 8 && N_SPARK_SLOTS <= 32, 'a uniform budget, not a population');
 });
 
 const g = kCoronaGlslConstants();

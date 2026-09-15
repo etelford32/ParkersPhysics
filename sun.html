@@ -1074,6 +1074,27 @@ import './js/telemetry.js';
                             <span class="layer-meta">white light · 10⁶ K</span>
                         </label>
                     </div>
+                    <!-- OBSERVED off-limb annulus. Optically thin EUV is
+                         plane-of-sky by nature, so the 1.0-1.6 R☉ ring of the
+                         live 304 + 131 frames is drawn on the plane through
+                         the Sun's centre normal to the Sun-Earth line, and is
+                         occluded by the sphere. js/sun-offlimb.js. -->
+                    <div class="toggle-row layer-row on" id="lr-offlimb">
+                        <input type="checkbox" id="tog-offlimb" checked>
+                        <label for="tog-offlimb">
+                            <span class="layer-dot tr"></span>
+                            <span class="layer-name">Off-limb (observed)</span>
+                            <span class="layer-meta">SDO 304 + 131 · plane of sky</span>
+                        </label>
+                    </div>
+                    <div class="toggle-row layer-row" id="lr-offlimb-diff">
+                        <input type="checkbox" id="tog-offlimb-diff">
+                        <label for="tog-offlimb-diff">
+                            <span class="layer-dot co"></span>
+                            <span class="layer-name">· running difference</span>
+                            <span class="layer-meta">consecutive frames · eruptions + dimmings</span>
+                        </label>
+                    </div>
                     <div class="layer-grp">Cutaway</div>
                     <div class="toggle-row layer-row" id="lr-cutaway">
                         <input type="checkbox" id="tog-cutaway">
@@ -1130,9 +1151,9 @@ import './js/telemetry.js';
                         <input type="checkbox" id="tog-loops" checked>
                         <label for="tog-loops">Coronal loops (AR)</label>
                     </div>
-                    <div class="toggle-row">
+                    <div class="toggle-row" title="A nanoflare is a 10²³–10²⁷ erg CORONAL energy release. No white-light instrument sees one, so the population renders in the EUV channel views (View mode ▸ 171 / 193 / 211 …), weighted by each channel's own temperature response — 171 is full of campfires, 131 and 94 have almost none.">
                         <input type="checkbox" id="tog-nanoflares" checked>
-                        <label for="tog-nanoflares">Nanoflares (Parker 1988)</label>
+                        <label for="tog-nanoflares">Nanoflares (Parker 1988) <span class="dim">· EUV views</span></label>
                     </div>
                     <!-- The nanoflare power-law index. Not a look-and-feel
                          slider: α decides whether the population can pay the
@@ -1726,6 +1747,7 @@ import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { SunPostPass }        from './js/sun-post.js';   // Phase 2 HDR post chain (mip-chain bloom + exposure)
 import { CoronaAccumPass }    from './js/corona-accumulate.js';   // Phase 3 jittered-march temporal integration
 import { rasterizeLoopDensity } from './js/corona-loop-density.js';   // Phase 3 PFSS lines → loop-density volume
+import { EUV_CHANNELS, channelResponseAt, N_SPARK_SLOTS, SPARK_R_RSUN } from './js/corona-volumetric.js';   // THE channel response table — nanoflare campfires read it too
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { loadRealHistory } from './js/history-loader.js';
@@ -1736,8 +1758,9 @@ import { initSunWatch } from './js/sun-watch.js';
 import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
 import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
 import { SunObserved, VIEW_MODE_CHANNEL, REAL_TIME_ROT_MUL, solarEphemeris } from './js/sun-observed.js';
+import { SunOffLimb, offLimbLabel } from './js/sun-offlimb.js';   // Phase 3b observed off-limb annulus (304 + 131 on the plane of sky)
 import {
-    nanoflareState, nanoflareUniform, sampleEnergy,
+    nanoflareState, nanoflareUniform, sampleEnergy, peakLogT, meanEnergy,
     AlphaMonitor, HEATING_REQUIREMENT, E_MIN_ERG, E_MAX_ERG, ALPHA_REFERENCES,
 } from './js/sun-nanoflares.js';
 // Flare-site geometry: the ONE copy of "where is the flare, which way does it
@@ -2284,6 +2307,7 @@ const uniforms = {
     u_nano:              { value: new THREE.Vector4(2.0, Math.log2(E_MIN_ERG), Math.log2(E_MAX_ERG), 1.0) },
     u_nanoOn:            { value: 1.0 },
     u_nanoGain:          { value: 1.0 },   // display brightness — a rendering choice, disclosed as one
+    u_nanoChan:          { value: new THREE.Vector2(0.0, 0.0) },   // (logT, σ) of the active channel; σ=0 ⇒ no response ⇒ no campfires
     // ── OBSERVED disk (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1) — the live SDO
     // frame wrapped on the Earth-facing hemisphere; js/sun-observed.js drives
     // these. u_obsOn is never 1 with a null texture (the chip must not lie).
@@ -2655,6 +2679,13 @@ const sunFS = /* glsl */`
     uniform vec4  u_nano;       // (alpha, log2 Emin, log2 Emax, rate multiplier)
     uniform float u_nanoOn;
     uniform float u_nanoGain;
+    // The ACTIVE channel's temperature response, straight from the raymarcher's
+    // own table (js/corona-volumetric.js EUV_CHANNELS → channelResponseAt).
+    // (log10 T_peak, σ_logT). White light and the magnetogram carry σ = 0 —
+    // a continuum image is not a passband, so the response is identically zero
+    // and the campfires simply do not exist there. That is how they leave white
+    // light: not by a special case, by the table.
+    uniform vec2  u_nanoChan;
     // Observed disk (js/sun-observed.js — the module header documents the geometry)
     uniform float     u_obsOn;
     uniform sampler2D u_obsTex;
@@ -3177,9 +3208,34 @@ const sunFS = /* glsl */`
             float lE = log2(max(A + h1 * (B - A), 1e-30)) / p;      // log2(E/erg)
             float eN = clamp((lE - u_nano.y) / max(u_nano.z - u_nano.y, 1e-3), 0.0, 1.0);
 
-            // Duration from the same energy: T ∝ E^0.33, so the loudest events
-            // also linger. Normalised so a mid-range event lasts ~1 sim-second.
-            float dur   = 0.35 + 2.6 * pow(max(eN, 1e-4), 0.33 * 4.0 * 0.75);
+            // ── The event's PEAK TEMPERATURE, and therefore which channels
+            // can see it at all. GLSL MIRROR of sun-nanoflares.js peakLogT —
+            // change both together. log10(E) = log2(E)·log10(2).
+            //   T_peak = 10^(6.0 + 0.22·(log10 E − 24))
+            // A nanoflare is a CORONAL energy release: the white-light
+            // photospheric continuum does not see one, and an EUV channel sees
+            // it exactly as much as its response overlaps this temperature.
+            // The ordering everyone recognises from AIA movies — 171 full of
+            // campfires, 193 fewer, 131 and 94 essentially none, 304 none —
+            // is EMERGENT here: the population is dominated by small (= cool,
+            // log T ≈ 5.8) events, which is 171's peak. Nothing per channel is
+            // tuned; u_nanoChan is the raymarcher's own table.
+            float logTev = 6.0 + 0.22 * (lE * 0.30102999566 - 24.0);
+            float resp   = 0.0;
+            if (u_nanoChan.y > 1e-3) {
+                float dT = (logTev - u_nanoChan.x) / u_nanoChan.y;
+                resp = exp(-0.5 * dT * dT);
+            }
+
+            // Duration from the same energy: T ∝ E^0.33 (the kernel's
+            // DURATION_BETA), so the loudest events also linger. GLSL MIRROR
+            // of durationFor(), in log2 — E^β = exp2(β·log2 E) — anchored so a
+            // mid-range event still lasts ~1 sim-second, as it always has.
+            // The line this replaced was 0.35 + 2.6·pow(eN, 0.99), i.e.
+            // LINEAR in the normalised log-energy: the right shape by accident
+            // and the wrong law, spanning 8.4× where the kernel's own exponent
+            // spans 21× over the same four decades.
+            float dur   = exp2(0.33 * (lE - 0.5 * (u_nano.y + u_nano.z)));
             float phase = fract(u_time / dur + h2);
             // Impulsive rise, exponential cool — the flare lightcurve shape,
             // not a sine. Rise is ~8 % of the event, decay fills the rest.
@@ -3187,15 +3243,29 @@ const sunFS = /* glsl */`
             float cool  = exp(-(phase - 0.08) * 6.0) * step(0.08, phase);
             float light = rise * (phase < 0.08 ? 1.0 : cool);
 
-            // Peak brightness ∝ energy, compressed for display (four decades
-            // cannot be shown linearly). Radius grows slowly with energy.
-            float amp   = pow(max(eN, 1e-4), 0.55);
-            float rad   = 0.18 + 0.42 * amp;
-            vec3  local = fract(nfP) - vec3(0.5);
-            float d     = length(local) / rad;
-            float core  = exp(-d * d * 3.0);
+            // ── SIZE from the same energy. GLSL mirror of sizeForRsun():
+            // L ∝ E^(1/3) anchored at 1000 km for 10²⁴ erg, over R☉ = 695 700
+            // km, expressed in lattice cells (the lattice is vPosition × 46,
+            // so one cell is 1/46 R☉).
+            //   rad_cells = (1000/695700)·10^((log10 E − 24)/3) · 46
+            // DISCLOSED FLOOR: a 10²⁴ campfire is 1000 km ≈ 0.3 px at the
+            // default framing, i.e. below the screen's own sample spacing. So
+            // the mark is drawn at NF_RAD_FLOOR and the true diameters are
+            // quoted in the readout — the Boötes-Void arrow rule (a symbol
+            // zoom, disclosed), not a claim about size. Above ~2×10²⁵ erg the
+            // physical size exceeds the floor and takes over, so the relative
+            // sizes ARE real wherever they are resolvable.
+            const float NF_RAD_FLOOR = 0.18;
+            float radPhys = (1000.0 / 695700.0) * exp2((lE * 0.30102999566 - 24.0) / 3.0 * 3.32192809489) * 46.0;
+            float rad     = max(NF_RAD_FLOOR, radPhys);
+            vec3  local   = fract(nfP) - vec3(0.5);
+            float d       = length(local) / rad;
+            float core    = exp(-d * d * 3.0);
 
-            microflare = live * core * light * amp * u_nanoGain;
+            // Peak brightness ∝ energy, compressed for display (four decades
+            // cannot be shown linearly), THEN weighted by the channel response.
+            float amp   = pow(max(eN, 1e-4), 0.55);
+            microflare = live * core * light * amp * resp * u_nanoGain;
         }
         microflare = min(microflare, 1.5);
 
@@ -3359,8 +3429,15 @@ const sunFS = /* glsl */`
         // Magnetic bright points — intensely white
         col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
 
-        // Nanoflare transient brightenings — hot white-yellow pops
-        col += mix(vec3(1.7, 1.5, 1.1), vec3(0.85, 0.95, 1.7), 0.55) * microflare * 1.1 * (1.0 - umbra) * u_showFlares;
+        // NANOFLARES ARE NOT DRAWN IN WHITE LIGHT, ON PURPOSE. They used to be
+        // (a hot white-yellow pop added right here) and that was wrong: a
+        // nanoflare is a CORONAL energy release of 10²³–10²⁷ erg, six to ten
+        // orders below the photospheric continuum flux it was being painted
+        // on. No white-light instrument sees one. The population now renders
+        // only where a real instrument would see it — the EUV branches below,
+        // weighted by the channel's own temperature response (u_nanoChan) —
+        // and u_nanoChan.y is 0 in white light, so microflare is identically
+        // zero here and there is nothing left to add. Do not restore this line.
 
         // Facular brightening near limb (spot-local Wilson walls)
         col += baseCol * facular * 0.65;
@@ -3669,32 +3746,43 @@ const sunFS = /* glsl */`
             float polar = smoothstep(0.58, 0.86, abs(fragUnit.y));
             float hole  = clamp(max(polar, smoothstep(0.60, 0.40, holeN)), 0.0, 1.0);
             float moss  = 0.22 + 0.22 * vnoise(fragUnit * 16.0 + vec3(u_time * 0.02));
-            float hot   = microflare + plage * u_flare_intensity * 1.5;
+            float hot   = plage * u_flare_intensity * 1.5;
+            // ── CAMPFIRES (Berghmans et al. 2021, Solar Orbiter/EUI) ───────
+            // microflare arrives already weighted by THIS channel's
+            // temperature response (see the nanoflare block above), so the
+            // same term added to every branch produces a different answer in
+            // each: 171 is full of them, 193 has fewer, 211 fewer still, and
+            // 304 / 131 / 94 have essentially none. That ordering is the
+            // population's own — it is not six tuned constants, and if the α
+            // control moves the population it moves the ordering with it.
+            // NANO_EUV is a display gain, disclosed like u_nanoGain.
+            const float NANO_EUV = 2.2;
+            float campfire = microflare * NANO_EUV;
             float limb  = 0.55 + 0.45 * mu;
             float rim   = pow(max(1.0 - mu, 0.0), 3.2);
             vec3 euv;
             if (u_viewMode < 1.5) {                                      // 304 — chromosphere, warm red
-                float I = (moss * 0.55 + netw * 1.0 + arEm * 1.3) * limb;
+                float I = (moss * 0.55 + netw * 1.0 + arEm * 1.3 + campfire) * limb;
                 I *= (1.0 - filament * 0.85);
                 euv  = aiaRamp(I, vec3(0.50,0.11,0.04), vec3(1.00,0.42,0.16), vec3(1.00,0.90,0.70));
                 euv += vec3(1.00,0.35,0.12) * rim * 0.9;
             } else if (u_viewMode < 2.5) {                              // 171 — quiet corona, gold
-                float I = (moss * 0.70 + netw * 0.85 + arEm * 1.25) * limb;
+                float I = (moss * 0.70 + netw * 0.85 + arEm * 1.25 + campfire) * limb;
                 I *= (1.0 - hole * 0.65);
                 euv  = aiaRamp(I, vec3(0.22,0.15,0.03), vec3(0.92,0.68,0.20), vec3(1.00,0.96,0.80));
                 euv += vec3(0.90,0.75,0.30) * rim * 0.5;
             } else if (u_viewMode < 3.5) {                              // 193 — corona + holes, bronze
-                float I = (moss * 0.70 + netw * 0.50 + arEm * 1.15) * limb;
+                float I = (moss * 0.70 + netw * 0.50 + arEm * 1.15 + campfire) * limb;
                 I *= (1.0 - hole * 0.92);
                 euv  = aiaRamp(I, vec3(0.14,0.12,0.06), vec3(0.80,0.72,0.28), vec3(0.92,1.00,0.72));
                 euv += vec3(0.60,0.80,0.40) * rim * 0.45;
             } else if (u_viewMode < 4.5) {                              // 211 — active corona, purple
-                float I = (moss * 0.45 + netw * 0.40 + arEm * 1.6) * limb;
+                float I = (moss * 0.45 + netw * 0.40 + arEm * 1.6 + campfire) * limb;
                 I *= (1.0 - hole * 0.85);
                 euv  = aiaRamp(I, vec3(0.16,0.06,0.22), vec3(0.72,0.38,0.95), vec3(1.00,0.90,1.00));
                 euv += vec3(0.70,0.40,0.95) * rim * 0.4;
             } else if (u_viewMode < 5.5) {                              // 131 — flare plasma, teal
-                float I = (moss * 0.28 + arEm * 0.7 + hot * 1.8) * limb;
+                float I = (moss * 0.28 + arEm * 0.7 + hot * 1.8 + campfire) * limb;
                 euv  = aiaRamp(I, vec3(0.03,0.13,0.13), vec3(0.18,0.78,0.80), vec3(0.85,1.00,1.00));
                 euv += vec3(0.20,0.85,0.90) * rim * 0.35;
             } else {                                                    // HMI magnetogram — bipolar grey
@@ -3826,6 +3914,8 @@ try {
 //  sunspots and shader sunspots never separate whatever the clock does.
 // ═══════════════════════════════════════════════════════════════════════════
 let sunObserved = null;
+let sunOffLimb  = null;                      // js/sun-offlimb.js — observed 304+131 annulus
+let _offLimbUserOn = true;                   // the layer toggle (?offlimb=0 starts off)
 let _obsUserOn = true;                       // the chip toggle (?observed=0 starts off)
 const _obsSuspenders = new Set();            // 'cutaway' | 'doppler' — model-only views
 let _obsRotSaved = null;                     // slider rate to restore on Model
@@ -3839,23 +3929,42 @@ function _obsApply(reason) {
         uniforms.u_rot.value = REAL_TIME_ROT_MUL * _obsSliderRot();
         if (hudRot) hudRot.textContent = 'real-time · 27.3';
         sunObserved.setEnabled(true);
+        // The annulus is the same observation as the disk: it lives and dies
+        // with it, and Model mode must not leave an observed ring in the sky.
+        sunOffLimb?.setEnabled(_offLimbUserOn);
     } else {
         sunObserved.setEnabled(false, reason);
+        sunOffLimb?.setEnabled(false);
         if (_obsRotSaved != null) { uniforms.u_rot.value = _obsSliderRot(); _obsRotSaved = null; }
         if (hudRot) hudRot.textContent = (25.4 / _obsSliderRot()).toFixed(1);
     }
 }
 function _obsSuspend(why) { _obsSuspenders.add(why); _obsApply(why); }
 function _obsResume(why)  { _obsSuspenders.delete(why); _obsApply('user'); }
-function _obsRenderChip(state) {
+// THE CHIP HAS TWO SOURCES AND ONE VOICE. The disk (js/sun-observed.js) and
+// the off-limb annulus (js/sun-offlimb.js) fail independently, so each pushes
+// its own state here and the chip is rendered from both — never from whichever
+// happened to update last. Plan §5.1: the chip is never wrong.
+let _obsState = null;
+let _offLimbState = null;
+function _obsRenderChip(state) { _obsState = state; _renderProvChip(); }
+function _offLimbChip(state)   { _offLimbState = state; _renderProvChip(); }
+function _renderProvChip() {
     const el = document.getElementById('sun-provenance');
-    if (!el) return;
-    el.textContent = state.label;
+    const state = _obsState;
+    if (!el || !state) return;
+    // The off-limb suffix only ever rides an OBSERVED disk — in Model mode the
+    // layer is off, so there is nothing to append and nothing to imply.
+    const suffix = state.mode === 'observed' ? offLimbLabel(_offLimbState) : '';
+    el.textContent = state.label + suffix;
     el.classList.remove('prov-observed', 'prov-stale', 'prov-model');
     const stale = state.mode === 'observed' && /stale|expired|refresh failed/.test(state.label);
     el.classList.add(state.mode === 'observed' ? (stale ? 'prov-stale' : 'prov-observed') : 'prov-model');
+    const ol = _offLimbState && _offLimbState.enabled
+        ? ` Off-limb: the 1.0–1.6 R☉ annulus of the live 304 + 131 frames, drawn on the plane through Sun centre normal to the Sun–Earth line (optically thin EUV is plane-of-sky by nature) and occluded by the photosphere. Level is normalised by each frame's own 1.05–1.15 R☉ shell, then square-root stretched for display (the field spans ~70:1 — no linear mapping shows both the quiet corona and a prominence); colour is the browse product's own. Fades as the camera leaves the Sun–Earth line (${Math.round((_offLimbState.axisWeight ?? 0) * 100)}% now).`
+        : '';
     el.title = state.mode === 'observed'
-        ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid). Click for Model.`
+        ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid).${ol} Click for Model.`
         : 'Model: procedural photosphere on the whole sphere. Click for Observed (live SDO frame).';
 }
 {
@@ -3879,6 +3988,52 @@ function _obsRenderChip(state) {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sunObserved?.refresh(); });
     _obsApply('user');
     sunObserved.start();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ☉ OBSERVED OFF-LIMB ANNULUS — SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 3b
+//  js/sun-offlimb.js owns the physics argument and the scars; read its header.
+//  In one line: an off-limb EUV pixel is a line integral, plane of sky is its
+//  native geometry, so the 1.0–1.6 R☉ ring of the live 304 + 131 frames is
+//  drawn on the plane through Sun centre normal to the Sun–Earth line —
+//  occluded by the photosphere, pinned to the observer (never co-rotated),
+//  and faded as the camera leaves that line.
+// ═══════════════════════════════════════════════════════════════════════════
+{
+    const qp = new URLSearchParams(location.search);
+    const olParam = qp.get('offlimb');
+    if (olParam === '0') _offLimbUserOn = false;
+    sunOffLimb = new SunOffLimb({
+        THREE, scene,
+        base: qp.get('aiaBase') || '/api/solar/aia',
+        res:  (window.devicePixelRatio || 1) >= 1.5 ? 2048 : 1024,
+        onState: _offLimbChip,
+    });
+    sunOffLimb.mount();
+    const togOl   = document.getElementById('tog-offlimb');
+    const togDiff = document.getElementById('tog-offlimb-diff');
+    if (togOl) {
+        togOl.checked = _offLimbUserOn;
+        togOl.addEventListener('change', (e) => {
+            _offLimbUserOn = e.target.checked;
+            document.getElementById('lr-offlimb')?.classList.toggle('on', _offLimbUserOn);
+            sunOffLimb.setEnabled(_offLimbUserOn && _obsShouldBeOn());
+        });
+    }
+    if (togDiff) {
+        togDiff.checked = olParam === 'diff';
+        togDiff.addEventListener('change', (e) => {
+            sunOffLimb.setDiff(e.target.checked);
+            document.getElementById('lr-offlimb-diff')?.classList.toggle('on', e.target.checked);
+        });
+        if (togDiff.checked) {
+            sunOffLimb.setDiff(true);
+            document.getElementById('lr-offlimb-diff')?.classList.add('on');
+        }
+    }
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sunOffLimb?.refresh(); });
+    sunOffLimb.setEnabled(_offLimbUserOn && _obsShouldBeOn());
+    sunOffLimb.start();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6876,10 +7031,24 @@ function _renderNanoflareReadout() {
         ? `<span class="dim">SOC grid measuring… (${measured.n}/50 events)</span>`
         : `<span class="dim">SOC grid: ${measured.n} cascades · avalanche sizes not power-law`
           + ` (KS ${measured.ks.toFixed(2)})</span>`;
+    // WHERE THE POPULATION IS DRAWN, said out loud. A nanoflare is a coronal
+    // energy release: white light does not see one, and each EUV channel sees
+    // it only as far as its temperature response reaches the event's own peak
+    // temperature (js/sun-nanoflares.js peakLogT × EUV_CHANNELS). In white
+    // light the layer is honestly dark, and the line says so rather than
+    // leaving the user to conclude the toggle is broken.
+    const chKey  = VIEW_MODE_CHANNEL[uniforms.u_viewMode.value] || 'white';
+    const chResp = EUV_CHANNELS[chKey];
+    const viewLine = (chResp && chResp.sigma > 1e-3)
+        ? `<span class="dim">drawn in ${chKey} Å · response at the population's peak T`
+          + ` ${(channelResponseAt(peakLogT(meanEnergy(s.alpha)), chKey) * 100).toFixed(0)}%</span>`
+        : `<span class="dim">not drawn in ${chKey === 'mag' ? 'the magnetogram' : 'white light'} —`
+          + ` a nanoflare is a coronal event; switch to an EUV channel view</span>`;
     el.innerHTML =
         `α = <b>${s.alpha.toFixed(2)}</b> · ${verdict}<br>` +
         `<span class="dim">quiet-corona budget</span> <b>×${budget.toFixed(2)}</b> ` +
         `<span class="dim">of Withbroe &amp; Noyes ${(HEATING_REQUIREMENT.quiet / 1e5).toFixed(0)}×10⁵ erg cm⁻² s⁻¹</span><br>` +
+        viewLine + `<br>` +
         socLine;
 }
 
@@ -6901,37 +7070,31 @@ const NANOFLARE_POOL_SIZE   = 768;   // total simultaneous sparks
 const NANOFLARE_E_MIN       = 0.001;
 const NANOFLARE_E_MAX       = 1.0;
 
-const NANOFLARE_VS = /* glsl */`
-    attribute float aSize;
-    attribute float aAlpha;
-    varying vec3 vColor;
-    varying float vAlpha;
-    uniform float uPixelRatio;
-    void main() {
-        vColor  = color;
-        vAlpha  = aAlpha;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_Position  = projectionMatrix * mv;
-        // Perspective size attenuation; clamp to avoid singularities.
-        gl_PointSize = aSize * uPixelRatio * (260.0 / max(-mv.z, 0.001));
-    }
-`;
-const NANOFLARE_FS = /* glsl */`
-    varying vec3 vColor;
-    varying float vAlpha;
-    void main() {
-        vec2 uv = gl_PointCoord - 0.5;
-        float r2 = dot(uv, uv);
-        if (r2 > 0.25) discard;
-        // Hot stellar core + softer halo — mimics unresolved EUV brightening
-        float core = exp(-r2 * 70.0);
-        float halo = exp(-r2 *  9.0) * 0.30;
-        gl_FragColor = vec4(vColor, (core + halo) * vAlpha);
-    }
-`;
-
+// THE SPARKS ARE NO LONGER SPRITES. They used to be additive THREE.Points
+// drawn straight over the scene, which made three claims that were all wrong:
+// a spark in front of the limb and a spark behind it looked identical, a
+// filament between the viewer and the spark did not attenuate it, and the same
+// gold-to-teal ramp was used whatever channel you were looking at — when the
+// one thing a nanoflare's energy determines is its PEAK TEMPERATURE, and
+// therefore which passband can see it at all (js/sun-nanoflares.js peakLogT).
+// The pool below is now STATE ONLY; it is rendered by the volumetric corona as
+// transient hot DEM pulses inside its own front-to-back march
+// (js/corona-volumetric.js, u_sparks), which gives occlusion, extinction and
+// per-channel response for free. The vertex/fragment shaders that drew the
+// sprites are deleted, not disabled — do not resurrect them.
 let _nanoflareSystem = null;
-let _nanoflareHost   = null;   // co-rotating parent group for spark Points (always exists)
+let _nanoflareLayerOn = true;  // the 'Nanoflares' layer toggle (the pool used to carry this on its Points mesh)
+
+/**
+ * The sprite code has always worked in a 0..1 normalised log-energy (eNorm);
+ * the PHYSICS is in erg. This is the one place the two meet, so a spark's peak
+ * temperature comes from the kernel rather than from a colour ramp.
+ * eNorm spans the kernel's own bounds by construction.
+ */
+function _nanoErgFromNorm(eNorm) {
+    const lo = Math.log10(E_MIN_ERG), hi = Math.log10(E_MAX_ERG);
+    return Math.pow(10, lo + Math.max(0, Math.min(1, eNorm)) * (hi - lo));
+}
 let _coronalLoopCurves = [];   // per-loop: { points: Vec3[], rate, nextEventT }
 
 // ── ONE nanoflare energy distribution for the whole page ──────────────────
@@ -6955,52 +7118,18 @@ function _sampleNanoflareEnergy() {
 
 function _initNanoflareSystem() {
     if (_nanoflareSystem) return;
-
+    // Pool state only — see the note above. `positions` stays in the pool's
+    // own CO-ROTATING frame (as it always was, when a parent Group carried the
+    // rotation); _nanoflareSparkSlots() applies the photosphere's rotation on
+    // the way to the volume, which marches in the world frame.
     const positions = new Float32Array(NANOFLARE_POOL_SIZE * 3);
-    const colors    = new Float32Array(NANOFLARE_POOL_SIZE * 3);
     const sizes     = new Float32Array(NANOFLARE_POOL_SIZE);
     const alphas    = new Float32Array(NANOFLARE_POOL_SIZE);
-
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
-    geom.setAttribute('aSize',    new THREE.BufferAttribute(sizes, 1));
-    geom.setAttribute('aAlpha',   new THREE.BufferAttribute(alphas, 1));
-
-    const mat = new THREE.ShaderMaterial({
-        vertexShader:   NANOFLARE_VS,
-        fragmentShader: NANOFLARE_FS,
-        vertexColors:   true,
-        transparent:    true,
-        depthWrite:     false,
-        blending:       THREE.AdditiveBlending,
-        uniforms: {
-            uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
-        },
-    });
-
-    const points = new THREE.Points(geom, mat);
-    points.frustumCulled = false;
-
     const pool = new Array(NANOFLARE_POOL_SIZE);
     for (let i = 0; i < NANOFLARE_POOL_SIZE; i++) {
-        pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0, bx: 0, by: 0, bz: 0 };
+        pool[i] = { alive: false, t0: 0, life: 1, peakSize: 1, peakAlpha: 0, bx: 0, by: 0, bz: 0, logT: 6.0 };
     }
-
-    // Permanent host group co-rotates with the photosphere so SOC-spawned
-    // surface sparks track AR positions automatically. Decoupled from
-    // loopGroup so the SOC layer works even when no active regions exist.
-    if (!_nanoflareHost) {
-        _nanoflareHost = new THREE.Group();
-        scene.add(_nanoflareHost);
-    }
-    _nanoflareHost.add(points);
-
-    _nanoflareSystem = {
-        points, geom, positions, colors, sizes, alphas, pool,
-        nextSlot:  0,
-        liveCount: 0,
-    };
+    _nanoflareSystem = { positions, sizes, alphas, pool, nextSlot: 0, liveCount: 0 };
 }
 
 function _spawnNanoflare(loopIdx, sArc, energyE) {
@@ -7032,21 +7161,6 @@ function _spawnNanoflare(loopIdx, sArc, energyE) {
     const peakAlpha = 0.50 + eNorm * 0.45;
     const life      = 0.30 + eNorm * 1.20;   // sim-seconds
 
-    // EUV color ramp: low-E warm gold (chromospheric tail) → mid white →
-    // high-E blue-white teal (Fe XVIII / Fe XXI hot-channel signature).
-    let r, gC, b;
-    if (eNorm < 0.5) {
-        const k = eNorm * 2;
-        r  = 1.00;
-        gC = 0.78 + k * 0.18;
-        b  = 0.32 + k * 0.42;
-    } else {
-        const k = (eNorm - 0.5) * 2;
-        r  = 1.00 - k * 0.45;
-        gC = 0.96 - k * 0.10;
-        b  = 0.74 + k * 0.30;
-    }
-
     const ent = sys.pool[slot];
     ent.alive     = true;
     ent.t0        = uniforms.u_time.value;
@@ -7061,9 +7175,10 @@ function _spawnNanoflare(loopIdx, sArc, energyE) {
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
     ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
-    sys.colors[slot * 3]     = r;
-    sys.colors[slot * 3 + 1] = gC;
-    sys.colors[slot * 3 + 2] = b;
+    // PEAK TEMPERATURE, from the one kernel. This is what decides which
+    // passband sees the spark at all once the volume renders it — the
+    // gold→teal sprite ramp it replaced was a colour, not a temperature.
+    ent.logT = peakLogT(_nanoErgFromNorm(eNorm));
     sys.sizes[slot]  = peakSize * 0.6;   // start small, grow to peak
     sys.alphas[slot] = 0.0;              // alpha ramps in over rise
 }
@@ -7073,7 +7188,7 @@ function _updateNanoflares(t) {
     // Lazy-init the spark pool the first time we run — this lets the SOC
     // driver work even when there are no coronal loops in the scene yet.
     if (!_nanoflareSystem) _initNanoflareSystem();
-    if (!_nanoflareSystem || !_nanoflareSystem.points.visible) {
+    if (!_nanoflareSystem || !_nanoflareLayerOn) {
         _nanoflarePrevT = t;
         return;
     }
@@ -7161,10 +7276,7 @@ function _updateNanoflares(t) {
     }
 
     sys.liveCount = liveCount;
-    sys.geom.attributes.position.needsUpdate = true;
-    sys.geom.attributes.color.needsUpdate    = true;
-    sys.geom.attributes.aSize.needsUpdate    = true;
-    sys.geom.attributes.aAlpha.needsUpdate   = true;
+    _nanoflareSparkSlots(t);
 
     // Optional global heating term other shaders can tap into.
     if (uniforms.u_nanoflare_heat) {
@@ -7174,12 +7286,58 @@ function _updateNanoflares(t) {
     }
 }
 
+/**
+ * Hand the volumetric corona the brightest live sparks, as transient hot DEM
+ * pulses (js/corona-volumetric.js, u_sparks). This is the whole renderer for
+ * the nanoflare sparks now — see the note above the pool.
+ *
+ * TWO THINGS ARE LOAD-BEARING:
+ *
+ *  1. THE FRAME. The pool's positions are in the photosphere's CO-ROTATING
+ *     frame (they used to hang off a Group whose rotation.y was solarRotAngle).
+ *     The raymarcher marches in the WORLD frame. So every position is turned
+ *     by the page's ONE rotation accumulator on the way out, through
+ *     FG.rotateY at the site's own latitude — the same Snodgrass scaling every
+ *     other co-rotating consumer uses (CLAUDE.md: never a group turned by the
+ *     equatorial angle). Skip this and the sparks slide off the loops they
+ *     were anchored to at the differential-rotation rate.
+ *
+ *  2. THE TRUNCATION IS DISCLOSED, NOT HIDDEN. There are up to 768 live sparks
+ *     and N_SPARK_SLOTS uniform slots, so only the brightest are drawn. The
+ *     readout goes on quoting the POPULATION's rate and heating budget from
+ *     js/sun-nanoflares.js — never the drawn count — because the drawn count
+ *     is a property of the uniform budget, not of the Sun.
+ */
+function _nanoflareSparkSlots(t) {
+    if (!volumetricCorona) return;
+    if (!_nanoflareLayerOn || !_nanoflareSystem) { volumetricCorona.setSparks([]); return; }
+    const sys = _nanoflareSystem;
+    const picked = [];
+    for (let i = 0; i < NANOFLARE_POOL_SIZE; i++) {
+        const a = sys.alphas[i];
+        if (a <= 0.02) continue;
+        picked.push({ i, a });
+    }
+    if (picked.length > N_SPARK_SLOTS) {
+        picked.sort((p, q) => q.a - p.a);
+        picked.length = N_SPARK_SLOTS;
+    }
+    const out = picked.map(({ i, a }) => {
+        const x = sys.positions[i * 3], y = sys.positions[i * 3 + 1], z = sys.positions[i * 3 + 2];
+        const r = Math.hypot(x, y, z) || 1;
+        const latRad = Math.asin(Math.max(-1, Math.min(1, y / r)));
+        const w = FG.rotateY([x, y, z], FG.siteRotation(solarRotAngle, latRad));
+        return { x: w[0], y: w[1], z: w[2], amp: a, logT: sys.pool[i].logT ?? 6.0, radius: SPARK_R_RSUN };
+    });
+    volumetricCorona.setSparks(out);
+}
+
 // Snapshot every coronal loop's curve points after buildCoronalLoops so
 // the Phase-1 (loop-anchored) driver can sample positions. Phase 2 (SOC)
 // works without loops; this just keeps Phase 1 alive as a fallback driver.
 function _rebuildNanoflares() {
     _coronalLoopCurves = [];
-    _initNanoflareSystem();   // ensure host + Points exist regardless of loops
+    _initNanoflareSystem();   // ensure the pool exists regardless of loops
 
     if (loopGroup && loopGroup.children?.length) {
         loopGroup.children.forEach(line => {
@@ -7196,9 +7354,7 @@ function _rebuildNanoflares() {
     }
 
     const tog = document.getElementById('tog-nanoflares');
-    if (_nanoflareSystem?.points) {
-        _nanoflareSystem.points.visible = tog ? tog.checked : true;
-    }
+    _nanoflareLayerOn = tog ? tog.checked : true;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -7624,14 +7780,6 @@ function _spawnNanoflareAtSurface(latRad, lonRad, energyE) {
     const peakAlpha = 0.50 + eNorm * 0.45;
     const life      = 0.30 + eNorm * 1.20;
 
-    let r, gC, b;
-    if (eNorm < 0.5) {
-        const k = eNorm * 2;
-        r  = 1.00; gC = 0.78 + k * 0.18; b = 0.32 + k * 0.42;
-    } else {
-        const k = (eNorm - 0.5) * 2;
-        r  = 1.00 - k * 0.45; gC = 0.96 - k * 0.10; b = 0.74 + k * 0.30;
-    }
 
     const ent = sys.pool[slot];
     ent.alive     = true;
@@ -7646,9 +7794,7 @@ function _spawnNanoflareAtSurface(latRad, lonRad, energyE) {
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
     ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
-    sys.colors[slot * 3]     = r;
-    sys.colors[slot * 3 + 1] = gC;
-    sys.colors[slot * 3 + 2] = b;
+    ent.logT = peakLogT(_nanoErgFromNorm(eNorm));
     sys.sizes[slot]  = peakSize * 0.6;
     sys.alphas[slot] = 0.0;
 }
@@ -8699,7 +8845,8 @@ document.getElementById('tog-loops').addEventListener('change',  e => { if (loop
 document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
     // The toggle owns the WHOLE nanoflare chain — the loop sparks AND the
     // photospheric population — so "off" means off, not "off in one layer".
-    if (_nanoflareSystem?.points) _nanoflareSystem.points.visible = e.target.checked;
+    _nanoflareLayerOn = e.target.checked;
+    if (!_nanoflareLayerOn) volumetricCorona?.setSparks([]);   // stop feeding the volume immediately
     uniforms.u_nanoOn.value = e.target.checked ? 1.0 : 0.0;
 });
 // Tick marks on the α slider at the published measurements, so the control
@@ -8907,9 +9054,24 @@ function _applyViewLayers(channel) {
     if (promGroup)  promGroup.visible  = channel ? false : togOn('tog-prom');
     if (loopGroup)  loopGroup.visible  = channel === 0 ? togOn('tog-loops') : (channel >= 2 && channel <= 4);
 }
+/**
+ * Hand the photosphere shader the ACTIVE channel's temperature response, from
+ * the raymarcher's own table. ONE table decides whether a nanoflare campfire
+ * is visible in this view (js/corona-volumetric.js EUV_CHANNELS; the GLSL
+ * mirror is in sunFS's nanoflare block). 'white' and 'mag' carry σ = 0, which
+ * is what makes the campfires vanish there — a continuum image and a
+ * magnetogram are not passbands, so there is no response to evaluate.
+ */
+function _applyNanoChannel(m) {
+    const key = VIEW_MODE_CHANNEL[m] || 'white';
+    const ch  = EUV_CHANNELS[key];
+    uniforms.u_nanoChan.value.set(ch ? ch.logT : 0, ch ? ch.sigma : 0);
+}
 document.getElementById('view-mode')?.addEventListener('change', e => {
     const m = parseFloat(e.target.value) || 0;
     uniforms.u_viewMode.value = m;
+    _applyNanoChannel(m);
+    _refreshNanoflares();      // the readout names the channel the population is drawn in
     sunObserved?.setChannel(VIEW_MODE_CHANNEL[m] || 'white');   // observed frame follows the channel
     // EUV/magnetogram and Doppler are mutually exclusive views.
     if (m > 0) {
@@ -8969,6 +9131,9 @@ function animate() {
     const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
     if (sunObserved) sunObserved.tick();
+    // The plane is pinned to the observer; only its off-axis weight tracks the
+    // camera (js/sun-offlimb.js header, point 3).
+    if (sunOffLimb) sunOffLimb.update(camera.position);
 
     // Phase 2 prominence bundles — re-classify each frame so EP state machines
     // and class transitions evolve smoothly. Then tick uniforms (time, camera
@@ -9145,7 +9310,7 @@ function animate() {
 
     // Nanoflare host group rotates with the photosphere so SOC-spawned
     // surface sparks track AR positions even when no coronal loops exist.
-    if (_nanoflareHost) _nanoflareHost.rotation.y = solarRotAngle;
+    // (the spark pool's co-rotation is applied per frame in _nanoflareSparkSlots)
     _updateNanoflares(t);
 
     // Core → radiative-zone simulation: photon random-walk Monte Carlo.
@@ -12333,7 +12498,8 @@ window.__sun = {
             propagate: SOC_PROPAGATE,
             setPropagate: (v) => { SOC_PROPAGATE = v; },
             resetMonitor: () => _nanoAlphaMon.reset(),
-            sparksVisible: !!_nanoflareSystem?.points?.visible,
+            sparksVisible: _nanoflareLayerOn,
+            sparkSlots: volumetricCorona ? volumetricCorona.uniforms.u_nSparks.value : 0,
             liveSparks: _nanoflareSystem?.liveCount ?? 0,
             loopCurves: _coronalLoopCurves.length,
         };
@@ -12341,6 +12507,12 @@ window.__sun = {
     // Observed-disk hooks (SUN_VISUALS_WORLD_CLASS_PLAN.md Phases 0–1)
     get observed() { return sunObserved ? sunObserved.getState() : null; },   // provenance snapshot
     get observedCtl() { return sunObserved; },
+    // Off-limb annulus (js/sun-offlimb.js): state for the chip gate, the mesh
+    // for the geometry gate (orientation, occlusion, visibility).
+    get offLimb() { return sunOffLimb ? sunOffLimb.getState() : null; },
+    get offLimbCtl() { return sunOffLimb; },
+    get offLimbMesh() { return sunOffLimb?.mesh ?? null; },
+    refreshOffLimb: () => sunOffLimb?.refresh(true),
     setObserved: (on) => { _obsUserOn = !!on; _obsApply('user'); },
     refreshObserved: () => sunObserved?.refresh(true),
     /** Freeze the sim clock at a fixed u_time so a screenshot is deterministic. */
