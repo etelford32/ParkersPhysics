@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import {
-    EUV_CHANNELS, N_AR_SLOTS, N_HOLE_SLOTS,
+    EUV_CHANNELS, N_AR_SLOTS, N_HOLE_SLOTS, N_PULSE_SLOTS,
     CORONA_VOL_VERT, CORONA_VOL_FRAG,
 } from './corona-volumetric.js';
 
@@ -41,6 +41,9 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
     for (let i = 0; i < N_AR_SLOTS; i++) u_regions.push(new THREE.Vector4(0, 0, 0, 0));
     const u_holes = [];
     for (let i = 0; i < N_HOLE_SLOTS; i++) u_holes.push(new THREE.Vector4(0, 0, 0, 0));
+    // Nanoflare heat pulses (sun.html feeds them per frame; see the shader header).
+    const u_pulses = [], u_pulseE = [];
+    for (let i = 0; i < N_PULSE_SLOTS; i++) { u_pulses.push(new THREE.Vector4(0, 0, 0, 1)); u_pulseE.push(new THREE.Vector2(0, 24)); }
 
     // Build the uniform set. Where compatible we share *the same uniform
     // object* with the host page (e.g. u_time, u_activity) so a single
@@ -84,6 +87,10 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
         u_loopGain:           { value: 1.0 },
         u_jitter:             { value: 0.0 },
         u_marchLegacy:        { value: 0.0 },
+
+        u_pulses:             { value: u_pulses },
+        u_pulseE:             { value: u_pulseE },
+        u_nPulses:            { value: 0 },
     };
 
     const material = new THREE.ShaderMaterial({
@@ -200,6 +207,26 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
             }
             uniforms.u_nHoles.value = hs.length;
         },
+
+        /**
+         * Nanoflare heat pulses: [{ x, y, z (sun-local, R☉), sigma (R☉), amp (0–1), log10E (erg) }],
+         * at most N_PULSE_SLOTS used. An empty list clears them.
+         */
+        setPulses(list) {
+            const n = Math.min(list ? list.length : 0, N_PULSE_SLOTS);
+            for (let i = 0; i < N_PULSE_SLOTS; i++) {
+                if (i < n) {
+                    const p = list[i];
+                    u_pulses[i].set(p.x, p.y, p.z, Math.max(1e-3, p.sigma));
+                    u_pulseE[i].set(Math.max(0, p.amp), p.log10E);
+                } else {
+                    u_pulses[i].set(0, 0, 0, 1);
+                    u_pulseE[i].set(0, 24);
+                }
+            }
+            uniforms.u_nPulses.value = n;
+        },
+        get pulseCount() { return uniforms.u_nPulses.value; },
 
         /** Sync the (lat, lon) of the most recent flare. */
         tickFlareLatLon(latRad, lonRad) {

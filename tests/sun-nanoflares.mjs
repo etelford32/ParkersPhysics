@@ -23,6 +23,15 @@
  *   • the MLE recovers the planted α from the sampler, and the sliding-window
  *     monitor tracks a population whose index CHANGES (the SOC driver's α is
  *     emergent, so the page measures it rather than setting it)
+ *   • WHAT THE POPULATION LOOKS LIKE (the CAMPFIRE section): white light sees
+ *     NOTHING, 171 ≫ 193 > 211 see a 10²⁴ erg event and 304 / 131 / 94 do not
+ *     — scored against the corona raymarcher's real channel table, not a copy;
+ *     T(E) and L(E) hit their stated anchors; the sub-pixel rule conserves flux;
+ *     and the ONE GLSL mirror the three shaders splice in evaluates to the same
+ *     numbers as the kernel (parsed from the shader text, not re-typed)
+ *   • sun.html drift gates: the mirror is spliced into the photosphere AND the
+ *     sprite shaders, the white-light composite no longer adds the population,
+ *     the EUV overlay does, and the pulse slot count matches the corona's
  */
 import assert from 'node:assert/strict';
 import {
@@ -31,7 +40,13 @@ import {
     sampleEnergy, energyFractionBelow, meanEnergy, durationFor,
     heatingFlux, rateForFlux, nanoflareState, nanoflareLabel, nanoflareUniform,
     fitAlphaMLE, AlphaMonitor,
+    CAMPFIRE, MM_PER_RSUN, nanoflareLogT, campfireSizeMm, campfireSizeRsun,
+    channelWeight, channelRanking, subPixelFlux, GLSL_NANOFLARE,
 } from '../js/sun-nanoflares.js';
+import { EUV_CHANNELS, CORONA_VOL_FRAG, N_PULSE_SLOTS } from '../js/corona-volumetric.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 let passed = 0;
 function ok(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -404,6 +419,101 @@ ok('a fit pinned at the search bound is reported, not passed off as a measuremen
     const r = fitAlphaMLE(flat, undefined, undefined, { autoRange: true });
     assert.equal(r.ok, false);
     assert.ok(r.atBound || r.ks > 0.09, `flagged: atBound=${r.atBound} ks=${r.ks}`);
+});
+
+// ── What the population LOOKS like ─────────────────────────────────────────
+
+ok('T(E): ~1 MK at 10²⁴ erg, 0.8 MK at 10²³, 2 MK at 10²⁷ — inside the 1–2 MK of Aschwanden 2000 over 10²⁴–10²⁶', () => {
+    assert.ok(Math.abs(nanoflareLogT(1e24) - 6.00) < 1e-9);
+    assert.ok(Math.abs(nanoflareLogT(1e23) - 5.90) < 1e-9);
+    assert.ok(Math.abs(nanoflareLogT(1e27) - 6.30) < 1e-9);
+    for (const E of [1e24, 1e25, 1e26]) {
+        const T = Math.pow(10, nanoflareLogT(E));
+        assert.ok(T >= 1e6 && T <= 2e6, `${E.toExponential(0)} erg → ${(T / 1e6).toFixed(2)} MK`);
+    }
+    let prev = -Infinity;
+    for (let l = 23; l <= 27; l += 0.5) { const v = nanoflareLogT(Math.pow(10, l)); assert.ok(v > prev); prev = v; }
+    assert.ok(Number.isFinite(nanoflareLogT(0)), 'guarded at zero');
+});
+
+ok('L(E) ∝ E^⅓ anchored at 1 Mm for 10²⁴ erg, so 10²³–10²⁶ erg spans the 0.4–4 Mm campfire range (Berghmans 2021)', () => {
+    assert.ok(Math.abs(campfireSizeMm(1e24) - 1.0) < 1e-9);
+    assert.ok(Math.abs(campfireSizeMm(1e27) / campfireSizeMm(1e24) - 10) < 1e-9, 'three decades → ×10');
+    const lo = campfireSizeMm(1e23), hi = campfireSizeMm(1e26);
+    assert.ok(lo > 0.4 && lo < 0.5, `10²³ erg → ${lo.toFixed(2)} Mm`);
+    assert.ok(hi > 4.0 && hi < 5.0, `10²⁶ erg → ${hi.toFixed(2)} Mm`);
+    assert.ok(Math.abs(campfireSizeRsun(1e24) * MM_PER_RSUN - 1.0) < 1e-9, 'R☉ conversion');
+    assert.ok(campfireSizeRsun(1e24) < 0.002, 'a 1 Mm event is ~1.4 milli-R☉ — sub-pixel at whole-disk framing');
+});
+
+ok('CHANNEL WEIGHTS against the corona\'s own table: white light sees NOTHING; 171 ≫ 193 > 211 see a 10²⁴ erg event; 304 / 131 / 94 do not', () => {
+    assert.equal(channelWeight(1e24, EUV_CHANNELS.white), 0, 'white light: exactly zero, not merely small');
+    assert.equal(channelWeight(1e24, null), 0);
+    assert.equal(channelWeight(1e24, undefined), 0);
+    const w = Object.fromEntries(Object.keys(EUV_CHANNELS).map(k => [k, channelWeight(1e24, EUV_CHANNELS[k])]));
+    for (const k of Object.keys(w)) assert.ok(w[k] >= 0 && w[k] <= 1, `${k} in [0,1]`);
+    assert.ok(w['171'] > w['193'] && w['193'] > w['211'], `171 ${w['171'].toFixed(2)} > 193 ${w['193'].toFixed(2)} > 211 ${w['211'].toFixed(2)}`);
+    assert.ok(w['171'] > 0.5, `171 sees it clearly (${w['171'].toFixed(2)})`);
+    for (const k of ['304', '131', '94']) assert.ok(w[k] < 0.01, `${k} Å must not see a ~1 MK event (${w[k].toExponential(1)})`);
+    // The biggest events are warmer, and the hot channels take over — 211 and
+    // 193 ahead of 171 at 10²⁷ erg. This is what makes the same population
+    // look different in each channel, as it does in AIA.
+    const big = channelRanking(EUV_CHANNELS, 1e27);
+    assert.ok(['211', '193'].includes(big[0].name), `10²⁷ erg is seen first by ${big[0].name}`);
+    assert.ok(channelWeight(1e27, EUV_CHANNELS['171']) < channelWeight(1e24, EUV_CHANNELS['171']), '171 favours the small events');
+});
+
+ok('channelRanking omits channels that see nothing and sorts descending', () => {
+    const r = channelRanking(EUV_CHANNELS, CAMPFIRE.eTempRef);
+    assert.ok(!r.some(x => x.name === 'white'), 'white light is not ranked');
+    assert.equal(r[0].name, '171');
+    assert.equal(r[1].name, '193');
+    for (let i = 1; i < r.length; i++) assert.ok(r[i].weight <= r[i - 1].weight);
+    assert.deepEqual(channelRanking(null), []);
+});
+
+ok('the sub-pixel rule conserves flux: a resolved source is untouched, a smaller one is scaled by the AREA ratio', () => {
+    assert.equal(subPixelFlux(0.01, 0.002), 1);
+    assert.equal(subPixelFlux(0.002, 0.002), 1);
+    assert.ok(Math.abs(subPixelFlux(0.001, 0.002) - 0.25) < 1e-12, 'half the radius → a quarter of the peak');
+    assert.equal(subPixelFlux(0.001, 0), 1, 'guarded');
+});
+
+ok('the ONE GLSL mirror evaluates to the kernel\'s numbers — parsed from the shader text, not re-typed', () => {
+    for (const fn of ['nfLogT', 'nfChannelWeight', 'nfSizeRsun']) assert.ok(GLSL_NANOFLARE.includes(`float ${fn}(`), fn);
+    const mT = /nfLogT\(float log10E\)\s*\{\s*return ([\d.]+) \+ ([\d.]+) \* \(log10E - ([\d.]+)\);/.exec(GLSL_NANOFLARE);
+    const mV = /float v = chSig \* chSig \+ ([\d.]+);/.exec(GLSL_NANOFLARE);
+    const mS = /return ([\d.]+) \* pow\(10\.0, \(log10E - ([\d.]+)\) \* ([\d.]+)\) \/ ([\d.]+);/.exec(GLSL_NANOFLARE);
+    assert.ok(mT && mV && mS, 'the three formulas parse');
+    const glLogT = (l) => +mT[1] + +mT[2] * (l - +mT[3]);
+    const glWeight = (l, ch) => { if (!(ch.sigma > 1e-3)) return 0; const d = glLogT(l) - ch.logT; return Math.exp(-0.5 * d * d / (ch.sigma * ch.sigma + +mV[1])); };
+    const glSize = (l) => +mS[1] * Math.pow(10, (l - +mS[2]) * +mS[3]) / +mS[4];
+    for (const l of [23, 23.7, 24, 25.2, 26, 27]) {
+        const E = Math.pow(10, l);
+        assert.ok(Math.abs(glLogT(l) - nanoflareLogT(E)) < 1e-9, `logT at 10^${l}`);
+        assert.ok(Math.abs(glSize(l) - campfireSizeRsun(E)) / campfireSizeRsun(E) < 1e-5, `size at 10^${l}`);
+        for (const k of Object.keys(EUV_CHANNELS)) {
+            assert.ok(Math.abs(glWeight(l, EUV_CHANNELS[k]) - channelWeight(E, EUV_CHANNELS[k])) < 1e-6, `weight ${k} at 10^${l}`);
+        }
+    }
+});
+
+ok('the corona raymarcher splices the mirror and carries the pulse slots the page feeds', () => {
+    assert.ok(CORONA_VOL_FRAG.includes('float nfChannelWeight('), 'mirror spliced into the corona shader');
+    assert.ok(CORONA_VOL_FRAG.includes(`u_pulses[${N_PULSE_SLOTS}]`) && CORONA_VOL_FRAG.includes('g_pulseNear['), 'pulse uniforms + prefilter');
+    assert.ok(CORONA_VOL_FRAG.indexOf('float nfChannelWeight(') < CORONA_VOL_FRAG.indexOf('void demSample('), 'defined before its first use');
+});
+
+ok('sun.html drift gates: the mirror is spliced into the photosphere AND the sprite shader; white light no longer adds the population; the EUV overlay does; slot counts agree', () => {
+    const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'sun.html'), 'utf8');
+    const splices = html.split('${GLSL_NANOFLARE}').length - 1;
+    assert.ok(splices >= 2, `GLSL_NANOFLARE spliced ${splices}× (photosphere + sprites)`);
+    assert.ok(!/col \+= [^\n]*\* microflare \*/.test(html), 'the white-light composite must not add microflare (it did, as white-yellow pops)');
+    assert.ok(html.includes('euv += mix(u_nanoChanColor, vec3(1.0), 0.45) * microflare'), 'the EUV branch adds the channel-weighted population');
+    assert.ok(html.includes('if (u_nanoOn > 0.5 && u_nanoChan.z > 0.5)'), 'the block is gated on the EUV-view flag');
+    assert.ok(html.includes('nfChannelWeight(log10E, u_nanoChan.x, u_nanoChan.y)'), 'every event is weighted by the active channel');
+    const m = /const NANO_PULSE_SLOTS = (\d+);/.exec(html);
+    assert.ok(m && +m[1] === N_PULSE_SLOTS, `NANO_PULSE_SLOTS ${m && m[1]} = N_PULSE_SLOTS ${N_PULSE_SLOTS}`);
 });
 
 console.log(`\n${passed} checks passed`);

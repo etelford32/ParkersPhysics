@@ -476,4 +476,81 @@ test.describe('sun.html smoke', () => {
         expect(st.rot).toBe(1);
         expect(st.chip).toMatch(/^MODEL · procedural photosphere$/);
     });
+
+    // The nanoflare population is ~1 MK coronal plasma (js/sun-nanoflares.js,
+    // CAMPFIRE section): white light cannot see it, 171 Å can, 131 Å (10 MK)
+    // barely. Until 2026-09 the page drew it as white-yellow pops on the
+    // white-light photosphere and reached the EUV views only through the 131
+    // ramp — the inverse. This gate measures PIXELS: toggling the layer must
+    // leave a white-light frame untouched and must change a 171 frame.
+    test('nanoflares are EUV-only: toggling the layer leaves white light untouched and changes 171 (measured in pixels)', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await routeAiaDown(page);                       // Model mode in both views: the disk is the same procedural photosphere
+        await page.goto(PAGE + '?observed=0');
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        const setCheckbox = (id, on) => page.evaluate(({ id, on }) => {
+            const el = document.getElementById(id);
+            if (el && el.checked !== on) { el.checked = on; el.dispatchEvent(new Event('change', { bubbles: true })); }
+        }, { id, on });
+        const setView = (v) => page.evaluate((v) => {
+            const el = document.getElementById('view-mode'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, v);
+        // The volumetric corona's jittered accumulation would leak frame-to-frame
+        // noise into the measurement; the population under test lives in the
+        // photosphere shader and the sprite layer, neither of which needs it.
+        await setCheckbox('tog-corona', false);
+        // Brightness is a display choice (u_nanoGain is disclosed as one); the
+        // gate is about WHERE the population shows, so make it loud.
+        await page.evaluate(() => { window.__sun.uniforms.u_nanoGain.value = 6; });
+        const luma = () => page.evaluate(() => window.__sun.readbackLuma({ x0: 0.32, y0: 0.18, x1: 0.68, y1: 0.82 }).mean);
+        const measure = async (view) => {
+            await setView(view);
+            await page.evaluate(() => window.__sun.setSimSpeed(5));   // let the SOC grid spawn sparks
+            await page.waitForTimeout(700);
+            await page.evaluate(() => window.__sun.freeze(120));
+            await page.waitForTimeout(300);
+            await setCheckbox('tog-nanoflares', true);
+            const on1 = await luma(), on2 = await luma();            // two reads of the same state = the noise floor
+            await setCheckbox('tog-nanoflares', false);
+            const off = await luma();
+            await setCheckbox('tog-nanoflares', true);
+            const h = await page.evaluate(() => {
+                const n = window.__sun.nanoflares;
+                return { channel: n.channel, euvFlag: n.chan[2], weightHere: n.weightHere, sparksVisible: n.sparksVisible, top: n.ranking[0]?.name };
+            });
+            return { noise: Math.abs(on1 - on2), diff: Math.abs(on1 - off), ...h };
+        };
+
+        const white = await measure('0');
+        expect(white.channel).toBe('white');
+        expect(white.euvFlag).toBe(0);
+        expect(white.weightHere).toBe(0);
+        expect(white.sparksVisible).toBe(false);
+        expect(white.diff, `white light must not change when the layer toggles (Δ ${white.diff.toFixed(5)}, noise ${white.noise.toFixed(5)})`)
+            .toBeLessThan(0.002 + 3 * white.noise);
+
+        const euv = await measure('2');
+        expect(euv.channel).toBe('171');
+        expect(euv.euvFlag).toBe(1);
+        expect(euv.top).toBe('171');
+        expect(euv.weightHere).toBeGreaterThan(0.5);
+        expect(euv.sparksVisible).toBe(true);
+        expect(euv.diff, `171 Å must change when the layer toggles (Δ ${euv.diff.toFixed(5)}, noise ${euv.noise.toFixed(5)})`)
+            .toBeGreaterThan(0.003 + 5 * euv.noise);
+
+        // 131 Å (Fe XXI, 10 MK) sees almost none of a ~1 MK population, and the
+        // readout says which channels do.
+        await setView('5');
+        const hot = await page.evaluate(() => ({ w: window.__sun.nanoflares.weightHere, text: document.getElementById('nano-readout')?.textContent || '' }));
+        expect(hot.w).toBeLessThan(0.01);
+        expect(hot.text).toMatch(/EUV only/);
+        expect(hot.text).toMatch(/171 Å/);
+        await setView('0');
+        const wl = await page.evaluate(() => document.getElementById('nano-readout')?.textContent || '');
+        expect(wl).toMatch(/invisible in white light/);
+
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no shader / console errors').toHaveLength(0);
+    });
 });

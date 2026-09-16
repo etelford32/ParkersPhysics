@@ -59,7 +59,19 @@
  *   coronal lines so the disk is mostly dark; 304 is chromospheric so
  *   the disk has moderate brightness; white-light keeps the photosphere
  *   at full brightness and disables the volumetric corona entirely).
+ *
+ * ── Nanoflare pulses (2026-09) ────────────────────────────────────────────
+ *   The page's largest live nanoflares arrive as ≤ N_PULSE_SLOTS Gaussian
+ *   heat pulses (setPulses on the mount handle). Each is multiplied by the
+ *   CLOSED-line density where an atlas exists, so what brightens is the loop
+ *   strand the event sits on rather than a blob — the Solar Orbiter/EUI
+ *   "campfire" look — and weighted by this channel's response to the event's
+ *   own temperature through the kernel's nfChannelWeight (js/sun-nanoflares.js,
+ *   GLSL_NANOFLARE spliced below): a 10²⁴ erg event is bright in 171, faint in
+ *   211 and absent in 131 / 94 / 304. Per-ray prefilter in main() so rays that
+ *   pass no pulse (nearly all of them) never enter the loop.
  */
+import { GLSL_NANOFLARE } from './sun-nanoflares.js';
 
 // ── Channel response table ──────────────────────────────────────────────────
 //
@@ -89,6 +101,7 @@ export const EUV_CHANNELS = {
 // (u_regions array length) and SunSkin.setHoles().
 export const N_AR_SLOTS    = 8;
 export const N_HOLE_SLOTS  = 4;
+export const N_PULSE_SLOTS = 12;   // nanoflare heat pulses — = NANO_PULSE_SLOTS in sun.html
 
 // ── Vertex shader ───────────────────────────────────────────────────────────
 //
@@ -154,6 +167,12 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform float u_jitter;             // per-frame ray-start phase (golden-ratio sequence)
     uniform float u_marchLegacy;        // 1 = the pre-Phase-3 single 12-step chord march (A/B + perf reference)
 
+    // Nanoflare heat pulses (js/sun-nanoflares.js): xyz sun-local centre, w = σ (R☉); (amp, log10 E/erg)
+    uniform vec4  u_pulses[${N_PULSE_SLOTS}];
+    uniform vec2  u_pulseE[${N_PULSE_SLOTS}];
+    uniform int   u_nPulses;
+    bool g_pulseNear[${N_PULSE_SLOTS}];   // per-ray prefilter, filled once in main()
+
     varying vec3 vWorldPos;
 
     // Hash-based noise for granulation-scale variation in the DEM
@@ -180,6 +199,7 @@ export const CORONA_VOL_FRAG = /* glsl */`
         float d = (logT - u_channel_logT) / u_channel_sigT;
         return exp(-0.5 * d * d);
     }
+${GLSL_NANOFLARE}
 
     // ── Loop-density read (mirrors sampleLoopDensity in corona-loop-density.js)
     // Two bilinear taps on the slice atlas (slices z0 and z0+1) mixed by the
@@ -265,6 +285,25 @@ export const CORONA_VOL_FRAG = /* glsl */`
             emission += loopCol * loopResp * 9.0;
         }
         float openHole = clamp(ld.y * 1.4, 0.0, 1.0) * exp(-h / 0.5);
+
+        // ── Nanoflare pulses — a loop strand lighting up ───────────────────
+        // See the header. The sigma is the HEATED STRAND (≥ 0.015 R☉ —
+        // conduction spreads the heat along the loop), not the sub-pixel event
+        // itself; with no atlas the 0.35 floor still shows the event, so the
+        // offline / CI path is not dead.
+        if (u_nPulses > 0) {
+            float strand = 0.35 + 1.4 * min(ld.x * 4.0, 1.0);
+            for (int k = 0; k < ${N_PULSE_SLOTS}; k++) {
+                if (k >= u_nPulses) break;
+                if (!g_pulseNear[k]) continue;
+                vec3  dP = p_local - u_pulses[k].xyz;
+                float sg = u_pulses[k].w;
+                float q  = dot(dP, dP) / (2.0 * sg * sg);
+                if (q > 7.0) continue;
+                emission += u_pulseE[k].x * exp(-q) * strand
+                          * nfChannelWeight(u_pulseE[k].y, u_channel_logT, u_channel_sigT) * 14.0;
+            }
+        }
 
         // ── Combined per-AR contribution ─────────────────────────────────
         for (int k = 0; k < ${N_AR_SLOTS}; k++) {
@@ -456,6 +495,19 @@ export const CORONA_VOL_FRAG = /* glsl */`
         vec2 hit_phot = raySphere(ro, rd, u_sun_world, u_sun_radius);
         if (hit_phot.x > 0.0) {
             t_exit = min(t_exit, hit_phot.x);
+        }
+
+        // Nanoflare pulse prefilter: closest approach of this ray to each pulse
+        // centre, once per fragment. demSample() then skips every pulse this
+        // ray never comes near — nearly all of them, for nearly every ray.
+        for (int k = 0; k < ${N_PULSE_SLOTS}; k++) {
+            g_pulseNear[k] = false;
+            if (k >= u_nPulses) continue;
+            vec3  oc = u_pulses[k].xyz + u_sun_world - ro;
+            float tc = dot(oc, rd);
+            float d2 = dot(oc, oc) - tc * tc;
+            float sg = u_pulses[k].w;
+            g_pulseNear[k] = d2 < 14.0 * sg * sg && tc > -4.0 * sg;
         }
 
         // ── Two-scale front-to-back march (Phase 3) ───────────────────────

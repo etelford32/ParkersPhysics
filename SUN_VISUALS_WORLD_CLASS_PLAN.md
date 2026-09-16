@@ -283,6 +283,62 @@ in §1 are locked by the repo owner.*
     not a power law, or a likelihood that ran to the edge of its search. The
     node test feeds it a log-normal to prove the KS guard bites.
 
+- **2026-09-16 — nanoflares drawn as what they are: EUV-only, channel-weighted,
+  sub-pixel with flux conserved (done).** Measured on the page before touching
+  it: the population was ADDED TO THE WHITE-LIGHT COMPOSITE (`sunFS`, the
+  "hot white-yellow pops" line) and reached the EUV views only through the
+  131 Å (10 MK) ramp's `hot` term — visible where a ~1 MK event cannot be,
+  absent from 171/193 where Solar Orbiter actually resolved them (the EUI
+  "campfires", Berghmans et al. 2021: 0.4–4 Mm, 10–200 s, 1–5 Mm up,
+  ~1–1.6 MK). The loop sparks had the same inversion plus an energy→colour
+  ramp (gold → teal) that painted a 10 MK signature onto ~1 MK events, and
+  they drew in white light. Now, with ONE kernel section (`CAMPFIRE` in
+  `js/sun-nanoflares.js`) and ONE GLSL mirror (`GLSL_NANOFLARE`, generated from
+  the same constants and spliced into sunFS, the sprite shader and the corona
+  raymarcher — the node test parses the formulas back out of the shader text):
+  - **`channelWeight(E, channel)`** — the event's DEM (log-normal in T,
+    centre `nanoflareLogT(E)` = 1 MK at 10²⁴ erg rising to 2 MK at 10²⁷,
+    width 0.15 dex) convolved with the corona raymarcher's OWN channel
+    Gaussian (`EUV_CHANNELS`, one table): a 10²⁴ erg event is seen 71 % by
+    171, 58 % by 193, 32 % by 211, < 1 % by 304 / 131 / 94, and **0 in white
+    light** (no temperature response ⇒ exactly zero, not merely small). The
+    biggest events swing to 193/211 as T(E) climbs — the same population
+    looks different per channel, as it does in AIA.
+  - **`campfireSizeMm(E)`** = 1 Mm·(E/10²⁴)^⅓ (constant-density thermal
+    energy ⇒ L ∝ V^⅓), so 10²³–10²⁶ erg spans 0.46–4.6 Mm; that is
+    sub-pixel at whole-disk framing, and the shader draws each event at
+    max(true size, ~1 px) with its FLUX conserved (`subPixelFlux`, the area
+    ratio; `u_pxFootprint` is refreshed per frame from the camera distance).
+    Zooming in resolves the same events it showed as specks.
+  - sunFS: the block is gated on `u_nanoChan.z` (EUV views 1–5 only), sites
+    are hashed in the ROTATING surface frame (rotLon, lat) and the lattice
+    offset is projected onto the tangent plane (a cell whose centre sits off
+    the sphere otherwise never drew), and the result is added in the EUV
+    branch AFTER the observed mix as a disclosed modelled overlay — the
+    readout's new third line says which channels see the population, what
+    the current view sees, and that it is drawn over the observation.
+  - Sprites are coloured by the channel and weighted per spark
+    (`aLog10E` attribute → `nfChannelWeight` in the vertex shader), hidden
+    outside EUV views while the SOC grid keeps stepping in every view (its
+    measured α is about the model, not the channel being looked through).
+  - The largest live events (upper half of the log range) are fed to the
+    corona raymarcher as ≤ 12 Gaussian heat pulses (`setPulses`,
+    `N_PULSE_SLOTS`) multiplied by the closed-line density, so what
+    brightens is the loop strand the event sits on rather than a dot —
+    σ ≥ 0.015 R☉ (the heated strand, not the event; the two-scale march
+    cannot see smaller) with a per-ray closest-approach prefilter so rays
+    that pass no pulse skip the loop.
+  Gates: `tests/sun-nanoflares.mjs` 23 → 31 checks (incl. sun.html drift
+  gates: the mirror is spliced ≥ 2×, no `col += … * microflare` in the
+  white-light composite, the EUV overlay present, slot counts equal) and a
+  smoke test that measures PIXELS via the new `__sun.readbackLuma()`:
+  toggling the layer must leave a white-light frame within the noise floor
+  and must move a 171 frame. Software GL only — the GPU baseline is still
+  the owner's. Known, not touched: the solar-wind particle layer draws over
+  the disk in every EUV view and is what dominates a whole-disk 171
+  screenshot; the campfires are visible once it is off or the camera is
+  inside ~2 R☉.
+
 - **2026-09-09 — the fluid solver was not enforcing incompressibility (fixed).**
   Found while gating the convection: `SolarFluid.probe()` reported residual
   |div| ≈ 1.2 RMS **that did not fall when the Jacobi count was tripled from 20

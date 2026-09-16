@@ -1739,7 +1739,13 @@ import { SunObserved, VIEW_MODE_CHANNEL, REAL_TIME_ROT_MUL, solarEphemeris } fro
 import {
     nanoflareState, nanoflareUniform, sampleEnergy,
     AlphaMonitor, HEATING_REQUIREMENT, E_MIN_ERG, E_MAX_ERG, ALPHA_REFERENCES,
+    GLSL_NANOFLARE, channelWeight, channelRanking, campfireSizeRsun, CAMPFIRE,
 } from './js/sun-nanoflares.js';
+// The AIA channel table is the corona raymarcher's — ONE table. The nanoflare
+// layer weights its population by the SAME temperature responses the corona
+// is lit with, so an event and the loop it sits on agree on which channel
+// sees them (js/sun-nanoflares.js, CAMPFIRE rule 2).
+import { EUV_CHANNELS } from './js/corona-volumetric.js';
 // Flare-site geometry: the ONE copy of "where is the flare, which way does it
 // face, how does it co-rotate" (js/flare-geometry.js, node-gated). Every
 // rotation on this page — sunFS, the AR slots, the marker groups, the flash
@@ -2284,6 +2290,17 @@ const uniforms = {
     u_nano:              { value: new THREE.Vector4(2.0, Math.log2(E_MIN_ERG), Math.log2(E_MAX_ERG), 1.0) },
     u_nanoOn:            { value: 1.0 },
     u_nanoGain:          { value: 1.0 },   // display brightness — a rendering choice, disclosed as one
+    // Which channel is looking, and does it see ~1 MK plasma (js/sun-nanoflares.js
+    // channelWeight): x = the active channel's log10 T peak, y = its σ in log T
+    // — 0 in white light, which is what makes the population INVISIBLE there
+    // (CAMPFIRE rule 1); z = 1 while the view is an EUV channel (1–5), 0 for
+    // white light and the magnetogram. Written by _syncNanoflareChannel().
+    u_nanoChan:          { value: new THREE.Vector4(0.0, 0.0, 0.0, 0.0) },
+    u_nanoChanColor:     { value: new THREE.Vector3(1.0, 0.85, 0.45) },
+    // Object-space size of one screen pixel at the photosphere (R☉), refreshed
+    // per frame in animate(): a 0.5 Mm campfire is drawn at pixel size with its
+    // flux conserved (kernel subPixelFlux) instead of falling through the raster.
+    u_pxFootprint:       { value: 0.003 },
     // ── OBSERVED disk (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1) — the live SDO
     // frame wrapped on the Earth-facing hemisphere; js/sun-observed.js drives
     // these. u_obsOn is never 1 with a null texture (the chip must not lie).
@@ -2655,6 +2672,9 @@ const sunFS = /* glsl */`
     uniform vec4  u_nano;       // (alpha, log2 Emin, log2 Emax, rate multiplier)
     uniform float u_nanoOn;
     uniform float u_nanoGain;
+    uniform vec4  u_nanoChan;       // (channel log10 T peak, channel σ logT, EUV-view flag, 0)
+    uniform vec3  u_nanoChanColor;  // the channel's pseudocolour (EUV_CHANNELS)
+    uniform float u_pxFootprint;    // R☉ per screen pixel at the photosphere
     // Observed disk (js/sun-observed.js — the module header documents the geometry)
     uniform float     u_obsOn;
     uniform sampler2D u_obsTex;
@@ -2764,6 +2784,8 @@ const sunFS = /* glsl */`
             mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),u.x),
                 mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),u.x), u.y), u.z);
     }
+
+${GLSL_NANOFLARE}
 
     // ── Fractal Brownian motion ────────────────────────────────────────────────
     float fbm(vec3 p, int oct) {
@@ -3113,40 +3135,62 @@ const sunFS = /* glsl */`
         //
         // Physics + statistics live in the PURE kernel js/sun-nanoflares.js
         // (node-gated); this draws the population that kernel specifies. Read
-        // that header before touching any of this — in particular the α = 2
-        // threshold, which is the whole reason the layer exists.
+        // that header before touching any of this — the α = 2 threshold, which
+        // is the whole reason the layer exists, and the CAMPFIRE section, which
+        // is where the population is DRAWN as what it is:
         //
-        // WHAT THIS REPLACED, AND WHY. The old term put a handful of sites
-        // inside each active region on a pow(sin, 9) clock. Two things were
-        // wrong with it as physics:
+        //   • CORONAL, so EUV-ONLY. Until 2026-09 this term was added to the
+        //     WHITE-LIGHT composite as white-yellow pops on the photosphere, and
+        //     reached the EUV views only through the 131 Å (10 MK) ramp —
+        //     visible where a ~1 MK event cannot be, absent where it is. Now
+        //     the block runs only in the EUV channel views (u_nanoChan.z) and
+        //     every event is weighted by the active channel's temperature
+        //     response (nfChannelWeight — the kernel's own formula, spliced in
+        //     above): 171 ≫ 193 > 211 for a 10²⁴ erg event, the big ones
+        //     swinging to 193/211 as T(E) climbs, and nothing in 304 / 131 /
+        //     94. White light: zero, by physics rather than by a switch.
+        //   • SMALL. 0.4–4 Mm campfires (Berghmans 2021) are sub-pixel at the
+        //     whole-disk framing; each is drawn at max(its true size, one
+        //     pixel) with its FLUX conserved (the area ratio, kernel
+        //     subPixelFlux), so zooming in resolves the same events it showed
+        //     as specks — never inflated, never dropped.
+        //   • PINNED TO THE SURFACE. Sites are hashed in the DIFFERENTIALLY
+        //     ROTATING surface frame (rotLon, lat) — the frame the network
+        //     lanes live in — so the population rides with the network it is
+        //     seeded on instead of sliding over it. The 3-D lattice offset is
+        //     projected onto the tangent plane, otherwise a cell whose centre
+        //     sits above or below the sphere never draws its site.
+        //
+        // WHAT THE ORIGINAL TERM GOT WRONG AS PHYSICS (kept so it is not re-done):
         //   • it fired ONLY inside active regions, which inverts Parker's
         //     (1988) hypothesis — the proposal is about the QUIET corona,
         //     where convection braids the field everywhere and the ubiquitous
         //     small events do the heating. A spotless Sun went dark.
         //   • every event was the same size, so the population had no energy
-        //     distribution and therefore no α — and α is the one number that
-        //     decides whether nanoflares can heat the corona at all.
+        //     distribution and therefore no α to report, tune or be wrong about.
         //
-        // Now: sites are seeded over the whole surface, WEIGHTED by where the
-        // field is actually braided (the supergranular network lanes, plus a
-        // large boost in plage / AR), and each site draws an energy from the
-        // bounded power law dN/dE ∝ E^−α by inverse transform — the same
-        // transform the kernel uses, so the rendered population really does
-        // carry the index the control reports. Energy then sets BOTH the peak
-        // brightness and, through T ∝ E^β, the duration: big events are rare,
-        // bright and slow; small ones are everywhere, faint and quick. That
-        // contrast IS the α = 2 argument made visible.
+        // Sites are seeded over the whole surface, WEIGHTED by where the field
+        // is braided (the supergranular network lanes, plus a large boost in
+        // plage / AR), and each site draws an energy from the bounded power law
+        // dN/dE ∝ E^−α by inverse transform — the same transform the kernel
+        // uses, so the rendered population really does carry the index the
+        // control reports. Energy then sets peak brightness, size (L ∝ E^⅓),
+        // temperature (hence which channel sees it) and, through T ∝ E^β, the
+        // duration: big events are rare, bright, warm and slow; small ones are
+        // everywhere, faint, cool and quick. That contrast IS the α = 2
+        // argument made visible.
         //
         // u_nano = (α, log2 E_MIN, log2 E_MAX, rate multiplier) — packed by
         // nanoflareUniform(); u_nanoGain is the display brightness, which is a
         // rendering choice and is disclosed as one.
         float microflare = 0.0;
         vec3  nfUnit = normalize(vPosition);
-        if (u_nanoOn > 0.5) {
+        if (u_nanoOn > 0.5 && u_nanoChan.z > 0.5) {
             float nfA = u_nano.x;
-            // Site lattice, fine enough that a granule-scale event is a point
-            // at the framings this page uses.
-            vec3  nfP    = vPosition * 46.0;
+            // Site lattice in the ROTATING surface frame — fine enough that a
+            // granule-scale event is a point at the framings this page uses.
+            vec3  nfSurf = vec3(cos(lat) * sin(rotLon), sin(lat), cos(lat) * cos(rotLon));
+            vec3  nfP    = nfSurf * 46.0;
             vec3  nfCell = floor(nfP);
             float h0 = hash(nfCell);
             float h1 = hash(nfCell + vec3(19.3, 7.1, 3.7));
@@ -3176,6 +3220,7 @@ const sunFS = /* glsl */`
             float B  = exp2(u_nano.z * p);
             float lE = log2(max(A + h1 * (B - A), 1e-30)) / p;      // log2(E/erg)
             float eN = clamp((lE - u_nano.y) / max(u_nano.z - u_nano.y, 1e-3), 0.0, 1.0);
+            float log10E = lE * 0.30102999566;                        // log10(E/erg)
 
             // Duration from the same energy: T ∝ E^0.33, so the loudest events
             // also linger. Normalised so a mid-range event lasts ~1 sim-second.
@@ -3188,14 +3233,21 @@ const sunFS = /* glsl */`
             float light = rise * (phase < 0.08 ? 1.0 : cool);
 
             // Peak brightness ∝ energy, compressed for display (four decades
-            // cannot be shown linearly). Radius grows slowly with energy.
+            // cannot be shown linearly).
             float amp   = pow(max(eN, 1e-4), 0.55);
-            float rad   = 0.18 + 0.42 * amp;
-            vec3  local = fract(nfP) - vec3(0.5);
-            float d     = length(local) / rad;
-            float core  = exp(-d * d * 3.0);
+            // Size from the kernel (L ∝ E^⅓, in R☉), drawn no smaller than one
+            // screen pixel with the flux conserved — kernel subPixelFlux.
+            float rTrue = nfSizeRsun(log10E);
+            float rDraw = max(rTrue, u_pxFootprint * 0.9);
+            float flux  = min(1.0, (rTrue * rTrue) / (rDraw * rDraw));
+            vec3  local = (fract(nfP) - vec3(0.5)) / 46.0;           // offset from the site, R☉
+            local      -= nfSurf * dot(local, nfSurf);                // on the tangent plane
+            float d     = length(local) / rDraw;
+            float core  = exp(-d * d * 2.0);
+            // Which channel sees THIS event — the kernel's temperature response.
+            float seen  = nfChannelWeight(log10E, u_nanoChan.x, u_nanoChan.y);
 
-            microflare = live * core * light * amp * u_nanoGain;
+            microflare = live * core * light * amp * flux * seen * u_nanoGain;
         }
         microflare = min(microflare, 1.5);
 
@@ -3359,8 +3411,11 @@ const sunFS = /* glsl */`
         // Magnetic bright points — intensely white
         col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
 
-        // Nanoflare transient brightenings — hot white-yellow pops
-        col += mix(vec3(1.7, 1.5, 1.1), vec3(0.85, 0.95, 1.7), 0.55) * microflare * 1.1 * (1.0 - umbra) * u_showFlares;
+        // Nanoflares are NOT added here. They are ~1 MK coronal events with no
+        // white-light signature (js/sun-nanoflares.js, CAMPFIRE rule 1); the
+        // population is drawn in the EUV channel views below, weighted by each
+        // channel's temperature response. This line used to add white-yellow
+        // pops to the photosphere — do not bring it back.
 
         // Facular brightening near limb (spot-local Wilson walls)
         col += baseCol * facular * 0.65;
@@ -3669,7 +3724,7 @@ const sunFS = /* glsl */`
             float polar = smoothstep(0.58, 0.86, abs(fragUnit.y));
             float hole  = clamp(max(polar, smoothstep(0.60, 0.40, holeN)), 0.0, 1.0);
             float moss  = 0.22 + 0.22 * vnoise(fragUnit * 16.0 + vec3(u_time * 0.02));
-            float hot   = microflare + plage * u_flare_intensity * 1.5;
+            float hot   = plage * u_flare_intensity * 1.5;   // the flare's 10 MK plasma; nanoflares are ~1 MK and enter below, channel-weighted
             float limb  = 0.55 + 0.45 * mu;
             float rim   = pow(max(1.0 - mu, 0.0), 3.2);
             vec3 euv;
@@ -3733,6 +3788,13 @@ const sunFS = /* glsl */`
                 }
                 euv = mix(euv, obsCh, obsW);
             }
+            // ── The nanoflare population, in the channel that sees it ────────
+            // Added AFTER the observed mix: a modelled, sub-pixel population
+            // drawn over the observation the way the volumetric corona's
+            // arcades are — the readout discloses it. microflare already
+            // carries this channel's temperature-response weight, so in 304 /
+            // 131 / 94 it is ~0 by physics, not by a per-channel switch.
+            euv += mix(u_nanoChanColor, vec3(1.0), 0.45) * microflare * 1.5;
             col = euv;
         }
 
@@ -6838,6 +6900,77 @@ const _nanoAlphaMon = new AlphaMonitor({ eMin: Number.MIN_VALUE, eMax: Infinity 
 let _nanoF107     = 150;
 let _nanoAreaMh   = 0;
 
+// ── Which channel is looking ───────────────────────────────────────────────
+// The population is drawn ONLY in the EUV channel views, weighted by the
+// active channel's temperature response (js/sun-nanoflares.js, CAMPFIRE rules
+// 1–2: ~1 MK plasma has no white-light signature; 171 ≫ 193 > 211 see it,
+// 304 / 131 / 94 do not). This is the ONE place that decides "which channel is
+// on, and does it see nanoflares" — the photosphere shader (u_nanoChan), the
+// spark sprites (their material uniforms) and the volumetric pulses (which read
+// the corona's own channel uniforms) all follow it. Modes 1–5 are the AIA
+// channels; 0 is white light and 6 the magnetogram, which show none.
+function _nanoViewChannel() {
+    const mode = parseFloat(document.getElementById('view-mode')?.value) || 0;
+    const name = VIEW_MODE_CHANNEL[mode] || 'white';
+    const row  = EUV_CHANNELS[name];
+    const euv  = mode >= 1 && mode <= 5 && !!row && row.sigma > 0;
+    return { mode, name, row: euv ? row : null, euv };
+}
+function _syncNanoflareChannel() {
+    const ch = _nanoViewChannel();
+    uniforms.u_nanoChan.value.set(ch.row ? ch.row.logT : 0, ch.row ? ch.row.sigma : 0, ch.euv ? 1 : 0, 0);
+    if (ch.row) uniforms.u_nanoChanColor.value.set(ch.row.color[0], ch.row.color[1], ch.row.color[2]);
+    const on = uniforms.u_nanoOn.value > 0.5;
+    if (_nanoflareSystem?.points) {
+        // The sprites are DRAWN only in an EUV view; the SOC grid underneath
+        // keeps stepping whatever the view (its measured α is a statement about
+        // the model, not about which channel the visitor happens to be looking through).
+        _nanoflareSystem.points.visible = on && ch.euv;
+        const u = _nanoflareSystem.points.material.uniforms;
+        u.uChanLogT.value = ch.row ? ch.row.logT : 0;
+        u.uChanSig.value  = ch.row ? ch.row.sigma : 0;
+        if (ch.row) u.uChanColor.value.set(ch.row.color[0], ch.row.color[1], ch.row.color[2]);
+    }
+    _renderNanoflareReadout();
+}
+
+// ── Volumetric pulses — the largest live events light the loop strand they sit on ──
+// Fed to js/corona-volumetric.js (setPulses) each frame: ≤ NANO_PULSE_SLOTS
+// Gaussian heat pulses in sun-local space, multiplied there by the PFSS
+// loop density so the strand brightens rather than a blob. The sigma is the
+// heated strand (conduction spreads a nanoflare's heat along its loop), not
+// the sub-pixel event — clamped ≥ 0.015 R☉ so the two-scale march can see it.
+const NANO_PULSE_SLOTS = 12;          // = N_PULSE_SLOTS in js/corona-volumetric.js
+const _nanoPulses = Array.from({ length: NANO_PULSE_SLOTS }, () => ({ alive: false, t0: 0, life: 1, x: 0, y: 0, z: 0, log10E: 24, amp: 0, sigma: 0.02 }));
+let   _nanoPulseNext = 0;
+const _nanoPulseList = [];
+const _nanoPulseV = new THREE.Vector3();
+const _nanoPulseY = new THREE.Vector3(0, 1, 0);
+function _registerNanoPulse(px, py, pz, eNorm, life) {
+    if (eNorm < 0.5) return;          // the upper half of the log-energy range: the events a strand answers to
+    const p = _nanoPulses[_nanoPulseNext];
+    _nanoPulseNext = (_nanoPulseNext + 1) % NANO_PULSE_SLOTS;
+    p.alive = true; p.t0 = uniforms.u_time.value; p.life = life;
+    p.x = px; p.y = py; p.z = pz;
+    p.log10E = Math.log10(E_MIN_ERG) + eNorm * (Math.log10(E_MAX_ERG) - Math.log10(E_MIN_ERG));
+    p.amp    = 0.35 + 0.65 * eNorm;
+    p.sigma  = Math.min(0.05, Math.max(0.015, 3 * campfireSizeRsun(Math.pow(10, p.log10E))));
+}
+function _feedNanoPulses(t) {
+    if (!volumetricCorona?.setPulses) return;
+    const list = _nanoPulseList; list.length = 0;
+    for (const p of _nanoPulses) {
+        if (!p.alive) continue;
+        const age = (t - p.t0) / p.life;
+        if (age >= 1 || age < 0) { p.alive = false; continue; }
+        const env = age < 0.15 ? age / 0.15 : Math.exp(-(age - 0.15) * 4.5);
+        // Sparks live in the co-rotating host group; the corona volume is sun-local world.
+        _nanoPulseV.set(p.x, p.y, p.z).applyAxisAngle(_nanoPulseY, solarRotAngle);
+        list.push({ x: _nanoPulseV.x, y: _nanoPulseV.y, z: _nanoPulseV.z, sigma: p.sigma, amp: p.amp * env, log10E: p.log10E });
+    }
+    volumetricCorona.setPulses(list);
+}
+
 /** Recompute the population from the control + whatever the feeds have said. */
 function _refreshNanoflares() {
     _nanoState = nanoflareState({ f107: _nanoF107, arAreaMh: _nanoAreaMh, alpha: _nanoAlphaSet });
@@ -6876,11 +7009,27 @@ function _renderNanoflareReadout() {
         ? `<span class="dim">SOC grid measuring… (${measured.n}/50 events)</span>`
         : `<span class="dim">SOC grid: ${measured.n} cascades · avalanche sizes not power-law`
           + ` (KS ${measured.ks.toFixed(2)})</span>`;
+    // Where the population can be SEEN. ~1 MK events have no white-light
+    // signature and are seen through a temperature response (kernel CAMPFIRE
+    // rules 1–2); the line names the channels that see a 10²⁴ erg event and
+    // what the current view sees, so a visitor in white light learns why the
+    // layer is dark rather than concluding it is broken.
+    const view = _nanoViewChannel();
+    const rank = channelRanking(EUV_CHANNELS, CAMPFIRE.eTempRef).slice(0, 3)
+        .map(r => `${r.name} Å ${(r.weight * 100).toFixed(0)}%`).join(' · ');
+    const here = view.euv
+        ? `this view (${view.name} Å) sees a 10²⁴ erg event at <b>${(channelWeight(CAMPFIRE.eTempRef, view.row) * 100).toFixed(0)}%</b>`
+        : view.mode === 6
+        ? 'a magnetogram shows none'
+        : '<b>invisible in white light</b> — ~1 MK events have no continuum signature';
+    const seeLine =
+        `<span class="dim">EUV only · ${rank}</span> · ${here}<br>` +
+        `<span class="dim">0.4–4 Mm events (Berghmans 2021) drawn at ≥ 1 px, flux conserved · a modelled population, also over the observed disk</span>`;
     el.innerHTML =
         `α = <b>${s.alpha.toFixed(2)}</b> · ${verdict}<br>` +
         `<span class="dim">quiet-corona budget</span> <b>×${budget.toFixed(2)}</b> ` +
         `<span class="dim">of Withbroe &amp; Noyes ${(HEATING_REQUIREMENT.quiet / 1e5).toFixed(0)}×10⁵ erg cm⁻² s⁻¹</span><br>` +
-        socLine;
+        socLine + '<br>' + seeLine;
 }
 
 // ─── NANOFLARES (Phase 1: loop-anchored Poisson sparks) ──────────────────────
@@ -6901,19 +7050,31 @@ const NANOFLARE_POOL_SIZE   = 768;   // total simultaneous sparks
 const NANOFLARE_E_MIN       = 0.001;
 const NANOFLARE_E_MAX       = 1.0;
 
+// Sprites are coloured by the CHANNEL and weighted by the channel's response
+// to the spark's own temperature (js/sun-nanoflares.js nfChannelWeight, the
+// same GLSL the photosphere and the corona use) — a 10²⁴ erg spark is bright
+// in 171, faint in 211 and gone in 131. The old energy→colour ramp (gold →
+// teal) painted a 10 MK signature onto ~1 MK events.
 const NANOFLARE_VS = /* glsl */`
     attribute float aSize;
     attribute float aAlpha;
+    attribute float aLog10E;
     varying vec3 vColor;
     varying float vAlpha;
     uniform float uPixelRatio;
+    uniform float uChanLogT;
+    uniform float uChanSig;
+    uniform vec3  uChanColor;
+    ${GLSL_NANOFLARE}
     void main() {
-        vColor  = color;
-        vAlpha  = aAlpha;
+        float seen = nfChannelWeight(aLog10E, uChanLogT, uChanSig);
+        vColor  = mix(uChanColor, vec3(1.0), 0.35);
+        vAlpha  = aAlpha * seen;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_Position  = projectionMatrix * mv;
-        // Perspective size attenuation; clamp to avoid singularities.
-        gl_PointSize = aSize * uPixelRatio * (260.0 / max(-mv.z, 0.001));
+        // Perspective size attenuation; clamp to avoid singularities. A spark
+        // this channel cannot see collapses to nothing rather than a dark dot.
+        gl_PointSize = aSize * uPixelRatio * (260.0 / max(-mv.z, 0.001)) * step(0.02, seen);
     }
 `;
 const NANOFLARE_FS = /* glsl */`
@@ -6957,25 +7118,27 @@ function _initNanoflareSystem() {
     if (_nanoflareSystem) return;
 
     const positions = new Float32Array(NANOFLARE_POOL_SIZE * 3);
-    const colors    = new Float32Array(NANOFLARE_POOL_SIZE * 3);
+    const log10E    = new Float32Array(NANOFLARE_POOL_SIZE);   // erg, log10 — the shader derives T and the channel weight
     const sizes     = new Float32Array(NANOFLARE_POOL_SIZE);
     const alphas    = new Float32Array(NANOFLARE_POOL_SIZE);
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+    geom.setAttribute('aLog10E',  new THREE.BufferAttribute(log10E, 1));
     geom.setAttribute('aSize',    new THREE.BufferAttribute(sizes, 1));
     geom.setAttribute('aAlpha',   new THREE.BufferAttribute(alphas, 1));
 
     const mat = new THREE.ShaderMaterial({
         vertexShader:   NANOFLARE_VS,
         fragmentShader: NANOFLARE_FS,
-        vertexColors:   true,
         transparent:    true,
         depthWrite:     false,
         blending:       THREE.AdditiveBlending,
         uniforms: {
             uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
+            uChanLogT:   { value: 0.0 },
+            uChanSig:    { value: 0.0 },      // 0 until an EUV view is on: no channel, no sparks
+            uChanColor:  { value: new THREE.Vector3(1.0, 0.85, 0.45) },
         },
     });
 
@@ -6997,10 +7160,11 @@ function _initNanoflareSystem() {
     _nanoflareHost.add(points);
 
     _nanoflareSystem = {
-        points, geom, positions, colors, sizes, alphas, pool,
+        points, geom, positions, log10E, sizes, alphas, pool,
         nextSlot:  0,
         liveCount: 0,
     };
+    _syncNanoflareChannel();   // visible only in an EUV view, coloured by it
 }
 
 function _spawnNanoflare(loopIdx, sArc, energyE) {
@@ -7032,20 +7196,10 @@ function _spawnNanoflare(loopIdx, sArc, energyE) {
     const peakAlpha = 0.50 + eNorm * 0.45;
     const life      = 0.30 + eNorm * 1.20;   // sim-seconds
 
-    // EUV color ramp: low-E warm gold (chromospheric tail) → mid white →
-    // high-E blue-white teal (Fe XVIII / Fe XXI hot-channel signature).
-    let r, gC, b;
-    if (eNorm < 0.5) {
-        const k = eNorm * 2;
-        r  = 1.00;
-        gC = 0.78 + k * 0.18;
-        b  = 0.32 + k * 0.42;
-    } else {
-        const k = (eNorm - 0.5) * 2;
-        r  = 1.00 - k * 0.45;
-        gC = 0.96 - k * 0.10;
-        b  = 0.74 + k * 0.30;
-    }
+    // Physical energy, log10 erg: the log position in the display range IS the
+    // log position in the kernel's 10²³–10²⁷ (a monotone re-parameterisation).
+    // Colour is the channel's, applied in the shader — not an energy ramp.
+    const log10E = Math.log10(E_MIN_ERG) + eNorm * (Math.log10(E_MAX_ERG) - Math.log10(E_MIN_ERG));
 
     const ent = sys.pool[slot];
     ent.alive     = true;
@@ -7061,11 +7215,10 @@ function _spawnNanoflare(loopIdx, sArc, energyE) {
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
     ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
-    sys.colors[slot * 3]     = r;
-    sys.colors[slot * 3 + 1] = gC;
-    sys.colors[slot * 3 + 2] = b;
+    sys.log10E[slot] = log10E;
     sys.sizes[slot]  = peakSize * 0.6;   // start small, grow to peak
     sys.alphas[slot] = 0.0;              // alpha ramps in over rise
+    _registerNanoPulse(ent.bx, ent.by, ent.bz, eNorm, life);
 }
 
 let _nanoflarePrevT = 0;
@@ -7073,8 +7226,14 @@ function _updateNanoflares(t) {
     // Lazy-init the spark pool the first time we run — this lets the SOC
     // driver work even when there are no coronal loops in the scene yet.
     if (!_nanoflareSystem) _initNanoflareSystem();
-    if (!_nanoflareSystem || !_nanoflareSystem.points.visible) {
+    // Gate on the TOGGLE. The sprites are hidden outside the EUV views (they
+    // are ~1 MK events; white light cannot see them) but the SOC grid and the
+    // α monitor keep running in every view — the measurement is about the
+    // model, not about the channel the visitor is looking through.
+    if (!_nanoflareSystem || uniforms.u_nanoOn.value < 0.5) {
         _nanoflarePrevT = t;
+        _nanoPulseList.length = 0;
+        if (volumetricCorona?.setPulses) volumetricCorona.setPulses(_nanoPulseList);
         return;
     }
 
@@ -7162,7 +7321,7 @@ function _updateNanoflares(t) {
 
     sys.liveCount = liveCount;
     sys.geom.attributes.position.needsUpdate = true;
-    sys.geom.attributes.color.needsUpdate    = true;
+    sys.geom.attributes.aLog10E.needsUpdate  = true;
     sys.geom.attributes.aSize.needsUpdate    = true;
     sys.geom.attributes.aAlpha.needsUpdate   = true;
 
@@ -7172,6 +7331,8 @@ function _updateNanoflares(t) {
         const cur    = uniforms.u_nanoflare_heat.value;
         uniforms.u_nanoflare_heat.value = cur + (target - cur) * 0.05;
     }
+    // The largest live events light their loop strands in the volumetric corona.
+    _feedNanoPulses(t);
 }
 
 // Snapshot every coronal loop's curve points after buildCoronalLoops so
@@ -7195,10 +7356,7 @@ function _rebuildNanoflares() {
         });
     }
 
-    const tog = document.getElementById('tog-nanoflares');
-    if (_nanoflareSystem?.points) {
-        _nanoflareSystem.points.visible = tog ? tog.checked : true;
-    }
+    _syncNanoflareChannel();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -7624,14 +7782,7 @@ function _spawnNanoflareAtSurface(latRad, lonRad, energyE) {
     const peakAlpha = 0.50 + eNorm * 0.45;
     const life      = 0.30 + eNorm * 1.20;
 
-    let r, gC, b;
-    if (eNorm < 0.5) {
-        const k = eNorm * 2;
-        r  = 1.00; gC = 0.78 + k * 0.18; b = 0.32 + k * 0.42;
-    } else {
-        const k = (eNorm - 0.5) * 2;
-        r  = 1.00 - k * 0.45; gC = 0.96 - k * 0.10; b = 0.74 + k * 0.30;
-    }
+    const log10E = Math.log10(E_MIN_ERG) + eNorm * (Math.log10(E_MAX_ERG) - Math.log10(E_MIN_ERG));
 
     const ent = sys.pool[slot];
     ent.alive     = true;
@@ -7646,11 +7797,10 @@ function _spawnNanoflareAtSurface(latRad, lonRad, energyE) {
     sys.positions[slot * 3 + 1] = py * lift;
     sys.positions[slot * 3 + 2] = pz * lift;
     ent.bx = px * lift; ent.by = py * lift; ent.bz = pz * lift;   // base for the rise
-    sys.colors[slot * 3]     = r;
-    sys.colors[slot * 3 + 1] = gC;
-    sys.colors[slot * 3 + 2] = b;
+    sys.log10E[slot] = log10E;
     sys.sizes[slot]  = peakSize * 0.6;
     sys.alphas[slot] = 0.0;
+    _registerNanoPulse(ent.bx, ent.by, ent.bz, eNorm, life);
 }
 
 // Build the AR list the SOC needs from the existing liveRegions array.
@@ -8699,8 +8849,8 @@ document.getElementById('tog-loops').addEventListener('change',  e => { if (loop
 document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
     // The toggle owns the WHOLE nanoflare chain — the loop sparks AND the
     // photospheric population — so "off" means off, not "off in one layer".
-    if (_nanoflareSystem?.points) _nanoflareSystem.points.visible = e.target.checked;
     uniforms.u_nanoOn.value = e.target.checked ? 1.0 : 0.0;
+    _syncNanoflareChannel();
 });
 // Tick marks on the α slider at the published measurements, so the control
 // reads as "where in the literature are you standing" rather than a free knob.
@@ -8714,6 +8864,7 @@ document.getElementById('tog-nanoflares')?.addEventListener('change', e => {
         dl.appendChild(o);
     }
     _refreshNanoflares();
+    _syncNanoflareChannel();
     // The SOC grid's measured α needs events to accumulate, so the readout is
     // re-rendered on a slow tick rather than per frame — this line changes on
     // the timescale of the avalanches, not the timescale of the renderer.
@@ -8911,6 +9062,7 @@ document.getElementById('view-mode')?.addEventListener('change', e => {
     const m = parseFloat(e.target.value) || 0;
     uniforms.u_viewMode.value = m;
     sunObserved?.setChannel(VIEW_MODE_CHANNEL[m] || 'white');   // observed frame follows the channel
+    _syncNanoflareChannel();                                     // the nanoflare population follows the channel's temperature response
     // EUV/magnetogram and Doppler are mutually exclusive views.
     if (m > 0) {
         const dop = document.getElementById('tog-doppler');
@@ -9017,6 +9169,16 @@ function animate() {
     // explicit `&& smartTour.active` short-circuits cleanly on early frames.
     if (smartTour && smartTour.active) {
         smartTour.tick(performance.now());
+    }
+
+    // Object-space size of one screen pixel at the photosphere, for the
+    // nanoflare sub-pixel rule (js/sun-nanoflares.js subPixelFlux): the sphere
+    // is at the origin, so the near surface is |camera| − 1 away, and the
+    // drawing buffer height is in device pixels (setSize(w, h, false)).
+    {
+        const dist = Math.max(0.02, camera.position.length() - 1.0);
+        const hPx  = renderer.domElement.height || 720;
+        uniforms.u_pxFootprint.value = 2 * dist * Math.tan(camera.fov * Math.PI / 360) / hPx;
     }
 
     // Phase 4.3 — keep the volumetric corona's per-frame inputs synced.
@@ -12336,7 +12498,37 @@ window.__sun = {
             sparksVisible: !!_nanoflareSystem?.points?.visible,
             liveSparks: _nanoflareSystem?.liveCount ?? 0,
             loopCurves: _coronalLoopCurves.length,
+            // Where the population can be seen (kernel CAMPFIRE rules 1–2).
+            channel: _nanoViewChannel().name,
+            chan: uniforms.u_nanoChan.value.toArray(),
+            weightHere: channelWeight(CAMPFIRE.eTempRef, _nanoViewChannel().row),
+            ranking: channelRanking(EUV_CHANNELS, CAMPFIRE.eTempRef),
+            pulses: _nanoPulses.filter(p => p.alive).length,
+            pulsesFed: _nanoPulseList.length,
+            footprint: uniforms.u_pxFootprint.value,
         };
+    },
+    /**
+     * Mean luminance (0–1) of a canvas region, given as fractions of the
+     * canvas, read back from a frame rendered right now — for gates that must
+     * measure PIXELS rather than trust a uniform (the nanoflare visibility
+     * gate: white light must not change when the layer toggles, 171 must).
+     */
+    readbackLuma: ({ x0 = 0, y0 = 0, x1 = 1, y1 = 1, step = 4 } = {}) => {
+        composer.render();
+        const gl = renderer.getContext();
+        const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+        const w = Math.max(1, Math.floor((x1 - x0) * W)), h = Math.max(1, Math.floor((y1 - y0) * H));
+        const px0 = Math.floor(x0 * W), py0 = Math.floor((1 - y1) * H);      // GL rows run bottom-up
+        const buf = new Uint8Array(w * h * 4);
+        gl.readPixels(px0, py0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        let sum = 0, n = 0;
+        for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
+            const i = (y * w + x) * 4;
+            sum += 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
+            n++;
+        }
+        return { mean: n ? sum / n / 255 : 0, w, h, n };
     },
     // Observed-disk hooks (SUN_VISUALS_WORLD_CLASS_PLAN.md Phases 0–1)
     get observed() { return sunObserved ? sunObserved.getState() : null; },   // provenance snapshot

@@ -422,3 +422,135 @@ export function nanoflareUniform(state) {
         state.rateQuiet / rateForFlux(HEATING_REQUIREMENT.quiet, ALPHA_NORM),
     ];
 }
+
+// ── What a nanoflare LOOKS like — the observational template ──────────────
+//
+// Solar Orbiter's EUI resolved the population for the first time (Berghmans
+// et al. 2021, A&A 656, L4 — the "campfires"): in the QUIET Sun, in the 174 Å
+// passband, 0.4–4 Mm long, 10–200 s, sitting 1–5 Mm above the photosphere,
+// and hot — the differential-emission-measure analysis puts them at ~1–1.6 MK
+// (Chen et al. 2021 reproduce them in a radiative-MHD model at ~1.3 MK).
+// Three things follow for anything that DRAWS this population:
+//
+//   1. THEY ARE CORONAL. A ~1 MK plasma at 10⁻¹⁰ of the photospheric density
+//      emits nothing a white-light imager can see; a white-light FLARE needs
+//      ≳ 10²⁹ erg (an M-class event), two decades above this population's
+//      ceiling. In white light the weight is ZERO — and until 2026-09 the
+//      page drew them as white-yellow pops on the white-light photosphere.
+//   2. THEY ARE SEEN THROUGH A TEMPERATURE RESPONSE. At ~1 MK the 171 Å
+//      (Fe IX/X) and 193 Å (Fe XII) passbands see them, 211 Å (Fe XIV)
+//      faintly, and 304 Å (He II, 50 kK), 131 Å (Fe XXI, 10 MK) and 94 Å
+//      (Fe XVIII, 7 MK) do not. The same event is bright in 171, faint in
+//      211 and absent in 131 — which is what an AIA movie shows, and the
+//      opposite of drawing them only in the 131 ramp (the other 2026-09 bug).
+//   3. THEY ARE SMALL. 0.4–4 Mm is 0.6–6 milli-R☉: sub-pixel at any
+//      whole-disk framing, resolved only when zoomed in. A renderer must draw
+//      a sub-pixel source at pixel size WITH ITS FLUX CONSERVED, not drop it
+//      and not inflate it — `subPixelFlux` below is that rule.
+//
+// The two scalings are stated as such, not measured:
+//   • T(E): logT = logT0 + tempSlope·log10(E/E_ref) — 0.8 MK at 10²³ erg,
+//     1 MK at 10²⁴, 2 MK at 10²⁷, inside the 1–2 MK TRACE nanoflares of
+//     Aschwanden et al. 2000 (10²⁴–10²⁶ erg) with the biggest events warmer.
+//   • L(E) ∝ E^{1/3}: at constant density and temperature the thermal energy
+//     is E = 3nkT·V, so the length scale is V^{1/3}. Anchored so 10²³–10²⁶ erg
+//     spans 0.46–4.6 Mm — the 0.4–4 Mm campfire range.
+export const CAMPFIRE = Object.freeze({
+    logT0: 6.00,          // log10 K at eTempRef — ~1 MK
+    tempSlope: 0.10,      // d(log10 T) / d(log10 E)
+    eTempRef: 1e24,       // erg
+    sigmaLogT: 0.15,      // width of ONE event's DEM in log10 T (a dex-scale spread, not a delta)
+    sizeRefMm: 1.0,       // Mm at eSizeRef
+    eSizeRef: 1e24,       // erg
+    sizeExp: 1 / 3,       // L ∝ E^{1/3}
+    heightMm: [1, 5],     // above the photosphere (Berghmans 2021) — sub-pixel, drawn ON the surface
+});
+
+/** Solar radius in Mm (IAU 2015 nominal, 695.7 Mm). */
+export const MM_PER_RSUN = 695.7;
+
+/** log10 temperature (K) of an event of the given energy. */
+export function nanoflareLogT(energyErg) {
+    const l = Math.log10(Math.max(energyErg, 1)) - Math.log10(CAMPFIRE.eTempRef);
+    return CAMPFIRE.logT0 + CAMPFIRE.tempSlope * l;
+}
+
+/** Event length, Mm. */
+export function campfireSizeMm(energyErg) {
+    return CAMPFIRE.sizeRefMm * Math.pow(Math.max(energyErg, 1) / CAMPFIRE.eSizeRef, CAMPFIRE.sizeExp);
+}
+
+/** Event length in units of R☉ (the renderer's unit sphere). */
+export function campfireSizeRsun(energyErg) {
+    return campfireSizeMm(energyErg) / MM_PER_RSUN;
+}
+
+/**
+ * How strongly one instrument channel sees an event of this energy, 0–1.
+ *
+ * The event's emission is a log-normal in T (centre nanoflareLogT(E), width
+ * CAMPFIRE.sigmaLogT) and the channel's temperature response is the Gaussian
+ * in log T that js/corona-volumetric.js EUV_CHANNELS tabulates; the overlap
+ * integral of two Gaussians is a Gaussian with the variances summed, which is
+ * the closed form here. A channel with no temperature response (white light:
+ * sigma = 0) returns 0 — that is rule 1 above, not a missing case.
+ *
+ * @param {number} energyErg
+ * @param {{logT:number, sigma:number}|null|undefined} channel  an EUV_CHANNELS row
+ */
+export function channelWeight(energyErg, channel) {
+    if (!channel || !(channel.sigma > 1e-3)) return 0;
+    const d = nanoflareLogT(energyErg) - channel.logT;
+    const v = channel.sigma * channel.sigma + CAMPFIRE.sigmaLogT * CAMPFIRE.sigmaLogT;
+    return Math.exp(-0.5 * d * d / v);
+}
+
+/**
+ * Channels ranked by how well they see an event of energy E — for the readout.
+ * @param {Record<string,{logT:number,sigma:number}>} table  EUV_CHANNELS
+ * @returns {Array<{name:string, weight:number}>} descending, zero-weight channels omitted
+ */
+export function channelRanking(table, energyErg = CAMPFIRE.eTempRef) {
+    return Object.entries(table || {})
+        .map(([name, row]) => ({ name, weight: channelWeight(energyErg, row) }))
+        .filter((r) => r.weight > 1e-4)
+        .sort((a, b) => b.weight - a.weight);
+}
+
+/**
+ * Sub-pixel rule: a source of true radius rTrue drawn at radius rDraw keeps
+ * its integrated flux, so its peak is scaled by the AREA ratio (≤ 1). A
+ * resolved source (rTrue ≥ rDraw) is untouched.
+ */
+export function subPixelFlux(rTrue, rDraw) {
+    if (!(rDraw > 0)) return 1;
+    const q = rTrue / rDraw;
+    return q >= 1 ? 1 : q * q;
+}
+
+/**
+ * ONE GLSL copy of the three functions above, spliced into every shader that
+ * draws the population (sunFS in sun.html, the spark sprites, and the
+ * volumetric corona's pulse term in js/corona-volumetric.js). Generated from
+ * the same constants so the shaders cannot drift from the kernel; the node
+ * test evaluates the formulas against these exports.
+ *
+ *   nfLogT(log10E)                       → log10 T
+ *   nfChannelWeight(log10E, chLogT, chSig) → 0–1 (0 when chSig ≤ 0, i.e. white light)
+ *   nfSizeRsun(log10E)                   → event length, R☉
+ */
+export const GLSL_NANOFLARE = /* glsl */`
+    // ── js/sun-nanoflares.js mirror (generated from CAMPFIRE) — change the kernel, not this ──
+    float nfLogT(float log10E) {
+        return ${CAMPFIRE.logT0.toFixed(2)} + ${CAMPFIRE.tempSlope.toFixed(2)} * (log10E - ${Math.log10(CAMPFIRE.eTempRef).toFixed(1)});
+    }
+    float nfChannelWeight(float log10E, float chLogT, float chSig) {
+        if (chSig < 1e-3) return 0.0;                       // white light: no temperature response
+        float d = nfLogT(log10E) - chLogT;
+        float v = chSig * chSig + ${(CAMPFIRE.sigmaLogT * CAMPFIRE.sigmaLogT).toFixed(4)};
+        return exp(-0.5 * d * d / v);
+    }
+    float nfSizeRsun(float log10E) {
+        return ${CAMPFIRE.sizeRefMm.toFixed(1)} * pow(10.0, (log10E - ${Math.log10(CAMPFIRE.eSizeRef).toFixed(1)}) * ${CAMPFIRE.sizeExp.toFixed(6)}) / ${MM_PER_RSUN.toFixed(1)};
+    }
+`;
