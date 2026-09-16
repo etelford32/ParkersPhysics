@@ -313,7 +313,12 @@ export const PIPELINES = [
       category: 'weather', upstream: 'NOAA NHC CurrentStorms',
       cadence_s: 1_800, prewarm: 'medium',
       warnAgeS:  6 * 3600, critAgeS: 24 * 3600,
-      notes: 'Powers the storm-feed overlay on Earth + satellite-track sims.' },
+      notes: 'Powers the storm-feed overlay on Earth + satellite-track sims. '
+           + 'Two disjoint upstreams (NHC = ATL/EPAC/CPAC, EONET = WPAC/IO/SH), so it '
+           + 'reports freshness three ways: live (both answered), degraded (one down — '
+           + 'the list is real but half the planet is unseen), stale (both down — the '
+           + 'empty list means nothing). Before 2026-09 a total outage answered 200 with '
+           + 'count:0 and scored GREEN here, indistinguishable from a quiet ocean.' },
 
     // ── Environment · air quality + wildfire (earth.html, pollution.html) ──
     // The two 2026-07 AQ routes (#971) shipped without registry rows — the
