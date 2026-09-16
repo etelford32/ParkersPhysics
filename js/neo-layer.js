@@ -35,6 +35,7 @@
  */
 
 import * as THREE from 'three';
+import { TONE_DECODE_GLSL } from './tone-decode.js';
 import {
     FLAG, LD_AU, AU_KM, LOCAL_FRAME, CLASS_LABELS,
     rowToRecord, normalizeElements, propagate, toOfDate, sampleOrbit,
@@ -159,7 +160,7 @@ const POINT_VS = /* glsl */`
         vColor = aColor; vAlpha = aAlpha; vPulse = aPulse;
     }
 `;
-const POINT_FS = /* glsl */`
+const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
     varying vec3  vColor;
     varying float vAlpha;
     varying float vPulse;
@@ -179,7 +180,15 @@ const POINT_FS = /* glsl */`
         }
         float halo = vPulse * exp(-d2 * 1.6) * 0.40;   // flyby breathing halo
         float a = (core + glow + spikes + halo) * vAlpha;
-        gl_FragColor = vec4(vColor * a, a);            // premultiplied; blended additively
+        // Tone map + encode the UNPREMULTIPLIED colour, then premultiply — the
+        // order three.js itself uses (<premultiplied_alpha_fragment> runs after
+        // <colorspace_fragment>). Encoding vColor * a instead would push the
+        // sRGB curve through the alpha and brighten every faint object.
+        gl_FragColor = vec4(vColor, a);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        gl_FragColor.rgb *= a;                         // premultiplied; blended additively
     }
 `;
 
@@ -228,7 +237,7 @@ const STREAM_VS = /* glsl */`
         gl_Position = projectionMatrix * mv;
     }
 `;
-const STREAM_FS = /* glsl */`
+const STREAM_FS = /* glsl */`${TONE_DECODE_GLSL}
     uniform vec3 u_color;
     varying float vFade;
     void main() {
@@ -236,7 +245,11 @@ const STREAM_FS = /* glsl */`
         float d2 = dot(c, c);
         if (d2 > 1.0) discard;
         float a = exp(-d2 * 4.0) * vFade * 0.35;   // faint streaks; the rocks carry the stream
-        gl_FragColor = vec4(u_color * a, a);
+        gl_FragColor = vec4(u_color, a);               // premultiply AFTER the encode — see POINT_FS
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        gl_FragColor.rgb *= a;
     }
 `;
 function makeStream(count, colorHex) {
