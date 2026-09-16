@@ -64,6 +64,12 @@ export function offLimbIntensity(channel, paDeg, rho) {
                 : 0.75 + 0.25 * vnoise(paDeg * 0.5, rho * 30);
             I += A * ring * threads * (f.kind === 'loops' ? 0.75 : 1);
         }
+        // A prominence is a CURTAIN of material hanging under its arch (a
+        // hedgerow), not a hoop: fill the interior with vertical threads.
+        if (f.kind === 'prominence' && Math.hypot(u, v) < 1) {
+            const curtain = 0.45 * (0.5 + 0.5 * vnoise(paDeg * 2.2, rho * 8)) * (0.6 + 0.4 * vnoise(paDeg * 0.7, rho * 90));
+            I += A * curtain * (1 - 0.5 * v);                           // denser toward the feet
+        }
     }
     return I;
 }
