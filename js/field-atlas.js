@@ -84,6 +84,13 @@ export function computeFieldAtlas(activeRegions, coronalHoles, params = {}) {
 /** Most recent atlas, or null. */
 export function getFieldAtlas() { return _lastAtlas; }
 
+// NOTE: `appendObservedFilaments` lives in js/hek-filaments.js, NOT here.
+// It is pure atlas arithmetic with no three.js in it, and this module imports
+// three — which makes everything in this file unreachable from a node test.
+// The atlas LAYOUT it writes is documented at the top of this file and the
+// drift between the two copies of META_STRIDE is gated by
+// tests/hek-filaments.mjs.
+
 // ─── DataTexture packing ────────────────────────────────────────────
 //
 // Layout per texture (RGBA float, sized W = samplesPerLine, H = lineCount,

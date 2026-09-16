@@ -84,11 +84,57 @@ export const EUV_CHANNELS = {
     '304':   { logT: 4.70, sigma: 0.08, color: [1.00, 0.55, 0.30], photDim: 0.35, filOpacity: 0.5, label: '304 Å · He II · 50 kK · chromo + prom' },
 };
 
+/**
+ * The channel's temperature response at log10(T/K) — the JS mirror of the
+ * GLSL `channelResponse` below, and THE single place the page asks "would
+ * this channel see plasma at this temperature".
+ *
+ * Exported because more than the raymarcher needs it: the photosphere shader's
+ * nanoflare campfires (sun.html sunFS, js/sun-nanoflares.js `peakLogT`) are
+ * weighted by exactly this, so "171 is full of campfires, 131 has almost none"
+ * falls out of ONE table instead of six hand-set constants. Change the table
+ * and every consumer moves together — which is the point.
+ *
+ * Gaussian in log T, as the shader does it. The real AIA responses are bimodal
+ * in places (171 and 131 both have cool secondary peaks); collapsing to the
+ * dominant peak is a deliberate simplification stated in this file's header,
+ * and it is the same simplification on both sides of the mirror.
+ *
+ * @param {number} logT  log10(T/K)
+ * @param {string|{logT:number,sigma:number}} channel  key into EUV_CHANNELS
+ * @returns {number} 0..1
+ */
+export function channelResponseAt(logT, channel) {
+    const ch = typeof channel === 'string' ? EUV_CHANNELS[channel] : channel;
+    if (!ch || !(ch.sigma > 1e-3)) return 0;      // 'white' has no response — a continuum image is not a passband
+    const d = (logT - ch.logT) / ch.sigma;
+    return Math.exp(-0.5 * d * d);
+}
+
 // Number of slots reserved in the shader uniforms for active regions /
 // coronal holes.  Match these to the corresponding caps in sun-shader.js
 // (u_regions array length) and SunSkin.setHoles().
 export const N_AR_SLOTS    = 8;
 export const N_HOLE_SLOTS  = 4;
+/**
+ * Nanoflare spark slots. The population is ~768 live sparks (sun.html's pool),
+ * which cannot go in uniforms — so the volume carries the N BRIGHTEST and the
+ * readout keeps quoting the population's own rate, never the drawn count.
+ * The truncation is a rendering limit and is stated as one; it is not a claim
+ * that the corona has twelve nanoflares in it.
+ */
+export const N_SPARK_SLOTS = 12;
+
+/**
+ * The radius a spark is drawn at, R☉. NOT its physical size — the kernel says
+ * a 10²⁴ erg event is ~1000 km (0.0014 R☉) and the fine march's step here is
+ * ~0.03 R☉, so a true-size spark would fall between two samples and integrate
+ * to nothing. This is the march's own resolution, disclosed, the same way the
+ * photosphere shader's campfire marks sit on a visibility floor. ENERGY is
+ * carried by amplitude and by peak temperature, neither of which is
+ * resolution-limited, so nothing about the physics rides on this number.
+ */
+export const SPARK_R_RSUN = 0.018;
 
 // ── Vertex shader ───────────────────────────────────────────────────────────
 //
@@ -132,6 +178,11 @@ export const CORONA_VOL_FRAG = /* glsl */`
 
     uniform float u_xray_norm;          // 0..1 GOES flux → flare DEM amplitude
     uniform float u_flare_t;            // 0..1 impulsive flare flash decay
+    // (log10 T, amplitude) of the flare's COOLING DEM — js/flare-dem.js.
+    // .x defaults to 7.05, which is the fixed temperature this term used to
+    // carry for its whole life; with a tracked flare it FALLS, which is what
+    // makes 131 and 94 light first and the 171 arcade tens of minutes later.
+    uniform vec2  u_flare_dem;
     uniform float u_activity;           // 0..1 solar-cycle activity → quiet-corona density
     uniform vec2  u_flare_lon;          // (lat_rad, lon_rad) of flare site
 
@@ -145,14 +196,21 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform float u_unrest;             // 0..1 live restlessness (X-ray driven)
 
     // Phase 3 — loop-density slice atlas (js/corona-loop-density.js) + jitter
-    uniform sampler2D u_loopTex;        // tilesX×tilesY height slices of nlon×nlat; R=√closed, G=√open
+    uniform sampler2D u_loopTex;        // tilesX×tilesY height slices of nlon×nlat; R=√closed, G=√open, B=√cool
     uniform float u_loopOn;             // 0 = analytic fallback only
     uniform vec3  u_loopDims;           // (nlon, nlat, nh)
     uniform vec2  u_loopTiles;          // (tilesX, tilesY)
     uniform float u_loopRMax;           // R☉ extent of the volume (2.5)
     uniform float u_loopGain;           // arcade emission gain
+    uniform float u_coolGain;           // observed cool-material (B channel) gain — 0 disables
     uniform float u_jitter;             // per-frame ray-start phase (golden-ratio sequence)
     uniform float u_marchLegacy;        // 1 = the pre-Phase-3 single 12-step chord march (A/B + perf reference)
+
+    // Nanoflare sparks as transient hot DEM pulses (js/sun-nanoflares.js is
+    // the one oracle for their statistics; sun.html owns the pool).
+    uniform vec4  u_sparks[${N_SPARK_SLOTS}];    // (x, y, z, amplitude 0..1) sun-local R☉
+    uniform vec2  u_sparkTP[${N_SPARK_SLOTS}];   // (log10 T_peak, radius R☉)
+    uniform int   u_nSparks;
 
     varying vec3 vWorldPos;
 
@@ -184,19 +242,19 @@ export const CORONA_VOL_FRAG = /* glsl */`
     // ── Loop-density read (mirrors sampleLoopDensity in corona-loop-density.js)
     // Two bilinear taps on the slice atlas (slices z0 and z0+1) mixed by the
     // fractional slice — trilinear on GLSL ES 1.0 without sampler3D.
-    vec2 loopSlice(vec2 vla, float ih) {
+    vec3 loopSlice(vec2 vla, float ih) {
         float tx = mod(ih, u_loopTiles.x);
         float ty = floor(ih / u_loopTiles.x);
         vec2 dimsLA = u_loopDims.xy;
         vec2 px = (vec2(tx, ty) * dimsLA + clamp(vla + 0.5, vec2(0.5), dimsLA - 0.5)) / (u_loopTiles * dimsLA);
-        return texture2D(u_loopTex, px).rg;
+        return texture2D(u_loopTex, px).rgb;
     }
     // Shell coordinates mirror corona-loop-density.js shellCoords():
     // lon = atan(x, z) (scene convention), lat = asin(y/r), h_n = √((r−1)/(r_max−1)).
-    vec2 loopDensity(vec3 p_local) {
-        if (u_loopOn < 0.5) return vec2(0.0);
+    vec3 loopDensity(vec3 p_local) {
+        if (u_loopOn < 0.5) return vec3(0.0);
         float r = length(p_local);
-        if (r < u_sun_radius || r > u_loopRMax) return vec2(0.0);
+        if (r < u_sun_radius || r > u_loopRMax) return vec3(0.0);
         float lon = atan(p_local.x, p_local.z);
         float lat = asin(clamp(p_local.y / r, -1.0, 1.0));
         float hn  = sqrt(max(r - u_sun_radius, 0.0) / (u_loopRMax - u_sun_radius));
@@ -205,9 +263,9 @@ export const CORONA_VOL_FRAG = /* glsl */`
                       hn * (u_loopDims.z - 1.0));
         float h0 = floor(v.z);
         float fh = v.z - h0;
-        vec2 a = loopSlice(v.xy, h0);
-        vec2 b = loopSlice(v.xy, min(h0 + 1.0, u_loopDims.z - 1.0));
-        vec2 e = mix(a, b, fh);
+        vec3 a = loopSlice(v.xy, h0);
+        vec3 b = loopSlice(v.xy, min(h0 + 1.0, u_loopDims.z - 1.0));
+        vec3 e = mix(a, b, fh);
         return e * e;                    // stored as √density → back to linear
     }
 
@@ -253,7 +311,7 @@ export const CORONA_VOL_FRAG = /* glsl */`
         // Closed-line density lights the real arcades; open-line density
         // darkens the low corona (topological coronal holes). Both fade with
         // altitude like the plasma they trace.
-        vec2 ld = loopDensity(p_local);
+        vec3 ld = loopDensity(p_local);
         if (ld.x > 1e-4) {
             float loopCol = ld.x * exp(-h / 0.45) * u_loopGain
                           * (0.65 + 0.35 * vnoise(p_local * 30.0 + vec3(u_time * 0.03)));   // per-thread variance
@@ -265,6 +323,57 @@ export const CORONA_VOL_FRAG = /* glsl */`
             emission += loopCol * loopResp * 9.0;
         }
         float openHole = clamp(ld.y * 1.4, 0.0, 1.0) * exp(-h / 0.5);
+
+        // ── OBSERVED cool material: filaments and prominences ─────────────
+        // The B channel is HEK's filament / prominence detections splatted as
+        // spine tubes (js/corona-loop-density.js; js/hek-filaments.js).
+        // ONE density, used BOTH ways, which is the whole point of putting it
+        // in the volume:
+        //   • it adds to fil_density, so the front-to-back march ATTENUATES
+        //     everything behind it → the structure reads DARK on the disk in
+        //     171/193/211, where u_filament_opacity is 4–6;
+        //   • it emits at chromospheric temperatures → the same structure
+        //     reads BRIGHT off the limb in 304, where the opacity is 0.5.
+        // A filament and a prominence are the same plasma seen from two
+        // directions, and this is what makes the renderer agree with that.
+        //
+        // The analytic per-AR filament further down is NOT dead code: it is
+        // the offline / feed-down fallback, and it is the only thing that
+        // draws when HEK has nothing. It only ever sat beside an active
+        // region, so it never had a quiescent polar-crown filament in it —
+        // which is exactly what the observed channel adds.
+        if (ld.z > 1e-4) {
+            float coolD = ld.z * u_coolGain;
+            fil_density += coolD;
+            emission    += coolD * channelResponse(4.70) * 2.2;
+        }
+
+        // ── Nanoflare sparks as transient hot DEM pulses ──────────────────
+        // These used to be additive point SPRITES in sun.html, drawn over
+        // everything: they could not be occluded by a filament in front of
+        // them, they could not be hidden behind the limb, and they were the
+        // same colour whatever channel you were looking at — which is the one
+        // thing a 10²³–10²⁷ erg event is NOT (see js/sun-nanoflares.js
+        // peakLogT). As DEM pulses inside this march they get all three for
+        // free: front-to-back transmission attenuates them, the photospheric
+        // occluder cuts the ray, and channelResponse decides per channel.
+        //
+        // A spark is a LOOP being heated, so it rides the CLOSED-line density:
+        // where the atlas says there is no closed field there is no loop to
+        // heat. With no atlas at all (offline, CI, no ARs) the gate opens to 1
+        // so the sparks still draw — the same analytic-fallback rule the
+        // arcades follow, because offline must still show a corona.
+        for (int k = 0; k < ${N_SPARK_SLOTS}; k++) {
+            if (k >= u_nSparks) break;
+            float sAmp = u_sparks[k].w;
+            if (sAmp < 0.01) continue;
+            vec3  dsp  = p_local - u_sparks[k].xyz;
+            float sR   = max(u_sparkTP[k].y, 1e-4);
+            float q2   = dot(dsp, dsp) / (sR * sR);
+            if (q2 > 9.0) continue;                       // 3σ — beyond it the Gaussian is 1 %
+            float loopGate = (u_loopOn > 0.5) ? clamp(ld.x * 4.0, 0.12, 1.0) : 1.0;
+            emission += exp(-0.5 * q2) * sAmp * loopGate * channelResponse(u_sparkTP[k].x) * 26.0;
+        }
 
         // ── Combined per-AR contribution ─────────────────────────────────
         for (int k = 0; k < ${N_AR_SLOTS}; k++) {
@@ -401,8 +510,24 @@ export const CORONA_VOL_FRAG = /* glsl */`
             float angF  = acos(cosFA);
             float facingF = step(0.0, cosFA);
             float flareCore = exp(-h / 0.20) * exp(-angF * angF / 0.030) * facingF;
-            float flareAmp  = u_xray_norm * 0.6 + u_flare_t * 0.8;
-            emission += flareCore * flareAmp * channelResponse(7.05) * 30.0;
+            // Three drives, deliberately separate: the live GOES level, the
+            // impulsive flash, and the COOLING TRACK's own emission-measure
+            // envelope (js/flare-dem.js). The last one outlives the soft
+            // X-ray decay on purpose — by the time the plasma has cooled to
+            // 171 temperatures the GOES flux is long back at background, and
+            // driving amplitude from it alone is why the post-flare arcade
+            // could never appear.
+            float flareAmp  = u_xray_norm * 0.6 + u_flare_t * 0.8 + u_flare_dem.y * 0.9;
+            // A FLARE IS A CLOSED-FIELD ARCADE LIGHTING UP, so the hot DEM
+            // rides the closed-line density like the sparks do. The 0.30 floor
+            // is there because the atlas is a coarse PFSS-lite model and a
+            // real flare must not vanish because the tracer put no seed
+            // nearby; with no atlas at all the gate opens to 1.
+            float flareGate = (u_loopOn > 0.5) ? clamp(0.30 + ld.x * 3.0, 0.0, 1.0) : 1.0;
+            // TEMPERATURE FROM THE TRACK, not a constant: this is the whole
+            // change. One response table then decides which channel sees the
+            // flare at this instant.
+            emission += flareCore * flareAmp * flareGate * channelResponse(u_flare_dem.x) * 30.0;
             // Suppress filament near the flare site (filament eruption)
             float erupt_mask = exp(-angF * angF / 0.030) * u_flare_t;
             fil_density *= max(0.0, 1.0 - erupt_mask);
