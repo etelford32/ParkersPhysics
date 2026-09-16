@@ -484,6 +484,7 @@ test.describe('sun.html smoke', () => {
     // ramp — the inverse. This gate measures PIXELS: toggling the layer must
     // leave a white-light frame untouched and must change a 171 frame.
     test('nanoflares are EUV-only: toggling the layer leaves white light untouched and changes 171 (measured in pixels)', async ({ page }) => {
+        test.slow();   // two views × six readbacks on software GL, plus the lazy corona mount on the first EUV view
         const errors = attachConsoleRecorder(page);
         await routeAiaDown(page);                       // Model mode in both views: the disk is the same procedural photosphere
         await page.goto(PAGE + '?observed=0');
@@ -503,6 +504,11 @@ test.describe('sun.html smoke', () => {
         // gate is about WHERE the population shows, so make it loud.
         await page.evaluate(() => { window.__sun.uniforms.u_nanoGain.value = 6; });
         const luma = () => page.evaluate(() => window.__sun.readbackLuma({ x0: 0.32, y0: 0.18, x1: 0.68, y1: 0.82 }).mean);
+        // Frame the disk at ~2.4 R☉ so the 0.4–4 Mm events are near-resolved
+        // (the sub-pixel rule scales a whole-disk framing's specks down by
+        // the area ratio, which is correct and also what a mean-luminance
+        // gate cannot see through).
+        await page.evaluate(() => { window.__sun.camera.position.set(0, 0.3, 2.4); window.__sun.controls.target.set(0, 0, 0); window.__sun.controls.update(); });
         const measure = async (view) => {
             await setView(view);
             await page.evaluate(() => window.__sun.setSimSpeed(5));   // let the SOC grid spawn sparks

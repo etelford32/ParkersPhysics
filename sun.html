@@ -3187,10 +3187,12 @@ ${GLSL_NANOFLARE}
         vec3  nfUnit = normalize(vPosition);
         if (u_nanoOn > 0.5 && u_nanoChan.z > 0.5) {
             float nfA = u_nano.x;
-            // Site lattice in the ROTATING surface frame — fine enough that a
-            // granule-scale event is a point at the framings this page uses.
+            // Site lattice in the ROTATING surface frame. 110 cells per R☉ is a
+            // 6.3 Mm cell — one site per cell, so the biggest common events
+            // (~3 Mm radius at 10²⁶ erg) still fit inside it; the 1-in-10⁴
+            // 10²⁷ erg event is clipped at the cell edge and that is accepted.
             vec3  nfSurf = vec3(cos(lat) * sin(rotLon), sin(lat), cos(lat) * cos(rotLon));
-            vec3  nfP    = nfSurf * 46.0;
+            vec3  nfP    = nfSurf * 110.0;
             vec3  nfCell = floor(nfP);
             float h0 = hash(nfCell);
             float h1 = hash(nfCell + vec3(19.3, 7.1, 3.7));
@@ -3208,8 +3210,23 @@ ${GLSL_NANOFLARE}
                 float w    = exp(-ang * ang / (0.010 + 0.030 * abs(u_arSpots[k].w)));
                 arBoost   += w * 11.0;                 // AR corona runs ~30x the quiet losses
             }
-            // Occurrence: the rate multiplier thins or thickens the lattice.
-            float occupancy = clamp(0.030 * braid * arBoost * u_nano.w, 0.0, 0.85);
+            // Occurrence — anchored to the COUNT Solar Orbiter measured, not a
+            // look. Berghmans et al. 2021 detected ~1,500 campfires in a 4-min
+            // HRI_EUV sequence over ~0.34 R☉² of quiet Sun; with 10–200 s
+            // lifetimes that is a few hundred alive at any instant per R☉²,
+            // ~1.5 × 10³ across the projected near hemisphere — and those are
+            // the DETECTABLE ones, the bright ≳ 10²⁴ erg tail. At α ≈ 2 nine
+            // events in ten sit in the bottom decade (10²³–10²⁴ erg, amp
+            // below ~0.3 here), so the lattice must carry ~10× the detectable
+            // count: 2π·110² ≈ 76,000 cells per hemisphere × occupancy
+            // 0.2–0.8 (cell interiors → network lanes) × the ~0.2 duty cycle
+            // of the lightcurve below ≈ 10⁴ lit at once, ~10³ of them bright.
+            // (The original 0.030 on a 46-lattice gave ~10¹ in total, which is
+            // why a zoomed frame showed a speck or two; 0.20 measured ~10²
+            // bright and still failed the pixel gate.) The rate multiplier
+            // u_nano.w (F10.7 + AR area, kernel nanoflareState) thins or
+            // thickens it from there; AR cores saturate at the 0.85 cap.
+            float occupancy = clamp(0.80 * braid * arBoost * u_nano.w, 0.0, 0.85);
             float live = step(h0, occupancy);
 
             // ── GLSL MIRROR of sun-nanoflares.js sampleEnergy — change both
@@ -3240,7 +3257,7 @@ ${GLSL_NANOFLARE}
             float rTrue = nfSizeRsun(log10E);
             float rDraw = max(rTrue, u_pxFootprint * 0.9);
             float flux  = min(1.0, (rTrue * rTrue) / (rDraw * rDraw));
-            vec3  local = (fract(nfP) - vec3(0.5)) / 46.0;           // offset from the site, R☉
+            vec3  local = (fract(nfP) - vec3(0.5)) / 110.0;          // offset from the site, R☉
             local      -= nfSurf * dot(local, nfSurf);                // on the tangent plane
             float d     = length(local) / rDraw;
             float core  = exp(-d * d * 2.0);
