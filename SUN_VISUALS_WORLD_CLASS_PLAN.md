@@ -339,6 +339,43 @@ in §1 are locked by the repo owner.*
   screenshot; the campfires are visible once it is off or the camera is
   inside ~2 R☉.
 
+- **2026-09-16 — the observed OFF-LIMB Sun: prominences and loops from the
+  frame the disk already wears (done).** Phase 1 projected the SDO browse
+  frame onto the near hemisphere and discarded the rest of it — yet an AIA
+  frame reaches 1.28 R☉ at its nearest edge (1.81 at the corners), and that
+  annulus is exactly where the 304 Å prominences and the 171 / 131 Å
+  post-flare loops are. `js/sun-limb-observed.js` (PURE half node-gated by
+  `tests/sun-limb-observed.mjs`, 7 checks) draws it as a PLANE-OF-SKY
+  BILLBOARD: a plane through the Sun's centre perpendicular to the Sun–Earth
+  line, additive, occluded by the sphere, sampling the same texture with the
+  same `(cx + a·r, (1 − cy) + b·r)` formula the disk uses (the test proves the
+  plane mapping IS `projectDiskUV` with q = (a, b, ·)). EUV emission is
+  optically thin, so the image IS a line-of-sight integral — a 2-D field with
+  no depth — and placing it where the instrument saw it is the observation,
+  not a trick. Two disclosures make it honest: the layer FADES with the
+  camera's angle off the Sun–Earth line (full within 30°, gone past 60°;
+  `viewWeight`), and only the six AIA passbands get it (HMI continuum and the
+  magnetogram have nothing above the limb; `channelHasOffLimb`). It shares
+  the disk's `u_obs*` uniforms BY REFERENCE, so refresh, cross-fade,
+  feed-down and the MODEL switch apply to the limb at the same instant and
+  the chip's timestamp covers both. The model corona is SUPPRESSED where the
+  observation covers (`u_obsLimb` / `u_obsLimbN` in `js/corona-volumetric.js`:
+  emission × (1 − weight·cover) on the ray's sky-plane radius inside
+  1.02–rEdge; on-disk rays untouched) so the page never draws two coronas.
+  `?limb=0` opts out; the chip tooltip discloses the layer; `__sun.limb` is
+  the test hook. The synthetic fixtures gain PLANTED off-limb features
+  (`PLANTED_LIMB` in `scripts/lib/sdo-synth.mjs`: two prominences loud in 304,
+  one loop arcade loud in 171, all off the eight disk-measurement rays) so CI
+  and the screenshots have something above the limb to show — the README
+  already says the frames are synthetic. **Deferred, recorded here:** GOES-R
+  SUVI via SWPC (`services.swpc.noaa.gov/images/animations/suvi/primary/<ch>/latest.png`,
+  UNVERIFIED — egress-blocked at build time) would give a ~1.6 R☉ field at
+  4-min cadence with minutes of latency, the better off-limb source; it is a
+  different instrument with its own plate scale and freshness contract, so
+  it belongs in `api/solar/aia.js` as a `src=suvi` candidate list with its
+  own geometry (the `noaa-regions` pattern — one production request settles
+  the URL), not as a silent swap of the disk's frame.
+
 - **2026-09-09 — the fluid solver was not enforcing incompressibility (fixed).**
   Found while gating the convection: `SolarFluid.probe()` reported residual
   |div| ≈ 1.2 RMS **that did not fall when the Jacobi count was tripled from 20

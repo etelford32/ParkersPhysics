@@ -13,14 +13,14 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderSyntheticDisk, encodePng, FIXTURE_EPOCH_ISO, PLANTED } from './lib/sdo-synth.mjs';
+import { renderSyntheticDisk, encodePng, FIXTURE_EPOCH_ISO, PLANTED, PLANTED_LIMB } from './lib/sdo-synth.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT  = join(ROOT, 'tests', 'fixtures', 'sdo');
 const size = Number((process.argv.find(a => a.startsWith('--size=')) || '--size=512').split('=')[1]);
 mkdirSync(OUT, { recursive: true });
 
-const manifest = { synthetic: true, generated: new Date().toISOString(), epoch: FIXTURE_EPOCH_ISO, size, planted: PLANTED, frames: {} };
+const manifest = { synthetic: true, generated: new Date().toISOString(), epoch: FIXTURE_EPOCH_ISO, size, planted: PLANTED, plantedLimb: PLANTED_LIMB, frames: {} };
 for (const ch of ['white', 'mag', '171', '193', '211', '131', '304']) {
     const frame = renderSyntheticDisk(ch, { size });
     const name  = `synthetic_${ch}.png`;

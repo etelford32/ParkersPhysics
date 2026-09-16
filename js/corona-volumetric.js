@@ -70,6 +70,13 @@
  *   GLSL_NANOFLARE spliced below): a 10²⁴ erg event is bright in 171, faint in
  *   211 and absent in 131 / 94 / 304. Per-ray prefilter in main() so rays that
  *   pass no pulse (nearly all of them) never enter the loop.
+ *
+ * ── Observed off-limb suppression (2026-09) ──────────────────────────────
+ *   sun.html draws the SDO frame's own off-limb annulus as a plane-of-sky
+ *   billboard (js/sun-limb-observed.js). u_obsLimb = (weight, rEdge) and
+ *   u_obsLimbN (the Sun–Earth line) tell this shader to dim its emission
+ *   inside that annulus by the billboard's weight, so observation and model
+ *   never draw the same corona twice; on-disk rays are untouched.
  */
 import { GLSL_NANOFLARE } from './sun-nanoflares.js';
 
@@ -172,6 +179,10 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform vec2  u_pulseE[${N_PULSE_SLOTS}];
     uniform int   u_nPulses;
     bool g_pulseNear[${N_PULSE_SLOTS}];   // per-ray prefilter, filled once in main()
+
+    // Observed off-limb plane (js/sun-limb-observed.js): (weight, rEdge R☉, 0, 0) + the sky-plane normal
+    uniform vec4  u_obsLimb;
+    uniform vec3  u_obsLimbN;
 
     varying vec3 vWorldPos;
 
@@ -592,6 +603,24 @@ ${GLSL_NANOFLARE}
                 transmission *= exp(-fil * ds * u_filament_opacity);
                 if (transmission < 0.01) break;
             }
+        }
+
+        // ── Observed off-limb suppression ─────────────────────────────────
+        // Where the SDO frame's own annulus is drawn as a plane-of-sky
+        // billboard (js/sun-limb-observed.js), the model corona steps aside so
+        // the page never shows two coronas at once. rho is the ray's closest
+        // approach to the Sun centre projected onto the sky plane; rays that
+        // hit the disk (rho < 1) are untouched — the observed disk + modelled
+        // arcades overlay is the existing, disclosed design. Same feathers as
+        // the plane's mask (limbMask), so the handoff is a soft ring.
+        if (u_obsLimb.x > 0.0) {
+            vec3  oc  = ro - u_sun_world;
+            float tc  = -dot(oc, rd);
+            vec3  pc  = oc + rd * tc;
+            vec3  sky = pc - dot(pc, u_obsLimbN) * u_obsLimbN;
+            float rho = length(sky);
+            float cover = smoothstep(1.0, 1.02, rho) * (1.0 - smoothstep(u_obsLimb.y - 0.12, u_obsLimb.y, rho));
+            emission *= 1.0 - u_obsLimb.x * cover;
         }
 
         // White-light mode disables the volumetric corona entirely

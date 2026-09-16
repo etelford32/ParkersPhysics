@@ -5,7 +5,11 @@
 `latest_<res>_<code>.jpg` browse frames (centred disk, HMI ≈ 0.465 / AIA ≈ 0.390
 of the frame radius, limb darkening / brightening, faint off-limb corona) and
 three PLANTED active regions at heliographic coordinates recorded in
-`manifest.json`. `tests/sun-observed.mjs` uses that ground truth to pin the
+`manifest.json`, plus (AIA channels only) three PLANTED OFF-LIMB features —
+two prominences loud in 304 Å and one loop arcade loud in 171 Å, at position
+angles kept off the eight disk-measurement rays — recorded as `plantedLimb`
+so the observed off-limb plane (`js/sun-limb-observed.js`) has something to
+show in CI and in screenshots. `tests/sun-observed.mjs` uses that ground truth to pin the
 disk→sphere projection and the disk measurement; `tests/sun-smoke.spec.js`
 serves them in place of `/api/solar/aia` so CI never needs nasa.gov.
 

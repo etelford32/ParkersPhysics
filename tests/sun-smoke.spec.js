@@ -559,4 +559,68 @@ test.describe('sun.html smoke', () => {
         if (filtered.length) console.error('Console errors:', filtered);
         expect(filtered, 'no shader / console errors').toHaveLength(0);
     });
+
+    // The observed OFF-LIMB plane (js/sun-limb-observed.js): the same frame's
+    // 1–1.28 R☉ annulus drawn as a plane-of-sky billboard in the EUV views,
+    // nothing in white light, faded off-axis, and the model corona told to
+    // step aside where it covers.
+    test('observed off-limb plane: on in 304 at the Earth-facing camera, off in white light, faded off-axis, and the corona is told where it covers', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await routeAiaToFixtures(page);
+        await page.goto(PAGE);
+        await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed', { timeout: BOOT_TIMEOUT_MS });
+        const setView = (v) => page.evaluate((v) => { const el = document.getElementById('view-mode'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, v);
+        const limb = () => page.evaluate(() => window.__sun.limb);
+
+        // White light: HMI has nothing above the limb — the plane must not exist here.
+        await page.waitForTimeout(400);
+        let s = await limb();
+        expect(s, 'the layer mounted').not.toBeNull();
+        expect(s.active).toBe(false);
+        expect(s.reason).toBe('no-off-limb-emission');
+        expect(s.visible).toBe(false);
+
+        // 304 at the default (Earth-facing) camera: full weight, the plane's
+        // normal IS the Sun–Earth line, and the corona suppression carries the
+        // same weight + the AIA frame's edge radius.
+        await setView('1');
+        await page.waitForFunction(() => window.__sun.observed?.mode === 'observed' && window.__sun.uniforms.u_viewMode.value === 1 && window.__sun.limb?.active, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForFunction(() => window.__sun.coronaVol, { timeout: BOOT_TIMEOUT_MS });   // lazy mount on the first EUV view
+        await page.waitForTimeout(400);
+        s = await limb();
+        expect(s.active).toBe(true);
+        expect(s.visible).toBe(true);
+        expect(s.weight).toBeGreaterThan(0.99);
+        expect(Math.abs(s.rEdge - 1.282)).toBeLessThan(0.02);
+        const b0 = (await page.evaluate(() => window.__sun.observed.b0Deg)) * Math.PI / 180;
+        expect(Math.abs(s.normal[0])).toBeLessThan(1e-6);
+        expect(Math.abs(s.normal[1] - Math.sin(b0))).toBeLessThan(1e-6);
+        expect(Math.abs(s.normal[2] - Math.cos(b0))).toBeLessThan(1e-6);
+        expect(s.coronaSuppress[0]).toBeGreaterThan(0.99);
+        expect(Math.abs(s.coronaSuppress[1] - s.rEdge)).toBeLessThan(1e-6);
+
+        // 60° off the Sun–Earth line: the billboard is gone and the corona is released.
+        await page.evaluate((b0) => {
+            const c = window.__sun.camera; const d = 6;
+            c.position.set(d * Math.sin(1.1), d * Math.sin(b0) * Math.cos(1.1), d * Math.cos(b0) * Math.cos(1.1));
+            window.__sun.controls.target.set(0, 0, 0); window.__sun.controls.update();
+        }, b0);
+        await page.waitForTimeout(600);
+        s = await limb();
+        expect(s.active).toBe(false);
+        expect(s.reason).toBe('off-axis');
+        expect(s.coronaSuppress[0]).toBe(0);
+
+        // Model mode: no observation, no plane — whatever the channel.
+        await page.evaluate(() => window.__sun.setObserved(false));
+        await page.waitForTimeout(400);
+        s = await limb();
+        expect(s.active).toBe(false);
+        expect(s.reason).toBe('model');
+
+        const filtered = errors.filter((e) => !isExpectedNoise(e.text));
+        if (filtered.length) console.error('Console errors:', filtered);
+        expect(filtered, 'no shader / console errors').toHaveLength(0);
+    });
 });

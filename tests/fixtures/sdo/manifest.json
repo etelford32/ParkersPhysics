@@ -1,6 +1,6 @@
 {
   "synthetic": true,
-  "generated": "2026-09-06T14:58:59.279Z",
+  "generated": "2026-09-16T13:45:11.004Z",
   "epoch": "2026-09-06T12:00:00Z",
   "size": 512,
   "planted": [
@@ -24,6 +24,53 @@
       "lonDeg": -60,
       "areaMh": 140,
       "polarity": 1
+    }
+  ],
+  "plantedLimb": [
+    {
+      "id": "PROM-NE",
+      "kind": "prominence",
+      "paDeg": 70,
+      "height": 0.22,
+      "halfWidthDeg": 7,
+      "channels": {
+        "94": 0.05,
+        "131": 0.1,
+        "171": 0.22,
+        "193": 0.14,
+        "211": 0.1,
+        "304": 0.85
+      }
+    },
+    {
+      "id": "PROM-SW",
+      "kind": "prominence",
+      "paDeg": 235,
+      "height": 0.14,
+      "halfWidthDeg": 5,
+      "channels": {
+        "94": 0.04,
+        "131": 0.08,
+        "171": 0.18,
+        "193": 0.12,
+        "211": 0.08,
+        "304": 0.7
+      }
+    },
+    {
+      "id": "LOOPS-W",
+      "kind": "loops",
+      "paDeg": 290,
+      "height": 0.18,
+      "halfWidthDeg": 10,
+      "channels": {
+        "94": 0.3,
+        "131": 0.35,
+        "171": 0.8,
+        "193": 0.62,
+        "211": 0.5,
+        "304": 0.15
+      }
     }
   ],
   "frames": {
@@ -65,6 +112,32 @@
           "py": 174.92340869767042,
           "visible": true
         }
+      ],
+      "plantedLimb": [
+        {
+          "id": "PROM-NE",
+          "kind": "prominence",
+          "paDeg": 70,
+          "height": 0.22,
+          "halfWidthDeg": 7,
+          "peak": 0.1
+        },
+        {
+          "id": "PROM-SW",
+          "kind": "prominence",
+          "paDeg": 235,
+          "height": 0.14,
+          "halfWidthDeg": 5,
+          "peak": 0.08
+        },
+        {
+          "id": "LOOPS-W",
+          "kind": "loops",
+          "paDeg": 290,
+          "height": 0.18,
+          "halfWidthDeg": 10,
+          "peak": 0.35
+        }
       ]
     },
     "171": {
@@ -104,6 +177,32 @@
           "px": 95.6639943203279,
           "py": 174.92340869767042,
           "visible": true
+        }
+      ],
+      "plantedLimb": [
+        {
+          "id": "PROM-NE",
+          "kind": "prominence",
+          "paDeg": 70,
+          "height": 0.22,
+          "halfWidthDeg": 7,
+          "peak": 0.22
+        },
+        {
+          "id": "PROM-SW",
+          "kind": "prominence",
+          "paDeg": 235,
+          "height": 0.14,
+          "halfWidthDeg": 5,
+          "peak": 0.18
+        },
+        {
+          "id": "LOOPS-W",
+          "kind": "loops",
+          "paDeg": 290,
+          "height": 0.18,
+          "halfWidthDeg": 10,
+          "peak": 0.8
         }
       ]
     },
@@ -145,6 +244,32 @@
           "py": 174.92340869767042,
           "visible": true
         }
+      ],
+      "plantedLimb": [
+        {
+          "id": "PROM-NE",
+          "kind": "prominence",
+          "paDeg": 70,
+          "height": 0.22,
+          "halfWidthDeg": 7,
+          "peak": 0.14
+        },
+        {
+          "id": "PROM-SW",
+          "kind": "prominence",
+          "paDeg": 235,
+          "height": 0.14,
+          "halfWidthDeg": 5,
+          "peak": 0.12
+        },
+        {
+          "id": "LOOPS-W",
+          "kind": "loops",
+          "paDeg": 290,
+          "height": 0.18,
+          "halfWidthDeg": 10,
+          "peak": 0.62
+        }
       ]
     },
     "211": {
@@ -184,6 +309,32 @@
           "px": 95.6639943203279,
           "py": 174.92340869767042,
           "visible": true
+        }
+      ],
+      "plantedLimb": [
+        {
+          "id": "PROM-NE",
+          "kind": "prominence",
+          "paDeg": 70,
+          "height": 0.22,
+          "halfWidthDeg": 7,
+          "peak": 0.1
+        },
+        {
+          "id": "PROM-SW",
+          "kind": "prominence",
+          "paDeg": 235,
+          "height": 0.14,
+          "halfWidthDeg": 5,
+          "peak": 0.08
+        },
+        {
+          "id": "LOOPS-W",
+          "kind": "loops",
+          "paDeg": 290,
+          "height": 0.18,
+          "halfWidthDeg": 10,
+          "peak": 0.5
         }
       ]
     },
@@ -225,6 +376,32 @@
           "py": 174.92340869767042,
           "visible": true
         }
+      ],
+      "plantedLimb": [
+        {
+          "id": "PROM-NE",
+          "kind": "prominence",
+          "paDeg": 70,
+          "height": 0.22,
+          "halfWidthDeg": 7,
+          "peak": 0.85
+        },
+        {
+          "id": "PROM-SW",
+          "kind": "prominence",
+          "paDeg": 235,
+          "height": 0.14,
+          "halfWidthDeg": 5,
+          "peak": 0.7
+        },
+        {
+          "id": "LOOPS-W",
+          "kind": "loops",
+          "paDeg": 290,
+          "height": 0.18,
+          "halfWidthDeg": 10,
+          "peak": 0.15
+        }
       ]
     },
     "white": {
@@ -265,7 +442,8 @@
           "py": 159.33175652414548,
           "visible": true
         }
-      ]
+      ],
+      "plantedLimb": []
     },
     "mag": {
       "file": "synthetic_mag.png",
@@ -305,7 +483,8 @@
           "py": 159.33175652414548,
           "visible": true
         }
-      ]
+      ],
+      "plantedLimb": []
     }
   }
 }

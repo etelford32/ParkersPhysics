@@ -1736,6 +1736,10 @@ import { initSunWatch } from './js/sun-watch.js';
 import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
 import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
 import { SunObserved, VIEW_MODE_CHANNEL, REAL_TIME_ROT_MUL, solarEphemeris } from './js/sun-observed.js';
+// The OBSERVED off-limb Sun — the same frame's 1–1.28 R☉ annulus (prominences
+// in 304, loops in 171/131) as a plane-of-sky billboard. Shares the disk's
+// uniforms by reference; see the module header for why a billboard is honest.
+import { mountObservedLimb } from './js/sun-limb-observed.js';
 import {
     nanoflareState, nanoflareUniform, sampleEnergy,
     AlphaMonitor, HEATING_REQUIREMENT, E_MIN_ERG, E_MAX_ERG, ALPHA_REFERENCES,
@@ -3905,6 +3909,7 @@ try {
 //  sunspots and shader sunspots never separate whatever the clock does.
 // ═══════════════════════════════════════════════════════════════════════════
 let sunObserved = null;
+let observedLimb = null;                     // js/sun-limb-observed.js handle (null under ?limb=0 or a failed mount)
 let _obsUserOn = true;                       // the chip toggle (?observed=0 starts off)
 const _obsSuspenders = new Set();            // 'cutaway' | 'doppler' — model-only views
 let _obsRotSaved = null;                     // slider rate to restore on Model
@@ -3934,7 +3939,7 @@ function _obsRenderChip(state) {
     const stale = state.mode === 'observed' && /stale|expired|refresh failed/.test(state.label);
     el.classList.add(state.mode === 'observed' ? (stale ? 'prov-stale' : 'prov-observed') : 'prov-model');
     el.title = state.mode === 'observed'
-        ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid). Click for Model.`
+        ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid). In the EUV views the same frame's off-limb annulus (1–1.28 R☉ for AIA) is drawn as a plane-of-sky billboard — prominences and loops where the instrument saw them — fading past 30° off the Sun–Earth line while the model corona takes over (?limb=0 disables). Click for Model.`
         : 'Model: procedural photosphere on the whole sphere. Click for Observed (live SDO frame).';
 }
 {
@@ -3958,6 +3963,13 @@ function _obsRenderChip(state) {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sunObserved?.refresh(); });
     _obsApply('user');
     sunObserved.start();
+    // Off-limb plane: EUV views only, faded past 30° off the Sun–Earth line,
+    // suppressing the model corona where the observation covers. ?limb=0 opts out.
+    try {
+        observedLimb = mountObservedLimb({ THREE, scene, uniforms, userOn: qp.get('limb') !== '0' });
+    } catch (e) {
+        console.warn('[observed-limb] mount failed (disk only):', e?.message || e);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9198,6 +9210,18 @@ function animate() {
         uniforms.u_pxFootprint.value = 2 * dist * Math.tan(camera.fov * Math.PI / 360) / hPx;
     }
 
+    // Observed off-limb plane (js/sun-limb-observed.js): follows the disk's
+    // channel + frame geometry, fades with the camera's angle off the
+    // Sun–Earth line, and tells the model corona where to step aside.
+    if (observedLimb) {
+        const chKey = sunObserved ? sunObserved.channel : 'white';
+        const frame = sunObserved ? sunObserved.frames.get(chKey) : null;
+        const st = observedLimb.update({ camera, channel: chKey, geom: frame ? frame.geom : null });
+        if (volumetricCorona?.setObservedLimb) {
+            volumetricCorona.setObservedLimb(st.active ? st.weight : 0, st.rEdge, 0, Math.sin(st.b0Rad), Math.cos(st.b0Rad));
+        }
+    }
+
     // Phase 4.3 — keep the volumetric corona's per-frame inputs synced.
     // Flare lat/lon as a vec2; GOES X-ray flux normalized by X-class peak.
     if (volumetricCorona) {
@@ -12550,6 +12574,14 @@ window.__sun = {
     // Observed-disk hooks (SUN_VISUALS_WORLD_CLASS_PLAN.md Phases 0–1)
     get observed() { return sunObserved ? sunObserved.getState() : null; },   // provenance snapshot
     get observedCtl() { return sunObserved; },
+    // Off-limb plane state (js/sun-limb-observed.js): active / weight / rEdge / reason, and the mesh's world normal.
+    get limb() {
+        if (!observedLimb) return null;
+        const n = observedLimb.mesh.getWorldDirection(new THREE.Vector3());
+        return { ...observedLimb.state, visible: observedLimb.mesh.visible, normal: n.toArray(),
+                 coronaSuppress: volumetricCorona?.uniforms?.u_obsLimb?.value?.toArray?.() ?? null };
+    },
+    setLimbGain: (g) => observedLimb?.setGain(g),
     setObserved: (on) => { _obsUserOn = !!on; _obsApply('user'); },
     refreshObserved: () => sunObserved?.refresh(true),
     /** Freeze the sim clock at a fixed u_time so a screenshot is deterministic. */

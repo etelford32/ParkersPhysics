@@ -25,6 +25,49 @@ export const PLANTED = Object.freeze([
 /** Fixture epoch → B0 is what the projection must apply; keep it non-zero. */
 export const FIXTURE_EPOCH_ISO = '2026-09-06T12:00:00Z';
 
+/**
+ * Planted OFF-LIMB features, AIA channels only — the ground truth for the
+ * observed off-limb plane (js/sun-limb-observed.js). Position angle is
+ * measured CLOCKWISE from image north (up) toward image right in this
+ * fixture's own convention (recorded in the manifest, not a solar PA);
+ * `height` is the arch top above the limb in R☉, `halfWidthDeg` its angular
+ * half-width, `channels` the peak brightness per passband — a prominence is
+ * loud in 304 and faint in the coronal lines, a loop arcade the reverse.
+ * Kept OFF the eight disk-measurement rays (multiples of 45°) so
+ * `measureDisk` still sees a clean limb drop on every ray.
+ */
+export const PLANTED_LIMB = Object.freeze([
+    { id: 'PROM-NE',  kind: 'prominence', paDeg: 70,  height: 0.22, halfWidthDeg: 7,
+      channels: { '304': 0.85, '171': 0.22, '193': 0.14, '211': 0.10, '131': 0.10, '94': 0.05 } },
+    { id: 'PROM-SW',  kind: 'prominence', paDeg: 235, height: 0.14, halfWidthDeg: 5,
+      channels: { '304': 0.70, '171': 0.18, '193': 0.12, '211': 0.08, '131': 0.08, '94': 0.04 } },
+    { id: 'LOOPS-W',  kind: 'loops',      paDeg: 290, height: 0.18, halfWidthDeg: 10,
+      channels: { '171': 0.80, '193': 0.62, '211': 0.50, '131': 0.35, '94': 0.30, '304': 0.15 } },
+]);
+
+/** Off-limb intensity at (paDeg, rho) for one AIA channel — arches in (PA, height) space. */
+export function offLimbIntensity(channel, paDeg, rho) {
+    let I = 0;
+    for (const f of PLANTED_LIMB) {
+        const A = f.channels[String(channel)] || 0;
+        if (!A) continue;
+        let dpa = ((paDeg - f.paDeg) % 360 + 540) % 360 - 180;         // −180..180
+        const u = dpa / f.halfWidthDeg;                                 // −1..1 across the feature
+        const v = (rho - 1) / f.height;                                 // 0..1 up to the arch top
+        if (Math.abs(u) > 1.6 || v < 0 || v > 1.35) continue;
+        const rings = f.kind === 'loops' ? [0.55, 0.78, 1.0] : [1.0];   // an arcade is nested arches
+        for (const sc of rings) {
+            const d = Math.hypot(u / sc, v / sc) - 1;                  // distance from the unit half-ellipse
+            const ring = Math.exp(-(d * d) / (2 * 0.12 * 0.12));
+            const threads = f.kind === 'prominence'
+                ? 0.55 + 0.45 * vnoise(paDeg * 0.9, rho * 60)          // hedgerow-like fine structure
+                : 0.75 + 0.25 * vnoise(paDeg * 0.5, rho * 30);
+            I += A * ring * threads * (f.kind === 'loops' ? 0.75 : 1);
+        }
+    }
+    return I;
+}
+
 function hash2(x, y) {
     const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
     return s - Math.floor(s);
@@ -85,6 +128,12 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
             } else {                                                  // AIA EUV
                 const halo = rho >= 1 ? 0.10 * Math.exp(-(rho - 1) * 6) : 0;
                 let I = halo;
+                if (rho >= 1) {
+                    // Planted off-limb prominences / loops (PLANTED_LIMB):
+                    // position angle clockwise from image north toward image right.
+                    const paDeg = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+                    I += offLimbIntensity(channel, paDeg, rho);
+                }
                 if (rho < 1) {
                     const mu = Math.sqrt(Math.max(0, 1 - rho * rho));
                     I = 0.30 + 0.14 * vnoise(x * 0.25, y * 0.25) + 0.30 * Math.pow(1 - mu, 3); // limb brightening
@@ -113,6 +162,10 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
             synthetic: true, channel: String(channel), code: ch.code, instrument: ch.instrument,
             epoch: FIXTURE_EPOCH_ISO, b0Deg, geom: { cx: geom.cx, cy: geom.cy, r },
             planted: spots.map(s => ({ id: s.id, latDeg: s.latDeg, lonDeg: s.lonDeg, px: s.px, py: s.py, visible: s.visible })),
+            // Off-limb ground truth (AIA only): where the plane must show an arch.
+            plantedLimb: ch.kind === 1
+                ? PLANTED_LIMB.map(f => ({ id: f.id, kind: f.kind, paDeg: f.paDeg, height: f.height, halfWidthDeg: f.halfWidthDeg, peak: f.channels[String(channel)] || 0 }))
+                : [],
         },
     };
 }

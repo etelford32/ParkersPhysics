@@ -91,6 +91,10 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
         u_pulses:             { value: u_pulses },
         u_pulseE:             { value: u_pulseE },
         u_nPulses:            { value: 0 },
+
+        // Observed off-limb plane: (weight, rEdge, 0, 0) + sky-plane normal (sun.html per frame)
+        u_obsLimb:            { value: new THREE.Vector4(0, 1.28, 0, 0) },
+        u_obsLimbN:           { value: new THREE.Vector3(0, 0, 1) },
     };
 
     const material = new THREE.ShaderMaterial({
@@ -227,6 +231,12 @@ export function mountVolumetricCorona({ scene, baseUniforms, channel = '171', re
             uniforms.u_nPulses.value = n;
         },
         get pulseCount() { return uniforms.u_nPulses.value; },
+
+        /** Observed off-limb billboard coverage: weight 0–1, the frame's edge radius (R☉) and the sky-plane normal. */
+        setObservedLimb(weight, rEdge, nx, ny, nz) {
+            uniforms.u_obsLimb.value.set(Math.max(0, Math.min(1, weight || 0)), Math.max(1.02, rEdge || 1.28), 0, 0);
+            uniforms.u_obsLimbN.value.set(nx, ny, nz).normalize();
+        },
 
         /** Sync the (lat, lon) of the most recent flare. */
         tickFlareLatLon(latRad, lonRad) {
