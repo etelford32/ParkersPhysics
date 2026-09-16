@@ -37,6 +37,7 @@
  */
 
 import * as THREE from 'three';
+import { TONE_DECODE_GLSL } from './tone-decode.js';
 
 export const ROTATION_PERIOD_H = Object.freeze({
     '99942': 30.6, '101955': 4.30, '162173': 7.63, '65803': 2.26, '2024 YR4': 0.33, '3200': 3.60,
@@ -190,7 +191,7 @@ const ROCK_VS = /* glsl */`
         gl_Position = projectionMatrix * viewMatrix * wp;
     }
 `;
-const ROCK_FS = /* glsl */`
+const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
     uniform vec3  u_base;
     uniform float u_glow;        // comet nucleus: faint self-lit coma haze
     varying vec3  vN;
@@ -207,6 +208,9 @@ const ROCK_FS = /* glsl */`
         vec3 col = u_base * (0.05 + diff * 0.95 + wrap) * (0.82 + 0.36 * vSpeck) + rim * vec3(0.7, 0.85, 1.0);
         col += u_glow * vec3(0.55, 0.75, 1.0) * 0.25;
         gl_FragColor = vec4(col, 1.0);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 

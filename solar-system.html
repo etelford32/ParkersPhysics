@@ -790,6 +790,7 @@ import {
 import { JovianSystem } from './js/jovian-system.js';
 import { EarthSimBridge } from './js/earth-sim-bridge.js';
 import { NeoLayer } from './js/neo-layer.js';
+import { TONE_DECODE_GLSL } from './js/tone-decode.js';
 import { NeoPanel } from './js/neo-panel.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
@@ -853,11 +854,85 @@ controls.target.set(0, 0, 0);
 // ═══════════════════════════════════════════════════════
 //  SUN  — G2V shader (same pipeline as WR-102)
 // ═══════════════════════════════════════════════════════
+
+// ── X-RAY LEVEL IS NOT EVENT STRENGTH ─────────────────────────────────────
+// js/swpc-feed.js publishes xray_intensity = clamp01((log10(flux) + 9) / 6).
+// That is a LOG LEVEL of the GOES 1-8 A channel, and it is NEVER ZERO:
+//
+//     A1 (background) 1e-8 -> 0.17      M1   1e-5   -> 0.67
+//     B1              1e-7 -> 0.33      X1   1e-4   -> 0.83
+//     C1              1e-6 -> 0.50      X2.8 2.8e-4 -> 0.91
+//
+// The shader below was written as if it ran 0 -> ~0.3, so every term that
+// means "how much is erupting" was reading an ordinary quiet day as a
+// half-strength event, and C-class — which is most days — as a full one. Two
+// terms went past their own zero crossing: the sunspot darkening flipped
+// NEGATIVE above 0.40 and the filament channel became identically 0, which is
+// how the page came to switch off the two features it works hardest to draw
+// (SOLAR_SYSTEM_VISUAL_REVIEW.md S2 — measured: at A-class background the
+// spots were already 42 % erased, and from C1 up the darkest pixel inside a
+// region was BRIGHTER than the quiet photosphere around it).
+//
+// flareExcess() is the quantity those terms actually wanted: 0 at A-class
+// background, 1 at X1, and it keeps climbing above X1 so an X10 (1.26) still
+// outruns an X1. Terms that describe a LEVEL (the standing coronal rim, the
+// network) may legitimately read u_flare_str; terms that describe an EVENT
+// must read this. ONE definition, mirrored into GLSL by interpolation so the
+// two cannot drift.
+const XR_BACKGROUND = 0.17;   // A1, 1e-8 W/m^2 — nothing is happening
+const XR_X1         = 0.83;   // X1, 1e-4 W/m^2
+const flareExcess   = (xr) => Math.max(0, (xr - XR_BACKGROUND) / (XR_X1 - XR_BACKGROUND));
+// ── THE ACTIVE-REGION FIELD, ONE COPY ─────────────────────────────────────
+// Both the photosphere and the chromosphere have to know where the regions
+// are, because S2's rule is that every flare term is weighted by the region it
+// belongs to — and the chromosphere is where flare RIBBONS actually live. The
+// angular-radius formula in particular must not exist twice: sunFS sizes its
+// spots and filament channels with it and the shell weights its ribbons with
+// it, and a drift between them would put the ribbons somewhere the spots are
+// not. The uniform values are shared by reference from sunUniforms.
+const AR_FIELD_GLSL = /* glsl */`
+    uniform int   u_ar_count;
+    uniform float u_ar_lat[5];
+    uniform float u_ar_lon[5];
+    uniform float u_ar_area[5];
+
+    /** Angular radius of region i, radians. */
+    float arRadius(int i) { return 0.10 + u_ar_area[i] * 0.18; }
+
+    /** Unit direction of region i in the body frame. */
+    vec3 arDirection(int i) {
+        float clat = cos(u_ar_lat[i]);
+        return vec3(clat * cos(u_ar_lon[i]), sin(u_ar_lat[i]), clat * sin(u_ar_lon[i]));
+    }
+
+    /** 1 inside a region, falling to 0 at its edge; max over all regions. */
+    float arProximity(vec3 pos) {
+        float near = 0.0;
+        for (int i = 0; i < 5; i++) {
+            if (i >= u_ar_count) break;
+            float angD = acos(clamp(dot(pos, arDirection(i)), -1.0, 1.0));
+            float arR  = arRadius(i);
+            near = max(near, 1.0 - smoothstep(arR * 0.55, arR, angD));
+        }
+        return near;
+    }
+`;
+
+const FLARE_EXCESS_GLSL = /* glsl */`
+    const float XR_BACKGROUND = ${XR_BACKGROUND};
+    const float XR_X1         = ${XR_X1};
+    float flareExcess(float xr) {
+        return max(0.0, (xr - XR_BACKGROUND) / (XR_X1 - XR_BACKGROUND));
+    }
+`;
+
 const sunUniforms = {
     u_time:     { value: 0.0    },
     u_teff:     { value: 5778.0 },
     // ── Live SWPC data ─────────────────────────────────────────────────────
-    // u_flare_str  : normalised GOES X-ray intensity [0,1]  (0=A-class, 0.8=X1)
+    // u_flare_str  : normalised GOES X-ray LEVEL [0,1] — A1 background is 0.17,
+    //                C1 0.50, M1 0.67, X1 0.83. It is never 0 on a live feed;
+    //                event-strength terms go through flareExcess() above.
     // u_ar_count   : number of active regions in the arrays below (0–5)
     // u_ar_lat[5]  : heliographic latitude  (radians, local body frame)
     // u_ar_lon[5]  : heliographic longitude (radians, Carrington − sunMesh.rotation.y)
@@ -880,10 +955,8 @@ const sunFS = /* glsl */`
     uniform float u_time;
     uniform float u_teff;
     uniform float u_flare_str;
-    uniform int   u_ar_count;
-    uniform float u_ar_lat[5];
-    uniform float u_ar_lon[5];
-    uniform float u_ar_area[5];
+${FLARE_EXCESS_GLSL}
+${AR_FIELD_GLSL}
 
     varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
 
@@ -908,6 +981,10 @@ const sunFS = /* glsl */`
         vec3 vDir = normalize(vViewDir);
         vec3 pos  = normalize(vPosition);
 
+        // How much is ERUPTING, as opposed to how bright the X-ray channel is.
+        // 0 on an ordinary A-class day; 1 at X1. See FLARE_EXCESS_GLSL.
+        float flareX = flareExcess(u_flare_str);
+
         // ── Photospheric convection + granulation ─────────────────────────────
         vec3 drift = vec3(u_time*0.012, u_time*0.009, u_time*0.011);
         float conv = fbm(vPosition*0.40 + drift);
@@ -927,10 +1004,92 @@ const sunFS = /* glsl */`
         float dCz = fbm(vPosition*0.40 + vec3(0,0,FD) + drift) - conv;
         float jProx = length(vec3(dCx,dCy,dCz)) / FD;   // proxy for |∇B|
 
+        // ── Where the active regions are ──────────────────────────────────────
+        // THIS BLOCK IS FIRST ON PURPOSE. Every flare term below has to be
+        // weighted by the region it belongs to — that is the whole of S2 — and
+        // arNear is that weight, so it has to exist before the first term
+        // that reads it. Moving this back down silently makes the network and
+        // the coronal shimmer global again.
+        // ── Active-region sunspots / flare brightening / filament channels ─────
+        // Filament channels mark the polarity inversion line (PIL) of each AR.
+        // They are dark elongated features in H-alpha on the disk — the on-disk
+        // counterpart of the prominence seen at the limb.  The PIL runs E-W
+        // through the AR centre (bipole axis perpendicular to PIL).
+        // During a flare the filament is disrupted and the channel brightens
+        // (post-flare loop arcade).
+        float arDark = 0.0, arBrite = 0.0, filDark = 0.0, arNear = 0.0;
+        for (int i = 0; i < 5; i++) {
+            if (i >= u_ar_count) break;
+            vec3 arDir = arDirection(i);
+            float angD = acos(clamp(dot(pos, arDir), -1.0, 1.0));
+            float arR  = arRadius(i);
+            float inAR = 1.0 - smoothstep(arR*0.55, arR, angD);
+            float core = 1.0 - smoothstep(arR*0.15, arR*0.45, angD);
+            // A SUNSPOT DOES NOT DISAPPEAR BECAUSE ITS REGION FLARED. This term
+            // used to carry (1.0 - u_flare_str*2.5), which is negative for any
+            // X-ray level above 0.40 — i.e. from C-class up, most days — and only
+            // 0.575 at A-class background. The spots the shader draws were erased
+            // by the feed being switched on. It has no business reading the flare
+            // at all: a delta-spot region is if anything MORE visible when it is
+            // producing flares, which is why it is producing them.
+            arDark  += inAR * core * 0.5;
+            // AR proximity, for the temperature mix below. This is the weight
+            // that makes a flare an event in one place instead of a light switch
+            // over the whole photosphere.
+            arNear   = max(arNear, inAR);
+
+            // Filament channel: elongated dark absorption along E-W PIL
+            // eastDir = tangent to the latitude circle (increasing longitude)
+            vec3 eastDir  = normalize(vec3(-sin(u_ar_lon[i]), 0.0, cos(u_ar_lon[i])));
+            // northDir ≈ north in the AR tangent plane (for N-S width measurement)
+            vec3 northDir = normalize(cross(arDir, eastDir));
+            // Linearised projected distances from the AR centre along each PIL axis
+            float dNS = abs(dot(pos, northDir));    // cross-PIL (narrow)
+            float dEW = abs(dot(pos, eastDir));     // along-PIL (long)
+            float filW = 0.052 + u_ar_area[i] * 0.030;   // N-S half-width
+            float filL = 0.260 + u_ar_area[i] * 0.140;   // E-W half-length
+            float filMask = (1.0 - smoothstep(filW*0.4, filW, dNS)) *
+                            (1.0 - smoothstep(filL*0.4, filL, dEW));
+            // An eruption THINS a filament, it does not delete the channel, and
+            // the channel is still there afterwards. The old
+            // max(0.0, 1.0 - u_flare_str*2.5) was identically zero above 0.40, so
+            // every filament channel on the disc vanished at C-class.
+            filDark += filMask * (0.28 + u_ar_area[i] * 0.30) * mu
+                       * max(0.35, 1.0 - flareX * 0.6);
+
+            // Post-flare arcade. The continuum brightening a flare really does
+            // produce sits on the RIBBONS, which straddle the polarity inversion
+            // line — the band filMask already describes — not over the whole
+            // region and certainly not over the whole star. So the same band
+            // carries a dark filament when quiet and a bright arcade when it
+            // erupts, which is the sequence a real region goes through.
+            // (1.0 - core) keeps the arcade OFF the umbra. This shader puts the
+            // PIL through the region centre, so the channel and the spot core are
+            // co-located; without this the ribbons re-erased the spot at C-class,
+            // which is the very bug S2 exists to fix (measured: depth −1.5 counts).
+            arBrite += filMask * (1.0 - core) * flareX * 1.8;
+        }
+        bmod = bmod * (1.0 - clamp(arDark, 0.0, 0.95)) + clamp(arBrite, 0.0, 2.0);
+        // Filament channel: cool dense PIL plasma absorbs continuum (dark on disk)
+        bmod *= 1.0 - clamp(filDark, 0.0, 0.56);
+        bmod = clamp(bmod, 0.05, 3.0);
+
         // ── Chromospheric H-alpha network ─────────────────────────────────────
         // Bright web at supergranule boundaries.  Colour = H-alpha 6563 Å (deep red).
         // Intensity proportional to local current density proxy.
-        float netStr = smoothstep(0.55, 1.10, jProx) * (0.18 + u_flare_str * 0.30);
+        // A SUNSPOT UMBRA IS OPTICALLY THICK. arDark peaks at 0.5 in a core, so
+        // this is 1 inside the umbra and 0 outside it, and every AR-local flare
+        // accent below is multiplied by its complement. Without that the accents
+        // are additive terms that do not know the spot is there, and they paint
+        // it out from above: measured, the darkest pixel inside a region rose
+        // from 137 counts at A-class to 198 at X2.8 even after the spot's own
+        // darkening had been made flare-independent. A sunspot does not
+        // disappear because its region flared — including via the glow on top.
+        float umbraLit = 1.0 - clamp(arDark * 2.0, 0.0, 1.0);
+
+        // The flare boost on the network is weighted by arNear: a flare brightens
+        // the chromospheric network of ITS OWN region, not the whole disc.
+        float netStr = smoothstep(0.55, 1.10, jProx) * (0.18 + flareX * arNear * umbraLit * 0.30);
         // Network is most visible at the limb where we look along the surface
         vec3 col = vec3(0.0);
         col += vec3(0.88, 0.22, 0.05) * netStr * limb;
@@ -960,49 +1119,23 @@ const sunFS = /* glsl */`
         float spicule = spLine * (1.0 - mu) * (0.55 + netStr * 1.5);
         col += vec3(0.95, 0.40, 0.12) * spicule;
 
-        // ── Active-region sunspots / flare brightening / filament channels ─────
-        // Filament channels mark the polarity inversion line (PIL) of each AR.
-        // They are dark elongated features in H-alpha on the disk — the on-disk
-        // counterpart of the prominence seen at the limb.  The PIL runs E-W
-        // through the AR centre (bipole axis perpendicular to PIL).
-        // During a flare the filament is disrupted and the channel brightens
-        // (post-flare loop arcade).
-        float arDark = 0.0, arBrite = 0.0, filDark = 0.0;
-        for (int i = 0; i < 5; i++) {
-            if (i >= u_ar_count) break;
-            float clat = cos(u_ar_lat[i]);
-            vec3 arDir = vec3(clat*cos(u_ar_lon[i]), sin(u_ar_lat[i]), clat*sin(u_ar_lon[i]));
-            float angD = acos(clamp(dot(pos, arDir), -1.0, 1.0));
-            float arR  = 0.10 + u_ar_area[i] * 0.18;
-            float inAR = 1.0 - smoothstep(arR*0.55, arR, angD);
-            float core = 1.0 - smoothstep(arR*0.15, arR*0.45, angD);
-            arDark  += inAR * core * (1.0 - u_flare_str*2.5) * 0.5;
-            arBrite += inAR * u_flare_str * 2.2;
-
-            // Filament channel: elongated dark absorption along E-W PIL
-            // eastDir = tangent to the latitude circle (increasing longitude)
-            vec3 eastDir  = normalize(vec3(-sin(u_ar_lon[i]), 0.0, cos(u_ar_lon[i])));
-            // northDir ≈ north in the AR tangent plane (for N-S width measurement)
-            vec3 northDir = normalize(cross(arDir, eastDir));
-            // Linearised projected distances from the AR centre along each PIL axis
-            float dNS = abs(dot(pos, northDir));    // cross-PIL (narrow)
-            float dEW = abs(dot(pos, eastDir));     // along-PIL (long)
-            float filW = 0.052 + u_ar_area[i] * 0.030;   // N-S half-width
-            float filL = 0.260 + u_ar_area[i] * 0.140;   // E-W half-length
-            float filMask = (1.0 - smoothstep(filW*0.4, filW, dNS)) *
-                            (1.0 - smoothstep(filL*0.4, filL, dEW));
-            // Filament vanishes when flare disrupts the flux rope
-            filDark += filMask * (0.28 + u_ar_area[i] * 0.30) * mu
-                       * max(0.0, 1.0 - u_flare_str * 2.5);
-        }
-        bmod = bmod * (1.0 - clamp(arDark, 0.0, 0.95)) + clamp(arBrite, 0.0, 2.0);
-        // Filament channel: cool dense PIL plasma absorbs continuum (dark on disk)
-        bmod *= 1.0 - clamp(filDark, 0.0, 0.56);
-        bmod = clamp(bmod, 0.05, 3.0);
 
         // ── Effective temperature + flare boost ───────────────────────────────
-        float flareTemp = u_teff * (1.0 + u_flare_str * 0.55);
-        vec3  base      = mix(blackbody(u_teff), blackbody(flareTemp), u_flare_str * 0.75);
+        // A real X-class brightens ~1e-4 of the visible disc in white light and
+        // is invisible in the continuum outside the ribbons. This mix used to be
+        // GLOBAL, so an X2.8 reheated the entire photosphere to 8 956 K — the
+        // whole star changed colour and the far field rose 9.6 counts, measured.
+        // arNear confines it to the region that is actually flaring.
+        // The weight is arBrite — the post-flare arcade itself — not mere AR
+        // proximity, because the white-light emission of a flare comes from the
+        // ribbons and footpoints, and a SUNSPOT UMBRA IS THE COOLEST THING ON
+        // THE STAR. Weighted by proximity alone the mix reheated the umbra with
+        // everything else and the spot faded out again as the class rose
+        // (measured: depth 71 counts at A-class down to 9.9 at X2.8). arBrite
+        // already excludes the core, so the ribbons heat and the spot does not.
+        float flareLit  = clamp(arBrite, 0.0, 1.0);
+        float flareTemp = u_teff * (1.0 + flareX * 0.55);
+        vec3  base      = mix(blackbody(u_teff), blackbody(flareTemp), flareLit * 0.75);
 
         // Combine photospheric emission
         col += base * bmod * limb * 1.80;
@@ -1022,24 +1155,66 @@ const sunFS = /* glsl */`
         // The chromosphere/corona interface emits strongly in UV (He II 304Å, etc.)
         // despite being only ~100 km thick.  Visible as a thin blue-white arc at limb.
         float trGlow = pow(1.0 - mu, 7.0) * 0.22;
-        col += vec3(0.50, 0.72, 1.00) * trGlow * (1.0 + u_flare_str * 2.0);
+        col += vec3(0.50, 0.72, 1.00) * trGlow * (1.0 + flareX * arNear * 2.0);
 
         // ── Corona rim glow + Alfvén-wave-heated loops ────────────────────────
+        // The STANDING rim is global — the corona is always there — but its flare
+        // response is not. Both of these are blue-rich, and left global they were
+        // the last thing whitening the far field: B/R ran 0.788 to 0.850 across
+        // A1 → X2.8 with everything else already localised, because a
+        // limb-weighted term still covers a lot of the disc. Post-flare loops
+        // stand over the region that flared.
         float fr   = pow(1.0 - mu, 3.0);
-        float rimT = u_teff * (1.12 + u_flare_str * 0.40);
-        col += blackbody(rimT) * fr * (0.50 + u_flare_str * 0.70);
+        float rimT = u_teff * (1.12 + flareX * arNear * 0.40);
+        col += blackbody(rimT) * fr * (0.50 + flareX * arNear * 0.70);
 
         // Coronal loop shimmer: fine-scale FBM driven by flare activity
-        if (u_flare_str > 0.02) {
-            float cLoop = fbm(vPosition * 6.0 + vec3(u_time * 0.18)) * u_flare_str * 0.35;
+        if (flareX > 0.02) {
+            // Loops belong to active regions, so the shimmer does too — and it
+            // does not shine through the umbra.
+            float cLoop = fbm(vPosition * 6.0 + vec3(u_time * 0.18)) * flareX * arNear * umbraLit * 0.35;
             col += vec3(1.0, 0.82, 0.52) * cLoop;
         }
 
+        // ── Scene exposure → the tone curve ───────────────────────────────────
+        // EVERYTHING ABOVE IS SCENE-REFERRED EMISSION, NOT DISPLAY PIXELS. The
+        // photospheric term alone reaches base.r(1.0) x bmod(<=3.0) x limb(1.0)
+        // x 1.80 = 5.4 before the network, nanoflare, spicule, rim and
+        // transition-region terms are added on top. Written raw to the
+        // framebuffer that is 5.4 clamped to 1.0: measured 2026-09-14, the disc
+        // was 100 % clipped in R and G at all times and the flare-state
+        // luminance sigma across the disc was 0.00 — granulation, sunspots,
+        // filament channels and active regions were all present in the shader
+        // and all of them above the ceiling. The star rendered as a featureless
+        // white cut-out (SOLAR_SYSTEM_VISUAL_REVIEW.md S1).
+        //
+        // SUN_EXPOSURE is the fit that puts the emission INTO the working range
+        // of the ACES curve the two includes below finally apply:
+        //   quiet disc centre  1.80 x SUN_EXPOSURE = 0.80 linear
+        //   quiet at mu = 0.30 x limb(0.594)       = 0.47 linear
+        // which is the review's target. Above ~1.5 the curve's shoulder eats
+        // spatial structure faster than the terms can add it, which is the
+        // mechanism behind the sigma = 0.00.
+        //
+        // EXPOSURE AND CURVE MOVE TOGETHER. An A/B during the review added the
+        // includes ALONE and moved the flare-state sigma only 0.00 -> 0.10,
+        // still 100 % clipped: ACES cannot recover an input that far past its
+        // shoulder. Equally, dropping the exposure without the curve just makes
+        // a dim clipped disc. If you retune one, retune the other and re-run
+        // the gate. Every additive accent term above is weighted RELATIVE to
+        // the 1.80 photospheric gain, so scaling the accumulated col once
+        // here preserves the look and only removes the clipping.
+        const float SUN_EXPOSURE = 0.444;      // 1.80 x 0.444 = 0.80 at centre
+        col *= SUN_EXPOSURE;
+
         gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 
-const sunGeo  = new THREE.SphereGeometry(1.5, 96, 96);
+const SUN_R   = 1.5;                       // drawn photosphere radius, scene units
+const sunGeo  = new THREE.SphereGeometry(SUN_R, 96, 96);
 const sunMat  = new THREE.ShaderMaterial({ vertexShader:sunVS, fragmentShader:sunFS, uniforms:sunUniforms });
 const sunMesh = new THREE.Mesh(sunGeo, sunMat);
 scene.add(sunMesh);
@@ -1111,33 +1286,118 @@ function setFlareSite({ latRad, lonRad, cls = 'M', ageS = 0, key = null }) {
 }
 
 // Sun glow shells
-const sgVS = /* glsl */`
-    varying vec3 vNormal; varying vec3 vViewDir;
-    void main(){ vNormal=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.0); vViewDir=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }
+// ── THE CORONA ────────────────────────────────────────────────────────────
+// ONE radially-integrated shell, replacing the two back-side spheres that drew
+// a bullseye (SOLAR_SYSTEM_VISUAL_REVIEW.md S3).
+//
+// WHAT THE OLD PAIR ACTUALLY DID, which is worse than the review's reading of
+// it. Both shells took alpha from pow(rim, n) with
+// rim = 1 - max(dot(normal, viewDir), 0), which the review read as peaking at
+// the sphere's own silhouette. On a BACK-SIDE sphere it does not vary at all:
+// the rendered faces are the far hemisphere, whose outward normals point AWAY
+// from the camera, so the dot product is negative, max() clamps it to 0, and
+// rim is identically 1 over every drawn fragment. The shells were flat plates
+// with hard rims. Measured on the radial profile at Sun View, in units of the
+// drawn disc radius:
+//
+//     1.25 R   132.5      1.95 R   12.6
+//     1.35 R    35.5  <-- cliff       2.05 R    0.0  <-- cliff
+//     1.35-1.85 R  35.52 EXACTLY, five annuli, a constant plate
+//     2.35 -> 3.05 R   0.2 -> 7.8, RISING again: the second shell's own rim
+//
+// A bright annulus, a cliff, a flat plate, a cliff to nothing, a gap, and then
+// a second ring further out. That is a target, not a star.
+//
+// WHAT THIS DRAWS INSTEAD. The K-corona's electron density falls steeply with
+// height; a single power law n(r) ~ r^-2.5 is a fair one-term stand-in for
+// Baumbach-Allen over the 1-3 R_sun range this scene ever shows. For a ray of
+// impact parameter b the line-of-sight column has a closed form,
+//
+//     INTEGRAL (b^2 + z^2)^(-p/2) dz  =  b^(1-p) * sqrt(pi) * G((p-1)/2)/G(p/2)
+//
+// so with p = 2.5 the column falls as b^-1.5 and NO MARCH IS NEEDED — which is
+// the point. sun.html's volumetric corona (js/corona-volumetric.js) is the
+// fidelity reference, but it is a jittered march on its own camera layer with
+// an accumulation buffer, and this page draws the Sun at ~30 px for most of a
+// session. One analytic shell is the right rung here.
+//
+// The density carries an exponential outer cutoff, exp(-(r/CORONA_SCALE)^3),
+// so the profile has a real outer boundary rather than a clipped one. That
+// cutoff is evaluated at the ray's closest approach rather than integrated
+// along it: for a power law this steep the column is concentrated within about
+// one impact parameter of closest approach (the integrand is at half its peak
+// by z = 0.8 b), so holding a slowly varying factor at r = b is a good
+// approximation and a cheap one. It is an approximation, not an identity.
+//
+// THE MESH IS MUCH BIGGER THAN THE CORONA ON PURPOSE. At the mesh radius the
+// column is ~8e-4 of its value at the limb, which is a hundredth of one 8-bit
+// count — the geometry's silhouette cannot become the visual edge, which is
+// the whole failure mode being fixed. Do not shrink the mesh to fit the glow.
+const CORONA_SCALE   = 1.9;   // R_sun — outer scale of the drawn corona
+const CORONA_MESH_R  = 5.8;   // scene units = 3.87 R_sun — the glow is already at the 8-bit floor by 3.2
+const CORONA_SEGS    = 96;    // was 24: the old outer shell read as a 24-gon
+
+const coronaVS = /* glsl */`
+    varying vec3 vWorld;
+    void main(){
+        vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
 `;
-const sgInFS = /* glsl */`
+const coronaFS = /* glsl */`${TONE_DECODE_GLSL}${FLARE_EXCESS_GLSL}
     uniform float u_time;
-    varying vec3 vNormal; varying vec3 vViewDir;
+    uniform float u_flare_str;
+    varying vec3 vWorld;
+
     void main(){
-        float rim=1.0-max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
-        float a=pow(rim,1.8)*0.60;
-        float p=0.88+0.12*sin(u_time*1.8+0.6);
-        gl_FragColor=vec4(1.0,0.62,0.12,a*p);
+        // Impact parameter of this fragment's view ray about the Sun's centre,
+        // which sits at the world origin.
+        vec3  ro = cameraPosition;
+        vec3  rd = normalize(vWorld - ro);
+        float b  = length(ro + rd * dot(-ro, rd)) / ${SUN_R};   // in solar radii
+        b = max(b, 1.0);                                        // the disc is opaque
+
+        // Analytic column for n ~ r^-2.5, with the model's outer cutoff.
+        float column = pow(b, -1.5) * exp(-pow(b / ${CORONA_SCALE}, 3.0));
+
+        // A flare lights the WHOLE corona, and this is the one term on the page
+        // that is legitimately global: S2's rule is about the photosphere's
+        // white light, which comes from the ribbons and nowhere else, whereas
+        // the corona is irradiated as a body. It reads the excess over A-class
+        // background like every other event term.
+        float flareX = flareExcess(u_flare_str);
+        float pulse  = 0.94 + 0.06 * sin(u_time * 1.8 + 0.6);
+
+        // Warm at the base, paler outward: the low corona this page draws is
+        // dominated by the same warm continuum as the limb, while the K-corona
+        // further out is Thomson-scattered photospheric light and near-white.
+        vec3 warm = vec3(1.00, 0.62, 0.12);
+        vec3 pale = vec3(1.00, 0.80, 0.58);
+        vec3 col  = mix(warm, pale, smoothstep(1.0, 2.4, b));
+
+        float a = clamp(column * 0.42 * pulse * (1.0 + flareX * 0.8), 0.0, 1.0);
+        gl_FragColor = vec4(col, a);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
-const sgOutFS = /* glsl */`
-    varying vec3 vNormal; varying vec3 vViewDir;
-    void main(){
-        float rim=1.0-max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
-        float a=pow(rim,3.5)*0.22;
-        gl_FragColor=vec4(1.0,0.48,0.06,a);
-    }
-`;
-[{r:1.9,fs:sgInFS},{r:2.8,fs:sgOutFS}].forEach(({r,fs})=>{
-    scene.add(new THREE.Mesh(new THREE.SphereGeometry(r,24,24),
-        new THREE.ShaderMaterial({vertexShader:sgVS,fragmentShader:fs,uniforms:sunUniforms,
-            transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.BackSide})));
-});
+const coronaMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(CORONA_MESH_R, CORONA_SEGS, CORONA_SEGS),
+    new THREE.ShaderMaterial({
+        vertexShader: coronaVS, fragmentShader: coronaFS, uniforms: sunUniforms,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.BackSide,
+    })
+);
+coronaMesh.name = 'corona-shell';
+// Additive layers composite order-independently (dst += src*a is commutative,
+// and nothing here writes depth), so this does NOT change the picture — it is
+// declared so the intent survives a future move to a non-additive blend, where
+// it WOULD matter. What actually stopped the corona drowning the modelled
+// physics is the falloff above plus the opacity lift on the loops.
+coronaMesh.renderOrder = -1;
+scene.add(coronaMesh);
 
 // ── Chromosphere shell (r = 1.52) ─────────────────────────────────────────
 // Thin layer between photosphere (r=1.5) and inner corona (r=1.9).
@@ -1154,10 +1414,12 @@ const chromoVS = /* glsl */`
         gl_Position = projectionMatrix * mv;
     }
 `;
-const chromoFS = /* glsl */`
+const chromoFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_flare_str;
     varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPosition;
+${FLARE_EXCESS_GLSL}
+${AR_FIELD_GLSL}
 
     float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
     float vn(vec3 p){
@@ -1187,11 +1449,41 @@ const chromoFS = /* glsl */`
         float hAlpha = pow(rim, 1.8) * 0.80;
         // Ca II K (3934 Å — violet): even more limb-bright
         float caK    = pow(rim, 3.2) * 0.45;
+        // ── On-disk terms: a veil, not a wash ─────────────────────────────
+        // This shell is ADDITIVE and sits in FRONT of the photosphere, so
+        // every on-disk term lands on top of the disc's own brightness. They
+        // were fitted when that disc was clipped to white and nothing on-disk
+        // could read at all. Against a properly exposed disc the same weights
+        // put +26 counts of red across the whole star, and under X-class the
+        // flare-ribbon term alone clipped 31 % of it — measured
+        // (SOLAR_SYSTEM_VISUAL_REVIEW.md S1).
+        //
+        // The chromosphere is optically thin in the continuum and LIMB-
+        // BRIGHTENED, which is what the comments above already say, so the
+        // limb terms (hAlpha, caK) keep their weight and DISK_VEIL re-fits
+        // only the two that are on-disk by construction. fibLine is left
+        // alone deliberately: it is a thin-line texture over a small fraction
+        // of the surface, so it adds STRUCTURE rather than a wash, and that
+        // structure is half of what the gate measures.
+        //
+        // Making the ribbons LOCAL to the flaring region — so an X-class is
+        // an event and not a lighting change — is finding S2, not this.
+        const float DISK_VEIL = 0.42;
+
         // Network is bright on disk too (plage regions)
-        float diskNet = netBright * mu * 0.30;
+        float diskNet = netBright * mu * 0.30 * DISK_VEIL;
 
         // Flare ribbons: during flares, chromosphere lights up in H-alpha
-        float flareRib = u_flare_str * (netBright * 0.6 + hAlpha * 0.4);
+        // FLARE RIBBONS BELONG TO A REGION. Two things were wrong here: the raw
+        // X-ray level meant an ordinary A-class day lit the whole shell at 0.17
+        // of full ribbon strength, and nothing weighted it by WHERE the flare
+        // was, so an X-class filled in every sunspot umbra on the disc from a
+        // layer floating in front of them (measured: it put the darkest pixel
+        // inside a region ~40 counts brighter than the photosphere below it).
+        // Ribbons are chromospheric, so this shell is the right place to draw
+        // them — but only over the region that is flaring.
+        float flareRib = flareExcess(u_flare_str) * arProximity(normalize(vPosition))
+                       * (netBright * 0.6 + hAlpha * 0.4) * DISK_VEIL;
 
         vec3 col  = vec3(0.90, 0.18, 0.04) * (hAlpha + diskNet + fibLine*0.4 + flareRib);
         col += vec3(0.48, 0.30, 0.92) * (caK + fibLine * rim * 0.15);  // Ca K
@@ -1200,9 +1492,18 @@ const chromoFS = /* glsl */`
 
         float alpha = clamp(pow(rim, 1.5)*0.65 + fibLine*0.30 + diskNet*0.25 + flareRib*0.40, 0.0, 0.80);
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
-const chromoUniforms = { u_time: sunUniforms.u_time, u_flare_str: sunUniforms.u_flare_str };
+// Shared BY REFERENCE with sunUniforms, so the shell's ribbons and the
+// photosphere's spots can never disagree about where a region is.
+const chromoUniforms = {
+    u_time: sunUniforms.u_time, u_flare_str: sunUniforms.u_flare_str,
+    u_ar_count: sunUniforms.u_ar_count, u_ar_lat: sunUniforms.u_ar_lat,
+    u_ar_lon: sunUniforms.u_ar_lon, u_ar_area: sunUniforms.u_ar_area,
+};
 scene.add(new THREE.Mesh(
     new THREE.SphereGeometry(1.52, 64, 64),
     new THREE.ShaderMaterial({
@@ -1239,7 +1540,7 @@ const planetVS = /* glsl */`
         gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
-const planetFS = /* glsl */`
+const planetFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform vec3  u_base;      // planet base RGB color
     uniform float u_time;      // animation clock
     uniform float u_windStr;   // solar-wind intensity (1/r² scaled)
@@ -1348,6 +1649,9 @@ const planetFS = /* glsl */`
         }
 
         gl_FragColor = vec4(col, 1.0);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 
@@ -1663,7 +1967,7 @@ const msVS = /* glsl */`
         gl_Position  = projectionMatrix * viewMatrix * wp;
     }
 `;
-const msFS = /* glsl */`
+const msFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_kp;
     uniform float u_bz_s;
@@ -1685,6 +1989,9 @@ const msFS = /* glsl */`
         col += vec3(0.55, 0.0, 0.0) * flankM * kpFrac * kpFrac * 0.45;
         float alpha = 0.055 + bow * 0.07 + term * 0.05 + kpFrac * 0.025;
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const msUniforms = {
@@ -1712,7 +2019,7 @@ scene.add(msMesh);
 //    Outer belt (~4.5 Re): mostly relativistic electrons — blue.
 //    Intensity driven by live GOES proton/electron flux from NOAA SWPC.
 // ─────────────────────────────────────────────────────────────────────────────
-const vaBeltFS = /* glsl */`
+const vaBeltFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_intensity;  // 0–1, from live NOAA particle flux
     uniform vec3  u_clr;
@@ -1720,6 +2027,9 @@ const vaBeltFS = /* glsl */`
         float pulse = 0.72 + 0.28 * sin(u_time * 2.1 + gl_FragCoord.x * 0.09);
         float alpha = clamp(u_intensity, 0.03, 1.0) * pulse * 0.28;
         gl_FragColor = vec4(u_clr * (0.8 + u_intensity * 0.7), alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 // Inner proton belt (~1.5 Re radius, 0.3 Re tube thickness)
@@ -1762,7 +2072,7 @@ scene.add(outerBelt);
 //    The ring current is the primary cause of the Dst (now Sym-H) index drop.
 //    Appears only during Kp > 2.5; intensifies strongly with storm level.
 // ─────────────────────────────────────────────────────────────────────────────
-const rcFS = /* glsl */`
+const rcFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_kp;
     void main() {
@@ -1771,6 +2081,9 @@ const rcFS = /* glsl */`
         vec3  col    = mix(vec3(0.55, 0.00, 0.00), vec3(1.00, 0.35, 0.00), kpFrac);
         float alpha  = kpFrac * kpFrac * pulse * 0.28;
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const rcUniforms = { u_time: { value: 0.0 }, u_kp: { value: 0.0 } };
@@ -1792,7 +2105,7 @@ scene.add(ringCurrentMesh);
 //    Brightens to white-blue during X-ray flares (D-layer over-ionization → HF blackout).
 //    Also responds to F10.7 flux (solar cycle EUV proxy).
 // ─────────────────────────────────────────────────────────────────────────────
-const ionoFS = /* glsl */`
+const ionoFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_xray;   // GOES X-ray intensity 0–1
     uniform float u_f107;   // F10.7 radio flux normalised 0–1
     uniform float u_time;
@@ -1802,6 +2115,9 @@ const ionoFS = /* glsl */`
         vec3  col    = mix(vec3(0.15, 0.55, 1.0), vec3(1.0, 0.92, 0.8), u_xray * 0.75);
         float pulse  = 1.0 + 0.04 * sin(u_time * 0.5);
         gl_FragColor = vec4(col * pulse, baseA + flare);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const ionoUni = { u_xray: { value: 0.0 }, u_f107: { value: 0.3 }, u_time: { value: 0.0 } };
@@ -1821,12 +2137,15 @@ scene.add(ionoMesh);
 //    During geomagnetic storms, the outer plasmasphere drains tailward
 //    (plasmaspheric erosion) — modeled as shrinking opacity with Kp.
 // ─────────────────────────────────────────────────────────────────────────────
-const plasmaFS = /* glsl */`
+const plasmaFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_kp;
     void main() {
         float erosion = 1.0 - clamp(u_kp / 8.5, 0.0, 0.80);
         float alpha   = 0.032 * erosion;
         gl_FragColor  = vec4(0.25, 0.80, 1.0, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const plasmaUni = { u_kp: { value: 0.0 } };
@@ -2287,6 +2606,7 @@ const hcsVS = /* glsl */`
     uniform float u_time;
     varying float vR;
     varying float vPhi;
+    varying vec3  vWorld;
     void main() {
         float r   = length(position.xz);
         float phi = atan(position.z, position.x);   // azimuthal angle in XZ plane
@@ -2295,15 +2615,17 @@ const hcsVS = /* glsl */`
         float yHCS = 0.28 * pow(r / 1.90, 0.82) * sin(phi - 0.025 * u_time + 0.35);
         vR   = r;
         vPhi = phi;
-        gl_Position = projectionMatrix * modelViewMatrix
-                    * vec4(position.x, yHCS, position.z, 1.0);
+        vec4 warped = vec4(position.x, yHCS, position.z, 1.0);
+        vWorld = (modelMatrix * warped).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * warped;
     }
 `;
-const hcsFS = /* glsl */`
+const hcsFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
     uniform float u_bt_norm;    // total IMF Bt normalised [0,1] from DSCOVR/ACE
     varying float vR;
     varying float vPhi;
+    varying vec3  vWorld;
     void main() {
         // Radial intensity: brighter near sun, fades at outer boundary
         float rFade = 1.0 - smoothstep(8.0, 15.8, vR);
@@ -2316,7 +2638,35 @@ const hcsFS = /* glsl */`
         vec3 col    = mix(inCol, outCol, smoothstep(-0.5, 0.5, sector));
         float bright = 0.40 + u_bt_norm * 0.60;
         float alpha  = rFade * bright * 0.30;
+
+        // ── The sheet may not paint over the photosphere ──────────────────
+        // The geometry starts at r = 1.9, safely outside the drawn Sun, but
+        // the part of it BETWEEN the camera and the Sun still projects onto
+        // the disc — and being additive with depthWrite off, it passes the
+        // depth test and lands on top. At Sun View that put a broad bright
+        // wedge and a hard horizontal seam across the star: measured, it
+        // alone took the disc from 0 % clipped to 21 % quiet and 47 % under
+        // X-class, and collapsed the disc's luminance sigma from 3.60 to
+        // 0.92 (SOLAR_SYSTEM_VISUAL_REVIEW.md S1). Nobody saw it before
+        // because the disc underneath was clipped to white anyway.
+        //
+        // It is also simply not what the sheet looks like: the current sheet
+        // is optically thin and some ten orders of magnitude fainter than
+        // the photosphere, so in front of the disc it is invisible, not
+        // translucent. Fade it out where its own line of sight passes
+        // through the disc AND it is on the near side.
+        vec3  ro    = cameraPosition;
+        vec3  rd    = normalize(vWorld - ro);
+        float tNear = dot(-ro, rd);                       // closest approach to the Sun
+        float dPerp = length(ro + rd * tNear);            // impact parameter of this ray
+        float front = step(dot(vWorld - ro, rd), tNear);  // 1 = nearer than the Sun's centre
+        float offDisc = smoothstep(${SUN_R} * 0.97, ${SUN_R} * 1.30, dPerp);
+        alpha *= mix(1.0, offDisc, front);
+
         gl_FragColor = vec4(col, alpha);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 const hcsUniforms = {
@@ -2427,11 +2777,17 @@ function buildCoronalLoops(ars, sunRotY) {
         const apex  = fp1.clone().add(fp2).normalize().multiplyScalar(1.53 + h);
         const curve = new THREE.CatmullRomCurve3([fp1, apex, fp2], false, 'catmullrom', 0.5);
         const tube  = new THREE.TubeGeometry(curve, 20, 0.004, 4, false);
+        // 0.18 -> 0.30. These are the quiet-sun loops, and under the old
+        // corona they were a few hairlines against a solid orange plate — the
+        // page's modelled physics, drawn as if it were the decoration
+        // (SOLAR_SYSTEM_VISUAL_REVIEW.md S3). The integrated corona above is
+        // now much dimmer here than the flat plate was, so this lift is what
+        // the loops needed rather than a fight against it.
         const mat   = new THREE.MeshBasicMaterial({
-            color: 0x5588ee, transparent: true, opacity: 0.18,
+            color: 0x5588ee, transparent: true, opacity: 0.30,
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
-        mat.userData.baseOpacity = 0.18;
+        mat.userData.baseOpacity = 0.30;
         const mesh  = new THREE.Mesh(tube, mat);
         sunFrame.add(mesh);
         coronalLoopMeshes.push(mesh);
@@ -2537,7 +2893,7 @@ const rainVS = /* glsl */`
 //
 // Radial profile: tight Gaussian core (optically thick blob body) +
 // broad soft halo (transition region sheath, optically thin).
-const rainFS = /* glsl */`
+const rainFS = /* glsl */`${TONE_DECODE_GLSL}
     varying float vTemp;
     varying float vActive;
     void main() {
@@ -2560,6 +2916,9 @@ const rainFS = /* glsl */`
             : mix(warmCol, hotCol,  (vTemp - 0.5) * 2.0);
 
         gl_FragColor = vec4(col, core + halo);
+        gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
     }
 `;
 
@@ -2716,10 +3075,10 @@ function buildProminences(ars, sunRotY) {
         // Outer coronal sheath: hot blue cavity surrounding the flux rope
         const envGeo = new THREE.TubeGeometry(curve, 44, 0.032, 7, false);
         const envMat = new THREE.MeshBasicMaterial({
-            color: 0x3366dd, transparent: true, opacity: 0.20,
+            color: 0x3366dd, transparent: true, opacity: 0.32,
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
-        envMat.userData.baseOpacity = 0.20;
+        envMat.userData.baseOpacity = 0.32;   // S3: was 0.20, lost inside the old corona plate
 
         // Dense H-alpha core: cool, draped plasma
         const coreGeo = new THREE.TubeGeometry(curve, 44, 0.013, 6, false);
@@ -3469,6 +3828,31 @@ window.__solarFlare = {
     },
 };
 
+// Colour-pipeline hook (tests/solar-system-tone.spec.js). Every custom shader
+// on this page writes gl_FragColor directly, so none of them saw
+// renderer.toneMapping until the S1 fix; the gate that stops that regressing
+// has to measure real framebuffer pixels, and to do that it needs to know
+// exactly which ones are the Sun's disc rather than the corona shells around
+// it. `discPx` projects the photosphere's own radius through the live camera.
+window.__solarRender = {
+    renderer, camera, sunMesh,
+    /** The drawn photosphere in CSS pixels of the canvas: { cx, cy, r, w, h }. */
+    discPx() {
+        const el = renderer.domElement;
+        const w = el.clientWidth, h = el.clientHeight;
+        camera.updateMatrixWorld();
+        // Offset along the camera's RIGHT vector so the limb point is exactly
+        // perpendicular to the view axis whatever the framing.
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+        const c = sunMesh.position.clone().project(camera);
+        const e = sunMesh.position.clone().addScaledVector(right, SUN_R).project(camera);
+        const cx = (c.x * 0.5 + 0.5) * w, cy = (-c.y * 0.5 + 0.5) * h;
+        const ex = (e.x * 0.5 + 0.5) * w, ey = (-e.y * 0.5 + 0.5) * h;
+        return { cx, cy, r: Math.hypot(ex - cx, ey - cy), w, h };
+    },
+    get flareStr() { return sunUniforms.u_flare_str.value; },
+};
+
 let _prevFrameMs = performance.now();
 function animate() {
     requestAnimationFrame(animate);
@@ -3601,8 +3985,13 @@ function animate() {
 
     // Coronal magnetic structure animation
     updateCoronalLoops(t);
-    updateCoronalRain(sunUniforms.u_flare_str.value);
-    updateProminences(t, sunUniforms.u_flare_str.value);
+    // Both of these take the flare as an ENERGY INPUT, so they take the
+    // excess over background: at A-class quiet the old level (0.17) made
+    // coronal rain ~7x more likely than the loops' own stored-energy floor,
+    // so an ordinary day already rained like a moderate flare.
+    const flareX = flareExcess(sunUniforms.u_flare_str.value);
+    updateCoronalRain(flareX);
+    updateProminences(t, flareX);
 
     // ── Near-Earth objects ────────────────────────────────────────────────────
     // Earth's TRUE position (VSOP87D, ecliptic of date) for the flyby geometry;
