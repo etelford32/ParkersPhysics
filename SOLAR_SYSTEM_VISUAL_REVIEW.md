@@ -2,8 +2,9 @@
 
 **Page:** `solar-system.html` (4008 lines) + `js/neo-*.js`, `js/flare-*.js`
 **Reviewed:** 2026-09-14, at `8e72cf8` (flare geometry kernel) on a software rasteriser
-**Status:** review complete. One finding — **L2**, the CME — is now implemented (see §3.2);
-everything else is still the plan.
+**Status:** review complete. Four findings are now implemented — **L2**, the CME
+(see §3.2), **S1**, the colour pipeline (§1.1), **S2**, the flare response
+(§1.2), and **S3**, the corona (§1.3) — everything else is still the plan.
 
 > **Scope note.** This is a review of the *visuals*, in three areas the author
 > named: the Sun's animation, near-Earth objects, and flare propagation + NEOs
@@ -92,20 +93,81 @@ moved the flare-state σ from 0.00 to 0.10 and left the disc 100 % clipped,
 because the input is so far above the curve's working range that ACES cannot
 recover it. **Exposure and curve have to move together.**
 
-**Plan — S1.**
+**Plan — S1. ✅ IMPLEMENTED 2026-09-15.** Measured after, same method
+(brightest 8 000 disc pixels, Sun View, panel closed, 1400 × 900):
+
+| state | disc RGB | luminance σ | R,G at 255 |
+|---|---|---|---|
+| quiet | (247, 212, 193) | **4.91** | **0.7 %** |
+| X2.8 flare | (252, 223, 217) | **6.23** | **1.4 %** |
+
+Gated by `tests/solar-system-tone.spec.js`, which was verified to FAIL on the
+pre-fix tree. Four things were needed, not the three planned — see the notes
+under each step.
+
 1. Add `#include <tonemapping_fragment>` + `#include <colorspace_fragment>` to
    every custom fragment shader on the page, in one commit, so the page stops
    having two colour pipelines.
+   **Done — and there were SIXTEEN, not the 15 counted above: `js/jupiter-shader.js`
+   was missed, and it is shared with `jupiter-system.html`, which declares the
+   same ACES curve and had the same bypass.**
+
+   **1b. THE CHUNKS ALONE MAKE IT WORSE, and this is the step the plan missed.**
+   Both chunks assume the value handed to them is LINEAR RADIANCE. The colour
+   literals in these shaders are not — `vec3(1.0, 0.62, 0.12)` is an sRGB
+   colour picked by eye, exactly like the hex passed to a `MeshBasicMaterial`,
+   and three.js decodes THOSE for you (ColorManagement, default-on since r152)
+   but cannot reach a literal inside a shader. Encoding an encoded value lifts
+   dark channels far more than bright ones (0.12 → 0.43 while 1.0 → 0.93), so
+   the corona, the solar-wind disc and every planet went pale khaki. Captured
+   and compared before/after at four framings. `js/tone-decode.js` is the
+   inverse transfer function; it is applied in all 15 colour-pick shaders and
+   deliberately NOT in `sunFS`, whose output is genuine HDR emission.
 2. In the same commit, bring `sunFS`'s emission into the curve's range: the
    `× 1.80` gain and the additive term weights need re-fitting against a target
    of "quiet disc centre lands near 0.8 in linear, limb near 0.45", not against
    what looks right on a clipped display. Sun.html solved the same problem with
    a real HDR chain (`js/sun-post.js`); the orrery does not need the mip-chain
    bloom, but it does need to stop handing the framebuffer values above 5.
+   **Done — `SUN_EXPOSURE = 0.444` (1.80 × 0.444 = 0.80 at quiet disc centre),
+   fitted offline against three's own ACES implementation and then confirmed in
+   the browser: the disc measures 222 at centre → 207 at 0.98 R, 0 % clipped in
+   BOTH states when rendered alone.**
+
+   **2b. THE DISC WAS NEVER THE ONLY THING PAINTING THE DISC.** With `sunFS`
+   fixed the composite was still 100 % clipped, because the additive layers
+   stacked on top were fitted against the same white cut-out. Isolated by
+   toggling each layer group and re-measuring, the culprits were exactly two:
+
+   - **The heliospheric current sheet.** Its geometry starts at r = 1.9, safely
+     outside the drawn Sun, but the part BETWEEN the camera and the Sun still
+     projects onto the disc, and being additive with `depthWrite: false` it
+     passes the depth test and lands on top — a broad bright wedge and a hard
+     horizontal seam across the star. Alone it took the disc from 0 % clipped
+     to **21 % quiet / 47 % under X-class** and collapsed σ from 3.60 to 0.92.
+     `hcsFS` now fades where its own line of sight passes through the disc on
+     the near side, which is also what an optically thin sheet ten orders
+     fainter than the photosphere actually looks like in front of it.
+   - **The chromosphere shell's on-disk terms** (`diskNet`, `flareRib`): +26
+     counts of red across the whole star at quiet, 31 % clipped under X-class.
+     `DISK_VEIL = 0.42` re-fits those two only — the limb-brightened terms
+     (`hAlpha`, `caK`) and the `fibLine` texture keep their weight, because the
+     shell is limb-brightened by construction and `fibLine` contributes
+     STRUCTURE rather than a wash.
+
 3. Gate it: extend `tests/solar-system-flare.spec.js`, or add a sibling spec,
    with the measurement above — **disc luminance σ > 2 in quiet and > 4 under
    X-class, and R,G clipped on under 20 % of disc pixels**. That test fails today
    and is what stops the fix from being undone.
+   **Done — `tests/solar-system-tone.spec.js`, those exact three thresholds,
+   plus a structural half that asserts all 16 shaders carry both chunks so the
+   NEXT one cannot quietly land on the old pipeline. It reads real framebuffer
+   pixels (a WebGLRenderTarget would not do: three DISABLES tone mapping when
+   the target is not null, which would measure the bug as the fix).**
+
+**What S1 did NOT fix.** The disc under X-class still reads as a global
+brightening rather than an event — that is **S2** below, now visible for the
+first time — and the corona is still the two hard-edged shells of **S3**.
 
 ### 1.2 The flare terms saturate at C-class, so the page never shows a sunspot — S2
 
@@ -144,7 +206,32 @@ is **global**. A real X-class flare brightens ~10⁻⁴ of the visible disc in w
 light and is invisible in the continuum outside the ribbons. Here it reheats the
 entire photosphere to 8 956 K.
 
-**Plan — S2.** Make every flare term spatially weighted by the active region it
+**Plan — S2. ✅ IMPLEMENTED 2026-09-15.** Measured after, four GOES classes with
+four regions planted 90° apart in Stonyhurst so one is always well inside the
+drawn disc. "Spot depth" is the quiet photosphere's median minus the 1st
+percentile inside the region — how dark the umbra is against its surroundings:
+
+| class | spot depth, before | spot depth, after | far-field B/R, before | after |
+|---|---|---|---|---|
+| A1 (background) | 2.1 | **67.3** | 0.7998 | 0.8103 |
+| C1 (a normal day) | **−11.0** | **46.2** | 0.8450 | 0.7939 |
+| M1 | −6.9 | **34.4** | 0.8489 | 0.8313 |
+| X2.8 | −11.8 | **30.4** | 0.8933 | 0.8018 |
+
+A NEGATIVE depth means the darkest pixel inside a region was BRIGHTER than the
+photosphere around it — from C-class up there was no sunspot at all, there was
+an inverted one. Gated by `tests/solar-system-flare-response.spec.js`, verified
+to fail on the pre-fix tree.
+
+**COLOUR IS THE INSTRUMENT FOR LOCALITY, NOT BRIGHTNESS** — that is the one
+measurement lesson here. The bug reheats the photosphere from 5 778 K to
+~8 956 K, and after the ACES shoulder S1 installed, that enormous radiance
+change is only ~10 counts of luminance while the blue-to-red ratio moves
+freely and monotonically (0.7998 → 0.8933 across the four classes). The
+luminance metric could not separate the fix from the bug; the colour one
+separates them by 11×.
+
+Make every flare term spatially weighted by the active region it
 belongs to, and re-scale the thresholds against the real `xray_intensity` range:
 
 - `arDark` loses its `u_flare_str` factor completely — **a sunspot does not
@@ -160,6 +247,35 @@ belongs to, and re-scale the thresholds against the real `xray_intensity` range:
 **This is the fix that makes an X-class flare look like an event instead of a
 lighting change**, and it composes with S1: once the disc is not clipped, a
 *locally* brightened ribbon pair actually reads.
+
+**Four things the plan did not anticipate, each found by measuring:**
+
+1. **"Every flare term" meant more terms than the four bullets.** With the
+   named ones fixed the far field still whitened, because the chromospheric
+   network boost, the coronal-loop shimmer, the transition-region fringe and
+   the corona rim glow were all global too. They are now weighted by `arNear`.
+   The rim was the last one and the largest: it is blue-rich and, being
+   limb-weighted, still covers much of the disc.
+2. **The arcade re-erased the spot.** Brightening on the PIL is right — that is
+   where ribbons are — but this shader runs the PIL through the region centre,
+   so the channel and the spot core are co-located and the ribbons landed on
+   the umbra (depth −1.5 at C1). `arBrite` carries `(1.0 - core)`.
+3. **The accents painted over the umbra from above.** `col +=` terms do not
+   know a spot is there. A sunspot umbra is optically thick, so every AR-local
+   flare accent is multiplied by `umbraLit`; without it the darkest pixel in a
+   region still ran 137 → 198 counts from A-class to X2.8.
+4. **The chromosphere had no idea where the regions were.** Flare ribbons are
+   chromospheric, so that shell is the right place to draw them — but it was
+   lighting every umbra on the disc from in front. `AR_FIELD_GLSL` is now one
+   shared block: both shaders size regions with the same `arRadius`, so the
+   ribbons cannot drift away from the spots.
+
+**A note for whoever writes the next gate.** S2 broke *two assertions in S1's
+own spec*, and both were S1's fault rather than S2's: the regions were planted
+at raw Carrington longitudes (so whether any was visible depended on the date —
+harmless while an X-class lit the whole disc, flaky the moment it did not), and
+it asserted `flare σ > quiet σ`, which is simply not a property a LOCAL flare
+has. Both are fixed and documented in place.
 
 ### 1.3 The corona is two hard-edged spheres — S3
 
@@ -187,7 +303,47 @@ Two further consequences:
   screenshots show the arcade as a few grey hairlines against a solid orange
   plate.
 
-**Plan — S3.** Replace the two shells with **one** radially-integrated corona:
+**Plan — S3. ✅ IMPLEMENTED 2026-09-15.** Gated by
+`tests/solar-system-corona.spec.js`, verified to fail on the pre-fix tree.
+
+**THE SHELLS WERE WORSE THAN THIS FINDING SAYS, and the reason is worth
+keeping.** `pow(rim, n)` does not peak at the sphere's silhouette on a
+BACK-SIDE sphere — it does not vary at all. The rendered faces are the far
+hemisphere, whose outward normals point away from the camera, so
+`dot(normal, viewDir)` is negative, `max(…, 0.0)` clamps it to zero, and `rim`
+is identically 1 over every drawn fragment. Both shells were flat plates with
+hard rims. The radial profile at Sun View, in units of the drawn disc radius,
+with everything but the Sun and its shells hidden:
+
+| radius | before | after |
+|---|---|---|
+| 1.15 R | — | 51.7 |
+| 1.25 R | 132.5 | 43.5 |
+| 1.35 R | **35.5** ← a 73 % cliff in one step | 36.8 |
+| 1.35–1.85 R | **35.52 EXACTLY, five annuli — a plate** | 31.1 → 15.4, falling |
+| 1.95 R | 12.6 | 12.7 |
+| 2.05 R | **0.0** ← a second cliff, to nothing | 10.4 |
+| 2.35 → 3.05 R | **0.2 → 7.8, RISING** — the second shell's own rim | 5.4 → 1.0, falling |
+| 3.25 R | 3.0 | 0.2 |
+
+A bright annulus, a cliff, a flat plate, a cliff to nothing, a gap, and then a
+second ring further out. After: one analytic shell falling monotonically to the
+8-bit floor with no step anywhere.
+
+**THE PROFILE'S END IS THE DENSITY MODEL, NOT THE MESH** — which is the
+property this finding is really about. Verified by moving the mesh from 3.33 to
+3.87 R☉ and re-measuring: the profile did not move by a single count. The gate
+asserts it against the shell's LIVE radius, so shrinking the mesh to fit the
+glow fails there rather than looking tidy.
+
+**Two measurement notes for whoever edits the gate.** The sample is a WEDGE
+about +x, not an annulus: an element screenshot includes whatever DOM is
+painted over the canvas, and past ~2.7 R the bottom overlay alone turned a
+falling profile into a rising one (21 counts in the south sector against 1 in
+the east). And the drawn corona is spherically symmetric by construction, so
+one clean wedge is the whole story.
+
+Replace the two shells with **one** radially-integrated corona:
 
 - a single back-side sphere at a generous radius with a fragment shader that
   integrates a `r^-2.5`-ish density along the view ray and **fades to zero well
@@ -202,6 +358,25 @@ The visual reference is `sun.html`'s volumetric corona
 (`js/corona-volumetric.js`), **but do not import it** — that is a full march on
 camera layer 1 with an accumulation buffer, and the orrery draws the Sun at
 30 px for most of a session. A single integrated shell is the right rung here.
+
+**How it is drawn, and the one approximation in it.** The column has a CLOSED
+FORM, so there is no march at all: for a density n(r) ∝ r^−p and a ray of
+impact parameter b, ∫(b² + z²)^(−p/2) dz = b^(1−p)·√π·Γ((p−1)/2)/Γ(p/2), so at
+p = 2.5 the column falls as b^−1.5. The density carries an exponential outer
+cutoff so the profile has a real boundary rather than a clipped one, and that
+cutoff is evaluated at the ray's closest approach rather than integrated along
+it — for a power law this steep the column is concentrated within about one
+impact parameter of closest approach (the integrand is at half its peak by
+z = 0.8 b), so holding a slowly varying factor at r = b is a good approximation
+and a cheap one. It is an approximation, not an identity, and the shader says so.
+
+**On the `renderOrder` bullet.** It is set, but it is NOT what fixed anything,
+and the plan was wrong to expect it to: these layers are additive with
+`depthWrite: false`, and `dst += src·a` is commutative, so the composite is
+order-independent. What actually stopped the corona drowning the modelled
+physics is the falloff plus the opacity lift (quiet-sun loops 0.18 → 0.30,
+prominence envelopes 0.20 → 0.32). The declaration stays so the intent survives
+a future move to a non-additive blend, where it would matter.
 
 ### 1.4 Smaller Sun findings
 
@@ -443,9 +618,9 @@ easier to judge.
 | # | Work | Why first |
 |---|---|---|
 | 1 | **U1** (backdrop gate) | One line. Until it is fixed, every visual judgement on this page is made through a 45 % grey filter — including the next four steps'. |
-| 2 | **S1** (tone mapping + exposure, all shaders, one commit) + its gate | Nothing else in §1 can be evaluated while the disc is 100 % clipped. Highest leverage on the page. |
-| 3 | **S2** (localise the flare terms) | Depends on S1 to be visible at all. Turns an X-class from a lighting change into an event, and gives the page its sunspots back on ordinary C-class days. |
-| 4 | **S3** (one integrated corona) + **S5** (wire in the existing ring/ribbon modules) | The bullseye is the most-seen defect; S5 is nearly free once the corona stops drowning it. |
+| 2 | ✅ **S1** (tone mapping + exposure, all shaders, one commit) + its gate — **DONE 2026-09-15** | Nothing else in §1 can be evaluated while the disc is 100 % clipped. Highest leverage on the page. |
+| 3 | ✅ **S2** (localise the flare terms) — **DONE 2026-09-15** | Depends on S1 to be visible at all. Turns an X-class from a lighting change into an event, and gives the page its sunspots back on ordinary C-class days. |
+| 4 | ✅ **S3** (one integrated corona) — **DONE 2026-09-15** — + **S5** (wire in the existing ring/ribbon modules) | The bullseye is the most-seen defect; S5 is nearly free once the corona stops drowning it. |
 | 5 | **L1** (layer panel + three presets) | Architecture the rest hangs off; also the honest fix for "too much is on at once". |
 | 6 | **L2** (CME as a propagating front on the sim clock) + its gate | The largest single gain in what the page *says*, and the one place the picture currently contradicts the HUD. |
 | 7 | **N1 · N2 · N3** (palette affordance, label declutter, selection framing) | Polish on an already-good layer. |
