@@ -39,6 +39,12 @@ const UPSTREAMS = [
     // sun.html + the Stage / globe / heliosphere live Suns), so this row IS
     // authoritative. Smallest frame NASA serves, to keep the probe cheap.
     { source: 'sdo-latest',   url: 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg', edge_authoritative: true },
+    // LMSAL HEK — proxied by /api/hek/coronal-holes and /api/hek/filaments
+    // (the coronal-hole cells on the space-weather globe, and the COOL-MATERIAL
+    // channel of sun.html's volumetric corona). Authoritative for both. The
+    // probe asks for a single row over a one-hour window so it stays cheap;
+    // HEK is regularly >8 s cold, hence the generous timeouts on both routes.
+    { source: 'lmsal-hek',    url: 'https://www.lmsal.com/hek/her?cmd=search&type=column&event_type=ch&event_starttime=2026-01-01T00:00:00&event_endtime=2026-01-01T01:00:00&result_limit=1&cosec=2', edge_authoritative: true },
     // Mars upstreams. Both are proxied through the edge (/api/mars/route and
     // /api/mars/weather), so these rows ARE authoritative. mars.nasa.gov has
     // been intermittent since 2024 — a `down` here is the expected steady
