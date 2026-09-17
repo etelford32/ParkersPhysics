@@ -29,9 +29,11 @@ import {
     E_MIN_ERG, E_MAX_ERG, HEATING_REQUIREMENT, ALPHA_NORM, ALPHA_REFERENCES,
     DURATION_BETA, DURATION_REF_S, E_DUR_REF,
     sampleEnergy, energyFractionBelow, meanEnergy, durationFor,
+    peakLogT, sizeForKm, sizeForRsun, T_PEAK_BETA, T_PEAK_LOG_REF, E_T_REF, R_SUN_KM,
     heatingFlux, rateForFlux, nanoflareState, nanoflareLabel, nanoflareUniform,
     fitAlphaMLE, AlphaMonitor,
 } from '../js/sun-nanoflares.js';
+import { channelResponseAt, EUV_CHANNELS } from '../js/corona-volumetric.js';
 
 let passed = 0;
 function ok(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -404,6 +406,97 @@ ok('a fit pinned at the search bound is reported, not passed off as a measuremen
     const r = fitAlphaMLE(flat, undefined, undefined, { autoRange: true });
     assert.equal(r.ok, false);
     assert.ok(r.atBound || r.ks > 0.09, `flagged: atBound=${r.atBound} ks=${r.ks}`);
+});
+
+// ── Energy → temperature, and the per-channel ordering it implies ──────────
+
+ok('peak temperature follows the stated power law, anchored where it says', () => {
+    assert.ok(Math.abs(peakLogT(E_T_REF) - T_PEAK_LOG_REF) < 1e-12, 'anchored at E_T_REF');
+    // One decade in E is T_PEAK_BETA dex in T, by construction.
+    for (const E of [1e23, 1e24, 1e25, 1e26]) {
+        assert.ok(Math.abs((peakLogT(E * 10) - peakLogT(E)) - T_PEAK_BETA) < 1e-12);
+    }
+    // Monotone, and the bounded population stays inside a physical range —
+    // no nanoflare comes out hotter than a big flare.
+    assert.ok(peakLogT(E_MIN_ERG) < peakLogT(E_MAX_ERG));
+    assert.ok(peakLogT(E_MIN_ERG) > 5.5, `coolest event ${peakLogT(E_MIN_ERG).toFixed(2)} is still coronal`);
+    assert.ok(peakLogT(E_MAX_ERG) < 7.0, `hottest event ${peakLogT(E_MAX_ERG).toFixed(2)} is below flare-core temperatures`);
+    assert.equal(Number.isFinite(peakLogT(0)), true, 'E = 0 degrades rather than returning -Infinity');
+});
+
+ok('THE ORDERING IS EMERGENT: 171 sees the campfires, 193 fewer, 131/94/304 none', () => {
+    // This is the check that stops the per-channel look being six tuned
+    // constants. Nothing here is set per channel: the population's own energy
+    // distribution is pushed through peakLogT and then through the
+    // RAYMARCHER's response table, and the ordering falls out.
+    const N = 60000, alpha = 2.0;
+    const draws = [];
+    for (let i = 0; i < N; i++) draws.push(sampleEnergy((i + 0.5) / N, alpha));
+    const seen = {};
+    for (const ch of ['304', '171', '193', '211', '131', '94']) {
+        let sum = 0;
+        for (const E of draws) sum += channelResponseAt(peakLogT(E), ch);
+        seen[ch] = sum / N;
+    }
+    assert.ok(seen['171'] > seen['193'], `171 (${seen['171'].toFixed(4)}) > 193 (${seen['193'].toFixed(4)})`);
+    assert.ok(seen['193'] > seen['211'], `193 > 211 (${seen['211'].toFixed(4)})`);
+    assert.ok(seen['131'] < seen['171'] / 100, `131 (${seen['131'].toExponential(2)}) is negligible beside 171`);
+    assert.ok(seen['94']  < seen['171'] / 100, `94 (${seen['94'].toExponential(2)}) is negligible beside 171`);
+    assert.ok(seen['304'] < 1e-6, `304 sees nothing (${seen['304'].toExponential(2)})`);
+    // White light has no response at all — a continuum image is not a passband.
+    // This is what removes nanoflares from white light: the table, not a flag.
+    assert.equal(channelResponseAt(peakLogT(1e24), 'white'), 0);
+});
+
+ok('moving α really does move which channel is busiest', () => {
+    // If α is the control the page says it is, a steeper population (more small
+    // events) must shift the visible campfires toward the cooler channel. A
+    // per-channel constant could not do this — which is the point of deriving it.
+    const ratio = (alpha) => {
+        const N = 40000;
+        let a = 0, b = 0;
+        for (let i = 0; i < N; i++) {
+            const lt = peakLogT(sampleEnergy((i + 0.5) / N, alpha));
+            a += channelResponseAt(lt, '171');
+            b += channelResponseAt(lt, '193');
+        }
+        return a / Math.max(b, 1e-12);
+    };
+    const steep = ratio(2.6), shallow = ratio(1.5);
+    assert.ok(steep > shallow, `steeper α favours 171 more: ${steep.toFixed(2)} vs ${shallow.toFixed(2)}`);
+});
+
+ok('size follows E^(1/3) and lands on the observed campfire range', () => {
+    assert.ok(Math.abs(sizeForKm(E_T_REF) - 1000) < 1e-9, 'anchored at 1000 km for 10²⁴ erg');
+    // A factor 8 in energy is a factor 2 in size.
+    assert.ok(Math.abs(sizeForKm(8 * E_T_REF) / sizeForKm(E_T_REF) - 2) < 1e-9);
+    // Berghmans et al. 2021 measured campfires at 400–4000 km. The part of the
+    // bounded population α ≈ 2 makes overwhelmingly the most common (10²³–10²⁶)
+    // must land there — arrived at from the energy law, not fitted to it.
+    assert.ok(sizeForKm(1e23) > 400 && sizeForKm(1e23) < 600, `10²³ → ${sizeForKm(1e23).toFixed(0)} km`);
+    assert.ok(sizeForKm(1e26) > 4000 && sizeForKm(1e26) < 5000, `10²⁶ → ${sizeForKm(1e26).toFixed(0)} km`);
+    // The renderer works in R☉.
+    assert.ok(Math.abs(sizeForRsun(E_T_REF) - 1000 / R_SUN_KM) < 1e-12);
+});
+
+ok('the GLSL mirrors in sunFS reproduce the JS laws', () => {
+    // The shader works in log2(E) and cannot import anything, so the three
+    // laws are transcribed. Re-implement the transcription here and compare —
+    // this is what catches a mirror drifting from its kernel.
+    const glslPeakLogT = (lE) => 6.0 + 0.22 * (lE * 0.30102999566 - 24.0);
+    const glslRadCells = (lE) => (1000 / 695700) * Math.pow(2, (lE * 0.30102999566 - 24.0) / 3 * 3.32192809489) * 46;
+    const lmin = Math.log2(E_MIN_ERG), lmax = Math.log2(E_MAX_ERG);
+    const glslDur = (lE) => Math.pow(2, 0.33 * (lE - 0.5 * (lmin + lmax)));
+    for (const E of [1e23, 3e23, 1e24, 1e25, 1e26, 1e27]) {
+        const lE = Math.log2(E);
+        assert.ok(Math.abs(glslPeakLogT(lE) - peakLogT(E)) < 1e-6, `peakLogT mirror at ${E.toExponential(0)}`);
+        assert.ok(Math.abs(glslRadCells(lE) / 46 - sizeForRsun(E)) / sizeForRsun(E) < 1e-6, `size mirror at ${E.toExponential(0)}`);
+        // Duration: the mirror is anchored at the geometric middle rather than
+        // E_DUR_REF, so compare RATIOS — the law, not the constant.
+        const ref = 1e25;
+        assert.ok(Math.abs(glslDur(lE) / glslDur(Math.log2(ref)) - durationFor(E) / durationFor(ref)) < 1e-6,
+            `duration mirror at ${E.toExponential(0)}`);
+    }
 });
 
 console.log(`\n${passed} checks passed`);

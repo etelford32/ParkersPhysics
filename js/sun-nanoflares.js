@@ -91,6 +91,64 @@ export const DURATION_BETA = 0.33;      // Aschwanden & Parnell 2002, order-of
 export const DURATION_REF_S = 60;       // a 10²⁴ erg event lasts ~1 min
 export const E_DUR_REF = 1e24;
 
+// ── Energy → peak temperature, and why it is the whole per-channel story ───
+//
+// A nanoflare is a CORONAL energy release. It is invisible in the white-light
+// photospheric continuum — which is why the page no longer draws one there —
+// and in the EUV it is visible exactly as much as the channel's temperature
+// response overlaps the event's own peak temperature. So the only honest way
+// to decide "does 171 see this event, does 131" is to give the event a
+// temperature and ask the raymarcher's OWN response table
+// (js/corona-volumetric.js, `channelResponseAt`). Nothing is tuned per
+// channel; the per-channel visibility is derived.
+//
+// The scaling. RTV (Rosner, Tucker & Vaiana 1978) gives T_max ∝ (E_H L²)^{1/3}
+// for a heated loop, so the exponent on TOTAL energy depends on how loop
+// length scales with event size: 1/3 at fixed length, shallower once bigger
+// events sit on bigger loops. Hydrodynamic nanoflare modelling (Aschwanden &
+// Parnell 2002) puts nanoflare peak temperatures around 1 MK across most of
+// the range, i.e. shallow. T_PEAK_BETA = 0.22 is the middle of that family and
+// is an ORDER-OF-MAGNITUDE anchor, not a fit — it is quoted as such.
+//
+// What it implies, which is the part worth checking against AIA movies:
+//   10²³ erg → log T 5.78   the ubiquitous small events — 171's peak (5.85)
+//   10²⁴ erg → log T 6.00   still 171/193
+//   10²⁵ erg → log T 6.22   193 (6.20), 211 (6.30)
+//   10²⁷ erg → log T 6.66   between 211 and 94 (6.85) — and 10⁻⁴ as common
+// so 171 is full of campfires, 193 has fewer, 94 and 131 (7.00) have almost
+// none, and 304 (4.70) none at all. That ordering is EMERGENT from the
+// population's own energy distribution; it is not a per-channel constant, and
+// if the α control moves the population it moves the ordering with it.
+export const T_PEAK_BETA = 0.22;
+export const T_PEAK_LOG_REF = 6.0;      // log10 T/K at E_T_REF
+export const E_T_REF = 1e24;
+
+/** Peak temperature of an event, as log10(T/K). See the block above. */
+export function peakLogT(energyErg, beta = T_PEAK_BETA) {
+    const E = Math.max(energyErg, 1);
+    return T_PEAK_LOG_REF + beta * (Math.log10(E) - Math.log10(E_T_REF));
+}
+
+/**
+ * Event size (characteristic diameter, km). Campfires are observed at
+ * 400–4000 km (Berghmans et al. 2021, Solar Orbiter/EUI). Energy at roughly
+ * fixed density and temperature scales with VOLUME, so L ∝ E^{1/3}; anchored
+ * so a 10²⁴ erg event is ~1000 km. The bounded population then spans
+ * 464 km (10²³) to 10 000 km (10²⁷), and the part of it α ≈ 2 makes
+ * overwhelmingly the most common — 10²³ to 10²⁶, i.e. 464–4600 km — is the
+ * observed campfire range. Arrived at from the energy law, not assumed.
+ */
+export const SIZE_REF_KM = 1000;
+export const SIZE_BETA = 1 / 3;
+export function sizeForKm(energyErg, beta = SIZE_BETA) {
+    return SIZE_REF_KM * Math.pow(Math.max(energyErg, 1) / E_T_REF, beta);
+}
+
+/** R☉ = 695 700 km — the unit the renderer works in. */
+export const R_SUN_KM = 695700;
+/** Event size as a fraction of R☉, which is what the shader needs. */
+export function sizeForRsun(energyErg) { return sizeForKm(energyErg) / R_SUN_KM; }
+
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 /**

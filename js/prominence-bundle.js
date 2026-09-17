@@ -172,9 +172,20 @@ void main() {
         }
         // HEDGEROW: blend the B (flat) direction toward outward — produces
         // the wall/curtain look where threads stack vertically.
-        vec3 flat = mix(dirB, outward, verticality);
+        //
+        // NOT NAMED 'flat'. In GLSL that word is an interpolation qualifier in
+        // ES 3.00 and RESERVED in ES 1.00, so declaring a vec3 by that name is
+        // a syntax error and this vertex shader never compiled — the whole
+        // bundle system has
+        // never drawn a single thread. It went unnoticed for as long as it did
+        // because the layer was behind ?debug=prominence, so no test and no
+        // visitor ever compiled it. (CLAUDE.md records the sibling scar: the
+        // smoke spec's noise filter once swallowed a broken coronaFS for a
+        // full run. A shader that is never exercised is a shader that is
+        // never checked.)
+        vec3 curtain = mix(dirB, outward, verticality);
         lateral = dirN * (aOffset.x * halfR)
-                + flat * (aOffset.y * halfR * (1.0 + 0.6 * verticality));
+                + curtain * (aOffset.y * halfR * (1.0 + 0.6 * verticality));
     }
 
     // Apex sag — cool plasma sags; EP class flips it to anti-sag (rising).

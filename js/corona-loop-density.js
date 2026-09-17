@@ -12,6 +12,7 @@
  *
  *     R = closed-line density   → lights the arcades as a DEM term
  *     G = open-line density     → suppresses emission (coronal holes)
+ *     B = COOL-MATERIAL density → filaments and prominences (below)
  *
  * — on a SHELL grid (longitude × latitude × stretched height), not a
  * Cartesian cube: the corona is a thin shell and the traced AR arcades peak
@@ -30,6 +31,29 @@
  * structure survives 8 bits. The shader SQUARES the read back to linear
  * density before using it. `sampleLoopDensity` is the JS mirror of the
  * shader read (encoded value) — the test pins the two agree.
+ *
+ * ── The cool-material channel (B) ───────────────────────────────────────
+ * Filaments and prominences are the same plasma: cool, dense material
+ * suspended in the corona, seen DARK against the disk in 171/193/211 (it
+ * absorbs) and BRIGHT off the limb in 304 (it emits). Carrying it as a
+ * density in the same volume gets both from one field, with real occlusion
+ * and parallax, instead of the analytic per-AR Gaussian the raymarcher used
+ * to invent — which could only ever sit beside an active region, and so had
+ * no quiescent polar-crown filaments at all.
+ *
+ * WHERE THE MATERIAL COMES FROM, AND WHY IT IS NOT THE ATLAS. Real prominence
+ * material collects in MAGNETIC DIPS, so the obvious source was a dip search
+ * over these same traced lines. Measured (rust-sunfield `examples/dip_scan.rs`,
+ * 2026-09-15): the atlas has **ZERO dips**, in every configuration tried. That
+ * is not a tracer bug — it is what a POTENTIAL field is. Dips deep enough to
+ * hold material against gravity need field-aligned currents, which is exactly
+ * why every prominence model is non-potential (Kuperus & Raadu 1974;
+ * Antiochos' sheared arcade). So the channel is filled from OBSERVATIONS:
+ * HEK filament/prominence detections (`js/hek-filaments.js`) become
+ * spine polylines, splatted here with a tube radius. `coolLines` is
+ * independent of the field atlas on purpose — one can be present without the
+ * other, and a page with no HEK answer simply has an empty B channel and falls
+ * back to the analytic filament, which is still live code.
  *
  * ── K and F corona ──────────────────────────────────────────────────────
  * Thomson-scattered K-corona brightness at impact parameter b (R☉) from the
@@ -99,12 +123,16 @@ export function rasterizeLoopDensity(atlas, opts = {}) {
     const open   = new Float32Array(nvox);
     const stats = { closed: 0, open: 0, stray: 0, splats: 0, lines: 0 };
     const idx = (il, ia, ih) => (ih * nlat + ia) * nlon + il;
-    if (!atlas || !atlas.lineCount || !atlas.positions) {
-        return { data: new Uint8Array(layout.width * layout.height * 4), layout, dims, rMax, stats, empty: true };
-    }
-    const n = atlas.samplesPerLine;
-    const lines = Math.min(atlas.lineCount, opts.maxLines ?? atlas.lineCount);
-    const w = 1 / n;
+    // NOTE the shape: a missing ATLAS must not skip the COOL channel. The two
+    // inputs are independent — HEK can answer when the field tracer has no
+    // active regions to trace, and the tracer can run on a day HEK is down —
+    // so the atlas loop is skipped on its own and the cool splat below still
+    // runs. (This used to be an early `return` and would have silently thrown
+    // away every filament on a spotless Sun.)
+    const hasAtlas = !!(atlas && atlas.lineCount && atlas.positions);
+    const n = hasAtlas ? atlas.samplesPerLine : 0;
+    const lines = hasAtlas ? Math.min(atlas.lineCount, opts.maxLines ?? atlas.lineCount) : 0;
+    const w = n ? 1 / n : 0;
     for (let l = 0; l < lines; l++) {
         const topo = atlas.meta ? atlas.meta[l * META_STRIDE] : TOPOLOGY.CLOSED;
         if (topo === TOPOLOGY.STRAY) { stats.stray++; continue; }
@@ -128,8 +156,32 @@ export function rasterizeLoopDensity(atlas, opts = {}) {
             }
         }
     }
+    // ── Cool material (B): HEK filament / prominence spines ───────────────
+    // Splatted as TUBES, not as bare polylines: a filament is ~5 000–10 000 km
+    // across, which at this grid is a couple of cells, and a zero-width line
+    // aliases into a dotted trail that reads as a row of blobs rather than a
+    // filament. The radius comes from the caller (SPINE_RADIUS_RSUN).
+    const cool = new Float32Array(nvox);
+    if (Array.isArray(opts.coolLines) && opts.coolLines.length) {
+        for (const line of opts.coolLines) {
+            const pts = line?.points;
+            if (!pts || pts.length < 2) continue;
+            const w = (line.weight ?? 1) / pts.length;
+            const radius = line.radius ?? 0.012;
+            for (const p of pts) splatTube(cool, p, radius, w, dims, rMax, idx);
+            stats.coolLines = (stats.coolLines || 0) + 1;
+        }
+    }
+
     const cNorm = percentile(closed, 0.99) || 1;
     const oNorm = percentile(open, 0.99) || 1;
+    // The cool channel is normalised at a HIGHER percentile than the field
+    // channels. A filament population is a handful of localised structures
+    // rather than a space-filling field, so the 99th percentile of the
+    // non-zero voxels sits inside a filament core and normalising there
+    // flattens every filament to the same density. The max is the honest
+    // reference for a sparse channel.
+    const kNorm = percentile(cool, 1.0) || 1;
     const data = new Uint8Array(layout.width * layout.height * 4);
     for (let ih = 0; ih < nh; ih++) for (let ia = 0; ia < nlat; ia++) for (let il = 0; il < nlon; il++) {
         const v = idx(il, ia, ih);
@@ -137,15 +189,59 @@ export function rasterizeLoopDensity(atlas, opts = {}) {
         const p = (py * layout.width + px) * 4;
         data[p]     = Math.min(255, Math.round(255 * Math.sqrt(closed[v] / cNorm)));
         data[p + 1] = Math.min(255, Math.round(255 * Math.sqrt(open[v] / oNorm)));
-        data[p + 2] = 0;
+        data[p + 2] = Math.min(255, Math.round(255 * Math.sqrt(cool[v] / kNorm)));
         data[p + 3] = 255;
     }
-    return { data, layout, dims, rMax, stats, empty: stats.lines === 0 };
+    return { data, layout, dims, rMax, stats, empty: stats.lines === 0 && !stats.coolLines };
+}
+
+/**
+ * Trilinear splat of a Gaussian tube cross-section around one spine sample.
+ * Walks the shell cells within `radius` of the point. Longitude wraps; latitude
+ * and height clamp, exactly as the line splat does.
+ */
+function splatTube(grid, p, radius, weight, dims, rMax, idx) {
+    const { nlon, nlat, nh } = dims;
+    const c = shellCoords(p, dims, rMax);
+    if (!c) return;
+    // Cell sizes in R☉ at this point, so the tube is round in SPACE rather
+    // than round in index space (the grid is 256×128×32 over very different
+    // physical extents — a symmetric index-space kernel would draw a filament
+    // as a wide flat smear near the poles).
+    const r = Math.hypot(p[0], p[1], p[2]);
+    const dLon = (2 * Math.PI * r) / nlon;
+    const dLat = (Math.PI * r) / nlat;
+    // Height spacing is √-stretched, so take the local derivative.
+    const hn = Math.sqrt(Math.max(r - 1, 0) / (rMax - 1));
+    const dH = Math.max(1e-4, 2 * Math.max(hn, 1 / nh) * (rMax - 1) / (nh - 1));
+    const spanL = Math.max(1, Math.ceil(radius / Math.max(dLon, 1e-6)));
+    const spanA = Math.max(1, Math.ceil(radius / Math.max(dLat, 1e-6)));
+    const spanH = Math.max(1, Math.ceil(radius / dH));
+    const [vl, va, vh] = c;
+    const l0 = Math.round(vl), a0 = Math.round(va), h0 = Math.round(vh);
+    const s2 = 2 * (radius * 0.5) * (radius * 0.5);      // σ = radius/2 ⇒ ~2σ at the edge
+    for (let dh = -spanH; dh <= spanH; dh++) {
+        const ih = h0 + dh;
+        if (ih < 0 || ih >= nh) continue;
+        for (let da = -spanA; da <= spanA; da++) {
+            const ia = a0 + da;
+            if (ia < 0 || ia >= nlat) continue;
+            for (let dl = -spanL; dl <= spanL; dl++) {
+                const il = ((l0 + dl) % nlon + nlon) % nlon;             // longitude wraps
+                const ex = (l0 + dl - vl) * dLon;
+                const ey = (ia - va) * dLat;
+                const ez = (ih - vh) * dH;
+                const g = Math.exp(-(ex * ex + ey * ey + ez * ez) / s2);
+                if (g < 1e-3) continue;
+                grid[idx(il, ia, ih)] += weight * g;
+            }
+        }
+    }
 }
 
 /**
  * JS mirror of the shader's read: trilinear over the slice atlas, returns the
- * ENCODED [√closed, √open] in 0..1 for a sun-local point (R☉).
+ * ENCODED [√closed, √open, √cool] in 0..1 for a sun-local point (R☉).
  */
 export function sampleLoopDensity(rast, p) {
     const { data, layout, dims, rMax } = rast;
@@ -160,8 +256,8 @@ export function sampleLoopDensity(rast, p) {
         const [px, py] = atlasPixel(il, ia, ih, layout);
         return data[(py * layout.width + px) * 4 + ch] / 255;
     };
-    const out = [0, 0];
-    for (let ch = 0; ch < 2; ch++) {
+    const out = [0, 0, 0];
+    for (let ch = 0; ch < 3; ch++) {
         let acc = 0;
         for (let dh = 0; dh <= 1; dh++) for (let da = 0; da <= 1; da++) for (let dl = 0; dl <= 1; dl++) {
             acc += read(l0 + dl, a0 + da, h0 + dh, ch) * (dl ? fl : 1 - fl) * (da ? fa : 1 - fa) * (dh ? fh : 1 - fh);

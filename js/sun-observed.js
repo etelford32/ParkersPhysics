@@ -221,6 +221,33 @@ export function diskFractionFor(channel) {
  * pair midpoints, radius = median of the eight. Returns fractions of the
  * frame (x/w, y/h, r/min(w,h)), plus `ok` = the eight agree to within 4 %.
  */
+/**
+ * Sub-pixel edge from the half-maximum crossing around a coarse location.
+ * Medians for the two levels so a bright point just inside the limb, or a
+ * prominence just outside it, cannot set either one.
+ */
+function refineEdge(prof, i, rMax) {
+    const med = (lo, hi) => {
+        const v = [];
+        for (let r = Math.max(0, lo); r <= Math.min(rMax, hi); r++) v.push(prof[r]);
+        if (!v.length) return 0;
+        v.sort((a, b) => a - b);
+        return v[v.length >> 1];
+    };
+    const inner = med(i - 6, i - 2);
+    const outer = med(i + 3, i + 7);
+    if (!(inner > outer)) return i + 1.5;              // not an edge — keep the old estimate
+    const half = (inner + outer) / 2;
+    // Walk outward from the inner side for the first crossing of `half`.
+    for (let r = Math.max(1, i - 5); r <= Math.min(rMax - 1, i + 6); r++) {
+        if (prof[r] >= half && prof[r + 1] < half) {
+            const f = (prof[r] - half) / Math.max(prof[r] - prof[r + 1], 1e-9);
+            return r + f;
+        }
+    }
+    return i + 1.5;
+}
+
 export function measureDisk(gray, w, h) {
     const cx0 = (w - 1) / 2, cy0 = (h - 1) / 2;
     const rMax = Math.floor(Math.min(w, h) / 2) - 2;
@@ -234,15 +261,34 @@ export function measureDisk(gray, w, h) {
             const x = Math.round(cx0 + dx * r), y = Math.round(cy0 + dy * r);
             prof[r] = gray[y * w + x];
         }
-        // 5-tap box smooth, then the strongest negative slope over a 4-px span.
-        let best = -1, bestR = -1;
+        // Two stages: LOCATE the edge coarsely by the strongest negative
+        // slope over a 4-px span, then REFINE it to the half-maximum
+        // crossing between the local inner and outer levels.
+        //
+        // WHY THE REFINEMENT EXISTS. The coarse step alone was biased OUTWARD
+        // on every AIA channel and not on HMI, because the two instruments
+        // have opposite edge shapes: HMI is limb-DARKENED and ends in a clean
+        // step to black, while AIA is limb-BRIGHTENED and steps down into a
+        // bright off-limb corona that then decays. Straddling windows blur an
+        // edge sitting on a sloping background, and the fixed `+1.5` pixel
+        // offset that compensated for the window centroid is an ANGULAR bias
+        // that doubles when the frame is read at 256² instead of 512².
+        // Measured on the synthetic fixtures at the 256² readback the page
+        // actually uses: AIA +1.41 %, HMI −0.24 %. A 1.4 % radius error draws
+        // the observed frame 1.4 % too large on the sphere, which misregisters
+        // its sunspots against `u_arSpots` near the limb.
+        //
+        // The half-maximum crossing does not care what is outside the disk: it
+        // is defined between the level just inside the edge and the level just
+        // outside it, so a bright halo moves both and cancels.
+        let best = -1, bestI = -1;
         for (let r = rMin; r < rMax - 4; r++) {
             const a = (prof[r - 2] + prof[r - 1] + prof[r]) / 3;
             const b = (prof[r + 2] + prof[r + 3] + prof[r + 4]) / 3;
             const drop = a - b;
-            if (drop > best) { best = drop; bestR = r + 1.5; }
+            if (drop > best) { best = drop; bestI = r; }
         }
-        hits.push(bestR);
+        hits.push(bestI < 0 ? -1 : refineEdge(prof, bestI, rMax));
     }
     // Opposite rays k and k+4: (ra − rb)/2 is the offset's component along
     // d_k. Four directions 45° apart satisfy Σ d dᵀ = 2·I, so the summed
@@ -763,8 +809,22 @@ async function decodeImage(blob) {
  * exactly the same pixels. Returns `{ measured, rgba, size }`, or nulls when
  * the canvas is unavailable / tainted (a CORS-tainted frame must degrade to
  * the per-instrument fallback, never throw).
+ *
+ * ── Why 512 and not 256 ──────────────────────────────────────────────────
+ * The two passes want the same PIXELS but not the same RESOLUTION. Photometry
+ * is a set of shell medians and is resolution-insensitive; GEOMETRY is an edge
+ * location, and an edge is exactly the thing a downsample destroys. At 256²
+ * the disk radius is ~100 px, so one pixel of edge blur IS one percent of the
+ * radius — and on AIA, where the limb steps down into a bright off-limb
+ * corona rather than to black, the measurement came out 1.4 % too large
+ * (measured on the synthetic fixtures; HMI, which ends in a clean step, was
+ * fine at −0.24 %). A 1.4 % radius error draws the observed frame 1.4 % too
+ * large on the sphere and misregisters its sunspots against `u_arSpots` near
+ * the limb. At 512² the same measurement is 0.08–0.21 % on every channel.
+ * 512² is a quarter-megapixel readback on a 5-minute cadence — 1/64 the
+ * pixels of the full-res read the 40 ms figure above refers to.
  */
-export function readFrame(img, size = 256) {
+export function readFrame(img, size = 512) {
     try {
         const c = document.createElement('canvas');
         c.width = c.height = size;
@@ -781,7 +841,7 @@ export function readFrame(img, size = 256) {
     }
 }
 
-/** Downsample to 256² and run measureDisk. Returns null if the canvas is unavailable. */
-export function measureImageDisk(img, size = 256) {
+/** Downsample to `size`² and run measureDisk. Returns null if the canvas is unavailable. */
+export function measureImageDisk(img, size = 512) {
     return readFrame(img, size).measured;
 }
