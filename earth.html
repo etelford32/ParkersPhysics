@@ -5513,7 +5513,12 @@ function _scheduleBaseUpgrade() {
 }
 
 // ── Storm-update: push active cyclone positions into cloud shader ─────────────
-new StormFeed().start();
+// Held in a const (it used to be a bare `new StormFeed().start()`) so the
+// Storm Watch panel's ↻ button has something to call — see the panel's
+// onRetry wiring further down. The feed also self-heals now: bounded
+// request timeout, exponential backoff on failure, and an immediate
+// re-poll when a backgrounded tab comes back into view.
+const stormFeed = new StormFeed().start();
 window.addEventListener('storm-update', e => {
     const storms = e.detail.storms ?? [];
     const arr = cloudU.u_storms.value;
@@ -6279,16 +6284,27 @@ document.getElementById('lyr-storm-tracks')?.addEventListener('change', e => {
 window.addEventListener('storm-update', (ev) => {
     const status = ev?.detail?.status;
     const count  = (ev?.detail?.storms ?? []).length;
+    // StormFeed's vocabulary is live | partial | stale | offline |
+    // connecting. 'partial' (one upstream down) and 'stale' (nothing new
+    // arrived) used to fall through to 'fetching', which read as a
+    // perpetual "awaiting NHC update" — a degraded feed looked merely
+    // slow. 'partial' reuses the EXISTING amber st-fallback pip rather
+    // than a new class; that state already means "working, but degraded".
     const state =
         status === 'live'    ? 'loaded'   :
+        status === 'partial' ? 'fallback' :
         status === 'offline' ? 'error'    :
+        status === 'stale'   ? 'error'    :
                                'fetching';
+    const missing = (ev?.detail?.missingBasins ?? []).join(', ');
     const title =
-        state === 'loaded' ? `${count} active storm${count === 1 ? '' : 's'} · NHC`
-        : state === 'error' ? 'NHC feed unreachable'
-        :                     'awaiting NHC update';
+        state === 'loaded'   ? `${count} active storm${count === 1 ? '' : 's'} · NHC`
+        : state === 'fallback' ? `${count} visible · partial coverage${missing ? ` (${missing} missing)` : ''}`
+        : status === 'stale'   ? 'Storm feeds unreachable — showing last known data'
+        : state === 'error'    ? 'NHC feed unreachable'
+        :                        'awaiting NHC update';
     document.querySelectorAll('.lyr-status[data-layer="storm-tracks"]').forEach(pip => {
-        pip.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+        pip.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error', 'st-fallback');
         pip.classList.add(`st-${state}`);
         pip.title = title;
     });
@@ -15338,6 +15354,9 @@ document.addEventListener('click', e => {
 // change what the globe paints.
 const stormWatchPanel = new StormWatchPanel({
     onStormClick: (lat, lon) => flyToLatLon(lat, lon),
+    // ↻ in the panel header. Gives a user looking at "feeds unreachable"
+    // something to do besides wait out the backoff.
+    onRetry: () => stormFeed.refresh(),
     // Hover or click on a card focuses the matching cone — but only
     // when the Storm Tracks overlay is visible (toggled via lyr-storm
     // -tracks). Auto-enable the overlay when the user pins a storm by

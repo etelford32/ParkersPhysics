@@ -93,6 +93,25 @@ function bearingLabel(deg) {
     return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
 }
 
+// Escape text that lands in innerHTML. Storm names and the route's
+// degradation notes are upstream strings — NOAA/NASA are trusted, but a
+// stray quote or angle bracket in a bulletin would silently break the
+// card markup, and "the panel renders nothing" is exactly the failure
+// mode this module is being hardened against.
+function escapeHtml(v) {
+    return String(v ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Short local clock for the footer / "last known" disclosures. Takes an
+// explicit epoch so a caller can never accidentally pass the wall clock
+// where feed time was meant — the bug this whole pass exists to fix.
+function formatClock(ms) {
+    if (!Number.isFinite(ms)) return '—';
+    return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 function formatLatLon(lat, lon) {
     const ns = lat >= 0 ? 'N' : 'S';
     const ew = lon >= 0 ? 'E' : 'W';
@@ -215,7 +234,43 @@ body.ev-verdict-solo #${PANEL_ID} {
     box-shadow: 0 0 8px var(--c-storm-glow, #ff9050);
     animation: sw-pulse 1.6s ease-in-out infinite;
 }
+/* Pulse states mirror the feed vocabulary exactly — the dot is the
+   panel's at-a-glance health indicator and it must not read "live"
+   (warm, animated) while the list is degraded or frozen.
+     live     warm amber, pulsing   — both upstreams answered
+     partial  yellow, pulsing       — one upstream down, list incomplete
+     stale    red, still            — last-known data, nothing new arrived
+     offline  grey, still           — endpoint itself unreachable */
+#${PANEL_ID} .sw-pulse.partial { background:#e8c33a; box-shadow:0 0 8px #e8c33a; }
+#${PANEL_ID} .sw-pulse.stale   { background:#e05a45; box-shadow:0 0 8px rgba(224,90,69,.7); animation:none; }
 #${PANEL_ID} .sw-pulse.offline { background:#555; box-shadow:none; animation:none; }
+/* Feed-health disclosure. Hidden entirely when healthy so the panel
+   stays quiet in the normal case — it must only ever appear because
+   something is actually wrong. */
+#${PANEL_ID} .sw-health {
+    display:none;
+    margin:0 0 7px; padding:6px 8px;
+    border-radius:6px;
+    font-size:9.5px; line-height:1.45;
+    border:1px solid transparent;
+}
+#${PANEL_ID} .sw-health.show { display:block; }
+#${PANEL_ID} .sw-health.partial {
+    background:rgba(232,195,58,.10); border-color:rgba(232,195,58,.34); color:#e8d79a;
+}
+#${PANEL_ID} .sw-health.down {
+    background:rgba(224,90,69,.12); border-color:rgba(224,90,69,.38); color:#f0b4a8;
+}
+#${PANEL_ID} .sw-health b { font-weight:600; }
+/* The ↻ is HIDDEN while the feed is healthy, for the same reason the
+   disclosure banner is: it should only ever appear because something is
+   wrong. It is also a layout constraint — this panel is 240px wide and
+   the header is an emoji + "Storm Watch" + a count. A permanently
+   visible third action button pushed the title onto two lines. */
+#${PANEL_ID} .sw-retry { display:none; line-height:1; }
+#${PANEL_ID} .sw-retry.show { display:inline-flex; }
+#${PANEL_ID} .sw-retry.busy { animation: sw-spin .9s linear infinite; opacity:.6; pointer-events:none; }
+@keyframes sw-spin { to { transform: rotate(360deg); } }
 @keyframes sw-pulse {
     0%, 100% { opacity:.4; transform:scale(.85); }
     50%      { opacity:1;  transform:scale(1.2); }
@@ -405,10 +460,16 @@ body.ev-verdict-solo #${PANEL_ID} {
 #${PANEL_ID}.scrubbing .sw-card .sw-scrub-line {
     display:block;
 }
+/* ≤640px: a SHORTER body inside the bottom sheet, nothing else.
+   This block used to also carry width:230px / top:auto / bottom:70px /
+   left:10px — a leftover from before the sheet existed. Every one of
+   those declarations was already dead: the ≤768px block above sets the
+   same properties with !important (it has to, to beat a persisted
+   desktop drag's inline style), and 640 is inside 768. They survived as
+   a booby trap that read like live positioning, so the next reader would
+   look here first when the sheet misbehaved. Only the live declaration
+   remains — the sheet's geometry is the ≤768px block, full stop. */
 @media (max-width: 640px) {
-    #${PANEL_ID} {
-        width: 230px; top: auto; bottom: 70px; left: 10px;
-    }
     #${PANEL_ID} .panel-body { max-height: 38vh; }
 }
 `;
@@ -422,6 +483,7 @@ function buildPanelDOM() {
         <div class="panel-header" data-minimize="${PANEL_ID}">
             <h3><span class="sw-pulse" id="${PANEL_ID}-pulse"></span>🌀 Storm Watch <span id="${PANEL_ID}-count" style="opacity:.6;font-weight:400;margin-left:4px;"></span></h3>
             <div class="panel-actions">
+                <button class="panel-btn sw-retry" id="${PANEL_ID}-retry" title="Refresh storm feeds">↻</button>
                 <button class="panel-btn" data-minimize-btn="${PANEL_ID}" title="Minimise">▾</button>
                 <button class="panel-btn panel-close" data-close="${PANEL_ID}" title="Close">✕</button>
             </div>
@@ -461,6 +523,11 @@ function buildPanelDOM() {
                     <button type="button" class="sw-scrub-chip" data-hour="120" title="+120 hours from now (5-day cone tip)">D5</button>
                 </div>
             </div>
+            <!-- Feed-health disclosure. Empty (and display:none) while the
+                 feed is healthy; carries the reason text whenever coverage
+                 is partial or the upstreams are down, so a short list can
+                 never be mistaken for a complete one. -->
+            <div class="sw-health" id="${PANEL_ID}-health" role="status" aria-live="polite"></div>
             <div id="${PANEL_ID}-list"></div>
             <div class="sw-foot" id="${PANEL_ID}-foot">awaiting NHC feed…</div>
         </div>
@@ -481,13 +548,19 @@ export class StormWatchPanel {
      *   card. The storm-track overlay uses this to highlight the
      *   selected cone on the globe and dim the rest. Receives nulls
      *   when the user mouses out of the panel.
+     * @param {() => void} [opts.onRetry]
+     *   Optional callback for the header's ↻ button. Wired to
+     *   StormFeed.refresh() by earth.html so a user staring at a
+     *   "feeds unreachable" panel has something to DO about it instead
+     *   of waiting out the poll interval.
      * @param {number} [opts.maxStorms=5]
      */
-    constructor({ onStormClick, onStormFocus, onScrubChange, maxStorms = 5 } = {}) {
+    constructor({ onStormClick, onStormFocus, onScrubChange, onRetry, maxStorms = 5 } = {}) {
         this._maxStorms    = maxStorms;
         this._onStormClick = onStormClick;
         this._onStormFocus = onStormFocus;
         this._onScrubChange = onScrubChange;
+        this._onRetry      = onRetry;
         this._panel        = null;
         this._listEl       = null;
         this._countEl      = null;
@@ -528,6 +601,23 @@ export class StormWatchPanel {
         this._countEl = this._panel.querySelector(`#${PANEL_ID}-count`);
         this._footEl  = this._panel.querySelector(`#${PANEL_ID}-foot`);
         this._pulseEl = this._panel.querySelector(`#${PANEL_ID}-pulse`);
+        this._healthEl = this._panel.querySelector(`#${PANEL_ID}-health`);
+        this._retryEl  = this._panel.querySelector(`#${PANEL_ID}-retry`);
+
+        // Manual retry. The button spins until the next storm-update
+        // arrives (or 15 s elapses) so the click always has visible
+        // feedback even when the retry fails again — a dead button on a
+        // dead feed is how users conclude a panel is broken.
+        this._retryEl?.addEventListener('click', () => {
+            if (!this._onRetry) return;
+            this._setRetryBusy(true);
+            clearTimeout(this._retryTimer);
+            this._retryTimer = setTimeout(() => this._setRetryBusy(false), 15_000);
+            try { this._onRetry(); } catch (err) {
+                console.debug('[StormWatchPanel] retry failed:', err);
+                this._setRetryBusy(false);
+            }
+        });
 
         // Click delegation: one listener on the list root, route to the
         // clicked card via dataset. Cheap, and survives re-renders that
@@ -610,8 +700,23 @@ export class StormWatchPanel {
 
         window.addEventListener('storm-update', this._onUpdate);
 
-        // Initial paint with an empty state so the panel is never blank
-        // — the user sees a hint while the first feed tick arrives.
+        // ── CATCH UP ON WHAT WE MISSED ─────────────────────────────────
+        // This panel mounts ~9,800 lines after earth.html starts StormFeed,
+        // so on a warm cache the first (and, for the next 30 minutes, only)
+        // 'storm-update' has ALREADY fired by the time we subscribe above.
+        // StormFeed publishes its latest detail to window.__stormFeedState
+        // for exactly this reason — the shared-provider idiom from
+        // flux-rope-forecast.js. Without it the panel renders its
+        // placeholder and holds it for a full poll interval, which is
+        // indistinguishable from a broken panel.
+        const seeded = window.__stormFeedState;
+        if (seeded && typeof seeded === 'object') {
+            this._lastDetail = seeded;
+            if (Number.isFinite(seeded.updatedMs)) this._issueMs = seeded.updatedMs;
+        }
+
+        // Initial paint — either the state we just caught up on, or an
+        // empty placeholder so the panel is never blank while we wait.
         this._render();
         // Apply restored scrub state to the readouts + class (we can
         // already paint the time even before any storms arrive).
@@ -625,8 +730,16 @@ export class StormWatchPanel {
 
     unmount() {
         window.removeEventListener('storm-update', this._onUpdate);
+        clearTimeout(this._retryTimer);
         if (this._panel?.parentElement) this._panel.parentElement.removeChild(this._panel);
         this._panel = this._listEl = this._countEl = this._footEl = this._pulseEl = null;
+        this._healthEl = this._retryEl = null;
+    }
+
+    /** Toggle the ↻ spinner. Safe to call after unmount. */
+    _setRetryBusy(busy) {
+        this._retryEl?.classList.toggle('busy', !!busy);
+        if (!busy) clearTimeout(this._retryTimer);
     }
 
     /** Underlying root element so callers can wire drag / minimise chrome. */
@@ -636,11 +749,16 @@ export class StormWatchPanel {
 
     _onUpdate(ev) {
         this._lastDetail = ev?.detail ?? null;
-        // Anchor the scrubber's time readout to the moment the panel
-        // received the latest feed update. The user shouldn't see the
-        // "+36h · Fri ..." readout drift between feed ticks just
-        // because real-world clock time is advancing.
-        this._issueMs = Date.now();
+        // Anchor the scrubber's time readout to the moment the DATA was
+        // fetched, not the moment we rendered it. The user shouldn't see
+        // the "+36h · Fri ..." readout drift between feed ticks just
+        // because real-world clock time is advancing — and on a stale
+        // tick (upstreams down, last-known storms re-dispatched) the wall
+        // clock would march the readout forward over data that never
+        // changed, quietly re-dating an old advisory.
+        this._issueMs = Number.isFinite(ev?.detail?.updatedMs)
+            ? ev.detail.updatedMs
+            : Date.now();
         // Invalidate per-storm track cache; new feed = new positions.
         this._trackCache.clear();
         this._render();
@@ -796,6 +914,18 @@ export class StormWatchPanel {
         const status = detail?.status ?? 'connecting';
         const all    = detail?.storms ?? [];
 
+        // ── FEED HEALTH IS NOT THE SAME QUESTION AS "ARE THERE STORMS" ──
+        // `feedDown` means we could not observe the ocean at all; `partial`
+        // means we saw only part of it. Neither is a storm count, and the
+        // renderer must never collapse them into one. This is the 2026-09
+        // fix for the "storm watch isn't showing up" report: the panel was
+        // printing "No active tropical cyclones worldwide right now. 🌊"
+        // — a positive claim of absence — on top of a feed that had
+        // returned nothing at all. See js/storm-feed.js's header.
+        const feedDown = status === 'offline' || status === 'stale';
+        const partial  = status === 'partial';
+        const missing  = detail?.missingBasins ?? [];
+
         // Sort by intensity descending — the headline UI is "scariest
         // storms first." Filter out any with non-finite intensity to
         // keep a clean ranking.
@@ -804,24 +934,71 @@ export class StormWatchPanel {
             .sort((a, b) => b.intensityKt - a.intensityKt)
             .slice(0, this._maxStorms);
 
-        // Pulse colour reflects feed health.
+        // Pulse colour reflects feed health across the whole vocabulary.
+        // Only 'live' leaves every modifier off (warm + animated).
         if (this._pulseEl) {
             this._pulseEl.classList.toggle('offline', status === 'offline');
+            this._pulseEl.classList.toggle('stale',   status === 'stale');
+            this._pulseEl.classList.toggle('partial', partial);
+        }
+
+        // A feed answer of any kind ends the manual-retry spinner.
+        if (status !== 'connecting') this._setRetryBusy(false);
+        // …and the retry affordance only exists while it has a job to do.
+        this._retryEl?.classList.toggle('show', !!this._onRetry && (feedDown || partial));
+
+        // ── Disclosure banner ──────────────────────────────────────────
+        if (this._healthEl) {
+            const h = this._healthEl;
+            h.classList.remove('show', 'partial', 'down');
+            if (feedDown) {
+                const when = Number.isFinite(detail?.updatedMs)
+                    ? ` Showing last known positions from ${formatClock(detail.updatedMs)}.`
+                    : '';
+                h.classList.add('show', 'down');
+                h.innerHTML = `<b>Storm feeds unreachable.</b> `
+                    + `${escapeHtml(detail?.note || 'NOAA NHC and NASA EONET did not respond.')}`
+                    + `${all.length ? escapeHtml(when) : ''}`;
+            } else if (partial) {
+                h.classList.add('show', 'partial');
+                h.innerHTML = `<b>Partial coverage.</b> `
+                    + escapeHtml(detail?.note
+                        || `${missing.map(b => BASIN_LABEL[b] ?? b).join(', ')} not covered.`);
+            } else {
+                h.textContent = '';
+            }
         }
 
         if (this._countEl) {
-            this._countEl.textContent = all.length
-                ? `· ${all.length} active`
-                : '';
+            // "N active" is a claim about the whole planet. On a partial
+            // or stale payload it is only a claim about what we could see,
+            // so the wording changes with the evidence.
+            this._countEl.textContent =
+                !all.length            ? ''
+                : feedDown             ? `· ${all.length} last known`
+                : partial              ? `· ${all.length} visible`
+                :                        `· ${all.length} active`;
         }
 
         if (ranked.length === 0) {
-            this._listEl.innerHTML = `
-                <div class="sw-empty">
-                    ${status === 'offline'
-                        ? 'Storm feeds (NHC + EONET) unreachable — retrying.'
-                        : 'No active tropical cyclones worldwide right now. 🌊'}
-                </div>`;
+            // THREE different claims, three different sentences. An empty
+            // list from a dead feed is NOT evidence of a quiet ocean, and
+            // saying so was the original bug.
+            let emptyMsg;
+            if (feedDown) {
+                emptyMsg = 'No storm data — the NHC and EONET feeds are unreachable. '
+                         + 'This is not a report that the tropics are quiet.';
+            } else if (status === 'connecting') {
+                emptyMsg = 'Contacting storm feeds…';
+            } else if (partial) {
+                const seen = missing.length
+                    ? `the ${missing.map(b => BASIN_LABEL[b] ?? b).join(', ')} feed is down`
+                    : 'one feed is down';
+                emptyMsg = `No active cyclones in the basins we can currently see — ${seen}.`;
+            } else {
+                emptyMsg = 'No active tropical cyclones worldwide right now. 🌊';
+            }
+            this._listEl.innerHTML = `<div class="sw-empty">${escapeHtml(emptyMsg)}</div>`;
             // No storms left — drop any lingering active focus so the
             // overlay clears and the host's onStormFocus fires with null.
             if (this._activeId || this._pinnedId) {
@@ -846,8 +1023,21 @@ export class StormWatchPanel {
         }
 
         if (this._footEl) {
-            const updated = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            this._footEl.textContent = `Source: NOAA NHC + NASA EONET · updated ${updated}`;
+            // CRITICAL: this timestamp is the FEED's, never `new Date()`.
+            // It used to read the wall clock on every render, so a panel
+            // whose data was hours old — or had never arrived at all —
+            // still printed a freshly-minted "updated 01:13 PM". That is
+            // the most convincing part of a broken panel looking healthy.
+            const src = 'Source: NOAA NHC + NASA EONET';
+            if (status === 'connecting') {
+                this._footEl.textContent = `${src} · connecting…`;
+            } else if (Number.isFinite(detail?.updatedMs)) {
+                const age = detail.stale || feedDown ? ' (no new data since)' : '';
+                this._footEl.textContent =
+                    `${src} · updated ${formatClock(detail.updatedMs)}${age}`;
+            } else {
+                this._footEl.textContent = `${src} · no data received`;
+            }
         }
 
         // Re-apply scrub readouts after the cards rewrote — the new
@@ -872,11 +1062,11 @@ export class StormWatchPanel {
         const arrowDeg = Number.isFinite(s.movementDir) ? s.movementDir : 0;
 
         return `
-            <div class="sw-card" data-id="${s.id ?? ''}" data-lat="${s.lat}" data-lon="${s.lon}"
-                 title="${meta.label} — click to fly to eye">
+            <div class="sw-card" data-id="${escapeHtml(s.id ?? '')}" data-lat="${s.lat}" data-lon="${s.lon}"
+                 title="${escapeHtml(meta.label)} — click to fly to eye">
                 <div class="sw-row1">
-                    <span class="sw-badge" style="background:${meta.tint}">${s.classification ?? '?'}</span>
-                    <span class="sw-name">${(s.name ?? 'Unnamed').toLowerCase()}</span>
+                    <span class="sw-badge" style="background:${meta.tint}">${escapeHtml(s.classification ?? '?')}</span>
+                    <span class="sw-name">${escapeHtml((s.name ?? 'Unnamed').toLowerCase())}</span>
                     <span class="sw-cat">${cat ? `Cat ${cat}` : ''}</span>
                 </div>
                 <div style="font-size:9.5px;color:#aab;">
