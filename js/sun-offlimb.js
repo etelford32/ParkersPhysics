@@ -126,14 +126,103 @@
  */
 
 import { solarEphemeris, srgbToLinear, luminance, resolveDiskGeometry, readFrame } from './sun-observed.js';
+import { SUVI_DISK_FRACTION, AIA_DISK_FRACTION, annulusCoverage, frameReach, coverageNote } from './suvi-geometry.js';
 
 // ── Geometry of the annulus ────────────────────────────────────────────────
 
-/** The two channels drawn. Cool + hot; see the header. */
+/**
+ * The two channels drawn. Cool + hot; see the header.
+ * This is the SDO source's pair and the module default — `OFFLIMB_SOURCES`
+ * below carries the same pairing for GOES/SUVI.
+ */
 export const OFFLIMB_CHANNELS = Object.freeze(['304', '131']);
 
+/**
+ * ── TWO INSTRUMENTS, ONE ANNULUS ──────────────────────────────────────────
+ *
+ * Both entries draw the SAME two lines — He II 304 (prominences, eruptive
+ * filaments) and Fe XXI/Fe VIII 131 (flare plasma, post-flare arcades) — from
+ * the SAME vantage: GOES is geostationary, so its Sun–observer line differs
+ * from SDO's by 0.016°, three orders of magnitude inside the layer's 12°
+ * full-weight band. The plane of sky is the same plane and `observerBasis` is
+ * reused unchanged (js/suvi-geometry.js's header derives this).
+ *
+ * WHAT DIFFERS IS THE FIELD OF VIEW, AND IT IS THE WHOLE POINT.
+ * The shader never clamp-extends a border texel, so outside the frame it draws
+ * nothing — which means the annulus is only ever as complete as the frame that
+ * feeds it. AIA is 0.6″/px over 4096 px: the half-frame is 1.280 R☉ on axis,
+ * 1.811 into the corners, so it supplies 65.9 % of the 1.0–1.6 R☉ annulus and
+ * the missing third is FOUR LOBES ON THE AXES — the viewer reads the shape of
+ * the detector as the shape of the corona. SUVI is 2.5″/px over 1280 px:
+ * 1.667 R☉ on axis, and it supplies 100 %.
+ *
+ * The trade is resolution for reach — SUVI is four times AIA's plate scale —
+ * which is exactly why this is a SOURCE TOGGLE on the off-limb layer and NOT a
+ * swap of the disk's frame. The near-side disk stays SDO, where the sharpness
+ * is used and the field of view is not.
+ *
+ * `coverage` is COMPUTED from the disk fraction, never typed, so the tooltip
+ * and the geometry cannot drift apart.
+ */
+export const OFFLIMB_SOURCES = Object.freeze({
+    sdo: Object.freeze({
+        id: 'sdo',
+        label: 'SDO/AIA',
+        instrument: 'aia',
+        channels: OFFLIMB_CHANNELS,               // proxy channel names
+        bands: Object.freeze(['304', '131']),     // what the chip prints
+        diskFraction: AIA_DISK_FRACTION,   // derived — see js/suvi-geometry.js
+        plateScale: 0.6,
+        note: 'sharpest (0.6″/px), but the frame stops at 1.28 R☉ on axis',
+    }),
+    suvi: Object.freeze({
+        id: 'suvi',
+        label: 'GOES/SUVI',
+        instrument: 'suvi',
+        channels: Object.freeze(['suvi304', 'suvi131']),
+        bands: Object.freeze(['304', '131']),
+        diskFraction: SUVI_DISK_FRACTION,
+        plateScale: 2.5,
+        note: 'softer (2.5″/px), but covers the whole annulus to 1.67 R☉',
+    }),
+});
+
+export const DEFAULT_SOURCE = 'sdo';
+
+/** Resolve a source id, falling back to the default rather than throwing. */
+export function offLimbSource(id) {
+    return OFFLIMB_SOURCES[String(id)] || OFFLIMB_SOURCES[DEFAULT_SOURCE];
+}
+
 export const R_INNER = 1.0;      // R☉ — the limb
-export const R_OUTER = 1.6;      // R☉ — where an AIA frame's off-limb signal is gone
+/**
+ * R☉ — the outer edge of the drawn annulus.
+ *
+ * This was commented "where an AIA frame's off-limb signal is gone". It is NOT:
+ * an AIA half-frame ENDS at 1.280 R☉ on axis, so past that there is no frame to
+ * have signal in, and the layer has been drawing four dark lobes on the axes
+ * ever since. Measured, and the reason OFFLIMB_SOURCES exists — see its note.
+ * Kept at 1.6 for BOTH sources so an A/B between them measures field of view
+ * rather than two different annuli; SUVI could honestly carry it to 1.667.
+ */
+export const R_OUTER = 1.6;
+
+/**
+ * What fraction of the drawn annulus this source's frame actually supplies,
+ * and how far it reaches. Derived from the disk fraction — see OFFLIMB_SOURCES.
+ * Declared BELOW R_INNER/R_OUTER on purpose: as default parameter values those
+ * are read at call time, but a module-scope caller would hit the temporal dead
+ * zone, and this repo has already paid for one of those (CLAUDE.md, NeoPanel).
+ */
+export function sourceCoverage(id, rIn = R_INNER, rOut = R_OUTER) {
+    const src = offLimbSource(id);
+    return {
+        id: src.id,
+        fraction: annulusCoverage(rIn, rOut, src.diskFraction),
+        reach: frameReach(src.diskFraction),
+        note: coverageNote(rIn, rOut, src.diskFraction, src.label),
+    };
+}
 /**
  * Feather widths. The inner ramp exists because the observed DISK already owns
  * ρ < 1: without it the two layers meet at a hard step and the limb reads as a
@@ -296,9 +385,16 @@ export function calibrateOffLimb(rgba, w, h, geom) {
  */
 export function offLimbLabel(state) {
     if (!state || !state.enabled) return '';
-    const live = (state.channels || []).filter(c => c.ok).map(c => c.channel);
-    if (!live.length) return state.feedDown ? ' · off-limb feed down' : ' · off-limb loading';
-    const tag = live.join('+');
+    const live = (state.channels || []).filter(c => c.ok).map(c => c.band ?? c.channel);
+    // Name the INSTRUMENT whenever it is not the default. SUVI 304 and AIA 304
+    // are the same line but not the same measurement, and a chip that prints
+    // only "304" would let a source switch pass unannounced.
+    const src = state.sourceId && state.sourceId !== DEFAULT_SOURCE
+        ? `${offLimbSource(state.sourceId).label} ` : '';
+    if (!live.length) {
+        return state.feedDown ? ` · off-limb ${src}feed down` : ` · off-limb ${src}loading`;
+    }
+    const tag = `${src}${live.join('+')}`;
     if (state.axisWeight <= 0.01) return ` · off-limb ${tag} (off-axis)`;
     if (state.diff) return state.diffReady ? ` · off-limb Δ${tag}` : ` · off-limb Δ${tag} (awaiting next frame)`;
     return ` · off-limb ${tag}`;
@@ -436,12 +532,21 @@ export class SunOffLimb {
         this.renderOrder = opts.renderOrder ?? 3;
         this.enabled   = false;
         this.diff      = false;
+        // Which instrument feeds the annulus (OFFLIMB_SOURCES). Frames are keyed
+        // by PROXY CHANNEL, so both sources' frames coexist in the map and a
+        // source switch is instant once each has loaded once.
+        this.sourceId  = OFFLIMB_SOURCES[String(opts.source)] ? String(opts.source) : DEFAULT_SOURCE;
         this.frames    = new Map();       // channel → { tex, prev, observedAt, prevObservedAt, geom, ref, ok }
         this.mesh      = null;
         this.uniforms  = null;
         this.b0Rad     = 0;
         this.axisWeight = 0;
-        this.state = { enabled: false, diff: false, diffReady: false, feedDown: false, channels: [], axisWeight: 0, b0Deg: 0 };
+        this.state = {
+            enabled: false, diff: false, diffReady: false, feedDown: false,
+            channels: [], axisWeight: 0, b0Deg: 0,
+            sourceId: this.sourceId, source: offLimbSource(this.sourceId).label,
+            coverage: sourceCoverage(this.sourceId),
+        };
         this._timer = null;
         this._gen = 0;
     }
@@ -512,6 +617,27 @@ export class SunOffLimb {
 
     setGain(g) { if (this.uniforms) this.uniforms.u_gain.value = Math.max(0, +g || 0); }
 
+    /** The proxy channel names the current source feeds slots A and B from. */
+    get channels() { return offLimbSource(this.sourceId).channels; }
+
+    /**
+     * Switch instrument. Frames already fetched for the other source are KEPT,
+     * so an A/B comparison does not re-download either one — which is the whole
+     * point of being able to switch: the 66 %-vs-100 % annulus difference is
+     * only legible if you can flip between them without a reload in between.
+     */
+    setSource(id) {
+        const next = OFFLIMB_SOURCES[String(id)] ? String(id) : DEFAULT_SOURCE;
+        if (next === this.sourceId) return this.sourceId;
+        this.sourceId = next;
+        this.state.sourceId = next;
+        this.state.source = offLimbSource(next).label;
+        this.state.coverage = sourceCoverage(next);
+        this._applyAll();                    // repoint the slots at once
+        if (this.enabled) this.refresh();    // fetch whatever this source lacks
+        return next;
+    }
+
     start() {
         if (this._timer) return this;
         this._timer = setInterval(() => this.refresh(), this.refreshMs);
@@ -520,7 +646,7 @@ export class SunOffLimb {
 
     stop() { if (this._timer) clearInterval(this._timer); this._timer = null; }
 
-    _anyOk() { return OFFLIMB_CHANNELS.some(c => this.frames.get(c)?.ok); }
+    _anyOk() { return this.channels.some(c => this.frames.get(c)?.ok); }
 
     /**
      * Per-frame. The off-axis weight is the only thing that changes with the
@@ -549,7 +675,7 @@ export class SunOffLimb {
         if (!force && this.doc && this.doc.visibilityState === 'hidden') return null;
         const gen = ++this._gen;
         const bucket = Math.floor(this.now() / this.refreshMs);
-        const results = await Promise.all(OFFLIMB_CHANNELS.map(ch => this._fetchChannel(ch, bucket, force)));
+        const results = await Promise.all(this.channels.map(ch => this._fetchChannel(ch, bucket, force)));
         if (gen !== this._gen) return null;
         this.state.feedDown = results.every(r => !r);
         this._applyAll();
@@ -598,7 +724,8 @@ export class SunOffLimb {
     _applyAll() {
         if (!this.uniforms) return;
         const u = this.uniforms;
-        const slots = [['A', OFFLIMB_CHANNELS[0]], ['B', OFFLIMB_CHANNELS[1]]];
+        const chans = this.channels;
+        const slots = [['A', chans[0]], ['B', chans[1]]];
         let b0Src = null;
         for (const [slot, ch] of slots) {
             const f = this.frames.get(ch);
@@ -621,10 +748,12 @@ export class SunOffLimb {
     }
 
     _emit() {
-        const channels = OFFLIMB_CHANNELS.map(ch => {
+        const src = offLimbSource(this.sourceId);
+        const channels = src.channels.map((ch, i) => {
             const f = this.frames.get(ch);
             return {
                 channel: ch,
+                band: src.bands[i],       // what the chip prints: '304', not 'suvi304'
                 ok: !!(f && f.ok),
                 observedAt: f?.observedAt ?? null,
                 ref: f?.ref ?? null,
@@ -640,6 +769,8 @@ export class SunOffLimb {
         Object.assign(this.state, {
             enabled: this.enabled, diff: this.diff, diffReady,
             channels, axisWeight: this.axisWeight,
+            sourceId: this.sourceId, source: src.label,
+            coverage: sourceCoverage(this.sourceId),
         });
         this.state.label = offLimbLabel(this.state);
         try { this.onState(this.state); } catch (_) {}

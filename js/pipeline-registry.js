@@ -129,6 +129,14 @@ export const PIPELINES = [
       warnAgeS:  30 * 60, critAgeS: 90 * 60,
       notes: 'The OBSERVED disk on sun.html (default) + the Stage / globe / heliosphere live Suns. Shipped 2026-07 unmonitored; registered with the sun.html observed-by-default work (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 1). meta=1 answers 200 + freshness:expired when NASA is unreachable so the row reads DOWN, not broken.' },
 
+    { id: 'solar-suvi',         label: 'GOES/SUVI off-limb frames',
+      endpoint: '/api/solar/aia?channel=suvi304',
+      probePath: '/api/solar/aia?channel=suvi304&meta=1',   // JSON provenance + the candidate report
+      category: 'space-weather', upstream: 'NOAA SWPC (GOES/SUVI browse frames)',
+      cadence_s: 240,   prewarm: 'hot', probeTimeoutMs: 20_000,
+      warnAgeS:  30 * 60, critAgeS: 90 * 60,
+      notes: 'The SECOND source for sun.html\'s observed off-limb annulus (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 3e). An SDO/AIA frame supplies only 65.9% of the 1.0-1.6 R☉ ring the layer draws — its half-frame stops at 1.280 R☉ on axis — while SUVI reaches 1.667 R☉ and supplies all of it; see js/suvi-geometry.js. THE UPSTREAM PATH IS UNVERIFIED (services.swpc.noaa.gov is egress-blocked at build time), so it resolves from an ordered candidate list and meta=1 reports source_id + every candidate\'s status. ONE production request settles it — record the winner in js/suvi-geometry.js SOURCE_CANDIDATES and trim the list. A total miss answers 200 + freshness:expired + error:suvi_unresolved so the row reads DOWN rather than broken, and the off-limb layer stays on SDO. Probe timeout is generous because the diagnostic call probes every candidate.' },
+
     { id: 'hek-coronal-holes',  label: 'HEK coronal holes',
       endpoint: '/api/hek/coronal-holes',
       category: 'events', upstream: 'LMSAL HEK',

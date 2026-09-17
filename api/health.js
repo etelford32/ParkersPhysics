@@ -39,6 +39,11 @@ const UPSTREAMS = [
     // sun.html + the Stage / globe / heliosphere live Suns), so this row IS
     // authoritative. Smallest frame NASA serves, to keep the probe cheap.
     { source: 'sdo-latest',   url: 'https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg', edge_authoritative: true },
+    // GOES/SUVI, the off-limb layer's wide-field source. This is the HEAD of
+    // js/suvi-geometry.js's candidate list — UNVERIFIED until one production
+    // request settles it, so a red row here may mean the path, not the feed.
+    // /api/solar/aia?channel=suvi304&meta=1 reports every candidate's status.
+    { source: 'goes-suvi',    url: 'https://services.swpc.noaa.gov/images/animations/suvi/primary/304/latest.png', edge_authoritative: true },
     // LMSAL HEK — proxied by /api/hek/coronal-holes and /api/hek/filaments
     // (the coronal-hole cells on the space-weather globe, and the COOL-MATERIAL
     // channel of sun.html's volumetric corona). Authoritative for both. The

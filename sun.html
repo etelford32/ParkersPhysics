@@ -1087,6 +1087,22 @@ import './js/telemetry.js';
                             <span class="layer-meta">SDO 304 + 131 · plane of sky</span>
                         </label>
                     </div>
+                    <!-- SOURCE. Both entries draw the same two lines from the
+                         same vantage; what differs is the field of view. An AIA
+                         frame stops at 1.28 R☉ on axis and so supplies only
+                         65.9% of the ring above (the missing third is four
+                         lobes on the axes); GOES/SUVI reaches 1.67 R☉ and
+                         supplies all of it, at 2.5"/px instead of 0.6". The
+                         meta text is written from the LIVE coverage figure, not
+                         typed. js/suvi-geometry.js. -->
+                    <div class="toggle-row layer-row" id="lr-offlimb-suvi">
+                        <input type="checkbox" id="tog-offlimb-suvi">
+                        <label for="tog-offlimb-suvi">
+                            <span class="layer-dot tr"></span>
+                            <span class="layer-name">· GOES/SUVI source</span>
+                            <span class="layer-meta" id="lm-offlimb-suvi">wider field · fills the ring</span>
+                        </label>
+                    </div>
                     <div class="toggle-row layer-row" id="lr-offlimb-diff">
                         <input type="checkbox" id="tog-offlimb-diff">
                         <label for="tog-offlimb-diff">
@@ -1762,7 +1778,7 @@ import { initSunWatch } from './js/sun-watch.js';
 import { startFluxRopeProvider, trainStateAt, scrubMarks } from './js/sun-flux-rope.js';
 import { initSunRopeOverlay } from './js/sun-rope-overlay.js';
 import { SunObserved, VIEW_MODE_CHANNEL, REAL_TIME_ROT_MUL, solarEphemeris } from './js/sun-observed.js';
-import { SunOffLimb, offLimbLabel } from './js/sun-offlimb.js';   // Phase 3b observed off-limb annulus (304 + 131 on the plane of sky)
+import { SunOffLimb, offLimbLabel, sourceCoverage } from './js/sun-offlimb.js';   // Phase 3b observed off-limb annulus (304 + 131 on the plane of sky); 3e adds the GOES/SUVI source
 import {
     nanoflareState, nanoflareUniform, sampleEnergy, peakLogT, meanEnergy,
     AlphaMonitor, HEATING_REQUIREMENT, E_MIN_ERG, E_MAX_ERG, ALPHA_REFERENCES,
@@ -3969,8 +3985,21 @@ function _renderProvChip() {
     el.classList.remove('prov-observed', 'prov-stale', 'prov-model');
     const stale = state.mode === 'observed' && /stale|expired|refresh failed/.test(state.label);
     el.classList.add(state.mode === 'observed' ? (stale ? 'prov-stale' : 'prov-observed') : 'prov-model');
+    // The off-limb sentence must name the INSTRUMENT and what fraction of the
+    // ring it actually supplies. Written source-agnostically: an SDO-only
+    // sentence would quietly imply SDO while GOES/SUVI was drawing, and the
+    // coverage figure is the one thing a viewer cannot see for themselves —
+    // the shader draws nothing outside the frame, so a partly-covered ring
+    // looks like a partly-empty corona. js/suvi-geometry.js.
+    const olSrc = _offLimbState?.source ?? 'SDO/AIA';
+    const olCov = _offLimbState?.coverage;
+    const olCovTxt = olCov
+        ? (olCov.fraction > 0.999
+            ? ` ${olSrc}'s frame covers the whole annulus (reaching ${olCov.reach.axis.toFixed(2)} R☉ on axis).`
+            : ` ${olSrc}'s frame reaches only ${olCov.reach.axis.toFixed(2)} R☉ on axis, so it supplies ${(olCov.fraction * 100).toFixed(0)}% of this annulus — the rest is outside the frame and is drawn as nothing, never invented.`)
+        : '';
     const ol = _offLimbState && _offLimbState.enabled
-        ? ` Off-limb: the 1.0–1.6 R☉ annulus of the live 304 + 131 frames, drawn on the plane through Sun centre normal to the Sun–Earth line (optically thin EUV is plane-of-sky by nature) and occluded by the photosphere. Level is normalised by each frame's own 1.05–1.15 R☉ shell, then square-root stretched for display (the field spans ~70:1 — no linear mapping shows both the quiet corona and a prominence); colour is the browse product's own. Fades as the camera leaves the Sun–Earth line (${Math.round((_offLimbState.axisWeight ?? 0) * 100)}% now).`
+        ? ` Off-limb: the 1.0–1.6 R☉ annulus of the live ${olSrc} 304 + 131 frames, drawn on the plane through Sun centre normal to the Sun–Earth line (optically thin EUV is plane-of-sky by nature) and occluded by the photosphere.${olCovTxt} Level is normalised by each frame's own 1.05–1.15 R☉ shell, then square-root stretched for display (the field spans ~70:1 — no linear mapping shows both the quiet corona and a prominence); colour is the browse product's own. Fades as the camera leaves the Sun–Earth line (${Math.round((_offLimbState.axisWeight ?? 0) * 100)}% now).`
         : '';
     el.title = state.mode === 'observed'
         ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid).${ol} Click for Model.`
@@ -4007,6 +4036,12 @@ function _renderProvChip() {
 //  drawn on the plane through Sun centre normal to the Sun–Earth line —
 //  occluded by the photosphere, pinned to the observer (never co-rotated),
 //  and faded as the camera leaves that line.
+//  Phase 3e adds a SECOND SOURCE for that ring, GOES/SUVI, because an AIA
+//  frame only supplies 65.9% of it — the half-frame stops at 1.28 R☉ on axis
+//  while the ring runs to 1.6, so the shader (which correctly refuses to
+//  clamp-extend a border texel) draws four dark lobes on the axes. SUVI
+//  reaches 1.67 R☉ and fills it. The disk stays SDO: this is a layer, not a
+//  swap. js/suvi-geometry.js.
 // ═══════════════════════════════════════════════════════════════════════════
 {
     const qp = new URLSearchParams(location.search);
@@ -4021,6 +4056,7 @@ function _renderProvChip() {
     sunOffLimb.mount();
     const togOl   = document.getElementById('tog-offlimb');
     const togDiff = document.getElementById('tog-offlimb-diff');
+    const togSuvi = document.getElementById('tog-offlimb-suvi');
     if (togOl) {
         togOl.checked = _offLimbUserOn;
         togOl.addEventListener('change', (e) => {
@@ -4039,6 +4075,29 @@ function _renderProvChip() {
             sunOffLimb.setDiff(true);
             document.getElementById('lr-offlimb-diff')?.classList.add('on');
         }
+    }
+    // ── Source: SDO/AIA (default) ↔ GOES/SUVI ──────────────────────────────
+    // The row's meta text is generated from sourceCoverage(), which computes the
+    // figure from the instrument's disk fraction — so the UI cannot claim a
+    // field of view the geometry does not have.
+    if (togSuvi) {
+        const meta = document.getElementById('lm-offlimb-suvi');
+        const paint = (id) => {
+            const c = sourceCoverage(id);
+            if (meta) {
+                meta.textContent = id === 'suvi'
+                    ? `GOES/SUVI 2.5″/px · ${(c.fraction * 100).toFixed(0)}% of the ring`
+                    : `SDO/AIA 0.6″/px · ${(c.fraction * 100).toFixed(0)}% of the ring`;
+                meta.title = c.note;
+            }
+            document.getElementById('lr-offlimb-suvi')?.classList.toggle('on', id === 'suvi');
+        };
+        togSuvi.checked = qp.get('offlimbSource') === 'suvi';
+        togSuvi.addEventListener('change', (e) => {
+            paint(sunOffLimb.setSource(e.target.checked ? 'suvi' : 'sdo'));
+        });
+        if (togSuvi.checked) sunOffLimb.setSource('suvi');
+        paint(togSuvi.checked ? 'suvi' : 'sdo');
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sunOffLimb?.refresh(); });
     sunOffLimb.setEnabled(_offLimbUserOn && _obsShouldBeOn());
@@ -12799,6 +12858,8 @@ window.__sun = {
     get offLimbCtl() { return sunOffLimb; },
     get offLimbMesh() { return sunOffLimb?.mesh ?? null; },
     refreshOffLimb: () => sunOffLimb?.refresh(true),
+    setOffLimbSource: (id) => sunOffLimb?.setSource(id),
+    get offLimbCoverage() { return sunOffLimb ? sourceCoverage(sunOffLimb.sourceId) : null; },
     setObserved: (on) => { _obsUserOn = !!on; _obsApply('user'); },
     refreshObserved: () => sunObserved?.refresh(true),
     /** Freeze the sim clock at a fixed u_time so a screenshot is deterministic. */
