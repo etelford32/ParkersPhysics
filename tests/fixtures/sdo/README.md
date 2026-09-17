@@ -16,3 +16,31 @@ writes `real_<channel>.jpg` + `real-manifest.json`; `tests/sun-visual.spec.js`
 frames are public-domain NASA imagery.
 
 Do not hand-edit the PNGs; regenerate them.
+
+
+## GOES/SUVI frames (`synthetic_suvi304.png`, `synthetic_suvi131.png`)
+
+Added with SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 3e. Same two lines as the AIA
+304 / 131 frames beside them — He II 304 and Fe XXI/Fe VIII 131 really are the
+same lines in both instruments — rendered at **SUVI's own plate scale**, so the
+disk is 0.2999 of the frame instead of AIA's 0.390.
+
+That difference is the point. `js/sun-offlimb.js` draws a 1.0–1.6 R☉ annulus
+and its shader draws nothing outside the frame; an AIA half-frame stops at
+1.280 R☉ on axis, so it supplies only 65.9 % of that ring, while SUVI reaches
+1.667 R☉ and supplies all of it.
+
+**`PROM-FAR-W` is the probe that makes this measurable.** It is planted on the
++x axis at 1.50 R☉ — deliberately *between* the two instruments' on-axis reach.
+Nothing in the generator special-cases it: the render loop only walks the frame,
+so the feature is simply absent from `synthetic_304.png` — which stays
+BYTE-IDENTICAL to the frame that shipped before the probe existed — and present in
+`synthetic_suvi304.png`. `tests/sun-suvi-layer.spec.js` samples that scene point
+under both sources, with a control probe at 1.15 R☉ that both frames cover.
+
+These remain SYNTHETIC stand-ins. The real SUVI browse path is UNVERIFIED —
+services.swpc.noaa.gov is egress-blocked from the build sandbox, which is why
+`js/suvi-geometry.js` resolves it from a candidate list. Note that a real SUVI
+browse frame is 1280² where these are 512², so the disk is measured here to
+~0.7 % rather than the ~0.1 % the AIA fixtures reach; that is the fixture's
+resolution, not the model's accuracy.

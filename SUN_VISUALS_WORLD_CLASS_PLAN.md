@@ -577,6 +577,113 @@ in §1 are locked by the repo owner.*
     identical filaments; a row with no position is dropped, never placed at
     disk centre. Both gated.
 
+- **2026-09-17 — Phase 3e: GOES/SUVI as a second source for the off-limb ring
+  (done).** The observed off-limb annulus now draws from either SDO/AIA or
+  GOES/SUVI. `js/suvi-geometry.js` (PURE, 16 checks) + the `suvi###` channel
+  family on `/api/solar/aia` + a source toggle on the layer. The disk is
+  untouched and stays SDO — this is a LAYER, not a swap.
+
+  **THE LAYER HAS BEEN DRAWING A DETECTOR EDGE AND NOBODY NOTICED.**
+  `js/sun-offlimb.js` draws 1.0–1.6 R☉ and its shader correctly refuses to
+  clamp-extend a border texel, so outside the frame it draws nothing. An AIA
+  half-frame is 0.6″/px × 4096 px = 1229″ = **1.280 R☉ on axis** (1.811 into
+  the corners). The ring asks for 1.6. MEASURED in closed form and
+  cross-checked against grid quadrature to 3e-3: **an AIA frame supplies 65.9 %
+  of the annulus the layer draws.** The missing third is four lobes on the
+  axes, so the viewer has been reading the shape of the DETECTOR as the shape
+  of the corona. SUVI is 2.5″/px × 1280 px = **1.667 R☉ on axis**, and supplies
+  **100 %** — every azimuth, to the outer edge. That is the whole argument, and
+  it is why SUVI is specifically the right feed for off-limb prominences and
+  flare loops: those are the structures that live where AIA's frame stops.
+
+  **Findings:**
+  - **THE 23 % DISK-FRACTION GAP WOULD HAVE FAILED SILENTLY.** SUVI is 0.2999
+    of its frame against AIA's 0.390, and `resolveDiskGeometry` accepts a
+    measurement only within 12 % of the instrument's expected fraction. Fed a
+    SUVI frame with the AIA fallback, the honest measurement is **rejected**
+    and the layer falls back to 0.390 — drawing the ring **30 % too small**,
+    with the observed limb a third of a solar radius inside the model's. The
+    frame loads, the shader runs, nothing errors, and every prominence is in
+    the wrong place. So `suvi` is a real instrument in `DISK_FRACTION`
+    (imported from the kernel, ONE copy of the number) and every `suvi###`
+    channel resolves to it. Both the node test and the browser gate assert the
+    uniform carries ~0.300 and provably NOT 0.390.
+  - **The vantage is the same, and that is what makes this drop in.** GOES is
+    geostationary: 42 164 km at 1 AU subtends 0.0161°, and the East–West chord
+    0.0197°. The layer's `OFF_AXIS_FULL_DEG` = 12° band is **~750×** that, so
+    the plane of sky SUVI encodes and the plane AIA encodes are the same plane,
+    and B0 is the same B0. `observerBasis` and `solarEphemeris` are reused
+    UNCHANGED. (An earlier draft of this entry said "three orders of
+    magnitude"; it is 745×, and the test computes the factor rather than
+    trusting the prose.)
+  - **SUVI IS NOT SIX AIA CHANNELS.** Its bands are 94/131/171/**195**/**284**/
+    304. 195 (Fe XII) is not AIA's 193 (Fe XII + Fe XXIV) and 284 (Fe XV) is
+    not AIA's 211 (Fe XIV) — a different ion at a similar temperature.
+    `AIA_CORRESPONDENCE` carries the mapping with a `same` flag and the label
+    prints SUVI's own wavelength; the test fails if 195 ever renders as "193".
+    The off-limb pair (304, 131) are both shared lines, which is exactly what
+    makes an A/B between the two sources meaningful.
+  - **The URL is UNVERIFIED and resolves from a candidate list.**
+    services.swpc.noaa.gov is egress-blocked at build time (verified, same as
+    nasa.gov), so guessing one path would fail silently and look like a dead
+    upstream — the `noaa-regions` / `mars-tiles` scar, twice paid for. Two
+    policies on purpose: the IMAGE path tries candidates in order and stops at
+    the first that answers (`X-SUVI-Source` names it); `meta=1` probes EVERY
+    candidate in parallel and reports each one's status, so **ONE production
+    request settles it**:
+
+        curl -s 'https://parkersphysics.com/api/solar/aia?channel=suvi304&meta=1' \
+          | jq '.source_id, .upstream, .candidates'
+
+    Record the winner in `js/suvi-geometry.js` `SOURCE_CANDIDATES`, move it to
+    the head, delete the ones that never hit. A 200 that is not an image is
+    SWPC's HTML error page and is rejected as `not_an_image` rather than
+    decoded as a frame. Primaries are always tried before secondaries (which
+    physical GOES is primary is an operational decision we do not assume — the
+    chip says `primary`/`secondary`, never a satellite number). The route's own
+    contract is gated by `tests/suvi-route.mjs` against a stubbed upstream.
+    Registered as
+    `solar-suvi` in `js/pipeline-registry.js` + `api/health.js`; a total miss
+    answers **200 + freshness:expired**, never a 5xx, so status.html reads the
+    FEED as down rather than the route as broken.
+  - **SUVI's cadence is 4 min, not AIA's 12.** The proxy caches SUVI at 240 s
+    rather than inheriting `CACHE_S` — a layer whose reason for being is
+    watching a prominence erupt must not be served three frames stale.
+  - **The fixture proves the coverage claim on pixels, not arithmetic.**
+    `scripts/lib/sdo-synth.mjs` now renders `suvi304` / `suvi131` at SUVI's own
+    plate scale, and plants `PROM-FAR-W` on the +x axis at **1.50 R☉** —
+    deliberately between the two instruments' on-axis reach, so it is
+    physically absent from the AIA frame and present in the SUVI one. Nothing
+    arranges that; it falls out of the plate scale, because the render loop
+    only walks the frame. **`synthetic_304.png` is byte-identical to the frame
+    that shipped before the probe existed**, so "absent from the AIA frame" is a
+    property of the file rather than a claim about it — and getting there took
+    two wrong sizings worth recording: σ=0.070 put 10.7 counts at the AIA edge
+    (faintly VISIBLE, quietly contradicting the point), and σ=0.045 put 0.16
+    counts there and STILL moved 30 samples by one count, because a
+    sub-quantisation contribution added to the existing halo can cross a
+    rounding boundary. Estimating the contribution alone is not enough; diff the
+    fixture. `tests/sun-suvi-layer.spec.js` samples that point under both
+    sources and requires SUVI brighter, with a CONTROL probe at 1.15 R☉ that
+    both frames cover — without the control the test would pass on any overall
+    brightness difference between sources.
+  - **The UI states its own field of view.** The layer row's meta text is
+    generated from `sourceCoverage()`, which computes the figure from the
+    instrument's disk fraction, so the page cannot claim a field of view the
+    geometry does not have. It reads "SDO/AIA 0.6″/px · 66% of the ring" by
+    default — the disclosure is the point.
+  - **Coverage is computed from DERIVED fractions, not the rounded table.**
+    `DISK_FRACTION` keeps the 0.465 / 0.390 it has always shipped (they feed a
+    ±12 % band where the fourth decimal cannot matter), while the disclosure
+    uses `diskFractionFromPlateScale` — quoting 66.2 % for a number that is
+    65.9 % would be the layer misreporting its own field of view.
+  - **NOT done, deliberately:** the drawn ring stays 1.0–1.6 R☉ for both
+    sources, so the two are directly comparable and an A/B measures field of
+    view rather than two different annuli. SUVI could honestly carry the ring
+    out to 1.667 R☉ (`u_radial` is already a uniform, so it is a per-source
+    value and not a mesh rebuild); recorded here as the obvious next step
+    rather than smuggled into this one.
+
 - **2026-09-15 — two measurements that CONTRADICT this file's own Phase 3 log.**
   Recorded here because acting on the stale numbers would have re-broken
   working code (CLAUDE.md §5).
@@ -1013,6 +1120,7 @@ These mirror the rules the Mars and Moon pages already live by
 | SDO/HMI continuum (`white`), LOS magnetogram (`mag`) | `/api/solar/aia` (exists) | 12 min | Phase 1 near-side disk |
 | SDO/AIA 94/131/171/193/211/304 | `/api/solar/aia` (exists) | 12 min | Phase 1 EUV modes, Phase 3 |
 | GONG far-side helioseismic map | `/api/solar/farside?source=gong` (exists) | ~24 h | Phase 1 far side |
+| GOES/SUVI 94/131/171/195/284/304 | `/api/solar/aia?channel=suvi304` (candidate-resolved) | 4 min | Phase 3e off-limb ring (wide field) |
 | SOHO/LASCO C2, C3 | `js/soho-feed.js` URLs (direct, `<img>`-safe); needs an edge proxy if used as a texture | 20–30 min | Phase 3 coronagraph plane |
 | NOAA SWPC AR list, GOES X-ray | existing feeds | 1 min–daily | unchanged |
 
@@ -1077,4 +1185,22 @@ log. Re-read CLAUDE.md §5 before opening it.
 - **Solar Orbiter EUI far-side EUV** when geometry cooperates
   (`farside-sources.js` already lists it) — would let the far hemisphere be
   observed some of the time. Chip must say which spacecraft.
+- **Settle the SUVI upstream path** (Phase 3e). The browse URL is UNVERIFIED —
+  services.swpc.noaa.gov is egress-blocked from the build sandbox — so it
+  resolves from a candidate list. ONE production request settles it:
+  `curl -s '…/api/solar/aia?channel=suvi304&meta=1' | jq '.source_id, .upstream, .candidates'`.
+  Record the winner in `js/suvi-geometry.js` `SOURCE_CANDIDATES`, move it to the
+  head, delete the ones that never hit, and swap `api/health.js`'s `goes-suvi`
+  URL for it. Until then `status.html` may show that row red for the PATH rather
+  than the feed, which is why the notes field says so.
+- **Carry the off-limb ring out to SUVI's full reach** (Phase 3e). The drawn
+  annulus is 1.0–1.6 R☉ for both sources so an A/B measures field of view and
+  not two different annuli. SUVI honestly supports 1.667 R☉ on axis, and
+  `u_radial` is already a uniform — so this is a per-source value plus a mesh
+  built to the larger outer radius, not a rebuild. Small.
+- **The other four SUVI bands.** `/api/solar/aia` already serves 94/171/195/284
+  and `js/suvi-geometry.js` carries their ions and peak temperatures; only the
+  off-limb layer's cool+hot pair consumes them today. 195 and 284 are NOT AIA's
+  193 and 211 and must never be labelled as such — `AIA_CORRESPONDENCE` carries
+  the flag.
 - **Stereo pair / VR** — nothing here blocks it, nothing here does it.

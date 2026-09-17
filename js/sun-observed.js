@@ -64,6 +64,11 @@
  *  • Nothing procedural changes the colour or shape of an observed pixel.
  */
 
+// GOES/SUVI's plate scale and band table live in their own kernel; this file
+// imports them so DISK_FRACTION carries ONE copy of the number that decides
+// whether a measured SUVI disk is believed (see DISK_FRACTION below).
+import { SUVI_DISK_FRACTION, SUVI_CHANNELS } from './suvi-geometry.js';
+
 const DEG = Math.PI / 180;
 
 // ── Ephemeris (Meeus, Astronomical Algorithms, ch. 25 + 29) ────────────────
@@ -185,10 +190,21 @@ export function projectToPixel(latDeg, lonDeg, geom, width, height) {
 
 // ── Disk geometry ──────────────────────────────────────────────────────────
 
-/** Disk radius as a fraction of the browse frame, per instrument (fallback). */
+/**
+ * Disk radius as a fraction of the browse frame, per instrument (fallback).
+ *
+ * SUVI's entry is IMPORTED rather than typed. It is 23 % from AIA's, and
+ * `resolveDiskGeometry` below accepts a measurement only within 12 % of the
+ * instrument's expected fraction — so a SUVI frame resolved against the AIA
+ * fallback has its honest measurement REJECTED and draws the disk 30 % too
+ * small, with the observed limb a third of a solar radius inside the model's.
+ * See js/suvi-geometry.js's header; two copies of that number is how they
+ * come to disagree.
+ */
 export const DISK_FRACTION = Object.freeze({
-    hmi: 0.465,   // 0.504″/px → R☉ ≈ 1905 px of 4096
-    aia: 0.390,   // 0.600″/px → R☉ ≈ 1600 px of 4096
+    hmi:  0.465,   // 0.504″/px → R☉ ≈ 1905 px of 4096
+    aia:  0.390,   // 0.600″/px → R☉ ≈ 1600 px of 4096
+    suvi: SUVI_DISK_FRACTION,   // 2.500″/px → R☉ ≈ 384 px of 1280 = 0.2999
 });
 
 export const CHANNELS = Object.freeze({
@@ -200,6 +216,14 @@ export const CHANNELS = Object.freeze({
     193:   { code: '0193',  instrument: 'aia', label: 'SDO/AIA 193 Å',           kind: 1 },
     211:   { code: '0211',  instrument: 'aia', label: 'SDO/AIA 211 Å',           kind: 1 },
     304:   { code: '0304',  instrument: 'aia', label: 'SDO/AIA 304 Å',           kind: 1 },
+    // GOES/SUVI — a SECOND instrument on the same vantage, namespaced so the
+    // disk path is untouched. Added for the off-limb layer, whose 1.0–1.6 R☉
+    // annulus an AIA frame only supplies 65.9 % of (js/suvi-geometry.js).
+    // The wavelengths are SUVI's OWN: 195 and 284 are NOT AIA's 193 and 211.
+    ...Object.fromEntries(Object.entries(SUVI_CHANNELS).map(([band, c]) => [
+        `suvi${band}`,
+        { code: c.code, instrument: 'suvi', label: c.label, kind: 1 },
+    ])),
 });
 
 /** sun.html `u_viewMode` value → proxy channel. */
