@@ -14,6 +14,7 @@
  */
 import { deflateSync } from 'node:zlib';
 import { heliographicToVec, projectDiskUV, DISK_FRACTION, CHANNELS } from '../../js/sun-observed.js';
+import { parseSuviChannel } from '../../js/suvi-geometry.js';
 
 /** Planted features shared by every synthetic channel: heliographic degrees. */
 export const PLANTED = Object.freeze([
@@ -36,6 +37,28 @@ export const PLANTED_OFFLIMB = Object.freeze([
     { id: 'PROM-E', channel: '304', x: -1.18, y: 0.10, sigma: 0.075, amp: 0.85 },
     // A 131 Å post-flare loop arcade off the WEST limb (image right).
     { id: 'ARCADE-W', channel: '131', x: 1.14, y: -0.22, sigma: 0.060, amp: 0.90 },
+    // ── The coverage probe (Phase 3e) ──────────────────────────────────────
+    // Planted ON THE +x AXIS at 1.45 R☉, which is deliberately BETWEEN the two
+    // instruments' on-axis reach: AIA's half-frame stops at 1.280 R☉ so this
+    // feature is not in an AIA frame AT ALL, while SUVI's reaches 1.667 so it
+    // is. Nothing special is done to arrange that — the render loop only walks
+    // the frame, so the feature's presence or absence falls out of the plate
+    // scale. It is what lets the browser gate prove the 66 %-vs-100 % claim on
+    // pixels rather than on arithmetic. See js/suvi-geometry.js.
+    // POSITION AND WIDTH ARE BOTH SIZED, not picked. The AIA frame's on-axis
+    // edge is 1.280 R☉; at x = 1.50 with σ = 0.040 that is 5.5σ away, so the
+    // Gaussian contributes 6e-5 of a code value there. That is what makes the
+    // AIA fixture BYTE-IDENTICAL to the one that shipped before this feature
+    // existed — "absent from the AIA frame" is then a property of the file, not
+    // a claim about it. Two earlier sizings are recorded because each was
+    // wrong in an instructive way: σ=0.070 put 10.7 counts at the frame edge
+    // (the feature was faintly VISIBLE in AIA, quietly contradicting the whole
+    // point), and σ=0.045 put 0.16 counts there — which still moved 30 samples
+    // by one count, because a sub-quantisation contribution ADDED TO THE
+    // EXISTING HALO can still cross a rounding boundary. Estimating the
+    // contribution alone is not enough; the fixture has to be diffed.
+    // 3σ out is 1.620 R☉, inside SUVI's 1.667 reach, so SUVI gets all of it.
+    { id: 'PROM-FAR-W', channel: '304', x: 1.50, y: 0.00, sigma: 0.040, amp: 0.80 },
 ]);
 
 /**
@@ -81,6 +104,11 @@ function vnoise(x, y) {
 export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) {
     const ch = CHANNELS[String(channel)];
     if (!ch) throw new Error(`unknown channel ${channel}`);
+    // A SUVI channel draws the SAME LINE as its AIA namesake (304 is He II in
+    // both), so the corona profile, the planted features and the tint are
+    // looked up by BAND while the geometry comes from the instrument. That
+    // split is the whole fixture: same physics, different field of view.
+    const band = parseSuviChannel(channel) ?? String(channel);
     const r = DISK_FRACTION[ch.instrument];
     const geom = { cx: 0.5, cy: 0.5, r, b0Rad: b0Deg * Math.PI / 180 };
     const rgb = new Uint8Array(size * size * 3);
@@ -123,12 +151,12 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
                 // Off-limb corona + any planted off-limb feature. Optically
                 // thin emission is plane-of-sky, so both are drawn in ρ (the
                 // plane-of-sky radius) and never projected onto the sphere.
-                const oc = OFFLIMB_CORONA[String(channel)] || { amp: 0.18, scale: 0.20 };
+                const oc = OFFLIMB_CORONA[band] || { amp: 0.18, scale: 0.20 };
                 let halo = 0;
                 if (rho >= 1) {
                     halo = oc.amp * Math.exp(-(rho - 1) / oc.scale);
                     for (const f of PLANTED_OFFLIMB) {
-                        if (f.channel !== String(channel)) continue;
+                        if (f.channel !== band) continue;
                         // Plane-of-sky offset in R☉: +x image right, +y image up.
                         const fx = dx / r - f.x, fy = -(dy / r) - f.y;
                         halo += f.amp * Math.exp(-(fx * fx + fy * fy) / (2 * f.sigma * f.sigma));
@@ -145,11 +173,13 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
                     }
                 }
                 I = Math.min(1, I);
-                const tint = channel === '304' ? [1.0, 0.42, 0.16]
-                           : channel === '171' ? [0.95, 0.72, 0.22]
-                           : channel === '193' ? [0.80, 0.72, 0.30]
-                           : channel === '211' ? [0.72, 0.40, 0.92]
-                           : channel === '131' ? [0.25, 0.80, 0.82]
+                const tint = band === '304' ? [1.0, 0.42, 0.16]
+                           : band === '171' ? [0.95, 0.72, 0.22]
+                           : band === '193' ? [0.80, 0.72, 0.30]
+                           : band === '195' ? [0.80, 0.72, 0.30]
+                           : band === '211' ? [0.72, 0.40, 0.92]
+                           : band === '284' ? [0.72, 0.40, 0.92]
+                           : band === '131' ? [0.25, 0.80, 0.82]
                            :                     [0.50, 0.85, 0.50];
                 R = Math.round(255 * I * tint[0]); G = Math.round(255 * I * tint[1]); B = Math.round(255 * I * tint[2]);
             }
@@ -163,7 +193,8 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
             synthetic: true, channel: String(channel), code: ch.code, instrument: ch.instrument,
             epoch: FIXTURE_EPOCH_ISO, b0Deg, geom: { cx: geom.cx, cy: geom.cy, r },
             planted: spots.map(s => ({ id: s.id, latDeg: s.latDeg, lonDeg: s.lonDeg, px: s.px, py: s.py, visible: s.visible })),
-            plantedOffLimb: PLANTED_OFFLIMB.filter(f => f.channel === String(channel))
+            band,
+            plantedOffLimb: PLANTED_OFFLIMB.filter(f => f.channel === band)
                 .map(f => ({ id: f.id, x: f.x, y: f.y, sigma: f.sigma })),
         },
     };

@@ -21,6 +21,9 @@
  *     reading as a full-disk eruption in the running difference
  *   • the chip label names the channels actually drawn and never implies a
  *     difference is ready before two distinct observations exist
+ *   • the SECOND SOURCE (GOES/SUVI) draws the same two lines on the same
+ *     plane, is never silently substituted in the chip, and reports a field of
+ *     view computed from its own plate scale
  */
 import assert from 'node:assert/strict';
 import {
@@ -29,6 +32,7 @@ import {
     annulusWeight, observerBasis, planeOfSkyUV, offAxisWeight, offAxisWeightDeg,
     calibrateOffLimb, offLimbLabel, OFFLIMB_FRAG, OFFLIMB_VERT,
     displayStretch, STRETCH_GAMMA, DEFAULT_GAIN,
+    OFFLIMB_SOURCES, DEFAULT_SOURCE, offLimbSource, sourceCoverage,
 } from '../js/sun-offlimb.js';
 import { linearToSrgb, solarEphemeris } from '../js/sun-observed.js';
 
@@ -334,4 +338,66 @@ ok('B0 really does move the plane (the basis is not a constant)', () => {
         `the two extremes are >10° apart, got ${(Math.acos(cos) * 180 / Math.PI).toFixed(2)}°`);
 });
 
-console.log(`\n${passed} checks passed`);
+
+
+// ── The second source (Phase 3e) ───────────────────────────────────────────
+
+ok('the default source is SDO and both sources draw the same two lines', () => {
+    assert.equal(DEFAULT_SOURCE, 'sdo');
+    assert.deepEqual([...OFFLIMB_SOURCES.sdo.channels], [...OFFLIMB_CHANNELS]);
+    // Same BANDS (304 cool + 131 hot), different proxy channels: the pairing
+    // the layer is built around carries over, only the instrument moves.
+    assert.deepEqual([...OFFLIMB_SOURCES.suvi.bands], [...OFFLIMB_SOURCES.sdo.bands]);
+    assert.notDeepEqual([...OFFLIMB_SOURCES.suvi.channels], [...OFFLIMB_SOURCES.sdo.channels]);
+    for (const src of Object.values(OFFLIMB_SOURCES)) {
+        assert.equal(src.channels.length, 2, 'two slots, A and B');
+        assert.equal(src.bands.length, 2);
+    }
+});
+
+ok('an unknown source id falls back rather than throwing', () => {
+    assert.equal(offLimbSource('nope').id, 'sdo');
+    assert.equal(offLimbSource(undefined).id, 'sdo');
+    assert.equal(offLimbSource('suvi').id, 'suvi');
+});
+
+ok('SUVI is the wider field and that is the whole reason it is here', () => {
+    const sdo = sourceCoverage('sdo'), suvi = sourceCoverage('suvi');
+    // The SDO frame does NOT cover the annulus this module draws...
+    assert.ok(sdo.fraction < 0.7, `SDO coverage ${sdo.fraction}`);
+    assert.ok(sdo.reach.axis < R_OUTER, 'and it falls short on the axes');
+    // ...while SUVI does, everywhere.
+    assert.ok(1 - suvi.fraction < 1e-12, `SUVI coverage ${suvi.fraction}`);
+    assert.ok(suvi.reach.axis > R_OUTER);
+    // The trade is resolution: SUVI's plate scale is coarser, which is why the
+    // DISK path is not moved to it.
+    assert.ok(OFFLIMB_SOURCES.suvi.plateScale > OFFLIMB_SOURCES.sdo.plateScale);
+});
+
+ok('the chip never substitutes one instrument for the other silently', () => {
+    const chans = (bands) => bands.map(b => ({ channel: b, band: b, ok: true }));
+    const base = { enabled: true, axisWeight: 1, channels: chans(['304', '131']) };
+    // The default source stays unadorned — no regression in the existing label.
+    assert.equal(offLimbLabel({ ...base, sourceId: 'sdo' }), ' · off-limb 304+131');
+    // SUVI is NAMED. 304 from SUVI and 304 from AIA are the same line but not
+    // the same measurement, so a source switch must be visible.
+    const suvi = offLimbLabel({ ...base, sourceId: 'suvi' });
+    assert.match(suvi, /GOES\/SUVI/);
+    assert.match(suvi, /304\+131/);
+    // …in every state the label has.
+    assert.match(offLimbLabel({ ...base, sourceId: 'suvi', feedDown: true, channels: [] }), /GOES\/SUVI feed down/);
+    assert.match(offLimbLabel({ ...base, sourceId: 'suvi', axisWeight: 0 }), /GOES\/SUVI 304\+131 \(off-axis\)/);
+    assert.match(offLimbLabel({ ...base, sourceId: 'suvi', diff: true, diffReady: true }), /ΔGOES\/SUVI/);
+    assert.match(offLimbLabel({ ...base, sourceId: 'suvi', diff: true, diffReady: false }), /awaiting next frame/);
+});
+
+ok('the chip prints the BAND, not the proxy channel name', () => {
+    const label = offLimbLabel({
+        enabled: true, axisWeight: 1, sourceId: 'suvi',
+        channels: [{ channel: 'suvi304', band: '304', ok: true }, { channel: 'suvi131', band: '131', ok: true }],
+    });
+    assert.ok(!label.includes('suvi304'), `leaked the proxy name: ${label}`);
+    assert.match(label, /304\+131/);
+});
+
+console.log(`\n${passed} checks passed (off-limb)`);

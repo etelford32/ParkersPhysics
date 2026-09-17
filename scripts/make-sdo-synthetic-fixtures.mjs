@@ -3,7 +3,8 @@
  * scripts/make-sdo-synthetic-fixtures.mjs — regenerate tests/fixtures/sdo/*
  *
  * Writes one SYNTHETIC frame per channel sun.html can wrap (white, mag, 171,
- * 193, 211, 131, 304) plus a manifest.json carrying the planted-feature ground
+ * 193, 211, 131, 304) plus the two GOES/SUVI bands the off-limb layer's second
+ * source draws (suvi304, suvi131), plus a manifest.json carrying the planted-feature ground
  * truth. See tests/fixtures/sdo/README.md — these are stand-ins with the
  * real browse-frame geometry, not observations. Replace with real frames via
  * scripts/fetch-sdo-fixtures.mjs on a machine that can reach nasa.gov.
@@ -13,15 +14,18 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderSyntheticDisk, encodePng, FIXTURE_EPOCH_ISO, PLANTED } from './lib/sdo-synth.mjs';
+import { renderSyntheticDisk, encodePng, FIXTURE_EPOCH_ISO, PLANTED, PLANTED_OFFLIMB } from './lib/sdo-synth.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT  = join(ROOT, 'tests', 'fixtures', 'sdo');
 const size = Number((process.argv.find(a => a.startsWith('--size=')) || '--size=512').split('=')[1]);
 mkdirSync(OUT, { recursive: true });
 
-const manifest = { synthetic: true, generated: new Date().toISOString(), epoch: FIXTURE_EPOCH_ISO, size, planted: PLANTED, frames: {} };
-for (const ch of ['white', 'mag', '171', '193', '211', '131', '304']) {
+const manifest = { synthetic: true, generated: new Date().toISOString(), epoch: FIXTURE_EPOCH_ISO, size, planted: PLANTED, plantedOffLimb: PLANTED_OFFLIMB, frames: {} };
+// The two SUVI bands the off-limb layer draws are rendered too: same lines,
+// SUVI's own plate scale, so the fixture set can exercise BOTH sources of
+// js/sun-offlimb.js without reaching NOAA. See js/suvi-geometry.js.
+for (const ch of ['white', 'mag', '171', '193', '211', '131', '304', 'suvi304', 'suvi131']) {
     const frame = renderSyntheticDisk(ch, { size });
     const name  = `synthetic_${ch}.png`;
     writeFileSync(join(OUT, name), encodePng(frame));

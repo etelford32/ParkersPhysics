@@ -1,6 +1,6 @@
 {
   "synthetic": true,
-  "generated": "2026-09-15T13:06:10.797Z",
+  "generated": "2026-09-17T01:58:43.287Z",
   "epoch": "2026-09-06T12:00:00Z",
   "size": 512,
   "planted": [
@@ -24,6 +24,32 @@
       "lonDeg": -60,
       "areaMh": 140,
       "polarity": 1
+    }
+  ],
+  "plantedOffLimb": [
+    {
+      "id": "PROM-E",
+      "channel": "304",
+      "x": -1.18,
+      "y": 0.1,
+      "sigma": 0.075,
+      "amp": 0.85
+    },
+    {
+      "id": "ARCADE-W",
+      "channel": "131",
+      "x": 1.14,
+      "y": -0.22,
+      "sigma": 0.06,
+      "amp": 0.9
+    },
+    {
+      "id": "PROM-FAR-W",
+      "channel": "304",
+      "x": 1.5,
+      "y": 0,
+      "sigma": 0.04,
+      "amp": 0.8
     }
   ],
   "frames": {
@@ -66,6 +92,7 @@
           "visible": true
         }
       ],
+      "band": "131",
       "plantedOffLimb": [
         {
           "id": "ARCADE-W",
@@ -114,6 +141,7 @@
           "visible": true
         }
       ],
+      "band": "171",
       "plantedOffLimb": []
     },
     "193": {
@@ -155,6 +183,7 @@
           "visible": true
         }
       ],
+      "band": "193",
       "plantedOffLimb": []
     },
     "211": {
@@ -196,6 +225,7 @@
           "visible": true
         }
       ],
+      "band": "211",
       "plantedOffLimb": []
     },
     "304": {
@@ -237,12 +267,19 @@
           "visible": true
         }
       ],
+      "band": "304",
       "plantedOffLimb": [
         {
           "id": "PROM-E",
           "x": -1.18,
           "y": 0.1,
           "sigma": 0.075
+        },
+        {
+          "id": "PROM-FAR-W",
+          "x": 1.5,
+          "y": 0,
+          "sigma": 0.04
         }
       ]
     },
@@ -285,6 +322,7 @@
           "visible": true
         }
       ],
+      "band": "white",
       "plantedOffLimb": []
     },
     "mag": {
@@ -326,7 +364,112 @@
           "visible": true
         }
       ],
+      "band": "mag",
       "plantedOffLimb": []
+    },
+    "suvi304": {
+      "file": "synthetic_suvi304.png",
+      "synthetic": true,
+      "channel": "suvi304",
+      "code": "304",
+      "instrument": "suvi",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.299884375
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 306.72467368227916,
+          "py": 206.63591597903212,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 169.85709875864268,
+          "py": 279.26338757377727,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 132.71214653014124,
+          "py": 193.6574284363345,
+          "visible": true
+        }
+      ],
+      "band": "304",
+      "plantedOffLimb": [
+        {
+          "id": "PROM-E",
+          "x": -1.18,
+          "y": 0.1,
+          "sigma": 0.075
+        },
+        {
+          "id": "PROM-FAR-W",
+          "x": 1.5,
+          "y": 0,
+          "sigma": 0.04
+        }
+      ]
+    },
+    "suvi131": {
+      "file": "synthetic_suvi131.png",
+      "synthetic": true,
+      "channel": "suvi131",
+      "code": "131",
+      "instrument": "suvi",
+      "epoch": "2026-09-06T12:00:00Z",
+      "b0Deg": -4,
+      "geom": {
+        "cx": 0.5,
+        "cy": 0.5,
+        "r": 0.299884375
+      },
+      "planted": [
+        {
+          "id": "AR-A",
+          "latDeg": 15,
+          "lonDeg": 20,
+          "px": 306.72467368227916,
+          "py": 206.63591597903212,
+          "visible": true
+        },
+        {
+          "id": "AR-B",
+          "latDeg": -12,
+          "lonDeg": -35,
+          "px": 169.85709875864268,
+          "py": 279.26338757377727,
+          "visible": true
+        },
+        {
+          "id": "AR-C",
+          "latDeg": 22,
+          "lonDeg": -60,
+          "px": 132.71214653014124,
+          "py": 193.6574284363345,
+          "visible": true
+        }
+      ],
+      "band": "131",
+      "plantedOffLimb": [
+        {
+          "id": "ARCADE-W",
+          "x": 1.14,
+          "y": -0.22,
+          "sigma": 0.06
+        }
+      ]
     }
   }
 }
