@@ -22,6 +22,10 @@ import { precessionLongitudeRad, rotateAboutPole, LD_AU, R2D } from '../js/neo-o
  *   - the approach list selects an object, the data card fills, the camera
  *     lock anchor follows, and selecting a planet clears it again
  *   - the time controls move the population (a scrub is a real re-propagation)
+ *   - a CLICK selects what is under the cursor, a DRAG selects nothing and empty
+ *     sky selects nothing — the two halves of the "it picks NEOs at random" bug
+ *   - a HOVER names the body a click would take, and marks it
+ *   - the population is drawn as SUNLIT BODIES, not additive point sources
  *   - feeds down ⇒ the page says so, draws nothing, and raises no page error
  *
  * The flyby objects are SYNTHESISED at test time from the page's own VSOP87D
@@ -140,6 +144,50 @@ async function waitForFrames(page) {
         const L = window.__neoLab?.layer;
         return !!L && L.count > 0 && L.frameJd != null && L.status.tiersPending.length === 0;
     }, null, { timeout: 45_000 });
+}
+
+/**
+ * Every loaded object that is currently DRAWN, with its position in client
+ * pixels. The pick contract is stated in pixels (js/neo-layer.js pick()), so a
+ * gate that cannot measure pixels cannot check it.
+ */
+async function drawnPixels(page) {
+    return page.evaluate(() => {
+        const lab = window.__neoLab, L = lab.layer;
+        const r = lab.canvas.getBoundingClientRect();
+        const out = [];
+        for (let i = 0; i < L.count; i++) {
+            if (!(L._alpha[i] > 0.05) && !L._meshed.has(i)) continue;
+            const p = L.drawnPosition(i);
+            if (!p) continue;
+            const c = p.project(lab.camera);
+            if (!(c.z > -1 && c.z < 1)) continue;
+            out.push({ i, des: L.els[i].des,
+                x: r.left + (c.x * 0.5 + 0.5) * r.width,
+                y: r.top + (-c.y * 0.5 + 0.5) * r.height });
+        }
+        return out;
+    });
+}
+
+/**
+ * The most ISOLATED drawn object in the canvas's middle band that the page's own
+ * pick paths agree is there and is not behind a planet. Isolation matters: the
+ * assertion is about WHICH object a click takes, so a candidate with a neighbour
+ * a few pixels away would make a correct pick look like a wrong one.
+ */
+async function isolatedTarget(page) {
+    const pts = (await drawnPixels(page)).filter(p => p.x > 380 && p.x < 940 && p.y > 150 && p.y < 560);
+    const ranked = pts.map((a) => {
+        let near = Infinity;
+        for (const b of pts) if (b !== a) near = Math.min(near, Math.hypot(a.x - b.x, a.y - b.y));
+        return { ...a, near };
+    }).sort((a, b) => b.near - a.near).slice(0, 8);
+    for (const cand of ranked) {
+        const probe = await page.evaluate(([x, y]) => window.__neoLab.probeAt(x, y), [cand.x, cand.y]);
+        if (!probe.planet && probe.neo != null) return { ...cand, probe };
+    }
+    return null;
 }
 
 test.describe('solar-system.html — near-Earth objects', () => {
@@ -376,6 +424,166 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(after.mode).toBe('class');
         expect(after.rgb).not.toEqual(before.rgb);
         expect(after.rgb[0]).toBeGreaterThan(0.9);   // PHA red
+        expect(errors).toEqual([]);
+    });
+
+    test('a click selects what is under the cursor — a drag selects nothing, and empty sky selects nothing', async ({ page }) => {
+        // THE REPORTED BUG, twice over. Selection fired on pointerdown, so every
+        // camera orbit that began over the population selected whatever was
+        // under the press; and the pick radius was a WORLD-space threshold
+        // (0.012 x camera range) compared against distanceToRay, so a click on
+        // empty sky returned an object hundreds of pixels away. Together they
+        // read as the page selecting at random. Both are pinned here.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 20_000 });
+
+        // 1. A DRAG that starts on a body selects nothing — it belongs to the camera.
+        const dragFrom = await isolatedTarget(page);
+        expect(dragFrom, 'an isolated drawn object to drag from').not.toBeNull();
+        await page.mouse.move(dragFrom.x, dragFrom.y);
+        await page.mouse.down();
+        await page.mouse.move(dragFrom.x + 46, dragFrom.y + 34, { steps: 6 });
+        await page.mouse.up();
+        await page.waitForTimeout(400);
+        expect(await page.evaluate(() => window.__neoLab.layer.selectedIndex), 'a drag is a camera move, not a selection').toBeNull();
+
+        // 2. A click on empty sky selects nothing. The candidate is chosen with
+        //    probeAt (no planet, no NEO there); the assertion is a real click.
+        const pts = await drawnPixels(page);
+        let empty = null;
+        for (let x = 420; x <= 900 && !empty; x += 20) {
+            for (let y = 170; y <= 550 && !empty; y += 20) {
+                if (pts.some(p => Math.hypot(p.x - x, p.y - y) < 60)) continue;
+                const probe = await page.evaluate(([cx, cy]) => window.__neoLab.probeAt(cx, cy), [x, y]);
+                if (!probe.planet && probe.neo == null) empty = { x, y };
+            }
+        }
+        expect(empty, 'a patch of empty sky in the middle of the canvas').not.toBeNull();
+        await page.mouse.move(empty.x, empty.y);
+        await page.mouse.down(); await page.mouse.up();
+        await page.waitForTimeout(300);
+        expect(await page.evaluate(() => window.__neoLab.layer.selectedIndex), 'empty sky selects nothing').toBeNull();
+
+        // 3. A click ON a body selects THAT body — measured in pixels against the
+        //    positions as they were when the click was dispatched (selectBody()
+        //    locks the camera, which moves everything afterwards).
+        await page.waitForTimeout(400);
+        const target = await isolatedTarget(page);
+        expect(target, 'an isolated drawn object to click').not.toBeNull();
+        const before = await drawnPixels(page);
+        await page.mouse.move(target.x, target.y);
+        await page.mouse.down(); await page.mouse.up();
+        await page.waitForTimeout(400);
+        const sel = await page.evaluate(() => ({
+            index: window.__neoLab.layer.selectedIndex,
+            name: window.__neoLab.selectedBody?.name,
+            neoIndex: window.__neoLab.selectedBody?.neoIndex,
+        }));
+        expect(sel.index, 'a click on a body selects a body').not.toBeNull();
+        expect(sel.neoIndex).toBe(sel.index);
+        const hit = before.find(p => p.i === sel.index);
+        expect(hit, 'the selected object was on screen when it was clicked').toBeTruthy();
+        // The accept radius is the DRAWN radius plus GRAB_PX of grace; nothing
+        // further from the cursor than that may ever win.
+        expect(Math.hypot(hit.x - target.x, hit.y - target.y)).toBeLessThan(16);
+        expect(errors).toEqual([]);
+    });
+
+    test('hovering names the body a click would take, and marks it', async ({ page }) => {
+        // The population is dark bodies a few pixels across, so "what am I about
+        // to click?" has to be answerable before the click.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 20_000 });
+        const target = await isolatedTarget(page);
+        expect(target).not.toBeNull();
+        await page.mouse.move(target.x, target.y);
+        await page.waitForTimeout(250);
+        const hov = await page.evaluate(() => ({
+            index: window.__neoLab.layer.hoverIndex,
+            marker: window.__neoLab.layer.hoverMarker.visible,
+            tip: document.getElementById('neo-hover-tip').textContent,
+            shown: getComputedStyle(document.getElementById('neo-hover-tip')).display,
+            cursor: window.__neoLab.canvas.style.cursor,
+            selected: window.__neoLab.layer.selectedIndex,
+        }));
+        expect(hov.index).toBe(target.probe.neo);
+        expect(hov.marker).toBe(true);
+        expect(hov.shown).not.toBe('none');
+        expect(hov.tip).toContain(await page.evaluate((i) => window.__neoLab.layer.els[i].des, target.probe.neo));
+        expect(hov.cursor).toBe('pointer');
+        expect(hov.selected, 'a hover is not a selection').toBeNull();
+        // Off the body: the mark and the tooltip go away.
+        await page.mouse.move(target.x + 220, target.y + 150);
+        await page.waitForTimeout(250);
+        const off = await page.evaluate(() => ({
+            index: window.__neoLab.layer.hoverIndex,
+            marker: window.__neoLab.layer.hoverMarker.visible,
+            shown: getComputedStyle(document.getElementById('neo-hover-tip')).display,
+        }));
+        if (off.index == null) { expect(off.marker).toBe(false); expect(off.shown).toBe('none'); }
+        expect(errors).toEqual([]);
+    });
+
+    test('the population is drawn as sunlit bodies, not additive point sources', async ({ page }) => {
+        // "Shadows at a distance, not little lights." A rock reflects sunlight;
+        // it does not emit it. If this ever goes back to AdditiveBlending the
+        // population glows on its own again and 38 000 of them stack into a haze.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        // The coma needs a WORKER FRAME, not just a loaded catalogue: the last
+        // tier in the ladder empties tiersPending and rebuilds the attribute
+        // arrays, so `_coma` can legitimately be all zeros for one more frame.
+        // (Caught as a 1-in-3 flake on this very assertion.)
+        await page.waitForFunction(() => {
+            const L = window.__neoLab.layer, i = L.byDes.get('2P');
+            return i != null && L._coma && L._coma[i] > 0;
+        }, null, { timeout: 20_000 });
+        const draw = await page.evaluate(() => {
+            const lab = window.__neoLab, L = lab.layer, THREE = lab.THREE;
+            const m = L.points.material;
+            const iComet = L.byDes.get('2P'), iRock = L.byDes.get('433');
+            const albedo = Array.from(L._albedo.slice(0, L.count));
+            return {
+                blending: m.blending, normal: THREE.NormalBlending, additive: THREE.AdditiveBlending,
+                premultiplied: m.premultipliedAlpha, depthWrite: m.depthWrite,
+                sameMaterial: L.localPoints.material === m,
+                hasAlbedo: !!L.points.geometry.attributes.aAlbedo,
+                hasComa: !!L.points.geometry.attributes.aComa,
+                albedoMin: Math.min(...albedo), albedoMax: Math.max(...albedo),
+                cometAlbedo: L._albedo[iComet], cometComa: L._coma[iComet],
+                rockAlpha: L._alpha[iRock],
+                fs: m.fragmentShader, vs: m.vertexShader,
+            };
+        });
+        // Not a light source.
+        expect(draw.blending).toBe(draw.normal);
+        expect(draw.blending).not.toBe(draw.additive);
+        expect(draw.premultiplied).toBe(true);
+        expect(draw.depthWrite).toBe(false);
+        expect(draw.sameMaterial, 'both frames draw the same kind of body').toBe(true);
+        // A lit body, shaded from the Sun at the scene origin.
+        expect(draw.vs).toContain('viewMatrix * vec4(0.0, 0.0, 0.0, 1.0)');
+        expect(draw.fs).toContain('dot(n, vSun)');
+        expect(draw.fs).not.toContain('spikes');          // the diffraction cross of a point source
+        // Albedo is the taxonomy's, and a comet nucleus is among the darkest.
+        expect(draw.hasAlbedo).toBe(true);
+        expect(draw.hasComa).toBe(true);
+        // The attribute is a Float32Array, so 0.04 reads back as 0.0399999991 —
+        // compare with a tolerance, not against the literal.
+        expect(draw.albedoMin).toBeGreaterThan(0.039);
+        expect(draw.albedoMax).toBeLessThan(0.201);
+        expect(draw.cometAlbedo).toBeCloseTo(0.04, 3);
+        expect(draw.cometComa, '2P/Encke at perihelion has a coma').toBeGreaterThan(0);
+        // Alpha is visibility, not magnitude: a drawn body is opaque.
+        expect(draw.rockAlpha).toBeCloseTo(1, 5);
         expect(errors).toEqual([]);
     });
 

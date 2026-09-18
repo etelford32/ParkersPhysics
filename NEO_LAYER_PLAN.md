@@ -94,10 +94,32 @@ through it.
   seeded phase), so warp and scrub stay honest. Rocks light themselves from
   the Sun direction (the page's PointLight decays physically and leaves 1 AU
   dim) — same convention as the page's planet shader.
-- **Sprites for the far field only**, sized and brightened by absolute
-  magnitude, additive Gaussian PSF with a faint diffraction cross on the
-  brightest, NATURAL S/C-type tints by default (PHAs warm-biased) with the
-  class palette behind a "Colour by class" toggle.
+- **The far field is the SAME BODY, drawn as a sphere impostor** (2026-09-18).
+  It used to be an additive Gaussian PSF with a diffraction cross — the
+  rendering convention for a point SOURCE of light. Three things followed: the
+  population glowed on its own, tens of thousands of additive sprites stacked
+  into an orange haze, and an object CHANGED SPECIES as it crossed `ROCK_RANGE`
+  into a Lambert-shaded mesh. `POINT_VS` / `POINT_FS` now shade the visible
+  hemisphere with the same terms as `ROCK_FS`. The Sun is the scene origin, so
+  the vertex shader has the exact solar direction in view space for free
+  (`viewMatrix * vec4(0,0,0,1)`), and **the phase angle is real** — an object
+  between the camera and the Sun is a crescent, one at opposition a full disc;
+  nothing is keyed to it. Blending is **normal, premultiplied**, so a body in
+  front of the Sun is a SILHOUETTE and no number of bodies can add up to a glow.
+  Tone is `aAlbedo`, from the same taxonomy hash the colour reads (S-type 0.20 →
+  C-type 0.045, cometary nucleus 0.04), compressed and disclosed like the sizes.
+  **The magnitude-derived ALPHA is gone**: H is size *and* albedo, both of which
+  the body now carries honestly, and as an opacity it made a faint rock a
+  see-through one the moment the blend stopped being additive. Alpha is
+  visibility and the local-frame cross-fade, nothing else. NATURAL S/C-type
+  tints stay the default, the class palette stays behind "Colour by class".
+- **A comet's coma is the one thing here that may glow.** `aComa` carries its
+  1/r² strength (the tails' own law) and the nucleus stays the dark body it is —
+  the sprite no longer swells to fake a coma.
+- **Attention is a RETICLE, never a halo.** Flybys within ±7 d, in-zone objects
+  and the hovered body wear a hairline ring outside the limb, breathing in
+  OPACITY (a size pulse reads as a body that changes size). A halo says "this
+  object is bright"; a ring says "the page is pointing at it".
 - **Comets grow tails**: ion tail straight anti-sunward (exact — the Sun is
   the scene origin), dust tail lagging the motion with a t² curve, lengths
   and coma ∝ 1/r² inside 3.5 AU; the nucleus mesh gets a self-lit haze.
@@ -112,6 +134,37 @@ through it.
 - **Sizes are a disclosed log map** (`drawnRockRadius`): a 30 m rock and Eros
   differ 500× in reality and ~4× on screen. Never used for physics.
 
+## 2c. Interaction (2026-09-18, the "it selects at random" pass)
+
+- **A click is not the start of a drag.** Selection fired on `pointerdown`, so
+  every camera orbit that began over the population selected whatever was under
+  the press and — through `selectBody()` → `setCamLock()` — threw the camera
+  into a lock on it. It now fires on `pointerup`, and only when the pointer
+  stayed inside `CLICK_SLOP_PX` (6 px, or `TOUCH_SLOP_PX` 12 for a finger or a
+  pen — a touch never lands as still as a mouse) for less than `CLICK_MAX_MS`
+  (700). Same rule mars.html already carries: a confirmed drag is the camera's,
+  a bare click is a selection. Right and middle buttons never select.
+- **Picking is measured in PIXELS.** `pick()` takes `{ camera, ndc, pixels }`
+  and the accept radius is THE DRAWN RADIUS — `gl_PointSize / 2` plus `GRAB_PX`
+  of grace for a 2 px body. It cannot drift from what is drawn, because the
+  attenuation clamp, both pads and the pixel floor live once in `SPRITE` and are
+  interpolated into the GLSL, and `drawnPx()` is the JS mirror of `POINT_VS`
+  (`clip.w` IS −viewZ for a perspective camera — the exact term the vertex
+  shader attenuates by). The rule a visitor can learn: you can click what you
+  can see, and only what you can see.
+- **Rock meshes are picked first, and exactly.** A body close enough to be drawn
+  as a shaped rock was previously not clickable at all: only the two point
+  clouds were in the pick set, and a meshed object's sprite is suppressed
+  (`_meshed` ⇒ alpha 0), so the one object on screen with a real silhouette was
+  the one thing a click could not hit.
+- **Hover answers "what am I about to click?"** before the click, because the
+  population is dark bodies a few pixels across. `hover(index)` seats the same
+  reticle the selection uses (dimmer), `hoverText(index)` fills `#neo-hover-tip`
+  — `position: fixed` (it is placed from clientX/clientY) and
+  `pointer-events: none` (a tooltip that can be hovered steals the pointermove
+  keeping it alive). Throttled to 70 ms: a pick projects the whole loaded
+  catalogue, which is sub-millisecond but not free, and no hover needs frame rate.
+
 ## 3. Scars (each was a bug during the build)
 
 - **TDZ abort.** `NeoPanel` renders synchronously in its constructor and
@@ -123,6 +176,18 @@ through it.
   a dozen flyby labels stacked on the Earth disc. Ring labels show when the
   1 LD ring subtends > 2 % of the view, object labels when the 20 LD ring
   subtends > 8 %; the selected object never gets a second local label.
+  **That was necessary and not sufficient** — the gate decides WHETHER the class
+  of labels is drawn, not whether any two of them collide, and with Earth in
+  front of the Sun a dozen of them still stacked across the glare (2026-09-18,
+  reported from a live screenshot). The cap is now `LOCAL_LABEL_MAX` = 8 AND a
+  screen-separation test: `_labelClear()` projects each candidate and drops it
+  if it lands within `LABEL_SEP_NDC` of one already placed — nearest object
+  first, so the closer one keeps its label. Separation is in NDC because the
+  labels are `sizeAttenuation:false` sprites, i.e. sized as a fraction of the
+  VIEW. What is dropped is not lost: hover names it. The pass re-runs on camera
+  motion as well as on a worker frame, throttled — otherwise orbiting with the
+  SIM PAUSED never re-places anything, because the frame that normally does it
+  never arrives.
 - **Label re-raster per worker frame.** A flyby label's text carries its
   distance, which changes every frame at warp speed; rebuilding a canvas
   texture per frame × 12 labels was the most expensive thing on the page.
@@ -132,8 +197,15 @@ through it.
 - **"(2024 YR4)" ≠ "2024 YR4".** SBDB's `full_name` for unnamed objects is
   the designation in parentheses; the "same as designation → ship null"
   byte-saver has to strip them.
-- **Points raycast sorts along the ray, not across it.** `pick()` re-sorts
-  hits by `distanceToRay` so a click means "nearest the cursor".
+- **Points raycast sorts along the ray, not across it.** The first `pick()`
+  re-sorted hits by `distanceToRay` so a click meant "nearest the cursor" —
+  which is still the right idea and still the wrong measure. `distanceToRay` is
+  a perpendicular distance in SCENE units, and the threshold it was compared
+  against (0.012 × the camera range) is a world-space radius: on a log radial
+  scale that is a fraction of a pixel out at Neptune and a third of the screen a
+  few hundredths of a unit from the eye. A click on empty sky routinely returned
+  an object hundreds of pixels away, which is what "it selects random NEOs"
+  looks like from the outside. Measure in pixels (§2c).
 - **"Earth View" did not look at Earth.** The page's preset was a fixed
   camera aimed at the +X axis, where Earth sits in late September; on any
   other date it framed empty space (the Geminids capture on Dec 14 showed
@@ -144,6 +216,18 @@ through it.
   gives 162 vertices, not 642; the rocks use 7 (1280 faces).
 - **A label that follows the sprite's alpha disappears when a mesh stands
   in.** Flyby labels follow the local-frame weight only.
+- **A sprite that is a light and a mesh that is a rock are two different
+  objects.** The LOD line was also a species line: an additive PSF out here, a
+  sunlit body up close. Nothing failed — it just quietly said the population
+  emits light. One lighting model now spans both (§2b).
+- **`gl_PointCoord.y` runs DOWN the screen.** The impostor's normal is built in
+  VIEW space, where +y is up, so the sphere normal is `vec3(q.x, -q.y, …)`. With
+  the sign wrong the terminator tilts the wrong way and the crescent points at
+  the wrong side of the sky — a picture that still looks plausible.
+- **The pad in `POINT_VS` and the `bodyR` in `POINT_FS` are one number in two
+  places.** The quad grows to make room for the reticle and the coma; the body
+  shrinks inside it by exactly the same factor, and the pick radius recomputes
+  it a third time. Change one, change all three.
 
 ## 4. Open items
 

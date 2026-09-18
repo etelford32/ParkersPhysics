@@ -144,6 +144,18 @@ nav {
 }
 #canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
 
+/* Hover read-out for the NEO population. POSITION:FIXED and pointer-events:none
+   — it is placed from clientX/clientY, and a tooltip that can be hovered would
+   steal the very pointermove that is keeping it alive. */
+#neo-hover-tip {
+    position:fixed; z-index:95; display:none; pointer-events:none;
+    max-width:min(320px, 60vw);
+    padding:5px 9px; border-radius:5px;
+    background:rgba(6,8,14,.92); border:1px solid rgba(255,220,150,.28);
+    color:#ffe9a8; font-size:11px; line-height:1.35; letter-spacing:.2px;
+    box-shadow:0 4px 14px rgba(0,0,0,.55);
+}
+
 /* ─── HUD ────────────────────────────────────────────────────── */
 #hud {
     position:absolute; top:12px; left:12px; z-index:50;
@@ -400,6 +412,9 @@ import './js/telemetry.js';
 <!-- ═══ APP ═══ -->
 <div id="app">
     <div id="canvas-wrap">
+        <!-- What a click would select, for a population drawn as dark bodies a
+             few pixels across (js/neo-layer.js hover/hoverText). -->
+        <div id="neo-hover-tip" role="status" aria-live="off"></div>
         <!-- HUD -->
         <div id="hud">
             <h3 id="hud-name">Solar System</h3>
@@ -467,7 +482,7 @@ import './js/telemetry.js';
                 <span class="val" id="hud-neo-closest" style="color:#ffe9a8;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">—</span>
             </div>
             <div class="sep"></div>
-            <div class="dim" style="margin-top:0">Drag · Scroll · Click planet</div>
+            <div class="dim" style="margin-top:0">Drag · Scroll · Click a body</div>
         </div>
 
         <!-- Overlay buttons -->
@@ -3207,12 +3222,33 @@ allMoonMeshes.forEach(m => meshes.push(m));
 let _lastClickMs = 0;
 let _lastClickName = '';
 
-function onPointerDown(e) {
+// ── A CLICK IS NOT THE START OF A DRAG ───────────────────────────────────────
+// Selection used to fire on POINTERDOWN, so every camera orbit that began over
+// the NEO population selected whatever was under the press and — through
+// selectBody() → setCamLock() — threw the camera into a lock on it. With tens
+// of thousands of objects on screen that reads as the page selecting at random,
+// which is exactly how it was reported. Selection now fires on POINTERUP, and
+// only when the pointer stayed inside CLICK_SLOP_PX for less than CLICK_MAX_MS
+// — the rule mars.html already learned (beginManualCamera() fires on a
+// CONFIRMED drag; a bare click is a selection, never a camera move).
+const CLICK_SLOP_PX = 6;      // a mouse press that wanders further belongs to the camera
+const TOUCH_SLOP_PX = 12;     // a finger never lands as still as a mouse
+const CLICK_MAX_MS  = 700;    // a longer press is a hold, not a click
+let _press = null;
+const _slopFor = (e) => (e.pointerType === 'touch' || e.pointerType === 'pen' ? TOUCH_SLOP_PX : CLICK_SLOP_PX);
+
+/** Writes `mouse` (NDC) from a pointer event; returns the canvas rect + client px. */
+function _pointerNdc(e) {
     const rect = renderer.domElement.getBoundingClientRect();
     const cx   = e.touches ? e.touches[0].clientX : e.clientX;
     const cy   = e.touches ? e.touches[0].clientY : e.clientY;
-    mouse.x = ((cx - rect.left)  / rect.width)  * 2 - 1;
+    mouse.x = ((cx - rect.left) / rect.width)  * 2 - 1;
     mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
+    return { rect, cx, cy };
+}
+
+function _selectAt(e) {
+    const { rect } = _pointerNdc(e);
     raycaster.setFromCamera(mouse, camera);
     const hits = raycaster.intersectObjects(meshes);
     if (hits.length > 0) {
@@ -3228,14 +3264,76 @@ function onPointerDown(e) {
         }
         _lastClickMs   = now;
         _lastClickName = name;
-    } else {
-        // No planet / moon under the cursor — try the NEO point clouds. The pick
-        // radius scales with camera distance so a dot is clickable at every zoom.
-        const nb = neoLayer.pick(raycaster, camera.position.distanceTo(controls.target));
-        if (nb) { neoLayer.select(nb.neoIndex); selectBody(nb); }
+        return;
     }
+    // No planet / moon under the cursor — ask the NEO layer what is, in PIXELS.
+    // (js/neo-layer.js pick(): the accept radius is the object's DRAWN radius.)
+    const nb = neoLayer.pick({ camera, raycaster, ndc: { x: mouse.x, y: mouse.y }, pixels: { w: rect.width, h: rect.height } });
+    if (nb) { const body = neoLayer.select(nb.index); if (body) selectBody(body); }
 }
+
+function onPointerDown(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;   // right / middle belong to the camera
+    _press = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), drag: false, slop: _slopFor(e) };
+    _hoverHide();
+}
+function onPointerMove(e) {
+    if (_press && e.pointerId === _press.id) {
+        if (Math.hypot(e.clientX - _press.x, e.clientY - _press.y) > _press.slop) _press.drag = true;
+        return;                                   // a drag in progress is the camera's
+    }
+    if (e.pointerType === 'mouse') _hoverProbe(e);
+}
+function onPointerUp(e) {
+    const p = _press;
+    _press = null;
+    if (!p || e.pointerId !== p.id || p.drag) return;
+    if (performance.now() - p.t > CLICK_MAX_MS) return;
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > p.slop) return;
+    _selectAt(e);
+}
+
+// ── Hover affordance ────────────────────────────────────────────────────────
+// The population is dark bodies a few pixels across (they are rocks, not point
+// sources — see the POINT_FS block in js/neo-layer.js), so "what am I about to
+// click?" has to be answerable BEFORE the click. Throttled to HOVER_MS: a pick
+// projects the whole loaded catalogue, which is sub-millisecond but not free,
+// and nothing about a hover needs to run at frame rate.
+const HOVER_MS = 70;
+const hoverTip = document.getElementById('neo-hover-tip');
+let _hoverAt = 0;
+
+function _hoverHide() {
+    if (hoverTip.style.display !== 'none') hoverTip.style.display = 'none';
+    renderer.domElement.style.cursor = '';
+    neoLayer.hover(null);
+}
+function _hoverProbe(e) {
+    const now = performance.now();
+    if (now - _hoverAt < HOVER_MS) return;
+    _hoverAt = now;
+    const { rect, cx, cy } = _pointerNdc(e);
+    raycaster.setFromCamera(mouse, camera);
+    if (raycaster.intersectObjects(meshes).length) {          // a planet has its own affordance
+        _hoverHide();
+        renderer.domElement.style.cursor = 'pointer';
+        return;
+    }
+    const nb = neoLayer.pick({ camera, raycaster, ndc: { x: mouse.x, y: mouse.y }, pixels: { w: rect.width, h: rect.height } });
+    if (!nb) { _hoverHide(); return; }
+    neoLayer.hover(nb.index);
+    renderer.domElement.style.cursor = 'pointer';
+    hoverTip.textContent = neoLayer.hoverText(nb.index);
+    hoverTip.style.display = 'block';
+    hoverTip.style.left = `${Math.min(cx + 14, window.innerWidth - hoverTip.offsetWidth - 12)}px`;
+    hoverTip.style.top  = `${Math.min(cy + 16, window.innerHeight - hoverTip.offsetHeight - 12)}px`;
+}
+
 renderer.domElement.addEventListener('pointerdown', onPointerDown);
+renderer.domElement.addEventListener('pointermove', onPointerMove);
+renderer.domElement.addEventListener('pointerup', onPointerUp);
+renderer.domElement.addEventListener('pointercancel', () => { _press = null; });
+renderer.domElement.addEventListener('pointerleave', () => { _press = null; _hoverHide(); });
 
 // "Open Earth Simulation" button in the Earth Space Weather panel
 document.getElementById('btn-goto-earth').addEventListener('click', () => navigateTo('earth.html'));
@@ -3772,8 +3870,28 @@ neoLayer.on('catalog', _renderNeoLedger);
 // Test / console hook (tests/solar-system-neo-smoke.spec.js reads this).
 window.__neoLab = {
     layer: neoLayer, panel: neoPanel, simDist, selectBody,
+    // The camera and the canvas are exposed so the browser gate can turn a
+    // drawn position into a PIXEL and click it — the pick contract is stated in
+    // pixels, so a test that cannot measure pixels cannot check it.
+    camera, canvas: renderer.domElement, THREE,
     get selectedBody() { return selectedBody; },
     get simJD() { return neoLayer._lastJd; },
+    // Test support: what the two pick paths see at a canvas pixel, WITHOUT
+    // dispatching anything. The browser gate uses it to CHOOSE a pixel (one
+    // with no planet on it, one with nothing on it at all); the assertions
+    // themselves always go through real pointer events.
+    probeAt(clientX, clientY) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const hit = raycaster.intersectObjects(meshes)[0];
+        const neo = hit ? null : neoLayer.pick({ camera, raycaster, ndc: { x: mouse.x, y: mouse.y }, pixels: { w: rect.width, h: rect.height } });
+        return {
+            planet: hit ? (hit.object === sunMesh ? 'Sun' : (hit.object.userData?.name ?? null)) : null,
+            neo: neo ? neo.index : null, px: neo ? neo.px : null, kind: neo ? neo.kind : null,
+        };
+    },
 };
 
 // Flare / active-region geometry as this page is DRAWING it — every consumer

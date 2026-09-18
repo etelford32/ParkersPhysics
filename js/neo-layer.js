@@ -61,6 +61,25 @@ const GEO_CACHE_MAX = 48;
 const _Y = new THREE.Vector3(0, 1, 0);
 const _qSpin = new THREE.Quaternion();
 
+// Pick scratch. GRAB_PX is the grace a 2 px body gets: the accept radius is the
+// DRAWN radius, which for most of the population is smaller than a fingertip.
+const _mPick = new THREE.Matrix4();
+const _mPick2 = new THREE.Matrix4();
+const GRAB_PX = 7;
+const _cHover = new THREE.Color();
+
+// ── Local-frame labels ──────────────────────────────────────────────────────
+// At most LOCAL_LABEL_MAX in-zone objects are labelled, and a label that would
+// land on top of one already placed is dropped rather than drawn: stacked text
+// over the Sun's glare is worse than no text, and since 2026-09-18 anything the
+// page does not label is one HOVER away from being named. Separation is in NDC
+// because the labels are `sizeAttenuation:false` sprites — their size is a
+// fraction of the VIEW, not of the world (hFrac 0.032 of the height ⇒ 0.064 of
+// the NDC y range, so 0.055 is a little under one label of clearance).
+const LOCAL_LABEL_MAX = 8;
+const LABEL_SEP_NDC = { x: 0.26, y: 0.055 };
+const _vLbl = new THREE.Vector3();
+
 export const NEO_COLORS = Object.freeze({
     pha:          0xff5a3c,
     APO:          0xffb347,
@@ -103,11 +122,23 @@ function baseSize(el) {
     const H = el.H ?? 20;
     return Math.min(5.6, Math.max(1.7, 5.6 - 0.24 * (H - 12)));
 }
-/** Base alpha from absolute magnitude — faint rocks are faint. */
-function baseAlpha(el) {
-    if (el.flags & (FLAG.INTERSTELLAR | FLAG.COMET)) return 1;
-    const H = el.H ?? 20;
-    return Math.min(1, Math.max(0.42, 1 - 0.045 * (H - 14)));
+/**
+ * Geometric albedo proxy, from the SAME taxonomy hash `colorFor` reads, so a
+ * body's tone and its reflectance can never disagree: S-type 0.20 → C-type
+ * 0.045 (darker than coal), cometary nucleus 0.04 (1P/Halley measured 0.04),
+ * an interstellar object 0.10 for want of a better number. It is the shader's
+ * reflectance term — compressed there, disclosed, and never used for photometry.
+ *
+ * THE MAGNITUDE-DERIVED ALPHA THIS REPLACED IS GONE ON PURPOSE. It made a faint
+ * rock a see-through one the moment the population stopped blending additively,
+ * and it was double-counting: H is size AND albedo, both of which the body now
+ * carries honestly (`baseSize` for the first, this for the second).
+ */
+function albedoFor(el) {
+    if (el.flags & FLAG.COMET) return 0.04;
+    if (el.flags & FLAG.INTERSTELLAR) return 0.10;
+    const t = Math.min(1, 0.25 + 0.6 * hash01(String(el.des ?? el.name ?? '')));   // 0 = S-type, 1 = C-type
+    return 0.20 + (0.045 - 0.20) * t;
 }
 function classColorHex(el) {
     if (el.flags & FLAG.INTERSTELLAR) return NEO_COLORS.interstellar;
@@ -136,59 +167,149 @@ export function displayName(el) { return el.name || el.des || '—'; }
 
 const DPR = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
 
+/**
+ * THE DRAWN SIZE OF A BODY, IN ONE PLACE. `POINT_VS` sets gl_PointSize from
+ * these, `POINT_FS` re-derives the body's share of the quad from the same pad,
+ * and `pick()` recomputes the whole thing to get its accept radius. Three
+ * readers, one set of numbers — interpolated into the GLSL rather than typed
+ * twice, because a pick radius that disagrees with the drawn radius is exactly
+ * the bug this layer already shipped once.
+ */
+const SPRITE = Object.freeze({
+    att: 30.0,                    // attenuation numerator: att = 1 at 30 scene units out
+    attMin: 0.55, attMax: 2.30,   // attenuation clamp: u_att / viewDepth, bounded
+    padReticle: 0.75,             // extra quad for the attention ring
+    padComa: 1.40,                // extra quad for a comet's coma
+    minPx: 2.0,                   // a body never falls below this many CSS px
+});
+const G = (x) => x.toFixed(2);    // GLSL wants a decimal point on every float
+/** gl_PointSize in CSS px (before DPR) — the JS mirror of POINT_VS. */
+function drawnPx(size, viewDepth, pulse = 0, coma = 0) {
+    const att = Math.min(SPRITE.attMax, Math.max(SPRITE.attMin, SPRITE.att / Math.max(viewDepth, 0.05)));
+    return Math.max(SPRITE.minPx, size * att * (1 + pulse * SPRITE.padReticle + coma * SPRITE.padComa));
+}
+
+// ── What a far-field object LOOKS like ──────────────────────────────────────
+// A catalogued NEO is a ROCK, not a star. What this replaced was an additive
+// Gaussian PSF with a diffraction cross — the rendering convention for a point
+// SOURCE of light — and 38 000 of them blended additively into an orange haze
+// that read as the population glowing on its own. Worse, the rock meshes that
+// stand in inside ROCK_RANGE are Lambert-shaded SUNLIT BODIES (js/neo-rocks.js
+// ROCK_FS), so an object changed species as it crossed the LOD line: a light
+// out here, a rock up close.
+//
+// The sprite is now the same body the mesh is, drawn as a SPHERE IMPOSTOR. The
+// Sun is the scene origin on this page, so the vertex shader gets the exact
+// solar direction in view space for free, and the fragment shader shades the
+// visible hemisphere with the SAME terms as ROCK_FS (Lambert + wrap fill +
+// limb). Three consequences, all of them the point:
+//
+//   · THE PHASE ANGLE IS REAL. An object between the camera and the Sun is a
+//     crescent; one at opposition is a full disc. Nothing is keyed to it — it
+//     falls out of dot(normal, sunDirection) on a hemisphere the shader knows.
+//   · BLENDING IS NORMAL, NOT ADDITIVE, and the material is premultiplied, so
+//     the blend is (ONE, ONE_MINUS_SRC_ALPHA). 38 000 dark bodies cannot stack
+//     into a glow, and a body drawn in front of the Sun is a SILHOUETTE.
+//   · BRIGHTNESS IS ALBEDO × ILLUMINATION. A C-type (0.045) is nearly black;
+//     an S-type (0.20) is a grey pebble. `aAlbedo` carries the taxonomy the
+//     colour already encodes, so tone and albedo can never disagree.
+//
+// A COMET'S COMA IS THE ONE THING HERE THAT MAY GLOW — that light is real, and
+// `aComa` carries its 1/r² strength; the tails stay additive for the same
+// reason. Attention markers (a flyby this week, an in-zone object, the hovered
+// body) are a HAIRLINE RETICLE — an instrument annotation drawn AROUND the
+// body, never a halo drawn ON it, so "the page is pointing at this" can never
+// be mistaken for "this object is bright".
 const POINT_VS = /* glsl */`
     attribute vec3  aColor;
     attribute float aSize;
     attribute float aAlpha;
     attribute float aPulse;
+    attribute float aAlbedo;
+    attribute float aComa;
     uniform float u_dpr;
-    uniform float u_time;
     uniform float u_att;
+    uniform float u_minPx;
     varying vec3  vColor;
+    varying vec3  vSun;
     varying float vAlpha;
     varying float vPulse;
+    varying float vAlbedo;
+    varying float vComa;
     varying float vPx;
     void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        // A flyby BREATHES its halo rather than blinking.
-        float pulse = 1.0 + aPulse * (0.18 + 0.18 * sin(u_time * 2.2));
-        float att = clamp(u_att / max(-mv.z, 0.05), 0.6, 2.3);
-        // ×2: the Gaussian core occupies the inner half of the sprite; the rest is halo.
-        gl_PointSize = aSize * pulse * u_dpr * att * 2.0;
+        // The Sun is the scene origin, so its VIEW-space position is the view
+        // matrix applied to the origin — no uniform for the page to keep in sync.
+        vec3 sunView = (viewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        vSun = normalize(sunView - mv.xyz);
+        float att = clamp(u_att / max(-mv.z, 0.05), ${G(SPRITE.attMin)}, ${G(SPRITE.attMax)});
+        // A reticle and a coma both need room OUTSIDE the body, so the quad
+        // grows and the fragment shader shrinks the body by the same factor.
+        float pad = 1.0 + aPulse * ${G(SPRITE.padReticle)} + aComa * ${G(SPRITE.padComa)};
+        gl_PointSize = max(u_minPx, aSize * att * pad) * u_dpr;
         vPx = gl_PointSize;
         gl_Position = projectionMatrix * mv;
-        vColor = aColor; vAlpha = aAlpha; vPulse = aPulse;
+        vColor = aColor; vAlpha = aAlpha; vPulse = aPulse; vAlbedo = aAlbedo; vComa = aComa;
     }
 `;
 const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
+    uniform float u_time;
     varying vec3  vColor;
+    varying vec3  vSun;
     varying float vAlpha;
     varying float vPulse;
+    varying float vAlbedo;
+    varying float vComa;
     varying float vPx;
     void main() {
         if (vAlpha <= 0.002) discard;
-        vec2 c = (gl_PointCoord - 0.5) * 2.0;
-        float d2 = dot(c, c);
-        if (d2 > 1.0) discard;
-        float core = exp(-d2 * 14.0);                  // the point source
-        float glow = exp(-d2 * 3.0) * 0.30;            // soft PSF halo
-        float spikes = 0.0;
-        if (vPx > 9.0) {                               // brightest few: a faint diffraction cross
-            float ax = abs(c.x), ay = abs(c.y);
-            spikes = (pow(max(0.0, 1.0 - ay * 7.0), 2.0) + pow(max(0.0, 1.0 - ax * 7.0), 2.0))
-                   * max(0.0, 1.0 - sqrt(d2)) * 0.22;
-        }
-        float halo = vPulse * exp(-d2 * 1.6) * 0.40;   // flyby breathing halo
-        float a = (core + glow + spikes + halo) * vAlpha;
-        // Tone map + encode the UNPREMULTIPLIED colour, then premultiply — the
+        vec2 c = (gl_PointCoord - 0.5) * 2.0;     // NOTE gl_PointCoord.y runs DOWN the screen
+        float r = length(c);
+        if (r > 1.0) discard;
+        float pad   = 1.0 + vPulse * ${G(SPRITE.padReticle)} + vComa * ${G(SPRITE.padComa)};   // mirrors POINT_VS
+        float bodyR = 1.0 / pad;
+        float edge  = max(0.10, 2.0 / max(vPx, 1.0));      // ~1 px of antialiased limb
+        float cov   = 1.0 - smoothstep(bodyR - edge, bodyR + edge, r);
+
+        // Sphere impostor: the visible hemisphere's normal, in VIEW space, which
+        // is the frame vSun is already in. The y flip is gl_PointCoord's.
+        vec2 q = c / bodyR;
+        vec3 n = vec3(q.x, -q.y, sqrt(max(0.0, 1.0 - min(1.0, dot(q, q)))));
+        float ndl  = dot(n, vSun);
+        float diff = max(ndl, 0.0);
+        float wrap = max(ndl * 0.5 + 0.5, 0.0) * 0.10;     // scattered fill — ROCK_FS's term
+        float limb = pow(smoothstep(bodyR * 0.55, bodyR, r), 3.0) * 0.07;
+        // Albedo is COMPRESSED, like the drawn sizes: 0.045 (C) to 0.20 (S) is
+        // 4.4x of tone on a body a few pixels across. Disclosed in the panel note.
+        float refl = 0.45 + 2.6 * vAlbedo;
+        vec3 body  = vColor * refl * (0.045 + 0.95 * diff + wrap) + limb * vec3(0.55, 0.62, 0.78);
+
+        float coma = vComa * exp(-r * r * 2.2) * 0.55;     // the one real light source here
+
+        // Hairline reticle, breathing in OPACITY (a size pulse reads as a body
+        // that changes size), sitting between the limb and the edge of the quad.
+        float ringR = bodyR + (1.0 - bodyR) * 0.55;
+        float w     = max(0.035, 1.6 / max(vPx, 1.0));
+        float ring  = vPulse * (1.0 - smoothstep(0.0, w, abs(r - ringR)))
+                    * (0.62 + 0.38 * sin(u_time * 2.2));
+        vec3 ringCol = mix(vColor, vec3(1.0), 0.65);
+
+        float aBody = cov * vAlpha;
+        float aComa = coma * vAlpha;
+        float aRing = ring * vAlpha * 0.9;
+        float a = clamp(aBody + aComa + aRing, 0.0, 1.0);
+        if (a <= 0.003) discard;
+        // Tone map and encode the UNPREMULTIPLIED colour, then premultiply — the
         // order three.js itself uses (<premultiplied_alpha_fragment> runs after
-        // <colorspace_fragment>). Encoding vColor * a instead would push the
-        // sRGB curve through the alpha and brighten every faint object.
-        gl_FragColor = vec4(vColor, a);
+        // <colorspace_fragment>). Encoding the premultiplied colour instead would
+        // push the sRGB curve through the alpha and lift every faint object.
+        vec3 rgb = (body * aBody + vec3(0.72, 0.86, 1.0) * aComa + ringCol * aRing) / max(a, 1e-4);
+        gl_FragColor = vec4(rgb, a);
         gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
-        gl_FragColor.rgb *= a;                         // premultiplied; blended additively
+        gl_FragColor.rgb *= a;                             // premultiplied
     }
 `;
 
@@ -196,11 +317,15 @@ function makePointsMaterial() {
     return new THREE.ShaderMaterial({
         vertexShader: POINT_VS, fragmentShader: POINT_FS,
         uniforms: {
-            u_dpr:  { value: DPR },
-            u_time: { value: 0 },
-            u_att:  { value: 30.0 },
+            u_dpr:   { value: DPR },
+            u_time:  { value: 0 },
+            u_att:   { value: SPRITE.att },
+            u_minPx: { value: SPRITE.minPx },
         },
-        transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending,
+        transparent: true, depthWrite: false, depthTest: true,
+        // NOT AdditiveBlending — see the block above. Premultiplied because the
+        // shader hands back premultiplied colour, tone-mapped before the multiply.
+        blending: THREE.NormalBlending, premultipliedAlpha: true,
     });
 }
 
@@ -373,6 +498,10 @@ export class NeoLayer extends Emitter {
         this._rockTick = 0;
         this.anchor = new THREE.Object3D(); this.anchor.name = 'neo-anchor'; this.group.add(this.anchor);
         this.selectedMarker = this._buildSelectedMarker();
+        // Hover: what a click would take. Built from the same reticle so the
+        // pre-selection and the selection are visibly the same kind of mark.
+        this.hoverIndex = null;
+        this.hoverMarker = this._buildSelectedMarker('neo-hover-marker', 0.62);
         this._labels = new Map();      // key → sprite
         // Labels have constant SCREEN size, so at the top view (camera ~55 units
         // out) a dozen of them pile onto the Earth disc. Each class is shown
@@ -532,6 +661,7 @@ export class NeoLayer extends Emitter {
         this._rebuildPoints();
         const prevSel = this.selectedIndex != null ? this._selectedDes : null;
         this.selectedIndex = null; this._bodies.clear();
+        this.hover(null);              // indices are about to mean different objects
         this._clearTrails();
         if (this._worker) {
             this._inFlight = true;
@@ -589,11 +719,15 @@ export class NeoLayer extends Emitter {
         this._size = new Float32Array(N);
         this._alpha = new Float32Array(N);
         this._pulse = new Float32Array(N);
+        this._albedo = new Float32Array(N);
+        this._coma = new Float32Array(N);
         geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
         geo.setAttribute('aColor', new THREE.BufferAttribute(this._col, 3));
         geo.setAttribute('aSize', new THREE.BufferAttribute(this._size, 1));
         geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._alpha, 1));
         geo.setAttribute('aPulse', new THREE.BufferAttribute(this._pulse, 1));
+        geo.setAttribute('aAlbedo', new THREE.BufferAttribute(this._albedo, 1));
+        geo.setAttribute('aComa', new THREE.BufferAttribute(this._coma, 1));
         geo.setDrawRange(0, N);
         this.points = new THREE.Points(geo, this._pointsMat);
         this.points.name = 'neo-points';
@@ -649,7 +783,7 @@ export class NeoLayer extends Emitter {
         const jd = this.frameJd, prec = precessionLongitudeRad(jd);
         const cp = Math.cos(prec), sp = Math.sin(prec);
         const pos = this._tailPos, col = this._tailCol;
-        let active = 0, sizeDirty = false;
+        let active = 0, comaDirty = false;
         for (let i = 0; i < this._cometIdx.length; i++) {
             const k = this._cometIdx[i];
             const o = i * TAIL_VERTS * 3;
@@ -657,9 +791,11 @@ export class NeoLayer extends Emitter {
             const r = this.rHelio[k];
             const vis = this._baseVis ? this._baseVis[k] : 1;
             const b = vis && r < TAIL_MAX_R ? Math.min(1, 0.9 / (r * r)) : 0;
-            // Coma: the nucleus sprite swells and brightens as 1/r².
-            const sz = baseSize(el) + (b > 0 ? 4.0 * b : 0);
-            if (this._size[k] !== sz) { this._size[k] = sz; sizeDirty = true; }
+            // The coma is the one thing in the population that may GLOW, so it
+            // rides its own attribute (POINT_FS `aComa`) rather than swelling the
+            // body: the nucleus stays the dark rock it is and the haze grows
+            // around it as 1/r², which is also how the tails below are scaled.
+            if (this._coma[k] !== b) { this._coma[k] = b; comaDirty = true; }
             if (b <= 0.01) { pos.fill(0, o, o + TAIL_VERTS * 3); col.fill(0, o, o + TAIL_VERTS * 3); continue; }
             active++;
             const px = this._pos[k * 3], py = this._pos[k * 3 + 1], pz = this._pos[k * 3 + 2];
@@ -679,7 +815,7 @@ export class NeoLayer extends Emitter {
         this.cometTailsActive = active;
         this.cometTails.geometry.attributes.position.needsUpdate = true;
         this.cometTails.geometry.attributes.color.needsUpdate = true;
-        if (sizeDirty) this.points.geometry.attributes.aSize.needsUpdate = true;
+        if (comaDirty) this.points.geometry.attributes.aComa.needsUpdate = true;
     }
 
     _buildLocalFrame() {
@@ -688,11 +824,14 @@ export class NeoLayer extends Emitter {
         const geo = new THREE.BufferGeometry();
         this._lpos = new Float32Array(cap * 3); this._lcol = new Float32Array(cap * 3);
         this._lsize = new Float32Array(cap); this._lalpha = new Float32Array(cap); this._lpulse = new Float32Array(cap);
+        this._lalbedo = new Float32Array(cap); this._lcoma = new Float32Array(cap);
         geo.setAttribute('position', new THREE.BufferAttribute(this._lpos, 3));
         geo.setAttribute('aColor', new THREE.BufferAttribute(this._lcol, 3));
         geo.setAttribute('aSize', new THREE.BufferAttribute(this._lsize, 1));
         geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._lalpha, 1));
         geo.setAttribute('aPulse', new THREE.BufferAttribute(this._lpulse, 1));
+        geo.setAttribute('aAlbedo', new THREE.BufferAttribute(this._lalbedo, 1));
+        geo.setAttribute('aComa', new THREE.BufferAttribute(this._lcoma, 1));
         geo.setDrawRange(0, 0);
         this.localPoints = new THREE.Points(geo, this._pointsMat);
         this.localPoints.name = 'neo-local-points';
@@ -724,16 +863,16 @@ export class NeoLayer extends Emitter {
         }
     }
 
-    _buildSelectedMarker() {
+    _buildSelectedMarker(name = 'neo-selected-marker', dim = 1) {
         // A thin reticle in the object's own colour, not a grey washer.
         const group = new THREE.Group();
-        group.name = 'neo-selected-marker';
+        group.name = name;
         const ring = (ri, ro, opacity) => new THREE.Mesh(new THREE.RingGeometry(ri, ro, 64),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity, side: THREE.DoubleSide,
                 depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
         // Hairlines: the lock camera sits ~0.1 unit from the rock, so a ring
         // 0.0025 thick was a 25 px band.
-        group.add(ring(0.0222, 0.0228, 0.95), ring(0.0300, 0.0303, 0.30));
+        group.add(ring(0.0222, 0.0228, 0.95 * dim), ring(0.0300, 0.0303, 0.30 * dim));
         group.visible = false;
         group.renderOrder = 15;
         this.group.add(group);
@@ -772,12 +911,17 @@ export class NeoLayer extends Emitter {
             this._col[k * 3] = c.r; this._col[k * 3 + 1] = c.g; this._col[k * 3 + 2] = c.b;
             this._size[k] = flyby ? 6.0 : baseSize(el);
             this._pulse[k] = flyby ? 1 : 0;
+            this._albedo[k] = albedoFor(el);
             this._baseVis[k] = vis ? 1 : 0;
-            this._baseA[k] = flyby ? 1 : baseAlpha(el);
+            // Alpha is VISIBILITY and the local-frame cross-fade, nothing else —
+            // a body is opaque or it is not drawn. Magnitude lives in the drawn
+            // size and albedo in the shading (see albedoFor).
+            this._baseA[k] = 1;
         }
         this.points.geometry.attributes.aColor.needsUpdate = true;
         this.points.geometry.attributes.aSize.needsUpdate = true;
         this.points.geometry.attributes.aPulse.needsUpdate = true;
+        this.points.geometry.attributes.aAlbedo.needsUpdate = true;
         this._flybySet = flybySet;
         this._refreshAlpha();
     }
@@ -790,7 +934,7 @@ export class NeoLayer extends Emitter {
             const base = (this._baseVis ? this._baseVis[k] : 1) * (this._baseA ? this._baseA[k] : 1);
             const dLD = this.rGeo ? toLD(this.rGeo[k]) : Infinity;
             const w = this.visible.local ? localFrameWeight(dLD) : 1;
-            this._alpha[k] = base * (0.35 + 0.65 * w) * (k === this.selectedIndex ? 1 : 0.9);
+            this._alpha[k] = base * (0.35 + 0.65 * w);
             // Inside the fade band the local instance takes over; in the deep zone the helio instance is off.
             if (this.visible.local && dLD < LOCAL_FRAME.fadeLD[0]) this._alpha[k] = 0;
         }
@@ -833,12 +977,32 @@ export class NeoLayer extends Emitter {
         return { x: p.x - e[0], y: p.y - e[1], z: p.z - e[2], helio: p };
     }
 
+    /**
+     * Is there room on screen for this object's label? Off-screen and
+     * behind-the-camera positions are never labelled; a position within
+     * LABEL_SEP_NDC of one already placed loses (the nearest object is drawn
+     * first, so the closer one keeps its label). With no camera yet, every
+     * label is allowed — the old behaviour, and the first frame looks the same.
+     */
+    _labelClear(off, placed) {
+        const cam = this._camera;
+        if (!cam) return true;
+        _vLbl.set(off.x + this._earthDrawn.x, off.y + 0.02 + this._earthDrawn.y, off.z + this._earthDrawn.z).project(cam);
+        if (!(_vLbl.z > -1 && _vLbl.z < 1) || Math.abs(_vLbl.x) > 1.1 || Math.abs(_vLbl.y) > 1.1) return false;
+        for (const p of placed) {
+            if (Math.abs(p.x - _vLbl.x) < LABEL_SEP_NDC.x && Math.abs(p.y - _vLbl.y) < LABEL_SEP_NDC.y) return false;
+        }
+        placed.push({ x: _vLbl.x, y: _vLbl.y });
+        return true;
+    }
+
     _refreshLocalInstances() {
         const c = new THREE.Color();
         const jd = this.frameJd;
         const n = this.inZone.length;
         this._localIndices = this.inZone.slice();
         const keep = new Set();
+        const placed = [];             // NDC of the labels already placed this pass
         for (let j = 0; j < n; j++) {
             const k = this.inZone[j];
             const el = this.els[k];
@@ -849,11 +1013,13 @@ export class NeoLayer extends Emitter {
             else colorFor(el, this.visible.colorMode, c);
             this._lcol[j * 3] = c.r; this._lcol[j * 3 + 1] = c.g; this._lcol[j * 3 + 2] = c.b;
             this._lsize[j] = 5.2;
-            this._lpulse[j] = 0.8;
+            this._lpulse[j] = 0.8;                       // in-zone: the body wears a reticle
+            this._lalbedo[j] = albedoFor(el);
+            this._lcoma[j] = this._coma ? this._coma[k] : 0;
             this._lalpha[j] = this.visible.local && !this._meshed.has(k) ? (1 - localFrameWeight(off.dLD)) : 0;
             // Labels + trails for the nearest few (the selected object already
             // carries the page-level label, so it gets no second one here).
-            if (j < 12 && this.visible.local && this.visible.labels && k !== this.selectedIndex) {
+            if (j < LOCAL_LABEL_MAX && this.visible.local && this.visible.labels && k !== this.selectedIndex && this._labelClear(off, placed)) {
                 const key = `local:${k}`;
                 keep.add(key);
                 const text = `${displayName(el)} · ${off.dLD < 10 ? off.dLD.toFixed(2) : off.dLD.toFixed(1)} LD`;
@@ -883,7 +1049,7 @@ export class NeoLayer extends Emitter {
             if (!this.inZone.slice(0, 12).includes(k)) { this.localGroup.remove(line); line.geometry.dispose(); this._trails.delete(k); }
         }
         this.localPoints.geometry.setDrawRange(0, n);
-        for (const a of ['position', 'aColor', 'aSize', 'aAlpha', 'aPulse']) this.localPoints.geometry.attributes[a].needsUpdate = true;
+        for (const a of ['position', 'aColor', 'aSize', 'aAlpha', 'aPulse', 'aAlbedo', 'aComa']) this.localPoints.geometry.attributes[a].needsUpdate = true;
         this.localPoints.geometry.computeBoundingSphere();
     }
 
@@ -1063,6 +1229,7 @@ export class NeoLayer extends Emitter {
     select(index) {
         if (index != null && !this.els[index]) index = null;
         this.selectedIndex = index;
+        if (index != null && index === this.hoverIndex) { this.hoverIndex = null; this.hoverMarker.visible = false; }
         this._selectedDes = index != null ? this.els[index].des : null;
         if (this.orbitLine) { this.group.remove(this.orbitLine); this.orbitLine.geometry.dispose(); this.orbitLine = null; }
         const key = 'selected';
@@ -1174,27 +1341,113 @@ export class NeoLayer extends Emitter {
     // ── Picking ─────────────────────────────────────────────────────────────
 
     /**
-     * @param {THREE.Raycaster} raycaster  already set from the camera
-     * @param {number} camDist            camera → controls.target distance (scales the pick radius)
+     * WHAT IS UNDER THE CURSOR — measured in PIXELS, in the frame that is drawn.
+     *
+     * The three.js Points raycast this replaced compared a WORLD-space distance
+     * to the ray against a world-space threshold (0.012 × the camera range). On
+     * a log-scaled orrery that is not a pick radius at all: the same 0.24 units
+     * is a fraction of a pixel out at Neptune and a third of the screen a few
+     * hundredths of a unit from the eye, so a click on empty sky routinely
+     * returned an object hundreds of pixels from the cursor — the "it selects
+     * random NEOs" report. It then sorted the hits by `distanceToRay`, which is
+     * a perpendicular distance in scene units and not what a cursor means.
+     *
+     * This projects each candidate and measures the distance in CSS PIXELS, and
+     * the accept radius is THE DRAWN RADIUS: gl_PointSize / 2, recomputed here
+     * from the same attenuation, pad and floor POINT_VS uses (clip.w IS −viewZ
+     * for a perspective camera, which is the term the vertex shader attenuates
+     * by), plus GRAB_PX of grace. So the rule a visitor can learn holds — you
+     * can click what you can see, and only what you can see. If the two shaders
+     * ever disagree, the pick radius is wrong: change them together.
+     *
+     * Rock meshes are picked FIRST and exactly, against real geometry. A body
+     * close enough to be drawn as a shaped rock was previously not clickable at
+     * all — only the two point clouds were ever in the pick set, and a meshed
+     * object's sprite is suppressed (`_meshed` ⇒ alpha 0), so the one object on
+     * screen with an actual silhouette was the one thing a click could not hit.
+     *
+     * @param {{ camera: THREE.Camera, ndc: {x:number,y:number},
+     *           pixels: {w:number,h:number}, raycaster?: THREE.Raycaster,
+     *           grabPx?: number }} o
+     * @returns {{ index:number, kind:'mesh'|'point'|'local', px:number } | null}
      */
-    pick(raycaster, camDist = 20) {
-        if (!this.points) return null;
-        const prevParams = raycaster.params.Points;
-        raycaster.params.Points = { ...(prevParams || {}), threshold: Math.max(0.01, 0.012 * camDist) };
-        const hits = raycaster.intersectObjects([this.localPoints, this.points], false);
-        raycaster.params.Points = prevParams;
-        // Points intersections sort by distance ALONG the ray; a click means "the
-        // one nearest the cursor", which is distanceToRay.
-        hits.sort((a, b) => (a.distanceToRay ?? 0) - (b.distanceToRay ?? 0));
-        for (const h of hits) {
-            if (h.object === this.localPoints) {
-                const k = this._localIndices[h.index];
-                if (k != null && this._lalpha[h.index] > 0.05) return this.bodyFor(k);
-            } else if (h.object === this.points) {
-                if (this._alpha[h.index] > 0.05) return this.bodyFor(h.index);
+    pick(o = {}) {
+        const { camera, ndc, pixels, raycaster = null, grabPx = GRAB_PX } = o;
+        if (!camera || !ndc || !pixels || !pixels.w || !pixels.h || !this.points) return null;
+
+        // 1. Rock meshes — an exact raycast against the drawn geometry.
+        if (raycaster) {
+            const meshes = this._rockSlots.filter(sl => sl.index >= 0 && sl.mesh.visible).map(sl => sl.mesh);
+            if (meshes.length) {
+                const hit = raycaster.intersectObjects(meshes, false)[0];
+                if (hit) {
+                    const slot = this._rockSlots.find(sl => sl.mesh === hit.object);
+                    if (slot && slot.index >= 0) return { index: slot.index, kind: 'mesh', px: 0 };
+                }
             }
         }
-        return null;
+
+        // 2. The two point clouds, in screen space.
+        const halfW = pixels.w * 0.5, halfH = pixels.h * 0.5;
+        let best = null;
+        const scan = (obj, pos, size, alpha, pulse, coma, count, indexOf, kind) => {
+            if (!obj || !count || !pos) return;
+            _mPick.multiplyMatrices(camera.projectionMatrix,
+                _mPick2.multiplyMatrices(camera.matrixWorldInverse, obj.matrixWorld));
+            const e = _mPick.elements;
+            for (let i = 0; i < count; i++) {
+                if (alpha[i] <= 0.05) continue;                       // not drawn ⇒ not clickable
+                const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+                const cw = e[3] * x + e[7] * y + e[11] * z + e[15];
+                if (cw <= 1e-6) continue;                             // behind the camera
+                const cx = (e[0] * x + e[4] * y + e[8] * z + e[12]) / cw;
+                const cy = (e[1] * x + e[5] * y + e[9] * z + e[13]) / cw;
+                const dx = (cx - ndc.x) * halfW, dy = (cy - ndc.y) * halfH;
+                const d = Math.sqrt(dx * dx + dy * dy);
+                if (best && d > best.d + 2) continue;                 // cheap reject before the size maths
+                // clip.w IS −viewZ for a perspective camera: the exact term
+                // POINT_VS attenuates by, so drawnPx() is the drawn size.
+                const px = drawnPx(size[i], cw, pulse ? pulse[i] : 0, coma ? coma[i] : 0);
+                if (d > Math.max(grabPx, px * 0.5 + 1.5)) continue;
+                // Nearest the cursor; within 2 px of a tie, the nearer body wins.
+                if (!best || d < best.d - 2 || (d < best.d + 2 && cw < best.cw)) {
+                    const index = indexOf(i);
+                    if (index != null) best = { index, kind, d, cw };
+                }
+            }
+        };
+        scan(this.localPoints, this._lpos, this._lsize, this._lalpha, this._lpulse, this._lcoma,
+             this._localIndices ? this._localIndices.length : 0, (i) => this._localIndices[i], 'local');
+        scan(this.points, this._pos, this._size, this._alpha, this._pulse, this._coma,
+             this.count, (i) => i, 'point');
+        return best ? { index: best.index, kind: best.kind, px: best.d } : null;
+    }
+
+    /**
+     * Hover highlight — the affordance that tells you what a click will take.
+     * A reticle, for the same reason the flyby marker is one: an instrument
+     * annotation on a body, never a brightening OF the body.
+     */
+    hover(index) {
+        let next = (index == null || index === this.selectedIndex) ? null : index;
+        if (next != null && !this.els[next]) next = null;   // a tier swap can outrun a hover
+        if (next === this.hoverIndex) return this.hoverIndex;
+        this.hoverIndex = next;
+        if (next == null) { this.hoverMarker.visible = false; return null; }
+        const tint = colorFor(this.els[next], this.visible.colorMode, _cHover).lerp(_cB.setHex(0xffffff), 0.5);
+        for (const m of this.hoverMarker.children) m.material.color.copy(tint);
+        this.hoverMarker.visible = true;
+        return next;
+    }
+
+    /** One line identifying an object, for a hover tooltip — no readout() build. */
+    hoverText(index) {
+        const el = this.els[index];
+        if (!el) return '';
+        const g = this.geocentricAt(index);
+        const bits = [displayName(el), classLabel(el)];
+        if (g) bits.push(`${formatLD(Math.hypot(g.x, g.y, g.z))} from Earth`);
+        return bits.join(' · ');
     }
 
     // ── Meteor showers ──────────────────────────────────────────────────────
@@ -1268,6 +1521,7 @@ export class NeoLayer extends Emitter {
         this._t = f.t ?? this._t + 0.016;
         this._pointsMat.uniforms.u_time.value = this._t;
         for (const r of this._radiants) { r.stream.material.uniforms.u_time.value = this._t; r.rocks.update(this._t); }
+        this._camera = f.camera ?? this._camera;   // the label de-clutter projects with it
         this._earthDrawn.copy(f.earthDrawn);
         this._earthOfDate = [f.earthOfDate.x_AU, f.earthOfDate.y_AU, f.earthOfDate.z_AU];
         this._earthFn = f.earthFn ?? this._earthFn;
@@ -1287,12 +1541,37 @@ export class NeoLayer extends Emitter {
                 for (const [key, sp] of this._labels) if (key.startsWith('local:')) sp.visible = objects;
             }
         }
+        // Labels are placed by SCREEN separation (_labelClear), so orbiting with
+        // the sim PAUSED has to re-place them — the worker frame that normally
+        // does it never arrives while the clock is stopped. Throttled, and only
+        // on real camera motion, because the pass costs up to 64 Kepler solves.
+        if (f.camera && this.rGeo && this.visible.local && this.visible.labels) {
+            const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            const moved = this._labelCamPos ? f.camera.position.distanceTo(this._labelCamPos) : Infinity;
+            if (moved > 0.01 * Math.max(1e-3, f.camera.position.length()) && nowMs - (this._labelPassAt ?? 0) > 300) {
+                this._labelPassAt = nowMs;
+                (this._labelCamPos ??= new THREE.Vector3()).copy(f.camera.position);
+                this._refreshLocalInstances();
+            }
+        }
         if (jdChanged) this._requestFrame(false);
         // Radiants ride the sim date (λ☉ moves ~1°/day, cheap to re-evaluate every ~0.1 d).
         if (this._radiantJd == null || Math.abs(f.jd - this._radiantJd) > 0.1) { this._radiantJd = f.jd; this._refreshRadiants(f.jd, f.earthOfDate.lon_rad); }
         // Flyby highlight set depends on the sim date (±7 d) — refresh every sim-day.
         if (this._styleMs == null || Math.abs((this._simMs ?? 0) - this._styleMs) > 86400e3) { this._styleMs = this._simMs ?? 0; if (this.points) this._applyStyles(); }
         this._updateRocks(f);
+        // Hover reticle: the same seat-and-face treatment as the selected one, a
+        // touch larger so the two rings read as pre-selection and selection.
+        if (this.hoverIndex != null && this.hoverMarker.visible) {
+            const hp = this.drawnPosition(this.hoverIndex, this.hoverMarker.position);
+            if (hp) {
+                const hr = this._rockRadius(this.els[this.hoverIndex]);
+                this.hoverMarker.scale.setScalar(Math.max(hr * 2.1 / 0.021, Math.min(9, Math.max(1.25, (f.camDist ?? 20) * 0.10))));
+                this.hoverMarker.lookAt(f.camera ? f.camera.position : new THREE.Vector3(0, 50, 0));
+            } else {
+                this.hoverMarker.visible = false;
+            }
+        }
         // Selected object: anchor, marker, label, orbit (re-oriented if the date moved a lot).
         if (this.selectedIndex != null) {
             const p = this.drawnPosition(this.selectedIndex, this.anchor.position);

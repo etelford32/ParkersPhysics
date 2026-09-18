@@ -267,17 +267,20 @@ export class NeoPanel {
     _renderLegend() {
         const classItems = [
             ['pha', 'Potentially hazardous'], ['APO', 'Apollo'], ['ATE', 'Aten'], ['AMO', 'Amor'], ['IEO', 'Atira'],
-            ['comet', 'Comet'], ['interstellar', 'Interstellar'], ['flyby', 'Flyby within ±7 d (breathing halo)'], ['ring', 'LD rings around Earth'], ['radiant', 'Meteor stream (inbound)'],
+            ['comet', 'Comet'], ['interstellar', 'Interstellar'], ['flyby', 'Flyby within ±7 d (reticle)'], ['ring', 'LD rings around Earth'], ['radiant', 'Meteor stream (inbound)'],
         ].map(([k, l]) => [NEO_COLORS[k], l]);
         const naturalItems = [
             [NATURAL_COLORS.sType, 'S-type asteroid (reddish grey)'], [NATURAL_COLORS.cType, 'C-type asteroid (dark neutral)'],
             [NATURAL_COLORS.pha, 'Potentially hazardous (warm bias)'], [NATURAL_COLORS.comet, 'Comet · blue ion tail anti-sunward, warm dust tail lagging'],
-            [NATURAL_COLORS.interstellar, 'Interstellar'], [NATURAL_COLORS.flyby, 'Flyby within ±7 d (breathing halo)'],
+            [NATURAL_COLORS.interstellar, 'Interstellar'], [NATURAL_COLORS.flyby, 'Flyby within ±7 d (reticle)'],
             [NEO_COLORS.ring, 'LD rings around Earth'], [NEO_COLORS.radiant, 'Meteor stream (inbound)'],
         ];
         const items = this.layer.visible.colorMode === 'class' ? classItems : naturalItems;
         this.$('neo-legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${hex(c)}"></i>${l}</span>`).join('')
-            + `<span style="flex-basis:100%;color:#667">Size and brightness follow absolute magnitude (H); comae and tails scale as 1/r².</span>`;
+            + `<span style="flex-basis:100%;color:#667">Bodies are drawn SUNLIT, not self-luminous — the phase angle is real, so an object
+               between you and the Sun is a crescent. Drawn size follows absolute magnitude (H) and tone follows albedo (S-type 0.20 →
+               C-type 0.045), both compressed to stay visible at a few pixels; a comet's coma and tails are the light that is real, and
+               scale as 1/r². A ring around a body is the page pointing at it, never the body being bright.</span>`;
     }
 
     renderNote() {
