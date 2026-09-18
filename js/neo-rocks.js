@@ -24,10 +24,16 @@
  * The orrery's Sun is a physically-decaying PointLight that leaves anything
  * at 1 AU dim, so the rocks light THEMSELVES from the Sun direction (the Sun
  * is always at the world origin — the same convention the page's planet
- * shader uses): Lambert term, a small wrap/fill, a faint rim so a dark limb
- * still reads against black, and a per-vertex regolith speckle. The shader
- * handles `instanceMatrix` so the same material drives the InstancedMesh
- * streams.
+ * shader uses). The scattering law is LOMMEL–SEELIGER, not Lambert: single
+ * scattering off a dark particulate regolith, ∝ μ₀/(μ₀+μ), nearly flat across
+ * the disc where a Lambertian sphere darkens toward the limb — the reason a
+ * full Moon reads as a disc rather than a ball. Level comes from the object's
+ * own albedo times the illumination and the IAU H–G phase function, through
+ * the same disclosed display compression js/neo-layer.js POINT_FS uses: the
+ * LOD handoff between an impostor and a mesh must change the geometry and
+ * nothing else. Plus a faint scattered fill, a rim so a dark limb still reads
+ * against black, and a per-vertex regolith speckle. The shader handles
+ * `instanceMatrix` so the same material drives the InstancedMesh streams.
  *
  * ── Scale ─────────────────────────────────────────────────────────────────
  * `drawnRockRadius(diamKm)` is a LOG map from real diameter to scene units:
@@ -194,6 +200,10 @@ const ROCK_VS = /* glsl */`
 const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
     uniform vec3  u_base;
     uniform float u_glow;        // comet nucleus: faint self-lit coma haze
+    uniform float u_albedo;      // geometric albedo — measured, or the class mean
+    uniform float u_light;       // (1 AU / r)² × Φ_HG(α): illumination × phase
+    uniform float u_gain;        // display normalisation, shared with the impostor
+    uniform float u_stretch;     // DISCLOSED display compression
     varying vec3  vN;
     varying vec3  vW;
     varying float vSpeck;
@@ -201,11 +211,19 @@ const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
         vec3 n = normalize(vN);
         vec3 toSun = normalize(-vW);                  // Sun at the world origin
         vec3 toCam = normalize(cameraPosition - vW);
-        float ndl  = dot(n, toSun);
-        float diff = max(ndl, 0.0);
-        float wrap = max(ndl * 0.5 + 0.5, 0.0) * 0.10;   // faint fill (zodiacal / Earth-shine)
+        // LOMMEL–SEELIGER, not Lambert. Single scattering off a dark
+        // particulate regolith: brightness ∝ μ₀/(μ₀+μ), which is nearly FLAT
+        // across the disc where a Lambertian sphere falls off toward the limb.
+        // It is why the full Moon reads as a disc and not a ball, and it is the
+        // same law js/neo-layer.js POINT_FS applies to the far-field impostor —
+        // the LOD handoff must not change the physics, only the geometry.
+        float mu0 = max(dot(n, toSun), 0.0);
+        float mu  = max(dot(n, toCam), 1e-3);
+        float ls  = 2.0 * mu0 / (mu0 + mu);           // normalised at μ₀ = μ
+        float wrap = max(dot(n, toSun) * 0.5 + 0.5, 0.0) * 0.06;   // faint scattered fill
+        float lit = pow(clamp((u_albedo * u_light * ls + wrap * u_albedo) * u_gain, 0.0, 6.0), u_stretch);
         float rim  = pow(1.0 - max(dot(n, toCam), 0.0), 3.0) * (0.06 + u_glow * 0.5);
-        vec3 col = u_base * (0.05 + diff * 0.95 + wrap) * (0.82 + 0.36 * vSpeck) + rim * vec3(0.7, 0.85, 1.0);
+        vec3 col = u_base * lit * (0.82 + 0.36 * vSpeck) + rim * vec3(0.7, 0.85, 1.0);
         col += u_glow * vec3(0.55, 0.75, 1.0) * 0.25;
         gl_FragColor = vec4(col, 1.0);
         gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
@@ -214,10 +232,24 @@ const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
     }
 `;
 
-export function rockMaterial(colorHex, glow = 0) {
+/**
+ * @param {number} colorHex   the taxonomy's tint
+ * @param {number} glow       cometary coma haze, 0..1
+ * @param {{albedo?:number, light?:number, gain?:number, stretch?:number}} [phot]
+ *        photometry: geometric albedo, illumination × phase function, and the
+ *        display normalisation the far-field impostor uses. Defaults reproduce
+ *        a 0.14-albedo body at 1 AU seen at opposition.
+ */
+export function rockMaterial(colorHex, glow = 0, phot = {}) {
     return new THREE.ShaderMaterial({
         vertexShader: ROCK_VS, fragmentShader: ROCK_FS,
-        uniforms: { u_base: { value: new THREE.Color(colorHex) }, u_glow: { value: glow } },
+        uniforms: {
+            u_base: { value: new THREE.Color(colorHex) }, u_glow: { value: glow },
+            u_albedo:  { value: phot.albedo ?? 0.14 },
+            u_light:   { value: phot.light ?? 1 },
+            u_gain:    { value: phot.gain ?? 6.2 },
+            u_stretch: { value: phot.stretch ?? 0.38 },
+        },
     });
 }
 

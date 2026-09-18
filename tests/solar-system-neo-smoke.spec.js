@@ -33,6 +33,10 @@ import { precessionLongitudeRad, rotateAboutPole, LD_AU, R2D } from '../js/neo-o
  * geometry assertion holds on any date the suite runs.
  */
 
+// Every in-test wait here is 45 s, matching waitForFrames: this page loads a
+// three-tier catalogue, spawns a worker and renders a full orrery on whatever
+// rasteriser CI has, and under parallel workers a single test was measured at
+// 37 s. A 20 s wait inside one of them is a coin flip, not a gate.
 const IGNORED_CONSOLE_ERRORS = [
     /fonts\.googleapis\.com/,
     /\/api\/telemetry\//,
@@ -138,11 +142,17 @@ async function openPage(page) {
     await page.waitForFunction(() => !!window.__neoLab, null, { timeout: 30_000 });
 }
 
-/** Population loaded AND at least one worker frame applied. */
+/**
+ * Population loaded AND at least one worker frame APPLIED to it. `rHelio` is
+ * the tell: a tier swap rebuilds every buffer and nulls the derived frames
+ * (_rebuildPoints), so `tiersPending` can empty a beat before the arrays the
+ * assertions read exist. Without this a test reads a half-swapped layer.
+ */
 async function waitForFrames(page) {
     await page.waitForFunction(() => {
         const L = window.__neoLab?.layer;
-        return !!L && L.count > 0 && L.frameJd != null && L.status.tiersPending.length === 0;
+        return !!L && L.count > 0 && L.frameJd != null && L.status.tiersPending.length === 0
+            && !!L.rHelio && !!L.rGeo;
     }, null, { timeout: 45_000 });
 }
 
@@ -231,7 +241,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await mockJpl(page);
         await openPage(page);
         await waitForFrames(page);
-        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 45_000 });
 
         const s = await page.evaluate(() => {
             const L = window.__neoLab.layer;
@@ -334,7 +344,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
             return { jd: L.frameJd, pos: [L._pos[i * 3], L._pos[i * 3 + 1], L._pos[i * 3 + 2]] };
         });
         await page.click('#tc-next-mo');
-        await page.waitForFunction((jd0) => window.__neoLab.layer.frameJd > jd0 + 25, before.jd, { timeout: 20_000 });
+        await page.waitForFunction((jd0) => window.__neoLab.layer.frameJd > jd0 + 25, before.jd, { timeout: 45_000 });
         const after = await page.evaluate(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('99942');
             return { jd: L.frameJd, pos: [L._pos[i * 3], L._pos[i * 3 + 1], L._pos[i * 3 + 2]] };
@@ -375,12 +385,12 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await mockJpl(page);
         await openPage(page);
         await waitForFrames(page);
-        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 45_000 });
         // A flyby 3 LD out is a lit rock mesh, and its sprite is suppressed.
         await page.waitForFunction(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
             return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible);
-        }, null, { timeout: 20_000 });
+        }, null, { timeout: 45_000 });
         const rocks = await page.evaluate(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
             const slot = L._rockSlots.find(sl => sl.index === i);
@@ -397,7 +407,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(rocks.tails).toBeGreaterThanOrEqual(1);
         // Selecting Apophis puts a rock at the lock anchor with its real (elongated) family and spin period.
         await page.evaluate(() => { const b = window.__neoLab.layer.selectByDes('99942'); window.__neoLab.selectBody(b); });
-        await page.waitForFunction(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible); }, null, { timeout: 20_000 });
+        await page.waitForFunction(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible); }, null, { timeout: 45_000 });
         const sel = await page.evaluate(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('99942'); const slot = L._rockSlots.find(sl => sl.index === i);
             return { atAnchor: slot.mesh.position.distanceTo(L.anchor.position) < 1e-6, shape: slot.shape, periodH: slot.spin.periodH,
@@ -409,7 +419,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(Math.abs(sel.bodyRadius - sel.scale)).toBeLessThan(1e-9);
         // Meteoroid streams are instanced rock meshes.
         await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
-        await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 45_000 });
         const stream = await page.evaluate(() => { const r = window.__neoLab.layer._radiants[0]; return { code: r.code, instanced: !!r.rocks.mesh.isInstancedMesh, count: r.rocks.mesh.count, visible: r.rocks.mesh.visible }; });
         expect(stream.code).toBe('PER');
         expect(stream.instanced).toBe(true);
@@ -438,7 +448,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await mockJpl(page);
         await openPage(page);
         await waitForFrames(page);
-        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 45_000 });
 
         // 1. A DRAG that starts on a body selects nothing — it belongs to the camera.
         const dragFrom = await isolatedTarget(page);
@@ -499,7 +509,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await mockJpl(page);
         await openPage(page);
         await waitForFrames(page);
-        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 45_000 });
         const target = await isolatedTarget(page);
         expect(target).not.toBeNull();
         await page.mouse.move(target.x, target.y);
@@ -538,31 +548,30 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await mockJpl(page);
         await openPage(page);
         await waitForFrames(page);
-        // The coma needs a WORKER FRAME, not just a loaded catalogue: the last
-        // tier in the ladder empties tiersPending and rebuilds the attribute
-        // arrays, so `_coma` can legitimately be all zeros for one more frame.
-        // (Caught as a 1-in-3 flake on this very assertion.)
-        await page.waitForFunction(() => {
-            const L = window.__neoLab.layer, i = L.byDes.get('2P');
-            return i != null && L._coma && L._coma[i] > 0;
-        }, null, { timeout: 20_000 });
-        const draw = await page.evaluate(() => {
+        // ONE ATOMIC READ, retried until the layer is consistent. The coma needs
+        // a WORKER FRAME, not just a loaded catalogue, and a tier swap rebuilds
+        // every attribute array from zero — so waiting for `_coma > 0` and THEN
+        // evaluating can still land on a freshly swapped layer and read the
+        // zeros back. Wait and read in the same tick. (Caught as a 1-in-30
+        // flake on exactly this assertion, twice.)
+        const draw = await (await page.waitForFunction(() => {
             const lab = window.__neoLab, L = lab.layer, THREE = lab.THREE;
             const m = L.points.material;
             const iComet = L.byDes.get('2P'), iRock = L.byDes.get('433');
+            if (iComet == null || iRock == null || !L._coma || !L._albedo || !L._alpha) return null;
+            if (!(L._coma[iComet] > 0)) return null;      // no frame applied to THIS array yet
             const albedo = Array.from(L._albedo.slice(0, L.count));
             return {
                 blending: m.blending, normal: THREE.NormalBlending, additive: THREE.AdditiveBlending,
                 premultiplied: m.premultipliedAlpha, depthWrite: m.depthWrite,
                 sameMaterial: L.localPoints.material === m,
-                hasAlbedo: !!L.points.geometry.attributes.aAlbedo,
-                hasComa: !!L.points.geometry.attributes.aComa,
+                attrs: Object.keys(L.points.geometry.attributes).sort(),
                 albedoMin: Math.min(...albedo), albedoMax: Math.max(...albedo),
                 cometAlbedo: L._albedo[iComet], cometComa: L._coma[iComet],
                 rockAlpha: L._alpha[iRock],
                 fs: m.fragmentShader, vs: m.vertexShader,
             };
-        });
+        }, null, { timeout: 45_000 })).jsonValue();
         // Not a light source.
         expect(draw.blending).toBe(draw.normal);
         expect(draw.blending).not.toBe(draw.additive);
@@ -571,19 +580,116 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(draw.sameMaterial, 'both frames draw the same kind of body').toBe(true);
         // A lit body, shaded from the Sun at the scene origin.
         expect(draw.vs).toContain('viewMatrix * vec4(0.0, 0.0, 0.0, 1.0)');
-        expect(draw.fs).toContain('dot(n, vSun)');
         expect(draw.fs).not.toContain('spikes');          // the diffraction cross of a point source
+        // LOMMEL–SEELIGER, not Lambert: μ₀/(μ₀+μ) is the airless-regolith law,
+        // and it is what makes a body read as a disc instead of a shiny ball.
+        expect(draw.fs).toContain('mu0 / (mu0 + mu)');
+        // The IAU H–G phase function, with the published coefficients — this is
+        // the GLSL mirror of the kernel's phaseHG and must not drift from it.
+        expect(draw.vs).toContain('phaseHG');
+        for (const c of ['3.33', '0.63', '1.87', '1.22']) expect(draw.vs).toContain(c);
+        // Size is a RADIUS put through the projection, not a magnitude curve.
+        expect(draw.attrs).toContain('aRadius');
+        expect(draw.attrs).toContain('aIllum');
+        expect(draw.attrs).toContain('aG');
+        expect(draw.attrs).not.toContain('aSize');
+        expect(draw.vs).toContain('projectionMatrix[1][1]');
         // Albedo is the taxonomy's, and a comet nucleus is among the darkest.
-        expect(draw.hasAlbedo).toBe(true);
-        expect(draw.hasComa).toBe(true);
         // The attribute is a Float32Array, so 0.04 reads back as 0.0399999991 —
         // compare with a tolerance, not against the literal.
         expect(draw.albedoMin).toBeGreaterThan(0.039);
-        expect(draw.albedoMax).toBeLessThan(0.201);
+        expect(draw.albedoMax).toBeLessThan(0.46);
         expect(draw.cometAlbedo).toBeCloseTo(0.04, 3);
         expect(draw.cometComa, '2P/Encke at perihelion has a coma').toBeGreaterThan(0);
         // Alpha is visibility, not magnitude: a drawn body is opaque.
         expect(draw.rockAlpha).toBeCloseTo(1, 5);
+        expect(errors).toEqual([]);
+    });
+
+    test('photometry is the kernel\'s: albedo, phase slope, inverse-square light, and a size that is an angle', async ({ page }) => {
+        // THE ACCURACY CONTRACT. Everything about how a body looks is derived
+        // from published quantities through js/neo-orbits.js, and this asserts
+        // the page agrees with the kernel object by object — not that it renders
+        // some remembered pixel value.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        await page.waitForFunction(() => {
+            const L = window.__neoLab.layer;
+            return L.rHelio && L._illum && L._illum.some(v => v !== 1);
+        }, null, { timeout: 45_000 });
+
+        const K = await import('../js/neo-orbits.js');
+        // ONE ATOMIC READ, retried until the layer is consistent. A tier swap
+        // rebuilds the attribute arrays and nulls rHelio mid-flight, so a plain
+        // evaluate() can land on a half-swapped layer (caught as a 1-in-4 flake
+        // reading rHelio[i] off null).
+        const objs = await (await page.waitForFunction(() => {
+            const L = window.__neoLab.layer;
+            if (!L.rHelio || !L._albedo || !L._illum || !L._radius) return null;
+            const out = {};
+            for (const des of ['433', '101955', '2P', '3200']) {
+                const i = L.byDes.get(des);
+                if (i == null || !L.els[i]) continue;
+                out[des] = { i, albedo: L._albedo[i], G: L._G[i], illum: L._illum[i], radius: L._radius[i],
+                    rHelio: L.rHelio[i], el: { H: L.els[i].H, diam: L.els[i].diam, spec: L.els[i].spec ?? null,
+                        albedo: L.els[i].albedo ?? null, flags: L.els[i].flags } };
+            }
+            return Object.keys(out).length >= 3 ? out : null;
+        }, null, { timeout: 45_000 })).jsonValue();
+        expect(Object.keys(objs).length).toBeGreaterThanOrEqual(3);
+        for (const [des, o] of Object.entries(objs)) {
+            const optics = K.opticalProperties(o.el);
+            expect(o.albedo, `${des} albedo is the kernel's`).toBeCloseTo(optics.albedo, 5);
+            expect(o.G, `${des} phase slope is the kernel's`).toBeCloseTo(optics.G, 5);
+            // Illumination is the inverse-square law in the units H is defined
+            // in: (1 AU / r)². Uniform light was the bug this replaces.
+            expect(o.illum, `${des} is lit as 1/r²`).toBeCloseTo(1 / (o.rHelio * o.rHelio), 4);
+            // The drawn radius is the SAME diameter the mesh pool uses, and the
+            // diameter is derived through THIS object's albedo when unmeasured.
+            const km = K.diameterKm(o.el, optics).km;
+            expect(o.radius, `${des} radius is drawnRockRadius(diameterKm)`).toBeCloseTo(0.010 + 0.011 * Math.log10(1 + 10 * km), 5);
+        }
+        // A dark body is derived BIGGER from the same H — the albedo is inside
+        // the square root, and assuming 0.14 for everything is what shrank them.
+        expect(K.diameterKm({ H: 20, spec: 'C' }).km).toBeGreaterThan(K.diameterKm({ H: 20, spec: 'S' }).km);
+
+        // ── Size is an ANGLE, and the LOD handoff is continuous ──────────────
+        // The impostor and the mesh that replaces it must subtend the same
+        // angle, or a body jumps size as it crosses ROCK_RANGE. The mesh's
+        // projected diameter is measured here from its own world geometry, so
+        // this is not the layer's mirror checking itself.
+        await page.evaluate(() => { const b = window.__neoLab.layer.selectByDes('99942'); window.__neoLab.selectBody(b); });
+        await page.waitForFunction(() => {
+            const L = window.__neoLab.layer, i = L.byDes.get('99942');
+            return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible);
+        }, null, { timeout: 45_000 });
+        const lod = await page.evaluate(() => {
+            const lab = window.__neoLab, L = lab.layer, THREE = lab.THREE;
+            const i = L.byDes.get('99942');
+            const slot = L._rockSlots.find(sl => sl.index === i);
+            const cam = lab.camera, h = lab.canvas.getBoundingClientRect().height;
+            cam.updateMatrixWorld();
+            // Project the mesh's own limb: centre ± radius along the camera RIGHT
+            // vector, so the measurement is perpendicular to the view axis.
+            const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).normalize();
+            const c = slot.mesh.position.clone();
+            const a = c.clone().addScaledVector(right, -slot.mesh.scale.x).project(cam);
+            const b = c.clone().addScaledVector(right, slot.mesh.scale.x).project(cam);
+            const meshPx = Math.abs(b.x - a.x) * 0.5 * lab.canvas.getBoundingClientRect().width;
+            // The impostor's size for the SAME object at the SAME depth.
+            const view = c.clone().applyMatrix4(cam.matrixWorldInverse);
+            const scale = (cam.projectionMatrix.elements[5] * h * 0.5) / Math.max(-view.z, 1e-6);
+            const spritePx = 2 * L._radius[i] * scale;
+            return { meshPx, spritePx, radius: L._radius[i], meshRadius: slot.mesh.scale.x };
+        });
+        // (float32 attribute vs float64 mesh scale — the two agree to the
+        // attribute's own precision, which is the most that can be asked.)
+        expect(lod.meshRadius, 'the mesh is scaled to the same drawn radius').toBeCloseTo(lod.radius, 7);
+        expect(lod.meshPx).toBeGreaterThan(2);
+        // Same angle, to within the projection's own perspective asymmetry.
+        expect(Math.abs(lod.spritePx - lod.meshPx) / lod.meshPx, 'sprite and mesh subtend the same angle').toBeLessThan(0.06);
         expect(errors).toEqual([]);
     });
 

@@ -106,8 +106,8 @@ through it.
   between the camera and the Sun is a crescent, one at opposition a full disc;
   nothing is keyed to it. Blending is **normal, premultiplied**, so a body in
   front of the Sun is a SILHOUETTE and no number of bodies can add up to a glow.
-  Tone is `aAlbedo`, from the same taxonomy hash the colour reads (S-type 0.20 →
-  C-type 0.045, cometary nucleus 0.04), compressed and disclosed like the sizes.
+  Tone is `aAlbedo` — MEASURED where JPL publishes one, else the taxonomic class
+  mean (§2d), never a hash of the designation.
   **The magnitude-derived ALPHA is gone**: H is size *and* albedo, both of which
   the body now carries honestly, and as an opacity it made a faint rock a
   see-through one the moment the blend stopped being additive. Alpha is
@@ -165,6 +165,64 @@ through it.
   keeping it alive). Throttled to 70 ms: a pick projects the whole loaded
   catalogue, which is sub-millisecond but not free, and no hover needs frame rate.
 
+## 2d. Photometry (2026-09-18, the "more visual accuracy" pass)
+
+Everything about how a body looks is now derived from published quantities
+through the kernel, and `tests/solar-system-neo-smoke.spec.js` asserts the page
+agrees with `js/neo-orbits.js` object by object.
+
+- **Drawn size is a TRUE PROJECTED SIZE.** `aRadius` is `drawnRockRadius` of the
+  object's diameter, put through the perspective division in `POINT_VS`
+  (`projectionMatrix[1][1]`, which is 1/tan(fov/2)), floored at `SPRITE.minPx`
+  where it falls below a pixel. **The attenuation curve it replaced saturated at
+  both ends** — `clamp(u_att / viewDepth, 0.55, 2.30)` is at its ceiling for
+  anything closer than ~13 scene units and at its floor past ~54, so a whole
+  framing came out as one wall of same-size rocks and depth did not read at all.
+  It also means the impostor and the mesh that replaces it inside `ROCK_RANGE`
+  **subtend the same angle**, so nothing jumps size across the LOD line; the
+  browser gate measures the mesh's own projected limb and compares.
+- **The scattering law is LOMMEL–SEELIGER, not Lambert.** Single scattering off
+  a dark particulate regolith, ∝ μ₀/(μ₀+μ): nearly FLAT across the disc where a
+  Lambertian sphere darkens toward the limb. This is the difference between a
+  body that reads as a disc and one that reads as a shiny ball — it is why the
+  full Moon looks like a disc. Both the impostor and the rock meshes use it.
+- **The phase function is the IAU H–G law** the published H and G are defined in
+  (`phaseHG`, mirrored in GLSL — change both together). It carries the
+  opposition surge for free. **It is held past α = 120°** (`HG_ALPHA_MAX`): the
+  fit says nothing beyond that and its basis functions run to zero there, which
+  drew every backlit object as nothing at all. A floor is honest, an
+  extrapolation off the end of a published fit is not.
+- **Illumination falls as 1/r².** `aIllum` is (1 AU / r)² from the worker's own
+  heliocentric distance, so an object at 3 AU is 9× darker than the same object
+  at 1 AU. Before this, everything was lit as though it sat at Earth's distance.
+- **Albedo and taxonomy are MEASURED where JPL has them.** `opticalProperties`
+  returns the measured albedo when the archive published one, else the class
+  mean from `TAXONOMY` (Tholen/Bus–DeMeo means: C 0.06, S 0.20, V 0.36, E 0.45,
+  D 0.04, cometary nucleus 0.04), else the IAU defaults — and reports WHICH in
+  `measured`. The panel prints the coverage. **The albedo is load-bearing twice
+  over**: it sets the tone, and it sets the size, because D = 1329/√p·10^(−H/5)
+  — assuming 0.14 for a C-type draws it √(0.14/0.06) = 1.53× too small.
+- **The optional columns can never take the catalogue down.** `albedo` /
+  `spec_B` / `spec_T` are UNVERIFIED spellings on an egress-blocked API, and a
+  `fields` list JPL does not recognise is rejected whole. `SBDB_FIELDS` is
+  therefore split core / photometry, and `api/neo/catalog.js` retries once
+  without the optional list on a 4xx, self-reporting `photometry_fields:
+  'dropped'`. One production request settles it.
+- **Level carries a DISCLOSED display normalisation** (`SPRITE.gain`,
+  `SPRITE.stretch`): the population spans several decades of reflected radiance
+  and no linear gain shows both ends. Neither constant changes anything
+  relative. Shape from Lommel–Seeliger and level from H–G is a rendering
+  approximation, not a self-consistent Hapke model, and the header says so.
+- **Opacity rises with the light the body returns** (floor 0.30). The drawn disc
+  is inflated by the log size map — `drawnRockRadius` draws a 1 km rock at about
+  2 000 km — so a fully opaque backlit body punched a solid black hole in the
+  sky, occulting a patch thousands of times larger than the real object could.
+  The floor keeps a body crossing a bright background reading as a shadow.
+- **The data card reports V, exactly.** `apparentMagnitudeV(H, r, Δ, α, G)` with
+  r, Δ and α from the propagated vectors — the magnitude AS SEEN FROM EARTH, not
+  from the drawn scene. At r = Δ = 1 AU, α = 0 it returns H, which is the
+  definition and what the kernel gate asserts.
+
 ## 3. Scars (each was a bug during the build)
 
 - **TDZ abort.** `NeoPanel` renders synchronously in its constructor and
@@ -184,7 +242,10 @@ through it.
   if it lands within `LABEL_SEP_NDC` of one already placed — nearest object
   first, so the closer one keeps its label. Separation is in NDC because the
   labels are `sizeAttenuation:false` sprites, i.e. sized as a fraction of the
-  VIEW. What is dropped is not lost: hover names it. The pass re-runs on camera
+  VIEW. What is dropped is not lost: hover names it. **Off-screen is not a
+  conflict** — an early version also culled labels outside the frustum, which
+  made the label set depend on the framing, churned a canvas raster on every pan
+  and turned the local-frame browser gate flaky. The pass re-runs on camera
   motion as well as on a worker frame, throttled — otherwise orbiting with the
   SIM PAUSED never re-places anything, because the frame that normally does it
   never arrives.
@@ -224,16 +285,36 @@ through it.
   VIEW space, where +y is up, so the sphere normal is `vec3(q.x, -q.y, …)`. With
   the sign wrong the terminator tilts the wrong way and the crescent points at
   the wrong side of the sky — a picture that still looks plausible.
-- **The pad in `POINT_VS` and the `bodyR` in `POINT_FS` are one number in two
-  places.** The quad grows to make room for the reticle and the coma; the body
-  shrinks inside it by exactly the same factor, and the pick radius recomputes
-  it a third time. Change one, change all three.
+- **The pad in `POINT_VS` and the `bodyR` in `POINT_FS` were one number in two
+  places.** The quad grows to make room for the reticle and the coma and the
+  body shrinks inside it by the same factor — so the vertex shader now PASSES
+  the body's share of the quad (`vBodyFrac`) instead of the fragment shader
+  re-deriving it, and `drawnPx()` is the one JS mirror the pick radius uses.
+- **A size curve that saturates is not a size.** The old attenuation clamp was
+  at one end or the other for every framing anyone actually uses, so the
+  population drew at a near-constant pixel size and the scene lost its depth
+  cue entirely. Nothing errored; it just looked like wallpaper.
+- **An inflated body must not occult like a real one.** Drawn radii are
+  log-inflated by ~3 orders of magnitude, so an opaque backlit rock erased a
+  patch of sky no real 1 km body could touch. Opacity follows the returned
+  light now, with a floor for the silhouette.
+- **A published fit has an end.** Running the H–G phase function to α = 180°
+  took every backlit object to zero brightness — plausible-looking, and wrong,
+  because the law is fitted to α ≲ 120° and a real body still shows a crescent.
+- **Albedo is inside a square root.** Deriving D from H at a blanket 0.14 draws
+  every dark object too small — 1.53× for a C-type — which is a size error that
+  looks like a rendering choice.
 
 ## 4. Open items
 
 - Production self-report: after the first deploy, read
   `/api/neo/catalog?tier=pha` `groups.*.field_map` and `/api/neo/watch`
   `sources.*` and trim the candidate lists in `api/_lib/neo-sources.js`.
+  **Read `groups.*.photometry_fields` in the same request**: 'dropped' means JPL
+  refused the optional albedo/taxonomy columns and every tone and derived size
+  on the page is a class mean — fix the spelling or trim
+  `SBDB_FIELDS_PHOTOMETRY`. `groups.*.photometry.albedo_measured` /
+  `.spec_measured` say how many rows actually carried them.
   Confirm the interstellar query (`e > 1.1`) returns 1I/2I/3I and nothing
   else.
 - Vercel edge response size for `tier=all` (~3.4 MB) is untested in

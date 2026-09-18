@@ -40,7 +40,8 @@ import {
     FLAG, LD_AU, AU_KM, LOCAL_FRAME, CLASS_LABELS,
     rowToRecord, normalizeElements, propagate, toOfDate, sampleOrbit,
     helioToScene, geoToLocalScene, localSceneRadius, localFrameWeight, precessionLongitudeRad, rotateAboutPole,
-    diameterKmFromH, formatSize, formatLD, toLD, speedKms, elementsAgeNote, findNotable, neoClass,
+    diameterKm, formatSize, formatLD, toLD, speedKms, elementsAgeNote, findNotable, neoClass,
+    opticalProperties, phaseHG, apparentMagnitudeV, phaseAngleRad, TAXONOMY,
     solarLongitudeDeg, activeShowers, nextShower, radiantEclipticUnit,
 } from './neo-orbits.js';
 
@@ -107,39 +108,34 @@ export const NEO_TIER_LADDER = ['pha', 'bright', 'all'];
  * honestly occupy. The sprite itself is a Gaussian core + soft PSF halo,
  * blended ADDITIVELY so dense regions glow instead of stacking opaque discs.
  */
-export const NATURAL_COLORS = Object.freeze({
-    sType: 0xd6bb95, cType: 0x9a9691, pha: 0xf0a97c, comet: 0xc4e8ff, interstellar: 0xffffff, flyby: 0xfff0c2,
-});
-function hash01(str) {
-    let h = 2166136261;
-    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-    return ((h >>> 0) % 10007) / 10007;
-}
-/** Point size (CSS px before attenuation) from absolute magnitude. */
-function baseSize(el) {
-    if (el.flags & FLAG.INTERSTELLAR) return 5.2;
-    if (el.flags & FLAG.COMET) return 3.8;
-    const H = el.H ?? 20;
-    return Math.min(5.6, Math.max(1.7, 5.6 - 0.24 * (H - 12)));
-}
 /**
- * Geometric albedo proxy, from the SAME taxonomy hash `colorFor` reads, so a
- * body's tone and its reflectance can never disagree: S-type 0.20 → C-type
- * 0.045 (darker than coal), cometary nucleus 0.04 (1P/Halley measured 0.04),
- * an interstellar object 0.10 for want of a better number. It is the shader's
- * reflectance term — compressed there, disclosed, and never used for photometry.
- *
- * THE MAGNITUDE-DERIVED ALPHA THIS REPLACED IS GONE ON PURPOSE. It made a faint
- * rock a see-through one the moment the population stopped blending additively,
- * and it was double-counting: H is size AND albedo, both of which the body now
- * carries honestly (`baseSize` for the first, this for the second).
+ * The NATURAL palette's fixed entries. The ASTEROID tints no longer live here —
+ * they come from the kernel's TAXONOMY table, so a body's colour, its albedo and
+ * its derived diameter are three readings of ONE published classification and
+ * cannot disagree. These are the objects that have no taxonomy to read.
  */
-function albedoFor(el) {
-    if (el.flags & FLAG.COMET) return 0.04;
-    if (el.flags & FLAG.INTERSTELLAR) return 0.10;
-    const t = Math.min(1, 0.25 + 0.6 * hash01(String(el.des ?? el.name ?? '')));   // 0 = S-type, 1 = C-type
-    return 0.20 + (0.045 - 0.20) * t;
+export const NATURAL_COLORS = Object.freeze({
+    sType: TAXONOMY.S.tint, cType: TAXONOMY.C.tint, pha: 0xf0a97c,
+    comet: 0xc4e8ff, interstellar: 0xffffff, flyby: 0xfff0c2,
+});
+/**
+ * Per-object optical properties, CACHED. `opticalProperties` walks a small
+ * table and allocates, and this is called for every object in the catalogue on
+ * every style pass — 38 000 of them. Keyed by the element record itself, so a
+ * catalogue swap drops the whole map with the objects.
+ */
+const _optics = new WeakMap();
+export function opticsFor(el) {
+    let o = _optics.get(el);
+    if (!o) {
+        o = opticalProperties(el);
+        const d = diameterKm(el, o);
+        o = { ...o, diamKm: d.km, diamMeasured: d.measured };
+        _optics.set(el, o);
+    }
+    return o;
 }
+
 function classColorHex(el) {
     if (el.flags & FLAG.INTERSTELLAR) return NEO_COLORS.interstellar;
     if (el.flags & FLAG.COMET) return NEO_COLORS.comet;
@@ -151,11 +147,11 @@ const _cB = new THREE.Color();
 export function colorFor(el, mode, out) {
     if (mode === 'class') return out.setHex(classColorHex(el));
     if (el.flags & FLAG.INTERSTELLAR) return out.setHex(NATURAL_COLORS.interstellar);
-    if (el.flags & FLAG.COMET) return out.setHex(NATURAL_COLORS.comet);
-    const t = hash01(String(el.des ?? el.name ?? ''));
-    out.setHex(NATURAL_COLORS.sType).lerp(_cB.setHex(NATURAL_COLORS.cType), 0.25 + 0.6 * t);
-    if (el.flags & FLAG.PHA) out.lerp(_cB.setHex(NATURAL_COLORS.pha), 0.6);
-    return out;
+    // NATURAL is now the TAXONOMY's own tint (kernel TAXONOMY / COMET_NUCLEUS /
+    // UNCLASSIFIED), not a hash of the designation. An object JPL has classified
+    // is drawn as its class; one it has not gets the unclassified grey and says
+    // so in the readout, rather than being assigned a spectral type at random.
+    return out.setHex(opticsFor(el).tint);
 }
 export function classLabel(el) {
     if (el.flags & FLAG.INTERSTELLAR) return 'Interstellar object';
@@ -168,25 +164,52 @@ export function displayName(el) { return el.name || el.des || '—'; }
 const DPR = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
 
 /**
- * THE DRAWN SIZE OF A BODY, IN ONE PLACE. `POINT_VS` sets gl_PointSize from
- * these, `POINT_FS` re-derives the body's share of the quad from the same pad,
- * and `pick()` recomputes the whole thing to get its accept radius. Three
- * readers, one set of numbers — interpolated into the GLSL rather than typed
- * twice, because a pick radius that disagrees with the drawn radius is exactly
- * the bug this layer already shipped once.
+ * THE DRAWN SIZE OF A BODY, IN ONE PLACE.
+ *
+ * A body's drawn size is now its TRUE PROJECTED SIZE — the same
+ * `drawnRockRadius` the mesh pool uses, put through the perspective division —
+ * floored at `minPx` where it falls below a pixel. Three things follow, and the
+ * first two were visible bugs:
+ *
+ *   · DEPTH READS. The attenuation curve this replaced (u_att / viewDepth,
+ *     clamped to [0.55, 2.30]) saturated at both ends: everything closer than
+ *     ~13 scene units drew at the ceiling and everything past ~54 at the floor,
+ *     so a whole framing of the orrery came out as one wall of same-size rocks.
+ *   · THE LOD HANDOFF IS CONTINUOUS. The impostor and the rock mesh that
+ *     replaces it inside ROCK_RANGE now subtend the same angle, so an object
+ *     does not jump size as it crosses the line.
+ *   · RELATIVE SIZES MEAN SOMETHING. They are the (disclosed, log-compressed)
+ *     real diameters — measured where JPL publishes one, else derived from H
+ *     through THIS object's albedo, not a 0.14 default that draws every dark
+ *     body 1.5x too small.
+ *
+ * Below `minPx` a body is UNRESOLVED and drawn as a fixed marker; that floor is
+ * the one drawing convention left in the size, and the panel discloses it.
+ * `drawnPx()` is the JS mirror the pick radius uses — the shader works in
+ * device pixels and the mirror in CSS pixels, which is the only difference.
  */
 const SPRITE = Object.freeze({
-    att: 30.0,                    // attenuation numerator: att = 1 at 30 scene units out
-    attMin: 0.55, attMax: 2.30,   // attenuation clamp: u_att / viewDepth, bounded
-    padReticle: 0.75,             // extra quad for the attention ring
-    padComa: 1.40,                // extra quad for a comet's coma
-    minPx: 2.0,                   // a body never falls below this many CSS px
+    minPx: 2.0,        // an unresolved body is drawn this big and no smaller
+    reticlePx: 11.0,   // an attention ring stays a legible target at any size
+    padComa: 1.40,     // extra quad for a comet's coma
+    // The display normalisation and compression, both DISCLOSED. `gain` is set
+    // so the reference object — the IAU default albedo 0.14, at 1 AU, seen at
+    // opposition — renders at ~0.95 of full tone, and `stretch` compresses the
+    // several decades of reflected radiance the population actually spans
+    // (0.04-albedo nucleus at 5 AU up to a 0.45 E-type at 0.9 AU). Neither
+    // changes anything RELATIVE: they move the whole population together.
+    gain: 6.2,
+    stretch: 0.38,
 });
-const G = (x) => x.toFixed(2);    // GLSL wants a decimal point on every float
-/** gl_PointSize in CSS px (before DPR) — the JS mirror of POINT_VS. */
-function drawnPx(size, viewDepth, pulse = 0, coma = 0) {
-    const att = Math.min(SPRITE.attMax, Math.max(SPRITE.attMin, SPRITE.att / Math.max(viewDepth, 0.05)));
-    return Math.max(SPRITE.minPx, size * att * (1 + pulse * SPRITE.padReticle + coma * SPRITE.padComa));
+/** Pixels per scene unit at view depth `clipW` for a camera of height `viewH` px. */
+function pxPerUnit(camera, viewH, clipW) {
+    return (camera.projectionMatrix.elements[5] * viewH * 0.5) / Math.max(clipW, 1e-6);
+}
+/** gl_PointSize in CSS px — the JS mirror of POINT_VS. Keep the two in step. */
+function drawnPx(radius, scale, coma = 0, pulse = 0) {
+    const body = 2 * radius * scale;
+    const quad = Math.max(SPRITE.minPx, body) * (1 + coma * SPRITE.padComa);
+    return Math.max(quad, pulse * SPRITE.reticlePx);
 }
 
 // ── What a far-field object LOOKS like ──────────────────────────────────────
@@ -194,42 +217,65 @@ function drawnPx(size, viewDepth, pulse = 0, coma = 0) {
 // Gaussian PSF with a diffraction cross — the rendering convention for a point
 // SOURCE of light — and 38 000 of them blended additively into an orange haze
 // that read as the population glowing on its own. Worse, the rock meshes that
-// stand in inside ROCK_RANGE are Lambert-shaded SUNLIT BODIES (js/neo-rocks.js
-// ROCK_FS), so an object changed species as it crossed the LOD line: a light
-// out here, a rock up close.
+// stand in inside ROCK_RANGE are shaded SUNLIT BODIES (js/neo-rocks.js), so an
+// object changed species as it crossed the LOD line: a light out here, a rock
+// up close. The sprite is now the same body the mesh is, drawn as a SPHERE
+// IMPOSTOR, and everything about its appearance is computed photometry:
 //
-// The sprite is now the same body the mesh is, drawn as a SPHERE IMPOSTOR. The
-// Sun is the scene origin on this page, so the vertex shader gets the exact
-// solar direction in view space for free, and the fragment shader shades the
-// visible hemisphere with the SAME terms as ROCK_FS (Lambert + wrap fill +
-// limb). Three consequences, all of them the point:
+//   · THE SCATTERING LAW IS LOMMEL–SEELIGER (single scattering off a dark,
+//     particulate, airless regolith), NOT LAMBERT. This is the classic
+//     difference: a Lambertian sphere at full phase is a bright centre fading
+//     to a dark limb, while an airless body is nearly FLAT across the disc —
+//     which is why the full Moon looks like a disc and not a ball. The rock
+//     meshes use the same law, on real normals.
+//   · THE PHASE FUNCTION IS THE IAU H–G LAW the published H and G are defined
+//     in (kernel `phaseHG`, mirrored here in GLSL). It carries the opposition
+//     surge, so a body near opposition brightens the way a real one does.
+//   · THE ILLUMINATION FALLS AS 1/r². `aIllum` is (1 AU / r)² from the worker's
+//     own heliocentric distance, so an object at 3 AU is 9x darker than the
+//     same object at 1 AU instead of equally bright everywhere.
+//   · THE ALBEDO IS THE OBJECT'S. Measured where JPL publishes one, else the
+//     taxonomic class mean (kernel `opticalProperties`) — 0.04 for a cometary
+//     nucleus, 0.06 for a C-type, 0.45 for an E-type. Never a hash.
 //
-//   · THE PHASE ANGLE IS REAL. An object between the camera and the Sun is a
-//     crescent; one at opposition is a full disc. Nothing is keyed to it — it
-//     falls out of dot(normal, sunDirection) on a hemisphere the shader knows.
-//   · BLENDING IS NORMAL, NOT ADDITIVE, and the material is premultiplied, so
-//     the blend is (ONE, ONE_MINUS_SRC_ALPHA). 38 000 dark bodies cannot stack
-//     into a glow, and a body drawn in front of the Sun is a SILHOUETTE.
-//   · BRIGHTNESS IS ALBEDO × ILLUMINATION. A C-type (0.045) is nearly black;
-//     an S-type (0.20) is a grey pebble. `aAlbedo` carries the taxonomy the
-//     colour already encodes, so tone and albedo can never disagree.
+// The product of those is a REFLECTED RADIANCE spanning several decades across
+// the population, so the last step is a DISCLOSED display stretch (SPRITE.gain
+// and SPRITE.stretch) — the same honesty the drawn sizes carry. Shape from
+// Lommel–Seeliger and level from H–G is a rendering approximation, not a
+// self-consistent Hapke model; it is not claimed to be one.
 //
-// A COMET'S COMA IS THE ONE THING HERE THAT MAY GLOW — that light is real, and
-// `aComa` carries its 1/r² strength; the tails stay additive for the same
-// reason. Attention markers (a flyby this week, an in-zone object, the hovered
-// body) are a HAIRLINE RETICLE — an instrument annotation drawn AROUND the
-// body, never a halo drawn ON it, so "the page is pointing at this" can never
-// be mistaken for "this object is bright".
-const POINT_VS = /* glsl */`
+// Blending is NORMAL and premultiplied, so a body in front of the Sun is a
+// SILHOUETTE and no number of bodies can add up to a glow. A COMET'S COMA IS
+// THE ONE THING HERE THAT MAY GLOW (aComa, the tails' own 1/r²). Attention
+// markers — a flyby this week, an in-zone object, the hovered body — are a
+// HAIRLINE RETICLE drawn around the body, never a halo drawn on it.
+const PHASE_GLSL = /* glsl */`
+    // IAU two-parameter phase function (Bowell et al. 1989) — the GLSL mirror
+    // of neo-orbits.js phaseHG(). Φ(0) = 1 for every G, by construction, and
+    // the value is HELD past the published fit's α ≲ 120° (HG_ALPHA_MAX): the
+    // basis functions run to zero there, which drew every backlit body as
+    // nothing at all. Change this and the kernel together.
+    float phaseHG(float alpha, float G) {
+        float t = tan(min(max(alpha, 0.0), 2.0943951) * 0.5);   // 120° in radians
+        float p1 = exp(-3.33 * pow(max(t, 1e-6), 0.63));
+        float p2 = exp(-1.87 * pow(max(t, 1e-6), 1.22));
+        return (1.0 - G) * p1 + G * p2;
+    }
+`;
+const POINT_VS = /* glsl */`${PHASE_GLSL}
     attribute vec3  aColor;
-    attribute float aSize;
+    attribute float aRadius;     // drawn body radius, SCENE units (drawnRockRadius)
     attribute float aAlpha;
     attribute float aPulse;
     attribute float aAlbedo;
+    attribute float aG;          // IAU phase slope for this object's taxonomy
+    attribute float aIllum;      // (1 AU / r_helio)² — the light reaching the body
     attribute float aComa;
     uniform float u_dpr;
-    uniform float u_att;
+    uniform float u_viewPx;      // drawing-buffer height, device px
     uniform float u_minPx;
+    uniform float u_reticlePx;
+    uniform float u_padComa;
     varying vec3  vColor;
     varying vec3  vSun;
     varying float vAlpha;
@@ -237,24 +283,37 @@ const POINT_VS = /* glsl */`
     varying float vAlbedo;
     varying float vComa;
     varying float vPx;
+    varying float vBodyFrac;     // the body's share of the quad — the FS never re-derives it
+    varying float vLight;        // illumination × phase function at this body
     void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         // The Sun is the scene origin, so its VIEW-space position is the view
         // matrix applied to the origin — no uniform for the page to keep in sync.
         vec3 sunView = (viewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-        vSun = normalize(sunView - mv.xyz);
-        float att = clamp(u_att / max(-mv.z, 0.05), ${G(SPRITE.attMin)}, ${G(SPRITE.attMax)});
-        // A reticle and a coma both need room OUTSIDE the body, so the quad
-        // grows and the fragment shader shrinks the body by the same factor.
-        float pad = 1.0 + aPulse * ${G(SPRITE.padReticle)} + aComa * ${G(SPRITE.padComa)};
-        gl_PointSize = max(u_minPx, aSize * att * pad) * u_dpr;
-        vPx = gl_PointSize;
+        vec3 toSun = sunView - mv.xyz;
+        vec3 toEye = -mv.xyz;
+        vSun = normalize(toSun);
+        // Phase angle at the BODY, between the Sun and the camera — the same
+        // Sun–body–observer angle the kernel's phaseAngleRad computes.
+        float alpha = acos(clamp(dot(vSun, normalize(toEye)), -1.0, 1.0));
+        vLight = aIllum * phaseHG(alpha, aG);
+
+        float clipW = max(-mv.z, 1e-4);
+        // TRUE projected size: projectionMatrix[1][1] is 1/tan(fov/2).
+        float bodyPx = 2.0 * aRadius * (projectionMatrix[1][1] * u_viewPx * 0.5) / clipW;
+        float quad = max(u_minPx * u_dpr, bodyPx) * (1.0 + aComa * u_padComa);
+        quad = max(quad, aPulse * u_reticlePx * u_dpr);
+        gl_PointSize = quad;
+        vPx = quad;
+        vBodyFrac = clamp(bodyPx / max(quad, 1e-4), 0.04, 1.0);
         gl_Position = projectionMatrix * mv;
         vColor = aColor; vAlpha = aAlpha; vPulse = aPulse; vAlbedo = aAlbedo; vComa = aComa;
     }
 `;
 const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_time;
+    uniform float u_gain;
+    uniform float u_stretch;
     varying vec3  vColor;
     varying vec3  vSun;
     varying float vAlpha;
@@ -262,28 +321,32 @@ const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
     varying float vAlbedo;
     varying float vComa;
     varying float vPx;
+    varying float vBodyFrac;
+    varying float vLight;
     void main() {
         if (vAlpha <= 0.002) discard;
         vec2 c = (gl_PointCoord - 0.5) * 2.0;     // NOTE gl_PointCoord.y runs DOWN the screen
         float r = length(c);
         if (r > 1.0) discard;
-        float pad   = 1.0 + vPulse * ${G(SPRITE.padReticle)} + vComa * ${G(SPRITE.padComa)};   // mirrors POINT_VS
-        float bodyR = 1.0 / pad;
+        float bodyR = vBodyFrac;                  // set in POINT_VS — never re-derived here
         float edge  = max(0.10, 2.0 / max(vPx, 1.0));      // ~1 px of antialiased limb
         float cov   = 1.0 - smoothstep(bodyR - edge, bodyR + edge, r);
 
         // Sphere impostor: the visible hemisphere's normal, in VIEW space, which
         // is the frame vSun is already in. The y flip is gl_PointCoord's.
-        vec2 q = c / bodyR;
+        vec2 q = c / max(bodyR, 1e-4);
         vec3 n = vec3(q.x, -q.y, sqrt(max(0.0, 1.0 - min(1.0, dot(q, q)))));
-        float ndl  = dot(n, vSun);
-        float diff = max(ndl, 0.0);
-        float wrap = max(ndl * 0.5 + 0.5, 0.0) * 0.10;     // scattered fill — ROCK_FS's term
-        float limb = pow(smoothstep(bodyR * 0.55, bodyR, r), 3.0) * 0.07;
-        // Albedo is COMPRESSED, like the drawn sizes: 0.045 (C) to 0.20 (S) is
-        // 4.4x of tone on a body a few pixels across. Disclosed in the panel note.
-        float refl = 0.45 + 2.6 * vAlbedo;
-        vec3 body  = vColor * refl * (0.045 + 0.95 * diff + wrap) + limb * vec3(0.55, 0.62, 0.78);
+        float mu0 = max(dot(n, vSun), 0.0);       // cos(incidence)
+        float mu  = max(n.z, 1e-3);               // cos(emission) — the eye is +z here
+        // Lommel–Seeliger, normalised to 1 where mu0 == mu (the backscatter
+        // direction), so the phase function alone carries the level.
+        float ls = 2.0 * mu0 / (mu0 + mu);
+        float radiance = vAlbedo * vLight * ls;
+        // DISCLOSED display compression — the population spans several decades
+        // of reflected radiance and no linear gain shows both ends.
+        float lit = pow(clamp(radiance * u_gain, 0.0, 6.0), u_stretch);
+        float limb = pow(smoothstep(bodyR * 0.55, bodyR, r), 3.0) * 0.06;
+        vec3 body = vColor * lit + limb * vec3(0.55, 0.62, 0.78);
 
         float coma = vComa * exp(-r * r * 2.2) * 0.55;     // the one real light source here
 
@@ -295,7 +358,14 @@ const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
                     * (0.62 + 0.38 * sin(u_time * 2.2));
         vec3 ringCol = mix(vColor, vec3(1.0), 0.65);
 
-        float aBody = cov * vAlpha;
+        // OPACITY RISES WITH THE LIGHT THE BODY ACTUALLY RETURNS. The drawn disc
+        // is inflated by the log size map (drawnRockRadius draws a 1 km rock at
+        // ~2 000 km), so a fully opaque body would occult a patch of sky
+        // thousands of times larger than the real one can — a backlit object
+        // came out as a solid black hole in the scene, which is a bigger lie
+        // than the dimming. The floor keeps a body crossing a bright background
+        // reading as a shadow, which is what an occultation looks like.
+        float aBody = cov * vAlpha * clamp(0.30 + 0.70 * lit, 0.30, 1.0);
         float aComa = coma * vAlpha;
         float aRing = ring * vAlpha * 0.9;
         float a = clamp(aBody + aComa + aRing, 0.0, 1.0);
@@ -317,10 +387,14 @@ function makePointsMaterial() {
     return new THREE.ShaderMaterial({
         vertexShader: POINT_VS, fragmentShader: POINT_FS,
         uniforms: {
-            u_dpr:   { value: DPR },
-            u_time:  { value: 0 },
-            u_att:   { value: SPRITE.att },
-            u_minPx: { value: SPRITE.minPx },
+            u_dpr:       { value: DPR },
+            u_time:      { value: 0 },
+            u_viewPx:    { value: 720 * DPR },       // replaced on the first update()
+            u_minPx:     { value: SPRITE.minPx },
+            u_reticlePx: { value: SPRITE.reticlePx },
+            u_padComa:   { value: SPRITE.padComa },
+            u_gain:      { value: SPRITE.gain },
+            u_stretch:   { value: SPRITE.stretch },
         },
         transparent: true, depthWrite: false, depthTest: true,
         // NOT AdditiveBlending — see the block above. Premultiplied because the
@@ -716,17 +790,22 @@ export class NeoLayer extends Emitter {
         const geo = new THREE.BufferGeometry();
         this._pos = new Float32Array(N * 3);
         this._col = new Float32Array(N * 3);
-        this._size = new Float32Array(N);
+        this._radius = new Float32Array(N);    // drawn body radius, scene units
         this._alpha = new Float32Array(N);
         this._pulse = new Float32Array(N);
         this._albedo = new Float32Array(N);
+        this._G = new Float32Array(N);         // IAU phase slope per taxonomy
+        this._illum = new Float32Array(N);     // (1 AU / r_helio)²
         this._coma = new Float32Array(N);
+        this._illum.fill(1);
         geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
         geo.setAttribute('aColor', new THREE.BufferAttribute(this._col, 3));
-        geo.setAttribute('aSize', new THREE.BufferAttribute(this._size, 1));
+        geo.setAttribute('aRadius', new THREE.BufferAttribute(this._radius, 1));
         geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._alpha, 1));
         geo.setAttribute('aPulse', new THREE.BufferAttribute(this._pulse, 1));
         geo.setAttribute('aAlbedo', new THREE.BufferAttribute(this._albedo, 1));
+        geo.setAttribute('aG', new THREE.BufferAttribute(this._G, 1));
+        geo.setAttribute('aIllum', new THREE.BufferAttribute(this._illum, 1));
         geo.setAttribute('aComa', new THREE.BufferAttribute(this._coma, 1));
         geo.setDrawRange(0, N);
         this.points = new THREE.Points(geo, this._pointsMat);
@@ -823,14 +902,17 @@ export class NeoLayer extends Emitter {
         const cap = this._localCap;
         const geo = new THREE.BufferGeometry();
         this._lpos = new Float32Array(cap * 3); this._lcol = new Float32Array(cap * 3);
-        this._lsize = new Float32Array(cap); this._lalpha = new Float32Array(cap); this._lpulse = new Float32Array(cap);
+        this._lradius = new Float32Array(cap); this._lalpha = new Float32Array(cap); this._lpulse = new Float32Array(cap);
         this._lalbedo = new Float32Array(cap); this._lcoma = new Float32Array(cap);
+        this._lG = new Float32Array(cap); this._lillum = new Float32Array(cap);
         geo.setAttribute('position', new THREE.BufferAttribute(this._lpos, 3));
         geo.setAttribute('aColor', new THREE.BufferAttribute(this._lcol, 3));
-        geo.setAttribute('aSize', new THREE.BufferAttribute(this._lsize, 1));
+        geo.setAttribute('aRadius', new THREE.BufferAttribute(this._lradius, 1));
         geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._lalpha, 1));
         geo.setAttribute('aPulse', new THREE.BufferAttribute(this._lpulse, 1));
         geo.setAttribute('aAlbedo', new THREE.BufferAttribute(this._lalbedo, 1));
+        geo.setAttribute('aG', new THREE.BufferAttribute(this._lG, 1));
+        geo.setAttribute('aIllum', new THREE.BufferAttribute(this._lillum, 1));
         geo.setAttribute('aComa', new THREE.BufferAttribute(this._lcoma, 1));
         geo.setDrawRange(0, 0);
         this.localPoints = new THREE.Points(geo, this._pointsMat);
@@ -909,19 +991,20 @@ export class NeoLayer extends Emitter {
             if (flyby && this.visible.asteroids) vis = true;   // a flyby this week is always worth drawing
             if (flyby) c.setHex(flybyHex); else colorFor(el, mode, c);
             this._col[k * 3] = c.r; this._col[k * 3 + 1] = c.g; this._col[k * 3 + 2] = c.b;
-            this._size[k] = flyby ? 6.0 : baseSize(el);
+            // Size, albedo and phase slope are three readings of ONE published
+            // classification — never three independent guesses.
+            const o = opticsFor(el);
+            this._radius[k] = drawnRockRadius(o.diamKm);
             this._pulse[k] = flyby ? 1 : 0;
-            this._albedo[k] = albedoFor(el);
+            this._albedo[k] = o.albedo;
+            this._G[k] = o.G;
             this._baseVis[k] = vis ? 1 : 0;
             // Alpha is VISIBILITY and the local-frame cross-fade, nothing else —
             // a body is opaque or it is not drawn. Magnitude lives in the drawn
             // size and albedo in the shading (see albedoFor).
             this._baseA[k] = 1;
         }
-        this.points.geometry.attributes.aColor.needsUpdate = true;
-        this.points.geometry.attributes.aSize.needsUpdate = true;
-        this.points.geometry.attributes.aPulse.needsUpdate = true;
-        this.points.geometry.attributes.aAlbedo.needsUpdate = true;
+        for (const a of ['aColor', 'aRadius', 'aPulse', 'aAlbedo', 'aG']) this.points.geometry.attributes[a].needsUpdate = true;
         this._flybySet = flybySet;
         this._refreshAlpha();
     }
@@ -948,6 +1031,14 @@ export class NeoLayer extends Emitter {
         this.points.geometry.attributes.position.needsUpdate = true;
         this.points.geometry.computeBoundingSphere();
         this.rGeo = msg.rGeo; this.rHelio = msg.rHelio; this.frameJd = msg.jd;
+        // Illumination at each body: the inverse-square law, in the units H is
+        // defined in (1 AU). Without it every object is lit as if it sat at
+        // Earth's distance, whatever its real heliocentric distance.
+        for (let k = 0; k < N; k++) {
+            const r = this.rHelio[k];
+            this._illum[k] = r > 1e-4 ? 1 / (r * r) : 1;
+        }
+        this.points.geometry.attributes.aIllum.needsUpdate = true;
         this.status.frameMs = msg.ms;
 
         // In-zone set + closest.
@@ -988,7 +1079,15 @@ export class NeoLayer extends Emitter {
         const cam = this._camera;
         if (!cam) return true;
         _vLbl.set(off.x + this._earthDrawn.x, off.y + 0.02 + this._earthDrawn.y, off.z + this._earthDrawn.z).project(cam);
-        if (!(_vLbl.z > -1 && _vLbl.z < 1) || Math.abs(_vLbl.x) > 1.1 || Math.abs(_vLbl.y) > 1.1) return false;
+        const onScreen = _vLbl.z > -1 && _vLbl.z < 1 && Math.abs(_vLbl.x) <= 1.1 && Math.abs(_vLbl.y) <= 1.1;
+        // OFF-SCREEN IS NOT A CONFLICT. This test exists to stop two labels
+        // landing on top of each other, not to cull: a label outside the
+        // frustum is already invisible, and dropping it made the set of labels
+        // depend on the framing — which churned canvas rasters on every pan and
+        // made a browser gate flaky (a label the test expected simply was not
+        // built on the frames where Earth sat near the edge). It is allowed
+        // through, and takes no slot, because it cannot overlap anything drawn.
+        if (!onScreen) return true;
         for (const p of placed) {
             if (Math.abs(p.x - _vLbl.x) < LABEL_SEP_NDC.x && Math.abs(p.y - _vLbl.y) < LABEL_SEP_NDC.y) return false;
         }
@@ -1012,9 +1111,12 @@ export class NeoLayer extends Emitter {
             if (this._flybySet?.has(k)) c.setHex(this.visible.colorMode === 'class' ? NEO_COLORS.flyby : NATURAL_COLORS.flyby);
             else colorFor(el, this.visible.colorMode, c);
             this._lcol[j * 3] = c.r; this._lcol[j * 3 + 1] = c.g; this._lcol[j * 3 + 2] = c.b;
-            this._lsize[j] = 5.2;
+            const o = opticsFor(el);
+            this._lradius[j] = drawnRockRadius(o.diamKm);
             this._lpulse[j] = 0.8;                       // in-zone: the body wears a reticle
-            this._lalbedo[j] = albedoFor(el);
+            this._lalbedo[j] = o.albedo;
+            this._lG[j] = o.G;
+            this._lillum[j] = this._illum ? this._illum[k] : 1;
             this._lcoma[j] = this._coma ? this._coma[k] : 0;
             this._lalpha[j] = this.visible.local && !this._meshed.has(k) ? (1 - localFrameWeight(off.dLD)) : 0;
             // Labels + trails for the nearest few (the selected object already
@@ -1049,7 +1151,7 @@ export class NeoLayer extends Emitter {
             if (!this.inZone.slice(0, 12).includes(k)) { this.localGroup.remove(line); line.geometry.dispose(); this._trails.delete(k); }
         }
         this.localPoints.geometry.setDrawRange(0, n);
-        for (const a of ['position', 'aColor', 'aSize', 'aAlpha', 'aPulse', 'aAlbedo', 'aComa']) this.localPoints.geometry.attributes[a].needsUpdate = true;
+        for (const a of ['position', 'aColor', 'aRadius', 'aAlpha', 'aPulse', 'aAlbedo', 'aG', 'aIllum', 'aComa']) this.localPoints.geometry.attributes[a].needsUpdate = true;
         this.localPoints.geometry.computeBoundingSphere();
     }
 
@@ -1106,8 +1208,10 @@ export class NeoLayer extends Emitter {
     // ── Mesh LOD (rock pool) ────────────────────────────────────────────────
 
     _rockRadius(el) {
-        const d = el.diam ?? diameterKmFromH(el.H) ?? ((el.flags & FLAG.COMET) ? 3 : 0.1);
-        return drawnRockRadius(d);
+        // ONE diameter for the mesh and the impostor — measured where JPL has
+        // one, else derived from H through THIS object's albedo. They must
+        // agree or a body changes size as the mesh takes over.
+        return drawnRockRadius(opticsFor(el).diamKm ?? ((el.flags & FLAG.COMET) ? 3 : 0.1));
     }
 
     _ensureRockSlots() {
@@ -1179,7 +1283,10 @@ export class NeoLayer extends Emitter {
                 slot.mesh.geometry = g.geo; slot.geoKey = g.key; slot.shape = g.shape;
                 slot.spin = spinFor(el.des, hash32(String(el.des ?? el.name)));
                 slot.isComet = this._isCometLike(el);
-                slot.mesh.material.uniforms.u_base.value.copy(colorFor(el, this.visible.colorMode, _cB)).multiplyScalar(slot.isComet ? 0.55 : 0.9);
+                // The base colour is the taxonomy's tint; how DARK the body is
+                // comes from its albedo in the shader, not from a hand dimming.
+                slot.mesh.material.uniforms.u_base.value.copy(colorFor(el, this.visible.colorMode, _cB));
+                slot.mesh.material.uniforms.u_albedo.value = opticsFor(el).albedo;
                 slot.mesh.material.uniforms.u_glow.value = 0;
                 slot.mesh.scale.setScalar(this._rockRadius(el));
                 slot.index = k;
@@ -1199,6 +1306,19 @@ export class NeoLayer extends Emitter {
             const p = this.drawnPosition(slot.index, slot.mesh.position);
             if (!p) { slot.mesh.visible = false; continue; }
             slot.mesh.visible = true;
+            // Illumination × phase function, from the drawn geometry — the same
+            // pair POINT_VS computes for the impostor, so an object does not
+            // change brightness when a mesh stands in for its sprite.
+            if (f.camera) {
+                const o = opticsFor(this.els[slot.index]);
+                const toSunLen = Math.hypot(p.x, p.y, p.z) || 1;
+                const cx = f.camera.position.x - p.x, cy = f.camera.position.y - p.y, cz = f.camera.position.z - p.z;
+                const camLen = Math.hypot(cx, cy, cz) || 1;
+                const cosA = (-p.x * cx - p.y * cy - p.z * cz) / (toSunLen * camLen);
+                const alpha = Math.acos(Math.min(1, Math.max(-1, cosA)));
+                const illum = this._illum ? this._illum[slot.index] : 1;
+                slot.mesh.material.uniforms.u_light.value = illum * phaseHG(alpha, o.G);
+            }
             const ang = ((simMs / 3.6e6 / slot.spin.periodH) * Math.PI * 2 + slot.spin.phase) % (Math.PI * 2);
             // Spin about the body's own symmetry axis (geometry +Y), tilted to the seeded pole.
             _qSpin.setFromAxisAngle(_Y, ang);
@@ -1305,7 +1425,7 @@ export class NeoLayer extends Emitter {
         const notable = findNotable(el);
         const next = this.watch.approaches.filter(a => a.des === el.des && a.t_ms >= (this._simMs ?? Date.now()) - 86400e3).sort((a, b) => a.t_ms - b.t_ms)[0];
         const sentry = this.watch.sentry.find(s => s.des === el.des);
-        const dKm = el.diam ?? diameterKmFromH(el.H);
+        const o = opticsFor(el);
         const out = {};
         if (notable) out['Why it matters'] = notable.why;
         out['Designation'] = el.des ?? '—';
@@ -1313,7 +1433,22 @@ export class NeoLayer extends Emitter {
         out['Distance from Earth'] = dGeo != null ? `${formatLD(dGeo)} · ${dGeo.toFixed(4)} AU` : '—';
         out['Distance from Sun'] = `${p.r.toFixed(3)} AU`;
         out['Heliocentric speed'] = `${speedKms(p.vx, p.vy, p.vz).toFixed(1)} km/s`;
-        out['Size'] = el.diam != null ? `${formatSize(el.diam)} (measured)` : (el.H != null ? `${formatSize(dKm)} (from H ${el.H.toFixed(1)}, albedo 0.14 assumed)` : '—');
+        out['Size'] = o.diamMeasured
+            ? `${formatSize(o.diamKm)} (measured)`
+            : (o.diamKm != null ? `${formatSize(o.diamKm)} (from H ${el.H.toFixed(1)} at albedo ${o.albedo.toFixed(3)})` : '—');
+        // Albedo and taxonomy set the drawn tone, the drawn size and the phase
+        // slope, so the card says which of them was OBSERVED and which is a
+        // class mean. `opticalProperties` never invents one.
+        out['Albedo · taxonomy'] = `${o.albedo.toFixed(3)} ${o.measured.albedo ? '(measured)' : '(class mean)'} · ${o.measured.taxonomy ? o.label : o.label + ' — no published class'}`;
+        // Apparent magnitude AS SEEN FROM EARTH, exact: r, Δ and the phase angle
+        // all come from the propagated vectors, never from the drawn scene.
+        if (el.H != null && g && dGeo) {
+            const alpha = phaseAngleRad(g.helio, g);
+            const V = apparentMagnitudeV(el.H, p.r, dGeo, alpha, o.G);
+            if (V != null) {
+                out['Apparent magnitude'] = `V ≈ ${V.toFixed(1)} from Earth · phase ${(alpha * 180 / Math.PI).toFixed(0)}° · H ${el.H.toFixed(1)}, G ${o.G.toFixed(2)} (IAU H–G)`;
+            }
+        }
         out['Orbit a · e · i'] = `${Math.abs(el.a).toFixed(3)} AU · ${el.e.toFixed(4)} · ${el.i.toFixed(2)}°`;
         out['Perihelion · aphelion'] = el.e < 1 ? `${el.q.toFixed(3)} · ${el.Q.toFixed(3)} AU` : `${el.q.toFixed(3)} AU · unbound (e > 1)`;
         out['Period'] = el.per_y != null ? (el.per_y < 2 ? `${(el.per_y * 365.25).toFixed(0)} days` : `${el.per_y.toFixed(2)} yr`) : 'unbound — leaving the Solar System';
@@ -1332,7 +1467,7 @@ export class NeoLayer extends Emitter {
         this.localGroup.visible = this.visible.local;
         for (const [, line] of this._trails) line.visible = this.visible.local;
         for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.cone.visible = v; r.label.visible = v; r.stream.visible = v; r.rocks.mesh.visible = v; }
-        for (const slot of this._rockSlots) if (slot.index >= 0) slot.mesh.material.uniforms.u_base.value.copy(colorFor(this.els[slot.index], this.visible.colorMode, _cB)).multiplyScalar(slot.isComet ? 0.55 : 0.9);
+        for (const slot of this._rockSlots) if (slot.index >= 0) slot.mesh.material.uniforms.u_base.value.copy(colorFor(this.els[slot.index], this.visible.colorMode, _cB));
         if (this.rGeo) this._refreshCometTails();
         this._applyStyles();
         if (this.rGeo) this._refreshLocalInstances();
@@ -1353,12 +1488,11 @@ export class NeoLayer extends Emitter {
      * a perpendicular distance in scene units and not what a cursor means.
      *
      * This projects each candidate and measures the distance in CSS PIXELS, and
-     * the accept radius is THE DRAWN RADIUS: gl_PointSize / 2, recomputed here
-     * from the same attenuation, pad and floor POINT_VS uses (clip.w IS −viewZ
-     * for a perspective camera, which is the term the vertex shader attenuates
-     * by), plus GRAB_PX of grace. So the rule a visitor can learn holds — you
-     * can click what you can see, and only what you can see. If the two shaders
-     * ever disagree, the pick radius is wrong: change them together.
+     * the accept radius is THE DRAWN RADIUS: gl_PointSize / 2 through `drawnPx`,
+     * the JS mirror of POINT_VS, plus GRAB_PX of grace. Both read the same
+     * SPRITE table and the same projected body size, so the accept radius
+     * cannot drift from what is on screen. The rule a visitor can learn holds —
+     * you can click what you can see, and only what you can see.
      *
      * Rock meshes are picked FIRST and exactly, against real geometry. A body
      * close enough to be drawn as a shaped rock was previously not clickable at
@@ -1389,8 +1523,12 @@ export class NeoLayer extends Emitter {
 
         // 2. The two point clouds, in screen space.
         const halfW = pixels.w * 0.5, halfH = pixels.h * 0.5;
+        // projectionMatrix[1][1] · viewportHeight/2 is the pixels-per-scene-unit
+        // numerator POINT_VS uses; dividing by clip.w (which IS −viewZ for a
+        // perspective camera) gives the drawn size at that depth.
+        const pxNum = camera.projectionMatrix.elements[5] * halfH;
         let best = null;
-        const scan = (obj, pos, size, alpha, pulse, coma, count, indexOf, kind) => {
+        const scan = (obj, pos, radius, alpha, pulse, coma, count, indexOf, kind) => {
             if (!obj || !count || !pos) return;
             _mPick.multiplyMatrices(camera.projectionMatrix,
                 _mPick2.multiplyMatrices(camera.matrixWorldInverse, obj.matrixWorld));
@@ -1405,9 +1543,7 @@ export class NeoLayer extends Emitter {
                 const dx = (cx - ndc.x) * halfW, dy = (cy - ndc.y) * halfH;
                 const d = Math.sqrt(dx * dx + dy * dy);
                 if (best && d > best.d + 2) continue;                 // cheap reject before the size maths
-                // clip.w IS −viewZ for a perspective camera: the exact term
-                // POINT_VS attenuates by, so drawnPx() is the drawn size.
-                const px = drawnPx(size[i], cw, pulse ? pulse[i] : 0, coma ? coma[i] : 0);
+                const px = drawnPx(radius[i], pxNum / cw, coma ? coma[i] : 0, pulse ? pulse[i] : 0);
                 if (d > Math.max(grabPx, px * 0.5 + 1.5)) continue;
                 // Nearest the cursor; within 2 px of a tie, the nearer body wins.
                 if (!best || d < best.d - 2 || (d < best.d + 2 && cw < best.cw)) {
@@ -1416,9 +1552,9 @@ export class NeoLayer extends Emitter {
                 }
             }
         };
-        scan(this.localPoints, this._lpos, this._lsize, this._lalpha, this._lpulse, this._lcoma,
+        scan(this.localPoints, this._lpos, this._lradius, this._lalpha, this._lpulse, this._lcoma,
              this._localIndices ? this._localIndices.length : 0, (i) => this._localIndices[i], 'local');
-        scan(this.points, this._pos, this._size, this._alpha, this._pulse, this._coma,
+        scan(this.points, this._pos, this._radius, this._alpha, this._pulse, this._coma,
              this.count, (i) => i, 'point');
         return best ? { index: best.index, kind: best.kind, px: best.d } : null;
     }
@@ -1438,6 +1574,22 @@ export class NeoLayer extends Emitter {
         for (const m of this.hoverMarker.children) m.material.color.copy(tint);
         this.hoverMarker.visible = true;
         return next;
+    }
+
+    /**
+     * How much of the drawn population is OBSERVED rather than a class mean.
+     * Albedo and taxonomy set every body's tone, its derived diameter and its
+     * phase slope, so the page reports the coverage instead of letting a
+     * catalogue with zero measured albedos look identical to one full of them.
+     */
+    photometryCoverage() {
+        let albedo = 0, taxonomy = 0, diam = 0;
+        for (const el of this.els) {
+            if (el.albedo != null) albedo++;
+            if (el.spec != null) taxonomy++;
+            if (el.diam != null) diam++;
+        }
+        return { total: this.els.length, albedo, taxonomy, diam };
     }
 
     /** One line identifying an object, for a hover tooltip — no readout() build. */
@@ -1520,6 +1672,11 @@ export class NeoLayer extends Emitter {
     update(f) {
         this._t = f.t ?? this._t + 0.016;
         this._pointsMat.uniforms.u_time.value = this._t;
+        // Drawn size is a TRUE projected size, so the shader needs the viewport
+        // height in device pixels. Set every frame: it is one uniform write, and
+        // a resize that missed it would silently mis-size the whole population
+        // (and the pick radius with it).
+        if (f.viewPx > 0) this._pointsMat.uniforms.u_viewPx.value = f.viewPx;
         for (const r of this._radiants) { r.stream.material.uniforms.u_time.value = this._t; r.rocks.update(this._t); }
         this._camera = f.camera ?? this._camera;   // the label de-clutter projects with it
         this._earthDrawn.copy(f.earthDrawn);

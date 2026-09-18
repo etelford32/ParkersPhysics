@@ -4121,6 +4121,9 @@ function animate() {
             jd: _simJD, earthOfDate: _earthNow, earthFn: earthHeliocentric,
             earthDrawn: earthP.mesh.position, t, simMs: _simDateNow.getTime(),
             camera, camDist: camera.position.distanceTo(controls.target),
+            // NEO bodies are drawn at their TRUE projected size, so the layer
+            // needs the drawing buffer's height in device pixels (not CSS px).
+            viewPx: renderer.domElement.height,
         });
         neoPanel.tick();
         if (selectedBody?.neoIndex != null && _nowMs - _neoCardMs > 500) { _neoCardMs = _nowMs; _renderNeoCard(selectedBody); }
