@@ -54,35 +54,73 @@ function tagFor(row) {
     return '';
 }
 
+/** Altitude cell content for a row — the one dynamic column that has markup. */
+function altCell(r) {
+    if (!r.sky) return '—';
+    return r.sky.up
+        ? `<span class="nw-up">${num(r.sky.altDeg, 0)}°&nbsp;${esc(r.sky.compass)}</span>`
+        : '<span class="nw-down">below</span>';
+}
+
 /**
  * The live board: what is nearest to Earth right now, by our own propagation.
  * `rows` are `buildObjectRow` outputs, already sorted.
+ *
+ * IT UPDATES IN PLACE. The board redraws three times a second, and rebuilding
+ * the table's innerHTML each time detaches every `<tr>` under the cursor: a
+ * click that lands between two redraws hits a node that is already gone, which
+ * Playwright reports as "element was detached from the DOM, retrying" and a
+ * visitor experiences as a row that sometimes just does not respond. So the
+ * DOM is rebuilt ONLY when the set of rows or their order changes, and the
+ * numbers are written into the existing cells otherwise. Same rule, and the
+ * same reason, as the EarthView verdict card's stable-header split
+ * (CLAUDE.md §4.4).
  */
 export function renderNearest(el, rows, { state = 'live', selected = null, observer = null } = {}) {
     if (!rows || !rows.length) {
+        el.dataset.nwSig = '';
         el.innerHTML = emptyState(state, 'Nothing inside the view horizon at this instant.');
         return;
     }
+
+    // The signature covers everything the MARKUP depends on: which objects, in
+    // what order, and whether the altitude column exists at all.
+    const sig = `${observer ? 'o' : '-'}|${rows.map(r => r.index).join(',')}`;
+    const body = el.querySelector('tbody');
+
+    if (body && el.dataset.nwSig === sig && body.children.length === rows.length) {
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const tr = body.children[i];
+            const td = tr.children;
+            // Name and size are fixed for a given object; distance, magnitude
+            // and altitude are not.
+            td[1].textContent = r.distLabel;
+            td[3].textContent = r.mag == null ? '—' : num(r.mag, 1);
+            if (observer && td[4]) td[4].innerHTML = altCell(r);
+            tr.classList.toggle('nw-row--sel', r.index === selected);
+        }
+        return;
+    }
+
     const head = `
         <tr>
             <th>Object</th><th class="nw-num">Distance</th><th class="nw-num">Size</th>
             <th class="nw-num">Mag</th>${observer ? '<th class="nw-num">Alt</th>' : ''}
         </tr>`;
-    const body = rows.map((r) => {
+    const html = rows.map((r) => {
         const sel = r.index === selected ? ' nw-row--sel' : '';
-        const up = r.sky ? (r.sky.up
-            ? `<span class="nw-up">${num(r.sky.altDeg, 0)}°&nbsp;${esc(r.sky.compass)}</span>`
-            : `<span class="nw-down">below</span>`) : '—';
         return `
         <tr class="nw-row ${rowClass(r)}${sel}" data-index="${r.index}" tabindex="0">
             <td class="nw-name">${esc(r.name)} ${tagFor(r)}</td>
             <td class="nw-num">${esc(r.distLabel)}</td>
             <td class="nw-num" title="${esc(r.sizeSource || '')}">${esc(r.sizeLabel)}</td>
             <td class="nw-num">${r.mag == null ? '—' : num(r.mag, 1)}</td>
-            ${observer ? `<td class="nw-num">${up}</td>` : ''}
+            ${observer ? `<td class="nw-num">${altCell(r)}</td>` : ''}
         </tr>`;
     }).join('');
-    el.innerHTML = `<table class="nw-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    el.dataset.nwSig = sig;
+    el.innerHTML = `<table class="nw-table"><thead>${head}</thead><tbody>${html}</tbody></table>`;
 }
 
 /**
@@ -92,9 +130,25 @@ export function renderNearest(el, rows, { state = 'live', selected = null, obser
  */
 export function renderApproaches(el, approaches, { state = 'live', nowMs = Date.now(), selectedDes = null } = {}) {
     if (!approaches || !approaches.length) {
+        el.dataset.nwSig = '';
         el.innerHTML = emptyState(state, 'No catalogued approach inside 0.05 AU in the window.');
         return;
     }
+
+    // In place while the list is the same list — see renderNearest. Only the
+    // "when" column and the selection change as the clock moves.
+    const sig = approaches.map(a => a.des).join(',');
+    const tbody = el.querySelector('tbody');
+    if (tbody && el.dataset.nwSig === sig && tbody.children.length === approaches.length) {
+        for (let i = 0; i < approaches.length; i++) {
+            const a = approaches[i];
+            const tr = tbody.children[i];
+            tr.children[1].textContent = formatRelativeTime((a.t_ms - nowMs) / 86400e3);
+            tr.classList.toggle('nw-row--sel', a.des === selectedDes);
+        }
+        return;
+    }
+
     const body = approaches.map((a) => {
         const dDays = (a.t_ms - nowMs) / 86400e3;
         const ld = a.dist_au / LD_IN_AU;
@@ -109,6 +163,7 @@ export function renderApproaches(el, approaches, { state = 'live', nowMs = Date.
             <td class="nw-num">${a.H == null ? '—' : num(a.H, 1)}</td>
         </tr>`;
     }).join('');
+    el.dataset.nwSig = sig;
     el.innerHTML = `
         <table class="nw-table">
             <thead><tr><th>Object</th><th class="nw-num">When</th><th class="nw-num">Miss</th>
@@ -236,6 +291,75 @@ export function renderSelected(el, row, { approach = null, comparison = null, no
     if (row.elementsNote) parts.push(`<p class="nw-note">${esc(row.elementsNote)}.</p>`);
     if (row.magNote) parts.push(`<p class="nw-note">${esc(row.magNote)}.</p>`);
     el.innerHTML = parts.join('');
+}
+
+/**
+ * The Moon card. Everything here is the kernel's (`moonPhase`, `moonApsides`)
+ * — this renders it and derives nothing.
+ *
+ * The Moon earns a card of its own rather than a row in the board because it
+ * is the stage's RULER: it is the one object a visitor already has a distance
+ * intuition for, so its numbers are what make the compressed radial map
+ * readable at all.
+ */
+export function renderMoon(el, phase, apsides, { jd = null } = {}) {
+    if (!el) return;
+    if (!phase) { el.innerHTML = emptyState('loading', ''); return; }
+
+    const stat = (k, v, title = '') =>
+        `<div class="nw-stat" ${title ? `title="${esc(title)}"` : ''}>
+            <span class="nw-stat-k">${esc(k)}</span><span class="nw-stat-v">${v}</span></div>`;
+
+    // A little disc that shows the actual phase, drawn from the illuminated
+    // fraction and the waxing flag — the same two numbers the text quotes, so
+    // the picture and the words cannot disagree.
+    const f = Math.max(0, Math.min(1, phase.illuminated));
+    const rx = Math.abs(1 - 2 * f) * 13;
+    const sweepOuter = phase.waxing ? 1 : 0;
+    const sweepInner = (f > 0.5) === phase.waxing ? 1 : 0;
+    const disc = `
+        <svg class="nw-moon-disc" viewBox="0 0 30 30" width="30" height="30" aria-hidden="true">
+            <circle cx="15" cy="15" r="13" fill="#1b1f2e"/>
+            ${f > 0.004 ? `<path d="M15 2 A 13 13 0 0 ${sweepOuter} 15 28 A ${rx.toFixed(2)} 13 0 0 ${sweepInner} 15 2 Z" fill="#d8d5cc"/>` : ''}
+            <circle cx="15" cy="15" r="13" fill="none" stroke="rgba(216,213,204,.35)"/>
+        </svg>`;
+
+    const rows = [
+        `<div class="nw-moon-head">${disc}
+            <div>
+                <div class="nw-moon-name">${esc(phase.name)}</div>
+                <div class="nw-moon-sub">${(phase.illuminated * 100).toFixed(0)}% lit ·
+                ${phase.ageDays.toFixed(1)} d into the lunation ·
+                ${phase.waxing ? 'waxing' : 'waning'}</div>
+            </div>
+        </div>`,
+        '<div class="nw-stats">',
+        stat('Distance', `${Math.round(phase.distKm).toLocaleString('en-US')} km`,
+            `${(phase.distKm / LD_KM).toFixed(4)} lunar distances — this IS the lunar distance`),
+        stat('Apparent size', `${(phase.angularDiameterDeg * 60).toFixed(1)}′`, 'angular diameter as seen from Earth’s centre'),
+        stat('Elongation', `${phase.elongationDeg.toFixed(0)}°`, 'Sun–Earth–Moon angle: how far from the Sun in the sky'),
+        stat('Phase angle', `${phase.phaseAngleDeg.toFixed(0)}°`, 'Sun–Moon–Earth angle: the argument of the illumination law'),
+        '</div>',
+    ];
+
+    if (apsides?.perigee && apsides?.apogee) {
+        const when = (a) => (jd == null ? '' : ` ${formatRelativeTime(a.jd - jd)}`);
+        rows.push(`<p class="nw-note">
+            Next <b>perigee</b> ${Math.round(apsides.perigee.km).toLocaleString('en-US')} km${when(apsides.perigee)} ·
+            <b>apogee</b> ${Math.round(apsides.apogee.km).toLocaleString('en-US')} km${when(apsides.apogee)}.
+            Both are marked on the drawn path; they differ by
+            ${(100 * (apsides.apogee.km / apsides.perigee.km - 1)).toFixed(0)}%, which is what a circle would hide.
+        </p>`);
+    }
+    rows.push(`<p class="nw-note">
+        Drawn at true size relative to Earth (radius ratio 0.273) and lit by the
+        Lommel–Seeliger law, so the phase on the stage is the real Sun direction
+        rather than a drawn crescent. The disc above follows the northern-hemisphere
+        convention — lit limb to the right while waxing; from the southern
+        hemisphere it appears the other way up. Position and path are Meeus ch. 47,
+        good to about 100 km.
+    </p>`);
+    el.innerHTML = rows.join('');
 }
 
 /** A short line naming what each feed is currently doing. */

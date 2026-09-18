@@ -3,7 +3,10 @@ import {
     parseSbdbQuery, parseCad, parseSentry, parseFireballs,
     composeCatalogResponse, composeWatchResponse,
 } from '../api/_lib/neo-sources.js';
-import { earthHelioJ2000, LD_AU, geoSceneRadius, MOON_SCENE, EARTH_RADIUS_KM, LD_KM } from '../js/neo-space.js';
+import {
+    earthHelioJ2000, LD_AU, geoSceneRadius, MOON_SCENE, EARTH_RADIUS_KM, LD_KM,
+    MOON_RADIUS_KM, bodySceneRadius, moonPhase,
+} from '../js/neo-space.js';
 import { R2D } from '../js/neo-orbits.js';
 
 /**
@@ -23,6 +26,7 @@ import { R2D } from '../js/neo-orbits.js';
  *   - an object planted 3 LD away is inside the default horizon and is drawn;
  *     one planted at 0.4 AU is inside the map but OUTSIDE the default horizon
  *   - the live board ranks by distance and the nearest row is the nearest object
+ *   - the live board updates IN PLACE, so a row is not detached mid-click
  *   - selecting a row selects on the stage, and the card fills
  *   - a JPL approach row moves the clock (LIVE turns off, the offset is the
  *     encounter) and comes back with "Now"
@@ -265,11 +269,133 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         expect(nowDrawn).toBe(true);
     });
 
+    test('the Moon is drawn at true relative size, on its real path, with its apsides', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+
+        const moon = await page.evaluate(() => {
+            const s = window.__neoWatch.stage;
+            return {
+                // The sphere's own radius, not a scale factor: the mesh is built
+                // at the kernel's size and never scaled.
+                geomRadius: s.moon.geometry.parameters.radius,
+                scale: s.moon.scale.x,
+                sceneR: Math.hypot(...s.moon.position.toArray()),
+                orbitPoints: s.moonOrbit.geometry.attributes.position.count,
+                phase: s.phase,
+                apsides: s.apsides,
+                apsisVisible: Object.fromEntries(
+                    Object.entries(s.apsisMarks).map(([k, v]) => [k, v.dot.visible])),
+            };
+        });
+
+        // TRUE RELATIVE SIZE — the other half of the scale contract.
+        expect(moon.geomRadius).toBeCloseTo(bodySceneRadius(MOON_RADIUS_KM), 9);
+        expect(moon.scale).toBe(1);
+        expect(moon.geomRadius).toBeCloseTo(MOON_RADIUS_KM / EARTH_RADIUS_KM, 9);
+
+        // Drawn where the kernel says, on the kernel's own map.
+        const moonKm = await page.evaluate(async () => {
+            const m = await import('/js/neo-space.js');
+            return m.moonGeoJ2000(window.__neoWatch.frame.jd).distKm;
+        });
+        expect(moon.sceneR).toBeCloseTo(geoSceneRadius(moonKm), 2);
+
+        // A real path, not a ring: sampled, and its radii actually vary.
+        expect(moon.orbitPoints).toBeGreaterThan(64);
+        const radii = await page.evaluate(() => {
+            const a = window.__neoWatch.stage.moonOrbit.geometry.attributes.position.array;
+            const out = [];
+            for (let i = 0; i < a.length; i += 3) out.push(Math.hypot(a[i], a[i + 1], a[i + 2]));
+            return { min: Math.min(...out), max: Math.max(...out) };
+        });
+        expect(radii.max - radii.min).toBeGreaterThan(0.01);
+
+        // Apsides: drawn, and the real ones.
+        expect(moon.apsisVisible.perigee).toBe(true);
+        expect(moon.apsisVisible.apogee).toBe(true);
+        expect(moon.apsides.perigee.km).toBeGreaterThan(356_000);
+        expect(moon.apsides.perigee.km).toBeLessThan(371_000);
+        expect(moon.apsides.apogee.km).toBeGreaterThan(403_000);
+        expect(moon.apsides.apogee.km).toBeLessThan(407_000);
+
+        // The phase is the kernel's, evaluated on the stage's own instant.
+        const jd = await page.evaluate(() => window.__neoWatch.frame.jd);
+        const want = moonPhase(jd);
+        expect(moon.phase.illuminated).toBeCloseTo(want.illuminated, 6);
+        expect(moon.phase.name).toBe(want.name);
+
+        // The card prints it.
+        await expect(page.locator('#nw-moon .nw-moon-name')).toHaveText(want.name);
+        await expect(page.locator('#nw-moon .nw-moon-disc')).toBeVisible();
+        expect(await page.textContent('#nw-moon')).toMatch(/perigee/);
+
+        // TRUE SCALE must not change the body's size — only the distance.
+        await page.check('#nw-true-scale');
+        await page.waitForTimeout(600);
+        const after = await page.evaluate(() => {
+            const s = window.__neoWatch.stage;
+            return {
+                geomRadius: s.moon.geometry.parameters.radius,
+                scale: s.moon.scale.x,
+                sceneR: Math.hypot(...s.moon.position.toArray()),
+            };
+        });
+        expect(after.geomRadius).toBeCloseTo(moon.geomRadius, 9);
+        expect(after.scale).toBe(1);
+        // ...but the distance does change, by a lot: 60 R⊕ true against 12 drawn.
+        expect(after.sceneR).toBeGreaterThan(moon.sceneR * 3);
+
+        expect(errors).toEqual([]);
+    });
+
+    test('the Moon is selectable and gets its own card, not a catalogue row', async ({ page }) => {
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+
+        await page.evaluate(() => window.__neoWatch.select('moon'));
+        await page.waitForTimeout(500);
+        const sel = await page.evaluate(() => ({
+            page: window.__neoWatch.selected,
+            stage: window.__neoWatch.stage.selected,
+            ring: window.__neoWatch.stage.selRing.visible,
+            des: window.__neoWatch.selectedDes,
+        }));
+        expect(sel.page).toBe('moon');
+        expect(sel.stage).toBe('moon');
+        expect(sel.ring).toBe(true);
+        // The Moon is not a small body, so it must not leak into the catalogue
+        // selection — a sentinel index would read into the population arrays.
+        expect(sel.des).toBe(null);
+        await expect(page.locator('#nw-selected .nw-empty')).toBeVisible();
+
+        // And focusing it must not throw or send the camera to NaN.
+        await page.click('#nw-frame-sel');
+        await page.waitForTimeout(400);
+        const cam = await page.evaluate(() => window.__neoWatch.stage.camera.position.toArray());
+        expect(cam.every(Number.isFinite)).toBe(true);
+    });
+
     test('selecting a row selects on the stage and fills the card', async ({ page }) => {
         const errors = collectPageErrors(page);
         await mockJpl(page);
         await openPage(page);
         await waitForPopulation(page);
+
+        // THE ROW MUST SURVIVE ITS OWN REDRAWS. The board refreshes at 3 Hz; if
+        // it rebuilt its markup each time, the node under the cursor would be
+        // detached between press and release and the click would go nowhere —
+        // which is what a visitor experiences as a row that sometimes does not
+        // respond, and what this suite hit as a click timeout before the board
+        // started updating in place.
+        const firstRow = await page.locator('#nw-nearest tbody tr').first().elementHandle();
+        await page.waitForTimeout(1600);                      // ~5 redraws
+        expect(await firstRow.evaluate(node => node.isConnected)).toBe(true);
+        // ...and the numbers in it are still being updated.
+        expect(await firstRow.evaluate(node => node.children[1].textContent.trim().length)).toBeGreaterThan(0);
 
         await page.locator('#nw-nearest tbody tr').first().click();
         await page.waitForFunction(() => window.__neoWatch.selected != null, null, { timeout: 10_000 });

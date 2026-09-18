@@ -156,6 +156,25 @@ export function trueSceneRadius(dKm) {
     return dKm / EARTH_RADIUS_KM;
 }
 
+/** Volumetric mean radius of the Moon (IAU), km. */
+export const MOON_RADIUS_KM = 1737.4;
+
+/**
+ * BODIES ARE DRAWN AT TRUE RELATIVE SIZE. Only DISTANCE is compressed.
+ *
+ * This is the other half of the scale contract and it is what keeps the
+ * compression legible: the drawn Earth is 1 R⊕ across, the drawn Moon is
+ * 0.2727 of it, and that ratio is real in both display modes. A viewer who
+ * knows how big the Moon looks next to Earth has a working ruler for every
+ * other body on the stage, which is exactly what a logarithmic RADIUS takes
+ * away. Never scale a body to make it easier to see — that is the one knob
+ * that would make the ratio a lie, and the sprites and rock meshes already
+ * exist for objects too small to draw.
+ */
+export function bodySceneRadius(radiusKm) {
+    return radiusKm / EARTH_RADIUS_KM;
+}
+
 /** Ratio by which the log map compresses (or magnifies) a given distance. */
 export function compressionAt(dKm) {
     const t = trueSceneRadius(dKm);
@@ -487,6 +506,121 @@ export function subSolarPoint(jd) {
     let lon = (ra - gmstRad(jd)) * R2D;
     lon = ((lon + 180) % 360 + 360) % 360 - 180;
     return { latDeg: dec, lonDeg: lon };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4b. The Moon — phase, path, and the apsides of the current orbit
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The Moon is the stage's ruler mark: it is the one object a visitor already
+// has an intuition for, so its distance, its size relative to Earth and its
+// phase all have to be right, and all three come from here. `moonGeoJ2000`
+// above supplies the position; these supply everything drawn around it.
+
+/** Mean synodic month (new moon to new moon), days. */
+export const SYNODIC_MONTH_DAYS = 29.530588853;
+/** Mean sidereal month (one circuit against the stars), days. */
+export const SIDEREAL_MONTH_DAYS = 27.321661;
+/** Mean anomalistic month (perigee to perigee), days. */
+export const ANOMALISTIC_MONTH_DAYS = 27.554549;
+
+const PHASE_NAMES = [
+    'New moon', 'Waxing crescent', 'First quarter', 'Waxing gibbous',
+    'Full moon', 'Waning gibbous', 'Last quarter', 'Waning crescent',
+];
+
+/**
+ * The Moon's phase at JD.
+ *
+ *   phaseAngleDeg  the Sun–Moon–Earth angle. 0° is full, 180° is new — note
+ *                  the direction, it is the angle AT THE MOON and it is the
+ *                  argument of the illumination law, not the elongation.
+ *   illuminated    the lit fraction of the disc as seen from Earth,
+ *                  (1 + cos α)/2 exactly. This is an identity, not a fit.
+ *   elongationDeg  the Sun–Earth–Moon angle, which is what "how far from the
+ *                  Sun in the sky" means and what the phase NAME keys off.
+ *   waxing         true between new and full. Decided by the sign of the
+ *                  Moon's ecliptic longitude minus the Sun's, because the
+ *                  elongation alone is symmetric about full and cannot tell
+ *                  a waxing gibbous from a waning one.
+ *
+ * Both bodies come from this module's own adapters, so the phase can never
+ * disagree with the positions drawn on the stage.
+ */
+export function moonPhase(jd) {
+    const m = moonGeoJ2000(jd);
+    const s = sunGeoDirectionJ2000(jd);           // unit, geocentric, ecliptic J2000
+    const mr = Math.hypot(m.x, m.y, m.z) || 1;
+    const mu = { x: m.x / mr, y: m.y / mr, z: m.z / mr };
+
+    // Elongation: the angle at EARTH between the Sun and the Moon.
+    const cosElong = mu.x * s.x + mu.y * s.y + mu.z * s.z;
+    const elongationDeg = Math.acos(Math.max(-1, Math.min(1, cosElong))) * R2D;
+
+    // Phase angle: the angle at the MOON between the Earth and the Sun. The
+    // Sun is ~390 Moon-distances away, so its direction from the Moon differs
+    // from its direction from Earth by well under a degree — but the whole
+    // point of a phase is that small angle near new and full, so it is carried
+    // properly rather than approximated by 180° − elongation.
+    const sunAU = s.distAU;
+    const toSun = { x: s.x * sunAU - m.x, y: s.y * sunAU - m.y, z: s.z * sunAU - m.z };
+    const tsr = Math.hypot(toSun.x, toSun.y, toSun.z) || 1;
+    const cosPhase = (-mu.x * toSun.x - mu.y * toSun.y - mu.z * toSun.z) / tsr;
+    const phaseAngleDeg = Math.acos(Math.max(-1, Math.min(1, cosPhase))) * R2D;
+    const illuminated = (1 + Math.cos(phaseAngleDeg * D2R)) / 2;
+
+    // Waxing or waning, from the ecliptic longitude difference.
+    const moonLon = Math.atan2(m.y, m.x);
+    const sunLon = Math.atan2(s.y, s.x);
+    let dLon = ((moonLon - sunLon) * R2D % 360 + 360) % 360;
+    const waxing = dLon < 180;
+    const ageDays = (dLon / 360) * SYNODIC_MONTH_DAYS;
+
+    // Name from the longitude difference — the octant the Moon is actually in.
+    const name = PHASE_NAMES[Math.floor(((dLon + 22.5) % 360) / 45)];
+
+    return {
+        phaseAngleDeg, illuminated, elongationDeg, waxing, ageDays, name,
+        distKm: m.distKm,
+        angularDiameterDeg: 2 * Math.atan(MOON_RADIUS_KM / m.distKm) * R2D,
+    };
+}
+
+/**
+ * The Moon's geocentric path, sampled over `days` from `jd`. Returned in the
+ * same ecliptic J2000 frame as everything else, so a renderer maps it with the
+ * same `geoToScene` it uses for the Moon itself and the two cannot part
+ * company. Default span is one SIDEREAL month, which is the circuit that
+ * closes in an inertial frame — a synodic month would leave a visible gap.
+ */
+export function moonPath(jd, samples = 96, days = SIDEREAL_MONTH_DAYS) {
+    const out = [];
+    for (let k = 0; k < samples; k++) {
+        const t = jd + (k / samples) * days;
+        const m = moonGeoJ2000(t);
+        out.push({ x: m.x, y: m.y, z: m.z, distKm: m.distKm, jd: t });
+    }
+    return out;
+}
+
+/**
+ * Perigee and apogee of the orbit the Moon is on now: the nearest and farthest
+ * approach within one anomalistic month of `jd`, refined by the same
+ * golden-section search the close-approach code uses.
+ *
+ * These are worth drawing because the lunar orbit's eccentricity is the thing
+ * a circle-drawn "Moon orbit" hides: perigee and apogee differ by about 13 %,
+ * which is a visible amount on any honest path and zero on a ring.
+ */
+export function moonApsides(jd, span = ANOMALISTIC_MONTH_DAYS) {
+    const dist = (t) => moonGeoJ2000(t).distKm;
+    const neg = (t) => -dist(t);
+    const perigee = findApproach(dist, jd + span / 2, span / 2, 120, 1e-4);
+    const apogee = findApproach(neg, jd + span / 2, span / 2, 120, 1e-4);
+    return {
+        perigee: perigee ? { jd: perigee.jd, km: perigee.distAU } : null,
+        apogee: apogee ? { jd: apogee.jd, km: -apogee.distAU } : null,
+    };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

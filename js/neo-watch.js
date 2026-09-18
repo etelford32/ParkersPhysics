@@ -36,10 +36,11 @@ import {
 } from './neo-space.js';
 import { rowToRecord, prepareColumns, propagateColumns, deriveGeocentric } from './neo-orbits.js';
 import { EARTH_TEXTURES } from './earth-skin.js';
+import { MOON_TEXTURES } from './moon-skin.js';
 import { NeoStage } from './neo-watch/stage.js';
 import {
     renderNearest, renderApproaches, renderSentry, renderFireballs,
-    renderSelected, renderFeedChips,
+    renderSelected, renderFeedChips, renderMoon,
 } from './neo-watch/panels.js';
 
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
@@ -275,7 +276,7 @@ export class NeoWatch {
         if (msg.type === 'meta') {
             for (const o of msg.objects) this.meta.set(o.index, o);
             this.stage.setMeta(msg.objects);
-            if (this.selectedDes == null && this.selected != null) {
+            if (this.selectedDes == null && Number.isInteger(this.selected)) {
                 this.selectedDes = this.meta.get(this.selected)?.des ?? null;
             }
             return;
@@ -295,7 +296,7 @@ export class NeoWatch {
         if (!this.worker || !this.frame) return;
         const order = this._nearestIndices(BOARD_ROWS + 16);
         const want = order.filter(k => !this.meta.has(k) && !this._metaWanted.has(k));
-        if (this.selected != null && !this.meta.has(this.selected)) want.push(this.selected);
+        if (Number.isInteger(this.selected) && !this.meta.has(this.selected)) want.push(this.selected);
         if (!want.length) return;
         for (const k of want) this._metaWanted.add(k);
         this.worker.postMessage({ type: 'meta', id: 2, indices: want });
@@ -356,7 +357,7 @@ export class NeoWatch {
     _rowFor(index, jd, earthRAU) {
         const f = this.frame;
         const el = this.meta.get(index);
-        if (!f || !el || index >= f.count) return null;
+        if (!f || !el || !Number.isInteger(index) || index >= f.count) return null;
         const o = index * 3;
         const prev = this.prevFrame && this.prevFrame.count === f.count
             ? [this.prevFrame.geo[o], this.prevFrame.geo[o + 1], this.prevFrame.geo[o + 2]]
@@ -386,7 +387,7 @@ export class NeoWatch {
             state: boardState, selected: this.selected, observer: this.observer,
         });
 
-        const selRow = this.selected != null ? this._rowFor(this.selected, jd, earth.rAU) : null;
+        const selRow = Number.isInteger(this.selected) ? this._rowFor(this.selected, jd, earth.rAU) : null;
         const approach = selRow ? this.watch.approaches.find(a => a.des === selRow.des) : null;
         const cmp = approach && this._approachCheck && this._approachCheck.des === selRow.des
             ? compareApproach(this._approachCheck.ours, approach.dist_au, msToJd(approach.t_ms))
@@ -404,6 +405,11 @@ export class NeoWatch {
             this._lastWatchJd = jd;
             this._renderWatchPanels();
         }
+
+        // The Moon card. Phase and apsides are computed by the stage each time
+        // it places the Moon, so this prints the same numbers the stage drew
+        // rather than evaluating the ephemeris a second time.
+        renderMoon(this.$('nw-moon'), this.stage.phase, this.stage.apsides, { jd });
 
         const sub = subSolarPoint(jd);
         this._setText('nw-subsolar',
@@ -454,14 +460,15 @@ export class NeoWatch {
 
     // ── Selection and the approach comparison ───────────────────────────────
 
-    select(index) {
-        this.selected = index;
-        this.selectedDes = index == null ? null : (this.meta.get(index)?.des ?? null);
-        this.stage.select(index);
+    /** Select a catalogue index, the string 'moon', or null to clear. */
+    select(sel) {
+        this.selected = sel;
+        this.selectedDes = Number.isInteger(sel) ? (this.meta.get(sel)?.des ?? null) : null;
+        this.stage.select(sel);
         this._approachCheck = null;
-        if (index != null) {
+        if (Number.isInteger(sel)) {
             this._requestMetaForVisible();
-            this._checkApproach(index);
+            this._checkApproach(sel);
         }
         this._renderWatchPanels();
     }
@@ -529,8 +536,12 @@ export class NeoWatch {
     _mountStage() {
         const canvas = this.$('nw-canvas');
         this.stage = new NeoStage(canvas, {
-            onPick: (index) => this.select(index),
+            onPick: (sel) => this.select(sel),
+            // Both texture tables are the repo's ONE copy of those pinned CDN
+            // URLs (js/earth-skin.js, js/moon-skin.js). Both are optional: the
+            // stage never claims imagery it did not receive.
             textures: [EARTH_TEXTURES.day, EARTH_TEXTURES.night],
+            moonTexture: MOON_TEXTURES.surface,
         });
         this.stage.setHorizon(this.horizonKm);
         this.stage.frameAll();

@@ -26,6 +26,8 @@ answers it from the middle of the Earth:
 | Impact risk, with an energy estimate | JPL Sentry → `/api/neo/watch` | hourly |
 | Fireballs, **pinned at their real lat/lon on the globe** | JPL Fireball → `/api/neo/watch` | hourly |
 | The ruler: LEO · GEO · 1/5/10/20 LD · 0.05 / 0.2 AU | kernel `SHELLS` | per frame |
+| The Moon: true relative size, real phase, real path, marked apsides | kernel `moonGeoJ2000` · `moonPhase` · `moonPath` · `moonApsides` | per frame |
+| Earth: GMST-locked globe, marched Rayleigh atmosphere, ocean glint | stage, from the kernel's Sun direction | per frame |
 | Globe locked to sidereal time — terminator, sub-solar point, your horizon | kernel `gmstRad`, `subSolarPoint` | per frame |
 | Our two-body pass vs JPL's integrated one, for the selected object | kernel `findApproach` + `compareApproach` | on selection |
 
@@ -96,7 +98,26 @@ the view *from* Earth and a stage that draws it.
    centre is subtracted before the angles are taken: the diurnal parallax is
    0.95° at one lunar distance and 9.5° at a tenth of it, which is the whole
    difference between "just above your horizon" and "not up".
-10. **Estimates say they are estimates.** A published diameter is used where JPL
+10. **BODIES ARE DRAWN AT TRUE RELATIVE SIZE; only distance is compressed.**
+    `bodySceneRadius` is the whole rule: the drawn Earth is 1 R⊕ across and the
+    drawn Moon is 0.2727 of it, in both display modes and at every distance.
+    This is what keeps the compressed radius legible — a viewer who knows how
+    big the Moon looks next to Earth has a working ruler for the one thing a
+    logarithmic radial map takes away. The Moon's mesh is therefore built at
+    that radius and NEVER scaled; the gate asserts `scale === 1` before and
+    after a True-scale flip, because a scale factor is exactly how "just make it
+    a bit easier to see" would get in.
+11. **The Moon is a body, not a marker.** Its phase is not drawn — it is the
+    same Sun direction the terminator and the sub-solar point come from, so the
+    three cannot disagree. It is lit by LOMMEL–SEELIGER rather than Lambert,
+    which is why a full moon reads flat across the disc as the real one does,
+    plus an earthshine term for the dark limb. Its path is `moonPath` over one
+    SIDEREAL month (the circuit that closes in an inertial frame; a synodic
+    month leaves a visible gap), and `moonApsides` marks perigee and apogee —
+    drawn because a ring would hide the 13 % the lunar orbit's eccentricity is
+    actually worth. It is selectable as the string `'moon'` rather than a
+    sentinel index, because an index would read into the population arrays.
+12. **Estimates say they are estimates.** A published diameter is used where JPL
     has one; otherwise size comes from absolute magnitude with a stated albedo.
     Magnitudes use the IAU H,G system and are **absent** past its 120° phase fit
     limit rather than extrapolated. Comets get no H,G magnitude at all — their
@@ -136,15 +157,58 @@ the view *from* Earth and a stage that draws it.
   warp with the full catalogue. The population buffers are grown, never
   reallocated, and the bounding sphere is nulled rather than computed over the
   oversized tail.
+- **The atmosphere cannot use a rim term.** The first instinct is
+  `pow(1 - dot(n, viewDir), k)` on a BackSide shell, and on a back-side sphere
+  the drawn faces are the far hemisphere whose outward normals point away from
+  the camera, so that dot is 0 and the rim is IDENTICALLY 1 — the exact failure
+  `SOLAR_SYSTEM_VISUAL_REVIEW.md` S3 measured as five consecutive annuli at
+  35.52. The shell here is FrontSide and marches the real view chord, which
+  also buys the thing a closed form would not: each sample can ask whether it
+  is in Earth's own shadow, and that shadow test is what puts the sunset ring
+  on the terminator instead of a uniform halo.
+- **The white blowout was not the atmosphere.** Measured, not guessed: with the
+  globe hidden the shell read (18, 26, 48) at the disc centre and with it
+  visible the pixel was unchanged, because that sample was on the NIGHT side
+  where the shadow test correctly zeroes it. The blowout was the procedural
+  fallback's ice caps, which began at 51° — the latitude of London — and were
+  pure white. They are gone: a featureless ocean sphere with a graticule is
+  unambiguous about being schematic, where a fake cap reads as a map. Two
+  probes' worth of tuning was spent on the wrong term first.
+- **The lit hemisphere needs a cosine.** Without it the day side is one flat
+  colour and the globe reads as a circle rather than a ball. It is also simply
+  correct once a texture arrives: an albedo map is a reflectance.
+- **A cached path outlives the map it was built on.** `_placeMoonOrbit`
+  throttles to 0.05 d of sim time, so flipping True scale or moving the horizon
+  left the old geometry on screen indefinitely until both invalidate
+  `_moonOrbitJd`.
+- **A table that redraws detaches the row under the cursor.** The board
+  refreshes at 3 Hz; rebuilding its innerHTML each time meant a click landing
+  between two redraws hit a node that was already gone. Playwright reported it
+  as "element was detached from the DOM, retrying" and then a click timeout; a
+  visitor would have experienced a row that sometimes just does not respond.
+  Both live tables now rebuild their markup ONLY when the set of rows or their
+  order changes, and write the numbers into the existing cells otherwise — the
+  EarthView verdict card's stable-header rule (CLAUDE.md §4.4), arrived at the
+  same way.
 - **Three call sites want the same ephemeris every frame.** `earthHelioJ2000`
   and `moonGeoJ2000` carry a single-entry memo keyed on the Julian Day; they
   stay pure (same input, same frozen output).
 
 ## 5. Open items
 
-- The Moon's ring is sampled over one sidereal month from the current instant,
-  so at high warp it is rebuilt every 0.05 d of sim time. Fine at 96 samples;
+- The Moon's path is sampled over one sidereal month from the current instant,
+  so at high warp it is rebuilt every 0.05 d of sim time. Fine at 128 samples;
   revisit if the sample count grows.
+- The atmosphere march is 8 fixed samples. It is cheap because the shell covers
+  few pixels at any useful framing, but it is a fixed cost per covered fragment
+  and the globe fills the frame in the Earth view. If a weak GPU ever shows up
+  in the numbers, the sample count is the knob — not the shell radius, which is
+  a disclosed physical claim.
+- Earth's day/night imagery and the lunar surface map are both optional CDN
+  loads (`js/earth-skin.js`, `js/moon-skin.js`). Everything on the page is
+  correct without them and the feed chip says which is showing, but the
+  procedural globe is deliberately featureless, so a local equirectangular
+  basemap would be a real improvement rather than a cosmetic one.
 - Objects outside the view horizon are counted but not drawn at all. A faint
   out-of-horizon population (dimmed, at the horizon radius) would show how much
   is just off-stage; deliberately not shipped, because drawing something at a

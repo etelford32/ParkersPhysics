@@ -167,6 +167,12 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
 .nw-approach p { font-size:.68rem; color:#bfcbe6; margin-top:4px; line-height:1.5; }
 .nw-compare { color:#a9b6d0 !important; font-size:.64rem !important; }
 
+/* ── Moon card ──────────────────────────────────────────── */
+.nw-moon-head { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+.nw-moon-disc { flex:0 0 auto; }
+.nw-moon-name { font-size:.84rem; color:#dfe6f6; font-weight:700; }
+.nw-moon-sub { font-size:.63rem; color:#8b97b4; margin-top:2px; }
+
 #nw-side { display:flex; flex-direction:column; gap:14px; }
 #nw-observer-note { font-size:.62rem; color:#8b97b4; line-height:1.5; margin-top:6px; }
 .nw-obs-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:7px; }
@@ -221,10 +227,14 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
       <div id="nw-stage-wrap">
         <canvas id="nw-canvas"></canvas>
         <div id="nw-stage-legend">
-          <b>Distance is drawn on a logarithmic scale</b> &mdash; near-Earth space spans
-          four decades of radius and no linear picture holds both the ISS and 0.2&nbsp;AU.
-          The labelled rings are the ruler; <b>True scale</b> removes the compression
-          entirely. Rings are ranges, not orbits; the Moon's path is its real one.
+          <b>Distance is drawn on a logarithmic scale; bodies are not.</b>
+          Near-Earth space spans four decades of radius and no linear picture holds
+          both the ISS and 0.2&nbsp;AU &mdash; but Earth and the Moon are drawn at
+          their true relative size, so the one ratio you can check is real.
+          The labelled rings are the ruler; <b>True scale</b> removes the distance
+          compression entirely. Rings are ranges, not orbits; the Moon's path is
+          its real one, with perigee and apogee marked. The atmosphere is a
+          scattering model drawn to 160&nbsp;km.
         </div>
       </div>
 
@@ -300,9 +310,17 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
         <b>Brightness.</b> The IAU two-parameter H,&nbsp;G system with G&nbsp;=&nbsp;0.15.
         Past 120&deg; of phase the fit is out of range and no magnitude is shown.
         Comets get none at all: their light is activity-driven.<br>
-        <b>Scale.</b> One drawn unit is one Earth radius, and radius is logarithmic
+        <b>Scale.</b> One drawn unit is one Earth radius, and DISTANCE is logarithmic
         beyond the surface &mdash; nearly true out to the geostationary belt, and
-        strongly compressed past the Moon. <b>True scale</b> turns it off.
+        strongly compressed past the Moon. <b>True scale</b> turns it off. Body
+        SIZES are never compressed: the drawn Moon is 0.273 of the drawn Earth,
+        which is the real ratio.<br>
+        <b>Light.</b> Both bodies are lit by the same Sun direction the stage
+        derives from Earth's own ephemeris, so the terminator, the lunar phase and
+        the sub-solar point are one calculation. Earth's atmosphere is a marched
+        Rayleigh model &mdash; the sunset ring is the shadow test, not a painted
+        gradient. The Moon uses the Lommel&ndash;Seeliger law rather than Lambert,
+        which is why a full moon reads flat across the disc, as the real one does.
       </p>
     </section>
   </main>
@@ -312,6 +330,11 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
     <section class="nw-panel">
       <h2>Selected object</h2>
       <div id="nw-selected"></div>
+    </section>
+
+    <section class="nw-panel">
+      <h2>The Moon <small>the stage&rsquo;s ruler</small></h2>
+      <div id="nw-moon"></div>
     </section>
 
     <section class="nw-panel">

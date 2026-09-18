@@ -64,16 +64,21 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-    SHELLS, AU_KM,
-    geoToScene, geoSceneRadius, trueSceneRadius,
+    SHELLS, AU_KM, MOON_RADIUS_KM,
+    geoToScene, geoSceneRadius, trueSceneRadius, bodySceneRadius,
     gmstRad, earthSceneMatrix,
-    sunGeoDirectionJ2000, moonGeoJ2000,
+    sunGeoDirectionJ2000, moonGeoJ2000, moonPhase, moonPath, moonApsides,
     equatorialToScene, eclipticToEquatorial,
 } from '../neo-space.js';
 import { FLAG } from '../neo-orbits.js';
 import { rockGeometry, rockMaterial, shapeFor, spinFor, hash32, drawnRockRadius } from '../neo-rocks.js';
 
-const MOON_RADIUS_KM = 1737.4;
+/**
+ * The drawn atmosphere's outer radius, in Earth radii — 160 km. Not where the
+ * atmosphere ends (it does not end); where the scattering a camera records
+ * dies out. Disclosed in the page's legend.
+ */
+const ATMO_OUTER = 1 + 160 / 6371.0088;
 /**
  * Where the rocks are lit from. Far enough that the direction is effectively
  * parallel across the whole stage (the residual is ~0.001° at 0.5 AU drawn in
@@ -99,18 +104,23 @@ const COLOR = {
 // it is silently on a different colour pipeline from everything beside it.
 const GLOBE_VS = /* glsl */`
     varying vec3 vObj;
+    varying vec3 vWorld;
     void main() {
         vObj = normalize(position);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
     }
 `;
 const GLOBE_FS = /* glsl */`
     uniform vec3      uSunObj;      // Sun direction in OBJECT space
+    uniform vec3      uSunWorld;    // Sun direction in WORLD space (specular)
     uniform sampler2D uDay;
     uniform sampler2D uNight;
     uniform float     uHasTex;      // 0 until both textures have actually arrived
     uniform float     uGrid;
     varying vec3      vObj;
+    varying vec3      vWorld;
 
     const float PI = 3.141592653589793;
 
@@ -123,33 +133,230 @@ const GLOBE_FS = /* glsl */`
         float lon = atan(-vObj.z, vObj.x);
         vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
 
-        float ndl  = dot(vObj, uSunObj);
-        float day  = smoothstep(-0.12, 0.12, ndl);      // a soft, ~14 deg terminator
+        float ndl = dot(vObj, uSunObj);
 
-        // Procedural fallback: a plausible ocean/ice tint that never pretends
-        // to be geography. It is what CI and a blocked CDN see.
-        float ice  = smoothstep(0.62, 0.78, abs(sin(lat)));
-        vec3 base  = mix(vec3(0.06, 0.13, 0.26), vec3(0.72, 0.78, 0.86), ice);
+        // Procedural fallback: a plain ocean sphere. Deliberately NOT a
+        // guess at geography — an earlier version put white caps on everything
+        // above 51 deg, which is the latitude of London, and the result read
+        // as a map while being nothing of the sort (and blew out the sunward
+        // limb into a white blob). A featureless globe with a graticule is
+        // unambiguous about being schematic, and the page's imagery chip says
+        // "procedural globe" while it is showing.
+        vec3 base  = vec3(0.055, 0.115, 0.235);
         vec3 dayC  = base;
-        vec3 nightC = base * 0.06;
+        vec3 nightC = base * 0.05;
+        float oceanMask = 1.0;
 
         vec3 texDay   = texture2D(uDay,   uv).rgb;
         vec3 texNight = texture2D(uNight, uv).rgb;
+        // Ocean from the day texture: water is the only thing on Earth whose
+        // blue channel dominates BOTH others by a clear margin, so this needs
+        // no second map. Only consulted when a texture actually arrived.
+        float texOcean = smoothstep(0.02, 0.14, texDay.b - max(texDay.r, texDay.g));
+        oceanMask = mix(oceanMask, texOcean, uHasTex);
         dayC   = mix(dayC,   texDay,   uHasTex);
-        nightC = mix(nightC, texNight * 1.35, uHasTex);
+        // City lights are the night texture's own signal; lift them rather than
+        // the whole night side so the unlit ocean stays dark.
+        nightC = mix(nightC, texNight * 1.6, uHasTex);
 
+        // ── Terminator ──────────────────────────────────────────────────────
+        // A soft ~14 deg band, and a warm one: the light reaching the ground
+        // there has come the long way through the atmosphere. This is the
+        // sunset, drawn on the surface rather than only in the shell above it.
+        float day = smoothstep(-0.12, 0.12, ndl);
+        float belt = exp(-pow(ndl / 0.20, 2.0));
+        // Lambert across the lit hemisphere. Without it the day side is a flat
+        // disc of one colour and the globe reads as a circle rather than a
+        // ball; with a texture it is also the correct thing to do, since an
+        // albedo map is a reflectance and wants the cosine applied to it.
+        dayC *= 0.16 + 0.84 * max(ndl, 0.0);
         vec3 col = mix(nightC, dayC, day);
+        col = mix(col, col * vec3(1.45, 0.86, 0.60), belt * day * 0.55);
 
-        // Graticule every 30 deg, and a brighter equator. Drawn in screen-space
+        // ── Ocean glint ─────────────────────────────────────────────────────
+        // The specular highlight the Sun leaves on water. Real, geography-free
+        // (it only needs the ocean mask), and the single strongest cue that
+        // this is a lit sphere rather than a flat disc.
+        vec3 N = normalize(vWorld);
+        vec3 V = normalize(cameraPosition - vWorld);
+        vec3 H = normalize(uSunWorld + V);
+        // Tight and weak: the glint is a highlight a few hundred km across, not
+        // a sheen over the sunward hemisphere.
+        float spec = pow(max(dot(N, H), 0.0), 110.0) * oceanMask * day;
+        col += vec3(1.0, 0.94, 0.80) * spec * 0.28;
+
+        // ── Graticule ───────────────────────────────────────────────────────
+        // Every 30 deg, brighter on the equator, drawn at a screen-space
         // derivative width so it stays one line wide at any zoom.
         float latLines = abs(fract(degrees(lat) / 30.0 + 0.5) - 0.5);
         float lonLines = abs(fract(degrees(lon) / 30.0 + 0.5) - 0.5);
         float lw = fwidth(degrees(lat)) / 30.0 * 0.9 + 1e-4;
         float grid = max(1.0 - smoothstep(0.0, lw, latLines), 1.0 - smoothstep(0.0, lw, lonLines));
         float eq   = 1.0 - smoothstep(0.0, lw * 1.6, abs(degrees(lat)) / 30.0);
-        col = mix(col, vec3(0.45, 0.72, 0.95), grid * uGrid * 0.30 + eq * uGrid * 0.25);
+        col = mix(col, vec3(0.45, 0.72, 0.95), grid * uGrid * 0.26 + eq * uGrid * 0.22);
 
-        // A thin limb glow so the night side still has an edge against black.
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+    }
+`;
+
+// ── The atmosphere ──────────────────────────────────────────────────────────
+//
+// A MARCHED shell, not a rim term. On a sphere drawn with BackSide the drawn
+// faces are the far hemisphere, their outward normals point away from the
+// camera, and `max(dot(n, viewDir), 0.0)` is identically zero — so
+// `pow(rim, n)` DOES NOT VARY, which is exactly how solar-system.html's two
+// glow shells came out as flat plates with hard rims (SOLAR_SYSTEM_VISUAL_
+// REVIEW.md S3). The fix there was a closed-form column; here the shell is
+// thin enough that eight samples along the actual view chord are cheaper than
+// deriving one, and they buy something a closed form would not: each sample
+// can ask whether it is in Earth's own shadow, which is what puts the red ring
+// on the night side of the terminator instead of a uniform halo.
+//
+// This is a MODEL of Rayleigh scattering, not a radiative transfer solution:
+// the sun-ward optical depth is a Chapman-style secant approximation, and the
+// shell is drawn to 160 km because that is where the scattering a camera
+// records dies out, not because the atmosphere ends there.
+const ATMO_VS = /* glsl */`
+    varying vec3 vWorld;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const ATMO_FS = /* glsl */`
+    uniform vec3  uSunWorld;
+    uniform float uOuter;        // shell radius, in Earth radii
+    varying vec3  vWorld;
+
+    // Rayleigh weights, 1/lambda^4 at 680/550/440 nm, normalised to the red.
+    const vec3 BETA = vec3(1.0, 2.33, 5.71);
+    const float H_SCALE = 0.0013;    // 8.5 km in Earth radii
+
+    // Both roots of a ray against a sphere of radius r centred at the origin.
+    // Returns vec2(-1.0) when the ray misses.
+    vec2 sphereHit(vec3 ro, vec3 rd, float r) {
+        float b = dot(ro, rd);
+        float c = dot(ro, ro) - r * r;
+        float d = b * b - c;
+        if (d < 0.0) return vec2(-1.0);
+        float sq = sqrt(d);
+        return vec2(-b - sq, -b + sq);
+    }
+
+    void main() {
+        vec3 ro = cameraPosition;
+        vec3 rd = normalize(vWorld - cameraPosition);
+
+        vec2 atm = sphereHit(ro, rd, uOuter);
+        if (atm.y < 0.0) discard;
+        float t0 = max(atm.x, 0.0);
+        float t1 = atm.y;
+
+        // Stop at the ground: the column in front of the surface is all we may
+        // draw, or the glow would show through the planet.
+        vec2 ground = sphereHit(ro, rd, 1.0);
+        if (ground.x > 0.0) t1 = min(t1, ground.x);
+        if (t1 <= t0) discard;
+
+        const int STEPS = 8;
+        float dt = (t1 - t0) / float(STEPS);
+        vec3 acc = vec3(0.0);
+        for (int i = 0; i < STEPS; i++) {
+            vec3 p = ro + rd * (t0 + (float(i) + 0.5) * dt);
+            float r = length(p);
+            float h = max(r - 1.0, 0.0);
+            float dens = exp(-h / H_SCALE);
+
+            // Is this parcel in sunlight, or behind the Earth?
+            float mu = dot(p / r, uSunWorld);                 // local sun elevation
+            vec2 toSun = sphereHit(p, uSunWorld, 1.0);
+            float lit = (toSun.x > 0.0) ? 0.0 : 1.0;          // the planet's shadow
+
+            // Chapman-style secant for the slant path to the Sun. Clamped at a
+            // grazing floor so the terminator reddens instead of going black.
+            float odSun = dens * H_SCALE / max(mu, 0.06);
+            vec3 transmit = exp(-BETA * odSun * 320.0);
+
+            acc += dens * lit * transmit * dt;
+        }
+
+        // Forward scattering: the limb you are looking THROUGH is brighter.
+        float cosSun = dot(rd, uSunWorld);
+        float phase = 0.75 * (1.0 + cosSun * cosSun);
+        // GAIN. The shell's front face covers the whole disc, not just the
+        // limb, so this multiplies the haze over the GROUND as much as the ring
+        // around it. Sized from the limb: a grazing chord integrates to about
+        // sqrt(2*pi*H) ~ 0.09 against 0.0013 straight down, so the ring is ~70x
+        // the haze over the ground and one gain sets both. Measured on the lit
+        // limb rather than guessed — see NEO_WATCH_PLAN.md.
+        vec3 col = acc * BETA * phase * 9.0;
+
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+    }
+`;
+
+// ── The Moon ────────────────────────────────────────────────────────────────
+//
+// Lit by LOMMEL-SEELIGER, not Lambert. The Moon is the textbook case of a
+// surface that is not Lambertian: a Lambert full moon is bright in the middle
+// and dark at the limb, and the real one is famously almost flat across the
+// disc — which is why it reads as a disc rather than a ball at full phase.
+// I ~ mu0 / (mu0 + mu) reproduces that for free and costs one divide, and it
+// is the same single-scattering law the lunar photometry literature starts
+// from. The phase itself is not drawn or faked: it falls out of the Sun
+// direction the rest of the stage already uses.
+const MOON_VS = /* glsl */`
+    varying vec3 vN;
+    varying vec3 vWorld;
+    varying vec3 vObj;
+    void main() {
+        vObj = normalize(position);
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        vN = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const MOON_FS = /* glsl */`
+    uniform vec3      uSunWorld;
+    uniform vec3      uEarthDir;   // unit, Moon toward Earth: the earthshine source
+    uniform sampler2D uSurface;
+    uniform float     uHasTex;
+    varying vec3      vN;
+    varying vec3      vWorld;
+    varying vec3      vObj;
+
+    const float PI = 3.141592653589793;
+
+    void main() {
+        vec3 N = normalize(vN);
+        vec3 V = normalize(cameraPosition - vWorld);
+        float mu0 = dot(N, uSunWorld);           // cos of the incidence angle
+        float mu  = max(dot(N, V), 0.0);         // cos of the emission angle
+
+        // Lommel-Seeliger. Zero on the unlit side, with a short smoothstep so
+        // the terminator is a terminator and not a jagged tessellation edge.
+        float lit = smoothstep(-0.03, 0.06, mu0);
+        float ls = (mu0 > 0.0 && (mu0 + mu) > 0.0) ? mu0 / (mu0 + mu) : 0.0;
+
+        // Albedo: the real surface when it arrived, otherwise the Moon's own
+        // mean geometric albedo as a flat grey. No invented maria.
+        float albedo = 0.136;
+        vec3 surf = vec3(albedo);
+        vec3 tex = texture2D(uSurface, vec2(atan(-vObj.z, vObj.x) / (2.0 * PI) + 0.5,
+                                            0.5 - asin(clamp(vObj.y, -1.0, 1.0)) / PI)).rgb;
+        surf = mix(surf, tex * 0.42, uHasTex);
+
+        // Earthshine: the night side of the Moon is lit by a full Earth, which
+        // is ~50x brighter in the lunar sky than a full Moon is in ours. Faint,
+        // blue, and the reason the dark limb of a crescent is visible at all.
+        float earthLit = max(dot(N, uEarthDir), 0.0) * (1.0 - lit);
+
+        vec3 col = surf * (ls * lit * 2.6) + surf * earthLit * 0.055 * vec3(0.55, 0.72, 1.0);
+
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
     }
@@ -264,7 +471,7 @@ export class NeoStage {
         this._buildStarfield();
         this._buildEarth(opts.textures);
         this._buildShells();
-        this._buildMoon();
+        this._buildMoon(opts.moonTexture);
         this._buildPopulation();
         this._buildRockPool();
         this._buildOverlays();
@@ -309,11 +516,12 @@ export class NeoStage {
         this.scene.add(this.earthFrame);
 
         this.globeUniforms = {
-            uSunObj: { value: new THREE.Vector3(1, 0, 0) },
-            uDay:    { value: null },
-            uNight:  { value: null },
-            uHasTex: { value: 0 },
-            uGrid:   { value: 1 },
+            uSunObj:   { value: new THREE.Vector3(1, 0, 0) },
+            uSunWorld: { value: new THREE.Vector3(1, 0, 0) },
+            uDay:      { value: null },
+            uNight:    { value: null },
+            uHasTex:   { value: 0 },
+            uGrid:     { value: 1 },
         };
         // A null sampler is a GPU hazard, so both start as a 1×1 texture and
         // uHasTex stays 0 until the real pair has ARRIVED. The chip on the page
@@ -331,15 +539,37 @@ export class NeoStage {
         );
         this.earthFrame.add(this.globe);
 
-        // A faint atmosphere shell, purely to give the limb an edge.
-        this.airglow = new THREE.Mesh(
-            new THREE.SphereGeometry(1.025, 64, 48),
-            new THREE.MeshBasicMaterial({
-                color: 0x3f7fd0, transparent: true, opacity: 0.12,
-                side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending,
+        // The atmosphere. FrontSide, not BackSide: the shader marches the view
+        // chord from the fragment inward, so it needs the shell's NEAR surface
+        // as its entry point, and the march clamps at the ground so the glow
+        // cannot show through the planet. Additive with depthWrite off, because
+        // scattered light adds to whatever is behind it.
+        this.atmoUniforms = {
+            uSunWorld: { value: new THREE.Vector3(1, 0, 0) },
+            uOuter:    { value: ATMO_OUTER },
+        };
+        this.atmosphere = new THREE.Mesh(
+            new THREE.SphereGeometry(ATMO_OUTER, 96, 64),
+            new THREE.ShaderMaterial({
+                vertexShader: ATMO_VS, fragmentShader: ATMO_FS, uniforms: this.atmoUniforms,
+                transparent: true, depthWrite: false, side: THREE.FrontSide,
+                blending: THREE.AdditiveBlending,
             }),
         );
-        this.earthFrame.add(this.airglow);
+        // NOT a child of earthFrame: the shell is a sphere about the same
+        // centre, and parenting it to a rotating frame would only make its
+        // uniforms need the inverse rotation for nothing.
+        this.scene.add(this.atmosphere);
+
+        // A pole marker, so "which way is north" is answerable at a glance on a
+        // stage whose +Y is the celestial pole rather than anything drawn.
+        this.poleAxis = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, -1.45, 0), new THREE.Vector3(0, 1.45, 0),
+            ]),
+            new THREE.LineBasicMaterial({ color: 0x5a7fd6, transparent: true, opacity: 0.35 }),
+        );
+        this.scene.add(this.poleAxis);
 
         this.texturesReady = false;
         if (textures && textures.length === 2) this._loadTextures(textures);
@@ -380,17 +610,60 @@ export class NeoStage {
         });
     }
 
-    _buildMoon() {
+    _buildMoon(surfaceUrl) {
+        const blank = new THREE.DataTexture(new Uint8Array([160, 160, 160, 255]), 1, 1, THREE.RGBAFormat);
+        blank.needsUpdate = true;
+        this.moonUniforms = {
+            uSunWorld: { value: new THREE.Vector3(1, 0, 0) },
+            uEarthDir: { value: new THREE.Vector3(-1, 0, 0) },
+            uSurface:  { value: blank },
+            uHasTex:   { value: 0 },
+        };
+        // TRUE RELATIVE SIZE, in both scale modes and at every distance. The
+        // kernel owns that rule (`bodySceneRadius`): the map compresses
+        // DISTANCE, and a body scaled up to be easier to see would make the one
+        // ratio on this stage a viewer can check into a lie.
         this.moon = new THREE.Mesh(
-            new THREE.SphereGeometry(1, 32, 24),
-            new THREE.MeshBasicMaterial({ color: 0xb9b6ae }),
+            new THREE.SphereGeometry(bodySceneRadius(MOON_RADIUS_KM), 48, 32),
+            new THREE.ShaderMaterial({
+                vertexShader: MOON_VS, fragmentShader: MOON_FS, uniforms: this.moonUniforms,
+            }),
         );
         this.moonLabel = labelSprite('Moon', '#d8d5cc', 0.9);
         this.moonOrbit = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({
-            color: 0x6f6a80, transparent: true, opacity: 0.3,
+            color: 0x8e8aa6, transparent: true, opacity: 0.5,
         }));
         this._moonOrbitJd = null;
+
+        // Perigee and apogee of the orbit the Moon is on now. Drawn because a
+        // circle would hide the one thing the lunar orbit's shape actually
+        // does: the two differ by about 13 %.
+        this.apsisMarks = {};
+        for (const id of ['perigee', 'apogee']) {
+            const dot = new THREE.Mesh(
+                new THREE.SphereGeometry(0.09, 10, 8),
+                new THREE.MeshBasicMaterial({ color: id === 'perigee' ? 0xffb05c : 0x7f8aa8 }),
+            );
+            const label = labelSprite(id, id === 'perigee' ? '#ffb05c' : '#9fb0cc', 0.8);
+            dot.visible = label.visible = false;
+            this.scene.add(dot, label);
+            this.apsisMarks[id] = { dot, label };
+        }
         this.scene.add(this.moon, this.moonLabel, this.moonOrbit);
+        if (surfaceUrl) this._loadMoonTexture(surfaceUrl);
+    }
+
+    /** Optional, and never allowed to claim more than it has — as for Earth. */
+    _loadMoonTexture(url) {
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin('anonymous');
+        loader.load(url, (t) => {
+            if (this._disposed) return;
+            t.colorSpace = THREE.SRGBColorSpace;
+            this.moonUniforms.uSurface.value = t;
+            this.moonUniforms.uHasTex.value = 1;
+            this.moonTextureReady = true;
+        }, undefined, () => {});
     }
 
     _buildPopulation() {
@@ -497,6 +770,8 @@ export class NeoStage {
         const eq = eclipticToEquatorial(s.x, s.y, s.z);
         const sc = equatorialToScene(eq.x, eq.y, eq.z);
         this._sunDir = new THREE.Vector3(sc.x, sc.y, sc.z).normalize();
+        this.globeUniforms.uSunWorld.value.copy(this._sunDir);
+        this.atmoUniforms.uSunWorld.value.copy(this._sunDir);
         this.sunPos.copy(this._sunDir).multiplyScalar(SUN_LIGHT_R);
         for (const r of this.rocks) r.mesh.material.uniforms.u_sunPos.value.copy(this.sunPos);
 
@@ -524,13 +799,25 @@ export class NeoStage {
         const m = moonGeoJ2000(jd);
         const p = geoToScene(m.x, m.y, m.z, { trueScale: this.trueScale });
         this.moon.position.set(p.x, p.y, p.z);
-        // Drawn on the SAME radial map as everything else, so its disc is a
-        // size on that map, not a real angular size. Small and honest.
-        const r = this.trueScale
-            ? trueSceneRadius(MOON_RADIUS_KM)
-            : Math.max(0.12, geoSceneRadius(m.distKm) - geoSceneRadius(m.distKm - MOON_RADIUS_KM));
-        this.moon.scale.setScalar(r);
-        this.moonLabel.position.copy(this.moon.position).multiplyScalar(1.05);
+        // No scale term: the geometry is already `bodySceneRadius(MOON_RADIUS_KM)`
+        // and it stays that in both display modes. See _buildMoon.
+
+        // The phase is not drawn — it is the Sun direction, which the whole
+        // stage already shares. Earthshine points back at the drawn Earth.
+        this.moonUniforms.uSunWorld.value.copy(this._sunDir);
+        this.moonUniforms.uEarthDir.value.copy(this.moon.position).negate().normalize();
+
+        this.phase = moonPhase(jd);
+        const label = `Moon · ${Math.round(this.phase.distKm).toLocaleString('en-US')} km · ${Math.round(this.phase.illuminated * 100)}% ${this.phase.waxing ? 'waxing' : 'waning'}`;
+        if (this._moonLabelText !== label) {
+            this._moonLabelText = label;
+            this.scene.remove(this.moonLabel);
+            this.moonLabel = labelSprite(label, '#d8d5cc', 0.85);
+            this.scene.add(this.moonLabel);
+        }
+        this.moonLabel.position.copy(this.moon.position)
+            .add(new THREE.Vector3(0, bodySceneRadius(MOON_RADIUS_KM) * 1.9, 0));
+
         this._placeMoonOrbit(jd);
     }
 
@@ -548,14 +835,34 @@ export class NeoStage {
             return;
         }
         this._moonOrbitJd = jd;
-        const N = 96, pts = [];
-        for (let k = 0; k < N; k++) {
-            const m = moonGeoJ2000(jd + (k / N) * 27.321661);
+        const pts = moonPath(jd, 128).map((m) => {
             const q = geoToScene(m.x, m.y, m.z, { trueScale: this.trueScale });
-            pts.push(new THREE.Vector3(q.x, q.y, q.z));
-        }
+            return new THREE.Vector3(q.x, q.y, q.z);
+        });
         this.moonOrbit.geometry.dispose();
         this.moonOrbit.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+
+        // Apsides of the orbit the Moon is on NOW — refined by the kernel from
+        // the same distance curve this path was sampled from.
+        this.apsides = moonApsides(jd);
+        for (const id of ['perigee', 'apogee']) {
+            const a = this.apsides[id];
+            const mark = this.apsisMarks[id];
+            if (!a) { mark.dot.visible = mark.label.visible = false; continue; }
+            const g = moonGeoJ2000(a.jd);
+            const q = geoToScene(g.x, g.y, g.z, { trueScale: this.trueScale });
+            mark.dot.position.set(q.x, q.y, q.z);
+            mark.dot.visible = true;
+            const text = `${id} ${Math.round(a.km).toLocaleString('en-US')} km`;
+            if (mark.text !== text) {
+                mark.text = text;
+                this.scene.remove(mark.label);
+                mark.label = labelSprite(text, id === 'perigee' ? '#ffb05c' : '#9fb0cc', 0.75);
+                this.scene.add(mark.label);
+            }
+            mark.label.position.set(q.x, q.y, q.z);
+            mark.label.visible = true;
+        }
     }
 
     _placeShells() {
@@ -601,6 +908,10 @@ export class NeoStage {
     setTrueScale(on) {
         if (this.trueScale === on) return;
         this.trueScale = !!on;
+        // The Moon's path and its apsis marks are cached against a radial map;
+        // changing the map invalidates them, and the 0.05 d throttle in
+        // _placeMoonOrbit would otherwise hold the old geometry indefinitely.
+        this._moonOrbitJd = null;
         this._applyRange();
         const outer = this._outerRadius();
         this.camera.position.normalize().multiplyScalar(Math.min(outer * 1.6, this.controls.maxDistance));
@@ -610,6 +921,7 @@ export class NeoStage {
 
     setHorizon(km) {
         this.horizonKm = km;
+        this._moonOrbitJd = null;
         this._applyRange();
         this._placeShells();
         this._refreshPopulation();
@@ -712,7 +1024,7 @@ export class NeoStage {
     _refreshRocks() {
         if (!this.geo) return;
         const want = [];
-        if (this.selected != null && this.rGeo && this.selected < this.count) want.push(this.selected);
+        if (Number.isInteger(this.selected) && this.rGeo && this.selected < this.count) want.push(this.selected);
         const sorted = [...this._visible].sort((a, b) => this.rGeo[a] - this.rGeo[b]);
         for (const k of sorted) {
             if (want.length >= ROCK_POOL) break;
@@ -745,10 +1057,29 @@ export class NeoStage {
         }
     }
 
-    /** Selection ring + label follow the selected object. */
+    /**
+     * Selection ring + label follow the selection, which is either a catalogue
+     * INDEX or the string 'moon'. The Moon is not in the catalogue — it is not
+     * a small body — so it gets its own branch rather than a sentinel index
+     * that would index into the population arrays as NaN.
+     */
     _placeSelection() {
         const k = this.selected;
-        if (k == null || !this.geo || k >= this.count) {
+        if (k === 'moon') {
+            this.selRing.position.copy(this.moon.position);
+            this.selRing.visible = true;
+            if (this._selName !== 'Moon') {
+                this.scene.remove(this.selLabel);
+                this.selLabel = labelSprite('Moon', '#ffffff', 1);
+                this.scene.add(this.selLabel);
+                this._selName = 'Moon';
+            }
+            // The Moon carries its own live label already; a second one on top
+            // of it would just be the word twice.
+            this.selLabel.visible = false;
+            return;
+        }
+        if (k == null || !this.geo || !Number.isInteger(k) || k >= this.count) {
             this.selRing.visible = false;
             this.selLabel.visible = false;
             return;
@@ -777,9 +1108,15 @@ export class NeoStage {
 
     /** Fly the camera so the selected object and Earth are both in frame. */
     focusSelected() {
-        if (this.selected == null || !this.geo) return;
-        const o = this.selected * 3;
-        const p = geoToScene(this.geo[o], this.geo[o + 1], this.geo[o + 2], { trueScale: this.trueScale });
+        let p;
+        if (this.selected === 'moon') {
+            p = this.moon.position;
+        } else if (Number.isInteger(this.selected) && this.geo) {
+            const o = this.selected * 3;
+            p = geoToScene(this.geo[o], this.geo[o + 1], this.geo[o + 2], { trueScale: this.trueScale });
+        } else {
+            return;
+        }
         const r = Math.hypot(p.x, p.y, p.z);
         this.controls.target.set(0, 0, 0);
         this.camera.position.set(p.x, p.y, p.z).normalize().multiplyScalar(Math.max(2.4, r * 1.9));
@@ -845,8 +1182,12 @@ export class NeoStage {
         this._pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
         this._ray.setFromCamera(this._pointer, this.camera);
 
-        // Meshes first — a rock that is standing in for a point is what the
-        // cursor is actually over.
+        // The Moon first — it is the largest thing on the stage after Earth and
+        // a click on it means the Moon, whatever else the ray goes on to hit.
+        if (this._ray.intersectObject(this.moon, false).length) { this.onPick('moon'); return; }
+
+        // Then meshes — a rock standing in for a point is what the cursor is
+        // actually over.
         const meshHits = this._ray.intersectObjects(this.rocks.map(r => r.mesh).filter(m => m.visible), false);
         if (meshHits.length) {
             const slot = this.rocks.find(r => r.mesh === meshHits[0].object);

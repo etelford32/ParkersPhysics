@@ -31,6 +31,8 @@ import {
     EARTH_RADIUS_KM, GEO_RADIUS_KM, OBLIQUITY_J2000_DEG, MOON_SCENE, GEO_MAP,
     SHELLS, HORIZONS, DEFAULT_HORIZON,
     geoSceneRadius, geoSceneToKm, trueSceneRadius, compressionAt,
+    MOON_RADIUS_KM, bodySceneRadius, moonPhase, moonPath, moonApsides,
+    SYNODIC_MONTH_DAYS, SIDEREAL_MONTH_DAYS, ANOMALISTIC_MONTH_DAYS,
     ofDateToJ2000, j2000ToOfDate, obliquityDeg,
     eclipticToEquatorial, equatorialToEcliptic, equatorialToScene, sceneToEquatorial,
     geoToScene, raDecFromEclipticJ2000, formatRaDec,
@@ -338,6 +340,135 @@ assert.equal(compass16(225), 'SW');
         near(viaM.z, want.z, 1e-12, 'earthSceneMatrix is the conjugated rotation (z)');
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4c. Bodies are drawn at TRUE relative size
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The other half of the scale contract: distance is compressed, SIZE is not.
+assert.equal(bodySceneRadius(EARTH_RADIUS_KM), 1, 'Earth is one scene unit across the radius');
+near(bodySceneRadius(MOON_RADIUS_KM), MOON_RADIUS_KM / EARTH_RADIUS_KM, 0,
+    'the drawn Moon:Earth ratio is the real one');
+near(bodySceneRadius(MOON_RADIUS_KM), 0.2727, 5e-4, 'and that ratio is 0.2727');
+// It is a pure ratio, so it cannot depend on which radial map is active.
+near(bodySceneRadius(MOON_RADIUS_KM) / bodySceneRadius(EARTH_RADIUS_KM),
+    MOON_RADIUS_KM / EARTH_RADIUS_KM, 1e-15, 'the ratio is scale-free');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4d. The Moon — phase, path, apsides
+// ─────────────────────────────────────────────────────────────────────────────
+
+// THE ILLUMINATION IDENTITY. The lit fraction is (1 + cos α)/2 exactly — not a
+// fit, not a table — so it must hold at every instant, including the corners.
+for (let k = 0; k < 40; k++) {
+    const jd = jdOf('2026-01-01T00:00:00Z') + k * 0.83;
+    const ph = moonPhase(jd);
+    near(ph.illuminated, (1 + Math.cos(ph.phaseAngleDeg * D2R)) / 2, 1e-15,
+        `illuminated fraction is (1+cos α)/2 (sample ${k})`);
+    assert.ok(ph.illuminated >= 0 && ph.illuminated <= 1, 'a fraction is a fraction');
+    assert.ok(ph.phaseAngleDeg >= 0 && ph.phaseAngleDeg <= 180, 'phase angle is an angle at the Moon');
+    // The Sun is ~390 Moon-distances away, so the phase angle and the
+    // elongation are supplementary to within the Sun's parallax at the Moon.
+    near(ph.phaseAngleDeg + ph.elongationDeg, 180, 0.3,
+        'phase angle and elongation are supplementary to within the solar parallax');
+    // The drawn Moon's apparent size stays inside the real range.
+    assert.ok(ph.angularDiameterDeg > 0.48 && ph.angularDiameterDeg < 0.57,
+        `the Moon subtends about half a degree, got ${ph.angularDiameterDeg}`);
+}
+
+// Over one synodic month the phase must actually sweep: reaching neither new
+// nor full would mean the Sun direction and the Moon are not being compared.
+{
+    const jd0 = jdOf('2026-03-01T00:00:00Z');
+    let minLit = 1, maxLit = 0, sawWaxing = false, sawWaning = false;
+    const names = new Set();
+    for (let k = 0; k <= 300; k++) {
+        const ph = moonPhase(jd0 + (k / 300) * SYNODIC_MONTH_DAYS);
+        minLit = Math.min(minLit, ph.illuminated);
+        maxLit = Math.max(maxLit, ph.illuminated);
+        if (ph.waxing) sawWaxing = true; else sawWaning = true;
+        names.add(ph.name);
+        // Age and the waxing flag are two readings of the same quantity.
+        assert.equal(ph.waxing, ph.ageDays < SYNODIC_MONTH_DAYS / 2,
+            'waxing is exactly the first half of the lunation');
+        assert.ok(ph.ageDays >= 0 && ph.ageDays <= SYNODIC_MONTH_DAYS + 1e-9, 'age is within a lunation');
+    }
+    assert.ok(minLit < 0.02, `the Moon goes new within a synodic month (min lit ${minLit})`);
+    assert.ok(maxLit > 0.98, `and full (max lit ${maxLit})`);
+    assert.ok(sawWaxing && sawWaning, 'and does both halves');
+    assert.ok(names.has('New moon') && names.has('Full moon'), 'the named octants include new and full');
+    assert.equal(names.size, 8, 'all eight octants are visited exactly once per lunation');
+}
+// New moon is dark and full moon is lit — the two anchors the names hang on.
+{
+    const jd0 = jdOf('2026-03-01T00:00:00Z');
+    let newJd = null, fullJd = null;
+    for (let k = 0; k <= 600; k++) {
+        const jd = jd0 + (k / 600) * SYNODIC_MONTH_DAYS;
+        const ph = moonPhase(jd);
+        if (ph.name === 'New moon' && newJd === null && ph.illuminated < 0.02) newJd = jd;
+        if (ph.name === 'Full moon' && fullJd === null && ph.illuminated > 0.98) fullJd = jd;
+    }
+    assert.ok(newJd !== null, 'a new moon is found and it is dark');
+    assert.ok(fullJd !== null, 'a full moon is found and it is lit');
+    // The elongation bound is DERIVED from the 0.02 illumination threshold used
+    // to find these instants, not chosen: lit < 0.02 means cos α < −0.96, so
+    // α > 163.74°, so the elongation is under 16.26° plus the solar parallax.
+    const LIT_EDGE_DEG = 180 - Math.acos(2 * 0.02 - 1) * R2D + 0.3;
+    assert.ok(moonPhase(newJd).elongationDeg < LIT_EDGE_DEG,
+        `the new moon is near the Sun in the sky (< ${LIT_EDGE_DEG.toFixed(1)}°)`);
+    assert.ok(moonPhase(fullJd).elongationDeg > 180 - LIT_EDGE_DEG,
+        `the full moon is opposite it (> ${(180 - LIT_EDGE_DEG).toFixed(1)}°)`);
+}
+
+// The path is the same ephemeris, sampled — and it closes over a SIDEREAL
+// month, which is the circuit that closes in an inertial frame.
+{
+    const jd = jdOf('2026-09-18T00:00:00Z');
+    const path = moonPath(jd, 64);
+    assert.equal(path.length, 64, 'the requested number of samples');
+    const first = path[0], back = moonGeoJ2000(jd);
+    near(first.x, back.x, 0, 'the path starts at the Moon');
+    near(first.distKm, back.distKm, 0, 'and carries its distance');
+    for (const p of path) {
+        assert.ok(p.distKm > 350_000 && p.distKm < 410_000, `every sample is a real lunar distance (${p.distKm})`);
+    }
+    // One sidereal month later the Moon is back where it started, in this frame.
+    const closed = moonGeoJ2000(jd + SIDEREAL_MONTH_DAYS);
+    const sep = Math.acos(Math.max(-1, Math.min(1,
+        (first.x * closed.x + first.y * closed.y + first.z * closed.z)
+        / (Math.hypot(first.x, first.y, first.z) * Math.hypot(closed.x, closed.y, closed.z))))) * R2D;
+    assert.ok(sep < 6, `a sidereal month closes the circuit to within a few degrees (got ${sep}°)`);
+}
+
+// Apsides: refined from the same distance curve, and inside the real bounds.
+// These bounds are the Moon's, not this code's — they are what makes the
+// assertion worth making.
+{
+    const jd = jdOf('2026-09-18T00:00:00Z');
+    const a = moonApsides(jd);
+    assert.ok(a.perigee && a.apogee, 'both apsides are found within an anomalistic month');
+    assert.ok(a.perigee.km > 356_000 && a.perigee.km < 371_000,
+        `perigee is in the real range 356 400–370 400 km, got ${a.perigee.km}`);
+    assert.ok(a.apogee.km > 403_000 && a.apogee.km < 407_000,
+        `apogee is in the real range 404 000–406 700 km, got ${a.apogee.km}`);
+    assert.ok(a.perigee.km < a.apogee.km, 'perigee is nearer than apogee');
+    for (const k of ['perigee', 'apogee']) {
+        assert.ok(a[k].jd >= jd && a[k].jd <= jd + ANOMALISTIC_MONTH_DAYS + 1e-6,
+            `${k} lands inside the searched month`);
+        // And it really is an extremum of the distance curve it was found on.
+        const d0 = moonGeoJ2000(a[k].jd).distKm;
+        const dm = moonGeoJ2000(a[k].jd - 0.05).distKm;
+        const dp = moonGeoJ2000(a[k].jd + 0.05).distKm;
+        if (k === 'perigee') assert.ok(d0 <= dm && d0 <= dp, 'perigee is a minimum of the curve');
+        else assert.ok(d0 >= dm && d0 >= dp, 'apogee is a maximum of the curve');
+        near(a[k].km, d0, 1, `${k} distance is the curve's own value there`);
+    }
+}
+// The three month lengths are distinct and ordered — sidereal < anomalistic
+// < synodic. Getting two of them equal is how a "one month" path stops closing.
+assert.ok(SIDEREAL_MONTH_DAYS < ANOMALISTIC_MONTH_DAYS, 'sidereal is the shortest month');
+assert.ok(ANOMALISTIC_MONTH_DAYS < SYNODIC_MONTH_DAYS, 'synodic is the longest');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. Ephemeris adapters — rotations preserve what they must
