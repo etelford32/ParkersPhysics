@@ -22,9 +22,10 @@
  *
  * ── Lighting ──────────────────────────────────────────────────────────────
  * The orrery's Sun is a physically-decaying PointLight that leaves anything
- * at 1 AU dim, so the rocks light THEMSELVES from the Sun direction (the Sun
- * is always at the world origin — the same convention the page's planet
- * shader uses): Lambert term, a small wrap/fill, a faint rim so a dark limb
+ * at 1 AU dim, so the rocks light THEMSELVES from the Sun direction — taken
+ * from `u_sunPos`, which DEFAULTS to the world origin because that is where
+ * the orrery draws the Sun, and which neo-watch.html sets instead because its
+ * stage is Earth-centred: Lambert term, a small wrap/fill, a faint rim so a dark limb
  * still reads against black, and a per-vertex regolith speckle. The shader
  * handles `instanceMatrix` so the same material drives the InstancedMesh
  * streams.
@@ -194,12 +195,19 @@ const ROCK_VS = /* glsl */`
 const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
     uniform vec3  u_base;
     uniform float u_glow;        // comet nucleus: faint self-lit coma haze
+    // Where the Sun is, in world space. The orrery draws the Sun AT the origin,
+    // so the default (0,0,0) reproduces the original normalize(-vW) exactly.
+    // neo-watch.html draws EARTH at the origin and passes the Sun's direction
+    // scaled far out instead: same lighting rule, different stage.
+    // NOTE no backticks in this comment. It lives inside a template literal,
+    // and one would end the shader mid-string (CLAUDE.md, solar-system scars).
+    uniform vec3  u_sunPos;
     varying vec3  vN;
     varying vec3  vW;
     varying float vSpeck;
     void main() {
         vec3 n = normalize(vN);
-        vec3 toSun = normalize(-vW);                  // Sun at the world origin
+        vec3 toSun = normalize(u_sunPos - vW);
         vec3 toCam = normalize(cameraPosition - vW);
         float ndl  = dot(n, toSun);
         float diff = max(ndl, 0.0);
@@ -214,10 +222,14 @@ const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
     }
 `;
 
-export function rockMaterial(colorHex, glow = 0) {
+export function rockMaterial(colorHex, glow = 0, sunPos = null) {
     return new THREE.ShaderMaterial({
         vertexShader: ROCK_VS, fragmentShader: ROCK_FS,
-        uniforms: { u_base: { value: new THREE.Color(colorHex) }, u_glow: { value: glow } },
+        uniforms: {
+            u_base: { value: new THREE.Color(colorHex) },
+            u_glow: { value: glow },
+            u_sunPos: { value: sunPos ? sunPos.clone() : new THREE.Vector3(0, 0, 0) },
+        },
     });
 }
 

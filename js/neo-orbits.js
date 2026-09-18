@@ -407,6 +407,35 @@ export function propagateColumns(cols, jd, helio) {
 }
 
 /**
+ * The GEOCENTRIC sibling of `deriveFrames`, for neo-watch.html's Earth-centred
+ * stage: from J2000 heliocentric positions and Earth's J2000 heliocentric
+ * position, fill geocentric J2000 vectors (3N, AU) plus heliocentric and
+ * geocentric distance (N each, AU).
+ *
+ * No frame rotation happens here, and that asymmetry with `deriveFrames` is
+ * the point. The orrery draws VSOP87D planets, which are ecliptic OF DATE, so
+ * `deriveFrames` rotates every object FORWARD to meet them. A geocentric stage
+ * has no of-date content in it at all, so js/neo-space.js rotates EARTH back
+ * to J2000 once (`earthHelioJ2000`) and everything downstream — vectors,
+ * RA/Dec, the drawn scene — stays in the frame the catalogue is published in.
+ * Distances are of course identical either way, which is exactly what
+ * tests/neo-space.mjs asserts across the two paths.
+ *
+ * One pass, allocation-free; this is what the worker's `geoframe` ships back.
+ */
+export function deriveGeocentric(helio, N, earthJ2000, geo, rHelio, rGeo) {
+    const [ex, ey, ez] = earthJ2000;
+    for (let k = 0; k < N; k++) {
+        const o = k * 3;
+        const x = helio[o], y = helio[o + 1], z = helio[o + 2];
+        rHelio[k] = Math.hypot(x, y, z);
+        const dx = x - ex, dy = y - ey, dz = z - ez;
+        geo[o] = dx; geo[o + 1] = dy; geo[o + 2] = dz;
+        rGeo[k] = Math.hypot(dx, dy, dz);
+    }
+}
+
+/**
  * From J2000 heliocentric positions and Earth's OF-DATE heliocentric position,
  * fill scene positions (log frame, of date), heliocentric distance (AU) and
  * geocentric distance (AU). `precRad` is precessionLongitudeRad(jd); the

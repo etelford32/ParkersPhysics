@@ -149,6 +149,7 @@ const NAV_ITEMS = {
         { href: 'operations.html',     label: 'Operations',     sub: 'Fleet & debris analysis console',       tier: 'public', icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },
         { href: 'satellites.html',     label: 'Satellites',     sub: 'Real-time orbital tracking',            tier: 'public', icon: 'satellite' },
         { href: 'launch-planner.html', label: 'Launch Planner', sub: 'SpaceX/Blue Origin launches + weather', tier: 'public', icon: 'rocket', id: 'launch-planner' },
+        { href: 'neo-watch.html',      label: 'Near-Earth Watch', sub: 'Live NEO population around Earth · JPL', tier: 'public', icon: 'target', badge: 'NEW', id: 'neo-watch' },
         { section: 'Build & fly' },
         { href: 'satellite-designer.html', label: 'Satellite Designer',  sub: 'Build a craft · fly drag vs thrust',     tier: 'public', icon: 'satellite', badge: 'NEW', id: 'satellite-designer' },
         { href: 'spaceship-designer.html', label: 'Space Ship Designer', sub: 'Build a rocket · fly it to orbit in 3D', tier: 'public', icon: 'rocket', badge: 'NEW', id: 'spaceship-designer' },
