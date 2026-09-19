@@ -22,17 +22,19 @@
  *
  * ── Lighting ──────────────────────────────────────────────────────────────
  * The orrery's Sun is a physically-decaying PointLight that leaves anything
- * at 1 AU dim, so the rocks light THEMSELVES from the Sun direction (the Sun
- * is always at the world origin — the same convention the page's planet
- * shader uses). The scattering law, the opposition surge, the display
- * compression and the eclipse test all come from js/airless-body.js — ONE copy
- * shared with the far-field impostor and with every moon on the page, so a LOD
- * handoff changes the geometry and nothing else. Level is the object's own
- * albedo times the illumination reaching it; the H–G phase function is NOT
- * applied on top of the BRDF (it is disc-integrated — see that header). Plus
- * a rim so a dark limb still reads against black, and a per-vertex regolith
- * speckle. The shader handles `instanceMatrix` so the same material drives the
- * InstancedMesh streams.
+ * at 1 AU dim, so the rocks light THEMSELVES from the Sun direction — taken
+ * from `u_sunPos`, which DEFAULTS to the world origin because that is where
+ * the orrery draws the Sun, and which neo-watch.html sets instead because its
+ * stage is EARTH-centred. Same lighting rule, different stage; the default
+ * reproduces the orrery's original `normalize(-vW)` exactly. The scattering
+ * law, the opposition surge, the display compression and the eclipse test all
+ * come from js/airless-body.js — ONE copy shared with the far-field impostor
+ * and with every moon on the page, so a LOD handoff changes the geometry and
+ * nothing else. Level is the object's own albedo times the illumination
+ * reaching it; the H–G phase function is NOT applied on top of the BRDF (it is
+ * disc-integrated — see that header). Plus a rim so a dark limb still reads
+ * against black, and a per-vertex regolith speckle. The shader handles
+ * `instanceMatrix` so the same material drives the InstancedMesh streams.
  *
  * ── Scale ─────────────────────────────────────────────────────────────────
  * `drawnRockRadius(diamKm)` is a LOG map from real diameter to scene units:
@@ -201,6 +203,13 @@ const ROCK_VS = /* glsl */`
 const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}${AIRLESS_GLSL}
     uniform vec3  u_base;
     uniform float u_glow;        // comet nucleus: faint self-lit coma haze
+    // Where the Sun is, in world space. The orrery draws the Sun AT the origin,
+    // so the default (0,0,0) reproduces the original normalize(-vW) exactly.
+    // neo-watch.html draws EARTH at the origin and passes the Sun's direction
+    // scaled far out instead: same lighting rule, different stage.
+    // NOTE no backticks in this comment. It lives inside a template literal,
+    // and one would end the shader mid-string (CLAUDE.md, solar-system scars).
+    uniform vec3  u_sunPos;
     uniform float u_albedo;      // geometric albedo — measured, or the class mean
     uniform float u_illum;       // (1 AU / r)²: the sunlight reaching this body
     uniform float u_gain;        // display normalisation, shared with every airless body
@@ -221,7 +230,7 @@ const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}${AIRLESS_GLSL}
     varying float vSpeck;
     void main() {
         vec3 n = normalize(vN);
-        vec3 toSun = normalize(-vW);                  // Sun at the world origin
+        vec3 toSun = normalize(u_sunPos - vW);        // orrery: the origin
         vec3 toCam = normalize(cameraPosition - vW);
         // LOMMEL–SEELIGER and the opposition surge, from js/airless-body.js —
         // the SAME law the far-field impostor and every moon on this page use,
@@ -257,16 +266,22 @@ const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}${AIRLESS_GLSL}
  * @param {number} colorHex   the taxonomy's tint
  * @param {number} glow       cometary coma haze, 0..1
  * @param {{albedo?:number, illum?:number, gain?:number, stretch?:number,
- *          bodyRadiusKm?:number}} [phot]
+ *          bodyRadiusKm?:number, sunPos?:object}} [phot]
  *        photometry: geometric albedo, the illumination reaching the body, and
  *        the display normalisation every airless body on the page shares.
  *        Defaults reproduce a 0.14-albedo body at 1 AU.
+ *        `sunPos` is WHERE THE SUN IS in world space (a THREE.Vector3). It
+ *        defaults to the origin because that is where the orrery draws it, so
+ *        omitting it reproduces the original `normalize(-vW)` exactly —
+ *        neo-watch.html is EARTH-centred and must pass it, or every rock on
+ *        that stage is lit from Earth.
  */
 export function rockMaterial(colorHex, glow = 0, phot = {}) {
     return new THREE.ShaderMaterial({
         vertexShader: ROCK_VS, fragmentShader: ROCK_FS,
         uniforms: {
             u_base: { value: new THREE.Color(colorHex) }, u_glow: { value: glow },
+            u_sunPos:  { value: phot.sunPos ? phot.sunPos.clone() : new THREE.Vector3(0, 0, 0) },
             u_albedo:  { value: phot.albedo ?? 0.14 },
             u_illum:   { value: phot.illum ?? 1 },
             u_gain:    { value: phot.gain ?? AIRLESS_DISPLAY.gain },
