@@ -3254,18 +3254,47 @@ ALTER TABLE public.weather_grid_cache ENABLE ROW LEVEL SECURITY;
 -- No policies = no rows visible to anon/authenticated roles.
 -- (service_role bypasses RLS entirely, so the edge fns still work.)
 
--- Retention: keep the last 720 hourly rows (30 days — bumped from 72
--- by supabase-weather-cache-retention-migration.sql so Phase 4 NN
--- training has history to learn from; keep the two files in lockstep).
+-- Retention: 30 days, but DECIMATED — the last 72 h stay hourly and
+-- everything older is thinned to 3-hourly (~288 rows, ~47 MB).
+--
+-- WHY, and do NOT "restore" the flat 720 (2026-09-19): flat hourly made
+-- this table 137 MB — 58% of a 235 MB database on a 500 MB free tier —
+-- and 489 of those frames were read by NOTHING. The only consumers are
+-- /api/weather/grid (newest row; range read capped at 72 by
+-- RANGE_MAX_LIMIT, an Edge response-body limit) and
+-- compute_weather_extremes(), which decimates by 3 and whose own ledger
+-- recorded frames_sampled = 231 of 720. 3-hourly beyond 72 h therefore
+-- keeps the full 30-day span at the resolution anything actually reads,
+-- and the extremes job now samples MORE frames than it did before.
+--
+-- The anchor is max(fetched_at), NOT now(): during the 2026-09-18 API
+-- outage the newest frame was 15 h old, and a now()-anchored window
+-- would have eaten most of the hourly tail it is supposed to protect.
+--
+-- LOAD-BEARING LOCKSTEP: pg_cron job 'weather-extremes-hourly' must
+-- pass p_decimate = 1 (it calls compute_weather_extremes(30, 1)). At the
+-- old default of 3 it would decimate an ALREADY-decimated archive to
+-- 9-hourly, thinning the per-cell sample toward the n_t >= 24 guard and
+-- dropping cells out of percentile scoring with nothing erroring.
+-- Change the retention and that argument together.
+--
+-- Payload slimming was MEASURED AND REJECTED: every cell repeats an
+-- identical current_units object, 37% of the raw JSON, but stripping it
+-- moves the STORED row only 163 kB -> 148 kB (9%) because pglz already
+-- compresses the repetition; even a minimal lat/lon/current payload is
+-- 141 kB. Row count is the only lever that pays.
+--
 -- Called opportunistically from the refresh endpoint after each insert.
 CREATE OR REPLACE FUNCTION public.trim_weather_grid_cache()
 RETURNS void AS $$
-    DELETE FROM public.weather_grid_cache
-    WHERE id NOT IN (
-        SELECT id FROM public.weather_grid_cache
-        ORDER BY fetched_at DESC
-        LIMIT 720
-    );
+    WITH anchor AS (SELECT max(fetched_at) AS newest FROM public.weather_grid_cache)
+    DELETE FROM public.weather_grid_cache w
+    USING anchor a
+    WHERE w.fetched_at < a.newest - interval '30 days'
+       OR NOT (
+             w.fetched_at > a.newest - interval '72 hours'
+          OR extract(hour FROM date_trunc('hour', w.fetched_at))::int % 3 = 0
+       );
 $$ LANGUAGE sql
 SET search_path = public, pg_temp;
 

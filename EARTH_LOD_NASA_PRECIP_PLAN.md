@@ -94,8 +94,15 @@ Yes — and the architecture is now wired to make it happen automatically.
    observations into the bias tracker for a microwave-only
    cross-check on the IMERG fusion product.
 3. **Server-side cold archive (`EARTH_ML_FIRST_PRINCIPLES.md` Phase
-   0a).** Bump `weather_grid_cache` retention from 72 h → 720 h (30
-   days). Unlocks Phase 4 NN training.
+   0a).** ~~Bump `weather_grid_cache` retention from 72 h → 720 h (30
+   days).~~ DONE, then PARTLY WALKED BACK (2026-09-19): flat hourly 720
+   made the table 137 MB — 58% of a 235 MB database on a 500 MB free
+   tier — while `frames_sampled` showed only 231 of 720 were ever read.
+   Retention is now 30 days DECIMATED (hourly 72 h, 3-hourly older,
+   ~288 rows). The 30-day SPAN that Phase 4 wanted survives; hourly
+   resolution past 3 days does not. If NN training genuinely needs
+   hourly depth, it needs an off-Postgres cold tier (object storage),
+   not a bigger table — see supabase-storage-reclaim-migration.sql.
 4. **Per-channel fusion.** The fusion idea generalises beyond precip:
    SST has GHRSST (observation) vs Open-Meteo's surface field. Same
    bias-tracker pattern with a per-channel parameterisation.
