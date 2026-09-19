@@ -43,17 +43,38 @@ const CACHE_SWR = 86_400;
 // stack (~6 MB from JPL); give it the Horizons budget, not the 10 s default.
 const SBDB_TIMEOUT_MS = 24_000;
 
-async function fetchGroup(url, opts) {
+async function fetchOnce(url, opts) {
     let res;
     try {
         res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, timeoutMs: SBDB_TIMEOUT_MS });
     } catch (e) {
-        return { ok: false, reason: `unreachable: ${e.message || 'fetch failed'}`, records: [], count: 0 };
+        return { ok: false, reason: `unreachable: ${e.message || 'fetch failed'}`, records: [], count: 0, status: 0 };
     }
-    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}`, records: [], count: 0 };
+    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}`, records: [], count: 0, status: res.status };
     let json;
-    try { json = await res.json(); } catch (e) { return { ok: false, reason: `unparseable: ${e.message}`, records: [], count: 0 }; }
-    return parseSbdbQuery(json, opts);
+    try { json = await res.json(); } catch (e) { return { ok: false, reason: `unparseable: ${e.message}`, records: [], count: 0, status: res.status }; }
+    return { ...parseSbdbQuery(json, opts), status: res.status };
+}
+
+/**
+ * AN OPTIONAL COLUMN MUST NEVER TAKE THE CATALOGUE DOWN.
+ *
+ * The measured albedo / taxonomy columns (SBDB_FIELDS_PHOTOMETRY) are what make
+ * the drawn population honest rather than a class mean, but their spelling is
+ * UNVERIFIED — ssd-api.jpl.nasa.gov is egress-blocked from the build sandbox —
+ * and a `fields` list JPL does not recognise is rejected as a whole. So the
+ * first attempt asks for them and a 4xx (the shape of "I do not know that
+ * field", never a network error or a 5xx) retries ONCE on the core list alone.
+ * Either way the group self-reports `photometry_fields` so one production
+ * request settles it: if it reads 'dropped', trim SBDB_FIELDS_PHOTOMETRY.
+ */
+async function fetchGroup(buildUrl, opts) {
+    const first = await fetchOnce(buildUrl({ photometry: true }), opts);
+    if (first.ok) return { ...first, photometry_fields: 'requested' };
+    if (!(first.status >= 400 && first.status < 500)) return { ...first, photometry_fields: 'requested' };
+    const retry = await fetchOnce(buildUrl({ photometry: false }), opts);
+    return { ...retry, photometry_fields: 'dropped',
+        reason: retry.ok ? null : `${retry.reason} (after dropping optional photometry columns: ${first.reason})` };
 }
 
 export default async function handler(request) {
@@ -64,9 +85,9 @@ export default async function handler(request) {
     }
 
     const [asteroids, comets, interstellar] = await Promise.all([
-        fetchGroup(sbdbAsteroidUrl(tier), { kind: 'a' }),
-        fetchGroup(sbdbCometUrl(), { kind: 'c' }),
-        fetchGroup(sbdbInterstellarUrl(), { interstellar: true }),
+        fetchGroup((o) => sbdbAsteroidUrl(tier, o), { kind: 'a' }),
+        fetchGroup((o) => sbdbCometUrl(o), { kind: 'c' }),
+        fetchGroup((o) => sbdbInterstellarUrl(o), { interstellar: true }),
     ]);
 
     const body = composeCatalogResponse({ tier, asteroids, comets, interstellar });

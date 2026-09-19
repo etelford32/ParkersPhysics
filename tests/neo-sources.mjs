@@ -18,7 +18,8 @@
  */
 import assert from 'node:assert/strict';
 import {
-    CATALOG_TIERS, DEFAULT_TIER, SBDB_FIELDS, INTERSTELLAR_E_MIN, MAX_CATALOG_ROWS,
+    CATALOG_TIERS, DEFAULT_TIER, SBDB_FIELDS, SBDB_FIELDS_CORE, SBDB_FIELDS_PHOTOMETRY,
+    INTERSTELLAR_E_MIN, MAX_CATALOG_ROWS,
     sbdbAsteroidUrl, sbdbCometUrl, sbdbInterstellarUrl, cadUrl, sentryUrl, fireballUrl,
     parseSbdbQuery, parseCad, parseCadDate, parseSentry, parseFireballs,
     compactRows, composeCatalogResponse, composeWatchResponse, CAD_WINDOW, SENTRY_KEEP,
@@ -54,6 +55,18 @@ import { NEO_ROW_COLUMNS, FLAG, rowToRecord, normalizeElements } from '../js/neo
     assert.equal(cad.searchParams.get('dist-max'), String(CAD_WINDOW.distMaxAU));
     assert.equal(cad.searchParams.get('fullname'), 'true');
     assert.equal(new URL(fireballUrl()).searchParams.get('limit'), '20');
+
+    // The optional photometry columns can be dropped from EVERY builder — the
+    // route's retry path when JPL refuses a field spelling it does not know.
+    // Without that, one unverified column name takes the whole catalogue down.
+    assert.deepEqual(SBDB_FIELDS.slice(0, SBDB_FIELDS_CORE.length), [...SBDB_FIELDS_CORE], 'core columns come first');
+    assert.deepEqual(SBDB_FIELDS.slice(SBDB_FIELDS_CORE.length), [...SBDB_FIELDS_PHOTOMETRY]);
+    assert.ok(SBDB_FIELDS_PHOTOMETRY.length > 0);
+    for (const build of [(o) => sbdbAsteroidUrl('all', o), sbdbCometUrl, sbdbInterstellarUrl]) {
+        assert.equal(new URL(build({ photometry: true })).searchParams.get('fields'), SBDB_FIELDS.join(','));
+        assert.equal(new URL(build({ photometry: false })).searchParams.get('fields'), SBDB_FIELDS_CORE.join(','));
+        assert.equal(new URL(build()).searchParams.get('fields'), SBDB_FIELDS.join(','), 'photometry is the default');
+    }
 }
 
 // ── SBDB query parser ───────────────────────────────────────────────────────
@@ -97,6 +110,44 @@ const sbdbFixture = {
     const rows = compactRows(r.records);
     assert.equal(rows[0].length, NEO_ROW_COLUMNS.length);
     assert.deepEqual(rowToRecord(rows[0]), { ...ap, name: ap.name });
+}
+{
+    // ── Optional photometry ─────────────────────────────────────────────────
+    // Measured albedo and taxonomy come through when JPL publishes them, and
+    // the group SELF-REPORTS how many rows carried each — a route quietly
+    // serving zero measured albedos is otherwise indistinguishable from one
+    // serving thousands, and every drawn tone and derived size depends on it.
+    const withPhot = {
+        fields: ['pdes', 'full_name', 'H', 'class', 'e', 'a', 'i', 'om', 'w', 'ma', 'epoch', 'diameter', 'albedo', 'spec_B'],
+        data: [
+            ['101955', '101955 Bennu (1999 RQ36)', '20.2', 'APO', '.2037', '1.1264', '6.035', '2.06', '66.22', '220.5', '2461000.5', '.49', '.044', 'B'],
+            ['433', '433 Eros (A898 PA)', '10.4', 'AMO', '.2227', '1.458', '10.83', '304.3', '178.9', '12.3', '2461000.5', '16.8', null, 'S'],
+            ['2024 YR4', '(2024 YR4)', '23.92', 'APO', '.6616', '2.516', '3.408', '271.4', '134.4', '32.11', '2461000.5', null, null, null],
+        ],
+    };
+    const r = parseSbdbQuery(withPhot, { kind: 'a' });
+    assert.equal(r.ok, true); assert.equal(r.count, 3);
+    assert.equal(r.records[0].albedo, 0.044, 'Bennu’s measured albedo survives the round trip');
+    assert.equal(r.records[0].spec, 'B');
+    assert.equal(r.records[1].albedo, null, 'no albedo published ⇒ null, never a class mean here');
+    assert.equal(r.records[1].spec, 'S');
+    assert.equal(r.records[2].spec, null);
+    assert.equal(r.photometry.albedo_column, 'albedo');
+    assert.equal(r.photometry.spec_column, 'spec_B');
+    assert.equal(r.photometry.albedo_measured, 1);
+    assert.equal(r.photometry.spec_measured, 2);
+    // The wire row carries them, so the client never re-fetches to get them.
+    const row = compactRows(r.records)[0];
+    assert.equal(rowToRecord(row).albedo, 0.044);
+    assert.equal(rowToRecord(row).spec, 'B');
+    // A response with NO photometry columns at all still parses — that is the
+    // dropped-columns retry path, and it must look like data, not a failure.
+    const none = parseSbdbQuery(sbdbFixture, { kind: 'a' });
+    assert.equal(none.ok, true);
+    assert.equal(none.photometry.albedo_column, null);
+    assert.equal(none.photometry.albedo_measured, 0);
+    assert.equal(none.records[0].albedo, null);
+    assert.equal(none.records[0].spec, null);
 }
 {
     // Renamed columns still resolve; extra columns are reported, not fatal.

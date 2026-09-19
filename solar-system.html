@@ -144,6 +144,18 @@ nav {
 }
 #canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
 
+/* Hover read-out for the NEO population. POSITION:FIXED and pointer-events:none
+   — it is placed from clientX/clientY, and a tooltip that can be hovered would
+   steal the very pointermove that is keeping it alive. */
+#neo-hover-tip {
+    position:fixed; z-index:95; display:none; pointer-events:none;
+    max-width:min(320px, 60vw);
+    padding:5px 9px; border-radius:5px;
+    background:rgba(6,8,14,.92); border:1px solid rgba(255,220,150,.28);
+    color:#ffe9a8; font-size:11px; line-height:1.35; letter-spacing:.2px;
+    box-shadow:0 4px 14px rgba(0,0,0,.55);
+}
+
 /* ─── HUD ────────────────────────────────────────────────────── */
 #hud {
     position:absolute; top:12px; left:12px; z-index:50;
@@ -400,6 +412,9 @@ import './js/telemetry.js';
 <!-- ═══ APP ═══ -->
 <div id="app">
     <div id="canvas-wrap">
+        <!-- What a click would select, for a population drawn as dark bodies a
+             few pixels across (js/neo-layer.js hover/hoverText). -->
+        <div id="neo-hover-tip" role="status" aria-live="off"></div>
         <!-- HUD -->
         <div id="hud">
             <h3 id="hud-name">Solar System</h3>
@@ -467,7 +482,7 @@ import './js/telemetry.js';
                 <span class="val" id="hud-neo-closest" style="color:#ffe9a8;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">—</span>
             </div>
             <div class="sep"></div>
-            <div class="dim" style="margin-top:0">Drag · Scroll · Click planet</div>
+            <div class="dim" style="margin-top:0">Drag · Scroll · Click a body</div>
         </div>
 
         <!-- Overlay buttons -->
@@ -789,6 +804,9 @@ import {
 } from './js/planet-moons.js';
 import { JovianSystem } from './js/jovian-system.js';
 import { EarthSimBridge } from './js/earth-sim-bridge.js';
+import { airlessSphereMaterial } from './js/airless-body.js';
+import { BODY_ALBEDO, shadowIllumination, reflectedIrradianceFraction, SUN_RADIUS_KM } from './js/eclipse-geometry.js';
+import { AU_KM } from './js/neo-orbits.js';
 import { NeoLayer } from './js/neo-layer.js';
 import { TONE_DECODE_GLSL } from './js/tone-decode.js';
 import { NeoPanel } from './js/neo-panel.js';
@@ -2172,6 +2190,7 @@ scene.add(plasmaMesh);
 // — so the Laplace 1:2:4 mean-motion resonance and Io's forced eccentricity
 // emerge from pairwise gravity rather than being baked in.
 
+let _earthTrueAU = null;                      // VSOP87D Earth, AU (of date) — see _updateMoonPhotometry
 const allMoonMeshes = [];                     // for raycaster
 const moonRecords   = [];                     // tick-list: {planet, key, cfg, mesh, ring, ...}
 const _GALILEAN_KEYS = ['io', 'europa', 'ganymede', 'callisto'];
@@ -2194,9 +2213,23 @@ PLANETS.forEach(p => {
     for (const [key, cfg] of Object.entries(moonTable)) {
         // Visual sphere — physical radius mapped to vis_scale × parentR.
         const visR  = parentR * (cfg.vis_scale ?? 0.05);
-        const mg    = new THREE.SphereGeometry(Math.max(visR, 0.004), 16, 16);
-        const mm    = new THREE.MeshStandardMaterial({
-            color: cfg.color, roughness: 0.85, metalness: 0.0,
+        const mg    = new THREE.SphereGeometry(Math.max(visR, 0.004), 32, 24);
+        // EVERY SATELLITE ON THIS PAGE IS AN AIRLESS BODY AND IS NOW SHADED AS
+        // ONE — the same Lommel–Seeliger law, opposition surge and disclosed
+        // display compression the near-Earth objects use (js/airless-body.js),
+        // with its own PUBLISHED geometric albedo. The MeshStandardMaterial
+        // this replaced was a Lambert-diffuse PBR sphere lit by the scene's
+        // decaying PointLight: the Moon came out as a light-grey ball, when it
+        // is as dark as worn asphalt (0.12) and reads as a flat DISC because
+        // an airless regolith barely darkens toward the limb. The outer moons
+        // were worse — the PointLight's 1/r² left them at ~1.6% of Earth's
+        // light and all but black. Colour here is a tint; the LEVEL is albedo.
+        const albedo = BODY_ALBEDO[key] ?? 0.14;
+        const mm    = airlessSphereMaterial({
+            colorHex: cfg.color, albedo,
+            bodyRadiusKm: cfg.r_km ?? 1,
+            occulterRadiusKm: PARENT_BODIES[parentKey]?.r_km ?? 0,
+            texMix: 0.85,
         });
         const mesh  = new THREE.Mesh(mg, mm);
         const moon  = {
@@ -2213,6 +2246,7 @@ PLANETS.forEach(p => {
                 'Eccentricity': cfg.e.toFixed(4),
                 'Inclination':  `${cfg.i_deg.toFixed(2)}°`,
                 'Radius':       `${cfg.r_km.toLocaleString()} km`,
+                'Geometric albedo': `${albedo.toFixed(3)}${albedo > 1 ? ' (backscattering — a geometric albedo may exceed 1)' : ''}`,
                 'Mass':         cfg.mass_kg.toExponential(2) + ' kg',
                 'Notes':        cfg.desc,
             },
@@ -2253,6 +2287,12 @@ PLANETS.forEach(p => {
             parentKey, key, cfg,
             mesh,      ring,
             cosT, sinT,
+            // OUR Moon does not ride the fixed-element ellipse. See
+            // _updateMoonPosition: it is the one satellite here for which the
+            // page already carries a real series, and the one whose geometry
+            // the page makes a claim about (eclipses).
+            useSeries: parentKey === 'earth' && key === 'moon',
+            ringJd:    null,
             useNBody:  isUseNBody && _GALILEAN_KEYS.includes(key),
             mu_km3_s2: muOfParent(parentKey, cfg.mass_kg),
         });
@@ -2261,10 +2301,48 @@ PLANETS.forEach(p => {
     p.moons = moonRecords.filter(r => r.planet === p).map(r => r.mesh.userData);
 });
 
+// ── Where the Moon actually is ───────────────────────────────────────────────
+// THE MOON IS NOT A FIXED-ELEMENT ELLIPSE, and treating it as one is wrong by
+// tens of degrees in 2026. `propagateMoonKepler` holds a, e, i, Omega, omega
+// fixed at their J2000 values, but the lunar node regresses a full turn in
+// 18.6 years and the perigee advances one in 8.85 — a quarter-century on, both
+// are most of a revolution out. On top of that the generic satellite path
+// rotates parent-EQUATORIAL elements into the ecliptic by the parent's
+// obliquity, and the Moon's table entry (raan 125.08 deg) is already ECLIPTIC, so
+// it was being tilted an extra 23.44 deg it does not have.
+//
+// Neither error is visible in a still frame — the Moon still orbits Earth at
+// the right distance and the right rate, so the page looked fine. It shows up
+// the moment the page claims to know WHERE the Moon is: no lunar eclipse
+// landed anywhere near its real date, in a simulation driven by real
+// ephemerides throughout.
+//
+// So the Moon uses the Meeus Chapter 47 series the rest of the site already
+// runs on (js/horizons.js moonGeocentric, ecliptic OF DATE, the same routine
+// the NEO layer's Earth-local frame and the mission planner use). That is one
+// implementation of the lunar position for the whole site, and it reproduces
+// the four 2025-26 umbral eclipses to within the half hour
+// (tests/eclipse-geometry.mjs). Every other satellite keeps the Kepler path:
+// no comparable series exists for them here, their host planets' positions are
+// mean-motion circles anyway, and the page makes no timing claim about them.
+function _moonSeriesKm(jd) {
+    const m = moonGeocentric(jd);
+    const cl = Math.cos(m.lat_rad);
+    return {
+        x: m.dist_km * cl * Math.cos(m.lon_rad),
+        y: m.dist_km * cl * Math.sin(m.lon_rad),
+        z: m.dist_km * Math.sin(m.lat_rad),
+    };
+}
+
 // Helper used by the animation loop: position one moon for the current JD.
 function _updateMoonPosition(rec, jd) {
     let kmPos;
-    if (rec.useNBody) {
+    if (rec.useSeries) {
+        // Already ecliptic of date — no obliquity rotation (see above).
+        kmPos = _moonSeriesKm(jd);
+        _refreshMoonRing(rec, jd);
+    } else if (rec.useNBody) {
         // Yoshida-4 result is in ecliptic-of-J2000 already.
         kmPos = jovianNBody.getRelPosKm(rec.key);
     } else {
@@ -2280,6 +2358,95 @@ function _updateMoonPosition(rec, jd) {
     const pp = rec.planet.mesh.position;
     rec.mesh.position.set(pp.x + sc.x, pp.y + sc.z, pp.z + sc.y);
     rec.ring.position.copy(pp);
+    _updateMoonPhotometry(rec, kmPos);
+}
+
+/**
+ * The drawn Moon must sit ON its drawn orbit. The static ellipse built at page
+ * load is the one the series just stopped following, so the ring is re-sampled
+ * from the SAME series, over one sidereal month centred on the current instant.
+ * Rebuilt only when the clock has moved a quarter of a day — 96 evaluations of
+ * a 16-term trigonometric series is nothing, but it is not free per frame, and
+ * at any plausible scrub rate a quarter-day-old ring is sub-pixel stale.
+ */
+const SIDEREAL_MONTH_D = 27.321661;
+function _refreshMoonRing(rec, jd) {
+    if (rec.ringJd != null && Math.abs(jd - rec.ringJd) < 0.25) return;
+    rec.ringJd = jd;
+    const pos = rec.ring.geometry.attributes.position;
+    const arr = pos.array;
+    // Sample the buffer the loader already sized, whatever that is — the ring
+    // is a LineLoop, so writing fewer points than it holds leaves a stale
+    // segment reaching back to wherever the old ellipse used to be.
+    const n = pos.count;
+    for (let k = 0; k < n; k++) {
+        const ec = _moonSeriesKm(jd + (k / (n - 1) - 0.5) * SIDEREAL_MONTH_D);
+        const sc = moonKmToScene(rec.parentKey, rec.planet.radius, ec);
+        arr[k * 3] = sc.x; arr[k * 3 + 1] = sc.z; arr[k * 3 + 2] = sc.y;
+    }
+    pos.needsUpdate = true;
+    rec.ring.geometry.computeBoundingSphere();
+}
+
+// ── What the light is doing at a satellite ──────────────────────────────────
+// All of it from REAL kilometres, never from the drawn frame: the orrery draws
+// the Moon at ~2 Earth radii instead of 60, so a shadow cone built in scene
+// units would be fiction. The shader then applies the result to whatever is
+// drawn — honest numbers, disclosed geometry (js/eclipse-geometry.js).
+//
+// THE PARENT'S OWN POSITION IS THE ONE APPROXIMATION. Earth's comes from
+// VSOP87D (exact enough that this reproduces the real lunar eclipse dates to
+// the half hour); every other planet rides the page's mean-motion circle, so
+// its heliocentric DIRECTION carries that model's equation-of-centre error —
+// up to a couple of degrees, which shifts an eclipse of a Galilean moon by a
+// fraction of an hour against Jupiter's 19°-wide disc. Stated, not hidden.
+const _mpSun = { x: 0, y: 0, z: 0 };
+const _mpBody = { x: 0, y: 0, z: 0 };
+function _updateMoonPhotometry(rec, kmPos) {
+    const u = rec.mesh.material.uniforms;
+    if (!u || !u.u_illum) return;
+    const parent = PARENT_BODIES[rec.parentKey];
+    if (!parent) return;
+
+    // Parent → Sun, in km, ecliptic.
+    let px, py, pz;
+    if (rec.parentKey === 'earth' && _earthTrueAU) {
+        px = _earthTrueAU.x * AU_KM; py = _earthTrueAU.y * AU_KM; pz = _earthTrueAU.z * AU_KM;
+    } else {
+        const m = rec.planet.mesh.position;         // drawn: direction is the model's
+        const len = Math.hypot(m.x, m.z) || 1;      // scene (x, z) is the ecliptic plane
+        const rkm = (rec.planet.dAU ?? 1) * AU_KM;
+        px = (m.x / len) * rkm; py = (m.z / len) * rkm; pz = 0;
+    }
+    // Vectors FROM the satellite, ecliptic km.
+    _mpSun.x = -px - kmPos.x; _mpSun.y = -py - kmPos.y; _mpSun.z = -pz - kmPos.z;
+    _mpBody.x = -kmPos.x; _mpBody.y = -kmPos.y; _mpBody.z = -kmPos.z;
+
+    // 1/r2 at the SATELLITE, not at its parent. The difference is the orbit
+    // radius over the heliocentric distance - 0.26% for the Moon, so this is
+    // not a visible correction; it is here because it costs one length that is
+    // already computed, and because a term that is exactly right needs no
+    // caveat attached to it downstream.
+    const rBodyKm = Math.hypot(_mpSun.x, _mpSun.y, _mpSun.z) || AU_KM;
+    u.u_illum.value = 1 / Math.pow(rBodyKm / AU_KM, 2);
+    // → SCENE axes (x, z, y), the swap helioToScene applies, so the shader's
+    // drawn normals and these real vectors share one frame.
+    u.u_sunFromBodyKm.value.set(_mpSun.x, _mpSun.z, _mpSun.y);
+    u.u_occFromBodyKm.value.set(_mpBody.x, _mpBody.z, _mpBody.y);
+    u.u_sunRadiusKm.value = SUN_RADIUS_KM;
+
+    // Planetshine: earthshine at the Moon, and its far brighter cousins at the
+    // inner moons of the giants. Brightest when the PARENT is full as seen from
+    // the satellite — which is when the satellite is new as seen from the
+    // parent. Nothing keys that; it falls out of the phase angle.
+    const shine = reflectedIrradianceFraction({
+        bodyFromPlanetKm: kmPos,
+        sunFromPlanetKm: { x: -px, y: -py, z: -pz },
+        planetRadiusKm: parent.r_km,
+        albedo: BODY_ALBEDO[rec.parentKey] ?? 0.3,
+    });
+    u.u_shine.value = shine;
+    u.u_shineDir.value.set(_mpBody.x, _mpBody.z, _mpBody.y).normalize();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -3207,12 +3374,33 @@ allMoonMeshes.forEach(m => meshes.push(m));
 let _lastClickMs = 0;
 let _lastClickName = '';
 
-function onPointerDown(e) {
+// ── A CLICK IS NOT THE START OF A DRAG ───────────────────────────────────────
+// Selection used to fire on POINTERDOWN, so every camera orbit that began over
+// the NEO population selected whatever was under the press and — through
+// selectBody() → setCamLock() — threw the camera into a lock on it. With tens
+// of thousands of objects on screen that reads as the page selecting at random,
+// which is exactly how it was reported. Selection now fires on POINTERUP, and
+// only when the pointer stayed inside CLICK_SLOP_PX for less than CLICK_MAX_MS
+// — the rule mars.html already learned (beginManualCamera() fires on a
+// CONFIRMED drag; a bare click is a selection, never a camera move).
+const CLICK_SLOP_PX = 6;      // a mouse press that wanders further belongs to the camera
+const TOUCH_SLOP_PX = 12;     // a finger never lands as still as a mouse
+const CLICK_MAX_MS  = 700;    // a longer press is a hold, not a click
+let _press = null;
+const _slopFor = (e) => (e.pointerType === 'touch' || e.pointerType === 'pen' ? TOUCH_SLOP_PX : CLICK_SLOP_PX);
+
+/** Writes `mouse` (NDC) from a pointer event; returns the canvas rect + client px. */
+function _pointerNdc(e) {
     const rect = renderer.domElement.getBoundingClientRect();
     const cx   = e.touches ? e.touches[0].clientX : e.clientX;
     const cy   = e.touches ? e.touches[0].clientY : e.clientY;
-    mouse.x = ((cx - rect.left)  / rect.width)  * 2 - 1;
+    mouse.x = ((cx - rect.left) / rect.width)  * 2 - 1;
     mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
+    return { rect, cx, cy };
+}
+
+function _selectAt(e) {
+    const { rect } = _pointerNdc(e);
     raycaster.setFromCamera(mouse, camera);
     const hits = raycaster.intersectObjects(meshes);
     if (hits.length > 0) {
@@ -3228,14 +3416,76 @@ function onPointerDown(e) {
         }
         _lastClickMs   = now;
         _lastClickName = name;
-    } else {
-        // No planet / moon under the cursor — try the NEO point clouds. The pick
-        // radius scales with camera distance so a dot is clickable at every zoom.
-        const nb = neoLayer.pick(raycaster, camera.position.distanceTo(controls.target));
-        if (nb) { neoLayer.select(nb.neoIndex); selectBody(nb); }
+        return;
     }
+    // No planet / moon under the cursor — ask the NEO layer what is, in PIXELS.
+    // (js/neo-layer.js pick(): the accept radius is the object's DRAWN radius.)
+    const nb = neoLayer.pick({ camera, raycaster, ndc: { x: mouse.x, y: mouse.y }, pixels: { w: rect.width, h: rect.height } });
+    if (nb) { const body = neoLayer.select(nb.index); if (body) selectBody(body); }
 }
+
+function onPointerDown(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;   // right / middle belong to the camera
+    _press = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), drag: false, slop: _slopFor(e) };
+    _hoverHide();
+}
+function onPointerMove(e) {
+    if (_press && e.pointerId === _press.id) {
+        if (Math.hypot(e.clientX - _press.x, e.clientY - _press.y) > _press.slop) _press.drag = true;
+        return;                                   // a drag in progress is the camera's
+    }
+    if (e.pointerType === 'mouse') _hoverProbe(e);
+}
+function onPointerUp(e) {
+    const p = _press;
+    _press = null;
+    if (!p || e.pointerId !== p.id || p.drag) return;
+    if (performance.now() - p.t > CLICK_MAX_MS) return;
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > p.slop) return;
+    _selectAt(e);
+}
+
+// ── Hover affordance ────────────────────────────────────────────────────────
+// The population is dark bodies a few pixels across (they are rocks, not point
+// sources — see the POINT_FS block in js/neo-layer.js), so "what am I about to
+// click?" has to be answerable BEFORE the click. Throttled to HOVER_MS: a pick
+// projects the whole loaded catalogue, which is sub-millisecond but not free,
+// and nothing about a hover needs to run at frame rate.
+const HOVER_MS = 70;
+const hoverTip = document.getElementById('neo-hover-tip');
+let _hoverAt = 0;
+
+function _hoverHide() {
+    if (hoverTip.style.display !== 'none') hoverTip.style.display = 'none';
+    renderer.domElement.style.cursor = '';
+    neoLayer.hover(null);
+}
+function _hoverProbe(e) {
+    const now = performance.now();
+    if (now - _hoverAt < HOVER_MS) return;
+    _hoverAt = now;
+    const { rect, cx, cy } = _pointerNdc(e);
+    raycaster.setFromCamera(mouse, camera);
+    if (raycaster.intersectObjects(meshes).length) {          // a planet has its own affordance
+        _hoverHide();
+        renderer.domElement.style.cursor = 'pointer';
+        return;
+    }
+    const nb = neoLayer.pick({ camera, raycaster, ndc: { x: mouse.x, y: mouse.y }, pixels: { w: rect.width, h: rect.height } });
+    if (!nb) { _hoverHide(); return; }
+    neoLayer.hover(nb.index);
+    renderer.domElement.style.cursor = 'pointer';
+    hoverTip.textContent = neoLayer.hoverText(nb.index);
+    hoverTip.style.display = 'block';
+    hoverTip.style.left = `${Math.min(cx + 14, window.innerWidth - hoverTip.offsetWidth - 12)}px`;
+    hoverTip.style.top  = `${Math.min(cy + 16, window.innerHeight - hoverTip.offsetHeight - 12)}px`;
+}
+
 renderer.domElement.addEventListener('pointerdown', onPointerDown);
+renderer.domElement.addEventListener('pointermove', onPointerMove);
+renderer.domElement.addEventListener('pointerup', onPointerUp);
+renderer.domElement.addEventListener('pointercancel', () => { _press = null; });
+renderer.domElement.addEventListener('pointerleave', () => { _press = null; _hoverHide(); });
 
 // "Open Earth Simulation" button in the Earth Space Weather panel
 document.getElementById('btn-goto-earth').addEventListener('click', () => navigateTo('earth.html'));
@@ -3772,8 +4022,28 @@ neoLayer.on('catalog', _renderNeoLedger);
 // Test / console hook (tests/solar-system-neo-smoke.spec.js reads this).
 window.__neoLab = {
     layer: neoLayer, panel: neoPanel, simDist, selectBody,
+    // The camera and the canvas are exposed so the browser gate can turn a
+    // drawn position into a PIXEL and click it — the pick contract is stated in
+    // pixels, so a test that cannot measure pixels cannot check it.
+    camera, canvas: renderer.domElement, THREE,
     get selectedBody() { return selectedBody; },
     get simJD() { return neoLayer._lastJd; },
+    // Test support: what the two pick paths see at a canvas pixel, WITHOUT
+    // dispatching anything. The browser gate uses it to CHOOSE a pixel (one
+    // with no planet on it, one with nothing on it at all); the assertions
+    // themselves always go through real pointer events.
+    probeAt(clientX, clientY) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const hit = raycaster.intersectObjects(meshes)[0];
+        const neo = hit ? null : neoLayer.pick({ camera, raycaster, ndc: { x: mouse.x, y: mouse.y }, pixels: { w: rect.width, h: rect.height } });
+        return {
+            planet: hit ? (hit.object === sunMesh ? 'Sun' : (hit.object.userData?.name ?? null)) : null,
+            neo: neo ? neo.index : null, px: neo ? neo.px : null, kind: neo ? neo.kind : null,
+        };
+    },
 };
 
 // Flare / active-region geometry as this page is DRAWING it — every consumer
@@ -3851,6 +4121,71 @@ window.__solarRender = {
         return { cx, cy, r: Math.hypot(ex - cx, ey - cy), w, h };
     },
     get flareStr() { return sunUniforms.u_flare_str.value; },
+    get moonKeys() { return moonRecords.map(r => r.key); },
+    /**
+     * What the light is doing at one drawn satellite, read straight off its
+     * live uniforms (tests/solar-system-moon-light.spec.js). Everything here
+     * is REAL kilometres — that is what the shader is handed, and it is the
+     * whole point: the orrery draws the Moon at ~2 R_E instead of 60, so a
+     * gate that measured the DRAWN separation would be checking the scale
+     * dishonesty rather than the physics. `lit` re-runs the kernel on exactly
+     * the vectors the shader has, so the test compares the page against
+     * js/eclipse-geometry.js and not against a remembered number.
+     */
+    moonLight(key) {
+        const rec = moonRecords.find(r => r.key === key);
+        if (!rec) return null;
+        const u = rec.mesh.material.uniforms;
+        if (!u || !u.u_illum) return null;
+        const v = (a) => [a.x, a.y, a.z];
+        return {
+            key: rec.key, parent: rec.parentKey,
+            isShader: rec.mesh.material.isShaderMaterial === true,
+            albedo: u.u_albedo.value, illum: u.u_illum.value, shine: u.u_shine.value,
+            bodyRadiusKm: u.u_bodyRadiusKm.value, occRadiusKm: u.u_occRadiusKm.value,
+            sunRadiusKm: u.u_sunRadiusKm.value, umbralT: u.u_umbralT.value,
+            sunFromBodyKm: v(u.u_sunFromBodyKm.value),
+            occFromBodyKm: v(u.u_occFromBodyKm.value),
+            shineDir: v(u.u_shineDir.value),
+            drawnSeparation: rec.mesh.position.distanceTo(rec.planet.mesh.position),
+        };
+    },
+    /**
+     * Put the camera WHERE A LUNAR ECLIPSE IS ACTUALLY OBSERVED FROM: just off
+     * the parent's surface, on the line to the satellite, looking at it. The
+     * gate needs this because no other vantage reproduces the observation —
+     * from outside, the drawn Earth (a whole scene unit wide beside a moon
+     * orbiting at ~2 R_E) occults the very thing being measured, and from the
+     * default framing the Sun is in front of the camera so the face on show is
+     * the night side. Standing on the parent puts the Sun BEHIND the observer,
+     * which is what makes a full Moon full.
+     *
+     * It also has to lower `controls.minDistance` (0.5, sized for planets)
+     * because OrbitControls CLAMPS the orbit radius on every update() — a
+     * camera written closer than the floor is silently pushed back out to it,
+     * and the measurement would then be of a 2-pixel moon.
+     *
+     * Leaves the camera in free mode. Returns the drawn disc in CSS pixels.
+     */
+    viewFromParent(key) {
+        const rec = moonRecords.find(r => r.key === key);
+        if (!rec) return null;
+        const mp = rec.mesh.position, pp = rec.planet.mesh.position;
+        const dir = new THREE.Vector3().subVectors(mp, pp).normalize();
+        cameraMode = 'free'; targetBody = null; _setModeUI?.();
+        controls.minDistance = 0.001;
+        camera.position.copy(pp).addScaledVector(dir, rec.planet.radius * 1.08);
+        controls.target.copy(mp);
+        controls.update();
+        camera.updateMatrixWorld();
+        const el = renderer.domElement, w = el.clientWidth, h = el.clientHeight;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+        const c = mp.clone().project(camera);
+        const e = mp.clone().addScaledVector(right, rec.mesh.geometry.parameters.radius).project(camera);
+        const cx = (c.x * 0.5 + 0.5) * w, cy = (-c.y * 0.5 + 0.5) * h;
+        const ex = (e.x * 0.5 + 0.5) * w, ey = (-e.y * 0.5 + 0.5) * h;
+        return { cx, cy, r: Math.hypot(ex - cx, ey - cy), w, h };
+    },
 };
 
 let _prevFrameMs = performance.now();
@@ -3918,7 +4253,17 @@ function animate() {
     // to the orbits and to the wind's own Parker spiral — measured 2026-09-13).
     sunMesh.rotation.y -= SUN_SPIN_SIGN * FG.OMEGA_SUN_SIDEREAL * _frameDt * simSpeed;
 
-    // ── Moon update (Keplerian for all moons; Yoshida-4 N-body for Galileans)
+    // Earth's TRUE position (VSOP87D, ecliptic of date). Computed HERE, above
+    // the moon update, because _updateMoonPhotometry reads it: one frame at
+    // 1 s/s is 16 ms and would not matter, but at warp a frame is days, and a
+    // shadow geometry built from where Earth was LAST frame would drift an
+    // eclipse by exactly the amount the user is scrubbing. The near-Earth
+    // object block further down reuses this same value.
+    const _earthNow = earthHeliocentric(_simJD);
+    _earthTrueAU = { x: _earthNow.x_AU, y: _earthNow.y_AU, z: _earthNow.z_AU };
+
+    // ── Moon update (Meeus series for our Moon, Keplerian for the rest;
+    // Yoshida-4 N-body for the Galileans) ────────────────────────────────────
     // Run the Jovian integrator first so the Galilean overrides are fresh.
     jovianNBody.advanceTo(_simJD);
     for (let i = 0; i < moonRecords.length; i++) {
@@ -3994,15 +4339,17 @@ function animate() {
     updateProminences(t, flareX);
 
     // ── Near-Earth objects ────────────────────────────────────────────────────
-    // Earth's TRUE position (VSOP87D, ecliptic of date) for the flyby geometry;
-    // the DRAWN Earth for where the local frame is anchored. Must run before the
+    // `_earthNow` (above) is Earth's TRUE position for the flyby geometry; the
+    // DRAWN Earth is where the local frame is anchored. Must run before the
     // camera block: a locked NEO's anchor is seated here.
     {
-        const _earthNow = earthHeliocentric(_simJD);
         neoLayer.update({
             jd: _simJD, earthOfDate: _earthNow, earthFn: earthHeliocentric,
             earthDrawn: earthP.mesh.position, t, simMs: _simDateNow.getTime(),
             camera, camDist: camera.position.distanceTo(controls.target),
+            // NEO bodies are drawn at their TRUE projected size, so the layer
+            // needs the drawing buffer's height in device pixels (not CSS px).
+            viewPx: renderer.domElement.height,
         });
         neoPanel.tick();
         if (selectedBody?.neoIndex != null && _nowMs - _neoCardMs > 500) { _neoCardMs = _nowMs; _renderNeoCard(selectedBody); }
