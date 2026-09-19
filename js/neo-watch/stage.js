@@ -750,7 +750,14 @@ export class NeoStage {
         this.sunPos = new THREE.Vector3(SUN_LIGHT_R, 0, 0);
         this.rocks = [];
         for (let i = 0; i < ROCK_POOL; i++) {
-            const mesh = new THREE.Mesh(new THREE.BufferGeometry(), rockMaterial(0x9a8f80, 0, this.sunPos));
+            // `sunPos` is load-bearing HERE and nowhere else: rockMaterial
+            // defaults the Sun to the world origin, which is right on the
+            // orrery and is EARTH on this stage — omit it and every rock is
+            // lit from the planet it is orbiting.
+            const mesh = new THREE.Mesh(
+                new THREE.BufferGeometry(),
+                rockMaterial(0x9a8f80, 0, { sunPos: this.sunPos }),
+            );
             mesh.visible = false;
             mesh.frustumCulled = false;
             this.scene.add(mesh);

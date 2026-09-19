@@ -22,6 +22,10 @@ import { precessionLongitudeRad, rotateAboutPole, LD_AU, R2D } from '../js/neo-o
  *   - the approach list selects an object, the data card fills, the camera
  *     lock anchor follows, and selecting a planet clears it again
  *   - the time controls move the population (a scrub is a real re-propagation)
+ *   - a CLICK selects what is under the cursor, a DRAG selects nothing and empty
+ *     sky selects nothing — the two halves of the "it picks NEOs at random" bug
+ *   - a HOVER names the body a click would take, and marks it
+ *   - the population is drawn as SUNLIT BODIES, not additive point sources
  *   - feeds down ⇒ the page says so, draws nothing, and raises no page error
  *
  * The flyby objects are SYNTHESISED at test time from the page's own VSOP87D
@@ -29,6 +33,10 @@ import { precessionLongitudeRad, rotateAboutPole, LD_AU, R2D } from '../js/neo-o
  * geometry assertion holds on any date the suite runs.
  */
 
+// Every in-test wait here is 45 s, matching waitForFrames: this page loads a
+// three-tier catalogue, spawns a worker and renders a full orrery on whatever
+// rasteriser CI has, and under parallel workers a single test was measured at
+// 37 s. A 20 s wait inside one of them is a coin flip, not a gate.
 const IGNORED_CONSOLE_ERRORS = [
     /fonts\.googleapis\.com/,
     /\/api\/telemetry\//,
@@ -134,12 +142,62 @@ async function openPage(page) {
     await page.waitForFunction(() => !!window.__neoLab, null, { timeout: 30_000 });
 }
 
-/** Population loaded AND at least one worker frame applied. */
+/**
+ * Population loaded AND at least one worker frame APPLIED to it. `rHelio` is
+ * the tell: a tier swap rebuilds every buffer and nulls the derived frames
+ * (_rebuildPoints), so `tiersPending` can empty a beat before the arrays the
+ * assertions read exist. Without this a test reads a half-swapped layer.
+ */
 async function waitForFrames(page) {
     await page.waitForFunction(() => {
         const L = window.__neoLab?.layer;
-        return !!L && L.count > 0 && L.frameJd != null && L.status.tiersPending.length === 0;
+        return !!L && L.count > 0 && L.frameJd != null && L.status.tiersPending.length === 0
+            && !!L.rHelio && !!L.rGeo;
     }, null, { timeout: 45_000 });
+}
+
+/**
+ * Every loaded object that is currently DRAWN, with its position in client
+ * pixels. The pick contract is stated in pixels (js/neo-layer.js pick()), so a
+ * gate that cannot measure pixels cannot check it.
+ */
+async function drawnPixels(page) {
+    return page.evaluate(() => {
+        const lab = window.__neoLab, L = lab.layer;
+        const r = lab.canvas.getBoundingClientRect();
+        const out = [];
+        for (let i = 0; i < L.count; i++) {
+            if (!(L._alpha[i] > 0.05) && !L._meshed.has(i)) continue;
+            const p = L.drawnPosition(i);
+            if (!p) continue;
+            const c = p.project(lab.camera);
+            if (!(c.z > -1 && c.z < 1)) continue;
+            out.push({ i, des: L.els[i].des,
+                x: r.left + (c.x * 0.5 + 0.5) * r.width,
+                y: r.top + (-c.y * 0.5 + 0.5) * r.height });
+        }
+        return out;
+    });
+}
+
+/**
+ * The most ISOLATED drawn object in the canvas's middle band that the page's own
+ * pick paths agree is there and is not behind a planet. Isolation matters: the
+ * assertion is about WHICH object a click takes, so a candidate with a neighbour
+ * a few pixels away would make a correct pick look like a wrong one.
+ */
+async function isolatedTarget(page) {
+    const pts = (await drawnPixels(page)).filter(p => p.x > 380 && p.x < 940 && p.y > 150 && p.y < 560);
+    const ranked = pts.map((a) => {
+        let near = Infinity;
+        for (const b of pts) if (b !== a) near = Math.min(near, Math.hypot(a.x - b.x, a.y - b.y));
+        return { ...a, near };
+    }).sort((a, b) => b.near - a.near).slice(0, 8);
+    for (const cand of ranked) {
+        const probe = await page.evaluate(([x, y]) => window.__neoLab.probeAt(x, y), [cand.x, cand.y]);
+        if (!probe.planet && probe.neo != null) return { ...cand, probe };
+    }
+    return null;
 }
 
 test.describe('solar-system.html — near-Earth objects', () => {
@@ -183,11 +241,20 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await mockJpl(page);
         await openPage(page);
         await waitForFrames(page);
-        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 45_000 });
 
-        const s = await page.evaluate(() => {
+        // ONE ATOMIC READ, retried until the layer is consistent — the third
+        // instance of the tier-swap race in this file. `_rebuildPoints` nulls
+        // `inZone` AND `closest` together and a later worker frame refills
+        // both, so a wait on inZone followed by a separate evaluate() can land
+        // in the gap and read `L.closest.index` off null. Waiting on the whole
+        // read is the only thing that closes it; retrying the assertion does
+        // not, because the exception happens inside the browser.
+        const s = await (await page.waitForFunction(() => {
             const L = window.__neoLab.layer;
             const idx3 = L.byDes.get('FLYBY-3LD'), idx30 = L.byDes.get('FLYBY-30LD');
+            if (!L.rGeo || !L._alpha || !L.closest || idx3 == null || idx30 == null) return null;
+            if (!L.els[L.closest.index]) return null;
             const ld = (i) => L.rGeo[i] / 0.0025695556;
             return {
                 closest: L.els[L.closest.index].des, closestLD: L.closest.dLD,
@@ -201,7 +268,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
                 ringNames: L.rings.map(r => r.line.name),
                 localAtEarth: L.localGroup.position.distanceTo(window.__neoLab.layer._earthDrawn) < 1e-9,
             };
-        });
+        }, null, { timeout: 45_000 })).jsonValue();
         expect(s.closest).toBe('FLYBY-3LD');
         expect(s.ld3).toBeGreaterThan(2.5); expect(s.ld3).toBeLessThan(3.5);
         expect(s.ld30).toBeGreaterThan(28); expect(s.ld30).toBeLessThan(32);
@@ -286,7 +353,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
             return { jd: L.frameJd, pos: [L._pos[i * 3], L._pos[i * 3 + 1], L._pos[i * 3 + 2]] };
         });
         await page.click('#tc-next-mo');
-        await page.waitForFunction((jd0) => window.__neoLab.layer.frameJd > jd0 + 25, before.jd, { timeout: 20_000 });
+        await page.waitForFunction((jd0) => window.__neoLab.layer.frameJd > jd0 + 25, before.jd, { timeout: 45_000 });
         const after = await page.evaluate(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('99942');
             return { jd: L.frameJd, pos: [L._pos[i * 3], L._pos[i * 3 + 1], L._pos[i * 3 + 2]] };
@@ -327,12 +394,12 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await mockJpl(page);
         await openPage(page);
         await waitForFrames(page);
-        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 45_000 });
         // A flyby 3 LD out is a lit rock mesh, and its sprite is suppressed.
         await page.waitForFunction(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
             return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible);
-        }, null, { timeout: 20_000 });
+        }, null, { timeout: 45_000 });
         const rocks = await page.evaluate(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
             const slot = L._rockSlots.find(sl => sl.index === i);
@@ -349,7 +416,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(rocks.tails).toBeGreaterThanOrEqual(1);
         // Selecting Apophis puts a rock at the lock anchor with its real (elongated) family and spin period.
         await page.evaluate(() => { const b = window.__neoLab.layer.selectByDes('99942'); window.__neoLab.selectBody(b); });
-        await page.waitForFunction(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible); }, null, { timeout: 20_000 });
+        await page.waitForFunction(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible); }, null, { timeout: 45_000 });
         const sel = await page.evaluate(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('99942'); const slot = L._rockSlots.find(sl => sl.index === i);
             return { atAnchor: slot.mesh.position.distanceTo(L.anchor.position) < 1e-6, shape: slot.shape, periodH: slot.spin.periodH,
@@ -361,7 +428,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(Math.abs(sel.bodyRadius - sel.scale)).toBeLessThan(1e-9);
         // Meteoroid streams are instanced rock meshes.
         await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
-        await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 20_000 });
+        await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 45_000 });
         const stream = await page.evaluate(() => { const r = window.__neoLab.layer._radiants[0]; return { code: r.code, instanced: !!r.rocks.mesh.isInstancedMesh, count: r.rocks.mesh.count, visible: r.rocks.mesh.visible }; });
         expect(stream.code).toBe('PER');
         expect(stream.instanced).toBe(true);
@@ -376,6 +443,285 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(after.mode).toBe('class');
         expect(after.rgb).not.toEqual(before.rgb);
         expect(after.rgb[0]).toBeGreaterThan(0.9);   // PHA red
+        expect(errors).toEqual([]);
+    });
+
+    test('a click selects what is under the cursor — a drag selects nothing, and empty sky selects nothing', async ({ page }) => {
+        // THE REPORTED BUG, twice over. Selection fired on pointerdown, so every
+        // camera orbit that began over the population selected whatever was
+        // under the press; and the pick radius was a WORLD-space threshold
+        // (0.012 x camera range) compared against distanceToRay, so a click on
+        // empty sky returned an object hundreds of pixels away. Together they
+        // read as the page selecting at random. Both are pinned here.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 45_000 });
+
+        // 1. A DRAG that starts on a body selects nothing — it belongs to the camera.
+        const dragFrom = await isolatedTarget(page);
+        expect(dragFrom, 'an isolated drawn object to drag from').not.toBeNull();
+        await page.mouse.move(dragFrom.x, dragFrom.y);
+        await page.mouse.down();
+        await page.mouse.move(dragFrom.x + 46, dragFrom.y + 34, { steps: 6 });
+        await page.mouse.up();
+        await page.waitForTimeout(400);
+        expect(await page.evaluate(() => window.__neoLab.layer.selectedIndex), 'a drag is a camera move, not a selection').toBeNull();
+
+        // 2. A click on empty sky selects nothing. The candidate is chosen with
+        //    probeAt (no planet, no NEO there); the assertion is a real click.
+        const pts = await drawnPixels(page);
+        let empty = null;
+        for (let x = 420; x <= 900 && !empty; x += 20) {
+            for (let y = 170; y <= 550 && !empty; y += 20) {
+                if (pts.some(p => Math.hypot(p.x - x, p.y - y) < 60)) continue;
+                const probe = await page.evaluate(([cx, cy]) => window.__neoLab.probeAt(cx, cy), [x, y]);
+                if (!probe.planet && probe.neo == null) empty = { x, y };
+            }
+        }
+        expect(empty, 'a patch of empty sky in the middle of the canvas').not.toBeNull();
+        await page.mouse.move(empty.x, empty.y);
+        await page.mouse.down(); await page.mouse.up();
+        await page.waitForTimeout(300);
+        expect(await page.evaluate(() => window.__neoLab.layer.selectedIndex), 'empty sky selects nothing').toBeNull();
+
+        // 3. A click ON a body selects THAT body — measured in pixels against the
+        //    positions as they were when the click was dispatched (selectBody()
+        //    locks the camera, which moves everything afterwards).
+        await page.waitForTimeout(400);
+        const target = await isolatedTarget(page);
+        expect(target, 'an isolated drawn object to click').not.toBeNull();
+        const before = await drawnPixels(page);
+        await page.mouse.move(target.x, target.y);
+        await page.mouse.down(); await page.mouse.up();
+        await page.waitForTimeout(400);
+        const sel = await page.evaluate(() => ({
+            index: window.__neoLab.layer.selectedIndex,
+            name: window.__neoLab.selectedBody?.name,
+            neoIndex: window.__neoLab.selectedBody?.neoIndex,
+        }));
+        expect(sel.index, 'a click on a body selects a body').not.toBeNull();
+        expect(sel.neoIndex).toBe(sel.index);
+        const hit = before.find(p => p.i === sel.index);
+        expect(hit, 'the selected object was on screen when it was clicked').toBeTruthy();
+        // The accept radius is the DRAWN radius plus GRAB_PX of grace; nothing
+        // further from the cursor than that may ever win.
+        expect(Math.hypot(hit.x - target.x, hit.y - target.y)).toBeLessThan(16);
+        expect(errors).toEqual([]);
+    });
+
+    test('hovering names the body a click would take, and marks it', async ({ page }) => {
+        // The population is dark bodies a few pixels across, so "what am I about
+        // to click?" has to be answerable before the click.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        await page.waitForFunction(() => window.__neoLab.layer._alpha.some(a => a > 0.05), null, { timeout: 45_000 });
+        const target = await isolatedTarget(page);
+        expect(target).not.toBeNull();
+        await page.mouse.move(target.x, target.y);
+        await page.waitForTimeout(250);
+        const hov = await page.evaluate(() => ({
+            index: window.__neoLab.layer.hoverIndex,
+            marker: window.__neoLab.layer.hoverMarker.visible,
+            tip: document.getElementById('neo-hover-tip').textContent,
+            shown: getComputedStyle(document.getElementById('neo-hover-tip')).display,
+            cursor: window.__neoLab.canvas.style.cursor,
+            selected: window.__neoLab.layer.selectedIndex,
+        }));
+        expect(hov.index).toBe(target.probe.neo);
+        expect(hov.marker).toBe(true);
+        expect(hov.shown).not.toBe('none');
+        expect(hov.tip).toContain(await page.evaluate((i) => window.__neoLab.layer.els[i].des, target.probe.neo));
+        expect(hov.cursor).toBe('pointer');
+        expect(hov.selected, 'a hover is not a selection').toBeNull();
+        // Off the body: the mark and the tooltip go away.
+        await page.mouse.move(target.x + 220, target.y + 150);
+        await page.waitForTimeout(250);
+        const off = await page.evaluate(() => ({
+            index: window.__neoLab.layer.hoverIndex,
+            marker: window.__neoLab.layer.hoverMarker.visible,
+            shown: getComputedStyle(document.getElementById('neo-hover-tip')).display,
+        }));
+        if (off.index == null) { expect(off.marker).toBe(false); expect(off.shown).toBe('none'); }
+        expect(errors).toEqual([]);
+    });
+
+    test('the population is drawn as sunlit bodies, not additive point sources', async ({ page }) => {
+        // "Shadows at a distance, not little lights." A rock reflects sunlight;
+        // it does not emit it. If this ever goes back to AdditiveBlending the
+        // population glows on its own again and 38 000 of them stack into a haze.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        // ONE ATOMIC READ, retried until the layer is consistent. The coma needs
+        // a WORKER FRAME, not just a loaded catalogue, and a tier swap rebuilds
+        // every attribute array from zero — so waiting for `_coma > 0` and THEN
+        // evaluating can still land on a freshly swapped layer and read the
+        // zeros back. Wait and read in the same tick. (Caught as a 1-in-30
+        // flake on exactly this assertion, twice.)
+        const draw = await (await page.waitForFunction(() => {
+            const lab = window.__neoLab, L = lab.layer, THREE = lab.THREE;
+            const m = L.points.material;
+            const iComet = L.byDes.get('2P'), iRock = L.byDes.get('433');
+            if (iComet == null || iRock == null || !L._coma || !L._albedo || !L._alpha) return null;
+            if (!(L._coma[iComet] > 0)) return null;      // no frame applied to THIS array yet
+            const albedo = Array.from(L._albedo.slice(0, L.count));
+            return {
+                blending: m.blending, normal: THREE.NormalBlending, additive: THREE.AdditiveBlending,
+                premultiplied: m.premultipliedAlpha, depthWrite: m.depthWrite,
+                sameMaterial: L.localPoints.material === m,
+                attrs: Object.keys(L.points.geometry.attributes).sort(),
+                albedoMin: Math.min(...albedo), albedoMax: Math.max(...albedo),
+                cometAlbedo: L._albedo[iComet], cometComa: L._coma[iComet],
+                rockAlpha: L._alpha[iRock],
+                fs: m.fragmentShader, vs: m.vertexShader,
+            };
+        }, null, { timeout: 45_000 })).jsonValue();
+        // Not a light source.
+        expect(draw.blending).toBe(draw.normal);
+        expect(draw.blending).not.toBe(draw.additive);
+        expect(draw.premultiplied).toBe(true);
+        expect(draw.depthWrite).toBe(false);
+        expect(draw.sameMaterial, 'both frames draw the same kind of body').toBe(true);
+        // A lit body, shaded from the Sun at the scene origin.
+        expect(draw.vs).toContain('viewMatrix * vec4(0.0, 0.0, 0.0, 1.0)');
+        expect(draw.fs).not.toContain('spikes');          // the diffraction cross of a point source
+        // LOMMEL–SEELIGER, not Lambert: μ₀/(μ₀+μ) is the airless-regolith law,
+        // and it is what makes a body read as a disc instead of a shiny ball.
+        // The law itself lives ONCE, in js/airless-body.js AIRLESS_GLSL, and is
+        // interpolated into this shader — so a moon and a NEO of the same albedo
+        // at the same distance are shaded by the same lines of code. Assert on
+        // the shared definition and its call, not on a copy of the expression.
+        expect(draw.fs).toContain('float lommelSeeliger(float mu0, float mu)');
+        expect(draw.fs).toContain('lommelSeeliger(mu0, mu)');
+        // THE DISC-INTEGRATED H–G FUNCTION MUST NOT MULTIPLY THE BRDF. Φ(α) is
+        // what a whole unresolved disc returns — it ALREADY contains the
+        // terminator that Lommel–Seeliger is drawing here, so applying both
+        // darkens a crescent twice, which is why the earlier version needed an
+        // HG_ALPHA_MAX clamp to stop backlit bodies vanishing entirely. What a
+        // BRDF legitimately misses is the shadow-hiding OPPOSITION SURGE, and
+        // that is the one phase term the render path keeps (Hapke B(α) =
+        // 1 + B₀/(1 + tan(α/2)/h)). phaseHG survives in the kernel, where
+        // apparentMagnitudeV needs exactly the disc-integrated quantity.
+        expect(draw.vs).toContain('oppositionSurge');
+        expect(draw.vs).not.toContain('phaseHG');
+        expect(draw.vs).not.toContain('HG_ALPHA_MAX');
+        // Size is a RADIUS put through the projection, not a magnitude curve.
+        expect(draw.attrs).toContain('aRadius');
+        expect(draw.attrs).toContain('aIllum');
+        expect(draw.attrs).not.toContain('aG');
+        expect(draw.attrs).not.toContain('aSize');
+        // Earth's shadow and Earth's reflected light are per-body scalars — the
+        // far field cannot be inside a 1.38 M km umbra, so they are only ever
+        // non-trivial on the Earth-anchored local frame, but the attribute has
+        // to exist on both or the two frames are not the same material.
+        expect(draw.attrs).toContain('aShadow');
+        expect(draw.attrs).toContain('aShine');
+        expect(draw.vs).toContain('projectionMatrix[1][1]');
+        // Albedo is the taxonomy's, and a comet nucleus is among the darkest.
+        // The attribute is a Float32Array, so 0.04 reads back as 0.0399999991 —
+        // compare with a tolerance, not against the literal.
+        expect(draw.albedoMin).toBeGreaterThan(0.039);
+        expect(draw.albedoMax).toBeLessThan(0.46);
+        expect(draw.cometAlbedo).toBeCloseTo(0.04, 3);
+        expect(draw.cometComa, '2P/Encke at perihelion has a coma').toBeGreaterThan(0);
+        // Alpha is visibility, not magnitude: a drawn body is opaque.
+        expect(draw.rockAlpha).toBeCloseTo(1, 5);
+        expect(errors).toEqual([]);
+    });
+
+    test('photometry is the kernel\'s: albedo, phase slope, inverse-square light, and a size that is an angle', async ({ page }) => {
+        // THE ACCURACY CONTRACT. Everything about how a body looks is derived
+        // from published quantities through js/neo-orbits.js, and this asserts
+        // the page agrees with the kernel object by object — not that it renders
+        // some remembered pixel value.
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        await page.waitForFunction(() => {
+            const L = window.__neoLab.layer;
+            return L.rHelio && L._illum && L._illum.some(v => v !== 1);
+        }, null, { timeout: 45_000 });
+
+        const K = await import('../js/neo-orbits.js');
+        // ONE ATOMIC READ, retried until the layer is consistent. A tier swap
+        // rebuilds the attribute arrays and nulls rHelio mid-flight, so a plain
+        // evaluate() can land on a half-swapped layer (caught as a 1-in-4 flake
+        // reading rHelio[i] off null).
+        const objs = await (await page.waitForFunction(() => {
+            const L = window.__neoLab.layer;
+            if (!L.rHelio || !L._albedo || !L._illum || !L._radius) return null;
+            const out = {};
+            for (const des of ['433', '101955', '2P', '3200']) {
+                const i = L.byDes.get(des);
+                if (i == null || !L.els[i]) continue;
+                out[des] = { i, albedo: L._albedo[i], illum: L._illum[i], radius: L._radius[i],
+                    rHelio: L.rHelio[i], el: { H: L.els[i].H, diam: L.els[i].diam, spec: L.els[i].spec ?? null,
+                        albedo: L.els[i].albedo ?? null, flags: L.els[i].flags } };
+            }
+            return Object.keys(out).length >= 3 ? out : null;
+        }, null, { timeout: 45_000 })).jsonValue();
+        expect(Object.keys(objs).length).toBeGreaterThanOrEqual(3);
+        for (const [des, o] of Object.entries(objs)) {
+            const optics = K.opticalProperties(o.el);
+            expect(o.albedo, `${des} albedo is the kernel's`).toBeCloseTo(optics.albedo, 5);
+            // The kernel still publishes a per-object H–G slope and still uses
+            // it for apparentMagnitudeV; the RENDER deliberately does not carry
+            // it (see the opposition-surge note above), so there is no longer a
+            // `_G` array to compare — assert the kernel's own value instead.
+            expect(optics.G, `${des} has a published phase slope`).toBeGreaterThan(0);
+            // Illumination is the inverse-square law in the units H is defined
+            // in: (1 AU / r)². Uniform light was the bug this replaces.
+            expect(o.illum, `${des} is lit as 1/r²`).toBeCloseTo(1 / (o.rHelio * o.rHelio), 4);
+            // The drawn radius is the SAME diameter the mesh pool uses, and the
+            // diameter is derived through THIS object's albedo when unmeasured.
+            const km = K.diameterKm(o.el, optics).km;
+            expect(o.radius, `${des} radius is drawnRockRadius(diameterKm)`).toBeCloseTo(0.010 + 0.011 * Math.log10(1 + 10 * km), 5);
+        }
+        // A dark body is derived BIGGER from the same H — the albedo is inside
+        // the square root, and assuming 0.14 for everything is what shrank them.
+        expect(K.diameterKm({ H: 20, spec: 'C' }).km).toBeGreaterThan(K.diameterKm({ H: 20, spec: 'S' }).km);
+
+        // ── Size is an ANGLE, and the LOD handoff is continuous ──────────────
+        // The impostor and the mesh that replaces it must subtend the same
+        // angle, or a body jumps size as it crosses ROCK_RANGE. The mesh's
+        // projected diameter is measured here from its own world geometry, so
+        // this is not the layer's mirror checking itself.
+        await page.evaluate(() => { const b = window.__neoLab.layer.selectByDes('99942'); window.__neoLab.selectBody(b); });
+        await page.waitForFunction(() => {
+            const L = window.__neoLab.layer, i = L.byDes.get('99942');
+            return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible);
+        }, null, { timeout: 45_000 });
+        const lod = await page.evaluate(() => {
+            const lab = window.__neoLab, L = lab.layer, THREE = lab.THREE;
+            const i = L.byDes.get('99942');
+            const slot = L._rockSlots.find(sl => sl.index === i);
+            const cam = lab.camera, h = lab.canvas.getBoundingClientRect().height;
+            cam.updateMatrixWorld();
+            // Project the mesh's own limb: centre ± radius along the camera RIGHT
+            // vector, so the measurement is perpendicular to the view axis.
+            const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).normalize();
+            const c = slot.mesh.position.clone();
+            const a = c.clone().addScaledVector(right, -slot.mesh.scale.x).project(cam);
+            const b = c.clone().addScaledVector(right, slot.mesh.scale.x).project(cam);
+            const meshPx = Math.abs(b.x - a.x) * 0.5 * lab.canvas.getBoundingClientRect().width;
+            // The impostor's size for the SAME object at the SAME depth.
+            const view = c.clone().applyMatrix4(cam.matrixWorldInverse);
+            const scale = (cam.projectionMatrix.elements[5] * h * 0.5) / Math.max(-view.z, 1e-6);
+            const spritePx = 2 * L._radius[i] * scale;
+            return { meshPx, spritePx, radius: L._radius[i], meshRadius: slot.mesh.scale.x };
+        });
+        // (float32 attribute vs float64 mesh scale — the two agree to the
+        // attribute's own precision, which is the most that can be asked.)
+        expect(lod.meshRadius, 'the mesh is scaled to the same drawn radius').toBeCloseTo(lod.radius, 7);
+        expect(lod.meshPx).toBeGreaterThan(2);
+        // Same angle, to within the projection's own perspective asymmetry.
+        expect(Math.abs(lod.spritePx - lod.meshPx) / lod.meshPx, 'sprite and mesh subtend the same angle').toBeLessThan(0.06);
         expect(errors).toEqual([]);
     });
 

@@ -94,10 +94,32 @@ through it.
   seeded phase), so warp and scrub stay honest. Rocks light themselves from
   the Sun direction (the page's PointLight decays physically and leaves 1 AU
   dim) — same convention as the page's planet shader.
-- **Sprites for the far field only**, sized and brightened by absolute
-  magnitude, additive Gaussian PSF with a faint diffraction cross on the
-  brightest, NATURAL S/C-type tints by default (PHAs warm-biased) with the
-  class palette behind a "Colour by class" toggle.
+- **The far field is the SAME BODY, drawn as a sphere impostor** (2026-09-18).
+  It used to be an additive Gaussian PSF with a diffraction cross — the
+  rendering convention for a point SOURCE of light. Three things followed: the
+  population glowed on its own, tens of thousands of additive sprites stacked
+  into an orange haze, and an object CHANGED SPECIES as it crossed `ROCK_RANGE`
+  into a Lambert-shaded mesh. `POINT_VS` / `POINT_FS` now shade the visible
+  hemisphere with the same terms as `ROCK_FS`. The Sun is the scene origin, so
+  the vertex shader has the exact solar direction in view space for free
+  (`viewMatrix * vec4(0,0,0,1)`), and **the phase angle is real** — an object
+  between the camera and the Sun is a crescent, one at opposition a full disc;
+  nothing is keyed to it. Blending is **normal, premultiplied**, so a body in
+  front of the Sun is a SILHOUETTE and no number of bodies can add up to a glow.
+  Tone is `aAlbedo` — MEASURED where JPL publishes one, else the taxonomic class
+  mean (§2d), never a hash of the designation.
+  **The magnitude-derived ALPHA is gone**: H is size *and* albedo, both of which
+  the body now carries honestly, and as an opacity it made a faint rock a
+  see-through one the moment the blend stopped being additive. Alpha is
+  visibility and the local-frame cross-fade, nothing else. NATURAL S/C-type
+  tints stay the default, the class palette stays behind "Colour by class".
+- **A comet's coma is the one thing here that may glow.** `aComa` carries its
+  1/r² strength (the tails' own law) and the nucleus stays the dark body it is —
+  the sprite no longer swells to fake a coma.
+- **Attention is a RETICLE, never a halo.** Flybys within ±7 d, in-zone objects
+  and the hovered body wear a hairline ring outside the limb, breathing in
+  OPACITY (a size pulse reads as a body that changes size). A halo says "this
+  object is bright"; a ring says "the page is pointing at it".
 - **Comets grow tails**: ion tail straight anti-sunward (exact — the Sun is
   the scene origin), dust tail lagging the motion with a t² curve, lengths
   and coma ∝ 1/r² inside 3.5 AU; the nucleus mesh gets a self-lit haze.
@@ -112,8 +134,214 @@ through it.
 - **Sizes are a disclosed log map** (`drawnRockRadius`): a 30 m rock and Eros
   differ 500× in reality and ~4× on screen. Never used for physics.
 
+## 2c. Interaction (2026-09-18, the "it selects at random" pass)
+
+- **A click is not the start of a drag.** Selection fired on `pointerdown`, so
+  every camera orbit that began over the population selected whatever was under
+  the press and — through `selectBody()` → `setCamLock()` — threw the camera
+  into a lock on it. It now fires on `pointerup`, and only when the pointer
+  stayed inside `CLICK_SLOP_PX` (6 px, or `TOUCH_SLOP_PX` 12 for a finger or a
+  pen — a touch never lands as still as a mouse) for less than `CLICK_MAX_MS`
+  (700). Same rule mars.html already carries: a confirmed drag is the camera's,
+  a bare click is a selection. Right and middle buttons never select.
+- **Picking is measured in PIXELS.** `pick()` takes `{ camera, ndc, pixels }`
+  and the accept radius is THE DRAWN RADIUS — `gl_PointSize / 2` plus `GRAB_PX`
+  of grace for a 2 px body. It cannot drift from what is drawn, because the
+  attenuation clamp, both pads and the pixel floor live once in `SPRITE` and are
+  interpolated into the GLSL, and `drawnPx()` is the JS mirror of `POINT_VS`
+  (`clip.w` IS −viewZ for a perspective camera — the exact term the vertex
+  shader attenuates by). The rule a visitor can learn: you can click what you
+  can see, and only what you can see.
+- **Rock meshes are picked first, and exactly.** A body close enough to be drawn
+  as a shaped rock was previously not clickable at all: only the two point
+  clouds were in the pick set, and a meshed object's sprite is suppressed
+  (`_meshed` ⇒ alpha 0), so the one object on screen with a real silhouette was
+  the one thing a click could not hit.
+- **Hover answers "what am I about to click?"** before the click, because the
+  population is dark bodies a few pixels across. `hover(index)` seats the same
+  reticle the selection uses (dimmer), `hoverText(index)` fills `#neo-hover-tip`
+  — `position: fixed` (it is placed from clientX/clientY) and
+  `pointer-events: none` (a tooltip that can be hovered steals the pointermove
+  keeping it alive). Throttled to 70 ms: a pick projects the whole loaded
+  catalogue, which is sub-millisecond but not free, and no hover needs frame rate.
+
+## 2d. Photometry (2026-09-18, the "more visual accuracy" pass)
+
+Everything about how a body looks is now derived from published quantities
+through the kernel, and `tests/solar-system-neo-smoke.spec.js` asserts the page
+agrees with `js/neo-orbits.js` object by object.
+
+- **Drawn size is a TRUE PROJECTED SIZE.** `aRadius` is `drawnRockRadius` of the
+  object's diameter, put through the perspective division in `POINT_VS`
+  (`projectionMatrix[1][1]`, which is 1/tan(fov/2)), floored at `SPRITE.minPx`
+  where it falls below a pixel. **The attenuation curve it replaced saturated at
+  both ends** — `clamp(u_att / viewDepth, 0.55, 2.30)` is at its ceiling for
+  anything closer than ~13 scene units and at its floor past ~54, so a whole
+  framing came out as one wall of same-size rocks and depth did not read at all.
+  It also means the impostor and the mesh that replaces it inside `ROCK_RANGE`
+  **subtend the same angle**, so nothing jumps size across the LOD line; the
+  browser gate measures the mesh's own projected limb and compares.
+- **The scattering law is LOMMEL–SEELIGER, not Lambert.** Single scattering off
+  a dark particulate regolith, ∝ μ₀/(μ₀+μ): nearly FLAT across the disc where a
+  Lambertian sphere darkens toward the limb. This is the difference between a
+  body that reads as a disc and one that reads as a shiny ball — it is why the
+  full Moon looks like a disc. Both the impostor and the rock meshes use it.
+- **The phase term in the RENDER is the Hapke opposition surge, NOT H–G.**
+  *(Superseded 2026-09-19 — see §2e. The original version of this bullet used
+  the IAU H–G law here, held past α = 120° by an `HG_ALPHA_MAX` clamp. That
+  clamp was a symptom: Φ(α) is the DISC-INTEGRATED return of an unresolved
+  body, so it already contains the terminator that Lommel–Seeliger is drawing,
+  and multiplying the two darkened a crescent twice — which is why backlit
+  objects vanished and needed rescuing with a floor. `phaseHG` stays in the
+  kernel, where `apparentMagnitudeV` wants exactly the disc-integrated
+  quantity.)*
+- **Illumination falls as 1/r².** `aIllum` is (1 AU / r)² from the worker's own
+  heliocentric distance, so an object at 3 AU is 9× darker than the same object
+  at 1 AU. Before this, everything was lit as though it sat at Earth's distance.
+- **Albedo and taxonomy are MEASURED where JPL has them.** `opticalProperties`
+  returns the measured albedo when the archive published one, else the class
+  mean from `TAXONOMY` (Tholen/Bus–DeMeo means: C 0.06, S 0.20, V 0.36, E 0.45,
+  D 0.04, cometary nucleus 0.04), else the IAU defaults — and reports WHICH in
+  `measured`. The panel prints the coverage. **The albedo is load-bearing twice
+  over**: it sets the tone, and it sets the size, because D = 1329/√p·10^(−H/5)
+  — assuming 0.14 for a C-type draws it √(0.14/0.06) = 1.53× too small.
+- **The optional columns can never take the catalogue down.** `albedo` /
+  `spec_B` / `spec_T` are UNVERIFIED spellings on an egress-blocked API, and a
+  `fields` list JPL does not recognise is rejected whole. `SBDB_FIELDS` is
+  therefore split core / photometry, and `api/neo/catalog.js` retries once
+  without the optional list on a 4xx, self-reporting `photometry_fields:
+  'dropped'`. One production request settles it.
+- **Level carries a DISCLOSED display normalisation** (`SPRITE.gain`,
+  `SPRITE.stretch`): the population spans several decades of reflected radiance
+  and no linear gain shows both ends. Neither constant changes anything
+  relative. Shape from Lommel–Seeliger and level from H–G is a rendering
+  approximation, not a self-consistent Hapke model, and the header says so.
+- **Opacity rises with the light the body returns** (floor 0.30). The drawn disc
+  is inflated by the log size map — `drawnRockRadius` draws a 1 km rock at about
+  2 000 km — so a fully opaque backlit body punched a solid black hole in the
+  sky, occulting a patch thousands of times larger than the real object could.
+  The floor keeps a body crossing a bright background reading as a shadow.
+- **The data card reports V, exactly.** `apparentMagnitudeV(H, r, Δ, α, G)` with
+  r, Δ and α from the propagated vectors — the magnitude AS SEEN FROM EARTH, not
+  from the drawn scene. At r = Δ = 1 AU, α = 0 it returns H, which is the
+  definition and what the kernel gate asserts.
+
+## 2e. The Earth–Moon system (2026-09-19, the "Earth and Moon realism" pass)
+
+The near-Earth objects got published photometry in §2d and then sat beside a
+Moon that was a light-grey PBR ball on a fixed-element ellipse. This pass put
+the satellites on the same physics and fixed what the orrery believed about
+where our Moon is.
+
+**Two new modules, both shared with the NEO layer.**
+
+- `js/airless-body.js` — ONE copy of how a sunlit airless body is shaded:
+  `AIRLESS_GLSL` (Lommel–Seeliger, the Hapke shadow-hiding opposition surge, the
+  disclosed display compression, and the GLSL mirror of the occultation kernel),
+  plus `airlessSphereMaterial()` for resolved spheres. `js/neo-rocks.js`,
+  `js/neo-layer.js` and every satellite on `solar-system.html` interpolate the
+  same text, so a moon and a rock of the same albedo at the same distance render
+  identically. The browser gate asserts on the shared definition, never on a
+  copy of the expression.
+- `js/eclipse-geometry.js` — PURE, no three.js: circle–circle occultation in
+  closed form, `shadowIllumination()`, the Lambert-sphere phase law and
+  `reflectedIrradianceFraction()` for planetshine, `umbraLengthKm()`, and the
+  `BODY_ALBEDO` table (planets + 34 satellites). **It never reads a DRAWN
+  position** — every input is real kilometres, because the orrery draws the Moon
+  at ~2 R_E instead of 60 and a shadow cone in scene units would be fiction that
+  still looked right in a screenshot.
+
+**What changed on the page.**
+
+- **Satellites carry their published geometric albedo**, from `BODY_ALBEDO`, and
+  the data card prints it. The Moon is 0.120 — darker than worn asphalt — where
+  the old `0xc8c2b8` base colour drew it about six times too bright; Enceladus is
+  1.375 (a geometric albedo above 1 is a backscatter ratio, not an energy
+  budget, and the card says so); Phobos is 0.071.
+- **Illumination is 1/r² at the SATELLITE's own true heliocentric distance**, so
+  Io is ~27× dimmer than the Moon. The decaying `PointLight` this replaced left
+  the Galileans at ~1.6 % of Earth's light and all but black. It is evaluated at
+  the satellite and not at its parent — 0.26 % at the Moon, invisible, but a term
+  that is exactly right needs no caveat downstream, and the equality is what the
+  gate uses to say which one the page used.
+- **Eclipses are evaluated PER FRAGMENT at the body's real radius offset**, which
+  is what puts the occulter's CURVED shadow edge across the disc during a
+  partial. Totality is not black: `UMBRAL_TRANSMISSION` (0.012) and
+  `UMBRAL_TINT` are the disclosed constants standing for sunlight refracted
+  through the occulter's atmosphere — which is why a totally eclipsed Moon is
+  copper and not invisible. The far-field NEO impostors get a CPU scalar instead
+  (`aShadow`): only the in-zone set can be inside a 1.38 M km umbra at all.
+- **Planetshine** (`u_shine`, `u_shineDir`) is its own Lommel–Seeliger lobe from
+  the parent's direction, so the night side is lit from the right quarter of the
+  sky rather than by a flat ambient. Nothing keys it to the lunar month; it falls
+  out of the phase angle. **The `wrap` scattered-fill term in `ROCK_FS` went away
+  with it** — a flat 6 % wrap-around was standing in for light that, in deep
+  space, is not there; where a body genuinely does have light on its night side
+  it now comes from a named source, and where it does not, the rim term is what
+  keeps a dark limb legible against black. Do not restore the fill.
+- **The display constants have ONE home.** `AIRLESS_DISPLAY.gain` / `.stretch`
+  are imported by `SPRITE` in `js/neo-layer.js` and by `rockMaterial`, and
+  `SUN_RADIUS_KM` by both materials — what makes "a moon and a rock of the same
+  albedo at the same distance render identically" a fact about the code and not
+  a coincidence between hand-tuned numbers that happen to match today.
+
+**THE MOON IS NOT A FIXED-ELEMENT ELLIPSE.** This is the finding that made the
+eclipse work possible, and it had been wrong on the page for its whole life:
+
+- `propagateMoonKepler` holds a, e, i, Ω, ω at their J2000 values, but the lunar
+  node regresses a full turn in 18.6 years and the perigee advances one in 8.85.
+  A quarter-century on, both are most of a revolution out.
+- On top of that, the generic satellite path rotates parent-EQUATORIAL elements
+  into the ecliptic by the parent's obliquity — and the Moon's table entry
+  (`raan_deg: 125.08`) is already ECLIPTIC, so it was being tilted an extra
+  23.44° it does not have.
+- **Neither error is visible in a still frame.** The Moon still orbited Earth at
+  the right distance and the right rate. It shows up only where the page claims
+  to know where the Moon *is*: no lunar eclipse landed anywhere near its real
+  date, in a simulation driven by real ephemerides throughout.
+- The Moon now uses `moonGeocentric` (Meeus ch. 47) from `js/horizons.js` — the
+  series the NEO layer's Earth-local frame, the mission planner and the
+  heliosphere view already run on, so there is ONE lunar position for the site.
+  It reproduces the four 2025–26 umbral eclipses to within the half hour. Every
+  other satellite keeps the Kepler path: no comparable series exists for them
+  here, their host planets ride mean-motion circles anyway, and the page makes no
+  timing claim about them.
+- The drawn orbit ring is re-sampled from the same series (`_refreshMoonRing`,
+  one sidereal month centred on the clock, rebuilt at most every quarter day) —
+  otherwise the Moon leaves the ellipse it is drawn on.
+
+**Gates.** `node tests/eclipse-geometry.mjs` (lens regimes vs Monte-Carlo, umbra
+length, the four published eclipses reproduced from the page's own ephemerides,
+earthshine against the real lunar month) and
+`npx playwright test tests/solar-system-moon-light.spec.js` (shared shader,
+published albedo, 1/r², real-kilometre uniforms, a screenshot-measured copper
+totality, and emergent earthshine phase). `js/airless-body.js` is in the
+`tests/solar-system-tone.spec.js` file list and the shader count moved 15 → 16.
+
 ## 3. Scars (each was a bug during the build)
 
+- **The phase angle was measured at the wrong vertex** (2026-09-19).
+  `reflectedIrradianceFraction` took the angle AT THE RECEIVING BODY between its
+  direction to the Sun and its direction to the planet. The phase angle is
+  measured at the ILLUMINATED body — Sun–planet–body — and because the satellite
+  is very close to its planet compared with the Sun, the two are almost exactly
+  π apart. The term was inverted end to end: earthshine came out brightest at
+  FULL moon, which is precisely when no one has ever seen it, and vanished at new
+  moon, which is the only time anyone has. **The kernel's own unit test encoded
+  the same mistake in its comment** ("Sun opposite the Moon ⇒ FULL Earth from
+  the Moon") and passed, so it was the BROWSER gate — which measures where in the
+  lunar month the maximum lands — that caught it. The node test now drives a
+  synodic month of real ephemerides and asserts the peak is at an elongation
+  under 15°.
+- **`POINT_FS` used the shared functions without including them.** `AIRLESS_GLSL`
+  was interpolated into the vertex shader and `ROCK_FS` but not the point
+  fragment shader, so the program failed to LINK and the entire NEO population
+  stopped drawing. Caught by `tests/solar-system-tone.spec.js`, which fails on
+  any console error while it measures — not by anything looking at the NEO layer.
+- **A backtick in a `/* glsl */` comment, twice more.** Writing `` `sep` `` and
+  `` `aShadow` `` in a shader comment terminated the template literal and the
+  rest of the shader became JavaScript. The repo's own CLAUDE.md warns about
+  exactly this; it is still the easiest way to break the page.
 - **TDZ abort.** `NeoPanel` renders synchronously in its constructor and
   reads the page's sim clock; instantiated before `let _ephemEpoch` it threw
   a `ReferenceError` that aborted the WHOLE page module (no animate loop, no
@@ -123,6 +351,21 @@ through it.
   a dozen flyby labels stacked on the Earth disc. Ring labels show when the
   1 LD ring subtends > 2 % of the view, object labels when the 20 LD ring
   subtends > 8 %; the selected object never gets a second local label.
+  **That was necessary and not sufficient** — the gate decides WHETHER the class
+  of labels is drawn, not whether any two of them collide, and with Earth in
+  front of the Sun a dozen of them still stacked across the glare (2026-09-18,
+  reported from a live screenshot). The cap is now `LOCAL_LABEL_MAX` = 8 AND a
+  screen-separation test: `_labelClear()` projects each candidate and drops it
+  if it lands within `LABEL_SEP_NDC` of one already placed — nearest object
+  first, so the closer one keeps its label. Separation is in NDC because the
+  labels are `sizeAttenuation:false` sprites, i.e. sized as a fraction of the
+  VIEW. What is dropped is not lost: hover names it. **Off-screen is not a
+  conflict** — an early version also culled labels outside the frustum, which
+  made the label set depend on the framing, churned a canvas raster on every pan
+  and turned the local-frame browser gate flaky. The pass re-runs on camera
+  motion as well as on a worker frame, throttled — otherwise orbiting with the
+  SIM PAUSED never re-places anything, because the frame that normally does it
+  never arrives.
 - **Label re-raster per worker frame.** A flyby label's text carries its
   distance, which changes every frame at warp speed; rebuilding a canvas
   texture per frame × 12 labels was the most expensive thing on the page.
@@ -132,8 +375,15 @@ through it.
 - **"(2024 YR4)" ≠ "2024 YR4".** SBDB's `full_name` for unnamed objects is
   the designation in parentheses; the "same as designation → ship null"
   byte-saver has to strip them.
-- **Points raycast sorts along the ray, not across it.** `pick()` re-sorts
-  hits by `distanceToRay` so a click means "nearest the cursor".
+- **Points raycast sorts along the ray, not across it.** The first `pick()`
+  re-sorted hits by `distanceToRay` so a click meant "nearest the cursor" —
+  which is still the right idea and still the wrong measure. `distanceToRay` is
+  a perpendicular distance in SCENE units, and the threshold it was compared
+  against (0.012 × the camera range) is a world-space radius: on a log radial
+  scale that is a fraction of a pixel out at Neptune and a third of the screen a
+  few hundredths of a unit from the eye. A click on empty sky routinely returned
+  an object hundreds of pixels away, which is what "it selects random NEOs"
+  looks like from the outside. Measure in pixels (§2c).
 - **"Earth View" did not look at Earth.** The page's preset was a fixed
   camera aimed at the +X axis, where Earth sits in late September; on any
   other date it framed empty space (the Geminids capture on Dec 14 showed
@@ -144,12 +394,44 @@ through it.
   gives 162 vertices, not 642; the rocks use 7 (1280 faces).
 - **A label that follows the sprite's alpha disappears when a mesh stands
   in.** Flyby labels follow the local-frame weight only.
+- **A sprite that is a light and a mesh that is a rock are two different
+  objects.** The LOD line was also a species line: an additive PSF out here, a
+  sunlit body up close. Nothing failed — it just quietly said the population
+  emits light. One lighting model now spans both (§2b).
+- **`gl_PointCoord.y` runs DOWN the screen.** The impostor's normal is built in
+  VIEW space, where +y is up, so the sphere normal is `vec3(q.x, -q.y, …)`. With
+  the sign wrong the terminator tilts the wrong way and the crescent points at
+  the wrong side of the sky — a picture that still looks plausible.
+- **The pad in `POINT_VS` and the `bodyR` in `POINT_FS` were one number in two
+  places.** The quad grows to make room for the reticle and the coma and the
+  body shrinks inside it by the same factor — so the vertex shader now PASSES
+  the body's share of the quad (`vBodyFrac`) instead of the fragment shader
+  re-deriving it, and `drawnPx()` is the one JS mirror the pick radius uses.
+- **A size curve that saturates is not a size.** The old attenuation clamp was
+  at one end or the other for every framing anyone actually uses, so the
+  population drew at a near-constant pixel size and the scene lost its depth
+  cue entirely. Nothing errored; it just looked like wallpaper.
+- **An inflated body must not occult like a real one.** Drawn radii are
+  log-inflated by ~3 orders of magnitude, so an opaque backlit rock erased a
+  patch of sky no real 1 km body could touch. Opacity follows the returned
+  light now, with a floor for the silhouette.
+- **A published fit has an end.** Running the H–G phase function to α = 180°
+  took every backlit object to zero brightness — plausible-looking, and wrong,
+  because the law is fitted to α ≲ 120° and a real body still shows a crescent.
+- **Albedo is inside a square root.** Deriving D from H at a blanket 0.14 draws
+  every dark object too small — 1.53× for a C-type — which is a size error that
+  looks like a rendering choice.
 
 ## 4. Open items
 
 - Production self-report: after the first deploy, read
   `/api/neo/catalog?tier=pha` `groups.*.field_map` and `/api/neo/watch`
   `sources.*` and trim the candidate lists in `api/_lib/neo-sources.js`.
+  **Read `groups.*.photometry_fields` in the same request**: 'dropped' means JPL
+  refused the optional albedo/taxonomy columns and every tone and derived size
+  on the page is a class mean — fix the spelling or trim
+  `SBDB_FIELDS_PHOTOMETRY`. `groups.*.photometry.albedo_measured` /
+  `.spec_measured` say how many rows actually carried them.
   Confirm the interstellar query (`e > 1.1`) returns 1I/2I/3I and nothing
   else.
 - Vercel edge response size for `tier=all` (~3.4 MB) is untested in
