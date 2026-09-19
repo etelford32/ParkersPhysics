@@ -243,9 +243,18 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await waitForFrames(page);
         await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 45_000 });
 
-        const s = await page.evaluate(() => {
+        // ONE ATOMIC READ, retried until the layer is consistent — the third
+        // instance of the tier-swap race in this file. `_rebuildPoints` nulls
+        // `inZone` AND `closest` together and a later worker frame refills
+        // both, so a wait on inZone followed by a separate evaluate() can land
+        // in the gap and read `L.closest.index` off null. Waiting on the whole
+        // read is the only thing that closes it; retrying the assertion does
+        // not, because the exception happens inside the browser.
+        const s = await (await page.waitForFunction(() => {
             const L = window.__neoLab.layer;
             const idx3 = L.byDes.get('FLYBY-3LD'), idx30 = L.byDes.get('FLYBY-30LD');
+            if (!L.rGeo || !L._alpha || !L.closest || idx3 == null || idx30 == null) return null;
+            if (!L.els[L.closest.index]) return null;
             const ld = (i) => L.rGeo[i] / 0.0025695556;
             return {
                 closest: L.els[L.closest.index].des, closestLD: L.closest.dLD,
@@ -259,7 +268,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
                 ringNames: L.rings.map(r => r.line.name),
                 localAtEarth: L.localGroup.position.distanceTo(window.__neoLab.layer._earthDrawn) < 1e-9,
             };
-        });
+        }, null, { timeout: 45_000 })).jsonValue();
         expect(s.closest).toBe('FLYBY-3LD');
         expect(s.ld3).toBeGreaterThan(2.5); expect(s.ld3).toBeLessThan(3.5);
         expect(s.ld30).toBeGreaterThan(28); expect(s.ld30).toBeLessThan(32);
