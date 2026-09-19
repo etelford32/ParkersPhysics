@@ -17,7 +17,8 @@
  * Feeds that are down say so in their own section; nothing is invented.
  */
 
-import { FLAG, LD_AU, formatLD, formatSize, diameterKmFromH, NOTABLES, findNotable } from './neo-orbits.js';
+import { FLAG, LD_AU, formatLD, formatSize, diameterKmFromH, NOTABLES, findNotable,
+         TAXONOMY, COMET_NUCLEUS, UNCLASSIFIED } from './neo-orbits.js';
 import { NEO_COLORS, NATURAL_COLORS, displayName } from './neo-layer.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -267,17 +268,46 @@ export class NeoPanel {
     _renderLegend() {
         const classItems = [
             ['pha', 'Potentially hazardous'], ['APO', 'Apollo'], ['ATE', 'Aten'], ['AMO', 'Amor'], ['IEO', 'Atira'],
-            ['comet', 'Comet'], ['interstellar', 'Interstellar'], ['flyby', 'Flyby within ±7 d (breathing halo)'], ['ring', 'LD rings around Earth'], ['radiant', 'Meteor stream (inbound)'],
+            ['comet', 'Comet'], ['interstellar', 'Interstellar'], ['flyby', 'Flyby within ±7 d (reticle)'], ['ring', 'LD rings around Earth'], ['radiant', 'Meteor stream (inbound)'],
         ].map(([k, l]) => [NEO_COLORS[k], l]);
+        // The NATURAL legend is the kernel's TAXONOMY, with the albedo that
+        // actually drives the tone and the derived size. It used to claim a
+        // "potentially hazardous (warm bias)" tint, which the render no longer
+        // applies — a legend entry for a colour nothing draws is a lie.
         const naturalItems = [
-            [NATURAL_COLORS.sType, 'S-type asteroid (reddish grey)'], [NATURAL_COLORS.cType, 'C-type asteroid (dark neutral)'],
-            [NATURAL_COLORS.pha, 'Potentially hazardous (warm bias)'], [NATURAL_COLORS.comet, 'Comet · blue ion tail anti-sunward, warm dust tail lagging'],
-            [NATURAL_COLORS.interstellar, 'Interstellar'], [NATURAL_COLORS.flyby, 'Flyby within ±7 d (breathing halo)'],
+            [TAXONOMY.S.tint, 'S-type · albedo 0.20'],
+            [TAXONOMY.C.tint, 'C-type · 0.06 (darker than coal)'],
+            [TAXONOMY.X.tint, 'X-type · 0.15'],
+            [TAXONOMY.V.tint, 'V-type · 0.36 (basaltic)'],
+            [UNCLASSIFIED.tint, 'No published taxonomy · IAU default 0.14'],
+            [COMET_NUCLEUS.tint, 'Comet nucleus · 0.04 · blue ion tail anti-sunward, warm dust tail lagging'],
+            [NATURAL_COLORS.interstellar, 'Interstellar'], [NATURAL_COLORS.flyby, 'Flyby within ±7 d (reticle)'],
             [NEO_COLORS.ring, 'LD rings around Earth'], [NEO_COLORS.radiant, 'Meteor stream (inbound)'],
         ];
         const items = this.layer.visible.colorMode === 'class' ? classItems : naturalItems;
         this.$('neo-legend').innerHTML = items.map(([c, l]) => `<span><i style="background:${hex(c)}"></i>${l}</span>`).join('')
-            + `<span style="flex-basis:100%;color:#667">Size and brightness follow absolute magnitude (H); comae and tails scale as 1/r².</span>`;
+            + `<span style="flex-basis:100%;color:#667">Bodies are drawn SUNLIT and at their true projected size — the note below says
+               exactly what that means and how much of it is measured.</span>`;
+    }
+
+    /**
+     * What the drawn appearance is made of, and how much of it is observed.
+     * Every clause here is a claim the render actually makes — if one stops
+     * being true, delete the clause rather than leaving it to drift.
+     */
+    photometryNote() {
+        const c = this.layer.photometryCoverage?.() ?? { total: 0, albedo: 0, taxonomy: 0, diam: 0 };
+        const pct = (n) => (c.total ? `${Math.round((n / c.total) * 100)}%` : '—');
+        return 'Bodies are drawn SUNLIT, not self-luminous: scattering is Lommel–Seeliger (airless regolith, nearly flat across the '
+            + 'disc — the reason a full Moon reads as a disc and not a ball), brightness is the object’s albedo × the IAU H–G phase '
+            + 'function × 1/r² of its real distance from the Sun, and the phase angle is the drawn geometry’s, so an object between you '
+            + 'and the Sun is a crescent. Drawn size is the body’s TRUE projected size down to a 2-pixel floor below which it is '
+            + 'unresolved; diameters are log-compressed and derived from H through the object’s own albedo where JPL has not measured '
+            + `one. Of ${c.total.toLocaleString()} objects loaded, ${pct(c.diam)} have a measured diameter, ${pct(c.albedo)} a measured `
+            + `albedo and ${pct(c.taxonomy)} a published taxonomy; the rest use their class mean, or the IAU defaults when unclassified. `
+            + 'Level and contrast carry a disclosed display normalisation — the population spans several decades of reflected light. '
+            + 'A comet’s coma and tails are the one light here that is real, and scale as 1/r². A ring around a body is the page '
+            + 'pointing at it, never the body being bright.';
     }
 
     renderNote() {
@@ -287,7 +317,8 @@ export class NeoPanel {
             radial scale (ecliptic of date). Inside 20 lunar distances it moves to an Earth-anchored frame drawn on the Moon's own
             compression — the 1 LD ring passes through the drawn Moon — and the two cross-fade between 14 and 20 LD. Planets ride
             mean-motion circles; flyby geometry uses Earth's true VSOP87D position. Close-approach rows are JPL's integrated orbits;
-            drawn positions are two-body from JPL osculating elements. ${epochNote}`;
+            drawn positions are two-body from JPL osculating elements. ${epochNote}
+            <br><br>${esc(this.photometryNote())}`;
     }
 
     /** Called from the page's animate loop at low cadence (~1 Hz) for the sim-date-dependent sections. */

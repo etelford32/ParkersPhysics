@@ -25,7 +25,9 @@ import {
     prepareColumns, propagateColumns, deriveFrames,
     logSceneRadius, helioToScene, localSceneRadius, geoToLocalScene, localFrameWeight,
     precessionLongitudeRad, rotateAboutPole, toOfDate,
-    neoClass, diameterKmFromH, formatSize, formatLD, toLD, speedKms, elementsAgeNote,
+    neoClass, diameterKmFromH, diameterKm, formatSize, formatLD, toLD, speedKms, elementsAgeNote,
+    TAXONOMY, COMET_NUCLEUS, UNCLASSIFIED, taxonomyClass, opticalProperties,
+    phaseHG, HG_ALPHA_MAX, apparentMagnitudeV, phaseAngleRad,
     rowToRecord, recordToRow, findNotable,
     METEOR_SHOWERS, solarLongitudeDeg, showerActivity, activeShowers, nextShower, radiantEclipticUnit,
 } from '../js/neo-orbits.js';
@@ -245,9 +247,14 @@ assert.match(elementsAgeNote(2461000.5, 2461000.5 + 5 * 365.25), /perturbations/
 
 // ── Wire format round trip ──────────────────────────────────────────────────
 {
-    const rec = { des: '99942', name: '99942 Apophis (2004 MN4)', H: 19.09, cls: 'ATE', flags: 3, e: 0.1914, a: 0.9224, q: null, i: 3.34, om: 203.9, w: 126.7, ma: 100.1, tp: null, epoch: 2461000.5, moid: 0.0003, diam: 0.34 };
+    const rec = { des: '99942', name: '99942 Apophis (2004 MN4)', H: 19.09, cls: 'ATE', flags: 3, e: 0.1914, a: 0.9224, q: null, i: 3.34, om: 203.9, w: 126.7, ma: 100.1, tp: null, epoch: 2461000.5, moid: 0.0003, diam: 0.34, albedo: 0.35, spec: 'Sq' };
     assert.equal(recordToRow(rec).length, NEO_ROW_COLUMNS.length);
     assert.deepEqual(rowToRecord(recordToRow(rec)), rec);
+    // APPEND-ONLY wire format: a row shipped before `albedo`/`spec` existed
+    // still parses, with the trailing columns null. Inserting a column in the
+    // middle instead would silently reinterpret every older row.
+    const legacy = recordToRow(rec).slice(0, NEO_ROW_COLUMNS.length - 2);
+    assert.deepEqual(rowToRecord(legacy), { ...rec, albedo: null, spec: null });
     assert.equal(findNotable(rec).label, 'Apophis');
     assert.equal(findNotable({ des: 'C/2025 N1', name: '3I/ATLAS (C/2025 N1)' }).label, '3I/ATLAS');
     assert.equal(findNotable({ des: '2020 XY', name: '(2020 XY)' }), null);
@@ -276,4 +283,82 @@ for (const s of METEOR_SHOWERS) {
     const pole = radiantEclipticUnit(270, 66.5607); near(pole.z, 1, 2e-6, 'RA 18h Dec +66.56° is the ecliptic north pole');
 }
 
-console.log(`neo-orbits: Kepler ×${6 * 10 + 5 * 8} residuals, Earth-vs-VSOP87D, vis-viva, bulk≡scalar, Moon anchor, ${METEOR_SHOWERS.length} showers — passed`);
+// ── Photometry ──────────────────────────────────────────────────────────────
+// Identities and published definitions, never a remembered render value.
+{
+    // Φ(0) = 1 for EVERY G, by construction: Φ₁(0) = Φ₂(0) = 1 and the weights sum to 1.
+    for (const G of [0, 0.15, 0.23, 0.4, 1]) near(phaseHG(0, G), 1, 1e-15, `Φ(0) = 1 at G=${G}`);
+    // Monotonically fainter with phase angle, on both extreme slopes.
+    for (const G of [0, 0.15, 1]) {
+        let prev = Infinity;
+        for (let d = 0; d <= 120; d += 5) {
+            const phi = phaseHG(d * Math.PI / 180, G);
+            assert.ok(phi < prev, `Φ falls through α=${d}° at G=${G}`);
+            assert.ok(phi > 0, 'Φ stays positive');
+            prev = phi;
+        }
+    }
+    // Past the published fit's validity (α ≲ 120°) the value is HELD, not
+    // extrapolated: the basis functions run to zero there, and a real body at
+    // 150° still shows a crescent. A floor is honest; an extrapolation is not.
+    near(phaseHG(Math.PI, 0.15), phaseHG(HG_ALPHA_MAX, 0.15), 1e-15, 'Φ is held past 120°');
+    near(phaseHG(2.6, 0.23), phaseHG(HG_ALPHA_MAX, 0.23), 1e-15, 'Φ is held past 120° at any G');
+    assert.ok(phaseHG(HG_ALPHA_MAX, 0.15) > 0.005, 'the held value is a crescent, not zero');
+    assert.ok(phaseHG(HG_ALPHA_MAX, 0.15) < 0.05, 'and it is 4-5 magnitudes down, as measured');
+    // G is the weight between the two published basis functions: G=0 ⇒ Φ₁, G=1 ⇒ Φ₂,
+    // and any G is their linear blend — checked at a phase angle away from the ends.
+    const a40 = 40 * Math.PI / 180;
+    const p1 = phaseHG(a40, 0), p2 = phaseHG(a40, 1);
+    near(phaseHG(a40, 0.23), 0.77 * p1 + 0.23 * p2, 1e-15, 'Φ is linear in G');
+    assert.ok(p2 > p1, 'Φ₂ is the shallower basis function');
+
+    // V = H at r = Δ = 1 AU, α = 0 — the DEFINITION of absolute magnitude.
+    for (const G of [0.15, 0.23]) near(apparentMagnitudeV(19.09, 1, 1, 0, G), 19.09, 1e-12, 'V(1 AU, 1 AU, 0°) = H');
+    // Inverse-square in BOTH distances: doubling r·Δ costs exactly 5log₁₀4 mag.
+    near(apparentMagnitudeV(19.09, 2, 2, 0) - apparentMagnitudeV(19.09, 1, 1, 0), 5 * Math.log10(4), 1e-12, 'V ∝ 5log₁₀(rΔ)');
+    // Phase makes it fainter, never brighter.
+    assert.ok(apparentMagnitudeV(19.09, 1, 1, a40) > apparentMagnitudeV(19.09, 1, 1, 0), 'phase dims');
+
+    // Phase angle is the SUN–BODY–OBSERVER angle: an observer at opposition
+    // (body beyond the observer, all on one line) sees α = 0; one at the Sun's
+    // own distance across a right angle sees 90°.
+    near(phaseAngleRad({ x: 2, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }), 0, 1e-12, 'opposition is α = 0');
+    near(phaseAngleRad({ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }), Math.PI / 2, 1e-12, 'quadrature is α = 90°');
+    near(phaseAngleRad({ x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 }), Math.PI, 1e-12, 'in front of the Sun is α = 180°');
+
+    // Taxonomy: the primary letter decides, an unknown spelling degrades to the
+    // IAU defaults rather than picking a wrong albedo.
+    assert.equal(taxonomyClass('Sq'), 'S');
+    assert.equal(taxonomyClass('Ch'), 'C');
+    assert.equal(taxonomyClass('Xk'), 'X');
+    assert.equal(taxonomyClass('Zzz'), null);
+    assert.equal(taxonomyClass(null), null);
+    assert.equal(opticalProperties({}).albedo, UNCLASSIFIED.albedo);
+    assert.equal(opticalProperties({}).measured.albedo, false);
+    assert.equal(opticalProperties({ spec: 'Cgh' }).albedo, TAXONOMY.C.albedo);
+    assert.equal(opticalProperties({ spec: 'Cgh' }).measured.taxonomy, true);
+    // A MEASURED albedo always wins over the class mean.
+    const meas = opticalProperties({ spec: 'C', albedo: 0.23 });
+    assert.equal(meas.albedo, 0.23);
+    assert.equal(meas.measured.albedo, true);
+    assert.equal(meas.G, TAXONOMY.C.G, 'slope still comes from the taxonomy');
+    // A comet with no taxonomy is a dark nucleus, not the 0.14 default.
+    assert.equal(opticalProperties({ flags: FLAG.COMET }).albedo, COMET_NUCLEUS.albedo);
+    for (const [k, t] of Object.entries(TAXONOMY)) {
+        assert.ok(t.albedo > 0 && t.albedo <= 1, `${k} albedo in range`);
+        assert.ok(t.G >= 0 && t.G <= 1, `${k} G in range`);
+    }
+
+    // D = 1329/√p · 10^(−H/5): the albedo is inside a square root, so assuming
+    // 0.14 for a C-type (0.06) draws it √(0.14/0.06) = 1.53× too small.
+    const H = 19.09;
+    near(diameterKmFromH(H, 0.06) / diameterKmFromH(H, 0.14), Math.sqrt(0.14 / 0.06), 1e-12, 'D ∝ 1/√p');
+    // diameterKm prefers the measured value and says so.
+    const dm = diameterKm({ diam: 0.34, H });
+    assert.equal(dm.km, 0.34); assert.equal(dm.measured, true);
+    const dd = diameterKm({ H, spec: 'C' });
+    assert.equal(dd.measured, false);
+    near(dd.km, diameterKmFromH(H, TAXONOMY.C.albedo), 1e-12, 'derived through the OBJECT’s albedo');
+}
+
+console.log(`neo-orbits: Kepler ×${6 * 10 + 5 * 8} residuals, Earth-vs-VSOP87D, vis-viva, bulk≡scalar, Moon anchor, ${METEOR_SHOWERS.length} showers, H–G photometry + ${Object.keys(TAXONOMY).length} taxa — passed`);

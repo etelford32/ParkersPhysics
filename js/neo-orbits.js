@@ -180,14 +180,22 @@ export function solveKeplerHyperbolic(M, e) {
 //   q tp    perihelion distance / time — required when e ≥ 1
 //   moid    Earth MOID (AU) or null
 //   diam    measured diameter (km) or null
+//   albedo  MEASURED geometric albedo (V) or null — JPL publishes one for a
+//           minority of objects; `opticalProperties` falls back to the class
+//           mean and reports which it used. Never fabricate one.
+//   spec    taxonomic class as published (spec_B / spec_T: "Sq", "Ch", "V"…)
+//           or null; `taxonomyClass` reduces it to the primary letter.
 
 export const FLAG = Object.freeze({
     NEO: 1, PHA: 2, COMET: 4, INTERSTELLAR: 8,
 });
 
 /** Column order of a compact catalogue row (the wire format). */
+// APPEND-ONLY. rowToRecord reads by index, so a row shipped before a column
+// existed still parses — the missing trailing fields simply come back null.
 export const NEO_ROW_COLUMNS = Object.freeze([
     'des', 'name', 'H', 'cls', 'flags', 'e', 'a', 'q', 'i', 'om', 'w', 'ma', 'tp', 'epoch', 'moid', 'diam',
+    'albedo', 'spec',
 ]);
 
 export function rowToRecord(row) {
@@ -237,6 +245,8 @@ export function normalizeElements(rec) {
             cls: rec.cls ?? null, flags: rec.flags | 0,
             moid: Number.isFinite(num(rec.moid)) ? num(rec.moid) : null,
             diam: Number.isFinite(num(rec.diam)) ? num(rec.diam) : null,
+            albedo: Number.isFinite(num(rec.albedo)) ? num(rec.albedo) : null,
+            spec: rec.spec ?? null,
             e, a, q, Q, i, om, w, n, per_y,
             M0: anchor.M0, t0: anchor.t0,
             epoch: Number.isFinite(epoch) ? epoch : anchor.t0,
@@ -407,6 +417,35 @@ export function propagateColumns(cols, jd, helio) {
 }
 
 /**
+ * The GEOCENTRIC sibling of `deriveFrames`, for neo-watch.html's Earth-centred
+ * stage: from J2000 heliocentric positions and Earth's J2000 heliocentric
+ * position, fill geocentric J2000 vectors (3N, AU) plus heliocentric and
+ * geocentric distance (N each, AU).
+ *
+ * No frame rotation happens here, and that asymmetry with `deriveFrames` is
+ * the point. The orrery draws VSOP87D planets, which are ecliptic OF DATE, so
+ * `deriveFrames` rotates every object FORWARD to meet them. A geocentric stage
+ * has no of-date content in it at all, so js/neo-space.js rotates EARTH back
+ * to J2000 once (`earthHelioJ2000`) and everything downstream — vectors,
+ * RA/Dec, the drawn scene — stays in the frame the catalogue is published in.
+ * Distances are of course identical either way, which is exactly what
+ * tests/neo-space.mjs asserts across the two paths.
+ *
+ * One pass, allocation-free; this is what the worker's `geoframe` ships back.
+ */
+export function deriveGeocentric(helio, N, earthJ2000, geo, rHelio, rGeo) {
+    const [ex, ey, ez] = earthJ2000;
+    for (let k = 0; k < N; k++) {
+        const o = k * 3;
+        const x = helio[o], y = helio[o + 1], z = helio[o + 2];
+        rHelio[k] = Math.hypot(x, y, z);
+        const dx = x - ex, dy = y - ey, dz = z - ez;
+        geo[o] = dx; geo[o + 1] = dy; geo[o + 2] = dz;
+        rGeo[k] = Math.hypot(dx, dy, dz);
+    }
+}
+
+/**
  * From J2000 heliocentric positions and Earth's OF-DATE heliocentric position,
  * fill scene positions (log frame, of date), heliocentric distance (AU) and
  * geocentric distance (AU). `precRad` is precessionLongitudeRad(jd); the
@@ -459,10 +498,149 @@ export function neoClass(a, e) {
     return null;
 }
 
+// ── Photometry ──────────────────────────────────────────────────────────────
+// WHAT AN ASTEROID ACTUALLY LOOKS LIKE, from published quantities rather than
+// from drawing constants. Three things live here and nothing else may re-derive
+// them: the taxonomy table (mean geometric albedo, phase slope G, and a display
+// tint per class), the IAU two-parameter H–G phase function, and the apparent
+// magnitude that falls out of the two.
+//
+// The albedo matters twice over. It sets the TONE — a C-type reflects 6 % of
+// the light that hits it and is darker than coal, an E-type reflects 45 % — and
+// it sets the SIZE, because a diameter derived from H without it is wrong by
+// √(p₂/p₁): assume 0.14 for a 0.06 body and you draw it 1.5× too small. JPL
+// publishes a measured albedo and a taxonomic class for a minority of objects;
+// `opticalProperties` uses them WHEN THEY EXIST and says so in `measured`, so
+// the page can report how much of what it draws is observed and how much is a
+// class mean. Nothing here is ever a hash of the designation — that was the
+// placeholder this replaced.
+
+/**
+ * Mean geometric albedo (V), IAU phase slope G, and a display tint per
+ * taxonomic class. Albedos are the standard class means (Tholen / Bus–DeMeo
+ * compilations); G is the class-typical slope parameter, with 0.15 — the IAU
+ * default for an object with no measured slope — for anything unclassified.
+ * The tints are sRGB picks consistent with the classes' mean visible spectra
+ * (C/B neutral to slightly blue, S/Q/A reddened by silicates, D the reddest,
+ * E/V bright); they are a display choice, and the only one in this table.
+ */
+export const TAXONOMY = Object.freeze({
+    B: { albedo: 0.07, G: 0.15, tint: 0x8f949c, label: 'B — carbonaceous, blue-sloped' },
+    C: { albedo: 0.06, G: 0.15, tint: 0x8d8981, label: 'C — carbonaceous' },
+    D: { albedo: 0.04, G: 0.12, tint: 0x9a7b63, label: 'D — organic-rich, very red' },
+    P: { albedo: 0.05, G: 0.13, tint: 0x8f8073, label: 'P — primitive' },
+    T: { albedo: 0.05, G: 0.13, tint: 0x94806d, label: 'T — reddish, low albedo' },
+    K: { albedo: 0.18, G: 0.21, tint: 0xcbb69b, label: 'K — CO/CV-like' },
+    L: { albedo: 0.16, G: 0.21, tint: 0xc9b79f, label: 'L — reddish, weak 1 µm band' },
+    S: { albedo: 0.20, G: 0.23, tint: 0xd8bb92, label: 'S — silicaceous' },
+    Q: { albedo: 0.21, G: 0.23, tint: 0xd6bda0, label: 'Q — ordinary-chondrite-like' },
+    A: { albedo: 0.22, G: 0.23, tint: 0xdcb08a, label: 'A — olivine-rich, very red' },
+    V: { albedo: 0.36, G: 0.28, tint: 0xe4cbb0, label: 'V — basaltic (Vesta-like)' },
+    X: { albedo: 0.15, G: 0.20, tint: 0xb5aa9b, label: 'X — E/M/P degenerate' },
+    M: { albedo: 0.17, G: 0.20, tint: 0xb9b1a6, label: 'M — metallic' },
+    E: { albedo: 0.45, G: 0.40, tint: 0xe8e0d2, label: 'E — enstatite, bright' },
+});
+/** Cometary nucleus: among the darkest surfaces measured (1P/Halley p ≈ 0.04). */
+export const COMET_NUCLEUS = Object.freeze({ albedo: 0.04, G: 0.15, tint: 0xb9c6d2, label: 'Cometary nucleus' });
+/** An object with no measured albedo and no taxonomy: the IAU defaults. */
+export const UNCLASSIFIED = Object.freeze({ albedo: 0.14, G: 0.15, tint: 0xa9a49a, label: 'Unclassified' });
+
+/**
+ * Primary taxonomic letter from an SBDB `spec_B` / `spec_T` string — 'Sq' → S,
+ * 'Ch' → C, 'Xk' → X, 'V' → V. Returns null for anything not in TAXONOMY, so
+ * an unexpected spelling degrades to the unclassified defaults rather than
+ * silently picking the wrong albedo.
+ */
+export function taxonomyClass(spec) {
+    if (spec == null) return null;
+    const c = String(spec).trim().toUpperCase().replace(/[^A-Z]/g, '').charAt(0);
+    return Object.prototype.hasOwnProperty.call(TAXONOMY, c) ? c : null;
+}
+
+/**
+ * Optical properties for a record: measured where JPL published them, class
+ * means where it published a taxonomy, IAU defaults otherwise. `measured` says
+ * which of the two came from the archive — never round that away, it is the
+ * difference between an observation and an assumption.
+ */
+export function opticalProperties(rec = {}) {
+    const isComet = (rec.flags | 0) & FLAG.COMET;
+    const tax = taxonomyClass(rec.spec);
+    const base = tax ? TAXONOMY[tax] : (isComet ? COMET_NUCLEUS : UNCLASSIFIED);
+    const pv = num(rec.albedo);
+    const measuredAlbedo = Number.isFinite(pv) && pv > 0 && pv <= 1;
+    return {
+        tax, label: base.label,
+        albedo: measuredAlbedo ? pv : base.albedo,
+        G: base.G,
+        tint: base.tint,
+        measured: { albedo: measuredAlbedo, taxonomy: tax != null },
+    };
+}
+
 /** Diameter (km) from absolute magnitude, D = 1329 / √p · 10^(−H/5). */
 export function diameterKmFromH(H, albedo = 0.14) {
     if (!Number.isFinite(H)) return null;
     return (1329 / Math.sqrt(albedo)) * Math.pow(10, -H / 5);
+}
+
+/**
+ * Best diameter (km) for a record: the measured one when JPL has it, else
+ * derived from H through THIS object's albedo — not the 0.14 default, which is
+ * what made every dark object too small. Returns null when neither exists.
+ */
+export function diameterKm(rec = {}, optics = null) {
+    const d = num(rec.diam);
+    if (Number.isFinite(d) && d > 0) return { km: d, measured: true };
+    const o = optics ?? opticalProperties(rec);
+    const km = diameterKmFromH(num(rec.H), o.albedo);
+    return km == null ? { km: null, measured: false } : { km, measured: false };
+}
+
+// IAU two-parameter magnitude system (Bowell et al. 1989), the standard the
+// published H and G are defined in: Φi(α) = exp(−Ai·tan^Bi(α/2)).
+const HG_A = [3.33, 1.87], HG_B = [0.63, 1.22];
+/**
+ * The H–G law is FITTED OVER α ≲ 120° and says nothing beyond it — the basis
+ * functions run to zero there while a real body still shows a thin crescent.
+ * Past the limit the value is HELD, which is a disclosed floor rather than an
+ * extrapolation off the end of the published fit. (Extrapolating instead made
+ * every backlit object in the orrery vanish outright.)
+ */
+export const HG_ALPHA_MAX = 120 * Math.PI / 180;
+/** H–G phase function Φ(α) = (1−G)Φ₁ + GΦ₂. Φ(0) = 1 for every G, by construction. */
+export function phaseHG(alphaRad, G = 0.15) {
+    if (!Number.isFinite(alphaRad)) return NaN;
+    const a = Math.min(Math.max(alphaRad, 0), HG_ALPHA_MAX);
+    const t = Math.tan(a / 2);
+    const p1 = Math.exp(-HG_A[0] * Math.pow(t, HG_B[0]));
+    const p2 = Math.exp(-HG_A[1] * Math.pow(t, HG_B[1]));
+    return (1 - G) * p1 + G * p2;
+}
+/**
+ * Apparent visual magnitude: V = H + 5log₁₀(r·Δ) − 2.5log₁₀Φ(α).
+ * EXACT for the Earth-based case the data card reports — r, Δ and α all come
+ * from the propagated vectors, not from the drawn scene. At r = Δ = 1 AU and
+ * α = 0 it returns H, which is the definition of H and what the gate asserts.
+ */
+export function apparentMagnitudeV(H, rAU, deltaAU, alphaRad, G = 0.15) {
+    if (![H, rAU, deltaAU].every(Number.isFinite) || rAU <= 0 || deltaAU <= 0) return null;
+    const phi = phaseHG(alphaRad, G);
+    if (!(phi > 0)) return null;
+    return H + 5 * Math.log10(rAU * deltaAU) - 2.5 * Math.log10(phi);
+}
+/**
+ * Phase angle α at the body, between the Sun and the observer — the Sun-body-
+ * observer angle. `helio` is the body's heliocentric vector and `geo` its
+ * observer-relative vector, both in the same frame and units.
+ */
+export function phaseAngleRad(helio, geo) {
+    const r = Math.hypot(helio.x, helio.y, helio.z);
+    const d = Math.hypot(geo.x, geo.y, geo.z);
+    if (!(r > 0) || !(d > 0)) return NaN;
+    // Vectors FROM the body: −helio points at the Sun, −geo at the observer.
+    const dot = (helio.x * geo.x + helio.y * geo.y + helio.z * geo.z) / (r * d);
+    return Math.acos(Math.min(1, Math.max(-1, dot)));
 }
 
 /** Short human size: "~340 m" / "~1.2 km", with the albedo assumption disclosed by the caller. */
