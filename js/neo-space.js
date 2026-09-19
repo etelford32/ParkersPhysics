@@ -107,6 +107,11 @@ export const EARTH_RADIUS_KM = 6371.0088;
 export const GEO_RADIUS_KM = 42_164.0;
 /** Mean obliquity at J2000 (IAU 1976), degrees. */
 export const OBLIQUITY_J2000_DEG = 23.4392911;
+/** Standard gravitational parameters, km³/s². Used by section 5b. */
+export const MU_EARTH = 398_600.4418;
+export const MU_SUN = 1.327_124_400_18e11;
+/** Derived, never typed twice: the Earth:Sun mass ratio IS the ratio of the two μ. */
+export const EARTH_SUN_MASS_RATIO = MU_EARTH / MU_SUN;
 /** Seconds of UT1 in one Julian day — the unit GMST_COEFF is expressed in. */
 const SEC_PER_DAY = 86_400;
 const TWO_PI = Math.PI * 2;
@@ -191,6 +196,21 @@ export const SHELLS = Object.freeze([
     { id: 'leo',  label: 'LEO · 400 km',      km: EARTH_RADIUS_KM + 400,  kind: 'orbit', alwaysOn: false },
     { id: 'geo',  label: 'GEO belt',          km: GEO_RADIUS_KM,          kind: 'orbit', alwaysOn: true },
     { id: 'ld1',  label: '1 lunar distance',  km: LD_KM,                  kind: 'ld',    alwaysOn: true },
+    // The two GRAVITY boundaries, and note WHERE they land: the SOI at 2.4 LD
+    // and the Hill sphere at 3.9 LD both sit between the 1 LD and 5 LD rings.
+    // Earth's gravitational domain is smaller than most people's intuition for
+    // it, and drawing it inside the familiar lunar-distance ladder is the point.
+    //
+    // These are not ruler marks. The Hill sphere is the edge of Earth's
+    // gravitational domain; the SOI is the edge of THIS PAGE'S competence,
+    // since inside it a heliocentric two-body position is the wrong model. Both
+    // scale with Earth's own heliocentric distance (3.3 % over a year), so the
+    // `km` here is NOMINAL — `dynamic` tells the renderer to recompute the real
+    // radius per frame, and the gate pins the nominal against the formula.
+    { id: 'soi',  label: 'Sphere of influence', km: soiRadiusKm(1),        kind: 'gravity', alwaysOn: false,
+      dynamic: 'soi' },
+    { id: 'hill', label: 'Hill sphere',         km: hillRadiusKm(1),       kind: 'gravity', alwaysOn: true,
+      dynamic: 'hill' },
     { id: 'ld5',  label: '5 LD',              km: 5 * LD_KM,              kind: 'ld',    alwaysOn: true },
     { id: 'ld10', label: '10 LD',             km: 10 * LD_KM,             kind: 'ld',    alwaysOn: false },
     // 0.05 AU is 19.46 LD — INSIDE the 20 LD ring, not outside it. The two
@@ -604,22 +624,40 @@ export function moonPath(jd, samples = 96, days = SIDEREAL_MONTH_DAYS) {
 }
 
 /**
- * Perigee and apogee of the orbit the Moon is on now: the nearest and farthest
- * approach within one anomalistic month of `jd`, refined by the same
- * golden-section search the close-approach code uses.
+ * Perigee and apogee of the orbit the Moon is on now: the NEXT of each at or
+ * after `jd`, refined from the same distance curve the drawn path is sampled
+ * from.
  *
  * These are worth drawing because the lunar orbit's eccentricity is the thing
  * a circle-drawn "Moon orbit" hides: perigee and apogee differ by about 13 %,
  * which is a visible amount on any honest path and zero on a ring.
+ *
+ * ── Why this does not use `findApproach` ──────────────────────────────────
+ * It did, and it was DATE-DEPENDENT. `findApproach` deliberately returns null
+ * for an extremum on the edge of its window, because a search boundary is not
+ * a close approach — correct there, wrong here. Searching [jd, jd + month] put
+ * whichever apsis happened to be a few hours ahead ON that edge, so the marker
+ * silently vanished for the ~1 day in 14 that the Moon was near one. The
+ * browser gate caught it the morning after it was written, on a date where
+ * apogee was four hours out.
+ *
+ * So the search window now STARTS BEFORE `jd` — far enough that an apsis at
+ * `jd` itself is comfortably bracketed — and the caller takes the first
+ * extremum at or after `jd`. A window of 1.7 anomalistic months always contains
+ * at least two of each, so there is always one to take.
  */
 export function moonApsides(jd, span = ANOMALISTIC_MONTH_DAYS) {
     const dist = (t) => moonGeoJ2000(t).distKm;
-    const neg = (t) => -dist(t);
-    const perigee = findApproach(dist, jd + span / 2, span / 2, 120, 1e-4);
-    const apogee = findApproach(neg, jd + span / 2, span / 2, 120, 1e-4);
+    // Forward to 1.3 months, not 1.0: the anomalistic month is a MEAN and the
+    // real perigee-to-perigee interval swings over ~24.6–28.6 days under solar
+    // perturbation (28.4 d measured as the longest wait across a year), so a
+    // window sized to the mean can miss the next apsis outright.
+    const ex = findExtrema(dist, jd - span * 0.6, jd + span * 1.3, 460, 1e-4);
+    const perigee = ex.minima.find(m => m.jd >= jd) ?? null;
+    const apogee = ex.maxima.find(m => m.jd >= jd) ?? null;
     return {
-        perigee: perigee ? { jd: perigee.jd, km: perigee.distAU } : null,
-        apogee: apogee ? { jd: apogee.jd, km: -apogee.distAU } : null,
+        perigee: perigee ? { jd: perigee.jd, km: perigee.value } : null,
+        apogee: apogee ? { jd: apogee.jd, km: apogee.value } : null,
     };
 }
 
@@ -637,6 +675,194 @@ export function moonApsides(jd, span = ANOMALISTIC_MONTH_DAYS) {
  * tests/neo-space.mjs is what pins it against the of-date path.
  */
 export { deriveGeocentric };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5b. Earth's gravitational reach — and where this page's model stops
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Everything else on this page propagates each object on a two-body orbit about
+// the SUN. Earth is not in that model at all: it supplies the origin the view is
+// drawn from and nothing else. That is a perfectly good approximation right up
+// until an object gets close enough for Earth's gravity to matter — and this
+// section is how the page finds that line and says where it is.
+//
+// The line has two conventional radii and they answer different questions:
+//
+//   HILL RADIUS   r_H = r (m/3M)^⅓ ≈ 0.0100 AU ≈ 1.50 million km ≈ 3.9 LD.
+//                 Where Earth's pull beats the Sun's TIDAL pull. This is the
+//                 outer bound of anything that can orbit Earth even briefly, so
+//                 it is the boundary of "in Earth's gravitational domain".
+//   SOI (Laplace) r_S = r (m/M)^⅖ ≈ 0.0062 AU ≈ 0.92 million km ≈ 2.4 LD.
+//                 Where it becomes more accurate to treat the encounter as a
+//                 two-body problem about EARTH than about the Sun. This is the
+//                 boundary of "our heliocentric propagation is the wrong model".
+//
+// Both scale with Earth's own heliocentric distance, which varies 3.3 % over a
+// year, so both take it as an argument rather than being constants.
+//
+// THE POINT OF DRAWING THEM is that they are this page's own competence
+// boundary. An object inside the SOI is being deflected by Earth and our
+// unperturbed two-body position for it is wrong — increasingly so the closer it
+// gets. Every readout in this section therefore reports the screen, not a
+// trajectory: it says who comes close enough for Earth's gravity to matter and
+// what would follow if it did, and hands the actual encounter to JPL's
+// integrated orbits, which is where the close-approach table already comes from.
+
+// MU_EARTH / MU_SUN / EARTH_SUN_MASS_RATIO are declared in the constants block
+// at the top of this file, NOT here. `SHELLS` in section 1 calls the two radius
+// functions below to seed its nominal values, and a `const` declared down here
+// would be in its temporal dead zone at that point — the module would throw on
+// import and take the whole page with it. Function declarations hoist; `const`
+// does not. (NEO_LAYER_PLAN.md §3 records the same failure on the orrery.)
+
+/** Hill radius (km) at Earth's current heliocentric distance. */
+export function hillRadiusKm(earthRAU = 1) {
+    return earthRAU * AU_KM * Math.cbrt(EARTH_SUN_MASS_RATIO / 3);
+}
+/** Laplace sphere-of-influence radius (km) at Earth's current distance. */
+export function soiRadiusKm(earthRAU = 1) {
+    return earthRAU * AU_KM * Math.pow(EARTH_SUN_MASS_RATIO, 0.4);
+}
+/** Escape speed (km/s) from Earth at geocentric range `rKm`. */
+export function escapeSpeedKms(rKm) {
+    return rKm > 0 ? Math.sqrt(2 * MU_EARTH / rKm) : Infinity;
+}
+/** Specific geocentric orbital energy (km²/s²). NEGATIVE means bound to Earth. */
+export function geocentricEnergy(rKm, vKms) {
+    return (vKms * vKms) / 2 - MU_EARTH / rKm;
+}
+/**
+ * Hyperbolic excess speed (km/s) — the geocentric speed the object keeps once
+ * it is clear of Earth. Returns null when the object is BOUND, because a bound
+ * object has no v∞ and reporting one would be inventing an escape it cannot make.
+ */
+export function vInfinityKms(rKm, vKms) {
+    const e2 = vKms * vKms - 2 * MU_EARTH / rKm;
+    return e2 > 0 ? Math.sqrt(e2) : null;
+}
+
+/**
+ * Gravitational focusing. Earth is a bigger target than Earth: an object aimed
+ * to miss by up to b_max is still pulled in, where
+ *
+ *     b_max = R √(1 + (v_esc/v∞)²),   σ = π b_max²
+ *
+ * The enhancement is large for slow encounters — a 3 km/s v∞ makes Earth's
+ * collision cross-section 14× its geometric one — and negligible for fast ones.
+ * `targetRadiusKm` defaults to Earth's radius; pass the Hill radius to ask the
+ * same question about capture rather than impact.
+ */
+export function gravitationalFocusing(vInfKms, targetRadiusKm = EARTH_RADIUS_KM) {
+    if (!(vInfKms > 0) || !(targetRadiusKm > 0)) return null;
+    const vEscKms = escapeSpeedKms(targetRadiusKm);
+    const enhancement = 1 + (vEscKms * vEscKms) / (vInfKms * vInfKms);
+    return { bMaxKm: targetRadiusKm * Math.sqrt(enhancement), enhancement, vEscKms };
+}
+
+/**
+ * Earth's heliocentric velocity (AU/day, ecliptic J2000) at JD.
+ *
+ * VSOP87D publishes position, not velocity, so this is a central difference on
+ * the SAME series `earthHelioJ2000` uses — which is the point: differencing the
+ * page's own Earth cannot disagree with the page's own Earth. The step is small
+ * enough that the truncation error is ~1e-10 AU/day and large enough that the
+ * series' own rounding does not dominate.
+ */
+const EARTH_VEL_STEP_DAYS = 0.01;
+export function earthVelocityJ2000(jd, h = EARTH_VEL_STEP_DAYS) {
+    const a = earthHelioJ2000(jd - h);
+    const b = earthHelioJ2000(jd + h);
+    return { x: (b.x - a.x) / (2 * h), y: (b.y - a.y) / (2 * h), z: (b.z - a.z) / (2 * h) };
+}
+
+/** AU/day → km/s. */
+export const AU_PER_DAY_TO_KMS = AU_KM / 86_400;
+
+/**
+ * The encounter screen for ONE object at ONE instant.
+ *
+ * Inputs are geocentric: range in km and speed in km/s (the caller differences
+ * the object's heliocentric velocity against `earthVelocityJ2000`). Everything
+ * returned is a statement about the geometry NOW, not a prediction:
+ *
+ *   regime        where it sits relative to the two boundaries
+ *   bound         geocentric energy < 0 — it is, at this instant, orbiting Earth
+ *   vInfKms       what it keeps on the way out (null when bound)
+ *   focusing      Earth's focused impact cross-section for that v∞
+ *   captureMarginKms
+ *                 how much faster than the local escape speed it is going. This
+ *                 is the number that explains why minimoons are rare: at the
+ *                 Hill radius escape is only 0.73 km/s, so an object arriving at
+ *                 a typical 5–20 km/s misses being captured by an order of
+ *                 magnitude, and shedding that needs a third body.
+ *   modelValid    false inside the SOI — see the section header. The page says
+ *                 so rather than drawing an unperturbed position as though it
+ *                 were still right.
+ */
+export function encounterAnalysis({ distKm, vGeoKms, earthRAU = 1 }) {
+    const hillKm = hillRadiusKm(earthRAU);
+    const soiKm = soiRadiusKm(earthRAU);
+    if (!(distKm > 0) || !Number.isFinite(vGeoKms)) {
+        return { hillKm, soiKm, insideHill: false, insideSOI: false, regime: 'unknown', modelValid: true };
+    }
+    const escapeKms = escapeSpeedKms(distKm);
+    const energy = geocentricEnergy(distKm, vGeoKms);
+    const bound = energy < 0;
+    const vInfKms = vInfinityKms(distKm, vGeoKms);
+    const insideHill = distKm <= hillKm;
+    const insideSOI = distKm <= soiKm;
+
+    let regime;
+    if (bound && insideHill) regime = 'captured';
+    else if (insideSOI) regime = 'inside-soi';
+    else if (insideHill) regime = 'inside-hill';
+    else regime = 'heliocentric';
+
+    return {
+        hillKm, soiKm, insideHill, insideSOI,
+        distKm, vGeoKms, escapeKms, energy, bound, vInfKms,
+        captureMarginKms: vGeoKms - escapeKms,
+        focusing: gravitationalFocusing(vInfKms ?? vGeoKms),
+        regime,
+        // Inside the SOI a heliocentric two-body position is the wrong model, and
+        // the page's own positions for this object stop being trustworthy.
+        modelValid: !insideSOI,
+    };
+}
+
+/**
+ * THE CATALOGUE-WIDE SCREEN: can this object reach Earth's gravitational domain
+ * AT ALL on its current orbit?
+ *
+ * The Earth MOID is the minimum distance between the two ORBITS — not between
+ * the two bodies — so an object whose MOID exceeds the Hill radius cannot enter
+ * the Hill sphere this century no matter where it is in its orbit. That makes a
+ * published number the page already has into a hard filter over the whole
+ * catalogue, which is a far stronger statement than "it is far away today".
+ *
+ * The converse is NOT true and the caller must not claim it: a small MOID means
+ * the orbits pass close, not that the bodies do. Timing is everything, and that
+ * is what the close-approach table is for.
+ */
+export function reachesGravityDomain(moidAU, earthRAU = 1) {
+    if (!Number.isFinite(moidAU)) return null;
+    const moidKm = moidAU * AU_KM;
+    return {
+        moidKm,
+        hill: moidKm <= hillRadiusKm(earthRAU),
+        soi: moidKm <= soiRadiusKm(earthRAU),
+        impact: moidKm <= EARTH_RADIUS_KM,
+    };
+}
+
+/** Human label for an `encounterAnalysis` regime. */
+export const REGIME_LABELS = Object.freeze({
+    captured: 'temporarily bound to Earth',
+    'inside-soi': 'inside the sphere of influence',
+    'inside-hill': 'inside the Hill sphere',
+    heliocentric: 'on a solar orbit, Earth negligible',
+    unknown: '—',
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. Photometry — how bright it actually looks
@@ -758,6 +984,36 @@ export function findApproach(f, jdCenter, spanDays, coarseSteps = 240, tolDays =
 }
 
 /**
+ * Every INTERIOR local minimum and maximum of `f` on [jdStart, jdEnd], each
+ * refined by golden section. Interior is the operative word: an extremum in the
+ * end samples is not bracketed and is not reported, which is the same rule
+ * `findApproach` applies and for the same reason — a window edge is not an
+ * extremum, it is the end of the search.
+ *
+ * The caller chooses the window so that the extrema it wants are interior to
+ * it. `moonApsides` searches from before the instant it cares about precisely
+ * so the next apsis cannot land on the boundary.
+ */
+export function findExtrema(f, jdStart, jdEnd, coarseSteps = 240, tolDays = 1e-5) {
+    const n = Math.max(4, coarseSteps | 0);
+    const dt = (jdEnd - jdStart) / n;
+    const v = new Float64Array(n + 1);
+    for (let i = 0; i <= n; i++) v[i] = f(jdStart + i * dt);
+    const minima = [], maxima = [];
+    for (let i = 1; i < n; i++) {
+        const a = jdStart + (i - 1) * dt, b = jdStart + (i + 1) * dt;
+        if (v[i] <= v[i - 1] && v[i] <= v[i + 1] && (v[i] < v[i - 1] || v[i] < v[i + 1])) {
+            const r = refineMinimum(f, a, b, tolDays);
+            minima.push({ jd: r.t, value: r.value });
+        } else if (v[i] >= v[i - 1] && v[i] >= v[i + 1] && (v[i] > v[i - 1] || v[i] > v[i + 1])) {
+            const r = refineMinimum((t) => -f(t), a, b, tolDays);
+            maxima.push({ jd: r.t, value: -r.value });
+        }
+    }
+    return { minima, maxima };
+}
+
+/**
  * Compare this page's two-body approach against JPL's integrated one.
  *
  * The output of this function is a DISAGREEMENT, and that is what it is for:
@@ -827,7 +1083,8 @@ export function energyComparison(megatons) {
  * or the equivalent metadata the worker ships back. `ctx.geo` is the object's
  * geocentric ecliptic J2000 vector in AU — the worker's `geoframe` output.
  * Everything optional degrades to null rather than to a guess: no observer,
- * no altitude; no H, no magnitude; no previous sample, no sky rate.
+ * no altitude; no H, no magnitude; no previous sample, no sky rate; and no
+ * geocentric velocity, no encounter screen.
  */
 export function buildObjectRow(el, ctx) {
     const [gx, gy, gz] = ctx.geo;
@@ -878,6 +1135,17 @@ export function buildObjectRow(el, ctx) {
         ? angularRateDegPerHour([gx, gy, gz], ctx.prevGeo, ctx.prevDtDays)
         : null;
 
+    // The encounter screen, when the caller has differenced this object's
+    // heliocentric velocity against Earth's. Optional like everything else:
+    // no velocity, no claim about Earth's grip on it.
+    const vGeoKms = Number.isFinite(ctx.vGeoKms) ? ctx.vGeoKms : null;
+    const encounter = vGeoKms != null
+        ? encounterAnalysis({ distKm, vGeoKms, earthRAU: earthRAU ?? 1 })
+        : null;
+    // And the orbit-level question, which needs no velocity at all — just the
+    // published MOID. "Can it ever get here", as against "is it here now".
+    const reach = reachesGravityDomain(el.moid, earthRAU ?? 1);
+
     return {
         index: ctx.index ?? null,
         des: el.des ?? null,
@@ -893,6 +1161,7 @@ export function buildObjectRow(el, ctx) {
         raDeg: rd.raDeg, decDeg: rd.decDeg, raDecLabel: formatRaDec(rd.raDeg, rd.decDeg),
         mag, magBand: visibilityBand(mag), phaseDeg, magNote,
         sky, rateDegPerHour,
+        vGeoKms, encounter, reach,
         angularArcsec: angularDiameterArcsec(sizeKm, distKm),
         elementsNote: Number.isFinite(el.epoch) ? elementsAgeNote(el.epoch, ctx.jd) : null,
     };

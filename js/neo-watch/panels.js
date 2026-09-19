@@ -21,7 +21,10 @@
  *     rather than extrapolated; comets get no H,G magnitude at all.
  */
 
-import { formatRelativeTime, impactEnergy, DENSITY, LD_KM, AU_KM } from '../neo-space.js';
+import {
+    formatRelativeTime, impactEnergy, DENSITY, LD_KM, AU_KM,
+    hillRadiusKm, soiRadiusKm, escapeSpeedKms, REGIME_LABELS, formatGeoDistance,
+} from '../neo-space.js';
 
 /** Lunar distance in AU — the unit every miss distance here is printed in. */
 const LD_IN_AU = LD_KM / AU_KM;
@@ -96,8 +99,9 @@ export function renderNearest(el, rows, { state = 'live', selected = null, obser
             // Name and size are fixed for a given object; distance, magnitude
             // and altitude are not.
             td[1].textContent = r.distLabel;
-            td[3].textContent = r.mag == null ? '—' : num(r.mag, 1);
-            if (observer && td[4]) td[4].innerHTML = altCell(r);
+            td[2].textContent = r.vGeoKms == null ? '—' : `${r.vGeoKms.toFixed(1)}`;
+            td[4].textContent = r.mag == null ? '—' : num(r.mag, 1);
+            if (observer && td[5]) td[5].innerHTML = altCell(r);
             tr.classList.toggle('nw-row--sel', r.index === selected);
         }
         return;
@@ -105,8 +109,8 @@ export function renderNearest(el, rows, { state = 'live', selected = null, obser
 
     const head = `
         <tr>
-            <th>Object</th><th class="nw-num">Distance</th><th class="nw-num">Size</th>
-            <th class="nw-num">Mag</th>${observer ? '<th class="nw-num">Alt</th>' : ''}
+            <th>Object</th><th class="nw-num">Distance</th><th class="nw-num">Speed</th>
+            <th class="nw-num">Size</th><th class="nw-num">Mag</th>${observer ? '<th class="nw-num">Alt</th>' : ''}
         </tr>`;
     const html = rows.map((r) => {
         const sel = r.index === selected ? ' nw-row--sel' : '';
@@ -114,6 +118,7 @@ export function renderNearest(el, rows, { state = 'live', selected = null, obser
         <tr class="nw-row ${rowClass(r)}${sel}" data-index="${r.index}" tabindex="0">
             <td class="nw-name">${esc(r.name)} ${tagFor(r)}</td>
             <td class="nw-num">${esc(r.distLabel)}</td>
+            <td class="nw-num" title="geocentric speed, km/s">${r.vGeoKms == null ? '—' : r.vGeoKms.toFixed(1)}</td>
             <td class="nw-num" title="${esc(r.sizeSource || '')}">${esc(r.sizeLabel)}</td>
             <td class="nw-num">${r.mag == null ? '—' : num(r.mag, 1)}</td>
             ${observer ? `<td class="nw-num">${altCell(r)}</td>` : ''}
@@ -360,6 +365,122 @@ export function renderMoon(el, phase, apsides, { jd = null } = {}) {
         good to about 100 km.
     </p>`);
     el.innerHTML = rows.join('');
+}
+
+/**
+ * EARTH'S GRAVITATIONAL REACH — the page's answer to "what could actually get
+ * here", and to where its own model stops being the right one.
+ *
+ * Three questions, three different kinds of answer, and the card keeps them
+ * apart because conflating them is the whole trap:
+ *
+ *   WHERE IS THE BOUNDARY   pure physics from the live Earth distance. Certain.
+ *   WHO IS INSIDE IT NOW    our two-body propagation. Good far out, and
+ *                           explicitly NOT good inside the SOI, which the card
+ *                           says out loud rather than quietly drawing anyway.
+ *   WHO COULD EVER BE       the Earth MOID — a property of the ORBITS, so it is
+ *                           a hard filter over the whole catalogue and says
+ *                           nothing at all about timing.
+ */
+export function renderGravity(el, { earthRAU = 1, nearest = null, inside = [], screen = null, tierLabel = '', state = 'live' } = {}) {
+    if (!el) return;
+    const hillKm = hillRadiusKm(earthRAU);
+    const soiKm = soiRadiusKm(earthRAU);
+    const escHill = escapeSpeedKms(hillKm);
+
+    const stat = (k, v, title = '') =>
+        `<div class="nw-stat" ${title ? `title="${esc(title)}"` : ''}>
+            <span class="nw-stat-k">${esc(k)}</span><span class="nw-stat-v">${v}</span></div>`;
+
+    const out = [
+        '<div class="nw-stats">',
+        stat('Hill sphere', `${(hillKm / LD_KM).toFixed(2)} LD`,
+            `${Math.round(hillKm).toLocaleString('en-US')} km — where Earth's pull beats the Sun's tide. Nothing can orbit Earth beyond it.`),
+        stat('Sphere of influence', `${(soiKm / LD_KM).toFixed(2)} LD`,
+            `${Math.round(soiKm).toLocaleString('en-US')} km — inside this, an encounter is better modelled about Earth than about the Sun.`),
+        stat('Escape at Hill', `${escHill.toFixed(2)} km/s`,
+            'The speed an object must be under, out there, to be bound to Earth at all.'),
+        '</div>',
+    ];
+
+    // ── Who is inside, right now ────────────────────────────────────────────
+    if (state === 'down' || state === 'loading') {
+        out.push(emptyState(state, ''));
+    } else if (inside.length) {
+        out.push(`<p class="nw-grav-hit"><b>${inside.length}</b> object${inside.length === 1 ? '' : 's'}
+            inside the Hill sphere right now.</p>`);
+        out.push(`<table class="nw-table"><thead><tr><th>Object</th>
+            <th class="nw-num">Range</th><th class="nw-num">Speed</th><th class="nw-num">State</th></tr></thead><tbody>${
+            inside.slice(0, 6).map(r => `
+            <tr class="nw-row ${rowClass(r)}" data-index="${r.index}" tabindex="0">
+                <td class="nw-name">${esc(r.name)}</td>
+                <td class="nw-num">${esc(r.distLabel)}</td>
+                <td class="nw-num">${r.vGeoKms == null ? '—' : `${r.vGeoKms.toFixed(1)} km/s`}</td>
+                <td class="nw-num">${r.encounter?.bound ? '<span class="nw-up">bound</span>' : 'passing'}</td>
+            </tr>`).join('')}</tbody></table>`);
+    } else {
+        out.push(`<p class="nw-note">Nothing catalogued is inside the Hill sphere at this instant —
+            the ordinary state of affairs. A pass inside ${(hillKm / LD_KM).toFixed(1)} LD happens
+            a few times a year among known objects.</p>`);
+    }
+
+    // ── The nearest object's encounter, in full ─────────────────────────────
+    if (nearest?.encounter) {
+        const e = nearest.encounter;
+        const lines = [
+            `<h4>Nearest object · ${esc(nearest.name)}</h4>`,
+            `<p>${esc(nearest.distLabel)} away at
+             <b>${nearest.vGeoKms == null ? '—' : `${nearest.vGeoKms.toFixed(2)} km/s`}</b> relative to Earth
+             — ${esc(REGIME_LABELS[e.regime] || e.regime)}.</p>`,
+        ];
+        if (e.vInfKms != null) {
+            const f = e.focusing;
+            lines.push(`<p class="nw-note">Hyperbolic excess <b>${e.vInfKms.toFixed(2)} km/s</b>: it is
+                ${e.captureMarginKms.toFixed(2)} km/s faster than escape at this range, so Earth cannot hold it.
+                ${f ? `At that speed Earth's focused collision cross-section is <b>${f.enhancement.toFixed(1)}×</b>
+                its geometric one — an impact corridor ${Math.round(f.bMaxKm).toLocaleString('en-US')} km wide,
+                against a miss of ${esc(formatGeoDistance(e.distKm))}.` : ''}</p>`);
+        } else if (e.bound) {
+            lines.push(`<p class="nw-note">Its geocentric energy is <b>negative</b> — at this instant it is
+                bound to Earth. That is what a temporarily captured object, a "minimoon", is.</p>`);
+        }
+        if (!e.modelValid) {
+            lines.push(`<p class="nw-warn">It is inside the sphere of influence, so <b>this page's own
+                position for it is no longer the right model</b> — we propagate two-body orbits about the
+                Sun and Earth is deflecting it. The close-approach table beside this is JPL's integrated
+                orbit and is the one to believe.</p>`);
+        }
+        out.push(`<div class="nw-grav-near">${lines.join('')}</div>`);
+    }
+
+    // ── Who could ever be ───────────────────────────────────────────────────
+    if (screen?.counts) {
+        const c = screen.counts;
+        out.push(`<div class="nw-grav-screen">
+            <h4>Which orbits can reach us at all</h4>
+            <p>Of <b>${c.withMoid.toLocaleString('en-US')}</b> loaded objects with a published Earth MOID,
+            <b>${c.hill.toLocaleString('en-US')}</b> have orbits that pass within the Hill sphere,
+            <b>${c.soi.toLocaleString('en-US')}</b> within the sphere of influence, and
+            <b>${c.impact.toLocaleString('en-US')}</b> within one Earth radius of our orbit.</p>
+            <p class="nw-note">MOID is the minimum distance between the two <em>orbits</em>, not the two
+            bodies, so this is a hard ceiling — an object whose MOID exceeds the Hill radius cannot enter
+            it wherever it is in its orbit. The converse does <em>not</em> follow: a small MOID means the
+            orbits pass close, not that the bodies do. Timing is what the approach table is for.
+            ${tierLabel ? `Screening the loaded population: ${esc(tierLabel)}.` : ''}</p>
+        </div>`);
+        if (screen.closest?.length) {
+            out.push(`<table class="nw-table"><thead><tr><th>Closest orbits</th>
+                <th class="nw-num">Earth MOID</th><th class="nw-num">H</th></tr></thead><tbody>${
+                screen.closest.slice(0, 6).map(o => `
+                <tr class="nw-row" data-index="${o.index}" tabindex="0">
+                    <td class="nw-name">${esc(o.name || o.des)}</td>
+                    <td class="nw-num">${(o.moid * AU_KM / LD_KM).toFixed(3)} LD</td>
+                    <td class="nw-num">${o.H == null ? '—' : o.H.toFixed(1)}</td>
+                </tr>`).join('')}</tbody></table>`);
+        }
+    }
+
+    el.innerHTML = out.join('');
 }
 
 /** A short line naming what each feed is currently doing. */

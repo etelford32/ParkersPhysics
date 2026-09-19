@@ -31,16 +31,18 @@
 
 import {
     AU_KM, HORIZONS, DEFAULT_HORIZON,
-    earthHelioJ2000, buildObjectRow, findApproach, compareApproach,
+    earthHelioJ2000, earthVelocityJ2000, AU_PER_DAY_TO_KMS,
+    buildObjectRow, findApproach, compareApproach,
     formatGeoDistance, subSolarPoint, gmstRad,
+    hillRadiusKm, soiRadiusKm, EARTH_RADIUS_KM,
 } from './neo-space.js';
-import { rowToRecord, prepareColumns, propagateColumns, deriveGeocentric } from './neo-orbits.js';
+import { rowToRecord, prepareColumns, propagateColumns, deriveGeocentric, propagate } from './neo-orbits.js';
 import { EARTH_TEXTURES } from './earth-skin.js';
 import { MOON_TEXTURES } from './moon-skin.js';
 import { NeoStage } from './neo-watch/stage.js';
 import {
     renderNearest, renderApproaches, renderSentry, renderFireballs,
-    renderSelected, renderFeedChips, renderMoon,
+    renderSelected, renderFeedChips, renderMoon, renderGravity,
 } from './neo-watch/panels.js';
 
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
@@ -262,6 +264,8 @@ export class NeoWatch {
             this.workerState = `${msg.count.toLocaleString('en-US')} objects`;
             this.meta.clear();
             this._metaWanted.clear();
+            this.screen = null;
+            this._requestScreen();
             this._renderChips();
             return;
         }
@@ -271,6 +275,10 @@ export class NeoWatch {
             this.frame = { jd: msg.jd, geo: msg.geo, rHelio: msg.rHelio, rGeo: msg.rGeo, count: msg.count };
             this.stage.setPopulation({ geo: msg.geo, rGeo: msg.rGeo, count: msg.count });
             this._requestMetaForVisible();
+            return;
+        }
+        if (msg.type === 'screen') {
+            this.screen = { ...msg, jd: this._jdNow() };
             return;
         }
         if (msg.type === 'meta') {
@@ -300,6 +308,24 @@ export class NeoWatch {
         if (!want.length) return;
         for (const k of want) this._metaWanted.add(k);
         this.worker.postMessage({ type: 'meta', id: 2, indices: want });
+    }
+
+    /**
+     * Ask the worker which objects can reach Earth's gravitational domain at
+     * all. The thresholds are computed here because they ride Earth's live
+     * heliocentric distance (3.3 % over a year) and the ephemeris lives on this
+     * thread; the worker holds the MOID column and does the pass.
+     */
+    _requestScreen() {
+        if (!this.worker) return;
+        const earthRAU = earthHelioJ2000(this._jdNow()).rAU;
+        this.worker.postMessage({
+            type: 'screen', id: 5,
+            hillAU: hillRadiusKm(earthRAU) / AU_KM,
+            soiAU: soiRadiusKm(earthRAU) / AU_KM,
+            impactAU: EARTH_RADIUS_KM / AU_KM,
+            limit: 10,
+        });
     }
 
     _nearestIndices(limit) {
@@ -371,7 +397,27 @@ export class NeoWatch {
             observer: this.observer,
             prevGeo: prev,
             prevDtDays: prev ? f.jd - this.prevFrame.jd : 0,
+            vGeoKms: this._geocentricSpeed(el, jd),
         });
+    }
+
+    /**
+     * Geocentric speed (km/s) of one object: its heliocentric velocity from the
+     * kernel's own propagator, differenced against Earth's.
+     *
+     * Computed HERE and not in the worker on purpose. The worker ships
+     * velocities for nobody — 38 000 vectors a frame to label fourteen rows —
+     * but it does ship each named object's orientation and time anchor, which
+     * is exactly enough for `propagate` to answer for the handful the readouts
+     * are about to name. Returns null when the metadata predates that (a
+     * catalogue row that never reached `meta`), rather than a zero that would
+     * read as "stationary relative to Earth".
+     */
+    _geocentricSpeed(el, jd) {
+        if (!Number.isFinite(el?.om) || !Number.isFinite(el?.n) || !Number.isFinite(el?.t0)) return null;
+        const p = propagate(el, jd, true);
+        const ev = earthVelocityJ2000(jd);
+        return Math.hypot(p.vx - ev.x, p.vy - ev.y, p.vz - ev.z) * AU_PER_DAY_TO_KMS;
     }
 
     _renderLive(jd) {
@@ -405,6 +451,18 @@ export class NeoWatch {
             this._lastWatchJd = jd;
             this._renderWatchPanels();
         }
+
+        // Earth's gravitational reach: the boundaries, who is inside them right
+        // now, and who could ever be. The nearest row supplies the live
+        // encounter; the worker's screen supplies the catalogue-wide answer.
+        renderGravity(this.$('nw-gravity'), {
+            earthRAU: earth.rAU,
+            nearest: rows[0] || null,
+            inside: rows.filter(r => r.encounter?.insideHill),
+            screen: this.screen,
+            tierLabel: this.catalog.note,
+            state: boardState,
+        });
 
         // The Moon card. Phase and apsides are computed by the stage each time
         // it places the Moon, so this prints the same numbers the stage drew

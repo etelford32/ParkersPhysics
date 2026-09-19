@@ -36,6 +36,14 @@
  *                ring at its own real radius on the active radial map, with a
  *                label that stops being drawn when the ring is too small to
  *                point at (the orrery's "labels pile up at the top view" scar).
+ *                Two of them are not ruler marks at all: the SOI and the Hill
+ *                sphere are GRAVITY boundaries, drawn amber, and their radii
+ *                are recomputed per frame from Earth's live heliocentric
+ *                distance rather than read from the table (both scale with it,
+ *                by 3.3 % over a year). The Hill sphere is the edge of Earth's
+ *                gravitational domain; the SOI is the edge of this page's own
+ *                competence, since inside it our heliocentric two-body
+ *                positions are the wrong model and the panel says so.
  *   moon         at its real geocentric position, with its real path over one
  *                sidereal month sampled from the same ephemeris.
  *   population   every catalogued object inside the view horizon, as an
@@ -69,6 +77,7 @@ import {
     gmstRad, earthSceneMatrix,
     sunGeoDirectionJ2000, moonGeoJ2000, moonPhase, moonPath, moonApsides,
     equatorialToScene, eclipticToEquatorial,
+    earthHelioJ2000, hillRadiusKm, soiRadiusKm,
 } from '../neo-space.js';
 import { FLAG } from '../neo-orbits.js';
 import { rockGeometry, rockMaterial, shapeFor, spinFor, hash32, drawnRockRadius } from '../neo-rocks.js';
@@ -599,12 +608,18 @@ export class NeoStage {
         this.shellGroup = new THREE.Group();
         this.scene.add(this.shellGroup);
         this.shells = SHELLS.map((s) => {
+            const color = s.kind === 'orbit' ? 0x54e0b8
+                : s.kind === 'ld' ? 0x5a7fd6
+                : s.kind === 'gravity' ? 0xffb05c
+                : 0x8a6fd0;
             const mat = new THREE.LineBasicMaterial({
-                color: s.kind === 'orbit' ? 0x54e0b8 : s.kind === 'ld' ? 0x5a7fd6 : 0x8a6fd0,
-                transparent: true, opacity: s.kind === 'orbit' ? 0.5 : 0.34,
+                color, transparent: true,
+                opacity: s.kind === 'orbit' ? 0.5 : s.kind === 'gravity' ? 0.62 : 0.34,
             });
             const line = new THREE.LineLoop(ringGeometry(1), mat);
-            const label = labelSprite(s.label, s.kind === 'orbit' ? '#54e0b8' : s.kind === 'ld' ? '#8fb0ff' : '#b79bff', 0.9);
+            const label = labelSprite(s.label,
+                s.kind === 'orbit' ? '#54e0b8' : s.kind === 'ld' ? '#8fb0ff'
+                : s.kind === 'gravity' ? '#ffb05c' : '#b79bff', 0.9);
             this.shellGroup.add(line, label);
             return { spec: s, line, label };
         });
@@ -865,11 +880,25 @@ export class NeoStage {
         }
     }
 
+    /**
+     * The live radius of one shell. The gravity boundaries move with Earth's
+     * own heliocentric distance — 3.3 % over a year — so their table entry is a
+     * nominal value and the real one is computed per frame. Everything else is
+     * a fixed distance and returns its own number.
+     */
+    _shellKm(spec, earthRAU) {
+        if (spec.dynamic === 'hill') return hillRadiusKm(earthRAU);
+        if (spec.dynamic === 'soi') return soiRadiusKm(earthRAU);
+        return spec.km;
+    }
+
     _placeShells() {
+        const earthRAU = earthHelioJ2000(this.jd).rAU;
         for (let i = 0; i < this.shells.length; i++) {
             const sh = this.shells[i];
-            const r = this.trueScale ? trueSceneRadius(sh.spec.km) : geoSceneRadius(sh.spec.km);
-            const inView = sh.spec.km <= this.horizonKm * 1.35;
+            sh.km = this._shellKm(sh.spec, earthRAU);
+            const r = this.trueScale ? trueSceneRadius(sh.km) : geoSceneRadius(sh.km);
+            const inView = sh.km <= this.horizonKm * 1.35;
             sh.line.scale.setScalar(r);
             sh.line.visible = inView;
             // Each label sits at its own azimuth on its own ring. Rings only a

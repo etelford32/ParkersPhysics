@@ -167,6 +167,19 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
 .nw-approach p { font-size:.68rem; color:#bfcbe6; margin-top:4px; line-height:1.5; }
 .nw-compare { color:#a9b6d0 !important; font-size:.64rem !important; }
 
+/* ── Gravity card ───────────────────────────────────────── */
+.nw-grav-hit { font-size:.72rem; color:#ffd479; margin:8px 0 6px; }
+.nw-grav-near, .nw-grav-screen { margin-top:10px; padding-top:9px; border-top:1px solid rgba(255,255,255,.08); }
+.nw-grav-near h4, .nw-grav-screen h4 {
+    font-size:.6rem; text-transform:uppercase; letter-spacing:.1em; color:#8fb0ff; margin-bottom:4px;
+}
+.nw-grav-near p, .nw-grav-screen p { font-size:.68rem; color:#bfcbe6; line-height:1.55; margin-top:4px; }
+.nw-warn {
+    font-size:.65rem !important; color:#ffb05c !important; line-height:1.55;
+    background: rgba(255,176,92,.07); border-left:2px solid rgba(255,176,92,.5);
+    padding:6px 8px; border-radius:0 6px 6px 0; margin-top:7px !important;
+}
+
 /* ── Moon card ──────────────────────────────────────────── */
 .nw-moon-head { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
 .nw-moon-disc { flex:0 0 auto; }
@@ -234,7 +247,10 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
           The labelled rings are the ruler; <b>True scale</b> removes the distance
           compression entirely. Rings are ranges, not orbits; the Moon's path is
           its real one, with perigee and apogee marked. The atmosphere is a
-          scattering model drawn to 160&nbsp;km.
+          scattering model drawn to 160&nbsp;km. The two <b>amber</b> rings are
+          Earth's gravitational boundaries &mdash; the sphere of influence at
+          2.4&nbsp;LD and the Hill sphere at 3.9&nbsp;LD, both smaller than most
+          people expect and both inside the lunar-distance ladder.
         </div>
       </div>
 
@@ -330,6 +346,11 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
     <section class="nw-panel">
       <h2>Selected object</h2>
       <div id="nw-selected"></div>
+    </section>
+
+    <section class="nw-panel">
+      <h2>Earth&rsquo;s gravitational reach <small>what can get here &mdash; and where our model stops</small></h2>
+      <div id="nw-gravity"></div>
     </section>
 
     <section class="nw-panel">

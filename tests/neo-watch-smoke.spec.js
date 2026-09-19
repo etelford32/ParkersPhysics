@@ -6,6 +6,7 @@ import {
 import {
     earthHelioJ2000, LD_AU, geoSceneRadius, MOON_SCENE, EARTH_RADIUS_KM, LD_KM,
     MOON_RADIUS_KM, bodySceneRadius, moonPhase,
+    hillRadiusKm, soiRadiusKm, escapeSpeedKms, encounterAnalysis,
 } from '../js/neo-space.js';
 import { R2D } from '../js/neo-orbits.js';
 
@@ -27,6 +28,8 @@ import { R2D } from '../js/neo-orbits.js';
  *     one planted at 0.4 AU is inside the map but OUTSIDE the default horizon
  *   - the live board ranks by distance and the nearest row is the nearest object
  *   - the live board updates IN PLACE, so a row is not detached mid-click
+ *   - the gravity boundaries are drawn at their LIVE radii and the panel's
+ *     numbers are the same ones, including the catalogue-wide MOID screen
  *   - selecting a row selects on the stage, and the card fills
  *   - a JPL approach row moves the clock (LIVE turns off, the offset is the
  *     encounter) and comes back with "Now"
@@ -224,6 +227,15 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         // NEAR-3LD is planted at 3 LD and FAR-04AU at 0.4 AU. The default
         // horizon is 0.2 AU, so exactly one of them is inside it.
         //
+        // Wait for the object this test is ABOUT, not for "some metadata": the
+        // tier ladder's second load clears the metadata map and refills it on
+        // the next frame, so a generic wait can land in that window. The test
+        // has to wait on its own precondition.
+        await page.waitForFunction(() => {
+            for (const m of window.__neoWatch.meta.values()) if (m.des === 'NEAR-3LD') return true;
+            return false;
+        }, null, { timeout: 30_000 });
+
         // The near one is found by name; the far one CANNOT be, and that is
         // itself the design: metadata is only fetched for objects a readout can
         // name, so an object outside the horizon has none. It is identified by
@@ -347,6 +359,82 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         expect(after.scale).toBe(1);
         // ...but the distance does change, by a lot: 60 R⊕ true against 12 drawn.
         expect(after.sceneR).toBeGreaterThan(moon.sceneR * 3);
+
+        expect(errors).toEqual([]);
+    });
+
+    test('Earth\u2019s gravitational reach is drawn and analysed from one set of numbers', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+        await page.waitForFunction(() => !!window.__neoWatch.screen, null, { timeout: 20_000 });
+
+        const g = await page.evaluate(() => {
+            const w = window.__neoWatch;
+            const byId = Object.fromEntries(w.stage.shells.map(s => [s.spec.id, { km: s.km, visible: s.line.visible }]));
+            return { shells: byId, screen: w.screen, jd: w.frame.jd };
+        });
+
+        // THE BOUNDARIES ARE LIVE. Both scale with Earth's own heliocentric
+        // distance, so the drawn ring must be the formula at THIS instant, not
+        // the nominal value in the table.
+        const earthRAU = await page.evaluate(async (jd) => {
+            const m = await import('/js/neo-space.js');
+            return m.earthHelioJ2000(jd).rAU;
+        }, g.jd);
+        expect(g.shells.hill.km).toBeCloseTo(hillRadiusKm(earthRAU), 3);
+        expect(g.shells.soi.km).toBeCloseTo(soiRadiusKm(earthRAU), 3);
+        // ...and that is measurably not the 1 AU value, or "live" would be free.
+        expect(Math.abs(g.shells.hill.km - hillRadiusKm(1))).toBeGreaterThan(100);
+        // Both are inside the lunar-distance ladder, which is the point of them.
+        expect(g.shells.soi.km).toBeLessThan(g.shells.hill.km);
+        expect(g.shells.hill.km).toBeLessThan(5 * LD_KM);
+        expect(g.shells.hill.visible).toBe(true);
+
+        // The panel prints the same boundaries and the escape speed out there.
+        const card = await page.textContent('#nw-gravity');
+        expect(card).toMatch(new RegExp(`${(hillRadiusKm(earthRAU) / LD_KM).toFixed(2)}\\s*LD`));
+        expect(card).toMatch(new RegExp(`${(soiRadiusKm(earthRAU) / LD_KM).toFixed(2)}\\s*LD`));
+        expect(card).toMatch(new RegExp(`${escapeSpeedKms(hillRadiusKm(earthRAU)).toFixed(2)}\\s*km/s`));
+
+        // THE CATALOGUE-WIDE SCREEN. The fixtures' MOIDs are all 0.001 AU or
+        // smaller except Eros at 0.148, so the Hill count must exclude Eros and
+        // include the rest — a real filter, not a count of everything.
+        expect(g.screen.counts.withMoid).toBeGreaterThan(3);
+        expect(g.screen.counts.hill).toBeGreaterThan(0);
+        expect(g.screen.counts.hill).toBeLessThan(g.screen.counts.withMoid);
+        expect(g.screen.counts.impact).toBe(0);
+        // Ordered, and the closest really is the smallest MOID in the set.
+        const moids = g.screen.closest.map(o => o.moid);
+        expect([...moids].sort((a, b) => a - b)).toEqual(moids);
+        expect(card).toMatch(/orbits that pass within the Hill sphere/);
+
+        // Every board row carries a geocentric speed, and the encounter screen
+        // agrees with the kernel evaluated independently on the same inputs.
+        const rows = await page.evaluate(() => {
+            const w = window.__neoWatch;
+            const earth = w.frame ? w.frame.rHelio : null;
+            return w._nearestIndices(6).map((k) => {
+                const r = w._rowFor(k, w.frame.jd, 1.0);
+                return r && { v: r.vGeoKms, dist: r.encounter?.distKm, regime: r.encounter?.regime,
+                    bound: r.encounter?.bound, valid: r.encounter?.modelValid };
+            }).filter(Boolean);
+        });
+        expect(rows.length).toBeGreaterThan(0);
+        for (const r of rows) {
+            expect(Number.isFinite(r.v)).toBe(true);
+            // A near-Earth object's geocentric speed is a few km/s to a few tens.
+            expect(r.v).toBeGreaterThan(0.1);
+            expect(r.v).toBeLessThan(80);
+            const want = encounterAnalysis({ distKm: r.dist, vGeoKms: r.v, earthRAU: 1.0 });
+            expect(r.regime).toBe(want.regime);
+            expect(r.bound).toBe(want.bound);
+            expect(r.valid).toBe(want.modelValid);
+        }
+
+        // The speed column is on the board.
+        expect(await page.locator('#nw-nearest thead th').allTextContents()).toContain('Speed');
 
         expect(errors).toEqual([]);
     });

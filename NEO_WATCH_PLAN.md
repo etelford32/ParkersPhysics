@@ -30,6 +30,9 @@ answers it from the middle of the Earth:
 | Earth: GMST-locked globe, marched Rayleigh atmosphere, ocean glint | stage, from the kernel's Sun direction | per frame |
 | Globe locked to sidereal time — terminator, sub-solar point, your horizon | kernel `gmstRad`, `subSolarPoint` | per frame |
 | Our two-body pass vs JPL's integrated one, for the selected object | kernel `findApproach` + `compareApproach` | on selection |
+| Earth's gravitational boundaries, drawn at their live radii | kernel `hillRadiusKm` · `soiRadiusKm` | per frame |
+| Per-object encounter screen: geocentric speed, v∞, bound/unbound, focused impact corridor | kernel `encounterAnalysis` | 3 Hz |
+| Catalogue-wide "which orbits can reach us at all" by Earth MOID | worker `screen` + kernel `reachesGravityDomain` | per catalogue load |
 
 Nothing in the data layer is forked. The elements, the wire format, Kepler, the
 class table and the rock meshes are the orrery's; what is new is a kernel for
@@ -117,11 +120,50 @@ the view *from* Earth and a stage that draws it.
     drawn because a ring would hide the 13 % the lunar orbit's eccentricity is
     actually worth. It is selectable as the string `'moon'` rather than a
     sentinel index, because an index would read into the population arrays.
-12. **Estimates say they are estimates.** A published diameter is used where JPL
+12. **THE PAGE DRAWS ITS OWN COMPETENCE BOUNDARY.** Every object here is
+    propagated on a two-body orbit about the SUN — Earth supplies the origin and
+    nothing else. That is fine until an object is close enough for Earth's
+    gravity to matter, and the SOI (0.0062 AU, 2.4 LD) is exactly where it stops
+    being fine. So the stage draws it, in amber, next to the Hill sphere
+    (0.0100 AU, 3.9 LD), and an object inside it gets `modelValid: false` and a
+    panel warning saying our own position for it is no longer the right model.
+    Both radii ride Earth's live heliocentric distance (3.3 % over a year) and
+    are recomputed per frame; the `km` in `SHELLS` is nominal and the gate pins
+    it against the formula. Note where they land — INSIDE the 1–5 LD rings.
+    Earth's gravitational domain is smaller than most people's intuition for it,
+    and drawing it inside the familiar lunar-distance ladder is the point.
+13. **Three different questions, three different kinds of answer.** The gravity
+    card keeps them apart because conflating them is the trap: WHERE THE
+    BOUNDARY IS is pure physics and certain; WHO IS INSIDE IT NOW is our
+    propagation, and is explicitly untrustworthy inside the SOI; WHO COULD EVER
+    BE is the Earth MOID, a property of the ORBITS, which makes it a hard
+    catalogue-wide filter that says nothing whatever about timing. The converse
+    of the MOID filter does not hold and the card says so: a small MOID means
+    the orbits pass close, not that the bodies do.
+14. **Estimates say they are estimates.** A published diameter is used where JPL
     has one; otherwise size comes from absolute magnitude with a stated albedo.
     Magnitudes use the IAU H,G system and are **absent** past its 120° phase fit
     limit rather than extrapolated. Comets get no H,G magnitude at all — their
     light is activity-driven — and the row says so.
+
+## 2b. The gravity analysis, in numbers
+
+Computed from the kernel, at Earth's mean distance:
+
+| Quantity | Value | Why it matters |
+|---|---|---|
+| Hill radius | 1,503,600 km · **3.91 LD** | Outer bound of anything that can orbit Earth |
+| Sphere of influence | 929,000 km · **2.42 LD** | Where our heliocentric model stops being right |
+| Escape speed at the Hill radius | **0.73 km/s** | What an arrival must be under to be captured |
+| Typical NEO arrival speed | 5–20 km/s | An order of magnitude too fast — why minimoons are rare |
+| Focused cross-section at v∞ = 3 km/s | **14.9×** geometric | Earth is a much bigger target than Earth |
+| Focused cross-section at v∞ = 20 km/s | 1.31× geometric | Fast encounters are barely focused at all |
+
+The capture margin is the whole story: an object reaching the Hill sphere at a
+typical 8 km/s is going 7.3 km/s faster than it could be and still be bound, and
+nothing in a two-body encounter can shed that — which is why temporary capture
+needs a third body and why the known minimoons (2006 RH120, 2020 CD3) are a list
+of two rather than a population.
 
 ## 3. Shared code, and what was added to it
 
@@ -130,10 +172,13 @@ the view *from* Earth and a stage that draws it.
   `js/neo-worker.js`'s dependency graph does not grow: `js/neo-space.js` pulls
   in the VSOP87D + Meeus modules (73 KB) that a worker propagating osculating
   elements has no use for. `neo-space.js` re-exports it.
-- **`js/neo-worker.js`** gained three additive messages — `geoframe`,
-  `geotrack` and `meta`. Same catalogue, same propagation, one load; the two
-  pages differ only in what they ask for at the end. The orrery's `frame` and
-  `track` paths are untouched.
+- **`js/neo-worker.js`** gained four additive messages — `geoframe`,
+  `geotrack`, `meta` and `screen`. Same catalogue, same propagation, one load;
+  the two pages differ only in what they ask for at the end. The orrery's
+  `frame` and `track` paths are untouched. `meta` also ships each named object's
+  orientation and time anchor, which is what lets the main thread call
+  `propagate(el, jd, true)` for a VELOCITY on the fourteen rows a readout is
+  about to name — rather than shipping 38 000 velocity vectors every frame.
 - **`js/neo-rocks.js`** `rockMaterial` gained a `u_sunPos` uniform whose default
   `(0,0,0)` reproduces the orrery's `normalize(-vW)` exactly. The orrery draws
   the Sun at the world origin; this stage draws Earth there.
@@ -190,6 +235,26 @@ the view *from* Earth and a stage that draws it.
   order changes, and write the numbers into the existing cells otherwise — the
   EarthView verdict card's stable-header rule (CLAUDE.md §4.4), arrived at the
   same way.
+- **`moonApsides` was DATE-DEPENDENT and shipped that way for a day.** It used
+  `findApproach`, which deliberately refuses an extremum on its window edge —
+  right for a close approach, wrong for an apsis. Searching forward from `jd`
+  put whichever apsis was a few hours ahead ON that edge, so the marker silently
+  vanished for roughly one day in fourteen. The browser gate caught it the next
+  morning purely because the date had rolled over onto a bad one. It now uses
+  `findExtrema` over a window that STARTS BEFORE `jd`, and
+  `tests/neo-space.mjs` sweeps 120 epochs across both cycles so the catch is no
+  longer an accident of the calendar.
+- **The anomalistic month is a MEAN.** The follow-up assertion — "the next
+  apsis is within one anomalistic month" — also failed, and this time the code
+  was right: solar perturbation swings the real perigee-to-perigee interval over
+  ~24.6–28.6 days (28.4 d measured as the longest wait across 2026). The search
+  window and the test bound are both sized to the real interval, not the mean.
+- **A `const` in a later section is in its temporal dead zone.** `SHELLS`
+  (section 1) seeds the two gravity boundaries by calling `hillRadiusKm` /
+  `soiRadiusKm`, whose `EARTH_SUN_MASS_RATIO` was a `const` in section 5b — the
+  module threw on import and took the page with it. Function declarations hoist;
+  `const` does not. The gravitational constants now live in the top constants
+  block. `NEO_LAYER_PLAN.md` §3 records the same failure mode on the orrery.
 - **Three call sites want the same ephemeris every frame.** `earthHelioJ2000`
   and `moonGeoJ2000` carry a single-entry memo keyed on the Julian Day; they
   stay pure (same input, same frozen output).

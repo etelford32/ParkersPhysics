@@ -53,6 +53,13 @@
  *       thread holding a second copy of the catalogue.
  *   out { type:'meta', id, objects:[{ index, des, name, H, cls, … }] }
  *
+ *   in  { type:'screen', id, hillAU, soiAU, impactAU, limit }
+ *       Catalogue-wide Earth-MOID screen: how many objects' ORBITS come within
+ *       each of Earth's gravitational boundaries, plus the closest few. One
+ *       pass over a column the worker already holds; the thresholds come in
+ *       from the main thread because they depend on the live ephemeris.
+ *   out { type:'screen', id, counts:{total,withMoid,hill,soi,impact}, closest:[…], ms }
+ *
  *   out { type:'ready' }        on start
  *   out { type:'error', id, error }
  *
@@ -152,6 +159,12 @@ function onMeta(msg) {
             index: idx, des: el.des, name: el.name, H: el.H, cls: el.cls,
             flags: el.flags, moid: el.moid, diam: el.diam, epoch: el.epoch,
             e: el.e, a: el.a, q: el.q, Q: el.Q, i: el.i, per_y: el.per_y,
+            // The orientation and time anchor too, so a consumer can call the
+            // kernel's own `propagate(el, jd, true)` and get a VELOCITY for the
+            // handful of objects it is about to name. Shipping velocities for
+            // the whole catalogue in every frame would cost 38 000 vectors to
+            // label fourteen rows.
+            om: el.om, w: el.w, M0: el.M0, t0: el.t0, n: el.n,
         });
     }
     postMessage({ type: 'meta', id: msg.id, objects: out });
@@ -162,6 +175,39 @@ function onMeta(msg) {
  * neo-space.js `findApproach`. Earth's J2000 position is supplied per sample
  * by the main thread, which is where the ephemeris lives.
  */
+/**
+ * THE CATALOGUE-WIDE SCREEN. Which objects can reach Earth's gravitational
+ * domain AT ALL, by Earth MOID — the minimum distance between the two ORBITS.
+ * An object whose MOID exceeds the Hill radius cannot enter the Hill sphere
+ * wherever it is in its orbit, so one published number filters the whole
+ * catalogue in a single pass over columns the worker already holds.
+ *
+ * The thresholds arrive in the message rather than being computed here: they
+ * depend on Earth's live heliocentric distance, which lives on the main thread
+ * with the ephemeris, and passing three numbers is cheaper than giving this
+ * worker a dependency on js/neo-space.js (see the import comment above).
+ */
+function onScreen(msg) {
+    const t0 = performance.now();
+    const counts = { total: els.length, withMoid: 0, hill: 0, soi: 0, impact: 0 };
+    const ranked = [];
+    for (let k = 0; k < els.length; k++) {
+        const moid = els[k].moid;
+        if (!Number.isFinite(moid)) continue;
+        counts.withMoid++;
+        if (moid <= msg.hillAU) counts.hill++;
+        if (moid <= msg.soiAU) counts.soi++;
+        if (moid <= msg.impactAU) counts.impact++;
+        ranked.push(k);
+    }
+    ranked.sort((a, b) => els[a].moid - els[b].moid);
+    const closest = ranked.slice(0, Math.max(1, msg.limit | 0 || 12)).map((k) => ({
+        index: k, des: els[k].des, name: els[k].name, moid: els[k].moid,
+        H: els[k].H, diam: els[k].diam, flags: els[k].flags, cls: els[k].cls,
+    }));
+    postMessage({ type: 'screen', id: msg.id, counts, closest, ms: performance.now() - t0 });
+}
+
 function onGeoTrack(msg) {
     const el = els[msg.index];
     const steps = Math.max(2, msg.steps | 0);
@@ -218,6 +264,7 @@ self.addEventListener('message', (ev) => {
         else if (msg.type === 'track') onTrack(msg);
         else if (msg.type === 'geotrack') onGeoTrack(msg);
         else if (msg.type === 'meta') onMeta(msg);
+        else if (msg.type === 'screen') onScreen(msg);
     } catch (err) {
         postMessage({ type: 'error', id: msg.id, error: err?.message || String(err) });
     }

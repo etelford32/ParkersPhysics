@@ -39,9 +39,13 @@ import {
     gmstRad, observerEquatorialOfDate, topocentricAltAz, compass16,
     earthHelioJ2000, moonGeoJ2000, sunGeoDirectionJ2000, subSolarPoint,
     deriveGeocentric,
+    MU_EARTH, MU_SUN, EARTH_SUN_MASS_RATIO, AU_PER_DAY_TO_KMS,
+    hillRadiusKm, soiRadiusKm, escapeSpeedKms, geocentricEnergy, vInfinityKms,
+    gravitationalFocusing, earthVelocityJ2000, encounterAnalysis,
+    reachesGravityDomain, REGIME_LABELS,
     DEFAULT_G, PHASE_FIT_MAX_DEG, phaseAngleDeg, apparentMagnitude,
     angularDiameterArcsec, angularRateDegPerHour,
-    refineMinimum, findApproach, compareApproach,
+    refineMinimum, findApproach, findExtrema, compareApproach,
     applyMatrix3, ofDateEquatorialToJ2000Matrix, earthSceneMatrix, buildObjectRow,
     DENSITY, impactEnergy, energyComparison,
     formatGeoDistance, formatRelativeTime, visibilityBand,
@@ -103,6 +107,27 @@ for (let i = 1; i < SHELLS.length; i++) assert.ok(SHELLS[i].km > SHELLS[i - 1].k
 for (let i = 1; i < HORIZONS.length; i++) assert.ok(HORIZONS[i].km > HORIZONS[i - 1].km, 'horizons ascend');
 assert.ok(HORIZONS.some(h => h.id === DEFAULT_HORIZON), 'the default horizon is one of the offered ones');
 assert.ok(SHELLS.every(s => s.km <= GEO_MAP.maxKm), 'no shell is drawn beyond the map');
+
+// The gravity boundaries' table entries are NOMINAL — the renderer recomputes
+// them per frame from Earth's live distance — so the nominal must be the
+// formula's value at 1 AU, or the ring and the panel would disagree about where
+// the same boundary is.
+{
+    const soi = SHELLS.find(x => x.id === 'soi');
+    const hill = SHELLS.find(x => x.id === 'hill');
+    assert.ok(soi && hill, 'both gravity boundaries are in the ruler');
+    near(soi.km, soiRadiusKm(1), 0, 'the SOI shell is the SOI formula at 1 AU');
+    near(hill.km, hillRadiusKm(1), 0, 'the Hill shell is the Hill formula at 1 AU');
+    assert.equal(soi.dynamic, 'soi', 'and they are marked for per-frame recomputation');
+    assert.equal(hill.dynamic, 'hill');
+    assert.equal(soi.kind, 'gravity');
+    assert.equal(hill.kind, 'gravity');
+    // Where they land is the point: Earth's gravitational domain is INSIDE the
+    // familiar lunar-distance ladder, between the 1 LD and 5 LD rings.
+    const ld1 = SHELLS.find(x => x.id === 'ld1'), ld5 = SHELLS.find(x => x.id === 'ld5');
+    assert.ok(ld1.km < soi.km && soi.km < hill.km && hill.km < ld5.km,
+        'the SOI and Hill sphere sit between 1 LD and 5 LD');
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Frames
@@ -441,6 +466,48 @@ for (let k = 0; k < 40; k++) {
     assert.ok(sep < 6, `a sidereal month closes the circuit to within a few degrees (got ${sep}°)`);
 }
 
+// findExtrema: interior extrema only, both kinds, on a function whose extrema
+// are known exactly. sin has a maximum at π/2 and a minimum at 3π/2.
+{
+    const f = (t) => Math.sin(t);
+    const ex = findExtrema(f, 0, 4 * Math.PI, 400, 1e-9);
+    assert.equal(ex.maxima.length, 2, 'two maxima in two periods');
+    assert.equal(ex.minima.length, 2, 'two minima in two periods');
+    near(ex.maxima[0].jd, Math.PI / 2, 1e-6, 'first maximum of sin');
+    near(ex.maxima[0].value, 1, 1e-9, 'and its value');
+    near(ex.minima[0].jd, 3 * Math.PI / 2, 1e-6, 'first minimum of sin');
+    near(ex.minima[0].value, -1, 1e-9, 'and its value');
+    // A monotonic function has no interior extremum at all.
+    assert.equal(findExtrema((t) => t, 0, 10, 100).minima.length, 0);
+    assert.equal(findExtrema((t) => t, 0, 10, 100).maxima.length, 0);
+}
+
+// THE DATE-INDEPENDENCE GATE. `moonApsides` first used `findApproach`, which
+// correctly refuses an extremum on its window edge — and searching forward from
+// `jd` put whichever apsis was a few hours ahead ON that edge, so the marker
+// vanished for roughly one day in fourteen. It shipped, and this suite's
+// browser gate caught it the next morning by accident of the date. Sweeping the
+// whole cycle is what makes it an accident that cannot recur.
+{
+    const start = jdOf('2026-01-01T00:00:00Z');
+    for (let k = 0; k < 120; k++) {
+        const jd = start + k * 0.47;                   // steps through both cycles
+        const a = moonApsides(jd);
+        assert.ok(a.perigee, `a next perigee exists at every epoch (offset ${k * 0.47} d)`);
+        assert.ok(a.apogee, `a next apogee exists at every epoch (offset ${k * 0.47} d)`);
+        assert.ok(a.perigee.jd >= jd, 'the NEXT perigee is not in the past');
+        assert.ok(a.apogee.jd >= jd, 'the NEXT apogee is not in the past');
+        // NOT the mean anomalistic month: that is a MEAN, and solar
+        // perturbations swing successive apsis intervals over roughly
+        // 24.6–28.6 days. Measured across this sweep the longest wait is
+        // 28.4 d, so the bound is the physics, not the mean — asserting the
+        // mean here failed, and the code was right.
+        assert.ok(a.perigee.jd - jd <= 29.5, `the next perigee is within the longest real interval (${a.perigee.jd - jd} d)`);
+        assert.ok(a.apogee.jd - jd <= 29.5, `and so is apogee (${a.apogee.jd - jd} d)`);
+        assert.ok(a.perigee.km < a.apogee.km, 'perigee is always the nearer of the two');
+    }
+}
+
 // Apsides: refined from the same distance curve, and inside the real bounds.
 // These bounds are the Moon's, not this code's — they are what makes the
 // assertion worth making.
@@ -454,8 +521,8 @@ for (let k = 0; k < 40; k++) {
         `apogee is in the real range 404 000–406 700 km, got ${a.apogee.km}`);
     assert.ok(a.perigee.km < a.apogee.km, 'perigee is nearer than apogee');
     for (const k of ['perigee', 'apogee']) {
-        assert.ok(a[k].jd >= jd && a[k].jd <= jd + ANOMALISTIC_MONTH_DAYS + 1e-6,
-            `${k} lands inside the searched month`);
+        assert.ok(a[k].jd >= jd && a[k].jd <= jd + 29.5,
+            `${k} is the NEXT one, within the longest real apsis interval`);
         // And it really is an extremum of the distance curve it was found on.
         const d0 = moonGeoJ2000(a[k].jd).distKm;
         const dm = moonGeoJ2000(a[k].jd - 0.05).distKm;
@@ -488,6 +555,180 @@ assert.ok(ANOMALISTIC_MONTH_DAYS < SYNODIC_MONTH_DAYS, 'synodic is the longest')
     const s = sunGeoDirectionJ2000(jd);
     near(Math.hypot(s.x, s.y, s.z), 1, 1e-12, 'sun direction is a unit vector');
     near(s.x, -e.x / e.rAU, 1e-12, 'and points away from Earth’s heliocentric position');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5b. Earth's gravitational reach
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The mass ratio is DERIVED from the two published μ, not typed a third time.
+near(EARTH_SUN_MASS_RATIO, MU_EARTH / MU_SUN, 0, 'the mass ratio is the ratio of the two μ');
+near(EARTH_SUN_MASS_RATIO, 3.0035e-6, 1e-9, 'and it is Earth:Sun');
+
+// The two radii ARE their formulas, and they land where the literature puts them.
+near(hillRadiusKm(1), AU_KM * Math.cbrt(EARTH_SUN_MASS_RATIO / 3), 1e-6, 'Hill radius is r(m/3M)^⅓');
+near(soiRadiusKm(1), AU_KM * Math.pow(EARTH_SUN_MASS_RATIO, 0.4), 1e-6, 'SOI radius is r(m/M)^⅖');
+assert.ok(hillRadiusKm(1) > 1.47e6 && hillRadiusKm(1) < 1.53e6,
+    `Hill radius is about 1.5 million km, got ${hillRadiusKm(1)}`);
+assert.ok(soiRadiusKm(1) > 9.0e5 && soiRadiusKm(1) < 9.5e5,
+    `SOI radius is about 924 000 km, got ${soiRadiusKm(1)}`);
+// The SOI is INSIDE the Hill sphere — the ordering is what makes the two
+// boundaries mean different things, and swapping them would be invisible.
+assert.ok(soiRadiusKm(1) < hillRadiusKm(1), 'the SOI sits inside the Hill sphere');
+// Both scale linearly with Earth's own heliocentric distance (3.3 % over a year).
+near(hillRadiusKm(2) / hillRadiusKm(1), 2, 1e-12, 'the Hill radius scales with r');
+near(soiRadiusKm(0.5) / soiRadiusKm(1), 0.5, 1e-12, 'so does the SOI');
+
+// Escape speed: the surface value is the textbook one, and the Hill-radius value
+// is the number that explains why temporary capture is rare.
+near(escapeSpeedKms(EARTH_RADIUS_KM), 11.186, 0.01, 'escape speed at the surface');
+near(escapeSpeedKms(GEO_RADIUS_KM), Math.sqrt(2 * MU_EARTH / GEO_RADIUS_KM), 0, 'and at GEO');
+assert.ok(escapeSpeedKms(hillRadiusKm(1)) < 0.8, 'escape from the Hill radius is under 0.8 km/s');
+// Monotonic, and infinite at zero range rather than NaN.
+assert.ok(escapeSpeedKms(1e5) < escapeSpeedKms(1e4), 'escape speed falls with range');
+assert.equal(escapeSpeedKms(0), Infinity);
+
+// Energy is exactly zero AT escape speed — the definition, and the sign test
+// every capture claim on the page rests on.
+{
+    for (const r of [EARTH_RADIUS_KM, GEO_RADIUS_KM, LD_KM, hillRadiusKm(1)]) {
+        const vEsc = escapeSpeedKms(r);
+        near(geocentricEnergy(r, vEsc), 0, 1e-9, `zero energy at escape speed (r=${r})`);
+        assert.ok(geocentricEnergy(r, vEsc * 0.99) < 0, 'slower than escape is bound');
+        assert.ok(geocentricEnergy(r, vEsc * 1.01) > 0, 'faster than escape is unbound');
+        // v∞ is null exactly when bound, and exact when not.
+        assert.equal(vInfinityKms(r, vEsc * 0.99), null, 'a bound object has no v∞');
+        const want = 7.5;
+        near(vInfinityKms(r, Math.sqrt(vEsc * vEsc + want * want)), want, 1e-9,
+            'v∞ inverts the energy relation exactly');
+    }
+}
+
+// Gravitational focusing: the identity, the limits, and the textbook case.
+{
+    for (const vInf of [0.5, 1, 3, 5, 11.186, 20, 50]) {
+        const f = gravitationalFocusing(vInf);
+        const vEsc = escapeSpeedKms(EARTH_RADIUS_KM);
+        near(f.enhancement, 1 + (vEsc * vEsc) / (vInf * vInf), 1e-12, 'σ/πR² = 1 + (v_esc/v∞)²');
+        near(f.bMaxKm, EARTH_RADIUS_KM * Math.sqrt(f.enhancement), 1e-9, 'b_max is R√enhancement');
+        assert.ok(f.bMaxKm >= EARTH_RADIUS_KM, 'focusing can only ever make the target bigger');
+    }
+    // At v∞ = v_esc the cross-section is exactly double.
+    near(gravitationalFocusing(escapeSpeedKms(EARTH_RADIUS_KM)).enhancement, 2, 1e-12,
+        'v∞ = v_esc doubles the cross-section');
+    // Fast encounters are barely focused; slow ones enormously.
+    assert.ok(gravitationalFocusing(50).enhancement < 1.06, 'a 50 km/s encounter is nearly unfocused');
+    assert.ok(gravitationalFocusing(1).enhancement > 100, 'a 1 km/s encounter is focused >100x');
+    assert.equal(gravitationalFocusing(0), null, 'no v∞, no cross-section');
+    assert.equal(gravitationalFocusing(-3), null);
+    // Asking the same question about the Hill sphere is the capture cross-section.
+    const hill = gravitationalFocusing(1, hillRadiusKm(1));
+    assert.ok(hill.bMaxKm > hillRadiusKm(1), 'the focused capture radius exceeds the Hill radius');
+}
+
+// Earth's velocity, from differencing the page's own Earth.
+{
+    // Speed is in the right band all year, and ENERGY IS CONSERVED — which is
+    // the real test, because it checks the differenced velocity against the
+    // position series it was differenced from.
+    const jd0 = jdOf('2026-01-01T00:00:00Z');
+    let minE = Infinity, maxE = -Infinity, minV = Infinity, maxV = -Infinity;
+    for (let k = 0; k < 60; k++) {
+        const jd = jd0 + k * 6.1;
+        const e = earthHelioJ2000(jd);
+        const v = earthVelocityJ2000(jd);
+        const vKms = Math.hypot(v.x, v.y, v.z) * AU_PER_DAY_TO_KMS;
+        const rKm = e.rAU * AU_KM;
+        const energy = (vKms * vKms) / 2 - MU_SUN / rKm;
+        minE = Math.min(minE, energy); maxE = Math.max(maxE, energy);
+        minV = Math.min(minV, vKms); maxV = Math.max(maxV, vKms);
+    }
+    assert.ok(minV > 29.0 && maxV < 30.6, `Earth's speed stays in 29.0–30.6 km/s (${minV}–${maxV})`);
+    // Perihelion is faster than aphelion — the variation must be REAL, not noise.
+    assert.ok(maxV - minV > 0.7, `the annual speed variation is about 1 km/s, got ${maxV - minV}`);
+    // Specific orbital energy is constant to well under a percent over a year.
+    assert.ok(Math.abs((maxE - minE) / minE) < 0.005,
+        `Earth's orbital energy is conserved across a year (spread ${(maxE - minE) / minE})`);
+    // And it implies the right semi-major axis: a = −μ/2ε.
+    const e = earthHelioJ2000(jd0), v = earthVelocityJ2000(jd0);
+    const vKms = Math.hypot(v.x, v.y, v.z) * AU_PER_DAY_TO_KMS;
+    const energy = (vKms * vKms) / 2 - MU_SUN / (e.rAU * AU_KM);
+    const aAU = (-MU_SUN / (2 * energy)) / AU_KM;
+    near(aAU, 1.0, 0.01, 'the implied semi-major axis is 1 AU');
+    // The step size is not load-bearing: halving it changes nothing that matters.
+    const vHalf = earthVelocityJ2000(jd0, 0.005);
+    near(Math.hypot(vHalf.x, vHalf.y, vHalf.z), Math.hypot(v.x, v.y, v.z), 1e-9,
+        'the central difference is converged at its default step');
+}
+
+// The encounter screen.
+{
+    const R = hillRadiusKm(1), S = soiRadiusKm(1);
+    // Far away and fast: plain heliocentric, and the page's model is valid.
+    const far = encounterAnalysis({ distKm: 30 * LD_KM, vGeoKms: 12 });
+    assert.equal(far.regime, 'heliocentric');
+    assert.equal(far.insideHill, false);
+    assert.equal(far.modelValid, true);
+    assert.ok(far.vInfKms > 11.9 && far.vInfKms < 12.1, 'far out, v∞ is essentially the geocentric speed');
+
+    // Inside the Hill sphere but outside the SOI, still unbound.
+    const hill = encounterAnalysis({ distKm: (R + S) / 2, vGeoKms: 8 });
+    assert.equal(hill.regime, 'inside-hill');
+    assert.equal(hill.insideHill, true);
+    assert.equal(hill.insideSOI, false);
+    assert.equal(hill.modelValid, true, 'the Hill sphere is not yet where our model fails');
+
+    // Inside the SOI: our unperturbed heliocentric position is the wrong model
+    // and the screen must say so. This is the assertion that keeps the page
+    // honest about its own competence.
+    const soi = encounterAnalysis({ distKm: S * 0.5, vGeoKms: 8 });
+    assert.equal(soi.regime, 'inside-soi');
+    assert.equal(soi.modelValid, false, 'inside the SOI the page says its own model is invalid');
+
+    // Bound inside the Hill sphere: a temporarily captured object — a minimoon.
+    const slow = escapeSpeedKms(R * 0.5) * 0.5;
+    const cap = encounterAnalysis({ distKm: R * 0.5, vGeoKms: slow });
+    assert.equal(cap.bound, true);
+    assert.equal(cap.regime, 'captured');
+    assert.equal(cap.vInfKms, null, 'a captured object has no v∞');
+    assert.ok(cap.captureMarginKms < 0, 'and it is slower than the local escape speed');
+
+    // The capture margin is what makes minimoons rare: a typical arrival speed
+    // at the Hill radius overshoots escape there by more than an order of magnitude.
+    const typical = encounterAnalysis({ distKm: R, vGeoKms: 8 });
+    assert.ok(typical.captureMarginKms > 7, 'a typical encounter is far too fast to be captured');
+    assert.ok(typical.captureMarginKms / escapeSpeedKms(R) > 9,
+        'by roughly an order of magnitude — the reason minimoons are rare');
+
+    // Degenerate inputs give a shaped answer, not NaN.
+    const bad = encounterAnalysis({ distKm: 0, vGeoKms: NaN });
+    assert.equal(bad.regime, 'unknown');
+    assert.ok(Number.isFinite(bad.hillKm) && Number.isFinite(bad.soiKm),
+        'the boundaries are still reported when the object is not');
+    for (const k of Object.keys(REGIME_LABELS)) assert.ok(REGIME_LABELS[k].length > 0);
+    assert.ok(REGIME_LABELS[far.regime] && REGIME_LABELS[cap.regime], 'every regime has a label');
+}
+
+// The catalogue-wide MOID screen.
+{
+    const hillAU = hillRadiusKm(1) / AU_KM;
+    // An object whose ORBITS never come within the Hill radius cannot enter it.
+    const wide = reachesGravityDomain(0.05);
+    assert.equal(wide.hill, false, '0.05 AU MOID is well outside the Hill sphere');
+    assert.equal(wide.soi, false);
+    assert.equal(wide.impact, false);
+    // One that does.
+    const close = reachesGravityDomain(hillAU * 0.5);
+    assert.equal(close.hill, true);
+    assert.equal(close.soi, true, 'half the Hill radius is inside the SOI too');
+    // The boundary is the boundary.
+    assert.equal(reachesGravityDomain(hillAU * 0.999).hill, true);
+    assert.equal(reachesGravityDomain(hillAU * 1.001).hill, false);
+    // An Earth-radius MOID is an orbit that intersects the planet.
+    assert.equal(reachesGravityDomain(EARTH_RADIUS_KM / AU_KM * 0.5).impact, true);
+    // No MOID published ⇒ no claim, rather than a false negative.
+    assert.equal(reachesGravityDomain(null), null);
+    assert.equal(reachesGravityDomain(undefined), null);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
