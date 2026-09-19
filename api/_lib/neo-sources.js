@@ -54,39 +54,53 @@ export const CATALOG_TIERS = Object.freeze({
 });
 export const DEFAULT_TIER = 'bright';
 
-/** Fields requested from sbdb_query.api, in the order we want them back. */
-export const SBDB_FIELDS = Object.freeze([
+/**
+ * Fields requested from sbdb_query.api, in the order we want them back.
+ *
+ * SPLIT IN TWO ON PURPOSE. The core list is what the orrery cannot draw without
+ * — an object with no elements is not renderable. The photometry list is what
+ * makes the drawing HONEST (measured albedo and taxonomy: the albedo is inside
+ * the √ of D = 1329/√p·10^(−H/5), so assuming 0.14 for a C-type draws it 1.5×
+ * too small, and it sets the tone besides) but every object still renders
+ * without it. The schema is UNVERIFIED — ssd-api.jpl.nasa.gov is egress-blocked
+ * from the build sandbox — so a spelling JPL does not recognise could reject
+ * the WHOLE query. An optional column must never be able to take the catalogue
+ * down: the route retries once without this list and self-reports `photometry`.
+ */
+export const SBDB_FIELDS_CORE = Object.freeze([
     'pdes', 'full_name', 'H', 'class', 'neo', 'pha',
     'e', 'a', 'q', 'i', 'om', 'w', 'ma', 'tp', 'epoch', 'moid', 'diameter',
 ]);
+export const SBDB_FIELDS_PHOTOMETRY = Object.freeze(['albedo', 'spec_B', 'spec_T']);
+export const SBDB_FIELDS = Object.freeze([...SBDB_FIELDS_CORE, ...SBDB_FIELDS_PHOTOMETRY]);
 
 /** Objects with e above this are treated as interstellar (1I 1.20, 2I 3.36, 3I 6.14). */
 export const INTERSTELLAR_E_MIN = 1.1;
 
-function sbdbUrl(params) {
+function sbdbUrl(params, { photometry = true } = {}) {
     const u = new URL(SBDB_QUERY_BASE);
-    u.searchParams.set('fields', SBDB_FIELDS.join(','));
+    u.searchParams.set('fields', (photometry ? SBDB_FIELDS : SBDB_FIELDS_CORE).join(','));
     for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, v);
     return u.toString();
 }
 
 /** Asteroid query for a named tier. Unknown tiers return null — never a guess. */
-export function sbdbAsteroidUrl(tier) {
+export function sbdbAsteroidUrl(tier, opts) {
     const t = CATALOG_TIERS[tier];
     if (!t) return null;
     return sbdbUrl({
         'sb-kind': 'a',
         'sb-group': t.group,
         'sb-cdata': t.constraint ? JSON.stringify({ AND: [t.constraint] }) : null,
-    });
+    }, opts);
 }
 /** Near-Earth comets (q < 1.3 AU, P < 200 yr — all elliptic). */
-export function sbdbCometUrl() {
-    return sbdbUrl({ 'sb-kind': 'c', 'sb-group': 'neo' });
+export function sbdbCometUrl(opts) {
+    return sbdbUrl({ 'sb-kind': 'c', 'sb-group': 'neo' }, opts);
 }
 /** Interstellar visitors: anything with e > INTERSTELLAR_E_MIN, either kind. */
-export function sbdbInterstellarUrl() {
-    return sbdbUrl({ 'sb-cdata': JSON.stringify({ AND: [`e|GT|${INTERSTELLAR_E_MIN}`] }) });
+export function sbdbInterstellarUrl(opts) {
+    return sbdbUrl({ 'sb-cdata': JSON.stringify({ AND: [`e|GT|${INTERSTELLAR_E_MIN}`] }) }, opts);
 }
 
 // ── Column resolution ───────────────────────────────────────────────────────
@@ -156,6 +170,11 @@ const SBDB_CANDIDATES = Object.freeze({
     epoch: ['epoch', 'epoch_jd', 'epoch_tdb'],
     moid:  ['moid', 'moid_au', 'earth_moid'],
     diam:  ['diameter', 'diam', 'diameter_km'],
+    // Optional photometry — absent for most objects and possibly for every
+    // object if JPL spells these differently. `opticalProperties` in the kernel
+    // falls back to the class mean and reports which it used.
+    albedo: ['albedo', 'geometric_albedo', 'p_v', 'pv', 'albedo_v'],
+    spec:   ['spec_B', 'spec_T', 'spec', 'spec_b', 'spec_t', 'taxonomy', 'class_tax'],
 });
 
 /**
@@ -203,6 +222,7 @@ export function parseSbdbQuery(json, opts = {}) {
         if (yes(t.get(row, 'pha'))) flags |= FLAG.PHA;
         if (isComet) flags |= FLAG.COMET;
         if (interstellar) flags |= FLAG.INTERSTELLAR;
+        const specRaw = t.get(row, 'spec');
         const clsRaw = t.get(row, 'cls');
         const cls = clsRaw ? String(clsRaw).trim() : (neoClass(a ?? q / (1 - e), e) ?? null);
         // "(2024 YR4)" is just the designation in parentheses — ship null and
@@ -222,9 +242,20 @@ export function parseSbdbQuery(json, opts = {}) {
             epoch: epoch == null ? null : round(epoch, 2),
             moid: round(numOrNull(t.get(row, 'moid')), 5),
             diam: round(numOrNull(t.get(row, 'diam')), 3),
+            albedo: round(numOrNull(t.get(row, 'albedo')), 4),
+            spec: specRaw == null || specRaw === '' ? null : String(specRaw).trim(),
         });
     }
-    return { ok: records.length > 0 || t.rows.length === 0, records, count: records.length, dropped,
+    // How much of what the page will draw is OBSERVED rather than a class mean.
+    // A route that silently served zero measured albedos would look identical
+    // to one serving thousands; this is what tells them apart in production.
+    const photometry = {
+        albedo_column: t.fieldMap.albedo ? t.fieldMap.albedo.field : null,
+        spec_column: t.fieldMap.spec ? t.fieldMap.spec.field : null,
+        albedo_measured: records.reduce((n, r) => n + (r.albedo != null ? 1 : 0), 0),
+        spec_measured: records.reduce((n, r) => n + (r.spec != null ? 1 : 0), 0),
+    };
+    return { ok: records.length > 0 || t.rows.length === 0, records, count: records.length, dropped, photometry,
         field_map: fieldMapReport(t.fieldMap), unmapped: t.unmapped };
 }
 
@@ -420,7 +451,12 @@ export function parseFireballs(json) {
 
 /** Strip a parser result down to the operator-facing self-report. */
 function report(r, extra = {}) {
-    return { ok: !!r.ok, count: r.count ?? 0, reason: r.reason ?? null, field_map: r.field_map ?? {}, unmapped: r.unmapped ?? [], ...extra };
+    return { ok: !!r.ok, count: r.count ?? 0, reason: r.reason ?? null, field_map: r.field_map ?? {},
+        unmapped: r.unmapped ?? [], photometry: r.photometry ?? null,
+        // 'requested' | 'dropped' — whether the optional albedo/taxonomy columns
+        // survived. `dropped` means JPL refused them and the route retried on the
+        // core list alone, so every tone and derived size is a class mean.
+        photometry_fields: r.photometry_fields ?? null, ...extra };
 }
 
 /**
