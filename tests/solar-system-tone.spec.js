@@ -234,6 +234,7 @@ test.describe('solar-system.html tone mapping', () => {
             'solar-system.html',
             'js/neo-layer.js',     // NEO sprites + meteoroid streams
             'js/neo-rocks.js',     // NEO bodies up close
+            'js/airless-body.js',  // the ONE airless-regolith sphere (moons + NEO meshes)
             'js/jupiter-shader.js', // drawn by this page AND jupiter-system.html
         ];
         const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -259,8 +260,13 @@ test.describe('solar-system.html tone mapping', () => {
             }
         }
 
-        // 15, not 16: S3 replaced the two glow shells with ONE integrated corona.
-        expect(checked, 'found the fragment shaders to check').toBe(15);
+        // 16 = the page's 15 (S3 replaced the two glow shells with ONE integrated
+        // corona) + SPHERE_FS in js/airless-body.js, which took over the moons
+        // from MeshStandardMaterial. A built-in material carries both chunks for
+        // free; the moment a moon moved to a raw gl_FragColor shader it joined
+        // this gate, and it is drawn right beside the NEO rocks that share its
+        // photometry — two bodies of the same albedo must not tone differently.
+        expect(checked, 'found the fragment shaders to check').toBe(16);
         expect(offenders, `shaders still on the raw colour pipeline:\n  ${offenders.join('\n  ')}`).toEqual([]);
     });
 
@@ -276,7 +282,7 @@ test.describe('solar-system.html tone mapping', () => {
         // The test: every /* glsl */ literal must contain something that is
         // actually GLSL. A split leaves a fragment that is pure prose.
         const files = ['solar-system.html', 'js/neo-layer.js', 'js/neo-rocks.js',
-                       'js/jupiter-shader.js', 'js/tone-decode.js'];
+                       'js/airless-body.js', 'js/jupiter-shader.js', 'js/tone-decode.js'];
         const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
         const split = [];
         for (const rel of files) {

@@ -583,16 +583,35 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(draw.fs).not.toContain('spikes');          // the diffraction cross of a point source
         // LOMMEL–SEELIGER, not Lambert: μ₀/(μ₀+μ) is the airless-regolith law,
         // and it is what makes a body read as a disc instead of a shiny ball.
-        expect(draw.fs).toContain('mu0 / (mu0 + mu)');
-        // The IAU H–G phase function, with the published coefficients — this is
-        // the GLSL mirror of the kernel's phaseHG and must not drift from it.
-        expect(draw.vs).toContain('phaseHG');
-        for (const c of ['3.33', '0.63', '1.87', '1.22']) expect(draw.vs).toContain(c);
+        // The law itself lives ONCE, in js/airless-body.js AIRLESS_GLSL, and is
+        // interpolated into this shader — so a moon and a NEO of the same albedo
+        // at the same distance are shaded by the same lines of code. Assert on
+        // the shared definition and its call, not on a copy of the expression.
+        expect(draw.fs).toContain('float lommelSeeliger(float mu0, float mu)');
+        expect(draw.fs).toContain('lommelSeeliger(mu0, mu)');
+        // THE DISC-INTEGRATED H–G FUNCTION MUST NOT MULTIPLY THE BRDF. Φ(α) is
+        // what a whole unresolved disc returns — it ALREADY contains the
+        // terminator that Lommel–Seeliger is drawing here, so applying both
+        // darkens a crescent twice, which is why the earlier version needed an
+        // HG_ALPHA_MAX clamp to stop backlit bodies vanishing entirely. What a
+        // BRDF legitimately misses is the shadow-hiding OPPOSITION SURGE, and
+        // that is the one phase term the render path keeps (Hapke B(α) =
+        // 1 + B₀/(1 + tan(α/2)/h)). phaseHG survives in the kernel, where
+        // apparentMagnitudeV needs exactly the disc-integrated quantity.
+        expect(draw.vs).toContain('oppositionSurge');
+        expect(draw.vs).not.toContain('phaseHG');
+        expect(draw.vs).not.toContain('HG_ALPHA_MAX');
         // Size is a RADIUS put through the projection, not a magnitude curve.
         expect(draw.attrs).toContain('aRadius');
         expect(draw.attrs).toContain('aIllum');
-        expect(draw.attrs).toContain('aG');
+        expect(draw.attrs).not.toContain('aG');
         expect(draw.attrs).not.toContain('aSize');
+        // Earth's shadow and Earth's reflected light are per-body scalars — the
+        // far field cannot be inside a 1.38 M km umbra, so they are only ever
+        // non-trivial on the Earth-anchored local frame, but the attribute has
+        // to exist on both or the two frames are not the same material.
+        expect(draw.attrs).toContain('aShadow');
+        expect(draw.attrs).toContain('aShine');
         expect(draw.vs).toContain('projectionMatrix[1][1]');
         // Albedo is the taxonomy's, and a comet nucleus is among the darkest.
         // The attribute is a Float32Array, so 0.04 reads back as 0.0399999991 —
@@ -632,7 +651,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
             for (const des of ['433', '101955', '2P', '3200']) {
                 const i = L.byDes.get(des);
                 if (i == null || !L.els[i]) continue;
-                out[des] = { i, albedo: L._albedo[i], G: L._G[i], illum: L._illum[i], radius: L._radius[i],
+                out[des] = { i, albedo: L._albedo[i], illum: L._illum[i], radius: L._radius[i],
                     rHelio: L.rHelio[i], el: { H: L.els[i].H, diam: L.els[i].diam, spec: L.els[i].spec ?? null,
                         albedo: L.els[i].albedo ?? null, flags: L.els[i].flags } };
             }
@@ -642,7 +661,11 @@ test.describe('solar-system.html — near-Earth objects', () => {
         for (const [des, o] of Object.entries(objs)) {
             const optics = K.opticalProperties(o.el);
             expect(o.albedo, `${des} albedo is the kernel's`).toBeCloseTo(optics.albedo, 5);
-            expect(o.G, `${des} phase slope is the kernel's`).toBeCloseTo(optics.G, 5);
+            // The kernel still publishes a per-object H–G slope and still uses
+            // it for apparentMagnitudeV; the RENDER deliberately does not carry
+            // it (see the opposition-surge note above), so there is no longer a
+            // `_G` array to compare — assert the kernel's own value instead.
+            expect(optics.G, `${des} has a published phase slope`).toBeGreaterThan(0);
             // Illumination is the inverse-square law in the units H is defined
             // in: (1 AU / r)². Uniform light was the bug this replaces.
             expect(o.illum, `${des} is lit as 1/r²`).toBeCloseTo(1 / (o.rHelio * o.rHelio), 4);

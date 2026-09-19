@@ -186,12 +186,15 @@ agrees with `js/neo-orbits.js` object by object.
   Lambertian sphere darkens toward the limb. This is the difference between a
   body that reads as a disc and one that reads as a shiny ball — it is why the
   full Moon looks like a disc. Both the impostor and the rock meshes use it.
-- **The phase function is the IAU H–G law** the published H and G are defined in
-  (`phaseHG`, mirrored in GLSL — change both together). It carries the
-  opposition surge for free. **It is held past α = 120°** (`HG_ALPHA_MAX`): the
-  fit says nothing beyond that and its basis functions run to zero there, which
-  drew every backlit object as nothing at all. A floor is honest, an
-  extrapolation off the end of a published fit is not.
+- **The phase term in the RENDER is the Hapke opposition surge, NOT H–G.**
+  *(Superseded 2026-09-19 — see §2e. The original version of this bullet used
+  the IAU H–G law here, held past α = 120° by an `HG_ALPHA_MAX` clamp. That
+  clamp was a symptom: Φ(α) is the DISC-INTEGRATED return of an unresolved
+  body, so it already contains the terminator that Lommel–Seeliger is drawing,
+  and multiplying the two darkened a crescent twice — which is why backlit
+  objects vanished and needed rescuing with a floor. `phaseHG` stays in the
+  kernel, where `apparentMagnitudeV` wants exactly the disc-integrated
+  quantity.)*
 - **Illumination falls as 1/r².** `aIllum` is (1 AU / r)² from the worker's own
   heliocentric distance, so an object at 3 AU is 9× darker than the same object
   at 1 AU. Before this, everything was lit as though it sat at Earth's distance.
@@ -223,8 +226,122 @@ agrees with `js/neo-orbits.js` object by object.
   from the drawn scene. At r = Δ = 1 AU, α = 0 it returns H, which is the
   definition and what the kernel gate asserts.
 
+## 2e. The Earth–Moon system (2026-09-19, the "Earth and Moon realism" pass)
+
+The near-Earth objects got published photometry in §2d and then sat beside a
+Moon that was a light-grey PBR ball on a fixed-element ellipse. This pass put
+the satellites on the same physics and fixed what the orrery believed about
+where our Moon is.
+
+**Two new modules, both shared with the NEO layer.**
+
+- `js/airless-body.js` — ONE copy of how a sunlit airless body is shaded:
+  `AIRLESS_GLSL` (Lommel–Seeliger, the Hapke shadow-hiding opposition surge, the
+  disclosed display compression, and the GLSL mirror of the occultation kernel),
+  plus `airlessSphereMaterial()` for resolved spheres. `js/neo-rocks.js`,
+  `js/neo-layer.js` and every satellite on `solar-system.html` interpolate the
+  same text, so a moon and a rock of the same albedo at the same distance render
+  identically. The browser gate asserts on the shared definition, never on a
+  copy of the expression.
+- `js/eclipse-geometry.js` — PURE, no three.js: circle–circle occultation in
+  closed form, `shadowIllumination()`, the Lambert-sphere phase law and
+  `reflectedIrradianceFraction()` for planetshine, `umbraLengthKm()`, and the
+  `BODY_ALBEDO` table (planets + 34 satellites). **It never reads a DRAWN
+  position** — every input is real kilometres, because the orrery draws the Moon
+  at ~2 R_E instead of 60 and a shadow cone in scene units would be fiction that
+  still looked right in a screenshot.
+
+**What changed on the page.**
+
+- **Satellites carry their published geometric albedo**, from `BODY_ALBEDO`, and
+  the data card prints it. The Moon is 0.120 — darker than worn asphalt — where
+  the old `0xc8c2b8` base colour drew it about six times too bright; Enceladus is
+  1.375 (a geometric albedo above 1 is a backscatter ratio, not an energy
+  budget, and the card says so); Phobos is 0.071.
+- **Illumination is 1/r² at the SATELLITE's own true heliocentric distance**, so
+  Io is ~27× dimmer than the Moon. The decaying `PointLight` this replaced left
+  the Galileans at ~1.6 % of Earth's light and all but black. It is evaluated at
+  the satellite and not at its parent — 0.26 % at the Moon, invisible, but a term
+  that is exactly right needs no caveat downstream, and the equality is what the
+  gate uses to say which one the page used.
+- **Eclipses are evaluated PER FRAGMENT at the body's real radius offset**, which
+  is what puts the occulter's CURVED shadow edge across the disc during a
+  partial. Totality is not black: `UMBRAL_TRANSMISSION` (0.012) and
+  `UMBRAL_TINT` are the disclosed constants standing for sunlight refracted
+  through the occulter's atmosphere — which is why a totally eclipsed Moon is
+  copper and not invisible. The far-field NEO impostors get a CPU scalar instead
+  (`aShadow`): only the in-zone set can be inside a 1.38 M km umbra at all.
+- **Planetshine** (`u_shine`, `u_shineDir`) is its own Lommel–Seeliger lobe from
+  the parent's direction, so the night side is lit from the right quarter of the
+  sky rather than by a flat ambient. Nothing keys it to the lunar month; it falls
+  out of the phase angle. **The `wrap` scattered-fill term in `ROCK_FS` went away
+  with it** — a flat 6 % wrap-around was standing in for light that, in deep
+  space, is not there; where a body genuinely does have light on its night side
+  it now comes from a named source, and where it does not, the rim term is what
+  keeps a dark limb legible against black. Do not restore the fill.
+- **The display constants have ONE home.** `AIRLESS_DISPLAY.gain` / `.stretch`
+  are imported by `SPRITE` in `js/neo-layer.js` and by `rockMaterial`, and
+  `SUN_RADIUS_KM` by both materials — what makes "a moon and a rock of the same
+  albedo at the same distance render identically" a fact about the code and not
+  a coincidence between hand-tuned numbers that happen to match today.
+
+**THE MOON IS NOT A FIXED-ELEMENT ELLIPSE.** This is the finding that made the
+eclipse work possible, and it had been wrong on the page for its whole life:
+
+- `propagateMoonKepler` holds a, e, i, Ω, ω at their J2000 values, but the lunar
+  node regresses a full turn in 18.6 years and the perigee advances one in 8.85.
+  A quarter-century on, both are most of a revolution out.
+- On top of that, the generic satellite path rotates parent-EQUATORIAL elements
+  into the ecliptic by the parent's obliquity — and the Moon's table entry
+  (`raan_deg: 125.08`) is already ECLIPTIC, so it was being tilted an extra
+  23.44° it does not have.
+- **Neither error is visible in a still frame.** The Moon still orbited Earth at
+  the right distance and the right rate. It shows up only where the page claims
+  to know where the Moon *is*: no lunar eclipse landed anywhere near its real
+  date, in a simulation driven by real ephemerides throughout.
+- The Moon now uses `moonGeocentric` (Meeus ch. 47) from `js/horizons.js` — the
+  series the NEO layer's Earth-local frame, the mission planner and the
+  heliosphere view already run on, so there is ONE lunar position for the site.
+  It reproduces the four 2025–26 umbral eclipses to within the half hour. Every
+  other satellite keeps the Kepler path: no comparable series exists for them
+  here, their host planets ride mean-motion circles anyway, and the page makes no
+  timing claim about them.
+- The drawn orbit ring is re-sampled from the same series (`_refreshMoonRing`,
+  one sidereal month centred on the clock, rebuilt at most every quarter day) —
+  otherwise the Moon leaves the ellipse it is drawn on.
+
+**Gates.** `node tests/eclipse-geometry.mjs` (lens regimes vs Monte-Carlo, umbra
+length, the four published eclipses reproduced from the page's own ephemerides,
+earthshine against the real lunar month) and
+`npx playwright test tests/solar-system-moon-light.spec.js` (shared shader,
+published albedo, 1/r², real-kilometre uniforms, a screenshot-measured copper
+totality, and emergent earthshine phase). `js/airless-body.js` is in the
+`tests/solar-system-tone.spec.js` file list and the shader count moved 15 → 16.
+
 ## 3. Scars (each was a bug during the build)
 
+- **The phase angle was measured at the wrong vertex** (2026-09-19).
+  `reflectedIrradianceFraction` took the angle AT THE RECEIVING BODY between its
+  direction to the Sun and its direction to the planet. The phase angle is
+  measured at the ILLUMINATED body — Sun–planet–body — and because the satellite
+  is very close to its planet compared with the Sun, the two are almost exactly
+  π apart. The term was inverted end to end: earthshine came out brightest at
+  FULL moon, which is precisely when no one has ever seen it, and vanished at new
+  moon, which is the only time anyone has. **The kernel's own unit test encoded
+  the same mistake in its comment** ("Sun opposite the Moon ⇒ FULL Earth from
+  the Moon") and passed, so it was the BROWSER gate — which measures where in the
+  lunar month the maximum lands — that caught it. The node test now drives a
+  synodic month of real ephemerides and asserts the peak is at an elongation
+  under 15°.
+- **`POINT_FS` used the shared functions without including them.** `AIRLESS_GLSL`
+  was interpolated into the vertex shader and `ROCK_FS` but not the point
+  fragment shader, so the program failed to LINK and the entire NEO population
+  stopped drawing. Caught by `tests/solar-system-tone.spec.js`, which fails on
+  any console error while it measures — not by anything looking at the NEO layer.
+- **A backtick in a `/* glsl */` comment, twice more.** Writing `` `sep` `` and
+  `` `aShadow` `` in a shader comment terminated the template literal and the
+  rest of the shader became JavaScript. The repo's own CLAUDE.md warns about
+  exactly this; it is still the easiest way to break the page.
 - **TDZ abort.** `NeoPanel` renders synchronously in its constructor and
   reads the page's sim clock; instantiated before `let _ephemEpoch` it threw
   a `ReferenceError` that aborted the WHOLE page module (no animate loop, no

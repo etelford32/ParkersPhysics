@@ -24,16 +24,15 @@
  * The orrery's Sun is a physically-decaying PointLight that leaves anything
  * at 1 AU dim, so the rocks light THEMSELVES from the Sun direction (the Sun
  * is always at the world origin — the same convention the page's planet
- * shader uses). The scattering law is LOMMEL–SEELIGER, not Lambert: single
- * scattering off a dark particulate regolith, ∝ μ₀/(μ₀+μ), nearly flat across
- * the disc where a Lambertian sphere darkens toward the limb — the reason a
- * full Moon reads as a disc rather than a ball. Level comes from the object's
- * own albedo times the illumination and the IAU H–G phase function, through
- * the same disclosed display compression js/neo-layer.js POINT_FS uses: the
- * LOD handoff between an impostor and a mesh must change the geometry and
- * nothing else. Plus a faint scattered fill, a rim so a dark limb still reads
- * against black, and a per-vertex regolith speckle. The shader handles
- * `instanceMatrix` so the same material drives the InstancedMesh streams.
+ * shader uses). The scattering law, the opposition surge, the display
+ * compression and the eclipse test all come from js/airless-body.js — ONE copy
+ * shared with the far-field impostor and with every moon on the page, so a LOD
+ * handoff changes the geometry and nothing else. Level is the object's own
+ * albedo times the illumination reaching it; the H–G phase function is NOT
+ * applied on top of the BRDF (it is disc-integrated — see that header). Plus
+ * a rim so a dark limb still reads against black, and a per-vertex regolith
+ * speckle. The shader handles `instanceMatrix` so the same material drives the
+ * InstancedMesh streams.
  *
  * ── Scale ─────────────────────────────────────────────────────────────────
  * `drawnRockRadius(diamKm)` is a LOG map from real diameter to scene units:
@@ -44,6 +43,8 @@
 
 import * as THREE from 'three';
 import { TONE_DECODE_GLSL } from './tone-decode.js';
+import { AIRLESS_GLSL, AIRLESS_DISPLAY, OPPOSITION } from './airless-body.js';
+import { UMBRAL_TRANSMISSION, UMBRAL_TINT, SUN_RADIUS_KM } from './eclipse-geometry.js';
 
 export const ROTATION_PERIOD_H = Object.freeze({
     '99942': 30.6, '101955': 4.30, '162173': 7.63, '65803': 2.26, '2024 YR4': 0.33, '3200': 3.60,
@@ -197,13 +198,24 @@ const ROCK_VS = /* glsl */`
         gl_Position = projectionMatrix * viewMatrix * wp;
     }
 `;
-const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
+const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}${AIRLESS_GLSL}
     uniform vec3  u_base;
     uniform float u_glow;        // comet nucleus: faint self-lit coma haze
     uniform float u_albedo;      // geometric albedo — measured, or the class mean
-    uniform float u_light;       // (1 AU / r)² × Φ_HG(α): illumination × phase
-    uniform float u_gain;        // display normalisation, shared with the impostor
+    uniform float u_illum;       // (1 AU / r)²: the sunlight reaching this body
+    uniform float u_gain;        // display normalisation, shared with every airless body
     uniform float u_stretch;     // DISCLOSED display compression
+    uniform float u_B0;
+    uniform float u_hOpp;
+    uniform float u_shine;       // Earth-reflected light, as a fraction of direct
+    uniform vec3  u_shineDir;    // unit, toward Earth, SCENE axes
+    uniform vec3  u_sunFromBodyKm;   // REAL km, SCENE axes — the eclipse test
+    uniform vec3  u_occFromBodyKm;
+    uniform float u_occRadiusKm;
+    uniform float u_sunRadiusKm;
+    uniform float u_bodyRadiusKm;
+    uniform float u_umbralT;
+    uniform vec3  u_umbralTint;
     varying vec3  vN;
     varying vec3  vW;
     varying float vSpeck;
@@ -211,19 +223,28 @@ const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
         vec3 n = normalize(vN);
         vec3 toSun = normalize(-vW);                  // Sun at the world origin
         vec3 toCam = normalize(cameraPosition - vW);
-        // LOMMEL–SEELIGER, not Lambert. Single scattering off a dark
-        // particulate regolith: brightness ∝ μ₀/(μ₀+μ), which is nearly FLAT
-        // across the disc where a Lambertian sphere falls off toward the limb.
-        // It is why the full Moon reads as a disc and not a ball, and it is the
-        // same law js/neo-layer.js POINT_FS applies to the far-field impostor —
-        // the LOD handoff must not change the physics, only the geometry.
+        // LOMMEL–SEELIGER and the opposition surge, from js/airless-body.js —
+        // the SAME law the far-field impostor and every moon on this page use,
+        // so crossing a LOD line or looking at a different kind of body never
+        // changes the physics. The H–G phase function is deliberately NOT
+        // applied here: it is disc-integrated and this shader is drawing the
+        // terminator itself (see the airless-body header).
         float mu0 = max(dot(n, toSun), 0.0);
         float mu  = max(dot(n, toCam), 1e-3);
-        float ls  = 2.0 * mu0 / (mu0 + mu);           // normalised at μ₀ = μ
-        float wrap = max(dot(n, toSun) * 0.5 + 0.5, 0.0) * 0.06;   // faint scattered fill
-        float lit = pow(clamp((u_albedo * u_light * ls + wrap * u_albedo) * u_gain, 0.0, 6.0), u_stretch);
+        float alpha = acos(clamp(dot(toSun, toCam), -1.0, 1.0));
+        float brdf = lommelSeeliger(mu0, mu) * oppositionSurge(alpha, u_B0, u_hOpp);
+        // Earth's shadow, at THIS point on the surface, in real kilometres.
+        vec3 offs = n * u_bodyRadiusKm;
+        float lit = (u_occRadiusKm > 0.0)
+            ? solarLitAt(u_sunFromBodyKm - offs, u_occFromBodyKm - offs, u_occRadiusKm, u_sunRadiusKm)
+            : 1.0;
+        vec3 sunTint = mix(u_umbralTint, vec3(1.0), clamp(lit * 3.0, 0.0, 1.0));
+        float direct = max(lit, (1.0 - lit) * u_umbralT);
+        float shine = u_shine * lommelSeeliger(max(dot(n, normalize(u_shineDir)), 0.0), mu);
+
+        float lit_tone = airlessTone(u_albedo * u_illum * (brdf * direct + shine), u_gain, u_stretch);
         float rim  = pow(1.0 - max(dot(n, toCam), 0.0), 3.0) * (0.06 + u_glow * 0.5);
-        vec3 col = u_base * lit * (0.82 + 0.36 * vSpeck) + rim * vec3(0.7, 0.85, 1.0);
+        vec3 col = u_base * lit_tone * (0.82 + 0.36 * vSpeck) * sunTint + rim * vec3(0.7, 0.85, 1.0);
         col += u_glow * vec3(0.55, 0.75, 1.0) * 0.25;
         gl_FragColor = vec4(col, 1.0);
         gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
@@ -235,10 +256,11 @@ const ROCK_FS = /* glsl */`${TONE_DECODE_GLSL}
 /**
  * @param {number} colorHex   the taxonomy's tint
  * @param {number} glow       cometary coma haze, 0..1
- * @param {{albedo?:number, light?:number, gain?:number, stretch?:number}} [phot]
- *        photometry: geometric albedo, illumination × phase function, and the
- *        display normalisation the far-field impostor uses. Defaults reproduce
- *        a 0.14-albedo body at 1 AU seen at opposition.
+ * @param {{albedo?:number, illum?:number, gain?:number, stretch?:number,
+ *          bodyRadiusKm?:number}} [phot]
+ *        photometry: geometric albedo, the illumination reaching the body, and
+ *        the display normalisation every airless body on the page shares.
+ *        Defaults reproduce a 0.14-albedo body at 1 AU.
  */
 export function rockMaterial(colorHex, glow = 0, phot = {}) {
     return new THREE.ShaderMaterial({
@@ -246,9 +268,20 @@ export function rockMaterial(colorHex, glow = 0, phot = {}) {
         uniforms: {
             u_base: { value: new THREE.Color(colorHex) }, u_glow: { value: glow },
             u_albedo:  { value: phot.albedo ?? 0.14 },
-            u_light:   { value: phot.light ?? 1 },
-            u_gain:    { value: phot.gain ?? 6.2 },
-            u_stretch: { value: phot.stretch ?? 0.38 },
+            u_illum:   { value: phot.illum ?? 1 },
+            u_gain:    { value: phot.gain ?? AIRLESS_DISPLAY.gain },
+            u_stretch: { value: phot.stretch ?? AIRLESS_DISPLAY.stretch },
+            u_B0:      { value: OPPOSITION.B0 },
+            u_hOpp:    { value: OPPOSITION.h },
+            u_shine:    { value: 0 },
+            u_shineDir: { value: new THREE.Vector3(0, 0, 1) },
+            u_sunFromBodyKm: { value: new THREE.Vector3(1.496e8, 0, 0) },
+            u_occFromBodyKm: { value: new THREE.Vector3(0, 0, 0) },
+            u_occRadiusKm:   { value: 0 },
+            u_sunRadiusKm:   { value: SUN_RADIUS_KM },
+            u_bodyRadiusKm:  { value: phot.bodyRadiusKm ?? 1 },
+            u_umbralT:       { value: UMBRAL_TRANSMISSION },
+            u_umbralTint:    { value: new THREE.Color(UMBRAL_TINT.r, UMBRAL_TINT.g, UMBRAL_TINT.b) },
         },
     });
 }

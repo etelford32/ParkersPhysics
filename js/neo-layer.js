@@ -41,11 +41,13 @@ import {
     rowToRecord, normalizeElements, propagate, toOfDate, sampleOrbit,
     helioToScene, geoToLocalScene, localSceneRadius, localFrameWeight, precessionLongitudeRad, rotateAboutPole,
     diameterKm, formatSize, formatLD, toLD, speedKms, elementsAgeNote, findNotable, neoClass,
-    opticalProperties, phaseHG, apparentMagnitudeV, phaseAngleRad, TAXONOMY,
+    opticalProperties, apparentMagnitudeV, phaseAngleRad, TAXONOMY,
     solarLongitudeDeg, activeShowers, nextShower, radiantEclipticUnit,
 } from './neo-orbits.js';
 
 import { rockGeometry, rockMaterial, drawnRockRadius, shapeFor, spinFor, hash32, MeteoroidStream } from './neo-rocks.js';
+import { AIRLESS_GLSL, AIRLESS_DISPLAY, OPPOSITION } from './airless-body.js';
+import { shadowIllumination, reflectedIrradianceFraction, BODY_ALBEDO, EARTH_RADIUS_KM } from './eclipse-geometry.js';
 
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
 
@@ -198,8 +200,14 @@ const SPRITE = Object.freeze({
     // several decades of reflected radiance the population actually spans
     // (0.04-albedo nucleus at 5 AU up to a 0.45 E-type at 0.9 AU). Neither
     // changes anything RELATIVE: they move the whole population together.
-    gain: 6.2,
-    stretch: 0.38,
+    //
+    // THEY ARE NOT LOCAL. The same two constants tone every moon on the orrery
+    // (js/airless-body.js AIRLESS_DISPLAY), which is what makes "a moon and a
+    // rock of the same albedo at the same distance render identically" a fact
+    // about the code rather than a coincidence between two hand-tuned numbers.
+    // One copy, imported — never re-typed here.
+    gain: AIRLESS_DISPLAY.gain,
+    stretch: AIRLESS_DISPLAY.stretch,
 });
 /** Pixels per scene unit at view depth `clipW` for a camera of height `viewH` px. */
 function pxPerUnit(camera, viewH, clipW) {
@@ -228,9 +236,11 @@ function drawnPx(radius, scale, coma = 0, pulse = 0) {
 //     to a dark limb, while an airless body is nearly FLAT across the disc —
 //     which is why the full Moon looks like a disc and not a ball. The rock
 //     meshes use the same law, on real normals.
-//   · THE PHASE FUNCTION IS THE IAU H–G LAW the published H and G are defined
-//     in (kernel `phaseHG`, mirrored here in GLSL). It carries the opposition
-//     surge, so a body near opposition brightens the way a real one does.
+//   · THE SCATTERING LAW AND THE OPPOSITION SURGE COME FROM js/airless-body.js,
+//     shared with the rock meshes and with every moon the page draws. The
+//     disc-integrated H–G function is deliberately NOT applied on top of the
+//     BRDF — that double-counted the terminator this shader already draws; it
+//     survives in the kernel where a MAGNITUDE is computed, which is its job.
 //   · THE ILLUMINATION FALLS AS 1/r². `aIllum` is (1 AU / r)² from the worker's
 //     own heliocentric distance, so an object at 3 AU is 9x darker than the
 //     same object at 1 AU instead of equally bright everywhere.
@@ -249,33 +259,24 @@ function drawnPx(radius, scale, coma = 0, pulse = 0) {
 // THE ONE THING HERE THAT MAY GLOW (aComa, the tails' own 1/r²). Attention
 // markers — a flyby this week, an in-zone object, the hovered body — are a
 // HAIRLINE RETICLE drawn around the body, never a halo drawn on it.
-const PHASE_GLSL = /* glsl */`
-    // IAU two-parameter phase function (Bowell et al. 1989) — the GLSL mirror
-    // of neo-orbits.js phaseHG(). Φ(0) = 1 for every G, by construction, and
-    // the value is HELD past the published fit's α ≲ 120° (HG_ALPHA_MAX): the
-    // basis functions run to zero there, which drew every backlit body as
-    // nothing at all. Change this and the kernel together.
-    float phaseHG(float alpha, float G) {
-        float t = tan(min(max(alpha, 0.0), 2.0943951) * 0.5);   // 120° in radians
-        float p1 = exp(-3.33 * pow(max(t, 1e-6), 0.63));
-        float p2 = exp(-1.87 * pow(max(t, 1e-6), 1.22));
-        return (1.0 - G) * p1 + G * p2;
-    }
-`;
-const POINT_VS = /* glsl */`${PHASE_GLSL}
+const POINT_VS = /* glsl */`${AIRLESS_GLSL}
     attribute vec3  aColor;
     attribute float aRadius;     // drawn body radius, SCENE units (drawnRockRadius)
     attribute float aAlpha;
     attribute float aPulse;
     attribute float aAlbedo;
-    attribute float aG;          // IAU phase slope for this object's taxonomy
     attribute float aIllum;      // (1 AU / r_helio)² — the light reaching the body
+    attribute float aShadow;     // fraction of the Sun still visible (Earth's shadow)
+    attribute float aShine;      // Earth-reflected light, as a fraction of direct
     attribute float aComa;
     uniform float u_dpr;
     uniform float u_viewPx;      // drawing-buffer height, device px
     uniform float u_minPx;
     uniform float u_reticlePx;
     uniform float u_padComa;
+    uniform float u_B0;
+    uniform float u_hOpp;
+    uniform vec3  u_earthWorld;  // the DRAWN Earth, for the earthshine direction
     varying vec3  vColor;
     varying vec3  vSun;
     varying float vAlpha;
@@ -284,7 +285,9 @@ const POINT_VS = /* glsl */`${PHASE_GLSL}
     varying float vComa;
     varying float vPx;
     varying float vBodyFrac;     // the body's share of the quad — the FS never re-derives it
-    varying float vLight;        // illumination × phase function at this body
+    varying float vLight;        // illumination × opposition surge × eclipse at this body
+    varying float vShine;        // Earth-reflected light reaching it
+    varying vec3  vShineDir;     // view-space direction toward Earth
     void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         // The Sun is the scene origin, so its VIEW-space position is the view
@@ -294,9 +297,18 @@ const POINT_VS = /* glsl */`${PHASE_GLSL}
         vec3 toEye = -mv.xyz;
         vSun = normalize(toSun);
         // Phase angle at the BODY, between the Sun and the camera — the same
-        // Sun–body–observer angle the kernel's phaseAngleRad computes.
+        // Sun–body–observer angle the kernel's phaseAngleRad computes. Only the
+        // OPPOSITION SURGE is applied here: the disc-integrated H–G function
+        // would double-count the terminator this shader already draws (see the
+        // js/airless-body.js header). aShadow is Earth's shadow, which only
+        // the Earth-local instances can be inside — the umbra is 1.38 million
+        // km long and the heliocentric cloud starts past 20 lunar distances.
         float alpha = acos(clamp(dot(vSun, normalize(toEye)), -1.0, 1.0));
-        vLight = aIllum * phaseHG(alpha, aG);
+        vLight = aIllum * oppositionSurge(alpha, u_B0, u_hOpp) * aShadow;
+        vShine = aShine;
+        // Earth-reflected light arrives from the DRAWN Earth, so the night side
+        // of a close flyby is lit from the right side of the sky.
+        vShineDir = normalize((viewMatrix * vec4(u_earthWorld, 1.0)).xyz - mv.xyz);
 
         float clipW = max(-mv.z, 1e-4);
         // TRUE projected size: projectionMatrix[1][1] is 1/tan(fov/2).
@@ -310,7 +322,7 @@ const POINT_VS = /* glsl */`${PHASE_GLSL}
         vColor = aColor; vAlpha = aAlpha; vPulse = aPulse; vAlbedo = aAlbedo; vComa = aComa;
     }
 `;
-const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
+const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}${AIRLESS_GLSL}
     uniform float u_time;
     uniform float u_gain;
     uniform float u_stretch;
@@ -323,6 +335,8 @@ const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
     varying float vPx;
     varying float vBodyFrac;
     varying float vLight;
+    varying float vShine;
+    varying vec3  vShineDir;
     void main() {
         if (vAlpha <= 0.002) discard;
         vec2 c = (gl_PointCoord - 0.5) * 2.0;     // NOTE gl_PointCoord.y runs DOWN the screen
@@ -338,13 +352,12 @@ const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}
         vec3 n = vec3(q.x, -q.y, sqrt(max(0.0, 1.0 - min(1.0, dot(q, q)))));
         float mu0 = max(dot(n, vSun), 0.0);       // cos(incidence)
         float mu  = max(n.z, 1e-3);               // cos(emission) — the eye is +z here
-        // Lommel–Seeliger, normalised to 1 where mu0 == mu (the backscatter
-        // direction), so the phase function alone carries the level.
-        float ls = 2.0 * mu0 / (mu0 + mu);
-        float radiance = vAlbedo * vLight * ls;
-        // DISCLOSED display compression — the population spans several decades
-        // of reflected radiance and no linear gain shows both ends.
-        float lit = pow(clamp(radiance * u_gain, 0.0, 6.0), u_stretch);
+        // The SHARED law (js/airless-body.js): Lommel–Seeliger, normalised at
+        // backscatter, plus the DISCLOSED display compression. A moon and a
+        // rock of the same albedo at the same distance render identically.
+        float radiance = vAlbedo * (vLight * lommelSeeliger(mu0, mu)
+                                  + vShine * lommelSeeliger(max(dot(n, vShineDir), 0.0), mu));
+        float lit = airlessTone(radiance, u_gain, u_stretch);
         float limb = pow(smoothstep(bodyR * 0.55, bodyR, r), 3.0) * 0.06;
         vec3 body = vColor * lit + limb * vec3(0.55, 0.62, 0.78);
 
@@ -395,6 +408,9 @@ function makePointsMaterial() {
             u_padComa:   { value: SPRITE.padComa },
             u_gain:      { value: SPRITE.gain },
             u_stretch:   { value: SPRITE.stretch },
+            u_B0:        { value: OPPOSITION.B0 },
+            u_hOpp:      { value: OPPOSITION.h },
+            u_earthWorld: { value: new THREE.Vector3() },
         },
         transparent: true, depthWrite: false, depthTest: true,
         // NOT AdditiveBlending — see the block above. Premultiplied because the
@@ -794,18 +810,24 @@ export class NeoLayer extends Emitter {
         this._alpha = new Float32Array(N);
         this._pulse = new Float32Array(N);
         this._albedo = new Float32Array(N);
-        this._G = new Float32Array(N);         // IAU phase slope per taxonomy
         this._illum = new Float32Array(N);     // (1 AU / r_helio)²
+        this._shadow = new Float32Array(N);    // fraction of the Sun still visible
+        this._shine = new Float32Array(N);     // Earth-reflected light, fraction of direct
         this._coma = new Float32Array(N);
         this._illum.fill(1);
+        // The heliocentric cloud starts past 20 lunar distances and Earth's
+        // umbra is 1.38 million km (3.6 LD) long, so nothing drawn on THIS
+        // frame can be eclipsed or meaningfully earthlit: these stay constant.
+        this._shadow.fill(1);
         geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
         geo.setAttribute('aColor', new THREE.BufferAttribute(this._col, 3));
         geo.setAttribute('aRadius', new THREE.BufferAttribute(this._radius, 1));
         geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._alpha, 1));
         geo.setAttribute('aPulse', new THREE.BufferAttribute(this._pulse, 1));
         geo.setAttribute('aAlbedo', new THREE.BufferAttribute(this._albedo, 1));
-        geo.setAttribute('aG', new THREE.BufferAttribute(this._G, 1));
         geo.setAttribute('aIllum', new THREE.BufferAttribute(this._illum, 1));
+        geo.setAttribute('aShadow', new THREE.BufferAttribute(this._shadow, 1));
+        geo.setAttribute('aShine', new THREE.BufferAttribute(this._shine, 1));
         geo.setAttribute('aComa', new THREE.BufferAttribute(this._coma, 1));
         geo.setDrawRange(0, N);
         this.points = new THREE.Points(geo, this._pointsMat);
@@ -904,15 +926,17 @@ export class NeoLayer extends Emitter {
         this._lpos = new Float32Array(cap * 3); this._lcol = new Float32Array(cap * 3);
         this._lradius = new Float32Array(cap); this._lalpha = new Float32Array(cap); this._lpulse = new Float32Array(cap);
         this._lalbedo = new Float32Array(cap); this._lcoma = new Float32Array(cap);
-        this._lG = new Float32Array(cap); this._lillum = new Float32Array(cap);
+        this._lillum = new Float32Array(cap);
+        this._lshadow = new Float32Array(cap); this._lshine = new Float32Array(cap);
         geo.setAttribute('position', new THREE.BufferAttribute(this._lpos, 3));
         geo.setAttribute('aColor', new THREE.BufferAttribute(this._lcol, 3));
         geo.setAttribute('aRadius', new THREE.BufferAttribute(this._lradius, 1));
         geo.setAttribute('aAlpha', new THREE.BufferAttribute(this._lalpha, 1));
         geo.setAttribute('aPulse', new THREE.BufferAttribute(this._lpulse, 1));
         geo.setAttribute('aAlbedo', new THREE.BufferAttribute(this._lalbedo, 1));
-        geo.setAttribute('aG', new THREE.BufferAttribute(this._lG, 1));
         geo.setAttribute('aIllum', new THREE.BufferAttribute(this._lillum, 1));
+        geo.setAttribute('aShadow', new THREE.BufferAttribute(this._lshadow, 1));
+        geo.setAttribute('aShine', new THREE.BufferAttribute(this._lshine, 1));
         geo.setAttribute('aComa', new THREE.BufferAttribute(this._lcoma, 1));
         geo.setDrawRange(0, 0);
         this.localPoints = new THREE.Points(geo, this._pointsMat);
@@ -997,14 +1021,13 @@ export class NeoLayer extends Emitter {
             this._radius[k] = drawnRockRadius(o.diamKm);
             this._pulse[k] = flyby ? 1 : 0;
             this._albedo[k] = o.albedo;
-            this._G[k] = o.G;
             this._baseVis[k] = vis ? 1 : 0;
             // Alpha is VISIBILITY and the local-frame cross-fade, nothing else —
             // a body is opaque or it is not drawn. Magnitude lives in the drawn
             // size and albedo in the shading (see albedoFor).
             this._baseA[k] = 1;
         }
-        for (const a of ['aColor', 'aRadius', 'aPulse', 'aAlbedo', 'aG']) this.points.geometry.attributes[a].needsUpdate = true;
+        for (const a of ['aColor', 'aRadius', 'aPulse', 'aAlbedo']) this.points.geometry.attributes[a].needsUpdate = true;
         this._flybySet = flybySet;
         this._refreshAlpha();
     }
@@ -1115,8 +1138,16 @@ export class NeoLayer extends Emitter {
             this._lradius[j] = drawnRockRadius(o.diamKm);
             this._lpulse[j] = 0.8;                       // in-zone: the body wears a reticle
             this._lalbedo[j] = o.albedo;
-            this._lG[j] = o.G;
             this._lillum[j] = this._illum ? this._illum[k] : 1;
+            // EARTH'S SHADOW AND EARTHSHINE, in real kilometres — never from
+            // the drawn frame, which compresses 384 400 km into two Earth
+            // radii. Only the in-zone set can be inside the umbra at all
+            // (1.38 million km, i.e. 3.6 LD), and only it is close enough for
+            // earthshine to be worth anything, so the heliocentric cloud pays
+            // nothing for either.
+            const ec = this._earthLitState(g);
+            this._lshadow[j] = ec.lit;
+            this._lshine[j] = ec.shine;
             this._lcoma[j] = this._coma ? this._coma[k] : 0;
             this._lalpha[j] = this.visible.local && !this._meshed.has(k) ? (1 - localFrameWeight(off.dLD)) : 0;
             // Labels + trails for the nearest few (the selected object already
@@ -1151,8 +1182,31 @@ export class NeoLayer extends Emitter {
             if (!this.inZone.slice(0, 12).includes(k)) { this.localGroup.remove(line); line.geometry.dispose(); this._trails.delete(k); }
         }
         this.localPoints.geometry.setDrawRange(0, n);
-        for (const a of ['position', 'aColor', 'aRadius', 'aAlpha', 'aPulse', 'aAlbedo', 'aG', 'aIllum', 'aComa']) this.localPoints.geometry.attributes[a].needsUpdate = true;
+        for (const a of ['position', 'aColor', 'aRadius', 'aAlpha', 'aPulse', 'aAlbedo', 'aIllum', 'aShadow', 'aShine', 'aComa']) this.localPoints.geometry.attributes[a].needsUpdate = true;
         this.localPoints.geometry.computeBoundingSphere();
+    }
+
+    /**
+     * What Earth is doing to the light at a body, from its REAL geocentric
+     * vector: blocking some of the Sun, and reflecting some back. Both come
+     * out of js/eclipse-geometry.js, so the Moon (solar-system.html) and a
+     * near-Earth object answer the same question with the same code.
+     * @param {{x,y,z,helio:{x,y,z}}} g  geocentric + heliocentric, AU
+     */
+    _earthLitState(g) {
+        const e = this._earthOfDate;
+        if (!g || !e) return { lit: 1, shine: 0, phase: 'none' };
+        const K = AU_KM;
+        const geoKm = { x: g.x * K, y: g.y * K, z: g.z * K };
+        const sunFromBody = { x: -g.helio.x * K, y: -g.helio.y * K, z: -g.helio.z * K };
+        const earthFromBody = { x: -geoKm.x, y: -geoKm.y, z: -geoKm.z };
+        const sh = shadowIllumination({ sunFromBody, occulterFromBody: earthFromBody, occulterRadiusKm: EARTH_RADIUS_KM });
+        const shine = reflectedIrradianceFraction({
+            bodyFromPlanetKm: geoKm,
+            sunFromPlanetKm: { x: -e[0] * K, y: -e[1] * K, z: -e[2] * K },
+            planetRadiusKm: EARTH_RADIUS_KM, albedo: BODY_ALBEDO.earth,
+        });
+        return { lit: sh.lit, shine, phase: sh.phase };
     }
 
     _requestTrack(index) {
@@ -1306,18 +1360,32 @@ export class NeoLayer extends Emitter {
             const p = this.drawnPosition(slot.index, slot.mesh.position);
             if (!p) { slot.mesh.visible = false; continue; }
             slot.mesh.visible = true;
-            // Illumination × phase function, from the drawn geometry — the same
-            // pair POINT_VS computes for the impostor, so an object does not
-            // change brightness when a mesh stands in for its sprite.
-            if (f.camera) {
-                const o = opticsFor(this.els[slot.index]);
-                const toSunLen = Math.hypot(p.x, p.y, p.z) || 1;
-                const cx = f.camera.position.x - p.x, cy = f.camera.position.y - p.y, cz = f.camera.position.z - p.z;
-                const camLen = Math.hypot(cx, cy, cz) || 1;
-                const cosA = (-p.x * cx - p.y * cy - p.z * cz) / (toSunLen * camLen);
-                const alpha = Math.acos(Math.min(1, Math.max(-1, cosA)));
-                const illum = this._illum ? this._illum[slot.index] : 1;
-                slot.mesh.material.uniforms.u_light.value = illum * phaseHG(alpha, o.G);
+            // The illumination reaching this body, plus whatever Earth is doing
+            // to it. The shader evaluates the eclipse PER FRAGMENT from these
+            // real-kilometre vectors, so a body inside the shadow shows the
+            // curved edge of it rather than dimming as one flat disc.
+            {
+                const el = this.els[slot.index];
+                const u = slot.mesh.material.uniforms;
+                u.u_illum.value = this._illum ? this._illum[slot.index] : 1;
+                u.u_bodyRadiusKm.value = Math.max(0.05, (opticsFor(el).diamKm ?? 0.2) * 0.5);
+                const g = this.geocentricAt(slot.index);
+                const e = this._earthOfDate;
+                if (g && e) {
+                    const K = AU_KM;
+                    // Ecliptic (x, y, z) → SCENE axes (x, z, y), the same swap
+                    // helioToScene applies, so these share a frame with the
+                    // drawn normals the shader reads.
+                    u.u_sunFromBodyKm.value.set(-g.helio.x * K, -g.helio.z * K, -g.helio.y * K);
+                    u.u_occFromBodyKm.value.set(-g.x * K, -g.z * K, -g.y * K);
+                    u.u_occRadiusKm.value = EARTH_RADIUS_KM;
+                    const st = this._earthLitState(g);
+                    u.u_shine.value = st.shine;
+                    u.u_shineDir.value.set(-g.x, -g.z, -g.y).normalize();
+                } else {
+                    u.u_occRadiusKm.value = 0;
+                    u.u_shine.value = 0;
+                }
             }
             const ang = ((simMs / 3.6e6 / slot.spin.periodH) * Math.PI * 2 + slot.spin.phase) % (Math.PI * 2);
             // Spin about the body's own symmetry axis (geometry +Y), tilted to the seeded pole.
@@ -1455,6 +1523,21 @@ export class NeoLayer extends Emitter {
         if (el.moid != null) out['Earth MOID'] = `${formatLD(el.moid)} · ${el.moid.toFixed(4)} AU`;
         if (next) out['Next close approach'] = `${new Date(next.t_ms).toISOString().slice(0, 16).replace('T', ' ')} UTC · ${formatLD(next.dist_au)} · ${next.v_rel_kms != null ? next.v_rel_kms.toFixed(1) + ' km/s' : ''}`;
         if (sentry) out['Impact monitor'] = `Sentry-listed · Torino ${sentry.ts_max} · Palermo ${sentry.ps_cum} · P(impact) ${sentry.ip != null ? sentry.ip.toExponential(1) : '—'} (${sentry.range ?? '—'})`;
+        // Earth in the way, or Earth lighting the night side. Both are computed
+        // from the real vectors (js/eclipse-geometry.js), and both are silent
+        // when they are nothing — an "Earth's shadow: none" row on every object
+        // in the catalogue would be noise.
+        if (g) {
+            const st = this._earthLitState(g);
+            if (st.lit < 0.999) {
+                out['Earth\u2019s shadow'] = st.phase === 'umbral'
+                    ? 'total — the Sun is fully hidden by Earth; lit only by sunlight refracted through its atmosphere'
+                    : `partial — Earth is covering ${((1 - st.lit) * 100).toFixed(0)}% of the Sun`;
+            }
+            if (st.shine > 1e-5) {
+                out['Earthshine'] = `${(st.shine * 1e6).toFixed(0)} ppm of direct sunlight on the night side`;
+            }
+        }
         out['Propagation'] = `${elementsAgeNote(el.epoch, jd)} · JPL SBDB osculating elements`;
         return out;
     }
@@ -1680,6 +1763,7 @@ export class NeoLayer extends Emitter {
         for (const r of this._radiants) { r.stream.material.uniforms.u_time.value = this._t; r.rocks.update(this._t); }
         this._camera = f.camera ?? this._camera;   // the label de-clutter projects with it
         this._earthDrawn.copy(f.earthDrawn);
+        this._pointsMat.uniforms.u_earthWorld.value.copy(this._earthDrawn);
         this._earthOfDate = [f.earthOfDate.x_AU, f.earthOfDate.y_AU, f.earthOfDate.z_AU];
         this._earthFn = f.earthFn ?? this._earthFn;
         this._simMs = f.simMs ?? this._simMs;
