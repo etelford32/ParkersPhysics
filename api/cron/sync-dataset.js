@@ -18,6 +18,25 @@
  * the archive via trim_sw_geomag_dataset() (180-day retention; deeper
  * history lives in omni_hourly).
  *
+ * DO NOT SHRINK WINDOW_MIN TO SAVE WRITES. At a 10-min cadence over a
+ * 180-min window every minute-row is re-upserted ~18x, and an upsert
+ * whose values are unchanged STILL writes a new tuple version — measured
+ * n_tup_upd/n_live_tup = 1,714,801/98,179 = 17.5, which was 27.8% table
+ * bloat and the main WAL source. That is NOT a reason to narrow the
+ * window: the 3 h span is the self-healing property above, and trading it
+ * away buys writes with correctness.
+ *
+ * The fix is in the database, not here: a BEFORE UPDATE
+ * suppress_redundant_updates_trigger() on sw_geomag_dataset drops the
+ * no-op writes and lets genuine revisions through (see
+ * supabase-write-amplification-migration.sql, which records the
+ * ctid/xmin verification). It works ONLY because this file never sends
+ * synced_at — it is DB-default only, and PostgREST's DO UPDATE SET
+ * touches just the payload columns, so a settled minute re-upserts
+ * byte-identical. If you ever add synced_at (or any now()-valued column)
+ * to the row payload, every row becomes distinct again, the trigger goes
+ * dead, and the 17.5x comes straight back.
+ *
  * ── Raw-side archive ───────────────────────────────────────────────────────
  * Native-cadence ≥2 MeV electron rows also land in geomag_indices
  * (kind 'e2_mev') — NOAA's 1-day file rolls off; the archive doesn't.
