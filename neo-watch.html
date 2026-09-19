@@ -93,6 +93,37 @@ body {
 }
 #nw-stage-legend b { color:#bfcbe6; }
 
+/* The hover tooltip is DOM, not a sprite: it is text that has to be legible
+   at any zoom, and a canvas texture rebuilt on every hover change is a
+   texture upload per pointer move. pointer-events:none because it sits over
+   the canvas, which is the drag target. */
+#nw-tip {
+    position:absolute; z-index:4; pointer-events:none; opacity:0;
+    transform:translate(-50%, -140%); transition:opacity .12s ease;
+    background:rgba(4,6,16,.92); border:1px solid rgba(110,150,255,.32);
+    border-radius:7px; padding:5px 8px; white-space:nowrap;
+    font-size:.66rem; color:#e6ecf8; line-height:1.45;
+}
+#nw-tip[data-on="1"] { opacity:1; }
+#nw-tip .d { display:block; color:#8b97b4; font-size:.6rem; }
+
+/* Sparse state. Centred over the stage, because the report it answers is
+   "I am not seeing any objects" — an empty canvas has nowhere else to say
+   so, and the panels below the fold are not where the eye is. */
+#nw-sparse {
+    position:absolute; left:50%; top:46%; transform:translate(-50%,-50%);
+    max-width:min(430px, 78%); text-align:center; display:none;
+    background:rgba(4,6,16,.86); border:1px solid rgba(110,150,255,.24);
+    border-radius:10px; padding:12px 14px; font-size:.7rem; color:#bfcbe6; line-height:1.55;
+}
+#nw-sparse[data-on="1"] { display:block; }
+#nw-sparse b { color:#e6ecf8; }
+#nw-sparse.nw-sparse--down { border-color:rgba(255,176,92,.4); color:#ffd2a1; }
+#nw-sparse button {
+    margin-top:9px; font:inherit; color:#03040c; background:#9fc6ff; cursor:pointer;
+    border:0; border-radius:6px; padding:5px 11px; font-weight:600;
+}
+
 /* ── Headline stats ─────────────────────────────────────── */
 #nw-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(128px,1fr)); gap:9px; margin-top:12px; }
 .nw-stat-card {
@@ -242,7 +273,7 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
         <div id="nw-stage-legend">
           <b>Distance is drawn on a logarithmic scale; bodies are not.</b>
           Near-Earth space spans four decades of radius and no linear picture holds
-          both the ISS and 0.2&nbsp;AU &mdash; but Earth and the Moon are drawn at
+          both the ISS and 0.5&nbsp;AU &mdash; but Earth and the Moon are drawn at
           their true relative size, so the one ratio you can check is real.
           The labelled rings are the ruler; <b>True scale</b> removes the distance
           compression entirely. Rings are ranges, not orbits; the Moon's path is
@@ -251,7 +282,13 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
           Earth's gravitational boundaries &mdash; the sphere of influence at
           2.4&nbsp;LD and the Hill sphere at 3.9&nbsp;LD, both smaller than most
           people expect and both inside the lunar-distance ladder.
+          <br><b>Hover</b> an object to name it, <b>click</b> to select it, drag to
+          orbit. The page opens at its widest ring on purpose: the near ones are
+          usually empty, and an empty ring says so rather than showing you a
+          blank sky.
         </div>
+        <div id="nw-tip" role="status" aria-live="off"></div>
+        <div id="nw-sparse" role="status"></div>
       </div>
 
       <div id="nw-stats">

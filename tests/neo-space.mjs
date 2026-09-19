@@ -106,6 +106,11 @@ near(geoSceneRadius(GEO_RADIUS_KM) / trueSceneRadius(GEO_RADIUS_KM), 1, 0.15,
 for (let i = 1; i < SHELLS.length; i++) assert.ok(SHELLS[i].km > SHELLS[i - 1].km, 'shells ascend');
 for (let i = 1; i < HORIZONS.length; i++) assert.ok(HORIZONS[i].km > HORIZONS[i - 1].km, 'horizons ascend');
 assert.ok(HORIZONS.some(h => h.id === DEFAULT_HORIZON), 'the default horizon is one of the offered ones');
+// The page boots at its WIDEST horizon on purpose (see the DEFAULT_HORIZON
+// comment): enclosed volume goes as r^3, so the near rings are routinely and
+// correctly empty and booting into one shows a first visitor a black stage.
+// Narrowing the default again is the change this pins.
+assert.equal(DEFAULT_HORIZON, HORIZONS[HORIZONS.length - 1].id, 'the page boots at the widest offered horizon');
 assert.ok(SHELLS.every(s => s.km <= GEO_MAP.maxKm), 'no shell is drawn beyond the map');
 
 // The gravity boundaries' table entries are NOMINAL — the renderer recomputes

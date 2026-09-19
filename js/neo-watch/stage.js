@@ -62,17 +62,50 @@
  *   observer     your own position, with the local horizon plane, so the
  *                alt/az the panel prints has something to mean on screen.
  *
- * ── Picking ────────────────────────────────────────────────────────────────
- * Points raycasting sorts hits along the RAY, not across it, so a click would
- * otherwise select whatever is nearest the camera rather than nearest the
- * cursor. `pick()` re-sorts by `distanceToRay`, the same fix the orrery
- * carries.
+ * ── Picking, hover and framing ─────────────────────────────────────────────
+ * PICKING IS SCREEN-SPACE. three's `Raycaster` against a `Points` cloud takes
+ * a `threshold` in WORLD units, but these dots are drawn at a fixed 11 px with
+ * `sizeAttenuation: false` — so a world radius and a pixel radius agree at
+ * exactly one camera distance and nowhere else. The 0.22-unit threshold this
+ * replaced worked out to ~7 px at the default framing, ~64 px zoomed in to
+ * Earth, and 0.016 px in TRUE SCALE, where nothing on the stage could be
+ * selected at all. `pickAt` projects the Moon and every drawn point to the
+ * screen and takes the nearest within a pixel radius: exact, matched to what
+ * the viewer can actually see, and one projection per visible object.
+ *
+ *   - 14 px for a cursor, 44 px for a fingertip (the repo's standing
+ *     touch-target floor, shared with js/nav.js).
+ *   - A TAP is a `pointerup` within 6 px (14 on touch) and 700 ms of its
+ *     `pointerdown`, measured on `event.timeStamp` — NOT `performance.now()`,
+ *     which is when the handler ran rather than when the browser generated the
+ *     event, and on a frame rebuilding thousands of positions those differ by
+ *     hundreds of ms (mars.html measured 914). Without the press/release test
+ *     every camera drag ends in a click, and on a page whose entire surface is
+ *     a drag target that reads as the selection resetting at random.
+ *   - Hover is resolved from `render()`, at most `HOVER_HZ`, not from the
+ *     `pointermove` handler: moves fire far faster than the scene changes, and
+ *     running it per frame is also what keeps the ring on an object that is
+ *     MOVING under a still cursor — which at warp is most of what happens.
+ *   - Hover is a MOUSE affordance: a touch pointer dragging the camera must
+ *     not leave a highlight behind it.
+ *   - Names are not hover-only. `NEAR_LABELS` of the nearest objects carry
+ *     labels on the stage, because sweeping a cursor over a field of identical
+ *     dots is the findability failure mars.html's feature index exists to fix.
+ *
+ * FRAMING IS DERIVED, never a hand-tuned multiple of the radius. `frameAll`
+ * used to sit at 1.15 × the outer radius, which with a 45° VERTICAL field
+ * shows the inner 48 % of it — the ring the button is named after was off the
+ * top of the canvas, and so was anything near it. It presented as a picking
+ * bug: the pick was exact to 1.4e-5 px and the object projected to y = −58.
+ * `_distanceToFit` reads the camera's own fov and aspect, and the binding
+ * half-angle is the SMALLER one (vertical on a wide canvas, horizontal on a
+ * narrow one), so the phone case cannot be read off the desktop one.
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-    SHELLS, AU_KM, MOON_RADIUS_KM,
+    SHELLS, AU_KM, MOON_RADIUS_KM, HORIZONS, DEFAULT_HORIZON,
     geoToScene, geoSceneRadius, trueSceneRadius, bodySceneRadius,
     gmstRad, earthSceneMatrix,
     sunGeoDirectionJ2000, moonGeoJ2000, moonPhase, moonPath, moonApsides,
@@ -96,6 +129,12 @@ const ATMO_OUTER = 1 + 160 / 6371.0088;
 const SUN_LIGHT_R = 1e7;
 /** Pool size for real meshes. Small on purpose — each is 1280 faces. */
 const ROCK_POOL = 8;
+/** Longest a press may last and still count as a tap rather than a drag, ms. */
+const TAP_MAX_MS = 700;
+/** How often a hover is resolved. Every resolution projects the population. */
+const HOVER_HZ = 30;
+/** How many of the nearest objects get a name on the stage. */
+const NEAR_LABELS = 5;
 /** Sprite colours by class family. */
 const COLOR = {
     pha:        0xff6a5c,
@@ -444,8 +483,11 @@ export class NeoStage {
     constructor(canvas, opts = {}) {
         this.canvas = canvas;
         this.onPick = opts.onPick || (() => {});
+        this.onHover = opts.onHover || (() => {});
         this.trueScale = false;
-        this.horizonKm = 0.2 * AU_KM;
+        // Derived, never typed: a second copy of the default horizon here
+        // would silently disagree with the <select> the moment one moved.
+        this.horizonKm = (HORIZONS.find(h => h.id === DEFAULT_HORIZON) || HORIZONS[0]).km;
         this.jd = 2451545.0;
         this.selected = null;
         this.count = 0;
@@ -485,11 +527,19 @@ export class NeoStage {
         this._buildRockPool();
         this._buildOverlays();
 
-        this._ray = new THREE.Raycaster();
-        this._ray.params.Points.threshold = 0.22;
-        this._pointer = new THREE.Vector2();
-        this._onClick = (ev) => this._handleClick(ev);
-        canvas.addEventListener('click', this._onClick);
+        // Pointer events, not click: one path for mouse, pen and touch, and a
+        // press/release pair we can measure to tell a tap from a camera drag.
+        this.hovered = null;
+        this._down = null;
+        this._hoverClient = null;
+        this._listeners = [
+            ['pointerdown', (ev) => this._onPointerDown(ev)],
+            ['pointerup', (ev) => this._onPointerUp(ev)],
+            ['pointermove', (ev) => this._onPointerMove(ev)],
+            ['pointerleave', () => this._onPointerLeave()],
+            ['pointercancel', () => { this._down = null; this._onPointerLeave(); }],
+        ];
+        for (const [type, fn] of this._listeners) canvas.addEventListener(type, fn, { passive: true });
 
         this._applyRange();
         this.resize();
@@ -757,6 +807,28 @@ export class NeoStage {
         this.selLabel = labelSprite('', '#ffffff', 1);
         this.selLabel.visible = false;
         this.scene.add(this.selLabel);
+
+        // Hover: the same ring, dimmer and in the population's own blue. A
+        // hover affordance is what makes an 11 px dot on a black field look
+        // like a control at all — the cursor alone cannot say it, because on
+        // this page the whole canvas is also a camera drag target.
+        this.hoverRing = new THREE.Mesh(
+            new THREE.RingGeometry(0.16, 0.185, 40),
+            new THREE.MeshBasicMaterial({
+                color: 0x9fc6ff, transparent: true, opacity: 0.5,
+                side: THREE.DoubleSide, depthTest: false,
+            }),
+        );
+        this.hoverRing.visible = false;
+        this.hoverRing.renderOrder = 14;
+        this.scene.add(this.hoverRing);
+
+        // Names on the nearest few. Without them the stage is a field of
+        // identical dots and the only way to learn what anything IS is to
+        // sweep the cursor over it and hope — the findability failure
+        // mars.html's feature index was built to fix, in 3D.
+        this.nearLabels = [];
+        for (let i = 0; i < NEAR_LABELS; i++) this.nearLabels.push({ sprite: null, name: null });
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -923,7 +995,11 @@ export class NeoStage {
      */
     _applyRange() {
         const outer = this._outerRadius();
-        this.controls.maxDistance = Math.max(50, outer * 3.2);
+        // Room for `frameAll` to actually fit the outer ring: on a PORTRAIT
+        // viewport the binding half-angle is the horizontal one, and the
+        // distance that fits a given radius grows as 1/aspect. 3.2× was enough
+        // for the camera the page booted with and not for the one that fits.
+        this.controls.maxDistance = Math.max(50, outer * 6);
         this.controls.minDistance = 1.35;
         this.camera.far = Math.max(4000, outer * 30);
         // Near/far ratio: the globe is 1 unit across and must stay solid, so
@@ -943,7 +1019,8 @@ export class NeoStage {
         this._moonOrbitJd = null;
         this._applyRange();
         const outer = this._outerRadius();
-        this.camera.position.normalize().multiplyScalar(Math.min(outer * 1.6, this.controls.maxDistance));
+        this.camera.position.normalize()
+            .multiplyScalar(Math.min(this._distanceToFit(outer), this.controls.maxDistance));
         this.setEpoch(this.jd);
         this._refreshPopulation();
     }
@@ -963,10 +1040,32 @@ export class NeoStage {
      * three components it came out at 1.9x the radius, which put Earth at a
      * dozen pixels inside a scene whose whole point is that Earth is in it.
      */
+    /**
+     * Camera distance that puts a sphere of radius `r` about the origin inside
+     * the frame, with a little margin.
+     *
+     * DERIVED, never a hand-tuned multiple of the radius. `frameAll` used to
+     * sit at 1.15 × outer, which with a 45° vertical field shows the inner
+     * 48 % of the radius and CUTS OFF the outer ring the button is named
+     * after — measured: at the 0.5 AU horizon an object 3 LD out projected to
+     * y = −58 on an 806 × 446 canvas, i.e. above the top edge, while the stage
+     * reported it as drawn. It looked like a picking failure and was not.
+     *
+     * The binding constraint is the SMALLER half-angle: vertical on a wide
+     * canvas, horizontal on a narrow one (tan(h/2) = aspect · tan(v/2)), which
+     * is why the phone case cannot be read off the desktop one.
+     */
+    _distanceToFit(r, margin = 1.08) {
+        const halfV = Math.tan((this.camera.fov * Math.PI / 180) / 2);
+        const half = halfV * Math.min(1, this.camera.aspect || 1);
+        return (r * margin) / Math.max(1e-6, half);
+    }
+
     frameAll() {
         const outer = this._outerRadius();
         this.controls.target.set(0, 0, 0);
-        this.camera.position.set(0.62, 0.42, 0.66).normalize().multiplyScalar(outer * 1.15);
+        this.camera.position.set(0.62, 0.42, 0.66).normalize()
+            .multiplyScalar(Math.min(this._distanceToFit(outer), this.controls.maxDistance));
         this.controls.update();
     }
 
@@ -1055,6 +1154,7 @@ export class NeoStage {
         const want = [];
         if (Number.isInteger(this.selected) && this.rGeo && this.selected < this.count) want.push(this.selected);
         const sorted = [...this._visible].sort((a, b) => this.rGeo[a] - this.rGeo[b]);
+        this._refreshNearLabels(sorted);
         for (const k of sorted) {
             if (want.length >= ROCK_POOL) break;
             if (!want.includes(k)) want.push(k);
@@ -1083,6 +1183,51 @@ export class NeoStage {
             slot.mesh.scale.setScalar(Math.max(0.03, drawn * 1.6));
             slot.mesh.visible = true;
             slot.index = k;
+        }
+    }
+
+    /**
+     * Name the nearest few objects on the stage itself.
+     *
+     * Only objects we HAVE metadata for get a label — the tier ladder fetches
+     * names for the objects the page cares about, and an unnamed one would be
+     * labelled with its buffer index, which tells the viewer nothing and costs
+     * a canvas texture to say it. A sprite is rebuilt only when its text
+     * changes (the selLabel pattern): at 3 Hz, rebuilding five canvases a
+     * refresh is five textures a second for text that almost never moves.
+     */
+    _refreshNearLabels(sorted) {
+        let slot = 0;
+        for (const k of sorted) {
+            if (slot >= this.nearLabels.length) break;
+            const meta = this.meta.get(k);
+            const name = meta?.name || meta?.des;
+            if (!name) continue;
+            // The selection carries its own label; two on one dot is the word
+            // twice, offset by a pixel.
+            if (k === this.selected) continue;
+            const entry = this.nearLabels[slot];
+            if (entry.name !== name) {
+                if (entry.sprite) {
+                    this.scene.remove(entry.sprite);
+                    entry.sprite.material.map.dispose();
+                    entry.sprite.material.dispose();
+                }
+                entry.sprite = labelSprite(name, '#c8d8f2', 0.82);
+                entry.name = name;
+                this.scene.add(entry.sprite);
+            }
+            const o = k * 3;
+            const p = geoToScene(this.geo[o], this.geo[o + 1], this.geo[o + 2], { trueScale: this.trueScale });
+            // Above the dot, not on it: a label centred on an 11 px sprite
+            // hides the thing it names.
+            entry.sprite.position.set(p.x, p.y, p.z);
+            entry.sprite.center.set(0.5, -0.35);
+            entry.sprite.visible = true;
+            slot++;
+        }
+        for (let i = slot; i < this.nearLabels.length; i++) {
+            if (this.nearLabels[i].sprite) this.nearLabels[i].sprite.visible = false;
         }
     }
 
@@ -1204,33 +1349,166 @@ export class NeoStage {
     setGrid(on) { this.globeUniforms.uGrid.value = on ? 1 : 0; }
 
     // ── Interaction ─────────────────────────────────────────────────────────
+    //
+    // PICKING IS DONE IN SCREEN SPACE, and that is the whole fix.
+    //
+    // three's Points raycaster takes ONE threshold in WORLD units, but these
+    // dots are drawn with `sizeAttenuation: false` — a constant 11 px whatever
+    // their distance. The two have no relationship, so a fixed world threshold
+    // is a different hit radius at every zoom: measured at ~7 px on the default
+    // camera, ~64 px zoomed to Earth, and 0.016 px in TRUE SCALE, where nothing
+    // could be selected at all. Projecting the candidates to the screen and
+    // taking the nearest within a pixel radius is exact, matches what the user
+    // can actually see, and costs one projection per visible object — a few
+    // hundred, once per click or hover frame.
+    //
+    // The radius is bigger for touch than for a mouse because a fingertip is
+    // bigger than a cursor; 44 px is the repo's standing touch-target floor
+    // (js/nav.js and tests/nav-responsive.spec.js use the same number).
 
-    _handleClick(ev) {
+    /** Screen-space pick radius, CSS pixels. */
+    _pickRadius(pointerType) {
+        return pointerType === 'touch' ? 44 : 14;
+    }
+
+    /**
+     * Nearest selectable thing to a client point, or null.
+     * Returns { sel, distPx } where `sel` is a catalogue index or 'moon'.
+     */
+    pickAt(clientX, clientY, pointerType = 'mouse') {
         const rect = this.canvas.getBoundingClientRect();
-        this._pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-        this._pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-        this._ray.setFromCamera(this._pointer, this.camera);
+        if (!rect.width || !rect.height) return null;
+        const px = clientX - rect.left, py = clientY - rect.top;
+        const maxPx = this._pickRadius(pointerType);
 
-        // The Moon first — it is the largest thing on the stage after Earth and
-        // a click on it means the Moon, whatever else the ray goes on to hit.
-        if (this._ray.intersectObject(this.moon, false).length) { this.onPick('moon'); return; }
+        const v = new THREE.Vector3();
+        const toScreen = (x, y, z) => {
+            v.set(x, y, z).project(this.camera);
+            // Behind the camera: project() flips the sign, so a point behind
+            // would otherwise land on screen as a mirrored ghost.
+            if (v.z > 1) return null;
+            return { x: (v.x * 0.5 + 0.5) * rect.width, y: (-v.y * 0.5 + 0.5) * rect.height };
+        };
 
-        // Then meshes — a rock standing in for a point is what the cursor is
-        // actually over.
-        const meshHits = this._ray.intersectObjects(this.rocks.map(r => r.mesh).filter(m => m.visible), false);
-        if (meshHits.length) {
-            const slot = this.rocks.find(r => r.mesh === meshHits[0].object);
-            if (slot && slot.index != null) { this.onPick(slot.index); return; }
+        let best = null;
+        const consider = (sel, sx, sy) => {
+            const d = Math.hypot(sx - px, sy - py);
+            if (d <= maxPx && (!best || d < best.distPx)) best = { sel, distPx: d };
+        };
+
+        // The Moon is a real sphere, so its own silhouette is the hit area when
+        // the cursor is inside it — but it also stays pickable as a point when
+        // it is only a few pixels across.
+        const m = this.moon.position;
+        const ms = toScreen(m.x, m.y, m.z);
+        if (ms) consider('moon', ms.x, ms.y);
+
+        // Population.
+        if (this.geo && this._visible.length) {
+            const pos = this.popGeom.attributes.position.array;
+            for (let j = 0; j < this._visible.length; j++) {
+                const o = j * 3;
+                const sp = toScreen(pos[o], pos[o + 1], pos[o + 2]);
+                if (sp) consider(this._visible[j], sp.x, sp.y);
+            }
         }
-        const hits = this._ray.intersectObject(this.population, false);
-        if (hits.length) {
-            // Points raycasting sorts along the RAY. Re-sort across it, or a
-            // click means "nearest the camera" rather than "nearest the cursor".
-            hits.sort((a, b) => a.distanceToRay - b.distanceToRay);
-            const k = this._visible[hits[0].index];
-            if (k != null) { this.onPick(k); return; }
+        return best;
+    }
+
+    _clientToCanvas(ev) {
+        const rect = this.canvas.getBoundingClientRect();
+        return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+    }
+
+    /**
+     * A TAP is a pointerup near where the pointerdown landed, soon after it.
+     * Without this test every camera drag ends in a `click` and clears or
+     * changes the selection — which on a page whose whole surface is a drag
+     * target reads as the selection randomly resetting itself.
+     *
+     * The clock is `event.timeStamp`, not `performance.now()`: same origin, but
+     * timeStamp is when the browser GENERATED the event while performance.now()
+     * in the handler is when it finally ran, and on a frame where this page is
+     * rebuilding thousands of positions that lag is hundreds of milliseconds.
+     * mars.html measured a genuine quick double-tap at 914 ms by handler clock;
+     * the same trap applies to a single tap's time budget.
+     */
+    _onPointerDown(ev) {
+        this._down = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, id: ev.pointerId, type: ev.pointerType };
+    }
+
+    _onPointerUp(ev) {
+        const d = this._down;
+        this._down = null;
+        if (!d || d.id !== ev.pointerId) return;
+        const moved = Math.hypot(ev.clientX - d.x, ev.clientY - d.y);
+        const elapsed = ev.timeStamp - d.t;
+        // Touch slop is larger: a finger always moves a little.
+        const slop = d.type === 'touch' ? 14 : 6;
+        if (moved > slop || elapsed > TAP_MAX_MS) return;         // a drag, not a tap
+        const hit = this.pickAt(ev.clientX, ev.clientY, d.type);
+        this.onPick(hit ? hit.sel : null);
+    }
+
+    _onPointerMove(ev) {
+        // Hover is a mouse affordance. A touch pointer dragging the camera must
+        // not leave a hover highlight behind it.
+        if (ev.pointerType === 'touch') return;
+        this._hoverClient = { x: ev.clientX, y: ev.clientY };
+        this._hoverDirty = true;
+    }
+
+    _onPointerLeave() {
+        this._hoverClient = null;
+        this._hoverDirty = true;
+    }
+
+    /**
+     * Resolve the hover at most `HOVER_HZ` times a second, from the render
+     * loop rather than the event. pointermove fires far faster than the scene
+     * changes, and each resolution projects every visible object.
+     */
+    _updateHover(now) {
+        if (!this._hoverDirty && now - (this._hoverAt || 0) < 1000 / HOVER_HZ) return;
+        this._hoverAt = now;
+        this._hoverDirty = false;
+        const c = this._hoverClient;
+        const hit = c ? this.pickAt(c.x, c.y, 'mouse') : null;
+        const sel = hit ? hit.sel : null;
+        if (sel !== this.hovered) {
+            this.hovered = sel;
+            this.canvas.style.cursor = sel != null ? 'pointer' : '';
+            this.onHover(sel, c);
         }
-        this.onPick(null);
+        this._placeHoverRing();
+    }
+
+    /** The hover ring follows whatever is under the cursor. */
+    _placeHoverRing() {
+        const k = this.hovered;
+        const p = this._selectionPoint(k);
+        if (!p) { this.hoverRing.visible = false; return; }
+        this.hoverRing.position.copy(p);
+        this.hoverRing.visible = true;
+    }
+
+    /** Scene position of a selection token ('moon' or a catalogue index). */
+    _selectionPoint(sel, out = new THREE.Vector3()) {
+        if (sel === 'moon') return out.copy(this.moon.position);
+        if (!Number.isInteger(sel) || !this.geo || sel >= this.count) return null;
+        const o = sel * 3;
+        const p = geoToScene(this.geo[o], this.geo[o + 1], this.geo[o + 2], { trueScale: this.trueScale });
+        return out.set(p.x, p.y, p.z);
+    }
+
+    /** Where a selection token sits on screen, for a DOM tooltip. null if off-screen. */
+    screenPositionOf(sel) {
+        const p = this._selectionPoint(sel);
+        if (!p) return null;
+        const rect = this.canvas.getBoundingClientRect();
+        const v = p.clone().project(this.camera);
+        if (v.z > 1) return null;
+        return { x: (v.x * 0.5 + 0.5) * rect.width, y: (-v.y * 0.5 + 0.5) * rect.height };
     }
 
     // ── Frame ───────────────────────────────────────────────────────────────
@@ -1240,6 +1518,9 @@ export class NeoStage {
         this.renderer.setSize(w, h, false);
         this.camera.aspect = w / Math.max(1, h);
         this.camera.updateProjectionMatrix();
+        // Deliberately does NOT re-frame: `_distanceToFit` depends on the
+        // aspect, but moving the camera on every resize would fight the user's
+        // own framing. Frame All is a button for that reason.
     }
 
     render() {
@@ -1263,12 +1544,22 @@ export class NeoStage {
             this.selRing.quaternion.copy(this.camera.quaternion);
             this.selRing.scale.setScalar(Math.max(0.35, camDist * 0.055));
         }
+        // Hover is resolved HERE, not in the pointermove handler: pointermove
+        // fires far faster than the scene changes, and each resolution
+        // projects every visible object. Running it from the frame also means
+        // the ring keeps following an object that is MOVING under a still
+        // cursor, which is most of what happens on this page at warp.
+        this._updateHover(performance.now());
+        if (this.hoverRing.visible) {
+            this.hoverRing.quaternion.copy(this.camera.quaternion);
+            this.hoverRing.scale.setScalar(Math.max(0.3, camDist * 0.046));
+        }
         this.renderer.render(this.scene, this.camera);
     }
 
     dispose() {
         this._disposed = true;
-        this.canvas.removeEventListener('click', this._onClick);
+        for (const [type, fn] of this._listeners) this.canvas.removeEventListener(type, fn);
         this.controls.dispose();
         this.renderer.dispose();
     }

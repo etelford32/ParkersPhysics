@@ -223,15 +223,43 @@ export const SHELLS = Object.freeze([
     { id: 'au20', label: '0.2 AU',            km: 0.2 * AU_KM,            kind: 'far',   alwaysOn: true },
 ]);
 
-/** View horizons the page offers, nearest first. `default` is what it boots with. */
+/** View horizons the page offers, nearest first. `DEFAULT_HORIZON` boots it. */
 export const HORIZONS = Object.freeze([
+    // 1 LD answers the question this page is most often opened with — what is
+    // closer than the Moon right now — and it is the only offered ring that
+    // sits inside Earth's own gravitational boundaries (SOI 2.4 LD, Hill
+    // 3.9 LD), which is the page's headline analysis. It is also, most days,
+    // empty; that is the answer, and `_renderSparse` in js/neo-watch.js is
+    // what makes an empty ring read as one.
+    { id: 'ld1',   label: '1 LD',    km: LD_KM },
     { id: 'ld5',   label: '5 LD',    km: 5 * LD_KM },
     { id: 'ld20',  label: '20 LD',   km: 20 * LD_KM },
     { id: 'au01',  label: '0.1 AU',  km: 0.1 * AU_KM },
     { id: 'au02',  label: '0.2 AU',  km: 0.2 * AU_KM },
     { id: 'au05',  label: '0.5 AU',  km: 0.5 * AU_KM },
 ]);
-export const DEFAULT_HORIZON = 'au02';
+/**
+ * THE PAGE BOOTS AT ITS WIDEST HORIZON, AND THAT IS NOT A DEFAULT-BY-ACCIDENT.
+ *
+ * Near-Earth space is mostly empty, and the emptiness is steep: the enclosed
+ * volume goes as r³, so 0.2 AU holds 1/15.6 of what 0.5 AU does and 5 LD holds
+ * 1/5300 of it. JPL's own close-approach watch radius is 0.05 AU — 1/1000 of
+ * the 0.5 AU volume — and the number of catalogued objects inside it on an
+ * ordinary day is a handful. So the NEAR horizons are the ones that are
+ * routinely, correctly empty, and booting into one shows a first-time visitor
+ * a black stage and no way to know whether that is the sky or a broken feed.
+ *
+ * (The exact per-tier counts are UNVERIFIED here: ssd-api.jpl.nasa.gov is
+ * egress-blocked from the build sandbox, the same constraint `api/neo/*`
+ * documents. The volume ratios above are geometry and hold regardless.)
+ *
+ * The page answers the emptiness in words too — see `_renderSparse` in
+ * js/neo-watch.js, which distinguishes "the feed is down" from "N loaded, none
+ * inside this ring" and offers the next ring out. Both halves are needed: the
+ * wide default so the first frame has something in it, and the message so a
+ * deliberately narrow horizon still reads as an answer rather than a fault.
+ */
+export const DEFAULT_HORIZON = 'au05';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Frames

@@ -444,6 +444,7 @@ export class NeoWatch {
         const inView = this.frame ? this._countInView() : 0;
         this._setText('nw-count-view', inView.toLocaleString('en-US'));
         this._setText('nw-count-total', this.catalog.count.toLocaleString('en-US'));
+        this._renderSparse(inView);
         const closest = rows[0];
         this._setText('nw-closest', closest ? formatGeoDistance(closest.distKm) : '—');
         this._setText('nw-closest-name', closest ? closest.name : '');
@@ -595,6 +596,7 @@ export class NeoWatch {
         const canvas = this.$('nw-canvas');
         this.stage = new NeoStage(canvas, {
             onPick: (sel) => this.select(sel),
+            onHover: (sel, pt) => this._showTip(sel, pt),
             // Both texture tables are the repo's ONE copy of those pinned CDN
             // URLs (js/earth-skin.js, js/moon-skin.js). Both are optional: the
             // stage never claims imagery it did not receive.
@@ -606,6 +608,128 @@ export class NeoWatch {
         addEventListener('resize', () => this.stage.resize());
     }
 
+    /**
+     * The hover tooltip. DOM rather than a sprite: it is text that must stay
+     * legible at any zoom, and a canvas texture rebuilt on every hover change
+     * would be a texture upload per pointer move.
+     *
+     * It is anchored to the OBJECT (via the stage's own projection), not to the
+     * cursor, so it stays put while the object moves under a still cursor —
+     * which at warp is most of what happens. The cursor point is the fallback
+     * for the frame where the projection has not caught up.
+     */
+    _showTip(sel, pt) {
+        const tip = this.$('nw-tip');
+        if (!tip) return;
+        if (sel == null) { tip.dataset.on = '0'; return; }
+
+        let title, sub;
+        if (sel === 'moon') {
+            const ph = this.stage.phase;
+            title = 'Moon';
+            sub = ph ? `${formatGeoDistance(ph.distKm)} · ${ph.name}` : '';
+        } else {
+            const meta = this.meta.get(sel);
+            title = meta?.name || meta?.des || 'object';
+            const rAU = this.frame?.rGeo?.[sel];
+            sub = Number.isFinite(rAU) ? formatGeoDistance(rAU * AU_KM) : 'distance pending';
+        }
+        tip.innerHTML = '';
+        tip.append(document.createTextNode(title));
+        const d = document.createElement('span');
+        d.className = 'd';
+        d.textContent = sub;
+        tip.append(d);
+
+        const wrap = this.$('nw-stage-wrap');
+        const canvas = this.$('nw-canvas');
+        const at = this.stage.screenPositionOf(sel);
+        let x, y;
+        if (at) {
+            x = at.x + canvas.offsetLeft;
+            y = at.y + canvas.offsetTop;
+        } else if (pt) {
+            const r = wrap.getBoundingClientRect();
+            x = pt.x - r.left;
+            y = pt.y - r.top;
+        } else { tip.dataset.on = '0'; return; }
+        tip.style.left = `${x}px`;
+        tip.style.top = `${y}px`;
+        tip.dataset.on = '1';
+    }
+
+    /**
+     * Say WHY the stage is empty, on the stage.
+     *
+     * Three states are genuinely different and were previously one blank
+     * canvas: the feed is down (nothing to draw and nothing the viewer can do),
+     * the catalogue is still arriving, and — the common one — a catalogue is
+     * loaded but every object in it is outside the chosen horizon. The last is
+     * not a failure at all: at the Hill sphere the honest answer is usually
+     * nobody is here, and the fix is one control away.
+     */
+    _renderSparse(inView) {
+        const el = this.$('nw-sparse');
+        if (!el) return;
+        const st = this.catalog.state;
+        if (inView > 0) { el.dataset.on = '0'; el.classList.remove('nw-sparse--down'); return; }
+
+        el.classList.toggle('nw-sparse--down', st === 'down' || st === 'stale');
+        el.innerHTML = '';
+        const say = (html) => { const p = document.createElement('p'); p.style.margin = '0'; p.innerHTML = html; el.append(p); };
+
+        if (st === 'loading') {
+            say('Loading the catalogue…');
+        } else if (st === 'down') {
+            say('<b>The small-body feed is not answering.</b> Earth, the Moon and the range rings are still real — the population is not being drawn because we have none, not because none is there.');
+        } else if (st === 'stale') {
+            say('<b>Serving a cached catalogue.</b> Nothing in it is inside the current horizon.');
+        } else {
+            const wider = this._widerHorizon();
+            say(`<b>${this.catalog.count.toLocaleString('en-US')} objects loaded, none within ${this._horizonLabel()}.</b> That is the usual state of near-Earth space — the volume is mostly empty, and the closer the ring the emptier it is.`);
+            if (wider) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = `Widen to ${wider.label}`;
+                btn.addEventListener('click', () => this._setHorizon(wider.id));
+                el.append(btn);
+            }
+        }
+        el.dataset.on = '1';
+    }
+
+    _horizonLabel() {
+        return (HORIZONS.find(h => h.km === this.horizonKm) || {}).label || 'this horizon';
+    }
+
+    /**
+     * The ring to offer next. Not simply the next one out: the NARROWEST wider
+     * ring that would actually draw something, because a button that widens to
+     * another empty ring is a button the visitor has to press twice for no
+     * reason. Falls back to the next one out when we cannot tell (no frame
+     * yet), and to null at the widest.
+     */
+    _widerHorizon() {
+        const wider = HORIZONS.filter(h => h.km > this.horizonKm);
+        if (!wider.length) return null;
+        const f = this.frame;
+        if (!f) return wider[0];
+        for (const h of wider) {
+            const au = h.km / AU_KM;
+            for (let k = 0; k < f.count; k++) if (f.rGeo[k] <= au) return h;
+        }
+        return wider[wider.length - 1];
+    }
+
+    _setHorizon(id) {
+        const h = HORIZONS.find(x => x.id === id);
+        if (!h) return;
+        this.horizonKm = h.km;
+        this.stage.setHorizon(h.km);
+        const sel = this.$('nw-horizon');
+        if (sel) sel.value = h.id;
+    }
+
     _wireControls() {
         const on = (id, ev, fn) => { const el = this.$(id); if (el) el.addEventListener(ev, fn); };
 
@@ -614,11 +738,7 @@ export class NeoWatch {
         if (hsel) {
             hsel.innerHTML = HORIZONS.map(h =>
                 `<option value="${h.id}"${h.id === DEFAULT_HORIZON ? ' selected' : ''}>${h.label}</option>`).join('');
-            hsel.addEventListener('change', () => {
-                const h = HORIZONS.find(x => x.id === hsel.value) || HORIZONS[0];
-                this.horizonKm = h.km;
-                this.stage.setHorizon(h.km);
-            });
+            hsel.addEventListener('change', () => this._setHorizon(hsel.value));
         }
 
         // Tier.

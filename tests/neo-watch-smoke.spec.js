@@ -24,8 +24,11 @@ import { R2D } from '../js/neo-orbits.js';
  *   - the page boots, the stage mounts, and the population reaches it
  *   - the kernel's radial map is the map the stage actually draws with, at the
  *     Moon anchor — the ruler cannot drift from the ruler's own definition
- *   - an object planted 3 LD away is inside the default horizon and is drawn;
- *     one planted at 0.4 AU is inside the map but OUTSIDE the default horizon
+ *   - the view horizon decides what is drawn: an object planted 3 LD away and
+ *     one planted at 0.4 AU split across a 0.2 AU ring and rejoin at 0.5 AU
+ *   - the page BOOTS wide, and says so in words when a narrow ring is empty
+ *   - picking is SCREEN-SPACE: a dot is selectable in both scale modes, a
+ *     camera drag is not a selection, and hovering names the thing under it
  *   - the live board ranks by distance and the nearest row is the nearest object
  *   - the live board updates IN PLACE, so a row is not detached mid-click
  *   - the gravity boundaries are drawn at their LIVE radii and the panel's
@@ -89,7 +92,8 @@ function catalogBody(nowJd) {
         ['99942', '99942 Apophis (2004 MN4)', '19.09', 'ATE', 'Y', 'Y', '.1914', '.9224', '.7461', '3.339', '203.96', '126.68', '100.1', null, String(EPOCH), '.000258', '.340'],
         ['101955', '101955 Bennu (1999 RQ36)', '20.2', 'APO', 'Y', 'Y', '.2037', '1.1264', '.8969', '6.035', '2.06', '66.22', '220.5', null, String(EPOCH), '.0032', '.49'],
         ['433', '433 Eros (A898 PA)', '10.4', 'AMO', 'Y', 'N', '.2227', '1.458', '1.133', '10.83', '304.3', '178.9', '12.3', null, String(EPOCH), '.148', '16.8'],
-        // Two planted objects: one well inside the default horizon, one outside.
+        // Two planted objects that straddle the 0.2 AU ring: the horizon test
+        // narrows to it, splits them, and widens back to rejoin them.
         planted('NEAR-3LD', 3 * LD_AU, 24.0, null),
         planted('FAR-04AU', 0.4, 22.0, null),
     ];
@@ -169,6 +173,52 @@ async function waitForPopulation(page) {
     }, null, { timeout: 45_000 });
 }
 
+/**
+ * Wait until OrbitControls' damping has run out. `enableDamping` keeps the
+ * camera moving after the mouse is released, so a screen position sampled
+ * straight after a drag is stale by the time the next click is dispatched —
+ * which reads as picking missing by a few pixels, intermittently.
+ */
+async function waitForCameraStill(page) {
+    await page.waitForFunction(() => {
+        const c = window.__neoWatch.stage.camera.position;
+        const prev = window.__nwPrevCam;
+        window.__nwPrevCam = [c.x, c.y, c.z];
+        if (!prev) return false;
+        return Math.hypot(c.x - prev[0], c.y - prev[1], c.z - prev[2]) < 1e-4;
+    }, null, { timeout: 15_000 });
+    await page.evaluate(() => { delete window.__nwPrevCam; });
+}
+
+/** Client coordinates of a point on the canvas where the stage picks NOTHING. */
+async function emptySky(page) {
+    return page.evaluate(() => {
+        const st = window.__neoWatch.stage;
+        const r = st.canvas.getBoundingClientRect();
+        for (let fy = 0.08; fy <= 0.92; fy += 0.12) {
+            for (let fx = 0.08; fx <= 0.92; fx += 0.12) {
+                const x = r.left + r.width * fx, y = r.top + r.height * fy;
+                if (!st.pickAt(x, y, 'mouse')) return { x, y };
+            }
+        }
+        return null;
+    });
+}
+
+/** Client coordinates of a catalogue object's drawn pixel, by designation. */
+async function screenPixelOf(page, des) {
+    return page.evaluate((d) => {
+        const w = window.__neoWatch;
+        let target = null;
+        for (const [k, m] of w.meta) if (m.des === d) target = k;
+        if (target == null) return null;
+        const p = w.stage.screenPositionOf(target);
+        if (!p) return null;
+        const r = w.stage.canvas.getBoundingClientRect();
+        return { target, x: p.x + r.left, y: p.y + r.top };
+    }, des);
+}
+
 test.describe('neo-watch.html — Near-Earth Watch', () => {
     test.setTimeout(120_000);
 
@@ -224,8 +274,11 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         await openPage(page);
         await waitForPopulation(page);
 
-        // NEAR-3LD is planted at 3 LD and FAR-04AU at 0.4 AU. The default
-        // horizon is 0.2 AU, so exactly one of them is inside it.
+        // NEAR-3LD is planted at 3 LD and FAR-04AU at 0.4 AU. The page BOOTS
+        // at its widest ring (0.5 AU — see DEFAULT_HORIZON), which holds both,
+        // so this test narrows to 0.2 AU explicitly to split them. Asserting
+        // against whatever the default happens to be is what made the split a
+        // hostage to a product decision it has nothing to do with.
         //
         // Wait for the object this test is ABOUT, not for "some metadata": the
         // tier ladder's second load clears the metadata map and refills it on
@@ -236,10 +289,12 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
             return false;
         }, null, { timeout: 30_000 });
 
-        // The near one is found by name; the far one CANNOT be, and that is
-        // itself the design: metadata is only fetched for objects a readout can
-        // name, so an object outside the horizon has none. It is identified by
-        // its planted distance instead.
+        await page.selectOption('#nw-horizon', 'au02');
+        await page.waitForTimeout(600);
+
+        // The near one is found by name; the far one need not be, because
+        // metadata is only fetched for objects a readout can name and an object
+        // outside the horizon has none. It is identified by planted distance.
         const planted = await page.evaluate(() => {
             const w = window.__neoWatch;
             const out = { near: null, far: [] };
@@ -274,11 +329,113 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         }, firstIndex);
         expect(isNearest).toBe(true);
 
-        // Widening the horizon brings the far object in.
+        // Widening the horizon back brings the far object in.
         await page.selectOption('#nw-horizon', 'au05');
         await page.waitForTimeout(600);
         const nowDrawn = await page.evaluate((idx) => window.__neoWatch.stage._visible.includes(idx), planted.far[0].index);
         expect(nowDrawn).toBe(true);
+    });
+
+    test('the page boots WIDE, and an empty ring says so instead of showing a black stage', async ({ page }) => {
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+
+        // Boots at the widest offered ring. This is the half of the fix that
+        // the visitor's first frame depends on; the message below is the other.
+        const boot = await page.evaluate(() => {
+            const w = window.__neoWatch;
+            return { km: w.horizonKm, select: document.getElementById('nw-horizon').value, drawn: w.stage._visible.length };
+        });
+        expect(boot.select).toBe('au05');
+        expect(boot.km).toBeCloseTo(0.5 * 149597870.7, 0);
+        expect(boot.drawn).toBeGreaterThan(0);
+
+        // With something drawn there is nothing to explain.
+        await expect(page.locator('#nw-sparse')).toBeHidden();
+
+        // FRAME ALL MUST FRAME ALL. The boot framing used to sit at 1.15 x the
+        // outer radius, which with a 45 deg vertical field shows under half of
+        // it — so the ring the page is ranged to was off the top of the canvas
+        // and so was anything near it. Probe the outer ring's own extremes
+        // through the camera the page booted with.
+        await page.click('#nw-frame-all');
+        await page.waitForTimeout(500);
+        const fits = await page.evaluate(() => {
+            const s = window.__neoWatch.stage;
+            const THREE_ = s.camera.constructor;                 // only for the type name
+            const r = s.canvas.getBoundingClientRect();
+            const outer = s._outerRadius();
+            let worst = 0;
+            for (let i = 0; i < 16; i++) {
+                const a = (i / 16) * Math.PI * 2;
+                const p = new s.camera.position.constructor(outer * Math.cos(a), 0, outer * Math.sin(a));
+                p.project(s.camera);
+                const x = (p.x * 0.5 + 0.5) * r.width, y = (-p.y * 0.5 + 0.5) * r.height;
+                worst = Math.max(worst, -x, -y, x - r.width, y - r.height);
+            }
+            return { worstOverflowPx: worst, outer, type: THREE_.name };
+        });
+        // Every point of the outer ring lands on the canvas.
+        expect(fits.worstOverflowPx).toBeLessThanOrEqual(0);
+
+        // Now narrow to 1 LD — inside the nearest planted object (3 LD) and,
+        // on any ordinary date, inside everything real in the fixture too.
+        // Emptiness there is the correct answer, not a fault, and the page has
+        // to be able to say the difference.
+        await page.selectOption('#nw-horizon', 'ld1');
+        await page.waitForTimeout(1200);           // panels redraw at 3 Hz
+
+        const empty = await page.evaluate(() => ({
+            drawn: window.__neoWatch.stage._visible.length,
+            on: document.getElementById('nw-sparse').dataset.on,
+            text: document.getElementById('nw-sparse').textContent,
+            down: document.getElementById('nw-sparse').classList.contains('nw-sparse--down'),
+        }));
+        // Apophis passes inside 1 LD in April 2029 and the fixture carries its
+        // real elements, so a suite run in that window legitimately has company
+        // in this ring. The assertion is on the empty case, which is every
+        // other date.
+        if (empty.drawn === 0) {
+            expect(empty.on).toBe('1');
+            // It must read as "loaded, none here" — NOT as a feed failure.
+            expect(empty.down).toBe(false);
+            expect(empty.text).toMatch(/objects loaded, none within/i);
+            // And it must offer the way out — to a ring that actually holds
+            // something, not merely to the next one, or the visitor presses it
+            // twice for nothing.
+            const widen = page.locator('#nw-sparse button');
+            await expect(widen).toBeVisible();
+            await widen.click();
+            await page.waitForTimeout(700);
+            const after = await page.evaluate(() => ({
+                horizon: document.getElementById('nw-horizon').value,
+                drawn: window.__neoWatch.stage._visible.length,
+                sparse: document.getElementById('nw-sparse').dataset.on,
+            }));
+            expect(after.horizon).not.toBe('ld1');
+            expect(after.drawn).toBeGreaterThan(0);
+            expect(after.sparse).toBe('0');
+        }
+    });
+
+    test('a feed that is down says so ON THE STAGE, in different words from an empty ring', async ({ page }) => {
+        await mockJpl(page, { catalogDown: true, watchDown: true });
+        await openPage(page);
+        await page.waitForFunction(() => window.__neoWatch.catalog.state !== 'loading', null, { timeout: 30_000 });
+        await page.waitForTimeout(700);
+
+        const sparse = await page.evaluate(() => {
+            const el = document.getElementById('nw-sparse');
+            return { on: el.dataset.on, text: el.textContent, down: el.classList.contains('nw-sparse--down') };
+        });
+        expect(sparse.on).toBe('1');
+        expect(sparse.down).toBe(true);
+        // The distinction the whole element exists for: a dead feed must not
+        // read as "space is empty here", and an empty ring must not read as a
+        // fault. Neither message may contain the other's claim.
+        expect(sparse.text).toMatch(/not answering|cached catalogue/i);
+        expect(sparse.text).not.toMatch(/objects loaded, none within/i);
     });
 
     test('the Moon is drawn at true relative size, on its real path, with its apsides', async ({ page }) => {
@@ -502,6 +659,169 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         const card = await page.textContent('#nw-selected');
         expect(card).toMatch(/Distance/);
         expect(card).toMatch(/RA \/ Dec/);
+        expect(errors).toEqual([]);
+    });
+
+    test('picking is SCREEN-SPACE, so a dot is selectable in both scale modes', async ({ page }) => {
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+        await page.waitForFunction(() => {
+            for (const m of window.__neoWatch.meta.values()) if (m.des === 'NEAR-3LD') return true;
+            return false;
+        }, null, { timeout: 30_000 });
+
+        // THE BUG THIS PINS: picking used to be a three.js Raycaster against
+        // Points, whose `threshold` is a WORLD radius. The dots are drawn at a
+        // fixed 11 px with sizeAttenuation off, so the world threshold and the
+        // drawn size agree at exactly one camera distance and nowhere else —
+        // and in TRUE SCALE, where the whole population sits four decades
+        // further out, the hit radius works out to a fraction of a pixel and
+        // nothing on the stage can be selected at all.
+        //
+        // Screen-space picking is checked where it failed: project the object,
+        // click its own pixel, and require the click to land on it — in both
+        // modes, with no change to the code between them.
+        const pickAtOwnPixel = async () => page.evaluate(() => {
+            const w = window.__neoWatch;
+            let target = null;
+            for (const [k, m] of w.meta) if (m.des === 'NEAR-3LD') target = k;
+            if (target == null) return { ok: false, why: 'no target' };
+            const at = w.stage.screenPositionOf(target);
+            if (!at) return { ok: false, why: 'off screen' };
+            const r = w.stage.canvas.getBoundingClientRect();
+            const hit = w.stage.pickAt(at.x + r.left, at.y + r.top, 'mouse');
+            return {
+                ok: true, target, hit: hit ? hit.sel : null, distPx: hit ? hit.distPx : null,
+                // Guard the guard: a pick that "works" at a coordinate outside
+                // the canvas proves nothing about what a user can click.
+                onCanvas: at.x >= 0 && at.y >= 0 && at.x <= r.width && at.y <= r.height,
+            };
+        });
+
+        const compressed = await pickAtOwnPixel();
+        expect(compressed.ok).toBe(true);
+        expect(compressed.onCanvas).toBe(true);
+        expect(compressed.hit).toBe(compressed.target);
+        expect(compressed.distPx).toBeLessThan(2);
+
+        await page.check('#nw-true-scale');
+        await page.waitForTimeout(700);
+        const trueScale = await page.evaluate(() => window.__neoWatch.stage.trueScale);
+        expect(trueScale).toBe(true);
+        const linear = await pickAtOwnPixel();
+        expect(linear.ok).toBe(true);
+        // THE true-scale case is the one the world-unit threshold could not do
+        // at all: the same object, four decades further out, still on screen
+        // and still one pixel from its own pick.
+        expect(linear.onCanvas).toBe(true);
+        expect(linear.hit).toBe(linear.target);
+        expect(linear.distPx).toBeLessThan(2);
+
+        // A fingertip gets a bigger target than a cursor, and the touch radius
+        // is the repo's standing 44 px touch-target floor.
+        const radii = await page.evaluate(() => ({
+            mouse: window.__neoWatch.stage._pickRadius('mouse'),
+            touch: window.__neoWatch.stage._pickRadius('touch'),
+        }));
+        expect(radii.touch).toBe(44);
+        expect(radii.touch).toBeGreaterThan(radii.mouse);
+        await page.uncheck('#nw-true-scale');
+    });
+
+    test('a camera drag is not a selection, and a tap is', async ({ page }) => {
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+        await page.waitForFunction(() => {
+            for (const m of window.__neoWatch.meta.values()) if (m.des === 'NEAR-3LD') return true;
+            return false;
+        }, null, { timeout: 30_000 });
+
+        // Put something selectable under a known pixel and remember where.
+        const at = await screenPixelOf(page, 'NEAR-3LD');
+        expect(at).toBeTruthy();
+
+        await page.evaluate(() => window.__neoWatch.select(null));
+        await page.waitForTimeout(250);
+
+        // A DRAG that starts on the object must leave the selection alone.
+        // Without the press/release test every camera drag ends in a click and
+        // the selection changes under the user's hand — on a page whose entire
+        // surface is a drag target, that reads as the selection resetting at
+        // random.
+        await page.mouse.move(at.x, at.y);
+        await page.mouse.down();
+        await page.mouse.move(at.x + 90, at.y + 50, { steps: 8 });
+        await page.mouse.up();
+        await page.waitForTimeout(350);
+        expect(await page.evaluate(() => window.__neoWatch.selected)).toBe(null);
+
+        // A TAP on the same object selects it. Re-project AFTER the damping has
+        // run out: the drag moved the camera, and a position sampled while it
+        // is still coasting is stale by the time the click is dispatched.
+        await waitForCameraStill(page);
+        const at2 = await screenPixelOf(page, 'NEAR-3LD');
+        expect(at2).toBeTruthy();
+        await page.mouse.move(at2.x, at2.y);
+        await page.mouse.down();
+        await page.mouse.up();
+        await page.waitForTimeout(400);
+        expect(await page.evaluate(() => window.__neoWatch.selected)).toBe(at2.target);
+
+        // Clicking empty sky clears it, which is how a selection is dismissed.
+        await waitForCameraStill(page);
+        const sky = await emptySky(page);
+        expect(sky).toBeTruthy();
+        await page.mouse.move(sky.x, sky.y);
+        await page.mouse.down();
+        await page.mouse.up();
+        await page.waitForTimeout(350);
+        expect(await page.evaluate(() => window.__neoWatch.selected)).toBe(null);
+    });
+
+    test('hovering names what is under the cursor, and the nearest few are labelled', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+        await page.waitForFunction(() => {
+            for (const m of window.__neoWatch.meta.values()) if (m.des === 'NEAR-3LD') return true;
+            return false;
+        }, null, { timeout: 30_000 });
+
+        const at = await screenPixelOf(page, 'NEAR-3LD');
+        expect(at).toBeTruthy();
+
+        await page.mouse.move(at.x, at.y);
+        // Hover is resolved from the RENDER LOOP, not the event, so it takes a
+        // frame or two rather than landing synchronously with the move.
+        await page.waitForFunction(() => document.getElementById('nw-tip').dataset.on === '1', null, { timeout: 10_000 });
+        const tip = await page.evaluate(() => {
+            const el = document.getElementById('nw-tip');
+            return { text: el.textContent, hovered: window.__neoWatch.stage.hovered, cursor: window.__neoWatch.stage.canvas.style.cursor };
+        });
+        expect(tip.hovered).toBe(at.target);
+        expect(tip.text).toContain('NEAR-3LD');
+        // The affordance: a dot on a black field has to look like a control.
+        expect(tip.cursor).toBe('pointer');
+        expect(await page.evaluate(() => window.__neoWatch.stage.hoverRing.visible)).toBe(true);
+
+        // Off the object, the tooltip and the ring go away.
+        await page.mouse.move(8, 8);
+        await page.waitForFunction(() => document.getElementById('nw-tip').dataset.on !== '1', null, { timeout: 10_000 });
+        expect(await page.evaluate(() => window.__neoWatch.stage.hoverRing.visible)).toBe(false);
+
+        // Hover must not be the ONLY way to learn what anything is: the nearest
+        // few carry their names on the stage. Sweeping a cursor over a field of
+        // identical dots is the findability failure mars.html's feature index
+        // exists to fix, and it is worse in 3D.
+        const labels = await page.evaluate(() => {
+            const w = window.__neoWatch;
+            return w.stage.nearLabels.filter(e => e.sprite && e.sprite.visible).map(e => e.name);
+        });
+        expect(labels.length).toBeGreaterThan(0);
+        expect(labels.every(n => typeof n === 'string' && n.length > 0)).toBe(true);
         expect(errors).toEqual([]);
     });
 

@@ -146,6 +146,53 @@ the view *from* Earth and a stage that draws it.
     limit rather than extrapolated. Comets get no H,G magnitude at all — their
     light is activity-driven — and the row says so.
 
+
+### 2x. Picking is screen-space, and the page boots wide
+
+Two decisions that came out of one report — *"I am not seeing any objects yet"*
+— and that turned out to be two unrelated causes.
+
+**Picking projects; it does not raycast.** three's `Raycaster` against a
+`Points` cloud takes a `threshold` in **world units**, but the dots are drawn
+at a fixed 11 px with `sizeAttenuation: false`. A world radius and a pixel
+radius agree at exactly one camera distance and nowhere else: the 0.22-unit
+threshold worked out to ~7 px at the default framing, ~64 px zoomed to Earth,
+and **0.016 px in true scale, where nothing on the stage could be selected at
+all**. `NeoStage.pickAt` instead projects the Moon and every drawn point to the
+screen and takes the nearest within a pixel radius — 14 px for a cursor, 44 px
+for a fingertip (the repo's standing touch-target floor). It costs one
+projection per visible object, once per click or hover resolution.
+
+Three consequences are load-bearing:
+
+- **A press/release pair, not a `click`.** A tap is a `pointerup` within 6 px
+  (14 on touch) and 700 ms of its `pointerdown`. Without that test every camera
+  drag ends in a click, and on a page whose entire surface is a drag target the
+  selection appears to reset at random. The clock is `event.timeStamp`, not
+  `performance.now()` — the same trap `mars.html` measured at 914 ms.
+- **Hover resolves from the render loop**, at most 30 Hz, not from the
+  `pointermove` handler: moves fire far faster than the scene changes, and this
+  is also what keeps the hover ring on an object that is *moving* under a still
+  cursor, which at warp is most of what happens.
+- **Names are not hover-only.** The nearest few objects carry labels on the
+  stage. Hunting a field of identical dots with the cursor is the findability
+  failure `mars.html`'s feature index exists to fix, and it is worse in 3D.
+
+**`DEFAULT_HORIZON` is the WIDEST offered ring, and the page says why when one
+is empty.** Enclosed volume goes as r³: 0.2 AU holds 1/15.6 of what 0.5 AU
+does, and 5 LD holds 1/5300 of it. JPL's own close-approach watch radius is
+0.05 AU. So the near rings are the ones that are routinely and *correctly*
+empty, and booting into one shows a first visitor a black stage with no way to
+tell the sky from a broken feed. Both halves ship: the wide default, and
+`_renderSparse`, which distinguishes *the feed is down* (amber) from *N loaded,
+none inside this ring* (neutral, with a button to the narrowest wider ring that
+actually holds something). A `1 LD` horizon was added at the same time — it is
+the ring the page is most often opened for, the only one inside Earth's own
+gravitational boundaries, and most days it is empty, which is the answer.
+
+(The per-tier counts behind this are **unverified**: `ssd-api.jpl.nasa.gov` is
+egress-blocked from the build sandbox. The volume ratios are geometry.)
+
 ## 2b. The gravity analysis, in numbers
 
 Computed from the kernel, at Earth's mean distance:
@@ -255,6 +302,20 @@ of two rather than a population.
   module threw on import and took the page with it. Function declarations hoist;
   `const` does not. The gravitational constants now live in the top constants
   block. `NEO_LAYER_PLAN.md` §3 records the same failure mode on the orrery.
+- **`frameAll()` did not frame all, and it looked like a picking bug.** The
+  boot framing sat at 1.15 × the outer radius; with a 45° *vertical* field that
+  shows the inner 48 % of it, so the ring the stage is ranged to was off the top
+  of the canvas and so was anything near it. The screen-space picking gate found
+  it by accident: the pick was exact to 1.4e-5 px and the object's projected y
+  was **−58** on an 806 × 446 canvas. `_distanceToFit()` now derives the
+  distance from the camera's own fov and aspect, and the binding half-angle is
+  the *smaller* one — vertical on a wide canvas, horizontal on a narrow one — so
+  the phone case cannot be read off the desktop one. `controls.maxDistance` had
+  to move with it (3.2× → 6×) or the clamp ate the fix on portrait viewports.
+- **A second copy of the default horizon.** The stage initialised
+  `this.horizonKm` to a typed `0.2 * AU_KM` while the `<select>` read
+  `DEFAULT_HORIZON`. Harmless only because the controller calls `setHorizon`
+  immediately after construction — it derives the value now.
 - **Three call sites want the same ephemeris every frame.** `earthHelioJ2000`
   and `moonGeoJ2000` carry a single-entry memo keyed on the Julian Day; they
   stay pure (same input, same frozen output).
