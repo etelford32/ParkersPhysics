@@ -89,9 +89,11 @@ const RANGE_SWR     = 60;
 // Hard cap on range-query limit. The binding constraint is the Edge
 // response-body ceiling (~4 MB compressed), NOT retention: trimmed frames
 // gzip to ~60 KB each, so 72 frames ≈ 4.3 MB — already at the limit.
-// (Retention itself is 720 rows / 30 days since the
-// supabase-weather-cache-retention-migration bump; raising this cap
-// requires paginating the response, not just editing the constant.)
+// (Retention is 30 days DECIMATED since supabase-storage-reclaim-
+// migration.sql, 2026-09-19: hourly for the last 72 h, 3-hourly older.
+// So a range read inside 72 h is hourly exactly as before — only a
+// `since` reaching past 3 days returns a 3-hourly series. Raising this
+// cap requires paginating the response, not just editing the constant.)
 const RANGE_MAX_LIMIT     = 72;
 const RANGE_DEFAULT_LIMIT = 24;
 

@@ -354,8 +354,11 @@ New cron `api/cron/archive-weather-grid.js` (daily 03:00 UTC):
 1. Pull last 24 h of `weather_grid_cache` rows.
 2. Insert one row into `weather_grid_cache_warm` per 6 h (decimated).
 3. Stream the 24 raw rows to `r2://parker-physics-cold/weather-grid/{yyyy}/{mm}/{dd}.jsonl.gz`.
-4. Existing `trim_weather_grid_cache()` already keeps `weather_grid_cache`
-   at 72 h — no change needed.
+4. Existing `trim_weather_grid_cache()` keeps `weather_grid_cache` at 30
+   days DECIMATED (hourly for 72 h, 3-hourly older) as of
+   supabase-storage-reclaim-migration.sql — so the "warm" 6-hourly tier
+   this step describes is now only a 2x thinning of the tail, not 28x.
+   Re-score whether it still earns its own table before building it.
 
 Existing `/api/weather/grid` gets a new optional `?tier=hot|warm|cold` param;
 default `hot`.
