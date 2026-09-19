@@ -20,6 +20,33 @@
 -- next place to look is Org -> Usage, egress line.
 -- ═══════════════════════════════════════════════════════════════
 
+-- ── WHY supabase/migrations/ IS NOT TOUCHED ───────────────────
+-- Everything here lives in TOP-LEVEL supabase-*-migration.sql files, per
+-- CLAUDE.md section 8, and the CLI baseline
+-- (supabase/migrations/20200101000000_baseline.sql) is deliberately left
+-- alone even though it still shows the OLD trim_weather_grid_cache body.
+--
+-- This is not tidiness. This repo has Supabase Git BRANCHING enabled:
+-- any PR that touches supabase/ makes the bot provision a PREVIEW
+-- DATABASE — a whole extra project — per commit. On PRs that leave
+-- supabase/ alone the check reports 'skipped' in under a second
+-- (compare #1014); the first revision of THIS PR edited the baseline and
+-- the preview branch came up '⚠️ Service health check failed' while its
+-- Migrations task never even ran.
+--
+-- On a FREE org already at its project limit and already returning 402,
+-- standing up another database per commit is the exact opposite of what
+-- this migration is for. So: never edit supabase/migrations/ to record a
+-- change that a top-level file already carries.
+--
+-- CONSEQUENCE, stated rather than hidden: the baseline is a point-in-time
+-- snapshot and is NOT a live mirror of production (it never contained
+-- omni_ingest/omni_refresh at all — see the write-amplification
+-- migration). After a `supabase db reset` the top-level
+-- supabase-*-migration.sql files still have to be applied by hand, in
+-- the order their headers describe. That was already true before this
+-- change.
+
 -- ── 1. weather_grid_cache: 137 MB -> 49 MB ────────────────────
 -- Deletes the frames nothing reads. See the header on
 -- trim_weather_grid_cache() in supabase-weather-cache-migration.sql
