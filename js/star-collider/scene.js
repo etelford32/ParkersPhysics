@@ -384,6 +384,10 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
             'c': () => { const ids = Object.keys(COLOR_MODES); api.setColorMode(ids[(ids.indexOf(st.colorMode) + 1) % ids.length]); },
             't': () => api.setTrails(!st.trailsOn), 'r': () => api.reset(),
             ' ': () => onCommand && onCommand('togglePause'),
+            // Transport keys hand off to the page's clock (it owns the worker); the stage
+            // has no idea what a chunk is and must not.
+            'arrowleft': () => onCommand && onCommand('stepBack'), 'arrowright': () => onCommand && onCommand('stepFwd'),
+            'home': () => onCommand && onCommand('toStart'), 'end': () => onCommand && onCommand('toHead'),
             '+': () => flyTo({ r: currentSpherical().r * 0.8 }, 0.3), '=': () => flyTo({ r: currentSpherical().r * 0.8 }, 0.3),
             '-': () => flyTo({ r: currentSpherical().r * 1.25 }, 0.3),
         }[key];

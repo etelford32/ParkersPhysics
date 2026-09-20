@@ -254,3 +254,91 @@ fn neutron_stars_merge() {
     assert!(alive > 400);
     assert!(s.frame[0].is_finite());
 }
+
+/// The rewind contract: a state restored from a snapshot and advanced again
+/// reproduces the live run BIT FOR BIT — positions, velocities, thermal
+/// energy, time, step count, E_gw and the diagnostics. Positions + velocities
+/// alone would not (the leapfrog starts from the previous step's acceleration
+/// and h relaxes by a 0.5 blend on every density pass), which is why the
+/// snapshot carries acc/du/h/cs/pn_kick/diag[31] and this test checks with
+/// exact equality, never a tolerance. Covers a star pair with 2.5PN on and a
+/// black-hole + star pair with accretion (alive flags and BH mass growth).
+#[test]
+fn snapshot_restore_is_bit_exact() {
+    fn run_case(mut s: Sim, dt_max: f64, chunk: f64) {
+        // Chunk 0 is the built state; step to chunk 5, snapshot, run to chunk 12.
+        for _ in 0..5 {
+            s.advance(chunk, 100_000, dt_max);
+        }
+        let len = s.snapshot();
+        assert_eq!(len, s.snapshot_len());
+        let saved: Vec<f64> = s.snap[..len].to_vec();
+        let t5 = s.time;
+        let steps5 = s.steps;
+        for _ in 0..7 {
+            s.advance(chunk, 100_000, dt_max);
+        }
+        let n = s.n;
+        let pos12 = s.pos[..3 * n].to_vec();
+        let vel12 = s.vel[..3 * n].to_vec();
+        let u12 = s.u[..n].to_vec();
+        let alive12 = s.alive[..n].to_vec();
+        let diag12 = s.diag.clone();
+        let bodies12 = s.bodies;
+        let (t12, steps12, egw12) = (s.time, s.steps, s.e_gw);
+        assert!(steps12 > steps5 + 7, "the case must actually step ({} → {})", steps5, steps12);
+
+        // Rewind: restore chunk 5 and re-run the same 7 chunks.
+        s.snap[..len].copy_from_slice(&saved);
+        assert!(s.restore(len), "restore refused its own snapshot");
+        assert_eq!(s.time, t5);
+        assert_eq!(s.steps, steps5);
+        for _ in 0..7 {
+            s.advance(chunk, 100_000, dt_max);
+        }
+        assert_eq!(s.time.to_bits(), t12.to_bits(), "time");
+        assert_eq!(s.steps, steps12, "steps");
+        assert_eq!(s.e_gw.to_bits(), egw12.to_bits(), "E_gw");
+        for i in 0..3 * n {
+            assert_eq!(s.pos[i].to_bits(), pos12[i].to_bits(), "pos[{}]", i);
+            assert_eq!(s.vel[i].to_bits(), vel12[i].to_bits(), "vel[{}]", i);
+        }
+        for i in 0..n {
+            assert_eq!(s.u[i].to_bits(), u12[i].to_bits(), "u[{}]", i);
+            assert_eq!(s.alive[i], alive12[i], "alive[{}]", i);
+        }
+        for k in 0..s.diag.len() {
+            assert_eq!(s.diag[k].to_bits(), diag12[k].to_bits(), "diag[{}]", k);
+        }
+        for idx in 0..2 {
+            assert_eq!(s.bodies[idx].mass.to_bits(), bodies12[idx].mass.to_bits(), "body {} mass", idx);
+            assert_eq!(s.bodies[idx].accreted.to_bits(), bodies12[idx].accreted.to_bits(), "body {} accreted", idx);
+            for k in 0..3 {
+                assert_eq!(s.bodies[idx].pos[k].to_bits(), bodies12[idx].pos[k].to_bits(), "body {} pos", idx);
+            }
+        }
+        // A snapshot from a different particle count is refused, and refusing leaves the state alone.
+        let t_before = s.time;
+        s.snap[1] = (n + 1) as f64;
+        assert!(!s.restore(len));
+        assert_eq!(s.time, t_before);
+    }
+
+    // Case 1: two neutron stars, 2.5PN driver on (pn_kick / pn_weight / diag[31] in play).
+    let mut s = two_stars(80, 1.0);
+    s.relax(30, 0.5, 0.05);
+    s.set_orbit(24.0, 0.0, 0.0, 0.0, true);
+    run_case(s, 1.0, 4.0);
+
+    // Case 2: black hole + star on a close eccentric orbit so accretion fires
+    // (alive flags flip, the BH mass and sink grow) inside the replayed window.
+    let mut s = Sim::new();
+    s.params.c = 1.0;
+    s.params.pn25 = false;
+    s.set_body(0, Kind::BlackHole, 3.0, 6.0, 2.0);
+    s.set_body(1, Kind::Star, 1.0, 5.0, 2.0);
+    s.build(0, 90, 11);
+    s.relax(30, 0.5, 0.05);
+    s.set_orbit(14.0, 0.6, 0.0, 0.0, false);
+    run_case(s, 0.5, 2.0);
+}

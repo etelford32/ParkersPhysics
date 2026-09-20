@@ -1,6 +1,6 @@
 # Star Collider Lab — design, status, decisions
 
-`star-collider.html` · `js/star-collider/*` · `rust-star-collider/` · 2026-09-20
+`star-collider.html` · `js/star-collider/*` · `rust-star-collider/` · 2026-09-20 (clock + transport 2026-09-20)
 
 ## 1. What it is
 
@@ -25,11 +25,18 @@ catalog.js ──resolveProfile(EOS)──▶ profile {M, R, C, Λ, k2, χ, I, k
        eos.js ◀──┤                      ├──▶ inspiral.js  (TaylorT4 3.5PN + tides + SO; Peters)
        tov.js ◀──┘                      ├──▶ remnant.js   (BBH/BNS/NSBH/WD fits; kilonova; magnetar)
                                         └──▶ sph-worker.js ─▶ kernel.js ─▶ star_collider_kernel.wasm
-page.js  (the ONE recompute; DOM contract data-sc / data-sc-control / data-sc-chart)
+page.js  (the ONE recompute; DOM contract data-sc / data-sc-control / data-sc-chart;
+          transport bar + live-vs-rebuild control routing)
+sph-worker.js (the run's CLOCK: chunk index, parameter events, checkpoint timeline,
+          seek / step / replay / branch — see its header)
 scene.js (three.js stage + camera rig: follow / presets / corotating frame / frame-to-fit /
           keyboard / colour modes / trails / pre-run preview; Y-up, rotation-mapped)
-charts.js (M–R, waveform, frequency track, kilonova, energy ledger)
+charts.js (M–R, waveform, frequency track, kilonova, energy ledger; review cursor)
 ```
+
+The page opens on the stage (stage → transport → console under the hero;
+the lede and the provenance banner follow). The console scrolls on its own
+so Build & run stays beside the stage.
 
 Every module under `js/star-collider/` except `page.js`, `scene.js` and the
 worker is PURE (no DOM, no fetch, no ambient time) and node-tested.
@@ -108,7 +115,47 @@ cgs with p/c² in g/cm³ (see the eos.js header — reading them as dyn/cm² is
     definition, pinned by the kernel smoke (flagged mass == diagnostic).
 14. **Before a run the stage previews the configured pair** as wire spheres
     at the configured separation, framed to fit — the camera has the system
-    to look at, not an empty grid, and the ring already reads in km.
+    to look at, not an empty grid, and the ring already reads in km. The
+    preview re-frames itself when the extent moves by more than a quarter.
+15. **The clock is the chunk index, not the wall clock** (2026-09-20). A
+    chunk is `advance(chunkDt = 4·dt_max, 64 substeps max)`, so state(k) is
+    a function of the build, the seed and the parameter events before k;
+    the pace only decides how many chunks run per tick. The first worker
+    advanced `warp × wallDt` in four pieces inside a millisecond budget, so
+    the substep boundaries depended on the machine and two runs of one
+    setup could not agree past the first frame — nothing could be rewound.
+    `tests/star-collider-worker.mjs` pins chunk 3 identical across paces.
+16. **A snapshot is everything the leapfrog reads, and restore is bit-exact.**
+    KDK starts from the PREVIOUS step's acc/du, the timestep reads cs/h/acc,
+    the implicit PN correction reads pn_kick/pn_weight, e_gw integrates
+    diag[31], and h relaxes by a 0.5 blend on every density pass — so
+    positions + velocities + a recompute is NOT the identity. `sph.rs`
+    SNAP_* carries all of it (17 f64 per particle + bodies + scalars +
+    params); `cargo test snapshot_restore_is_bit_exact` and the kernel
+    smoke compare with `Object.is`/`to_bits`, never a tolerance.
+17. **Live parameter changes are events on the clock; a change behind the
+    head branches.** α, Γ_th, 2.5PN and 1PN are applied as `{chunk, params}`
+    events, re-applied on every replay through them, so a run tuned in
+    flight rewinds to the states it had. A change while reviewing cannot be
+    folded into history without falsifying the recorded frames after it, so
+    it truncates the timeline and moves the head to the cursor — and says
+    so. Everything else (objects, masses, radii, spins, EOS, separation,
+    eccentricity, tidal lock, resolution, seed) is a REBUILD, debounced
+    650 ms while "apply changes to the running sim" is on; the console tags
+    every field LIVE or REBUILD. THE SCAR: a live run's head is the
+    worker's, not the page's — the page's last frame lags by a frame
+    interval, and sending that chunk as the event position made every live
+    tweak branch the run a few chunks back (caught by the browser gate).
+    `at` is sent only while reviewing and ignored by a running worker.
+18. **The timeline is capped and thins, never truncates.** Frames + diag
+    every `every` chunks, a full snapshot every 4th entry; over 40 MB or
+    600 entries it drops every other entry and doubles `every`, so a long
+    run is still scrubbable end to end at a coarser resolution the
+    transport prints. Scrubbing shows the nearest recorded frame at once
+    (no kernel work); releasing replays from the nearest checkpoint — or
+    from the kernel's own state when that is nearer — to the exact chunk.
+    The head is held in `headSnap` while the kernel is behind it, so Live
+    returns exactly. Trails clear whenever the shown time goes backwards.
 
 ## 4. What the SPH engine is and is not
 
@@ -119,6 +166,9 @@ Paczyński–Wiita black holes with sinks, bulk 2.5PN radiation reaction with
 E_gw accounting, quadrupole-formula strain from accelerations (exact, no
 finite differencing), Bernoulli unbound mass. Deterministic (seeded LCG
 jitter only).
+
+Deterministic and rewindable: seeded LCG jitter at build, fixed-chunk
+stepping, bit-exact snapshot/restore (decisions 15–18).
 
 Is not: GR hydrodynamics, a nuclear EOS in the hydro (the polytrope is
 fitted to the TOV radius), neutrinos, magnetic fields, a tree code (O(N²):
@@ -132,7 +182,8 @@ two-body term fades once the cores overlap).
 ```
 node tests/star-collider-tov.mjs tests/star-collider-inspiral.mjs \
      tests/star-collider-remnant.mjs tests/star-collider-catalog.mjs \
-     tests/star-collider-kernel-smoke.mjs tests/star-collider-page.mjs
+     tests/star-collider-kernel-smoke.mjs tests/star-collider-worker.mjs \
+     tests/star-collider-page.mjs
 (cd rust-star-collider && cargo test --release)
 npx playwright test tests/star-collider-smoke.spec.js
 ```

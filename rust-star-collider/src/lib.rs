@@ -24,11 +24,19 @@
 //!   28 u_max          29 orbital ω     30 PN weight     31 RR power
 //!   32 E_gw (integrated RR work)       33/34 alive mass A/B
 //!   35/36 body mass A/B (BH grows)     37/38 r_s A/B    39 n_total
+//!
+//! Snapshot / restore (the page's rewind clock): sc_snapshot() serialises the
+//! COMPLETE integrator state into the buffer at sc_snap_ptr() (flat f64, see
+//! sph.rs SNAP_*) and returns its length; JS copies it out. To rewind, JS
+//! copies a snapshot back into the same buffer and calls sc_restore(len),
+//! which refuses (returns 0) a snapshot from another build. Advancing from a
+//! restored state reproduces the live run bit for bit — that is what makes
+//! the transport bar honest, and `cargo test` pins it.
 
 pub mod lane_emden;
 pub mod sph;
 
-use sph::{Kind, Sim, DIAG_SLOTS, FRAME_STRIDE, MAX_N};
+use sph::{Kind, Sim, DIAG_SLOTS, FRAME_STRIDE, MAX_N, SNAP_CAPACITY, SNAP_HEADER, SNAP_STRIDE};
 
 static mut SIM: Option<Box<Sim>> = None;
 
@@ -106,6 +114,43 @@ pub extern "C" fn sc_set_orbit(sep: f64, ecc: f64, spin_a: f64, spin_b: f64, pn_
 #[no_mangle]
 pub extern "C" fn sc_advance(dt_total: f64, max_steps: u32, dt_max: f64) -> u32 {
     sim().advance(dt_total, max_steps, dt_max)
+}
+
+/// Serialise the integrator state into the snapshot buffer; returns the f64 length.
+#[no_mangle]
+pub extern "C" fn sc_snapshot() -> u32 {
+    sim().snapshot() as u32
+}
+
+/// Restore the state from the first `len` slots of the snapshot buffer. 1 on success, 0 if refused.
+#[no_mangle]
+pub extern "C" fn sc_restore(len: u32) -> u32 {
+    if sim().restore(len as usize) {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sc_snap_ptr() -> *mut f64 {
+    sim().snap.as_mut_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn sc_snap_capacity() -> u32 {
+    SNAP_CAPACITY as u32
+}
+
+/// Layout helpers so kernel.js never hard-codes the snapshot geometry.
+#[no_mangle]
+pub extern "C" fn sc_snap_header() -> u32 {
+    SNAP_HEADER as u32
+}
+
+#[no_mangle]
+pub extern "C" fn sc_snap_stride() -> u32 {
+    SNAP_STRIDE as u32
 }
 
 #[no_mangle]

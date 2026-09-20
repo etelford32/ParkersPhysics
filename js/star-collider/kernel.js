@@ -90,6 +90,27 @@ export async function loadKernel(source) {
             const n = x.sc_n();
             return new Float32Array(f32(x.sc_frame_ptr(), n * frameStride));
         },
+        /**
+         * The rewind clock. snapshot() serialises the COMPLETE integrator state
+         * (positions, velocities, the previous step's accelerations, u/du, h,
+         * cs, rho, p, phi, alive flags, both bodies, time, steps, E_gw, the PN
+         * kick state and params — see sph.rs SNAP_*) as a Float64Array COPY;
+         * restore(snap) writes one back and returns true, or false if the
+         * kernel refuses it (another build: particle count differs). Advancing
+         * from a restored state reproduces the live run bit for bit — the
+         * worker's timeline and `tests/star-collider-kernel-smoke.mjs` both
+         * rely on exact equality, never a tolerance.
+         */
+        snapshot() {
+            const len = x.sc_snapshot();
+            return new Float64Array(f64(x.sc_snap_ptr(), len));
+        },
+        restore(snap) {
+            if (!snap || !snap.length || snap.length > x.sc_snap_capacity()) return false;
+            f64(x.sc_snap_ptr(), snap.length).set(snap);
+            return x.sc_restore(snap.length) === 1;
+        },
+        snapshotBytes() { return 8 * (x.sc_snap_header() + 64 + x.sc_n() * x.sc_snap_stride()); },
         // Raw views (re-created per call; do not hold across an allocation).
         pos() { return f64(x.sc_pos_ptr(), x.sc_n() * 3); },
         vel() { return f64(x.sc_vel_ptr(), x.sc_n() * 3); },

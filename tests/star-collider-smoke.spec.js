@@ -44,12 +44,16 @@ test.describe('Star Collider Lab', () => {
 
         await page.goto(PAGE);
         await ready(page);
+        // The camera readouts fill when the stage module lands (an async import); wait for it so
+        // a slow rasteriser cannot turn "stage still loading" into a placeholder failure.
+        await page.waitForFunction(() => !!window.__starCollider?.scene, null, { timeout: 30000 });
 
         // Analytic readouts must all carry values. The SPH HUD is legitimately on
         // its placeholder until a run is started, so it is excluded here and
         // checked in the run test.
         const hudKeys = new Set(['simTime', 'simSep', 'simFreq', 'simN', 'simSteps', 'simRate', 'simUnbound', 'simAccreted',
-            'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'stageScale']);
+            'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'stageScale',
+            'clockTime', 'clockChunk', 'clockSteps', 'clockTimeline']);
         const unfilled = await page.evaluate((hud) => [...document.querySelectorAll('[data-sc]')]
             .filter(el => !hud.includes(el.getAttribute('data-sc')))
             .filter(el => !el.textContent.trim() || el.textContent.trim() === '—')
@@ -217,8 +221,132 @@ test.describe('Star Collider Lab', () => {
         const fb = await page.evaluate(() => { const el = document.querySelector('#sc-stage-fallback'); return { hidden: el.hidden, display: getComputedStyle(el).display }; });
         expect(fb.hidden).toBe(true);
         expect(fb.display).toBe('none');
-        await page.locator('[data-sc-control="pause"]').click();
+        await page.locator('[data-sc-control="tPlay"]').click();
         await expect(page.locator('[data-sc="simStatus"]')).toHaveText(/paused/);
         expect(errors, 'errors during the run').toEqual([]);
+    });
+
+    test('layout: the stage opens the page, the transport sits under it, Build & run is in the first screen', async ({ page }) => {
+        await page.goto(PAGE);
+        await ready(page);
+        const box = async (sel) => page.locator(sel).first().boundingBox();
+        const stage = await box('#sc-stage-wrap'), lede = await box('.sc-lede'), prov = await box('.sc-provenance'), transport = await box('#sc-transport'), run = await box('[data-sc-control="run"]'), hero = await box('.sc-hero');
+        expect(stage.y).toBeGreaterThan(hero.y);
+        expect(stage.y + stage.height).toBeLessThanOrEqual(lede.y + 1);
+        expect(stage.y + stage.height).toBeLessThanOrEqual(prov.y + 1);
+        expect(transport.y).toBeGreaterThanOrEqual(stage.y + stage.height - 1);
+        expect(transport.y + transport.height).toBeLessThanOrEqual(lede.y + 1);
+        // The primary action is visible without scrolling (the console scrolls, the button does not move).
+        expect(run.y + run.height).toBeLessThan(720);
+        expect(run.x).toBeGreaterThan(stage.x + stage.width - 1);
+        // Live / rebuild tags are visible in the console.
+        await expect(page.locator('.sc-console .sc-tag-live').first()).toBeVisible();
+        await expect(page.locator('.sc-console .sc-tag-build').first()).toBeVisible();
+    });
+
+    test('the clock: pause, step, scrub, exact replay, branch, live parameters, auto-apply rebuild, keys', async ({ page }) => {
+        test.setTimeout(150000);
+        const errors = collectErrors(page);
+        await page.goto(PAGE);
+        await ready(page);
+        await page.waitForFunction(() => /WASM/.test(document.querySelector('[data-sc="simEngine"]').textContent), null, { timeout: 30000 });
+        await page.selectOption('[data-sc-control="particles"]', '150');
+        // Before a run the transport is inert.
+        await expect(page.locator('[data-sc-control="tPlay"]')).toBeDisabled();
+        await expect(page.locator('[data-sc="clockMode"]')).toHaveText(/NO RUN/);
+        await page.locator('[data-sc-control="run"]').click();
+        const clock = () => page.evaluate(() => { const c = window.__starCollider.state.sim.clock; return c ? { ...c, timeline: undefined } : null; });
+        await page.waitForFunction(() => { const c = window.__starCollider.state.sim.clock; return c && c.mode === 'running' && c.head >= 12; }, null, { timeout: 60000 });
+        await expect(page.locator('#sc-transport')).toHaveAttribute('data-mode', 'running');
+        await expect(page.locator('[data-sc="clockMode"]')).toHaveText(/LIVE · RUNNING/);
+
+        // Pause at the head.
+        await page.locator('[data-sc-control="tPlay"]').click();
+        await page.waitForFunction(() => window.__starCollider.state.sim.clock.mode === 'paused', null, { timeout: 10000 });
+        await expect(page.locator('[data-sc="simStatus"]')).toHaveText(/paused/);
+        const headFrame = await page.evaluate(() => ({ chunk: window.__starCollider.state.sim.clock.head, frame: Array.from(window.__starCollider.state.sim.frame), t: window.__starCollider.state.sim.diag.time }));
+        expect(headFrame.chunk).toBeGreaterThanOrEqual(12);
+        await expect(page.locator('[data-sc="clockChunk"]')).toHaveText(new RegExp(`^${headFrame.chunk} / ${headFrame.chunk}$`));
+
+        // One chunk back → review, exact; one forward → back at the head, bit-identical.
+        await page.locator('[data-sc-control="tBack"]').click();
+        await page.waitForFunction((h) => { const c = window.__starCollider.state.sim.clock; return c.chunk === h - 1 && c.exact; }, headFrame.chunk, { timeout: 10000 });
+        await expect(page.locator('#sc-transport')).toHaveAttribute('data-mode', 'review');
+        await expect(page.locator('[data-sc="simStatus"]')).toHaveText(/review · chunk \d+ of \d+ · bit-exact replay/);
+        await page.locator('[data-sc-control="tFwd"]').click();
+        await page.waitForFunction((h) => { const c = window.__starCollider.state.sim.clock; return c.chunk === h && c.exact && c.mode === 'paused'; }, headFrame.chunk, { timeout: 10000 });
+        const backAtHead = await page.evaluate(() => Array.from(window.__starCollider.state.sim.frame));
+        expect(backAtHead.length).toBe(headFrame.frame.length);
+        expect(backAtHead.every((v, i) => Object.is(v, headFrame.frame[i]))).toBe(true);
+
+        // Scrub to chunk 2: the input event shows a recorded frame, the change event replays exactly.
+        const scrubTo = (k) => page.evaluate((k) => {
+            const el = document.querySelector('[data-sc-control="scrub"]');
+            el.value = String(k); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, k);
+        await scrubTo(2);
+        await page.waitForFunction(() => { const c = window.__starCollider.state.sim.clock; return c.chunk === 2 && c.exact && c.mode === 'review'; }, null, { timeout: 15000 });
+        const at2 = await page.evaluate(() => ({ frame: Array.from(window.__starCollider.state.sim.frame), t: window.__starCollider.state.sim.diag.time }));
+        expect(at2.t).toBeLessThan(headFrame.t);
+        expect(at2.frame.every((v, i) => Object.is(v, headFrame.frame[i]))).toBe(false);
+        await expect(page.locator('[data-sc="clockTime"]')).not.toHaveText('—');
+        // Head, then back to 2: determinism in the browser — the same frame to the bit.
+        await page.locator('[data-sc-control="tHead"]').click();
+        await page.waitForFunction((h) => { const c = window.__starCollider.state.sim.clock; return c.chunk === h && c.mode === 'paused'; }, headFrame.chunk, { timeout: 10000 });
+        await scrubTo(2);
+        await page.waitForFunction(() => { const c = window.__starCollider.state.sim.clock; return c.chunk === 2 && c.exact; }, null, { timeout: 15000 });
+        const at2again = await page.evaluate(() => Array.from(window.__starCollider.state.sim.frame));
+        expect(at2again.every((v, i) => Object.is(v, at2.frame[i]))).toBe(true);
+
+        // Keys over the stage: → steps forward, End returns to the head.
+        await page.evaluate(() => document.querySelector('#sc-stage canvas').focus());
+        await page.hover('#sc-stage canvas');
+        await page.keyboard.press('ArrowRight');
+        await page.waitForFunction(() => window.__starCollider.state.sim.clock.chunk === 3, null, { timeout: 10000 });
+        await page.keyboard.press('End');
+        await page.waitForFunction((h) => window.__starCollider.state.sim.clock.chunk === h, headFrame.chunk, { timeout: 10000 });
+
+        // Resume from here: scrub to 4, branch → the head becomes 4 and the run continues from there.
+        await scrubTo(4);
+        await page.waitForFunction(() => { const c = window.__starCollider.state.sim.clock; return c.chunk === 4 && c.exact; }, null, { timeout: 15000 });
+        await page.locator('[data-sc-control="tBranch"]').click();
+        // The head restarts from 4 and grows again; on a software rasteriser a rAF poll can
+        // miss any particular window, so only the lower bound and the note are asserted.
+        await page.waitForFunction(() => { const c = window.__starCollider.state.sim.clock; return c.mode === 'running' && c.head >= 6; }, null, { timeout: 20000 });
+        await expect(page.locator('[data-sc="applyNote"]')).toHaveText(/branched at chunk 4/);
+        const energyOk = await page.evaluate(() => { const s = window.__starCollider.state.sim; return s.energy.every((e, i) => i === 0 || e.t > s.energy[i - 1].t); });
+        expect(energyOk, 'energy series stays monotonic across the branch').toBe(true);
+        // The GW series was truncated at the branch time and is growing again.
+        const gwOk = await page.evaluate(() => { const s = window.__starCollider.state.sim; return s.gw.length > 0 && s.gw[s.gw.length - 1].t >= s.clock.time - 1e-9; });
+        expect(gwOk).toBe(true);
+
+        // A live parameter reaches the worker as an event at the head (no rebuild: n unchanged, head keeps growing).
+        const nBefore = await page.evaluate(() => window.__starCollider.state.sim.n);
+        await page.fill('[data-sc-control="viscosity"]', '2.2');
+        await expect(page.locator('[data-sc="applyNote"]')).toHaveText(/parameters applied at chunk \d+: α = 2\.20/, { timeout: 10000 });
+        expect(await page.evaluate(() => window.__starCollider.state.sim.clock.head)).toBeGreaterThan(6);
+        expect(await page.evaluate(() => window.__starCollider.state.sim.n)).toBe(nBefore);
+        await expect(page.locator('#sc-transport')).toHaveAttribute('data-mode', 'running');
+
+        // A structural change with auto-apply on rebuilds the run from t = 0 (300 per star → ~600 particles).
+        await page.selectOption('[data-sc-control="particles"]', '300');
+        await expect(page.locator('[data-sc="applyNote"]')).toHaveText(/rebuilding/);
+        await page.waitForFunction(() => { const s = window.__starCollider.state.sim; return s.n >= 560 && s.n <= 640 && s.clock && s.clock.mode === 'running'; }, null, { timeout: 60000 });
+        await expect(page.locator('[data-sc="applyNote"]')).toHaveText(/rebuilt from t = 0/);
+        await expect(page.locator('[data-sc="clockDet"]')).toHaveText(/seed 7 · chunk = 4 × dt_max/);
+
+        // Auto-apply off: a structural change only notes what would happen.
+        await page.uncheck('[data-sc-control="autoApply"]');
+        await page.selectOption('[data-sc-control="particles"]', '150');
+        await expect(page.locator('[data-sc="applyNote"]')).toHaveText(/keeps its build/);
+        expect(await page.evaluate(() => window.__starCollider.state.sim.n)).toBeGreaterThanOrEqual(560);
+
+        // Space pauses; the timeline readout reports its resolution.
+        await page.evaluate(() => document.querySelector('#sc-stage canvas').focus());
+        await page.hover('#sc-stage canvas');
+        await page.keyboard.press(' ');
+        await page.waitForFunction(() => window.__starCollider.state.sim.clock.mode === 'paused', null, { timeout: 10000 });
+        await expect(page.locator('[data-sc="clockTimeline"]')).toHaveText(/frames every \d+ chunks? · \d+ checkpoints · [\d.]+ (KB|MB)/);
+        expect(errors, 'errors during the clock test').toEqual([]);
     });
 });

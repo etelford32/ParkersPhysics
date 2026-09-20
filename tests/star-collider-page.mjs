@@ -62,10 +62,23 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
     const all = uniq(handled.concat(templ));
     const unhandled = inMarkup.filter(k => !all.includes(k));
     assert.deepEqual(unhandled, [], `controls in the markup page.js never reads: ${unhandled.join(', ')}`);
-    for (const must of ['run', 'pause', 'reset', 'eos', 'pair', 'particles', 'separation', 'pn25']) {
+    for (const must of ['run', 'reset', 'eos', 'pair', 'particles', 'separation', 'pn25', 'pn1', 'viscosity', 'gammaTh', 'seed', 'autoApply',
+        'tStart', 'tBack', 'tPlay', 'tFwd', 'tHead', 'tReplay', 'tBranch', 'scrub']) {
         assert.ok(inMarkup.includes(must), `control "${must}" missing from markup`);
     }
-    ok(`${inMarkup.length} controls all handled`);
+    ok(`${inMarkup.length} controls all handled (incl. the transport: ⏮ ◀ ▶ ▶| ⏭, replay, branch, scrubber)`);
+    // Every control is labelled LIVE or REBUILD in the console so the user knows what a change does —
+    // the live set is exactly what page.js sends as a `params` event, the rest goes through the build.
+    const tagNear = (control, tag) => {
+        const i = html.indexOf(`data-sc-control="${control}"`);
+        return i >= 0 && html.slice(Math.max(0, i - 220), i + 260).includes(tag);
+    };
+    for (const live of ['viscosity', 'gammaTh', 'pn25', 'pn1']) assert.ok(tagNear(live, 'sc-tag-live'), `${live} carries the LIVE tag`);
+    for (const build of ['particles', 'seed']) assert.ok(tagNear(build, 'sc-tag-build'), `${build} carries the REBUILD tag`);
+    for (const group of ['pair', 'separation']) assert.ok(html.slice(html.lastIndexOf('sc-group-head', html.indexOf(`data-sc-control="${group}"`)), html.indexOf(`data-sc-control="${group}"`)).includes('sc-tag-build'), `${group}'s group is tagged REBUILD`);
+    assert.ok(/type: 'params', params: liveParams\(\)/.test(page), 'live params go to the worker as a params event');
+    assert.ok(/onStructural\(/.test(page) && /rebuildSoon/.test(page), 'structural changes route through the debounced rebuild');
+    ok('live vs rebuild: params event for the live set, debounced rebuild for the structural set');
 }
 
 // ── 3. Charts ───────────────────────────────────────────────────────────────
@@ -90,10 +103,17 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
     // An author display on the fallback needs its own [hidden] rule.
     assert.ok(/#sc-stage-fallback\[hidden\]\s*\{\s*display:\s*none/.test(html), 'fallback carries its own [hidden]{display:none} rule');
     assert.ok(/id="sc-catalog"/.test(html), 'catalog rail present');
+    // The stage is the first thing under the hero: collider section BEFORE the lede and the provenance banner.
+    const iCollider = html.indexOf('class="sc-collider"'), iLede = html.indexOf('class="sc-lede"'), iProv = html.indexOf('class="sc-provenance"'), iHero = html.indexOf('class="sc-wrap sc-hero"');
+    assert.ok(iHero > 0 && iCollider > iHero && iLede > iCollider && iProv > iCollider, 'the collider (stage + console) sits directly under the hero, above the lede and the provenance banner');
+    assert.ok(/id="sc-transport"/.test(html) && html.indexOf('id="sc-transport"') < html.indexOf('class="sc-console"'), 'the transport bar is in the stage column, above the console in source order');
+    for (const b of ['tStart', 'tBack', 'tPlay', 'tFwd', 'tHead', 'tReplay', 'tBranch']) {
+        assert.ok(new RegExp(`data-sc-control="${b}"[^>]*title="`).test(html) || new RegExp(`title="[^"]*"[^>]*data-sc-control="${b}"`).test(html), `transport button ${b} carries a title`);
+    }
     assert.ok(/MEASURED · MODELLED/.test(html), 'provenance banner present');
     assert.ok(!/fetch\(/.test(page), 'page.js fetches nothing — the page is offline by design');
     assert.ok(/three\/addons\//.test(html), 'importmap for three present');
-    ok('structure: nav shell, stage + fallback rule, catalog rail, provenance, no fetch');
+    ok('structure: nav shell, stage first under the hero, transport bar, stage + fallback rule, catalog rail, provenance, no fetch');
 }
 
 // ── 5. Registration ─────────────────────────────────────────────────────────

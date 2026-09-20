@@ -161,7 +161,22 @@ export function drawMassRadius(canvas, { curves = [], objects = [], bodies = [],
  * @param tail {t[], hPlus[]}   seconds from tailStart, strain
  * @param sph  [{t, hp}]         seconds, strain (optional overlay)
  */
-export function drawWaveform(canvas, { tail, sph = null, label = '' }) {
+/** Vertical time cursor (the transport's review position) drawn over a finished plot. */
+function drawCursor(p, t, x, label = 'cursor') {
+    if (!Number.isFinite(t) || t < x.min || t > x.max) return;
+    const { ctx } = p;
+    const px = p.sx(t);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(px, p.pad.t); ctx.lineTo(px, p.pad.t + p.ph); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.textAlign = px > p.pad.l + p.pw * 0.8 ? 'right' : 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(label, px + (px > p.pad.l + p.pw * 0.8 ? -4 : 4), p.pad.t + 14);
+    ctx.restore();
+}
+
+/** @param cursorT seconds (same axis as the series) — the review position; null/undefined draws none. */
+export function drawWaveform(canvas, { tail, sph = null, label = '', cursorT = null }) {
     const hasTail = tail && tail.t.length > 1;
     const hasSph = sph && sph.length > 1;
     let hmax = 1e-23;
@@ -174,6 +189,8 @@ export function drawWaveform(canvas, { tail, sph = null, label = '' }) {
     if (hasSph) p.line(sph.map(s => [s.t, s.hp]), C.amber, 1.4);
     if (label) p.text(t0, 1.0 * hmax, label, C.dim);
     if (hasSph && hasTail) p.text(t1, -1.0 * hmax, 'amber: SPH quadrupole · cyan: PN', C.dim, 'right');
+    const xAxis = { min: t0, max: Math.max(t1, t0 + 1e-6) };
+    if (hasSph && cursorT !== null) drawCursor(p, cursorT, xAxis, 'review');
     p.done();
 }
 
@@ -211,7 +228,8 @@ export function drawKilonova(canvas, kn, extraLabel = '') {
 }
 
 /** @param series [{t, eKin, eThermal, ePot, eTotal, eGw}] in code units */
-export function drawEnergy(canvas, series) {
+/** @param cursorT code-unit time of the review position; null draws none. */
+export function drawEnergy(canvas, series, cursorT = null) {
     if (!series || series.length < 2) { prep(canvas); return; }
     let lo = Infinity, hi = -Infinity;
     for (const s of series) for (const k of ['eKin', 'eThermal', 'ePot', 'eTotal']) { lo = Math.min(lo, s[k]); hi = Math.max(hi, s[k]); }
@@ -225,5 +243,6 @@ export function drawEnergy(canvas, series) {
     p.line(series.map(s => [s.t, s.eTotal]), C.accent, 2);
     p.line(series.map(s => [s.t, s.eTotal + s.eGw]), 'rgba(125,255,176,0.8)', 1, [3, 3]);
     p.text(series[0].t, hi + pad * 0.5, 'cyan E_tot · green E_tot + E_gw · amber kinetic · red thermal · blue potential', C.dim);
+    if (cursorT !== null) drawCursor(p, cursorT, { min: series[0].t, max: Math.max(series[series.length - 1].t, series[0].t + 1e-6) }, 'review');
     p.done();
 }

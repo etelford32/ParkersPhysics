@@ -10,17 +10,38 @@
  * TWO ENGINES, ONE PAIR. Every change to the pair (objects, EOS, masses,
  * separation, spins, distance) runs `recompute()` — the ANALYTIC engine:
  * TOV structure → PN inspiral → fate/ejecta/kilonova — and pushes every
- * readout and chart from one derived state. The SPH engine is started
- * explicitly ("Build & run") from the same pair, in the same units, and
- * its diagnostics stream into the HUD + the waveform/energy charts. The two
- * are never mixed in one number: the aftermath panel is the calibrated fits,
- * the HUD is the simulation, and the "SPH vs fit" row prints both.
+ * readout and chart from one derived state; the stage previews the pair
+ * live from the same numbers. The SPH engine is built from the same pair,
+ * in the same units, and its diagnostics stream into the HUD + the
+ * waveform/energy charts. The two are never mixed in one number: the
+ * aftermath panel is the calibrated fits, the HUD is the simulation, and
+ * the "SPH vs fit" row prints both.
  *
- * THE DOM CONTRACT is `data-sc="<key>"` for a readout, `data-sc-control` for
- * an input, `data-sc-chart` for a canvas. Keys are looked up once at init; a
- * key present in the markup but never written, or written but absent, is
- * caught by tests/star-collider-page.mjs, which parses the HTML and diffs
- * the two sets (the Boötes page's gate, reused).
+ * EVERY CONTROL IS ONE OF TWO KINDS, AND THE CONSOLE SAYS WHICH. LIVE
+ * controls (viscosity, Γ_th, the PN terms) go to the worker as parameter
+ * EVENTS on the run's chunk clock the moment they change — the stage
+ * answers on the next chunk, and a rewind through the change replays it.
+ * STRUCTURAL controls (objects, masses, radii, spins, EOS, separation,
+ * eccentricity, tidal lock, resolution, seed) define the build; while a run
+ * exists and "apply changes live" is on, a structural change rebuilds the
+ * run from t = 0 after a short debounce — the preview moves at once, the
+ * particles a moment later. The distance to Earth is neither: it scales
+ * the strain readouts and nothing in the kernel.
+ *
+ * THE CLOCK IS THE WORKER'S (sph-worker.js header): a chunk index with a
+ * checkpoint timeline. This module only drives it — transport buttons,
+ * the scrubber, keys — and displays it: the cursor chunk vs the head,
+ * sim time in ms, whether the shown frame is a bit-exact replay or a
+ * recorded frame, and the timeline's resolution. The GW and energy series
+ * are the HEAD's history and only grow from live head frames; a review
+ * draws a cursor over them, and a branch truncates them at the branch
+ * time. Trails are cleared whenever the shown time goes backwards.
+ *
+ * THE DOM CONTRACT is `data-sc="<key>"` for a readout, `data-sc-control`
+ * for an input, `data-sc-chart` for a canvas. Keys are looked up once at
+ * init; a key present in the markup but never written, or written but
+ * absent, is caught by tests/star-collider-page.mjs, which parses the HTML
+ * and diffs the two sets (the Boötes page's gate, reused).
  *
  * UNITS. Everything handed to the kernel is GEOMETRIC (M☉, G M☉/c², so
  * c = 1): masses as they are, radii ÷ GEOM_KM, time × GEOM_S back to
@@ -42,12 +63,16 @@ import { drawMassRadius, drawWaveform, drawFrequencyTrack, drawKilonova, drawEne
 
 const PARTICLE_CHOICES = [150, 300, 600, 1000, 1500, 2500];
 const WARP_CHOICES = [
-    { id: 'max', label: 'as fast as the hardware allows', warp: 1e12 },
-    { id: 'rt2000', label: '1 ms of merger per 2 s', warp: 1e-3 / GEOM_S / 2 },
-    { id: 'rt10000', label: '1 ms of merger per 10 s', warp: 1e-3 / GEOM_S / 10 },
-    { id: 'rt50000', label: '1 ms of merger per 50 s', warp: 1e-3 / GEOM_S / 50 },
+    { id: 'max', label: 'as fast as possible', warp: 1e12 },
+    { id: 'rt2000', label: '1 ms of merger / 2 s', warp: 1e-3 / GEOM_S / 2 },
+    { id: 'rt10000', label: '1 ms of merger / 10 s', warp: 1e-3 / GEOM_S / 10 },
+    { id: 'rt50000', label: '1 ms of merger / 50 s', warp: 1e-3 / GEOM_S / 50 },
 ];
 const DEFAULT_DISTANCE_MPC = 40;
+const DEFAULT_SEED = 7;
+const REBUILD_MS = 650;      // debounce for structural changes while a run exists
+const CHUNK_STEPS = 4;       // one clock chunk = CHUNK_STEPS × dt_max of sim time
+const SCRUB_THROTTLE_MS = 50;
 
 const fmt = {
     num: (v, d = 2) => Number.isFinite(v) ? (+v).toFixed(d) : '—',
@@ -57,6 +82,8 @@ const fmt = {
     msun: (v, d = 3) => Number.isFinite(v) ? `${(+v).toFixed(d)} M☉` : '—',
     pct: (v) => Number.isFinite(v) ? `${(100 * v).toFixed(1)} %` : '—',
     hz: (v) => Number.isFinite(v) ? (v >= 1000 ? `${(v / 1000).toPrecision(3)} kHz` : v >= 1 ? `${v.toPrecision(3)} Hz` : `${(v * 1000).toPrecision(3)} mHz`) : '—',
+    ms: (tCode) => Number.isFinite(tCode) ? `${(tCode * GEOM_S * 1e3).toFixed(3)} ms` : '—',
+    bytes: (b) => b >= 1 << 20 ? `${(b / (1 << 20)).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`,
 };
 
 export function initStarColliderPage(doc = document) {
@@ -67,10 +94,11 @@ export function initStarColliderPage(doc = document) {
     for (const el of doc.querySelectorAll('[data-sc-control]')) controls.set(el.getAttribute('data-sc-control'), el);
     const charts = new Map();
     for (const el of doc.querySelectorAll('[data-sc-chart]')) charts.set(el.getAttribute('data-sc-chart'), el);
-    const set = (key, value) => { const el = readouts.get(key); if (el) el.textContent = value; };
+    const set = (key, value) => { const el = readouts.get(key); if (el && el.textContent !== value) el.textContent = value; };
     const ctl = (key) => controls.get(key);
     const val = (key) => { const el = ctl(key); return el ? (el.type === 'checkbox' ? el.checked : el.value) : null; };
     const num = (key, fallback = 0) => { const v = parseFloat(val(key)); return Number.isFinite(v) ? v : fallback; };
+    const enable = (key, on) => { const el = ctl(key); if (el) el.disabled = !on; };
 
     // ── State ───────────────────────────────────────────────────────────────
     const state = {
@@ -87,8 +115,12 @@ export function initStarColliderPage(doc = document) {
         profiles: [null, null],
         derived: null,
         sim: {
+            // status: idle | building | ready | error. Everything finer (running / paused / review /
+            // replay) is the worker's clock.mode, mirrored in `clock`.
             status: 'idle', engine: 'loading', n: 0, frames: 0, diag: null, bodies: null, gw: [], energy: [],
-            codePerKm: 1 / GEOM_KM, e0: null, merged: false, builtAt: 0, perf: null,
+            codePerKm: 1 / GEOM_KM, e0: null, merged: false, builtAt: 0, perf: null, frame: null, frameStride: 6,
+            clock: null, lastFrameTime: -1, seed: DEFAULT_SEED, dtMax: 1, chunkDt: CHUNK_STEPS, autoRun: true,
+            previewExtent: 0, previewFramed: false, note: '', noteAt: 0,
         },
     };
 
@@ -111,6 +143,7 @@ export function initStarColliderPage(doc = document) {
     fillSelect(ctl('pair'), [{ value: '', label: 'Pick a real pair…' }].concat(PAIRS.map(p => ({ value: p.id, label: p.name }))), state.pair);
     fillSelect(ctl('particles'), PARTICLE_CHOICES.map(n => ({ value: String(n), label: `${n} per star` })), '600');
     fillSelect(ctl('warp'), WARP_CHOICES.map(w => ({ value: w.id, label: w.label })), 'max');
+    if (ctl('seed') && !val('seed')) ctl('seed').value = String(DEFAULT_SEED);
 
     // ── Body resolution ─────────────────────────────────────────────────────
     function bodySpec(i) {
@@ -274,6 +307,12 @@ export function initStarColliderPage(doc = document) {
     }
 
     // ── Charts ──────────────────────────────────────────────────────────────
+    /** The review position in code units, or null when the shown frame is the head. */
+    function cursorTimeCode() {
+        const c = state.sim.clock;
+        if (!c || c.chunk >= c.head) return null;
+        return c.time;
+    }
     function drawCharts() {
         const d = state.derived; if (!d) return;
         const [A, B] = state.profiles;
@@ -288,8 +327,11 @@ export function initStarColliderPage(doc = document) {
         if (ft && d.insp.valid) drawFrequencyTrack(ft, { track: d.insp.track, timeToMergerS: d.insp.timeToMergerS, fEndHz: d.insp.fEndHz, endReason: d.insp.endReason });
         const kc = charts.get('kilonova');
         if (kc) drawKilonova(kc, d.kn, d.cls === 'bbh' ? 'black holes eject nothing' : '');
+        drawEnergyChart();
+    }
+    function drawEnergyChart() {
         const ec = charts.get('energy');
-        if (ec) drawEnergy(ec, state.sim.energy);
+        if (ec) drawEnergy(ec, state.sim.energy, cursorTimeCode());
     }
     function drawWaveformChart() {
         const wf = charts.get('waveform'); const d = state.derived;
@@ -298,7 +340,8 @@ export function initStarColliderPage(doc = document) {
         if (s.gw.length > 50) {
             const D = state.distanceMpc * MPC_GEOM;
             const sph = s.gw.map(g => ({ t: g.t * GEOM_S, hp: g.hp / D }));
-            drawWaveform(wf, { tail: null, sph, label: `SPH quadrupole strain at ${fmt.sig(state.distanceMpc, 3)} Mpc (face-on)` });
+            const ct = cursorTimeCode();
+            drawWaveform(wf, { tail: null, sph, label: `SPH quadrupole strain at ${fmt.sig(state.distanceMpc, 3)} Mpc (face-on)`, cursorT: ct === null ? null : ct * GEOM_S });
         } else if (d.insp.valid) {
             drawWaveform(wf, { tail: d.insp.tail, label: `PN inspiral, last ${fmt.sig(d.insp.tail.t[d.insp.tail.t.length - 1] * 1000, 2)} ms before ${d.insp.endReason}` });
         }
@@ -332,6 +375,7 @@ export function initStarColliderPage(doc = document) {
                     state.pair = '';
                     const sel = ctl(i === 0 ? 'bodyA' : 'bodyB'); if (sel) sel.value = o.id;
                     recompute();
+                    onStructural(`${o.name} loaded as ${i === 0 ? 'A' : 'B'}`);
                 }));
                 rail.appendChild(card);
             }
@@ -384,7 +428,6 @@ export function initStarColliderPage(doc = document) {
         if (kind !== 'bh' && Number.isFinite(radius) && radius > 0 && (kind === 'wd' || Math.abs(radius - (p.eosRadiusKm || radius)) > 1e-6)) custom.radiusKm = radius;
         else delete custom.radiusKm;
         if (kind === 'bh') { custom.chi = num(`chi${s}`, p.chi); }
-        delete custom.mass?.value;
         state.bodies[i] = { source: 'custom', custom };
         if (kind !== 'bh') state.chiOverride[i] = num(`chi${s}`, p.chi);
         state.pair = '';
@@ -393,6 +436,18 @@ export function initStarColliderPage(doc = document) {
     const debounce = (fn, ms) => { let t = 0; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
     const recomputeSoon = debounce(recompute, 120);
 
+    // A structural change while a run exists: rebuild it (debounced) when auto-apply is on.
+    const rebuildSoon = debounce(() => {
+        if (!simActive() || !val('autoApply')) return;
+        buildAndRun({ run: true, reason: 'auto' });
+    }, REBUILD_MS);
+    function onStructural(what) {
+        if (!simActive()) { setNote(`${what} — preview updated; Build & run to simulate`); return; }
+        if (val('autoApply')) { setNote(`${what} — rebuilding the run from t = 0…`); rebuildSoon(); }
+        else setNote(`${what} — the running sim keeps its build; Build & run to apply`);
+    }
+    function setNote(text) { state.sim.note = text; state.sim.noteAt = performance.now(); set('applyNote', text); }
+
     ctl('bodyA')?.addEventListener('change', () => { if (syncing) return; loadBody(0, val('bodyA')); });
     ctl('bodyB')?.addEventListener('change', () => { if (syncing) return; loadBody(1, val('bodyB')); });
     function loadBody(i, id) {
@@ -400,18 +455,30 @@ export function initStarColliderPage(doc = document) {
         else { state.bodies[i] = { source: id, custom: null }; state.chiOverride[i] = null; }
         state.separationKm = null; state.pair = '';
         recompute();
+        onStructural(`body ${i === 0 ? 'A' : 'B'} changed`);
     }
     for (const s of ['A', 'B']) {
         const i = s === 'A' ? 0 : 1;
-        for (const k of ['kind', 'mass', 'radius', 'chi']) {
-            ctl(`${k}${s}`)?.addEventListener('change', () => { if (syncing) return; customFromControls(i); state.separationKm = null; recompute(); });
+        const apply = (label) => { if (syncing) return; customFromControls(i); state.separationKm = null; recompute(); onStructural(label); };
+        ctl(`kind${s}`)?.addEventListener('change', () => apply(`kind of ${s} changed`));
+        // Number fields respond as you type (debounced) so the preview and the
+        // readouts track the value; syncControlsFromState leaves a focused field alone.
+        for (const k of ['mass', 'radius', 'chi']) {
+            const el = ctl(`${k}${s}`);
+            if (!el) continue;
+            const soon = debounce(() => apply(`${k} of ${s} changed`), 250);
+            el.addEventListener('input', () => { if (syncing) return; if (Number.isFinite(parseFloat(el.value))) soon(); });
+            el.addEventListener('change', () => { if (syncing) return; apply(`${k} of ${s} changed`); });
         }
     }
-    ctl('eos')?.addEventListener('change', () => { state.eos = val('eos'); state.separationKm = null; recompute(); });
-    ctl('separation')?.addEventListener('input', () => { if (syncing) return; const v = num('separation', NaN); if (v > 0) { state.separationKm = v; recomputeSoon(); } });
-    ctl('eccentricity')?.addEventListener('input', () => { state.eccentricity = num('eccentricity', 0); set('eccentricityOut', fmt.num(state.eccentricity, 2)); });
+    ctl('eos')?.addEventListener('change', () => { state.eos = val('eos'); state.separationKm = null; recompute(); onStructural(`EOS → ${state.eos}`); });
+    ctl('separation')?.addEventListener('input', () => { if (syncing) return; const v = num('separation', NaN); if (v > 0) { state.separationKm = v; recomputeSoon(); onStructural('separation changed'); } });
+    ctl('eccentricity')?.addEventListener('input', () => { state.eccentricity = num('eccentricity', 0); set('eccentricityOut', fmt.num(state.eccentricity, 2)); onStructural(`eccentricity ${fmt.num(state.eccentricity, 2)}`); });
     ctl('distance')?.addEventListener('input', () => { if (syncing) return; const v = num('distance', NaN); if (v > 0) { state.distanceMpc = v; recomputeSoon(); } });
-    ctl('pair')?.addEventListener('change', () => { if (syncing) return; loadPair(val('pair')); });
+    ctl('corotate')?.addEventListener('change', () => onStructural(val('corotate') ? 'tidal lock on' : 'tidal lock off'));
+    ctl('particles')?.addEventListener('change', () => onStructural(`${val('particles')} particles per star`));
+    ctl('seed')?.addEventListener('change', () => onStructural(`seed ${num('seed', DEFAULT_SEED) | 0}`));
+    ctl('pair')?.addEventListener('change', () => { if (syncing) return; loadPair(val('pair')); onStructural('pair loaded'); });
     function loadPair(id) {
         const p = pairById(id);
         if (!p) { state.pair = ''; recompute(); return; }
@@ -423,16 +490,87 @@ export function initStarColliderPage(doc = document) {
         if (p.event?.distanceMpc) state.distanceMpc = p.event.distanceMpc;
         recompute();
     }
+    // Live parameters: an event on the running clock, effective from the next chunk.
+    function liveParams() {
+        const alpha = num('viscosity', 1);
+        return { c: 1, alpha, beta: 2 * alpha, gammaTh: num('gammaTh', 1.75), pn1: !!val('pn1'), pn25: !!val('pn25'), sinkFactor: 1.5 };
+    }
+    function onLiveParam(what) {
+        if (!simActive() || !worker) { setNote(`${what} — applies when the run is built`); return; }
+        const c = state.sim.clock;
+        // `at` pins the change to the review cursor. While the run is LIVE the page's last
+        // frame lags the worker's head by up to a frame interval, so no position is sent and
+        // the worker applies the event at its own head — sending the stale chunk made every
+        // live tweak branch the run a few chunks back (measured in the browser gate).
+        const reviewing = c && c.chunk < c.head && c.mode !== 'running';
+        worker.postMessage(reviewing ? { type: 'params', params: liveParams(), at: c.chunk } : { type: 'params', params: liveParams() });
+        setNote(reviewing ? `${what} — applied at chunk ${c.chunk}: the run branches here` : `${what} — applied live at the head`);
+    }
+    for (const k of ['viscosity', 'gammaTh']) {
+        const el = ctl(k); if (!el) continue;
+        const soon = debounce(() => onLiveParam(k === 'viscosity' ? `α = ${fmt.num(num('viscosity', 1), 2)}` : `Γ_th = ${fmt.num(num('gammaTh', 1.75), 2)}`), 200);
+        el.addEventListener('input', () => { if (Number.isFinite(parseFloat(el.value))) soon(); });
+    }
+    ctl('pn25')?.addEventListener('change', () => onLiveParam(`2.5PN ${val('pn25') ? 'on' : 'off'}`));
+    ctl('pn1')?.addEventListener('change', () => onLiveParam(`1PN ${val('pn1') ? 'on' : 'off'}`));
+    ctl('autoApply')?.addEventListener('change', () => setNote(val('autoApply') ? 'structural changes rebuild the run live' : 'structural changes wait for Build & run'));
     ctl('autorotate')?.addEventListener('change', () => scene?.setAutoRotate(val('autorotate')));
     ctl('warp')?.addEventListener('change', () => sendWarp());
-    ctl('run')?.addEventListener('click', () => buildAndRun());
-    ctl('pause')?.addEventListener('click', () => { worker?.postMessage({ type: 'pause' }); state.sim.status = 'paused'; renderHud(); });
-    ctl('resume')?.addEventListener('click', () => { if (state.sim.status === 'paused') { worker?.postMessage({ type: 'resume' }); state.sim.status = 'running'; renderHud(); } });
+    ctl('run')?.addEventListener('click', () => buildAndRun({ run: true, reason: 'button' }));
     ctl('reset')?.addEventListener('click', () => resetSim());
+
+    // ── Transport ───────────────────────────────────────────────────────────
+    const clockOf = () => state.sim.clock;
+    const post = (msg) => { if (worker && simActive()) worker.postMessage(msg); };
+    function transport(cmd) {
+        const c = clockOf(); if (!c) return;
+        const at = c.mode === 'running' ? undefined : c.chunk;   // a live run's position is the worker's, not the last frame's
+        switch (cmd) {
+            case 'toStart': post({ type: 'seek', chunk: 0, exact: true }); break;
+            case 'toHead': post({ type: 'live', run: false }); break;
+            case 'stepBack': post({ type: 'step', dir: -1, at }); break;
+            case 'stepFwd': post({ type: 'step', dir: 1, at }); break;
+            case 'branch': post({ type: 'branch', run: true, at }); break;
+            case 'replay': post({ type: 'replay', on: true, at }); break;
+            case 'togglePause':
+                if (c.mode === 'running') post({ type: 'pause' });
+                else if (c.mode === 'replay') post({ type: 'replay', on: false });
+                else if (c.chunk < c.head) post({ type: 'replay', on: true, at: c.chunk });
+                else post({ type: 'run', warp: warpValue(), budgetMs: 28 });
+                break;
+            default: break;
+        }
+    }
+    ctl('tStart')?.addEventListener('click', () => transport('toStart'));
+    ctl('tBack')?.addEventListener('click', () => transport('stepBack'));
+    ctl('tPlay')?.addEventListener('click', () => transport('togglePause'));
+    ctl('tFwd')?.addEventListener('click', () => transport('stepFwd'));
+    ctl('tHead')?.addEventListener('click', () => transport('toHead'));
+    ctl('tReplay')?.addEventListener('click', () => transport('replay'));
+    ctl('tBranch')?.addEventListener('click', () => transport('branch'));
+    let scrubbing = false, scrubLast = 0, scrubPending = null, scrubTimer = 0;
+    const scrub = ctl('scrub');
+    if (scrub) {
+        const flush = () => { scrubTimer = 0; if (scrubPending !== null) { post({ type: 'seek', chunk: scrubPending, exact: false }); scrubPending = null; scrubLast = performance.now(); } };
+        scrub.addEventListener('pointerdown', () => { scrubbing = true; });
+        scrub.addEventListener('input', () => {
+            scrubbing = true;
+            const k = Math.round(parseFloat(scrub.value));
+            if (performance.now() - scrubLast > SCRUB_THROTTLE_MS && !scrubTimer) { post({ type: 'seek', chunk: k, exact: false }); scrubLast = performance.now(); }
+            else { scrubPending = k; if (!scrubTimer) scrubTimer = setTimeout(flush, SCRUB_THROTTLE_MS); }
+        });
+        scrub.addEventListener('change', () => {
+            scrubbing = false; scrubPending = null; if (scrubTimer) { clearTimeout(scrubTimer); scrubTimer = 0; }
+            post({ type: 'seek', chunk: Math.round(parseFloat(scrub.value)), exact: true });
+        });
+        scrub.addEventListener('pointerup', () => { scrubbing = false; });
+        scrub.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { scrubbing = false; post({ type: 'seek', chunk: Math.round(parseFloat(scrub.value)), exact: true }); } });
+    }
 
     // ── The SPH engine ──────────────────────────────────────────────────────
     let worker = null, scene = null;
     const stageEl = $('#sc-stage'), fallback = $('#sc-stage-fallback');
+    const simActive = () => (state.sim.status === 'ready' || state.sim.status === 'building') && state.sim.engine === 'wasm';
     try {
         if (stageEl) {
             import('./scene.js').then(({ createColliderScene }) => {
@@ -467,9 +605,10 @@ export function initStarColliderPage(doc = document) {
     }
 
     function warpValue() { return (WARP_CHOICES.find(w => w.id === val('warp')) || WARP_CHOICES[0]).warp; }
-    function sendWarp() { worker?.postMessage({ type: 'warp', warp: warpValue(), dtMax: state.sim.dtMax }); }
+    function sendWarp() { worker?.postMessage({ type: 'warp', warp: warpValue() }); }
 
-    function buildAndRun() {
+    /** Build the SPH run from the current pair. Every input is read here, once — the run is a pure function of them plus the seed. */
+    function buildAndRun({ run = true, reason = 'button' } = {}) {
         const d = state.derived; if (!d || !worker || state.sim.engine === 'unavailable') return;
         const [A, B] = state.profiles;
         const nPer = parseInt(val('particles'), 10) || 600;
@@ -481,15 +620,19 @@ export function initStarColliderPage(doc = document) {
         const smallest = bodies.filter(b => b.kind === 'star').sort((a, b) => a.radius - b.radius)[0];
         const dyn = smallest ? Math.sqrt(smallest.radius ** 3 / smallest.mass) : Math.sqrt(sepCode ** 3 / d.M) / 60;
         const dtMax = smallest ? 0.12 * dyn : dyn;
+        const chunkDt = CHUNK_STEPS * dtMax;
         const corotate = !!val('corotate');
         const omega = Math.sqrt(d.M / sepCode ** 3);
-        state.sim = { ...state.sim, status: 'building', n: 0, frames: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, dtMax, builtAt: performance.now(), frame: null, perf: null };
+        const seed = Math.max(0, Math.floor(num('seed', DEFAULT_SEED))) >>> 0;
+        state.sim = { ...state.sim, status: 'building', n: 0, frames: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, dtMax, chunkDt, seed,
+            builtAt: performance.now(), frame: null, perf: null, clock: null, lastFrameTime: -1, autoRun: run, buildReason: reason };
         renderHud();
         worker.postMessage({
-            type: 'setup', seed: 7,
-            params: { c: 1, alpha: num('viscosity', 1), beta: 2 * num('viscosity', 1), gammaTh: num('gammaTh', 1.75), pn1: !!val('pn1'), pn25: !!val('pn25'), sinkFactor: 1.5 },
+            type: 'setup', seed,
+            params: liveParams(),
             bodies, orbit: { sep: sepCode, ecc: state.eccentricity, spinA: corotate && bodies[0].kind === 'star' ? omega : 0, spinB: corotate && bodies[1].kind === 'star' ? omega : 0, pnCirc: !!val('pn1') },
             relax: { steps: 60, dtMax: 0.5 * dtMax, damping: 0.05 },
+            clock: { chunkDt, dtMax },
         });
         if (scene) {
             const extent = sepCode + bodies[0].radius + bodies[1].radius;
@@ -501,45 +644,74 @@ export function initStarColliderPage(doc = document) {
     }
     function resetSim() {
         worker?.postMessage({ type: 'pause' });
-        state.sim = { ...state.sim, status: 'idle', n: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, frame: null, perf: null };
+        state.sim = { ...state.sim, status: 'idle', n: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, frame: null, perf: null, clock: null, lastFrameTime: -1, previewFramed: false };
         scene?.clear();
         renderPreview();
+        setNote('run discarded — the preview shows the configured pair');
         renderHud(); drawCharts(); set('sphVsFit', sphVsFitText());
+    }
+    function truncateSeries(tCode) {
+        const s = state.sim;
+        s.gw = s.gw.filter(g => g.t <= tCode);
+        s.energy = s.energy.filter(e => e.t <= tCode);
     }
     function onWorkerMessage(ev) {
         const msg = ev.data;
-        if (msg.type === 'ready') { state.sim.engine = 'wasm'; state.sim.frameStride = msg.frameStride || 6; renderHud(); return; }
-        if (msg.type === 'error') { state.sim.status = 'error'; state.sim.error = msg.message; renderHud(); return; }
+        const s = state.sim;
+        if (msg.type === 'ready') { s.engine = 'wasm'; s.frameStride = msg.frameStride || 6; renderHud(); return; }
+        if (msg.type === 'error') { s.status = 'error'; s.error = msg.message; renderHud(); return; }
         if (msg.type === 'built') {
-            state.sim.n = msg.n; state.sim.status = 'running'; state.sim.bodies = msg.bodies; state.sim.diag = msg.diag; state.sim.frame = msg.frame;
-            state.sim.e0 = msg.diag.eTotal; state.sim.relaxMs = msg.relaxMs; state.sim.frameStride = msg.frameStride || state.sim.frameStride || 6;
+            s.n = msg.n; s.status = 'ready'; s.bodies = msg.bodies; s.diag = msg.diag; s.frame = msg.frame;
+            s.e0 = msg.diag.eTotal; s.relaxMs = msg.relaxMs; s.frameStride = msg.frameStride || s.frameStride || 6;
+            s.clock = clockFrom(msg); s.lastFrameTime = 0;
             scene?.clearTrails();
             pushFrameToScene(msg.frame, msg.diag, msg.bodies);
             scene?.frameSystem({ animate: false });
-            worker.postMessage({ type: 'run', warp: warpValue(), budgetMs: 28, dtMax: state.sim.dtMax });
+            if (s.autoRun) worker.postMessage({ type: 'run', warp: warpValue(), budgetMs: 28 });
+            setNote(s.buildReason === 'auto' ? `rebuilt from t = 0 with the new settings (${msg.n} particles, relaxed in ${msg.relaxMs.toFixed(0)} ms)` : `built ${msg.n} particles · relaxed in ${msg.relaxMs.toFixed(0)} ms · seed ${s.seed}`);
             renderHud();
             return;
         }
+        if (msg.type === 'branched') {
+            truncateSeries(msg.time);
+            s.merged = false;
+            setNote(`branched at chunk ${msg.chunk} (t = ${fmt.ms(msg.time)}) — the timeline after it is discarded`);
+            drawWaveformChart(); drawEnergyChart();
+            return;
+        }
         if (msg.type === 'frame') {
-            const s = state.sim;
-            s.diag = msg.diag; s.bodies = msg.bodies; s.frames++; s.perf = msg.perf;
-            if (msg.frame) { s.frame = msg.frame; pushFrameToScene(msg.frame, msg.diag, msg.bodies); }
-            for (const g of msg.gw) s.gw.push(g);
-            if (s.gw.length > 6000) s.gw = s.gw.slice(-6000);
-            if (s.frames % 2 === 0) {
+            if (s.status !== 'ready') return;   // a late frame from a run that was reset
+            s.clock = clockFrom(msg);
+            s.diag = msg.diag; s.bodies = msg.bodies; s.frames++; if (msg.perf) s.perf = msg.perf;
+            const liveHead = msg.chunk === msg.head && msg.exact !== false && (msg.mode === 'running' || msg.mode === 'paused');
+            if (msg.gw && msg.gw.length) {
+                for (const g of msg.gw) if (!s.gw.length || g.t > s.gw[s.gw.length - 1].t) s.gw.push(g);
+                if (s.gw.length > 6000) s.gw = s.gw.slice(-6000);
+            }
+            if (liveHead && (!s.energy.length || msg.diag.time > s.energy[s.energy.length - 1].t) && (s.frames % 2 === 0 || !s.energy.length)) {
                 s.energy.push({ t: msg.diag.time, eKin: msg.diag.eKin, eThermal: msg.diag.eThermal, ePot: msg.diag.ePot, eTotal: msg.diag.eTotal, eGw: msg.diag.eGw });
                 if (s.energy.length > 1500) s.energy = s.energy.filter((_, i) => i % 2 === 0);
             }
-            const [A, B] = state.profiles;
-            const rsum = (A.kind === 'bh' ? 2 * A.M : A.radiusKm / GEOM_KM) + (B.kind === 'bh' ? 2 * B.M : B.radiusKm / GEOM_KM);
-            if (!s.merged && msg.diag.separation < 0.5 * rsum) s.merged = true;
-            if (A.kind === 'bh' && B.kind === 'bh' && msg.diag.separation < rsum && s.status === 'running') {
-                s.status = 'merged'; worker.postMessage({ type: 'pause' });
+            if (msg.frame) {
+                if (msg.time < s.lastFrameTime - 1e-12) scene?.clearTrails();
+                s.frame = msg.frame; s.lastFrameTime = msg.time;
+                pushFrameToScene(msg.frame, msg.diag, msg.bodies);
+            }
+            if (msg.paramsApplied) setNote(msg.branched ? `parameters changed behind the head — branched at chunk ${msg.chunk}` : `parameters applied at chunk ${msg.chunk}: α = ${fmt.num(msg.paramsApplied.alpha, 2)}, Γ_th = ${fmt.num(msg.paramsApplied.gammaTh, 2)}, 2.5PN ${msg.paramsApplied.pn25 ? 'on' : 'off'}, 1PN ${msg.paramsApplied.pn1 ? 'on' : 'off'}`);
+            if (liveHead) {
+                const [A, B] = state.profiles;
+                const rsum = (A.kind === 'bh' ? 2 * A.M : A.radiusKm / GEOM_KM) + (B.kind === 'bh' ? 2 * B.M : B.radiusKm / GEOM_KM);
+                if (!s.merged && msg.diag.separation < 0.5 * rsum) s.merged = true;
+                if (A.kind === 'bh' && B.kind === 'bh' && msg.diag.separation < rsum && msg.mode === 'running') {
+                    s.bbhDone = true; worker.postMessage({ type: 'pause' }); setNote('horizons touching — the point-mass run stops here; see the aftermath fits');
+                }
             }
             renderHud();
-            if (s.frames % 6 === 0) { drawWaveformChart(); const ec = charts.get('energy'); if (ec) drawEnergy(ec, s.energy); set('sphVsFit', sphVsFitText()); }
+            const reviewing = msg.chunk < msg.head;
+            if (s.frames % 6 === 0 || reviewing) { drawWaveformChart(); drawEnergyChart(); set('sphVsFit', sphVsFitText()); }
         }
     }
+    const clockFrom = (msg) => ({ chunk: msg.chunk, head: msg.head, mode: msg.mode, time: msg.time, headTime: msg.headTime, exact: msg.exact !== false, kernelChunk: msg.kernelChunk, timeline: msg.timeline || null });
     const bodyKinds = (bodies) => bodies.map((b, i) => ({ ...b, kind: state.profiles[i].kind === 'bh' ? 'bh' : 'star' }));
 
     // ── Stage: frames, preview, camera state ────────────────────────────────
@@ -554,7 +726,7 @@ export function initStarColliderPage(doc = document) {
         } : null;
         scene.setFrame(frame, state.sim.n, bodyKinds(bodies || state.sim.bodies || []), meta, state.sim.frameStride || 6);
     }
-    /** Before a run: the configured pair as wire spheres at the configured separation. */
+    /** Before a run: the configured pair as wire spheres at the configured separation. Re-framed when the extent moves by more than a quarter. */
     function renderPreview() {
         if (!scene || !state.derived) return;
         if (state.sim.status !== 'idle' && state.sim.frame) return;
@@ -572,7 +744,8 @@ export function initStarColliderPage(doc = document) {
             { kind: B.kind === 'bh' ? 'bh' : 'star', radius: rB, pos: [A.M / M * sepCode, 0, 0] },
         ]);
         set('stageScale', `ring = ${fmt.km(d.sepKm / 2)} · ${fmt.km(extent / 8 * GEOM_KM)} per grid unit · preview of the configured pair`);
-        if (!state.sim.previewFramed) { scene.frameSystem({ animate: false }); state.sim.previewFramed = true; }
+        const moved = state.sim.previewExtent > 0 && Math.abs(extent - state.sim.previewExtent) / state.sim.previewExtent > 0.25;
+        if (!state.sim.previewFramed || moved) { scene.frameSystem({ animate: state.sim.previewFramed }); state.sim.previewFramed = true; state.sim.previewExtent = extent; }
     }
     const FOLLOW_LABEL = { system: 'following the system barycentre', A: 'following core A', B: 'following core B', none: 'fixed on the origin' };
     const COLOUR_LABEL = {
@@ -587,13 +760,10 @@ export function initStarColliderPage(doc = document) {
         set('pointScaleOut', `${v.pointScale.toFixed(1)}×`);
         const sync = (key, value) => { const el = ctl(key); if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = !!value; else el.value = String(value); } };
         sync('follow', v.follow); sync('colorMode', v.colorMode); sync('frameCorotating', v.corotating); sync('trails', v.trails); sync('pointScale', v.pointScale);
+        for (const [key, name] of [['viewTop', 'top'], ['viewEdge', 'edge'], ['viewOblique', 'oblique']]) ctl(key)?.classList.toggle('sc-on', v.view === name);
     }
     function onSceneCommand(cmd) {
-        if (cmd === 'togglePause') {
-            if (state.sim.status === 'running') { worker?.postMessage({ type: 'pause' }); state.sim.status = 'paused'; renderHud(); }
-            else if (state.sim.status === 'paused') { worker?.postMessage({ type: 'resume' }); state.sim.status = 'running'; renderHud(); }
-            return;
-        }
+        if (['togglePause', 'stepBack', 'stepFwd', 'toStart', 'toHead'].includes(cmd)) { transport(cmd); return; }
         renderViewState();
     }
     ctl('viewTop')?.addEventListener('click', () => scene?.setView('top'));
@@ -606,12 +776,60 @@ export function initStarColliderPage(doc = document) {
     ctl('trails')?.addEventListener('change', () => scene?.setTrails(!!val('trails')));
     ctl('pointScale')?.addEventListener('input', () => { scene?.setPointScale(num('pointScale', 1)); set('pointScaleOut', `${num('pointScale', 1).toFixed(1)}×`); });
 
+    // ── HUD + transport readouts ────────────────────────────────────────────
+    const MODE_LABEL = { running: 'LIVE · RUNNING', paused: 'LIVE · PAUSED', review: 'REVIEW', replay: 'REPLAY', seeking: 'SEEKING' };
+    function statusText() {
+        const s = state.sim, c = s.clock;
+        if (s.status === 'idle') return 'idle — Build & run to start';
+        if (s.status === 'building') return `building ${parseInt(val('particles'), 10) || 600} particles per star + relaxing…`;
+        if (s.status === 'error') return `error: ${s.error || ''}`;
+        if (!c) return 'ready';
+        const phase = s.merged ? 'merged' : 'inspiral';
+        if (s.bbhDone && c.chunk === c.head) return 'merged — horizons touching; see the aftermath fits';
+        if (c.mode === 'running') return `running · ${phase}`;
+        if (c.mode === 'paused') return `paused at the head · ${phase}`;
+        if (c.mode === 'replay') return `replaying the recorded timeline · chunk ${c.chunk} of ${c.head}`;
+        if (c.mode === 'seeking') return `seeking · replaying from the nearest checkpoint to chunk ${c.chunk}…`;
+        return `review · chunk ${c.chunk} of ${c.head} · ${c.exact ? 'bit-exact replay' : 'recorded frame'}`;
+    }
+    function renderTransport() {
+        const s = state.sim, c = s.clock;
+        const root = $('#sc-transport');
+        const active = simActive() && !!c;
+        if (root) root.dataset.mode = active ? (s.bbhDone && c.mode === 'paused' ? 'done' : c.mode) : (s.status === 'building' ? 'building' : 'idle');
+        set('clockMode', active ? (MODE_LABEL[c.mode] || c.mode.toUpperCase()) : s.status === 'building' ? 'BUILDING' : 'NO RUN');
+        set('clockTime', active ? fmt.ms(c.time) : '—');
+        set('clockChunk', active ? `${c.chunk} / ${c.head}` : '—');
+        set('clockSteps', active && s.diag ? `${s.diag.steps | 0}` : '—');
+        set('clockTimeline', active && c.timeline
+            ? `${c.timeline.entries} frames every ${c.timeline.every} chunk${c.timeline.every === 1 ? '' : 's'} · ${c.timeline.snapshots} checkpoints · ${fmt.bytes(c.timeline.bytes)} · head ${fmt.ms(c.headTime)}`
+            : '—');
+        set('clockDet', active ? `seed ${s.seed} · chunk = ${CHUNK_STEPS} × dt_max = ${(s.chunkDt * GEOM_S * 1e6).toFixed(2)} µs of merger · same settings + seed ⇒ same run, bit for bit` : `seed ${num('seed', DEFAULT_SEED) | 0} · chunk = ${CHUNK_STEPS} × dt_max`);
+        set('playGlyph', active && (c.mode === 'running' || c.mode === 'replay') ? '❚❚' : '▶');
+        const playEl = ctl('tPlay');
+        if (playEl) playEl.title = !active ? 'Build & run first' : c.mode === 'running' ? 'pause (space)' : c.mode === 'replay' ? 'stop the replay (space)' : c.chunk < c.head ? 'replay the recorded timeline from here (space)' : 'run from the head (space)';
+        enable('tStart', active && c.chunk > 0);
+        enable('tBack', active && c.chunk > 0);
+        enable('tPlay', active);
+        enable('tFwd', active);
+        enable('tHead', active && !(c.chunk === c.head && c.exact));
+        enable('tReplay', active && c.head > 0 && c.mode !== 'replay');
+        enable('tBranch', active && c.chunk < c.head);
+        if (scrub) {
+            scrub.disabled = !active;
+            const max = active ? Math.max(c.head, 1) : 1;
+            if (String(max) !== scrub.max) scrub.max = String(max);
+            if (!scrubbing) scrub.value = String(active ? c.chunk : 0);
+        }
+        set('consoleStatus', active ? (c.mode === 'running' ? 'running' : c.mode === 'paused' ? 'paused' : c.mode) : s.status);
+    }
     function renderHud() {
         const s = state.sim, d = s.diag;
         set('simEngine', { loading: 'loading kernel…', wasm: 'WASM · Rust SPH kernel', unavailable: 'unavailable — analytic engine only' }[s.engine] || s.engine);
-        set('simStatus', { idle: 'idle — Build & run to start', building: `building ${parseInt(val('particles'), 10) || 600} particles per star + relaxing…`, running: s.merged ? 'running · merged' : 'running · inspiral', paused: 'paused', merged: 'merged — horizons touching; see the aftermath fits', error: `error: ${s.error || ''}` }[s.status] || s.status);
+        set('simStatus', statusText());
+        renderTransport();
         if (!d) { for (const k of ['simTime', 'simSep', 'simFreq', 'simN', 'simSteps', 'simRate', 'simUnbound', 'simAccreted', 'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn']) set(k, '—'); return; }
-        set('simTime', `${(d.time * GEOM_S * 1e3).toFixed(3)} ms`);
+        set('simTime', fmt.ms(d.time));
         set('simSep', fmt.km(d.separation * GEOM_KM));
         set('simFreq', fmt.hz(Math.abs(d.omega) / Math.PI / GEOM_S));
         set('simN', `${d.nAlive | 0} / ${s.n}`);
@@ -630,13 +848,14 @@ export function initStarColliderPage(doc = document) {
 
     // ── Boot ────────────────────────────────────────────────────────────────
     loadPair(state.pair);
+    setNote('preview of the configured pair — every control updates it; Build & run starts the particles');
     renderHud();
     renderViewState();
     window.addEventListener('resize', debounce(drawCharts, 150));
 
     // Test hook
     window.__starCollider = {
-        state, recompute, buildAndRun, resetSim, loadPair,
+        state, recompute, buildAndRun, resetSim, loadPair, transport,
         get scene() { return scene; }, get worker() { return worker; },
     };
     return window.__starCollider;

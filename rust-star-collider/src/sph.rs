@@ -52,6 +52,23 @@ pub const DIAG_SLOTS: usize = 40;
 /// Render-frame fields per particle: x, y, z, log10 ρ, u, flags (star id + 2·unbound).
 pub const FRAME_STRIDE: usize = 6;
 
+// ── Snapshot layout ───────────────────────────────────────────────────────
+// A snapshot is EVERYTHING `step()` reads before it recomputes anything: the
+// KDK leapfrog starts from the PREVIOUS step's acc/du (first kick), the
+// timestep reads cs/h/acc, the implicit PN correction reads pn_kick and
+// pn_weight, and e_gw integrates diag[31]. Positions and velocities alone
+// would restart the integrator on a re-evaluated force and diverge from the
+// live run at the first step — and h relaxes by a 0.5 blend on every density
+// pass, so a recompute is never the identity. rho/p/phi are carried too so
+// the diagnostics and the packed frame read the same at a restored state as
+// they did live. The layout is flat f64 so JS can copy it out as one
+// Float64Array; the gate is `snapshot_restore_is_bit_exact` in tests/.
+pub const SNAP_VERSION: f64 = 1.0;
+pub const SNAP_HEADER: usize = 32;
+pub const SNAP_BODY: usize = 32;
+pub const SNAP_STRIDE: usize = 17; // x y z vx vy vz ax ay az u du h cs rho p phi alive
+pub const SNAP_CAPACITY: usize = SNAP_HEADER + 2 * SNAP_BODY + MAX_N * SNAP_STRIDE;
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
     Star,
@@ -156,6 +173,8 @@ pub struct Sim {
     pub relaxing: bool,
     /// Per-body bulk-PN acceleration from the last evaluation (A, B).
     pub pn_kick: [[f64; 3]; 2],
+    /// Snapshot staging buffer (see SNAP_* above); filled by snapshot(), read by restore().
+    pub snap: Vec<f64>,
 }
 
 // ── Kernel ──────────────────────────────────────────────────────────────────
@@ -227,6 +246,7 @@ impl Sim {
             diag: vec![0.0; DIAG_SLOTS],
             relaxing: false,
             pn_kick: [[0.0; 3]; 2],
+            snap: vec![0.0; SNAP_CAPACITY],
         }
     }
 
@@ -1127,5 +1147,165 @@ impl Sim {
             self.frame[o + 4] = self.u[i] as f32;
             self.frame[o + 5] = self.star[i] as f32 + if unbound { 2.0 } else { 0.0 };
         }
+    }
+
+    // ── Snapshot / restore ──────────────────────────────────────────────────
+    /// Length in f64 of a snapshot of the current build.
+    pub fn snapshot_len(&self) -> usize {
+        SNAP_HEADER + 2 * SNAP_BODY + self.n * SNAP_STRIDE
+    }
+
+    fn body_to_slots(b: &Body, o: &mut [f64]) {
+        o[0] = if b.kind == Kind::BlackHole { 1.0 } else { 0.0 };
+        o[1] = b.mass;
+        o[2] = b.radius;
+        o[3] = b.gamma;
+        o[4] = b.k_poly;
+        o[5] = b.n_particles as f64;
+        o[6] = b.first as f64;
+        o[7..10].copy_from_slice(&b.pos);
+        o[10..13].copy_from_slice(&b.vel);
+        o[13..16].copy_from_slice(&b.acc);
+        o[16] = b.accreted;
+        o[17] = b.sink;
+        o[18] = b.rs;
+        o[19..22].copy_from_slice(&b.cm);
+        o[22..25].copy_from_slice(&b.cmv);
+        o[25] = b.alive_mass;
+    }
+
+    fn body_from_slots(b: &mut Body, o: &[f64]) {
+        b.kind = if o[0] == 1.0 { Kind::BlackHole } else { Kind::Star };
+        b.mass = o[1];
+        b.radius = o[2];
+        b.gamma = o[3];
+        b.k_poly = o[4];
+        b.n_particles = o[5] as usize;
+        b.first = o[6] as usize;
+        b.pos.copy_from_slice(&o[7..10]);
+        b.vel.copy_from_slice(&o[10..13]);
+        b.acc.copy_from_slice(&o[13..16]);
+        b.accreted = o[16];
+        b.sink = o[17];
+        b.rs = o[18];
+        b.cm.copy_from_slice(&o[19..22]);
+        b.cmv.copy_from_slice(&o[22..25]);
+        b.alive_mass = o[25];
+    }
+
+    /// Write the complete integrator state into `self.snap`; returns the length used.
+    pub fn snapshot(&mut self) -> usize {
+        let n = self.n;
+        let len = self.snapshot_len();
+        let p = &self.params;
+        {
+            let h = &mut self.snap[0..SNAP_HEADER];
+            for v in h.iter_mut() {
+                *v = 0.0;
+            }
+            h[0] = SNAP_VERSION;
+            h[1] = n as f64;
+            h[2] = self.time;
+            h[3] = self.dt_last;
+            h[4] = self.steps as f64;
+            h[5] = self.e_gw;
+            h[6] = self.pn_weight;
+            h[7..10].copy_from_slice(&self.pn_kick[0]);
+            h[10..13].copy_from_slice(&self.pn_kick[1]);
+            h[13] = self.diag[31];
+            h[14] = if self.mutual { 1.0 } else { 0.0 };
+            h[15] = if self.relaxing { 1.0 } else { 0.0 };
+            h[16] = p.c;
+            h[17] = p.alpha;
+            h[18] = p.beta;
+            h[19] = p.gamma_th;
+            h[20] = p.eta_h;
+            h[21] = p.cfl;
+            h[22] = if p.pn1 { 1.0 } else { 0.0 };
+            h[23] = if p.pn25 { 1.0 } else { 0.0 };
+            h[24] = p.sink_factor;
+        }
+        for idx in 0..2 {
+            let o = SNAP_HEADER + idx * SNAP_BODY;
+            let b = self.bodies[idx];
+            Sim::body_to_slots(&b, &mut self.snap[o..o + SNAP_BODY]);
+        }
+        let base = SNAP_HEADER + 2 * SNAP_BODY;
+        for i in 0..n {
+            let o = base + i * SNAP_STRIDE;
+            let s = &mut self.snap[o..o + SNAP_STRIDE];
+            s[0..3].copy_from_slice(&self.pos[3 * i..3 * i + 3]);
+            s[3..6].copy_from_slice(&self.vel[3 * i..3 * i + 3]);
+            s[6..9].copy_from_slice(&self.acc[3 * i..3 * i + 3]);
+            s[9] = self.u[i];
+            s[10] = self.du[i];
+            s[11] = self.h[i];
+            s[12] = self.cs[i];
+            s[13] = self.rho[i];
+            s[14] = self.p[i];
+            s[15] = self.phi[i];
+            s[16] = self.alive[i] as f64;
+        }
+        len
+    }
+
+    /// Restore the integrator state from `self.snap` (the first `len` slots).
+    /// Refuses (returns false, touches nothing) a snapshot of another version
+    /// or another build — the particle count must match, because mass/star/
+    /// first are the build's and are not carried.
+    pub fn restore(&mut self, len: usize) -> bool {
+        if len < SNAP_HEADER + 2 * SNAP_BODY || self.snap[0] != SNAP_VERSION {
+            return false;
+        }
+        let n = self.snap[1] as usize;
+        if n != self.n || len != SNAP_HEADER + 2 * SNAP_BODY + n * SNAP_STRIDE {
+            return false;
+        }
+        {
+            let h = &self.snap[0..SNAP_HEADER];
+            self.time = h[2];
+            self.dt_last = h[3];
+            self.steps = h[4] as u64;
+            self.e_gw = h[5];
+            self.pn_weight = h[6];
+            self.pn_kick[0].copy_from_slice(&h[7..10]);
+            self.pn_kick[1].copy_from_slice(&h[10..13]);
+            self.diag[31] = h[13];
+            self.mutual = h[14] != 0.0;
+            self.relaxing = h[15] != 0.0;
+            self.params.c = h[16];
+            self.params.alpha = h[17];
+            self.params.beta = h[18];
+            self.params.gamma_th = h[19];
+            self.params.eta_h = h[20];
+            self.params.cfl = h[21];
+            self.params.pn1 = h[22] != 0.0;
+            self.params.pn25 = h[23] != 0.0;
+            self.params.sink_factor = h[24];
+        }
+        for idx in 0..2 {
+            let o = SNAP_HEADER + idx * SNAP_BODY;
+            let mut b = self.bodies[idx];
+            Sim::body_from_slots(&mut b, &self.snap[o..o + SNAP_BODY]);
+            self.bodies[idx] = b;
+        }
+        let base = SNAP_HEADER + 2 * SNAP_BODY;
+        for i in 0..n {
+            let o = base + i * SNAP_STRIDE;
+            let s = &self.snap[o..o + SNAP_STRIDE];
+            self.pos[3 * i..3 * i + 3].copy_from_slice(&s[0..3]);
+            self.vel[3 * i..3 * i + 3].copy_from_slice(&s[3..6]);
+            self.acc[3 * i..3 * i + 3].copy_from_slice(&s[6..9]);
+            self.u[i] = s[9];
+            self.du[i] = s[10];
+            self.h[i] = s[11];
+            self.cs[i] = s[12];
+            self.rho[i] = s[13];
+            self.p[i] = s[14];
+            self.phi[i] = s[15];
+            self.alive[i] = if s[16] != 0.0 { 1 } else { 0 };
+        }
+        self.update_diagnostics();
+        true
     }
 }

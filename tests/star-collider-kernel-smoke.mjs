@@ -98,5 +98,39 @@ console.log(`      (NS scenario: relax ${relaxMs.toFixed(0)} ms, ${steps} steps 
 check('body state readable', Number.isFinite(kernel.bodyState(0).pos[0]));
 check('positions finite', Number.isFinite(pos[0]));
 
+// ── Scenario 3: the rewind clock — restore + advance is bit-exact ──────────
+// The page's transport bar restores a checkpoint and replays to the scrub
+// point; the replayed frame must be the frame the live run produced, not a
+// close one. Exact equality on the packed frame, every diagnostic slot and
+// the raw positions — never a tolerance (a tolerance is how a drifting
+// replay would ship unnoticed).
+{
+    const snap = kernel.snapshot();
+    check('snapshot is a Float64Array copy of the documented length', snap instanceof Float64Array && snap.length === 32 + 64 + 17 * n && snap.buffer !== kernel.pos().buffer, `${snap.length}`);
+    check('snapshotBytes matches the copy', kernel.snapshotBytes() === snap.byteLength, `${kernel.snapshotBytes()} vs ${snap.byteLength}`);
+    const CH = 4, DT = 1.0;
+    const stepsBefore = kernel.diagnostics().steps;
+    for (let k = 0; k < 6; k++) kernel.advance(CH, 64, DT);
+    const liveFrame = kernel.frame(), liveDiag = kernel.diagnostics(), livePos = Float64Array.from(kernel.pos());
+    check('the live window actually stepped', liveDiag.steps > stepsBefore + 6, `${stepsBefore} → ${liveDiag.steps}`);
+    check('restore accepts its own snapshot', kernel.restore(snap) === true);
+    check('restored time/steps match the snapshot instant', kernel.diagnostics().steps === stepsBefore);
+    for (let k = 0; k < 6; k++) kernel.advance(CH, 64, DT);
+    const replayFrame = kernel.frame(), replayDiag = kernel.diagnostics(), replayPos = kernel.pos();
+    let frameExact = replayFrame.length === liveFrame.length;
+    for (let i = 0; i < liveFrame.length && frameExact; i++) if (!Object.is(liveFrame[i], replayFrame[i])) frameExact = false;
+    check('replayed frame is bit-identical to the live frame', frameExact);
+    let posExact = true;
+    for (let i = 0; i < livePos.length && posExact; i++) if (!Object.is(livePos[i], replayPos[i])) posExact = false;
+    check('replayed positions are bit-identical', posExact);
+    const diagDiff = Object.keys(liveDiag).filter(k => !Object.is(liveDiag[k], replayDiag[k]));
+    check('every diagnostic slot is bit-identical after replay', diagDiff.length === 0, diagDiff.join(',') || 'all 40');
+    // Refusals leave the state alone.
+    const tBefore = kernel.time();
+    check('restore refuses a foreign length', kernel.restore(new Float64Array(10)) === false && kernel.time() === tBefore);
+    const bad = Float64Array.from(snap); bad[1] = n + 1;
+    check('restore refuses another build (n mismatch)', kernel.restore(bad) === false && kernel.time() === tBefore);
+}
+
 if (failures) { console.error(`\n❌ star-collider-kernel-smoke: ${failures} failure(s)`); process.exit(1); }
 console.log('✅ star-collider-kernel-smoke: all checks passed');
