@@ -308,6 +308,10 @@ export const SIMULATIONS = [
       category: 'deep-space', group: 'black-holes',
       tier: 'public', icon: 'observatory',
       blurb: 'Two black-hole merger simulations side by side, one story.' },
+    { id: 'star-collider', href: 'star-collider.html', title: 'Star Collider Lab',
+      category: 'deep-space', group: 'black-holes',
+      tier: 'public', icon: 'star-binary', badge: 'NEW',
+      blurb: 'Collide real neutron stars, black holes and white dwarfs: EOS, PN inspiral, SPH merger, kilonova.' },
     // ── Cosmic web ────────────────────────────────────────────────────────
     { id: 'bootes-void', href: 'bootes-void.html', title: 'Boötes Void',
       category: 'deep-space', group: 'cosmic-web',

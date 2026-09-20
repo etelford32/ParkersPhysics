@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Star Collider Lab · Compact-Object Mergers · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/star-collider.html">
+<meta name="description" content="Collide real neutron stars, black holes and white dwarfs. A TOV star builder on eight nuclear equations of state, a 3.5PN inspiral with tides and the gravitational-wave chirp, a Rust/WASM smoothed-particle merger engine, and the calibrated aftermath: remnant fate, ejecta, kilonova.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/star-collider.html">
+<meta property="og:title" content="Star Collider Lab — compact-object mergers, from the equation of state to the kilonova">
+<meta property="og:description" content="Pick two real objects — PSR J0740+6620, the GW170817 stars, Cygnus X-1, Sirius B — build them on a nuclear EOS, inspiral them at 3.5PN, smash them in a WASM SPH engine, and read off what is left.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/star-collider.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Parkers Physics — Star Collider Lab">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Star Collider Lab — Parkers Physics">
+<meta name="twitter:description" content="Neutron stars, black holes and white dwarfs from the catalogue, on a nuclear EOS, through the inspiral, into the merger engine, out the other side.">
+<meta name="twitter:image" content="https://parkersphysics.com/static/og/star-collider.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is sc- prefixed; there is intentionally NO nav styling
+     here (js/nav-styles.css owns it). -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+    min-height:100vh;
+    background:#03010e;
+    color:#cdd5e4;
+    font-family:'Segoe UI', system-ui, sans-serif;
+    overflow-x:hidden;
+}
+.skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
+.skip-link:focus{left:16px}
+
+:root {
+    --sc-accent:#5ee1ff; --sc-accent-rgb:94,225,255;
+    --sc-amber:#ffb066; --sc-amber-rgb:255,176,102;
+    --sc-magenta:#f08cff; --sc-red:#ff6b7a; --sc-green:#7dffb0;
+    --sc-panel:rgba(10,14,36,.78); --sc-border:rgba(var(--sc-accent-rgb),.18);
+    --sc-text-dim:#8fa0be; --sc-mono:'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+.sc-wrap { max-width:1380px; margin:0 auto; padding:0 18px 60px; }
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+.sc-hero { padding:26px 4px 10px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
+.sc-hero h1 { font-size:clamp(1.7rem, 3.4vw, 2.5rem); font-weight:700; color:#fff; letter-spacing:.2px; }
+.sc-badge { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--sc-amber); border:1px solid rgba(var(--sc-amber-rgb),.45); border-radius:999px; padding:3px 10px; }
+.sc-sub { flex-basis:100%; color:var(--sc-text-dim); font-size:.98rem; }
+.sc-lede { font-size:1.02rem; line-height:1.6; color:#c2cbdc; margin:8px 4px 14px; max-width:1050px; }
+.sc-lede strong { color:#fff; }
+
+/* ── Provenance banner ────────────────────────────────────────────────── */
+.sc-provenance { display:flex; gap:14px; align-items:flex-start; border:1px solid rgba(var(--sc-amber-rgb),.35); background:rgba(var(--sc-amber-rgb),.06); border-radius:10px; padding:12px 14px; margin:0 4px 18px; font-size:.9rem; line-height:1.5; }
+.sc-prov-mark { flex:0 0 auto; font-family:var(--sc-mono); font-size:.72rem; letter-spacing:.14em; color:var(--sc-amber); border:1px solid rgba(var(--sc-amber-rgb),.5); border-radius:6px; padding:3px 7px; margin-top:2px; }
+.sc-provenance strong { color:#fff; }
+
+/* ── Collider: stage + console ────────────────────────────────────────── */
+.sc-collider { display:grid; grid-template-columns:minmax(0, 1fr) 340px; gap:14px; margin:0 4px 18px; align-items:start; }
+@media (max-width:1000px) { .sc-collider { grid-template-columns:1fr; } }
+/* The stage owns its height. Left to the grid it stretched to the console's
+   ~1100px on desktop and the merger sat in the top fifth of an empty grid. */
+#sc-stage-wrap { position:relative; border:1px solid var(--sc-border); border-radius:12px; overflow:hidden; background:#04051a; height:min(72vh, 720px); min-height:420px; }
+@media (max-width:1000px) { #sc-stage-wrap { height:min(60vh, 560px); } }
+#sc-stage { position:absolute; inset:0; }
+#sc-stage-fallback { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:20px; text-align:center; color:var(--sc-text-dim); background:#04051a; }
+#sc-stage-fallback[hidden] { display:none; }
+.sc-hud { position:absolute; left:10px; top:10px; right:10px; display:flex; flex-wrap:wrap; gap:6px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.72rem; color:#bcd0ee; text-shadow:0 1px 3px #000; }
+.sc-hud span[data-sc] { color:#fff; }
+.sc-hud-b { position:absolute; left:10px; right:10px; bottom:10px; display:flex; flex-wrap:wrap; gap:4px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.7rem; color:#9fb0cc; text-shadow:0 1px 3px #000; }
+.sc-hud-b span[data-sc] { color:#dfe8ff; }
+.sc-console { border:1px solid var(--sc-border); border-radius:12px; background:var(--sc-panel); padding:12px 14px; display:flex; flex-direction:column; gap:10px; font-size:.86rem; }
+.sc-console h2 { font-size:.78rem; letter-spacing:.12em; text-transform:uppercase; color:var(--sc-accent); }
+.sc-console h3 { font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--sc-text-dim); margin-top:6px; }
+.sc-row { display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; align-items:center; }
+.sc-row label, .sc-field label { color:var(--sc-text-dim); font-size:.78rem; }
+.sc-field { display:flex; flex-direction:column; gap:3px; }
+.sc-console select, .sc-console input[type=number], .sc-console input[type=text] { width:100%; background:#0b1030; color:#e6edff; border:1px solid rgba(var(--sc-accent-rgb),.25); border-radius:6px; padding:5px 7px; font-size:.82rem; font-family:inherit; }
+.sc-console input[type=range] { width:100%; accent-color:var(--sc-accent); }
+.sc-console input:disabled { opacity:.45; }
+.sc-check { display:flex; align-items:center; gap:7px; color:#c2cbdc; font-size:.8rem; }
+.sc-check input { accent-color:var(--sc-accent); }
+.sc-buttons { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+.sc-buttons button { flex:1 1 auto; background:rgba(var(--sc-accent-rgb),.12); color:#fff; border:1px solid rgba(var(--sc-accent-rgb),.4); border-radius:7px; padding:8px 10px; font-size:.84rem; cursor:pointer; font-family:inherit; }
+.sc-buttons button:hover { background:rgba(var(--sc-accent-rgb),.22); }
+.sc-buttons button.sc-primary { background:rgba(var(--sc-amber-rgb),.18); border-color:rgba(var(--sc-amber-rgb),.6); }
+.sc-body-block { border:1px solid rgba(var(--sc-accent-rgb),.12); border-radius:8px; padding:8px; }
+.sc-body-block.sc-b { border-color:rgba(var(--sc-magenta),.25); }
+.sc-hint { font-size:.72rem; color:var(--sc-text-dim); line-height:1.4; }
+
+/* ── Catalogue rail ───────────────────────────────────────────────────── */
+.sc-catalog-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin:8px 4px 8px; }
+.sc-catalog-head h2 { font-size:1.15rem; color:#fff; }
+.sc-catalog-head p { color:var(--sc-text-dim); font-size:.88rem; }
+.sc-pair-pick { display:flex; align-items:center; gap:8px; margin-left:auto; font-size:.82rem; color:var(--sc-text-dim); }
+.sc-pair-pick select { background:#0b1030; color:#e6edff; border:1px solid rgba(var(--sc-accent-rgb),.25); border-radius:6px; padding:5px 7px; font-family:inherit; }
+#sc-catalog { display:grid; grid-auto-flow:column; grid-auto-columns:280px; gap:10px; overflow-x:auto; padding:4px 4px 12px; margin:0 0 18px; scroll-snap-type:x proximity; }
+.sc-card { scroll-snap-align:start; border:1px solid var(--sc-border); border-radius:10px; background:var(--sc-panel); padding:10px 12px; display:flex; flex-direction:column; gap:6px; font-size:.8rem; }
+.sc-card.sc-card-a { border-color:rgba(var(--sc-accent-rgb),.7); box-shadow:0 0 0 1px rgba(var(--sc-accent-rgb),.35) inset; }
+.sc-card.sc-card-b { border-color:rgba(240,140,255,.7); box-shadow:0 0 0 1px rgba(240,140,255,.35) inset; }
+.sc-card-head { display:flex; align-items:center; gap:8px; }
+.sc-card-head strong { color:#fff; font-size:.9rem; }
+.sc-kind { font-family:var(--sc-mono); font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; padding:2px 6px; border-radius:4px; border:1px solid; }
+.sc-kind-ns { color:var(--sc-accent); border-color:rgba(var(--sc-accent-rgb),.5); }
+.sc-kind-bh { color:var(--sc-amber); border-color:rgba(var(--sc-amber-rgb),.5); }
+.sc-kind-wd { color:var(--sc-green); border-color:rgba(125,255,176,.5); }
+.sc-card-short { color:#dfe8ff; font-style:italic; }
+.sc-card-props { font-family:var(--sc-mono); font-size:.7rem; color:#bcd0ee; line-height:1.5; }
+.sc-card-props em { color:var(--sc-text-dim); font-style:normal; }
+.sc-card-blurb { color:#aab6cc; line-height:1.45; flex:1; }
+.sc-card-actions { display:flex; gap:6px; }
+.sc-card-actions button { flex:1; background:rgba(var(--sc-accent-rgb),.1); color:#fff; border:1px solid rgba(var(--sc-accent-rgb),.35); border-radius:6px; padding:5px; cursor:pointer; font-size:.76rem; font-family:inherit; }
+.sc-card-actions button:hover { background:rgba(var(--sc-accent-rgb),.22); }
+.sc-card-src { font-size:.66rem; color:var(--sc-text-dim); }
+.sc-warn { color:var(--sc-amber); }
+
+/* ── Panels ───────────────────────────────────────────────────────────── */
+.sc-panels { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; margin:0 4px 18px; }
+@media (max-width:900px) { .sc-panels { grid-template-columns:1fr; } }
+.sc-panel { border:1px solid var(--sc-border); border-radius:12px; background:var(--sc-panel); padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+.sc-panel h2 { font-size:1.05rem; color:#fff; }
+.sc-panel h2 small { display:block; font-size:.78rem; font-weight:400; color:var(--sc-text-dim); margin-top:2px; }
+.sc-panel canvas { width:100%; height:230px; display:block; border-radius:8px; background:#06071a; }
+.sc-kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:.83rem; }
+.sc-kv dt { color:var(--sc-text-dim); white-space:nowrap; }
+.sc-kv dd { color:#e6edff; font-family:var(--sc-mono); font-size:.78rem; overflow-wrap:anywhere; }
+.sc-two { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+@media (max-width:640px) { .sc-two { grid-template-columns:1fr; } }
+.sc-bodycard { border:1px solid rgba(var(--sc-accent-rgb),.14); border-radius:8px; padding:8px 10px; }
+.sc-bodycard h3 { font-size:.8rem; color:var(--sc-accent); margin-bottom:6px; }
+.sc-bodycard.sc-b h3 { color:var(--sc-magenta); }
+.sc-fate { font-size:1.05rem; color:#fff; }
+.sc-fate-detail { color:#c2cbdc; font-size:.86rem; line-height:1.5; }
+.sc-note { font-size:.74rem; color:var(--sc-text-dim); line-height:1.45; }
+
+/* ── Method ───────────────────────────────────────────────────────────── */
+.sc-method { margin:0 4px; border-top:1px solid var(--sc-border); padding-top:18px; }
+.sc-method h2 { font-size:1.15rem; color:#fff; margin-bottom:8px; }
+.sc-method h3 { font-size:.92rem; color:var(--sc-accent); margin:14px 0 4px; }
+.sc-method p, .sc-method li { color:#b6c1d6; font-size:.9rem; line-height:1.55; max-width:1000px; }
+.sc-method ul { padding-left:20px; }
+.sc-method code { font-family:var(--sc-mono); font-size:.8rem; color:#dfe8ff; background:rgba(255,255,255,.05); padding:1px 4px; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element in
+     place — it does NOT create one, so removing this tag silently removes
+     the site navigation. -->
+<nav></nav>
+
+<header class="sc-wrap sc-hero">
+    <h1>Star Collider Lab</h1>
+    <span class="sc-badge">Experimental</span>
+    <span class="sc-sub">Neutron stars, black holes and white dwarfs from the catalogue — built on a nuclear equation of state, spiralled in at 3.5PN, smashed in a smoothed-particle engine, read out as a remnant, an ejecta budget and a kilonova.</span>
+</header>
+
+<main id="main-content" class="sc-wrap">
+
+<p class="sc-lede">
+    A neutron-star merger is the one experiment that touches every scale of physics at once: the
+    nuclear equation of state sets the radius, the radius sets how the star deforms in its
+    partner's tide, the tide is written into the last gravitational-wave cycles, the total mass
+    decides whether the remnant survives, and what is thrown out decides what the telescopes see
+    a day later. <strong>This lab runs that whole chain, and lets you change any link in it.</strong>
+    The objects are real. The chain is the field's own: TOV structure, post-Newtonian inspiral,
+    numerical-relativity-calibrated fits for the aftermath, and a Newtonian SPH engine with
+    radiation reaction for the merger itself.
+</p>
+
+<div class="sc-provenance">
+    <span class="sc-prov-mark">MEASURED · MODELLED</span>
+    <div>
+        <strong>What is measured and what is modelled.</strong>
+        Every object's mass, spin, field and distance is a published measurement with its source on the
+        card; where a mass has never been measured the card says <em>assumed</em>. Radii marked
+        <em>measured</em> are NICER's; every other radius, every tidal deformability and every fate
+        is computed here from the equation of state you pick — eight piecewise-polytrope fits to
+        tabulated nuclear EOSs. The merger engine is Newtonian smoothed-particle hydrodynamics
+        with a bulk 2.5PN radiation-reaction driver — the Rasio &amp; Shapiro / Rosswog class of
+        simulation, not general-relativistic hydrodynamics — and its numbers are labelled
+        <em>SPH</em> wherever they sit next to a calibrated fit. Nothing on this page is fetched
+        from the network.
+    </div>
+</div>
+
+<!-- ── The collider ─────────────────────────────────────────────────────── -->
+<section class="sc-collider" aria-label="Collider stage and console">
+    <div id="sc-stage-wrap">
+        <div id="sc-stage" aria-label="3D merger stage"></div>
+        <div id="sc-stage-fallback">Starting the stage…</div>
+        <div class="sc-hud" aria-live="off">
+            <div>engine <span data-sc="simEngine">—</span></div>
+            <div>status <span data-sc="simStatus">—</span></div>
+            <div>t <span data-sc="simTime">—</span></div>
+            <div>separation <span data-sc="simSep">—</span></div>
+            <div>f_GW <span data-sc="simFreq">—</span></div>
+            <div>particles <span data-sc="simN">—</span></div>
+        </div>
+        <div class="sc-hud-b">
+            <div>steps <span data-sc="simSteps">—</span></div>
+            <div>rate <span data-sc="simRate">—</span></div>
+            <div>unbound <span data-sc="simUnbound">—</span></div>
+            <div>accreted <span data-sc="simAccreted">—</span></div>
+            <div>ρ_max <span data-sc="simRhoMax">—</span></div>
+            <div>shock heat <span data-sc="simHeat">—</span></div>
+            <div>E_gw <span data-sc="simEgw">—</span></div>
+            <div>energy drift <span data-sc="simDrift">—</span></div>
+            <div>PN <span data-sc="simPn">—</span></div>
+            <div>scale <span data-sc="stageScale">—</span></div>
+        </div>
+    </div>
+
+    <aside class="sc-console" aria-label="Collider console">
+        <h2>Collider console</h2>
+
+        <div class="sc-field">
+            <label for="sc-pair">Real pair</label>
+            <select id="sc-pair" data-sc-control="pair"></select>
+        </div>
+
+        <div class="sc-body-block">
+            <h3>Body A</h3>
+            <div class="sc-field"><label for="sc-bodyA">Object</label><select id="sc-bodyA" data-sc-control="bodyA"></select></div>
+            <div class="sc-row">
+                <div class="sc-field"><label for="sc-kindA">Kind</label>
+                    <select id="sc-kindA" data-sc-control="kindA"><option value="ns">Neutron star</option><option value="bh">Black hole</option><option value="wd">White dwarf</option></select></div>
+                <div class="sc-field"><label for="sc-massA">Mass (M☉)</label><input id="sc-massA" data-sc-control="massA" type="number" step="0.01" min="0.1" max="500"></div>
+                <div class="sc-field"><label for="sc-radiusA">Radius (km)</label><input id="sc-radiusA" data-sc-control="radiusA" type="number" step="0.1" min="1"></div>
+                <div class="sc-field"><label for="sc-chiA">Spin χ (aligned)</label><input id="sc-chiA" data-sc-control="chiA" type="number" step="0.01" min="-0.99" max="0.99"></div>
+            </div>
+        </div>
+        <div class="sc-body-block sc-b">
+            <h3>Body B</h3>
+            <div class="sc-field"><label for="sc-bodyB">Object</label><select id="sc-bodyB" data-sc-control="bodyB"></select></div>
+            <div class="sc-row">
+                <div class="sc-field"><label for="sc-kindB">Kind</label>
+                    <select id="sc-kindB" data-sc-control="kindB"><option value="ns">Neutron star</option><option value="bh">Black hole</option><option value="wd">White dwarf</option></select></div>
+                <div class="sc-field"><label for="sc-massB">Mass (M☉)</label><input id="sc-massB" data-sc-control="massB" type="number" step="0.01" min="0.1" max="500"></div>
+                <div class="sc-field"><label for="sc-radiusB">Radius (km)</label><input id="sc-radiusB" data-sc-control="radiusB" type="number" step="0.1" min="1"></div>
+                <div class="sc-field"><label for="sc-chiB">Spin χ (aligned)</label><input id="sc-chiB" data-sc-control="chiB" type="number" step="0.01" min="-0.99" max="0.99"></div>
+            </div>
+        </div>
+
+        <div class="sc-field">
+            <label for="sc-eos">Equation of state (neutron stars)</label>
+            <select id="sc-eos" data-sc-control="eos"></select>
+        </div>
+
+        <h3>Orbit</h3>
+        <div class="sc-row">
+            <div class="sc-field"><label for="sc-sep">Initial separation (km)</label><input id="sc-sep" data-sc-control="separation" type="number" step="1" min="1"></div>
+            <div class="sc-field"><label for="sc-dist">Distance to Earth (Mpc)</label><input id="sc-dist" data-sc-control="distance" type="number" step="1" min="0.001"></div>
+        </div>
+        <div class="sc-field">
+            <label for="sc-ecc">Eccentricity at apoapsis · <span data-sc="eccentricityOut">0.00</span></label>
+            <input id="sc-ecc" data-sc-control="eccentricity" type="range" min="0" max="0.6" step="0.01" value="0">
+        </div>
+        <label class="sc-check"><input type="checkbox" data-sc-control="corotate"> tidally locked stars (corotating)</label>
+
+        <h3>Engine</h3>
+        <div class="sc-row">
+            <div class="sc-field"><label for="sc-particles">Resolution</label><select id="sc-particles" data-sc-control="particles"></select></div>
+            <div class="sc-field"><label for="sc-warp">Pace</label><select id="sc-warp" data-sc-control="warp"></select></div>
+            <div class="sc-field"><label for="sc-visc">Artificial viscosity α</label><input id="sc-visc" data-sc-control="viscosity" type="number" step="0.1" min="0" max="3" value="1"></div>
+            <div class="sc-field"><label for="sc-gth">Thermal Γ<sub>th</sub></label><input id="sc-gth" data-sc-control="gammaTh" type="number" step="0.05" min="1.1" max="2.2" value="1.75"></div>
+        </div>
+        <label class="sc-check"><input type="checkbox" data-sc-control="pn25" checked> 2.5PN radiation reaction (the inspiral driver)</label>
+        <label class="sc-check"><input type="checkbox" data-sc-control="pn1"> 1PN conservative term <span class="sc-hint">(experimental — stalls at contact, fine on wide orbits)</span></label>
+        <label class="sc-check"><input type="checkbox" data-sc-control="autorotate"> auto-rotate the stage</label>
+
+        <div class="sc-buttons">
+            <button type="button" class="sc-primary" data-sc-control="run">Build &amp; run</button>
+            <button type="button" data-sc-control="pause">Pause</button>
+            <button type="button" data-sc-control="resume">Resume</button>
+            <button type="button" data-sc-control="reset">Reset</button>
+        </div>
+        <p class="sc-hint">Direct-summation gravity is O(N²): 600 particles per star runs at a few tens of steps per second on a laptop; 2 500 is a coffee break. The relaxation pass before each run is what makes the stars start in equilibrium.</p>
+    </aside>
+</section>
+
+<!-- ── Catalogue ────────────────────────────────────────────────────────── -->
+<div class="sc-catalog-head">
+    <h2>The catalogue</h2>
+    <p>Real objects with their integrated properties on the current EOS. Load any two into the collider.</p>
+</div>
+<div id="sc-catalog" aria-label="Catalogue of real compact objects"></div>
+
+<!-- ── Panels ───────────────────────────────────────────────────────────── -->
+<div class="sc-panels">
+
+    <section class="sc-panel" aria-label="Star builder">
+        <h2>Star builder <small>TOV structure + tidal Love number on the chosen EOS · I–Love for the moment of inertia</small></h2>
+        <canvas data-sc-chart="massRadius" aria-label="Mass–radius diagram"></canvas>
+        <div class="sc-two">
+            <div class="sc-bodycard">
+                <h3>A · <span data-sc="nameA">—</span></h3>
+                <dl class="sc-kv">
+                    <dt>Kind</dt><dd data-sc="kindAOut">—</dd>
+                    <dt>Mass</dt><dd data-sc="massAOut">—</dd>
+                    <dt>Radius</dt><dd data-sc="radiusAOut">—</dd>
+                    <dt>Compactness</dt><dd data-sc="compactA">—</dd>
+                    <dt>Λ</dt><dd data-sc="lambdaA">—</dd>
+                    <dt>k₂</dt><dd data-sc="k2A">—</dd>
+                    <dt>χ</dt><dd data-sc="chiAOut">—</dd>
+                    <dt>Structure</dt><dd data-sc="extraA">—</dd>
+                </dl>
+                <p class="sc-note" data-sc="noteA">—</p>
+            </div>
+            <div class="sc-bodycard sc-b">
+                <h3>B · <span data-sc="nameB">—</span></h3>
+                <dl class="sc-kv">
+                    <dt>Kind</dt><dd data-sc="kindBOut">—</dd>
+                    <dt>Mass</dt><dd data-sc="massBOut">—</dd>
+                    <dt>Radius</dt><dd data-sc="radiusBOut">—</dd>
+                    <dt>Compactness</dt><dd data-sc="compactB">—</dd>
+                    <dt>Λ</dt><dd data-sc="lambdaB">—</dd>
+                    <dt>k₂</dt><dd data-sc="k2B">—</dd>
+                    <dt>χ</dt><dd data-sc="chiBOut">—</dd>
+                    <dt>Structure</dt><dd data-sc="extraB">—</dd>
+                </dl>
+                <p class="sc-note" data-sc="noteB">—</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="sc-panel" aria-label="Inspiral and gravitational waves">
+        <h2>Inspiral &amp; gravitational waves <small>TaylorT4 at 3.5PN · leading tidal (39/8 Λ̃ x⁵) and aligned spin–orbit terms</small></h2>
+        <canvas data-sc-chart="waveform" aria-label="Gravitational-wave strain"></canvas>
+        <canvas data-sc-chart="frequency" aria-label="Frequency track"></canvas>
+        <dl class="sc-kv">
+            <dt>System</dt><dd data-sc="pairClass">—</dd>
+            <dt>Chirp mass</dt><dd data-sc="chirpMass">—</dd>
+            <dt>Mass ratio q</dt><dd data-sc="massRatio">—</dd>
+            <dt>Total mass</dt><dd data-sc="totalMass">—</dd>
+            <dt>Λ̃</dt><dd data-sc="lambdaTilde">—</dd>
+            <dt>χ_eff</dt><dd data-sc="chiEff">—</dd>
+            <dt>Starts at</dt><dd><span data-sc="separationOut">—</span> · <span data-sc="fStart">—</span></dd>
+            <dt>Time to merger</dt><dd data-sc="timeToMerger">—</dd>
+            <dt>GW cycles</dt><dd data-sc="gwCycles">—</dd>
+            <dt>Ends at</dt><dd><span data-sc="fEnd">—</span> · <span data-sc="endReason">—</span></dd>
+            <dt>Peak strain</dt><dd><span data-sc="strainPeak">—</span> at <span data-sc="distanceOut">—</span></dd>
+            <dt>Real orbit today</dt><dd data-sc="realOrbit">—</dd>
+        </dl>
+    </section>
+
+    <section class="sc-panel" aria-label="Aftermath">
+        <h2>Aftermath <small>numerical-relativity-calibrated fits: fate, ejecta, kilonova — every branch cited below</small></h2>
+        <div class="sc-fate" data-sc="fate">—</div>
+        <p class="sc-fate-detail" data-sc="fateDetail">—</p>
+        <dl class="sc-kv">
+            <dt>Remnant</dt><dd data-sc="remnant">—</dd>
+            <dt>Dynamical ejecta</dt><dd data-sc="ejectaDyn">—</dd>
+            <dt>Disk</dt><dd data-sc="ejectaDisk">—</dd>
+            <dt>Disk wind</dt><dd data-sc="ejectaWind">—</dd>
+            <dt>Kilonova peak</dt><dd data-sc="knPeak">—</dd>
+            <dt>Brightness</dt><dd data-sc="knMag">—</dd>
+            <dt>Colour</dt><dd data-sc="knColour">—</dd>
+            <dt>Magnetic</dt><dd data-sc="magnetic">—</dd>
+        </dl>
+        <canvas data-sc-chart="kilonova" aria-label="Kilonova light curve"></canvas>
+    </section>
+
+    <section class="sc-panel" aria-label="Simulation ledger">
+        <h2>Simulation ledger <small>the SPH run's own bookkeeping — kinetic, thermal, potential, total, and what radiation reaction removed</small></h2>
+        <canvas data-sc-chart="energy" aria-label="Energy ledger"></canvas>
+        <dl class="sc-kv">
+            <dt>SPH vs fit</dt><dd data-sc="sphVsFit">—</dd>
+        </dl>
+        <p class="sc-note">Momentum is conserved to round-off by construction (antisymmetric pair forces). Energy is conserved to leapfrog accuracy through the inspiral and drifts by a few percent per dynamical time once the remnant forms — adaptive smoothing lengths without the grad-h correction terms. The dashed green line adds back the radiated E_gw; the gap between it and the starting energy is the numerical drift, printed on the stage.</p>
+    </section>
+</div>
+
+<!-- ── Method ───────────────────────────────────────────────────────────── -->
+<section class="sc-method" aria-label="Method and sources">
+    <h2>How it is built, and what each number is worth</h2>
+
+    <h3>Star builder</h3>
+    <p>Each EOS is the piecewise-polytrope parametrisation of Read, Lackey, Owen &amp; Friedman (2009): a four-piece SLy crust below a three-piece core described by log p₁ and three adiabatic indices. The Tolman–Oppenheimer–Volkoff equations are integrated outward with the l = 2 metric perturbation alongside them (Hinderer 2008; Hinderer, Lackey, Lang &amp; Read 2010), which gives the Love number k₂ and Λ = (2/3) k₂ C⁻⁵. The moment of inertia comes from the I–Love universal relation (Yagi &amp; Yunes 2013), and a pulsar's dimensionless spin from χ = IΩ/M². The builder reproduces the published M_max to 2 %, R(1.4 M☉) to 4 % and Λ(1.4 M☉) to 25 % for all eight EOSs (<code>node tests/star-collider-tov.mjs</code>). A white dwarf is a Newtonian n = 1.5 polytrope.</p>
+
+    <h3>Inspiral</h3>
+    <p>TaylorT4 — the 3.5PN energy-flux balance re-expanded in x = (Mω)^{2/3} (Buonanno et al. 2009) — with the leading spin–orbit coefficient for aligned spins and the leading tidal term, whose coefficient (39/8)Λ̃ was re-derived from the tidal potential rather than copied (the derivation is in the test file). It stops at contact, evaluated with the 1PN harmonic separation, or at the test-particle ISCO, and says which. The wide, eccentric pulsar binaries in the catalogue get Peters' (1964) closed-form merger time instead, pinned to the Hulse–Taylor pulsar's 300 Myr. Spin–spin, precession and higher tidal orders are not modelled.</p>
+
+    <h3>The merger engine</h3>
+    <p>Rust compiled to WebAssembly, running in a Web Worker (<code>rust-star-collider/</code>, <code>cargo test</code> is the physics gate). Stars are Lane–Emden polytropes at the radius the TOV builder gave them, placed as a stretched lattice and relaxed with velocity damping. The hydrodynamics is cubic-spline SPH with an adaptive smoothing length, the symmetric pressure force (exact momentum conservation), Monaghan artificial viscosity, and the hybrid cold + thermal equation of state used by the first generation of merger codes (Janka et al. 1993; Bauswein et al. 2010): the polytrope is adiabatic and only shocks heat the gas. Gravity is direct summation with Plummer softening — no tree, hence the particle budget. A black hole is a point mass in a Paczyński–Wiita potential (ISCO at 6M for free) with a sink that absorbs mass and momentum. The inspiral is driven by the 2.5PN radiation-reaction acceleration of Lincoln &amp; Will (1990) applied to the two bodies' cores as a uniform kick and integrated as E_gw; it fades once the bodies overlap. The gravitational-wave strain is the quadrupole formula evaluated from the particle accelerations, so it is exact for the Newtonian dynamics and noise-free. <strong>It is not general relativity:</strong> no GR hydrodynamics, neutrinos or magnetic fields, and the remnant's post-merger oscillation frequencies are Newtonian ones. A pinned test shows two point black holes decaying at Peters' rate to within 5 % and the 1PN orbit conserving energy to 10⁻⁸ per orbit.</p>
+
+    <h3>Aftermath</h3>
+    <ul>
+        <li>Binary black holes: final spin from Barausse &amp; Rezzolla (2009); radiated energy with the Barausse–Morozova–Rezzolla (2012) structure, its spin bracket calibrated here to the SXS equal-mass aligned-spin runs. GW150914 → 62 M☉, χ = 0.68.</li>
+        <li>Binary neutron stars: prompt-collapse threshold M_th = (2.38 − 3.606 C_max) M_max (Bauswein, Baumgarte &amp; Janka 2013), with the ±0.1 M☉ scatter of that fit reported as "marginal"; hypermassive / supramassive / stable by the rigid-rotation limit 1.2 M_max. Dynamical ejecta and disk mass from Krüger &amp; Foucart (2020); disk wind as 20 % of the disk.</li>
+        <li>Neutron star – black hole: remnant baryon mass from Foucart, Hinderer &amp; Nissanke (2018), dynamical ejecta from Kawaguchi et al. (2016).</li>
+        <li>White dwarfs: Roche-lobe overflow (Eggleton 1983) against the companion's ISCO or surface.</li>
+        <li>Kilonova: the one-zone homologous model of Metzger (2017, Living Reviews) with r-process heating 2×10¹⁰ t_d^{-1.3} erg g⁻¹ s⁻¹, ε_th = 0.5, and two components differing in opacity (0.5 and 10 cm²/g). AT2017gfo-like ejecta at 40 Mpc gives ~10⁴² erg/s at one day.</li>
+        <li>Magnetars: vacuum-dipole spin-down, magnetic energy, and the dipole–dipole energy against the orbital binding energy at contact — the answer to "does the field matter for the orbit" is 10⁻⁶.</li>
+    </ul>
+
+    <h3>Gates</h3>
+    <p><code>node tests/star-collider-tov.mjs tests/star-collider-inspiral.mjs tests/star-collider-remnant.mjs tests/star-collider-catalog.mjs tests/star-collider-kernel-smoke.mjs tests/star-collider-page.mjs</code>, <code>cargo test</code> in <code>rust-star-collider/</code>, and the browser gate <code>tests/star-collider-smoke.spec.js</code>. Design notes and the roadmap: <code>STAR_COLLIDER_LAB_PLAN.md</code>.</p>
+</section>
+
+</main>
+
+<script type="module">
+import { initStarColliderPage } from './js/star-collider/page.js';
+try {
+    initStarColliderPage(document);
+} catch (err) {
+    // A boot failure must not take the page with it: the prose and the sources
+    // carry the argument, and the provenance banner must never disappear
+    // because a script threw.
+    console.error('[star-collider] init failed', err);
+    const fb = document.getElementById('sc-stage-fallback');
+    if (fb) { fb.hidden = false; fb.textContent = 'The collider failed to start in this browser.'; }
+}
+</script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("star-collider");</script>
+</body>
+</html>
