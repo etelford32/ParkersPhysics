@@ -26,6 +26,25 @@
  *   • Perf guards — real frame clock, RAF fully parked when the tab is hidden
  *     or the hero is scrolled away (IntersectionObserver), and a one-way
  *     degradation ladder (drop bloom, then the deep field, then halve particles) on slow devices.
+ *   • THE STAGE (2026-09-20) — Earth is FRAMED INTO A DOM BOX. index.html
+ *     passes `stage: #hero-stage` (an empty element: the right column of
+ *     the split hero on wide screens, a short band between the copy and
+ *     the console on phones). `_updateFraming()` measures that box against
+ *     the canvas on every resize and solves the camera for it: the field of
+ *     view so Earth's disc is STAGE_DISC_FRAC of the box's short side (a
+ *     telephoto zoom, NOT a closer camera — the camera stays at ~12 R_E,
+ *     outside the shells it would otherwise clip through), and a look-at
+ *     offset so the disc lands at the box's centre in NDC. Before this the
+ *     camera panned Earth 3.2 units right on any widescreen and hoped the
+ *     console missed it; it did not — Earth sat at ~85 px radius half under
+ *     the Air Quality card. Without a stage the scene centres at 50°, the
+ *     old behaviour.
+ *   • The camera SWAYS, it does not orbit. The old 1.2°/s orbit carried the
+ *     Sun from screen-left to screen-right every 2.5 min, so "the sunlit
+ *     limb faces the copy" could not be a property of the layout. The
+ *     azimuth is now CAM_AZIMUTH ± CAM_SWAY_DEG: with the Sun at +x and the
+ *     camera at negative z, screen-right is (sin θ, 0, −cos θ) and the Sun
+ *     projects LEFT — toward the copy — with the tail receding right.
  *
  * Graceful fallback: any WebGL failure hides the canvas; the CSS gradient
  * backdrop in index.html remains and the live ticker/HUD stay functional.
@@ -45,6 +64,20 @@ const DEG = Math.PI / 180;
 // Sun direction in world space — slightly tilted off the equatorial plane.
 // The engine's _solarGroup +Y axis tracks this each tick.
 const SUN_DIR = new THREE.Vector3(1, 0.12, -0.08).normalize();
+
+// Camera azimuth about +y (radians, measured from +x toward +z). Negative z
+// puts the Sun screen-LEFT (see the header). The elevation is the old
+// vantage's (asin(3.0/12.3)); the sway keeps the framing stable enough that
+// the stage's look-at solve is exact at the mean and ~1% off at the extremes.
+const CAM_AZIMUTH   = -Math.atan2(10.4, 5.2);   // −63.4°
+const CAM_SWAY_DEG  = 7;
+const CAM_SWAY_RATE = 0.07;                     // rad/s of the sway phase
+// Earth's projected radius as a fraction of the stage box's SHORT side:
+// 0.30 leaves the 1.85 R_E aurora curtains and the 1.2 R_E limb glow inside
+// the box. At the 1440×900 split layout (640 px box) this is ~190 px, 2.2×
+// the old ~85 px; the 250 px phone band lands ~75 px inside the fov clamp.
+const STAGE_DISC_FRAC = 0.30;
+const FOV_MIN = 16, FOV_MAX = 72, FOV_DEFAULT = 50;
 
 // ── Shared GLSL noise (value noise + fbm), prepended to shaders that need it ──
 const GLSL_NOISE = /* glsl */`
@@ -112,7 +145,9 @@ const EARTH_FRAG = /* glsl */`
         // Ocean sun glint
         vec3 V = normalize(cameraPosition - vWP);
         vec3 H = normalize(u_sun + V);
-        col += vec3(1.0, 0.92, 0.75) * pow(max(dot(vWN, H), 0.0), 90.0) * (1.0 - land) * dayW * 0.75;
+        // 0.40, was 0.75: at the stage's telephoto framing the old level plus
+        // bloom read as a white ball, not a glint.
+        col += vec3(1.0, 0.92, 0.75) * pow(max(dot(vWN, H), 0.0), 90.0) * (1.0 - land) * dayW * 0.40;
 
         // Night-side city lights, clustered on land
         float clusters = smoothstep(0.35, 0.75, fbm3(vObj * 6.0 + 3.0));
@@ -259,9 +294,11 @@ export class HeroSpaceWeather {
         this._canvas = canvas;
         this._opts = {
             particleCount: window.innerWidth < 700 ? 1100 : 2400,
-            rotateSpeed:   0.02,    // degrees/s camera orbit
+            stage: null,            // DOM box Earth is framed into (see header)
             ...opts,
         };
+        // Framing solved from the stage box: Earth's NDC centre + vertical fov
+        this._frame = { nx: 0, ny: 0, fov: FOV_DEFAULT };
         this._state  = { solar_wind: { speed: 420, density: 5, bz: 0 }, kp: 2 };
         this._t      = 0;
         this._animId = null;
@@ -299,6 +336,11 @@ export class HeroSpaceWeather {
             this._clock = new THREE.Clock();
 
             window.addEventListener('resize', this._onResize.bind(this), { passive: true });
+            // The stage box moves without a window resize (the console grows
+            // as feeds land, the grid re-rows) — re-solve the framing then too.
+            if (this._opts.stage && 'ResizeObserver' in window) {
+                new ResizeObserver(() => this._updateFraming()).observe(this._opts.stage);
+            }
             window.addEventListener('swpc-update', (e) => {
                 this._state = e.detail;
                 this._engine.update(e.detail);
@@ -406,25 +448,51 @@ export class HeroSpaceWeather {
 
     // ── Camera ────────────────────────────────────────────────────────────────
     _initCamera() {
-        const cam = new THREE.PerspectiveCamera(50, this._w() / this._h(), 0.1, 700);
-        // Day-side flank vantage, closer than the old hero so Earth reads
-        // LARGE and LIT: sunlit hemisphere + city-light terminator facing the
-        // camera, compressed dayside magnetopause right, tail receding left,
-        // belts as glowing tori, aurora curtains over the poles.
-        cam.position.set(5.2, 3.0, 10.4);
-        cam.lookAt(0, 0.9, 0);
+        const cam = new THREE.PerspectiveCamera(FOV_DEFAULT, this._w() / this._h(), 0.1, 700);
+        // Day-side flank vantage at ~12.3 R_E — outside every shell the
+        // engine draws — with the Sun screen-left so the lit hemisphere and
+        // the compressed dayside magnetopause face the copy and the tail
+        // recedes right. Size on screen is the stage's business (fov), not
+        // the camera distance's.
+        this._camR   = Math.hypot(5.2, 3.0, 10.4);
+        this._camPhi = Math.asin(3.0 / this._camR);
+        this._camTh  = CAM_AZIMUTH;
+        cam.position.set(
+            this._camR * Math.cos(this._camPhi) * Math.cos(this._camTh),
+            this._camR * Math.sin(this._camPhi),
+            this._camR * Math.cos(this._camPhi) * Math.sin(this._camTh));
+        cam.lookAt(0, 0, 0);
         this._camera = cam;
-
-        this._camR   = cam.position.length();
-        this._camPhi = Math.asin(cam.position.y / this._camR);
-        this._camTh  = Math.atan2(cam.position.z, cam.position.x);
+        this._updateFraming();
     }
 
-    // On widescreen, pan the view so Earth sits right of the headline block
-    // instead of dimmed behind it; portrait keeps Earth centered under the
-    // copy. Pan is a camera-space lookAt offset so it survives the orbit.
-    _panOffset() {
-        return (this._w() / Math.max(1, this._h()) > 1.05) ? 3.2 : 0;
+    /**
+     * Solve fov + Earth's NDC centre from the stage box (see header). Cheap
+     * (two getBoundingClientRect calls); runs on resize, not per frame.
+     */
+    _updateFraming() {
+        const f = this._frame;
+        const stage = this._opts.stage;
+        const W = this._w(), H = this._h();
+        if (!stage || !this._camera) { f.nx = 0; f.ny = 0; f.fov = FOV_DEFAULT; return; }
+        const sr = stage.getBoundingClientRect();
+        const cr = this._canvas.getBoundingClientRect();
+        if (!(sr.width > 0 && sr.height > 0 && cr.width > 0 && cr.height > 0)) {
+            f.nx = 0; f.ny = 0; f.fov = FOV_DEFAULT; return;
+        }
+        const cx = (sr.left + sr.width  / 2 - cr.left) / cr.width;
+        const cy = (sr.top  + sr.height / 2 - cr.top)  / cr.height;
+        f.nx = cx * 2 - 1;
+        f.ny = 1 - cy * 2;
+        // Radius on screen the box wants, then the vertical fov that gives it
+        // for a unit sphere at the camera distance (small-angle-free).
+        const rpx  = STAGE_DISC_FRAC * Math.min(sr.width, sr.height) * (H / cr.height);
+        const tanA = Math.tan(Math.asin(Math.min(0.999, 1 / this._camR)));
+        const tanV = (H / 2) * tanA / Math.max(1, rpx);
+        f.fov = Math.min(FOV_MAX, Math.max(FOV_MIN, 2 * Math.atan(tanV) / DEG));
+        this._camera.fov = f.fov;
+        this._camera.aspect = W / Math.max(1, H);
+        this._camera.updateProjectionMatrix();
     }
 
     // ── Lighting ─────────────────────────────────────────────────────────────
@@ -674,8 +742,9 @@ export class HeroSpaceWeather {
         this._t += dt;
         const t = this._t;
 
-        // ── Camera: slow orbit + widescreen pan + eased pointer parallax ───
-        this._camTh += this._opts.rotateSpeed * DEG * dt * 60;
+        // ── Camera: bounded sway (Sun stays screen-left) + stage framing +
+        //    eased pointer parallax ───────────────────────────────────────
+        this._camTh = CAM_AZIMUTH + CAM_SWAY_DEG * DEG * Math.sin(t * CAM_SWAY_RATE);
         const cx = this._camR * Math.cos(this._camPhi) * Math.cos(this._camTh);
         const cy = this._camR * Math.sin(this._camPhi) + 0.35 * Math.sin(t * 0.11);
         const cz = this._camR * Math.cos(this._camPhi) * Math.sin(this._camTh);
@@ -683,17 +752,7 @@ export class HeroSpaceWeather {
         this._parX += (this._parTX - this._parX) * k;
         this._parY += (this._parTY - this._parY) * k;
         this._camera.position.set(cx, cy, cz);
-        // Aim left of Earth (camera-space) so Earth composes right of the
-        // headline on widescreen; parallax rides on top of the pan.
-        const tv = this._tmpTarget ?? (this._tmpTarget = new THREE.Vector3());
-        const rv = this._tmpRight  ?? (this._tmpRight  = new THREE.Vector3());
-        tv.set(0, 0.9, 0);
-        rv.subVectors(tv, this._camera.position).normalize()
-          .cross(this._camera.up).normalize();
-        tv.addScaledVector(rv, -this._panOffset());
-        tv.x -= this._parX * 0.8;
-        tv.y -= this._parY * 0.6;
-        this._camera.lookAt(tv);
+        this._aimAtStage();
 
         // ── Earth + clouds rotation, shader clocks ─────────────────────────
         this._earth.rotation.y  += 0.0085 * dt;
@@ -726,6 +785,40 @@ export class HeroSpaceWeather {
 
         this._renderFrame();
         this._degrade(performance.now() - frameStart);
+    }
+
+    /**
+     * Point the camera so Earth (the origin) projects at the stage's NDC
+     * centre. Earth must sit at camera-space (nx·tanH·z, ny·tanV·z, −z) with
+     * |E − cam| = d, which fixes z; the look-at target is Earth minus that
+     * offset along the camera's right/up. Those axes rotate with the
+     * re-aim, so it is solved twice (the second pass is exact to <0.1%).
+     * Pointer parallax rides on top, scaled by the fov so a 16° telephoto
+     * frame does not swing four times further than the 50° one did.
+     */
+    _aimAtStage() {
+        const cam = this._camera, f = this._frame;
+        const tv = this._tmpTarget ?? (this._tmpTarget = new THREE.Vector3());
+        const rv = this._tmpRight  ?? (this._tmpRight  = new THREE.Vector3());
+        const uv = this._tmpUp     ?? (this._tmpUp     = new THREE.Vector3());
+        const fv = this._tmpFwd    ?? (this._tmpFwd    = new THREE.Vector3());
+        const tanV = Math.tan(f.fov * DEG / 2);
+        const tanH = tanV * cam.aspect;
+        const d = cam.position.length();
+        const z = d / Math.sqrt(1 + (f.nx * tanH) ** 2 + (f.ny * tanV) ** 2);
+        const ox = f.nx * tanH * z, oy = f.ny * tanV * z;
+        const par = tanV / Math.tan(FOV_DEFAULT * DEG / 2);
+        tv.set(0, 0, 0);
+        cam.lookAt(tv);
+        for (let pass = 0; pass < 2; pass++) {
+            fv.set(0, 0, -1).applyQuaternion(cam.quaternion);
+            rv.crossVectors(fv, cam.up).normalize();
+            uv.crossVectors(rv, fv).normalize();
+            tv.set(0, 0, 0).addScaledVector(rv, -ox).addScaledVector(uv, -oy);
+            tv.x -= this._parX * 0.8 * par;
+            tv.y -= this._parY * 0.6 * par;
+            cam.lookAt(tv);
+        }
     }
 
     // Base frame first, then the additive bloom overlay (never clears/blits
@@ -838,6 +931,7 @@ export class HeroSpaceWeather {
         const w = this._w(), h = this._h();
         this._camera.aspect = w / h;
         this._camera.updateProjectionMatrix();
+        this._updateFraming();
         this._renderer.setSize(w, h, false);
         this._bloom?.setSize(w, h);
         this._rtScene?.setSize(w, h);

@@ -352,7 +352,11 @@ const CSS = `
   color:var(--sc-ink2);text-align:left}
 .sky-console *{box-sizing:border-box}
 .sc-tabs{display:grid;grid-template-columns:104px repeat(4,1fr);gap:10px;margin:0 0 12px;align-items:center}
-@media(max-width:880px){.sc-tabs{grid-template-columns:repeat(2,1fr)}.sc-orb{grid-column:span 2;justify-self:center}}
+/* @container, not @media: index.html's split hero puts the console in a 560px
+   column on a 1440px viewport, where a viewport query would keep the 5-across
+   tab row and overflow it. The host sets container-type:inline-size; in a
+   host without it the query never matches and the row stays 5-across. */
+@container (max-width:880px){.sc-tabs{grid-template-columns:repeat(2,1fr)}.sc-orb{grid-column:span 2;justify-self:center}}
 .sc-tab{--tc:var(--sc-accent);display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:13px;
   background:var(--sc-s1);border:1px solid var(--sc-border);cursor:pointer;text-align:left;color:var(--sc-ink3);
   font-family:inherit;transition:transform .15s,border-color .2s,box-shadow .2s;min-width:0}
