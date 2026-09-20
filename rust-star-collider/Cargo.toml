@@ -1,0 +1,20 @@
+[package]
+name = "star-collider-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Star Collider Lab merger engine: 3D smoothed-particle hydrodynamics for compact-object collisions — Lane–Emden polytrope stars, cubic-spline SPH with a hybrid cold+thermal EOS and Monaghan artificial viscosity, softened direct gravity, Paczyński–Wiita black-hole sinks, 1PN + 2.5PN bulk corrections on the stars' centres of mass, and quadrupole-formula gravitational-wave extraction. Pure extern-C surface for the browser (no wasm-bindgen); cargo test runs the physics gate."
+
+[lib]
+# cdylib → the WASM artifact; rlib → native tests.
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Keep optimisation on in dev so `cargo test`'s merger integration doesn't crawl.
+[profile.dev]
+opt-level = 2

@@ -149,6 +149,22 @@ else
     echo "WARN: rust-flux-rope build failed — serving committed js/flux-rope-wasm binary."
 fi
 
+# ── Build Star Collider Lab merger engine ────────────────────
+# Dependency-free extern "C" module (no wasm-bindgen): plain cargo build,
+# artifact copied verbatim. The committed binary at
+# js/star-collider/wasm/star_collider_kernel.wasm serves as the fallback if
+# this build ever fails on Vercel's toolchain. Physics is gated by
+# `cargo test` in rust-star-collider/; the shipped binary by
+# node tests/star-collider-kernel-smoke.mjs.
+echo "Building star-collider-kernel WASM (SPH compact-object merger engine)..."
+if (cd rust-star-collider && cargo build --release --target wasm32-unknown-unknown); then
+    mkdir -p js/star-collider/wasm
+    cp rust-star-collider/target/wasm32-unknown-unknown/release/star_collider_kernel.wasm \
+       js/star-collider/wasm/star_collider_kernel.wasm
+else
+    echo "WARN: rust-star-collider build failed — serving committed js/star-collider/wasm binary."
+fi
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke

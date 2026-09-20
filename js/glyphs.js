@@ -122,6 +122,12 @@ export const GLYPHS = {
         // 'planet'
         `<circle cx="8.4" cy="14" r="4.2"/>` + `<circle cx="17" cy="7.8" r="2.5"/>` +
         NODE(12.9, 11.2, 1.1),
+    collider:
+        // two bodies at contact — overlapping rings, the merger node where
+        // they meet. No enclosing ring (the binary glyph's lesson: it reads
+        // as a planet), and the overlap is what says 'collision' at 20px.
+        `<circle cx="8.6" cy="12" r="5.2"/>` + `<circle cx="15.4" cy="12" r="5.2"/>` +
+        NODE(12, 12, 1.2),
     'star-red':
         // evolved giant: big shell + core node
         `<circle cx="12" cy="12" r="8.4"/>` + `<circle cx="12" cy="12" r="3.4"/>`,

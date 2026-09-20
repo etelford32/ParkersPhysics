@@ -182,7 +182,10 @@ const NAV_ITEMS = {
         { href: 'ton618.html',                label: 'TON 618',                sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: 'black-hole', id: 'ton618' },
         { href: 'blackhole-observatory.html', label: 'Black Hole Observatory', sub: 'Three UMBH systems · one canvas',     tier: 'public', icon: 'observatory', badge: 'NEW', id: 'blackhole-observatory' },
         { href: 'sagittarius.html',           label: 'Sagittarius A*',         sub: 'Galactic center · live',              tier: 'public', icon: 'black-hole-core', id: 'sagittarius' },
-        { href: 'black-hole-fluid.html',      label: 'Black Hole Accretion',   sub: 'Fluid dynamics simulation',           tier: 'public', icon: 'accretion' },
+        // 2026-09-20: Star Collider Lab took this slot from Black Hole Accretion
+        // (black-hole-fluid.html), which stays on the Deep Space hub and in the
+        // catalogue — the menu is at its 10-link cap (js/site-sections.js).
+        { href: 'star-collider.html',         label: 'Star Collider Lab',      sub: 'NS · BH · WD mergers · SPH engine',   tier: 'public', icon: 'collider', badge: 'NEW', id: 'star-collider' },
         { section: 'Cosmic web' },
         { href: 'bootes-void.html',           label: 'Boötes Void',            sub: 'Supervoid dynamics · the counterfactual', tier: 'public', icon: 'void', badge: 'NEW', id: 'bootes-void' },
     ],
