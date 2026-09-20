@@ -96,6 +96,89 @@ test.describe('Star Collider Lab', () => {
         await expect(page.locator('[data-sc="fate"]')).toHaveText(/prompt collapse \(marginal\)/);
     });
 
+    test('camera rig: presets fly, follow tracks a core, corotating holds the cores on x, colour modes switch, keys work', async ({ page }) => {
+        test.setTimeout(120000);
+        const errors = collectErrors(page);
+        await page.goto(PAGE);
+        await ready(page);
+        await page.waitForFunction(() => window.__starCollider?.scene && !window.__starCollider.scene.state.tweening, null, { timeout: 30000 });
+        const polar = () => page.evaluate(() => {
+            const s = window.__starCollider.scene;
+            const v = s.camera.position.clone().sub(s.controls.target);
+            return Math.atan2(Math.hypot(v.x, v.z), v.y);
+        });
+        const settle = () => page.waitForFunction(() => !window.__starCollider.scene.state.tweening, null, { timeout: 5000 });
+
+        // Presets are one-shot flights to the named polar angle.
+        await page.locator('[data-sc-control="viewTop"]').click();
+        await settle();
+        expect(await polar()).toBeLessThan(0.1);
+        await page.locator('[data-sc-control="viewEdge"]').click();
+        await settle();
+        expect(Math.abs(await polar() - 1.545)).toBeLessThan(0.05);
+        await expect(page.locator('[data-sc="stageFrame"]')).toHaveText(/edge view/);
+
+        // Pre-run preview exists (the stage is not an empty grid before a run).
+        expect(await page.evaluate(() => window.__starCollider.scene.world.children.some(c => c.type === 'Group' && c.visible && c.children.length === 2))).toBe(true);
+
+        // Run, then follow core A: the target must sit on core A's world position.
+        await page.waitForFunction(() => /WASM/.test(document.querySelector('[data-sc="simEngine"]').textContent), null, { timeout: 30000 });
+        await page.selectOption('[data-sc-control="particles"]', '150');
+        await page.locator('[data-sc-control="run"]').click();
+        await page.waitForFunction(() => { const d = window.__starCollider.state.sim.diag; return /running/.test(document.querySelector('[data-sc="simStatus"]').textContent) && d && d.steps > 60; }, null, { timeout: 60000 });
+        await page.selectOption('[data-sc-control="follow"]', 'A');
+        await page.waitForTimeout(500);
+        // Measure after a render frame, against the core position the scene itself
+        // last received — this is a test of the rig tracking its target, not of
+        // worker-message timing on a software renderer.
+        const afterFrame = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+        await afterFrame();
+        const followErr = await page.evaluate(() => {
+            const s = window.__starCollider.scene; const st = s.state; const cps = s.codePerScene;
+            const local = new (s.camera.position.constructor)(st.lastMeta.cmA[0] / cps, st.lastMeta.cmA[2] / cps, -st.lastMeta.cmA[1] / cps);
+            const w = s.world.localToWorld(local);
+            return { err: w.distanceTo(s.controls.target), fp: st.followPoint, target: s.controls.target.toArray() };
+        });
+        expect(followErr.err, JSON.stringify(followErr)).toBeLessThan(0.15);
+        await expect(page.locator('[data-sc="stageFrame"]')).toHaveText(/following core A/);
+
+        // Corotating frame: the core–core line lies along world x (|z| ≪ |x|).
+        await page.locator('[data-sc-control="frameCorotating"]').check();
+        await page.waitForTimeout(300);
+        await afterFrame();
+        const align = await page.evaluate(() => {
+            const s = window.__starCollider.scene; const st = s.state; const cps = s.codePerScene;
+            const V = s.camera.position.constructor;
+            s.world.updateMatrixWorld(true);
+            const a = s.world.localToWorld(new V(st.lastMeta.cmA[0] / cps, st.lastMeta.cmA[2] / cps, -st.lastMeta.cmA[1] / cps));
+            const b = s.world.localToWorld(new V(st.lastMeta.cmB[0] / cps, st.lastMeta.cmB[2] / cps, -st.lastMeta.cmB[1] / cps));
+            return { dx: Math.abs(a.x - b.x), dz: Math.abs(a.z - b.z), rot: s.world.rotation.y };
+        });
+        expect(align.dz, JSON.stringify(align)).toBeLessThan(0.08 * align.dx + 1e-3);
+        await expect(page.locator('[data-sc="stageFrame"]')).toHaveText(/corotating/);
+
+        // Colour modes reach the shader.
+        await page.selectOption('[data-sc-control="colorMode"]', 'bound');
+        expect(await page.evaluate(() => window.__starCollider.scene.state.colorMode)).toBe('bound');
+        await expect(page.locator('[data-sc="stageColour"]')).toHaveText(/unbound ejecta/);
+
+        // Keyboard on the stage: keys go to the focused canvas (a focused select
+        // keeps its own keys — typing in the console must never fly the camera).
+        await page.evaluate(() => document.querySelector('#sc-stage canvas').focus());
+        await page.hover('#sc-stage canvas');
+        await page.keyboard.press('3');
+        await settle();
+        expect(Math.abs(await polar() - 0.82)).toBeLessThan(0.05);
+        await page.keyboard.press('0');
+        await expect(page.locator('[data-sc="stageFrame"]')).toHaveText(/fixed on the origin/);
+        await page.keyboard.press(' ');
+        await expect(page.locator('[data-sc="simStatus"]')).toHaveText(/paused/);
+
+        // Trails accumulated while following.
+        expect(await page.evaluate(() => window.__starCollider.scene.world.children.filter(c => c.type === 'Line' && c.visible).length)).toBeGreaterThanOrEqual(2);
+        expect(errors, 'errors during the camera test').toEqual([]);
+    });
+
     test('the WASM engine builds, runs, inspirals, and paints the stage', async ({ page }) => {
         test.setTimeout(120000);
         const errors = collectErrors(page);

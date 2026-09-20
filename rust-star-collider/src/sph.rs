@@ -49,6 +49,8 @@ use core::f64::consts::PI;
 
 pub const MAX_N: usize = 8192;
 pub const DIAG_SLOTS: usize = 40;
+/// Render-frame fields per particle: x, y, z, log10 ρ, u, flags (star id + 2·unbound).
+pub const FRAME_STRIDE: usize = 6;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
@@ -141,7 +143,7 @@ pub struct Sim {
     pub phi: Vec<f64>,
     pub star: Vec<u8>,
     pub alive: Vec<u8>,
-    pub frame: Vec<f32>, // [x, y, z, log10 rho, u] × MAX_N
+    pub frame: Vec<f32>, // [x, y, z, log10 rho, u, flags] × MAX_N (FRAME_STRIDE)
     pub bodies: [Body; 2],
     pub params: Params,
     pub time: f64,
@@ -213,7 +215,7 @@ impl Sim {
             phi: vec![0.0; MAX_N],
             star: vec![0; MAX_N],
             alive: vec![0; MAX_N],
-            frame: vec![0.0; MAX_N * 5],
+            frame: vec![0.0; MAX_N * FRAME_STRIDE],
             bodies: [Body::empty(), Body::empty()],
             params: Params::default(),
             time: 0.0,
@@ -1102,23 +1104,28 @@ impl Sim {
         d[39] = n as f64;
     }
 
-    /// Pack a render frame: [x, y, z, log10 ρ, u] per particle (dead particles get NaN x).
+    /// Pack a render frame: [x, y, z, log10 ρ, u, flags] per particle, where
+    /// flags = star id + 2 × unbound (Bernoulli ½v² + Φ + u > 0 — the same
+    /// test the M_unbound diagnostic uses, so the stage's ejecta colouring and
+    /// the HUD's number are one definition). Dead particles get NaN x.
     pub fn pack_frame(&mut self) {
         for i in 0..self.n {
-            let o = 5 * i;
+            let o = FRAME_STRIDE * i;
             if self.alive[i] == 0 {
                 self.frame[o] = f32::NAN;
-                self.frame[o + 1] = 0.0;
-                self.frame[o + 2] = 0.0;
-                self.frame[o + 3] = 0.0;
-                self.frame[o + 4] = 0.0;
+                for k in 1..FRAME_STRIDE {
+                    self.frame[o + k] = 0.0;
+                }
                 continue;
             }
+            let v2 = self.vel[3 * i].powi(2) + self.vel[3 * i + 1].powi(2) + self.vel[3 * i + 2].powi(2);
+            let unbound = 0.5 * v2 + self.phi[i] + self.u[i] > 0.0;
             self.frame[o] = self.pos[3 * i] as f32;
             self.frame[o + 1] = self.pos[3 * i + 1] as f32;
             self.frame[o + 2] = self.pos[3 * i + 2] as f32;
             self.frame[o + 3] = self.rho[i].max(1e-30).log10() as f32;
             self.frame[o + 4] = self.u[i] as f32;
+            self.frame[o + 5] = self.star[i] as f32 + if unbound { 2.0 } else { 0.0 };
         }
     }
 }

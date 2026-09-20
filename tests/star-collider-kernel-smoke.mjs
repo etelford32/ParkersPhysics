@@ -84,7 +84,15 @@ let px = 0, py = 0;
 for (let i = 0; i < n; i++) if (alive[i]) { px += mass[i] * vel[3 * i]; py += mass[i] * vel[3 * i + 1]; }
 check('Σ m v ≈ 0', Math.abs(px) < 1e-9 && Math.abs(py) < 1e-9, `${px.toExponential(2)}, ${py.toExponential(2)}`);
 const frame = kernel.frame();
-check('frame packed [x,y,z,logρ,u] × n', frame.length === n * 5 && Number.isFinite(frame[0]) && Number.isFinite(frame[3]));
+check('frame stride is 6 (x,y,z,logρ,u,flags)', kernel.frameStride === 6, `${kernel.frameStride}`);
+check('frame packed × n', frame.length === n * kernel.frameStride && Number.isFinite(frame[0]) && Number.isFinite(frame[3]));
+{
+    let okFlags = true, seenA = false, seenB = false;
+    for (let i = 0; i < n; i++) { const f = frame[i * kernel.frameStride + 5]; if (![0, 1, 2, 3].includes(f)) okFlags = false; if (f === 0 || f === 2) seenA = true; if (f === 1 || f === 3) seenB = true; }
+    check('flags ∈ {0,1,2,3} and both stars present', okFlags && seenA && seenB);
+    let unboundFlagged = 0; for (let i = 0; i < n; i++) if (frame[i * kernel.frameStride + 5] >= 2) unboundFlagged += mass[i];
+    check('flagged unbound mass equals the M_unbound diagnostic', Math.abs(unboundFlagged - dEnd.mUnbound) < 1e-9, `${unboundFlagged.toExponential(3)} vs ${dEnd.mUnbound.toExponential(3)}`);
+}
 check('frame is a copy, not a view', frame.buffer !== kernel.pos().buffer);
 console.log(`      (NS scenario: relax ${relaxMs.toFixed(0)} ms, ${steps} steps in ${ms.toFixed(0)} ms → ${(ms / steps).toFixed(2)} ms/step at N=${n})`);
 check('body state readable', Number.isFinite(kernel.bodyState(0).pos[0]));

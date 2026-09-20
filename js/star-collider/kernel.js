@@ -45,13 +45,14 @@ export async function loadKernel(source) {
     x.sc_init();
     const maxParticles = x.sc_max_particles();
     const diagSlots = x.sc_diag_slots();
+    const frameStride = x.sc_frame_stride ? x.sc_frame_stride() : 5;
 
     const f64 = (ptr, len) => new Float64Array(x.memory.buffer, ptr, len);
     const f32 = (ptr, len) => new Float32Array(x.memory.buffer, ptr, len);
     const u8 = (ptr, len) => new Uint8Array(x.memory.buffer, ptr, len);
 
     const kernel = {
-        maxParticles, diagSlots,
+        maxParticles, diagSlots, frameStride,
         init() { x.sc_init(); },
         setParams({ c = 1, alpha = 1, beta = 2, gammaTh = 1.75, etaH = 1.3, cfl = 0.3, pn1 = false, pn25 = true, sinkFactor = 1.5 } = {}) {
             x.sc_set_params(c, alpha, beta, gammaTh, etaH, cfl, (pn1 ? 1 : 0) | (pn25 ? 2 : 0), sinkFactor);
@@ -83,11 +84,11 @@ export async function loadKernel(source) {
             for (const [k, i] of Object.entries(DIAG)) out[k] = d[i];
             return out;
         },
-        /** Packed render frame [x,y,z,log10ρ,u] × n as a COPY (safe to transfer). */
+        /** Packed render frame [x,y,z,log10ρ,u,flags] × n as a COPY (safe to transfer). flags = star + 2·unbound. */
         frame() {
             x.sc_pack_frame();
             const n = x.sc_n();
-            return new Float32Array(f32(x.sc_frame_ptr(), n * 5));
+            return new Float32Array(f32(x.sc_frame_ptr(), n * frameStride));
         },
         // Raw views (re-created per call; do not hold across an allocation).
         pos() { return f64(x.sc_pos_ptr(), x.sc_n() * 3); },

@@ -105,6 +105,7 @@ body {
 .sc-buttons button { flex:1 1 auto; background:rgba(var(--sc-accent-rgb),.12); color:#fff; border:1px solid rgba(var(--sc-accent-rgb),.4); border-radius:7px; padding:8px 10px; font-size:.84rem; cursor:pointer; font-family:inherit; }
 .sc-buttons button:hover { background:rgba(var(--sc-accent-rgb),.22); }
 .sc-buttons button.sc-primary { background:rgba(var(--sc-amber-rgb),.18); border-color:rgba(var(--sc-amber-rgb),.6); }
+.sc-buttons-sm button { padding:6px 8px; font-size:.78rem; }
 .sc-body-block { border:1px solid rgba(var(--sc-accent-rgb),.12); border-radius:8px; padding:8px; }
 .sc-body-block.sc-b { border-color:rgba(var(--sc-magenta),.25); }
 .sc-hint { font-size:.72rem; color:var(--sc-text-dim); line-height:1.4; }
@@ -231,6 +232,8 @@ body {
             <div>energy drift <span data-sc="simDrift">—</span></div>
             <div>PN <span data-sc="simPn">—</span></div>
             <div>scale <span data-sc="stageScale">—</span></div>
+            <div>camera <span data-sc="stageFrame">—</span></div>
+            <div>colour <span data-sc="stageColour">—</span></div>
         </div>
     </div>
 
@@ -291,6 +294,31 @@ body {
         <label class="sc-check"><input type="checkbox" data-sc-control="pn25" checked> 2.5PN radiation reaction (the inspiral driver)</label>
         <label class="sc-check"><input type="checkbox" data-sc-control="pn1"> 1PN conservative term <span class="sc-hint">(experimental — stalls at contact, fine on wide orbits)</span></label>
         <label class="sc-check"><input type="checkbox" data-sc-control="autorotate"> auto-rotate the stage</label>
+
+        <h3>Camera &amp; analysis view</h3>
+        <div class="sc-buttons sc-buttons-sm">
+            <button type="button" data-sc-control="viewTop" title="key 1 — face-on to the orbital plane">Top</button>
+            <button type="button" data-sc-control="viewEdge" title="key 2 — in the orbital plane">Edge-on</button>
+            <button type="button" data-sc-control="viewOblique" title="key 3">Oblique</button>
+            <button type="button" data-sc-control="frameSystem" title="key F — fit the particle cloud">Frame</button>
+        </div>
+        <div class="sc-row">
+            <div class="sc-field"><label for="sc-follow">Follow</label>
+                <select id="sc-follow" data-sc-control="follow">
+                    <option value="system">system barycentre</option><option value="A">core A</option><option value="B">core B</option><option value="none">fixed origin</option>
+                </select></div>
+            <div class="sc-field"><label for="sc-colour">Colour by</label>
+                <select id="sc-colour" data-sc-control="colorMode">
+                    <option value="density">density</option><option value="heat">shock heating</option><option value="body">body A / B</option><option value="bound">bound / ejecta</option>
+                </select></div>
+        </div>
+        <div class="sc-field">
+            <label for="sc-psize">Point size · <span data-sc="pointScaleOut">1.0×</span></label>
+            <input id="sc-psize" data-sc-control="pointScale" type="range" min="0.4" max="3" step="0.1" value="1">
+        </div>
+        <label class="sc-check"><input type="checkbox" data-sc-control="frameCorotating"> corotating frame — the cores held on the x-axis <span class="sc-hint">(key 4)</span></label>
+        <label class="sc-check"><input type="checkbox" data-sc-control="trails" checked> core trails <span class="sc-hint">(key T)</span></label>
+        <p class="sc-hint">Keys while the pointer is over the stage: 1 / 2 / 3 views · F frame · S / A / B / 0 follow · 4 corotating · C colour · T trails · R reset · space pause. Follow moves the rig, never your orbit or zoom; any drag or wheel cancels a flight.</p>
 
         <div class="sc-buttons">
             <button type="button" class="sc-primary" data-sc-control="run">Build &amp; run</button>

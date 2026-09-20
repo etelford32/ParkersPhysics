@@ -13,6 +13,7 @@
 //!   sc_relax(steps, dt_max, damping)  (each star alone, damped)
 //!   sc_set_orbit(sep, ecc, spinA, spinB, pn_circ)
 //!   loop: sc_advance(dt_total, max_steps, dt_max); sc_pack_frame(); read views
+//!   (frame stride = sc_frame_stride(): x, y, z, log10 ρ, u, flags = star + 2·unbound)
 //!
 //! Diagnostic slots (sc_diag_ptr, DIAG_SLOTS f64):
 //!    0 time            1 dt_last        2 n_alive        3 separation (CM–CM)
@@ -27,7 +28,7 @@
 pub mod lane_emden;
 pub mod sph;
 
-use sph::{Kind, Sim, DIAG_SLOTS, MAX_N};
+use sph::{Kind, Sim, DIAG_SLOTS, FRAME_STRIDE, MAX_N};
 
 static mut SIM: Option<Box<Sim>> = None;
 
@@ -57,6 +58,12 @@ pub extern "C" fn sc_max_particles() -> u32 {
 #[no_mangle]
 pub extern "C" fn sc_diag_slots() -> u32 {
     DIAG_SLOTS as u32
+}
+
+/// Fields per particle in the packed render frame (x, y, z, log10 ρ, u, flags).
+#[no_mangle]
+pub extern "C" fn sc_frame_stride() -> u32 {
+    FRAME_STRIDE as u32
 }
 
 /// pn_flags bit 0 = 1PN conservative, bit 1 = 2.5PN radiation reaction.

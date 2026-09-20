@@ -82,7 +82,7 @@ self.onmessage = async (ev) => {
     try {
         if (msg.type === 'init') {
             kernel = await loadKernel(msg.wasmUrl);
-            post({ type: 'ready', maxParticles: kernel.maxParticles });
+            post({ type: 'ready', maxParticles: kernel.maxParticles, frameStride: kernel.frameStride });
             return;
         }
         if (!kernel) { post({ type: 'error', message: 'kernel not loaded' }); return; }
@@ -104,7 +104,7 @@ self.onmessage = async (ev) => {
             stepsAccum = 0; msAccum = 0;
             const diag = kernel.diagnostics();
             const frame = kernel.frame();
-            post({ type: 'built', n, nA: kernel.bodyCount(0), nB: kernel.bodyCount(1), relaxMs,
+            post({ type: 'built', n, nA: kernel.bodyCount(0), nB: kernel.bodyCount(1), relaxMs, frameStride: kernel.frameStride,
                 bodies: [kernel.bodyState(0), kernel.bodyState(1)], diag, frame }, [frame.buffer]);
             return;
         }

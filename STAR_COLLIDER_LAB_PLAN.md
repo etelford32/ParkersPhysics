@@ -26,7 +26,8 @@ catalog.js ──resolveProfile(EOS)──▶ profile {M, R, C, Λ, k2, χ, I, k
        tov.js ◀──┘                      ├──▶ remnant.js   (BBH/BNS/NSBH/WD fits; kilonova; magnetar)
                                         └──▶ sph-worker.js ─▶ kernel.js ─▶ star_collider_kernel.wasm
 page.js  (the ONE recompute; DOM contract data-sc / data-sc-control / data-sc-chart)
-scene.js (three.js Points stage, Y-up, rotation-mapped from the kernel's x–y orbital plane)
+scene.js (three.js stage + camera rig: follow / presets / corotating frame / frame-to-fit /
+          keyboard / colour modes / trails / pre-run preview; Y-up, rotation-mapped)
 charts.js (M–R, waveform, frequency track, kilonova, energy ledger)
 ```
 
@@ -83,9 +84,31 @@ cgs with p/c² in g/cm³ (see the eos.js header — reading them as dyn/cm² is
    particle sees only its own star; otherwise a light body parked inside a
    heavy one feeds on its density with no matching force and its h collapses
    (ρ_max ran away 36×). Bodies are also parked ±4R apart at build.
-10. **The Deep Space menu is at its cap (10 links), so this page is on the hub
-    and in the catalogue, not in the dropdown.** Swapping it in for another
-    link is an editorial call for the author.
+10. **The page took Black Hole Accretion's slot in the Deep Space menu**
+    (2026-09-20, on the author's call). The menu is at its 10-link cap;
+    black-hole-fluid.html stays on the Deep Space hub and in the catalogue.
+11. **Follow is a rig translation, never a camera hold** (the TIGA rule).
+    Each frame the followed point (system barycentre, core A or core B) moves
+    `controls.target`, and the camera is translated by exactly the same
+    vector — the user's orbit angle and zoom are never touched. The
+    translation is EXACT: an eased version (e-folding 0.18 s) trailed a
+    following core by 75° of orbit on a 3 fps software rasteriser, measured
+    in the browser gate, and the followed point is a density-weighted
+    centroid with no jitter worth smoothing. Presets and frame-to-fit are
+    one-shot spherical tweens that any drag, wheel or key cancels
+    (`controls`' 'start' event).
+12. **The corotating frame is a rotation of the WORLD group, not of the
+    camera.** `world.rotation.y = atan2(Z, X)` of the core–core line in the
+    scene's x–z plane holds the cores on the x-axis; after the cores
+    coincide the last measured ω carries the angle. The follow point is
+    converted with `world.localToWorld` so follow and corotation compose.
+13. **The frame carries a flags field** (stride 6: x, y, z, log₁₀ρ, u,
+    star + 2·unbound). Unbound is the kernel's own Bernoulli test — the
+    "bound / ejecta" colour mode and the M_unbound readout share one
+    definition, pinned by the kernel smoke (flagged mass == diagnostic).
+14. **Before a run the stage previews the configured pair** as wire spheres
+    at the configured separation, framed to fit — the camera has the system
+    to look at, not an empty grid, and the ring already reads in km.
 
 ## 4. What the SPH engine is and is not
 

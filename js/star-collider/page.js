@@ -259,6 +259,7 @@ export function initStarColliderPage(doc = document) {
         set('sphVsFit', sphVsFitText());
         drawCharts();
         renderCatalog();
+        renderPreview();
         syncControlsFromState();
     }
 
@@ -435,10 +436,18 @@ export function initStarColliderPage(doc = document) {
     try {
         if (stageEl) {
             import('./scene.js').then(({ createColliderScene }) => {
-                scene = createColliderScene(stageEl, {});
+                scene = createColliderScene(stageEl, { onCommand: onSceneCommand });
                 scene.setAutoRotate(!!val('autorotate'));
+                scene.setColorMode(val('colorMode') || 'density');
+                scene.setFollow(val('follow') || 'system');
+                scene.setTrails(val('trails') !== false && val('trails') !== null ? !!val('trails') : true);
+                scene.setPointScale(num('pointScale', 1));
+                scene.setCorotating(!!val('frameCorotating'));
                 if (fallback) fallback.hidden = true;
-                if (state.sim.frame) scene.setFrame(state.sim.frame, state.sim.n, state.sim.bodies);
+                if (state.sim.frame) pushFrameToScene(state.sim.frame, state.sim.diag, state.sim.bodies);
+                else renderPreview();
+                scene.setView('oblique', { animate: false });
+                renderViewState();
             }).catch(err => {
                 console.warn('[star-collider] stage unavailable', err);
                 if (fallback) { fallback.hidden = false; fallback.textContent = 'WebGL is unavailable in this browser — the analytic engine still runs below.'; }
@@ -487,7 +496,6 @@ export function initStarColliderPage(doc = document) {
             scene.setScale(extent / 8, sepCode / 2);
             const spacing = smallest ? smallest.radius * Math.cbrt(4 * Math.PI / 3 / nPer) : extent / 60;
             scene.setPointSize(Math.max(1.1 * spacing / (extent / 8), 0.02));
-            scene.frameAll(13);
             set('stageScale', `ring = ${fmt.km(d.sepKm / 2)} · ${fmt.km(extent / 8 * GEOM_KM)} per grid unit`);
         }
     }
@@ -495,16 +503,19 @@ export function initStarColliderPage(doc = document) {
         worker?.postMessage({ type: 'pause' });
         state.sim = { ...state.sim, status: 'idle', n: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, frame: null, perf: null };
         scene?.clear();
+        renderPreview();
         renderHud(); drawCharts(); set('sphVsFit', sphVsFitText());
     }
     function onWorkerMessage(ev) {
         const msg = ev.data;
-        if (msg.type === 'ready') { state.sim.engine = 'wasm'; renderHud(); return; }
+        if (msg.type === 'ready') { state.sim.engine = 'wasm'; state.sim.frameStride = msg.frameStride || 6; renderHud(); return; }
         if (msg.type === 'error') { state.sim.status = 'error'; state.sim.error = msg.message; renderHud(); return; }
         if (msg.type === 'built') {
             state.sim.n = msg.n; state.sim.status = 'running'; state.sim.bodies = msg.bodies; state.sim.diag = msg.diag; state.sim.frame = msg.frame;
-            state.sim.e0 = msg.diag.eTotal; state.sim.relaxMs = msg.relaxMs;
-            scene?.setFrame(msg.frame, msg.n, bodyKinds(msg.bodies));
+            state.sim.e0 = msg.diag.eTotal; state.sim.relaxMs = msg.relaxMs; state.sim.frameStride = msg.frameStride || state.sim.frameStride || 6;
+            scene?.clearTrails();
+            pushFrameToScene(msg.frame, msg.diag, msg.bodies);
+            scene?.frameSystem({ animate: false });
             worker.postMessage({ type: 'run', warp: warpValue(), budgetMs: 28, dtMax: state.sim.dtMax });
             renderHud();
             return;
@@ -512,7 +523,7 @@ export function initStarColliderPage(doc = document) {
         if (msg.type === 'frame') {
             const s = state.sim;
             s.diag = msg.diag; s.bodies = msg.bodies; s.frames++; s.perf = msg.perf;
-            if (msg.frame) { s.frame = msg.frame; scene?.setFrame(msg.frame, s.n, bodyKinds(msg.bodies)); }
+            if (msg.frame) { s.frame = msg.frame; pushFrameToScene(msg.frame, msg.diag, msg.bodies); }
             for (const g of msg.gw) s.gw.push(g);
             if (s.gw.length > 6000) s.gw = s.gw.slice(-6000);
             if (s.frames % 2 === 0) {
@@ -530,6 +541,70 @@ export function initStarColliderPage(doc = document) {
         }
     }
     const bodyKinds = (bodies) => bodies.map((b, i) => ({ ...b, kind: state.profiles[i].kind === 'bh' ? 'bh' : 'star' }));
+
+    // ── Stage: frames, preview, camera state ────────────────────────────────
+    /** Hand a kernel frame + its diagnostics to the stage (meta drives follow/corotation/trails). */
+    function pushFrameToScene(frame, diag, bodies) {
+        if (!scene || !frame) return;
+        const [A, B] = state.profiles;
+        const meta = diag ? {
+            cmA: [diag.cmAx, diag.cmAy, diag.cmAz], cmB: [diag.cmBx, diag.cmBy, diag.cmBz],
+            mA: A.kind === 'bh' ? diag.massA : diag.aliveMassA, mB: B.kind === 'bh' ? diag.massB : diag.aliveMassB,
+            sep: diag.separation, omega: diag.omega, time: diag.time,
+        } : null;
+        scene.setFrame(frame, state.sim.n, bodyKinds(bodies || state.sim.bodies || []), meta, state.sim.frameStride || 6);
+    }
+    /** Before a run: the configured pair as wire spheres at the configured separation. */
+    function renderPreview() {
+        if (!scene || !state.derived) return;
+        if (state.sim.status !== 'idle' && state.sim.frame) return;
+        const [A, B] = state.profiles;
+        const d = state.derived;
+        const toCode = (km) => km / GEOM_KM;
+        const rA = A.kind === 'bh' ? 2 * A.M : toCode(A.radiusKm);
+        const rB = B.kind === 'bh' ? 2 * B.M : toCode(B.radiusKm);
+        const sepCode = toCode(d.sepKm);
+        const M = A.M + B.M;
+        const extent = sepCode + rA + rB;
+        scene.setScale(extent / 8, sepCode / 2);
+        scene.setPreview([
+            { kind: A.kind === 'bh' ? 'bh' : 'star', radius: rA, pos: [-B.M / M * sepCode, 0, 0] },
+            { kind: B.kind === 'bh' ? 'bh' : 'star', radius: rB, pos: [A.M / M * sepCode, 0, 0] },
+        ]);
+        set('stageScale', `ring = ${fmt.km(d.sepKm / 2)} · ${fmt.km(extent / 8 * GEOM_KM)} per grid unit · preview of the configured pair`);
+        if (!state.sim.previewFramed) { scene.frameSystem({ animate: false }); state.sim.previewFramed = true; }
+    }
+    const FOLLOW_LABEL = { system: 'following the system barycentre', A: 'following core A', B: 'following core B', none: 'fixed on the origin' };
+    const COLOUR_LABEL = {
+        density: 'log₁₀ ρ, top 3 decades · shock heat → orange', heat: 'shock heating u · blue → white → red',
+        body: 'body A cyan · body B magenta', bound: 'bound dim · unbound ejecta green (Bernoulli, same flag as M_unbound)',
+    };
+    function renderViewState() {
+        if (!scene) { set('stageFrame', 'stage unavailable'); set('stageColour', '—'); return; }
+        const v = scene.state;
+        set('stageFrame', `${v.corotating ? 'corotating frame (cores held on x)' : 'inertial frame'} · ${FOLLOW_LABEL[v.follow] || v.follow} · ${v.view} view${v.trails ? ' · trails' : ''}`);
+        set('stageColour', COLOUR_LABEL[v.colorMode] || v.colorMode);
+        set('pointScaleOut', `${v.pointScale.toFixed(1)}×`);
+        const sync = (key, value) => { const el = ctl(key); if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = !!value; else el.value = String(value); } };
+        sync('follow', v.follow); sync('colorMode', v.colorMode); sync('frameCorotating', v.corotating); sync('trails', v.trails); sync('pointScale', v.pointScale);
+    }
+    function onSceneCommand(cmd) {
+        if (cmd === 'togglePause') {
+            if (state.sim.status === 'running') { worker?.postMessage({ type: 'pause' }); state.sim.status = 'paused'; renderHud(); }
+            else if (state.sim.status === 'paused') { worker?.postMessage({ type: 'resume' }); state.sim.status = 'running'; renderHud(); }
+            return;
+        }
+        renderViewState();
+    }
+    ctl('viewTop')?.addEventListener('click', () => scene?.setView('top'));
+    ctl('viewEdge')?.addEventListener('click', () => scene?.setView('edge'));
+    ctl('viewOblique')?.addEventListener('click', () => scene?.setView('oblique'));
+    ctl('frameSystem')?.addEventListener('click', () => scene?.frameSystem());
+    ctl('follow')?.addEventListener('change', () => scene?.setFollow(val('follow')));
+    ctl('colorMode')?.addEventListener('change', () => scene?.setColorMode(val('colorMode')));
+    ctl('frameCorotating')?.addEventListener('change', () => scene?.setCorotating(!!val('frameCorotating')));
+    ctl('trails')?.addEventListener('change', () => scene?.setTrails(!!val('trails')));
+    ctl('pointScale')?.addEventListener('input', () => { scene?.setPointScale(num('pointScale', 1)); set('pointScaleOut', `${num('pointScale', 1).toFixed(1)}×`); });
 
     function renderHud() {
         const s = state.sim, d = s.diag;
@@ -556,6 +631,7 @@ export function initStarColliderPage(doc = document) {
     // ── Boot ────────────────────────────────────────────────────────────────
     loadPair(state.pair);
     renderHud();
+    renderViewState();
     window.addEventListener('resize', debounce(drawCharts, 150));
 
     // Test hook
