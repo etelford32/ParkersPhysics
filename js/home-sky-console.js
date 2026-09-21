@@ -520,14 +520,14 @@ details.sc-tbl th{color:var(--sc-ink4);font-weight:600}
 .sc-cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;
   color:var(--sc-ink4);text-align:center;margin-bottom:3px}
 .sc-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
-.sc-cal .d{position:relative;min-height:46px;border-radius:7px;background:var(--sc-s2);border:1px solid transparent;padding:4px 5px 3px;
+.sc-cal .d{position:relative;min-height:50px;border-radius:7px;background:var(--sc-s2);border:1px solid transparent;padding:4px 5px 3px;
   font-size:.7rem;line-height:1.25;color:var(--sc-ink3);display:flex;flex-direction:column;justify-content:space-between;cursor:default;outline:none;min-width:0}
 .sc-cal .d.pad{background:transparent}
-.sc-cal .d .dn{font-size:.62rem;color:var(--sc-ink4);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-cal .d .dn{font-size:.66rem;color:var(--sc-ink3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sc-cal .d .dn b{color:var(--sc-ink2);font-weight:650}
-.sc-cal .d .hl{font-variant-numeric:tabular-nums;color:var(--sc-ink);font-weight:650;white-space:nowrap}
+.sc-cal .d .hl{font-variant-numeric:tabular-nums;color:var(--sc-ink);font-weight:650;white-space:nowrap;font-size:.76rem}
 .sc-cal .d .hl small{color:var(--sc-ink3);font-weight:500;font-size:.9em}
-.sc-cal .d.past{opacity:.6}
+.sc-cal .d.past{opacity:.74}
 .sc-cal .d.past .hl{font-weight:500;color:var(--sc-ink2)}
 .sc-cal .d.today{border-color:var(--sc-accent);box-shadow:0 0 0 1px var(--sc-accent) inset;opacity:1}
 .sc-cal .d[data-tier="nwp-ext"] .hl{font-weight:560}
@@ -729,18 +729,31 @@ const fmtSigned = (v) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(Math.r
  * (23:00), wick from the day's low to its high. Each day column is a hit
  * area carrying the tip.
  */
-function weekCandlesSvg(wk, now) {
+function weekCandlesSvg(wk, now, { narrow = false } = {}) {
     if (!wk?.candles?.length) return '';
-    const W = 620, H = 200, L = 30, R = 10, T = 26, B = 36;
+    // Type sizes assume the viewBox lands near 1:1 — 620 units in the split
+    // hero's ~520 px lane (0.84×). On a phone the same box would shrink to
+    // ~340 px and every label to ~5 px, so the renderer measures the card and
+    // asks for the NARROW box (380 units), which keeps type at ~0.9×.
+    const W = narrow ? 380 : 620, H = narrow ? 236 : 228, L = narrow ? 32 : 36, R = narrow ? 6 : 10, T = 30, B = 42;
     const iw = W - L - R, ih = H - T - B;
     const x = (t) => L + iw * ((t - wk.start) / (wk.end - wk.start));
     const lo = Math.floor((wk.tMin - 2) / 5) * 5, hi = Math.ceil((wk.tMax + 2) / 5) * 5;
     const y = (v) => T + ih * (1 - (v - lo) / ((hi - lo) || 1));
-    let g = `<text x="${L}" y="10" font-size="8" fill="rgba(255,255,255,.5)" letter-spacing="1.6" font-weight="700">7-DAY · HOURLY LINE + DAILY CANDLES</text>`;
+    let g = `<text x="${L}" y="11" font-size="8.5" fill="rgba(255,255,255,.5)" letter-spacing="1.6" font-weight="700">7-DAY · HOURLY LINE + DAILY CANDLES</text>`;
+    // The hours already behind us: a faint wash left of "now" so the eye reads
+    // observed vs forecast without a second legend entry.
+    if (now > wk.start) g += `<rect x="${L}" y="${T}" width="${(x(Math.min(now, wk.end)) - L).toFixed(1)}" height="${ih}" fill="rgba(255,255,255,.035)"/>`;
     const span = hi - lo, step = span > 60 ? 20 : span > 30 ? 10 : 5;
     for (let v = lo; v <= hi; v += step) {
         g += `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#221743" stroke-width="1"/>`
-            + `<text x="${L - 5}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end" font-size="8" fill="#6f6695" font-variant-numeric="tabular-nums">${v}°</text>`;
+            + `<text x="${L - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end" font-size="9.5" fill="#6f6695" font-variant-numeric="tabular-nums">${v}°</text>`;
+    }
+    // Line first, candles over it: the candle is the day's summary and must
+    // read on top; the line shows through the body at its opacity.
+    if (wk.hours.length > 1) {
+        const path = wk.hours.map((h, i) => `${i ? 'L' : 'M'}${x(h.t).toFixed(1)},${y(h.tempF).toFixed(1)}`).join(' ');
+        g += `<path d="${path}" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>`;
     }
     let hits = '';
     wk.candles.forEach((c) => {
@@ -748,26 +761,23 @@ function weekCandlesSvg(wk, now) {
         const cx = (xs + xe) / 2, bw = (xe - xs) * 0.42;
         if (c.lead > 0) g += `<line x1="${xs.toFixed(1)}" x2="${xs.toFixed(1)}" y1="${T}" y2="${T + ih}" stroke="#221743" stroke-width="1"/>`;
         const col = c.dir === 'warming' ? WARM_COL : COOL_COL;
-        g += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(c.high).toFixed(1)}" y2="${y(c.low).toFixed(1)}" stroke="${col}" stroke-width="1.4" opacity=".9"/>`;
+        g += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(c.high).toFixed(1)}" y2="${y(c.low).toFixed(1)}" stroke="${col}" stroke-width="1.6" opacity=".95"/>`;
         const yo = y(c.open), yc = y(c.close);
-        const top = Math.min(yo, yc), bh = Math.max(2, Math.abs(yo - yc));
-        g += `<rect data-candle="${c.key}" data-dir="${c.dir}" x="${(cx - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="2" fill="${col}" fill-opacity="${c.lead === 0 ? '.95' : '.8'}" stroke="${col}" stroke-width="1"/>`;
-        g += `<text x="${cx.toFixed(1)}" y="${(y(c.high) - 4).toFixed(1)}" text-anchor="middle" font-size="8.6" fill="rgba(255,255,255,.85)" font-variant-numeric="tabular-nums">${Math.round(c.high)}°</text>`
-            + `<text x="${cx.toFixed(1)}" y="${(y(c.low) + 10).toFixed(1)}" text-anchor="middle" font-size="8" fill="#9d92c8" font-variant-numeric="tabular-nums">${Math.round(c.low)}°</text>`
-            + `<text x="${cx.toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="8.4" fill="#6f6695">${c.lead === 0 ? 'Today' : new Date(c.t).toLocaleDateString(undefined, { weekday: 'short' })}</text>`;
-        const day = new Date(c.t).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+        const top = Math.min(yo, yc), bh = Math.max(3, Math.abs(yo - yc));
+        g += `<rect data-candle="${c.key}" data-dir="${c.dir}" x="${(cx - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="2.5" fill="${col}" fill-opacity="${c.lead === 0 ? '.95' : '.85'}" stroke="${col}" stroke-width="1"/>`;
+        const d = new Date(c.t);
+        g += `<text x="${cx.toFixed(1)}" y="${(y(c.high) - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="650" fill="rgba(255,255,255,.92)" font-variant-numeric="tabular-nums">${Math.round(c.high)}°</text>`
+            + `<text x="${cx.toFixed(1)}" y="${(y(c.low) + 12).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="#9d92c8" font-variant-numeric="tabular-nums">${Math.round(c.low)}°</text>`
+            + `<text x="${cx.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="${c.lead === 0 ? '#cdc4f0' : '#6f6695'}" font-weight="${c.lead === 0 ? '650' : '500'}">${c.lead === 0 ? 'Today' : narrow ? d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2) : `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.getDate()}`}</text>`;
+        const day = d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
         const tip = `${day}\nHigh ${Math.round(c.high)}° · Low ${Math.round(c.low)}°\nMidnight ${Math.round(c.open)}° → 23:00 ${Math.round(c.close)}° (${c.dir} ${Math.abs(Math.round(c.deltaF))}°)`
             + (c.lead === 0 ? `\n${c.observedHours} h of today already in` : '');
         hits += `<rect class="hit" x="${xs.toFixed(1)}" y="${T}" width="${(xe - xs).toFixed(1)}" height="${ih}" tabindex="0" role="img" aria-label="${esc(tip.replace(/\n/g, '. '))}" data-tip="${esc(tip)}"/>`;
     });
-    if (wk.hours.length > 1) {
-        const path = wk.hours.map((h, i) => `${i ? 'L' : 'M'}${x(h.t).toFixed(1)},${y(h.tempF).toFixed(1)}`).join(' ');
-        g += `<path d="${path}" fill="none" stroke="rgba(255,255,255,.72)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
-    }
     if (now >= wk.start && now <= wk.end) {
         const xn = x(now).toFixed(1);
-        g += `<line x1="${xn}" x2="${xn}" y1="${T}" y2="${T + ih}" stroke="#cdc4f0" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>`
-            + `<text x="${x(now) + 3}" y="${T + 9}" font-size="8" fill="#cdc4f0">now</text>`;
+        g += `<line x1="${xn}" x2="${xn}" y1="${T}" y2="${T + ih}" stroke="#cdc4f0" stroke-width="1" stroke-dasharray="2 3" opacity=".75"/>`
+            + `<text x="${x(now) + 4}" y="${T + 10}" font-size="9" fill="#cdc4f0">now</text>`;
     }
     return `<svg class="sc-svg sc-wk" viewBox="0 0 ${W} ${H}" role="group" aria-label="Seven-day hourly temperature with one candlestick per day">${g}${hits}</svg>`;
 }
@@ -1327,8 +1337,9 @@ export async function initSkyConsole(host) {
                  the planet's thermal memory, and the reason seasons spike after the solstices.</div>`
             : `<div class="sc-risknote" style="margin-top:10px">Loading the multi-year archive for the solar-vs-temperature year arc…</div>`;
         const now = Date.now();
+        const narrow = (card.clientWidth || 600) < 470;
         const weekBlock = temp.candles?.candles?.length
-            ? `${weekCandlesSvg(temp.candles, now)}
+            ? `${weekCandlesSvg(temp.candles, now, { narrow })}
                <div class="sc-legend" aria-label="How to read the candles">
                  <span><i style="background:${WARM_COL}"></i>day warms midnight → midnight</span>
                  <span><i style="background:${COOL_COL}"></i>day cools</span>
@@ -1484,6 +1495,18 @@ export async function initSkyConsole(host) {
     window.addEventListener('swpc-update', (e) => {
         lastState = e.detail ?? {};
         rebuild();
+    });
+    // The candle chart picks a viewBox from the card's width; re-draw it
+    // when a resize crosses the threshold (debounced — a drag-resize fires
+    // dozens of events, and renderTemp rebuilds a few hundred nodes).
+    let lastNarrow = null, resizeT = 0;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeT);
+        resizeT = setTimeout(() => {
+            const narrowNow = ($('[data-temp-card]')?.clientWidth || 600) < 470;
+            if (lastNarrow !== null && narrowNow !== lastNarrow && temp?.available) renderTemp();
+            lastNarrow = narrowNow;
+        }, 150);
     });
 
     rebuild();          // placeholder paint before any feed dispatch

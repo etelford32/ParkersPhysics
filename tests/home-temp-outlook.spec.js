@@ -139,7 +139,7 @@ test.describe('home temperature tab: candles + 30-day calendar', () => {
         });
         expect(ok).toBe(true);
         // The hourly line spans the week and the seven columns are hit areas.
-        await expect(page.locator('[data-temp-card] svg.sc-wk path[stroke-width="1.5"]')).toHaveCount(1);
+        await expect(page.locator('[data-temp-card] svg.sc-wk path[stroke-width="1.4"]')).toHaveCount(1);
         await expect(page.locator('[data-temp-card] svg.sc-wk rect.hit')).toHaveCount(7);
         // The old 7-day range bars are gone from this tab.
         await expect(page.locator('[data-temp-card] svg[aria-label="7-day temperature range"]')).toHaveCount(0);
