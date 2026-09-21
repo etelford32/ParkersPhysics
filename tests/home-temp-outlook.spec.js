@@ -21,7 +21,12 @@
  */
 import { test, expect } from '@playwright/test';
 
-test.use({ timezoneId: 'UTC' });
+// UTC so the fixture's wall-clock strings and the page's local day agree;
+// reduced motion because index.html skips the live-magnetosphere WebGL hero
+// on that media query (its own no-motion path) — this spec never looks at
+// the hero, and on the software rasteriser the hero alone cost ~40 s per
+// tab click and ~20 s per hover (measured in a trace, 2026-09-21).
+test.use({ timezoneId: 'UTC', reducedMotion: 'reduce' });
 
 const URL = '/index.html?exp_home_bg_carousel=control';
 const pad = (n) => String(n).padStart(2, '0');
@@ -107,9 +112,9 @@ async function boot(page, { archive = true } = {}) {
 }
 
 test.describe('home temperature tab: candles + 30-day calendar', () => {
-    // Boot alone measured ~40 s on the software rasteriser (see
-    // home-hero-stage.spec.js); the 60 s default is what a full-file run trips.
-    test.describe.configure({ timeout: 150_000 });
+    // Without the hero the boot is seconds, but the console still imports
+    // auth + feeds; keep the hero spec's margin (home-hero-stage.spec.js).
+    test.describe.configure({ timeout: 180_000 });
 
     test('seven daily candles over the hourly line, today first, wick ⊇ body, both directions', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
