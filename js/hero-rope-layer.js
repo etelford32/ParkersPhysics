@@ -354,9 +354,15 @@ const CSS = `
 .hrs-legend .hrs-chip{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;transform:translateY(1px)}
 .hrs-legend a{color:#8ff0ff;text-decoration:none;font-weight:600;margin-left:auto;white-space:nowrap}
 .hrs-legend a:hover{text-decoration:underline}
-.hrs-play{grid-column:2;justify-self:start;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
-  border:1px solid rgba(154,133,255,.3);background:rgba(255,255,255,.04);color:var(--fg-2,#cdd8f0);font:inherit;font-size:.68rem;cursor:pointer}
-.hrs-play:hover{border-color:#8ff0ff;color:#fff}
+.hrs-play{grid-column:2;justify-self:start;display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;border:0;
+  color:#fff;font:inherit;font-size:.7rem;font-weight:700;letter-spacing:.04em;cursor:pointer;
+  background:linear-gradient(180deg,#b765ff 0%,#9d3aff 45%,#7b00ee 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 -2px 0 rgba(60,0,140,.9) inset,0 4px 0 #4a0a9a,0 8px 18px rgba(157,58,255,.4);
+  transition:transform .08s,box-shadow .12s,filter .2s}
+.hrs-play:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.hrs-play:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 -1px 0 rgba(60,0,140,.9) inset,0 1px 0 #4a0a9a,0 3px 8px rgba(157,58,255,.35)}
+.hrs-play[aria-pressed="true"]{background:linear-gradient(180deg,#3a2a70 0%,#241650 55%,#150b36 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.16) inset,0 -2px 0 rgba(0,0,0,.5) inset,0 4px 0 #06031a,0 8px 18px rgba(2,0,10,.6)}
 @media (max-width:640px){
   #hero-scrub{padding:8px 10px;grid-template-columns:1fr auto;gap:8px 10px}
   .hrs-mode{grid-column:1;font-size:.56rem;white-space:normal}

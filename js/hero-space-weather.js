@@ -1084,6 +1084,10 @@ export class HeroSpaceWeather {
         const vel   = this._pVel;
         const heat  = this._pHeat;
         const N     = this._opts.particleCount;
+        // Bow-shock crossings this frame → a rate (per second) for the
+        // sound layer; EMA so a frame hitch does not read as a burst.
+        this._shockHits = 0;
+        this._shockDt = dt;
 
         // Live Shue bow shock from the engine — the deflection boundary.
         const an     = this._engine?.analysis;
@@ -1115,6 +1119,7 @@ export class HeroSpaceWeather {
                         }
                         const push = (rB - r) * ease / ql;
                         px += qx * push;  py += qy * push;  pz += qz * push;
+                        if (heat[i] === 0) this._shockHits++;   // first contact — the sound layer's tick
                         heat[i] = Math.min(1, heat[i] + 3.5 * dt);
                     } else {
                         heat[i] = Math.max(0, heat[i] - 0.7 * dt);
@@ -1135,6 +1140,23 @@ export class HeroSpaceWeather {
         }
         this._particles.geometry.attributes.position.needsUpdate = true;
         this._particles.geometry.attributes.aHeat.needsUpdate = true;
+        const inst = this._shockHits / Math.max(1e-3, this._shockDt);
+        this._shockRate = (this._shockRate ?? inst) * 0.85 + inst * 0.15;
+    }
+
+    /**
+     * What the sound layer (js/hero-sonify.js) sonifies: the state the
+     * engine is running on right now (live, or the model's at τ while the
+     * transit is scrubbed) plus the bow-shock crossing rate.
+     */
+    audioState() {
+        const st = this._condState ?? this._state ?? {};
+        const sw = st.solar_wind ?? {};
+        return {
+            speed: sw.speed ?? 400, density: sw.density ?? 5, bz: sw.bz ?? 0,
+            kp: st.kp ?? 2, stormNorm: this._stormNorm ?? 0,
+            shockRate: this._shockRate ?? 0, modeled: !!st.modeled,
+        };
     }
 
     // ── Resize ────────────────────────────────────────────────────────────────

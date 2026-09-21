@@ -127,8 +127,8 @@ img{display:block}
    specificity would lose on source order (measured: the column stayed centred). */
 @media(min-width:1100px){
   #hero .hero-inner{display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);column-gap:40px;max-width:1320px;align-items:start}
-  #hero .hero-top,#hero #sky-console-host,#hero .hero-cta{grid-column:1;min-width:0}
-  #hero #hero-stage-col{grid-column:2;grid-row:1/4;align-self:start;min-width:0}
+  #hero .hero-top,#hero #sky-console-host,#hero .hero-cta,#hero #hero-signup-host{grid-column:1;min-width:0}
+  #hero #hero-stage-col{grid-column:2;grid-row:1/5;align-self:start;min-width:0}
   #hero #hero-scrub-host{margin:12px 0 0}
   /* explicit: a size-contained (container-type) grid item did not stretch in Chromium — measured 0px wide, centred */
   #hero #sky-console-host{width:100%;justify-self:stretch}
@@ -199,10 +199,30 @@ img{display:block}
 #cta-rail .rail-x{background:none;border:0;color:var(--fg-4);font-size:1rem;cursor:pointer;padding:4px 6px;line-height:1}
 #cta-rail .rail-x:hover{color:var(--fg-1)}
 @media(max-width:640px){#cta-rail .rail-copy,#cta-rail .rail-link{display:none}#cta-rail{gap:6px;padding:6px 6px 6px 10px}}
-.btn-primary{padding:13px 30px;background:var(--grad-uv-pink);border-radius:8px;color:#fff;font-family:var(--font-display);font-weight:700;font-size:.88rem;letter-spacing:.12em;text-transform:uppercase;transition:filter .2s,transform .15s,box-shadow .25s;border:none;cursor:pointer;box-shadow:var(--glow-uv-md)}
-.btn-primary:hover{filter:brightness(1.12);transform:translateY(-2px);box-shadow:var(--glow-uv-lg)}
-.btn-secondary{padding:13px 30px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#ddd;font-size:.95rem;font-weight:600;transition:background .2s,border-color .2s,transform .15s}
-.btn-secondary:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.5);color:#fff;transform:translateY(-2px)}
+/* ── BEVELED BUTTONS (2026-09-21) ────────────────────────────────────────
+   A physical key, not a flat chip: a top highlight (inset 1px white), a
+   dark under-lip (inset bottom), a solid base plate (the 0 6px 0 shadow —
+   the "3D" depth), and the glow. :active drops the key onto its plate
+   (translateY = plate height, plate shadow → 2px) so the press reads as
+   travel, not as a colour change. The same recipe is mirrored in
+   js/home-signup-upsell.js (.hsu-btn), js/hero-sonify.js (.hsn-btn),
+   js/hero-rope-layer.js (.hrs-play) and the console's Locate button — keep
+   the plate/travel numbers in step. */
+.btn-primary{position:relative;padding:14px 32px;border-radius:14px;color:#fff;font-family:var(--font-display);font-weight:800;font-size:.88rem;letter-spacing:.12em;text-transform:uppercase;border:none;cursor:pointer;
+  background:linear-gradient(180deg,#c47cff 0%,#9d3aff 38%,#ff1f9c 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -3px 0 rgba(70,0,120,.85) inset,0 6px 0 #4a0a8a,0 10px 0 rgba(0,0,0,.35),0 16px 40px rgba(157,58,255,.5),0 0 60px rgba(255,31,156,.25);
+  text-shadow:0 1px 0 rgba(0,0,0,.35);transition:transform .08s,box-shadow .12s,filter .2s}
+.btn-primary::after{content:'';position:absolute;inset:1px 1px 50%;border-radius:13px 13px 40% 40%;background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,0));pointer-events:none}
+.btn-primary:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 -3px 0 rgba(70,0,120,.85) inset,0 7px 0 #4a0a8a,0 11px 0 rgba(0,0,0,.35),0 20px 48px rgba(157,58,255,.6),0 0 70px rgba(255,31,156,.3)}
+.btn-primary:active{transform:translateY(4px);box-shadow:0 1px 0 rgba(255,255,255,.25) inset,0 -1px 0 rgba(70,0,120,.85) inset,0 2px 0 #4a0a8a,0 4px 0 rgba(0,0,0,.35),0 8px 20px rgba(157,58,255,.4)}
+.btn-primary:focus-visible{outline:2px solid #8ff0ff;outline-offset:4px}
+.btn-secondary{position:relative;padding:13px 30px;border-radius:14px;color:#e6e9f5;font-size:.95rem;font-weight:650;border:0;cursor:pointer;
+  background:linear-gradient(180deg,#2a1a5e 0%,#170c3a 55%,#0d0626 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.16) inset,0 -3px 0 rgba(0,0,0,.55) inset,0 6px 0 #06031a,0 10px 24px rgba(2,0,10,.6);
+  transition:transform .08s,box-shadow .12s,color .2s}
+.btn-secondary:hover{color:#fff;transform:translateY(-1px);box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 -3px 0 rgba(0,0,0,.55) inset,0 7px 0 #06031a,0 14px 30px rgba(2,0,10,.65)}
+.btn-secondary:active{transform:translateY(4px);box-shadow:0 1px 0 rgba(255,255,255,.1) inset,0 -1px 0 rgba(0,0,0,.55) inset,0 2px 0 #06031a,0 4px 12px rgba(2,0,10,.6)}
+@media (prefers-reduced-motion:reduce){.btn-primary,.btn-secondary{transition:none}}
 
 /* ── LIVE TICKER (styles injected by js/home-ticker.js) ──────────────────── */
 .sw-ticker{min-height:44px}
@@ -423,6 +443,9 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
     <div id="hero-stage-col">
       <div id="hero-stage" aria-hidden="true"></div>
       <div id="hero-scrub-host"></div>
+      <!-- Opt-in sound layer (js/hero-sonify.js): the solar wind as audio,
+           conditioned on the saved location's aurora verdict. Never autoplays. -->
+      <div id="hero-sound-host"></div>
     </div>
     <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
     <!-- ONE ask (see the CSS note above): the dashboard, which is what the
@@ -434,6 +457,12 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
       <a href="space-weather.html" class="btn-primary" data-funnel-cta="hero_magnetosphere" aria-label="Open the live space weather dashboard">Open the live dashboard <span aria-hidden="true">→</span></a>
       <span class="hero-cta-note">Free · a free account saves your location, alerts and dashboards · no credit card</span>
     </div>
+    <!-- Passwordless sign-up upsell (js/home-signup-upsell.js). Re-added
+         2026-09-21 at the author's request over the ONE ASK note above,
+         as a DIFFERENT ask (one field, magic link, "your sky by email")
+         with its own funnel ids — read that module's header before
+         touching either the copy or the decision. Hidden when signed in. -->
+    <div id="hero-signup-host"></div>
   </div>
 </section>
 
@@ -866,6 +895,21 @@ if (heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
 } else if (heroCanvas) {
   heroCanvas.style.display = 'none';
 }
+
+/* Passwordless sign-up upsell — see js/home-signup-upsell.js header. */
+import('./js/home-signup-upsell.js')
+  .then(m => m.mountSignupUpsell(document.getElementById('hero-signup-host'), {
+    track: (stage, meta) => experiments.track(stage, meta),
+  }))
+  .catch(err => console.warn('[home] signup upsell failed to mount:', err));
+
+/* Opt-in sound layer — mounts only when the hero scene booted (it
+   sonifies the scene's own state). */
+heroReady.then(h => {
+  if (!h) return;
+  return import('./js/hero-sonify.js')
+    .then(m => m.mountHeroSonify({ host: document.getElementById('hero-sound-host'), getState: () => h.audioState() }));
+}).catch(err => console.warn('[home] sound layer failed to mount:', err));
 
 /* The shared flux-rope forecast provider (js/sun-flux-rope.js — the same
    loop sun.html / the dashboard run): DONKI → compounding train → kernel

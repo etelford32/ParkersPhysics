@@ -109,6 +109,25 @@ test.describe('home hero stage', () => {
         await expect(page.locator('#hero-scrub .hrs-mode')).toContainText(/LIVE|REPLAY/);
         await expect(page.locator('#hero-scrub a[data-funnel-cta="hero_flux_rope"]')).toHaveCount(1);
 
+        // Sound layer: mounted, OFF by default, no AudioContext until a click.
+        const snd = page.locator('#hero-sound .hsn-btn');
+        await expect(snd).toHaveAttribute('aria-pressed', 'false');
+        expect(await page.evaluate(() => window.__heroSound?.state.hasContext)).toBe(false);
+        expect(overlaps(await rect(page, '#hero-sound'), await rect(page, '#hero-stage'))).toBe(false);
+
+        // Sign-up upsell: present for a signed-out visitor, one field, one
+        // funnel-tracked button; a bad email fails client-side, no network.
+        const up = page.locator('#hero-signup');
+        await expect(up).toBeVisible();
+        await expect(up.locator('button[data-funnel-cta="hero_magic_link"]')).toHaveCount(1);
+        await up.locator('input[type="email"]').fill('not-an-email');
+        await up.locator('form').evaluate((f) => f.requestSubmit());
+        await expect(up).toHaveAttribute('data-state', 'error');
+        expect(overlaps(await rect(page, '#hero-signup'), await rect(page, '#hero-stage'))).toBe(false);
+
+        // The location field stands out until a place is saved.
+        await expect(page.locator('#sky-console-host .sc-loc')).toHaveClass(/unset/);
+
         // Scrub to mid-transit: corridor framing, camera eased out, train drawn.
         await page.evaluate(() => {
             const r = window.__heroRopes; const w = r.state.window;
