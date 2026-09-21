@@ -47,6 +47,17 @@
  *     ride one `_mix` on an e-folding TIME, never a per-frame fraction) so
  *     the Sun→Earth segment fills the stage box; it eases back to the Earth
  *     shot when they let go. Both solves live in `_updateFraming()`.
+ *   • STORM-DRIVEN REVEAL (2026-09-21) — on a quiet day the belts, the
+ *     plasmasphere, the sheath glow and the reconnection line are OFF: the
+ *     resting shot is Earth, its aurora and its shield. They come on when
+ *     the storm norm crosses REVEAL_ON (hysteresis to REVEAL_OFF) — from the
+ *     live feed, or from the rope layer's modeled conditions at the
+ *     scrubbed τ (`conditionsAt`: the model's own L1 driver through the
+ *     ring-current page's Dst integrator). While the corridor is up the
+ *     engine runs on THAT state, so the magnetosphere compresses, the ring
+ *     current fills and the oval expands as the rope arrives; when the
+ *     visitor lets go the live state is restored. The engine's response is
+ *     its own — this file only decides which state it sees.
  *   • The camera SWAYS, it does not orbit. The old 1.2°/s orbit carried the
  *     Sun from screen-left to screen-right every 2.5 min, so "the sunlit
  *     limb faces the copy" could not be a property of the layout. The
@@ -93,6 +104,11 @@ const FOV_MIN = 16, FOV_MAX = 72, FOV_DEFAULT = 50;
 const CORRIDOR_FOV = 34, CORRIDOR_SPAN_FRAC = 0.62, CORRIDOR_ELEV = 26 * DEG;
 const CORRIDOR_AIM_FRAC = 0.50;      // of the Sun→Earth segment, from Earth
 const FRAMING_TAU_S = 0.55;          // e-folding time of the framing ease
+// Storm reveal thresholds on the storm norm (storm_level/5 + 0.3·kp_norm):
+// G1 with Kp 5 lands at ~0.37, a quiet Kp 2 day at ~0.07.
+const REVEAL_ON = 0.24, REVEAL_OFF = 0.12;
+const REVEAL_LAYERS = ['belts', 'plasmasphere', 'magnetosheath', 'reconnection'];
+const COND_HZ = 4;                   // how often the scrubbed state is pushed to the engine
 
 // ── Shared GLSL noise (value noise + fbm), prepended to shaders that need it ──
 const GLSL_NOISE = /* glsl */`
@@ -197,6 +213,36 @@ const CLOUD_FRAG = /* glsl */`
         float dayW = clamp(dot(vWN, u_sun), 0.0, 1.0);
         a *= 0.22 + 0.85 * dayW;
         gl_FragColor = vec4(vec3(0.92, 0.96, 1.0), a);
+    }
+`;
+
+// ── Atmosphere scattering shell ───────────────────────────────────────────────
+const ATMO_FRAG = /* glsl */`
+    precision highp float;
+    uniform vec3  u_sun;
+    uniform float u_storm;
+    varying vec3 vObj;
+    varying vec3 vWN;
+    varying vec3 vWP;
+    void main(){
+        vec3 N = normalize(vWN);
+        vec3 V = normalize(cameraPosition - vWP);
+        float mu   = max(dot(N, V), 0.0);
+        float rim  = pow(1.0 - mu, 3.2);                  // thin bright limb
+        float halo = pow(1.0 - mu, 1.4) * 0.35;           // soft inner haze
+        float day  = dot(N, u_sun);
+        float lit  = smoothstep(-0.25, 0.35, day);
+        // Path-length colour: blue where the Sun is high, orange along the
+        // terminator, a dim teal airglow on the night side.
+        vec3 blue   = vec3(0.30, 0.58, 1.00);
+        vec3 orange = vec3(1.00, 0.46, 0.18);
+        vec3 night  = vec3(0.05, 0.16, 0.24);
+        float term  = smoothstep(0.30, 0.0, abs(day)) * (1.0 - smoothstep(0.0, 0.5, day) * 0.6);
+        vec3 col = mix(night, blue, lit);
+        col = mix(col, orange, term * 0.85);
+        col = mix(col, vec3(0.62, 0.40, 1.0), u_storm * 0.35 * rim);
+        float a = (rim * 1.15 + halo) * (0.35 + 0.75 * lit) + rim * 0.25;
+        gl_FragColor = vec4(col * a, a);
     }
 `;
 
@@ -347,9 +393,12 @@ export class HeroSpaceWeather {
             // camera is much closer and full-height funnels swallow the frame.
             this._engine = new MagnetosphereEngine(this._scene, { auroraTop: 1.85 });
             this._engine.update(this._state);
-            // The wireframe cusp cones read as clutter at this close camera —
-            // every other layer stays on.
+            // The wireframe cusp cones read as clutter at this close camera.
             this._engine.setLayerVisible('cusps', false);
+            // Storm-driven reveal: these start OFF and come on with activity
+            // (live or scrubbed) — see the header.
+            this._revealed = false;
+            for (const l of REVEAL_LAYERS) this._engine.setLayerVisible(l, false);
             this._initBloom(this._w(), this._h());
             this._initRopes();
 
@@ -574,14 +623,34 @@ export class HeroSpaceWeather {
         this._clouds.renderOrder = 1;
         this._scene.add(this._clouds);
 
-        // Atmosphere shells — inner haze + outer limb glow
-        this._scene.add(_additiveSphere(1.09, 0x2266dd, 0.10));
-        this._scene.add(_additiveSphere(1.20, 0x1144bb, 0.05));
+        // Atmosphere: ONE Fresnel scattering shell (2026-09-21) in place of
+        // the two flat additive spheres. Day-side limb is Rayleigh blue, the
+        // terminator goes through orange (long path, red-shifted), the night
+        // limb keeps a faint airglow; a storm warms the whole rim. Drawn
+        // FrontSide so the rim term varies (a BackSide pow(rim) is identically
+        // 1 — the SOLAR_SYSTEM_VISUAL_REVIEW S3 scar).
+        this._atmoU = {
+            u_sun:   { value: SUN_DIR.clone() },
+            u_storm: { value: 0 },
+        };
+        const atmoMat = new THREE.ShaderMaterial({
+            uniforms: this._atmoU,
+            vertexShader: EARTH_VERT,
+            fragmentShader: ATMO_FRAG,
+            transparent: true, depthWrite: false, side: THREE.FrontSide,
+            blending: THREE.AdditiveBlending,
+        });
+        const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.075, 96, 96), atmoMat);
+        atmo.renderOrder = 2;
+        this._scene.add(atmo);
     }
 
     // ── Background stars ──────────────────────────────────────────────────────
     _initStars() {
-        const N     = 2400;
+        // 1400 (was 2400), sizes weighted hard toward tiny and tints kept
+        // cold — the old field's warm tan stars were indistinguishable from
+        // the heated wind particles and the two read as confetti.
+        const N     = 1400;
         const pos   = new Float32Array(N * 3);
         const size  = new Float32Array(N);
         const phase = new Float32Array(N);
@@ -594,11 +663,11 @@ export class HeroSpaceWeather {
             pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
             pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
             pos[i*3+2] = r * Math.cos(phi);
-            size[i]  = 0.7 + Math.pow(Math.random(), 3) * 2.6;
+            size[i]  = 0.55 + Math.pow(Math.random(), 4.5) * 2.8;
             phase[i] = Math.random();
-            // Cool-to-warm stellar tints
+            // Cold-to-neutral stellar tints (no warm end — see above)
             const w = Math.random();
-            c.setRGB(0.75 + w * 0.25, 0.8 + Math.random() * 0.2, 0.85 + (1 - w) * 0.15);
+            c.setRGB(0.72 + w * 0.22, 0.80 + w * 0.15, 0.95 + (1 - w) * 0.05);
             tint[i*3] = c.r; tint[i*3+1] = c.g; tint[i*3+2] = c.b;
         }
         const geo = new THREE.BufferGeometry();
@@ -620,7 +689,7 @@ export class HeroSpaceWeather {
 
     // ── Deep field (see NEBULA_FRAG) ──────────────────────────────────────────
     _initDeepField() {
-        this._nebU = { u_time: { value: 0 }, u_gain: { value: 0.85 } };
+        this._nebU = { u_time: { value: 0 }, u_gain: { value: 0.50 } };   // 0.85 → 0.50: one band, not three clouds
         const mat = new THREE.ShaderMaterial({
             uniforms: this._nebU,
             vertexShader:   NEBULA_VERT,
@@ -783,6 +852,14 @@ export class HeroSpaceWeather {
         const level = state.derived?.storm_level ?? 0;
         this._stormNorm = Math.min(1, level / 5 + (state.derived?.kp_norm ?? 0) * 0.3);
         this._earthU.u_storm.value = this._stormNorm;
+        if (this._atmoU) this._atmoU.u_storm.value = this._stormNorm;
+
+        // Storm-driven reveal (hysteresis so a feed wobble cannot strobe it)
+        const want = this._revealed ? this._stormNorm > REVEAL_OFF : this._stormNorm > REVEAL_ON;
+        if (want !== this._revealed) {
+            this._revealed = want;
+            for (const l of REVEAL_LAYERS) this._engine.setLayerVisible(l, want);
+        }
 
         // Storm escalation / major flare → aurora substorm surge
         if (level > this._lastStormLevel) this._engine.setSubstorm(0.45 + 0.12 * level);
@@ -799,6 +876,27 @@ export class HeroSpaceWeather {
 
         // Sun pulse follows X-ray intensity
         this._xrayNorm = state.derived?.xray_intensity ?? 0;
+    }
+
+    /**
+     * A swpc-feed-shaped state from the rope layer's modeled conditions at τ
+     * (bz / v / n / Dst / Kp proxy), so the engine and the storm terms read
+     * it exactly as they read the live feed. Shape mirrors js/swpc-feed.js.
+     */
+    _stateFromConditions(c) {
+        const kp = c.kp;
+        const level = c.gLevel;
+        return {
+            solar_wind: { speed: c.v, density: c.n, bz: c.bz },
+            kp,
+            dst: c.dst,
+            derived: {
+                storm_level: level,
+                kp_norm: Math.min(1, kp / 9),
+                xray_intensity: this._state?.derived?.xray_intensity ?? 0,
+            },
+            modeled: true,
+        };
     }
 
     // ── Animation loop ────────────────────────────────────────────────────────
@@ -849,7 +947,33 @@ export class HeroSpaceWeather {
         if (this._nebU) this._nebU.u_time.value = t;
 
         // ── Magnetosphere: live state + real dt every frame ────────────────
-        this._engine.tick(t, SUN_DIR, this._state, dt);
+        // ── Scrubbed conditions → the engine (storm-driven reveal) ─────────
+        // While the corridor is up, the engine sees the model's state at τ;
+        // on the way back it sees the live feed again. Pushed at COND_HZ.
+        let engineState = this._state;
+        if (this._ropes) {
+            this._ropes.setMix(this._mix);
+            if (this._mix > 0.02 && this._ropes.hasConditions) {
+                const now = performance.now();
+                if (!this._condAt || now - this._condAt > 1000 / COND_HZ) {
+                    this._condAt = now;
+                    const c = this._ropes.conditionsAt(this._ropes.tauMs);
+                    this._condState = c ? this._stateFromConditions(c) : null;
+                    if (this._condState) {
+                        this._engine.update(this._condState);
+                        this._updateFromState(this._condState);
+                        this._scrubDriven = true;
+                    }
+                }
+                if (this._condState) engineState = this._condState;
+            } else if (this._scrubDriven) {
+                this._scrubDriven = false;
+                this._condState = null;
+                this._engine.update(this._state);
+                this._updateFromState(this._state);
+            }
+        }
+        this._engine.tick(t, SUN_DIR, engineState, dt);
         this._ropes?.tick(dt);
 
         // ── Solar wind ─────────────────────────────────────────────────────

@@ -49,6 +49,20 @@
  *   in the legend. AU readouts are true.
  * • A rope past 1 AU fades, never implying a still-inbound cloud.
  *
+ * ── Conditions at Earth, for the storm-driven reveal ───────────────────────
+ * `conditionsSeries(fc)` turns the forecast's L1 driver (live: the
+ * provider's `driver.samples`; replay: the kernel's own deterministic
+ * `series()` at the L1 observer, V from the arrived rope's apex speed) into
+ * a Dst track with `ring-current-model.js` `integrateDst` (O'Brien &
+ * McPherron — the same integrator the ring-current page runs), and
+ * `conditionsAt(fc, τ)` samples it. The hero feeds that state to the
+ * magnetosphere engine while the transit is scrubbed, so the belts, the
+ * ring current, the sheath and the aurora react to the rope ARRIVING —
+ * the engine's own response, on the model's own driver. Kp is needed by
+ * the engine for the plasmapause/oval and there is no Kp in a flux-rope
+ * forecast: `kpProxyFromDst` is a DISCLOSED piecewise display proxy
+ * pinned to the NOAA G-scale's usual Dst bands, never a forecast of Kp.
+ *
  * Node gate: `node tests/hero-rope-layer.mjs` (the pure half — the frame
  * basis, the radial anchors, the scrub-window derivation, the replay
  * forecast shape). Browser gate: `tests/home-hero-stage.spec.js`.
@@ -58,6 +72,7 @@
 import { trainAt } from './corridor/corridor-model.js';
 import { ropeSurfaceGrid } from './stage/model.js';
 import { stageRadius, EARTH_S, RSUN_KM, AU_KM } from './stage/scale.js';
+import { integrateDst } from './ring-current-model.js';
 
 const HOUR = 3600e3;
 
@@ -142,6 +157,90 @@ export function mapSurface(positions, basis, sunPos, dst = null) {
 export function passedFade(apexAu) {
     if (!(apexAu > 1)) return 1;
     return Math.max(0, 1 - (apexAu - 1) / (PASSED_HIDE_AU - 1));
+}
+
+/** Heliocentric distances the corridor's ecliptic ruler rings mark (AU) —
+ *  fixed multiples, never adaptive (a ruler whose ticks move is not a ruler). */
+export const RULER_AU = Object.freeze([0.25, 0.5, 0.75, 1.0]);
+
+/**
+ * Display proxy Kp from Dst — piecewise-linear through the Dst levels the
+ * NOAA G-scale storms are usually quoted at (G1 ≈ −50 nT … G5 ≈ −400 nT).
+ * Disclosed as a proxy wherever it is used; it exists only because the
+ * magnetosphere engine keys its plasmapause and oval on Kp.
+ */
+export function kpProxyFromDst(dst) {
+    if (!Number.isFinite(dst)) return 2;
+    const pts = [[-20, 2], [-50, 5], [-100, 6], [-150, 7], [-250, 8], [-400, 9]];
+    if (dst >= pts[0][0]) return pts[0][1];
+    if (dst <= pts[pts.length - 1][0]) return pts[pts.length - 1][1];
+    for (let i = 1; i < pts.length; i++) {
+        const [d0, k0] = pts[i - 1], [d1, k1] = pts[i];
+        if (dst <= d0 && dst >= d1) return k0 + (k1 - k0) * (dst - d0) / (d1 - d0);
+    }
+    return 2;
+}
+
+/**
+ * L1 driver samples for a forecast: the provider's driver when it has one,
+ * else the kernel's deterministic series (replay). Pure given the kernel.
+ * @returns {null|Array<{t:number,v:number,n:number,bz:number}>}
+ */
+export function driverSamples(fc, { dtS = 900, hours = 120, ambientN = 5 } = {}) {
+    if (fc?.driver?.samples?.length) return fc.driver.samples;
+    const k = fc?.kernel;
+    const ropes = fc?.preset?.ropes;
+    if (!k || typeof k.series !== 'function' || !ropes?.length || !Number.isFinite(fc.launchMs)) return null;
+    const lastOff = Math.max(...ropes.map((r) => r.launchOffsetS ?? 0));
+    const n = Math.min(k.maxSteps ?? 1e9, Math.round((hours * 3600 + lastOff) / dtS));
+    const det = k.series(0, dtS, n);
+    const w = ropes[0].wKms ?? 400;
+    const reachKm = 0.9 * 0.99 * AU_KM;
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+        const tS = i * dtS;
+        let v = w;
+        for (let r = 0; r < ropes.length; r++) {
+            if (tS <= (ropes[r].launchOffsetS ?? 0)) continue;
+            if (typeof k.apexKmAt === 'function' && k.apexKmAt(r, tS) >= reachKm && typeof k.apexVKmsAt === 'function') {
+                v = Math.max(v, k.apexVKmsAt(r, tS));
+            }
+        }
+        out[i] = { t: fc.launchMs + tS * 1000, v, n: ambientN, bz: det.bz[i] };
+    }
+    return out;
+}
+
+/**
+ * Dst track for a forecast (O'Brien–McPherron on the L1 driver), sampled
+ * on the driver's own grid. null when there is no driver.
+ */
+export function conditionsSeries(fc) {
+    const samples = driverSamples(fc);
+    if (!samples?.length) return null;
+    const dst = integrateDst(samples, -10);
+    return { samples, dst };
+}
+
+/** State at τ: bz / v / n from the driver, Dst from the track, Kp proxy. */
+export function conditionsAt(series, tauMs) {
+    if (!series?.samples?.length || !Number.isFinite(tauMs)) return null;
+    const { samples, dst } = series;
+    if (tauMs < samples[0].t || tauMs > samples[samples.length - 1].t) return null;
+    // Binary search the driver grid.
+    let lo = 0, hi = samples.length - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (samples[mid].t <= tauMs) lo = mid; else hi = mid; }
+    const s = samples[lo];
+    const d = dst[Math.min(lo, dst.length - 1)]?.dst ?? 0;
+    const kp = kpProxyFromDst(d);
+    return {
+        bz: Number.isFinite(s.bz) ? s.bz : 0,
+        v: Number.isFinite(s.v) && s.v > 0 ? s.v : 400,
+        n: Number.isFinite(s.n) && s.n > 0 ? s.n : 5,
+        dst: d,
+        kp,
+        gLevel: kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0,
+    };
 }
 
 // ── Scrub window ───────────────────────────────────────────────────────────
@@ -331,26 +430,80 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
                     float mu = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
                     float limb = 0.55 + 0.45 * pow(mu, 0.6);          // Eddington-ish limb darkening
                     vec3 col = mix(vec3(1.0, 0.62, 0.22), vec3(1.0, 0.96, 0.82), limb);
-                    gl_FragColor = vec4(col * (0.72 + 0.38 * limb), 1.0);  // ≤1.1: the halo carries the glow, the disc keeps its limb colour under bloom
+                    gl_FragColor = vec4(col * (0.42 + 0.30 * limb), 1.0);  // ≤0.72: under the bloom threshold, so the disc keeps its limb colour and the halo carries the glow
                 }`,
             fog: false,
         }));
     sunGroup.add(sunDisc);
     const haloTex = radialTexture([
-        [0.0, 'rgba(255,240,200,0.95)'], [0.18, 'rgba(255,200,110,0.55)'],
+        [0.0, 'rgba(255,240,200,0.45)'], [0.18, 'rgba(255,200,110,0.50)'],
         [0.45, 'rgba(255,150,50,0.16)'], [1.0, 'rgba(255,120,30,0)'],
     ]);
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
         map: haloTex, transparent: true, depthWrite: false, depthTest: false,
-        blending: THREE.AdditiveBlending, opacity: 0.85, fog: false,
+        blending: THREE.AdditiveBlending, opacity: 0.6, fog: false,
     }));
     halo.scale.setScalar(CORRIDOR_SUN_DRAWN_R * 8);
     halo.renderOrder = 9;
     sunGroup.add(halo);
     scene.add(sunGroup);
 
+    // Ecliptic ruler: rings at RULER_AU about the drawn Sun, in the rope
+    // frame's e1–e2 plane. A depth cue that is also a scale bar; fades in
+    // with the corridor mix.
+    const rings = new THREE.Group();
+    rings.visible = false;
+    for (const rAu of RULER_AU) {
+        const N = 128, pts = new Float32Array((N + 1) * 3);
+        for (let i = 0; i <= N; i++) {
+            const a = (i / N) * Math.PI * 2;
+            const p = ropePointToHero([rAu * Math.cos(a), rAu * Math.sin(a), 0], basis, sunPos);
+            pts[i * 3] = p[0]; pts[i * 3 + 1] = p[1]; pts[i * 3 + 2] = p[2];
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+        const line = new THREE.Line(g, new THREE.LineBasicMaterial({
+            color: rAu === 1 ? 0x8ff0ff : 0x9a85ff, transparent: true, opacity: 0, depthWrite: false, fog: false,
+        }));
+        line.userData.baseOpacity = rAu === 1 ? 0.30 : 0.14;
+        rings.add(line);
+    }
+    scene.add(rings);
+
+    // Rope surface shader: a translucent plasma skin — Fresnel rim glow so
+    // the tube reads as a volume, plus helical flow stripes (aPsi from the
+    // grid's ψ index, aTheta from θ) drifting along the axis so the field's
+    // twist is legible. Additive, no depth write, fog off.
+    const ROPE_VERT = /* glsl */`
+        attribute float aPsi;
+        attribute float aTheta;
+        varying vec3 vN; varying vec3 vV; varying float vPsi; varying float vTheta;
+        void main(){
+            vec4 wp = modelMatrix * vec4(position, 1.0);
+            vN = normalize(mat3(modelMatrix) * normal);
+            vV = normalize(cameraPosition - wp.xyz);
+            vPsi = aPsi; vTheta = aTheta;
+            gl_Position = projectionMatrix * viewMatrix * wp;
+        }`;
+    const ROPE_FRAG = /* glsl */`
+        precision highp float;
+        uniform vec3 u_color; uniform float u_opacity; uniform float u_time; uniform float u_twist;
+        varying vec3 vN; varying vec3 vV; varying float vPsi; varying float vTheta;
+        void main(){
+            float mu = abs(dot(normalize(vN), normalize(vV)));
+            float rim = pow(1.0 - mu, 1.6);
+            // Helical stripes: phase advances with θ (twist) and drifts along ψ.
+            float helix = 0.5 + 0.5 * sin(6.2831 * (vTheta * u_twist + vPsi * 3.0) - u_time * 0.9);
+            float body = 0.10 + 0.55 * rim;
+            float stripes = 0.35 * helix * (0.4 + 0.6 * rim);
+            vec3 col = u_color * (body + stripes) + vec3(1.0) * rim * rim * 0.25;
+            gl_FragColor = vec4(col, u_opacity * (0.35 + 1.4 * rim + 0.4 * stripes));
+        }`;
+
     /** @type {null|object} the forecast being drawn (live or replay) */
     let fc = null;
+    let cond = null;         // conditionsSeries(fc)
+    let mixNow = 0;
     let mode = 'boot';        // 'live' | 'replay' | 'down' | 'boot'
     let ropes = [];
     let win = null;
@@ -360,6 +513,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     let framing = 'earth';
     let restTimer = 0;
     let autoTimer = 0;
+    let held = false;         // hook-driven hold: corridor stays until release()
     let oneShot = false;      // the replay's first, self-started pass
     let lastKey = '';
     let lastLegendAt = 0;
@@ -400,17 +554,17 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     function setFraming(next) {
         if (framing === next) return;
         framing = next;
-        sunGroup.visible = next === 'corridor';
         onFraming?.(next);
     }
 
     function armRest() {
         clearTimeout(restTimer);
-        restTimer = setTimeout(() => { if (!dragging && !playing) setFraming('earth'); }, REST_MS);
+        restTimer = setTimeout(() => { if (!dragging && !playing && !held) setFraming('earth'); }, REST_MS);
     }
 
-    function setTau(t, fromSlider = false) {
+    function setTau(t, fromSlider = false, hold = false) {
         if (!win) return;
+        if (hold) { held = true; clearTimeout(restTimer); }
         tauMs = Math.min(win.t1, Math.max(win.t0, t));
         if (!fromSlider) slider.value = String(Math.round(tauToSlider(tauMs)));
         const ref = win.arrivalMs ?? fc.launchMs;
@@ -428,6 +582,9 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     playBtn.addEventListener('click', () => { oneShot = false; clearTimeout(autoTimer); setPlaying(!playing); });
 
     function setPlaying(on) {
+        // Any explicit play/pause cancels the replay's pending self-start.
+        clearTimeout(autoTimer);
+        if (!on) oneShot = false;
         playing = !!on && !!win;
         playBtn.textContent = playing ? '❚❚ Pause' : '▶ Play transit';
         playBtn.setAttribute('aria-pressed', String(playing));
@@ -476,6 +633,8 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
         fc = next;
         mode = nextMode;
         win = scrubWindow(fc);
+        try { cond = fc ? conditionsSeries(fc) : null; }
+        catch (e) { cond = null; console.info('[hero-rope] conditions unavailable:', e?.message ?? e); }
         lastKey = '';
         group.visible = !!(fc && win);
         ui.hidden = !group.visible;
@@ -490,8 +649,24 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             const geo = new THREE.BufferGeometry();
             geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(seed.positions.length), 3));
             geo.setIndex(new THREE.BufferAttribute(seed.indices, 1));
-            const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-                color, transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+            // ψ / θ lattice coordinates for the shader, fixed by (N_PSI, N_THETA).
+            const nV = (N_PSI + 1) * (N_THETA + 1);
+            const aPsi = new Float32Array(nV), aTheta = new Float32Array(nV);
+            for (let ii = 0; ii <= N_PSI; ii++) for (let jj = 0; jj <= N_THETA; jj++) {
+                const o = ii * (N_THETA + 1) + jj;
+                aPsi[o] = ii / N_PSI; aTheta[o] = jj / N_THETA;
+            }
+            geo.setAttribute('aPsi', new THREE.BufferAttribute(aPsi, 1));
+            geo.setAttribute('aTheta', new THREE.BufferAttribute(aTheta, 1));
+            const mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+                uniforms: {
+                    u_color: { value: new THREE.Color(color) },
+                    u_opacity: { value: 0.22 },
+                    u_time: { value: 0 },
+                    u_twist: { value: Math.max(1, Math.min(6, Math.abs(rope.twistTurns ?? 3))) * Math.sign(rope.handedness ?? 1) },
+                },
+                vertexShader: ROPE_VERT, fragmentShader: ROPE_FRAG,
+                transparent: true, side: THREE.DoubleSide,
                 depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
             }));
             mesh.renderOrder = 6;
@@ -569,6 +744,8 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
      */
     function tick(dt) {
         if (!group.visible || !fc) return;
+        const tNow = performance.now() / 1000;
+        for (const r of ropes) r.mesh.material.uniforms.u_time.value = tNow;
         if (playing) {
             let t = tauMs + dt * PLAY_H_PER_S * HOUR;
             if (t >= win.t1) {
@@ -602,6 +779,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             const attr = r.mesh.geometry.attributes.position;
             attr.array.set(r.scratch);
             attr.needsUpdate = true;
+            r.mesh.geometry.computeVertexNormals();
             r.mesh.geometry.computeBoundingSphere();
             r.wire.geometry.dispose();
             r.wire.geometry = new THREE.WireframeGeometry(r.mesh.geometry);
@@ -609,7 +787,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             const tip = ropePointToHero([eDir[0] * apexAu, eDir[1] * apexAu, eDir[2] * apexAu], basis, sunPos);
             r.nose.position.set(tip[0], tip[1], tip[2]);
             const fade = passedFade(apexAu);
-            r.mesh.material.opacity = 0.22 * fade;
+            r.mesh.material.uniforms.u_opacity.value = 0.22 * fade;
             r.wire.material.opacity = 0.12 * fade;
             r.nose.material.opacity = 0.95 * fade;
             const v = fc.kernel?.apexVKmsAt ? Math.round(fc.kernel.apexVKmsAt(r.index, m.geometry.tS)) : null;
@@ -628,15 +806,31 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
         const story = mode === 'live'
             ? 'Modeled from live NASA DONKI CMEs on the flux-rope kernel; arrival band = ensemble P10–P90.'
             : 'The May 2024 G5 superstorm as a 2-rope compounding train — the storm these forecasts were validated on (min Bz −44.3 vs −44.2 nT observed).';
-        legend.innerHTML = `${chips}
+        const c = conditionsAt(cond, tauMs);
+        const condTxt = c ? `<span><b>At Earth</b> · Bz ${c.bz >= 0 ? '+' : ''}${c.bz.toFixed(0)} nT · ${Math.round(c.v)} km/s · Dst ${Math.round(c.dst)} nT · G${c.gLevel} (Kp proxy ${c.kp.toFixed(0)})</span>` : '';
+        legend.innerHTML = `${chips}${condTxt}
             <span class="hrs-note">${story}${mirrored ? ' Some ropes on the mirror fallback.' : ''}
-            Corridor radial scale compressed (Sun drawn ×${SUN_EXAGGERATION.toFixed(0)}); AU readouts are true.</span>
+            Corridor radial scale compressed (Sun drawn ×${SUN_EXAGGERATION.toFixed(0)}); AU readouts are true. Dst is O'Brien–McPherron on the modeled L1 driver; Kp is a display proxy from Dst.</span>
             <a href="flux-rope-live.html" data-funnel-cta="hero_flux_rope">Open the Compounding Watch →</a>`;
     }
 
     const handle = {
-        group, sunGroup, tick, update,
+        group, sunGroup, rings, tick, update,
         setTau, setPlaying,
+        /** Release a hook-held corridor (setTau(t, false, true)); rests back to Earth. */
+        release() { held = false; armRest(); },
+        /** The hero's corridor mix (0 Earth … 1 corridor): fades the ruler + Sun marker. */
+        setMix(m) {
+            mixNow = Math.max(0, Math.min(1, m));
+            rings.visible = mixNow > 0.02;
+            for (const l of rings.children) l.material.opacity = l.userData.baseOpacity * mixNow;
+            halo.material.opacity = 0.6 * mixNow;
+            sunGroup.visible = mixNow > 0.02;
+        },
+        /** Modeled L1 conditions at the scrubbed instant, or null (no driver / outside the window). */
+        conditionsAt(t = tauMs) { return conditionsAt(cond, t); },
+        get tauMs() { return tauMs; },
+        get hasConditions() { return !!cond; },
         get framing() { return framing; },
         get state() {
             return {
@@ -651,7 +845,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
         },
         dispose() {
             clearTimeout(restTimer); clearTimeout(autoTimer);
-            disposeRopes(); scene.remove(group); scene.remove(sunGroup); ui.remove(); style.remove();
+            disposeRopes(); scene.remove(group); scene.remove(sunGroup); scene.remove(rings); ui.remove(); style.remove();
         },
     };
     if (/[?&]debug=1(?:&|$)/.test(location.search)) window.__heroRopes = handle;

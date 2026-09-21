@@ -95,7 +95,11 @@ test.describe('home hero stage', () => {
         await page.waitForFunction(() => window.__heroRopes?.state.ropeCount > 0, null, { timeout: 60_000 });
         const st0 = await page.evaluate(() => window.__heroRopes.state);
         expect(['live', 'replay', 'down']).toContain(st0.mode);
-        expect(st0.framing).toBe('earth');           // nothing moves the camera uninvited at adoption
+        // A LIVE train never moves the camera uninvited; a replay plays
+        // itself once 5 s after adoption, which slow polling can overrun.
+        if (st0.mode === 'live') expect(st0.framing).toBe('earth');
+        // Pausing parks the self-start too (the hook the shots use).
+        await page.evaluate(() => window.__heroRopes.setPlaying(false));
 
         const scrub = await rect(page, '#hero-scrub');
         const stage = await rect(page, '#hero-stage');
@@ -109,7 +113,9 @@ test.describe('home hero stage', () => {
         await page.evaluate(() => {
             const r = window.__heroRopes; const w = r.state.window;
             r.setPlaying(false);
-            r.setTau(w.t0 + (w.arrivalMs ? (w.arrivalMs - w.t0) * 0.85 : (w.t1 - w.t0) * 0.5));
+            // hold: a programmatic scrub is not a drag, and the layer rests
+            // back to Earth 6 s after a drag ends — slower than this poll.
+            r.setTau(w.t0 + (w.arrivalMs ? (w.arrivalMs - w.t0) * 0.85 : (w.t1 - w.t0) * 0.5), false, true);
         });
         await page.waitForFunction(() => window.__ppHero._mix > 0.95, null, { timeout: 20_000 });
         const st1 = await page.evaluate(() => ({ ...window.__heroRopes.state, frame: window.__ppHero._frame }));

@@ -96,3 +96,49 @@ assert.equal(noSummary.arrivalMs, null, 'no summary → no arrival claimed');
 assert.equal(noSummary.t1, 1e12 + 3600e3 + 60 * HOUR + 18 * HOUR, 'nominal transit after the LAST launch');
 
 console.log('hero-rope-layer: all assertions passed');
+
+// ── Storm-driven reveal: the Kp proxy and the conditions sampler ──────────
+{
+    const { kpProxyFromDst, driverSamples, conditionsSeries, conditionsAt } = await import('../js/hero-rope-layer.js');
+    assert.equal(kpProxyFromDst(0), 2); assert.equal(kpProxyFromDst(-20), 2);
+    assert.equal(kpProxyFromDst(-50), 5); assert.equal(kpProxyFromDst(-100), 6);
+    assert.equal(kpProxyFromDst(-400), 9); assert.equal(kpProxyFromDst(-900), 9);
+    near(kpProxyFromDst(-75), 5.5, 1e-12, 'linear between the G bands');
+    assert.equal(kpProxyFromDst(NaN), 2, 'no Dst → quiet, never a storm');
+    let prevK = 0;
+    for (let d = 0; d >= -500; d -= 5) { const k = kpProxyFromDst(d); assert.ok(k >= prevK - 1e-12, 'monotone: deeper Dst never lowers the proxy'); prevK = k; }
+
+    // A live forecast hands its driver through untouched.
+    const live = { driver: { samples: [{ t: 0, v: 400, n: 5, bz: 0 }] } };
+    assert.equal(driverSamples(live), live.driver.samples);
+
+    // A replay builds one from the kernel's series; V is the arrived rope's
+    // apex speed, ambient otherwise.
+    const n = 8;
+    const stub = {
+        maxSteps: 1000,
+        series: (t0, dtS, nn) => ({ bz: Float32Array.from({ length: nn }, (_, i) => (i >= 4 ? -30 : 0)) }),
+        apexKmAt: (r, tS) => (tS >= 4 * 900 ? 1.5e8 : 1e7),
+        apexVKmsAt: () => 700,
+    };
+    const rf = { kernel: stub, launchMs: 1e12, preset: { ropes: [{ launchOffsetS: 0, wKms: 450 }] } };
+    const smp = driverSamples(rf, { dtS: 900, hours: n * 900 / 3600 });
+    assert.equal(smp.length, n);
+    assert.equal(smp[0].v, 450, 'ambient before arrival'); assert.equal(smp[5].v, 700, 'apex speed once arrived');
+    assert.equal(smp[5].bz, -30); assert.equal(smp[3].t, 1e12 + 3 * 900e3);
+
+    const cs = conditionsSeries(rf);
+    assert.equal(cs.dst.length, cs.samples.length, 'Dst track on the driver grid');
+    assert.ok(cs.samples.length > n, 'production default is the full 120 h horizon');
+    const before = conditionsAt(cs, 1e12 + 1 * 900e3);
+    const after = conditionsAt(cs, 1e12 + 7 * 900e3);
+    assert.equal(before.bz, 0); assert.equal(before.gLevel, 0);
+    assert.equal(after.bz, -30); assert.equal(after.v, 700);
+    assert.ok(after.dst < before.dst, 'Dst deepens under southward Bz');
+    assert.ok(after.kp >= before.kp, 'Kp proxy follows Dst');
+    assert.equal(conditionsAt(cs, 1e12 - 1), null, 'outside the window → null, never extrapolated');
+    assert.equal(conditionsAt(null, 1e12), null);
+    assert.equal(conditionsSeries({ preset: { ropes: [] } }), null, 'no driver, no kernel → null');
+}
+
+console.log('hero-rope-layer: reveal assertions passed');
