@@ -11,9 +11,10 @@
  */
 import assert from 'node:assert/strict';
 import {
-    tzGuessLocation, aqiCat, normalizeWeather, normalizeAir,
+    tzGuessLocation, aqiCat, normalizeWeather, normalizeAir, normalizeClimate,
     buildAirModel, buildEventsModel, buildTempModel,
 } from '../js/home-conditions.js';
+import { localDayKey, addDaysNoon } from '../js/temp-outlook.js';
 
 const NOW = Date.UTC(2026, 6, 15, 18, 0, 0); // mid-July, midday US
 
@@ -51,16 +52,20 @@ const wxPayload = {
         precipitation_probability: [...Array(48)].map((_, i) => (i === 20 ? 60 : 5)),
         cape: [...Array(48)].map((_, i) => (i === 20 ? 2800 : 300)),
     },
+    // The live call is forecast_days=16&past_days=2: two PAST days lead the
+    // arrays (a gust of 80 on day −1 that must never reach the board), then
+    // the 7-day board's extremes, then 9 more days carrying a 108° spike on
+    // day +12 that is beyond the hero's "7 days out" claim and must be clipped.
     daily: {
-        time: [...Array(7)].map((_, i) => new Date(NOW + i * 86400e3).toISOString().slice(0, 10)),
-        temperature_2m_max: [96, 101, 91, 88, 86, 84, 82],
-        temperature_2m_min: [70, 74, 68, 64, 62, 60, 58],
-        precipitation_sum: [0, 0.2, 2.4, 0.1, 0, 0, 0],
-        wind_gusts_10m_max: [18, 25, 61, 30, 22, 20, 15],
-        weather_code: [1, 2, 95, 61, 2, 1, 0],
-        sunrise: [...Array(7)].map((_, i) => new Date(NOW - 7 * 3600e3 + i * 86400e3).toISOString()),
-        sunset: [...Array(7)].map((_, i) => new Date(NOW + 8 * 3600e3 + i * 86400e3).toISOString()),
-        uv_index_max: [9, 9, 6, 5, 7, 8, 8],
+        time: [...Array(18)].map((_, i) => new Date(NOW + (i - 2) * 86400e3).toISOString().slice(0, 10)),
+        temperature_2m_max: [90, 92, 96, 101, 91, 88, 86, 84, 82, 80, 80, 80, 80, 80, 108, 80, 80, 80],
+        temperature_2m_min: [66, 67, 70, 74, 68, 64, 62, 60, 58, 56, 56, 56, 56, 56, 70, 56, 56, 56],
+        precipitation_sum: [0, 0, 0, 0.2, 2.4, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        wind_gusts_10m_max: [12, 80, 18, 25, 61, 30, 22, 20, 15, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+        weather_code: [0, 0, 1, 2, 95, 61, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        sunrise: [...Array(18)].map((_, i) => new Date(NOW - 7 * 3600e3 + (i - 2) * 86400e3).toISOString()),
+        sunset: [...Array(18)].map((_, i) => new Date(NOW + 8 * 3600e3 + (i - 2) * 86400e3).toISOString()),
+        uv_index_max: [8, 8, 9, 9, 6, 5, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
     },
 };
 const aqPayload = {
@@ -75,8 +80,8 @@ const aq = normalizeAir(aqPayload);
 {
     assert.equal(wx.current.tempF, 88);
     assert.equal(wx.hourly.length, 48);
-    assert.equal(wx.daily.length, 7);
-    assert.equal(wx.daily[2].precipIn, 2.4);
+    assert.equal(wx.daily.length, 18);
+    assert.equal(wx.daily[4].precipIn, 2.4);
     assert.equal(aq.current.aqi, 132);
     assert.ok(aq.hourly.length === 96);
     assert.equal(normalizeWeather(null), null);
@@ -139,7 +144,10 @@ const aq = normalizeAir(aqPayload);
     const t = m.events.find((e) => e.id === 'tstorm');
     assert.equal(t.level, 3, 'CAPE 2800 is high');
     const w = m.events.find((e) => e.id === 'wind');
-    assert.equal(w.level, 3, '61 mph gusts are damaging-wind');
+    assert.equal(w.level, 3, '61 mph gusts are damaging-wind — not the 80 mph on the PAST day');
+    assert.ok(w.when > NOW, 'the wind event is in the future');
+    const heat = m.events.find((e) => e.id === 'heat');
+    assert.equal(heat.magnitude, '101°F high', 'the 108° spike on day +12 is beyond the 7-day board');
     // severity ordering: no lower level before a higher one
     for (let i = 1; i < m.events.length; i++) {
         assert.ok(m.events[i].level <= m.events[i - 1].level, 'events sorted by severity');
@@ -161,19 +169,33 @@ const aq = normalizeAir(aqPayload);
     const m = buildTempModel(wx, null, NOW);
     assert.equal(m.available, true);
     assert.equal(m.tempF, 88);
-    assert.equal(m.hiF, 96);
+    assert.equal(m.hiF, 96, "today's high is found by date, not by array index (past_days lead the array)");
     assert.ok(m.spark.length >= 20, '24 h sparkline data present');
-    assert.equal(m.week.length, 7);
+    assert.equal(m.week.length, 7, 'the week is 7 forward days out of the 18-day payload');
+    assert.ok(m.week.every((d) => d.t > NOW - 12 * 3600e3));
     assert.equal(m.arc, null, 'no arc without climate data');
+    // Candles: the hourly fixture starts at NOW (not midnight) and runs 48 h,
+    // so today, tomorrow and the day after have hours — three candles.
+    assert.ok(m.candles.candles.length >= 2 && m.candles.candles.length <= 3, `${m.candles.candles.length} candles from a 48 h series`);
+    assert.equal(m.candles.candles[0].key, localDayKey(NOW));
+    // Outlook: 16 NWP days, then nothing to say without normals.
+    assert.equal(m.outlook.days.length, 31);
+    assert.equal(m.outlook.nwpLeads, 16);
+    assert.equal(m.outlook.days[15].source, 'nwp');
+    assert.equal(m.outlook.days[16].source, 'none');
+    assert.ok(m.calendar.weeks.length >= 5);
+    assert.equal(m.calendar.weeks.flat().filter((c) => !c.pad && c.lead >= 0).length, 31);
+    assert.equal(m.clim, null);
+    assert.equal(m.persistence, null);
 
     // Synthetic 3-year climate: solar peaks doy 172, temperature doy 207 → 35-day lag.
     const pts = [];
     for (let d = 0; d < 3 * 365; d++) {
         const t = Date.UTC(2023, 0, 1) + d * 86400e3;
         const doy = Math.floor((t - Date.UTC(new Date(t).getUTCFullYear(), 0, 0)) / 86400e3);
+        const tempF = 55 + 28 * Math.cos(2 * Math.PI * (doy - 207) / 365);
         pts.push({
-            t,
-            tempF: 55 + 28 * Math.cos(2 * Math.PI * (doy - 207) / 365),
+            t, tempF, hiF: tempF + 9, loF: tempF - 9,
             radMJ: 14 + 11 * Math.cos(2 * Math.PI * (doy - 172) / 365),
         });
     }
@@ -182,8 +204,39 @@ const aq = normalizeAir(aqPayload);
     assert.ok(Math.abs(withArc.arc.lagDays - 35) <= 4,
         `thermal lag ${withArc.arc.lagDays} should recover ≈35 days`);
     assert.ok(withArc.arc.mean.length > 300);
+    // With the archive loaded the outlook runs the full 30 days: NWP, then
+    // normal + relaxing anomaly, every cell numeric.
+    assert.ok(withArc.clim && withArc.clim.years[0] === 2023);
+    assert.ok(withArc.persistence && withArc.persistence.tau >= 1);
+    assert.equal(withArc.outlook.days[16].source, 'blend');
+    assert.ok(withArc.outlook.days.every((d) => Number.isFinite(d.hiF) && Number.isFinite(d.loF)));
+    assert.ok(withArc.outlook.days[30].hiF > withArc.outlook.days[30].loF);
+    const forward = withArc.calendar.weeks.flat().filter((c) => !c.pad && c.lead >= 0);
+    assert.ok(forward.every((c) => Number.isFinite(c.hiF)), 'every forward calendar cell has a value');
+    assert.equal(forward[forward.length - 1].key, localDayKey(addDaysNoon(NOW, 30)));
 
     assert.equal(buildTempModel(null, null, NOW).available, false);
+}
+
+// ── Climate normalizer ───────────────────────────────────────────────────────
+{
+    const n = 400;
+    const j = {
+        daily: {
+            time: [...Array(n)].map((_, i) => new Date(Date.UTC(2025, 0, 1) + i * 86400e3).toISOString().slice(0, 10)),
+            temperature_2m_mean: [...Array(n)].map((_, i) => 50 + i % 10),
+            temperature_2m_max: [...Array(n)].map((_, i) => (i === 5 ? null : 60 + i % 10)),
+            temperature_2m_min: [...Array(n)].map((_, i) => 40 + i % 10),
+            shortwave_radiation_sum: [...Array(n)].map(() => 12),
+        },
+    };
+    const c = normalizeClimate(j);
+    assert.equal(c.pts.length, n);
+    assert.equal(c.pts[0].hiF, 60);
+    assert.equal(c.pts[5].hiF, null, 'a missing max is null, never 0 — gaps are not zeros');
+    assert.equal(c.pts[5].tempF, 55, 'the mean survives a missing max');
+    assert.equal(normalizeClimate({ daily: { time: j.daily.time.slice(0, 100), temperature_2m_mean: j.daily.temperature_2m_mean.slice(0, 100), shortwave_radiation_sum: j.daily.shortwave_radiation_sum.slice(0, 100) } }), null, '< 300 days is not a climate');
+    assert.equal(normalizeClimate(null), null);
 }
 
 console.log('home-conditions: all assertions passed');

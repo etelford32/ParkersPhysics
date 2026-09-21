@@ -5,13 +5,22 @@
  *
  * DATA — Open-Meteo (keyless, CORS-enabled, already a credited source):
  *   fetchConditions(loc)  — ONE forecast request + ONE air-quality request
- *                           per location: current weather, 7-day hourly
- *                           (temp / precip-prob / CAPE), 7-day daily
- *                           (hi/lo/precip/gusts), current pollutants,
- *                           7-day hourly AQI.
+ *                           per location: current weather, 16-day hourly
+ *                           (temp / precip-prob / CAPE) + 2 past days, 16-day
+ *                           daily (hi/lo/precip/gusts), current pollutants,
+ *                           7-day hourly AQI. 16 is the API's ceiling and is
+ *                           what the temperature tab's 30-day calendar
+ *                           (js/temp-outlook.js) runs on; the 2 past days
+ *                           give today's candle its midnight open and fill
+ *                           the calendar's gap behind the archive. The
+ *                           EVENTS board still reads 7 days — the hero
+ *                           promises "major events 7 days out", so
+ *                           buildEventsModel clips the wider payload.
  *   fetchClimate(loc)     — ONE archive request (lazy, ~3 years of daily
- *                           mean temperature + shortwave radiation) for the
- *                           solar-input-vs-temperature year arc.
+ *                           mean/max/min temperature + shortwave radiation)
+ *                           for the solar-input-vs-temperature year arc AND
+ *                           the per-date normals + anomaly persistence the
+ *                           30-day outlook is built from.
  *
  * This module deliberately does NOT reuse js/air-quality-feed.js — that
  * class is the EarthView verdict card's feed with its own cadence, cache
@@ -33,8 +42,15 @@
  */
 
 import { gFromKp } from './home-sky-console.js';
+import {
+    buildWeekCandles, climatologyByDoy, anomalyPersistence, projectDays,
+    buildMonthCalendar, localDayKey,
+} from './temp-outlook.js';
 
 const isNum = (v) => Number.isFinite(v);
+const DAY_MS = 86400e3;
+/** The events board's horizon — the hero's "7 days out" claim, in ms. */
+const EVENTS_HORIZON_MS = 7.5 * DAY_MS;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,7 +157,7 @@ export async function fetchConditions(loc) {
             + '&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,weather_code,pressure_msl,cloud_cover,precipitation,uv_index,is_day'
             + '&hourly=temperature_2m,precipitation_probability,cape'
             + '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_gusts_10m_max,weather_code,sunrise,sunset,uv_index_max'
-            + '&forecast_days=7'),
+            + '&forecast_days=16&past_days=2'),
         jget(`https://air-quality-api.open-meteo.com/v1/air-quality?${base}`
             + '&current=us_aqi,pm2_5,pm10,ozone,nitrogen_dioxide&hourly=us_aqi&forecast_days=7'),
     ]);
@@ -151,7 +167,12 @@ export async function fetchConditions(loc) {
     };
 }
 
-/** ~3 years of daily mean temp + shortwave radiation for the year arc. */
+/**
+ * ~3 years of daily mean/max/min temp + shortwave radiation: the year arc
+ * (mean + radiation) and the 30-day outlook's normals (max/min). The
+ * archive lags real time by ~2 days; the forecast call's past_days covers
+ * the gap. hiF/loF are nullable per day — the arc never needed them.
+ */
 export async function fetchClimate(loc) {
     const end = new Date(Date.now() - 2 * 86400e3);
     const start = new Date(end.getTime() - 3 * 365 * 86400e3);
@@ -159,12 +180,18 @@ export async function fetchClimate(loc) {
     const j = await jget(
         `https://archive-api.open-meteo.com/v1/archive?latitude=${loc.lat}&longitude=${loc.lon}`
         + `&temperature_unit=fahrenheit&start_date=${iso(start)}&end_date=${iso(end)}`
-        + '&daily=temperature_2m_mean,shortwave_radiation_sum', 25000);
+        + '&daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min,shortwave_radiation_sum', 25000);
+    return normalizeClimate(j);
+}
+
+export function normalizeClimate(j) {
     const D = j?.daily;
     if (!D?.time) return null;
     const pts = D.time.map((t, i) => ({
         t: Date.parse(`${t}T12:00`),
         tempF: D.temperature_2m_mean?.[i],
+        hiF: isNum(D.temperature_2m_max?.[i]) ? D.temperature_2m_max[i] : null,
+        loF: isNum(D.temperature_2m_min?.[i]) ? D.temperature_2m_min[i] : null,
         radMJ: D.shortwave_radiation_sum?.[i],
     })).filter((p) => isNum(p.t) && isNum(p.tempF) && isNum(p.radMJ));
     return pts.length > 300 ? { pts } : null;
@@ -385,7 +412,8 @@ export function buildEventsModel(swState = {}, wx = null, now = Date.now()) {
         }
     }
     if (wx?.daily?.length) {
-        const days = wx.daily.filter((d) => d.t > now - 12 * 3600e3);
+        // The payload now runs 16 days + 2 past days; the board is 7 days.
+        const days = wx.daily.filter((d) => d.t > now - 12 * 3600e3 && d.t <= now + EVENTS_HORIZON_MS);
         const rain = days.slice().sort((a, b) => b.precipIn - a.precipIn)[0];
         if (rain && rain.precipIn >= 1) {
             const level = rain.precipIn >= 4 ? 3 : rain.precipIn >= 2 ? 2 : 1;
@@ -435,16 +463,36 @@ export function buildEventsModel(swState = {}, wx = null, now = Date.now()) {
 }
 
 /**
- * Temperature-dynamics view model: now / today, 24 h sparkline data, 7-day
- * hi-lo band, and (when the archive is loaded) the solar-input vs
- * temperature year arc with the thermal-lag annotation — the planet's
- * thermal memory, per the prototype.
+ * Temperature-dynamics view model: now / today, 24 h sparkline data, the
+ * 7-day hourly line + daily candles, the 30-day outlook calendar, and (when
+ * the archive is loaded) the solar-input vs temperature year arc with the
+ * thermal-lag annotation — the planet's thermal memory, per the prototype.
+ *
+ * The outlook is js/temp-outlook.js's v0 projection: Open-Meteo's 16 NWP
+ * days, then the archive normal for each date plus the NWP tail anomaly
+ * relaxing with the e-folding time FITTED from this location's own
+ * history. That module is the engine seam — see its header.
  */
 export function buildTempModel(wx, climate = null, now = Date.now()) {
     if (!wx?.current) return { available: false };
-    const today = wx.daily?.[0] ?? null;
+    const daily = wx.daily ?? [];
+    // The payload carries past_days, so "today" is found by date, never by
+    // index; the first non-past day is the fallback for a clock/zone skew.
+    const todayKey = localDayKey(now);
+    const today = daily.find((d) => localDayKey(d.t) === todayKey)
+        ?? daily.find((d) => d.t > now - 12 * 3600e3) ?? null;
     const spark = (wx.hourly ?? []).filter((h) => h.t >= now - 3600e3).slice(0, 25);
-    const week = (wx.daily ?? []).slice(0, 7);
+    const week = daily.filter((d) => d.t > now - 12 * 3600e3 && d.t <= now + EVENTS_HORIZON_MS).slice(0, 7);
+    const candles = buildWeekCandles(wx, now);
+
+    // 30-day outlook — the engine seam. Climatology + persistence are
+    // re-derived per call (≈1 ms on 3 years of dailies); nothing is cached
+    // here so the model stays a pure function of its inputs.
+    const pts = climate?.pts?.length > 300 ? climate.pts : null;
+    const clim = pts ? climatologyByDoy(pts) : null;
+    const persistence = clim ? anomalyPersistence(pts, clim) : null;
+    const outlook = projectDays({ daily, clim, persistence, now, days: 30 });
+    const calendar = buildMonthCalendar({ projection: outlook, archive: pts ?? [], daily, clim, now });
 
     let arc = null;
     if (climate?.pts?.length > 300) {
@@ -490,6 +538,9 @@ export function buildTempModel(wx, climate = null, now = Date.now()) {
         rh: wx.current.rh, windMph: wx.current.windMph,
         code: wx.current.code, isDay: wx.current.isDay,
         hiF: today?.hiF ?? null, loF: today?.loF ?? null,
-        spark, week, arc,
+        spark, week, candles, arc,
+        outlook, calendar,
+        clim: clim ? { years: clim.years, nDays: clim.nDays } : null,
+        persistence,
     };
 }
