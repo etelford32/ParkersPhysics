@@ -10,9 +10,19 @@
  *   EVENTS      — major-event predictions, next 7 days: thunderstorms, heavy
  *                 rain, wind, heat/freeze (Open-Meteo) merged with inbound
  *                 space weather (CME arrival, forecast G-storms, radiation)
- *   TEMPERATURE — temperature dynamics: now / 24 h / 7-day band, plus the
+ *   TEMPERATURE — temperature dynamics: now / 24 h / the 7-day hourly line
+ *                 with one CANDLE per day (open = midnight, close = 23:00,
+ *                 wick = the day's high/low — a day that warms end to end
+ *                 is a warm candle) / the 30-DAY CALENDAR (this month's
+ *                 page, today + 30 days: 16 days of Open-Meteo NWP, then
+ *                 the archive normal + the model's tail anomaly relaxing
+ *                 on a per-location τ fitted from history — the v0 engine
+ *                 in js/temp-outlook.js, THE seam the 30-day engine plugs
+ *                 into; see TEMP_OUTLOOK_ENGINE_PLAN.md), plus the
  *                 solar-input-vs-temperature year arc with the thermal-lag
- *                 annotation (the planet's thermal memory)
+ *                 annotation (the planet's thermal memory). The charts on
+ *                 this tab carry hover/focus tips (data-tip → .sc-tip);
+ *                 every value in a tip is also printed on the chart.
  *   SPACE       — the NOAA R/S/G risk board, Kp outlook, flares, CME, drag
  *   AURORA      — personal go/maybe/no verdict + the Kp *you* need tonight
  *
@@ -57,6 +67,7 @@ import {
     magneticLatitude, boundaryForKp, auroraVerdict, sunAltitudeDeg,
 } from './verdict-engine.js';
 import { shueStandoffRe } from './hero-live-hud.js';
+import { localDayStart, addDaysNoon } from './temp-outlook.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PURE MODEL — node-testable, no DOM below this line until the renderer
@@ -349,7 +360,7 @@ const CSS = `
   --sc-ink4:#6f6695;--sc-grid:#221743;--sc-border:rgba(154,133,255,.16);--sc-accent:#8ff0ff;
   --sc-good:#2eff9e;--sc-warn:#ffd23f;--sc-serious:#ff8c5a;--sc-crit:#ff3050;
   max-width:1000px;margin:0 auto;font-family:var(--font-sans,'Space Grotesk',system-ui,sans-serif);
-  color:var(--sc-ink2);text-align:left}
+  color:var(--sc-ink2);text-align:left;position:relative}
 .sky-console *{box-sizing:border-box}
 .sc-tabs{display:grid;grid-template-columns:104px repeat(4,1fr);gap:10px;margin:0 0 12px;align-items:center}
 /* @container, not @media: index.html's split hero puts the console in a 560px
@@ -499,6 +510,36 @@ details.sc-tbl th{color:var(--sc-ink4);font-weight:600}
 .sc-temp-hero{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin:4px 0 6px}
 .sc-temp-hero .n{font-size:2.6rem;font-weight:700;letter-spacing:-.02em;line-height:1;color:var(--sc-ink)}
 .sc-temp-hero .n small{font-size:1rem;color:var(--sc-ink3);font-weight:500}
+/* week candles: the hit rect is the whole day column (bigger than the mark) */
+.sc-wk rect.hit{fill:transparent;cursor:crosshair;outline:none}
+.sc-wk rect.hit:hover,.sc-wk rect.hit:focus{fill:rgba(255,255,255,.05)}
+.sc-legend{display:flex;gap:12px 16px;flex-wrap:wrap;font-size:.68rem;color:var(--sc-ink4);margin-top:4px;line-height:1.5}
+.sc-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:5px;box-sizing:border-box}
+/* month calendar */
+.sc-cal{margin-top:6px}
+.sc-cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--sc-ink4);text-align:center;margin-bottom:3px}
+.sc-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.sc-cal .d{position:relative;min-height:50px;border-radius:7px;background:var(--sc-s2);border:1px solid transparent;padding:4px 5px 3px;
+  font-size:.7rem;line-height:1.25;color:var(--sc-ink3);display:flex;flex-direction:column;justify-content:space-between;cursor:default;outline:none;min-width:0}
+.sc-cal .d.pad{background:transparent}
+.sc-cal .d .dn{font-size:.66rem;color:var(--sc-ink3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-cal .d .dn b{color:var(--sc-ink2);font-weight:650}
+.sc-cal .d .hl{font-variant-numeric:tabular-nums;color:var(--sc-ink);font-weight:650;white-space:nowrap;font-size:.76rem}
+.sc-cal .d .hl small{color:var(--sc-ink3);font-weight:500;font-size:.9em}
+.sc-cal .d.past{opacity:.74}
+.sc-cal .d.past .hl{font-weight:500;color:var(--sc-ink2)}
+.sc-cal .d.today{border-color:var(--sc-accent);box-shadow:0 0 0 1px var(--sc-accent) inset;opacity:1}
+.sc-cal .d[data-tier="nwp-ext"] .hl{font-weight:560}
+.sc-cal .d[data-tier="blend"]{border-style:dashed;border-color:rgba(154,133,255,.3)}
+.sc-cal .d[data-tier="blend"] .hl{font-weight:500;color:var(--sc-ink2)}
+.sc-cal .d[data-tier="none"] .hl{color:var(--sc-ink4);font-weight:400}
+.sc-cal .d:not(.pad):hover,.sc-cal .d:not(.pad):focus{border-color:rgba(255,255,255,.4)}
+@container (max-width:520px){.sc-cal .d{min-height:40px;padding:3px 3px 2px;font-size:.62rem}.sc-cal .d .dn{font-size:.56rem}}
+/* hover tip: one element per console, positioned in the console's box */
+.sc-tip{position:absolute;z-index:6;pointer-events:none;display:none;background:#1b1140;border:1px solid var(--sc-border);border-radius:9px;
+  padding:7px 10px;font-size:.72rem;line-height:1.45;color:var(--sc-ink2);white-space:pre-line;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:250px}
+.sc-tip b{color:var(--sc-ink)}
 `;
 
 function ensureStyles() {
@@ -670,6 +711,128 @@ function weekBandSvg(week) {
         g += `<text x="${cx.toFixed(1)}" y="${labY}" text-anchor="middle" font-size="8.4" fill="#6f6695">${i === 0 ? 'Today' : new Date(d.t).toLocaleDateString(undefined, { weekday: 'short' })}</text>`;
     });
     return `<svg class="sc-spark" style="max-width:480px" viewBox="0 0 ${W} ${H}" role="img" aria-label="7-day temperature range">${g}</svg>`;
+}
+
+// Warming / cooling: the tab's own accent for a day that warms across
+// midnight, a blue for one that cools. The pair validates for CVD and
+// normal-vision separation and for contrast on the console surface
+// (dataviz validator, 2026-09-21); the lightness band it fails is the
+// console's deliberate neon-on-black house style, shared by every colour
+// on this card.
+const WARM_COL = '#ff8c5a', COOL_COL = '#6ea8ff';
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtSigned = (v) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(Math.round(v))}°`;
+
+/**
+ * The week: the hourly temperature line across seven local days with ONE
+ * candle per day — body from the day's first hour (midnight) to its last
+ * (23:00), wick from the day's low to its high. Each day column is a hit
+ * area carrying the tip.
+ */
+function weekCandlesSvg(wk, now, { narrow = false } = {}) {
+    if (!wk?.candles?.length) return '';
+    // Type sizes assume the viewBox lands near 1:1 — 620 units in the split
+    // hero's ~520 px lane (0.84×). On a phone the same box would shrink to
+    // ~340 px and every label to ~5 px, so the renderer measures the card and
+    // asks for the NARROW box (380 units), which keeps type at ~0.9×.
+    const W = narrow ? 380 : 620, H = narrow ? 236 : 228, L = narrow ? 32 : 36, R = narrow ? 6 : 10, T = 30, B = 42;
+    const iw = W - L - R, ih = H - T - B;
+    const x = (t) => L + iw * ((t - wk.start) / (wk.end - wk.start));
+    const lo = Math.floor((wk.tMin - 2) / 5) * 5, hi = Math.ceil((wk.tMax + 2) / 5) * 5;
+    const y = (v) => T + ih * (1 - (v - lo) / ((hi - lo) || 1));
+    let g = `<text x="${L}" y="11" font-size="8.5" fill="rgba(255,255,255,.5)" letter-spacing="1.6" font-weight="700">7-DAY · HOURLY LINE + DAILY CANDLES</text>`;
+    // The hours already behind us: a faint wash left of "now" so the eye reads
+    // observed vs forecast without a second legend entry.
+    if (now > wk.start) g += `<rect x="${L}" y="${T}" width="${(x(Math.min(now, wk.end)) - L).toFixed(1)}" height="${ih}" fill="rgba(255,255,255,.035)"/>`;
+    const span = hi - lo, step = span > 60 ? 20 : span > 30 ? 10 : 5;
+    for (let v = lo; v <= hi; v += step) {
+        g += `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#221743" stroke-width="1"/>`
+            + `<text x="${L - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end" font-size="9.5" fill="#6f6695" font-variant-numeric="tabular-nums">${v}°</text>`;
+    }
+    // Line first, candles over it: the candle is the day's summary and must
+    // read on top; the line shows through the body at its opacity.
+    if (wk.hours.length > 1) {
+        const path = wk.hours.map((h, i) => `${i ? 'L' : 'M'}${x(h.t).toFixed(1)},${y(h.tempF).toFixed(1)}`).join(' ');
+        g += `<path d="${path}" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>`;
+    }
+    let hits = '';
+    wk.candles.forEach((c) => {
+        const xs = x(localDayStart(c.t)), xe = x(localDayStart(addDaysNoon(c.t, 1)));
+        const cx = (xs + xe) / 2, bw = (xe - xs) * 0.42;
+        if (c.lead > 0) g += `<line x1="${xs.toFixed(1)}" x2="${xs.toFixed(1)}" y1="${T}" y2="${T + ih}" stroke="#221743" stroke-width="1"/>`;
+        const col = c.dir === 'warming' ? WARM_COL : COOL_COL;
+        g += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(c.high).toFixed(1)}" y2="${y(c.low).toFixed(1)}" stroke="${col}" stroke-width="1.6" opacity=".95"/>`;
+        const yo = y(c.open), yc = y(c.close);
+        const top = Math.min(yo, yc), bh = Math.max(3, Math.abs(yo - yc));
+        g += `<rect data-candle="${c.key}" data-dir="${c.dir}" x="${(cx - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="2.5" fill="${col}" fill-opacity="${c.lead === 0 ? '.95' : '.85'}" stroke="${col}" stroke-width="1"/>`;
+        const d = new Date(c.t);
+        g += `<text x="${cx.toFixed(1)}" y="${(y(c.high) - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="650" fill="rgba(255,255,255,.92)" font-variant-numeric="tabular-nums">${Math.round(c.high)}°</text>`
+            + `<text x="${cx.toFixed(1)}" y="${(y(c.low) + 12).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="#9d92c8" font-variant-numeric="tabular-nums">${Math.round(c.low)}°</text>`
+            + `<text x="${cx.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="${c.lead === 0 ? '#cdc4f0' : '#6f6695'}" font-weight="${c.lead === 0 ? '650' : '500'}">${c.lead === 0 ? 'Today' : narrow ? d.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2) : `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.getDate()}`}</text>`;
+        const day = d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+        const tip = `${day}\nHigh ${Math.round(c.high)}° · Low ${Math.round(c.low)}°\nMidnight ${Math.round(c.open)}° → 23:00 ${Math.round(c.close)}° (${c.dir} ${Math.abs(Math.round(c.deltaF))}°)`
+            + (c.lead === 0 ? `\n${c.observedHours} h of today already in` : '');
+        hits += `<rect class="hit" x="${xs.toFixed(1)}" y="${T}" width="${(xe - xs).toFixed(1)}" height="${ih}" tabindex="0" role="img" aria-label="${esc(tip.replace(/\n/g, '. '))}" data-tip="${esc(tip)}"/>`;
+    });
+    if (now >= wk.start && now <= wk.end) {
+        const xn = x(now).toFixed(1);
+        g += `<line x1="${xn}" x2="${xn}" y1="${T}" y2="${T + ih}" stroke="#cdc4f0" stroke-width="1" stroke-dasharray="2 3" opacity=".75"/>`
+            + `<text x="${x(now) + 4}" y="${T + 10}" font-size="9" fill="#cdc4f0">now</text>`;
+    }
+    return `<svg class="sc-svg sc-wk" viewBox="0 0 ${W} ${H}" role="group" aria-label="Seven-day hourly temperature with one candlestick per day">${g}${hits}</svg>`;
+}
+
+/** Cell background: departure from the date's normal, warm or cool, magnitude → mix. */
+function anomalyStyle(anomF) {
+    if (!isNum(anomF)) return '';
+    const pct = Math.round(clamp01(Math.abs(anomF) / 12) * 55);
+    if (pct < 4) return '';
+    return ` style="background:color-mix(in srgb,${anomF > 0 ? WARM_COL : COOL_COL} ${pct}%,var(--sc-s2))"`;
+}
+
+function calendarCellTip(c, temp) {
+    const date = new Date(c.t).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+    const years = temp.clim ? `${temp.clim.years[0]}–${temp.clim.years[1]}` : '';
+    const anom = isNum(c.anomF) ? `\n${fmtSigned(c.anomF)} vs the ${years} normal for the date` : '';
+    if (c.past) {
+        if (c.hiF == null) return `${date}\nNo record for this day.`;
+        return `${date}\nObserved high ${Math.round(c.hiF)}° · low ${Math.round(c.loF)}°${anom}\n${c.source === 'archive' ? 'ERA5 reanalysis archive' : 'Model analysis — the archive publishes ~2 days behind'}`;
+    }
+    const when = c.lead === 0 ? 'today' : c.lead === 1 ? 'tomorrow' : `in ${c.lead} days`;
+    if (c.source === 'none') return `${date} · ${when}\nNo outlook yet — the archive normals are still loading.`;
+    const val = `High ${Math.round(c.hiF)}° · Low ${Math.round(c.loF)}°`;
+    if (c.source === 'nwp') {
+        return `${date} · ${when}\n${val}${anom}\n${c.tier === 'nwp-near' ? 'Model forecast — day-to-day skill' : 'Extended model run — skill fades past ~10 days'}`;
+    }
+    const tau = temp.outlook?.tau;
+    const trend = c.rho > 0.05 ? `the model's day-16 departure at ${Math.round(c.rho * 100)}%` : 'no model trend left';
+    return `${date} · ${when}\n${val}${anom}\nNormal for the date + ${trend}${isNum(tau) ? ` (τ ${tau.toFixed(1)} d)` : ''}`
+        + (isNum(c.sigmaF) ? `\nTypical miss ±${Math.round(c.sigmaF)}°` : '');
+}
+
+/** The 30-day calendar: this month's page through today + 30. */
+function monthCalendarHtml(temp) {
+    const cal = temp.calendar;
+    if (!cal?.weeks?.length) return '';
+    const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let g = `<div class="sc-cal" role="grid" aria-label="30-day temperature outlook calendar">`
+        + `<div class="sc-cal-head" role="row">${DOW.map((d) => `<span role="columnheader">${d}</span>`).join('')}</div>`;
+    for (const week of cal.weeks) {
+        g += '<div class="sc-cal-grid" role="row">';
+        for (const c of week) {
+            if (c.pad) { g += '<div class="d pad" role="gridcell" aria-hidden="true"></div>'; continue; }
+            const dn = c.monthStart ? `<b>${MONTH_SHORT[c.month]} ${c.day}</b>` : c.isToday ? `<b>${c.day}</b>` : String(c.day);
+            const hl = c.hiF != null && c.loF != null ? `${Math.round(c.hiF)}<small>/${Math.round(c.loF)}</small>` : '<small>—</small>';
+            const cls = `d${c.past ? ' past' : ''}${c.isToday ? ' today' : ''}`;
+            const tip = calendarCellTip(c, temp);
+            g += `<div class="${cls}" role="gridcell" tabindex="0" data-key="${c.key}" data-tier="${c.tier}" data-src="${c.source}" data-lead="${c.lead}"`
+                + `${anomalyStyle(c.anomF)} aria-label="${esc(tip.replace(/\n/g, '. '))}" data-tip="${esc(tip)}">`
+                + `<span class="dn">${dn}</span><span class="hl">${hl}</span></div>`;
+        }
+        g += '</div>';
+    }
+    g += '</div>';
+    return g;
 }
 
 /** The year arc: multi-year mean solar input vs temperature, with lag. */
@@ -876,6 +1039,53 @@ export async function initSkyConsole(host) {
     }));
     const initHash = location.hash.replace('#', '');
     if (/^sky-/.test(initHash)) host.querySelector(`.sc-tab[data-view="${initHash}"]`)?.click();
+
+    // ── Hover / focus tips (temperature tab) ──────────────────────────────
+    // One .sc-tip per console, appended to the HOST (the cards re-render
+    // via innerHTML; the host and the card containers are stable). Tip text
+    // rides data-tip and is inserted with textContent — never innerHTML.
+    const tipEl = document.createElement('div');
+    tipEl.className = 'sc-tip';
+    tipEl.setAttribute('role', 'tooltip');
+    host.appendChild(tipEl);
+    const tempCard = $('[data-temp-card]');
+    const hideTip = () => { tipEl.style.display = 'none'; };
+    const placeTip = (cx, cy) => {
+        const hr = host.getBoundingClientRect();
+        const tw = tipEl.offsetWidth || 200, th = tipEl.offsetHeight || 60;
+        let left = cx - hr.left + 14, top = cy - hr.top + 16;
+        if (left + tw > hr.width - 8) left = Math.max(8, cx - hr.left - tw - 14);
+        if (top + th > hr.height - 8) top = Math.max(8, cy - hr.top - th - 12);
+        tipEl.style.left = `${Math.round(left)}px`;
+        tipEl.style.top = `${Math.round(top)}px`;
+    };
+    const showTip = (el, cx, cy) => {
+        const txt = el.dataset.tip;
+        if (!txt) return;
+        const [first, ...rest] = txt.split('\n');
+        tipEl.replaceChildren();
+        const b = document.createElement('b');
+        b.textContent = first;
+        tipEl.append(b);
+        if (rest.length) tipEl.append(`\n${rest.join('\n')}`);
+        tipEl.style.display = 'block';
+        placeTip(cx, cy);
+    };
+    tempCard.addEventListener('pointerover', (e) => {
+        const el = e.target.closest?.('[data-tip]');
+        if (el) showTip(el, e.clientX, e.clientY); else hideTip();
+    });
+    tempCard.addEventListener('pointermove', (e) => {
+        if (tipEl.style.display === 'block') placeTip(e.clientX, e.clientY);
+    });
+    tempCard.addEventListener('pointerleave', hideTip);
+    tempCard.addEventListener('focusin', (e) => {
+        const el = e.target.closest?.('[data-tip]');
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        showTip(el, r.left + r.width / 2, r.bottom);
+    });
+    tempCard.addEventListener('focusout', hideTip);
 
     // ── Async auth chip ───────────────────────────────────────────────────
     const authSlot = $('[data-auth-slot]');
@@ -1126,6 +1336,42 @@ export async function initSkyConsole(host) {
                  Solar input peaks at the solstice — the air answers weeks later, year after year. That repeatable gap is stored heat:
                  the planet's thermal memory, and the reason seasons spike after the solstices.</div>`
             : `<div class="sc-risknote" style="margin-top:10px">Loading the multi-year archive for the solar-vs-temperature year arc…</div>`;
+        const now = Date.now();
+        const narrow = (card.clientWidth || 600) < 470;
+        const weekBlock = temp.candles?.candles?.length
+            ? `${weekCandlesSvg(temp.candles, now, { narrow })}
+               <div class="sc-legend" aria-label="How to read the candles">
+                 <span><i style="background:${WARM_COL}"></i>day warms midnight → midnight</span>
+                 <span><i style="background:${COOL_COL}"></i>day cools</span>
+                 <span><i style="border:1px solid rgba(255,255,255,.6);height:1px;margin-top:5px"></i>hourly forecast</span>
+                 <span>wick = the day's high / low · body = midnight → 23:00</span>
+               </div>`
+            : weekBandSvg(temp.week);
+        const monthNames = (temp.calendar?.months ?? []).map((m) => MONTH_SHORT[Number(m.slice(5)) - 1]).join(' – ');
+        const o = temp.outlook;
+        // Three honest states: model + normals, model alone (normals loading),
+        // normals alone (feed down) — each says exactly what filled the cells.
+        const outlookNote = temp.clim && o?.nwpLeads > 0
+            ? `Days 1–${o.nwpLeads} are Open-Meteo's model forecast (day-to-day skill fades past ~10 days). Days ${o.nwpLeads + 1}–30 are the ${temp.clim.years[0]}–${temp.clim.years[1]} normal for each date plus the model's last-day departure relaxing on <b>τ ≈ ${fmt1(o.tau)} days</b>`
+              + (temp.persistence ? `, fitted from this location's own history (anomaly σ ${fmt1(temp.persistence.sigmaF)}°)` : '')
+              + ` — a placeholder formula until the per-location 30-day engine ships.`
+            : temp.clim
+                ? `The model days are unavailable right now, so every cell is the ${temp.clim.years[0]}–${temp.clim.years[1]} normal for its date — no model trend.`
+                : o?.nwpLeads > 0
+                ? 'Days 1–16 are Open-Meteo\'s model forecast. Days 17–30 fill in from this location\'s archive normals once they load…'
+                : 'Waiting on the weather feed for the model days; the archive normals will fill the rest.';
+        const calendarBlock = temp.calendar?.weeks?.length
+            ? `<div style="margin-top:14px" class="formula">30-day outlook · ${esc(monthNames)} · this month's page, then 30 days ahead</div>
+               ${monthCalendarHtml(temp)}
+               <div class="sc-legend" aria-label="How to read the calendar">
+                 <span><i style="background:color-mix(in srgb,${WARM_COL} 45%,var(--sc-s2))"></i>warmer than normal</span>
+                 <span><i style="background:color-mix(in srgb,${COOL_COL} 45%,var(--sc-s2))"></i>cooler than normal</span>
+                 <span><i style="border:1px solid var(--sc-accent)"></i>today</span>
+                 <span><i style="border:1px dashed rgba(154,133,255,.7)"></i>normal + trend (days 17–30)</span>
+                 <span>dimmed = observed</span>
+               </div>
+               <div class="sc-risknote" data-outlook-note>${outlookNote}</div>`
+            : '';
         card.innerHTML = `
           <div class="formula"><b>Solar input</b> × <b>thermal memory</b> — today's number, and the physics behind its season</div>
           <h3>Temperature at ${esc(placeName())}${placeSuffix()}</h3>
@@ -1138,10 +1384,9 @@ export async function initSkyConsole(host) {
               <span>Wind <b>${fmt0(temp.windMph)} mph</b></span>
             </div>
           </div>
-          <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end">
-            <div style="flex:1 1 300px;min-width:0">${tempSparkSvg(temp.spark)}</div>
-            <div style="flex:1 1 300px;min-width:0">${weekBandSvg(temp.week)}</div>
-          </div>
+          ${tempSparkSvg(temp.spark)}
+          ${weekBlock}
+          ${calendarBlock}
           ${arcBlock}
           <div class="sc-links">
             <a href="earth.html" data-funnel-cta="console_earth_temp">Open the EarthView globe →</a>
@@ -1250,6 +1495,18 @@ export async function initSkyConsole(host) {
     window.addEventListener('swpc-update', (e) => {
         lastState = e.detail ?? {};
         rebuild();
+    });
+    // The candle chart picks a viewBox from the card's width; re-draw it
+    // when a resize crosses the threshold (debounced — a drag-resize fires
+    // dozens of events, and renderTemp rebuilds a few hundred nodes).
+    let lastNarrow = null, resizeT = 0;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeT);
+        resizeT = setTimeout(() => {
+            const narrowNow = ($('[data-temp-card]')?.clientWidth || 600) < 470;
+            if (lastNarrow !== null && narrowNow !== lastNarrow && temp?.available) renderTemp();
+            lastNarrow = narrowNow;
+        }, 150);
     });
 
     rebuild();          // placeholder paint before any feed dispatch
