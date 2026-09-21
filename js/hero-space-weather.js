@@ -39,6 +39,14 @@
  *     console missed it; it did not — Earth sat at ~85 px radius half under
  *     the Air Quality card. Without a stage the scene centres at 50°, the
  *     old behaviour.
+ *   • CORRIDOR FRAMING (2026-09-21) — `js/hero-rope-layer.js` draws the
+ *     shared provider's CME flux-rope train between a drawn Sun at
+ *     CORRIDOR_SUN_RE and Earth, and owns the τ scrubber under the stage.
+ *     While the visitor scrubs or plays the transit, `setFraming('corridor')`
+ *     eases the camera OUT (fov, distance, elevation and the aim point all
+ *     ride one `_mix` on an e-folding TIME, never a per-frame fraction) so
+ *     the Sun→Earth segment fills the stage box; it eases back to the Earth
+ *     shot when they let go. Both solves live in `_updateFraming()`.
  *   • The camera SWAYS, it does not orbit. The old 1.2°/s orbit carried the
  *     Sun from screen-left to screen-right every 2.5 min, so "the sunlit
  *     limb faces the copy" could not be a property of the layout. The
@@ -78,6 +86,13 @@ const CAM_SWAY_RATE = 0.07;                     // rad/s of the sway phase
 // the old ~85 px; the 250 px phone band lands ~75 px inside the fov clamp.
 const STAGE_DISC_FRAC = 0.30;
 const FOV_MIN = 16, FOV_MAX = 72, FOV_DEFAULT = 50;
+// Corridor framing: the Sun→Earth segment (hero-rope-layer CORRIDOR_SUN_RE
+// long) fills CORRIDOR_SPAN_FRAC of the stage's width at CORRIDOR_FOV, from
+// a higher vantage so the rope's arc reads. The aim point sits between the
+// two bodies, biased toward Earth so the magnetotail has room.
+const CORRIDOR_FOV = 34, CORRIDOR_SPAN_FRAC = 0.62, CORRIDOR_ELEV = 26 * DEG;
+const CORRIDOR_AIM_FRAC = 0.50;      // of the Sun→Earth segment, from Earth
+const FRAMING_TAU_S = 0.55;          // e-folding time of the framing ease
 
 // ── Shared GLSL noise (value noise + fbm), prepended to shaders that need it ──
 const GLSL_NOISE = /* glsl */`
@@ -297,8 +312,12 @@ export class HeroSpaceWeather {
             stage: null,            // DOM box Earth is framed into (see header)
             ...opts,
         };
-        // Framing solved from the stage box: Earth's NDC centre + vertical fov
-        this._frame = { nx: 0, ny: 0, fov: FOV_DEFAULT };
+        // Framing solved from the stage box: Earth's NDC centre + vertical fov,
+        // plus the corridor solve (fov/distance) the rope layer eases to.
+        this._frame = { nx: 0, ny: 0, fov: FOV_DEFAULT, corrFov: CORRIDOR_FOV, corrDist: 0 };
+        this._framingMode = 'earth';
+        this._mix = 0;               // 0 = Earth shot, 1 = corridor
+        this._corridorRe = 0;        // Sun→Earth segment length the rope layer draws
         this._state  = { solar_wind: { speed: 420, density: 5, bz: 0 }, kp: 2 };
         this._t      = 0;
         this._animId = null;
@@ -332,6 +351,7 @@ export class HeroSpaceWeather {
             // every other layer stays on.
             this._engine.setLayerVisible('cusps', false);
             this._initBloom(this._w(), this._h());
+            this._initRopes();
 
             this._clock = new THREE.Clock();
 
@@ -490,9 +510,30 @@ export class HeroSpaceWeather {
         const tanA = Math.tan(Math.asin(Math.min(0.999, 1 / this._camR)));
         const tanV = (H / 2) * tanA / Math.max(1, rpx);
         f.fov = Math.min(FOV_MAX, Math.max(FOV_MIN, 2 * Math.atan(tanV) / DEG));
-        this._camera.fov = f.fov;
+        // Corridor: distance at which the projected Sun→Earth segment spans
+        // CORRIDOR_SPAN_FRAC of the box. The segment is foreshortened by the
+        // sine of the angle between it and the view direction.
+        const seg = this._corridorRe || 0;
+        if (seg > 0) {
+            const th = CAM_AZIMUTH, ph = CORRIDOR_ELEV;
+            const vx = Math.cos(ph) * Math.cos(th), vy = Math.sin(ph), vz = Math.cos(ph) * Math.sin(th);
+            const cosA = vx * SUN_DIR.x + vy * SUN_DIR.y + vz * SUN_DIR.z;
+            const proj = seg * Math.sqrt(Math.max(0.05, 1 - cosA * cosA));
+            const tanVc = Math.tan(CORRIDOR_FOV * DEG / 2);
+            const tanHc = tanVc * (W / Math.max(1, H));
+            const boxFrac = Math.max(0.15, sr.width / cr.width);
+            f.corrDist = proj / (CORRIDOR_SPAN_FRAC * boxFrac * 2 * tanHc);
+            f.corrFov = CORRIDOR_FOV;
+        }
+        this._applyFov();
         this._camera.aspect = W / Math.max(1, H);
         this._camera.updateProjectionMatrix();
+    }
+
+    /** The camera's fov for the current framing mix. */
+    _applyFov() {
+        const f = this._frame;
+        this._camera.fov = f.fov + (f.corrFov - f.fov) * this._mix;
     }
 
     // ── Lighting ─────────────────────────────────────────────────────────────
@@ -605,6 +646,32 @@ export class HeroSpaceWeather {
     setCovered(covered) {
         this._covered = !!covered;
         this._maybeRun();
+    }
+
+    // ── CME flux-rope train + τ scrubber (js/hero-rope-layer.js) ─────────────
+    // Optional: `opts.ropes` is { host, replay } — absent, the scene draws no
+    // train and the framing stays on Earth. The layer is dynamically
+    // imported so a page without it pays nothing.
+    _initRopes() {
+        const cfg = this._opts.ropes;
+        if (!cfg) return;
+        import('./hero-rope-layer.js').then((m) => {
+            if (this._stopped) return;
+            this._corridorRe = m.CORRIDOR_SUN_RE;
+            this._ropes = m.createHeroRopeLayer({
+                THREE, scene: this._scene,
+                sunDir: [SUN_DIR.x, SUN_DIR.y, SUN_DIR.z],
+                host: cfg.host,
+                replay: cfg.replay ?? null,
+                onFraming: (mode) => this.setFraming(mode),
+            });
+            this._updateFraming();
+        }).catch((e) => console.warn('[HeroSpaceWeather] rope layer failed:', e?.message ?? e));
+    }
+
+    /** 'earth' (resting shot) or 'corridor' (Sun→Earth, for the transit). */
+    setFraming(mode) {
+        this._framingMode = mode === 'corridor' ? 'corridor' : 'earth';
     }
 
     // ── Sun — radial-gradient sprites that feed the bloom pass ────────────────
@@ -738,21 +805,40 @@ export class HeroSpaceWeather {
     _animate() {
         this._animId = requestAnimationFrame(this._animate.bind(this));
         const frameStart = performance.now();
-        const dt = Math.min(0.05, this._clock.getDelta() || 1 / 60);
+        const rawDt = this._clock.getDelta() || 1 / 60;
+        const dt = Math.min(0.05, rawDt);            // physics step (clamped)
+        const easeDt = Math.min(0.5, rawDt);         // wall-clock for camera eases
         this._t += dt;
         const t = this._t;
 
         // ── Camera: bounded sway (Sun stays screen-left) + stage framing +
         //    eased pointer parallax ───────────────────────────────────────
+        // Framing mix eases on an e-folding TIME (the TIGA/Star Collider
+        // rule: never a per-frame fraction, which took 8 s on software GL).
+        const want = (this._framingMode === 'corridor' && this._frame.corrDist > 0) ? 1 : 0;
+        const prevMix = this._mix;
+        // easeDt, not dt: the clamped physics step would stretch a 0.55 s
+        // ease to ~6 s on a software rasteriser (measured: mix 0.09 after 3.5 s).
+        this._mix += (want - this._mix) * (1 - Math.exp(-easeDt / FRAMING_TAU_S));
+        if (Math.abs(this._mix - want) < 0.002) this._mix = want;
+        if (this._mix !== prevMix) { this._applyFov(); this._camera.updateProjectionMatrix(); }
+        const mix = this._mix;
+        const camR   = this._camR + (this._frame.corrDist - this._camR) * mix;
+        const camPhi = this._camPhi + (CORRIDOR_ELEV - this._camPhi) * mix;
+
         this._camTh = CAM_AZIMUTH + CAM_SWAY_DEG * DEG * Math.sin(t * CAM_SWAY_RATE);
-        const cx = this._camR * Math.cos(this._camPhi) * Math.cos(this._camTh);
-        const cy = this._camR * Math.sin(this._camPhi) + 0.35 * Math.sin(t * 0.11);
-        const cz = this._camR * Math.cos(this._camPhi) * Math.sin(this._camTh);
+        // The aim point slides from Earth toward the corridor's midpoint;
+        // the camera orbits THAT point so the segment stays framed.
+        const sv = this._tmpSubject ?? (this._tmpSubject = new THREE.Vector3());
+        sv.copy(SUN_DIR).multiplyScalar(this._corridorRe * CORRIDOR_AIM_FRAC * mix);
+        const cx = sv.x + camR * Math.cos(camPhi) * Math.cos(this._camTh);
+        const cy = sv.y + camR * Math.sin(camPhi) + 0.35 * Math.sin(t * 0.11) * (1 - mix);
+        const cz = sv.z + camR * Math.cos(camPhi) * Math.sin(this._camTh);
         const k = Math.min(1, 2.5 * dt);
         this._parX += (this._parTX - this._parX) * k;
         this._parY += (this._parTY - this._parY) * k;
         this._camera.position.set(cx, cy, cz);
-        this._aimAtStage();
+        this._aimAtStage(sv);
 
         // ── Earth + clouds rotation, shader clocks ─────────────────────────
         this._earth.rotation.y  += 0.0085 * dt;
@@ -764,6 +850,7 @@ export class HeroSpaceWeather {
 
         // ── Magnetosphere: live state + real dt every frame ────────────────
         this._engine.tick(t, SUN_DIR, this._state, dt);
+        this._ropes?.tick(dt);
 
         // ── Solar wind ─────────────────────────────────────────────────────
         this._windU.u_cold.value.lerp(this._windColdTarget, Math.min(1, 3 * dt));
@@ -796,25 +883,25 @@ export class HeroSpaceWeather {
      * Pointer parallax rides on top, scaled by the fov so a 16° telephoto
      * frame does not swing four times further than the 50° one did.
      */
-    _aimAtStage() {
+    _aimAtStage(subject) {
         const cam = this._camera, f = this._frame;
         const tv = this._tmpTarget ?? (this._tmpTarget = new THREE.Vector3());
         const rv = this._tmpRight  ?? (this._tmpRight  = new THREE.Vector3());
         const uv = this._tmpUp     ?? (this._tmpUp     = new THREE.Vector3());
         const fv = this._tmpFwd    ?? (this._tmpFwd    = new THREE.Vector3());
-        const tanV = Math.tan(f.fov * DEG / 2);
+        const tanV = Math.tan(cam.fov * DEG / 2);
         const tanH = tanV * cam.aspect;
-        const d = cam.position.length();
+        const d = cam.position.distanceTo(subject);
         const z = d / Math.sqrt(1 + (f.nx * tanH) ** 2 + (f.ny * tanV) ** 2);
         const ox = f.nx * tanH * z, oy = f.ny * tanV * z;
         const par = tanV / Math.tan(FOV_DEFAULT * DEG / 2);
-        tv.set(0, 0, 0);
+        tv.copy(subject);
         cam.lookAt(tv);
         for (let pass = 0; pass < 2; pass++) {
             fv.set(0, 0, -1).applyQuaternion(cam.quaternion);
             rv.crossVectors(fv, cam.up).normalize();
             uv.crossVectors(rv, fv).normalize();
-            tv.set(0, 0, 0).addScaledVector(rv, -ox).addScaledVector(uv, -oy);
+            tv.copy(subject).addScaledVector(rv, -ox).addScaledVector(uv, -oy);
             tv.x -= this._parX * 0.8 * par;
             tv.y -= this._parY * 0.6 * par;
             cam.lookAt(tv);

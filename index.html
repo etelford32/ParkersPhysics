@@ -121,18 +121,21 @@ img{display:block}
    #hero-stage; if it needs to be covered, that is a layout change, not a
    z-index one. */
 #hero-stage{position:relative;height:250px;margin:18px 0 10px;pointer-events:none}
+#hero-scrub-host{position:relative;z-index:2;margin:0 0 14px}
 /* `#hero .x` (0,1,1,0) on purpose: these override the page's own
    `.hero-top{text-align:center}` etc. declared BELOW this block — same
    specificity would lose on source order (measured: the column stayed centred). */
 @media(min-width:1100px){
   #hero .hero-inner{display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);column-gap:40px;max-width:1320px;align-items:start}
   #hero .hero-top,#hero #sky-console-host,#hero .hero-cta{grid-column:1;min-width:0}
+  #hero #hero-stage-col{grid-column:2;grid-row:1/4;align-self:start;min-width:0}
+  #hero #hero-scrub-host{margin:12px 0 0}
   /* explicit: a size-contained (container-type) grid item did not stretch in Chromium — measured 0px wide, centred */
   #hero #sky-console-host{width:100%;justify-self:stretch}
   /* Top-aligned and viewport-capped, NOT stretched over the column: stretched,
      the box was 1023px tall on a 900px viewport and Earth's centre sat below
      the fold. The short side (the cap) is what sets the disc size. */
-  #hero #hero-stage{grid-column:2;grid-row:1/4;align-self:start;height:min(640px,calc(100vh - 150px));min-height:440px;margin:0}
+  #hero #hero-stage{height:min(560px,calc(100vh - 290px));min-height:400px;margin:0}
   #hero .hero-top{text-align:left}
   #hero .hero-sub{margin:0}
   #hero .hero-values{justify-content:flex-start;margin-left:0;margin-right:0}
@@ -412,8 +415,13 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
         <span style="--dot:#8ff0ff">Forecasts validated on the May 2024 G5</span>
       </div>
     </div>
-    <!-- The stage: empty on purpose — the live canvas frames Earth into this box (see the CSS note). -->
-    <div id="hero-stage" aria-hidden="true"></div>
+    <!-- The stage: empty on purpose — the live canvas frames Earth into this
+         box (see the CSS note). Under it, the CME transit scrubber
+         (js/hero-rope-layer.js mounts #hero-scrub into #hero-scrub-host). -->
+    <div id="hero-stage-col">
+      <div id="hero-stage" aria-hidden="true"></div>
+      <div id="hero-scrub-host"></div>
+    </div>
     <div id="sky-console-host" aria-label="Personal sky conditions console"></div>
     <!-- ONE ask (see the CSS note above): the dashboard, which is what the
          funnel shows people actually click. It is sign-in gated; a new
@@ -837,11 +845,38 @@ const heroCanvas = document.getElementById('hero-canvas');
 let heroReady = Promise.resolve(null);
 if (heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
   heroReady = import('./js/hero-space-weather.js')
-    .then(m => { const h = new m.HeroSpaceWeather(heroCanvas, { stage: document.getElementById('hero-stage') }); h.start(); return h; })
+    .then(m => {
+      const h = new m.HeroSpaceWeather(heroCanvas, {
+        stage: document.getElementById('hero-stage'),
+        // The CME flux-rope train + τ scrubber (js/hero-rope-layer.js). It
+        // consumes the ONE shared provider started below and replays the
+        // validated Gannon train while nothing is in flight.
+        ropes: {
+          host: document.getElementById('hero-scrub-host'),
+          replay: () => import('./js/hero-rope-layer.js').then(r => r.gannonReplay()),
+        },
+      });
+      h.start();
+      return h;
+    })
     .catch(() => { heroCanvas.style.display = 'none'; return null; });
   await Promise.race([heroReady, new Promise(r => setTimeout(r, 4000))]);
 } else if (heroCanvas) {
   heroCanvas.style.display = 'none';
+}
+
+/* The shared flux-rope forecast provider (js/sun-flux-rope.js — the same
+   loop sun.html / the dashboard run): DONKI → compounding train → kernel
+   ensemble, published on 'flux-rope-forecast' for the hero's rope layer.
+   Started on idle after the hero is up so the 147 KB WASM + ensemble never
+   sit on the boot path; it publishes idle/failed states too, which is what
+   lets the hero fall back to the Gannon replay honestly. */
+if (heroCanvas && heroCanvas.style.display !== 'none') {
+  const startProvider = () => import('./js/sun-flux-rope.js')
+    .then(m => m.startFluxRopeProvider({ delayMs: 1500 }))
+    .catch(err => console.info('[home] flux-rope provider unavailable:', err?.message ?? err));
+  if ('requestIdleCallback' in window) requestIdleCallback(startProvider, { timeout: 6000 });
+  else setTimeout(startProvider, 2500);
 }
 
 /* Background carousel — experiment home_bg_carousel (js/experiments.js).

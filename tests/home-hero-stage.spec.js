@@ -12,7 +12,12 @@
  *       telephoto (the 2–2.5× disc), on the stack it is centred;
  *   (3) the console's tab row reflows to two columns inside the 560px lane
  *       (container query — a viewport query kept it 5-across and overflowed);
- *   (4) no horizontal page overflow at either width.
+ *   (4) no horizontal page overflow at either width;
+ *   (5) the CME flux-rope layer (js/hero-rope-layer.js) adopts a forecast
+ *       whatever the feed does (live / idle→replay / failed→replay), mounts
+ *       the scrubber under the stage without overlapping it, and scrubbing
+ *       pulls the camera to the corridor framing (mix → 1, corrDist > 0)
+ *       with the train drawn.
  * Chrome geometry only — no live network needed (feeds fail closed).
  */
 import { test, expect } from '@playwright/test';
@@ -42,6 +47,9 @@ function overlaps(a, b) {
 }
 
 test.describe('home hero stage', () => {
+    // Boot alone measured 41 s on the software rasteriser; the 60 s default
+    // is what a full-file run tripped, not an assertion.
+    test.describe.configure({ timeout: 150_000 });
     test('split layout at 1440: stage right of the copy, nothing over it, Earth framed right', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await boot(page);
@@ -73,6 +81,43 @@ test.describe('home hero stage', () => {
         expect(frame.fov).toBeLessThan(36);
 
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
+    });
+
+    test('rope layer: adopts a forecast, scrubber sits under the stage, scrubbing frames the corridor', async ({ page }) => {
+        // Boot + the replay kernel's WASM + the corridor ease, all on a
+        // software rasteriser: measured ~75 s end to end, over the 60 s default.
+        test.setTimeout(180_000);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await boot(page);
+        const hero = await page.evaluate(() => !!window.__ppHero);
+        test.skip(!hero, 'WebGL unavailable — no rope layer without the scene');
+        // The replay's kernel is a 147 KB WASM; give it time on software GL.
+        await page.waitForFunction(() => window.__heroRopes?.state.ropeCount > 0, null, { timeout: 60_000 });
+        const st0 = await page.evaluate(() => window.__heroRopes.state);
+        expect(['live', 'replay', 'down']).toContain(st0.mode);
+        expect(st0.framing).toBe('earth');           // nothing moves the camera uninvited at adoption
+
+        const scrub = await rect(page, '#hero-scrub');
+        const stage = await rect(page, '#hero-stage');
+        expect(scrub).not.toBeNull();
+        expect(scrub.t).toBeGreaterThanOrEqual(stage.b - 1);   // under the stage, never over it
+        expect(overlaps(scrub, stage)).toBe(false);
+        await expect(page.locator('#hero-scrub .hrs-mode')).toContainText(/LIVE|REPLAY/);
+        await expect(page.locator('#hero-scrub a[data-funnel-cta="hero_flux_rope"]')).toHaveCount(1);
+
+        // Scrub to mid-transit: corridor framing, camera eased out, train drawn.
+        await page.evaluate(() => {
+            const r = window.__heroRopes; const w = r.state.window;
+            r.setPlaying(false);
+            r.setTau(w.t0 + (w.arrivalMs ? (w.arrivalMs - w.t0) * 0.85 : (w.t1 - w.t0) * 0.5));
+        });
+        await page.waitForFunction(() => window.__ppHero._mix > 0.95, null, { timeout: 20_000 });
+        const st1 = await page.evaluate(() => ({ ...window.__heroRopes.state, frame: window.__ppHero._frame }));
+        expect(st1.framing).toBe('corridor');
+        expect(st1.frame.corrDist).toBeGreaterThan(20);
+        expect(st1.drawn).toBeGreaterThan(0);
+        expect(st1.apexAu.some((a) => a > 0 && a < 1.35)).toBe(true);
+        expect(st1.oracle.filter(Boolean).every((o) => o === 'kernel' || o === 'mirror')).toBe(true);
     });
 
     test('stacked layout at 390: stage is a band between copy and console, Earth centred', async ({ page }) => {
