@@ -352,7 +352,11 @@ const CSS = `
   color:var(--sc-ink2);text-align:left}
 .sky-console *{box-sizing:border-box}
 .sc-tabs{display:grid;grid-template-columns:104px repeat(4,1fr);gap:10px;margin:0 0 12px;align-items:center}
-@media(max-width:880px){.sc-tabs{grid-template-columns:repeat(2,1fr)}.sc-orb{grid-column:span 2;justify-self:center}}
+/* @container, not @media: index.html's split hero puts the console in a 560px
+   column on a 1440px viewport, where a viewport query would keep the 5-across
+   tab row and overflow it. The host sets container-type:inline-size; in a
+   host without it the query never matches and the row stays 5-across. */
+@container (max-width:880px){.sc-tabs{grid-template-columns:repeat(2,1fr)}.sc-orb{grid-column:span 2;justify-self:center}}
 .sc-tab{--tc:var(--sc-accent);display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:13px;
   background:var(--sc-s1);border:1px solid var(--sc-border);cursor:pointer;text-align:left;color:var(--sc-ink3);
   font-family:inherit;transition:transform .15s,border-color .2s,box-shadow .2s;min-width:0}
@@ -388,11 +392,27 @@ const CSS = `
 @keyframes sc-pulse{0%{box-shadow:0 0 0 0 rgba(46,255,158,.45)}70%{box-shadow:0 0 0 9px rgba(46,255,158,0)}100%{box-shadow:0 0 0 0 rgba(46,255,158,0)}}
 .sc-loc{display:flex;align-items:center;gap:8px;margin-left:auto;position:relative;flex-wrap:wrap}
 .sc-loc input{background:var(--sc-s2);border:1px solid var(--sc-border);border-radius:999px;color:var(--sc-ink);
-  font-size:.8rem;padding:6px 13px;width:180px;outline:none;font-family:inherit}
-.sc-loc input:focus{border-color:var(--sc-accent)}
-.sc-loc button{background:transparent;border:1px solid var(--sc-border);color:var(--sc-ink3);border-radius:999px;
-  padding:6px 11px;font-size:.78rem;cursor:pointer;font-family:inherit;white-space:nowrap}
-.sc-loc button:hover{color:var(--sc-ink)}
+  font-size:.86rem;padding:8px 15px;width:200px;outline:none;font-family:inherit;
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.45);transition:border-color .2s,box-shadow .2s,width .2s}
+.sc-loc input:focus{border-color:var(--sc-accent);box-shadow:inset 0 2px 5px rgba(0,0,0,.45),0 0 0 3px rgba(143,240,255,.18)}
+/* 2026-09-21: the location field is the console's one real input and it
+   read as a search box. While NO location is saved (.sc-loc.unset) the
+   field glows and breathes and carries the ask as its placeholder; once a
+   place is set it calms down. Reduced motion: glow without the pulse. */
+.sc-loc.unset input{border-color:rgba(143,240,255,.65);width:230px;
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.45),0 0 0 3px rgba(143,240,255,.14),0 0 22px rgba(143,240,255,.35)}
+.sc-loc.unset::before{content:'Set your location →';font-family:var(--font-mono,monospace);font-size:.6rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--sc-accent);white-space:nowrap}
+@media (prefers-reduced-motion:no-preference){
+  .sc-loc.unset input{animation:sc-loc-pulse 2.6s ease-in-out infinite}
+  @keyframes sc-loc-pulse{0%,100%{box-shadow:inset 0 2px 5px rgba(0,0,0,.45),0 0 0 3px rgba(143,240,255,.14),0 0 18px rgba(143,240,255,.25)}
+    50%{box-shadow:inset 0 2px 5px rgba(0,0,0,.45),0 0 0 4px rgba(143,240,255,.26),0 0 34px rgba(143,240,255,.55)}}}
+.sc-loc button{border:0;border-radius:999px;padding:8px 14px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;
+  color:#06141a;background:linear-gradient(180deg,#b9f7ff 0%,#8ff0ff 45%,#3fc6dc 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.55) inset,0 -2px 0 rgba(0,70,90,.6) inset,0 4px 0 #0c7a90,0 8px 18px rgba(143,240,255,.35);
+  transition:transform .08s,box-shadow .12s,filter .2s}
+.sc-loc button:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.sc-loc button:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(255,255,255,.3) inset,0 -1px 0 rgba(0,70,90,.6) inset,0 1px 0 #0c7a90,0 3px 8px rgba(143,240,255,.3)}
 .sc-loc-msg{font-size:.7rem;color:var(--sc-warn);flex-basis:100%;text-align:right;min-height:0}
 .sc-auth{display:inline-flex;align-items:center;gap:7px;font-size:.78rem;padding:6px 13px;border-radius:999px;
   border:1px solid var(--sc-border);color:var(--sc-ink2);white-space:nowrap;text-decoration:none;transition:border-color .2s,color .2s}
@@ -868,6 +888,12 @@ export async function initSkyConsole(host) {
     // ── Location plumbing ─────────────────────────────────────────────────
     const locMsg = $('[data-loc-msg]');
     const setLocMsg = (t) => { locMsg.textContent = t || ''; };
+    // The stand-out state: no SAVED location (a tz-guessed default is not
+    // one — it lives in memory only, see the header).
+    const locRow = $('.sc-loc');
+    const applyLocState = () => locRow?.classList.toggle('unset', !loadUserLocation());
+    applyLocState();
+    window.addEventListener('user-location-changed', applyLocState);
     $('[data-loc-input]').addEventListener('keydown', async (e) => {
         if (e.key !== 'Enter') return;
         const q = e.target.value.trim();
