@@ -176,7 +176,7 @@ test.describe('home temperature tab: candles + 30-day calendar', () => {
             if (dom > 3) expect(srcs).toContain('archive');
         }
         // The provenance note names the fitted τ.
-        await expect(page.locator('[data-temp-card] .sc-risknote')).toContainText(/τ ≈ \d/);
+        await expect(page.locator('[data-temp-card] [data-outlook-note]')).toContainText(/τ ≈ \d/);
         // Every week row is seven cells wide.
         const widths = await cal.locator('.sc-cal-grid').evaluateAll((rows) => rows.map((r) => r.children.length));
         expect(widths.every((w) => w === 7)).toBe(true);
@@ -189,7 +189,7 @@ test.describe('home temperature tab: candles + 30-day calendar', () => {
         await expect(cal.locator('.d[data-lead="3"]')).toHaveAttribute('data-src', 'nwp');
         await expect(cal.locator('.d[data-lead="20"]')).toHaveAttribute('data-src', 'none');
         await expect(cal.locator('.d[data-lead="20"] .hl')).toHaveText('—');
-        await expect(page.locator('[data-temp-card] .sc-risknote')).toContainText(/normals/);
+        await expect(page.locator('[data-temp-card] [data-outlook-note]')).toContainText(/normals/);
     });
 
     test('tips: hover a day column and a calendar cell, focus a cell, leave hides', async ({ page }) => {

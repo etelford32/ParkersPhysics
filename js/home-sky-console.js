@@ -1359,7 +1359,7 @@ export async function initSkyConsole(host) {
                  <span><i style="border:1px dashed rgba(154,133,255,.7)"></i>normal + trend (days 17–30)</span>
                  <span>dimmed = observed</span>
                </div>
-               <div class="sc-risknote">${outlookNote}</div>`
+               <div class="sc-risknote" data-outlook-note>${outlookNote}</div>`
             : '';
         card.innerHTML = `
           <div class="formula"><b>Solar input</b> × <b>thermal memory</b> — today's number, and the physics behind its season</div>
