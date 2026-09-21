@@ -982,13 +982,20 @@ class AuthManager {
      * "Check your email" either way; only an actual user with that
      * address gets a delivered email.
      *
-     * shouldCreateUser is FALSE — magic links are intentionally a
-     * sign-IN flow, not a sign-UP flow. New accounts go through the
-     * password form so a recoverable credential exists. A request for
-     * an unknown email is silently ignored on Supabase's side.
+     * shouldCreateUser defaults to FALSE — magic links are a sign-IN flow
+     * on signin.html, where new accounts go through the password form so
+     * a recoverable credential exists. A request for an unknown email is
+     * silently ignored on Supabase's side.
+     *
+     * `createUser: true` (2026-09-21, the homepage upsell —
+     * js/home-signup-upsell.js) opts a caller INTO passwordless sign-UP:
+     * Supabase creates the account on first link click. Such an account
+     * has no password until the user sets one in account settings; it
+     * can always sign in again by magic link. The default stays false so
+     * signin.html's posture is unchanged.
      *
      * @param {string} email
-     * @param {{ redirectTo?: string }} [options]
+     * @param {{ redirectTo?: string, createUser?: boolean }} [options]
      * @returns {{ success: boolean, error?: string, code?: string }}
      */
     async signInWithMagicLink(email, options = {}) {
@@ -1002,7 +1009,7 @@ class AuthManager {
                 email,
                 options: {
                     emailRedirectTo:  redirectTo,
-                    shouldCreateUser: false,
+                    shouldCreateUser: options.createUser === true,
                 },
             });
             if (error) {
