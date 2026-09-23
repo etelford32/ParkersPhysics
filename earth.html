@@ -11205,6 +11205,29 @@ function _tickCloudTiming(simTimeMs) {
     }
 }
 
+// Debug/test probes for LIVE-data gates (tests/cloud-live.spec.js): a
+// strided fingerprint of the mosaic on screen — enough to tell two frames
+// apart and to say whether the observation is empty — and the wind field
+// the advection reads. Neither allocates more than a handful of numbers.
+window.__evCloudMosaic = () => {
+    if (!_satMosaicCPU) return null;
+    const { data, w, h, hasIR, updated } = _satMosaicCPU;
+    let cloud = 0, conf = 0, n = 0, hash = 2166136261 >>> 0;
+    for (let o = 0; o < data.length; o += 4 * 97) {
+        cloud += data[o]; conf += data[o + 3]; n++;
+        hash = Math.imul(hash ^ data[o], 16777619) >>> 0;
+    }
+    return { w, h, hasIR, updated, samples: n,
+             meanCloud: cloud / (255 * n), meanConf: conf / (255 * n), hash: hash.toString(16) };
+};
+window.__evCloudWind = () => {
+    const d = windTex.image.data;
+    let sum = 0, n = 0;
+    for (let o = 0; o < d.length; o += 4 * 13) {
+        sum += Math.hypot(d[o] / 127.5 - 1, d[o + 1] / 127.5 - 1); n++;
+    }
+    return { meanSpeedMs: (sum / n) * MAX_WIND_MS, samples: n };
+};
 // Debug/test probe: what the cloud layer believes about the clock.
 window.__evCloudTime = () => ({
     simTimeMs,

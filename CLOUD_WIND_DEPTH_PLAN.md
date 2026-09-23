@@ -290,6 +290,21 @@ disclosure goes stale).
 NASA is egress-blocked from the build sandbox. It is set wider than the
 bus's −7 d so the only route to 'unavailable' is a real miss.
 
+### 6.2a Plugging in live data
+
+The cloud gates take their pixels from ONE switch,
+`tests/helpers/cloud-source.mjs`, in three modes:
+
+| mode | how | what it proves |
+|------|-----|----------------|
+| **live** | `CLOUD_LIVE=1 npx playwright test tests/cloud-live.spec.js --headed` (or `TEST_BASE_URL=https://parkersphysics.com` for production) | the real archive serves the scrubbed frame by timestamp, the live grid drives a real wind field, a paused instant renders steadily on real data, and **how far back GIBS reaches** — the number that settles `MOSAIC.retentionMs`. Screenshots + `report.json` land in `test-results/cloud-live/`. |
+| **fixture** | `node scripts/fetch-cloud-fixtures.mjs --probe` on a networked machine, then the ordinary gates | `tests/fixtures/clouds/` holds real frames at −0/−3/−6 h plus the live grid; `cloud-timeline.spec.js` answers every GIBS request from them, egress-free. `archive-probe.json` records the reach. |
+| **synthetic** | nothing present (the build sandbox) | routing, modes, timing, shader compile — with banded stubs. |
+
+`--headed` matters: headless Chromium draws on SwiftShader, so the live
+gate on a laptop should run on the machine's GPU to see the march the way
+a visitor does. `CLOUD_STEPS=12` caps the march if a run is too slow.
+
 ### 6.3 Motion comes from the wind, and the clouds run on sim time
 
 - `u_sim_time` is simulation seconds relative to a page epoch (an absolute

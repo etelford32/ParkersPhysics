@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import zlib from 'node:zlib';
+import { installCloudRoutes, resolveCloudSource } from './helpers/cloud-source.mjs';
 
 /**
  * cloud-timeline.spec.js — the cloud layer on the shared clock.
@@ -22,61 +22,15 @@ import zlib from 'node:zlib';
  *      compiles — a GLSL error here surfaces as an invisible layer that is
  *      indistinguishable from "thin clouds today".
  *
- * GIBS is stubbed with synthetic PNGs (the build sandbox has no NASA
- * egress, and this gate must not need it). The same three URL flags the
- * atmo-stack gate uses make the volumetric path reachable on a software
- * rasteriser; see that spec for why each is load-bearing.
+ * GIBS is never hit for real here (the build sandbox has no NASA egress,
+ * and this gate must not need it): tests/helpers/cloud-source.mjs answers
+ * every request from REAL archived frames when `node
+ * scripts/fetch-cloud-fixtures.mjs` has populated tests/fixtures/clouds/,
+ * and from synthetic PNGs otherwise. tests/cloud-live.spec.js is the
+ * opt-in gate that runs against the live archive. The same three URL
+ * flags the atmo-stack gate uses make the volumetric path reachable on a
+ * software rasteriser; see that spec for why each is load-bearing.
  */
-
-// ── Minimal PNG encoder (RGBA, no interlace) — see cloud-mosaic-e2e.spec.js ──
-function crc32(buf) {
-    let c, table = crc32.table;
-    if (!table) {
-        table = crc32.table = new Int32Array(256);
-        for (let n = 0; n < 256; n++) {
-            c = n;
-            for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-            table[n] = c;
-        }
-    }
-    c = 0xFFFFFFFF;
-    for (let i = 0; i < buf.length; i++) c = table[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
-    return (c ^ 0xFFFFFFFF) >>> 0;
-}
-function chunk(type, data) {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(body));
-    return Buffer.concat([len, body, crc]);
-}
-function encodePng(width, height, rgbaFn) {
-    const ihdr = Buffer.alloc(13);
-    ihdr.writeUInt32BE(width, 0);
-    ihdr.writeUInt32BE(height, 4);
-    ihdr[8] = 8; ihdr[9] = 6;
-    const raw = Buffer.alloc(height * (1 + width * 4));
-    for (let j = 0; j < height; j++) {
-        const row = j * (1 + width * 4);
-        raw[row] = 0;
-        for (let i = 0; i < width; i++) {
-            const [r, g, b, a] = rgbaFn(i, j);
-            const o = row + 1 + i * 4;
-            raw[o] = r; raw[o + 1] = g; raw[o + 2] = b; raw[o + 3] = a;
-        }
-    }
-    return Buffer.concat([
-        Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
-        chunk('IHDR', ihdr),
-        chunk('IDAT', zlib.deflateSync(raw)),
-        chunk('IEND', Buffer.alloc(0)),
-    ]);
-}
-// Banded IR (alternating overcast / clear stripes) so the mosaic carries
-// structure; MODIS COT transparent (observed-clear).
-const IR_PNG  = encodePng(64, 32, (i) => ((i >> 3) & 1) ? [235, 235, 235, 255] : [70, 70, 70, 255]);
-const COT_PNG = encodePng(64, 32, () => [0, 0, 0, 0]);
 
 const H = 3_600_000;
 const floor10 = (ms) => Math.floor(ms / 600_000) * 600_000;
@@ -92,18 +46,12 @@ test.use({
 test.describe('cloud timeline', () => {
     test('mosaic follows the time bus; sim time drives the clouds; half-res march compiles', async ({ page }) => {
         test.setTimeout(180_000);
-        const gibs = [];
-        await page.route('**wvs.earthdata.nasa.gov/**', async route => {
-            const url = new URL(route.request().url());
-            const layers = url.searchParams.get('LAYERS') ?? '';
-            const time   = url.searchParams.get('TIME') ?? '';
-            gibs.push({ layers, time, at: Date.now() });
-            await route.fulfill({
-                status: 200, contentType: 'image/png',
-                headers: { 'Access-Control-Allow-Origin': '*' },
-                body: /Cloud_Optical_Thickness/.test(layers) ? COT_PNG : IR_PNG,
-            });
-        });
+        // Fixture mode (real archived frames from disk) when the fetcher has
+        // run; synthetic otherwise. Never live — that is cloud-live.spec.js.
+        let source = resolveCloudSource();
+        if (source.mode === 'live') source = { mode: 'synthetic', manifest: null };
+        console.log(`[cloud-timeline] GIBS source: ${source.mode}${source.manifest ? ` (${source.manifest.frames.length} frames, fetched ${source.manifest.fetched})` : ''}`);
+        const gibs = await installCloudRoutes(page, source);
         await page.route('**/api/telemetry/log', route =>
             route.fulfill({ status: 202, contentType: 'application/json', body: '{"ok":true}' }));
 
