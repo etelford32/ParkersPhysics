@@ -22,10 +22,17 @@
  *       (u_texMix → 1) and the globe is held at its real orientation — the
  *       mesh carries today's sub-solar point onto the scene Sun — and with
  *       the maps blocked the globe stays FEATURELESS (u_texMix 0) while the
- *       hero still boots and goes live.
+ *       hero still boots and goes live;
+ *   (7) THE REAL AURORA (js/hero-aurora.js): with an OVATION grid served
+ *       (a SYNTHETIC fixture — NOAA is egress-blocked here), the curtains
+ *       stand on the observed oval (per-azimuth intensity, not the uniform
+ *       Kp ring), the engine's equatorial group sits on the REAL IGRF dipole,
+ *       and the night-side footprint is on; with the feed failing, the Kp
+ *       ring comes back and the footprint goes dark.
  * Chrome geometry + debug hooks only — no live network needed.
  */
 import { test, expect } from '@playwright/test';
+import { synthOvation } from './fixtures/ovation-synthetic.mjs';
 
 const URL = '/index.html?exp_home_bg_carousel=control&debug=1';
 
@@ -126,6 +133,58 @@ test.describe('home hero entrance', () => {
         await page.waitForTimeout(1500);
         const st = await page.evaluate(() => ({ texMix: window.__ppHero._earthU.u_texMix.value, tier: window.__ppHero._earthTier ?? null }));
         expect(st).toEqual({ texMix: 0, tier: null });
+    });
+
+    test('live aurora: curtains on the observed oval, on the real dipole; dead feed → Kp ring', async ({ page }) => {
+        await page.setViewportSize({ width: 1280, height: 800 });
+        let feed = 'up';
+        const body = JSON.stringify(synthOvation(new Date()));
+        await page.route('**/api/noaa/aurora-grid*', (r) => feed === 'up'
+            ? r.fulfill({ status: 200, contentType: 'application/json', body })
+            : r.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"upstream_unavailable"}' }));
+        await page.goto(URL + '&intro=0', { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction(() => {
+            const c = document.getElementById('hero-canvas');
+            return !!window.__ppHero?._shown || (c && c.style.display === 'none');
+        }, null, { timeout: 120_000 });
+        test.skip(!(await page.evaluate(() => !!window.__ppHero?._shown)), 'WebGL unavailable — no scene to check');
+        await page.waitForFunction(() => window.__ppHero._auroraSource === 'ovation' && window.__ppHero._earthU.u_auroraOn.value === 1, null, { timeout: 30_000 });
+
+        const live = await page.evaluate(() => {
+            const h = window.__ppHero, e = h._engine;
+            let ints = null;
+            e._auroraN.traverse((o) => { if (!ints && o.geometry?.attributes?.a_int) ints = Array.from(o.geometry.attributes.a_int.array); });
+            // The group's +y must be the IGRF north dipole pole, carried into
+            // the world by the globe's own orientation.
+            const V3 = h._earth.position.constructor;
+            const r = Math.PI / 180, la = h._dipole.poleLatDeg * r, lo = h._dipole.poleLonDeg * r;
+            const pole = new V3(Math.cos(la) * Math.cos(lo), Math.sin(la), -Math.cos(la) * Math.sin(lo)).applyQuaternion(h._earth.quaternion);
+            const up = new V3(0, 1, 0).applyQuaternion(e._eqGroup.quaternion);
+            return {
+                oval: !!e._auroraOval, segs: e._auroraOval?.north?.colatDeg?.length,
+                min: Math.min(...ints), max: Math.max(...ints), dot: up.dot(pole),
+                poleLat: h._dipole.poleLatDeg,
+            };
+        });
+        expect(live.oval).toBe(true);
+        expect(live.segs).toBe(181);
+        // Observed, not parametric: bright at magnetic midnight, dark at noon.
+        expect(live.max).toBeGreaterThan(0.7);
+        expect(live.min).toBeLessThan(0.5);
+        expect(live.dot).toBeGreaterThan(0.99999);
+        expect(live.poleLat).toBeGreaterThan(79);   // the geomagnetic pole, not the old fixed 11.5° tilt
+
+        // Feed dies → the next refresh drops back to the Kp ring, footprint dark.
+        feed = 'down';
+        await page.evaluate(() => window.__ppHero._fetchAurora());
+        await page.waitForFunction(() => window.__ppHero._auroraSource === 'kp' && window.__ppHero._earthU.u_auroraOn.value === 0, null, { timeout: 30_000 });
+        const kp = await page.evaluate(() => {
+            const e = window.__ppHero._engine;
+            let ints = null;
+            e._auroraN.traverse((o) => { if (!ints && o.geometry?.attributes?.a_int) ints = Array.from(o.geometry.attributes.a_int.array); });
+            return { oval: e._auroraOval, allOne: ints.every((v) => v === 1), reason: window.__ppHero._auroraReason };
+        });
+        expect(kp).toEqual({ oval: null, allOne: true, reason: 'http-503' });
     });
 
     test('reduced motion: no reticle, no scene', async ({ page }) => {

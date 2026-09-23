@@ -17,6 +17,17 @@
  *     (assets/earth/SOURCES.md). No cloud shell: invented clouds over real
  *     continents would be weather that is not there — see _initEarth.
  *     Maps missing ⇒ a FEATURELESS ocean globe, never invented land.
+ *   • THE REAL AURORA (2026-09-23) — js/hero-aurora.js. The engine's
+ *     equatorial group (curtains, belts, plasmasphere, field lines) is turned
+ *     onto the IGRF-14 dipole (`dipoleFrame`, composed with the globe's
+ *     orientation every second) instead of a fixed 11.5° tilt, and NOAA's
+ *     OVATION nowcast (/api/noaa/aurora-grid, every 5 min) shapes the
+ *     curtains: each azimuth stands at the oval's own magnetic colatitude at
+ *     the oval's own strength (`setAuroraOval`), and the same grid glows on
+ *     the night side as a footprint. The Kp ring comes back whenever there is
+ *     no fresh product (feed down / stale / no oval) AND while a scrubbed
+ *     MODEL storm drives the engine — `_applyAurora` is the one switch and
+ *     `_auroraSource` says which is on screen.
  *   • MagnetosphereEngine — Shue magnetopause, bow shock, belts, plasmasphere,
  *     GLSL aurora curtains, dayside reconnection. The engine gets the FULL
  *     live state every frame via tick(t, sunDir, state, dt) — do not drop the
@@ -108,6 +119,7 @@ import { CopyShader } from 'three/addons/shaders/CopyShader.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { GEO_GLSL } from './geo/coords.glsl.js';
 import { TEXTURE_TIERS, pickTextureTier, earthOrientation } from './hero-earth.js';
+import { auroraProduct, dipoleFrame } from './hero-aurora.js';
 
 const DEG = Math.PI / 180;
 
@@ -168,6 +180,11 @@ const EARTH_EXPOSURE    = 1.0;    // noon land reproduces the map; the roll-off 
 const EARTH_TEXMIX_TAU  = 0.35;   // s — featureless → real map crossfade when the maps arrive late
 const EARTH_ORIENT_MS   = 1000;   // re-aim at the real sub-solar point this often (it moves 0.004°/s)
 const PHONE_MAX_W       = 768;    // DESIGN_TOKENS.md mobile breakpoint — phones never fetch 4k
+// ── The aurora (2026-09-23) — js/hero-aurora.js ────────────────────────────
+const AURORA_URL        = '/api/noaa/aurora-grid';   // OVATION Prime, the route AurOracle uses
+const AURORA_REFRESH_MS = 5 * 60e3;                  // OVATION's own cadence (and the route's cache)
+const AURORA_TIMEOUT_MS = 10e3;
+const AURORA_FADE_TAU   = 0.6;    // s — the footprint fades between OVATION and the Kp fallback
 
 // ── Shared GLSL noise (value noise + fbm), prepended to shaders that need it ──
 const GLSL_NOISE = /* glsl */`
@@ -243,6 +260,8 @@ const EARTH_FRAG = /* glsl */`
     uniform vec3  u_sun;          // world Sun direction
     uniform vec3  u_pole;         // world direction of the geographic north pole
     uniform float u_exposure;
+    uniform sampler2D u_aurora;   // OVATION footprint, √(p/P_FULL) in R (js/hero-aurora.js)
+    uniform float u_auroraOn;     // 0 = no live oval (feed down / stale / a scrubbed model storm)
     varying vec3 vObj;
     varying vec3 vWN;
     varying vec3 vWP;
@@ -358,6 +377,12 @@ const EARTH_FRAG = /* glsl */`
         col += albedo * 0.006 * dark;                 // starlight + airglow on the ground: continents barely there
 
         col = rolloff(col * u_exposure) + glint * u_exposure;
+
+        // ── Aurora footprint: NOAA's OVATION oval where the ground is dark ─
+        // An emitter, so added after the roll-off like the glint. By day it
+        // is outshone by sunlight, as the real one is from orbit.
+        float oval = texture2D(u_aurora, uv).r * u_auroraOn;
+        col += vec3(0.10, 0.95, 0.38) * 0.42 * oval * (1.0 - smoothstep(-0.12, 0.06, mu0s));
         gl_FragColor = vec4(srgbEncode(col), 1.0);
     }
 `;
@@ -602,6 +627,9 @@ export class HeroSpaceWeather {
             for (const l of REVEAL_LAYERS) this._engine.setLayerVisible(l, false);
             // The entrance raises the curtains from the ground (_stepIntro).
             if (this._intro) this._engine.setAuroraRise(0);
+            // Real dipole + NOAA's live oval (js/hero-aurora.js).
+            this._applyDipoleWorld();
+            this._initAurora();
             this._initBloom(this._w(), this._h());
             this._initRopes();
 
@@ -761,6 +789,7 @@ export class HeroSpaceWeather {
 
     stop() {
         this._stopped = true;
+        clearInterval(this._auroraTimer);
         if (this._animId) { cancelAnimationFrame(this._animId); this._animId = null; }
     }
 
@@ -932,7 +961,23 @@ export class HeroSpaceWeather {
             u_sun:      { value: SUN_DIR.clone() },
             u_pole:     { value: new THREE.Vector3(0, 1, 0) },
             u_exposure: { value: EARTH_EXPOSURE },
+            u_aurora:   { value: null },
+            u_auroraOn: { value: 0 },
         };
+        // The OVATION footprint (RGBA so it uploads on WebGL1 too; the value
+        // rides R). 1° cells in the canonical UV — js/hero-aurora.js.
+        const aTex = new THREE.DataTexture(new Uint8Array(360 * 180 * 4), 360, 180);
+        aTex.wrapS = THREE.RepeatWrapping;
+        aTex.wrapT = THREE.ClampToEdgeWrapping;
+        aTex.magFilter = THREE.LinearFilter;
+        aTex.minFilter = THREE.LinearFilter;
+        aTex.needsUpdate = true;
+        this._earthU.u_aurora.value = aTex;
+        this._auroraOnTarget = 0;
+        // The REAL geomagnetic dipole (IGRF-14 via js/geomag/dipole.js),
+        // Earth-fixed; composed with the globe's orientation in _orientEarth.
+        this._dipole = dipoleFrame(new Date());
+        this._auroraSource = 'kp';
         this._texMixTarget = 0;
         const earthMat = new THREE.ShaderMaterial({
             uniforms: this._earthU,
@@ -983,6 +1028,63 @@ export class HeroSpaceWeather {
         this._earthU.u_pole.value.set(o.pole[0], o.pole[1], o.pole[2]);
         this._subsolar = o.subsolar;
         this._orientAt = date.getTime();
+        this._applyDipoleWorld();
+    }
+
+    /**
+     * The engine's equatorial group (curtains, belts, plasmasphere, field
+     * lines) on the REAL dipole: world = globe orientation ∘ Earth-fixed
+     * dipole frame. Before this it sat on a fixed 11.5° tilt about the
+     * scene's x axis, which put the oval nowhere in particular.
+     */
+    _applyDipoleWorld() {
+        if (!this._engine || !this._dipole) return;
+        const d = this._dipole.quaternion;
+        const q = this._tmpDipQ ?? (this._tmpDipQ = new THREE.Quaternion());
+        const dq = this._tmpDipQ2 ?? (this._tmpDipQ2 = new THREE.Quaternion());
+        q.copy(this._earth.quaternion).multiply(dq.set(d[0], d[1], d[2], d[3]));
+        this._engine.setDipoleFrame([q.x, q.y, q.z, q.w]);
+    }
+
+    // ── The live oval (js/hero-aurora.js) ───────────────────────────────────
+    _initAurora() {
+        this._fetchAurora();
+        this._auroraTimer = setInterval(() => this._fetchAurora(), AURORA_REFRESH_MS);
+    }
+
+    async _fetchAurora() {
+        let product;
+        try {
+            const res = await fetch(AURORA_URL, { signal: AbortSignal.timeout?.(AURORA_TIMEOUT_MS) });
+            product = res.ok ? auroraProduct(await res.json(), new Date()) : { ok: false, reason: `http-${res.status}` };
+        } catch (e) {
+            product = { ok: false, reason: 'unreachable' };
+        }
+        if (this._stopped) return;
+        this._auroraProduct = product.ok ? product : null;
+        this._auroraReason = product.ok ? 'ovation' : product.reason;
+        if (product.ok) {
+            const tex = this._earthU.u_aurora.value, px = tex.image.data, f = product.footprint;
+            for (let i = 0; i < f.length; i++) px[i * 4] = f[i];
+            tex.needsUpdate = true;
+        }
+        this._applyAurora();
+    }
+
+    /**
+     * Which aurora the scene shows. OVATION when there is a fresh product and
+     * the engine is on the LIVE state; the Kp ring otherwise — a dead or
+     * stale feed must look like the model, never like a quiet live night,
+     * and a SCRUBBED model storm (the Gannon replay) must not wear today's
+     * observed oval.
+     */
+    _applyAurora() {
+        if (!this._engine) return;
+        const p = this._auroraProduct;
+        const live = !!p && !this._scrubDriven;
+        this._engine.setAuroraOval(live ? { north: p.north, south: p.south } : null);
+        this._auroraOnTarget = live ? 1 : 0;
+        this._auroraSource = live ? 'ovation' : 'kp';
     }
 
     /**
@@ -1372,6 +1474,12 @@ export class HeroSpaceWeather {
                 : tm.value + (this._texMixTarget - tm.value) * (1 - Math.exp(-easeDt / EARTH_TEXMIX_TAU));
             if (Math.abs(tm.value - this._texMixTarget) < 0.003) tm.value = this._texMixTarget;
         }
+        // The footprint rises with the curtains in the entrance and fades
+        // between OVATION and the Kp fallback on wall clock.
+        const ao = this._earthU.u_auroraOn;
+        const aoTarget = this._auroraOnTarget * (this._engine?._auroraRise ?? 1);
+        ao.value += (aoTarget - ao.value) * (1 - Math.exp(-easeDt / AURORA_FADE_TAU));
+        if (Math.abs(ao.value - aoTarget) < 0.003) ao.value = aoTarget;
         this._starU.u_time.value  = t;
         if (this._nebU) this._nebU.u_time.value = t;
 
@@ -1391,7 +1499,7 @@ export class HeroSpaceWeather {
                     if (this._condState) {
                         this._engine.update(this._condState);
                         this._updateFromState(this._condState);
-                        this._scrubDriven = true;
+                        if (!this._scrubDriven) { this._scrubDriven = true; this._applyAurora(); }
                     }
                 }
                 if (this._condState) engineState = this._condState;
@@ -1400,6 +1508,7 @@ export class HeroSpaceWeather {
                 this._condState = null;
                 this._engine.update(this._state);
                 this._updateFromState(this._state);
+                this._applyAurora();
             }
         }
         this._engine.tick(t, SUN_DIR, engineState, dt);
