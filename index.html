@@ -21,10 +21,22 @@
      perf-hints block, which scripts/perf_hints.py owns. -->
 <link rel="modulepreload" href="/js/hero-space-weather.js">
 <link rel="modulepreload" href="/js/magnetosphere-engine.js">
+<link rel="modulepreload" href="/js/hero-earth.js">
+<link rel="modulepreload" href="/js/sun-altitude.js">
+<link rel="modulepreload" href="/js/geo/coords.glsl.js">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/UnrealBloomPass.js">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/Pass.js">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/CopyShader.js">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/LuminosityHighPassShader.js">
+<!-- The Earth's boot-tier maps (assets/earth, ~115 KB — js/hero-earth.js
+     TEXTURE_TIERS.boot; the entrance waits on them, capped). `crossorigin`
+     because three's TextureLoader requests in CORS mode and a preload is
+     only reused on a matching mode; `media` because a reduced-motion visitor
+     never gets the scene and should not pay for its maps. -->
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/day-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/water-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/lights-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/relief-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">

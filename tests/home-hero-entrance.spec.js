@@ -17,7 +17,12 @@
  *       'hero-intro-done';
  *   (4) the two demo iframes carry no src at load, the near one gets it
  *       only after the gate opens, the far one only when scrolled near;
- *   (5) reduced motion: no reticle, no scene.
+ *   (5) reduced motion: no reticle, no scene;
+ *   (6) THE REAL EARTH (js/hero-earth.js): the self-hosted maps are applied
+ *       (u_texMix → 1) and the globe is held at its real orientation — the
+ *       mesh carries today's sub-solar point onto the scene Sun — and with
+ *       the maps blocked the globe stays FEATURELESS (u_texMix 0) while the
+ *       hero still boots and goes live.
  * Chrome geometry + debug hooks only — no live network needed.
  */
 import { test, expect } from '@playwright/test';
@@ -64,6 +69,23 @@ test.describe('home hero entrance', () => {
         });
         expect(settled).toEqual({ zoom: 1, arc: 0, elev: 0, rise: 1, ignite: 1 });
 
+        // (6) Real maps applied; real orientation: the sub-solar point's
+        // canonical normal (js/geo/coords.js frame), through the mesh's own
+        // transform, lands on the scene Sun.
+        const earth = await page.evaluate(() => {
+            const h = window.__ppHero;
+            const V3 = h._earth.position.constructor;
+            const { lat, lon } = h._subsolar;
+            const r = Math.PI / 180, cl = Math.cos(lat * r);
+            const n = new V3(cl * Math.cos(lon * r), Math.sin(lat * r), -cl * Math.sin(lon * r));
+            const w = n.applyQuaternion(h._earth.quaternion);
+            const S = h._earthU.u_sun.value.clone().normalize();
+            return { texMix: h._earthU.u_texMix.value, tier: h._earthTier, dot: w.dot(S) };
+        });
+        expect(earth.texMix).toBe(1);
+        expect(['boot', 'hd', 'uhd']).toContain(earth.tier);
+        expect(earth.dot).toBeGreaterThan(0.99999);
+
         // (2) Grow the hero with no window resize: the buffer must follow the
         // CSS box and the camera aspect with it (else Earth is an oval).
         await page.evaluate(() => {
@@ -89,6 +111,21 @@ test.describe('home hero entrance', () => {
         expect(await page.evaluate(() => document.querySelector('iframe.sw-attract-frame').getAttribute('src'))).toBeNull();
         await page.evaluate(() => document.querySelector('.sw-attract-section').scrollIntoView());
         await page.waitForFunction(() => /preview=1/.test(document.querySelector('iframe.sw-attract-frame').getAttribute('src') || ''), null, { timeout: 20_000 });
+    });
+
+    test('maps blocked: a featureless globe, still live', async ({ page }) => {
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.route('**/assets/earth/**', (r) => r.abort());
+        await page.goto(URL + '&intro=0', { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction(() => {
+            const c = document.getElementById('hero-canvas');
+            return document.getElementById('hero').classList.contains('hero-live') || (c && c.style.display === 'none');
+        }, null, { timeout: 120_000 });
+        const hasScene = await page.evaluate(() => !!window.__ppHero?._shown);
+        test.skip(!hasScene, 'WebGL unavailable — no scene to check');
+        await page.waitForTimeout(1500);
+        const st = await page.evaluate(() => ({ texMix: window.__ppHero._earthU.u_texMix.value, tier: window.__ppHero._earthTier ?? null }));
+        expect(st).toEqual({ texMix: 0, tier: null });
     });
 
     test('reduced motion: no reticle, no scene', async ({ page }) => {
