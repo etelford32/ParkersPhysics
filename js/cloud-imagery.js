@@ -186,9 +186,20 @@ function shortLayerId(id) {
     return String(id).replace('_Brightness_Temperature', '_BT').slice(0, 64);
 }
 
-/** Geo candidates: every layer at fresh timestamps first, then date-only. */
-function geoCandidates(region, baseDate) {
-    const times = gibsTimeCandidates(baseDate.getTime());
+/**
+ * Geo candidates: every layer at fresh timestamps first, then date-only.
+ *
+ * `explicit` = the caller asked for a SPECIFIC instant (the time scrubber,
+ * via satellite-feed.js setTime). Then the ingest lag does not apply (it is
+ * a property of "now"), the walk-back is one cadence at a time so the frame
+ * lands as close to the request as the archive allows, and the date-only
+ * net is OFF — a reference granule from an unknown hour must never be
+ * labelled with the scrubbed time. A total miss is reported, not papered.
+ */
+function geoCandidates(region, baseDate, explicit = false) {
+    const times = explicit
+        ? gibsTimeCandidates(baseDate.getTime(), { lagMin: 0, backMin: [0, 10, 30], dateFallback: false })
+        : gibsTimeCandidates(baseDate.getTime());
     const out = [];
     // Freshness beats sensor preference: try every layer at the freshest
     // time before stepping any layer back — a 10-min-old fallback bird is
@@ -290,11 +301,15 @@ function ageMinutes(timestampMs, now) {
 async function fetchGeostationaryMosaic(THREE, opts, diag) {
     const width  = Math.min(4096, Math.max(512, opts.width ?? DEFAULT_WIDTH));
     const height = opts.height ?? (width / 2 | 0);
-    const base   = opts.date ?? new Date();
+    // An explicit `timestampMs` (the time scrubber) is a request for THAT
+    // instant; `date` / nothing means "the freshest frame there is".
+    const explicit = Number.isFinite(opts.timestampMs);
+    const base   = explicit ? new Date(opts.timestampMs) : (opts.date ?? new Date());
     const now    = base.getTime();
+    diag.requestedMs = explicit ? opts.timestampMs : null;
 
     const regionResults = await Promise.all(GEO_REGIONS.map(region =>
-        loadFirstCandidate(geoCandidates(region, base), width, height, diag, region.name)
+        loadFirstCandidate(geoCandidates(region, base, explicit), width, height, diag, region.name)
             .then(hit => hit ? { region, ...hit } : null)
     ));
     const polarHit = await loadFirstCandidate(
@@ -342,6 +357,7 @@ async function fetchGeostationaryMosaic(THREE, opts, diag) {
         mosaic:      true,
         date:        successful[0]?.time?.slice(0, 10) ?? toUtcDate(base),
         timestampMs: newest,
+        requestedMs: explicit ? opts.timestampMs : null,
         layers:      successful.map(s => `${s.region.name}=${s.layerId}`)
                         .concat(polarHit ? [`Polar=${polarHit.layerId}`] : []),
         regions:     successful.map(s => s.region.name),
@@ -404,7 +420,14 @@ export async function fetchCloudImagery(THREE, opts = {}) {
     let result = null;
     try {
         result = await fetchGeostationaryMosaic(THREE, opts, diag);
-        if (!result) result = await fetchSingleLayerFallback(THREE, opts, diag);
+        // The single-layer MODIS net is a DAILY composite: fine as the
+        // last resort for "live", wrong under an explicit scrubbed instant
+        // (an hourly label over a day-long average). An explicit request
+        // that the geostationary archive cannot serve is reported as a miss
+        // and the caller (satellite-feed.js) maps it to 'unavailable'.
+        if (!result && !Number.isFinite(opts.timestampMs)) {
+            result = await fetchSingleLayerFallback(THREE, opts, diag);
+        }
     } finally {
         if (!result) diag.mode = 'none';
         diag.ms = Math.round(performance.now() - t0);
