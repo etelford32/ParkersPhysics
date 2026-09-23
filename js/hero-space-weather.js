@@ -64,6 +64,25 @@
  *     azimuth is now CAM_AZIMUTH ± CAM_SWAY_DEG: with the Sun at +x and the
  *     camera at negative z, screen-right is (sin θ, 0, −cos θ) and the Sun
  *     projects LEFT — toward the copy — with the tail receding right.
+ *   • THE ENTRANCE (2026-09-23) — the load used to be: empty stage for a
+ *     beat, a main-thread freeze while every program compiled on frame one,
+ *     then the finished scene CUT in over the CSS backdrop (and, because the
+ *     buffer was never resized when the hero grew, as an oval — see
+ *     _onResize). Now: index.html shows a boot reticle in the stage (CSS,
+ *     compositor-only), `_boot()` warms every program (`_compileAsync`)
+ *     while the canvas is at opacity 0, and the second frame (the first is
+ *     presented by then) sets `hero-live` on #hero so the canvas CROSSFADES
+ *     in and the reticle locks and dissolves. The camera then settles over INTRO_S of WALL clock
+ *     from a sunrise pose — over the night side, higher, zoomed out — so
+ *     the lit limb grows from a crescent into the resting gibbous while
+ *     Earth grows into the reticle; the stars ignite, the solar wind
+ *     ARRIVES from the Sun as a front (the same stream laid out upstream,
+ *     not a separate effect), breaks on the bow shock, and the aurora
+ *     curtains RISE to their Kp-driven level (engine `setAuroraRise`) as it
+ *     reaches Earth. Every term ends on the live state; nothing is faked
+ *     (no substorm flash the feed did not report). `hero-intro-done` fires
+ *     when it has settled — index.html holds the two demo iframes until
+ *     then. `?intro=0` (or `intro: false`) starts settled.
  *
  * Graceful fallback: any WebGL failure hides the canvas; the CSS gradient
  * backdrop in index.html remains and the live ticker/HUD stay functional.
@@ -109,6 +128,24 @@ const FRAMING_TAU_S = 0.55;          // e-folding time of the framing ease
 const REVEAL_ON = 0.24, REVEAL_OFF = 0.12;
 const REVEAL_LAYERS = ['belts', 'plasmasphere', 'magnetosheath', 'reconnection'];
 const COND_HZ = 4;                   // how often the scrubbed state is pushed to the engine
+
+// ── The entrance (2026-09-23) — see the header's ENTRANCE bullet ────────────
+// Everything here is PRESENTATION and ends on the live state exactly: the
+// camera settles onto the resting framing, the stars and aurora come up to
+// the level the feed drives, the wind stream becomes the steady stream. No
+// data is faked on the way (the aurora RISES to its Kp-driven level; it is
+// never flashed as a substorm the feed did not report).
+const INTRO_S        = 4.6;   // camera settle (s of wall clock, not frames)
+const INTRO_ARC_DEG  = -72;   // azimuth offset at t=0: from over the night side,
+                              // so the lit limb grows crescent → gibbous (a sunrise)
+const INTRO_ELEV_DEG = 16;    // extra elevation at t=0 — descends onto the rest vantage
+const INTRO_ZOOM     = 1.55;  // fov multiplier at t=0 (Earth ~0.64× its resting disc)
+const INTRO_FOV_MAX  = 80;    // the zoom never widens past this (phone bands sit near FOV_MAX)
+const INTRO_STARS_S  = 1.8;   // stars ignite, staggered, over this long
+const INTRO_AURORA   = [1.4, 3.4];   // s: curtains rise from the ground as the wind front arrives
+const SPAWN_R        = 27;    // solar-wind spawn plane, R_E sunward of Earth
+const WIND_PATH      = 57;    // spawn plane → tail respawn (27 + 30): the stream's length
+const BOOT_WARM_CAP_MS = 2500;
 
 // ── Shared GLSL noise (value noise + fbm), prepended to shaders that need it ──
 const GLSL_NOISE = /* glsl */`
@@ -217,6 +254,18 @@ const CLOUD_FRAG = /* glsl */`
 `;
 
 // ── Atmosphere scattering shell ───────────────────────────────────────────────
+// The glow is a function of the view ray's IMPACT PARAMETER b (its closest
+// approach to Earth's centre), not of the shell's own Fresnel rim. The rim
+// version (2026-09-21) peaked twice — at Earth's limb (the surface shader's
+// own Fresnel term) and again at the shell's silhouette 7.5% further out —
+// so the night limb read as TWO rings with a dark gap (visible at the
+// stage's telephoto framing). Here the column is an exponential atmosphere
+// seen edge-on: off the disc it falls as exp(−(b−1)/H), on the disc it is
+// the slant path H/μ down to the surface, the two meeting at the limb. At the
+// shell's radius the column is e^−3.75 of the limb value, so the mesh edge is
+// never the visual edge (the SOLAR_SYSTEM_VISUAL_REVIEW S3 lesson). H is a
+// DISPLAY scale height (~15× the real 8 km) — a true-scale atmosphere is a
+// hairline at this framing.
 const ATMO_FRAG = /* glsl */`
     precision highp float;
     uniform vec3  u_sun;
@@ -224,12 +273,22 @@ const ATMO_FRAG = /* glsl */`
     varying vec3 vObj;
     varying vec3 vWN;
     varying vec3 vWP;
+    const float H_LIMB = 0.020;   // off-disc falloff (R_E)
+    const float H_DISC = 0.085;   // on-disc haze: column H/μ, capped at the limb value
     void main(){
-        vec3 N = normalize(vWN);
-        vec3 V = normalize(cameraPosition - vWP);
-        float mu   = max(dot(N, V), 0.0);
-        float rim  = pow(1.0 - mu, 3.2);                  // thin bright limb
-        float halo = pow(1.0 - mu, 1.4) * 0.35;           // soft inner haze
+        vec3 V = normalize(vWP - cameraPosition);            // along the ray
+        vec3 Q = cameraPosition - dot(cameraPosition, V) * V; // closest approach (Earth at origin)
+        float b = length(Q);
+        float col;
+        vec3  N;                                             // where the light scatters
+        if (b >= 1.0) {
+            col = exp(-(b - 1.0) / H_LIMB);
+            N = Q / b;
+        } else {
+            float mu = sqrt(1.0 - b * b);                    // cos zenith at the surface hit
+            col = min(1.0, H_DISC / max(mu, 1e-3));
+            N = normalize(cameraPosition + (dot(-cameraPosition, V) - mu) * V);
+        }
         float day  = dot(N, u_sun);
         float lit  = smoothstep(-0.25, 0.35, day);
         // Path-length colour: blue where the Sun is high, orange along the
@@ -238,11 +297,11 @@ const ATMO_FRAG = /* glsl */`
         vec3 orange = vec3(1.00, 0.46, 0.18);
         vec3 night  = vec3(0.05, 0.16, 0.24);
         float term  = smoothstep(0.30, 0.0, abs(day)) * (1.0 - smoothstep(0.0, 0.5, day) * 0.6);
-        vec3 col = mix(night, blue, lit);
-        col = mix(col, orange, term * 0.85);
-        col = mix(col, vec3(0.62, 0.40, 1.0), u_storm * 0.35 * rim);
-        float a = (rim * 1.15 + halo) * (0.35 + 0.75 * lit) + rim * 0.25;
-        gl_FragColor = vec4(col * a, a);
+        vec3 c = mix(night, blue, lit);
+        c = mix(c, orange, term * 0.85);
+        c = mix(c, vec3(0.62, 0.40, 1.0), u_storm * 0.35 * col);
+        float a = col * (0.30 + 1.05 * lit);
+        gl_FragColor = vec4(c * a, a);
     }
 `;
 
@@ -252,11 +311,13 @@ const STAR_VERT = /* glsl */`
     attribute float aPhase;
     attribute vec3  aTint;
     uniform float u_time;
+    uniform float u_ignite;   // entrance: 0 → 1, each star switches on at its own phase
     varying float vTw;
     varying vec3  vC;
     void main(){
         vC  = aTint;
         vTw = 0.62 + 0.38 * sin(u_time * (0.4 + aPhase * 1.8) + aPhase * 21.0);
+        vTw *= smoothstep(aPhase * 0.75, aPhase * 0.75 + 0.25, u_ignite);
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_PointSize = aSize * (170.0 / -mv.z);
         gl_Position  = projectionMatrix * mv;
@@ -375,6 +436,18 @@ export class HeroSpaceWeather {
         this._parTX = 0; this._parTY = 0; this._parX = 0; this._parY = 0;
         // One-way perf degradation ladder
         this._frameEma = 16; this._frameN = 0;
+        // The entrance: wall-clock seconds since the first shown frame.
+        // ?intro=0 starts settled (tests / debugging / a quick look).
+        this._intro = this._opts.intro !== false
+            && !/[?&]intro=0(?:&|$)/.test(typeof location !== 'undefined' ? location.search : '');
+        this._introT = this._intro ? 0 : Math.max(INTRO_S, INTRO_AURORA[1]);
+        this._framesDrawn = 0;
+        this._introSettled = new Promise((r) => { this._resolveIntro = r; });
+        // Offsets start at the entrance's t = 0 pose (or settled).
+        const k0 = this._intro ? 1 : 0;
+        this._introArc  = INTRO_ARC_DEG * DEG * k0;
+        this._introElev = INTRO_ELEV_DEG * DEG * k0;
+        this._introZoom = 1 + (INTRO_ZOOM - 1) * k0;
     }
 
     start() {
@@ -391,7 +464,11 @@ export class HeroSpaceWeather {
             this._initParticles();
             // Shorter aurora curtains than the earth.html default — this
             // camera is much closer and full-height funnels swallow the frame.
-            this._engine = new MagnetosphereEngine(this._scene, { auroraTop: 1.85 });
+            // 1.85 → 1.32 (2026-09-23): 1.85 was chosen at the pre-stage
+            // framing; the stage's 2.2× telephoto made the curtains two
+            // hourglass beams taller than the planet. At 1.32 they read as a
+            // crown on the oval (still ~6× the real ~300 km, on purpose).
+            this._engine = new MagnetosphereEngine(this._scene, { auroraTop: 1.32 });
             this._engine.update(this._state);
             // The wireframe cusp cones read as clutter at this close camera.
             this._engine.setLayerVisible('cusps', false);
@@ -399,16 +476,24 @@ export class HeroSpaceWeather {
             // (live or scrubbed) — see the header.
             this._revealed = false;
             for (const l of REVEAL_LAYERS) this._engine.setLayerVisible(l, false);
+            // The entrance raises the curtains from the ground (_stepIntro).
+            if (this._intro) this._engine.setAuroraRise(0);
             this._initBloom(this._w(), this._h());
             this._initRopes();
 
             this._clock = new THREE.Clock();
 
             window.addEventListener('resize', this._onResize.bind(this), { passive: true });
-            // The stage box moves without a window resize (the console grows
-            // as feeds land, the grid re-rows) — re-solve the framing then too.
-            if (this._opts.stage && 'ResizeObserver' in window) {
-                new ResizeObserver(() => this._updateFraming()).observe(this._opts.stage);
+            // The canvas and the stage box both change size without a window
+            // resize (the console grows as feeds land, fonts swap, the grid
+            // re-rows) — resize the buffer and re-solve the framing then too.
+            // Observing the CANVAS is what keeps Earth round (see _onResize);
+            // observing the stage catches a box that moves inside a canvas
+            // that did not change.
+            if ('ResizeObserver' in window) {
+                const ro = new ResizeObserver(() => this._onResize());
+                ro.observe(this._canvas);
+                if (this._opts.stage) ro.observe(this._opts.stage);
             }
             window.addEventListener('swpc-update', (e) => {
                 this._state = e.detail;
@@ -441,12 +526,108 @@ export class HeroSpaceWeather {
             // Debug handle (same ?debug=1 convention as swpc-feed's fetch log)
             if (/[?&]debug=1(?:&|$)/.test(location.search)) window.__ppHero = this;
 
-            this._maybeRun();
+            // Nothing renders until the programs are warm (see _boot).
+            this._boot();
         } catch (err) {
             // WebGL unavailable — canvas stays hidden, CSS backdrop shows instead
             console.warn('[HeroSpaceWeather] WebGL error:', err.message);
             if (this._canvas) this._canvas.style.display = 'none';
+            this._setHostState('failed');
         }
+    }
+
+    // ── Boot: warm the GPU programs, THEN show the first frame ───────────────
+    // The first render used to compile every program in the scene — ~20
+    // materials, each twice (the screen frame and the bloom's render-target
+    // frame are different program variants) plus the bloom chain's own —
+    // synchronously, on the frame that also made the canvas visible: the
+    // page froze, then the finished scene cut in over the CSS backdrop.
+    // Now `_compileAsync` builds them all while the canvas is still at
+    // opacity 0 and index.html's boot reticle spins on the COMPOSITOR thread
+    // (transform/opacity only, so it keeps turning through any main-thread
+    // stall); with KHR_parallel_shader_compile the compile does not block
+    // at all. Capped: a driver that never reports ready must not strand the
+    // hero, it only costs the old synchronous compile on frame one.
+    async _boot() {
+        try {
+            await Promise.race([this._warmPrograms(), new Promise(r => setTimeout(r, BOOT_WARM_CAP_MS))]);
+        } catch (e) {
+            console.info('[HeroSpaceWeather] program warm-up skipped:', e?.message ?? e);
+        }
+        if (this._stopped) return;
+        this._booted = true;
+        this._maybeRun();
+    }
+
+    _warmPrograms() {
+        const r = this._renderer, cam = this._camera;
+        if (typeof r.compile !== 'function') return Promise.resolve();
+        const jobs = [this._compileAsync(this._scene, cam)];
+        if (this._bloomOn && this._bloom && this._rtScene) {
+            // The program cache key depends on the CURRENT render target
+            // (output colour space), so the scene is compiled again with the
+            // bloom's source target bound, and the bloom chain's materials —
+            // which never sit in the scene — on stand-in quads. _compileAsync
+            // calls compile() synchronously before returning, so the target
+            // can be restored straight after.
+            const quad = new THREE.PlaneGeometry(2, 2);
+            const post = new THREE.Scene();
+            const b = this._bloom;
+            for (const m of [b.materialHighPassFilter, ...(b.separableBlurMaterials ?? []), b.compositeMaterial, b.blendMaterial]) {
+                if (m) post.add(new THREE.Mesh(quad, m));
+            }
+            const blit = new THREE.Scene();
+            blit.add(new THREE.Mesh(quad, this._bloomBlit.material));
+            const prev = r.getRenderTarget();
+            r.setRenderTarget(this._rtScene);
+            jobs.push(this._compileAsync(this._scene, cam), this._compileAsync(post, cam));
+            r.setRenderTarget(prev);
+            jobs.push(this._compileAsync(blit, cam));
+        }
+        return Promise.all(jobs);
+    }
+
+    /**
+     * three r160's `compileAsync`, minus its failure mode here: it polls
+     * `properties.get(m).currentProgram.isReady()` on a timer, and the
+     * magnetosphere engine DISPOSES and rebuilds its shells on a Kp change
+     * (or the first eased Shue step) — a disposed material has no program
+     * and three's poll throws inside its own setTimeout, so the promise
+     * never settles (measured: an uncaught "reading 'isReady'" TypeError
+     * when a feed update landed mid-warm-up). `compile()` kicks the compile off
+     * synchronously (non-blocking with KHR_parallel_shader_compile) and
+     * returns the material set; a material with no program is treated as
+     * done — it is gone, and its replacement compiles on first use.
+     */
+    _compileAsync(scene, cam) {
+        const r = this._renderer;
+        const mats = r.compile(scene, cam);
+        if (!mats || typeof mats.forEach !== 'function' || !r.properties) return Promise.resolve();
+        return new Promise((resolve) => {
+            const poll = () => {
+                mats.forEach((m) => {
+                    const prog = r.properties.get(m)?.currentProgram;
+                    if (!prog || typeof prog.isReady !== 'function' || prog.isReady()) mats.delete(m);
+                });
+                if (mats.size === 0 || this._stopped) resolve();
+                else setTimeout(poll, 16);
+            };
+            poll();
+        });
+    }
+
+    /**
+     * Boot state on the host element (#hero) — index.html's CSS keys the
+     * canvas crossfade and the boot reticle off these classes:
+     *   'live'   frames are on the canvas → `hero-live` (canvas fades in,
+     *            reticle locks and dissolves)
+     *   'failed' WebGL/boot failure → the reticle goes; the CSS backdrop stays
+     */
+    _setHostState(state) {
+        const host = this._opts.host ?? this._canvas?.parentElement;
+        if (!host) return;
+        host.classList.remove('hero-booting');
+        if (state === 'live') host.classList.add('hero-live');
     }
 
     stop() {
@@ -455,7 +636,7 @@ export class HeroSpaceWeather {
     }
 
     _maybeRun() {
-        const active = !this._stopped && this._visible && this._pageVisible && !this._covered;
+        const active = this._booted && !this._stopped && this._visible && this._pageVisible && !this._covered;
         if (active && !this._animId && this._renderer) {
             this._clock.getDelta();               // flush the paused interval
             this._animId = requestAnimationFrame(this._animate.bind(this));
@@ -474,7 +655,8 @@ export class HeroSpaceWeather {
             powerPreference: 'high-performance',
         });
         r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        r.setSize(this._w(), this._h(), false);
+        this._sizeW = this._w(); this._sizeH = this._h();
+        r.setSize(this._sizeW, this._sizeH, false);
         r.setClearColor(0x02010c, 1);
         r.sortObjects = true;
         this._renderer = r;
@@ -559,6 +741,14 @@ export class HeroSpaceWeather {
         const tanA = Math.tan(Math.asin(Math.min(0.999, 1 / this._camR)));
         const tanV = (H / 2) * tanA / Math.max(1, rpx);
         f.fov = Math.min(FOV_MAX, Math.max(FOV_MIN, 2 * Math.atan(tanV) / DEG));
+        // Publish the disc radius Earth will REST at, in CSS px, for the boot
+        // reticle (index.html sizes it 2 × 1.14 × this). It is 0.30 of the
+        // short side unless the fov clamp binds — on phones the hero canvas
+        // is the whole tall stacked hero and FOV_MAX does bind, so the planet
+        // lands ~1.4× bigger than the CSS-only guess; the reticle ranges out
+        // to it instead of locking onto a ring Earth overshoots.
+        const restR = (cr.height / 2) * tanA / Math.tan(f.fov * DEG / 2);
+        if (Number.isFinite(restR) && restR > 0) stage.style.setProperty('--hero-disc-r', restR.toFixed(1) + 'px');
         // Corridor: distance at which the projected Sun→Earth segment spans
         // CORRIDOR_SPAN_FRAC of the box. The segment is foreshortened by the
         // sine of the angle between it and the view direction.
@@ -582,7 +772,9 @@ export class HeroSpaceWeather {
     /** The camera's fov for the current framing mix. */
     _applyFov() {
         const f = this._frame;
-        this._camera.fov = f.fov + (f.corrFov - f.fov) * this._mix;
+        const fov = f.fov + (f.corrFov - f.fov) * this._mix;
+        const z = this._introZoom;
+        this._camera.fov = z > 1 ? Math.min(INTRO_FOV_MAX, fov * z) : fov;
     }
 
     // ── Lighting ─────────────────────────────────────────────────────────────
@@ -675,7 +867,7 @@ export class HeroSpaceWeather {
         geo.setAttribute('aSize',    new THREE.BufferAttribute(size, 1));
         geo.setAttribute('aPhase',   new THREE.BufferAttribute(phase, 1));
         geo.setAttribute('aTint',    new THREE.BufferAttribute(tint, 3));
-        this._starU = { u_time: { value: 0 } };
+        this._starU = { u_time: { value: 0 }, u_ignite: { value: this._intro ? 0 : 1 } };
         const mat = new THREE.ShaderMaterial({
             uniforms: this._starU,
             vertexShader:   STAR_VERT,
@@ -733,8 +925,14 @@ export class HeroSpaceWeather {
                 host: cfg.host,
                 replay: cfg.replay ?? null,
                 onFraming: (mode) => this.setFraming(mode),
+                // The Gannon replay's self-start waits for the entrance.
+                autoplayGate: this._introSettled,
             });
             this._updateFraming();
+            // The corridor's own materials (drawn Sun, halo, ruler) sit in
+            // the scene hidden until the first scrub/replay; warm them now so
+            // that first corridor frame does not compile synchronously.
+            try { this._compileAsync(this._scene, this._camera); } catch { /* compiles on first use instead */ }
         }).catch((e) => console.warn('[HeroSpaceWeather] rope layer failed:', e?.message ?? e));
     }
 
@@ -789,8 +987,15 @@ export class HeroSpaceWeather {
         const heat = new Float32Array(N);
         const vel  = new Float32Array(N);
 
+        // Steady state: scattered so the stream starts full. Entrance: the
+        // SAME stream laid out UPSTREAM of the spawn plane (a uniform block
+        // one path-length long), so it arrives from the Sun with a front,
+        // breaks on the bow shock, and settles into exactly the steady
+        // stream — every particle keeps a uniform phase, so no pulse echoes
+        // down the tail afterwards.
         for (let i = 0; i < N; i++) {
-            this._spawnParticle(pos, vel, i, /*scatter=*/true);
+            if (this._intro) this._spawnParticle(pos, vel, i, false, Math.random() * WIND_PATH);
+            else this._spawnParticle(pos, vel, i, /*scatter=*/true);
             seed[i] = Math.random();
             heat[i] = 0;
         }
@@ -823,14 +1028,15 @@ export class HeroSpaceWeather {
     }
 
     // Spawn one particle on the sun-side spawn plane, optionally scattered
-    // along the flow axis so the stream starts full instead of as a wave.
-    _spawnParticle(pos, vel, i, scatter = false) {
+    // along the flow axis so the stream starts full instead of as a wave,
+    // or `upstream` R_E further sunward (the entrance's arriving stream).
+    _spawnParticle(pos, vel, i, scatter = false, upstream = 0) {
         const right = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize();
         const up    = SUN_DIR.clone().cross(right).normalize();
         const spread = 24;
         const y = (Math.random() - 0.5) * spread;
         const z = (Math.random() - 0.5) * spread;
-        const pt = SUN_DIR.clone().multiplyScalar(27)
+        const pt = SUN_DIR.clone().multiplyScalar(SPAWN_R + upstream)
             .addScaledVector(right, y)
             .addScaledVector(up,    z);
         pos[i*3]   = pt.x + (scatter ? (Math.random() - 0.5) * 55 : 0);
@@ -919,12 +1125,15 @@ export class HeroSpaceWeather {
         // ease to ~6 s on a software rasteriser (measured: mix 0.09 after 3.5 s).
         this._mix += (want - this._mix) * (1 - Math.exp(-easeDt / FRAMING_TAU_S));
         if (Math.abs(this._mix - want) < 0.002) this._mix = want;
-        if (this._mix !== prevMix) { this._applyFov(); this._camera.updateProjectionMatrix(); }
         const mix = this._mix;
+        // The entrance offsets (zero once settled) ride on top of the
+        // framing; _applyFov folds in its zoom.
+        const introOn = this._stepIntro(easeDt, mix);
+        if (this._mix !== prevMix || introOn) { this._applyFov(); this._camera.updateProjectionMatrix(); }
         const camR   = this._camR + (this._frame.corrDist - this._camR) * mix;
-        const camPhi = this._camPhi + (CORRIDOR_ELEV - this._camPhi) * mix;
+        const camPhi = this._camPhi + (CORRIDOR_ELEV - this._camPhi) * mix + this._introElev;
 
-        this._camTh = CAM_AZIMUTH + CAM_SWAY_DEG * DEG * Math.sin(t * CAM_SWAY_RATE);
+        this._camTh = CAM_AZIMUTH + CAM_SWAY_DEG * DEG * Math.sin(t * CAM_SWAY_RATE) + this._introArc;
         // The aim point slides from Earth toward the corridor's midpoint;
         // the camera orbits THAT point so the segment stays framed.
         const sv = this._tmpSubject ?? (this._tmpSubject = new THREE.Vector3());
@@ -995,7 +1204,61 @@ export class HeroSpaceWeather {
         }
 
         this._renderFrame();
+        if (!this._shown) {
+            // First frame is on the canvas: index.html's CSS fades the canvas
+            // in over the backdrop and dissolves the boot reticle. Flagged on
+            // the SECOND frame — by then the first has been presented, so on
+            // a slow GPU the reticle cannot dissolve over a canvas that is
+            // still empty.
+            if (++this._framesDrawn >= 2) {
+                this._shown = true;
+                this._setHostState('live');
+                if (!this._intro) this._finishIntro();
+            }
+        }
         this._degrade(performance.now() - frameStart);
+    }
+
+    /**
+     * Advance the entrance by `easeDt` of WALL clock (so a software
+     * rasteriser at 2 fps still settles on time) and publish its offsets:
+     * azimuth arc + extra elevation (radians) and a fov zoom factor, each
+     * weighted (1 − e)(1 − mix) so it eases out cubically and yields to the
+     * corridor framing if the visitor scrubs mid-entrance. Stars ignite and
+     * the aurora rises on the same clock. Returns true while it is running.
+     */
+    _stepIntro(easeDt, mix) {
+        const end = Math.max(INTRO_S, INTRO_AURORA[1]);
+        if (this._introT >= end) return false;
+        // Scrubbing into the corridor mid-entrance fast-forwards it: coming
+        // back from the corridor must land on the resting shot, not resume.
+        if (mix > 0.5) this._introT = end;
+        else this._introT += easeDt;
+        const ti = this._introT;
+        const p = Math.min(1, ti / INTRO_S);
+        const k = Math.pow(1 - p, 3) * (1 - mix);        // 1 − easeOutCubic
+        this._introArc  = INTRO_ARC_DEG * DEG * k;
+        this._introElev = INTRO_ELEV_DEG * DEG * k;
+        this._introZoom = 1 + (INTRO_ZOOM - 1) * k;
+        this._starU.u_ignite.value = Math.min(1, ti / INTRO_STARS_S);
+        const a = Math.min(1, Math.max(0, (ti - INTRO_AURORA[0]) / (INTRO_AURORA[1] - INTRO_AURORA[0])));
+        this._engine.setAuroraRise(a * a * (3 - 2 * a));
+        if (ti >= end) this._finishIntro();
+        return true;
+    }
+
+    /** Settle every entrance term on its live value and announce it. */
+    _finishIntro() {
+        this._introT = Math.max(INTRO_S, INTRO_AURORA[1]);
+        this._introArc = 0; this._introElev = 0; this._introZoom = 1;
+        this._starU.u_ignite.value = 1;
+        this._engine.setAuroraRise(1);
+        this._applyFov();
+        this._camera.updateProjectionMatrix();
+        // index.html holds the below-the-fold demo iframes (two full WebGL
+        // apps) until this fires, so they cannot stutter the entrance.
+        this._resolveIntro?.();
+        try { window.dispatchEvent(new CustomEvent('hero-intro-done')); } catch { /* old engines */ }
     }
 
     /**
@@ -1129,9 +1392,15 @@ export class HeroSpaceWeather {
                 }
             }
 
-            // Respawn beyond the tail or far off the flanks
+            // Respawn beyond the tail or far off the flanks. A particle still
+            // UPSTREAM of the spawn plane is the entrance stream arriving,
+            // not a stray: the flank rule would teleport it onto the plane
+            // and the stream would arrive as one flat sheet. Inert in the
+            // steady state — particles spawn ON the plane and only ever
+            // move anti-sunward (the bow-shock push is transverse).
             const downTail = px*anti.x + py*anti.y + pz*anti.z;
-            if (downTail > 30 || (r > 34 && downTail < 0)) {
+            const arriving = -downTail > SPAWN_R + 0.5;
+            if (downTail > 30 || (r > 34 && downTail < 0 && !arriving)) {
                 this._spawnParticle(pos, vel, i);
                 heat[i] = 0;
             } else {
@@ -1160,14 +1429,32 @@ export class HeroSpaceWeather {
     }
 
     // ── Resize ────────────────────────────────────────────────────────────────
+    // Runs on window resize AND whenever the canvas's own CSS box changes
+    // (ResizeObserver in start()). The second case is the common one: the
+    // hero grows as the console, the fonts and the upsell land, none of
+    // which fires a window resize — and a drawing buffer left at its boot
+    // size is stretched by CSS, which drew Earth as an OVAL on every load
+    // (measured: buffer 1440×1009 shown at 1440×1208, a 1.20 vertical
+    // stretch with the camera still at the boot aspect). setSize only when
+    // the size actually changed: re-assigning canvas.width resets the
+    // drawing buffer even to the same value.
     _onResize() {
         const w = this._w(), h = this._h();
+        const resized = w !== this._sizeW || h !== this._sizeH;
+        if (resized) {
+            this._sizeW = w; this._sizeH = h;
+            this._renderer.setSize(w, h, false);
+            this._bloom?.setSize(w, h);
+            this._rtScene?.setSize(w, h);
+        }
         this._camera.aspect = w / h;
         this._camera.updateProjectionMatrix();
         this._updateFraming();
-        this._renderer.setSize(w, h, false);
-        this._bloom?.setSize(w, h);
-        this._rtScene?.setSize(w, h);
+        // A resized buffer is EMPTY until the next render, and ResizeObserver
+        // callbacks run after this frame's rAF — so the cleared canvas was
+        // painted for a frame (a blank stage mid-entrance, measured). Redraw
+        // now, before paint, whenever the loop is live.
+        if (resized && this._animId && this._shown) this._renderFrame();
     }
 
     _w() { return this._canvas.clientWidth  || 900; }

@@ -390,8 +390,11 @@ function fmtRel(ms, refMs) {
  * @param {HTMLElement} opts.host  where the scrubber mounts (a sibling of #hero-stage)
  * @param {function(string):void} [opts.onFraming]  'corridor' while scrubbing/playing, 'earth' at rest
  * @param {function():Promise<object>} [opts.replay] async → forecast-shaped replay (Gannon); null disables
+ * @param {Promise<any>} [opts.autoplayGate] the replay's self-start waits for this AND adoption
+ *     (the hero passes its entrance: the camera must not be pulled into the
+ *     corridor while it is still settling onto Earth)
  */
-export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = null, replay = null } = {}) {
+export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = null, replay = null, autoplayGate = null } = {}) {
     if (!THREE || !scene) throw new Error('createHeroRopeLayer: THREE and scene are required');
 
     const style = document.createElement('style');
@@ -519,6 +522,8 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     let framing = 'earth';
     let restTimer = 0;
     let autoTimer = 0;
+    let autoToken = 0;        // bumps on every cancel, so a gated self-start that resolves late is void
+    const gate = autoplayGate ?? Promise.resolve();
     let held = false;         // hook-driven hold: corridor stays until release()
     let oneShot = false;      // the replay's first, self-started pass
     let lastKey = '';
@@ -530,8 +535,10 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     const REST_MS = 6000;
     /** A replay plays itself ONCE this long after adoption — the entrance —
      *  then returns to the Earth shot. Live trains never move the camera
-     *  uninvited. */
+     *  uninvited. Counted from adoption OR the hero's entrance settling
+     *  (`autoplayGate`), whichever is later. */
     const AUTOPLAY_DELAY_MS = 5000;
+    const cancelAuto = () => { clearTimeout(autoTimer); autoToken++; };
 
     // ── Scrubber DOM ──────────────────────────────────────────────────────
     const ui = document.createElement('div');
@@ -580,16 +587,16 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     }
 
     slider.addEventListener('input', () => { setTau(sliderToTau(+slider.value), true); });
-    slider.addEventListener('pointerdown', () => { dragging = true; oneShot = false; clearTimeout(autoTimer); setPlaying(false); clearTimeout(restTimer); });
+    slider.addEventListener('pointerdown', () => { dragging = true; oneShot = false; cancelAuto(); setPlaying(false); clearTimeout(restTimer); });
     const endDrag = () => { if (dragging) { dragging = false; armRest(); } };
     slider.addEventListener('pointerup', endDrag);
     slider.addEventListener('pointercancel', endDrag);
     slider.addEventListener('keydown', () => { setPlaying(false); armRest(); });
-    playBtn.addEventListener('click', () => { oneShot = false; clearTimeout(autoTimer); setPlaying(!playing); });
+    playBtn.addEventListener('click', () => { oneShot = false; cancelAuto(); setPlaying(!playing); });
 
     function setPlaying(on) {
         // Any explicit play/pause cancels the replay's pending self-start.
-        clearTimeout(autoTimer);
+        cancelAuto();
         if (!on) oneShot = false;
         playing = !!on && !!win;
         playBtn.textContent = playing ? '❚❚ Pause' : '▶ Play transit';
@@ -709,13 +716,17 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
         setTau(start);
         setFraming('earth');
         clearTimeout(restTimer);
-        clearTimeout(autoTimer);
+        cancelAuto();
         if (mode !== 'live') {
-            autoTimer = setTimeout(() => {
-                if (dragging || playing || mode === 'live') return;
-                oneShot = true;
-                setPlaying(true);
-            }, AUTOPLAY_DELAY_MS);
+            const token = autoToken;
+            gate.then(() => {
+                if (token !== autoToken) return;     // cancelled, or a newer adoption owns it
+                autoTimer = setTimeout(() => {
+                    if (dragging || playing || mode === 'live') return;
+                    oneShot = true;
+                    setPlaying(true);
+                }, AUTOPLAY_DELAY_MS);
+            });
         }
         update(true);
     }
@@ -850,7 +861,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             };
         },
         dispose() {
-            clearTimeout(restTimer); clearTimeout(autoTimer);
+            clearTimeout(restTimer); cancelAuto();
             disposeRopes(); scene.remove(group); scene.remove(sunGroup); scene.remove(rings); ui.remove(); style.remove();
         },
     };

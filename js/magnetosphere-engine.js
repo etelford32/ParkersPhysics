@@ -213,6 +213,7 @@ const _AURORA_FRAG = /* glsl */`
     uniform float u_kp_norm;
     uniform float u_bz_south;
     uniform float u_substorm_t;
+    uniform float u_rise;       // 0 → 1: how far up the curtain is drawn (setAuroraRise; 1 = all of it)
 
     varying float vHeight;
     varying float vPhi;
@@ -252,6 +253,12 @@ const _AURORA_FRAG = /* glsl */`
         float sbBoost  = sbRipple * 0.70;
 
         float alpha  = clamp(vFade * base * fold1 * fold2 * s1 * s2 * s3 + sbBoost, 0.0, 0.92);
+
+        // ── Rise: the curtain drawn from the ground up to u_rise, with a soft
+        // leading edge. At u_rise = 1 the mask is exactly 1 at every height
+        // (the edge sits at 1.2), so the default render is unchanged.
+        float rise = clamp((u_rise * 1.2 - vHeight) / 0.2, 0.0, 1.0);
+        alpha *= rise * rise * (3.0 - 2.0 * rise);
 
         gl_FragColor = vec4(col, alpha);
     }
@@ -607,6 +614,7 @@ function buildAuroralCurtains(kp, isNorth, rTop = 2.50) {
                 u_kp_norm:    { value: Math.min(1, kp / 9) * layerFade },
                 u_bz_south:   { value: 0 },
                 u_substorm_t: { value: 0 },
+                u_rise:       { value: 1 },
             },
             vertexShader:   _AURORA_VERT,
             fragmentShader: _AURORA_FRAG,
@@ -751,6 +759,8 @@ export class MagnetosphereEngine {
 
         // Substorm flash state: set via setSubstorm(); decays in tick()
         this._substormT = 0;  // 0–1 flash intensity
+        // Curtain rise (setAuroraRise) — presentation only, default fully drawn
+        this._auroraRise = 1;
 
         // Build with fallback values
         this._rebuildSolarShells(10.9, 0.58);
@@ -984,6 +994,7 @@ export class MagnetosphereEngine {
                     U.u_kp_norm.value    = kpNorm;
                     U.u_bz_south.value   = bzSouth;
                     U.u_substorm_t.value = this._substormT;
+                    U.u_rise.value       = this._auroraRise;
                 }
             });
         };
@@ -1040,6 +1051,19 @@ export class MagnetosphereEngine {
                 if (this._auroraS) this._auroraS.visible = v;
                 break;
         }
+    }
+
+    /**
+     * How much of each aurora curtain is drawn, from the ground up (0–1).
+     * PRESENTATION ONLY — the hero's entrance raises the curtains to their
+     * Kp/Bz-driven level instead of cutting them in; the brightness itself
+     * is untouched, so at 1 (the default, and what every other consumer
+     * uses) the curtains render exactly as before. Applied in tick(), so
+     * curtains rebuilt on a Kp change keep the current rise.
+     * @param {number} f
+     */
+    setAuroraRise(f) {
+        this._auroraRise = Math.max(0, Math.min(1, Number.isFinite(f) ? f : 1));
     }
 
     /**
