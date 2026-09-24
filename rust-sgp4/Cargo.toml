@@ -17,6 +17,11 @@ serde-wasm-bindgen = "0.6"
 # references when we link it for wasm32-unknown-unknown (which has no
 # libc). See src/nrlmsise00.rs for the C-symbol shims.
 libm = "0.2"
+# sgp4 — the propagator (Vallado 2006 SGP4/SDP4 in pure Rust, MIT). Replaced
+# a hand-rolled kernel that was 5 260 km off at epoch; src/lib.rs's
+# "SGP4 internal state" note has the story and `cargo test` pins it to the
+# Vallado verification vectors. "std" for the float math on wasm32.
+sgp4 = { version = "2.4", default-features = false, features = ["std"] }
 
 [build-dependencies]
 # cc — compiles the vendored NRLMSISE-00 C source into our cdylib.

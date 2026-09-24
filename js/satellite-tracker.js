@@ -99,7 +99,13 @@ async function _loadWasmSgp4() {
 }
 
 // Try to load WASM immediately (non-blocking)
-_loadWasmSgp4();
+const _wasmReady = _loadWasmSgp4();
+
+/** Resolves (with the module, or null if it could not load) once the WASM
+ *  load has settled. Callers that must use ONE propagator for a whole
+ *  computation (js/climate-lab/lab-satellites.js) wait on this, because
+ *  propagate() silently uses the JS path until the WASM arrives. */
+export function whenWasmSettled() { return _wasmReady; }
 
 /** Check if WASM SGP4 is loaded. */
 export function isWasmLoaded() { return _wasmSgp4 !== null; }
@@ -186,14 +192,14 @@ export function canBatchPropagate(tle) {
 // Uses the same Keplerian mean motion + J2 secular perturbations, but skips
 // the full SGP4 drag and deep-space corrections. Good to ~5 km for LEO.
 //
-// EXPORTED (2026-09-24) for the dashboard's satellite tracker, which uses it
-// ON PURPOSE instead of the WASM path: measured against Vallado et al. 2006's
-// SGP4 verification vectors this function lands 7–18 km at epoch and ~60–110
-// km after 6–12 h (no drag), and moves at a uniform ~458 km/min on an ISS
-// orbit — while the committed sgp4_wasm misses case 00005 by 5 260 km AT
-// EPOCH and its along-track speed swings between ~5 and ~800 km/min, which
-// turned into physically impossible 49-minute ISS "passes". See
-// js/climate-lab/lab-satellites.js (PROPAGATOR) for the switch back.
+// Exported for callers that need a synchronous propagator with no WASM wait.
+// Measured against Vallado et al. 2006's SGP4 verification vectors it lands
+// 7–18 km at epoch and ~60–110 km after 6–12 h (no drag) — fine for pass
+// times, not for conjunction-grade work. The WASM kernel is the accurate
+// path: since 2026-09-24 it is the `sgp4` crate and matches every Vallado
+// row to < 1 m (tests/sgp4-vallado.mjs). Before that it was a broken
+// hand-rolled SGP4 (5 260 km off at epoch), which is why the dashboard and
+// satellites.html briefly routed around it.
 export function jsFallbackPropagate(tle, tsince_min) {
     const n0 = tle.mean_motion * TWOPI / MIN_PER_DAY;  // rad/min
     const e0 = tle.eccentricity;

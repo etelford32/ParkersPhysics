@@ -8,16 +8,17 @@
  * ONE PROPAGATOR, AND WHICH ONE IS A MEASURED CHOICE. Positions, ground
  * tracks, passes and sky charts all come from ONE propagator (PROPAGATOR
  * below) through geo/coords.js + pass-predictor.js `nextPasses` — the
- * modules the 3D tracker and earth.html's ISS card use. It is the tracker's
- * Kepler + J2 mean-element propagator, NOT the SGP4 WASM, on purpose: the
- * committed sgp4_wasm fails Vallado et al. 2006's verification case 00005 by
- * 5 260 km at epoch and its along-track speed swings ~5–800 km/min on an ISS
- * orbit (a smooth ground track that is simply wrong in TIME — it produced
- * 49-minute ISS passes). Kepler + J2 measured 7–18 km at epoch, ~60–110 km
- * after 6–12 h: seconds of pass-timing error. Mixing the two is also a bug
- * of its own (a pass predicted by one, drawn by the other, collapsed the sky
- * chart to a point). When the kernel passes the Vallado vectors, set
- * PROPAGATOR = 'sgp4-wasm'. Everything is lazy-imported on mount; TLEs come
+ * modules the 3D tracker and earth.html's ISS card use. It is the SGP4 WASM
+ * (the `sgp4` crate since 2026-09-24, pinned to every Vallado et al. 2006
+ * verification row by tests/sgp4-vallado.mjs), with the Kepler + J2 JS path
+ * only if the WASM cannot load. Until that date the WASM was a broken
+ * hand-rolled SGP4 — 5 260 km off at epoch on Vallado case 00005, 49-minute
+ * ISS passes — and this module ran on Kepler + J2 instead ('kepler-j2' is
+ * kept as the switch). ONE propagator per session is load-bearing: a pass
+ * predicted by one and drawn by the other collapsed the sky chart to a
+ * point, and tracker.propagate silently uses the JS path until the WASM has
+ * arrived — so loadKit WAITS for the WASM load to settle (capped at
+ * WASM_WAIT_MS) before anything is computed. Everything is lazy-imported on mount; TLEs come
  * from the existing `/api/celestrak/tle?norad=` edge route (2 h cache).
  *
  * WHAT IS HONEST ABOUT REMINDERS. `notify_sat_pass` exists as a column but
@@ -46,8 +47,10 @@ const QUICK_PICKS = Object.freeze([
     [43013, 'NOAA-20'], [25994, 'Terra'], [49260, 'Landsat 9'],
 ]);
 const REMIND_KEY = 'pp_lab_pass_reminded';
-/** 'kepler-j2' (satellite-tracker.js jsFallbackPropagate) | 'sgp4-wasm'. See header. */
-const PROPAGATOR = 'kepler-j2';
+/** 'sgp4-wasm' (satellite-tracker.js propagate) | 'kepler-j2' (jsFallbackPropagate). See header. */
+const PROPAGATOR = 'sgp4-wasm';
+/** Longest the kit waits for the SGP4 WASM before settling on Kepler + J2. */
+const WASM_WAIT_MS = 6000;
 const ISS = 25544;
 
 let _kit = null;
@@ -56,8 +59,14 @@ function loadKit() {
     if (_kit) return _kit;
     _kit = Promise.all([
         import('three'), import('../geo/coords.js'), import('../satellite-tracker.js'), import('../pass-predictor.js'),
-    ]).then(([THREE, coords, tracker, pp]) => {
-        const propagate = PROPAGATOR === 'sgp4-wasm' ? tracker.propagate : tracker.jsFallbackPropagate;
+    ]).then(async ([THREE, coords, tracker, pp]) => {
+        let propagate = tracker.jsFallbackPropagate;
+        if (PROPAGATOR === 'sgp4-wasm') {
+            // Settle the WASM load FIRST so every pass, track and sky chart
+            // this session comes from the same propagator (see header).
+            await Promise.race([tracker.whenWasmSettled(), new Promise((r) => setTimeout(r, WASM_WAIT_MS))]);
+            if (tracker.isWasmLoaded()) propagate = tracker.propagate;
+        }
         return {
             THREE, geo: coords.geo, RAD: coords.RAD,
             propagate, tleEpochToJd: tracker.tleEpochToJd,

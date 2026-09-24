@@ -485,7 +485,7 @@ import './js/telemetry.js';
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SatelliteTracker, isWasmLoaded, propagate, tleEpochToJd, jsFallbackPropagate } from './js/satellite-tracker.js';
+import { SatelliteTracker, isWasmLoaded, propagate, tleEpochToJd } from './js/satellite-tracker.js';
 import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
          estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV,
          decayWatchlist, constellationCoverage, detectBreakupEvents
@@ -1306,14 +1306,14 @@ function _updateAnalytics(tle) {
     const loc = loadUserLocation();
     const passesEl = document.getElementById('sp-passes');
     if (loc && passesEl) {
-        // The Kepler + J2 propagator, synchronous (no WASM wait). This used to
-        // be an inline copy of it that referenced TWOPI / MIN_PER_DAY / DEG2RAD —
-        // module-private constants of satellite-tracker.js, undeclared here — so
-        // for every visitor with a saved location the first call threw a
-        // ReferenceError and the pass list never rendered. Kept on the JS path
-        // on purpose: the committed SGP4 WASM fails Vallado's verification
-        // vectors (see js/climate-lab/lab-satellites.js PROPAGATOR).
-        const passes = predictPasses(tle, loc.lat, loc.lon, 0, 24, 10, jsFallbackPropagate);
+        // The tracker's own propagator: SGP4 WASM once loaded (pinned to the
+        // Vallado vectors by tests/sgp4-vallado.mjs), Kepler + J2 before that.
+        // This used to be an inline copy of the Kepler + J2 path that
+        // referenced TWOPI / MIN_PER_DAY / DEG2RAD — module-private constants
+        // of satellite-tracker.js, undeclared here — so for every visitor with
+        // a saved location the first call threw a ReferenceError and the pass
+        // list never rendered.
+        const passes = predictPasses(tle, loc.lat, loc.lon, 0, 24, 10, propagate);
         _lastPasses = passes;
         if (passes.length === 0) {
             passesEl.textContent = `No passes above 10° in next 24h from ${loc.city || 'your location'}`;

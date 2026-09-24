@@ -17,9 +17,9 @@
  *   · customisation (units, hidden instruments) re-renders and persists
  *   · the meteogram probe reads every series at one hour; table view exists
  *   · satellite passes are PHYSICAL (≤ 15 min for LEO) and the sky chart is
- *     an arc — the committed SGP4 WASM produced 49-minute ISS passes and a
- *     sky chart collapsed to one point before the tracker was moved to the
- *     Kepler + J2 propagator (js/climate-lab/lab-satellites.js header)
+ *     an arc — the pre-2026-09-24 SGP4 WASM produced 49-minute ISS passes and
+ *     a sky chart collapsed to one point. The tracker now runs on the fixed
+ *     WASM (js/climate-lab/lab-satellites.js header); this judges that path
  *   · a lab watch triggers on the fixture's gusts
  *   · phone width: no horizontal scroll
  */
@@ -139,11 +139,11 @@ test('satellite passes over home are physical and the sky chart is an arc', asyn
     await boot(page);
     const rows = page.locator('#cl-sat-card .cl-pass-table tbody tr');
     await expect(rows.first()).toBeVisible({ timeout: 30_000 });
-    // The first pass search runs BEFORE satellite-tracker.js's SGP4 WASM has
-    // finished loading, so at that moment tracker.propagate IS the JS path and
-    // a regression back to it would pass unseen (measured: this test passed
-    // with PROPAGATOR = 'sgp4-wasm' until this block existed). Wait for the
-    // WASM, re-run the search, and judge the passes it produces.
+    // Judge the passes the SGP4 WASM produces, not the Kepler + J2 fallback:
+    // wait for the WASM, re-run the search, then read the table. (Without
+    // this block the test once passed on the BROKEN kernel, because the first
+    // search had beaten the WASM load. It fails on that kernel's binary now —
+    // verified 2026-09-24 by swapping the pre-fix sgp4_wasm_bg.wasm back in.)
     await expect.poll(() => page.evaluate(async () => (await import('/js/satellite-tracker.js')).isWasmLoaded()),
         { timeout: 30_000, message: 'SGP4 WASM never loaded' }).toBe(true);
     await page.evaluate(() => window.__labSats.recompute());
