@@ -1028,7 +1028,9 @@ if (heroModule) {
     .then(([m]) => {
       const h = new m.HeroSpaceWeather(heroCanvas, {
         stage: document.getElementById('hero-stage'),
-        // The CME flux-rope train + τ scrubber (js/hero-rope-layer.js). It
+        // The Sun + CME flux ropes + τ scrubber (js/hero-rope-layer.js):
+        // the default "Next 24 h" tab flies today's CMEs on the flux-rope
+        // kernel off a live Sun (js/hero-sun.js); the "CME transit" tab
         // consumes the ONE shared provider started below and replays the
         // validated Gannon train while nothing is in flight.
         ropes: {

@@ -1,7 +1,31 @@
 /**
- * hero-rope-layer.js — the modeled CME train, drawn as FLUX-ROPE SURFACES in
- * the homepage hero, with the τ scrubber that replays its transit.
+ * hero-rope-layer.js — the Sun and its CMEs as FLUX-ROPE SURFACES in the
+ * homepage hero, with the τ scrubber that plays them: "☉ Next 24 h" (the
+ * default tab) and "CME transit".
  * ═══════════════════════════════════════════════════════════════════════════
+ * TWO TABS, ONE DRAWING (2026-09-24):
+ *   · ☉ NEXT 24 H — the camera closes on the drawn Sun (`'sun'` framing in
+ *     js/hero-space-weather.js) and τ runs NOW → NOW + 24 h. The Sun is
+ *     js/hero-sun.js: today's NOAA regions (the existing /api/noaa/regions
+ *     relay — nothing new fetched) as sunspot bipoles, plage and loop
+ *     arcades carried by differential rotation, an active corona that
+ *     brightens with the live GOES level, flashes at located flares. Every
+ *     CME of the last 72 h in the DONKI catalogue the page's feed already
+ *     carries — EVERY direction, not just Earth's — is handed to its own
+ *     instance of the flux-rope KERNEL (WASM) through the provider's own
+ *     converter (`donkiToTrainPreset`, §16 interaction on), and the kernel
+ *     propagates them through the day (js/hero-sun-model.js chooses which;
+ *     it computes no kinematics). A quiet catalogue draws NO rope. Marks on
+ *     the track: Earth-directed ropes crossing 1 AU (the kernel's own apex
+ *     probe) and regions setting behind the W limb. This preview plays
+ *     itself ONCE after the hero's entrance, then returns to Earth.
+ *   · CME TRANSIT — the shared provider's live Earth-relevant train or the
+ *     Gannon replay, exactly as before (below), drawn on the corridor.
+ * In both, a rope's SKIN is the kernel's own field: `kernel.fieldAt` Bz at
+ * every surface vertex (red south, blue north — the Stage's convention),
+ * normalised by the rope's axial field at its current apex; the identity
+ * colour shows only where the kernel has nothing to say.
+ *
  * The hero's stage (index.html #hero-stage, js/hero-space-weather.js) frames
  * Earth at ~2.2× for the resting shot. A CME in transit cannot be seen at
  * that framing — the stage shows ±4 R_E and 1 AU is 23 481 R_E — so this
@@ -63,9 +87,10 @@
  * forecast: `kpProxyFromDst` is a DISCLOSED piecewise display proxy
  * pinned to the NOAA G-scale's usual Dst bands, never a forecast of Kp.
  *
- * Node gate: `node tests/hero-rope-layer.mjs` (the pure half — the frame
+ * Node gates: `node tests/hero-rope-layer.mjs` (the pure half — the frame
  * basis, the radial anchors, the scrub-window derivation, the replay
- * forecast shape). Browser gate: `tests/home-hero-stage.spec.js`.
+ * forecast shape) and `node tests/hero-sun-model.mjs` (the 24 h preview's
+ * model, on the real WASM). Browser gate: `tests/home-hero-stage.spec.js`.
  * Test hook: `window.__heroRopes` under ?debug=1.
  */
 
@@ -73,6 +98,11 @@ import { trainAt } from './corridor/corridor-model.js';
 import { ropeSurfaceGrid } from './stage/model.js';
 import { stageRadius, EARTH_S, RSUN_KM, AU_KM } from './stage/scale.js';
 import { integrateDst } from './ring-current-model.js';
+import { createHeroSun, SPOT_SCALE } from './hero-sun.js';
+import {
+    OUTLOOK_HOURS, CME_LOOKBACK_H, outlookWindow, outlookMarks, latestRegions, activityCmes,
+    buildOutlookForecast, regionAt, limbCrossingMs, activityHeat,
+} from './hero-sun-model.js';
 // The hero's colour rules: both raw shaders end in heroEmit (js/hero-color.js).
 import { HERO_COLOR_GLSL } from './hero-color.js';
 
@@ -322,15 +352,35 @@ export async function gannonReplay(wasmUrl = './js/flux-rope-wasm/flux_rope_core
     return buildReplayForecast(kernel, GANNON_FIT, ROPE_DEFAULTS);
 }
 
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  RENDERER + SCRUBBER
 // ═══════════════════════════════════════════════════════════════════════════
+
+/** Rope skin colours by the KERNEL's Bz (js/stage/stage.js convention). */
+const BZ_SOUTH = [0.95, 0.30, 0.18];
+const BZ_NORTH = [0.15, 0.65, 0.95];
+/** Field sampling cadence (kernel.fieldAt over every surface vertex). */
+const FIELD_MS = 220;
+/** Rope sheets closer than this to the camera fade out (hero units). */
+const NEAR_FADE_RE = [7, 20];
 
 const CSS = `
 #hero-scrub{position:relative;z-index:2;display:grid;grid-template-columns:auto 1fr auto;gap:10px 14px;align-items:center;
   margin:0;padding:10px 14px;border-radius:14px;background:rgba(6,2,20,.72);border:1px solid rgba(154,133,255,.22);
   backdrop-filter:blur(8px);color:var(--fg-2,#cdd8f0);font-size:.74rem}
 #hero-scrub[hidden]{display:none}
+.hrs-tabs{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px}
+.hrs-tab{appearance:none;border:1px solid rgba(154,133,255,.28);background:rgba(20,12,48,.55);color:var(--fg-3,#8b94ad);
+  font:inherit;font-size:.66rem;font-weight:700;letter-spacing:.05em;padding:5px 12px;border-radius:999px;cursor:pointer;
+  transition:color .15s,border-color .15s,background .15s}
+.hrs-tab:hover{color:#fff}
+.hrs-tab[aria-selected="true"]{color:#fff;border-color:rgba(255,196,107,.75);
+  background:linear-gradient(180deg,rgba(255,170,70,.30),rgba(255,120,40,.10));box-shadow:0 0 14px rgba(255,160,70,.22)}
+.hrs-tab[data-tab="transit"][aria-selected="true"]{border-color:rgba(143,240,255,.7);
+  background:linear-gradient(180deg,rgba(143,240,255,.22),rgba(80,160,255,.08));box-shadow:0 0 14px rgba(143,240,255,.2)}
+.hrs-tab:disabled{opacity:.45;cursor:default}
+.hrs-tab:focus-visible{outline:2px solid #8ff0ff;outline-offset:2px}
 .hrs-mode{grid-column:1;display:inline-flex;align-items:center;gap:7px;font-family:var(--font-mono,monospace);font-size:.6rem;
   letter-spacing:.12em;text-transform:uppercase;color:#ffd75e;white-space:nowrap}
 .hrs-mode::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
@@ -346,16 +396,27 @@ const CSS = `
   border:2px solid #8ff0ff;box-shadow:0 0 12px rgba(143,240,255,.7);margin-top:-6px}
 .hrs-track input::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #8ff0ff;box-shadow:0 0 12px rgba(143,240,255,.7)}
 .hrs-track input:focus-visible{outline:2px solid #8ff0ff;outline-offset:4px;border-radius:4px}
+#hero-scrub[data-tab="outlook"] .hrs-track input::-webkit-slider-thumb{border-color:#ffc46b;box-shadow:0 0 12px rgba(255,196,107,.75)}
+#hero-scrub[data-tab="outlook"] .hrs-track input::-moz-range-thumb{border-color:#ffc46b;box-shadow:0 0 12px rgba(255,196,107,.75)}
 .hrs-mark{position:absolute;top:7px;width:2px;height:12px;margin-left:-1px;border-radius:1px;pointer-events:none}
 .hrs-mark.launch{background:#ffb454;box-shadow:0 0 6px #ffb454}
 .hrs-mark.arrive{background:#8ff0ff;box-shadow:0 0 6px #8ff0ff}
+.hrs-mark.set{background:#ffd75e;box-shadow:0 0 6px #ffd75e;height:8px;top:9px}
 .hrs-mark.now{background:#fff;opacity:.55}
 .hrs-band{position:absolute;top:11px;height:4px;border-radius:2px;background:rgba(143,240,255,.28);pointer-events:none}
 .hrs-legend{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;font-size:.68rem;color:var(--fg-3,#8b94ad);line-height:1.4}
 .hrs-legend b{color:var(--fg-1,#f5f0ff);font-weight:600}
 .hrs-legend .hrs-chip{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;transform:translateY(1px)}
-.hrs-legend a{color:#8ff0ff;text-decoration:none;font-weight:600;margin-left:auto;white-space:nowrap}
+.hrs-legend .hrs-bz{display:inline-block;width:18px;height:6px;border-radius:3px;margin:0 4px;transform:translateY(-1px);
+  background:linear-gradient(90deg,rgb(242,77,46),rgb(89,107,158),rgb(38,166,242))}
+.hrs-legend details.hrs-note{flex-basis:100%;order:9}
+.hrs-legend details.hrs-note summary{cursor:pointer;color:var(--fg-3,#8b94ad);font-size:.64rem;letter-spacing:.04em;list-style:none}
+.hrs-legend details.hrs-note summary::-webkit-details-marker{display:none}
+.hrs-legend details.hrs-note summary::before{content:'ⓘ ';color:#ffc46b}
+.hrs-legend details.hrs-note[open] summary{margin-bottom:3px}
+.hrs-legend a{color:#8ff0ff;text-decoration:none;font-weight:600;white-space:nowrap}
 .hrs-legend a:hover{text-decoration:underline}
+.hrs-legend .hrs-links{margin-left:auto;display:inline-flex;gap:14px}
 .hrs-play{grid-column:2;justify-self:start;display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;border:0;
   color:#fff;font:inherit;font-size:.7rem;font-weight:700;letter-spacing:.04em;cursor:pointer;
   background:linear-gradient(180deg,#b765ff 0%,#9d3aff 45%,#7b00ee 100%);
@@ -371,7 +432,9 @@ const CSS = `
   .hrs-play{grid-column:2;justify-self:end}
   .hrs-tau{grid-column:1/-1;text-align:left;min-width:0}
   .hrs-legend .hrs-note{display:none}
-  .hrs-legend a{margin-left:0}}
+  .hrs-legend [data-rank="1"],.hrs-legend [data-rank="2"],.hrs-legend [data-crank="2"],.hrs-legend [data-crank="3"],
+  .hrs-legend [data-crank="4"],.hrs-legend [data-crank="5"]{display:none}
+  .hrs-legend .hrs-links{margin-left:0}}
 `;
 
 function fmtUtc(ms) {
@@ -383,6 +446,15 @@ function fmtRel(ms, refMs) {
     const a = Math.abs(h);
     return a >= 48 ? `T${sign}${(a / 24).toFixed(1)} d` : `T${sign}${a.toFixed(1)} h`;
 }
+function fmtDur(ms) {
+    const h = ms / HOUR;
+    return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : `${h.toFixed(h < 10 ? 1 : 0)} h`;
+}
+function fmtLoc(latDeg, lonDeg) {
+    const la = Math.round(Math.abs(latDeg)), lo = Math.round(Math.abs(lonDeg));
+    return `${latDeg < 0 ? 'S' : 'N'}${String(la).padStart(2, '0')}${lonDeg < 0 ? 'E' : 'W'}${String(lo).padStart(2, '0')}`;
+}
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /**
  * @param {object} opts
@@ -390,13 +462,19 @@ function fmtRel(ms, refMs) {
  * @param {object} opts.scene      the hero scene
  * @param {number[]} opts.sunDir   unit Sun direction from Earth (hero-space-weather SUN_DIR)
  * @param {HTMLElement} opts.host  where the scrubber mounts (a sibling of #hero-stage)
- * @param {function(string):void} [opts.onFraming]  'corridor' while scrubbing/playing, 'earth' at rest
+ * @param {function(string):void} [opts.onFraming]  'sun' (Next 24 h) / 'corridor' (transit) while
+ *     scrubbing or playing, 'earth' at rest
  * @param {function():Promise<object>} [opts.replay] async → forecast-shaped replay (Gannon); null disables
- * @param {Promise<any>} [opts.autoplayGate] the replay's self-start waits for this AND adoption
- *     (the hero passes its entrance: the camera must not be pulled into the
- *     corridor while it is still settling onto Earth)
+ * @param {Promise<any>} [opts.autoplayGate] the 24 h preview's self-start waits for this (the hero
+ *     passes its entrance: the camera must not be pulled away while it is still settling onto Earth)
+ * @param {object} [opts.busState]  the latest swpc-update state (later ones arrive on the event)
+ * @param {string} [opts.regionsUrl] NOAA region list (the existing relay; null disables)
+ * @param {string} [opts.wasmUrl]   the flux-rope kernel for the 24 h preview
  */
-export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = null, replay = null, autoplayGate = null } = {}) {
+export function createHeroRopeLayer({
+    THREE, scene, sunDir, host, onFraming = null, replay = null, autoplayGate = null,
+    busState = null, regionsUrl = '/api/noaa/regions', wasmUrl = './js/flux-rope-wasm/flux_rope_core.wasm',
+} = {}) {
     if (!THREE || !scene) throw new Error('createHeroRopeLayer: THREE and scene are required');
 
     const style = document.createElement('style');
@@ -412,50 +490,17 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     group.visible = false;
     scene.add(group);
 
-    // The corridor's Sun: a bright disc + halo at the drawn Sun position.
-    // Shown only in corridor framing (the resting shot has the sun sprite
-    // at 70 R_E, off-frame, lighting Earth — this one is a MAP marker).
+    // The drawn Sun: js/hero-sun.js — photosphere with today's regions,
+    // their loop arcades, an impact-parameter corona, flare + liftoff glows.
+    // Shown only in the corridor / Sun framings (the resting shot has the
+    // sun sprite at 70 R_E, off-frame, lighting Earth — this one is the star
+    // the ropes leave).
     const sunGroup = new THREE.Group();
     sunGroup.position.set(sunPos[0], sunPos[1], sunPos[2]);
     sunGroup.visible = false;
-    // Limb-darkened photosphere (a flat MeshBasicMaterial read as a grey
-    // ball beside the orange rope — measured) plus an additive halo that
-    // skips the depth test: the sprite's plane sits at the Sun's CENTRE, so
-    // with the test on the disc occluded its own halo.
-    const sunDisc = new THREE.Mesh(
-        new THREE.SphereGeometry(CORRIDOR_SUN_DRAWN_R, 40, 28),
-        new THREE.ShaderMaterial({
-            uniforms: { u_time: { value: 0 } },
-            vertexShader: /* glsl */`
-                varying vec3 vN; varying vec3 vV;
-                void main(){
-                    vec4 wp = modelMatrix * vec4(position, 1.0);
-                    vN = normalize(mat3(modelMatrix) * normal);
-                    vV = normalize(cameraPosition - wp.xyz);
-                    gl_Position = projectionMatrix * viewMatrix * wp;
-                }`,
-            fragmentShader: /* glsl */`
-                precision highp float;
-                ${HERO_COLOR_GLSL}
-                varying vec3 vN; varying vec3 vV;
-                void main(){
-                    float mu = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
-                    float limb = 0.55 + 0.45 * pow(mu, 0.6);          // Eddington-ish limb darkening
-                    vec3 col = mix(vec3(1.0, 0.62, 0.22), vec3(1.0, 0.96, 0.82), limb);
-                    // An HDR EMITTER (js/hero-color.js rule 1): the limb colour
-                    // is a pick (decoded once), the level is light — ~1.4× the
-                    // diffuse white at disc centre. The old display-space
-                    // pipeline had to hold this disc at 0.72 so the per-channel
-                    // clip would not flatten the limb to white, and the bloom
-                    // (thresholded on display values) whitened it anyway. The
-                    // hue-preserving shoulder now takes the core to white-hot
-                    // while the limb keeps its orange, and the glow is in
-                    // proportion to how bright it really is.
-                    gl_FragColor = heroRadiance(heroDecode(col) * (0.42 + 0.30 * limb) * 2.0);
-                }`,
-            fog: false,
-        }));
-    sunGroup.add(sunDisc);
+    const sun = createHeroSun({ THREE, parent: sunGroup, basis, radius: CORRIDOR_SUN_DRAWN_R });
+    // Far glow: an additive halo that skips the depth test (its plane sits
+    // at the Sun's CENTRE, so with the test on the disc occluded it).
     const haloTex = radialTexture([
         [0.0, 'rgba(255,240,200,0.45)'], [0.18, 'rgba(255,200,110,0.50)'],
         [0.45, 'rgba(255,150,50,0.16)'], [1.0, 'rgba(255,120,30,0)'],
@@ -491,42 +536,78 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     }
     scene.add(rings);
 
-    // Rope surface shader: a translucent plasma skin — Fresnel rim glow so
-    // the tube reads as a volume, plus helical flow stripes (aPsi from the
-    // grid's ψ index, aTheta from θ) drifting along the axis so the field's
-    // twist is legible. Additive, no depth write, fog off.
+    // Rope surface shader: a translucent plasma skin. Its COLOUR is the
+    // flux-rope KERNEL's own field — `kernel.fieldAt` Bz sampled at every
+    // surface vertex (red south, blue north; the Stage's convention),
+    // normalised by the rope's axial field at its current apex so the
+    // pattern reads the same at 0.1 AU and at 1 AU — with the per-rope
+    // identity colour where the kernel has nothing to say (mirror fallback,
+    // outside the boundary). Fresnel rim so the tube reads as a volume;
+    // helical stripes (twist from the rope's own turns + handedness)
+    // drifting along the axis. Additive, no depth write, fog off.
     const ROPE_VERT = /* glsl */`
         attribute float aPsi;
         attribute float aTheta;
-        varying vec3 vN; varying vec3 vV; varying float vPsi; varying float vTheta;
+        attribute vec4 aField;
+        varying vec3 vN; varying vec3 vV; varying float vPsi; varying float vTheta; varying vec4 vField;
+        varying float vCam;
         void main(){
             vec4 wp = modelMatrix * vec4(position, 1.0);
             vN = normalize(mat3(modelMatrix) * normal);
             vV = normalize(cameraPosition - wp.xyz);
-            vPsi = aPsi; vTheta = aTheta;
+            vCam = distance(cameraPosition, wp.xyz);
+            vPsi = aPsi; vTheta = aTheta; vField = aField;
             gl_Position = projectionMatrix * viewMatrix * wp;
         }`;
     const ROPE_FRAG = /* glsl */`
         precision highp float;
         ${HERO_COLOR_GLSL}
         uniform vec3 u_color; uniform float u_opacity; uniform float u_time; uniform float u_twist;
-        varying vec3 vN; varying vec3 vV; varying float vPsi; varying float vTheta;
+        uniform vec2 u_near; uniform float u_mix;
+        varying vec3 vN; varying vec3 vV; varying float vPsi; varying float vTheta; varying vec4 vField;
+        varying float vCam;
         void main(){
+            // A sheet passing right by the lens is not information: fade it
+            // (only the Sun close-up is near enough for this to engage).
+            float nearFade = smoothstep(u_near.x, u_near.y, vCam);
             float mu = abs(dot(normalize(vN), normalize(vV)));
             float rim = pow(1.0 - mu, 1.6);
-            // Helical stripes: phase advances with θ (twist) and drifts along ψ.
+            // Helical stripes: phase advances with theta (twist) and drifts along psi.
             float helix = 0.5 + 0.5 * sin(6.2831 * (vTheta * u_twist + vPsi * 3.0) - u_time * 0.9);
-            float body = 0.10 + 0.55 * rim;
+            float body = 0.12 + 0.55 * rim;
             float stripes = 0.35 * helix * (0.4 + 0.6 * rim);
-            vec3 col = u_color * (body + stripes) + vec3(1.0) * rim * rim * 0.25;
-            gl_FragColor = heroEmit(col, u_opacity * (0.35 + 1.4 * rim + 0.4 * stripes));
+            // Kernel field colour where sampled (vField.a = 1), identity colour otherwise.
+            vec3 skin = mix(u_color, vField.rgb, vField.a * 0.85);
+            vec3 col = skin * (body + stripes) + vec3(1.0) * rim * rim * 0.22;
+            gl_FragColor = heroEmit(col, u_opacity * u_mix * nearFade * (0.38 + 1.4 * rim + 0.4 * stripes));
         }`;
 
-    /** @type {null|object} the forecast being drawn (live or replay) */
+    /** @type {'outlook'|'transit'} */
+    let tab = 'outlook';
+    // The CME TRANSIT tab: the shared provider's live train, or the Gannon replay.
+    const transit = { fc: null, mode: 'boot', cond: null };
+    // The NEXT 24 H tab: today's Sun + the engine propagating the recent CMEs.
+    const outlook = {
+        fc: null, regions: [], regionsState: regionsUrl ? 'loading' : 'off',
+        cmeKey: null, bus: null, kernel: null, kernelPromise: null, marks: [], pending: 0,
+    };
+
+    /** @type {null|object} the forecast being drawn in the active tab */
     let fc = null;
-    let cond = null;         // conditionsSeries(fc)
-    let mixNow = 0;
-    let mode = 'boot';        // 'live' | 'replay' | 'down' | 'boot'
+    let cond = null;
+    let mixNow = 0, sunMixNow = 0;
+    // Ropes belong to the corridor / Sun framings: at the resting Earth shot
+    // a rope near 1 AU would ENGULF the camera (measured: an Earth-directed
+    // CME at 0.8 AU hid the planet entirely), so they fade in with the pull-out.
+    let ropeMix = 0, ropesOn = false;
+    const applyRopeMix = (r) => {
+        r.mesh.material.uniforms.u_mix.value = ropeMix;
+        r.wire.material.opacity = r.wireBase * ropeMix;
+        r.nose.material.opacity = r.noseBase * ropeMix;
+        // The apex marker is sized for the far corridor view; in the Sun
+        // close-up (≈4.5× nearer) it would read as a ball beside the star.
+        r.nose.scale.setScalar(1 - 0.78 * sunMixNow);
+    };
     let ropes = [];
     let win = null;
     let tauMs = Date.now();
@@ -537,34 +618,41 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     let autoTimer = 0;
     let autoToken = 0;        // bumps on every cancel, so a gated self-start that resolves late is void
     const gate = autoplayGate ?? Promise.resolve();
-    let held = false;         // hook-driven hold: corridor stays until release()
-    let oneShot = false;      // the replay's first, self-started pass
+    let held = false;         // hook-driven hold: the framing stays until release()
+    let oneShot = false;      // the preview's first, self-started pass
     let lastKey = '';
     let lastLegendAt = 0;
+    let lastFieldAt = 0;
+    let interacted = false;   // the visitor touched the scrubber: no self-start after that
     const LEGEND_MS = 400;
-    /** Replay speed: one hour of transit per 0.35 s of wall clock. */
+    /** Transit replay speed: one hour of transit per 0.35 s of wall clock. */
     const PLAY_H_PER_S = 1 / 0.35;
-    /** After the pointer lets go, hold the corridor this long, then return. */
+    /** 24 h preview speed: the whole day in 12 s. */
+    const OUTLOOK_H_PER_S = OUTLOOK_HOURS / 12;
+    /** After the pointer lets go, hold the framing this long, then return. */
     const REST_MS = 6000;
-    /** A replay plays itself ONCE this long after adoption — the entrance —
-     *  then returns to the Earth shot. Live trains never move the camera
-     *  uninvited. Counted from adoption OR the hero's entrance settling
-     *  (`autoplayGate`), whichever is later. */
+    /** The 24 h preview plays itself ONCE this long after the hero's
+     *  entrance settles (`autoplayGate`), then returns to the Earth shot. */
     const AUTOPLAY_DELAY_MS = 5000;
     const cancelAuto = () => { clearTimeout(autoTimer); autoToken++; };
 
     // ── Scrubber DOM ──────────────────────────────────────────────────────
     const ui = document.createElement('div');
     ui.id = 'hero-scrub';
-    ui.hidden = true;
-    ui.setAttribute('aria-label', 'CME transit time scrubber');
+    ui.dataset.tab = tab;
+    ui.setAttribute('aria-label', 'Solar activity and CME transit time scrubber');
     ui.innerHTML = `
-        <span class="hrs-mode" data-mode="boot">CME train · connecting…</span>
-        <button type="button" class="hrs-play" aria-label="Play the transit">▶ Play transit</button>
+        <div class="hrs-tabs" role="tablist" aria-label="Scrubber view">
+          <button type="button" class="hrs-tab" role="tab" data-tab="outlook" aria-selected="true">☉ Next 24 h</button>
+          <button type="button" class="hrs-tab" role="tab" data-tab="transit" aria-selected="false">CME transit</button>
+        </div>
+        <span class="hrs-mode" data-mode="boot">Sun · connecting…</span>
+        <button type="button" class="hrs-play" aria-label="Play the next 24 hours">▶ Play next 24 h</button>
         <div class="hrs-tau"><span class="hrs-tau-rel">—</span><small class="hrs-tau-abs">—</small></div>
-        <div class="hrs-track"><div class="hrs-band" hidden></div><input type="range" min="0" max="1000" step="1" value="0" aria-label="Transit time"></div>
+        <div class="hrs-track"><div class="hrs-band" hidden></div><input type="range" min="0" max="1000" step="1" value="0" aria-label="Time"></div>
         <div class="hrs-legend"></div>`;
     (host ?? document.body).appendChild(ui);
+    const tabBtns = [...ui.querySelectorAll('.hrs-tab')];
     const modeEl = ui.querySelector('.hrs-mode');
     const playBtn = ui.querySelector('.hrs-play');
     const relEl = ui.querySelector('.hrs-tau-rel');
@@ -573,9 +661,15 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
     const band = ui.querySelector('.hrs-band');
     const slider = ui.querySelector('input');
     const legend = ui.querySelector('.hrs-legend');
+    // The legend body is re-rendered at LEGEND_MS; the disclosure's open
+    // state must survive that or it snaps shut under the reader's cursor.
+    let noteOpen = false;
+    legend.addEventListener('toggle', (e) => { if (e.target?.matches?.('details.hrs-note')) noteOpen = e.target.open; }, true);
+    const noteTag = (body) => `<details class="hrs-note"${noteOpen ? ' open' : ''}><summary>How this is drawn</summary>${body}</details>`;
 
     const sliderToTau = (v) => win ? win.t0 + (win.t1 - win.t0) * (v / 1000) : Date.now();
     const tauToSlider = (t) => win ? 1000 * (t - win.t0) / (win.t1 - win.t0) : 0;
+    const activeFraming = () => (tab === 'outlook' ? 'sun' : 'corridor');
 
     function setFraming(next) {
         if (framing === next) return;
@@ -588,59 +682,78 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
         restTimer = setTimeout(() => { if (!dragging && !playing && !held) setFraming('earth'); }, REST_MS);
     }
 
+    /** Move τ (and the readout) without touching the camera. */
+    function placeTau(t, fromSlider = false) {
+        if (!win) return;
+        tauMs = Math.min(win.t1, Math.max(win.t0, t));
+        if (!fromSlider) slider.value = String(Math.round(tauToSlider(tauMs)));
+        if (tab === 'outlook') {
+            relEl.textContent = `now ${fmtRel(tauMs, win.t0).replace(/^T/, '')}`;
+        } else {
+            const ref = win.arrivalMs ?? fc?.launchMs ?? win.t0;
+            relEl.textContent = (win.arrivalMs ? 'arrival ' : 'launch ') + fmtRel(tauMs, ref);
+        }
+        absEl.textContent = fmtUtc(tauMs);
+    }
+
+    /** Scrub to τ: the camera goes to this tab's framing (Sun / corridor). */
     function setTau(t, fromSlider = false, hold = false) {
         if (!win) return;
         if (hold) { held = true; clearTimeout(restTimer); }
-        tauMs = Math.min(win.t1, Math.max(win.t0, t));
-        if (!fromSlider) slider.value = String(Math.round(tauToSlider(tauMs)));
-        const ref = win.arrivalMs ?? fc.launchMs;
-        relEl.textContent = (win.arrivalMs ? 'arrival ' : 'launch ') + fmtRel(tauMs, ref);
-        absEl.textContent = fmtUtc(tauMs);
-        setFraming('corridor');
+        placeTau(t, fromSlider);
+        setFraming(activeFraming());
     }
 
+    const touched = () => { interacted = true; oneShot = false; cancelAuto(); };
     slider.addEventListener('input', () => { setTau(sliderToTau(+slider.value), true); });
-    slider.addEventListener('pointerdown', () => { dragging = true; oneShot = false; cancelAuto(); setPlaying(false); clearTimeout(restTimer); });
+    slider.addEventListener('pointerdown', () => { dragging = true; touched(); setPlaying(false); clearTimeout(restTimer); });
     const endDrag = () => { if (dragging) { dragging = false; armRest(); } };
     slider.addEventListener('pointerup', endDrag);
     slider.addEventListener('pointercancel', endDrag);
-    slider.addEventListener('keydown', () => { setPlaying(false); armRest(); });
-    playBtn.addEventListener('click', () => { oneShot = false; cancelAuto(); setPlaying(!playing); });
+    slider.addEventListener('keydown', () => { touched(); setPlaying(false); armRest(); });
+    playBtn.addEventListener('click', () => { touched(); setPlaying(!playing); });
+    for (const b of tabBtns) b.addEventListener('click', () => { touched(); setTab(b.dataset.tab, true); });
+
+    function playLabel() {
+        return playing ? '❚❚ Pause' : (tab === 'outlook' ? '▶ Play next 24 h' : '▶ Play transit');
+    }
 
     function setPlaying(on) {
-        // Any explicit play/pause cancels the replay's pending self-start.
+        // Any explicit play/pause cancels the pending self-start.
         cancelAuto();
         if (!on) oneShot = false;
         playing = !!on && !!win;
-        playBtn.textContent = playing ? '❚❚ Pause' : '▶ Play transit';
+        if (playing && tab === 'outlook' && tauMs >= win.t1 - 60e3) setTau(win.t0);
+        playBtn.textContent = playLabel();
         playBtn.setAttribute('aria-pressed', String(playing));
-        if (playing) { clearTimeout(restTimer); setFraming('corridor'); }
+        playBtn.setAttribute('aria-label', tab === 'outlook' ? 'Play the next 24 hours' : 'Play the transit');
+        if (playing) { clearTimeout(restTimer); setFraming(activeFraming()); }
         else armRest();
     }
 
     function renderMarks() {
         for (const m of track.querySelectorAll('.hrs-mark')) m.remove();
+        band.hidden = true;
         if (!win) return;
         const pct = (t) => `${(100 * (t - win.t0) / (win.t1 - win.t0)).toFixed(2)}%`;
-        for (const l of win.launches) {
-            const m = document.createElement('div'); m.className = 'hrs-mark launch';
-            m.style.left = pct(l); m.title = 'launch ' + fmtUtc(l); track.appendChild(m);
+        const add = (cls, t, title) => {
+            const m = document.createElement('div'); m.className = 'hrs-mark ' + cls;
+            m.style.left = pct(t); m.title = title; track.appendChild(m);
+        };
+        if (tab === 'outlook') {
+            for (const mk of outlook.marks) add(mk.kind === 'arrive' ? 'arrive' : 'set', mk.t, `${mk.label} · ${fmtUtc(mk.t)}`);
+            return;
         }
-        if (win.arrivalMs) {
-            const m = document.createElement('div'); m.className = 'hrs-mark arrive';
-            m.style.left = pct(win.arrivalMs); m.title = 'arrival ' + fmtUtc(win.arrivalMs); track.appendChild(m);
-        }
-        const s = fc.summary;
+        for (const l of win.launches) add('launch', l, 'launch ' + fmtUtc(l));
+        if (win.arrivalMs) add('arrive', win.arrivalMs, 'arrival ' + fmtUtc(win.arrivalMs));
+        const s = fc?.summary;
         if (Number.isFinite(s?.arrivalP10Ms) && Number.isFinite(s?.arrivalP90Ms)) {
             band.hidden = false;
             band.style.left = pct(s.arrivalP10Ms);
             band.style.width = `calc(${pct(s.arrivalP90Ms)} - ${pct(s.arrivalP10Ms)})`;
-        } else band.hidden = true;
-        const now = Date.now();
-        if (now > win.t0 && now < win.t1) {
-            const m = document.createElement('div'); m.className = 'hrs-mark now';
-            m.style.left = pct(now); m.title = 'now'; track.appendChild(m);
         }
+        const now = Date.now();
+        if (now > win.t0 && now < win.t1) add('now', now, 'now');
     }
 
     // ── Rope draw slots ───────────────────────────────────────────────────
@@ -654,19 +767,9 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
         ropes = [];
     }
 
-    function adoptForecast(next, nextMode) {
+    function buildRopes(next) {
         disposeRopes();
-        fc = next;
-        mode = nextMode;
-        win = scrubWindow(fc);
-        try { cond = fc ? conditionsSeries(fc) : null; }
-        catch (e) { cond = null; console.info('[hero-rope] conditions unavailable:', e?.message ?? e); }
-        lastKey = '';
-        group.visible = !!(fc && win);
-        ui.hidden = !group.visible;
-        if (!group.visible) { modeEl.textContent = 'CME train · unavailable'; modeEl.dataset.mode = 'down'; return; }
-
-        const list = fc.preset.ropes;
+        const list = next?.preset?.ropes ?? [];
         list.forEach((rope, i) => {
             const color = ROPE_COLORS[i % ROPE_COLORS.length];
             const seed = ropeSurfaceGrid(
@@ -684,12 +787,15 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             }
             geo.setAttribute('aPsi', new THREE.BufferAttribute(aPsi, 1));
             geo.setAttribute('aTheta', new THREE.BufferAttribute(aTheta, 1));
+            geo.setAttribute('aField', new THREE.BufferAttribute(new Float32Array(nV * 4), 4));
             const mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({
                 uniforms: {
                     u_color: { value: new THREE.Color(color) },
                     u_opacity: { value: 0.22 },
                     u_time: { value: 0 },
                     u_twist: { value: Math.max(1, Math.min(6, Math.abs(rope.twistTurns ?? 3))) * Math.sign(rope.handedness ?? 1) },
+                    u_near: { value: new THREE.Vector2(NEAR_FADE_RE[0], NEAR_FADE_RE[1]) },
+                    u_mix: { value: 0 },
                 },
                 vertexShader: ROPE_VERT, fragmentShader: ROPE_FRAG,
                 transparent: true, side: THREE.DoubleSide,
@@ -708,93 +814,289 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             group.add(root);
             ropes.push({
                 root, mesh, wire, nose, color, rope, index: i,
-                launchMs: fc.launchMs + (rope.launchOffsetS ?? 0) * 1000,
-                cme: fc.cmes?.[i] ?? null,
+                launchMs: next.launchMs + (rope.launchOffsetS ?? 0) * 1000,
+                cme: next.cmes?.[i] ?? null,
                 scratch: new Float32Array(seed.positions.length),
-                apexAu: NaN, oracle: null,
+                apexAu: NaN, oracle: null, fielded: false, wireBase: 0, noseBase: 0,
             });
         });
+    }
 
-        modeEl.className = 'hrs-mode ' + (mode === 'live' ? 'live' : mode === 'down' ? 'down' : '');
-        modeEl.dataset.mode = mode;
-        modeEl.textContent = mode === 'live'
-            ? `LIVE · CME train · ${list.length} rope${list.length > 1 ? 's' : ''}`
-            : mode === 'down'
-                ? 'LIVE FEED DOWN · replay · May 2024 G5'
-                : 'REPLAY · May 2024 G5 · validated hindcast';
-        renderMarks();
-        // Live: rest at NOW so the drawn train is the current state. Replay:
-        // start at the epoch so pressing Play shows the whole transit.
-        const start = mode === 'live' ? Date.now() : win.t0 + 6 * HOUR;
-        setTau(start);
-        setFraming('earth');
-        clearTimeout(restTimer);
-        cancelAuto();
-        if (mode !== 'live') {
-            const token = autoToken;
-            gate.then(() => {
-                if (token !== autoToken) return;     // cancelled, or a newer adoption owns it
-                autoTimer = setTimeout(() => {
-                    if (dragging || playing || mode === 'live') return;
-                    oneShot = true;
-                    setPlaying(true);
-                }, AUTOPLAY_DELAY_MS);
-            });
+    /**
+     * Paint a rope's skin with the KERNEL's Bz at every surface vertex
+     * (sampled just inside the boundary, σ×0.8, so the inside test never
+     * flickers — the Stage's rule). Returns false when there is no kernel.
+     */
+    function colorRope(r, geometry) {
+        const k = fc?.kernel;
+        const attr = r.mesh.geometry.attributes.aField;
+        if (!k || typeof k.fieldAt !== 'function' || geometry.oracle !== 'kernel') {
+            if (r.fielded) { attr.array.fill(0); attr.needsUpdate = true; r.fielded = false; }
+            return false;
         }
+        const inner = { ...geometry, sigApexAu: geometry.sigApexAu * 0.8 };
+        const { positions } = ropeSurfaceGrid(inner, N_PSI, N_THETA);
+        const tTrain = geometry.tTrainS ?? geometry.tS;
+        const bAxis = Math.max(1, Math.abs(r.rope.b1AuNt ?? 20) * Math.pow(Math.max(geometry.dAu, 0.05), -(r.rope.nB ?? 1.64)));
+        const a = attr.array;
+        const n = positions.length / 3;
+        for (let i = 0; i < n; i++) {
+            const f = k.fieldAt(tTrain, positions[i * 3] * AU_KM, positions[i * 3 + 1] * AU_KM, positions[i * 3 + 2] * AU_KM);
+            const o = i * 4;
+            if (f.inside && Number.isFinite(f.bz)) {
+                const mag = Math.min(1, Math.abs(f.bz) / bAxis);
+                const c = f.bz < 0 ? BZ_SOUTH : BZ_NORTH;
+                const w = 0.35 + 0.65 * mag;
+                a[o] = c[0] * w; a[o + 1] = c[1] * w; a[o + 2] = c[2] * w; a[o + 3] = 1;
+            } else {
+                a[o] = 0; a[o + 1] = 0; a[o + 2] = 0; a[o + 3] = 0;
+            }
+        }
+        attr.needsUpdate = true;
+        r.fielded = true;
+        return true;
+    }
+
+    // ── Tabs ──────────────────────────────────────────────────────────────
+    function renderChip() {
+        let cls = '', text = '';
+        if (tab === 'outlook') {
+            const down = outlook.regionsState === 'down';
+            cls = down ? 'down' : 'live';
+            text = down ? 'Sun · next 24 h · regions feed down' : 'LIVE · Sun · next 24 h';
+            modeEl.dataset.mode = down ? 'down' : 'live';
+        } else {
+            const n = fc?.preset?.ropes?.length ?? 0;
+            modeEl.dataset.mode = transit.mode;
+            cls = transit.mode === 'live' ? 'live' : transit.mode === 'down' ? 'down' : '';
+            text = !fc ? (transit.mode === 'boot' ? 'CME train · connecting…' : 'CME train · unavailable')
+                : transit.mode === 'live' ? `LIVE · CME train · ${n} rope${n > 1 ? 's' : ''}`
+                    : transit.mode === 'down' ? 'LIVE FEED DOWN · replay · May 2024 G5'
+                        : 'REPLAY · May 2024 G5 · validated hindcast';
+        }
+        modeEl.className = 'hrs-mode ' + cls;
+        modeEl.textContent = text;
+    }
+
+    /**
+     * Make `next` the active tab and draw its forecast. `keepTau` keeps the
+     * scrubbed instant when the same tab's data refreshes under it.
+     */
+    function activate(next, { keepTau = false } = {}) {
+        const changed = next !== tab;
+        tab = next;
+        ui.dataset.tab = tab;
+        for (const b of tabBtns) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+        tabBtns.find((b) => b.dataset.tab === 'transit').disabled = !transit.fc && transit.mode === 'boot';
+        const prevTau = tauMs;
+        if (tab === 'outlook') {
+            fc = outlook.fc;
+            cond = null;
+            win = outlookWindow(keepTau && win?.outlook ? win.t0 : Date.now());
+            outlook.marks = outlookMarks(fc, win, outlook.regions);
+            sun.setLive(true);
+            sun.setLiftoffs(liftoffsOf(fc));
+        } else {
+            fc = transit.fc;
+            cond = transit.cond;
+            win = fc ? scrubWindow(fc) : null;
+            sun.setLive(false);
+            sun.setLiftoffs(liftoffsOf(fc));
+        }
+        buildRopes(fc);
+        lastKey = '';
+        ropesOn = !!(fc && win && ropes.length);
+        group.visible = ropesOn && ropeMix > 0.02;
+        renderChip();
+        renderMarks();
+        playBtn.textContent = playLabel();
+        playBtn.setAttribute('aria-label', tab === 'outlook' ? 'Play the next 24 hours' : 'Play the transit');
+        if (!win) { update(true); return; }
+        // Outlook rests at NOW; a live train rests at now; a replay starts at
+        // its epoch so pressing Play shows the whole transit.
+        const start = keepTau && !changed ? prevTau
+            : tab === 'outlook' ? win.t0
+                : transit.mode === 'live' ? Date.now() : win.t0 + 6 * HOUR;
+        placeTau(start);          // a data refresh never moves the camera
         update(true);
     }
 
-    // ── Provider wiring ───────────────────────────────────────────────────
+    /** At rest, the preview's NOW follows the wall clock (no rebuild, no camera). */
+    function rewindowOutlook() {
+        win = outlookWindow(Date.now());
+        outlook.marks = outlookMarks(fc, win, outlook.regions);
+        renderMarks();
+        placeTau(win.t0);
+        lastKey = '';
+    }
+
+    /** Public: switch tabs. A visitor's click also flies the camera there. */
+    function setTab(next, fly = false) {
+        if (next !== 'outlook' && next !== 'transit') return;
+        if (next === 'transit' && !transit.fc && transit.mode === 'boot') return;
+        setPlaying(false);
+        activate(next);
+        if (fly) { setFraming(activeFraming()); armRest(); }
+        else setFraming('earth');
+    }
+
+    function liftoffsOf(f) {
+        const list = f?.preset?.ropes ?? [];
+        return list.map((r) => ({
+            launchMs: f.launchMs + (r.launchOffsetS ?? 0) * 1000,
+            latDeg: r.latDeg ?? 0, lonDeg: r.lonDeg ?? 0,
+        }));
+    }
+
+    // ── Transit tab wiring (the shared provider) ──────────────────────────
+    function adoptTransit(next, nextMode) {
+        transit.fc = next;
+        transit.mode = nextMode;
+        try { transit.cond = next ? conditionsSeries(next) : null; }
+        catch (e) { transit.cond = null; console.info('[hero-rope] conditions unavailable:', e?.message ?? e); }
+        tabBtns.find((b) => b.dataset.tab === 'transit').disabled = false;
+        if (tab === 'transit') activate('transit');
+    }
+
     let replayPromise = null;
     async function adoptPublished(pub) {
         if (pub && !pub.idle && !pub.failed && pub.preset && Number.isFinite(pub.launchMs)) {
-            adoptForecast(pub, 'live');
+            adoptTransit(pub, 'live');
             return;
         }
         const down = !!pub?.failed;
-        if (!replay) { adoptForecast(null, 'down'); return; }
+        if (!replay) { adoptTransit(null, 'down'); return; }
         try {
             replayPromise ??= replay();
             const rf = await replayPromise;
             // A live train that landed while the replay was loading wins.
-            if (fc && mode === 'live') return;
-            adoptForecast(rf, down ? 'down' : 'replay');
+            if (transit.fc && transit.mode === 'live') return;
+            adoptTransit(rf, down ? 'down' : 'replay');
         } catch (e) {
             console.info('[hero-rope] replay unavailable:', e?.message ?? e);
-            adoptForecast(null, 'down');
+            adoptTransit(null, 'down');
         }
     }
     window.addEventListener('flux-rope-forecast', (ev) => { adoptPublished(ev.detail); }, { passive: true });
     if (window.__fluxRopeForecast) adoptPublished(window.__fluxRopeForecast);
 
+    // ── Next 24 h wiring: today's regions + the engine on the recent CMEs ──
+    async function loadRegions() {
+        if (!regionsUrl) return;
+        try {
+            const res = await fetch(regionsUrl, { headers: { accept: 'application/json' } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const payload = await res.json();
+            outlook.regions = latestRegions(payload?.data?.regions ?? payload?.regions ?? []);
+            outlook.regionsState = 'ok';
+        } catch (e) {
+            // Down must LOOK down: no invented spots, and the chip says so.
+            outlook.regions = [];
+            outlook.regionsState = 'down';
+            console.info('[hero-sun] regions unavailable:', e?.message ?? e);
+        }
+        sun.setRegions(outlook.regions);
+        if (tab === 'outlook') activate('outlook', { keepTau: true });
+    }
+
+    async function ensureKernel() {
+        if (outlook.kernel) return outlook.kernel;
+        outlook.kernelPromise ??= import('./flux-rope-kernel.js').then((m) => m.loadFluxRopeKernel(wasmUrl));
+        outlook.kernel = await outlook.kernelPromise;
+        return outlook.kernel;
+    }
+
+    /** The live bus (js/swpc-feed.js state): X-ray, flares, and the CME catalogue. */
+    async function setBusState(state) {
+        if (!state) return;
+        outlook.bus = state;
+        sun.setBus(state);
+        const now = Date.now();
+        const cmes = activityCmes(state.recent_cmes, now);
+        const key = cmes.map((c) => c.timeIso + ':' + Math.round(c.speedKms)).join('|');
+        if (key === outlook.cmeKey && outlook.fc) { lastKey = ''; return; }
+        outlook.cmeKey = key;
+        let next;
+        try {
+            outlook.pending = cmes.length && !outlook.kernel ? cmes.length : 0;
+            if (outlook.pending) lastKey = '';
+            const kernel = cmes.length ? await ensureKernel() : null;
+            outlook.pending = 0;
+            if (key !== outlook.cmeKey) return;          // a newer catalogue won the race
+            const w = Number(state.solar_wind?.speed);
+            next = buildOutlookForecast(kernel, cmes, now, { ambientWKms: w > 200 && w < 1500 ? w : 400 });
+        } catch (e) {
+            outlook.pending = 0;
+            console.info('[hero-sun] flux-rope kernel unavailable:', e?.message ?? e);
+            next = buildOutlookForecast(null, [], now);
+            next.kernelDown = true;
+        }
+        outlook.fc = next;
+        if (tab === 'outlook') activate('outlook', { keepTau: true });
+    }
+    window.addEventListener('swpc-update', (ev) => { setBusState(ev.detail); }, { passive: true });
+    if (busState) setBusState(busState);
+    else if (!outlook.fc) outlook.fc = buildOutlookForecast(null, [], Date.now());
+    loadRegions();
+    const regionsTimer = regionsUrl ? setInterval(loadRegions, 15 * 60e3) : 0;
+
+    // The 24 h preview plays itself ONCE after the entrance — unless the
+    // visitor got to the scrubber first.
+    {
+        const token = autoToken;
+        gate.then(() => {
+            if (token !== autoToken || interacted) return;
+            autoTimer = setTimeout(() => {
+                if (interacted || dragging || playing || held) return;
+                if (tab !== 'outlook') return;
+                activate('outlook');
+                setPlaying(true);
+                oneShot = true;
+            }, AUTOPLAY_DELAY_MS);
+        });
+    }
+
     // ── Per-frame ─────────────────────────────────────────────────────────
     /**
-     * Advance the replay clock (when playing) and place the train at τ.
+     * Advance the clock (when playing) and place the train + the Sun at τ.
      * Called by the hero's animate loop with the real frame dt.
      */
     function tick(dt) {
-        if (!group.visible || !fc) return;
         const tNow = performance.now() / 1000;
+        if (sunGroup.visible) sun.tick(tNow);
+        if (!win) return;
         for (const r of ropes) r.mesh.material.uniforms.u_time.value = tNow;
         if (playing) {
-            let t = tauMs + dt * PLAY_H_PER_S * HOUR;
+            const rate = tab === 'outlook' ? OUTLOOK_H_PER_S : PLAY_H_PER_S;
+            let t = tauMs + dt * rate * HOUR;
             if (t >= win.t1) {
-                if (oneShot) { oneShot = false; setPlaying(false); setTau(win.t0 + 6 * HOUR); return; }
+                if (oneShot) {
+                    oneShot = false; setPlaying(false); placeTau(tab === 'outlook' ? win.t0 : win.t0 + 6 * HOUR);
+                    setFraming('earth');
+                    return;
+                }
                 t = win.t0;   // loop
             }
             setTau(t);
+        } else if (tab === 'outlook' && framing === 'earth' && !dragging && !held && Date.now() - win.t0 > 60e3) {
+            rewindowOutlook();
         }
         update(false);
     }
 
     function update(force) {
-        if (!group.visible || !fc || !Number.isFinite(tauMs)) return;
+        if (!Number.isFinite(tauMs)) return;
+        sun.update(tauMs, force);
+        if (!fc || !win) { if (force) renderLegend([]); return; }
         const key = Math.round(tauMs / 60e3) + ':' + ropes.length + ':' + framing;
-        const wantLegend = performance.now() - lastLegendAt >= LEGEND_MS;
+        const now = performance.now();
+        const wantLegend = now - lastLegendAt >= LEGEND_MS;
         if (!force && key === lastKey && !wantLegend) return;
         lastKey = key;
+        const wantField = force || now - lastFieldAt >= FIELD_MS;
+        if (wantField) lastFieldAt = now;
 
-        const train = trainAt(fc.preset, fc.launchMs, tauMs, fc.kernel);
+        const train = ropes.length ? trainAt(fc.preset, fc.launchMs, tauMs, fc.kernel) : [];
         const byIndex = new Map(train.map((m) => [m.index, m]));
         const rows = [];
         for (const r of ropes) {
@@ -802,7 +1104,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             if (!m) { r.root.visible = false; r.apexAu = NaN; r.oracle = null; rows.push({ r, txt: `launches ${fmtUtc(r.launchMs)}` }); continue; }
             const apexAu = m.geometry.dAu;
             r.apexAu = apexAu; r.oracle = m.geometry.oracle;
-            if (apexAu >= PASSED_HIDE_AU) { r.root.visible = false; rows.push({ r, txt: 'passed Earth' }); continue; }
+            if (apexAu >= PASSED_HIDE_AU) { r.root.visible = false; rows.push({ r, txt: 'passed 1 AU' }); continue; }
             r.root.visible = true;
             const { positions } = ropeSurfaceGrid(m.geometry, N_PSI, N_THETA);
             mapSurface(positions, basis, sunPos, r.scratch);
@@ -816,68 +1118,145 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             const eDir = m.geometry.frame.eDir;
             const tip = ropePointToHero([eDir[0] * apexAu, eDir[1] * apexAu, eDir[2] * apexAu], basis, sunPos);
             r.nose.position.set(tip[0], tip[1], tip[2]);
-            const fade = passedFade(apexAu);
+            if (wantField) colorRope(r, m.geometry);
+            // Fade in over the first 40 min of flight (the kernel starts a
+            // rope at the 21.5 R☉ launch surface), out past 1 AU.
+            const flightMin = (tauMs - r.launchMs) / 60e3;
+            const fade = passedFade(apexAu) * Math.min(1, Math.max(0.15, flightMin / 40));
             r.mesh.material.uniforms.u_opacity.value = 0.22 * fade;
-            r.wire.material.opacity = 0.12 * fade;
-            r.nose.material.opacity = 0.95 * fade;
-            const v = fc.kernel?.apexVKmsAt ? Math.round(fc.kernel.apexVKmsAt(r.index, m.geometry.tS)) : null;
-            rows.push({ r, txt: apexAu >= 1 ? 'at Earth' : `apex ${apexAu.toFixed(2)} AU${v ? ` · ${v} km/s` : ''}` });
+            r.wireBase = (r.fielded ? 0.07 : 0.12) * fade;
+            r.noseBase = 0.95 * fade;
+            applyRopeMix(r);
+            const tTrain = m.geometry.tTrainS ?? m.geometry.tS;
+            const v = fc.kernel?.apexVKmsAt ? Math.round(fc.kernel.apexVKmsAt(r.index, tTrain)) : null;
+            rows.push({ r, txt: apexAu >= 1 ? 'at 1 AU' : tab === 'outlook' ? `${apexAu.toFixed(2)} AU` : `apex ${apexAu.toFixed(2)} AU${v ? ` · ${v} km/s` : ''}` });
         }
-        if (wantLegend || force) { lastLegendAt = performance.now(); renderLegend(rows); }
+        if (wantLegend || force) { lastLegendAt = now; renderLegend(rows); }
+    }
+
+    function ropeDirection(r) {
+        if (r.cme?.earthDirected) return '→ Earth';
+        const lon = r.rope.lonDeg ?? 0, lat = r.rope.latDeg ?? 0;
+        return `→ ${fmtLoc(lat, lon)}`;
     }
 
     function renderLegend(rows) {
+        const links = `<span class="hrs-links">${tab === 'outlook' ? '<a href="sun.html" data-funnel-cta="hero_sun_outlook">Open the live Sun →</a>' : ''}<a href="flux-rope-live.html" data-funnel-cta="hero_flux_rope">Open the Compounding Watch →</a></span>`;
+        if (tab === 'outlook') {
+            legend.innerHTML = outlookLegend(rows) + links;
+            return;
+        }
         const chips = rows.map(({ r, txt }) => {
             const hex = '#' + r.color.toString(16).padStart(6, '0');
             const kms = Math.round(r.cme?.speedKms ?? r.rope.v0Kms ?? 0);
             return `<span><i class="hrs-chip" style="background:${hex}"></i><b>Rope ${r.index + 1}</b> · ${kms} km/s → ${txt}</span>`;
         }).join('');
         const mirrored = rows.some(({ r }) => r.oracle === 'mirror');
-        const story = mode === 'live'
+        const story = transit.mode === 'live'
             ? 'Modeled from live NASA DONKI CMEs on the flux-rope kernel; arrival band = ensemble P10–P90.'
             : 'The May 2024 G5 superstorm as a 2-rope compounding train — the storm these forecasts were validated on (min Bz −44.3 vs −44.2 nT observed).';
         const c = conditionsAt(cond, tauMs);
         const condTxt = c ? `<span><b>At Earth</b> · Bz ${c.bz >= 0 ? '+' : ''}${c.bz.toFixed(0)} nT · ${Math.round(c.v)} km/s · Dst ${Math.round(c.dst)} nT · G${c.gLevel} (Kp proxy ${c.kp.toFixed(0)})</span>` : '';
         legend.innerHTML = `${chips}${condTxt}
-            <span class="hrs-note">${story}${mirrored ? ' Some ropes on the mirror fallback.' : ''}
-            Corridor radial scale compressed (Sun drawn ×${SUN_EXAGGERATION.toFixed(0)}); AU readouts are true. Dst is O'Brien–McPherron on the modeled L1 driver; Kp is a display proxy from Dst.</span>
-            <a href="flux-rope-live.html" data-funnel-cta="hero_flux_rope">Open the Compounding Watch →</a>`;
+            ${noteTag(`${story}${mirrored ? ' Some ropes on the mirror fallback.' : ''}
+            Skin <i class="hrs-bz"></i> = the kernel's own Bz (red south, blue north). Corridor radial scale compressed (Sun drawn ×${SUN_EXAGGERATION.toFixed(0)}); AU readouts are true. Dst is O'Brien–McPherron on the modeled L1 driver; Kp is a display proxy from Dst.`)}
+            ${links}`;
+    }
+
+    function outlookLegend(rows) {
+        const bus = outlook.bus;
+        const cls = bus?.xray_class ? esc(bus.xray_class) : null;
+        const parts = [];
+        if (cls) parts.push(`<span><b>GOES X-ray</b> · ${cls} now</span>`);
+        // The regions that matter most for the next day, by their glow.
+        const regs = outlook.regions.slice().sort((a, b) => activityHeat(b) - activityHeat(a)).slice(0, 3);
+        for (const [k, reg] of regs.entries()) {
+            const at = regionAt(reg, tauMs);
+            const pm = Number.isFinite(reg.pM) ? `M ${Math.round(reg.pM * 100)}%` : null;
+            const px = Number.isFinite(reg.pX) ? `X ${Math.round(reg.pX * 100)}%` : null;
+            const odds = [pm, px].filter(Boolean).join(' · ');
+            const set = limbCrossingMs(reg, tauMs, win.t1 - tauMs);
+            const where = !at.earthFacing ? 'behind the W limb' : set ? `sets in ${fmtDur(set - tauMs)}` : fmtLoc(at.latDeg, at.lonDeg);
+            parts.push(`<span data-rank="${k}"><b>AR ${esc(reg.region)}</b>${reg.complex ? ' δγ' : ''} · ${where}${odds ? ` · ${odds} / 24 h` : ''}</span>`);
+        }
+        if (outlook.regionsState === 'ok' && !outlook.regions.length) parts.push('<span><b>No numbered regions</b> on the disc today</span>');
+        // Newest CMEs first in the list (the fresh eruptions are the story).
+        rows.slice().reverse().forEach(({ r, txt }, k) => {
+            const hex = '#' + r.color.toString(16).padStart(6, '0');
+            const kms = Math.round(r.cme?.speedKms ?? r.rope.v0Kms ?? 0);
+            parts.push(`<span data-crank="${k}"><i class="hrs-chip" style="background:${hex}"></i><b>CME ${r.index + 1}</b> · ${kms} km/s ${ropeDirection(r)} · ${txt}</span>`);
+        });
+        const nCme = fc?.preset?.ropes?.length ?? 0;
+        if (!nCme) {
+            // Four different reasons for an empty sky — never let them read alike.
+            parts.push(!bus ? '<span><b>CME catalogue</b> · waiting for the live feed…</span>'
+                : !bus.donki_cme_at ? '<span><b>CME catalogue (DONKI) not received</b> — no ropes drawn</span>'
+                    : outlook.pending ? `<span><b>Loading the flux-rope kernel</b> for ${outlook.pending} CME${outlook.pending > 1 ? 's' : ''}…</span>`
+                        : outlook.fc?.kernelDown ? '<span><b>Flux-rope kernel unavailable</b> — no CMEs propagated</span>'
+                            : `<span><b>No CMEs</b> in DONKI's catalogue in the last ${CME_LOOKBACK_H} h — nothing in flight to propagate</span>`);
+        }
+        const probs = outlook.regions.some((r) => Number.isFinite(r.pM));
+        parts.push(noteTag(`Regions sit at NOAA's reported positions, carried forward by differential rotation; spots, loops and corona are a schematic of each region (Joy's-law bipole, size ~ √area, glow ~ ${probs ? "SWPC's 24 h M/X odds" : 'complexity + area'}). CMEs: the last ${CME_LOOKBACK_H} h of DONKI cone fits, every direction, propagated by the flux-rope kernel (DBM, §16 interaction on); skin <i class="hrs-bz"></i> = the kernel's Bz. Sun drawn ×${SUN_EXAGGERATION.toFixed(0)}, spots ×${SPOT_SCALE}, axis along ecliptic north.`));
+        return parts.join('');
     }
 
     const handle = {
-        group, sunGroup, rings, tick, update,
-        setTau, setPlaying,
-        /** Release a hook-held corridor (setTau(t, false, true)); rests back to Earth. */
+        group, sunGroup, rings, sun, tick, update,
+        setTau, setPlaying, setTab, setBusState,
+        /** Release a hook-held framing (setTau(t, false, true)); rests back to Earth. */
         release() { held = false; armRest(); },
-        /** The hero's corridor mix (0 Earth … 1 corridor): fades the ruler + Sun marker. */
-        setMix(m) {
-            mixNow = Math.max(0, Math.min(1, m));
+        /**
+         * The hero's framing mixes (0 Earth … 1 corridor / Sun close-up):
+         * fade the ruler with the corridor, the Sun's dressing with either.
+         */
+        setMix(corr, sunM = 0) {
+            mixNow = Math.max(0, Math.min(1, corr));
+            sunMixNow = Math.max(0, Math.min(1, sunM));
+            const any = Math.max(mixNow, sunMixNow);
+            ropeMix = any;
+            group.visible = ropesOn && any > 0.02;
+            for (const r of ropes) applyRopeMix(r);
             rings.visible = mixNow > 0.02;
             for (const l of rings.children) l.material.opacity = l.userData.baseOpacity * mixNow;
-            halo.material.opacity = 0.6 * mixNow;
-            sunGroup.visible = mixNow > 0.02;
+            // The far halo is for the corridor's small Sun; the close-up has its own corona.
+            halo.material.opacity = 0.6 * mixNow * (1 - 0.8 * sunMixNow);
+            sunGroup.visible = any > 0.02;
+            sun.setVisibility(any);
         },
-        /** Modeled L1 conditions at the scrubbed instant, or null (no driver / outside the window). */
+        /** Modeled L1 conditions at the scrubbed instant, or null (no driver / outside the window / outlook tab). */
         conditionsAt(t = tauMs) { return conditionsAt(cond, t); },
         get tauMs() { return tauMs; },
         get hasConditions() { return !!cond; },
         get framing() { return framing; },
+        get tab() { return tab; },
         get state() {
             return {
-                mode, playing, framing, tauMs,
+                tab,
+                mode: transit.mode, playing, framing, tauMs,
                 ropeCount: ropes.length,
                 drawn: ropes.filter((r) => r.root.visible).length,
+                fielded: ropes.filter((r) => r.root.visible && r.fielded).length,
                 apexAu: ropes.map((r) => r.apexAu),
                 oracle: ropes.map((r) => r.oracle),
                 window: win,
+                transitRopes: transit.fc?.preset?.ropes?.length ?? 0,
+                outlook: {
+                    regions: outlook.regions.length,
+                    regionsState: outlook.regionsState,
+                    cmes: outlook.fc?.preset?.ropes?.length ?? 0,
+                    marks: outlook.marks.length,
+                },
+                sun: sun.state,
                 sunExaggeration: SUN_EXAGGERATION,
             };
         },
         dispose() {
-            clearTimeout(restTimer); cancelAuto();
-            disposeRopes(); scene.remove(group); scene.remove(sunGroup); scene.remove(rings); ui.remove(); style.remove();
+            clearTimeout(restTimer); cancelAuto(); clearInterval(regionsTimer);
+            disposeRopes(); sun.dispose();
+            scene.remove(group); scene.remove(sunGroup); scene.remove(rings); ui.remove(); style.remove();
         },
     };
+    activate('outlook');
     if (/[?&]debug=1(?:&|$)/.test(location.search)) window.__heroRopes = handle;
     return handle;
 
