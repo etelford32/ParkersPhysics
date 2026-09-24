@@ -470,7 +470,7 @@ function renderWeekTable(days, tz) {
  * Build the email body. Intro: a single-day card. Pro: lead card + the
  * remaining days as a 7-cell horizontal strip.
  */
-function buildDigestHtml({ label, city, forecast, plan }) {
+export function buildDigestHtml({ label, city, forecast, plan }) {
     const tz   = forecast.timezone;
     const days = forecast.days;
     const lead = days[0];
@@ -498,7 +498,7 @@ function buildDigestHtml({ label, city, forecast, plan }) {
   </div>
   <p style="margin-top:20px;font-size:.62rem;color:#445;text-align:center;line-height:1.5">
     You're receiving this because you enabled the daily forecast digest for this location.<br>
-    <a href="https://parkersphysics.com/dashboard.html#saved-locations-card" style="color:#667">Manage digest preferences</a>
+    <a href="https://parkersphysics.com/settings.html#saved-locations" style="color:#667">Manage digest preferences</a>
   </p>
 </div>
 </body></html>`;

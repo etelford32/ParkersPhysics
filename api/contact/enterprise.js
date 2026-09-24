@@ -144,7 +144,7 @@ async function _notifySales(lead) {
     <p style="margin:0 0 14px;font-size:.85rem;color:#aab"><strong>Use cases:</strong> ${useCases}</p>
     <hr style="border:none;border-top:1px solid #333;margin:14px 0">
     <p style="margin:0 0 14px;font-size:.88rem;color:#cdd;white-space:pre-wrap">${escHtml(lead.message || '(no additional message)')}</p>
-    <p style="margin:18px 0 0;font-size:.75rem;color:#778"><a href="${APP_URL}/admin.html#leads" style="color:#a080ff">Open admin → leads</a></p>
+    <p style="margin:18px 0 0;font-size:.75rem;color:#778"><a href="${APP_URL}/admin.html" style="color:#a080ff">Open admin</a></p>
   </div>
 </body></html>`;
     try {
