@@ -185,8 +185,16 @@ export function canBatchPropagate(tle) {
 // This is a simplified propagator for when the Rust WASM module isn't loaded.
 // Uses the same Keplerian mean motion + J2 secular perturbations, but skips
 // the full SGP4 drag and deep-space corrections. Good to ~5 km for LEO.
-
-function jsFallbackPropagate(tle, tsince_min) {
+//
+// EXPORTED (2026-09-24) for the dashboard's satellite tracker, which uses it
+// ON PURPOSE instead of the WASM path: measured against Vallado et al. 2006's
+// SGP4 verification vectors this function lands 7–18 km at epoch and ~60–110
+// km after 6–12 h (no drag), and moves at a uniform ~458 km/min on an ISS
+// orbit — while the committed sgp4_wasm misses case 00005 by 5 260 km AT
+// EPOCH and its along-track speed swings between ~5 and ~800 km/min, which
+// turned into physically impossible 49-minute ISS "passes". See
+// js/climate-lab/lab-satellites.js (PROPAGATOR) for the switch back.
+export function jsFallbackPropagate(tle, tsince_min) {
     const n0 = tle.mean_motion * TWOPI / MIN_PER_DAY;  // rad/min
     const e0 = tle.eccentricity;
     const i0 = tle.inclination * DEG2RAD;

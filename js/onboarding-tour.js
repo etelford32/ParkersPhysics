@@ -121,7 +121,7 @@ const STEPS_BY_PERSONA = {
             title: 'Configure your alerts',
             body: 'Solar flare class, Kp threshold, conjunction radius, GNSS risk, power-grid storm severity — all configurable, all delivered by email when triggered.',
             icon: '&#128276;',
-            target: '#alert-prefs-card',
+            target: '#alert-console-card',
             cta: 'Next',
         },
         {
@@ -153,8 +153,8 @@ const STEPS_BY_PERSONA = {
             cta: 'Show me around',
         },
         {
-            title: 'Set your location',
-            body: 'Enter your city or use GPS to unlock personalized aurora forecasts, satellite pass predictions, and local weather alerts.',
+            title: 'Set your home station',
+            body: 'Search your town or use GPS to make it Home. The dashboard opens there, and every instrument, satellite pass, and alert is measured from it.',
             icon: '&#128205;',
             target: '#location-card',
             cta: 'Next',
@@ -174,10 +174,10 @@ const STEPS_BY_PERSONA = {
             cta: 'Next',
         },
         {
-            title: 'Custom alerts',
-            body: 'Set alerts for aurora visibility, solar flares, geomagnetic storms, temperature extremes, and more. Subscribers get email delivery and advanced alerts like satellite collision detection.',
+            title: 'Your alert console',
+            body: 'Set account alerts for aurora, flares, storms and temperature extremes (email on paid plans), plus lab watches for wind, rain, UV and air quality at your home station.',
             icon: '&#128276;',
-            target: '#alert-prefs-card',
+            target: '#alert-console-card',
             cta: 'Next',
         },
         {

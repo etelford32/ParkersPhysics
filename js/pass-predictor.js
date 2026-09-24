@@ -17,6 +17,8 @@
  *       stepMin:        number,  coarse scan step min     (default: 1)
  *       minPeakDeg:     number,  drop passes peaking <N° (default: 10)
  *       maxPasses:      number,  cap returned count       (default: 6)
+ *       propagate:      fn,      (tle, tsinceMin) → {x,y,z} TEME km
+ *                                 (default: satellite-tracker.js propagate)
  *   }
  *
  *   Pass = {
@@ -114,6 +116,7 @@ export function nextPasses(tle, obs, opts = {}) {
     const stepMin     = opts.stepMin     ?? 1;
     const minPeakDeg  = opts.minPeakDeg  ?? 10;
     const maxPasses   = opts.maxPasses   ?? 6;
+    const prop        = typeof opts.propagate === 'function' ? opts.propagate : propagate;
 
     const epochJd = tleEpochToJd(tle);
     const startJd = msToJd(from.getTime());
@@ -127,14 +130,14 @@ export function nextPasses(tle, obs, opts = {}) {
 
     for (let k = 0; k <= totalSteps; k++) {
         const jd  = startJd + (k * stepMin) / MIN_PER_DAY;
-        const sample = _sampleEl(tle, epochJd, jd, obs);
+        const sample = _sampleEl(tle, epochJd, jd, obs, prop);
         const el = sample.elevationDeg;
 
         // Rising edge — the last step was below horizon, this one is above.
         if (prevEl <= 0 && el > 0) {
-            const riseJd = _bisectElevationZero(tle, epochJd, obs, prevJd, jd);
+            const riseJd = _bisectElevationZero(tle, epochJd, obs, prevJd, jd, prop);
             pass = {
-                rise: _sampleEl(tle, epochJd, riseJd, obs),
+                rise: _sampleEl(tle, epochJd, riseJd, obs, prop),
                 peak: sample,            // initial peak guess; refined below
                 set:  null,
             };
@@ -145,10 +148,10 @@ export function nextPasses(tle, obs, opts = {}) {
 
         // Setting edge — above last step, below now.
         if (pass && prevEl > 0 && el <= 0) {
-            const setJd = _bisectElevationZero(tle, epochJd, obs, prevJd, jd);
-            pass.set = _sampleEl(tle, epochJd, setJd, obs);
+            const setJd = _bisectElevationZero(tle, epochJd, obs, prevJd, jd, prop);
+            pass.set = _sampleEl(tle, epochJd, setJd, obs, prop);
             if (pass.peak.elevationDeg >= minPeakDeg) {
-                const vis = _classifyVisibility(pass.peak.time, tle, epochJd, obs);
+                const vis = _classifyVisibility(pass.peak.time, tle, epochJd, obs, prop);
                 passes.push(_finalizePass(pass, vis));
                 if (passes.length >= maxPasses) return passes;
             }
@@ -164,10 +167,10 @@ export function nextPasses(tle, obs, opts = {}) {
 
 // ── Internals ───────────────────────────────────────────────────────────────
 
-function _sampleEl(tle, epochJd, jd, obs) {
+function _sampleEl(tle, epochJd, jd, obs, prop = propagate) {
     const gmstRad = geo.greenwichSiderealTimeFromJD(jd);
     const tsince  = (jd - epochJd) * MIN_PER_DAY;
-    const t = propagate(tle, tsince);
+    const t = prop(tle, tsince);
     _teme.x = t.x; _teme.y = t.y; _teme.z = t.z;
     const la = lookAngle(_teme, obs, gmstRad);
     return {
@@ -180,11 +183,11 @@ function _sampleEl(tle, epochJd, jd, obs) {
 
 // Bisect between jdLo (el < 0) and jdHi (el > 0) to find the horizon crossing.
 // ~10 s resolution = 10 iterations (covers most common scan step sizes).
-function _bisectElevationZero(tle, epochJd, obs, jdLo, jdHi) {
+function _bisectElevationZero(tle, epochJd, obs, jdLo, jdHi, prop = propagate) {
     let lo = jdLo, hi = jdHi;
     for (let i = 0; i < 10; i++) {
         const mid = 0.5 * (lo + hi);
-        const el  = _sampleEl(tle, epochJd, mid, obs).elevationDeg;
+        const el  = _sampleEl(tle, epochJd, mid, obs, prop).elevationDeg;
         if (el > 0) hi = mid;
         else        lo = mid;
     }
@@ -218,10 +221,10 @@ function _finalizePass(p, vis) {
  * and easiest-to-spot moment of the pass, and it's where naked-eye
  * spotters get the best read on visibility.
  */
-function _classifyVisibility(peakTime, tle, epochJd, obs) {
+function _classifyVisibility(peakTime, tle, epochJd, obs, prop = propagate) {
     const jd     = msToJd(peakTime.getTime());
     const tsince = (jd - epochJd) * MIN_PER_DAY;
-    const t      = propagate(tle, tsince);
+    const t      = prop(tle, tsince);
 
     const sun = sunDirectionEci(peakTime);                  // unit vector
     const dot = t.x * sun.x + t.y * sun.y + t.z * sun.z;   // sat · sun_hat
