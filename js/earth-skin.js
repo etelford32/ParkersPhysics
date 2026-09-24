@@ -46,6 +46,13 @@ function _grayTex() {
     t.needsUpdate = true;
     return t;
 }
+// Calm wind (U = V = 0 decodes from 128,128) — a black default would advect
+// the mosaic by −u_wind_max on both axes before the first weather frame.
+function _calmWindTex() {
+    const t = new THREE.DataTexture(new Uint8Array([128, 128, 0, 255]), 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  TEMPERATURE COLOUR LUT
@@ -246,6 +253,7 @@ uniform vec3  u_mag_pole;       // geomagnetic dipole pole (unit normal)
 uniform sampler2D u_cloud_layers;  // R=cl_low, G=cl_mid, B=cl_high, A=precip
 uniform sampler2D u_satellite;     // r = mosaic cloudiness, a = confidence
 uniform float u_satellite_on;
+uniform float u_sat_weight;        // js/cloud-time.js mode confidence (0 = no observation)
 uniform float u_cloud_shadow;
 uniform vec3  u_sun_dir_obj;       // sun dir in the mesh's OBJECT space —
                                    // the shadow offset feeds normalToUV,
@@ -389,8 +397,11 @@ void main() {
             // Low decks shade hardest; cirrus barely. The mosaic cloudiness
             // reinforces where it saw cloud the model grid missed.
             float cover = clamp(clS.r * 0.55 + clS.g * 0.35 + clS.b * 0.15, 0.0, 1.0);
-            cover = max(cover, satS.r * 0.75);
-            float conf  = (u_satellite_on > 0.5) ? satS.a : 0.65;
+            // The mosaic's contribution rides its mode weight: with no
+            // observation for this instant (weight 0) the model decks cast
+            // at their own reduced strength, exactly as with no mosaic.
+            cover = max(cover, satS.r * 0.75 * u_sat_weight);
+            float conf  = (u_satellite_on > 0.5) ? mix(0.65, satS.a, u_sat_weight) : 0.65;
             float shade = cover * conf * smoothstep(0.03, 0.30, sunElev);
             base *= 1.0 - 0.34 * shade;
         }
@@ -476,6 +487,17 @@ uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_weather_on;
 uniform float u_satellite_on;      // blend satellite into cloud appearance
+uniform float u_sat_weight;        // mode confidence from js/cloud-time.js:
+                                   // 1 observed (live/replay), decaying through
+                                   // the nowcast window, 0 where no observation
+                                   // exists (deep future) — the decal then
+                                   // draws the model field alone, as the
+                                   // volumetric path does.
+uniform sampler2D u_wind;          // RG = 10 m wind U,V: (x*2-1)*u_wind_max m/s
+uniform float u_wind_max;
+uniform float u_sat_lead_k;        // mosaic advection: lead(s) × gain / R_EARTH(m),
+                                   // i.e. radians per (m/s) — PRE-DIVIDED on the JS
+                                   // side because 6.371e6 overflows mediump.
 uniform float u_cloud_data_strength; // Open-Meteo imprint intensity.
                                      //   0.0  = pure noise, no data modulation (debug)
                                      //   0.2  = ±10% soft modulation
@@ -537,6 +559,20 @@ varying vec3 vWorldPos;
 ${INSET_GLSL_HELPERS}
 ${PATCH_GLSL_CORE}
 ${PATCH_GLSL_CLOUDS}
+
+// ── Mosaic advection (mirror of js/cloud-time.js advectDirection) ───────────
+// The observed frame stands in for an instant it was not taken at; the cloud
+// that is over n NOW was upstream by lead × wind THEN. Local east / north in
+// the Earth-fixed frame (spin axis +Y, lon 0 at +X, 90°E at −Z). The
+// volumetric path (js/cloud-volume.js) does the same with the same wind, so
+// a governor flip between the two cannot move an observed cloud.
+vec3 advectSat(vec3 n, vec2 wind, float k) {
+    vec3  east = vec3(n.z, 0.0, -n.x);
+    float el   = length(east);
+    east = el < 1e-4 ? vec3(1.0, 0.0, 0.0) : east / el;
+    vec3  north = cross(n, east);
+    return normalize(n - (east * wind.x + north * wind.y) * k);
+}
 
 // ── Procedural noise for natural cloud shapes ────────────────────────────────
 // Hash-based value noise + FBM give multi-scale cloud structure directly in
@@ -986,10 +1022,19 @@ void main() {
     vec4  satPix   = vec4(0.0);  // hoisted: the anvil pass below reuses it
     float satCthKm = -1.0;       // IR cloud-top height, km; < 0 = no IR estimate
     if (u_satellite_on > 0.5) {
-        vec4  sat      = texture2D(u_satellite, vUv);
-        satPix         = sat;
+        // Sampled UPSTREAM by the frame's lead × the model wind (see
+        // advectSat): a 10-min frame moves for the minutes it stands in
+        // for, and the nowcast into the near future is the same tap with a
+        // longer lead. u_sat_lead_k is 0 whenever the frame IS the instant.
+        vec2  wndS     = (texture2D(u_wind, vUv).rg * 2.0 - 1.0) * u_wind_max;
+        vec3  nSat     = advectSat(N_sphere, wndS, u_sat_lead_k);
+        vec4  sat      = texture2D(u_satellite, normalToUV(nSat));
         float satCloud = sat.r;
-        float satData  = sat.a;                             // 1 where the satellite saw this pixel
+        // Confidence × mode weight: 1 where the satellite saw this pixel AND
+        // an observation exists for this instant; the deep future is 0 and
+        // the decal draws the model field alone.
+        float satData  = sat.a * u_sat_weight;
+        satPix         = vec4(sat.rgb, satData);
         float satShape = smoothstep(0.18, 0.85, satCloud);
         // Coverage-weighted blend: full satellite influence only where the
         // alpha mask confirms the pixel is real observation.
@@ -1746,6 +1791,7 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_cloud_layers: { value: _blackTex() },
         u_satellite:    { value: _blackTex() },
         u_satellite_on: { value: 0 },
+        u_sat_weight:   { value: 1 },             // cloud-time.js mode confidence
         u_cloud_shadow: { value: 0 },
         u_sun_dir_obj:  { value: sunDir.clone() },
         u_time:         { value: 0 },
@@ -1798,6 +1844,12 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_time:          { value: 0 },
         u_weather_on:    { value: 0 },
         u_satellite_on:  { value: 0 },            // off until satellite texture arrives
+        // Timeline coupling (js/cloud-time.js): mode confidence, the wind
+        // the mosaic is advected with, and the pre-divided advection lead.
+        u_sat_weight:    { value: 1 },
+        u_wind:          { value: _calmWindTex() },
+        u_wind_max:      { value: 60 },
+        u_sat_lead_k:    { value: 0 },
         u_cloud_data_strength: { value: 0.5 },    // 0.5 matches original ±25% imprint
         // Adaptive ALU budget — stepped down by earth.html's resolution
         // governor on struggling GPUs. 1 = original full-quality shader.

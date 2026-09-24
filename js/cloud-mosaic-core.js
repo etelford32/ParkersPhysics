@@ -403,7 +403,17 @@ function toUtcStamp(ms) {
  *
  * @returns [{ time, timestampMs|null }]  timestampMs null ⇒ date-only
  */
-export function gibsTimeCandidates(nowMs, { cadenceMin = 10, lagMin = 20, backMin = [0, 30, 90] } = {}) {
+export function gibsTimeCandidates(nowMs, {
+    cadenceMin = 10, lagMin = 20, backMin = [0, 30, 90],
+    // Date-only candidates return the day's REFERENCE granule — whichever
+    // frame GIBS pins as the daily default, at an unknown hour. That is an
+    // acceptable last resort for "live" (a day-old cloud field beats a
+    // procedural one) but a lie for an explicit REPLAY instant: the page
+    // would label a frame from the wrong hour with the scrubbed time. The
+    // time-aware feed therefore passes dateFallback:false and reports the
+    // miss instead (js/cloud-time.js 'unavailable').
+    dateFallback = true,
+} = {}) {
     const cadMs = cadenceMin * 60000;
     const base  = Math.floor((nowMs - lagMin * 60000) / cadMs) * cadMs;
     const out = [];
@@ -413,9 +423,11 @@ export function gibsTimeCandidates(nowMs, { cadenceMin = 10, lagMin = 20, backMi
         const s = toUtcStamp(t);
         if (!seen.has(s)) { seen.add(s); out.push({ time: s, timestampMs: t }); }
     }
-    for (const dayBack of [0, 1]) {
-        const s = toUtcDate(nowMs - dayBack * 86400000);
-        if (!seen.has(s)) { seen.add(s); out.push({ time: s, timestampMs: null }); }
+    if (dateFallback) {
+        for (const dayBack of [0, 1]) {
+            const s = toUtcDate(nowMs - dayBack * 86400000);
+            if (!seen.has(s)) { seen.add(s); out.push({ time: s, timestampMs: null }); }
+        }
     }
     return out;
 }

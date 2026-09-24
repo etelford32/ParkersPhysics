@@ -14,6 +14,8 @@
     "test:headed": "npx playwright test --headed",
     "test:debug": "npx playwright test --headed --debug",
     "test:ui": "npx playwright test --ui",
+    "test:cloud-live": "CLOUD_LIVE=1 npx playwright test tests/cloud-live.spec.js --project=chromium",
+    "fixtures:clouds": "node scripts/fetch-cloud-fixtures.mjs --probe",
     "probe:dashboard": "node scripts/probe-dashboard.mjs",
     "probe:dashboard:local": "node scripts/probe-dashboard.mjs http://localhost:8000/dashboard.html"
   },
