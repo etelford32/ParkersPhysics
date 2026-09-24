@@ -16,14 +16,24 @@
  *   (5) the CME flux-rope layer (js/hero-rope-layer.js) adopts a forecast
  *       whatever the feed does (live / idle→replay / failed→replay), mounts
  *       the scrubber under the stage without overlapping it, and scrubbing
- *       pulls the camera to the corridor framing (mix → 1, corrDist > 0)
- *       with the train drawn — and, with a live OVATION oval served, puts
- *       the curtains back on the Kp ring while the MODEL storm drives the
- *       engine (a replayed G5 must not wear today's observed oval).
+ *       its CME TRANSIT tab pulls the camera to the corridor framing
+ *       (mix → 1, corrDist > 0) with the train drawn — and, with a live
+ *       OVATION oval served, puts the curtains back on the Kp ring while the
+ *       MODEL storm drives the engine (a replayed G5 must not wear today's
+ *       observed oval);
+ *   (6) the ☉ NEXT 24 H tab (the default; js/hero-sun.js + hero-sun-model):
+ *       on a SYNTHETIC active Sun (tests/fixtures/sun-outlook-synthetic.mjs —
+ *       NOAA and DONKI are egress-blocked here) the live Sun wears the
+ *       regions, the flux-rope KERNEL propagates every catalogued CME with
+ *       its skin painted by the kernel's own Bz, scrubbing closes the camera
+ *       on the Sun and parks the near-Earth scene, the resting Earth shot
+ *       draws NO rope (an Earth-directed rope near 1 AU once engulfed the
+ *       planet), and a dead regions feed LOOKS dead (no invented spots).
  * Chrome geometry only — no live network needed (feeds fail closed).
  */
 import { test, expect } from '@playwright/test';
 import { synthOvation } from './fixtures/ovation-synthetic.mjs';
+import { synthRegions, synthBus } from './fixtures/sun-outlook-synthetic.mjs';
 
 const URL = '/index.html?exp_home_bg_carousel=control&debug=1';
 
@@ -100,14 +110,14 @@ test.describe('home hero stage', () => {
         test.skip(!hero, 'WebGL unavailable — no rope layer without the scene');
         await page.waitForFunction(() => window.__ppHero._auroraSource === 'ovation', null, { timeout: 30_000 });
         // The replay's kernel is a 147 KB WASM; give it time on software GL.
-        await page.waitForFunction(() => window.__heroRopes?.state.ropeCount > 0, null, { timeout: 60_000 });
+        await page.waitForFunction(() => window.__heroRopes?.state.transitRopes > 0, null, { timeout: 60_000 });
+        // Pausing parks the 24 h preview's self-start too (the hook the shots use).
+        await page.evaluate(() => { window.__heroRopes.setPlaying(false); window.__heroRopes.setTab('transit'); });
         const st0 = await page.evaluate(() => window.__heroRopes.state);
+        expect(st0.tab).toBe('transit');
+        expect(st0.ropeCount).toBeGreaterThan(0);
         expect(['live', 'replay', 'down']).toContain(st0.mode);
-        // A LIVE train never moves the camera uninvited; a replay plays
-        // itself once 5 s after adoption, which slow polling can overrun.
-        if (st0.mode === 'live') expect(st0.framing).toBe('earth');
-        // Pausing parks the self-start too (the hook the shots use).
-        await page.evaluate(() => window.__heroRopes.setPlaying(false));
+        expect(st0.framing).toBe('earth');     // a tab switch by hook never moves the camera
 
         const scrub = await rect(page, '#hero-scrub');
         const stage = await rect(page, '#hero-stage');
@@ -151,10 +161,108 @@ test.describe('home hero stage', () => {
         expect(st1.drawn).toBeGreaterThan(0);
         expect(st1.apexAu.some((a) => a > 0 && a < 1.35)).toBe(true);
         expect(st1.oracle.filter(Boolean).every((o) => o === 'kernel' || o === 'mirror')).toBe(true);
+        // The skins are the kernel's field wherever the kernel drew the rope.
+        if (st1.oracle.includes('kernel')) expect(st1.fielded).toBeGreaterThan(0);
+        // A replay is another date: the Sun wears none of TODAY's activity.
+        if (st1.mode !== 'live') expect(st1.sun.live).toBe(false);
         // The engine is on the MODEL state at τ: the curtains go back to the
         // Kp ring, never today's observed oval (js/hero-space-weather.js
         // _applyAurora).
         await page.waitForFunction(() => window.__ppHero._auroraSource === 'kp' && window.__ppHero._engine._auroraOval === null, null, { timeout: 20_000 });
+    });
+
+    test('Next 24 h: the live Sun wears the regions, the kernel flies every CME, the camera closes on the Sun', async ({ page }) => {
+        test.setTimeout(180_000);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const now = Date.now();
+        await page.route('**/api/noaa/regions*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(synthRegions(now)) }));
+        // The live feed (dead here: fallback state) would overwrite the
+        // injected catalogue between frames — the hero's HARNESS SCAR.
+        await page.addInitScript(() => {
+            window.addEventListener('swpc-update', (e) => { if (!e.detail?.__synthetic) e.stopImmediatePropagation(); }, true);
+        });
+        await boot(page);
+        const hero = await page.evaluate(() => !!window.__ppHero);
+        test.skip(!hero, 'WebGL unavailable — no Sun without the scene');
+        await page.waitForFunction(() => !!window.__heroRopes, null, { timeout: 60_000 });
+        await page.evaluate((b) => {
+            for (const f of b.flares) f.time = new Date(f.time);
+            window.__heroRopes.setPlaying(false);
+            window.__heroRopes.setBusState(b);
+        }, synthBus(now));
+        // Kernel WASM + the fixture regions.
+        await page.waitForFunction(() => {
+            const o = window.__heroRopes.state.outlook;
+            return o.cmes === 4 && o.regions > 0;
+        }, null, { timeout: 60_000 });
+        const st0 = await page.evaluate(() => ({ ...window.__heroRopes.state, groupVisible: window.__heroRopes.group.visible }));
+        expect(st0.tab).toBe('outlook');                       // the default tab
+        expect(st0.outlook.regionsState).toBe('ok');
+        expect(st0.outlook.regions).toBe(6);                    // history row superseded, 7 rows → 6 regions
+        expect(st0.window.t1 - st0.window.t0).toBe(24 * 3600e3);
+        expect(st0.window.t0).toBeGreaterThanOrEqual(now - 120e3);
+        expect(st0.groupVisible).toBe(false);                   // the resting Earth shot draws no rope
+        await expect(page.locator('#hero-scrub .hrs-tab[data-tab="outlook"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#hero-scrub .hrs-mode')).toContainText(/LIVE · Sun · next 24 h/i);
+        await expect(page.locator('#hero-scrub a[data-funnel-cta="hero_flux_rope"]')).toHaveCount(1);
+        await expect(page.locator('#hero-scrub a[data-funnel-cta="hero_sun_outlook"]')).toHaveCount(1);
+        await expect(page.locator('#hero-scrub .hrs-legend')).toContainText('AR 4233');
+        // The Earth-directed rope crosses 1 AU inside the day (kernel probe).
+        await expect(page.locator('#hero-scrub .hrs-mark.arrive')).toHaveCount(1);
+
+        // Scrub 3 h ahead: the camera closes on the drawn Sun.
+        await page.evaluate(() => { const r = window.__heroRopes; r.setTau(r.state.window.t0 + 3 * 3600e3, false, true); });
+        await page.waitForFunction(() => window.__ppHero._sunMix > 0.97, null, { timeout: 20_000 });
+        const st1 = await page.evaluate(() => ({
+            ...window.__heroRopes.state, sunMix: window.__ppHero._sunMix, parked: window.__ppHero._parked,
+            earthVisible: window.__ppHero._earth.visible, groupVisible: window.__heroRopes.group.visible,
+            frame: window.__ppHero._frame,
+        }));
+        expect(st1.framing).toBe('sun');
+        expect(st1.frame.sunDist).toBeGreaterThan(5);
+        expect(st1.parked).toBe(true);                          // globe + shells off the sightline
+        expect(st1.earthVisible).toBe(false);
+        expect(st1.groupVisible).toBe(true);
+        expect(st1.sun.live).toBe(true);
+        expect(st1.sun.regions).toBe(6);
+        expect(st1.sun.earthFacing).toBeGreaterThanOrEqual(4);
+        expect(st1.sun.xray).toBeCloseTo(0.55, 2);
+        expect(st1.drawn).toBe(4);                               // every direction, not just Earth's
+        expect(st1.oracle.every((o) => o === 'kernel')).toBe(true);
+        expect(st1.fielded).toBe(4);                             // skins = kernel Bz
+        // The regions rotate WEST over the day (the legend re-renders at 400 ms).
+        const lonAt = async (h) => {
+            await page.evaluate((hh) => { const r = window.__heroRopes; r.setTau(r.state.window.t0 + hh * 3600e3, false, true); }, h);
+            await page.waitForTimeout(900);
+            const m = /AR 4233[^·]*·\s*S09E(\d+)/.exec(await page.locator('#hero-scrub .hrs-legend').textContent());
+            return m ? Number(m[1]) : null;
+        };
+        const e3 = await lonAt(3), e20 = await lonAt(20);
+        expect(e3).not.toBeNull(); expect(e20).not.toBeNull();
+        expect(e3 - e20).toBeGreaterThan(7);                    // ~13°/day × 17 h, east → west
+
+        // Let go: back to Earth, the near-Earth scene restored.
+        await page.evaluate(() => { window.__heroRopes.release(); window.__heroRopes.setTab('outlook'); });
+        await page.waitForFunction(() => window.__ppHero._sunMix < 0.02 && !window.__ppHero._parked, null, { timeout: 30_000 });
+        expect(await page.evaluate(() => window.__ppHero._earth.visible)).toBe(true);
+    });
+
+    test('Next 24 h with the regions feed down: no invented spots, and the chip says so', async ({ page }) => {
+        test.setTimeout(150_000);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.route('**/api/noaa/regions*', (r) => r.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"upstream_unavailable"}' }));
+        await boot(page);
+        const hero = await page.evaluate(() => !!window.__ppHero);
+        test.skip(!hero, 'WebGL unavailable');
+        await page.waitForFunction(() => window.__heroRopes?.state.outlook.regionsState === 'down', null, { timeout: 60_000 });
+        const st = await page.evaluate(() => window.__heroRopes.state);
+        expect(st.outlook.regions).toBe(0);
+        expect(st.sun.regions).toBe(0);
+        await expect(page.locator('#hero-scrub .hrs-mode')).toContainText(/regions feed down/i);
+        await expect(page.locator('#hero-scrub .hrs-mode')).toHaveClass(/down/);
+        // DONKI is unreachable here too: an empty sky must say WHY, never read as a quiet Sun.
+        await expect(page.locator('#hero-scrub .hrs-legend')).toContainText(/not received|waiting for the live feed/);
+        await expect(page.locator('#hero-scrub .hrs-legend')).not.toContainText(/No CMEs/);
     });
 
     test('stacked layout at 390: stage is a band between copy and console, Earth centred', async ({ page }) => {

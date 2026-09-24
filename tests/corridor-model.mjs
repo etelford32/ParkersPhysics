@@ -142,6 +142,13 @@ const ROPE = {
     close(g.sigApexAu, 0.05, 1e-9, 'sigma straight from the probe');
     assert.deepEqual(asked, { i: 2, tS: 30 * 3600 }, 'probed for THIS rope at THIS time');
 
+    // A FOLLOWER: the kernel's probes take TRAIN time (they subtract the
+    // rope's own launch offset), so flight time + offset is what it is asked.
+    asked = null;
+    const fol = ropeGeometryAt({ ...ROPE, launchOffsetS: 6 * 3600 }, 1, 4 * 3600, kernel);
+    assert.deepEqual(asked, { i: 1, tS: 10 * 3600 }, 'follower probed at TRAIN time, not flight time');
+    assert.equal(fol.tS, 4 * 3600, 'flight clock kept'); assert.equal(fol.tTrainS, 10 * 3600, 'train clock returned');
+
     // A kernel returning nonsense must not poison the scene — fall back.
     const bad = ropeGeometryAt(ROPE, 0, 30 * 3600,
         { apexKmAt: () => NaN, sigmaApexKmAt: () => NaN });
