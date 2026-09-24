@@ -17,10 +17,13 @@
  *       whatever the feed does (live / idle→replay / failed→replay), mounts
  *       the scrubber under the stage without overlapping it, and scrubbing
  *       pulls the camera to the corridor framing (mix → 1, corrDist > 0)
- *       with the train drawn.
+ *       with the train drawn — and, with a live OVATION oval served, puts
+ *       the curtains back on the Kp ring while the MODEL storm drives the
+ *       engine (a replayed G5 must not wear today's observed oval).
  * Chrome geometry only — no live network needed (feeds fail closed).
  */
 import { test, expect } from '@playwright/test';
+import { synthOvation } from './fixtures/ovation-synthetic.mjs';
 
 const URL = '/index.html?exp_home_bg_carousel=control&debug=1';
 
@@ -88,9 +91,14 @@ test.describe('home hero stage', () => {
         // software rasteriser: measured ~75 s end to end, over the 60 s default.
         test.setTimeout(180_000);
         await page.setViewportSize({ width: 1440, height: 900 });
+        // A live OVATION oval (SYNTHETIC fixture — NOAA is egress-blocked
+        // here), so the scrub below can prove a MODEL storm never wears it.
+        const ovation = JSON.stringify(synthOvation(new Date()));
+        await page.route('**/api/noaa/aurora-grid*', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: ovation }));
         await boot(page);
         const hero = await page.evaluate(() => !!window.__ppHero);
         test.skip(!hero, 'WebGL unavailable — no rope layer without the scene');
+        await page.waitForFunction(() => window.__ppHero._auroraSource === 'ovation', null, { timeout: 30_000 });
         // The replay's kernel is a 147 KB WASM; give it time on software GL.
         await page.waitForFunction(() => window.__heroRopes?.state.ropeCount > 0, null, { timeout: 60_000 });
         const st0 = await page.evaluate(() => window.__heroRopes.state);
@@ -143,6 +151,10 @@ test.describe('home hero stage', () => {
         expect(st1.drawn).toBeGreaterThan(0);
         expect(st1.apexAu.some((a) => a > 0 && a < 1.35)).toBe(true);
         expect(st1.oracle.filter(Boolean).every((o) => o === 'kernel' || o === 'mirror')).toBe(true);
+        // The engine is on the MODEL state at τ: the curtains go back to the
+        // Kp ring, never today's observed oval (js/hero-space-weather.js
+        // _applyAurora).
+        await page.waitForFunction(() => window.__ppHero._auroraSource === 'kp' && window.__ppHero._engine._auroraOval === null, null, { timeout: 20_000 });
     });
 
     test('stacked layout at 390: stage is a band between copy and console, Earth centred', async ({ page }) => {

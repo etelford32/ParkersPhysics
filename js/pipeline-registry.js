@@ -90,6 +90,16 @@ export const PIPELINES = [
       cadence_s: 1_800, prewarm: 'medium',
       warnAgeS:  60 * 60, critAgeS: 240 * 60 },
 
+    // The 1° OVATION grid (bright cells) — AurOracle's 3D analyzer and, since
+    // 2026-09-23, the homepage hero's curtains + night-side footprint
+    // (js/hero-aurora.js). It was live for AurOracle but never registered,
+    // i.e. never monitored or pre-warmed.
+    { id: 'noaa-aurora-grid',   label: 'NOAA OVATION aurora grid',
+      endpoint: '/api/noaa/aurora-grid',
+      category: 'space-weather', upstream: 'NOAA OVATION',
+      cadence_s: 300,   prewarm: 'medium',
+      warnAgeS:  60 * 60, critAgeS: 240 * 60 },
+
     { id: 'noaa-alerts',        label: 'NOAA alerts',
       endpoint: '/api/noaa/alerts',
       category: 'space-weather', upstream: 'NOAA SWPC',

@@ -34,6 +34,11 @@
  */
 
 import * as THREE from 'three';
+// The hero's colour rules (js/hero-color.js). The three raw shaders below end
+// in heroEmit(), which is the IDENTITY unless a consumer compiles them with
+// HERO_HDR — only the homepage hero does (its per-frame material sweep), so
+// every other page renders exactly as before.
+import { HERO_COLOR_GLSL } from './hero-color.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Physical constants and helpers
@@ -196,26 +201,32 @@ export function computeIonoLayers(f107 = 150, kp = 2, xray = 1e-8, szaDeg = 50) 
 const _AURORA_VERT = /* glsl */`
     attribute float a_height;
     attribute float a_phi;
+    attribute float a_int;      // per-azimuth oval intensity (1 unless setAuroraOval gave one)
     varying float   vHeight;
     varying float   vPhi;
+    varying float   vInt;
 
     void main() {
         vHeight     = a_height;
         vPhi        = a_phi;
+        vInt        = a_int;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
 
 const _AURORA_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
 
     uniform float u_time;
     uniform float u_kp_norm;
     uniform float u_bz_south;
     uniform float u_substorm_t;
+    uniform float u_rise;       // 0 → 1: how far up the curtain is drawn (setAuroraRise; 1 = all of it)
 
     varying float vHeight;
     varying float vPhi;
+    varying float vInt;
 
     void main() {
         // ── Altitude-dependent spectral colours ──────────────────────────────
@@ -253,7 +264,16 @@ const _AURORA_FRAG = /* glsl */`
 
         float alpha  = clamp(vFade * base * fold1 * fold2 * s1 * s2 * s3 + sbBoost, 0.0, 0.92);
 
-        gl_FragColor = vec4(col, alpha);
+        // ── Rise: the curtain drawn from the ground up to u_rise, with a soft
+        // leading edge. At u_rise = 1 the mask is exactly 1 at every height
+        // (the edge sits at 1.2), so the default render is unchanged.
+        float rise = clamp((u_rise * 1.2 - vHeight) / 0.2, 0.0, 1.0);
+        alpha *= rise * rise * (3.0 - 2.0 * rise);
+        // Observed oval intensity at this azimuth (setAuroraOval); 1 on the
+        // parametric ring, so the default render is unchanged.
+        alpha *= vInt;
+
+        gl_FragColor = heroEmit(col, alpha);
     }
 `;
 
@@ -298,6 +318,7 @@ const _FRESNEL_VERT = /* glsl */`
 
 const _FRESNEL_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
     uniform vec3  u_color;
     uniform vec3  u_rim_color;
     uniform float u_base_alpha;
@@ -312,7 +333,7 @@ const _FRESNEL_FRAG = /* glsl */`
         vec3 col = mix(u_color, u_rim_color, fresnel);
         float pulse = 1.0 + u_pulse * 0.12 * sin(u_time * 0.8);
         float alpha = (u_base_alpha + fresnel * 0.35) * pulse;
-        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.85));
+        gl_FragColor = heroEmit(col, clamp(alpha, 0.0, 0.85));
     }
 `;
 
@@ -357,6 +378,7 @@ const _BELT_VERT = /* glsl */`
 
 const _BELT_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
     uniform vec3  u_color;
     uniform float u_opacity;
     uniform float u_time;
@@ -386,7 +408,7 @@ const _BELT_FRAG = /* glsl */`
         float alpha = u_opacity * density * patchiness;
         // Breathing animation
         alpha *= 0.85 + 0.15 * sin(u_time * 1.5 + vLocalPos.x * 3.0);
-        gl_FragColor = vec4(u_color, clamp(alpha, 0.0, 0.75));
+        gl_FragColor = heroEmit(u_color, clamp(alpha, 0.0, 0.75));
     }
 `;
 
@@ -537,9 +559,14 @@ function buildPolarCusps(r0, alpha) {
  *
  * @param {number}  kp       Planetary K-index (0–9) — sets oval latitude
  * @param {boolean} isNorth  true = northern oval, false = southern oval
+ * @param {number}  [rTop]
+ * @param {{colatDeg: ArrayLike<number>, intensity: ArrayLike<number>}|null} [oval]
+ *     an OBSERVED oval (js/hero-aurora.js `ovalFromGrid`, N_SEG + 1 entries):
+ *     the curtain stands at colatDeg[k] from the dipole pole and is drawn at
+ *     intensity[k]. Absent, the ring is the Kp parametric one at intensity 1.
  * @returns {THREE.Mesh}
  */
-function buildAuroralCurtains(kp, isNorth, rTop = 2.50) {
+function buildAuroralCurtains(kp, isNorth, rTop = 2.50, oval = null) {
     const N_SEG  = 180;     // segments around the oval (smoother)
     const R_BASE = 1.02;    // curtain bottom (just above surface, Re)
     const R_TOP  = rTop;    // curtain top (default ~9600 km — visually dramatic
@@ -550,10 +577,9 @@ function buildAuroralCurtains(kp, isNorth, rTop = 2.50) {
     // Auroral oval colatitude θ from pole: expands equatorward during storms
     const auroralLat_deg = Math.max(50, 67 - kp * 1.5);
     const colatDeg       = 90 - auroralLat_deg;
-    const theta          = colatDeg * DEG;
     const sign           = isNorth ? 1 : -1;
-    const sinT           = Math.sin(theta);
-    const cosT           = Math.cos(theta);
+    const useOval = !!(oval && oval.colatDeg && oval.colatDeg.length >= N_SEG + 1
+                       && oval.intensity && oval.intensity.length >= N_SEG + 1);
 
     // Build multi-layer curtain mesh
     const group = new THREE.Group();
@@ -568,22 +594,29 @@ function buildAuroralCurtains(kp, isNorth, rTop = 2.50) {
         const posArr = [];
         const hArr   = [];
         const phiArr = [];
+        const intArr = [];
         const idxArr = [];
 
         for (let k = 0; k <= N_SEG; k++) {
             const phi  = (k / N_SEG) * Math.PI * 2;
             const cosP = Math.cos(phi);
             const sinP = Math.sin(phi);
+            const theta = (useOval ? oval.colatDeg[k] : colatDeg) * DEG;
+            const sinT  = Math.sin(theta);
+            const cosT  = Math.cos(theta);
+            const aInt  = useOval ? Math.max(0, Math.min(1, oval.intensity[k])) : 1;
 
             // Base vertex
             posArr.push(rBase * sinT * cosP, rBase * cosT * sign, rBase * sinT * sinP);
             hArr.push(0.0);
             phiArr.push(phi);
+            intArr.push(aInt);
 
             // Top vertex
             posArr.push(rTop * sinT * cosP, rTop * cosT * sign, rTop * sinT * sinP);
             hArr.push(1.0);
             phiArr.push(phi);
+            intArr.push(aInt);
         }
 
         for (let k = 0; k < N_SEG; k++) {
@@ -596,6 +629,8 @@ function buildAuroralCurtains(kp, isNorth, rTop = 2.50) {
         geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posArr), 3));
         geo.setAttribute('a_height', new THREE.BufferAttribute(new Float32Array(hArr),   1));
         geo.setAttribute('a_phi',    new THREE.BufferAttribute(new Float32Array(phiArr), 1));
+        // ALWAYS present: a missing attribute reads as 0 and would hide the curtain.
+        geo.setAttribute('a_int',    new THREE.BufferAttribute(new Float32Array(intArr), 1));
         geo.setIndex(idxArr);
 
         // Outer layers are slightly fainter for depth illusion
@@ -607,6 +642,7 @@ function buildAuroralCurtains(kp, isNorth, rTop = 2.50) {
                 u_kp_norm:    { value: Math.min(1, kp / 9) * layerFade },
                 u_bz_south:   { value: 0 },
                 u_substorm_t: { value: 0 },
+                u_rise:       { value: 1 },
             },
             vertexShader:   _AURORA_VERT,
             fragmentShader: _AURORA_FRAG,
@@ -751,6 +787,14 @@ export class MagnetosphereEngine {
 
         // Substorm flash state: set via setSubstorm(); decays in tick()
         this._substormT = 0;  // 0–1 flash intensity
+        // Curtain rise (setAuroraRise) — presentation only, default fully drawn
+        this._auroraRise = 1;
+        // Observed oval + real dipole frame — both opt-in (setAuroraOval /
+        // setDipoleFrame); null keeps the Kp ring on the fixed 11.5° tilt.
+        this._auroraOval = null;
+        this._dipoleQ = null;
+        this._auroraN = null;
+        this._auroraS = null;
 
         // Build with fallback values
         this._rebuildSolarShells(10.9, 0.58);
@@ -984,6 +1028,7 @@ export class MagnetosphereEngine {
                     U.u_kp_norm.value    = kpNorm;
                     U.u_bz_south.value   = bzSouth;
                     U.u_substorm_t.value = this._substormT;
+                    U.u_rise.value       = this._auroraRise;
                 }
             });
         };
@@ -1040,6 +1085,46 @@ export class MagnetosphereEngine {
                 if (this._auroraS) this._auroraS.visible = v;
                 break;
         }
+    }
+
+    /**
+     * How much of each aurora curtain is drawn, from the ground up (0–1).
+     * PRESENTATION ONLY — the hero's entrance raises the curtains to their
+     * Kp/Bz-driven level instead of cutting them in; the brightness itself
+     * is untouched, so at 1 (the default, and what every other consumer
+     * uses) the curtains render exactly as before. Applied in tick(), so
+     * curtains rebuilt on a Kp change keep the current rise.
+     * @param {number} f
+     */
+    setAuroraRise(f) {
+        this._auroraRise = Math.max(0, Math.min(1, Number.isFinite(f) ? f : 1));
+    }
+
+    /**
+     * Orient the equatorial group (curtains, belts, plasmasphere, ring
+     * current, field lines) — its +y becomes the dipole axis. Pass the WORLD
+     * quaternion [x, y, z, w] of the real dipole frame (js/hero-aurora.js
+     * `dipoleFrame`, composed with the globe's own orientation), or null for
+     * the default fixed 11.5° tilt every other consumer keeps.
+     * @param {number[]|null} q
+     */
+    setDipoleFrame(q) {
+        this._dipoleQ = Array.isArray(q) && q.length === 4 && q.every(Number.isFinite) ? q.slice() : null;
+        this._applyDipoleFrame();
+    }
+
+    /**
+     * Stand the curtains on an OBSERVED oval (js/hero-aurora.js
+     * `ovalFromGrid`, one per hemisphere: `{ north, south }`, each
+     * `{ colatDeg, intensity }` with N_SEG + 1 entries in the dipole frame),
+     * or pass null to return to the Kp parametric ring. The curtains are
+     * rebuilt now; a later Kp change rebuilds them on the same oval.
+     */
+    setAuroraOval(oval) {
+        const next = oval && (oval.north || oval.south) ? oval : null;
+        if (next === this._auroraOval) return;
+        this._auroraOval = next;
+        this._rebuildAurora(this._auroraKp ?? (this._lastKp > 0 ? this._lastKp : 2));
     }
 
     /**
@@ -1182,16 +1267,18 @@ export class MagnetosphereEngine {
 
         // ── 3D Auroral curtains (North + South ovals) ─────────────────────────
         // Placed in _eqGroup which is Earth-local space centred at origin.
-        // The curtain oval colatitude contracts equatorward with rising Kp.
-        this._auroraN = buildAuroralCurtains(kp, true, this._auroraTop);
-        this._eqGroup.add(this._auroraN);
-        this._auroraS = buildAuroralCurtains(kp, false, this._auroraTop);
-        this._eqGroup.add(this._auroraS);
+        // The curtain oval colatitude contracts equatorward with rising Kp —
+        // or follows an observed oval when setAuroraOval gave one.
+        this._auroraN = null;
+        this._auroraS = null;
+        this._rebuildAurora(kp);
 
         // ── Magnetic dipole tilt ──────────────────────────────────────────────
         // Earth's magnetic dipole axis is tilted ~11.5° from rotation axis.
-        // This makes belts/field lines visibly offset, adding realism.
-        this._eqGroup.rotation.x = 11.5 * DEG;
+        // This makes belts/field lines visibly offset, adding realism. A
+        // consumer that knows the REAL dipole frame (setDipoleFrame) replaces
+        // this fixed tilt.
+        this._applyDipoleFrame();
 
         // Apply layer visibility
         if (!this._layers.belts) {
@@ -1199,11 +1286,32 @@ export class MagnetosphereEngine {
             this._outerBelt.visible = false;
         }
         if (!this._layers.plasmasphere) this._plasmasphere.visible = false;
+        if (!this._layers.belts && this._fieldLines) this._fieldLines.visible = false;
+    }
+
+    /** (Re)build both curtain groups at `kp`, on the observed oval if one is set. */
+    _rebuildAurora(kp) {
+        for (const g of [this._auroraN, this._auroraS]) {
+            if (!g) continue;
+            g.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+            this._eqGroup.remove(g);
+        }
+        this._auroraKp = kp;
+        const ov = this._auroraOval;
+        this._auroraN = buildAuroralCurtains(kp, true, this._auroraTop, ov?.north ?? null);
+        this._auroraS = buildAuroralCurtains(kp, false, this._auroraTop, ov?.south ?? null);
+        this._eqGroup.add(this._auroraN);
+        this._eqGroup.add(this._auroraS);
         if (!this._layers.aurora) {
             this._auroraN.visible = false;
             this._auroraS.visible = false;
         }
-        if (!this._layers.belts && this._fieldLines) this._fieldLines.visible = false;
+    }
+
+    _applyDipoleFrame() {
+        const q = this._dipoleQ;
+        if (q) this._eqGroup.quaternion.set(q[0], q[1], q[2], q[3]);
+        else this._eqGroup.rotation.set(11.5 * DEG, 0, 0);
     }
 }
 
