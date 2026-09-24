@@ -485,7 +485,7 @@ import './js/telemetry.js';
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SatelliteTracker, isWasmLoaded, propagate, tleEpochToJd } from './js/satellite-tracker.js';
+import { SatelliteTracker, isWasmLoaded, propagate, tleEpochToJd, jsFallbackPropagate } from './js/satellite-tracker.js';
 import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
          estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV,
          decayWatchlist, constellationCoverage, detectBreakupEvents
@@ -1306,37 +1306,14 @@ function _updateAnalytics(tle) {
     const loc = loadUserLocation();
     const passesEl = document.getElementById('sp-passes');
     if (loc && passesEl) {
-        // Use JS fallback for pass prediction (no async needed)
-        const jsFn = (t, tsince) => {
-            // Inline propagate using the fallback
-            const n0 = t.mean_motion * TWOPI / MIN_PER_DAY;
-            const e0 = t.eccentricity;
-            const i0 = t.inclination * DEG2RAD;
-            const raan0 = t.raan * DEG2RAD;
-            const argp0 = t.arg_perigee * DEG2RAD;
-            const M0 = t.mean_anomaly * DEG2RAD;
-            const cosI = Math.cos(i0);
-            const a = Math.pow(398600.8 / (n0 * n0 / 3600), 1/3);
-            const p = a * (1 - e0 * e0);
-            const J2v = 0.001082616;
-            const n_c = n0 * (1 + 1.5 * J2v * (6378.135/p)**2 * (1 - 1.5*(1-cosI*cosI)));
-            const rdot = -1.5 * J2v * (6378.135/p)**2 * n0 * cosI;
-            const adot = 0.75 * J2v * (6378.135/p)**2 * n0 * (5*cosI*cosI - 1);
-            const M = M0 + n_c * tsince;
-            const raan = raan0 + rdot * tsince;
-            const argp = argp0 + adot * tsince;
-            let E = M;
-            for (let k = 0; k < 8; k++) E -= (E - e0*Math.sin(E) - M) / (1 - e0*Math.cos(E));
-            const nu = Math.atan2(Math.sqrt(1-e0*e0)*Math.sin(E), Math.cos(E)-e0);
-            const r = a * (1 - e0*Math.cos(E));
-            const u = argp + nu;
-            const cU = Math.cos(u), sU = Math.sin(u);
-            const cR = Math.cos(raan), sR = Math.sin(raan);
-            const cI = Math.cos(i0), sI = Math.sin(i0);
-            return { x: r*(cR*cU - sR*sU*cI), y: r*(sR*cU + cR*sU*cI), z: r*sU*sI };
-        };
-
-        const passes = predictPasses(tle, loc.lat, loc.lon, 0, 24, 10, jsFn);
+        // The Kepler + J2 propagator, synchronous (no WASM wait). This used to
+        // be an inline copy of it that referenced TWOPI / MIN_PER_DAY / DEG2RAD —
+        // module-private constants of satellite-tracker.js, undeclared here — so
+        // for every visitor with a saved location the first call threw a
+        // ReferenceError and the pass list never rendered. Kept on the JS path
+        // on purpose: the committed SGP4 WASM fails Vallado's verification
+        // vectors (see js/climate-lab/lab-satellites.js PROPAGATOR).
+        const passes = predictPasses(tle, loc.lat, loc.lon, 0, 24, 10, jsFallbackPropagate);
         _lastPasses = passes;
         if (passes.length === 0) {
             passesEl.textContent = `No passes above 10° in next 24h from ${loc.city || 'your location'}`;
