@@ -34,6 +34,11 @@
  */
 
 import * as THREE from 'three';
+// The hero's colour rules (js/hero-color.js). The three raw shaders below end
+// in heroEmit(), which is the IDENTITY unless a consumer compiles them with
+// HERO_HDR — only the homepage hero does (its per-frame material sweep), so
+// every other page renders exactly as before.
+import { HERO_COLOR_GLSL } from './hero-color.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Physical constants and helpers
@@ -211,6 +216,7 @@ const _AURORA_VERT = /* glsl */`
 
 const _AURORA_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
 
     uniform float u_time;
     uniform float u_kp_norm;
@@ -267,7 +273,7 @@ const _AURORA_FRAG = /* glsl */`
         // parametric ring, so the default render is unchanged.
         alpha *= vInt;
 
-        gl_FragColor = vec4(col, alpha);
+        gl_FragColor = heroEmit(col, alpha);
     }
 `;
 
@@ -312,6 +318,7 @@ const _FRESNEL_VERT = /* glsl */`
 
 const _FRESNEL_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
     uniform vec3  u_color;
     uniform vec3  u_rim_color;
     uniform float u_base_alpha;
@@ -326,7 +333,7 @@ const _FRESNEL_FRAG = /* glsl */`
         vec3 col = mix(u_color, u_rim_color, fresnel);
         float pulse = 1.0 + u_pulse * 0.12 * sin(u_time * 0.8);
         float alpha = (u_base_alpha + fresnel * 0.35) * pulse;
-        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.85));
+        gl_FragColor = heroEmit(col, clamp(alpha, 0.0, 0.85));
     }
 `;
 
@@ -371,6 +378,7 @@ const _BELT_VERT = /* glsl */`
 
 const _BELT_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
     uniform vec3  u_color;
     uniform float u_opacity;
     uniform float u_time;
@@ -400,7 +408,7 @@ const _BELT_FRAG = /* glsl */`
         float alpha = u_opacity * density * patchiness;
         // Breathing animation
         alpha *= 0.85 + 0.15 * sin(u_time * 1.5 + vLocalPos.x * 3.0);
-        gl_FragColor = vec4(u_color, clamp(alpha, 0.0, 0.75));
+        gl_FragColor = heroEmit(u_color, clamp(alpha, 0.0, 0.75));
     }
 `;
 

@@ -38,10 +38,22 @@
  *     doing its job" money shot. Particle colour follows IMF Bz.
  *   • Deep field — fbm nebula on a BackSide shell inside the stars (the
  *     'intergalactic' backdrop). Second rung of the perf ladder.
- *   • Bloom — UnrealBloomPass composited as an additive overlay on top of the
- *     untouched base frame. Same pattern (and same reason) as
- *     ring-current-globe.js: the composer's own to-screen path clears the
- *     canvas through an opaque blit. Opt out with ?bloom=0.
+ *   • ONE COLOUR PIPELINE (2026-09-24) — js/hero-color.js. The scene is drawn
+ *     ONCE per frame into a linear HalfFloat target (MSAA where the canvas
+ *     used to antialias); every material writes LINEAR light there — the
+ *     Earth through heroRadiance, every eye-tuned additive glow through
+ *     heroEmit (which reproduces its old pixel exactly when it is alone on
+ *     black), three's built-ins through a per-frame sweep that also flips
+ *     HERO_HDR on the engine's and the rope layer's shaders — so layers now
+ *     ADD AS LIGHT: a storm's curtains keep their green and violet where the
+ *     old display-space sum clipped them to cyan-white. UnrealBloomPass runs
+ *     on that same linear image and adds into it; one output pass then
+ *     applies the hue-preserving shoulder (heroTone), the sRGB encode and a
+ *     triangular dither (the deep field banded: mean run of identical pixels
+ *     16.4 px → 4.1 px). Bloom numbers were re-fitted against the old frame,
+ *     not carried over — see BLOOM_*. `?bloom=0` drops only the glow;
+ *     `?hdr=0` is the display-space fallback (also taken automatically
+ *     without WebGL2 + a colour-renderable half float).
  *   • CME-inbound cue — pulsing sunward glow whenever the feed carries an
  *     earth-directed CME with an ETA.
  *   • Perf guards — real frame clock, RAF fully parked when the tab is hidden
@@ -114,12 +126,11 @@
  */
 import * as THREE from 'three';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import { CopyShader } from 'three/addons/shaders/CopyShader.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { GEO_GLSL } from './geo/coords.glsl.js';
 import { TEXTURE_TIERS, pickTextureTier, earthOrientation } from './hero-earth.js';
 import { auroraProduct, dipoleFrame } from './hero-aurora.js';
+import { HERO_COLOR_GLSL, HeroPost, adaptMaterialForHdr } from './hero-color.js';
 
 const DEG = Math.PI / 180;
 
@@ -185,6 +196,25 @@ const AURORA_URL        = '/api/noaa/aurora-grid';   // OVATION Prime, the route
 const AURORA_REFRESH_MS = 5 * 60e3;                  // OVATION's own cadence (and the route's cache)
 const AURORA_TIMEOUT_MS = 10e3;
 const AURORA_FADE_TAU   = 0.6;    // s — the footprint fades between OVATION and the Kp fallback
+// ── The glow (2026-09-24) — js/hero-color.js ────────────────────────────────
+// UnrealBloomPass now runs on the LINEAR HDR image, so its numbers are in
+// linear light: the threshold is the old display-luminance 0.5 decoded
+// (0.214), so the same things glow — the emitters, the glint, the ice just
+// over the Earth's roll-off ceiling — and nothing that did not glow before.
+// A halo computed in linear light and encoded at the end reads WIDER than
+// the same kernel on display values (the encode lifts its faint tail into
+// visible grey), so the old 0.9 / 0.8 could not be carried over: here it put
+// the whole disc in a haze, doubled the limb glow, and turned the corridor
+// Sun's halo into a sepia wash across half the frame. The fix is in the MIP
+// WEIGHTS, not the strength — the coarse mips are exactly that faint wide
+// tail — and was chosen against the old frame (aligned captures, three
+// candidate weightings, glint core and sunward-limb profiles): the tight
+// mips carry the glow, the widest carries none.
+const BLOOM_THRESHOLD   = 0.214;
+const BLOOM_STRENGTH    = 0.75;
+const BLOOM_RADIUS      = 0.0;
+const BLOOM_MIP_WEIGHTS = [1.0, 0.5, 0.2, 0.06, 0.0];   // UnrealBloomPass bloomFactors, finest → coarsest (three's default 1.0 … 0.2)
+const BLOOM_STORM_GAIN  = 0.30;   // strength × (1 + storm · this): the glow breathes with activity (was 0.85 + 0.55·storm in display space; ×1.65 in linear light turned the stormy limb into a thick lavender ring — measured)
 
 // ── Shared GLSL noise (value noise + fbm), prepended to shaders that need it ──
 const GLSL_NOISE = /* glsl */`
@@ -244,13 +274,16 @@ const EARTH_VERT = /* glsl */`
 // skylight that outlives the sunset through civil twilight; ocean glint is a
 // Cox–Munk wave-slope distribution (the real reason sunglint from orbit is a
 // broad patch, not a pin) on the water mask, so it can only land on real
-// water; city lights come on after civil twilight. Highlight-rolled-off and
-// sRGB-encoded here, because a raw ShaderMaterial gets neither from three.
+// water; city lights come on after civil twilight. The diffuse light is
+// highlight-rolled-off here (the Earth's own exposure design); the tone curve
+// and the sRGB encode are NOT — the shader writes linear light through
+// heroRadiance and the frame's ONE output pass does both (js/hero-color.js).
 // u_texMix = 0 is the FEATURELESS fallback (textures not loaded / failed): an
 // ocean-coloured sphere with the same lighting — never invented land.
 const EARTH_FRAG = /* glsl */`
     precision highp float;
     ${GEO_GLSL}
+    ${HERO_COLOR_GLSL}
     uniform sampler2D u_day;      // sRGB albedo (hardware-decoded to linear)
     uniform sampler2D u_water;    // 1 = water
     uniform sampler2D u_lights;   // city lights only
@@ -308,9 +341,6 @@ const EARTH_FRAG = /* glsl */`
     vec3 rolloff(vec3 x) {
         vec3 over = max(x - KNEE, 0.0);
         return min(x, vec3(KNEE)) + over / (1.0 + over / SHOULDER);
-    }
-    vec3 srgbEncode(vec3 c) {
-        return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
     }
 
     void main(){
@@ -383,7 +413,9 @@ const EARTH_FRAG = /* glsl */`
         // is outshone by sunlight, as the real one is from orbit.
         float oval = texture2D(u_aurora, uv).r * u_auroraOn;
         col += vec3(0.10, 0.95, 0.38) * 0.42 * oval * (1.0 - smoothstep(-0.12, 0.06, mu0s));
-        gl_FragColor = vec4(srgbEncode(col), 1.0);
+        // LINEAR out (js/hero-color.js rule 1): the one tone curve and the
+        // one encode happen at the end of the frame, not here.
+        gl_FragColor = heroRadiance(col);
     }
 `;
 
@@ -412,6 +444,7 @@ const EARTH_FRAG = /* glsl */`
 // so the airglow can add alongside it with alpha 1.
 const ATMO_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
     uniform vec3  u_sun;
     uniform float u_storm;
     varying vec3 vObj;
@@ -450,7 +483,7 @@ const ATMO_FRAG = /* glsl */`
         float a = col * (0.30 + 1.05 * lit);
         float agLine = exp(-pow((b - AG_R) / AG_W, 2.0));
         float agDark = 1.0 - smoothstep(-0.25, 0.05, dot(Q / max(b, 1e-4), u_sun));
-        gl_FragColor = vec4(c * a * a + AG_COL * agLine * agDark, 1.0);
+        gl_FragColor = heroEmit(c * a * a + AG_COL * agLine * agDark, 1.0);
     }
 `;
 
@@ -474,12 +507,13 @@ const STAR_VERT = /* glsl */`
 `;
 const STAR_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
     varying float vTw;
     varying vec3  vC;
     void main(){
         float d = length(gl_PointCoord - 0.5) * 2.0;
         float a = smoothstep(1.0, 0.15, d) * vTw;
-        gl_FragColor = vec4(vC, a * 0.9);
+        gl_FragColor = heroEmit(vC, a * 0.9);
     }
 `;
 
@@ -499,6 +533,7 @@ const WIND_VERT = /* glsl */`
 `;
 const WIND_FRAG = /* glsl */`
     precision highp float;
+    ${HERO_COLOR_GLSL}
     uniform vec3 u_cold;
     uniform vec3 u_hot;
     varying float vHeat;
@@ -508,7 +543,7 @@ const WIND_FRAG = /* glsl */`
         float core = smoothstep(1.0, 0.0, d);
         vec3  col  = mix(u_cold, u_hot, vHeat);
         float a    = core * core * (0.30 + 0.45 * vHeat);
-        gl_FragColor = vec4(col, a);
+        gl_FragColor = heroEmit(col, a);
     }
 `;
 
@@ -529,6 +564,7 @@ const NEBULA_VERT = /* glsl */`
 `;
 const NEBULA_FRAG = /* glsl */`
     ${GLSL_NOISE}
+    ${HERO_COLOR_GLSL}
     uniform float u_time;
     uniform float u_gain;
     varying vec3 vDir;
@@ -552,7 +588,7 @@ const NEBULA_FRAG = /* glsl */`
         // Keep the sunward side (particles + sun sprites) quieter.
         float sunside = smoothstep(-0.2, 0.9, d.x);
         col *= (1.0 - 0.45 * sunside);
-        gl_FragColor = vec4(col * u_gain, 1.0);
+        gl_FragColor = heroEmit(col * u_gain, 1.0);
     }
 `;
 
@@ -630,7 +666,7 @@ export class HeroSpaceWeather {
             // Real dipole + NOAA's live oval (js/hero-aurora.js).
             this._applyDipoleWorld();
             this._initAurora();
-            this._initBloom(this._w(), this._h());
+            this._initPost(this._w(), this._h());
             this._initRopes();
 
             this._clock = new THREE.Clock();
@@ -692,8 +728,8 @@ export class HeroSpaceWeather {
 
     // ── Boot: warm the GPU programs, THEN show the first frame ───────────────
     // The first render used to compile every program in the scene — ~20
-    // materials, each twice (the screen frame and the bloom's render-target
-    // frame are different program variants) plus the bloom chain's own —
+    // materials (each twice until 2026-09-24, when the scene was still drawn
+    // to the canvas AND into the bloom's target) plus the bloom chain's own —
     // synchronously, on the frame that also made the canvas visible: the
     // page froze, then the finished scene cut in over the CSS backdrop.
     // Now `_compileAsync` builds them all while the canvas is still at
@@ -719,28 +755,30 @@ export class HeroSpaceWeather {
     _warmPrograms() {
         const r = this._renderer, cam = this._camera;
         if (typeof r.compile !== 'function') return Promise.resolve();
-        const jobs = [this._compileAsync(this._scene, cam)];
-        if (this._bloomOn && this._bloom && this._rtScene) {
-            // The program cache key depends on the CURRENT render target
-            // (output colour space), so the scene is compiled again with the
-            // bloom's source target bound, and the bloom chain's materials —
-            // which never sit in the scene — on stand-in quads. _compileAsync
-            // calls compile() synchronously before returning, so the target
-            // can be restored straight after.
+        if (!this._post) return this._compileAsync(this._scene, cam);
+        // The program cache key depends on the CURRENT render target (output
+        // colour space), so the scene is compiled with the linear target
+        // bound, the bloom chain's materials — which never sit in the scene —
+        // on stand-in quads (also into a float target), and the output pass
+        // with the canvas bound. `_compileAsync` calls compile() synchronously
+        // before returning, so the target can be restored straight after.
+        this._sweepMaterials();
+        const jobs = [];
+        const prev = r.getRenderTarget();
+        r.setRenderTarget(this._post.target);
+        jobs.push(this._compileAsync(this._scene, cam));
+        const b = this._bloom;
+        if (b) {
             const quad = new THREE.PlaneGeometry(2, 2);
             const post = new THREE.Scene();
-            const b = this._bloom;
             for (const m of [b.materialHighPassFilter, ...(b.separableBlurMaterials ?? []), b.compositeMaterial, b.blendMaterial]) {
                 if (m) post.add(new THREE.Mesh(quad, m));
             }
-            const blit = new THREE.Scene();
-            blit.add(new THREE.Mesh(quad, this._bloomBlit.material));
-            const prev = r.getRenderTarget();
-            r.setRenderTarget(this._rtScene);
-            jobs.push(this._compileAsync(this._scene, cam), this._compileAsync(post, cam));
-            r.setRenderTarget(prev);
-            jobs.push(this._compileAsync(blit, cam));
+            jobs.push(this._compileAsync(post, cam));
         }
+        r.setRenderTarget(null);
+        jobs.push(this._compileAsync(this._post.warmScene(), cam));
+        r.setRenderTarget(prev);
         return Promise.all(jobs);
     }
 
@@ -808,7 +846,11 @@ export class HeroSpaceWeather {
     _initRenderer() {
         const r = new THREE.WebGLRenderer({
             canvas:    this._canvas,
-            antialias: window.devicePixelRatio < 2,
+            // The canvas only ever receives the output pass's one quad: the
+            // scene's MSAA lives on the linear target (HeroPost, `samples`).
+            // The no-HDR fallback therefore draws without MSAA — it exists
+            // for browsers without WebGL2 or float targets, which are rare.
+            antialias: false,
             alpha:     false,   // opaque — scene provides its own background
             powerPreference: 'high-performance',
         });
@@ -820,32 +862,81 @@ export class HeroSpaceWeather {
         this._renderer = r;
     }
 
-    // ── Bloom overlay ─────────────────────────────────────────────────────────
-    // Additive-composite pattern mirrored from ring-current-globe.js: base
-    // frame renders untouched, then the blurred bright cores are ADDED on top.
-    // EffectComposer is avoided deliberately — UnrealBloomPass's to-screen
-    // path blits through an opaque material. Opt out with ?bloom=0.
-    _initBloom(w, h) {
+    // ── Colour pipeline + bloom (js/hero-color.js) ────────────────────────────
+    // HDR path: the scene is drawn ONCE into a linear HalfFloat target (MSAA
+    // at dpr < 2, where the canvas used to antialias), the bloom is added
+    // INTO that target on the same linear image, and one output pass applies
+    // the tone curve, the sRGB encode and the dither. The old path drew the
+    // scene twice per frame — once to the canvas, once into a float target
+    // for the bloom, where three wrote the built-in materials LINEAR while
+    // the raw shaders wrote display values, so the glow was computed from a
+    // different image than the one on screen — and then added the halo onto
+    // the 8-bit canvas, which banded it. `?hdr=0` forces the fallback (the
+    // materials then compile without HERO_HDR: the old display-space render,
+    // no bloom); `?bloom=0` keeps the pipeline and drops only the glow.
+    _initPost(w, h) {
+        const r = this._renderer;
         const params = new URLSearchParams(location.search);
-        this._bloomOn = params.get('bloom') !== '0' && w > 0 && h > 0;
-        if (!this._bloomOn) return;
-        try {
-            this._bloom  = new UnrealBloomPass(new THREE.Vector2(w, h), 0.9, 0.8, 0.5);
-            this._rtScene = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType });
-            const blit = new THREE.ShaderMaterial({
-                uniforms: THREE.UniformsUtils.clone(CopyShader.uniforms),
-                vertexShader:   CopyShader.vertexShader,
-                fragmentShader: CopyShader.fragmentShader,
-                blending: THREE.AdditiveBlending,
-                transparent: true, depthTest: false, depthWrite: false,
-            });
-            blit.uniforms.opacity.value = 1.0;
-            this._bloomBlit = new FullScreenQuad(blit);
-        } catch (e) {
-            console.warn('[HeroSpaceWeather] bloom unavailable — rendering without glow:', e);
-            this._bloomOn = false;
-            this._bloom = null;
+        this._post = null;
+        this._hdr = false;
+        this._bloom = null;
+        this._bloomOn = false;
+        if (params.get('hdr') === '0' || !HeroPost.supported(r)) {
+            console.info('[HeroSpaceWeather] no linear HDR target — display-space fallback, no bloom');
+            return;
         }
+        if (params.get('bloom') !== '0' && w > 0 && h > 0) {
+            try {
+                this._bloom = new UnrealBloomPass(new THREE.Vector2(w, h), BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD);
+                this._bloom.compositeMaterial.uniforms.bloomFactors.value = BLOOM_MIP_WEIGHTS.slice();
+            } catch (e) {
+                console.warn('[HeroSpaceWeather] bloom unavailable — rendering without glow:', e);
+                this._bloom = null;
+            }
+        }
+        const buf = r.getDrawingBufferSize(new THREE.Vector2());
+        // MSAA where the canvas used to have it (dpr < 2); a driver that
+        // refuses a multisampled half float gets one more try without.
+        for (const samples of (window.devicePixelRatio < 2 ? [4, 0] : [0])) {
+            let post = null;
+            try {
+                post = new HeroPost(THREE, r, { width: buf.x, height: buf.y, samples, bloom: this._bloom });
+                if (post.validate()) { this._post = post; break; }
+            } catch (e) {
+                console.info('[HeroSpaceWeather] HDR target failed:', e?.message ?? e);
+            }
+            post?.dispose();
+        }
+        if (!this._post) {
+            console.info('[HeroSpaceWeather] HDR target incomplete — display-space fallback, no bloom');
+            this._bloom = null;
+            return;
+        }
+        this._hdr = true;
+        this._bloomOn = !!this._bloom;
+        this._sweepMaterials();
+    }
+
+    /**
+     * Put every material in the scene on the linear path (js/hero-color.js
+     * rules 2/3 + the HERO_HDR switch). Runs before every HDR frame and before
+     * program warm-up: the engine REBUILDS its shells on a Kp change and the
+     * rope layer builds its ropes when a forecast lands, and each new material
+     * must be converted before its first draw. Cheap: a tagged material is
+     * one property read.
+     */
+    _sweepMaterials() {
+        if (!this._hdr) return;
+        this._scene.traverse((o) => {
+            const m = o.material;
+            if (!m) return;
+            for (const mm of Array.isArray(m) ? m : [m]) {
+                if (mm.userData?.heroHdr) continue;
+                if (adaptMaterialForHdr(mm, THREE.AdditiveBlending) === 'unconverted') {
+                    console.warn('[HeroSpaceWeather] raw shader without heroEmit/heroRadiance on the HDR path:', o.name || o.type);
+                }
+            }
+        });
     }
 
     // ── Scene ─────────────────────────────────────────────────────────────────
@@ -1247,7 +1338,15 @@ export class HeroSpaceWeather {
             // The corridor's own materials (drawn Sun, halo, ruler) sit in
             // the scene hidden until the first scrub/replay; warm them now so
             // that first corridor frame does not compile synchronously.
-            try { this._compileAsync(this._scene, this._camera); } catch { /* compiles on first use instead */ }
+            try {
+                // Onto the linear path first, then compiled with the target the
+                // frame will actually bind (the program key depends on it).
+                this._sweepMaterials();
+                const r = this._renderer, prev = r.getRenderTarget();
+                if (this._post) r.setRenderTarget(this._post.target);
+                this._compileAsync(this._scene, this._camera);
+                r.setRenderTarget(prev);
+            } catch { /* compiles on first use instead */ }
         }).catch((e) => console.warn('[HeroSpaceWeather] rope layer failed:', e?.message ?? e));
     }
 
@@ -1387,7 +1486,7 @@ export class HeroSpaceWeather {
         this._lastStormLevel = level;
 
         // Bloom breathes with activity
-        if (this._bloom) this._bloom.strength = 0.85 + this._stormNorm * 0.55;
+        if (this._bloom) this._bloom.strength = BLOOM_STRENGTH * (1 + this._stormNorm * BLOOM_STORM_GAIN);
 
         // CME-inbound cue
         const eta = state.cme_eta_hours;
@@ -1625,28 +1724,16 @@ export class HeroSpaceWeather {
         }
     }
 
-    // Base frame first, then the additive bloom overlay (never clears/blits
-    // over the base — see _initBloom).
+    // HDR: sweep (new materials onto the linear path), then scene → linear
+    // target → bloom → output transform (js/hero-color.js). Fallback: the
+    // scene straight to the canvas, as display values.
     _renderFrame() {
-        const r = this._renderer;
-        r.render(this._scene, this._camera);
-        if (this._bloomOn && this._bloom) {
-            const prevTarget    = r.getRenderTarget();
-            const prevAutoClear = r.autoClear;
-            r.setRenderTarget(this._rtScene);
-            r.setClearColor(0x000000, 0);
-            r.clear();
-            r.render(this._scene, this._camera);
-            r.autoClear = false;
-            this._bloom.renderToScreen = false;
-            this._bloom.render(r, this._rtScene, this._rtScene, 0, false);
-            r.setRenderTarget(null);
-            this._bloomBlit.material.uniforms.tDiffuse.value =
-                this._bloom.renderTargetsHorizontal[0].texture;
-            this._bloomBlit.render(r);
-            r.autoClear = prevAutoClear;
-            r.setRenderTarget(prevTarget);
-            r.setClearColor(0x02010c, 1);
+        if (this._post) {
+            this._sweepMaterials();
+            this._post.bloomEnabled = this._bloomOn && !!this._bloom;
+            this._post.render(this._scene, this._camera);
+        } else {
+            this._renderer.render(this._scene, this._camera);
         }
     }
 
@@ -1775,7 +1862,10 @@ export class HeroSpaceWeather {
             this._sizeW = w; this._sizeH = h;
             this._renderer.setSize(w, h, false);
             this._bloom?.setSize(w, h);
-            this._rtScene?.setSize(w, h);
+            if (this._post) {
+                const buf = this._renderer.getDrawingBufferSize(new THREE.Vector2());
+                this._post.setSize(buf.x, buf.y);
+            }
         }
         this._camera.aspect = w / h;
         this._camera.updateProjectionMatrix();

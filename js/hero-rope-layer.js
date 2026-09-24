@@ -73,6 +73,8 @@ import { trainAt } from './corridor/corridor-model.js';
 import { ropeSurfaceGrid } from './stage/model.js';
 import { stageRadius, EARTH_S, RSUN_KM, AU_KM } from './stage/scale.js';
 import { integrateDst } from './ring-current-model.js';
+// The hero's colour rules: both raw shaders end in heroEmit (js/hero-color.js).
+import { HERO_COLOR_GLSL } from './hero-color.js';
 
 const HOUR = 3600e3;
 
@@ -434,12 +436,22 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
                 }`,
             fragmentShader: /* glsl */`
                 precision highp float;
+                ${HERO_COLOR_GLSL}
                 varying vec3 vN; varying vec3 vV;
                 void main(){
                     float mu = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
                     float limb = 0.55 + 0.45 * pow(mu, 0.6);          // Eddington-ish limb darkening
                     vec3 col = mix(vec3(1.0, 0.62, 0.22), vec3(1.0, 0.96, 0.82), limb);
-                    gl_FragColor = vec4(col * (0.42 + 0.30 * limb), 1.0);  // ≤0.72: under the bloom threshold, so the disc keeps its limb colour and the halo carries the glow
+                    // An HDR EMITTER (js/hero-color.js rule 1): the limb colour
+                    // is a pick (decoded once), the level is light — ~1.4× the
+                    // diffuse white at disc centre. The old display-space
+                    // pipeline had to hold this disc at 0.72 so the per-channel
+                    // clip would not flatten the limb to white, and the bloom
+                    // (thresholded on display values) whitened it anyway. The
+                    // hue-preserving shoulder now takes the core to white-hot
+                    // while the limb keeps its orange, and the glow is in
+                    // proportion to how bright it really is.
+                    gl_FragColor = heroRadiance(heroDecode(col) * (0.42 + 0.30 * limb) * 2.0);
                 }`,
             fog: false,
         }));
@@ -496,6 +508,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
         }`;
     const ROPE_FRAG = /* glsl */`
         precision highp float;
+        ${HERO_COLOR_GLSL}
         uniform vec3 u_color; uniform float u_opacity; uniform float u_time; uniform float u_twist;
         varying vec3 vN; varying vec3 vV; varying float vPsi; varying float vTheta;
         void main(){
@@ -506,7 +519,7 @@ export function createHeroRopeLayer({ THREE, scene, sunDir, host, onFraming = nu
             float body = 0.10 + 0.55 * rim;
             float stripes = 0.35 * helix * (0.4 + 0.6 * rim);
             vec3 col = u_color * (body + stripes) + vec3(1.0) * rim * rim * 0.25;
-            gl_FragColor = vec4(col, u_opacity * (0.35 + 1.4 * rim + 0.4 * stripes));
+            gl_FragColor = heroEmit(col, u_opacity * (0.35 + 1.4 * rim + 0.4 * stripes));
         }`;
 
     /** @type {null|object} the forecast being drawn (live or replay) */
