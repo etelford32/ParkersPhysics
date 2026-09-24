@@ -334,6 +334,27 @@ a visitor does. `CLOUD_STEPS=12` caps the march if a run is too slow.
 - The wind-aloft gain is a **stated approximation** until the pressure-level
   winds ride the same hourly ring.
 
+### 6.4 Two lighting bugs the sunward capture exposed (2026-09-24)
+
+Rendered in the sandbox against a synthetic 45 %-cover mosaic, camera aimed
+along the page's own sun vector (`window.__evSetCamDir(...__evSunDir())`):
+
+- **The powder term was inverted.** Its blend weight was
+  `clamp(cosT·0.5 + 0.5)`: full when looking *toward* the sun, zero in
+  back-scatter — the opposite of the effect it names (edges darker than
+  interiors when the sun is behind the viewer, i.e. the whole sunlit
+  hemisphere seen from orbit). Now `clamp(−cosT·0.5 + 0.5)`.
+- **Sunlit tops clipped to flat white.** The three multiple-scattering
+  octaves were summed raw (1 + 0.52 + 0.27 = 1.79× single scatter) on top
+  of the sky ambient, so a lit top reached radiance ~1.8 and the ACES
+  shoulder plus bloom flattened every cloud into a cut-out. `msScatter` now
+  divides by the octaves' total weight: the octaves shape the falloff,
+  they are not extra energy.
+
+Both were invisible in every earlier capture because every earlier capture
+looked at the terminator or the night side. A frame of the sunlit
+hemisphere is now part of the live gate for that reason.
+
 Gates: `node tests/cloud-time.mjs tests/cloud-mosaic-core.mjs` +
 `npx playwright test tests/cloud-timeline.spec.js tests/atmo-stack-smoke.spec.js tests/cloud-shells-smoke.spec.js tests/cloud-mosaic-e2e.spec.js`.
 

@@ -559,18 +559,27 @@ float phaseTwoLobe(float cosT, float ani) {
 // scattering alone is always far too dark, because almost every photon that
 // reaches your eye from a real cloud has bounced many times; without these
 // orders you get exactly the flat grey the decal shader was already stuck at.
+//
+// NORMALISED by the octaves' total weight (1 + 0.52 + 0.27). Summed raw, a
+// sunlit top reached radiance ~1.8 (three orders × the back lobe, plus the
+// sky ambient) and the ACES shoulder plus bloom turned every cloud on the
+// sunward hemisphere into a flat white cut-out with no gradation — measured
+// on the sun-facing capture. The octaves are a shape for the multiple-
+// scattering FALLOFF, not extra energy; a cloud's albedo is still ≤ 1.
 vec3 msScatter(float lt, float cosT, vec3 sunCol) {
     vec3 sum = vec3(0.0);
     float att = 1.0;   // energy remaining in this order
     float ext = 1.0;   // extinction exponent
     float ani = 1.0;   // phase anisotropy
+    float norm = 0.0;
     for (int k = 0; k < 3; k++) {
-        sum += att * sunCol * pow(max(lt, 1e-5), ext) * phaseTwoLobe(cosT, ani);
+        sum  += att * sunCol * pow(max(lt, 1e-5), ext) * phaseTwoLobe(cosT, ani);
+        norm += att;
         att *= 0.52;
         ext *= 0.55;
         ani *= 0.60;
     }
-    return sum;
+    return sum / norm;
 }
 
 // Planet shadow with a penumbra. A hard raySphere test gives a razor-sharp
@@ -689,10 +698,15 @@ void main() {
 
             // Powder / dark-edge term: an approximation of the multiple
             // scattering that makes cloud EDGES darker than their interiors
-            // when lit from behind the viewer. Without it thin edges read as
-            // uniformly bright and the whole field flattens.
+            // when lit from BEHIND THE VIEWER (back-scatter: cosT → −1, the
+            // sun-facing hemisphere seen from orbit). Without it thin edges
+            // read as uniformly bright and the whole field flattens. The
+            // blend weight used to be clamp(cosT·0.5 + 0.5) — full weight
+            // when looking TOWARD the sun and zero in back-scatter, i.e.
+            // exactly reversed; the sunward capture showed flat white
+            // silhouettes with no edge falloff at all.
             float powder = 1.0 - exp(-d * 14.0);
-            powder = mix(1.0, powder, clamp(cosT * 0.5 + 0.5, 0.0, 1.0));
+            powder = mix(1.0, powder, clamp(-cosT * 0.5 + 0.5, 0.0, 1.0));
 
             // Sky ambient: bright from above, dim and blue from below, so
             // undersides fill with sky rather than going black.
