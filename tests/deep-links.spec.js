@@ -10,52 +10,12 @@
  *     daily digest's "manage" links, which pointed at a dashboard card that
  *     no longer existed) scroll a visible section into view.
  *
- * Auth: a STUBBED Supabase session (the tests/auth-e2e.spec.js pattern — a
- * structurally valid unsigned JWT, every /auth/v1 and /rest/v1 call answered
- * locally). The pp_auth mock that tests/auth-tier-redirect.spec.js seeds only
- * applies when the Supabase client FAILS to initialise; the client is
- * self-hosted and initialises offline, finds no session and bounces to
- * sign-in — measured 2026-09-24, and that spec's settings/dashboard cases fail
- * in this sandbox for exactly that reason.
+ * Auth: tests/fixtures/supabase-session.mjs (a stubbed Supabase session).
  */
 import { test, expect } from '@playwright/test';
+import { stubSupabaseSession } from './fixtures/supabase-session.mjs';
 
-const PROJECT_REF = 'aijsboodkivnhzfstvdq';
-const USER_ID = '00000000-0000-0000-0000-0000000abcde';
-const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-const fakeJwt = (sub) => `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub, role: 'authenticated', aud: 'authenticated', exp: 9999999999 })}.sig`;
-const json = (obj, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(obj) });
-
-async function signIn(page, plan, role) {
-    const user = {
-        id: USER_ID, aud: 'authenticated', role: 'authenticated', email: 'links@playwright.test',
-        user_metadata: { full_name: 'Link Tester' }, app_metadata: { provider: 'email' },
-    };
-    const session = {
-        access_token: fakeJwt(USER_ID), token_type: 'bearer', expires_in: 3600,
-        expires_at: 9999999999, refresh_token: 'fake-refresh-token', user,
-    };
-    const profile = { id: USER_ID, email: user.email, plan, role, full_name: 'Link Tester' };
-    // Reverse-registration matching: catch-alls FIRST (see auth-e2e.spec.js).
-    await page.route('**/rest/v1/**', (r) => r.fulfill(json([])));
-    await page.route('**/auth/v1/**', (r) => r.fulfill(json({})));
-    await page.route('**/auth/v1/user**', (r) => r.fulfill(json(user)));
-    await page.route('**/auth/v1/token**', (r) => r.fulfill(json(session)));
-    // auth.js reads the profile with .single(), which asks PostgREST for an
-    // OBJECT (Accept: application/vnd.pgrst.object+json). Answering with an
-    // array leaves role undefined and the admin gate refuses — answer in the
-    // shape that was asked for.
-    await page.route('**/rest/v1/user_profiles**', (r) => {
-        const one = /vnd\.pgrst\.object/.test(r.request().headers().accept || '');
-        return r.fulfill(json(one ? profile : [profile]));
-    });
-    await page.route('**/rest/v1/rpc/**', (r) => r.fulfill(json(plan)));
-    await page.addInitScript(({ key, session }) => {
-        localStorage.setItem(key, JSON.stringify(session));
-        localStorage.setItem('pp_consent_v1', JSON.stringify({ strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
-        localStorage.setItem('pp_tour_completed', '1');
-    }, { key: `sb-${PROJECT_REF}-auth-token`, session });
-}
+const signIn = (page, plan, role) => stubSupabaseSession(page, { plan, role });
 
 test('admin.html#activation opens the Activation tab', async ({ page }) => {
     await signIn(page, 'enterprise', 'admin');

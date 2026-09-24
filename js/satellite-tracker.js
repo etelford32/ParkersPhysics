@@ -338,6 +338,12 @@ export class SatelliteTracker {
      */
     constructor(parent, earthRadius, { maxSatellites = 50000, showOrbits = true } = {}) {
         this._parent = parent;
+        // HEADLESS when parent is null: catalogue + propagation + conjunction
+        // screening with nothing attached to a scene and no render-propagation
+        // worker. js/conjunction-alert.js constructs it this way; before this
+        // existed `parent.add` threw a TypeError there, the monitor swallowed
+        // it as a console.warn, and conjunction screening never ran once.
+        this._headless = !parent;
         this._earthR = earthRadius;
         this._maxSats = maxSatellites;
         this._showOrbits = showOrbits;
@@ -349,7 +355,7 @@ export class SatelliteTracker {
         this._groups = new Map(); // group name → { visible, count, color }
         this._group = new THREE.Group();
         this._group.name = 'satellites';
-        parent.add(this._group);
+        if (parent) parent.add(this._group);
 
         // Per-vertex color material (replaces uniform cyan)
         this._dotMat = new THREE.PointsMaterial({
@@ -416,7 +422,7 @@ export class SatelliteTracker {
         this._workerInFlight  = false;
         this._workerFrameId   = 0;
         this._workerLastFrame = 0;          // most recent frameId that landed
-        this._workerEnabled   = (typeof Worker !== 'undefined');
+        this._workerEnabled   = !this._headless && (typeof Worker !== 'undefined');
 
         // SAB fast path. crossOriginIsolated requires COOP/COEP to be
         // set on the document; vercel.json + dev-server.mjs add them
@@ -434,7 +440,7 @@ export class SatelliteTracker {
         // could in principle overlap a worker write — bounded but
         // visually torn. With it, we just defer the upload one frame
         // when the writing flag is set.
-        const isolated = typeof self !== 'undefined'
+        const isolated = !this._headless && typeof self !== 'undefined'
             && self.crossOriginIsolated
             && typeof SharedArrayBuffer !== 'undefined';
         this._posSab        = null;
@@ -479,7 +485,7 @@ export class SatelliteTracker {
         this._shellGroup = new THREE.Group();
         this._shellGroup.name = 'orbital-shells';
         this._shellGroup.visible = false;
-        parent.add(this._shellGroup);
+        if (parent) parent.add(this._shellGroup);
 
         // Optional single-satellite highlight (e.g. pin "ISS" out of the
         // stations group). Lazily built on the first setHighlight() call.
@@ -1938,8 +1944,12 @@ export class SatelliteTracker {
         }
 
         if (!targetPositions) {
-            // JS fallback — propagate one step at a time
-            targetPositions = times.map(t => propagate(target.tle, t));
+            // JS fallback — propagate one step at a time. Array.from, NOT
+            // times.map: `times` is a Float64Array, and a typed array's map
+            // returns a Float64Array, coercing every {x,y,z} to NaN — every
+            // sample was then skipped and the screen returned [] whenever the
+            // WASM was not loaded (found 2026-09-24; tests/conjunction-monitor.spec.js).
+            targetPositions = Array.from(times, t => propagate(target.tle, t));
             console.debug(`[Conjunction] Target propagated via JS fallback: ${nSteps} steps`);
         }
 

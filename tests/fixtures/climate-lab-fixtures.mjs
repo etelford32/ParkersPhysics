@@ -156,12 +156,12 @@ export function archiveFixture(nowMs) {
 }
 
 /** A normalised ISS-like OMM record (epoch 6 h before `nowMs`), via the real normaliser. */
-export function issRecord(nowMs, { norad = 25544, name = 'ISS (ZARYA)' } = {}) {
+export function issRecord(nowMs, { norad = 25544, name = 'ISS (ZARYA)', meanAnomaly = 270.0 } = {}) {
     return normalizeOmmRecord({
         OBJECT_NAME: name, OBJECT_ID: '1998-067A', NORAD_CAT_ID: norad,
         EPOCH: new Date(nowMs - 6 * HOUR).toISOString().replace('Z', ''),
         MEAN_MOTION: 15.50, ECCENTRICITY: 0.0003, INCLINATION: 51.64,
-        RA_OF_ASC_NODE: 120.5, ARG_OF_PERICENTER: 90.0, MEAN_ANOMALY: 270.0,
+        RA_OF_ASC_NODE: 120.5, ARG_OF_PERICENTER: 90.0, MEAN_ANOMALY: meanAnomaly,
         EPHEMERIS_TYPE: 0, CLASSIFICATION_TYPE: 'U', ELEMENT_SET_NO: 999, REV_AT_EPOCH: 50000,
         BSTAR: 0.0003, MEAN_MOTION_DOT: 0.0001, MEAN_MOTION_DDOT: 0,
     });
