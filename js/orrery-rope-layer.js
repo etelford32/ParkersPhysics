@@ -447,7 +447,7 @@ export function createOrreryRopeLayer({ THREE, scene, getEarthAz, spinSign = 1, 
             r.nose.material.opacity = 0.95 * fade;
             r.trail.material.opacity = 0.34 * fade;
 
-            const v = fc.kernel?.apexVKmsAt ? Math.round(fc.kernel.apexVKmsAt(r.index, m.geometry.tS)) : null;
+            const v = fc.kernel?.apexVKmsAt ? Math.round(fc.kernel.apexVKmsAt(r.index, m.geometry.tTrainS ?? m.geometry.tS)) : null;
             rows.push({ r, txt: `apex ${apexAu.toFixed(2)} AU${v ? ` · ${v} km/s` : ''}` });
         }
 

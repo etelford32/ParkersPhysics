@@ -116,26 +116,38 @@ export function ropeFlightSeconds(rope, epochMs, tauMs) {
  * §16 interaction. The mirror fallback is the single-rope kinematic and is
  * flagged as such on the result so the UI can say which it drew.
  *
- * @returns {null|{frame,dAu,sigApexAu,tS,oracle:'kernel'|'mirror'}}
+ * THE TWO CLOCKS. `tS` here is this rope's FLIGHT time (the mirror's
+ * clock), but the kernel's per-rope probes take TRAIN time — seconds after
+ * the epoch — and subtract the rope's own launch offset themselves
+ * (rust-flux-rope `fr_apex_km_at`: `apex_km(t − t_launch)`). Handing the
+ * kernel the flight time subtracted the offset TWICE: every follower in a
+ * train sat pinned at the 21.5 R☉ launch surface for an extra
+ * `launchOffsetS` (Gannon rope 2: drawn at 0.10 AU at T+30 h where the
+ * kernel has it at 0.31 AU). `tTrainS` is returned so callers probing the
+ * kernel again (apexVKmsAt, fieldAt) use the same clock.
+ *
+ * @returns {null|{frame,dAu,sigApexAu,tS,tTrainS,oracle:'kernel'|'mirror'}}
  */
 export function ropeGeometryAt(rope, index, tS, kernel = null, wKms = 400) {
     if (!rope || !Number.isFinite(tS) || tS <= 0) return null;
+    const tTrainS = tS + (rope.launchOffsetS ?? 0);
     if (kernel && typeof kernel.apexKmAt === 'function') {
-        const dKm = kernel.apexKmAt(index, tS);
-        const sigKm = kernel.sigmaApexKmAt(index, tS);
+        const dKm = kernel.apexKmAt(index, tTrainS);
+        const sigKm = kernel.sigmaApexKmAt(index, tTrainS);
         if (Number.isFinite(dKm) && dKm > 0 && Number.isFinite(sigKm) && sigKm > 0) {
             return {
                 frame: ropeFrame(rope.lonDeg, rope.latDeg, rope.tiltDeg ?? 0),
                 dAu: dKm / AU_KM,
                 sigApexAu: sigKm / AU_KM,
                 tS,
+                tTrainS,
                 oracle: 'kernel',
             };
         }
     }
     const spec = ropeSpecAt(rope, rope.wKms ?? wKms, tS, D0_KM_DEFAULT);
     if (!Number.isFinite(spec.dAu) || spec.dAu <= 0) return null;
-    return { ...spec, tS, oracle: 'mirror' };
+    return { ...spec, tS, tTrainS, oracle: 'mirror' };
 }
 
 /**
