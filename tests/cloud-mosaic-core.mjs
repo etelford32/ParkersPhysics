@@ -249,6 +249,19 @@ check('gibsTimeCandidates: freshest-first timestamps, date-only tail', () => {
     }
 });
 
+check('gibsTimeCandidates: explicit replay target — no lag, no date-only fallback', () => {
+    // A scrubbed instant is a REQUEST for that instant. The ingest lag is a
+    // property of "now", not of an archived frame, and the date-only tail
+    // would hand back a frame from an unknown hour under a labelled time.
+    const target = Date.UTC(2026, 6, 12, 9, 47, 12);   // 2026-07-12T09:47:12Z
+    const c = gibsTimeCandidates(target, { lagMin: 0, backMin: [0, 10, 30], dateFallback: false });
+    assert.equal(c.length, 3, 'exactly the timestamped walk-back, nothing date-only');
+    assert.equal(c[0].time, '2026-07-12T09:40:00Z', 'floor to cadence with no lag');
+    assert.equal(c[1].time, '2026-07-12T09:30:00Z');
+    assert.equal(c[2].time, '2026-07-12T09:10:00Z');
+    assert.ok(c.every(x => x.timestampMs != null));
+});
+
 check('toUtcDate formats in UTC', () => {
     assert.equal(toUtcDate(Date.UTC(2026, 0, 2, 0, 30)), '2026-01-02');
 });
