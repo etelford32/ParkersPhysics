@@ -80,6 +80,16 @@
  *     ride one `_mix` on an e-folding TIME, never a per-frame fraction) so
  *     the Sun→Earth segment fills the stage box; it eases back to the Earth
  *     shot when they let go. Both solves live in `_updateFraming()`.
+ *   • SUN FRAMING (2026-09-24) — the rope layer's default "☉ Next 24 h" tab
+ *     closes the camera on the corridor's drawn Sun (js/hero-sun.js: today's
+ *     regions, loops and corona; the flux-rope kernel flying every recent
+ *     CME) with `setFraming('sun')`. A second mix, `_sunMix`, rides the same
+ *     e-folding clock; the pose is a weighted blend of the three framings
+ *     (Earth weight 1 − mix − sunMix, which a corridor ↔ Sun switch keeps
+ *     ≥ 0 exactly because both eases share one clock). At that distance the
+ *     sightline crosses the magnetosphere's flank, so `_parkNearEarth` hides
+ *     the near-Earth scene once the close-up has all but arrived and
+ *     restores it exactly on the way out.
  *   • STORM-DRIVEN REVEAL (2026-09-21) — on a quiet day the belts, the
  *     plasmasphere, the sheath glow and the reconnection line are OFF: the
  *     resting shot is Earth, its aurora and its shield. They come on when
@@ -158,11 +168,28 @@ const FOV_MIN = 16, FOV_MAX = 72, FOV_DEFAULT = 50;
 const CORRIDOR_FOV = 34, CORRIDOR_SPAN_FRAC = 0.62, CORRIDOR_ELEV = 26 * DEG;
 const CORRIDOR_AIM_FRAC = 0.50;      // of the Sun→Earth segment, from Earth
 const FRAMING_TAU_S = 0.55;          // e-folding time of the framing ease
+// Sun framing (the rope layer's "Next 24 h" preview, js/hero-sun.js): the
+// camera closes on the corridor's DRAWN Sun from the Earth side, SUN_AZ_EAST
+// east of the Sun→Earth line and SUN_ELEV above it — close to the SDO view a
+// visitor may know (north up, west right, the Earth-facing hemisphere) with
+// enough obliquity that loops and ropes read in 3D — the disc SUN_DISC_FRAC
+// of the stage's short side at a telephoto SUN_FOV (a wide fov would stretch
+// the off-axis disc into an oval: the Earth framing's lesson). At that
+// distance the sightline passes the magnetosphere's flank, so the near-Earth
+// scene (globe, engine shells, wind, sprites) is parked once the close-up
+// has all but arrived (SUN_PARK_MIX) and restored on the way out.
+const SUN_FOV = 32, SUN_DISC_FRAC = 0.25, SUN_ELEV = 11 * DEG, SUN_AZ_EAST = 22 * DEG;
+const SUN_PARK_MIX = 0.9;
 // Storm reveal thresholds on the storm norm (storm_level/5 + 0.3·kp_norm):
 // G1 with Kp 5 lands at ~0.37, a quiet Kp 2 day at ~0.07.
 const REVEAL_ON = 0.24, REVEAL_OFF = 0.12;
 const REVEAL_LAYERS = ['belts', 'plasmasphere', 'magnetosheath', 'reconnection'];
 const COND_HZ = 4;                   // how often the scrubbed state is pushed to the engine
+
+// Azimuth of the Sun framing's camera about the drawn Sun: −SUN_DIR swung
+// toward −z (east — the rope frame's west, e2, is ≈ +z here), unwrapped next
+// to CAM_AZIMUTH so the blend between them takes the short way round.
+const SUN_CAM_AZIMUTH = Math.atan2(-SUN_DIR.z, -SUN_DIR.x) + SUN_AZ_EAST - 2 * Math.PI;
 
 // ── The entrance (2026-09-23) — see the header's ENTRANCE bullet ────────────
 // Everything here is PRESENTATION and ends on the live state exactly: the
@@ -606,10 +633,13 @@ export class HeroSpaceWeather {
         };
         // Framing solved from the stage box: Earth's NDC centre + vertical fov,
         // plus the corridor solve (fov/distance) the rope layer eases to.
-        this._frame = { nx: 0, ny: 0, fov: FOV_DEFAULT, corrFov: CORRIDOR_FOV, corrDist: 0 };
+        this._frame = { nx: 0, ny: 0, fov: FOV_DEFAULT, corrFov: CORRIDOR_FOV, corrDist: 0, sunFov: SUN_FOV, sunDist: 0 };
         this._framingMode = 'earth';
         this._mix = 0;               // 0 = Earth shot, 1 = corridor
+        this._sunMix = 0;            // 0 = Earth shot, 1 = the drawn Sun close-up
         this._corridorRe = 0;        // Sun→Earth segment length the rope layer draws
+        this._sunDrawnR = 0;         // the drawn Sun's radius (rope layer), for the close-up solve
+        this._parked = false;        // near-Earth scene parked behind the Sun close-up
         this._state  = { solar_wind: { speed: 420, density: 5, bz: 0 }, kp: 2 };
         this._t      = 0;
         this._animId = null;
@@ -1016,6 +1046,14 @@ export class HeroSpaceWeather {
             f.corrDist = proj / (CORRIDOR_SPAN_FRAC * boxFrac * 2 * tanHc);
             f.corrFov = CORRIDOR_FOV;
         }
+        // Sun close-up: the distance at which the drawn Sun's disc is
+        // SUN_DISC_FRAC of the stage's short side at SUN_FOV.
+        if (this._sunDrawnR > 0) {
+            const spx = SUN_DISC_FRAC * Math.min(sr.width, sr.height) * (H / cr.height);
+            const tanS = (spx / Math.max(1, H / 2)) * Math.tan(SUN_FOV * DEG / 2);
+            f.sunDist = this._sunDrawnR / Math.sin(Math.atan(tanS));
+            f.sunFov = SUN_FOV;
+        }
         this._applyFov();
         this._camera.aspect = W / Math.max(1, H);
         this._camera.updateProjectionMatrix();
@@ -1024,7 +1062,8 @@ export class HeroSpaceWeather {
     /** The camera's fov for the current framing mix. */
     _applyFov() {
         const f = this._frame;
-        const fov = f.fov + (f.corrFov - f.fov) * this._mix;
+        const wE = Math.max(0, 1 - this._mix - this._sunMix);
+        const fov = f.fov * wE + f.corrFov * this._mix + f.sunFov * this._sunMix;
         const z = this._introZoom;
         this._camera.fov = z > 1 ? Math.min(INTRO_FOV_MAX, fov * z) : fov;
     }
@@ -1110,6 +1149,7 @@ export class HeroSpaceWeather {
         const atmo = new THREE.Mesh(new THREE.SphereGeometry(1.075, 96, 96), atmoMat);
         atmo.renderOrder = 2;
         this._scene.add(atmo);
+        this._atmo = atmo;
     }
 
     /** Turn the globe so the REAL sub-solar point faces SUN_DIR (js/hero-earth.js). */
@@ -1325,14 +1365,18 @@ export class HeroSpaceWeather {
         import('./hero-rope-layer.js').then((m) => {
             if (this._stopped) return;
             this._corridorRe = m.CORRIDOR_SUN_RE;
+            this._sunDrawnR = m.CORRIDOR_SUN_DRAWN_R;
             this._ropes = m.createHeroRopeLayer({
                 THREE, scene: this._scene,
                 sunDir: [SUN_DIR.x, SUN_DIR.y, SUN_DIR.z],
                 host: cfg.host,
                 replay: cfg.replay ?? null,
                 onFraming: (mode) => this.setFraming(mode),
-                // The Gannon replay's self-start waits for the entrance.
+                // The 24 h preview's self-start waits for the entrance.
                 autoplayGate: this._introSettled,
+                // The live feed's latest state (X-ray, flares, the CME
+                // catalogue); later ones reach the layer on 'swpc-update'.
+                busState: this._state?.derived ? this._state : null,
             });
             this._updateFraming();
             // The corridor's own materials (drawn Sun, halo, ruler) sit in
@@ -1350,9 +1394,30 @@ export class HeroSpaceWeather {
         }).catch((e) => console.warn('[HeroSpaceWeather] rope layer failed:', e?.message ?? e));
     }
 
-    /** 'earth' (resting shot) or 'corridor' (Sun→Earth, for the transit). */
+    /**
+     * Park (hide) the near-Earth scene behind the Sun close-up: the globe,
+     * its atmosphere, the engine's shells, the solar-wind stream and the
+     * CME cue. From the close-up's vantage they are off-frame or a veil
+     * across the sightline (the bow shock's flank); none of them is lost —
+     * `visible` is restored exactly as it was on the way out.
+     */
+    _parkNearEarth(park) {
+        if (park === this._parked) return;
+        this._parked = park;
+        const objs = [this._earth, this._atmo, this._particles, this._engine?._solarGroup, this._engine?._eqGroup];
+        if (park) {
+            this._parkedVis = objs.map((o) => o?.visible);
+            for (const o of objs) if (o) o.visible = false;
+            if (this._cmeCue) this._cmeCue.visible = false;
+        } else {
+            objs.forEach((o, i) => { if (o) o.visible = this._parkedVis?.[i] ?? true; });
+            if (this._cmeCue) this._cmeCue.visible = !!this._cmeInbound;
+        }
+    }
+
+    /** 'earth' (resting shot), 'corridor' (Sun→Earth, the transit) or 'sun' (the 24 h preview). */
     setFraming(mode) {
-        this._framingMode = mode === 'corridor' ? 'corridor' : 'earth';
+        this._framingMode = mode === 'corridor' || mode === 'sun' ? mode : 'earth';
     }
 
     // ── Sun — radial-gradient sprites that feed the bloom pass ────────────────
@@ -1491,7 +1556,7 @@ export class HeroSpaceWeather {
         // CME-inbound cue
         const eta = state.cme_eta_hours;
         this._cmeInbound = !!state.earth_directed_cme && Number.isFinite(eta) && eta < 120;
-        if (this._cmeCue) this._cmeCue.visible = this._cmeInbound;
+        if (this._cmeCue) this._cmeCue.visible = this._cmeInbound && !this._parked;
 
         // Sun pulse follows X-ray intensity
         this._xrayNorm = state.derived?.xray_intensity ?? 0;
@@ -1533,27 +1598,37 @@ export class HeroSpaceWeather {
         // Framing mix eases on an e-folding TIME (the TIGA/Star Collider
         // rule: never a per-frame fraction, which took 8 s on software GL).
         const want = (this._framingMode === 'corridor' && this._frame.corrDist > 0) ? 1 : 0;
-        const prevMix = this._mix;
+        const wantSun = (this._framingMode === 'sun' && this._frame.sunDist > 0) ? 1 : 0;
+        const prevMix = this._mix, prevSun = this._sunMix;
         // easeDt, not dt: the clamped physics step would stretch a 0.55 s
         // ease to ~6 s on a software rasteriser (measured: mix 0.09 after 3.5 s).
-        this._mix += (want - this._mix) * (1 - Math.exp(-easeDt / FRAMING_TAU_S));
+        const ease = 1 - Math.exp(-easeDt / FRAMING_TAU_S);
+        this._mix += (want - this._mix) * ease;
         if (Math.abs(this._mix - want) < 0.002) this._mix = want;
-        const mix = this._mix;
+        this._sunMix += (wantSun - this._sunMix) * ease;
+        if (Math.abs(this._sunMix - wantSun) < 0.002) this._sunMix = wantSun;
+        const mix = this._mix, sunMix = this._sunMix;
+        // Earth's weight in the pose blend. The two eases share one clock, so
+        // a corridor ↔ Sun switch keeps mix + sunMix ≤ 1 exactly.
+        const wE = Math.max(0, 1 - mix - sunMix);
         // The entrance offsets (zero once settled) ride on top of the
         // framing; _applyFov folds in its zoom.
-        const introOn = this._stepIntro(easeDt, mix);
-        if (this._mix !== prevMix || introOn) { this._applyFov(); this._camera.updateProjectionMatrix(); }
-        const camR   = this._camR + (this._frame.corrDist - this._camR) * mix;
-        const camPhi = this._camPhi + (CORRIDOR_ELEV - this._camPhi) * mix + this._introElev;
+        const introOn = this._stepIntro(easeDt, Math.max(mix, sunMix));
+        if (this._mix !== prevMix || this._sunMix !== prevSun || introOn) { this._applyFov(); this._camera.updateProjectionMatrix(); }
+        const f = this._frame;
+        const camR   = this._camR * wE + f.corrDist * mix + f.sunDist * sunMix;
+        const camPhi = this._camPhi * wE + CORRIDOR_ELEV * mix + SUN_ELEV * sunMix + this._introElev;
 
-        this._camTh = CAM_AZIMUTH + CAM_SWAY_DEG * DEG * Math.sin(t * CAM_SWAY_RATE) + this._introArc;
-        // The aim point slides from Earth toward the corridor's midpoint;
-        // the camera orbits THAT point so the segment stays framed.
+        this._camTh = CAM_AZIMUTH + (SUN_CAM_AZIMUTH - CAM_AZIMUTH) * sunMix
+            + CAM_SWAY_DEG * DEG * Math.sin(t * CAM_SWAY_RATE) * (1 - 0.6 * sunMix) + this._introArc;
+        // The aim point slides from Earth toward the corridor's midpoint (or
+        // all the way to the drawn Sun); the camera orbits THAT point.
         const sv = this._tmpSubject ?? (this._tmpSubject = new THREE.Vector3());
-        sv.copy(SUN_DIR).multiplyScalar(this._corridorRe * CORRIDOR_AIM_FRAC * mix);
+        sv.copy(SUN_DIR).multiplyScalar(this._corridorRe * (CORRIDOR_AIM_FRAC * mix + sunMix));
         const cx = sv.x + camR * Math.cos(camPhi) * Math.cos(this._camTh);
-        const cy = sv.y + camR * Math.sin(camPhi) + 0.35 * Math.sin(t * 0.11) * (1 - mix);
+        const cy = sv.y + camR * Math.sin(camPhi) + 0.35 * Math.sin(t * 0.11) * wE;
         const cz = sv.z + camR * Math.cos(camPhi) * Math.sin(this._camTh);
+        this._parkNearEarth(sunMix >= SUN_PARK_MIX);
         const k = Math.min(1, 2.5 * dt);
         this._parX += (this._parTX - this._parX) * k;
         this._parY += (this._parTY - this._parY) * k;
@@ -1588,7 +1663,7 @@ export class HeroSpaceWeather {
         // on the way back it sees the live feed again. Pushed at COND_HZ.
         let engineState = this._state;
         if (this._ropes) {
-            this._ropes.setMix(this._mix);
+            this._ropes.setMix(this._mix, this._sunMix);
             if (this._mix > 0.02 && this._ropes.hasConditions) {
                 const now = performance.now();
                 if (!this._condAt || now - this._condAt > 1000 / COND_HZ) {
@@ -1611,7 +1686,10 @@ export class HeroSpaceWeather {
             }
         }
         this._engine.tick(t, SUN_DIR, engineState, dt);
-        this._ropes?.tick(dt);
+        // Wall clock (≤0.5 s), not the clamped physics step: the 24 h preview
+        // and the transit replay must take the same time on a software
+        // rasteriser as on a GPU (the framing ease's rule).
+        this._ropes?.tick(easeDt);
 
         // ── Solar wind ─────────────────────────────────────────────────────
         this._windU.u_cold.value.lerp(this._windColdTarget, Math.min(1, 3 * dt));
@@ -1621,7 +1699,11 @@ export class HeroSpaceWeather {
         if (this._sunCore) {
             const pulse = 1 + 0.05 * Math.sin(t * 1.7) + (this._xrayNorm ?? 0) * 0.3;
             this._sunCore.scale.setScalar(12 * pulse);
-            this._sunHalo.material.opacity = 0.28 + 0.08 * Math.sin(t * 0.9) + (this._xrayNorm ?? 0) * 0.2;
+            // The resting shot's light-source sprite sits BEHIND the drawn Sun
+            // in the close-up and would ring it with a second glow.
+            const keep = 1 - this._sunMix;
+            this._sunCore.material.opacity = keep;
+            this._sunHalo.material.opacity = (0.28 + 0.08 * Math.sin(t * 0.9) + (this._xrayNorm ?? 0) * 0.2) * keep;
         }
 
         // ── CME cue pulse ──────────────────────────────────────────────────

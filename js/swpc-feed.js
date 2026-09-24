@@ -803,6 +803,10 @@ async function fetchDONKICME(state) {
     });
 
     state.recent_cmes = parsed;
+    // When the catalogue last ARRIVED: an empty list is ambiguous on its own
+    // (the INITIAL state, a failed fetch and a quiet week all read []), and a
+    // consumer that says "no CMEs" must know it actually has the catalogue.
+    state.donki_cme_at = now;
     const edList             = parsed.filter(c => c.earthDirected && (c.hoursUntil ?? 0) > -24);
     state.earth_directed_cme = edList[0] ?? null;
     state.cme_eta_hours      = state.earth_directed_cme?.hoursUntil ?? null;
@@ -1219,6 +1223,7 @@ export class SpaceWeatherFeed {
             f107_trend_direction:    raw.f107_trend_direction     ?? null,
             f107_recent:             raw.f107_recent              ?? [],
             recent_cmes:         raw.recent_cmes        ?? [],
+            donki_cme_at:        raw.donki_cme_at       ?? null,
             earth_directed_cme:  raw.earth_directed_cme ?? null,
             cme_eta_hours:       raw.cme_eta_hours      ?? null,
             donki_notifications: raw.donki_notifications ?? [],
