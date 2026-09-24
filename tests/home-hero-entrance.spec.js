@@ -177,7 +177,13 @@ test.describe('home hero entrance', () => {
         // Feed dies → the next refresh drops back to the Kp ring, footprint dark.
         feed = 'down';
         await page.evaluate(() => window.__ppHero._fetchAurora());
-        await page.waitForFunction(() => window.__ppHero._auroraSource === 'kp' && window.__ppHero._earthU.u_auroraOn.value === 0, null, { timeout: 30_000 });
+        // The SWITCH is immediate (source + footprint target); the footprint
+        // then FADES on eased wall clock, which advances ≤ 0.5 s per frame —
+        // ~7 frames to reach 0, i.e. frame-count-bound: on a saturated
+        // software rasteriser (seconds per frame) that alone overran 30 s.
+        // So the decision is gated tight and the fade loose.
+        await page.waitForFunction(() => window.__ppHero._auroraSource === 'kp' && window.__ppHero._auroraOnTarget === 0, null, { timeout: 30_000 });
+        await page.waitForFunction(() => window.__ppHero._earthU.u_auroraOn.value === 0, null, { timeout: 90_000 });
         const kp = await page.evaluate(() => {
             const e = window.__ppHero._engine;
             let ints = null;
