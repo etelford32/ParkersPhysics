@@ -14850,6 +14850,17 @@ window.__evSetCamDist = (d) => {
     controls.update();
     return camera.position.length();
 };
+// Aim the camera from a world DIRECTION at the current distance. The live
+// cloud gate frames the SUNLIT hemisphere with it (a screenshot of the
+// night side says nothing about the render), using the sun the page itself
+// is lighting with — a scripted orbit drag lands wherever damping leaves it.
+window.__evSetCamDir = (x, y, z) => {
+    const d = camera.position.length();
+    camera.position.set(Number(x) || 0, Number(y) || 0, Number(z) || 0).normalize().multiplyScalar(d);
+    controls.update();
+    return camera.position.toArray();
+};
+window.__evSunDir = () => earthU.u_sun_dir.value.toArray();
 
 // ═══════════════════════════════════════════════════════════════
 //  USER LOCATION BEACON  (must be declared before animate() runs)

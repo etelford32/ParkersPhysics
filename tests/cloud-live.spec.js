@@ -100,10 +100,14 @@ test.describe('cloud layer — LIVE data', () => {
             () => typeof window.__evCloudTime === 'function' && typeof window.__evCloudMosaic === 'function'
                && typeof window.__evCloudWind === 'function' && window._earthTimeBus,
             null, { timeout: 90_000 });
-        // Park the camera: the screenshots below are compared to each other.
+        // Park the camera (the screenshots below are compared to each other)
+        // and aim it at the SUNLIT hemisphere — a frame of the night side says
+        // nothing about the render. The sun comes from the page's own uniform.
         await page.evaluate(() => {
             const el = document.getElementById('lyr-rotate');
             if (el?.checked) { el.checked = false; el.dispatchEvent(new Event('change', { bubbles: true })); }
+            const [x, y, z] = window.__evSunDir();
+            window.__evSetCamDir(x, y + 0.25, z);
         });
 
         // ── 1. The live mosaic is a real, recent geostationary composite ──────
