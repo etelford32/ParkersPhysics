@@ -1,0 +1,11 @@
+# Phase-0 spike only (offline, not deployed). Python 3.11.
+xarray>=2025.1
+zarr>=3
+netCDF4
+h5netcdf
+fsspec
+aiohttp
+requests
+numpy
+scipy
+pandas
