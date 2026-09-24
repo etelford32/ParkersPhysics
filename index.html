@@ -13,7 +13,31 @@
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js" crossorigin>
 <link rel="modulepreload" href="/js/swpc-feed.js">
-<!-- perf-hints:end --><link rel="icon" type="image/x-icon" href="/favicon.ico">
+<!-- perf-hints:end -->
+<!-- Hero boot (2026-09-23): the live magnetosphere's module graph, fetched
+     while the HTML parses. The PAGE WIRING module imports it first thing
+     (in parallel with the console), so without these the browser only
+     discovered three levels of it one round trip at a time. Kept OUT of the
+     perf-hints block, which scripts/perf_hints.py owns. -->
+<link rel="modulepreload" href="/js/hero-space-weather.js">
+<link rel="modulepreload" href="/js/magnetosphere-engine.js">
+<link rel="modulepreload" href="/js/hero-earth.js">
+<link rel="modulepreload" href="/js/sun-altitude.js">
+<link rel="modulepreload" href="/js/geo/coords.glsl.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/UnrealBloomPass.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/postprocessing/Pass.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/CopyShader.js">
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/jsm/shaders/LuminosityHighPassShader.js">
+<!-- The Earth's boot-tier maps (assets/earth, ~115 KB — js/hero-earth.js
+     TEXTURE_TIERS.boot; the entrance waits on them, capped). `crossorigin`
+     because three's TextureLoader requests in CORS mode and a preload is
+     only reused on a matching mode; `media` because a reduced-motion visitor
+     never gets the scene and should not pay for its maps. -->
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/day-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/water-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/lights-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="preload" as="image" type="image/webp" href="/assets/earth/relief-1k.webp" crossorigin media="(prefers-reduced-motion: no-preference)">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
@@ -31,6 +55,7 @@
 
 <meta name="description" content="Your sky's space-weather risks, live: aurora odds for your exact location, NOAA storm scales, satellite drag and GPS impact — driven by live NASA and NOAA satellite data, validated against the May 2024 Gannon G5 superstorm.">
 <meta name="theme-color" content="#03010e">
+<meta name="color-scheme" content="dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Parkers Physics">
@@ -75,7 +100,9 @@
   --glow-uv-lg:0 0 36px rgba(157,58,255,.7),0 0 90px rgba(91,30,255,.5);
 }
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-html{overflow-y:auto;scroll-behavior:smooth}
+/* The ROOT carries the page colour too, so nothing can paint the UA's white
+   root before <body>'s background applies (the page is dark end to end). */
+html{overflow-y:auto;scroll-behavior:smooth;background:#03010e;color-scheme:dark}
 body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);font-family:var(--font-sans)}
 a{text-decoration:none;color:inherit}
 img{display:block}
@@ -95,7 +122,15 @@ img{display:block}
   radial-gradient(ellipse 50% 35% at 82% 70%,rgba(0,150,170,.16),transparent 70%),
   radial-gradient(ellipse 35% 25% at 60% 15%,rgba(255,31,156,.10),transparent 70%),
   radial-gradient(ellipse at 50% 30%,#071026 0%,#03010e 70%)}
-#hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+/* The canvas starts TRANSPARENT and crossfades in over the CSS backdrop when
+   the hero module has warmed its programs and put frames on it (`hero-live`,
+   set by js/hero-space-weather.js on its second frame). It used to CUT in — an
+   opaque WebGL frame replacing the CSS nebula in one repaint, after a
+   main-thread stall. If the module never arrives the canvas simply stays
+   invisible, which is the no-WebGL look. */
+#hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;
+  opacity:0;transition:opacity 1.6s cubic-bezier(.25,.6,.25,1)}
+#hero.hero-live #hero-canvas{opacity:1}
 /* Background carousel (js/home-carousel.js, experiment home_bg_carousel):
    the .hc-layer is inserted right after the canvas so #hero::after — the
    legibility scrim below — still paints ABOVE the media. Its own styles are
@@ -120,7 +155,60 @@ img{display:block}
    dimming the one thing the layout exists to show. Do not put content in
    #hero-stage; if it needs to be covered, that is a layout change, not a
    z-index one. */
-#hero-stage{position:relative;height:250px;margin:18px 0 10px;pointer-events:none}
+#hero-stage{position:relative;height:250px;margin:18px 0 10px;pointer-events:none;container-type:size}
+/* ── BOOT RETICLE (2026-09-23) ────────────────────────────────────────────
+   The one exception to "nothing in #hero-stage": two pseudo-elements that
+   exist only while the scene boots and are GONE before Earth settles, so
+   they never cover it. `hero-booting` (set by the inline script under the
+   canvas, only where the hero will actually run) shows a lock-on reticle
+   exactly where Earth will land: centred on the stage, 1.14 × the resting
+   disc. Until the module loads that is a CSS guess — Earth's radius is
+   framed at 0.30 of the box's SHORT side → 30cqmin — and once it has
+   measured the stage the module publishes the real radius as
+   --hero-disc-r (larger on phones, where its fov clamp binds) and the ring
+   ranges out to it. The camera then pushes in and Earth grows into the
+   ring; on `hero-live` the ring swells and dissolves. Every
+   animation here is transform/opacity (individual `rotate`/`scale`
+   properties) so it runs on the COMPOSITOR and keeps turning through the
+   main-thread work of booting WebGL. */
+#hero-stage::before,#hero-stage::after{content:'';position:absolute;left:50%;top:50%;width:calc(var(--hero-disc-r,30cqmin) * 2.28);aspect-ratio:1;
+  translate:-50% -50%;border-radius:50%;opacity:0;pointer-events:none;transition:opacity .5s ease,width .8s cubic-bezier(.2,.7,.2,1)}
+#hero-stage::before{border:1px solid rgba(143,240,255,.26);
+  background:
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 50% 0/1px 9px no-repeat,
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 50% 100%/1px 9px no-repeat,
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 0 50%/9px 1px no-repeat,
+    linear-gradient(rgba(143,240,255,.75),rgba(143,240,255,.75)) 100% 50%/9px 1px no-repeat,
+    radial-gradient(circle,rgba(20,60,140,.16) 0 58%,rgba(77,219,255,.07) 80%,transparent 88%);
+  box-shadow:0 0 28px rgba(77,219,255,.10);animation:hero-breathe 2.4s ease-in-out infinite}
+#hero-stage::after{width:calc(var(--hero-disc-r,30cqmin) * 2.28 + 14px);border:1.5px solid transparent;border-top-color:rgba(143,240,255,.85);
+  border-right-color:rgba(157,58,255,.35);filter:drop-shadow(0 0 5px rgba(77,219,255,.6));
+  animation:hero-scan 1.5s linear infinite}
+#hero.hero-booting #hero-stage::before,#hero.hero-booting #hero-stage::after{opacity:1}
+/* Lock-on: the ring holds while the camera pushes Earth into it, then swells
+   out and dissolves; the scanning arc stops being needed at once. */
+#hero.hero-live #hero-stage::before{opacity:0;scale:1.16;animation:none;
+  transition:opacity 1.2s ease 1.1s,scale 2.4s cubic-bezier(.2,.7,.2,1) .6s}
+#hero.hero-live #hero-stage::after{opacity:0;transition:opacity .45s ease}
+@keyframes hero-scan{to{rotate:360deg}}
+@keyframes hero-breathe{50%{scale:1.025}}
+
+/* ── ENTRANCE — the copy settles in while the scene boots ─────────────────
+   Opacity + `translate` only (compositor), short, and started at first paint
+   rather than on a JS signal, so it costs the headline nothing but a frame
+   of LCP. The console fades up when its module renders (initSkyConsole adds
+   .sky-console) — it used to pop in whole. */
+@keyframes hero-rise{from{opacity:0;translate:0 12px}to{opacity:1;translate:0 0}}
+#hero .hero-badge,#hero .hero-h1,#hero .hero-sub,#hero .hero-values{animation:hero-rise .8s cubic-bezier(.2,.7,.2,1) both}
+#hero .hero-h1{animation-delay:.07s}
+#hero .hero-sub{animation-delay:.16s}
+#hero .hero-values{animation-delay:.24s}
+#hero #sky-console-host.sky-console{animation:hero-rise .7s cubic-bezier(.2,.7,.2,1) both}
+@media (prefers-reduced-motion:reduce){
+  #hero-canvas{transition:none}
+  #hero-stage::before,#hero-stage::after{display:none}
+  #hero .hero-badge,#hero .hero-h1,#hero .hero-sub,#hero .hero-values,#hero #sky-console-host.sky-console{animation:none}
+}
 #hero-scrub-host{position:relative;z-index:2;margin:0 0 14px}
 /* `#hero .x` (0,1,1,0) on purpose: these override the page's own
    `.hero-top{text-align:center}` etc. declared BELOW this block — same
@@ -422,6 +510,19 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
      dashboard) — see the "ONE ASK" CSS note for the funnel numbers. -->
 <section id="hero" aria-label="Your sky, live: air, temperature, major events">
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
+  <script>
+  /* Boot reticle on — only where the hero will actually boot (the page
+     wiring skips it under reduced motion; no WebGL means no scene). Parsed
+     inline so the reticle is in the very first paint. The hero module swaps
+     this for `hero-live` once it is drawing (or drops it on failure); the
+     timeout is the backstop for a module that never arrives. */
+  (function () {
+    var h = document.getElementById('hero');
+    if (!h || !window.WebGLRenderingContext || !window.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    h.classList.add('hero-booting');
+    setTimeout(function () { h.classList.remove('hero-booting'); }, 20000);
+  })();
+  </script>
   <div class="hero-inner">
     <div class="hero-top">
       <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
@@ -485,8 +586,8 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
     aurora on one 3D globe. It's not a video. It's the actual page, running on live data, right now.</p>
   <div class="demo-frame">
     <span class="demo-live-tag">Live · earth.html</span>
-    <iframe src="/earth.html" loading="lazy" title="EarthView live globe" tabindex="-1"
-        style="top:-52px;height:calc(100% + 52px)" onload="this.style.opacity=1"></iframe>
+    <iframe data-src="/earth.html" loading="lazy" title="EarthView live globe" tabindex="-1"
+        style="top:-52px;height:calc(100% + 52px)" onload="if(this.getAttribute('src'))this.style.opacity=1"></iframe>
     <a class="demo-open" href="earth.html" data-funnel-cta="earth_demo_open">Fly to your sky <span aria-hidden="true">→</span></a>
   </div>
 </section>
@@ -508,7 +609,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
     re-scored against L1 truth after every event. Where will it be when it reaches you?</p>
   <div class="demo-frame">
     <span class="demo-live-tag">Live · flux-rope ensemble</span>
-    <iframe class="sw-attract-frame" src="/space-weather.html?preview=1" loading="lazy"
+    <iframe class="sw-attract-frame" data-src="/space-weather.html?preview=1" loading="lazy"
         title="Live Sun-to-Earth corridor" tabindex="-1"
         style="top:0;height:100%"></iframe>
     <a class="demo-open" href="flux-rope-live.html" data-funnel-cta="attract_fluxrope">Watch it live <span aria-hidden="true">→</span></a>
@@ -524,6 +625,43 @@ window.addEventListener('message', (e) => {
         document.querySelectorAll('.sw-attract-frame').forEach((f) => { f.style.opacity = '1'; });
     }
 });
+
+/* ── The two demo embeds load LATE, on purpose (2026-09-23) ───────────────
+   Both are full WebGL apps (earth.html, space-weather.html?preview=1).
+   `loading="lazy"` alone did not defer them: Chromium's lazy-load distance
+   is ~1250px, and on a 1440×900 screen both started fetching 150 ms into
+   the load — two more three.js scenes booting against the hero's entrance.
+   They carry data-src and get a real src only when (a) they come within
+   800px of the viewport AND (b) the hero has settled ('hero-intro-done'),
+   the visitor has scrolled, or 6 s have passed — whichever is first, so a
+   page whose hero never boots still loads them. `loading="lazy"` stays
+   (tests/space-weather-attract.spec.js pins it). */
+(function () {
+  const frames = [...document.querySelectorAll('iframe[data-src]')];
+  if (!frames.length) return;
+  const load = (f) => { if (!f.getAttribute('src')) f.src = f.dataset.src; };
+  const near = new Set();
+  let open = false;
+  const openGate = () => {
+    if (open) return;
+    open = true;
+    near.forEach(load);
+    near.clear();
+  };
+  window.addEventListener('hero-intro-done', openGate, { once: true });
+  setTimeout(openGate, 6000);
+  const onScroll = () => { if (scrollY > 240) { window.removeEventListener('scroll', onScroll); openGate(); } };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  if (!('IntersectionObserver' in window)) { frames.forEach((f) => near.add(f)); return; }
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      io.unobserve(e.target);
+      if (open) load(e.target); else near.add(e.target);
+    }
+  }, { rootMargin: '800px 0px' });
+  frames.forEach((f) => io.observe(f));
+})();
 </script>
 
 <!-- ── S5 · AURORACLE CAPTURE — the consumer conversion ───────────────────
@@ -860,23 +998,34 @@ import { experiments } from './js/experiments.js';
    starts. The console works even when WebGL/reduced-motion kills the
    backdrop canvas: the numbers are the product either way. A console boot
    failure must never take the ticker (or the feed) down with it. */
-initHomeTicker(document.querySelector('[data-sw-ticker]'));
-try {
-  await initSkyConsole(document.getElementById('sky-console-host'));
-} catch (err) {
-  console.warn('[home] sky console failed to boot:', err);
-}
-
 /* Hero backdrop: live magnetosphere. Skipped under prefers-reduced-motion —
    the CSS gradient backdrop remains and the console stays live. WebGL
-   failure self-handles (the module hides its canvas). The import is awaited
-   with a cap so the hero's swpc-update listener attaches before the first
-   feed dispatch, but a hung network can never stall the console. */
+   failure self-handles (the module hides its canvas). Its import starts
+   FIRST, in parallel with the console's (2026-09-23: it used to wait for
+   initSkyConsole, i.e. two more module round trips before three.js was
+   even requested — the <head> modulepreloads cover the rest of the graph).
+   The console boot and the hero are both awaited — the hero with a cap —
+   so the hero's swpc-update listener attaches before the first feed
+   dispatch, but a hung network can never stall the console. */
 const heroCanvas = document.getElementById('hero-canvas');
+const heroHost = document.getElementById('hero');
+const heroWanted = !!heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const heroModule = heroWanted ? import('./js/hero-space-weather.js') : null;
+
+initHomeTicker(document.querySelector('[data-sw-ticker]'));
+const consoleReady = initSkyConsole(document.getElementById('sky-console-host'))
+  .catch(err => console.warn('[home] sky console failed to boot:', err));
+
+// The module downloads in parallel, but the scene is BUILT only once the
+// console has rendered (or 1.5 s have passed): building + compiling it is
+// main-thread work, and done first it pushed the console's first render back
+// by seconds on a software rasteriser (measured). The console is the product;
+// the canvas is the backdrop.
+const consoleOrCap = Promise.race([consoleReady, new Promise(r => setTimeout(r, 1500))]);
 let heroReady = Promise.resolve(null);
-if (heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  heroReady = import('./js/hero-space-weather.js')
-    .then(m => {
+if (heroModule) {
+  heroReady = Promise.all([heroModule, consoleOrCap])
+    .then(([m]) => {
       const h = new m.HeroSpaceWeather(heroCanvas, {
         stage: document.getElementById('hero-stage'),
         // The CME flux-rope train + τ scrubber (js/hero-rope-layer.js). It
@@ -890,11 +1039,12 @@ if (heroCanvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       h.start();
       return h;
     })
-    .catch(() => { heroCanvas.style.display = 'none'; return null; });
-  await Promise.race([heroReady, new Promise(r => setTimeout(r, 4000))]);
+    .catch(() => { heroCanvas.style.display = 'none'; heroHost?.classList.remove('hero-booting'); return null; });
 } else if (heroCanvas) {
   heroCanvas.style.display = 'none';
 }
+await consoleReady;
+await Promise.race([heroReady, new Promise(r => setTimeout(r, 4000))]);
 
 /* Passwordless sign-up upsell — see js/home-signup-upsell.js header. */
 import('./js/home-signup-upsell.js')
