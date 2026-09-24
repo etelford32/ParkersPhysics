@@ -229,7 +229,136 @@ one — a stale disclosure is worse than none.
 
 ---
 
-## 6. Known limits / not yet done
+## 6. Phase 4 — the clock (2026-09)
+
+Two reports, one diagnosis: **"the clouds keep regressing"** and **"the
+scrubber doesn't move the clouds."**
+
+### 6.1 Why it kept regressing
+
+Four render paths, one live at a time, chosen by a *reactive* governor. The
+march ran only at the top tier; the first demotion swapped it for the decal
+shells, the decals ran fast enough to promote again, and the page
+ping-ponged between two different-looking planets every few seconds on
+exactly the mid-range GPU (DPR 2 laptop) most visitors have. Each swap read
+as a regression because it *was* a different renderer.
+
+Two changes, both in `earth.html`:
+
+- **The march stays live one tier down.** `_updateCloudShellMode` routes to
+  the volume at `q > 0.45`; the tier step changes the step budget
+  (48 → 28, via `marchLadder`), not the renderer. The floor tier still
+  collapses to the composite decal. Gate: `atmo-stack-smoke.spec.js` asserts
+  `setCloudQuality(0.66)` stays `volumetric`.
+- **Half resolution.** `VolumeCompositor` (js/cloud-volume.js) renders the
+  carrier mesh into an offscreen target at 0.5× the drawing buffer and
+  composites it through a screen quad with the same premultiplied blend at
+  the same renderOrder. ~4× on fill rate, HalfFloat where the context can
+  render to it so HDR cloud tops still reach the bloom. `?cloud_res=1` for
+  A/B; `window.setCloudResolution()`.
+
+Plus the light march now runs on alternate primary steps (its result is
+reused; it varies slowly along the ray and was the dominant cost).
+
+### 6.2 The mosaic has a time dimension
+
+`js/cloud-time.js` is the ONE copy of how the layer relates to the clock,
+pure and node-gated (`tests/cloud-time.mjs`). `SatelliteFeed.setTime()`
+follows the bus like `EarthObsFeed` does: a scrubbed instant resolves to
+one of five modes —
+
+| mode | frame | weight | when |
+|------|-------|--------|------|
+| live | newest | 1 | within a cadence of wall clock |
+| replay | the 10-min frame ≤ t, fetched by **explicit timestamp** | 1 | the past, inside the archive |
+| nowcast | newest, **advected forward by the model wind** | 1 → 0.35 over 3 h | the near future |
+| model | none | 0 | further ahead — no observation exists |
+| unavailable | none | 0 | beyond retention, or a fetch that failed |
+
+Frames are cached (4-slot LRU keyed on frame time; the on-screen frame and
+its cross-fade partner are never evicted), network work waits for the drag
+to settle with a 3 s leading-edge cap so 600× playback still advances, and
+the live poll stops burning bandwidth while the view is parked in the past.
+A replay miss is **reported**, never substituted with a nearer frame or a
+date-only reference granule (`gibsTimeCandidates({ dateFallback: false })`)
+— an observation of the wrong instant under a labelled time is worse than
+none. The Cloud Cover row tooltip says which mode is on screen; the status
+pip stays with the weather-grid pipeline (two writers on one title is how a
+disclosure goes stale).
+
+**The retention window is an assumption** (`MOSAIC.retentionMs`, 30 d) —
+NASA is egress-blocked from the build sandbox. It is set wider than the
+bus's −7 d so the only route to 'unavailable' is a real miss.
+
+### 6.2a Plugging in live data
+
+The cloud gates take their pixels from ONE switch,
+`tests/helpers/cloud-source.mjs`, in three modes:
+
+| mode | how | what it proves |
+|------|-----|----------------|
+| **live** | `CLOUD_LIVE=1 npx playwright test tests/cloud-live.spec.js --headed` (or `TEST_BASE_URL=https://parkersphysics.com` for production) | the real archive serves the scrubbed frame by timestamp, the live grid drives a real wind field, a paused instant renders steadily on real data, and **how far back GIBS reaches** — the number that settles `MOSAIC.retentionMs`. Screenshots + `report.json` land in `test-results/cloud-live/`. |
+| **fixture** | `node scripts/fetch-cloud-fixtures.mjs --probe` on a networked machine, then the ordinary gates | `tests/fixtures/clouds/` holds real frames at −0/−3/−6 h plus the live grid; `cloud-timeline.spec.js` answers every GIBS request from them, egress-free. `archive-probe.json` records the reach. |
+| **synthetic** | nothing present (the build sandbox) | routing, modes, timing, shader compile — with banded stubs. |
+
+`--headed` matters: headless Chromium draws on SwiftShader, so the live
+gate on a laptop should run on the machine's GPU to see the march the way
+a visitor does. `CLOUD_STEPS=12` caps the march if a run is too slow.
+
+### 6.3 Motion comes from the wind, and the clouds run on sim time
+
+- `u_sim_time` is simulation seconds relative to a page epoch (an absolute
+  epoch-ms has 128 s of float32 precision). Pause freezes the clouds, 60×
+  runs them 60× faster, a revisited instant renders the same. The morph is
+  per sim-*minute* what the old wall-clock drift was per second — real
+  cloud morphology evolves over hours; the wind carries the visible motion.
+- **Flow-map noise.** The sample point is displaced upstream by
+  phase × period × wind (stronger aloft, `windGainAt`) on two layers half a
+  period apart, cross-faded so each reset hides under the other (Vlachos).
+  The phases are computed once per frame on the JS side (`writeFlowUniforms`)
+  so the branch on the blend weight is uniform and a fresh reset costs one
+  noise evaluation, not two. The domain warp is evaluated once, un-advected,
+  and applied to both layers — its job is to break the lattice, which a
+  static large-scale distortion does as well, at a third of the cost.
+- **The mosaic is sampled upstream** by (sim time − frame time) × wind in
+  both the volume and the decal (`advectSat` in CLOUD_FRAG mirrors
+  `advectDir` in VOLUME_FRAG mirrors `advectDirection` in cloud-time.js; the
+  gate pins the JS against a hand calculation and the shader against the
+  interpolated constants). A 10-min frame *moves* for the minutes it stands
+  in for, the next frame lands where the last one drifted to, and the same
+  tap with a lead of hours is the nowcast. Leads are clamped at ±4 h so a
+  stale feed can never smear the observation off the globe. The wind is the
+  scrubbed 10 m field the particles advect on, packed to an RGBA8 texture
+  on every weather-update (260 KB; the ~1 MB Float32 copy that used to live
+  there was removed as "nothing samples it" — now something does).
+- The wind-aloft gain is a **stated approximation** until the pressure-level
+  winds ride the same hourly ring.
+
+### 6.4 Two lighting bugs the sunward capture exposed (2026-09-24)
+
+Rendered in the sandbox against a synthetic 45 %-cover mosaic, camera aimed
+along the page's own sun vector (`window.__evSetCamDir(...__evSunDir())`):
+
+- **The powder term was inverted.** Its blend weight was
+  `clamp(cosT·0.5 + 0.5)`: full when looking *toward* the sun, zero in
+  back-scatter — the opposite of the effect it names (edges darker than
+  interiors when the sun is behind the viewer, i.e. the whole sunlit
+  hemisphere seen from orbit). Now `clamp(−cosT·0.5 + 0.5)`.
+- **Sunlit tops clipped to flat white.** The three multiple-scattering
+  octaves were summed raw (1 + 0.52 + 0.27 = 1.79× single scatter) on top
+  of the sky ambient, so a lit top reached radiance ~1.8 and the ACES
+  shoulder plus bloom flattened every cloud into a cut-out. `msScatter` now
+  divides by the octaves' total weight: the octaves shape the falloff,
+  they are not extra energy.
+
+Both were invisible in every earlier capture because every earlier capture
+looked at the terminator or the night side. A frame of the sunlit
+hemisphere is now part of the live gate for that reason.
+
+Gates: `node tests/cloud-time.mjs tests/cloud-mosaic-core.mjs` +
+`npx playwright test tests/cloud-timeline.spec.js tests/atmo-stack-smoke.spec.js tests/cloud-shells-smoke.spec.js tests/cloud-mosaic-e2e.spec.js`.
+
+## 7. Known limits / not yet done
 
 - **Not validated against real imagery.** The build sandbox is egress-blocked
   from NASA GIBS, Open-Meteo and the Blue Marble CDN, so every screenshot
@@ -240,15 +369,24 @@ one — a stale disclosure is worse than none.
   `createVolumeUniforms` is the single knob that trades "dramatic" against
   "washed out".
 - **The march is not temporally reprojected.** Each frame marches from
-  scratch with a per-frame jitter. A TAA-style history buffer would let the
-  step count drop substantially, at the cost of ghosting on a rotating globe.
-  Not attempted.
-- **No half-resolution pass.** The march renders at full framebuffer
-  resolution and leans on the existing pixel-ratio governor. A half-res FBO
-  with depth-aware upsampling is the standard next lever if the arming
-  threshold turns out to exclude too many real GPUs.
+  scratch with a per-frame (interleaved-gradient) jitter. A TAA-style
+  history buffer would let the step count drop further, at the cost of
+  ghosting on a rotating globe. Not attempted; the half-res compositor
+  (§6.1) took the cheaper win first.
+- **The half-res upsample is plain bilinear.** Clouds are soft so it holds,
+  but a depth-aware / nearest-depth upsample would tighten the planet limb
+  by half a pixel if it ever reads as a halo.
+- **Winds aloft are a gain on the 10 m wind** (`windGainAt`), not the
+  pressure-level fields. The 850/500/250 hPa winds exist (tempVolFeed) but
+  do not ride the hourly ring the scrubber replays, so they cannot yet be
+  the flow field without breaking time coherence. Next step: put them on
+  the ring.
+- **The mosaic archive window is assumed** (§6.2). One production request
+  at a known-old timestamp settles it; `MOSAIC.retentionMs` is the knob.
 - **Profile columns are not pickable.** Clicking one could pin the existing
   column probe card; today the two are unrelated features.
-- **Cirrus is isotropic.** The decal shader's note about wind-driven flow
-  advection stretching cirrus into strands applies here too and is still
-  unimplemented — the wind field is right there in `u_weather`.
+- **The decal (fallback) shader's own noise still runs on the animation
+  clock.** Its mosaic sample follows sim time like the volume's; its FBM
+  morph does not. It is the software-GL / phone path, and moving its
+  morph onto sim time is one uniform swap plus a retune of three drift
+  constants that were chosen for a wall-clock viewer.

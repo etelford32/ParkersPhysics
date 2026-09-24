@@ -97,6 +97,18 @@ test.describe('atmosphere stack', () => {
         await page.evaluate(() => window.setVolumetricClouds(true));
         expect(await page.evaluate(() => window.__evCloudMode())).toBe('volumetric');
 
+        // One governor tier down keeps the MARCH (its cheaper 28-step rung),
+        // not the decals. Routing away at the first demotion was the
+        // "clouds keep regressing" flip-flop: march → demote → decals →
+        // promote → march, two different-looking planets every few seconds.
+        // The floor tier still collapses to the composite decal.
+        await page.evaluate(() => window.setCloudQuality(0.66));
+        expect(await page.evaluate(() => window.__evCloudMode())).toBe('volumetric');
+        await page.evaluate(() => window.setCloudQuality(0.33));
+        expect(await page.evaluate(() => window.__evCloudMode())).toBe('composite');
+        await page.evaluate(() => window.setCloudQuality(1));
+        expect(await page.evaluate(() => window.__evCloudMode())).toBe('volumetric');
+
         // Toggles are driven programmatically, not clicked. These live inside
         // collapsible panel sections, so a real click is a test of the panel's
         // disclosure behaviour — which is nav-responsive.spec.js's job, not

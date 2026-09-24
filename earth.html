@@ -4205,7 +4205,9 @@ import { cloudTopHeightKm } from './js/cloud-mosaic-core.js';
 // Vertical geometry of the whole troposphere stack — clouds AND wind — lives
 // in ONE place (js/atmo-scale.js). Never hard-code a shell radius here again.
 import * as AtmoScale from './js/atmo-scale.js';
-import { createVolumeUniforms, createVolumeMesh, marchLadder } from './js/cloud-volume.js';
+import { createVolumeUniforms, createVolumeMesh, marchLadder, writeFlowUniforms,
+         VolumeCompositor, SAT_ADVECT_ALT_KM } from './js/cloud-volume.js';
+import { clampedLeadSec, windGainAt, R_EARTH_M as CLOUD_R_EARTH_M } from './js/cloud-time.js';
 import { WindColumns } from './js/wind-column.js';
 // Module singleton — already booted by the early telemetry side-effect
 // import in <head>; the named binding just gives this module a handle.
@@ -4935,6 +4937,7 @@ var cloudShellMeshes = null;
 // hoists as undefined so the guard in _updateCloudShellMode is TDZ-safe.
 var cloudVolumeMesh = null;
 var cloudVolumeU    = null;
+var cloudVolumeCompositor = null;
 {
     cloudVolumeU = createVolumeUniforms(SUN_EQ.clone());
     // Share the live data entries — NOT copies.
@@ -4944,13 +4947,27 @@ var cloudVolumeU    = null;
     cloudVolumeU.u_sun_dir      = cloudU.u_sun_dir;
     cloudVolumeU.u_satellite_on = cloudU.u_satellite_on;
     cloudVolumeU.u_cloud_data_strength = cloudU.u_cloud_data_strength;
+    // Timeline coupling (js/cloud-time.js) — the wind the clouds flow with
+    // and the mosaic's mode weight are ONE entry each, so the decal and the
+    // march can never disagree about where an observed cloud is or whether
+    // an observation exists for the instant on the clock.
+    cloudVolumeU.u_wind         = cloudU.u_wind;
+    cloudVolumeU.u_wind_max     = cloudU.u_wind_max;
+    cloudVolumeU.u_sat_weight   = cloudU.u_sat_weight;
     cloudVolumeMesh = createVolumeMesh(cloudVolumeU);
-    // Between the surface and the aurora, matching where the decal shells
-    // sat. depthTest is off on this material (the march owns its occlusion),
-    // so renderOrder is the only thing sequencing it.
-    cloudVolumeMesh.renderOrder = 3.0;
     cloudVolumeMesh.visible = false;
-    scene.add(cloudVolumeMesh);
+    // HALF-RESOLUTION: the mesh renders into the compositor's private scene
+    // at a fraction of the drawing buffer, and its screen QUAD stands in the
+    // page scene where the mesh used to — between the surface and the
+    // aurora, same premultiplied blend, same renderOrder. depthTest is off
+    // (the march owns its occlusion), so renderOrder is the only thing
+    // sequencing it. `?cloud_res=1` renders full-size for A/B.
+    const resParam = Number(new URLSearchParams(location.search).get('cloud_res'));
+    cloudVolumeCompositor = new VolumeCompositor(renderer, cloudVolumeMesh, {
+        scale: Number.isFinite(resParam) && resParam > 0 ? resParam : 0.5,
+    });
+    cloudVolumeCompositor.quad.renderOrder = 3.0;
+    scene.add(cloudVolumeCompositor.quad);
 }
 
 // Pick volumetric vs composite vs split per (clouds toggle × research mode ×
@@ -4959,9 +4976,19 @@ var cloudVolumeU    = null;
 // init-time call _setCloudQuality can make before the meshes exist.
 //
 // Routing, highest first:
-//   volumetric — clouds on, research off, full governor tier
-//   split      — clouds on, research off, one tier down (the old top path)
+//   volumetric — clouds on, research off, ARMED, top TWO governor tiers
+//                (48-step march at the top, 28-step one tier down)
+//   split      — clouds on, research off, full tier, not (yet) armed
 //   composite  — everything else, including ALL of research mode
+//
+// The march stays live one tier down ON PURPOSE (2026-09). It used to route
+// away at the first demotion — and that swap was the "clouds keep
+// regressing" report: the governor is reactive, the march pushed a
+// mid-range GPU over the 22 ms demotion threshold, the decals it fell back
+// to ran fast enough to promote it again, and the page ping-ponged between
+// two different-looking planets every few seconds. A cheaper march is the
+// same planet with less detail; the decal is a different renderer. The
+// tier-2 floor still collapses to the composite decal (software GL, phones).
 //
 // Research mode never gets the volumetric path: measured-only means alpha =
 // data, and a march that distributes that data through a column is asserting
@@ -4972,9 +4999,10 @@ function _updateCloudShellMode() {
     const cloudsOn  = document.getElementById('lyr-clouds')?.checked ?? true;
     const research  = cloudU.u_research_mode.value > 0.5;
     const q         = cloudU.u_quality.value;
-    const volumetric = cloudsOn && !research && q > 0.83 && !_volumetricDisabled && _volumetricArmed;
+    const volumetric = cloudsOn && !research && q > 0.45 && !_volumetricDisabled && _volumetricArmed;
     const split      = cloudsOn && !research && !volumetric && q > 0.83;
     if (cloudVolumeMesh) cloudVolumeMesh.visible = volumetric;
+    if (cloudVolumeCompositor) cloudVolumeCompositor.quad.visible = volumetric;
     cloudMesh.visible = cloudsOn && !volumetric && !split;
     for (const m of cloudShellMeshes) m.visible = split;
 }
@@ -5002,8 +5030,15 @@ var  _volumetricArmed = false;
 function _tickVolumetricArming() {
     if (_volumetricArmed || _volumetricDisabled) return;
     // Any demotion resets the count: we want a sustained good stretch, not
-    // a lucky one.
-    if (_cloudQIdx > 0) { _volArmCount = 0; return; }
+    // a lucky one. So does a frame without HEADROOM: the count runs only
+    // while the governor's own EMA sits under its promotion threshold
+    // (< 15 ms, > ~66 fps). "Still at the top tier" is not the same as
+    // "has room for the most expensive draw" — a software rasteriser
+    // renders its first 90 frames at the top tier before textures and
+    // feeds land, armed on that, and fell into a march it took seconds to
+    // demote out of. The cloud governors elsewhere on the site climb on
+    // sustained headroom for the same reason.
+    if (_cloudQIdx > 0 || _prEmaMs >= 15) { _volArmCount = 0; return; }
     if (++_volArmCount < VOLUMETRIC_ARM_FRAMES) return;
     _volumetricArmed = true;
     _updateCloudShellMode();
@@ -5045,6 +5080,27 @@ window.setCloudMarchSteps = (primary, light) => {
     cloudVolumeU.u_light_steps.value = Math.max(1, Math.min(8, light | 0));
     console.info(`[CloudDebug] march ${cloudVolumeU.u_steps.value} primary / ` +
                  `${cloudVolumeU.u_light_steps.value} light`);
+};
+// Half-res scale of the march (js/cloud-volume.js VolumeCompositor). 1 =
+// full drawing-buffer resolution, for A/B against the 0.5 default.
+window.setCloudResolution = (s) => {
+    if (!cloudVolumeCompositor) return null;
+    const v = cloudVolumeCompositor.setScale(s);
+    console.info(`[CloudDebug] volumetric render scale ${v}`);
+    return v;
+};
+// Display exaggeration of the wind advection (1 = physical). The flow is
+// real at 1: a 20 m/s wind moves a cloud 1.3° per sim-hour, which at 1× is
+// invisible in a minute — as it is out of a window. ?flow_gain=4 makes the
+// streaming legible at 1× for a demo, and the tooltip says so.
+{
+    const g = Number(new URLSearchParams(location.search).get('flow_gain'));
+    if (Number.isFinite(g) && g > 0 && cloudVolumeU) cloudVolumeU.u_flow_gain.value = Math.min(20, g);
+}
+window.setCloudFlowGain = (g) => {
+    if (!cloudVolumeU) return null;
+    cloudVolumeU.u_flow_gain.value = Math.max(0, Math.min(20, Number(g) || 0));
+    return cloudVolumeU.u_flow_gain.value;
 };
 // Initial pick — re-applying the current quality also arms the ground-
 // shadow gate (earthU.u_cloud_shadow), which defaults to 0 in the factory.
@@ -5243,6 +5299,30 @@ cloudU.u_cloud_layers.value.needsUpdate = true;
 // cloud texture, offset toward the sun. Shared reference — every rewrite in
 // updateWeatherTextures reaches both shaders.
 earthU.u_cloud_layers.value = cloudU.u_cloud_layers.value;
+
+// Wind DataTexture for the cloud shaders (js/cloud-time.js): RG = U,V of the
+// 10 m wind, snorm-packed to 8 bits ((v·0.5+0.5)·255). A Float32 copy used
+// to live here and was removed as "nothing samples it"; the flow-map noise
+// and the mosaic advection now do, and at 260 KB per upload (vs ~1 MB) an
+// 11 Hz scrub repaint is negligible. Same south-first rows + flipY as the
+// other weather textures. Seeded CALM (128,128) — a zero-filled buffer
+// decodes to −MAX_WIND on both axes and would advect every cloud 60 m/s
+// south-west before the first frame lands.
+const windTex = new THREE.DataTexture(
+    new Uint8Array(TEX_W * TEX_H * 4).fill(128), TEX_W, TEX_H, THREE.RGBAFormat
+);
+windTex.magFilter = THREE.LinearFilter;
+windTex.minFilter = THREE.LinearFilter;
+windTex.wrapS     = THREE.RepeatWrapping;
+windTex.wrapT     = THREE.ClampToEdgeWrapping;
+windTex.flipY     = true;
+windTex.needsUpdate = true;
+cloudU.u_wind.value     = windTex;
+cloudU.u_wind_max.value = MAX_WIND_MS;
+// (earthU.u_sat_weight — the ground-shadow pass's copy of the mode weight —
+// is WRITTEN each frame by _tickCloudTiming rather than entry-shared: the
+// terrain patch snapshots earthU's entries at construction, above, and a
+// swapped entry would strand it on the factory value.)
 
 // Convergence / uplift DataTexture (R=signed convergence [-1,1], A=|magnitude|).
 // Not consumed by the surface/cloud shaders — only the convergence overlay
@@ -9263,8 +9343,9 @@ function _updateLayerTooltips() {
         : 'Weather data not yet loaded';
     const satTip = sat
         ? `Source: ${sat.source}\n` +
-          (sat.goesTime ? `GOES-East: ${_timeAgo(sat.goesTime)} (updates every 10 min)\n` : '') +
+          (sat.goesTime ? `Frame: ${_timeAgo(sat.goesTime)} (10-min cadence, follows the time scrubber)\n` : '') +
           (sat.modisDate ? `MODIS: ${sat.modisDate} (daily composite)\n` : '') +
+          (_satTiming.describe ? `${_satTiming.describe}\n` : '') +
           `Last fetch: ${_timeAgo(sat.updated)}`
         : 'Satellite data not yet loaded';
     const windTip = wx
@@ -10507,6 +10588,11 @@ setTimeout(_paintFlowLearner, 500);
 // ═══════════════════════════════════════════════════════════════
 const satFeed = new SatelliteFeed();
 satFeed.start();
+// The mosaic follows the SAME shared clock as the weather grid, the sun and
+// the NASA daily layers (see js/satellite-feed.js setTime): a scrubbed
+// instant resolves to an archived 10-min frame, the near future to a
+// wind-advected nowcast of the newest frame, the deep future to model-only.
+timeBus.subscribe(({ simTimeMs: satTimeMs }) => satFeed.setTime(satTimeMs));
 
 // ═══════════════════════════════════════════════════════════════
 //  NASA EARTH OBSERVATIONS — multi-layer GIBS feed
@@ -11052,13 +11138,133 @@ function _updateObsStatusPanel(meta) {
 // longitude of any residual cloud wedge).
 window.addEventListener('cloud-mosaic-diag', e => { window.__cloudDiag = e.detail; });
 
+// ── Cloud timeline coupling (js/cloud-time.js) ───────────────────────────
+// The mosaic feed resolves the clock to a MODE (live / replay / nowcast /
+// model / unavailable) with a confidence WEIGHT and the frame's own time;
+// the shaders advect the frame by (sim time − frame time) × wind and scale
+// its confidence by the weight. Everything here is a tween or a uniform
+// write — no physics, no fetching.
+//
+// Epoch for the shaders' sim-time uniform: an absolute epoch-ms value has
+// 128 s of float32 precision, so the shader gets seconds RELATIVE to page
+// load (±21 days of bus range is 1.8e6 s → ~0.1 s precision).
+const _cloudEpochMs = Date.now();
+const _satTiming = {
+    mode: 'live', weight: 1, targetWeight: 1, describe: '',
+    frameTimeMs: null, prevFrameTimeMs: null,
+    blend: 0,             // weight of the PREVIOUS frame in the cross-fade
+    lastTickMs: 0, lastPipMode: null,
+};
+const SAT_WEIGHT_RATE   = 3.0;    // weight tween, per wall second
+const SAT_BLEND_MS      = 450;    // frame cross-fade
+// Mosaic advection gain (mid-troposphere; js/cloud-volume.js SAT_ADVECT_ALT_KM)
+// pre-divided by Earth's radius for the mediump decal shader.
+const SAT_LEAD_K_PER_S  = windGainAt(SAT_ADVECT_ALT_KM) / CLOUD_R_EARTH_M;
+
+function _applySatelliteTiming(d) {
+    if (!d) return;
+    _satTiming.mode         = d.mode ?? 'live';
+    _satTiming.targetWeight = Number.isFinite(d.weight) ? d.weight : 1;
+    _satTiming.describe     = d.describe ?? '';
+    if (Number.isFinite(d.frameTimeMs)) _satTiming.frameTimeMs = d.frameTimeMs;
+    // Disclosure: the Cloud Cover row's tooltip says which mode is on
+    // screen (mode + frame time + confidence). The status PIP is left to the
+    // weather-grid pipeline — it already writes that title ("live weather
+    // unavailable — showing synthetic circulation") and two writers on one
+    // attribute is how a disclosure goes stale.
+    if (_satTiming.mode !== _satTiming.lastPipMode) {
+        _satTiming.lastPipMode = _satTiming.mode;
+        console.info(`[CloudTime] ${_satTiming.describe}`);
+    }
+    _updateLayerTooltips();
+}
+window.addEventListener('satellite-time', e => _applySatelliteTiming(e.detail));
+
+// Per-frame: tween the weight and the cross-fade, write the leads. Called
+// from animate() with the bus's sim time.
+function _tickCloudTiming(simTimeMs) {
+    const now = performance.now();
+    const dt  = _satTiming.lastTickMs ? Math.min(0.25, (now - _satTiming.lastTickMs) / 1000) : 0;
+    _satTiming.lastTickMs = now;
+    // Weight eases toward the mode's target so a scrub across the nowcast
+    // horizon fades the observation out instead of cutting it.
+    const dw = _satTiming.targetWeight - _satTiming.weight;
+    _satTiming.weight += Math.abs(dw) < 0.002 ? dw : dw * Math.min(1, dt * SAT_WEIGHT_RATE);
+    if (_satTiming.blend > 0) {
+        _satTiming.blend = Math.max(0, _satTiming.blend - dt * 1000 / SAT_BLEND_MS);
+    }
+    const lead     = clampedLeadSec(simTimeMs, _satTiming.frameTimeMs);
+    const leadPrev = clampedLeadSec(simTimeMs, _satTiming.prevFrameTimeMs);
+    cloudU.u_sat_weight.value = _satTiming.weight;
+    earthU.u_sat_weight.value = _satTiming.weight;   // ground-shadow confidence
+    cloudU.u_sat_lead_k.value = lead * SAT_LEAD_K_PER_S;
+    if (cloudVolumeU) {
+        cloudVolumeU.u_sat_lead.value      = lead;
+        cloudVolumeU.u_sat_prev_lead.value = leadPrev;
+        cloudVolumeU.u_sat_blend.value     = _satTiming.blend;
+    }
+}
+
+// Debug/test probes for LIVE-data gates (tests/cloud-live.spec.js): a
+// strided fingerprint of the mosaic on screen — enough to tell two frames
+// apart and to say whether the observation is empty — and the wind field
+// the advection reads. Neither allocates more than a handful of numbers.
+window.__evCloudMosaic = () => {
+    if (!_satMosaicCPU) return null;
+    const { data, w, h, hasIR, updated } = _satMosaicCPU;
+    let cloud = 0, conf = 0, n = 0, hash = 2166136261 >>> 0;
+    for (let o = 0; o < data.length; o += 4 * 97) {
+        cloud += data[o]; conf += data[o + 3]; n++;
+        hash = Math.imul(hash ^ data[o], 16777619) >>> 0;
+    }
+    return { w, h, hasIR, updated, samples: n,
+             meanCloud: cloud / (255 * n), meanConf: conf / (255 * n), hash: hash.toString(16) };
+};
+window.__evCloudWind = () => {
+    const d = windTex.image.data;
+    let sum = 0, n = 0;
+    for (let o = 0; o < d.length; o += 4 * 13) {
+        sum += Math.hypot(d[o] / 127.5 - 1, d[o + 1] / 127.5 - 1); n++;
+    }
+    return { meanSpeedMs: (sum / n) * MAX_WIND_MS, samples: n };
+};
+// Debug/test probe: what the cloud layer believes about the clock.
+window.__evCloudTime = () => ({
+    simTimeMs,
+    simSec:       (simTimeMs - _cloudEpochMs) / 1000,
+    mode:         _satTiming.mode,
+    weight:       _satTiming.weight,
+    targetWeight: _satTiming.targetWeight,
+    frameTimeMs:  _satTiming.frameTimeMs,
+    leadSec:      cloudVolumeU?.u_sat_lead.value ?? null,
+    blend:        _satTiming.blend,
+    flow:         cloudVolumeU ? cloudVolumeU.u_flow.value.toArray() : null,
+    describe:     _satTiming.describe,
+    resScale:     cloudVolumeCompositor?.scale ?? null,
+    target:       cloudVolumeCompositor?.targetSize ?? null,
+    hdr:          cloudVolumeCompositor?.hdr ?? null,
+});
+
 window.addEventListener('satellite-update', e => {
     const { compositeTex, goesTex, modisTex, source, goesTime, modisDate, diag } = e.detail;
     // Prefer composite (GOES+MODIS merged), then individual sources
     const tex = compositeTex ?? goesTex ?? modisTex ?? null;
     if (tex) {
+        // Frame swap → cross-fade from the frame on screen. The feed keeps
+        // the previous texture alive for exactly this (its LRU never evicts
+        // the current frame or the one it is fading from).
+        const prevTex = cloudU.u_satellite.value;
+        if (cloudVolumeU && prevTex && prevTex !== tex && cloudU.u_satellite_on.value > 0.5) {
+            cloudVolumeU.u_sat_prev.value = prevTex;
+            _satTiming.prevFrameTimeMs = _satTiming.frameTimeMs;
+            _satTiming.blend = 1;
+        }
+        _satTiming.frameTimeMs = Number.isFinite(e.detail.frameTimeMs)
+            ? e.detail.frameTimeMs
+            : (goesTime instanceof Date ? goesTime.getTime() : null);
         cloudU.u_satellite.value    = tex;
         cloudU.u_satellite_on.value = 1.0;
+        _applySatelliteTiming(e.detail);
         // Surface shader shares the mosaic for shadow confidence feathering
         // and the mosaic-reinforced shadow cover (Phase 2.4).
         earthU.u_satellite.value    = tex;
@@ -11100,6 +11306,19 @@ function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
     if (cloudBuf && cloudU.u_cloud_layers.value) {
         cloudU.u_cloud_layers.value.image.data.set(cloudBuf);
         cloudU.u_cloud_layers.value.needsUpdate = true;
+    }
+    // Wind for the cloud shaders' advection (see windTex). wBuf R/G are
+    // U/V in [-1,1] MAX_WIND units; pack to snorm bytes. This is the SAME
+    // scrubbed field the particles advect on, so the clouds and the wind
+    // trails cannot disagree about which way the weather is moving.
+    if (wBuf) {
+        const dst = windTex.image.data;
+        for (let i = 0; i < wBuf.length; i += 4) {
+            const u = wBuf[i], v = wBuf[i + 1];
+            dst[i]     = ((u < -1 ? -1 : u > 1 ? 1 : u) * 127.5 + 127.5 + 0.5) | 0;
+            dst[i + 1] = ((v < -1 ? -1 : v > 1 ? 1 : v) * 127.5 + 127.5 + 0.5) | 0;
+        }
+        windTex.needsUpdate = true;
     }
     // Recompute the convergence/uplift diagnostic from the same wind field the
     // forecaster grows precip from. During time-scrub it tracks the FORECAST
@@ -14276,8 +14495,14 @@ function animate() {
     earthU.u_time.value  = t;
     cloudU.u_time.value  = t;
     auroraU.u_time.value = t;
+    // ── Cloud timeline (js/cloud-time.js) — SIMULATION time, not the
+    // animation clock: pause freezes the clouds, 60× runs them 60× faster,
+    // and a revisited instant renders the same. The mosaic lead / weight
+    // tweens ride the same tick.
+    _tickCloudTiming(simTimeMs);
     if (cloudVolumeU) {
-        cloudVolumeU.u_time.value = t;
+        writeFlowUniforms(cloudVolumeU, (simTimeMs - _cloudEpochMs) / 1000);
+        cloudVolumeU.u_frame.value = (cloudVolumeU.u_frame.value + 1) % 4096;
         // The volumetric shell is not rotated as a mesh (see _applyAtmoScale)
         // — the planet's spin reaches its march as this scalar, which the
         // shader applies to the SAMPLE DIRECTION only.
@@ -14487,6 +14712,11 @@ function animate() {
         if (camR < CAM_FLOOR) camera.position.multiplyScalar(CAM_FLOOR / camR);
     }
 
+    // Volumetric clouds march into their half-res target first; the quad in
+    // the scene composites the result at renderOrder 3 (see the shell block).
+    if (cloudVolumeMesh?.visible && cloudVolumeCompositor) {
+        cloudVolumeCompositor.render(renderer, camera);
+    }
     if (composer) composer.render();
     else renderer.render(scene, camera);
 }
@@ -14620,6 +14850,17 @@ window.__evSetCamDist = (d) => {
     controls.update();
     return camera.position.length();
 };
+// Aim the camera from a world DIRECTION at the current distance. The live
+// cloud gate frames the SUNLIT hemisphere with it (a screenshot of the
+// night side says nothing about the render), using the sun the page itself
+// is lighting with — a scripted orbit drag lands wherever damping leaves it.
+window.__evSetCamDir = (x, y, z) => {
+    const d = camera.position.length();
+    camera.position.set(Number(x) || 0, Number(y) || 0, Number(z) || 0).normalize().multiplyScalar(d);
+    controls.update();
+    return camera.position.toArray();
+};
+window.__evSunDir = () => earthU.u_sun_dir.value.toArray();
 
 // ═══════════════════════════════════════════════════════════════
 //  USER LOCATION BEACON  (must be declared before animate() runs)

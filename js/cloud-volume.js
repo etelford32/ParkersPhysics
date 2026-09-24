@@ -4,7 +4,9 @@
  *
  * A single-pass raymarch through the troposphere shell, replacing the three
  * alpha-blended noise DECALS in earth-skin.js's CLOUD_FRAG at the top
- * governor tier. Same data, given real vertical extent.
+ * governor tiers. Same data, given real vertical extent — and, since
+ * 2026-09, real MOTION: everything time-dependent below is a function of
+ * SIMULATION time, and the motion comes from the wind field.
  *
  * WHAT THIS FIXES
  * ───────────────
@@ -27,6 +29,37 @@
  * Research / measured-only mode does NOT use this path at all (see the
  * routing note below) — a volumetric render implies vertical structure the
  * measured fields did not supply.
+ *
+ * THE CLOCK (Phase 4 — js/cloud-time.js is the ONE copy of the rules)
+ * ─────────────────────────────────────────────────────────────────────
+ * Three things used to run on three clocks: the coverage grid on the time
+ * bus, the mosaic on wall-clock, the noise on clock.getElapsedTime(). Now:
+ *
+ *   • `u_sim_time` is simulation seconds (relative to a page epoch — a raw
+ *     epoch-ms value has 128 s of float32 precision, which is useless).
+ *     Pause freezes the clouds; 60× runs them 60× faster; revisiting an
+ *     instant reproduces it. The MORPH rate is per sim-MINUTE what the old
+ *     wall-clock drift was per second (FLOW.morphRatePerSec) — real cloud
+ *     morphology evolves over hours, and the wind carries the visible motion.
+ *   • The procedural noise is a two-phase FLOW MAP advected by the surface
+ *     wind (scaled aloft by windGainAt): the sample point is displaced
+ *     upstream by phase × period × wind on two layers half a period apart,
+ *     cross-faded so each layer's reset hides under the other. Bounded
+ *     distortion, no pops, and the clouds stream along the jet and spiral
+ *     into lows because that is what the wind field does.
+ *   • The mosaic is sampled UPSTREAM by `u_sat_lead` (sim time − frame
+ *     time) × wind — a 10-min frame MOVES for the ten minutes it stands in
+ *     for, the next frame lands where the last one had drifted to, and the
+ *     same displacement with a lead of hours is the persistence-advection
+ *     NOWCAST cloud-time.js resolves for the near future. `u_sat_prev` +
+ *     `u_sat_blend` cross-fade frame swaps; `u_sat_weight` is the mode's
+ *     confidence (0 in the deep future — the render is model-only there,
+ *     and the page says so).
+ *
+ * The phase numbers (`u_flow` = (phaseA·T, phaseB·T, blend)) are computed
+ * on the JS side from the same kernel, once per frame, so the branch on
+ * the blend weight below is UNIFORM across pixels and a fresh reset costs
+ * one noise evaluation, not two.
  *
  * THE IR TOP IS THE VOLUME'S TOP
  * ──────────────────────────────
@@ -66,16 +99,34 @@
  *
  * COST + ROUTING
  * ──────────────
- * This is fragment-bound and expensive. It is gated exactly like the split
- * shells: top governor tier only, research mode off. Every other state —
- * including the whole software-GL path CI runs on, which is why
- * tests/earth-smoke.spec.js's ≥25 fps gate still holds — falls back to the
- * composite CLOUD_FRAG shell. Both paths stay live and neither is dead
- * code. Step counts come from `marchLadder()` so the ladder is data, not
- * scattered magic numbers.
+ * This is fragment-bound and expensive. Two things keep it on screen on
+ * hardware that used to lose it:
+ *
+ *   1. HALF-RESOLUTION. `VolumeCompositor` renders the carrier mesh into an
+ *      offscreen target at `scale` (default 0.5) of the drawing buffer and
+ *      composites it into the scene through a screen quad with the SAME
+ *      premultiplied blend, at the same renderOrder the mesh had. Clouds are
+ *      low-frequency; a 2× bilinear upsample of a raymarch is standard
+ *      practice and buys ~4× on fill rate. `?cloud_res=1` disables it.
+ *   2. The light march runs on ALTERNATE primary steps and the result is
+ *      reused: sun transmittance varies slowly along the ray and it is the
+ *      dominant term (light steps × primary steps density evaluations).
+ *
+ * The routing (earth.html `_updateCloudShellMode`) now keeps the march live
+ * one governor tier down — at the 28-step rung instead of the 48 — rather
+ * than swapping to the decals. THAT SWAP WAS THE "KEEPS REGRESSING" REPORT:
+ * the governor is reactive, the march pushed a mid-range GPU over the
+ * demotion threshold, the decals ran fast enough to promote it back, and
+ * the page ping-ponged between two different-looking planets. A cheaper
+ * march is the same planet with less detail. Every other state — the floor
+ * tier, research mode, the whole software-GL path CI runs on — still falls
+ * back to the composite CLOUD_FRAG shell. Both paths stay live and neither
+ * is dead code. Step counts come from `marchLadder()` so the ladder is
+ * data, not scattered magic numbers.
  *
  * Altitudes, radii and the exaggeration factor all come from
- * js/atmo-scale.js. This module owns no geometry constants of its own.
+ * js/atmo-scale.js; timing rules from js/cloud-time.js. This module owns no
+ * geometry or timing constants of its own.
  */
 
 import * as THREE from 'three';
@@ -84,14 +135,14 @@ import {
     R_EARTH_KM, DECK_ALTITUDE_KM, VOLUME_TOP_KM, VOLUME_BASE_KM,
     SURFACE_CLEARANCE_R,
 } from './atmo-scale.js';
+import { FLOW, R_EARTH_M, windGainAt, flowPhase } from './cloud-time.js';
 
 /**
  * Primary / light march step budget per quality tier. Mirrors the tiering of
  * CLOUD_FRAG's `u_quality` so a governor step changes both shaders' cost in
- * the same direction. The volumetric path only ever runs at the top tier, so
- * the lower rungs exist for the URL override (`?cloud_quality=`) and for a
- * future mid-tier volumetric mode — they are not reachable by the governor
- * on its own.
+ * the same direction. The top two rungs are reachable by the governor (the
+ * volumetric path routes at q > 0.45); the floor rung exists for the URL
+ * override (`?cloud_quality=`).
  */
 export function marchLadder(quality) {
     if (quality > 0.83) return { primary: 48, light: 6 };
@@ -103,6 +154,12 @@ export function marchLadder(quality) {
  *  constant bounds; the uniforms break out early below these). */
 const MAX_PRIMARY_STEPS = 64;
 const MAX_LIGHT_STEPS   = 8;
+
+/** Wind gain applied to the mosaic's advection: the observed field is a
+ *  column property whose motion is set by the cloud tops, so it rides a
+ *  mid-troposphere gain rather than the surface wind. Stated approximation
+ *  (see cloud-time.js windGainAt). */
+export const SAT_ADVECT_ALT_KM = 3.0;
 
 export const VOLUME_VERT = /* glsl */`
 varying vec3 vWorldPos;
@@ -120,11 +177,21 @@ varying vec3 vWorldPos;
 
 uniform sampler2D u_cloud_layers;   // R=low G=mid B=high A=precip  [0-1]
 uniform sampler2D u_satellite;      // R=cover  B=IR top proxy  A=confidence
+uniform sampler2D u_sat_prev;       // the frame being cross-faded FROM
 uniform sampler2D u_weather;        // R=temp (t2m, normalised)
+uniform sampler2D u_wind;           // RG = 10 m wind U,V  (x*2-1)*u_wind_max m/s
 
 uniform vec3  u_sun_dir;            // world space, unit
 uniform float u_earth_rot;          // planet spin, radians (world → Earth-fixed)
-uniform float u_time;               // animation SECONDS (clock.getElapsedTime)
+uniform float u_sim_time;           // SIMULATION seconds, relative to the page epoch
+uniform vec3  u_flow;               // (phaseA·T, phaseB·T, blend) — cloud-time.js flowPhase
+uniform float u_flow_gain;          // display exaggeration of the advection (1 = physical)
+uniform float u_wind_max;           // m/s at texel value 1
+uniform float u_sat_lead;           // s the CURRENT mosaic frame is advected by
+uniform float u_sat_prev_lead;      // s the PREVIOUS frame is advected by
+uniform float u_sat_blend;          // weight of the previous frame [0,1]
+uniform float u_sat_weight;         // mode confidence (0 = model only)
+uniform float u_frame;              // frame counter (jitter decorrelation)
 uniform float u_exag;               // vertical exaggeration (atmo-scale)
 uniform float u_r_base;             // volume inner radius, world units
 uniform float u_r_top;              // volume outer radius, world units
@@ -136,6 +203,7 @@ uniform int   u_steps;              // primary march steps
 uniform int   u_light_steps;        // light march steps
 
 const float R_EARTH_KM_C   = ${R_EARTH_KM.toFixed(1)};
+const float R_EARTH_M_C    = ${R_EARTH_M.toFixed(1)};
 const float R_CLEAR_C      = ${SURFACE_CLEARANCE_R.toFixed(6)};
 const float VOL_TOP_KM     = ${VOLUME_TOP_KM.toFixed(2)};
 const float VOL_BASE_KM    = ${VOLUME_BASE_KM.toFixed(3)};
@@ -145,6 +213,12 @@ const float MID_BASE_KM    = ${DECK_ALTITUDE_KM.mid.base.toFixed(2)};
 const float MID_TOP_KM     = ${DECK_ALTITUDE_KM.mid.top.toFixed(2)};
 const float HIGH_BASE_KM   = ${DECK_ALTITUDE_KM.high.base.toFixed(2)};
 const float HIGH_TOP_KM    = ${DECK_ALTITUDE_KM.high.top.toFixed(2)};
+// Timing constants — interpolated from js/cloud-time.js FLOW, never typed.
+const float FLOW_PERIOD_S  = ${FLOW.periodSec.toFixed(1)};
+const float MORPH_RATE     = ${FLOW.morphRatePerSec.toExponential(6)};
+const float WIND_GAIN_ALOFT = ${FLOW.windGainAloft.toFixed(3)};
+const float WIND_GAIN_TOP_KM = ${FLOW.windGainTopKm.toFixed(2)};
+const float SAT_WIND_GAIN  = ${windGainAt(SAT_ADVECT_ALT_KM).toFixed(4)};
 
 // ── Noise ────────────────────────────────────────────────────────────────────
 // Same hash/value-noise construction as CLOUD_FRAG so the two paths share a
@@ -194,9 +268,40 @@ float fbm3(vec3 p, int octaves) {
     return v / max(norm, 1e-5);
 }
 
+// Interleaved gradient noise (Jimenez 2014): a per-pixel jitter with a far
+// better spectrum than a hash of the fragment coordinate, and cheaper. The
+// golden-ratio frame offset decorrelates it frame to frame.
+float ign(vec2 p) {
+    return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
+}
+
 vec3 rotateY(vec3 p, float a) {
     float c = cos(a), s = sin(a);
     return vec3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c);
+}
+
+// ── Wind advection (mirrors cloud-time.js tangentFrame / advectDirection) ───
+// Local east / north at unit direction n in the Earth-fixed frame (spin axis
+// +Y, lon 0 at +X, 90°E at −Z — js/geo/coords.js). Displace UPSTREAM by the
+// wind for dtSec: the material at n now was at the returned direction dtSec
+// ago. First-order semi-Lagrangian; the leads are clamped on the JS side.
+vec3 advectDir(vec3 n, vec2 wind, float dtSec, float gain) {
+    vec3  east = vec3(n.z, 0.0, -n.x);
+    float el   = length(east);
+    east = el < 1e-6 ? vec3(1.0, 0.0, 0.0) : east / el;
+    vec3  north = cross(n, east);
+    float k = dtSec * gain * u_flow_gain / R_EARTH_M_C;
+    return normalize(n - (east * wind.x + north * wind.y) * k);
+}
+
+// Surface → aloft wind gain (cloud-time.js windGainAt).
+float windGain(float altKm) {
+    float x = clamp(altKm / WIND_GAIN_TOP_KM, 0.0, 1.0);
+    return 1.0 + WIND_GAIN_ALOFT * x * x * (3.0 - 2.0 * x);
+}
+
+vec2 windAt(vec2 uv) {
+    return (texture2D(u_wind, uv).rg * 2.0 - 1.0) * u_wind_max;
 }
 
 // ── Ray/sphere ───────────────────────────────────────────────────────────────
@@ -239,11 +344,13 @@ struct Column {
     float covHigh;
     float precip;
     float topKm;      // observed cloud-top height, < 0 when no IR estimate
-    float conf;       // satellite observation confidence
+    float conf;       // satellite observation confidence (× mode weight)
+    vec2  wind;       // 10 m wind, m/s east/north — drives every advection
 };
 
-Column columnAt(vec2 uv) {
+Column columnAt(vec3 nObj) {
     Column c;
+    vec2 uv   = normalToUV(nObj);
     vec4 cl   = texture2D(u_cloud_layers, uv);
     float g   = clamp(u_cloud_data_strength * 2.0, 0.0, 1.0);
     // Data-GATED coverage, lockstep with CLOUD_FRAG: a clear grid cell must
@@ -255,14 +362,24 @@ Column columnAt(vec2 uv) {
     c.precip  = cl.a;
     c.topKm   = -1.0;
     c.conf    = 0.0;
+    c.wind    = windAt(uv);
 
-    if (u_satellite_on > 0.5) {
-        vec4 sat = texture2D(u_satellite, uv);
-        c.conf   = sat.a;
+    if (u_satellite_on > 0.5 && u_sat_weight > 0.001) {
+        // The observed frame is sampled UPSTREAM of the sample point by the
+        // lead × wind: a frame stands in for an instant it was not taken
+        // at, and the cloud that is here now was there then. The same tap
+        // with an hours-long lead is the nowcast (see header).
+        vec3 nSat = advectDir(nObj, c.wind, u_sat_lead, SAT_WIND_GAIN);
+        vec4 sat  = texture2D(u_satellite, normalToUV(nSat));
+        if (u_sat_blend > 0.001) {
+            vec3 nPrev = advectDir(nObj, c.wind, u_sat_prev_lead, SAT_WIND_GAIN);
+            sat = mix(sat, texture2D(u_sat_prev, normalToUV(nPrev)), u_sat_blend);
+        }
+        c.conf   = sat.a * u_sat_weight;
         float satShape = smoothstep(0.14, 0.86, sat.r);
         // The mosaic is the dominant coverage signal where it actually saw
         // the pixel; the feathered alpha keeps the handoff a gradient.
-        float infl = sat.a * 0.85;
+        float infl = c.conf * 0.85;
         c.covLow  = mix(c.covLow,  satShape,        infl);
         c.covMid  = mix(c.covMid,  satShape * 0.85, infl * 0.8);
         c.covHigh = mix(c.covHigh, satShape * 0.70, infl * 0.7);
@@ -310,8 +427,7 @@ float densityAt(vec3 pWorld, Column col, bool cheap) {
     // edge relaxes back to the model's nominal decks instead of snapping.
     if (col.topKm > 0.0) {
         float capped = 1.0 - smoothstep(col.topKm - 0.9, col.topKm + 0.35, altKm);
-        float tower  = smoothstep(LOW_BASE_KM, col.topKm, altKm) * 0.0 + 1.0;
-        cov = mix(cov, cov * capped * tower, col.conf);
+        cov = mix(cov, cov * capped, col.conf);
         // Tall observed tops thicken the column they belong to — this is the
         // anvil, and it is measured, not invented.
         float anvil = smoothstep(7.0, 13.0, col.topKm) * col.conf;
@@ -334,13 +450,21 @@ float densityAt(vec3 pWorld, Column col, bool cheap) {
     // never equirectangular UV — that is what keeps the poles free of the
     // UV-stretch smear the decal shader had to fix the same way.
     vec3 nObj = rotateY(pWorld / r, -u_earth_rot);
-    // Slow drift, per altitude band: high cloud runs faster, as it does.
-    float drift = u_time * 0.0026 * (1.0 + hFrac * 1.6);
-    vec3  q     = nObj * 22.0 + vec3(0.0, 0.0, drift);
+
+    // FLOW MAP: two copies of the noise field, each displaced upstream by
+    // its phase × period × wind (stronger aloft), cross-faded by u_flow.z.
+    // Layer A resets at phase 0 under full B weight and vice versa, so the
+    // domain distortion stays bounded and neither reset is visible. The
+    // morph (z-drift) is per sim-second — see the header for the rate.
+    float gainA = windGain(altKm);
+    float drift = u_sim_time * MORPH_RATE * (1.0 + hFrac * 1.6);
+    vec3  qA = advectDir(nObj, col.wind, u_flow.x, gainA) * 22.0 + vec3(0.0, 0.0, drift);
+    vec3  qB = advectDir(nObj, col.wind, u_flow.y, gainA) * 22.0 + vec3(0.0, 0.0, drift);
     // Vertical detail is sampled in REAL km so the noise cell shape is
     // physical — without this the exaggeration stretches every cloud
     // vertically as the ramp climbs, and the whole stack smears on zoom.
-    q.y += altKm * 0.42;
+    qA.y += altKm * 0.42;
+    qB.y += altKm * 0.42;
 
     // DOMAIN WARP — not optional. Value noise on a cubic-interpolated lattice
     // leaves axis-aligned straight edges, and the coverage threshold below
@@ -350,17 +474,31 @@ float densityAt(vec3 pWorld, Column col, bool cheap) {
     // per axis is enough to decorrelate the lattice and is a third the cost of
     // warping with full FBM.
     //
+    // Evaluated ONCE, at the un-advected point, and applied to both flow
+    // layers: the warp's job is to break the lattice, which a static
+    // large-scale distortion does just as well, and warping per layer would
+    // double the most expensive taps in the shader.
+    //
     // Applied on BOTH the cheap and detailed paths on purpose: the light march
     // uses the cheap one, and if the two disagree about where a cloud IS, the
     // self-shadowing lands next to the cloud casting it.
+    vec3 q0 = nObj * 22.0 + vec3(0.0, 0.0, drift);
+    q0.y += altKm * 0.42;
     vec3 warp = vec3(
-        vnoise3(q * 0.55 + vec3( 17.3, -3.1,  0.0)),
-        vnoise3(q * 0.55 + vec3( -9.6, 12.4,  5.2)),
-        vnoise3(q * 0.55 + vec3(  4.2,  7.8, -8.1))
+        vnoise3(q0 * 0.55 + vec3( 17.3, -3.1,  0.0)),
+        vnoise3(q0 * 0.55 + vec3( -9.6, 12.4,  5.2)),
+        vnoise3(q0 * 0.55 + vec3(  4.2,  7.8, -8.1))
     ) - 0.5;
-    q += warp * 1.35;
+    qA += warp * 1.35;
+    qB += warp * 1.35;
 
-    float shape = fbm3(q, cheap ? 2 : 4);
+    // u_flow.z is a UNIFORM, so this branch is coherent: a layer at (almost)
+    // zero weight is simply not evaluated.
+    int   oct   = cheap ? 2 : 4;
+    float shape;
+    if      (u_flow.z < 0.01) shape = fbm3(qA, oct);
+    else if (u_flow.z > 0.99) shape = fbm3(qB, oct);
+    else                      shape = mix(fbm3(qA, oct), fbm3(qB, oct), u_flow.z);
 
     // Coverage-thresholded remap: as cov → 1 the threshold → 0 and the
     // column fills. Standard, and the reason clear cells read as truly clear.
@@ -376,8 +514,9 @@ float densityAt(vec3 pWorld, Column col, bool cheap) {
     if (!cheap && d > 0.0) {
         // Edge erosion: high-frequency detail bites into the boundary only,
         // which is where real clouds are wispy. Applying it everywhere just
-        // lowers the mean density and brings back the haze.
-        float det  = fbm3(q * 4.3 + vec3(11.7, 3.1, 0.0), 2);
+        // lowers the mean density and brings back the haze. The detail rides
+        // layer A's advected frame so it streams with the cloud it erodes.
+        float det  = fbm3(qA * 4.3 + vec3(11.7, 3.1, 0.0), 2);
         float edge = 1.0 - smoothstep(0.0, 0.30, d);
         d = clamp(d - det * edge * 0.42, 0.0, 1.0);
     }
@@ -420,18 +559,27 @@ float phaseTwoLobe(float cosT, float ani) {
 // scattering alone is always far too dark, because almost every photon that
 // reaches your eye from a real cloud has bounced many times; without these
 // orders you get exactly the flat grey the decal shader was already stuck at.
+//
+// NORMALISED by the octaves' total weight (1 + 0.52 + 0.27). Summed raw, a
+// sunlit top reached radiance ~1.8 (three orders × the back lobe, plus the
+// sky ambient) and the ACES shoulder plus bloom turned every cloud on the
+// sunward hemisphere into a flat white cut-out with no gradation — measured
+// on the sun-facing capture. The octaves are a shape for the multiple-
+// scattering FALLOFF, not extra energy; a cloud's albedo is still ≤ 1.
 vec3 msScatter(float lt, float cosT, vec3 sunCol) {
     vec3 sum = vec3(0.0);
     float att = 1.0;   // energy remaining in this order
     float ext = 1.0;   // extinction exponent
     float ani = 1.0;   // phase anisotropy
+    float norm = 0.0;
     for (int k = 0; k < 3; k++) {
-        sum += att * sunCol * pow(max(lt, 1e-5), ext) * phaseTwoLobe(cosT, ani);
+        sum  += att * sunCol * pow(max(lt, 1e-5), ext) * phaseTwoLobe(cosT, ani);
+        norm += att;
         att *= 0.52;
         ext *= 0.55;
         ani *= 0.60;
     }
-    return sum;
+    return sum / norm;
 }
 
 // Planet shadow with a penumbra. A hard raySphere test gives a razor-sharp
@@ -504,10 +652,11 @@ void main() {
     float span   = tExit - tEnter;
     float dt     = span / float(n);
 
-    // Blue-noise-ish jitter on the start offset. Without it a 48-step march
-    // across a 0.02 R shell bands visibly into concentric rings; with it the
-    // banding becomes per-pixel noise the bloom pass swallows.
-    float jitter = hash31(vec3(gl_FragCoord.xy, fract(u_time * 137.0)));
+    // Interleaved-gradient jitter on the start offset. Without it a 48-step
+    // march across a 0.02 R shell bands visibly into concentric rings; with
+    // it the banding becomes per-pixel noise the bloom pass swallows. The
+    // golden-ratio frame offset keeps the pattern from sitting still.
+    float jitter = fract(ign(gl_FragCoord.xy) + u_frame * 0.61803398875);
 
     vec3  scattered    = vec3(0.0);
     float transmittance = 1.0;
@@ -516,18 +665,29 @@ void main() {
     float cosT  = dot(rd, u_sun_dir);
     float sigK  = sigmaScale();
 
+    // Light transmittance is evaluated on ALTERNATE steps and reused: it is
+    // the dominant cost (light steps × density evaluations per primary step)
+    // and it varies slowly along the ray. A step that finds density after an
+    // empty one re-evaluates regardless, so a cloud edge is never lit with a
+    // stale value from clear air.
+    float lt      = 1.0;
+    bool  ltValid = false;
+
     for (int i = 0; i < ${MAX_PRIMARY_STEPS}; i++) {
         if (i >= n || transmittance < 0.012) break;
 
         vec3  p    = ro + rd * t;
         float r    = length(p);
         vec3  nObj = rotateY(p / r, -u_earth_rot);
-        Column col = columnAt(normalToUV(nObj));
+        Column col = columnAt(nObj);
 
         float d = densityAt(p, col, false);
         if (d > 0.002) {
             float sigma = d * sigK;
-            float lt    = lightTransmittance(p, col);
+            if (!ltValid || mod(float(i), 2.0) < 0.5) {
+                lt = lightTransmittance(p, col);
+                ltValid = true;
+            }
 
             // Sun colour reddens through the long slant path near the
             // terminator — the same reason a real sunset is orange. Driven by
@@ -538,10 +698,15 @@ void main() {
 
             // Powder / dark-edge term: an approximation of the multiple
             // scattering that makes cloud EDGES darker than their interiors
-            // when lit from behind the viewer. Without it thin edges read as
-            // uniformly bright and the whole field flattens.
+            // when lit from BEHIND THE VIEWER (back-scatter: cosT → −1, the
+            // sun-facing hemisphere seen from orbit). Without it thin edges
+            // read as uniformly bright and the whole field flattens. The
+            // blend weight used to be clamp(cosT·0.5 + 0.5) — full weight
+            // when looking TOWARD the sun and zero in back-scatter, i.e.
+            // exactly reversed; the sunward capture showed flat white
+            // silhouettes with no edge falloff at all.
             float powder = 1.0 - exp(-d * 14.0);
-            powder = mix(1.0, powder, clamp(cosT * 0.5 + 0.5, 0.0, 1.0));
+            powder = mix(1.0, powder, clamp(-cosT * 0.5 + 0.5, 0.0, 1.0));
 
             // Sky ambient: bright from above, dim and blue from below, so
             // undersides fill with sky rather than going black.
@@ -566,6 +731,8 @@ void main() {
             float Tstep = exp(-sigma * dt);
             scattered += transmittance * S * (1.0 - Tstep);
             transmittance *= Tstep;
+        } else {
+            ltValid = false;
         }
         t += dt;
     }
@@ -580,6 +747,14 @@ void main() {
     gl_FragColor = vec4(scattered, alpha);
 }`;
 
+/** A 1×1 "calm" wind texture (U = V = 0) so the shader never advects by the
+ *  −u_wind_max a black default would decode to. */
+export function createNeutralWindTexture() {
+    const tex = new THREE.DataTexture(new Uint8Array([128, 128, 0, 255]), 1, 1, THREE.RGBAFormat);
+    tex.needsUpdate = true;
+    return tex;
+}
+
 /**
  * Uniform block. Shares the SAME uniform entry objects as the decal shader
  * for every input both consume (`Object.assign` in earth.html copies the
@@ -588,13 +763,24 @@ void main() {
  */
 export function createVolumeUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     const ladder = marchLadder(1);
+    const neutralWind = createNeutralWindTexture();
     return {
         u_cloud_layers: { value: null },
         u_satellite:    { value: null },
+        u_sat_prev:     { value: null },
         u_weather:      { value: null },
+        u_wind:         { value: neutralWind },
         u_sun_dir:      { value: sunDir },
         u_earth_rot:    { value: 0 },
-        u_time:         { value: 0 },
+        u_sim_time:     { value: 0 },
+        u_flow:         { value: new THREE.Vector3(0, FLOW.periodSec * 0.5, 1) },
+        u_flow_gain:    { value: 1 },
+        u_wind_max:     { value: 60 },
+        u_sat_lead:     { value: 0 },
+        u_sat_prev_lead: { value: 0 },
+        u_sat_blend:    { value: 0 },
+        u_sat_weight:   { value: 1 },
+        u_frame:        { value: 0 },
         u_exag:         { value: 10 },
         u_r_base:       { value: 1.0031 },
         u_r_top:        { value: 1.025 },
@@ -609,6 +795,18 @@ export function createVolumeUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_steps:        { value: ladder.primary },
         u_light_steps:  { value: ladder.light },
     };
+}
+
+/**
+ * Per-frame timing write: sim seconds → u_sim_time + the flow-map phases.
+ * One place, so the shader's u_flow can never disagree with the kernel.
+ * @param {object} uniforms   from createVolumeUniforms (or any sharing u_flow)
+ * @param {number} simSec     simulation seconds relative to the page epoch
+ */
+export function writeFlowUniforms(uniforms, simSec) {
+    const ph = flowPhase(simSec, FLOW.periodSec);
+    uniforms.u_sim_time.value = simSec;
+    uniforms.u_flow.value.set(ph.p0 * FLOW.periodSec, ph.p1 * FLOW.periodSec, ph.w);
 }
 
 /**
@@ -638,4 +836,121 @@ export function createVolumeMesh(uniforms) {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;   // the camera can sit inside it
     return mesh;
+}
+
+// ── Half-resolution compositor ───────────────────────────────────────────────
+
+const COMPOSITE_VERT = /* glsl */`
+varying vec2 vUv;
+void main() {
+    vUv = uv;
+    gl_Position = vec4(position.xy, 0.0, 1.0);
+}`;
+
+const COMPOSITE_FRAG = /* glsl */`
+precision mediump float;
+uniform sampler2D u_tex;
+varying vec2 vUv;
+void main() {
+    // Premultiplied radiance straight through — the blend state on the
+    // material composites it exactly as the carrier mesh's did.
+    gl_FragColor = texture2D(u_tex, vUv);
+}`;
+
+/**
+ * Renders the volumetric carrier mesh into an offscreen target at a fraction
+ * of the drawing-buffer resolution and composites it into the main scene
+ * through a screen quad with the SAME premultiplied blend. See the header's
+ * COST section. The mesh lives in the compositor's private scene; the quad
+ * goes in the page scene where the mesh used to be.
+ *
+ *   const vc = new VolumeCompositor(renderer, cloudVolumeMesh, { scale: 0.5 });
+ *   scene.add(vc.quad);
+ *   … per frame, before the main render: if (mesh.visible) vc.render(renderer, camera);
+ *
+ * The target is HalfFloat where the context can render to it (WebGL2 with
+ * EXT_color_buffer_(half_)float) so the march's HDR radiance survives into
+ * the ACES/bloom chain unclamped; otherwise 8-bit, which merely caps the
+ * brightest sunlit tops at 1.0 before the tonemap.
+ */
+export class VolumeCompositor {
+    constructor(renderer, mesh, { scale = 0.5 } = {}) {
+        this.scene = new THREE.Scene();
+        this.scene.add(mesh);
+        this.mesh  = mesh;
+        this.scale = 1;
+        this.setScale(scale);
+
+        const gl2 = renderer.capabilities.isWebGL2;
+        const canHalf = gl2 && (renderer.extensions.has('EXT_color_buffer_float')
+                              || renderer.extensions.has('EXT_color_buffer_half_float'));
+        this.hdr = canHalf;
+        this.rt = new THREE.WebGLRenderTarget(2, 2, {
+            type:            canHalf ? THREE.HalfFloatType : THREE.UnsignedByteType,
+            format:          THREE.RGBAFormat,
+            minFilter:       THREE.LinearFilter,
+            magFilter:       THREE.LinearFilter,
+            depthBuffer:     false,
+            stencilBuffer:   false,
+            generateMipmaps: false,
+        });
+
+        const mat = new THREE.ShaderMaterial({
+            vertexShader:   COMPOSITE_VERT,
+            fragmentShader: COMPOSITE_FRAG,
+            uniforms:       { u_tex: { value: this.rt.texture } },
+            transparent:    true,
+            depthWrite:     false,
+            depthTest:      false,
+            blending:       THREE.CustomBlending,
+            blendSrc:       THREE.OneFactor,
+            blendDst:       THREE.OneMinusSrcAlphaFactor,
+            blendSrcAlpha:  THREE.OneFactor,
+            blendDstAlpha:  THREE.OneMinusSrcAlphaFactor,
+        });
+        this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+        this.quad.frustumCulled = false;
+        this.quad.visible = false;
+
+        this._size  = new THREE.Vector2();
+        this._clear = new THREE.Color();
+    }
+
+    /** Resolution fraction of the drawing buffer, clamped to [0.25, 1]. */
+    setScale(s) {
+        const v = Number(s);
+        this.scale = Number.isFinite(v) ? Math.max(0.25, Math.min(1, v)) : 0.5;
+        return this.scale;
+    }
+
+    /** Current target size in device pixels (for probes / tests). */
+    get targetSize() { return { width: this.rt.width, height: this.rt.height }; }
+
+    render(renderer, camera) {
+        renderer.getDrawingBufferSize(this._size);
+        const w = Math.max(1, Math.round(this._size.x * this.scale));
+        const h = Math.max(1, Math.round(this._size.y * this.scale));
+        if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h);
+
+        const prevTarget = renderer.getRenderTarget();
+        const prevAuto   = renderer.autoClear;
+        renderer.getClearColor(this._clear);
+        const prevAlpha  = renderer.getClearAlpha();
+
+        renderer.setRenderTarget(this.rt);
+        renderer.setClearColor(0x000000, 0);
+        renderer.autoClear = false;
+        renderer.clear(true, false, false);
+        renderer.render(this.scene, camera);
+
+        renderer.setRenderTarget(prevTarget);
+        renderer.setClearColor(this._clear, prevAlpha);
+        renderer.autoClear = prevAuto;
+    }
+
+    dispose() {
+        this.rt.dispose();
+        this.quad.geometry.dispose();
+        this.quad.material.dispose();
+    }
 }
