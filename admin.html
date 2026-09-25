@@ -1127,6 +1127,16 @@ document.getElementById('tabs').addEventListener('click', e => {
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
 });
+// Deep links (admin.html#activation, e.g. from the Stripe webhook's staff
+// email) open that tab. A CLICK, not a class flip, so each tab's own lazy
+// loader (the per-tab click listeners below) runs as if the admin clicked it.
+// Deferred to after the auth gate + those listeners are wired.
+function openTabFromHash() {
+    const tab = decodeURIComponent(location.hash.slice(1));
+    const btn = tab && document.querySelector(`.tab[data-tab="${CSS.escape(tab)}"]`);
+    if (btn && !btn.classList.contains('active')) btn.click();
+}
+window.addEventListener('hashchange', openTabFromHash);
 
 // ── Auth gate ────────────────────────────────────────────────────────────────
 await auth.ready();
@@ -4323,6 +4333,9 @@ document.addEventListener('visibilitychange', () => {
 });
 
 _setAnalyticsAuto(true);
+
+// Last, so the auth gate has passed and every tab's click listener exists.
+openTabFromHash();
 </script>
 </body>
 </html>
