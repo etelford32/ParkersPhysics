@@ -137,7 +137,7 @@ async function checkRate({ userId, recipient, subject, severity, alertType }) {
 }
 
 /** Build a clean HTML email body. */
-function buildEmailHtml(title, body, severity, alertType, locationLabel) {
+export function buildEmailHtml(title, body, severity, alertType, locationLabel) {
     const sevColor = severity === 'critical' ? '#ff3344' : severity === 'warning' ? '#ffaa00' : '#44cc88';
     const sevLabel = severity.charAt(0).toUpperCase() + severity.slice(1);
     const locChip  = locationLabel
@@ -165,7 +165,7 @@ function buildEmailHtml(title, body, severity, alertType, locationLabel) {
   </div>
   <p style="margin-top:20px;font-size:.65rem;color:#445;text-align:center;line-height:1.5">
     You're receiving this because you enabled email alerts in your Parkers Physics dashboard.<br>
-    <a href="https://parkerphysics.com/dashboard.html#saved-locations-card" style="color:#667">Manage alert preferences &amp; locations</a>
+    <a href="https://parkerphysics.com/settings.html#alert-prefs" style="color:#667">Manage alert preferences &amp; locations</a>
   </p>
 </div>
 </body></html>`;

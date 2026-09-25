@@ -115,7 +115,7 @@ async function _notifyTeam(item) {
     <p style="margin:0 0 14px;font-size:.78rem;color:#778"><strong>UA:</strong> ${escHtml(item.user_agent || '—')}</p>
     <hr style="border:none;border-top:1px solid #333;margin:14px 0">
     <p style="margin:0 0 14px;font-size:.88rem;color:#cdd;white-space:pre-wrap">${escHtml(item.message)}</p>
-    <p style="margin:18px 0 0;font-size:.75rem;color:#778"><a href="${APP_URL}/admin.html#feedback" style="color:#a080ff">Open admin → feedback</a></p>
+    <p style="margin:18px 0 0;font-size:.75rem;color:#778"><a href="${APP_URL}/admin.html" style="color:#a080ff">Open admin</a></p>
   </div>
 </body></html>`;
     try {

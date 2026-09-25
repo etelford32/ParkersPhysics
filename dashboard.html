@@ -16,6 +16,8 @@
 <link rel="canonical" href="https://parkersphysics.com/dashboard">
 <meta name="robots" content="noindex,nofollow">
 <link rel="stylesheet" href="js/nav-styles.css">
+<link rel="stylesheet" href="js/design-tokens.css">
+<link rel="stylesheet" href="js/climate-lab/climate-lab.css">
 
 <!-- Import map — resolves the bare "three" specifier used transitively by
      js/trip-planner.js → js/geo/coords.js (and anything else that reaches
@@ -40,9 +42,13 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#06030f;--surface:#0d0820;--border:rgba(255,255,255,.07);
-  --text:#d0cce8;--muted:#6a6488;--accent:#ffb830;--accent2:#4fc3f7;
-  --green:#4fc97f;--card-bg:#0f0c21;
+  /* Retuned 2026-09 to the Climate Lab's navy instrument palette
+     (js/climate-lab/climate-lab.css). --muted was #6a6488 (~3.5:1 on the
+     old card); #8da2b5 is 7:1 on the new one. Existing cards read these
+     vars inline, so they follow the lab look without markup changes. */
+  --bg:#050a14;--surface:#08101c;--border:rgba(150,190,240,.12);
+  --text:#d6e2ee;--muted:#8da2b5;--accent:#ffb830;--accent2:#4fc3f7;
+  --green:#4fc97f;--card-bg:#0b1322;
 }
 html{height:auto;overflow-y:auto}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
@@ -63,7 +69,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 
 /* ── WELCOME ── */
-.welcome{margin-bottom:36px}
+.welcome{margin-bottom:18px}
 .welcome h1{font-size:1.85rem;font-weight:800;background:linear-gradient(100deg,#fff 40%,#aaa9cc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2;margin-bottom:6px}
 .welcome-sub{font-size:.9rem;color:var(--muted);display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .plan-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
@@ -78,13 +84,16 @@ main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 .section-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700;margin-bottom:14px}
 
 /* ── TOP ROW (location + space weather) ── */
-.top-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:36px}
-@media(max-width:860px){.top-row{grid-template-columns:1fr}}
 
-/* ── CARDS ── */
-.card{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;overflow:hidden}
-.card-head{padding:16px 18px 0;display:flex;align-items:center;justify-content:space-between}
-.card-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+/* ── CARDS ── (the pre-lab cards, restyled to sit beside .cl-module) */
+.card{position:relative;background:linear-gradient(180deg,#101a2c,var(--card-bg));border:1px solid rgba(150,190,240,.18);border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(0,6,18,.35),inset 0 1px 0 rgba(255,255,255,.03)}
+.card::before{content:'';position:absolute;left:18px;right:18px;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,200,255,.45),transparent)}
+.card-head{padding:14px 18px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card-head > .card-title + *{margin-left:auto}
+.card-title{font-size:.82rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:#e8f1f8}
+.cl-duo{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:16px}
+.cl-duo > .card{margin-bottom:0}
+@media(max-width:420px){.cl-duo{grid-template-columns:minmax(0,1fr)}}
 .card-link{font-size:.75rem;color:var(--accent2);text-decoration:none;opacity:.8;transition:opacity .2s}
 .card-link:hover{opacity:1}
 .card-body{padding:16px 18px 18px}
@@ -236,28 +245,6 @@ main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 .ah-type{text-transform:uppercase;letter-spacing:.05em;font-weight:600}
 .ah-empty{text-align:center;padding:24px;color:var(--muted);font-size:.78rem}
 
-/* ── LOCATION CARD ── */
-#loc-map-canvas{display:block;width:100%;height:140px;border-radius:8px;margin-bottom:14px;background:#030612}
-.loc-info{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;min-height:38px}
-.loc-pin{font-size:1.3rem;flex-shrink:0;margin-top:1px}
-.loc-city{font-size:1.05rem;font-weight:700;line-height:1.2}
-.loc-coords-txt{font-size:.73rem;color:var(--muted);margin-top:2px;font-family:monospace}
-.loc-time{font-size:.75rem;color:var(--accent2);margin-top:2px}
-.loc-none{color:var(--muted);font-size:.85rem;font-style:italic}
-
-.loc-search-row{display:flex;gap:6px}
-.loc-input{flex:1;background:#08051a;border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:.82rem;outline:none;transition:border-color .2s}
-.loc-input:focus{border-color:rgba(0,200,255,.45)}
-.loc-input::placeholder{color:var(--muted)}
-.loc-btn{background:rgba(0,180,255,.15);border:1px solid rgba(0,180,255,.25);border-radius:8px;color:var(--accent2);cursor:pointer;padding:7px 11px;font-size:.82rem;white-space:nowrap;transition:background .2s}
-.loc-btn:hover{background:rgba(0,180,255,.28)}
-.loc-err{color:#ff6666;font-size:.73rem;margin-top:5px;display:none}
-.loc-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-.loc-action-btn{font-size:.75rem;padding:5px 12px;border-radius:14px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-decoration:none;transition:border-color .2s,color .2s}
-.loc-action-btn:hover{border-color:var(--accent2);color:var(--accent2)}
-.loc-action-btn.danger{border-color:rgba(255,80,80,.3);color:#ff8888}
-.loc-action-btn.danger:hover{border-color:#ff5555;color:#ff5555}
-
 /* ── SPACE WEATHER CARD ── */
 .sw-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
 .sw-cell{flex:1;min-width:80px;background:#080518;border:1px solid var(--border);border-radius:10px;padding:10px 12px}
@@ -351,9 +338,7 @@ footer a:hover{color:var(--text)}
 
   /* Bigger tap targets on the dense control rows. */
   .sl-btn{font-size:.72rem;padding:7px 12px;min-height:32px}
-  .loc-action-btn{font-size:.78rem;padding:8px 14px;min-height:36px}
-  .loc-input,.sl-add-row input{font-size:.9rem;padding:10px 12px;min-height:40px}
-  .loc-btn{padding:10px 12px;min-height:40px;min-width:40px}
+  .sl-add-row input{font-size:.9rem;padding:10px 12px;min-height:40px}
   .tp-earth-btn,.tp-go-btn{font-size:.78rem;padding:9px 16px;min-height:36px}
   .tp-select{font-size:.88rem;padding:9px 11px;min-height:38px}
   .alert-pref-row{padding:8px 10px}
@@ -449,515 +434,507 @@ footer a:hover{color:var(--text)}
 <!-- ── MAIN ── -->
 <main>
 
-  <div class="welcome">
-    <h1 id="welcome-heading">Good morning, Explorer</h1>
-    <p class="welcome-sub">
-      Your astrophysics command center.
-      <span class="plan-badge plan-free" id="plan-badge">Free</span>
-      <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.7);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:8px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
-      <a href="account.html" style="color:rgba(79,195,247,.85);font-size:.72rem;margin-left:8px;text-decoration:none;font-weight:600" title="Profile, alerts, API keys, billing">Account &rarr;</a>
-      <!-- Admin/superadmin shortcuts intentionally live in the shared nav
-           (js/nav.js renders the ADMIN/SUPER pill for elevated roles). The
-           user dashboard is now strictly user-scoped — operator content
-           lives on admin.html. -->
-    </p>
-  </div>
-
-  <!-- ── SETTINGS LINK STRIP ──
-       Subscription / Alert Preferences / Saved Locations have moved
-       to /settings.html. This thin strip is the dashboard's pointer
-       to that page so muscle-memory doesn't take the user on a
-       wild-goose chase. -->
-  <div class="card" id="settings-link-card" style="margin-bottom:16px">
-    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
-      <div>
-        <div style="font-size:.82rem;font-weight:700;color:#e8f4ff">Subscription, alerts &amp; saved locations</div>
-        <div style="font-size:.68rem;color:var(--muted)">Manage your plan, alert preferences, and saved locations on the settings page.</div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <a href="settings.html" class="btn-sm" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Open Settings →</a>
-      </div>
+  <!-- ── LAB HEADER ──
+       The greeting (#welcome-heading), plan badge (#plan-badge), tour
+       (#retake-tour) and Account link keep their ids: the auth/plan
+       renderers below and the onboarding tour key off them. -->
+  <header class="welcome cl-labhead">
+    <div>
+      <div class="cl-kicker">Parkers Physics · Climate Laboratory</div>
+      <h1 id="welcome-heading">Good morning, Explorer</h1>
+      <p class="welcome-sub">
+        Your home station, the sky above it, and the space weather around it.
+        <span class="plan-badge plan-free" id="plan-badge">Free</span>
+        <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.8);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:4px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
+        <a href="account.html" style="color:rgba(79,195,247,.85);font-size:.72rem;margin-left:8px;text-decoration:none;font-weight:600" title="Profile, alerts, API keys, billing">Account &rarr;</a>
+      </p>
     </div>
-  </div>
-
-  <!-- ── SPACE WEATHER DASHBOARD BRIDGE ──
-       The account dashboard stays the account dashboard (admin/superuser
-       home); the customizable space-weather console is its own surface.
-       This tile is the bridge between the two — see
-       SPACE_WEATHER_DASHBOARD_PLAN.md §3 (separate surfaces, no merge). -->
-  <div class="card" id="sw-bridge-card" style="margin-bottom:16px">
-    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
-      <div>
-        <div style="font-size:.82rem;font-weight:700;color:#e8f4ff">Your space weather dashboard</div>
-        <div style="font-size:.68rem;color:var(--muted)">Live solar wind, storm indices, CME forecasts, and the auroral oval — fully customizable, arranged your way.</div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <a href="space-weather.html" class="btn-sm" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Open dashboard →</a>
-      </div>
+    <div class="cl-labclock" aria-label="Clocks">
+      <span><b>UTC</b><time id="cl-clock-utc">--:--:--</time></span>
+      <span><b>Your clock</b><time id="cl-clock-local">--:--</time></span>
     </div>
-  </div>
+  </header>
+
+  <!-- ── SECTION RAIL ── sticky jump links; scrollspy sets aria-current. -->
+  <nav class="cl-rail" id="cl-rail" aria-label="Dashboard sections">
+    <a href="#sec-station"><b>WX</b> Home station</a>
+    <a href="#sec-geospace"><b>GS</b> Space weather</a>
+    <a href="#sec-orbit"><b>SAT</b> Satellites</a>
+    <a href="#sec-alerts"><b>AL</b> Alerts</a>
+    <a href="#sec-tools"><b>TL</b> Tools &amp; sims</a>
+  </nav>
 
   <!-- ── CLASS ROSTER (educator/institution/enterprise) ── -->
   <!-- Mounted by js/class-roster.js when the user holds a seated plan. -->
   <div class="card" id="class-roster-card" style="margin-bottom:16px;display:none"></div>
 
-  <!-- Pipeline Analytics has moved to admin.html → System tab.
-       The user dashboard is strictly user-scoped; superadmin operator
-       content (live edge-proxy probes, heartbeat freshness, cron status)
-       all lives on the admin console now. -->
+  <!-- ══ WX · HOME STATION ══════════════════════════════════════════════
+       js/climate-lab/lab-station.js fills the four modules. #location-card
+       keeps the id the onboarding tour targets. -->
+  <section class="cl-section" id="sec-station" aria-labelledby="sec-station-h">
+    <div class="cl-section-head"><h2 id="sec-station-h">Home station</h2><p>Your weather, measured like a lab would.</p></div>
+    <section class="cl-module cl-station" id="location-card" aria-labelledby="cl-station-title"></section>
+    <section class="cl-module" id="cl-bench-card" aria-labelledby="cl-bench-title"></section>
+    <section class="cl-module" id="cl-meteogram-card" aria-labelledby="cl-mg-title"></section>
+    <section class="cl-module" id="cl-climate-card" aria-labelledby="cl-climate-title"></section>
 
-  <!-- ── TOP ROW ── -->
-  <div class="top-row">
+    <!-- ── DAILY BRIEFING ── -->
+    <div class="card" id="daily-briefing-card" style="margin-bottom:20px">
+        <div class="card-head">
+          <span class="cl-code">WX-04</span><span class="card-title">Daily Briefing</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="briefing-time" style="font-size:.62rem;color:var(--muted)"></span>
+            <button id="briefing-refresh" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Refresh">&#8635;</button>
+            <button id="briefing-share" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Copy to clipboard">Share</button>
+          </div>
+        </div>
+        <div class="card-body" id="briefing-body">
 
-    <!-- Location card -->
-    <div class="card" id="location-card">
-      <div class="card-head">
-        <span class="card-title">Your Location</span>
-        <a href="earth.html" class="card-link" id="earth-link">View on Earth →</a>
+          <!-- Solar Activity -->
+          <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:16px">
+            <div style="flex-shrink:0;width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;background:var(--surface);border:1px solid var(--border)" id="briefing-solar-icon">&#9788;</div>
+            <div style="flex:1">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                <span style="font-size:.9rem;font-weight:700;color:#e8f4ff">Solar Activity</span>
+                <span id="briefing-solar-badge" style="padding:2px 8px;border-radius:4px;font-size:.65rem;font-weight:700;letter-spacing:.05em">QUIET</span>
+              </div>
+              <div id="briefing-solar-detail" style="font-size:.75rem;color:#8899aa;line-height:1.6">
+                Loading solar data...
+              </div>
+              <div id="briefing-storm-prob" style="display:none;margin-top:6px;font-size:.7rem;color:#889">
+                Storm (24h): <span id="bp-g1" style="color:#44cc88">0%</span> G1+ · <span id="bp-g2" style="color:#ffcc00">0%</span> G2+ · <span id="bp-g3" style="color:#ff4444">0%</span> G3+
+              </div>
+            </div>
+          </div>
+
+          <!-- Today & Sun — solar day-arc, feels-like, and physics advisories -->
+          <div id="local-sky"></div>
+
+          <!-- 7-Day Temperature Forecast -->
+          <div id="briefing-forecast-section" style="display:none">
+            <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+              7-Day Temperature Forecast
+              <span id="briefing-model-badge" style="font-size:.55rem;padding:1px 5px;border-radius:3px;background:rgba(0,200,200,.1);color:#0cc;font-weight:700"></span>
+            </div>
+            <div style="overflow-x:auto">
+              <div id="briefing-forecast-grid" style="display:flex;gap:6px;min-width:0;padding-bottom:4px">
+                <!-- Filled by JS -->
+              </div>
+            </div>
+          </div>
+
+        </div>
       </div>
-      <div class="card-body">
-        <canvas id="loc-map-canvas" aria-label="Mini world map showing your location"></canvas>
 
-        <div class="loc-info" id="loc-info">
-          <span class="loc-pin">📍</span>
+    <!-- ── MONTH-AHEAD OUTLOOK (weeks 3–6, probabilistic / driver-attributed) ── -->
+    <div class="card" id="month-outlook-card" style="margin-bottom:20px">
+        <div class="card-head">
+          <span class="cl-code">WX-05</span><span class="card-title">Month-Ahead Outlook</span>
+          <span style="font-size:.6rem;color:var(--muted)">weeks 3–6 · probabilistic</span>
+        </div>
+        <div class="card-body" id="month-outlook"></div>
+      </div>
+  </section>
+
+  <!-- ══ GS · SPACE WEATHER ═════════════════════════════════════════════ -->
+  <section class="cl-section" id="sec-geospace" aria-labelledby="sec-geospace-h">
+    <div class="cl-section-head"><h2 id="sec-geospace-h">Space weather</h2><p>The Sun–Earth connection over your station.</p></div>
+    <div class="cl-duo">
+      <div class="card" id="sw-card">
+            <div class="card-head">
+              <span class="cl-code">GS-01</span><span class="card-title">Geospace now</span>
+              <a href="space-weather.html" class="card-link">Full Dashboard →</a>
+            </div>
+            <div class="card-body">
+
+              <div class="sw-row">
+                <div class="sw-cell">
+                  <span class="sw-lbl">Kp Index</span>
+                  <span class="sw-val" id="sw-kp" style="color:#4fc3f7">—</span>
+                  <div class="kp-cells" id="kp-cells"></div>
+                </div>
+                <div class="sw-cell">
+                  <span class="sw-lbl">Solar Wind</span>
+                  <span class="sw-val" id="sw-speed" style="color:#ffd700">—</span>
+                  <div style="font-size:.67rem;color:var(--muted);margin-top:1px">km/s</div>
+                </div>
+                <div class="sw-cell">
+                  <span class="sw-lbl">IMF Bz</span>
+                  <span class="sw-val" id="sw-bz">—</span>
+                  <div style="font-size:.67rem;color:var(--muted);margin-top:1px">nT</div>
+                </div>
+              </div>
+
+              <div class="storm-badge" id="storm-badge" style="color:#4fc3f7;border-color:#4fc3f722;background:#4fc3f708">Quiet</div>
+
+              <div class="aurora-row" id="aurora-row">
+                <span class="aurora-icon" id="aurora-icon">🔭</span>
+                <div>
+                  <div class="aurora-text" id="aurora-text" style="color:var(--muted)">Set your location to check aurora visibility</div>
+                  <div class="aurora-loc" id="aurora-loc"></div>
+                </div>
+              </div>
+
+              <div class="sw-footer" id="sw-footer" style="margin-top:12px">
+                <span id="sw-status">Connecting to NOAA SWPC…</span>
+                &nbsp;·&nbsp; <a href="space-weather.html">Full space weather dashboard →</a>
+              </div>
+            </div>
+          </div>
+      <div class="card" id="impact-card" style="margin-bottom:20px">
+          <div class="card-head">
+            <span class="cl-code">GS-03</span><span class="card-title">Space Weather Impact Score</span>
+            <span class="card-link" id="impact-updated" style="font-size:.62rem;color:var(--muted)">Waiting for data...</span>
+          </div>
+          <div class="card-body">
+
+            <!-- Score ring + label -->
+            <div style="display:flex;align-items:center;gap:20px;margin-bottom:16px">
+              <div style="position:relative;width:90px;height:90px;flex-shrink:0">
+                <svg viewBox="0 0 36 36" style="width:90px;height:90px;transform:rotate(-90deg)">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="3"/>
+                  <circle id="impact-ring" cx="18" cy="18" r="15.5" fill="none" stroke="#44cc88"
+                          stroke-width="3" stroke-dasharray="97.4" stroke-dashoffset="97.4"
+                          stroke-linecap="round" style="transition:stroke-dashoffset .8s,stroke .5s"/>
+                </svg>
+                <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                  <div id="impact-number" style="font-size:1.6rem;font-weight:800;color:#e8f4ff;line-height:1">0</div>
+                  <div style="font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">/ 100</div>
+                </div>
+              </div>
+              <div style="flex:1">
+                <div id="impact-label" style="font-size:1rem;font-weight:700;margin-bottom:4px">Quiet</div>
+                <div id="impact-desc" style="font-size:.72rem;color:var(--muted);line-height:1.5">
+                  Conditions are calm. No significant space weather expected.
+                </div>
+              </div>
+            </div>
+
+            <!-- Component breakdown bars -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin-bottom:16px">
+              <div class="impact-bar-wrap">
+                <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Geomagnetic</span><span id="impact-geo-val" style="color:#aac">0</span></div>
+                <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-geo-bar" style="height:100%;width:0%;background:#4488ff;border-radius:2px;transition:width .6s"></div></div>
+              </div>
+              <div class="impact-bar-wrap">
+                <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Solar</span><span id="impact-sol-val" style="color:#aac">0</span></div>
+                <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-sol-bar" style="height:100%;width:0%;background:#ff8800;border-radius:2px;transition:width .6s"></div></div>
+              </div>
+              <div class="impact-bar-wrap">
+                <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">CME Threat</span><span id="impact-cme-val" style="color:#aac">0</span></div>
+                <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-cme-bar" style="height:100%;width:0%;background:#ff4444;border-radius:2px;transition:width .6s"></div></div>
+              </div>
+              <div class="impact-bar-wrap">
+                <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Location Risk</span><span id="impact-loc-val" style="color:#aac">0</span></div>
+                <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-loc-bar" style="height:100%;width:0%;background:#cc44ff;border-radius:2px;transition:width .6s"></div></div>
+              </div>
+            </div>
+
+            <!-- Time-windowed forecast probabilities -->
+            <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">
+              Storm Probability Forecast
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:.72rem;font-variant-numeric:tabular-nums">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--border)">
+                    <th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">Window</th>
+                    <th style="text-align:right;padding:4px 8px;color:#44cc88;font-weight:600">G1+ (Kp5)</th>
+                    <th style="text-align:right;padding:4px 8px;color:#ffcc00;font-weight:600">G2+ (Kp6)</th>
+                    <th style="text-align:right;padding:4px 8px;color:#ff4444;font-weight:600">G3+ (Kp7)</th>
+                    <th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody id="impact-forecast-tbody">
+                  <tr><td colspan="5" style="text-align:center;padding:12px;color:var(--muted)">Accumulating data...</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Recurrence + cycle context -->
+            <div id="impact-context" style="margin-top:10px;font-size:.68rem;color:var(--muted);line-height:1.6;display:none">
+              <span id="impact-recurrence"></span> &middot; <span id="impact-cycle"></span>
+            </div>
+
+          </div>
+        </div>
+    </div>
+
+    <!-- ── PERSONALIZED SPACE WEATHER REPORT ── -->
+    <div class="card" id="alert-card" style="margin-bottom:20px">
+        <div class="card-head">
+          <span class="cl-code">GS-02</span><span class="card-title">Your Space Weather Report</span>
+          <span class="card-link" id="alert-loc-name" style="font-size:.72rem;color:var(--muted)">Set location above</span>
+        </div>
+        <div class="card-body" id="alert-card-body">
+
+          <!-- Aurora forecast -->
+          <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px">
+            <div id="alert-aurora-icon" style="font-size:2rem;line-height:1">🔭</div>
+            <div style="flex:1">
+              <div style="font-size:.82rem;font-weight:700;margin-bottom:2px" id="alert-aurora-title">Aurora Visibility</div>
+              <div style="font-size:.75rem;color:var(--muted);line-height:1.5" id="alert-aurora-desc">
+                Enter your city or zip code in the Location card above to see your personalized aurora forecast.
+              </div>
+              <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap" id="alert-aurora-tags"></div>
+            </div>
+          </div>
+
+          <!-- Condition grid -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px">
+            <!-- HF Radio -->
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+              <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">HF Radio</div>
+              <div style="font-size:.88rem;font-weight:700" id="alert-hf">Normal</div>
+              <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-hf-desc">No blackout</div>
+            </div>
+            <!-- GPS/GNSS -->
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+              <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">GPS Accuracy</div>
+              <div style="font-size:.88rem;font-weight:700" id="alert-gps">Nominal</div>
+              <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-gps-desc">Normal precision</div>
+            </div>
+            <!-- Power Grid -->
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+              <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Power Grid</div>
+              <div style="font-size:.88rem;font-weight:700" id="alert-grid">No Impact</div>
+              <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-grid-desc">GIC risk low</div>
+            </div>
+            <!-- Spacecraft -->
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+              <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Spacecraft</div>
+              <div style="font-size:.88rem;font-weight:700" id="alert-craft">Low Risk</div>
+              <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-craft-desc">Surface charging minimal</div>
+            </div>
+          </div>
+
+          <!-- Aurora viewing tip -->
+          <div id="alert-tip" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.72rem;color:var(--muted);line-height:1.5;display:none">
+            <strong style="color:var(--accent)">Viewing Tip:</strong> <span id="alert-tip-text"></span>
+          </div>
+
+          <!-- Shareable summary -->
+          <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+            <button id="alert-share-btn" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;font-family:inherit;font-size:.7rem;padding:5px 12px;transition:all .15s">
+              Share Report
+            </button>
+            <span id="alert-share-msg" style="font-size:.65rem;color:var(--green);display:none">Copied to clipboard!</span>
+          </div>
+
+        </div>
+      </div>
+
+    <!-- ── SPACE WEATHER DASHBOARD BRIDGE ──
+         The account dashboard stays the account dashboard; the customizable
+         space-weather console is its own surface. SPACE_WEATHER_DASHBOARD_PLAN.md §3. -->
+    <div class="card" id="sw-bridge-card" style="margin-bottom:16px">
+        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
           <div>
-            <div class="loc-city" id="loc-city-name"><span class="loc-none">Set your location to unlock personalized forecasts</span></div>
-            <div class="loc-coords-txt" id="loc-coords-txt"></div>
-            <div class="loc-time" id="loc-time-txt"></div>
+            <div style="font-size:.82rem;font-weight:700;color:#e8f4ff">Your space weather dashboard</div>
+            <div style="font-size:.68rem;color:var(--muted)">Live solar wind, storm indices, CME forecasts, and the auroral oval — fully customizable, arranged your way.</div>
           </div>
-        </div>
-
-        <div class="loc-search-row">
-          <input class="loc-input" id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off" aria-label="Search for a location">
-          <button class="loc-btn" id="loc-search-btn" aria-label="Search">↵</button>
-          <button class="loc-btn" id="loc-gps-btn" title="Detect my location" aria-label="Use GPS to detect location">⊕</button>
-        </div>
-        <div class="loc-err" id="loc-err" role="alert"></div>
-
-        <div class="loc-actions">
-          <a href="earth.html" class="loc-action-btn" id="loc-earth-btn" style="display:none">🌍 Open Earth Sim</a>
-          <button class="loc-action-btn danger" id="loc-clear-btn" style="display:none">✕ Clear</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a href="space-weather.html" class="btn-sm" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Open dashboard →</a>
+          </div>
         </div>
       </div>
-    </div>
+  </section>
 
-    <!-- Space weather card -->
-    <div class="card" id="sw-card">
-      <div class="card-head">
-        <span class="card-title">Space Weather</span>
-        <a href="space-weather.html" class="card-link">Full Dashboard →</a>
-      </div>
-      <div class="card-body">
+  <!-- ══ SAT · SATELLITES ═══════════════════════════════════════════════ -->
+  <section class="cl-section" id="sec-orbit" aria-labelledby="sec-orbit-h">
+    <div class="cl-section-head"><h2 id="sec-orbit-h">Satellites</h2><p>What is overhead, and when you can see it.</p></div>
+    <section class="cl-module" id="cl-sat-card" aria-labelledby="cl-sat-title"></section>
+  </section>
 
-        <div class="sw-row">
-          <div class="sw-cell">
-            <span class="sw-lbl">Kp Index</span>
-            <span class="sw-val" id="sw-kp" style="color:#4fc3f7">—</span>
-            <div class="kp-cells" id="kp-cells"></div>
-          </div>
-          <div class="sw-cell">
-            <span class="sw-lbl">Solar Wind</span>
-            <span class="sw-val" id="sw-speed" style="color:#ffd700">—</span>
-            <div style="font-size:.67rem;color:var(--muted);margin-top:1px">km/s</div>
-          </div>
-          <div class="sw-cell">
-            <span class="sw-lbl">IMF Bz</span>
-            <span class="sw-val" id="sw-bz">—</span>
-            <div style="font-size:.67rem;color:var(--muted);margin-top:1px">nT</div>
+  <!-- ══ AL · ALERTS ════════════════════════════════════════════════════
+       #alert-console-card is NOT #alert-prefs-card on purpose: that id wakes
+       the dormant preferences block in the Alerts runCard below. -->
+  <section class="cl-section" id="sec-alerts" aria-labelledby="sec-alerts-h">
+    <div class="cl-section-head"><h2 id="sec-alerts-h">Alerts</h2><p>What to watch for, and how it reaches you.</p></div>
+    <section class="cl-module" id="alert-console-card" aria-labelledby="cl-alerts-title"></section>
+
+    <!-- ── ALERT HISTORY ── -->
+    <div class="card" id="alert-history-card" style="margin-bottom:20px">
+        <div class="card-head">
+          <span class="cl-code">AL-02</span><span class="card-title">Alert History</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <select id="alert-history-filter" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 8px;font-family:inherit;font-size:.68rem">
+              <option value="all">All types</option>
+              <option value="storm">Storm</option>
+              <option value="flare">Flare</option>
+              <option value="aurora">Aurora</option>
+              <option value="conjunction">Conjunction</option>
+              <option value="pass">Pass</option>
+            </select>
+            <select id="alert-history-severity" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 8px;font-family:inherit;font-size:.68rem">
+              <option value="all">All severity</option>
+              <option value="critical">Critical</option>
+              <option value="warning">Warning</option>
+              <option value="info">Info</option>
+            </select>
+            <button id="alert-history-refresh" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:3px 10px;font-family:inherit;font-size:.68rem" title="Refresh">&#8635;</button>
           </div>
         </div>
+        <div class="card-body" id="alert-history-body">
 
-        <div class="storm-badge" id="storm-badge" style="color:#4fc3f7;border-color:#4fc3f722;background:#4fc3f708">Quiet</div>
+          <!-- Gate: non-subscribers see upgrade prompt -->
+          <div id="alert-history-gate" style="text-align:center;padding:16px 0;display:none">
+            <div style="font-size:.82rem;color:var(--muted)">Alert history is available for subscribers.</div>
+          </div>
 
-        <div class="aurora-row" id="aurora-row">
-          <span class="aurora-icon" id="aurora-icon">🔭</span>
+          <!-- Alert list -->
+          <div id="alert-history-list">
+            <div style="text-align:center;padding:20px;color:var(--muted);font-size:.78rem">Loading alerts...</div>
+          </div>
+
+          <!-- Pagination -->
+          <div id="alert-history-pagination" style="display:flex;justify-content:center;gap:8px;margin-top:12px;display:none">
+            <button id="alert-history-prev" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;cursor:pointer;padding:4px 12px;font-family:inherit;font-size:.68rem">&larr; Newer</button>
+            <span id="alert-history-page" style="font-size:.68rem;color:var(--muted);padding:4px 8px">Page 1</span>
+            <button id="alert-history-next" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;cursor:pointer;padding:4px 12px;font-family:inherit;font-size:.68rem">Older &rarr;</button>
+          </div>
+
+        </div>
+      </div>
+  </section>
+
+  <!-- ══ TL · TOOLS & SIMULATIONS ═══════════════════════════════════════ -->
+  <section class="cl-section" id="sec-tools" aria-labelledby="sec-tools-h">
+    <div class="cl-section-head"><h2 id="sec-tools-h">Tools &amp; simulations</h2><p>Plan a trip, manage your account, open a lab.</p></div>
+
+    <!-- ── TRIP PLANNING ── -->
+    <div class="card" id="trip-planning-card" style="margin-bottom:20px">
+        <div class="card-head">
+          <span class="cl-code">TL-01</span><span class="card-title">Trip Planning</span>
+          <span class="card-link" id="tp-hint" style="font-size:.68rem;color:var(--muted)">Compare weather at two saved locations</span>
+        </div>
+        <div class="card-body">
+
+          <div id="tp-empty" class="sl-empty" style="display:none">
+            Save at least two locations above to plan a trip.
+          </div>
+
+          <div id="tp-wrap" style="display:none">
+            <div class="tp-row">
+              <div class="tp-col">
+                <span class="tp-lbl">From</span>
+                <select class="tp-select" id="tp-from"></select>
+              </div>
+              <button class="tp-swap" id="tp-swap" title="Swap From / To" aria-label="Swap from and to">⇄</button>
+              <div class="tp-col">
+                <span class="tp-lbl">To</span>
+                <select class="tp-select" id="tp-to"></select>
+              </div>
+            </div>
+
+            <div class="tp-actions">
+              <button class="tp-go-btn" id="tp-go">Compare weather</button>
+              <a class="tp-earth-btn disabled" id="tp-earth" href="#" target="_self">View route on Earth →</a>
+              <span class="tp-summary" id="tp-summary"></span>
+            </div>
+            <div class="tp-err" id="tp-err" role="alert"></div>
+
+            <div class="tp-results" id="tp-results">
+              <div class="tp-compare-grid">
+                <div class="tp-card from" id="tp-card-from"></div>
+                <div class="tp-card to"   id="tp-card-to"></div>
+              </div>
+
+              <div class="tp-route" id="tp-route-wrap" style="display:none">
+                <div class="tp-route-hdr">Along the route <span id="tp-route-note" style="color:#778;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+                <div class="tp-route-strip" id="tp-route-strip"></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    <!-- ── SETTINGS LINK STRIP ── (Subscription / Alert Preferences / Saved
+         Locations live on /settings.html) -->
+    <div class="card" id="settings-link-card" style="margin-bottom:16px">
+        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
           <div>
-            <div class="aurora-text" id="aurora-text" style="color:var(--muted)">Set your location to check aurora visibility</div>
-            <div class="aurora-loc" id="aurora-loc"></div>
+            <div style="font-size:.82rem;font-weight:700;color:#e8f4ff">Subscription, alerts &amp; saved locations</div>
+            <div style="font-size:.68rem;color:var(--muted)">Manage your plan, alert preferences, and saved locations on the settings page.</div>
           </div>
-        </div>
-
-        <div class="sw-footer" id="sw-footer" style="margin-top:12px">
-          <span id="sw-status">Connecting to NOAA SWPC…</span>
-          &nbsp;·&nbsp; <a href="space-weather.html">Full space weather dashboard →</a>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- /top-row -->
-
-  <!-- ── DAILY BRIEFING ── -->
-  <div class="card" id="daily-briefing-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Daily Briefing</span>
-      <div style="display:flex;gap:8px;align-items:center">
-        <span id="briefing-time" style="font-size:.62rem;color:var(--muted)"></span>
-        <button id="briefing-refresh" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Refresh">&#8635;</button>
-        <button id="briefing-share" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Copy to clipboard">Share</button>
-      </div>
-    </div>
-    <div class="card-body" id="briefing-body">
-
-      <!-- Solar Activity -->
-      <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:16px">
-        <div style="flex-shrink:0;width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;background:var(--surface);border:1px solid var(--border)" id="briefing-solar-icon">&#9788;</div>
-        <div style="flex:1">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-            <span style="font-size:.9rem;font-weight:700;color:#e8f4ff">Solar Activity</span>
-            <span id="briefing-solar-badge" style="padding:2px 8px;border-radius:4px;font-size:.65rem;font-weight:700;letter-spacing:.05em">QUIET</span>
-          </div>
-          <div id="briefing-solar-detail" style="font-size:.75rem;color:#8899aa;line-height:1.6">
-            Loading solar data...
-          </div>
-          <div id="briefing-storm-prob" style="display:none;margin-top:6px;font-size:.7rem;color:#889">
-            Storm (24h): <span id="bp-g1" style="color:#44cc88">0%</span> G1+ · <span id="bp-g2" style="color:#ffcc00">0%</span> G2+ · <span id="bp-g3" style="color:#ff4444">0%</span> G3+
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a href="settings.html" class="btn-sm" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Open Settings →</a>
           </div>
         </div>
       </div>
 
-      <!-- Today & Sun — solar day-arc, feels-like, and physics advisories -->
-      <div id="local-sky"></div>
+    <p class="section-label">Simulations</p>
+    <div class="sim-grid">
 
-      <!-- 7-Day Temperature Forecast -->
-      <div id="briefing-forecast-section" style="display:none">
-        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
-          7-Day Temperature Forecast
-          <span id="briefing-model-badge" style="font-size:.55rem;padding:1px 5px;border-radius:3px;background:rgba(0,200,200,.1);color:#0cc;font-weight:700"></span>
-        </div>
-        <div style="overflow-x:auto">
-          <div id="briefing-forecast-grid" style="display:flex;gap:6px;min-width:0;padding-bottom:4px">
-            <!-- Filled by JS -->
+        <a href="earth.html" class="sim-card" aria-label="Launch Earth Magnetosphere simulation">
+          <div class="sim-thumb th-earth">
+            <span>🌍</span>
+            <span class="sim-badge badge-live">Live</span>
           </div>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ── MONTH-AHEAD OUTLOOK (weeks 3–6, probabilistic / driver-attributed) ── -->
-  <div class="card" id="month-outlook-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Month-Ahead Outlook</span>
-      <span style="font-size:.6rem;color:var(--muted)">weeks 3–6 · probabilistic</span>
-    </div>
-    <div class="card-body" id="month-outlook"></div>
-  </div>
-
-  <!-- ── PERSONALIZED SPACE WEATHER REPORT ── -->
-  <div class="card" id="alert-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Your Space Weather Report</span>
-      <span class="card-link" id="alert-loc-name" style="font-size:.72rem;color:var(--muted)">Set location above</span>
-    </div>
-    <div class="card-body" id="alert-card-body">
-
-      <!-- Aurora forecast -->
-      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px">
-        <div id="alert-aurora-icon" style="font-size:2rem;line-height:1">🔭</div>
-        <div style="flex:1">
-          <div style="font-size:.82rem;font-weight:700;margin-bottom:2px" id="alert-aurora-title">Aurora Visibility</div>
-          <div style="font-size:.75rem;color:var(--muted);line-height:1.5" id="alert-aurora-desc">
-            Enter your city or zip code in the Location card above to see your personalized aurora forecast.
+          <div class="sim-info">
+            <p class="sim-name">Earth Magnetosphere</p>
+            <p class="sim-desc">Real-time field lines, particle trapping &amp; Van Allen belts</p>
           </div>
-          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap" id="alert-aurora-tags"></div>
-        </div>
-      </div>
+        </a>
 
-      <!-- Condition grid -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px">
-        <!-- HF Radio -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
-          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">HF Radio</div>
-          <div style="font-size:.88rem;font-weight:700" id="alert-hf">Normal</div>
-          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-hf-desc">No blackout</div>
-        </div>
-        <!-- GPS/GNSS -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
-          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">GPS Accuracy</div>
-          <div style="font-size:.88rem;font-weight:700" id="alert-gps">Nominal</div>
-          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-gps-desc">Normal precision</div>
-        </div>
-        <!-- Power Grid -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
-          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Power Grid</div>
-          <div style="font-size:.88rem;font-weight:700" id="alert-grid">No Impact</div>
-          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-grid-desc">GIC risk low</div>
-        </div>
-        <!-- Spacecraft -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
-          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Spacecraft</div>
-          <div style="font-size:.88rem;font-weight:700" id="alert-craft">Low Risk</div>
-          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-craft-desc">Surface charging minimal</div>
-        </div>
-      </div>
-
-      <!-- Aurora viewing tip -->
-      <div id="alert-tip" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.72rem;color:var(--muted);line-height:1.5;display:none">
-        <strong style="color:var(--accent)">Viewing Tip:</strong> <span id="alert-tip-text"></span>
-      </div>
-
-      <!-- Shareable summary -->
-      <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
-        <button id="alert-share-btn" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;font-family:inherit;font-size:.7rem;padding:5px 12px;transition:all .15s">
-          Share Report
-        </button>
-        <span id="alert-share-msg" style="font-size:.65rem;color:var(--green);display:none">Copied to clipboard!</span>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ── IMPACT SCORE ── -->
-  <div class="card" id="impact-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Space Weather Impact Score</span>
-      <span class="card-link" id="impact-updated" style="font-size:.62rem;color:var(--muted)">Waiting for data...</span>
-    </div>
-    <div class="card-body">
-
-      <!-- Score ring + label -->
-      <div style="display:flex;align-items:center;gap:20px;margin-bottom:16px">
-        <div style="position:relative;width:90px;height:90px;flex-shrink:0">
-          <svg viewBox="0 0 36 36" style="width:90px;height:90px;transform:rotate(-90deg)">
-            <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="3"/>
-            <circle id="impact-ring" cx="18" cy="18" r="15.5" fill="none" stroke="#44cc88"
-                    stroke-width="3" stroke-dasharray="97.4" stroke-dashoffset="97.4"
-                    stroke-linecap="round" style="transition:stroke-dashoffset .8s,stroke .5s"/>
-          </svg>
-          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-            <div id="impact-number" style="font-size:1.6rem;font-weight:800;color:#e8f4ff;line-height:1">0</div>
-            <div style="font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">/ 100</div>
+        <a href="sun.html" class="sim-card" aria-label="Launch Solar Surface simulation">
+          <div class="sim-thumb th-sun">
+            <span>☀️</span>
+            <span class="sim-badge badge-live">Live</span>
           </div>
-        </div>
-        <div style="flex:1">
-          <div id="impact-label" style="font-size:1rem;font-weight:700;margin-bottom:4px">Quiet</div>
-          <div id="impact-desc" style="font-size:.72rem;color:var(--muted);line-height:1.5">
-            Conditions are calm. No significant space weather expected.
+          <div class="sim-info">
+            <p class="sim-name">Solar Surface</p>
+            <p class="sim-desc">Solar flares, CMEs, active regions from NOAA SWPC</p>
           </div>
-        </div>
-      </div>
+        </a>
 
-      <!-- Component breakdown bars -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin-bottom:16px">
-        <div class="impact-bar-wrap">
-          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Geomagnetic</span><span id="impact-geo-val" style="color:#aac">0</span></div>
-          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-geo-bar" style="height:100%;width:0%;background:#4488ff;border-radius:2px;transition:width .6s"></div></div>
-        </div>
-        <div class="impact-bar-wrap">
-          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Solar</span><span id="impact-sol-val" style="color:#aac">0</span></div>
-          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-sol-bar" style="height:100%;width:0%;background:#ff8800;border-radius:2px;transition:width .6s"></div></div>
-        </div>
-        <div class="impact-bar-wrap">
-          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">CME Threat</span><span id="impact-cme-val" style="color:#aac">0</span></div>
-          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-cme-bar" style="height:100%;width:0%;background:#ff4444;border-radius:2px;transition:width .6s"></div></div>
-        </div>
-        <div class="impact-bar-wrap">
-          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Location Risk</span><span id="impact-loc-val" style="color:#aac">0</span></div>
-          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-loc-bar" style="height:100%;width:0%;background:#cc44ff;border-radius:2px;transition:width .6s"></div></div>
-        </div>
-      </div>
-
-      <!-- Time-windowed forecast probabilities -->
-      <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">
-        Storm Probability Forecast
-      </div>
-      <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:.72rem;font-variant-numeric:tabular-nums">
-          <thead>
-            <tr style="border-bottom:1px solid var(--border)">
-              <th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">Window</th>
-              <th style="text-align:right;padding:4px 8px;color:#44cc88;font-weight:600">G1+ (Kp5)</th>
-              <th style="text-align:right;padding:4px 8px;color:#ffcc00;font-weight:600">G2+ (Kp6)</th>
-              <th style="text-align:right;padding:4px 8px;color:#ff4444;font-weight:600">G3+ (Kp7)</th>
-              <th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">Confidence</th>
-            </tr>
-          </thead>
-          <tbody id="impact-forecast-tbody">
-            <tr><td colspan="5" style="text-align:center;padding:12px;color:var(--muted)">Accumulating data...</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Recurrence + cycle context -->
-      <div id="impact-context" style="margin-top:10px;font-size:.68rem;color:var(--muted);line-height:1.6;display:none">
-        <span id="impact-recurrence"></span> &middot; <span id="impact-cycle"></span>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- Saved Locations moved to /settings.html#saved-locations.
-       The init IIFE further down still runs but no-ops because the
-       DOM ids it queries no longer exist on this page. -->
-
-
-  <!-- ── TRIP PLANNING ── -->
-  <div class="card" id="trip-planning-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Trip Planning</span>
-      <span class="card-link" id="tp-hint" style="font-size:.68rem;color:var(--muted)">Compare weather at two saved locations</span>
-    </div>
-    <div class="card-body">
-
-      <div id="tp-empty" class="sl-empty" style="display:none">
-        Save at least two locations above to plan a trip.
-      </div>
-
-      <div id="tp-wrap" style="display:none">
-        <div class="tp-row">
-          <div class="tp-col">
-            <span class="tp-lbl">From</span>
-            <select class="tp-select" id="tp-from"></select>
+        <a href="space-weather.html" class="sim-card" aria-label="Launch Space Weather dashboard">
+          <div class="sim-thumb th-sw">
+            <span>🌌</span>
+            <span class="sim-badge badge-live">Live</span>
           </div>
-          <button class="tp-swap" id="tp-swap" title="Swap From / To" aria-label="Swap from and to">⇄</button>
-          <div class="tp-col">
-            <span class="tp-lbl">To</span>
-            <select class="tp-select" id="tp-to"></select>
+          <div class="sim-info">
+            <p class="sim-name">Space Weather</p>
+            <p class="sim-desc">Kp index, solar wind speed, geomagnetic storm alerts</p>
           </div>
-        </div>
+        </a>
 
-        <div class="tp-actions">
-          <button class="tp-go-btn" id="tp-go">Compare weather</button>
-          <a class="tp-earth-btn disabled" id="tp-earth" href="#" target="_self">View route on Earth →</a>
-          <span class="tp-summary" id="tp-summary"></span>
-        </div>
-        <div class="tp-err" id="tp-err" role="alert"></div>
-
-        <div class="tp-results" id="tp-results">
-          <div class="tp-compare-grid">
-            <div class="tp-card from" id="tp-card-from"></div>
-            <div class="tp-card to"   id="tp-card-to"></div>
+        <a href="sirius-planetary.html" class="sim-card" aria-label="Launch Stellar Physics simulation">
+          <div class="sim-thumb th-star">
+            <span>⭐</span>
+            <span class="sim-badge badge-live">Live</span>
           </div>
-
-          <div class="tp-route" id="tp-route-wrap" style="display:none">
-            <div class="tp-route-hdr">Along the route <span id="tp-route-note" style="color:#778;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
-            <div class="tp-route-strip" id="tp-route-strip"></div>
+          <div class="sim-info">
+            <p class="sim-name">Stellar Physics</p>
+            <p class="sim-desc">3D stellar evolution, HR diagram, spectral classification</p>
           </div>
-        </div>
-      </div>
+        </a>
 
-    </div>
-  </div>
+        <a href="galactic-map.html" class="sim-card" aria-label="Launch Galactic Map simulation">
+          <div class="sim-thumb th-galactic">
+            <span>🌠</span>
+            <span class="sim-badge badge-live">Live</span>
+          </div>
+          <div class="sim-info">
+            <p class="sim-name">Galactic Map</p>
+            <p class="sim-desc">Milky Way structure, stellar populations &amp; arm dynamics</p>
+          </div>
+        </a>
 
-  <!-- Alert Preferences moved to /settings.html#alert-prefs.
-       The init logic further down no-ops when its DOM ids are
-       missing (each id lookup is guarded). -->
+        <a href="satellite-designer.html" class="sim-card" aria-label="Launch Satellite Designer simulation">
+          <div class="sim-thumb th-satdesign">
+            <span>🛰️</span>
+            <span class="sim-badge badge-live">Live</span>
+          </div>
+          <div class="sim-info">
+            <p class="sim-name">Satellite Designer</p>
+            <p class="sim-desc">Design a craft &amp; fly thrust vs. atmospheric drag in LEO</p>
+          </div>
+        </a>
 
-  <!-- ── ALERT HISTORY ── -->
-  <div class="card" id="alert-history-card" style="margin-bottom:20px">
-    <div class="card-head">
-      <span class="card-title">Alert History</span>
-      <div style="display:flex;align-items:center;gap:8px">
-        <select id="alert-history-filter" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 8px;font-family:inherit;font-size:.68rem">
-          <option value="all">All types</option>
-          <option value="storm">Storm</option>
-          <option value="flare">Flare</option>
-          <option value="aurora">Aurora</option>
-          <option value="conjunction">Conjunction</option>
-          <option value="pass">Pass</option>
-        </select>
-        <select id="alert-history-severity" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 8px;font-family:inherit;font-size:.68rem">
-          <option value="all">All severity</option>
-          <option value="critical">Critical</option>
-          <option value="warning">Warning</option>
-          <option value="info">Info</option>
-        </select>
-        <button id="alert-history-refresh" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:3px 10px;font-family:inherit;font-size:.68rem" title="Refresh">&#8635;</button>
       </div>
-    </div>
-    <div class="card-body" id="alert-history-body">
-
-      <!-- Gate: non-subscribers see upgrade prompt -->
-      <div id="alert-history-gate" style="text-align:center;padding:16px 0;display:none">
-        <div style="font-size:.82rem;color:var(--muted)">Alert history is available for subscribers.</div>
-      </div>
-
-      <!-- Alert list -->
-      <div id="alert-history-list">
-        <div style="text-align:center;padding:20px;color:var(--muted);font-size:.78rem">Loading alerts...</div>
-      </div>
-
-      <!-- Pagination -->
-      <div id="alert-history-pagination" style="display:flex;justify-content:center;gap:8px;margin-top:12px;display:none">
-        <button id="alert-history-prev" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;cursor:pointer;padding:4px 12px;font-family:inherit;font-size:.68rem">&larr; Newer</button>
-        <span id="alert-history-page" style="font-size:.68rem;color:var(--muted);padding:4px 8px">Page 1</span>
-        <button id="alert-history-next" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;cursor:pointer;padding:4px 12px;font-family:inherit;font-size:.68rem">Older &rarr;</button>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ── SIMULATIONS ── -->
-  <p class="section-label">Simulations</p>
-  <div class="sim-grid">
-
-    <a href="earth.html" class="sim-card" aria-label="Launch Earth Magnetosphere simulation">
-      <div class="sim-thumb th-earth">
-        <span>🌍</span>
-        <span class="sim-badge badge-live">Live</span>
-      </div>
-      <div class="sim-info">
-        <p class="sim-name">Earth Magnetosphere</p>
-        <p class="sim-desc">Real-time field lines, particle trapping &amp; Van Allen belts</p>
-      </div>
-    </a>
-
-    <a href="sun.html" class="sim-card" aria-label="Launch Solar Surface simulation">
-      <div class="sim-thumb th-sun">
-        <span>☀️</span>
-        <span class="sim-badge badge-live">Live</span>
-      </div>
-      <div class="sim-info">
-        <p class="sim-name">Solar Surface</p>
-        <p class="sim-desc">Solar flares, CMEs, active regions from NOAA SWPC</p>
-      </div>
-    </a>
-
-    <a href="space-weather.html" class="sim-card" aria-label="Launch Space Weather dashboard">
-      <div class="sim-thumb th-sw">
-        <span>🌌</span>
-        <span class="sim-badge badge-live">Live</span>
-      </div>
-      <div class="sim-info">
-        <p class="sim-name">Space Weather</p>
-        <p class="sim-desc">Kp index, solar wind speed, geomagnetic storm alerts</p>
-      </div>
-    </a>
-
-    <a href="sirius-planetary.html" class="sim-card" aria-label="Launch Stellar Physics simulation">
-      <div class="sim-thumb th-star">
-        <span>⭐</span>
-        <span class="sim-badge badge-live">Live</span>
-      </div>
-      <div class="sim-info">
-        <p class="sim-name">Stellar Physics</p>
-        <p class="sim-desc">3D stellar evolution, HR diagram, spectral classification</p>
-      </div>
-    </a>
-
-    <a href="galactic-map.html" class="sim-card" aria-label="Launch Galactic Map simulation">
-      <div class="sim-thumb th-galactic">
-        <span>🌠</span>
-        <span class="sim-badge badge-live">Live</span>
-      </div>
-      <div class="sim-info">
-        <p class="sim-name">Galactic Map</p>
-        <p class="sim-desc">Milky Way structure, stellar populations &amp; arm dynamics</p>
-      </div>
-    </a>
-
-    <a href="satellite-designer.html" class="sim-card" aria-label="Launch Satellite Designer simulation">
-      <div class="sim-thumb th-satdesign">
-        <span>🛰️</span>
-        <span class="sim-badge badge-live">Live</span>
-      </div>
-      <div class="sim-info">
-        <p class="sim-name">Satellite Designer</p>
-        <p class="sim-desc">Design a craft &amp; fly thrust vs. atmospheric drag in LEO</p>
-      </div>
-    </a>
-
-  </div>
+  </section>
 
 </main>
 
@@ -1118,6 +1095,7 @@ const _imp = (m) => import(m).then(x => x, e => {
 });
 const [
     _mUL, _mSWF, _mAE, _mISE, _mOT, _mDSE, _mSL, _mTP, _mCR, _mACT, _mLS, _mMO,
+    _mLabStation, _mLabAlerts, _mLabSats, _mLabHome, _mLabPrefs,
 ] = await Promise.all([
     _imp('./js/user-location.js'),
     _imp('./js/swpc-feed.js'),
@@ -1131,6 +1109,11 @@ const [
     _imp('./js/activation.js'),
     _imp('./js/local-sky.js'),
     _imp('./js/month-outlook.js'),
+    _imp('./js/climate-lab/lab-station.js'),
+    _imp('./js/climate-lab/lab-alerts.js'),
+    _imp('./js/climate-lab/lab-satellites.js'),
+    _imp('./js/climate-lab/lab-home.js'),
+    _imp('./js/climate-lab/lab-prefs.js'),
 ]);
 // Missing export → a stub that throws when actually used, so the
 // failure surfaces inside a runCard()/runSafe() boundary rather than
@@ -1160,6 +1143,14 @@ const DailySummaryEngine = _pick(_mDSE, 'daily-summary', 'DailySummaryEngine');
 const mountLocalSky      = _pick(_mLS, 'local-sky', 'mountLocalSky', () => ({ refresh() {}, destroy() {} }));
 // month-outlook.js — weeks 3–6 probabilistic outlook; no-op controller fallback.
 const mountMonthOutlook  = _pick(_mMO, 'month-outlook', 'mountMonthOutlook', () => ({ refresh() {}, destroy() {} }));
+// climate-lab/* — the Climate Lab modules. Mount failures degrade to a
+// per-card Retry through runCard(); anchorAtHome degrades to a no-op so a
+// failed import can never block the cards that follow it.
+const mountClimateLab       = _pick(_mLabStation, 'lab-station', 'mountClimateLab');
+const mountAlertConsole     = _pick(_mLabAlerts,  'lab-alerts', 'mountAlertConsole');
+const mountSatelliteTracker = _pick(_mLabSats,    'lab-satellites', 'mountSatelliteTracker');
+const anchorAtHome          = _pick(_mLabHome,    'lab-home', 'anchorAtHome', () => null);
+const labLoadPrefs          = _pick(_mLabPrefs,   'lab-prefs', 'loadPrefs', () => ({ openAt: 'home' }));
 // saved-locations.js (its card lives on /settings now; IIFE early-returns)
 const listLocations      = _pick(_mSL, 'saved-locations', 'listLocations');
 const addLocation        = _pick(_mSL, 'saved-locations', 'addLocation');
@@ -1777,157 +1768,21 @@ if (!_auth || !_auth.signedIn) {
 }
 
 /* ════════════════════════════════════════════════════════════
-   MINI WORLD MAP CANVAS
-   Equirectangular projection, lat/lon grid, glowing user pin.
+   HOME BASE — the dashboard opens at the user's home station.
+   js/climate-lab/lab-home.js. Runs ONCE, here, BEFORE any card mounts:
+   the briefing, local-sky, outlook, impact and alert cards all read
+   ppx_user_location when they mount, so the view must already be Home.
+   Visiting another place later writes the same store and every card
+   follows 'user-location-changed' — no second location store. (The old
+   location card's 2D map + search lived here; the Home Station module
+   in #location-card replaces both.)
 ═════════════════════════════════════════════════════════════ */
-const _canvas = document.getElementById('loc-map-canvas');
-const _ctx    = _canvas.getContext('2d');
-let   _pinLat = null, _pinLon = null, _pulseT = 0, _mapRaf = null;
-
-function _resizeMap() {
-  _canvas.width  = _canvas.offsetWidth  * devicePixelRatio;
-  _canvas.height = _canvas.offsetHeight * devicePixelRatio;
-  _drawMap();
-}
-
-function _ll2xy(lat, lon) {
-  const W = _canvas.width, H = _canvas.height;
-  const x = ((lon + 180) / 360) * W;
-  const y = ((90 - lat) / 180) * H;
-  return { x, y };
-}
-
-function _drawMap() {
-  const W = _canvas.width, H = _canvas.height;
-  const ctx = _ctx;
-
-  // Background gradient
-  const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0,   '#030818');
-  bg.addColorStop(1,   '#060c24');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
-
-  // Grid lines
-  ctx.lineWidth = 1;
-  for (let lon = -180; lon <= 180; lon += 30) {
-    const { x } = _ll2xy(0, lon);
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H);
-    const prime = lon === 0;
-    ctx.strokeStyle = prime ? 'rgba(255,215,0,.35)' : 'rgba(255,255,255,.08)';
-    ctx.stroke();
-  }
-  for (let lat = -90; lat <= 90; lat += 30) {
-    const { y } = _ll2xy(lat, 0);
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y);
-    const equator  = lat === 0;
-    const tropics  = Math.abs(lat) === 30;
-    ctx.strokeStyle = equator  ? 'rgba(0,200,255,.4)'
-                    : tropics  ? 'rgba(255,140,0,.18)'
-                    :            'rgba(255,255,255,.07)';
-    ctx.stroke();
-  }
-
-  if (_pinLat !== null) {
-    // Pulse animation
-    const pulse = 0.4 + 0.3 * Math.sin(_pulseT * 3);
-    const { x, y } = _ll2xy(_pinLat, _pinLon);
-
-    // Outer glow ring
-    const ring = ctx.createRadialGradient(x, y, 0, x, y, 22 * devicePixelRatio);
-    ring.addColorStop(0,   `rgba(79,195,247,${0.18 + pulse * 0.12})`);
-    ring.addColorStop(1,   'transparent');
-    ctx.beginPath();
-    ctx.arc(x, y, 22 * devicePixelRatio, 0, Math.PI * 2);
-    ctx.fillStyle = ring;
-    ctx.fill();
-
-    // Inner dot
-    ctx.beginPath();
-    ctx.arc(x, y, 5 * devicePixelRatio, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(79,195,247,${0.75 + pulse * 0.25})`;
-    ctx.shadowBlur  = 10 * devicePixelRatio;
-    ctx.shadowColor = '#4fc3f7';
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    // Coordinates label
-    const latStr = `${Math.abs(_pinLat).toFixed(2)}°${_pinLat >= 0 ? 'N' : 'S'}`;
-    const lonStr = `${Math.abs(_pinLon).toFixed(2)}°${_pinLon >= 0 ? 'E' : 'W'}`;
-    const label  = `${latStr} ${lonStr}`;
-    ctx.font      = `${10 * devicePixelRatio}px monospace`;
-    ctx.fillStyle = 'rgba(79,195,247,.8)';
-    const tx = Math.min(x + 8 * devicePixelRatio, W - 90 * devicePixelRatio);
-    const ty = Math.max(y - 8 * devicePixelRatio, 12 * devicePixelRatio);
-    ctx.fillText(label, tx, ty);
-  } else {
-    ctx.font      = `${11 * devicePixelRatio}px 'Segoe UI',sans-serif`;
-    ctx.fillStyle = 'rgba(100,90,136,.8)';
-    ctx.textAlign = 'center';
-    ctx.fillText('Search a city or use GPS to set your location', W / 2, H / 2);
-    ctx.textAlign = 'left';
-  }
-}
-
-function _startMapAnimation() {
-  if (_mapRaf) return;
-  function tick() {
-    _pulseT += 0.04;
-    _drawMap();
-    _mapRaf = requestAnimationFrame(tick);
-  }
-  _mapRaf = requestAnimationFrame(tick);
-}
-
-function _stopMapAnimation() {
-  cancelAnimationFrame(_mapRaf);
-  _mapRaf = null;
-}
-
-/* ════════════════════════════════════════════════════════════
-   LOCATION DISPLAY
-═════════════════════════════════════════════════════════════ */
-function _fmtLatLon(lat, lon) {
-  return `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'},  `
-       + `${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`;
-}
-
-function _showLocation(loc) {
-  if (!loc) {
-    document.getElementById('loc-city-name').innerHTML = '<span class="loc-none">No location set</span>';
-    document.getElementById('loc-coords-txt').textContent = '';
-    document.getElementById('loc-time-txt').textContent   = '';
-    document.getElementById('loc-earth-btn').style.display  = 'none';
-    document.getElementById('loc-clear-btn').style.display  = 'none';
-    _pinLat = _pinLon = null;
-    _stopMapAnimation();
-    _drawMap();
-    _updateAuroraDisplay(null);
-    return;
-  }
-
-  document.getElementById('loc-city-name').textContent      = loc.city;
-  document.getElementById('loc-coords-txt').textContent     = _fmtLatLon(loc.lat, loc.lon);
-  document.getElementById('loc-earth-btn').style.display    = '';
-  document.getElementById('loc-clear-btn').style.display    = '';
-
-  _pinLat = loc.lat; _pinLon = loc.lon;
-  _startMapAnimation();
-  _updateLocalTime(loc.lon);
-  _updateAuroraDisplay(loc);
-}
-
-function _updateLocalTime(lon) {
-  // Approximate offset from meridian (±12h)
-  const offsetH = Math.round(lon / 15);
-  const now = new Date();
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  const localD = new Date(utcMs + offsetH * 3600000);
-  const hh = String(localD.getHours()).padStart(2, '0');
-  const mm = String(localD.getMinutes()).padStart(2, '0');
-  const sign = offsetH >= 0 ? '+' : '';
-  document.getElementById('loc-time-txt').textContent = `Local time ~${hh}:${mm} (UTC${sign}${offsetH})`;
-}
+let _homeBoot = null;
+runSafe('Home base', () => {
+  const openAt = labLoadPrefs().openAt;
+  _homeBoot = anchorAtHome({ auth, openAt, demo: _demoMode ? DEMO_LOCATION : null });
+  console.info('[Dashboard] home base:', { source: _homeBoot?.source, visiting: _homeBoot?.visiting });
+});
 
 /* ════════════════════════════════════════════════════════════
    KP GAUGE COLORS
@@ -1995,76 +1850,6 @@ function _updateAuroraDisplay(loc) {
     : `${vis.label} for aurora at ${loc.city}`;
   textEl.style.color = vis.color;
   locEl.textContent  = `Your latitude: ${Math.abs(loc.lat).toFixed(1)}° ${loc.lat >= 0 ? 'N' : 'S'} · Boundary: ${vis.boundaryDeg.toFixed(0)}°`;
-}
-
-/* ════════════════════════════════════════════════════════════
-   GEOCODING / GPS
-═════════════════════════════════════════════════════════════ */
-async function _doSearch() {
-  const q   = document.getElementById('loc-input').value.trim();
-  if (!q) return;
-  const btn = document.getElementById('loc-search-btn');
-  const err = document.getElementById('loc-err');
-  err.style.display = 'none';
-  btn.textContent = '…'; btn.disabled = true;
-  try {
-    const loc = await geocodeQuery(q);
-    saveUserLocation(loc);
-    document.getElementById('loc-input').value = loc.city;
-  } catch(e) {
-    err.textContent = e.message;
-    err.style.display = 'block';
-  } finally {
-    btn.textContent = '↵'; btn.disabled = false;
-  }
-}
-
-function _doGPS() {
-  const btn = document.getElementById('loc-gps-btn');
-  const err = document.getElementById('loc-err');
-  err.style.display = 'none';
-  if (!navigator.geolocation) {
-    err.textContent   = 'Geolocation not supported by this browser';
-    err.style.display = 'block';
-    return;
-  }
-  btn.textContent = '…'; btn.disabled = true;
-  navigator.geolocation.getCurrentPosition(
-    async pos => {
-      try {
-        const { latitude: lat, longitude: lon } = pos.coords;
-        // Reverse geocode via Nominatim
-        const res  = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
-          { headers: { 'Accept-Language': 'en' } }
-        );
-        const data = res.ok ? await res.json() : {};
-        const adr  = data.address ?? {};
-        const city = adr.city || adr.town || adr.village || adr.county || adr.state || 'Your location';
-        const loc  = { lat, lon, city, displayName: data.display_name || city };
-        saveUserLocation(loc);
-        document.getElementById('loc-input').value = city;
-      } catch(e) {
-        // Save coords even if reverse geocode fails
-        const { latitude: lat, longitude: lon } = pos.coords;
-        const loc = { lat, lon, city: `${lat.toFixed(2)}, ${lon.toFixed(2)}`, displayName: '' };
-        saveUserLocation(loc);
-      } finally {
-        btn.textContent = '⊕'; btn.disabled = false;
-      }
-    },
-    geoErr => {
-      const msgs = {
-        1: 'Location access denied — please allow location in browser settings',
-        2: 'Location unavailable',
-        3: 'Location request timed out'
-      };
-      err.textContent   = msgs[geoErr.code] || 'GPS error';
-      err.style.display = 'block';
-      btn.textContent = '⊕'; btn.disabled = false;
-    },
-    { timeout: 10000 }
-  );
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2277,50 +2062,68 @@ window.addEventListener('user-location-changed', () => {
    INIT
 ═════════════════════════════════════════════════════════════ */
 function initAll() {
-  // Map canvas
-  new ResizeObserver(_resizeMap).observe(_canvas);
-  _resizeMap();
-
-  // Location search events
-  document.getElementById('loc-search-btn').addEventListener('click', _doSearch);
-  document.getElementById('loc-input').addEventListener('keydown', e => { if (e.key === 'Enter') _doSearch(); });
-  document.getElementById('loc-gps-btn').addEventListener('click', _doGPS);
-  document.getElementById('loc-clear-btn').addEventListener('click', () => {
-    clearUserLocation();
-    document.getElementById('loc-input').value = '';
-    document.getElementById('loc-err').style.display = 'none';
-  });
-
-  // Sync location display whenever it changes (from this page or earth.html in same session)
-  window.addEventListener('user-location-changed', e => _showLocation(e.detail));
-
-  // Restore saved location
-  const saved = loadUserLocation();
-  if (saved) {
-    document.getElementById('loc-input').value = saved.city || '';
-    _showLocation(saved);
-  } else {
-    _showLocation(null);
-  }
+  // Aurora row on the Geospace card follows the current view.
+  _updateAuroraDisplay(loadUserLocation());
+  window.addEventListener('user-location-changed', e => _updateAuroraDisplay(e.detail));
 
   // Space weather (isolated: a dead SWPC feed degrades this card only)
   runCard('Space Weather', 'sw-card', _initSpaceWeather);
-
-  // Local time refresh every minute
-  setInterval(() => {
-    const loc = loadUserLocation();
-    if (loc) _updateLocalTime(loc.lon);
-  }, 60000);
-
-  // Pause map animation when tab hidden
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) _stopMapAnimation();
-    else if (_pinLat !== null) _startMapAnimation();
-  });
 }
 
 // All declarations complete — safe to call initAll now
-runSafe('Location card', initAll);
+runSafe('Space weather card', initAll);
+
+// ── Climate Lab modules ─────────────────────────────────────────────────────
+// Station first: the alert console listens for its 'climate-lab-station'
+// event, which fires only after the (async) station fetch — so mounting the
+// console right after is early enough.
+runCard('Home station', 'location-card', () => {
+    window.__climateLab = mountClimateLab({
+        hosts: {
+            station:   document.getElementById('location-card'),
+            bench:     document.getElementById('cl-bench-card'),
+            meteogram: document.getElementById('cl-meteogram-card'),
+            climate:   document.getElementById('cl-climate-card'),
+        },
+        auth,
+        demo: _demoMode ? DEMO_LOCATION : null,
+        listPlaces: () => listLocations({ force: false }),
+    });
+});
+runCard('Alert console', 'alert-console-card', () => {
+    mountAlertConsole({ host: document.getElementById('alert-console-card'), auth, demo: _demoMode });
+});
+runCard('Satellite tracker', 'cl-sat-card', () => {
+    window.__labSats = mountSatelliteTracker({ host: document.getElementById('cl-sat-card') });
+});
+
+// ── Lab chrome: header clocks + section-rail scrollspy ──────────────────────
+runSafe('Lab chrome', () => {
+    document.body.classList.add('cl-lab');
+    const utc = document.getElementById('cl-clock-utc');
+    const loc = document.getElementById('cl-clock-local');
+    const pad = (n) => String(n).padStart(2, '0');
+    const tick = () => {
+        const d = new Date();
+        if (utc) utc.textContent = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+        if (loc) loc.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    tick();
+    setInterval(tick, 1000);
+
+    const links = [...document.querySelectorAll('#cl-rail a[href^="#"]')];
+    const byId = new Map(links.map((a) => [a.getAttribute('href').slice(1), a]));
+    if (!('IntersectionObserver' in window) || !links.length) return;
+    const visible = new Map();
+    const io = new IntersectionObserver((entries) => {
+        for (const e of entries) visible.set(e.target.id, e.isIntersecting ? e.intersectionRatio : 0);
+        let best = null, bestR = 0;
+        for (const [id, r] of visible) if (r > bestR) { best = id; bestR = r; }
+        links.forEach((a) => a.removeAttribute('aria-current'));
+        if (best && byId.get(best)) byId.get(best).setAttribute('aria-current', 'true');
+    }, { rootMargin: '-60px 0px -45% 0px', threshold: [0, 0.1, 0.25, 0.5] });
+    for (const id of byId.keys()) { const el = document.getElementById(id); if (el) io.observe(el); }
+});
 
 // ── Onboarding Tour ─────────────────────────────────────────────────────────
 runSafe('Onboarding tour', () => {

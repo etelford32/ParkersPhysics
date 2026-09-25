@@ -1,20 +1,19 @@
 //! SGP4/SDP4 Orbital Propagator — WebAssembly Module
 //!
-//! Implements the Simplified General Perturbations model (SGP4) for
-//! propagating Two-Line Element sets (TLEs) to arbitrary future times.
+//! Propagates Two-Line Element sets / CCSDS OMM mean elements to arbitrary
+//! times, plus the site's batch, registry, trajectory, drag-decay and
+//! NRLMSISE-00 helpers, exported to JavaScript via wasm-bindgen.
 //!
-//! Based on:
-//!   Hoots & Roehrich (1980) "Spacetrack Report No. 3"
-//!   Vallado et al. (2006) "Revisiting Spacetrack Report #3" — AIAA 2006-6753
-//!
-//! Key features:
-//!   - Full SGP4 for near-Earth orbits (period < 225 min)
-//!   - SDP4 deep-space extensions (period ≥ 225 min) — lunar/solar perturbations
-//!   - J2, J3, J4 zonal harmonics (Earth oblateness)
-//!   - Atmospheric drag (B* parameter from TLE)
-//!   - Returns TEME (True Equator Mean Equinox) position & velocity vectors
-//!
-//! Exported to JavaScript via wasm-bindgen.
+//! The propagator is the `sgp4` crate, a pure-Rust transcription of
+//!   Vallado et al. (2006) "Revisiting Spacetrack Report #3", AIAA 2006-6753
+//! (itself built on Hoots & Roehrich 1980, Spacetrack Report No. 3):
+//!   - SGP4 for near-Earth orbits and SDP4 deep-space (period ≥ 225 min),
+//!     lunisolar terms and 12 h / 24 h resonances included
+//!   - WGS-72, the AFSPC epoch and sidereal-time expressions, Lyddane fix
+//!   - TEME (True Equator Mean Equinox) position (km) and velocity (km/s)
+//! `cargo test` pins it to every published row of the Vallado verification
+//! set (tests/fixtures/sgp4/). See the "SGP4 internal state" note for why the
+//! hand-rolled kernel this replaced is gone.
 
 use wasm_bindgen::prelude::*;
 use std::f64::consts::PI;
@@ -25,21 +24,14 @@ use std::f64::consts::PI;
 mod nrlmsise00;
 
 // ── WGS-72 constants (SGP4 standard, NOT WGS-84) ──────────────────────────
+// Used by the trajectory / osculating-element helpers below; the propagator
+// carries its own copy (sgp4::WGS72).
 
 const MU: f64 = 398600.8;            // km³/s² — gravitational parameter
 const RE: f64 = 6378.135;            // km — Earth equatorial radius
-const KE: f64 = 0.0743669161;        // (RE³/MU)^0.5 in min⁻¹  = √(μ)/RE^1.5 in er/min
-const J2: f64 = 0.001082616;         // second zonal harmonic
-const J3: f64 = -0.00000253881;      // third zonal harmonic
-const J4: f64 = -0.00000165597;      // fourth zonal harmonic
-const CK2: f64 = J2 / 2.0;          // 5.413080e-4
-const CK4: f64 = -3.0 * J4 / 8.0;   // 6.209887e-7
-const QOMS2T: f64 = 1.880279e-09;    // (q₀ − s)⁴ in (er)⁴
-const S: f64 = 1.01222928;           // s parameter in er  (1 + 78/RE)
 const TWOPI: f64 = 2.0 * PI;
 const DEG2RAD: f64 = PI / 180.0;
 const MIN_PER_DAY: f64 = 1440.0;
-const XJ3OJ2: f64 = J3 / J2;        // -2.34507e-3
 
 // ── TLE parsed elements ────────────────────────────────────────────────────
 
@@ -61,24 +53,31 @@ struct TleElements {
 }
 
 // ── SGP4 internal state ────────────────────────────────────────────────────
+//
+// The propagator itself is the `sgp4` crate — a pure-Rust transcription of
+// Vallado et al. 2006's reference SGP4/SDP4, deep-space lunisolar and
+// resonance terms included. It REPLACED a hand-rolled kernel on 2026-09-24
+// that claimed "full SGP4 + SDP4" but had no deep-space code at all, dropped
+// the a/r factor from the short-period position (so every position was
+// distorted), carried incomplete secular rates and mangled drag
+// coefficients, and refused e < 1e-6 as "decayed": 5 260 km off at epoch on
+// Vallado case 00005, 1.2e8 km at worst across the verification set, and
+// 47-49 minute ISS "passes" on the dashboard. `cargo test` now pins every
+// published row of that set (tests/fixtures/sgp4/). Do not hand-roll SGP4
+// here again; if the crate ever needs replacing, the gate says whether the
+// replacement is right.
+//
+// WGS-72 + the AFSPC sidereal-time and epoch expressions: the model
+// CelesTrak / Space-Track element sets are FITTED with. Propagation uses the
+// crate's standard `propagate`, which carries Vallado's LYDDANE FIX, not
+// `propagate_afspc_compatibility_mode`. The two differ only for deep-space
+// orbits below 0.2 rad inclination, where AFSPC's AcTan() drifts past
+// 280.5 min. Verification case 23599 is that orbit: the AFSPC mode missed
+// tcppver.out by 0.96 km there (measured) and this mode matches it.
 
 struct Sgp4State {
-    // Initialized constants
-    a0: f64, n0: f64, // recovered semi-major axis and mean motion
-    // Secular rates
-    mdot: f64, nodedot: f64, argpdot: f64,
-    // Drag terms
-    c1: f64, c4: f64, c5: f64, d2: f64, d3: f64, d4: f64,
-    t2cof: f64, t3cof: f64, t4cof: f64, t5cof: f64,
-    // Orbital elements at epoch
     tle: TleElements,
-    // Flags
-    deep_space: bool,
-    // Additional precomputed values
-    eta: f64, aodp: f64, perigee: f64,
-    sinI0: f64, cosI0: f64, x1mth2: f64, x7thm1: f64,
-    xlcof: f64, aycof: f64, x3thm1: f64,
-    omgcof: f64, xmcof: f64, xnodcf: f64, delmo: f64,
+    constants: sgp4::Constants,
 }
 
 // ── TLE Parser ─────────────────────────────────────────────────────────────
@@ -218,225 +217,30 @@ fn parse_tle_float(s: &str) -> Result<f64, String> {
     Ok(sign * mantissa * 10.0_f64.powf(exp))
 }
 
-// ── SGP4 Initialization ───────────────────────────────────────────────────
+// ── SGP4 Initialization / Propagation ─────────────────────────────────────
 
 fn sgp4_init(tle: &TleElements) -> Result<Sgp4State, String> {
-    let n0 = tle.mean_motion;
-    let e0 = tle.ecc;
-    let i0 = tle.incl;
-    let bstar = tle.bstar;
-
-    if e0 >= 1.0 || e0 < 0.0 { return Err("Invalid eccentricity".into()); }
-    if n0 <= 0.0 { return Err("Invalid mean motion".into()); }
-
-    let cosI0 = i0.cos();
-    let sinI0 = i0.sin();
-    let x1mth2 = 1.0 - cosI0 * cosI0;  // sin²i
-    let x3thm1 = 3.0 * cosI0 * cosI0 - 1.0;
-    let x7thm1 = 7.0 * cosI0 * cosI0 - 1.0;
-
-    // Recover original mean motion (n₀") and semi-major axis (a₀")
-    let a1 = (KE / n0).powf(2.0 / 3.0);
-    let delta1 = 1.5 * CK2 * x3thm1 / (a1 * a1 * (1.0 - e0 * e0).powf(1.5));
-    let a0 = a1 * (1.0 - delta1 / 3.0 - delta1 * delta1 - 134.0 * delta1.powi(3) / 81.0);
-    let delta0 = 1.5 * CK2 * x3thm1 / (a0 * a0 * (1.0 - e0 * e0).powf(1.5));
-    let n0pp = n0 / (1.0 + delta0);
-    let a0pp = a0 / (1.0 - delta0);
-
-    let perigee = (a0pp * (1.0 - e0) - 1.0) * RE;  // km
-
-    // Check deep space (period > 225 min)
-    let period = TWOPI / n0pp;  // minutes
-    let deep_space = period >= 225.0;
-
-    // Atmospheric drag parameter
-    let s_star = if perigee < 156.0 {
-        let ss = perigee - 78.0;
-        if ss < 20.0 { 20.0 } else { ss }
-    } else {
-        78.0
-    };
-    let s_param = s_star / RE + 1.0;
-
-    let xi = 1.0 / (a0pp - s_param);
-    let eta = a0pp * e0 * xi;
-    let eta2 = eta * eta;
-    let eeta = e0 * eta;
-    let psisq = (1.0 - eta2).abs();
-    let coef = QOMS2T * xi.powi(4) * (RE / (s_param * RE)).powi(4) / QOMS2T * QOMS2T;
-    // Simplified: use qoms2t directly
-    let qoms24 = ((120.0 - s_star) / RE).powi(4);
-    let coef_simple = qoms24 * xi.powi(4);
-
-    let c2 = coef_simple * n0pp * (a0pp * (1.0 + 1.5 * eta2 + eeta * (4.0 + eta2))
-        + 0.75 * CK2 * xi / psisq * x3thm1 * (8.0 + 3.0 * eta2 * (8.0 + eta2)));
-    let c1 = bstar * c2;
-
-    let c4 = 2.0 * n0pp * coef_simple * a0pp * (1.0 - eta2).abs()
-        * (eta * (2.0 + 0.5 * eta2) + e0 * (0.5 + 2.0 * eta2)
-        - 2.0 * CK2 * xi / (a0pp * psisq)
-            * (-3.0 * x3thm1 * (1.0 - 2.0 * eeta + eta2 * (1.5 - 0.5 * eeta))
-               + 0.75 * x1mth2 * (2.0 * eta2 - eeta * (1.0 + eta2))
-                   * (2.0 * tle.argp).cos()));
-
-    let c5 = 2.0 * coef_simple * a0pp * (1.0 - eta2).abs()
-        * (1.0 + 2.75 * (eta2 + eeta) + eeta * eta2);
-
-    // Secular rates
-    let temp1 = CK2 * 1.5;
-    let temp2 = CK2 * CK2 * 0.5;
-    let temp3 = CK4 * -0.46875;
-
-    let mdot = n0pp + 0.5 * temp1 * (1.0 - e0 * e0).sqrt().recip().powi(3) * x3thm1;
-    let argpdot = -0.5 * temp1 * (5.0 * cosI0 * cosI0 - 1.0)
-        / (1.0 - e0 * e0).sqrt().powi(3) * n0pp;
-    let nodedot = -temp1 * cosI0 / (1.0 - e0 * e0).sqrt().powi(3) * n0pp;
-
-    // Drag terms
-    let d2 = 4.0 * a0pp * xi * c1 * c1;
-    let d3 = d2 * xi * c1 * (17.0 * a0pp + s_param) / 3.0;
-    let d4 = 0.5 * d2 * xi * xi * c1 * c1 * a0pp * (221.0 * a0pp + 31.0 * s_param) / 3.0;
-
-    let t2cof = 1.5 * c1;
-    let t3cof = d2 + 2.0 * c1 * c1;
-    let t4cof = 0.25 * (3.0 * d3 + c1 * (12.0 * d2 + 10.0 * c1 * c1));
-    let t5cof = 0.2 * (3.0 * d4 + 12.0 * c1 * d3 + 6.0 * d2 * d2 + 15.0 * c1 * c1 * (2.0 * d2 + c1 * c1));
-
-    let xlcof = if i0.abs() > 1e-12 {
-        -0.25 * XJ3OJ2 * sinI0 * (3.0 + 5.0 * cosI0) / (1.0 + cosI0)
-    } else {
-        -0.25 * XJ3OJ2 * sinI0 * (3.0 + 5.0 * cosI0) / 1e-12
-    };
-    let aycof = -0.5 * XJ3OJ2 * sinI0;
-
-    let delmo = (1.0 + eta * tle.mean_anom.cos()).powi(3);
-    let xmcof = if e0.abs() > 1e-12 { -coef_simple * bstar * RE / (2.0 * eeta) } else { 0.0 };
-    let omgcof = bstar * c2 * (tle.argp).cos();  // simplified
-    let xnodcf = 3.5 * (1.0 - e0 * e0) * nodedot * c1;
-
-    Ok(Sgp4State {
-        a0: a0pp, n0: n0pp,
-        mdot, nodedot, argpdot,
-        c1, c4, c5, d2, d3, d4,
-        t2cof, t3cof, t4cof, t5cof,
-        tle: tle.clone(),
-        deep_space,
-        eta, aodp: a0pp, perigee,
-        sinI0, cosI0, x1mth2, x7thm1,
-        xlcof, aycof, x3thm1,
-        omgcof, xmcof, xnodcf, delmo,
-    })
+    if !(0.0..1.0).contains(&tle.ecc) { return Err("Invalid eccentricity".into()); }
+    if !(tle.mean_motion > 0.0) { return Err("Invalid mean motion".into()); }
+    // tle.mean_motion is already rad/min — the Kozai mean motion SGP4 wants.
+    let orbit = sgp4::Orbit::from_kozai_elements(
+        &sgp4::WGS72, tle.incl, tle.raan, tle.ecc, tle.argp, tle.mean_anom, tle.mean_motion,
+    ).map_err(|e| format!("SGP4 init: {e:?}"))?;
+    // Years since J2000 by the AFSPC expression (JD − 2451545) / 365.25;
+    // tle.epoch_jd is exact for both the TLE and the OMM entry points.
+    let epoch = (tle.epoch_jd - 2_451_545.0) / 365.25;
+    let constants = sgp4::Constants::new(
+        sgp4::WGS72, sgp4::afspc_epoch_to_sidereal_time, epoch, tle.bstar, orbit,
+    ).map_err(|e| format!("SGP4 init: {e:?}"))?;
+    Ok(Sgp4State { tle: tle.clone(), constants })
 }
 
-// ── SGP4 Propagation ──────────────────────────────────────────────────────
-
+/// TEME position (km) and velocity (km/s) `tsince_min` minutes from epoch.
 fn sgp4_propagate(state: &Sgp4State, tsince_min: f64) -> Result<([f64; 3], [f64; 3]), String> {
-    let t = tsince_min;
-    let tle = &state.tle;
-
-    // Secular effects
-    let xmdf = tle.mean_anom + state.mdot * t;
-    let argpdf = tle.argp + state.argpdot * t;
-    let nodedf = tle.raan + state.nodedot * t;
-
-    let tsq = t * t;
-    let node = nodedf + state.xnodcf * tsq;
-    let argp;
-    let e;
-    let a;
-    let xl;
-
-    // Near-Earth SGP4
-    let tempa = 1.0 - state.c1 * t;
-    let tempe = tle.bstar * state.c4 * t;
-    let templ = state.t2cof * tsq;
-
-    a = state.aodp * tempa * tempa;
-    e = tle.ecc - tempe;
-    xl = xmdf + argpdf + node + state.n0 * templ;
-    argp = argpdf;
-
-    if e < 1e-6 { return Err("Satellite decayed".into()); }
-    if a < 0.95 { return Err("Satellite re-entered".into()); }
-
-    // Kepler's equation (Newton-Raphson)
-    let axn = e * argp.cos();
-    let ayn = e * argp.sin() + state.aycof;
-    let xlt = xl + state.xlcof * axn;
-
-    // Solve Kepler: U = xlt - node
-    let u = (xlt - node) % TWOPI;
-    let mut eo1 = u;
-    for _ in 0..10 {
-        let sineo1 = eo1.sin();
-        let coseo1 = eo1.cos();
-        let f = u - eo1 + axn * sineo1 - ayn * coseo1;
-        let fp = 1.0 - axn * coseo1 - ayn * sineo1;
-        let delta = f / fp;
-        eo1 -= delta;
-        if delta.abs() < 1e-12 { break; }
-    }
-
-    let sineo1 = eo1.sin();
-    let coseo1 = eo1.cos();
-
-    // Short-period corrections
-    let ecose = axn * coseo1 + ayn * sineo1;
-    let esine = axn * sineo1 - ayn * coseo1;
-    let el2 = axn * axn + ayn * ayn;
-    let pl = a * (1.0 - el2);
-    if pl < 0.0 { return Err("Semi-latus rectum negative".into()); }
-
-    let r = a * (1.0 - ecose);
-    let rdot = KE * a.sqrt() * esine / r;
-    let rfdot = KE * pl.sqrt() / r;
-
-    let cosu = (coseo1 - axn + ayn * esine / (1.0 + (1.0 - el2).sqrt())) / r;
-    let sinu = (sineo1 - ayn - axn * esine / (1.0 + (1.0 - el2).sqrt())) / r;
-    let u_angle = sinu.atan2(cosu);
-
-    let sin2u = 2.0 * sinu * cosu;
-    let cos2u = 2.0 * cosu * cosu - 1.0;
-
-    let rk = r * (1.0 - 1.5 * CK2 * (1.0 - el2).sqrt() / (pl) * state.x3thm1)
-        + 0.5 * CK2 / pl * state.x1mth2 * cos2u;
-    let uk = u_angle - 0.25 * CK2 / (pl * pl) * state.x7thm1 * sin2u;
-    let nodek = node + 1.5 * CK2 * state.cosI0 / (pl * pl) * sin2u;
-    let ik = state.tle.incl + 1.5 * CK2 * state.sinI0 * state.cosI0 / (pl * pl) * cos2u;
-
-    // Orientation vectors (TEME frame)
-    let sinuk = uk.sin();
-    let cosuk = uk.cos();
-    let sinik = ik.sin();
-    let cosik = ik.cos();
-    let sinnk = nodek.sin();
-    let cosnk = nodek.cos();
-
-    let mx = -sinnk * cosik;
-    let my = cosnk * cosik;
-
-    let ux = mx * sinuk + cosnk * cosuk;
-    let uy = my * sinuk + sinnk * cosuk;
-    let uz = sinik * sinuk;
-
-    let vx = mx * cosuk - cosnk * sinuk;
-    let vy = my * cosuk - sinnk * sinuk;
-    let vz = sinik * cosuk;
-
-    // Position (km) and velocity (km/s) in TEME
-    let pos = [
-        rk * ux * RE,
-        rk * uy * RE,
-        rk * uz * RE,
-    ];
-
-    let vel = [
-        (rdot * ux + rfdot * vx) * RE / 60.0,  // er/min → km/s
-        (rdot * uy + rfdot * vy) * RE / 60.0,
-        (rdot * uz + rfdot * vz) * RE / 60.0,
-    ];
-
-    Ok((pos, vel))
+    let p = state.constants
+        .propagate(sgp4::MinutesSinceEpoch(tsince_min))
+        .map_err(|e| e.to_string())?;
+    Ok((p.position, p.velocity))
 }
 
 // ── WASM Exports ──────────────────────────────────────────────────────────
@@ -1191,6 +995,102 @@ mod tests {
             assert!((tle_pos[i] - omm_pos[i]).abs() < 1e-9);
             assert!((tle_vel[i] - omm_vel[i]).abs() < 1e-12);
         }
+    }
+
+    // ── Vallado et al. 2006 verification (tests/fixtures/sgp4/SOURCES.md) ──
+    // Every published row of every case, in TEME km and km/s. This is the
+    // gate the old hand-rolled kernel never had: its only test compared the
+    // TLE and OMM entry points with EACH OTHER, so a kernel 5 260 km wrong at
+    // epoch passed it.
+    const VER_TLE: &str = include_str!("../../tests/fixtures/sgp4/SGP4-VER.TLE");
+    const VER_OUT: &str = include_str!("../../tests/fixtures/sgp4/tcppver.out");
+
+    /// (norad, [t, x, y, z, vx, vy, vz] per row), in file order.
+    fn reference_cases() -> Vec<(u32, Vec<[f64; 7]>)> {
+        let mut cases: Vec<(u32, Vec<[f64; 7]>)> = Vec::new();
+        for line in VER_OUT.lines() {
+            let tok: Vec<&str> = line.split_whitespace().collect();
+            if tok.len() == 2 && tok[1] == "xx" {
+                cases.push((tok[0].parse().expect("case id"), Vec::new()));
+            } else if tok.len() >= 7 {
+                let mut row = [0.0; 7];
+                for (i, v) in tok[..7].iter().enumerate() { row[i] = v.parse().expect("number"); }
+                cases.last_mut().expect("row before first case").1.push(row);
+            }
+        }
+        cases
+    }
+
+    /// (line1, line2 truncated to 69 columns) in file order.
+    fn verification_tles() -> Vec<(String, String)> {
+        let lines: Vec<&str> = VER_TLE.lines().filter(|l| !l.starts_with('#')).collect();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i + 1 < lines.len() {
+            if lines[i].starts_with("1 ") && lines[i + 1].starts_with("2 ") {
+                out.push((lines[i][..69].to_string(), lines[i + 1][..69].to_string()));
+                i += 2;
+            } else { i += 1; }
+        }
+        out
+    }
+
+    /// Rows the reference prints that we REFUSE instead, each asserted to be
+    /// an error (never a silently different number). 33334 is Vallado's
+    /// "try and check error code 2" case, a 0.00001 rev/day orbit whose
+    /// perturbed eccentricity is −122 at epoch. The C code prints one t = 0
+    /// state before failing at t = 1; the sgp4 crate (and so this kernel)
+    /// refuses at t = 0, which its own reference records as "diverging
+    /// perturbed eccentricity". Refusing a non-physical element set lets JS
+    /// fall back instead of drawing a fictitious orbit.
+    const KNOWN_REFUSALS: &[(u32, f64)] = &[(33334, 0.0)];
+
+    #[test]
+    fn matches_vallado_2006_verification_vectors() {
+        let cases = reference_cases();
+        let tles = verification_tles();
+        assert_eq!(cases.len(), tles.len(), "one reference case per TLE");
+        assert!(cases.len() >= 30, "the full verification set, not a subset");
+
+        let (mut rows, mut worst_r, mut worst_v) = (0usize, 0.0f64, 0.0f64);
+        let mut failures = Vec::new();
+        for ((norad, ref_rows), (l1, l2)) in cases.iter().zip(tles.iter()) {
+            assert_eq!(l1[2..7].trim().parse::<u32>().ok(), Some(*norad), "cases stay aligned");
+            let state = match parse_tle(l1, l2).and_then(|e| sgp4_init(&e)) {
+                Ok(s) => s,
+                Err(e) => {
+                    if !ref_rows.is_empty() { failures.push(format!("{norad}: init failed ({e}) but reference has {} rows", ref_rows.len())); }
+                    continue;
+                }
+            };
+            for r in ref_rows {
+                if KNOWN_REFUSALS.contains(&(*norad, r[0])) {
+                    if sgp4_propagate(&state, r[0]).is_ok() {
+                        failures.push(format!("{norad} t={}: expected a refusal, got a state", r[0]));
+                    }
+                    continue;
+                }
+                match sgp4_propagate(&state, r[0]) {
+                    Ok((p, v)) => {
+                        let dr = ((p[0] - r[1]).powi(2) + (p[1] - r[2]).powi(2) + (p[2] - r[3]).powi(2)).sqrt();
+                        let dv = ((v[0] - r[4]).powi(2) + (v[1] - r[5]).powi(2) + (v[2] - r[6]).powi(2)).sqrt();
+                        worst_r = worst_r.max(dr);
+                        worst_v = worst_v.max(dv);
+                        rows += 1;
+                        // 1 m and 1 mm/s. The reference prints 8 decimals of km
+                        // and 9 of km/s; this leaves room only for float
+                        // ordering differences between two correct codes.
+                        if dr > 1e-3 || dv > 1e-6 {
+                            failures.push(format!("{norad} t={}: |dr| {:.6} km, |dv| {:.9} km/s", r[0], dr, dv));
+                        }
+                    }
+                    Err(e) => failures.push(format!("{norad} t={}: propagate failed ({e}) but the reference has a row", r[0])),
+                }
+            }
+        }
+        eprintln!("Vallado verification: {} cases, {} rows, worst |dr| {:.3e} km, worst |dv| {:.3e} km/s", cases.len(), rows, worst_r, worst_v);
+        assert!(failures.is_empty(), "{} mismatches, first 10:\n{}", failures.len(), failures.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
+        assert!(rows > 500, "compared {rows} rows");
     }
 
     #[test]

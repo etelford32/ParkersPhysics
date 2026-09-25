@@ -99,7 +99,13 @@ async function _loadWasmSgp4() {
 }
 
 // Try to load WASM immediately (non-blocking)
-_loadWasmSgp4();
+const _wasmReady = _loadWasmSgp4();
+
+/** Resolves (with the module, or null if it could not load) once the WASM
+ *  load has settled. Callers that must use ONE propagator for a whole
+ *  computation (js/climate-lab/lab-satellites.js) wait on this, because
+ *  propagate() silently uses the JS path until the WASM arrives. */
+export function whenWasmSettled() { return _wasmReady; }
 
 /** Check if WASM SGP4 is loaded. */
 export function isWasmLoaded() { return _wasmSgp4 !== null; }
@@ -185,8 +191,16 @@ export function canBatchPropagate(tle) {
 // This is a simplified propagator for when the Rust WASM module isn't loaded.
 // Uses the same Keplerian mean motion + J2 secular perturbations, but skips
 // the full SGP4 drag and deep-space corrections. Good to ~5 km for LEO.
-
-function jsFallbackPropagate(tle, tsince_min) {
+//
+// Exported for callers that need a synchronous propagator with no WASM wait.
+// Measured against Vallado et al. 2006's SGP4 verification vectors it lands
+// 7–18 km at epoch and ~60–110 km after 6–12 h (no drag) — fine for pass
+// times, not for conjunction-grade work. The WASM kernel is the accurate
+// path: since 2026-09-24 it is the `sgp4` crate and matches every Vallado
+// row to < 1 m (tests/sgp4-vallado.mjs). Before that it was a broken
+// hand-rolled SGP4 (5 260 km off at epoch), which is why the dashboard and
+// satellites.html briefly routed around it.
+export function jsFallbackPropagate(tle, tsince_min) {
     const n0 = tle.mean_motion * TWOPI / MIN_PER_DAY;  // rad/min
     const e0 = tle.eccentricity;
     const i0 = tle.inclination * DEG2RAD;
@@ -330,6 +344,12 @@ export class SatelliteTracker {
      */
     constructor(parent, earthRadius, { maxSatellites = 50000, showOrbits = true } = {}) {
         this._parent = parent;
+        // HEADLESS when parent is null: catalogue + propagation + conjunction
+        // screening with nothing attached to a scene and no render-propagation
+        // worker. js/conjunction-alert.js constructs it this way; before this
+        // existed `parent.add` threw a TypeError there, the monitor swallowed
+        // it as a console.warn, and conjunction screening never ran once.
+        this._headless = !parent;
         this._earthR = earthRadius;
         this._maxSats = maxSatellites;
         this._showOrbits = showOrbits;
@@ -341,7 +361,7 @@ export class SatelliteTracker {
         this._groups = new Map(); // group name → { visible, count, color }
         this._group = new THREE.Group();
         this._group.name = 'satellites';
-        parent.add(this._group);
+        if (parent) parent.add(this._group);
 
         // Per-vertex color material (replaces uniform cyan)
         this._dotMat = new THREE.PointsMaterial({
@@ -408,7 +428,7 @@ export class SatelliteTracker {
         this._workerInFlight  = false;
         this._workerFrameId   = 0;
         this._workerLastFrame = 0;          // most recent frameId that landed
-        this._workerEnabled   = (typeof Worker !== 'undefined');
+        this._workerEnabled   = !this._headless && (typeof Worker !== 'undefined');
 
         // SAB fast path. crossOriginIsolated requires COOP/COEP to be
         // set on the document; vercel.json + dev-server.mjs add them
@@ -426,7 +446,7 @@ export class SatelliteTracker {
         // could in principle overlap a worker write — bounded but
         // visually torn. With it, we just defer the upload one frame
         // when the writing flag is set.
-        const isolated = typeof self !== 'undefined'
+        const isolated = !this._headless && typeof self !== 'undefined'
             && self.crossOriginIsolated
             && typeof SharedArrayBuffer !== 'undefined';
         this._posSab        = null;
@@ -471,7 +491,7 @@ export class SatelliteTracker {
         this._shellGroup = new THREE.Group();
         this._shellGroup.name = 'orbital-shells';
         this._shellGroup.visible = false;
-        parent.add(this._shellGroup);
+        if (parent) parent.add(this._shellGroup);
 
         // Optional single-satellite highlight (e.g. pin "ISS" out of the
         // stations group). Lazily built on the first setHighlight() call.
@@ -1930,8 +1950,12 @@ export class SatelliteTracker {
         }
 
         if (!targetPositions) {
-            // JS fallback — propagate one step at a time
-            targetPositions = times.map(t => propagate(target.tle, t));
+            // JS fallback — propagate one step at a time. Array.from, NOT
+            // times.map: `times` is a Float64Array, and a typed array's map
+            // returns a Float64Array, coercing every {x,y,z} to NaN — every
+            // sample was then skipped and the screen returned [] whenever the
+            // WASM was not loaded (found 2026-09-24; tests/conjunction-monitor.spec.js).
+            targetPositions = Array.from(times, t => propagate(target.tle, t));
             console.debug(`[Conjunction] Target propagated via JS fallback: ${nSteps} steps`);
         }
 

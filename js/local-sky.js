@@ -41,7 +41,8 @@ const DATA_TTL_MS   = 10 * 60_000;   // re-pull point weather at most every 10 m
 // Compact WMO weather-code labels (Open-Meteo's code set). Kept local rather
 // than importing trip-planner.js's weatherCodeLabel — that module pulls three
 // transitive deps and has historically been a single point of failure for the
-// dashboard (see the resilient-import block in dashboard.html).
+// dashboard (see the resilient-import block in dashboard.html). Exported as
+// WMO_LABELS so the Climate Lab (js/climate-lab/) reads this one copy.
 const WMO = {
     0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
     45: 'Fog', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle',
@@ -79,6 +80,8 @@ const round = (v, d = 0) => {
     const f = 10 ** d;
     return Number.isFinite(v) ? Math.round(v * f) / f : null;
 };
+
+export { WMO as WMO_LABELS };
 
 // ── Public mount ────────────────────────────────────────────────────────────
 

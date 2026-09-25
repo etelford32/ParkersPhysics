@@ -163,6 +163,20 @@ const TYPE_SPECS = Object.freeze({
         build:       buildMarineParams,
         cacheTier:   'forecast',
     },
+    // The dashboard's Climate Lab (js/climate-lab/lab-feed.js): one call per
+    // home station that feeds every instrument tile and the meteogram. SI
+    // units on purpose — the lab kernel works in °C / m/s / mm / hPa and
+    // converts only for display — plus one PAST day, because a barometer
+    // without its 3-hour tendency and a rain gauge without its trailing
+    // 24 h total are not instruments. Fixed at 3 forecast days so every
+    // lab visitor at a place shares ONE cache key.
+    lab: {
+        defaultDays: 3,
+        maxDays:     3,
+        upstream:    OPEN_METEO_FORECAST,
+        build:       buildLabParams,
+        cacheTier:   'forecast',
+    },
     // Historical daily temperatures — feeds temp-forecast.js's local
     // ridge-regression model. The client requests N days of lookback via
     // `days`; we clamp to [14, 365] because <14 days can't fit a
@@ -252,6 +266,51 @@ function buildHourlyParams(lat, lon, days) {
         wind_speed_unit:  'mph',
         timezone:         'auto',
         forecast_days:    String(days),
+    });
+}
+
+/**
+ * Climate Lab station feed (see the `lab` TYPE_SPECS entry). Every hourly
+ * variable is also requested as `current` so the bench reads the model's
+ * 15-minute current state rather than the top of the hour.
+ *
+ *   · `surface_pressure` (station) AND `pressure_msl` (sea level) both: the
+ *     barometer shows sea level, but moist-air density, mixing ratio and
+ *     density altitude are only defined at STATION pressure — the channel-P
+ *     confusion CLAUDE.md records for EarthView is exactly this pair.
+ *   · `timeformat=unixtime`: epoch seconds, so a station on another
+ *     continent needs no local-time string parsing; `utc_offset_seconds`
+ *     in the response gives the station's calendar day.
+ *   · `past_days=1`: the trailing 24 h behind "now" for the barometric
+ *     tendency, the rain gauge's trailing total and the sparklines.
+ */
+function buildLabParams(lat, lon, days) {
+    const hourly = [
+        'temperature_2m', 'relative_humidity_2m', 'dew_point_2m', 'apparent_temperature',
+        'precipitation_probability', 'precipitation', 'weather_code',
+        'pressure_msl', 'surface_pressure',
+        'cloud_cover', 'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
+        'visibility', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
+        'uv_index', 'shortwave_radiation', 'is_day',
+        'soil_temperature_0cm', 'soil_moisture_0_to_1cm',
+    ];
+    return new URLSearchParams({
+        latitude:  lat.toFixed(COORD_DECIMALS),
+        longitude: lon.toFixed(COORD_DECIMALS),
+        current:   hourly.filter((v) => v !== 'precipitation_probability').join(','),
+        hourly:    hourly.join(','),
+        daily: [
+            'temperature_2m_max', 'temperature_2m_min',
+            'precipitation_sum', 'precipitation_probability_max',
+            'sunrise', 'sunset', 'daylight_duration', 'sunshine_duration',
+            'uv_index_max', 'shortwave_radiation_sum', 'et0_fao_evapotranspiration',
+            'wind_speed_10m_max', 'wind_gusts_10m_max', 'wind_direction_10m_dominant',
+        ].join(','),
+        wind_speed_unit: 'ms',
+        timeformat:      'unixtime',
+        timezone:        'auto',
+        past_days:       '1',
+        forecast_days:   String(days),
     });
 }
 

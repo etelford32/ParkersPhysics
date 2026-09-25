@@ -4125,7 +4125,7 @@ import './js/telemetry.js';
         <div class="ed-meta"  id="ed-meta"></div>
         <div class="ed-actions">
             <button class="ed-btn" id="ed-save-btn" type="button">Save as location</button>
-            <button class="ed-btn secondary" id="ed-open-dash" type="button" title="Open dashboard">Dashboard</button>
+            <button class="ed-btn secondary" id="ed-open-dash" type="button" title="Manage saved locations">Locations</button>
         </div>
         <div class="ed-msg" id="ed-msg"></div>
     </div>
@@ -12782,7 +12782,7 @@ function _hideEventDetail() {
 }
 
 _ed.closeBtn?.addEventListener('click', _hideEventDetail);
-_ed.openBtn?.addEventListener('click', () => { window.location.href = 'dashboard.html#saved-locations-card'; });
+_ed.openBtn?.addEventListener('click', () => { window.location.href = 'settings.html#saved-locations'; });
 
 // Save → addLocation() with auth + plan guards
 _ed.saveBtn?.addEventListener('click', async () => {
@@ -12838,8 +12838,8 @@ _ed.saveBtn?.addEventListener('click', async () => {
 
     if (res.ok) {
         _ed.saveBtn.textContent = 'Saved ✓';
-        _setEdMsg('Saved to your dashboard. Configure alert thresholds from there.', '');
-        _ed.msg.innerHTML += ` <a class="ed-upsell" href="dashboard.html#saved-locations-card">Open dashboard →</a>`;
+        _setEdMsg('Saved to your locations. Configure its alert thresholds in Settings.', '');
+        _ed.msg.innerHTML += ` <a class="ed-upsell" href="settings.html#saved-locations">Manage locations →</a>`;
     } else if (res.limitReached) {
         _ed.saveBtn.disabled    = false;
         _ed.saveBtn.textContent = 'Save as location';
