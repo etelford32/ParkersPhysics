@@ -24,6 +24,12 @@ import { MARS_LANDMARKS } from '../js/mars-landmarks-data.js';
  *      site by a drawn-relief budget; Jezero keeps its documented 18×.
  *   5. SEASON. The analytic Ls was anchored 61 days early and the live Horizons
  *      column was misnamed, so production read "Ls 30°" at Ls 358°.
+ *   6. NO MAPPING CAMERA. Below the orbit floor the only camera was the tilted
+ *      pilot view, with synthesized craters and a geology tint painted over the
+ *      imagery, and the imagery footprint was pinned to the patch centre (so a
+ *      pan slid the view off the streamed tiles). The MAP camera looks straight
+ *      down, pans like a slippy map, draws the imagery as published, and the
+ *      lower-right cluster drives it.
  *
  * Every Mars feed is aborted: the page must do all of this on its fallbacks.
  */
@@ -50,7 +56,7 @@ function collectPageErrors(page) {
     return errors;
 }
 
-async function bootMars(page, { width = 1440, height = 900 } = {}) {
+async function bootMars(page, { width = 1440, height = 900, tiles = null } = {}) {
     await page.setViewportSize({ width, height });
     // Consent answered up front: the banner sits over the bottom of the map.
     await page.addInitScript(() => {
@@ -63,7 +69,8 @@ async function bootMars(page, { width = 1440, height = 900 } = {}) {
     await page.route('**/api/mars/ephemeris**', route => route.abort());
     await page.route('**/api/mars/weather**', route => route.abort());
     await page.route('**/api/horizons?**', route => route.abort());
-    await page.route('**/api/mars/tiles**', route => route.abort());
+    if (tiles) await tiles(page);
+    else await page.route('**/api/mars/tiles**', route => route.abort());
     await page.goto('/mars.html', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => window.__marsReady === true && !!window.__marsLab, null, { timeout: 90_000 });
     // The ladder would demote the renderer mid-test on a software rasteriser;
@@ -215,6 +222,9 @@ test('Zooming through the orbit floor lands, and zooming out past the ceiling re
     expect(landed, 'zooming in reaches the ground').toBe(true);
     await expect(page.locator('#surface-explorer')).toBeVisible();
     await expect(page.locator('#camera-mode')).toContainText('selected terrain');
+    // Zooming DOWN at the globe lands in the MAP camera — still looking down.
+    expect((await page.evaluate(() => window.__marsLab.mapState())).view).toBe('map');
+    await expect(page.locator('#map-view-map')).toHaveAttribute('aria-checked', 'true');
 
     let orbit = false;
     for (let i = 0; i < 60 && !orbit; i += 1) {
@@ -256,5 +266,142 @@ test('The season is Mars24-correct on the analytic fallback, not 32° ahead', as
     const expected = marsSolarLongitude(new Date());
     const delta = Math.abs(((shown - expected + 540) % 360) - 180);
     expect(delta, `header shows Ls ${shown}°, Mars24 says ${expected.toFixed(2)}°`).toBeLessThanOrEqual(1);
+    expect(errors).toEqual([]);
+});
+
+/**
+ * A 2×2 PNG: tiles only have to be decodable for the stitch, the upload and
+ * the shader path to run end to end. The capability report mirrors what
+ * production answered on 2026-09-26 — Viking and MOLA relief resolved, THEMIS
+ * and CTX unreachable — so the picker's disabled options are the real ones.
+ */
+const TILE_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAF0lEQVQI12P8//8/AzbAxIAH'
+    + 'jEqOSgIAWJgDBZJTsRcAAAAASUVORK5CYII=',
+    'base64',
+);
+const PRODUCTION_TILE_REPORT = {
+    resolved: {
+        imagery: { id: 'Mars_Viking_MDIM21_ClrMosaic_global_232m', gsdM: 232, maxLevel: 8, label: 'Viking MDIM 2.1',
+            epoch: 'Viking Orbiter, 1976–1980', global: true, candidate: 0, tilePx: 256, credit: 'NASA', contentType: 'image/png' },
+        thermal: null,
+        highres: null,
+        topo: { id: 'Mars_MGS_MOLA_ClrShade_merge_global_463m', gsdM: 463, maxLevel: 7, label: 'MOLA colour relief',
+            epoch: 'Mars Global Surveyor, 1997–2001', global: true, candidate: 0, tilePx: 256, credit: 'NASA', contentType: 'image/png' },
+    },
+    unreachable: ['thermal', 'highres'],
+    freshness: 'stale',
+    resolved_count: 2,
+};
+async function mockProductionTiles(page) {
+    await page.route('**/api/mars/tiles*', route => {
+        const url = new URL(route.request().url());
+        if (!url.searchParams.has('z')) {
+            return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PRODUCTION_TILE_REPORT) });
+        }
+        return route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG });
+    });
+    await page.route('**://trek.nasa.gov/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }));
+}
+
+test('The Map camera looks straight down, pans like a map, and the lower-right controls drive it', async ({ page }) => {
+    test.slow();
+    const errors = collectPageErrors(page);
+    await bootMars(page, { tiles: mockProductionTiles });
+    const mapState = () => page.evaluate(() => window.__marsLab.mapState());
+    const location = () => page.evaluate(() => window.__marsLab.surfaceState().location);
+
+    // ── The cluster is in the lower right, clear of its neighbours ────────
+    const boxes = await page.evaluate(() => {
+        const r = s => { const b = document.querySelector(s).getBoundingClientRect(); return { left: b.left, top: b.top, right: b.right, bottom: b.bottom }; };
+        return { controls: r('#map-controls'), viewport: r('#mars-viewport'), layers: r('.layers-panel'), dock: r('.data-dock'), zoomIn: r('#camera-zoom-in') };
+    });
+    expect(boxes.viewport.right - boxes.controls.right).toBeLessThan(30);
+    expect(boxes.controls.top).toBeGreaterThan(boxes.viewport.top + (boxes.viewport.bottom - boxes.viewport.top) / 2);
+    expect(boxes.controls.top, 'below the layers panel').toBeGreaterThanOrEqual(boxes.layers.bottom);
+    expect(boxes.controls.bottom, 'above the MEDA dock').toBeLessThanOrEqual(boxes.dock.top);
+    expect(boxes.zoomIn.left).toBeGreaterThanOrEqual(boxes.controls.left);
+    await expect(page.locator('#map-view-orbit')).toHaveAttribute('aria-checked', 'true');
+
+    // ── Map: straight down, north up, true scale, no invented texture ─────
+    await page.locator('#map-view-map').click();
+    await expect.poll(async () => (await mapState()).view, { timeout: 20_000 }).toBe('map');
+    await expect.poll(async () => (await mapState()).nadirDot, { timeout: 20_000 }).toBeGreaterThan(0.999);
+    let state = await mapState();
+    expect(Math.min(state.headingDeg, 360 - state.headingDeg)).toBeLessThan(0.5);
+    expect(state).toMatchObject({ vertexTint: 0, synthesizedDetail: 0, analysisGrid: false, primaryDrag: 'pan' });
+    expect((await page.evaluate(() => window.__marsLab.surfaceState())).reliefScaleNow).toBe(1);
+    await expect(page.locator('#surface-detail')).toContainText('imagery as published');
+    await expect(page.locator('#map-scale-label')).toHaveText(/\d+ (km|m)/);
+    await expect(page.locator('#map-altitude')).toContainText('ALT');
+
+    // ── The imagery streams for the view, and the picker says what exists ─
+    await expect.poll(() => page.evaluate(() => window.__marsLab.tileState().status), { timeout: 30_000 }).toBe('ready');
+    await expect(page.locator('#map-source')).toContainText('Viking MDIM 2.1');
+    // (toBeDisabled does not read <option>; the property is the contract.)
+    await expect(page.locator('#map-imagery option[value="highres"]')).toHaveJSProperty('disabled', true);
+    await expect(page.locator('#map-imagery option[value="thermal"]')).toHaveJSProperty('disabled', true);
+    await expect(page.locator('#map-imagery option[value="topo"]')).toHaveJSProperty('disabled', false);
+    await expect(page.locator('#map-imagery option[value="highres"]')).toContainText('unavailable');
+
+    // ── Left-drag PANS (grab the ground: drag right → view moves west) ────
+    const before = await location();
+    const box = await page.locator('#mars-canvas').boundingBox();
+    await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.45 + 220, box.y + box.height * 0.5, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(async () => (await location()).lonDeg).toBeLessThan(before.lonDeg - 0.2);
+    const afterPan = await location();
+    expect(Math.abs(afterPan.latDeg - before.latDeg)).toBeLessThan(0.1);
+    expect((await mapState()).nadirDot).toBeGreaterThan(0.999);
+    // The streamed footprint follows the view, not the patch centre.
+    await expect.poll(async () => {
+        const bounds = await page.evaluate(() => window.__marsLab.tileState().boundsDeg);
+        const here = await location();
+        return Boolean(bounds) && here.lonDeg > bounds.lonMin && here.lonDeg < bounds.lonMax;
+    }, { timeout: 30_000 }).toBe(true);
+
+    // ── Zoom (lower-right buttons) ─────────────────────────────────────────
+    const rangeBefore = (await mapState()).rangeKm;
+    await page.locator('#camera-zoom-in').click();
+    await expect.poll(async () => (await mapState()).rangeKm).toBeLessThan(rangeBefore * 0.9);
+
+    // ── Right-drag ROTATES without moving the ground; the compass undoes it ─
+    const beforeRotate = await location();
+    await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.5);
+    await page.mouse.down({ button: 'right' });
+    await page.mouse.move(box.x + box.width * 0.45 + 200, box.y + box.height * 0.5, { steps: 8 });
+    await page.mouse.up({ button: 'right' });
+    await expect.poll(async () => {
+        const h = (await mapState()).headingDeg;
+        return Math.min(h, 360 - h);
+    }).toBeGreaterThan(10);
+    const afterRotate = await location();
+    expect(Math.abs(afterRotate.lonDeg - beforeRotate.lonDeg)).toBeLessThan(1e-6);
+    await page.locator('#map-compass').click();
+    await expect.poll(async () => {
+        const h = (await mapState()).headingDeg;
+        return Math.min(h, 360 - h);
+    }, { timeout: 10_000 }).toBeLessThan(0.5);
+
+    // ── Imagery source switch ──────────────────────────────────────────────
+    await page.locator('#map-imagery').selectOption('topo');
+    await expect.poll(() => page.evaluate(() => window.__marsLab.tileState().layer), { timeout: 30_000 }).toBe('topo');
+    await expect(page.locator('#map-source')).toContainText('MOLA colour relief');
+
+    // ── 3D and back out to orbit ───────────────────────────────────────────
+    await page.locator('#map-view-tilt').click();
+    await expect.poll(async () => (await mapState()).view).toBe('tilt');
+    await expect.poll(async () => (await mapState()).nadirDot, { timeout: 20_000 }).toBeLessThan(0.5);
+    expect(await mapState()).toMatchObject({ primaryDrag: 'rotate', analysisGrid: true });
+    await page.locator('#map-view-orbit').click();
+    await expect.poll(async () => (await mapState()).view, { timeout: 20_000 }).toBe('orbit');
+    await expect(page.locator('#surface-explorer')).toBeHidden();
+
+    // `M` from orbit lands in the map view.
+    await page.locator('#mars-canvas').focus();
+    await page.keyboard.press('m');
+    await expect.poll(async () => (await mapState()).view, { timeout: 20_000 }).toBe('map');
     expect(errors).toEqual([]);
 });

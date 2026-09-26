@@ -815,6 +815,14 @@ test('Mars UI remains interactive while the 3D engine is still starting', async 
     await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
     await weatherCollapse.click();
     await expect(page.locator('.weather-grid')).toBeVisible();
+    // The lower-right map controls must clear the EXPANDED dock before the
+    // engine exists: js/mars-ui-shell.js publishes --dock-clearance, because
+    // when the engine did it the controls sat over this very collapse button
+    // and the next click waited out the 15 s boot timer.
+    await expect.poll(() => page.evaluate(() => (
+        document.querySelector('.data-dock').getBoundingClientRect().top
+        - document.querySelector('#map-controls').getBoundingClientRect().bottom
+    ))).toBeGreaterThanOrEqual(0);
     await weatherCollapse.click();
     await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
     await expect(page.locator('.weather-grid')).toBeHidden();

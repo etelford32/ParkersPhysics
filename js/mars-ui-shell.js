@@ -23,6 +23,7 @@
         'camera-zoom-in': 'zoom-in',
         'camera-spin': 'toggle-spin',
         'camera-light': 'toggle-lighting',
+        'map-compass': 'north-up',
         'surface-light': 'toggle-surface-light',
         'surface-grid': 'toggle-surface-grid',
         'landmark-card-close': 'close-landmark-card',
@@ -57,6 +58,7 @@
         if (!button) return null;
         if (button.matches('[data-surface-move]')) return 'surface-move';
         if (button.matches('[data-sky-focus]')) return 'sky-focus';
+        if (button.matches('[data-map-view]')) return 'set-view';
         return commandById[button.id] || null;
     }
 
@@ -149,6 +151,37 @@
             setHelp(message || '3D controls unavailable · mission panels remain usable');
         }
     }
+
+    // Clearances for the lower-right map controls (see the CSS note in
+    // mars.html): how much of the bottom the MEDA dock occupies (it grows
+    // ~120 px when expanded, and is gone with the panels hidden) and how tall
+    // the controls are, so the layers panel above them can end in time. They
+    // are published HERE, not by the engine, because the dock can be expanded
+    // before the engine has loaded — with nothing published the controls (z 7)
+    // sat over the expanded dock's own collapse button (z 6) until the boot
+    // timer gave up on the engine.
+    function setAppVar(name, value) {
+        if (app.style.getPropertyValue(name) !== value) app.style.setProperty(name, value);
+    }
+
+    function publishClearances() {
+        const appBox = app.getBoundingClientRect();
+        const dockBox = document.querySelector('.data-dock')?.getBoundingClientRect();
+        const clearance = dockBox && dockBox.height > 0 && !app.classList.contains('interface-clean')
+            ? Math.max(8, appBox.bottom - dockBox.top)
+            : 8;
+        setAppVar('--dock-clearance', `${Math.round(clearance)}px`);
+        const controls = document.querySelector('#map-controls');
+        if (controls?.offsetHeight) setAppVar('--map-controls-h', `${controls.offsetHeight}px`);
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+        const clearanceObserver = new ResizeObserver(publishClearances);
+        [app, document.querySelector('.data-dock'), document.querySelector('#map-controls')]
+            .forEach(element => { if (element) clearanceObserver.observe(element); });
+    }
+    new MutationObserver(publishClearances).observe(app, { attributes: true, attributeFilter: ['class'] });
+    publishClearances();
 
     document.addEventListener('click', handleClick);
     document.addEventListener('change', handleLayerChange);

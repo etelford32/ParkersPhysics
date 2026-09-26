@@ -28,7 +28,7 @@ import {
 } from './mars-climate-layer.js';
 import { dustOpacity, MARS_CLIMATE_MODEL } from './mars-atmosphere-model.js';
 import { MarsTileInset } from './mars-tile-inset.js';
-import { BUNDLED_BASE_GSD_M, boundsToUv, describeLayer, formatGsd } from './mars-tiles.js';
+import { BUNDLED_BASE_GSD_M, MARS_TILE_LAYERS, boundsToUv, describeLayer, formatGsd } from './mars-tiles.js';
 import { FocusFootprint } from './focus-footprint.js';
 
 const SURFACE_RADIUS = 1;
@@ -166,6 +166,40 @@ const SURFACE_MAX_EYE_KM = 260;
 // ABOVE SURFACE_MIN_EYE_KM: the polar limit below is derived from the ratio of
 // the two, and at parity it collapses to "you may only look straight down".
 const SURFACE_MIN_ORBIT_KM = 4.5;
+
+/**
+ * ═══ THE MAP CAMERA ═══════════════════════════════════════════════════════
+ * The surface explorer has TWO views of the same regional patch:
+ *   'tilt' — the pilot's 3D view (eye 9 km up, looking 55 km ahead). It is for
+ *            reading SHAPE, so it keeps the exaggeration ramp, the WFC geology
+ *            tint and the synthesized regolith/craters (all disclosed).
+ *   'map'  — a top-down survey camera for reading the MAP: straight down, north
+ *            up, left-drag/one-finger PANS the ground under the cursor (a
+ *            slippy map), right-drag rotates, the wheel zooms toward the cursor,
+ *            relief is TRUE scale (planimetric: an exaggerated volcano seen from
+ *            above is magnified by perspective), and the patch shows the imagery
+ *            AS PUBLISHED — no hypsometric/synth vertex tint (`uMapView`) and no
+ *            synthesized craters (`uDetailStrength` 0). Anything invented would
+ *            be indistinguishable from data in a plan view.
+ * Zoom-through from orbit LANDS in 'map' — you were looking down at the globe,
+ * you keep looking down — while double-click and the ▰ preset keep landing in
+ * 'tilt'. The Orbit | Map | 3D switch in the lower-right cluster says which is on.
+ *
+ * Straight down, the view direction is parallel to `camera.up` (the local
+ * vertical) and lookAt's orientation is undefined, so the eye sits a hair
+ * (MAP_NADIR_OFFSET × range) BEHIND the target: that sliver of horizontal offset
+ * is what defines which way is screen-up. Everything that needs a horizontal
+ * "forward" reads `horizontalViewForward()`, which falls back to the camera's
+ * own screen-up axis rather than to north — north is only right until the map
+ * is rotated.
+ */
+const MAP_ENTRY_RANGE_KM = 240;
+const MAP_NADIR_OFFSET = 1e-3;
+// Polar freedom in the map view: enough slack for the ≤1.5° the orbit axis may
+// lag the local vertical between control-frame rebuilds while panning, and for
+// a right-drag nudge, not enough to turn the map into a tilted view.
+const MAP_MAX_POLAR_RAD = THREE.MathUtils.degToRad(2);
+let surfaceViewMode = 'tilt';
 
 // Depth range per mode. The old code paired near = 0.00002 with far = 100 —
 // a 5,000,000:1 ratio that leaves a 24-bit depth buffer with almost no usable
@@ -313,14 +347,27 @@ function applyControlMode(next = controls) {
         next.minDistance = SURFACE_MIN_ORBIT_KM / MARS_RADIUS_KM;
         next.maxDistance = SURFACE_MAX_EYE_KM / MARS_RADIUS_KM;
         next.zoomToCursor = false;
-        // Right-drag becomes ground translation (panSurfaceByPixels), so
-        // OrbitControls must stop claiming it as a duplicate rotate.
-        next.mouseButtons.RIGHT = null;
+        if (surfaceViewMode === 'map') {
+            // Map: the PRIMARY gesture pans (our pointer handlers own it), the
+            // secondary one rotates the map. OrbitControls must not also claim
+            // left-drag or a one-finger drag.
+            next.mouseButtons.LEFT = null;
+            next.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+            next.touches.ONE = null;
+        } else {
+            // Right-drag becomes ground translation (panSurfaceByPixels), so
+            // OrbitControls must stop claiming it as a duplicate rotate.
+            next.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+            next.mouseButtons.RIGHT = null;
+            next.touches.ONE = THREE.TOUCH.ROTATE;
+        }
     } else {
         next.minDistance = 1.22;
         next.maxDistance = 7;
         next.zoomToCursor = true;
+        next.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
         next.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+        next.touches.ONE = THREE.TOUCH.ROTATE;
         next.maxPolarAngle = Math.PI;
     }
     next.minPolarAngle = 0;
@@ -412,6 +459,23 @@ const lampScratch = {
     up: new THREE.Vector3(), forward: new THREE.Vector3(), right: new THREE.Vector3(), dir: new THREE.Vector3(),
 };
 
+/**
+ * The horizontal direction the view faces, on the tangent plane of `up`.
+ * Looking straight down (the MAP camera) camera→target has no horizontal part,
+ * so the camera's own screen-up axis stands in — falling back to north instead
+ * was right only until the map was rotated.
+ */
+function horizontalViewForward(up, out) {
+    out.copy(controls.target).sub(camera.position);
+    out.addScaledVector(up, -out.dot(up));
+    if (out.lengthSq() < 1e-12) {
+        out.setFromMatrixColumn(camera.matrixWorld, 1);
+        out.addScaledVector(up, -out.dot(up));
+    }
+    if (out.lengthSq() < 1e-12) out.copy(tangentFrame(up).north);
+    return out.normalize();
+}
+
 /** Aim `sun` (the lamp) for the current mode. Cheap; runs every frame. */
 function updateLamp() {
     const { up, forward, right, dir } = lampScratch;
@@ -419,13 +483,14 @@ function updateLamp() {
         dir.copy(sunDirectionWorld);
     } else if (surfaceModeActive) {
         up.copy(controls.target).normalize();
-        forward.copy(controls.target).sub(camera.position);
-        forward.addScaledVector(up, -forward.dot(up));
-        if (forward.lengthSq() < 1e-12) forward.copy(tangentFrame(up).north);
-        forward.normalize();
+        horizontalViewForward(up, forward);
         right.crossVectors(forward, up).normalize();
-        const elevation = THREE.MathUtils.degToRad(MAP_LIGHT_GROUND_ELEVATION_DEG);
-        const behind = THREE.MathUtils.degToRad(MAP_LIGHT_GROUND_BEHIND_DEG);
+        // Map view: the cartographic hillshade convention — from the screen's
+        // upper left (NW when north is up) at 45°. The tilted view lights from
+        // the viewer's left, a little behind, at 35°.
+        const mapView = surfaceViewMode === 'map';
+        const elevation = THREE.MathUtils.degToRad(mapView ? 45 : MAP_LIGHT_GROUND_ELEVATION_DEG);
+        const behind = THREE.MathUtils.degToRad(mapView ? -45 : MAP_LIGHT_GROUND_BEHIND_DEG);
         dir.copy(right).multiplyScalar(-Math.cos(behind))
             .addScaledVector(forward, -Math.sin(behind))
             .multiplyScalar(Math.cos(elevation))
@@ -813,6 +878,9 @@ const detailUniforms = {
     // the anchor itself.
     uDetailEast: { value: new THREE.Vector3(1, 0, 0) },
     uDetailNorth: { value: new THREE.Vector3(0, 1, 0) },
+    // 1 in the MAP view: the imagery is drawn as published, without the
+    // hypsometric + geology vertex tint (see THE MAP CAMERA).
+    uMapView: { value: 0 },
 };
 regionalTerrainMaterial.customProgramCacheKey = () => 'mars-regolith-detail';
 regionalTerrainMaterial.onBeforeCompile = (shader) => {
@@ -837,6 +905,7 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
             uniform vec3 uDetailAnchor;
             uniform vec3 uDetailEast;
             uniform vec3 uDetailNorth;
+            uniform float uMapView;
             varying vec3 vDetailWorld;
             varying float vDetailGrain;
             varying float vDetailCrater;
@@ -911,7 +980,11 @@ regionalTerrainMaterial.onBeforeCompile = (shader) => {
             }
             #include <common>`)
         .replace('#include <color_fragment>', `
-            #include <color_fragment>
+            #if defined( USE_COLOR )
+                // Vertex colour = hypsometric shade x geology synth tint:
+                // analysis decoration, dropped in the map view (uMapView 1).
+                diffuseColor.rgb *= mix(vColor, vec3(1.0), uMapView);
+            #endif
             if (uDetailStrength > 0.001) {
                 vec3 radialDir = normalize(vDetailWorld);
                 // km on the reference sphere, ANCHOR-RELATIVE (see uniform
@@ -2831,6 +2904,7 @@ function setCameraMode(mode, label) {
     cameraMode = mode;
     cameraModeLabel = label;
     cameraModeElement.textContent = label;
+    syncViewSwitch();
     document.querySelectorAll('[data-camera-preset]').forEach(button => {
         button.setAttribute('aria-pressed', String(button.dataset.cameraPreset === mode));
     });
@@ -3023,12 +3097,8 @@ function updatePilotCluster(target, altitudeKm, nowMs) {
     // Heading: camera forward projected on the target's tangent plane.
     const radial = controls.target.clone().normalize();
     const frame = tangentFrame(radial);
-    const forward = controls.target.clone().sub(camera.position);
-    forward.addScaledVector(radial, -forward.dot(radial));
-    if (forward.lengthSq() > 1e-10) {
-        forward.normalize();
-        pilot.hdgDeg = (Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI + 360) % 360;
-    }
+    const forward = horizontalViewForward(radial, new THREE.Vector3());
+    pilot.hdgDeg = (Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI + 360) % 360;
     pilot.aglKm = altitudeKm;
 
     // Ground speed + vertical speed over a ~1.2 s sliding window.
@@ -3171,6 +3241,7 @@ function deactivateSurfaceExplorer() {
     // Back to survey scale; the next entry recomputes its own ceiling.
     regionalReliefScale = REGIONAL_RELIEF_EXAGGERATION;
     regionalReliefCeiling = REGIONAL_RELIEF_EXAGGERATION;
+    surfaceViewMode = 'tilt';
     updateLandingReticle();
     app.classList.remove('is-surface-mode');
     surfaceExplorer.hidden = true;
@@ -3193,6 +3264,8 @@ function deactivateSurfaceExplorer() {
     refreshSurfaceAnchors();
     meshStatusElement.textContent = globalMeshStatus;
     cameraHelpElement.textContent = defaultInputHint();
+    applySurfaceViewLook();
+    syncViewSwitch();
 }
 
 /**
@@ -3204,7 +3277,8 @@ function deactivateSurfaceExplorer() {
 function updateSurfaceDetail() {
     // The close-range regolith cascade is invented texture and says so —
     // appended to whichever provenance line is active.
-    const regolithNote = QUALITY_LEVELS[qualityIndex].surfaceDetail > 0
+    const mapView = surfaceViewMode === 'map';
+    const regolithNote = !mapView && QUALITY_LEVELS[qualityIndex].surfaceDetail > 0
         ? ' · close-range regolith + craters synthesized'
         : '';
     if (!hasRelief) {
@@ -3215,7 +3289,11 @@ function updateSurfaceDetail() {
     // the MOLA sample spacing is synthesized. With the WFC layer on, the HUD
     // names the leading class so the viewer knows what the tint is claiming.
     let detailNote = 'sub-sample roughness is illustrative';
-    if (synthEnabled && synthResult && synthShares) {
+    if (mapView) {
+        // The plan view draws no tint and no synthesized texture (uMapView,
+        // uDetailStrength 0) — the one thing it may claim is the imagery.
+        detailNote = 'map view · imagery as published, no synthesized texture';
+    } else if (synthEnabled && synthResult && synthShares) {
         const [topId, topShare] = Object.entries(synthShares).sort((a, b) => b[1] - a[1])[0];
         // shares are keyed by CLASS id — linear families have no tile named
         // after the class, so this lookup must go through classes.
@@ -3242,10 +3320,20 @@ function updateSurfaceDetail() {
  * when the step changes. Skipped mid-tween: entry flights sweep the range
  * through the ramp bands and would fire rebuild hitches inside the animation.
  */
+/**
+ * The patch's vertical scale for the current view. The MAP camera is always
+ * TRUE scale: seen from straight above, exaggerated relief is magnified by
+ * perspective (an 18× ridge stands 18× closer to the lens), which bends a plan
+ * view out of true; the tilted view keeps the range-driven ramp.
+ */
+function desiredReliefScale(rangeKm) {
+    return surfaceViewMode === 'map' ? 1 : reliefScaleForRange(rangeKm);
+}
+
 function updateReliefRamp() {
     if (!surfaceModeActive || !regionalTerrainCenter || cameraTween) return;
     const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
-    const next = reliefScaleForRange(rangeKm);
+    const next = desiredReliefScale(rangeKm);
     if (next === regionalReliefScale) return;
     applyRegionalReliefScale(next);
 }
@@ -3300,10 +3388,40 @@ function surfaceCameraPlacement(latDeg, lonDeg, headingRad = 0) {
     return { target, radial, position };
 }
 
-function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', duration = 1050 } = {}) {
+/**
+ * The MAP camera's pose: straight above the target at `rangeKm`, screen-up at
+ * `headingRad` from north, the eye a hair behind the target along that heading
+ * so the orientation is defined (see THE MAP CAMERA).
+ */
+function mapCameraPlacement(latDeg, lonDeg, rangeKm, headingRad = 0) {
+    const target = worldSurfacePoint(latDeg, lonDeg);
+    const radial = target.clone().normalize();
+    const { north, east } = tangentFrame(radial);
+    const forward = north.multiplyScalar(Math.cos(headingRad)).addScaledVector(east, Math.sin(headingRad));
+    const range = THREE.MathUtils.clamp(rangeKm, SURFACE_MIN_ORBIT_KM, SURFACE_MAX_EYE_KM) / MARS_RADIUS_KM;
+    const position = target.clone()
+        .addScaledVector(radial, range)
+        .addScaledVector(forward, -range * MAP_NADIR_OFFSET);
+    return { target, radial, position };
+}
+
+/** Heading of the current view, degrees clockwise from north (0–360). */
+function currentHeadingDeg() {
+    const radial = controls.target.clone().normalize();
+    if (radial.lengthSq() < 0.25) return 0;   // orbiting the planet centre: north is up
+    const frame = tangentFrame(radial);
+    const forward = horizontalViewForward(radial, new THREE.Vector3());
+    return (Math.atan2(forward.dot(frame.east), forward.dot(frame.north)) * 180 / Math.PI + 360) % 360;
+}
+
+function enterSurfaceExplorer(latDeg, lonDeg, {
+    label = 'Surface traverse', duration = 1050, view = 'tilt', rangeKm = null, headingRad = 0,
+} = {}) {
     setAutoRotate(false);
     if (surfaceModeActive) setSurfacePresentation(false);
     surfaceModeActive = true;
+    surfaceViewMode = view === 'map' ? 'map' : 'tilt';
+    applySurfaceViewLook();
     surfaceLocation = { latDeg, lonDeg };
     // Fresh motion window: V/S and ground speed must not read the flight-in
     // tween (or a previous visit) as pilot motion.
@@ -3315,13 +3433,14 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     // Arriving is the answer to "Fly here"; the card can be reopened by clicking
     // the feature again from orbit or the index.
     landmarkCard.hidden = true;
-    // Survey scale for THIS site (see PER-SITE EXAGGERATION CEILING).
+    // Survey scale for THIS site (see PER-SITE EXAGGERATION CEILING); the
+    // map view is true scale from the start.
     regionalReliefCeiling = reliefCeilingFor(latDeg, lonDeg);
-    regionalReliefScale = regionalReliefCeiling;
+    regionalReliefScale = surfaceViewMode === 'map' ? 1 : regionalReliefCeiling;
     rebuildRegionalTerrain(latDeg, lonDeg);
     regionalTerrain.visible = true;
     skyDome.visible = true;
-    setSurfaceGrid(true);
+    setSurfaceGrid(surfaceViewMode !== 'map');
     surfaceTrail.visible = true;
     setSurfacePresentation(true);
     // Anchors re-seat onto the patch's exaggeration before the trail is laid.
@@ -3334,7 +3453,9 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     // ground translation, and minPolarAngle 0 kept because straight overhead is
     // a useful map view — it is the OTHER end that had to be constrained.
     applyControlMode();
-    const { target, radial, position } = surfaceCameraPlacement(latDeg, lonDeg);
+    const { target, radial, position } = surfaceViewMode === 'map'
+        ? mapCameraPlacement(latDeg, lonDeg, rangeKm ?? MAP_ENTRY_RANGE_KM, headingRad)
+        : surfaceCameraPlacement(latDeg, lonDeg, headingRad);
     camera.up.copy(radial);
     // The local vertical is now the orbit axis, and OrbitControls only reads
     // camera.up at construction — without this rebuild every polar limit below
@@ -3366,7 +3487,108 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
         : 'regional smooth-terrain fallback';
     cameraHelpElement.textContent = defaultInputHint();
     updateSurfaceReadout({ force: true });
+    syncViewSwitch();
+    tileInsetLastAt = 0;
     canvas.focus({ preventScroll: true });
+}
+
+/**
+ * What changes between the two surface views besides the camera: the vertex
+ * tint and the synthesized regolith are analysis decoration in 3D and are
+ * dropped in the plan view (see THE MAP CAMERA). Idempotent.
+ */
+function applySurfaceViewLook() {
+    const mapView = surfaceModeActive && surfaceViewMode === 'map';
+    detailUniforms.uMapView.value = mapView ? 1 : 0;
+    detailUniforms.uDetailStrength.value = mapView ? 0 : QUALITY_LEVELS[qualityIndex].surfaceDetail;
+    app.dataset.surfaceView = surfaceModeActive ? surfaceViewMode : 'orbit';
+}
+
+/**
+ * Switch the camera between Orbit, Map and 3D — the lower-right switch, `M`,
+ * and zoom-through all come here. Inside the explorer it re-poses the camera
+ * over the SAME ground at the same range and heading; from orbit it lands at
+ * the centre of the safe frame.
+ */
+function setSurfaceView(view) {
+    if (view === 'orbit') {
+        if (surfaceModeActive) climbToOrbit();
+        return;
+    }
+    if (!surfaceModeActive) {
+        if (view === 'map') descendAtClientPoint(null, null, { view: 'map' });
+        else enterSurfaceAtCurrentFocus();
+        return;
+    }
+    const next = view === 'map' ? 'map' : 'tilt';
+    const location = surfaceLocation || regionalTerrainCenter;
+    if (!location) return;
+    settleControls();
+    const headingRad = THREE.MathUtils.degToRad(currentHeadingDeg());
+    const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
+    surfaceViewMode = next;
+    applySurfaceViewLook();
+    applyControlMode();
+    // Map is true scale, 3D rides the ramp: rebuild + re-seat BEFORE posing, so
+    // the pose is computed against the ground that will actually be drawn.
+    const wantedScale = desiredReliefScale(next === 'map' ? rangeKm : SURFACE_LOOK_AHEAD_KM);
+    if (wantedScale !== regionalReliefScale) applyRegionalReliefScale(wantedScale);
+    const { target, position } = next === 'map'
+        ? mapCameraPlacement(location.latDeg, location.lonDeg, Math.min(rangeKm, SURFACE_MAX_EYE_KM), headingRad)
+        : surfaceCameraPlacement(location.latDeg, location.lonDeg, headingRad);
+    setCameraMode('surface', next === 'map' ? 'Map view' : 'Surface traverse');
+    cameraTween = {
+        started: performance.now(), duration: 700,
+        fromPosition: camera.position.clone(), toPosition: position,
+        fromTarget: controls.target.clone(), toTarget: target,
+    };
+    // The 16 km analysis graticule is a depth cue in 3D; in a plan view the
+    // scale bar does its job and the lines just hatch the imagery. Toggleable
+    // (#) in both.
+    setSurfaceGrid(next !== 'map');
+    updateSurfaceDetail();
+    cameraHelpElement.textContent = defaultInputHint();
+    syncViewSwitch();
+    tileInsetLastAt = 0;
+}
+
+/**
+ * Drop whatever orbit velocity the damping still carries. A right-drag leaves
+ * sphericalDelta decaying over the next frames, and a pose computed from the
+ * camera NOW would be rotated by that tail the moment the tween hands back
+ * (measured: north-up landed at 358.4° instead of 0°). With damping off, one
+ * update() applies the remainder and zeroes it.
+ */
+function settleControls() {
+    const damping = controls.enableDamping;
+    controls.enableDamping = false;
+    controls.update();
+    controls.enableDamping = damping;
+}
+
+/** Rotate the view about the local vertical until north is up. */
+function northUp() {
+    if (!surfaceModeActive) return;
+    settleControls();
+    const location = surfaceLocation || regionalTerrainCenter;
+    if (!location) return;
+    const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
+    let position;
+    if (surfaceViewMode === 'map') {
+        ({ position } = mapCameraPlacement(location.latDeg, location.lonDeg, rangeKm, 0));
+    } else {
+        // Rotating the eye about the vertical by +heading (right-handed about
+        // up turns north toward west) brings the heading to 0 and keeps the
+        // tilt and range exactly.
+        const radial = controls.target.clone().normalize();
+        const turn = new THREE.Quaternion().setFromAxisAngle(radial, THREE.MathUtils.degToRad(currentHeadingDeg()));
+        position = controls.target.clone().add(camera.position.clone().sub(controls.target).applyQuaternion(turn));
+    }
+    cameraTween = {
+        started: performance.now(), duration: 450,
+        fromPosition: camera.position.clone(), toPosition: position,
+        fromTarget: controls.target.clone(), toTarget: controls.target.clone(),
+    };
 }
 
 function enterSurfaceAtCurrentFocus() {
@@ -3399,10 +3621,9 @@ function moveSurfaceBy(forwardKm, rightKm, { trail = true } = {}) {
     cameraTween = null;
     const oldTarget = controls.target.clone();
     const radial = oldTarget.clone().normalize();
-    let forward = controls.target.clone().sub(camera.position);
-    forward.addScaledVector(radial, -forward.dot(radial));
-    if (forward.lengthSq() < 1e-8) forward.copy(tangentFrame(radial).north);
-    forward.normalize();
+    // Screen-relative, including straight down (the map view), where the old
+    // north fallback panned the wrong way on a rotated map.
+    const forward = horizontalViewForward(radial, new THREE.Vector3());
     const right = new THREE.Vector3().crossVectors(forward, radial).normalize();
     const movement = forward.multiplyScalar(forwardKm).addScaledVector(right, rightKm);
     if (movement.lengthSq() < 1e-12) return;
@@ -3431,7 +3652,7 @@ function moveSurfaceBy(forwardKm, rightKm, { trail = true } = {}) {
         // the current range moved with it, rebuild once more and re-seat.
         regionalReliefCeiling = reliefCeilingFor(location.latDeg, location.lonDeg);
         const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
-        const wanted = reliefScaleForRange(rangeKm);
+        const wanted = desiredReliefScale(rangeKm);
         if (wanted !== regionalReliefScale) applyRegionalReliefScale(wanted);
     }
     if (trail) updateSurfaceTrail(location);
@@ -3462,6 +3683,12 @@ function nudgeSurface(forwardAmount, rightAmount) {
  */
 function updateSurfacePolarLimit() {
     if (!surfaceModeActive) return;
+    if (surfaceViewMode === 'map') {
+        controls.minPolarAngle = 0;
+        controls.maxPolarAngle = MAP_MAX_POLAR_RAD;
+        return;
+    }
+    controls.minPolarAngle = 0;
     const orbitRadius = camera.position.distanceTo(controls.target);
     if (!(orbitRadius > 0)) return;
     const ratio = THREE.MathUtils.clamp(
@@ -3579,6 +3806,8 @@ window.__marsUi?.registerCommands({
     ),
     'toggle-surface-light': () => setSurfaceLight(!surfaceHeadlamp.visible),
     'toggle-lighting': () => setLightingMode(lightingMode === 'live' ? 'map' : 'live'),
+    'set-view': ({ dataset }) => setSurfaceView(dataset.mapView),
+    'north-up': () => northUp(),
     'toggle-surface-grid': () => setSurfaceGrid(!regionalTerrainGrid.visible),
     'sky-focus': ({ dataset }) => focusSkyBody(dataset.skyFocus),
 });
@@ -3597,7 +3826,7 @@ function beginManualCamera() {
     setAutoRotate(false);
     setCameraMode(
         surfaceModeActive ? 'surface' : 'custom',
-        surfaceModeActive ? 'Surface traverse' : 'Free orbit',
+        surfaceModeActive ? (surfaceViewMode === 'map' ? 'Map view' : 'Surface traverse') : 'Free orbit',
     );
 }
 
@@ -3668,6 +3897,8 @@ document.addEventListener('keydown', event => {
     else if (event.key === '-' || event.key === '_') zoomCamera(1.3);
     else if (event.key === ' ') setAutoRotate(!controls.autoRotate);
     else if (key === 'i') setLightingMode(lightingMode === 'live' ? 'map' : 'live');
+    else if (key === 'm') setSurfaceView(surfaceModeActive && surfaceViewMode === 'map' ? 'tilt' : 'map');
+    else if (key === 'n') northUp();
     else return;
     event.preventDefault();
 });
@@ -3714,9 +3945,12 @@ let inputHintTimer = null;
 let lastGestureWasPinch = false;
 
 function defaultInputHint() {
+    if (surfaceModeActive && surfaceViewMode === 'map') {
+        return 'Drag pan · wheel zoom (out to orbit) · right-drag rotate · double-click zoom · Esc';
+    }
     return surfaceModeActive
         ? 'Drag look · right-drag move · wheel altitude (out to orbit) · WASD · Esc'
-        : 'Drag orbit · zoom in to land · click a landmark · double-click to land';
+        : 'Drag orbit · zoom in to map · click a landmark · double-click to land';
 }
 
 function setInputHint(message, state = 'idle', resetDelay = 1400) {
@@ -3891,14 +4125,45 @@ function pickPointOfInterest(clientX, clientY) {
     return true;
 }
 
-function enterSurfaceAtClientPoint(clientX, clientY) {
+function groundLocationAtClientPoint(clientX, clientY) {
     setRaycastPointer(clientX, clientY);
     const targets = surfaceModeActive ? [regionalTerrain, reliefMars, smoothMars] : [reliefMars, smoothMars];
     const globeHit = raycaster.intersectObjects(targets, false)[0];
-    if (!globeHit) return false;
-    const location = worldVectorLatLon(globeHit.point);
+    return globeHit ? worldVectorLatLon(globeHit.point) : null;
+}
+
+function enterSurfaceAtClientPoint(clientX, clientY, { view = 'tilt' } = {}) {
+    const location = groundLocationAtClientPoint(clientX, clientY);
+    if (!location) return false;
     lastSurfaceFocus = { ...location, label: 'Selected terrain' };
-    enterSurfaceExplorer(location.latDeg, location.lonDeg, { label: 'Surface · selected terrain' });
+    enterSurfaceExplorer(location.latDeg, location.lonDeg, {
+        label: view === 'map' ? 'Map · selected terrain' : 'Surface · selected terrain',
+        view,
+    });
+    return true;
+}
+
+/** Client coordinates of the SAFE FRAME's centre — where the camera looks. */
+function safeFrameCenterClient() {
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: rect.left + (safeFrame.left + safeFrame.right) / 2,
+        y: rect.top + (safeFrame.top + safeFrame.bottom) / 2,
+    };
+}
+
+/**
+ * Map view double-click: centre that point and zoom in by half — the slippy-map
+ * convention. (In the tilted view double-click keeps meaning "land here".)
+ */
+function mapFocusAtClientPoint(clientX, clientY) {
+    const location = groundLocationAtClientPoint(clientX, clientY);
+    if (!location || !surfaceLocation) return false;
+    // Pan the clicked point to the centre (the same screen→ground scale the
+    // drag uses), then halve the range.
+    const center = safeFrameCenterClient();
+    panSurfaceByPixels(center.x - clientX, center.y - clientY);
+    zoomCamera(0.5);
     return true;
 }
 
@@ -3945,14 +4210,17 @@ function atZoomLimit(direction) {
     return surfaceModeActive && distance >= controls.maxDistance * (1 - ZOOM_LIMIT_SLACK);
 }
 
-function descendAtClientPoint(clientX, clientY) {
-    if (clientX != null && enterSurfaceAtClientPoint(clientX, clientY)) return true;
-    // No globe under the cursor (or a button press): land under the view centre.
-    const rect = canvas.getBoundingClientRect();
-    if (enterSurfaceAtClientPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)) return true;
+function descendAtClientPoint(clientX, clientY, { view = 'map' } = {}) {
+    if (clientX != null && enterSurfaceAtClientPoint(clientX, clientY, { view })) return true;
+    // No globe under the cursor (or a button press): land under the view
+    // centre — the SAFE FRAME's, which is where the camera is looking.
+    const center = safeFrameCenterClient();
+    if (enterSurfaceAtClientPoint(center.x, center.y, { view })) return true;
     const location = worldVectorLatLon(controls.target.lengthSq() > 1e-6 ? controls.target : camera.position);
     lastSurfaceFocus = { ...location, label: 'Selected terrain' };
-    enterSurfaceExplorer(location.latDeg, location.lonDeg, { label: 'Surface · selected terrain' });
+    enterSurfaceExplorer(location.latDeg, location.lonDeg, {
+        label: view === 'map' ? 'Map · selected terrain' : 'Surface · selected terrain', view,
+    });
     return true;
 }
 
@@ -3984,8 +4252,8 @@ function zoomThroughIfAtLimit(direction, clientX, clientY, { immediate = false, 
     }
     zoomPush.count = 0;
     if (direction < 0) {
-        descendAtClientPoint(clientX, clientY);
-        setInputHint('Descending to the surface', 'zoom-through');
+        descendAtClientPoint(clientX, clientY, { view: 'map' });
+        setInputHint('Descending to the map', 'zoom-through');
     } else {
         climbToOrbit();
         setInputHint('Climbing back to orbit', 'zoom-through');
@@ -4001,12 +4269,41 @@ canvas.addEventListener('wheel', event => {
     beginManualCamera();
     const direction = Math.sign(event.deltaY);
     if (direction !== 0 && zoomThroughIfAtLimit(direction, event.clientX, event.clientY, { timeStamp: event.timeStamp })) return;
+    if (direction !== 0 && surfaceModeActive && surfaceViewMode === 'map') zoomMapTowardCursor(event, direction);
     if (zoomPush.count > 0) return; // the arming hint is showing; keep it
     setInputHint(
-        surfaceModeActive ? 'Wheel adjusts eye altitude' : 'Wheel zooms toward the cursor',
+        surfaceModeActive
+            ? (surfaceViewMode === 'map' ? 'Wheel zooms toward the cursor' : 'Wheel adjusts eye altitude')
+            : 'Wheel zooms toward the cursor',
         'wheel',
     );
 }, { passive: true });
+
+/**
+ * Keep the ground under the cursor fixed while the map zooms.
+ *
+ * OrbitControls dollies about its target (zoomToCursor stays OFF on the ground:
+ * it slides the target along a plane, off the terrain and out from under the
+ * explorer's own location). So the map pans instead: with the cursor (dx, dy)
+ * px from the principal point and the range scaled by `k`, moving the target
+ * (1 − k)·(dx, dy) px toward the cursor at the PRE-zoom scale leaves the ground
+ * point under it where it was. This listener is registered before every
+ * explorer-mode OrbitControls instance (they are rebuilt on entry), so it runs
+ * first and reads the pre-zoom distance. The factor mirrors OrbitControls'
+ * getZoomScale (vendored r160) — including its integer devicePixelRatio.
+ */
+function zoomMapTowardCursor(event, direction) {
+    const distance = camera.position.distanceTo(controls.target);
+    const step = Math.pow(0.95, controls.zoomSpeed * Math.abs(event.deltaY) / (100 * Math.max(1, window.devicePixelRatio | 0)));
+    const next = THREE.MathUtils.clamp(
+        direction < 0 ? distance * step : distance / step,
+        controls.minDistance, controls.maxDistance,
+    );
+    const kept = 1 - next / distance;
+    if (Math.abs(kept) < 1e-4) return;
+    const center = safeFrameCenterClient();
+    panSurfaceByPixels(-(event.clientX - center.x) * kept, -(event.clientY - center.y) * kept);
+}
 
 // ── Hover ───────────────────────────────────────────────────────────────────
 // Every landmark, sky body, and marker on this page is clickable, and none of
@@ -4076,15 +4373,20 @@ canvas.addEventListener('pointerdown', event => {
         moved: false,
         multiTouch: false,
         // Right-drag on the ground translates the view instead of duplicating
-        // left-drag's rotation (see surfacePanEnabled below).
-        panning: event.button === 2 && surfaceModeActive && event.pointerType !== 'touch',
+        // left-drag's rotation (see surfacePanEnabled below). In the MAP view
+        // the PRIMARY button pans instead — the slippy-map convention.
+        // (and right-drag is OrbitControls' ROTATE there, so it must not pan).
+        panning: surfaceModeActive && event.pointerType !== 'touch'
+            && event.button === (surfaceViewMode === 'map' ? 0 : 2),
+        // One finger pans the map; a second finger turns it into a pinch.
+        touchPan: surfaceModeActive && surfaceViewMode === 'map' && event.pointerType === 'touch',
     };
     pointerStarts.set(event.pointerId, record);
     if (record.panning) canvas.setPointerCapture?.(event.pointerId);
     if (record.pointerType === 'touch') {
         const touchRecords = [...pointerStarts.values()].filter(item => item.pointerType === 'touch');
         if (touchRecords.length > 1) {
-            touchRecords.forEach(item => { item.multiTouch = true; });
+            touchRecords.forEach(item => { item.multiTouch = true; item.touchPan = false; });
             lastGestureWasPinch = true;
         }
         setInputHint(
@@ -4093,7 +4395,7 @@ canvas.addEventListener('pointerdown', event => {
             0,
         );
     } else if (record.panning) {
-        setInputHint('Right-drag moves across the terrain', 'mouse-pan', 0);
+        setInputHint(event.button === 0 ? 'Drag pans the map' : 'Right-drag moves across the terrain', 'mouse-pan', 0);
     } else {
         setInputHint(event.button === 1 ? 'Middle-drag zoom' : (surfaceModeActive ? 'Drag to look around' : 'Drag to orbit'), 'mouse-drag', 0);
     }
@@ -4108,14 +4410,16 @@ canvas.addEventListener('pointermove', event => {
         return;
     }
     const travelled = Math.hypot(event.clientX - record.x, event.clientY - record.y);
+    const pans = record.panning || record.touchPan;
     if (!record.moved && travelled > DRAG_THRESHOLD_PX) {
         record.moved = true;
         // Only NOW is this a camera interaction. A click that never moves stays
         // a selection and leaves the camera mode and auto-rotate alone.
-        if (!record.panning) beginManualCamera();
+        if (!pans) beginManualCamera();
         clearHover();
     }
-    if (record.panning && record.moved) {
+    if (pans && !record.moved) return;   // hold the start point: the first pan carries the threshold travel too
+    if (pans) {
         panSurfaceByPixels(event.clientX - record.lastX, event.clientY - record.lastY);
     }
     record.lastX = event.clientX;
@@ -4154,7 +4458,13 @@ canvas.addEventListener('pointerup', event => {
             && Math.hypot(event.clientX - lastTouchTap.x, event.clientY - lastTouchTap.y) < DOUBLE_TAP_SLOP_PX;
         if (isDoubleTap) {
             lastTouchTap = null;
-            if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) {
+            if (surfaceModeActive && surfaceViewMode === 'map') {
+                if (mapFocusAtClientPoint(event.clientX, event.clientY)) {
+                    event.preventDefault();
+                    setInputHint('Centred and zoomed in', 'double-tap');
+                    return;
+                }
+            } else if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) {
                 event.preventDefault();
                 setInputHint('Surface target acquired', 'double-tap');
                 return;
@@ -4174,6 +4484,10 @@ canvas.addEventListener('pointerup', event => {
 });
 canvas.addEventListener('dblclick', event => {
     event.preventDefault();
+    if (surfaceModeActive && surfaceViewMode === 'map') {
+        if (mapFocusAtClientPoint(event.clientX, event.clientY)) setInputHint('Centred and zoomed in', 'double-click');
+        return;
+    }
     if (enterSurfaceAtClientPoint(event.clientX, event.clientY)) setInputHint('Surface target acquired', 'double-click');
 });
 window.__marsUi?.registerCommands({
@@ -4312,14 +4626,25 @@ function publishSurfaceHudBottom() {
     if (!surfaceExplorer || surfaceExplorer.hidden) return;
     const appTop = app.getBoundingClientRect().top;
     const bottom = surfaceExplorer.getBoundingClientRect().bottom - appTop;
-    if (bottom > 0) app.style.setProperty('--surface-hud-bottom', `${Math.round(bottom)}px`);
+    if (bottom > 0) setAppVar('--surface-hud-bottom', `${Math.round(bottom)}px`);
 }
 
+// resize() runs from a ResizeObserver on five panels, so it must be cheap when
+// nothing moved: a custom-property write restyles the whole app even when the
+// value is unchanged, and renderer.setSize reallocates the drawing buffer.
+// (The map-control clearances are published by js/mars-ui-shell.js, which runs
+// before the engine — see its note.)
+function setAppVar(name, value) {
+    if (app.style.getPropertyValue(name) !== value) app.style.setProperty(name, value);
+}
+
+const resizeScratch = new THREE.Vector2();
 function resize() {
     publishSurfaceHudBottom();
     const width = Math.max(1, viewport.clientWidth);
     const height = Math.max(1, viewport.clientHeight);
-    renderer.setSize(width, height, false);
+    const size = renderer.getSize(resizeScratch);
+    if (size.x !== width || size.y !== height) renderer.setSize(width, height, false);
     camera.aspect = width / height;
     measureSafeFrame(width, height);
     applySafeFrame(width, height);
@@ -4375,7 +4700,8 @@ function applyQuality(index) {
     // Close-range regolith cascade rides the ladder too: it costs noise
     // evaluations per fragment, which is exactly what a software rasteriser
     // cannot afford. 0 branches the whole cascade out of the shader path.
-    detailUniforms.uDetailStrength.value = level.surfaceDetail;
+    // Through applySurfaceViewLook: the map view holds the cascade at 0.
+    applySurfaceViewLook();
     // The globe's bump term costs a dFdx/dFdy pair per fragment across the whole
     // disc. Unlike the regional patch's (which was perturbing detail finer than
     // one texel and is gone for good), this one earns its keep at full quality —
@@ -4695,6 +5021,27 @@ window.__marsLab = Object.freeze({
     },
     feedState: () => ({ ...marsFeedState }),
     /**
+     * The camera switch's state and what the MAP camera is actually doing: is
+     * it looking straight down (nadirDot ≈ 1), which way is up, how far down,
+     * and whether the plan view really dropped the synthesized decoration.
+     */
+    mapState: () => {
+        const view = surfaceModeActive ? surfaceViewMode : 'orbit';
+        const radial = controls.target.clone().normalize();
+        const look = camera.getWorldDirection(new THREE.Vector3());
+        return {
+            view,
+            headingDeg: currentHeadingDeg(),
+            nadirDot: surfaceModeActive ? -look.dot(radial) : null,
+            rangeKm: camera.position.distanceTo(controls.target) * MARS_RADIUS_KM,
+            kmPerPx: centreKmPerPixel(),
+            vertexTint: 1 - detailUniforms.uMapView.value,
+            synthesizedDetail: detailUniforms.uDetailStrength.value,
+            analysisGrid: regionalTerrainGrid.visible,
+            primaryDrag: controls.mouseButtons.LEFT == null ? 'pan' : 'rotate',
+        };
+    },
+    /**
      * The SAFE FRAME and where the globe actually lands in it, in CSS px of
      * the viewport. The browser gate asserts the whole disc fits the frame and
      * sits at its centre — the thing "Global view" did not do before.
@@ -4776,8 +5123,14 @@ const SURFACE_TILE_MIN_SPAN_KM = 12;
 function surfaceTileSpanKm() {
     const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
     if (!Number.isFinite(rangeKm)) return REGIONAL_TERRAIN_EXTENT_KM;
+    // Looking straight down, the ground in frame is just the frustum's width
+    // at the range (plus a margin for panning), not the tilted view's
+    // look-ahead — a tighter footprint is a deeper level for the same budget.
+    const perRange = surfaceViewMode === 'map'
+        ? 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * Math.max(1, camera.aspect) * 1.35
+        : SURFACE_TILE_SPAN_PER_RANGE;
     return THREE.MathUtils.clamp(
-        rangeKm * SURFACE_TILE_SPAN_PER_RANGE,
+        rangeKm * perRange,
         SURFACE_TILE_MIN_SPAN_KM,
         REGIONAL_TERRAIN_EXTENT_KM,
     );
@@ -4785,15 +5138,19 @@ function surfaceTileSpanKm() {
 
 function tileFootprint() {
     if (surfaceModeActive && regionalTerrainCenter) {
-        // Centred on the explorer's location, sized by the camera. Longitude
-        // widens by 1/cos(lat) for the same ground distance; clamped so a
-        // near-polar patch cannot ask for a footprint that wraps into itself.
+        // Centred on the explorer's LOCATION (the orbit target), not the patch
+        // centre: the patch recentres only every ~114 km of travel, so a
+        // footprint pinned to it slid away from the view while panning the map
+        // and the ground you were looking at fell back to 15 km/px.
+        // Longitude widens by 1/cos(lat) for the same ground distance; clamped
+        // so a near-polar patch cannot ask for a footprint that wraps into itself.
+        const centre = surfaceLocation || regionalTerrainCenter;
         const halfLatDeg = (surfaceTileSpanKm() / 2) / MARS_RADIUS_KM * (180 / Math.PI);
-        const cosLat = Math.max(0.08, Math.cos(THREE.MathUtils.degToRad(regionalTerrainCenter.latDeg)));
+        const cosLat = Math.max(0.08, Math.cos(THREE.MathUtils.degToRad(centre.latDeg)));
         const halfLonDeg = Math.min(90, halfLatDeg / cosLat);
-        const latMin = Math.max(-90, regionalTerrainCenter.latDeg - halfLatDeg);
-        const latMax = Math.min(90, regionalTerrainCenter.latDeg + halfLatDeg);
-        const lonMin = ((regionalTerrainCenter.lonDeg - halfLonDeg + 540) % 360) - 180;
+        const latMin = Math.max(-90, centre.latDeg - halfLatDeg);
+        const latMax = Math.min(90, centre.latDeg + halfLatDeg);
+        const lonMin = ((centre.lonDeg - halfLonDeg + 540) % 360) - 180;
         return {
             latMin, latMax, lonMin, lonMax: lonMin + halfLonDeg * 2,
             spanLatDeg: halfLatDeg * 2,
@@ -4863,6 +5220,7 @@ function clearTileInset() {
  * leaving the row describing imagery that is not there.
  */
 function updateTileProvenance() {
+    updateMapSourceLine();
     if (!tilesSourceElement) return;
     if (!tileLayerEnabled) {
         tilesSourceElement.textContent =
@@ -4900,6 +5258,139 @@ function updateTileProvenance() {
     tilesSourceElement.textContent = parts.join(' · ');
 }
 
+/**
+ * ═══ MAP CONTROLS (lower right) ════════════════════════════════════════════
+ * Read-outs only: every number here comes from state the page already owns —
+ * the tile inset's own report for the imagery, the camera for the scale — so
+ * the cluster can never claim a resolution the stitch does not have. The
+ * elements are looked up per call (getElementById is cheap, and these run at
+ * ≤5 Hz) so nothing here can be caught in a module-init TDZ.
+ */
+const MAP_READOUT_INTERVAL_MS = 200;
+const SCALE_BAR_MAX_PX = 110;
+const SCALE_STEPS_KM = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000];
+let mapReadoutAt = 0;
+let mapImageryOptionsSynced = false;
+
+function syncViewSwitch() {
+    const view = surfaceModeActive ? surfaceViewMode : 'orbit';
+    for (const button of document.querySelectorAll('[data-map-view]')) {
+        button.setAttribute('aria-checked', String(button.dataset.mapView === view));
+    }
+    document.getElementById('map-compass')?.setAttribute('aria-disabled', String(!surfaceModeActive));
+}
+
+function formatKm(km) {
+    if (km < 1) return `${Math.round(km * 1000)} m`;
+    return `${km >= 100 ? Math.round(km).toLocaleString() : Number(km.toFixed(km >= 10 ? 0 : 1))} km`;
+}
+
+/** Ground kilometres across one CSS pixel at the view centre. */
+function centreKmPerPixel() {
+    const height = Math.max(1, viewport.clientHeight);
+    const onGround = controls.target.lengthSq() > 0.25;
+    const rangeKm = onGround
+        ? camera.position.distanceTo(controls.target) * MARS_RADIUS_KM
+        : (camera.position.length() - SURFACE_RADIUS) * MARS_RADIUS_KM;
+    return 2 * rangeKm * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / height;
+}
+
+function updateMapSourceLine() {
+    const element = document.getElementById('map-source');
+    if (!element) return;
+    let text;
+    let stateName = 'base';
+    const state = tileInset.state();
+    const layer = state.layer ? MARS_TILE_LAYERS[state.layer] : null;
+    if (!tileLayerEnabled) {
+        text = `Streaming off · bundled Viking ${formatGsd(BUNDLED_BASE_GSD_M)}`;
+    } else if (['unavailable', 'empty', 'error'].includes(state.status)) {
+        text = `NASA Trek unavailable · bundled Viking ${formatGsd(BUNDLED_BASE_GSD_M)}`;
+        stateName = 'unavailable';
+    } else if (state.status === 'base' || !layer) {
+        text = state.status === 'loading'
+            ? 'Loading NASA Trek tiles for this view…'
+            : `Bundled Viking ${formatGsd(BUNDLED_BASE_GSD_M)} · zoom in for NASA Trek imagery`;
+    } else {
+        // Served finer than the mosaic was MADE is interpolation, whether the
+        // pyramid or our own stitch did it (Trek publishes Viking's 232 m data
+        // down to a 162 m level). Say so rather than print a flattering number.
+        const pastNative = state.upsampled || state.gsdM < layer.gsdM * 0.95;
+        text = `${layer.label} · ${formatGsd(state.gsdM)}`
+            + (pastNative ? ` · finer than its ${formatGsd(layer.gsdM)} native data` : ` · native ${formatGsd(layer.gsdM)}`)
+            + (state.coverage != null && state.coverage < 0.999 ? ` · ${Math.round(state.coverage * 100)}% covered` : '');
+        stateName = pastNative ? 'upsampled' : 'ready';
+    }
+    element.textContent = text;
+    element.dataset.state = stateName;
+    element.title = layer ? `${layer.label} — ${layer.epoch} · ${layer.credit}` : text;
+}
+
+/**
+ * Disable the imagery choices production could not resolve (the capability
+ * report names them), once the report is in. An option is never hidden — a
+ * missing CTX entry would read as "we never had it", a disabled one as "NASA
+ * Trek did not answer for it", which is the truth.
+ */
+function syncImageryOptions() {
+    if (mapImageryOptionsSynced) return;
+    const capability = tileInset.state().capability;
+    const select = document.getElementById('map-imagery');
+    if (!capability || !select) return;
+    const unreachable = new Set(capability.unreachable || []);
+    const resolved = new Set(capability.resolved || []);
+    for (const option of select.options) {
+        if (option.value === 'auto') continue;
+        const usable = resolved.has(option.value) && !unreachable.has(option.value);
+        option.disabled = !usable;
+        if (!usable && !option.textContent.includes('unavailable')) option.textContent += ' · unavailable';
+    }
+    mapImageryOptionsSynced = true;
+}
+
+function updateMapReadout(now) {
+    if (now - mapReadoutAt < MAP_READOUT_INTERVAL_MS) return;
+    mapReadoutAt = now;
+    const kmPerPx = centreKmPerPixel();
+    const bar = document.getElementById('map-scale-bar');
+    const label = document.getElementById('map-scale-label');
+    if (bar && label && Number.isFinite(kmPerPx) && kmPerPx > 0) {
+        let stepKm = SCALE_STEPS_KM[0];
+        for (const candidate of SCALE_STEPS_KM) if (candidate / kmPerPx <= SCALE_BAR_MAX_PX) stepKm = candidate;
+        bar.style.width = `${Math.round(stepKm / kmPerPx)}px`;
+        label.textContent = formatKm(stepKm);
+        label.title = surfaceModeActive && surfaceViewMode === 'tilt'
+            ? 'Scale at the view centre — a tilted view shrinks toward the horizon'
+            : 'Scale at the view centre';
+    }
+    const altitude = document.getElementById('map-altitude');
+    if (altitude) {
+        let altitudeKm;
+        if (surfaceModeActive) {
+            const at = worldVectorLatLon(camera.position);
+            altitudeKm = (camera.position.length() - anchorRadiusAtLatLon(at.latDeg, at.lonDeg)) * MARS_RADIUS_KM;
+        } else {
+            altitudeKm = (camera.position.length() - SURFACE_RADIUS) * MARS_RADIUS_KM;
+        }
+        altitude.textContent = `ALT ${formatKm(Math.max(0, altitudeKm))}`;
+    }
+    const needle = document.getElementById('map-compass-needle');
+    if (needle) needle.style.transform = `rotate(${-currentHeadingDeg()}deg)`;
+    syncImageryOptions();
+}
+
+document.getElementById('map-imagery')?.addEventListener('change', event => {
+    const value = event.target.value;
+    tileLayerPreferred = value === 'auto' ? null : value;
+    // Choosing a source is asking for streaming: turn it on if it was off.
+    const toggle = document.querySelector('#tiles-toggle');
+    if (toggle && !toggle.checked) {
+        toggle.checked = true;
+        setTileLayerEnabled(true);
+    }
+    tileInsetLastAt = 0;
+    updateMapSourceLine();
+});
 
 function setTileLayerEnabled(enabled) {
     tileLayerEnabled = Boolean(enabled);
@@ -4962,6 +5453,7 @@ function animate(now) {
         updateGridFade(camera.position.length());
     }
     updateCameraReadout();
+    updateMapReadout(now);
     renderer.render(scene, camera);
 }
 requestAnimationFrame(animate);
