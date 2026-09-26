@@ -8,9 +8,11 @@
  * ── Why this route exists ─────────────────────────────────────────────────
  * Everything time-varying on mars.html used to come from ONE of two places: a
  * bundled 2024 MEDA snapshot, or the linear mean-motion Ls model in
- * js/mars-mission-state.js. Neither is live. Mars' orbit has e ≈ 0.0934, so a
- * constant-rate Ls runs up to ~11° off the true value — that error lands
- * directly on the terminator and on any "dust season" call.
+ * js/mars-mission-state.js. Neither is live. (That model has since become the
+ * Mars24 algorithm, ≈0.01° in Ls — it was a linear mean-motion Ls anchored 61
+ * days early, ~32° wrong, and because the Ls column was misnamed in the parser
+ * it was ALSO what production served. `ls_column` now says which header
+ * answered.)
  *
  * Horizons is the one Mars upstream in this stack that has never been retired,
  * is not rate-limited behind DEMO_KEY, and answers for any epoch. It is already
@@ -36,7 +38,7 @@
  */
 
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
-import { marsEphemerisParams, parseMarsEphemeris } from '../../js/mars-ephemeris.js';
+import { marsDustSeason, marsEphemerisParams, marsSeasonLabel, parseMarsEphemeris } from '../../js/mars-ephemeris.js';
 import { marsSolarLongitudeFromJulianDate, marsSubsolarPoint } from '../../js/mars-mission-state.js';
 
 export const config = { runtime: 'edge' };
@@ -61,8 +63,8 @@ function analyticBlock(date) {
             lon_deg: Number(subsolar.lon_deg.toFixed(4)),
             frame: 'planetocentric · east-positive',
         },
-        model: 'linear mean-motion Ls + MTC sub-solar longitude',
-        accuracy_note: 'mean-anomaly approximation; up to ~11° of Ls error near the solstices',
+        model: 'Allison & McEwen (2000) Mars24: Ls, equation of time, MTC',
+        accuracy_note: '~0.01° in Ls against JPL; sub-solar point is Mars-simultaneous (no light time)',
         source: 'js/mars-mission-state.js',
     };
 }
@@ -90,8 +92,12 @@ export default async function handler(request) {
         generated_at: new Date().toISOString(),
         jd,
         ls_deg: analytic.ls_deg,
-        season: null,
+        // The Mars24 fallback is accurate enough to name the season; `source`
+        // still says 'analytic', and the client labels it so.
+        season: marsSeasonLabel(analytic.ls_deg),
+        dust_season: marsDustSeason(analytic.ls_deg),
         sub_solar: analytic.sub_solar,
+        sub_solar_now: analytic.sub_solar,
         sub_earth: null,
         earth_range_au: null,
         earth_range_km: null,

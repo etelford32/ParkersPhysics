@@ -8,7 +8,7 @@ machine-readable version.
 | Feed | Route | Live source | Falls back to |
 |------|-------|-------------|---------------|
 | Traverse / rover position | `/api/mars/route` | NASA MMGIS waypoints | bundled `perseverance-route.json` |
-| Mars geometry + season | `/api/mars/ephemeris` | JPL Horizons | analytic model in `js/mars-mission-state.js` |
+| Mars geometry + season | `/api/mars/ephemeris` | JPL Horizons | Mars24 analytic model in `js/mars-mission-state.js` |
 | Surface weather | `/api/mars/weather` | NASA MEDA / REMS / InSight | bundled MEDA snapshot (sol 1133) |
 | Sky directions | `/api/horizons` | JPL Horizons topocentric | nothing — bodies report unavailable |
 | Surface imagery tiles | `/api/mars/tiles` | NASA Solar System Treks WMTS | bundled 1440×720 Viking texture |
@@ -49,7 +49,7 @@ gates the registration.
 
 | Registry id | Endpoint | Green means | Amber means |
 |-------------|----------|-------------|-------------|
-| `mars-ephemeris` | `/api/mars/ephemeris` | JPL Horizons answered | fell back to the analytic Ls model |
+| `mars-ephemeris` | `/api/mars/ephemeris` | JPL Horizons answered | fell back to the Mars24 analytic model |
 | `mars-route` | `/api/mars/route` | live MMGIS traverse | serving the bundled route snapshot |
 | `mars-weather` | `/api/mars/weather` | a rover returned a usable observation | every NASA rover feed is offline |
 | `mars-tiles` | `/api/mars/tiles` | every catalogued mosaic answered | at least one layer is unreachable; the page falls back to the bundled texture for it |
@@ -63,8 +63,9 @@ amber. **If you remove that field, a dead NASA feed renders green.**
 **`mars-weather` is expected to sit amber.** That is not an alert to chase — it
 is the frozen-upstream state described above, and the page says so in its own
 provenance line. `mars-ephemeris` going amber is worth investigating; it means
-JPL Horizons is unreachable, and the terminator has silently dropped to a model
-that can be ~11° of Ls wrong.
+JPL Horizons is unreachable. Since 2026-09 the fallback is the Mars24 algorithm
+(≈0.01° of Ls), so amber costs the earth-range / light-time / elongation cells,
+not the season or the terminator.
 
 Upstream reachability from the Vercel edge is separately pinged by
 `/api/health` (`mars-mmgis`, `mars-rss`, `jpl-horizons`). Those rows are
@@ -158,13 +159,37 @@ apparent diameter — one JPL Horizons observer query per 15-minute cache window
 - Quantities: `13,14,15,20,21,23,24,44` (44 is apparent solar longitude, L_s)
 - Source: https://ssd.jpl.nasa.gov/horizons/
 
+**Quantity 44's column header is `App_Lon_Sun`, not `L_s`.** Horizons uses
+"L_s" only in its prose legend; the table header (documented in astroquery's
+column map) is `App_Lon_Sun`. The parser read `L_s` from 2026-08 to 2026-09
+against a hand-written fixture that used that name, so `node
+tests/mars-ephemeris.mjs` passed while production's `ls_deg` was `null` on every
+call. Ls now resolves from `LS_COLUMN_CANDIDATES` (verified name first) and the
+payload self-reports `ls_column` — `curl -s https://parkersphysics.com/api/mars/ephemeris | jq .ls_column`
+settles it in one request.
+
+**The analytic model is Mars24** (Allison & McEwen 2000, `marsOrbitalClock` in
+`js/mars-mission-state.js`): Ls with the planetary perturbation terms, the
+equation of time, and the TT-scale Mars Sol Date. It replaced a linear
+mean-motion Ls whose anchor ("2024-09-12 = Ls 0°") was 61 days early — Mars Year
+38 began 2024-11-12 — so the page read "Ls 30°" on 2026-09-26 at Ls 358°.
+Checked against production Horizons at 2026-09-26T12:14:41Z: sub-solar latitude
+−0.8182° vs −0.8207°; sub-solar longitude 64.2134°E vs 64.2102°E at the
+light-time-retarded instant (below). `tests/mars-mission-state.mjs` pins the
+paper's worked example and those numbers.
+
+**The route reports two sub-solar points.** `sub_solar` is Horizons' own value
+for an Earth observer — Mars as seen one down-leg light time ago (8–22 min), 3–5°
+east of where the Sun is overhead NOW. `sub_solar_now` removes the light time
+(360° per mean sol); it is what the terminator is drawn from, because the page's
+LMST clock is Mars-simultaneous. The client also ADVANCES it with Mars' rotation
+between refreshes: the route is edge-cached up to 30 min, i.e. 7.5° of rotation.
+
 **Why this route exists.** Everything seasonal on the page previously came from
-`marsSolarLongitudeFromJulianDate` — a linear mean-motion model. Mars' orbit has
-e ≈ 0.0934, so a constant-rate Ls runs up to ~11° from the true value near the
-solstices, and that error lands directly on the terminator and on any
-dust-season call. The response carries BOTH the Horizons value and the analytic
-one, plus `ls_model_delta_deg` between them, so the page can show the gap rather
-than quietly picking a number.
+`marsSolarLongitudeFromJulianDate` — then a linear mean-motion model. The
+response carries BOTH the Horizons value and the analytic one, plus
+`ls_model_delta_deg` between them, so the page can show the gap rather than
+quietly picking a number.
 
 Two conventions are converted once, in `js/mars-ephemeris.js`, and must not be
 re-derived elsewhere: Horizons sub-longitudes are **west-positive** (Mars is a
@@ -208,7 +233,7 @@ dynamics, no advection, no water cycle, and therefore **no winds**.
 
 | Input | Comes from | Degrades to |
 |-------|-----------|-------------|
-| Season (Ls) | `/api/mars/ephemeris` (JPL Horizons) | the analytic Ls model, ~11° worse near solstice |
+| Season (Ls) | `/api/mars/ephemeris` (JPL Horizons) | the Mars24 analytic model (≈0.01° of Ls) |
 | Elevation | the bundled MOLA raster, same sampler the relief uses | 0 m, i.e. datum pressure everywhere |
 | Albedo → thermal inertia | luminance measured off the bundled Viking mosaic | a stated uniform albedo, disclosed in the provenance line |
 | Dust opacity τ | seasonal climatology in the kernel | — (it has no live source; see below) |
