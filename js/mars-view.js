@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     MARS_RADIUS_M,
+    MARS_SOL_MS,
     PERSEVERANCE_MEDA_SNAPSHOT,
     PERSEVERANCE_MISSION,
     estimatedMissionSol,
@@ -11,8 +12,8 @@ import {
     marsSolarLongitude,
     marsSubsolarPoint,
     observationFreshness,
-} from './mars-mission-state.js?v=20260809-live';
-import { MarsLandmarks } from './mars-landmarks.js?v=20260809-live';
+} from './mars-mission-state.js?v=20260926-explore';
+import { MarsLandmarks } from './mars-landmarks.js?v=20260926-explore';
 import { MARS_LANDMARKS, MARS_LANDMARK_CATEGORIES } from './mars-landmarks-data.js';
 import { fetchMarsSkyEphemeris } from './horizons.js';
 import { MarsSky } from './mars-sky.js';
@@ -89,11 +90,66 @@ const RELIEF_RAMP_FULL_RANGE_KM = 50;
 const RELIEF_SCALE_STEPS = Object.freeze([1, 2, 3, 5, 8, 12, REGIONAL_RELIEF_EXAGGERATION]);
 let regionalReliefScale = REGIONAL_RELIEF_EXAGGERATION;
 
-function reliefScaleForRange(rangeKm) {
+/**
+ * ═══ PER-SITE EXAGGERATION CEILING ════════════════════════════════════════
+ * 18× was tuned at Jezero, whose 520 km patch spans 4.75 km of real MOLA
+ * relief (85 km drawn). Applied everywhere it was absurd where Mars is NOT
+ * flat: Olympus Mons' patch spans 23.5 km, so it was drawn 422 km tall — the
+ * camera, placed 9 km above the ground, pitched 20° down to find its target,
+ * the ENTIRE frame fell below the local horizon, and the view was a wall of
+ * facets against black void (measured). Valles Marineris (11.1 km) and Elysium
+ * Mons (14.9 km) were nearly as bad.
+ *
+ * So the survey scale is capped per patch by a DRAWN-relief budget: the largest
+ * step whose drawn span fits in REGIONAL_DRAWN_RELIEF_BUDGET_KM. 90 km keeps
+ * Jezero at the documented 18× (and the flat plains — Hellas floor 1.9 km,
+ * Utopia 1.6 km — too); Olympus draws at 3×, Valles at 8×, Elysium at 5×,
+ * Gale and Argyre at 12×. The ramp below then runs from that ceiling down to
+ * true scale exactly as before, and every HUD readout already prints the live
+ * multiplier, so nothing claims a scale it is not drawing.
+ *
+ * The ceiling is a property of the MOLA data at the patch centre, never of the
+ * camera, so it cannot feed back through the surface it scales (the AGL trap
+ * the ramp note below describes).
+ */
+const REGIONAL_DRAWN_RELIEF_BUDGET_KM = 90;
+const RELIEF_SPAN_SAMPLES = 33;
+let regionalReliefCeiling = REGIONAL_RELIEF_EXAGGERATION;
+const reliefCeilingCache = new Map();
+
+function reliefCeilingFor(latDeg, lonDeg) {
+    if (!hasRelief || !reliefEnabled) return REGIONAL_RELIEF_EXAGGERATION;
+    // Quarter-degree key, the same quantization the synth cache uses.
+    const key = `${Math.round(latDeg * 4)}:${Math.round(lonDeg * 4)}`;
+    const cached = reliefCeilingCache.get(key);
+    if (cached) return cached;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < RELIEF_SPAN_SAMPLES; i += 1) {
+        const northKm = (i / (RELIEF_SPAN_SAMPLES - 1) - 0.5) * REGIONAL_TERRAIN_EXTENT_KM;
+        for (let j = 0; j < RELIEF_SPAN_SAMPLES; j += 1) {
+            const eastKm = (j / (RELIEF_SPAN_SAMPLES - 1) - 0.5) * REGIONAL_TERRAIN_EXTENT_KM;
+            const location = destinationLatLon(latDeg, lonDeg, eastKm, northKm);
+            const elevationM = elevationAtLatLon(location.latDeg, location.lonDeg);
+            if (elevationM < min) min = elevationM;
+            if (elevationM > max) max = elevationM;
+        }
+    }
+    const spanKm = Math.max(0.001, (max - min) / 1000);
+    const allowed = REGIONAL_DRAWN_RELIEF_BUDGET_KM / spanKm;
+    let ceiling = RELIEF_SCALE_STEPS[0];
+    for (const step of RELIEF_SCALE_STEPS) if (step <= allowed) ceiling = step;
+    if (reliefCeilingCache.size > 256) reliefCeilingCache.clear();
+    reliefCeilingCache.set(key, ceiling);
+    return ceiling;
+}
+
+function reliefScaleForRange(rangeKm, ceiling = regionalReliefCeiling) {
     const blend = THREE.MathUtils.smoothstep(rangeKm, RELIEF_RAMP_TRUE_RANGE_KM, RELIEF_RAMP_FULL_RANGE_KM);
-    const target = 1 + (REGIONAL_RELIEF_EXAGGERATION - 1) * blend;
+    const target = 1 + (ceiling - 1) * blend;
     let best = RELIEF_SCALE_STEPS[0];
     for (const step of RELIEF_SCALE_STEPS) {
+        if (step > ceiling) break;
         if (Math.abs(step - target) < Math.abs(best - target)) best = step;
     }
     return best;
@@ -316,6 +372,69 @@ scene.add(rim);
 // terminator, which is still the layer that says where day actually ends.
 const nightFloor = new THREE.AmbientLight(0x40211a, 0.5);
 scene.add(nightFloor);
+
+/**
+ * ═══ LIGHTING: MAP LIGHT (default) vs LIVE SUN ═════════════════════════════
+ * The page used to light Mars ONLY by the real Sun. That is honest and it made
+ * half the planet unexplorable at any moment: the night hemisphere rendered as
+ * a brown smear, flying to Olympus Mons at Jezero's noon showed nothing, and
+ * the surface explorer landed on a featureless orange plane past the
+ * terminator. Worse, the opening camera faces Jezero, so whether a first visit
+ * saw a planet or a dark disc depended on the Mars hour it happened to arrive.
+ *
+ * So there are two lamps, and the page says which one is on:
+ *   'map'  — a cartographic lamp that follows the VIEW: over the camera's upper
+ *            left on the globe; low (35°) and from the viewer's left on the
+ *            ground, which is the angle that reads relief. Every region is
+ *            legible at every hour. The live day/night boundary is still drawn
+ *            — the terminator LINE is the live layer in this mode.
+ *   'live' — the real Sun from JPL Horizons / Mars24, exactly as before.
+ *
+ * `sunDirectionWorld` is ALWAYS the physical Sun, in every mode: the pilot
+ * cluster's SUN readout, sunState(), the terminator, and the night-side
+ * analysis-lamp decision read it. `sun.position` is the LAMP — the direction
+ * the renderer, the sky dome, and the regolith shader's lit-relief term use —
+ * and only equals the Sun in 'live'. Reading the lamp where the Sun is meant
+ * would report "noon" at midnight; reading the Sun where the lamp is meant
+ * shades craters against a light that is not drawing them.
+ */
+const sunDirectionWorld = new THREE.Vector3(1, 0, 0);
+// Globe lamp in CAMERA space: left, up, and toward the viewer. The lit
+// hemisphere is centred on the upper-left of the visible disc, so the limb
+// falls off to the lower right and the globe still reads as a sphere.
+const MAP_LIGHT_CAMERA_DIR = Object.freeze(new THREE.Vector3(-0.52, 0.58, 0.62).normalize());
+// Ground lamp: elevation above the local horizon, and how far round from the
+// viewer's left it sits (0 = straight from the left, +: toward the viewer).
+const MAP_LIGHT_GROUND_ELEVATION_DEG = 35;
+const MAP_LIGHT_GROUND_BEHIND_DEG = 20;
+let lightingMode = 'map';
+const lampScratch = {
+    up: new THREE.Vector3(), forward: new THREE.Vector3(), right: new THREE.Vector3(), dir: new THREE.Vector3(),
+};
+
+/** Aim `sun` (the lamp) for the current mode. Cheap; runs every frame. */
+function updateLamp() {
+    const { up, forward, right, dir } = lampScratch;
+    if (lightingMode === 'live') {
+        dir.copy(sunDirectionWorld);
+    } else if (surfaceModeActive) {
+        up.copy(controls.target).normalize();
+        forward.copy(controls.target).sub(camera.position);
+        forward.addScaledVector(up, -forward.dot(up));
+        if (forward.lengthSq() < 1e-12) forward.copy(tangentFrame(up).north);
+        forward.normalize();
+        right.crossVectors(forward, up).normalize();
+        const elevation = THREE.MathUtils.degToRad(MAP_LIGHT_GROUND_ELEVATION_DEG);
+        const behind = THREE.MathUtils.degToRad(MAP_LIGHT_GROUND_BEHIND_DEG);
+        dir.copy(right).multiplyScalar(-Math.cos(behind))
+            .addScaledVector(forward, -Math.sin(behind))
+            .multiplyScalar(Math.cos(elevation))
+            .addScaledVector(up, Math.sin(elevation));
+    } else {
+        dir.copy(MAP_LIGHT_CAMERA_DIR).applyQuaternion(camera.quaternion);
+    }
+    sun.position.copy(dir).normalize().multiplyScalar(5);
+}
 
 const marsGroup = new THREE.Group();
 marsGroup.rotation.y = THREE.MathUtils.degToRad(-77.25);
@@ -1482,29 +1601,42 @@ const marsFeedState = {
 };
 
 let horizonsSunDirection = null;
-// Sub-solar point from /api/mars/ephemeris (JPL Horizons). Ranks between the
-// topocentric Horizons sun direction and the analytic model — see
-// updateIllumination for the ladder.
-let ephemerisSunDirection = null;
+// Sub-solar point from /api/mars/ephemeris (JPL Horizons), Mars-simultaneous
+// (`sub_solar_now`: light time removed) and stamped with the instant it is FOR.
+// Ranks between the topocentric Horizons sun direction and the analytic model —
+// see updateIllumination for the ladder.
+//
+// It is ADVANCED with Mars' rotation between refreshes rather than held: the
+// sub-solar longitude moves 15°/hr, the route is edge-cached for up to 30 min
+// and polled every 15, so a held value let the terminator lag the LMST clock
+// printed beside it by up to ~11° (7.5° of cache age + 3.4° of light time).
+let ephemerisSubSolar = null;
+
+function ephemerisSunDirectionAt(date) {
+    if (!ephemerisSubSolar) return null;
+    const elapsedMs = date.getTime() - ephemerisSubSolar.atMs;
+    const lonDeg = ephemerisSubSolar.lonDeg - 360 * elapsedMs / MARS_SOL_MS;
+    return latLonVector(ephemerisSubSolar.latDeg, lonDeg).normalize();
+}
 
 function updateIllumination(date = new Date()) {
     const subsolar = marsSubsolarPoint(date);
     const analyticDirection = latLonVector(subsolar.lat_deg, subsolar.lon_deg).normalize();
     // Illumination ladder, best first:
     //   1. Horizons topocentric Sun az/el at the rover site (the sky layer)
-    //   2. Horizons sub-solar point from /api/mars/ephemeris
-    //   3. the linear mean-motion model, which can be ~11° of Ls off
-    const fallbackDirection = ephemerisSunDirection || analyticDirection;
+    //   2. Horizons sub-solar point from /api/mars/ephemeris, advanced to now
+    //   3. the Mars24 analytic model (≈0.01° in Ls; agrees with 2. to ~0.003°)
+    const fallbackDirection = ephemerisSunDirectionAt(date) || analyticDirection;
     marsFeedState.illumination = horizonsSunDirection ? 'horizons-topocentric'
-        : ephemerisSunDirection ? 'horizons-subsolar'
+        : ephemerisSubSolar ? 'horizons-subsolar'
         : 'analytic';
     const { points, sunDirection } = terminatorPoints(horizonsSunDirection || fallbackDirection);
     terminatorLine.geometry.dispose();
     terminatorLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const worldSunDirection = sunDirection.clone().applyQuaternion(marsGroup.quaternion);
-    sun.position.copy(worldSunDirection.multiplyScalar(5));
+    sunDirectionWorld.copy(sunDirection).applyQuaternion(marsGroup.quaternion).normalize();
     sun.target.position.set(0, 0, 0);
     sun.target.updateMatrixWorld();
+    updateLamp();
     return subsolar;
 }
 
@@ -1666,10 +1798,16 @@ const skyDomeMaterial = new THREE.ShaderMaterial({
             vec3 sky=mix(uZenith,uHorizon,band);
             float sunAngle=max(dot(dir,uSunDirection),0.0);
             sky+=uSunTint*(pow(sunAngle,42.0)*1.15+pow(sunAngle,7.0)*0.30)*uGlow;
-            // Below the local horizontal there is ground, not sky. Fade out so
-            // the dome never paints over the terrain silhouette.
-            float belowHorizon=smoothstep(-0.06,0.0,altitude);
-            gl_FragColor=vec4(sky,uOpacity*belowHorizon);
+            // Below the local horizontal there is GROUND the 520 km patch does
+            // not reach. This used to fade to alpha 0 there, which punched a
+            // hole into space past the patch edge: invisible on the plains,
+            // and the whole frame at a high-relief site where the camera looks
+            // down (measured at Olympus Mons). It is painted as dust haze now,
+            // opaque. It cannot cover the terrain: the dome sits ~2000 km out,
+            // is drawn after every opaque mesh, and is depth-tested.
+            float above=smoothstep(-0.015,0.015,altitude);
+            vec3 haze=uHorizon*0.86;
+            gl_FragColor=vec4(mix(haze,sky,above),mix(1.0,uOpacity,above));
         }`,
 });
 const skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), skyDomeMaterial);
@@ -2078,9 +2216,8 @@ function applyWeatherUi(payload) {
     const feedState = document.querySelector('#feed-state');
     const warning = document.querySelector('#weather-warning');
     // Season belongs to /api/mars/ephemeris once JPL has answered — the Ls in
-    // the weather payload is the linear mean-motion model, and letting a later
-    // weather refresh overwrite the JPL value would quietly re-introduce up to
-    // ~11° of error that applyEphemerisUi had just removed.
+    // the weather payload is the analytic model, and a later weather refresh
+    // must not overwrite the JPL value (or its source label) with it.
     if (marsFeedState.ephemeris !== 'jpl-horizons') {
         const orbitalSeason = marsSubsolarPoint(new Date()).ls_deg;
         const payloadSeason = numberOrNull(payload?.ls_deg) ?? orbitalSeason;
@@ -2194,8 +2331,8 @@ function applyEphemerisUi(payload) {
 
     const lsDeg = Number.isFinite(payload?.ls_deg) ? payload.ls_deg : null;
     if (lsDeg != null) {
-        // The climate field's season. Horizons is worth ~11° of Ls over the
-        // analytic model near the solstices, and Ls moves BOTH the seasonal
+        // The climate field's season. Horizons is the reference (the Mars24
+        // fallback agrees to ~0.01°), and Ls moves BOTH the seasonal
         // CO₂ pressure cycle and the solar declination, so this is the single
         // largest accuracy input the layer has.
         liveLsDeg = lsDeg;
@@ -2221,11 +2358,12 @@ function applyEphemerisUi(payload) {
     setGeometry('#geo-elongation',
         Number.isFinite(payload?.solar_elongation_deg) ? `${payload.solar_elongation_deg.toFixed(1)}°` : '—',
         payload?.solar_conjunction?.note || 'Sun–Earth–Mars angle');
+    const shownSubSolar = payload?.sub_solar_now || payload?.sub_solar;
     setGeometry('#geo-subsolar',
-        Number.isFinite(payload?.sub_solar?.lat_deg) && Number.isFinite(payload?.sub_solar?.lon_deg)
-            ? `${payload.sub_solar.lat_deg.toFixed(1)}°, ${payload.sub_solar.lon_deg.toFixed(1)}°`
+        Number.isFinite(shownSubSolar?.lat_deg) && Number.isFinite(shownSubSolar?.lon_deg)
+            ? `${shownSubSolar.lat_deg.toFixed(1)}°, ${shownSubSolar.lon_deg.toFixed(1)}°`
             : '—',
-        'sub-solar lat, lon');
+        payload?.sub_solar_now ? 'sub-solar lat, lon · at Mars now' : 'sub-solar lat, lon');
 
     const note = document.querySelector('#geometry-note');
     if (note) {
@@ -2235,15 +2373,22 @@ function applyEphemerisUi(payload) {
                 : '';
             note.innerHTML = `<strong>Geometry:</strong> live JPL Horizons, refreshed every 15 minutes.${delta}`;
         } else {
-            note.innerHTML = `<strong>Geometry:</strong> JPL Horizons unavailable (${payload?.degraded_reason || 'no response'}); showing the bundled analytic season model, which can run ~11° of Ls off near the solstices.`;
+            note.innerHTML = `<strong>Geometry:</strong> JPL Horizons unavailable (${payload?.degraded_reason || 'no response'}); showing the Mars24 analytic model (Allison &amp; McEwen 2000, ≈0.01° of Ls).`;
         }
     }
 
-    // Feed the sub-solar point into the terminator. This is strictly better than
-    // the analytic model and independent of the five-body topocentric sky query,
-    // so illumination survives a partial Horizons outage.
-    if (live && Number.isFinite(payload.sub_solar?.lat_deg) && Number.isFinite(payload.sub_solar?.lon_deg)) {
-        ephemerisSunDirection = latLonVector(payload.sub_solar.lat_deg, payload.sub_solar.lon_deg).normalize();
+    // Feed the sub-solar point into the terminator. Independent of the five-body
+    // topocentric sky query, so illumination survives a partial Horizons outage.
+    // `sub_solar_now` is Mars-simultaneous (the raw `sub_solar` is as seen from
+    // Earth, one light time ago); `jd` is the instant it describes, which can be
+    // up to 30 minutes before now because the route is edge-cached.
+    // A payload without `sub_solar_now` (a response cached from before the
+    // route learned it) falls back to the as-seen-from-Earth point: one light
+    // time (~3°) stale, but JPL's own number, and the source label says JPL.
+    const subSolarNow = payload?.sub_solar_now || payload?.sub_solar || null;
+    const atMs = Number.isFinite(payload?.jd) ? (payload.jd - 2_440_587.5) * 86_400_000 : Date.now();
+    if (live && Number.isFinite(subSolarNow?.lat_deg) && Number.isFinite(subSolarNow?.lon_deg)) {
+        ephemerisSubSolar = { latDeg: subSolarNow.lat_deg, lonDeg: subSolarNow.lon_deg, atMs };
     }
     updateIllumination();
 }
@@ -2260,7 +2405,7 @@ async function loadMarsEphemeris() {
         marsFeedState.ephemeris = 'unavailable';
         marsFeedState.ephemerisReason = error.message || 'adapter unreachable';
         const note = document.querySelector('#geometry-note');
-        if (note) note.innerHTML = '<strong>Geometry:</strong> live adapter unreachable; the season shown is the bundled analytic model.';
+        if (note) note.innerHTML = '<strong>Geometry:</strong> live adapter unreachable; season and sub-solar point come from the Mars24 analytic model (≈0.01° of Ls).';
     } finally {
         window.clearTimeout(timer);
     }
@@ -2576,7 +2721,11 @@ function setLayer(name, enabled) {
     } else if (name === 'grid') gridLayer.visible = enabled;
     // The quality ladder can drop the limb shell entirely; the layer switch must
     // not turn it back on underneath that decision.
-    else if (name === 'atmosphere') atmosphereLayer.visible = enabled && QUALITY_LEVELS[qualityIndex].atmosphere;
+    else if (name === 'atmosphere') {
+        const want = enabled && QUALITY_LEVELS[qualityIndex].atmosphere;
+        if (surfaceModeActive) surfaceVisibilityRestore.set(atmosphereLayer, want);
+        else atmosphereLayer.visible = want;
+    }
     else if (name === 'terminator') terminatorLayer.visible = enabled;
     else if (name === 'rover') roverLayer.visible = enabled;
     else if (name === 'landing') landingLayer.visible = enabled;
@@ -2590,6 +2739,7 @@ function setLayer(name, enabled) {
         landmarks.setCategoryVisible('crater', enabled);
     } else if (name === 'landmark-polar') landmarks.setCategoryVisible('polar', enabled);
     else if (name === 'rotate') setAutoRotate(enabled);
+    else if (name === 'sunlight') setLightingMode(enabled ? 'live' : 'map');
     else if (name === 'tiles') setTileLayerEnabled(enabled);
 }
 
@@ -2900,7 +3050,7 @@ function updatePilotCluster(target, altitudeKm, nowMs) {
     }
 
     pilot.sunElevDeg = Math.asin(THREE.MathUtils.clamp(
-        sun.position.clone().normalize().dot(radial), -1, 1,
+        sunDirectionWorld.dot(radial), -1, 1,
     )) * 180 / Math.PI;
 
     if (!pilotElements.hdg) return;
@@ -2962,6 +3112,41 @@ function updateSurfaceReadout({ force = false } = {}) {
     updateLandingReticle();
 }
 
+function nightAnalysisLampWanted(radial) {
+    return lightingMode === 'live'
+        && sunDirectionWorld.dot(radial) < Math.sin(THREE.MathUtils.degToRad(3));
+}
+
+const lightingToggle = document.querySelector('#lighting-toggle');
+const lightingSourceElement = document.querySelector('#lighting-source');
+const cameraLightButton = document.querySelector('#camera-light');
+
+/**
+ * Switch the lamp (see the LIGHTING block). Everything that shows WHICH lamp is
+ * on — the layer row, the camera-dock button, the mesh badge suffix — is set
+ * here and nowhere else, so the disclosure cannot drift from the render.
+ */
+function setLightingMode(mode) {
+    lightingMode = mode === 'live' ? 'live' : 'map';
+    const live = lightingMode === 'live';
+    if (lightingToggle) lightingToggle.checked = live;
+    if (lightingSourceElement) {
+        lightingSourceElement.textContent = live
+            ? 'real Sun now · JPL Horizons / Mars24 · the night side is dark'
+            : 'off · even map light for exploring · the terminator line marks live day/night';
+    }
+    if (cameraLightButton) {
+        cameraLightButton.setAttribute('aria-pressed', String(live));
+        cameraLightButton.setAttribute('aria-label', live ? 'Switch to map lighting' : 'Show live sunlight');
+        cameraLightButton.title = live ? 'Switch to even map lighting (I)' : 'Show live sunlight (I)';
+    }
+    app.dataset.lighting = lightingMode;
+    updateLamp();
+    if (surfaceModeActive) {
+        setSurfaceLight(nightAnalysisLampWanted(controls.target.clone().normalize()));
+    }
+}
+
 function setSurfaceLight(enabled) {
     const active = Boolean(enabled) && surfaceModeActive;
     surfaceHeadlamp.visible = active;
@@ -2983,8 +3168,9 @@ function setSurfaceGrid(enabled) {
 function deactivateSurfaceExplorer() {
     if (!surfaceModeActive) return;
     surfaceModeActive = false;
-    // Back to survey scale so the next entry starts at the documented 18×.
+    // Back to survey scale; the next entry recomputes its own ceiling.
     regionalReliefScale = REGIONAL_RELIEF_EXAGGERATION;
+    regionalReliefCeiling = REGIONAL_RELIEF_EXAGGERATION;
     updateLandingReticle();
     app.classList.remove('is-surface-mode');
     surfaceExplorer.hidden = true;
@@ -3061,6 +3247,11 @@ function updateReliefRamp() {
     const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
     const next = reliefScaleForRange(rangeKm);
     if (next === regionalReliefScale) return;
+    applyRegionalReliefScale(next);
+}
+
+/** Rebuild the patch at a new vertical scale and re-seat the view onto it. */
+function applyRegionalReliefScale(next) {
     regionalReliefScale = next;
     const previousTarget = controls.target.clone();
     rebuildRegionalTerrain(regionalTerrainCenter.latDeg, regionalTerrainCenter.lonDeg);
@@ -3120,6 +3311,13 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     pilot.slopeAt = null;
     app.classList.add('is-surface-mode');
     surfaceExplorer.hidden = false;
+    // The detail card sat bottom-centre over the terrain for the whole visit.
+    // Arriving is the answer to "Fly here"; the card can be reopened by clicking
+    // the feature again from orbit or the index.
+    landmarkCard.hidden = true;
+    // Survey scale for THIS site (see PER-SITE EXAGGERATION CEILING).
+    regionalReliefCeiling = reliefCeilingFor(latDeg, lonDeg);
+    regionalReliefScale = regionalReliefCeiling;
     rebuildRegionalTerrain(latDeg, lonDeg);
     regionalTerrain.visible = true;
     skyDome.visible = true;
@@ -3153,14 +3351,18 @@ function enterSurfaceExplorer(latDeg, lonDeg, { label = 'Surface traverse', dura
     // With emissive shading gone the sun does the lighting, so leaving the lamp
     // on in daylight just flattens the relief it exists to reveal — but past the
     // terminator it is the only thing that makes the ground readable at all.
-    const sunElevationDeg = updateSurfaceSky(radial);
-    setSurfaceLight(sunElevationDeg < 3);
+    // Under MAP light the ground is already lit from a relief-reading angle, so
+    // the lamp stays off; it is a LIVE-sun night tool. The decision reads the
+    // PHYSICAL Sun, never the lamp (see the LIGHTING block).
+    updateLamp();
+    updateSurfaceSky(radial);
+    setSurfaceLight(nightAnalysisLampWanted(radial));
     // Report the patch's ACTUAL relief span. It is the number that tells a
     // viewer whether the shape in front of them is a 3 km scarp or 200 m of
     // noise stretched by the exaggeration, and it costs nothing to be specific.
     updateSurfaceDetail();
     meshStatusElement.textContent = hasRelief
-        ? `regional MOLA · 66k vertices · ${REGIONAL_RELIEF_EXAGGERATION}× relief`
+        ? `regional MOLA · 66k vertices · ${regionalReliefScale}× relief`
         : 'regional smooth-terrain fallback';
     cameraHelpElement.textContent = defaultInputHint();
     updateSurfaceReadout({ force: true });
@@ -3224,6 +3426,13 @@ function moveSurfaceBy(forwardKm, rightKm, { trail = true } = {}) {
         || greatCircleDistanceKm(regionalTerrainCenter, location) > REGIONAL_TERRAIN_EXTENT_KM * 0.22) {
         rebuildRegionalTerrain(location.latDeg, location.lonDeg);
         updateSurfaceDetail();
+        // Driving from the plains onto a volcano changes what the patch can
+        // bear. Re-derive the ceiling for the new centre and, if the scale for
+        // the current range moved with it, rebuild once more and re-seat.
+        regionalReliefCeiling = reliefCeilingFor(location.latDeg, location.lonDeg);
+        const rangeKm = camera.position.distanceTo(controls.target) * MARS_RADIUS_KM;
+        const wanted = reliefScaleForRange(rangeKm);
+        if (wanted !== regionalReliefScale) applyRegionalReliefScale(wanted);
     }
     if (trail) updateSurfaceTrail(location);
     updateSurfaceReadout({ force: true });
@@ -3291,6 +3500,11 @@ function flyCamera(position, target, { duration = 850, mode = 'custom', label = 
 function focusSurfacePoint(latDeg, lonDeg, { mode = 'landmark', label = 'Surface focus', duration = 850 } = {}) {
     lastSurfaceFocus = { latDeg, lonDeg, label };
     const radial = latLonVector(latDeg, lonDeg).applyQuaternion(marsGroup.quaternion).normalize();
+    // Under live sunlight a night-side target is correctly dark — say why, and
+    // how to see it, instead of letting it read as a rendering failure.
+    if (lightingMode === 'live' && sunDirectionWorld.dot(radial) < 0) {
+        window.setTimeout(() => setInputHint(`Night at ${label} · press I (☀) for map light`, 'hint', 5000), duration);
+    }
     const { north, east } = tangentFrame(radial);
     const position = radial.clone().multiplyScalar(1.22)
         .addScaledVector(north, 0.09)
@@ -3333,6 +3547,10 @@ function focusSkyBody(key, { showDetails = true } = {}) {
 }
 
 function zoomCamera(factor) {
+    // The +/− buttons and keys obey the same zoom-through rule as the wheel:
+    // at the orbit floor "closer" means land, at the surface ceiling "further"
+    // means orbit. Without it the buttons simply stopped working at the limits.
+    if (!cameraTween && zoomThroughIfAtLimit(factor < 1 ? -1 : 1, null, null, { immediate: true })) return;
     cameraTween = null;
     setAutoRotate(false);
     const offset = camera.position.clone().sub(controls.target);
@@ -3360,6 +3578,7 @@ window.__marsUi?.registerCommands({
         Number(dataset.right || 0),
     ),
     'toggle-surface-light': () => setSurfaceLight(!surfaceHeadlamp.visible),
+    'toggle-lighting': () => setLightingMode(lightingMode === 'live' ? 'map' : 'live'),
     'toggle-surface-grid': () => setSurfaceGrid(!regionalTerrainGrid.visible),
     'sky-focus': ({ dataset }) => focusSkyBody(dataset.skyFocus),
 });
@@ -3384,11 +3603,24 @@ function beginManualCamera() {
 
 // Bound in createControls() so they survive a frame rebuild. Declarations, not
 // consts: createControls() runs during module init, above this point.
+let gestureStartDistance = null;
 function onControlsStart() {
     canvas.classList.add('is-interacting');
+    gestureStartDistance = camera.position.distanceTo(controls.target);
 }
 function onControlsEnd() {
     canvas.classList.remove('is-interacting');
+    // A PINCH that ends pressed against a zoom limit is the touch version of
+    // pushing the wheel past it (see ZOOM-THROUGH). One pinch is a deliberate
+    // gesture, so it does not need the wheel's arming push.
+    const pinched = [...pointerStarts.values()].some(record => record.multiTouch) || lastGestureWasPinch;
+    lastGestureWasPinch = false;
+    if (pinched && gestureStartDistance != null && !cameraTween) {
+        const distance = camera.position.distanceTo(controls.target);
+        const direction = distance < gestureStartDistance * 0.97 ? -1
+            : distance > gestureStartDistance * 1.03 ? 1 : 0;
+        if (direction !== 0 && zoomThroughIfAtLimit(direction, null, null, { immediate: true })) return;
+    }
     if (pointerStarts.size === 0 && canvas.dataset.inputState !== 'double-tap') setInputHint(defaultInputHint());
 }
 
@@ -3435,6 +3667,7 @@ document.addEventListener('keydown', event => {
     else if (event.key === '+' || event.key === '=') zoomCamera(0.76);
     else if (event.key === '-' || event.key === '_') zoomCamera(1.3);
     else if (event.key === ' ') setAutoRotate(!controls.autoRotate);
+    else if (key === 'i') setLightingMode(lightingMode === 'live' ? 'map' : 'live');
     else return;
     event.preventDefault();
 });
@@ -3476,11 +3709,14 @@ function panSurfaceByPixels(deltaX, deltaY) {
 }
 let lastTouchTap = null;
 let inputHintTimer = null;
+// Set on a two-finger touch; read (and cleared) when OrbitControls ends the
+// gesture — by then pointerup may already have dropped the records.
+let lastGestureWasPinch = false;
 
 function defaultInputHint() {
     return surfaceModeActive
-        ? 'Drag look · right-drag move · wheel altitude · WASD · Esc to orbit'
-        : 'Drag orbit · wheel zoom · click a landmark · double-click to land';
+        ? 'Drag look · right-drag move · wheel altitude (out to orbit) · WASD · Esc'
+        : 'Drag orbit · zoom in to land · click a landmark · double-click to land';
 }
 
 function setInputHint(message, state = 'idle', resetDelay = 1400) {
@@ -3672,10 +3908,100 @@ canvas.dataset.pointerCount = '0';
 cameraHelpElement.dataset.active = 'false';
 
 canvas.addEventListener('contextmenu', event => event.preventDefault());
-canvas.addEventListener('wheel', () => {
+/**
+ * ═══ ZOOM-THROUGH: ORBIT ⇄ SURFACE ══════════════════════════════════════════
+ * The globe's zoom used to stop dead ~600–750 km up (the orbit floor), and the
+ * only way lower was a double-click nobody was told about — so "zoom in on
+ * Mars" ended at a blurry wall, which read as the map being broken. Now
+ * pushing PAST the floor descends into the surface explorer at the point under
+ * the cursor, and pulling out past the explorer's ceiling (260 km eye) climbs
+ * back to orbit over the same ground. One continuous gesture, globe to regolith.
+ *
+ * It takes TWO consecutive pushes against the limit inside ZOOM_THROUGH_WINDOW_MS,
+ * never one: a trackpad fling delivers a burst of wheel events, and the first
+ * event to reach the floor must not also be the one that yanks the camera into
+ * a flight the visitor did not ask for. The first push arms it and says so.
+ *
+ * Runs AFTER OrbitControls' own wheel handler (registered at construction,
+ * before this), so the distance read here is already clamped for this event.
+ */
+const ZOOM_THROUGH_PUSHES = 2;
+const ZOOM_THROUGH_WINDOW_MS = 1200;
+// Slack on the limit test: OrbitControls clamps to the limit exactly, but the
+// damped orbit and float round-off leave the distance a hair either side.
+const ZOOM_LIMIT_SLACK = 0.015;
+const zoomPush = { direction: 0, count: 0, at: -Infinity };
+// A trackpad fling keeps delivering wheel events for a second or more after
+// the push that triggered the transition, and every one of them called
+// beginManualCamera(), which CANCELS the flight — the descent stalled in mid-air
+// (caught by tests/mars-map.spec.js). Wheel input is held off until the flight
+// has landed, plus a short grace for the tail of the fling.
+const ZOOM_THROUGH_GRACE_MS = 350;
+let zoomThroughLockUntil = 0;
+
+function atZoomLimit(direction) {
+    const distance = camera.position.distanceTo(controls.target);
+    if (direction < 0) return !surfaceModeActive && distance <= controls.minDistance * (1 + ZOOM_LIMIT_SLACK);
+    return surfaceModeActive && distance >= controls.maxDistance * (1 - ZOOM_LIMIT_SLACK);
+}
+
+function descendAtClientPoint(clientX, clientY) {
+    if (clientX != null && enterSurfaceAtClientPoint(clientX, clientY)) return true;
+    // No globe under the cursor (or a button press): land under the view centre.
+    const rect = canvas.getBoundingClientRect();
+    if (enterSurfaceAtClientPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)) return true;
+    const location = worldVectorLatLon(controls.target.lengthSq() > 1e-6 ? controls.target : camera.position);
+    lastSurfaceFocus = { ...location, label: 'Selected terrain' };
+    enterSurfaceExplorer(location.latDeg, location.lonDeg, { label: 'Surface · selected terrain' });
+    return true;
+}
+
+function climbToOrbit() {
+    const location = surfaceLocation || regionalTerrainCenter;
+    if (!location) { showGlobalView(); return; }
+    focusSurfacePoint(location.latDeg, location.lonDeg, {
+        mode: 'custom', label: 'Orbit · over the explored ground', duration: 1000,
+    });
+}
+
+/**
+ * @param {number} direction  −1 zooming in, +1 zooming out
+ * @param {boolean} [immediate] a discrete command (button, key): no arming push
+ * @returns {boolean} true when this push triggered a transition
+ */
+function zoomThroughIfAtLimit(direction, clientX, clientY, { immediate = false, timeStamp = performance.now() } = {}) {
+    if (!atZoomLimit(direction)) {
+        zoomPush.count = 0;
+        return false;
+    }
+    const sameGesture = zoomPush.direction === direction && timeStamp - zoomPush.at < ZOOM_THROUGH_WINDOW_MS;
+    zoomPush.direction = direction;
+    zoomPush.count = immediate ? ZOOM_THROUGH_PUSHES : (sameGesture ? zoomPush.count + 1 : 1);
+    zoomPush.at = timeStamp;
+    if (zoomPush.count < ZOOM_THROUGH_PUSHES) {
+        setInputHint(direction < 0 ? 'Keep zooming to descend to the surface' : 'Keep zooming out to return to orbit', 'zoom-through', 1600);
+        return false;
+    }
+    zoomPush.count = 0;
+    if (direction < 0) {
+        descendAtClientPoint(clientX, clientY);
+        setInputHint('Descending to the surface', 'zoom-through');
+    } else {
+        climbToOrbit();
+        setInputHint('Climbing back to orbit', 'zoom-through');
+    }
+    zoomThroughLockUntil = performance.now() + (cameraTween?.duration ?? 1000) + ZOOM_THROUGH_GRACE_MS;
+    return true;
+}
+
+canvas.addEventListener('wheel', event => {
+    if (performance.now() < zoomThroughLockUntil) return;
     // Wheel IS taking the wheel — unlike a bare click, it always means the
     // visitor wants the camera.
     beginManualCamera();
+    const direction = Math.sign(event.deltaY);
+    if (direction !== 0 && zoomThroughIfAtLimit(direction, event.clientX, event.clientY, { timeStamp: event.timeStamp })) return;
+    if (zoomPush.count > 0) return; // the arming hint is showing; keep it
     setInputHint(
         surfaceModeActive ? 'Wheel adjusts eye altitude' : 'Wheel zooms toward the cursor',
         'wheel',
@@ -3757,7 +4083,10 @@ canvas.addEventListener('pointerdown', event => {
     if (record.panning) canvas.setPointerCapture?.(event.pointerId);
     if (record.pointerType === 'touch') {
         const touchRecords = [...pointerStarts.values()].filter(item => item.pointerType === 'touch');
-        if (touchRecords.length > 1) touchRecords.forEach(item => { item.multiTouch = true; });
+        if (touchRecords.length > 1) {
+            touchRecords.forEach(item => { item.multiTouch = true; });
+            lastGestureWasPinch = true;
+        }
         setInputHint(
             touchRecords.length > 1 ? 'Pinch zoom · twist orbit' : (surfaceModeActive ? 'One-finger surface look' : 'One-finger orbit'),
             touchRecords.length > 1 ? 'pinch' : 'touch-drag',
@@ -3883,14 +4212,131 @@ function updateSurfaceMarkerScale(marker) {
     marker.scale.setScalar(THREE.MathUtils.clamp(distance / 2.25, 0.18, 1));
 }
 
+/**
+ * ═══ SAFE FRAME ═══════════════════════════════════════════════════════════
+ * The canvas is full-bleed and the panels float over it, so the optical centre
+ * of the render (the canvas centre) sat BEHIND them: the "Global view" globe
+ * was 770 px tall in an 850 px canvas with ~60% of it under the Perseverance
+ * panel, the layers panel, the MEDA dock and the title, and a flown-to feature
+ * landed in the middle of the screen, which on desktop is where the header is.
+ *
+ * So the unobstructed rectangle is measured from the live panel boxes and the
+ * projection's principal point is moved into its centre with setViewOffset —
+ * the renderer still draws the whole canvas (the planet shows through the
+ * translucent panels exactly as before), but everything the camera LOOKS AT is
+ * centred where it can be seen, and the global view is distanced so the whole
+ * disc fits there. Picking is unaffected: Raycaster.setFromCamera reads the
+ * offset projection, so NDC under the cursor still maps to the right ray.
+ *
+ * Rules for what counts as an obstruction are deliberately coarse: a side panel
+ * narrows the frame only while it is TALL (a collapsed panel is a pill in a
+ * corner, not a wall), and nothing obstructs on the stacked phone layout
+ * (≤820 px, where the panels flow below the canvas) or with panels hidden.
+ */
+const safeFrame = { left: 0, top: 0, right: 1, bottom: 1, widthPx: 1, heightPx: 1 };
+const SAFE_FRAME_GAP_PX = 14;
+const GLOBE_FIT_RADIUS = 1.06;       // relief + limb glow, scene units
+const GLOBE_FIT_FILL = 0.46;         // disc radius as a fraction of the frame's short side
+const GLOBAL_DISTANCE_MIN = 1.7;
+const GLOBAL_DISTANCE_MAX = 6.5;
+const stackedLayout = window.matchMedia('(max-width: 820px)');
+
+function measureSafeFrame(width, height) {
+    let left = 0; let top = 0; let right = width; let bottom = height;
+    const viewportRect = viewport.getBoundingClientRect();
+    const clean = app.classList.contains('interface-clean');
+    if (!stackedLayout.matches && !clean && viewportRect.width > 0) {
+        const boxOf = selector => {
+            const element = document.querySelector(selector);
+            if (!element || element.hidden) return null;
+            const box = element.getBoundingClientRect();
+            if (box.width < 1 || box.height < 1) return null;
+            return {
+                left: box.left - viewportRect.left, right: box.right - viewportRect.left,
+                top: box.top - viewportRect.top, bottom: box.bottom - viewportRect.top,
+                height: box.height,
+            };
+        };
+        const tall = box => box && box.height > height * 0.4;
+        const mission = boxOf('.mission-panel');
+        if (tall(mission) && mission.left < width * 0.4) left = Math.max(left, mission.right + SAFE_FRAME_GAP_PX);
+        const layers = boxOf('.layers-panel');
+        if (tall(layers) && layers.right > width * 0.6) right = Math.min(right, layers.left - SAFE_FRAME_GAP_PX);
+        const dock = boxOf('.data-dock');
+        if (dock && dock.top > height * 0.45) bottom = Math.min(bottom, dock.top - SAFE_FRAME_GAP_PX);
+        const header = boxOf('.mars-header');
+        if (header && header.bottom < height * 0.4) top = Math.max(top, header.bottom + SAFE_FRAME_GAP_PX * 0.5);
+        // Never let the frame collapse: if the chrome leaves less than ~38% of
+        // either axis, stop honouring it on that axis. (At 1024 px the band
+        // between the side panels is 42% — still worth centring the globe in.)
+        if (right - left < width * 0.38) { left = 0; right = width; }
+        if (bottom - top < height * 0.38) { top = 0; bottom = height; }
+    }
+    safeFrame.left = left; safeFrame.top = top; safeFrame.right = right; safeFrame.bottom = bottom;
+    safeFrame.widthPx = right - left;
+    safeFrame.heightPx = bottom - top;
+}
+
+function applySafeFrame(width, height) {
+    const centerX = (safeFrame.left + safeFrame.right) / 2;
+    const centerY = (safeFrame.top + safeFrame.bottom) / 2;
+    const offsetX = width / 2 - centerX;
+    const offsetY = height / 2 - centerY;
+    if (Math.abs(offsetX) < 0.5 && Math.abs(offsetY) < 0.5) camera.clearViewOffset();
+    else camera.setViewOffset(width, height, offsetX, offsetY, width, height);
+}
+
+/** Camera distance at which the whole disc fits the safe frame. */
+function globalFitDistance() {
+    const height = Math.max(1, viewport.clientHeight);
+    const focalPx = (height / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const radiusPx = GLOBE_FIT_FILL * Math.min(safeFrame.widthPx, safeFrame.heightPx);
+    const angular = Math.atan(radiusPx / focalPx);
+    return THREE.MathUtils.clamp(GLOBE_FIT_RADIUS / Math.sin(angular), GLOBAL_DISTANCE_MIN, GLOBAL_DISTANCE_MAX);
+}
+
+function refitGlobalView() {
+    const distance = globalFitDistance();
+    globalCameraPosition.setLength(distance);
+    // Sitting in the global view (auto-rotating or not) follows the new fit;
+    // anything the visitor framed themselves is left alone.
+    if (cameraMode === 'global' && !cameraTween && !surfaceModeActive) {
+        camera.position.setLength(distance);
+    }
+}
+
+// The surface HUD grew a pilot cluster and is ~200 px tall; the mission panel
+// was pinned at a fixed top:166px beneath it and the two overlapped. The HUD's
+// real bottom edge is published as --surface-hud-bottom for the CSS to clear.
+function publishSurfaceHudBottom() {
+    if (!surfaceExplorer || surfaceExplorer.hidden) return;
+    const appTop = app.getBoundingClientRect().top;
+    const bottom = surfaceExplorer.getBoundingClientRect().bottom - appTop;
+    if (bottom > 0) app.style.setProperty('--surface-hud-bottom', `${Math.round(bottom)}px`);
+}
+
 function resize() {
+    publishSurfaceHudBottom();
     const width = Math.max(1, viewport.clientWidth);
     const height = Math.max(1, viewport.clientHeight);
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
+    measureSafeFrame(width, height);
+    applySafeFrame(width, height);
     camera.updateProjectionMatrix();
+    refitGlobalView();
 }
-if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(viewport);
+if (typeof ResizeObserver !== 'undefined') {
+    const frameObserver = new ResizeObserver(() => resize());
+    frameObserver.observe(viewport);
+    // Collapsing or expanding a panel changes the safe frame without resizing
+    // the viewport, so the panels are observed too.
+    for (const selector of ['.mission-panel', '.layers-panel', '.data-dock', '.mars-header', '#surface-explorer']) {
+        const element = document.querySelector(selector);
+        if (element) frameObserver.observe(element);
+    }
+}
+new MutationObserver(() => resize()).observe(app, { attributes: true, attributeFilter: ['class'] });
 window.addEventListener('resize', resize, { passive: true });
 resize();
 
@@ -3919,8 +4365,13 @@ function applyQuality(index) {
     }
     // The additive limb shell is a full-screen overdraw pass for a decorative
     // glow — the first thing worth losing, and the last thing worth keeping.
-    atmosphereLayer.visible = level.atmosphere
+    // Through the surface restore map while the explorer is up: writing
+    // .visible directly put the limb shell back into the surface scene (seen
+    // as a stray 1.075-radius backside sphere in the surface render list).
+    const wantAtmosphere = level.atmosphere
         && Boolean(document.querySelector('[data-layer="atmosphere"]')?.checked);
+    if (surfaceModeActive) surfaceVisibilityRestore.set(atmosphereLayer, wantAtmosphere);
+    else atmosphereLayer.visible = wantAtmosphere;
     // Close-range regolith cascade rides the ladder too: it costs noise
     // evaluations per fragment, which is exactly what a software rasteriser
     // cannot afford. 0 branches the whole cascade out of the shader path.
@@ -4028,6 +4479,7 @@ loaderStatus.textContent = hasRelief ? 'MOLA relief ready · locating Perseveran
 window.__marsReady = true;
 window.__marsLab = Object.freeze({
     camera,
+    scene,
     // Getter, not a value: refreshControlFrame() replaces the instance whenever
     // the local vertical changes, and a captured reference would go stale.
     get controls() { return controls; },
@@ -4122,6 +4574,7 @@ window.__marsLab = Object.freeze({
         skyVisible: skyDome.visible,
         skyOpacity: skyDomeMaterial.uniforms.uOpacity.value,
         reliefExaggeration: REGIONAL_RELIEF_EXAGGERATION,
+        reliefCeiling: regionalReliefCeiling,
         reliefScaleNow: regionalReliefScale,
         patchRelief: { ...regionalTerrainRelief },
         hasRelief,
@@ -4196,7 +4649,7 @@ window.__marsLab = Object.freeze({
     }),
     /** Solar geometry, so a test can ask whether the focused point is in daylight. */
     sunState: () => {
-        const sunDirection = sun.position.clone().normalize();
+        const sunDirection = sunDirectionWorld.clone();
         const targetRadial = controls.target.clone().normalize();
         return {
             source: marsFeedState.illumination,
@@ -4204,6 +4657,11 @@ window.__marsLab = Object.freeze({
                 Math.asin(THREE.MathUtils.clamp(sunDirection.dot(targetRadial), -1, 1)),
             ),
             subSolar: worldVectorLatLon(sunDirection),
+            lighting: lightingMode,
+            // The LAMP's elevation at the target — equals the Sun's only in 'live'.
+            lampElevationAtTargetDeg: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(
+                sun.position.clone().normalize().dot(targetRadial), -1, 1,
+            ))),
         };
     },
     renderState: () => ({
@@ -4236,6 +4694,27 @@ window.__marsLab = Object.freeze({
         };
     },
     feedState: () => ({ ...marsFeedState }),
+    /**
+     * The SAFE FRAME and where the globe actually lands in it, in CSS px of
+     * the viewport. The browser gate asserts the whole disc fits the frame and
+     * sits at its centre — the thing "Global view" did not do before.
+     */
+    frameState: () => {
+        const width = Math.max(1, viewport.clientWidth);
+        const height = Math.max(1, viewport.clientHeight);
+        const ndc = new THREE.Vector3(0, 0, 0).project(camera);
+        const distance = camera.position.length();
+        const focalPx = (height / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+        return {
+            safe: { ...safeFrame },
+            viewport: { width, height },
+            viewOffset: camera.view?.enabled ? { x: camera.view.offsetX, y: camera.view.offsetY } : null,
+            discCenterPx: { x: (ndc.x + 1) / 2 * width, y: (1 - ndc.y) / 2 * height },
+            discRadiusPx: distance > 1 ? focalPx * Math.tan(Math.asin(1 / distance)) : null,
+            cameraDistance: distance,
+            fitDistance: globalFitDistance(),
+        };
+    },
 });
 window.__marsUi?.setEngineState('ready');
 window.clearTimeout(window.__marsBootTimer);
@@ -4450,6 +4929,9 @@ function animate(now) {
     updateSurfaceMarkerScale(routeCursor);
     landmarks.update(camera);
     sky.updateCamera(camera);
+    // Held off during a zoom-through flight (see ZOOM_THROUGH_GRACE_MS). Set
+    // every frame because refreshControlFrame() rebuilds the instance.
+    controls.enableZoom = now >= zoomThroughLockUntil;
     if (!cameraTween) {
         // Must run BEFORE update() — OrbitControls applies the polar limits
         // inside update(), so setting them afterwards is a frame too late.
@@ -4469,12 +4951,14 @@ function animate(now) {
         surfaceHeadlamp.target.updateMatrixWorld();
         surfaceFillLight.position.copy(camera.position).addScaledVector(cameraRadial, -0.0001);
         skyDome.position.copy(camera.position);
+        updateLamp();
         updateSurfaceSky(cameraRadial);
         // The detail cascade's lit-relief term shades against the live sun.
         detailUniforms.uSunDirWorld.value.copy(sun.position).normalize();
         updateReliefRamp();
         updateSurfaceReadout();
     } else {
+        updateLamp();
         updateGridFade(camera.position.length());
     }
     updateCameraReadout();

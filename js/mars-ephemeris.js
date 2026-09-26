@@ -8,16 +8,21 @@
  *
  * ── Why this exists ───────────────────────────────────────────────────────
  * The page previously derived Mars' season from a linear mean-motion model
- * (`marsSolarLongitudeFromJulianDate` in mars-mission-state.js): Ls advanced at
- * a constant rate through a 686.971-day year. Mars' orbit has e ≈ 0.0934, so the
- * true areocentric Ls runs up to ~11° away from that mean near the solstices —
- * enough to put the terminator and the "dust season" call in the wrong place.
- * This module reads Ls, the sub-solar point, and Earth-Mars geometry straight
- * from JPL Horizons instead.
+ * (`marsSolarLongitudeFromJulianDate` in mars-mission-state.js). This module reads
+ * Ls, the sub-solar point, and Earth-Mars geometry straight from JPL Horizons.
+ * The analytic model is now Allison & McEwen's Mars24 algorithm (≈0.01° in Ls),
+ * and it remains the offline fallback; the route labels which one produced a
+ * given payload. Never silently swap them — the client prints the source.
  *
- * The analytic model is NOT deleted: it remains the offline fallback, and the
- * route labels which one produced a given payload. Never silently swap them —
- * the client prints the source.
+ * ── THE L_s COLUMN IS CALLED `App_Lon_Sun` ────────────────────────────────
+ * Quantity 44 prints its value under the header `App_Lon_Sun`, NOT `L_s` (the
+ * astroquery column map documents it; Horizons only uses "L_s" in the prose
+ * legend). This parser read `row.L_s` from 2026-08 to 2026-09, against a fixture
+ * written by hand with an `L_s` header, so the test passed while production's
+ * `ls_deg` was null on every single call and the page silently ran on the
+ * analytic model (whose anchor was then 61 days wrong). Ls now resolves from a
+ * CANDIDATE LIST, and the payload reports which column answered
+ * (`ls_column`) so a future rename is visible in one production request.
  *
  * ── Horizons observer quantities requested ───────────────────────────────
  *   13  target angular diameter          21  one-way down-leg light-time
@@ -40,6 +45,9 @@
  *   tables into the edge bundle. tests/mars-ephemeris.mjs imports BOTH and
  *   asserts they round-trip to 1e-12 — that gate is what keeps them honest.
  */
+
+/** Header candidates for quantity 44, verified name first. */
+export const LS_COLUMN_CANDIDATES = Object.freeze(['App_Lon_Sun', 'L_s', 'L_Ap_Sun']);
 
 const MARS_EQUATORIAL_RADIUS_KM = 3396.19;
 const MARS_POLAR_RADIUS_KM = 3376.2;
@@ -186,6 +194,30 @@ export function solarConjunctionState(elongationDeg) {
 }
 
 /**
+ * The sub-solar point AT MARS NOW, from the one Horizons reports for an Earth
+ * observer.
+ *
+ * An observer table is apparent: Mars is evaluated one down-leg light time
+ * earlier (8–22 min), so Horizons' sub-solar longitude is where the Sun WAS
+ * overhead when the light now reaching Earth left Mars — 3–5° east of where it is
+ * overhead now. The page's LMST clock is Mars-simultaneous, so a terminator drawn
+ * from the raw value disagrees with the clock beside it. The Sun's hour angle
+ * advances 360° per mean sol (the equation of time changes by ~0.001° over a
+ * light time — below anything drawn), so the correction is a pure rotation west.
+ * Measured 2026-09-26: Horizons 64.2102°E with LT 846.2 s → 60.7784°E here, vs
+ * 60.7820°E from the independent Mars24 evaluation at the same instant.
+ */
+export const MARS_MEAN_SOL_S = 88_775.244;
+export function subSolarAtMars(subSolar, lightTimeSeconds) {
+    if (!subSolar || !Number.isFinite(subSolar.lon_deg) || !Number.isFinite(lightTimeSeconds)) return null;
+    return {
+        lat_deg: subSolar.lat_deg,
+        lon_deg: wrapLongitude(subSolar.lon_deg - 360 * lightTimeSeconds / MARS_MEAN_SOL_S),
+        frame: 'planetocentric · east-positive · Mars-simultaneous (light time removed)',
+    };
+}
+
+/**
  * Parse one Horizons CSV observer row into the feed's normalized geometry.
  *
  * Every field degrades to `null` independently: a Horizons column rename costs
@@ -203,15 +235,17 @@ export function parseMarsEphemeris(text) {
     const subSolarLonWest = numberOrNull(row['SunSub-LON']);
     const subEarthLatGeodetic = numberOrNull(row['ObsSub-LAT']);
     const subEarthLonWest = numberOrNull(row['ObsSub-LON']);
-    const lsDeg = numberOrNull(row.L_s);
+    const lsColumn = LS_COLUMN_CANDIDATES.find(name => numberOrNull(row[name]) != null) || null;
+    const lsDeg = lsColumn ? numberOrNull(row[lsColumn]) : null;
     const elongationDeg = numberOrNull(row['S-O-T']);
 
     const present = [];
     const track = (name, value) => { if (value != null) present.push(name); return value; };
 
-    return {
+    const result = {
         horizons_utc: row.__date || null,
         ls_deg: track('ls_deg', lsDeg),
+        ls_column: lsColumn,
         season: marsSeasonLabel(lsDeg),
         dust_season: marsDustSeason(lsDeg),
         sub_solar: {
@@ -226,6 +260,8 @@ export function parseMarsEphemeris(text) {
             lon_deg: track('sub_earth_lon', subEarthLonWest == null ? null : wrapLongitude(-subEarthLonWest)),
             frame: 'planetocentric · east-positive',
         },
+        // Mars-simultaneous; what the terminator should be drawn from.
+        sub_solar_now: null,
         earth_range_au: track('earth_range_au', rangeAu),
         earth_range_km: rangeAu == null ? null : rangeAu * AU_KM,
         range_rate_km_s: numberOrNull(row.deldot),
@@ -237,6 +273,8 @@ export function parseMarsEphemeris(text) {
         angular_diameter_arcsec: numberOrNull(row['Ang-diam']),
         fields_present: present,
     };
+    result.sub_solar_now = subSolarAtMars(result.sub_solar, lightTimeSeconds);
+    return result;
 }
 
 export default parseMarsEphemeris;

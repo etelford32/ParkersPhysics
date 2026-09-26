@@ -237,14 +237,18 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     await missionCollapse.click();
     await expect(page.locator('.mission-panel .panel-body')).toBeVisible();
 
+    // The MEDA dock starts COLLAPSED (2026-09): it is a historical snapshot,
+    // and expanded it covered the bottom fifth of the map. One click opens it.
     const weatherCollapse = page.locator('#weather-collapse');
     await expect(weatherCollapse).toBeVisible();
-    await weatherCollapse.click();
     await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
     await expect(weatherCollapse).toHaveText('+');
     await expect(page.locator('.weather-grid')).toBeHidden();
     await weatherCollapse.click();
     await expect(page.locator('.weather-grid')).toBeVisible();
+    await expect(weatherCollapse).toHaveText('−');
+    await weatherCollapse.click();
+    await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
 
     // ── A bare click selects; it does not seize the camera ─────────────────
     // OrbitControls fires 'start' on pointerdown, so wiring the mode switch to
@@ -268,10 +272,16 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     // ── Hover advertises that markers are clickable ────────────────────────
     // Nothing on this canvas used to change on hover, so the landmark atlas
     // read as decoration rather than as 18 clickable features.
+    // Swept over the DISC, wherever the safe frame put it (js/mars-view.js
+    // SAFE FRAME) — the globe is no longer centred on the canvas.
+    const disc = await page.evaluate(() => window.__marsLab.frameState());
     const hovered = await (async () => {
-        for (let gx = 0.30; gx <= 0.72; gx += 0.012) {
-            for (const gy of [0.30, 0.38, 0.46, 0.54]) {
-                await page.mouse.move(canvasForClick.x + canvasForClick.width * gx, canvasForClick.y + canvasForClick.height * gy);
+        for (let fx = -0.85; fx <= 0.85; fx += 0.055) {
+            for (const fy of [-0.55, -0.3, -0.05, 0.2, 0.45]) {
+                await page.mouse.move(
+                    canvasForClick.x + disc.discCenterPx.x + fx * disc.discRadiusPx,
+                    canvasForClick.y + disc.discCenterPx.y + fy * disc.discRadiusPx,
+                );
                 await page.waitForTimeout(90);
                 const state = await page.evaluate(() => window.__marsLab.hoverState());
                 if (state.label) return state;
@@ -438,11 +448,27 @@ test('Real-Time Mars boots, preserves provenance, and exposes working layers', a
     const surfaceRender = await page.evaluate(() => window.__marsLab.renderState());
     expect(surfaceRender.depthRatio).toBeLessThan(20_000);
     expect(surfaceRender.near).toBeGreaterThan(0.0001);
-    // The analysis lamp follows the sun rather than defaulting on: the mocked
-    // Horizons Sun sits just below the local horizon, so it lights up.
+    // The mocked Horizons Sun sits just below the local horizon. Under MAP
+    // light (the default) the ground is already lit from a relief-reading
+    // angle, so the night analysis lamp stays off — and the physical Sun is
+    // still reported as the Sun, not as the lamp.
     const sunState = await page.evaluate(() => window.__marsLab.sunState());
     expect(sunState.elevationAtTargetDeg).toBeLessThan(3);
+    expect(sunState.lighting).toBe('map');
+    expect(sunState.lampElevationAtTargetDeg).toBeGreaterThan(20);
+    await expect(page.locator('#surface-light')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('#pilot-sun')).toHaveText(/^[−+]\d+°$/);
+    // Under LIVE sunlight the lamp is the Sun, and past the terminator the
+    // analysis lamp follows it on.
+    await page.locator('#camera-light').click();
+    await expect(page.locator('#camera-light')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#lighting-toggle')).toBeChecked();
     await expect(page.locator('#surface-light')).toHaveAttribute('aria-pressed', 'true');
+    const liveSun = await page.evaluate(() => window.__marsLab.sunState());
+    expect(liveSun.lighting).toBe('live');
+    expect(Math.abs(liveSun.lampElevationAtTargetDeg - liveSun.elevationAtTargetDeg)).toBeLessThan(0.01);
+    await page.locator('#camera-light').click();
+    await expect(page.locator('#surface-light')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('#surface-grid')).toHaveAttribute('aria-pressed', 'true');
 
     await page.locator('#surface-collapse').click();
@@ -748,12 +774,14 @@ test('Real-Time Mars keeps a responsive 3D stage and explicit offline fallbacks'
 
     const rejectCookies = page.getByRole('button', { name: 'Reject non-essential' });
     if (await rejectCookies.isVisible()) await rejectCookies.click();
-    await page.locator('#weather-collapse').click();
     await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
     await expect(page.locator('#weather-collapse')).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('.weather-grid')).toBeHidden();
     await page.locator('#weather-collapse').click();
     await expect(page.locator('.weather-grid')).toBeVisible();
+    await expect(page.locator('#weather-collapse')).toHaveAttribute('aria-expanded', 'true');
+    await page.locator('#weather-collapse').click();
+    await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
     expect(errors).toEqual([]);
 });
 
@@ -778,12 +806,18 @@ test('Mars UI remains interactive while the 3D engine is still starting', async 
     await missionCollapse.click();
     await expect(page.locator('.mission-panel .panel-body')).toBeVisible();
 
+    // The consent banner sits over the bottom of the page until answered (the
+    // mobile test above does the same). This test predates the banner and had
+    // been timing out on it.
+    const rejectCookies = page.getByRole('button', { name: 'Reject non-essential' });
+    if (await rejectCookies.isVisible()) await rejectCookies.click();
     const weatherCollapse = page.locator('#weather-collapse');
+    await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
+    await weatherCollapse.click();
+    await expect(page.locator('.weather-grid')).toBeVisible();
     await weatherCollapse.click();
     await expect(page.locator('.data-dock')).toHaveClass(/collapsed/);
     await expect(page.locator('.weather-grid')).toBeHidden();
-    await weatherCollapse.click();
-    await expect(page.locator('.weather-grid')).toBeVisible();
 
     // The dock clicks above scroll the page; at 720 px that can park the layer
     // switches under the sticky nav, where a force-click hits the nav's Sign Up

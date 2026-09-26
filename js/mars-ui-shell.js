@@ -22,6 +22,7 @@
         'camera-zoom-out': 'zoom-out',
         'camera-zoom-in': 'zoom-in',
         'camera-spin': 'toggle-spin',
+        'camera-light': 'toggle-lighting',
         'surface-light': 'toggle-surface-light',
         'surface-grid': 'toggle-surface-grid',
         'landmark-card-close': 'close-landmark-card',

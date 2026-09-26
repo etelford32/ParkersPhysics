@@ -39,7 +39,13 @@ them here as production settles them, then trim the candidate lists to match:
 
 | Logical layer | Verified identifier | Verified on |
 |---------------|--------------------|-------------|
-| `imagery` | _(unverified — run `curl -s https://parkersphysics.com/api/mars/tiles \| jq .resolved`)_ | — |
-| `thermal` | _(unverified)_ | — |
-| `highres` | _(unverified)_ | — |
-| `topo` | _(unverified)_ | — |
+| `imagery` | `Mars_Viking_MDIM21_ClrMosaic_global_232m` (candidate 0) | 2026-09-26, production `/api/mars/tiles?meta=1` |
+| `thermal` | _none — all three candidates 404 on trek.nasa.gov_ | 2026-09-26 |
+| `highres` | _none — all three candidates 404 on trek.nasa.gov_ | 2026-09-26 |
+| `topo` | `Mars_MGS_MOLA_ClrShade_merge_global_463m` (candidate 0) | 2026-09-26 |
+
+The production probe answered `resolved_count: 2` with `freshness: 'stale'`
+(thermal + highres unreachable). Imagery and topo are settled. THEMIS and CTX
+need new candidate identifiers found on a networked machine before those layers
+can stream; until then the page correctly falls back to the Viking mosaic for
+them and says so.

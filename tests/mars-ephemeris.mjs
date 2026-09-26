@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {
+    LS_COLUMN_CANDIDATES,
+    MARS_MEAN_SOL_S,
     formatLightTime,
     marsDustSeason,
     marsEphemerisParams,
@@ -9,6 +11,7 @@ import {
     parseHorizonsCsvRow,
     parseMarsEphemeris,
     solarConjunctionState,
+    subSolarAtMars,
     wrapLongitude,
 } from '../js/mars-ephemeris.js';
 import { marsPlanetocentricToGeodetic } from '../js/horizons.js';
@@ -58,6 +61,10 @@ assert.throws(() => marsEphemerisParams('soon'), TypeError);
 // the date (solar-presence and interfering-body flags) and the single-character
 // `/r` indicator are exactly why the parser keys off the header instead of
 // counting fields from either end.
+//
+// Quantity 44's header is `App_Lon_Sun`. This fixture used to say `L_s` — a
+// header Horizons never prints — so the parser read a column that only existed
+// here, and production served `ls_deg: null` for its whole life.
 const HORIZONS_CSV = `*******************************************************************************
  Revised: June 21, 2016                  Mars                              499
 *******************************************************************************
@@ -65,7 +72,7 @@ Ephemeris / API_USER Sat Aug  9 04:11:02 2026 Pasadena, USA / Horizons
 *******************************************************************************
 Center body name: Earth (399)
 *******************************************************************************
- Date__(UT)__HR:MN:SC.fff, , , Ang-diam, ObsSub-LON, ObsSub-LAT, SunSub-LON, SunSub-LAT, delta, deldot, 1-way_down_LT, S-O-T, /r, S-T-O, L_s,
+ Date__(UT)__HR:MN:SC.fff, , , Ang-diam, ObsSub-LON, ObsSub-LAT, SunSub-LON, SunSub-LAT, delta, deldot, 1-way_down_LT, S-O-T, /r, S-T-O, App_Lon_Sun,
 *******************************************************************************
 $$SOE
  2026-Aug-09 00:00:00.000, , ,  5.91234, 213.4567890,  12.3456789, 198.7654321,  14.5678901,  1.58234567890123, 12.3456789,  13.15832660,  78.90123, /L,  33.45678, 168.43210,
@@ -78,7 +85,8 @@ assert.equal(header[0], 'Date__(UT)__HR:MN:SC.fff');
 assert.equal(header[1], '', 'solar-presence flag column stays unnamed to keep index alignment');
 assert.equal(header[2], '');
 assert.equal(header[3], 'Ang-diam');
-assert.equal(header.at(-1), 'L_s');
+assert.equal(header.at(-1), 'App_Lon_Sun');
+assert.equal(LS_COLUMN_CANDIDATES[0], 'App_Lon_Sun', 'the verified header is tried first');
 
 const row = parseHorizonsCsvRow(HORIZONS_CSV);
 assert.equal(row.__date, '2026-Aug-09 00:00:00.000');
@@ -89,6 +97,11 @@ assert.equal(row['S-T-O'], '33.45678');
 const ephemeris = parseMarsEphemeris(HORIZONS_CSV);
 assert.equal(ephemeris.horizons_utc, '2026-Aug-09 00:00:00.000');
 assert.equal(ephemeris.ls_deg, 168.4321);
+assert.equal(ephemeris.ls_column, 'App_Lon_Sun', 'the payload says which header answered');
+// A legacy/alternate spelling still resolves, and says so.
+const legacy = parseMarsEphemeris(HORIZONS_CSV.replace('App_Lon_Sun,', 'L_s,'));
+assert.equal(legacy.ls_deg, 168.4321);
+assert.equal(legacy.ls_column, 'L_s');
 assert.equal(ephemeris.season, 'northern summer · southern winter');
 assert.equal(ephemeris.earth_range_au, 1.58234567890123);
 assert.ok(Math.abs(ephemeris.earth_range_km - 236_713_000) < 1_000_000, 'AU converted to km');
@@ -109,10 +122,22 @@ assert.ok(Math.abs(ephemeris.sub_solar.lat_deg - marsGeodeticToPlanetocentric(14
 assert.ok(Math.abs(ephemeris.sub_earth.lon_deg - 146.543211) < 1e-6);
 assert.equal(ephemeris.sub_solar.frame, 'planetocentric · east-positive');
 
+// ── Mars-simultaneous sub-solar point ───────────────────────────────────────
+// Light time removed: 789.5 s is 3.20° of hour angle at 360°/sol, westward.
+assert.equal(MARS_MEAN_SOL_S, 88_775.244);
+assert.ok(Math.abs(ephemeris.sub_solar_now.lon_deg - (ephemeris.sub_solar.lon_deg - 360 * ephemeris.light_time_s / MARS_MEAN_SOL_S)) < 1e-9);
+assert.equal(ephemeris.sub_solar_now.lat_deg, ephemeris.sub_solar.lat_deg);
+// The production measurement the correction was verified against (2026-09-26):
+// Horizons 64.2102°E, LT 846.1667 s; Mars24 at the same instant says 60.7820°E.
+assert.ok(Math.abs(subSolarAtMars({ lat_deg: -0.82, lon_deg: 64.2102 }, 846.1667).lon_deg - 60.782) < 0.01);
+assert.equal(subSolarAtMars({ lat_deg: 0, lon_deg: 10 }, null), null, 'no light time → no correction invented');
+assert.ok(Math.abs(subSolarAtMars({ lat_deg: 0, lon_deg: -179 }, 1000).lon_deg - wrapLongitude(-179 - 360 * 1000 / MARS_MEAN_SOL_S)) < 1e-9, 'wraps across the antimeridian');
+
 // ── Degradation: a renamed or missing column costs one field, not the payload ─
-const RENAMED = HORIZONS_CSV.replace('L_s,', 'Ls_apparent,').replace('S-O-T, /r', 'SOT, /r');
+const RENAMED = HORIZONS_CSV.replace('App_Lon_Sun,', 'Ls_apparent,').replace('S-O-T, /r', 'SOT, /r');
 const degraded = parseMarsEphemeris(RENAMED);
 assert.equal(degraded.ls_deg, null);
+assert.equal(degraded.ls_column, null);
 assert.equal(degraded.season, null);
 assert.equal(degraded.solar_elongation_deg, null);
 assert.equal(degraded.solar_conjunction, null);

@@ -67,13 +67,20 @@ button{color:inherit}
 .mars-render-fallback-copy{position:absolute;left:50%;bottom:42px;transform:translateX(-50%);width:min(560px,calc(100% - 40px));color:#bda69a;font-size:.7rem;line-height:1.5}
 .mars-render-fallback-copy strong{display:block;margin-bottom:5px;color:var(--mars-bright);font:700 .68rem var(--display);letter-spacing:.11em;text-transform:uppercase}
 
-.mars-header{position:absolute;z-index:4;top:19px;left:50%;width:min(620px,calc(100% - 640px));transform:translateX(-50%);text-align:center;pointer-events:none}
+.mars-header{position:absolute;z-index:4;top:19px;left:427px;right:314px;text-align:center;pointer-events:none}
+/* The header lives in the band BETWEEN the camera dock (18 + 395 px) and the
+   layers panel (18 + 282 px) rather than centred on the viewport: centred, the
+   one-line title ran under the dock at 1280 px. */
 .eyebrow{display:flex;align-items:center;justify-content:center;gap:9px;color:var(--mars-bright);font:700 .66rem var(--display);letter-spacing:.24em;text-transform:uppercase}
 .live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 12px rgba(115,245,168,.8);animation:pulse 2s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.4;transform:scale(.78)}}
-.mars-header h1{margin:9px 0 5px;font:700 clamp(1.15rem,2.2vw,1.8rem) var(--display);letter-spacing:.05em;text-transform:uppercase;text-shadow:0 2px 24px rgba(0,0,0,.8)}
-.mars-header p{margin:0;color:#d1bdb2;font-size:.76rem;letter-spacing:.03em;text-shadow:0 1px 8px #000,0 0 18px #000}
-.mission-strip{display:inline-flex;align-items:center;gap:14px;margin-top:10px;padding:7px 13px;border:1px solid var(--line);border-radius:999px;background:rgba(9,5,4,.62);backdrop-filter:blur(12px);font:.64rem var(--mono);color:#d9c5ba}
+.mars-header h1{margin:7px 0 3px;font:700 clamp(.88rem,1.3vw,1.25rem) var(--display);letter-spacing:.05em;text-transform:uppercase;text-shadow:0 2px 24px rgba(0,0,0,.8)}
+/* The title used to wrap to two 1.8rem lines over the top of the globe. It is
+   one line now, and the tagline is small: js/mars-view.js frames the planet in
+   the space BELOW the header (the SAFE FRAME), so every pixel of header height
+   is a pixel of Mars. */
+.mars-header p{margin:0;color:#d1bdb2;font-size:.68rem;letter-spacing:.03em;text-shadow:0 1px 8px #000,0 0 18px #000}
+.mission-strip{display:inline-flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:4px 14px;margin-top:7px;padding:7px 13px;border:1px solid var(--line);border-radius:999px;background:rgba(9,5,4,.62);backdrop-filter:blur(12px);font:.64rem var(--mono);color:#d9c5ba}
 .mission-strip strong{color:#fff;font-weight:600}
 .mission-strip span+span{padding-left:14px;border-left:1px solid var(--line)}
 
@@ -92,6 +99,15 @@ button{color:inherit}
 .panel.collapsed .panel-head{border-bottom:0}
 
 .mission-panel{left:18px;top:92px;width:298px;max-height:calc(100% - 278px)}
+/* The MEDA dock starts collapsed (it is a historical snapshot, and it covered
+   the bottom fifth of the map), which frees the column below the side panels.
+   Overlay layout only: ≤820 px the panels flow below the canvas. */
+@media(min-width:821px){
+  .mars-app:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - 170px)}
+  .mars-app:has(.data-dock.collapsed) .layers-panel{max-height:calc(100% - 96px)}
+  .mars-app:has(.data-dock.collapsed) .landmark-card{bottom:84px}
+  .mars-app.is-surface-mode:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - var(--surface-hud-bottom,300px) - 90px)}
+}
 .panel-body{min-height:0;padding:14px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(255,173,114,.42) transparent}
 .panel-body::-webkit-scrollbar{width:7px}
 .panel-body::-webkit-scrollbar-track{background:rgba(255,255,255,.015)}
@@ -210,7 +226,7 @@ button{color:inherit}
 .dock-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 13px;color:#716159;font-size:.58rem}
 .dock-foot a{color:#a77c68;text-decoration:none}.dock-foot a:hover{color:var(--mars-bright);text-decoration:underline}
 
-.camera-dock{position:absolute;z-index:7;left:18px;top:18px;display:flex;align-items:center;gap:6px;width:365px;min-width:0;padding:5px;border:1px solid rgba(255,186,145,.19);border-radius:11px;background:rgba(10,5,4,.84);box-shadow:0 12px 34px rgba(0,0,0,.38);backdrop-filter:blur(18px)}
+.camera-dock{position:absolute;z-index:7;left:18px;top:18px;display:flex;align-items:center;gap:6px;width:395px;min-width:0;padding:5px;border:1px solid rgba(255,186,145,.19);border-radius:11px;background:rgba(10,5,4,.84);box-shadow:0 12px 34px rgba(0,0,0,.38);backdrop-filter:blur(18px)}
 .camera-readout{display:flex;flex:0 0 64px;flex-direction:column;justify-content:center;min-width:0;padding:2px 6px 2px 2px;border-right:1px solid var(--line)}
 .camera-readout span{color:var(--faint);font:600 .48rem var(--display);letter-spacing:.14em;text-transform:uppercase}
 .camera-readout strong{display:block;max-width:56px;margin-top:3px;overflow:hidden;color:#f6ded2;font:600 .58rem var(--mono);letter-spacing:0;text-overflow:ellipsis;white-space:nowrap}
@@ -220,6 +236,9 @@ button{color:inherit}
 .camera-btn{display:flex;flex:0 0 28px;width:28px;min-width:28px;height:30px;align-items:center;justify-content:center;padding:0;border:1px solid rgba(255,255,255,.075);border-radius:7px;background:rgba(255,255,255,.03);color:#bca99f;cursor:pointer}
 .camera-btn:hover{border-color:var(--line-strong);background:rgba(255,122,61,.09);color:#fff}
 .camera-btn[aria-pressed="true"]{border-color:rgba(255,173,114,.52);background:rgba(255,122,61,.17);color:#ffe2d1;box-shadow:inset 0 0 0 1px rgba(255,122,61,.08)}
+/* Lighting: pressed = live sunlight. Amber so "the real Sun is on" reads apart
+   from the camera-preset states. */
+#camera-light[aria-pressed="true"]{border-color:rgba(255,209,102,.6);background:rgba(255,209,102,.16);color:#ffe7a8}
 .ui-panels-toggle{flex-basis:44px;width:44px;min-width:44px;border-color:rgba(105,228,255,.24);color:#b9e9f2}
 .ui-panels-toggle .camera-icon{font:700 .46rem var(--display);letter-spacing:.06em}
 .ui-panels-toggle[aria-pressed="true"]{border-color:rgba(105,228,255,.58);background:rgba(105,228,255,.14);color:#e7fbff}
@@ -251,7 +270,7 @@ button{color:inherit}
 .pi-v{color:#c9efdc;font:.58rem var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pi-v.ok{color:#7dffb0}.pi-v.warn{color:#ffd75c}.pi-v.alert{color:#ff8a70}
 .surface-explorer.collapsed .pilot-cluster{display:none}
-.is-surface-mode .mission-panel{top:166px;max-height:calc(100% - 352px)}
+.is-surface-mode .mission-panel{top:calc(var(--surface-hud-bottom,300px) + 10px);max-height:calc(100% - var(--surface-hud-bottom,300px) - 200px)}
 .is-surface-mode .mars-viewport{background:radial-gradient(ellipse at 50% 76%,#9a3d1d 0,#4a160d 38%,#190807 72%,#070303 100%)}
 .is-surface-mode .vignette{background:linear-gradient(180deg,rgba(19,7,4,.08),transparent 45%,rgba(5,2,1,.42))}
 .interface-clean .mars-header,.interface-clean .mission-panel,.interface-clean .layers-panel,.interface-clean .data-dock,.interface-clean .surface-explorer,.interface-clean .mesh-badge{display:none}
@@ -281,18 +300,22 @@ button{color:inherit}
 .loader-title{font:700 .78rem var(--display);letter-spacing:.17em;text-transform:uppercase}
 .loader-status{margin-top:8px;color:var(--faint);font:.64rem var(--mono)}
 
+/* The MESH badge sits in the header's band and grows to ~260 px in surface
+   mode, where it ran over the header eyebrow below ~1400 px. Everything it
+   says is also in the surface HUD's detail line and the pilot cluster. */
+@media(max-width:1400px){.mesh-badge{display:none}}
 @media(max-width:1120px){
-  .mars-header{width:min(500px,calc(100% - 580px))}.mars-header h1{font-size:1.05rem}
+  .mars-header{left:368px;right:290px}.mars-header h1{font-size:.92rem}.mars-header p{display:none}
   .mission-panel{width:270px}.layers-panel{width:258px}.mesh-badge{display:none}
   .weather-grid{grid-template-columns:repeat(3,1fr)}.weather-cell{min-height:67px;padding:8px 10px}
-  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 329px)}.layers-panel{max-height:calc(100% - 255px)}.camera-dock,.surface-explorer{width:304px}.camera-readout{display:none}.landmark-card{bottom:238px}
-  .is-surface-mode .mission-panel{max-height:calc(100% - 403px)}
+  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 329px)}.layers-panel{max-height:calc(100% - 255px)}.camera-dock{width:336px}.surface-explorer{width:304px}.camera-readout{display:none}.landmark-card{bottom:238px}
+  .is-surface-mode .mission-panel{max-height:calc(100% - var(--surface-hud-bottom,300px) - 250px)}
 }
 @media(max-width:820px){
   body{overflow:auto;background:#050302}
   .mars-app{display:grid;gap:12px;height:auto;min-height:0;padding:0 0 12px;overflow:visible}
   .mars-viewport{position:relative;inset:auto;width:100%;height:auto;aspect-ratio:4 / 3;min-height:360px;max-height:min(72svh,620px)}
-  .mars-header{top:16px;left:14px;right:14px;width:auto;transform:none}.mars-header p{display:none}.mission-strip{margin-top:7px;gap:8px}.mission-strip span+span{padding-left:8px}
+  .mars-header{top:16px;left:14px;right:14px}.mars-header p{display:none}.mission-strip{margin-top:7px;gap:8px}.mission-strip span+span{padding-left:8px}
   .mission-panel,.layers-panel,.data-dock{position:relative;inset:auto;width:auto;max-height:none;margin:0 12px}
   .mission-panel .metric-grid{grid-template-columns:repeat(4,1fr)}
   .layers-panel .panel-body{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}.layers-panel .layer-group-title,.layers-panel .source-mini,.layers-panel .climate-controls{grid-column:1/-1}
@@ -308,7 +331,7 @@ button{color:inherit}
   .weather-grid{grid-template-columns:1fr 1fr}.dock-warning{display:none}.dock-foot{align-items:flex-start;flex-direction:column;gap:3px}
   .mars-static-globe{width:min(76vw,300px)}.mars-render-fallback-copy{font-size:.62rem}
 }
-@media(max-width:360px){.camera-readout{display:none}.camera-actions{justify-content:center}.surface-telemetry output{font-size:.47rem}}
+@media(max-width:360px){.camera-readout{display:none}.camera-actions{justify-content:center}.camera-btn{flex-basis:25px;width:25px;min-width:25px}.surface-telemetry output{font-size:.47rem}}
 @media(prefers-reduced-motion:reduce){.live-dot,.loader-orbit::after{animation:none}}
 </style>
 <script type="importmap">
@@ -360,9 +383,10 @@ button{color:inherit}
         <button class="camera-btn" id="camera-zoom-out" type="button" title="Zoom out (-)" aria-label="Zoom out"><span class="camera-icon" aria-hidden="true">−</span></button>
         <button class="camera-btn" id="camera-zoom-in" type="button" title="Zoom in (+)" aria-label="Zoom in"><span class="camera-icon" aria-hidden="true">＋</span></button>
         <button class="camera-btn" id="camera-spin" type="button" aria-label="Pause automatic rotation" aria-pressed="true" title="Pause automatic rotation (Space)"><span class="camera-icon" aria-hidden="true">Ⅱ</span><span class="camera-btn-label">Pause</span></button>
+        <button class="camera-btn" id="camera-light" type="button" aria-label="Show live sunlight" aria-pressed="false" title="Show live sunlight (I)"><span class="camera-icon" aria-hidden="true">☀</span><span class="camera-btn-label">Sun</span></button>
         <button class="camera-btn ui-panels-toggle" id="ui-panels-toggle" type="button" aria-label="Hide all interface panels" aria-pressed="false" title="Hide all interface panels (P)"><span class="camera-icon" id="ui-panels-icon" aria-hidden="true">HIDE</span><span class="camera-btn-label">Hide panels</span></button>
       </div>
-      <span class="camera-help" id="camera-help">Drag orbit · wheel zoom · pinch · double-tap land</span>
+      <span class="camera-help" id="camera-help">Drag orbit · zoom in to land · click a landmark · double-click to land</span>
     </div>
     <div class="surface-explorer" id="surface-explorer" role="group" aria-label="Regional surface movement" hidden>
       <button class="panel-toggle surface-collapse" id="surface-collapse" type="button" aria-label="Minimize surface controls" aria-expanded="true" title="Minimize surface controls">−</button>
@@ -443,8 +467,9 @@ button{color:inherit}
       <div class="layer-group-title">Surface</div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◒</span><div class="layer-name">Viking imagery<span class="layer-desc" id="surface-source">JPL / USGS global color</span></div><label class="switch"><input id="surface-toggle" type="checkbox" data-layer="imagery" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">▤</span><div class="layer-name">High-res mapping<span class="layer-desc" id="tiles-source">NASA Trek mosaics · streaming for the visible ground</span></div><label class="switch"><input id="tiles-toggle" type="checkbox" data-layer="tiles" checked><span class="switch-track"></span></label></div>
-      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌁</span><div class="layer-name">MOLA relief<span class="layer-desc" id="relief-source">5× on the globe · 18× on the surface patch</span></div><label class="switch"><input id="relief-toggle" type="checkbox" data-layer="relief" checked><span class="switch-track"></span></label></div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">⌁</span><div class="layer-name">MOLA relief<span class="layer-desc" id="relief-source">5× on the globe · up to 18× on the surface patch, capped per site</span></div><label class="switch"><input id="relief-toggle" type="checkbox" data-layer="relief" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">▦</span><div class="layer-name">Geology synth<span class="layer-desc">WFC classes seeded by MOLA · channels follow D8 drainage · synthesized</span></div><label class="switch"><input id="synth-toggle" type="checkbox" data-layer="synth" checked><span class="switch-track"></span></label></div>
+      <div class="layer-row"><span class="layer-glyph" aria-hidden="true">☀</span><div class="layer-name">Live sunlight<span class="layer-desc" id="lighting-source">off · even map light for exploring · the terminator line marks live day/night</span></div><label class="switch"><input id="lighting-toggle" type="checkbox" data-layer="sunlight"><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">#</span><div class="layer-name">Coordinate grid<span class="layer-desc">30° planetocentric</span></div><label class="switch"><input type="checkbox" data-layer="grid" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◌</span><div class="layer-name">Thin atmosphere<span class="layer-desc">visual CO₂ limb</span></div><label class="switch"><input type="checkbox" data-layer="atmosphere" checked><span class="switch-track"></span></label></div>
       <div class="layer-row"><span class="layer-glyph" aria-hidden="true">◐</span><div class="layer-name">Day/night terminator<span class="layer-desc" id="terminator-source">season + MTC fallback while JPL loads</span></div><label class="switch"><input type="checkbox" data-layer="terminator" checked><span class="switch-track"></span></label></div>
@@ -504,12 +529,12 @@ button{color:inherit}
     </div>
   </aside>
 
-  <section class="data-dock" aria-labelledby="weather-title">
+  <section class="data-dock collapsed" aria-labelledby="weather-title">
     <div class="dock-head">
       <h2 class="dock-title" id="weather-title">MEDA surface observations</h2>
       <span class="feed-state" id="feed-state" data-state="historical">Bundled MEDA snapshot · sol 1133</span>
       <span class="dock-warning" id="weather-warning">Observed 2024-04-27 · historical snapshot · not live telemetry</span>
-      <button class="panel-toggle dock-collapse" id="weather-collapse" type="button" aria-label="Minimize MEDA surface observations" aria-expanded="true" title="Minimize MEDA surface observations">−</button>
+      <button class="panel-toggle dock-collapse" id="weather-collapse" type="button" aria-label="Expand MEDA surface observations" aria-expanded="false" title="Expand MEDA surface observations">+</button>
     </div>
     <div class="weather-grid">
       <div class="weather-cell" id="cell-temp"><label>Air temperature</label><strong class="weather-value" id="weather-temp">-79.3 → -24.7 °C</strong><small class="weather-detail" id="weather-temp-detail">daily minimum → maximum · 2024-04-27</small></div>
@@ -527,7 +552,7 @@ button{color:inherit}
 
 </main>
 
-<script src="./js/mars-ui-shell.js?v=20260809-live"></script>
+<script src="./js/mars-ui-shell.js?v=20260926-explore"></script>
 <script>
 (() => {
   window.__marsReady = false;
@@ -557,6 +582,6 @@ button{color:inherit}
   });
 })();
 </script>
-<script type="module" src="./js/mars-view.js?v=20260809-live" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
+<script type="module" src="./js/mars-view.js?v=20260926-explore" onerror="window.__marsRevealFallback?.('The Mars module could not load. Mission and provenance panels remain usable.')"></script>
 </body>
 </html>
