@@ -25,6 +25,15 @@
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="js/nav-styles.css">
+<!-- The import map MUST come before the modulepreload below (and before any
+     module script). A modulepreload starts a module fetch, and Firefox then
+     ignores every later import map: "three" never resolves, js/mars-view.js
+     dies on line 1 with "The specifier 'three' was a bare specifier", and the
+     page falls back to the static globe. Chromium merges late import maps, so
+     only Firefox broke — for the page's whole life (tests/importmap-order.mjs). -->
+<script type="importmap">
+{"imports":{"three":"./js/vendor/three-0.160.0/three.module.js","three/addons/":"./js/vendor/three-0.160.0/jsm/"}}
+</script>
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
 <link rel="preload" href="/assets/mars/mars-viking-jpl.jpg" as="image">
 <link rel="preload" href="/assets/mars/mola-topography.png" as="image">
@@ -377,9 +386,6 @@ button{color:inherit}
 @media(max-width:360px){.camera-readout{display:none}.camera-actions{justify-content:center}.camera-btn{flex-basis:25px;width:25px;min-width:25px}.surface-telemetry output{font-size:.47rem}}
 @media(prefers-reduced-motion:reduce){.live-dot,.loader-orbit::after{animation:none}}
 </style>
-<script type="importmap">
-{"imports":{"three":"./js/vendor/three-0.160.0/three.module.js","three/addons/":"./js/vendor/three-0.160.0/jsm/"}}
-</script>
 </head>
 <body data-clickmap>
 <a class="skip-link" href="#mars-main">Skip to Mars simulation</a>

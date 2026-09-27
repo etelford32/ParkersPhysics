@@ -52,3 +52,13 @@ jobs:
       # page that disagrees with the menu pointing at it.
       - name: section hub pages are in sync
         run: node scripts/build-section-pages.mjs --check
+
+      # Every page's import map must precede its first module load (a
+      # modulepreload or a module script). Firefox ignores a later map, so the
+      # page's bare `import 'three'` fails and its engine never starts, while
+      # Chromium merges late maps and every Chromium-only browser test passes.
+      # mars.html shipped that way and its 3D view never ran in Firefox for
+      # seven weeks. Kept here for the same reason as the gates above: a
+      # static, whole-site check under the existing required status.
+      - name: import map ordering gate
+        run: node tests/importmap-order.mjs
