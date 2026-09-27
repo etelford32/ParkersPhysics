@@ -334,9 +334,13 @@ export function magLatMLTToUnit(latDeg, mltHours) {
     const phi = latDeg * (Math.PI / 180);
     const lam = ((mltHours - 12) / 24) * (2 * Math.PI);
     const c = Math.cos(phi);
+    // Local time increases EASTWARD, and in the page's canonical frame
+    // (js/geo/coords.js: +X = noon here, +Y = north, east = −Z) dusk
+    // (MLT 18) therefore sits at −Z. Until 2026-09-27 this put dusk at
+    // +Z, the mirror of the frame the Earth texture is drawn in.
     return {
         x: c * Math.cos(lam),
         y: Math.sin(phi),
-        z: c * Math.sin(lam),
+        z: -c * Math.sin(lam),
     };
 }

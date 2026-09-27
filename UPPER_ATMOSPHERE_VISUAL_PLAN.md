@@ -330,6 +330,108 @@ rather than lived with.
 
 ---
 
+## 9. 2026-09-27 — ONE frame, and the flight layer
+
+### 9.1 The page's longitude was mirrored against the continents
+
+`_subSolarToVec3` in the globe mapped lon → `z = +cos·sin(lon)`, and the LST
+oracle (`geoFromVectors`, its GLSL mirror), the drag-flow tracers, the fleet
+ribbons and the MLT helper were all written against that. The EarthSkin
+texture is drawn through `js/geo/coords.glsl.js`, whose frame puts +90°E at
+**−Z**, and the SGP4 catalogue cloud uses the same. So the terminator and the
+diurnal bulge sat at −lon over the continents — local noon drawn over India
+at 18 UTC — and every still frame looked plausible.
+
+**There is now ONE mapping**, `latLonToScene` / `sceneToLatLon` in the column
+kernel, and every lat/lon → scene on the page goes through it (the sun vector,
+the drag overlay, the ribbons, the MLT helper). The hour angle is measured
+about +north; `tests/upper-atmosphere-column.mjs` gates the sign AND proves
+the mirrored frame fails the gate (reads 6 h where the oracle says 18 h).
+
+The reference probes (ISS, Hubble, Starlink, Iridium, Tiangong), the debris
+sample and the Walker constellations had a second version of the same bug:
+`_propagateKeplerian` returned ECI axes as scene axes with the y/z swap
+mirrored and **never turned by the sidereal angle**, so the orbits sat still
+over a planet that does not. They are now `[x, z, −y]` (coords.js at GMST 0)
+rotated by −GMST(sim clock) about +Y (`_eciSceneToEarthFixed`; the orbit-path
+loops get `rotation.y = −gmst`). Conjunction distances read the un-rotated
+lookup tables and are frame-invariant. The sun now reads the BUS clock, not
+the wall clock, so the page's scrubber finally moves the terminator (its copy
+had always said so); the flight deck's own clock pins it further.
+
+### 9.2 The flight layer
+
+| module | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-flight.js` | PURE kernel: RK4 through the live field — gravity + J2, drag against the co-rotating air, unbanked lift; ECI↔scene; elements; launch builder; presets; TLE epoch | `node tests/upper-atmosphere-flight.mjs` (35) |
+| `js/upper-atmosphere-flight-layer.js` | screen-space ribbon (custom shader + dark underlay), head, heating wake, log-scaled force arrows, ground track, floor ring, the mission clock | `tests/upper-atmosphere-flight.spec.js` |
+| `js/upper-atmosphere-flight-deck.js` | DOM deck: every readout is a kernel column; two clocks; sparkline; name tag via `projectToScreen` | same spec |
+| `js/upper-atmosphere-flight-panel.js` | presets / track-a-satellite / custom launch with pick-site | same spec |
+
+Decisions, each with the reason it is not the obvious alternative:
+
+- **The density sampler is a bilinear log₁₀ρ table over (altitude × T∞)**
+  built from the engine per (F10.7, Ap): ~1 µs against ~14 µs for
+  `densityFieldAt`, gated to 3 % (measured worst 0.95 %). A 24-h ISS flight
+  integrates in ~65 ms. The table is the ENGINE's, not a second model.
+- **Co-rotation is on by default** and it matters: a prograde equatorial body
+  feels ~22 % less drag than the same body retrograde (gated).
+- **Lift is marginal above 80 km and the preset says so.** The "skip entry"
+  preset at 7.6 km/s with L/D 2 buys seconds before the floor, not a climb;
+  a 6 km/s "glider" was tried first and simply fell. The real entry peak
+  (40–60 km) is BELOW the model, so the capsule preset shows ~0.03 g and
+  ~12 W/cm² on a 1 m nose and the deck says where the peak actually lives.
+- **The 80 km floor terminates the flight** with the last sample landed ON
+  the floor (linear crossing) — never continued into air the page does not
+  model.
+- **Arrow length is log₁₀|a|** over 1e-8…10 m/s² (gravity 8.7 vs drag 1e-6 at
+  the ISS cannot share a linear scale); the deck prints the true numbers.
+- **Colour ranges are FIXED per mode** so the same altitude or q is the same
+  colour in every flight and does not drift as the ribbon grows.
+- **Two clocks.** Live-locked to the bus by default (scrubbing before launch
+  un-launches it — the orrery's rope rule); the deck's transport detaches it
+  because the bus clamps one hour into the future and a day of decay cannot
+  be played through it. The globe pins the sun to the detached clock.
+- **A launch frames the camera** (`frameFlight`): at whole-globe framing the
+  ribbon competes with every other overlay and the limb band (measured on
+  the screenshots — it was invisible). The dark underlay pass is the other
+  half of legibility.
+- **"Track a satellite" needs a LIVE TLE**: seeded via Rust SGP4 at the sim
+  clock. The mean-element fallback probes are visualisation-grade and the
+  panel says "waiting for live TLE" rather than integrating them.
+- **FOCUS quiets the competition** (`setFlightFocus`, on at every launch,
+  a deck chip): the cascade field lines, conjunction chords, altitude tori,
+  solar-wind streamers, the slider ring, the mesosphere rings and the
+  probes' orbit loops. Each crossed the launch framing as a band brighter
+  than the ribbon (measured on the screenshots; the flight could not be
+  found). Every hidden object's OWN visibility is remembered and restored
+  exactly on focus-off / clearFlight.
+- **Glyphs scale with camera distance** (`ak = camDist / 2.4`, floor 0.06):
+  the arrows are world geometry and at chase range one drag cone filled
+  the frame. The heating wake appears only above ~0.06 W/cm² — at LEO
+  cruise (0.01) it is decoration.
+
+### 9.3 Fixed here, on the way
+
+- The camera controller now receives a REAL wall-clock `dt`. The globe's
+  `dt` is ~0 every frame (§6) — fly-mode WASD barely moved and the follow
+  spring never closed, which the chase cam surfaced. ONLY the controls take
+  the corrected value; every other `dt` consumer keeps its historical
+  behaviour pending the deliberate look §6 asks for.
+- The controls are stepped AFTER every position update, just before the
+  render. A follow that aims at the target's PREVIOUS position lags it by a
+  frame of motion; at time-warp on a software renderer that put the chased
+  probe at the frame's edge (measured). The follow spring also keeps the
+  camera at or above the target's own radius: a fast target moves tens of
+  degrees between slow frames and the lerp's CHORD cut inside the planet
+  (camera at −171 km after a 600× chase).
+- The canvas click test uses `event.timeStamp`, not `performance.now()`: on
+  a busy frame a genuine click measured as a drag and was dropped (the
+  mars.html 914 ms scar, found again by the pick-site gate).
+- A backtick in a comment inside the volume shader's template literal
+  terminated the string and took the whole page down as a boot error (the
+  CLAUDE.md scar, hit again). No backticks inside `/* glsl */` literals.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
@@ -348,8 +450,9 @@ rather than lived with.
 - **Airglow radiance.** The volume emission rates are order-of-magnitude
   typical values used for *relative* brightness. This is not a radiance
   calculation and the page must not present it as one.
-- **The `dt` bug in §6.** Worth its own change, with the animation-speed
-  consequences looked at deliberately.
+- **The `dt` bug in §6.** The controls are fixed (§9.3); particles, drag
+  tracers and the substorm still take the ~0 value. Worth its own change,
+  with the animation-speed consequences looked at deliberately.
 - **Neither of this feature's test files runs in CI.** `nav-lint.yml` runs
   two node tests; the other ~40 in `tests/` — these two included — are run
   per the CLAUDE.md table. The DSMC end-to-end workflow is the only CI job

@@ -303,6 +303,68 @@ input[type=range]::-moz-range-thumb {
     #ua-atmo-controls .ua-atmo-btn { padding:4px 6px; font-size:.58rem; }
 }
 
+/* ─── Flight deck (top-right, under the camera HUD) ──────────────
+ * The camera HUD's measured bottom is published as --ua-cam-hud-bottom by
+ * the bootstrap (same rule as --ua-atmo-floor: a measured number, never a
+ * constant — the HUD's rows wrap on narrow viewports). The deck fills the
+ * band between the HUD and the scrubber and scrolls inside itself. */
+#ua-flight-deck {
+    position:absolute; right:12px;
+    top:calc(var(--ua-cam-hud-bottom, 258px) + 10px);
+    bottom:calc(var(--ua-atmo-floor, 74px) + 8px);
+    width:min(312px, 44%);
+    display:flex; flex-direction:column;
+    background:rgba(4,8,20,.82); backdrop-filter:blur(6px);
+    border:1px solid rgba(95,216,255,.28); border-radius:8px;
+    font:.64rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color:#cde;
+    z-index:8; overflow:hidden; box-shadow:0 2px 14px rgba(0,0,0,.45);
+}
+#ua-flight-deck[hidden] { display:none; }
+#ua-flight-deck[data-open="0"] { bottom:auto; }
+#ua-flight-deck[data-open="0"] .ua-fd-body { display:none; }
+.ua-fd-head { display:flex; align-items:center; gap:6px; padding:5px 8px; border-bottom:1px solid rgba(95,216,255,.18); }
+.ua-fd-dot { width:7px; height:7px; border-radius:50%; background:#5fd8ff; box-shadow:0 0 8px #5fd8ff; flex:none; }
+.ua-fd-name { color:#dff; font-weight:700; letter-spacing:.04em; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ua-fd-status { font-size:.58rem; padding:1px 6px; border-radius:999px; border:1px solid rgba(255,255,255,.15); color:#9cc; }
+.ua-fd-status[data-status="floor"]   { color:#ffb090; border-color:rgba(255,120,80,.5); }
+.ua-fd-status[data-status="escape"]  { color:#c9a8ff; border-color:rgba(180,140,255,.5); }
+.ua-fd-status[data-status="horizon"] { color:#8fe9b0; border-color:rgba(100,230,160,.45); }
+.ua-fd-btn { background:rgba(255,255,255,.05); border:1px solid rgba(120,180,220,.22); color:#9bc; border-radius:5px; padding:2px 6px; font:inherit; font-size:.6rem; cursor:pointer; line-height:1.2; }
+.ua-fd-btn:hover { color:#dff; border-color:rgba(120,220,255,.5); }
+.ua-fd-body { padding:6px 8px 8px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+.ua-fd-transport { display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+.ua-fd-tplus { margin-left:auto; color:#fff; font-weight:700; font-variant-numeric:tabular-nums; }
+.ua-fd-chip--on, .ua-fd-btn.ua-fd-chip--on { color:#04121c !important; background:#5fd8ff !important; border-color:#5fd8ff !important; }
+.ua-fd-scrubrow { display:flex; gap:6px; align-items:center; }
+.ua-fd-scrub { flex:1; accent-color:#5fd8ff; min-width:0; margin:0; }
+.ua-fd-span { color:#8aa; white-space:nowrap; font-size:.58rem; }
+.ua-fd-grid { display:grid; grid-template-columns:auto 1fr; gap:1px 10px; }
+.ua-fd-k { color:#7f9db8; white-space:nowrap; }
+.ua-fd-v { color:#eef; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ua-fd-spark { width:100%; height:56px; display:block; background:rgba(255,255,255,.03); border-radius:4px; }
+.ua-fd-chips { display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+.ua-fd-chiplabel { color:#7f9db8; font-size:.58rem; margin-right:2px; }
+.ua-fd-chip { background:rgba(255,255,255,.05); border:1px solid rgba(120,180,220,.22); color:#9bc; border-radius:999px; padding:2px 7px; font:inherit; font-size:.58rem; cursor:pointer; }
+.ua-fd-chip:hover { color:#dff; border-color:rgba(120,220,255,.5); }
+.ua-fd-note { color:#8fa4b8; font-size:.58rem; line-height:1.4; border-top:1px dotted rgba(255,255,255,.1); padding-top:5px; }
+.ua-fd-tag { position:absolute; pointer-events:none; z-index:7; font:600 .6rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color:#e8f6ff; background:rgba(4,8,20,.7); border:1px solid rgba(95,216,255,.35); border-radius:4px; padding:3px 6px; white-space:nowrap; transform:translate(0,-100%); }
+.ua-fd-tag[hidden] { display:none; }
+@media (max-width:900px) { #ua-flight-deck { width:min(300px, 60%); } }
+
+/* ─── Flight launch panel (Controls pane) ───────────────────────── */
+.ua-fp-group { display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-bottom:6px; }
+.ua-fp-grouplabel { font-size:.6rem; color:#667; text-transform:uppercase; letter-spacing:.08em; width:100%; }
+.ua-fp-preset { font-size:.66rem; padding:4px 9px; }
+.ua-fp-track { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+.ua-fp-sat { flex:1; min-width:120px; background:rgba(255,255,255,.05); color:#cde; border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:4px 6px; font-size:.7rem; }
+.ua-fp-custom summary { cursor:pointer; color:#0cc; font-size:.72rem; font-weight:600; margin:6px 0; }
+.ua-fp-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.ua-fp-row .ua-chip { font-size:.66rem; padding:4px 9px; display:inline-flex; gap:4px; align-items:center; }
+.ua-fp-row .ua-chip input { accent-color:#0cc; margin:0; }
+.ua-fp-horizon { background:rgba(255,255,255,.05); color:#cde; border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:4px 6px; font-size:.68rem; }
+.ua-fp-inc { font-size:.66rem; color:#9ab; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ua-fp-status { font-size:.66rem; line-height:1.45; margin-top:8px; min-height:1em; }
+
 /* ─── Camera HUD (top-right of globe) — Phase 25 refresh ── */
 /* The HUD now hosts two control rows (mode + preset/follow) plus the
  * live readout. Uses fleet-UI design tokens via .ua-fw scope (HUD is
@@ -2346,7 +2408,10 @@ input[type=range]::-moz-range-thumb {
         Interactive thermosphere + exosphere (80–2000 km). Jacchia-style
         surrogate mirroring the Parkers Physics DSMC pipeline; switches to
         SPARTA-refined tables once the offline grid ships. Inputs are live
-        indices — F10.7 cm flux and Ap.
+        indices — F10.7 cm flux and Ap. Fly satellites, re-entries and
+        suborbital arcs through the live density field with the
+        <strong>Flight dynamics</strong> panel: gravity + J2, drag against
+        the rotating air, energy · momentum · decay read off the deck.
     </p>
     <div class="ua-chip-row" id="ua-presets"></div>
 </div>
@@ -2421,6 +2486,24 @@ input[type=range]::-moz-range-thumb {
             </div>
 
             <div id="ua-summary"><span class="ua-dim">Pick a preset above to load archived storm indices, or sweep the sliders.</span></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2 style="display:flex;align-items:center;gap:8px;">
+                Flight dynamics
+                <span class="ua-drag-chip" title="RK4 through the live anisotropic density field: gravity + J2, drag against the co-rotating air, optional unbanked lift">LIVE FIELD</span>
+            </h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Fly a body through <em>this</em> atmosphere. Presets launch at
+                the sim clock; <strong>Track</strong> seeds a reference
+                satellite from its live TLE through Rust SGP4; the custom
+                launch takes a site, speed, flight-path angle and heading.
+                The ribbon on the globe is the integrated path (colour = the
+                quantity you pick on the deck), the arrows are velocity ·
+                gravity · drag · lift, and the flight deck reads everything
+                off the head — energy, angular momentum, decay rate, heating.
+            </p>
+            <div id="ua-flight-panel"></div>
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
@@ -3043,6 +3126,10 @@ input[type=range]::-moz-range-thumb {
     // particular the DISPLAY TRANSFORM (log decades + gamma) is generated
     // from the live uniforms, never retyped here.
     import { volumeLegend } from './js/upper-atmosphere-instruments.js';
+    // Flight dynamics: the deck lives on the canvas, the launch panel in
+    // the Controls pane; both drive the globe's flight API only.
+    import { FlightDeck } from './js/upper-atmosphere-flight-deck.js';
+    import { FlightPanel } from './js/upper-atmosphere-flight-panel.js';
 
     const canvas = document.getElementById('ua-globe');
     const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.2 });
@@ -3213,8 +3300,27 @@ input[type=range]::-moz-range-thumb {
     const scrubberHost = document.getElementById('ua-time-scrubber-host');
     const timeScrubber = scrubberHost ? new TimeScrubber(scrubberHost) : null;
 
+    // ── Flight dynamics: deck on the canvas, launch panel in Controls ──
+    const flightDeck = new FlightDeck({
+        host: document.getElementById('ua-globe-wrap'), globe,
+        getState: () => ({ f107: ui.state.f107, ap: ui.state.ap }),
+    });
+    const flightPanelEl = document.getElementById('ua-flight-panel');
+    const flightPanel = flightPanelEl ? new FlightPanel({ host: flightPanelEl, globe }) : null;
+    // The deck docks under the camera HUD; publish the HUD's MEASURED bottom
+    // (its rows wrap on narrow viewports) the way --ua-atmo-floor is done.
+    (() => {
+        const wrap = document.getElementById('ua-globe-wrap');
+        const hud = document.getElementById('ua-camera-hud');
+        if (!wrap || !hud) return;
+        const place = () => wrap.style.setProperty('--ua-cam-hud-bottom', `${hud.offsetTop + hud.offsetHeight}px`);
+        place();
+        new ResizeObserver(place).observe(hud);
+    })();
+
     // Expose for devtools poking.
-    window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber };
+    window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber,
+                    flight: { deck: flightDeck, panel: flightPanel, layer: globe.getFlightLayer() } };
 
     /* ─── Atmosphere render controls + legend ────────────────────
      * The two component buttons are separate physical claims, not a

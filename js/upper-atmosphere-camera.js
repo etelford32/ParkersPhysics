@@ -391,6 +391,12 @@ export class CameraController {
         // frame-rate independent.
         const k = 1 - Math.exp(-dt / Math.max(0.001, f.smoothing));
         this.camera.position.lerp(camPos, k);
+        // A fast target (time-warp on a slow renderer: the flight probe or a
+        // satellite can move tens of degrees between frames) puts the lerp's
+        // CHORD inside the planet — measured: camera at −171 km after a
+        // 600× chase. Keep the camera at least at the target's own radius.
+        const rMin = tgt.length() + 0.02;
+        if (this.camera.position.length() < rMin) this.camera.position.setLength(rMin);
 
         // Re-aim. Use lookAt with world-Y up so the horizon stays level.
         this.camera.up.set(0, 1, 0);

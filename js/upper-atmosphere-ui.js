@@ -251,7 +251,9 @@ export class UpperAtmosphereUI {
                     ? `following ${tgt.id}`
                     : tgt?.kind === 'debris'
                         ? `following debris #${tgt.idx}`
-                        : 'following';
+                        : tgt?.kind === 'flight'
+                            ? 'chasing the flight probe'
+                            : 'following';
             }
         }
         if (this.el.camHint && on) {

@@ -283,11 +283,14 @@ const VOLUME_FRAG = /* glsl */`
     }
 
     // ── MIRROR OF upper-atmosphere-column.js geoFromVectors ──────────
-    // The hour angle is measured about −uNorth because the scene's
-    // longitude convention (x=cos·cos, y=sin, z=cos·sin) increases
-    // CLOCKWISE seen from +Y. Flipping this sign moves the diurnal bulge
-    // to the morning side and looks perfectly plausible. Gated by
-    // 'LST MATCHES localSolarTime' in the kernel test.
+    // The hour angle is measured about +uNorth because the scene's
+    // canonical longitude convention (x=cos·cos, y=sin, z=−cos·sin —
+    // latLonToScene, the js/geo/coords.js frame the Earth texture is
+    // drawn in; NO backticks in here, this is inside a template literal)
+    // increases COUNTER-clockwise seen from +Y. Flipping this
+    // sign moves the diurnal bulge to the morning side and looks
+    // perfectly plausible. Gated by 'LST MATCHES localSolarTime' in the
+    // kernel test, which also proves the mirrored sign FAILS it.
     void geoAt(vec3 u, out float latRad, out float lstHr) {
         latRad = asin(clamp(dot(u, uNorth), -1.0, 1.0));
         vec3 pe = u - uNorth * dot(u, uNorth);
@@ -295,7 +298,7 @@ const VOLUME_FRAG = /* glsl */`
         float pl = length(pe), sl = length(se);
         if (pl < 1e-6 || sl < 1e-6) { lstHr = 12.0; return; }
         pe /= pl; se /= sl;
-        float sinA = -dot(cross(se, pe), uNorth);
+        float sinA = dot(cross(se, pe), uNorth);
         float cosA = dot(se, pe);
         float hourDeg = degrees(atan(sinA, cosA));
         lstHr = mod(12.0 + hourDeg / 15.0 + 24.0, 24.0);
