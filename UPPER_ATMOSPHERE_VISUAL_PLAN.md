@@ -425,6 +425,13 @@ Decisions, each with the reason it is not the obvious alternative:
   camera at or above the target's own radius: a fast target moves tens of
   degrees between slow frames and the lerp's CHORD cut inside the planet
   (camera at −171 km after a 600× chase).
+- A storm preset now PINS both indices (`_userPinnedKey = 'preset'`, no
+  expiry) until "Use live NOAA" or the realtime toggle releases it. The
+  realtime driver ticks every 100 ms and re-applied its own value over a
+  preset before the plots had redrawn, so presets silently did nothing
+  whenever the driver had a value — measured: reverted within 100 ms; the
+  smoke gate only ever passed while the driver's first fetch was still in
+  flight.
 - The canvas click test uses `event.timeStamp`, not `performance.now()`: on
   a busy frame a genuine click measured as a drag and was dropped (the
   mars.html 914 ms scar, found again by the pick-site gate).

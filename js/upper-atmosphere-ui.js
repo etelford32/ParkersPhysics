@@ -847,6 +847,7 @@ export class UpperAtmosphereUI {
             try {
                 const live = await fetchLiveIndices();
                 if (!live) throw new Error('no data');
+                if (this._userPinnedKey === 'preset') this._userPinnedKey = null;
                 this.setState({ f107: live.f107Sfu, ap: live.ap });
                 if (statusEl) {
                     const ts = new Date().toLocaleTimeString([], {
@@ -1118,9 +1119,15 @@ export class UpperAtmosphereUI {
             } else {
                 this._forecastSkill = 1.0;
             }
-            if (this._userPinnedKey !== 'f107' || pinExpired)
+            // An archived storm preset pins BOTH indices with no expiry —
+            // the driver ticks every 100 ms and used to overwrite a preset
+            // before the plots had redrawn, so presets silently did nothing
+            // whenever realtime had a value (measured: reverted within
+            // 100 ms). "Use live NOAA" or re-enabling realtime releases it.
+            const presetPinned = this._userPinnedKey === 'preset';
+            if (!presetPinned && (this._userPinnedKey !== 'f107' || pinExpired))
                 partial.f107 = f107Apply;
-            if (this._userPinnedKey !== 'ap' || pinExpired)
+            if (!presetPinned && (this._userPinnedKey !== 'ap' || pinExpired))
                 partial.ap = apApply;
             // Skip the redraw round-trip if nothing actually changed.
             const changed =
@@ -1144,6 +1151,8 @@ export class UpperAtmosphereUI {
      */
     setRealtimeEnabled(on) {
         this._realtimeEnabled = !!on;
+        // Turning realtime back on is an explicit request for live values.
+        if (on && this._userPinnedKey === 'preset') this._userPinnedKey = null;
     }
 
     // Push the latest solar-wind plasma state to the globe + the side
@@ -1544,6 +1553,8 @@ export class UpperAtmosphereUI {
             btn.title = `${p.date} — F10.7 ${p.f107} SFU, Ap ${p.ap}\n\n${p.summary}`;
             btn.dataset.presetId = p.id;
             btn.addEventListener('click', () => {
+                this._userPinnedKey = 'preset';
+                this._userPinnedAt  = Date.now();
                 this.setState({ f107: p.f107, ap: p.ap });
                 row.querySelectorAll('.ua-chip').forEach(c => c.classList.remove('ua-chip--on'));
                 btn.classList.add('ua-chip--on');
