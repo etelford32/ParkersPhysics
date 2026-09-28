@@ -87,6 +87,9 @@ import {
     launchState, tleEpochMs,
 } from './upper-atmosphere-flight.js';
 import { FlightLayer } from './upper-atmosphere-flight-layer.js';
+// Layer transit: the camera rides the local vertical through the band and a
+// camera-local gas cloud is re-sampled from the engine at its altitude.
+import { AtmosphereTransit } from './upper-atmosphere-transit.js';
 
 // Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
 // frame. THE ONE CONVENTION is the kernel's `latLonToScene` — the site's
@@ -618,6 +621,21 @@ export class AtmosphereGlobe {
         this._buildMagneticCascade();
         if (this.opts.stars) this._initStars();
         this._initControls();
+        this._transit = new AtmosphereTransit(this._scene, {
+            controls: this._controls, canvas: this.canvas,
+            // From inside the band the altitude tori, field lines and orbit
+            // loops sweep through the view as hoops; quiet them for the
+            // ride (the flight layer's focus set) unless a flight already
+            // owns that focus, and restore their own settings on release.
+            onStart: () => {
+                this._transitFocus = !this._flightFocusOn;
+                if (this._transitFocus) this.setFlightFocus(true);
+            },
+            onStop: () => {
+                if (this._transitFocus && !this._flight?.hasFlight()) this.setFlightFocus(false);
+                this._transitFocus = false;
+            },
+        });
         this._initResize();
         this._initTooltip();
         this._initInstruments();
@@ -4098,6 +4116,20 @@ export class AtmosphereGlobe {
         });
     }
 
+    // ── Layer transit + ambient gas (js/upper-atmosphere-transit.js) ───────
+    /** Ride the local vertical: { mode:'descend'|'ascend', kmPerSec, toKm?, headingDeg?, pitchDeg? }. */
+    startTransit(opts) {
+        this._followId = null;
+        return this._transit?.start(opts) ?? null;
+    }
+    stopTransit()        { this._transit?.stop('api'); }
+    pauseTransit(on)     { this._transit?.setPaused(on); }
+    getTransitState()    { return this._transit?.getState() ?? null; }
+    setAmbientGasVisible(on) { this._transit?.setCloudVisible(on); }
+    getAmbientGasVisible()   { return this._transit?.getCloudVisible() ?? false; }
+    getAmbientGas()          { return this._transit?.getGas() ?? null; }
+    getAmbientGasCount()     { return this._transit?.getCloudCount() ?? 0; }
+
     setInstrumentsEnabled(on) { this._instruments?.setEnabled(on); }
     getInstrumentsEnabled()   { return this._instruments?.getEnabled() ?? false; }
     setLimbProbeEnabled(on)   { this._instruments?.setProbeEnabled(on); }
@@ -4670,6 +4702,11 @@ export class AtmosphereGlobe {
         }
 
         this._controls.update(dtWall);
+        // After the controls: while a transit is active it owns the pose,
+        // and the ambient gas is re-sampled at wherever the camera now is.
+        this._transit?.update(this._camera, dtWall, {
+            f107: this._state?.f107 ?? 150, ap: this._state?.ap ?? 15,
+        });
 
         this._renderer.render(this._scene, this._camera);
 

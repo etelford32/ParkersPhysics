@@ -793,6 +793,9 @@ export class UpperAtmosphereUI {
             camRho.textContent = '—';
             camT.textContent   = '—';
             camKn.textContent  = '—';
+            if (this.el.camGas) this.el.camGas.textContent = '—';
+            if (this.el.camMfp) this.el.camMfp.textContent = '—';
+            if (this.el.camVth) this.el.camVth.textContent = '—';
             return;
         }
 
@@ -807,6 +810,24 @@ export class UpperAtmosphereUI {
             ? (sample.knudsen >= 100 ? sample.knudsen.toExponential(1)
               : sample.knudsen.toFixed(2))
             : '∞';
+        // Layer-transit rows: what the gas around the camera is made of,
+        // how far a molecule flies between collisions, how fast it moves.
+        const { camGas, camMfp, camVth } = this.el;
+        if (camGas) {
+            const fr = sample.fractions || {};
+            const top = Object.entries(fr).filter(([, f]) => f > 0.02).sort((a, b) => b[1] - a[1]).slice(0, 3)
+                .map(([id, f]) => `${id} ${(f * 100).toFixed(0)}%`).join(' · ');
+            const hex = `#${(sample.dominantColor ?? 0xffffff).toString(16).padStart(6, '0')}`;
+            camGas.innerHTML = `<span style="color:${hex}">${top || sample.dominant || '—'}</span>`;
+        }
+        if (camMfp) {
+            const km = sample.mfp_km;
+            camMfp.textContent = !Number.isFinite(km) ? '∞'
+                : km >= 1000 ? `${(km / 1000).toFixed(1)}×10³ km`
+                : km >= 1 ? `${km.toFixed(1)} km`
+                : `${(km * 1000).toFixed(km * 1000 >= 10 ? 0 : 2)} m`;
+        }
+        if (camVth) camVth.textContent = Number.isFinite(sample.vth_m_s) ? `${Math.round(sample.vth_m_s)} m/s` : '—';
     }
 
     // ── Data-source pill ────────────────────────────────────────────────────

@@ -298,6 +298,15 @@ input[type=range]::-moz-range-thumb {
     color:#04121c; background:#5fd8ff; border-color:#5fd8ff;
 }
 #ua-atmo-controls .ua-atmo-sep { width:1px; height:16px; background:rgba(120,180,220,.25); margin:0 3px; }
+#ua-atmo-controls .ua-atmo-group { display:inline-flex; gap:4px; align-items:center; }
+#ua-atmo-controls .ua-atmo-select {
+    font:600 .62rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding:4px 5px; border-radius:6px; background:rgba(4,8,20,.78); color:#8aa8c4;
+    border:1px solid rgba(120,180,220,.22);
+}
+#ua-atmo-controls .ua-atmo-btn.ua-atmo-btn--live { color:#04121c; background:#ffb057; border-color:#ffb057; }
+#ua-cam-readout .ua-cam-transit .ua-cam-v { color:#ffb057; }
+#ua-cam-readout .ua-cam-transit[hidden] { display:none; }
 @media (max-width:900px) {
     #ua-globe-legend { max-width:calc(100% - 28px); }
     #ua-atmo-controls .ua-atmo-btn { padding:4px 6px; font-size:.58rem; }
@@ -2411,7 +2420,10 @@ input[type=range]::-moz-range-thumb {
         indices — F10.7 cm flux and Ap. Fly satellites, re-entries and
         suborbital arcs through the live density field with the
         <strong>Flight dynamics</strong> panel: gravity + J2, drag against
-        the rotating air, energy · momentum · decay read off the deck.
+        the rotating air, energy · momentum · decay read off the deck. Or
+        ride the local vertical through the layers yourself
+        (<strong>⇣ descend</strong> on the canvas) with the gas around the
+        camera drawn from the live model.
     </p>
     <div class="ua-chip-row" id="ua-presets"></div>
 </div>
@@ -3047,6 +3059,22 @@ input[type=range]::-moz-range-thumb {
                     <span class="ua-cam-k">Kn</span>
                     <span class="ua-cam-v" id="ua-cam-Kn">—</span>
                 </div>
+                <div class="ua-cam-row" title="Number fractions of the gas at the camera's altitude (engine)">
+                    <span class="ua-cam-k">gas</span>
+                    <span class="ua-cam-v" id="ua-cam-gas">—</span>
+                </div>
+                <div class="ua-cam-row" title="Mean free path — how far a molecule flies between collisions">
+                    <span class="ua-cam-k">λ</span>
+                    <span class="ua-cam-v" id="ua-cam-mfp">—</span>
+                </div>
+                <div class="ua-cam-row" title="Mean thermal speed of the dominant species">
+                    <span class="ua-cam-k">v_th</span>
+                    <span class="ua-cam-v" id="ua-cam-vth">—</span>
+                </div>
+                <div class="ua-cam-row ua-cam-transit" id="ua-cam-transit" hidden>
+                    <span class="ua-cam-k">transit</span>
+                    <span class="ua-cam-v" id="ua-cam-transit-v">—</span>
+                </div>
                 <div class="ua-cam-mode" id="ua-cam-mode">orbit</div>
                 <div class="ua-cam-hint" id="ua-cam-hint">drag to rotate · scroll to zoom</div>
             </div>
@@ -3083,6 +3111,24 @@ input[type=range]::-moz-range-thumb {
             <button type="button" class="ua-atmo-btn" id="ua-atmo-probe"
                     aria-pressed="true"
                     title="Limb probe — point anywhere to read the tangent altitude, local density, column and drag multiplier of that view ray.">probe</button>
+            <span class="ua-atmo-sep"></span>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-gas"
+                    aria-pressed="true"
+                    title="Camera-local gas: dots ∝ log₁₀ n (symbolic — one dot is not one molecule), colour = species from the engine's fractions, drift ∝ thermal speed, heading changes ∝ collision rate.">gas</button>
+            <span class="ua-atmo-group" id="ua-transit-controls" role="group" aria-label="Layer transit">
+                <button type="button" class="ua-atmo-btn" id="ua-transit-descend"
+                        title="Ride the local vertical DOWN through the layers from where the camera is (or from the 2000 km model ceiling) to the 80 km floor, horizon level. Any fly key or drag releases the camera.">⇣ descend</button>
+                <button type="button" class="ua-atmo-btn" id="ua-transit-ascend"
+                        title="Ride the local vertical UP to the 2000 km model ceiling.">⇡ ascend</button>
+                <button type="button" class="ua-atmo-btn" id="ua-transit-hold"
+                        title="Hold the altitude (the camera stays locked to the vertical); press again to resume." hidden>⏸ hold</button>
+                <select id="ua-transit-rate" class="ua-atmo-select" title="Transit rate — kilometres of altitude per second of real time">
+                    <option value="5">5 km/s</option>
+                    <option value="20">20 km/s</option>
+                    <option value="50" selected>50 km/s</option>
+                    <option value="200">200 km/s</option>
+                </select>
+            </span>
         </div>
 
         <div id="ua-globe-legend" data-open="0">
@@ -3186,6 +3232,9 @@ input[type=range]::-moz-range-thumb {
             camKn:            document.getElementById('ua-cam-Kn'),
             camMode:          document.getElementById('ua-cam-mode'),
             camHint:          document.getElementById('ua-cam-hint'),
+            camGas:           document.getElementById('ua-cam-gas'),
+            camMfp:           document.getElementById('ua-cam-mfp'),
+            camVth:           document.getElementById('ua-cam-vth'),
             // Drag forecast (Phase 1: nowcast, sun-driven flow;
             //                Phase 3: AR(1) horizon scrubber)
             dragToggle:        document.getElementById('ua-drag-toggle'),
@@ -3385,6 +3434,50 @@ input[type=range]::-moz-range-thumb {
             globe.setLimbProbeEnabled?.(on);
             press(bProbe, on);
         });
+
+        /* ─── Layer transit + the camera-local gas ────────────────── */
+        const bGas = btn('ua-atmo-gas');
+        bGas?.addEventListener('click', () => {
+            const on = !globe.getAmbientGasVisible?.();
+            globe.setAmbientGasVisible?.(on);
+            press(bGas, on);
+        });
+        const bDesc = btn('ua-transit-descend'), bAsc = btn('ua-transit-ascend');
+        const bHold = btn('ua-transit-hold'), selRate = btn('ua-transit-rate');
+        const rowT = document.getElementById('ua-cam-transit');
+        const valT = document.getElementById('ua-cam-transit-v');
+        const rate = () => Number(selRate?.value) || 50;
+        bDesc?.addEventListener('click', () => globe.startTransit?.({ mode: 'descend', kmPerSec: rate() }));
+        bAsc?.addEventListener('click', () => globe.startTransit?.({ mode: 'ascend', kmPerSec: rate() }));
+        bHold?.addEventListener('click', () => {
+            const st = globe.getTransitState?.();
+            if (st?.active) globe.pauseTransit?.(!st.paused);
+        });
+        const paintTransit = (ev) => {
+            const st = globe.getTransitState?.();
+            const on = !!st?.active;
+            // A transit switches the controller to fly mode itself; keep the
+            // camera HUD's mode chip honest (it is otherwise only repainted
+            // by its own buttons).
+            if (ev?.detail?.kind === 'start') {
+                document.getElementById('ua-cam-orbit')?.classList.remove('ua-cam-on');
+                document.getElementById('ua-cam-fly')?.classList.add('ua-cam-on');
+                const m = document.getElementById('ua-cam-mode');
+                if (m) m.textContent = 'fly';
+                const hint = document.getElementById('ua-cam-hint');
+                if (hint) hint.textContent = 'transit · WASD or drag releases the camera';
+            }
+            for (const b of [bDesc, bAsc]) b?.classList.toggle('ua-atmo-btn--live', on && st.mode === (b === bDesc ? 'descend' : 'ascend') && !st.done);
+            if (bHold) { bHold.hidden = !on; bHold.textContent = st?.paused ? '▶ resume' : '⏸ hold'; }
+            if (rowT) {
+                rowT.hidden = !on;
+                if (on && valT) valT.textContent = st.done
+                    ? `arrived · ${Math.round(st.altKm)} km · WASD / drag to release`
+                    : `${st.paused ? 'holding' : (st.mode === 'descend' ? '⇣' : '⇡') + ' ' + st.kmPerSec + ' km/s'} → ${Math.round(st.toKm)} km`;
+            }
+        };
+        window.addEventListener('ua-transit', paintTransit);
+        paintTransit();
 
         const legendEl = document.getElementById('ua-globe-legend');
         const toggle = document.getElementById('ua-legend-toggle');

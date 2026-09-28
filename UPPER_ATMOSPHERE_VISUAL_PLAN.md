@@ -439,6 +439,31 @@ Decisions, each with the reason it is not the obvious alternative:
   terminated the string and took the whole page down as a boot error (the
   CLAUDE.md scar, hit again). No backticks inside `/* glsl */` literals.
 
+### 9.4 Travelling THROUGH the layers (2026-09-28)
+
+| module | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-transit-model.js` | PURE: pose on the local vertical (canonical basis, texture east), constant-rate altitude profile, the camera-local gas from `pointPhysics` (dot count ∝ log₁₀ n, species by the engine's fractions, drift ∝ v_th, heading changes ∝ collision rate) | `node tests/upper-atmosphere-transit.mjs` (9) |
+| `js/upper-atmosphere-transit.js` | the transit driver + the wrapped point cloud around the camera | `tests/upper-atmosphere-transit.spec.js` |
+
+- **The transit rate is real time and keeps its own clock.** km of altitude
+  per second of wall time; on the globe's capped frame delta a 200 km/s
+  request ran at 60 km/s on a software renderer (measured).
+- **The page STARTS the flight and never HOLDS the camera** (the TIGA
+  rule): any fly key or a drag releases it. To hand back exactly the view
+  it left, the fly controller gained a configurable UP (`setUpVector`):
+  yaw/pitch live in an (e1, up, e3) basis that is (X, Y, Z) by default and
+  the local radial during and after a transit; Q/E climb along it. With a
+  fixed +Y the first fly frame after a transit on the +Z side of the globe
+  rolled the view ~80° (quaternion Δ 0.47, gated < 0.15 now). Orbit mode
+  and Reset put +Y back, because OrbitControls orbits about the +Y it
+  cached at construction (the CLAUDE.md scar).
+- **The gas cloud is a symbol and says so**: one dot is not one molecule;
+  every parameter is the engine's number at the camera's altitude, and a
+  dot leaving the sphere re-enters on the far side so a descent reads as
+  gas streaming past. It is off above the 2000 km ceiling and disclosed in
+  the `gas` button's title and the camera readout (gas · λ · v_th rows).
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

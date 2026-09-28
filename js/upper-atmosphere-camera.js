@@ -67,10 +67,18 @@ export class CameraController {
         this._orbit.enablePan = false;
         this._orbit.rotateSpeed = 0.55;
 
-        // Fly-mode state.
+        // Fly-mode state. Yaw / pitch are measured in a basis built on
+        // `_up` — world +Y by default, the LOCAL RADIAL during and after a
+        // layer transit — so the horizon the fly camera keeps level is the
+        // one the user is actually looking at. With a fixed +Y, a transit
+        // on the +Z side of the globe (lon −90°) handed back a view rolled
+        // ~80° on the first fly frame (measured: quaternion Δ 0.47).
         this._mode = 'orbit';
         this._yaw = 0;
         this._pitch = 0;
+        this._up = new THREE.Vector3(0, 1, 0);
+        this._e1 = new THREE.Vector3(1, 0, 0);     // "right" at yaw 0
+        this._e3 = new THREE.Vector3(0, 0, 1);     // "back" at yaw 0 (fwd = −e3)
         this._velocity = new THREE.Vector3();
         this._keys = new Set();
         this._dragging = false;
@@ -106,18 +114,16 @@ export class CameraController {
 
         if (mode === 'fly') {
             // Seed yaw/pitch from the camera's current orientation so the
-            // transition is invisible. Compute from the camera's forward
-            // vector (-Z in local space, transformed by world matrix).
-            const fwd = new THREE.Vector3(0, 0, -1)
-                .applyQuaternion(this.camera.quaternion);
-            this._pitch = Math.asin(Math.max(-1, Math.min(1, fwd.y)));
-            // _stepFly() builds forward as (sy·cp, sp, -cy·cp), so
-            // inverting requires atan2(x, -z) not atan2(x, z).
-            this._yaw   = Math.atan2(fwd.x, -fwd.z);
+            // transition is invisible.
+            this.syncOrientationFromCamera();
             // Stop any orbit damping motion.
             this._orbit.enabled = false;
             this.dom.style.cursor = 'crosshair';
         } else {
+            // OrbitControls orbits about the +Y it cached at construction;
+            // give it back a +Y camera before it runs.
+            this.setUpVector(new THREE.Vector3(0, 1, 0), { keepView: false });
+            this.camera.up.set(0, 1, 0);
             // Re-aim orbit at planet centre while preserving camera
             // position so the user doesn't get yanked.
             this._orbit.target.set(0, 0, 0);
@@ -128,7 +134,40 @@ export class CameraController {
         this._mode = mode;
     }
 
+    /**
+     * The fly camera's "up". Pass the local radial to fly level over a
+     * point on the globe (the layer transit does), +Y to go back to the
+     * page-wide default. With `keepView` the current view is re-expressed
+     * in the new basis so nothing on screen moves.
+     */
+    setUpVector(v, { keepView = true } = {}) {
+        if (!v || v.lengthSq() < 1e-12) return;
+        this._up.copy(v).normalize();
+        // Reference axis least aligned with up → a stable, right-handed basis
+        // that reduces to (X, Y, Z) for up = +Y.
+        const ref = Math.abs(this._up.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+        this._e1.crossVectors(this._up, ref).normalize();     // Y × Z = X
+        this._e3.crossVectors(this._e1, this._up).normalize(); // X × Y = Z
+        if (keepView) this.syncOrientationFromCamera();
+    }
+    getUpVector() { return this._up.clone(); }
+
     getMode() { return this._mode; }
+
+    /**
+     * Re-seed fly-mode yaw/pitch from the camera's CURRENT orientation.
+     * Anything that drives the camera directly for a while (the layer
+     * transit) calls this when it hands control back, so the first drag
+     * continues from where the view is instead of snapping to a stale
+     * heading. Same inversion as setMode('fly').
+     */
+    syncOrientationFromCamera() {
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        // _stepFly builds fwd = e1·(sy·cp) + up·sp − e3·(cy·cp), so invert
+        // with the same basis: pitch from up, yaw from (e1, −e3).
+        this._pitch = Math.asin(Math.max(-1, Math.min(1, fwd.dot(this._up))));
+        this._yaw   = Math.atan2(fwd.dot(this._e1), -fwd.dot(this._e3));
+    }
 
     /** Total camera distance from Earth centre, expressed in km. */
     getAltitudeKm() {
@@ -208,6 +247,8 @@ export class CameraController {
     /** Reset to a default viewpoint — useful for a "Home" button. */
     resetView({ distance = 3.4, durationSec = 1.0 } = {}) {
         this._follow = null;
+        this.setUpVector(new THREE.Vector3(0, 1, 0), { keepView: false });
+        this.camera.up.set(0, 1, 0);
         const target = new THREE.Vector3(0, 0.65 * distance, distance);
         const lookAt = new THREE.Vector3(0, 0, 0);
         this.flyTo(target, lookAt, durationSec);
@@ -318,18 +359,23 @@ export class CameraController {
         // this controller so user input picks up cleanly.
         if (this._anim) return;
 
-        // Build forward / right from yaw + pitch.
+        // Build forward / right from yaw + pitch in the (e1, up, e3) basis —
+        // (X, Y, Z) unless a transit set a local up. Convention unchanged:
+        // yaw=0, pitch=0 → looking along −e3 (−Z in the default basis).
         const cy = Math.cos(this._yaw),   sy = Math.sin(this._yaw);
         const cp = Math.cos(this._pitch), sp = Math.sin(this._pitch);
-        // Forward: yaw rotates around world-Y, pitch around camera-right.
-        // With our convention (yaw=0, pitch=0 → looking at -Z):
-        this._fwd.set(sy * cp, sp, -cy * cp).normalize();
-        this._right.set(cy, 0, sy).normalize();    // perpendicular to fwd & up
+        this._fwd.set(0, 0, 0)
+            .addScaledVector(this._e1, sy * cp)
+            .addScaledVector(this._up, sp)
+            .addScaledVector(this._e3, -cy * cp).normalize();
+        this._right.set(0, 0, 0)
+            .addScaledVector(this._e1, cy)
+            .addScaledVector(this._e3, sy).normalize();
 
-        // Apply orientation. Use lookAt with an explicit target so up
-        // stays world-Y (no roll).
+        // Apply orientation. lookAt with an explicit target so up stays
+        // the basis up (no roll).
         const tgt = this.camera.position.clone().add(this._fwd);
-        this.camera.up.set(0, 1, 0);
+        this.camera.up.copy(this._up);
         this.camera.lookAt(tgt);
 
         // Distance-scaled base speed: when very close to Earth, slow down
@@ -346,10 +392,11 @@ export class CameraController {
         if (this._keys.has('s')) move.sub(this._fwd);
         if (this._keys.has('d')) move.add(this._right);
         if (this._keys.has('a')) move.sub(this._right);
-        // Q/E descend/ascend in WORLD frame so users can climb out of a
-        // layer regardless of where they're looking.
-        if (this._keys.has('e')) move.y += 1;
-        if (this._keys.has('q')) move.y -= 1;
+        // Q/E descend/ascend along the basis up (world +Y by default, the
+        // local vertical after a transit) so users can climb out of a layer
+        // regardless of where they're looking.
+        if (this._keys.has('e')) move.add(this._up);
+        if (this._keys.has('q')) move.sub(this._up);
 
         if (move.lengthSq() > 0) {
             move.normalize().multiplyScalar(speed * dt);
@@ -404,10 +451,9 @@ export class CameraController {
 
         // Seed yaw/pitch from the lookAt direction so if the operator
         // stops following + drives the fly camera manually, controls
-        // pick up cleanly.
-        const fwd = tgt.clone().sub(this.camera.position).normalize();
-        this._pitch = Math.asin(Math.max(-1, Math.min(1, fwd.y)));
-        this._yaw   = Math.atan2(fwd.x, -fwd.z);
+        // pick up cleanly (the follow keeps +Y up; re-express in it).
+        if (this._up.y < 0.999) this.setUpVector(new THREE.Vector3(0, 1, 0), { keepView: false });
+        this.syncOrientationFromCamera();
     }
 
     _stepAnim() {
@@ -424,9 +470,7 @@ export class CameraController {
             // On completion, sync the active mode so user-input picks up
             // cleanly from the new pose.
             if (this._mode === 'fly' && a.lookAt) {
-                const fwd = a.lookAt.clone().sub(a.endPos).normalize();
-                this._pitch = Math.asin(Math.max(-1, Math.min(1, fwd.y)));
-                this._yaw   = Math.atan2(fwd.x, -fwd.z);
+                this.syncOrientationFromCamera();
             } else if (this._mode === 'orbit') {
                 this._orbit.target.set(0, 0, 0);
                 this._orbit.update();
