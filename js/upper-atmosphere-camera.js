@@ -14,6 +14,18 @@
  *                /decelerate base speed, mouse-drag rotates view (no
  *                pointer-lock — keeps the click-to-fly affordance working
  *                against satellites).
+ *   'explore'  — Flight ALONG the sphere inside the 80–2000 km band (the
+ *                kernel is js/upper-atmosphere-explore-model.js): W/S fly
+ *                where you look, A/D turn, Q/E climb in log-altitude,
+ *                Shift boost, Ctrl crawl, drag to look. Up is always the
+ *                local radial, so the horizon is level everywhere.
+ *
+ * Transitions (`runPath`) — a dive into the band or the climb back out —
+ * own the camera until they finish, and ANY input cancels them where they
+ * are (the TIGA rule: the page may start a flight, it may not hold the
+ * camera). An external driver (the layer transit) can claim the camera
+ * with `setExternalDriver(true)`; the active mode re-seeds from the pose
+ * it is handed back.
  *
  * Public surface
  *   new CameraController(camera, domElement)
@@ -34,6 +46,9 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+    stateFromPose, explorePose, exploreStep, transitionFovGain, EXPLORE,
+} from './upper-atmosphere-explore-model.js';
 
 const R_EARTH_KM = 6371;
 
@@ -46,6 +61,8 @@ const FLY_CRAWL       = 0.18;     // hold-Ctrl/Alt multiplier
 // Mouse sensitivity in radians per pixel of drag. Tuned so a full
 // monitor-width drag completes ~half a turn.
 const FLY_LOOK_SENS   = 0.0035;
+// Keys that move the camera, and therefore cancel a transition in flight.
+const MOVE_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 
 export class CameraController {
     /**
@@ -101,18 +118,46 @@ export class CameraController {
         this._right = new THREE.Vector3();
         this._up    = new THREE.Vector3(0, 1, 0);
 
+        // Explore mode: the kernel state { u, h, altKm, pitchRad } and the
+        // last step's speeds (for the HUD). Mouse-look accumulates here and
+        // is consumed by the next step.
+        this._explore = null;
+        this._exploreInfo = null;
+        this._lookDx = 0;
+        this._lookDy = 0;
+        // A transition (dive / climb) in progress, and the external driver flag.
+        this._path = null;
+        this._external = false;
+        this._tmpV = new THREE.Vector3();
+
         this._bindFly();
     }
 
     setMode(mode, { fromFollow = false } = {}) {
-        if (mode !== 'orbit' && mode !== 'fly') return;
+        if (mode !== 'orbit' && mode !== 'fly' && mode !== 'explore') return;
         // Phase 25: user-initiated mode changes break follow lock —
         // otherwise the operator would fight an invisible track. The
         // internal followObject() path passes fromFollow=true to bypass.
         if (!fromFollow) this._follow = null;
         if (mode === this._mode) return;
+        const prev = this._mode;
 
+        if (mode === 'explore') {
+            // Seed the sphere-flight state from wherever the camera is; the
+            // altitude clamps into the band (callers above the band DIVE in
+            // rather than asking for this directly).
+            this._orbit.enabled = false;
+            this._mode = 'explore';
+            this._seedExplore();
+            this.dom.style.cursor = 'crosshair';
+            return;
+        }
         if (mode === 'fly') {
+            // Leaving explore: keep flying level over the same point, so
+            // the first fly frame does not roll the view.
+            if (prev === 'explore') {
+                this.setUpVector(this.camera.position.clone().normalize(), { keepView: false });
+            }
             // Seed yaw/pitch from the camera's current orientation so the
             // transition is invisible.
             this.syncOrientationFromCamera();
@@ -167,6 +212,112 @@ export class CameraController {
         // with the same basis: pitch from up, yaw from (e1, −e3).
         this._pitch = Math.asin(Math.max(-1, Math.min(1, fwd.dot(this._up))));
         this._yaw   = Math.atan2(fwd.dot(this._e1), -fwd.dot(this._e3));
+        if (this._mode === 'explore') this._seedExplore();
+    }
+
+    /** Explore state from the camera's current pose (altitude clamped into the band). */
+    _seedExplore() {
+        const p = this.camera.position, f = this._tmpV.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const st = stateFromPose([p.x, p.y, p.z], [f.x, f.y, f.z]);
+        st.altKm = Math.max(EXPLORE.floorKm, Math.min(EXPLORE.ceilKm, st.altKm));
+        this._explore = st;
+        this._lookDx = this._lookDy = 0;
+    }
+
+    /** The explore kernel state and the last step's speeds (null outside explore). */
+    getExploreState() {
+        if (this._mode !== 'explore' || !this._explore) return null;
+        return { ...this._explore, ...(this._exploreInfo || {}) };
+    }
+
+    /**
+     * An external driver (the layer transit) owns the camera pose while
+     * `on`. The active mode stops stepping, and re-seeds from the pose it is
+     * handed back when the driver lets go.
+     */
+    setExternalDriver(on) {
+        const was = this._external;
+        this._external = !!on;
+        if (was && !on) this.syncOrientationFromCamera();
+    }
+
+    /**
+     * Run a camera path from js/upper-atmosphere-explore-model.js
+     * (`divePath` / `climbPath`). The path owns the camera until it ends;
+     * any move key, a press on the canvas or a wheel turn cancels it where
+     * it is. The field of view kicks out mid-path as a speed cue and is
+     * restored exactly at the end or on cancel.
+     *
+     * @param {{ at:(s:number)=>{position,forward,up}, durationSec:number }} path
+     * @param {object} [o]
+     * @param {'explore'|'orbit'|'fly'} [o.endMode='explore']
+     * @param {(reason:string)=>void} [o.onDone]    'arrived' | 'cancelled'
+     */
+    runPath(path, { endMode = 'explore', durationSec = null, onDone = null } = {}) {
+        this.cancelPath('superseded');
+        this._follow = null;
+        this._anim = null;
+        this._orbit.enabled = false;
+        this._path = {
+            path, endMode, onDone,
+            t0: performance.now() / 1000,
+            duration: Math.max(0.2, durationSec ?? path.durationSec ?? 4),
+            fov0: this.camera.fov,
+            s: 0,
+        };
+    }
+    isPathActive() { return !!this._path; }
+    getPathProgress() { return this._path ? this._path.s : null; }
+
+    /** Stop a running path where it is. The caller's onDone gets 'cancelled'. */
+    cancelPath(reason = 'cancelled') {
+        const P = this._path;
+        if (!P) return false;
+        this._path = null;
+        this.camera.fov = P.fov0;
+        this.camera.updateProjectionMatrix();
+        // Hand the camera to a mode that can hold this pose: inside the band
+        // that is explore; above it, fly (level over the same point).
+        const alt = this.getAltitudeKm();
+        if (alt <= EXPLORE.ceilKm + 1) {
+            if (this._mode === 'explore') this._seedExplore(); else this.setMode('explore');
+        } else {
+            this.setUpVector(this.camera.position.clone().normalize(), { keepView: false });
+            if (this._mode === 'fly') this.syncOrientationFromCamera(); else this.setMode('fly');
+        }
+        try { P.onDone?.(reason === 'superseded' ? 'superseded' : 'cancelled'); } catch (_) { /* isolate */ }
+        return true;
+    }
+
+    _stepPath() {
+        const P = this._path;
+        const now = performance.now() / 1000;
+        const s = Math.min(1, (now - P.t0) / P.duration);
+        P.s = s;
+        const pose = P.path.at(s);
+        this.camera.position.set(pose.position[0], pose.position[1], pose.position[2]);
+        this.camera.up.set(pose.up[0], pose.up[1], pose.up[2]);
+        this._tmpV.set(
+            pose.position[0] + pose.forward[0],
+            pose.position[1] + pose.forward[1],
+            pose.position[2] + pose.forward[2]);
+        this.camera.lookAt(this._tmpV);
+        this.camera.fov = P.fov0 * transitionFovGain(s);
+        this.camera.updateProjectionMatrix();
+        if (s < 1) return;
+        this._path = null;
+        this.camera.fov = P.fov0;
+        this.camera.updateProjectionMatrix();
+        if (P.endMode === 'orbit') {
+            this._mode = 'fly';                     // force the orbit re-entry path
+            this.setMode('orbit');
+        } else if (P.endMode === 'explore') {
+            if (this._mode === 'explore') this._seedExplore(); else this.setMode('explore');
+        } else {
+            this.setUpVector(this.camera.position.clone().normalize(), { keepView: false });
+            if (this._mode === 'fly') this.syncOrientationFromCamera(); else this.setMode('fly');
+        }
+        try { P.onDone?.('arrived'); } catch (_) { /* isolate */ }
     }
 
     /** Total camera distance from Earth centre, expressed in km. */
@@ -183,6 +334,12 @@ export class CameraController {
      * @param {number}        [durationSec=1.4]
      */
     flyTo(targetPos, lookAtPos = null, durationSec = 1.4) {
+        // A flyTo (Reset, Top, click-to-fly) supersedes a transition, and
+        // cannot run under explore: at its end the explore state would be
+        // stale and the next explore step would snap the camera back into
+        // the band. Fly holds any pose, level over the same point.
+        this.cancelPath('superseded');
+        if (this._mode === 'explore') this.setMode('fly');
         // Snapshot start state.
         const start = {
             pos:  this.camera.position.clone(),
@@ -264,6 +421,11 @@ export class CameraController {
 
     /** Per-frame update — call from the host's animate() loop. */
     update(dt) {
+        // A transition (dive / climb) owns the camera outright.
+        if (this._path) {
+            this._stepPath();
+            return;
+        }
         // While a flyTo() animation is in progress we don't run mode-
         // specific update logic — the anim owns the camera. In orbit
         // mode in particular, OrbitControls would fight the anim by
@@ -284,11 +446,46 @@ export class CameraController {
             return;
         }
 
+        // The layer transit (or any external driver) owns the pose.
+        if (this._external && this._mode !== 'orbit') return;
+
         if (this._mode === 'orbit') {
             this._orbit.update();
+        } else if (this._mode === 'explore') {
+            this._stepExplore(dt);
         } else {
             this._stepFly(dt);
         }
+    }
+
+    _stepExplore(dt) {
+        if (!this._explore) this._seedExplore();
+        const k = this._keys;
+        const input = {
+            forward: (k.has('w') ? 1 : 0) - (k.has('s') ? 1 : 0),
+            turn:    (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0),
+            climb:   (k.has('e') ? 1 : 0) - (k.has('q') ? 1 : 0),
+            boost:   k.has('shift'),
+            crawl:   k.has('control') || k.has('alt'),
+            // Drag right looks right; drag up looks up.
+            dYawRad:   this._lookDx * FLY_LOOK_SENS,
+            dPitchRad: -this._lookDy * FLY_LOOK_SENS,
+        };
+        this._lookDx = this._lookDy = 0;
+        const next = exploreStep(this._explore, input, dt);
+        this._explore = { u: next.u, h: next.h, altKm: next.altKm, pitchRad: next.pitchRad };
+        this._exploreInfo = {
+            speedKmS: next.speedKmS, groundSpeedKmS: next.groundSpeedKmS,
+            climbKmS: next.climbKmS, moving: input.forward !== 0 || input.climb !== 0,
+        };
+        const pose = explorePose(this._explore);
+        this.camera.position.set(pose.position[0], pose.position[1], pose.position[2]);
+        this.camera.up.set(pose.up[0], pose.up[1], pose.up[2]);
+        this._tmpV.set(
+            pose.position[0] + pose.forward[0],
+            pose.position[1] + pose.forward[1],
+            pose.position[2] + pose.forward[2]);
+        this.camera.lookAt(this._tmpV);
     }
 
     dispose() {
@@ -306,10 +503,13 @@ export class CameraController {
             const key = e.key.toLowerCase();
             if (down) this._keys.add(key);
             else      this._keys.delete(key);
+            // A move key takes the camera back from a transition in flight.
+            if (down && this._path && MOVE_KEYS.has(key)) this.cancelPath('key');
             // Don't preventDefault — that would block tabbing/copy etc.
         };
         const onMouseDown = (e) => {
-            if (this._mode !== 'fly') return;
+            if (this._path) this.cancelPath('drag');
+            if (this._mode !== 'fly' && this._mode !== 'explore') return;
             // Left button only — leave middle/right alone for browser UI.
             if (e.button !== 0) return;
             this._dragging = true;
@@ -319,10 +519,19 @@ export class CameraController {
         };
         const onMouseUp = () => {
             this._dragging = false;
-            if (this._mode === 'fly') this.dom.style.cursor = 'crosshair';
+            if (this._mode === 'fly' || this._mode === 'explore') this.dom.style.cursor = 'crosshair';
         };
+        const onWheel = () => { if (this._path) this.cancelPath('wheel'); };
         const onMouseMove = (e) => {
-            if (!this._dragging || this._mode !== 'fly') return;
+            if (!this._dragging) return;
+            if (this._mode === 'explore') {
+                this._lookDx += e.clientX - this._lastMouse.x;
+                this._lookDy += e.clientY - this._lastMouse.y;
+                this._lastMouse.x = e.clientX;
+                this._lastMouse.y = e.clientY;
+                return;
+            }
+            if (this._mode !== 'fly') return;
             const dx = e.clientX - this._lastMouse.x;
             const dy = e.clientY - this._lastMouse.y;
             this._lastMouse.x = e.clientX;
@@ -338,14 +547,23 @@ export class CameraController {
         const onKD = onKey(true);
         const onKU = onKey(false);
 
+        // Releasing every key when the window loses focus: a key held
+        // through an alt-tab otherwise never sees its keyup and the explore
+        // camera flies on by itself.
+        const onBlur = () => this._keys.clear();
+
         window.addEventListener('keydown', onKD);
         window.addEventListener('keyup',   onKU);
+        window.addEventListener('blur',    onBlur);
         this.dom.addEventListener('mousedown', onMouseDown);
+        this.dom.addEventListener('wheel', onWheel, { passive: true });
         window.addEventListener('mouseup', onMouseUp);
         window.addEventListener('mousemove', onMouseMove);
         this._unbindFly = () => {
             window.removeEventListener('keydown', onKD);
             window.removeEventListener('keyup',   onKU);
+            window.removeEventListener('blur',    onBlur);
+            this.dom.removeEventListener('wheel', onWheel);
             this.dom.removeEventListener('mousedown', onMouseDown);
             window.removeEventListener('mouseup', onMouseUp);
             window.removeEventListener('mousemove', onMouseMove);

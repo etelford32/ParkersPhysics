@@ -20,6 +20,17 @@
  *     the far side, which is what makes a fast descent read as gas
  *     streaming past rather than a static snow globe.
  *
+ *   • SPEED STREAKS. When the camera moves through the gas (a transit, an
+ *     explore cruise, a dive) every dot also draws a line from where it is
+ *     to where it appeared `STREAK.exposureS` ago — a camera shutter, which
+ *     is the depth cue exploration games use for speed. Streaks are the
+ *     CAMERA's motion, not the gas's: the gas's own drift is its thermal
+ *     jitter and stays a dot. They switch off at rest.
+ *
+ * The transit hands the camera to EXPLORE mode (flight along the sphere),
+ * so the first key after arriving flies level over the ground instead of
+ * off along a straight line out of the band.
+ *
  * Symbolic, and disclosed: one dot is not one molecule.
  */
 
@@ -31,6 +42,14 @@ import {
 import { capPointSize } from './upper-atmosphere-point-cap.js';
 
 const CANCEL_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
+
+/** Speed-streak tuning. Exposure is a shutter time; lengths in R⊕. */
+export const STREAK = Object.freeze({
+    exposureS: 0.12,
+    minLenRunit: 0.0012,     // below ~8 km of apparent motion a dot stays a dot
+    maxLenRunit: 0.045,      // 1.5 × the cloud radius
+    smoothS: 0.15,           // velocity EMA time constant
+});
 
 function _dotTexture(size = 32) {
     const c = document.createElement('canvas');
@@ -93,6 +112,29 @@ export class AtmosphereTransit {
         this._tmp = new THREE.Vector3();
         this._tmpC = new THREE.Color();
 
+        // Speed streaks: one segment per dot, head bright, tail black
+        // (additive, so the tail fades out rather than darkening anything).
+        this._sPos = new Float32Array(N * 6);
+        this._sCol = new Float32Array(N * 6);
+        const sgeo = new THREE.BufferGeometry();
+        sgeo.setAttribute('position', new THREE.BufferAttribute(this._sPos, 3));
+        sgeo.setAttribute('color', new THREE.BufferAttribute(this._sCol, 3));
+        sgeo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+        sgeo.attributes.color.setUsage(THREE.DynamicDrawUsage);
+        sgeo.setDrawRange(0, 0);
+        this._streaks = new THREE.LineSegments(sgeo, new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true, opacity: 0.55,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        this._streaks.frustumCulled = false;
+        this._streaks.name = 'gas-streaks';
+        this._streaks.visible = false;
+        this._streaks.userData = { kind: 'gas-streaks' };
+        scene.add(this._streaks);
+        this._vel = new THREE.Vector3();
+        this._lastCam = null;
+        this._streakLen = 0;
+
         // Release on user input — the page may START a flight, not HOLD the camera.
         this._onKey = (e) => {
             const tag = (e.target?.tagName || '').toUpperCase();
@@ -142,11 +184,13 @@ export class AtmosphereTransit {
         s.tS = 0; s.done = false; s.paused = false; s.active = true;
         s.altKm = s.fromKm;
         this._controls.stopFollowing?.();
-        if (this._controls.getMode() !== 'fly') this._controls.setMode('fly');
+        this._controls.cancelPath?.('superseded');
         this._controls._anim = null;
-        // The fly camera flies LEVEL over this point from now on: its up is
-        // the local radial (constant along a vertical), so releasing the
-        // transit hands back exactly the view it left.
+        // The transit owns the pose; explore takes over from wherever it
+        // leaves the camera (flight along the sphere, up = local radial).
+        if (this._controls.getMode() !== 'explore') this._controls.setMode('explore');
+        this._controls.setExternalDriver?.(true);
+        // Fly mode, if the user switches to it later, flies level here too.
         const pose0 = transitPose({ latDeg: s.latDeg, lonDeg: s.lonDeg, altKm: s.fromKm, headingDeg: 0, pitchDeg: 0 });
         this._controls.setUpVector?.(new THREE.Vector3(...pose0.up), { keepView: false });
         this._apply(cam);
@@ -158,7 +202,9 @@ export class AtmosphereTransit {
         if (!this._state.active) return;
         this._state.active = false;
         this._state.paused = false;
-        this._controls.syncOrientationFromCamera?.();
+        // Hand the pose back: the active mode re-seeds from it.
+        if (this._controls.setExternalDriver) this._controls.setExternalDriver(false);
+        else this._controls.syncOrientationFromCamera?.();
         try { this._onStop?.(this.getState(), reason); } catch (_) { /* isolate */ }
         this._emit('stop', reason);
     }
@@ -186,10 +232,69 @@ export class AtmosphereTransit {
     }
 
     // ── ambient gas ────────────────────────────────────────────────────
-    setCloudVisible(on) { this._cloudVisible = !!on; if (!on) this._cloud.visible = false; }
+    setCloudVisible(on) {
+        this._cloudVisible = !!on;
+        if (!on) { this._cloud.visible = false; this._streaks.visible = false; }
+    }
     getCloudVisible() { return this._cloudVisible; }
     getGas() { return this._gas; }
     getCloudCount() { return this._cloud.visible ? this._cloud.geometry.drawRange.count : 0; }
+    /** Streak segments drawn this frame, and their apparent length (R⊕). */
+    getStreakInfo() {
+        return {
+            count: this._streaks.visible ? this._streaks.geometry.drawRange.count / 2 : 0,
+            lengthRunit: this._streaks.visible ? this._streakLen : 0,
+            speedKmS: this._vel.length() * R_EARTH_KM,
+        };
+    }
+
+    /** Camera velocity through the gas, smoothed; scene units per second. */
+    _trackVelocity(cam, dtReal) {
+        const p = cam.position;
+        if (this._lastCam && dtReal > 1e-4) {
+            const dx = p.x - this._lastCam.x, dy = p.y - this._lastCam.y, dz = p.z - this._lastCam.z;
+            const jump = Math.hypot(dx, dy, dz);
+            if (jump > 0.5) {
+                this._vel.set(0, 0, 0);                  // a teleport, not a motion
+            } else {
+                const k = 1 - Math.exp(-dtReal / STREAK.smoothS);
+                this._vel.x += (dx / dtReal - this._vel.x) * k;
+                this._vel.y += (dy / dtReal - this._vel.y) * k;
+                this._vel.z += (dz / dtReal - this._vel.z) * k;
+            }
+        }
+        if (!this._lastCam) this._lastCam = p.clone(); else this._lastCam.copy(p);
+    }
+
+    _drawStreaks(n) {
+        const v = this._vel;
+        let L = v.length() * STREAK.exposureS;
+        if (L < STREAK.minLenRunit || n === 0) {
+            this._streaks.visible = false;
+            this._streakLen = 0;
+            return;
+        }
+        const k = Math.min(1, STREAK.maxLenRunit / L);
+        L *= k;
+        this._streakLen = L;
+        const ox = v.x * STREAK.exposureS * k, oy = v.y * STREAK.exposureS * k, oz = v.z * STREAK.exposureS * k;
+        const P = this._pos, C = this._col, SP = this._sPos, SC = this._sCol;
+        // Longer streaks spread the same light along more pixels; hold the
+        // total roughly constant so a boost does not white out the view.
+        const gain = Math.min(1, 0.012 / L + 0.35);
+        for (let i = 0; i < n; i++) {
+            const o = i * 3, q = i * 6;
+            SP[q] = P[o]; SP[q + 1] = P[o + 1]; SP[q + 2] = P[o + 2];
+            SP[q + 3] = P[o] + ox; SP[q + 4] = P[o + 1] + oy; SP[q + 5] = P[o + 2] + oz;
+            SC[q] = C[o] * gain; SC[q + 1] = C[o + 1] * gain; SC[q + 2] = C[o + 2] * gain;
+            SC[q + 3] = 0; SC[q + 4] = 0; SC[q + 5] = 0;
+        }
+        const g = this._streaks.geometry;
+        g.setDrawRange(0, n * 2);
+        g.attributes.position.needsUpdate = true;
+        g.attributes.color.needsUpdate = true;
+        this._streaks.visible = true;
+    }
 
     _seedCloud(cam) {
         const R = CLOUD.radiusRunit;
@@ -244,10 +349,12 @@ export class AtmosphereTransit {
         }
 
         // Ambient gas.
+        this._trackVelocity(cam, dtReal);
         if (!this._cloudVisible) return;
         const altKm = (cam.position.length() - 1) * R_EARTH_KM;
         if (altKm > MODEL_CEIL_KM || altKm < MODEL_FLOOR_KM - 5) {
             this._cloud.visible = false;
+            this._streaks.visible = false;
             return;
         }
         const key = `${Math.round(altKm / 2)}|${Math.round(f107)}|${Math.round(ap)}`;
@@ -265,7 +372,7 @@ export class AtmosphereTransit {
             this._cloud.material.opacity = 0.35 + 0.5 * this._gas.densityNorm;
         }
         const gas = this._gas;
-        if (!gas || gas.count === 0) { this._cloud.visible = false; return; }
+        if (!gas || gas.count === 0) { this._cloud.visible = false; this._streaks.visible = false; return; }
         if (!this._seeded) this._seedCloud(cam);
         this._cloud.visible = true;
 
@@ -282,7 +389,17 @@ export class AtmosphereTransit {
             P[o] += D[o] * step; P[o + 1] += D[o + 1] * step; P[o + 2] += D[o + 2] * step;
             const dx = P[o] - cx, dy = P[o + 1] - cy, dz = P[o + 2] - cz;
             const d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 > R2) {
+            if (d2 > 4 * R2) {
+                // Left more than a cloud diameter behind (a dive covers
+                // hundreds of km per frame): mirroring would re-enter EVERY
+                // dot in the one narrow cone pointing back at the old cloud
+                // — measured as all the streaks bunched in a corner — so
+                // re-seed it uniformly in the ball instead.
+                let x, y, z;
+                do { x = Math.random() * 2 - 1; y = Math.random() * 2 - 1; z = Math.random() * 2 - 1; }
+                while (x * x + y * y + z * z > 1);
+                P[o] = cx + x * R; P[o + 1] = cy + y * R; P[o + 2] = cz + z * R;
+            } else if (d2 > R2) {
                 // Re-enter on the opposite side, slightly inside, so a moving
                 // camera sees a continuous stream of gas.
                 const k = 0.97 * R / Math.sqrt(d2);
@@ -290,12 +407,16 @@ export class AtmosphereTransit {
             }
         }
         this._cloud.geometry.attributes.position.needsUpdate = true;
+        this._drawStreaks(n);
     }
 
     dispose() {
         window.removeEventListener('keydown', this._onKey);
         this._canvas.removeEventListener('mousedown', this._onDown);
         this._scene.remove(this._cloud);
+        this._scene.remove(this._streaks);
+        this._streaks.geometry.dispose();
+        this._streaks.material.dispose();
         this._cloud.geometry.dispose();
         this._cloud.material.map?.dispose();
         this._cloud.material.dispose();

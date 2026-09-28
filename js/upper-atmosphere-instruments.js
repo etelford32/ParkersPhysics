@@ -538,7 +538,7 @@ export class AtmosphereInstruments {
      */
     _avoidRects() {
         const sel = ['#ua-camera-hud', '#ua-globe-legend', '#ua-atmo-controls',
-                     '#ua-time-scrubber-host'];
+                     '#ua-time-scrubber-host', '#ua-explore-gauge'];
         const hb = this._host.getBoundingClientRect();
         const out = [];
         for (const q of sel) {

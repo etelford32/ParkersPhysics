@@ -75,7 +75,8 @@ test('descend rides the local vertical in real time, the gas follows, a fly key 
     expect(Math.abs(b.camAlt - b.st.altKm)).toBeLessThan(1);
     expect(Math.abs(b.radial.lat - b.st.latDeg)).toBeLessThan(0.01);
     expect(Math.abs(((b.radial.lon - b.st.lonDeg + 540) % 360) - 180)).toBeLessThan(0.01);
-    expect(b.mode).toBe('fly');
+    // The transit hands the camera to EXPLORE (flight along the sphere).
+    expect(b.mode).toBe('explore');
     expect(b.dots).toBeGreaterThan(0);
     expect(b.gas.species.length).toBeGreaterThan(0);
     expect(b.hudGas).toMatch(/(H|He|O|N2) \d+%/);

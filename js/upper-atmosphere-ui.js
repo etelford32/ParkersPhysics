@@ -122,11 +122,12 @@ export class UpperAtmosphereUI {
     // necessarily looking at.
 
     _bindCameraControls() {
-        const { camOrbitBtn, camFlyBtn, camIssBtn } = this.el;
+        const { camOrbitBtn, camFlyBtn, camIssBtn, camExploreBtn } = this.el;
         const setMode = (mode) => {
             const m = this.globe.setCameraMode?.(mode) || mode;
-            camOrbitBtn?.classList.toggle('ua-cam-on', m === 'orbit');
-            camFlyBtn  ?.classList.toggle('ua-cam-on', m === 'fly');
+            camOrbitBtn  ?.classList.toggle('ua-cam-on', m === 'orbit');
+            camFlyBtn    ?.classList.toggle('ua-cam-on', m === 'fly');
+            camExploreBtn?.classList.toggle('ua-cam-on', m === 'explore');
             if (this.el.camMode) this.el.camMode.textContent = m;
             if (this.el.camHint) {
                 this.el.camHint.textContent = m === 'fly'
@@ -134,8 +135,20 @@ export class UpperAtmosphereUI {
                     : 'drag to rotate · scroll to zoom';
             }
         };
-        camOrbitBtn?.addEventListener('click', () => setMode('orbit'));
-        camFlyBtn  ?.addEventListener('click', () => setMode('fly'));
+        // From inside the band, Orbit CLIMBS OUT over the same ground rather
+        // than snapping the view round to the planet's centre from 200 km.
+        camOrbitBtn?.addEventListener('click', () => {
+            const m = this.globe.getCameraMode?.();
+            const alt = this.globe.getCameraAltitudeKm?.();
+            if (this.globe.climbToOrbit && (m === 'explore' || this.globe.isTransitioning?.()
+                    || (m === 'fly' && Number.isFinite(alt) && alt < 2000))) {
+                this.globe.climbToOrbit();
+                return;
+            }
+            setMode('orbit');
+        });
+        camFlyBtn  ?.addEventListener('click', () => { this.globe.cancelTransition?.(); setMode('fly'); });
+        camExploreBtn?.addEventListener('click', () => this.globe.enterExplore?.());
         camIssBtn  ?.addEventListener('click', () => {
             // Phase 25: Visit ISS now LOCKS follow — the camera tracks
             // the probe as it propagates, instead of arriving at one

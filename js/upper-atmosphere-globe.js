@@ -75,7 +75,7 @@ import { SubstormController } from './upper-atmosphere-substorm.js';
 import { getTimeBus } from './upper-atmosphere-time-bus.js';
 import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint, greenwichSiderealDeg } from './sun-altitude.js';
-import { geoFromVectors, latLonToScene } from './upper-atmosphere-column.js';
+import { geoFromVectors, latLonToScene, sceneToLatLon } from './upper-atmosphere-column.js';
 // On-canvas analysis overlay (altitude ruler · limb probe · diurnal
 // compass). Deliberately three-free — it takes geometry through the
 // hooks below and its physics from the node-tested kernel.
@@ -91,6 +91,10 @@ import { FlightLayer } from './upper-atmosphere-flight-layer.js';
 // Layer transit: the camera rides the local vertical through the band and a
 // camera-local gas cloud is re-sampled from the engine at its altitude.
 import { AtmosphereTransit } from './upper-atmosphere-transit.js';
+import { ExploreLayer } from './upper-atmosphere-explore.js';
+import {
+    divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8,
+} from './upper-atmosphere-explore-model.js';
 
 // Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
 // frame. THE ONE CONVENTION is the kernel's `latLonToScene` — the site's
@@ -651,8 +655,14 @@ export class AtmosphereGlobe {
                 this._transitFocus = false;
             },
         });
+        // Explore mode's markers: boundary membranes, POI beacons, and the
+        // crossing / discovery events (js/upper-atmosphere-explore.js).
+        this._explore = new ExploreLayer(this._scene, {
+            getPoiInputs: () => this._poiInputs(),
+        });
         this._initResize();
         this._initTooltip();
+        this._initDiveOnDoubleClick();
         this._initInstruments();
 
         this._clock = new THREE.Clock();
@@ -2147,9 +2157,13 @@ export class AtmosphereGlobe {
     getFollowTarget() { return this._followId ?? null; }
 
     /** Reset camera to a default home view. Drops any active follow. */
-    resetCameraView() { this._controls.resetView?.(); this._followId = null; }
+    resetCameraView() { this._releaseTransitForCamera('reset'); this._controls.resetView?.(); this._followId = null; }
     /** Snap to top-down (polar) view. */
-    cameraTopView()   { this._controls.flyToTopView?.(); this._followId = null; }
+    cameraTopView()   { this._releaseTransitForCamera('top'); this._controls.flyToTopView?.(); this._followId = null; }
+    /** A camera preset takes over from the layer transit (which re-applies its pose every frame). */
+    _releaseTransitForCamera(reason) {
+        if (this._transit?.getState?.().active) this._transit.stop(reason);
+    }
 
     // ── Phase 26: time-warp + sat-clock control ──────────────────────────
     //
@@ -4150,6 +4164,246 @@ export class AtmosphereGlobe {
     getAmbientGasVisible()   { return this._transit?.getCloudVisible() ?? false; }
     getAmbientGas()          { return this._transit?.getGas() ?? null; }
     getAmbientGasCount()     { return this._transit?.getCloudCount() ?? 0; }
+    getStreakInfo()          { return this._transit?.getStreakInfo() ?? { count: 0, lengthRunit: 0, speedKmS: 0 }; }
+
+    // ── Explore mode (js/upper-atmosphere-explore*.js) ─────────────────────
+    /** What the POI kernel needs from the live page. */
+    _poiInputs() {
+        const ssp = subSolarPoint(new Date(this._sceneTimeMs()));
+        return {
+            subSolarLatDeg: ssp.lat, subSolarLonDeg: ssp.lon,
+            f107Sfu: this._state?.f107 ?? 150, ap: this._state?.ap ?? 15,
+            iss: this._issState(),
+        };
+    }
+    /** Live ISS lat/lon/alt/heading from its probe (null without one). */
+    _issState() {
+        const probe = this._satProbes?.iss;
+        if (!probe?.mesh) return null;
+        const p = probe.mesh.position;
+        const r = p.length();
+        if (!(r > 1)) return null;
+        const u = [p.x / r, p.y / r, p.z / r];
+        const ll = sceneToLatLon(u);
+        // Heading from a two-second look-ahead on the same propagator.
+        const t = this._timeBus?.getSimTime?.() ?? Date.now();
+        const q = _eciSceneToEarthFixed(_lookupProbePositionAt(probe, t + 2000), this._gmstRad(t + 2000));
+        const dir = [q.x - p.x, q.y - p.y, q.z - p.z];
+        const east = [-Math.sin(ll.lonDeg * Math.PI / 180), 0, -Math.cos(ll.lonDeg * Math.PI / 180)];
+        const north = [
+            u[1] * east[2] - u[2] * east[1],
+            u[2] * east[0] - u[0] * east[2],
+            u[0] * east[1] - u[1] * east[0],
+        ];
+        const he = dir[0] * east[0] + dir[1] * east[1] + dir[2] * east[2];
+        const hn = dir[0] * north[0] + dir[1] * north[1] + dir[2] * north[2];
+        const headingDeg = (Math.hypot(he, hn) > 0) ? ((Math.atan2(he, hn) * 180 / Math.PI) + 360) % 360 : null;
+        return { latDeg: ll.latDeg, lonDeg: ll.lonDeg, altKm: (r - 1) * R_EARTH_KM, headingDeg };
+    }
+    _cameraPose() {
+        const c = this._camera;
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion);
+        return { fromPos: c.position.toArray(), fromFwd: f.toArray(), fromUp: c.up.toArray() };
+    }
+    _emitExplore(detail) {
+        try { window.dispatchEvent(new CustomEvent('ua-explore', { detail })); } catch (_) { /* SSR */ }
+    }
+
+    /**
+     * Dive from wherever the camera is to (lat, lon, alt), arriving level
+     * with the horizon in explore mode. Any key, drag or wheel cancels it
+     * where it is (the page may start a flight, not hold the camera).
+     */
+    diveTo({ latDeg, lonDeg, altKm = 250, headingDeg = null, pitchDeg = -8, durationSec = null, poiId = null } = {}) {
+        if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg)) return null;
+        if (this._transit?.getState?.().active) this._transit.stop('dive');
+        this._followId = null;
+        this._controls.stopFollowing?.();
+        const path = divePath({ ...this._cameraPose(), latDeg, lonDeg, altKm, headingDeg, pitchDeg });
+        const target = path.target;
+        this._controls.runPath(path, {
+            endMode: 'explore', durationSec,
+            onDone: (why) => this._emitExplore({
+                kind: why === 'arrived' ? 'dive-arrive' : 'dive-cancel', target, poiId, reason: why,
+            }),
+        });
+        this._emitExplore({ kind: 'dive-start', target, poiId, durationSec: durationSec ?? path.durationSec, arcDeg: path.arcDeg });
+        return { ...target, durationSec: durationSec ?? path.durationSec, arcDeg: path.arcDeg };
+    }
+    /** Dive to one of the live points of interest by id. */
+    diveToPoi(id, opts = {}) {
+        this._explore?.refreshPois(true);
+        const poi = this._explore?.getPoi(id);
+        if (!poi) return null;
+        return this.diveTo({
+            latDeg: poi.latDeg, lonDeg: poi.lonDeg, altKm: poi.altKm,
+            headingDeg: poi.headingDeg, pitchDeg: poi.pitchDeg, poiId: id, ...opts,
+        });
+    }
+    /** Climb out of the band to the orbit view over the same ground. */
+    climbToOrbit({ distance = 3.4, durationSec = null } = {}) {
+        if (this._transit?.getState?.().active) this._transit.stop('climb');
+        this._followId = null;
+        this._controls.stopFollowing?.();
+        const path = climbPath({ ...this._cameraPose(), distance });
+        this._controls.runPath(path, {
+            endMode: 'orbit', durationSec,
+            onDone: (why) => this._emitExplore({ kind: why === 'arrived' ? 'climb-arrive' : 'climb-cancel', reason: why }),
+        });
+        this._emitExplore({ kind: 'climb-start', durationSec: durationSec ?? path.durationSec });
+        return { durationSec: durationSec ?? path.durationSec };
+    }
+    /**
+     * Explore from here: inside the band the camera switches mode where it
+     * is; above it, it dives to the ground under the camera at `altKm`.
+     */
+    enterExplore({ altKm = 250 } = {}) {
+        const alt = this.getCameraAltitudeKm();
+        if (alt <= EXPLORE.ceilKm && !this._controls.isPathActive?.()) {
+            if (this._transit?.getState?.().active) this._transit.stop('explore');
+            this._controls.stopFollowing?.();
+            this._followId = null;
+            this._controls.setMode('explore');
+            return { mode: 'explore', dived: false };
+        }
+        const ll = sceneToLatLon(this._camera.position.toArray());
+        const t = this.diveTo({ ...ll, altKm });
+        return { mode: 'dive', dived: true, target: t };
+    }
+    /**
+     * Go to an altitude over the ground below the camera: a dive from above
+     * the band, otherwise a ride along the local vertical that keeps the
+     * current heading and pitch (~2 s; any key or drag releases it).
+     */
+    goToAltitude(altKm) {
+        const target = Math.max(EXPLORE.floorKm, Math.min(EXPLORE.ceilKm, altKm));
+        if (!Number.isFinite(target)) return null;
+        const alt = this.getCameraAltitudeKm();
+        if (alt > EXPLORE.ceilKm + 1 || this._controls.isPathActive?.()) {
+            this._controls.cancelPath?.('superseded');
+            const ll = sceneToLatLon(this._camera.position.toArray());
+            return this.diveTo({ ...ll, altKm: target });
+        }
+        if (this._controls.getMode() !== 'explore') this._controls.setMode('explore');
+        const info = this.getExploreInfo();
+        return this.startTransit({
+            mode: target < alt ? 'descend' : 'ascend',
+            kmPerSec: Math.max(5, Math.abs(target - alt) / 2.2),
+            fromKm: alt, toKm: target,
+            headingDeg: info?.headingDeg ?? null,
+            pitchDeg: Number.isFinite(info?.pitchDeg) ? info.pitchDeg : -6,
+        });
+    }
+    isTransitioning() { return !!this._controls.isPathActive?.(); }
+    getTransitionProgress() { return this._controls.getPathProgress?.() ?? null; }
+    cancelTransition() { return this._controls.cancelPath?.('api') ?? false; }
+
+    /** Where the explorer is and how fast it is going (null outside explore). */
+    getExploreInfo() {
+        const st = this._controls.getExploreState?.();
+        if (!st) return null;
+        const d = describeState(st);
+        const v = st.speedKmS ?? 0;
+        return {
+            ...d,
+            compass: compass8(d.headingDeg),
+            speedKmS: v,
+            groundSpeedKmS: st.groundSpeedKmS ?? 0,
+            climbKmS: st.climbKmS ?? 0,
+            moving: !!st.moving,
+            orbitalKmS: orbitalSpeedKmS(d.altKm),
+            orbitalMultiple: v / orbitalSpeedKmS(d.altKm),
+        };
+    }
+    getPointsOfInterest()    { this._explore?.refreshPois(false); return this._explore?.getPois() ?? []; }
+    getExploreDiscoveries()  { return this._explore?.getDiscoveries() ?? { found: [], total: 0 }; }
+    resetExploreDiscoveries() { this._explore?.resetDiscoveries(); }
+    setMembranesVisible(on)  { this._explore?.setMembranesVisible(on); }
+    getMembranesVisible()    { return this._explore?.getMembranesVisible() ?? false; }
+    getMembraneWeights()     { return this._explore?.getMembraneWeights() ?? []; }
+    isMembranePassDrawn()    { return this._explore?.isMembranePassDrawn() ?? false; }
+    setBeaconsVisible(on)    { this._explore?.setBeaconsVisible(on); }
+    getBeaconsVisible()      { return this._explore?.getBeaconsVisible() ?? false; }
+    setAuroraCurtainsVisible(on) { this._explore?.setAuroraVisible(on); }
+    getAuroraCurtainsVisible()   { return this._explore?.getAuroraVisible() ?? false; }
+    getAuroraCurtainInfo()       { return this._explore?.getAuroraInfo() ?? null; }
+
+    /**
+     * Double-click the planet to dive there. Skipped when a click handler
+     * (the launch panel's site picking) consumed the click, and when the
+     * pointer is over a satellite / debris / catalogue point (a click on one
+     * already means "fly to it").
+     */
+    _initDiveOnDoubleClick() {
+        const ray = new THREE.Raycaster();
+        const ndc = new THREE.Vector2();
+        this._onDblClick = (e) => {
+            // The launch panel's handler is registered for good and only
+            // CONSUMES clicks while it is picking a site; skip the dive only
+            // when one of this double-click's own clicks was consumed.
+            if (Number.isFinite(this._clickConsumedAt) && e.timeStamp - this._clickConsumedAt < 700) return;
+            // Only the kinds a single click already acts on (fly-to-satellite,
+            // debris, catalogue): the hover raycast also reports shells and
+            // field lines, which must not block a dive.
+            const k = this._hoveredUserData?.kind;
+            if (k === 'sat-probe' || k === 'iss-probe' || k === 'debris-piece' || k === 'catalog-point') return;
+            const earth = this._skin?.earthMesh;
+            if (!earth) return;
+            const rect = this.canvas.getBoundingClientRect();
+            ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1,
+                    ((e.clientY - rect.top) / rect.height) * -2 + 1);
+            ray.setFromCamera(ndc, this._camera);
+            // Analytic sphere hit (the mesh is 33 k triangles; the sphere is exact).
+            const o = ray.ray.origin, d = ray.ray.direction;
+            const b = o.dot(d), c = o.lengthSq() - 1, disc = b * b - c;
+            if (disc < 0) return;
+            const t = -b - Math.sqrt(disc);
+            if (!(t > 0)) return;
+            const hit = o.clone().addScaledVector(d, t);
+            const ll = sceneToLatLon(hit.toArray());
+            const alt = this.getCameraAltitudeKm();
+            const altKm = alt <= EXPLORE.ceilKm ? Math.max(EXPLORE.floorKm, alt) : 250;
+            this.diveTo({ ...ll, altKm });
+        };
+        this.canvas.addEventListener('dblclick', this._onDblClick);
+    }
+
+    /**
+     * Quiet the hoops (tori, field lines, orbit loops) while the camera is
+     * down in the band, exactly as the transit does, and restore the user's
+     * own settings when it goes back to orbit — unless a flight owns focus.
+     */
+    _updateExploreFocus(mode) {
+        const inside = mode === 'explore';
+        if (inside === !!this._exploreFocusMode) return;
+        this._exploreFocusMode = inside;
+        if (inside) {
+            this._exploreFocus = !this._flightFocusOn;
+            if (this._exploreFocus) this.setFlightFocus(true);
+        } else {
+            if (this._exploreFocus && !this._flight?.hasFlight() && !this._transit?.getState?.().active) {
+                this.setFlightFocus(false);
+            }
+            this._exploreFocus = false;
+        }
+    }
+
+    /**
+     * Near plane follows the camera down. The default 0.01 R⊕ (64 km) clips
+     * everything nearer than that, which at 100 km is most of the gas and
+     * every streak; 0.25 × altitude keeps the ground in front of it. Far
+     * stays put, so the depth ratio never exceeds 5×10⁵ (the Mars flicker
+     * scar was 5×10⁶). From the orbit view this is the old 0.01 exactly.
+     */
+    _updateNearPlane() {
+        const cam = this._camera;
+        const altR = cam.position.length() - 1;
+        const near = Math.max(0.002, Math.min(0.01, 0.25 * altR));
+        if (Math.abs(near - cam.near) > 0.02 * cam.near) {
+            cam.near = near;
+            cam.updateProjectionMatrix();
+        }
+    }
 
     setInstrumentsEnabled(on) { this._instruments?.setEnabled(on); }
     getInstrumentsEnabled()   { return this._instruments?.getEnabled() ?? false; }
@@ -4471,7 +4725,8 @@ export class AtmosphereGlobe {
                 tip.style.opacity = '0';
                 this._hoveredUserData = null;
                 this._hoveredDebrisIdx = null;
-                if (this._controls.getMode() === 'fly') {
+                const m = this._controls.getMode();
+                if (m === 'fly' || m === 'explore') {
                     this.canvas.style.cursor = 'crosshair';
                 } else {
                     this.canvas.style.cursor = 'grab';
@@ -4508,7 +4763,14 @@ export class AtmosphereGlobe {
                 const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
                 const ny = ((e.clientY - rect.top) / rect.height) * -2 + 1;
                 for (const fn of this._canvasClickHandlers) {
-                    try { if (fn({ nx, ny, userData: ud, event: e })) return; } catch (_) { /* isolate */ }
+                    try {
+                        if (fn({ nx, ny, userData: ud, event: e })) {
+                            // A double-click's clicks that a handler consumed (site
+                            // picking) must not also start a dive.
+                            this._clickConsumedAt = e.timeStamp;
+                            return;
+                        }
+                    } catch (_) { /* isolate */ }
                 }
             }
             // Phase 25: click on an orbital target both flies the
@@ -4728,6 +4990,14 @@ export class AtmosphereGlobe {
         this._transit?.update(this._camera, dtWall, {
             f107: this._state?.f107 ?? 150, ap: this._state?.ap ?? 15,
         });
+        const camMode = this._controls.getMode();
+        const travelling = camMode !== 'orbit' || this._controls.isPathActive?.()
+            || !!this._transit?.getState?.().active;
+        this._explore?.update(this._camera, {
+            viewportHeight: this.canvas.clientHeight, travelling,
+        });
+        this._updateExploreFocus(camMode);
+        this._updateNearPlane();
 
         this._renderer.render(this._scene, this._camera);
 

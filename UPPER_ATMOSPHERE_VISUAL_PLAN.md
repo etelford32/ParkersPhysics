@@ -489,6 +489,63 @@ each measured at the 95 km floor and each gated by the third test in
   under the ~2.13 the default view ever reaches) it keeps that view's
   angle; the gate asserts the default view is untouched.
 
+### 9.6 Exploring the whole band (2026-09-28)
+
+| module | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-explore-model.js` | PURE: flight ALONG the sphere (`exploreStep`), the one transition path for dives in and the climb out (`cameraPath` / `divePath` / `climbPath`), boundaries from the layer schema + crossings + membrane weight + grid level, model-placed points of interest, auroral curtain geometry, milestones, the log altitude gauge | `node tests/upper-atmosphere-explore.mjs` (23) |
+| `js/upper-atmosphere-explore.js` | analytic boundary membranes, POI beacons, auroral curtains, crossing / milestone / discovery events | `tests/upper-atmosphere-explore.spec.js` |
+| `js/upper-atmosphere-explore-hud.js` | DOM: altitude column, toasts, POI labels, readout nav rows, the panel, immersive | same |
+| `js/upper-atmosphere-camera.js` | new `'explore'` mode, `runPath` (cancel on any input, FOV kick restored exactly), `setExternalDriver` for the transit | same + the transit gate |
+
+- **Explore flies ALONG the sphere.** State is a unit position, a tangent
+  heading parallel-transported along each great-circle step, an altitude and
+  a pitch — no lat/lon, so no pole singularity (the gate flies over the pole
+  and comes down the far meridian heading south). W flies where you LOOK: the
+  vertical part is taken in log-altitude, so diving at the floor slows
+  exponentially instead of hitting it. Speed is 1.2 × altitude per second, a
+  NAVIGATION speed the readout prints next to the circular orbital speed.
+- **One path for every transition.** Position slerps along a great circle
+  while altitude interpolates in LOG space, so the path can never pass below
+  the lower of its two ends (no chord through the planet); the view turns from
+  where it was, to the ground under the destination, to the destination's
+  horizon. Both ends are exact (gated). Any key, press or wheel cancels it
+  where it is (the TIGA rule); the FOV kick is restored exactly.
+- **The transit now hands over to EXPLORE**, not fly: from 95 km, fly mode's
+  straight lines leave the band in a few hundred km.
+- **Boundary membranes are ANALYTIC**, one pass on a bounding sphere, never a
+  tessellated shell per boundary (the §9.5 facet lesson). Three scars, each
+  measured: (1) line width must be the pixel's ANISOTROPIC footprint on the
+  sphere, computed from the ray-sphere hit — an isotropic width divided by
+  the grazing cosine bloomed the latitude line under the camera into a 30 px
+  orange wedge; (2) a camera sitting exactly ON a boundary gets a
+  rounding-level hit at t ≈ 0 on a grid meridian and floods a wedge of the
+  view — the near fade starts at the camera's own height above the surface;
+  (3) dives land on round coordinates, so the grid sits at HALF-integer cells
+  or a stripe runs straight down the middle of the view. A surface above the
+  camera draws at about half weight: seen edge-on it is the whole sky, and a
+  marker must not drown the airglow.
+- **Points of interest are PLACED BY THE MODEL** — the bulge and trough where
+  the page's own Jacchia term peaks and bottoms, the aurora on the page's
+  own oval for Kp from the live Ap, the exobase where the engine's λ equals
+  its scale height, the airglow where the emission table puts it. None is a
+  typed coordinate; each card says what placed it.
+- **Auroral curtains** ride the same oval, 100–300 km, green low / red high,
+  a sharp lower border. Placement is the model's; brightness and folds are
+  symbolic and the panel says so. They fade in only below ~4000 km, so the
+  default orbit view is unchanged (gated). The ring's seam vertex is
+  DUPLICATED: closed by index, the last quad swept 23.9 → 0 h of MLT and
+  squeezed a day of the ray pattern into one quad, dead ahead at magnetic
+  midnight where the aurora stop looks.
+- **The gas streaks.** Every dot draws a line to where it appeared one
+  shutter ago — the camera's motion through the gas, not the gas's own
+  (that stays thermal jitter). After a jump of more than a cloud diameter
+  dots are re-seeded uniformly: mirrored, they all re-entered in the one
+  cone pointing back at the old cloud.
+- **The near plane follows the camera down** (0.25 × altitude, clamped to
+  0.002–0.01 R⊕; far fixed, so the depth ratio stays ≤ 5×10⁵). From the
+  orbit view it is the old 0.01 exactly.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
