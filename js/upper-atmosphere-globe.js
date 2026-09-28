@@ -59,6 +59,7 @@ import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
 import { AtmosphereVolume, VOLUME_QUALITY }
     from './upper-atmosphere-volume.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
+import { capPointSize, roundDotTexture } from './upper-atmosphere-point-cap.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 import { ZoneWaveField } from './upper-atmosphere-wave-field.js';
@@ -117,6 +118,20 @@ function apToKp(ap) {
 }
 
 const R_EARTH_KM = 6371;
+
+// Camera-to-probe distance (R⊕) at which a far-tier probe marker is drawn
+// at its built size. The default view (camera at ~3.2 R⊕) never comes
+// closer than ~2.13 to a LEO probe (see the LOD thresholds in
+// _buildSatelliteProbe), so from there every marker is untouched; closer
+// than this a marker holds that angular size (~0.7°), so a transit or
+// chase camera sees a dot, not a moon.
+const PROBE_MARKER_REF_RUNIT = 2.0;
+
+// The planet's icosphere detail. three's `detail` is LINEAR: 5 was 720
+// faces with ~10.6° edges whose chords sag 27 km below the sphere — a
+// polygon horizon from a layer transit, where the horizon is ~10° away.
+// 40 gives 1.55° edges and a 0.58 km sag, invisible from the 80 km floor.
+const EARTH_ICO_DETAIL = 40;
 
 // ── Gradient layer shells ──────────────────────────────────────────────────
 // Five concentric translucent shells, one per physical regime the page
@@ -1532,7 +1547,7 @@ export class AtmosphereGlobe {
         // atmosphere page is about what's *above* the troposphere.
         this._skin = new EarthSkin(this._scene, this._sunDir, {
             radius: 1.0,
-            icoLevel: 5,
+            icoLevel: EARTH_ICO_DETAIL,
             clouds: false,
             atmosphere: true,
             aurora: true,
@@ -2039,7 +2054,7 @@ export class AtmosphereGlobe {
         // real TLE epoch + sat.mean_anomaly when live data arrives.
         const M0 = spec.orbital.meanAnomalyDeg0 * Math.PI / 180;
         const probe = {
-            mesh, pathLine, spec,
+            mesh, pathLine, spec, farGrp,
             _phase0:        M0,
             _M_epoch_rad:   M0,
             _epochMs:       Date.now(),
@@ -2829,7 +2844,11 @@ export class AtmosphereGlobe {
             opacity:     1.0,
             depthWrite:  false,
             blending:    THREE.AdditiveBlending,
+            map:         roundDotTexture(),
         });
+        // 0.034 R⊕ is a 217 km sprite: a chase or transit camera inside the
+        // LEO shell drew debris as squares tens of pixels wide.
+        capPointSize(mat, { maxPx: 10 });
         if (this._debrisCloud) {
             // Re-load: dispose the old.
             this._satProbeGrp?.remove(this._debrisCloud);
@@ -3012,7 +3031,9 @@ export class AtmosphereGlobe {
             opacity:     0.55,
             depthWrite:  false,
             blending:    THREE.AdditiveBlending,
+            map:         roundDotTexture(),
         });
+        capPointSize(mat, { maxPx: 8, fadeNear: false });
         const cloud = new THREE.Points(geom, mat);
         cloud.frustumCulled = false;
         cloud.userData = {
@@ -4782,6 +4803,7 @@ export class AtmosphereGlobe {
         // sim clock before it is drawn — the same rotation the catalogue
         // tracker applies. One angle per frame serves every probe.
         const gmst = this._gmstRad(simTimeMs);
+        const cam = this._camera;
         for (const id in this._satProbes) {
             const probe = this._satProbes[id];
             const periodSec = probe.spec.orbital.periodMin * 60;
@@ -4794,6 +4816,15 @@ export class AtmosphereGlobe {
                 _propagateKeplerian(probe.spec.orbital, tFrac, altShellR), gmst);
 
             probe.mesh.position.set(p.x, p.y, p.z);
+            // The far-tier ball is 0.012 R⊕ (76 km) with a 166 km halo —
+            // a legible dot from the default ~2 R⊕ view, a moon-sized disc
+            // from a layer transit a few hundred km below it (measured: a
+            // 4.6° ball over the 95 km horizon). Inside the reference range
+            // it keeps the angle it has there; beyond it nothing changes.
+            if (probe.farGrp && cam) {
+                const d = cam.position.distanceTo(probe.mesh.position);
+                probe.farGrp.scale.setScalar(Math.min(1, d / PROBE_MARKER_REF_RUNIT));
+            }
             // The orbit-path loop is built once in the inertial frame;
             // turning the whole polyline is one assignment per frame.
             if (probe.pathLine) probe.pathLine.rotation.y = -gmst;

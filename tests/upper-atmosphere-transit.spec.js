@@ -125,3 +125,42 @@ test('the gas cloud is denser and bluer low down than high up, and ascend goes b
     expect(r.up.altKm).toBeGreaterThan(200);
     expect(r.up.toKm).toBe(2000);
 });
+
+test('nothing at the lens fills the screen: round capped points, a curved horizon, dot-sized probe markers', async ({ page }) => {
+    // Measured at the 95 km floor before this gate: layer particles as
+    // 30 px squares, transit gas as 71 px blobs, a 76 km probe ball
+    // subtending 4.6°, and a polygon horizon from a 720-face planet.
+    await boot(page);
+    const orbit = await page.evaluate(() =>
+        Object.values(window.__ua.globe._satProbes || {}).map(p => p.farGrp?.scale.x));
+    // The default orbit view is untouched.
+    expect(orbit.length).toBeGreaterThan(0);
+    for (const s of orbit) expect(s).toBe(1);
+    await page.evaluate(() => window.__ua.globe.startTransit({ mode: 'descend', kmPerSec: 200, fromKm: 100, toKm: 95, headingDeg: 90, pitchDeg: -4 }));
+    await page.waitForTimeout(1500);
+    const r = await page.evaluate(() => {
+        const g = window.__ua.globe;
+        const pts = [];
+        g._scene.traverse(o => {
+            const m = o.material;
+            if (o.isPoints && m && !m.isShaderMaterial && m.sizeAttenuation) {
+                pts.push({ kind: o.userData?.kind || o.name || 'points', map: !!m.map, cap: m.userData?.pointCapPx ?? null });
+            }
+        });
+        const detail = g._skin.earthMesh.geometry.parameters.detail;
+        const probes = Object.values(g._satProbes || {}).map(p => p.farGrp?.scale.x);
+        return { pts, detail, probes, gl: g._renderer.getContext().getError() };
+    });
+    expect(r.pts.length).toBeGreaterThan(0);
+    for (const p of r.pts) {
+        expect(p.map, `${p.kind} is an untextured square`).toBe(true);
+        expect(p.cap, `${p.kind} has no pixel ceiling`).not.toBeNull();
+    }
+    // Icosphere edge ≈ 63.43° / (detail + 1); its chord must sag < 1 km
+    // below the sphere or the transit horizon is visibly a polygon.
+    const edgeRad = (63.435 * Math.PI / 180) / (r.detail + 1);
+    const sagKm = 6371 * (1 - Math.cos(edgeRad / 2));
+    expect(sagKm).toBeLessThan(1);
+    expect(Math.min(...r.probes)).toBeLessThan(1);
+    expect(r.gl).toBe(0);
+});

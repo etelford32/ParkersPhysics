@@ -464,6 +464,31 @@ Decisions, each with the reason it is not the obvious alternative:
   gas streaming past. It is off above the 2000 km ceiling and disclosed in
   the `gas` button's title and the camera readout (gas · λ · v_th rows).
 
+### 9.5 What the camera saw once it was down there (2026-09-28)
+
+Screenshots from the transit showed three things the orbit view had hidden,
+each measured at the 95 km floor and each gated by the third test in
+`tests/upper-atmosphere-transit.spec.js`:
+
+- **A polygon horizon.** The planet was `IcosahedronGeometry(1, 5)`, and
+  three's `detail` is LINEAR: 720 faces, ~10.6° edges whose chords sag
+  27 km below the sphere. From 95 km the horizon is ~10° away, so it was
+  literally the mesh's edges. `EARTH_ICO_DETAIL = 40` (1.55° edges, 0.58 km
+  sag); the gate asserts the sag < 1 km, not the number.
+- **Squares and snowballs.** Every `THREE.Points` layer is sized in world
+  units with `sizeAttenuation`: sub-pixel from the orbit view, 30 px
+  untextured SQUARES (layer particles) and 71 px additive blobs (transit
+  gas) a few km from the lens. `js/upper-atmosphere-point-cap.js` clamps
+  `gl_PointSize` to a CSS-pixel ceiling (× the renderer's pixel ratio,
+  because three multiplies `size` by it) and dims a clamped vertex-coloured
+  sprite by the area it lost; below the ceiling nothing changes. The layer
+  particles, debris and constellations also gained the disc texture.
+- **A moon that was a satellite.** A far-tier probe marker is a 76 km ball
+  in a 166 km halo — a dot from the default ~3.2 R⊕ camera, a 4.6° disc
+  over the transit horizon. Closer than `PROBE_MARKER_REF_RUNIT` (2.0 R⊕,
+  under the ~2.13 the default view ever reaches) it keeps that view's
+  angle; the gate asserts the default view is untouched.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

@@ -28,6 +28,7 @@ import {
     ambientGas, assignSpecies, transitPose, poseFromPosition, transitAltitude,
     CLOUD, MODEL_FLOOR_KM, MODEL_CEIL_KM, R_EARTH_KM, TRANSIT_FLOOR_KM,
 } from './upper-atmosphere-transit-model.js';
+import { capPointSize } from './upper-atmosphere-point-cap.js';
 
 const CANCEL_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 
@@ -76,11 +77,14 @@ export class AtmosphereTransit {
         geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
         geo.attributes.color.setUsage(THREE.DynamicDrawUsage);
         geo.setDrawRange(0, 0);
-        this._cloud = new THREE.Points(geo, new THREE.PointsMaterial({
+        // Capped and dimmed at the lens: a dot a few hundred metres away
+        // otherwise drew 71 px wide and neighbours stacked into white blobs
+        // under additive blending (measured at 95 km).
+        this._cloud = new THREE.Points(geo, capPointSize(new THREE.PointsMaterial({
             size: CLOUD.dotSizeRunit, sizeAttenuation: true, vertexColors: true,
             map: _dotTexture(), transparent: true, opacity: 0.6, depthWrite: false,
             blending: THREE.AdditiveBlending,
-        }));
+        }), { maxPx: 14 }));
         this._cloud.frustumCulled = false;
         this._cloud.name = 'ambient-gas';
         this._cloud.visible = false;
