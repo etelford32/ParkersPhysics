@@ -545,6 +545,18 @@ each measured at the 95 km floor and each gated by the third test in
 - **The near plane follows the camera down** (0.25 × altitude, clamped to
   0.002–0.01 R⊕; far fixed, so the depth ratio stays ≤ 5×10⁵). From the
   orbit view it is the old 0.01 exactly.
+- **Focus covers the transition, not just the mode.** The hoops (tori, field
+  lines, orbit loops) are quieted while the camera is in explore OR a dive /
+  climb is running; keyed on the mode alone, the dive swept them through the
+  view as giant coloured bands before it arrived.
+- **Every curtain pattern term is periodic in 24 h of MLT** (`noiseP` with an
+  integer cell period, folds at integer multiples of 2π/24). Duplicating the
+  seam vertex fixed the geometry, but a non-periodic noise still left a hard
+  vertical edge in the curtain dead ahead at magnetic midnight.
+- **The hover picks the first VISIBLE hit.** three's raycaster does not skip
+  hidden objects, so with focus on, a hover over a hidden cascade marker
+  showed a tooltip titled "undefined". The layer shells are exempt: hidden in
+  the default volume render, they still answer "which layer is this".
 
 ## 8. What is still open
 

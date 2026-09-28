@@ -179,23 +179,26 @@ varying float vV;
 varying float vS;
 varying float vI;
 float hash1(float n) { return fract(sin(n) * 43758.5453); }
-float noise1(float x) {
+// Value noise that repeats every P cells, so a pattern laid along the ring's
+// 0-24 h coordinate closes on itself at the seam (magnetic midnight, which
+// is exactly where the aurora stop looks).
+float noiseP(float x, float P) {
     float i = floor(x);
     float f = fract(x);
     float u = f * f * (3.0 - 2.0 * f);
-    return mix(hash1(i), hash1(i + 1.0), u);
+    return mix(hash1(mod(i, P)), hash1(mod(i + 1.0, P)), u);
 }
 void main() {
-    // Fine vertical rays along the curtain and slow large folds (symbolic).
-    // Seen edge-on the rays crowd below a pixel and alias into a barcode, so
-    // they relax to their mean as the screen-space density climbs (fwidth is
-    // safe here: no loop, uniform control flow).
+    // Fine vertical rays along the curtain and slow large folds (symbolic),
+    // every term periodic in 24 h of MLT. Seen edge-on the rays crowd below
+    // a pixel and alias into a barcode, so they relax to their mean as the
+    // screen-space density climbs (fwidth is safe here: no loop, uniform
+    // control flow).
     float s = vS * 22.0;
-    float raysRaw = 0.45 + 0.55 * noise1(s + uTime * 0.5) * noise1(s * 2.3 - uTime * 0.8);
+    float raysRaw = 0.45 + 0.55 * noiseP(s + uTime * 0.5, 528.0) * noiseP(s * 2.0 - uTime * 0.8, 1056.0);
     float rays = mix(raysRaw, 0.6, smoothstep(0.25, 0.9, fwidth(s)));
-    // Six folds around the oval: periodic in 24 h of MLT so the ring's seam
-    // does not show (1.5708 = 2 pi x 6 / 24).
-    float folds = 0.55 + 0.45 * sin(vS * 1.5708 + uTime * 0.12 + 2.5 * noise1(vS * 0.9));
+    // Six folds around the oval, wobbled by an 11-cycle term (2 pi / 24 h = 0.2618).
+    float folds = 0.55 + 0.45 * sin(vS * 1.5708 + uTime * 0.12 + 1.6 * sin(vS * 2.8798 + 0.7));
     // A sharp lower border and a long fade upward, as real curtains have.
     float lower = smoothstep(0.0, 0.05, vV);
     float upper = 1.0 - smoothstep(0.3, 1.0, vV);

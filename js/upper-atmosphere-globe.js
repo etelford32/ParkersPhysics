@@ -4374,7 +4374,9 @@ export class AtmosphereGlobe {
      * own settings when it goes back to orbit — unless a flight owns focus.
      */
     _updateExploreFocus(mode) {
-        const inside = mode === 'explore';
+        // A dive or climb counts: mid-dive the hoops sweep through the view
+        // as giant bands (measured) before the mode has become explore.
+        const inside = mode === 'explore' || !!this._controls.isPathActive?.();
         if (inside === !!this._exploreFocusMode) return;
         this._exploreFocusMode = inside;
         if (inside) {
@@ -4705,7 +4707,18 @@ export class AtmosphereGlobe {
             this._mouse.x = (x / rect.width)  *  2 - 1;
             this._mouse.y = (y / rect.height) * -2 + 1;
             this._raycaster.setFromCamera(this._mouse, this._camera);
-            const hits = this._raycaster.intersectObjects(hittable(), true);
+            // three's raycaster does not skip hidden objects: with the cascade
+            // or the hoops hidden (focus, a toggle) a hover still hit them and
+            // showed a tooltip titled 'undefined'. Take the first VISIBLE hit —
+            // except the layer shells, which are hidden in the default volume
+            // render but still answer "which layer is this" for the volume,
+            // which has no hover of its own.
+            const shown = (o) => {
+                if (o.userData?.kind === 'layer-shell') return true;
+                for (let p = o; p; p = p.parent) if (!p.visible) return false;
+                return true;
+            };
+            const hits = this._raycaster.intersectObjects(hittable(), true).filter(h => shown(h.object));
             if (hits.length > 0) {
                 const ud = _userDataForHit(hits[0]);
                 tip.innerHTML = _tipHTML(ud, this._profile, this._swState);
