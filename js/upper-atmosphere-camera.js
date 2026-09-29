@@ -295,7 +295,11 @@ export class CameraController {
     _stepPath() {
         const P = this._path;
         const now = frameClock.now() / 1000;
-        const s = Math.min(1, (now - P.t0) / P.duration);
+        // Within 1e-9 of the end IS the end: n frames of 1/60 s sum to a hair
+        // under n/60 in floating point for some start instants, which left a
+        // path one frame from landing on the frame the clock says it lands.
+        const raw = (now - P.t0) / P.duration;
+        const s = raw > 1 - 1e-9 ? 1 : raw;
         P.s = s;
         const pose = P.path.at(s);
         this.camera.position.set(pose.position[0], pose.position[1], pose.position[2]);
@@ -680,7 +684,8 @@ export class CameraController {
     _stepAnim() {
         const a = this._anim;
         const now = frameClock.now() / 1000;
-        const t = Math.min(1, (now - a.t0) / a.duration);
+        const tr = (now - a.t0) / a.duration;
+        const t = tr > 1 - 1e-9 ? 1 : tr;   // same end tolerance as _stepPath
         // Ease in/out (smoothstep).
         const k = t * t * (3 - 2 * t);
 
