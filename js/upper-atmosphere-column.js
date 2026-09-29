@@ -802,6 +802,46 @@ export function diurnalContrast({
 }
 
 /**
+ * (latitude, longitude) → unit vector in the SCENE frame, and back.
+ *
+ * ═══ THIS IS THE ONE LONGITUDE CONVENTION ON upper-atmosphere.html. ═══
+ * It is the site's canonical Earth-fixed frame — `js/geo/coords.js`,
+ * whose GLSL twin (`coords.glsl.js`) is what textures the EarthSkin globe
+ * and what the SGP4 catalogue cloud is drawn in:
+ *
+ *     +X → lon 0° (Greenwich)     +Y → north pole     −Z → lon +90°E
+ *
+ * so longitude increases COUNTER-clockwise seen from +Y: east is −Z.
+ *
+ * Until 2026-09-27 this page's sun vector, the LST oracle below, the
+ * drag-flow tracers, the fleet ribbons and the MLT helper all used the
+ * MIRROR of this (+Z = east) while the texture and the catalogue used the
+ * canonical frame. The day/night terminator and the diurnal bulge therefore
+ * sat at −lon over the continents (local noon drawn over India at 18 UTC)
+ * and nothing in a still frame looked wrong. Every lat/lon → scene mapping
+ * on the page now goes through this pair; do not write another one.
+ *
+ * @param {number} latDeg
+ * @param {number} lonDeg  east-positive
+ * @returns {number[]} unit [x, y, z]
+ */
+export function latLonToScene(latDeg, lonDeg) {
+    const phi = latDeg * DEG, lam = lonDeg * DEG;
+    const c = Math.cos(phi);
+    return [c * Math.cos(lam), Math.sin(phi), -c * Math.sin(lam)];
+}
+
+/** Inverse of `latLonToScene`; the input need not be normalised. */
+export function sceneToLatLon(p) {
+    const [x, y, z] = p;
+    const r = Math.hypot(x, y, z) || 1;
+    return {
+        latDeg: Math.asin(Math.max(-1, Math.min(1, y / r))) / DEG,
+        lonDeg: Math.atan2(-z, x) / DEG,
+    };
+}
+
+/**
  * (latitude, local solar time) at a scene-space point.
  *
  * ═══ THE GLSL IN `upper-atmosphere-volume.js` MIRRORS THIS FUNCTION. ═══
@@ -809,13 +849,15 @@ export function diurnalContrast({
  * a test — and `tests/upper-atmosphere-column.mjs` checks it against
  * `localSolarTime` on the same geometry so a sign error cannot ship.
  *
- * The scene convention (set by `_subSolarToVec3` in the globe module) is
- *     x = cos(lat)·cos(lon),  y = sin(lat),  z = cos(lat)·sin(lon)
- * so +Y is the north pole and longitude increases from +X toward +Z —
- * i.e. CLOCKWISE seen from +Y, which is why the hour angle is measured
- * about −north and not +north. Getting that sign wrong puts the diurnal
- * bulge on the morning side, where it is not, and nothing else in the
- * render looks any different.
+ * The scene convention is `latLonToScene` above:
+ *     x = cos(lat)·cos(lon),  y = sin(lat),  z = −cos(lat)·sin(lon)
+ * so +Y is the north pole and longitude increases from +X toward −Z —
+ * i.e. COUNTER-clockwise seen from +Y, which is why the hour angle is
+ * measured about +north. Getting that sign wrong puts the diurnal bulge
+ * on the morning side, where it is not, and nothing else in the render
+ * looks any different. (It was measured about −north until 2026-09-27,
+ * which was self-consistent with the page's mirrored sun vector and
+ * wrong against the continents — see `latLonToScene`.)
  *
  * @param {number[]} p    position (need not be normalised)
  * @param {number[]} sun  sub-solar direction (unit)
@@ -842,11 +884,12 @@ export function geoFromVectors(p, sun, north = [0, 1, 0]) {
     ex /= el; ey /= el; ez /= el;
     fx /= fl; fy /= fl; fz /= fl;
 
-    // Signed angle from the sub-solar meridian to this one, about −north.
+    // Signed angle from the sub-solar meridian to this one, about +north
+    // (east = counter-clockwise seen from +Y in the canonical frame).
     const cx = fy * ez - fz * ey;
     const cy = fz * ex - fx * ez;
     const cz = fx * ey - fy * ex;
-    const sinA = -(cx * nx + cy * ny + cz * nz);
+    const sinA = (cx * nx + cy * ny + cz * nz);
     const cosA = fx * ex + fy * ey + fz * ez;
     const hourDeg = Math.atan2(sinA, cosA) / DEG;
     return { latDeg, lstHr: (12 + hourDeg / 15 + 24) % 24 };

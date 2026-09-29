@@ -49,7 +49,7 @@ const SPECIES_DIAMETER_M = {
     H:  2.50e-10,
 };
 
-const SPECIES_COLOR_HEX = {
+export const SPECIES_COLOR_HEX = {
     N2: 0x3b7fff,
     O2: 0x4cc7ff,
     NO: 0x7fe0a0,

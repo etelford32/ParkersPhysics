@@ -1,0 +1,93 @@
+name: upper-atmosphere-kernels
+
+# The PURE kernels behind upper-atmosphere.html, gated in node on every
+# change that touches them — ~2 s, no browser, no npm install (the tests
+# import only node:* and the repo's own ES modules):
+#
+#   upper-atmosphere-column.mjs    the T∞ field, LST oracle, canonical frame
+#   upper-atmosphere-flight.mjs    RK4 + J2 + co-rotating drag
+#   upper-atmosphere-transit.mjs   the layer transit + ambient gas
+#   upper-atmosphere-explore.mjs   explore flight, dive/climb paths, POIs,
+#                                  boundaries, aurora ring
+#   upper-atmosphere-frame-clock.mjs  the steppable clock never runs backwards
+#   upper-atmosphere-airglow-field.mjs  where the airglow is: day/night, the
+#                                  equatorial arcs + bubbles (the SHARED
+#                                  fountain model), SAR arcs, ripples, TIDs
+#   upper-atmosphere-plasma-field.mjs  how thick the plasma is: the shared
+#                                  F-region stack, TEC, the teardrop trough,
+#                                  penetration into the fountain, the TIDs,
+#                                  and the GLSL mirrors run back through JS
+#   image-metrics.mjs              the image metrics the browser gates use,
+#                                  each shown SEEING its bug on a synthetic
+#                                  image (a metric that cannot fail is not a
+#                                  gate)
+#
+# The browser gates (tests/upper-atmosphere-*.spec.js — including the
+# deterministic camera-feel and image-metric specs that run on the manual
+# frame clock) are NOT in this job: they need Chromium and a dev server.
+# Run them locally per the CLAUDE.md upper-atmosphere row.
+#
+# Push runs on every branch (path-filtered) so a session branch gets a
+# signal before a PR exists; it costs seconds.
+
+on:
+  push:
+    paths:
+      - 'js/upper-atmosphere-*.js'
+      - 'js/sun-altitude.js'
+      - 'js/ionosphere-fountain.js'
+      - 'js/ionosphere-descent.js'
+      - 'js/ionosphere-cells.js'
+      - 'js/ring-current-efield.js'
+      - 'tests/upper-atmosphere-*.mjs'
+      - 'tests/image-metrics.mjs'
+      - 'tests/helpers/image-metrics.mjs'
+      - '.github/workflows/upper-atmosphere-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/upper-atmosphere-*.js'
+      - 'js/sun-altitude.js'
+      - 'js/ionosphere-fountain.js'
+      - 'js/ionosphere-descent.js'
+      - 'js/ionosphere-cells.js'
+      - 'js/ring-current-efield.js'
+      - 'tests/upper-atmosphere-*.mjs'
+      - 'tests/image-metrics.mjs'
+      - 'tests/helpers/image-metrics.mjs'
+      - '.github/workflows/upper-atmosphere-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upper-atmosphere-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Upper-atmosphere kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: column (T∞ field, LST, frame)
+        run: node tests/upper-atmosphere-column.mjs
+      - name: flight dynamics
+        run: node tests/upper-atmosphere-flight.mjs
+      - name: layer transit + gas
+        run: node tests/upper-atmosphere-transit.mjs
+      - name: explore kernel
+        run: node tests/upper-atmosphere-explore.mjs
+      - name: frame clock
+        run: node tests/upper-atmosphere-frame-clock.mjs
+      - name: airglow field
+        run: node tests/upper-atmosphere-airglow-field.mjs
+      - name: plasma field + TIDs
+        run: node tests/upper-atmosphere-plasma-field.mjs
+      - name: image metrics (synthetic controls)
+        run: node tests/image-metrics.mjs

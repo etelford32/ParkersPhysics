@@ -122,11 +122,12 @@ export class UpperAtmosphereUI {
     // necessarily looking at.
 
     _bindCameraControls() {
-        const { camOrbitBtn, camFlyBtn, camIssBtn } = this.el;
+        const { camOrbitBtn, camFlyBtn, camIssBtn, camExploreBtn } = this.el;
         const setMode = (mode) => {
             const m = this.globe.setCameraMode?.(mode) || mode;
-            camOrbitBtn?.classList.toggle('ua-cam-on', m === 'orbit');
-            camFlyBtn  ?.classList.toggle('ua-cam-on', m === 'fly');
+            camOrbitBtn  ?.classList.toggle('ua-cam-on', m === 'orbit');
+            camFlyBtn    ?.classList.toggle('ua-cam-on', m === 'fly');
+            camExploreBtn?.classList.toggle('ua-cam-on', m === 'explore');
             if (this.el.camMode) this.el.camMode.textContent = m;
             if (this.el.camHint) {
                 this.el.camHint.textContent = m === 'fly'
@@ -134,8 +135,20 @@ export class UpperAtmosphereUI {
                     : 'drag to rotate · scroll to zoom';
             }
         };
-        camOrbitBtn?.addEventListener('click', () => setMode('orbit'));
-        camFlyBtn  ?.addEventListener('click', () => setMode('fly'));
+        // From inside the band, Orbit CLIMBS OUT over the same ground rather
+        // than snapping the view round to the planet's centre from 200 km.
+        camOrbitBtn?.addEventListener('click', () => {
+            const m = this.globe.getCameraMode?.();
+            const alt = this.globe.getCameraAltitudeKm?.();
+            if (this.globe.climbToOrbit && (m === 'explore' || this.globe.isTransitioning?.()
+                    || (m === 'fly' && Number.isFinite(alt) && alt < 2000))) {
+                this.globe.climbToOrbit();
+                return;
+            }
+            setMode('orbit');
+        });
+        camFlyBtn  ?.addEventListener('click', () => { this.globe.cancelTransition?.(); setMode('fly'); });
+        camExploreBtn?.addEventListener('click', () => this.globe.enterExplore?.());
         camIssBtn  ?.addEventListener('click', () => {
             // Phase 25: Visit ISS now LOCKS follow — the camera tracks
             // the probe as it propagates, instead of arriving at one
@@ -251,7 +264,9 @@ export class UpperAtmosphereUI {
                     ? `following ${tgt.id}`
                     : tgt?.kind === 'debris'
                         ? `following debris #${tgt.idx}`
-                        : 'following';
+                        : tgt?.kind === 'flight'
+                            ? 'chasing the flight probe'
+                            : 'following';
             }
         }
         if (this.el.camHint && on) {
@@ -791,6 +806,9 @@ export class UpperAtmosphereUI {
             camRho.textContent = '—';
             camT.textContent   = '—';
             camKn.textContent  = '—';
+            if (this.el.camGas) this.el.camGas.textContent = '—';
+            if (this.el.camMfp) this.el.camMfp.textContent = '—';
+            if (this.el.camVth) this.el.camVth.textContent = '—';
             return;
         }
 
@@ -805,6 +823,24 @@ export class UpperAtmosphereUI {
             ? (sample.knudsen >= 100 ? sample.knudsen.toExponential(1)
               : sample.knudsen.toFixed(2))
             : '∞';
+        // Layer-transit rows: what the gas around the camera is made of,
+        // how far a molecule flies between collisions, how fast it moves.
+        const { camGas, camMfp, camVth } = this.el;
+        if (camGas) {
+            const fr = sample.fractions || {};
+            const top = Object.entries(fr).filter(([, f]) => f > 0.02).sort((a, b) => b[1] - a[1]).slice(0, 3)
+                .map(([id, f]) => `${id} ${(f * 100).toFixed(0)}%`).join(' · ');
+            const hex = `#${(sample.dominantColor ?? 0xffffff).toString(16).padStart(6, '0')}`;
+            camGas.innerHTML = `<span style="color:${hex}">${top || sample.dominant || '—'}</span>`;
+        }
+        if (camMfp) {
+            const km = sample.mfp_km;
+            camMfp.textContent = !Number.isFinite(km) ? '∞'
+                : km >= 1000 ? `${(km / 1000).toFixed(1)}×10³ km`
+                : km >= 1 ? `${km.toFixed(1)} km`
+                : `${(km * 1000).toFixed(km * 1000 >= 10 ? 0 : 2)} m`;
+        }
+        if (camVth) camVth.textContent = Number.isFinite(sample.vth_m_s) ? `${Math.round(sample.vth_m_s)} m/s` : '—';
     }
 
     // ── Data-source pill ────────────────────────────────────────────────────
@@ -845,6 +881,7 @@ export class UpperAtmosphereUI {
             try {
                 const live = await fetchLiveIndices();
                 if (!live) throw new Error('no data');
+                if (this._userPinnedKey === 'preset') this._userPinnedKey = null;
                 this.setState({ f107: live.f107Sfu, ap: live.ap });
                 if (statusEl) {
                     const ts = new Date().toLocaleTimeString([], {
@@ -1116,9 +1153,15 @@ export class UpperAtmosphereUI {
             } else {
                 this._forecastSkill = 1.0;
             }
-            if (this._userPinnedKey !== 'f107' || pinExpired)
+            // An archived storm preset pins BOTH indices with no expiry —
+            // the driver ticks every 100 ms and used to overwrite a preset
+            // before the plots had redrawn, so presets silently did nothing
+            // whenever realtime had a value (measured: reverted within
+            // 100 ms). "Use live NOAA" or re-enabling realtime releases it.
+            const presetPinned = this._userPinnedKey === 'preset';
+            if (!presetPinned && (this._userPinnedKey !== 'f107' || pinExpired))
                 partial.f107 = f107Apply;
-            if (this._userPinnedKey !== 'ap' || pinExpired)
+            if (!presetPinned && (this._userPinnedKey !== 'ap' || pinExpired))
                 partial.ap = apApply;
             // Skip the redraw round-trip if nothing actually changed.
             const changed =
@@ -1142,6 +1185,8 @@ export class UpperAtmosphereUI {
      */
     setRealtimeEnabled(on) {
         this._realtimeEnabled = !!on;
+        // Turning realtime back on is an explicit request for live values.
+        if (on && this._userPinnedKey === 'preset') this._userPinnedKey = null;
     }
 
     // Push the latest solar-wind plasma state to the globe + the side
@@ -1542,6 +1587,8 @@ export class UpperAtmosphereUI {
             btn.title = `${p.date} — F10.7 ${p.f107} SFU, Ap ${p.ap}\n\n${p.summary}`;
             btn.dataset.presetId = p.id;
             btn.addEventListener('click', () => {
+                this._userPinnedKey = 'preset';
+                this._userPinnedAt  = Date.now();
                 this.setState({ f107: p.f107, ap: p.ap });
                 row.querySelectorAll('.ua-chip').forEach(c => c.classList.remove('ua-chip--on'));
                 btn.classList.add('ua-chip--on');

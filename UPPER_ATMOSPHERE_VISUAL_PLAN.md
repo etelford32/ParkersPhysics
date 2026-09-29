@@ -330,6 +330,461 @@ rather than lived with.
 
 ---
 
+## 9. 2026-09-27 — ONE frame, and the flight layer
+
+### 9.1 The page's longitude was mirrored against the continents
+
+`_subSolarToVec3` in the globe mapped lon → `z = +cos·sin(lon)`, and the LST
+oracle (`geoFromVectors`, its GLSL mirror), the drag-flow tracers, the fleet
+ribbons and the MLT helper were all written against that. The EarthSkin
+texture is drawn through `js/geo/coords.glsl.js`, whose frame puts +90°E at
+**−Z**, and the SGP4 catalogue cloud uses the same. So the terminator and the
+diurnal bulge sat at −lon over the continents — local noon drawn over India
+at 18 UTC — and every still frame looked plausible.
+
+**There is now ONE mapping**, `latLonToScene` / `sceneToLatLon` in the column
+kernel, and every lat/lon → scene on the page goes through it (the sun vector,
+the drag overlay, the ribbons, the MLT helper). The hour angle is measured
+about +north; `tests/upper-atmosphere-column.mjs` gates the sign AND proves
+the mirrored frame fails the gate (reads 6 h where the oracle says 18 h).
+
+The reference probes (ISS, Hubble, Starlink, Iridium, Tiangong), the debris
+sample and the Walker constellations had a second version of the same bug:
+`_propagateKeplerian` returned ECI axes as scene axes with the y/z swap
+mirrored and **never turned by the sidereal angle**, so the orbits sat still
+over a planet that does not. They are now `[x, z, −y]` (coords.js at GMST 0)
+rotated by −GMST(sim clock) about +Y (`_eciSceneToEarthFixed`; the orbit-path
+loops get `rotation.y = −gmst`). Conjunction distances read the un-rotated
+lookup tables and are frame-invariant. The sun now reads the BUS clock, not
+the wall clock, so the page's scrubber finally moves the terminator (its copy
+had always said so); the flight deck's own clock pins it further.
+
+### 9.2 The flight layer
+
+| module | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-flight.js` | PURE kernel: RK4 through the live field — gravity + J2, drag against the co-rotating air, unbanked lift; ECI↔scene; elements; launch builder; presets; TLE epoch | `node tests/upper-atmosphere-flight.mjs` (35) |
+| `js/upper-atmosphere-flight-layer.js` | screen-space ribbon (custom shader + dark underlay), head, heating wake, log-scaled force arrows, ground track, floor ring, the mission clock | `tests/upper-atmosphere-flight.spec.js` |
+| `js/upper-atmosphere-flight-deck.js` | DOM deck: every readout is a kernel column; two clocks; sparkline; name tag via `projectToScreen` | same spec |
+| `js/upper-atmosphere-flight-panel.js` | presets / track-a-satellite / custom launch with pick-site | same spec |
+
+Decisions, each with the reason it is not the obvious alternative:
+
+- **The density sampler is a bilinear log₁₀ρ table over (altitude × T∞)**
+  built from the engine per (F10.7, Ap): ~1 µs against ~14 µs for
+  `densityFieldAt`, gated to 3 % (measured worst 0.95 %). A 24-h ISS flight
+  integrates in ~65 ms. The table is the ENGINE's, not a second model.
+- **Co-rotation is on by default** and it matters: a prograde equatorial body
+  feels ~22 % less drag than the same body retrograde (gated).
+- **Lift is marginal above 80 km and the preset says so.** The "skip entry"
+  preset at 7.6 km/s with L/D 2 buys seconds before the floor, not a climb;
+  a 6 km/s "glider" was tried first and simply fell. The real entry peak
+  (40–60 km) is BELOW the model, so the capsule preset shows ~0.03 g and
+  ~12 W/cm² on a 1 m nose and the deck says where the peak actually lives.
+- **The 80 km floor terminates the flight** with the last sample landed ON
+  the floor (linear crossing) — never continued into air the page does not
+  model.
+- **Arrow length is log₁₀|a|** over 1e-8…10 m/s² (gravity 8.7 vs drag 1e-6 at
+  the ISS cannot share a linear scale); the deck prints the true numbers.
+- **Colour ranges are FIXED per mode** so the same altitude or q is the same
+  colour in every flight and does not drift as the ribbon grows.
+- **Two clocks.** Live-locked to the bus by default (scrubbing before launch
+  un-launches it — the orrery's rope rule); the deck's transport detaches it
+  because the bus clamps one hour into the future and a day of decay cannot
+  be played through it. The globe pins the sun to the detached clock.
+- **A launch frames the camera** (`frameFlight`): at whole-globe framing the
+  ribbon competes with every other overlay and the limb band (measured on
+  the screenshots — it was invisible). The dark underlay pass is the other
+  half of legibility.
+- **"Track a satellite" needs a LIVE TLE**: seeded via Rust SGP4 at the sim
+  clock. The mean-element fallback probes are visualisation-grade and the
+  panel says "waiting for live TLE" rather than integrating them.
+- **FOCUS quiets the competition** (`setFlightFocus`, on at every launch,
+  a deck chip): the cascade field lines, conjunction chords, altitude tori,
+  solar-wind streamers, the slider ring, the mesosphere rings and the
+  probes' orbit loops. Each crossed the launch framing as a band brighter
+  than the ribbon (measured on the screenshots; the flight could not be
+  found). Every hidden object's OWN visibility is remembered and restored
+  exactly on focus-off / clearFlight.
+- **Glyphs scale with camera distance** (`ak = camDist / 2.4`, floor 0.06):
+  the arrows are world geometry and at chase range one drag cone filled
+  the frame. The heating wake appears only above ~0.06 W/cm² — at LEO
+  cruise (0.01) it is decoration.
+
+### 9.3 Fixed here, on the way
+
+- The camera controller now receives a REAL wall-clock `dt`. The globe's
+  `dt` is ~0 every frame (§6) — fly-mode WASD barely moved and the follow
+  spring never closed, which the chase cam surfaced. ONLY the controls take
+  the corrected value; every other `dt` consumer keeps its historical
+  behaviour pending the deliberate look §6 asks for.
+- The controls are stepped AFTER every position update, just before the
+  render. A follow that aims at the target's PREVIOUS position lags it by a
+  frame of motion; at time-warp on a software renderer that put the chased
+  probe at the frame's edge (measured). The follow spring also keeps the
+  camera at or above the target's own radius: a fast target moves tens of
+  degrees between slow frames and the lerp's CHORD cut inside the planet
+  (camera at −171 km after a 600× chase).
+- A storm preset now PINS both indices (`_userPinnedKey = 'preset'`, no
+  expiry) until "Use live NOAA" or the realtime toggle releases it. The
+  realtime driver ticks every 100 ms and re-applied its own value over a
+  preset before the plots had redrawn, so presets silently did nothing
+  whenever the driver had a value — measured: reverted within 100 ms; the
+  smoke gate only ever passed while the driver's first fetch was still in
+  flight.
+- The canvas click test uses `event.timeStamp`, not `performance.now()`: on
+  a busy frame a genuine click measured as a drag and was dropped (the
+  mars.html 914 ms scar, found again by the pick-site gate).
+- A backtick in a comment inside the volume shader's template literal
+  terminated the string and took the whole page down as a boot error (the
+  CLAUDE.md scar, hit again). No backticks inside `/* glsl */` literals.
+
+### 9.4 Travelling THROUGH the layers (2026-09-28)
+
+| module | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-transit-model.js` | PURE: pose on the local vertical (canonical basis, texture east), constant-rate altitude profile, the camera-local gas from `pointPhysics` (dot count ∝ log₁₀ n, species by the engine's fractions, drift ∝ v_th, heading changes ∝ collision rate) | `node tests/upper-atmosphere-transit.mjs` (9) |
+| `js/upper-atmosphere-transit.js` | the transit driver + the wrapped point cloud around the camera | `tests/upper-atmosphere-transit.spec.js` |
+
+- **The transit rate is real time and keeps its own clock.** km of altitude
+  per second of wall time; on the globe's capped frame delta a 200 km/s
+  request ran at 60 km/s on a software renderer (measured).
+- **The page STARTS the flight and never HOLDS the camera** (the TIGA
+  rule): any fly key or a drag releases it. To hand back exactly the view
+  it left, the fly controller gained a configurable UP (`setUpVector`):
+  yaw/pitch live in an (e1, up, e3) basis that is (X, Y, Z) by default and
+  the local radial during and after a transit; Q/E climb along it. With a
+  fixed +Y the first fly frame after a transit on the +Z side of the globe
+  rolled the view ~80° (quaternion Δ 0.47, gated < 0.15 now). Orbit mode
+  and Reset put +Y back, because OrbitControls orbits about the +Y it
+  cached at construction (the CLAUDE.md scar).
+- **The gas cloud is a symbol and says so**: one dot is not one molecule;
+  every parameter is the engine's number at the camera's altitude, and a
+  dot leaving the sphere re-enters on the far side so a descent reads as
+  gas streaming past. It is off above the 2000 km ceiling and disclosed in
+  the `gas` button's title and the camera readout (gas · λ · v_th rows).
+
+### 9.5 What the camera saw once it was down there (2026-09-28)
+
+Screenshots from the transit showed three things the orbit view had hidden,
+each measured at the 95 km floor and each gated by the third test in
+`tests/upper-atmosphere-transit.spec.js`:
+
+- **A polygon horizon.** The planet was `IcosahedronGeometry(1, 5)`, and
+  three's `detail` is LINEAR: 720 faces, ~10.6° edges whose chords sag
+  27 km below the sphere. From 95 km the horizon is ~10° away, so it was
+  literally the mesh's edges. `EARTH_ICO_DETAIL = 40` (1.55° edges, 0.58 km
+  sag); the gate asserts the sag < 1 km, not the number.
+- **Squares and snowballs.** Every `THREE.Points` layer is sized in world
+  units with `sizeAttenuation`: sub-pixel from the orbit view, 30 px
+  untextured SQUARES (layer particles) and 71 px additive blobs (transit
+  gas) a few km from the lens. `js/upper-atmosphere-point-cap.js` clamps
+  `gl_PointSize` to a CSS-pixel ceiling (× the renderer's pixel ratio,
+  because three multiplies `size` by it) and dims a clamped vertex-coloured
+  sprite by the area it lost; below the ceiling nothing changes. The layer
+  particles, debris and constellations also gained the disc texture.
+- **A moon that was a satellite.** A far-tier probe marker is a 76 km ball
+  in a 166 km halo — a dot from the default ~3.2 R⊕ camera, a 4.6° disc
+  over the transit horizon. Closer than `PROBE_MARKER_REF_RUNIT` (2.0 R⊕,
+  under the ~2.13 the default view ever reaches) it keeps that view's
+  angle; the gate asserts the default view is untouched.
+
+### 9.6 Exploring the whole band (2026-09-28)
+
+| module | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-explore-model.js` | PURE: flight ALONG the sphere (`exploreStep`), the one transition path for dives in and the climb out (`cameraPath` / `divePath` / `climbPath`), boundaries from the layer schema + crossings + membrane weight + grid level, model-placed points of interest, auroral curtain geometry, milestones, the log altitude gauge | `node tests/upper-atmosphere-explore.mjs` (23) |
+| `js/upper-atmosphere-explore.js` | analytic boundary membranes, POI beacons, auroral curtains, crossing / milestone / discovery events | `tests/upper-atmosphere-explore.spec.js` |
+| `js/upper-atmosphere-explore-hud.js` | DOM: altitude column, toasts, POI labels, readout nav rows, the panel, immersive | same |
+| `js/upper-atmosphere-camera.js` | new `'explore'` mode, `runPath` (cancel on any input, FOV kick restored exactly), `setExternalDriver` for the transit | same + the transit gate |
+
+- **Explore flies ALONG the sphere.** State is a unit position, a tangent
+  heading parallel-transported along each great-circle step, an altitude and
+  a pitch — no lat/lon, so no pole singularity (the gate flies over the pole
+  and comes down the far meridian heading south). W flies where you LOOK: the
+  vertical part is taken in log-altitude, so diving at the floor slows
+  exponentially instead of hitting it. Speed is 1.2 × altitude per second, a
+  NAVIGATION speed the readout prints next to the circular orbital speed.
+- **One path for every transition.** Position slerps along a great circle
+  while altitude interpolates in LOG space, so the path can never pass below
+  the lower of its two ends (no chord through the planet); the view turns from
+  where it was, to the ground under the destination, to the destination's
+  horizon. Both ends are exact (gated). Any key, press or wheel cancels it
+  where it is (the TIGA rule); the FOV kick is restored exactly.
+- **The transit now hands over to EXPLORE**, not fly: from 95 km, fly mode's
+  straight lines leave the band in a few hundred km.
+- **Boundary membranes are ANALYTIC**, one pass on a bounding sphere, never a
+  tessellated shell per boundary (the §9.5 facet lesson). Three scars, each
+  measured: (1) line width must be the pixel's ANISOTROPIC footprint on the
+  sphere, computed from the ray-sphere hit — an isotropic width divided by
+  the grazing cosine bloomed the latitude line under the camera into a 30 px
+  orange wedge; (2) a camera sitting exactly ON a boundary gets a
+  rounding-level hit at t ≈ 0 on a grid meridian and floods a wedge of the
+  view — the near fade starts at the camera's own height above the surface;
+  (3) dives land on round coordinates, so the grid sits at HALF-integer cells
+  or a stripe runs straight down the middle of the view. A surface above the
+  camera draws at about half weight: seen edge-on it is the whole sky, and a
+  marker must not drown the airglow.
+- **Points of interest are PLACED BY THE MODEL** — the bulge and trough where
+  the page's own Jacchia term peaks and bottoms, the aurora on the page's
+  own oval for Kp from the live Ap, the exobase where the engine's λ equals
+  its scale height, the airglow where the emission table puts it. None is a
+  typed coordinate; each card says what placed it.
+- **Auroral curtains** ride the same oval, 100–300 km, green low / red high,
+  a sharp lower border. Placement is the model's; brightness and folds are
+  symbolic and the panel says so. They fade in only below ~4000 km, so the
+  default orbit view is unchanged (gated). The ring's seam vertex is
+  DUPLICATED: closed by index, the last quad swept 23.9 → 0 h of MLT and
+  squeezed a day of the ray pattern into one quad, dead ahead at magnetic
+  midnight where the aurora stop looks.
+- **The gas streaks.** Every dot draws a line to where it appeared one
+  shutter ago — the camera's motion through the gas, not the gas's own
+  (that stays thermal jitter). After a jump of more than a cloud diameter
+  dots are re-seeded uniformly: mirrored, they all re-entered in the one
+  cone pointing back at the old cloud.
+- **The near plane follows the camera down** (0.25 × altitude, clamped to
+  0.002–0.01 R⊕; far fixed, so the depth ratio stays ≤ 5×10⁵). From the
+  orbit view it is the old 0.01 exactly.
+- **Focus covers the transition, not just the mode.** The hoops (tori, field
+  lines, orbit loops) are quieted while the camera is in explore OR a dive /
+  climb is running; keyed on the mode alone, the dive swept them through the
+  view as giant coloured bands before it arrived.
+- **Every curtain pattern term is periodic in 24 h of MLT** (`noiseP` with an
+  integer cell period, folds at integer multiples of 2π/24). Duplicating the
+  seam vertex fixed the geometry, but a non-periodic noise still left a hard
+  vertical edge in the curtain dead ahead at magnetic midnight.
+- **The hover picks the first VISIBLE hit.** three's raycaster does not skip
+  hidden objects, so with focus on, a hover over a hidden cascade marker
+  showed a tooltip titled "undefined". The layer shells are exempt: hidden in
+  the default volume render, they still answer "which layer is this".
+
+### 9.7 Testing what the camera sees (2026-09-29)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-frame-clock.js` | the ONE clock the camera stack reads: `performance.now()` normally, stepped time in manual mode, continuous across the switch | `node tests/upper-atmosphere-frame-clock.mjs` (5) + every spec below |
+| `globe.setManualClock(on, { startMs })` / `stepFrames(n, dt, { render })` / `seedRandom(seed)` | the test hook: rAF idles, frames advance by exactly `dt` | `tests/upper-atmosphere-camera-feel.spec.js` (5) |
+| `tests/helpers/image-metrics.mjs` | PURE metrics on raw RGBA: `horizonDeviation`, `lineWidths` (half maximum), `runWidths`, `coverage`, `seamStep`, `blobStats` | `node tests/image-metrics.mjs` (12, synthetic, each metric shown failing its bug) |
+| `tests/upper-atmosphere-image-metrics.spec.js` | four solo-render gates, each with a runtime NEGATIVE CONTROL | itself (5 tests, ~45 s) |
+| `.github/workflows/upper-atmosphere-kernels.yml` | the node tests on every push that touches them | CI, ~2 s |
+
+- **The frame clock.** Everything that moves the camera or times a visual —
+  dives/climbs/flyTo (`-camera.js`), the transit and the gas (`-transit.js`),
+  POI refresh, discovery checks and the aurora's `uTime` (`-explore.js`) —
+  reads `frameClock.now()`. In manual mode the render loop idles, the time
+  bus is NOT stepped (sun, probes and scene instant are frozen), the volume
+  governor does not run on stepped frames (it would read a software
+  rasteriser's frame time as a verdict), and `stepFrames` advances exactly
+  `n × dt`. Leaving manual mode resumes FROM the manual time (a pinned
+  start is far from the wall clock, and a backwards jump would be a negative
+  dt in the transit and a negative path progress). A module singleton on purpose: threading a clock through every
+  constructor would put test plumbing into production signatures. Anything
+  new that animates on this page must read it, or it will not stand still
+  under the hook and its test will be measuring the machine.
+- **The camera-feel gate compares the page to the kernel, frame for frame.**
+  Held keys fly EXACTLY `exploreStep`'s cruise/turn/climb/boost (1e-6°),
+  mouse look is exactly pixels × 0.0035 rad, a dive IS `divePath` at every
+  stepped frame (1e-9) with the kernel's FOV gain and lands on time, any
+  input stops a dive on the event, and a seeded gas cloud is repeatable with
+  streak length = shutter × speed (1 %). On a renderer that draws one frame
+  every ~0.6 s, none of that was checkable before — only "it moved, roughly
+  east".
+- **Image metrics run on SOLO renders.** The layer under test is drawn alone
+  on black (`__uaSolo` hides every other leaf, clears the background, renders
+  and `gl.readPixels` in the same task because the drawing buffer is not
+  preserved), off-site requests are blocked so EarthSkin keeps its grey
+  fallback, and the manual clock starts at a fixed instant. The numbers:
+
+  | gate | now | control (the old bug, put back at runtime) |
+  |---|---|---|
+  | limb vs the ANALYTIC limb (per-column ray tangency), 300 / 110 km | 0.86 / 0.79 px | 14 / 24 px — `IcosahedronGeometry(1, 5)`, the 720-face planet |
+  | the line straight ahead, width at half maximum, 270 km grazing | ≤ 4 px | 25 px — isotropic width ÷ grazing cosine |
+  | camera 10 m above the 250 km boundary on the equator, coverage | 0 | 59 % of the frame — whole-degree grid, no near fade |
+  | aurora column-to-column step at the MLT seam (÷ mean) | 0.08 | 0.81, AT the seam — non-periodic noise + folds |
+  | nearest sprite at 1.1–10 × the near plane | ≤ cap + 1 px, a disc | gas 30 px; layer particle 243 px square (fill 1.0) |
+
+  Every gate asserts its control FAILS — a metric that cannot see the bug is
+  not a gate, and a threshold set without a control is a guess. Controls are
+  shader-text patches (`split/join` on the exact source line; a patch that
+  no longer applies throws, so a refactor cannot silently turn a control
+  into a no-op), a swapped geometry, or a replaced material, always
+  restored. Three measuring choices, each forced by a first attempt that
+  could not separate the two: the grid is drawn at 16× gain for the
+  measurement (the product draws it at ~8/255, where 8-bit quantisation IS
+  the width) and widths are taken at HALF the line's own peak above the
+  row's median, so neither the gain nor the dim rim fill enters; only the
+  receding line dead ahead is measured (every other line crosses rows at a
+  slant, and a slanted line's horizontal run is its width ÷ sin θ); and the
+  seam step is column-to-column (`win = 1`) because the rays are 20–40 px
+  wide and an 8 px window scored them 0.55 against the seam's 1.05.
+- **Sprites nearer than the camera's near plane are clipped**, so the sprite
+  gate places its dot at multiples of `camera.near` (24 km at 95 km
+  altitude) rather than at a fixed distance — at 0.5–20 km neither the
+  product nor the control drew anything, which is a passing test of nothing.
+- **Tuning**: `UA_METRICS_LOG=1` prints each measurement beside its control's
+  and `UA_METRICS_PNG=<dir>` writes every solo render as a PNG (a 30-line
+  encoder on `node:zlib`; the repo has no image dependency and needs none).
+
+### 9.8 Where the airglow is (2026-09-29)
+
+Until now every airglow band was the same everywhere on the planet, day and
+night — `airglowAt` depends on altitude only, so the render drew one even
+ring. The real airglow is the most structured thing in the band.
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-airglow-field.js` | PURE: the band GROUPS (mesospheric: OH, Na, O₂, green; red line), day/night on the red line, the equatorial arcs + plasma bubbles via `FountainSampler`, SAR arcs, symbolic ripples, the probe's column, the renderer's tables, and the GLSL mirror GENERATED from its own constants | `node tests/upper-atmosphere-airglow-field.mjs` (27) |
+| `js/upper-atmosphere-volume.js` | evaluates the field once per half-ray per emitting shell (92 km, 250 km) and applies it per sample | `tests/upper-atmosphere-airglow.spec.js` (5) |
+| `js/upper-atmosphere-globe.js` | drives the fountain on the SCENE clock, ripple phases, Kp; `airglowFieldAt(point)` for the probe | same |
+| explore stop `eia-arcs` | the strongest evening crest, placed by the fountain | `node tests/upper-atmosphere-explore.mjs` |
+
+- **Two groups, because the physics splits there.** The mesospheric group
+  (OH Meinel, Na D, O₂, the O(¹S) green line, 85–100 km) is
+  chemiluminescence that runs day and night, so it gets NO day/night factor;
+  its structure is gravity-wave ripples. The red line (630 nm, ~250 km) is
+  where the day/night, equatorial and storm structure lives. With every
+  factor at 1 the two groups add up to the old `airglowAt` EXACTLY (gated),
+  so a location where nothing is happening renders as before.
+- **Day is "sunlit at altitude", not the ground terminator.** A point is dark
+  when the sunward ray to it grazes below the EUV screening height (100 km);
+  at 250 km that is ~12° past the ground terminator. The 630 nm dayglow is
+  taken as 20× the nightglow (the low end of Solomon & Abreu's range). One
+  log stretch shows both — no camera exposure could, and the legend says so.
+- **The arcs and bubbles are the SHARED fountain model**, imported from
+  `js/ionosphere-fountain.js` (what ring-current.html runs), never re-derived.
+  `FountainSampler` ticks it on the scene clock (36 h spin-up, re-spun on a
+  backwards jump or one > 6 h — the model is deterministic per sim-date, so a
+  re-spin to the same instant gives the same state), and samples it into a
+  1440×1 half-float texture: crest intensity, crest magnetic latitude, bubble
+  mask, bubble latitude extent. (Since §9.9 the fountain also takes the
+  prompt-penetration ΔA from ring-current-efield via `IonosphereDriver`.)
+  Crest gain 4 (arcs ~3–5× the mid-latitude nightglow, as observed); bubbles
+  cut 85 % of the red line in a ~170 km-wide field-aligned wedge.
+- **SAR arcs** sit on the plasmapause footprint at ~400 km, onset above
+  Kp 4, dark side only — since §9.9 the TEARDROP plasmapause per MLT
+  (`plasmapauseL`, Carpenter & Anderson, is the fallback).
+- **The ripples are SYMBOLIC** and live in the mesospheric group only: eight
+  fixed waves (30–300 km), each in its OWN packet — a spherical cap and its
+  antipode, ~18° across — with the wave direction tangent at the packet
+  centre. Two earlier versions gated the waves with cosine envelopes (one
+  shared, then one each); a cos(k·u) envelope is a set of bands that wrap
+  the planet, the bands crossed everywhere, and from orbit the waves read as
+  a waffle lattice. Phases are computed on the CPU in double precision
+  (ω·t on absolute time is ~10³ rad, beyond float32) and waves shorter than
+  ~4 px fade out.
+- **Where the shader evaluates the field.** Per fragment, at the point where
+  each half-ray crosses the 92 km and the 250 km shell (or the ray's closest
+  approach if it passes over): a limb ray tangent at 90 km crosses 250 km
+  ~1400 km from its tangent point, so the red line must NOT be held at the
+  tangent point the way the T∞ field is. Sunlit-ness is evaluated per SAMPLE
+  from terms hoisted per half-ray. A half-ray with no samples (the far half
+  of a ray that strikes the planet) is skipped.
+- **The march still fetches TWO texels per sample.** A third (a separate
+  red/SAR row) measured +70 % frame time on SwiftShader, so the red-line and
+  SAR profiles ride in the density table's spare G/B channels
+  (`packRedIntoFieldLUT`; ~20 km bins hold a 90 km-wide line) and the 10 km
+  green band keeps its own finer table. Measured, solo volume at the default
+  orbit framing, ms/frame on SwiftShader (noisy ±10 %):
+
+  | rung | before | after |
+  |---|---|---|
+  | 10 steps (floor, default) | 228 | 303 |
+  | 24 | 447 | 489 |
+  | 40 | 808 | 859 |
+
+- **A bug found on the way: the volume's magnetic pole was MIRRORED.** It was
+  typed inline as `+cos·sin(lon)` — the frame the page used before §9.1 — so
+  since 2026-09-27 the auroral Joule-heating term in the density render has
+  been centred on a pole at 72.7°E instead of 72.7°W, and nothing looked
+  wrong. It now comes from `latLonToScene(DIPOLE_POLE)`, and the airglow
+  spec asserts it (a check that fails on the old line).
+- **The gates** (`tests/upper-atmosphere-airglow.spec.js`, solo renders at
+  the 2026 March equinox 00 UT, each with a control): noon/midnight red 4.7×
+  vs 1.000 with dayglow patched out; both crests within 4 px of the rows the
+  NODE kernel predicts, crest/trough 13.9 vs 1.00 with the arcs patched out;
+  an injected bubble cuts both crests 99 % vs <5 % with bubbles patched out;
+  a Kp 8 SAR arc 51× above its surroundings on the plasmapause row vs 1.000
+  at Kp 2; ripple energy 4.0 vs 0.85 with ripples patched out. The solo-
+  render harness is now shared (`tests/helpers/ua-render.mjs`).
+- **The probe card** prints what shapes the 630 nm line under the cursor
+  (dayglow / equatorial arc / plasma bubble / SAR arc / nightglow, and the
+  multiplier), from the same kernel and drivers the shader reads.
+
+### 9.9 How thick the plasma is, and the waves in it (2026-09-29)
+
+The page drew the neutral gas and the light the gas emits; it did not draw
+the PLASMA — the ionosphere a GNSS signal crosses. That field now exists, and
+it is built almost entirely from models already in the repo, so this is a
+JOIN, not a second ionosphere model:
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-plasma-field.js` | PURE: the electron density field and its TEC. The vertical E/F1/F2 stack is ring-current.html's `columnProfile` (`js/ionosphere-descent.js`); the crests + bubbles are the SHARED fountain; the night-side main trough sits on ring-current-efield's TEARDROP plasmapause; `IonosphereDriver` runs `ConvectionEField` + the fountain on the scene clock; `slantTec` is the shader's oracle; the GLSL is generated from its constants | `node tests/upper-atmosphere-plasma-field.mjs` (29) |
+| `js/upper-atmosphere-tid.js` | PURE: the travelling ionospheric disturbances — ONE copy, read by the plasma field AND the red line | same (the GLSL mirrors are transliterated back to JS and run against the kernel) |
+| volume mode `'plasma'` | slant TEC along every view ray, drawn OVER the globe | `tests/upper-atmosphere-plasma.spec.js` (7) |
+| `js/upper-atmosphere-airglow-field.js` | the red line now carries the TIDs; SAR arcs moved onto the teardrop | `node tests/upper-atmosphere-airglow-field.mjs` (29) + `tests/upper-atmosphere-airglow.spec.js` (5) |
+| globe | `IonosphereDriver` fed Kp + the page's solar-wind VBs (v·Bs); `plasmaFieldAt(point)`, `ionosphereState()` | both specs |
+| page | a `plasma` chip (exclusive with `anomaly`), the probe rows `vTEC · NmF2` / `plasma`, `plasmaLegend` (prints the live E-field + ΔA) | smoke |
+
+- **The data integration with the ring-current engine is two-way-shaped but
+  one-way-wired**: this page's solar wind drives ring-current-efield's
+  shielding model (Kp + VBs → driver amplitude; the shield relaxes with
+  τ = 25 min). Its prompt-PENETRATION ΔA = A_drv − A_sh goes into the shared
+  fountain (`FountainSampler.advanceTo(…, { dA })` — the super-fountain: a
+  southward turning lifts the evening crests), and its TEARDROP separatrix,
+  evaluated per longitude at that longitude's MLT (`ppData`, a second
+  1440×1 texture), places the night-side trough and the SAR arcs. Nothing
+  flows back into ring-current.html; both pages run the same kernels.
+- **A driver change at the SAME scene instant re-equilibrates** (the shield
+  is set to the new driver, ΔA = 0): a preset is a what-if, and no time has
+  passed for region-2 currents to respond. Penetration needs time to pass
+  while the driver differs from the shield — which is what it is.
+- **One departure from the shared stack, stated.** `columnProfile`'s F2 term
+  is 0.65 + 0.35·day, a readability choice for the descent inspector's bars
+  that puts midnight at 65 % of noon. A TEC map with that contrast has no
+  night side, and observed mid-latitude NmF2 falls to ~25–40 % overnight, so
+  the column uses `f2NightFloor` (0.3) + 0.7·√cos χ in its place. Heights,
+  storm loss and the E/F1 terms are the stack's own. vTEC at F10.7 150:
+  ~26 TECU midday mid-latitude, ~7 midnight, ~57 in a daytime crest.
+- **TEC is integrated over 80–2000 km only.** Real GNSS TEC includes the
+  plasmasphere (+10–30 %); the legend says so. The display is log₁₀ over
+  1–316 TECU (a vertical ray spans ~3–60; limb rays saturate), on an
+  inferno-like ramp whose floor is lifted to deep violet so the thin night
+  side still reads.
+- **The plasma view is drawn premultiplied OVER the globe with the depth
+  test OFF.** The volume is a back-face shell behind the opaque Earth, so
+  depth-tested it only ever shows at the limb — right for a glow, useless for
+  a map. The march already stops each ray at the planet, so nothing behind
+  the Earth is integrated, and the volume is first in the transparent pass so
+  orbits and field lines still draw over it. Blend and depth are GL state:
+  switching mode costs no recompile.
+- **The field is held per half-ray at the 300 km shell** (the airglow rule,
+  §9.8) and the per-sample cost is three `exp` pairs of the α-Chapman stack
+  with NO texture fetch — the plasma view is CHEAPER than the column view
+  (SwiftShader, floor rung, solo: 210 vs 300 ms/frame), and modes 0–2 pay
+  only a uniform branch.
+- **TIDs are ILLUSTRATIVE** (observed speeds, wavelengths, directions, bands
+  and Kp dependence; not a TID forecast). LSTIDs: λ 1500 km, 500 m/s,
+  launched equatorward from `ovalCenterMaglat` (the cell engine's oval,
+  imported), δN/N up to 15 % above Kp 3, decaying over 3000 km, 0.6 on the
+  day side. MSTIDs: λ 250 km, 100 m/s, night, |magnetic latitude| 20–50°,
+  fronts NW–SE travelling SOUTH-WEST in the north and NORTH-WEST in the south
+  (the Perkins morphology), an INTEGER zonal wavenumber so the pattern closes
+  at the date line, faded below ~4 px per wavelength. The red line sees
+  1.8 × δN/N. Phases are double precision on the CPU.
+- **The gates**, each with a control: rendered slant TEC vs the kernel's
+  `slantTec` on the page's own drivers over 71 rays, display |Δt| median
+  0.0009 / max 0.015 (≈ 4 % TEC) — control (horizontal structure patched
+  out) max 0.089; crest/equator TEC 2.25 vs 1.10 with crests off; a Kp 8
+  trough found exactly on the teardrop row (0° off) at depth 0.165 vs 0.011;
+  LSTIDs in TEC correlate with the kernel r = 0.998/0.997 at two instants
+  15 min apart, and the later render against the EARLIER kernel r = −0.25
+  (the pattern moved); MSTID bands in the 630 nm line r = 0.999 vs −0.999
+  against the half-period-shifted kernel; a southward turning in the page's
+  solar wind gives ΔA 0.60 and lifts the evening crest 0.58 → 0.66 vs
+  ΔA 0.000 under northward IMF. The SAR gate now finds the arc on the
+  teardrop row (54.4° inv. lat; Carpenter–Anderson would put it at 49.1°).
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
@@ -345,13 +800,32 @@ rather than lived with.
   extrapolating, which is correct but means a ray tangent below 80 km is
   slightly under-bright. A proper stitch to a standard-atmosphere fit
   would fix it.
+- **The airglow field's next steps.** A dayglow peak that sits lower
+  (~220 km) than the nightglow's; an explore stop that follows a live bubble
+  or the storm trough.
+- **The plasma field's next steps.** The plasmasphere above 2000 km (it is
+  why GNSS TEC is higher than ours); storm-enhanced density and its plume
+  (the dusk-side counterpart of the trough — ring-current-efield's SAPS
+  bridge is the natural driver); the TIDs as a propagating field launched by
+  the auroral Joule heating the T∞ field already carries (they are a
+  climatological wave train here); and a real TEC map (GNSS, e.g. Madrigal)
+  to score the field against, with the same measured-vs-model split the
+  rest of the page keeps.
 - **Airglow radiance.** The volume emission rates are order-of-magnitude
   typical values used for *relative* brightness. This is not a radiance
   calculation and the page must not present it as one.
-- **The `dt` bug in §6.** Worth its own change, with the animation-speed
-  consequences looked at deliberately.
-- **Neither of this feature's test files runs in CI.** `nav-lint.yml` runs
-  two node tests; the other ~40 in `tests/` — these two included — are run
-  per the CLAUDE.md table. The DSMC end-to-end workflow is the only CI job
-  that boots this page at all, which is why a 5× frame-cost regression
-  reached CI as a mysterious timeout rather than as a failed assertion.
+- **The `dt` bug in §6.** The controls are fixed (§9.3); particles, drag
+  tracers and the substorm still take the ~0 value. Worth its own change,
+  with the animation-speed consequences looked at deliberately.
+- **The browser gates still do not run in CI.** The seven node kernel tests
+  now do (`upper-atmosphere-kernels.yml`, §9.7); the Playwright specs —
+  camera-feel and image-metrics included — are run per the CLAUDE.md table.
+  They are deterministic and need only Chromium + the dev server (~4 min for
+  the upper-atmosphere set on SwiftShader), so a browser job is the natural
+  next step. The DSMC end-to-end workflow is still the only CI job that boots
+  this page, which is why a 5× frame-cost regression reached CI as a
+  mysterious timeout rather than as a failed assertion.
+- **Nothing measures how it looks on a GPU.** Every image number above is
+  SwiftShader. Geometry and shape metrics transfer; brightness and bloom do
+  not, and the Vercel preview on real hardware is still where those are
+  judged.

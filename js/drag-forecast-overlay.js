@@ -249,7 +249,10 @@ export class DragForecastOverlay {
 
         // World-frame sun direction (lat, lon).
         const sunLat = Math.asin(_clamp(this._sunDir.y, -1, 1)) / RAD;
-        const sunLon = Math.atan2(this._sunDir.z, this._sunDir.x) / RAD;
+        // Canonical frame: east is −Z (js/geo/coords.js; the kernel's
+        // `latLonToScene`), so longitude is atan2(−z, x). Must match
+        // _latLonToVec3 below or the tracers advect the wrong way.
+        const sunLon = Math.atan2(-this._sunDir.z, this._sunDir.x) / RAD;
 
         for (let i = 0; i < this.N; i++) {
             this.age[i] += dt;
@@ -454,7 +457,9 @@ function _latLonToVec3(latDeg, lonDeg, r, out) {
     const lat = latDeg * RAD;
     const lon = lonDeg * RAD;
     const cl = Math.cos(lat);
-    out.set(r * cl * Math.cos(lon), r * Math.sin(lat), r * cl * Math.sin(lon));
+    // Canonical Earth-fixed frame (+X = Greenwich, +Y = north, −Z = 90°E)
+    // — the same mapping as the kernel's `latLonToScene` and the texture.
+    out.set(r * cl * Math.cos(lon), r * Math.sin(lat), -r * cl * Math.sin(lon));
     return out;
 }
 

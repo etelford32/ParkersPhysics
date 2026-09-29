@@ -59,6 +59,7 @@ import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
 import { AtmosphereVolume, VOLUME_QUALITY }
     from './upper-atmosphere-volume.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
+import { capPointSize, roundDotTexture } from './upper-atmosphere-point-cap.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 import { ZoneWaveField } from './upper-atmosphere-wave-field.js';
@@ -73,24 +74,47 @@ import { SubstormController } from './upper-atmosphere-substorm.js';
 // follows.
 import { getTimeBus } from './upper-atmosphere-time-bus.js';
 import { CameraController } from './upper-atmosphere-camera.js';
-import { subSolarPoint } from './sun-altitude.js';
-import { geoFromVectors } from './upper-atmosphere-column.js';
+import { subSolarPoint, greenwichSiderealDeg } from './sun-altitude.js';
+import { geoFromVectors, latLonToScene, sceneToLatLon } from './upper-atmosphere-column.js';
+import {
+    gwPhases, airglowFieldAt, redFactorAt, redLineRegime, sarArc, brightestEveningArc,
+} from './upper-atmosphere-airglow-field.js';
+// The plasma (TEC) field and its driver: ring-current-efield's shielding
+// model (Kp + solar-wind VBs → penetration ΔA into the shared fountain, the
+// teardrop plasmapause into the trough and the SAR arcs) and the TIDs.
+import { IonosphereDriver, plasmaFieldAt as plasmaKernelAt, vtec, mltAt } from './upper-atmosphere-plasma-field.js';
+import { tidPhases } from './upper-atmosphere-tid.js';
 // On-canvas analysis overlay (altitude ruler · limb probe · diurnal
 // compass). Deliberately three-free — it takes geometry through the
 // hooks below and its physics from the node-tested kernel.
 import { AtmosphereInstruments } from './upper-atmosphere-instruments.js';
+// Flight dynamics: the PURE kernel integrates, the layer draws. The globe
+// only builds the density sampler from its own (F10.7, Ap) state and
+// hands out the kernel's launch helpers — it computes no physics itself.
+import {
+    Flight, createDensitySampler, flightOptionsFromPreset, presetById,
+    launchState, tleEpochMs,
+} from './upper-atmosphere-flight.js';
+import { FlightLayer } from './upper-atmosphere-flight-layer.js';
+// Layer transit: the camera rides the local vertical through the band and a
+// camera-local gas cloud is re-sampled from the engine at its altitude.
+import { AtmosphereTransit } from './upper-atmosphere-transit.js';
+import { ExploreLayer } from './upper-atmosphere-explore.js';
+import { frameClock } from './upper-atmosphere-frame-clock.js';
+import {
+    divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8,
+} from './upper-atmosphere-explore-model.js';
 
 // Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
-// frame. Convention: scene +Y is the geographic north pole; lon=0 (Greenwich)
-// faces +X at scene-origin orientation. This keeps the day-side terminator
-// on the existing Earth texture aligned with the real sub-solar geographic
-// point, so the simulation reads as "real-time Earth–Sun geometry."
+// frame. THE ONE CONVENTION is the kernel's `latLonToScene` — the site's
+// canonical Earth-fixed frame (+X = Greenwich, +Y = north, −Z = 90°E),
+// which is what the EarthSkin texture is drawn in. This function used to
+// carry its own trig with z = +cos·sin(lon), the MIRROR of the texture's
+// frame, so the terminator sat at −lon over the continents (noon over India
+// at 18 UTC) for the page's whole life. See the kernel's header note.
 function _subSolarToVec3(latDeg, lonDeg) {
-    const DEG = Math.PI / 180;
-    const phi = latDeg * DEG;
-    const lam = lonDeg * DEG;
-    const c = Math.cos(phi);
-    return new THREE.Vector3(c * Math.cos(lam), Math.sin(phi), c * Math.sin(lam));
+    const [x, y, z] = latLonToScene(latDeg, lonDeg);
+    return new THREE.Vector3(x, y, z);
 }
 
 // NOAA SWPC Kp→Ap table, used to invert Ap back to Kp for the aurora
@@ -107,6 +131,20 @@ function apToKp(ap) {
 }
 
 const R_EARTH_KM = 6371;
+
+// Camera-to-probe distance (R⊕) at which a far-tier probe marker is drawn
+// at its built size. The default view (camera at ~3.2 R⊕) never comes
+// closer than ~2.13 to a LEO probe (see the LOD thresholds in
+// _buildSatelliteProbe), so from there every marker is untouched; closer
+// than this a marker holds that angular size (~0.7°), so a transit or
+// chase camera sees a dot, not a moon.
+const PROBE_MARKER_REF_RUNIT = 2.0;
+
+// The planet's icosphere detail. three's `detail` is LINEAR: 5 was 720
+// faces with ~10.6° edges whose chords sag 27 km below the sphere — a
+// polygon horizon from a layer transit, where the horizon is ~10° away.
+// 40 gives 1.55° edges and a 0.58 km sag, invisible from the 80 km floor.
+const EARTH_ICO_DETAIL = 40;
 
 // ── Gradient layer shells ──────────────────────────────────────────────────
 // Five concentric translucent shells, one per physical regime the page
@@ -582,6 +620,7 @@ export class AtmosphereGlobe {
         this._buildZoneWaveFields();
         this._buildDragForecastOverlay();
         this._buildFleetRibbons();
+        this._buildFlightLayer();
         this._buildSatelliteRings();
         // Pairwise conjunction screener — depends on the probe lookup
         // tables built inside _buildSatelliteRings, so we set up after.
@@ -610,8 +649,29 @@ export class AtmosphereGlobe {
         this._buildMagneticCascade();
         if (this.opts.stars) this._initStars();
         this._initControls();
+        this._transit = new AtmosphereTransit(this._scene, {
+            controls: this._controls, canvas: this.canvas,
+            // From inside the band the altitude tori, field lines and orbit
+            // loops sweep through the view as hoops; quiet them for the
+            // ride (the flight layer's focus set) unless a flight already
+            // owns that focus, and restore their own settings on release.
+            onStart: () => {
+                this._transitFocus = !this._flightFocusOn;
+                if (this._transitFocus) this.setFlightFocus(true);
+            },
+            onStop: () => {
+                if (this._transitFocus && !this._flight?.hasFlight()) this.setFlightFocus(false);
+                this._transitFocus = false;
+            },
+        });
+        // Explore mode's markers: boundary membranes, POI beacons, and the
+        // crossing / discovery events (js/upper-atmosphere-explore.js).
+        this._explore = new ExploreLayer(this._scene, {
+            getPoiInputs: () => this._poiInputs(),
+        });
         this._initResize();
         this._initTooltip();
+        this._initDiveOnDoubleClick();
         this._initInstruments();
 
         this._clock = new THREE.Clock();
@@ -780,6 +840,186 @@ export class AtmosphereGlobe {
      */
     setFleetRibbons(top) {
         this._fleetRibbons?.setRibbons?.(Array.isArray(top) ? top : []);
+    }
+
+    // ── Flight dynamics layer ───────────────────────────────────────────
+    // See js/upper-atmosphere-flight.js (kernel) and -flight-layer.js
+    // (renderer). The globe's only physics contribution is the density
+    // sampler, built from the SAME (F10.7, Ap) the rest of the page runs on.
+    _buildFlightLayer() {
+        this._flight = new FlightLayer(this._scene, {
+            getSimTimeMs: () => this._timeBus.getSimTime(),
+        });
+        this._flightOpts = null;
+        this._flightSampler = null;
+        this._flightSamplerKey = '';
+        this._canvasClickHandlers = [];
+    }
+    getFlightLayer() { return this._flight; }
+
+    _flightSamplerKeyNow() {
+        return `${Math.round(this._state?.f107 ?? 150)}|${Math.round(this._state?.ap ?? 15)}`;
+    }
+    /** The (F10.7, Ap) sampler; rebuilt only when the rounded state moves. */
+    getFlightSampler() {
+        const key = this._flightSamplerKeyNow();
+        if (!this._flightSampler || this._flightSamplerKey !== key) {
+            const [f107, ap] = key.split('|').map(Number);
+            this._flightSampler = createDensitySampler({ f107Sfu: f107, ap });
+            this._flightSamplerKey = key;
+        }
+        return this._flightSampler;
+    }
+
+    /**
+     * Integrate + draw a flight from kernel options (r0, v0, t0Ms, bc, …).
+     * The sampler is always the page's. Returns the Flight.
+     */
+    launchFlight(opts, { keepClock = false, colorMode = null } = {}) {
+        const sampler = this.getFlightSampler();
+        const prev = keepClock && this._flight.hasFlight() ? this._flight.getClock() : null;
+        const flight = new Flight({ ...opts, sampler,
+            meta: { ...(opts.meta || {}), samplerKey: this._flightSamplerKey } });
+        this._flightOpts = { ...opts };
+        this._flight.setFlight(flight, { colorMode: colorMode || opts.meta?.colorMode || null });
+        if (prev && prev.mode === 'own') {
+            this._flight.seek(prev.tS);
+            if (prev.playing) this._flight.play();
+        }
+        try {
+            window.dispatchEvent(new CustomEvent('ua-flight-launched', {
+                detail: { name: flight.name, meta: flight.meta, relaunch: !!prev },
+            }));
+        } catch (_) { /* SSR */ }
+        return flight;
+    }
+    /** One of FLIGHT_PRESETS by id, launched at the bus's sim time. */
+    launchPreset(id, { atMs = null } = {}) {
+        const preset = presetById(id);
+        if (!preset) return null;
+        const t0 = Number.isFinite(atMs) ? atMs : this._timeBus.getSimTime();
+        return this.launchFlight(flightOptionsFromPreset(preset, t0));
+    }
+    /** A custom launch from a site + local velocity (see kernel launchState). */
+    launchFromSite(launch, {
+        bcM2PerKg = 0.02, liftToDrag = 0, horizonS = 86400,
+        name = 'custom probe', atMs = null, colorMode = 'altitude',
+    } = {}) {
+        const t0 = Number.isFinite(atMs) ? atMs : this._timeBus.getSimTime();
+        const ls = launchState({ ...launch, unixMs: t0 });
+        return this.launchFlight({
+            r0: ls.r, v0: ls.v, t0Ms: t0, bcM2PerKg, liftToDrag, horizonS, name,
+            meta: { launch: { ...launch }, colorMode, custom: true },
+        });
+    }
+    /**
+     * Seed a flight from a TLE via the page's Rust SGP4 at the bus's sim
+     * time (TEME treated as ECI, as the catalogue tracker does), then let
+     * the kernel carry it through the live atmosphere. Needs the WASM.
+     */
+    async trackFlightFromTle({ line1, line2, name = 'satellite', bcM2PerKg = 0.02,
+                               horizonS = 86400, noradId = null, color = null }) {
+        if (!line1 || !line2) throw new Error('TLE lines required');
+        const mod = await import('./satellite-tracker.js');
+        await mod.whenWasmSettled?.();
+        const wasm = mod.getWasmSgp4?.();
+        if (!wasm?.propagate_tle) throw new Error('SGP4 WASM not loaded');
+        const epochMs = tleEpochMs(line1);
+        if (!Number.isFinite(epochMs)) throw new Error('unreadable TLE epoch');
+        const t0 = this._timeBus.getSimTime();
+        const st = wasm.propagate_tle(line1, line2, (t0 - epochMs) / 60000);
+        return this.launchFlight({
+            r0: [st[0], st[1], st[2]], v0: [st[3], st[4], st[5]], t0Ms: t0,
+            bcM2PerKg, horizonS, name,
+            meta: { tle: { line1, line2, noradId, epochMs }, colorMode: 'q', color },
+        });
+    }
+    /**
+     * Fly the camera to the flight's head (0.9 R⊕ out, tilted toward the
+     * pole so the limb shows) — what makes a launch READ at all: at whole-
+     * globe framing the ribbon competes with every other overlay and the
+     * limb band. Switches to fly mode like a satellite click does.
+     */
+    frameFlight(durationSec = 1.6) {
+        const layer = this._flight;
+        if (!layer?.hasFlight()) return false;
+        const f = layer.getFlight();
+        const c = layer.getClock();
+        const p = f.sceneAt(Math.max(0, Math.min(c.tS, f.tEndS))) || f.sceneAt(0);
+        if (!p) return false;
+        const pos = new THREE.Vector3(p[0], p[1], p[2]);
+        const radial = pos.clone().normalize();
+        const camPos = pos.clone().addScaledVector(radial, 0.55)
+            .add(new THREE.Vector3(0, 0.16, 0)).normalize()
+            .multiplyScalar(pos.length() + 0.55);
+        if (this._controls.getMode?.() === 'orbit') this._controls.setMode('fly');
+        this._followId = null;
+        this._controls.stopFollowing?.();
+        this.flyTo(camPos, pos, durationSec);
+        this.setFlightFocus(true);
+        return true;
+    }
+    /**
+     * FOCUS: while a flight is on, quiet the overlays that compete with the
+     * ribbon at close range — the magnetic-cascade field lines, the
+     * conjunction chords, the reference probes' orbit loops and the fleet
+     * ribbons (measured: at the launch framing they filled the frame and
+     * the flight could not be found). Every hidden object's own visibility
+     * is remembered and restored EXACTLY on focus-off / clearFlight, so a
+     * user who switched a layer off keeps it off.
+     */
+    setFlightFocus(on) {
+        on = !!on;
+        if (on === !!this._flightFocusOn) return;
+        this._flightFocusOn = on;
+        const targets = [
+            this._cascade?.group, this._conjunctionGroup, this._fleetRibbons?.mesh,
+            // the altitude reference tori, the solar-wind streamers / Sun
+            // marker, the slider's altitude ring and the mesosphere rings —
+            // at the launch framing each of these crossed the frame as a
+            // band brighter than the ribbon (measured on the screenshots)
+            this._satGroup, this._swGroup, this._ring, this._phenomenaGroup,
+            ...Object.values(this._satProbes || {}).map(p => p.pathLine),
+        ].filter(Boolean);
+        if (on) {
+            this._flightFocusSaved = new Map(targets.map(o => [o, o.visible]));
+            for (const o of targets) o.visible = false;
+        } else if (this._flightFocusSaved) {
+            for (const [o, v] of this._flightFocusSaved) o.visible = v;
+            this._flightFocusSaved = null;
+        }
+    }
+    getFlightFocus() { return !!this._flightFocusOn; }
+
+    clearFlight() {
+        this.setFlightFocus(false);
+        this._flight.clear();
+        this._flightOpts = null;
+        this._sceneTimeOverrideMs = null;
+        if (this._followId?.kind === 'flight') this.stopFollowing();
+    }
+    /** Chase camera on the flight head (radial-out offset, like a probe). */
+    followFlight() {
+        if (!this._flight?.hasFlight()) return false;
+        if (this._controls.getMode?.() === 'orbit') this._controls.setMode('fly');
+        this._controls.followObject?.(() => this._flight.getHeadPosition());
+        this._followId = { kind: 'flight' };
+        return true;
+    }
+    /** The atmosphere changed under a live flight: integrate it again. */
+    _relaunchFlightForState() {
+        if (!this._flightOpts || !this._flight?.hasFlight()) return;
+        if (this._flight.getFlight()?.meta?.samplerKey === this._flightSamplerKeyNow()) return;
+        this.launchFlight(this._flightOpts, { keepClock: true, colorMode: this._flight.getColorMode() });
+    }
+    /**
+     * Register a canvas click (not drag) handler: fn({ nx, ny, userData,
+     * event }) → return true to consume. Used by the launch panel's
+     * "pick site on the globe". Returns an unsubscribe.
+     */
+    onCanvasClick(fn) {
+        this._canvasClickHandlers.push(fn);
+        return () => { this._canvasClickHandlers = this._canvasClickHandlers.filter(f => f !== fn); };
     }
 
     setDragForecastVisible(v) {
@@ -982,6 +1222,8 @@ export class AtmosphereGlobe {
         // frame. The march reads density straight out of these, so this is
         // what makes a storm visibly inflate the rendered column.
         this._volume?.setState({ f107, ap });
+        // The airglow field's Kp (SAR arcs, the fountain's disturbance dynamo).
+        this._airglowAp = Number.isFinite(ap) ? ap : 15;
         // Let the page's legend re-read the display-scale numbers, which
         // are derived from the LUTs that just rebuilt. Without this the
         // legend would keep printing the boot-time scale after a storm
@@ -1035,6 +1277,13 @@ export class AtmosphereGlobe {
     setState({ f107 = 150, ap = 15, bz = null } = {}) {
         this._state = { f107, ap, bz };
         this._lastState = { f107, ap };
+        // A live flight was integrated through the OLD atmosphere; give the
+        // slider a moment to settle, then integrate it again through the new
+        // one (no-op when the rounded state has not moved).
+        if (this._flight?.hasFlight()) {
+            clearTimeout(this._flightRelaunchT);
+            this._flightRelaunchT = setTimeout(() => this._relaunchFlightForState(), 350);
+        }
 
         // Push the new (F10.7, Ap) to each particle system so the
         // storm-drift kicks in as soon as the user clicks a preset —
@@ -1184,6 +1433,9 @@ export class AtmosphereGlobe {
         const bz      = Number.isFinite(sw.bz)      ? sw.bz      : SW_DEFAULTS.bz;
         const by      = Number.isFinite(sw.by)      ? sw.by      : 0;
         this._swState = { speed, density, bz, by };
+        // VBs (mV/m) for the ionosphere driver's convection field: the
+        // rectified dawn–dusk electric field, v × southward Bz.
+        this._vbs = speed * Math.max(0, -bz) * 1e-3;
 
         // Cascade geometry compresses dayside / stretches nightside
         // lines under Pdyn — push the live state so the visual tracks
@@ -1308,7 +1560,7 @@ export class AtmosphereGlobe {
         // (≈15°/hour, the Earth's actual rotation rate relative to the
         // Sun) so the camera reads as static while the geometry remains
         // physically correct.
-        const ssp = subSolarPoint(new Date());
+        const ssp = subSolarPoint(new Date(this._sceneTimeMs()));
         this._sunDir = _subSolarToVec3(ssp.lat, ssp.lon);
     }
 
@@ -1319,7 +1571,7 @@ export class AtmosphereGlobe {
         // atmosphere page is about what's *above* the troposphere.
         this._skin = new EarthSkin(this._scene, this._sunDir, {
             radius: 1.0,
-            icoLevel: 5,
+            icoLevel: EARTH_ICO_DETAIL,
             clouds: false,
             atmosphere: true,
             aurora: true,
@@ -1460,7 +1712,7 @@ export class AtmosphereGlobe {
         return this._volume?.getComponentVisibility() ?? { density: false, airglow: false };
     }
 
-    /** 'column' | 'composition' | 'anomaly' */
+    /** 'column' | 'composition' | 'anomaly' | 'plasma' (slant TEC) */
     setVolumeMode(mode) { this._volume?.setMode(mode); }
     getVolumeAnomalyAltitude() { return this._volume?.getAnomalyAltitude?.() ?? null; }
     getVolumeMode() { return this._volume?.getMode() ?? 'column'; }
@@ -1826,7 +2078,7 @@ export class AtmosphereGlobe {
         // real TLE epoch + sat.mean_anomaly when live data arrives.
         const M0 = spec.orbital.meanAnomalyDeg0 * Math.PI / 180;
         const probe = {
-            mesh, pathLine, spec,
+            mesh, pathLine, spec, farGrp,
             _phase0:        M0,
             _M_epoch_rad:   M0,
             _epochMs:       Date.now(),
@@ -1919,9 +2171,13 @@ export class AtmosphereGlobe {
     getFollowTarget() { return this._followId ?? null; }
 
     /** Reset camera to a default home view. Drops any active follow. */
-    resetCameraView() { this._controls.resetView?.(); this._followId = null; }
+    resetCameraView() { this._releaseTransitForCamera('reset'); this._controls.resetView?.(); this._followId = null; }
     /** Snap to top-down (polar) view. */
-    cameraTopView()   { this._controls.flyToTopView?.(); this._followId = null; }
+    cameraTopView()   { this._releaseTransitForCamera('top'); this._controls.flyToTopView?.(); this._followId = null; }
+    /** A camera preset takes over from the layer transit (which re-applies its pose every frame). */
+    _releaseTransitForCamera(reason) {
+        if (this._transit?.getState?.().active) this._transit.stop(reason);
+    }
 
     // ── Phase 26: time-warp + sat-clock control ──────────────────────────
     //
@@ -2584,9 +2840,10 @@ export class AtmosphereGlobe {
         // Phase B: absolute-time lookup; downstream _stepDebris reuses
         // the same helper each frame.
         const simTimeMs = this._timeBus.getSimTime();
+        const gmst = this._gmstRad(simTimeMs);
         const _tmpColor = new THREE.Color();
         for (let i = 0; i < N; i++) {
-            const p = _lookupProbePositionAt(debris[i], simTimeMs);
+            const p = _eciSceneToEarthFixed(_lookupProbePositionAt(debris[i], simTimeMs), gmst);
             positions[i * 3]     = p.x;
             positions[i * 3 + 1] = p.y;
             positions[i * 3 + 2] = p.z;
@@ -2615,7 +2872,11 @@ export class AtmosphereGlobe {
             opacity:     1.0,
             depthWrite:  false,
             blending:    THREE.AdditiveBlending,
+            map:         roundDotTexture(),
         });
+        // 0.034 R⊕ is a 217 km sprite: a chase or transit camera inside the
+        // LEO shell drew debris as squares tens of pixels wide.
+        capPointSize(mat, { maxPx: 10 });
         if (this._debrisCloud) {
             // Re-load: dispose the old.
             this._satProbeGrp?.remove(this._debrisCloud);
@@ -2644,13 +2905,16 @@ export class AtmosphereGlobe {
     _stepDebris() {
         if (!this._debris?.length || !this._debrisPositions) return;
         const simTimeMs = this._timeBus.getSimTime();
+        // Inertial lookup → Earth-fixed scene, see _stepSatellites.
+        const gmst = this._gmstRad(simTimeMs);
+        const c = Math.cos(gmst), s = Math.sin(gmst);
         const pos = this._debrisPositions;
         for (let i = 0; i < this._debris.length; i++) {
             const p = _lookupProbePositionAt(this._debris[i], simTimeMs);
             const o = i * 3;
-            pos[o]     = p.x;
+            pos[o]     = c * p.x - s * p.z;
             pos[o + 1] = p.y;
-            pos[o + 2] = p.z;
+            pos[o + 2] = s * p.x + c * p.z;
         }
         this._debrisCloud.geometry.attributes.position.needsUpdate = true;
     }
@@ -2778,8 +3042,9 @@ export class AtmosphereGlobe {
         const positions = new Float32Array(N * 3);
         // Phase B: seed initial positions from bus-driven absolute time.
         const simTimeMs = this._timeBus.getSimTime();
+        const gmst = this._gmstRad(simTimeMs);
         for (let i = 0; i < N; i++) {
-            const p = _lookupProbePositionAt(probes[i], simTimeMs);
+            const p = _eciSceneToEarthFixed(_lookupProbePositionAt(probes[i], simTimeMs), gmst);
             positions[i * 3]     = p.x;
             positions[i * 3 + 1] = p.y;
             positions[i * 3 + 2] = p.z;
@@ -2794,7 +3059,9 @@ export class AtmosphereGlobe {
             opacity:     0.55,
             depthWrite:  false,
             blending:    THREE.AdditiveBlending,
+            map:         roundDotTexture(),
         });
+        capPointSize(mat, { maxPx: 8, fadeNear: false });
         const cloud = new THREE.Points(geom, mat);
         cloud.frustumCulled = false;
         cloud.userData = {
@@ -2818,6 +3085,8 @@ export class AtmosphereGlobe {
         // _stepSatellites + _stepDebris — every orbital object on the
         // page is rendered against ONE canonical simTimeMs.
         const simTimeMs = this._timeBus.getSimTime();
+        const gmst = this._gmstRad(simTimeMs);
+        const c = Math.cos(gmst), s = Math.sin(gmst);
         for (const id in all) {
             const entry = all[id];
             if (!entry.cloud.visible) continue;
@@ -2826,9 +3095,9 @@ export class AtmosphereGlobe {
             for (let i = 0; i < probes.length; i++) {
                 const p = _lookupProbePositionAt(probes[i], simTimeMs);
                 const o = i * 3;
-                pos[o]     = p.x;
+                pos[o]     = c * p.x - s * p.z;
                 pos[o + 1] = p.y;
-                pos[o + 2] = p.z;
+                pos[o + 2] = s * p.x + c * p.z;
             }
             entry.cloud.geometry.attributes.position.needsUpdate = true;
         }
@@ -3708,8 +3977,151 @@ export class AtmosphereGlobe {
      * the solar-wind group track real time. Cheap (one trig call + a
      * quaternion + a few uniform copies) so we run it every frame.
      */
+    /**
+     * The instant the SCENE is drawn at, in Unix ms: the flight deck's
+     * private clock while a flight is being scrubbed or warped, else the
+     * shared TimeBus (so the page's own time controls move the terminator
+     * — its copy always promised that, and until 2026-09-27 the sun read
+     * the wall clock while every satellite read the bus), else the wall
+     * clock before the bus exists.
+     */
+    _sceneTimeMs() {
+        if (Number.isFinite(this._sceneTimeOverrideMs)) return this._sceneTimeOverrideMs;
+        const bus = this._timeBus?.getSimTime?.();
+        return Number.isFinite(bus) ? bus : Date.now();
+    }
+
+    /** Sidereal angle of an instant — the ONE ECI→Earth-fixed rotation. */
+    _gmstRad(ms) {
+        return greenwichSiderealDeg(ms) * (Math.PI / 180);
+    }
+
+    // ── The airglow field (upper-atmosphere-airglow-field.js) ────────────
+    /**
+     * Drive the volume's airglow field from the SCENE instant: the shared
+     * equatorial fountain (arcs + bubbles) advanced on the scene clock, the
+     * symbolic ripple phases, and Kp for the SAR arcs. The fountain table
+     * is re-sampled at most every 250 ms of frame clock (it moves on hour
+     * scales) unless the scene instant jumps or Kp changes; the phases are
+     * pushed every frame (cheap, and computed in double precision here
+     * because float32 cannot hold ω·t).
+     */
+    _updateAirglowField(force = false) {
+        if (!this._volume) return;
+        const sceneMs = this._sceneTimeMs();
+        const kp = apToKp(this._airglowAp ?? 15);
+        if (!this._iono) {
+            this._iono = new IonosphereDriver();
+            // `_arcs` is the fountain sampler every airglow consumer reads
+            // (probe, POIs, the gates); the driver owns and advances it.
+            this._arcs = this._iono.sampler;
+        }
+        const now = frameClock.now();
+        const kpChanged = kp !== this._arcsKp;
+        const due = force || kpChanged || this._arcsSceneMs == null
+            || (sceneMs !== this._arcsSceneMs
+                && (now - (this._arcsAt ?? -Infinity) > 250 || Math.abs(sceneMs - this._arcsSceneMs) > 60000));
+        let arcsData = null, ppData = null;
+        if (due) {
+            this._arcsAt = now;
+            this._arcsSceneMs = sceneMs;
+            if (this._iono.advanceTo(sceneMs, { kp, vbs: this._vbs }) || force) {
+                arcsData = this._iono.sampler.data;
+                ppData = this._iono.ppData;
+            }
+        }
+        this._volume.setAirglowField({
+            arcsData, ppData, phases: gwPhases(sceneMs / 1000), kp: kpChanged ? kp : null,
+            tidPhases: tidPhases(sceneMs / 1000), utHours: sceneMs / 3.6e6,
+        });
+        this._arcsKp = kp;
+    }
+
+    /** Re-sample and re-upload the airglow field now (tests; after editing the fountain). */
+    refreshAirglowField() {
+        this._arcs?._fill?.();
+        this._updateAirglowField(true);
+    }
+
+    /**
+     * The airglow field at a scene point (e.g. the probe's tangent point),
+     * from the SAME kernel and drivers the shader reads.
+     */
+    airglowFieldAt(p) {
+        const v = Array.isArray(p) ? p : [p.x, p.y, p.z];
+        const r = Math.hypot(v[0], v[1], v[2]) || 1;
+        const u = [v[0] / r, v[1] / r, v[2] / r];
+        const ll = sceneToLatLon(u);
+        const sd = this._sunDir;
+        const cosChi = sd ? (u[0] * sd.x + u[1] * sd.y + u[2] * sd.z) / (sd.length() || 1) : 0;
+        const kp = apToKp(this._airglowAp ?? 15);
+        const arcs = this._arcs ? this._arcs.sampleAt(ll.lonDeg) : undefined;
+        const sceneMs = this._sceneTimeMs();
+        const field = airglowFieldAt({
+            latDeg: ll.latDeg, lonDeg: ll.lonDeg, u, cosChi, kp, arcs,
+            phases: gwPhases(sceneMs / 1000),
+            ppInvLatDeg: this._iono?.timeMs != null ? this._iono.plasmapauseAt(ll.lonDeg) : null,
+            tidPhases: tidPhases(sceneMs / 1000), utHours: sceneMs / 3.6e6,
+        });
+        const red = redFactorAt(250, field);
+        return { ...field, latDeg: ll.latDeg, lonDeg: ll.lonDeg, arcs, kp, sar: field.sar,
+                 sarArc: sarArc(kp), red250: red.red, lit250: red.lit, regime: redLineRegime(field) };
+    }
+
+    /**
+     * The plasma field at a scene point (the probe's tangent point), from
+     * the SAME kernel and drivers the plasma view reads: layer peaks with
+     * the horizontal factors applied, vertical TEC over the page's 80–2000
+     * km band, and what dominates. Also the E-field state driving it.
+     */
+    plasmaFieldAt(p) {
+        const v = Array.isArray(p) ? p : [p.x, p.y, p.z];
+        const r = Math.hypot(v[0], v[1], v[2]) || 1;
+        const u = [v[0] / r, v[1] / r, v[2] / r];
+        const ll = sceneToLatLon(u);
+        const sd = this._sunDir;
+        const sun = sd ? [sd.x, sd.y, sd.z] : [1, 0, 0];
+        const sl = Math.hypot(...sun) || 1;
+        const cosChi = (u[0] * sun[0] + u[1] * sun[1] + u[2] * sun[2]) / sl;
+        const { lstHr } = geoFromVectors(u, sun);
+        const sceneMs = this._sceneTimeMs();
+        const ut = ((sceneMs / 3.6e6) % 24 + 24) % 24;
+        const kp = apToKp(this._airglowAp ?? 15);
+        const live = this._iono?.timeMs != null;
+        const field = plasmaKernelAt({
+            latDeg: ll.latDeg, lonDeg: ll.lonDeg, cosChi, lstHr, mltHr: mltAt(ll.lonDeg, ut), kp,
+            f107Sfu: this._lastFieldState?.f107 ?? 150,
+            arcs: this._arcs ? this._arcs.sampleAt(ll.lonDeg) : undefined,
+            ppInvLatDeg: live ? this._iono.plasmapauseAt(ll.lonDeg) : null,
+            phases: tidPhases(sceneMs / 1000),
+        });
+        return {
+            ...field, latDeg: ll.latDeg, lonDeg: ll.lonDeg, lstHr, kp, vtecTecu: vtec(field),
+            ppInvLatDeg: live ? this._iono.plasmapauseAt(ll.lonDeg) : null,
+            efield: this._iono?.efield?.() ?? null, vbs: this._vbs ?? null,
+        };
+    }
+
+    /** The ionosphere driver's state (E-field, penetration, table time) — the legend and the gates read it. */
+    ionosphereState() {
+        if (!this._iono || this._iono.timeMs == null) return null;
+        return { efield: this._iono.efield(), vbs: this._vbs ?? null, timeMs: this._iono.timeMs,
+                 kp: apToKp(this._airglowAp ?? 15) };
+    }
+
+    /**
+     * Pin the scene's instant (sun direction / terminator / diurnal bulge)
+     * to a time other than the bus's — the flight layer's mission clock
+     * when a flight is warped or scrubbed off the live clock. `null`
+     * releases it back to the bus.
+     */
+    setSceneTime(ms) {
+        this._sceneTimeOverrideMs = Number.isFinite(ms) ? ms : null;
+    }
+    getSceneTimeMs() { return this._sceneTimeMs(); }
+
     _updateSunRealTime() {
-        const ssp = subSolarPoint(new Date());
+        const ssp = subSolarPoint(new Date(this._sceneTimeMs()));
         // Skin: only push uniform updates when the angle has actually
         // moved meaningfully (>0.01° ≈ 1.7e-4 rad). Sub-solar drift is
         // ≈15°/hour so this still fires several times a minute.
@@ -3864,6 +4276,263 @@ export class AtmosphereGlobe {
                 sunDeclDeg: this._sunDeclDeg ?? 0,
             }),
         });
+    }
+
+    // ── Layer transit + ambient gas (js/upper-atmosphere-transit.js) ───────
+    /** Ride the local vertical: { mode:'descend'|'ascend', kmPerSec, toKm?, headingDeg?, pitchDeg? }. */
+    startTransit(opts) {
+        this._followId = null;
+        return this._transit?.start(opts) ?? null;
+    }
+    stopTransit()        { this._transit?.stop('api'); }
+    pauseTransit(on)     { this._transit?.setPaused(on); }
+    getTransitState()    { return this._transit?.getState() ?? null; }
+    setAmbientGasVisible(on) { this._transit?.setCloudVisible(on); }
+    getAmbientGasVisible()   { return this._transit?.getCloudVisible() ?? false; }
+    getAmbientGas()          { return this._transit?.getGas() ?? null; }
+    getAmbientGasCount()     { return this._transit?.getCloudCount() ?? 0; }
+    getStreakInfo()          { return this._transit?.getStreakInfo() ?? { count: 0, lengthRunit: 0, speedKmS: 0 }; }
+
+    // ── Explore mode (js/upper-atmosphere-explore*.js) ─────────────────────
+    /** What the POI kernel needs from the live page. */
+    _poiInputs() {
+        const ssp = subSolarPoint(new Date(this._sceneTimeMs()));
+        return {
+            subSolarLatDeg: ssp.lat, subSolarLonDeg: ssp.lon,
+            f107Sfu: this._state?.f107 ?? 150, ap: this._state?.ap ?? 15,
+            iss: this._issState(),
+            arcs: brightestEveningArc(this._arcs, ssp.lon),
+        };
+    }
+    /** Live ISS lat/lon/alt/heading from its probe (null without one). */
+    _issState() {
+        const probe = this._satProbes?.iss;
+        if (!probe?.mesh) return null;
+        const p = probe.mesh.position;
+        const r = p.length();
+        if (!(r > 1)) return null;
+        const u = [p.x / r, p.y / r, p.z / r];
+        const ll = sceneToLatLon(u);
+        // Heading from a two-second look-ahead on the same propagator.
+        const t = this._timeBus?.getSimTime?.() ?? Date.now();
+        const q = _eciSceneToEarthFixed(_lookupProbePositionAt(probe, t + 2000), this._gmstRad(t + 2000));
+        const dir = [q.x - p.x, q.y - p.y, q.z - p.z];
+        const east = [-Math.sin(ll.lonDeg * Math.PI / 180), 0, -Math.cos(ll.lonDeg * Math.PI / 180)];
+        const north = [
+            u[1] * east[2] - u[2] * east[1],
+            u[2] * east[0] - u[0] * east[2],
+            u[0] * east[1] - u[1] * east[0],
+        ];
+        const he = dir[0] * east[0] + dir[1] * east[1] + dir[2] * east[2];
+        const hn = dir[0] * north[0] + dir[1] * north[1] + dir[2] * north[2];
+        const headingDeg = (Math.hypot(he, hn) > 0) ? ((Math.atan2(he, hn) * 180 / Math.PI) + 360) % 360 : null;
+        return { latDeg: ll.latDeg, lonDeg: ll.lonDeg, altKm: (r - 1) * R_EARTH_KM, headingDeg };
+    }
+    _cameraPose() {
+        const c = this._camera;
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion);
+        return { fromPos: c.position.toArray(), fromFwd: f.toArray(), fromUp: c.up.toArray() };
+    }
+    _emitExplore(detail) {
+        try { window.dispatchEvent(new CustomEvent('ua-explore', { detail })); } catch (_) { /* SSR */ }
+    }
+
+    /**
+     * Dive from wherever the camera is to (lat, lon, alt), arriving level
+     * with the horizon in explore mode. Any key, drag or wheel cancels it
+     * where it is (the page may start a flight, not hold the camera).
+     */
+    diveTo({ latDeg, lonDeg, altKm = 250, headingDeg = null, pitchDeg = -8, durationSec = null, poiId = null } = {}) {
+        if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg)) return null;
+        if (this._transit?.getState?.().active) this._transit.stop('dive');
+        this._followId = null;
+        this._controls.stopFollowing?.();
+        const path = divePath({ ...this._cameraPose(), latDeg, lonDeg, altKm, headingDeg, pitchDeg });
+        const target = path.target;
+        this._controls.runPath(path, {
+            endMode: 'explore', durationSec,
+            onDone: (why) => this._emitExplore({
+                kind: why === 'arrived' ? 'dive-arrive' : 'dive-cancel', target, poiId, reason: why,
+            }),
+        });
+        this._emitExplore({ kind: 'dive-start', target, poiId, durationSec: durationSec ?? path.durationSec, arcDeg: path.arcDeg });
+        return { ...target, durationSec: durationSec ?? path.durationSec, arcDeg: path.arcDeg };
+    }
+    /** Dive to one of the live points of interest by id. */
+    diveToPoi(id, opts = {}) {
+        this._explore?.refreshPois(true);
+        const poi = this._explore?.getPoi(id);
+        if (!poi) return null;
+        return this.diveTo({
+            latDeg: poi.latDeg, lonDeg: poi.lonDeg, altKm: poi.altKm,
+            headingDeg: poi.headingDeg, pitchDeg: poi.pitchDeg, poiId: id, ...opts,
+        });
+    }
+    /** Climb out of the band to the orbit view over the same ground. */
+    climbToOrbit({ distance = 3.4, durationSec = null } = {}) {
+        if (this._transit?.getState?.().active) this._transit.stop('climb');
+        this._followId = null;
+        this._controls.stopFollowing?.();
+        const path = climbPath({ ...this._cameraPose(), distance });
+        this._controls.runPath(path, {
+            endMode: 'orbit', durationSec,
+            onDone: (why) => this._emitExplore({ kind: why === 'arrived' ? 'climb-arrive' : 'climb-cancel', reason: why }),
+        });
+        this._emitExplore({ kind: 'climb-start', durationSec: durationSec ?? path.durationSec });
+        return { durationSec: durationSec ?? path.durationSec };
+    }
+    /**
+     * Explore from here: inside the band the camera switches mode where it
+     * is; above it, it dives to the ground under the camera at `altKm`.
+     */
+    enterExplore({ altKm = 250 } = {}) {
+        const alt = this.getCameraAltitudeKm();
+        if (alt <= EXPLORE.ceilKm && !this._controls.isPathActive?.()) {
+            if (this._transit?.getState?.().active) this._transit.stop('explore');
+            this._controls.stopFollowing?.();
+            this._followId = null;
+            this._controls.setMode('explore');
+            return { mode: 'explore', dived: false };
+        }
+        const ll = sceneToLatLon(this._camera.position.toArray());
+        const t = this.diveTo({ ...ll, altKm });
+        return { mode: 'dive', dived: true, target: t };
+    }
+    /**
+     * Go to an altitude over the ground below the camera: a dive from above
+     * the band, otherwise a ride along the local vertical that keeps the
+     * current heading and pitch (~2 s; any key or drag releases it).
+     */
+    goToAltitude(altKm) {
+        const target = Math.max(EXPLORE.floorKm, Math.min(EXPLORE.ceilKm, altKm));
+        if (!Number.isFinite(target)) return null;
+        const alt = this.getCameraAltitudeKm();
+        if (alt > EXPLORE.ceilKm + 1 || this._controls.isPathActive?.()) {
+            this._controls.cancelPath?.('superseded');
+            const ll = sceneToLatLon(this._camera.position.toArray());
+            return this.diveTo({ ...ll, altKm: target });
+        }
+        if (this._controls.getMode() !== 'explore') this._controls.setMode('explore');
+        const info = this.getExploreInfo();
+        return this.startTransit({
+            mode: target < alt ? 'descend' : 'ascend',
+            kmPerSec: Math.max(5, Math.abs(target - alt) / 2.2),
+            fromKm: alt, toKm: target,
+            headingDeg: info?.headingDeg ?? null,
+            pitchDeg: Number.isFinite(info?.pitchDeg) ? info.pitchDeg : -6,
+        });
+    }
+    isTransitioning() { return !!this._controls.isPathActive?.(); }
+    getTransitionProgress() { return this._controls.getPathProgress?.() ?? null; }
+    cancelTransition() { return this._controls.cancelPath?.('api') ?? false; }
+
+    /** Where the explorer is and how fast it is going (null outside explore). */
+    getExploreInfo() {
+        const st = this._controls.getExploreState?.();
+        if (!st) return null;
+        const d = describeState(st);
+        const v = st.speedKmS ?? 0;
+        return {
+            ...d,
+            compass: compass8(d.headingDeg),
+            speedKmS: v,
+            groundSpeedKmS: st.groundSpeedKmS ?? 0,
+            climbKmS: st.climbKmS ?? 0,
+            moving: !!st.moving,
+            orbitalKmS: orbitalSpeedKmS(d.altKm),
+            orbitalMultiple: v / orbitalSpeedKmS(d.altKm),
+        };
+    }
+    getPointsOfInterest()    { this._explore?.refreshPois(false); return this._explore?.getPois() ?? []; }
+    getExploreDiscoveries()  { return this._explore?.getDiscoveries() ?? { found: [], total: 0 }; }
+    resetExploreDiscoveries() { this._explore?.resetDiscoveries(); }
+    setMembranesVisible(on)  { this._explore?.setMembranesVisible(on); }
+    getMembranesVisible()    { return this._explore?.getMembranesVisible() ?? false; }
+    getMembraneWeights()     { return this._explore?.getMembraneWeights() ?? []; }
+    isMembranePassDrawn()    { return this._explore?.isMembranePassDrawn() ?? false; }
+    setBeaconsVisible(on)    { this._explore?.setBeaconsVisible(on); }
+    getBeaconsVisible()      { return this._explore?.getBeaconsVisible() ?? false; }
+    setAuroraCurtainsVisible(on) { this._explore?.setAuroraVisible(on); }
+    getAuroraCurtainsVisible()   { return this._explore?.getAuroraVisible() ?? false; }
+    getAuroraCurtainInfo()       { return this._explore?.getAuroraInfo() ?? null; }
+
+    /**
+     * Double-click the planet to dive there. Skipped when a click handler
+     * (the launch panel's site picking) consumed the click, and when the
+     * pointer is over a satellite / debris / catalogue point (a click on one
+     * already means "fly to it").
+     */
+    _initDiveOnDoubleClick() {
+        const ray = new THREE.Raycaster();
+        const ndc = new THREE.Vector2();
+        this._onDblClick = (e) => {
+            // The launch panel's handler is registered for good and only
+            // CONSUMES clicks while it is picking a site; skip the dive only
+            // when one of this double-click's own clicks was consumed.
+            if (Number.isFinite(this._clickConsumedAt) && e.timeStamp - this._clickConsumedAt < 700) return;
+            // Only the kinds a single click already acts on (fly-to-satellite,
+            // debris, catalogue): the hover raycast also reports shells and
+            // field lines, which must not block a dive.
+            const k = this._hoveredUserData?.kind;
+            if (k === 'sat-probe' || k === 'iss-probe' || k === 'debris-piece' || k === 'catalog-point') return;
+            const earth = this._skin?.earthMesh;
+            if (!earth) return;
+            const rect = this.canvas.getBoundingClientRect();
+            ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1,
+                    ((e.clientY - rect.top) / rect.height) * -2 + 1);
+            ray.setFromCamera(ndc, this._camera);
+            // Analytic sphere hit (the mesh is 33 k triangles; the sphere is exact).
+            const o = ray.ray.origin, d = ray.ray.direction;
+            const b = o.dot(d), c = o.lengthSq() - 1, disc = b * b - c;
+            if (disc < 0) return;
+            const t = -b - Math.sqrt(disc);
+            if (!(t > 0)) return;
+            const hit = o.clone().addScaledVector(d, t);
+            const ll = sceneToLatLon(hit.toArray());
+            const alt = this.getCameraAltitudeKm();
+            const altKm = alt <= EXPLORE.ceilKm ? Math.max(EXPLORE.floorKm, alt) : 250;
+            this.diveTo({ ...ll, altKm });
+        };
+        this.canvas.addEventListener('dblclick', this._onDblClick);
+    }
+
+    /**
+     * Quiet the hoops (tori, field lines, orbit loops) while the camera is
+     * down in the band, exactly as the transit does, and restore the user's
+     * own settings when it goes back to orbit — unless a flight owns focus.
+     */
+    _updateExploreFocus(mode) {
+        // A dive or climb counts: mid-dive the hoops sweep through the view
+        // as giant bands (measured) before the mode has become explore.
+        const inside = mode === 'explore' || !!this._controls.isPathActive?.();
+        if (inside === !!this._exploreFocusMode) return;
+        this._exploreFocusMode = inside;
+        if (inside) {
+            this._exploreFocus = !this._flightFocusOn;
+            if (this._exploreFocus) this.setFlightFocus(true);
+        } else {
+            if (this._exploreFocus && !this._flight?.hasFlight() && !this._transit?.getState?.().active) {
+                this.setFlightFocus(false);
+            }
+            this._exploreFocus = false;
+        }
+    }
+
+    /**
+     * Near plane follows the camera down. The default 0.01 R⊕ (64 km) clips
+     * everything nearer than that, which at 100 km is most of the gas and
+     * every streak; 0.25 × altitude keeps the ground in front of it. Far
+     * stays put, so the depth ratio never exceeds 5×10⁵ (the Mars flicker
+     * scar was 5×10⁶). From the orbit view this is the old 0.01 exactly.
+     */
+    _updateNearPlane() {
+        const cam = this._camera;
+        const altR = cam.position.length() - 1;
+        const near = Math.max(0.002, Math.min(0.01, 0.25 * altR));
+        if (Math.abs(near - cam.near) > 0.02 * cam.near) {
+            cam.near = near;
+            cam.updateProjectionMatrix();
+        }
     }
 
     setInstrumentsEnabled(on) { this._instruments?.setEnabled(on); }
@@ -4166,7 +4835,18 @@ export class AtmosphereGlobe {
             this._mouse.x = (x / rect.width)  *  2 - 1;
             this._mouse.y = (y / rect.height) * -2 + 1;
             this._raycaster.setFromCamera(this._mouse, this._camera);
-            const hits = this._raycaster.intersectObjects(hittable(), true);
+            // three's raycaster does not skip hidden objects: with the cascade
+            // or the hoops hidden (focus, a toggle) a hover still hit them and
+            // showed a tooltip titled 'undefined'. Take the first VISIBLE hit —
+            // except the layer shells, which are hidden in the default volume
+            // render but still answer "which layer is this" for the volume,
+            // which has no hover of its own.
+            const shown = (o) => {
+                if (o.userData?.kind === 'layer-shell') return true;
+                for (let p = o; p; p = p.parent) if (!p.visible) return false;
+                return true;
+            };
+            const hits = this._raycaster.intersectObjects(hittable(), true).filter(h => shown(h.object));
             if (hits.length > 0) {
                 const ud = _userDataForHit(hits[0]);
                 tip.innerHTML = _tipHTML(ud, this._profile, this._swState);
@@ -4186,7 +4866,8 @@ export class AtmosphereGlobe {
                 tip.style.opacity = '0';
                 this._hoveredUserData = null;
                 this._hoveredDebrisIdx = null;
-                if (this._controls.getMode() === 'fly') {
+                const m = this._controls.getMode();
+                if (m === 'fly' || m === 'explore') {
                     this.canvas.style.cursor = 'crosshair';
                 } else {
                     this.canvas.style.cursor = 'grab';
@@ -4203,15 +4884,36 @@ export class AtmosphereGlobe {
         // mouse-look working) by tracking the down-position and only
         // firing if the mouse hasn't moved more than a few pixels.
         let downX = 0, downY = 0, downT = 0;
+        // event.timeStamp, not performance.now(): timeStamp is when the
+        // browser GENERATED the event, performance.now() is when the handler
+        // finally ran. On a busy frame (this page rebuilds a lot per frame on
+        // a weak GPU) delivery lags by hundreds of ms and a genuine click was
+        // measured as a 'drag' and dropped — the mars.html 914 ms scar.
         const onDown = (e) => {
-            downX = e.clientX; downY = e.clientY; downT = performance.now();
+            downX = e.clientX; downY = e.clientY; downT = e.timeStamp;
         };
         const onUp = (e) => {
             const dx = Math.abs(e.clientX - downX);
             const dy = Math.abs(e.clientY - downY);
-            const dt = performance.now() - downT;
+            const dt = e.timeStamp - downT;
             if (dx > 4 || dy > 4 || dt > 350) return;     // user dragged
             const ud = this._hoveredUserData;
+            // Registered click handlers (launch-site picking) get first refusal.
+            if (this._canvasClickHandlers?.length) {
+                const rect = this.canvas.getBoundingClientRect();
+                const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                const ny = ((e.clientY - rect.top) / rect.height) * -2 + 1;
+                for (const fn of this._canvasClickHandlers) {
+                    try {
+                        if (fn({ nx, ny, userData: ud, event: e })) {
+                            // A double-click's clicks that a handler consumed (site
+                            // picking) must not also start a dive.
+                            this._clickConsumedAt = e.timeStamp;
+                            return;
+                        }
+                    } catch (_) { /* isolate */ }
+                }
+            }
             // Phase 25: click on an orbital target both flies the
             // camera in AND engages follow — so the target stays in
             // frame as it propagates instead of immediately drifting
@@ -4258,9 +4960,75 @@ export class AtmosphereGlobe {
 
     _animate() {
         this._raf = requestAnimationFrame(this._animate);
+        // Manual clock (the test hook): frames advance only through
+        // stepFrames(), so nothing moves between a test's steps.
+        if (this._manualClock) return;
         const t = this._clock.getElapsedTime();
         const dt = this._clock.getDelta();
+        // The camera controller gets a REAL wall-clock delta. `dt` above is
+        // ~0 every frame (Clock.getElapsedTime() consumes the delta — plan
+        // §6), which left fly-mode WASD nearly frozen and the follow spring
+        // (k = 1 − e^(−dt/τ)) never closing on its target. Only the controls
+        // take the corrected value; every other consumer of `dt` keeps its
+        // historical behaviour until its speed is looked at deliberately.
+        const wallNow = performance.now();
+        const dtWall = this._lastWallMs == null ? 0.016 : Math.min(0.1, (wallNow - this._lastWallMs) / 1000);
+        this._lastWallMs = wallNow;
+        this._frame(t, dt, dtWall, { render: true, stepBus: true });
+    }
 
+    // ── Test hook: a manual, steppable frame clock ──────────────────────
+    /**
+     * Freeze the render loop onto a manual clock. While on, the rAF loop
+     * idles, the shared frame clock (js/upper-atmosphere-frame-clock.js)
+     * stands still, the time bus is not stepped (so the sun, the probes and
+     * the scene instant are frozen), and frames advance only through
+     * stepFrames(). Off resumes live without a jump. `startMs` pins the
+     * manual clock's starting instant (default: the wall time of the switch).
+     */
+    setManualClock(on, { startMs = null } = {}) {
+        on = !!on;
+        if (on === !!this._manualClock) return;
+        this._manualClock = on;
+        // A fixed start makes time-driven visuals (aurora rays, the
+        // discovery cadence) the same frame on every run.
+        frameClock.setManual(on, startMs);
+        if (on) {
+            this._manualT = Number.isFinite(startMs) ? startMs / 1000 : this._clock.getElapsedTime();
+        } else {
+            this._lastWallMs = null;
+            this._clock.getDelta();
+        }
+    }
+    isManualClock() { return !!this._manualClock; }
+    /**
+     * Run `n` frames of exactly `dtSec` each (entering manual mode if
+     * needed). `render`: 'last' (default — cheap on a software renderer,
+     * the camera logic still runs every frame), 'each', or 'none'.
+     * The legacy per-frame `dt` is passed as 0, which is what the live loop
+     * hands those consumers (plan §6), so stepped frames match live ones.
+     */
+    stepFrames(n = 1, dtSec = 1 / 60, { render = 'last' } = {}) {
+        if (!this._manualClock) this.setManualClock(true);
+        const steps = Math.max(0, Math.floor(n));
+        const dt = Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 1 / 60;
+        for (let i = 0; i < steps; i++) {
+            frameClock.advance(dt * 1000);
+            this._manualT += dt;
+            const doRender = render === 'each' || (render === 'last' && i === steps - 1);
+            this._frame(this._manualT, 0, dt, { render: doRender, stepBus: false });
+        }
+        return { timeMs: frameClock.now(), frames: steps };
+    }
+    /** Seed the stochastic visuals (the camera-local gas) for repeatable frames; null = Math.random. */
+    seedRandom(seed) { this._transit?.setSeed(seed); }
+
+    /**
+     * One frame of the scene. `t` is the elapsed clock, `dt` the legacy
+     * per-frame delta (~0, plan §6), `dtWall` the real (or stepped) delta the
+     * camera stack uses.
+     */
+    _frame(t, dt, dtWall, { render = true, stepBus = true } = {}) {
         if (this._skin) this._skin.update(t);
 
         // Per-frame particle integration. Each layer system runs its
@@ -4297,6 +5065,7 @@ export class AtmosphereGlobe {
         // this as a stationary, physically-correct scene rather than the
         // old fast spin-and-circle.
         this._updateSunRealTime();
+        this._updateAirglowField();
 
         // Push the live camera position into the shell shaders so their
         // limb fresnel tracks the current viewpoint.
@@ -4311,7 +5080,7 @@ export class AtmosphereGlobe {
         // rung and climbs only while the frame interval says there is
         // headroom — it times itself rather than taking the `dt` above,
         // which is ~0 every frame (see _governQuality's comment).
-        this._volume?.update(this._camera);
+        this._volume?.update(this._camera, { govern: stepBus, viewportHeight: this.canvas.clientHeight });
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.
@@ -4359,7 +5128,10 @@ export class AtmosphereGlobe {
             }
         }
 
-        this._controls.update(dt);
+        // The controls are stepped AFTER every position update below (just
+        // before the render): a follow that aims at a target's PREVIOUS
+        // position lags it by a frame's worth of motion, which on a slow
+        // renderer at time-warp put the chased probe at the frame's edge.
 
         // Phase B: advance the shared time bus once per animate frame.
         // step() reads Date.now() internally + applies the current rate,
@@ -4367,7 +5139,7 @@ export class AtmosphereGlobe {
         // drift between frames). Every downstream consumer (sat probes,
         // debris, eventually realtime driver + analyzer) reads
         // bus.getSimTime() — one canonical "now" across the page.
-        this._timeBus?.step();
+        if (stepBus) this._timeBus?.step();
 
         // Per-frame satellite orbit propagation. Uses absolute sim-time
         // via the bus (Phase B) — each probe carries (_epochMs,
@@ -4377,6 +5149,13 @@ export class AtmosphereGlobe {
         if (this._satProbes) this._stepSatellites();
         if (this._debris)    this._stepDebris();
         if (this._constellationClouds) this._stepConstellations();
+        // Flight layer: advances its own mission clock (live-locked to the
+        // bus unless the deck detached it), pumps the kernel a few ms at a
+        // time, and publishes the instant the sun should be drawn at.
+        if (this._flight?.hasFlight()) {
+            this._flight.update(this._camera, this.canvas.clientWidth, this.canvas.clientHeight);
+            this._sceneTimeOverrideMs = this._flight.getSceneTimeMs();
+        }
         if (this._phenomenaGroup) this._stepPhenomena(t);
         // Track the hovered debris with a face-on cyan reticle so
         // users can tell which of 50 identical-looking pink dots the
@@ -4404,6 +5183,22 @@ export class AtmosphereGlobe {
             this._catalogTracker.tick(Date.now());
         }
 
+        this._controls.update(dtWall);
+        // After the controls: while a transit is active it owns the pose,
+        // and the ambient gas is re-sampled at wherever the camera now is.
+        this._transit?.update(this._camera, dtWall, {
+            f107: this._state?.f107 ?? 150, ap: this._state?.ap ?? 15,
+        });
+        const camMode = this._controls.getMode();
+        const travelling = camMode !== 'orbit' || this._controls.isPathActive?.()
+            || !!this._transit?.getState?.().active;
+        this._explore?.update(this._camera, {
+            viewportHeight: this.canvas.clientHeight, travelling,
+        });
+        this._updateExploreFocus(camMode);
+        this._updateNearPlane();
+
+        if (!render) return;
         this._renderer.render(this._scene, this._camera);
 
         // 2-D instrument overlay, drawn after the GL frame so its ruler and
@@ -4472,6 +5267,13 @@ export class AtmosphereGlobe {
         // whatever moment the bus says is "now".
         const simTimeMs = this._timeBus.getSimTime();
         const TAU = 2 * Math.PI;
+        // The scene is Earth-FIXED (the texture, the sun vector and the
+        // SGP4 cloud all live in the canonical coords.js frame), so an
+        // inertial orbit has to be turned by the sidereal angle of the
+        // sim clock before it is drawn — the same rotation the catalogue
+        // tracker applies. One angle per frame serves every probe.
+        const gmst = this._gmstRad(simTimeMs);
+        const cam = this._camera;
         for (const id in this._satProbes) {
             const probe = this._satProbes[id];
             const periodSec = probe.spec.orbital.periodMin * 60;
@@ -4480,9 +5282,22 @@ export class AtmosphereGlobe {
             // Convert M back into an orbit fraction for the helper.
             const tFrac = ((M / TAU) % 1 + 1) % 1;
             const altShellR = 1 + probe.spec.altitudeKm / R_EARTH_KM;
-            const p = _propagateKeplerian(probe.spec.orbital, tFrac, altShellR);
+            const p = _eciSceneToEarthFixed(
+                _propagateKeplerian(probe.spec.orbital, tFrac, altShellR), gmst);
 
             probe.mesh.position.set(p.x, p.y, p.z);
+            // The far-tier ball is 0.012 R⊕ (76 km) with a 166 km halo —
+            // a legible dot from the default ~2 R⊕ view, a moon-sized disc
+            // from a layer transit a few hundred km below it (measured: a
+            // 4.6° ball over the 95 km horizon). Inside the reference range
+            // it keeps the angle it has there; beyond it nothing changes.
+            if (probe.farGrp && cam) {
+                const d = cam.position.distanceTo(probe.mesh.position);
+                probe.farGrp.scale.setScalar(Math.min(1, d / PROBE_MARKER_REF_RUNIT));
+            }
+            // The orbit-path loop is built once in the inertial frame;
+            // turning the whole polyline is one assignment per frame.
+            if (probe.pathLine) probe.pathLine.rotation.y = -gmst;
             // Update altitude from current radial distance — keeps the
             // tooltip honest if eccentricity is non-zero (apogee/perigee
             // sweep). For circular orbits the value is constant.
@@ -4491,7 +5306,9 @@ export class AtmosphereGlobe {
 
             // Orient the sprite along the velocity tangent so users
             // can see direction-of-travel when zoomed in.
-            const v = _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR);
+            const v = _eciSceneToEarthFixed(
+                _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR),
+                gmst, new THREE.Vector3());
             const radial = probe.mesh.position.clone().normalize();
             const m = new THREE.Matrix4().lookAt(
                 probe.mesh.position,
@@ -4861,9 +5678,33 @@ function _propagateKeplerian(orb, tFrac, radius) {
     const yEci = xa * sinΩ + ya * cosΩ;
     const zEci = za;
 
-    // Map ECI Z-up → Three.js world Y-up by swapping y and z.
-    // (Three.js convention used throughout the page: +Y is north pole.)
-    return { x: xEci, y: zEci, z: yEci };
+    // Map ECI Z-up → the scene's Y-up axes the CANONICAL way (js/geo/
+    // coords.js `eciToEcef` at GMST = 0: scene = [x, z, −y]). This is
+    // the inertial frame expressed in scene axes; it is NOT yet Earth-
+    // fixed. Callers that DRAW must rotate the result by the sidereal
+    // angle of the sim clock (`_eciSceneToEarthFixed`) or the orbit
+    // sits still while the planet does not. Until 2026-09-27 this
+    // returned [x, z, +y] — the mirror — and was never rotated, so every
+    // reference orbit on the page ran RETROGRADE against the continents
+    // and sat over the wrong ground; the catalogue cloud, drawn through
+    // coords.js, disagreed with it by exactly that.
+    return { x: xEci, y: zEci, z: -yEci };
+}
+
+/**
+ * Rotate an inertial position (ECI in scene axes, from
+ * `_propagateKeplerian` / the probe lookup tables) into the scene's
+ * Earth-fixed frame at Greenwich sidereal angle `gmstRad`. This is
+ * coords.js `eciToEcef` written out for the (x, z, −y) axis order:
+ * a rotation of −gmst about +Y. The orbit-path polylines get the same
+ * thing as `rotation.y = −gmst`.
+ */
+function _eciSceneToEarthFixed(p, gmstRad, out = null) {
+    const c = Math.cos(gmstRad), s = Math.sin(gmstRad);
+    const x = c * p.x - s * p.z;
+    const z = s * p.x + c * p.z;
+    if (out) { out.set(x, p.y, z); return out; }
+    return { x, y: p.y, z };
 }
 
 /**

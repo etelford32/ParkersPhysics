@@ -31,7 +31,7 @@ import {
     airglowColumn, buildAtmosphereLUT, probeProfile,
     tangentAltitudeKm, localSolarTime, bulgeLocalSolarTime,
     diurnalContrast, R_EARTH_KM, MODEL_FLOOR_KM, MODEL_CEIL_KM,
-    geoFromVectors, buildFieldLUT,
+    geoFromVectors, buildFieldLUT, latLonToScene, sceneToLatLon,
 } from '../js/upper-atmosphere-column.js';
 import { density, exosphereTempK } from '../js/upper-atmosphere-engine.js';
 
@@ -529,11 +529,30 @@ t('local solar time wraps cleanly across the dateline', () => {
 
 console.log('\n── 10. the shader mirror: scene vectors → (lat, LST) ──');
 
-// Scene convention, copied from the globe's _subSolarToVec3.
-function vec(latDeg, lonDeg) {
+// Scene convention: the kernel's latLonToScene, which is the canonical
+// js/geo/coords.js frame the Earth texture is drawn in (+90°E at −Z).
+const vec = (latDeg, lonDeg) => latLonToScene(latDeg, lonDeg);
+// The MIRRORED convention this page used until 2026-09-27 (+90°E at +Z).
+// Kept here ONLY so the LST gate can prove it would catch the bug.
+function vecMirrored(latDeg, lonDeg) {
     const c = Math.cos(latDeg * DEG);
     return [c * Math.cos(lonDeg * DEG), Math.sin(latDeg * DEG), c * Math.sin(lonDeg * DEG)];
 }
+
+t('latLonToScene IS the canonical js/geo/coords.js frame', () => {
+    const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-12);
+    assert.ok(near(latLonToScene(0, 0),    [1, 0, 0]),  'Greenwich → +X');
+    assert.ok(near(latLonToScene(0, 90),   [0, 0, -1]), '+90°E → −Z');
+    assert.ok(near(latLonToScene(0, -90),  [0, 0, 1]),  '−90°W → +Z');
+    assert.ok(near(latLonToScene(0, 180),  [-1, 0, 0]), 'antimeridian → −X');
+    assert.ok(near(latLonToScene(90, 37),  [0, 1, 0]),  'north pole → +Y');
+    for (const [lat, lon] of [[0, 0], [12, 77], [-33, -118], [67, 179], [-89, 3]]) {
+        const p = latLonToScene(lat, lon);
+        const back = sceneToLatLon(p.map(v => v * 2.5));
+        assert.ok(Math.abs(back.latDeg - lat) < 1e-9 && Math.abs(back.lonDeg - lon) < 1e-9,
+            `round trip (${lat}, ${lon}) → (${back.latDeg}, ${back.lonDeg})`);
+    }
+});
 
 t('latitude round-trips through the scene frame', () => {
     for (const lat of [-80, -35, 0, 12, 67, 89]) {
@@ -564,6 +583,15 @@ t('a point 90° EAST of the sub-solar meridian reads 18 h, not 6 h', () => {
     const lst = geoFromVectors(vec(0, 90), vec(0, 0)).lstHr;
     assert.ok(Math.abs(lst - 18) < 1e-6,
         `got ${lst.toFixed(2)} h — east of the sub-solar point is AFTERNOON`);
+});
+
+t('THE GATE CAN SEE THE BUG: the mirrored (+Z = east) frame reads 6 h there', () => {
+    // If someone re-derives a lat/lon → scene mapping with z = +cos·sin
+    // (the page's convention until 2026-09-27) the oracle must disagree
+    // with it by exactly 12 h, not silently agree.
+    const lst = geoFromVectors(vecMirrored(0, 90), vecMirrored(0, 0)).lstHr;
+    assert.ok(Math.abs(lst - 6) < 1e-6,
+        `mirrored frame gave ${lst.toFixed(2)} h; expected the oracle to read it as MORNING`);
 });
 
 t('poles return noon rather than NaN', () => {
