@@ -169,12 +169,16 @@ export class FleetRibbons {
             const xr = xi * cosO + zi * sinO;
             const yr = yi;
             const zr = -xi * sinO + zi * cosO;
-            // Scene convention (matches drag-forecast-overlay's
-            // _latLonToVec3): lon=0 along +X, +Y north. The inertial
-            // frame above is built in the same convention, so just scale.
+            // Scene convention is the canonical Earth-fixed frame of
+            // js/geo/coords.js (lon 0 along +X, +Y north, +90°E at −Z —
+            // the kernel's `latLonToScene`, the same mapping the texture
+            // and the SGP4 cloud use). The circle above was built with
+            // longitude increasing toward +Z (lonInertial = atan2(z, x)),
+            // so mirror z on the way out; the ribbon then passes over
+            // the asset's real (lat0, lon0) instead of over (lat0, −lon0).
             pts[i * 3 + 0] = xr * altR;
             pts[i * 3 + 1] = yr * altR;
-            pts[i * 3 + 2] = zr * altR;
+            pts[i * 3 + 2] = -zr * altR;
         }
         // Emit as line segments (not LineStrip) by writing each segment's
         // two endpoints. The shared mesh is LineSegments so we can pack

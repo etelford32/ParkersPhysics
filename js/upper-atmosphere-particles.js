@@ -37,6 +37,7 @@
 import * as THREE from 'three';
 import { parkerVisualSpeedRunit, parkerRegime } from './upper-atmosphere-parker-wind.js';
 import { batesTemperature, exosphereTempK, SPECIES_MASS_KG } from './upper-atmosphere-engine.js';
+import { capPointSize, roundDotTexture } from './upper-atmosphere-point-cap.js';
 
 const R_EARTH_KM = 6371;
 const KB         = 1.380_649e-23;
@@ -191,11 +192,15 @@ export class LayerParticleSystem {
             size:             layer.particleSize ?? 0.005,
             vertexColors:     true,
             sizeAttenuation:  true,
+            // A disc, and a ceiling: from a layer transit these sprites sit
+            // a few km from the lens and drew as 30 px squares (measured).
+            map:              roundDotTexture(),
             transparent:      true,
             opacity:          0.85,
             depthWrite:       false,
             blending:         THREE.AdditiveBlending,
         });
+        capPointSize(mat, { maxPx: 8 });
 
         this._geom = geom;
         this._mat  = mat;

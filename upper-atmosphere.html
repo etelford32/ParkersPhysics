@@ -298,10 +298,213 @@ input[type=range]::-moz-range-thumb {
     color:#04121c; background:#5fd8ff; border-color:#5fd8ff;
 }
 #ua-atmo-controls .ua-atmo-sep { width:1px; height:16px; background:rgba(120,180,220,.25); margin:0 3px; }
+#ua-atmo-controls .ua-atmo-group { display:inline-flex; gap:4px; align-items:center; }
+#ua-atmo-controls .ua-atmo-select {
+    font:600 .62rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding:4px 5px; border-radius:6px; background:rgba(4,8,20,.78); color:#8aa8c4;
+    border:1px solid rgba(120,180,220,.22);
+}
+#ua-atmo-controls .ua-atmo-btn.ua-atmo-btn--live { color:#04121c; background:#ffb057; border-color:#ffb057; }
+#ua-cam-readout .ua-cam-transit .ua-cam-v { color:#ffb057; }
+#ua-cam-readout .ua-cam-transit[hidden] { display:none; }
 @media (max-width:900px) {
     #ua-globe-legend { max-width:calc(100% - 28px); }
     #ua-atmo-controls .ua-atmo-btn { padding:4px 6px; font-size:.58rem; }
 }
+
+/* ─── Flight deck (top-right, under the camera HUD) ──────────────
+ * The camera HUD's measured bottom is published as --ua-cam-hud-bottom by
+ * the bootstrap (same rule as --ua-atmo-floor: a measured number, never a
+ * constant — the HUD's rows wrap on narrow viewports). The deck fills the
+ * band between the HUD and the scrubber and scrolls inside itself. */
+#ua-flight-deck {
+    position:absolute; right:12px;
+    top:calc(var(--ua-cam-hud-bottom, 258px) + 10px);
+    bottom:calc(var(--ua-atmo-floor, 74px) + 8px);
+    width:min(312px, 44%);
+    display:flex; flex-direction:column;
+    background:rgba(4,8,20,.82); backdrop-filter:blur(6px);
+    border:1px solid rgba(95,216,255,.28); border-radius:8px;
+    font:.64rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color:#cde;
+    z-index:8; overflow:hidden; box-shadow:0 2px 14px rgba(0,0,0,.45);
+}
+#ua-flight-deck[hidden] { display:none; }
+#ua-flight-deck[data-open="0"] { bottom:auto; }
+#ua-flight-deck[data-open="0"] .ua-fd-body { display:none; }
+.ua-fd-head { display:flex; align-items:center; gap:6px; padding:5px 8px; border-bottom:1px solid rgba(95,216,255,.18); }
+.ua-fd-dot { width:7px; height:7px; border-radius:50%; background:#5fd8ff; box-shadow:0 0 8px #5fd8ff; flex:none; }
+.ua-fd-name { color:#dff; font-weight:700; letter-spacing:.04em; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ua-fd-status { font-size:.58rem; padding:1px 6px; border-radius:999px; border:1px solid rgba(255,255,255,.15); color:#9cc; }
+.ua-fd-status[data-status="floor"]   { color:#ffb090; border-color:rgba(255,120,80,.5); }
+.ua-fd-status[data-status="escape"]  { color:#c9a8ff; border-color:rgba(180,140,255,.5); }
+.ua-fd-status[data-status="horizon"] { color:#8fe9b0; border-color:rgba(100,230,160,.45); }
+.ua-fd-btn { background:rgba(255,255,255,.05); border:1px solid rgba(120,180,220,.22); color:#9bc; border-radius:5px; padding:2px 6px; font:inherit; font-size:.6rem; cursor:pointer; line-height:1.2; }
+.ua-fd-btn:hover { color:#dff; border-color:rgba(120,220,255,.5); }
+.ua-fd-body { padding:6px 8px 8px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+.ua-fd-transport { display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+.ua-fd-tplus { margin-left:auto; color:#fff; font-weight:700; font-variant-numeric:tabular-nums; }
+.ua-fd-chip--on, .ua-fd-btn.ua-fd-chip--on { color:#04121c !important; background:#5fd8ff !important; border-color:#5fd8ff !important; }
+.ua-fd-scrubrow { display:flex; gap:6px; align-items:center; }
+.ua-fd-scrub { flex:1; accent-color:#5fd8ff; min-width:0; margin:0; }
+.ua-fd-span { color:#8aa; white-space:nowrap; font-size:.58rem; }
+.ua-fd-grid { display:grid; grid-template-columns:auto 1fr; gap:1px 10px; }
+.ua-fd-k { color:#7f9db8; white-space:nowrap; }
+.ua-fd-v { color:#eef; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ua-fd-spark { width:100%; height:56px; display:block; background:rgba(255,255,255,.03); border-radius:4px; }
+.ua-fd-chips { display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+.ua-fd-chiplabel { color:#7f9db8; font-size:.58rem; margin-right:2px; }
+.ua-fd-chip { background:rgba(255,255,255,.05); border:1px solid rgba(120,180,220,.22); color:#9bc; border-radius:999px; padding:2px 7px; font:inherit; font-size:.58rem; cursor:pointer; }
+.ua-fd-chip:hover { color:#dff; border-color:rgba(120,220,255,.5); }
+.ua-fd-note { color:#8fa4b8; font-size:.58rem; line-height:1.4; border-top:1px dotted rgba(255,255,255,.1); padding-top:5px; }
+.ua-fd-tag { position:absolute; pointer-events:none; z-index:7; font:600 .6rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color:#e8f6ff; background:rgba(4,8,20,.7); border:1px solid rgba(95,216,255,.35); border-radius:4px; padding:3px 6px; white-space:nowrap; transform:translate(0,-100%); }
+.ua-fd-tag[hidden] { display:none; }
+
+/* ─── Explore mode (js/upper-atmosphere-explore-hud.js) ───────────────
+ * Altitude column on the left edge, toasts top-centre, POI labels under
+ * the camera HUD (z 5), the panel in the Controls column, and the
+ * immersive fill. The column's bottom clears the legend + render
+ * controls via the MEASURED --ua-atmo-floor (never a constant). */
+.ua-xg {
+    position:absolute; left:12px; top:108px;
+    bottom:calc(var(--ua-atmo-floor, 74px) + 84px);
+    width:84px; z-index:5;
+    display:flex; flex-direction:column; align-items:flex-start; gap:5px;
+    cursor:pointer; user-select:none;
+}
+.ua-xg:focus-visible { outline:1px solid #5fd8ff; outline-offset:4px; border-radius:4px; }
+.ua-xg-cap { font:700 .55rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.14em; color:#6ce0ff; }
+.ua-xg-bar {
+    position:relative; flex:1; width:8px; margin-left:4px; border-radius:4px;
+    background:rgba(4,8,20,.65); box-shadow:0 0 0 1px rgba(120,200,255,.28), 0 0 12px rgba(0,0,0,.5);
+}
+.ua-xg:hover .ua-xg-bar { box-shadow:0 0 0 1px rgba(120,220,255,.7), 0 0 12px rgba(95,216,255,.25); }
+.ua-xg-band { position:absolute; left:0; right:0; opacity:.62; }
+.ua-xg-tick { position:absolute; left:-3px; width:14px; height:1px; background:rgba(230,245,255,.55); }
+.ua-xg-tick--line { background:#e8f4ff; height:1px; box-shadow:0 0 4px #e8f4ff; }
+.ua-xg-tick span {
+    position:absolute; left:17px; top:-5px; white-space:nowrap;
+    font:600 .54rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color:#9fc6d6;
+    text-shadow:0 0 3px #000, 0 0 2px #000;
+}
+.ua-xg-tick span em { font-style:normal; color:#7fa6b0; }
+.ua-xg-poi {
+    position:absolute; left:-5px; width:6px; height:6px;
+    transform:translateY(50%) rotate(45deg);
+    background:var(--c); box-shadow:0 0 6px var(--c); pointer-events:none;
+}
+.ua-xg-poi--found { opacity:.45; }
+.ua-xg-cam {
+    position:absolute; left:-6px; width:20px; height:2px; transform:translateY(50%);
+    background:#fff; box-shadow:0 0 8px #5fd8ff; z-index:2;
+}
+.ua-xg-cam-v {
+    position:absolute; left:24px; top:-8px; white-space:nowrap;
+    font:700 .6rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color:#04121c; background:#5fd8ff; padding:3px 5px; border-radius:3px;
+}
+.ua-xg-cam--above { background:#9aa8ff; box-shadow:0 0 8px #9aa8ff; }
+.ua-xg-cam--above .ua-xg-cam-v { background:#9aa8ff; }
+
+.ua-xt {
+    position:absolute; left:50%; top:112px; z-index:9; pointer-events:none;
+    transform:translate(-50%, -6px); opacity:0;
+    transition:opacity .35s ease, transform .35s ease;
+    text-align:center; max-width:min(440px, 72%);
+    padding:8px 18px 9px; border-radius:8px;
+    background:linear-gradient(180deg, rgba(4,10,24,.86), rgba(4,10,24,.64));
+    border:1px solid rgba(95,216,255,.45);
+    border-color:color-mix(in srgb, var(--ua-xt-accent, #5fd8ff) 60%, transparent);
+    box-shadow:0 0 28px rgba(0,0,0,.45), 0 0 18px color-mix(in srgb, var(--ua-xt-accent, #5fd8ff) 22%, transparent);
+}
+.ua-xt.on { opacity:1; transform:translate(-50%, 0); }
+.ua-xt-k { font:700 .56rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.22em; color:var(--ua-xt-accent, #5fd8ff); }
+.ua-xt-t { font:600 1.02rem/1.25 system-ui, sans-serif; color:#f2fbff; margin-top:4px; letter-spacing:.02em; }
+.ua-xt-s { font:500 .62rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; color:#9cb8c4; margin-top:3px; }
+.ua-xt-s:empty { display:none; }
+
+.ua-xl { position:absolute; inset:0; z-index:4; pointer-events:none; overflow:hidden; }
+.ua-xl-tag {
+    position:absolute; left:0; top:0; pointer-events:auto; cursor:pointer;
+    font:600 .58rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color:#e8f6ff;
+    background:rgba(4,8,20,.66); border:1px solid rgba(95,216,255,.35);
+    border-color:color-mix(in srgb, var(--ua-xl-c, #5fd8ff) 55%, transparent);
+    border-left:2px solid var(--ua-xl-c, #5fd8ff);
+    border-radius:3px; padding:3px 6px; white-space:nowrap;
+}
+.ua-xl-tag:hover { background:rgba(10,24,44,.92); color:#fff; }
+.ua-xl-tag[hidden] { display:none; }
+.ua-xl-tag--found { opacity:.62; }
+
+#ua-camera-hud button.ua-cam-live { border-color:#ffb057; color:#ffb057; animation:ua-cam-pulse 1.1s ease-in-out infinite; }
+@keyframes ua-cam-pulse { 50% { box-shadow:0 0 10px rgba(255,176,87,.55); } }
+#ua-cam-readout .ua-cam-nav .ua-cam-v { color:#7ff0c8; }
+#ua-cam-readout .ua-cam-nav[hidden] { display:none; }
+
+.ua-xp { display:flex; flex-direction:column; gap:8px; }
+.ua-xp-head { display:flex; justify-content:space-between; align-items:center; }
+.ua-xp-count { font:700 .66rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color:#ffd36b; letter-spacing:.06em; }
+.ua-xp-mini, .ua-xp-chip, .ua-xp-go {
+    font:600 .62rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; cursor:pointer;
+    background:rgba(4,8,20,.7); color:#9cc6d8; border:1px solid rgba(120,180,220,.25);
+    border-radius:5px; padding:4px 7px;
+}
+.ua-xp-mini:hover, .ua-xp-chip:hover, .ua-xp-go:hover { color:#eaffff; border-color:rgba(120,220,255,.55); }
+.ua-xp-chip[aria-pressed="true"] { color:#04121c; background:#5fd8ff; border-color:#5fd8ff; }
+.ua-xp-list { display:flex; flex-direction:column; gap:4px; }
+.ua-xp-row {
+    display:grid; grid-template-columns:10px 1fr auto; gap:8px; align-items:start;
+    padding:6px 7px; border-radius:6px; background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.05); border-left:2px solid var(--c);
+}
+.ua-xp-row--found { background:rgba(255,211,107,.05); }
+.ua-xp-dot { width:8px; height:8px; margin-top:3px; transform:rotate(45deg); background:var(--c); box-shadow:0 0 6px var(--c); }
+.ua-xp-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.ua-xp-name { font:600 .72rem/1.25 system-ui, sans-serif; color:#e6f4ff; }
+.ua-xp-name [data-r="found"] { color:#ffd36b; }
+.ua-xp-where, .ua-xp-fact { font:500 .6rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; color:#8fb4c4; }
+.ua-xp-fact { color:#b7d6c6; }
+.ua-xp-by { font:italic .58rem/1.35 system-ui, sans-serif; color:#62808e; }
+.ua-xp-go { align-self:center; color:#5fd8ff; border-color:rgba(95,216,255,.4); }
+.ua-xp-mile { display:flex; flex-wrap:wrap; gap:4px 10px; font:500 .6rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color:#6f8a96; }
+.ua-xp-mile .on { color:#ffd36b; }
+.ua-xp-toggles { display:flex; flex-wrap:wrap; gap:5px; }
+.ua-xp-keys { font:500 .62rem/1.55 system-ui, sans-serif; color:#86a4b2; }
+.ua-xp-keys b { color:#cfeaff; font-weight:600; }
+.ua-xp-note { font:italic .6rem/1.45 system-ui, sans-serif; color:#5f7c89; margin:0; }
+
+/* Immersive: the canvas card fills the window (and goes true fullscreen
+ * where the API allows; the CSS fill stands on its own where it does not). */
+#ua-globe-wrap.ua-immersive {
+    position:fixed !important; inset:0 !important; top:0 !important;
+    width:100vw !important; height:100vh !important; height:100dvh !important;
+    min-height:0 !important; max-height:none !important;
+    z-index:10000; border-radius:0; border:none; margin:0;
+}
+body.ua-immersive-on { overflow:hidden; }
+/* Phones: a narrower column (numbers only), smaller labels, a wider toast. */
+@media (max-width:768px) {
+    .ua-xg { width:48px; top:120px; }
+    .ua-xg-tick span em { display:none; }
+    .ua-xg-cam-v { font-size:.55rem; padding:2px 4px; }
+    .ua-xt { top:120px; max-width:88%; padding:6px 12px 7px; }
+    .ua-xt-t { font-size:.9rem; }
+    .ua-xl-tag { font-size:.52rem; padding:2px 4px; }
+}
+@media (max-width:900px) { #ua-flight-deck { width:min(300px, 60%); } }
+
+/* ─── Flight launch panel (Controls pane) ───────────────────────── */
+.ua-fp-group { display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-bottom:6px; }
+.ua-fp-grouplabel { font-size:.6rem; color:#667; text-transform:uppercase; letter-spacing:.08em; width:100%; }
+.ua-fp-preset { font-size:.66rem; padding:4px 9px; }
+.ua-fp-track { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+.ua-fp-sat { flex:1; min-width:120px; background:rgba(255,255,255,.05); color:#cde; border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:4px 6px; font-size:.7rem; }
+.ua-fp-custom summary { cursor:pointer; color:#0cc; font-size:.72rem; font-weight:600; margin:6px 0; }
+.ua-fp-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.ua-fp-row .ua-chip { font-size:.66rem; padding:4px 9px; display:inline-flex; gap:4px; align-items:center; }
+.ua-fp-row .ua-chip input { accent-color:#0cc; margin:0; }
+.ua-fp-horizon { background:rgba(255,255,255,.05); color:#cde; border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:4px 6px; font-size:.68rem; }
+.ua-fp-inc { font-size:.66rem; color:#9ab; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ua-fp-status { font-size:.66rem; line-height:1.45; margin-top:8px; min-height:1em; }
 
 /* ─── Camera HUD (top-right of globe) — Phase 25 refresh ── */
 /* The HUD now hosts two control rows (mode + preset/follow) plus the
@@ -2346,7 +2549,15 @@ input[type=range]::-moz-range-thumb {
         Interactive thermosphere + exosphere (80–2000 km). Jacchia-style
         surrogate mirroring the Parkers Physics DSMC pipeline; switches to
         SPARTA-refined tables once the offline grid ships. Inputs are live
-        indices — F10.7 cm flux and Ap.
+        indices — F10.7 cm flux and Ap. Fly satellites, re-entries and
+        suborbital arcs through the live density field with the
+        <strong>Flight dynamics</strong> panel: gravity + J2, drag against
+        the rotating air, energy · momentum · decay read off the deck. Or
+        <strong>Explore</strong> the band yourself: dive in from orbit
+        (double-click anywhere on the globe), fly along the sphere from 80
+        to 2000&nbsp;km through the layer boundaries, the gas and the
+        auroral curtains, and find the places the model puts the diurnal
+        bulge, the exobase and the airglow right now.
     </p>
     <div class="ua-chip-row" id="ua-presets"></div>
 </div>
@@ -2421,6 +2632,40 @@ input[type=range]::-moz-range-thumb {
             </div>
 
             <div id="ua-summary"><span class="ua-dim">Pick a preset above to load archived storm indices, or sweep the sliders.</span></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2 style="display:flex;align-items:center;gap:8px;">
+                Explore the atmosphere
+                <span class="ua-drag-chip" title="Every point of interest is placed by this page's own model">MODEL-PLACED</span>
+            </h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Dive from orbit into the band and fly <em>along</em> the
+                sphere anywhere from 80 to 2000&nbsp;km. Boundary grids come up
+                to meet you as you cross a layer, the gas around the camera
+                streaks past as you move, and the column on the left of the
+                view says where you are in the atmosphere. The places below
+                are where the page's own model puts them right now.
+            </p>
+            <div id="ua-explore-panel"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2 style="display:flex;align-items:center;gap:8px;">
+                Flight dynamics
+                <span class="ua-drag-chip" title="RK4 through the live anisotropic density field: gravity + J2, drag against the co-rotating air, optional unbanked lift">LIVE FIELD</span>
+            </h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Fly a body through <em>this</em> atmosphere. Presets launch at
+                the sim clock; <strong>Track</strong> seeds a reference
+                satellite from its live TLE through Rust SGP4; the custom
+                launch takes a site, speed, flight-path angle and heading.
+                The ribbon on the globe is the integrated path (colour = the
+                quantity you pick on the deck), the arrows are velocity ·
+                gravity · drag · lift, and the flight deck reads everything
+                off the head — energy, angular momentum, decay rate, heating.
+            </p>
+            <div id="ua-flight-panel"></div>
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
@@ -2891,6 +3136,8 @@ input[type=range]::-moz-range-thumb {
                         title="Orbit the planet (drag to rotate, scroll to zoom)">Orbit</button>
                 <button type="button" id="ua-cam-fly"
                         title="Free-fly · WASD move · Q/E down/up · Shift faster · drag to look">Fly</button>
+                <button type="button" id="ua-cam-explore"
+                        title="Explore the atmosphere · dive into the band under the camera and fly ALONG the sphere (W/S fly where you look · A/D turn · Q/E climb · drag to look). Double-click the globe to dive anywhere.">Explore</button>
                 <button type="button" id="ua-cam-iss"
                         title="Fly to the live ISS probe (420 km · 51.6°) and lock follow">↥ Visit ISS</button>
             </div>
@@ -2903,6 +3150,8 @@ input[type=range]::-moz-range-thumb {
                         title="Zoom in (decrease distance to target)">＋</button>
                 <button type="button" id="ua-cam-zoom-out"
                         title="Zoom out (increase distance to target)">−</button>
+                <button type="button" id="ua-cam-immersive"
+                        title="Immersive — fill the window with the view (Esc to leave)">⛶</button>
                 <button type="button" id="ua-cam-stop-follow" class="ua-cam-stop is-hidden"
                         title="Stop following the current target (camera stays put, you can orbit/fly freely)">⏹ Stop follow</button>
             </div>
@@ -2964,6 +3213,31 @@ input[type=range]::-moz-range-thumb {
                     <span class="ua-cam-k">Kn</span>
                     <span class="ua-cam-v" id="ua-cam-Kn">—</span>
                 </div>
+                <div class="ua-cam-row" title="Number fractions of the gas at the camera's altitude (engine)">
+                    <span class="ua-cam-k">gas</span>
+                    <span class="ua-cam-v" id="ua-cam-gas">—</span>
+                </div>
+                <div class="ua-cam-row" title="Mean free path — how far a molecule flies between collisions">
+                    <span class="ua-cam-k">λ</span>
+                    <span class="ua-cam-v" id="ua-cam-mfp">—</span>
+                </div>
+                <div class="ua-cam-row" title="Mean thermal speed of the dominant species">
+                    <span class="ua-cam-k">v_th</span>
+                    <span class="ua-cam-v" id="ua-cam-vth">—</span>
+                </div>
+                <div class="ua-cam-row ua-cam-nav" id="ua-cam-nav" hidden
+                     title="Heading, then cruise speed — a NAVIGATION speed (1.2 × altitude per second) — as a multiple of the circular orbital speed at this altitude">
+                    <span class="ua-cam-k">nav</span>
+                    <span class="ua-cam-v" id="ua-cam-nav-v">—</span>
+                </div>
+                <div class="ua-cam-row ua-cam-nav" id="ua-cam-pos" hidden>
+                    <span class="ua-cam-k">over</span>
+                    <span class="ua-cam-v" id="ua-cam-pos-v">—</span>
+                </div>
+                <div class="ua-cam-row ua-cam-transit" id="ua-cam-transit" hidden>
+                    <span class="ua-cam-k">transit</span>
+                    <span class="ua-cam-v" id="ua-cam-transit-v">—</span>
+                </div>
                 <div class="ua-cam-mode" id="ua-cam-mode">orbit</div>
                 <div class="ua-cam-hint" id="ua-cam-hint">drag to rotate · scroll to zoom</div>
             </div>
@@ -2993,6 +3267,9 @@ input[type=range]::-moz-range-thumb {
             <button type="button" class="ua-atmo-btn" id="ua-atmo-anomaly"
                     aria-pressed="false"
                     title="Colour by the local drag multiplier: local density divided by the spherically symmetric model. Shows the diurnal bulge and auroral inflation directly.">anomaly</button>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-plasma"
+                    aria-pressed="false"
+                    title="Plasma thickness: electrons along each view ray (slant TEC), from the shared F-region stack, the fountain's crests and bubbles, the teardrop-plasmapause trough and travelling ionospheric disturbances.">plasma</button>
             <button type="button" class="ua-atmo-btn" id="ua-atmo-shells"
                     aria-pressed="false"
                     title="A/B against the older five discrete gradient shells.">shells</button>
@@ -3000,6 +3277,24 @@ input[type=range]::-moz-range-thumb {
             <button type="button" class="ua-atmo-btn" id="ua-atmo-probe"
                     aria-pressed="true"
                     title="Limb probe — point anywhere to read the tangent altitude, local density, column and drag multiplier of that view ray.">probe</button>
+            <span class="ua-atmo-sep"></span>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-gas"
+                    aria-pressed="true"
+                    title="Camera-local gas: dots ∝ log₁₀ n (symbolic — one dot is not one molecule), colour = species from the engine's fractions, drift ∝ thermal speed, heading changes ∝ collision rate.">gas</button>
+            <span class="ua-atmo-group" id="ua-transit-controls" role="group" aria-label="Layer transit">
+                <button type="button" class="ua-atmo-btn" id="ua-transit-descend"
+                        title="Ride the local vertical DOWN through the layers from where the camera is (or from the 2000 km model ceiling) to the 80 km floor, horizon level. Any fly key or drag releases the camera.">⇣ descend</button>
+                <button type="button" class="ua-atmo-btn" id="ua-transit-ascend"
+                        title="Ride the local vertical UP to the 2000 km model ceiling.">⇡ ascend</button>
+                <button type="button" class="ua-atmo-btn" id="ua-transit-hold"
+                        title="Hold the altitude (the camera stays locked to the vertical); press again to resume." hidden>⏸ hold</button>
+                <select id="ua-transit-rate" class="ua-atmo-select" title="Transit rate — kilometres of altitude per second of real time">
+                    <option value="5">5 km/s</option>
+                    <option value="20">20 km/s</option>
+                    <option value="50" selected>50 km/s</option>
+                    <option value="200">200 km/s</option>
+                </select>
+            </span>
         </div>
 
         <div id="ua-globe-legend" data-open="0">
@@ -3042,7 +3337,12 @@ input[type=range]::-moz-range-thumb {
     // Legend copy lives with the renderer so the two cannot drift — in
     // particular the DISPLAY TRANSFORM (log decades + gamma) is generated
     // from the live uniforms, never retyped here.
-    import { volumeLegend } from './js/upper-atmosphere-instruments.js';
+    import { volumeLegend, plasmaLegend } from './js/upper-atmosphere-instruments.js';
+    // Flight dynamics: the deck lives on the canvas, the launch panel in
+    // the Controls pane; both drive the globe's flight API only.
+    import { FlightDeck } from './js/upper-atmosphere-flight-deck.js';
+    import { FlightPanel } from './js/upper-atmosphere-flight-panel.js';
+    import { ExploreHud } from './js/upper-atmosphere-explore-hud.js';
 
     const canvas = document.getElementById('ua-globe');
     const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.2 });
@@ -3085,6 +3385,7 @@ input[type=range]::-moz-range-thumb {
             // Camera HUD
             camOrbitBtn:      document.getElementById('ua-cam-orbit'),
             camFlyBtn:        document.getElementById('ua-cam-fly'),
+            camExploreBtn:    document.getElementById('ua-cam-explore'),
             camIssBtn:        document.getElementById('ua-cam-iss'),
             // Phase 25 — preset / utility / follow controls
             camResetBtn:      document.getElementById('ua-cam-reset'),
@@ -3099,6 +3400,9 @@ input[type=range]::-moz-range-thumb {
             camKn:            document.getElementById('ua-cam-Kn'),
             camMode:          document.getElementById('ua-cam-mode'),
             camHint:          document.getElementById('ua-cam-hint'),
+            camGas:           document.getElementById('ua-cam-gas'),
+            camMfp:           document.getElementById('ua-cam-mfp'),
+            camVth:           document.getElementById('ua-cam-vth'),
             // Drag forecast (Phase 1: nowcast, sun-driven flow;
             //                Phase 3: AR(1) horizon scrubber)
             dragToggle:        document.getElementById('ua-drag-toggle'),
@@ -3213,8 +3517,34 @@ input[type=range]::-moz-range-thumb {
     const scrubberHost = document.getElementById('ua-time-scrubber-host');
     const timeScrubber = scrubberHost ? new TimeScrubber(scrubberHost) : null;
 
+    // ── Flight dynamics: deck on the canvas, launch panel in Controls ──
+    const flightDeck = new FlightDeck({
+        host: document.getElementById('ua-globe-wrap'), globe,
+        getState: () => ({ f107: ui.state.f107, ap: ui.state.ap }),
+    });
+    const flightPanelEl = document.getElementById('ua-flight-panel');
+    const flightPanel = flightPanelEl ? new FlightPanel({ host: flightPanelEl, globe }) : null;
+    // The deck docks under the camera HUD; publish the HUD's MEASURED bottom
+    // (its rows wrap on narrow viewports) the way --ua-atmo-floor is done.
+    (() => {
+        const wrap = document.getElementById('ua-globe-wrap');
+        const hud = document.getElementById('ua-camera-hud');
+        if (!wrap || !hud) return;
+        const place = () => wrap.style.setProperty('--ua-cam-hud-bottom', `${hud.offsetTop + hud.offsetHeight}px`);
+        place();
+        new ResizeObserver(place).observe(hud);
+    })();
+
+    // ── Explore: altitude column, toasts, POI labels, panel, immersive ──
+    const exploreHud = new ExploreHud({
+        wrap: document.getElementById('ua-globe-wrap'), globe,
+        panelHost: document.getElementById('ua-explore-panel'),
+    });
+
     // Expose for devtools poking.
-    window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber };
+    window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber,
+                    flight: { deck: flightDeck, panel: flightPanel, layer: globe.getFlightLayer() },
+                    explore: exploreHud };
 
     /* ─── Atmosphere render controls + legend ────────────────────
      * The two component buttons are separate physical claims, not a
@@ -3228,10 +3558,12 @@ input[type=range]::-moz-range-thumb {
         const press = (el, on) => el?.setAttribute('aria-pressed', on ? 'true' : 'false');
         const bDen = btn('ua-atmo-density'), bGlow = btn('ua-atmo-airglow');
         const bAnom = btn('ua-atmo-anomaly'), bShell = btn('ua-atmo-shells');
-        const bProbe = btn('ua-atmo-probe');
+        const bProbe = btn('ua-atmo-probe'), bPlasma = btn('ua-atmo-plasma');
         if (!bDen) return;
 
-        let density = true, airglow = true, anomaly = false, shells = false;
+        // `anomaly` and `plasma` are mutually exclusive VIEWS of the volume
+        // (one uMode); density / airglow are components of the column view.
+        let density = true, airglow = true, anomaly = false, plasma = false, shells = false;
 
         const syncLegend = () => {
             const body = document.getElementById('ua-legend-body');
@@ -3245,12 +3577,15 @@ input[type=range]::-moz-range-thumb {
                 if (sum) sum.textContent = 'discrete shells (A/B reference)';
                 return;
             }
-            const legend = volumeLegend(globe.getVolumeScaleInfo?.());
+            const legend = plasma ? plasmaLegend(globe.ionosphereState?.())
+                : volumeLegend(globe.getVolumeScaleInfo?.());
             body.innerHTML = legend.lines
                 .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
             if (sum) {
                 const sc = globe.getVolumeScaleInfo?.();
-                sum.textContent = anomaly
+                sum.textContent = plasma
+                    ? 'plasma thickness · slant TEC, log₁₀ 1–1000 TECU'
+                    : anomaly
                     ? `local ÷ model density · log₁₀ × ${sc?.decades ?? 10}`
                     : `continuous column · log₁₀ × ${sc?.decades ?? 10}`;
             }
@@ -3259,26 +3594,75 @@ input[type=range]::-moz-range-thumb {
         const apply = () => {
             globe.setAtmosphereRender?.(shells ? 'shells' : 'volume');
             globe.setVolumeComponents?.({ density, airglow });
-            globe.setVolumeMode?.(anomaly ? 'anomaly' : 'column');
+            globe.setVolumeMode?.(plasma ? 'plasma' : anomaly ? 'anomaly' : 'column');
             press(bDen, density); press(bGlow, airglow);
-            press(bAnom, anomaly); press(bShell, shells);
-            // The component toggles only mean anything for the volume.
-            for (const b of [bDen, bGlow, bAnom]) {
-                b.disabled = shells;
-                b.style.opacity = shells ? '.45' : '';
+            press(bAnom, anomaly); press(bShell, shells); press(bPlasma, plasma);
+            // The component toggles only mean anything for the volume, and
+            // the plasma view draws neither component.
+            for (const b of [bDen, bGlow, bAnom, bPlasma]) {
+                if (!b) continue;
+                const off = shells || (plasma && (b === bDen || b === bGlow));
+                b.disabled = off;
+                b.style.opacity = off ? '.45' : '';
             }
             syncLegend();
         };
 
         bDen.addEventListener('click', () => { density = !density; apply(); });
         bGlow.addEventListener('click', () => { airglow = !airglow; apply(); });
-        bAnom.addEventListener('click', () => { anomaly = !anomaly; apply(); });
+        bAnom.addEventListener('click', () => { anomaly = !anomaly; if (anomaly) plasma = false; apply(); });
+        bPlasma?.addEventListener('click', () => { plasma = !plasma; if (plasma) anomaly = false; apply(); });
+        // The E-field line in the plasma legend is live state: refresh it
+        // while that legend is up (cheap text, every 2 s).
+        setInterval(() => { if (plasma && !shells) syncLegend(); }, 2000);
         bShell.addEventListener('click', () => { shells = !shells; apply(); });
         bProbe?.addEventListener('click', () => {
             const on = !globe.getLimbProbeEnabled?.();
             globe.setLimbProbeEnabled?.(on);
             press(bProbe, on);
         });
+
+        /* ─── Layer transit + the camera-local gas ────────────────── */
+        const bGas = btn('ua-atmo-gas');
+        bGas?.addEventListener('click', () => {
+            const on = !globe.getAmbientGasVisible?.();
+            globe.setAmbientGasVisible?.(on);
+            press(bGas, on);
+        });
+        const bDesc = btn('ua-transit-descend'), bAsc = btn('ua-transit-ascend');
+        const bHold = btn('ua-transit-hold'), selRate = btn('ua-transit-rate');
+        const rowT = document.getElementById('ua-cam-transit');
+        const valT = document.getElementById('ua-cam-transit-v');
+        const rate = () => Number(selRate?.value) || 50;
+        bDesc?.addEventListener('click', () => globe.startTransit?.({ mode: 'descend', kmPerSec: rate() }));
+        bAsc?.addEventListener('click', () => globe.startTransit?.({ mode: 'ascend', kmPerSec: rate() }));
+        bHold?.addEventListener('click', () => {
+            const st = globe.getTransitState?.();
+            if (st?.active) globe.pauseTransit?.(!st.paused);
+        });
+        const paintTransit = (ev) => {
+            const st = globe.getTransitState?.();
+            const on = !!st?.active;
+            // A transit switches the controller to fly mode itself; keep the
+            // camera HUD's mode chip honest (it is otherwise only repainted
+            // by its own buttons).
+            if (ev?.detail?.kind === 'start') {
+                // The transit hands the camera to EXPLORE (the mode chip and
+                // buttons are repainted by the explore HUD on the mode change).
+                const hint = document.getElementById('ua-cam-hint');
+                if (hint) hint.textContent = 'transit · WASD or drag releases the camera';
+            }
+            for (const b of [bDesc, bAsc]) b?.classList.toggle('ua-atmo-btn--live', on && st.mode === (b === bDesc ? 'descend' : 'ascend') && !st.done);
+            if (bHold) { bHold.hidden = !on; bHold.textContent = st?.paused ? '▶ resume' : '⏸ hold'; }
+            if (rowT) {
+                rowT.hidden = !on;
+                if (on && valT) valT.textContent = st.done
+                    ? `arrived · ${Math.round(st.altKm)} km · WASD / drag to release`
+                    : `${st.paused ? 'holding' : (st.mode === 'descend' ? '⇣' : '⇡') + ' ' + st.kmPerSec + ' km/s'} → ${Math.round(st.toKm)} km`;
+            }
+        };
+        window.addEventListener('ua-transit', paintTransit);
+        paintTransit();
 
         const legendEl = document.getElementById('ua-globe-legend');
         const toggle = document.getElementById('ua-legend-toggle');

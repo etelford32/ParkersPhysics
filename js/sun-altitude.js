@@ -80,6 +80,19 @@ function gmstDeg(jd) {
     return mod360(280.46061837 + 360.98564736629 * jd);
 }
 
+/**
+ * Greenwich mean sidereal time in DEGREES at a Date (or Unix ms). The
+ * same Meeus 12.4 series `subSolarPoint` is built on, exported so the
+ * upper-atmosphere flight kernel can rotate ECI ↔ Earth-fixed with the
+ * ONE sidereal clock this module already keeps (js/geo/coords.js has a
+ * second, three.js-bound copy for the satellite tracker; the two agree to
+ * ~1 arcsecond). Do not add a third.
+ */
+export function greenwichSiderealDeg(dateOrMs) {
+    const d = dateOrMs instanceof Date ? dateOrMs : new Date(dateOrMs);
+    return gmstDeg(julianDay(d));
+}
+
 // Equation of time in minutes (positive = sundial ahead of mean clock).
 // EoT = 4·(L − α) reduced to [−180°, +180°] before scaling — avoids the
 // 360°-wrap glitch that bites naive implementations twice a year.
