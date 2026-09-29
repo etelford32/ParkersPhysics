@@ -92,6 +92,7 @@ import { FlightLayer } from './upper-atmosphere-flight-layer.js';
 // camera-local gas cloud is re-sampled from the engine at its altitude.
 import { AtmosphereTransit } from './upper-atmosphere-transit.js';
 import { ExploreLayer } from './upper-atmosphere-explore.js';
+import { frameClock } from './upper-atmosphere-frame-clock.js';
 import {
     divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8,
 } from './upper-atmosphere-explore-model.js';
@@ -4832,9 +4833,75 @@ export class AtmosphereGlobe {
 
     _animate() {
         this._raf = requestAnimationFrame(this._animate);
+        // Manual clock (the test hook): frames advance only through
+        // stepFrames(), so nothing moves between a test's steps.
+        if (this._manualClock) return;
         const t = this._clock.getElapsedTime();
         const dt = this._clock.getDelta();
+        // The camera controller gets a REAL wall-clock delta. `dt` above is
+        // ~0 every frame (Clock.getElapsedTime() consumes the delta — plan
+        // §6), which left fly-mode WASD nearly frozen and the follow spring
+        // (k = 1 − e^(−dt/τ)) never closing on its target. Only the controls
+        // take the corrected value; every other consumer of `dt` keeps its
+        // historical behaviour until its speed is looked at deliberately.
+        const wallNow = performance.now();
+        const dtWall = this._lastWallMs == null ? 0.016 : Math.min(0.1, (wallNow - this._lastWallMs) / 1000);
+        this._lastWallMs = wallNow;
+        this._frame(t, dt, dtWall, { render: true, stepBus: true });
+    }
 
+    // ── Test hook: a manual, steppable frame clock ──────────────────────
+    /**
+     * Freeze the render loop onto a manual clock. While on, the rAF loop
+     * idles, the shared frame clock (js/upper-atmosphere-frame-clock.js)
+     * stands still, the time bus is not stepped (so the sun, the probes and
+     * the scene instant are frozen), and frames advance only through
+     * stepFrames(). Off resumes live without a jump. `startMs` pins the
+     * manual clock's starting instant (default: the wall time of the switch).
+     */
+    setManualClock(on, { startMs = null } = {}) {
+        on = !!on;
+        if (on === !!this._manualClock) return;
+        this._manualClock = on;
+        // A fixed start makes time-driven visuals (aurora rays, the
+        // discovery cadence) the same frame on every run.
+        frameClock.setManual(on, startMs);
+        if (on) {
+            this._manualT = Number.isFinite(startMs) ? startMs / 1000 : this._clock.getElapsedTime();
+        } else {
+            this._lastWallMs = null;
+            this._clock.getDelta();
+        }
+    }
+    isManualClock() { return !!this._manualClock; }
+    /**
+     * Run `n` frames of exactly `dtSec` each (entering manual mode if
+     * needed). `render`: 'last' (default — cheap on a software renderer,
+     * the camera logic still runs every frame), 'each', or 'none'.
+     * The legacy per-frame `dt` is passed as 0, which is what the live loop
+     * hands those consumers (plan §6), so stepped frames match live ones.
+     */
+    stepFrames(n = 1, dtSec = 1 / 60, { render = 'last' } = {}) {
+        if (!this._manualClock) this.setManualClock(true);
+        const steps = Math.max(0, Math.floor(n));
+        const dt = Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 1 / 60;
+        for (let i = 0; i < steps; i++) {
+            frameClock.advance(dt * 1000);
+            this._manualT += dt;
+            const doRender = render === 'each' || (render === 'last' && i === steps - 1);
+            this._frame(this._manualT, 0, dt, { render: doRender, stepBus: false });
+        }
+        return { timeMs: frameClock.now(), frames: steps };
+    }
+    /** Seed the stochastic visuals (the camera-local gas) for repeatable frames; null = Math.random. */
+    seedRandom(seed) { this._transit?.setSeed(seed); }
+
+    /**
+     * One frame of the scene. `t` is the elapsed clock, `dt` the legacy
+     * per-frame delta (~0, plan §6), `dtWall` the real (or stepped) delta the
+     * camera stack uses.
+     */
+    _frame(t, dt, dtWall, { render = true, stepBus = true } = {}) {
         if (this._skin) this._skin.update(t);
 
         // Per-frame particle integration. Each layer system runs its
@@ -4885,7 +4952,7 @@ export class AtmosphereGlobe {
         // rung and climbs only while the frame interval says there is
         // headroom — it times itself rather than taking the `dt` above,
         // which is ~0 every frame (see _governQuality's comment).
-        this._volume?.update(this._camera);
+        this._volume?.update(this._camera, { govern: stepBus });
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.
@@ -4933,15 +5000,6 @@ export class AtmosphereGlobe {
             }
         }
 
-        // The camera controller gets a REAL wall-clock delta. `dt` above is
-        // ~0 every frame (Clock.getElapsedTime() consumes the delta — plan
-        // §6), which left fly-mode WASD nearly frozen and the follow spring
-        // (k = 1 − e^(−dt/τ)) never closing on its target. Only the controls
-        // take the corrected value here; every other consumer of `dt` keeps
-        // its historical behaviour until its speed is looked at deliberately.
-        const wallNow = performance.now();
-        const dtWall = this._lastWallMs == null ? 0.016 : Math.min(0.1, (wallNow - this._lastWallMs) / 1000);
-        this._lastWallMs = wallNow;
         // The controls are stepped AFTER every position update below (just
         // before the render): a follow that aims at a target's PREVIOUS
         // position lags it by a frame's worth of motion, which on a slow
@@ -4953,7 +5011,7 @@ export class AtmosphereGlobe {
         // drift between frames). Every downstream consumer (sat probes,
         // debris, eventually realtime driver + analyzer) reads
         // bus.getSimTime() — one canonical "now" across the page.
-        this._timeBus?.step();
+        if (stepBus) this._timeBus?.step();
 
         // Per-frame satellite orbit propagation. Uses absolute sim-time
         // via the bus (Phase B) — each probe carries (_epochMs,
@@ -5012,6 +5070,7 @@ export class AtmosphereGlobe {
         this._updateExploreFocus(camMode);
         this._updateNearPlane();
 
+        if (!render) return;
         this._renderer.render(this._scene, this._camera);
 
         // 2-D instrument overlay, drawn after the GL frame so its ruler and

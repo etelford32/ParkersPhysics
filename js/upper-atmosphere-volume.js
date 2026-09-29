@@ -688,10 +688,14 @@ export class AtmosphereVolume {
      * Per-frame: the march needs the live camera position, and the governor
      * takes its tick here.
      */
-    update(camera) {
+    update(camera, { govern = true } = {}) {
         if (this._disposed || !this._mesh.visible) return;
         this._material.uniforms.uCameraPos.value.copy(camera.position);
-        this._governQuality();
+        // Stepped test frames (the globe's manual clock) arrive milliseconds
+        // apart with no render between them, which the governor would read
+        // as headroom and climb on; they update the camera and leave the
+        // ladder alone.
+        if (govern) this._governQuality();
     }
 
     setVisible(on)      { this._mesh.visible = !!on; }

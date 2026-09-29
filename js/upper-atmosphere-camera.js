@@ -49,6 +49,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     stateFromPose, explorePose, exploreStep, transitionFovGain, EXPLORE,
 } from './upper-atmosphere-explore-model.js';
+// Paths and flyTo animations time themselves on the shared frame clock, so
+// the test hook's stepped frames drive them exactly.
+import { frameClock } from './upper-atmosphere-frame-clock.js';
 
 const R_EARTH_KM = 6371;
 
@@ -260,7 +263,7 @@ export class CameraController {
         this._orbit.enabled = false;
         this._path = {
             path, endMode, onDone,
-            t0: performance.now() / 1000,
+            t0: frameClock.now() / 1000,
             duration: Math.max(0.2, durationSec ?? path.durationSec ?? 4),
             fov0: this.camera.fov,
             s: 0,
@@ -291,7 +294,7 @@ export class CameraController {
 
     _stepPath() {
         const P = this._path;
-        const now = performance.now() / 1000;
+        const now = frameClock.now() / 1000;
         const s = Math.min(1, (now - P.t0) / P.duration);
         P.s = s;
         const pose = P.path.at(s);
@@ -354,7 +357,7 @@ export class CameraController {
             endQuat.copy(start.quat);
         }
         this._anim = {
-            t0:        performance.now() / 1000,
+            t0:        frameClock.now() / 1000,
             duration:  durationSec,
             startPos:  start.pos,
             endPos:    targetPos.clone(),
@@ -676,7 +679,7 @@ export class CameraController {
 
     _stepAnim() {
         const a = this._anim;
-        const now = performance.now() / 1000;
+        const now = frameClock.now() / 1000;
         const t = Math.min(1, (now - a.t0) / a.duration);
         // Ease in/out (smoothstep).
         const k = t * t * (3 - 2 * t);

@@ -56,6 +56,7 @@ import {
 } from './upper-atmosphere-explore-model.js';
 import { latLonToScene, sceneToLatLon } from './upper-atmosphere-column.js';
 import { capPointSize } from './upper-atmosphere-point-cap.js';
+import { frameClock } from './upper-atmosphere-frame-clock.js';
 
 const NB = BOUNDARIES.length;
 const STORE_KEY = 'ua_explore_found_v1';
@@ -417,7 +418,7 @@ export class ExploreLayer {
 
     /** Re-place the POIs from the live state (the sun moves, Ap changes). */
     refreshPois(force = false) {
-        const now = performance.now();
+        const now = frameClock.now();
         if (!force && now - this._poiAt < 2000) return;
         this._poiAt = now;
         let inputs = {};
@@ -523,7 +524,7 @@ export class ExploreLayer {
         // Aurora: fade in as the camera comes down toward the band.
         const af = this._auroraOn ? Math.max(0, Math.min(1, (4000 - alt) / 2500)) : 0;
         this._auroraMat.uniforms.uFade.value = af;
-        this._auroraMat.uniforms.uTime.value = performance.now() / 1000;
+        this._auroraMat.uniforms.uTime.value = frameClock.now() / 1000;
         this._auroraGroup.visible = af > 0.01;
 
         // Crossings + milestones, only while the camera is being travelled
@@ -541,7 +542,7 @@ export class ExploreLayer {
         }
 
         // Discoveries, a few times a second.
-        const now = performance.now();
+        const now = frameClock.now();
         if (travelling && now - this._lastDiscoveryCheck > 250 && alt <= EXPLORE.ceilKm + 1) {
             this._lastDiscoveryCheck = now;
             const ll = sceneToLatLon([camera.position.x, camera.position.y, camera.position.z]);

@@ -40,6 +40,19 @@ import {
     CLOUD, MODEL_FLOOR_KM, MODEL_CEIL_KM, R_EARTH_KM, TRANSIT_FLOOR_KM,
 } from './upper-atmosphere-transit-model.js';
 import { capPointSize } from './upper-atmosphere-point-cap.js';
+import { frameClock } from './upper-atmosphere-frame-clock.js';
+
+/** mulberry32: a small seedable PRNG, so a test can pin the gas cloud. */
+function _mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+        a = (a + 0x6D2B79F5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
 
 const CANCEL_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 
@@ -84,6 +97,8 @@ export class AtmosphereTransit {
         this._gasKey = '';
         this._gasAt = 0;
         this._cloudVisible = true;
+        // Random source for the cloud: Math.random unless a test seeds it.
+        this._rand = Math.random;
 
         const N = CLOUD.maxDots;
         this._pos = new Float32Array(N * 3);
@@ -239,6 +254,17 @@ export class AtmosphereTransit {
     getCloudVisible() { return this._cloudVisible; }
     getGas() { return this._gas; }
     getCloudCount() { return this._cloud.visible ? this._cloud.geometry.drawRange.count : 0; }
+    /**
+     * Seed the cloud's random source (test hook): the dots are re-laid from
+     * the seed on the next frame, so a stepped test sees the same cloud and
+     * the same streaks every run. `null` goes back to Math.random.
+     */
+    setSeed(seed) {
+        this._rand = Number.isFinite(seed) ? _mulberry32(seed) : Math.random;
+        this._seeded = false;
+        this._lastCam = null;
+        this._vel.set(0, 0, 0);
+    }
     /** Streak segments drawn this frame, and their apparent length (R⊕). */
     getStreakInfo() {
         return {
@@ -301,7 +327,7 @@ export class AtmosphereTransit {
         for (let i = 0; i < CLOUD.maxDots; i++) {
             // Uniform in a ball around the camera.
             let x, y, z;
-            do { x = Math.random() * 2 - 1; y = Math.random() * 2 - 1; z = Math.random() * 2 - 1; }
+            do { x = this._rand() * 2 - 1; y = this._rand() * 2 - 1; z = this._rand() * 2 - 1; }
             while (x * x + y * y + z * z > 1);
             this._pos[i * 3] = cam.position.x + x * R;
             this._pos[i * 3 + 1] = cam.position.y + y * R;
@@ -311,7 +337,7 @@ export class AtmosphereTransit {
         this._seeded = true;
     }
     _randomDir(i) {
-        const u = Math.random() * 2 - 1, ph = Math.random() * Math.PI * 2;
+        const u = this._rand() * 2 - 1, ph = this._rand() * Math.PI * 2;
         const r = Math.sqrt(1 - u * u);
         this._dir[i * 3] = r * Math.cos(ph); this._dir[i * 3 + 1] = r * Math.sin(ph); this._dir[i * 3 + 2] = u;
     }
@@ -335,7 +361,7 @@ export class AtmosphereTransit {
         // the follow spring's sake, and on a slow renderer a 200 km/s descent
         // ran at ~60 km/s on it (measured). Capped at 1 s so a backgrounded
         // tab does not teleport the camera on return.
-        const now = performance.now();
+        const now = frameClock.now();
         const dtReal = this._lastMs == null ? dt : Math.min(1, (now - this._lastMs) / 1000);
         this._lastMs = now;
         if (s.active) {
@@ -385,7 +411,7 @@ export class AtmosphereTransit {
         const P = this._pos, D = this._dir, n = gas.count;
         for (let i = 0; i < n; i++) {
             const o = i * 3;
-            if (Math.random() < pFlip) this._randomDir(i);
+            if (this._rand() < pFlip) this._randomDir(i);
             P[o] += D[o] * step; P[o + 1] += D[o + 1] * step; P[o + 2] += D[o + 2] * step;
             const dx = P[o] - cx, dy = P[o + 1] - cy, dz = P[o + 2] - cz;
             const d2 = dx * dx + dy * dy + dz * dz;
@@ -396,7 +422,7 @@ export class AtmosphereTransit {
                 // — measured as all the streaks bunched in a corner — so
                 // re-seed it uniformly in the ball instead.
                 let x, y, z;
-                do { x = Math.random() * 2 - 1; y = Math.random() * 2 - 1; z = Math.random() * 2 - 1; }
+                do { x = this._rand() * 2 - 1; y = this._rand() * 2 - 1; z = this._rand() * 2 - 1; }
                 while (x * x + y * y + z * z > 1);
                 P[o] = cx + x * R; P[o + 1] = cy + y * R; P[o + 2] = cz + z * R;
             } else if (d2 > R2) {

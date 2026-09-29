@@ -558,6 +558,73 @@ each measured at the 95 km floor and each gated by the third test in
   showed a tooltip titled "undefined". The layer shells are exempt: hidden in
   the default volume render, they still answer "which layer is this".
 
+### 9.7 Testing what the camera sees (2026-09-29)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-frame-clock.js` | the ONE clock the camera stack reads: `performance.now()` normally, stepped time in manual mode, continuous across the switch | `node tests/upper-atmosphere-frame-clock.mjs` (5) + every spec below |
+| `globe.setManualClock(on, { startMs })` / `stepFrames(n, dt, { render })` / `seedRandom(seed)` | the test hook: rAF idles, frames advance by exactly `dt` | `tests/upper-atmosphere-camera-feel.spec.js` (5) |
+| `tests/helpers/image-metrics.mjs` | PURE metrics on raw RGBA: `horizonDeviation`, `lineWidths` (half maximum), `runWidths`, `coverage`, `seamStep`, `blobStats` | `node tests/image-metrics.mjs` (12, synthetic, each metric shown failing its bug) |
+| `tests/upper-atmosphere-image-metrics.spec.js` | four solo-render gates, each with a runtime NEGATIVE CONTROL | itself (5 tests, ~45 s) |
+| `.github/workflows/upper-atmosphere-kernels.yml` | the six node tests on every push that touches them | CI, ~2 s |
+
+- **The frame clock.** Everything that moves the camera or times a visual —
+  dives/climbs/flyTo (`-camera.js`), the transit and the gas (`-transit.js`),
+  POI refresh, discovery checks and the aurora's `uTime` (`-explore.js`) —
+  reads `frameClock.now()`. In manual mode the render loop idles, the time
+  bus is NOT stepped (sun, probes and scene instant are frozen), the volume
+  governor does not run on stepped frames (it would read a software
+  rasteriser's frame time as a verdict), and `stepFrames` advances exactly
+  `n × dt`. Leaving manual mode resumes FROM the manual time (a pinned
+  start is far from the wall clock, and a backwards jump would be a negative
+  dt in the transit and a negative path progress). A module singleton on purpose: threading a clock through every
+  constructor would put test plumbing into production signatures. Anything
+  new that animates on this page must read it, or it will not stand still
+  under the hook and its test will be measuring the machine.
+- **The camera-feel gate compares the page to the kernel, frame for frame.**
+  Held keys fly EXACTLY `exploreStep`'s cruise/turn/climb/boost (1e-6°),
+  mouse look is exactly pixels × 0.0035 rad, a dive IS `divePath` at every
+  stepped frame (1e-9) with the kernel's FOV gain and lands on time, any
+  input stops a dive on the event, and a seeded gas cloud is repeatable with
+  streak length = shutter × speed (1 %). On a renderer that draws one frame
+  every ~0.6 s, none of that was checkable before — only "it moved, roughly
+  east".
+- **Image metrics run on SOLO renders.** The layer under test is drawn alone
+  on black (`__uaSolo` hides every other leaf, clears the background, renders
+  and `gl.readPixels` in the same task because the drawing buffer is not
+  preserved), off-site requests are blocked so EarthSkin keeps its grey
+  fallback, and the manual clock starts at a fixed instant. The numbers:
+
+  | gate | now | control (the old bug, put back at runtime) |
+  |---|---|---|
+  | limb vs the ANALYTIC limb (per-column ray tangency), 300 / 110 km | 0.86 / 0.79 px | 14 / 24 px — `IcosahedronGeometry(1, 5)`, the 720-face planet |
+  | the line straight ahead, width at half maximum, 270 km grazing | ≤ 4 px | 25 px — isotropic width ÷ grazing cosine |
+  | camera 10 m above the 250 km boundary on the equator, coverage | 0 | 59 % of the frame — whole-degree grid, no near fade |
+  | aurora column-to-column step at the MLT seam (÷ mean) | 0.08 | 0.81, AT the seam — non-periodic noise + folds |
+  | nearest sprite at 1.1–10 × the near plane | ≤ cap + 1 px, a disc | gas 30 px; layer particle 243 px square (fill 1.0) |
+
+  Every gate asserts its control FAILS — a metric that cannot see the bug is
+  not a gate, and a threshold set without a control is a guess. Controls are
+  shader-text patches (`split/join` on the exact source line; a patch that
+  no longer applies throws, so a refactor cannot silently turn a control
+  into a no-op), a swapped geometry, or a replaced material, always
+  restored. Three measuring choices, each forced by a first attempt that
+  could not separate the two: the grid is drawn at 16× gain for the
+  measurement (the product draws it at ~8/255, where 8-bit quantisation IS
+  the width) and widths are taken at HALF the line's own peak above the
+  row's median, so neither the gain nor the dim rim fill enters; only the
+  receding line dead ahead is measured (every other line crosses rows at a
+  slant, and a slanted line's horizontal run is its width ÷ sin θ); and the
+  seam step is column-to-column (`win = 1`) because the rays are 20–40 px
+  wide and an 8 px window scored them 0.55 against the seam's 1.05.
+- **Sprites nearer than the camera's near plane are clipped**, so the sprite
+  gate places its dot at multiples of `camera.near` (24 km at 95 km
+  altitude) rather than at a fixed distance — at 0.5–20 km neither the
+  product nor the control drew anything, which is a passing test of nothing.
+- **Tuning**: `UA_METRICS_LOG=1` prints each measurement beside its control's
+  and `UA_METRICS_PNG=<dir>` writes every solo render as a PNG (a 30-line
+  encoder on `node:zlib`; the repo has no image dependency and needs none).
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
@@ -579,8 +646,15 @@ each measured at the 95 km floor and each gated by the third test in
 - **The `dt` bug in §6.** The controls are fixed (§9.3); particles, drag
   tracers and the substorm still take the ~0 value. Worth its own change,
   with the animation-speed consequences looked at deliberately.
-- **Neither of this feature's test files runs in CI.** `nav-lint.yml` runs
-  two node tests; the other ~40 in `tests/` — these two included — are run
-  per the CLAUDE.md table. The DSMC end-to-end workflow is the only CI job
-  that boots this page at all, which is why a 5× frame-cost regression
-  reached CI as a mysterious timeout rather than as a failed assertion.
+- **The browser gates still do not run in CI.** The six node kernel tests
+  now do (`upper-atmosphere-kernels.yml`, §9.7); the Playwright specs —
+  camera-feel and image-metrics included — are run per the CLAUDE.md table.
+  They are deterministic and need only Chromium + the dev server (~4 min for
+  the upper-atmosphere set on SwiftShader), so a browser job is the natural
+  next step. The DSMC end-to-end workflow is still the only CI job that boots
+  this page, which is why a 5× frame-cost regression reached CI as a
+  mysterious timeout rather than as a failed assertion.
+- **Nothing measures how it looks on a GPU.** Every image number above is
+  SwiftShader. Geometry and shape metrics transfer; brightness and bloom do
+  not, and the Vercel preview on real hardware is still where those are
+  judged.
