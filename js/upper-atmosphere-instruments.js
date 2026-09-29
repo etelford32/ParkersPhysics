@@ -303,6 +303,9 @@ export class AtmosphereInstruments {
                 f107Sfu: f107, ap, TinfK: field.Tinf,
             }),
             airglow: glow.brightness,
+            // What shapes the red line here — the SAME kernel and drivers the
+            // shader reads (upper-atmosphere-airglow-field.js via the globe).
+            airglowField: this._globe.airglowFieldAt?.(ray.point) ?? null,
             layer: layerForAltitude(sampleAlt),
             profile: probeProfile({ f107Sfu: f107, ap, n: 64, TinfK: field.Tinf }),
         };
@@ -341,7 +344,8 @@ export class AtmosphereInstruments {
         // overlapping candidate is used rather than none.
         // Taller when a disclosure note is showing.
         const W = 232;
-        const H = 202 + ((pr.aboveModel || pr.sampleAlt <= 120) ? 12 : 0);
+        const H = 202 + ((pr.aboveModel || pr.sampleAlt <= 120) ? 12 : 0)
+            + (pr.airglowField ? 13 : 0);
         const avoid = this._avoidRects();
         // Park below whichever chrome sits highest on the canvas.
         const hud = avoid[0] ?? { x: 0, y: 0, w: 0, h: 0 };
@@ -467,6 +471,12 @@ export class AtmosphereInstruments {
         }
         row('Kn · regime', `${pr.knudsen < 0.01 ? pr.knudsen.toExponential(1)
                               : pr.knudsen.toFixed(2)} · ${pr.regime}`);
+        if (pr.airglowField) {
+            // The red line's multiplier at 250 km over the plain nightglow.
+            const af = pr.airglowField;
+            row('630 nm here', `${af.regime} · ×${af.red250 < 10 ? af.red250.toFixed(2) : af.red250.toFixed(0)}`,
+                af.regime === 'plasma bubble' ? CSS.accent : af.regime === 'nightglow' ? CSS.ink : CSS.warn);
+        }
 
         // Mini profile: log ρ against log altitude, tangent altitude marked.
         const gx = cx + pad, gw = W - pad * 2;
@@ -650,6 +660,13 @@ export function volumeLegend(scale) {
                     + `transform, not the physics`],
             ['airglow', 'real emission layers at observed altitudes: '
                       + 'OH 87 · Na 92 · O₂ 94 · O(¹S) green 97 · O(¹D) red 250 km'],
+            ['630 nm', 'dayglow ~20× the nightglow where 250 km is SUNLIT (past the ground '
+                     + 'terminator); at night, equatorial arcs + plasma bubbles from the '
+                     + 'shared fountain model, SAR arcs on the plasmapause above Kp 4'],
+            ['ripples', 'gravity-wave ripples in the green/OH band are SYMBOLIC — a fixed '
+                      + 'wave set at observed wavelengths, not a wave forecast'],
+            ['exposure', 'dayglow and nightglow share one log stretch — no single camera '
+                       + 'exposure could record both'],
             ['not visible', 'the density render is DATA — above 80 km the neutral '
                           + 'atmosphere emits no visible light. The airglow is what '
                           + 'an eye would see.'],

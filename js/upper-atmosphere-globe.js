@@ -76,6 +76,9 @@ import { getTimeBus } from './upper-atmosphere-time-bus.js';
 import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint, greenwichSiderealDeg } from './sun-altitude.js';
 import { geoFromVectors, latLonToScene, sceneToLatLon } from './upper-atmosphere-column.js';
+import {
+    FountainSampler, gwPhases, airglowFieldAt, redFactorAt, redLineRegime, sarArc, brightestEveningArc,
+} from './upper-atmosphere-airglow-field.js';
 // On-canvas analysis overlay (altitude ruler · limb probe · diurnal
 // compass). Deliberately three-free — it takes geometry through the
 // hooks below and its physics from the node-tested kernel.
@@ -1214,6 +1217,8 @@ export class AtmosphereGlobe {
         // frame. The march reads density straight out of these, so this is
         // what makes a storm visibly inflate the rendered column.
         this._volume?.setState({ f107, ap });
+        // The airglow field's Kp (SAR arcs, the fountain's disturbance dynamo).
+        this._airglowAp = Number.isFinite(ap) ? ap : 15;
         // Let the page's legend re-read the display-scale numbers, which
         // are derived from the LUTs that just rebuilt. Without this the
         // legend would keep printing the boot-time scale after a storm
@@ -3983,6 +3988,66 @@ export class AtmosphereGlobe {
         return greenwichSiderealDeg(ms) * (Math.PI / 180);
     }
 
+    // ── The airglow field (upper-atmosphere-airglow-field.js) ────────────
+    /**
+     * Drive the volume's airglow field from the SCENE instant: the shared
+     * equatorial fountain (arcs + bubbles) advanced on the scene clock, the
+     * symbolic ripple phases, and Kp for the SAR arcs. The fountain table
+     * is re-sampled at most every 250 ms of frame clock (it moves on hour
+     * scales) unless the scene instant jumps or Kp changes; the phases are
+     * pushed every frame (cheap, and computed in double precision here
+     * because float32 cannot hold ω·t).
+     */
+    _updateAirglowField(force = false) {
+        if (!this._volume) return;
+        const sceneMs = this._sceneTimeMs();
+        const kp = apToKp(this._airglowAp ?? 15);
+        if (!this._arcs) this._arcs = new FountainSampler();
+        const now = frameClock.now();
+        const kpChanged = kp !== this._arcsKp;
+        const due = force || kpChanged || this._arcsSceneMs == null
+            || (sceneMs !== this._arcsSceneMs
+                && (now - (this._arcsAt ?? -Infinity) > 250 || Math.abs(sceneMs - this._arcsSceneMs) > 60000));
+        let arcsData = null;
+        if (due) {
+            this._arcsAt = now;
+            this._arcsSceneMs = sceneMs;
+            if (this._arcs.advanceTo(sceneMs, { kp }) || force) arcsData = this._arcs.data;
+        }
+        this._volume.setAirglowField({
+            arcsData, phases: gwPhases(sceneMs / 1000), kp: kpChanged ? kp : null,
+        });
+        this._arcsKp = kp;
+    }
+
+    /** Re-sample and re-upload the airglow field now (tests; after editing the fountain). */
+    refreshAirglowField() {
+        this._arcs?._fill?.();
+        this._updateAirglowField(true);
+    }
+
+    /**
+     * The airglow field at a scene point (e.g. the probe's tangent point),
+     * from the SAME kernel and drivers the shader reads.
+     */
+    airglowFieldAt(p) {
+        const v = Array.isArray(p) ? p : [p.x, p.y, p.z];
+        const r = Math.hypot(v[0], v[1], v[2]) || 1;
+        const u = [v[0] / r, v[1] / r, v[2] / r];
+        const ll = sceneToLatLon(u);
+        const sd = this._sunDir;
+        const cosChi = sd ? (u[0] * sd.x + u[1] * sd.y + u[2] * sd.z) / (sd.length() || 1) : 0;
+        const kp = apToKp(this._airglowAp ?? 15);
+        const arcs = this._arcs ? this._arcs.sampleAt(ll.lonDeg) : undefined;
+        const field = airglowFieldAt({
+            latDeg: ll.latDeg, lonDeg: ll.lonDeg, u, cosChi, kp, arcs,
+            phases: gwPhases(this._sceneTimeMs() / 1000),
+        });
+        const red = redFactorAt(250, field);
+        return { ...field, latDeg: ll.latDeg, lonDeg: ll.lonDeg, arcs, kp, sar: field.sar,
+                 sarArc: sarArc(kp), red250: red.red, lit250: red.lit, regime: redLineRegime(field) };
+    }
+
     /**
      * Pin the scene's instant (sun direction / terminator / diurnal bulge)
      * to a time other than the bus's — the flight layer's mission clock
@@ -4175,6 +4240,7 @@ export class AtmosphereGlobe {
             subSolarLatDeg: ssp.lat, subSolarLonDeg: ssp.lon,
             f107Sfu: this._state?.f107 ?? 150, ap: this._state?.ap ?? 15,
             iss: this._issState(),
+            arcs: brightestEveningArc(this._arcs, ssp.lon),
         };
     }
     /** Live ISS lat/lon/alt/heading from its probe (null without one). */
@@ -4938,6 +5004,7 @@ export class AtmosphereGlobe {
         // this as a stationary, physically-correct scene rather than the
         // old fast spin-and-circle.
         this._updateSunRealTime();
+        this._updateAirglowField();
 
         // Push the live camera position into the shell shaders so their
         // limb fresnel tracks the current viewpoint.
@@ -4952,7 +5019,7 @@ export class AtmosphereGlobe {
         // rung and climbs only while the frame interval says there is
         // headroom — it times itself rather than taking the `dt` above,
         // which is ~0 every frame (see _governQuality's comment).
-        this._volume?.update(this._camera, { govern: stepBus });
+        this._volume?.update(this._camera, { govern: stepBus, viewportHeight: this.canvas.clientHeight });
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.

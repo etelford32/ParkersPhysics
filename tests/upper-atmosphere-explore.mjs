@@ -339,6 +339,15 @@ t('airglow and geocorona POIs sit on the night side at their table\'s altitudes;
     }
     assert.equal(byId.iss, undefined, 'no ISS without a live state');
     const withIss = pointsOfInterest({ ...SUN, iss: { latDeg: 10, lonDeg: 20, altKm: 418, headingDeg: 50 } });
+t('the arcs stop appears only when the fountain hands one in, where it says', () => {
+    assert.ok(!pointsOfInterest({ ...SUN }).some(p => p.id === 'eia-arcs'));
+    const arcs = { lonDeg: -60, latDeg: 4.5, crest: 0.6, crestLatDeg: 14, lstHr: 21 };
+    const p = pointsOfInterest({ ...SUN, arcs }).find(x => x.id === 'eia-arcs');
+    assert.ok(p);
+    assert.equal(p.latDeg, 4.5);
+    assert.equal(p.lonDeg, -60);
+    assert.ok(/fountain/.test(p.placedBy));
+});
     assert.equal(withIss.find(p => p.id === 'iss').altKm, 418);
 });
 

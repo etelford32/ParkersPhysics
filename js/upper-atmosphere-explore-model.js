@@ -620,7 +620,7 @@ export function groundDistanceKm(lat1, lon1, lat2, lon2) {
  * @param {{latDeg,lonDeg,altKm,headingDeg}|null} [o.iss]  live ISS state, if known
  * @returns {Array<{id,name,latDeg,lonDeg,altKm,headingDeg,pitchDeg,colorHex,blurb,facts,placedBy}>}
  */
-export function pointsOfInterest({ subSolarLatDeg = 0, subSolarLonDeg = 0, f107Sfu = 150, ap = 15, iss = null } = {}) {
+export function pointsOfInterest({ subSolarLatDeg = 0, subSolarLonDeg = 0, f107Sfu = 150, ap = 15, iss = null, arcs = null } = {}) {
     const decl = subSolarLatDeg;
     const kp = apToKp(ap);
     const out = [];
@@ -703,6 +703,25 @@ export function pointsOfInterest({ subSolarLatDeg = 0, subSolarLonDeg = 0, f107S
         placedBy: `the ${red.label} peak (${red.peakKm} km), before local midnight`,
         blurb: red.note,
         facts: [['peak', `${red.peakKm} km`], ['wavelength', `${red.nm} nm`]],
+    });
+
+    // The equatorial arcs — placed by the SHARED fountain model (the caller
+    // hands in upper-atmosphere-airglow-field.js brightestEveningArc; this
+    // kernel does not import the fountain). Parked on the northern crest,
+    // looking west ALONG the arc, where the path through it is longest.
+    if (arcs && Number.isFinite(arcs.latDeg) && Number.isFinite(arcs.lonDeg)) out.push({
+        id: 'eia-arcs', name: 'Equatorial arcs (630 nm)',
+        latDeg: arcs.latDeg, lonDeg: wrapLon(arcs.lonDeg), altKm: 320,
+        headingDeg: 270, pitchDeg: -6, colorHex: 0xff4058,
+        placedBy: 'the equatorial fountain model\'s strongest evening crest (the one ring-current.html runs)',
+        blurb: 'After sunset the red line gathers into two arcs either side of the magnetic '
+            + 'equator — the Appleton anomaly crests, fed all day by the E×B fountain. Dark '
+            + 'north–south gaps through them are plasma bubbles rising from the bottomside.',
+        facts: [
+            ['crest', `${Number(arcs.crest).toFixed(2)} of full`],
+            ['magnetic latitude', `±${Number(arcs.crestLatDeg).toFixed(1)}°`],
+            ['local time', `${Number(arcs.lstHr).toFixed(1)} h`],
+        ],
     });
 
     // Exobase — where the engine's λ equals its scale height.

@@ -566,7 +566,7 @@ each measured at the 95 km floor and each gated by the third test in
 | `globe.setManualClock(on, { startMs })` / `stepFrames(n, dt, { render })` / `seedRandom(seed)` | the test hook: rAF idles, frames advance by exactly `dt` | `tests/upper-atmosphere-camera-feel.spec.js` (5) |
 | `tests/helpers/image-metrics.mjs` | PURE metrics on raw RGBA: `horizonDeviation`, `lineWidths` (half maximum), `runWidths`, `coverage`, `seamStep`, `blobStats` | `node tests/image-metrics.mjs` (12, synthetic, each metric shown failing its bug) |
 | `tests/upper-atmosphere-image-metrics.spec.js` | four solo-render gates, each with a runtime NEGATIVE CONTROL | itself (5 tests, ~45 s) |
-| `.github/workflows/upper-atmosphere-kernels.yml` | the six node tests on every push that touches them | CI, ~2 s |
+| `.github/workflows/upper-atmosphere-kernels.yml` | the node tests on every push that touches them | CI, ~2 s |
 
 - **The frame clock.** Everything that moves the camera or times a visual —
   dives/climbs/flyTo (`-camera.js`), the transit and the gas (`-transit.js`),
@@ -625,6 +625,90 @@ each measured at the 95 km floor and each gated by the third test in
   and `UA_METRICS_PNG=<dir>` writes every solo render as a PNG (a 30-line
   encoder on `node:zlib`; the repo has no image dependency and needs none).
 
+### 9.8 Where the airglow is (2026-09-29)
+
+Until now every airglow band was the same everywhere on the planet, day and
+night — `airglowAt` depends on altitude only, so the render drew one even
+ring. The real airglow is the most structured thing in the band.
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-airglow-field.js` | PURE: the band GROUPS (mesospheric: OH, Na, O₂, green; red line), day/night on the red line, the equatorial arcs + plasma bubbles via `FountainSampler`, SAR arcs, symbolic ripples, the probe's column, the renderer's tables, and the GLSL mirror GENERATED from its own constants | `node tests/upper-atmosphere-airglow-field.mjs` (27) |
+| `js/upper-atmosphere-volume.js` | evaluates the field once per half-ray per emitting shell (92 km, 250 km) and applies it per sample | `tests/upper-atmosphere-airglow.spec.js` (5) |
+| `js/upper-atmosphere-globe.js` | drives the fountain on the SCENE clock, ripple phases, Kp; `airglowFieldAt(point)` for the probe | same |
+| explore stop `eia-arcs` | the strongest evening crest, placed by the fountain | `node tests/upper-atmosphere-explore.mjs` |
+
+- **Two groups, because the physics splits there.** The mesospheric group
+  (OH Meinel, Na D, O₂, the O(¹S) green line, 85–100 km) is
+  chemiluminescence that runs day and night, so it gets NO day/night factor;
+  its structure is gravity-wave ripples. The red line (630 nm, ~250 km) is
+  where the day/night, equatorial and storm structure lives. With every
+  factor at 1 the two groups add up to the old `airglowAt` EXACTLY (gated),
+  so a location where nothing is happening renders as before.
+- **Day is "sunlit at altitude", not the ground terminator.** A point is dark
+  when the sunward ray to it grazes below the EUV screening height (100 km);
+  at 250 km that is ~12° past the ground terminator. The 630 nm dayglow is
+  taken as 20× the nightglow (the low end of Solomon & Abreu's range). One
+  log stretch shows both — no camera exposure could, and the legend says so.
+- **The arcs and bubbles are the SHARED fountain model**, imported from
+  `js/ionosphere-fountain.js` (what ring-current.html runs), never re-derived.
+  `FountainSampler` ticks it on the scene clock (36 h spin-up, re-spun on a
+  backwards jump or one > 6 h — the model is deterministic per sim-date, so a
+  re-spin to the same instant gives the same state), and samples it into a
+  1440×1 half-float texture: crest intensity, crest magnetic latitude, bubble
+  mask, bubble latitude extent. This page has no penetration field, so the
+  fountain runs on climatology + the disturbance dynamo from Kp (`dA = 0`).
+  Crest gain 4 (arcs ~3–5× the mid-latitude nightglow, as observed); bubbles
+  cut 85 % of the red line in a ~170 km-wide field-aligned wedge.
+- **SAR arcs** sit on the page's own plasmapause (`plasmapauseL`,
+  Carpenter & Anderson) at ~400 km, onset above Kp 4, dark side only.
+- **The ripples are SYMBOLIC** and live in the mesospheric group only: eight
+  fixed waves (30–300 km), each in its OWN packet — a spherical cap and its
+  antipode, ~18° across — with the wave direction tangent at the packet
+  centre. Two earlier versions gated the waves with cosine envelopes (one
+  shared, then one each); a cos(k·u) envelope is a set of bands that wrap
+  the planet, the bands crossed everywhere, and from orbit the waves read as
+  a waffle lattice. Phases are computed on the CPU in double precision
+  (ω·t on absolute time is ~10³ rad, beyond float32) and waves shorter than
+  ~4 px fade out.
+- **Where the shader evaluates the field.** Per fragment, at the point where
+  each half-ray crosses the 92 km and the 250 km shell (or the ray's closest
+  approach if it passes over): a limb ray tangent at 90 km crosses 250 km
+  ~1400 km from its tangent point, so the red line must NOT be held at the
+  tangent point the way the T∞ field is. Sunlit-ness is evaluated per SAMPLE
+  from terms hoisted per half-ray. A half-ray with no samples (the far half
+  of a ray that strikes the planet) is skipped.
+- **The march still fetches TWO texels per sample.** A third (a separate
+  red/SAR row) measured +70 % frame time on SwiftShader, so the red-line and
+  SAR profiles ride in the density table's spare G/B channels
+  (`packRedIntoFieldLUT`; ~20 km bins hold a 90 km-wide line) and the 10 km
+  green band keeps its own finer table. Measured, solo volume at the default
+  orbit framing, ms/frame on SwiftShader (noisy ±10 %):
+
+  | rung | before | after |
+  |---|---|---|
+  | 10 steps (floor, default) | 228 | 303 |
+  | 24 | 447 | 489 |
+  | 40 | 808 | 859 |
+
+- **A bug found on the way: the volume's magnetic pole was MIRRORED.** It was
+  typed inline as `+cos·sin(lon)` — the frame the page used before §9.1 — so
+  since 2026-09-27 the auroral Joule-heating term in the density render has
+  been centred on a pole at 72.7°E instead of 72.7°W, and nothing looked
+  wrong. It now comes from `latLonToScene(DIPOLE_POLE)`, and the airglow
+  spec asserts it (a check that fails on the old line).
+- **The gates** (`tests/upper-atmosphere-airglow.spec.js`, solo renders at
+  the 2026 March equinox 00 UT, each with a control): noon/midnight red 4.7×
+  vs 1.000 with dayglow patched out; both crests within 4 px of the rows the
+  NODE kernel predicts, crest/trough 13.9 vs 1.00 with the arcs patched out;
+  an injected bubble cuts both crests 99 % vs <5 % with bubbles patched out;
+  a Kp 8 SAR arc 51× above its surroundings on the plasmapause row vs 1.000
+  at Kp 2; ripple energy 4.0 vs 0.85 with ripples patched out. The solo-
+  render harness is now shared (`tests/helpers/ua-render.mjs`).
+- **The probe card** prints what shapes the 630 nm line under the cursor
+  (dayglow / equatorial arc / plasma bubble / SAR arc / nightglow, and the
+  multiplier), from the same kernel and drivers the shader reads.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
@@ -640,13 +724,18 @@ each measured at the 95 km floor and each gated by the third test in
   extrapolating, which is correct but means a ray tangent below 80 km is
   slightly under-bright. A proper stitch to a standard-atmosphere fit
   would fix it.
+- **The airglow field's next steps.** Medium-scale TIDs in the red line
+  (real, not drawn); a dayglow peak that sits lower (~220 km) than the
+  nightglow's; the fountain driven by this page's own penetration field once
+  it has one (it runs on climatology + Kp here); an explore stop that
+  follows a live bubble.
 - **Airglow radiance.** The volume emission rates are order-of-magnitude
   typical values used for *relative* brightness. This is not a radiance
   calculation and the page must not present it as one.
 - **The `dt` bug in §6.** The controls are fixed (§9.3); particles, drag
   tracers and the substorm still take the ~0 value. Worth its own change,
   with the animation-speed consequences looked at deliberately.
-- **The browser gates still do not run in CI.** The six node kernel tests
+- **The browser gates still do not run in CI.** The seven node kernel tests
   now do (`upper-atmosphere-kernels.yml`, §9.7); the Playwright specs —
   camera-feel and image-metrics included — are run per the CLAUDE.md table.
   They are deterministic and need only Chromium + the dev server (~4 min for
