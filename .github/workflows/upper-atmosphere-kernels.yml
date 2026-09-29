@@ -12,7 +12,11 @@ name: upper-atmosphere-kernels
 #   upper-atmosphere-frame-clock.mjs  the steppable clock never runs backwards
 #   upper-atmosphere-airglow-field.mjs  where the airglow is: day/night, the
 #                                  equatorial arcs + bubbles (the SHARED
-#                                  fountain model), SAR arcs, ripples
+#                                  fountain model), SAR arcs, ripples, TIDs
+#   upper-atmosphere-plasma-field.mjs  how thick the plasma is: the shared
+#                                  F-region stack, TEC, the teardrop trough,
+#                                  penetration into the fountain, the TIDs,
+#                                  and the GLSL mirrors run back through JS
 #   image-metrics.mjs              the image metrics the browser gates use,
 #                                  each shown SEEING its bug on a synthetic
 #                                  image (a metric that cannot fail is not a
@@ -32,6 +36,9 @@ on:
       - 'js/upper-atmosphere-*.js'
       - 'js/sun-altitude.js'
       - 'js/ionosphere-fountain.js'
+      - 'js/ionosphere-descent.js'
+      - 'js/ionosphere-cells.js'
+      - 'js/ring-current-efield.js'
       - 'tests/upper-atmosphere-*.mjs'
       - 'tests/image-metrics.mjs'
       - 'tests/helpers/image-metrics.mjs'
@@ -41,6 +48,9 @@ on:
       - 'js/upper-atmosphere-*.js'
       - 'js/sun-altitude.js'
       - 'js/ionosphere-fountain.js'
+      - 'js/ionosphere-descent.js'
+      - 'js/ionosphere-cells.js'
+      - 'js/ring-current-efield.js'
       - 'tests/upper-atmosphere-*.mjs'
       - 'tests/image-metrics.mjs'
       - 'tests/helpers/image-metrics.mjs'
@@ -77,5 +87,7 @@ jobs:
         run: node tests/upper-atmosphere-frame-clock.mjs
       - name: airglow field
         run: node tests/upper-atmosphere-airglow-field.mjs
+      - name: plasma field + TIDs
+        run: node tests/upper-atmosphere-plasma-field.mjs
       - name: image metrics (synthetic controls)
         run: node tests/image-metrics.mjs

@@ -77,8 +77,13 @@ import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint, greenwichSiderealDeg } from './sun-altitude.js';
 import { geoFromVectors, latLonToScene, sceneToLatLon } from './upper-atmosphere-column.js';
 import {
-    FountainSampler, gwPhases, airglowFieldAt, redFactorAt, redLineRegime, sarArc, brightestEveningArc,
+    gwPhases, airglowFieldAt, redFactorAt, redLineRegime, sarArc, brightestEveningArc,
 } from './upper-atmosphere-airglow-field.js';
+// The plasma (TEC) field and its driver: ring-current-efield's shielding
+// model (Kp + solar-wind VBs → penetration ΔA into the shared fountain, the
+// teardrop plasmapause into the trough and the SAR arcs) and the TIDs.
+import { IonosphereDriver, plasmaFieldAt as plasmaKernelAt, vtec, mltAt } from './upper-atmosphere-plasma-field.js';
+import { tidPhases } from './upper-atmosphere-tid.js';
 // On-canvas analysis overlay (altitude ruler · limb probe · diurnal
 // compass). Deliberately three-free — it takes geometry through the
 // hooks below and its physics from the node-tested kernel.
@@ -1428,6 +1433,9 @@ export class AtmosphereGlobe {
         const bz      = Number.isFinite(sw.bz)      ? sw.bz      : SW_DEFAULTS.bz;
         const by      = Number.isFinite(sw.by)      ? sw.by      : 0;
         this._swState = { speed, density, bz, by };
+        // VBs (mV/m) for the ionosphere driver's convection field: the
+        // rectified dawn–dusk electric field, v × southward Bz.
+        this._vbs = speed * Math.max(0, -bz) * 1e-3;
 
         // Cascade geometry compresses dayside / stretches nightside
         // lines under Pdyn — push the live state so the visual tracks
@@ -1704,7 +1712,7 @@ export class AtmosphereGlobe {
         return this._volume?.getComponentVisibility() ?? { density: false, airglow: false };
     }
 
-    /** 'column' | 'composition' | 'anomaly' */
+    /** 'column' | 'composition' | 'anomaly' | 'plasma' (slant TEC) */
     setVolumeMode(mode) { this._volume?.setMode(mode); }
     getVolumeAnomalyAltitude() { return this._volume?.getAnomalyAltitude?.() ?? null; }
     getVolumeMode() { return this._volume?.getMode() ?? 'column'; }
@@ -4002,20 +4010,29 @@ export class AtmosphereGlobe {
         if (!this._volume) return;
         const sceneMs = this._sceneTimeMs();
         const kp = apToKp(this._airglowAp ?? 15);
-        if (!this._arcs) this._arcs = new FountainSampler();
+        if (!this._iono) {
+            this._iono = new IonosphereDriver();
+            // `_arcs` is the fountain sampler every airglow consumer reads
+            // (probe, POIs, the gates); the driver owns and advances it.
+            this._arcs = this._iono.sampler;
+        }
         const now = frameClock.now();
         const kpChanged = kp !== this._arcsKp;
         const due = force || kpChanged || this._arcsSceneMs == null
             || (sceneMs !== this._arcsSceneMs
                 && (now - (this._arcsAt ?? -Infinity) > 250 || Math.abs(sceneMs - this._arcsSceneMs) > 60000));
-        let arcsData = null;
+        let arcsData = null, ppData = null;
         if (due) {
             this._arcsAt = now;
             this._arcsSceneMs = sceneMs;
-            if (this._arcs.advanceTo(sceneMs, { kp }) || force) arcsData = this._arcs.data;
+            if (this._iono.advanceTo(sceneMs, { kp, vbs: this._vbs }) || force) {
+                arcsData = this._iono.sampler.data;
+                ppData = this._iono.ppData;
+            }
         }
         this._volume.setAirglowField({
-            arcsData, phases: gwPhases(sceneMs / 1000), kp: kpChanged ? kp : null,
+            arcsData, ppData, phases: gwPhases(sceneMs / 1000), kp: kpChanged ? kp : null,
+            tidPhases: tidPhases(sceneMs / 1000), utHours: sceneMs / 3.6e6,
         });
         this._arcsKp = kp;
     }
@@ -4039,13 +4056,57 @@ export class AtmosphereGlobe {
         const cosChi = sd ? (u[0] * sd.x + u[1] * sd.y + u[2] * sd.z) / (sd.length() || 1) : 0;
         const kp = apToKp(this._airglowAp ?? 15);
         const arcs = this._arcs ? this._arcs.sampleAt(ll.lonDeg) : undefined;
+        const sceneMs = this._sceneTimeMs();
         const field = airglowFieldAt({
             latDeg: ll.latDeg, lonDeg: ll.lonDeg, u, cosChi, kp, arcs,
-            phases: gwPhases(this._sceneTimeMs() / 1000),
+            phases: gwPhases(sceneMs / 1000),
+            ppInvLatDeg: this._iono?.timeMs != null ? this._iono.plasmapauseAt(ll.lonDeg) : null,
+            tidPhases: tidPhases(sceneMs / 1000), utHours: sceneMs / 3.6e6,
         });
         const red = redFactorAt(250, field);
         return { ...field, latDeg: ll.latDeg, lonDeg: ll.lonDeg, arcs, kp, sar: field.sar,
                  sarArc: sarArc(kp), red250: red.red, lit250: red.lit, regime: redLineRegime(field) };
+    }
+
+    /**
+     * The plasma field at a scene point (the probe's tangent point), from
+     * the SAME kernel and drivers the plasma view reads: layer peaks with
+     * the horizontal factors applied, vertical TEC over the page's 80–2000
+     * km band, and what dominates. Also the E-field state driving it.
+     */
+    plasmaFieldAt(p) {
+        const v = Array.isArray(p) ? p : [p.x, p.y, p.z];
+        const r = Math.hypot(v[0], v[1], v[2]) || 1;
+        const u = [v[0] / r, v[1] / r, v[2] / r];
+        const ll = sceneToLatLon(u);
+        const sd = this._sunDir;
+        const sun = sd ? [sd.x, sd.y, sd.z] : [1, 0, 0];
+        const sl = Math.hypot(...sun) || 1;
+        const cosChi = (u[0] * sun[0] + u[1] * sun[1] + u[2] * sun[2]) / sl;
+        const { lstHr } = geoFromVectors(u, sun);
+        const sceneMs = this._sceneTimeMs();
+        const ut = ((sceneMs / 3.6e6) % 24 + 24) % 24;
+        const kp = apToKp(this._airglowAp ?? 15);
+        const live = this._iono?.timeMs != null;
+        const field = plasmaKernelAt({
+            latDeg: ll.latDeg, lonDeg: ll.lonDeg, cosChi, lstHr, mltHr: mltAt(ll.lonDeg, ut), kp,
+            f107Sfu: this._lastFieldState?.f107 ?? 150,
+            arcs: this._arcs ? this._arcs.sampleAt(ll.lonDeg) : undefined,
+            ppInvLatDeg: live ? this._iono.plasmapauseAt(ll.lonDeg) : null,
+            phases: tidPhases(sceneMs / 1000),
+        });
+        return {
+            ...field, latDeg: ll.latDeg, lonDeg: ll.lonDeg, lstHr, kp, vtecTecu: vtec(field),
+            ppInvLatDeg: live ? this._iono.plasmapauseAt(ll.lonDeg) : null,
+            efield: this._iono?.efield?.() ?? null, vbs: this._vbs ?? null,
+        };
+    }
+
+    /** The ionosphere driver's state (E-field, penetration, table time) — the legend and the gates read it. */
+    ionosphereState() {
+        if (!this._iono || this._iono.timeMs == null) return null;
+        return { efield: this._iono.efield(), vbs: this._vbs ?? null, timeMs: this._iono.timeMs,
+                 kp: apToKp(this._airglowAp ?? 15) };
     }
 
     /**

@@ -306,6 +306,9 @@ export class AtmosphereInstruments {
             // What shapes the red line here — the SAME kernel and drivers the
             // shader reads (upper-atmosphere-airglow-field.js via the globe).
             airglowField: this._globe.airglowFieldAt?.(ray.point) ?? null,
+            // How thick the plasma is here — the kernel the plasma view reads
+            // (upper-atmosphere-plasma-field.js via the globe).
+            plasmaField: this._globe.plasmaFieldAt?.(ray.point) ?? null,
             layer: layerForAltitude(sampleAlt),
             profile: probeProfile({ f107Sfu: f107, ap, n: 64, TinfK: field.Tinf }),
         };
@@ -345,7 +348,7 @@ export class AtmosphereInstruments {
         // Taller when a disclosure note is showing.
         const W = 232;
         const H = 202 + ((pr.aboveModel || pr.sampleAlt <= 120) ? 12 : 0)
-            + (pr.airglowField ? 13 : 0);
+            + (pr.airglowField ? 13 : 0) + (pr.plasmaField ? 26 : 0);
         const avoid = this._avoidRects();
         // Park below whichever chrome sits highest on the canvas.
         const hud = avoid[0] ?? { x: 0, y: 0, w: 0, h: 0 };
@@ -476,6 +479,14 @@ export class AtmosphereInstruments {
             const af = pr.airglowField;
             row('630 nm here', `${af.regime} · ×${af.red250 < 10 ? af.red250.toFixed(2) : af.red250.toFixed(0)}`,
                 af.regime === 'plasma bubble' ? CSS.accent : af.regime === 'nightglow' ? CSS.ink : CSS.warn);
+        }
+        if (pr.plasmaField) {
+            // Vertical TEC over the page's 80–2000 km band (no plasmasphere),
+            // and the F2 peak — the plasma view integrates the same field.
+            const pf = pr.plasmaField;
+            row('vTEC · NmF2', `${pf.vtecTecu.toFixed(1)} TECU · ${(pf.NmF2 / 1e11).toFixed(1)}e11 m⁻³`);
+            row('plasma', `${pf.regime} · hmF2 ${Math.round(pf.hmF2)} km`,
+                pf.regime === 'quiet F region' ? CSS.ink : CSS.warn);
         }
 
         // Mini profile: log ρ against log altitude, tangent altitude marked.
@@ -662,9 +673,13 @@ export function volumeLegend(scale) {
                       + 'OH 87 · Na 92 · O₂ 94 · O(¹S) green 97 · O(¹D) red 250 km'],
             ['630 nm', 'dayglow ~20× the nightglow where 250 km is SUNLIT (past the ground '
                      + 'terminator); at night, equatorial arcs + plasma bubbles from the '
-                     + 'shared fountain model, SAR arcs on the plasmapause above Kp 4'],
+                     + 'shared fountain model, SAR arcs on the teardrop plasmapause above Kp 4'],
             ['ripples', 'gravity-wave ripples in the green/OH band are SYMBOLIC — a fixed '
                       + 'wave set at observed wavelengths, not a wave forecast'],
+            ['TIDs', 'travelling ionospheric disturbances ripple the 630 nm line: storm-time '
+                   + 'waves running equatorward from the auroral oval above Kp 3, and night '
+                   + 'bands drifting south-west (north-west in the south) — ILLUSTRATIVE, '
+                   + 'observed speeds and wavelengths, not a TID forecast'],
             ['exposure', 'dayglow and nightglow share one log stretch — no single camera '
                        + 'exposure could record both'],
             ['not visible', 'the density render is DATA — above 80 km the neutral '
@@ -672,6 +687,34 @@ export function volumeLegend(scale) {
                           + 'an eye would see.'],
             ['field', 'Jacchia-71 diurnal bulge (peaks ~14 h LST) + auroral Joule '
                     + 'heating, both area-mean-preserving'],
+        ],
+    };
+}
+
+/**
+ * Legend copy for the plasma (slant-TEC) view. `iono` is the globe's
+ * ionosphereState() (E-field + penetration), or null before it has run.
+ */
+export function plasmaLegend(iono = null) {
+    const e = iono?.efield;
+    const drive = e
+        ? `shielded ${e.A_sh.toFixed(2)} kV/R_E² · penetration ΔA ${e.dA >= 0 ? '+' : ''}${e.dA.toFixed(2)}`
+            + (Number.isFinite(iono.vbs) ? ` · VBs ${iono.vbs.toFixed(1)} mV/m` : '')
+        : 'not running yet';
+    return {
+        title: 'plasma · slant TEC',
+        lines: [
+            ['plasma', 'colour = electrons along the view ray (slant TEC) — how thick the '
+                     + 'ionosphere is in that direction, the quantity a GNSS receiver measures'],
+            ['scale', 'log₁₀ over 1–1000 TECU (1 TECU = 10¹⁶ e⁻/m²) — a display transform; '
+                    + 'the probe prints vertical TEC'],
+            ['band', 'integrated over 80–2000 km only: real GNSS TEC also counts the '
+                   + 'plasmasphere, typically +10–30 %'],
+            ['stack', 'E / F1 / F2 layers from the ring-current page’s descent model, '
+                    + 'F2 day term ∝ √cos χ, F10.7-scaled'],
+            ['structure', 'equatorial crests + bubbles from the shared fountain · night-side '
+                        + 'trough on the teardrop plasmapause · TIDs (illustrative)'],
+            ['E-field', `ring-current-efield driven by Kp + solar-wind VBs: ${drive}`],
         ],
     };
 }

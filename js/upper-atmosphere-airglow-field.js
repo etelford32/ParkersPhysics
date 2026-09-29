@@ -31,15 +31,25 @@
  *       from `js/ionosphere-fountain.js` — the SAME model ring-current.html
  *       draws (E×B drift with the pre-reversal enhancement feeds the crests;
  *       Rayleigh–Taylor growth after sunset spawns the bubbles on
- *       gravity-wave crests) — imported, never re-derived. This page has no
- *       penetration electric field, so the fountain runs on its quiet
- *       climatology plus the disturbance dynamo from Kp (`dA = 0`).
+ *       gravity-wave crests) — imported, never re-derived. The fountain's
+ *       prompt-penetration input ΔA comes from ring-current-efield's
+ *       shielding model when the page drives it (`IonosphereDriver` in
+ *       js/upper-atmosphere-plasma-field.js); without it, ΔA = 0.
+ *     TIDs: the red line is dissociative recombination at the F-layer
+ *       bottomside, so the travelling ionospheric disturbances in the plasma
+ *       (js/upper-atmosphere-tid.js — the ONE copy, shared with the TEC
+ *       view) modulate it at `TID.redGain` × δN/N: storm-time LSTIDs running
+ *       equatorward from the oval, night-time MSTID bands travelling
+ *       south-west. ILLUSTRATIVE, disclosed like the ripples.
  *     STORMS: SAR arcs — stable, pure 630 nm arcs at ~400 km where the ring
- *       current overlaps the plasmasphere, i.e. on the PLASMAPAUSE footprint
- *       (`plasmapauseL`, Carpenter & Anderson 1992, already the page's), a
- *       few degrees equatorward of the auroral oval. Onset above Kp 4,
- *       kR-class at Kp 8–9. The existing `apGain` on the red and green lines
- *       (global brightening with Ap) is unchanged.
+ *       current overlaps the plasmasphere, i.e. on the PLASMAPAUSE footprint,
+ *       a few degrees equatorward of the auroral oval. Onset above Kp 4,
+ *       kR-class at Kp 8–9. The footprint is the TEARDROP plasmapause of
+ *       ring-current-efield (per MLT: the dusk bulge sits further poleward)
+ *       when the page supplies it (`ppInvLatDeg`, the GPU's
+ *       uPlasmapauseTex); `plasmapauseL` (Carpenter & Anderson 1992) is the
+ *       fallback. The existing `apGain` on the red and green lines (global
+ *       brightening with Ap) is unchanged.
  *
  * ONE EXPOSURE FOR DAY AND NIGHT. The render shows dayglow and nightglow in
  * one log stretch. No camera could; the legend says so.
@@ -54,6 +64,7 @@ import {
 } from './upper-atmosphere-column.js';
 import { plasmapauseL } from './upper-atmosphere-aurora-physics.js';
 import { IonosphereFountain, N_CELLS, CELL_DEG, hash1 } from './ionosphere-fountain.js';
+import { TID, tidField, TID_GLSL } from './upper-atmosphere-tid.js';
 
 const DEG = Math.PI / 180;
 
@@ -311,10 +322,18 @@ export class FountainSampler {
         this._kp = 2;
     }
 
-    /** Advance to `simMs`. Returns true when the table changed. */
-    advanceTo(simMs, { kp = this._kp } = {}) {
+    /**
+     * Advance to `simMs`. Returns true when the table changed. `dA` is the
+     * prompt-penetration amplitude (kV/R_E², js/ring-current-efield.js; > 0
+     * undershielding lifts the fountain, < 0 suppresses it), held over the
+     * step; 0 — the default — is the fountain's quiet climatology. A
+     * re-spin integrates its whole spin-up at dA = 0: the penetration
+     * history before the page opened is not known.
+     */
+    advanceTo(simMs, { kp = this._kp, dA = 0 } = {}) {
         if (!Number.isFinite(simMs)) return false;
         this._kp = Number.isFinite(kp) ? kp : this._kp;
+        const pen = Number.isFinite(dA) ? dA : 0;
         const F = AIRGLOW_FIELD;
         const fresh = !this._f || simMs < this._t - 1 || simMs - this._t > F.maxStepHours * 3.6e6;
         if (fresh) {
@@ -329,7 +348,7 @@ export class FountainSampler {
             }
         } else if (simMs > this._t) {
             this._f.setDriver({ kp: this._kp });
-            this._f.tick(simMs, (simMs - this._t) / 1000);
+            this._f.tick(simMs, (simMs - this._t) / 1000, { dA: pen });
             this._t = simMs;
         } else {
             return false;
@@ -424,6 +443,7 @@ export const NO_ARCS = Object.freeze({ crest: 0, crestLatDeg: 12, bubble: 0, bub
 export function airglowFieldAt({
     latDeg, lonDeg, u = null, cosChi = 0, kp = 2, arcs = NO_ARCS,
     phases = gwPhases(0), pixelKm = 0,
+    ppInvLatDeg = null, tidPhases = null, utHours = null,
 }) {
     const F = AIRGLOW_FIELD;
     const ml = magneticLatitude(latDeg, lonDeg);
@@ -431,10 +451,20 @@ export function airglowFieldAt({
         -Math.cos(latDeg * DEG) * Math.sin(lonDeg * DEG)];
     const gw = gwField(uu, phases, pixelKm);
     const meso = Math.max(0, 1 + F.gwAmpMeso * gw);
+    // TIDs (optional: need the TID phases and the UT for magnetic local time).
+    let tid = 0;
+    if (tidPhases && Number.isFinite(utHours)) {
+        const mltHr = (((utHours + lonDeg / 15) % 24) + 24) % 24;
+        const night = 1 - sunlitFraction(F.redShellKm, cosChi);
+        tid = tidField({ magLatDeg: ml, latDeg, lonDeg, mltHr, night, kp, phases: tidPhases }).total;
+    }
     const redNight = eiaFactor(ml, arcs.crest, arcs.crestLatDeg)
-        * bubbleFactor(ml, arcs.bubble, arcs.bubbleExtentDeg);
-    const sar = sarWeight(ml, sarArc(kp));
-    return { magLatDeg: ml, cosChi, gw, meso, redNight, sar };
+        * bubbleFactor(ml, arcs.bubble, arcs.bubbleExtentDeg)
+        * Math.max(0, 1 + TID.redGain * tid);
+    const sa = sarArc(kp);
+    const sarLatDeg = Number.isFinite(ppInvLatDeg) ? ppInvLatDeg : sa.latDeg;
+    const sar = sarWeight(ml, { gain: sa.gain, latDeg: sarLatDeg });
+    return { magLatDeg: ml, cosChi, gw, meso, redNight, sar, sarLatDeg, tid };
 }
 
 /** Red-line multiplier at one altitude, from the location's factors. */
@@ -566,8 +596,11 @@ export function packRedIntoFieldLUT(field, { f107Sfu = 150, ap = 15, airglowMax 
 // Straight-line code, no arrays (GLSL ES 1.00 has no array constructors),
 // every number interpolated from AIRGLOW_FIELD / GW. Uniforms the host
 // declares: uArcsTex (the FountainSampler table, linear filter, repeat in
-// s), uGwPhase0..5, uSarLat, uSarGain, uMagPole. NO BACKTICKS may appear in
-// the text below — it is spliced into a template literal.
+// s), uPlasmapauseTex (IonosphereDriver.ppData: R = the plasmapause footprint
+// in invariant latitude at each longitude's current MLT), uGwPhase0..7,
+// uSarGain, uUtHours, uMagPole, and TID_GLSL's uniforms (TID_GLSL is emitted
+// FIRST, here). NO BACKTICKS may appear in the text below — it is spliced
+// into a template literal.
 
 const f = (x) => {
     const s = Number(x).toPrecision(9);
@@ -585,10 +618,12 @@ export function airglowFieldGlsl() {
         '    }',
     ].join('\n')).join('\n');
     return [
+        TID_GLSL,
         'uniform sampler2D uArcsTex;',
+        'uniform sampler2D uPlasmapauseTex;',
         GW.waves.map((_, i) => `uniform float uGwPhase${i};`).join(' '),
-        'uniform float uSarLat;',
         'uniform float uSarGain;',
+        'uniform float uUtHours;',
         '',
         '// MIRROR OF upper-atmosphere-airglow-field.js sunlitFraction',
         'float agLit(float altKm, float cosChi) {',
@@ -611,6 +646,10 @@ export function airglowFieldGlsl() {
         `    float hGraze = pre.y > 0.5 ? (${f(R_EARTH_KM)} + altKm) * pre.x - ${f(R_EARTH_KM)} : altKm;`,
         `    return max(smoothstep(${f(F.screenKm - F.screenSoftKm)}, ${f(F.screenKm + F.screenSoftKm)}, hGraze), pre.z);`,
         '}',
+        '// Mean-sun magnetic local time at a longitude (the fountain\'s and the cell engine\'s).',
+        'float agMlt(float lonDeg) {',
+        '    return mod(uUtHours + lonDeg / 15.0 + 48.0, 24.0);',
+        '}',
         '// MIRROR OF gwField (SYMBOLIC ripples)',
         'float agGw(vec3 u, float pixKm) {',
         '    float s = 0.0;',
@@ -620,17 +659,20 @@ export function airglowFieldGlsl() {
         '    return s;',
         '}',
         '// MIRROR OF airglowFieldAt: meso factor, red-night factor, SAR weight.',
-        '// lonDeg is geographic longitude, magLat magnetic latitude, both degrees.',
-        'vec3 agField(float lonDeg, float magLat, float gw) {',
-        '    vec4 arcs = texture2D(uArcsTex, vec2((lonDeg + 180.0) / 360.0, 0.5));',
+        '// lonDeg is geographic longitude, magLat magnetic latitude, both degrees;',
+        '// tid the TID dN/N there (tidDelta; 0 on the mesospheric shell).',
+        'vec3 agField(float lonDeg, float magLat, float gw, float tid) {',
+        '    vec2 tcL = vec2((lonDeg + 180.0) / 360.0, 0.5);',
+        '    vec4 arcs = texture2D(uArcsTex, tcL);',
         // pow() of a negative base is undefined in GLSL: square by hand.
         `    float dN = (magLat - arcs.g) / ${f(F.eiaWidthDeg)};`,
         `    float dS = (magLat + arcs.g) / ${f(F.eiaWidthDeg)};`,
         `    float eia = 1.0 + ${f(F.eiaGain)} * max(arcs.r, 0.0) * (exp(-dN * dN) + exp(-dS * dS));`,
         `    float inside = 1.0 - smoothstep(arcs.a - ${f(F.bubbleEdgeDeg)}, arcs.a, abs(magLat));`,
         `    float bub = 1.0 - ${f(F.bubbleDepth)} * clamp(arcs.b, 0.0, 1.0) * inside;`,
-        '    float redNight = eia * bub;',
-        `    float dA = (abs(magLat) - uSarLat) / ${f(F.sarWidthDeg)};`,
+        `    float redNight = eia * bub * max(0.0, 1.0 + ${f(TID.redGain)} * tid);`,
+        '    float sarLat = texture2D(uPlasmapauseTex, tcL).r;',
+        `    float dA = (abs(magLat) - sarLat) / ${f(F.sarWidthDeg)};`,
         '    float sar = uSarGain * exp(-dA * dA);',
         `    return vec3(max(0.0, 1.0 + ${f(F.gwAmpMeso)} * gw), redNight, sar);`,
         '}',

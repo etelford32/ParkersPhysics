@@ -656,12 +656,13 @@ ring. The real airglow is the most structured thing in the band.
   backwards jump or one > 6 h — the model is deterministic per sim-date, so a
   re-spin to the same instant gives the same state), and samples it into a
   1440×1 half-float texture: crest intensity, crest magnetic latitude, bubble
-  mask, bubble latitude extent. This page has no penetration field, so the
-  fountain runs on climatology + the disturbance dynamo from Kp (`dA = 0`).
+  mask, bubble latitude extent. (Since §9.9 the fountain also takes the
+  prompt-penetration ΔA from ring-current-efield via `IonosphereDriver`.)
   Crest gain 4 (arcs ~3–5× the mid-latitude nightglow, as observed); bubbles
   cut 85 % of the red line in a ~170 km-wide field-aligned wedge.
-- **SAR arcs** sit on the page's own plasmapause (`plasmapauseL`,
-  Carpenter & Anderson) at ~400 km, onset above Kp 4, dark side only.
+- **SAR arcs** sit on the plasmapause footprint at ~400 km, onset above
+  Kp 4, dark side only — since §9.9 the TEARDROP plasmapause per MLT
+  (`plasmapauseL`, Carpenter & Anderson, is the fallback).
 - **The ripples are SYMBOLIC** and live in the mesospheric group only: eight
   fixed waves (30–300 km), each in its OWN packet — a spherical cap and its
   antipode, ~18° across — with the wave direction tangent at the packet
@@ -709,6 +710,81 @@ ring. The real airglow is the most structured thing in the band.
   (dayglow / equatorial arc / plasma bubble / SAR arc / nightglow, and the
   multiplier), from the same kernel and drivers the shader reads.
 
+### 9.9 How thick the plasma is, and the waves in it (2026-09-29)
+
+The page drew the neutral gas and the light the gas emits; it did not draw
+the PLASMA — the ionosphere a GNSS signal crosses. That field now exists, and
+it is built almost entirely from models already in the repo, so this is a
+JOIN, not a second ionosphere model:
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-plasma-field.js` | PURE: the electron density field and its TEC. The vertical E/F1/F2 stack is ring-current.html's `columnProfile` (`js/ionosphere-descent.js`); the crests + bubbles are the SHARED fountain; the night-side main trough sits on ring-current-efield's TEARDROP plasmapause; `IonosphereDriver` runs `ConvectionEField` + the fountain on the scene clock; `slantTec` is the shader's oracle; the GLSL is generated from its constants | `node tests/upper-atmosphere-plasma-field.mjs` (29) |
+| `js/upper-atmosphere-tid.js` | PURE: the travelling ionospheric disturbances — ONE copy, read by the plasma field AND the red line | same (the GLSL mirrors are transliterated back to JS and run against the kernel) |
+| volume mode `'plasma'` | slant TEC along every view ray, drawn OVER the globe | `tests/upper-atmosphere-plasma.spec.js` (7) |
+| `js/upper-atmosphere-airglow-field.js` | the red line now carries the TIDs; SAR arcs moved onto the teardrop | `node tests/upper-atmosphere-airglow-field.mjs` (29) + `tests/upper-atmosphere-airglow.spec.js` (5) |
+| globe | `IonosphereDriver` fed Kp + the page's solar-wind VBs (v·Bs); `plasmaFieldAt(point)`, `ionosphereState()` | both specs |
+| page | a `plasma` chip (exclusive with `anomaly`), the probe rows `vTEC · NmF2` / `plasma`, `plasmaLegend` (prints the live E-field + ΔA) | smoke |
+
+- **The data integration with the ring-current engine is two-way-shaped but
+  one-way-wired**: this page's solar wind drives ring-current-efield's
+  shielding model (Kp + VBs → driver amplitude; the shield relaxes with
+  τ = 25 min). Its prompt-PENETRATION ΔA = A_drv − A_sh goes into the shared
+  fountain (`FountainSampler.advanceTo(…, { dA })` — the super-fountain: a
+  southward turning lifts the evening crests), and its TEARDROP separatrix,
+  evaluated per longitude at that longitude's MLT (`ppData`, a second
+  1440×1 texture), places the night-side trough and the SAR arcs. Nothing
+  flows back into ring-current.html; both pages run the same kernels.
+- **A driver change at the SAME scene instant re-equilibrates** (the shield
+  is set to the new driver, ΔA = 0): a preset is a what-if, and no time has
+  passed for region-2 currents to respond. Penetration needs time to pass
+  while the driver differs from the shield — which is what it is.
+- **One departure from the shared stack, stated.** `columnProfile`'s F2 term
+  is 0.65 + 0.35·day, a readability choice for the descent inspector's bars
+  that puts midnight at 65 % of noon. A TEC map with that contrast has no
+  night side, and observed mid-latitude NmF2 falls to ~25–40 % overnight, so
+  the column uses `f2NightFloor` (0.3) + 0.7·√cos χ in its place. Heights,
+  storm loss and the E/F1 terms are the stack's own. vTEC at F10.7 150:
+  ~26 TECU midday mid-latitude, ~7 midnight, ~57 in a daytime crest.
+- **TEC is integrated over 80–2000 km only.** Real GNSS TEC includes the
+  plasmasphere (+10–30 %); the legend says so. The display is log₁₀ over
+  1–316 TECU (a vertical ray spans ~3–60; limb rays saturate), on an
+  inferno-like ramp whose floor is lifted to deep violet so the thin night
+  side still reads.
+- **The plasma view is drawn premultiplied OVER the globe with the depth
+  test OFF.** The volume is a back-face shell behind the opaque Earth, so
+  depth-tested it only ever shows at the limb — right for a glow, useless for
+  a map. The march already stops each ray at the planet, so nothing behind
+  the Earth is integrated, and the volume is first in the transparent pass so
+  orbits and field lines still draw over it. Blend and depth are GL state:
+  switching mode costs no recompile.
+- **The field is held per half-ray at the 300 km shell** (the airglow rule,
+  §9.8) and the per-sample cost is three `exp` pairs of the α-Chapman stack
+  with NO texture fetch — the plasma view is CHEAPER than the column view
+  (SwiftShader, floor rung, solo: 210 vs 300 ms/frame), and modes 0–2 pay
+  only a uniform branch.
+- **TIDs are ILLUSTRATIVE** (observed speeds, wavelengths, directions, bands
+  and Kp dependence; not a TID forecast). LSTIDs: λ 1500 km, 500 m/s,
+  launched equatorward from `ovalCenterMaglat` (the cell engine's oval,
+  imported), δN/N up to 15 % above Kp 3, decaying over 3000 km, 0.6 on the
+  day side. MSTIDs: λ 250 km, 100 m/s, night, |magnetic latitude| 20–50°,
+  fronts NW–SE travelling SOUTH-WEST in the north and NORTH-WEST in the south
+  (the Perkins morphology), an INTEGER zonal wavenumber so the pattern closes
+  at the date line, faded below ~4 px per wavelength. The red line sees
+  1.8 × δN/N. Phases are double precision on the CPU.
+- **The gates**, each with a control: rendered slant TEC vs the kernel's
+  `slantTec` on the page's own drivers over 71 rays, display |Δt| median
+  0.0009 / max 0.015 (≈ 4 % TEC) — control (horizontal structure patched
+  out) max 0.089; crest/equator TEC 2.25 vs 1.10 with crests off; a Kp 8
+  trough found exactly on the teardrop row (0° off) at depth 0.165 vs 0.011;
+  LSTIDs in TEC correlate with the kernel r = 0.998/0.997 at two instants
+  15 min apart, and the later render against the EARLIER kernel r = −0.25
+  (the pattern moved); MSTID bands in the 630 nm line r = 0.999 vs −0.999
+  against the half-period-shifted kernel; a southward turning in the page's
+  solar wind gives ΔA 0.60 and lifts the evening crest 0.58 → 0.66 vs
+  ΔA 0.000 under northward IMF. The SAR gate now finds the arc on the
+  teardrop row (54.4° inv. lat; Carpenter–Anderson would put it at 49.1°).
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
@@ -724,11 +800,17 @@ ring. The real airglow is the most structured thing in the band.
   extrapolating, which is correct but means a ray tangent below 80 km is
   slightly under-bright. A proper stitch to a standard-atmosphere fit
   would fix it.
-- **The airglow field's next steps.** Medium-scale TIDs in the red line
-  (real, not drawn); a dayglow peak that sits lower (~220 km) than the
-  nightglow's; the fountain driven by this page's own penetration field once
-  it has one (it runs on climatology + Kp here); an explore stop that
-  follows a live bubble.
+- **The airglow field's next steps.** A dayglow peak that sits lower
+  (~220 km) than the nightglow's; an explore stop that follows a live bubble
+  or the storm trough.
+- **The plasma field's next steps.** The plasmasphere above 2000 km (it is
+  why GNSS TEC is higher than ours); storm-enhanced density and its plume
+  (the dusk-side counterpart of the trough — ring-current-efield's SAPS
+  bridge is the natural driver); the TIDs as a propagating field launched by
+  the auroral Joule heating the T∞ field already carries (they are a
+  climatological wave train here); and a real TEC map (GNSS, e.g. Madrigal)
+  to score the field against, with the same measured-vs-model split the
+  rest of the page keeps.
 - **Airglow radiance.** The volume emission rates are order-of-magnitude
   typical values used for *relative* brightness. This is not a radiance
   calculation and the page must not present it as one.

@@ -25,6 +25,7 @@ import {
 } from '../js/upper-atmosphere-column.js';
 import { plasmapauseL } from '../js/upper-atmosphere-aurora-physics.js';
 import { IonosphereFountain, dipEquatorLat } from '../js/ionosphere-fountain.js';
+import { TID, tidField, tidPhases } from '../js/upper-atmosphere-tid.js';
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -338,6 +339,37 @@ t('airglowAtLocation colours: dayglow reddens the band, the mesosphere stays gre
     assert.ok(night.rgb[1] > night.rgb[0], 'green band');
 });
 
+t('SAR arcs follow the TEARDROP plasmapause when the page supplies it (C–A is the fallback)', () => {
+    const lat = 52, lon = -100;
+    const ml = magneticLatitude(lat, lon);
+    const on = airglowFieldAt({ latDeg: lat, lonDeg: lon, cosChi: -0.9, kp: 8, ppInvLatDeg: ml });
+    close(on.sarLatDeg, ml, 1e-12);
+    close(on.sar, sarArc(8).gain, 1e-9, 'peak of the arc at the supplied footprint');
+    const off = airglowFieldAt({ latDeg: lat, lonDeg: lon, cosChi: -0.9, kp: 8, ppInvLatDeg: ml - 8 });
+    assert.ok(off.sar < 0.02 * on.sar);
+    const fb = airglowFieldAt({ latDeg: lat, lonDeg: lon, cosChi: -0.9, kp: 8 });
+    close(fb.sarLatDeg, sarArc(8).latDeg, 1e-12);
+});
+t('TIDs modulate the night red line at redGain × δN/N, and only when the page supplies their clock', () => {
+    const ph = tidPhases(4321), ut = 2;
+    let maxAbs = 0;
+    for (let lat = 20; lat <= 55; lat += 1.3) for (let lon = -40; lon <= 40; lon += 2.9) {
+        const base = airglowFieldAt({ latDeg: lat, lonDeg: lon, cosChi: -0.9, kp: 7 });
+        const withTid = airglowFieldAt({ latDeg: lat, lonDeg: lon, cosChi: -0.9, kp: 7, tidPhases: ph, utHours: ut });
+        const mlt = (((ut + lon / 15) % 24) + 24) % 24;
+        const d = tidField({ magLatDeg: withTid.magLatDeg, latDeg: lat, lonDeg: lon, mltHr: mlt,
+            night: 1 - sunlitFraction(AIRGLOW_FIELD.redShellKm, -0.9), kp: 7, phases: ph }).total;
+        close(withTid.redNight, base.redNight * Math.max(0, 1 + TID.redGain * d), 1e-12);
+        close(withTid.tid, d, 1e-15);
+        assert.equal(withTid.meso, base.meso, 'the mesospheric group carries no TIDs');
+        maxAbs = Math.max(maxAbs, Math.abs(withTid.redNight / base.redNight - 1));
+    }
+    assert.ok(maxAbs > 0.25 && maxAbs < 0.8, `red-line TID contrast ${maxAbs}`);
+    // Day side: MSTIDs off, LSTIDs at the day floor — and dayglow swamps them anyway.
+    const day = airglowFieldAt({ latDeg: 35, lonDeg: 0, cosChi: 0.8, kp: 2, tidPhases: ph, utHours: 12 });
+    assert.equal(day.tid, 0);
+});
+
 console.log('\n── the GLSL mirror ──');
 t('the shader text is generated from the kernel\'s numbers', () => {
     const G = AIRGLOW_FIELD_GLSL;
@@ -349,7 +381,9 @@ t('the shader text is generated from the kernel\'s numbers', () => {
     for (let i = 0; i < GW.waves.length; i++) assert.ok(G.includes(`uGwPhase${i}`), `phase ${i}`);
     assert.ok(!G.includes('`'), 'no backticks (it is spliced into a template literal)');
     assert.ok(!/pow\(\s*\(/.test(G), 'no pow() of a possibly negative base');
-    for (const fn of ['agLit', 'agRedDay', 'agGw', 'agField', 'agShadowPre', 'agLitPre']) assert.ok(G.includes(fn));
+    for (const fn of ['agLit', 'agRedDay', 'agGw', 'agField', 'agShadowPre', 'agLitPre', 'agMlt', 'tidDelta']) assert.ok(G.includes(fn));
+    assert.ok(G.includes('uPlasmapauseTex') && !G.includes('uSarLat'), 'SAR latitude comes from the plasmapause table');
+    assert.ok(G.includes(Number(TID.redGain).toPrecision(9)), 'TID red gain');
     assert.ok(RED_RGB_GLSL.startsWith('vec3('));
 });
 

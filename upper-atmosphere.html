@@ -3267,6 +3267,9 @@ body.ua-immersive-on { overflow:hidden; }
             <button type="button" class="ua-atmo-btn" id="ua-atmo-anomaly"
                     aria-pressed="false"
                     title="Colour by the local drag multiplier: local density divided by the spherically symmetric model. Shows the diurnal bulge and auroral inflation directly.">anomaly</button>
+            <button type="button" class="ua-atmo-btn" id="ua-atmo-plasma"
+                    aria-pressed="false"
+                    title="Plasma thickness: electrons along each view ray (slant TEC), from the shared F-region stack, the fountain's crests and bubbles, the teardrop-plasmapause trough and travelling ionospheric disturbances.">plasma</button>
             <button type="button" class="ua-atmo-btn" id="ua-atmo-shells"
                     aria-pressed="false"
                     title="A/B against the older five discrete gradient shells.">shells</button>
@@ -3334,7 +3337,7 @@ body.ua-immersive-on { overflow:hidden; }
     // Legend copy lives with the renderer so the two cannot drift — in
     // particular the DISPLAY TRANSFORM (log decades + gamma) is generated
     // from the live uniforms, never retyped here.
-    import { volumeLegend } from './js/upper-atmosphere-instruments.js';
+    import { volumeLegend, plasmaLegend } from './js/upper-atmosphere-instruments.js';
     // Flight dynamics: the deck lives on the canvas, the launch panel in
     // the Controls pane; both drive the globe's flight API only.
     import { FlightDeck } from './js/upper-atmosphere-flight-deck.js';
@@ -3555,10 +3558,12 @@ body.ua-immersive-on { overflow:hidden; }
         const press = (el, on) => el?.setAttribute('aria-pressed', on ? 'true' : 'false');
         const bDen = btn('ua-atmo-density'), bGlow = btn('ua-atmo-airglow');
         const bAnom = btn('ua-atmo-anomaly'), bShell = btn('ua-atmo-shells');
-        const bProbe = btn('ua-atmo-probe');
+        const bProbe = btn('ua-atmo-probe'), bPlasma = btn('ua-atmo-plasma');
         if (!bDen) return;
 
-        let density = true, airglow = true, anomaly = false, shells = false;
+        // `anomaly` and `plasma` are mutually exclusive VIEWS of the volume
+        // (one uMode); density / airglow are components of the column view.
+        let density = true, airglow = true, anomaly = false, plasma = false, shells = false;
 
         const syncLegend = () => {
             const body = document.getElementById('ua-legend-body');
@@ -3572,12 +3577,15 @@ body.ua-immersive-on { overflow:hidden; }
                 if (sum) sum.textContent = 'discrete shells (A/B reference)';
                 return;
             }
-            const legend = volumeLegend(globe.getVolumeScaleInfo?.());
+            const legend = plasma ? plasmaLegend(globe.ionosphereState?.())
+                : volumeLegend(globe.getVolumeScaleInfo?.());
             body.innerHTML = legend.lines
                 .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
             if (sum) {
                 const sc = globe.getVolumeScaleInfo?.();
-                sum.textContent = anomaly
+                sum.textContent = plasma
+                    ? 'plasma thickness · slant TEC, log₁₀ 1–1000 TECU'
+                    : anomaly
                     ? `local ÷ model density · log₁₀ × ${sc?.decades ?? 10}`
                     : `continuous column · log₁₀ × ${sc?.decades ?? 10}`;
             }
@@ -3586,20 +3594,27 @@ body.ua-immersive-on { overflow:hidden; }
         const apply = () => {
             globe.setAtmosphereRender?.(shells ? 'shells' : 'volume');
             globe.setVolumeComponents?.({ density, airglow });
-            globe.setVolumeMode?.(anomaly ? 'anomaly' : 'column');
+            globe.setVolumeMode?.(plasma ? 'plasma' : anomaly ? 'anomaly' : 'column');
             press(bDen, density); press(bGlow, airglow);
-            press(bAnom, anomaly); press(bShell, shells);
-            // The component toggles only mean anything for the volume.
-            for (const b of [bDen, bGlow, bAnom]) {
-                b.disabled = shells;
-                b.style.opacity = shells ? '.45' : '';
+            press(bAnom, anomaly); press(bShell, shells); press(bPlasma, plasma);
+            // The component toggles only mean anything for the volume, and
+            // the plasma view draws neither component.
+            for (const b of [bDen, bGlow, bAnom, bPlasma]) {
+                if (!b) continue;
+                const off = shells || (plasma && (b === bDen || b === bGlow));
+                b.disabled = off;
+                b.style.opacity = off ? '.45' : '';
             }
             syncLegend();
         };
 
         bDen.addEventListener('click', () => { density = !density; apply(); });
         bGlow.addEventListener('click', () => { airglow = !airglow; apply(); });
-        bAnom.addEventListener('click', () => { anomaly = !anomaly; apply(); });
+        bAnom.addEventListener('click', () => { anomaly = !anomaly; if (anomaly) plasma = false; apply(); });
+        bPlasma?.addEventListener('click', () => { plasma = !plasma; if (plasma) anomaly = false; apply(); });
+        // The E-field line in the plasma legend is live state: refresh it
+        // while that legend is up (cheap text, every 2 s).
+        setInterval(() => { if (plasma && !shells) syncLegend(); }, 2000);
         bShell.addEventListener('click', () => { shells = !shells; apply(); });
         bProbe?.addEventListener('click', () => {
             const on = !globe.getLimbProbeEnabled?.();

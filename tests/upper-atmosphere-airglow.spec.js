@@ -19,7 +19,8 @@
  *   arcs          two red crests at ±crestLat of magnetic latitude, where
  *                 the kernel puts them, over a trough at the dip equator
  *   bubble        a plasma bubble cuts a dark gap through the arc
- *   SAR arc       a storm puts a red band on the plasmapause footprint
+ *   SAR arc       a storm puts a red band on the plasmapause footprint —
+ *                 the page's TEARDROP (ring-current-efield), per MLT
  *   ripples       gravity-wave packets ripple the green/OH band
  *   frame         the volume's magnetic pole is in the page's ONE frame
  *                 (it was mirrored to 72.7°E until this change)
@@ -35,6 +36,7 @@ import {
     latLonToScene, magneticLatitude, DIPOLE_POLE, R_EARTH_KM,
 } from '../js/upper-atmosphere-column.js';
 import { sarArc, GW, AIRGLOW_FIELD } from '../js/upper-atmosphere-airglow-field.js';
+import { TID } from '../js/upper-atmosphere-tid.js';
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -48,6 +50,11 @@ const NO_DAYGLOW = [['smoothstep(0.0, 0.1, cosChi), agRedDay(cosChi));', 'smooth
 const NO_ARCS = [['max(arcs.r, 0.0)', '0.0']];
 const NO_BUBBLES = [['clamp(arcs.b, 0.0, 1.0)', '0.0']];
 const NO_RIPPLES = [[`1.0 + ${Number(AIRGLOW_FIELD.gwAmpMeso).toPrecision(9)} * gw`, '1.0 + 0.0 * gw']];
+// The red line's TIDs (tests/upper-atmosphere-plasma.spec.js gates them):
+// held off on BOTH sides of the comparisons below, which are about other
+// structure — a ±20 % MSTID band across a crest row reads as crest shape.
+const NO_RED_TID = [[`max(0.0, 1.0 + ${Number(TID.redGain).toPrecision(9)} * tid)`, '1.0']];
+const RED_ONLY_NT = [...RED_ONLY, ...NO_RED_TID];
 
 async function setup(page) {
     await boot(page, { sceneTimeMs: T0 });
@@ -157,7 +164,7 @@ test('the red line is brighter where 250 km is sunlit (control: dayglow off)', a
     // Arcs and bubbles off on BOTH sides, so the only thing that can differ
     // between noon and midnight is the dayglow (the midnight limb crosses
     // the equatorial arcs; with them on, the control read 0.89).
-    const base = [...RED_ONLY, ...NO_ARCS, ...NO_BUBBLES];
+    const base = [...RED_ONLY_NT, ...NO_ARCS, ...NO_BUBBLES];
     const noon = await at(180, base), night = await at(0, base);
     const noonC = await at(180, [...base, ...NO_DAYGLOW]), nightC = await at(0, [...base, ...NO_DAYGLOW]);
     dumpPng('agl-noon', { w: noon.w, h: noon.h, b64: Buffer.from(noon.data).toString('base64') });
@@ -196,8 +203,8 @@ test('the equatorial arcs sit where the kernel puts them, and a bubble cuts them
         shellPoint(latForMagLat(-pick.crestLatDeg, lon), lon, 250),
         shellPoint(latEq, lon, 250),
     ]);
-    const img = imageFromCapture(await capture(page, RED_ONLY));
-    const ctl = imageFromCapture(await capture(page, [...RED_ONLY, ...NO_ARCS]));
+    const img = imageFromCapture(await capture(page, RED_ONLY_NT));
+    const ctl = imageFromCapture(await capture(page, [...RED_ONLY_NT, ...NO_ARCS]));
     dumpPng('agl-arcs', { w: img.w, h: img.h, b64: Buffer.from(img.data).toString('base64') });
     const cx = Math.round(pEq.x);
     const prof = columnProfile(img, cx - 3, cx + 3), profC = columnProfile(ctl, cx - 3, cx + 3);
@@ -225,8 +232,8 @@ test('the equatorial arcs sit where the kernel puts them, and a bubble cuts them
         f.cells[0].bubbles.push({ id: 'gate', lonDeg: lo, apexKm: 900, ageS: 1200, ttlS: 7200, strength: 1 });
         g.refreshAirglowField();
     }, lon);
-    const bub = imageFromCapture(await capture(page, RED_ONLY));
-    const bubC = imageFromCapture(await capture(page, [...RED_ONLY, ...NO_BUBBLES]));
+    const bub = imageFromCapture(await capture(page, RED_ONLY_NT));
+    const bubC = imageFromCapture(await capture(page, [...RED_ONLY_NT, ...NO_BUBBLES]));
     dumpPng('agl-bubble', { w: bub.w, h: bub.h, b64: Buffer.from(bub.data).toString('base64') });
     const depth = (im) => {
         const out = [];
@@ -244,18 +251,21 @@ test('the equatorial arcs sit where the kernel puts them, and a bubble cuts them
     for (const v of dC) expect(Math.abs(v), 'the control (bubbles off) has no gap').toBeLessThan(0.06);
 });
 
-test('a storm puts a SAR arc on the plasmapause footprint (control: the same night at quiet Kp)', async ({ page }) => {
+test('a storm puts a SAR arc on the TEARDROP plasmapause footprint (control: the same night at quiet Kp)', async ({ page }) => {
     await setup(page);
     const lon = 0;                                       // local midnight at 00 UT
-    const kp = 8;
-    const sar = sarArc(kp);
-    const latArc = latForMagLat(sar.latDeg, lon);
-    await page.evaluate(([la, lo]) => window.__agNadir(la, lo, 9000), [latArc - 6, lon]);
-    const [pArc] = await page.evaluate((pts) => window.__agProject(pts), [shellPoint(latArc, lon, AIRGLOW_FIELD.sarPeakKm)]);
     const run = async (ap) => {
         await page.evaluate((a) => { const g = window.__ua.globe; g._airglowAp = a; g._updateAirglowField(true); }, ap);
-        return imageFromCapture(await capture(page, RED_ONLY));
+        return imageFromCapture(await capture(page, RED_ONLY_NT));
     };
+    // The storm first, so the footprint the prediction reads is the storm's:
+    // the page's OWN plasmapause table (ring-current-efield's teardrop at
+    // this MLT), not the Carpenter–Anderson circle (the fallback).
+    await page.evaluate(() => { const g = window.__ua.globe; g._airglowAp = 240; g._updateAirglowField(true); });
+    const ppLat = await page.evaluate((lo) => window.__ua.globe._iono.plasmapauseAt(lo), lon);
+    const latArc = latForMagLat(ppLat, lon);
+    await page.evaluate(([la, lo]) => window.__agNadir(la, lo, 9000), [latArc - 6, lon]);
+    const [pArc] = await page.evaluate((pts) => window.__agProject(pts), [shellPoint(latArc, lon, AIRGLOW_FIELD.sarPeakKm)]);
     const storm = await run(240), quiet = await run(7);  // Ap 240 = Kp 8; Ap 7 = Kp 2
     dumpPng('agl-sar', { w: storm.w, h: storm.h, b64: Buffer.from(storm.data).toString('base64') });
     const cx = Math.round(storm.w / 2);
@@ -265,8 +275,14 @@ test('a storm puts a SAR arc on the plasmapause footprint (control: the same nig
             / (0.5 * (mean(p, Math.round(pArc.y) - 70, Math.round(pArc.y) - 60)
                     + mean(p, Math.round(pArc.y) + 60, Math.round(pArc.y) + 70)));
     };
+    // The brightest row near the prediction: the arc is ON the teardrop.
+    const prof = columnProfile(storm, cx - 3, cx + 3);
+    let at = 0, best = -1;
+    for (let k = Math.round(pArc.y) - 40; k <= Math.round(pArc.y) + 40; k++) if (prof[k] > best) { best = prof[k]; at = k; }
     const b = bump(storm), bq = bump(quiet);
-    log('SAR at row', pArc.y.toFixed(1), 'bump', b.toFixed(3), 'quiet', bq.toFixed(3));
+    log('SAR teardrop inv lat', ppLat.toFixed(2), '(C–A', sarArc(8).latDeg.toFixed(2), ') row', pArc.y.toFixed(1),
+        'found', at, 'bump', b.toFixed(3), 'quiet', bq.toFixed(3));
+    expect(Math.abs(at - pArc.y), 'the arc sits on the teardrop footprint').toBeLessThan(8);
     expect(b).toBeGreaterThan(1.3);
     expect(Math.abs(bq - 1), 'quiet Kp draws no SAR arc').toBeLessThan(0.08);
 });
