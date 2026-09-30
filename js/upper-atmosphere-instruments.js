@@ -57,9 +57,13 @@ import {
     R_EARTH_KM, MODEL_FLOOR_KM, MODEL_CEIL_KM,
 } from './upper-atmosphere-column.js';
 import { pointPhysics } from './upper-atmosphere-physics.js';
-import { layerForAltitude } from './upper-atmosphere-layers.js';
+import { layerForAltitude, ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
 
 const RULER_ALTS = [100, 200, 400, 800, 1200, 2000];
+// The limb scale's candidate ticks (labels are thinned to a minimum spacing),
+// and the layer boundaries it colours between.
+const LIMB_ALTS = [50, 60, 70, 80, 85, 90, 100, 120, 150, 200, 250, 300, 400, 500, 600, 800, 1000, 1200, 1500, 2000];
+const LAYER_EDGES = [...new Set(ATMOSPHERIC_LAYER_SCHEMA.flatMap((L) => [L.minKm, L.maxKm]))].sort((a, b) => a - b);
 
 const CSS = {
     ink:      '#dbe7f5',
@@ -180,7 +184,15 @@ export class AtmosphereInstruments {
     // owns the top-right of this canvas and the time strip owns the bottom.
     _drawRuler(ctx) {
         const geo = this._globe.limbTicks?.(RULER_ALTS);
-        if (!geo?.centre || !geo.ticks?.length) return;
+        // A limb view (the camera rig's layer lens) has the planet's centre
+        // far off-screen: the disc ruler would hang off the canvas, so read
+        // the TANGENT heights instead.
+        const c = geo?.centre;
+        if (!c || c.x < -this._w || c.x > 2 * this._w || c.y < -this._h || c.y > 2 * this._h) {
+            this._drawLimbScale(ctx);
+            return;
+        }
+        if (!geo.ticks?.length) return;
         const { centre, ticks, surfaceRadius } = geo;
 
         const brg = this._rulerBearingRad;
@@ -244,6 +256,59 @@ export class AtmosphereInstruments {
             ctx.globalAlpha = 0.95;
             ctx.fillStyle = col;
             ctx.fillText(label, lp.x + ux * 8, lp.y + uy * 8);
+        }
+        ctx.restore();
+    }
+
+    /**
+     * The limb scale: the ATMOSPHERIC LAYERS as coloured bands between their
+     * boundaries' tangent points, with altitude ticks, hung on the limb at
+     * screen-left. Labels are thinned to a measured spacing; the ticks and
+     * bands stay where the geometry puts them (the ruler rule above).
+     */
+    _drawLimbScale(ctx) {
+        const g = this._globe.limbTangentTicks?.([...LAYER_EDGES, ...LIMB_ALTS]);
+        if (!g?.length) return;
+        const at = new Map(g.map((t) => [t.altKm, t]));
+        const onScreen = (t) => t && t.y > -40 && t.y < this._h + 40 && t.x > -40 && t.x < this._w + 40;
+        ctx.save();
+        // Layer bands.
+        for (const L of ATMOSPHERIC_LAYER_SCHEMA) {
+            const a = at.get(L.minKm), b = at.get(L.maxKm);
+            if (!a || !b || (!onScreen(a) && !onScreen(b))) continue;
+            const col = `#${L.colorHigh.toString(16).padStart(6, '0')}`;
+            ctx.strokeStyle = col;
+            ctx.globalAlpha = 0.85;
+            ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(a.x - 14, a.y); ctx.lineTo(b.x - 14, b.y); ctx.stroke();
+            const span = Math.abs(a.y - b.y);
+            if (span > 16) {
+                const my = Math.min(Math.max((a.y + b.y) / 2, 12), this._h - 12);
+                ctx.save();
+                ctx.translate((a.x + b.x) / 2 - 22, my);
+                ctx.rotate(-Math.PI / 2);
+                ctx.font = '600 9px system-ui, sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillStyle = col; ctx.globalAlpha = 0.95;
+                ctx.fillText(span > 90 ? L.name : L.name.replace('Thermosphere', 'Thermo.').replace('Exosphere', 'Exo.'), 0, 0);
+                ctx.restore();
+            }
+        }
+        // Altitude ticks, labels thinned to a minimum vertical spacing.
+        ctx.font = '600 10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        let lastY = Infinity;
+        for (const alt of LIMB_ALTS) {
+            const t = at.get(alt);
+            if (!onScreen(t)) continue;
+            const layer = layerForAltitude(alt);
+            const col = layer ? `#${layer.colorHigh.toString(16).padStart(6, '0')}` : CSS.accent;
+            ctx.strokeStyle = col; ctx.globalAlpha = 0.8; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(t.x - 10, t.y); ctx.lineTo(t.x + 6, t.y); ctx.stroke();
+            if (Math.abs(lastY - t.y) < 13) continue;
+            lastY = t.y;
+            ctx.fillStyle = col; ctx.globalAlpha = 0.95;
+            ctx.fillText(`${alt} km`, t.x + 9, t.y);
         }
         ctx.restore();
     }
