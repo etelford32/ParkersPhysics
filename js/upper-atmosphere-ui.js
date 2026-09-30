@@ -132,7 +132,7 @@ export class UpperAtmosphereUI {
             if (this.el.camHint) {
                 this.el.camHint.textContent = m === 'fly'
                     ? 'WASD move · Q/E down/up · Shift fast · drag to look'
-                    : 'drag to rotate · scroll to zoom';
+                    : 'drag rotate · right-drag pan · Alt+drag swivel · scroll zoom';
             }
         };
         // From inside the band, Orbit CLIMBS OUT over the same ground rather
@@ -174,11 +174,13 @@ export class UpperAtmosphereUI {
             this.globe.cameraTopView?.();
             setTimeout(() => setMode('orbit'), 1000);
         });
-        // Zoom buttons nudge the camera radially. We multiply position
-        // by a factor — slower close to Earth, faster far away — so a
-        // single click visibly moves the camera at both ends of the
-        // distance range.
+        // Zoom buttons scale the camera's distance by a factor — slower
+        // close in, faster far away — so a single click visibly moves the
+        // camera at both ends of the range. In orbit mode the distance is
+        // to the PIVOT (a limb view zooms onto the limb point, not onto the
+        // planet's centre); the globe's rig owns that.
         const stepZoom = (factor) => {
+            if (this.globe?.dollyCamera) { this.globe.dollyCamera(factor); return; }
             const cam = this.globe?._camera;
             if (!cam) return;
             const dist = cam.position.length();
