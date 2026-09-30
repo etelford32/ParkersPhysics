@@ -27,9 +27,37 @@
  * with `setExternalDriver(true)`; the active mode re-seeds from the pose
  * it is handed back.
  *
+ * THE RIG (2026-09-30, js/upper-atmosphere-camera-rig.js is the PURE math):
+ *   • Orbit mode PANS and SWIVELS, not just rotates. A drag TOOL picks what
+ *     the left button / one finger does ('orbit' | 'pan' | 'swivel');
+ *     right-drag always pans (rotates under the pan tool), Shift/Ctrl+drag
+ *     pans, Alt+drag swivels (a tripod head: the camera stays, the view
+ *     turns). Pan and swivel move the PIVOT, and the pivot is bounded
+ *     (`clampPivot`) — the TIGA lesson: an unbounded pan orbits nothing.
+ *   • THE ORBIT FRAME IS REBUILT, NEVER RE-AIMED. Vendored r160
+ *     OrbitControls caches its orbit axis from `camera.up` at construction
+ *     (OrbitControls.js:177) and ignores later assignments, so a limb view
+ *     — pivot ON the limb, orbit axis = the local radial — rebuilds the
+ *     controls with `camera.up` set FIRST (`_buildOrbit`), exactly the
+ *     Stage / Mars / Moon rule. `setMode('orbit')` and every Reset rebuild
+ *     the planet frame (+Y about the centre). `_orbit` is therefore
+ *     re-assigned; nothing outside this file may hold a reference to it.
+ *   • Keyboard in orbit mode while the pointer is over the globe (or the
+ *     canvas has focus): arrows orbit, Shift+arrows pan, +/− dolly toward
+ *     the pivot, [ / ] change the lens. Gated so a focused slider or the
+ *     page scroll keep their arrow keys.
+ *   • The LENS is a control (`setFov`, 2°–90°). A running path restores
+ *     the lens the user chose, not the one it started with.
+ *
  * Public surface
  *   new CameraController(camera, domElement)
- *   .setMode('orbit'|'fly')                  switch active mode
+ *   .setMode('orbit'|'fly'|'explore')        switch active mode
+ *   .setDragTool('orbit'|'pan'|'swivel')     what a left drag does in orbit
+ *   .setFov(deg) / .getFov()                 the lens
+ *   .limbView(pose)                          fly to a limb pose, then orbit
+ *                                            about the limb point
+ *   .dolly(factor) / .recenterPivot()        pivot-aware zoom / re-centre
+ *   .getRigState()                           pivot, orbit axis, tool, lens
  *   .getMode()
  *   .update(dt)                              call once per frame
  *   .flyTo(targetVec3, lookAtVec3?)          smooth camera move
@@ -52,6 +80,10 @@ import {
 // Paths and flyTo animations time themselves on the shared frame clock, so
 // the test hook's stepped frames drive them exactly.
 import { frameClock } from './upper-atmosphere-frame-clock.js';
+import {
+    RIG, DRAG_TOOLS, clampFov, clampPivot, liftAboveSurface, panPivot, swivelTarget,
+    orbitAround, dollyToward,
+} from './upper-atmosphere-camera-rig.js';
 
 const R_EARTH_KM = 6371;
 
@@ -66,6 +98,10 @@ const FLY_CRAWL       = 0.18;     // hold-Ctrl/Alt multiplier
 const FLY_LOOK_SENS   = 0.0035;
 // Keys that move the camera, and therefore cancel a transition in flight.
 const MOVE_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
+// Orbit-mode rig keys, by KeyboardEvent.code (layout- and Shift-proof).
+const RIG_CODES = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+    'Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'BracketLeft', 'BracketRight']);
+const _arr = (v) => [v.x, v.y, v.z];
 
 export class CameraController {
     /**
@@ -76,16 +112,19 @@ export class CameraController {
         this.camera = camera;
         this.dom = domElement;
 
-        // OrbitControls owns the orbit-mode bookkeeping. We keep its
-        // damping enabled so the transition feels consistent with the
-        // page's existing behaviour.
-        this._orbit = new OrbitControls(camera, domElement);
-        this._orbit.enableDamping = true;
-        this._orbit.dampingFactor = 0.08;
-        this._orbit.minDistance = 1.05;       // allow grazing the surface
-        this._orbit.maxDistance = 28;
-        this._orbit.enablePan = false;
-        this._orbit.rotateSpeed = 0.55;
+        // OrbitControls owns the orbit-mode bookkeeping. It is REBUILT
+        // whenever the orbit axis changes (see the header) — `_buildOrbit`
+        // is the only place one is made.
+        this._dragTool = 'orbit';
+        this._maxDistance = 28;
+        this._orbitUp = new THREE.Vector3(0, 1, 0);
+        this._orbit = null;
+        this._buildOrbit(this._orbitUp, new THREE.Vector3(0, 0, 0));
+        // Keyboard rig state: physical key codes held, and whether the
+        // pointer is over the globe (the gate for arrow keys).
+        this._codes = new Set();
+        this._hover = false;
+        this._swivel = null;
 
         // Fly-mode state. Yaw / pitch are measured in a basis built on
         // `_up` — world +Y by default, the LOCAL RADIAL during and after a
@@ -142,6 +181,12 @@ export class CameraController {
         // otherwise the operator would fight an invisible track. The
         // internal followObject() path passes fromFollow=true to bypass.
         if (!fromFollow) this._follow = null;
+        // Orbit while already orbiting a limb point (or a panned pivot):
+        // go back to orbiting the PLANET, turning the view smoothly.
+        if (mode === 'orbit' && this._mode === 'orbit' && !this._isPlanetFrame()) {
+            this.recenterPivot();
+            return;
+        }
         if (mode === this._mode) return;
         const prev = this._mode;
 
@@ -169,17 +214,197 @@ export class CameraController {
             this.dom.style.cursor = 'crosshair';
         } else {
             // OrbitControls orbits about the +Y it cached at construction;
-            // give it back a +Y camera before it runs.
-            this.setUpVector(new THREE.Vector3(0, 1, 0), { keepView: false });
-            this.camera.up.set(0, 1, 0);
-            // Re-aim orbit at planet centre while preserving camera
-            // position so the user doesn't get yanked.
-            this._orbit.target.set(0, 0, 0);
-            this._orbit.enabled = true;
-            this._orbit.update();
-            this.dom.style.cursor = 'grab';
+            // rebuild it about the planet (+Y, centre) before it runs.
+            // Re-aim at the planet centre while preserving camera position.
+            this._enterOrbitFrame(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0));
+            return;
         }
         this._mode = mode;
+    }
+
+    // ── The orbit frame (see the header: rebuilt, never re-aimed) ────────
+
+    /**
+     * Make a fresh OrbitControls about `target` with orbit axis `up`.
+     * `camera.up` MUST be set before construction — r160 reads it there
+     * and never again. Everything tunable is (re)applied here.
+     */
+    _buildOrbit(up, target) {
+        const wasEnabled = this._orbit ? this._orbit.enabled : true;
+        this._orbit?.dispose();
+        this._orbitUp.copy(up).normalize();
+        this.camera.up.copy(this._orbitUp);
+        const o = new OrbitControls(this.camera, this.dom);
+        o.enableDamping = true;
+        o.dampingFactor = 0.08;
+        o.rotateSpeed = 0.55;
+        o.enablePan = true;
+        o.screenSpacePanning = true;
+        o.target.copy(target);
+        o.maxDistance = this._maxDistance;
+        this._orbit = o;
+        this._applyOrbitLimits();
+        this._applyDragTool();
+        o.enabled = wasEnabled;
+        o.update();
+        return o;
+    }
+
+    /** Distance limits: 1.05 R⊕ about the centre (the page's historical
+     *  floor); about any other pivot the surface floor does the work. */
+    _applyOrbitLimits() {
+        const o = this._orbit;
+        if (!o) return;
+        o.minDistance = o.target.lengthSq() < 1e-10 ? 1.05 : 0.01;
+        o.maxDistance = this._maxDistance;
+    }
+
+    _isPlanetFrame() {
+        return this._orbitUp.y > 1 - 1e-9 && this._orbit.target.lengthSq() < 1e-10;
+    }
+
+    /** Switch to orbit mode about (`up`, `target`) from the current pose. */
+    _enterOrbitFrame(up, target) {
+        this.setUpVector(up, { keepView: false });
+        const sameAxis = this._orbitUp.distanceToSquared(up.clone().normalize()) < 1e-14;
+        if (sameAxis && this._orbit) {
+            this.camera.up.copy(this._orbitUp);
+            this._orbit.target.copy(target);
+            this._applyOrbitLimits();
+        } else {
+            this._buildOrbit(up, target);
+        }
+        this._mode = 'orbit';
+        this._orbit.enabled = true;
+        this._orbit.update();
+        this._applyDragTool();
+    }
+
+    // ── The drag tool ───────────────────────────────────────────────────
+
+    /** What a left drag / one finger does in orbit mode. */
+    setDragTool(tool) {
+        if (!DRAG_TOOLS.includes(tool)) return this._dragTool;
+        this._dragTool = tool;
+        this._applyDragTool();
+        return tool;
+    }
+    getDragTool() { return this._dragTool; }
+
+    _applyDragTool() {
+        const o = this._orbit;
+        if (!o) return;
+        const t = this._dragTool;
+        // Right drag pans (or rotates under the pan tool); the wheel and the
+        // middle button dolly. The swivel tool's LEFT button is ours — the
+        // capture-phase listener in _bindFly handles it and OrbitControls
+        // is told to ignore it (−1: no action).
+        o.mouseButtons = {
+            LEFT:   t === 'pan' ? THREE.MOUSE.PAN : t === 'swivel' ? -1 : THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT:  t === 'pan' ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN,
+        };
+        o.touches = {
+            ONE: t === 'pan' ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY_PAN,
+        };
+        if (this._mode === 'orbit') {
+            this.dom.style.cursor = t === 'pan' ? 'move' : t === 'swivel' ? 'crosshair' : 'grab';
+        }
+    }
+
+    // ── The lens ─────────────────────────────────────────────────────────
+
+    /** Set the vertical field of view (clamped 2°–90°). */
+    setFov(deg) {
+        const f = clampFov(deg);
+        // A running path owns the lens (its FOV kick) — it restores THIS on exit.
+        if (this._path) { this._path.fov0 = f; return f; }
+        if (this._anim) this._anim.fov1 = f;
+        this.camera.fov = f;
+        this.camera.updateProjectionMatrix();
+        return f;
+    }
+    getFov() { return this._path ? this._path.fov0 : this.camera.fov; }
+
+    /** Largest orbit distance (the CME layer raises it to see the corridor). */
+    setMaxDistance(r) {
+        this._maxDistance = Math.max(4, Number(r) || 28);
+        this._applyOrbitLimits();
+        const d = this.camera.position.length();
+        if (d > this._maxDistance && this._mode === 'orbit') {
+            this.camera.position.multiplyScalar(this._maxDistance / d);
+        }
+    }
+    getMaxDistance() { return this._maxDistance; }
+
+    // ── Pivot moves ──────────────────────────────────────────────────────
+
+    /**
+     * Zoom. In orbit mode the camera moves along the line to the PIVOT (so
+     * a limb view zooms onto the limb point, not onto Earth's centre);
+     * elsewhere it scales the distance from the centre as the page always did.
+     */
+    dolly(factor) {
+        if (!(factor > 0)) return;
+        this.cancelPath('dolly');
+        if (this._mode === 'orbit') {
+            const o = this._orbit;
+            const p = dollyToward({
+                position: _arr(this.camera.position), target: _arr(o.target), factor,
+                minDist: o.minDistance, maxDist: o.maxDistance,
+            });
+            const q = liftAboveSurface(p);
+            this.camera.position.set(q[0], q[1], q[2]);
+            o.update();
+            return;
+        }
+        const dist = this.camera.position.length();
+        const next = Math.max(1.05, Math.min(this._maxDistance, dist * factor));
+        this.camera.position.multiplyScalar(next / dist);
+    }
+
+    /** Orbit the planet again from where the camera is (view turns smoothly). */
+    recenterPivot({ durationSec = 0.8 } = {}) {
+        this._follow = null;
+        const pos = this.camera.position.clone();
+        this.flyTo(pos, new THREE.Vector3(0, 0, 0), durationSec, {
+            up: new THREE.Vector3(0, 1, 0),
+            endOrbit: { up: new THREE.Vector3(0, 1, 0), target: new THREE.Vector3(0, 0, 0) },
+        });
+    }
+
+    /**
+     * Fly to a limb view (js/upper-atmosphere-camera-rig.js `limbViewPose`)
+     * and orbit the LIMB POINT about the local radial when it lands. The
+     * lens animates to the pose's field of view on the way.
+     */
+    limbView(pose, { durationSec = 1.8 } = {}) {
+        if (!pose?.position) return;
+        const v = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+        const up = v(pose.up).normalize();
+        this.flyTo(v(pose.position), v(pose.target), durationSec, {
+            up, fovDeg: pose.fovDeg,
+            endOrbit: { up, target: v(pose.target) },
+        });
+    }
+
+    /** Any pose `{position, target, up, fovDeg}` → fly there, then orbit its target about its up. */
+    flyToPose(pose, opts) { this.limbView(pose, opts); }
+
+    /** What the rig is doing, for the panel readout and the tests. */
+    getRigState() {
+        const o = this._orbit;
+        return {
+            mode: this._mode,
+            tool: this._dragTool,
+            fovDeg: this.getFov(),
+            target: _arr(o.target),
+            orbitUp: _arr(this._orbitUp),
+            planetFrame: this._isPlanetFrame(),
+            maxDistance: this._maxDistance,
+            position: _arr(this.camera.position),
+        };
     }
 
     /**
@@ -270,6 +495,8 @@ export class CameraController {
         };
     }
     isPathActive() { return !!this._path; }
+    /** A flyTo (Reset, a preset, a limb view) is still animating. */
+    isAnimating() { return !!this._anim; }
     getPathProgress() { return this._path ? this._path.s : null; }
 
     /** Stop a running path where it is. The caller's onDone gets 'cancelled'. */
@@ -340,7 +567,7 @@ export class CameraController {
      * @param {THREE.Vector3} [lookAtPos]
      * @param {number}        [durationSec=1.4]
      */
-    flyTo(targetPos, lookAtPos = null, durationSec = 1.4) {
+    flyTo(targetPos, lookAtPos = null, durationSec = 1.4, { up = null, fovDeg = null, endOrbit = null } = {}) {
         // A flyTo (Reset, Top, click-to-fly) supersedes a transition, and
         // cannot run under explore: at its end the explore state would be
         // stale and the next explore step would snap the camera back into
@@ -355,7 +582,7 @@ export class CameraController {
         // For end orientation: build a quaternion that points at lookAt.
         const endQuat = new THREE.Quaternion();
         if (lookAtPos) {
-            const m = new THREE.Matrix4().lookAt(targetPos, lookAtPos, this._up);
+            const m = new THREE.Matrix4().lookAt(targetPos, lookAtPos, up || this._up);
             endQuat.setFromRotationMatrix(m);
         } else {
             endQuat.copy(start.quat);
@@ -368,6 +595,11 @@ export class CameraController {
             startQuat: start.quat,
             endQuat,
             lookAt:    lookAtPos?.clone() || null,
+            fov0:      this.camera.fov,
+            fov1:      fovDeg == null ? this.camera.fov : clampFov(fovDeg),
+            // Orbit frame to enter on landing (a limb view, or back to the
+            // planet); null keeps the old behaviour per mode.
+            endOrbit:  endOrbit ? { up: endOrbit.up.clone(), target: endOrbit.target.clone() } : null,
         };
     }
 
@@ -412,18 +644,27 @@ export class CameraController {
     resetView({ distance = 3.4, durationSec = 1.0 } = {}) {
         this._follow = null;
         this.setUpVector(new THREE.Vector3(0, 1, 0), { keepView: false });
-        this.camera.up.set(0, 1, 0);
         const target = new THREE.Vector3(0, 0.65 * distance, distance);
         const lookAt = new THREE.Vector3(0, 0, 0);
-        this.flyTo(target, lookAt, durationSec);
+        // Home is also the home LENS and the planet orbit frame.
+        this.flyTo(target, lookAt, durationSec, {
+            up: new THREE.Vector3(0, 1, 0), fovDeg: RIG.fovDefaultDeg,
+            endOrbit: this._mode === 'orbit'
+                ? { up: new THREE.Vector3(0, 1, 0), target: new THREE.Vector3(0, 0, 0) } : null,
+        });
     }
 
     /** Snap to a polar (top-down) view of the planet. */
     flyToTopView({ distance = 4.5, durationSec = 1.0 } = {}) {
         this._follow = null;
+        this.setUpVector(new THREE.Vector3(0, 1, 0), { keepView: false });
         const target = new THREE.Vector3(0, distance, 0.001);   // ε for valid lookAt
         const lookAt = new THREE.Vector3(0, 0, 0);
-        this.flyTo(target, lookAt, durationSec);
+        this.flyTo(target, lookAt, durationSec, {
+            up: new THREE.Vector3(0, 1, 0),
+            endOrbit: this._mode === 'orbit'
+                ? { up: new THREE.Vector3(0, 1, 0), target: new THREE.Vector3(0, 0, 0) } : null,
+        });
     }
 
     /** Per-frame update — call from the host's animate() loop. */
@@ -457,12 +698,86 @@ export class CameraController {
         if (this._external && this._mode !== 'orbit') return;
 
         if (this._mode === 'orbit') {
+            this._stepOrbitKeys(dt);
             this._orbit.update();
+            this._boundOrbit();
         } else if (this._mode === 'explore') {
             this._stepExplore(dt);
         } else {
             this._stepFly(dt);
         }
+    }
+
+    /** True when the orbit-mode rig keys should act (pointer over the globe or canvas focused). */
+    _rigKeysLive() {
+        return this._mode === 'orbit' && !this._path && !this._anim
+            && (this._hover || document.activeElement === this.dom);
+    }
+
+    /**
+     * Keyboard orbit / pan / dolly / lens, frame-rate independent. Every
+     * move is the rig kernel's; OrbitControls then re-reads the pose.
+     */
+    _stepOrbitKeys(dt) {
+        const c = this._codes;
+        if (!c.size || !this._rigKeysLive() || !(dt > 0)) return;
+        const o = this._orbit;
+        const shift = this._keys.has('shift');
+        const h = ((c.has('ArrowRight') ? 1 : 0) - (c.has('ArrowLeft') ? 1 : 0));
+        const v = ((c.has('ArrowUp') ? 1 : 0) - (c.has('ArrowDown') ? 1 : 0));
+        let pos = _arr(this.camera.position), tgt = _arr(o.target);
+        if (h || v) {
+            if (shift) {
+                const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+                const sUp = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+                const r = panPivot({
+                    position: pos, target: tgt, right: _arr(right), screenUp: _arr(sUp),
+                    dxFrac: h * RIG.keyPanFracS * dt, dyFrac: v * RIG.keyPanFracS * dt, fovDeg: this.camera.fov,
+                });
+                pos = r.position; tgt = r.target;
+            } else {
+                // Right arrow swings the camera round to the right (the scene
+                // turns left) — the same sense as dragging the globe leftward.
+                pos = orbitAround({
+                    position: pos, target: tgt, up: _arr(this._orbitUp),
+                    dAzRad: h * RIG.keyOrbitRadS * dt, dPolarRad: -v * RIG.keyOrbitRadS * dt,
+                });
+            }
+        }
+        const z = ((c.has('Minus') || c.has('NumpadSubtract')) ? 1 : 0)
+                - ((c.has('Equal') || c.has('NumpadAdd')) ? 1 : 0);
+        if (z) {
+            pos = dollyToward({ position: pos, target: tgt, factor: Math.pow(RIG.keyZoomPerS, z * dt),
+                                minDist: o.minDistance, maxDist: o.maxDistance });
+        }
+        const f = (c.has('BracketRight') ? 1 : 0) - (c.has('BracketLeft') ? 1 : 0);
+        if (f) this.setFov(this.camera.fov * Math.pow(RIG.keyFovPerS, f * dt));
+        this.camera.position.set(pos[0], pos[1], pos[2]);
+        o.target.set(tgt[0], tgt[1], tgt[2]);
+    }
+
+    /** After OrbitControls: the pivot stays in bounds and the camera above ground. */
+    _boundOrbit() {
+        const o = this._orbit;
+        const c = clampPivot({ position: _arr(this.camera.position), target: _arr(o.target) });
+        if (c.shifted) {
+            this.camera.position.set(c.position[0], c.position[1], c.position[2]);
+            o.target.set(c.target[0], c.target[1], c.target[2]);
+        }
+        const r = this.camera.position.length();
+        if (r < RIG.surfaceFloorRe) this.camera.position.multiplyScalar(RIG.surfaceFloorRe / r);
+    }
+
+    /** Swivel the view about the camera (orbit mode): dx/dy in pixels. */
+    _swivelBy(dx, dy) {
+        const o = this._orbit;
+        const t = swivelTarget({
+            position: _arr(this.camera.position), target: _arr(o.target), up: _arr(this._orbitUp),
+            yawRad: dx * RIG.swivelSens, pitchRad: -dy * RIG.swivelSens,
+        });
+        o.target.set(t[0], t[1], t[2]);
+        this._applyOrbitLimits();
+        this.camera.lookAt(o.target);
     }
 
     _stepExplore(dt) {
@@ -510,6 +825,17 @@ export class CameraController {
             const key = e.key.toLowerCase();
             if (down) this._keys.add(key);
             else      this._keys.delete(key);
+            // Orbit-mode rig keys by physical code. Arrow keys would also
+            // scroll the page, so they are claimed ONLY while the rig acts
+            // on them (pointer over the globe, or the canvas focused).
+            if (RIG_CODES.has(e.code)) {
+                if (down && this._rigKeysLive()) {
+                    this._codes.add(e.code);
+                    e.preventDefault();
+                } else if (!down) {
+                    this._codes.delete(e.code);
+                }
+            }
             // A move key takes the camera back from a transition in flight.
             if (down && this._path && MOVE_KEYS.has(key)) this.cancelPath('key');
             // Don't preventDefault — that would block tabbing/copy etc.
@@ -557,13 +883,49 @@ export class CameraController {
         // Releasing every key when the window loses focus: a key held
         // through an alt-tab otherwise never sees its keyup and the explore
         // camera flies on by itself.
-        const onBlur = () => this._keys.clear();
+        const onBlur = () => { this._keys.clear(); this._codes.clear(); };
+
+        // Swivel (orbit mode): the swivel tool's left drag, or Alt + any
+        // left drag. Captured BEFORE OrbitControls' own pointerdown on the
+        // same element and stopped there, so it never starts a rotate.
+        const onPointerDownCapture = (e) => {
+            if (this._mode !== 'orbit' || this._path || this._anim) return;
+            if (e.button !== 0) return;
+            if (!(this._dragTool === 'swivel' || e.altKey)) return;
+            e.stopImmediatePropagation();
+            this._follow = null;
+            this._swivel = { id: e.pointerId, x: e.clientX, y: e.clientY };
+            try { this.dom.setPointerCapture(e.pointerId); } catch (_) { /* synthetic */ }
+            this.dom.style.cursor = 'grabbing';
+        };
+        const onPointerMoveSwivel = (e) => {
+            const sw = this._swivel;
+            if (!sw || e.pointerId !== sw.id) return;
+            const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+            sw.x = e.clientX; sw.y = e.clientY;
+            if (dx || dy) this._swivelBy(dx, dy);
+        };
+        const onPointerUpSwivel = (e) => {
+            const sw = this._swivel;
+            if (!sw || e.pointerId !== sw.id) return;
+            this._swivel = null;
+            try { this.dom.releasePointerCapture(e.pointerId); } catch (_) { /* synthetic */ }
+            this._applyDragTool();
+        };
+        const onEnter = () => { this._hover = true; };
+        const onLeave = () => { this._hover = false; this._codes.clear(); };
 
         window.addEventListener('keydown', onKD);
         window.addEventListener('keyup',   onKU);
         window.addEventListener('blur',    onBlur);
         this.dom.addEventListener('mousedown', onMouseDown);
         this.dom.addEventListener('wheel', onWheel, { passive: true });
+        this.dom.addEventListener('pointerdown', onPointerDownCapture, { capture: true });
+        this.dom.addEventListener('pointermove', onPointerMoveSwivel);
+        this.dom.addEventListener('pointerup', onPointerUpSwivel);
+        this.dom.addEventListener('pointercancel', onPointerUpSwivel);
+        this.dom.addEventListener('pointerenter', onEnter);
+        this.dom.addEventListener('pointerleave', onLeave);
         window.addEventListener('mouseup', onMouseUp);
         window.addEventListener('mousemove', onMouseMove);
         this._unbindFly = () => {
@@ -571,6 +933,12 @@ export class CameraController {
             window.removeEventListener('keyup',   onKU);
             window.removeEventListener('blur',    onBlur);
             this.dom.removeEventListener('wheel', onWheel);
+            this.dom.removeEventListener('pointerdown', onPointerDownCapture, { capture: true });
+            this.dom.removeEventListener('pointermove', onPointerMoveSwivel);
+            this.dom.removeEventListener('pointerup', onPointerUpSwivel);
+            this.dom.removeEventListener('pointercancel', onPointerUpSwivel);
+            this.dom.removeEventListener('pointerenter', onEnter);
+            this.dom.removeEventListener('pointerleave', onLeave);
             this.dom.removeEventListener('mousedown', onMouseDown);
             window.removeEventListener('mouseup', onMouseUp);
             window.removeEventListener('mousemove', onMouseMove);
@@ -634,9 +1002,11 @@ export class CameraController {
         if (dist < 1.005) {
             this.camera.position.multiplyScalar(1.005 / dist);
         }
-        // And a soft ceiling at 30 R⊕ so users can't get lost.
-        if (dist > 30) {
-            this.camera.position.multiplyScalar(30 / dist);
+        // And a soft ceiling (30 R⊕, or further while the CME corridor is
+        // up) so users can't get lost.
+        const ceil = Math.max(30, this._maxDistance);
+        if (dist > ceil) {
+            this.camera.position.multiplyScalar(ceil / dist);
         }
     }
 
@@ -691,14 +1061,26 @@ export class CameraController {
 
         this.camera.position.lerpVectors(a.startPos, a.endPos, k);
         this.camera.quaternion.slerpQuaternions(a.startQuat, a.endQuat, k);
+        if (a.fov1 !== a.fov0) {
+            this.camera.fov = a.fov0 + (a.fov1 - a.fov0) * k;
+            this.camera.updateProjectionMatrix();
+        }
 
         if (t >= 1) {
             // On completion, sync the active mode so user-input picks up
             // cleanly from the new pose.
+            if (a.endOrbit) {
+                this._anim = null;
+                this._enterOrbitFrame(a.endOrbit.up, a.endOrbit.target);
+                return;
+            }
             if (this._mode === 'fly' && a.lookAt) {
                 this.syncOrientationFromCamera();
             } else if (this._mode === 'orbit') {
+                // Planet frame only — a custom frame would need `endOrbit`.
+                if (!this._isPlanetFrame()) this._buildOrbit(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0));
                 this._orbit.target.set(0, 0, 0);
+                this._applyOrbitLimits();
                 this._orbit.update();
             }
             this._anim = null;

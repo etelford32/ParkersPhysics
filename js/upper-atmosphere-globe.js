@@ -102,8 +102,14 @@ import { AtmosphereTransit } from './upper-atmosphere-transit.js';
 import { ExploreLayer } from './upper-atmosphere-explore.js';
 import { frameClock } from './upper-atmosphere-frame-clock.js';
 import {
-    divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8,
+    divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8, pointsOfInterest,
 } from './upper-atmosphere-explore-model.js';
+// The camera rig's PURE math: limb views, lens, pivot moves.
+import { limbSites, limbViewPose, describeRig } from './upper-atmosphere-camera-rig.js';
+import { ATMOSPHERIC_LAYER_BY_ID } from './upper-atmosphere-layers.js';
+// The incoming CME's frame + camera stations (PURE, small); the layer itself
+// (and the flux-rope provider + WASM behind it) loads only on first enable.
+import { CME_VIEW, cmeViewPose, ropeBasisScene, eclipticNorthScene } from './upper-atmosphere-cme-model.js';
 
 // Map (sub-solar lat, sub-solar lon) → unit Vector3 in the scene's world
 // frame. THE ONE CONVENTION is the kernel's `latLonToScene` — the site's
@@ -1109,9 +1115,10 @@ export class AtmosphereGlobe {
             const shell = this._shells.find(s => s.userData?.id === layerId);
             if (shell) shell.visible = v;
         }
-        // Particle system.
-        const sys = this._particles?.[layerId];
-        if (sys) sys.setVisible(v);
+        // Particle system — through the solo filter, so a layer switched
+        // back on while another is soloed stays hidden until the solo ends.
+        (this._layerUserVisible ??= {})[layerId] = v;
+        this._applyParticleVisibility();
         // Drag-forecast overlay: mirror the layer toggle so flow lines for
         // hidden shells vanish too.
         this._dragOverlay?.setLayerEnabled?.(layerId, v);
@@ -2177,6 +2184,124 @@ export class AtmosphereGlobe {
     /** A camera preset takes over from the layer transit (which re-applies its pose every frame). */
     _releaseTransitForCamera(reason) {
         if (this._transit?.getState?.().active) this._transit.stop(reason);
+    }
+
+    // ── The camera rig (js/upper-atmosphere-camera-rig.js) ───────────────
+    // Lens, drag tool, pivot moves and the LIMB VIEWS that separate the
+    // layers. The controller applies; the rig kernel computes; the globe
+    // only supplies the model inputs (sub-solar point, the explore POIs).
+
+    setCameraDragTool(tool) { return this._controls.setDragTool?.(tool); }
+    getCameraDragTool()     { return this._controls.getDragTool?.() ?? 'orbit'; }
+    setCameraFov(deg)       { return this._controls.setFov?.(deg); }
+    getCameraFov()          { return this._controls.getFov?.() ?? this._camera.fov; }
+    /** Pivot-aware zoom (<1 in, >1 out) — the HUD's ＋/− buttons. */
+    dollyCamera(factor)     { this._releaseTransitForCamera('zoom'); this._controls.dolly?.(factor); }
+    /** Orbit the planet again from where the camera is. */
+    recenterCameraPivot()   { this._releaseTransitForCamera('pivot'); this._controls.stopFollowing?.(); this._followId = null; this._controls.recenterPivot?.(); }
+
+    /** The rig's state + what it means (altitude, pivot range, focal length). */
+    getCameraRig() {
+        const st = this._controls.getRigState?.();
+        if (!st) return null;
+        return { ...st, ...describeRig({ position: st.position, target: st.target, fovDeg: st.fovDeg }) };
+    }
+
+    /** Limb-view sites for the current scene instant — local times + model-placed POIs. */
+    getLimbSites() {
+        const inp = this._poiInputs();
+        let pois = [];
+        try { pois = pointsOfInterest(inp); } catch (_) { pois = []; }
+        return limbSites({ subSolarLatDeg: inp.subSolarLatDeg, subSolarLonDeg: inp.subSolarLonDeg, pois });
+    }
+
+    /**
+     * Fly to a telephoto view ACROSS the atmosphere at a site's limb,
+     * framing one layer (or any band), and orbit the limb point when it
+     * lands. `layerId` is an ATMOSPHERIC_LAYER_SCHEMA id or 'band'
+     * (80–2000 km). Returns the pose (or null for an unknown site).
+     */
+    flyToLimb({ layerId = 'band', siteId = 'dusk', minKm = null, maxKm = null, headingDeg = null, durationSec = 1.8 } = {}) {
+        const L = ATMOSPHERIC_LAYER_BY_ID[layerId];
+        const lo = Number.isFinite(minKm) ? minKm : L ? L.minKm : EXPLORE.floorKm;
+        const hi = Number.isFinite(maxKm) ? maxKm : L ? L.maxKm : EXPLORE.ceilKm;
+        const site = this.getLimbSites().find((q) => q.id === siteId);
+        if (!site) return null;
+        const pose = limbViewPose({ latDeg: site.latDeg, lonDeg: site.lonDeg, minKm: lo, maxKm: hi, headingDeg });
+        this._releaseTransitForCamera('limb');
+        this._controls.stopFollowing?.();
+        this._followId = null;
+        this._controls.cancelPath?.('superseded');
+        this._controls.limbView?.(pose, { durationSec });
+        this._limbView = { layerId, siteId, site, minKm: lo, maxKm: hi, fovDeg: pose.fovDeg };
+        this._limbFocus = true;
+        return { ...pose, site, layerId };
+    }
+    getLimbView() { return this._limbView ?? null; }
+
+    // ── The incoming CME (js/upper-atmosphere-cme-layer.js) ──────────────
+    /**
+     * Show / hide the flux-rope layer. First enable dynamically imports the
+     * layer (and, through it, the shared provider + the WASM kernel) so the
+     * page pays nothing until asked. While on, the camera may pull back to
+     * `CME_VIEW.maxDistanceRe` to see the corridor.
+     */
+    async setCmeLayerEnabled(on) {
+        if (on) {
+            if (!this._cme) {
+                const { CmeLayer } = await import('./upper-atmosphere-cme-layer.js');
+                this._cme ??= new CmeLayer(this._scene, {
+                    getSunDir: () => this._sunDir,
+                    getGmstRad: (ms) => this._gmstRad(ms),
+                    getSceneTimeMs: () => this._sceneTimeMs(),
+                    getMagnetopause: () => this._swGeometry?.mp ?? null,
+                });
+            }
+            await this._cme.enable();
+            this._controls.setMaxDistance?.(CME_VIEW.maxDistanceRe);
+        } else {
+            this._cme?.disable();
+            this._controls.setMaxDistance?.(28);
+        }
+        try { window.dispatchEvent(new CustomEvent('ua-cme-layer', { detail: { enabled: !!on } })); } catch (_) { /* no window */ }
+        return !!on;
+    }
+    getCmeLayer() { return this._cme ?? null; }
+    isCmeLayerEnabled() { return !!this._cme?.isEnabled?.(); }
+
+    /** Fly to a CME station ('approach' | 'upstream' | 'side') and orbit there. */
+    flyToCmeView(kind) {
+        const sd = this._sunDir;
+        if (!sd) return null;
+        const sunDir = [sd.x, sd.y, sd.z];
+        const basis = ropeBasisScene(sunDir, eclipticNorthScene(this._gmstRad(this._sceneTimeMs())));
+        const pose = cmeViewPose(kind, basis, sunDir);
+        if (!pose) return null;
+        this._releaseTransitForCamera('cme');
+        this._controls.stopFollowing?.();
+        this._followId = null;
+        this._controls.cancelPath?.('superseded');
+        this._controls.limbView?.(pose, { durationSec: kind === 'approach' ? 2.4 : 1.8 });
+        this._limbView = null;
+        return pose;
+    }
+
+    /**
+     * Show ONE layer's particle population (null = all). Composes with the
+     * per-layer toggles: a layer the user switched off stays off.
+     */
+    setParticleSolo(layerId = null) {
+        this._particleSolo = layerId && this._particles?.[layerId] ? layerId : null;
+        this._applyParticleVisibility();
+        return this._particleSolo;
+    }
+    getParticleSolo() { return this._particleSolo ?? null; }
+    _applyParticleVisibility() {
+        const solo = this._particleSolo ?? null;
+        for (const [id, sys] of Object.entries(this._particles || {})) {
+            const userOn = this._layerUserVisible?.[id] !== false;
+            sys.setVisible(userOn && (!solo || solo === id));
+        }
     }
 
     // ── Phase 26: time-warp + sat-clock control ──────────────────────────
@@ -4203,8 +4328,13 @@ export class AtmosphereGlobe {
             vertexColors: true,
             transparent: true,
             opacity: 0.9,
+            // Drawn first and never occluding: the backdrop is at infinity.
+            depthWrite: false,
         });
-        this._scene.add(new THREE.Points(geom, mat));
+        this._stars = new THREE.Points(geom, mat);
+        this._stars.renderOrder = -10;
+        this._stars.frustumCulled = false;
+        this._scene.add(this._stars);
     }
 
     _initControls() {
@@ -4504,7 +4634,16 @@ export class AtmosphereGlobe {
     _updateExploreFocus(mode) {
         // A dive or climb counts: mid-dive the hoops sweep through the view
         // as giant bands (measured) before the mode has become explore.
-        const inside = mode === 'explore' || !!this._controls.isPathActive?.();
+        let inside = mode === 'explore' || !!this._controls.isPathActive?.();
+        // A LIMB VIEW counts too, from the flight in until the camera orbits
+        // the planet again: under a telephoto lens the altitude tori, the
+        // mesosphere rings and the field lines are seen edge-on and fill the
+        // frame as pastel bands (measured on the first limb screenshots).
+        if (this._limbFocus) {
+            const rig = this._controls.getRigState?.();
+            if (rig && rig.planetFrame && !this._controls.isAnimating?.()) this._limbFocus = false;
+            else inside = true;
+        }
         if (inside === !!this._exploreFocusMode) return;
         this._exploreFocusMode = inside;
         if (inside) {
@@ -4659,6 +4798,37 @@ export class AtmosphereGlobe {
      * under a pixel; a ruler is not a measurement instrument here, it is a
      * legend for the render's vertical axis.
      */
+    /**
+     * Where the TANGENT rays for each altitude meet the limb, on screen, in
+     * the vertical plane through the camera and the sightline at NDC x =
+     * `ndcX` (screen-left by default). This is the ruler for a LIMB view:
+     * there the planet's centre is far off-screen, the disc ruler below has
+     * nothing to hang on, and what the eye reads is tangent height — each
+     * point is where a ray grazing that altitude touches it. Pure geometry
+     * on the unit sphere; the overlay stays three-free.
+     */
+    limbTangentTicks(altitudesKm, ndcX = -0.55) {
+        const cam = this._camera;
+        const C = cam.position.clone();
+        const d = C.length();
+        const dir = new THREE.Vector3(ndcX, 0, 0.5).unproject(cam).sub(cam.position).normalize();
+        const ec = C.clone().normalize();
+        const ef = dir.clone().addScaledVector(ec, -dir.dot(ec));
+        if (!(d > 1) || ef.lengthSq() < 1e-10) return [];
+        ef.normalize();
+        const out = [];
+        for (const altKm of altitudesKm) {
+            const r = 1 + altKm / R_EARTH_KM;
+            if (r >= d) continue;
+            const cosA = r / d, sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
+            const T = ec.clone().multiplyScalar(r * cosA).addScaledVector(ef, r * sinA);
+            const scr = this.projectToScreen(T.x, T.y, T.z);
+            if (scr.behind) continue;
+            out.push({ altKm, x: scr.x, y: scr.y });
+        }
+        return out;
+    }
+
     limbTicks(altitudesKm) {
         const cam = this._camera.position.clone();
         const d = cam.length();
@@ -5197,6 +5367,10 @@ export class AtmosphereGlobe {
         });
         this._updateExploreFocus(camMode);
         this._updateNearPlane();
+        this._cme?.update(this._camera, dtWall);
+        // The star backdrop rides the camera: it is at infinity, and with the
+        // CME corridor up the camera can stand further out than its shell.
+        if (this._stars) this._stars.position.copy(this._camera.position);
 
         if (!render) return;
         this._renderer.render(this._scene, this._camera);

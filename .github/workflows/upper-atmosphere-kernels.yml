@@ -17,6 +17,13 @@ name: upper-atmosphere-kernels
 #                                  F-region stack, TEC, the teardrop trough,
 #                                  penetration into the fountain, the TIDs,
 #                                  and the GLSL mirrors run back through JS
+#   upper-atmosphere-camera-rig.mjs  the camera rig: lens, pivot bound, pan,
+#                                  swivel, keyboard orbit, limb views (above
+#                                  the band, tangent-ray framing)
+#   upper-atmosphere-cme-model.mjs the incoming CME's frame join (ecliptic
+#                                  pole in the Earth-fixed scene), corridor
+#                                  map, true-scale field lines — on the real
+#                                  committed flux-rope WASM
 #   image-metrics.mjs              the image metrics the browser gates use,
 #                                  each shown SEEING its bug on a synthetic
 #                                  image (a metric that cannot fail is not a
@@ -39,6 +46,12 @@ on:
       - 'js/ionosphere-descent.js'
       - 'js/ionosphere-cells.js'
       - 'js/ring-current-efield.js'
+      - 'js/stage/scale.js'
+      - 'js/stage/model.js'
+      - 'js/corridor/corridor-model.js'
+      - 'js/flux-rope/view.js'
+      - 'js/flux-rope-kernel.js'
+      - 'js/flux-rope-wasm/**'
       - 'tests/upper-atmosphere-*.mjs'
       - 'tests/image-metrics.mjs'
       - 'tests/helpers/image-metrics.mjs'
@@ -51,6 +64,12 @@ on:
       - 'js/ionosphere-descent.js'
       - 'js/ionosphere-cells.js'
       - 'js/ring-current-efield.js'
+      - 'js/stage/scale.js'
+      - 'js/stage/model.js'
+      - 'js/corridor/corridor-model.js'
+      - 'js/flux-rope/view.js'
+      - 'js/flux-rope-kernel.js'
+      - 'js/flux-rope-wasm/**'
       - 'tests/upper-atmosphere-*.mjs'
       - 'tests/image-metrics.mjs'
       - 'tests/helpers/image-metrics.mjs'
@@ -89,5 +108,9 @@ jobs:
         run: node tests/upper-atmosphere-airglow-field.mjs
       - name: plasma field + TIDs
         run: node tests/upper-atmosphere-plasma-field.mjs
+      - name: camera rig
+        run: node tests/upper-atmosphere-camera-rig.mjs
+      - name: incoming CME frame + field lines (real WASM)
+        run: node tests/upper-atmosphere-cme-model.mjs
       - name: image metrics (synthetic controls)
         run: node tests/image-metrics.mjs

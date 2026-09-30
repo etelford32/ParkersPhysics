@@ -785,6 +785,113 @@ JOIN, not a second ionosphere model:
   ΔA 0.000 under northward IMF. The SAR gate now finds the arc on the
   teardrop row (54.4° inv. lat; Carpenter–Anderson would put it at 49.1°).
 
+### 9.10 The camera rig, and the CME coming at it (2026-09-30)
+
+Until now a left drag could only rotate the globe about its centre; there was
+no pan, no swivel, no lens, and no view in which the layers could actually be
+told apart — from the default ~3 R⊕ camera the whole 50–2000 km band is a
+0.3 R⊕ rim and the mesosphere is two pixels of it. And nothing on the page
+said what was coming from the Sun.
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-camera-rig.js` | PURE: lens (fov ↔ 35 mm focal length), the pivot bound, pan / swivel / keyboard orbit / dolly, limb sites, **limb views** | `node tests/upper-atmosphere-camera-rig.mjs` (13) |
+| `js/upper-atmosphere-camera.js` | applies the rig: drag TOOL (orbit · pan · swivel), right/Shift-drag pan, Alt-drag swivel, arrows / +− / [ ] keys, `setFov`, `limbView` / `flyToPose`, the orbit frame REBUILT for a new axis | `tests/upper-atmosphere-camera-rig.spec.js` (6) |
+| `js/upper-atmosphere-camera-rig-panel.js` | DOM: tool, lens, pivot, the LAYER LENS (site × layer), the particle population card, "only this layer's particles" | same |
+| `js/upper-atmosphere-cme-model.js` | PURE: the flux-rope frame in the Earth-FIXED scene, the compressed corridor, the true-scale near-Earth field lines, the camera stations | `node tests/upper-atmosphere-cme-model.mjs` (12, incl. the real WASM) |
+| `js/upper-atmosphere-cme-layer.js` / `-cme-panel.js` | the ropes, the drawn Sun + AU ruler, the field lines + B-at-Earth arrow; the chip, clock, rope table, disclosure | the spec |
+| `js/upper-atmosphere-instruments.js` | a LIMB SCALE: layer bands + altitude ticks at the tangent points, when the disc ruler has nothing to hang on | the spec (`limbTangentTicks`) |
+
+- **The orbit frame is rebuilt, never re-aimed.** Vendored r160
+  OrbitControls reads its orbit axis from `camera.up` ONCE, at
+  construction. A limb view orbits the limb point about the LOCAL RADIAL, so
+  the controller disposes and rebuilds the controls with `camera.up` set
+  first (`_buildOrbit`) — the Stage / Mars / Moon scar, avoided the same way.
+  `setMode('orbit')`, Reset and the "⌖ planet" button rebuild the planet
+  frame (+Y about the centre). The spec's gate drags in a limb view and
+  checks the camera's height along the radial is conserved; its NEGATIVE
+  CONTROL rebuilds the controls about +Y and the same drag must break it.
+- **Pan and swivel move the pivot, and the pivot is bounded** (the TIGA
+  lesson): within 6 R⊕ of the centre, or just past the camera's own radius.
+  A swivel that would carry the pivot out SHORTENS it along the new
+  sightline — sideways would jump the picture. The orbit camera never goes
+  below 20 km (radial lift). The swivel is captured on `pointerdown` in the
+  CAPTURE phase and stopped there, so OrbitControls never starts a rotate.
+- **Keyboard** (orbit mode, pointer over the globe or the canvas focused —
+  otherwise the arrows belong to the page and its sliders): arrows orbit at
+  exactly `keyOrbitRadS`, Shift+arrows pan, +/− dolly toward the pivot,
+  [ / ] change the lens. The ＋/− HUD buttons now dolly toward the PIVOT, so
+  they zoom onto a limb point instead of onto the planet's centre.
+- **A limb camera stands ABOVE the band it frames.** The first version stood
+  in the band's tangent plane AT mid-height: from 89 km a horizontal
+  sightline runs hundreds of km through the densest near-side gas and the
+  frame was pink haze (measured screenshots). Now the camera is at
+  `max(400 km, top + 250 km)` on the tangent line of the band's mid-height
+  sphere, so every ray's lowest point is its tangent height and the layers
+  stack by tangent height — the geometry of an ISS airglow photograph. The
+  frame is sized from the TANGENT rays to the band top, bottom and the
+  ground (the altitude reference, always in frame), the band fills ≥ half
+  of it, and it is composed ABOVE a bottom strip (`limbReserveBottom` 0.22)
+  that the time scrubber and render buttons cover. The mesosphere needs a
+  ~2.7° lens (≈ 500 mm) from 400 km; the whole band ~55°.
+- **Limb sites are local times or the model's own points**: noon, dusk,
+  midnight, dawn from the sub-solar point; the diurnal bulge, the pre-dawn
+  trough and the auroral oval from the explore kernel's `pointsOfInterest`.
+- **A limb view quiets the hoops** (the explore focus): under a telephoto
+  lens the altitude tori and mesosphere rings are seen edge-on and filled the
+  frame as pastel bands (measured). Focus holds until the camera orbits the
+  planet again.
+- **The limb scale.** The disc ruler hangs ticks along a bearing from the
+  planet's centre; in a limb view the centre is far off-screen. The overlay
+  then draws the LAYERS as coloured bands between their boundaries' tangent
+  points, with altitude ticks, at screen-left (`limbTangentTicks`, pure
+  geometry on the globe, the overlay stays three-free).
+- **Particle populations** are separable: "only this layer's particles"
+  composes with the per-layer toggles (a layer the user switched off stays
+  off), and the card prints the engine's number fractions, n, ρ, T, λ, v_th
+  and Kn at the layer's peak for the page's F10.7 / Ap. The mesosphere sits
+  mostly below the density model's 80 km floor; its view shows the column
+  clamped there and the airglow above it.
+
+**The incoming CME** computes no flux-rope physics — the orrery / hero
+pattern: `startFluxRopeProvider` (once per page), `trainAt` for geometry
+(kernel probes, mirror fallback), `ropeSurfaceGrid` / `ropeAxisPoints`,
+`kernel.fieldAt` for every colour that means field. What is new is the
+frame join and the two scales:
+
+- **The frame.** The rope frame is heliocentric (+x Sun→Earth, +z ecliptic
+  north). This scene is Earth-FIXED, so ecliptic north is the ecliptic pole
+  turned by the sidereal angle, (−sin θ sin ε, cos ε, cos θ sin ε), and the
+  basis e1 = −ŝ, e3 = N̂ ⟂ e1, e2 = e3 × e1 is RIGHT-handed ((x, z, −y) is a
+  rotation — not the orrery's mirror, so no `drawTilt`). The node gate pins
+  N̂ ⟂ the page's own Sun on every day of a year (worst |ŝ·N̂| < 2e-3) and
+  MEASURES e2 against the Sun's own motion (ΔŜ ∝ −e2), so a sign error in
+  east/west cannot pass.
+- **The corridor is compressed and says so**: the Stage's `stageRadius`,
+  rescaled so the drawn Sun is 160 R⊕ up the Sun line and 1 AU lands exactly
+  on Earth — ×110 near Earth, the Sun drawn ×6 its size on that map. Rope
+  surfaces fade within ~10 R⊕ of Earth and of the camera, and recede to a
+  ghost while the camera is inside ~60 R⊕, where the true-scale field lines
+  are the picture. The camera may pull back to 380 R⊕ while the layer is on;
+  the star backdrop now rides the camera (it is at infinity, and the camera
+  can now stand beyond its old 220–340 shell).
+- **The field near Earth is TRUE scale.** Within 40 R⊕ the lines trace the
+  kernel's field at real positions (Earth at 1 AU). A rope is thousands of
+  R⊕ across, so they are nearly straight; what moves is their direction.
+  They stop where the kernel says the rope stops (the front shows as lines
+  appearing) and at the Shue magnetopause the page already draws — the
+  kernel's field is the undisturbed rope, so a line that crosses the
+  magnetosphere comes out as its upstream and downstream pieces: clipped,
+  never bent by hand. ~2400 `fieldAt` calls per trace, 5–9 ms, on a 250 ms
+  leash.
+- **Honesty.** LIVE only when the provider has an Earth-relevant train;
+  otherwise the Gannon May 2024 replay on its own kernel (the hero's
+  `gannonReplay`), chip "REPLAY · MAY 2024 G5 · <why>". The CME clock follows
+  the page clock for a live train; scrubbing moves only the rope layer.
+- **Stations** (`cmeViewPose`): approach (side-on, Sun and Earth both in
+  frame — gated), upstream (30 R⊕ up the Sun line looking back), side-on;
+  each orbits its pivot about ecliptic north, through the same rebuilt frame.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
