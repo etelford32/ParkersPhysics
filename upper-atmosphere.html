@@ -4278,8 +4278,12 @@ body.ua-immersive-on { overflow:hidden; }
     import('./js/upper-atmosphere-trajectory-analysis.js').then(mod => {
         const {
             TrajectoryAnalyzer, SGP4_COL, DRAG_COL,
-            buildSvgChart, sliceColumn, dragPressureSeries,
+            buildSvgChart, sliceColumn, dragPressureSeries, catalogToPageAltKm,
         } = mod;
+        // The WASM's altitude columns are WGS-72 (|r| − 6378.135); this panel
+        // prints PAGE altitudes (above the 6371 sphere the globe draws), so a
+        // satellite reads the same height here as in its globe tooltip.
+        const pageAlt = (h) => (Number.isFinite(h) ? catalogToPageAltKm(h) : h);
 
         const analyzer = new TrajectoryAnalyzer();
         const trajBox  = document.getElementById('ua-traj');
@@ -4333,7 +4337,7 @@ body.ua-immersive-on { overflow:hidden; }
                 const tMin = sgp4[i * sgp4Stride + SGP4_COL.T_MIN];
                 tHrs[i] = (tMin - res.now.tsinceMin) / 60.0;
             }
-            const altKm   = sliceColumn(sgp4, sgp4Stride, SGP4_COL.ALT_KM, nSamp);
+            const altKm   = sliceColumn(sgp4, sgp4Stride, SGP4_COL.ALT_KM, nSamp).map(pageAlt);
             const speed   = sliceColumn(sgp4, sgp4Stride, SGP4_COL.SPEED, nSamp);
             const ecc     = sliceColumn(sgp4, sgp4Stride, SGP4_COL.ECC,   nSamp);
             const inc     = sliceColumn(sgp4, sgp4Stride, SGP4_COL.INC_DEG, nSamp);
@@ -4356,7 +4360,7 @@ body.ua-immersive-on { overflow:hidden; }
                 for (let i = 0; i < dn; i++) {
                     // RK4 t starts at 0 = "now"; SGP4 t is minutes since epoch.
                     dragHrs[i] = dd[i * ds + DRAG_COL.T_MIN] / 60.0;
-                    dragAlt[i] = dd[i * ds + DRAG_COL.ALT_KM];
+                    dragAlt[i] = pageAlt(dd[i * ds + DRAG_COL.ALT_KM]);
                     dadt[i]    = dd[i * ds + DRAG_COL.DA_DT_KM_DAY];
                     dragSpd[i] = dd[i * ds + DRAG_COL.SPEED_KMS];
                 }
@@ -4373,11 +4377,11 @@ body.ua-immersive-on { overflow:hidden; }
                     <span class="ua-k">RAAN (Ω)</span>          <span class="ua-v">${fmt(o.raan_deg, 1)}°</span>
                     <span class="ua-k">arg perigee (ω)</span>    <span class="ua-v">${fmt(o.arg_perigee_deg, 1)}°</span>
                     <span class="ua-k">true anomaly (ν)</span>   <span class="ua-v">${fmt(o.true_anomaly_deg, 1)}°</span>
-                    <span class="ua-k">perigee alt</span>        <span class="ua-v">${fmt(o.perigee_alt_km, 1)} km</span>
-                    <span class="ua-k">apogee alt</span>         <span class="ua-v">${fmt(o.apogee_alt_km, 1)} km</span>
+                    <span class="ua-k">perigee alt</span>        <span class="ua-v">${fmt(pageAlt(o.perigee_alt_km), 1)} km</span>
+                    <span class="ua-k">apogee alt</span>         <span class="ua-v">${fmt(pageAlt(o.apogee_alt_km), 1)} km</span>
                     <span class="ua-k">period</span>             <span class="ua-v">${fmt(o.period_min, 2)} min</span>
                     <span class="ua-k">|v| now</span>            <span class="ua-v">${fmt(o.speed_km_s, 4)} km/s</span>
-                    <span class="ua-k">altitude now</span>       <span class="ua-v">${fmt(o.altitude_km, 1)} km</span>
+                    <span class="ua-k">altitude now</span>       <span class="ua-v">${fmt(pageAlt(o.altitude_km), 1)} km</span>
                     <span class="ua-k">B*</span>                 <span class="ua-v">${fmtExp(tleLine.bstar, 3)} 1/er</span>
                 </div>`;
 

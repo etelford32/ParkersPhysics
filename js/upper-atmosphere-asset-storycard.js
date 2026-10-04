@@ -27,6 +27,7 @@
  */
 
 import { FloatingWindow } from './upper-atmosphere-floating-window.js';
+import { catalogToPageAltKm } from './upper-atmosphere-datum.js';
 import {
     detectAnomaly, walkResidualAnomalies,
     correlateAnomalyWithConjunctions,
@@ -143,7 +144,8 @@ export class AssetStoryCard {
         }
         const live = r.live;
         const q = live.q_pa ? ` · q ${(live.q_pa * 1e6).toFixed(2)} µPa` : '';
-        const altStr = `${live.altKm.toFixed(1)} km`;
+        // Page altitude (the WASM's is WGS-72) — js/upper-atmosphere-datum.js.
+        const altStr = `${catalogToPageAltKm(live.altKm).toFixed(1)} km`;
         const ssp = `lat ${live.latDeg.toFixed(1)}° / lon ${live.lonDeg.toFixed(1)}°`;
         const orbit = (live.period_min != null ? `T ${live.period_min.toFixed(1)} min` : '')
             + (live.inclinationDeg != null ? ` · i ${live.inclinationDeg.toFixed(1)}°` : '')

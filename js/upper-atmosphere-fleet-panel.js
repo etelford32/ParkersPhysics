@@ -48,6 +48,7 @@ import {
     walkResidualAnomalies,
 } from './upper-atmosphere-backtest.js';
 import { AssetStoryCard } from './upper-atmosphere-asset-storycard.js';
+import { catalogToPageAltKm } from './upper-atmosphere-datum.js';
 
 // Debounce window for full-fleet re-analysis on incoming ticks. Compute
 // is cheap (~50 µs/asset) but we don't want to thrash mid-slider-drag.
@@ -1573,7 +1574,10 @@ export class FleetPanel {
         const chart = _miniDecayChart(decay);
 
         // Live readouts.
-        const altLine = `${live.altKm.toFixed(0)} km · ${live.speedKms.toFixed(2)} km/s`
+        // `live.altKm` is the SGP4 WASM's WGS-72 altitude; the card prints
+        // the PAGE altitude so it matches the globe's tooltip for the same
+        // object (js/upper-atmosphere-datum.js).
+        const altLine = `${catalogToPageAltKm(live.altKm).toFixed(0)} km · ${live.speedKms.toFixed(2)} km/s`
                        + (live.q_pa ? ` · q ${(live.q_pa * 1e6).toFixed(2)} µPa` : '');
         const ssp = `lat ${live.latDeg.toFixed(1)}° / lon ${live.lonDeg.toFixed(1)}°`;
         const orbit = (live.period_min != null ? `T ${live.period_min.toFixed(1)} min · ` : '')

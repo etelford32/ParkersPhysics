@@ -33,7 +33,11 @@ const nForAlt = (altKm) => Math.sqrt(MU / (RE + altKm) ** 3) * 86400 / (2 * Math
 
 function rec(o) {
     const [line1, line2] = tle(o);
+    // The relay's derived fields, in ITS convention (WGS-72 altitudes).
+    const aKm = Math.cbrt(MU / (o.nRevDay * 2 * Math.PI / 86400) ** 2);
     return {
+        perigee_km: aKm * (1 - o.ecc) - RE, apogee_km: aKm * (1 + o.ecc) - RE,
+        period_min: 1440 / o.nRevDay,
         name: o.name, norad_id: o.norad, line1, line2,
         epoch: new Date(o.epochMs).toISOString(), epoch_jd: o.epochMs / 86400000 + 2440587.5,
         inclination: o.incDeg, raan: ((o.raanDeg % 360) + 360) % 360, eccentricity: o.ecc,
@@ -58,6 +62,12 @@ export function syntheticCatalogue(epochMs) {
     }
     groups.stations.push(rec({ name: 'STATION-SYN', norad: 79999, incDeg: 51.64, raanDeg: 120,
         ecc: 0.0005, argpDeg: 60, mDeg: 10, nRevDay: nForAlt(420), epochMs }));
+    // The page's own named ISS probe looks NORAD 25544 up by id; serving the
+    // SAME record in the stations suite is what lets a gate ask whether the
+    // two views of one satellite coincide. Its epoch is TWO DAYS old, so a
+    // propagator that freezes the node (−5°/day) visibly misses.
+    groups.stations.push(rec({ name: 'ISS (ZARYA)', norad: 25544, incDeg: 51.64, raanDeg: 200,
+        ecc: 0.0004, argpDeg: 80, mDeg: 300, nRevDay: 15.5, epochMs: epochMs - 2 * 86400e3 }));
     return groups;
 }
 
@@ -65,7 +75,15 @@ export function syntheticCatalogue(epochMs) {
 export async function routeSyntheticCatalogue(page, epochMs) {
     const cat = syntheticCatalogue(epochMs);
     await page.route('**/api/celestrak/tle**', (route) => {
-        const g = new URL(route.request().url()).searchParams.get('group');
+        const q = new URL(route.request().url()).searchParams;
+        const norad = q.get('norad');
+        if (norad) {
+            const hit = Object.values(cat).flat().find((r) => String(r.norad_id) === norad);
+            return hit
+                ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ satellites: [hit] }) })
+                : route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'fixture has no such norad' }) });
+        }
+        const g = q.get('group');
         const sats = cat[g];
         if (!sats) {
             return route.fulfill({ status: 503, contentType: 'application/json',

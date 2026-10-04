@@ -945,6 +945,45 @@ re-engage.
 largest control ("⛶ Full screen  F", ≥ 44 px), **F** toggles it, and the label
 flips to "Exit full screen".
 
+### 9.12 One Earth radius, one propagator per object (2026-10-04)
+
+§9.11 left a known split: the shared tracker drew at 6378.135 km per scene
+unit in a 6371 km scene. Auditing every satellite path on the page for the
+same kind of drift turned up four views of the SAME objects that disagreed.
+
+| where | what it did | now |
+|---|---|---|
+| catalogue dots | `new SatelliteTracker(scene, 1.0)` ⇒ km / 6378.135 — every dot 7 km low against the shells, probes and camera readout | `TRACKER_EARTH_RADIUS` ⇒ km / 6371 |
+| named probes with a live TLE (ISS, Hubble, …) | two-body circle, node FROZEN at the TLE epoch (ISS regresses −5°/day), radius from the relay's WGS-72 mean altitude drawn as a page altitude | SGP4 on the probe's own lines (the dots' propagator); mean elements + J2 until the WASM answers; orbit loop = the kernel's J2 ring, re-sampled every 10 sim-min |
+| debris sample | same frozen-node circle, anchored at boot wall-clock | mean elements + J2 (`inertialSceneAt` with a perifocal table) |
+| Walker constellation shells | radius 6371 + h, period from 6378.135 + h | one radius for both (`_rScene`) |
+| fleet ribbons | WASM `alt_km` (WGS-72) drawn as a page altitude | `catalogAltToScene` |
+| trajectory analyzer / fleet MC / backtest | page density profile looked up at the WASM's WGS-72 altitude — ρ read 7 km low, **~12–15 % dense** at 400 km against the probe tooltip for the same object | `profileToRhoGrid` hands the grid over in the WASM's convention; `dragPressureSeries` converts back |
+| printed altitudes (fleet card, story card, analysis panel) | WGS-72 | page altitude |
+
+`js/upper-atmosphere-datum.js` is the ONE seam: the page's datum is the
+column kernel's 6371 (drawn sphere, engine, camera, flight kernel); WGS-72 is
+what SGP4, the relay and the WASM drag integrator speak; analysis modules
+stay internally in WGS-72 and convert only where they hand something to a
+view. The kernel's GMST now comes from `js/sun-altitude.js` (its header asks
+for no third copy).
+
+The conjunction screener now reads every object through the same
+`_lookupProbePositionAt` its drawn dot uses; to keep assets × debris × steps
+affordable each object's track is computed ONCE per scan and shared by its
+pairs (it used to re-propagate both sides per pair).
+
+**Gates.** `node tests/upper-atmosphere-datum.mjs` (inverses, one radius,
+the tracker hand-off, and the analyzer seam with a negative control at the
+raw WGS-72 altitude: +15 %). In the browser, "one satellite, one place": the
+named ISS probe, NORAD 25544 in the stations suite, the probe's own orbit loop
+and a flight seeded from its TLE coincide — with two negative controls, the
+legacy frozen-node orbit on a 2-day-old TLE and the old tracker scale, each of
+which must break it. Measured: probe ↔ dot 0.002 km, probe ↔ its own orbit
+loop 4.7 km, flight seed ↔ dot 0.002 km, the mean-element fallback 5.1 km;
+controls 266 km (frozen node) and 7.6 km (old scale); catalogue dots vs the
+page's SGP4 0.005 km.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

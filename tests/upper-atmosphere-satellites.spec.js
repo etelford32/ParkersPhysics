@@ -13,6 +13,11 @@
  *     wall-clock tick, with the bus 3 h away, must miss by far more;
  *   • every orbit ring passes through its own dot (rebuilt AND rotation-only
  *     frames), and a picked dot gets its own ring;
+ *   • ONE SATELLITE, ONE PLACE: the named ISS probe, the same NORAD in the
+ *     stations suite, the probe's own orbit loop and a flight seeded from
+ *     its TLE all coincide; NEGATIVE CONTROLS: the legacy frozen-node orbit
+ *     (>200 km on a 2-day-old TLE) and the old 6378.135 km/unit tracker
+ *     scale (>5 km) must each break it;
  *   • the dots are capped (§9.5) and textured;
  *   • "Frame GEO" lands with the whole GEO belt in view in the planet orbit
  *     frame, which it was not from home — and does not HOLD the camera;
@@ -148,6 +153,82 @@ test('catalogue dots ride the SCENE clock (negative control: the wall clock)', a
     console.log(`  control (wall-clock tick): ${bad.toFixed(0)} km`);
     expect(bad).toBeGreaterThan(500);
     await page.evaluate(() => { window.__ua.globe._catalogClockOverride = null; });
+});
+
+test('one satellite, one place: named probe, catalogue dot, its ring and a seeded flight coincide', async ({ page }) => {
+    await boot(page);
+    // The named ISS probe upgrades from the fixture's ?norad=25544 record and
+    // hands itself to the SGP4 WASM; the SAME record is in the stations suite.
+    await page.waitForFunction(() => !!window.__ua.globe._satProbes?.iss?._sgp4, null, { timeout: 30_000 });
+    await setBus(page, EPOCH + 3600e3);
+    await enableSuite(page, 'stations');
+    const dotErr = await worstDotErrorKm(page, 'stations', { frames: 30 });
+    expect(dotErr).toBeLessThan(2);
+
+    const measure = () => page.evaluate(async () => {
+        const g = window.__ua.globe;
+        g.stepFrames(1, 1 / 60, { render: 'none' });
+        const K = await import('/js/upper-atmosphere-sat-suites.js');
+        const probe = g._satProbes.iss;
+        const a = probe.mesh.position;
+        const b = g._catalogTracker.getPositionXYZ(25544);
+        // The probe's own orbit loop, turned Earth-fixed exactly as drawn.
+        probe.pathLine.updateMatrixWorld(true);
+        const pos = probe.pathLine.geometry.getAttribute('position').array;
+        const e = probe.pathLine.matrixWorld.elements;
+        const ring = new Float64Array(pos.length);
+        for (let i = 0; i < pos.length; i += 3) {
+            const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+            ring[i] = e[0] * x + e[4] * y + e[8] * z;
+            ring[i + 1] = e[1] * x + e[5] * y + e[9] * z;
+            ring[i + 2] = e[2] * x + e[6] * y + e[10] * z;
+        }
+        return {
+            gapKm: Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) * 6371,
+            ringKm: K.distanceToRing([a.x, a.y, a.z], ring) * 6371,
+            probeAlt: probe.mesh.userData.altKm,
+            dotAlt: g._catalogPageAltKm(g._catalogTracker._satellites.find((s) => s.tle.norad_id === 25544)),
+        };
+    });
+
+    const m = await measure();
+    console.log(`  ISS probe vs its catalogue dot: ${m.gapKm.toFixed(3)} km · probe to its own orbit loop: ${m.ringKm.toFixed(2)} km · alt ${m.probeAlt.toFixed(2)} / ${m.dotAlt.toFixed(2)} km`);
+    expect(m.gapKm).toBeLessThan(0.5);            // one propagator, one datum
+    expect(m.ringKm).toBeLessThan(20);            // mean ring with J2 vs SGP4
+    expect(Math.abs(m.probeAlt - m.dotAlt)).toBeLessThan(0.5);
+
+    // A flight seeded from the same TLE at the same instant starts ON the dot.
+    const flight = await page.evaluate(async () => {
+        const g = window.__ua.globe;
+        const lines = g._satProbes.iss.tleLines;
+        await g.trackFlightFromTle({ line1: lines.line1, line2: lines.line2, name: 'ISS', horizonS: 600 });
+        g.stepFrames(1, 1 / 60, { render: 'none' });
+        const f = g._flight.getFlight();
+        const p = f.sceneAt(0);
+        const b = g._catalogTracker.getPositionXYZ(25544);
+        return Math.hypot(p[0] - b.x, p[1] - b.y, p[2] - b.z) * 6371;
+    });
+    console.log(`  flight seed vs dot: ${flight.toFixed(3)} km`);
+    expect(flight).toBeLessThan(2);
+
+    // Before the WASM answers, the probe rides its mean elements + J2: close.
+    await page.evaluate(() => { const p = window.__ua.globe._satProbes.iss; p.__sgp4 = p._sgp4; p._sgp4 = null; });
+    const meanPath = await measure();
+    console.log(`  mean-element path vs dot: ${meanPath.gapKm.toFixed(2)} km`);
+    expect(meanPath.gapKm).toBeLessThan(25);
+
+    // NEGATIVE CONTROL — the legacy frozen-node circle on a 2-day-old TLE.
+    await page.evaluate(() => { const p = window.__ua.globe._satProbes.iss; p.__el = p._el; p._el = null; });
+    const legacy = await measure();
+    console.log(`  control (legacy two-body, frozen node): ${legacy.gapKm.toFixed(0)} km`);
+    expect(legacy.gapKm).toBeGreaterThan(200);
+    await page.evaluate(() => { const p = window.__ua.globe._satProbes.iss; p._el = p.__el; p._sgp4 = p.__sgp4; });
+
+    // NEGATIVE CONTROL — the old tracker scale (earthRadius 1.0 ⇒ km/6378.135).
+    await page.evaluate(() => { window.__ua.globe._catalogTracker._earthR = 1.0; });
+    const scaled = await worstDotErrorKm(page, 'stations', { frames: 30 });
+    console.log(`  control (tracker at 6378.135 km/unit): ${scaled.toFixed(2)} km`);
+    expect(scaled).toBeGreaterThan(5);
 });
 
 test('orbit rings pass through their own dots, rebuilt and rotated; a picked dot gets its ring', async ({ page }) => {

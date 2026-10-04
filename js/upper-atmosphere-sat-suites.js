@@ -30,9 +30,9 @@
  * FRAMES. SGP4 works in TEME; the page's scene is Earth-FIXED with +Y north
  * and −Z = 90°E (js/geo/coords.js `eciToEcef`: rotate −GMST about z, then
  * (x, y, z)_ecef → (x, z, −y)). `temeToScene` is that map, transcribed, and
- * the GMST is the SAME IAU-1982 expression the tracker uses
- * (`greenwichSiderealTimeFromJD`) so a ring and its own dot cannot disagree
- * by a sidereal-time convention. For a ring that is rebuilt rarely, the
+ * the GMST is the page's own (js/sun-altitude.js), which agrees with the
+ * tracker's coords.js copy to ~0.1 arcsec. One scene unit is the PAGE datum,
+ * 6371 km (js/upper-atmosphere-datum.js). For a ring that is rebuilt rarely, the
  * renderer builds it at GMST = 0 and turns the group by `rotation.y = −GMST`
  * each frame — `ringRotationY` — which the node test proves equivalent.
  *
@@ -45,9 +45,11 @@
  */
 
 import { ATMOSPHERIC_LAYERS, layerAt } from './upper-atmosphere-engine.js';
+import { PAGE_RE_KM, CATALOG_RE_KM } from './upper-atmosphere-datum.js';
+import { greenwichSiderealDeg } from './sun-altitude.js';
 
 // ── Constants (WGS-72, as SGP4) ─────────────────────────────────────────────
-export const RE_KM = 6378.135;
+export const RE_KM = CATALOG_RE_KM;     // WGS-72 — SGP4's own, for the a/n recovery only
 export const MU_KM3S2 = 398600.8;
 export const J2 = 0.001082616;
 const KE = 60 / Math.sqrt(RE_KM ** 3 / MU_KM3S2);       // √μ in ER^1.5 / min
@@ -55,12 +57,14 @@ const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
 const MIN_PER_DAY = 1440;
 /**
- * Kilometres per scene unit FOR THE CATALOGUE: js/satellite-tracker.js scales
- * by its RE_KM (WGS-72, 6378.135), not the page's 6371 — so a ring drawn at
- * 6371 sits 0.11 % (7.8 km at Starlink) off its own dots, which the browser
- * gate measured. Rings and dots must share this one number.
+ * Kilometres per scene unit: the PAGE datum (js/upper-atmosphere-datum.js).
+ * Every altitude this kernel reports — mean, perigee, apogee, the ladder —
+ * is above that same 6371 km sphere, the one drawn and the one the engine's
+ * density is read at. (Until 2026-10-04 they were WGS-72 altitudes and the
+ * catalogue dots were drawn at 6378.135 km per unit to match; both moved to
+ * the page datum together — see that module's header.)
  */
-export const SCENE_RE_KM = RE_KM;
+export const SCENE_RE_KM = PAGE_RE_KM;
 
 // ── The catalogue ───────────────────────────────────────────────────────────
 // Every id is a group /api/celestrak/tle relays AND the tracker colours; the
@@ -167,9 +171,9 @@ export function meanElements(rec) {
         name: rec.name ?? null,
         epochMs, inc, raan0: raanDeg * DEG, ecc, argp0: argpDeg * DEG, m0: mDeg * DEG,
         n, aKm,
-        perigeeKm: aKm * (1 - ecc) - RE_KM,
-        apogeeKm: aKm * (1 + ecc) - RE_KM,
-        meanAltKm: aKm - RE_KM,
+        perigeeKm: aKm * (1 - ecc) - PAGE_RE_KM,
+        apogeeKm: aKm * (1 + ecc) - PAGE_RE_KM,
+        meanAltKm: aKm - PAGE_RE_KM,
         periodMin: TAU / n,
         raanDot, argpDot, mDot,
     };
@@ -228,13 +232,13 @@ export function orbitRingTeme(el, ms, n = 128) {
 }
 
 // ── Frames ──────────────────────────────────────────────────────────────────
-/** GMST (rad) — the IAU-1982 expression js/geo/coords.js and the tracker use. */
+/**
+ * GMST (rad) — the page's ONE sidereal clock (js/sun-altitude.js, the copy
+ * the globe and the flight kernel turn by; coords.js' tracker copy agrees
+ * to ~0.1 arcsec). Not a third implementation.
+ */
 export function gmstRad(ms) {
-    const jd = ms / 86400000 + 2440587.5;
-    const T = (jd - 2451545.0) / 36525.0;
-    const sec = 67310.54841 + (876600 * 3600 + 8640184.812866) * T + 0.093104 * T * T - 6.2e-6 * T * T * T;
-    const r = ((sec % 86400) / 86400) * TAU;
-    return (r + TAU) % TAU;
+    return greenwichSiderealDeg(ms) * DEG;
 }
 
 /**
@@ -262,6 +266,56 @@ export function orbitRingInertialScene(el, ms, n = 128) {
         temeToScene(teme[i * 3], teme[i * 3 + 1], teme[i * 3 + 2], 0, tmp);
         out[i * 3] = tmp[0]; out[i * 3 + 1] = tmp[1]; out[i * 3 + 2] = tmp[2];
     }
+    return out;
+}
+
+/**
+ * The orbit's SHAPE as a table: perifocal (x, y) in km at `n` equal steps of
+ * MEAN anomaly. a and e do not drift under secular J2, so this is built once;
+ * `inertialSceneAt` then needs one lerp and one rotation per call — what the
+ * conjunction screener's ~10⁵ lookups per scan can afford, where a Kepler
+ * solve per lookup could not. Linear interpolation over 256 steps sags
+ * r·(1 − cos(π/256)) ≈ 0.5 km at LEO (pinned in the node test).
+ */
+export function perifocalTable(el, n = 256) {
+    const out = new Float64Array(n * 2);
+    const a = el.aKm, e = el.ecc, b = a * Math.sqrt(1 - e * e);
+    for (let i = 0; i < n; i++) {
+        const E = solveKepler((i / n) * TAU, e);
+        out[i * 2] = a * (Math.cos(E) - e);
+        out[i * 2 + 1] = b * Math.sin(E);
+    }
+    return out;
+}
+
+/**
+ * Position at `ms` in the page's INERTIAL scene frame (temeToScene at
+ * GMST = 0: x, z, −y, scene units) — the frame `_propagateKeplerian` and the
+ * globe's probe tables use, so the caller turns it Earth-fixed with the same
+ * −GMST rotation as everything else. With `table` it interpolates; without,
+ * it solves Kepler exactly.
+ */
+export function inertialSceneAt(el, ms, table = null, out = [0, 0, 0]) {
+    const { raan, argp, m } = elementsAt(el, ms);
+    let xp, yp;
+    if (table) {
+        const n = table.length / 2;
+        const f = (m / TAU) * n;
+        const k0 = Math.floor(f) % n, k1 = (k0 + 1) % n, t = f - Math.floor(f);
+        xp = table[k0 * 2] * (1 - t) + table[k1 * 2] * t;
+        yp = table[k0 * 2 + 1] * (1 - t) + table[k1 * 2 + 1] * t;
+    } else {
+        const E = solveKepler(m, el.ecc);
+        xp = el.aKm * (Math.cos(E) - el.ecc);
+        yp = el.aKm * Math.sqrt(1 - el.ecc * el.ecc) * Math.sin(E);
+    }
+    const cO = Math.cos(raan), sO = Math.sin(raan);
+    const cw = Math.cos(argp), sw = Math.sin(argp);
+    const ci = Math.cos(el.inc), si = Math.sin(el.inc);
+    const x = (cO * cw - sO * sw * ci) * xp + (-cO * sw - sO * cw * ci) * yp;
+    const y = (sO * cw + cO * sw * ci) * xp + (-sO * sw + cO * cw * ci) * yp;
+    const z = (sw * si) * xp + (cw * si) * yp;
+    out[0] = x / SCENE_RE_KM; out[1] = z / SCENE_RE_KM; out[2] = -y / SCENE_RE_KM;
     return out;
 }
 

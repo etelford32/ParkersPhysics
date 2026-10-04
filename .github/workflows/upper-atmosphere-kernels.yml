@@ -120,5 +120,7 @@ jobs:
         run: node tests/upper-atmosphere-cme-model.mjs
       - name: satellite suites (rings vs the committed SGP4 WASM)
         run: node tests/upper-atmosphere-sat-suites.mjs
+      - name: one Earth radius (page datum vs WGS-72 seam)
+        run: node tests/upper-atmosphere-datum.mjs
       - name: image metrics (synthetic controls)
         run: node tests/image-metrics.mjs

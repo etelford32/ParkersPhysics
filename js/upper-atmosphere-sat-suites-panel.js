@@ -75,7 +75,7 @@ export class SatSuitesPanel {
             </div>
             <div class="ua-catalog-status" id="ua-catalog-status" role="status" aria-live="polite">no suites loaded · tick any suite to begin</div>
             <figure class="ua-ss-ladder" id="ua-ss-ladder" aria-label="Altitude ladder of the shown satellites"></figure>
-            <p class="ua-ss-note">Dots: live SGP4 at the simulation clock. Rings: each member's mean orbit with J2 drift — the satellite rides within ~10 km of it.</p>`;
+            <p class="ua-ss-note">Dots: live SGP4 at the simulation clock. Rings: each member's mean orbit with J2 drift — the satellite rides within ~10 km of it. Altitudes on this page are above the 6371 km sphere the globe draws; catalogue figures (above WGS-72's 6378 km) read 7 km lower for the same orbit.</p>`;
     }
 
     _bind() {

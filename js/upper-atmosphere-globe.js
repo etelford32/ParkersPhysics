@@ -63,8 +63,12 @@ import { capPointSize, roundDotTexture } from './upper-atmosphere-point-cap.js';
 import {
     meanElements, ringSample, orbitRingInertialScene, ringToSegments, ringRotationY,
     gmstRad as suiteGmstRad, altitudeLadder, outerShellKm, framingDistance, FRAME_PRESETS,
-    orbitRegime,
+    orbitRegime, perifocalTable, inertialSceneAt,
 } from './upper-atmosphere-sat-suites.js';
+import {
+    TRACKER_EARTH_RADIUS, catalogAltToScene, catalogToPageAltKm, sceneToPageAltKm,
+    pageAltToScene, PAGE_RE_KM,
+} from './upper-atmosphere-datum.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 import { ZoneWaveField } from './upper-atmosphere-wave-field.js';
@@ -2116,7 +2120,7 @@ export class AtmosphereGlobe {
     _buildProbeLookup(probe) {
         const N = 256;
         if (!probe._propTable) probe._propTable = new Float32Array(N * 3);
-        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        const r = _probeRadius(probe);
         for (let k = 0; k < N; k++) {
             const tFrac = k / N;
             const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
@@ -2544,9 +2548,19 @@ export class AtmosphereGlobe {
         // the orbital-path polyline radius and the static ring. For
         // near-circular orbits this is essentially unchanged; for
         // eccentric orbits this is a sensible "shell" altitude.
-        const meanAltKm = (sat.apogee_km + sat.perigee_km) / 2;
+        // The relay's perigee/apogee are WGS-72 altitudes; the page's are
+        // above the 6371 sphere (js/upper-atmosphere-datum.js).
+        const meanAltKm = catalogToPageAltKm((sat.apogee_km + sat.perigee_km) / 2);
         if (Number.isFinite(meanAltKm) && meanAltKm > 0) {
             probe.spec.altitudeKm = Math.round(meanAltKm);
+        }
+        // The real elements, with J2 — what the probe is now propagated
+        // by (and SGP4 on the lines once the WASM answers, below).
+        const el = meanElements(sat);
+        if (el) {
+            probe._el = el;
+            probe._perifocal = perifocalTable(el);
+            probe.spec.altitudeKm = Math.round(el.meanAltKm);
         }
 
         // Reset the per-frame phase. Legacy field (_phase0) remains
@@ -2582,6 +2596,7 @@ export class AtmosphereGlobe {
         // analyzer can run SGP4 directly without a second fetch.
         if (sat.line1 && sat.line2) {
             probe.tleLines = { line1: sat.line1, line2: sat.line2, epoch: sat.epoch };
+            this._attachProbeSgp4(probe, sat.line1, sat.line2);
         }
 
         // Rebuild the orbital-path polyline from the new elements.
@@ -2592,17 +2607,53 @@ export class AtmosphereGlobe {
         this._buildProbeLookup(probe);
     }
 
+    /** J2 moves a LEO node ~0.2°/h: re-sample a real-element path every 10 sim-min. */
+    _refreshProbePathIfStale(probe, ms) {
+        if (!Number.isFinite(probe._pathMs) || Math.abs(ms - probe._pathMs) > 10 * 60e3) {
+            this._refreshOrbitalPath(probe, ms);
+        }
+    }
+
+    /**
+     * Hand a probe to the SGP4 WASM once it has loaded (the tracker module
+     * owns the load). Until then the probe rides its mean elements; the
+     * switch is a few km in LEO, never a jump to another plane.
+     */
+    _attachProbeSgp4(probe, line1, line2) {
+        const epochMs = tleEpochMs(line1);
+        if (!Number.isFinite(epochMs)) return;
+        import('./satellite-tracker.js').then(async (mod) => {
+            await mod.whenWasmSettled?.();
+            const wasm = mod.getWasmSgp4?.();
+            if (!wasm?.propagate_tle) return;
+            // Only if the lines still belong to this probe (a later upgrade wins).
+            if (probe.tleLines?.line1 !== line1) return;
+            try { wasm.propagate_tle(line1, line2, 0); } catch (_) { return; }
+            probe._sgp4 = { wasm, line1, line2, epochMs };
+        }).catch(() => {});
+    }
+
     /**
      * Re-sample the orbital-path polyline for one probe using its
      * current spec.orbital. Cheap (96 points, no allocations) so
      * we can call it any time elements change.
      */
-    _refreshOrbitalPath(probe) {
+    _refreshOrbitalPath(probe, atMs = null) {
         const path = probe.pathLine;
         if (!path) return;
         const positions = path.geometry.attributes.position.array;
         const N = positions.length / 3;
-        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        if (probe._el) {
+            // Real elements: the instantaneous mean ring with J2 carried to
+            // the scene instant — the same curve the suites' rings draw.
+            const ms = Number.isFinite(atMs) ? atMs : this._timeBus.getSimTime();
+            positions.set(orbitRingInertialScene(probe._el, ms, N));
+            probe._pathMs = ms;
+            path.geometry.attributes.position.needsUpdate = true;
+            path.geometry.computeBoundingSphere();
+            return;
+        }
+        const r = _probeRadius(probe);
         for (let k = 0; k < N; k++) {
             const tFrac = k / N;
             const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
@@ -2912,7 +2963,11 @@ export class AtmosphereGlobe {
                 // Earth radius = 1 in scene units; tracker handles km→scene.
                 // showOrbits=false avoids per-sat orbit-trail meshes (we
                 // do that on the named refs instead).
-                const tracker = new mod.SatelliteTracker(this._scene, 1.0, {
+                // ONE datum (js/upper-atmosphere-datum.js): the tracker
+                // scales km by earthRadius / 6378.135, so handing it 1.0 drew
+                // every dot at r / 6378.135 in a 6371-km scene — 7 km low
+                // against the shells, the probes and the camera readout.
+                const tracker = new mod.SatelliteTracker(this._scene, TRACKER_EARTH_RADIUS, {
                     maxSatellites: 35000,
                     showOrbits: false,
                 });
@@ -2958,6 +3013,16 @@ export class AtmosphereGlobe {
         return this._catalogTrackerLoading;
     }
 
+    /** Page altitude (km above the 6371 sphere) of a tracker record, from its drawn position. */
+    _catalogPageAltKm(sat) {
+        const p = this._catalogTracker?.getPositionXYZ?.(sat?.tle?.norad_id);
+        if (p) {
+            const r = Math.hypot(p.x, p.y, p.z);
+            if (r > 0.5) return sceneToPageAltKm(r);
+        }
+        return Number.isFinite(sat?.alt) ? catalogToPageAltKm(sat.alt) : null;
+    }
+
     /** Resolve a catalog raycast hit to a sat record (TLE + name + alt). */
     _resolveCatalogHit(hit) {
         const t = this._catalogTracker;
@@ -2971,12 +3036,14 @@ export class AtmosphereGlobe {
             kind:   'catalog-point',
             id:     `catalog-${sat.tle?.norad_id ?? hit.index}`,
             name:   sat.tle?.name || `NORAD ${sat.tle?.norad_id ?? '—'}`,
-            altKm:  sat.alt,
+            // PAGE altitude from the drawn radius — the tracker's own
+            // `sat.alt` is a WGS-72 altitude (r − 6378.135).
+            altKm:  this._catalogPageAltKm(sat),
             color:  '#0cc',
             noradId: sat.tle?.norad_id,
             line1:  sat.tle?.line1,
             line2:  sat.tle?.line2,
-            tooltip: `Click to analyze trajectory · alt ${(sat.alt ?? 0).toFixed(0)} km`,
+            tooltip: `Click to analyze trajectory · alt ${(this._catalogPageAltKm(sat) ?? 0).toFixed(0)} km`,
         };
     }
 
@@ -3174,6 +3241,18 @@ export class AtmosphereGlobe {
         // tooltips, and the family roll-up panel.
         const annot = annotateDebris(rec);
 
+        // The record's REAL elements (M at the TLE epoch, before the legacy
+        // "M now" re-anchor below), propagated with J2 — the same kernel the
+        // suites' rings use, so a fragment shown both here and in its debris
+        // suite is one object, not two (the frozen-node circle put them
+        // hundreds of km apart within a day of epoch).
+        const el = meanElements({
+            norad_id: orb.noradId ?? rec.noradId, epoch: orb.epoch,
+            inclination: orb.inclinationDeg, raan: orb.raanDeg, eccentricity: orb.eccentricity,
+            arg_perigee: orb.argPerigeeDeg, mean_anomaly: orb.meanAnomalyDeg0,
+            mean_motion: orb.meanMotionRevPerDay,
+        });
+
         const probe = {
             spec: {
                 id: rec.id,
@@ -3181,7 +3260,8 @@ export class AtmosphereGlobe {
                 // Override the engine's generic pink with the family
                 // color so the cloud reads as "debris by source event".
                 color: annot.family.color,
-                altitudeKm: rec.altitudeKm,
+                // PAGE altitude: the record's is WGS-72 (perigee/apogee).
+                altitudeKm: el ? el.meanAltKm : catalogToPageAltKm(rec.altitudeKm),
                 orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
             },
             _phase0: M_now,
@@ -3194,6 +3274,8 @@ export class AtmosphereGlobe {
             _propTable: null,
             _propTableN: 0,
             _kind: 'debris',
+            _el: el,
+            _perifocal: el ? perifocalTable(el) : null,
             _family: annot.family,
             _size:   annot.size,
             _hazardMJ: annot.hazardMJ,
@@ -3404,9 +3486,12 @@ export class AtmosphereGlobe {
                     id: rec.id,
                     name: c.name,
                     color: rec.color,
-                    altitudeKm: rec.altitudeKm,
+                    // Shell altitudes are QUOTED in the catalogue convention
+                    // (its period uses 6378.135 + h): one radius for both.
+                    altitudeKm: catalogToPageAltKm(rec.altitudeKm),
                     orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
                 },
+                _rScene: catalogAltToScene(rec.altitudeKm),
                 _phase0: M_now,
                 // Phase B absolute-time anchor (same rationale as
                 // _satProbes / debris paths above).
@@ -5734,9 +5819,17 @@ export class AtmosphereGlobe {
             const M = probe._M_epoch_rad + (TAU * dtSec) / Math.max(periodSec, 1);
             // Convert M back into an orbit fraction for the helper.
             const tFrac = ((M / TAU) % 1 + 1) % 1;
-            const altShellR = 1 + probe.spec.altitudeKm / R_EARTH_KM;
-            const p = _eciSceneToEarthFixed(
-                _propagateKeplerian(probe.spec.orbital, tFrac, altShellR), gmst);
+            const altShellR = _probeRadius(probe);
+            // A probe with a live TLE is drawn by the SAME propagator as its
+            // own catalogue dot (SGP4) — or, until the WASM is in, by its
+            // mean elements with J2 drift; only the nominal reference set
+            // keeps the legacy circular Kepler. All via ONE function, so the
+            // drawn probe, the follow camera and the screener cannot differ.
+            const live = !!(probe._sgp4 || probe._el);
+            const p = _eciSceneToEarthFixed(live
+                ? _lookupProbePositionAt(probe, simTimeMs)
+                : _propagateKeplerian(probe.spec.orbital, tFrac, altShellR), gmst);
+            if (live && probe._el) this._refreshProbePathIfStale(probe, simTimeMs);
 
             probe.mesh.position.set(p.x, p.y, p.z);
             // The far-tier ball is 0.012 R⊕ (76 km) with a 166 km halo —
@@ -5755,13 +5848,23 @@ export class AtmosphereGlobe {
             // tooltip honest if eccentricity is non-zero (apogee/perigee
             // sweep). For circular orbits the value is constant.
             const rNow = Math.hypot(p.x, p.y, p.z);
-            probe.mesh.userData.altKm = (rNow - 1) * R_EARTH_KM;
+            probe.mesh.userData.altKm = sceneToPageAltKm(rNow);
 
             // Orient the sprite along the velocity tangent so users
             // can see direction-of-travel when zoomed in.
-            const v = _eciSceneToEarthFixed(
-                _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR),
-                gmst, new THREE.Vector3());
+            let v;
+            if (live) {
+                // Inertial-frame velocity direction by a 1 s difference on
+                // the same propagator (the Earth-fixed rotation over 1 s is
+                // 0.004° — irrelevant to an orientation).
+                const q = _lookupProbePositionAt(probe, simTimeMs + 1000);
+                const p0 = _lookupProbePositionAt(probe, simTimeMs);
+                v = _eciSceneToEarthFixed({ x: q.x - p0.x, y: q.y - p0.y, z: q.z - p0.z }, gmst, new THREE.Vector3()).normalize();
+            } else {
+                v = _eciSceneToEarthFixed(
+                    _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR),
+                    gmst, new THREE.Vector3());
+            }
             const radial = probe.mesh.position.clone().normalize();
             const m = new THREE.Matrix4().lookAt(
                 probe.mesh.position,
@@ -5918,17 +6021,34 @@ export class AtmosphereGlobe {
 
         const out = [];
 
+        // Each object's track over the horizon is computed ONCE per scan and
+        // shared by every pair it is in. Every object now goes through the
+        // one `_lookupProbePositionAt` its drawn dot uses (SGP4 / mean
+        // elements + J2), which costs more per call than the old phase table
+        // — memoising is what keeps assets × debris × steps affordable.
+        const tracks = new Map();
+        const trackOf = (o) => {
+            let t = tracks.get(o);
+            if (!t) {
+                t = new Float32Array(nSteps * 3);
+                for (let k = 0; k < nSteps; k++) {
+                    const p = _lookupProbePositionAt(o, nowMs + k * stepSec * 1000);
+                    t[k * 3] = p.x; t[k * 3 + 1] = p.y; t[k * 3 + 2] = p.z;
+                }
+                tracks.set(o, t);
+            }
+            return t;
+        };
         // Inner helper to scan one pair across the horizon.
         const scan = (a, b) => {
             let minDist = Infinity, minStep = 0;
             let firstDist = 0;
+            const ta = trackOf(a), tb = trackOf(b);
             for (let k = 0; k < nSteps; k++) {
-                const tMs = nowMs + k * stepSec * 1000;
-                const pa = _lookupProbePositionAt(a, tMs);
-                const pb = _lookupProbePositionAt(b, tMs);
-                const dx = pa.x - pb.x;
-                const dy = pa.y - pb.y;
-                const dz = pa.z - pb.z;
+                const o = k * 3;
+                const dx = ta[o] - tb[o];
+                const dy = ta[o + 1] - tb[o + 1];
+                const dz = ta[o + 2] - tb[o + 2];
                 const d2 = dx * dx + dy * dy + dz * dz;
                 if (k === 0) firstDist = Math.sqrt(d2);
                 if (d2 < minDist) { minDist = d2; minStep = k; }
@@ -6252,8 +6372,10 @@ function _hex(colorStr) {
  */
 function _circularOrbitalSpeedKmS(altKm) {
     const MU = 398600.4418;     // km³/s²
-    const RE = 6378.135;        // km, WGS-72
-    const r = RE + altKm;
+    // Callers pass PAGE altitudes (above the 6371 sphere, the probes'
+    // userData.altKm), so the radius is the page datum's — adding them to
+    // WGS-72's 6378.135 counted the 7 km datum offset twice.
+    const r = PAGE_RE_KM + altKm;
     return Math.sqrt(MU / r);
 }
 
@@ -6331,7 +6453,40 @@ function _buildChordLine(userData) {
  * Falls back to a fresh trig-based propagate when the precomputed
  * phase-table isn't built yet (only on the first frame post-spawn).
  */
+const _lookupScratch = [0, 0, 0];
+
+/**
+ * Scene radius of an element-free probe: its own `_rScene` (a synthetic
+ * shell quoted in the catalogue convention) or its PAGE altitude.
+ */
+function _probeRadius(probe) {
+    return Number.isFinite(probe._rScene) ? probe._rScene : pageAltToScene(probe.spec.altitudeKm);
+}
+
 function _lookupProbePositionAt(probe, simTimeMs) {
+    // ONE position per object (2026-10-04). In order:
+    //   1. SGP4 on the probe's live TLE — the propagator its catalogue dot
+    //      is drawn with, so a named probe and the same NORAD in a suite
+    //      coincide (they used to sit hundreds of km apart: frozen node);
+    //   2. mean elements + secular J2 (js/upper-atmosphere-sat-suites.js) —
+    //      every catalogue record without lines, and a TLE probe until the
+    //      WASM is in (~8 km of SGP4 in LEO, measured);
+    //   3. the legacy phase table — nominal references and synthetic
+    //      Walker shells, which have no epoch to propagate from.
+    // Returned in the INERTIAL scene frame; callers turn it by −GMST.
+    if (probe._sgp4) {
+        const g = probe._sgp4;
+        try {
+            const st = g.wasm.propagate_tle(g.line1, g.line2, (simTimeMs - g.epochMs) / 60000);
+            if (st && Number.isFinite(st[0])) {
+                return { x: st[0] / PAGE_RE_KM, y: st[2] / PAGE_RE_KM, z: -st[1] / PAGE_RE_KM };
+            }
+        } catch (_) { /* decayed / refused → the mean elements below */ }
+    }
+    if (probe._el) {
+        const q = inertialSceneAt(probe._el, simTimeMs, probe._perifocal, _lookupScratch);
+        return { x: q[0], y: q[1], z: q[2] };
+    }
     const periodSec = probe.spec.orbital.periodMin * 60;
     const TAU = 2 * Math.PI;
     // Mean anomaly via absolute time. The two-branch fallback keeps
@@ -6346,7 +6501,7 @@ function _lookupProbePositionAt(probe, simTimeMs) {
 
     if (!probe._propTable || !periodSec) {
         const tFrac = ((M / TAU) % 1 + 1) % 1;
-        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        const r = _probeRadius(probe);
         return _propagateKeplerian(probe.spec.orbital, tFrac, r);
     }
     const N = probe._propTableN;

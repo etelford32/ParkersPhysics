@@ -25,8 +25,9 @@ import {
     SAT_SUITES, SUITE_CATEGORIES, meanElements, elementsAt, orbitRingTeme, meanPositionTeme,
     temeToScene, gmstRad, orbitRingInertialScene, ringRotationY, ringToSegments, distanceToRing,
     ringSample, orbitRegime, altitudeLadder, outerShellKm, framingDistance, FRAME_PRESETS,
-    LADDER_LAYERS, layerIdAt, RE_KM, SCENE_RE_KM,
+    LADDER_LAYERS, layerIdAt, RE_KM, SCENE_RE_KM, perifocalTable, inertialSceneAt,
 } from '../js/upper-atmosphere-sat-suites.js';
+import { PAGE_RE_KM, CATALOG_RE_KM } from '../js/upper-atmosphere-datum.js';
 
 const here = (p) => new URL(p, import.meta.url);
 const wasm = await import('../js/sgp4-wasm/sgp4_wasm.js');
@@ -147,6 +148,38 @@ ok('temeToScene is coords.js eciToEcef; GMST=0 build + rotation.y equals a direc
     const seg = ringToSegments(inertial);
     assert.equal(seg.length, 64 * 6);
     assert.deepEqual([...seg.slice(-3)], [...inertial.slice(0, 3)], 'closed');
+});
+
+ok('altitudes are above the PAGE datum; scene unit is the page radius', () => {
+    assert.equal(SCENE_RE_KM, PAGE_RE_KM);
+    assert.ok(Math.abs(iss.meanAltKm - (iss.aKm - PAGE_RE_KM)) < 1e-9);
+    assert.ok(Math.abs(iss.meanAltKm - (iss.aKm - CATALOG_RE_KM) - (CATALOG_RE_KM - PAGE_RE_KM)) < 1e-9);
+    // A ring vertex's scene radius IS its geocentric radius / 6371.
+    const ring = orbitRingInertialScene(iss, iss.epochMs, 8);
+    const teme = orbitRingTeme(iss, iss.epochMs, 8);
+    for (let i = 0; i < 8; i++) {
+        const rS = Math.hypot(ring[i * 3], ring[i * 3 + 1], ring[i * 3 + 2]);
+        const rK = Math.hypot(teme[i * 3], teme[i * 3 + 1], teme[i * 3 + 2]);
+        assert.ok(Math.abs(rS * PAGE_RE_KM - rK) < 1e-3, `vertex ${i}`);
+    }
+});
+
+ok('table-based inertialSceneAt matches the exact solve (screener path)', () => {
+    let worst = 0;
+    for (const el of [iss, gps, mol]) {
+        const tbl = perifocalTable(el, 256);
+        for (let h = 0; h < 48; h += 0.37) {
+            const ms = el.epochMs + h * 3600e3;
+            const a = inertialSceneAt(el, ms, tbl), b = inertialSceneAt(el, ms);
+            const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * PAGE_RE_KM;
+            if (el === iss) worst = Math.max(worst, d);
+            // And the exact path IS meanPositionTeme mapped through temeToScene at GMST 0.
+            const t = meanPositionTeme(el, ms), s = temeToScene(t[0], t[1], t[2], 0);
+            assert.ok(Math.hypot(b[0] - s[0], b[1] - s[1], b[2] - s[2]) * PAGE_RE_KM < 1e-6);
+        }
+    }
+    console.log(`      LEO table vs exact: worst ${worst.toFixed(3)} km`);
+    assert.ok(worst < 0.6, `LEO table error ${worst} km`);
 });
 
 ok('GMST matches the IAU-1982 value at J2000', () => {
