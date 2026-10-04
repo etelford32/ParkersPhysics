@@ -52,6 +52,9 @@ on:
       - 'js/flux-rope/view.js'
       - 'js/flux-rope-kernel.js'
       - 'js/flux-rope-wasm/**'
+      - 'js/sgp4-wasm/**'
+      - 'js/satellite-tracker.js'
+      - 'api/celestrak/tle.js'
       - 'tests/upper-atmosphere-*.mjs'
       - 'tests/image-metrics.mjs'
       - 'tests/helpers/image-metrics.mjs'
@@ -70,6 +73,9 @@ on:
       - 'js/flux-rope/view.js'
       - 'js/flux-rope-kernel.js'
       - 'js/flux-rope-wasm/**'
+      - 'js/sgp4-wasm/**'
+      - 'js/satellite-tracker.js'
+      - 'api/celestrak/tle.js'
       - 'tests/upper-atmosphere-*.mjs'
       - 'tests/image-metrics.mjs'
       - 'tests/helpers/image-metrics.mjs'
@@ -112,5 +118,7 @@ jobs:
         run: node tests/upper-atmosphere-camera-rig.mjs
       - name: incoming CME frame + field lines (real WASM)
         run: node tests/upper-atmosphere-cme-model.mjs
+      - name: satellite suites (rings vs the committed SGP4 WASM)
+        run: node tests/upper-atmosphere-sat-suites.mjs
       - name: image metrics (synthetic controls)
         run: node tests/image-metrics.mjs

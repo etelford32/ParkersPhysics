@@ -892,6 +892,59 @@ frame join and the two scales:
   frame — gated), upstream (30 R⊕ up the Sun line looking back), side-on;
   each orbits its pivot about ecliptic north, through the same rebuilt frame.
 
+### 9.11 Where the satellites sit, and a way home for the camera (2026-10-04)
+
+The page drew the tracked catalogue as an eight-checkbox "Live catalog
+overlay": dots and nothing else. You could not see a shell or a plane, GPS and
+GEO "loaded" behind the home camera (3.4 R⊕; GPS is at 4.2, GEO at 6.6), and
+four things were wrong underneath.
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-sat-suites.js` | PURE: the suite catalogue (21 CelesTrak groups in 8 categories), mean elements from TLE or OMM with SGP4's own a/n recovery, secular J2 node/perigee/anomaly drift, orbit rings, TEME → scene (coords.js `eciToEcef`, transcribed), the plane-spreading ring sample, the altitude ladder over the ENGINE's layer table, regimes, `framingDistance` on the binding half-angle | `node tests/upper-atmosphere-sat-suites.mjs` (11, against the committed SGP4 WASM) |
+| `js/upper-atmosphere-sat-suites-panel.js` | DOM: suites by category with counts, Orbit rings, Frame LEO / MEO / GEO / Fit shown, the ladder (one series, one hue, bands labelled, caption = table view) | `tests/upper-atmosphere-satellites.spec.js` (6) |
+| globe | `setSuiteRingsVisible`, `setFocusSatellite`, `getSuiteLadder`, `frameSatellites`, `forgetCatalogGroup` | same |
+
+**Measured, not assumed.** A ring is the MEAN orbit; SGP4's short-period
+terms move the real satellite about it. Worst SGP4-to-ring over 24 h: ISS
+7.7 km, GPS 8.7 km, Molniya 42 km. Without the J2 drift the ISS ring misses by
+471 km in a day (the negative control). In the browser the dots sit within
+2 km of the page's own SGP4 at the scene instant and every ring passes within
+25 km of its dot, on rebuilt AND rotation-only frames (rings are built once in
+the inertial frame and turned by `rotation.y = −GMST`; rebuilt every 10 sim-min
+for the J2 drift).
+
+**Fixed on the way:**
+- **The catalogue ran on the WALL clock** (`tick(Date.now())`) while the
+  probes, the sun and the terminator read the bus: at warp or under a scrub
+  every dot sat hours away from its own day/night. It now ticks at
+  `_sceneTimeMs()`; the spec's control puts the old tick back with the bus 3 h
+  away and must miss by > 500 km.
+- **The tracker's dots were uncapped, untextured squares** (0.008 R⊕ ≈ 51 km
+  world size) — the §9.5 rule had never reached them. `capPointSize` 6 px +
+  the disc.
+- **Hidden suites still answered the cursor** (their slots draw in the hidden
+  colour but stayed in the raycast set).
+- **A suite that failed to load stuck** as an empty "shown" group forever; it
+  is now forgotten and re-fetched on the next tick of its box.
+
+**The camera escape (user report 2026-10-04: "stuck in this visual").** Visit
+ISS flies in and LOCKS follow; while following, the (symbolically scaled) ISS
+fills much of the frame, so every click the visitor made to look around landed
+on it and re-started the fly-in + lock. And the lock itself was scheduled by a
+`setTimeout` at the end of the fly-in, so a Reset pressed during the fly-in was
+overridden a second later. Now: deferred follows are GENERATION-checked and
+any Reset / Top / Stop-follow / mode change cancels them; clicking the target
+already being followed is a no-op; Reset drops every lock (follow, transit,
+explore path) and lands in the planet orbit frame itself (no racing
+`setTimeout(setMode('orbit'))`); **R** resets from anywhere and **Esc** lets go
+of a follow. The spec's control removes the cancellation and the lock must
+re-engage.
+
+**Full screen** was a bare ⛶ glyph in the preset row. It is now the HUD's
+largest control ("⛶ Full screen  F", ≥ 44 px), **F** toggles it, and the label
+flips to "Exit full screen".
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

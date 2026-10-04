@@ -435,7 +435,16 @@ export class ExploreHud {
         // Esc always leaves: in true fullscreen the browser also exits on its
         // own (and fullscreenchange lands here too), but a key it does not
         // consume — or the CSS-only fill — must not strand the view.
-        this._onKey = (e) => { if (e.key === 'Escape' && this.isImmersive()) this.setImmersive(false); };
+        this._onKey = (e) => {
+            if (e.key === 'Escape' && this.isImmersive()) { this.setImmersive(false); return; }
+            // F toggles full screen (not while typing, not with a modifier).
+            if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const tag = (e.target?.tagName || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
+                e.preventDefault();
+                this.setImmersive(!this.isImmersive());
+            }
+        };
         window.addEventListener('keydown', this._onKey);
     }
     isImmersive() { return this.wrap.classList.contains('ua-immersive'); }
@@ -443,7 +452,13 @@ export class ExploreHud {
         on = !!on;
         this.wrap.classList.toggle('ua-immersive', on);
         document.body.classList.toggle('ua-immersive-on', on);
-        document.getElementById('ua-cam-immersive')?.classList.toggle('ua-cam-on', on);
+        const fsBtn = document.getElementById('ua-cam-immersive');
+        if (fsBtn) {
+            fsBtn.classList.toggle('ua-cam-on', on);
+            fsBtn.setAttribute('aria-pressed', String(on));
+            const lbl = fsBtn.querySelector('.ua-cam-fs-label');
+            if (lbl) lbl.textContent = on ? 'Exit full screen' : 'Full screen';
+        }
         this._panel?.querySelector('[data-act="immersive"]')?.setAttribute('aria-pressed', String(on));
         try {
             if (on && this.wrap.requestFullscreen && !document.fullscreenElement) {

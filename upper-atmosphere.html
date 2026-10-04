@@ -686,6 +686,31 @@ body.ua-immersive-on { overflow:hidden; }
     color:#ffc060;
 }
 #ua-camera-hud .is-hidden { display:none; }
+/* Full screen: the HUD's primary call to action (2026-10 — the bare ⛶ glyph
+ * was too small to find, and the page is meant to be used full screen). */
+#ua-camera-hud button.ua-cam-fs {
+    display:inline-flex; align-items:center; gap:10px;
+    padding:10px 18px; min-height:44px;
+    font-size:var(--ua-fs-md, .95rem); letter-spacing:.06em;
+    background:linear-gradient(180deg, rgba(0,200,200,.28), rgba(0,200,200,.14));
+    border:1px solid var(--ua-cyan); color:#e8ffff;
+    box-shadow:0 0 18px rgba(0,220,220,.22);
+}
+#ua-camera-hud button.ua-cam-fs:hover { background:rgba(0,200,200,.36); color:#fff; }
+#ua-camera-hud .ua-cam-fs-ico { font-size:1.35em; line-height:1; }
+#ua-camera-hud .ua-cam-fs kbd {
+    font:600 .7em/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding:3px 6px; border-radius:4px; border:1px solid rgba(200,255,255,.35);
+    color:#bfeff0; background:rgba(0,0,0,.25);
+}
+@media (max-width:768px) {
+    #ua-camera-hud button.ua-cam-fs { padding:8px 12px; min-height:44px; }
+    #ua-camera-hud .ua-cam-fs kbd { display:none; }
+}
+/* Reset is the escape hatch from every camera state: never dimmed. */
+#ua-camera-hud .ua-cam-controls--preset button.ua-cam-reset {
+    color:var(--ua-text-default); border-color:var(--ua-cyan-bdr);
+}
 #ua-cam-readout {
     background:var(--ua-surf-3);
     border:1px solid rgba(0,200,200,.18);
@@ -1129,11 +1154,41 @@ body.ua-immersive-on { overflow:hidden; }
     border-color:rgba(0,200,200,.4);
     color:#0cc;
 }
-.ua-catalog-toggles input { display:none; }
+/* Visually hidden but still focusable: the chip is a real checkbox for keyboards. */
+.ua-catalog-toggles input { position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; }
+.ua-catalog-toggles label:focus-within { outline:2px solid rgba(0,220,220,.7); outline-offset:1px; }
 .ua-catalog-status {
     font-size:.62rem; color:#7a8; font-family:monospace;
     margin-top:4px;
 }
+.ua-catalog-status[data-kind="error"] { color:#ff8090; }
+/* ─── Satellite suites (js/upper-atmosphere-sat-suites-panel.js) ─── */
+.ua-ss-cats { flex-direction:column; gap:6px; }
+.ua-ss-cat { display:flex; flex-direction:column; gap:3px; }
+.ua-ss-catlabel { font-size:.56rem; color:#7f93a8; text-transform:uppercase; letter-spacing:.08em; }
+.ua-ss-chips { display:flex; flex-wrap:wrap; gap:5px; }
+.ua-ss-chips label { position:relative; }
+.ua-ss-sw { width:8px; height:8px; border-radius:50%; background:#0cc; flex:0 0 auto; }
+.ua-ss-n { color:#7f93a8; font-variant-numeric:tabular-nums; }
+.ua-ss-row { display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-top:8px; }
+.ua-ss-ringtog { font-size:.66rem; color:#cde; display:inline-flex; gap:5px; align-items:center; margin-right:6px; cursor:pointer; }
+.ua-ss-ringtog input { accent-color:#0cc; margin:0; }
+.ua-ss-framelabel { font-size:.6rem; color:#7f93a8; text-transform:uppercase; letter-spacing:.06em; }
+.ua-ss-btn { font-size:.64rem; padding:3px 9px; border-radius:4px; cursor:pointer;
+    background:rgba(255,255,255,.04); color:#cde; border:1px solid rgba(0,200,200,.3); }
+.ua-ss-btn:hover { color:#0ff; border-color:rgba(0,255,230,.6); }
+.ua-ss-ladder { margin:8px 0 0; }
+.ua-ss-ladder svg { width:100%; height:auto; display:block; }
+.ua-ss-ladder figcaption { font:.6rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color:#9ab; margin-top:3px; }
+.ua-ss-band { opacity:.10; }
+.ua-ss-band--thermosphere { fill:#ff8a4c; }
+.ua-ss-band--exosphere { fill:#c080ff; }
+.ua-ss-bandlabel { font:9px system-ui, sans-serif; fill:#9ab; }
+.ua-ss-tick { font:9px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#7f93a8; }
+.ua-ss-grid { stroke:rgba(160,180,210,.12); stroke-width:1; }
+.ua-ss-bar { fill:#2fd4d4; }
+.ua-ss-bar:hover { fill:#8ff; }
+.ua-ss-note { font-size:.6rem; color:#7f93a8; line-height:1.45; margin:6px 0 0; }
 
 /* ═══════════════════════════════════════════════════════════════════
    FLEET UI DESIGN TOKENS (Phase 22)
@@ -3005,24 +3060,15 @@ body.ua-immersive-on { overflow:hidden; }
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
-            <h2>Live catalog overlay</h2>
+            <h2>Satellite suites</h2>
             <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
-                Live TLE-driven cloud propagated via Rust SGP4 WASM at
-                full frame rate. Toggle catalogs to see all tracked
-                objects. Click any point to drop into the trajectory
-                analyzer above.
+                The tracked catalogue, suite by suite, propagated with Rust
+                SGP4 at the simulation clock — scrub or warp time and every
+                satellite moves with the sun. Turn on orbit rings to see the
+                shells and planes they fly in, and frame LEO, MEO or GEO to
+                bring the outer suites into view. Click any dot to analyze it.
             </p>
-            <div class="ua-catalog-toggles" id="ua-catalog-toggles">
-                <label data-group="active"><input type="checkbox"> active <span style="color:#88aacc">●</span></label>
-                <label data-group="starlink"><input type="checkbox"> starlink <span style="color:#ccddff">●</span></label>
-                <label data-group="oneweb"><input type="checkbox"> oneweb <span style="color:#4488ff">●</span></label>
-                <label data-group="iridium"><input type="checkbox"> iridium <span style="color:#ff66aa">●</span></label>
-                <label data-group="gps-ops"><input type="checkbox"> gps <span style="color:#00ff88">●</span></label>
-                <label data-group="weather"><input type="checkbox"> weather <span style="color:#ffdd44">●</span></label>
-                <label data-group="science"><input type="checkbox"> science <span style="color:#cc66ff">●</span></label>
-                <label data-group="debris"><input type="checkbox"> debris <span style="color:#ff2200">●</span></label>
-            </div>
-            <div class="ua-catalog-status" id="ua-catalog-status">no catalogs loaded</div>
+            <div id="ua-sat-suites"></div>
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
@@ -3218,6 +3264,14 @@ body.ua-immersive-on { overflow:hidden; }
              toggle so operators can stop tracking without changing
              camera mode. -->
         <div id="ua-camera-hud">
+            <!-- Full screen is the way this simulation is meant to be seen,
+                 so it is the HUD's largest control (it was a bare ⛶ glyph in
+                 the preset row). Same id: the explore HUD owns the toggle. -->
+            <div class="ua-cam-controls ua-cam-controls--fs">
+                <button type="button" id="ua-cam-immersive" class="ua-cam-fs"
+                        aria-pressed="false" aria-keyshortcuts="F"
+                        title="Full screen — fill the screen with the simulation (F · Esc to leave)"><span class="ua-cam-fs-ico" aria-hidden="true">⛶</span><span class="ua-cam-fs-label">Full screen</span><kbd>F</kbd></button>
+            </div>
             <div class="ua-cam-controls">
                 <button type="button" id="ua-cam-orbit" class="ua-cam-on"
                         title="Orbit the planet (drag to rotate, scroll to zoom)">Orbit</button>
@@ -3229,16 +3283,14 @@ body.ua-immersive-on { overflow:hidden; }
                         title="Fly to the live ISS probe (420 km · 51.6°) and lock follow">↥ Visit ISS</button>
             </div>
             <div class="ua-cam-controls ua-cam-controls--preset">
-                <button type="button" id="ua-cam-reset"
-                        title="Return camera to home view (drops any follow lock)">⟲ Reset</button>
+                <button type="button" id="ua-cam-reset" class="ua-cam-reset" aria-keyshortcuts="R"
+                        title="Reset view (R) — leave any follow / fly / explore state and return to the home orbit view">⟲ Reset view</button>
                 <button type="button" id="ua-cam-top"
                         title="Snap to top-down (polar) view">▲ Top</button>
                 <button type="button" id="ua-cam-zoom-in"
                         title="Zoom in (decrease distance to target)">＋</button>
                 <button type="button" id="ua-cam-zoom-out"
                         title="Zoom out (increase distance to target)">−</button>
-                <button type="button" id="ua-cam-immersive"
-                        title="Immersive — fill the window with the view (Esc to leave)">⛶</button>
                 <button type="button" id="ua-cam-stop-follow" class="ua-cam-stop is-hidden"
                         title="Stop following the current target (camera stays put, you can orbit/fly freely)">⏹ Stop follow</button>
             </div>
@@ -3928,63 +3980,15 @@ body.ua-immersive-on { overflow:hidden; }
         window.__ua?.globe?.setSubstormAuto?.(e.target.checked);
     });
 
-    /* ─── Live catalog overlay ───────────────────────────────────────────
-       Toggle bar in #ua-catalog-toggles wires checkboxes to
-       globe.enableCatalogGroup / disableCatalogGroup. The status line
-       under the bar shows the running total + per-group counts. The
-       actual cloud rendering and click→analyze handoff lives inside
-       the globe (catalogTracker + _resolveCatalogHit). */
-    (function wireCatalogToggles() {
-        const bar = document.getElementById('ua-catalog-toggles');
-        const status = document.getElementById('ua-catalog-status');
-        if (!bar) return;
-        const refreshStatus = () => {
-            if (!status) return;
-            const s = globe.getCatalogStatus?.();
-            if (!s || s.total === 0) {
-                status.textContent = 'no catalogs loaded · click any group to begin';
-                return;
-            }
-            const groups = s.groups
-                .map(g => `${g.name}:${g.count}${g.visible ? '' : '⊘'}`).join(' · ');
-            status.textContent = `total ${s.total.toLocaleString()} · ${groups}`;
-        };
-        bar.addEventListener('change', async (e) => {
-            const inp = e.target;
-            if (!inp || inp.tagName !== 'INPUT') return;
-            const label = inp.closest('label[data-group]');
-            if (!label) return;
-            const group = label.dataset.group;
-            label.classList.toggle('on', inp.checked);
-            if (status) status.textContent = inp.checked
-                ? `loading ${group}…`
-                : `hiding ${group}…`;
-            try {
-                if (inp.checked) {
-                    // First time → loadGroup; subsequent → just show.
-                    const s = globe.getCatalogStatus?.();
-                    const known = s?.groups?.find(g => g.name === group);
-                    if (known) {
-                        globe.showCatalogGroup?.(group);
-                    } else {
-                        await globe.enableCatalogGroup(group);
-                    }
-                } else {
-                    globe.disableCatalogGroup(group);
-                }
-            } catch (err) {
-                console.warn('[catalog]', group, err);
-            }
-            refreshStatus();
-        });
-        // Bumped on each successful CelesTrak fetch.
-        window.addEventListener('satellites-loaded', refreshStatus);
-        window.addEventListener('satellites-load-failed', (e) => {
-            if (status) status.textContent =
-                `load failed: ${e.detail?.group || 'unknown'} — ${e.detail?.error || 'see console'}`;
-        });
-        refreshStatus();
-    })();
+    /* ─── Satellite suites ───────────────────────────────────────────────
+       The whole relayed catalogue as toggleable suites, orbit rings,
+       LEO/MEO/GEO framing and the altitude ladder — all in
+       js/upper-atmosphere-sat-suites-panel.js over the globe's suite API
+       (kernel: js/upper-atmosphere-sat-suites.js). */
+    import('./js/upper-atmosphere-sat-suites-panel.js').then(({ SatSuitesPanel }) => {
+        const host = document.getElementById('ua-sat-suites');
+        if (host) window.__ua.satSuites = new SatSuitesPanel(host, globe);
+    }).catch((err) => console.warn('[suites] panel failed to load', err));
 
     /* ─── Realtime driver + sim-clock + time controls ────────────────────
        The driver fuses NOAA SWPC indices (F10.7 hourly, Kp 1-min) with

@@ -60,6 +60,11 @@ import { AtmosphereVolume, VOLUME_QUALITY }
     from './upper-atmosphere-volume.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { capPointSize, roundDotTexture } from './upper-atmosphere-point-cap.js';
+import {
+    meanElements, ringSample, orbitRingInertialScene, ringToSegments, ringRotationY,
+    gmstRad as suiteGmstRad, altitudeLadder, outerShellKm, framingDistance, FRAME_PRESETS,
+    orbitRegime,
+} from './upper-atmosphere-sat-suites.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 import { ZoneWaveField } from './upper-atmosphere-wave-field.js';
@@ -2149,11 +2154,27 @@ export class AtmosphereGlobe {
         if (follow) {
             // Engage follow after the flyTo's smoothstep completes —
             // delay by the animation duration so the spring doesn't
-            // fight the fly-in.
+            // fight the fly-in. The timer is GENERATION-checked: a Reset,
+            // Top, Stop-follow or mode change made during the fly-in must
+            // not be overridden by a lock that lands a second later (that
+            // re-lock is how a visitor got stuck chasing the ISS, 2026-10).
+            const gen = this._armPendingFollow();
             setTimeout(() => {
-                if (this._satProbes?.[id]) this.followSatellite(id);
+                if (gen === this._followGen && this._satProbes?.[id]) this.followSatellite(id);
             }, durationSec * 1000);
         }
+    }
+
+    /** A new deferred-follow ticket; any newer camera command invalidates it. */
+    _armPendingFollow() { this._followGen = (this._followGen ?? 0) + 1; return this._followGen; }
+    /** Cancel a follow that a fly-in has scheduled but not yet engaged. */
+    _cancelPendingFollow() { this._followGen = (this._followGen ?? 0) + 1; }
+    /** True while a follow is locked OR scheduled to lock at the end of a fly-in. */
+    _isFollowTarget(kind, key) {
+        const f = this._followId;
+        if (!f || f.kind !== kind || (f.id !== key && f.idx !== key)) return false;
+        // Stale ids (a fly-in that was cancelled) must not swallow a real click.
+        return !!this._controls.isFollowing?.() || !!this._controls.isFlying?.();
     }
 
     /**
@@ -2171,6 +2192,7 @@ export class AtmosphereGlobe {
 
     /** Stop any active follow (mode + flyTo unchanged). */
     stopFollowing() {
+        this._cancelPendingFollow();
         this._controls.stopFollowing?.();
         this._followId = null;
     }
@@ -2178,9 +2200,24 @@ export class AtmosphereGlobe {
     getFollowTarget() { return this._followId ?? null; }
 
     /** Reset camera to a default home view. Drops any active follow. */
-    resetCameraView() { this._releaseTransitForCamera('reset'); this._controls.resetView?.(); this._followId = null; }
+    resetCameraView() {
+        // The escape hatch: whatever the camera is doing — a fly-in with a
+        // follow pending, a follow lock, a transit, an explore path — Reset
+        // ends it and goes home. Every lock is dropped BEFORE the flight so
+        // nothing can re-grab the camera when the tween lands.
+        this._cancelPendingFollow();
+        this._releaseTransitForCamera('reset');
+        this._controls.cancelPath?.('reset');
+        this._controls.stopFollowing?.();
+        this._followId = null;
+        // Home is the PLANET ORBIT frame. Enter it first (keeps the camera
+        // where it is, re-aims at the centre) so the tween lands in orbit
+        // mode with no second timer racing it.
+        if (this._controls.getMode?.() !== 'orbit') this._controls.setMode('orbit');
+        this._controls.resetView?.();
+    }
     /** Snap to top-down (polar) view. */
-    cameraTopView()   { this._releaseTransitForCamera('top'); this._controls.flyToTopView?.(); this._followId = null; }
+    cameraTopView()   { this._cancelPendingFollow(); this._releaseTransitForCamera('top'); this._controls.stopFollowing?.(); this._controls.flyToTopView?.(); this._followId = null; }
     /** A camera preset takes over from the layer transit (which re-applies its pose every frame). */
     _releaseTransitForCamera(reason) {
         if (this._transit?.getState?.().active) this._transit.stop(reason);
@@ -2354,6 +2391,7 @@ export class AtmosphereGlobe {
     /** New: follow ISS (default click target for the HUD's "Visit ISS"). */
     followISS() {
         if (this._controls.getMode?.() === 'orbit') this._controls.setMode('fly');
+        this._followId = { kind: 'sat', id: 'iss' };   // pending: a re-click is a no-op
         return this.flyToSatellite('iss', 1.6, { follow: true });
     }
 
@@ -2381,7 +2419,8 @@ export class AtmosphereGlobe {
             // every frame by the catalog propagator. The follow callback
             // reads the live offset each frame — so the camera tracks
             // even rapidly-tumbling LEO fragments.
-            setTimeout(() => this.followDebris(idx), durationSec * 1000);
+            const gen = this._armPendingFollow();
+            setTimeout(() => { if (gen === this._followGen) this.followDebris(idx); }, durationSec * 1000);
         }
     }
 
@@ -2618,6 +2657,9 @@ export class AtmosphereGlobe {
         if (!tracker) return { ok: false, reason: 'tracker init failed' };
         try {
             const added = await tracker.loadGroup(group);
+            this._suiteRingsDirty = true;
+            const info = tracker._groups?.get?.(group);
+            if (info?.error) return { ok: false, reason: String(info.error), total: tracker._satellites.length };
             return { ok: true, count: added ?? 0, total: tracker._satellites.length };
         } catch (err) {
             return { ok: false, reason: String(err?.message || err) };
@@ -2634,7 +2676,15 @@ export class AtmosphereGlobe {
         if (t._groups?.has?.(group)) {
             t.setGroupVisible?.(group, false);
         }
+        this._suiteRingsDirty = true;
         return true;
+    }
+
+    /** Drop a group's registration (a failed load) so the next enable re-fetches. */
+    forgetCatalogGroup(group) {
+        this._catalogTracker?.forgetGroup?.(group);
+        this._suiteElCache?.delete(group);
+        this._suiteRingsDirty = true;
     }
 
     /** Re-show a previously disabled group without re-fetching. */
@@ -2642,6 +2692,7 @@ export class AtmosphereGlobe {
         const t = this._catalogTracker;
         if (!t) return false;
         t.setGroupVisible?.(group, true);
+        this._suiteRingsDirty = true;
         return true;
     }
 
@@ -2655,6 +2706,201 @@ export class AtmosphereGlobe {
                 name, count: info.count, visible: info.visible !== false,
             })),
         };
+    }
+
+    // ── Satellite suites: rings, ladder, framing ─────────────────────────
+    // js/upper-atmosphere-sat-suites.js is the kernel; the dots stay the
+    // tracker's SGP4. Everything here is drawn at the SCENE instant.
+
+    /** The instant the catalogue is propagated to (overridable by the spec's negative control). */
+    _catalogClockMs() {
+        return this._catalogClockOverride ? this._catalogClockOverride() : this._sceneTimeMs();
+    }
+
+    /** Mean elements of a loaded suite, parsed once per load (null rows dropped). */
+    _suiteElements(group) {
+        const t = this._catalogTracker;
+        if (!t) return [];
+        this._suiteElCache = this._suiteElCache || new Map();
+        const info = t._groups?.get?.(group);
+        const count = info?.count ?? 0;
+        const hit = this._suiteElCache.get(group);
+        if (hit && hit.count === count) return hit.els;
+        const els = [];
+        for (const s of t._satellites) {
+            if (s.group !== group) continue;
+            const el = meanElements(s.tle);
+            if (el) { el.group = group; els.push(el); }
+        }
+        this._suiteElCache.set(group, { count, els });
+        return els;
+    }
+
+    _visibleSuites() {
+        const t = this._catalogTracker;
+        if (!t?._groups) return [];
+        return Array.from(t._groups).filter(([, g]) => g.visible !== false && g.count > 0).map(([n]) => n);
+    }
+
+    /**
+     * Orbit rings for the visible suites: up to `perSuite` members each,
+     * chosen across PLANES (`ringSample`), capped at `maxTotal`, as ONE
+     * LineSegments draw. Off by default.
+     */
+    setSuiteRingsVisible(on, { perSuite = 24, maxTotal = 240 } = {}) {
+        on = !!on;
+        this._suiteRingOpts = { perSuite, maxTotal };
+        if (!on) {
+            if (this._suiteRings) { this._suiteRings.visible = false; }
+            this._suiteRingsOn = false;
+            return false;
+        }
+        this._suiteRingsOn = true;
+        if (!this._suiteRings) {
+            const geo = new THREE.BufferGeometry();
+            const mat = new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, opacity: 0.38, depthWrite: false,
+            });
+            this._suiteRings = new THREE.LineSegments(geo, mat);
+            this._suiteRings.name = 'suite-rings';
+            this._suiteRings.renderOrder = 9;
+            this._suiteRings.frustumCulled = false;
+            this._scene.add(this._suiteRings);
+        }
+        this._suiteRings.visible = true;
+        this._suiteRingsDirty = true;
+        return true;
+    }
+    areSuiteRingsVisible() { return !!this._suiteRingsOn; }
+    /** Mark the ring set stale (a suite was shown, hidden or loaded). */
+    invalidateSuiteRings() { this._suiteRingsDirty = true; }
+
+    /** Draw one picked satellite's ring brighter than the suite's. null clears it. */
+    setFocusSatellite(norad) {
+        this._focusNorad = norad == null ? null : Number(norad);
+        this._suiteRingsDirty = true;
+        if (this._focusNorad != null && !this._suiteRings) {
+            this.setSuiteRingsVisible(true);
+            this._suiteRingsOn = false;           // focus ring only
+        }
+    }
+
+    _stepSuiteRings() {
+        const ms = this._catalogClockMs();
+        const rings = this._suiteRings;
+        // The ring is inertial; J2 moves a LEO node ~0.2°/h, so rebuild
+        // when the scene instant has moved 10 min (or the set changed) and
+        // otherwise only turn the group by the sidereal angle.
+        if (this._suiteRingsDirty || !Number.isFinite(this._suiteRingsMs)
+            || Math.abs(ms - this._suiteRingsMs) > 10 * 60e3) {
+            this._rebuildSuiteRings(ms);
+        }
+        rings.rotation.y = ringRotationY(suiteGmstRad(ms));
+        rings.visible = !!this._suiteRingsOn || this._focusNorad != null;
+    }
+
+    _rebuildSuiteRings(ms) {
+        const t = this._catalogTracker;
+        const N = 96;
+        const picks = [];
+        if (t && this._suiteRingsOn) {
+            const { perSuite, maxTotal } = this._suiteRingOpts || { perSuite: 24, maxTotal: 240 };
+            for (const g of this._visibleSuites()) {
+                for (const el of ringSample(this._suiteElements(g), perSuite, ms)) {
+                    if (picks.length < maxTotal) picks.push({ el, color: t._groups.get(g).color, focus: false });
+                }
+            }
+        }
+        if (t && this._focusNorad != null) {
+            const idx = t._indexByNorad?.get?.(this._focusNorad);
+            const sat = idx != null ? t._satellites[idx] : null;
+            const el = sat ? meanElements(sat.tle) : null;
+            if (el) picks.push({ el, color: new THREE.Color(0xffffff), focus: true });
+        }
+        const pos = new Float32Array(picks.length * N * 6);
+        const col = new Float32Array(picks.length * N * 6);
+        picks.forEach((p, k) => {
+            ringToSegments(orbitRingInertialScene(p.el, ms, N), pos, k * N * 6);
+            const c = p.color;
+            const gain = p.focus ? 1 : 0.85;
+            for (let i = 0; i < N * 2; i++) {
+                const o = k * N * 6 + i * 3;
+                col[o] = c.r * gain; col[o + 1] = c.g * gain; col[o + 2] = c.b * gain;
+            }
+        });
+        const geo = this._suiteRings.geometry;
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        geo.computeBoundingSphere();
+        this._suiteRingsMs = ms;
+        this._suiteRingsDirty = false;
+        this._suiteRingCount = picks.length;
+        this._suiteRingNorads = picks.map((p) => p.el.norad);
+    }
+
+    /** What the rings currently show (for the panel and the spec). */
+    getSuiteRingState() {
+        // Readers (the panel's status line) must not see the PREVIOUS set:
+        // a toggle marks the rings dirty and the frame loop would only
+        // rebuild them on the next frame.
+        if (this._suiteRings && this._suiteRingsDirty) this._rebuildSuiteRings(this._catalogClockMs());
+        return {
+            on: !!this._suiteRingsOn, count: this._suiteRingCount || 0,
+            norads: (this._suiteRingNorads || []).slice(), focus: this._focusNorad ?? null,
+            builtMs: this._suiteRingsMs ?? null,
+        };
+    }
+
+    /**
+     * The altitude ladder over the visible suites (or `groups`), from MEAN
+     * elements — deterministic, available before the first SGP4 tick.
+     */
+    getSuiteLadder({ groups = null, minKm = 150, maxKm = 2000, binKm = 50 } = {}) {
+        const gs = groups || this._visibleSuites();
+        const els = gs.flatMap((g) => this._suiteElements(g));
+        const ladder = altitudeLadder(els, { minKm, maxKm, binKm });
+        ladder.groups = gs.map((g) => {
+            const e = this._suiteElements(g);
+            const regimes = {};
+            for (const el of e) { const r = orbitRegime(el); regimes[r] = (regimes[r] || 0) + 1; }
+            return { group: g, count: e.length, outerKm: outerShellKm(e), regimes };
+        });
+        return ladder;
+    }
+
+    /**
+     * One-shot framing flight so a whole shell fits the lens: a preset id
+     * ('leo' | 'meo' | 'geo'), a number (outer altitude, km), or 'visible'
+     * (the visible suites' 95th-percentile apogee). Keeps the current view
+     * DIRECTION, lands in the planet orbit frame, and is cancelled by any
+     * drag/scroll like every camera flight (the page may START a flight, it
+     * may not HOLD the camera).
+     */
+    frameSatellites(what = 'visible', { durationSec = 1.4 } = {}) {
+        let outerKm = null;
+        if (typeof what === 'number') outerKm = what;
+        else if (what === 'visible') {
+            outerKm = outerShellKm(this._visibleSuites().flatMap((g) => this._suiteElements(g)));
+        } else outerKm = FRAME_PRESETS.find((p) => p.id === what)?.outerKm ?? null;
+        if (!Number.isFinite(outerKm)) return null;
+        const cam = this._camera;
+        const maxR = this._controls.getMaxDistance?.() ?? 28;
+        const f = framingDistance({ outerKm, fovDeg: cam.fov, aspect: cam.aspect, maxR });
+        this._cancelPendingFollow();
+        this._releaseTransitForCamera('frame');
+        this._controls.cancelPath?.('frame');
+        this._controls.stopFollowing?.();
+        this._followId = null;
+        if (this._controls.getMode?.() !== 'orbit') this._controls.setMode('orbit');
+        const dir = cam.position.clone();
+        if (dir.lengthSq() < 1e-9) dir.set(0, 0.55, 1);
+        dir.normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        this._controls.flyTo(dir.multiplyScalar(f.distance), new THREE.Vector3(0, 0, 0), durationSec, {
+            up, endOrbit: { up, target: new THREE.Vector3(0, 0, 0) },
+        });
+        this._lastFrame = { outerKm, ...f };
+        return this._lastFrame;
     }
 
     async _ensureCatalogTracker() {
@@ -2674,6 +2920,16 @@ export class AtmosphereGlobe {
                 // tracker rebuilds its Points mesh on each add-sats batch,
                 // so we keep `_extraHittable` in sync with the live mesh
                 // instead of appending stale references.
+                // §9.5: nothing at the lens may fill the screen. The shared
+                // tracker's dots are world-sized (0.008 R⊕ ≈ 51 km) and
+                // untextured — uncapped SQUARES — so a camera chasing a
+                // Starlink drew its neighbours as screen-sized tiles. Cap
+                // them and give them the page's disc; the orbit view is
+                // unchanged (they are 1–3 px there, under the ceiling).
+                capPointSize(tracker._dotMat, { maxPx: 6 });
+                tracker._dotMat.map = roundDotTexture();
+                tracker._dotMat.alphaTest = 0.05;
+                tracker._dotMat.needsUpdate = true;
                 this._catalogTracker = tracker;
                 this._extraHittable = this._extraHittable || [];
                 const syncHittable = () => {
@@ -2708,6 +2964,9 @@ export class AtmosphereGlobe {
         if (!t || !hit || hit.object !== t._pointsMesh) return null;
         const sat = t._satellites?.[hit.index];
         if (!sat) return null;
+        // A hidden suite keeps its slots (cheap) but draws them in the
+        // hidden colour — it must not answer the cursor either.
+        if (t._groups?.get?.(sat.group)?.visible === false) return null;
         return {
             kind:   'catalog-point',
             id:     `catalog-${sat.tle?.norad_id ?? hit.index}`,
@@ -4351,7 +4610,10 @@ export class AtmosphereGlobe {
      * mode so callers can sync a UI toggle.
      */
     setCameraMode(mode) {
+        // An explicit mode choice outranks a follow still waiting on its fly-in.
+        this._cancelPendingFollow();
         this._controls.setMode(mode);
+        if (!this._controls.isFollowing?.()) this._followId = null;
         return this._controls.getMode();
     }
     getCameraMode() { return this._controls.getMode(); }
@@ -5090,13 +5352,25 @@ export class AtmosphereGlobe {
             // out of view after the flyTo animation completes. The
             // operator stops following by switching mode (Orbit/Fly
             // button) or by clicking "Stop follow" in the HUD.
+            // A click on the target ALREADY being followed (or flown to) is a
+            // no-op. While following, that target fills much of the frame, so
+            // every click the visitor made to look around landed on it and
+            // re-started the fly-in + lock — the camera could not be escaped
+            // without finding Stop follow (reported 2026-10-04).
             if (ud?.kind === 'sat-probe' && ud.id) {
+                if (this._isFollowTarget('sat', ud.id)) return;
+                this._followId = { kind: 'sat', id: ud.id };
                 this.flyToSatellite(ud.id, 1.6, { follow: true });
             } else if (ud?.kind === 'iss-probe') {
+                if (this._isFollowTarget('sat', 'iss')) return;
                 this.followISS();
             } else if (ud?.kind === 'debris-piece' && Number.isFinite(ud.debrisIdx)) {
+                if (this._isFollowTarget('debris', ud.debrisIdx)) return;
+                this._followId = { kind: 'debris', idx: ud.debrisIdx };
                 this.flyToDebris(ud.debrisIdx, 1.6, { follow: true });
             } else if (ud?.kind === 'catalog-point' && (ud.line1 || ud.noradId)) {
+                // The picked object's own orbit, drawn brighter than its suite's.
+                if (ud.noradId != null) this.setFocusSatellite(ud.noradId);
                 // Click on any live-catalog point → push into the
                 // trajectory analyzer panel. Pass TLE inline if we have
                 // it; analyzer falls back to /api/celestrak/tle?norad=
@@ -5347,11 +5621,16 @@ export class AtmosphereGlobe {
         if (this._shells) this._fadeShellsForCameraAltitude();
 
         // Live-catalog tracker — propagate every loaded sat via Rust
-        // SGP4 WASM. The tracker handles SAB / worker / batch fast-paths
-        // internally; we just feed it wall-clock time.
+        // SGP4 WASM at the SCENE instant. It was fed Date.now() until
+        // 2026-10-04 while the named probes, the sun and the terminator all
+        // read the bus: at 600× or under a scrub the catalogue sat at the
+        // wall-clock instant over a globe drawn hours away — every dot in the
+        // wrong place relative to its own day/night (gated by
+        // tests/upper-atmosphere-satellites.spec.js, with that negative control).
         if (this._catalogTracker?.tick) {
-            this._catalogTracker.tick(Date.now());
+            this._catalogTracker.tick(this._catalogClockMs());
         }
+        if (this._suiteRings) this._stepSuiteRings();
 
         this._controls.update(dtWall);
         // After the controls: while a transit is active it owns the pose,
