@@ -8,6 +8,13 @@
  * panelSpan, payload } — plus a starting orbit, propellant load, space-weather
  * preset, and a curated real-world reference card.
  *
+ * Since the component library landed, each blueprint is also ENGINEERED: its
+ * radiator coverage, array chord and battery were chosen so the bird clears
+ * the engineering review (js/satellite-engineering.js) with zero FAILs at its
+ * own orbit — real satellites close their budgets, so ours must too
+ * (tests/satellite-components.mjs gates it). Everything else rides the bus's
+ * default kit ('auto').
+ *
  * The build is an *approximation*: the designer has a finite parts bay, so we
  * pick the closest bus / propulsion / array / payload and let the honest
  * numbers live in `real`. Loading a blueprint drops its parts into the bay,
@@ -49,7 +56,8 @@ export const BLUEPRINTS = [
     klass: 'LEO broadband',
     icon: '📡',
     build: { body: 'bus_med', thruster: 'hall_ion', thrusterCount: 1,
-             panel: 'rosa', panelSpan: 6, payload: 'sar_radar' },
+             panel: 'rosa', panelSpan: 6, panelChord: 0.65, payload: 'phased_array',
+             radiator: 0.40 },
     fuelKg: 90,
     orbit: { periKm: 550, apoKm: 550 },
     sw: 'nominal',
@@ -70,7 +78,8 @@ export const BLUEPRINTS = [
     klass: 'LEO broadband',
     icon: '🛰',
     build: { body: 'smallsat', thruster: 'gridded_ion', thrusterCount: 1,
-             panel: 'dual', panelSpan: 3.5, payload: 'commsat_dish' },
+             panel: 'dual', panelSpan: 3.5, panelChord: 0.8, payload: 'commsat_dish',
+             battery: 'li_1200', radiator: 0.70 },
     fuelKg: 16,
     orbit: { periKm: 1200, apoKm: 1200 },
     sw: 'nominal',
@@ -91,7 +100,7 @@ export const BLUEPRINTS = [
     klass: 'LEO comms (L-band)',
     icon: '✨',
     build: { body: 'bus_med', thruster: 'monoprop', thrusterCount: 4,
-             panel: 'dual', panelSpan: 3, payload: 'commsat_dish' },
+             panel: 'dual', panelSpan: 3, payload: 'commsat_dish', radiator: 0.10 },
     fuelKg: 130,
     orbit: { periKm: 780, apoKm: 780 },
     sw: 'nominal',
@@ -114,7 +123,7 @@ export const BLUEPRINTS = [
     klass: 'EO · very-high-res optical',
     icon: '🔭',
     build: { body: 'bus_med', thruster: 'monoprop', thrusterCount: 4,
-             panel: 'dual', panelSpan: 2.5, payload: 'optical_cam' },
+             panel: 'dual', panelSpan: 2.5, payload: 'optical_cam', radiator: 0.05 },
     fuelKg: 60,
     orbit: { periKm: 620, apoKm: 620 },
     sw: 'solar_max',
@@ -158,7 +167,7 @@ export const BLUEPRINTS = [
     klass: 'GEO comms (all-electric)',
     icon: '🌍',
     build: { body: 'bus_med', thruster: 'hall_shielded', thrusterCount: 2,
-             panel: 'quad', panelSpan: 6, payload: 'commsat_dish' },
+             panel: 'quad', panelSpan: 6, payload: 'commsat_dish', radiator: 0.20 },
     fuelKg: 220,
     orbit: { periKm: 1200, apoKm: 1200, note: 'Real orbit is GEO (35 786 km); flown here at the sim’s 1200 km ceiling.' },
     sw: 'nominal',
@@ -181,7 +190,8 @@ export const BLUEPRINTS = [
     klass: 'LEO direct-to-cell',
     icon: '📶',
     build: { body: 'bus_med', thruster: 'hall_ion', thrusterCount: 1,
-             panel: 'large', panelSpan: 6, payload: 'sar_radar' },
+             panel: 'large', panelSpan: 6, panelChord: 0.8, payload: 'phased_array',
+             radiator: 0.40 },
     fuelKg: 80,
     orbit: { periKm: 700, apoKm: 700 },
     sw: 'solar_max',
@@ -204,7 +214,8 @@ export const BLUEPRINTS = [
     klass: 'CubeSat · iodine electric',
     icon: '🧊',
     build: { body: 'cubesat_12u', thruster: 'iodine_ion', thrusterCount: 1,
-             panel: 'dual', panelSpan: 1.5, payload: 'optical_cam' },
+             panel: 'dual', panelSpan: 1.5, panelChord: 0.55, payload: 'optical_cam',
+             finish: 'white_paint' },
     fuelKg: 1.2,
     orbit: { periKm: 500, apoKm: 500 },
     sw: 'nominal',
@@ -227,8 +238,10 @@ export const BLUEPRINTS = [
     klass: 'GEO life-extension servicer',
     icon: '🤝',
     build: { body: 'tug', thruster: 'biprop', thrusterCount: 2,
-             panel: 'quad', panelSpan: 5, payload: 'none' },
-    fuelKg: 500,
+             panel: 'quad', panelSpan: 5, payload: 'none', radiator: 0.05 },
+    // Real MEV-1 is a 2.3 t vehicle; the sim's tug bus holds ~300 kg of
+    // storable biprop in four Ø0.52 m tanks, so that is what it flies.
+    fuelKg: 300,
     orbit: { periKm: 1200, apoKm: 1200, note: 'Docks clients in GEO (35 786 km); flown here at the sim’s 1200 km ceiling.' },
     sw: 'nominal',
     multidirectional: true,
@@ -248,7 +261,7 @@ export const BLUEPRINTS = [
     klass: 'Last-mile orbital tug',
     icon: '🚚',
     build: { body: 'tug', thruster: 'biprop', thrusterCount: 1,
-             panel: 'dual', panelSpan: 2, payload: 'none' },
+             panel: 'dual', panelSpan: 2, payload: 'none', radiator: 0.05 },
     fuelKg: 200,
     orbit: { periKm: 400, apoKm: 700 },
     sw: 'solar_max',
@@ -263,6 +276,12 @@ export const BLUEPRINTS = [
   },
 ];
 
+/** The full bay build for a blueprint (parts + its propellant load). */
+export function blueprintBuild(bp) {
+  const b = typeof bp === 'string' ? findBlueprint(bp) : bp;
+  return b ? { ...b.build, fuelKg: b.fuelKg ?? 0 } : null;
+}
+
 /** Look up a blueprint by id. Returns undefined if not found. */
 export function findBlueprint(id) {
   return BLUEPRINTS.find(b => b.id === id);
@@ -276,7 +295,7 @@ export function findBlueprint(id) {
 export function blueprintDesign(bp) {
   const b = typeof bp === 'string' ? findBlueprint(bp) : bp;
   if (!b) return null;
-  return deriveDesign(b.build, ENGINE_PRESETS);
+  return deriveDesign(blueprintBuild(b), ENGINE_PRESETS);
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
