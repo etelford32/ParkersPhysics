@@ -367,15 +367,124 @@ select option{background:#0a1024}
 .advanced summary::-webkit-details-marker{color:var(--c-text-3)}
 
 /* ─── Inline 3-D build view + part chips ───────────────── */
-.bay-view{position:relative;height:230px;border-radius:var(--r-lg);
+.bay-view{position:relative;height:380px;border-radius:var(--r-lg);
   overflow:hidden;border:1px solid var(--c-accent-border);
   background:radial-gradient(120% 100% at 50% 30%,#0a1733,#02030a)}
-#bay-canvas{display:block;width:100%;height:100%}
-.bay-spec{position:absolute;left:9px;right:9px;bottom:9px;
-  display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
-  background:rgba(255,255,255,.07);border-radius:var(--r-md);overflow:hidden;
-  pointer-events:none}
+@media (max-width:640px){ .bay-view{height:300px} }
+#bay-canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+#bay-canvas.pick{cursor:pointer}
+.bay-spec{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:8px;
+  background:rgba(255,255,255,.07);border-radius:var(--r-md);overflow:hidden}
 .bay-spec .metric{padding:5px 7px}
+@media (max-width:640px){ .bay-spec{grid-template-columns:repeat(2,1fr)} }
+/* Bay toolbar — view modes + camera, floating over the canvas. */
+.bay-tools{position:absolute;top:8px;right:8px;display:flex;gap:6px;flex-wrap:wrap;
+  justify-content:flex-end;max-width:calc(100% - 16px)}
+.seg{display:inline-flex;border:1px solid var(--c-accent-border);border-radius:var(--r-md);
+  overflow:hidden;background:rgba(4,8,18,.72);backdrop-filter:blur(6px)}
+.seg button,.ico-btn{appearance:none;border:0;background:transparent;color:var(--c-text-2);
+  font:inherit;font-size:.66rem;font-weight:800;letter-spacing:.03em;padding:6px 9px;cursor:pointer;
+  min-height:30px}
+.seg button+button{border-left:1px solid rgba(255,255,255,.08)}
+.seg button:hover,.ico-btn:hover{color:#fff;background:rgba(var(--c-accent-rgb),.14)}
+.seg button.on,.ico-btn[aria-pressed="true"]{color:#fff;background:rgba(var(--c-accent-rgb),.28)}
+.ico-btn{border:1px solid var(--c-accent-border);border-radius:var(--r-md);
+  background:rgba(4,8,18,.72);min-width:32px}
+.bay-hint{position:absolute;top:9px;left:9px;font-size:.6rem;
+  color:var(--c-text-3);background:rgba(4,8,18,.6);padding:4px 9px;
+  border-radius:999px;pointer-events:none}
+@media (max-width:640px){ .bay-hint{display:none} }
+.bay-tip{position:absolute;pointer-events:none;z-index:4;font-size:.64rem;font-weight:700;
+  color:#fff;background:rgba(4,8,18,.9);border:1px solid var(--c-accent-border-hi);
+  padding:4px 8px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-130%)}
+.bay-tip small{color:var(--c-text-3);font-weight:600;margin-left:5px}
+.bay-legend{position:absolute;left:8px;bottom:8px;display:flex;flex-wrap:wrap;gap:4px 9px;
+  max-width:60%;padding:6px 9px;border-radius:var(--r-md);background:rgba(4,8,18,.78);
+  font-size:.6rem;color:var(--c-text-2);font-weight:700}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.bay-inspect{position:absolute;right:8px;bottom:8px;width:min(260px,calc(100% - 16px));
+  max-height:calc(100% - 56px);overflow:auto;padding:9px 10px;border-radius:var(--r-lg);
+  background:rgba(4,8,18,.92);border:1px solid var(--c-accent-border-hi);box-shadow:var(--shadow);
+  font-size:.68rem;color:var(--c-text-2);z-index:3}
+.bay-legend[hidden],.bay-tip[hidden],.bay-inspect[hidden]{display:none}  /* author display beats the UA [hidden] rule */
+.bay-inspect h3{font-size:.8rem;color:#fff;font-weight:800;margin:0 18px 3px 0;line-height:1.2}
+.bay-inspect .ins-sub{font-size:.6rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--c-text-3)}
+.bay-inspect dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin-top:7px}
+.bay-inspect dt{color:var(--c-text-3)}
+.bay-inspect dd{color:var(--c-text);font-variant-numeric:tabular-nums;text-align:right}
+.bay-inspect .ins-x{position:absolute;top:5px;right:6px;appearance:none;border:0;background:none;
+  color:var(--c-text-3);font-size:.9rem;cursor:pointer;padding:2px 5px}
+.bay-inspect .ins-x:hover{color:#fff}
+.bay-inspect .ins-act{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+.bay-inspect select{padding:4px 6px;font-size:.66rem;width:auto;flex:1}
+.bay-inspect .ins-warn{margin-top:6px;color:var(--c-bad);font-weight:700}
+@media (max-width:640px){ .bay-inspect{left:8px;right:8px;width:auto;max-height:55%} .bay-legend{display:none} }
+/* Tabs (subsystems + review). */
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:9px;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:7px}
+.tabs button{appearance:none;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);
+  color:var(--c-text-2);font:inherit;font-size:.66rem;font-weight:800;padding:5px 9px;border-radius:999px;cursor:pointer}
+.tabs button:hover{color:#fff;border-color:var(--c-accent-border-hi)}
+.tabs button.on{color:#fff;background:rgba(var(--c-accent-rgb),.24);border-color:var(--c-accent-border-hi)}
+.tabs button .cnt{margin-left:4px;font-size:.58rem;padding:0 5px;border-radius:999px;background:rgba(255,255,255,.12)}
+.tabpane[hidden]{display:none}
+.ss-note{font-size:.64rem;color:var(--c-text-3);margin-top:6px;line-height:1.45}
+.ss-note b{color:var(--c-text)}
+.face-row{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+.face-row .opt{min-width:0}
+.stepper{display:inline-flex;align-items:center;gap:6px}
+.stepper button{appearance:none;width:26px;height:26px;border-radius:6px;border:1px solid var(--c-accent-border);
+  background:rgba(var(--c-accent-rgb),.1);color:#fff;font-weight:800;cursor:pointer}
+.stepper button:disabled{opacity:.35;cursor:not-allowed}
+.lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:5px}
+.lib-item{appearance:none;text-align:left;border:1px solid rgba(255,255,255,.12);border-radius:var(--r-md);
+  background:rgba(255,255,255,.03);color:var(--c-text);font:inherit;font-size:.66rem;font-weight:700;
+  padding:6px 8px;cursor:pointer;line-height:1.25}
+.lib-item:hover{border-color:var(--c-accent-border-hi);background:rgba(var(--c-accent-rgb),.12)}
+.lib-item small{display:block;color:var(--c-text-3);font-weight:600;font-size:.58rem;margin-top:2px}
+.lib-item .plus{float:right;color:var(--c-accent);font-weight:900}
+.inst-list{display:flex;flex-direction:column;gap:4px;margin-top:6px;max-height:260px;overflow:auto}
+.inst{display:grid;grid-template-columns:auto 1fr auto auto;gap:7px;align-items:center;padding:5px 7px;
+  border:1px solid rgba(255,255,255,.08);border-radius:var(--r-md);background:rgba(255,255,255,.02);
+  font-size:.66rem;cursor:pointer}
+.inst:hover,.inst.sel{border-color:var(--c-accent-border-hi);background:rgba(var(--c-accent-rgb),.10)}
+.inst.bad{border-color:rgba(255,107,125,.5)}
+.inst select{padding:3px 5px;font-size:.62rem;width:auto}
+.inst .rm{appearance:none;border:0;background:none;color:var(--c-text-3);cursor:pointer;font-size:.85rem;padding:0 4px}
+.inst .rm:hover{color:var(--c-bad)}
+/* Engineering review. */
+.rv-summary{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.rv-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;
+  font-size:.66rem;font-weight:800;border:1px solid rgba(255,255,255,.14);color:var(--c-text)}
+.rv-chip.pass{border-color:rgba(95,227,154,.45)} .rv-chip.pass i{color:var(--c-good)}
+.rv-chip.warn{border-color:rgba(255,176,102,.5)} .rv-chip.warn i{color:var(--c-warn)}
+.rv-chip.fail{border-color:rgba(255,107,125,.55)} .rv-chip.fail i{color:var(--c-bad)}
+.rv-chip i{font-style:normal}
+.chk{display:grid;grid-template-columns:20px 1fr;gap:2px 7px;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,.05);font-size:.68rem}
+.chk:last-child{border-bottom:0}
+.chk .ic{font-weight:900;text-align:center;line-height:1.3}
+.chk.pass .ic{color:var(--c-good)} .chk.warn .ic{color:var(--c-warn)} .chk.fail .ic{color:var(--c-bad)}
+.chk .t{color:var(--c-text);font-weight:800}
+.chk .t small{color:var(--c-text-3);font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:.55rem;margin-left:6px}
+.chk .d{grid-column:2;color:var(--c-text-2);line-height:1.45}
+.chk.link{cursor:pointer} .chk.link:hover .t{color:var(--c-accent)}
+.stack{display:flex;gap:2px;height:16px;margin:4px 0 8px;background:var(--c-surface-2)}
+.stack span{display:block;height:100%;min-width:2px}
+.stack span:first-child{border-radius:4px 0 0 4px} .stack span:last-child{border-radius:0 4px 4px 0}
+.leg{display:grid;grid-template-columns:1fr auto auto;gap:3px 10px;font-size:.66rem;color:var(--c-text-2)}
+.leg b{color:var(--c-text);text-align:right;font-variant-numeric:tabular-nums}
+.leg em{font-style:normal;color:var(--c-text-3);text-align:right;font-variant-numeric:tabular-nums}
+.rv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:rgba(255,255,255,.07);
+  border-radius:var(--r-md);overflow:hidden;margin-bottom:8px}
+@media (max-width:640px){ .rv-grid{grid-template-columns:repeat(2,1fr)} }
+.rv-table{width:100%;border-collapse:collapse;font-size:.64rem;margin-top:4px}
+.rv-table th{text-align:left;color:var(--c-text-3);font-weight:800;letter-spacing:.05em;text-transform:uppercase;font-size:.56rem;padding:4px 5px;border-bottom:1px solid rgba(255,255,255,.1)}
+.rv-table td{padding:4px 5px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--c-text);font-variant-numeric:tabular-nums}
+.rv-table td.num,.rv-table th.num{text-align:right}
+.rv-table tr.click{cursor:pointer} .rv-table tr.click:hover td{background:rgba(var(--c-accent-rgb),.08)}
+.rv-foot{font-size:.6rem;color:var(--c-text-3);margin-top:7px;line-height:1.45}
+.gauge{position:relative;height:10px;border-radius:5px;background:rgba(255,255,255,.08);margin:6px 0 2px;overflow:hidden}
+.gauge i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--c-accent)}
+.gauge.warn i{background:var(--c-warn)} .gauge.bad i{background:var(--c-bad)} .gauge.good i{background:var(--c-good)}
 .bay-hint{position:absolute;top:9px;left:9px;font-size:.6rem;
   color:var(--c-text-3);background:rgba(4,8,18,.6);padding:4px 9px;
   border-radius:999px;pointer-events:none}
@@ -817,20 +926,34 @@ select option{background:#0a1024}
       <div class="bp-detail" id="bp-detail" hidden></div>
     </div>
 
-    <div class="panel" style="padding:9px">
-      <div class="bay-view">
-        <canvas id="bay-canvas"></canvas>
-        <div class="bay-hint">drag to orbit · scroll to zoom</div>
-        <div class="bay-loading" id="bay-loading">Loading 3D engine…</div>
-        <div class="bay-spec">
-          <div class="metric"><div class="k">Dry mass</div><div class="v" id="bs-mass">—</div></div>
-          <div class="metric"><div class="k">Ram area</div><div class="v" id="bs-area">—</div></div>
-          <div class="metric"><div class="k">Drag C<sub>d</sub></div><div class="v" id="bs-cd">—</div></div>
-          <div class="metric"><div class="k">Thrust</div><div class="v" id="bs-thr">—</div></div>
-          <div class="metric"><div class="k">Array power</div><div class="v" id="bs-pwr">—</div></div>
-          <div class="metric" id="bs-margin-m"><div class="k">Pwr margin</div><div class="v" id="bs-margin">—</div></div>
-          <div class="metric" id="bs-rcs-m"><div class="k">RCS</div><div class="v" id="bs-rcs">—</div></div>
+    <div class="panel bay-panel" style="padding:9px">
+      <div class="bay-view" id="bay-view">
+        <canvas id="bay-canvas" aria-label="3-D design bay — click a part to inspect it"></canvas>
+        <div class="bay-hint">drag to orbit · scroll to zoom · click a part</div>
+        <div class="bay-tools" role="toolbar" aria-label="Design view">
+          <div class="seg" id="bay-views" role="group" aria-label="View mode">
+            <button type="button" data-view="real" class="on" title="Flight hardware as built">Real</button>
+            <button type="button" data-view="subsystem" title="Colour every part by subsystem">Subsystems</button>
+            <button type="button" data-view="xray" title="See through the skin to the internals">X-ray</button>
+          </div>
+          <button type="button" class="ico-btn" id="bay-explode" aria-pressed="false" title="Exploded view">✳ Explode</button>
+          <button type="button" class="ico-btn" id="bay-spin" aria-pressed="true" title="Auto-rotate">⟳</button>
+          <button type="button" class="ico-btn" id="bay-fit" title="Frame the whole spacecraft">⤢</button>
         </div>
+        <div class="bay-legend" id="bay-legend" hidden></div>
+        <div class="bay-tip" id="bay-tip" hidden></div>
+        <div class="bay-inspect" id="bay-inspect" hidden></div>
+        <div class="bay-loading" id="bay-loading">Loading 3D engine…</div>
+      </div>
+      <div class="bay-spec">
+        <div class="metric"><div class="k">Dry mass</div><div class="v" id="bs-mass">—</div></div>
+        <div class="metric"><div class="k">Ram area</div><div class="v" id="bs-area">—</div></div>
+        <div class="metric"><div class="k">Drag C<sub>d</sub></div><div class="v" id="bs-cd">—</div></div>
+        <div class="metric"><div class="k">Thrust</div><div class="v" id="bs-thr">—</div></div>
+        <div class="metric"><div class="k">Array power</div><div class="v" id="bs-pwr">—</div></div>
+        <div class="metric" id="bs-margin-m"><div class="k">Pwr margin</div><div class="v" id="bs-margin">—</div></div>
+        <div class="metric" id="bs-rcs-m"><div class="k">RCS</div><div class="v" id="bs-rcs">—</div></div>
+        <div class="metric" id="bs-review-m"><div class="k">Review</div><div class="v" id="bs-review">—</div></div>
       </div>
     </div>
 
@@ -848,7 +971,9 @@ select option{background:#0a1024}
       <div class="part-row">
         <div class="part-row-hd"><span>☀ Solar arrays</span><span><b id="bay-span-v">2.2</b><small>m wing</small></span></div>
         <div class="opt-row big" id="bay-panel"></div>
-        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2" class="row-slider">
+        <input type="range" id="bay-span" min="0.5" max="6" step="0.1" value="2.2" class="row-slider" aria-label="Wing span">
+        <div class="part-row-hd" style="margin-top:6px"><span class="hint-tiny">Panel chord (width)</span><span><b id="bay-chord-v">0.45</b><small>m</small></span></div>
+        <input type="range" id="bay-chord" min="0.2" max="2.5" step="0.05" value="0.45" class="row-slider" aria-label="Panel chord">
       </div>
       <div class="part-row">
         <div class="part-row-hd"><span>📦 Payload</span><span class="hint-tiny" id="payload-tip">—</span></div>
@@ -858,6 +983,77 @@ select option{background:#0a1024}
         <div class="part-row-hd"><span>⛽ Propellant</span><span><b id="v-fuel">60</b><small>kg</small></span></div>
         <input type="range" id="f-fuel" min="0" max="1000" step="5" value="60" class="row-slider">
       </div>
+    </div>
+
+    <div class="panel subsys-panel" id="ss-panel">
+      <h2>🧩 Subsystems <span class="sub">every unit has mass, power and a place in the bus</span></h2>
+      <div class="tabs" id="ss-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="power" class="on">⚡ Power</button>
+        <button type="button" role="tab" data-tab="prop">⛽ Propulsion</button>
+        <button type="button" role="tab" data-tab="adcs">🧭 Attitude</button>
+        <button type="button" role="tab" data-tab="comms">📡 Comms &amp; sensors</button>
+        <button type="button" role="tab" data-tab="thermal">🌡 Thermal</button>
+        <button type="button" role="tab" data-tab="avionics">🖥 Avionics</button>
+      </div>
+      <div class="tabpane" data-pane="power">
+        <div class="part-row"><div class="part-row-hd"><span>🔋 Battery</span><span class="hint-tiny" id="ss-battery-tip">—</span></div>
+          <div class="opt-row big" id="ss-battery"></div></div>
+        <div class="part-row"><div class="part-row-hd"><span>▦ Body-mounted cells</span><span class="hint-tiny">faces wrapped in solar cells</span></div>
+          <div class="face-row" id="ss-cells"></div></div>
+        <p class="ss-note" id="ss-power-note">—</p>
+      </div>
+      <div class="tabpane" data-pane="prop" hidden>
+        <div class="part-row"><div class="part-row-hd"><span>🛢 Propellant tanks</span>
+            <span class="stepper"><button type="button" id="ss-tank-minus" aria-label="Fewer tanks">−</button><b id="ss-tank-n">1</b><button type="button" id="ss-tank-plus" aria-label="More tanks">+</button></span></div>
+          <div class="opt-row big" id="ss-tank"></div>
+          <p class="ss-note" id="ss-tank-note">—</p></div>
+        <div class="part-row"><div class="part-row-hd"><span>⊕ Reaction control</span><span class="hint-tiny" id="ss-rcs-tip">—</span></div>
+          <div class="opt-row big" id="ss-rcs"></div></div>
+      </div>
+      <div class="tabpane" data-pane="adcs" hidden>
+        <div class="part-row"><div class="part-row-hd"><span>🧭 Attitude actuators</span><span class="hint-tiny" id="ss-adcs-tip">—</span></div>
+          <div class="opt-row big" id="ss-adcs"></div></div>
+        <p class="ss-note" id="ss-adcs-note">—</p>
+        <p class="ss-note">Star trackers, sun sensors and magnetometers mount on the outside — add them under <b>Comms &amp; sensors</b>.</p>
+      </div>
+      <div class="tabpane" data-pane="comms" hidden>
+        <div class="part-row-hd"><span>➕ Add a component</span>
+          <label class="hint-tiny">mount on <select id="ss-face" style="width:auto;padding:3px 6px;font-size:.64rem"></select></label></div>
+        <div class="lib-grid" id="ss-lib"></div>
+        <div class="part-row-hd" style="margin-top:10px"><span>📋 Installed (<span id="ss-inst-n">0</span>)</span>
+          <button type="button" class="btn sm" id="ss-kit-reset" title="Restore the bus's standard kit">↺ Bus default kit</button></div>
+        <div class="inst-list" id="ss-installed"></div>
+      </div>
+      <div class="tabpane" data-pane="thermal" hidden>
+        <div class="part-row"><div class="part-row-hd"><span>🧥 Skin finish</span><span class="hint-tiny" id="ss-finish-tip">—</span></div>
+          <div class="opt-row big" id="ss-finish"></div></div>
+        <div class="part-row"><div class="part-row-hd"><span>▤ Radiator coverage (±Y)</span><span><b id="ss-rad-v">30</b><small>%</small></span></div>
+          <input type="range" id="ss-rad" min="0" max="100" step="1" value="30" class="row-slider" aria-label="Radiator coverage">
+          <div class="btn-row" style="margin-top:6px"><button type="button" class="btn sm" id="ss-rad-auto">Bus default</button>
+            <button type="button" class="btn sm" id="ss-rad-rec" hidden>Use recommended</button></div></div>
+        <p class="ss-note" id="ss-thermal-note">—</p>
+      </div>
+      <div class="tabpane" data-pane="avionics" hidden>
+        <div class="part-row"><div class="part-row-hd"><span>🖥 Flight computer</span><span class="hint-tiny" id="ss-obc-tip">—</span></div>
+          <div class="opt-row big" id="ss-obc"></div></div>
+        <p class="ss-note">GNSS receivers mount outside — add one under <b>Comms &amp; sensors</b>.</p>
+      </div>
+    </div>
+
+    <div class="panel review-panel" id="rv-panel">
+      <h2>📐 Engineering review <span class="sub" id="rv-orbit">—</span></h2>
+      <div class="rv-summary" id="rv-summary"></div>
+      <div class="tabs" id="rv-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="checks" class="on">Checks</button>
+        <button type="button" role="tab" data-tab="mass">Mass</button>
+        <button type="button" role="tab" data-tab="power">Power</button>
+        <button type="button" role="tab" data-tab="thermal">Thermal</button>
+        <button type="button" role="tab" data-tab="comms">Comms</button>
+        <button type="button" role="tab" data-tab="adcs">Attitude</button>
+        <button type="button" role="tab" data-tab="prop">Propulsion</button>
+        <button type="button" role="tab" data-tab="bom">Parts list</button>
+      </div>
+      <div id="rv-body" role="tabpanel"></div>
     </div>
 
     <div class="panel">
@@ -1343,6 +1539,10 @@ import { MISSIONS, MISSION_ORDER, assessFloorStatus, BREACH_SCORE_PENALTY_PER_SE
 import * as FORECAST from './js/satellite-designer-forecast.js';
 import * as PROG from './js/satellite-progression.js';
 import * as BP from './js/satellite-blueprints.js';
+import * as PARTS from './js/satellite-parts-3d.js';
+import * as LAYOUT from './js/satellite-layout.js';
+import * as ENGI from './js/satellite-engineering.js';
+import * as COMP from './js/satellite-components.js';
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -1390,6 +1590,9 @@ const sim = {
   prevMissionComplete: null,
 };
 let sdBuild = BUILDER.defaultBuild();
+// Latest engineering review (js/satellite-engineering.js) + its debounce timer.
+// Declared up here because refreshConditions() can schedule one early.
+let REVIEW = null, reviewT = 0;
 // Persistent pilot profile (XP, rank, unlocks) — see js/satellite-progression.js
 let profile = PROG.loadProfile();
 
@@ -1480,6 +1683,7 @@ function refreshConditions() {
   $('d-effarea').innerHTML = fmt(effArea, 2) + ' <small>m²</small>';
   $('d-bc2').innerHTML = fmt(wet / (d.cd * effArea), 1) + ' <small>kg/m²</small>';
   syncSWChips();
+  if (typeof scheduleReview === 'function') scheduleReview();
 }
 function setSWPreset(key) {
   const p = ENG.SPACE_WEATHER_PRESETS[key]; if (!p) return;
@@ -1525,6 +1729,7 @@ $('f-tgt').addEventListener('input', () => { SCENE?.setTargetAlt(+$('f-tgt').val
 // "Starting altitude" controls perigee AND mirrors apogee — unless the user
 // has explicitly opened the elliptical disclosure to tune them apart.
 $('f-peri').addEventListener('input', () => {
+  scheduleReview();
   const ellOpen = $('f-apo').closest('details')?.open;
   if (!ellOpen) { $('f-apo').value = $('f-peri').value; $('v-apo').textContent = $('f-peri').value; }
   else if (+$('f-apo').value < +$('f-peri').value) { $('f-apo').value = $('f-peri').value; $('v-apo').textContent = $('f-apo').value; }
@@ -3133,11 +3338,15 @@ function resize() {
 }
 addEventListener('resize', resize);
 
-let lastBuildSig = '';
+let lastBuildSig = '', lastBuildRaw = '';
 function draw() {
   if (!SCENE) return;
   // Push the active build into the scene only when it changes (cheap diff).
-  const sig = JSON.stringify(sdBuild);
+  // geometrySignature() resolves the Auto slots, so only re-run it when the
+  // raw build object actually changed.
+  const raw = JSON.stringify(sdBuild);
+  let sig = lastBuildSig;
+  if (raw !== lastBuildRaw) { lastBuildRaw = raw; sig = BUILDER.geometrySignature(sdBuild); }
   const buildChanged = sig !== lastBuildSig;
   if (buildChanged) lastBuildSig = sig;
 
@@ -3258,8 +3467,11 @@ function applyDesign(dd) {
   if (dd.apoKm != null) { $('f-apo').value = dd.apoKm; $('v-apo').textContent = dd.apoKm; }
   if (dd.targetKm != null) { $('f-tgt').value = dd.targetKm; $('v-tgt').textContent = dd.targetKm; }
   if (dd.build && dd.build.body) {
+    // Legacy saves predate the subsystem slots: defaultBuild() fills them
+    // with 'auto' so the bus's own kit is fitted.
     sdBuild = { ...BUILDER.defaultBuild(), ...dd.build };
-    syncBayUI(); rebuildMesh();
+    sdBuild.fuelKg = +$('f-fuel').value;
+    renderOptChips(); syncBayUI(); rebuildMesh();
   }
   if (dd.env && isFinite(dd.env.f107Sfu)) {
     env.f107Sfu = dd.env.f107Sfu; env.ap = dd.env.ap;
@@ -3357,8 +3569,9 @@ function saveDraft() {
 function loadDraft() {
   try {
     const d = JSON.parse(localStorage.getItem('pp_sd_draft') || 'null');
-    if (d) applyDesign(d);
+    if (d) { applyDesign(d); return true; }
   } catch {}
+  return false;
 }
 
 // ── Auth wiring ─────────────────────────────────────────────────────────────
@@ -3406,8 +3619,13 @@ async function initAuth() {
 $('b-save').addEventListener('click', saveShip);
 
 // ── 3D Design Bay ───────────────────────────────────────────────────────────
-const BAY = { ready: false, three: null, raf: 0,
-  scene: null, camera: null, renderer: null, controls: null, group: null };
+// The bay draws js/satellite-parts-3d.js meshes placed by
+// js/satellite-layout.js, and the Engineering Review panel reads the same
+// layout through js/satellite-engineering.js — one placement, three views.
+const BAY = { ready: false, three: null, raf: 0, envMap: null,
+  scene: null, camera: null, renderer: null, controls: null, group: null,
+  sig: '', extent: 0, view: 'real', explode: false, explodeT: 0,
+  selected: null, hover: null, raycaster: null, down: null, lastHoverT: 0 };
 
 // Iconography for the parts chips. Picked to read at a glance: cube
 // shapes for buses, a flame/leaf for chemical-vs-electric thrusters, sun
@@ -3421,7 +3639,7 @@ const PART_ICONS = {
               iodine_ion: '🟣', electrospray: '💧', water_resisto: '💦' },
   panel: { none: '⬛', dual: '☀', quad: '🔆', large: '🌞', rosa: '📜', thinfilm: '🪶' },
   payload: { none: '➖', optical_cam: '📷', wide_imager: '🎥',
-             commsat_dish: '📡', sar_radar: '🛰', mass_driver: '🧨' },
+             commsat_dish: '📡', sar_radar: '🛰', phased_array: '📶', mass_driver: '🧨' },
 };
 // Render a single part chip. The tier badge is appended for non-Mk-I parts
 // to advertise upgraded gear. The whole chip is clickable to select; the
@@ -3457,7 +3675,7 @@ function renderOptChips() {
   }).join('');
   $('bay-payload').innerHTML = Object.entries(BUILDER.PAYLOADS).map(([k, v]) => {
     const short = v.label.replace(' camera', '').replace(' (exp.)', '')
-                          .replace('Comms HG ', '').replace(' phased array', '');
+                          .replace('Comms HG ', '').replace(' phased array', '').replace('Comms ', '');
     return chip('payload', { key: k, name: short, full: v.label },
       v.mass > 0 ? `${v.mass}kg · ${v.powerW}W` : 'none',
       k === sdBuild.payload, PART_ICONS.payload[k], tT('payload', k));
@@ -3466,19 +3684,22 @@ function renderOptChips() {
   const plKey = sdBuild.payload || 'none';
   const pl = BUILDER.PAYLOADS[plKey];
   $('payload-tip').textContent = pl
-    ? `${pl.label} — ${pl.mass}kg · ${pl.area}m² · ${pl.powerW}W`
+    ? `${pl.label} — ${pl.mass}kg · ${pl.area}m² · ${pl.powerW}W${pl.role === 'comms' ? ' · comms relay' : pl.dataGBd ? ` · ${pl.dataGBd} GB/day` : ''}`
     : '';
 }
 function syncBayUI() {
-  const tc = $('bay-tc'), sp = $('bay-span');
+  const tc = $('bay-tc'), sp = $('bay-span'), ch = $('bay-chord');
   if (tc) { tc.value = sdBuild.thrusterCount; $('bay-tc-v').textContent = sdBuild.thrusterCount; }
   if (sp) { sp.value = sdBuild.panelSpan; $('bay-span-v').textContent = (+sdBuild.panelSpan).toFixed(1); }
+  const chord = sdBuild.panelChord ?? BUILDER.CHORD_DEFAULT;
+  if (ch) { ch.value = chord; $('bay-chord-v').textContent = (+chord).toFixed(2); }
   for (const [grp, key] of [['bay-body', 'body'], ['bay-thruster', 'thruster'],
                             ['bay-panel', 'panel'], ['bay-payload', 'payload']]) {
     const box = $(grp); if (!box) continue;
     box.querySelectorAll('.opt').forEach(o =>
       o.classList.toggle('active', o.dataset.v === sdBuild[key]));
   }
+  renderSubsystems();
 }
 // Build the per-slot tierMods object the builder expects, from the active
 // profile's persistent partTiers map. Each chip's modifiers are computed
@@ -3514,28 +3735,72 @@ function refreshBaySpec() {
     if (d.rcs) rcsM.classList.add('flag-good'); }
   return d;
 }
-function disposeGroup(grp) {
-  grp?.traverse?.(o => {
-    if (o.isMesh) { o.geometry?.dispose?.();
-      (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose?.()); }
-  });
+
+// ── Engineering review (debounced; density memoised per space weather) ────
+const RHO_MEMO = new Map();
+function rhoAtKm(h) {
+  const k = `${env.f107Sfu}|${env.ap}|${Math.round(h * 2)}`;
+  let v = RHO_MEMO.get(k);
+  if (v === undefined) {
+    if (RHO_MEMO.size > 6000) RHO_MEMO.clear();
+    v = ENG.airDensity(Math.round(h * 2) / 2 * 1000, env);
+    RHO_MEMO.set(k, v);
+  }
+  return v;
 }
-function fitBayCamera() {
-  if (!BAY.ready) return;
-  const E = BUILDER.buildExtent(sdBuild);
-  const dist = (E / 2) / Math.tan((45 * Math.PI / 180) / 2) * 1.55;
-  BAY.camera.position.set(dist * 0.62, dist * 0.42, dist * 0.78);
-  BAY.camera.near = E / 100; BAY.camera.far = E * 40;
+function computeReview() {
+  REVIEW = ENGI.reviewDesign(sdBuild, { presets: ENG.ENGINE_PRESETS, tierMods: activeTierMods(),
+                                        altKm: +$('f-peri').value, rhoAt: rhoAtKm });
+  return REVIEW;
+}
+function scheduleReview() {
+  clearTimeout(reviewT);
+  reviewT = setTimeout(() => {
+    try { computeReview(); renderReview(); renderSubsystemNotes(); renderInspector(); }
+    catch (e) { console.warn('[SD] review failed', e); }
+  }, 90);
+}
+
+// ── Bay camera / rendering ──────────────────────────────────────────────────
+function fitBayCamera(reframe = true) {
+  if (!BAY.ready || !BAY.group) return;
+  const lay = BAY.group.userData.layout;
+  const E = Math.max(0.3, lay.extent);
+  const c = [0, 1, 2].map(k => (lay.bbox.min[k] + lay.bbox.max[k]) / 2);
+  const dist = (E / 2) / Math.tan((45 * Math.PI / 180) / 2) * 0.72;
+  const T = BAY.three;
+  const dir = reframe ? new T.Vector3(0.62, 0.42, 0.62).normalize()
+                      : BAY.camera.position.clone().sub(BAY.controls.target).normalize();
+  BAY.controls.target.set(c[0], c[1], c[2]);
+  BAY.camera.position.copy(BAY.controls.target).addScaledVector(dir, dist);
+  BAY.camera.near = E / 200; BAY.camera.far = E * 60;
+  BAY.controls.minDistance = E * 0.08; BAY.controls.maxDistance = E * 8;
   BAY.camera.updateProjectionMatrix();
-  BAY.controls.target.set(0, 0, 0); BAY.controls.update();
+  BAY.controls.update();
+  BAY.extent = E;
 }
-function rebuildMesh() {
+function rebuildMesh(force = false) {
   refreshBaySpec();
+  scheduleReview();
   if (!BAY.ready) return;
-  if (BAY.group) { BAY.scene.remove(BAY.group); disposeGroup(BAY.group); }
-  BAY.group = BUILDER.buildGroup(BAY.three, sdBuild);
+  const sig = BUILDER.geometrySignature(sdBuild);
+  if (!force && sig === BAY.sig) { renderInspector(); return; }
+  const prevBody = BAY.group?.userData.layout.rb.body;
+  BAY.sig = sig;
+  if (BAY.group) { BAY.scene.remove(BAY.group); PARTS.disposeSatellite(BAY.group); }
+  BAY.group = PARTS.buildSatellite(BAY.three, sdBuild, { envMap: BAY.envMap, tierMods: activeTierMods() });
   BAY.scene.add(BAY.group);
-  fitBayCamera();
+  PARTS.setViewMode(BAY.group, BAY.view);
+  PARTS.setExplode(BAY.group, BAY.explodeT);
+  if (BAY.selected && !BAY.group.userData.parts.has(BAY.selected)) BAY.selected = null;
+  BAY.hover = null;
+  PARTS.setHighlight(BAY.group, BAY.selected, null);
+  // Re-frame on the first build or a new bus; otherwise keep the user's
+  // viewing angle and only re-fit if the craft grew or shrank noticeably.
+  const E = BAY.group.userData.extent;
+  if (!prevBody || prevBody !== BAY.group.userData.layout.rb.body) fitBayCamera(true);
+  else if (Math.abs(E - BAY.extent) / Math.max(BAY.extent, 1e-6) > 0.2) fitBayCamera(false);
+  renderLegend(); renderInspector();
 }
 async function ensureThree() {
   if (BAY.ready) return true;
@@ -3546,16 +3811,23 @@ async function ensureThree() {
     const cv = $('bay-canvas');
     BAY.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true });
     BAY.renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    BAY.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    BAY.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    BAY.renderer.toneMappingExposure = 1.15;
     BAY.scene = new THREE.Scene();
     BAY.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
-    BAY.scene.add(new THREE.AmbientLight(0x4a5566, 1.05));
-    const key = new THREE.DirectionalLight(0xffffff, 1.25); key.position.set(3, 4, 5);
-    const rim = new THREE.DirectionalLight(0x5577ff, 0.4); rim.position.set(-4, -2, -3);
+    BAY.camera.up.set(0, 0, 1);              // +Z = payload deck up — must precede the controls
+    BAY.envMap = PARTS.studioEnvironment(THREE, BAY.renderer);
+    BAY.scene.add(new THREE.HemisphereLight(0x8fb4ff, 0x1a2230, 0.55));
+    const key = new THREE.DirectionalLight(0xfff2e0, 2.4); key.position.set(4, 3, 5);
+    const rim = new THREE.DirectionalLight(0x6688cc, 0.5); rim.position.set(-4, -2, -3);
     BAY.scene.add(key, rim);
     BAY.controls = new OrbitControls(BAY.camera, cv);
     BAY.controls.enableDamping = true; BAY.controls.dampingFactor = 0.08;
-    BAY.controls.autoRotate = true; BAY.controls.autoRotateSpeed = 1.1;
-    BAY.controls.addEventListener('start', () => { BAY.controls.autoRotate = false; });
+    BAY.controls.autoRotate = true; BAY.controls.autoRotateSpeed = 0.9;
+    BAY.controls.addEventListener('start', () => setSpin(false));
+    BAY.raycaster = new THREE.Raycaster();
+    wireBayPicking(cv);
     BAY.ready = true;
     $('bay-loading').style.display = 'none';
     return true;
@@ -3574,17 +3846,495 @@ function resizeBay() {
   BAY.camera.aspect = r.width / r.height;
   BAY.camera.updateProjectionMatrix();
 }
+let bayVisible = true;
 function bayLoop() {
   BAY.raf = requestAnimationFrame(bayLoop);
-  if (BAY.ready) { BAY.controls.update(); BAY.renderer.render(BAY.scene, BAY.camera); }
+  if (!BAY.ready || !bayVisible) return;
+  const want = BAY.explode ? 1 : 0;
+  if (BAY.group && Math.abs(BAY.explodeT - want) > 1e-3) {
+    BAY.explodeT += (want - BAY.explodeT) * 0.12;
+    if (Math.abs(BAY.explodeT - want) < 2e-3) BAY.explodeT = want;
+    PARTS.setExplode(BAY.group, BAY.explodeT);
+  }
+  BAY.controls.update(); BAY.renderer.render(BAY.scene, BAY.camera);
 }
+// Don't render the bay while it is scrolled out of view (the mission stage
+// and the bay would otherwise share one GPU budget every frame).
+try {
+  new IntersectionObserver((es) => { bayVisible = es.some(e => e.isIntersecting); })
+    .observe($('bay-view'));
+} catch { /* old browser: always render */ }
 // The build view is now permanently inline — initialise once at boot and
 // keep rendering. No modal to open/close.
 async function initBay() {
   renderOptChips(); syncBayUI(); refreshBaySpec(); renderBlueprints();
+  scheduleReview();
   const ok = await ensureThree();
-  if (ok) { resizeBay(); rebuildMesh(); }
+  if (ok) { resizeBay(); rebuildMesh(true); }
   cancelAnimationFrame(BAY.raf); bayLoop();
+}
+
+// ── Picking, hover and the part inspector ───────────────────────────────────
+function pickAtEvent(e) {
+  if (!BAY.group) return null;
+  const cv = $('bay-canvas'), r = cv.getBoundingClientRect();
+  const v = new BAY.three.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  BAY.raycaster.setFromCamera(v, BAY.camera);
+  const hits = BAY.raycaster.intersectObject(BAY.group, true);
+  return PARTS.pickPart(BAY.group, hits);
+}
+function wireBayPicking(cv) {
+  // A click is a press that neither wandered (>5 px) nor lingered (>600 ms):
+  // anything else belongs to the orbit camera. event.timeStamp, not
+  // performance.now() — a busy frame delays the handler, not the event.
+  cv.addEventListener('pointerdown', (e) => { BAY.down = { x: e.clientX, y: e.clientY, t: e.timeStamp }; });
+  cv.addEventListener('pointerup', (e) => {
+    const d = BAY.down; BAY.down = null;
+    if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5 || e.timeStamp - d.t > 600) return;
+    selectPart(pickAtEvent(e));
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (e.buttons || e.pointerType === 'touch') return;
+    if (e.timeStamp - BAY.lastHoverT < 50) return;
+    BAY.lastHoverT = e.timeStamp;
+    const id = pickAtEvent(e);
+    setHover(id, e);
+  });
+  cv.addEventListener('pointerleave', () => setHover(null));
+}
+function partOf(id) { return BAY.group?.userData.parts.get(id)?.userData.part || null; }
+function setHover(id, e) {
+  const tip = $('bay-tip');
+  if (id !== BAY.hover) {
+    BAY.hover = id;
+    if (BAY.group) PARTS.setHighlight(BAY.group, BAY.selected, id);
+    $('bay-canvas').classList.toggle('pick', !!id);
+  }
+  const p = id && partOf(id);
+  if (!p || !e) { tip.hidden = true; return; }
+  const r = $('bay-view').getBoundingClientRect();
+  tip.innerHTML = `${escapeHtml(p.label)}<small>${COMP.SUBSYSTEMS[p.subsystem]?.label || ''}</small>`;
+  tip.style.left = (e.clientX - r.left) + 'px';
+  tip.style.top = (e.clientY - r.top) + 'px';
+  tip.hidden = false;
+}
+function selectPart(id) {
+  BAY.selected = id || null;
+  if (BAY.group) PARTS.setHighlight(BAY.group, BAY.selected, BAY.hover);
+  renderInspector();
+  document.querySelectorAll('#ss-installed .inst').forEach(r =>
+    r.classList.toggle('sel', r.dataset.id === BAY.selected));
+}
+const SLOT_TAB = { battery: 'power', cells: 'power', tank: 'prop', rcs: 'prop', adcs: 'adcs',
+                   obc: 'avionics', radiator: 'thermal', extra: 'comms' };
+function renderInspector() {
+  const box = $('bay-inspect');
+  const p = BAY.selected && partOf(BAY.selected);
+  if (!p) { box.hidden = true; return; }
+  const d = REVIEW?.design;
+  const sub = COMP.SUBSYSTEMS[p.subsystem];
+  const rows = [];
+  const row = (k, v) => rows.push(`<dt>${k}</dt><dd>${v}</dd>`);
+  const sameSlot = BAY.group.userData.layout.parts.filter(q => q.slot === p.slot && q.key === p.key);
+  const massEach = p.mass;
+  if (p.slot === 'bus') {
+    const b = BUILDER.BODIES[p.key];
+    row('Envelope', b.dims.map(v => v.toFixed(2)).join(' × ') + ' m');
+    row('Structure', fmt(p.mass, 1) + ' kg');
+    row('Skin', COMP.FINISHES[BAY.group.userData.layout.rb.finish].label);
+    if (d) row('Ballistic', fmt(d.dryMass / (d.cd * d.area), 1) + ' kg/m²');
+  } else {
+    if (massEach > 0) row(sameSlot.length > 1 ? `Mass (each of ${sameSlot.length})` : 'Mass', fmt(massEach, massEach < 1 ? 2 : 1) + ' kg');
+  }
+  if (p.slot === 'thruster') {
+    const pr = ENG.ENGINE_PRESETS[p.key], tu = BUILDER.THRUSTER_UNITS[p.key];
+    row('Rated thrust', fmt(pr.thrust, pr.thrust < 1 ? 3 : 0) + ' N');
+    row('Isp', pr.isp + ' s');
+    row('Propellant', COMP.propellantFor(p.key).label);
+    if (tu.power) row('Power at rated thrust', fmt(tu.power, 0) + ' W');
+    if (tu.gimbalDeg) row('Gimbal', '±' + tu.gimbalDeg + '°');
+  }
+  if (p.slot === 'panel' && d) {
+    row('Wing', `${p.span.toFixed(1)} × ${p.chord.toFixed(2)} m`);
+    row('Generates', fmt(d.wingPower / BUILDER.PANELS[p.key].wings, 0) + ' W (sunlit)');
+  }
+  if (p.slot === 'payload') {
+    const pl = BUILDER.PAYLOADS[p.key];
+    if (d) row('Power', fmt(d.payloadPower, 0) + ' W');
+    if (pl.dataGBd) row('Data', fmt(pl.dataGBd * (d?.payloadScale ?? 1) ** 2, 0) + ' GB/day');
+    if ((p.scale || 1) < 1) row('Variant', `miniaturised (${fmt(100 * p.scale, 0)} % scale)`);
+  }
+  if (p.slot === 'tank') {
+    row('Capacity', fmt(p.capacityKg, p.capacityKg < 10 ? 2 : 0) + ' kg each');
+    row('Propellant', COMP.propellantFor(BAY.group.userData.layout.rb.thruster).label);
+    if (REVIEW) row('Fill', fmt(100 * REVIEW.prop.fill, 0) + ' %');
+  }
+  if (p.slot === 'battery') {
+    const bt = COMP.BATTERIES[p.key];
+    row('Energy', bt.wh + ' Wh'); row('Specific energy', fmt(bt.wh / bt.mass, 0) + ' Wh/kg');
+    if (REVIEW) row('Depth of discharge', fmt(100 * REVIEW.power.dod, 0) + ' %');
+  }
+  if (p.slot === 'adcs') {
+    const u = COMP.ADCS_UNITS[p.key];
+    row('Momentum', u.hNms ? u.hNms + ' N·m·s' : 'none (no wheels)');
+    row('Torque', u.torque ? ENGI.fmtSci(u.torque) + ' N·m' : '—');
+    row('Dump dipole', u.dipole + ' A·m²'); row('Power', u.powerW + ' W');
+  }
+  if (p.slot === 'obc') { const o = COMP.OBC_UNITS[p.key]; row('Power', o.powerW + ' W'); row('Radiation', o.rad); }
+  if (p.slot === 'rcs' && d) { row('Per-axis thrust', d.rcsThrust + ' N'); row('Isp', d.rcsIsp + ' s'); }
+  if (p.slot === 'radiator') row('Coverage', fmt(100 * p.frac, 0) + ' % of ±Y');
+  if (p.slot === 'cells' && d) row('Cell area (all faces)', fmt(d.cellArea, 3) + ' m²');
+  if (p.slot === 'extra') {
+    const x = COMP.EXTRAS[p.key];
+    if (x.powerW) row('Power', x.powerW + ' W');
+    if (x.band) row('Band', x.band + (x.txW ? ` · ${x.txW} W RF` : ''));
+    const link = REVIEW?.comms.links.find(l => l.key === p.key);
+    if (link) row('Downlink', ENGI.fmtRate(link.rateBps) + (link.crosslink ? ' (crosslink)' : ''));
+    if (x.radArea) row('Radiating area', x.radArea + ' m²');
+  }
+  if (p.internal && p.slot !== 'harness') row('Location', 'inside the bus');
+  else if (p.face) row('Face', COMP.FACES[p.face].label);
+  const act = [];
+  if (p.slot === 'extra') {
+    const opts = Object.entries(COMP.FACES).map(([f, F]) =>
+      `<option value="${f}"${f === p.face ? ' selected' : ''}>${F.label}</option>`).join('');
+    act.push(`<select id="ins-face" aria-label="Move to face">${opts}</select>`,
+             `<button type="button" class="btn sm warn" id="ins-rm">Remove</button>`);
+  } else if (SLOT_TAB[p.slot]) {
+    act.push(`<button type="button" class="btn sm" id="ins-edit">Change in Subsystems ›</button>`);
+  } else if (['bus', 'thruster', 'panel', 'payload'].includes(p.slot)) {
+    act.push(`<button type="button" class="btn sm" id="ins-edit">Change in Parts ›</button>`);
+  }
+  box.innerHTML = `<button type="button" class="ins-x" aria-label="Close">✕</button>
+    <div class="ins-sub"><span class="sw" style="background:${sub?.color}"></span>${sub?.label || ''}</div>
+    <h3>${escapeHtml(p.label)}</h3>
+    <dl>${rows.join('')}</dl>
+    ${p.fits === false ? '<div class="ins-warn">✕ Does not fit where it is mounted.</div>' : ''}
+    ${act.length ? `<div class="ins-act">${act.join('')}</div>` : ''}`;
+  box.hidden = false;
+  box.querySelector('.ins-x').onclick = () => selectPart(null);
+  const face = box.querySelector('#ins-face');
+  if (face) face.onchange = () => moveExtra(p.index, face.value);
+  const rm = box.querySelector('#ins-rm');
+  if (rm) rm.onclick = () => removeExtra(p.index);
+  const ed = box.querySelector('#ins-edit');
+  if (ed) ed.onclick = () => {
+    if (SLOT_TAB[p.slot]) { setSsTab(SLOT_TAB[p.slot]); $('ss-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    else document.querySelector('.parts-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+}
+function renderLegend() {
+  const el = $('bay-legend');
+  if (BAY.view !== 'subsystem' || !BAY.group) { el.hidden = true; return; }
+  const present = new Set(BAY.group.userData.layout.parts.filter(p => !p.hidden).map(p => p.subsystem));
+  el.innerHTML = COMP.SUBSYSTEM_ORDER.filter(k => present.has(k)).map(k =>
+    `<span><span class="sw" style="background:${COMP.SUBSYSTEMS[k].color}"></span>${COMP.SUBSYSTEMS[k].label}</span>`).join('');
+  el.hidden = false;
+}
+function setBayView(v) {
+  BAY.view = ['real', 'subsystem', 'xray'].includes(v) ? v : 'real';
+  document.querySelectorAll('#bay-views button').forEach(b => b.classList.toggle('on', b.dataset.view === BAY.view));
+  if (BAY.group) PARTS.setViewMode(BAY.group, BAY.view);
+  renderLegend();
+}
+function setSpin(on) {
+  if (BAY.controls) BAY.controls.autoRotate = !!on;
+  $('bay-spin').setAttribute('aria-pressed', String(!!on));
+}
+$('bay-views').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setBayView(b.dataset.view); });
+$('bay-explode').addEventListener('click', () => {
+  BAY.explode = !BAY.explode;
+  $('bay-explode').setAttribute('aria-pressed', String(BAY.explode));
+});
+$('bay-spin').addEventListener('click', () => setSpin(!(BAY.controls?.autoRotate)));
+$('bay-fit').addEventListener('click', () => fitBayCamera(false));
+
+// ── Subsystems panel ────────────────────────────────────────────────────────
+function setSsTab(tab) {
+  document.querySelectorAll('#ss-tabs button').forEach(b => {
+    const on = b.dataset.tab === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on));
+  });
+  document.querySelectorAll('#ss-panel .tabpane').forEach(p => { p.hidden = p.dataset.pane !== tab; });
+}
+$('ss-tabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setSsTab(b.dataset.tab); });
+const RB = () => BUILDER.resolveBuild(sdBuild);
+function autoChip(slot, active, resolvedLabel) {
+  return `<div class="opt${active ? ' active' : ''}" data-v="auto" title="Bus default"><span class="ico">✦</span>Auto<small>${resolvedLabel}</small></div>`;
+}
+function renderSubsystems() {
+  const rb = RB();
+  const isAuto = (v) => v == null || v === 'auto';
+  // Battery
+  $('ss-battery').innerHTML = autoChip('battery', isAuto(sdBuild.battery), COMP.BATTERIES[COMP.bodyDefaults(rb.body).battery].label.replace('Li-ion ', ''))
+    + Object.entries(COMP.BATTERIES).map(([k, v]) =>
+      `<div class="opt${!isAuto(sdBuild.battery) && sdBuild.battery === k ? ' active' : ''}" data-v="${k}"><span class="ico">🔋</span>${v.label.replace('Li-ion ', '')}<small>${v.mass} kg</small></div>`).join('');
+  $('ss-battery-tip').textContent = `${COMP.BATTERIES[rb.battery].label} · ${COMP.BATTERIES[rb.battery].mass} kg`;
+  // Body cells (face toggles)
+  $('ss-cells').innerHTML = COMP.FACE_KEYS.map(f =>
+    `<div class="opt${rb.bodyCells.includes(f) ? ' active' : ''}" data-v="${f}" title="${COMP.FACES[f].label}">${f}</div>`).join('');
+  // Tanks
+  $('ss-tank').innerHTML = autoChip('tank', isAuto(sdBuild.tank), `${COMP.TANKS[rb.tank].label.split(' ')[0]} ×${rb.tankCount}`)
+    + Object.entries(COMP.TANKS).filter(([, t]) => !t.cubesatOnly || COMP.bodyClass(rb.body) === 'cubesat').map(([k, v]) =>
+      `<div class="opt${!isAuto(sdBuild.tank) && sdBuild.tank === k ? ' active' : ''}" data-v="${k}"><span class="ico">${v.shape === 'capsule' ? '🧪' : v.shape === 'box' ? '▫' : '⚪'}</span>${v.label}<small>${v.mass} kg · ${fmt(COMP.tankVolume(v) * 1000, 1)} L</small></div>`).join('');
+  $('ss-tank-n').textContent = rb.tankCount;
+  $('ss-tank-minus').disabled = isAuto(sdBuild.tank) || rb.tankCount <= 1;
+  $('ss-tank-plus').disabled = isAuto(sdBuild.tank) || rb.tankCount >= 4;
+  // RCS
+  const bodyRcs = BUILDER.BODIES[rb.body].rcs;
+  $('ss-rcs').innerHTML = autoChip('rcs', isAuto(sdBuild.rcs), bodyRcs ? `bus ${bodyRcs.thrust} N` : 'none')
+    + Object.entries(COMP.RCS_KITS).map(([k, v]) =>
+      `<div class="opt${sdBuild.rcs === k ? ' active' : ''}" data-v="${k}"><span class="ico">⊕</span>${v.label.replace(' RCS', '')}<small>${v.thrust ? `${v.thrust} N · ${v.mass} kg` : 'off'}</small></div>`).join('');
+  // ADCS
+  $('ss-adcs').innerHTML = autoChip('adcs', isAuto(sdBuild.adcs), COMP.ADCS_UNITS[COMP.bodyDefaults(rb.body).adcs].label.split(' (')[0])
+    + Object.entries(COMP.ADCS_UNITS).map(([k, v]) =>
+      `<div class="opt${!isAuto(sdBuild.adcs) && sdBuild.adcs === k ? ' active' : ''}" data-v="${k}"><span class="ico">${v.kind === 'cmg' ? '🌀' : v.kind === 'mtq' ? '🧲' : '⚙'}</span>${v.label}<small>${v.hNms ? v.hNms + ' N·m·s' : 'no wheels'} · ${v.mass} kg</small></div>`).join('');
+  $('ss-adcs-tip').textContent = COMP.ADCS_UNITS[rb.adcs].sys;
+  // Finish
+  $('ss-finish').innerHTML = autoChip('finish', isAuto(sdBuild.finish), COMP.FINISHES[COMP.bodyDefaults(rb.body).finish].label.split(' (')[0])
+    + Object.entries(COMP.FINISHES).map(([k, v]) =>
+      `<div class="opt${!isAuto(sdBuild.finish) && sdBuild.finish === k ? ' active' : ''}" data-v="${k}"><span class="ico">${v.mli ? '🧥' : '🎨'}</span>${v.label.split(' (')[0]}<small>α ${v.alpha} · ε ${v.eps}</small></div>`).join('');
+  $('ss-finish-tip').textContent = COMP.FINISHES[rb.finish].mli ? 'insulating blanket — radiators reject the heat' : 'bare surface — the whole skin radiates';
+  $('ss-rad').value = Math.round(rb.radiator * 100); $('ss-rad-v').textContent = Math.round(rb.radiator * 100);
+  // OBC
+  $('ss-obc').innerHTML = autoChip('obc', isAuto(sdBuild.obc), COMP.OBC_UNITS[COMP.bodyDefaults(rb.body).obc].label)
+    + Object.entries(COMP.OBC_UNITS).map(([k, v]) =>
+      `<div class="opt${!isAuto(sdBuild.obc) && sdBuild.obc === k ? ' active' : ''}" data-v="${k}"><span class="ico">🖥</span>${v.label}<small>${v.mass} kg · ${v.powerW} W</small></div>`).join('');
+  $('ss-obc-tip').textContent = COMP.OBC_UNITS[rb.obc].rad;
+  // Extras library + installed list
+  if (!$('ss-face').options.length) {
+    $('ss-face').innerHTML = '<option value="auto">best fit</option>' +
+      Object.entries(COMP.FACES).map(([f, F]) => `<option value="${f}">${F.label}</option>`).join('');
+  }
+  const lib = Object.entries(COMP.EXTRAS);
+  $('ss-lib').innerHTML = lib.map(([k, x]) =>
+    `<button type="button" class="lib-item" data-k="${k}"><span class="plus">＋</span>${x.label}<small><span class="sw" style="background:${COMP.SUBSYSTEMS[x.subsystem].color}"></span>${x.mass} kg${x.powerW ? ` · ${x.powerW} W` : ''}${x.band ? ` · ${x.band}` : ''}</small></button>`).join('');
+  renderInstalled();
+}
+function renderInstalled() {
+  const lay = BAY.group?.userData.layout || LAYOUT.layoutBuild(sdBuild);
+  const rb = lay.rb;
+  $('ss-inst-n').textContent = rb.extras.length;
+  const faceOpts = (sel) => Object.keys(COMP.FACES).map(f => `<option value="${f}"${f === sel ? ' selected' : ''}>${f}</option>`).join('');
+  $('ss-installed').innerHTML = rb.extras.map((e, i) => {
+    const x = COMP.EXTRAS[e.k];
+    const part = lay.parts.find(p => p.id === `extra-${i}`);
+    const bad = part && part.fits === false;
+    return `<div class="inst${bad ? ' bad' : ''}${BAY.selected === `extra-${i}` ? ' sel' : ''}" data-id="extra-${i}" data-i="${i}">
+      <span class="sw" style="background:${COMP.SUBSYSTEMS[x.subsystem].color}"></span>
+      <span>${x.label}${bad ? ' <b style="color:var(--c-bad)">· no room</b>' : ''}</span>
+      <select aria-label="Face for ${x.label}">${faceOpts(e.face)}</select>
+      <button type="button" class="rm" aria-label="Remove ${x.label}">✕</button></div>`;
+  }).join('') || '<div class="ss-note">Nothing mounted outside the bus. Add an antenna — a satellite you cannot talk to is debris.</div>';
+}
+function renderSubsystemNotes() {
+  const r = REVIEW; if (!r) return;
+  $('ss-power-note').innerHTML = `Sunlit generation <b>${fmt(r.power.genSunW, 0)} W</b> (arrays ${fmt(r.power.wingW, 0)} + body cells ${fmt(r.power.cellW, 1)}) · sunlit need <b>${fmt(r.power.requiredSunW, 0)} W</b> · eclipse ${fmt(r.orbit.eclipseS / 60, 0)} min at ${r.altKm} km · battery DoD <b>${fmt(100 * r.power.dod, 0)} %</b>.`;
+  $('ss-tank-note').innerHTML = `${fmt(r.prop.fuelKg, r.prop.fuelKg < 10 ? 2 : 0)} kg of ${r.prop.propellant} · capacity <b>${fmt(r.prop.capacityKg, r.prop.capacityKg < 10 ? 2 : 0)} kg</b> (${fmt(100 * Math.min(r.prop.fill, 9.99), 0)} % full). Capacity is the tanks' inner volume × storage density — Auto picks the lightest set that holds the load and still fits.`;
+  $('ss-adcs-note').innerHTML = `Disturbance builds <b>${ENGI.fmtSci(r.adcs.hNeedNms)} N·m·s</b> per orbit vs <b>${ENGI.fmtSci(r.adcs.hCapNms)}</b> stored · 30° slew in <b>${isFinite(r.adcs.slewS) ? fmt(r.adcs.slewS, 0) + ' s' : '—'}</b> · CG ${fmt(r.massProps.cgLateralM * 1000, 1)} mm off the thrust axis.`;
+  $('ss-thermal-note').innerHTML = `Hot case <b>${fmt(r.thermal.hotC, 0)} °C</b> · cold case <b>${fmt(r.thermal.coldC, 0)} °C</b>${r.thermal.heaterW > 0 ? ` (heaters ${fmt(r.thermal.heaterW, 0)} W hold −10 °C)` : ''} · radiator ${fmt(r.thermal.radAreaM2, 2)} m².`;
+  const rec = r.thermal.radRecFrac;
+  const btn = $('ss-rad-rec');
+  if (rec != null && Math.abs(rec - r.design.resolved.radiator) > 0.02) {
+    btn.hidden = false; btn.textContent = `Use recommended (${Math.round(rec * 100)} %)`; btn.dataset.v = rec;
+  } else btn.hidden = true;
+}
+function setSlot(slot, value) {
+  sdBuild[slot] = value;
+  syncBayUI(); syncBuild();
+}
+for (const [id, slot] of [['ss-battery', 'battery'], ['ss-tank', 'tank'], ['ss-rcs', 'rcs'],
+                          ['ss-adcs', 'adcs'], ['ss-finish', 'finish'], ['ss-obc', 'obc']]) {
+  $(id).addEventListener('click', (e) => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    if (slot === 'tank' && o.dataset.v !== 'auto' && (sdBuild.tank == null || sdBuild.tank === 'auto')) {
+      sdBuild.tankCount = RB().tankCount;            // start from what Auto chose
+    }
+    setSlot(slot, o.dataset.v);
+  });
+}
+$('ss-cells').addEventListener('click', (e) => {
+  const o = e.target.closest('.opt'); if (!o) return;
+  const cur = RB().bodyCells;
+  sdBuild.bodyCells = cur.includes(o.dataset.v) ? cur.filter(f => f !== o.dataset.v) : [...cur, o.dataset.v];
+  syncBayUI(); syncBuild();
+});
+$('ss-tank-minus').addEventListener('click', () => { sdBuild.tankCount = Math.max(1, RB().tankCount - 1); syncBayUI(); syncBuild(); });
+$('ss-tank-plus').addEventListener('click', () => { sdBuild.tankCount = Math.min(4, RB().tankCount + 1); syncBayUI(); syncBuild(); });
+$('ss-rad').addEventListener('input', (e) => {
+  sdBuild.radiator = (+e.target.value) / 100; $('ss-rad-v').textContent = e.target.value; syncBuild();
+});
+$('ss-rad-auto').addEventListener('click', () => setSlot('radiator', 'auto'));
+$('ss-rad-rec').addEventListener('click', (e) => setSlot('radiator', Math.round(+e.target.dataset.v * 100) / 100));
+
+// Extras: always edited as an explicit list (materialised from the bus kit
+// on the first edit, so 'auto' keeps meaning "follow the bus").
+function extrasList() {
+  if (!Array.isArray(sdBuild.extras)) sdBuild.extras = RB().extras.map(e => ({ ...e }));
+  return sdBuild.extras;
+}
+const FACE_PREF = {
+  uhf: ['+Y', '-Y', '+Z', '-X', '+X', '-Z'], patch: ['-Y', '+Y', '+Z', '-X', '+X', '-Z'],
+  xpatch: ['-Y', '+Y', '+Z', '-X', '+X', '-Z'], horn: ['+Z', '-Y', '+Y', '-Z'], gnss: ['+Y', '-Y', '+Z', '-X', '+X'],
+  kadish: ['+Z', '-Y', '+Y', '-Z'], laser: ['+Z', '+Y', '-Y'], star: ['+Y', '-Y', '+Z', '-Z', '+X', '-X'],
+  sun: ['+X', '-X', '+Y', '-Y', '+Z'], earth: ['+Z', '-Y', '+Y'], boom: ['-Y', '+Y', '-X', '+X'], radiator: ['+Y', '-Y'],
+};
+function addExtra(k, face = 'auto') {
+  const x = COMP.EXTRAS[k]; if (!x) return null;
+  const list = extrasList();
+  if (list.length >= 24) { toast('Mounting limit reached (24 external parts).', true); return null; }
+  let chosen = face;
+  if (face === 'auto') {
+    chosen = null;
+    for (const f of FACE_PREF[x.kind] || COMP.FACE_KEYS) {
+      const trial = { ...sdBuild, extras: [...list, { k, face: f }] };
+      const p = LAYOUT.layoutBuild(trial).parts.find(q => q.id === `extra-${list.length}`);
+      if (p && p.fits) { chosen = f; break; }
+    }
+    if (!chosen) { chosen = (FACE_PREF[x.kind] || ['+Y'])[0]; toast(`No free room for a ${x.label} — mounted on ${chosen} anyway; the review will flag it.`, true); }
+  }
+  list.push({ k, face: chosen });
+  syncBuild(); renderInstalled();
+  selectPart(`extra-${list.length - 1}`);
+  toast(`Added ${x.label} on ${COMP.FACES[chosen].label}`);
+  return chosen;
+}
+function removeExtra(i) {
+  const list = extrasList();
+  if (i < 0 || i >= list.length) return;
+  list.splice(i, 1);
+  if (BAY.selected?.startsWith('extra-')) BAY.selected = null;
+  syncBuild(); renderInstalled(); renderInspector();
+}
+function moveExtra(i, face) {
+  const list = extrasList();
+  if (!list[i] || !COMP.FACES[face]) return;
+  list[i].face = face;
+  syncBuild(); renderInstalled();
+}
+$('ss-lib').addEventListener('click', (e) => {
+  const b = e.target.closest('.lib-item'); if (b) addExtra(b.dataset.k, $('ss-face').value);
+});
+$('ss-installed').addEventListener('click', (e) => {
+  const row = e.target.closest('.inst'); if (!row) return;
+  if (e.target.closest('.rm')) { removeExtra(+row.dataset.i); return; }
+  if (e.target.closest('select')) return;
+  selectPart(row.dataset.id);
+});
+$('ss-installed').addEventListener('change', (e) => {
+  const row = e.target.closest('.inst'); if (row && e.target.matches('select')) moveExtra(+row.dataset.i, e.target.value);
+});
+$('ss-kit-reset').addEventListener('click', () => {
+  sdBuild.extras = 'auto'; sdBuild.bodyCells = 'auto';
+  BAY.selected = null; syncBayUI(); syncBuild(); toast('Restored the bus default kit');
+});
+
+// ── Engineering review panel ────────────────────────────────────────────────
+let rvTab = 'checks';
+$('rv-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  rvTab = b.dataset.tab;
+  document.querySelectorAll('#rv-tabs button').forEach(x => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-selected', String(on)); });
+  renderReview();
+});
+const SEV_ICON = { pass: '✓', warn: '⚠', fail: '✕' };
+const SEV_LABEL = { pass: 'pass', warn: 'warning', fail: 'fail' };
+function metricHtml(k, v, flag = '') { return `<div class="metric${flag ? ' flag-' + flag : ''}"><div class="k">${k}</div><div class="v">${v}</div></div>`; }
+function renderReview() {
+  const r = REVIEW; if (!r) return;
+  const c = r.counts;
+  $('rv-orbit').textContent = `at ${r.altKm} km (start altitude) · F10.7 ${Math.round(env.f107Sfu)} · Ap ${Math.round(env.ap)}`;
+  $('rv-summary').innerHTML = ['fail', 'warn', 'pass'].map(sv =>
+    `<span class="rv-chip ${sv}"><i>${SEV_ICON[sv]}</i>${c[sv]} ${SEV_LABEL[sv]}${c[sv] === 1 || sv === 'pass' ? '' : 's'}</span>`).join('');
+  const bsr = $('bs-review'), bsm = $('bs-review-m');
+  bsr.innerHTML = c.fail ? `✕ ${c.fail} <small>fail</small>` : c.warn ? `⚠ ${c.warn} <small>warn</small>` : `✓ <small>all pass</small>`;
+  bsm.classList.remove('flag-good', 'flag-warn', 'flag-bad');
+  bsm.classList.add(c.fail ? 'flag-bad' : c.warn ? 'flag-warn' : 'flag-good');
+  const body = $('rv-body');
+  const AREA = { mass: 'Mass', layout: 'Packaging', power: 'Power', thermal: 'Thermal', comms: 'Comms', adcs: 'Attitude', propulsion: 'Propulsion' };
+  if (rvTab === 'checks') {
+    const order = { fail: 0, warn: 1, pass: 2 };
+    const list = r.checks.slice().sort((a, b) => order[a.sev] - order[b.sev]);
+    body.innerHTML = list.map(ch => {
+      const m = /^layout\.(extra-\d+|tanks|battery|adcs|obc)$/.exec(ch.id);
+      const pid = m ? (m[1] === 'tanks' ? 'tank-0' : m[1]) : '';
+      return `<div class="chk ${ch.sev}${pid ? ' link' : ''}" ${pid ? `data-pid="${pid}"` : ''}>
+        <span class="ic" aria-label="${SEV_LABEL[ch.sev]}">${SEV_ICON[ch.sev]}</span>
+        <span class="t">${escapeHtml(ch.title)}<small>${AREA[ch.area] || ch.area}</small></span>
+        <span class="d">${escapeHtml(ch.detail)}</span></div>`;
+    }).join('');
+    body.querySelectorAll('.chk.link').forEach(el => el.onclick = () => {
+      selectPart(el.dataset.pid);
+      if (BAY.view === 'real' && /^(tank|battery|adcs|obc)/.test(el.dataset.pid)) setBayView('xray');
+      $('bay-view').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  } else if (rvTab === 'mass') {
+    const tot = r.mass.dry;
+    const subs = COMP.SUBSYSTEM_ORDER.filter(k => r.mass.bySubsystem[k] > 0);
+    body.innerHTML = `<div class="stack" role="img" aria-label="Dry mass by subsystem">${subs.map(k =>
+        `<span style="width:${100 * r.mass.bySubsystem[k] / tot}%;background:${COMP.SUBSYSTEMS[k].color}" title="${COMP.SUBSYSTEMS[k].label}: ${fmt(r.mass.bySubsystem[k], 1)} kg (${fmt(100 * r.mass.bySubsystem[k] / tot, 0)} %)"></span>`).join('')}</div>
+      <div class="leg">${subs.map(k => `<span><span class="sw" style="background:${COMP.SUBSYSTEMS[k].color}"></span>${COMP.SUBSYSTEMS[k].label}</span><b>${fmt(r.mass.bySubsystem[k], r.mass.bySubsystem[k] < 10 ? 2 : 1)} kg</b><em>${fmt(100 * r.mass.bySubsystem[k] / tot, 0)} %</em>`).join('')}</div>
+      <div class="rv-grid" style="margin-top:9px">${metricHtml('Dry', fmt(tot, 1) + ' <small>kg</small>')}${metricHtml('Propellant', fmt(r.mass.fuel, 1) + ' <small>kg</small>')}${metricHtml('Wet', fmt(r.mass.wet, 1) + ' <small>kg</small>')}
+        ${metricHtml('+15 % margin', fmt(r.mass.withMargin, 1) + ' <small>kg</small>')}${metricHtml('CG off axis', fmt(r.massProps.cgLateralM * 1000, 1) + ' <small>mm</small>')}${metricHtml('I max', fmt(r.massProps.principal[2], 1) + ' <small>kg·m²</small>')}</div>
+      <div class="rv-foot">Launch class: <b>${r.mass.launch}</b>. Principal moments ${r.massProps.principal.map(v => fmt(v, v < 1 ? 3 : 1)).join(' / ')} kg·m² (wet; parts as uniform boxes).</div>`;
+  } else if (r && rvTab === 'power') {
+    const p = r.power;
+    const frac = p.requiredSunW / Math.max(p.genSunW, 1e-9);
+    body.innerHTML = `<div class="rv-grid">${metricHtml('Sunlit gen.', fmt(p.genSunW, 0) + ' <small>W</small>')}${metricHtml('Sunlit need', fmt(p.requiredSunW, 0) + ' <small>W</small>', p.marginW < 0 ? 'bad' : '')}${metricHtml('Margin', (p.marginW >= 0 ? '+' : '') + fmt(p.marginW, 0) + ' <small>W</small>', p.marginW < 0 ? 'bad' : p.marginFrac < 0.1 ? 'warn' : 'good')}
+        ${metricHtml('Bus load (avg)', fmt(p.busAvgW, 0) + ' <small>W</small>')}${metricHtml('Heaters', fmt(p.heaterW, 0) + ' <small>W</small>')}${metricHtml('Eclipse', fmt(r.orbit.eclipseS / 60, 0) + ' <small>min</small>')}
+        ${metricHtml('Battery', p.batteryWh + ' <small>Wh</small>')}${metricHtml('DoD', fmt(100 * p.dod, 0) + ' <small>%</small>', p.dod > 0.6 ? 'bad' : p.dod > 0.3 ? 'warn' : 'good')}${metricHtml('EP thrust', p.thrusterW ? fmt(100 * p.powerFrac, 0) + ' <small>%</small>' : '<small>chemical</small>')}</div>
+      <div class="ss-note">Share of sunlit generation the orbit needs (load + eclipse recharge at 85 % round-trip):</div>
+      <div class="gauge ${frac > 1 ? 'bad' : frac > 0.9 ? 'warn' : 'good'}"><i style="width:${Math.min(100, 100 * frac)}%"></i></div>
+      <div class="rv-foot">Eclipse at β = 0 (worst case). Payload runs at ${fmt(100 * p.payloadDuty, 0)} % duty (imagers and SAR switch on over targets). Wings track the Sun; body-mounted cells average A/4 of their area. Thrusting is not in the orbit average — electric propulsion fires in sunlight.</div>`;
+  } else if (rvTab === 'thermal') {
+    const t = r.thermal;
+    body.innerHTML = `<div class="rv-grid">${metricHtml('Hot case', fmt(t.hotC, 0) + ' <small>°C</small>', t.hotC > 60 ? 'bad' : t.hotC > 40 ? 'warn' : 'good')}${metricHtml('Cold case', fmt(t.coldC, 0) + ' <small>°C</small>', t.coldC < -10 ? 'warn' : 'good')}${metricHtml('Heaters', fmt(t.heaterW, 0) + ' <small>W</small>')}
+        ${metricHtml('Dissipation', fmt(t.qHotW, 0) + ' <small>W hot</small>')}${metricHtml('Radiator', fmt(t.radAreaM2, 2) + ' <small>m²</small>')}${metricHtml('Recommended', t.radRecFrac != null ? fmt(100 * t.radRecFrac, 0) + ' <small>% cover</small>' : '<small>—</small>')}</div>
+      <table class="rv-table"><thead><tr><th>Surface</th><th class="num">Area m²</th><th class="num">α</th><th class="num">ε</th></tr></thead><tbody>
+      ${t.surfaces.map(s => `<tr><td>${s.kind === 'skin' ? COMP.FINISHES[r.design.resolved.finish].label : s.kind === 'radiator' ? 'OSR radiator' : 'Solar cells'}</td><td class="num">${fmt(s.area, 3)}</td><td class="num">${s.alpha.toFixed(3)}</td><td class="num">${s.eps.toFixed(2)}</td></tr>`).join('')}</tbody></table>
+      <div class="rv-foot">Single-node, orbit-averaged: hot = high β (no eclipse), summer Sun, full dissipation; cold = β 0, winter Sun, minimum dissipation. MLI surfaces use the blanket's effective ε* = ${COMP.MLI_EPS_STAR}. Radiators face away from the Sun (±Y).</div>`;
+  } else if (rvTab === 'comms') {
+    const cm = r.comms;
+    body.innerHTML = `<div class="rv-grid">${metricHtml('Data / day', fmt(cm.dataGBd, cm.dataGBd < 1 ? 2 : 0) + ' <small>GB</small>')}${metricHtml('Contact', fmt(cm.contact.contactSPerDay / 60, 0) + ' <small>min/day</small>')}${metricHtml('Stations', isFinite(cm.stations) ? cm.stations : '∞', cm.stations > 6 ? 'bad' : cm.stations > 2 ? 'warn' : 'good')}</div>
+      <table class="rv-table"><thead><tr><th>Radio</th><th>Band</th><th class="num">EIRP dBW</th><th class="num">Rate</th><th class="num">GB/day</th></tr></thead><tbody>
+      ${cm.links.map(l => `<tr><td>${l.label}</td><td>${l.band}</td><td class="num">${l.eirpDbw != null ? fmt(l.eirpDbw, 1) : '—'}</td><td class="num">${ENGI.fmtRate(l.rateBps)}${l.rawBps > l.rateBps ? '*' : ''}</td><td class="num">${fmt(l.capacityGBd, l.capacityGBd < 1 ? 2 : 1)}</td></tr>`).join('') || '<tr><td colspan="5">No radio fitted.</td></tr>'}</tbody></table>
+      <div class="rv-foot">Link budget at 10° elevation (${fmt(cm.rangeKm, 0)} km slant), coded Eb/N₀ 4 dB + 3 dB margin, typical station G/T (UHF −14, S 13, X 29, Ka 39 dB/K). * capped by the modem. One mid-latitude station: ${fmt(cm.contact.passesPerDay, 1)} passes/day.</div>`;
+  } else if (rvTab === 'adcs') {
+    const a = r.adcs, m = r.massProps;
+    body.innerHTML = `<table class="rv-table"><thead><tr><th>Disturbance torque</th><th class="num">N·m</th></tr></thead><tbody>
+      <tr><td>Aerodynamic (ρ ${a.rho.toExponential(1)} kg/m³)</td><td class="num">${ENGI.fmtSci(a.torques.aero)}</td></tr>
+      <tr><td>Gravity gradient (5° off nadir)</td><td class="num">${ENGI.fmtSci(a.torques.gg)}</td></tr>
+      <tr><td>Solar radiation pressure</td><td class="num">${ENGI.fmtSci(a.torques.srp)}</td></tr>
+      <tr><td>Residual magnetic dipole</td><td class="num">${ENGI.fmtSci(a.torques.mag)}</td></tr></tbody></table>
+      <div class="rv-grid" style="margin-top:8px">${metricHtml('Need / orbit', ENGI.fmtSci(a.hNeedNms) + ' <small>N·m·s</small>')}${metricHtml('Stored', ENGI.fmtSci(a.hCapNms) + ' <small>N·m·s</small>')}${metricHtml('30° slew', isFinite(a.slewS) ? fmt(a.slewS, 0) + ' <small>s</small>' : '—')}
+        ${metricHtml('CG off axis', fmt(m.cgLateralM * 1000, 1) + ' <small>mm</small>')}${metricHtml('Thrust torque', ENGI.fmtSci(m.thrustTorque) + ' <small>N·m</small>')}${metricHtml('Gimbal trim', ENGI.fmtSci(m.gimbalTrim) + ' <small>N·m</small>')}</div>
+      <div class="rv-foot">${a.unit}. Momentum per orbit = cyclic (gravity-gradient + magnetic, ×0.707 P/4) + secular (aero + SRP, × P). Move heavy external parts and the CG walks off the thrust axis — the engine then torques the craft.</div>`;
+  } else if (rvTab === 'prop') {
+    const pr = r.prop;
+    const yr = (y) => y >= 1000 ? '> 1000' : y >= 2 ? fmt(y, 0) : fmt(y, 1);
+    body.innerHTML = `<div class="rv-grid">${metricHtml('Capacity', fmt(pr.capacityKg, pr.capacityKg < 10 ? 2 : 0) + ' <small>kg</small>')}${metricHtml('Loaded', fmt(pr.fuelKg, pr.fuelKg < 10 ? 2 : 0) + ' <small>kg</small>', pr.fill > 1 ? 'bad' : '')}${metricHtml('Δv', fmt(pr.dv, 0) + ' <small>m/s</small>')}
+        ${metricHtml('Drag make-up', fmt(pr.dvPerYr, pr.dvPerYr < 10 ? 1 : 0) + ' <small>m/s/yr</small>')}${metricHtml('Deorbit Δv', fmt(pr.dvDeorbit, 0) + ' <small>m/s</small>')}${metricHtml('Natural decay', yr(pr.lifetimeYr) + ' <small>yr</small>', pr.lifetimeYr > 25 ? 'warn' : '')}
+        ${metricHtml('Station-keeping', isFinite(pr.stationKeepYr) ? yr(pr.stationKeepYr) + ' <small>yr</small>' : '∞')}${metricHtml('Full burn', isFinite(pr.burnTimeS) ? (pr.burnTimeS > 7200 ? fmt(pr.burnTimeS / 3600, 0) + ' <small>h</small>' : fmt(pr.burnTimeS, 0) + ' <small>s</small>') : '—')}${metricHtml('Ballistic coef.', fmt(pr.ballistic, 0) + ' <small>kg/m²</small>')}</div>
+      <div class="rv-foot">Decay lifetime integrates da/dt = −ρ(C_d A/m)√(μa) from ${r.altKm} km to 150 km with today's F10.7/Ap held fixed — real lifetimes average over the 11-year cycle. Disposal: FCC 2022 5-year rule, IADC 25-year guideline.</div>`;
+  } else if (rvTab === 'bom') {
+    const lay = r.layout;
+    const groups = new Map();
+    for (const p of lay.parts) {
+      if (p.mass <= 0 && p.slot !== 'rcs' && p.slot !== 'radiator') continue;
+      const key = p.slot === 'extra' ? p.id : p.slot + '|' + p.key;
+      const g = groups.get(key) || { p, n: 0, mass: 0 };
+      g.n++; g.mass += p.mass; groups.set(key, g);
+    }
+    const loc = (p) => p.internal ? 'inside' : p.face || (p.slot === 'panel' ? '±X' : p.slot === 'thruster' ? '−Z' : p.slot === 'payload' ? '+Z' : '—');
+    body.innerHTML = `<table class="rv-table"><thead><tr><th>Part</th><th class="num">Qty</th><th class="num">Mass kg</th><th>Where</th></tr></thead><tbody>
+      ${[...groups.values()].map(({ p, n, mass }) => `<tr class="click" data-pid="${p.id}"><td><span class="sw" style="background:${COMP.SUBSYSTEMS[p.subsystem].color}"></span>${escapeHtml(p.label)}</td><td class="num">${n}</td><td class="num">${fmt(mass, mass < 1 ? 2 : 1)}</td><td>${loc(p)}</td></tr>`).join('')}
+      </tbody></table><div class="rv-foot">Total dry ${fmt(r.mass.dry, 1)} kg — the same number the flight model flies. Click a row to find the part in the bay.</div>`;
+    body.querySelectorAll('tr.click').forEach(tr => tr.onclick = () => {
+      selectPart(tr.dataset.pid);
+      const p = partOf(tr.dataset.pid);
+      if (p?.internal && BAY.view === 'real') setBayView('xray');
+      $('bay-view').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
 }
 
 // ── Real-world blueprint gallery ─────────────────────────────────────────────
@@ -3627,8 +4377,9 @@ function showBlueprintDetail(b) {
 }
 function loadBlueprint(id) {
   const b = BP.findBlueprint(id); if (!b) return;
-  sdBuild = { ...BUILDER.defaultBuild(), ...b.build };
-  // Propellant load (the one physics field not in the parts build).
+  sdBuild = { ...BUILDER.defaultBuild(), ...BP.blueprintBuild(b) };
+  BAY.selected = null;
+  // Propellant load — also lives in the build (it sizes the Auto tanks).
   if (b.fuelKg != null) { $('f-fuel').value = b.fuelKg; $('v-fuel').textContent = b.fuelKg; }
   // Starting orbit — start alt, target alt (= start), apogee.
   const peri = b.orbit.periKm, apo = b.orbit.apoKm;
@@ -3715,6 +4466,12 @@ $('bay-tc').addEventListener('input', (e) => {
   sdBuild.thrusterCount = +e.target.value;
   $('bay-tc-v').textContent = e.target.value; syncBuild();
 });
+$('bay-chord').addEventListener('input', (e) => {
+  sdBuild.panelChord = +e.target.value;
+  $('bay-chord-v').textContent = (+e.target.value).toFixed(2); syncBuild();
+});
+// Propellant sizes the Auto tanks, so it is part of the build too.
+$('f-fuel').addEventListener('input', (e) => { sdBuild.fuelKg = +e.target.value; rebuildMesh(); });
 $('bay-span').addEventListener('input', (e) => {
   sdBuild.panelSpan = +e.target.value;
   $('bay-span-v').textContent = (+e.target.value).toFixed(1); syncBuild();
@@ -4090,7 +4847,25 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
                 find: BP.findBlueprint, selfTest: BP.selfTest },
   ui: { readDesign, currentDesignData },
   bay: { apply: applyBuild, sync: syncBuild,
-         getBuild: () => ({ ...sdBuild }) },
+         getBuild: () => ({ ...sdBuild }),
+         setSlot, addExtra, removeExtra, moveExtra,
+         select: selectPart, getSelected: () => BAY.selected,
+         setView: setBayView, getView: () => BAY.view,
+         setExplode: (on) => { BAY.explode = !!on; $('bay-explode').setAttribute('aria-pressed', String(!!on)); },
+         ready: () => BAY.ready && !!BAY.group,
+         layout: () => LAYOUT.layoutBuild(sdBuild, activeTierMods()),
+         review: () => computeReview(),
+         lastReview: () => REVIEW,
+         partIds: () => BAY.group ? [...BAY.group.userData.parts.keys()] : [],
+         screenOf: (id) => {
+           const g = BAY.group?.userData.parts.get(id); if (!g) return null;
+           const T = BAY.three, box = new T.Box3().setFromObject(g), c = box.getCenter(new T.Vector3());
+           c.project(BAY.camera);
+           const r = $('bay-canvas').getBoundingClientRect();
+           return { x: r.left + (c.x + 1) / 2 * r.width, y: r.top + (1 - c.y) / 2 * r.height };
+         },
+         spin: setSpin },
+  components: COMP, engineering: ENGI,
   conditions: { setSWPreset, setAttitude,
                 getEnv: () => ({ ...env }),
                 getAttitude: () => sim.attitude,
@@ -4119,7 +4894,11 @@ window.__sd = { auth, engine: ENG, sim, builder: BUILDER,
   renderMissionPicker();
   renderPilotPanel();
   applyUnlockLocks();
-  loadDraft();
+  const hadDraft = loadDraft();
+  // A fresh visit: the ship form must fly the build the bay shows (its
+  // HTML defaults predate the component library). A saved draft keeps any
+  // manual fine-tuning it carries.
+  if (!hadDraft) pushBuildToForm();
   refreshDesignReadouts();
   syncThrottleFill();
   syncGravityFill();
