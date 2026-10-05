@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkyView · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/skyview.html">
+<meta name="description" content="SkyView shows the sky above you right now: the ten easiest things to see from where you stand, ranked by how far they clear tonight's visibility limit, on a live chart of the top 100 — planets, the Moon, 5,000 Hipparcos stars, deep-sky objects, and the galaxy map's black holes and superclusters in their real directions.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/skyview.html">
+<meta property="og:title" content="SkyView — what you can see in your sky, right now">
+<meta property="og:description" content="The top 10 objects visible from your location, ranked by real visibility — twilight, moonlight, airmass and light pollution included — on a live chart of your sky.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SkyView — what you can see in your sky, right now">
+<meta name="twitter:description" content="The top 10 objects visible from your location, ranked by real visibility, on a live chart of your sky.">
+
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:clip;
+    background:#03050d; color:#cfd6ea;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+#sv-app {
+    display:grid; grid-template-columns: minmax(0, 1fr) 390px;
+    gap:14px; padding:14px; min-height:calc(100vh - 50px);
+}
+@media (max-width: 1100px) { #sv-app { grid-template-columns: minmax(0, 1fr); } }
+
+.sv-panel {
+    background: rgba(10,14,30,.76); backdrop-filter: blur(14px);
+    border:1px solid rgba(110,150,255,.16);
+    border-radius:12px; padding:13px 15px;
+}
+.sv-panel h2 {
+    font-size:.67rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#8fb0ff; font-weight:700; margin-bottom:9px;
+    display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+}
+.sv-panel h2 small { text-transform:none; letter-spacing:0; color:#7f8aa8; font-weight:500; }
+.sv-muted { color:#8792ad; font-size:.76rem; line-height:1.5; }
+
+/* ── Hero ───────────────────────────────────────────────── */
+#sv-hero { grid-column:1 / -1; padding:12px 18px; }
+#sv-hero-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+#sv-hero h1 {
+    font-size:1.45rem; font-weight:800;
+    background: linear-gradient(100deg, #e9f2ff 25%, #9fb8ff 85%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+#sv-hero p { font-size:.78rem; color:#a9b6d0; line-height:1.55; margin-top:6px; max-width:1180px; }
+#sv-hero p a { color:#8fb0ff; }
+.sv-badge {
+    display:inline-block; padding:3px 9px; border-radius:4px;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em;
+    background: rgba(110,150,255,.14); color:#8fb0ff; border:1px solid rgba(110,150,255,.32);
+}
+#sv-hero-live { color:#6ef0b0; border-color:rgba(110,240,176,.45); background:rgba(110,240,176,.08); }
+#sv-hero-live.is-shifted { color:#ffd27a; border-color:rgba(255,210,122,.45); background:rgba(255,210,122,.08); }
+.sv-hero-chip {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.66rem;
+    color:#a9b6d0; border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:2px 9px;
+}
+
+/* ── Stage ──────────────────────────────────────────────── */
+/* The stage must NOT stretch to the sidebar's height (a grid row is as tall as
+   its tallest cell, and a flex child would grow into it — the dome then
+   overflowed the screen). It is sized from the viewport and stays in view
+   while the sidebar scrolls. */
+#sv-stage { display:flex; flex-direction:column; gap:10px; min-width:0; align-self:start; position:sticky; top:58px; }
+#sv-canvas-wrap {
+    position:relative; flex:0 0 auto; min-height:480px; height:calc(100vh - 230px); max-height:980px;
+    border-radius:12px; overflow:hidden; border:1px solid rgba(110,150,255,.16); background:#02030a;
+}
+@media (max-width: 1100px) {
+    #sv-stage { position:static; }
+    /* Taller than wide so the square dome sits BELOW the view toolbar. */
+    #sv-canvas-wrap { height:min(calc(100vw + 76px), 720px); min-height:360px; }
+}
+#sv-canvas { display:block; width:100%; height:100%; touch-action:none; }
+#sv-tip {
+    position:absolute; pointer-events:none; z-index:5;
+    background:rgba(6,9,22,.92); border:1px solid rgba(127,208,255,.4); border-radius:6px;
+    padding:5px 8px; font-size:.72rem; display:flex; flex-direction:column; gap:1px; max-width:260px;
+}
+#sv-tip[hidden] { display:none; }
+#sv-tip b { color:#eaf2ff; }
+#sv-tip span { color:#9fb0cc; }
+#sv-status {
+    position:absolute; inset:auto 12px 12px 12px; z-index:6; padding:8px 12px; border-radius:8px;
+    background:rgba(6,9,22,.9); border:1px solid rgba(110,150,255,.3); font-size:.78rem;
+}
+#sv-status[hidden] { display:none; }
+#sv-status.is-error { border-color:rgba(255,140,100,.6); color:#ffc9b0; }
+#sv-cursor {
+    position:absolute; left:12px; bottom:10px; z-index:4; pointer-events:none;
+    font: .66rem ui-monospace, SFMono-Regular, Menlo, monospace; color:#8fa0c4;
+}
+
+/* Overlay controls on the stage */
+#sv-viewbar {
+    position:absolute; top:10px; left:10px; z-index:4;
+    display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+}
+.sv-seg { display:inline-flex; border:1px solid rgba(110,150,255,.3); border-radius:8px; overflow:hidden; background:rgba(6,9,22,.78); }
+.sv-seg button, .sv-btn {
+    font: 600 .72rem system-ui, sans-serif; color:#b9c6e4; background:transparent;
+    border:0; padding:6px 11px; cursor:pointer; min-height:32px;
+}
+.sv-seg button + button { border-left:1px solid rgba(110,150,255,.22); }
+.sv-seg button.is-on { background:rgba(127,208,255,.18); color:#eaf6ff; }
+.sv-btn { border:1px solid rgba(110,150,255,.3); border-radius:8px; background:rgba(6,9,22,.78); }
+.sv-btn:hover, .sv-seg button:hover { color:#fff; }
+.sv-btn.is-on { background:rgba(110,240,176,.14); color:#8ff5c4; border-color:rgba(110,240,176,.45); }
+#sv-look-tools[hidden] { display:none; }
+#sv-look-tools { display:inline-flex; gap:6px; }
+
+#sv-legend {
+    position:absolute; right:10px; top:10px; z-index:4; max-width:250px;
+    background:rgba(6,9,22,.8); border:1px solid rgba(110,150,255,.22); border-radius:8px;
+    font-size:.66rem; color:#9fb0cc; padding:6px 9px;
+}
+#sv-legend summary { cursor:pointer; color:#b9c6e4; font-weight:600; list-style:none; }
+#sv-legend summary::-webkit-details-marker { display:none; }
+#sv-legend ul { list-style:none; margin-top:6px; display:grid; gap:3px; }
+#sv-legend i { display:inline-block; width:10px; height:10px; margin-right:6px; vertical-align:-1px; }
+#sv-legend p { margin-top:6px; line-height:1.4; }
+
+/* Layers row under the stage */
+#sv-layers { display:flex; gap:12px; flex-wrap:wrap; align-items:center; font-size:.74rem; color:#a9b6d0; }
+#sv-layers label { display:inline-flex; gap:5px; align-items:center; cursor:pointer; }
+
+/* ── Sidebar ────────────────────────────────────────────── */
+#sv-side { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.sv-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.sv-input {
+    flex:1 1 140px; min-width:0; background:rgba(255,255,255,.05); color:#e6ecfa;
+    border:1px solid rgba(110,150,255,.28); border-radius:7px; padding:7px 9px; font-size:.78rem;
+}
+select.sv-input { flex:0 1 auto; }
+#sv-loc-label { font-weight:700; color:#eaf2ff; font-size:.92rem; }
+#sv-loc-coords { font: .68rem ui-monospace, SFMono-Regular, Menlo, monospace; color:#8fa0c4; }
+#sv-loc-note { font-size:.72rem; color:#ffd27a; margin-top:4px; }
+#sv-loc-note[hidden] { display:none; }
+#sv-loc-msg, #sv-time-msg { font-size:.72rem; color:#ffc9a0; min-height:0; }
+#sv-time-label { font-weight:700; color:#eaf2ff; font-size:.92rem; }
+#sv-time-utc { font: .66rem ui-monospace, SFMono-Regular, Menlo, monospace; color:#8fa0c4; }
+#sv-time-slider { width:100%; accent-color:#7fd0ff; margin-top:6px; }
+.sv-slider-scale { display:flex; justify-content:space-between; font-size:.62rem; color:#7f8aa8; }
+
+#sv-env { display:grid; gap:4px; font-size:.76rem; margin-top:9px; }
+.sv-env-row { display:grid; grid-template-columns: 110px auto 1fr; gap:8px; align-items:baseline; }
+.sv-env-row span { color:#8792ad; }
+.sv-env-row b { color:#eaf2ff; font-weight:700; }
+.sv-env-row em { color:#8792ad; font-style:normal; font-size:.7rem; }
+
+/* Top list */
+.sv-filters { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px; }
+.sv-filters button {
+    font: 600 .68rem system-ui, sans-serif; color:#a9b6d0; background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12); border-radius:999px; padding:4px 10px; cursor:pointer; min-height:28px;
+}
+.sv-filters button.is-on { color:#eaf6ff; background:rgba(127,208,255,.16); border-color:rgba(127,208,255,.45); }
+#sv-top-list { list-style:none; display:grid; gap:4px; }
+.sv-top-item {
+    display:grid; grid-template-columns: 26px minmax(0,1fr) auto; gap:8px; align-items:center;
+    padding:6px 8px; border-radius:8px; cursor:pointer; border:1px solid transparent;
+    background:rgba(255,255,255,.025);
+}
+.sv-top-item:hover, .sv-top-item:focus-visible { border-color:rgba(127,208,255,.35); outline:none; }
+.sv-top-item.is-selected { border-color:rgba(127,208,255,.7); background:rgba(127,208,255,.08); }
+.sv-rank {
+    width:24px; height:24px; border-radius:50%; display:grid; place-items:center;
+    font-weight:800; font-size:.74rem; color:#0a0f20; background:#ffe7a8;
+}
+.sv-top-main { display:flex; flex-direction:column; min-width:0; }
+.sv-top-name { font-weight:700; color:#eaf2ff; font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sv-top-sub { font-size:.68rem; color:#8fa0c4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#sv-top-count { font-size:.68rem; color:#7f8aa8; margin-top:7px; }
+.sv-empty { font-size:.76rem; color:#8792ad; padding:8px; }
+
+.sv-chip {
+    display:inline-block; font-size:.6rem; font-weight:700; letter-spacing:.02em; white-space:nowrap;
+    padding:2px 7px; border-radius:999px; border:1px solid currentColor;
+}
+.sv-chip--easy       { color:#6ef0b0; }
+.sv-chip--visible    { color:#b6f08a; }
+.sv-chip--binoculars { color:#ffd27a; }
+.sv-chip--telescope  { color:#9fb0cc; }
+.sv-chip--sun        { color:#ffb05c; }
+.sv-chip--nomag      { color:#ff8fe0; }
+.sv-chip--below      { color:#7f8aa8; }
+
+/* Card */
+.sv-card-head h3 { font-size:1.05rem; color:#eaf2ff; }
+.sv-card-kind { font-size:.7rem; color:#8fa0c4; }
+.sv-card-rows { display:grid; grid-template-columns: 82px 1fr; gap:4px 10px; margin-top:9px; font-size:.75rem; }
+.sv-card-rows dt { color:#8792ad; }
+.sv-card-rows dd { color:#dfe6f6; }
+.sv-card-rows em { color:#8792ad; font-style:normal; font-size:.68rem; margin-left:4px; }
+.sv-card-desc { font-size:.74rem; color:#a9b6d0; line-height:1.5; margin-top:9px; }
+.sv-card-links { display:flex; flex-direction:column; gap:4px; margin-top:9px; }
+.sv-link { color:#8fd0ff; font-size:.76rem; font-weight:600; text-decoration:none; }
+.sv-link:hover { text-decoration:underline; }
+.sv-warn { margin-top:7px; font-size:.72rem; color:#ffc9a0; border-left:2px solid #ffb05c; padding-left:8px; }
+
+/* Landmarks */
+.sv-lm-list { list-style:none; display:grid; gap:3px; max-height:260px; overflow:auto; }
+.sv-lm-list li { display:flex; justify-content:space-between; gap:8px; padding:5px 7px; border-radius:6px; cursor:pointer; font-size:.74rem; }
+.sv-lm-list li:hover, .sv-lm-list li:focus-visible, .sv-lm-list li.is-selected { background:rgba(255,111,216,.1); outline:none; }
+.sv-lm-name { color:#ffc4ee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sv-lm-sub { color:#8fa0c4; white-space:nowrap; font-size:.68rem; }
+
+/* Method */
+.sv-method { font-size:.72rem; color:#97a3bf; line-height:1.55; }
+.sv-method p + p { margin-top:6px; }
+.sv-method b { color:#b9c6e4; }
+
+@media (max-width: 640px) {
+    #sv-app { padding:8px; gap:10px; }
+    #sv-legend { display:none; }
+}
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("skyview");</script>
+<script type="module">import './js/telemetry.js';</script>
+
+<div id="sv-app">
+
+  <section id="sv-hero" class="sv-panel">
+    <div id="sv-hero-row">
+      <h1>SkyView</h1>
+      <span class="sv-badge">NEW</span>
+      <span id="sv-hero-live" class="sv-badge">LIVE</span>
+      <span class="sv-hero-chip" id="sv-hero-regime">—</span>
+      <span class="sv-hero-chip" id="sv-hero-limit">—</span>
+    </div>
+    <p>
+      The sky above <b>you</b>, right now — ranked by what you can actually see through tonight's twilight,
+      moonlight, air and light pollution. The <a href="galactic-map.html">Galaxy Map</a>'s black holes and
+      superclusters are drawn where they really are in your sky, even though no eye can see them.
+    </p>
+  </section>
+
+  <main id="sv-stage">
+    <div id="sv-canvas-wrap">
+      <canvas id="sv-canvas" aria-label="Chart of the sky above your location" role="img"></canvas>
+      <div id="sv-viewbar">
+        <div class="sv-seg" role="group" aria-label="Chart view">
+          <button type="button" data-view="dome" title="The whole sky overhead — north up, east on the LEFT, as if you held the chart above your head.">Whole sky</button>
+          <button type="button" data-view="look" title="Look toward one direction. Drag to look around, scroll or ± to zoom.">Look around</button>
+        </div>
+        <span id="sv-look-tools">
+          <span class="sv-seg" role="group" aria-label="Face a direction">
+            <button type="button" data-face="0">N</button><button type="button" data-face="90">E</button><button type="button" data-face="180">S</button><button type="button" data-face="270">W</button>
+          </span>
+          <button type="button" class="sv-btn" id="sv-zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" class="sv-btn" id="sv-zoom-out" aria-label="Zoom out">−</button>
+        </span>
+      </div>
+      <details id="sv-legend">
+        <summary>Legend</summary>
+        <ul>
+          <li><i style="background:#ffe7a8;border-radius:50%"></i>Top-10 (numbered) · top-100 labelled</li>
+          <li><i style="border:1px solid #c9a7ff;border-radius:50%/30%"></i>Galaxy</li>
+          <li><i style="border:1px solid #7fe0c8"></i>Nebula</li>
+          <li><i style="border:1px dashed #ffd98a;border-radius:50%"></i>Open cluster</li>
+          <li><i style="border:1px solid #ffb8a0;border-radius:50%"></i>Globular cluster</li>
+          <li><i style="border:1px solid #ff6fd8;transform:rotate(45deg) scale(.8)"></i>Galaxy-map object (invisible to the eye)</li>
+        </ul>
+        <p>Dim stars are up there but fainter than tonight's limit. The Sun and Moon are drawn larger than their true half-degree until you zoom in.</p>
+      </details>
+      <div id="sv-tip" hidden></div>
+      <div id="sv-cursor"></div>
+      <div id="sv-status">Loading the sky…</div>
+    </div>
+    <div id="sv-layers" class="sv-panel" role="group" aria-label="Chart layers">
+      <label><input type="checkbox" data-layer="constellations"> Constellations</label>
+      <label><input type="checkbox" data-layer="labels"> Labels</label>
+      <label><input type="checkbox" data-layer="milkyWay"> Milky Way</label>
+      <label><input type="checkbox" data-layer="landmarks"> Galaxy-map objects</label>
+      <label><input type="checkbox" data-layer="galactic"> Galactic plane</label>
+      <label><input type="checkbox" data-layer="ecliptic"> Ecliptic</label>
+      <label><input type="checkbox" data-layer="grid"> Alt/az grid</label>
+    </div>
+  </main>
+
+  <aside id="sv-side">
+    <section class="sv-panel" aria-labelledby="sv-h-where">
+      <h2 id="sv-h-where">Where &amp; when</h2>
+      <div><span id="sv-loc-label">—</span> <span id="sv-loc-coords"></span></div>
+      <p id="sv-loc-note" hidden>Using a default location — set yours to see your own sky.</p>
+      <div class="sv-row" style="margin-top:7px">
+        <input id="sv-loc-input" class="sv-input" type="text" placeholder="City, zip or address" aria-label="Search for a location">
+        <button type="button" class="sv-btn" id="sv-loc-search">Go</button>
+        <button type="button" class="sv-btn" id="sv-loc-gps" title="Use this device's location">📍 Me</button>
+      </div>
+      <div id="sv-loc-msg"></div>
+
+      <div style="margin-top:11px"><span id="sv-time-label">—</span> <span id="sv-time-utc"></span></div>
+      <div class="sv-row" style="margin-top:6px">
+        <button type="button" class="sv-btn" id="sv-time-live" aria-pressed="true">● Live</button>
+        <button type="button" class="sv-btn" id="sv-time-tonight" title="Jump to an hour after astronomical darkness tonight">☾ Tonight</button>
+        <select id="sv-quality" class="sv-input" aria-label="How dark is your sky?" title="How light-polluted your sky is — this sets the faintest star you can see on a dark, moonless night.">
+          <option value="dark">Dark site (mag 6.5)</option>
+          <option value="rural">Rural (6.0)</option>
+          <option value="suburban">Suburban (5.0)</option>
+          <option value="urban">Urban (4.0)</option>
+          <option value="city">City centre (3.0)</option>
+        </select>
+      </div>
+      <input id="sv-time-slider" type="range" min="-720" max="2160" step="10" value="0" aria-label="Shift the time">
+      <div class="sv-slider-scale"><span>−12 h</span><span>now</span><span>+12 h</span><span>+24 h</span><span>+36 h</span></div>
+      <div id="sv-time-msg"></div>
+      <div id="sv-env"></div>
+    </section>
+
+    <section class="sv-panel" aria-labelledby="sv-h-top">
+      <h2 id="sv-h-top">Top 10 to see <small>ranked by visibility</small></h2>
+      <div class="sv-filters" role="group" aria-label="Filter the list">
+        <button type="button" data-filter="all">All</button>
+        <button type="button" data-filter="solar">Solar system</button>
+        <button type="button" data-filter="stars">Stars</button>
+        <button type="button" data-filter="deep">Deep sky</button>
+      </div>
+      <ol id="sv-top-list"></ol>
+      <div id="sv-top-count"></div>
+    </section>
+
+    <section class="sv-panel" aria-labelledby="sv-h-card" aria-live="polite">
+      <h2 id="sv-h-card">Selected</h2>
+      <div id="sv-card"></div>
+    </section>
+
+    <section class="sv-panel" aria-labelledby="sv-h-lm">
+      <h2 id="sv-h-lm">Up there, but invisible <small>from the Galaxy Map</small></h2>
+      <div id="sv-landmarks"><p class="sv-muted">—</p></div>
+    </section>
+
+    <section class="sv-panel sv-method" aria-labelledby="sv-h-method">
+      <h2 id="sv-h-method">How this is computed</h2>
+      <p><b>Positions.</b> Catalogue places are J2000; your horizon is of date, so every object is precessed
+        to today (0.36° since 2000 — about a Moon's width). The Moon is topocentric: from where you stand it sits
+        up to 1° lower than from Earth's centre. Refraction lifts everything near the horizon by ~½°.</p>
+      <p><b>Ranking.</b> Each object's brightness, dimmed by the extra air it shines through, is compared with the
+        faintest magnitude your sky allows right now. The difference — in magnitudes — is the ranking. Galaxies and
+        nebulae pay a stated penalty for spreading their light over a large area, and objects near the Sun pay for glare.</p>
+      <p><b>What is approximate.</b> The visibility limit is an empirical twilight + moonlight + light-pollution
+        model, not a radiative-transfer calculation. Nutation, aberration and proper motion (all under a few
+        arcminutes) are left out. Planet magnitudes are the Astronomical Almanac's (Mallama &amp; Hilton 2018).</p>
+      <p><b>Data.</b> Stars: Hipparcos (ESA 1997) via d3-celestial (BSD-3). Galaxy-map objects: this site's
+        <a class="sv-link" href="galactic-map.html">Galaxy Map</a>, drawn where they lie in your sky.</p>
+    </section>
+  </aside>
+
+</div>
+
+<script type="module">
+  import { SkyViewPage } from './js/skyview/skyview-page.js';
+  const page = new SkyViewPage(document);
+  window.__skyView = page;
+  page.start();
+</script>
+
+</body>
+</html>
