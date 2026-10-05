@@ -41,6 +41,11 @@ export function decodeMilkyWay(mw) {
     return { width: mw.width, height: mw.height, levels: mw.levels, grid };
 }
 
+/** The sky-object key a galaxy-map record resolves to (star, deep-sky object, or landmark). */
+export function galacticKey(g) {
+    return g.hip != null ? `hip:${g.hip}` : g.dso != null ? `dso:${g.dso}` : `gal:${g.id}`;
+}
+
 /** Display name for a Hipparcos star: proper name, else Bayer/Flamsteed + constellation. */
 export function starLabel(names, hip) {
     const n = names[hip];
@@ -139,8 +144,10 @@ export function evaluateSky(cat, frame, {
         const v = [S.vec[i * 3], S.vec[i * 3 + 1], S.vec[i * 3 + 2]];
         const a = apparent(toEnu(frame, v), atm);
         starAlt[i] = a.altDeg; starAz[i] = a.azDeg;
-        if (S.mag[i] > RANK_STAR_MAG) continue;
         const hip = S.hip[i];
+        // Galaxy-map stars are always objects (61 Cyg is 5.2 — below the cut,
+        // but it has a card, a forecast and a track like every map object).
+        if (S.mag[i] > RANK_STAR_MAG && !cat.galacticByHip.has(hip)) continue;
         const o = {
             key: `hip:${hip}`, id: `hip:${hip}`, hip, kind: 'star',
             name: starLabel(cat.starNames, hip),

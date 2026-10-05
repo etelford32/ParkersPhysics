@@ -25,7 +25,12 @@ import {
     compassPoint, formatRa, formatDec, formatMag, equatorialToGalactic, SKY_QUALITY,
     DEFAULT_SKY_QUALITY, VISIBILITY_STATUS, BINOCULAR_GAIN,
 } from './sky-engine.js';
-import { loadSkyCatalog, evaluateSky } from './sky-catalog.js';
+import { loadSkyCatalog, evaluateSky, galacticKey } from './sky-catalog.js';
+import {
+    buildNightGrid, forecastVisibility, fixedTarget, bodyTarget, pathSamples, sameTimeSamples,
+    seasonPeakJd, nightNoonJd, NIGHTLY_DRIFT_DEG, NIGHTLY_EARLIER_MIN, DEFAULT_MIN_ALT_DEG,
+} from './sky-predict.js';
+import { renderForecastChart, sparklineSvg, describeWindow, clockOf, nightDate } from './skyview-forecast-ui.js';
 import { createView, unprojectAltAz } from './sky-projection.js';
 import { SkyRenderer, findObject } from './sky-renderer.js';
 import { loadUserLocation, saveUserLocation, geocodeQuery } from '../user-location.js';
@@ -37,11 +42,46 @@ const LIVE_TICK_MS = 15_000;
 const DEFAULT_LOCATION = Object.freeze({ lat: 51.4779, lon: -0.0015, city: 'Greenwich (default)', isDefault: true });
 const LS_PREFS = 'pp_skyview_v1';
 
+/** How far ahead the forecast looks (nights). */
+export const FORECAST_NIGHTS = 30;
+/**
+ * Tracked objects. Colour is assigned to the OBJECT when it is tracked and kept
+ * until it is untracked (colour follows the entity, never its rank). Three
+ * slots — the dataviz palette's first three, which are the ones that validate
+ * ALL-PAIRS for colour-vision deficiency on this dark sky (run 2026-10-05:
+ * worst CVD ΔE 9.4, normal 20.9, all ≥ 3:1). A fourth would put yellow beside
+ * orange, which fails; so the cap is a colour rule, not a whim.
+ */
+export const TRACK_COLORS = Object.freeze(['#3987e5', '#d95926', '#199e70']);
+export const MAX_TRACKS = TRACK_COLORS.length;
+
+/** Slider spans, in minutes from the forecast start, and how many nights of same-time dots to draw. */
+export const RANGES = Object.freeze({
+    tonight: { label: 'Tonight',   min: -720, max: 36 * 60,  step: 5,  nights: 7 },
+    week:    { label: '7 nights',  min: -720, max: 7 * 1440, step: 10, nights: 7 },
+    month:   { label: '30 nights', min: -720, max: 30 * 1440, step: 30, nights: 30 },
+});
+/** Playback speeds. `perNight` steps one CLOCK day at a time: the same moment each night. */
+export const SPEEDS = Object.freeze({
+    '10m':   { label: '10 min / s', rate: 600 },
+    '1h':    { label: '1 h / s', rate: 3600 },
+    '4h':    { label: '4 h / s', rate: 14_400 },
+    night:   { label: 'Nightly (same clock time)', perNight: true, secondsPerNight: 0.7 },
+});
+const BODY_KINDS = new Set(['sun', 'moon', 'planet']);
+
 const FILTERS = Object.freeze({
     all:   { label: 'All',          test: () => true },
     solar: { label: 'Solar system', test: (o) => o.kind === 'planet' || o.kind === 'moon' || o.kind === 'sun' },
     stars: { label: 'Stars',        test: (o) => o.kind === 'star' },
     deep:  { label: 'Deep sky',     test: (o) => !['planet', 'moon', 'sun', 'star'].includes(o.kind) },
+    galaxy: { label: 'Galaxy map',  test: (o) => !!o.galactic },
+});
+
+const GAL_FILTERS = Object.freeze({
+    all:        { label: 'All',            test: () => true },
+    eye:        { label: 'Naked eye',      test: (o) => Number.isFinite(o.mag) && o.mag <= 6.5 },
+    instrument: { label: 'Instrument only', test: (o) => !(Number.isFinite(o.mag) && o.mag <= 6.5) },
 });
 
 const KIND_LABEL = Object.freeze({
@@ -115,6 +155,21 @@ export class SkyViewPage {
             landmarks: true, ecliptic: false, galactic: false, ...(prefs.layers ?? {}),
         };
         this.filter = 'all';
+        this.range = RANGES[params.get('range')] ? params.get('range') : 'tonight';
+        this.speed = SPEEDS[prefs.speed] ? prefs.speed : '1h';
+        this.playing = false;
+        this.minAltDeg = [0, 10, 20, 30].includes(prefs.minAlt) ? prefs.minAlt : DEFAULT_MIN_ALT_DEG;
+        this.galFilter = 'all';
+        // Tracks: ?track=a,b (keys) > saved > the galactic centre, so a first
+        // visit shows the core of the galaxy wheeling across tonight's sky.
+        const urlTracks = params.get('track');
+        const saved = Array.isArray(prefs.tracks) ? prefs.tracks : null;
+        const keys = (urlTracks != null ? urlTracks.split(',').filter(Boolean) : saved ?? ['gal:sgr_a']).slice(0, MAX_TRACKS);
+        this.tracked = keys.map((key, i) => ({ key, color: TRACK_COLORS[i] }));
+        this.layers.trackArc ??= true;
+        this.layers.trackNights ??= true;
+        this._nightCache = new Map();
+        this._forecast = null;          // { key, grid, byKey: Map }
         this.selectedKey = params.get('select') || null;
         this.hoverKey = null;
         this.cat = null;
@@ -140,7 +195,14 @@ export class SkyViewPage {
         }
         this._status('');
         this.recompute();
-        this._liveTimer = setInterval(() => { if (this.live && !document.hidden) { this.timeMs = Date.now(); this.anchorMs = this.timeMs; this.recompute(); } }, LIVE_TICK_MS);
+        this._scheduleForecast();
+        this._liveTimer = setInterval(() => {
+            if (this.live && !this.playing && !document.hidden) {
+                this.timeMs = Date.now(); this.anchorMs = this.timeMs;
+                this.recompute();
+                this._scheduleForecast();
+            }
+        }, LIVE_TICK_MS);
         this.ready = true;
         this.doc.body.dataset.skyviewReady = '1';
     }
@@ -151,16 +213,107 @@ export class SkyViewPage {
         this.loc = { ...loc, isDefault: false };
         if (save) saveUserLocation({ lat: loc.lat, lon: loc.lon, city: loc.city, displayName: loc.displayName ?? loc.city });
         this._eventsCache.clear();
+        this._nightCache.clear();
+        this._syncControls();
+        this.recompute();
+        this._scheduleForecast();
+    }
+
+    /**
+     * Move the clock. `anchor` re-bases the slider (and therefore the 30-night
+     * forecast) on this instant; scrubbing inside the range never does, so a
+     * month-long scrub never rebuilds the forecast it is reading.
+     */
+    setTime(ms, { live = false, anchor = live } = {}) {
+        this.live = live;
+        this.timeMs = ms;
+        if (anchor) this.anchorMs = ms;
+        if (live) this.pause();
+        this._syncControls();
+        this.recompute();
+        if (anchor) this._scheduleForecast();
+    }
+
+    setRange(id) {
+        if (!RANGES[id]) return;
+        this.range = id;
+        const r = RANGES[id];
+        const off = (this.timeMs - this.anchorMs) / 60000;
+        if (off < r.min || off > r.max) this.timeMs = this.anchorMs + Math.max(r.min, Math.min(r.max, off)) * 60000;
+        feature('range', { range: id });
         this._syncControls();
         this.recompute();
     }
 
-    setTime(ms, { live = false } = {}) {
-        this.live = live;
-        this.timeMs = ms;
-        if (live) this.anchorMs = ms;
+    /** Step by hours or by whole nights (one CLOCK day = the same moment next night). */
+    step(minutes) {
+        this.live = false;
+        this.timeMs += minutes * 60000;
+        const r = RANGES[this.range];
+        const off = (this.timeMs - this.anchorMs) / 60000;
+        if (off > r.max || off < r.min) this.setRange(off > RANGES.week.max || off < RANGES.week.min ? 'month' : 'week');
         this._syncControls();
         this.recompute();
+    }
+
+    play() {
+        if (this.playing) return;
+        this.playing = true;
+        this.live = false;
+        const r = RANGES[this.range];
+        if ((this.timeMs - this.anchorMs) / 60000 >= r.max - r.step) this.timeMs = this.anchorMs;   // replay from the start
+        feature('play', { speed: this.speed, range: this.range });
+        let last = null, acc = 0, lastCompute = 0;
+        const tick = (ts) => {
+            if (!this.playing) return;
+            if (last == null) last = ts;
+            const dt = Math.min(0.25, (ts - last) / 1000);
+            last = ts;
+            const sp = SPEEDS[this.speed];
+            if (sp.perNight) {
+                acc += dt;
+                while (acc >= sp.secondsPerNight) { this.timeMs += 86_400_000; acc -= sp.secondsPerNight; }
+            } else {
+                this.timeMs += dt * sp.rate * 1000;
+            }
+            const rr = RANGES[this.range];
+            if ((this.timeMs - this.anchorMs) / 60000 > rr.max) {
+                this.timeMs = this.anchorMs + rr.max * 60000;
+                this.pause();
+            }
+            if (ts - lastCompute > 60 || !this.playing) {
+                lastCompute = ts;
+                this._syncControls();
+                this.recompute();
+            }
+            if (this.playing) this._raf = requestAnimationFrame(tick);
+        };
+        this._syncControls();
+        this._raf = requestAnimationFrame(tick);
+    }
+
+    pause() {
+        this.playing = false;
+        if (this._raf) cancelAnimationFrame(this._raf);
+        this._raf = 0;
+        this._syncControls?.();
+    }
+
+    isTracked(key) { return this.tracked.some((t) => t.key === key); }
+
+    /** Track / untrack. Colour stays with the object; a 4th track drops the oldest. */
+    toggleTrack(key) {
+        if (!key) return;
+        if (this.isTracked(key)) {
+            this.tracked = this.tracked.filter((t) => t.key !== key);
+        } else {
+            if (this.tracked.length >= MAX_TRACKS) this.tracked.shift();
+            const used = new Set(this.tracked.map((t) => t.color));
+            this.tracked.push({ key, color: TRACK_COLORS.find((c) => !used.has(c)) });
+            feature('track', { key: key.slice(0, 40) });
+        }
+        writePrefs({ ...readPrefs(), tracks: this.tracked.map((t) => t.key) });
+        this.recompute({ geometryOnly: true });
     }
 
     select(key, { fly = false } = {}) {
@@ -189,11 +342,100 @@ export class SkyViewPage {
             this.top = this.sky.ranked.slice(0, TOP_N_CHART);
             this.topKeys = new Map(this.top.map((o) => [o.key, o.rank]));
         }
+        this.tracks = this._computeTracks();
         this._draw();
         this._renderEnv();
         this._renderTop();
         this._renderCard();
-        this._renderLandmarks();
+        this._renderGalactic();
+        this._renderTracks();
+    }
+
+    // ── prediction ───────────────────────────────────────────────────────────
+
+    _site() { return { latDeg: this.loc.lat, lonDeg: this.loc.lon }; }
+
+    /** A sky-predict target for a sky object: moving bodies by ephemeris, everything else fixed. */
+    _targetFor(o) {
+        return BODY_KINDS.has(o.kind) ? bodyTarget(o.id, this._site()) : fixedTarget(o.raDeg, o.decDeg);
+    }
+
+    /** The one-night grid for the night containing `jd` (dusk/dawn for tonight's arc). */
+    _nightOf(jd) {
+        const noon = nightNoonJd(jd, this.loc.lon);
+        const k = `${this.loc.lat}|${this.loc.lon}|${noon.toFixed(5)}`;
+        if (!this._nightCache.has(k)) {
+            this._nightCache.set(k, buildNightGrid(this._site(), jd, 1).nights[0]);
+            if (this._nightCache.size > 40) this._nightCache.delete(this._nightCache.keys().next().value);
+        }
+        return this._nightCache.get(k);
+    }
+
+    _computeTracks() {
+        if (!this.tracked.length) return [];
+        const jd = jdFromMs(this.timeMs);
+        const night = this._nightOf(jd);
+        const from = night.twilightStart ?? night.noonJd + 0.25;
+        const to = night.twilightEnd ?? night.noonJd + 0.75;
+        const nights = RANGES[this.range].nights;
+        const out = [];
+        for (const t of this.tracked) {
+            const o = findObject(this.sky, t.key);
+            if (!o) continue;
+            const target = this._targetFor(o);
+            const arc = pathSamples(this._site(), target, from, to, { stepMin: 10 });
+            // Ticks on whole hours of the DEVICE clock (what you set an alarm by).
+            const ticks = [];
+            const d = new Date((from - 2440587.5) * 86_400_000);
+            d.setMinutes(0, 0, 0);
+            for (let ms = d.getTime() + 3_600_000; ms <= (to - 2440587.5) * 86_400_000; ms += 3_600_000) {
+                const tj = jdFromMs(ms);
+                const p = pathSamples(this._site(), target, tj, tj)[0];
+                ticks.push({ ...p, label: `${new Date(ms).getHours()}h` });
+            }
+            const nightly = sameTimeSamples(this._site(), target, jd, nights).map((p, k) => ({
+                ...p,
+                label: k > 0 && (k % 7 === 0 || k === nights - 1)
+                    ? new Date((p.jd - 2440587.5) * 86_400_000).toLocaleDateString([], { month: 'short', day: 'numeric' })
+                    : null,
+            }));
+            out.push({ key: t.key, color: t.color, name: o.name, arc, ticks, nightly });
+        }
+        return out;
+    }
+
+    /** Build (or reuse) the 30-night forecast for the slider's anchor, off the input path. */
+    _scheduleForecast() {
+        if (!this.cat) return;
+        const jdA = jdFromMs(this.anchorMs);
+        const key = `${this.loc.lat}|${this.loc.lon}|${nightNoonJd(jdA, this.loc.lon).toFixed(5)}|${this.minAltDeg}`;
+        if (this._forecast?.key === key) return;
+        clearTimeout(this._forecastTimer);
+        this._forecastTimer = setTimeout(() => {
+            const t0 = performance.now();
+            const grid = buildNightGrid(this._site(), jdA, FORECAST_NIGHTS);
+            this._forecast = { key, grid, byKey: new Map(), builtMs: performance.now() - t0 };
+            this._galacticForecast();
+            this._renderCard();
+            this._renderGalactic();
+            this.doc.body.dataset.skyviewForecast = '1';
+        }, 30);
+    }
+
+    /** Forecast for one object key, cached on the current grid. */
+    _forecastFor(key) {
+        const F = this._forecast;
+        if (!F) return null;
+        if (F.byKey.has(key)) return F.byKey.get(key);
+        const o = findObject(this.sky, key);
+        if (!o) return null;
+        const f = forecastVisibility(F.grid, this._targetFor(o), { minAltDeg: this.minAltDeg });
+        F.byKey.set(key, f);
+        return f;
+    }
+
+    _galacticForecast() {
+        for (const g of this.cat.galactic) this._forecastFor(galacticKey(g));
     }
 
     _view() {
@@ -210,6 +452,7 @@ export class SkyViewPage {
         this.renderer.draw({
             view: this.view, frame: this.frame, cat: this.cat, sky: this.sky, layers: this.layers,
             topKeys: this.topKeys, selectedKey: this.selectedKey, hoverKey: this.hoverKey,
+            tracks: this.tracks,
         });
     }
 
@@ -276,16 +519,63 @@ export class SkyViewPage {
         this.$('sv-top-count').textContent = `${count} naked-eye object${count === 1 ? '' : 's'} up · chart labels the top ${Math.min(TOP_N_CHART, this.sky.ranked.length)}`;
     }
 
-    _renderLandmarks() {
-        const up = this.sky.landmarks.filter((o) => o.altDeg > 0)
-            .sort((a, b) => (a.galactic.distLy ?? 0) - (b.galactic.distLy ?? 0));
-        const el = this.$('sv-landmarks');
-        if (!up.length) { el.innerHTML = '<p class="sv-muted">None of the galaxy map\'s invisible objects are above your horizon right now.</p>'; return; }
-        el.innerHTML = `<ul class="sv-lm-list">${up.map((o) => `
-          <li data-key="${esc(o.key)}" tabindex="0" role="button" class="${o.key === this.selectedKey ? 'is-selected' : ''}">
-            <span class="sv-lm-name">${esc(o.name)}</span>
-            <span class="sv-lm-sub">${esc(formatLy(o.galactic.distLy))} · ${o.altDeg.toFixed(0)}° ${compassPoint(o.azDeg)}</span>
-          </li>`).join('')}</ul>`;
+    /**
+     * Galactic targets: every Galaxy Map object, ranked by how long it is up
+     * in the dark TONIGHT, then by how soon it will be — with its 30-night
+     * shape as a sparkline and its season (when it crosses the meridian at
+     * midnight). Invisible objects are pointing targets, labelled as such.
+     */
+    _renderGalactic() {
+        const host = this.$('sv-galactic');
+        if (!host || !this.sky) return;
+        const F = this._forecast;
+        if (!F) { host.innerHTML = '<p class="sv-muted">Forecasting the next 30 nights…</p>'; return; }
+        const filt = GAL_FILTERS[this.galFilter] ?? GAL_FILTERS.all;
+        const rows = [];
+        for (const g of this.cat.galactic) {
+            const key = galacticKey(g);
+            const o = findObject(this.sky, key);
+            const f = F.byKey.get(key);
+            if (!o || !f || !filt.test(o)) continue;
+            const first = f.nights.findIndex((n) => n.hours > 0);
+            rows.push({ g, o, f, key, tonight: f.nights[0].hours, first });
+        }
+        rows.sort((a, b) => (b.tonight - a.tonight) || ((a.first < 0 ? 1e9 : a.first) - (b.first < 0 ? 1e9 : b.first)) || (b.f.totalHours - a.f.totalHours));
+        const maxH = Math.max(...F.grid.nights.map((n) => n.darkHours), 1);
+        const upTonight = rows.filter((r) => r.tonight > 0).length;
+        this.$('sv-galactic-count').textContent = `${upTonight} of ${rows.length} above ${this.minAltDeg}° in tonight's dark`;
+        host.innerHTML = `<ul class="sv-gal-list">${rows.map(({ g, o, f, key, first }) => {
+            const n0 = f.nights[0];
+            const when = n0.hours > 0 ? describeWindow(n0, this.minAltDeg)
+                : first > 0 ? `from ${nightDate(f.nights[first])}`
+                : `not above ${this.minAltDeg}° for 30 nights`;
+            const tracked = this.tracked.find((t) => t.key === key);
+            const inst = !(Number.isFinite(o.mag) && o.mag <= 6.5);
+            return `<li class="sv-gal-row${key === this.selectedKey ? ' is-selected' : ''}" data-key="${esc(key)}" tabindex="0" role="button">
+              <span class="sv-gal-main">
+                <span class="sv-gal-name">${esc(g.name)}</span>
+                <span class="sv-gal-sub">${esc(formatLy(g.distLy))}${inst ? ' · instrument' : ''} · ${esc(when)}</span>
+              </span>
+              ${sparklineSvg(f.nights, { maxHours: maxH })}
+              <button type="button" class="sv-track-btn${tracked ? ' is-on' : ''}" data-track="${esc(key)}"
+                aria-pressed="${tracked ? 'true' : 'false'}" title="${tracked ? 'Stop tracking' : 'Track its path across your sky'}"
+                ${tracked ? `style="--trk:${tracked.color}"` : ''}>${tracked ? '●' : '○'}</button>
+            </li>`;
+        }).join('')}</ul>`;
+    }
+
+    _renderTracks() {
+        const host = this.$('sv-tracks');
+        if (!host) return;
+        if (!this.tracked.length) {
+            host.innerHTML = '<span class="sv-muted">Nothing tracked — use ○ on a galactic target or “Track path” on a card.</span>';
+            return;
+        }
+        host.innerHTML = this.tracked.map((t) => {
+            const o = this.sky && findObject(this.sky, t.key);
+            return `<span class="sv-trk-chip"><i style="background:${t.color}"></i><button type="button" data-key="${esc(t.key)}" class="sv-trk-name">${esc(o?.name ?? t.key)}</button>
+              <button type="button" class="sv-trk-x" data-track="${esc(t.key)}" aria-label="Stop tracking ${esc(o?.name ?? t.key)}">×</button></span>`;
+        }).join('');
     }
 
     _events(o) {
@@ -312,6 +602,7 @@ export class SkyViewPage {
         const card = this.$('sv-card');
         const o = this.selectedKey && this.sky ? findObject(this.sky, this.selectedKey) : null;
         if (!o) {
+            this._renderCardForecast(null);
             card.innerHTML = '<p class="sv-muted">Tap anything on the chart — or a row in the list — to see where it is, when it rises and sets, and what it is.</p>';
             return;
         }
@@ -352,15 +643,67 @@ export class SkyViewPage {
         if (o.id === 'mars') links.push('<a class="sv-link" href="mars.html">Open Real-Time Mars ›</a>');
         if (['jupiter', 'saturn', 'uranus', 'neptune'].includes(o.id)) links.push(`<a class="sv-link" href="${o.id}-system.html">Open the ${esc(o.name)} system ›</a>`);
         const warn = o.kind === 'sun' ? '<p class="sv-warn">Never look at the Sun directly or through binoculars or a telescope without a certified solar filter.</p>' : '';
+        const trk = this.tracked.find((x) => x.key === o.key);
+        const trackBtn = `<button type="button" class="sv-btn sv-card-track${trk ? ' is-on' : ''}" data-track="${esc(o.key)}" aria-pressed="${trk ? 'true' : 'false'}">${trk ? '● Tracking' : '○ Track path'}</button>`;
         card.innerHTML = `
           <div class="sv-card-head">
-            <h3>${esc(o.name)}</h3>
+            <h3>${esc(o.name)}</h3>${trackBtn}
             <span class="sv-card-kind">${esc(KIND_LABEL[o.kind] ?? o.kind)}${o.designation ? ` · ${esc(o.designation)}` : ''}${g?.type && o.kind !== 'landmark' ? ` · ${esc(g.type)}` : ''}</span>
           </div>
           ${warn}
           <dl class="sv-card-rows">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
           ${g?.desc ? `<p class="sv-card-desc">${esc(g.desc)}</p>` : ''}
           ${links.length ? `<div class="sv-card-links">${links.join('')}</div>` : ''}`;
+        this._renderCardForecast(o);
+    }
+
+    /**
+     * The selected object's next 30 nights: a summary line (best night, its
+     * season, how it moves night to night) and the visibility calendar. Re-
+     * rendered only when its inputs change, so hovering it survives the clock.
+     */
+    _renderCardForecast(o) {
+        const host = this.$('sv-card-fc');
+        if (!host) return;
+        if (!o) { host.replaceChildren(); this._fcSig = ''; return; }
+        const F = this._forecast;
+        const nowJd = jdFromMs(this.timeMs);
+        const f = F ? this._forecastFor(o.key) : null;
+        const nowIdx = F ? F.grid.nights.findIndex((n) => nowJd >= n.noonJd && nowJd < n.noonJd + 1) : -1;
+        const sig = `${o.key}|${F?.key}|${nowIdx}|${Math.round(nowJd * 96)}`;
+        if (sig === this._fcSig) return;
+        this._fcSig = sig;
+        if (!f) { host.innerHTML = '<p class="sv-muted">Forecasting the next 30 nights…</p>'; return; }
+        const moving = BODY_KINDS.has(o.kind);
+        const best = f.best >= 0 ? f.nights[f.best] : null;
+        const lines = [];
+        lines.push(best
+            ? `<b>Best night: ${esc(nightDate(best))}</b> — ${best.hours.toFixed(1)} h above ${f.minAltDeg}° in the dark, peaking ${Math.round(best.peakAltDeg)}° at ${esc(clockOf(best.peakJd))}; Moon ${Math.round(best.moonIllum * 100)}% lit.`
+            : `<b>Not above ${f.minAltDeg}° in darkness on any of the next ${f.nights.length} nights</b> from here.`);
+        if (!moving && o.kind !== 'sun') {
+            const peak = seasonPeakJd(o.raDeg, nowJd - 182.6);
+            if (peak != null) {
+                const d = new Date((peak - 2440587.5) * 86_400_000).toLocaleDateString([], { month: 'long', day: 'numeric' });
+                lines.push(`Its season peaks around <b>${esc(d)}</b>, when it crosses the meridian at local midnight.`);
+            }
+            lines.push(`Fixed among the stars: at the same clock time it sits ${NIGHTLY_DRIFT_DEG.toFixed(2)}° further west each night and rises ${NIGHTLY_EARLIER_MIN.toFixed(1)} min earlier — the Earth's orbit, not the object, is moving.`);
+        } else if (o.kind === 'moon') {
+            lines.push('The Moon moves ~13° east against the stars every day, so it rises ~50 min later each night.');
+        } else if (o.kind === 'planet') {
+            lines.push('A planet moves against the stars as well as with them — its same-time dots drift differently from the stars around it.');
+        }
+        host.innerHTML = `<h4 class="sv-fc-h">Next ${f.nights.length} nights <small>above ${f.minAltDeg}° in darkness</small></h4>
+          <p class="sv-fc-sum">${lines.join(' ')}</p><div id="sv-fc-chart"></div>
+          <p class="sv-fc-note">Columns are nights; time runs down (local solar time at the site). Bands: twilight, then full dark. Blue: usable. Dots: Moon brightness. Tap a night to jump there.</p>`;
+        renderForecastChart(this.$('sv-fc-chart'), f, {
+            nowJd, name: o.name,
+            onPick: (n) => {
+                const t = n.windows.length ? (n.windows[0].start + n.windows[n.windows.length - 1].end) / 2 : n.midnightJd;
+                feature('forecast_pick', { night: n.index });
+                if (this.range !== 'month') this.range = 'month';
+                this.setTime(msFromJd(t));
+            },
+        });
     }
 
     _syncControls() {
@@ -386,6 +729,37 @@ export class SkyViewPage {
         $('sv-look-tools').hidden = this.viewMode !== 'look';
         for (const b of this.doc.querySelectorAll('[data-filter]')) b.classList.toggle('is-on', b.dataset.filter === this.filter);
         for (const i of this.doc.querySelectorAll('input[data-layer]')) i.checked = !!this.layers[i.dataset.layer];
+        // Time machine.
+        const r = RANGES[this.range];
+        slider.min = String(r.min); slider.max = String(r.max); slider.step = String(r.step);
+        slider.value = String(Math.max(r.min, Math.min(r.max, offMin)));
+        for (const b of this.doc.querySelectorAll('[data-range]')) {
+            const on = b.dataset.range === this.range;
+            b.classList.toggle('is-on', on); b.setAttribute('aria-pressed', String(on));
+        }
+        const scale = $('sv-slider-scale');
+        if (scale.dataset.range !== this.range || scale.dataset.anchor !== String(this.anchorMs)) {
+            scale.dataset.range = this.range; scale.dataset.anchor = String(this.anchorMs);
+            const marks = this.range === 'tonight' ? [-12, 0, 12, 24, 36].map((h) => [h * 60, h === 0 ? 'start' : `${h > 0 ? '+' : '−'}${Math.abs(h)} h`])
+                : [0, 0.25, 0.5, 0.75, 1].map((f) => {
+                    const m = r.min + f * (r.max - r.min);
+                    return [m, new Date(this.anchorMs + m * 60000).toLocaleDateString([], { month: 'short', day: 'numeric' })];
+                });
+            scale.innerHTML = marks.map(([, l]) => `<span>${esc(l)}</span>`).join('');
+        }
+        const pb = $('sv-play');
+        pb.textContent = this.playing ? '❚❚ Pause' : '▶ Play';
+        pb.setAttribute('aria-pressed', String(this.playing));
+        pb.classList.toggle('is-on', this.playing);
+        $('sv-speed').value = this.speed;
+        $('sv-minalt').value = String(this.minAltDeg);
+        for (const b of this.doc.querySelectorAll('[data-galfilter]')) b.classList.toggle('is-on', b.dataset.galfilter === this.galFilter);
+        $('sv-time-offset').textContent = (() => {
+            const d = (this.timeMs - this.anchorMs) / 86_400_000;
+            if (this.live) return '';
+            if (Math.abs(d) < 1) return `${d >= 0 ? '+' : '−'}${Math.abs(d * 24).toFixed(1)} h from start`;
+            return `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)} days from start`;
+        })();
     }
 
     // ── controls ─────────────────────────────────────────────────────────────
@@ -394,12 +768,37 @@ export class SkyViewPage {
         const $ = this.$;
         $('sv-time-live').addEventListener('click', () => { feature('live'); this.setTime(Date.now(), { live: true }); });
         $('sv-time-slider').addEventListener('input', (e) => {
+            this.pause();
             this.live = false;
             this.timeMs = this.anchorMs + Number(e.target.value) * 60000;
             this._syncControls();
             if (!this._scrubRaf) this._scrubRaf = requestAnimationFrame(() => { this._scrubRaf = 0; this.recompute(); });
         });
         $('sv-time-tonight').addEventListener('click', () => this.goTonight());
+        for (const b of this.doc.querySelectorAll('[data-range]')) b.addEventListener('click', () => this.setRange(b.dataset.range));
+        $('sv-play').addEventListener('click', () => (this.playing ? this.pause() : this.play()));
+        $('sv-speed').addEventListener('change', (e) => {
+            this.speed = e.target.value;
+            writePrefs({ ...readPrefs(), speed: this.speed });
+            if (SPEEDS[this.speed].perNight && this.range === 'tonight') this.setRange('month');
+        });
+        for (const b of this.doc.querySelectorAll('[data-step]')) b.addEventListener('click', () => { this.pause(); this.step(Number(b.dataset.step)); });
+        $('sv-minalt').addEventListener('change', (e) => {
+            this.minAltDeg = Number(e.target.value);
+            writePrefs({ ...readPrefs(), minAlt: this.minAltDeg });
+            this._fcSig = '';
+            this._scheduleForecast();
+        });
+        for (const b of this.doc.querySelectorAll('[data-galfilter]')) {
+            b.addEventListener('click', () => { this.galFilter = b.dataset.galfilter; this._syncControls(); this._renderGalactic(); });
+        }
+        // Track toggles anywhere in the sidebar (list rows, chips, the card).
+        $('sv-side').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-track]');
+            if (!btn) return;
+            e.stopPropagation();
+            this.toggleTrack(btn.dataset.track);
+        }, true);
         $('sv-quality').addEventListener('change', (e) => {
             this.skyQuality = e.target.value;
             writePrefs({ ...readPrefs(), sky: this.skyQuality });
@@ -431,7 +830,7 @@ export class SkyViewPage {
             e.preventDefault();
             this.select(li.dataset.key, { fly: true });
         };
-        for (const id of ['sv-top-list', 'sv-landmarks']) {
+        for (const id of ['sv-top-list', 'sv-galactic', 'sv-tracks']) {
             $(id).addEventListener('click', pickRow);
             $(id).addEventListener('keydown', pickRow);
         }
@@ -483,8 +882,10 @@ export class SkyViewPage {
         const target = dk.alreadyDark ? Date.now() : msFromJd(dk.start) + 3_600_000;
         this.$('sv-time-msg').textContent = depth === -18 ? ''
             : `No full darkness here tonight — showing ${depth === -12 ? 'nautical' : 'civil'} twilight, the darkest it gets.`;
+        this.pause();
         this.anchorMs = Date.now();
         this.setTime(target);
+        this._scheduleForecast();
     }
 
     _zoom(f) {

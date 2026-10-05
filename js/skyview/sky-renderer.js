@@ -110,6 +110,7 @@ export class SkyRenderer {
         this._drawDeepSky(s, dark);
         if (layers.landmarks) this._drawLandmarks(s);
         this._drawSolarSystem(s);
+        if (s.tracks?.length) this._drawTracks(s);
         ctx.restore();
 
         // Ground over everything below the horizon, then the horizon line.
@@ -530,7 +531,9 @@ export class SkyRenderer {
         for (const [key, color, w] of [[hoverKey, 'rgba(160,200,255,0.75)', 1.2], [selectedKey, '#7fd0ff', 2]]) {
             if (!key) continue;
             const o = findObject(sky, key);
-            if (!o) continue;
+            // Below the horizon there is nothing to point at: the ground covers it
+            // in Look mode, and on the dome it would float outside the rim.
+            if (!o || o.altDeg < -0.5) continue;
             const p = this._p(view, frame, raDecToVec(o.raDeg, o.decDeg));
             if (!p) continue;
             ctx.save();
@@ -547,6 +550,92 @@ export class SkyRenderer {
             }
             ctx.restore();
         }
+    }
+
+    /**
+     * Tracked objects (≤ 3, fixed colour slot per object — js/skyview/skyview-page.js
+     * TRACK_COLORS, validated for CVD on this sky). Two layers, both computed
+     * by sky-predict.js, never here:
+     *   arc     the path across the sky through tonight's darkness, with a tick
+     *           and label on every whole hour of the device clock
+     *   nightly the object at THIS clock time on each coming night — for a
+     *           galactic object a slow westward march (0.99°/night, the sidereal
+     *           drift); for the Moon and planets, their own motion on top
+     * Labels wear text ink; the colour lives on the mark (identity, not text).
+     */
+    _drawTracks(s) {
+        const { view, tracks, layers } = s;
+        const ctx = this.ctx;
+        const P = (p) => project(view, altAzToEnu(p.altDeg, p.azDeg));
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (const t of tracks) {
+            if (layers.trackArc && t.arc?.length) {
+                ctx.strokeStyle = t.color;
+                ctx.globalAlpha = 0.85;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                let first = true;
+                for (const q of t.arc) {
+                    const p = q.altDeg > -3 ? P(q) : null;
+                    if (!p) { first = true; continue; }
+                    if (first) { ctx.moveTo(p.x, p.y); first = false; } else ctx.lineTo(p.x, p.y);
+                }
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+                ctx.font = '600 10px system-ui, sans-serif';
+                ctx.textBaseline = 'middle';
+                for (const tk of t.ticks ?? []) {
+                    if (tk.altDeg < 0) continue;
+                    const p = P(tk);
+                    if (!p) continue;
+                    ctx.fillStyle = t.color;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = 'rgba(4,6,15,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+                    ctx.fillStyle = 'rgba(230,236,250,0.9)';
+                    ctx.fillText(tk.label, p.x + 6, p.y - 6);
+                }
+            }
+            // The tracked object is always named, at where it is now, in text ink
+            // beside a ring in its colour — even if the label pass dropped it.
+            const now = t.nightly?.[0];
+            if (now && now.altDeg > 0) {
+                const p = P(now);
+                if (p) {
+                    ctx.strokeStyle = t.color; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI * 2); ctx.stroke();
+                    ctx.font = '700 11px system-ui, sans-serif';
+                    ctx.textBaseline = 'middle';
+                    const w = ctx.measureText(t.name).width;
+                    ctx.fillStyle = 'rgba(8,12,28,0.78)';
+                    ctx.fillRect(p.x + 11, p.y - 17, w + 8, 15);
+                    ctx.fillStyle = '#eef3ff';
+                    ctx.fillText(t.name, p.x + 15, p.y - 9);
+                }
+            }
+            if (layers.trackNights && t.nightly?.length) {
+                const n = t.nightly.length;
+                for (let k = n - 1; k >= 0; k--) {
+                    const q = t.nightly[k];
+                    if (q.altDeg < 0) continue;
+                    const p = P(q);
+                    if (!p) continue;
+                    ctx.globalAlpha = 1 - 0.6 * (k / Math.max(1, n - 1));
+                    ctx.fillStyle = t.color;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, k === 0 ? 5 : 3.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.globalAlpha = 1;
+                    ctx.strokeStyle = 'rgba(4,6,15,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+                    if (q.label) {
+                        ctx.fillStyle = 'rgba(230,236,250,0.85)';
+                        ctx.font = '500 10px system-ui, sans-serif';
+                        ctx.fillText(q.label, p.x + 7, p.y + 9);
+                    }
+                }
+            }
+        }
+        ctx.restore();
     }
 
     /** Nearest drawn object within `radiusPx` of (x, y), preferring higher priority on ties. */

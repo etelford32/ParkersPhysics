@@ -53,6 +53,35 @@ Gates: `node tests/skyview-engine.mjs tests/skyview-catalog.mjs` (CI:
    the device's zone WITH the zone name (no tz database for an arbitrary
    lat/lon).
 
+## 2b. The time machine (2026-10-05, second pass)
+
+The page forecasts, not just reports. `js/skyview/sky-predict.js` (PURE,
+`tests/skyview-predict.mjs`) + `js/skyview/skyview-forecast-ui.js` (DOM).
+
+8. **A night is local-mean-solar noon → noon** at the SITE, and after 06:00
+   LMT the upcoming evening is night 0. Device-clock times are printed with
+   their zone; the calendar's vertical axis is the site's solar time.
+9. **One grid per forecast, anchored at the slider's START.** `buildNightGrid`
+   samples 30 nights × 97 steps once (~60 ms): frame matrix, Sun altitude,
+   Moon. A fixed object then costs one 3×3 multiply per sample, so all ~120
+   Galaxy Map objects forecast in a few ms. Scrubbing never re-anchors (only
+   Live, Tonight and a new location do), so dragging through a month never
+   rebuilds what it is reading.
+10. **Galactic objects are FIXED; the sky moves because the Earth does.** At the
+    same clock time a fixed object is 0.9856° further west each night (the
+    sidereal drift) — that is the motion "same time, each night" playback and
+    the nightly track dots show. The Moon and planets are evaluated per sample
+    (`bodyTarget`) because they also move against the stars.
+11. **Tracks: at most 3, colour fixed to the OBJECT.** The first three dataviz
+    slots validate all-pairs for colour-vision deficiency on this sky (worst
+    CVD ΔE 9.4); a fourth would pair yellow with orange, which fails. The 4th
+    track drops the oldest; an untracked object's colour is freed, never
+    shifted onto the survivors.
+12. **"Best night" is a stated heuristic** (usable hours × (1 − 0.7 · Moon lit ·
+    Moon-up fraction)); the calendar and table print hours and the Moon
+    separately. The season date is when the object is opposite the Sun (it
+    crosses the meridian at local midnight), from the Sun's own RA.
+
 ## 3. Scars (each one measured while building — don't re-learn them)
 
 - **The galaxy map had ten misplaced stars.** ε Eridani 8.7° off, η Eridani
@@ -75,6 +104,10 @@ Gates: `node tests/skyview-engine.mjs tests/skyview-catalog.mjs` (CI:
 - **The outer Milky Way contour wraps the RA seam** (two rings that each go
   all the way round), so it is rasterised by meridian rays from the south
   celestial pole (outside the band), not filled as planar polygons.
+- **Same-time drift is NOT an azimuth change.** Two nights at one clock time
+  move a star 2 × 0.9856° in HOUR ANGLE, which is ≈ 1.54° on the sky for Vega
+  but only 0.77° of azimuth (high stars sweep azimuth slowly). The browser gate
+  measures great-circle separation.
 - **A grid row is as tall as its tallest cell.** The chart grew to the
   sidebar's height and the dome overflowed the screen; the stage is now
   `align-self:start` + sticky and sized from the viewport.
@@ -93,3 +126,7 @@ Gates: `node tests/skyview-engine.mjs tests/skyview-catalog.mjs` (CI:
 - **Weather.** Cloud cover from the point forecast already used by
   `js/local-sky.js` — "visible" should be able to say "if the clouds part".
 - **Look-mode pinch zoom** on touch (buttons and keys exist).
+- **Year view** of the calendar (12 months × the season curve) and an
+  "observing plan" export (ICS / CSV of tonight's windows for tracked objects).
+- **Retrograde loops** drawn against the stars for planets (RA/Dec trail over
+  months, not alt/az) — the kernel's `bodyTarget` already supports it.

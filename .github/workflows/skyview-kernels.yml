@@ -9,6 +9,11 @@ name: skyview-kernels
 #                         of date, the inner series J2000), magnitudes,
 #                         refraction/airmass, limiting magnitude, rise/set,
 #                         and both projections' handedness
+#   skyview-predict.mjs   the forecasting kernel: night anchoring on local
+#                         mean solar time, dusk/dawn vs the refined solver,
+#                         the sidereal drift (0.9856°/night, 3.93 min earlier),
+#                         circumpolar / never-rising windows, Sirius & Vega
+#                         seasons (1 Jan / 1 Jul), the Moon's daily motion
 #   skyview-catalog.mjs   the baked file vs a FRESH extraction from
 #                         galactic-map.html (drift), every galaxy-map star
 #                         within 0.2° of its Hipparcos position, and the
@@ -70,5 +75,7 @@ jobs:
           node-version: '22'
       - name: sky engine + projection
         run: node tests/skyview-engine.mjs
+      - name: forecast (nights, windows, sidereal drift, seasons)
+        run: node tests/skyview-predict.mjs
       - name: catalogue (drift vs galactic-map.html, map star positions)
         run: node tests/skyview-catalog.mjs

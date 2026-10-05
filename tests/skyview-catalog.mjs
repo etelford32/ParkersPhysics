@@ -110,7 +110,13 @@ const cat = unpackCatalog(json);
     assert.ok(r.every((o) => o.altDeg > 0), 'nothing below the horizon is ranked');
     assert.ok(!r.some((o) => o.kind === 'landmark'), 'landmarks are never ranked');
     assert.ok(r.slice(0, 10).every((o) => o.vis.margin > 0), 'the top 10 are all naked-eye visible');
-    assert.ok(r.every((o) => o.kind !== 'star' || o.mag <= RANK_STAR_MAG), 'star candidates respect the cut');
+    assert.ok(r.every((o) => o.kind !== 'star' || o.mag <= RANK_STAR_MAG || o.galactic), 'star candidates respect the cut (galaxy-map stars excepted)');
+    // Every galaxy-map object resolves to a sky object or a landmark — each has a card.
+    const keys = new Set([...sky.objects, ...sky.landmarks].map((o) => o.key));
+    for (const g of cat.galactic) {
+        const key = g.hip != null ? `hip:${g.hip}` : g.dso != null ? `dso:${g.dso}` : `gal:${g.id}`;
+        assert.ok(keys.has(key), `galaxy-map ${g.id} has a sky object (${key})`);
+    }
     assert.ok(sky.landmarks.length > 40, 'galaxy-map landmarks are placed');
     const vega = r.find((o) => o.hip === 91262);
     assert.ok(vega && vega.galactic?.id === 'vega' && vega.galactic.link === 'vega.html', 'Vega carries its galaxy-map record');

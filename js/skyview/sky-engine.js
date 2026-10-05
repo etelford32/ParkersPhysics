@@ -444,14 +444,17 @@ const eclJ2000ToEq = (x, y, z) => eclipticToEquatorial(x, y, z, OBLIQUITY_J2000_
  * Each carries the same fields the catalogue objects do (raDeg/decDeg J2000,
  * mag, kind) plus the physical extras the card prints.
  */
-export function solarSystemObjects(frame) {
+export function solarSystemObjects(frame, { only = null } = {}) {
     const jd = frame.jd;
     const out = [];
     const earth = earthHelioJ2000(jd);
     const sunDir = sunGeoDirectionJ2000(jd);
+    // `only` computes ONE body (the forecast samples a moving object thousands
+    // of times; all nine cost ~86 µs a sample, one planet a fraction of that).
+    const want = (id) => only == null || only === id;
 
     // Sun
-    {
+    if (want('sun')) {
         const ecl = { x: sunDir.x * sunDir.distAU * AU_KM, y: sunDir.y * sunDir.distAU * AU_KM, z: sunDir.z * sunDir.distAU * AU_KM };
         const eq = eclJ2000ToEq(ecl.x, ecl.y, ecl.z);
         const t = topocentricRaDec(frame, [eq.x, eq.y, eq.z]);
@@ -464,7 +467,7 @@ export function solarSystemObjects(frame) {
     }
 
     // Moon (phase from neo-space so it matches every other Moon on the site)
-    {
+    if (want('moon')) {
         const m = moonGeoJ2000(jd);
         const ph = moonPhase(jd);
         const eq = eclJ2000ToEq(m.x * AU_KM, m.y * AU_KM, m.z * AU_KM);
@@ -481,6 +484,7 @@ export function solarSystemObjects(frame) {
 
     // Planets
     for (const p of PLANETS) {
+        if (!want(p.id)) continue;
         const h = heliocentricJ2000(p.id, jd);
         const g = { x: h.x - earth.x, y: h.y - earth.y, z: h.z - earth.z };
         const rAU = Math.hypot(h.x, h.y, h.z);

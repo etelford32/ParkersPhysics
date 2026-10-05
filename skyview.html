@@ -222,6 +222,61 @@ select.sv-input { flex:0 1 auto; }
 .sv-lm-name { color:#ffc4ee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sv-lm-sub { color:#8fa0c4; white-space:nowrap; font-size:.68rem; }
 
+/* Time machine */
+.sv-tm { margin-top:10px; padding-top:9px; border-top:1px solid rgba(110,150,255,.14); display:grid; gap:6px; }
+.sv-tm-row { justify-content:space-between; }
+.sv-tm .sv-seg button { min-height:30px; padding:5px 9px; }
+.sv-tm-off { font: .66rem ui-monospace, SFMono-Regular, Menlo, monospace; color:#ffd27a; }
+.sv-play { min-width:86px; }
+.sv-play.is-on { background:rgba(255,210,122,.12); color:#ffe2a0; border-color:rgba(255,210,122,.45); }
+#sv-speed { flex:1 1 120px; }
+#sv-slider-scale { display:flex; justify-content:space-between; font-size:.62rem; color:#7f8aa8; }
+.sv-tracks-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:.72rem; }
+.sv-tracks-h { color:#8792ad; }
+#sv-tracks { display:flex; gap:6px; flex-wrap:wrap; }
+.sv-trk-chip { display:inline-flex; align-items:center; gap:4px; border:1px solid rgba(255,255,255,.14); border-radius:999px; padding:1px 4px 1px 8px; }
+.sv-trk-chip i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+.sv-trk-chip button { background:none; border:0; color:#dfe6f6; font:600 .72rem system-ui, sans-serif; cursor:pointer; padding:3px 2px; min-height:24px; }
+.sv-trk-x { color:#8792ad !important; padding:3px 6px !important; }
+
+/* Galactic targets */
+.sv-gal-tools { justify-content:space-between; margin-bottom:4px; }
+.sv-gal-tools .sv-filters { margin-bottom:0; }
+.sv-minalt-l { font-size:.7rem; color:#8792ad; display:inline-flex; gap:5px; align-items:center; }
+.sv-gal-intro { font-size:.68rem; margin-bottom:6px; }
+.sv-gal-list { list-style:none; display:grid; gap:3px; max-height:420px; overflow:auto; }
+.sv-gal-row { display:grid; grid-template-columns:minmax(0,1fr) auto 30px; gap:8px; align-items:center; padding:5px 6px; border-radius:7px; cursor:pointer; border:1px solid transparent; }
+.sv-gal-row:hover, .sv-gal-row:focus-visible { border-color:rgba(127,208,255,.3); outline:none; }
+.sv-gal-row.is-selected { border-color:rgba(127,208,255,.7); background:rgba(127,208,255,.07); }
+.sv-gal-main { display:flex; flex-direction:column; min-width:0; }
+.sv-gal-name { font-weight:700; color:#eaf2ff; font-size:.78rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sv-gal-sub { font-size:.66rem; color:#8fa0c4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sv-spark { display:block; }
+.sv-track-btn { width:30px; height:30px; border-radius:50%; border:1px solid rgba(255,255,255,.18); background:transparent; color:#9fb0cc; cursor:pointer; font-size:.8rem; }
+.sv-track-btn.is-on { color:var(--trk, #7fd0ff); border-color:var(--trk, #7fd0ff); }
+.sv-card-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.sv-card-head .sv-card-kind { flex-basis:100%; }
+.sv-card-track { margin-left:auto; min-height:28px; padding:4px 10px; font-size:.68rem; }
+
+/* Forecast chart */
+#sv-card-fc { margin-top:10px; }
+.sv-fc-h { font-size:.74rem; color:#b9c6e4; font-weight:700; }
+.sv-fc-h small { color:#7f8aa8; font-weight:500; margin-left:4px; }
+.sv-fc-sum { font-size:.72rem; color:#a9b6d0; line-height:1.5; margin:5px 0 6px; }
+.sv-fc-sum b { color:#eaf2ff; }
+.sv-fc-wrap { position:relative; }
+.sv-fc-svg { display:block; background:#070a16; border-radius:8px; }
+.sv-fc-tip { position:absolute; z-index:3; pointer-events:none; width:170px; background:rgba(6,9,22,.95);
+    border:1px solid rgba(127,208,255,.35); border-radius:6px; padding:5px 8px; font-size:.68rem; color:#a9b6d0; display:grid; gap:1px; }
+.sv-fc-tip[hidden] { display:none; }
+.sv-fc-tip b { color:#eaf2ff; }
+.sv-fc-note { font-size:.64rem; color:#7f8aa8; margin-top:5px; line-height:1.4; }
+.sv-fc-table { margin-top:5px; font-size:.68rem; }
+.sv-fc-table summary { cursor:pointer; color:#8fd0ff; }
+.sv-fc-table table { width:100%; border-collapse:collapse; margin-top:5px; }
+.sv-fc-table th, .sv-fc-table td { text-align:left; padding:2px 4px; border-bottom:1px solid rgba(255,255,255,.06); color:#a9b6d0; }
+.sv-fc-table th { color:#8792ad; font-weight:600; }
+
 /* Method */
 .sv-method { font-size:.72rem; color:#97a3bf; line-height:1.55; }
 .sv-method p + p { margin-top:6px; }
@@ -251,9 +306,10 @@ select.sv-input { flex:0 1 auto; }
       <span class="sv-hero-chip" id="sv-hero-limit">—</span>
     </div>
     <p>
-      The sky above <b>you</b>, right now — ranked by what you can actually see through tonight's twilight,
-      moonlight, air and light pollution. The <a href="galactic-map.html">Galaxy Map</a>'s black holes and
-      superclusters are drawn where they really are in your sky, even though no eye can see them.
+      The sky above <b>you</b> — right now, and for the next 30 nights. Ranked by what you can actually see through
+      twilight, moonlight, air and light pollution; play the clock forward to watch it turn, and track any of the
+      <a href="galactic-map.html">Galaxy Map</a>'s objects to see when and where it will be up, night by night.
+      Its black holes and superclusters are drawn where they really are, even though no eye can see them.
     </p>
   </section>
 
@@ -284,6 +340,7 @@ select.sv-input { flex:0 1 auto; }
           <li><i style="border:1px solid #ff6fd8;transform:rotate(45deg) scale(.8)"></i>Galaxy-map object (invisible to the eye)</li>
         </ul>
         <p>Dim stars are up there but fainter than tonight's limit. The Sun and Moon are drawn larger than their true half-degree until you zoom in.</p>
+        <p><b>Tracks:</b> a line is the object's path through tonight's darkness, ticked on the hour; dots are where it will be at this same clock time on each coming night (fading forward).</p>
       </details>
       <div id="sv-tip" hidden></div>
       <div id="sv-cursor"></div>
@@ -297,6 +354,8 @@ select.sv-input { flex:0 1 auto; }
       <label><input type="checkbox" data-layer="galactic"> Galactic plane</label>
       <label><input type="checkbox" data-layer="ecliptic"> Ecliptic</label>
       <label><input type="checkbox" data-layer="grid"> Alt/az grid</label>
+      <label><input type="checkbox" data-layer="trackArc"> Tracked: tonight's path</label>
+      <label><input type="checkbox" data-layer="trackNights"> Tracked: same time, coming nights</label>
     </div>
   </main>
 
@@ -324,8 +383,31 @@ select.sv-input { flex:0 1 auto; }
           <option value="city">City centre (3.0)</option>
         </select>
       </div>
-      <input id="sv-time-slider" type="range" min="-720" max="2160" step="10" value="0" aria-label="Shift the time">
-      <div class="sv-slider-scale"><span>−12 h</span><span>now</span><span>+12 h</span><span>+24 h</span><span>+36 h</span></div>
+
+      <div class="sv-tm" role="group" aria-label="Time machine">
+        <div class="sv-row sv-tm-row">
+          <span class="sv-seg" role="group" aria-label="Time range">
+            <button type="button" data-range="tonight">Tonight</button><button type="button" data-range="week">7 nights</button><button type="button" data-range="month">30 nights</button>
+          </span>
+          <span id="sv-time-offset" class="sv-tm-off"></span>
+        </div>
+        <input id="sv-time-slider" type="range" min="-720" max="2160" step="5" value="0" aria-label="Move through time">
+        <div class="sv-slider-scale" id="sv-slider-scale"></div>
+        <div class="sv-row sv-tm-row">
+          <button type="button" class="sv-btn" data-step="-1440" title="Same clock time, previous night" aria-label="Previous night">«</button>
+          <button type="button" class="sv-btn" data-step="-60" title="One hour back" aria-label="One hour back">‹</button>
+          <button type="button" class="sv-btn sv-play" id="sv-play" aria-pressed="false">▶ Play</button>
+          <button type="button" class="sv-btn" data-step="60" title="One hour forward" aria-label="One hour forward">›</button>
+          <button type="button" class="sv-btn" data-step="1440" title="Same clock time, next night" aria-label="Next night">»</button>
+          <select id="sv-speed" class="sv-input" aria-label="Playback speed">
+            <option value="10m">10 min / s</option>
+            <option value="1h">1 h / s</option>
+            <option value="4h">4 h / s</option>
+            <option value="night" title="One night per step, at the same clock time">Nightly</option>
+          </select>
+        </div>
+        <div class="sv-tracks-row"><span class="sv-tracks-h">Tracking</span><span id="sv-tracks"></span></div>
+      </div>
       <div id="sv-time-msg"></div>
       <div id="sv-env"></div>
     </section>
@@ -337,19 +419,34 @@ select.sv-input { flex:0 1 auto; }
         <button type="button" data-filter="solar">Solar system</button>
         <button type="button" data-filter="stars">Stars</button>
         <button type="button" data-filter="deep">Deep sky</button>
+        <button type="button" data-filter="galaxy">Galaxy map</button>
       </div>
       <ol id="sv-top-list"></ol>
       <div id="sv-top-count"></div>
     </section>
 
+    <section class="sv-panel" aria-labelledby="sv-h-gal">
+      <h2 id="sv-h-gal">Galactic targets <small id="sv-galactic-count">from the Galaxy Map</small></h2>
+      <div class="sv-row sv-gal-tools">
+        <div class="sv-filters" role="group" aria-label="Filter galactic targets">
+          <button type="button" data-galfilter="all">All</button>
+          <button type="button" data-galfilter="eye">Naked eye</button>
+          <button type="button" data-galfilter="instrument">Instrument only</button>
+        </div>
+        <label class="sv-minalt-l">above
+          <select id="sv-minalt" class="sv-input" aria-label="Minimum altitude">
+            <option value="0">0°</option><option value="10">10°</option><option value="20">20°</option><option value="30">30°</option>
+          </select>
+        </label>
+      </div>
+      <p class="sv-muted sv-gal-intro">Ranked by hours above the floor in tonight's dark, then by how soon. Bars: the next 30 nights. ○ tracks its path on the chart.</p>
+      <div id="sv-galactic"><p class="sv-muted">—</p></div>
+    </section>
+
     <section class="sv-panel" aria-labelledby="sv-h-card" aria-live="polite">
       <h2 id="sv-h-card">Selected</h2>
       <div id="sv-card"></div>
-    </section>
-
-    <section class="sv-panel" aria-labelledby="sv-h-lm">
-      <h2 id="sv-h-lm">Up there, but invisible <small>from the Galaxy Map</small></h2>
-      <div id="sv-landmarks"><p class="sv-muted">—</p></div>
+      <div id="sv-card-fc"></div>
     </section>
 
     <section class="sv-panel sv-method" aria-labelledby="sv-h-method">
@@ -360,6 +457,12 @@ select.sv-input { flex:0 1 auto; }
       <p><b>Ranking.</b> Each object's brightness, dimmed by the extra air it shines through, is compared with the
         faintest magnitude your sky allows right now. The difference — in magnitudes — is the ranking. Galaxies and
         nebulae pay a stated penalty for spreading their light over a large area, and objects near the Sun pay for glare.</p>
+      <p><b>Prediction.</b> Each night is sampled noon to noon at your site; a galactic object is fixed among the
+        stars, so its whole motion is the Earth's — it turns once per <i>sidereal</i> day (23 h 56 m), which is why at
+        the same clock time everything sits 0.99° further west each night and rises 3.9 minutes earlier. The Moon and
+        planets are re-computed at every step because they also move against the stars. "Usable" means above your
+        chosen altitude while the Sun is 18° below the horizon; "best night" weighs those hours by moonlight (a stated
+        rule of thumb — the hours and the Moon are printed separately).</p>
       <p><b>What is approximate.</b> The visibility limit is an empirical twilight + moonlight + light-pollution
         model, not a radiative-transfer calculation. Nutation, aberration and proper motion (all under a few
         arcminutes) are left out. Planet magnitudes are the Astronomical Almanac's (Mallama &amp; Hilton 2018).</p>
