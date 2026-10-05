@@ -10,9 +10,11 @@
  * clickable:
  *   - the two NOAA history feeds the forecast module fetches at boot are
  *     served from the upper-atmosphere fixtures (same shapes the page's
- *     client reads). Without that, a sandbox with no egress logs two 503
- *     "Failed to load resource" lines, and a filter wide enough to hide a
- *     feed 503 would also hide a 404 on one of the page's own modules.
+ *     client reads), and the telemetry beacon gets a 204 (the local dev
+ *     server does not implement /api/telemetry/log). Without that, a
+ *     sandbox with no egress logs "Failed to load resource" 503/501 lines,
+ *     and a filter wide enough to hide those would also hide a 404 on one
+ *     of the page's own modules.
  *   - the cookie-consent banner (js/cookie-consent.js, fixed to the bottom
  *     of the viewport) is dismissed, or it swallows clicks on controls that
  *     scroll under it.
@@ -29,6 +31,8 @@ async function routeFeeds(page, nowMs = Date.now()) {
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     await page.route('**/api/noaa/f107-history**', (r) => json(r, f107History(nowMs)));
     await page.route('**/api/noaa/ap-history**', (r) => json(r, apHistory(nowMs)));
+    // js/telemetry.js beacons here; the local dev server answers 501.
+    await page.route('**/api/telemetry/**', (r) => r.fulfill({ status: 204, body: '' }));
 }
 
 async function boot(page) {
