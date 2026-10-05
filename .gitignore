@@ -102,3 +102,4 @@ rust-shielding/target/
 rust-star-collider/target/
 rust-ring-current/target/
 rust-flux-rope/target/
+.dsmc-local/

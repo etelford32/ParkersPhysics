@@ -18,6 +18,10 @@
  * The test URL uses the engine's ?api=… override so we don't have to
  * mutate the HTML or inject a script — just pass ?api=http://localhost:8001.
  *
+ * No Docker? `scripts/dsmc-backend-local.sh` does the same seed + serve
+ * natively (venv in .dsmc-local/); the suite's beforeAll names it when the
+ * API is down.
+ *
  * Env:
  *   TEST_BASE_URL   dev-server URL (default http://localhost:8000)
  *   DSMC_API_URL    DSMC API URL   (default http://localhost:8001)
@@ -38,6 +42,19 @@ async function pillClasses(page) {
 }
 
 test.describe('upper-atmosphere — live DSMC backend', () => {
+
+    // Without the backend every test below fails on a bare ECONNREFUSED or a
+    // pill that never leaves "Client". Say what is missing and how to get it
+    // instead. This FAILS (never skips): the suite's whole job is the live path.
+    test.beforeAll(async ({ request }) => {
+        let ok = false;
+        try { ok = (await request.get(`${DSMC_API}/health`, { timeout: 5_000 })).status() < 500; } catch (_) { /* refused */ }
+        if (!ok) {
+            throw new Error(`DSMC API not reachable at ${DSMC_API}. Start it with `
+                + '`docker compose -f dsmc/docker-compose.ci.yml up -d` (after seeding — see that file), '
+                + 'or without Docker: `scripts/dsmc-backend-local.sh` (stop: `scripts/dsmc-backend-local.sh stop`).');
+        }
+    });
 
     test('backend answers /health', async ({ request }) => {
         const r = await request.get(`${DSMC_API}/health`);
@@ -117,12 +134,28 @@ test.describe('upper-atmosphere — live DSMC backend', () => {
         }, { timeout: 10_000 });
 
         // Move F10.7 slider and let the debounced backend call resolve.
+        // The page draws the LOCAL profile immediately (the pill honestly
+        // reads "Client" for that frame) and asks the backend 220 ms later;
+        // what this test pins is that the backend IS asked for the new
+        // F10.7 and that its answer puts the pill back on SPARTA. It waits
+        // on those two events, not on a fixed sleep: a fixed 1.2 s failed
+        // on a software rasteriser where the answer landed at ~3.6 s
+        // (2026-10-05) while the behaviour was correct.
+        const asked = page.waitForResponse(
+            (r) => r.url().startsWith(DSMC_API) && /\/v1\/atmosphere\/profile\?/.test(r.url())
+                && new URL(r.url()).searchParams.get('f107') === '200',
+            { timeout: 15_000 });
         await page.fill('#ua-f107', '200');
         await page.dispatchEvent('#ua-f107', 'input');
-        await page.waitForTimeout(1200);
+        const res = await asked;
+        expect(res.ok(), 'backend answered the slider-driven profile request').toBe(true);
 
+        await page.waitForFunction(() => {
+            const l = document.querySelector('#ua-source-pill .ua-source-label')?.textContent || '';
+            return /SPARTA/i.test(l) && window.__ua.ui.state.f107 === 200;
+        }, { timeout: 15_000 }).catch(() => {});
         const label = await pillLabel(page);
-        expect(label, 'pill still reports SPARTA after a slider change')
+        expect(label, 'pill reports SPARTA again once the backend answers the slider change')
             .toMatch(/SPARTA/i);
     });
 });

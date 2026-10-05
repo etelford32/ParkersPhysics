@@ -163,10 +163,30 @@ export class UpperAtmosphereUI {
         // prefer discrete steps); Stop-follow appears whenever a
         // follow is engaged.
         const { camResetBtn, camTopBtn, camZoomInBtn, camZoomOutBtn, camStopFollowBtn } = this.el;
-        camResetBtn?.addEventListener('click', () => {
+        // Reset is the escape hatch from ANY camera state (follow lock,
+        // fly, explore, transit, a pending fly-in): the globe drops every
+        // lock and lands in the planet orbit frame itself, so the UI only
+        // has to repaint the mode chips.
+        const resetCamera = () => {
             this.globe.resetCameraView?.();
-            // setMode after resetView so the orbit pose is the default.
-            setTimeout(() => setMode('orbit'), 1000);
+            setMode(this.globe.getCameraMode?.() || 'orbit');
+            this._refreshFollowUi();
+        };
+        camResetBtn?.addEventListener('click', resetCamera);
+        // Keyboard: R = reset the camera; Esc = let go of a follow lock
+        // (Esc still leaves immersive first — that handler owns it there).
+        document.addEventListener('keydown', (e) => {
+            const tag = (e.target?.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.key === 'r' || e.key === 'R') {
+                e.preventDefault();
+                resetCamera();
+            } else if (e.key === 'Escape' && this.globe.isFollowing?.()
+                       && !document.body.classList.contains('ua-immersive-on')) {
+                this.globe.stopFollowing?.();
+                this._refreshFollowUi();
+            }
         });
         camTopBtn?.addEventListener('click', () => {
             // Top-view sits high above the north pole; orbit mode lets

@@ -892,6 +892,136 @@ frame join and the two scales:
   frame — gated), upstream (30 R⊕ up the Sun line looking back), side-on;
   each orbits its pivot about ecliptic north, through the same rebuilt frame.
 
+### 9.11 Where the satellites sit, and a way home for the camera (2026-10-04)
+
+The page drew the tracked catalogue as an eight-checkbox "Live catalog
+overlay": dots and nothing else. You could not see a shell or a plane, GPS and
+GEO "loaded" behind the home camera (3.4 R⊕; GPS is at 4.2, GEO at 6.6), and
+four things were wrong underneath.
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-sat-suites.js` | PURE: the suite catalogue (21 CelesTrak groups in 8 categories), mean elements from TLE or OMM with SGP4's own a/n recovery, secular J2 node/perigee/anomaly drift, orbit rings, TEME → scene (coords.js `eciToEcef`, transcribed), the plane-spreading ring sample, the altitude ladder over the ENGINE's layer table, regimes, `framingDistance` on the binding half-angle | `node tests/upper-atmosphere-sat-suites.mjs` (11, against the committed SGP4 WASM) |
+| `js/upper-atmosphere-sat-suites-panel.js` | DOM: suites by category with counts, Orbit rings, Frame LEO / MEO / GEO / Fit shown, the ladder (one series, one hue, bands labelled, caption = table view) | `tests/upper-atmosphere-satellites.spec.js` (6) |
+| globe | `setSuiteRingsVisible`, `setFocusSatellite`, `getSuiteLadder`, `frameSatellites`, `forgetCatalogGroup` | same |
+
+**Measured, not assumed.** A ring is the MEAN orbit; SGP4's short-period
+terms move the real satellite about it. Worst SGP4-to-ring over 24 h: ISS
+7.7 km, GPS 8.7 km, Molniya 42 km. Without the J2 drift the ISS ring misses by
+471 km in a day (the negative control). In the browser the dots sit within
+2 km of the page's own SGP4 at the scene instant and every ring passes within
+25 km of its dot, on rebuilt AND rotation-only frames (rings are built once in
+the inertial frame and turned by `rotation.y = −GMST`; rebuilt every 10 sim-min
+for the J2 drift).
+
+**Fixed on the way:**
+- **The catalogue ran on the WALL clock** (`tick(Date.now())`) while the
+  probes, the sun and the terminator read the bus: at warp or under a scrub
+  every dot sat hours away from its own day/night. It now ticks at
+  `_sceneTimeMs()`; the spec's control puts the old tick back with the bus 3 h
+  away and must miss by > 500 km.
+- **The tracker's dots were uncapped, untextured squares** (0.008 R⊕ ≈ 51 km
+  world size) — the §9.5 rule had never reached them. `capPointSize` 6 px +
+  the disc.
+- **Hidden suites still answered the cursor** (their slots draw in the hidden
+  colour but stayed in the raycast set).
+- **A suite that failed to load stuck** as an empty "shown" group forever; it
+  is now forgotten and re-fetched on the next tick of its box.
+
+**The camera escape (user report 2026-10-04: "stuck in this visual").** Visit
+ISS flies in and LOCKS follow; while following, the (symbolically scaled) ISS
+fills much of the frame, so every click the visitor made to look around landed
+on it and re-started the fly-in + lock. And the lock itself was scheduled by a
+`setTimeout` at the end of the fly-in, so a Reset pressed during the fly-in was
+overridden a second later. Now: deferred follows are GENERATION-checked and
+any Reset / Top / Stop-follow / mode change cancels them; clicking the target
+already being followed is a no-op; Reset drops every lock (follow, transit,
+explore path) and lands in the planet orbit frame itself (no racing
+`setTimeout(setMode('orbit'))`); **R** resets from anywhere and **Esc** lets go
+of a follow. The spec's control removes the cancellation and the lock must
+re-engage.
+
+**Full screen** was a bare ⛶ glyph in the preset row. It is now the HUD's
+largest control ("⛶ Full screen  F", ≥ 44 px), **F** toggles it, and the label
+flips to "Exit full screen".
+
+### 9.12 One Earth radius, one propagator per object (2026-10-04)
+
+§9.11 left a known split: the shared tracker drew at 6378.135 km per scene
+unit in a 6371 km scene. Auditing every satellite path on the page for the
+same kind of drift turned up four views of the SAME objects that disagreed.
+
+| where | what it did | now |
+|---|---|---|
+| catalogue dots | `new SatelliteTracker(scene, 1.0)` ⇒ km / 6378.135 — every dot 7 km low against the shells, probes and camera readout | `TRACKER_EARTH_RADIUS` ⇒ km / 6371 |
+| named probes with a live TLE (ISS, Hubble, …) | two-body circle, node FROZEN at the TLE epoch (ISS regresses −5°/day), radius from the relay's WGS-72 mean altitude drawn as a page altitude | SGP4 on the probe's own lines (the dots' propagator); mean elements + J2 until the WASM answers; orbit loop = the kernel's J2 ring, re-sampled every 10 sim-min |
+| debris sample | same frozen-node circle, anchored at boot wall-clock | mean elements + J2 (`inertialSceneAt` with a perifocal table) |
+| Walker constellation shells | radius 6371 + h, period from 6378.135 + h | one radius for both (`_rScene`) |
+| fleet ribbons | WASM `alt_km` (WGS-72) drawn as a page altitude | `catalogAltToScene` |
+| trajectory analyzer / fleet MC / backtest | page density profile looked up at the WASM's WGS-72 altitude — ρ read 7 km low, **~12–15 % dense** at 400 km against the probe tooltip for the same object | `profileToRhoGrid` hands the grid over in the WASM's convention; `dragPressureSeries` converts back |
+| printed altitudes (fleet card, story card, analysis panel) | WGS-72 | page altitude |
+
+`js/upper-atmosphere-datum.js` is the ONE seam: the page's datum is the
+column kernel's 6371 (drawn sphere, engine, camera, flight kernel); WGS-72 is
+what SGP4, the relay and the WASM drag integrator speak; analysis modules
+stay internally in WGS-72 and convert only where they hand something to a
+view. The kernel's GMST now comes from `js/sun-altitude.js` (its header asks
+for no third copy).
+
+The conjunction screener now reads every object through the same
+`_lookupProbePositionAt` its drawn dot uses; to keep assets × debris × steps
+affordable each object's track is computed ONCE per scan and shared by its
+pairs (it used to re-propagate both sides per pair).
+
+**Gates.** `node tests/upper-atmosphere-datum.mjs` (inverses, one radius,
+the tracker hand-off, and the analyzer seam with a negative control at the
+raw WGS-72 altitude: +15 %). In the browser, "one satellite, one place": the
+named ISS probe, NORAD 25544 in the stations suite, the probe's own orbit loop
+and a flight seeded from its TLE coincide — with two negative controls, the
+legacy frozen-node orbit on a 2-day-old TLE and the old tracker scale, each of
+which must break it. Measured: probe ↔ dot 0.002 km, probe ↔ its own orbit
+loop 4.7 km, flight seed ↔ dot 0.002 km, the mean-element fallback 5.1 km;
+controls 266 km (frozen node) and 7.6 km (old scale); catalogue dots vs the
+page's SGP4 0.005 km.
+
+### 9.13 The three "environmental" failures, root-caused (2026-10-05)
+
+The regression runs after §9.11/§9.12 carried seven failures written off as
+environment. Two of the three groups were not.
+
+**"Overlay toggles do not throw" — three real page bugs, stacked.**
+1. `body { overflow-x: hidden }` made BODY a scroll container (overflow-y
+   computes to auto). A sticky element sticks to its nearest scroll container,
+   and body never scrolls — the window does — so `#ua-aside-tabs` (and the
+   site nav) NEVER stuck. 5000 px down the Controls column the Controls /
+   Analysis switch was 5000 px off screen. Now `overflow-x: clip` (with
+   `hidden` as the fallback); the tabs stick at 64 px, under the 50 px nav
+   that now sticks too.
+2. Offscreen, the page kept rendering the globe every frame. On SwiftShader
+   the queued work landed as ONE 37 s frame when the globe scrolled back; on a
+   laptop it is GPU time spent on pixels nobody sees. `_animate` now passes
+   `render: false` while an IntersectionObserver says the canvas is off
+   screen — state still marches every frame (the Stage/TIGA rule).
+3. The offscreen frames were ~17 ms, and the volume's quality governor read
+   them as headroom and climbed 10 → 16 march steps (measured). It now ticks
+   only on frames it can see and resets its clock on return.
+
+**"Boots without console errors" — the network, but not by filtering.**
+The gate ran against live NOAA / CelesTrak / unpkg and failed wherever they
+are unreachable. `tests/fixtures/upper-atmosphere-feeds.mjs` serves every feed
+the page touches (the shapes its own clients read; the Earth textures are the
+self-hosted NASA maps), so the gate judges the page. It carries a NEGATIVE
+CONTROL (a 404'd page module must still be reported) and a sibling gate boots
+with every feed dead and requires no uncaught exception.
+
+**The DSMC e2e — environmental, and now runnable without Docker.** Against a
+real API (`scripts/dsmc-backend-local.sh`: the CI compose's seed + serve,
+natively) four of five passed at once. The fifth slept a fixed 1.2 s for the
+debounced backend answer, which lands at ~3.6 s on SwiftShader while the
+behaviour is right; it now waits for the request with the new F10.7 and for
+the pill to return to SPARTA. The suite's `beforeAll` fails with the start
+instructions when the API is down.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
