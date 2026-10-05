@@ -17,7 +17,7 @@
  *   setTargetAlt(km), update({ trailM, satM, satRotZ, targetSat,
  *     debris, earthSpin }), dispose().
  */
-import * as BUILDER from './satellite-builder.js';
+import * as PARTS from './satellite-parts-3d.js';
 
 const KM = 1 / 1000;            // metres → scene units (km)
 const R_EARTH_KM = 6371;
@@ -180,22 +180,20 @@ export async function init(canvas, THREE) {
   scene.add(satPickProxy);
   earth.userData.kind = 'earth';
 
+  // Same component meshes as the Design Bay (js/satellite-parts-3d.js), lit
+  // by the same studio environment so foil and cells read the same here.
+  const satEnv = PARTS.studioEnvironment(THREE, renderer);
   function rebuildSat(build) {
     if (satModel) {
       satPivot.remove(satModel);
-      satModel.traverse(o => {
-        if (o.isMesh) {
-          o.geometry?.dispose?.();
-          (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m?.dispose?.());
-        }
-      });
+      PARTS.disposeSatellite(satModel);
     }
-    satModel = BUILDER.buildGroup(THREE, build);
+    satModel = PARTS.buildSatellite(THREE, build, { envMap: satEnv });
     // Builder uses +z as thrust axis. Our prograde is along the velocity
     // vector — we'll yaw the pivot to align +x of the model with velocity.
     satModel.rotation.y = Math.PI / 2;
     satPivot.add(satModel);
-    satExtent = Math.max(0.3, BUILDER.buildExtent(build));
+    satExtent = Math.max(0.3, satModel.userData.extent);
   }
 
   // ── Thrust flame — visible exhaust plume tied to throttle ────────────────

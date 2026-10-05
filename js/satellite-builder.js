@@ -2,12 +2,23 @@
  * satellite-builder.js — parametric spacecraft assembly for the Design Bay
  * ════════════════════════════════════════════════════════════════════════════
  *
- * Turns a small "build" config — { body, thruster, thrusterCount, panel,
- * panelSpan } — into:
+ * Turns a "build" config into the derived *physics* the flight model
+ * consumes (dry mass, projected drag area, blended drag coefficient, total
+ * thrust, Isp, power, slew authority, RCS).
  *
- *   1. derived *physics* the flight model consumes (dry mass, projected
- *      drag area, blended drag coefficient, total thrust, Isp), and
- *   2. a THREE.Group the Design Bay renders.
+ * The build has the four original slots — { body, thruster, thrusterCount,
+ * panel, panelSpan, payload } — plus the subsystem slots added with the
+ * component library (js/satellite-components.js): panelChord, fuelKg, tank /
+ * tankCount, battery, adcs, obc, rcs, finish, radiator, bodyCells, extras.
+ * Every new slot accepts 'auto', which resolves to the bus's own default kit
+ * (BODY_DEFAULTS) — so a legacy saved build with none of the new fields still
+ * derives, and switching bus re-kits anything the user has not hand-picked.
+ * resolveBuild() is the ONE place 'auto' is resolved.
+ *
+ * massBreakdown() is the ONE itemised mass list: deriveDesign() sums it and
+ * js/satellite-layout.js places every item of it, so the mass the flight model
+ * flies and the centre of mass the review reports cannot disagree
+ * (tests/satellite-components.mjs pins the sum).
  *
  * The whole point is the engineering trade-off: bigger solar wings collect
  * more power but add frontal area → more drag → faster orbital decay; more
@@ -15,10 +26,16 @@
  * propellant fast. The numbers below are order-of-magnitude representative
  * of real LEO hardware classes.
  *
- * buildGroup() takes THREE as a parameter rather than importing it, so the
- * data + deriveDesign() + selfTest() stay dependency-free and unit-testable
- * in plain Node (mirroring satellite-designer-engine.js).
+ * The meshes live in js/satellite-parts-3d.js (THREE injected); this module
+ * stays dependency-free apart from the pure component library, so
+ * deriveDesign() + selfTest() run in plain Node.
  */
+
+import {
+    TANKS, BATTERIES, ADCS_UNITS, RCS_KITS, OBC_UNITS, FINISHES, EXTRAS, FACES,
+    BODY_CELL, bodyClass, bodyDefaults, payloadScale, tankCapacityKg,
+    innerEnvelope, placeTanks, packInternals, propellantFor,
+} from './satellite-components.js';
 
 // ── Body / bus chassis ──────────────────────────────────────────────────────
 // dims [x,y,z] metres (z = thrust axis), mass kg, cd ≈ free-molecular drag
@@ -108,12 +125,16 @@ export const THRUSTER_UNITS = {
 // the bus deck they sit, used both for the 3-D model and (eventually) for
 // CG-offset moments in the flight model.
 export const PAYLOADS = {
-    none:         { label: 'None',                mass:   0, area:  0,  cd: 0,   powerW:   0, centreOffset: 0,    shape: null     },
-    optical_cam:  { label: 'Optical camera',      mass:  18, area: 0.25, cd: 2.3, powerW:  40, centreOffset: 0.45, shape: 'scope'  },
-    wide_imager:  { label: 'Wide-field imager',   mass:  46, area: 0.70, cd: 2.3, powerW:  85, centreOffset: 0.55, shape: 'imager' },
-    commsat_dish: { label: 'Comms HG dish',       mass:  32, area: 1.10, cd: 2.6, powerW: 110, centreOffset: 0.60, shape: 'dish'   },
-    sar_radar:    { label: 'SAR phased array',    mass: 120, area: 2.40, cd: 2.6, powerW: 320, centreOffset: 0.30, shape: 'plate'  },
-    mass_driver:  { label: 'Mass driver (exp.)',  mass: 240, area: 1.60, cd: 2.4, powerW: 480, centreOffset: 0.95, shape: 'driver' },
+    none:         { label: 'None',                mass:   0, area:  0,  cd: 0,   powerW:   0, centreOffset: 0,    shape: null,     dataGBd: 0 },
+    optical_cam:  { label: 'Optical camera',      mass:  18, area: 0.25, cd: 2.3, powerW:  40, centreOffset: 0.45, shape: 'scope',  dataGBd: 25,  fine: true },
+    wide_imager:  { label: 'Wide-field imager',   mass:  46, area: 0.70, cd: 2.3, powerW:  85, centreOffset: 0.55, shape: 'imager', dataGBd: 90,  fine: true },
+    commsat_dish: { label: 'Comms HG dish',       mass:  32, area: 1.10, cd: 2.6, powerW: 110, centreOffset: 0.60, shape: 'dish',   dataGBd: 0,   role: 'comms' },
+    sar_radar:    { label: 'SAR phased array',    mass: 120, area: 2.40, cd: 2.6, powerW: 320, centreOffset: 0.30, shape: 'plate',  dataGBd: 150 },
+    // Same flat-plate physics as the SAR panel, but a COMMS role: it relays
+    // user traffic rather than generating imagery to downlink (Starlink,
+    // BlueBird). Drawn as an active phased array, not a SAR tile panel.
+    phased_array: { label: 'Comms phased array',  mass: 120, area: 2.40, cd: 2.6, powerW: 320, centreOffset: 0.30, shape: 'array',  dataGBd: 0,   role: 'comms' },
+    mass_driver:  { label: 'Mass driver (exp.)',  mass: 240, area: 1.60, cd: 2.4, powerW: 480, centreOffset: 0.95, shape: 'driver', dataGBd: 0 },
 };
 
 // ── Solar arrays ────────────────────────────────────────────────────────────
@@ -136,17 +157,220 @@ export const PANELS = {
     thinfilm: { label: 'Thin-film flex',    wings: 2, areaKgM2: 0.55, ramFactor: 0.6,  cd: 2.6, wPerM2: 140 },
 };
 
-const AVIONICS_MASS  = 6;    // kg — flight computer, comms, harness, reaction wheels
-const HOUSEKEEPING_W = 20;   // W  — baseline bus load drawn before any propulsion
+// Harness + power conditioning scale with the bus (≈5 % of structure); the
+// flight computer, wheels, battery and tanks are separate items now.
+const harnessMass = (busMass) => 0.2 + 0.05 * busMass;
+// Baseline bus load (EPS conversion losses, thermal control, harness) before
+// any listed unit. A CubeSat's is a couple of watts, not twenty.
+const housekeepingW = (bodyKey) => bodyClass(bodyKey) === 'cubesat' ? 2 : 20;
+export const CHORD_DEFAULT = 0.45;
 
 export function defaultBuild() {
     return { body: 'smallsat', thruster: 'monoprop', thrusterCount: 2,
-             panel: 'dual', panelSpan: 2.2,
-             payload: 'optical_cam' };
+             panel: 'dual', panelSpan: 2.2, panelChord: CHORD_DEFAULT,
+             payload: 'optical_cam', fuelKg: 60,
+             tank: 'auto', tankCount: 1, battery: 'auto', adcs: 'auto',
+             obc: 'auto', rcs: 'auto', finish: 'auto', radiator: 'auto',
+             bodyCells: 'auto', extras: 'auto' };
 }
 
-/** Per-wing panel area (m²): span (root→tip) × a fixed 0.45 m chord. */
-function wingArea(span) { return clampNum(span, 0.3, 8, 2) * 0.45; }
+/** Per-wing panel area (m²): span (root→tip) × chord. */
+function wingArea(span, chord = CHORD_DEFAULT) {
+    return clampNum(span, 0.3, 8, 2) * clampNum(chord, 0.2, 2.5, CHORD_DEFAULT);
+}
+
+const MAX_EXTRAS = 24;
+
+/**
+ * Pick the lightest tank set that holds `fuelKg` and fits inside the bus.
+ * Bipropellant prefers an even count (separate fuel and oxidiser tanks).
+ * @returns {{tank:string, count:number}}
+ */
+// Which tank sets physically fit a bus (with its internal kit) does not
+// depend on the propellant load, so it is computed once per bus + kit.
+const TANK_FIT_CACHE = new Map();
+function tankFitTable(bodyKey, others) {
+    const key = bodyKey + '|' + JSON.stringify(others);
+    let rows = TANK_FIT_CACHE.get(key);
+    if (rows) return rows;
+    const body = BODIES[bodyKey] || BODIES.smallsat;
+    const env = innerEnvelope(body, bodyKey);
+    const cube = bodyClass(bodyKey) === 'cubesat';
+    rows = [];
+    for (const [k, t] of Object.entries(TANKS)) {
+        if (t.cubesatOnly && !cube) continue;
+        for (let n = 1; n <= 4; n++) {
+            // "Fits" means the tanks fit AND the rest of the internal kit
+            // still packs around them — a tank that leaves no room for the
+            // battery is no answer.
+            const tp = placeTanks(env, t, n);
+            let fits = tp.fits;
+            if (fits && others.length) {
+                const obst = tp.items.map(it => ({ ...it, sphere: t.shape === 'sphere' ? t.d : 0 }));
+                fits = packInternals(env, others.map(s => ({ s })), obst).every(o => o.fits);
+            }
+            rows.push({ tank: k, count: n, mass: t.mass * n, fits });
+        }
+    }
+    rows.sort((a, b) => a.mass - b.mass || a.count - b.count);
+    if (TANK_FIT_CACHE.size > 200) TANK_FIT_CACHE.clear();
+    TANK_FIT_CACHE.set(key, rows);
+    return rows;
+}
+
+/**
+ * Pick the lightest tank set that holds `fuelKg` and fits inside the bus
+ * alongside the internal kit (`others` = their [x,y,z] envelopes).
+ * Bipropellant prefers an even count (separate fuel and oxidiser tanks).
+ * @returns {{tank:string, count:number}}
+ */
+export function autoTank(bodyKey, thrusterKey, fuelKg, others = []) {
+    const biprop = propellantFor(thrusterKey).storage === 'biprop';
+    const opts = tankFitTable(bodyKey, others).map(o =>
+        ({ ...o, cap: tankCapacityKg(TANKS[o.tank], thrusterKey) * o.count }));
+    const need = Math.max(0, fuelKg || 0);
+    const pick = (f) => opts.find(f);
+    return pick(o => o.fits && o.cap >= need && (!biprop || o.count % 2 === 0))
+        || pick(o => o.fits && o.cap >= need)
+        || opts.filter(o => o.fits).sort((a, b) => b.cap - a.cap)[0]
+        || opts.slice().sort((a, b) => b.cap - a.cap)[0];
+}
+
+/**
+ * Resolve every 'auto' slot to a concrete part. Unknown keys fall back to the
+ * defaults, so a corrupt draft can never throw. Returns a NEW object carrying
+ * the concrete values plus `auto` flags (which slots were auto).
+ */
+export function resolveBuild(build = {}) {
+    const d = defaultBuild();
+    const body = BODIES[build.body] ? build.body : d.body;
+    const bd = bodyDefaults(body);
+    const thruster = THRUSTER_UNITS[build.thruster] ? build.thruster : d.thruster;
+    const isAuto = (v) => v == null || v === 'auto';
+    const pickKey = (v, table, dflt) => (!isAuto(v) && table[v]) ? v : dflt;
+    const fuelKg = clampNum(build.fuelKg, 0, 500_000, 0);
+    const battery = pickKey(build.battery, BATTERIES, bd.battery);
+    const adcs = pickKey(build.adcs, ADCS_UNITS, bd.adcs);
+    const obc = pickKey(build.obc, OBC_UNITS, bd.obc);
+    let tank, tankCount;
+    if (!isAuto(build.tank) && TANKS[build.tank]) {
+        tank = build.tank; tankCount = Math.max(1, Math.min(4, Math.round(+build.tankCount || 1)));
+    } else {
+        const a = autoTank(body, thruster, fuelKg,
+            [ADCS_UNITS[adcs].dims, BATTERIES[battery].dims, OBC_UNITS[obc].dims]);
+        tank = a.tank; tankCount = a.count;
+    }
+    let extras;
+    if (Array.isArray(build.extras)) {
+        extras = build.extras
+            .filter(e => e && EXTRAS[e.k] && FACES[e.face])
+            .slice(0, MAX_EXTRAS)
+            .map(e => ({ k: e.k, face: e.face }));
+    } else {
+        extras = bd.extras.map(e => ({ ...e }));
+    }
+    const bodyCells = Array.isArray(build.bodyCells)
+        ? build.bodyCells.filter(f => FACES[f]) : [...bd.bodyCells];
+    return {
+        body, thruster,
+        thrusterCount: Math.max(1, Math.min(8, Math.round(build.thrusterCount || 1))),
+        panel: PANELS[build.panel] ? build.panel : d.panel,
+        panelSpan: clampNum(build.panelSpan, 0.3, 8, d.panelSpan),
+        panelChord: clampNum(build.panelChord, 0.2, 2.5, CHORD_DEFAULT),
+        payload: PAYLOADS[build.payload] ? build.payload : 'none',
+        fuelKg, tank, tankCount,
+        battery, adcs, obc,
+        rcs: (!isAuto(build.rcs) && RCS_KITS[build.rcs]) ? build.rcs : 'auto',
+        finish: pickKey(build.finish, FINISHES, bd.finish),
+        radiator: isAuto(build.radiator) ? bd.radiator : clampNum(build.radiator, 0, 1, bd.radiator),
+        bodyCells, extras,
+        auto: {
+            tank: isAuto(build.tank) || !TANKS[build.tank],
+            battery: isAuto(build.battery), adcs: isAuto(build.adcs), obc: isAuto(build.obc),
+            rcs: isAuto(build.rcs), finish: isAuto(build.finish), radiator: isAuto(build.radiator),
+            bodyCells: !Array.isArray(build.bodyCells), extras: !Array.isArray(build.extras),
+        },
+    };
+}
+
+/**
+ * Everything that changes the SHAPE of the craft (not its propellant load,
+ * unless the load changes the auto-sized tanks). Renderers rebuild meshes
+ * only when this string changes.
+ */
+export function geometrySignature(build) {
+    const rb = resolveBuild(build);
+    const { fuelKg, auto, ...shape } = rb;
+    return JSON.stringify(shape);
+}
+
+/** Area (m²) of one bus face — the curved wall of a cylinder counts a quadrant. */
+export function faceArea(body, face) {
+    const [dx, dy, dz] = body.dims;
+    const cyl = body.shape === 'cyl' || body.shape === 'tube';
+    if (face === '+Z' || face === '-Z') return cyl ? Math.PI * dx * dx / 4 : dx * dy;
+    if (cyl) return Math.PI * dx * dz / 4;
+    return (face === '+X' || face === '-X') ? dy * dz : dx * dz;
+}
+
+/**
+ * Itemised dry mass. Every entry: { slot, key, label, subsystem, mass, count }.
+ * deriveDesign() sums `mass` (already × count); the layout kernel places
+ * each entry. tierMods as in deriveDesign().
+ */
+export function massBreakdown(build, tierMods = null) {
+    const rb = build && build.auto ? build : resolveBuild(build);
+    const tm = tierMods || {};
+    const b  = BODIES[rb.body];
+    const tu = THRUSTER_UNITS[rb.thruster];
+    const p  = PANELS[rb.panel];
+    const pl = PAYLOADS[rb.payload];
+    const plS = payloadScale(rb.body, b.dims, pl.shape);
+    const items = [];
+    const add = (slot, key, label, subsystem, mass, count = 1) =>
+        items.push({ slot, key, label, subsystem, mass, count });
+
+    const busMass = b.mass * ((tm.body || {}).massMul ?? 1);
+    add('bus', rb.body, b.label, 'structure', busMass);
+    add('thruster', rb.thruster, tu.label, 'propulsion',
+        tu.unitMass * rb.thrusterCount * ((tm.thruster || {}).massMul ?? 1), rb.thrusterCount);
+    const panelArea = wingArea(rb.panelSpan, rb.panelChord) * p.wings;
+    add('panel', rb.panel, p.label, 'power', panelArea * p.areaKgM2 * ((tm.panel || {}).massMul ?? 1), p.wings);
+    add('payload', rb.payload, pl.label, 'payload', pl.mass * plS ** 3 * ((tm.payload || {}).massMul ?? 1));
+    add('harness', 'harness', 'Harness + power conditioning', 'power', harnessMass(b.mass));
+    const bat = BATTERIES[rb.battery];
+    add('battery', rb.battery, bat.label, 'power', bat.mass);
+    const tk = TANKS[rb.tank];
+    add('tank', rb.tank, tk.label, 'propulsion', tk.mass * rb.tankCount, rb.tankCount);
+    const ad = ADCS_UNITS[rb.adcs];
+    add('adcs', rb.adcs, ad.label, 'adcs', ad.mass);
+    const ob = OBC_UNITS[rb.obc];
+    add('obc', rb.obc, ob.label, 'avionics', ob.mass);
+    if (rb.rcs !== 'auto' && rb.rcs !== 'none') {
+        const kit = RCS_KITS[rb.rcs];
+        add('rcs', rb.rcs, kit.label, 'propulsion', kit.mass, 4);
+    }
+    const cellArea = bodyCellArea(rb);
+    if (cellArea > 0) add('cells', 'body_cells', 'Body-mounted cells', 'power', cellArea * BODY_CELL.kgM2);
+    rb.extras.forEach((e, i) => {
+        const x = EXTRAS[e.k];
+        items.push({ slot: 'extra', key: e.k, label: x.label, subsystem: x.subsystem,
+                     mass: x.mass, count: 1, index: i, face: e.face });
+    });
+    return items;
+}
+
+/** Cell area (m²) of the body-mounted strings (packing factor applied). */
+export function bodyCellArea(rb) {
+    const b = BODIES[rb.body];
+    let a = 0;
+    for (const f of rb.bodyCells) {
+        // Radiator band on ±Y displaces cells there.
+        const frac = (f === '+Y' || f === '-Y') ? (1 - rb.radiator) : 1;
+        a += faceArea(b, f) * frac;
+    }
+    return a * BODY_CELL.packing;
+}
 
 /**
  * Derive flight-model parameters from a build.
@@ -156,14 +380,16 @@ function wingArea(span) { return clampNum(span, 0.3, 8, 2) * 0.45; }
  *        supplied, thrust/isp are filled in (single source of truth).
  * @returns {{dryMass,area,cd,engine,thrusterCount,thrust,isp,
  *            bodyArea,panelArea,panelMass,
- *            power,powerReq,powerMargin,powerFrac,electric}}
+ *            power,powerReq,powerMargin,powerFrac,electric, …}}
  */
 export function deriveDesign(build, presets = null, tierMods = null) {
-    const b  = BODIES[build.body] || BODIES.smallsat;
-    const tu = THRUSTER_UNITS[build.thruster] || THRUSTER_UNITS.monoprop;
-    const p  = PANELS[build.panel] || PANELS.none;
-    const pl = PAYLOADS[build.payload] || PAYLOADS.none;
-    const count = Math.max(1, Math.round(build.thrusterCount || 1));
+    const rb = resolveBuild(build);
+    const b  = BODIES[rb.body];
+    const tu = THRUSTER_UNITS[rb.thruster];
+    const p  = PANELS[rb.panel];
+    const pl = PAYLOADS[rb.payload];
+    const count = rb.thrusterCount;
+    const plS = payloadScale(rb.body, b.dims, pl.shape);
 
     // ── Tier modifiers ──────────────────────────────────────────────────
     // tierMods is supplied by the progression module — { body:{massMul,...},
@@ -182,35 +408,44 @@ export function deriveDesign(build, presets = null, tierMods = null) {
         ? dx * dz                                   // diameter × length
         : Math.max(dx * dy, dx * dz, dy * dz);      // biggest box face
 
-    const perWing = wingArea(build.panelSpan);
+    const perWing = wingArea(rb.panelSpan, rb.panelChord);
     const totalPanelArea = perWing * p.wings;
     const panelRamArea = totalPanelArea * p.ramFactor * (mP.cdMul ?? 1);
-    const panelMass = totalPanelArea * p.areaKgM2 * (mP.massMul ?? 1);
 
     // Apply per-slot Cd multipliers to each contribution (Mk II/III bodies
     // are slicker, etc) — area is unchanged but blended Cd shifts.
     const bodyCdEff    = b.cd  * (mB.cdMul  ?? 1);
     const panelCdEff   = p.cd  * (mP.cdMul  ?? 1);
     const payloadCdEff = pl.cd * (mPl.cdMul ?? 1);
-    const payloadArea  = pl.area * (mPl.cdMul ? 1 : 1);   // area unchanged by Cd; reserved hook
+    const payloadArea  = pl.area * plS * plS;
+    // Big deployables (reflectors, radiator panels) add ram area too.
+    const extrasArea   = rb.extras.reduce((s, e) => s + (EXTRAS[e.k].area || 0), 0);
+    const EXTRA_CD = 2.4;
 
-    const area = bodyArea + panelRamArea + payloadArea;
+    const area = bodyArea + panelRamArea + payloadArea + extrasArea;
     const cd = area > 0
-        ? (bodyCdEff * bodyArea + panelCdEff * panelRamArea + payloadCdEff * payloadArea) / area
+        ? (bodyCdEff * bodyArea + panelCdEff * panelRamArea + payloadCdEff * payloadArea
+           + EXTRA_CD * extrasArea) / area
         : bodyCdEff;
 
-    const dryMass = b.mass * (mB.massMul ?? 1)
-                  + tu.unitMass * count * (mTu.massMul ?? 1)
-                  + panelMass
-                  + pl.mass * (mPl.massMul ?? 1)
-                  + AVIONICS_MASS;
+    const breakdown = massBreakdown(rb, tm);
+    const dryMass = breakdown.reduce((s, it) => s + it.mass, 0);
+    const panelMass = breakdown.find(it => it.slot === 'panel').mass;
 
     // ── Power budget ──────────────────────────────────────────────────────
-    const powerGen   = totalPanelArea * p.wPerM2 * (mP.wMul ?? 1);
+    // Deployable wings track the sun: full rated power in sunlight. Body-
+    // mounted cells see on average a quarter of their area (the projected
+    // area of a convex body averaged over orientation is A/4), disclosed.
+    const wingPower  = totalPanelArea * p.wPerM2 * (mP.wMul ?? 1);
+    const cellArea   = bodyCellArea(rb);
+    const cellPower  = cellArea / 4 * 1361 * BODY_CELL.eta * 0.9;
+    const powerGen   = wingPower + cellPower;
     const electric   = tu.power > 0;
     const thrPwrFull = tu.power * count;                      // W at rated thrust
-    const payloadW   = pl.powerW * (mPl.powerMul ?? 1);
-    const fixedLoad  = HOUSEKEEPING_W + payloadW;
+    const payloadW   = pl.powerW * plS * plS * (mPl.powerMul ?? 1);
+    const unitsW     = OBC_UNITS[rb.obc].powerW + ADCS_UNITS[rb.adcs].powerW
+                     + rb.extras.reduce((s, e) => s + EXTRAS[e.k].powerW, 0);
+    const fixedLoad  = housekeepingW(rb.body) + payloadW + unitsW;
     const powerReq   = fixedLoad + (electric ? thrPwrFull : 0);
     const powerAvail = Math.max(0, powerGen - fixedLoad);
     const powerFrac  = electric
@@ -222,38 +457,54 @@ export function deriveDesign(build, presets = null, tierMods = null) {
     // disturbance torques.
     const maxSide = Math.max(dx, dy, dz);
     const baseArm = maxSide * (b.momentArmMul ?? 0.18);
-    const payloadArmRaw = pl.centreOffset * (pl.mass / Math.max(1, dryMass));
+    const payloadArmRaw = pl.centreOffset * plS * (pl.mass * plS ** 3 / Math.max(1, dryMass));
     const copOffset = baseArm + payloadArmRaw * 0.5;
 
     // Thruster gimbal / throat life with tier mods. Default 1× (Mk I).
     const gimbalDeg   = tu.gimbalDeg   * (mTu.gimbalMul     ?? 1);
     const throatLifeS = tu.throatLifeS * (mTu.throatLifeMul ?? 1);
 
+    // ── RCS suite: the bus's own ('auto') or a fitted kit ────────────────
+    const kit = rb.rcs === 'auto' ? null : RCS_KITS[rb.rcs];
+    const rcsSpec = kit ? (kit.thrust > 0 ? { thrust: kit.thrust, isp: kit.isp } : null) : (b.rcs || null);
+
     // ── Attitude control / slew authority ───────────────────────────────
     // How fast the bus can re-point (steer). RCS jets add a slew bonus and a
     // combined label; lighter craft turn faster (slew ∝ 1/√mass); a tiered
     // bus adds reaction-wheel authority (mB.slewMul). The flight model reads
-    // slewRate [rad/s] for A/D steering; slewDeg/attSys are for the HUD.
-    const att = b.attCtrl || { sys: 'Reaction wheels', slewDeg: 1.0 };
-    const rcsSlewBonus = b.rcs ? 0.8 : 0;
+    // slewRate [rad/s] for A/D steering; slewDeg/attSys are for the HUD. An
+    // explicitly fitted ADCS suite replaces the bus's own actuator class.
+    const adU = ADCS_UNITS[rb.adcs];
+    const att = rb.auto.adcs
+        ? (b.attCtrl || { sys: 'Reaction wheels', slewDeg: 1.0 })
+        : { sys: adU.sys, slewDeg: adU.slewDeg };
+    const rcsSlewBonus = rcsSpec ? 0.8 : 0;
     const massSlew = Math.max(0.5, Math.min(1.6, Math.sqrt(180 / Math.max(40, dryMass))));
     const slewDeg = round((att.slewDeg + rcsSlewBonus) * massSlew * (mB.slewMul ?? 1), 2);
-    const attSys  = (b.rcs && /wheel/i.test(att.sys)) ? 'Reaction wheels + RCS' : att.sys;
+    const attSys  = (rcsSpec && /wheel/i.test(att.sys)) ? `${att.sys} + RCS` : att.sys;
 
     const out = {
         dryMass:      round(dryMass, 1),
         area:         round(area, 3),
         cd:           round(cd, 3),
-        engine:       build.thruster,
+        engine:       rb.thruster,
         thrusterCount: count,
         bodyArea:     round(bodyArea, 3),
         panelArea:    round(totalPanelArea, 3),
         panelMass:    round(panelMass, 2),
-        payload:      build.payload || 'none',
-        payloadMass:  round(pl.mass * (mPl.massMul ?? 1), 1),
+        payload:      rb.payload,
+        payloadMass:  round(pl.mass * plS ** 3 * (mPl.massMul ?? 1), 1),
         payloadArea:  round(payloadArea, 3),
         payloadPower: round(payloadW, 0),
+        payloadScale: round(plS, 3),
+        extrasArea:   round(extrasArea, 3),
         power:        round(powerGen, 0),
+        wingPower:    round(wingPower, 0),
+        cellPower:    round(cellPower, 1),
+        cellArea:     round(cellArea, 4),
+        fixedLoad:    round(fixedLoad, 1),
+        housekeepingW: housekeepingW(rb.body),
+        thrusterPowerW: electric ? thrPwrFull : 0,
         powerReq:     round(powerReq, 0),
         powerMargin:  round(powerGen - powerReq, 0),
         powerFrac:    round(powerFrac, 3),
@@ -263,263 +514,31 @@ export function deriveDesign(build, presets = null, tierMods = null) {
         throatLifeS:  Math.round(throatLifeS),
         copOffset:    round(copOffset, 3),
         maxSide:      round(maxSide, 3),
-        // ── Multidirectional RCS suite (body-dependent) ──────────────────
+        // ── Multidirectional RCS suite ───────────────────────────────────
         // Per-axis translation authority [N] and propellant Isp [s]. Zero /
-        // false for CubeSat-class buses that carry no translation clusters.
-        // Mass of the suite is folded into the bus mass already, so this is
-        // purely the flight-model capability the engine consumes.
-        rcs:          !!b.rcs,
-        rcsThrust:    b.rcs ? round(b.rcs.thrust, 2) : 0,
-        rcsIsp:       b.rcs ? b.rcs.isp : 0,
+        // false for buses with no translation clusters and no fitted kit.
+        rcs:          !!rcsSpec,
+        rcsThrust:    rcsSpec ? round(rcsSpec.thrust, 2) : 0,
+        rcsIsp:       rcsSpec ? rcsSpec.isp : 0,
         // Attitude / steering authority (see above).
         slewDeg:      slewDeg,
         slewRate:     round(slewDeg * Math.PI / 180, 4),   // rad/s
         attSys:       attSys,
+        // ── Subsystems (component library) ───────────────────────────────
+        tank:         rb.tank,
+        tankCount:    rb.tankCount,
+        tankCapacityKg: round(tankCapacityKg(TANKS[rb.tank], rb.thruster) * rb.tankCount, 2),
+        propellant:   propellantFor(rb.thruster).label,
+        batteryWh:    BATTERIES[rb.battery].wh,
+        resolved:     rb,
+        breakdown,
     };
-    if (presets && presets[build.thruster]) {
-        const ptu = presets[build.thruster];
+    if (presets && presets[rb.thruster]) {
+        const ptu = presets[rb.thruster];
         out.thrust = round(ptu.thrust * count * powerFrac * (mTu.thrustMul ?? 1), 4);
         out.isp    = round(ptu.isp * (mTu.ispMul ?? 1), 1);
     }
     return out;
-}
-
-/**
- * Assemble a THREE.Group for the build. THREE is injected so this module
- * carries no hard dependency on the 3-D library.
- */
-export function buildGroup(THREE, build) {
-    const g = new THREE.Group();
-    const b  = BODIES[build.body] || BODIES.smallsat;
-    const tu = THRUSTER_UNITS[build.thruster] || THRUSTER_UNITS.monoprop;
-    const p  = PANELS[build.panel] || PANELS.none;
-    const pl = PAYLOADS[build.payload] || PAYLOADS.none;
-    const count = Math.max(1, Math.round(build.thrusterCount || 1));
-    const [dx, dy, dz] = b.dims;
-
-    // ── Bus ──
-    const busMat = new THREE.MeshStandardMaterial({
-        color: 0xb9a05a, metalness: 0.65, roughness: 0.42,
-        emissive: 0x141005, emissiveIntensity: 0.4,
-    });
-    const goldMat = new THREE.MeshStandardMaterial({
-        color: 0xddc77b, metalness: 0.78, roughness: 0.32,
-        emissive: 0x1a1408, emissiveIntensity: 0.55,
-    });
-    let bus;
-    if (b.shape === 'cyl') {
-        bus = new THREE.Mesh(new THREE.CylinderGeometry(dx / 2, dx / 2, dz, 28), busMat);
-        bus.rotation.x = Math.PI / 2;                // align cylinder to +z
-        g.add(bus);
-    } else if (b.shape === 'tube') {
-        // Telescope: hollow tube + sun-shade baffle on the +z end.
-        bus = new THREE.Mesh(new THREE.CylinderGeometry(dx / 2, dx / 2, dz, 36), busMat);
-        bus.rotation.x = Math.PI / 2;
-        g.add(bus);
-        const baffleMat = new THREE.MeshStandardMaterial({
-            color: 0x222831, metalness: 0.6, roughness: 0.65,
-            emissive: 0x05070a, emissiveIntensity: 0.4,
-        });
-        const baffle = new THREE.Mesh(
-            new THREE.CylinderGeometry(dx / 2 * 1.18, dx / 2, dz * 0.18, 36, 1, true),
-            baffleMat);
-        baffle.rotation.x = Math.PI / 2;
-        baffle.position.z = dz / 2 + dz * 0.09;
-        g.add(baffle);
-    } else if (b.shape === 'grid') {
-        // Bolted multi-cube grid (e.g. 3×2 array of 1-U cubes). Each cell
-        // gets its own box so seams are visible; gives the silhouette real
-        // multi-cube character instead of one fat box.
-        const [gx, gy, gz] = b.gridCells || [Math.round(dx/0.1), Math.round(dy/0.1), 1];
-        const cx = dx / gx, cy = dy / gy, cz = dz / gz;
-        const inset = 0.0035;            // visible gap between cubes
-        for (let i = 0; i < gx; i++) for (let j = 0; j < gy; j++) for (let k = 0; k < gz; k++) {
-            const cell = new THREE.Mesh(
-                new THREE.BoxGeometry(cx - inset, cy - inset, cz - inset), busMat);
-            cell.position.set((i - (gx - 1) / 2) * cx,
-                              (j - (gy - 1) / 2) * cy,
-                              (k - (gz - 1) / 2) * cz);
-            g.add(cell);
-        }
-    } else {
-        bus = new THREE.Mesh(new THREE.BoxGeometry(dx, dy, dz), busMat);
-        g.add(bus);
-    }
-    // Tugs get a docking ring on the +z face — useful narrative cue.
-    if (b.tug) {
-        const ring = new THREE.Mesh(
-            new THREE.TorusGeometry(dx * 0.42, dx * 0.04, 12, 36), goldMat);
-        ring.position.z = dz / 2 + 0.02;
-        g.add(ring);
-    }
-
-    // ── Thrusters: nozzle cones on the −z face, packed in a tidy grid ──
-    const nozMat = new THREE.MeshStandardMaterial({
-        color: 0x2a2a30, metalness: 0.8, roughness: 0.3,
-    });
-    const cols = Math.ceil(Math.sqrt(count));
-    const pitch = Math.min(dx, dy) * 0.7 / cols;
-    for (let i = 0; i < count; i++) {
-        const noz = new THREE.Mesh(
-            new THREE.ConeGeometry(tu.nozzle, tu.nozzle * 1.8, 18), nozMat);
-        const cx = (i % cols) - (cols - 1) / 2;
-        const cy = Math.floor(i / cols) - (Math.ceil(count / cols) - 1) / 2;
-        noz.position.set(cx * pitch, cy * pitch, -dz / 2 - tu.nozzle * 0.9);
-        noz.rotation.x = -Math.PI / 2;               // bell points −z (aft)
-        g.add(noz);
-    }
-
-    // ── RCS clusters — tiny lateral thruster pods at the bus corners ──
-    // Visual cue for the multidirectional-thrust suite. Four pods straddling
-    // the +z deck, canted outward, so a glance tells you this bus can strafe.
-    if (b.rcs) {
-        const rcsMat = new THREE.MeshStandardMaterial({
-            color: 0x9a6b3a, metalness: 0.7, roughness: 0.45,
-            emissive: 0x2a1605, emissiveIntensity: 0.5,
-        });
-        const podR = Math.min(dx, dy) * 0.07 + 0.012;
-        for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
-            const pod = new THREE.Mesh(
-                new THREE.ConeGeometry(podR, podR * 2.0, 10), rcsMat);
-            pod.position.set(sx * dx * 0.46, sy * dy * 0.46, dz * 0.30);
-            // Bell points outward along the corner diagonal.
-            pod.rotation.z = Math.atan2(sy, sx) - Math.PI / 2;
-            g.add(pod);
-        }
-    }
-
-    // ── Solar wings along ±x, with a short yoke ──
-    if (p.wings > 0) {
-        const span = clampNum(build.panelSpan, 0.3, 8, 2);
-        const chord = 0.45;
-        const panelMat = new THREE.MeshStandardMaterial({
-            color: 0x1b2f6b, metalness: 0.35, roughness: 0.5,
-            emissive: 0x0a1430, emissiveIntensity: 0.55,
-        });
-        const yokeMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.4 });
-        // dual = one wing each side; quad = two stacked each side
-        const perSide = p.wings / 2;
-        for (const sgn of [-1, 1]) {
-            for (let k = 0; k < perSide; k++) {
-                const yoke = new THREE.Mesh(
-                    new THREE.BoxGeometry(0.12, 0.03, 0.03), yokeMat);
-                yoke.position.set(sgn * (dx / 2 + 0.06), 0, 0);
-                g.add(yoke);
-                const wing = new THREE.Mesh(
-                    new THREE.BoxGeometry(span, 0.02, chord), panelMat);
-                const zoff = perSide > 1 ? (k - (perSide - 1) / 2) * (chord + 0.06) : 0;
-                wing.position.set(sgn * (dx / 2 + 0.12 + span / 2), 0, zoff);
-                g.add(wing);
-            }
-        }
-    }
-
-    // ── Payload (mounted on the +z deck) ─────────────────────────────────
-    if (pl.shape) {
-        const payMat = new THREE.MeshStandardMaterial({
-            color: 0xc6cfd6, metalness: 0.55, roughness: 0.45,
-            emissive: 0x0a0e14, emissiveIntensity: 0.45,
-        });
-        const lensMat = new THREE.MeshStandardMaterial({
-            color: 0x6fdcff, metalness: 0.8, roughness: 0.15,
-            emissive: 0x062537, emissiveIntensity: 0.85,
-        });
-        const dishMat = new THREE.MeshStandardMaterial({
-            color: 0xe2eef7, metalness: 0.5, roughness: 0.35,
-            emissive: 0x10202c, emissiveIntensity: 0.5, side: THREE.DoubleSide,
-        });
-        const zBase = dz / 2;
-        if (pl.shape === 'scope') {
-            // Cylinder + glass eye on the bus's +z face.
-            const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.45, 24), payMat);
-            tube.rotation.x = Math.PI / 2;
-            tube.position.z = zBase + 0.22;
-            g.add(tube);
-            const lens = new THREE.Mesh(new THREE.CircleGeometry(0.12, 24), lensMat);
-            lens.position.z = zBase + 0.45;
-            g.add(lens);
-        } else if (pl.shape === 'imager') {
-            // Wider, shorter — multi-aperture imager block.
-            const box = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.4, 0.3), payMat);
-            box.position.z = zBase + 0.16;
-            g.add(box);
-            // Three lens dots in a triangle.
-            for (const [px, py] of [[-0.16, 0.07], [0.16, 0.07], [0, -0.12]]) {
-                const lens = new THREE.Mesh(new THREE.CircleGeometry(0.07, 18), lensMat);
-                lens.position.set(px, py, zBase + 0.31);
-                g.add(lens);
-            }
-        } else if (pl.shape === 'dish') {
-            // Parabolic-ish dish on a short pedestal, slightly canted.
-            const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 12), payMat);
-            ped.rotation.x = Math.PI / 2;
-            ped.position.z = zBase + 0.09;
-            g.add(ped);
-            const dish = new THREE.Mesh(
-                new THREE.SphereGeometry(0.42, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.32),
-                dishMat);
-            dish.rotation.x = -Math.PI * 0.45;
-            dish.position.z = zBase + 0.32;
-            g.add(dish);
-            const feed = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), lensMat);
-            feed.position.set(0, 0.25, zBase + 0.35);
-            g.add(feed);
-        } else if (pl.shape === 'plate') {
-            // Flat phased-array panel.
-            const plate = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.7), payMat);
-            plate.position.z = zBase + 0.18;
-            g.add(plate);
-            // Element grid pattern as a wireframe overlay.
-            const grid = new THREE.LineSegments(
-                new THREE.WireframeGeometry(new THREE.PlaneGeometry(1.2, 0.7, 6, 4)),
-                new THREE.LineBasicMaterial({ color: 0x55aaff, transparent: true, opacity: 0.55 }));
-            grid.rotation.x = -Math.PI / 2;
-            grid.position.z = zBase + 0.20;
-            g.add(grid);
-        } else if (pl.shape === 'driver') {
-            // Mass driver — a long open rail-launch tube with coil rings.
-            const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 1.4, 18, 1, true), payMat);
-            rail.rotation.x = Math.PI / 2;
-            rail.position.z = zBase + 0.75;
-            g.add(rail);
-            for (let i = 0; i < 5; i++) {
-                const coil = new THREE.Mesh(
-                    new THREE.TorusGeometry(0.16, 0.025, 8, 18), goldMat);
-                coil.position.z = zBase + 0.18 + i * 0.28;
-                coil.rotation.x = Math.PI / 2;
-                g.add(coil);
-            }
-        }
-    }
-
-    // Antenna whip for a little silhouette character (skip if a dish or
-    // mass-driver dominates the top — they're the comms / payload feature).
-    if (pl.shape !== 'dish' && pl.shape !== 'driver') {
-        const antMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.6, roughness: 0.4 });
-        const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, dz * 0.5, 8), antMat);
-        ant.position.set(0, dy / 2 + dz * 0.25, dz * 0.3);
-        g.add(ant);
-    }
-
-    return g;
-}
-
-/** Largest bounding dimension (m) — handy for fitting the camera. */
-export function buildExtent(build) {
-    const b  = BODIES[build.body] || BODIES.smallsat;
-    const p  = PANELS[build.panel] || PANELS.none;
-    const pl = PAYLOADS[build.payload] || PAYLOADS.none;
-    const [dx, dy, dz] = b.dims;
-    const span = p.wings > 0 ? clampNum(build.panelSpan, 0.3, 8, 2) : 0;
-    // Long payloads (mass driver, telescope baffle) extend the +z silhouette;
-    // account for them so the camera frames the whole stack.
-    const payloadStackZ = pl.shape === 'driver' ? 1.6
-                       : pl.shape === 'dish'   ? 0.7
-                       : pl.shape === 'scope'  ? 0.55
-                       : pl.shape === 'imager' ? 0.35
-                       : pl.shape === 'plate'  ? 0.25
-                       : 0;
-    return Math.max(dz + payloadStackZ, dy, dx + 2 * (span + 0.2));
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

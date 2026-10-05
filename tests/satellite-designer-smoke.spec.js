@@ -289,3 +289,128 @@ test.describe('satellite-designer.html smoke', () => {
             .toBeGreaterThan(0);
     });
 });
+
+// ── Component library, layout and engineering review (2026-10) ──────────────
+// The bay draws js/satellite-parts-3d.js meshes placed by
+// js/satellite-layout.js; the review panel reads the same layout. These gates
+// pin the page wiring — the physics itself is gated in plain Node by
+// tests/satellite-components.mjs.
+test.describe('satellite-designer.html component bay', () => {
+
+    async function bootBay(page) {
+        await page.goto(URL);
+        await page.waitForFunction(() => window.__sd?.bay?.ready?.(), { timeout: 60_000 });
+        // The cookie banner is fixed over the bottom of the viewport and
+        // swallows clicks on whatever scrolls under it — dismiss it first.
+        const reject = page.locator('button[data-action="reject"]').first();
+        if (await reject.isVisible().catch(() => false)) await reject.click();
+        await page.evaluate(() => {
+            window.__sd.bay.spin(false);
+            document.querySelector('#bay-view').scrollIntoView({ block: 'center' });
+        });
+        await page.waitForFunction(() => !!window.__sd.bay.lastReview(), { timeout: 10_000 });
+    }
+
+    test('every layout part is drawn and pickable; clicking one opens the inspector', async ({ page }) => {
+        const errors = attachConsoleRecorder(page);
+        await bootBay(page);
+        const ids = await page.evaluate(() => ({
+            drawn: window.__sd.bay.partIds(),
+            placed: window.__sd.bay.layout().parts.filter(p => p.kind !== 'harness').map(p => p.id),
+        }));
+        expect(ids.drawn.sort(), 'one mesh group per placed part').toEqual(ids.placed.sort());
+
+        // Click the payload where it projects on screen → it is selected and
+        // the inspector names it.
+        await page.waitForTimeout(400);                     // let damping settle
+        const pt = await page.evaluate(() => window.__sd.bay.screenOf('payload'));
+        await page.mouse.click(pt.x, pt.y);
+        await expect.poll(() => page.evaluate(() => window.__sd.bay.getSelected())).toBe('payload');
+        await expect(page.locator('#bay-inspect')).toBeVisible();
+        await expect(page.locator('#bay-inspect h3')).toHaveText(/camera/i);
+
+        const filtered = errors.filter(e => !/supabase|jsdelivr|Failed to fetch|net::ERR|Failed to load resource/i.test(e.text || ''));
+        expect(filtered, 'no console errors while picking').toHaveLength(0);
+    });
+
+    test('view modes swap materials and the legend really hides', async ({ page }) => {
+        await bootBay(page);
+        // The legend's author display:flex must not beat the [hidden] rule
+        // (the mars.html feature-index scar) — it is only shown in Subsystems.
+        await expect(page.locator('#bay-legend')).toBeHidden();
+        await page.click('#bay-views button[data-view="subsystem"]');
+        await expect(page.locator('#bay-legend')).toBeVisible();
+        await expect(page.locator('#bay-legend')).toContainText(/Propulsion/);
+        await page.click('#bay-views button[data-view="xray"]');
+        await expect(page.locator('#bay-legend')).toBeHidden();
+        expect(await page.evaluate(() => window.__sd.bay.getView())).toBe('xray');
+        await page.click('#bay-explode');
+        await expect(page.locator('#bay-explode')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    test('adding, moving and removing a component flows into mass, CG and the review', async ({ page }) => {
+        await bootBay(page);
+        const before = await page.evaluate(() => ({
+            dry: Number(document.querySelector('#f-dry').value),
+            n: window.__sd.bay.layout().rb.extras.length,
+        }));
+        await page.click('#ss-tabs button[data-tab="comms"]');
+        await page.selectOption('#ss-face', '+Y');
+        await page.click('#ss-lib .lib-item[data-k="ka_dish"]');
+        await expect.poll(() => page.evaluate(() => window.__sd.bay.layout().rb.extras.length)).toBe(before.n + 1);
+        const after = await page.evaluate(() => Number(document.querySelector('#f-dry').value));
+        expect(after - before.dry, 'a 9 kg dish adds 9 kg to the flight model').toBeCloseTo(9, 1);
+        await expect(page.locator('#ss-inst-n')).toHaveText(String(before.n + 1));
+
+        // The review re-runs and sees the CG walk toward +Y.
+        await page.waitForFunction(() => window.__sd.bay.lastReview()?.massProps.cgWet[1] > 0.02, { timeout: 5000 });
+
+        // Move it to the opposite face through the installed list.
+        const i = before.n;
+        await page.selectOption(`#ss-installed .inst[data-i="${i}"] select`, '-Y');
+        await page.waitForFunction(() => window.__sd.bay.lastReview()?.massProps.cgWet[1] < -0.02, { timeout: 5000 });
+
+        await page.click(`#ss-installed .inst[data-i="${i}"] .rm`);
+        await expect.poll(() => page.evaluate(() => window.__sd.bay.layout().rb.extras.length)).toBe(before.n);
+    });
+
+    test('subsystem chips change the hardware and the budgets', async ({ page }) => {
+        await bootBay(page);
+        await page.click('#ss-tabs button[data-tab="power"]');
+        await page.click('#ss-battery .opt[data-v="li_20"]');
+        await page.waitForFunction(() => window.__sd.bay.lastReview()?.design.resolved.battery === 'li_20', { timeout: 5000 });
+        const dod = await page.evaluate(() => window.__sd.bay.lastReview().checks.find(c => c.id === 'power.dod').sev);
+        expect(dod, 'a 20 Wh pack on a SmallSat fails depth of discharge').toBe('fail');
+        await expect(page.locator('#rv-summary .rv-chip.fail')).toContainText(/1 fail/);
+
+        // Propellant drives the Auto tanks: more fuel, more tank.
+        const cap0 = await page.evaluate(() => window.__sd.bay.lastReview().prop.capacityKg);
+        await page.evaluate(() => {
+            const f = document.querySelector('#f-fuel');
+            f.value = '400'; f.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await page.waitForFunction((c) => window.__sd.bay.lastReview()?.prop.capacityKg > c, cap0, { timeout: 5000 });
+    });
+
+    test('every review tab renders', async ({ page }) => {
+        await bootBay(page);
+        for (const tab of ['checks', 'mass', 'power', 'thermal', 'comms', 'adcs', 'prop', 'bom']) {
+            await page.click(`#rv-tabs button[data-tab="${tab}"]`);
+            const txt = await page.textContent('#rv-body');
+            expect(txt.trim().length, `${tab} tab has content`).toBeGreaterThan(20);
+        }
+        // The parts list is the flight model's own dry mass.
+        const total = await page.evaluate(() => window.__sd.bay.lastReview().mass.dry);
+        const form = await page.evaluate(() => Number(document.querySelector('#f-dry').value));
+        expect(total).toBeCloseTo(form, 1);
+    });
+
+    test('blueprints load their engineered subsystems', async ({ page }) => {
+        await bootBay(page);
+        await page.evaluate(() => window.__sd.blueprints.load('starlink_v2mini'));
+        const b = await page.evaluate(() => window.__sd.bay.getBuild());
+        expect(b.payload).toBe('phased_array');
+        expect(b.fuelKg).toBe(90);
+        await page.waitForFunction(() => window.__sd.bay.lastReview()?.design.resolved.payload === 'phased_array', { timeout: 5000 });
+    });
+});
