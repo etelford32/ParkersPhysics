@@ -74,39 +74,75 @@ export const PROPELLANTS = {
 // Wraps the real specs from launch-engines.js with the extra metadata the
 // designer needs: which nozzle `bell` to render, the default propellant, and
 // whether it is a sign-in-only "advanced" part.
-function eng(id, bell, propellant, extra = {}) {
+//
+// THE CATALOG KEY IS THE DESIGN'S engineId, NOT `id`. `id` is the ENGINES /
+// ENGINE_NOZZLE spec id and differs for one entry (raptor_vac → raptor_2_vac).
+// Until 2026-10 the stage <select> used `id` as its value, so picking Raptor
+// Vacuum stored 'raptor_2_vac', which missed the catalog and silently flew a
+// Merlin 1D. Look engines up through `engineFor()`, which accepts either.
+//
+// `propellant` is FIXED by the engine: a Merlin cannot burn hydrogen. The
+// stage's `propellantId` is derived from it (`normalizeDesign`), never chosen
+// independently — before 2026-10 a Merlin could be fuelled with xenon and the
+// tank sized at xenon density while the thrust stayed kerolox.
+function eng(key, id, bell, propellant, extra = {}) {
     const base = ENGINES[id] || {};
-    return { id, bell, propellant, ...base, ...extra };
+    // `propellant` goes AFTER the spec spread: ENGINES carries a descriptive
+    // `propellant` string ('RP-1 / LOX  (kerolox)') that would otherwise
+    // overwrite the id and send every lookup to the kerolox fallback.
+    return { key, id, bell, ...base, propellant, propellantLabel: base.propellant, ...extra };
 }
 
 export const ENGINE_CATALOG = {
-    merlin_1d: eng('merlin_1d', 'merlin', 'kerolox', {
+    merlin_1d: eng('merlin_1d', 'merlin_1d', 'merlin', 'kerolox', {
         label: 'Merlin 1D', note: 'Gas-generator kerolox workhorse. 9× on Falcon 9.',
     }),
-    raptor_2: eng('raptor_2', 'raptor', 'methalox', {
+    raptor_2: eng('raptor_2', 'raptor_2', 'raptor', 'methalox', {
         label: 'Raptor 2', note: 'Full-flow staged-combustion methalox. 33× on Super Heavy.',
     }),
+    rd_253: eng('rd_253', 'rd_253', 'generic', 'hypergolic', {
+        label: 'RD-253', note: 'Storable hypergolic booster engine. 6× on Proton.',
+    }),
     // ── Advanced (sign-in) ──
-    raptor_3: eng('raptor_3', 'raptor', 'methalox', {
+    raptor_3: eng('raptor_3', 'raptor_3', 'raptor', 'methalox', {
         label: 'Raptor 3', advanced: true, note: 'Higher chamber pressure, integrated plumbing.',
     }),
-    rs_25: eng('rs_25', 'rs25', 'hydrolox', {
+    rs_25: eng('rs_25', 'rs_25', 'rs25', 'hydrolox', {
         label: 'RS-25 (SSME)', advanced: true, note: 'Reusable hydrolox, sea-level Isp 366 s.',
     }),
-    f1: eng('f1', 'generic', 'kerolox', {
-        label: 'F-1', advanced: true, throatR: 0.55, exitR: 1.9, length: 3.7,
+    f1: eng('f1', 'f1', 'generic', 'kerolox', {
+        label: 'F-1', advanced: true,
         note: 'Saturn V first stage. 5× = 34 MN. The big one.',
     }),
-    rsrm: eng('rsrm', 'rsrm', 'solid', {
+    rsrm: eng('rsrm', 'rsrm', 'rsrm', 'solid', {
         label: 'RSRM (Solid)', advanced: true, note: 'Shuttle solid booster. No throttle, no off-switch.',
     }),
-    raptor_vac: eng('raptor_2_vac', 'raptor_vac', 'methalox', {
+    raptor_vac: eng('raptor_vac', 'raptor_2_vac', 'raptor_vac', 'methalox', {
         label: 'Raptor Vacuum', advanced: true, note: 'High-expansion bell for upper stages.',
     }),
-    merlin_vac: eng('merlin_vac', 'merlin_vac', 'kerolox', {
-        label: 'Merlin Vacuum', advanced: true, note: 'Falcon 9 second-stage engine.',
+    merlin_vac: eng('merlin_vac', 'merlin_vac', 'merlin_vac', 'kerolox', {
+        label: 'Merlin Vacuum', advanced: true, note: 'Falcon 9 second stage. Radiatively-cooled niobium skirt glows in flight.',
+    }),
+    rl10b_2: eng('rl10b_2', 'rl10b_2', 'merlin_vac', 'hydrolox', {
+        label: 'RL10B-2', advanced: true, note: 'Delta IV upper stage. 280:1 carbon-carbon skirt, 465 s.',
+    }),
+    aj10_190: eng('aj10_190', 'aj10_190', 'merlin_vac', 'hypergolic', {
+        label: 'AJ10-190 (OMS)', advanced: true, note: 'Shuttle OMS / Orion main engine. Small, storable, restartable.',
+    }),
+    nerva_xe: eng('nerva_xe', 'nerva_xe', 'generic', 'nuclear', {
+        label: 'NERVA XE', advanced: true, note: 'Reactor-heated hydrogen, 841 s. Tested 1969, never flown.',
+    }),
+    next_c: eng('next_c', 'next_c', 'generic', 'ion', {
+        label: 'NEXT-C (ion)', advanced: true, note: '0.24 N of thrust at 4190 s. It cannot lift itself off anything.',
     }),
 };
+
+const ENGINE_BY_SPEC_ID = Object.fromEntries(Object.values(ENGINE_CATALOG).map((e) => [e.id, e]));
+
+/** Resolve a stage's engineId (catalog key, or the legacy spec id) to its catalog entry. */
+export function engineFor(engineId) {
+    return ENGINE_CATALOG[engineId] || ENGINE_BY_SPEC_ID[engineId] || ENGINE_CATALOG.merlin_1d;
+}
 
 // ── Cosmetic / structural catalogs ───────────────────────────────────────────
 // `aero` carries the measured-ish drag character of each nose shape, referenced
@@ -195,8 +231,9 @@ const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 export function isAdvancedDesign(design) {
     const reasons = [];
     for (const [i, s] of design.stages.entries()) {
-        if (ENGINE_CATALOG[s.engineId]?.advanced) reasons.push(`Stage ${i + 1} engine`);
-        if (PROPELLANTS[s.propellantId]?.advanced) reasons.push(`Stage ${i + 1} propellant`);
+        const e = engineFor(s.engineId);
+        if (e.advanced) reasons.push(`Stage ${i + 1} engine`);
+        if (PROPELLANTS[e.propellant]?.advanced) reasons.push(`Stage ${i + 1} propellant`);
     }
     if (design.stages.length > 2) reasons.push('3+ stages');
     if (NOSECONE_TYPES[design.payload?.nosecone]?.advanced) reasons.push('Nosecone');
@@ -224,8 +261,8 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
     const topMass = payloadMass + crewMass;
 
     const stages = design.stages.map((s) => {
-        const e = ENGINE_CATALOG[s.engineId] || ENGINE_CATALOG.merlin_1d;
-        const prop = PROPELLANTS[s.propellantId] || PROPELLANTS.kerolox;
+        const e = engineFor(s.engineId);
+        const prop = PROPELLANTS[e.propellant] || PROPELLANTS.kerolox;   // the engine decides
         const r = s.diameter_m / 2;
         const volume = Math.PI * r * r * s.length_m * clamp(s.fillFrac, 0.2, 0.95);
         const propMass = volume * prop.density;
@@ -254,15 +291,24 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
         const ve = ispUse * G0;
         const dv = (mf > 0 && m0 > mf) ? ve * Math.log(m0 / mf) : 0;
         stages[i].dv_kms = dv / 1000;
-        stages[i].twr = stages[i].thrustSL_kN * 1000 / Math.max(m0 * g_body, 1e-9);
+        // Stage 1 lights on the ground (sea-level thrust); every later stage
+        // lights near vacuum, so its TWR is quoted on its VACUUM thrust — a
+        // vacuum engine's sea-level rating is 0 and used to read "TWR 0.00".
+        // (Still against surface g: that is the conventional, conservative figure.)
+        const F_kN = i === 0 ? stages[i].thrustSL_kN : stages[i].thrustVac_kN;
+        stages[i].twr = F_kN * 1000 / Math.max(m0 * g_body, 1e-9);
         dvTotal += dv;
     }
 
     const liftoffThrust = stages[0]?.thrustSL_kN || 0;
     const liftoffTWR = liftoffThrust * 1000 / Math.max(totalWet * g_body, 1e-9);
-    const maxDiameter = Math.max(...stages.map((s) => s.diameter_m), 1);
-    const noseLen = design.payload?.fairingLen_m || 8;
-    const height = stages.reduce((a, s) => a + s.length_m, 0) + noseLen;
+    // Geometry comes from the ONE stack layout the 3D view draws: interstages
+    // that house the upper engines count toward the body length, and a cluster
+    // too wide for its stage flares the base out — which the aero reference
+    // area then pays for (Saturn V's engine fairings, honestly billed).
+    const stack = stackLayout(design);
+    const maxDiameter = Math.max(1, stack.maxDiameter_m);
+    const height = stack.bodyLength_m;
 
     return {
         stages,
@@ -277,6 +323,7 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
         height_m: height,
         g_body,
         bodyName: body.name,
+        stack,
     };
 }
 
@@ -310,15 +357,29 @@ export const PROP_GAS = {
 };
 
 // Per-engine nozzle: area ratio ε and chamber pressure (Pa). Public data.
+//   exitD_m   — PUBLISHED nozzle exit diameter where one exists. It beats the
+//               ideal-c* derivation for the same reason the catalog thrust does:
+//               ideal theory over-predicts the throat (real c* efficiency is
+//               ~0.95–0.98), which put a Merlin bell at 1.08 m instead of the
+//               real 0.92 m — and then 9 of them no longer fit the 3.7 m Falcon
+//               core they actually fly on. Engines without one say 'derived'.
+//   gimbalDeg — thrust-vector range (± degrees), approximate public figures.
+//   cooling   — 'regen' | 'radiative' (glows in flight) | 'ablative' | 'reactor' | 'grid'
+//   profile   — bell contour: 'rao' (80 % bell) | 'conical' (15° cone)
 const ENGINE_NOZZLE = {
-    merlin_1d:    { eps: 16,  pc_pa: 9.7e6 },
-    merlin_vac:   { eps: 165, pc_pa: 9.7e6 },
-    raptor_2:     { eps: 34,  pc_pa: 30e6 },
-    raptor_2_vac: { eps: 80,  pc_pa: 30e6 },
-    raptor_3:     { eps: 35,  pc_pa: 35e6 },
-    rs_25:        { eps: 69,  pc_pa: 20.6e6 },
-    rsrm:         { eps: 12,  pc_pa: 6.3e6 },
-    f1:           { eps: 16,  pc_pa: 7.0e6 },
+    merlin_1d:    { eps: 16,  pc_pa: 9.7e6,  exitD_m: 0.92, gimbalDeg: 5,    cooling: 'regen' },
+    merlin_vac:   { eps: 165, pc_pa: 9.7e6,  exitD_m: 3.30, gimbalDeg: 5,    cooling: 'radiative' },
+    raptor_2:     { eps: 34,  pc_pa: 30e6,   exitD_m: 1.30, gimbalDeg: 15,   cooling: 'regen' },
+    raptor_2_vac: { eps: 80,  pc_pa: 30e6,   exitD_m: 2.30, gimbalDeg: 0,    cooling: 'regen' },
+    raptor_3:     { eps: 35,  pc_pa: 35e6,   exitD_m: 1.30, gimbalDeg: 15,   cooling: 'regen' },
+    rs_25:        { eps: 69,  pc_pa: 20.6e6, exitD_m: 2.30, gimbalDeg: 10.5, cooling: 'regen' },
+    rsrm:         { eps: 7.7, pc_pa: 6.3e6,  exitD_m: 3.80, gimbalDeg: 8,    cooling: 'ablative', profile: 'conical' },
+    f1:           { eps: 16,  pc_pa: 7.0e6,  exitD_m: 3.76, gimbalDeg: 6,    cooling: 'regen' },
+    rd_253:       { eps: 26,  pc_pa: 14.7e6, exitD_m: 1.43, gimbalDeg: 7.5,  cooling: 'regen' },
+    aj10_190:     { eps: 55,  pc_pa: 0.86e6,               gimbalDeg: 6,    cooling: 'radiative' },
+    rl10b_2:      { eps: 280, pc_pa: 4.4e6,  exitD_m: 2.15, gimbalDeg: 4,    cooling: 'radiative' },
+    nerva_xe:     { eps: 100, pc_pa: 3.9e6,                gimbalDeg: 3,    cooling: 'reactor' },
+    next_c:       { exitD_m: 0.36, gimbalDeg: 0, cooling: 'grid' },
 };
 const BELL_EPS = { merlin: 16, raptor: 34, raptor_vac: 80, merlin_vac: 165, rs25: 69, rsrm: 12, generic: 16 };
 const PC_BY_PROP = { kerolox: 9.7e6, methalox: 30e6, hydrolox: 20e6, hypergolic: 15e6, solid: 6e6, nuclear: 5e6 };
@@ -409,10 +470,199 @@ export function designStageExpansion01(design, stageIndex, alt_m) {
     const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
     const s = design.stages?.[stageIndex];
     if (!s) return 0.2;
-    const e = ENGINE_CATALOG[s.engineId] || ENGINE_CATALOG.merlin_1d;
-    const noz = computeNozzle(e, s.propellantId, 1, body);
+    const e = engineFor(s.engineId);
+    const noz = computeNozzle(e, e.propellant, 1, body);
     const p_a = (body.p0_pa || 0) * Math.exp(-((alt_m || 0) / 1000) / (body.H_km || 8.5));
     return expansionState(noz, p_a).expansion01;
+}
+
+// ── Thruster geometry ─────────────────────────────────────────────────────────
+/**
+ * The PHYSICAL size of one engine, in metres — what the 3D view draws and what
+ * the cluster packer packs. Until 2026-10 the view shrank every bell until the
+ * cluster fitted the stage, so engine size meant nothing and nine Merlins and
+ * nine F-1s looked identical on the same core.
+ *
+ *   exit radius  — published exit diameter (ENGINE_NOZZLE.exitD_m), else the
+ *                  de Laval exit area Aₑ = ε·Aₜ from `computeNozzle`.
+ *   throat       — rₜ = rₑ/√ε (area ratio is a radius ratio squared).
+ *   bell length  — Rao 80 % bell: L = 0.8·(rₑ − rₜ)/tan 15° (the length of a
+ *                  15° cone with the same expansion, shortened 20 %); a solid
+ *                  motor's conical nozzle keeps the full cone.
+ *   head length  — chamber + powerhead above the throat. NOT a published
+ *                  dimension; 3·rₜ matches what `buildEngineBell` draws there.
+ * An ion engine has no nozzle: `exitR_m` is the grid (beam) radius.
+ */
+const TAN15 = Math.tan(15 * Math.PI / 180);
+export function engineGeometry(engineDef, body = LAUNCH_BODIES.earth) {
+    const e = engineDef || ENGINE_CATALOG.merlin_1d;
+    const spec = ENGINE_NOZZLE[e.id] || {};
+    const gas = PROP_GAS[e.propellant] || PROP_GAS.kerolox;
+    if (gas.electrostatic) {
+        const exitR = (spec.exitD_m || 0.36) / 2;
+        return {
+            kind: 'ion', exitR_m: exitR, throatR_m: exitR, bellLen_m: exitR * 0.9, headLen_m: exitR * 0.5,
+            totalLen_m: exitR * 1.4, eps: 0, profile: 'grid', gimbalDeg: spec.gimbalDeg || 0,
+            cooling: 'grid', source: spec.exitD_m ? 'published' : 'derived',
+        };
+    }
+    const noz = computeNozzle(e, e.propellant, 1, body);
+    const eps = Math.max(1.5, noz.eps || 16);
+    const derivedExitR = Math.sqrt(Math.max(1e-6, noz.Ae_m2) / Math.PI);
+    const exitR = spec.exitD_m ? spec.exitD_m / 2 : derivedExitR;
+    const throatR = exitR / Math.sqrt(eps);
+    const profile = spec.profile || 'rao';
+    const bellLen = (profile === 'conical' ? 1.0 : 0.8) * (exitR - throatR) / TAN15;
+    const headLen = throatR * 3;
+    return {
+        kind: spec.cooling === 'reactor' ? 'nuclear' : 'bell',
+        exitR_m: exitR, throatR_m: throatR, bellLen_m: bellLen, headLen_m: headLen,
+        totalLen_m: bellLen + headLen, eps, profile,
+        gimbalDeg: spec.gimbalDeg ?? 5, cooling: spec.cooling || 'regen',
+        source: spec.exitD_m ? 'published' : 'derived', derivedExitR_m: derivedExitR,
+    };
+}
+
+/**
+ * Pack `count` engine exits of radius `exitR` under a stage of radius `stageR`.
+ *
+ * Rings are filled from the OUTSIDE IN at a centre-to-centre pitch of 2·rₑ·(1+gap)
+ * — the outer ring hugs the skin (stageR − rₑ), each inner ring sits one pitch
+ * further in, and a lone remaining engine goes on the axis only if it clears
+ * the innermost ring. That reproduces the real layouts without special cases:
+ * Falcon 9's 1+8 octaweb, Super Heavy's three rings. It is a PACKING, not a
+ * replica — five F-1s pack tighter as a ring of 5 than as Saturn V's 1+4 cross
+ * (which was chosen for control, not fit), and the packer says so.
+ *
+ * If the engines do not fit, the smallest outer-ring radius that does is found
+ * and `overhang_m` reports how far the exits stick out past the skin; the 3D
+ * view then flares the aft skirt to cover them, and computeStats bills the
+ * wider base as reference area. Engines are never shrunk to make them fit.
+ */
+export function clusterLayout(count, exitR, stageR, { gap = 0.04 } = {}) {
+    const n = Math.max(1, Math.round(count) || 1);
+    const re = Math.max(0.01, exitR);
+    const pitch = 2 * re * (1 + gap);
+
+    const pack = (Rmax) => {
+        if (n === 1) return [{ r: 0, n: 1 }];
+        const rings = [];
+        let remaining = n, r = Rmax;
+        while (remaining > 0) {
+            if (remaining === 1) {
+                const inner = rings.length ? rings[rings.length - 1].r : Infinity;
+                if (inner + 1e-9 < pitch) return null;     // centre engine would overlap
+                rings.push({ r: 0, n: 1 });
+                break;
+            }
+            if (2 * r + 1e-9 < pitch) return null;         // two can't sit opposite
+            const cap = Math.floor(Math.PI / Math.asin(Math.min(1, pitch / (2 * r))) + 1e-9);
+            const k = Math.min(cap, remaining);
+            rings.push({ r, n: k });
+            remaining -= k;
+            r -= pitch;
+        }
+        return rings;
+    };
+
+    const Rfit = stageR - re;
+    let rings = Rfit >= 0 ? pack(Rfit) : null;
+    let fits = !!rings;
+    if (!rings) {
+        // Scan outward for the smallest outer ring that packs (pack() is not
+        // monotonic in R — a bigger ring can change the ring partition — so
+        // scan in small steps rather than bisect).
+        const step = pitch / 40;
+        for (let R = Math.max(0, Rfit); R < stageR + 60 * pitch; R += step) {
+            rings = pack(R);
+            if (rings) break;
+        }
+        rings = rings || [{ r: 0, n: 1 }];
+    }
+
+    const positions = [];
+    rings.forEach((ring, ri) => {
+        for (let j = 0; j < ring.n; j++) {
+            const a = (j / ring.n) * Math.PI * 2 + (ri % 2 ? Math.PI / ring.n : 0);
+            positions.push({ x: Math.cos(a) * ring.r, z: Math.sin(a) * ring.r, ring: ri, r: ring.r });
+        }
+    });
+    const clusterR = Math.max(...rings.map((g) => g.r)) + re;
+    const overhang = Math.max(0, clusterR - stageR);
+    const pattern = rings.slice().reverse().map((g) => g.n).join('+');
+    return {
+        positions, rings, pattern, pitch_m: pitch,
+        clusterR_m: clusterR, fits: fits && overhang < 1e-6, overhang_m: overhang,
+    };
+}
+
+/**
+ * The vehicle's physical stack, bottom to top, in metres with y = 0 at the aft
+ * end of stage 1's skin. The ONE geometry the 3D view draws and computeStats
+ * measures (body length → fineness and wetted area; base flare → reference area).
+ *
+ *   • Each stage's engines hang BELOW its skin; stage 1's hang below y = 0
+ *     (`engineDrop_m`), which is how high the launch mount must hold the stack.
+ *   • An upper stage's engines live inside an INTERSTAGE on top of the stage
+ *     below — long enough to house them (+0.4 m), or to taper between two
+ *     diameters, whichever is longer. It belongs to the LOWER stage and is
+ *     jettisoned with it.
+ *   • A cluster that overhangs its skin gets an aft skirt flared out to cover it.
+ */
+export function stackLayout(design, body = LAUNCH_BODIES[design?.bodyId] || LAUNCH_BODIES.earth) {
+    const out = [];
+    let y = 0, maxD = 0;
+    const stages = design?.stages || [];
+    stages.forEach((s, i) => {
+        const e = engineFor(s.engineId);
+        const geo = engineGeometry(e, body);
+        const r = Math.max(0.25, (s.diameter_m || 1) / 2);
+        const cluster = clusterLayout(s.engineCount, geo.exitR_m, r);
+        const len = Math.max(1, s.length_m || 1);
+        const aftSkirt = cluster.overhang_m > 0.02
+            ? { rTop: r, rBot: cluster.clusterR_m + 0.05, length: Math.max(1.5, 1.6 * cluster.overhang_m + geo.headLen_m) }
+            : null;
+        const st = { index: i, engine: e, geo, cluster, r, y0: y, length: len, aftSkirt, interstage: null };
+        y += len;
+        const next = stages[i + 1];
+        if (next) {
+            const rTop = Math.max(0.25, (next.diameter_m || 1) / 2);
+            const nGeo = engineGeometry(engineFor(next.engineId), body);
+            const house = nGeo.totalLen_m + 0.4;
+            const taper = Math.abs(rTop - r) > 0.05 ? Math.max(1.5, Math.abs(rTop - r) * 2.2) : 0;
+            const iLen = Math.max(1.0, house, taper);
+            st.interstage = { y0: y, length: iLen, rBot: r, rTop };
+            y += iLen;
+        }
+        maxD = Math.max(maxD, 2 * r, aftSkirt ? 2 * aftSkirt.rBot : 0);
+        out.push(st);
+    });
+    const noseLen = Math.max(0.5, design?.payload?.fairingLen_m || 8);
+    const s0 = out[0];
+    return {
+        stages: out,
+        noseY0: y, noseLen,
+        bodyLength_m: y + noseLen,
+        engineDrop_m: s0 ? s0.geo.bellLen_m : 0,
+        maxDiameter_m: maxD,
+    };
+}
+
+/**
+ * Canonical form of a design blob: every stage's engineId is a catalog KEY and
+ * its propellantId is the one that engine burns. Saved designs from before
+ * 2026-10 can carry the legacy spec id ('raptor_2_vac') or a mismatched
+ * propellant; they load corrected rather than flying fiction. Returns a copy.
+ */
+export function normalizeDesign(design) {
+    const d = JSON.parse(JSON.stringify(design || defaultDesign()));
+    if (!Array.isArray(d.stages) || !d.stages.length) d.stages = defaultDesign().stages;
+    d.stages = d.stages.map((s) => {
+        const e = engineFor(s.engineId);
+        return { ...s, engineId: e.key, propellantId: e.propellant,
+                 engineCount: Math.max(1, Math.min(45, Math.round(+s.engineCount || 1))) };
+    });
+    return d;
 }
 
 // ── Aerodynamics ──────────────────────────────────────────────────────────────
@@ -569,7 +819,7 @@ export function runAscent(design) {
     // turbopump mass flow set by its vacuum rating; the integrator jettisons the
     // spent stage's dry mass at burnout. This replaces the old single-stage
     // collapse with a genuine staged thrust/TWR profile.
-    const nozzles = stats.stages.map((s) => computeNozzle(s.engine, s.propellantId, s.engineCount, body));
+    const nozzles = stats.stages.map((s) => computeNozzle(s.engine, s.engine.propellant, s.engineCount, body));
     const stagesSpec = stats.stages.map((s) => {
         const thr = clamp(s.throttle ?? 1, 0.4, 1);
         const F_sl_N  = (s.thrustSL_kN  || 0) * 1000;   // already includes count × throttle
@@ -577,7 +827,7 @@ export function runAscent(design) {
         const ispVac  = s.ispVac_s || s.isp_s || 300;
         const mdot    = ispVac > 0 ? F_vac_N / (ispVac * G0) : 0;   // kg/s, ~constant per stage
         // Solid motors burn a cast grain — no throttle, no shutdown.
-        const throttleable = s.propellantId !== 'solid';
+        const throttleable = s.engine.propellant !== 'solid';
         return { propMass_kg: s.propMass, dryMass_kg: s.dryMass,
                  F_sl_N, F_vac_N, mdot_kgs: mdot, Isp_vac_s: ispVac, throttle: thr, throttleable };
     });

@@ -99,6 +99,10 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 .ssd-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 .ssd-note{font-size:11px;color:var(--c-text-mut);line-height:1.4}
+.ssd-bay{font-size:11.5px;color:var(--c-text-2);line-height:1.5;display:flex;flex-direction:column;gap:2px;
+  border-left:2px solid var(--c-accent-border);padding:2px 0 2px 8px}
+.ssd-chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:1px 6px;border-radius:999px;background:var(--c-accent-soft);color:var(--c-accent);margin-right:4px}
 
 /* Canvas / stage */
 .ssd-stagewrap{position:relative;border:1px solid var(--c-line);border-radius:var(--r-lg);overflow:hidden;
@@ -110,7 +114,12 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 .ssd-hud .ssd-h{display:flex;flex-direction:column}
 .ssd-hud .ssd-h .k{font-size:10px;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.06em}
 .ssd-hud .ssd-h .v{font-size:18px;font-weight:700}
-.ssd-viewbar{position:absolute;top:12px;right:12px;display:flex;gap:6px}
+.ssd-viewbar{position:absolute;top:12px;right:12px;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:56%}
+.ssd-warp{position:absolute;top:78px;left:12px;font-size:11px;color:var(--c-text-2);background:rgba(2,6,14,.55);
+  border:1px solid var(--c-line);border-radius:999px;padding:3px 10px;font-variant-numeric:tabular-nums;pointer-events:none}
+.ssd-warp[hidden]{display:none}
+@media (max-width:760px){.ssd-hud{gap:10px;padding:6px 10px}.ssd-hud .ssd-h .v{font-size:14px}.ssd-h-x{display:none!important}
+  .ssd-viewbar{top:auto;bottom:58px;right:8px;max-width:calc(100% - 16px)}}
 .ssd-viewbar button{font-size:11px;padding:5px 9px}
 .ssd-launchbar{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px}
 .ssd-phase{position:absolute;bottom:14px;right:14px;font-size:12px;color:var(--c-accent);letter-spacing:.1em;text-transform:uppercase}
@@ -178,8 +187,10 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 
 <header class="ssd-hero">
   <h1>Space Ship Designer<span class="ssd-badge">NEW</span></h1>
-  <p>Build a launch vehicle from the engines up — stages, propellants, thrusters, nosecone and cockpit — watch it
-     render in 3D, then fly a physically real surface-to-orbit ascent. <strong id="ssd-signin-note"></strong></p>
+  <p>Build a launch vehicle from the engines up — stages, engines, nosecone and cockpit — watch it
+     render in 3D at true scale, then fly a physically real surface-to-orbit ascent: pitch-over, staging and fairing
+     separation over a real-size planet. Engines are drawn at their real nozzle size and packed under each stage the way
+     real clusters are; the engine decides the propellant. <strong id="ssd-signin-note"></strong></p>
 </header>
 
 <div class="ssd-app">
@@ -262,12 +273,16 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <div class="ssd-h"><span class="k">Velocity</span><span class="v" id="hud-vel">0.00 km/s</span></div>
         <div class="ssd-h"><span class="k">Throttle</span><span class="v" id="hud-thr">0%</span></div>
         <div class="ssd-h"><span class="k">Thrust</span><span class="v" id="hud-thrust">0.00 MN</span></div>
+        <div class="ssd-h ssd-h-x"><span class="k">Pitch · downrange</span><span class="v" id="hud-track">—</span></div>
       </div>
+      <div class="ssd-warp" id="ssd-warp" hidden></div>
       <div class="ssd-viewbar">
         <button class="ssd-btn ssd-ghost" data-view="3q">¾</button>
         <button class="ssd-btn ssd-ghost" data-view="front">Front</button>
         <button class="ssd-btn ssd-ghost" data-view="side">Side</button>
         <button class="ssd-btn ssd-ghost" data-view="top">Top</button>
+        <button class="ssd-btn ssd-ghost" data-view="engines" title="Look up into the engine bay">Engines</button>
+        <button class="ssd-btn ssd-ghost" data-view="nose" title="Fairing / capsule / payload close-up">Nose</button>
         <button class="ssd-btn ssd-ghost" id="ssd-rotate">↻ Spin</button>
       </div>
       <div class="ssd-launchbar">
@@ -392,6 +407,7 @@ import { getSupabase } from './js/supabase-config.js';
 import { openGate, consumeResume } from './js/gate-modal.js';
 import {
   defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
+  normalizeDesign, engineFor, engineGeometry, stackLayout, clusterLayout,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
   LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES, surfaceRotationSpeed,
 } from './js/spaceship-designer-engine.js';
@@ -399,7 +415,9 @@ import { createRocketScene } from './js/spaceship-designer-3d.js';
 import * as store from './js/spaceship-designer-store.js';
 
 // ── State ──────────────────────────────────────────────────────────────────
-let design = store.loadDraft() || defaultDesign();
+// normalizeDesign: legacy drafts may carry a spec-id engineId or a propellant the
+// engine cannot burn — they load corrected (see the engine kernel's catalog note).
+let design = normalizeDesign(store.loadDraft() || defaultDesign());
 let signedIn = false;
 let scene = null;
 let rebuildTimer = 0;
@@ -419,7 +437,7 @@ function fillSelect(el, entries, selectedId) {
   el.innerHTML = '';
   for (const e of entries) {
     const opt = document.createElement('option');
-    opt.value = e.id;
+    opt.value = e.key || e.id;
     const locked = e.advanced && !signedIn;
     opt.textContent = (e.label || e.name) + (e.advanced ? (locked ? ' 🔒' : ' ✦') : '');
     if (locked) opt.disabled = true;
@@ -429,8 +447,58 @@ function fillSelect(el, entries, selectedId) {
   // If the selected value is now locked/invalid, fall back to the first allowed.
   if (el.value !== selectedId) {
     const firstOk = entries.find((e) => !(e.advanced && !signedIn));
-    if (firstOk) el.value = firstOk.id;
+    if (firstOk) el.value = firstOk.key || firstOk.id;
   }
+}
+
+// Engine picker: grouped by propellant, because the engine DECIDES the
+// propellant (a Merlin cannot burn hydrogen). Values are catalog KEYS.
+function fillEngineSelect(el, selectedKey) {
+  el.innerHTML = '';
+  for (const prop of Object.values(PROPELLANTS)) {
+    const engines = Object.values(ENGINE_CATALOG).filter((e) => e.propellant === prop.id);
+    if (!engines.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = prop.name;
+    for (const e of engines) {
+      const opt = document.createElement('option');
+      opt.value = e.key;
+      const locked = e.advanced && !signedIn;
+      opt.textContent = e.label + (e.advanced ? (locked ? ' 🔒' : ' ✦') : '');
+      opt.disabled = locked;
+      og.appendChild(opt);
+    }
+    el.appendChild(og);
+  }
+  el.value = selectedKey;
+  if (el.value !== selectedKey) {
+    const ok = Object.values(ENGINE_CATALOG).find((e) => !(e.advanced && !signedIn));
+    el.value = ok.key;
+  }
+  return el.value;
+}
+
+// Per-stage engine-bay readout: the engine's real size, how the cluster packs
+// under this stage, and whether it fits — the same numbers the 3D view draws.
+function engineBayHtml(i) {
+  const st = stackLayout(design).stages[i];
+  if (!st) return '';
+  const e = st.engine, g = st.geo, c = st.cluster;
+  const prop = PROPELLANTS[e.propellant];
+  const fmtT = (kN) => kN >= 1000 ? (kN / 1000).toFixed(2) + ' MN' : kN >= 1 ? kN.toFixed(0) + ' kN' : (kN * 1000).toFixed(0) + ' N';
+  const thrust = (e.sl_kn ? fmtT(e.sl_kn) + ' SL / ' : '') + fmtT(e.vac_kn) + ' vac';
+  const isp = (e.isp_sl ? e.isp_sl + ' / ' : '') + e.isp_vac + ' s';
+  const size = g.kind === 'ion' ? `${(g.exitR_m * 200).toFixed(0)} cm grid` : `${(g.exitR_m * 2).toFixed(2)} m exit${g.source === 'derived' ? '*' : ''} · ε ${g.eps.toFixed(0)}`;
+  const fit = c.fits
+    ? `<span style="color:var(--c-good)">fits</span>`
+    : `<span style="color:var(--c-warn)">overhangs ${c.overhang_m.toFixed(2)} m → flared skirt</span>`;
+  const gim = g.gimbalDeg > 0 ? `±${g.gimbalDeg}° gimbal` : 'fixed (no gimbal)';
+  return `<div class="ssd-bay">
+      <div><span class="ssd-chip" title="${prop?.note || ''}">${prop?.short || e.propellant}</span>
+        <span>${thrust} · Isp ${isp}</span></div>
+      <div>${c.positions.length > 1 ? c.pattern + ' cluster' : 'single engine'} · ${size} · ${gim} · ${fit}</div>
+      <div class="ssd-note">${e.note || ''}${g.source === 'derived' ? ' <em>*exit size derived from the nozzle model (no published figure).</em>' : ''}</div>
+    </div>`;
 }
 
 // ── Stage editor ─────────────────────────────────────────────────────────────
@@ -443,12 +511,12 @@ function renderStages() {
     div.innerHTML = `
       <div class="ssd-stagehd"><span>Stage ${i + 1}${i === 0 ? ' · booster' : ''}</span>
         ${design.stages.length > 1 ? `<button class="ssd-x" data-rm="${i}" title="Remove stage">×</button>` : ''}</div>
-      <div class="ssd-field"><label>Engine</label><select data-k="engineId" data-i="${i}"></select></div>
       <div class="ssd-grid2">
+        <div class="ssd-field"><label>Engine</label><select data-k="engineId" data-i="${i}"></select></div>
         <div class="ssd-field"><label>Engines</label>
           <input type="number" data-k="engineCount" data-i="${i}" min="1" max="45" step="1" value="${s.engineCount}"></div>
-        <div class="ssd-field"><label>Propellant</label><select data-k="propellantId" data-i="${i}"></select></div>
       </div>
+      <div data-bay="${i}"></div>
       <div class="ssd-grid2">
         <div class="ssd-field"><label>Diameter (m)</label>
           <input type="number" data-k="diameter_m" data-i="${i}" min="0.5" max="18" step="0.1" value="${s.diameter_m}"></div>
@@ -458,8 +526,9 @@ function renderStages() {
       <div class="ssd-field"><label>Throttle <span class="ssd-rangeval" data-thrval="${i}">${Math.round((s.throttle ?? 1) * 100)}%</span></label>
         <input type="range" data-k="throttle" data-i="${i}" min="0.4" max="1" step="0.05" value="${s.throttle ?? 1}"></div>`;
     wrap.appendChild(div);
-    fillSelect(div.querySelector('[data-k="engineId"]'), Object.values(ENGINE_CATALOG), s.engineId);
-    fillSelect(div.querySelector('[data-k="propellantId"]'), Object.values(PROPELLANTS), s.propellantId);
+    const chosen = fillEngineSelect(div.querySelector('[data-k="engineId"]'), s.engineId);
+    if (chosen !== s.engineId) { s.engineId = chosen; s.propellantId = engineFor(chosen).propellant; }
+    div.querySelector(`[data-bay="${i}"]`).innerHTML = engineBayHtml(i);
   });
   // Sign-out users are capped at 2 stages.
   const addBtn = $('ssd-add-stage');
@@ -658,9 +727,9 @@ function setNozBadge(el, state, extra = '') {
 }
 function renderNozzleStatic() {
   const s0 = design.stages[0] || {};
-  const e = ENGINE_CATALOG[s0.engineId] || ENGINE_CATALOG.merlin_1d;
+  const e = engineFor(s0.engineId);
   const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
-  const n = computeNozzle(e, s0.propellantId, s0.engineCount || 1, body);
+  const n = computeNozzle(e, e.propellant, s0.engineCount || 1, body);
   $('noz-engine').textContent = (e.label || e.name || 'Engine') + ' ×' + (s0.engineCount || 1);
   if (n.electrostatic) {
     setNozBadge($('noz-state'), 'electrostatic');
@@ -833,7 +902,7 @@ async function refreshHangar() {
 
 function loadShip(data) {
   if (!data || !data.stages) { toast('Could not read design', true); return; }
-  design = JSON.parse(JSON.stringify(data));
+  design = normalizeDesign(data);
   hydrateControls();
   refresh();
   toast('Loaded "' + (design.name || 'design') + '"');
@@ -891,21 +960,17 @@ function wire() {
     const i = +t.dataset.i, k = t.dataset.k;
     if (Number.isNaN(i) || !k) return;
     let val = t.value;
-    if (k !== 'engineId' && k !== 'propellantId') val = +val;
+    if (k !== 'engineId') val = +val;
     design.stages[i][k] = val;
     if (k === 'throttle') {
       const lab = $('ssd-stages').querySelector(`[data-thrval="${i}"]`);
       if (lab) lab.textContent = Math.round(val * 100) + '%';
     }
-    // When picking an engine, default its propellant to match.
-    if (k === 'engineId') {
-      const e2 = ENGINE_CATALOG[val];
-      if (e2?.propellant) {
-        design.stages[i].propellantId = e2.propellant;
-        const sel = $('ssd-stages').querySelector(`select[data-k="propellantId"][data-i="${i}"]`);
-        if (sel) sel.value = e2.propellant;
-      }
-    }
+    // The engine fixes the propellant (normalizeDesign is the one rule).
+    if (k === 'engineId') design.stages[i].propellantId = engineFor(val).propellant;
+    // Any stage edit can change every bay (interstages + overhang depend on
+    // neighbours), so refresh all readouts in place without re-rendering inputs.
+    $('ssd-stages').querySelectorAll('[data-bay]').forEach((el) => { el.innerHTML = engineBayHtml(+el.dataset.bay); });
     refresh();
   });
   $('ssd-stages').addEventListener('click', (e) => {
@@ -923,7 +988,7 @@ function wire() {
     const top = design.stages[design.stages.length - 1];
     design.stages.push({
       diameter_m: Math.max(1.5, top.diameter_m * 0.7), length_m: 8,
-      engineId: top.engineId, engineCount: 1, propellantId: top.propellantId,
+      engineId: top.engineId, engineCount: 1, propellantId: engineFor(top.engineId).propellant,
       fillFrac: 0.8, dryFrac: 0.1, throttle: 1,
     });
     renderStages(); refresh();
@@ -951,6 +1016,7 @@ function wire() {
     liveProp = false; renderPropStatic();
     $('hud-alt').textContent = '0 km'; $('hud-vel').textContent = '0.00 km/s';
     $('hud-thr').textContent = '0%'; $('hud-thrust').textContent = '0.00 MN'; $('ssd-phase').textContent = '';
+    $('hud-track').textContent = '—'; $('ssd-warp').hidden = true;
   });
   $('ssd-save').addEventListener('click', doSave);
 }
@@ -963,10 +1029,18 @@ function wire() {
       $('hud-vel').textContent = (s.vKms ?? 0).toFixed(2) + ' km/s';
       $('hud-thr').textContent = Math.round((s.throttle ?? 0) * 100) + '%';
       $('hud-thrust').textContent = (s.thrustMN ?? 0).toFixed(2) + ' MN';
+      $('hud-track').textContent = s.pitchDeg != null
+        ? `${s.pitchDeg.toFixed(0)}° · ${(s.downrangeKm ?? 0).toFixed((s.downrangeKm ?? 0) >= 100 ? 0 : 1)} km` : '—';
+      const warp = $('ssd-warp');
+      warp.hidden = !(s.rate > 1.05);
+      if (s.rate > 1.05) warp.textContent = `playback ×${s.rate.toFixed(s.rate < 10 ? 1 : 0)} · T+${(s.t ?? 0).toFixed(0)} s`;
       if (s.mach !== undefined) updateAeroLive(s);
       if (s.isp !== undefined) updatePropLive(s);
     },
-    onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p.replace('-', ' '); },
+    onPhase: (p) => {
+      $('ssd-phase').textContent = p === 'idle' ? '' : p.replace('-', ' ');
+      if (p === 'idle' || p === 'meco') $('ssd-warp').hidden = true;
+    },
   });
 
   hydrateControls();
