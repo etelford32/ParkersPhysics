@@ -31,6 +31,10 @@ function tle({ norad, incDeg, raanDeg, ecc, argpDeg, mDeg, nRevDay, epochMs }) {
 
 const nForAlt = (altKm) => Math.sqrt(MU / (RE + altKm) ** 3) * 86400 / (2 * Math.PI);
 
+/** One synthetic catalogue record (real checksummed TLE lines + the relay's OMM/derived fields). */
+export function syntheticRecord(o) { return rec(o); }
+export { nForAlt };
+
 function rec(o) {
     const [line1, line2] = tle(o);
     // The relay's derived fields, in ITS convention (WGS-72 altitudes).

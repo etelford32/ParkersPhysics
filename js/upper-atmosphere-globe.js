@@ -1520,6 +1520,7 @@ export class AtmosphereGlobe {
         this._instruments?.dispose();
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
+        this._onScreenObs?.disconnect();
         if (this._debrisRefreshTimer) {
             clearInterval(this._debrisRefreshTimer);
             this._debrisRefreshTimer = null;
@@ -1558,6 +1559,24 @@ export class AtmosphereGlobe {
         });
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this._renderer.setClearColor(0x030012, 1);
+
+        // Is the globe actually on screen? Offscreen it is not RENDERED (see
+        // _animate), and the volume's quality governor may only learn from
+        // frames it can SEE: scrolled down the 5800 px
+        // controls column, the canvas is offscreen, frames come back in
+        // ~17 ms, and the governor read that as headroom and climbed the
+        // march ladder (10 → 16 steps, measured). Scrolling back then cost
+        // multi-second frames and froze the page — the smoke test's
+        // "overlay toggles" click timed out on exactly that (2026-10-05).
+        this._canvasOnScreen = true;
+        if (typeof IntersectionObserver !== 'undefined') {
+            this._onScreenObs = new IntersectionObserver((entries) => {
+                const on = entries.some((e) => e.isIntersecting);
+                if (on && !this._canvasOnScreen) this._volume?.resetGovernorClock?.();
+                this._canvasOnScreen = on;
+            });
+            this._onScreenObs.observe(this.canvas);
+        }
     }
 
     _initScene() {
@@ -5503,7 +5522,13 @@ export class AtmosphereGlobe {
         const wallNow = performance.now();
         const dtWall = this._lastWallMs == null ? 0.016 : Math.min(0.1, (wallNow - this._lastWallMs) / 1000);
         this._lastWallMs = wallNow;
-        this._frame(t, dt, dtWall, { render: true, stepBus: true });
+        // STATE every frame, GL only while the canvas is on screen — the
+        // Stage / TIGA rule. Scrolled down the controls column, the page used
+        // to keep issuing full renders of an invisible globe every 17 ms; on
+        // a software rasteriser the queued work landed when the globe came
+        // back as ONE 37-second frame (measured, 2026-10-05), and on a laptop
+        // it is a GPU burning battery on pixels nobody sees.
+        this._frame(t, dt, dtWall, { render: this._canvasOnScreen !== false, stepBus: true });
     }
 
     // ── Test hook: a manual, steppable frame clock ──────────────────────
@@ -5609,7 +5634,12 @@ export class AtmosphereGlobe {
         // rung and climbs only while the frame interval says there is
         // headroom — it times itself rather than taking the `dt` above,
         // which is ~0 every frame (see _governQuality's comment).
-        this._volume?.update(this._camera, { govern: stepBus, viewportHeight: this.canvas.clientHeight });
+        // Governed only on live frames of a canvas that is ON SCREEN (see the
+        // IntersectionObserver in the renderer setup).
+        this._volume?.update(this._camera, {
+            govern: stepBus && this._canvasOnScreen !== false,
+            viewportHeight: this.canvas.clientHeight,
+        });
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.

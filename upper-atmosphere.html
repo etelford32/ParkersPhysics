@@ -29,7 +29,14 @@
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
 body {
-    width:100%; min-height:100vh; overflow-x:hidden;
+    /* `clip`, not `hidden`: overflow-x:hidden makes BODY a scroll container
+     * (overflow-y computes to auto), and a sticky element sticks to its
+     * nearest scroll container — body, which never scrolls (the window does).
+     * So #ua-aside-tabs never stuck: deep in the 5800 px Controls column the
+     * Controls/Analysis switch was 5000 px off-screen (2026-10-05,
+     * tests/upper-atmosphere-smoke.spec.js). `hidden` stays as the fallback
+     * for engines without `clip`. */
+    width:100%; min-height:100vh; overflow-x:hidden; overflow-x:clip;
     background:#040210; color:#d0cce8;
     font-family:'Segoe UI', system-ui, sans-serif;
 }
@@ -2403,7 +2410,10 @@ body.ua-immersive-on { overflow:hidden; }
     padding:4px;
     margin-bottom:14px;
     backdrop-filter:blur(14px);
-    position:sticky; top:14px; z-index:3;
+    /* Below the site nav, which is itself sticky at 50 px (js/nav-styles.css)
+     * — both only started sticking once body stopped being a scroll
+     * container (see the body rule); at top:14px the tabs parked UNDER it. */
+    position:sticky; top:calc(50px + 14px); z-index:3;
 }
 .ua-tab-btn {
     flex:1;

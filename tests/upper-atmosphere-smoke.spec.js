@@ -5,9 +5,17 @@
  * engine self-tests all pass, and the three canvas surfaces render at
  * least one frame. Mirrors the style of earth-smoke.spec.js but leans
  * on the exposed `window.__ua` handle rather than a debug overlay.
+ *
+ * The console-error gates run HERMETIC (tests/fixtures/upper-atmosphere-feeds.mjs:
+ * NOAA, CelesTrak and the Earth textures served from fixtures), so they judge
+ * the page and not the network — they used to fail wherever NOAA/CelesTrak/
+ * unpkg are unreachable on ~50 "Failed to load resource" lines. A separate
+ * gate boots with EVERY feed dead and requires no uncaught exception: the
+ * degraded path is a promise too.
  */
 
 import { test, expect } from '@playwright/test';
+import { routeUpperAtmosphereFeeds } from './fixtures/upper-atmosphere-feeds.mjs';
 
 const URL = '/upper-atmosphere.html';
 const BOOT_TIMEOUT_MS = 15_000;
@@ -28,19 +36,40 @@ function attachConsoleRecorder(page) {
 test.describe('upper-atmosphere.html smoke', () => {
 
     test('boots without console errors', async ({ page }) => {
+        await routeUpperAtmosphereFeeds(page);
         const errors = attachConsoleRecorder(page);
         await page.goto(URL);
         await page.waitForFunction(() => !!window.__ua, { timeout: BOOT_TIMEOUT_MS });
         // Let the 3D scene + two canvas plots render a few frames.
         await page.waitForTimeout(1500);
 
-        const filtered = errors.filter(e => {
-            // The CDN blue-marble texture occasionally 503s — the page
-            // falls back to the flat tint, which is expected behavior.
-            return !/blue-marble|three-globe/i.test(e.text || '');
-        });
-        if (filtered.length) console.error('Console errors:', filtered);
-        expect(filtered, 'No unexpected console errors during boot').toHaveLength(0);
+        if (errors.length) console.error('Console errors:', errors);
+        expect(errors, 'No console errors during boot (feeds served from fixtures)').toHaveLength(0);
+    });
+
+    test('NEGATIVE CONTROL: the hermetic boot gate still sees a broken page', async ({ page }) => {
+        // The fixtures must silence the NETWORK, never the page: break one of
+        // the page's own modules and the same recorder has to see it.
+        await routeUpperAtmosphereFeeds(page);
+        await page.route('**/js/upper-atmosphere-sat-suites-panel.js', (r) => r.fulfill({ status: 404, body: '' }));
+        const errors = attachConsoleRecorder(page);
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__ua, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForTimeout(1500);
+        expect(errors.length, 'a 404 on a page module is reported').toBeGreaterThan(0);
+    });
+
+    test('boots with EVERY feed down and throws nothing', async ({ page }) => {
+        await routeUpperAtmosphereFeeds(page, { down: true });
+        const thrown = [];
+        page.on('pageerror', (err) => thrown.push(err.message));
+        await page.goto(URL);
+        await page.waitForFunction(() => !!window.__ua?.engine && !!window.__ua?.globe, { timeout: BOOT_TIMEOUT_MS });
+        await page.waitForTimeout(2500);   // let every failed fetch settle
+        // The model still answers from the client surrogate.
+        const rho = await page.evaluate(() => window.__ua.engine.density({ altitudeKm: 400, f107Sfu: 150, ap: 15 }).rho);
+        expect(Number.isFinite(rho) && rho > 0, 'density model works offline').toBe(true);
+        expect(thrown, 'no uncaught exception with the feeds down').toEqual([]);
     });
 
     test('engine self-test passes', async ({ page }) => {
@@ -105,6 +134,7 @@ test.describe('upper-atmosphere.html smoke', () => {
     });
 
     test('density + turbulence overlay toggles do not throw', async ({ page }) => {
+        await routeUpperAtmosphereFeeds(page);
         const errors = attachConsoleRecorder(page);
         await page.goto(URL);
         await page.waitForFunction(() => !!window.__ua, { timeout: BOOT_TIMEOUT_MS });
@@ -149,9 +179,8 @@ test.describe('upper-atmosphere.html smoke', () => {
         await page.dispatchEvent('#ua-zone-dashboard .ua-zd-bc', 'change');
         await page.waitForTimeout(150);
 
-        const filtered = errors.filter(e => !/blue-marble|three-globe/i.test(e.text || ''));
-        if (filtered.length) console.error('Console errors:', filtered);
-        expect(filtered, 'no console errors while toggling density/turbulence overlays')
+        if (errors.length) console.error('Console errors:', errors);
+        expect(errors, 'no console errors while toggling density/turbulence overlays')
             .toHaveLength(0);
     });
 });

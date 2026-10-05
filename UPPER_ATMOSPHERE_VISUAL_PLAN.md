@@ -984,6 +984,44 @@ loop 4.7 km, flight seed ↔ dot 0.002 km, the mean-element fallback 5.1 km;
 controls 266 km (frozen node) and 7.6 km (old scale); catalogue dots vs the
 page's SGP4 0.005 km.
 
+### 9.13 The three "environmental" failures, root-caused (2026-10-05)
+
+The regression runs after §9.11/§9.12 carried seven failures written off as
+environment. Two of the three groups were not.
+
+**"Overlay toggles do not throw" — three real page bugs, stacked.**
+1. `body { overflow-x: hidden }` made BODY a scroll container (overflow-y
+   computes to auto). A sticky element sticks to its nearest scroll container,
+   and body never scrolls — the window does — so `#ua-aside-tabs` (and the
+   site nav) NEVER stuck. 5000 px down the Controls column the Controls /
+   Analysis switch was 5000 px off screen. Now `overflow-x: clip` (with
+   `hidden` as the fallback); the tabs stick at 64 px, under the 50 px nav
+   that now sticks too.
+2. Offscreen, the page kept rendering the globe every frame. On SwiftShader
+   the queued work landed as ONE 37 s frame when the globe scrolled back; on a
+   laptop it is GPU time spent on pixels nobody sees. `_animate` now passes
+   `render: false` while an IntersectionObserver says the canvas is off
+   screen — state still marches every frame (the Stage/TIGA rule).
+3. The offscreen frames were ~17 ms, and the volume's quality governor read
+   them as headroom and climbed 10 → 16 march steps (measured). It now ticks
+   only on frames it can see and resets its clock on return.
+
+**"Boots without console errors" — the network, but not by filtering.**
+The gate ran against live NOAA / CelesTrak / unpkg and failed wherever they
+are unreachable. `tests/fixtures/upper-atmosphere-feeds.mjs` serves every feed
+the page touches (the shapes its own clients read; the Earth textures are the
+self-hosted NASA maps), so the gate judges the page. It carries a NEGATIVE
+CONTROL (a 404'd page module must still be reported) and a sibling gate boots
+with every feed dead and requires no uncaught exception.
+
+**The DSMC e2e — environmental, and now runnable without Docker.** Against a
+real API (`scripts/dsmc-backend-local.sh`: the CI compose's seed + serve,
+natively) four of five passed at once. The fifth slept a fixed 1.2 s for the
+debounced backend answer, which lands at ~3.6 s on SwiftShader while the
+behaviour is right; it now waits for the request with the new F10.7 and for
+the pill to return to SPARTA. The suite's `beforeAll` fails with the start
+instructions when the API is down.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
