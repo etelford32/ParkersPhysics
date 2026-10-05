@@ -87,6 +87,23 @@ export function poseAt(sample, R_m, baseY = 0) {
 }
 
 /**
+ * The rotation that carries the planet's own (equirect-mapped) frame onto the
+ * scene frame at the pad: the surface point (lat, lon) lands on +Y (up), local
+ * EAST on +X (downrange) and local NORTH on −Z. Returned as the three scene-
+ * frame ROWS (E, U, −N) of a proper rotation (det +1), so a planet-frame
+ * vector v maps to (E·v, U·v, −N·v). The planet frame is three.js
+ * SphereGeometry's: (lat φ, lon λ) sits at P = (cosφ cosλ, sinφ, −cosφ sinλ)
+ * with u = (λ + 180°)/360°, which is the equirect texture convention.
+ */
+export function padBasis(latDeg, lonDeg) {
+    const f = (latDeg * Math.PI) / 180, l = (lonDeg * Math.PI) / 180;
+    const U = [Math.cos(f) * Math.cos(l), Math.sin(f), -Math.cos(f) * Math.sin(l)];
+    const E = [-Math.sin(l), 0, -Math.cos(l)];
+    const N = [-Math.sin(f) * Math.cos(l), Math.cos(f), Math.sin(f) * Math.sin(l)];
+    return { E, U, Nneg: N.map((x) => -x) };
+}
+
+/**
  * Discrete events the view stages on the flight clock.
  *   staging — from simulateAscent's staging_events: stage `stage` burns out at
  *             t and (if another stage follows) is jettisoned.

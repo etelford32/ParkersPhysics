@@ -192,4 +192,51 @@ console.log('flight');
     ok('pitch/downrange samples, true-geometry poses, events, time warp');
 }
 
+// ── Launch site: longitude ───────────────────────────────────────────────────
+console.log('launch site');
+{
+    near(E.wrapLon(190), -170, 1e-12, 'wrap east past 180');
+    near(E.wrapLon(-190), 170, 1e-12, 'wrap west past −180');
+    near(E.wrapLon(180), -180, 1e-12, '180 → −180 (half-open)');
+    assert.ok(Object.is(E.wrapLon(0), 0) && Object.is(E.wrapLon(-360), 0), 'no −0');
+    assert.equal(E.wrapLon(177.9), 177.9, 'in-range longitude is returned bit-exact (no float noise in saved designs)');
+    assert.equal(E.formatLatLon(-39.3, 177.9), '39.3° S · 177.9° E');
+
+    // Legacy drafts: the meridian the view used to hard-code IS the default.
+    const legacy = E.defaultDesign(); delete legacy.launchLongitude;
+    near(E.normalizeDesign(legacy).launchLongitude, -80.6, 1e-12, 'legacy Earth draft → Cape meridian');
+    near(E.normalizeDesign({ ...legacy, bodyId: 'mars' }).launchLongitude, 77.5, 1e-12, 'legacy Mars draft → Jezero meridian');
+    near(E.normalizeDesign({ ...legacy, launchLongitude: 270 }).launchLongitude, -90, 1e-12, 'stored longitude is wrapped');
+    near(E.normalizeDesign({ ...legacy, launchLatitude: 120 }).launchLatitude, 90, 1e-12, 'latitude clamped');
+    assert.equal(E.matchLaunchSite('earth', 5.2, -52.8)?.id, 'kourou');
+    assert.equal(E.matchLaunchSite('earth', 5.3, -52.8), null, 'off-preset is custom');
+    for (const [body, sites] of Object.entries(E.LAUNCH_SITES)) {
+        assert.ok(E.LAUNCH_BODIES[body], `${body} is a launch body`);
+        for (const x of sites) assert.ok(Math.abs(x.lat) <= 90 && x.lon >= -180 && x.lon < 180, `${x.id} in range`);
+    }
+
+    // The orientation the 3D planet uses: the pad's own (lat, lon) lands on +Y,
+    // local east on +X (downrange) and north on −Z, as a proper rotation.
+    const P = (f, l) => [Math.cos(f) * Math.cos(l), Math.sin(f), -Math.cos(f) * Math.sin(l)];
+    const rad = Math.PI / 180;
+    for (const [la, lo] of [[28.5, -80.6], [-39.3, 177.9], [0, 0], [89.5, 45], [-89.5, -120]]) {
+        const { E: e, U: u, Nneg: n } = F.padBasis(la, lo);
+        const map = (v) => [e, u, n].map((r) => r[0] * v[0] + r[1] * v[1] + r[2] * v[2]);
+        const det = e[0] * (u[1] * n[2] - u[2] * n[1]) - e[1] * (u[0] * n[2] - u[2] * n[0]) + e[2] * (u[0] * n[1] - u[1] * n[0]);
+        near(det, 1, 1e-12, `proper rotation at ${la},${lo}`);
+        const up = map(P(la * rad, lo * rad));
+        near(up[1], 1, 1e-12, `pad on +Y at ${la},${lo}`);
+        const east = map(P(la * rad, (lo + 0.01) * rad));         // a step east
+        assert.ok(east[0] > 0 && Math.abs(east[2]) < Math.abs(east[0]) * 1e-3 + 1e-12, `east is +X at ${la},${lo}`);
+        const north = map(P((la + 0.01 * Math.sign(90 - la)) * rad, lo * rad));
+        if (Math.abs(la) < 89) assert.ok(north[2] < 0, `north is −Z at ${la},${lo}`);
+    }
+
+    // Longitude chooses the ground, not the Δv: the 2D ascent flies due east.
+    const a = E.runAscent({ ...E.defaultDesign(), launchLongitude: -80.6 });
+    const b = E.runAscent({ ...E.defaultDesign(), launchLongitude: 131.0 });
+    assert.equal(a.final_vt_kms, b.final_vt_kms, 'longitude changes no ascent number');
+    ok('wrap/clamp, legacy meridians, presets, padBasis orientation, Δv-neutral longitude');
+}
+
 console.log(`\n${passed} groups passed`);

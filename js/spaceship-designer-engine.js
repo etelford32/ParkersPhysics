@@ -212,7 +212,8 @@ export function defaultDesign() {
         name: 'Aurora I',
         bodyId: 'earth',
         targetAltKm: 200,
-        launchLatitude: 28.5,          // Cape Canaveral-ish — sets the rotation assist
+        launchLatitude: 28.5,          // Cape Canaveral — sets the rotation assist
+        launchLongitude: -80.6,        // east-positive; picks the ground under the pad
         stages: [
             { diameter_m: 3.7, length_m: 55, engineId: 'merlin_1d', engineCount: 9, propellantId: 'kerolox', fillFrac: 0.82, dryFrac: 0.06, throttle: 1 },
             { diameter_m: 3.7, length_m: 13, engineId: 'merlin_1d', engineCount: 1, propellantId: 'kerolox', fillFrac: 0.80, dryFrac: 0.09, throttle: 1 },
@@ -222,6 +223,66 @@ export function defaultDesign() {
         fins: { type: 'grid', count: 4 },
         livery: { id: 'classic', pattern: 'solid' },
     };
+}
+
+// ── Launch sites ─────────────────────────────────────────────────────────────
+// Presets per body, PLANETOCENTRIC latitude and EAST-POSITIVE longitude (the
+// convention of the equirect maps the 3D view wears). The first entry is the
+// body's default. A design carries its own launchLatitude / launchLongitude;
+// a preset is only a shortcut to a pair, so editing either slider just makes
+// the site "custom".
+//
+// WHAT LONGITUDE DOES AND DOES NOT DO: the ascent integrator is a 2D polar
+// model flown due east, so the rotation assist depends on LATITUDE alone
+// (v_rot = ωR·cos φ) and longitude changes no Δv number. Longitude decides
+// the ground under the pad and the planet seen on the way up.
+export const LAUNCH_SITES = {
+    earth: [
+        { id: 'cape',        name: 'Cape Canaveral, USA',     lat: 28.5,  lon: -80.6 },
+        { id: 'starbase',    name: 'Starbase, USA',           lat: 26.0,  lon: -97.2 },
+        { id: 'vandenberg',  name: 'Vandenberg, USA',         lat: 34.7,  lon: -120.6 },
+        { id: 'kourou',      name: 'Kourou, French Guiana',   lat: 5.2,   lon: -52.8 },
+        { id: 'baikonur',    name: 'Baikonur, Kazakhstan',    lat: 45.9,  lon: 63.3 },
+        { id: 'sriharikota', name: 'Sriharikota, India',      lat: 13.7,  lon: 80.2 },
+        { id: 'wenchang',    name: 'Wenchang, China',         lat: 19.6,  lon: 110.9 },
+        { id: 'tanegashima', name: 'Tanegashima, Japan',      lat: 30.4,  lon: 131.0 },
+        { id: 'mahia',       name: 'Māhia, New Zealand',      lat: -39.3, lon: 177.9 },
+    ],
+    mars: [
+        { id: 'jezero',  name: 'Jezero Crater',   lat: 18.4,  lon: 77.5 },
+        { id: 'utopia',  name: 'Utopia Planitia', lat: 25.1,  lon: 109.9 },
+        { id: 'gale',    name: 'Gale Crater',     lat: -5.4,  lon: 137.8 },
+    ],
+    moon: [
+        { id: 'tranquility', name: 'Tranquility Base',     lat: 0.7,   lon: 23.5 },
+        { id: 'shackleton',  name: 'Shackleton (S. pole)', lat: -89.5, lon: 0 },
+    ],
+};
+
+/** The body's default site (first preset), or the equator / prime meridian. */
+export function defaultLaunchSite(bodyId) {
+    return LAUNCH_SITES[bodyId]?.[0] || { id: null, name: null, lat: 0, lon: 0 };
+}
+
+/** The preset at (lat, lon) on this body, within 0.05°, or null (custom). */
+export function matchLaunchSite(bodyId, lat, lon) {
+    return (LAUNCH_SITES[bodyId] || []).find((s) =>
+        Math.abs(s.lat - lat) < 0.05 && Math.abs(wrapLon(s.lon - lon)) < 0.05) || null;
+}
+
+/** Longitude wrapped into [−180, 180). */
+export function wrapLon(lon) {
+    let x = +lon || 0;
+    // In-range values pass through untouched: the modular form below turns
+    // 177.9 into 177.89999999999998, which then lands in the saved design.
+    if (!(x >= -180 && x < 180)) x = (((x + 180) % 360) + 360) % 360 - 180;
+    return Object.is(x, -0) ? 0 : x;
+}
+
+/** "28.5° N · 80.6° W" */
+export function formatLatLon(lat, lon) {
+    const la = +lat || 0, lo = wrapLon(lon);
+    return `${Math.abs(la).toFixed(1)}° ${la < 0 ? 'S' : 'N'} · ${Math.abs(lo).toFixed(1)}° ${lo < 0 ? 'W' : 'E'}`;
 }
 
 // ── Small helpers ────────────────────────────────────────────────────────────
@@ -662,6 +723,16 @@ export function normalizeDesign(design) {
         return { ...s, engineId: e.key, propellantId: e.propellant,
                  engineCount: Math.max(1, Math.min(45, Math.round(+s.engineCount || 1))) };
     });
+    // Launch site. Designs saved before longitude existed flew over a fixed
+    // meridian — Cape Canaveral on Earth, Jezero on Mars — which IS those
+    // bodies' default-site longitude, so on the two bodies with maps they load
+    // unchanged. (Elsewhere it was 0° and the sphere is featureless, so the
+    // default site's longitude changes nothing visible.)
+    const lat = Number(d.launchLatitude);
+    d.launchLatitude = Number.isFinite(lat) ? Math.max(-90, Math.min(90, lat)) : defaultLaunchSite(d.bodyId).lat;
+    const lon = Number(d.launchLongitude);
+    d.launchLongitude = wrapLon(Number.isFinite(lon) && d.launchLongitude !== null && d.launchLongitude !== ''
+        ? lon : defaultLaunchSite(d.bodyId).lon);
     return d;
 }
 

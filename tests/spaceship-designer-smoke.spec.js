@@ -93,6 +93,28 @@ test.describe('spaceship-designer.html smoke', () => {
         expect(box.min).toBeLessThan(-19);
     });
 
+    // Longitude is part of the design: the presets and the slider both move
+    // the planet under the pad, and the design blob carries it.
+    test('launch site: presets and the longitude slider move the pad', async ({ page }) => {
+        await page.addInitScript(() => { try { localStorage.removeItem('pp_ssd_draft_v1'); } catch {} });
+        await page.goto(URL);
+        await page.waitForFunction(() => window.__ssd?.scene?.debug().stages > 0, { timeout: BOOT_TIMEOUT_MS });
+        expect(await page.evaluate(() => window.__ssd.scene.debug().site)).toEqual([28.5, -80.6]);
+        await page.selectOption('#ssd-site', 'mahia');
+        await page.waitForFunction(() => window.__ssd.scene.debug().site?.[1] === 177.9, { timeout: 10_000 });
+        expect(await page.evaluate(() => [window.__ssd.design.launchLatitude, window.__ssd.design.launchLongitude])).toEqual([-39.3, 177.9]);
+        await expect(page.locator('#ssd-lon-val')).toHaveText('177.9° E');
+        // Nudging the slider makes the site custom and still moves the pad.
+        await page.locator('#ssd-lon').evaluate((el) => { el.value = '-10'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+        await page.waitForFunction(() => window.__ssd.scene.debug().site?.[1] === -10, { timeout: 10_000 });
+        await expect(page.locator('#ssd-site')).toHaveValue('custom');
+        // A new body brings its own default site.
+        await page.selectOption('#ssd-body', 'mars');
+        await page.waitForFunction(() => window.__ssd.scene.debug().body === 'mars', { timeout: 10_000 });
+        expect(await page.evaluate(() => window.__ssd.scene.debug().site)).toEqual([18.4, 77.5]);
+        await expect(page.locator('#ssd-site')).toHaveValue('jezero');
+    });
+
     test('engine picker values are catalog keys', async ({ page }) => {
         await page.goto(URL);
         await page.waitForFunction(() => window.__ssd?.ready, { timeout: BOOT_TIMEOUT_MS });

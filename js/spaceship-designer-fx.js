@@ -12,9 +12,9 @@
  * the limb exactly as far away as it really is. Earth and Mars wear the
  * self-hosted archival maps (assets/earth, assets/mars — the hero / mars.html
  * sources); every other body is a featureless sphere in its mean surface
- * colour rather than invented geography. The pad sits at the design's launch
- * latitude on a FIXED, stated meridian (`PAD_LONGITUDE`) — the design has no
- * longitude, and picking one silently would be a fact we do not have.
+ * colour rather than invented geography. The pad sits at the design's own
+ * launchLatitude / launchLongitude (presets in the engine's LAUNCH_SITES);
+ * `padBasis` in the flight kernel is the one, node-tested, orientation.
  *
  * Colour pipeline: the renderer does NO tone mapping, and the raw shaders here
  * write display-space values (their colour uniforms are set without the
@@ -23,6 +23,7 @@
  */
 
 import * as THREE from 'three';
+import { padBasis } from './spaceship-designer-flight.js';
 
 // ── Per-body look ────────────────────────────────────────────────────────────
 // zenith / horizon: clear-day sky at the surface; ground: mean surface tint;
@@ -39,8 +40,6 @@ export const BODY_LOOK = {
     europa:    { ground: 0xcbbfae },
     enceladus: { ground: 0xe6eaee },
 };
-/** Pad meridian per body — fixed and disclosed (Cape Canaveral; Jezero on Mars). */
-export const PAD_LONGITUDE = { earth: -80.6, mars: 77.5 };
 
 const SUN_DIR = new THREE.Vector3(0.45, 0.78, 0.43).normalize();
 export function sunDirection() { return SUN_DIR.clone(); }
@@ -170,7 +169,7 @@ const LIMB_FRAG = /* glsl */`
         gl_FragColor = vec4(uColor * glow * uStrength, 1.0);
     }`;
 
-export function createPlanet(body, look, latDeg = 0) {
+export function createPlanet(body, look, latDeg = 0, lonDeg = 0) {
     const R = body.R_km * 1000;
     const group = new THREE.Group();
     group.position.set(0, -R, 0);
@@ -178,16 +177,14 @@ export function createPlanet(body, look, latDeg = 0) {
     const mat = new THREE.MeshStandardMaterial({ color: look.ground, roughness: 1, metalness: 0 });
     const sphere = new THREE.Mesh(new THREE.SphereGeometry(R, 192, 96), mat);
     // Orient the sphere so the pad's (lat, lon) is at +Y and local EAST is +X
-    // (the downrange direction). SphereGeometry's (u, v) → equirect lon/lat
-    // puts (lat φ, lon λ) at P = (cosφ cosλ, sinφ, −cosφ sinλ), east at
-    // (−sinλ, 0, −cosλ) and north at (−sinφ cosλ, cosφ, sinφ sinλ). The basis
-    // (E, U, −N) is right-handed, so M = [E U −N]ᵀ is a proper rotation.
-    const lat = (latDeg * Math.PI) / 180;
-    const lon = ((PAD_LONGITUDE[body.id] ?? 0) * Math.PI) / 180;
-    const U = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), -Math.cos(lat) * Math.sin(lon));
-    const E = new THREE.Vector3(-Math.sin(lon), 0, -Math.cos(lon));
-    const N = new THREE.Vector3(-Math.sin(lat) * Math.cos(lon), Math.cos(lat), Math.sin(lat) * Math.sin(lon));
-    const basis = new THREE.Matrix4().makeBasis(E, U, N.clone().negate()).transpose();
+    // (the downrange direction) — `padBasis` gives the rotation's rows.
+    const { E, U, Nneg } = padBasis(latDeg, lonDeg);
+    const basis = new THREE.Matrix4().set(
+        E[0], E[1], E[2], 0,
+        U[0], U[1], U[2], 0,
+        Nneg[0], Nneg[1], Nneg[2], 0,
+        0, 0, 0, 1,
+    );
     sphere.quaternion.setFromRotationMatrix(basis);
     group.add(sphere);
 

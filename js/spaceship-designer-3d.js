@@ -156,8 +156,9 @@ export function createRocketScene(canvas, opts = {}) {
     // ── Environment ─────────────────────────────────────────────────────────
     function ensureEnv(design) {
         const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
-        const lat = Math.round((design.launchLatitude ?? 0) * 2) / 2;
-        const key = body.id + ':' + lat;
+        const lat = Math.round((design.launchLatitude ?? 0) * 10) / 10;
+        const lon = Math.round((design.launchLongitude ?? 0) * 10) / 10;
+        const key = body.id + ':' + lat + ':' + lon;
         if (env?.key === key) return env;
         if (env) {
             scene.remove(env.sky.mesh, env.stars.points, env.planet.group, env.ground);
@@ -167,7 +168,7 @@ export function createRocketScene(canvas, opts = {}) {
         const look = BODY_LOOK[body.id] || BODY_LOOK.moon;
         const sky = createSky(look);
         const stars = createStars();
-        const planet = createPlanet(body, look, lat);
+        const planet = createPlanet(body, look, lat, lon);
         // Local ground apron: the planet's polar facet is ~100 km wide, so
         // the ground round the pad gets its own flat disc. 20 km is wide
         // enough that fog, not the disc's rim, makes the horizon (a 3 km disc
@@ -181,7 +182,7 @@ export function createRocketScene(canvas, opts = {}) {
         ground.receiveShadow = true;
         scene.add(sky.mesh, stars.points, planet.group, ground);
         hemi.groundColor.setHex(look.ground);
-        env = { key, body, look, sky, stars, planet, ground };
+        env = { key, body, look, sky, stars, planet, ground, site: [lat, lon] };
         return env;
     }
 
@@ -1158,6 +1159,7 @@ export function createRocketScene(canvas, opts = {}) {
             camToTarget: camera.position.distanceTo(controls.target),
             flightT: flight?.t ?? null, particles: particles.live,
             fog: scene.fog.density, near: camera.near, camPos: camera.position.toArray(),
+            body: env?.body.id ?? null, site: env?.site ?? null,
         };
     }
 

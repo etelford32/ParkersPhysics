@@ -108,20 +108,28 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 .ssd-stagewrap{position:relative;border:1px solid var(--c-line);border-radius:var(--r-lg);overflow:hidden;
   background:#0a1422;min-height:480px;height:62vh}
 #ssd-canvas{width:100%;height:100%;display:block}
-.ssd-hud{position:absolute;top:12px;left:12px;display:flex;gap:18px;background:rgba(2,6,14,.55);
+/* HUD + playback pill share one column so the pill follows the HUD's real
+   height (the HUD wraps to two rows when the stage is narrow), clear of the
+   view-button column on the right. */
+.ssd-hudcol{position:absolute;top:12px;left:12px;max-width:calc(100% - 118px);display:flex;flex-direction:column;
+  align-items:flex-start;gap:6px;pointer-events:none}
+.ssd-hud{display:flex;flex-wrap:wrap;row-gap:6px;gap:18px;background:rgba(2,6,14,.55);
   border:1px solid var(--c-line);border-radius:var(--r-md);padding:8px 14px;backdrop-filter:blur(6px);
   font-variant-numeric:tabular-nums;pointer-events:none}
 .ssd-hud .ssd-h{display:flex;flex-direction:column}
 .ssd-hud .ssd-h .k{font-size:10px;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.06em}
 .ssd-hud .ssd-h .v{font-size:18px;font-weight:700}
-.ssd-viewbar{position:absolute;top:12px;right:12px;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:56%}
-.ssd-warp{position:absolute;top:78px;left:12px;font-size:11px;color:var(--c-text-2);background:rgba(2,6,14,.55);
+/* A column on the right edge: as a row it ran under the HUD once the HUD
+   gained its pitch · downrange readout (the centre column is ~700 px wide). */
+.ssd-viewbar{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;align-items:stretch;gap:5px}
+.ssd-warp{font-size:11px;color:var(--c-text-2);background:rgba(2,6,14,.55);
   border:1px solid var(--c-line);border-radius:999px;padding:3px 10px;font-variant-numeric:tabular-nums;pointer-events:none}
 .ssd-warp[hidden]{display:none}
-@media (max-width:760px){.ssd-hud{gap:10px;padding:6px 10px}.ssd-hud .ssd-h .v{font-size:14px}.ssd-h-x{display:none!important}
-  .ssd-viewbar{top:auto;bottom:58px;right:8px;max-width:calc(100% - 16px)}}
+@media (max-width:760px){.ssd-hudcol{max-width:calc(100% - 24px)}.ssd-hud{gap:10px;padding:6px 10px}.ssd-hud .ssd-h .v{font-size:14px}.ssd-h-x{display:none!important}
+  .ssd-viewbar{top:auto;bottom:58px;right:8px;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 16px)}}
 .ssd-viewbar button{font-size:11px;padding:5px 9px}
 .ssd-launchbar{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px}
+.ssd-launchbar button{white-space:nowrap}
 .ssd-phase{position:absolute;bottom:14px;right:14px;font-size:12px;color:var(--c-accent);letter-spacing:.1em;text-transform:uppercase}
 
 /* Stats */
@@ -209,9 +217,14 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
           <div class="ssd-field"><label>Target orbit (km)</label>
             <input type="number" id="ssd-alt" min="80" max="2000" step="10" value="200"></div>
         </div>
-        <div class="ssd-field"><label>Launch latitude <span class="ssd-rangeval" id="ssd-lat-val">28.5°</span></label>
-          <div class="ssd-row"><input type="range" id="ssd-lat" min="0" max="90" step="0.5" value="28.5"></div>
+        <div class="ssd-field"><label>Launch site</label>
+          <select id="ssd-site"></select></div>
+        <div class="ssd-field"><label>Latitude <span class="ssd-rangeval" id="ssd-lat-val">28.5° N</span></label>
+          <div class="ssd-row"><input type="range" id="ssd-lat" min="-90" max="90" step="0.1" value="28.5"></div>
           <div class="ssd-note" id="ssd-lat-note"></div></div>
+        <div class="ssd-field"><label>Longitude <span class="ssd-rangeval" id="ssd-lon-val">80.6° W</span></label>
+          <div class="ssd-row"><input type="range" id="ssd-lon" min="-180" max="180" step="0.1" value="-80.6"></div>
+          <div class="ssd-note" id="ssd-lon-note"></div></div>
       </div>
     </div>
 
@@ -268,6 +281,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
   <div class="ssd-col">
     <div class="ssd-stagewrap">
       <canvas id="ssd-canvas"></canvas>
+      <div class="ssd-hudcol">
       <div class="ssd-hud">
         <div class="ssd-h"><span class="k">Altitude</span><span class="v" id="hud-alt">0 km</span></div>
         <div class="ssd-h"><span class="k">Velocity</span><span class="v" id="hud-vel">0.00 km/s</span></div>
@@ -276,6 +290,7 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <div class="ssd-h ssd-h-x"><span class="k">Pitch · downrange</span><span class="v" id="hud-track">—</span></div>
       </div>
       <div class="ssd-warp" id="ssd-warp" hidden></div>
+      </div>
       <div class="ssd-viewbar">
         <button class="ssd-btn ssd-ghost" data-view="3q">¾</button>
         <button class="ssd-btn ssd-ghost" data-view="front">Front</button>
@@ -408,6 +423,7 @@ import { openGate, consumeResume } from './js/gate-modal.js';
 import {
   defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
   normalizeDesign, engineFor, engineGeometry, stackLayout, clusterLayout,
+  LAUNCH_SITES, defaultLaunchSite, matchLaunchSite, wrapLon, formatLatLon,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
   LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES, surfaceRotationSpeed,
 } from './js/spaceship-designer-engine.js';
@@ -545,6 +561,7 @@ function readControls() {
   design.bodyId = $('ssd-body').value;
   design.targetAltKm = +$('ssd-alt').value || 200;
   design.launchLatitude = +$('ssd-lat').value || 0;
+  design.launchLongitude = wrapLon(+$('ssd-lon').value || 0);
   design.payload = {
     mass_kg: +$('ssd-payload').value || 0,
     nosecone: $('ssd-nose').value,
@@ -675,17 +692,53 @@ function updateAeroLive(s) {
   $('aero-val-wave').textContent = wv.toFixed(1) + ' kN';
 }
 
-// Launch-latitude → rotation assist note (under the slider).
+// Launch site → rotation-assist note + longitude note (under the sliders).
 function updateLatNote() {
   const lat = +$('ssd-lat').value || 0;
-  $('ssd-lat-val').textContent = lat.toFixed(1) + '°';
+  const lon = wrapLon(+$('ssd-lon').value || 0);
+  const [laTxt, loTxt] = formatLatLon(lat, lon).split(' · ');
+  $('ssd-lat-val').textContent = laTxt;
+  $('ssd-lon-val').textContent = loTxt;
   const body = LAUNCH_BODIES[$('ssd-body').value] || LAUNCH_BODIES.earth;
   const vrot = surfaceRotationSpeed(body, lat);
   const eq = surfaceRotationSpeed(body, 0);
   $('ssd-lat-note').innerHTML = vrot > 1
     ? `Eastward rotation gives <strong>+${vrot.toFixed(0)} m/s</strong> of orbital velocity free `
-      + `(${eq.toFixed(0)} m/s at the equator). Min inclination ≈ ${lat.toFixed(0)}°.`
+      + `(${eq.toFixed(0)} m/s at the equator). Min inclination ≈ ${Math.abs(lat).toFixed(0)}°.`
     : `${body.name} barely rotates — no useful launch assist.`;
+  // Longitude is honest about its reach: the ascent flies due east, so the
+  // assist (and every Δv) depends on latitude only; longitude picks the ground.
+  $('ssd-lon-note').textContent = 'Picks the ground under the pad and the planet you climb over. '
+    + 'The ascent flies due east, so it changes no Δv — latitude sets the rotation assist.';
+  syncSiteSelect();
+}
+
+// Launch-site presets for the current body; "Custom" whenever the sliders sit
+// off every preset. A preset is only a shortcut to a lat/lon pair.
+function fillSiteSelect() {
+  const sel = $('ssd-site');
+  const sites = LAUNCH_SITES[$('ssd-body').value] || [];
+  sel.innerHTML = '';
+  for (const site of sites) {
+    const o = document.createElement('option');
+    o.value = site.id;
+    o.textContent = `${site.name} — ${formatLatLon(site.lat, site.lon)}`;
+    sel.appendChild(o);
+  }
+  const custom = document.createElement('option');
+  custom.value = 'custom';
+  custom.textContent = 'Custom (use the sliders)';
+  sel.appendChild(custom);
+  syncSiteSelect();
+}
+function syncSiteSelect() {
+  const m = matchLaunchSite($('ssd-body').value, +$('ssd-lat').value || 0, +$('ssd-lon').value || 0);
+  $('ssd-site').value = m ? m.id : 'custom';
+}
+function applySite(site) {
+  if (!site) return;
+  $('ssd-lat').value = site.lat;
+  $('ssd-lon').value = site.lon;
 }
 
 // ── Propulsion / thrust analysis (bottom panel) ──────────────────────────────
@@ -707,7 +760,9 @@ function renderPropStatic() {
     ['Liftoff TWR', st.liftoffTWR.toFixed(2)],
     ['Stage 1 Isp (SL / vac)', `${Math.round(s0.isp_s || 0)} / ${Math.round(s0.ispVac_s || 0)} s`],
     ['Ideal Δv (Tsiolkovsky)', st.totalDv_kms.toFixed(2) + ' km/s'],
-    ['Rotation assist', vrot > 1 ? `+${vrot.toFixed(0)} m/s @ ${(design.launchLatitude ?? 0).toFixed(0)}°` : 'none'],
+    ['Launch site', (matchLaunchSite(design.bodyId, design.launchLatitude ?? 0, design.launchLongitude ?? 0)?.name || 'Custom')
+      + ' · ' + formatLatLon(design.launchLatitude ?? 0, design.launchLongitude ?? 0)],
+    ['Rotation assist', vrot > 1 ? `+${vrot.toFixed(0)} m/s @ ${Math.abs(design.launchLatitude ?? 0).toFixed(0)}°` : 'none'],
     ['Acceleration limit', `${crewed ? 4 : 6} g (${crewed ? 'crewed' : 'uncrewed'})`],
   ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
   if (!liveProp) {
@@ -931,6 +986,8 @@ function hydrateControls() {
   fillSelect($('ssd-body'), LAUNCH_BODY_OPTIONS, design.bodyId);
   $('ssd-alt').value = design.targetAltKm || 200;
   $('ssd-lat').value = design.launchLatitude ?? 28.5;
+  $('ssd-lon').value = design.launchLongitude ?? -80.6;
+  fillSiteSelect();
   updateLatNote();
   fillSelect($('ssd-nose'), Object.values(NOSECONE_TYPES), design.payload?.nosecone || 'ogive');
   $('ssd-payload').value = design.payload?.mass_kg ?? 15000;
@@ -948,10 +1005,25 @@ function hydrateControls() {
 // ── Wire events ──────────────────────────────────────────────────────────────
 function wire() {
   // Top-level controls.
-  ['ssd-name', 'ssd-body', 'ssd-alt', 'ssd-lat', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
+  ['ssd-name', 'ssd-alt', 'ssd-lat', 'ssd-lon', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
    'ssd-cockpit', 'ssd-crew', 'ssd-windows', 'ssd-fin', 'ssd-fincount',
    'ssd-livery', 'ssd-pattern'].forEach((id) => {
     $(id).addEventListener('input', () => { readControls(); updateLatNote(); refresh(); });
+  });
+  // A new body brings its own sites: move to its default site (a Cape
+  // Canaveral on Mars is nobody's intent). Bodies without presets keep the
+  // current coordinates.
+  $('ssd-body').addEventListener('input', () => {
+    const site = defaultLaunchSite($('ssd-body').value);
+    if (site.id) applySite(site);
+    fillSiteSelect();
+    readControls(); updateLatNote(); refresh();
+  });
+  $('ssd-site').addEventListener('input', () => {
+    const site = (LAUNCH_SITES[$('ssd-body').value] || []).find((x) => x.id === $('ssd-site').value);
+    if (!site) return;                       // "Custom" — leave the sliders where they are
+    applySite(site);
+    readControls(); updateLatNote(); refresh();
   });
 
   // Stage controls (event delegation on the container).
