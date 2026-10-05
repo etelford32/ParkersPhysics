@@ -60,6 +60,15 @@ import { AtmosphereVolume, VOLUME_QUALITY }
     from './upper-atmosphere-volume.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { capPointSize, roundDotTexture } from './upper-atmosphere-point-cap.js';
+import {
+    meanElements, ringSample, orbitRingInertialScene, ringToSegments, ringRotationY,
+    gmstRad as suiteGmstRad, altitudeLadder, outerShellKm, framingDistance, FRAME_PRESETS,
+    orbitRegime, perifocalTable, inertialSceneAt,
+} from './upper-atmosphere-sat-suites.js';
+import {
+    TRACKER_EARTH_RADIUS, catalogAltToScene, catalogToPageAltKm, sceneToPageAltKm,
+    pageAltToScene, PAGE_RE_KM,
+} from './upper-atmosphere-datum.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 import { ZoneWaveField } from './upper-atmosphere-wave-field.js';
@@ -1511,6 +1520,7 @@ export class AtmosphereGlobe {
         this._instruments?.dispose();
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
+        this._onScreenObs?.disconnect();
         if (this._debrisRefreshTimer) {
             clearInterval(this._debrisRefreshTimer);
             this._debrisRefreshTimer = null;
@@ -1549,6 +1559,24 @@ export class AtmosphereGlobe {
         });
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this._renderer.setClearColor(0x030012, 1);
+
+        // Is the globe actually on screen? Offscreen it is not RENDERED (see
+        // _animate), and the volume's quality governor may only learn from
+        // frames it can SEE: scrolled down the 5800 px
+        // controls column, the canvas is offscreen, frames come back in
+        // ~17 ms, and the governor read that as headroom and climbed the
+        // march ladder (10 → 16 steps, measured). Scrolling back then cost
+        // multi-second frames and froze the page — the smoke test's
+        // "overlay toggles" click timed out on exactly that (2026-10-05).
+        this._canvasOnScreen = true;
+        if (typeof IntersectionObserver !== 'undefined') {
+            this._onScreenObs = new IntersectionObserver((entries) => {
+                const on = entries.some((e) => e.isIntersecting);
+                if (on && !this._canvasOnScreen) this._volume?.resetGovernorClock?.();
+                this._canvasOnScreen = on;
+            });
+            this._onScreenObs.observe(this.canvas);
+        }
     }
 
     _initScene() {
@@ -2111,7 +2139,7 @@ export class AtmosphereGlobe {
     _buildProbeLookup(probe) {
         const N = 256;
         if (!probe._propTable) probe._propTable = new Float32Array(N * 3);
-        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        const r = _probeRadius(probe);
         for (let k = 0; k < N; k++) {
             const tFrac = k / N;
             const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
@@ -2149,11 +2177,27 @@ export class AtmosphereGlobe {
         if (follow) {
             // Engage follow after the flyTo's smoothstep completes —
             // delay by the animation duration so the spring doesn't
-            // fight the fly-in.
+            // fight the fly-in. The timer is GENERATION-checked: a Reset,
+            // Top, Stop-follow or mode change made during the fly-in must
+            // not be overridden by a lock that lands a second later (that
+            // re-lock is how a visitor got stuck chasing the ISS, 2026-10).
+            const gen = this._armPendingFollow();
             setTimeout(() => {
-                if (this._satProbes?.[id]) this.followSatellite(id);
+                if (gen === this._followGen && this._satProbes?.[id]) this.followSatellite(id);
             }, durationSec * 1000);
         }
+    }
+
+    /** A new deferred-follow ticket; any newer camera command invalidates it. */
+    _armPendingFollow() { this._followGen = (this._followGen ?? 0) + 1; return this._followGen; }
+    /** Cancel a follow that a fly-in has scheduled but not yet engaged. */
+    _cancelPendingFollow() { this._followGen = (this._followGen ?? 0) + 1; }
+    /** True while a follow is locked OR scheduled to lock at the end of a fly-in. */
+    _isFollowTarget(kind, key) {
+        const f = this._followId;
+        if (!f || f.kind !== kind || (f.id !== key && f.idx !== key)) return false;
+        // Stale ids (a fly-in that was cancelled) must not swallow a real click.
+        return !!this._controls.isFollowing?.() || !!this._controls.isFlying?.();
     }
 
     /**
@@ -2171,6 +2215,7 @@ export class AtmosphereGlobe {
 
     /** Stop any active follow (mode + flyTo unchanged). */
     stopFollowing() {
+        this._cancelPendingFollow();
         this._controls.stopFollowing?.();
         this._followId = null;
     }
@@ -2178,9 +2223,24 @@ export class AtmosphereGlobe {
     getFollowTarget() { return this._followId ?? null; }
 
     /** Reset camera to a default home view. Drops any active follow. */
-    resetCameraView() { this._releaseTransitForCamera('reset'); this._controls.resetView?.(); this._followId = null; }
+    resetCameraView() {
+        // The escape hatch: whatever the camera is doing — a fly-in with a
+        // follow pending, a follow lock, a transit, an explore path — Reset
+        // ends it and goes home. Every lock is dropped BEFORE the flight so
+        // nothing can re-grab the camera when the tween lands.
+        this._cancelPendingFollow();
+        this._releaseTransitForCamera('reset');
+        this._controls.cancelPath?.('reset');
+        this._controls.stopFollowing?.();
+        this._followId = null;
+        // Home is the PLANET ORBIT frame. Enter it first (keeps the camera
+        // where it is, re-aims at the centre) so the tween lands in orbit
+        // mode with no second timer racing it.
+        if (this._controls.getMode?.() !== 'orbit') this._controls.setMode('orbit');
+        this._controls.resetView?.();
+    }
     /** Snap to top-down (polar) view. */
-    cameraTopView()   { this._releaseTransitForCamera('top'); this._controls.flyToTopView?.(); this._followId = null; }
+    cameraTopView()   { this._cancelPendingFollow(); this._releaseTransitForCamera('top'); this._controls.stopFollowing?.(); this._controls.flyToTopView?.(); this._followId = null; }
     /** A camera preset takes over from the layer transit (which re-applies its pose every frame). */
     _releaseTransitForCamera(reason) {
         if (this._transit?.getState?.().active) this._transit.stop(reason);
@@ -2354,6 +2414,7 @@ export class AtmosphereGlobe {
     /** New: follow ISS (default click target for the HUD's "Visit ISS"). */
     followISS() {
         if (this._controls.getMode?.() === 'orbit') this._controls.setMode('fly');
+        this._followId = { kind: 'sat', id: 'iss' };   // pending: a re-click is a no-op
         return this.flyToSatellite('iss', 1.6, { follow: true });
     }
 
@@ -2381,7 +2442,8 @@ export class AtmosphereGlobe {
             // every frame by the catalog propagator. The follow callback
             // reads the live offset each frame — so the camera tracks
             // even rapidly-tumbling LEO fragments.
-            setTimeout(() => this.followDebris(idx), durationSec * 1000);
+            const gen = this._armPendingFollow();
+            setTimeout(() => { if (gen === this._followGen) this.followDebris(idx); }, durationSec * 1000);
         }
     }
 
@@ -2505,9 +2567,19 @@ export class AtmosphereGlobe {
         // the orbital-path polyline radius and the static ring. For
         // near-circular orbits this is essentially unchanged; for
         // eccentric orbits this is a sensible "shell" altitude.
-        const meanAltKm = (sat.apogee_km + sat.perigee_km) / 2;
+        // The relay's perigee/apogee are WGS-72 altitudes; the page's are
+        // above the 6371 sphere (js/upper-atmosphere-datum.js).
+        const meanAltKm = catalogToPageAltKm((sat.apogee_km + sat.perigee_km) / 2);
         if (Number.isFinite(meanAltKm) && meanAltKm > 0) {
             probe.spec.altitudeKm = Math.round(meanAltKm);
+        }
+        // The real elements, with J2 — what the probe is now propagated
+        // by (and SGP4 on the lines once the WASM answers, below).
+        const el = meanElements(sat);
+        if (el) {
+            probe._el = el;
+            probe._perifocal = perifocalTable(el);
+            probe.spec.altitudeKm = Math.round(el.meanAltKm);
         }
 
         // Reset the per-frame phase. Legacy field (_phase0) remains
@@ -2543,6 +2615,7 @@ export class AtmosphereGlobe {
         // analyzer can run SGP4 directly without a second fetch.
         if (sat.line1 && sat.line2) {
             probe.tleLines = { line1: sat.line1, line2: sat.line2, epoch: sat.epoch };
+            this._attachProbeSgp4(probe, sat.line1, sat.line2);
         }
 
         // Rebuild the orbital-path polyline from the new elements.
@@ -2553,17 +2626,53 @@ export class AtmosphereGlobe {
         this._buildProbeLookup(probe);
     }
 
+    /** J2 moves a LEO node ~0.2°/h: re-sample a real-element path every 10 sim-min. */
+    _refreshProbePathIfStale(probe, ms) {
+        if (!Number.isFinite(probe._pathMs) || Math.abs(ms - probe._pathMs) > 10 * 60e3) {
+            this._refreshOrbitalPath(probe, ms);
+        }
+    }
+
+    /**
+     * Hand a probe to the SGP4 WASM once it has loaded (the tracker module
+     * owns the load). Until then the probe rides its mean elements; the
+     * switch is a few km in LEO, never a jump to another plane.
+     */
+    _attachProbeSgp4(probe, line1, line2) {
+        const epochMs = tleEpochMs(line1);
+        if (!Number.isFinite(epochMs)) return;
+        import('./satellite-tracker.js').then(async (mod) => {
+            await mod.whenWasmSettled?.();
+            const wasm = mod.getWasmSgp4?.();
+            if (!wasm?.propagate_tle) return;
+            // Only if the lines still belong to this probe (a later upgrade wins).
+            if (probe.tleLines?.line1 !== line1) return;
+            try { wasm.propagate_tle(line1, line2, 0); } catch (_) { return; }
+            probe._sgp4 = { wasm, line1, line2, epochMs };
+        }).catch(() => {});
+    }
+
     /**
      * Re-sample the orbital-path polyline for one probe using its
      * current spec.orbital. Cheap (96 points, no allocations) so
      * we can call it any time elements change.
      */
-    _refreshOrbitalPath(probe) {
+    _refreshOrbitalPath(probe, atMs = null) {
         const path = probe.pathLine;
         if (!path) return;
         const positions = path.geometry.attributes.position.array;
         const N = positions.length / 3;
-        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        if (probe._el) {
+            // Real elements: the instantaneous mean ring with J2 carried to
+            // the scene instant — the same curve the suites' rings draw.
+            const ms = Number.isFinite(atMs) ? atMs : this._timeBus.getSimTime();
+            positions.set(orbitRingInertialScene(probe._el, ms, N));
+            probe._pathMs = ms;
+            path.geometry.attributes.position.needsUpdate = true;
+            path.geometry.computeBoundingSphere();
+            return;
+        }
+        const r = _probeRadius(probe);
         for (let k = 0; k < N; k++) {
             const tFrac = k / N;
             const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
@@ -2618,6 +2727,9 @@ export class AtmosphereGlobe {
         if (!tracker) return { ok: false, reason: 'tracker init failed' };
         try {
             const added = await tracker.loadGroup(group);
+            this._suiteRingsDirty = true;
+            const info = tracker._groups?.get?.(group);
+            if (info?.error) return { ok: false, reason: String(info.error), total: tracker._satellites.length };
             return { ok: true, count: added ?? 0, total: tracker._satellites.length };
         } catch (err) {
             return { ok: false, reason: String(err?.message || err) };
@@ -2634,7 +2746,15 @@ export class AtmosphereGlobe {
         if (t._groups?.has?.(group)) {
             t.setGroupVisible?.(group, false);
         }
+        this._suiteRingsDirty = true;
         return true;
+    }
+
+    /** Drop a group's registration (a failed load) so the next enable re-fetches. */
+    forgetCatalogGroup(group) {
+        this._catalogTracker?.forgetGroup?.(group);
+        this._suiteElCache?.delete(group);
+        this._suiteRingsDirty = true;
     }
 
     /** Re-show a previously disabled group without re-fetching. */
@@ -2642,6 +2762,7 @@ export class AtmosphereGlobe {
         const t = this._catalogTracker;
         if (!t) return false;
         t.setGroupVisible?.(group, true);
+        this._suiteRingsDirty = true;
         return true;
     }
 
@@ -2657,6 +2778,201 @@ export class AtmosphereGlobe {
         };
     }
 
+    // ── Satellite suites: rings, ladder, framing ─────────────────────────
+    // js/upper-atmosphere-sat-suites.js is the kernel; the dots stay the
+    // tracker's SGP4. Everything here is drawn at the SCENE instant.
+
+    /** The instant the catalogue is propagated to (overridable by the spec's negative control). */
+    _catalogClockMs() {
+        return this._catalogClockOverride ? this._catalogClockOverride() : this._sceneTimeMs();
+    }
+
+    /** Mean elements of a loaded suite, parsed once per load (null rows dropped). */
+    _suiteElements(group) {
+        const t = this._catalogTracker;
+        if (!t) return [];
+        this._suiteElCache = this._suiteElCache || new Map();
+        const info = t._groups?.get?.(group);
+        const count = info?.count ?? 0;
+        const hit = this._suiteElCache.get(group);
+        if (hit && hit.count === count) return hit.els;
+        const els = [];
+        for (const s of t._satellites) {
+            if (s.group !== group) continue;
+            const el = meanElements(s.tle);
+            if (el) { el.group = group; els.push(el); }
+        }
+        this._suiteElCache.set(group, { count, els });
+        return els;
+    }
+
+    _visibleSuites() {
+        const t = this._catalogTracker;
+        if (!t?._groups) return [];
+        return Array.from(t._groups).filter(([, g]) => g.visible !== false && g.count > 0).map(([n]) => n);
+    }
+
+    /**
+     * Orbit rings for the visible suites: up to `perSuite` members each,
+     * chosen across PLANES (`ringSample`), capped at `maxTotal`, as ONE
+     * LineSegments draw. Off by default.
+     */
+    setSuiteRingsVisible(on, { perSuite = 24, maxTotal = 240 } = {}) {
+        on = !!on;
+        this._suiteRingOpts = { perSuite, maxTotal };
+        if (!on) {
+            if (this._suiteRings) { this._suiteRings.visible = false; }
+            this._suiteRingsOn = false;
+            return false;
+        }
+        this._suiteRingsOn = true;
+        if (!this._suiteRings) {
+            const geo = new THREE.BufferGeometry();
+            const mat = new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, opacity: 0.38, depthWrite: false,
+            });
+            this._suiteRings = new THREE.LineSegments(geo, mat);
+            this._suiteRings.name = 'suite-rings';
+            this._suiteRings.renderOrder = 9;
+            this._suiteRings.frustumCulled = false;
+            this._scene.add(this._suiteRings);
+        }
+        this._suiteRings.visible = true;
+        this._suiteRingsDirty = true;
+        return true;
+    }
+    areSuiteRingsVisible() { return !!this._suiteRingsOn; }
+    /** Mark the ring set stale (a suite was shown, hidden or loaded). */
+    invalidateSuiteRings() { this._suiteRingsDirty = true; }
+
+    /** Draw one picked satellite's ring brighter than the suite's. null clears it. */
+    setFocusSatellite(norad) {
+        this._focusNorad = norad == null ? null : Number(norad);
+        this._suiteRingsDirty = true;
+        if (this._focusNorad != null && !this._suiteRings) {
+            this.setSuiteRingsVisible(true);
+            this._suiteRingsOn = false;           // focus ring only
+        }
+    }
+
+    _stepSuiteRings() {
+        const ms = this._catalogClockMs();
+        const rings = this._suiteRings;
+        // The ring is inertial; J2 moves a LEO node ~0.2°/h, so rebuild
+        // when the scene instant has moved 10 min (or the set changed) and
+        // otherwise only turn the group by the sidereal angle.
+        if (this._suiteRingsDirty || !Number.isFinite(this._suiteRingsMs)
+            || Math.abs(ms - this._suiteRingsMs) > 10 * 60e3) {
+            this._rebuildSuiteRings(ms);
+        }
+        rings.rotation.y = ringRotationY(suiteGmstRad(ms));
+        rings.visible = !!this._suiteRingsOn || this._focusNorad != null;
+    }
+
+    _rebuildSuiteRings(ms) {
+        const t = this._catalogTracker;
+        const N = 96;
+        const picks = [];
+        if (t && this._suiteRingsOn) {
+            const { perSuite, maxTotal } = this._suiteRingOpts || { perSuite: 24, maxTotal: 240 };
+            for (const g of this._visibleSuites()) {
+                for (const el of ringSample(this._suiteElements(g), perSuite, ms)) {
+                    if (picks.length < maxTotal) picks.push({ el, color: t._groups.get(g).color, focus: false });
+                }
+            }
+        }
+        if (t && this._focusNorad != null) {
+            const idx = t._indexByNorad?.get?.(this._focusNorad);
+            const sat = idx != null ? t._satellites[idx] : null;
+            const el = sat ? meanElements(sat.tle) : null;
+            if (el) picks.push({ el, color: new THREE.Color(0xffffff), focus: true });
+        }
+        const pos = new Float32Array(picks.length * N * 6);
+        const col = new Float32Array(picks.length * N * 6);
+        picks.forEach((p, k) => {
+            ringToSegments(orbitRingInertialScene(p.el, ms, N), pos, k * N * 6);
+            const c = p.color;
+            const gain = p.focus ? 1 : 0.85;
+            for (let i = 0; i < N * 2; i++) {
+                const o = k * N * 6 + i * 3;
+                col[o] = c.r * gain; col[o + 1] = c.g * gain; col[o + 2] = c.b * gain;
+            }
+        });
+        const geo = this._suiteRings.geometry;
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        geo.computeBoundingSphere();
+        this._suiteRingsMs = ms;
+        this._suiteRingsDirty = false;
+        this._suiteRingCount = picks.length;
+        this._suiteRingNorads = picks.map((p) => p.el.norad);
+    }
+
+    /** What the rings currently show (for the panel and the spec). */
+    getSuiteRingState() {
+        // Readers (the panel's status line) must not see the PREVIOUS set:
+        // a toggle marks the rings dirty and the frame loop would only
+        // rebuild them on the next frame.
+        if (this._suiteRings && this._suiteRingsDirty) this._rebuildSuiteRings(this._catalogClockMs());
+        return {
+            on: !!this._suiteRingsOn, count: this._suiteRingCount || 0,
+            norads: (this._suiteRingNorads || []).slice(), focus: this._focusNorad ?? null,
+            builtMs: this._suiteRingsMs ?? null,
+        };
+    }
+
+    /**
+     * The altitude ladder over the visible suites (or `groups`), from MEAN
+     * elements — deterministic, available before the first SGP4 tick.
+     */
+    getSuiteLadder({ groups = null, minKm = 150, maxKm = 2000, binKm = 50 } = {}) {
+        const gs = groups || this._visibleSuites();
+        const els = gs.flatMap((g) => this._suiteElements(g));
+        const ladder = altitudeLadder(els, { minKm, maxKm, binKm });
+        ladder.groups = gs.map((g) => {
+            const e = this._suiteElements(g);
+            const regimes = {};
+            for (const el of e) { const r = orbitRegime(el); regimes[r] = (regimes[r] || 0) + 1; }
+            return { group: g, count: e.length, outerKm: outerShellKm(e), regimes };
+        });
+        return ladder;
+    }
+
+    /**
+     * One-shot framing flight so a whole shell fits the lens: a preset id
+     * ('leo' | 'meo' | 'geo'), a number (outer altitude, km), or 'visible'
+     * (the visible suites' 95th-percentile apogee). Keeps the current view
+     * DIRECTION, lands in the planet orbit frame, and is cancelled by any
+     * drag/scroll like every camera flight (the page may START a flight, it
+     * may not HOLD the camera).
+     */
+    frameSatellites(what = 'visible', { durationSec = 1.4 } = {}) {
+        let outerKm = null;
+        if (typeof what === 'number') outerKm = what;
+        else if (what === 'visible') {
+            outerKm = outerShellKm(this._visibleSuites().flatMap((g) => this._suiteElements(g)));
+        } else outerKm = FRAME_PRESETS.find((p) => p.id === what)?.outerKm ?? null;
+        if (!Number.isFinite(outerKm)) return null;
+        const cam = this._camera;
+        const maxR = this._controls.getMaxDistance?.() ?? 28;
+        const f = framingDistance({ outerKm, fovDeg: cam.fov, aspect: cam.aspect, maxR });
+        this._cancelPendingFollow();
+        this._releaseTransitForCamera('frame');
+        this._controls.cancelPath?.('frame');
+        this._controls.stopFollowing?.();
+        this._followId = null;
+        if (this._controls.getMode?.() !== 'orbit') this._controls.setMode('orbit');
+        const dir = cam.position.clone();
+        if (dir.lengthSq() < 1e-9) dir.set(0, 0.55, 1);
+        dir.normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        this._controls.flyTo(dir.multiplyScalar(f.distance), new THREE.Vector3(0, 0, 0), durationSec, {
+            up, endOrbit: { up, target: new THREE.Vector3(0, 0, 0) },
+        });
+        this._lastFrame = { outerKm, ...f };
+        return this._lastFrame;
+    }
+
     async _ensureCatalogTracker() {
         if (this._catalogTracker) return this._catalogTracker;
         if (this._catalogTrackerLoading) return this._catalogTrackerLoading;
@@ -2666,7 +2982,11 @@ export class AtmosphereGlobe {
                 // Earth radius = 1 in scene units; tracker handles km→scene.
                 // showOrbits=false avoids per-sat orbit-trail meshes (we
                 // do that on the named refs instead).
-                const tracker = new mod.SatelliteTracker(this._scene, 1.0, {
+                // ONE datum (js/upper-atmosphere-datum.js): the tracker
+                // scales km by earthRadius / 6378.135, so handing it 1.0 drew
+                // every dot at r / 6378.135 in a 6371-km scene — 7 km low
+                // against the shells, the probes and the camera readout.
+                const tracker = new mod.SatelliteTracker(this._scene, TRACKER_EARTH_RADIUS, {
                     maxSatellites: 35000,
                     showOrbits: false,
                 });
@@ -2674,6 +2994,16 @@ export class AtmosphereGlobe {
                 // tracker rebuilds its Points mesh on each add-sats batch,
                 // so we keep `_extraHittable` in sync with the live mesh
                 // instead of appending stale references.
+                // §9.5: nothing at the lens may fill the screen. The shared
+                // tracker's dots are world-sized (0.008 R⊕ ≈ 51 km) and
+                // untextured — uncapped SQUARES — so a camera chasing a
+                // Starlink drew its neighbours as screen-sized tiles. Cap
+                // them and give them the page's disc; the orbit view is
+                // unchanged (they are 1–3 px there, under the ceiling).
+                capPointSize(tracker._dotMat, { maxPx: 6 });
+                tracker._dotMat.map = roundDotTexture();
+                tracker._dotMat.alphaTest = 0.05;
+                tracker._dotMat.needsUpdate = true;
                 this._catalogTracker = tracker;
                 this._extraHittable = this._extraHittable || [];
                 const syncHittable = () => {
@@ -2702,22 +3032,37 @@ export class AtmosphereGlobe {
         return this._catalogTrackerLoading;
     }
 
+    /** Page altitude (km above the 6371 sphere) of a tracker record, from its drawn position. */
+    _catalogPageAltKm(sat) {
+        const p = this._catalogTracker?.getPositionXYZ?.(sat?.tle?.norad_id);
+        if (p) {
+            const r = Math.hypot(p.x, p.y, p.z);
+            if (r > 0.5) return sceneToPageAltKm(r);
+        }
+        return Number.isFinite(sat?.alt) ? catalogToPageAltKm(sat.alt) : null;
+    }
+
     /** Resolve a catalog raycast hit to a sat record (TLE + name + alt). */
     _resolveCatalogHit(hit) {
         const t = this._catalogTracker;
         if (!t || !hit || hit.object !== t._pointsMesh) return null;
         const sat = t._satellites?.[hit.index];
         if (!sat) return null;
+        // A hidden suite keeps its slots (cheap) but draws them in the
+        // hidden colour — it must not answer the cursor either.
+        if (t._groups?.get?.(sat.group)?.visible === false) return null;
         return {
             kind:   'catalog-point',
             id:     `catalog-${sat.tle?.norad_id ?? hit.index}`,
             name:   sat.tle?.name || `NORAD ${sat.tle?.norad_id ?? '—'}`,
-            altKm:  sat.alt,
+            // PAGE altitude from the drawn radius — the tracker's own
+            // `sat.alt` is a WGS-72 altitude (r − 6378.135).
+            altKm:  this._catalogPageAltKm(sat),
             color:  '#0cc',
             noradId: sat.tle?.norad_id,
             line1:  sat.tle?.line1,
             line2:  sat.tle?.line2,
-            tooltip: `Click to analyze trajectory · alt ${(sat.alt ?? 0).toFixed(0)} km`,
+            tooltip: `Click to analyze trajectory · alt ${(this._catalogPageAltKm(sat) ?? 0).toFixed(0)} km`,
         };
     }
 
@@ -2915,6 +3260,18 @@ export class AtmosphereGlobe {
         // tooltips, and the family roll-up panel.
         const annot = annotateDebris(rec);
 
+        // The record's REAL elements (M at the TLE epoch, before the legacy
+        // "M now" re-anchor below), propagated with J2 — the same kernel the
+        // suites' rings use, so a fragment shown both here and in its debris
+        // suite is one object, not two (the frozen-node circle put them
+        // hundreds of km apart within a day of epoch).
+        const el = meanElements({
+            norad_id: orb.noradId ?? rec.noradId, epoch: orb.epoch,
+            inclination: orb.inclinationDeg, raan: orb.raanDeg, eccentricity: orb.eccentricity,
+            arg_perigee: orb.argPerigeeDeg, mean_anomaly: orb.meanAnomalyDeg0,
+            mean_motion: orb.meanMotionRevPerDay,
+        });
+
         const probe = {
             spec: {
                 id: rec.id,
@@ -2922,7 +3279,8 @@ export class AtmosphereGlobe {
                 // Override the engine's generic pink with the family
                 // color so the cloud reads as "debris by source event".
                 color: annot.family.color,
-                altitudeKm: rec.altitudeKm,
+                // PAGE altitude: the record's is WGS-72 (perigee/apogee).
+                altitudeKm: el ? el.meanAltKm : catalogToPageAltKm(rec.altitudeKm),
                 orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
             },
             _phase0: M_now,
@@ -2935,6 +3293,8 @@ export class AtmosphereGlobe {
             _propTable: null,
             _propTableN: 0,
             _kind: 'debris',
+            _el: el,
+            _perifocal: el ? perifocalTable(el) : null,
             _family: annot.family,
             _size:   annot.size,
             _hazardMJ: annot.hazardMJ,
@@ -3145,9 +3505,12 @@ export class AtmosphereGlobe {
                     id: rec.id,
                     name: c.name,
                     color: rec.color,
-                    altitudeKm: rec.altitudeKm,
+                    // Shell altitudes are QUOTED in the catalogue convention
+                    // (its period uses 6378.135 + h): one radius for both.
+                    altitudeKm: catalogToPageAltKm(rec.altitudeKm),
                     orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
                 },
+                _rScene: catalogAltToScene(rec.altitudeKm),
                 _phase0: M_now,
                 // Phase B absolute-time anchor (same rationale as
                 // _satProbes / debris paths above).
@@ -4351,7 +4714,10 @@ export class AtmosphereGlobe {
      * mode so callers can sync a UI toggle.
      */
     setCameraMode(mode) {
+        // An explicit mode choice outranks a follow still waiting on its fly-in.
+        this._cancelPendingFollow();
         this._controls.setMode(mode);
+        if (!this._controls.isFollowing?.()) this._followId = null;
         return this._controls.getMode();
     }
     getCameraMode() { return this._controls.getMode(); }
@@ -5090,13 +5456,25 @@ export class AtmosphereGlobe {
             // out of view after the flyTo animation completes. The
             // operator stops following by switching mode (Orbit/Fly
             // button) or by clicking "Stop follow" in the HUD.
+            // A click on the target ALREADY being followed (or flown to) is a
+            // no-op. While following, that target fills much of the frame, so
+            // every click the visitor made to look around landed on it and
+            // re-started the fly-in + lock — the camera could not be escaped
+            // without finding Stop follow (reported 2026-10-04).
             if (ud?.kind === 'sat-probe' && ud.id) {
+                if (this._isFollowTarget('sat', ud.id)) return;
+                this._followId = { kind: 'sat', id: ud.id };
                 this.flyToSatellite(ud.id, 1.6, { follow: true });
             } else if (ud?.kind === 'iss-probe') {
+                if (this._isFollowTarget('sat', 'iss')) return;
                 this.followISS();
             } else if (ud?.kind === 'debris-piece' && Number.isFinite(ud.debrisIdx)) {
+                if (this._isFollowTarget('debris', ud.debrisIdx)) return;
+                this._followId = { kind: 'debris', idx: ud.debrisIdx };
                 this.flyToDebris(ud.debrisIdx, 1.6, { follow: true });
             } else if (ud?.kind === 'catalog-point' && (ud.line1 || ud.noradId)) {
+                // The picked object's own orbit, drawn brighter than its suite's.
+                if (ud.noradId != null) this.setFocusSatellite(ud.noradId);
                 // Click on any live-catalog point → push into the
                 // trajectory analyzer panel. Pass TLE inline if we have
                 // it; analyzer falls back to /api/celestrak/tle?norad=
@@ -5144,7 +5522,13 @@ export class AtmosphereGlobe {
         const wallNow = performance.now();
         const dtWall = this._lastWallMs == null ? 0.016 : Math.min(0.1, (wallNow - this._lastWallMs) / 1000);
         this._lastWallMs = wallNow;
-        this._frame(t, dt, dtWall, { render: true, stepBus: true });
+        // STATE every frame, GL only while the canvas is on screen — the
+        // Stage / TIGA rule. Scrolled down the controls column, the page used
+        // to keep issuing full renders of an invisible globe every 17 ms; on
+        // a software rasteriser the queued work landed when the globe came
+        // back as ONE 37-second frame (measured, 2026-10-05), and on a laptop
+        // it is a GPU burning battery on pixels nobody sees.
+        this._frame(t, dt, dtWall, { render: this._canvasOnScreen !== false, stepBus: true });
     }
 
     // ── Test hook: a manual, steppable frame clock ──────────────────────
@@ -5250,7 +5634,12 @@ export class AtmosphereGlobe {
         // rung and climbs only while the frame interval says there is
         // headroom — it times itself rather than taking the `dt` above,
         // which is ~0 every frame (see _governQuality's comment).
-        this._volume?.update(this._camera, { govern: stepBus, viewportHeight: this.canvas.clientHeight });
+        // Governed only on live frames of a canvas that is ON SCREEN (see the
+        // IntersectionObserver in the renderer setup).
+        this._volume?.update(this._camera, {
+            govern: stepBus && this._canvasOnScreen !== false,
+            viewportHeight: this.canvas.clientHeight,
+        });
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.
@@ -5347,11 +5736,16 @@ export class AtmosphereGlobe {
         if (this._shells) this._fadeShellsForCameraAltitude();
 
         // Live-catalog tracker — propagate every loaded sat via Rust
-        // SGP4 WASM. The tracker handles SAB / worker / batch fast-paths
-        // internally; we just feed it wall-clock time.
+        // SGP4 WASM at the SCENE instant. It was fed Date.now() until
+        // 2026-10-04 while the named probes, the sun and the terminator all
+        // read the bus: at 600× or under a scrub the catalogue sat at the
+        // wall-clock instant over a globe drawn hours away — every dot in the
+        // wrong place relative to its own day/night (gated by
+        // tests/upper-atmosphere-satellites.spec.js, with that negative control).
         if (this._catalogTracker?.tick) {
-            this._catalogTracker.tick(Date.now());
+            this._catalogTracker.tick(this._catalogClockMs());
         }
+        if (this._suiteRings) this._stepSuiteRings();
 
         this._controls.update(dtWall);
         // After the controls: while a transit is active it owns the pose,
@@ -5455,9 +5849,17 @@ export class AtmosphereGlobe {
             const M = probe._M_epoch_rad + (TAU * dtSec) / Math.max(periodSec, 1);
             // Convert M back into an orbit fraction for the helper.
             const tFrac = ((M / TAU) % 1 + 1) % 1;
-            const altShellR = 1 + probe.spec.altitudeKm / R_EARTH_KM;
-            const p = _eciSceneToEarthFixed(
-                _propagateKeplerian(probe.spec.orbital, tFrac, altShellR), gmst);
+            const altShellR = _probeRadius(probe);
+            // A probe with a live TLE is drawn by the SAME propagator as its
+            // own catalogue dot (SGP4) — or, until the WASM is in, by its
+            // mean elements with J2 drift; only the nominal reference set
+            // keeps the legacy circular Kepler. All via ONE function, so the
+            // drawn probe, the follow camera and the screener cannot differ.
+            const live = !!(probe._sgp4 || probe._el);
+            const p = _eciSceneToEarthFixed(live
+                ? _lookupProbePositionAt(probe, simTimeMs)
+                : _propagateKeplerian(probe.spec.orbital, tFrac, altShellR), gmst);
+            if (live && probe._el) this._refreshProbePathIfStale(probe, simTimeMs);
 
             probe.mesh.position.set(p.x, p.y, p.z);
             // The far-tier ball is 0.012 R⊕ (76 km) with a 166 km halo —
@@ -5476,13 +5878,23 @@ export class AtmosphereGlobe {
             // tooltip honest if eccentricity is non-zero (apogee/perigee
             // sweep). For circular orbits the value is constant.
             const rNow = Math.hypot(p.x, p.y, p.z);
-            probe.mesh.userData.altKm = (rNow - 1) * R_EARTH_KM;
+            probe.mesh.userData.altKm = sceneToPageAltKm(rNow);
 
             // Orient the sprite along the velocity tangent so users
             // can see direction-of-travel when zoomed in.
-            const v = _eciSceneToEarthFixed(
-                _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR),
-                gmst, new THREE.Vector3());
+            let v;
+            if (live) {
+                // Inertial-frame velocity direction by a 1 s difference on
+                // the same propagator (the Earth-fixed rotation over 1 s is
+                // 0.004° — irrelevant to an orientation).
+                const q = _lookupProbePositionAt(probe, simTimeMs + 1000);
+                const p0 = _lookupProbePositionAt(probe, simTimeMs);
+                v = _eciSceneToEarthFixed({ x: q.x - p0.x, y: q.y - p0.y, z: q.z - p0.z }, gmst, new THREE.Vector3()).normalize();
+            } else {
+                v = _eciSceneToEarthFixed(
+                    _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR),
+                    gmst, new THREE.Vector3());
+            }
             const radial = probe.mesh.position.clone().normalize();
             const m = new THREE.Matrix4().lookAt(
                 probe.mesh.position,
@@ -5639,17 +6051,34 @@ export class AtmosphereGlobe {
 
         const out = [];
 
+        // Each object's track over the horizon is computed ONCE per scan and
+        // shared by every pair it is in. Every object now goes through the
+        // one `_lookupProbePositionAt` its drawn dot uses (SGP4 / mean
+        // elements + J2), which costs more per call than the old phase table
+        // — memoising is what keeps assets × debris × steps affordable.
+        const tracks = new Map();
+        const trackOf = (o) => {
+            let t = tracks.get(o);
+            if (!t) {
+                t = new Float32Array(nSteps * 3);
+                for (let k = 0; k < nSteps; k++) {
+                    const p = _lookupProbePositionAt(o, nowMs + k * stepSec * 1000);
+                    t[k * 3] = p.x; t[k * 3 + 1] = p.y; t[k * 3 + 2] = p.z;
+                }
+                tracks.set(o, t);
+            }
+            return t;
+        };
         // Inner helper to scan one pair across the horizon.
         const scan = (a, b) => {
             let minDist = Infinity, minStep = 0;
             let firstDist = 0;
+            const ta = trackOf(a), tb = trackOf(b);
             for (let k = 0; k < nSteps; k++) {
-                const tMs = nowMs + k * stepSec * 1000;
-                const pa = _lookupProbePositionAt(a, tMs);
-                const pb = _lookupProbePositionAt(b, tMs);
-                const dx = pa.x - pb.x;
-                const dy = pa.y - pb.y;
-                const dz = pa.z - pb.z;
+                const o = k * 3;
+                const dx = ta[o] - tb[o];
+                const dy = ta[o + 1] - tb[o + 1];
+                const dz = ta[o + 2] - tb[o + 2];
                 const d2 = dx * dx + dy * dy + dz * dz;
                 if (k === 0) firstDist = Math.sqrt(d2);
                 if (d2 < minDist) { minDist = d2; minStep = k; }
@@ -5973,8 +6402,10 @@ function _hex(colorStr) {
  */
 function _circularOrbitalSpeedKmS(altKm) {
     const MU = 398600.4418;     // km³/s²
-    const RE = 6378.135;        // km, WGS-72
-    const r = RE + altKm;
+    // Callers pass PAGE altitudes (above the 6371 sphere, the probes'
+    // userData.altKm), so the radius is the page datum's — adding them to
+    // WGS-72's 6378.135 counted the 7 km datum offset twice.
+    const r = PAGE_RE_KM + altKm;
     return Math.sqrt(MU / r);
 }
 
@@ -6052,7 +6483,40 @@ function _buildChordLine(userData) {
  * Falls back to a fresh trig-based propagate when the precomputed
  * phase-table isn't built yet (only on the first frame post-spawn).
  */
+const _lookupScratch = [0, 0, 0];
+
+/**
+ * Scene radius of an element-free probe: its own `_rScene` (a synthetic
+ * shell quoted in the catalogue convention) or its PAGE altitude.
+ */
+function _probeRadius(probe) {
+    return Number.isFinite(probe._rScene) ? probe._rScene : pageAltToScene(probe.spec.altitudeKm);
+}
+
 function _lookupProbePositionAt(probe, simTimeMs) {
+    // ONE position per object (2026-10-04). In order:
+    //   1. SGP4 on the probe's live TLE — the propagator its catalogue dot
+    //      is drawn with, so a named probe and the same NORAD in a suite
+    //      coincide (they used to sit hundreds of km apart: frozen node);
+    //   2. mean elements + secular J2 (js/upper-atmosphere-sat-suites.js) —
+    //      every catalogue record without lines, and a TLE probe until the
+    //      WASM is in (~8 km of SGP4 in LEO, measured);
+    //   3. the legacy phase table — nominal references and synthetic
+    //      Walker shells, which have no epoch to propagate from.
+    // Returned in the INERTIAL scene frame; callers turn it by −GMST.
+    if (probe._sgp4) {
+        const g = probe._sgp4;
+        try {
+            const st = g.wasm.propagate_tle(g.line1, g.line2, (simTimeMs - g.epochMs) / 60000);
+            if (st && Number.isFinite(st[0])) {
+                return { x: st[0] / PAGE_RE_KM, y: st[2] / PAGE_RE_KM, z: -st[1] / PAGE_RE_KM };
+            }
+        } catch (_) { /* decayed / refused → the mean elements below */ }
+    }
+    if (probe._el) {
+        const q = inertialSceneAt(probe._el, simTimeMs, probe._perifocal, _lookupScratch);
+        return { x: q[0], y: q[1], z: q[2] };
+    }
     const periodSec = probe.spec.orbital.periodMin * 60;
     const TAU = 2 * Math.PI;
     // Mean anomaly via absolute time. The two-branch fallback keeps
@@ -6067,7 +6531,7 @@ function _lookupProbePositionAt(probe, simTimeMs) {
 
     if (!probe._propTable || !periodSec) {
         const tFrac = ((M / TAU) % 1 + 1) % 1;
-        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        const r = _probeRadius(probe);
         return _propagateKeplerian(probe.spec.orbital, tFrac, r);
     }
     const N = probe._propTableN;

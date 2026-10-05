@@ -28,8 +28,8 @@
 
 import * as THREE from 'three';
 import { SGP4_COL } from './upper-atmosphere-trajectory-analysis.js';
+import { catalogAltToScene } from './upper-atmosphere-datum.js';
 
-const R_EARTH_KM = 6371;
 const RIBBON_CAP = 3;
 const SAMPLES_PER_RIBBON = 36;   // 5-min stride × 36 = 3-hr orbit window
 
@@ -122,7 +122,10 @@ export class FleetRibbons {
      * render here.
      */
     _writeCircularOrbit(slotIdx, live, [r0, g0, b0]) {
-        const altR = 1 + live.altKm / R_EARTH_KM;
+        // `live.altKm` is the SGP4 WASM's |r| − 6378.135 (WGS-72); the
+        // scene is 6371 km per unit (js/upper-atmosphere-datum.js). Drawn
+        // as a page altitude it sat 7 km below the asset's own dot.
+        const altR = catalogAltToScene(live.altKm);
         const lat0 = live.latDeg * Math.PI / 180;
         const lon0 = live.lonDeg * Math.PI / 180;
         const inc  = (live.inclinationDeg ?? 51) * Math.PI / 180;

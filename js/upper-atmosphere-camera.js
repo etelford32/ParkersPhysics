@@ -638,6 +638,8 @@ export class CameraController {
     }
 
     stopFollowing() { this._follow = null; }
+    /** True while a flyTo tween (Reset, Top, click-to-fly) is in progress. */
+    isFlying()      { return !!this._anim; }
     isFollowing()   { return !!this._follow; }
 
     /** Reset to a default viewpoint — useful for a "Home" button. */

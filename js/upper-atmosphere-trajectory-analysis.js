@@ -42,6 +42,10 @@
 // `nowDate` (used by the backtest engine for historical replay) —
 // only the default changes. Live behaviour is identical.
 import { getTimeBus } from './upper-atmosphere-time-bus.js';
+import { pageToCatalogAltKm, catalogToPageAltKm } from './upper-atmosphere-datum.js';
+// Re-exported for the page's analysis panel: every altitude it PRINTS is a
+// page altitude, converted from the WASM's WGS-72 columns at display.
+export { catalogToPageAltKm };
 
 const SGP4_STRIDE = 13;     // mirrors Rust trajectory_stride()
 const DRAG_STRIDE = 5;      // mirrors Rust drag_stride()
@@ -96,6 +100,14 @@ async function _loadWasm() {
  * (alt_grid, rho_grid) Float64Arrays the Rust RK4 expects. Skips out-of-
  * domain samples (negative ρ, NaN). The Rust side log-linearly interpolates
  * between them, so even a 50-point grid handles a 30-day decay well.
+ *
+ * DATUM SEAM (js/upper-atmosphere-datum.js): a page profile is indexed by
+ * PAGE altitude (above the 6371 km sphere) while the WASM looks ρ up at its
+ * own `alt_km` = |r| − 6378.135. The grid is therefore handed over in the
+ * WASM's convention, so its lookup lands on the density at the satellite's
+ * real geocentric radius. Passed through raw (until 2026-10-04) it read ρ
+ * 7.135 km LOW — ~12 % dense at 400 km — against the density the page's own
+ * probes and readouts show for the same object.
  */
 export function profileToRhoGrid(samples) {
     if (!samples || samples.length === 0) {
@@ -109,7 +121,7 @@ export function profileToRhoGrid(samples) {
     const alt = new Float64Array(valid.length);
     const rho = new Float64Array(valid.length);
     for (let i = 0; i < valid.length; i++) {
-        alt[i] = valid[i].altitudeKm;
+        alt[i] = pageToCatalogAltKm(valid[i].altitudeKm);
         rho[i] = valid[i].rho;
     }
     return { alt, rho };
@@ -437,7 +449,8 @@ export function dragPressureSeries(sgp4Flat, profileSamples) {
             out[i] = NaN;
             continue;
         }
-        const rho = _logLerpRho(altKm, sorted);
+        // WASM altitude (WGS-72) → the page altitude the profile is indexed by.
+        const rho = _logLerpRho(catalogToPageAltKm(altKm), sorted);
         const v_ms = speed * 1000;
         out[i] = 0.5 * rho * v_ms * v_ms;
     }

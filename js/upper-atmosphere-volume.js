@@ -986,6 +986,16 @@ export class AtmosphereVolume {
     /** Hand the ladder back to the governor. */
     unpinQuality() { this._qualityPinned = false; }
 
+    /**
+     * Forget the last frame time and any run of good frames — called when
+     * the canvas comes back on screen, so neither the offscreen gap nor the
+     * cheap offscreen frames before it count toward a promotion.
+     */
+    resetGovernorClock() {
+        this._lastFrameMs = null;
+        this._goodFrames = 0;
+    }
+
     getQualityState() {
         return {
             steps:   this._material.uniforms.uSteps.value,
