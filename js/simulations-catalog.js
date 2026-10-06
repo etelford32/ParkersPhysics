@@ -230,6 +230,10 @@ export const SIMULATIONS = [
       category: 'local-space', group: 'maps-missions',
       tier: 'free', icon: 'galaxy',
       blurb: 'A 3D Milky Way star map — find your place in the galaxy.' },
+    { id: 'skyview', href: 'skyview.html', title: 'SkyView',
+      category: 'local-space', group: 'maps-missions',
+      tier: 'public', icon: 'sky-dome', badge: 'NEW',
+      blurb: 'Your sky right now: the top 10 things you can see, and the galaxy map overhead.' },
     // ── Orbital mechanics ─────────────────────────────────────────────────
     { id: 'gravity-lab', href: 'gravity-lab.html', title: 'Gravity Lab',
       category: 'local-space', group: 'orbital-mechanics',
