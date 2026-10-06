@@ -1838,6 +1838,13 @@ function intergalacticPos(l_deg, b_deg, dist_ly) {
 // All positions: heliocentric galactic (l°, b°, distance ly)
 // S-stars have isSstar:true and gcOffset:[x,y,z] (ly offset from GC origin)
 // gcDist is auto-computed in the forEach below — no need to hardcode it
+//
+// SKYVIEW READS THIS ARRAY (scripts/build-skyview-catalog.mjs evaluates it as
+// data and draws every entry in the visitor's own sky), so it must stay PURE
+// LITERALS and its (l, b) must be RIGHT: tests/skyview-catalog.mjs checks each
+// star against its Hipparcos position and fails past 0.2°. Ten were wrong
+// until 2026-10-05 — ε Eri by 8.7°, η Eri by 17°, Pollux 1.4°, Aldebaran 0.7°
+// — and on a 3D map nobody could tell. After editing, re-run the baker.
 const CATALOG = [
 
     // ── Galactic Center ────────────────────────────────────────────────────
@@ -2083,7 +2090,7 @@ const CATALOG = [
     },
     {
         id: 'eps_eri', name: 'ε Eridani', abbr: 'ε Eri', type: 'K2V',
-        l: 208.98, b: -48.84, dist: 10.52,
+        l: 195.84, b: -48.05, dist: 10.52,
         temp: 5084, spectral: 'K',
         color: 0xffaa55, size: 0.75,
         desc: 'Nearby K-type star with confirmed debris disk. Long-time SETI target (Project Ozma, 1960). Age ~800 Myr — relatively young.',
@@ -2208,7 +2215,7 @@ const CATALOG = [
     },
     {
         id: 'pollux', name: 'Pollux', abbr: 'Pollux', type: 'K0III',
-        l: 190.72, b: 23.46, dist: 33.72,
+        l: 192.23, b: 23.41, dist: 33.72,
         temp: 4666, spectral: 'K',
         color: 0xff8844, size: 1.5,
         desc: 'Brightest star in Gemini and the nearest giant star to the Sun. Hosts confirmed exoplanet Pollux b (Thestias), a hot Jupiter with 2.3 Jupiter masses.',
@@ -2255,7 +2262,7 @@ const CATALOG = [
     // ── Bright and notable stars (50–1000 ly) ──────────────────────────────
     {
         id: 'aldebaran', name: 'Aldebaran', abbr: 'Aldebaran', type: 'K5III',
-        l: 180.25, b: -20.07, dist: 65.3,
+        l: 180.97, b: -20.25, dist: 65.3,
         temp: 3910, spectral: 'K',
         color: 0xff8833, size: 1.8,
         desc: '"Eye of the Bull." K-type red giant, 44× solar radius. Not physically part of the Hyades cluster (much closer at ~150 ly).',
@@ -2364,7 +2371,7 @@ const CATALOG = [
     },
     {
         id: 'rigel', name: 'Rigel', abbr: 'Rigel', type: 'B8Ia',
-        l: 209.52, b: -25.10, dist: 860,
+        l: 209.24, b: -25.25, dist: 860,
         temp: 12100, spectral: 'B',
         color: 0xaaccff, size: 2.2,
         desc: 'Brightest star in Orion. Blue-white supergiant, one of the most intrinsically luminous stars visible without a telescope (~120,000 L☉). Part of the Orion OB1 association.',
@@ -2603,7 +2610,7 @@ const CATALOG = [
     },
     {
         id: 'zeta_sco', name: 'Zeta Scorpii (ζ²)', abbr: 'ζ² Sco', type: 'K4 III',
-        l: 343.18, b: 1.13, dist: 130,
+        l: 343.10, b: 0.79, dist: 130,
         temp: 4100, spectral: 'K',
         color: 0xffc080, size: 0.36,
         desc: 'A foreground K-giant projected onto the much more distant ζ¹ — an extreme blue hypergiant ~6,000 ly away. The "Cat\'s Eyes" optical pair of Scorpius (with μ Sco) is actually two unrelated stars at very different distances.',
@@ -2618,7 +2625,7 @@ const CATALOG = [
     },
     {
         id: 'eta_sco', name: 'Eta Scorpii (η Sco)', abbr: 'η Sco', type: 'F3 IIIp',
-        l: 343.96, b: -2.39, dist: 73.5,
+        l: 344.36, b: -2.30, dist: 73.5,
         temp: 6800, spectral: 'F',
         color: 0xfff4e8, size: 0.32,
         desc: 'A peculiar F-type subgiant — chemically anomalous, with enhanced silicon and strontium and depleted calcium ("Ap-like" abundances despite the cooler temperature). Member of the Sirius supercluster moving group.',
@@ -2634,7 +2641,7 @@ const CATALOG = [
     },
     {
         id: 'sargas', name: 'Sargas (θ Sco)', abbr: 'θ Sco', type: 'F1 II',
-        l: 347.20, b: -5.55, dist: 270,
+        l: 347.14, b: -5.98, dist: 270,
         temp: 7200, spectral: 'F',
         color: 0xfff4e8, size: 0.50,
         desc: 'Sumerian "the Smiter" — second-brightest star in Scorpius and the bright knot at the tail\'s bend before the sting. A massive F-type bright giant just leaving the main sequence. Slowly variable in radial velocity, suggesting an undetected companion.',
@@ -2651,7 +2658,7 @@ const CATALOG = [
     },
     {
         id: 'iota_sco', name: 'Iota₁ Scorpii (ι¹ Sco)', abbr: 'ι¹ Sco', type: 'F2 Ia',
-        l: 350.94, b: -6.04, dist: 1820,
+        l: 350.61, b: -6.13, dist: 1820,
         temp: 6900, spectral: 'F',
         color: 0xfff4e8, size: 0.55,
         desc: 'A rare F-type yellow supergiant — among the most luminous F-type stars known (~30,000 L☉). Distant despite its naked-eye visibility. Likely transiting the Hertzsprung gap from blue-supergiant ancestor to red supergiant; will end as a Type II supernova within a few hundred thousand years.',
@@ -2777,7 +2784,7 @@ const CATALOG = [
     },
     {
         id: 'eta_eri', name: 'Azha (η Eri)', abbr: 'η Eri', type: 'K1 III-IV',
-        l: 187.59, b: -38.29, dist: 137,
+        l: 187.16, b: -55.31, dist: 137,
         temp: 4730, spectral: 'K',
         color: 0xffd2a1, size: 0.35,
         desc: 'Persian "the ostrich nest." An evolved K-giant slightly past first dredge-up; mildly enhanced in CN and Na. Often used to mark the eastern bend of the river before it heads south.',
@@ -2792,7 +2799,7 @@ const CATALOG = [
     },
     {
         id: 'acamar', name: 'Acamar (θ Eri)', abbr: 'θ Eri', type: 'A4 III + A1 V',
-        l: 247.96, b: -60.43, dist: 161,
+        l: 247.86, b: -60.74, dist: 161,
         temp: 8200, spectral: 'A',
         color: 0xccddff, size: 0.42,
         desc: 'Arabic "the end of the river." Before precession lowered Achernar into view, Acamar was the southernmost point of Eridanus visible from the ancient Mediterranean — the actual "river\'s end." A stunning visual binary, two A-type stars separated by ~8.3″.',
@@ -9458,6 +9465,13 @@ document.getElementById('op-close-btn')?.addEventListener('click', (e) => {
 
 // Select Sun initially (no fly — camera starts at galaxy view)
 selectStar('sun', false);
+
+// Deep link: ?focus=<catalog id> flies to that object (SkyView's "See it in the
+// Galaxy Map" uses it). Unknown ids are ignored, leaving the default view.
+{
+    const focusId = new URLSearchParams(location.search).get('focus');
+    if (focusId && CATALOG.some((s) => s.id === focusId && !s.isHeader)) selectStar(focusId, true);
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 //  MOUSE PICKING — click on any star sphere to select + fly

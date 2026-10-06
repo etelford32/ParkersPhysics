@@ -5,12 +5,51 @@
  * flight engine self-tests all pass, and launching a craft advances the
  * simulation (telemetry + orbit trail update). Mirrors the style of
  * upper-atmosphere-smoke.spec.js, leaning on the exposed `window.__sd`.
+ *
+ * Every test boots through `boot()`, which makes the gate HERMETIC and
+ * clickable:
+ *   - the two NOAA history feeds the forecast module fetches at boot are
+ *     served from the upper-atmosphere fixtures (same shapes the page's
+ *     client reads), and the telemetry beacon gets a 204 (the local dev
+ *     server does not implement /api/telemetry/log). Without that, a
+ *     sandbox with no egress logs "Failed to load resource" 503/501 lines,
+ *     and a filter wide enough to hide those would also hide a 404 on one
+ *     of the page's own modules.
+ *   - the cookie-consent banner (js/cookie-consent.js, fixed to the bottom
+ *     of the viewport) is dismissed, or it swallows clicks on controls that
+ *     scroll under it.
  */
 
 import { test, expect } from '@playwright/test';
+import { f107History, apHistory } from './fixtures/upper-atmosphere-feeds.mjs';
 
 const URL = '/satellite-designer.html';
 const BOOT_TIMEOUT_MS = 15_000;
+
+async function routeFeeds(page, nowMs = Date.now()) {
+    const json = (route, body) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    await page.route('**/api/noaa/f107-history**', (r) => json(r, f107History(nowMs)));
+    await page.route('**/api/noaa/ap-history**', (r) => json(r, apHistory(nowMs)));
+    // js/telemetry.js beacons here; the local dev server answers 501.
+    await page.route('**/api/telemetry/**', (r) => r.fulfill({ status: 204, body: '' }));
+}
+
+async function boot(page) {
+    await routeFeeds(page);
+    await page.goto(URL);
+    await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+    const reject = page.locator('button[data-action="reject"]').first();
+    if (await reject.count()) await reject.click();
+}
+
+/** Time warp above ×10 is a progression unlock (×1000 = Navigator rank).
+ *  Grant the XP through the page's own hook, then pick it in the UI. */
+async function warp1000(page) {
+    await page.evaluate(() => window.__sd.progression.award(1000));
+    await page.click('#warp-modes .toggle[data-warp="1000"]');
+    await expect(page.locator('#warp-modes .toggle[data-warp="1000"]')).toHaveClass(/active/);
+}
 
 function attachConsoleRecorder(page) {
     const errors = [];
@@ -25,8 +64,7 @@ test.describe('satellite-designer.html smoke', () => {
 
     test('boots without console errors', async ({ page }) => {
         const errors = attachConsoleRecorder(page);
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
         await page.waitForTimeout(1200);
 
         // Supabase CDN can be blocked in CI sandboxes — the page degrades to a
@@ -38,8 +76,7 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('flight engine self-test passes', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
         const results = await page.evaluate(() => window.__sd.engine.selfTest());
         const failures = results.filter(r => !r.pass);
         expect(failures,
@@ -48,13 +85,15 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('launch advances the simulation', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
 
         await page.click('#b-launch');
-        // Crank time-warp so a couple of orbits pass within the test window.
-        await page.click('#warp-modes .toggle[data-warp="600"]');
-        await page.waitForTimeout(2500);
+        // Crank time-warp so a good fraction of an orbit passes quickly.
+        await warp1000(page);
+        await page.waitForFunction(() => {
+            const s = window.__sd.sim;
+            return (s.state?.t || 0) > 60 && s.trail.length > 20;
+        }, { timeout: 20_000 }).catch(() => {});   // the expects below report
 
         const st = await page.evaluate(() => ({
             running: window.__sd.sim.running,
@@ -68,13 +107,17 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('design readouts compute Δv from the rocket equation', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
 
+        // Dry mass and Isp live in the collapsed "Manual fine-tune" disclosure;
+        // propellant is the bay's range slider (a range input cannot be filled).
+        await page.click('details:has(#f-dry) > summary');
         await page.fill('#f-dry', '100');
-        await page.fill('#f-fuel', '100');
         await page.fill('#f-isp', '300');
-        await page.dispatchEvent('#f-isp', 'input');
+        await page.evaluate(() => {
+            const f = document.querySelector('#f-fuel');
+            f.value = '100'; f.dispatchEvent(new Event('input', { bubbles: true }));
+        });
         await page.waitForTimeout(150);
 
         // Δv = Isp·g0·ln(2) = 300 · 9.80665 · 0.6931 ≈ 2039 m/s
@@ -85,8 +128,7 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('builder self-test passes', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
         const results = await page.evaluate(() => window.__sd.builder.selfTest());
         const failures = results.filter(r => !r.pass);
         expect(failures,
@@ -95,8 +137,7 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('inline design view configures parts and auto-applies to the ship', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
 
         // No modal: the labelled SATELLITE DESIGN section and its part chips
         // are present on the core page from the start.
@@ -126,8 +167,7 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('build config round-trips through the design draft', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
 
         const data = await page.evaluate(() => window.__sd.ui.currentDesignData());
         expect(data.build, 'design data carries the 3-D build').toBeTruthy();
@@ -138,8 +178,7 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('space-weather presets swing the thermosphere density', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
 
         const r = await page.evaluate(() => {
             window.__sd.conditions.setSWPreset('solar_min');
@@ -159,8 +198,7 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('drag attitude scales the effective drag area', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
 
         const r = await page.evaluate(() => {
             window.__sd.conditions.setAttitude('feathered');
@@ -178,37 +216,45 @@ test.describe('satellite-designer.html smoke', () => {
         expect(/\d/.test(effText), 'effective drag area shown').toBe(true);
     });
 
-    test('the 3-D ship layer mounts over the orbit stage', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+    test('the 3-D mission scene mounts on the stage canvas', async ({ page }) => {
+        await boot(page);
 
-        const canvas = page.locator('#sd-shipgl');
-        await expect(canvas, 'ship WebGL canvas overlays the stage').toBeAttached();
+        // One WebGL scene (js/satellite-designer-3d.js) draws Earth, the orbit
+        // and the parametric ship. If init fails the page swaps the canvas for
+        // a "3-D scene unavailable" note, so the canvas surviving boot is
+        // itself the first check.
+        await expect(page.locator('#sd-canvas'), 'stage canvas survives boot').toBeAttached();
 
-        // boot() fires ensureShipGL(); it either initialises (WebGL present)
-        // or fails gracefully — either way it must have been attempted, and
-        // the 2-D marker keeps the craft visible if it could not.
         const r = await page.evaluate(async () => {
-            await window.__sd.stage.ensureShipGL();
-            return { tried: window.__sd.stage.shipTried(),
-                     ready: window.__sd.stage.shipReady() };
+            const scene = await window.__sd.stage.ensureScene();
+            const cv = document.querySelector('#sd-canvas');
+            return { returned: !!scene,
+                     ready: window.__sd.stage.sceneReady(),
+                     mode: window.__sd.stage.getCameraMode(),
+                     w: cv?.width || 0, h: cv?.height || 0 };
         });
-        expect(r.tried, 'ship layer initialisation was attempted').toBe(true);
         // Chromium ships WebGL, so in CI this should come up ready.
-        expect(r.ready, 'ship layer initialised under WebGL').toBe(true);
+        expect(r.returned, 'ensureScene resolves to the scene').toBe(true);
+        expect(r.ready, 'scene initialised under WebGL').toBe(true);
+        expect(['wide', 'follow', 'free'], 'camera mode is one of the three').toContain(r.mode);
+        expect(r.w * r.h, 'drawing buffer sized to the stage').toBeGreaterThan(0);
+
+        // ensureScene is idempotent — a second call returns the same scene.
+        const same = await page.evaluate(async () =>
+            (await window.__sd.stage.ensureScene()) === (await window.__sd.stage.ensureScene()));
+        expect(same, 'ensureScene does not rebuild the scene').toBe(true);
     });
 
     test('launch → pause → reset drives the simulation loop', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
 
         // Pre-flight: readouts blank, Reset always available, Pause inert.
         await expect(page.locator('#st-phase')).toHaveText(/pre-flight/i);
         await expect(page.locator('#b-reset')).toBeEnabled();
         await expect(page.locator('#m-alt .v')).toHaveText('—');
 
-        // Crank time-warp so a few orbits pass in well under a second.
-        await page.click('#warp-modes .toggle[data-warp="3600"]');
+        // Crank time-warp so the loop visibly advances in well under a second.
+        await warp1000(page);
         await page.click('#b-launch');
         await expect(page.locator('#st-phase')).toHaveText(/in flight/i);
 
@@ -243,8 +289,16 @@ test.describe('satellite-designer.html smoke', () => {
     });
 
     test('power budget gates electric propulsion', async ({ page }) => {
-        await page.goto(URL);
-        await page.waitForFunction(() => !!window.__sd, { timeout: BOOT_TIMEOUT_MS });
+        await boot(page);
+
+        // One thruster, matching the builder's own self-test: the default
+        // build carries two, and 2 × 1500 W of Hall exceeds even a 6 m quad
+        // array (powerFrac ≈ 0.63), which is the physics working, not a bug.
+        await page.evaluate(() => {
+            const tc = document.querySelector('#bay-tc');
+            tc.value = '1'; tc.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        expect((await page.evaluate(() => window.__sd.bay.getBuild())).thrusterCount).toBe(1);
 
         // Flagship Hall thruster on a body-only build: no array power, so it
         // is fully starved — zero thrust, negative margin (flagged red).
