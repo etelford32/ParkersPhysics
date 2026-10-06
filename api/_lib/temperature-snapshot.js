@@ -13,8 +13,9 @@
  *                     otherwise scored healthy on status.html no matter what it
  *                     serves (CLAUDE.md §8), so a fallback source, thin
  *                     coverage, an old window or missing normals each say so
- *   encodeResponse    the model → a compact body: per-cell arrays rounded to
- *                     0.1 (K / percentile points), cards cut to `top`
+ *   encodeResponse    the model → a compact body: per-cell arrays (anomaly K,
+ *                     percentile, the 24-h mean °C) rounded to 0.1, cards cut
+ *                     to `top`
  */
 
 import { CELLS } from '../../js/temperature-normals.js';
@@ -90,6 +91,7 @@ export function encodeResponse({ snapshot, model, fresh, top = 25 }) {
         ...body,
         windowMidpoint: model.windowMidpoint,
         surface: model.surface,
+        region: model.region ?? null,
         planet: {
             anomalyK: r2(p.anomalyK), landAnomalyK: r2(p.landAnomalyK), oceanAnomalyK: r2(p.oceanAnomalyK),
             coverage: r2(p.coverage),
@@ -100,7 +102,11 @@ export function encodeResponse({ snapshot, model, fresh, top = 25 }) {
             coldest: p.coldest ? encodeRow(p.coldest) : null,
         },
         cards,
-        grid: { w: 72, h: 36, anomalyK: model.grid.anomalyK.map(r1), percentile: model.grid.percentile.map(r1) },
+        grid: {
+            w: 72, h: 36,
+            anomalyK: model.grid.anomalyK.map(r1), percentile: model.grid.percentile.map(r1),
+            tmeanC: model.grid.tmeanC.map(r1),
+        },
         disclosure: model.disclosure,
     };
 }

@@ -563,7 +563,12 @@ per-location counting: a single 864-location request may by itself exceed a per-
     outage is a deploy fault, not a feed fault. The isolate retries the load on the next
     request rather than caching the failure.
   - An expired answer is cached 60 s, not 900, so recovery shows up fast.
-- `?surface=land|ocean|all` (default land; anything else falls back to land).
+- `?surface=land|ocean|all` (default land; anything else falls back to land) and `?region=<name>`
+  (exactly a `js/geo-regions.js` `REGION_NAMES` entry, else ignored — the cache-key space stays
+  bounded and nothing typed is echoed). A region narrows the CARDS only and ranks them at
+  600 km (`REGION_SEPARATION_KM`; at 1500 km a region box holds 2–4 rows). The planet strip —
+  its hottest / coldest point included — is always all land, whatever the cards were asked for.
+- `grid` carries `anomalyK`, `percentile` and `tmeanC` (the 24-h mean) per cell, 0.1-rounded.
 - **Registration:** both routes go into `js/pipeline-registry.js`, which is what puts them on
   `status.html` and into prewarm (CLAUDE.md §8). The new crons go into `vercel.json` `crons`
   (CLAUDE.md §4.3).

@@ -78,6 +78,10 @@ function lonInBox(lon, lonMin, lonMax) {
     return lon >= lonMin || lon <= lonMax;            // antimeridian wrap
 }
 
+/** Every name a cell can be labelled with (first-seen order, unique). The
+ *  lab's region filter accepts exactly these — anything else is ignored. */
+export const REGION_NAMES = Object.freeze([...new Set(REGIONS.map(r => r[4]))]);
+
 export function labelRegion(lat, lon) {
     for (const [a, b, c, d, name] of REGIONS) {
         if (lat >= a && lat <= b && lonInBox(lon, c, d)) return name;

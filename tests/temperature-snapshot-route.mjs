@@ -97,6 +97,7 @@ await ok('a healthy aggregate → live, five cards, 2592-cell arrays, rounded', 
         assert.deepEqual(Object.keys(body.cards).sort(), ['above', 'below', 'coldest', 'hottest', 'swings']);
         assert.equal(body.grid.anomalyK.length, CELLS);
         assert.equal(body.grid.percentile.length, CELLS);
+        assert.equal(body.grid.tmeanC.length, CELLS);
         assert.ok(body.grid.anomalyK.every(v => v === null || Math.abs(v * 10 - Math.round(v * 10)) < 1e-9));
         assert.ok(Math.abs(body.planet.anomalyK) < 0.01);
         assert.equal(body.planet.decileExpected, 0.1);
@@ -149,7 +150,7 @@ await ok('the migration not applied / an empty table / a malformed payload → 2
     } finally { restore(); }
 });
 
-await ok('?surface=ocean reaches the model; an unknown surface falls back to land', async () => {
+await ok('?surface=ocean and ?region reach the model; unknown values fall back', async () => {
     try {
         stub({ db: [row()] });
         const o = await call('?surface=ocean');
@@ -157,6 +158,11 @@ await ok('?surface=ocean reaches the model; an unknown surface falls back to lan
         assert.ok(o.body.cards.hottest.every(r => r.landPct < 50));
         const x = await call('?surface=mars');
         assert.equal(x.body.surface, 'land');
+        const r = await call(`?region=${encodeURIComponent('Sahara & North Africa')}`);
+        assert.equal(r.body.region, 'Sahara & North Africa');
+        assert.ok(r.body.cards.hottest.length > 0 && r.body.cards.hottest.every(row => row.region === 'Sahara & North Africa'));
+        const bad = await call('?region=%3Cscript%3E');
+        assert.equal(bad.body.region, null, 'an unknown region is ignored, never echoed');
     } finally { restore(); }
 });
 

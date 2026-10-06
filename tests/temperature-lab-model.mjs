@@ -22,7 +22,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { CELLS, cellCentre, cellIndex, cellSurface, dailyNormal, parseNormalsAsset } from '../js/temperature-normals.js';
-import { buildLabModel, greatCircleKm, nearestPlace, SEPARATION_KM } from '../js/temperature-lab-model.js';
+import { buildLabModel, greatCircleKm, nearestPlace, SEPARATION_KM, REGION_SEPARATION_KM } from '../js/temperature-lab-model.js';
+import { labelRegion } from '../js/geo-regions.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (n) => parseNormalsAsset(new Uint8Array(readFileSync(join(ROOT, 'assets', 'temperature', n))));
@@ -106,6 +107,8 @@ ok('a null stays null: never ranked, never in coverage or a share', () => {
     for (const card of Object.values(m.cards)) assert.ok(!card.some(r => r.cell === gone));
     assert.equal(m.grid.anomalyK[gone], null);
     assert.equal(m.grid.percentile[gone], null);
+    assert.equal(m.grid.tmeanC[gone], null);
+    assert.equal(m.grid.tmeanC.length, CELLS);
     assert.ok(m.planet.coverage < 1);
     // and a whole-planet outage is reported as no coverage, not as a zero anomaly
     const empty = buildLabModel({ frame_to: FRAME_TO, sources: {} }, assets);
@@ -144,7 +147,29 @@ ok('surface: land (default) / ocean / all change the universe and nothing else',
     assert.ok(land.cards.hottest.every(r => r.landPct >= 50));
     assert.ok(ocean.cards.hottest.every(r => r.landPct < 50));
     assert.equal(all.cards.above.length, 5);
-    assert.equal(land.planet.anomalyK, ocean.planet.anomalyK, 'the planet strip is universe-independent');
+    assert.deepEqual(land.planet, ocean.planet, 'the planet strip (extreme points included) is universe-independent');
+    assert.ok(ocean.planet.hottest.landPct >= 50, 'the planet\'s hottest point is a land point even on the ocean cards');
+});
+
+ok('region narrows the cards only, ranks at the regional separation, and leaves the planet alone', () => {
+    const snap = normalPlanet();
+    const sahara = cellIndex(22.5, 12.5);
+    const region = labelRegion(22.5, 12.5);
+    snap.t24max[sahara] += 9;
+    const world = buildLabModel(snap, assets);
+    const reg = buildLabModel(snap, assets, { region });
+    assert.equal(reg.region, region);
+    assert.equal(reg.cards.hottest[0].cell, sahara);
+    for (const card of Object.values(reg.cards)) {
+        assert.ok(card.every(r => r.region === region), 'every row is in the region');
+        for (let x = 0; x < card.length; x++) for (let y = x + 1; y < card.length; y++) {
+            assert.ok(greatCircleKm(card[x].lat, card[x].lon, card[y].lat, card[y].lon) >= REGION_SEPARATION_KM);
+        }
+    }
+    assert.ok(reg.cards.above.length > 3, `a region yields a usable card (${reg.cards.above.length} rows)`);
+    assert.deepEqual(reg.planet, world.planet, 'the planet strip is region-independent');
+    assert.deepEqual(reg.grid, world.grid);
+    assert.equal(buildLabModel(snap, assets, { region: 'Atlantis' }).cards.hottest.length, 0);
 });
 
 ok('swings rank |Δ day-over-day| and carry the signed change', () => {

@@ -1,5 +1,5 @@
 /**
- * Edge route: /api/temperature/snapshot[?surface=land|ocean|all]
+ * Edge route: /api/temperature/snapshot[?surface=land|ocean|all][&region=<name>]
  *
  * The Planetary Temperature Lab's one live answer (PLANETARY_TEMPERATURE_LAB_PLAN.md
  * §4.5): where Earth is hottest, coldest, and most unusual for the date right now,
@@ -33,6 +33,7 @@
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
 import { parseNormalsAsset } from '../../js/temperature-normals.js';
 import { buildLabModel } from '../../js/temperature-lab-model.js';
+import { REGION_NAMES } from '../../js/geo-regions.js';
 import { encodeResponse, freshnessOf, normalizeLabRow } from '../_lib/temperature-snapshot.js';
 
 export const config = { runtime: 'edge' };
@@ -47,6 +48,9 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY
 const CACHE_TTL = 900;     // the aggregate changes hourly
 const CACHE_SWR = 600;
 const SURFACES = new Set(['land', 'ocean', 'all']);
+// Only a name from the shared table reaches the model — the cache key space
+// stays bounded and nothing user-typed is echoed back unvalidated.
+const REGION_SET = new Set(REGION_NAMES);
 const ASSET_FILES = Object.freeze({
     daily: 'normals-1991-2020.bin',
     quantiles: 'quantiles-1991-2020.bin',
@@ -90,6 +94,7 @@ export default async function handler(request) {
     }
     const url = new URL(request.url);
     const surface = SURFACES.has(url.searchParams.get('surface')) ? url.searchParams.get('surface') : 'land';
+    const region = REGION_SET.has(url.searchParams.get('region')) ? url.searchParams.get('region') : null;
     const nowMs = Date.now();
 
     let snapshot = null, rowError = null;
@@ -104,7 +109,7 @@ export default async function handler(request) {
         try {
             const assets = await loadAssets(url.origin);
             normalsOk = true;
-            model = buildLabModel(snapshot, assets, { surface });
+            model = buildLabModel(snapshot, assets, { surface, region });
         } catch (err) {
             normalsError = err.message;
         }

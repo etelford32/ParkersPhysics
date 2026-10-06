@@ -51,6 +51,10 @@ export const SEPARATION_KM = 1500;
 export const LAND_MIN_PCT = 50;
 export const PLACE_RADIUS_KM = 300;
 export const DEFAULT_TOP = 25;
+/** Inside one named region the planet-wide 1500 km would leave 2–4 rows;
+ *  600 km still keeps two neighbouring 5° cells from both being listed at
+ *  low latitudes. */
+export const REGION_SEPARATION_KM = 600;
 const WINDOW_HALF_MS = 11.5 * 3_600_000;     // 24 hourly frames ending at frame_to
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -96,9 +100,12 @@ export function separatedTop(rows, n, sepKm = SEPARATION_KM) {
  * The whole lab model for one aggregate snapshot.
  * @param {object} snap     the aggregate (see header)
  * @param {{daily, quantiles, records}} assets   parsed js/temperature-normals.js files
- * @param {{surface?: 'land'|'ocean'|'all', top?: number}} [opts]
+ * @param {{surface?: 'land'|'ocean'|'all', top?: number, region?: string|null}} [opts]
+ *        `region` (one of geo-regions REGION_NAMES) narrows the CARDS to that
+ *        region and ranks them at REGION_SEPARATION_KM; the planet strip and
+ *        the grid never change with it
  */
-export function buildLabModel(snap, assets, { surface = 'land', top = DEFAULT_TOP } = {}) {
+export function buildLabModel(snap, assets, { surface = 'land', top = DEFAULT_TOP, region = null } = {}) {
     const frameTo = Date.parse(snap?.frame_to);
     if (!Number.isFinite(frameTo)) throw new Error('temperature-lab-model: snapshot has no frame_to');
     const mid = frameTo - WINDOW_HALF_MS;
@@ -151,23 +158,33 @@ export function buildLabModel(snap, assets, { surface = 'land', top = DEFAULT_TO
         percentile: pos?.percentile ?? null, cls: pos?.cls ?? null,
         beyondRecord: pos?.beyondRecord ?? null,
     });
-    const pool = cells.filter(x => inUniverse(surface, x.landPct));
+    const pool = cells.filter(x => inUniverse(surface, x.landPct)
+        && (!region || labelRegion(x.lat, x.lon) === region));
+    const sep = region ? REGION_SEPARATION_KM : SEPARATION_KM;
 
     const hottest = separatedTop(pool.filter(x => isNum(x.tmax))
-        .sort((a, b) => b.tmax - a.tmax).map(x => row(x, x.tmax, x.posMax)), top);
+        .sort((a, b) => b.tmax - a.tmax).map(x => row(x, x.tmax, x.posMax)), top, sep);
     const coldest = separatedTop(pool.filter(x => isNum(x.tmin))
-        .sort((a, b) => a.tmin - b.tmin).map(x => row(x, x.tmin, x.posMin)), top);
+        .sort((a, b) => a.tmin - b.tmin).map(x => row(x, x.tmin, x.posMin)), top, sep);
     const rare = pool.filter(x => x.posMean);
     const above = separatedTop([...rare]
         .sort((a, b) => (b.posMean.percentile - a.posMean.percentile) || (b.posMean.z - a.posMean.z))
-        .map(x => row(x, x.tmean, x.posMean)), top);
+        .map(x => row(x, x.tmean, x.posMean)), top, sep);
     const below = separatedTop([...rare]
         .sort((a, b) => (a.posMean.percentile - b.posMean.percentile) || (a.posMean.z - b.posMean.z))
-        .map(x => row(x, x.tmean, x.posMean)), top);
+        .map(x => row(x, x.tmean, x.posMean)), top, sep);
     const swings = separatedTop(pool.filter(x => isNum(x.tmean) && isNum(x.prev24mean))
         .sort((a, b) => Math.abs(b.tmean - b.prev24mean) - Math.abs(a.tmean - a.prev24mean))
-        .map(x => ({ ...row(x, x.tmean, x.posMean), changeK: x.tmean - x.prev24mean })), top);
+        .map(x => ({ ...row(x, x.tmean, x.posMean), changeK: x.tmean - x.prev24mean })), top, sep);
 
+    // The planet strip's extreme points are the planet's: always ALL land,
+    // whatever universe or region the cards were asked for.
+    let hotCell = null, coldCell = null;
+    for (const x of cells) {
+        if (x.landPct < LAND_MIN_PCT) continue;
+        if (isNum(x.tmax) && (!hotCell || x.tmax > hotCell.tmax)) hotCell = x;
+        if (isNum(x.tmin) && (!coldCell || x.tmin < coldCell.tmin)) coldCell = x;
+    }
     const mean = ([s, w]) => (w > 0 ? s / w : null);
     const sources = snap.sources && typeof snap.sources === 'object' ? snap.sources : {};
     const fallbackTags = Object.keys(sources).filter(t => isFallbackSource('weather_grid', t));
@@ -175,6 +192,7 @@ export function buildLabModel(snap, assets, { surface = 'land', top = DEFAULT_TO
         frameTo: new Date(frameTo).toISOString(),
         windowMidpoint: new Date(mid).toISOString(),
         surface,
+        region: region || null,
         planet: {
             anomalyK: mean(acc.all), landAnomalyK: mean(acc.land), oceanAnomalyK: mean(acc.ocean),
             coverage: wAll > 0 ? wData / wAll : 0,
@@ -182,10 +200,11 @@ export function buildLabModel(snap, assets, { surface = 'land', top = DEFAULT_TO
             landBottomDecile: share.landWeight > 0 ? share.bottom / share.landWeight : null,
             decileExpected: 0.10,
             recordHighCells: recordHigh, recordLowCells: recordLow,
-            hottest: hottest[0] ?? null, coldest: coldest[0] ?? null,
+            hottest: hotCell ? row(hotCell, hotCell.tmax, hotCell.posMax) : null,
+            coldest: coldCell ? row(coldCell, coldCell.tmin, coldCell.posMin) : null,
         },
         cards: { hottest, coldest, above, below, swings },
-        grid: { anomalyK, percentile },
+        grid: { anomalyK, percentile, tmeanC: cells.map(x => x.tmean) },
         disclosure: {
             baseline: 'ERA5 1991–2020 (WMO standard normal)',
             liveField: 'model analysis at sampled grid points, not station observations',
