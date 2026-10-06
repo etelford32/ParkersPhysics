@@ -522,8 +522,9 @@ export function pipelinesByCategory(catId) {
 export const HEARTBEAT_PIPELINES = [
     // vercel.json: * * * * * (every minute)
     { key: 'solar_wind',              label: 'Solar Wind',              warnMin: 5,      critMin: 60 },
-    // vercel.json: 0 * * * * (hourly)
-    { key: 'weather_grid',            label: 'Weather Grid',            warnMin: 75,     critMin: 180 },
+    // vercel.json: 0 * * * * (hourly). primarySource: see isFallbackSource.
+    { key: 'weather_grid',            label: 'Weather Grid',            warnMin: 75,     critMin: 180,
+      primarySource: 'open-meteo' },
     // vercel.json: */10 * * * *
     { key: 'sync_dataset',            label: 'Sync Dataset (SW⇄geomag)',warnMin: 25,     critMin: 60 },
     // Supabase pg_cron omni_hourly_refresh: 0 * * * * (CDAWeb HAPI)
@@ -537,3 +538,30 @@ export const HEARTBEAT_PIPELINES = [
     // vercel.json: 40 12 * * 1 (weekly, Monday)
     { key: 'synthetic_auth_weekly',   label: 'Synthetic Auth (weekly)', warnMin: 8 * 1440, critMin: 15 * 1440 },
 ];
+
+/**
+ * isFallbackSource(pipelineKey, source) — is this pipeline SUCCEEDING on a
+ * fallback upstream rather than its primary?
+ *
+ * A heartbeat that only knows "the last run succeeded" scores a fallback
+ * run healthy. weather_grid did exactly that for at least 30 days to
+ * 2026-10-05: every frame was the MET Norway safety net ("met-norway:72x36",
+ * 648 points at 10 deg, bilinear-upsampled), consecutive_fail stayed 0, and
+ * status.html stayed green. That field misses the hottest land point by a
+ * median 6.3 K (PLANETARY_TEMPERATURE_LAB_PLAN.md §2 H).
+ *
+ * A spec opts in with `primarySource`, a prefix of the upstream tag the
+ * writer stores (`<src>:<W>x<H>`); 'open-meteo' covers both Open-Meteo
+ * attempts, because the gfs_seamless retry is the same grid from a
+ * different model, not a coarser field. ONE copy of the rule: status.html,
+ * admin.html and /api/weather/grid (freshness: 'stale') all call this.
+ *
+ * An unknown pipeline, a spec without `primarySource`, or a missing source
+ * is NOT a fallback. A legacy row with no tag cannot be proven degraded.
+ */
+export function isFallbackSource(pipelineKey, source) {
+    const spec = HEARTBEAT_PIPELINES.find(p => p.key === pipelineKey);
+    if (!spec?.primarySource) return false;
+    if (typeof source !== 'string' || source.trim() === '') return false;
+    return !source.startsWith(spec.primarySource);
+}

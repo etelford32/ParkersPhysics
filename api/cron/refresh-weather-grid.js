@@ -22,7 +22,20 @@
  *     2592-point fetch can't fit Vercel's 60 s Node ceiling at the
  *     20 rps ToS cap; the coarse fallback finishes in ~30-40 s.
  *   - Surfaces Open-Meteo {"error":true,"reason":"..."} bodies directly
- *     so future failures self-diagnose.
+ *     so future failures self-diagnose — INCLUDING when a later attempt
+ *     wins. Until 2026-10-06 a run that fell back to MET Norway threw the
+ *     primary's reason away and recorded a plain success, so the grid ran
+ *     on the 10° fallback for at least 30 days with the heartbeat green and
+ *     nothing anywhere saying why. A fallback win now (1) logs every
+ *     earlier attempt's reason (console.warn → Vercel runtime logs),
+ *     (2) writes it to pipeline_heartbeat via record_pipeline_failure
+ *     BEFORE record_pipeline_success — so last_failure_reason holds it and
+ *     consecutive_fail still ends at 0 (data IS flowing; the watchdog's
+ *     3-strike email stays reserved for "nothing was written") — and
+ *     (3) returns `degraded` + `attempt_failures` in the response body.
+ *     status.html / admin.html then score the row amber from the source
+ *     tag (js/pipeline-registry.js isFallbackSource) and /api/weather/grid
+ *     serves the frame with freshness: 'stale'.
  *   - Writes the 2592-item payload into weather_grid_cache and records
  *     success/failure in pipeline_heartbeat. Wraps the whole flow in a
  *     watchdog that fires record_pipeline_failure if the worker is about
@@ -41,6 +54,11 @@
  *   SUPABASE_URL           (or NEXT_PUBLIC_SUPABASE_URL)
  *   SUPABASE_SERVICE_KEY   (or SUPABASE_SECRET_KEY)   — service_role
  *   CRON_SECRET            (optional but recommended)
+ *   OPEN_METEO_API_KEY     (optional) — commercial Open-Meteo key. When set,
+ *                          both Open-Meteo attempts go to customer-api with
+ *                          &apikey=; unset, behaviour is unchanged (the free,
+ *                          keyless api host). The key never appears in a
+ *                          failure reason or a log line.
  */
 
 import { fetchWithTimeout } from '../_lib/responses.js';
@@ -64,7 +82,12 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const CRON_SECRET  = process.env.CRON_SECRET || '';
 
-const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1/forecast';
+// Keyless free host by default; the commercial host when a key is configured
+// (PLANETARY_TEMPERATURE_LAB_PLAN.md decision D12).
+const OPEN_METEO_API_KEY = process.env.OPEN_METEO_API_KEY || '';
+const OPEN_METEO_BASE = OPEN_METEO_API_KEY
+    ? 'https://customer-api.open-meteo.com/v1/forecast'
+    : 'https://api.open-meteo.com/v1/forecast';
 
 // MET Norway fallback. Free, JSON, no-key — but point-only (no multi-location
 // URL). We sample the coarse FALLBACK_GRID (648 points, 10° spacing) rather
@@ -191,7 +214,8 @@ function chunkUrl(start, end, modelQuery) {
         + `&current=${CURRENT_VARS}`
         + `&wind_speed_unit=ms`
         + `&timezone=UTC`
-        + modelQuery;
+        + modelQuery
+        + (OPEN_METEO_API_KEY ? `&apikey=${encodeURIComponent(OPEN_METEO_API_KEY)}` : '');
 }
 
 /**
@@ -199,7 +223,22 @@ function chunkUrl(start, end, modelQuery) {
  * { items } on success or { failureReason } on any failure. Used by the
  * concurrent worker pool below.
  */
+// Open-Meteo's three rate-limit envelopes ("Daily/Hourly/Minutely API request
+// limit exceeded"). None can clear on an immediate retry from the same IP.
+const RATE_LIMIT_RE = /(daily|hourly|minutely) api request limit/i;
+
+// A failure reason is logged and written to pipeline_heartbeat (public
+// read), so the key is scrubbed out of anything upstream echoes back.
+function redactKey(text) {
+    return OPEN_METEO_API_KEY ? String(text).split(OPEN_METEO_API_KEY).join('[apikey]') : text;
+}
+
 async function fetchOneChunk(src, modelQuery, start, end) {
+    const r = await fetchOneChunkRaw(src, modelQuery, start, end);
+    return r.failureReason ? { ...r, failureReason: redactKey(r.failureReason) } : r;
+}
+
+async function fetchOneChunkRaw(src, modelQuery, start, end) {
     const url = chunkUrl(start, end, modelQuery);
     let body;
     try {
@@ -209,8 +248,12 @@ async function fetchOneChunk(src, modelQuery, start, end) {
         });
         body = await res.text();
         if (!res.ok) {
+            // A rate limit can arrive as a non-2xx (429) carrying the same
+            // {"error":true,"reason":"… API request limit exceeded"} envelope,
+            // and it short-circuits the same way (see the 200-envelope branch).
             return {
                 failureReason: `${src} chunk ${start} HTTP ${res.status}: ${body.slice(0, 300)}`,
+                dailyLimitHit: RATE_LIMIT_RE.test(body),
             };
         }
     } catch (e) {
@@ -231,12 +274,14 @@ async function fetchOneChunk(src, modelQuery, start, end) {
     // Open-Meteo error envelope: {"error":true,"reason":"..."}
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.error === true) {
         const reason = parsed.reason ?? 'unknown';
-        // Daily-limit exhaustion is per-IP. Retrying gfs_seamless against the
+        // Rate-limit exhaustion is per-IP. Retrying gfs_seamless against the
         // same exhausted Vercel edge IP costs 8 s and never succeeds — flag
         // the failure as `dailyLimitHit: true` so fetchAllChunks() can short-
         // circuit straight to the MET Norway fallback (a different upstream
-        // entirely, no shared limit).
-        const dailyLimitHit = /daily api request limit/i.test(reason);
+        // entirely, no shared limit). Open-Meteo has minutely and hourly
+        // limits as well as the daily one, and an immediate retry cannot
+        // clear any of them — so all three short-circuit.
+        const dailyLimitHit = RATE_LIMIT_RE.test(reason);
         return {
             failureReason: `${src} chunk ${start} upstream error: ${reason}`,
             dailyLimitHit,
@@ -601,13 +646,17 @@ async function runRefresh(request) {
     let merged       = null;
     let lastErr      = null;
     let skipOpenMeteo = false;
+    // Every attempt that did not win, in order. Kept even when a later
+    // attempt succeeds — that reason is the whole diagnosis (header note).
+    const attemptFailures = [];
     for (const { src, fetcher, modelQuery } of ATTEMPTS) {
         // If the first Open-Meteo attempt hit the daily IP limit, skip the
         // gfs_seamless retry — it's the same provider on the same exhausted
         // edge IP and would just burn 8 s of our budget. Jump straight to
         // MET Norway, which is a different upstream entirely.
         if (fetcher === 'openmeteo' && skipOpenMeteo) {
-            lastErr = `${src} skipped (daily-limit short-circuit)`;
+            lastErr = `${src} skipped (rate-limit short-circuit)`;
+            attemptFailures.push({ src, reason: lastErr });
             continue;
         }
         const attempt = fetcher === 'metno'
@@ -619,11 +668,17 @@ async function runRefresh(request) {
             break;
         }
         lastErr = attempt.failureReason;
+        attemptFailures.push({ src, reason: attempt.failureReason });
         if (attempt.dailyLimitHit) skipOpenMeteo = true;
     }
 
     if (!merged) {
-        const reason = lastErr || 'all weather sources exhausted';
+        // Every attempt's reason, not just the last one (MET Norway's would
+        // otherwise hide why Open-Meteo failed — the same blind spot as a
+        // fallback win).
+        const reason = attemptFailures.length
+            ? attemptFailures.map(f => f.reason).join(' | ').slice(0, 2000)
+            : (lastErr || 'all weather sources exhausted');
         await supabaseCallRpc('record_pipeline_failure', {
             p_name:   'weather_grid',
             p_reason: reason,
@@ -650,6 +705,19 @@ async function runRefresh(request) {
 
     // Opportunistic retention trim + heartbeat update. Neither is fatal.
     await supabaseCallRpc('trim_weather_grid_cache', {});
+    // A win after earlier failures: record WHY first, then the success. The
+    // order is the point — the failure write stamps last_failure_at/reason,
+    // the success write then resets consecutive_fail to 0 and keeps
+    // last_success_at newest (header note).
+    const degraded = attemptFailures.length > 0;
+    if (degraded) {
+        const why = attemptFailures.map(f => f.reason).join(' | ');
+        console.warn(`[refresh-weather-grid] served ${sourceWithGrid} after ${attemptFailures.length} failed attempt(s): ${why}`);
+        await supabaseCallRpc('record_pipeline_failure', {
+            p_name:   'weather_grid',
+            p_reason: `degraded: served ${sourceWithGrid}; ${why}`.slice(0, 2000),
+        });
+    }
     await supabaseCallRpc('record_pipeline_success', {
         p_name:   'weather_grid',
         p_source: sourceWithGrid,
@@ -663,6 +731,8 @@ async function runRefresh(request) {
             source:    sourceWithGrid,
             locations: merged.length,
             grid:      { w: GRID_W, h: GRID_H, deg: GRID_DEG },
+            degraded,
+            ...(degraded ? { attempt_failures: attemptFailures } : {}),
         },
     };
 }
