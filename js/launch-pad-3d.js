@@ -808,6 +808,11 @@ const PAD_BUILDERS = {
     generic:     buildGenericPad,
 };
 
+// Sub-builders exported (2026-10) for the Space Ship Designer, which builds
+// its own launch mount sized to an arbitrary vehicle but keeps the site's
+// tower + beacon look. Exporting them changes nothing for the pads above.
+export { buildLatticeTower, buildBeacon, PAD_COLORS };
+
 // opts: optional builder hints — { boosterDiameter } adapts shared geometry
 // like the OLM table hole so a wider booster (e.g. the 12 m future Starship
 // concept) doesn't collide with the table. Each pad builder may ignore or

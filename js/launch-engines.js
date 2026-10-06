@@ -87,6 +87,49 @@ export const ENGINES = {
         isp_vac:    304,
         propellant: 'RP-1 / LOX  (kerolox)',
     },
+    // ── Added 2026-10 for the Space Ship Designer, so every propellant it
+    // offers has at least one real engine that burns it. Same public-data
+    // standard as above (manufacturer fact sheets / NASA history office).
+    rd_253: {                      // Proton first stage (Glushko)
+        name:       'RD-253',
+        sl_kn:      1470,
+        vac_kn:     1630,
+        isp_sl:     285,
+        isp_vac:    316,
+        propellant: 'N2O4 / UDMH  (hypergolic)',
+    },
+    aj10_190: {                    // Shuttle OMS / Orion service module
+        name:       'AJ10-190',
+        sl_kn:      0,
+        vac_kn:     26.7,
+        isp_sl:     0,
+        isp_vac:    316,
+        propellant: 'N2O4 / MMH  (hypergolic)',
+    },
+    rl10b_2: {                     // Delta IV upper stage
+        name:       'RL10B-2',
+        sl_kn:      0,
+        vac_kn:     110,
+        isp_sl:     0,
+        isp_vac:    465.5,
+        propellant: 'LH2 / LOX  (hydrolox)',
+    },
+    nerva_xe: {                    // NERVA XE-Prime ground test (1969)
+        name:       'NERVA XE',
+        sl_kn:      0,
+        vac_kn:     246.6,
+        isp_sl:     0,
+        isp_vac:    841,
+        propellant: 'LH2  (nuclear thermal)',
+    },
+    next_c: {                      // NASA NEXT-C gridded ion thruster (DART)
+        name:       'NEXT-C (ion)',
+        sl_kn:      0,
+        vac_kn:     0.236,
+        isp_sl:     0,
+        isp_vac:    4190,
+        propellant: 'Xenon  (electrostatic)',
+    },
 };
 
 // Reference thrust comparison — the bar chart in the planner side panel

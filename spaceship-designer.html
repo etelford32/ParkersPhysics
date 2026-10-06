@@ -99,20 +99,74 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 .ssd-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 .ssd-note{font-size:11px;color:var(--c-text-mut);line-height:1.4}
+.ssd-table{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.ssd-table th{font-size:10px;font-weight:600;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.05em;text-align:left;
+  padding:4px 6px;border-bottom:1px solid var(--c-line)}
+.ssd-table td{padding:6px;border-bottom:1px dashed rgba(120,160,200,.10);vertical-align:top}
+.ssd-table .n{text-align:right;white-space:nowrap}
+.ssd-table .mut{color:var(--c-text-mut);font-size:10.5px}
+/* Ascent profile charts (js/spaceship-designer-charts.js). Series slots are the
+   reference categorical order's DARK steps, validated on #0b1120. */
+#ssd-profile{position:relative;
+  --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70}
+.ssd-viz{margin:0;display:flex;flex-direction:column;gap:6px}
+.ssd-viz figcaption{font-size:12px;font-weight:600;color:var(--c-text-2)}
+.ssd-viz svg{width:100%;height:auto;display:block;overflow:visible}
+.ssd-viz .grid{stroke:var(--c-line);stroke-width:1}
+.ssd-viz .axis{stroke:rgba(120,160,200,.35);stroke-width:1}
+.ssd-viz .zero{stroke:rgba(120,160,200,.35);stroke-width:1}
+.ssd-viz .tick{fill:var(--c-text-mut);font-size:10px;font-variant-numeric:tabular-nums}
+.ssd-viz .axlab{fill:var(--c-text-mut);font-size:10px}
+.ssd-viz .lab{fill:var(--c-text-2);font-size:10.5px;paint-order:stroke;stroke:#0b1120;stroke-width:3px}
+.ssd-viz .ref{stroke:var(--c-text-mut);stroke-width:1;stroke-dasharray:4 3}
+.ssd-viz .reflab{fill:var(--c-text-mut);font-size:10px}
+.ssd-viz .line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.ssd-viz .line.s1{stroke:var(--series-1)} .ssd-viz .line.s2{stroke:var(--series-2)} .ssd-viz .line.s3{stroke:var(--series-3)}
+.ssd-viz .mk{fill:#0b1120;stroke:var(--c-text-2);stroke-width:2}
+.ssd-viz .mk.s1{fill:var(--series-1);stroke:#0b1120}
+.ssd-viz .hv{fill:var(--c-text);stroke:#0b1120;stroke-width:2}
+.ssd-viz .xhair{stroke:var(--c-text-2);stroke-width:1}
+.ssd-viz .hit{fill:transparent;cursor:crosshair}
+.ssd-viz-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11px;color:var(--c-text-2)}
+.ssd-viz-legend .sw{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.ssd-viz-legend .s1{background:var(--series-1)} .ssd-viz-legend .s2{background:var(--series-2)} .ssd-viz-legend .s3{background:var(--series-3)}
+.ssd-viz-tip{position:absolute;z-index:5;pointer-events:none;background:rgba(6,10,20,.94);border:1px solid var(--c-line);
+  border-radius:var(--r-sm);padding:6px 8px;font-size:11px;line-height:1.45;color:var(--c-text);font-variant-numeric:tabular-nums;
+  min-width:170px}
+.ssd-viz-tip[hidden]{display:none}
+.ssd-viz-table summary{cursor:pointer;font-size:11.5px;color:var(--c-text-2)}
+.ssd-viz-table{max-height:320px;overflow:auto}
+.ssd-bay{font-size:11.5px;color:var(--c-text-2);line-height:1.5;display:flex;flex-direction:column;gap:2px;
+  border-left:2px solid var(--c-accent-border);padding:2px 0 2px 8px}
+.ssd-chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:1px 6px;border-radius:999px;background:var(--c-accent-soft);color:var(--c-accent);margin-right:4px}
 
 /* Canvas / stage */
 .ssd-stagewrap{position:relative;border:1px solid var(--c-line);border-radius:var(--r-lg);overflow:hidden;
   background:#0a1422;min-height:480px;height:62vh}
 #ssd-canvas{width:100%;height:100%;display:block}
-.ssd-hud{position:absolute;top:12px;left:12px;display:flex;gap:18px;background:rgba(2,6,14,.55);
+/* HUD + playback pill share one column so the pill follows the HUD's real
+   height (the HUD wraps to two rows when the stage is narrow), clear of the
+   view-button column on the right. */
+.ssd-hudcol{position:absolute;top:12px;left:12px;max-width:calc(100% - 118px);display:flex;flex-direction:column;
+  align-items:flex-start;gap:6px;pointer-events:none}
+.ssd-hud{display:flex;flex-wrap:wrap;row-gap:6px;gap:18px;background:rgba(2,6,14,.55);
   border:1px solid var(--c-line);border-radius:var(--r-md);padding:8px 14px;backdrop-filter:blur(6px);
   font-variant-numeric:tabular-nums;pointer-events:none}
 .ssd-hud .ssd-h{display:flex;flex-direction:column}
 .ssd-hud .ssd-h .k{font-size:10px;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.06em}
 .ssd-hud .ssd-h .v{font-size:18px;font-weight:700}
-.ssd-viewbar{position:absolute;top:12px;right:12px;display:flex;gap:6px}
+/* A column on the right edge: as a row it ran under the HUD once the HUD
+   gained its pitch · downrange readout (the centre column is ~700 px wide). */
+.ssd-viewbar{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;align-items:stretch;gap:5px}
+.ssd-warp{font-size:11px;color:var(--c-text-2);background:rgba(2,6,14,.55);
+  border:1px solid var(--c-line);border-radius:999px;padding:3px 10px;font-variant-numeric:tabular-nums;pointer-events:none}
+.ssd-warp[hidden]{display:none}
+@media (max-width:760px){.ssd-hudcol{max-width:calc(100% - 24px)}.ssd-hud{gap:10px;padding:6px 10px}.ssd-hud .ssd-h .v{font-size:14px}.ssd-h-x{display:none!important}
+  .ssd-viewbar{top:auto;bottom:58px;right:8px;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 16px)}}
 .ssd-viewbar button{font-size:11px;padding:5px 9px}
 .ssd-launchbar{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px}
+.ssd-launchbar button{white-space:nowrap}
 .ssd-phase{position:absolute;bottom:14px;right:14px;font-size:12px;color:var(--c-accent);letter-spacing:.1em;text-transform:uppercase}
 
 /* Stats */
@@ -178,8 +232,10 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 
 <header class="ssd-hero">
   <h1>Space Ship Designer<span class="ssd-badge">NEW</span></h1>
-  <p>Build a launch vehicle from the engines up — stages, propellants, thrusters, nosecone and cockpit — watch it
-     render in 3D, then fly a physically real surface-to-orbit ascent. <strong id="ssd-signin-note"></strong></p>
+  <p>Build a launch vehicle from the engines up — stages, engines, nosecone and cockpit — watch it
+     render in 3D at true scale, then fly a physically real surface-to-orbit ascent: pitch-over, staging and fairing
+     separation over a real-size planet. Engines are drawn at their real nozzle size and packed under each stage the way
+     real clusters are; the engine decides the propellant. <strong id="ssd-signin-note"></strong></p>
 </header>
 
 <div class="ssd-app">
@@ -198,9 +254,17 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
           <div class="ssd-field"><label>Target orbit (km)</label>
             <input type="number" id="ssd-alt" min="80" max="2000" step="10" value="200"></div>
         </div>
-        <div class="ssd-field"><label>Launch latitude <span class="ssd-rangeval" id="ssd-lat-val">28.5°</span></label>
-          <div class="ssd-row"><input type="range" id="ssd-lat" min="0" max="90" step="0.5" value="28.5"></div>
+        <div class="ssd-field"><label>Launch site</label>
+          <select id="ssd-site"></select></div>
+        <div class="ssd-field"><label>Latitude <span class="ssd-rangeval" id="ssd-lat-val">28.5° N</span></label>
+          <div class="ssd-row"><input type="range" id="ssd-lat" min="-90" max="90" step="0.1" value="28.5"></div>
           <div class="ssd-note" id="ssd-lat-note"></div></div>
+        <div class="ssd-field"><label>Longitude <span class="ssd-rangeval" id="ssd-lon-val">80.6° W</span></label>
+          <div class="ssd-row"><input type="range" id="ssd-lon" min="-180" max="180" step="0.1" value="-80.6"></div>
+          <div class="ssd-note" id="ssd-lon-note"></div></div>
+        <div class="ssd-field"><label>Winds aloft</label>
+          <select id="ssd-wind"></select>
+          <div class="ssd-note" id="ssd-wind-note"></div></div>
       </div>
     </div>
 
@@ -257,17 +321,23 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
   <div class="ssd-col">
     <div class="ssd-stagewrap">
       <canvas id="ssd-canvas"></canvas>
+      <div class="ssd-hudcol">
       <div class="ssd-hud">
         <div class="ssd-h"><span class="k">Altitude</span><span class="v" id="hud-alt">0 km</span></div>
         <div class="ssd-h"><span class="k">Velocity</span><span class="v" id="hud-vel">0.00 km/s</span></div>
         <div class="ssd-h"><span class="k">Throttle</span><span class="v" id="hud-thr">0%</span></div>
         <div class="ssd-h"><span class="k">Thrust</span><span class="v" id="hud-thrust">0.00 MN</span></div>
+        <div class="ssd-h ssd-h-x"><span class="k">Pitch · downrange</span><span class="v" id="hud-track">—</span></div>
+      </div>
+      <div class="ssd-warp" id="ssd-warp" hidden></div>
       </div>
       <div class="ssd-viewbar">
         <button class="ssd-btn ssd-ghost" data-view="3q">¾</button>
         <button class="ssd-btn ssd-ghost" data-view="front">Front</button>
         <button class="ssd-btn ssd-ghost" data-view="side">Side</button>
         <button class="ssd-btn ssd-ghost" data-view="top">Top</button>
+        <button class="ssd-btn ssd-ghost" data-view="engines" title="Look up into the engine bay">Engines</button>
+        <button class="ssd-btn ssd-ghost" data-view="nose" title="Fairing / capsule / payload close-up">Nose</button>
         <button class="ssd-btn ssd-ghost" id="ssd-rotate">↻ Spin</button>
       </div>
       <div class="ssd-launchbar">
@@ -280,9 +350,18 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
     <div class="ssd-card">
       <h2>Flight Result</h2>
       <div class="ssd-body" id="ssd-result">
-        <div class="ssd-note">Press <strong>Launch</strong> to fly your design to orbit. The ascent uses the same
-          validated integrator as the Launch Planner — drag, gravity loss and the rocket equation are all real.</div>
+        <div class="ssd-note">Press <strong>Launch</strong> to fly your design to orbit. The guidance flies a real
+          two-burn insertion — a gravity turn optimised for <em>this</em> vehicle, engine cut-off when the apoapsis
+          reaches the target, a coast, and a circularisation burn — through drag, gravity and the rocket equation.</div>
       </div>
+    </div>
+    <div class="ssd-card" id="ssd-profile-card" hidden>
+      <h2>Ascent Profile</h2>
+      <div class="ssd-body" id="ssd-profile"></div>
+    </div>
+    <div class="ssd-card" id="ssd-beyond-card" hidden>
+      <h2>Beyond Orbit <span class="ssd-pill" id="ssd-beyond-dv">—</span></h2>
+      <div class="ssd-body" id="ssd-beyond"></div>
     </div>
   </div>
 
@@ -391,15 +470,21 @@ import { auth } from './js/auth.js';
 import { getSupabase } from './js/supabase-config.js';
 import { openGate, consumeResume } from './js/gate-modal.js';
 import {
-  defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
+  defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent, missionFromResult,
+  normalizeDesign, engineFor, engineGeometry, stackLayout, clusterLayout,
+  LAUNCH_SITES, defaultLaunchSite, matchLaunchSite, wrapLon, formatLatLon,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
   LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES, surfaceRotationSpeed,
 } from './js/spaceship-designer-engine.js';
 import { createRocketScene } from './js/spaceship-designer-3d.js';
+import { WIND_SETTINGS, WIND_PROFILES, meanWindSpeed, QALPHA_LIMIT_KPA_DEG } from './js/spaceship-designer-wind.js';
+import { renderAscentCharts } from './js/spaceship-designer-charts.js';
 import * as store from './js/spaceship-designer-store.js';
 
 // ── State ──────────────────────────────────────────────────────────────────
-let design = store.loadDraft() || defaultDesign();
+// normalizeDesign: legacy drafts may carry a spec-id engineId or a propellant the
+// engine cannot burn — they load corrected (see the engine kernel's catalog note).
+let design = normalizeDesign(store.loadDraft() || defaultDesign());
 let signedIn = false;
 let scene = null;
 let rebuildTimer = 0;
@@ -419,7 +504,7 @@ function fillSelect(el, entries, selectedId) {
   el.innerHTML = '';
   for (const e of entries) {
     const opt = document.createElement('option');
-    opt.value = e.id;
+    opt.value = e.key || e.id;
     const locked = e.advanced && !signedIn;
     opt.textContent = (e.label || e.name) + (e.advanced ? (locked ? ' 🔒' : ' ✦') : '');
     if (locked) opt.disabled = true;
@@ -429,8 +514,58 @@ function fillSelect(el, entries, selectedId) {
   // If the selected value is now locked/invalid, fall back to the first allowed.
   if (el.value !== selectedId) {
     const firstOk = entries.find((e) => !(e.advanced && !signedIn));
-    if (firstOk) el.value = firstOk.id;
+    if (firstOk) el.value = firstOk.key || firstOk.id;
   }
+}
+
+// Engine picker: grouped by propellant, because the engine DECIDES the
+// propellant (a Merlin cannot burn hydrogen). Values are catalog KEYS.
+function fillEngineSelect(el, selectedKey) {
+  el.innerHTML = '';
+  for (const prop of Object.values(PROPELLANTS)) {
+    const engines = Object.values(ENGINE_CATALOG).filter((e) => e.propellant === prop.id);
+    if (!engines.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = prop.name;
+    for (const e of engines) {
+      const opt = document.createElement('option');
+      opt.value = e.key;
+      const locked = e.advanced && !signedIn;
+      opt.textContent = e.label + (e.advanced ? (locked ? ' 🔒' : ' ✦') : '');
+      opt.disabled = locked;
+      og.appendChild(opt);
+    }
+    el.appendChild(og);
+  }
+  el.value = selectedKey;
+  if (el.value !== selectedKey) {
+    const ok = Object.values(ENGINE_CATALOG).find((e) => !(e.advanced && !signedIn));
+    el.value = ok.key;
+  }
+  return el.value;
+}
+
+// Per-stage engine-bay readout: the engine's real size, how the cluster packs
+// under this stage, and whether it fits — the same numbers the 3D view draws.
+function engineBayHtml(i) {
+  const st = stackLayout(design).stages[i];
+  if (!st) return '';
+  const e = st.engine, g = st.geo, c = st.cluster;
+  const prop = PROPELLANTS[e.propellant];
+  const fmtT = (kN) => kN >= 1000 ? (kN / 1000).toFixed(2) + ' MN' : kN >= 1 ? kN.toFixed(0) + ' kN' : (kN * 1000).toFixed(0) + ' N';
+  const thrust = (e.sl_kn ? fmtT(e.sl_kn) + ' SL / ' : '') + fmtT(e.vac_kn) + ' vac';
+  const isp = (e.isp_sl ? e.isp_sl + ' / ' : '') + e.isp_vac + ' s';
+  const size = g.kind === 'ion' ? `${(g.exitR_m * 200).toFixed(0)} cm grid` : `${(g.exitR_m * 2).toFixed(2)} m exit${g.source === 'derived' ? '*' : ''} · ε ${g.eps.toFixed(0)}`;
+  const fit = c.fits
+    ? `<span style="color:var(--c-good)">fits</span>`
+    : `<span style="color:var(--c-warn)">overhangs ${c.overhang_m.toFixed(2)} m → flared skirt</span>`;
+  const gim = g.gimbalDeg > 0 ? `±${g.gimbalDeg}° gimbal` : 'fixed (no gimbal)';
+  return `<div class="ssd-bay">
+      <div><span class="ssd-chip" title="${prop?.note || ''}">${prop?.short || e.propellant}</span>
+        <span>${thrust} · Isp ${isp}</span></div>
+      <div>${c.positions.length > 1 ? c.pattern + ' cluster' : 'single engine'} · ${size} · ${gim} · ${fit}</div>
+      <div class="ssd-note">${e.note || ''}${g.source === 'derived' ? ' <em>*exit size derived from the nozzle model (no published figure).</em>' : ''}</div>
+    </div>`;
 }
 
 // ── Stage editor ─────────────────────────────────────────────────────────────
@@ -443,12 +578,12 @@ function renderStages() {
     div.innerHTML = `
       <div class="ssd-stagehd"><span>Stage ${i + 1}${i === 0 ? ' · booster' : ''}</span>
         ${design.stages.length > 1 ? `<button class="ssd-x" data-rm="${i}" title="Remove stage">×</button>` : ''}</div>
-      <div class="ssd-field"><label>Engine</label><select data-k="engineId" data-i="${i}"></select></div>
       <div class="ssd-grid2">
+        <div class="ssd-field"><label>Engine</label><select data-k="engineId" data-i="${i}"></select></div>
         <div class="ssd-field"><label>Engines</label>
           <input type="number" data-k="engineCount" data-i="${i}" min="1" max="45" step="1" value="${s.engineCount}"></div>
-        <div class="ssd-field"><label>Propellant</label><select data-k="propellantId" data-i="${i}"></select></div>
       </div>
+      <div data-bay="${i}"></div>
       <div class="ssd-grid2">
         <div class="ssd-field"><label>Diameter (m)</label>
           <input type="number" data-k="diameter_m" data-i="${i}" min="0.5" max="18" step="0.1" value="${s.diameter_m}"></div>
@@ -458,8 +593,9 @@ function renderStages() {
       <div class="ssd-field"><label>Throttle <span class="ssd-rangeval" data-thrval="${i}">${Math.round((s.throttle ?? 1) * 100)}%</span></label>
         <input type="range" data-k="throttle" data-i="${i}" min="0.4" max="1" step="0.05" value="${s.throttle ?? 1}"></div>`;
     wrap.appendChild(div);
-    fillSelect(div.querySelector('[data-k="engineId"]'), Object.values(ENGINE_CATALOG), s.engineId);
-    fillSelect(div.querySelector('[data-k="propellantId"]'), Object.values(PROPELLANTS), s.propellantId);
+    const chosen = fillEngineSelect(div.querySelector('[data-k="engineId"]'), s.engineId);
+    if (chosen !== s.engineId) { s.engineId = chosen; s.propellantId = engineFor(chosen).propellant; }
+    div.querySelector(`[data-bay="${i}"]`).innerHTML = engineBayHtml(i);
   });
   // Sign-out users are capped at 2 stages.
   const addBtn = $('ssd-add-stage');
@@ -476,6 +612,8 @@ function readControls() {
   design.bodyId = $('ssd-body').value;
   design.targetAltKm = +$('ssd-alt').value || 200;
   design.launchLatitude = +$('ssd-lat').value || 0;
+  design.launchLongitude = wrapLon(+$('ssd-lon').value || 0);
+  design.windId = $('ssd-wind').value || 'typical';
   design.payload = {
     mass_kg: +$('ssd-payload').value || 0,
     nosecone: $('ssd-nose').value,
@@ -606,17 +744,72 @@ function updateAeroLive(s) {
   $('aero-val-wave').textContent = wv.toFixed(1) + ' kN';
 }
 
-// Launch-latitude → rotation assist note (under the slider).
+// Launch site → rotation-assist note + longitude note (under the sliders).
 function updateLatNote() {
   const lat = +$('ssd-lat').value || 0;
-  $('ssd-lat-val').textContent = lat.toFixed(1) + '°';
+  const lon = wrapLon(+$('ssd-lon').value || 0);
+  const [laTxt, loTxt] = formatLatLon(lat, lon).split(' · ');
+  $('ssd-lat-val').textContent = laTxt;
+  $('ssd-lon-val').textContent = loTxt;
   const body = LAUNCH_BODIES[$('ssd-body').value] || LAUNCH_BODIES.earth;
   const vrot = surfaceRotationSpeed(body, lat);
   const eq = surfaceRotationSpeed(body, 0);
   $('ssd-lat-note').innerHTML = vrot > 1
     ? `Eastward rotation gives <strong>+${vrot.toFixed(0)} m/s</strong> of orbital velocity free `
-      + `(${eq.toFixed(0)} m/s at the equator). Min inclination ≈ ${lat.toFixed(0)}°.`
+      + `(${eq.toFixed(0)} m/s at the equator). Min inclination ≈ ${Math.abs(lat).toFixed(0)}°.`
     : `${body.name} barely rotates — no useful launch assist.`;
+  // Longitude is honest about its reach: the ascent flies due east, so the
+  // assist (and every Δv) depends on latitude only; longitude picks the ground.
+  $('ssd-lon-note').textContent = 'Picks the ground under the pad and the planet you climb over. '
+    + 'The ascent flies due east, so it changes no Δv — latitude sets the rotation assist.';
+  syncSiteSelect();
+  updateWindNote();
+}
+
+// Winds aloft: the select only means something where there is air.
+function updateWindNote() {
+  const id = $('ssd-body').value;
+  const prof = WIND_PROFILES[id];
+  const sel = $('ssd-wind');
+  sel.disabled = !prof;
+  if (!prof) { $('ssd-wind-note').textContent = 'No air — no wind, no aerodynamic loads.'; return; }
+  const set = WIND_SETTINGS[sel.value] || WIND_SETTINGS.typical;
+  let peakH = 0;
+  for (let h = 0; h <= 3 * prof.jetAlt_km; h += 0.5) if (meanWindSpeed(id, h * 1000) > meanWindSpeed(id, peakH * 1000)) peakH = h;
+  const peak = meanWindSpeed(id, peakH * 1000) * set.scale;
+  $('ssd-wind-note').textContent = set.scale > 0
+    ? `Representative ${prof.note}: ${peak.toFixed(0)} m/s at ${peakH.toFixed(0)} km, ${set.toward_deg === 0 ? 'along'
+        : set.toward_deg === 180 ? 'against' : set.toward_deg + '° across'} the track, plus seeded gusts. Not a forecast — `
+      + `what matters is the bending load q·α it puts on the stack (limit ${QALPHA_LIMIT_KPA_DEG.toFixed(0)} kPa·°).`
+    : 'Still air: the gravity turn flies at zero angle of attack.';
+}
+
+// Launch-site presets for the current body; "Custom" whenever the sliders sit
+// off every preset. A preset is only a shortcut to a lat/lon pair.
+function fillSiteSelect() {
+  const sel = $('ssd-site');
+  const sites = LAUNCH_SITES[$('ssd-body').value] || [];
+  sel.innerHTML = '';
+  for (const site of sites) {
+    const o = document.createElement('option');
+    o.value = site.id;
+    o.textContent = `${site.name} — ${formatLatLon(site.lat, site.lon)}`;
+    sel.appendChild(o);
+  }
+  const custom = document.createElement('option');
+  custom.value = 'custom';
+  custom.textContent = 'Custom (use the sliders)';
+  sel.appendChild(custom);
+  syncSiteSelect();
+}
+function syncSiteSelect() {
+  const m = matchLaunchSite($('ssd-body').value, +$('ssd-lat').value || 0, +$('ssd-lon').value || 0);
+  $('ssd-site').value = m ? m.id : 'custom';
+}
+function applySite(site) {
+  if (!site) return;
+  $('ssd-lat').value = site.lat;
+  $('ssd-lon').value = site.lon;
 }
 
 // ── Propulsion / thrust analysis (bottom panel) ──────────────────────────────
@@ -638,7 +831,9 @@ function renderPropStatic() {
     ['Liftoff TWR', st.liftoffTWR.toFixed(2)],
     ['Stage 1 Isp (SL / vac)', `${Math.round(s0.isp_s || 0)} / ${Math.round(s0.ispVac_s || 0)} s`],
     ['Ideal Δv (Tsiolkovsky)', st.totalDv_kms.toFixed(2) + ' km/s'],
-    ['Rotation assist', vrot > 1 ? `+${vrot.toFixed(0)} m/s @ ${(design.launchLatitude ?? 0).toFixed(0)}°` : 'none'],
+    ['Launch site', (matchLaunchSite(design.bodyId, design.launchLatitude ?? 0, design.launchLongitude ?? 0)?.name || 'Custom')
+      + ' · ' + formatLatLon(design.launchLatitude ?? 0, design.launchLongitude ?? 0)],
+    ['Rotation assist', vrot > 1 ? `+${vrot.toFixed(0)} m/s @ ${Math.abs(design.launchLatitude ?? 0).toFixed(0)}°` : 'none'],
     ['Acceleration limit', `${crewed ? 4 : 6} g (${crewed ? 'crewed' : 'uncrewed'})`],
   ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join('');
   if (!liveProp) {
@@ -658,9 +853,9 @@ function setNozBadge(el, state, extra = '') {
 }
 function renderNozzleStatic() {
   const s0 = design.stages[0] || {};
-  const e = ENGINE_CATALOG[s0.engineId] || ENGINE_CATALOG.merlin_1d;
+  const e = engineFor(s0.engineId);
   const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
-  const n = computeNozzle(e, s0.propellantId, s0.engineCount || 1, body);
+  const n = computeNozzle(e, e.propellant, s0.engineCount || 1, body);
   $('noz-engine').textContent = (e.label || e.name || 'Engine') + ' ×' + (s0.engineCount || 1);
   if (n.electrostatic) {
     setNozBadge($('noz-state'), 'electrostatic');
@@ -759,9 +954,25 @@ function showResult(result) {
   const km = (x) => (x ?? 0).toFixed(0);
   const ks = (x) => (x ?? 0).toFixed(2);
   const statusLabel = {
-    orbit: 'Orbit achieved', 'fuel-out': 'MECO — out of propellant',
+    orbit: 'Orbit achieved', 'low-orbit': 'Orbit — below target', 'fuel-out': 'Out of propellant',
+    escape: 'Escape trajectory', breakup: 'Structural breakup', 'no-liftoff': 'No liftoff',
     crashed: 'Crashed', 'time-out': 'Flight timed out', invalid: 'Invalid design',
   }[result.status] || result.status;
+  const o = result.orbit || {};
+  const orbitTxt = !Number.isFinite(o.apo_km) ? 'unbound (escaping)'
+    : `${km(Math.max(o.peri_km, -9999))} × ${km(o.apo_km)} km`;
+  const ins = result.insertion || {};
+  const insertionRows = result.guidance === 'insertion' && (result.status === 'orbit' || result.status === 'low-orbit' || result.status === 'escape') ? `
+    <div class="ssd-stat"><span class="k">Orbit (periapsis × apoapsis)</span><span class="v">${orbitTxt}</span></div>
+    <div class="ssd-stat"><span class="k">${result.profile === 'gravity-turn' ? 'Gravity turn (optimised)' : 'Pitch program (optimised)'}</span><span class="v">${
+      result.profile === 'gravity-turn'
+        ? `${(result.kick_deg ?? 0).toFixed(1)}° kick, then zero-α`
+        : `horizontal by ${(result.turn_alt_km ?? 0).toFixed(0)} km`} · ${result.turn_search ?? 1} trial ascents</span></div>
+    ${ins.meco1_t != null ? `<div class="ssd-stat"><span class="k">MECO-1 → circularise</span><span class="v">T+${ins.meco1_t.toFixed(0)} s → T+${(ins.circ_start_t ?? ins.meco1_t).toFixed(0)} s · ${(ins.circ_dv_kms * 1000).toFixed(0)} m/s</span></div>` : ''}
+    <div class="ssd-stat"><span class="k">Δv left in orbit</span><span class="v" style="color:var(--c-accent)">${ks(result.remaining_dv_kms)} km/s</span></div>`
+    : `
+    <div class="ssd-stat"><span class="k">Altitude at end of flight</span><span class="v">${km(result.final_alt_km)} km</span></div>
+    <div class="ssd-stat"><span class="k">Horizontal speed reached</span><span class="v">${ks(result.final_vt_kms)} of ${ks(result.v_orb_circ_kms)} km/s</span></div>`;
   const ev = result.staging_events || [];
   const stagingRows = ev.length
     ? `<div class="ssd-stat" style="border:none"><span class="k">Staging</span><span class="v">${
@@ -773,18 +984,67 @@ function showResult(result) {
       <div><div style="font-weight:700">${statusLabel}</div>
         <div class="ssd-note">${g.label}</div></div>
     </div>
-    <div class="ssd-stat"><span class="k">Apoapsis at MECO</span><span class="v">${km(result.final_alt_km)} km</span></div>
-    <div class="ssd-stat"><span class="k">Velocity at MECO</span><span class="v">${ks(result.final_vt_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Orbital speed needed</span><span class="v">${ks(result.v_orb_circ_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Δv used</span><span class="v">${ks(result.dv_used_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Gravity loss</span><span class="v">${ks(result.dv_grav_loss_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Drag loss</span><span class="v">${ks(result.dv_drag_loss_kms)} km/s</span></div>
+    ${result.reason ? `<div class="ssd-lockmsg" style="color:var(--c-text-2)">${result.reason}</div>` : ''}
+    ${insertionRows}
+    <div class="ssd-stat"><span class="k">Δv used (gravity · drag · steering losses)</span><span class="v">${ks(result.dv_used_kms)} km/s
+      <span style="color:var(--c-text-mut);font-weight:500">(${ks(result.dv_grav_loss_kms)} · ${ks(result.dv_drag_loss_kms)} · ${ks(result.dv_steer_loss_kms)})</span></span></div>
     ${(result.v_rotation_kms ?? 0) > 0.001 ? `<div class="ssd-stat"><span class="k">Rotation assist</span><span class="v" style="color:var(--c-good)">+${ks(result.v_rotation_kms)} km/s @ ${(result.launch_lat_deg ?? 0).toFixed(0)}°</span></div>` : ''}
     <div class="ssd-stat"><span class="k">Peak acceleration</span><span class="v"${(result.max_accel_g ?? 0) > (result.accel_limit_g ?? 99) + 0.1 ? ' style="color:var(--c-warn)"' : ''}>${(result.max_accel_g ?? 0).toFixed(1)} g${result.accel_limit_g ? ` / ${result.accel_limit_g} g cap` : ''}</span></div>
-    <div class="ssd-stat"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>
+    <div class="ssd-stat"><span class="k">Max-Q</span><span class="v"${(result.max_q_kPa ?? 0) > (result.q_limit_kPa || 1e9) ? ' style="color:var(--c-bad)"' : ''}>${(result.max_q_kPa ?? 0).toFixed(0)} kPa${result.q_limit_kPa ? ` / ${result.q_limit_kPa} limit` : ''}</span></div>
+    ${loadsRow(result)}
     <div class="ssd-stat"><span class="k">Max Mach (in atmosphere)</span><span class="v">${(result.max_mach ?? 0).toFixed(1)}</span></div>
     <div class="ssd-stat"${stagingRows ? '' : ' style="border:none"'}><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>
     ${stagingRows}`;
+  showBeyond(result);
+  showProfile(result);
+}
+
+function loadsRow(result) {
+  const L = result.loads;
+  if (!L || !WIND_PROFILES[result.body_id] || !(result.max_q_kPa > 0.05)) return '';
+  const over = L.max_qalpha_kPa_deg > L.limit_kPa_deg;
+  const col = /bending/i.test(result.reason || '') ? 'var(--c-bad)' : over ? 'var(--c-warn)' : '';
+  return `<div class="ssd-stat"><span class="k">Max bending load q·α (${(WIND_SETTINGS[L.wind]?.name || L.wind).toLowerCase()} winds)</span>
+    <span class="v"${col ? ` style="color:${col}"` : ''}>${L.max_qalpha_kPa_deg.toFixed(0)} / ${L.limit_kPa_deg.toFixed(0)} kPa·°
+    <span style="color:var(--c-text-mut);font-weight:500">α ${L.alpha_deg.toFixed(1)}° @ ${L.alt_km.toFixed(1)} km</span></span></div>`;
+}
+
+function showProfile(result) {
+  const card = $('ssd-profile-card');
+  card.hidden = !(result.trajectory?.length > 2);
+  if (!card.hidden) renderAscentCharts($('ssd-profile'), result);
+}
+
+// "Where can it go from here?" — the mission kernel's patched-conic Hohmann
+// budgets against the Δv still aboard (spaceship-designer-mission.js).
+const REACH = {
+  orbit: ['✓ orbit', 'var(--c-good)'], aero: ['✓ with aerocapture', 'var(--c-accent)'],
+  flyby: ['flyby only', 'var(--c-warn)'], no: ['out of reach', 'var(--c-text-mut)'],
+};
+function showBeyond(result) {
+  const card = $('ssd-beyond-card');
+  const m = missionFromResult(design, result);
+  if (!m) { card.hidden = true; return; }
+  card.hidden = false;
+  $('ssd-beyond-dv').textContent = m.dvLeftKms.toFixed(2) + ' km/s left';
+  const days = (d) => d == null ? '—' : d < 2 ? (d * 24).toFixed(0) + ' h' : d < 60 ? d.toFixed(1) + ' d' : d.toFixed(0) + ' d';
+  const rows = m.options.map((x) => {
+    const [txt, col] = REACH[x.reach];
+    const legs = x.kind === 'escape' ? x.depart_kms.toFixed(2)
+      : `${x.depart_kms.toFixed(2)} + ${x.capture_kms.toFixed(2)}${x.aero ? '<sup>a</sup>' : ''}`;
+    return `<tr><td>${x.name}</td><td class="n">${legs}</td><td class="n">${x.total_kms.toFixed(2)}</td>
+      <td class="n">${days(x.tof_days)}${x.window_days ? `<br><span class="mut">every ${(x.window_days / 30.44).toFixed(0)} mo</span>` : ''}</td>
+      <td style="color:${col};font-weight:700">${txt}</td></tr>`;
+  }).join('');
+  $('ssd-beyond').innerHTML = `
+    <table class="ssd-table">
+      <thead><tr><th>Destination</th><th class="n">Depart + capture (km/s)</th><th class="n">Total</th><th class="n">Transit · window</th><th>Reach</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="ssd-note">From a ${m.parkAltKm.toFixed(0)} km parking orbit: ideal Hohmann transfers between circular,
+      coplanar orbits (patched conics), capture into a low orbit at the destination. Ignored: plane changes and launch
+      inclination, finite-burn losses, the planets' eccentric orbits. <sup>a</sup> The destination has an atmosphere —
+      aerobraking can replace most of the capture burn.</div>`;
 }
 
 // ── Hangar (save / load) ─────────────────────────────────────────────────────
@@ -833,7 +1093,7 @@ async function refreshHangar() {
 
 function loadShip(data) {
   if (!data || !data.stages) { toast('Could not read design', true); return; }
-  design = JSON.parse(JSON.stringify(data));
+  design = normalizeDesign(data);
   hydrateControls();
   refresh();
   toast('Loaded "' + (design.name || 'design') + '"');
@@ -862,6 +1122,9 @@ function hydrateControls() {
   fillSelect($('ssd-body'), LAUNCH_BODY_OPTIONS, design.bodyId);
   $('ssd-alt').value = design.targetAltKm || 200;
   $('ssd-lat').value = design.launchLatitude ?? 28.5;
+  $('ssd-lon').value = design.launchLongitude ?? -80.6;
+  fillSelect($('ssd-wind'), Object.values(WIND_SETTINGS), design.windId || 'typical');
+  fillSiteSelect();
   updateLatNote();
   fillSelect($('ssd-nose'), Object.values(NOSECONE_TYPES), design.payload?.nosecone || 'ogive');
   $('ssd-payload').value = design.payload?.mass_kg ?? 15000;
@@ -879,10 +1142,25 @@ function hydrateControls() {
 // ── Wire events ──────────────────────────────────────────────────────────────
 function wire() {
   // Top-level controls.
-  ['ssd-name', 'ssd-body', 'ssd-alt', 'ssd-lat', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
+  ['ssd-name', 'ssd-alt', 'ssd-lat', 'ssd-lon', 'ssd-wind', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
    'ssd-cockpit', 'ssd-crew', 'ssd-windows', 'ssd-fin', 'ssd-fincount',
    'ssd-livery', 'ssd-pattern'].forEach((id) => {
     $(id).addEventListener('input', () => { readControls(); updateLatNote(); refresh(); });
+  });
+  // A new body brings its own sites: move to its default site (a Cape
+  // Canaveral on Mars is nobody's intent). Bodies without presets keep the
+  // current coordinates.
+  $('ssd-body').addEventListener('input', () => {
+    const site = defaultLaunchSite($('ssd-body').value);
+    if (site.id) applySite(site);
+    fillSiteSelect();
+    readControls(); updateLatNote(); refresh();
+  });
+  $('ssd-site').addEventListener('input', () => {
+    const site = (LAUNCH_SITES[$('ssd-body').value] || []).find((x) => x.id === $('ssd-site').value);
+    if (!site) return;                       // "Custom" — leave the sliders where they are
+    applySite(site);
+    readControls(); updateLatNote(); refresh();
   });
 
   // Stage controls (event delegation on the container).
@@ -891,21 +1169,17 @@ function wire() {
     const i = +t.dataset.i, k = t.dataset.k;
     if (Number.isNaN(i) || !k) return;
     let val = t.value;
-    if (k !== 'engineId' && k !== 'propellantId') val = +val;
+    if (k !== 'engineId') val = +val;
     design.stages[i][k] = val;
     if (k === 'throttle') {
       const lab = $('ssd-stages').querySelector(`[data-thrval="${i}"]`);
       if (lab) lab.textContent = Math.round(val * 100) + '%';
     }
-    // When picking an engine, default its propellant to match.
-    if (k === 'engineId') {
-      const e2 = ENGINE_CATALOG[val];
-      if (e2?.propellant) {
-        design.stages[i].propellantId = e2.propellant;
-        const sel = $('ssd-stages').querySelector(`select[data-k="propellantId"][data-i="${i}"]`);
-        if (sel) sel.value = e2.propellant;
-      }
-    }
+    // The engine fixes the propellant (normalizeDesign is the one rule).
+    if (k === 'engineId') design.stages[i].propellantId = engineFor(val).propellant;
+    // Any stage edit can change every bay (interstages + overhang depend on
+    // neighbours), so refresh all readouts in place without re-rendering inputs.
+    $('ssd-stages').querySelectorAll('[data-bay]').forEach((el) => { el.innerHTML = engineBayHtml(+el.dataset.bay); });
     refresh();
   });
   $('ssd-stages').addEventListener('click', (e) => {
@@ -923,7 +1197,7 @@ function wire() {
     const top = design.stages[design.stages.length - 1];
     design.stages.push({
       diameter_m: Math.max(1.5, top.diameter_m * 0.7), length_m: 8,
-      engineId: top.engineId, engineCount: 1, propellantId: top.propellantId,
+      engineId: top.engineId, engineCount: 1, propellantId: engineFor(top.engineId).propellant,
       fillFrac: 0.8, dryFrac: 0.1, throttle: 1,
     });
     renderStages(); refresh();
@@ -951,6 +1225,7 @@ function wire() {
     liveProp = false; renderPropStatic();
     $('hud-alt').textContent = '0 km'; $('hud-vel').textContent = '0.00 km/s';
     $('hud-thr').textContent = '0%'; $('hud-thrust').textContent = '0.00 MN'; $('ssd-phase').textContent = '';
+    $('hud-track').textContent = '—'; $('ssd-warp').hidden = true;
   });
   $('ssd-save').addEventListener('click', doSave);
 }
@@ -963,10 +1238,18 @@ function wire() {
       $('hud-vel').textContent = (s.vKms ?? 0).toFixed(2) + ' km/s';
       $('hud-thr').textContent = Math.round((s.throttle ?? 0) * 100) + '%';
       $('hud-thrust').textContent = (s.thrustMN ?? 0).toFixed(2) + ' MN';
+      $('hud-track').textContent = s.pitchDeg != null
+        ? `${s.pitchDeg.toFixed(0)}° · ${Math.max(0, s.downrangeKm ?? 0).toFixed((s.downrangeKm ?? 0) >= 100 ? 0 : 1)} km` : '—';
+      const warp = $('ssd-warp');
+      warp.hidden = !(s.rate > 1.05);
+      if (s.rate > 1.05) warp.textContent = `playback ×${s.rate.toFixed(s.rate < 10 ? 1 : 0)} · T+${(s.t ?? 0).toFixed(0)} s`;
       if (s.mach !== undefined) updateAeroLive(s);
       if (s.isp !== undefined) updatePropLive(s);
     },
-    onPhase: (p) => { $('ssd-phase').textContent = p === 'idle' ? '' : p.replace('-', ' '); },
+    onPhase: (p) => {
+      $('ssd-phase').textContent = p === 'idle' ? '' : p.replace('-', ' ');
+      if (p === 'idle' || p === 'meco') $('ssd-warp').hidden = true;
+    },
   });
 
   hydrateControls();
@@ -1015,7 +1298,14 @@ function wire() {
       const poleD = { ...defaultDesign(), launchLatitude: 90 };
       const eq = runAscent(eqD), pole = runAscent(poleD);
       checks.push(['rotation assist > 0', r.v_rotation_kms > 0]);
-      checks.push(['equator beats pole', (eq.final_vt_kms - eq.v_orb_circ_kms) > (pole.final_vt_kms - pole.v_orb_circ_kms)]);
+      // Both now stop at circular speed; the rotation assist shows up as Δv LEFT.
+      checks.push(['equator beats pole', eq.remaining_dv_kms > pole.remaining_dv_kms]);
+      // Guided insertion: no airless overshoot to escape, honest failures.
+      const moon = runAscent({ ...defaultDesign(), bodyId: 'moon' });
+      checks.push(['moon: orbit, not escape', moon.status === 'orbit' && Number.isFinite(moon.orbit.apo_km)]);
+      checks.push(['venus: no liftoff against 92 bar', runAscent({ ...defaultDesign(), bodyId: 'venus' }).status === 'no-liftoff']);
+      const mission = missionFromResult(defaultDesign(), r);
+      checks.push(['mission budgets present', !!mission && mission.options.some((x) => x.id === 'moon')]);
       checks.push(['accel capped at limit', r.max_accel_g <= r.accel_limit_g + 0.05]);
       checks.push(['traj carries throttle', r.trajectory.every((p) => Number.isFinite(p.throttle))]);
       return { ok: checks.every((c) => c[1]), checks };

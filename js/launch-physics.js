@@ -458,6 +458,15 @@ export function simulateAscent({
                 coasting:  coastingNow,
                 throttle:  throttle_cmd,
                 dv_used_kms: (staged ? dv_used_integral_ms : ve * Math.log(m0_ref / Math.max(m, m_dry))) / 1000,
+                // Attitude + ground track (additive, 2026-10 — the Space Ship
+                // Designer flies its 3D rocket on these). pitch_deg is the
+                // COMMANDED thrust pitch above the local horizontal (where the
+                // vehicle points), not the flight-path angle. downrange_km is
+                // measured over the ROTATING surface: the inertial angle minus
+                // the angle the launch site itself has turned through.
+                pitch_deg:    pitch * 180 / Math.PI,
+                fpa_deg:      fpa * 180 / Math.PI,
+                downrange_km: (theta - (v_rot_ms / R) * (t + dt_s)) * R / 1000,   // theta already holds this step
             });
         }
         t += dt_s;
