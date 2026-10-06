@@ -166,7 +166,7 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 <script type="module">
 // ── Auth gate: superadmin only ──────────────────────────────────────────────
 import { auth } from './js/auth.js';
-import { PIPELINES, CATEGORIES, pipelinesByCategory, HEARTBEAT_PIPELINES } from './js/pipeline-registry.js';
+import { PIPELINES, CATEGORIES, pipelinesByCategory, HEARTBEAT_PIPELINES, isFallbackSource } from './js/pipeline-registry.js';
 // EARTH_OBS_LAYERS is the single source of truth for which NASA GIBS
 // products earth.html renders. Status page imports it directly so adding
 // a layer there auto-registers a probe row here.
@@ -318,6 +318,8 @@ function _rtHealth(row, spec) {
     const ageMin = Math.round((Date.now() - new Date(row.last_success_at).getTime()) / 60_000);
     const streak = Number(row.consecutive_fail || 0);
     if (streak >= 3 || ageMin > spec.critMin) return { color:'#ff5555', label:'critical' };
+    // Succeeding on a fallback upstream is not healthy (isFallbackSource header).
+    if (isFallbackSource(spec.key, row.last_source)) return { color:'#ffd700', label:'degraded · fallback source' };
     if (streak >= 1 || ageMin > spec.warnMin) return { color:'#ffd700', label:'stale' };
     return { color:'#4eff91', label:'healthy' };
 }

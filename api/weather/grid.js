@@ -44,8 +44,17 @@
  *     fetched_at:  "2025-…Z",
  *     age_seconds: 1234,
  *     grid:        { w: 72, h: 36, deg: 5 },    // null for legacy rows
+ *     freshness:   "live" | "stale",            // "stale" = a FALLBACK upstream
+ *     note?:       "fallback-source: …",        // present only when stale
  *     data:        [ { current: { temperature_2m, … } }, … ]   // 2592 items
  *   }
+ *
+ * `freshness` is about the SOURCE, not the age (age is `age_seconds`). A frame
+ * from the MET Norway safety net is 648 points at 10° bilinear-upsampled to
+ * 72×36, and it is a 200 like any other, so without this flag status.html
+ * scored it healthy for a month (js/pipeline-registry.js `isFallbackSource`,
+ * the ONE copy of the rule). CLAUDE.md §8: a route that degrades to a fallback
+ * says `freshness: 'stale'`.
  *
  * Range response shape:
  *   {
@@ -65,6 +74,7 @@
  */
 
 import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js';
+import { isFallbackSource } from '../../js/pipeline-registry.js';
 
 export const config = { runtime: 'edge' };
 
@@ -206,11 +216,14 @@ function projectRow(row, trim = false) {
             grid = { w, h, deg: 180 / h };
         }
     }
+    const fallback = isFallbackSource('weather_grid', row.source);
     return {
         source:      rawSource,
         fetched_at:  row.fetched_at,
         age_seconds: ageSec,
         grid,
+        freshness:   fallback ? 'stale' : 'live',
+        ...(fallback ? { note: `fallback-source: ${rawSource} (the primary upstream failed for this frame)` } : {}),
         data:        trim ? trimRowForRange(row.payload) : row.payload,
     };
 }

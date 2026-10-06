@@ -1,0 +1,70 @@
+{
+ "sizes": {
+  "normals": {
+   "bytes": 228994,
+   "deflate": 144989
+  },
+  "quantiles": {
+   "bytes": 980628,
+   "deflate": 691528
+  },
+  "records": {
+   "bytes": 2271474,
+   "deflate": 1222310
+  },
+  "hourly": {
+   "bytes": 182290,
+   "deflate": 81768
+  }
+ },
+ "harness": {
+  "global_mean_tmean_normal_C": 14.387,
+  "reference_C3S_1991_2020_C": 14.38
+ },
+ "quantile_fit_rms_K": {
+  "p01": 0.674,
+  "p05": 0.514,
+  "p10": 0.468,
+  "p33": 0.416,
+  "p50": 0.407,
+  "p67": 0.405,
+  "p90": 0.443,
+  "p95": 0.481,
+  "p99": 0.619
+ },
+ "quantile_order_splithalf_cv_rms_K": {
+  "N2": {
+   "p01": 0.97,
+   "p10": 0.698,
+   "p50": 0.605,
+   "p90": 0.634,
+   "p99": 0.826
+  },
+  "N3": {
+   "p01": 0.954,
+   "p10": 0.661,
+   "p50": 0.569,
+   "p90": 0.61,
+   "p99": 0.824
+  },
+  "N4": {
+   "p01": 0.956,
+   "p10": 0.65,
+   "p50": 0.562,
+   "p90": 0.61,
+   "p99": 0.831
+  },
+  "windowed_pm7": {
+   "p01": 1.134,
+   "p10": 0.739,
+   "p50": 0.633,
+   "p90": 0.701,
+   "p99": 0.973
+  }
+ },
+ "quantile_crossings_frac": 0.00118,
+ "record_below_p99_frac": 0.01205,
+ "record_above_p01_frac": 0.01466,
+ "quantisation_max_abs_K": 0.0244,
+ "land_cells": 895
+}
