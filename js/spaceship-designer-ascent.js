@@ -30,7 +30,40 @@
  * (coasted to 470–540 km on four worlds) and a proportional apoapsis hold
  * (escaped every airless world, and re-entered on Earth at Mach 20). The
  * search is deterministic and costs ~15 runs of a few ms each.
- *   coast       unpowered, prograde attitude, up to apoapsis.
+ *
+ * WITH AIR THERE IS A SECOND FAMILY, and it usually wins (2026-10): a pitch
+ * KICK at V_KICK_MS and then a ZERO-α GRAVITY TURN — the attitude follows the
+ * velocity, so the stack meets the air nose-first through max-Q. The cosine
+ * program kept the default rocket within 2° of vertical up to 12 km (real
+ * launchers are well into the turn by max-Q): 1.33 km/s of steering loss and
+ * 9.93 km/s to LEO, against 0.84 and 9.04 for the turn. The optimiser flies
+ * BOTH families and keeps the better; the cosine one still wins in a strong
+ * headwind (a steeper climb meets less q) and on airless worlds.
+ *   An open-loop gravity turn is SENSITIVE to its kick (orbit for ~2.5–3.2°
+ * on the default rocket; flatter breaks up at max-Q, steeper runs dry), so the
+ * kick scan is dense (KICK_SCAN_N) — read the note at KICK_BOUNDS.
+ *
+ * THE WIND (spaceship-designer-wind.js) adds the loads that decide real
+ * launch days: q·α, the bending load. The steering wind-biases into the air it
+ * has MEASURED (a 2.5 s loop), switched in with dynamic pressure (at low q a
+ * headwind would "need" 19° of pitch-over and the turn ran away flat), with
+ * only PARTIAL in-plane relief (LOAD_RELIEF: full relief in a headwind is a
+ * flattening runaway — measured), a bounded yaw into the crosswind (a cosine
+ * thrust loss), and LOAD-LIMITED commands (never more than 80 % of the q·α
+ * limit, never more than ALPHA_MAX in real air — the don't-sink guard once
+ * stood a slow upper stage on its tail at q = 28 kPa). What the loop cannot
+ * fly out — shear and gusts — is the α it reports; q·α past
+ * Q_BREAKUP_FACTOR × the limit is a bending breakup, past the limit itself an
+ * orbit a range would have scrubbed (`loads.exceeded`).
+ *
+ *   coast       unpowered, prograde attitude, up to apoapsis. If the burn
+ *               reached the target apoapsis while at PERIAPSIS (a flat
+ *               gravity turn often does — it is a Hohmann-like insertion) and
+ *               that periapsis is clear of the air, it coasts the half orbit
+ *               up to the real apoapsis; vr ≤ 0 used to fire the burn on the
+ *               wrong side of the orbit. Vacuum coast steps grow to
+ *               COAST_DT_MAX and use RK4 (first-order Euler walked a periapsis
+ *               12 km at that step).
  *   circularize ignites so the burn straddles apoapsis (t_to_apo ≤ t_burn/2)
  *               and steers to null the radial rate until the speed reaches
  *               circular — the orbit's periapsis rises to meet the apoapsis.
@@ -51,8 +84,9 @@
  * The force model (thrust F = F_vac − pₐAₑ, governors, Mach-dependent drag
  * against co-rotating air, launch-site rotation, staging with a brief coast)
  * is the staged path's, transcribed — only the guidance and the reporting are
- * new. Integration is semi-implicit (symplectic) Euler at dt = 0.1 s, which
- * holds orbital energy over the coast; the node gate pins the drift.
+ * new — plus the WIND (air-relative speed now includes it). Integration is
+ * semi-implicit Euler at dt = 0.1 s through powered flight and the air, and
+ * RK4 at up to COAST_DT_MAX on vacuum coasts.
  *
  * Loss accounting (textbook): Δv_used = (v_final − v_rot) + ∫g·sinγ dt
  * + ∫D/m dt + steering, with the gravity integral over the WHOLE flight (on a
@@ -60,6 +94,7 @@
  */
 
 import { atmosphericDensity, atmosphericPressure, speedOfSound, surfaceRotationSpeed } from './launch-physics.js';
+import { windAt, makeGustField, steeringLag, seedFrom, QALPHA_LIMIT_KPA_DEG, DEFAULT_WIND } from './spaceship-designer-wind.js';
 
 const G0 = 9.80665;
 export const Q_BREAKUP_FACTOR = 1.5;      // ultimate / limit load — the usual 1.4–1.5 structural factor
@@ -68,6 +103,17 @@ const HOLD_S = 6;                         // seconds on the pad before "no lifto
 // of it. Without this the turn optimiser found the cheapest "orbit" was a 4 km
 // skim over Mercury, and a periapsis grazing the 100 km line over Earth.
 export const TARGET_FRACTION = 0.9;
+// Gravity turn (worlds with air): the pitch-over starts once the vehicle is
+// moving through the air at V_KICK_MS, takes KICK_S, and from then on the
+// attitude FOLLOWS the air-relative velocity (zero angle of attack) — the
+// loads come only from what the steering loop cannot follow (wind module).
+export const V_KICK_MS = 50;
+const KICK_S = 8;
+const ALPHA_MAX = (15 * Math.PI) / 180;   // controllable angle of attack in air
+const COAST_DT_MAX = 2;                   // s — RK4 there: metres per half orbit
+const Q_BIAS_PA = 4000;
+const LOAD_RELIEF = 0.5;                  // share of the in-plane wind α the steering gives back                   // q at which wind steering is fully in
+const YAW_MAX = (15 * Math.PI) / 180;    // wind-bias yaw authority
 
 /** Osculating 2D orbit from polar state (SI). apo_r is Infinity when unbound. */
 export function orbitElements(mu, r, vr, vt) {
@@ -108,7 +154,8 @@ function turnBounds(body, target_m) {
 
 /** Rank a run: an orbit beats everything (by Δv left), then how close it came. */
 function score(res) {
-    if (res.status === 'orbit') return 1e6 + res.remaining_dv_kms * 1000;
+    const loadsOut = res.loads?.exceeded ? 3e5 : 0;       // a range would scrub it: prefer any in-envelope flight
+    if (res.status === 'orbit') return 1e6 - loadsOut + res.remaining_dv_kms * 1000;
     if (res.status === 'low-orbit') return 5e5 + res.orbit.peri_km;
     if (res.status === 'breakup' || res.status === 'no-liftoff') return -1e6 + (res.max_alt_km || 0);
     const vf = res.final_vt_kms / Math.max(1e-6, res.v_orb_circ_kms);
@@ -123,34 +170,63 @@ function score(res) {
  */
 export function optimizedAscent({ body, vehicle, target_alt_km = 200 }) {
     const target_m = target_alt_km * 1000;
-    const [lo, hi] = turnBounds(body, target_m);
     const runs = new Map();
-    const run = (h) => {
-        const key = Math.round(h);
-        if (!runs.has(key)) runs.set(key, guidedAscent({ body, vehicle: cloneVehicle(vehicle), target_alt_km, turn_alt_m: key }));
+    const fly = (profile, x0) => {
+        const x = profile === 'cosine' ? Math.round(x0) : +x0.toFixed(4);   // canonical: the cache key IS the run
+        const key = profile + ':' + (profile === 'cosine' ? Math.round(x) : x.toFixed(4));
+        if (!runs.has(key)) {
+            runs.set(key, guidedAscent({ body, vehicle: cloneVehicle(vehicle), target_alt_km, profile, record: false,
+                turn_alt_m: profile === 'cosine' ? Math.round(x) : null, kick_deg: profile === 'cosine' ? null : x }));
+        }
         return runs.get(key);
     };
-    // Coarse scan (log-spaced): 9 points.
-    const N = 9;
-    let best = null, bestH = lo, bestI = 0;
-    const hs = [];
-    for (let i = 0; i < N; i++) {
-        const h = lo * Math.pow(hi / lo, i / (N - 1));
-        hs.push(h);
-        const res = run(h);
-        if (!best || score(res) > score(best)) { best = res; bestH = h; bestI = i; }
+    // Every profile is a 1-D search: a coarse log-spaced scan, then a
+    // golden-section refine (in log x) between the winner's neighbours.
+    const search = (profile, lo, hi, N = 9) => {
+        const xs = [];
+        let best = null, bestX = lo, bestI = 0;
+        for (let i = 0; i < N; i++) {
+            const x = lo * Math.pow(hi / lo, i / (N - 1));
+            xs.push(x);
+            const res = fly(profile, x);
+            if (!best || score(res) > score(best)) { best = res; bestX = x; bestI = i; }
+        }
+        let a = Math.log(xs[Math.max(0, bestI - 1)]), b = Math.log(xs[Math.min(N - 1, bestI + 1)]);
+        const gr = (Math.sqrt(5) - 1) / 2;
+        let c = b - gr * (b - a), d = a + gr * (b - a);
+        for (let k = 0; k < 8; k++) {
+            const fc = score(fly(profile, Math.exp(c))), fd = score(fly(profile, Math.exp(d)));
+            if (fc >= fd) { b = d; d = c; c = b - gr * (b - a); } else { a = c; c = d; d = a + gr * (b - a); }
+        }
+        for (const x of [Math.exp(c), Math.exp(d)]) {
+            const res = fly(profile, x);
+            if (score(res) > score(best)) { best = res; bestX = x; }
+        }
+        return { best, x: bestX };
+    };
+    const [lo, hi] = turnBounds(body, target_m);
+    let pick = search('cosine', lo, hi);
+    // With air there is a second family: a pitch kick and a zero-α gravity turn.
+    if (body.rho0_kg_m3 > 1e-6) {
+        const gt = search('gravity-turn', KICK_BOUNDS[0], KICK_BOUNDS[1], KICK_SCAN_N);
+        if (score(gt.best) > score(pick.best)) pick = gt;
     }
-    // Golden-section refine (in log h) between the winner's neighbours.
-    let a = Math.log(hs[Math.max(0, bestI - 1)]), b = Math.log(hs[Math.min(N - 1, bestI + 1)]);
-    const gr = (Math.sqrt(5) - 1) / 2;
-    let c = b - gr * (b - a), d = a + gr * (b - a);
-    for (let k = 0; k < 8; k++) {
-        const fc = score(run(Math.exp(c))), fd = score(run(Math.exp(d)));
-        if (fc >= fd) { b = d; d = c; c = b - gr * (b - a); } else { a = c; c = d; d = a + gr * (b - a); }
-    }
-    for (const [h, res] of runs) if (score(res) > score(best)) { best = res; bestH = h; }
-    return { ...best, turn_alt_km: bestH / 1000, turn_search: runs.size };
+    // Re-fly the winner WITH its trajectory (deterministic: same numbers).
+    const best = guidedAscent({ body, vehicle: cloneVehicle(vehicle), target_alt_km, profile: pick.best.profile,
+        turn_alt_m: pick.best.profile === 'cosine' ? Math.round(pick.x) : null,
+        kick_deg: pick.best.profile === 'cosine' ? null : pick.x });
+    return { ...best,
+             turn_alt_km: best.profile === 'cosine' ? pick.x / 1000 : null,
+             kick_deg: best.profile === 'gravity-turn' ? pick.x : null,
+             turn_search: runs.size };
 }
+// Degrees. An open-loop gravity turn is SENSITIVE: the default rocket reaches
+// orbit only for kicks in ~2.5–3.2° (a ratio of 1.28) — below, it lofts and
+// runs dry; above, it flattens into thick air and exceeds max-Q. The scan's
+// step ratio (12/0.3)^(1/14) = 1.30 is set so it cannot step over a window
+// like that; widen the bounds and you must add points.
+const KICK_BOUNDS = [0.3, 12];
+const KICK_SCAN_N = 15;
 
 function cloneVehicle(v) {
     return { ...v, stages: v.stages.map((s) => ({ ...s })) };
@@ -163,7 +239,8 @@ function cloneVehicle(v) {
  *   launch_lat_deg, accel_limit_g, q_limit_kPa, throttle_min, stage_coast_s },
  *   target_alt_km
  */
-export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = null, dt_s = 0.1, max_t_s = 8000 }) {
+export function guidedAscent({ body, vehicle, target_alt_km = 200, profile = 'cosine', turn_alt_m = null, kick_deg = 3,
+                              dt_s = 0.1, max_t_s = 8000, record = true }) {
     const R = body.R_km * 1000, mu = body.mu_km3s2 * 1e9;
     const target_m = target_alt_km * 1000;
     const atmTop_km = atmosphereTopKm(body);
@@ -183,6 +260,17 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
 
     // Gravity-turn horizon: the optimiser's choice, or a per-atmosphere default.
     const hFull = turn_alt_m ?? defaultTurnAlt(body);
+    const gravityTurn = profile === 'gravity-turn';
+    const kickRad = ((kick_deg ?? 3) * Math.PI) / 180;
+    let kickT0 = null, kickLocked = false;
+
+    // The air: mean wind + a frozen gust field + the steering loop's lag.
+    const windSetting = vehicle.wind?.setting ?? DEFAULT_WIND;
+    const air = { bodyId: body.id, setting: windSetting,
+                  field: makeGustField(vehicle.wind?.seed ?? seedFrom(`${body.id}:${windSetting}`)) };
+    const lag = steeringLag(vehicle.wind?.tau_s);
+    const qaLimit = vehicle.qalpha_limit_kPa_deg ?? QALPHA_LIMIT_KPA_DEG;
+    let maxQA = 0, maxQAAlt = 0, maxQAT = 0, maxQAAlpha = 0, maxWind = 0;
 
     let r = R, theta = 0, vr = 0, vt = vRot;
     let m = payload + stages.reduce((a, s) => a + s.prop + s.dry, 0);
@@ -196,11 +284,16 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
     const staging = [];
     const traj = [];
     let lastPitch = Math.PI / 2;
+    let lastSampledPhase = null;
 
     const activeStage = () => (si < stages.length ? stages[si] : null);
     const thrustAt = (st, p_a) => Math.max(0, st.F_vac - p_a * st.Ae);
 
     while (t < max_t_s) {
+        // Step: dt_s, except on a vacuum coast far from the circularisation
+        // burn, where it grows to COAST_DT_MAX (a half-orbit coast to a real
+        // apoapsis is ~45 min — 27 000 steps at 0.1 s per optimiser trial).
+        let h = dt_s;
         const alt = r - R;
         const v = Math.hypot(vr, vt);
         const fpa = v > 1e-9 ? Math.atan2(vr, vt) : Math.PI / 2;
@@ -211,8 +304,13 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
         const rho = atmosphericDensity(body, alt);
         const p_a = atmosphericPressure(body, alt);
         const vAir = vRot * (r / R);
-        const vtRel = vt - vAir;
-        const vRel = Math.hypot(vr, vtRel);
+        const inAir = rho > 1e-7;
+        const w = inAir ? windAt(air, alt) : { along: 0, cross: 0, speed: 0, gustAlong: 0, gustCross: 0 };
+        const wf = lag.step(w, h);                            // what the steering flies into
+        if (w.speed > maxWind && rho > 1e-4) maxWind = w.speed;
+        const vtRel = vt - vAir - w.along;
+        const vRelPlane = Math.hypot(vr, vtRel);
+        const vRel = Math.hypot(vRelPlane, w.cross);
         const q = 0.5 * rho * vRel * vRel;
         if (q > maxQ) { maxQ = q; maxQAlt = alt / 1000; maxQT = t; }
         const mach = aSound > 0 ? vRel / aSound : 0;
@@ -251,7 +349,16 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
                     const tBurn = need / aThr;
                     const gEff = g - (vt * vt) / r;
                     const tToApo = gEff > 1e-6 ? vr / gEff : Infinity;
-                    if (vr <= 0 || tToApo <= tBurn / 2) { phase = 'circularize'; circStart = t; burns++; }
+                    // vr ≤ 0 means "at or past apoapsis" — unless the burn ended
+                    // at PERIAPSIS (a flat ascent reaching the target apoapsis
+                    // while still low): then, if that periapsis is already clear
+                    // of the air, coast the half orbit up to the real apoapsis.
+                    const atPeri = vr <= 0 && el.apo_r - r > 0.25 * (el.apo_r - el.peri_r) && el.peri_r - R > atmTop_km * 1000;
+                    if (!atPeri && (vr <= 0 || tToApo <= tBurn / 2)) { phase = 'circularize'; circStart = t; burns++; }
+                    else if (rho < 1e-9) {
+                        const slack = atPeri ? 0.25 * period(mu, el.a) : tToApo - tBurn / 2;
+                        h = Math.min(COAST_DT_MAX, Math.max(dt_s, slack / 20));
+                    }
                 }
             }
         }
@@ -264,7 +371,39 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
         // ── Attitude ────────────────────────────────────────────────────────
         let pitch;
         const aThrNominal = st ? (thrustAt(st, p_a) * st.throttle) / m : 0;
-        if (phase === 'ascent') {
+        // Air-relative flight-path angle against the wind the loop has caught up
+        // with — the wind term switching in WITH DYNAMIC PRESSURE (load relief).
+        // At low q the vehicle flies the ordinary ground-relative turn: a 17 m/s
+        // headwind at 50 m/s would otherwise "need" 19° of pitch-over and the
+        // turn runs away flat (measured: q 53 kPa at 5 km).
+        // In plane only PARTIAL relief (LOAD_RELIEF of the wind's α): the full
+        // zero-α turn in a headwind points the nose lower, which flattens the
+        // path, which raises q — a runaway (measured: every kick broke up at
+        // 7 km in a 72 m/s headwind). The ground-relative turn is the shape;
+        // the wind only leans on it.
+        const bias = smooth01(q / Q_BIAS_PA);
+        const vtRelF = vt - vAir - bias * wf.along;
+        const fpaGround = Math.atan2(vr, vt - vAir);
+        const airFpaF = fpaGround + LOAD_RELIEF * (Math.atan2(vr, vtRelF) - fpaGround);
+        if (phase === 'ascent' && gravityTurn) {
+            if (kickT0 === null && alt >= 100 && Math.hypot(vr, vtRelF) >= V_KICK_MS) kickT0 = t;
+            if (kickT0 === null) pitch = Math.PI / 2;
+            else {
+                const kickPitch = Math.PI / 2 - kickRad;
+                const f = Math.min(1, (t - kickT0) / KICK_S);
+                if (f < 1 || (!kickLocked && airFpaF > kickPitch)) pitch = Math.PI / 2 - kickRad * f;
+                else {
+                    kickLocked = true;
+                    // Zero α in the air; prograde in vacuum; blended across the upper atmosphere.
+                    const wAir = 1 - smooth01((alt / 1000 - 0.5 * atmTop_km) / Math.max(1, 0.5 * atmTop_km));
+                    pitch = wAir * airFpaF + (1 - wAir) * fpa;
+                }
+            }
+            if (vr < 0 && aThrNominal > 0) {
+                const hold = Math.asin(Math.min(1, Math.max(0, (g - vt * vt / r) / aThrNominal)));
+                pitch = Math.max(pitch, hold);
+            }
+        } else if (phase === 'ascent') {
             if (alt < 100) pitch = Math.PI / 2;
             else if (alt < hFull) pitch = (Math.PI / 2) * Math.cos((Math.PI / 2) * (alt / hFull));
             else pitch = 0;
@@ -281,7 +420,46 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
         } else {
             pitch = fpa;                                         // coasting: hold prograde
         }
+        // Load-limited guidance: never COMMAND an angle of attack the airframe
+        // cannot carry (q·α ≤ 80 % of the limit), nor more than ALPHA_MAX in
+        // any real air (a finned stack is not controllable past that; the
+        // cosine program otherwise flew Mars's thin air at 62°). Without this
+        // the don't-sink guard stood a flat, slow upper stage on its tail at
+        // q = 28 kPa.
+        // Gated on the vehicle's OWN airspeed: on the pad a strong gust alone
+        // makes 200+ Pa, and clamping the attitude to it there tipped the
+        // stack over (measured).
+        if (phase !== 'coast' && q > 50 && Math.hypot(vr, vt - vAir) > 100) {
+            const aMax = Math.min(ALPHA_MAX, ((0.8 * qaLimit) / (q / 1000)) * Math.PI / 180);
+            const ref = Math.atan2(vr, vtRel);
+            pitch = Math.max(ref - aMax, Math.min(ref + aMax, pitch));
+        }
         lastPitch = pitch;
+        // Wind bias: yaw into the cross wind the loop has measured, while in air.
+        // Only once q has built (on the pad a 4 m/s breeze would "need" 76° of
+        // yaw), and bounded.
+        const vPlaneF = Math.hypot(vr, vtRelF);
+        const yaw = inAir && steersIntoWind(phase)
+            ? clampAbs(Math.atan2(-wf.cross, Math.max(1, vPlaneF)), YAW_MAX) * bias
+            : 0;
+
+        // Angle of attack: vehicle axis vs the REAL air-relative velocity (3D).
+        let alpha = 0;
+        if (vRel > 1) {
+            const ax = Math.sin(pitch) * Math.cos(yaw), at_ = Math.cos(pitch) * Math.cos(yaw), ay = Math.sin(yaw);
+            const c = (ax * vr + at_ * vtRel + ay * (-w.cross)) / vRel;
+            alpha = Math.acos(Math.max(-1, Math.min(1, c)));
+        }
+        const qAlpha = (q / 1000) * (alpha * 180 / Math.PI);       // kPa·deg
+        if (qAlpha > maxQA) { maxQA = qAlpha; maxQAAlt = alt / 1000; maxQAT = t; maxQAAlpha = alpha * 180 / Math.PI; }
+        if (leftPad && qAlpha > Q_BREAKUP_FACTOR * qaLimit) {
+            status = 'breakup';
+            reason = `Aerodynamic bending: q·α reached ${qAlpha.toFixed(0)} kPa·° at ${(alt / 1000).toFixed(1)} km `
+                + `(α ${(alpha * 180 / Math.PI).toFixed(1)}° at q ${(q / 1000).toFixed(1)} kPa) — ${Q_BREAKUP_FACTOR}× the ${qaLimit.toFixed(0)} kPa·° limit. `
+                + 'The steering could not turn into the wind fast enough.';
+            pushSample(true, { q, mach, D, Cd, rho, pitch, alpha, qAlpha, w, yaw });
+            break;
+        }
 
         // ── Thrust ──────────────────────────────────────────────────────────
         let T = 0, mdot = 0, isp = 0, throttleCmd = 0;
@@ -304,36 +482,46 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
         const twr = T > 0 ? T / (m * g) : 0;
 
         // ── Integrate (semi-implicit Euler, polar, inertial) ───────────────
-        const tr = T * Math.sin(pitch), tt = T * Math.cos(pitch);
+        const tr = T * Math.sin(pitch) * Math.cos(yaw), tt = T * Math.cos(pitch) * Math.cos(yaw);
         const ar = (tr + dr) / m - g + (vt * vt) / r;
         const at = (tt + dtn) / m - (vr * vt) / r;
-        gravLoss += g * Math.sin(fpa) * dt_s;
-        dragLoss += (D / m) * dt_s;
-        vr += ar * dt_s; vt += at * dt_s;
-        // Held down on the pad until thrust beats weight (no sinking through it).
-        if (!leftPad && r + vr * dt_s <= R) { vr = 0; } else leftPad = leftPad || (r + vr * dt_s > R + 0.5);
-        r += vr * dt_s;
-        theta += (vt / r) * dt_s;
+        gravLoss += g * Math.sin(fpa) * h;
+        dragLoss += (D / m) * h;
+        if (h > dt_s && T === 0) {
+            // Long vacuum-coast step: RK4 on the pure two-body polar equations.
+            // Semi-implicit Euler is first order in ω·h — at h = 2 s it walked a
+            // 130 km periapsis up to 142 km over a half-orbit coast (measured).
+            [r, theta, vr, vt] = rk4Coast(mu, r, theta, vr, vt, h);
+        } else {
+            vr += ar * h; vt += at * h;
+            // Held down on the pad until thrust beats weight (no sinking through it).
+            if (!leftPad && r + vr * h <= R) { vr = 0; } else leftPad = leftPad || (r + vr * h > R + 0.5);
+            r += vr * h;
+            theta += (vt / r) * h;
+        }
         maxAlt = Math.max(maxAlt, r - R);
 
         // ── Mass + staging ──────────────────────────────────────────────────
         if (T > 0 || (powered && mdot > 0)) {
-            dvUsed += (T / m) * dt_s;
-            const burn = mdot * dt_s;
+            dvUsed += (T / m) * h;
+            const burn = mdot * h;
             st.prop -= burn; m -= burn;
-            if (phase === 'circularize') circDv += (T / m) * dt_s;
+            if (phase === 'circularize') circDv += (T / m) * h;
             if (st.prop <= 0) {
                 m -= st.prop; st.prop = 0;                       // no negative propellant
                 staging.push({ stage: si + 1, t, alt_km: (r - R) / 1000, v_kms: Math.hypot(vr, vt) / 1000 });
                 si++;
                 if (si < stages.length) { m -= st.dry; coastLeft = coastAfterStaging; }
             }
-        } else if (coastLeft > 0) coastLeft -= dt_s;
+        } else if (coastLeft > 0) coastLeft -= h;
 
         // Sampled after the state update but before the clock ticks, so the
         // ground track subtracts the site's rotation over t + dt.
-        if (step % 10 === 0) pushSample(false, { T, isp, twr, accelG, throttleCmd, q, mach, D, Cd, rho, pitch, tAhead: dt_s });
-        t += dt_s; step++;
+        // Every 10th step — and at every phase change, so a 0.6 s
+        // circularisation trim still appears in the record (and the playback).
+        const phaseNow = coastLeft > 0 ? 'staging' : phase;
+        if (step % 10 === 0 || phaseNow !== lastSampledPhase) pushSample(false, { T, isp, twr, accelG, throttleCmd, q, mach, D, Cd, rho, pitch, alpha, qAlpha, w, yaw, tAhead: h });
+        t += h; step++;
 
         // ── Terminal conditions ────────────────────────────────────────────
         if (!leftPad && t >= HOLD_S) {
@@ -385,7 +573,7 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
     const vCircF = Math.sqrt(mu / r);
     return {
         body: body.name, body_id: body.id, status, reason, time_s: t,
-        guidance: 'insertion', target_alt_km, max_alt_km: maxAlt / 1000,
+        guidance: 'insertion', profile, target_alt_km, max_alt_km: maxAlt / 1000,
         // Back-compatible headline fields (the page's result card reads these).
         final_alt_km: (r - R) / 1000,
         final_vt_kms: vt / 1000,
@@ -408,11 +596,15 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
         insertion: { meco1_t: meco1, circ_start_t: circStart, circ_dv_kms: circDv / 1000, burns: meco1 != null ? burns : 1,
                      solid_overshoot: solidOvershoot },
         atmosphere_top_km: atmTop_km,
+        loads: { max_qalpha_kPa_deg: maxQA, alt_km: maxQAAlt, t_s: maxQAT, alpha_deg: maxQAAlpha,
+                 limit_kPa_deg: qaLimit, exceeded: maxQA > qaLimit, wind: windSetting, max_wind_ms: maxWind },
         remaining_dv_kms: dvRem / 1000, remaining_stages: remStages, final_mass_kg: m,
         trajectory: traj,
     };
 
     function pushSample(final, f = {}) {
+        if (!record) return;                    // optimiser trials: the score needs no trajectory
+        lastSampledPhase = coastLeft > 0 ? 'staging' : phase;
         const alt = r - R, v = Math.hypot(vr, vt);
         const el = orbitElements(mu, r, vr, vt);
         const st2 = activeStage();
@@ -428,6 +620,9 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
             dv_used_kms: dvUsed / 1000,
             pitch_deg: ((f.pitch ?? lastPitch) * 180) / Math.PI,
             fpa_deg: (Math.atan2(vr, vt) * 180) / Math.PI,
+            alpha_deg: ((f.alpha ?? 0) * 180) / Math.PI, qalpha: f.qAlpha ?? 0, yaw_deg: ((f.yaw ?? 0) * 180) / Math.PI,
+            wind_along_ms: f.w?.along ?? 0, wind_cross_ms: f.w?.cross ?? 0,
+            gust_ms: Math.hypot(f.w?.gustAlong ?? 0, f.w?.gustCross ?? 0),
             downrange_km: (theta - (vRot / R) * (t + (f.tAhead ?? 0))) * R / 1000,
             apo_km: Number.isFinite(el.apo_r) ? (el.apo_r - R) / 1000 : Infinity,
             peri_km: (el.peri_r - R) / 1000,
@@ -435,4 +630,25 @@ export function guidedAscent({ body, vehicle, target_alt_km = 200, turn_alt_m = 
             final,
         });
     }
+}
+
+function smooth01(x) {
+    const t = Math.min(1, Math.max(0, x));
+    return t * t * (3 - 2 * t);
+}
+// Attitude phases that steer into the wind (the coast holds prograde too —
+// an unpowered vehicle in air still weathervanes into it).
+function steersIntoWind(phase) { return phase === 'ascent' || phase === 'circularize' || phase === 'coast'; }
+function clampAbs(x, m) { return Math.max(-m, Math.min(m, x)); }
+function period(mu, a) { return 2 * Math.PI * Math.sqrt(Math.max(0, a) ** 3 / mu); }
+
+/** One RK4 step of unpowered, drag-free motion in polar coordinates. */
+function rk4Coast(mu, r, th, vr, vt, h) {
+    const f = (r1, vr1, vt1) => [vr1, vt1 / r1, -mu / (r1 * r1) + (vt1 * vt1) / r1, -(vr1 * vt1) / r1];
+    const k1 = f(r, vr, vt);
+    const k2 = f(r + h / 2 * k1[0], vr + h / 2 * k1[2], vt + h / 2 * k1[3]);
+    const k3 = f(r + h / 2 * k2[0], vr + h / 2 * k2[2], vt + h / 2 * k2[3]);
+    const k4 = f(r + h * k3[0], vr + h * k3[2], vt + h * k3[3]);
+    const c = (i) => (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]);
+    return [r + c(0), th + c(1), vr + c(2), vt + c(3)];
 }

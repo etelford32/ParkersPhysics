@@ -20,8 +20,9 @@
 
 import { ENGINES } from './launch-engines.js';
 import { LAUNCH_BODIES, atmosphericPressure, surfaceRotationSpeed } from './launch-physics.js';
-import { optimizedAscent, atmosphereTopKm, Q_BREAKUP_FACTOR } from './spaceship-designer-ascent.js';
+import { optimizedAscent, guidedAscent, atmosphereTopKm, Q_BREAKUP_FACTOR } from './spaceship-designer-ascent.js';
 import { missionOptions } from './spaceship-designer-mission.js';
+import { WIND_SETTINGS, DEFAULT_WIND, QALPHA_LIMIT_KPA_DEG } from './spaceship-designer-wind.js';
 
 const G0 = 9.80665;            // m/s² — standard gravity (Isp definition)
 
@@ -751,6 +752,8 @@ export function normalizeDesign(design) {
     const lon = Number(d.launchLongitude);
     d.launchLongitude = wrapLon(Number.isFinite(lon) && d.launchLongitude !== null && d.launchLongitude !== ''
         ? lon : defaultLaunchSite(d.bodyId).lon);
+    // Winds aloft (spaceship-designer-wind.js). Older drafts fly the typical profile.
+    if (!WIND_SETTINGS[d.windId]) d.windId = DEFAULT_WIND;
     return d;
 }
 
@@ -885,7 +888,11 @@ export function computeAero(design, stats = computeStats(design), body = LAUNCH_
  * The integrator is the validated one from the launch planner; we just feed it
  * design-derived parameters.
  */
-export function runAscent(design) {
+/**
+ * `opts.profile` ('cosine' | 'gravity-turn') + `turn_alt_m` / `kick_deg` fly
+ * ONE fixed ascent instead of the optimised one — for tests and comparisons.
+ */
+export function runAscent(design, opts = {}) {
     const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
     const stats = computeStats(design, body);
     if (!stats.totalWet_kg || stats.propMass_kg <= 0) {
@@ -936,6 +943,10 @@ export function runAscent(design) {
         launch_lat_deg: design.launchLatitude ?? 0,
         accel_limit_g,
         q_limit_kPa: 35,             // airframe dynamic-pressure limit (max-Q throttling)
+        qalpha_limit_kPa_deg: QALPHA_LIMIT_KPA_DEG,   // bending-load limit (wind shear + gusts)
+        // Winds aloft: the same seeded turbulence for every design on a world,
+        // so two designs are compared through the same air.
+        wind: { setting: WIND_SETTINGS[design.windId] ? design.windId : DEFAULT_WIND },
         // Legacy fields kept so non-staged readers still have something sane.
         Isp_s: ispEff,
         TWR_E: stats.liftoffThrust_kN * 1000 / (stats.totalWet_kg * G0),
@@ -944,7 +955,10 @@ export function runAscent(design) {
 
     // The designer's own guided two-burn insertion (spaceship-designer-ascent.js);
     // launch-physics.simulateAscent stays the planners' calibrated integrator.
-    const result = optimizedAscent({ body, vehicle, target_alt_km: design.targetAltKm || 200 });
+    const target_alt_km = design.targetAltKm || 200;
+    const result = opts.profile
+        ? guidedAscent({ body, vehicle, target_alt_km, profile: opts.profile, turn_alt_m: opts.turn_alt_m ?? null, kick_deg: opts.kick_deg ?? 3 })
+        : optimizedAscent({ body, vehicle, target_alt_km });
 
     // Enrich each powered-ascent sample with the aero force breakdown and the
     // active nozzle's expansion state (drives the live panels and the plume).
@@ -981,6 +995,11 @@ function emptyAscent(body) {
 
 /** Human-readable verdict for the scorecard. */
 export function gradeAscent(result) {
+    if (result.status === 'orbit' && result.loads?.exceeded) {
+        // Flew, but through more bending load than the airframe is rated for:
+        // a real range would have scrubbed on the balloon sounding.
+        return { grade: 'B', label: 'Orbit — outside the wind-load envelope (a range would scrub)', tone: 'warn' };
+    }
     if (result.status === 'orbit') {
         // Margin = Δv still aboard in orbit. "To spare" means enough to leave
         // the body entirely (C3 = 0 from this orbit: (√2 − 1)·v_circ).
@@ -990,7 +1009,9 @@ export function gradeAscent(result) {
     }
     if (result.status === 'low-orbit') return { grade: 'B', label: 'In orbit, below the target altitude', tone: 'warn' };
     if (result.status === 'escape') return { grade: 'C', label: 'Overshot — escape trajectory, no orbit', tone: 'warn' };
-    if (result.status === 'breakup') return { grade: 'F', label: 'Broke up at max-Q', tone: 'bad' };
+    if (result.status === 'breakup') {
+        return { grade: 'F', label: /bending/i.test(result.reason || '') ? 'Broke up — wind shear bending' : 'Broke up at max-Q', tone: 'bad' };
+    }
     if (result.status === 'no-liftoff') return { grade: 'F', label: 'Never left the pad', tone: 'bad' };
     if (result.status === 'fuel-out') {
         const frac = result.final_vt_kms / (result.v_orb_circ_kms || 1);

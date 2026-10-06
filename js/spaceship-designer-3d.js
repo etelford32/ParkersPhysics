@@ -69,6 +69,8 @@ const DECK_TOP = 1.5;              // concrete deck height (m)
 const MOUNT_CLEARANCE = 3.5;       // engine exit plane → deck (m): room for the plume to turn
 const IGNITION_HOLD_S = 3.0;       // engines light at T−3 s, hold-downs release at T−0
 
+const MAX_CAM_DIST = 2500;            // m — the zoom limit around the vehicle
+
 export function createRocketScene(canvas, opts = {}) {
     const onTick = opts.onTick || (() => {});
     const onPhase = opts.onPhase || (() => {});
@@ -92,7 +94,7 @@ export function createRocketScene(canvas, opts = {}) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 6;
-    controls.maxDistance = 2500;
+    controls.maxDistance = MAX_CAM_DIST;
     controls.target.set(0, 30, 0);
 
     // ── Lighting ──
@@ -139,6 +141,9 @@ export function createRocketScene(canvas, opts = {}) {
     let autoRotate = false;
     let flight = null;
     let rcsPuffT = 0;
+    let vaporCone = null;             // transonic condensation collar (Earth only)
+    let orbitRing = null;             // the achieved orbit, drawn after insertion
+    let orbitView = null;             // one-shot fly-out tween to frame that orbit
 
     function own(obj) {
         obj.traverse((c) => {
@@ -252,6 +257,7 @@ export function createRocketScene(canvas, opts = {}) {
             stageGroups.push(g);
         });
         buildNose(design, M);
+        buildVaporCone();
         buildRcs(M);
         own(rocketRoot);
         rocketRoot.traverse((c) => { if (c.isMesh && !c.material?.transparent) c.castShadow = true; });
@@ -273,6 +279,8 @@ export function createRocketScene(canvas, opts = {}) {
         rocketRoot.clear();
         disposeSet(owned);
         stageGroups = []; engineSets = []; noseParts = { halves: [], les: null }; rcs = [];
+        vaporCone = null;
+        clearOrbitRing();
         particles.clear();
     }
 
@@ -782,6 +790,144 @@ export function createRocketScene(canvas, opts = {}) {
     // Framing reads the STACK geometry, never Box3.setFromObject: that walks
     // invisible children too, and the plume cones would add tens of metres
     // of nothing below the vehicle.
+    // ── Transonic vapor cone ────────────────────────────────────────────────
+    // The Prandtl–Glauert collar: near Mach 1 the flow expanding round the
+    // fairing shoulder drops below the dew point and a cone of cloud stands on
+    // the stack. It needs WATER VAPOUR, so it is drawn on Earth only, below
+    // ~12 km (where the humid air is). Opacity is a function of the sample's
+    // own Mach number — it appears and vanishes as the trajectory crosses M 1.
+    function buildVaporCone() {
+        if (!stack) return;
+        const r = Math.max(...stack.stages.map((st) => st.r), 0.5);
+        const geo = new THREE.ConeGeometry(r * 2.8, r * 4.2, 48, 1, true);
+        const mat = new THREE.MeshBasicMaterial({
+            map: vaporTexture(), color: 0xffffff, transparent: true, opacity: 0,
+            depthWrite: false, side: THREE.DoubleSide, fog: false,
+        });
+        vaporCone = new THREE.Mesh(geo, mat);
+        // Apex just ahead of the fairing shoulder, flaring aft over the body.
+        vaporCone.position.y = (stack.noseY0 ?? stack.bodyLength_m * 0.8) - r * 1.1;
+        vaporCone.visible = false;
+        vaporCone.renderOrder = 3;
+        rocketRoot.add(vaporCone);
+    }
+    function tickVapor(s, now) {
+        if (!vaporCone) return;
+        const humid = env?.body.id === 'earth' ? 1 - clamp((s.alt_km - 9) / 4, 0, 1) : 0;
+        const m = s.mach ?? 0;
+        const o = humid * 0.85 * Math.exp(-(((m - 1.0) / 0.09) ** 2)) * (fairingOn() ? 1 : 0.6);
+        vaporCone.visible = o > 0.01;
+        vaporCone.material.opacity = o;
+        // Flicker + breathing: the collar is a pressure field, not a solid.
+        const k = 1 + 0.06 * Math.sin(now * 23) + 0.04 * Math.sin(now * 37 + 1.1);
+        vaporCone.scale.set(k, 1 + 0.08 * Math.sin(now * 17), k);
+        vaporCone.rotation.y = now * 0.7;
+    }
+    function fairingOn() { return !flight?.fairingOff; }
+
+    // ── Buffet ──────────────────────────────────────────────────────────────
+    // Camera shake driven by the trajectory's own loads: dynamic pressure
+    // (against the 35 kPa limit), the bending load q·α against its limit (what
+    // the gusts and shear are doing), with the transonic peak where shock
+    // oscillation is worst. A SYMBOL of the loads, applied to the view only —
+    // the vehicle's pose stays the trajectory's.
+    function tickBuffet(s, now) {
+        const f = flight;
+        if (!f) return;
+        camera.position.sub(f.shake);
+        const qN = clamp((s.q_kPa ?? 0) / 35, 0, 1.5);
+        const qaN = clamp((s.qalpha ?? 0) / (f.result.loads?.limit_kPa_deg || 144), 0, 1.5);
+        const trans = 1 + 1.4 * Math.exp(-((((s.mach ?? 0) - 1) / 0.12) ** 2));
+        const amp = (0.25 * qN + 0.6 * qaN) * trans * clamp(stackSpan().h * 0.0025, 0.03, 0.4);
+        f.shake.set(
+            amp * (Math.sin(now * 61) * 0.6 + Math.sin(now * 89 + 1.7) * 0.4),
+            amp * (Math.sin(now * 53 + 0.4) * 0.6 + Math.sin(now * 97) * 0.4),
+            amp * (Math.sin(now * 71 + 2.1) * 0.6 + Math.sin(now * 43 + 0.3) * 0.4),
+        );
+        camera.position.add(f.shake);
+    }
+
+    // ── The orbit, after insertion ──────────────────────────────────────────
+    // The ellipse the guidance achieved (periapsis × apoapsis from the result),
+    // through the vehicle's final position, in the flight plane — the plane of
+    // the 2D ascent (+X downrange, +Y up at the pad). It is the INERTIAL orbit
+    // drawn in the frame of the ground at the end of the flight (one snapshot,
+    // the planet does not spin in this scene). Then a one-shot fly-out frames
+    // it; any drag/zoom cancels the fly-out (the page may START a flight, it
+    // may not HOLD the camera).
+    function clearOrbitRing() {
+        if (!orbitRing) return;
+        scene.remove(orbitRing);
+        orbitRing.traverse((c) => { c.geometry?.dispose(); c.material?.dispose(); });
+        orbitRing = null; orbitView = null;
+        controls.maxDistance = MAX_CAM_DIST;
+    }
+    function showOrbit(result, finalSample) {
+        clearOrbitRing();
+        const o = result?.orbit;
+        if (!o || !Number.isFinite(o.a_km) || !(o.a_km > 0) || !env) return;
+        const R = env.planet.R;
+        const a = o.a_km * 1000, e = Math.min(0.99, Math.max(0, o.e || 0));
+        const p = a * (1 - e * e);
+        const rv = R + (finalSample.alt_km || 0) * 1000;
+        const thV = ((finalSample.downrange_km || 0) * 1000) / R;
+        let nuV = 0;
+        if (e > 1e-6) {
+            nuV = Math.acos(clamp((p / rv - 1) / e, -1, 1));
+            if ((finalSample.vr_kms ?? 0) < 0) nuV = -nuV;
+        }
+        const pts = [];
+        const N = 360;
+        for (let i = 0; i < N; i++) {
+            const nu = (i / N) * Math.PI * 2;
+            const r = p / (1 + e * Math.cos(nu));
+            const ph = thV + (nu - nuV);
+            pts.push(new THREE.Vector3(r * Math.sin(ph), r * Math.cos(ph) - R, 0));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({ color: 0x00c6ff, transparent: true, opacity: 0.9, fog: false });
+        orbitRing = new THREE.LineLoop(geo, mat);
+        orbitRing.renderOrder = 2;
+        // Where the vehicle is on it — the stack itself is sub-pixel from here.
+        const mk = new THREE.Points(
+            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(rv * Math.sin(thV), rv * Math.cos(thV) - R, 0)]),
+            new THREE.PointsMaterial({ color: 0xffffff, size: 9, sizeAttenuation: false, fog: false, depthTest: false }));
+        mk.renderOrder = 4;
+        orbitRing.add(mk);
+        scene.add(orbitRing);
+        // Frame it: look at the planet's centre from far enough to see the
+        // whole ellipse, from the side the vehicle is on.
+        const C = new THREE.Vector3(0, -R, 0);
+        const span = a * (1 + e);
+        const dist = span / Math.tan((camera.fov * Math.PI) / 360) * 1.25;
+        // ~25° above the orbit plane, over the vehicle: face-on, a 200 km
+        // orbit is a hairline hugging the limb; oblique, it crosses the disc.
+        const dir = new THREE.Vector3(Math.sin(thV) * 0.9, Math.cos(thV) * 0.9, 0.42).normalize();
+        // The pad-scale zoom limit would clamp the fly-out at 2.5 km (it did).
+        controls.maxDistance = Math.max(MAX_CAM_DIST, dist * 3);
+        orbitView = { t: 0, dur: 3.2,
+            fromPos: camera.position.clone(), fromTarget: controls.target.clone(),
+            toPos: C.clone().addScaledVector(dir, dist), toTarget: C.clone() };
+    }
+    function tickOrbitView(dt) {
+        if (!orbitView) return;
+        orbitView.t = Math.min(orbitView.dur, orbitView.t + dt);
+        const u = orbitView.t / orbitView.dur;
+        const k = u * u * (3 - 2 * u);
+        // Log-distance interpolation: a linear lerp from 60 m to 30 000 km
+        // spends the whole tween in the far field.
+        const fromD = orbitView.fromPos.distanceTo(orbitView.toTarget);
+        const toD = orbitView.toPos.distanceTo(orbitView.toTarget);
+        const d = Math.exp(Math.log(Math.max(1, fromD)) * (1 - k) + Math.log(toD) * k);
+        controls.target.lerpVectors(orbitView.fromTarget, orbitView.toTarget, k);
+        const dirFrom = orbitView.fromPos.clone().sub(orbitView.toTarget).normalize();
+        const dirTo = orbitView.toPos.clone().sub(orbitView.toTarget).normalize();
+        const dir = dirFrom.lerp(dirTo, k).normalize();
+        camera.position.copy(orbitView.toTarget).addScaledVector(dir, d);
+        if (orbitView.t >= orbitView.dur) orbitView = null;
+    }
+    controls.addEventListener('start', () => { orbitView = null; });
+
     function attachedFrom() { return Math.max(0, stageGroups.findIndex((g) => g.parent === rocketRoot)); }
     function stackSpan() {
         const i0 = attachedFrom();
@@ -858,6 +1004,7 @@ export function createRocketScene(canvas, opts = {}) {
     // ── Flight ──────────────────────────────────────────────────────────────
     function launch(ascentResult) {
         staticFire = false;
+        clearOrbitRing();
         if (!ascentResult?.trajectory?.length || !stack) return Promise.resolve(ascentResult);
         rocketRoot.rotation.set(0, 0, 0);
         engineSets.forEach((_, i) => { setPlumes(i, false); applyGimbal(i, 0, 0); });
@@ -871,7 +1018,7 @@ export function createRocketScene(canvas, opts = {}) {
                 burn: ascentResult.trajectory[ascentResult.trajectory.length - 1].t || 1,
                 t: -IGNITION_HOLD_S, resolve, detached: 0, fairingOff: false,
                 lastPos: rocketRoot.position.clone(), vel: new THREE.Vector3(),
-                focusY: focusLocalY(0), lastFocus: focus, phase: 'ignition',
+                focusY: focusLocalY(0), lastFocus: focus, phase: 'ignition', shake: new THREE.Vector3(),
                 R: body.R_km * 1000, gSurf: (body.mu_km3s2 * 1e9) / Math.pow(body.R_km * 1000, 2),
             };
             lastTrailPos = null;
@@ -1005,6 +1152,8 @@ export function createRocketScene(canvas, opts = {}) {
         const delta = focus.clone().sub(f.lastFocus);
         camera.position.add(delta); controls.target.add(delta);
         f.lastFocus = focus;
+        tickBuffet(s, now);
+        tickVapor(s, now);
 
         // Engines: only the stage the trajectory says is firing.
         const burning = (s.thrust_kN ?? 0) > 0.001 && !s.coasting;
@@ -1066,7 +1215,10 @@ export function createRocketScene(canvas, opts = {}) {
         engineLight.intensity = 0;
         flight = null;
         lastTrailPos = null;
+        if (f?.shake) camera.position.sub(f.shake);
+        if (vaporCone) vaporCone.visible = false;
         const st = f?.result?.status;
+        if ((st === 'orbit' || st === 'low-orbit') && f.traj?.length) showOrbit(f.result, f.traj[f.traj.length - 1]);
         if (st === 'breakup') { breakApart(); onPhase('breakup'); }
         else if (st === 'no-liftoff') onPhase('no liftoff');
         else if (st === 'crashed') { breakApart(); onPhase('crashed'); }
@@ -1138,6 +1290,7 @@ export function createRocketScene(canvas, opts = {}) {
             for (const p of rcs) { p.material.opacity = o; p.scale.setScalar(0.6 + o); }
             rcsPrev = rcsPuffT;
         }
+        tickOrbitView(dt);
         controls.update();
         updateEnv();
         particles.update(dt, camera, renderer.domElement.height / renderer.getPixelRatio());
@@ -1169,6 +1322,13 @@ export function createRocketScene(canvas, opts = {}) {
     }
 
     /** Test / inspection hook (tests/spaceship-designer-smoke.spec.js). */
+    // Ring radius extremes about the planet centre, in metres (debug/test).
+    function ringRadius(pick) {
+        const a = orbitRing.geometry.attributes.position, R = env.planet.R;
+        const rs = [];
+        for (let i = 0; i < a.count; i++) rs.push(Math.hypot(a.getX(i), a.getY(i) + R));
+        return pick(...rs);
+    }
     function debug() {
         rocketRoot.updateMatrixWorld(true);
         let lowestExit = Infinity;
@@ -1192,6 +1352,11 @@ export function createRocketScene(canvas, opts = {}) {
             flightT: flight?.t ?? null, particles: particles.live,
             fog: scene.fog.density, near: camera.near, camPos: camera.position.toArray(),
             body: env?.body.id ?? null, site: env?.site ?? null,
+            orbitRing: orbitRing ? { points: orbitRing.geometry.attributes.position.count,
+                rMin: ringRadius(Math.min), rMax: ringRadius(Math.max) } : null,
+            orbitView: !!orbitView,
+            vapor: vaporCone ? { visible: vaporCone.visible, opacity: vaporCone.material.opacity } : null,
+            shake: flight?.shake?.length() ?? 0,
         };
     }
 
@@ -1228,4 +1393,30 @@ function groundTexture() {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return t;
+}
+
+// Soft vapor texture: transparent at the apex and the trailing edge, densest
+// just aft of the shoulder, streaked along the flow.
+let _vaporTex = null;
+function vaporTexture() {
+    if (_vaporTex) return _vaporTex;
+    const W = 64, H = 128;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const img = g.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+        const v = 1 - y / (H - 1);                 // canvas top = cone apex (uv.y = 1)
+        const along = Math.pow(Math.sin(Math.PI * Math.min(1, v * 1.15)), 1.6) * Math.exp(-v * 1.2);
+        for (let x = 0; x < W; x++) {
+            const streak = 0.75 + 0.25 * Math.sin(x * 0.9 + Math.sin(x * 0.37) * 3);
+            const i = (y * W + x) * 4;
+            img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+            img.data[i + 3] = Math.round(255 * Math.max(0, along * streak));
+        }
+    }
+    g.putImageData(img, 0, 0);
+    _vaporTex = new THREE.CanvasTexture(c);
+    _vaporTex.colorSpace = THREE.SRGBColorSpace;
+    return _vaporTex;
 }

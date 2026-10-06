@@ -105,6 +105,37 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 .ssd-table td{padding:6px;border-bottom:1px dashed rgba(120,160,200,.10);vertical-align:top}
 .ssd-table .n{text-align:right;white-space:nowrap}
 .ssd-table .mut{color:var(--c-text-mut);font-size:10.5px}
+/* Ascent profile charts (js/spaceship-designer-charts.js). Series slots are the
+   reference categorical order's DARK steps, validated on #0b1120. */
+#ssd-profile{position:relative;
+  --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70}
+.ssd-viz{margin:0;display:flex;flex-direction:column;gap:6px}
+.ssd-viz figcaption{font-size:12px;font-weight:600;color:var(--c-text-2)}
+.ssd-viz svg{width:100%;height:auto;display:block;overflow:visible}
+.ssd-viz .grid{stroke:var(--c-line);stroke-width:1}
+.ssd-viz .axis{stroke:rgba(120,160,200,.35);stroke-width:1}
+.ssd-viz .zero{stroke:rgba(120,160,200,.35);stroke-width:1}
+.ssd-viz .tick{fill:var(--c-text-mut);font-size:10px;font-variant-numeric:tabular-nums}
+.ssd-viz .axlab{fill:var(--c-text-mut);font-size:10px}
+.ssd-viz .lab{fill:var(--c-text-2);font-size:10.5px;paint-order:stroke;stroke:#0b1120;stroke-width:3px}
+.ssd-viz .ref{stroke:var(--c-text-mut);stroke-width:1;stroke-dasharray:4 3}
+.ssd-viz .reflab{fill:var(--c-text-mut);font-size:10px}
+.ssd-viz .line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.ssd-viz .line.s1{stroke:var(--series-1)} .ssd-viz .line.s2{stroke:var(--series-2)} .ssd-viz .line.s3{stroke:var(--series-3)}
+.ssd-viz .mk{fill:#0b1120;stroke:var(--c-text-2);stroke-width:2}
+.ssd-viz .mk.s1{fill:var(--series-1);stroke:#0b1120}
+.ssd-viz .hv{fill:var(--c-text);stroke:#0b1120;stroke-width:2}
+.ssd-viz .xhair{stroke:var(--c-text-2);stroke-width:1}
+.ssd-viz .hit{fill:transparent;cursor:crosshair}
+.ssd-viz-legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11px;color:var(--c-text-2)}
+.ssd-viz-legend .sw{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.ssd-viz-legend .s1{background:var(--series-1)} .ssd-viz-legend .s2{background:var(--series-2)} .ssd-viz-legend .s3{background:var(--series-3)}
+.ssd-viz-tip{position:absolute;z-index:5;pointer-events:none;background:rgba(6,10,20,.94);border:1px solid var(--c-line);
+  border-radius:var(--r-sm);padding:6px 8px;font-size:11px;line-height:1.45;color:var(--c-text);font-variant-numeric:tabular-nums;
+  min-width:170px}
+.ssd-viz-tip[hidden]{display:none}
+.ssd-viz-table summary{cursor:pointer;font-size:11.5px;color:var(--c-text-2)}
+.ssd-viz-table{max-height:320px;overflow:auto}
 .ssd-bay{font-size:11.5px;color:var(--c-text-2);line-height:1.5;display:flex;flex-direction:column;gap:2px;
   border-left:2px solid var(--c-accent-border);padding:2px 0 2px 8px}
 .ssd-chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
@@ -231,6 +262,9 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
         <div class="ssd-field"><label>Longitude <span class="ssd-rangeval" id="ssd-lon-val">80.6° W</span></label>
           <div class="ssd-row"><input type="range" id="ssd-lon" min="-180" max="180" step="0.1" value="-80.6"></div>
           <div class="ssd-note" id="ssd-lon-note"></div></div>
+        <div class="ssd-field"><label>Winds aloft</label>
+          <select id="ssd-wind"></select>
+          <div class="ssd-note" id="ssd-wind-note"></div></div>
       </div>
     </div>
 
@@ -320,6 +354,10 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
           two-burn insertion — a gravity turn optimised for <em>this</em> vehicle, engine cut-off when the apoapsis
           reaches the target, a coast, and a circularisation burn — through drag, gravity and the rocket equation.</div>
       </div>
+    </div>
+    <div class="ssd-card" id="ssd-profile-card" hidden>
+      <h2>Ascent Profile</h2>
+      <div class="ssd-body" id="ssd-profile"></div>
     </div>
     <div class="ssd-card" id="ssd-beyond-card" hidden>
       <h2>Beyond Orbit <span class="ssd-pill" id="ssd-beyond-dv">—</span></h2>
@@ -439,6 +477,8 @@ import {
   LIVERIES, PATTERNS, LAUNCH_BODY_OPTIONS, LAUNCH_BODIES, surfaceRotationSpeed,
 } from './js/spaceship-designer-engine.js';
 import { createRocketScene } from './js/spaceship-designer-3d.js';
+import { WIND_SETTINGS, WIND_PROFILES, meanWindSpeed, QALPHA_LIMIT_KPA_DEG } from './js/spaceship-designer-wind.js';
+import { renderAscentCharts } from './js/spaceship-designer-charts.js';
 import * as store from './js/spaceship-designer-store.js';
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -573,6 +613,7 @@ function readControls() {
   design.targetAltKm = +$('ssd-alt').value || 200;
   design.launchLatitude = +$('ssd-lat').value || 0;
   design.launchLongitude = wrapLon(+$('ssd-lon').value || 0);
+  design.windId = $('ssd-wind').value || 'typical';
   design.payload = {
     mass_kg: +$('ssd-payload').value || 0,
     nosecone: $('ssd-nose').value,
@@ -722,6 +763,25 @@ function updateLatNote() {
   $('ssd-lon-note').textContent = 'Picks the ground under the pad and the planet you climb over. '
     + 'The ascent flies due east, so it changes no Δv — latitude sets the rotation assist.';
   syncSiteSelect();
+  updateWindNote();
+}
+
+// Winds aloft: the select only means something where there is air.
+function updateWindNote() {
+  const id = $('ssd-body').value;
+  const prof = WIND_PROFILES[id];
+  const sel = $('ssd-wind');
+  sel.disabled = !prof;
+  if (!prof) { $('ssd-wind-note').textContent = 'No air — no wind, no aerodynamic loads.'; return; }
+  const set = WIND_SETTINGS[sel.value] || WIND_SETTINGS.typical;
+  let peakH = 0;
+  for (let h = 0; h <= 3 * prof.jetAlt_km; h += 0.5) if (meanWindSpeed(id, h * 1000) > meanWindSpeed(id, peakH * 1000)) peakH = h;
+  const peak = meanWindSpeed(id, peakH * 1000) * set.scale;
+  $('ssd-wind-note').textContent = set.scale > 0
+    ? `Representative ${prof.note}: ${peak.toFixed(0)} m/s at ${peakH.toFixed(0)} km, ${set.toward_deg === 0 ? 'along'
+        : set.toward_deg === 180 ? 'against' : set.toward_deg + '° across'} the track, plus seeded gusts. Not a forecast — `
+      + `what matters is the bending load q·α it puts on the stack (limit ${QALPHA_LIMIT_KPA_DEG.toFixed(0)} kPa·°).`
+    : 'Still air: the gravity turn flies at zero angle of attack.';
 }
 
 // Launch-site presets for the current body; "Custom" whenever the sliders sit
@@ -904,7 +964,10 @@ function showResult(result) {
   const ins = result.insertion || {};
   const insertionRows = result.guidance === 'insertion' && (result.status === 'orbit' || result.status === 'low-orbit' || result.status === 'escape') ? `
     <div class="ssd-stat"><span class="k">Orbit (periapsis × apoapsis)</span><span class="v">${orbitTxt}</span></div>
-    <div class="ssd-stat"><span class="k">Gravity turn (optimised)</span><span class="v">horizontal by ${(result.turn_alt_km ?? 0).toFixed(0)} km · ${result.turn_search ?? 1} trial ascents</span></div>
+    <div class="ssd-stat"><span class="k">${result.profile === 'gravity-turn' ? 'Gravity turn (optimised)' : 'Pitch program (optimised)'}</span><span class="v">${
+      result.profile === 'gravity-turn'
+        ? `${(result.kick_deg ?? 0).toFixed(1)}° kick, then zero-α`
+        : `horizontal by ${(result.turn_alt_km ?? 0).toFixed(0)} km`} · ${result.turn_search ?? 1} trial ascents</span></div>
     ${ins.meco1_t != null ? `<div class="ssd-stat"><span class="k">MECO-1 → circularise</span><span class="v">T+${ins.meco1_t.toFixed(0)} s → T+${(ins.circ_start_t ?? ins.meco1_t).toFixed(0)} s · ${(ins.circ_dv_kms * 1000).toFixed(0)} m/s</span></div>` : ''}
     <div class="ssd-stat"><span class="k">Δv left in orbit</span><span class="v" style="color:var(--c-accent)">${ks(result.remaining_dv_kms)} km/s</span></div>`
     : `
@@ -928,10 +991,28 @@ function showResult(result) {
     ${(result.v_rotation_kms ?? 0) > 0.001 ? `<div class="ssd-stat"><span class="k">Rotation assist</span><span class="v" style="color:var(--c-good)">+${ks(result.v_rotation_kms)} km/s @ ${(result.launch_lat_deg ?? 0).toFixed(0)}°</span></div>` : ''}
     <div class="ssd-stat"><span class="k">Peak acceleration</span><span class="v"${(result.max_accel_g ?? 0) > (result.accel_limit_g ?? 99) + 0.1 ? ' style="color:var(--c-warn)"' : ''}>${(result.max_accel_g ?? 0).toFixed(1)} g${result.accel_limit_g ? ` / ${result.accel_limit_g} g cap` : ''}</span></div>
     <div class="ssd-stat"><span class="k">Max-Q</span><span class="v"${(result.max_q_kPa ?? 0) > (result.q_limit_kPa || 1e9) ? ' style="color:var(--c-bad)"' : ''}>${(result.max_q_kPa ?? 0).toFixed(0)} kPa${result.q_limit_kPa ? ` / ${result.q_limit_kPa} limit` : ''}</span></div>
+    ${loadsRow(result)}
     <div class="ssd-stat"><span class="k">Max Mach (in atmosphere)</span><span class="v">${(result.max_mach ?? 0).toFixed(1)}</span></div>
     <div class="ssd-stat"${stagingRows ? '' : ' style="border:none"'}><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>
     ${stagingRows}`;
   showBeyond(result);
+  showProfile(result);
+}
+
+function loadsRow(result) {
+  const L = result.loads;
+  if (!L || !WIND_PROFILES[result.body_id] || !(result.max_q_kPa > 0.05)) return '';
+  const over = L.max_qalpha_kPa_deg > L.limit_kPa_deg;
+  const col = /bending/i.test(result.reason || '') ? 'var(--c-bad)' : over ? 'var(--c-warn)' : '';
+  return `<div class="ssd-stat"><span class="k">Max bending load q·α (${(WIND_SETTINGS[L.wind]?.name || L.wind).toLowerCase()} winds)</span>
+    <span class="v"${col ? ` style="color:${col}"` : ''}>${L.max_qalpha_kPa_deg.toFixed(0)} / ${L.limit_kPa_deg.toFixed(0)} kPa·°
+    <span style="color:var(--c-text-mut);font-weight:500">α ${L.alpha_deg.toFixed(1)}° @ ${L.alt_km.toFixed(1)} km</span></span></div>`;
+}
+
+function showProfile(result) {
+  const card = $('ssd-profile-card');
+  card.hidden = !(result.trajectory?.length > 2);
+  if (!card.hidden) renderAscentCharts($('ssd-profile'), result);
 }
 
 // "Where can it go from here?" — the mission kernel's patched-conic Hohmann
@@ -1042,6 +1123,7 @@ function hydrateControls() {
   $('ssd-alt').value = design.targetAltKm || 200;
   $('ssd-lat').value = design.launchLatitude ?? 28.5;
   $('ssd-lon').value = design.launchLongitude ?? -80.6;
+  fillSelect($('ssd-wind'), Object.values(WIND_SETTINGS), design.windId || 'typical');
   fillSiteSelect();
   updateLatNote();
   fillSelect($('ssd-nose'), Object.values(NOSECONE_TYPES), design.payload?.nosecone || 'ogive');
@@ -1060,7 +1142,7 @@ function hydrateControls() {
 // ── Wire events ──────────────────────────────────────────────────────────────
 function wire() {
   // Top-level controls.
-  ['ssd-name', 'ssd-alt', 'ssd-lat', 'ssd-lon', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
+  ['ssd-name', 'ssd-alt', 'ssd-lat', 'ssd-lon', 'ssd-wind', 'ssd-nose', 'ssd-payload', 'ssd-fairing',
    'ssd-cockpit', 'ssd-crew', 'ssd-windows', 'ssd-fin', 'ssd-fincount',
    'ssd-livery', 'ssd-pattern'].forEach((id) => {
     $(id).addEventListener('input', () => { readControls(); updateLatNote(); refresh(); });

@@ -140,4 +140,54 @@ test.describe('spaceship-designer.html smoke', () => {
         expect(d.attached).toEqual([false, true]);
         expect(d.rotZ).toBeLessThan(-0.5);          // pitched over downrange, not still vertical
     });
+
+    test('winds aloft: selectable with air, disabled without', async ({ page }) => {
+        await page.goto(URL);
+        await page.waitForFunction(() => window.__ssd?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await expect(page.locator('#ssd-wind')).toBeEnabled();
+        await expect(page.locator('#ssd-wind option')).toHaveCount(5);
+        await expect(page.locator('#ssd-wind-note')).toContainText('Not a forecast');
+        await page.selectOption('#ssd-body', 'moon');
+        await expect(page.locator('#ssd-wind')).toBeDisabled();
+        await expect(page.locator('#ssd-wind-note')).toContainText('No air');
+    });
+
+    test('after insertion: ascent profile charts, loads row, and the orbit drawn', async ({ page }) => {
+        test.setTimeout(240_000);
+        await page.route('**/api/telemetry/log', (route) =>
+            route.fulfill({ status: 202, contentType: 'application/json', body: '{"ok":true}' }));
+        await page.goto(URL);
+        await page.waitForFunction(() => window.__ssd?.ready, { timeout: BOOT_TIMEOUT_MS });
+        await page.selectOption('#ssd-wind', 'strong');
+        await page.getByRole('button', { name: /Launch/i }).click();
+        await page.evaluate(() => window.__ssd.scene.setTimeScale(8));
+        await page.waitForFunction(() => window.__ssd.scene.debug().flightT === null
+            && !document.getElementById('ssd-launch').disabled, null, { timeout: 200_000, polling: 250 });
+
+        // The result card carries the bending load; the profile card its charts.
+        await expect(page.locator('#ssd-result')).toContainText('Max bending load q·α (strong jet winds)');
+        await expect(page.locator('#ssd-profile-card')).toBeVisible();
+        for (const c of ['trajectory', 'q', 'qa', 'wind']) {
+            await expect(page.locator(`svg[data-chart="${c}"] path.line`).first()).toBeVisible();
+        }
+        // Shared crosshair: hovering one multiple lights all three.
+        // (locator.hover scrolls the chart into view — it sits below a 720 px fold.)
+        const hit = page.locator('svg[data-chart="q"] .hit');
+        const hb = await hit.boundingBox();
+        await hit.hover({ position: { x: hb.width * 0.4, y: hb.height * 0.5 } });
+        await expect(page.locator('.ssd-viz-tip')).toBeVisible();
+        await expect(page.locator('.ssd-viz-tip')).toContainText('q·α');
+        const lit = await page.locator('svg .xhair[visibility="visible"]').count();
+        expect(lit).toBe(3);
+
+        // The achieved orbit is drawn above the surface, around the planet.
+        const d = await page.evaluate(() => window.__ssd.scene.debug());
+        expect(d.orbitRing).not.toBeNull();
+        expect(d.orbitRing.rMin).toBeGreaterThan(6371e3 + 150e3);
+        expect(d.orbitRing.rMax).toBeLessThan(6371e3 + 300e3);
+        // Reset clears it and brings the camera back to the pad.
+        await page.getByRole('button', { name: /^Reset$/ }).click();
+        await expect.poll(() => page.evaluate(() => window.__ssd.scene.debug().orbitRing)).toBeNull();
+        await expect.poll(() => page.evaluate(() => window.__ssd.scene.debug().camToTarget)).toBeLessThan(2500);
+    });
 });

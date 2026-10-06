@@ -27,6 +27,12 @@
  *     lunar ascent costs what Apollo's did (~1.85 km/s), and the honest
  *     failures are reported as such: Venus never lifts off, an over-powered
  *     booster breaks up in Titan's air.
+ *   • THE WIND LOADS THE AIRFRAME, IT DOES NOT PUSH IT. In calm air the
+ *     zero-α gravity turn carries almost no bending load; q·α grows with the
+ *     wind (calm < typical < strong), a crosswind costs a yaw, a 72 m/s
+ *     headwind leaves no in-envelope trajectory (the result says a range
+ *     would scrub), and a q·α past 1.5× the limit is a bending breakup. The
+ *     guidance never COMMANDS more α than the airframe carries.
  *   • DESTINATIONS ARE TEXTBOOK. TLI 3.13, LOI 0.82, TMI 3.61, Earth escape
  *     3.22, GTO 2.44 + 1.47, Earth–Mars Hohmann 259 d, synodic 780 d.
  */
@@ -36,6 +42,8 @@ import * as E from '../js/spaceship-designer-engine.js';
 import * as F from '../js/spaceship-designer-flight.js';
 import * as A from '../js/spaceship-designer-ascent.js';
 import * as M from '../js/spaceship-designer-mission.js';
+import * as W from '../js/spaceship-designer-wind.js';
+import * as C from '../js/spaceship-designer-charts.js';
 
 let passed = 0;
 const ok = (name) => { console.log(`  ✓ ${name}`); passed += 1; };
@@ -299,6 +307,117 @@ console.log('guided ascent');
     const wall = F.playbackDuration(moon.trajectory[moon.trajectory.length - 1].t, ev);
     assert.ok(wall < 60, `lunar ascent plays in ${wall.toFixed(1)} s`);
     ok('bound orbits at target on 6 worlds, Apollo-class lunar Δv, Venus/Titan failures, surface thrust, playback');
+}
+
+// ── Winds aloft + bending loads ─────────────────────────────────────────────
+console.log('winds & loads');
+{
+    // The profile: a jet at Earth's tropopause, nothing on an airless world.
+    const prof = (h) => W.meanWindSpeed('earth', h * 1000);
+    let peakH = 0;
+    for (let h = 0; h <= 40; h += 0.25) if (prof(h) > prof(peakH)) peakH = h;
+    near(peakH, 11, 0.5, 'Earth jet sits at the tropopause');
+    assert.ok(prof(peakH) > 40 && prof(0) < 8, `jet ${prof(peakH).toFixed(0)} m/s over a ${prof(0).toFixed(0)} m/s surface wind`);
+    assert.equal(W.meanWindSpeed('moon', 10_000), 0, 'no wind without air');
+
+    // The gust field: unit rms, deterministic per seed, different per seed.
+    const f1 = W.makeGustField(42), f2 = W.makeGustField(42), f3 = W.makeGustField(43);
+    let s2 = 0, n = 0, diff = 0;
+    for (let h = 0; h < 200_000; h += 7) {
+        const g = (fld) => fld.along.reduce((acc, m) => acc + m.amp * Math.sin(m.k * h + m.phase), 0);
+        s2 += g(f1) ** 2; n++;
+        diff += Math.abs(g(f1) - g(f3));
+        assert.equal(g(f1), g(f2));
+    }
+    near(Math.sqrt(s2 / n), 1, 0.08, 'gust field has unit rms');
+    assert.ok(diff / n > 0.3, 'a different seed is a different sky');
+
+    // Settings: calm is still air; a crosswind has no mean along-track part.
+    const at = (setting, h) => W.windAt({ bodyId: 'earth', setting, field: null }, h);
+    assert.equal(at('calm', 11_000).speed, 0);
+    near(at('crosswind', 11_000).meanAlong, 0, 1e-9, 'crosswind: no along-track mean');
+    assert.ok(at('headwind', 11_000).meanAlong < -60, 'headwind blows against the track');
+    near(at('strong', 11_000).speed / at('typical', 11_000).speed, 1.8, 1e-9, 'strong = 1.8× typical');
+
+    // The steering loop is first order: 1 − 1/e of a step after one τ.
+    const lag = W.steeringLag(2.5);
+    lag.step({ along: 0, cross: 0 }, 0.1);
+    let y;
+    for (let t = 0; t < 2.5 - 1e-9; t += 0.1) y = lag.step({ along: 10, cross: 0 }, 0.1);
+    near(y.along, 10 * (1 - Math.exp(-1)), 0.05, 'steering lag τ');
+
+    // The flights. Same air for every design (seeded by world + setting).
+    const fly = (windId, extra = {}) => E.runAscent(E.normalizeDesign({ ...E.defaultDesign(), bodyId: 'earth', windId, ...extra }));
+    const calm = fly('calm'), typ = fly('typical'), strong = fly('strong'), cross = fly('crosswind'), head = fly('headwind');
+    for (const [name, r2] of [['calm', calm], ['typical', typ], ['strong', strong], ['crosswind', cross]]) {
+        assert.equal(r2.status, 'orbit', `${name}: orbit`);
+        assert.equal(r2.profile, 'gravity-turn', `${name}: a zero-α gravity turn wins with air`);
+        assert.ok(!r2.loads.exceeded, `${name}: inside the envelope (${r2.loads.max_qalpha_kPa_deg.toFixed(0)} kPa·°)`);
+    }
+    assert.ok(calm.loads.max_qalpha_kPa_deg < 10, `calm air: almost no bending (${calm.loads.max_qalpha_kPa_deg.toFixed(1)} kPa·°)`);
+    assert.ok(calm.loads.max_qalpha_kPa_deg < typ.loads.max_qalpha_kPa_deg
+        && typ.loads.max_qalpha_kPa_deg < strong.loads.max_qalpha_kPa_deg, 'q·α grows with the wind');
+    // At max-Q in calm air the turn flies at (nearly) zero angle of attack.
+    const atMaxQ = calm.trajectory.reduce((b, p) => (p.q_kPa > b.q_kPa ? p : b));
+    assert.ok(atMaxQ.alpha_deg < 0.5, `calm α at max-Q ${atMaxQ.alpha_deg.toFixed(2)}°`);
+    // The gravity turn is cheaper than the old cosine program (less lofting).
+    assert.ok(calm.dv_steer_loss_kms < 1.0 && calm.dv_used_kms < 9.5, `gravity turn Δv ${calm.dv_used_kms.toFixed(2)} km/s`);
+    // A strong headwind: no in-envelope trajectory exists — the honest answer is a scrub.
+    assert.ok(head.loads.exceeded, `headwind exceeds the envelope (${head.loads.max_qalpha_kPa_deg.toFixed(0)} kPa·°)`);
+    assert.match(E.gradeAscent(head).label, /scrub/);
+    // Crosswind is flown with a yaw into it; along-track wind needs none.
+    assert.ok(Math.max(...cross.trajectory.map((p) => Math.abs(p.yaw_deg))) > 3, 'crosswind: yaw into the wind');
+    // Load-limited guidance: never more α than the airframe carries in real air.
+    for (const r2 of [calm, typ, strong, cross, head]) {
+        for (const p of r2.trajectory) {
+            if (p.q_kPa > 2 && p.v_kms > 0.5) assert.ok(p.alpha_deg < 16, `α ${p.alpha_deg.toFixed(1)}° at q ${p.q_kPa.toFixed(1)} kPa`);
+        }
+    }
+    // Legacy drafts fly the typical sky.
+    assert.equal(E.normalizeDesign({ ...E.defaultDesign(), windId: undefined }).windId, W.DEFAULT_WIND);
+
+    // A bending breakup: a stack rated for almost no q·α, in a strong jet.
+    const vehicle = {
+        stages: [{ propMass_kg: 400_000, dryMass_kg: 25_000, F_sl_N: 7.6e6, F_vac_N: 8.2e6, mdot_kgs: 2700, Isp_vac_s: 311 },
+                 { propMass_kg: 100_000, dryMass_kg: 4_000, F_sl_N: 0, F_vac_N: 9.8e5, mdot_kgs: 287, Isp_vac_s: 348 }],
+        payload_kg: 10_000, Cd: 0.35, A_m2: 10.75, launch_lat_deg: 28.5, accel_limit_g: 6, q_limit_kPa: 35,
+        qalpha_limit_kPa_deg: 15, wind: { setting: 'strong' },
+    };
+    const bend = A.guidedAscent({ body: E.LAUNCH_BODIES.earth, vehicle, profile: 'gravity-turn', kick_deg: 3 });
+    assert.equal(bend.status, 'breakup');
+    assert.match(bend.reason, /bending/);
+    assert.match(E.gradeAscent(bend).label, /wind shear/);
+    ok('jet profile, unit-rms seeded gusts, steering lag, q·α ordering, zero-α max-Q, scrub + bending breakup');
+}
+
+// ── Ascent-profile charts (pure model) ─────────────────────────────────────
+console.log('ascent charts');
+{
+    const earth = E.runAscent(E.normalizeDesign({ ...E.defaultDesign(), bodyId: 'earth' }));
+    const m = C.chartModel(earth);
+    assert.deepEqual(m.segments.map((x) => x.phase), ['ascent', 'coast', 'circularize'], 'phases in flight order');
+    for (let k = 1; k < m.segments.length; k++) {
+        assert.deepEqual(m.segments[k].points[0], m.segments[k - 1].points.at(-1), 'no gap at a phase change');
+    }
+    assert.ok(m.hasAir && m.airMax_km >= 25 && m.airMax_km <= 80, `air window 0–${m.airMax_km} km`);
+    for (let k = 1; k < m.air.length; k++) assert.ok(m.air[k].x >= m.air[k - 1].x, 'shared x is single-valued');
+    // The chart's peaks ARE the card's numbers.
+    assert.equal(m.q.peak.q, earth.max_q_kPa);
+    assert.equal(m.qa.peak.qa, earth.loads.max_qalpha_kPa_deg);
+    assert.equal(m.qa.limit, W.QALPHA_LIMIT_KPA_DEG);
+    assert.equal(m.staging.length, earth.staging_events.length);
+    assert.deepEqual(m.events.map((e) => e.kind), ['meco', 'circ'], 'insertion events marked');
+    assert.match(m.events[1].label, /circularise \d+ m\/s/);
+    // Airless: a trajectory, no loads multiples.
+    const moon = C.chartModel(E.runAscent(E.normalizeDesign({ ...E.defaultDesign(), bodyId: 'moon' })));
+    assert.equal(moon.hasAir, false);
+    assert.ok(moon.segments.length >= 2);
+    // Scales.
+    assert.equal(C.niceCeil(87), 100); assert.equal(C.niceCeil(13), 15); assert.equal(C.niceCeil(0.7), 0.8);
+    assert.deepEqual(C.ticks(0, 100, 4), [0, 25, 50, 75, 100]);
+    assert.deepEqual(C.ticks(-40, 40, 4), [-40, -20, 0, 20, 40]);
+    assert.deepEqual(C.sqrtTicks(20000), [0, 250, 1000, 2500, 5000, 10000, 20000], '√ ticks: round, spread');
+    ok('phase segments, single-valued air window, peaks = card numbers, airless has no loads, nice scales');
 }
 
 // ── Beyond orbit (mission kernel) ────────────────────────────────────────────
