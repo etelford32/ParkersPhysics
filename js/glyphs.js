@@ -192,6 +192,15 @@ export const GLYPHS = {
         `<path d="M20 9.4c0 5-4 9-9 9-3.3 0-5.8-2-5.8-4.5 0-2 1.6-3.4 3.5-3.4"/>` +
         NODE(12, 12, 1.4),
 
+    'sky-dome':
+        // SkyView: the sky seen from the ground — the HORIZON is the axis, the
+        // dome is the visible half of the celestial sphere, and the nodes are
+        // stars at different heights (the brightest highest, as the ranking
+        // tends to put them). Built from the mark's axis + node primitives.
+        `<path d="M2.8 18.2h18.4"/>` +
+        `<path d="M4.4 18.2a7.6 7.6 0 0 1 15.2 0"/>` +
+        NODE(12.4, 12.8, 1.6) + NODE(8.4, 15.2, 1.1) + NODE(15.8, 15.0, 1.0),
+
     void:
         // A cosmic void: an EMPTY ring with the structure pushed out to its
         // rim. Drawn as a dashed circle rather than a solid one because the

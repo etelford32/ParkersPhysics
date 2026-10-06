@@ -1,0 +1,81 @@
+name: skyview-kernels
+
+# The PURE kernels and the baked catalogue behind skyview.html, gated in node
+# — ~1 s, no browser, no npm install (the tests import only node:* and the
+# repo's own ES modules):
+#
+#   skyview-engine.mjs    frames (Meeus 13.b, galactic definitions, pole at
+#                         latitude, east/west), planet-frame drift (VSOP87D is
+#                         of date, the inner series J2000), magnitudes,
+#                         refraction/airmass, limiting magnitude, rise/set,
+#                         and both projections' handedness
+#   skyview-predict.mjs   the forecasting kernel: night anchoring on local
+#                         mean solar time, dusk/dawn vs the refined solver,
+#                         the sidereal drift (0.9856°/night, 3.93 min earlier),
+#                         circumpolar / never-rising windows, Sirius & Vega
+#                         seasons (1 Jan / 1 Jul), the Moon's daily motion
+#   skyview-catalog.mjs   the baked file vs a FRESH extraction from
+#                         galactic-map.html (drift), every galaxy-map star
+#                         within 0.2° of its Hipparcos position, and the
+#                         ranking's invariants at a fixed instant
+#
+# galactic-map.html is in the path filter ON PURPOSE: SkyView reads its CATALOG,
+# so an edit there must re-run the drift gate (re-bake with
+# `node scripts/build-skyview-catalog.mjs`). The shared ephemeris modules are in
+# it because SkyView draws with them rather than a copy.
+#
+# The browser gate (tests/skyview-smoke.spec.js) needs Chromium and a dev
+# server; run it locally per the CLAUDE.md SkyView row.
+
+on:
+  push:
+    paths:
+      - 'js/skyview/**'
+      - 'data/skyview/**'
+      - 'galactic-map.html'
+      - 'scripts/build-skyview-catalog.mjs'
+      - 'js/neo-space.js'
+      - 'js/neo-orbits.js'
+      - 'js/horizons.js'
+      - 'js/outer-planets.js'
+      - 'js/earth-orbit.js'
+      - 'tests/skyview-*.mjs'
+      - '.github/workflows/skyview-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/skyview/**'
+      - 'data/skyview/**'
+      - 'galactic-map.html'
+      - 'scripts/build-skyview-catalog.mjs'
+      - 'js/neo-space.js'
+      - 'js/neo-orbits.js'
+      - 'js/horizons.js'
+      - 'js/outer-planets.js'
+      - 'js/earth-orbit.js'
+      - 'tests/skyview-*.mjs'
+      - '.github/workflows/skyview-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skyview-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: SkyView kernels + catalogue (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: sky engine + projection
+        run: node tests/skyview-engine.mjs
+      - name: forecast (nights, windows, sidereal drift, seasons)
+        run: node tests/skyview-predict.mjs
+      - name: catalogue (drift vs galactic-map.html, map star positions)
+        run: node tests/skyview-catalog.mjs

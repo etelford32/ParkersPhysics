@@ -103,3 +103,6 @@ rust-star-collider/target/
 rust-ring-current/target/
 rust-flux-rope/target/
 .dsmc-local/
+
+# Upstream source caches for data bakers (scripts/build-skyview-catalog.mjs --fetch)
+scripts/.cache/

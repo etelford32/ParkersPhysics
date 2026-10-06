@@ -159,7 +159,6 @@ const NAV_ITEMS = {
         { section: 'Worlds' },
         { href: 'moon.html',   label: 'The Moon',        sub: 'Radiation, interior, and a real relief surface', tier: 'public', icon: 'moon' },
         { href: 'mars.html',   label: 'Real-Time Mars',  sub: 'Perseverance + MEDA on a NASA terrain globe',    tier: 'public', icon: 'planet', badge: 'NEW', id: 'mars' },
-        { href: 'colony.html', label: 'Lunar Colony',    sub: 'Strategy game · the real Sun attacks',           tier: 'public', icon: 'moon', badge: 'NEW', id: 'colony' },
         { section: 'Planetary systems' },
         { href: 'solar-system.html',   label: 'Solar System',   sub: '31 moons · live Galilean N-body',                tier: 'public', icon: 'solar-system', id: 'solar' },
         { href: 'jupiter-system.html', label: 'Jupiter System', sub: 'Galilean moons · 4:2:1 Laplace resonance',       tier: 'public', icon: 'planet', id: 'jupiter-system' },
@@ -169,6 +168,11 @@ const NAV_ITEMS = {
         { section: 'Maps & missions' },
         { href: 'missions.html',     label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: 'probe', id: 'missions' },
         { href: 'galactic-map.html', label: 'Galaxy Map',     sub: '3D Milky Way star map',           tier: 'free',   icon: 'galaxy' },
+        // 2026-10-05: SkyView took Lunar Colony's slot (colony.html stays on the
+        // Local Space hub and in the catalogue) — this menu is at its 10-link cap
+        // (js/site-sections.js). It sits beside the Galaxy Map because it draws
+        // that map's objects in the visitor's own sky.
+        { href: 'skyview.html',      label: 'SkyView',        sub: 'Your sky now · top 10 to see',    tier: 'public', icon: 'sky-dome', badge: 'NEW', id: 'skyview' },
     ],
 
     'deep-space': [
