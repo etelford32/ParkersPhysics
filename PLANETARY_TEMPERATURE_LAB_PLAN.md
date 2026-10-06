@@ -472,27 +472,37 @@ representativeness offset.
 
 ### 4.3 The live aggregate (Postgres, next to `compute_weather_extremes`)
 
-Migration `supabase-temperature-lab-migration.sql`:
+Migration `supabase-temperature-lab-migration.sql` — **written 2026-10-06, NOT yet applied**
+(the author's go). Both SELECT bodies were run read-only against production first: 24 frames
+in the window, all 2592 cells mapped by lat/lon rounding with no collision, the previous 24 h
+fully covered.
 
 - **`temperature_lab_cache`** — derived, public analysis. Anon `SELECT`, the
   `weather_extremes_public_read` precedent.
   - Written hourly at **:25** by pg_cron `temperature-lab-hourly` → `compute_temperature_lab()`.
-  - Payload: per-cell arrays `t24max/t24min/t24mean/tNow/prev24mean/coverage`, the newest
-    frame time, and the `source` mix of the window.
-  - Pure SQL over the last 24 frames. That is cheap next to the 30-day extremes job.
-  - Keeps 48 rows.
+  - Window: frames in `(newest − 23 h 30 min, newest]`, i.e. the newest 24 hourly frames.
+  - Payload: per-cell arrays `t24max / t24min / t24mean` (NULL below 18 of 24 frames — never
+    zero), `tnow` (the newest frame), `prev24mean` (the 24 h before, for the swing card) and
+    `n24` (frame count); the row carries `frame_from / frame_to / n_frames` and the `sources`
+    mix of the window.
+  - Cells are keyed by **coordinates**, never by array position (the extremes migration's
+    rule): Open-Meteo returns its own snapped grid points, MET Norway the target centres.
+  - Pure SQL over 24 frames — cheap next to the 30-day extremes job. Keeps 48 rows.
 - **`temperature_daily_cells`** — service-role only, zero policies. This is the `forecast_log`
-  pattern; add it to CLAUDE.md §4.2 as an intentional advisor flag.
+  pattern, listed in CLAUDE.md §4.2 as an intentional advisor flag.
   - One row per UTC date with the per-cell local-solar-day max/min/mean, computed at **13:30
-    UTC** (when every longitude's local day for that date has ended).
+    UTC** (when every longitude's local day for that date has ended) by
+    `rollup_temperature_daily(p_date)`. Local day offset = `floor(lon/15 + 0.5)` at the cell
+    centre, the same expression as `js/temperature-normals.js`.
   - **This is our own consistent-source daily archive.** It starts accumulating on day one,
     outlives the grid cache's 30-day retention, and is what later verifies everything:
     - the representativeness offset;
     - the Intro forecast-anomaly skill;
     - the monthly harness check against C3S.
   - Keep 800 days; about 31 KB per day.
-- **`temperature_sites_cache`** — derived, anon `SELECT`. Holds the latest site-network
-  readings (§4.4).
+- Neither function is `SECURITY DEFINER`; EXECUTE is revoked from `public / anon /
+  authenticated` (cron runs as `postgres`).
+- **`temperature_sites_cache`** — moved to Phase 3 with the site network it caches (§4.4).
 
 ### 4.4 The extreme-site network
 
@@ -536,12 +546,24 @@ per-location counting: a single 864-location request may by itself exceed a per-
 
 | Route | Runtime | Reads | Cache | Registry |
 |---|---|---|---|---|
-| `/api/temperature/snapshot` | Edge | `temperature_lab_cache` + `temperature_sites_cache` + normals/quantiles/records assets (fetched from own origin, module-scoped) → runs the kernel | `s-maxage=900, swr=600` | `category:'weather'`, `prewarm:'medium'`, `cadence_s:3600` |
+| `/api/temperature/snapshot` *(shipped, Phase 2)* | Edge | `temperature_lab_cache` (+ `temperature_sites_cache` from Phase 3) + normals/quantiles/records assets (fetched from own origin, module-scoped) → runs the kernel | `s-maxage=900, swr=600` | `category:'weather'`, `prewarm:'medium'`, `cadence_s:3600` |
 | `/api/temperature/outlook-grid` (Intro) | Edge | `temperature_outlook_grid`, written 2×/day by `api/cron/refresh-temperature-outlook-grid.js` (16-day daily tmax/tmin/tmean at the 2592 points, 3 chunks) | `s-maxage=3600` | `prewarm:'cold'` |
 
-- **Degradation is never a 5xx.**
-  - The fallback source → `freshness:'stale'` + `note:'coarse-fallback-field'`.
-  - Missing normals → `freshness:'expired'` with the absolute cards only.
+- **Degradation is never a 5xx** (`api/_lib/temperature-snapshot.js` `freshnessOf`, the pure
+  half, node-tested by `tests/temperature-snapshot-route.mjs`). The body carries
+  `freshness` + `reasons`:
+  - `stale`: `fallback-source` (any non-`open-meteo` frame in the window; the disclosure says
+    it understates extremes, R1), `window-old` (newest frame > 3 h), `low-coverage`
+    (area-weighted coverage < 0.9). The cards still render.
+  - `expired`: `no-aggregate` (table missing — the migration not applied — empty, or a
+    payload whose arrays are not 2592 long: refused, never padded) or `normals-unavailable`.
+    `cards: null`, plus a `note` naming the cause. **Changed from the draft** ("absolute cards
+    only"): the land/ocean mask lives in the normals asset, so without it even the hottest-land
+    card cannot say which cells are land, and the asset is a same-origin static file — its
+    outage is a deploy fault, not a feed fault. The isolate retries the load on the next
+    request rather than caching the failure.
+  - An expired answer is cached 60 s, not 900, so recovery shows up fast.
+- `?surface=land|ocean|all` (default land; anything else falls back to land).
 - **Registration:** both routes go into `js/pipeline-registry.js`, which is what puts them on
   `status.html` and into prewarm (CLAUDE.md §8). The new crons go into `vercel.json` `crons`
   (CLAUDE.md §4.3).
@@ -790,8 +812,8 @@ clean:
 | **0b — restore the primary grid source** *(blocks launch)* | **Step 1 shipped 2026-10-06 (honesty + diagnosis).** The premise above was wrong: the cron surfaced Open-Meteo's reason only when *every* attempt failed, and threw it away when MET Norway won, so no log line or heartbeat field held it. Now a fallback win (i) `console.warn`s every earlier attempt's reason, (ii) writes it to `pipeline_heartbeat` via `record_pipeline_failure` *before* `record_pipeline_success` (streak still ends at 0, so the watchdog email stays reserved for "nothing written"), and (iii) returns `degraded` + `attempt_failures`. `status.html` / `admin.html` score a fallback source amber ("degraded · fallback source") through `js/pipeline-registry.js` `isFallbackSource`, and `/api/weather/grid` serves the frame with `freshness:'stale'`. Rate limits that arrive as a 429 now short-circuit the same-IP gfs retry, like the 200 envelope always did. `OPEN_METEO_API_KEY` (optional) moves both Open-Meteo attempts to `customer-api` with `&apikey=`; the key is scrubbed from every reason. Gate: `node tests/weather-grid-pipeline.mjs` (fails on the pre-fix code). **Step 2:** after deploy, read `pipeline_heartbeat.last_failure_reason` for `weather_grid` (or one Vercel log line), which names the cause. **Step 3:** fix it — (a) set `OPEN_METEO_API_KEY` (D12), (b) re-pace chunks under the per-minute cap, or (c) a different primary | Step 1: done. Exit: 24 h of `open-meteo*` frames in `weather_grid_cache`; heartbeat amber on fallback |
 | **1 — normals** *(shipped 2026-10-06)* | `scripts/build-temperature-normals.py`, the four assets + `SOURCES.md` + `build-report.json`, `js/temperature-normals.js`, `tests/temperature-normals.mjs` | **Met:** Python↔JS fixture (200 cases) agrees to < 1e-6 K; R1 on the shipped file 14.387 °C vs C3S 14.38. **Replaced:** the "within 0.3 K of the windowed quantiles" gate was the wrong test — the windowed quantile is itself the noisy estimator, so the right gate is split-half CV against held-out years, where the N = 3 curves beat the unsmoothed window at every level (p10 0.661 vs 0.739 K, p99 0.824 vs 0.973). Representativeness is NOT in these files (every header says so) — Phase 1b |
 | **1b — representativeness** | Offset against Open-Meteo ERA5 points (§4.2 step 3) | Residual live-minus-normal mean over the first 30 days of `temperature_daily_cells` reported per region |
-| **2 — live aggregate** | Migration (3 tables, `compute_temperature_lab`, the 13:30 rollup), `js/geo-regions.js` move (+ `api/weather/extremes.js` imports it), `/api/temperature/snapshot`, registry entry, CLAUDE.md §4.2 note | `node tests/geo-regions.mjs tests/temperature-lab-model.mjs`; route self-reports `freshness`; `node tests/pipeline-registry.mjs` |
-| **3 — site network** | Census in the build script, `js/temperature-sites.js`, the cron, `vercel.json` | `node tests/temperature-sites.mjs`; cron writes; stale path tested |
+| **2 — live aggregate** *(code shipped 2026-10-06; migration awaiting the author's go)* | `supabase-temperature-lab-migration.sql` (2 tables, `compute_temperature_lab`, `rollup_temperature_daily`, two pg_cron jobs — **written and validated read-only on production, NOT applied**), `js/geo-regions.js` (moved verbatim; `api/weather/extremes.js` imports it), `js/temperature-lab-model.js` (§3: the five cards, the planet strip, the per-cell grid, the disclosure), `api/_lib/temperature-snapshot.js` + `api/temperature/snapshot.js`, registry entry `temperature-snapshot`, CLAUDE.md §4.2 note. `temperature_sites_cache` moved to Phase 3 | **Met:** `node tests/geo-regions.mjs` (3 — pins the moved labels and clusters by hash), `tests/temperature-lab-model.mjs` (10 — incl. R5 rarity-beats-degrees, ≥ 1500 km separation, nulls stay null, the Antarctic plateau at −78 not the −60 clamp), `tests/temperature-snapshot-route.mjs` (8 — every stale/expired path a 200, the asset outage recovers), `tests/pipeline-registry.mjs`. **Live exit:** after the migration, one production request returns `freshness:'stale'` with `reasons:['fallback-source']` until 0b step 3 lands — that is the honest answer, not a defect |
+| **3 — site network** | Census in the build script, `js/temperature-sites.js`, `temperature_sites_cache` (moved here from Phase 2), the cron, `vercel.json`, the snapshot route reading it | `node tests/temperature-sites.mjs`; cron writes; stale path tested |
 | **4 — page** | `temperature-lab.html` (anonymous + free ladder), nav/catalog/hub/glyph | `tests/temperature-lab-smoke.spec.js` (routes mocked, ladder classes asserted), `lint-nav`, `site-sections`, `glyphs`, `importmap-order` |
 | **5 — EarthView** | Lazy modal panel + anomaly mode + entry points + mobile | `tests/earth-temperature-lab.spec.js`, `tests/earth-time-controls-position.spec.js`, `tests/verdict-card-smoke.spec.js` |
 | **6 — Intro** | `temp-calendar-view.js` extraction, 30-day card, outlook-grid cron + route, heat/cold-wave watch, 1961–1990 asset + lens, cities board, gate variants, telemetry | `tests/home-temp-outlook.spec.js` still green; gate variants smoke; Open-Meteo budget re-measured after 0b |
