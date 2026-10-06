@@ -1,39 +1,75 @@
 /**
- * spaceship-designer-3d.js — Parametric rocket builder + launch animation for
- * the Space Ship Designer page.
+ * spaceship-designer-3d.js — 3D vehicle builder + launch animation for the
+ * Space Ship Designer page.
  *
- * Builds a fully customizable launch vehicle out of THREE primitives driven by
- * a design blob (see spaceship-designer-engine.js): stack of stages, engine
- * clusters, nosecone / fairing / capsule, fins, livery. Then flies it on a
- * physics-derived ascent trajectory with a live HUD callback.
+ * Builds the vehicle from the ONE stack geometry the kernel computes
+ * (`stackLayout` in spaceship-designer-engine.js) and flies it along the ONE
+ * trajectory the kernel integrates (`runAscent`), posed by the pure flight
+ * kernel (spaceship-designer-flight.js). It computes no physics of its own.
  *
- * Reuses the launch planner's detailed sub-builders so the engines and exhaust
- * look the same as the rest of the site:
- *   launch-engine-bell.js → buildEngineBell  (de Laval / Rao / vacuum nozzles)
- *   launch-plume.js        → buildPlume / tickPlume (shader exhaust)
- *   launch-pad-3d.js       → buildPad / tickBeacons (launch mount + beacons)
+ * LOAD-BEARING (each was a bug in the version this replaced, 2026-10):
+ *   • ENGINES ARE REAL SIZE. Bells are drawn at their physical throat/exit/
+ *     length (`engineGeometry`) and packed by `clusterLayout`; nothing is
+ *     shrunk to fit. A cluster wider than its stage gets a flared aft skirt —
+ *     the same flare computeStats bills as reference area.
+ *   • THE STACK STANDS ON A LAUNCH MOUNT. Stage 1's skin base sits
+ *     `engineDrop + clearance` above the deck. The old view put it at y = 0, so
+ *     every bell hung inside the pad and the plume was a speck in the trench.
+ *   • EVERY STAGE HAS ITS OWN ENGINES AND PLUMES, lit only while that stage is
+ *     the one firing in the trajectory (sample.stage, !sample.coasting). Spent
+ *     stages are DETACHED (scene.attach keeps their world transform) and fly
+ *     ballistically from the vehicle's velocity at separation; the fairing
+ *     halves / escape tower go at the kernel's `fairing` event.
+ *   • THE CAMERA FOLLOWS BY TRANSLATING THE RIG, EXACTLY, every frame — target
+ *     and camera move by the same vector, so the user's own orbit / zoom are
+ *     never overwritten (the star-collider rule; an eased follow trails a fast
+ *     vehicle). The old view eased only the target, so the camera stayed on
+ *     the ground staring up at a vehicle leaving the frame.
+ *   • TRUE SCALE, NO ALTITUDE COMPRESSION. The vehicle flies real metres over
+ *     a planet of real radius; near/far are re-ranged from the camera distance
+ *     every frame so the pad and the limb both resolve.
  *
  * Public:
  *   createRocketScene(canvas, opts) → {
- *     build(design),          // (re)assemble the rocket from a design blob
- *     launch(ascentResult),   // play a flight; resolves a Promise on MECO
- *     abort(), reset(),
- *     setView(name), setAutoRotate(bool),
- *     dispose(),
+ *     build(design), launch(ascentResult), abort(), reset(),
+ *     setStaticFire(on), isStaticFiring, setView(name), setAutoRotate(bool),
+ *     debug(), dispose(), design,
  *   }
- *   opts.onTick(state)  — per-frame flight telemetry for the HUD
- *   opts.onPhase(name)  — phase transitions ('idle'|'ignition'|'liftoff'|'ascent'|'meco')
+ *   opts.onTick(state) — per-frame flight telemetry for the HUD
+ *   opts.onPhase(name) — phase transitions
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildEngineBell } from './launch-engine-bell.js';
 import { buildPlume, tickPlume } from './launch-plume.js';
-import { buildPad, tickBeacons } from './launch-pad-3d.js';
-import { PROPELLANTS, ENGINE_CATALOG, LIVERIES, designStageExpansion01 } from './spaceship-designer-engine.js';
+import { buildLatticeTower, buildBeacon, tickBeacons, PAD_COLORS } from './launch-pad-3d.js';
+import {
+    PROPELLANTS, LIVERIES, LAUNCH_BODIES, stackLayout, designStageExpansion01,
+} from './spaceship-designer-engine.js';
+import { sampleTrajectory, poseAt, flightEvents, playbackRate, airFraction } from './spaceship-designer-flight.js';
+import {
+    BODY_LOOK, createSky, createStars, createPlanet, createParticles, SMOKE, sunDirection,
+} from './spaceship-designer-fx.js';
 
-const DAY_SKY = new THREE.Color(0x9ec7e8);
-const SPACE_SKY = new THREE.Color(0x02040a);
+// Plume palette per propellant. Additive blending: darker = dimmer, which is
+// how hydrolox and nuclear plumes come out nearly transparent (as they are).
+// lenD = visible sea-level plume length in exit diameters (cosmetic).
+const PLUME_LOOK = {
+    kerolox:    { core: 0xfff2d0, mid: 0xffa040, outer: 0x3a1a08, lenD: 26 },
+    methalox:   { core: 0xeaf4ff, mid: 0x7fb8ff, outer: 0x101c3a, lenD: 22 },
+    hydrolox:   { core: 0xc8d4f0, mid: 0x5a6aa0, outer: 0x0a1020, lenD: 18 },
+    hypergolic: { core: 0xfff0d0, mid: 0xff9a50, outer: 0x401808, lenD: 20 },
+    solid:      { core: 0xffffff, mid: 0xfff2c8, outer: 0x8a6a40, lenD: 30 },
+    nuclear:    { core: 0xd8ecff, mid: 0x4a6a88, outer: 0x060c14, lenD: 12 },
+    ion:        { core: 0xbfe4ff, mid: 0x3a78ff, outer: 0x000610, lenD: 30 },
+};
+
+const DECK_TOP = 1.5;              // concrete deck height (m)
+const MOUNT_CLEARANCE = 3.5;       // engine exit plane → deck (m): room for the plume to turn
+const IGNITION_HOLD_S = 3.0;       // engines light at T−3 s, hold-downs release at T−0
+
+const MAX_CAM_DIST = 2500;            // m — the zoom limit around the vehicle
 
 export function createRocketScene(canvas, opts = {}) {
     const onTick = opts.onTick || (() => {});
@@ -42,586 +78,1222 @@ export function createRocketScene(canvas, opts = {}) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const scene = new THREE.Scene();
-    scene.background = DAY_SKY.clone();
-    scene.fog = new THREE.Fog(DAY_SKY.clone(), 120, 520);
+    scene.background = new THREE.Color(0x000000);
+    scene.fog = new THREE.FogExp2(0xb7d3ea, 0);
 
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.5, 4e7);
     camera.position.set(60, 45, 90);
 
+    // Y-up scene, camera.up never changes → OrbitControls is built once and
+    // never needs the rebuild the Z-up / local-vertical pages do.
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 12;
-    controls.maxDistance = 600;
+    controls.minDistance = 6;
+    controls.maxDistance = MAX_CAM_DIST;
     controls.target.set(0, 30, 0);
 
     // ── Lighting ──
-    scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x202830, 0.85));
-    const sun = new THREE.DirectionalLight(0xfff4e0, 1.4);
-    sun.position.set(80, 120, 60);
-    scene.add(sun);
-    const fill = new THREE.DirectionalLight(0x88aaff, 0.4);
+    const SUN = sunDirection();
+    const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x3a3328, 0.75);
+    scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
+    sun.position.copy(SUN).multiplyScalar(200);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.0004;
+    scene.add(sun, sun.target);
+    const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
     fill.position.set(-60, 40, -40);
     scene.add(fill);
+    // Exhaust light: lights the deck, the mount and the vehicle's own base.
+    const engineLight = new THREE.PointLight(0xffa040, 0, 0, 2);
+    scene.add(engineLight);
 
-    // ── Ground + pad ──
-    const world = new THREE.Group();          // everything that "drops away" on ascent
-    scene.add(world);
-    const ground = new THREE.Mesh(
-        new THREE.CircleGeometry(400, 64),
-        new THREE.MeshStandardMaterial({ color: 0x39414a, roughness: 1 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.05;
-    world.add(ground);
-    let pad = null, padBeacons = [];
-    try {
-        const p = buildPad('generic', {});
-        pad = p.root; padBeacons = p.beacons || [];
-        world.add(pad);
-    } catch { /* pad optional */ }
+    // ── Environment (rebuilt when the body or launch latitude changes) ──
+    let env = null;            // { key, body, look, sky, stars, planet, ground }
+    const particles = createParticles(3200);
+    scene.add(particles.points);
 
-    // ── Starfield (fades in with altitude) ──
-    const stars = makeStars();
-    stars.material.opacity = 0;
-    scene.add(stars);
+    // ── Pad (rebuilt per design: the mount is sized to the vehicle) ──
+    const padRoot = new THREE.Group();
+    scene.add(padRoot);
+    let padBeacons = [], padArms = [], padOwned = new Set();
+    let padGeom = null;               // { holeR, outerR, legs } of the current launch mount
 
     // ── Rocket ──
-    const rocketRoot = new THREE.Group();      // climbs in +Y during flight
+    const rocketRoot = new THREE.Group();
     scene.add(rocketRoot);
-    let plumes = [];                            // active first-stage plumes
-    let engineMounts = [];                      // gimbal pivots { pivot, isFirstStage }
+    let owned = new Set();            // geometries + materials of the current build
     let currentDesign = null;
-    let stage0ThrustFull_kN = 0;               // first-stage thrust at 100% throttle
-    let disposables = [];
+    let stack = null;                 // stackLayout(currentDesign)
+    let stageGroups = [];             // one Group per stage (detachable)
+    let engineSets = [];              // per stage: { pivots, plumes, bellMats, hotMats, look, gimbalRad, glow, fullThrust }
+    let noseParts = { halves: [], les: null };
+    let rcs = [];                     // puff meshes
+    let baseY = DECK_TOP + 4;         // rocket skin base height on the mount
+    let debris = [];
+    let staticFire = false;
+    let autoRotate = false;
+    let flight = null;
+    let rcsPuffT = 0;
+    let vaporCone = null;             // transonic condensation collar (Earth only)
+    let orbitRing = null;             // the achieved orbit, drawn after insertion
+    let orbitView = null;             // one-shot fly-out tween to frame that orbit
 
-    // ── Ground exhaust bloom (stays on the pad; fades with altitude) ──
-    const groundFX = makeGroundFX();
-    groundFX.group.position.y = 0.12;
-    groundFX.group.visible = false;
-    world.add(groundFX.group);
-
-    function disposeRocket() {
-        for (const d of disposables) {
-            d.geometry?.dispose?.();
-            if (Array.isArray(d.material)) d.material.forEach((m) => m.dispose());
-            else d.material?.dispose?.();
-        }
-        disposables = [];
-        rocketRoot.clear();
-        plumes = [];
-        engineMounts = [];
-    }
-
-    function track(obj) {
-        obj.traverse?.((c) => { if (c.isMesh) disposables.push(c); });
-        if (obj.isMesh) disposables.push(obj);
+    function own(obj) {
+        obj.traverse((c) => {
+            if (c.geometry) owned.add(c.geometry);
+            const m = c.material;
+            if (Array.isArray(m)) m.forEach((x) => owned.add(x)); else if (m) owned.add(m);
+        });
         return obj;
     }
+    function disposeSet(set) {
+        for (const r of set) r.dispose?.();
+        set.clear();
+    }
 
-    // ── Build the rocket from a design ──────────────────────────────────────
+    // ── Environment ─────────────────────────────────────────────────────────
+    function ensureEnv(design) {
+        const body = LAUNCH_BODIES[design.bodyId] || LAUNCH_BODIES.earth;
+        const lat = Math.round((design.launchLatitude ?? 0) * 10) / 10;
+        const lon = Math.round((design.launchLongitude ?? 0) * 10) / 10;
+        const key = body.id + ':' + lat + ':' + lon;
+        if (env?.key === key) return env;
+        if (env) {
+            scene.remove(env.sky.mesh, env.stars.points, env.planet.group, env.ground);
+            env.sky.dispose(); env.stars.dispose(); env.planet.dispose();
+            env.ground.geometry.dispose(); env.ground.material.map?.dispose(); env.ground.material.dispose();
+        }
+        const look = BODY_LOOK[body.id] || BODY_LOOK.moon;
+        const sky = createSky(look);
+        const stars = createStars();
+        const planet = createPlanet(body, look, lat, lon);
+        // Local ground apron: the planet's polar facet is ~100 km wide, so
+        // the ground round the pad gets its own flat disc. 20 km is wide
+        // enough that fog, not the disc's rim, makes the horizon (a 3 km disc
+        // ended 1° below it in a hard line); its sag against the true sphere
+        // is 31 m at the rim, and it is hidden above 25 km anyway.
+        const ground = new THREE.Mesh(
+            new THREE.CircleGeometry(20000, 96),
+            new THREE.MeshStandardMaterial({ color: look.ground, map: groundTexture(), roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, transparent: true }),
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(sky.mesh, stars.points, planet.group, ground);
+        hemi.groundColor.setHex(look.ground);
+        env = { key, body, look, sky, stars, planet, ground, site: [lat, lon] };
+        return env;
+    }
+
+    function updateEnv() {
+        if (!env) return;
+        const C = new THREE.Vector3(0, -env.planet.R, 0);
+        const rel = camera.position.clone().sub(C);
+        const camAlt = rel.length() - env.planet.R;
+        const up = rel.normalize();
+        const air = airFraction(env.body, camAlt);
+        // Perceived sky brightness falls much more slowly than pressure: the
+        // sky is still blue at 10 km (p/p₀ ≈ 0.3) and only black by ~60 km.
+        const skyAir = Math.pow(air, 0.35);
+        env.sky.update(camera.position, up, skyAir);
+        const hasAir = env.body.rho0_kg_m3 > 1e-6;
+        env.stars.update(camera.position, hasAir ? 1 - Math.min(1, air * 30) : 0.75);
+        env.planet.update(camera.position, camAlt);
+        // Fog = the horizon colour, visibility from the body's surface value,
+        // thinning with the air above the camera.
+        scene.fog.color.setHex(env.look.horizon ?? 0x000000).multiplyScalar(Math.max(0.05, skyAir));
+        // Haze is a SURFACE phenomenon: thin it faster than the pressure so
+        // the ground stays visible looking down from altitude.
+        scene.fog.density = hasAir && env.look.fog ? Math.pow(air, 1.5) / env.look.fog : 0;
+        // The apron and pad are 3 km of flat ground; from high up they would
+        // z-fight the sphere, and they are sub-pixel anyway.
+        // The flat apron hands over to the true sphere (and its map) as the
+        // camera climbs from 2 to 8 km.
+        const apron = 1 - Math.min(1, Math.max(0, (camAlt - 2000) / 6000));
+        env.ground.material.opacity = apron;
+        env.ground.visible = apron > 0.01;
+        padRoot.visible = camAlt < 25000;
+        // Depth range rides the camera distance: 5 m from an engine bell and
+        // 300 km over the limb are the same scene.
+        const d = camera.position.distanceTo(controls.target);
+        camera.near = Math.min(50, Math.max(0.05, d * 0.004));
+        camera.far = 4e7;
+        camera.updateProjectionMatrix();
+        hemi.intensity = 0.25 + 0.5 * (hasAir ? Math.max(air, 0.15) : 0.35);
+    }
+
+    // ── Build ───────────────────────────────────────────────────────────────
     function build(design) {
         currentDesign = design;
+        // A rebuild mid-flight (the user edited the design) ends that flight —
+        // resolve its promise or the page's Launch button never re-enables.
+        const was = flight; flight = null;
+        was?.resolve?.(was.result);
+        ensureEnv(design);
         disposeRocket();
-
+        stack = stackLayout(design);
         const liv = LIVERIES[design.livery?.id] || LIVERIES.classic;
-        const matBody = new THREE.MeshStandardMaterial({ color: liv.primary, roughness: 0.5, metalness: 0.12 });
-        const matDark = new THREE.MeshStandardMaterial({ color: liv.secondary, roughness: 0.55, metalness: 0.2 });
-        const matAccent = new THREE.MeshStandardMaterial({ color: liv.accent, roughness: 0.4, metalness: 0.3 });
-
-        let y = 0;
-        const stageTops = [];
-
-        design.stages.forEach((s, i) => {
-            const rTop = s.diameter_m / 2;
-            const rBot = (design.stages[i - 1]?.diameter_m / 2) || rTop;
-            // Interstage taper if this stage is narrower/wider than the one below.
-            if (i > 0 && Math.abs(rTop - rBot) > 0.05) {
-                const taperH = Math.max(1.5, Math.abs(rTop - rBot) * 2.2);
-                const taper = track(new THREE.Mesh(
-                    new THREE.CylinderGeometry(rTop, rBot, taperH, 40, 1, true),
-                    matDark
-                ));
-                taper.position.y = y + taperH / 2;
-                rocketRoot.add(taper);
-                y += taperH;
-            }
-
-            // Stage body.
-            const body = track(new THREE.Mesh(
-                new THREE.CylinderGeometry(rTop, rTop, s.length_m, 48, 1, true),
-                matBody
-            ));
-            body.position.y = y + s.length_m / 2;
-            rocketRoot.add(body);
-
-            // Livery pattern → accent rings.
-            addPattern(rocketRoot, design.livery?.pattern || 'solid', rTop, y, s.length_m, matAccent, track);
-
-            // Engine section ring (darker collar at the base of the stage).
-            const collarH = Math.min(2.2, s.length_m * 0.08);
-            const collar = track(new THREE.Mesh(
-                new THREE.CylinderGeometry(rTop * 1.005, rTop * 1.02, collarH, 48, 1, true),
-                matDark
-            ));
-            collar.position.y = y + collarH / 2;
-            rocketRoot.add(collar);
-
-            // Engine cluster at the base of this stage (points down).
-            addEngines(rocketRoot, s, rTop, y, i === 0);
-
-            stageTops.push(y + s.length_m);
-            y += s.length_m;
-        });
-
-        const topR = design.stages[design.stages.length - 1]?.diameter_m / 2 || 1.8;
-
-        // ── Nosecone / payload / cockpit ──
-        addNosecone(rocketRoot, design, topR, y, { matBody, matDark, matAccent }, track);
-
-        // ── Fins on the first stage ──
-        addFins(rocketRoot, design.fins, design.stages[0]?.diameter_m / 2 || 1.8, track, matDark);
-
-        // First-stage thrust (full throttle) — drives the live thrust HUD and the
-        // ground-bloom intensity during a static fire.
-        const s0 = design.stages[0];
-        if (s0) {
-            const e0 = ENGINE_CATALOG[s0.engineId] || ENGINE_CATALOG.merlin_1d;
-            stage0ThrustFull_kN = (e0.sl_kn || e0.vac_kn || 0) * Math.max(1, s0.engineCount | 0);
-            // Size the ground bloom to the booster footprint and tint it to the fuel.
-            const prop0 = PROPELLANTS[s0.propellantId] || PROPELLANTS.kerolox;
-            groundFX.configure((s0.diameter_m / 2) * 2.6, prop0.flame);
-        }
-
-        // A rebuild blows away the old plumes/pivots; if we're mid static-fire
-        // (e.g. the user nudged the throttle slider), re-light the new engines so
-        // the test keeps running and updates live.
-        if (staticFire) {
-            plumes.forEach((p) => { p.visible = true; });
-            groundFX.group.visible = true;
-        }
-
-        frameCamera();
-        return { height: y + (design.payload?.fairingLen_m || 8) };
-    }
-
-    function addPattern(parent, pattern, r, y0, len, matAccent, track) {
-        const ring = (yy, h) => {
-            const m = track(new THREE.Mesh(
-                new THREE.CylinderGeometry(r * 1.012, r * 1.012, h, 48, 1, true),
-                matAccent
-            ));
-            m.position.y = yy;
-            parent.add(m);
+        const M = {
+            body: new THREE.MeshStandardMaterial({ color: liv.primary, roughness: 0.45, metalness: 0.1 }),
+            dark: new THREE.MeshStandardMaterial({ color: liv.secondary, roughness: 0.55, metalness: 0.25 }),
+            accent: new THREE.MeshStandardMaterial({ color: liv.accent, roughness: 0.4, metalness: 0.3 }),
+            bulk: new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.7, metalness: 0.4, side: THREE.DoubleSide }),
+            steel: new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.45, metalness: 0.7 }),
         };
-        if (pattern === 'stripe') ring(y0 + len * 0.82, Math.min(2, len * 0.06));
-        else if (pattern === 'bands') {
-            for (let f = 0.2; f < 0.95; f += 0.25) ring(y0 + len * f, Math.min(1.2, len * 0.04));
-        } else if (pattern === 'checker') {
-            for (let f = 0.15; f < 0.95; f += 0.18) ring(y0 + len * f, Math.min(0.8, len * 0.03));
+
+        stack.stages.forEach((st, i) => {
+            const g = new THREE.Group();
+            g.name = `stage-${i + 1}`;
+            const prop = PROPELLANTS[st.engine.propellant] || PROPELLANTS.kerolox;
+            buildStageBody(g, st, i, prop, design, M);
+            engineSets[i] = buildEngineSet(g, st, i);
+            rocketRoot.add(g);
+            stageGroups.push(g);
+        });
+        buildNose(design, M);
+        buildVaporCone();
+        buildRcs(M);
+        own(rocketRoot);
+        rocketRoot.traverse((c) => { if (c.isMesh && !c.material?.transparent) c.castShadow = true; });
+
+        buildPad(design);
+        rocketRoot.position.set(0, baseY, 0);
+        rocketRoot.rotation.set(0, 0, 0);
+        if (staticFire) setPlumes(0, true);
+        frameCamera();
+        return { height: stack.bodyLength_m };
+    }
+
+    function disposeRocket() {
+        for (const d of debris) scene.remove(d.obj);
+        debris = [];
+        for (const g of stageGroups) { g.parent?.remove(g); }
+        for (const h of noseParts.halves) h.parent?.remove(h);
+        noseParts.les?.parent?.remove(noseParts.les);
+        rocketRoot.clear();
+        disposeSet(owned);
+        stageGroups = []; engineSets = []; noseParts = { halves: [], les: null }; rcs = [];
+        vaporCone = null;
+        clearOrbitRing();
+        particles.clear();
+    }
+
+    function buildStageBody(g, st, i, prop, design, M) {
+        const { r, y0, length: len } = st;
+        // Hydrolox stages wear their foam (the Shuttle ET / SLS core look);
+        // solid motors their bare case. Everything else wears the livery.
+        const skin = prop.id === 'hydrolox' || prop.id === 'solid'
+            ? new THREE.MeshStandardMaterial({ color: prop.tank, roughness: prop.id === 'solid' ? 0.6 : 0.85, metalness: 0.05 })
+            : M.body;
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 56, 1, true), skin);
+        body.position.y = y0 + len / 2;
+        g.add(body);
+
+        // Bulkheads — the stage is a closed tank, not a tube you can see sky through.
+        const baseR = st.aftSkirt ? st.aftSkirt.rBot : r;
+        const aft = new THREE.Mesh(new THREE.CircleGeometry(baseR, 48), M.bulk);
+        aft.rotation.x = Math.PI / 2; aft.position.y = y0;
+        const fwd = new THREE.Mesh(new THREE.CircleGeometry(r, 48), M.bulk);
+        fwd.rotation.x = -Math.PI / 2; fwd.position.y = y0 + len;
+        g.add(aft, fwd);
+
+        // Aft skirt flare over an overhanging cluster (Saturn V's engine fairings).
+        if (st.aftSkirt) {
+            const k = st.aftSkirt;
+            const skirt = new THREE.Mesh(new THREE.CylinderGeometry(k.rTop, k.rBot, k.length, 56, 1, true), M.dark);
+            skirt.position.y = y0 + k.length / 2;
+            g.add(skirt);
+        } else {
+            const collarH = Math.min(2.2, len * 0.08);
+            const collar = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.006, r * 1.02, collarH, 56, 1, true), M.dark);
+            collar.position.y = y0 + collarH / 2;
+            g.add(collar);
+        }
+
+        // Cable raceway — the one external line every real stage carries.
+        const race = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.12, r * 0.08), len * 0.86, Math.max(0.1, r * 0.06)), M.dark);
+        race.position.set(0, y0 + len / 2, r * 1.01);
+        g.add(race);
+
+        // Livery pattern.
+        const ring = (yy, h, mat = M.accent) => {
+            const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.012, r * 1.012, h, 56, 1, true), mat);
+            m.position.y = yy; g.add(m);
+        };
+        const pattern = design.livery?.pattern || 'solid';
+        if (prop.id === 'solid') {
+            for (let f = 0.2; f < 0.99; f += 0.2) ring(y0 + len * f, Math.min(0.5, len * 0.012), M.dark);   // segment joints
+        } else if (pattern === 'stripe') ring(y0 + len * 0.82, Math.min(2, len * 0.06));
+        else if (pattern === 'bands') { for (let f = 0.2; f < 0.95; f += 0.25) ring(y0 + len * f, Math.min(1.2, len * 0.04)); }
+        else if (pattern === 'checker') { for (let f = 0.15; f < 0.95; f += 0.18) ring(y0 + len * f, Math.min(0.8, len * 0.03)); }
+
+        // Interstage — houses the next stage's engines; jettisoned with THIS stage.
+        if (st.interstage) {
+            const it = st.interstage;
+            const inter = new THREE.Mesh(new THREE.CylinderGeometry(it.rTop, it.rBot, it.length, 56, 1, true), M.dark);
+            inter.material = M.dark;
+            inter.position.y = it.y0 + it.length / 2;
+            g.add(inter);
+        }
+
+        if (i === 0) addFins(g, design.fins, st, M);
+    }
+
+    function addFins(g, fins, st, M) {
+        if (!fins || fins.type === 'none') return;
+        const count = Math.max(2, Math.min(8, fins.count || 4));
+        const r = st.r;
+        for (let k = 0; k < count; k++) {
+            const a = (k / count) * Math.PI * 2 + Math.PI / count;
+            if (fins.type === 'grid') {
+                // Grid fins sit at the TOP of the booster (they steer it home
+                // tail-first): a frame with a 4×4 lattice, stowed flat.
+                const w = Math.max(0.8, r * 0.75), h = w * 1.25, t = 0.06;
+                const fin = new THREE.Group();
+                const bar = (bw, bh, x, y) => {
+                    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.22), M.dark);
+                    m.position.set(x, y, 0); fin.add(m);
+                };
+                bar(w, t * 2, 0, h / 2); bar(w, t * 2, 0, -h / 2); bar(t * 2, h, w / 2, 0); bar(t * 2, h, -w / 2, 0);
+                for (let q = 1; q < 4; q++) { bar(t, h, -w / 2 + (w * q) / 4, 0); bar(w, t, 0, -h / 2 + (h * q) / 4); }
+                fin.position.set(Math.cos(a) * (r + 0.15), st.y0 + st.length - h * 0.9, Math.sin(a) * (r + 0.15));
+                fin.rotation.y = -a + Math.PI / 2;
+                g.add(fin);
+            } else {
+                const span = r * (fins.type === 'swept' ? 1.3 : 1.1);
+                const root = r * 2.6;
+                const sweep = fins.type === 'swept' ? 0.85 : 0.45;
+                const shape = new THREE.Shape();
+                shape.moveTo(0, 0); shape.lineTo(0, root);
+                shape.lineTo(span, root * (1 - sweep)); shape.lineTo(span, 0); shape.closePath();
+                const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.12, r * 0.06), bevelEnabled: false });
+                geo.translate(0, 0, -Math.max(0.12, r * 0.06) / 2);
+                const fin = new THREE.Mesh(geo, M.dark);
+                fin.position.set(Math.cos(a) * r * 0.98, st.y0 - st.geo.bellLen_m * 0.2, Math.sin(a) * r * 0.98);
+                fin.rotation.y = -a;
+                g.add(fin);
+            }
         }
     }
 
-    function addEngines(parent, stageDef, stageR, baseY, isFirstStage) {
-        const eng = ENGINE_CATALOG[stageDef.engineId] || ENGINE_CATALOG.merlin_1d;
-        const prop = PROPELLANTS[stageDef.propellantId] || PROPELLANTS.kerolox;
-        const count = Math.max(1, Math.min(45, stageDef.engineCount | 0));
-        const positions = clusterPositions(count, stageR * 0.82);
-
-        // Build one bell to measure its natural exit radius, then scale all
-        // copies so the cluster fits inside the stage diameter.
-        const proto = buildEngineBell({ type: eng.bell, detail: count > 12 ? 'low' : count > 4 ? 'medium' : 'high' });
-        const box = new THREE.Box3().setFromObject(proto);
-        const natR = Math.max(0.2, (box.max.x - box.min.x) / 2);
-        const spacing = nearestSpacing(positions);
-        const targetR = Math.min(spacing * 0.46, stageR * 0.9 / Math.max(1, Math.cbrt(count)));
-        const scale = Math.max(0.12, targetR / natR);
-        proto.scale.setScalar(scale);
-
-        positions.forEach(([px, pz], idx) => {
-            // Each engine hangs off a gimbal pivot at its mount point so the bell
-            // and its plume can thrust-vector together (rotate about the mount,
-            // not about the rocket centreline).
-            const pivot = new THREE.Group();
-            pivot.position.set(px, baseY, pz);
-            parent.add(pivot);
-            engineMounts.push({ pivot, isFirstStage });
-
-            const bell = idx === 0 ? proto : proto.clone();
-            if (idx !== 0) bell.scale.setScalar(scale);
-            bell.position.set(0, -0.2, 0);
-            bell.traverse((c) => { if (c.isMesh) disposables.push(c); });
-            pivot.add(bell);
-
-            // Plumes only on the first stage (the one that fires at liftoff).
-            if (isFirstStage) {
-                const plume = buildPlume({
-                    coreRadius: natR * scale * 0.7,
-                    outerLen: natR * scale * 26,
-                    coreColor: 0xfff5d8,
-                    midColor: prop.flame,
-                    outerColor: 0x40210e,
-                    name: `plume-${idx}`,
-                });
-                plume.position.set(0, -natR * scale * 2.0, 0);
-                plume.traverse((c) => { if (c.isMesh) disposables.push(c); });
-                pivot.add(plume);
-                plumes.push(plume);
+    function buildEngineSet(g, st, i) {
+        const e = st.engine, geo = st.geo;
+        const look = PLUME_LOOK[e.propellant] || PLUME_LOOK.kerolox;
+        const n = st.cluster.positions.length;
+        const detail = n > 12 ? 'low' : n > 4 ? 'medium' : 'high';
+        let proto;
+        if (geo.kind === 'ion') proto = buildIonThruster(geo);
+        else {
+            proto = buildEngineBell({
+                type: e.bell, detail,
+                throatR: geo.throatR_m, exitR: geo.exitR_m, length: geo.bellLen_m,
+                tubes: geo.cooling === 'regen' ? undefined : false,
+            });
+        }
+        // Materials the firing state drives: the bell skin (radiatively-cooled
+        // extensions glow orange in flight) and the BackSide interior glow.
+        const bellMats = new Set(), hotMats = new Set();
+        proto.traverse((c) => {
+            if (!c.isMesh) return;
+            if (c.material?.isMeshPhysicalMaterial) bellMats.add(c.material);
+            if (c.material?.isMeshBasicMaterial && c.material.side === THREE.BackSide) {
+                c.material.userData.base = c.material.color.clone();
+                hotMats.add(c.material);
             }
         });
+        const pivots = [], plumes = [];
+        st.cluster.positions.forEach((p, k) => {
+            const pivot = new THREE.Group();
+            pivot.position.set(p.x, st.y0, p.z);       // gimbal at the throat plane
+            const bell = k === 0 ? proto : proto.clone();
+            pivot.add(bell);
+            const plume = buildPlume({
+                coreRadius: (geo.exitR_m / 1.6) * 0.95,
+                outerLen: geo.exitR_m * 2 * look.lenD,
+                coreColor: look.core, midColor: look.mid, outerColor: look.outer,
+                name: `plume-s${i + 1}-${k}`,
+            });
+            plume.position.y = -geo.bellLen_m;
+            pivot.add(plume);
+            g.add(pivot);
+            pivots.push(pivot); plumes.push(plume);
+        });
+        const fullThrust = Math.max(1, (i === 0 ? (e.sl_kn || e.vac_kn) : e.vac_kn) * n);
+        return {
+            pivots, plumes, bellMats: [...bellMats], hotMats: [...hotMats], look,
+            gimbalRad: ((geo.gimbalDeg || 0) * Math.PI) / 180, glow: 0, lit: false,
+            radiative: geo.cooling === 'radiative', fullThrust, geo, st,
+        };
     }
 
-    function addNosecone(parent, design, r, y0, mats, track) {
+    function buildIonThruster(geo) {
+        const g = new THREE.Group();
+        const R = geo.exitR_m;
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.12, R * 1.0, geo.bellLen_m, 32),
+            new THREE.MeshPhysicalMaterial({ color: 0x8e949c, metalness: 0.7, roughness: 0.35 }));
+        body.position.y = -geo.bellLen_m / 2;
+        const grid = new THREE.Mesh(new THREE.CircleGeometry(R * 0.95, 32),
+            new THREE.MeshBasicMaterial({ color: 0x16243a, side: THREE.BackSide }));
+        grid.rotation.x = -Math.PI / 2;
+        grid.position.y = -geo.bellLen_m - 0.005;
+        g.add(body, grid);
+        return g;
+    }
+
+    // Nose: fairing halves (jettisonable) round a payload, a crew capsule with
+    // its launch-escape tower, or a winged spaceplane.
+    function buildNose(design, M) {
         const type = design.payload?.nosecone || 'ogive';
-        const len = Math.max(3, design.payload?.fairingLen_m || 8);
+        const top = stack.stages[stack.stages.length - 1];
+        const r = top ? top.r : 1.8;
+        const L = stack.noseLen;
+        const y0 = stack.noseY0;
+        const hostG = stageGroups[stageGroups.length - 1];
 
         if (type === 'capsule') {
-            // Gumdrop crew capsule + window band.
-            const cap = track(new THREE.Mesh(
-                new THREE.CylinderGeometry(r * 0.55, r, len * 0.7, 40, 1, true),
-                mats.matBody
-            ));
-            cap.position.y = y0 + len * 0.35;
-            parent.add(cap);
-            const dome = track(new THREE.Mesh(
-                new THREE.SphereGeometry(r * 0.55, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-                mats.matBody
-            ));
-            dome.position.y = y0 + len * 0.7;
-            parent.add(dome);
-            addWindows(parent, design, r * 0.8, y0 + len * 0.42, track);
-        } else if (type === 'spaceplane') {
-            const fuse = track(new THREE.Mesh(
-                new THREE.CylinderGeometry(r * 0.7, r, len, 40, 1, true),
-                mats.matBody
-            ));
-            fuse.position.y = y0 + len / 2;
-            parent.add(fuse);
-            const wing = track(new THREE.Mesh(new THREE.BoxGeometry(r * 5, 0.4, r * 1.6), mats.matDark));
-            wing.position.set(0, y0 + len * 0.25, 0);
-            parent.add(wing);
-            addWindows(parent, design, r * 0.9, y0 + len * 0.75, track);
-        } else {
-            // Cone / ogive / blunt fairing.
-            const topR = type === 'cone' ? 0.01 : type === 'blunt' ? r * 0.4 : 0.05;
-            const segs = type === 'ogive' ? 40 : 32;
-            const nose = track(new THREE.Mesh(
-                new THREE.CylinderGeometry(topR, r, len, segs, 1, true),
-                mats.matBody
-            ));
-            nose.position.y = y0 + len / 2;
-            parent.add(nose);
-            if (design.cockpit?.layout && design.cockpit.layout !== 'none') {
-                addWindows(parent, design, r * 0.95, y0 + len * 0.55, track);
+            const rc = Math.min(r, 2.6);
+            const capH = Math.min(L * 0.75, rc * 1.25);
+            const adH = rc < r - 0.05 ? Math.max(1, (r - rc) * 1.6) : 0;
+            if (adH) {
+                const ad = new THREE.Mesh(new THREE.CylinderGeometry(rc, r, adH, 48, 1, true), M.dark);
+                ad.position.y = y0 + adH / 2; hostG.add(ad);
             }
+            const prof = [];
+            for (let k = 0; k <= 12; k++) {
+                const t = k / 12;
+                prof.push(new THREE.Vector2(rc * (1 - 0.66 * t) + 0.001, capH * t));
+            }
+            prof.unshift(new THREE.Vector2(0.001, -rc * 0.06));
+            prof.push(new THREE.Vector2(rc * 0.18, capH), new THREE.Vector2(rc * 0.18, capH + rc * 0.12), new THREE.Vector2(0.001, capH + rc * 0.12));
+            const cap = new THREE.Mesh(new THREE.LatheGeometry(prof, 48), M.body);
+            cap.position.y = y0 + adH;
+            hostG.add(cap);
+            addWindows(hostG, design, rc * 0.82, y0 + adH + capH * 0.45, M);
+            // Launch-escape tower: truss + solid motor, jettisoned with the fairing event.
+            const les = new THREE.Group();
+            const towerH = rc * 1.5, motorL = rc * 1.4;
+            for (let q = 0; q < 4; q++) {
+                const a = (q / 4) * Math.PI * 2;
+                const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, towerH, 6), M.dark);
+                rod.position.set(Math.cos(a) * rc * 0.12, towerH / 2, Math.sin(a) * rc * 0.12);
+                les.add(rod);
+            }
+            const motor = new THREE.Mesh(new THREE.CylinderGeometry(rc * 0.11, rc * 0.11, motorL, 20), M.body);
+            motor.position.y = towerH + motorL / 2;
+            const tip = new THREE.Mesh(new THREE.ConeGeometry(rc * 0.11, rc * 0.35, 20), M.accent);
+            tip.position.y = towerH + motorL + rc * 0.175;
+            les.add(motor, tip);
+            les.position.y = y0 + adH + capH + rc * 0.12;
+            hostG.add(les);
+            noseParts.les = les;
+            return;
         }
+
+        if (type === 'spaceplane') {
+            const prof = [];
+            for (let k = 0; k <= 16; k++) {
+                const t = k / 16;
+                prof.push(new THREE.Vector2(r * Math.sqrt(Math.max(0, 1 - Math.pow(t, 2.4))) * 0.85 + 0.001, L * t));
+            }
+            const fuse = new THREE.Mesh(new THREE.LatheGeometry(prof, 48), M.body);
+            fuse.position.y = y0;
+            hostG.add(fuse);
+            const wing = new THREE.Shape();
+            wing.moveTo(0, 0); wing.lineTo(r * 2.4, 0); wing.lineTo(0.2, L * 0.6); wing.closePath();
+            for (const side of [1, -1]) {
+                const w = new THREE.Mesh(new THREE.ExtrudeGeometry(wing, { depth: 0.18, bevelEnabled: false }), M.dark);
+                w.position.set(side * r * 0.7, y0 + L * 0.05, -0.09);
+                w.scale.x = side;
+                hostG.add(w);
+            }
+            addWindows(hostG, design, r * 0.7, y0 + L * 0.72, M);
+            return;
+        }
+
+        // Fairing: a cylindrical payload envelope + a tangent-ogive (or cone /
+        // blunt) nose, split into two halves that open at jettison.
+        const cylL = type === 'cone' ? 0 : L * 0.38;
+        const noseL = L - cylL;
+        const prof = [new THREE.Vector2(r, 0)];
+        if (cylL > 0) prof.push(new THREE.Vector2(r, cylL));
+        const rho = (r * r + noseL * noseL) / (2 * r);
+        for (let k = 1; k <= 24; k++) {
+            const x = (k / 24) * noseL;
+            let rad;
+            if (type === 'cone') rad = r * (1 - x / noseL);
+            else if (type === 'blunt') rad = r * Math.sqrt(Math.max(0, 1 - Math.pow(x / noseL, 2)));   // elliptic
+            else rad = Math.sqrt(Math.max(0, rho * rho - x * x)) + r - rho;   // tangent ogive, x from its base: r at 0, 0 at noseL
+            prof.push(new THREE.Vector2(Math.max(0.001, rad), cylL + x));
+        }
+        const fairMat = M.body.clone(); fairMat.side = THREE.DoubleSide;
+        owned.add(fairMat);
+        for (const side of [0, 1]) {
+            const half = new THREE.Group();
+            const m = new THREE.Mesh(new THREE.LatheGeometry(prof, 28, side * Math.PI, Math.PI), fairMat);
+            half.add(m);
+            half.position.y = y0;
+            half.userData.side = side ? -1 : 1;     // +X half / −X half
+            hostG.add(half);
+            noseParts.halves.push(half);
+        }
+        if (design.cockpit?.layout && design.cockpit.layout !== 'none') addWindows(hostG, design, r * 0.97, y0 + cylL + noseL * 0.3, M);
+        // Payload: a generic satellite bus, revealed when the fairing opens.
+        const w = r * 1.05, h = Math.min(L * 0.5, r * 1.5);
+        const sat = new THREE.Group();
+        const adapter = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.35, r * 0.7, h * 0.18, 32), M.dark);
+        adapter.position.y = h * 0.09;
+        const bus = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.7, w),
+            new THREE.MeshStandardMaterial({ color: 0xc89a3c, metalness: 0.85, roughness: 0.3 }));
+        bus.position.y = h * 0.18 + h * 0.35;
+        const panelMat = new THREE.MeshStandardMaterial({ color: 0x1a2a55, metalness: 0.4, roughness: 0.35 });
+        for (const sx of [1, -1]) {
+            const p = new THREE.Mesh(new THREE.BoxGeometry(0.06, h * 0.62, w * 0.9), panelMat);
+            p.position.set(sx * (w / 2 + 0.05), bus.position.y, 0);
+            sat.add(p);
+        }
+        const dish = new THREE.Mesh(new THREE.SphereGeometry(w * 0.28, 20, 8, 0, Math.PI * 2, 0, Math.PI / 3), M.steel);
+        dish.rotation.x = Math.PI; dish.position.y = bus.position.y + h * 0.35 + w * 0.28;
+        sat.add(adapter, bus, dish);
+        sat.position.y = y0;
+        hostG.add(sat);
     }
 
-    function addWindows(parent, design, r, yy, track) {
+    function addWindows(parent, design, r, yy, M) {
         const n = Math.max(0, Math.min(8, design.cockpit?.windows ?? 2));
         const glass = new THREE.MeshStandardMaterial({
             color: design.cockpit?.layout === 'glass' ? 0x0a1a2a : 0x121821,
             emissive: 0x123a55, emissiveIntensity: 0.6, roughness: 0.15, metalness: 0.6,
         });
-        for (let i = 0; i < n; i++) {
-            const a = (i / Math.max(1, n)) * Math.PI * 2;
-            const w = track(new THREE.Mesh(new THREE.CircleGeometry(r * 0.16, 16), glass));
-            w.position.set(Math.cos(a) * r, yy, Math.sin(a) * r);
-            w.lookAt(Math.cos(a) * r * 2, yy, Math.sin(a) * r * 2);
+        for (let k = 0; k < n; k++) {
+            const a = (k / Math.max(1, n)) * Math.PI * 2;
+            const w = new THREE.Mesh(new THREE.CircleGeometry(r * 0.13, 16), glass);
+            w.position.set(Math.cos(a) * r * 1.01, yy, Math.sin(a) * r * 1.01);
+            w.lookAt(Math.cos(a) * r * 3, yy, Math.sin(a) * r * 3);
             parent.add(w);
         }
     }
 
-    function addFins(parent, fins, r, track, matDark) {
-        if (!fins || fins.type === 'none') return;
-        const count = Math.max(2, Math.min(8, fins.count || 4));
-        for (let i = 0; i < count; i++) {
-            const a = (i / count) * Math.PI * 2;
-            let mesh;
-            if (fins.type === 'grid') {
-                mesh = track(new THREE.Mesh(new THREE.BoxGeometry(r * 1.1, r * 1.1, 0.18), matDark));
-                mesh.position.set(Math.cos(a) * r * 1.05, r * 6, Math.sin(a) * r * 1.05);
-                mesh.rotation.y = -a;
-            } else {
-                const shape = new THREE.Shape();
-                const sweep = fins.type === 'swept' ? 1.6 : 0.6;
-                shape.moveTo(0, 0); shape.lineTo(r * 1.4, 0);
-                shape.lineTo(r * (0.3 + sweep * 0.2), r * 2.2); shape.lineTo(0, r * 2.2);
-                shape.closePath();
-                const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.18, bevelEnabled: false });
-                mesh = track(new THREE.Mesh(geo, matDark));
-                mesh.position.set(Math.cos(a) * r, 0.2, Math.sin(a) * r);
-                mesh.rotation.y = -a + Math.PI / 2;
-            }
-            parent.add(mesh);
+    // RCS quads on the top stage: cold-gas puffs at separation (ullage
+    // settling) and fairing jettison. Cosmetic.
+    function buildRcs(M) {
+        const top = stack.stages[stack.stages.length - 1];
+        if (!top) return;
+        const g = stageGroups[stageGroups.length - 1];
+        const puffMat = new THREE.MeshBasicMaterial({ color: 0xf2f6ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
+        for (let k = 0; k < 4; k++) {
+            const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+            const quad = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.45, 0.3), M.dark);
+            const y = top.y0 + top.length * 0.92;
+            quad.position.set(Math.cos(a) * (top.r + 0.12), y, Math.sin(a) * (top.r + 0.12));
+            quad.lookAt(Math.cos(a) * 10, y, Math.sin(a) * 10);
+            const puff = new THREE.Mesh(new THREE.ConeGeometry(0.5, 2.4, 12, 1, true), puffMat);
+            puff.rotation.x = -Math.PI / 2; puff.position.z = 1.3;
+            quad.add(puff);
+            g.add(quad);
+            rcs.push(puff);
         }
     }
 
-    // ── Camera framing ──────────────────────────────────────────────────────
+    // ── Pad: deck + launch mount sized to the vehicle + tower ──────────────
+    function buildPad(design) {
+        padRoot.clear();
+        disposeSet(padOwned);
+        padBeacons = []; padArms = [];
+        const s0 = stack.stages[0];
+        if (!s0) return;
+        const baseR = s0.aftSkirt ? s0.aftSkirt.rBot : s0.r;
+        const holeR = Math.max(s0.cluster.clusterR_m, baseR) + 0.4;
+        const mountH = Math.max(4, stack.engineDrop_m + MOUNT_CLEARANCE);
+        const outerR = holeR + Math.max(2, baseR * 0.5);
+        baseY = DECK_TOP + mountH;
+        padGeom = { holeR, outerR, legs: 6 };
+
+        const concrete = new THREE.MeshStandardMaterial({ color: PAD_COLORS.concrete, roughness: 0.95 });
+        const steel = new THREE.MeshStandardMaterial({ color: PAD_COLORS.steelDark, roughness: 0.55, metalness: 0.6 });
+        const deckW = Math.max(40, outerR * 2 + 30);
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(deckW, DECK_TOP, deckW), concrete);
+        deck.position.y = DECK_TOP / 2; deck.receiveShadow = true;
+        padRoot.add(deck);
+        // Launch table: a ring on legs over the flame deflector.
+        const ringShape = new THREE.Shape();
+        ringShape.absarc(0, 0, outerR, 0, Math.PI * 2, false);
+        const hole = new THREE.Path(); hole.absarc(0, 0, holeR, 0, Math.PI * 2, true);
+        ringShape.holes.push(hole);
+        const table = new THREE.Mesh(new THREE.ExtrudeGeometry(ringShape, { depth: 1.2, bevelEnabled: false, curveSegments: 48 }), steel);
+        table.rotation.x = -Math.PI / 2;
+        table.position.y = baseY - 1.2;
+        table.castShadow = true; table.receiveShadow = true;
+        padRoot.add(table);
+        const legs = 6;
+        for (let k = 0; k < legs; k++) {
+            const a = (k / legs) * Math.PI * 2;
+            const leg = new THREE.Mesh(new THREE.BoxGeometry(1.4, mountH - 1.2, 1.4), steel);
+            leg.position.set(Math.cos(a) * (outerR - 1), DECK_TOP + (mountH - 1.2) / 2, Math.sin(a) * (outerR - 1));
+            leg.castShadow = true;
+            padRoot.add(leg);
+        }
+        // Hold-down clamps reaching from the ring to the stage's base.
+        for (let k = 0; k < 8; k++) {
+            const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+            const span = Math.max(0.3, holeR - baseR + 0.4);
+            const clamp = new THREE.Mesh(new THREE.BoxGeometry(span, 0.6, 0.5), steel);
+            clamp.position.set(Math.cos(a) * (baseR + span / 2 - 0.15), baseY + 0.3, Math.sin(a) * (baseR + span / 2 - 0.15));
+            clamp.rotation.y = -a;
+            padRoot.add(clamp);
+        }
+        const deflector = new THREE.Mesh(new THREE.ConeGeometry(holeR * 1.15, Math.min(mountH * 0.6, holeR * 0.9), 40), steel);
+        deflector.position.y = DECK_TOP + Math.min(mountH * 0.6, holeR * 0.9) / 2;
+        padRoot.add(deflector);
+
+        // Service tower: a lattice as tall as the vehicle, on the UP-range side
+        // (−X) so the ascent never crosses it, with umbilical / crew arms that
+        // swing clear at ignition.
+        const towerH = baseY + stack.bodyLength_m * 0.92 + 6;
+        const foot = Math.min(10, Math.max(5, baseR * 1.2));
+        const tower = buildLatticeTower({ height: towerH, footprint: foot, color: PAD_COLORS.fssOrange, bandStep: 7 });
+        const tx = -(outerR + foot / 2 + 3);
+        tower.position.set(tx, DECK_TOP, 0);
+        padRoot.add(tower);
+        const beacon = buildBeacon({ color: PAD_COLORS.beaconRed });
+        beacon.position.set(tx, DECK_TOP + towerH + 1.2, 0);
+        padRoot.add(beacon);
+        padBeacons.push({ mesh: beacon, phase: 0, color: PAD_COLORS.beaconRed });
+
+        const armTo = (yWorld, rAtY, w = 1.2) => {
+            const reach = Math.abs(tx) - foot / 2 - rAtY - 0.2;
+            if (reach <= 0.2) return;
+            const pivot = new THREE.Group();
+            pivot.position.set(tx + foot / 2, yWorld, 0);
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(reach, w, w), steel);
+            arm.position.x = reach / 2;
+            arm.castShadow = true;
+            pivot.add(arm);
+            padRoot.add(pivot);
+            padArms.push(pivot);
+        };
+        const top = stack.stages[stack.stages.length - 1];
+        if (top && stack.stages.length > 1) armTo(baseY + top.y0 + top.length * 0.5, top.r);
+        armTo(baseY + Math.min(8, s0.length * 0.3), s0.r, 0.9);
+        if (design.payload?.nosecone === 'capsule' && (design.cockpit?.crew || 0) > 0) {
+            armTo(baseY + stack.noseY0 + Math.min(stack.noseLen * 0.4, 2.5), Math.min(top?.r || 2, 2.6) * 0.9, 2.0);
+        }
+
+        padRoot.traverse((c) => {
+            if (c.geometry) padOwned.add(c.geometry);
+            if (c.material) padOwned.add(c.material);
+        });
+        padArms.forEach((p) => { p.rotation.y = 0; });
+
+        // Shadow box round the pad, sized to the vehicle.
+        const span = Math.max(60, stack.bodyLength_m * 0.8 + outerR * 2);
+        Object.assign(sun.shadow.camera, { left: -span, right: span, top: span, bottom: -span, near: 1, far: 600 });
+        sun.shadow.camera.updateProjectionMatrix();
+        sun.target.position.set(0, baseY, 0);
+        sun.position.copy(SUN).multiplyScalar(250).add(sun.target.position);
+    }
+
+    // ── Plume / engine state ────────────────────────────────────────────────
+    function setPlumes(i, on) {
+        const es = engineSets[i];
+        if (!es) return;
+        es.lit = on;
+        es.plumes.forEach((p) => { p.visible = on; });
+    }
+    function tickEngines(i, now, throttle, alt_km, exp01, dtF) {
+        const es = engineSets[i];
+        if (!es) return;
+        for (const p of es.plumes) tickPlume(p, now, throttle, alt_km, exp01);
+        // Interior glow follows the flame; a radiatively-cooled skirt heats up
+        // over ~20 s of firing and cools when the engine stops.
+        const target = es.lit ? throttle : 0;
+        es.glow += (target - es.glow) * Math.min(1, dtF / (es.lit ? 20 : 30));
+        const core = new THREE.Color(es.look.core);
+        for (const m of es.hotMats) m.color.copy(m.userData.base).lerp(core, es.lit ? 0.4 + 0.6 * throttle : 0);
+        if (es.radiative) for (const m of es.bellMats) { m.emissive.setHex(0xff5a1a); m.emissiveIntensity = 1.6 * es.glow; }
+    }
+    function applyGimbal(i, ax, az) {
+        const es = engineSets[i];
+        if (!es) return;
+        const lim = es.gimbalRad;
+        for (const p of es.pivots) p.rotation.set(clamp(ax, -lim, lim), 0, clamp(az, -lim, lim));
+    }
+    function placeEngineLight(i, throttle) {
+        const es = engineSets[i];
+        if (!es || !es.lit || throttle <= 0) { engineLight.intensity = 0; return; }
+        const local = new THREE.Vector3(0, es.st.y0 - es.geo.bellLen_m - 1.5, 0);
+        stageGroups[i].localToWorld(local);
+        engineLight.position.copy(local);
+        engineLight.color.setHex(es.look.mid);
+        const R = es.st.cluster.clusterR_m;
+        const brightness = es.look === PLUME_LOOK.hydrolox || es.look === PLUME_LOOK.nuclear || es.look === PLUME_LOOK.ion ? 0.25 : 1;
+        engineLight.intensity = 260 * throttle * brightness * Math.max(0.3, R * R / 3.4);
+    }
+
+    // ── Particles ───────────────────────────────────────────────────────────
+    let lastTrailPos = null;
+    function emitGroundCloud(intensity, dt) {
+        if (!env || intensity <= 0) return;
+        const s0 = stack.stages[0];
+        const holeR = Math.max(s0.cluster.clusterR_m, s0.r) + 0.4;
+        const airy = env.body.rho0_kg_m3 > 1e-6;
+        const n = Math.round((airy ? 38 : 30) * intensity * dt * Math.max(1, holeR / 2) + Math.random() * 0.9);
+        const smoke = SMOKE[s0.engine.propellant];
+        for (let k = 0; k < n; k++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = (airy ? 18 : 35) + Math.random() * 30;
+            emitRadial(a, sp, holeR, airy, smoke);
+        }
+    }
+    function emitRadial(a, sp, holeR, airy, smoke) {
+        particles.emit({
+            x: Math.cos(a) * holeR * 0.8, y: DECK_TOP + 1 + Math.random() * 2, z: Math.sin(a) * holeR * 0.8,
+            vx: Math.cos(a) * sp, vy: airy ? 2 + Math.random() * 5 : 1 + Math.random() * 3, vz: Math.sin(a) * sp,
+            size0: holeR * 1.2, size1: airy ? holeR * 7 + 14 : holeR * 3 + 6,
+            life: airy ? 4.5 + Math.random() * 4 : 1.8 + Math.random(),
+            color: airy ? (smoke === SMOKE.solid ? smoke.color : 0xeef1f4) : env.look.ground,   // deluge steam / regolith
+            alpha: airy ? 0.42 : 0.35, drag: airy ? 0.55 : 0.2, buoy: airy ? 1.6 : 0,
+        });
+    }
+    function emitTrail(i, air, throttle) {
+        const es = engineSets[i];
+        if (!es || !es.lit) { lastTrailPos = null; return; }
+        const smoke = SMOKE[es.st.engine.propellant];
+        if (!smoke || air < 0.002) { lastTrailPos = null; return; }
+        const local = new THREE.Vector3(0, es.st.y0 - es.geo.bellLen_m - es.geo.exitR_m * 2 * es.look.lenD * 0.45, 0);
+        stageGroups[i].localToWorld(local);
+        const R = es.st.cluster.clusterR_m;
+        const spacing = Math.max(1.5, R * 0.7);
+        const from = lastTrailPos || local.clone();
+        const dist = from.distanceTo(local);
+        const n = Math.min(40, Math.max(1, Math.floor(dist / spacing)));
+        const expand = 1 + 3 * (1 - air);               // thinner air → the puff balloons
+        for (let k = 0; k < n; k++) {
+            const p = from.clone().lerp(local, (k + Math.random()) / n);
+            particles.emit({
+                x: p.x + (Math.random() - 0.5) * R, y: p.y + (Math.random() - 0.5) * R, z: p.z + (Math.random() - 0.5) * R,
+                vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, vz: (Math.random() - 0.5) * 4,
+                size0: R * 2.2, size1: R * (6 + 8 * smoke.grow) * expand,
+                life: 7 + Math.random() * 5, color: smoke.color,
+                alpha: smoke.alpha * Math.pow(air, 0.25) * Math.min(1, throttle + 0.3), drag: 0.3, buoy: 0.4,
+            });
+        }
+        lastTrailPos = local;
+    }
+
+    // ── Camera ──────────────────────────────────────────────────────────────
+    // Framing reads the STACK geometry, never Box3.setFromObject: that walks
+    // invisible children too, and the plume cones would add tens of metres
+    // of nothing below the vehicle.
+    // ── Transonic vapor cone ────────────────────────────────────────────────
+    // The Prandtl–Glauert collar: near Mach 1 the flow expanding round the
+    // fairing shoulder drops below the dew point and a cone of cloud stands on
+    // the stack. It needs WATER VAPOUR, so it is drawn on Earth only, below
+    // ~12 km (where the humid air is). Opacity is a function of the sample's
+    // own Mach number — it appears and vanishes as the trajectory crosses M 1.
+    function buildVaporCone() {
+        if (!stack) return;
+        const r = Math.max(...stack.stages.map((st) => st.r), 0.5);
+        const geo = new THREE.ConeGeometry(r * 2.8, r * 4.2, 48, 1, true);
+        const mat = new THREE.MeshBasicMaterial({
+            map: vaporTexture(), color: 0xffffff, transparent: true, opacity: 0,
+            depthWrite: false, side: THREE.DoubleSide, fog: false,
+        });
+        vaporCone = new THREE.Mesh(geo, mat);
+        // Apex just ahead of the fairing shoulder, flaring aft over the body.
+        vaporCone.position.y = (stack.noseY0 ?? stack.bodyLength_m * 0.8) - r * 1.1;
+        vaporCone.visible = false;
+        vaporCone.renderOrder = 3;
+        rocketRoot.add(vaporCone);
+    }
+    function tickVapor(s, now) {
+        if (!vaporCone) return;
+        const humid = env?.body.id === 'earth' ? 1 - clamp((s.alt_km - 9) / 4, 0, 1) : 0;
+        const m = s.mach ?? 0;
+        const o = humid * 0.85 * Math.exp(-(((m - 1.0) / 0.09) ** 2)) * (fairingOn() ? 1 : 0.6);
+        vaporCone.visible = o > 0.01;
+        vaporCone.material.opacity = o;
+        // Flicker + breathing: the collar is a pressure field, not a solid.
+        const k = 1 + 0.06 * Math.sin(now * 23) + 0.04 * Math.sin(now * 37 + 1.1);
+        vaporCone.scale.set(k, 1 + 0.08 * Math.sin(now * 17), k);
+        vaporCone.rotation.y = now * 0.7;
+    }
+    function fairingOn() { return !flight?.fairingOff; }
+
+    // ── Buffet ──────────────────────────────────────────────────────────────
+    // Camera shake driven by the trajectory's own loads: dynamic pressure
+    // (against the 35 kPa limit), the bending load q·α against its limit (what
+    // the gusts and shear are doing), with the transonic peak where shock
+    // oscillation is worst. A SYMBOL of the loads, applied to the view only —
+    // the vehicle's pose stays the trajectory's.
+    function tickBuffet(s, now) {
+        const f = flight;
+        if (!f) return;
+        camera.position.sub(f.shake);
+        const qN = clamp((s.q_kPa ?? 0) / 35, 0, 1.5);
+        const qaN = clamp((s.qalpha ?? 0) / (f.result.loads?.limit_kPa_deg || 144), 0, 1.5);
+        const trans = 1 + 1.4 * Math.exp(-((((s.mach ?? 0) - 1) / 0.12) ** 2));
+        const amp = (0.25 * qN + 0.6 * qaN) * trans * clamp(stackSpan().h * 0.0025, 0.03, 0.4);
+        f.shake.set(
+            amp * (Math.sin(now * 61) * 0.6 + Math.sin(now * 89 + 1.7) * 0.4),
+            amp * (Math.sin(now * 53 + 0.4) * 0.6 + Math.sin(now * 97) * 0.4),
+            amp * (Math.sin(now * 71 + 2.1) * 0.6 + Math.sin(now * 43 + 0.3) * 0.4),
+        );
+        camera.position.add(f.shake);
+    }
+
+    // ── The orbit, after insertion ──────────────────────────────────────────
+    // The ellipse the guidance achieved (periapsis × apoapsis from the result),
+    // through the vehicle's final position, in the flight plane — the plane of
+    // the 2D ascent (+X downrange, +Y up at the pad). It is the INERTIAL orbit
+    // drawn in the frame of the ground at the end of the flight (one snapshot,
+    // the planet does not spin in this scene). Then a one-shot fly-out frames
+    // it; any drag/zoom cancels the fly-out (the page may START a flight, it
+    // may not HOLD the camera).
+    function clearOrbitRing() {
+        if (!orbitRing) return;
+        scene.remove(orbitRing);
+        orbitRing.traverse((c) => { c.geometry?.dispose(); c.material?.dispose(); });
+        orbitRing = null; orbitView = null;
+        controls.maxDistance = MAX_CAM_DIST;
+    }
+    function showOrbit(result, finalSample) {
+        clearOrbitRing();
+        const o = result?.orbit;
+        if (!o || !Number.isFinite(o.a_km) || !(o.a_km > 0) || !env) return;
+        const R = env.planet.R;
+        const a = o.a_km * 1000, e = Math.min(0.99, Math.max(0, o.e || 0));
+        const p = a * (1 - e * e);
+        const rv = R + (finalSample.alt_km || 0) * 1000;
+        const thV = ((finalSample.downrange_km || 0) * 1000) / R;
+        let nuV = 0;
+        if (e > 1e-6) {
+            nuV = Math.acos(clamp((p / rv - 1) / e, -1, 1));
+            if ((finalSample.vr_kms ?? 0) < 0) nuV = -nuV;
+        }
+        const pts = [];
+        const N = 360;
+        for (let i = 0; i < N; i++) {
+            const nu = (i / N) * Math.PI * 2;
+            const r = p / (1 + e * Math.cos(nu));
+            const ph = thV + (nu - nuV);
+            pts.push(new THREE.Vector3(r * Math.sin(ph), r * Math.cos(ph) - R, 0));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({ color: 0x00c6ff, transparent: true, opacity: 0.9, fog: false });
+        orbitRing = new THREE.LineLoop(geo, mat);
+        orbitRing.renderOrder = 2;
+        // Where the vehicle is on it — the stack itself is sub-pixel from here.
+        const mk = new THREE.Points(
+            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(rv * Math.sin(thV), rv * Math.cos(thV) - R, 0)]),
+            new THREE.PointsMaterial({ color: 0xffffff, size: 9, sizeAttenuation: false, fog: false, depthTest: false }));
+        mk.renderOrder = 4;
+        orbitRing.add(mk);
+        scene.add(orbitRing);
+        // Frame it: look at the planet's centre from far enough to see the
+        // whole ellipse, from the side the vehicle is on.
+        const C = new THREE.Vector3(0, -R, 0);
+        const span = a * (1 + e);
+        const dist = span / Math.tan((camera.fov * Math.PI) / 360) * 1.25;
+        // ~25° above the orbit plane, over the vehicle: face-on, a 200 km
+        // orbit is a hairline hugging the limb; oblique, it crosses the disc.
+        const dir = new THREE.Vector3(Math.sin(thV) * 0.9, Math.cos(thV) * 0.9, 0.42).normalize();
+        // The pad-scale zoom limit would clamp the fly-out at 2.5 km (it did).
+        controls.maxDistance = Math.max(MAX_CAM_DIST, dist * 3);
+        orbitView = { t: 0, dur: 3.2,
+            fromPos: camera.position.clone(), fromTarget: controls.target.clone(),
+            toPos: C.clone().addScaledVector(dir, dist), toTarget: C.clone() };
+    }
+    function tickOrbitView(dt) {
+        if (!orbitView) return;
+        orbitView.t = Math.min(orbitView.dur, orbitView.t + dt);
+        const u = orbitView.t / orbitView.dur;
+        const k = u * u * (3 - 2 * u);
+        // Log-distance interpolation: a linear lerp from 60 m to 30 000 km
+        // spends the whole tween in the far field.
+        const fromD = orbitView.fromPos.distanceTo(orbitView.toTarget);
+        const toD = orbitView.toPos.distanceTo(orbitView.toTarget);
+        const d = Math.exp(Math.log(Math.max(1, fromD)) * (1 - k) + Math.log(toD) * k);
+        controls.target.lerpVectors(orbitView.fromTarget, orbitView.toTarget, k);
+        const dirFrom = orbitView.fromPos.clone().sub(orbitView.toTarget).normalize();
+        const dirTo = orbitView.toPos.clone().sub(orbitView.toTarget).normalize();
+        const dir = dirFrom.lerp(dirTo, k).normalize();
+        camera.position.copy(orbitView.toTarget).addScaledVector(dir, d);
+        if (orbitView.t >= orbitView.dur) orbitView = null;
+    }
+    controls.addEventListener('start', () => { orbitView = null; });
+
+    function attachedFrom() { return Math.max(0, stageGroups.findIndex((g) => g.parent === rocketRoot)); }
+    function stackSpan() {
+        const i0 = attachedFrom();
+        const st = stack.stages[i0];
+        const lo = st ? st.y0 - st.geo.bellLen_m : 0;
+        return { lo, hi: stack.bodyLength_m, h: stack.bodyLength_m - lo };
+    }
     function frameCamera() {
-        const box = new THREE.Box3().setFromObject(rocketRoot);
-        if (box.isEmpty()) return;
-        const size = new THREE.Vector3(); box.getSize(size);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        const h = Math.max(size.y, size.x, 10);
-        const dist = h * 1.5;
-        camera.position.set(dist * 0.7, center.y + h * 0.15, dist);
-        controls.target.set(0, center.y, 0);
+        if (!stack) return;
+        const { lo, hi, h } = stackSpan();
+        const center = rocketRoot.localToWorld(new THREE.Vector3(0, (lo + hi) / 2, 0));
+        const dist = (Math.max(h, 10) / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.25;
+        camera.position.set(center.x + dist * 0.62, center.y + h * 0.08, center.z + dist * 0.78);
+        controls.target.copy(center);
         controls.update();
     }
-
+    /** Views are relative to the vehicle's current pose (on the pad or in flight). */
     function setView(name) {
-        const box = new THREE.Box3().setFromObject(rocketRoot);
-        const size = new THREE.Vector3(); box.getSize(size);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        const h = Math.max(size.y, 10), d = h * 1.4;
-        const cy = center.y;
-        if (name === 'front') camera.position.set(0, cy, d);
-        else if (name === 'side') camera.position.set(d, cy, 0);
-        else if (name === 'top') camera.position.set(0.01, cy + d, 0.01);
-        else camera.position.set(d * 0.7, cy + h * 0.15, d);
-        controls.target.set(0, cy, 0);
+        if (!stack) return;
+        const { lo, hi, h: span } = stackSpan();
+        const center = rocketRoot.localToWorld(new THREE.Vector3(0, (lo + hi) / 2, 0));
+        const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(rocketRoot.quaternion);
+        const side = new THREE.Vector3(0, 0, 1);
+        const right = new THREE.Vector3().crossVectors(axis, side).normalize();
+        const h = Math.max(span, 10);
+        const d = (h / 2) / Math.tan((camera.fov * Math.PI) / 360) * 1.2;
+        let pos, target = center.clone();
+        if (name === 'front') pos = center.clone().addScaledVector(side, d);
+        else if (name === 'side') pos = center.clone().addScaledVector(right, -d);
+        else if (name === 'top') pos = center.clone().addScaledVector(axis, d).addScaledVector(side, 0.01);
+        else if (name === 'engines') {
+            // Look up into the aft end: the cluster, the bells, the mount.
+            const i0 = attachedFrom();
+            const s0 = stack.stages[i0];
+            const aft = new THREE.Vector3(0, s0.y0 - s0.geo.bellLen_m * 0.5, 0);
+            stageGroups[i0].localToWorld(aft);
+            const R = Math.max(s0.cluster.clusterR_m, s0.r);
+            target = aft;
+            if (!flight && i0 === 0 && padGeom) {
+                // On the pad: a deck-level camera just outside the launch
+                // table, mid-way between two legs, looking up into the cluster
+                // UNDER the table ring (from any higher the ring hides the bells).
+                const a = Math.PI / padGeom.legs;
+                const rr = padGeom.outerR + Math.max(2, padGeom.holeR * 0.6);
+                pos = new THREE.Vector3(Math.cos(a) * rr, DECK_TOP + 0.9, Math.sin(a) * rr);
+                target = new THREE.Vector3(0, baseY - s0.geo.bellLen_m * 0.7, 0);
+            } else {
+                pos = aft.clone().addScaledVector(side, R * 3.2).addScaledVector(right, R * 1.6).addScaledVector(axis, -R * 1.4);
+            }
+        } else if (name === 'nose') {
+            const top = stack.stages[stack.stages.length - 1];
+            const rN = Math.max(top?.r || 2, 1);
+            target = rocketRoot.localToWorld(new THREE.Vector3(0, stack.noseY0 + stack.noseLen * 0.45, 0));
+            const dn = Math.max(stack.noseLen, rN * 4) * 1.6;
+            pos = target.clone().addScaledVector(side, dn * 0.8).addScaledVector(right, -dn * 0.55).addScaledVector(axis, dn * 0.15);
+        } else pos = center.clone().addScaledVector(side, d * 0.78).addScaledVector(right, -d * 0.62).addScaledVector(axis, h * 0.08);
+        camera.position.copy(pos);
+        controls.target.copy(target);
         controls.update();
     }
 
-    // ── Thrust vectoring (gimbal) ────────────────────────────────────────────
-    // Tilt every first-stage engine pivot (bell + plume) by the same small angle
-    // so the cluster visibly vectors. Angles are in radians; ~0.1 rad ≈ 5.7°.
-    function applyGimbal(angX, angZ) {
-        for (const m of engineMounts) {
-            if (!m.isFirstStage) continue;
-            m.pivot.rotation.x = angX;
-            m.pivot.rotation.z = angZ;
-        }
-    }
-    function clearGimbal() { applyGimbal(0, 0); }
-
-    // ── Static fire (hold-down engine test on the pad) ───────────────────────
-    let staticFire = false;
+    // ── Static fire ─────────────────────────────────────────────────────────
     function setStaticFire(on) {
-        if (flight) return;                 // can't static-fire mid-flight
+        if (flight) return;
         staticFire = !!on;
-        plumes.forEach((p) => { p.visible = staticFire; });
-        groundFX.group.visible = staticFire;
-        if (!staticFire) { clearGimbal(); onPhase('idle'); }
+        setPlumes(0, staticFire);
+        if (!staticFire) { applyGimbal(0, 0, 0); engineLight.intensity = 0; onPhase('idle'); }
         else onPhase('static-fire');
     }
+    function padExpansion() {
+        try { return currentDesign ? designStageExpansion01(currentDesign, 0, 0) : 0.35; } catch { return 0.35; }
+    }
 
-    // ── Flight animation ────────────────────────────────────────────────────
-    let flight = null;     // { traj, dur, t0, resolve, result }
-    let autoRotate = false;
-    const clock = new THREE.Clock();
-
+    // ── Flight ──────────────────────────────────────────────────────────────
     function launch(ascentResult) {
-        staticFire = false;                       // a real launch supersedes a static fire
-        if (!ascentResult || !ascentResult.trajectory?.length) {
-            // No usable trajectory — still show ignition then "fail".
-            return Promise.resolve(ascentResult);
-        }
-        rocketRoot.position.y = 0;
-        plumes.forEach((p) => { p.visible = false; });
-        clearGimbal();
+        staticFire = false;
+        clearOrbitRing();
+        if (!ascentResult?.trajectory?.length || !stack) return Promise.resolve(ascentResult);
+        rocketRoot.rotation.set(0, 0, 0);
+        engineSets.forEach((_, i) => { setPlumes(i, false); applyGimbal(i, 0, 0); });
+        const body = env.body;
+        const events = flightEvents(ascentResult, currentDesign, body);
         onPhase('ignition');
         return new Promise((resolve) => {
+            const focus = rocketFocusWorld();
             flight = {
-                traj: ascentResult.trajectory,
+                result: ascentResult, traj: ascentResult.trajectory, events,
                 burn: ascentResult.trajectory[ascentResult.trajectory.length - 1].t || 1,
-                t0: clock.getElapsedTime() + 2.2,    // 2.2 s ignition hold
-                ignited: false,
-                resolve,
-                result: ascentResult,
+                t: -IGNITION_HOLD_S, resolve, detached: 0, fairingOff: false,
+                lastPos: rocketRoot.position.clone(), vel: new THREE.Vector3(),
+                focusY: focusLocalY(0), lastFocus: focus, phase: 'ignition', shake: new THREE.Vector3(),
+                R: body.R_km * 1000, gSurf: (body.mu_km3s2 * 1e9) / Math.pow(body.R_km * 1000, 2),
             };
+            lastTrailPos = null;
         });
     }
 
-    function abort() { if (flight) { endFlight(flight.result); } }
-
-    function reset() {
-        flight = null;
-        staticFire = false;
-        rocketRoot.position.y = 0;
-        plumes.forEach((p) => { p.visible = false; });
-        clearGimbal();
-        groundFX.group.visible = false;
-        scene.background = DAY_SKY.clone();
-        scene.fog.color = DAY_SKY.clone();
-        stars.material.opacity = 0;
-        world.position.y = 0;
-        onPhase('idle');
+    /** Local-y of the middle of the stack still attached (stage `from` up). */
+    function focusLocalY(from) {
+        const st = stack.stages[from];
+        if (!st) return stack.bodyLength_m / 2;
+        const lo = st.y0 - st.geo.bellLen_m;
+        return (lo + stack.bodyLength_m) / 2;
+    }
+    function rocketFocusWorld(yLocal) {
+        const y = yLocal ?? (flight ? flight.focusY : stack.bodyLength_m / 2);
+        return rocketRoot.localToWorld(new THREE.Vector3(0, y, 0));
     }
 
-    function endFlight(result) {
-        const f = flight; flight = null;
-        plumes.forEach((p) => { p.visible = false; });
-        clearGimbal();
-        groundFX.group.visible = false;
-        onPhase('meco');
-        f?.resolve?.(result);
+    function separateStage(i) {
+        const g = stageGroups[i];
+        if (!g || g.parent !== rocketRoot) return;
+        setPlumes(i, false);
+        scene.attach(g);
+        const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(rocketRoot.quaternion);
+        debris.push({
+            obj: g, v: flight.vel.clone().addScaledVector(axis, -2.5),
+            w: new THREE.Vector3((Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.04, (Math.random() - 0.5) * 0.08),
+            ttl: 240, axisSpin: null,
+        });
+        rcsPuffT = 1.6;
+        engineSets[i].glow = 0;
     }
-
-    // sample trajectory (alt_km, v_kms, + aero telemetry) at flight-time t
-    function sampleTraj(traj, t) {
-        if (t <= traj[0].t) return traj[0];
-        const last = traj[traj.length - 1];
-        if (t >= last.t) return last;
-        for (let i = 1; i < traj.length; i++) {
-            if (traj[i].t >= t) {
-                const a = traj[i - 1], b = traj[i];
-                const f = (t - a.t) / Math.max(1e-3, b.t - a.t);
-                const lerp = (k, d = 0) => (a[k] ?? d) + ((b[k] ?? d) - (a[k] ?? d)) * f;
-                return {
-                    t, alt_km: lerp('alt_km'),
-                    v_kms: lerp('v_kms'),
-                    mass_frac: lerp('mass_frac', 1),
-                    // Aerodynamic telemetry (enriched by runAscent) for the live panel.
-                    mach: lerp('mach'), q_kPa: lerp('q_kPa'), reynolds: lerp('reynolds'),
-                    drag_kN: lerp('drag_kN'),
-                    dragFriction_kN: lerp('dragFriction_kN'),
-                    dragPressure_kN: lerp('dragPressure_kN'),
-                    dragWave_kN: lerp('dragWave_kN'),
-                    boundaryLayer: (f < 0.5 ? a : b).boundaryLayer,
-                    regime: (f < 0.5 ? a : b).regime,
-                    // Propulsion telemetry.
-                    thrust_kN: lerp('thrust_kN'), isp_s: lerp('isp_s'),
-                    twr: lerp('twr'), accel_g: lerp('accel_g'),
-                    dv_used_kms: lerp('dv_used_kms'),
-                    throttle: lerp('throttle', 1),
-                    stage: (f < 0.5 ? a : b).stage,
-                    coasting: (f < 0.5 ? a : b).coasting,
-                    // Nozzle expansion telemetry.
-                    expansion01: lerp('expansion01', 0.2),
-                    exitMach: lerp('exitMach'), peOverPa: lerp('peOverPa', 1),
-                    nozzleState: (f < 0.5 ? a : b).nozzleState,
-                    separated: (f < 0.5 ? a : b).separated,
-                };
-            }
+    function jettisonFairing() {
+        flight.fairingOff = true;
+        const q = rocketRoot.quaternion;
+        const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+        const zAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+        const xAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+        for (const h of noseParts.halves) {
+            if (h.parent === scene) continue;
+            scene.attach(h);
+            const s = h.userData.side;
+            debris.push({
+                obj: h, v: flight.vel.clone().addScaledVector(xAxis, 3.5 * s).addScaledVector(axis, 0.6),
+                w: new THREE.Vector3(), axisSpin: { axis: zAxis.clone(), rate: -0.5 * s }, ttl: 200,
+            });
         }
-        return last;
+        if (noseParts.les && noseParts.les.parent !== scene) {
+            const les = noseParts.les;
+            scene.attach(les);
+            // The tower's own jettison motor fires it up and off to one side.
+            debris.push({ obj: les, v: flight.vel.clone().addScaledVector(axis, 30).addScaledVector(xAxis, 8), w: new THREE.Vector3(0, 0, -0.4), ttl: 200 });
+        }
+        rcsPuffT = Math.max(rcsPuffT, 1.0);
     }
 
-    // Compress real altitude (0..hundreds of km) into a small scene rise so the
-    // rocket visibly climbs while staying framed. Pad/ground drop with it.
-    const altToScene = (altKm) => Math.log10(1 + altKm) * 26;
-
-    function tickFlight(now) {
-        const f = flight;
-        const tcd = now - f.t0;       // negative during ignition hold
-
-        if (tcd < 0) {
-            // Ignition hold: spin up plume, hold on pad, build the exhaust bloom.
-            if (!f.ignited && tcd > -1.4) {
-                plumes.forEach((p) => { p.visible = true; });
-                groundFX.group.visible = true;
-                f.ignited = true;
+    function tickDebris(dtF) {
+        if (!dtF || !debris.length || !flight) return;
+        const C = new THREE.Vector3(0, -flight.R, 0);
+        const keep = [];
+        for (const d of debris) {
+            const rel = d.obj.position.clone().sub(C);
+            const r = rel.length();
+            const g = rel.multiplyScalar(-flight.gSurf * flight.R * flight.R / (r * r * r));
+            d.v.addScaledVector(g, dtF);
+            d.obj.position.addScaledVector(d.v, dtF);
+            if (d.axisSpin) {
+                // Fairing halves hinge open (~100°) and then just drift.
+                const spun = d.obj.userData.spun || 0;
+                const step = d.axisSpin.rate * dtF * Math.max(0, 1 - spun / 1.8);
+                d.obj.rotateOnWorldAxis(d.axisSpin.axis, step);
+                d.obj.userData.spun = spun + Math.abs(step);
             }
-            const spool = Math.max(0, 1 + tcd / 1.4);
-            const exp0 = padExpansion();
-            plumes.forEach((p) => tickPlume(p, now, spool * 0.6, 0, exp0));
-            groundFX.tick(now, spool * 0.6, 1);     // full ground-effect on the pad
-            // Engines settle from a small ignition twitch to centred as they light.
-            applyGimbal(Math.sin(now * 9) * 0.05 * (1 - spool), Math.cos(now * 7) * 0.05 * (1 - spool));
-            onTick({ phase: 'ignition', t: tcd, altKm: 0, vKms: 0, throttle: spool * 0.6,
-                     thrustMN: stage0ThrustFull_kN * spool * 0.6 / 1000 });
+            d.obj.rotation.x += d.w.x * dtF; d.obj.rotation.y += d.w.y * dtF; d.obj.rotation.z += d.w.z * dtF;
+            d.ttl -= dtF;
+            const far = d.obj.position.distanceTo(rocketRoot.position) > 40000;
+            if (d.ttl <= 0 || far) d.obj.parent?.remove(d.obj);
+            else keep.push(d);
+        }
+        debris = keep;
+    }
+
+    function tickFlight(dtWall, now) {
+        const f = flight;
+        if (f.t < 0) {
+            // ── Ignition hold: engines light at T−3, spool, hold-downs release at T−0.
+            f.t += dtWall;
+            const spool = Math.min(1, Math.max(0, (f.t + IGNITION_HOLD_S - 0.3) / 1.4));
+            if (spool > 0 && !engineSets[0].lit) setPlumes(0, true);
+            const thr = spool * 0.9;
+            tickEngines(0, now, thr, 0, padExpansion(), dtWall);
+            applyGimbal(0, Math.sin(now * 9) * 0.04 * (1 - spool), Math.cos(now * 7) * 0.04 * (1 - spool));
+            placeEngineLight(0, thr);
+            emitGroundCloud(thr, dtWall);
+            padArms.forEach((p) => { p.rotation.y = Math.min(1.2, p.rotation.y + dtWall * 0.8); });
+            onTick({ phase: 'ignition', t: f.t, altKm: 0, vKms: 0, throttle: thr,
+                     thrustMN: engineSets[0].fullThrust * thr / 1000 });
             return;
         }
 
-        // Playback speed: compress the multi-minute ascent into ~14 s.
-        const PLAY = Math.max(6, f.burn / 14);
-        const flightT = tcd * PLAY;
-        const s = sampleTraj(f.traj, flightT);
-        // Plume follows the real engine: lit whenever there is thrust, dark during
-        // the inter-stage coast. Intensity scales with thrust vs the sea-level
-        // liftoff thrust (so the vacuum thrust rise reads as a fuller plume).
-        const burning = (s.thrust_kN ?? 0) > 1 && !s.coasting;
-        const throttle = burning
-            ? Math.max(0.55, Math.min(1.2, (s.thrust_kN || 0) / Math.max(1, stage0ThrustFull_kN)))
-            : 0;
+        const rate = playbackRate(f.t, f.events, f.burn);
+        const dtF = rate * dtWall;
+        f.t = Math.min(f.burn, f.t + dtF);
+        const s = sampleTrajectory(f.traj, f.t);
+        const active = Math.max(1, s.stage || 1);
 
-        const rise = altToScene(s.alt_km);
-        rocketRoot.position.y = rise;              // rocket climbs; the ground stays put
-        // Camera eases upward to follow.
-        const targetY = rocketRoot.position.y + 25;
-        controls.target.y += (targetY - controls.target.y) * 0.05;
+        // Spent stages go when the trajectory moves on to the next one.
+        while (f.detached < active - 1 && f.detached < stageGroups.length - 1) {
+            separateStage(f.detached);
+            f.detached++;
+            f.phase = 'staging';
+        }
+        const fairEv = f.events.find((e) => e.kind === 'fairing');
+        if (fairEv && !f.fairingOff && f.t >= fairEv.t) { jettisonFairing(); onPhase('fairing sep'); }
+        // Ullage: RCS settles the propellant before the circularisation relight.
+        const circEv = f.events.find((e) => e.kind === 'circularize');
+        if (circEv && !f.ullaged && f.t >= circEv.t - 3) { f.ullaged = true; rcsPuffT = Math.max(rcsPuffT, 2); }
 
-        // Sky darkens with altitude.
-        const mix = Math.min(1, s.alt_km / 90);
-        scene.background.copy(DAY_SKY).lerp(SPACE_SKY, mix);
-        scene.fog.color.copy(scene.background);
-        stars.material.opacity = mix;
+        // Pose the vehicle on the real trajectory.
+        const pose = poseAt(s, f.R, baseY);
+        rocketRoot.position.set(pose.x, pose.y, 0);
+        rocketRoot.rotation.set(0, 0, pose.rotZ);
+        if (dtF > 1e-6) f.vel.copy(rocketRoot.position).sub(f.lastPos).divideScalar(dtF);
+        f.lastPos.copy(rocketRoot.position);
 
-        plumes.forEach((p) => { p.visible = throttle > 0; tickPlume(p, now, throttle, s.alt_km, s.expansion01); });
+        // Camera rig: re-centre the focus on the remaining stack (eased in the
+        // vehicle's OWN frame — a re-centring, not a follow lag), then move
+        // camera + target by exactly the focus's displacement.
+        f.focusY += (focusLocalY(f.detached) - f.focusY) * Math.min(1, dtWall * 1.5);
+        const focus = rocketFocusWorld(f.focusY);
+        const delta = focus.clone().sub(f.lastFocus);
+        camera.position.add(delta); controls.target.add(delta);
+        f.lastFocus = focus;
+        tickBuffet(s, now);
+        tickVapor(s, now);
 
-        // Thrust vectoring: a slow guidance weave plus a downrange lean that grows
-        // with altitude — the visible signature of the gravity-turn steering.
-        const lean = Math.min(0.16, s.alt_km / 90 * 0.16) * throttle;
-        applyGimbal(
-            (lean + Math.sin(flightT * 0.6) * 0.03) * throttle,
-            Math.sin(flightT * 0.45 + 1.3) * 0.03 * throttle,
-        );
+        // Engines: only the stage the trajectory says is firing.
+        const burning = (s.thrust_kN ?? 0) > 0.001 && !s.coasting;
+        const iFire = active - 1;
+        const es = engineSets[iFire];
+        const thrVis = burning && es ? Math.max(0.55, Math.min(1.15, (s.thrust_kN || 0) / es.fullThrust)) : 0;
+        engineSets.forEach((_, i) => {
+            const on = burning && i === iFire;
+            if (engineSets[i].lit !== on && stageGroups[i].parent === rocketRoot) setPlumes(i, on);
+            tickEngines(i, now, on ? thrVis : 0, s.alt_km, s.expansion01, dtF);
+        });
+        // Guidance: a slow weave inside each engine's real gimbal range, plus
+        // a downrange lean while the pitch program is turning the vehicle.
+        if (es && burning) {
+            const turning = (s.pitch_deg ?? 90) < 89.5 && (s.pitch_deg ?? 90) > 0.5 ? 1 : 0.3;
+            applyGimbal(iFire, (Math.sin(f.t * 0.6) * 0.35) * es.gimbalRad * turning, Math.sin(f.t * 0.45 + 1.3) * 0.3 * es.gimbalRad);
+        }
+        placeEngineLight(iFire, burning ? thrVis : 0);
 
-        // Ground bloom only reads near the pad; fade it out over the first ~1.5 km.
-        const groundMix = Math.max(0, 1 - s.alt_km / 1.5);
-        groundFX.group.visible = groundMix > 0.02 && throttle > 0;
-        if (groundFX.group.visible) groundFX.tick(now, throttle, groundMix);
+        // Smoke: ground cloud while the vehicle clears the pad; exhaust trail
+        // while there is air to hold it.
+        const air = airFraction(env.body, s.alt_km * 1000);
+        if (s.alt_km < 0.25 && burning) emitGroundCloud(thrVis * (1 - s.alt_km / 0.25), dtWall);
+        if (burning) emitTrail(iFire, air, thrVis); else lastTrailPos = null;
 
-        if (s.coasting) onPhase('staging');
-        else if (tcd < 0.2) onPhase('liftoff');
-        else onPhase((s.stage || 1) > 1 ? 'stage ' + s.stage : 'ascent');
-        onTick({ phase: 'ascent', t: flightT, altKm: s.alt_km, vKms: s.v_kms,
+        padArms.forEach((p) => { p.rotation.y = Math.min(1.2, p.rotation.y + dtWall * 0.8); });
+        tickDebris(dtF);
+
+        // Phase label from the guided ascent's own phase (coast / circularize
+        // are the two-burn insertion; 'staging' is the brief inter-stage coast).
+        let phase;
+        if (f.result.status === 'no-liftoff') phase = 'held on the pad';
+        else if (s.phase === 'coast') phase = 'coast to apoapsis';
+        else if (s.phase === 'circularize') phase = 'circularization burn';
+        else if (s.coasting) phase = 'staging';
+        else if (f.t < 6) phase = 'liftoff';
+        else phase = active > 1 ? 'stage ' + active : 'ascent';
+        if (phase !== f.phase) { f.phase = phase; onPhase(phase); }
+
+        onTick({ phase: 'ascent', t: f.t, altKm: s.alt_km, vKms: s.v_kms,
                  throttle: burning ? (s.throttle ?? 1) : 0,
-                 thrustMN: (s.thrust_kN ?? 0) / 1000,
-                 massFrac: s.mass_frac,
+                 thrustMN: (s.thrust_kN ?? 0) / 1000, massFrac: s.mass_frac,
                  mach: s.mach, qkPa: s.q_kPa, reynolds: s.reynolds,
                  dragkN: s.drag_kN, dragFrictionkN: s.dragFriction_kN,
                  dragPressurekN: s.dragPressure_kN, dragWavekN: s.dragWave_kN,
                  boundaryLayer: s.boundaryLayer, regime: s.regime,
-                 // Propulsion telemetry for the live engine panel.
                  isp: s.isp_s, twr: s.twr, accelG: s.accel_g,
                  stage: s.stage, coasting: s.coasting, dvUsed: s.dv_used_kms,
-                 // Nozzle expansion state.
+                 pitchDeg: s.pitch_deg, downrangeKm: s.downrange_km, rate,
                  nozzleState: s.nozzleState, peOverPa: s.peOverPa,
                  exitMach: s.exitMach, separated: s.separated, expansion01: s.expansion01 });
 
-        if (flightT >= f.burn - 1e-3) endFlight(f.result);
+        if (f.t >= f.burn - 1e-6) endFlight();
     }
 
-    // Static-fire test: hold on the pad and fire stage 1 at the design throttle,
-    // with the engines weaving on their gimbals so the thrust vector is visible.
-    // Stage-1 nozzle expansion at the pad (sea level) — drives the static-fire
-    // and ignition plume shape from the real over-/optimally-expanded state.
-    function padExpansion() {
-        try { return currentDesign ? designStageExpansion01(currentDesign, 0, 0) : 0.35; }
-        catch { return 0.35; }
+    function endFlight() {
+        const f = flight;
+        engineSets.forEach((_, i) => setPlumes(i, false));
+        engineLight.intensity = 0;
+        flight = null;
+        lastTrailPos = null;
+        if (f?.shake) camera.position.sub(f.shake);
+        if (vaporCone) vaporCone.visible = false;
+        const st = f?.result?.status;
+        if ((st === 'orbit' || st === 'low-orbit') && f.traj?.length) showOrbit(f.result, f.traj[f.traj.length - 1]);
+        if (st === 'breakup') { breakApart(); onPhase('breakup'); }
+        else if (st === 'no-liftoff') onPhase('no liftoff');
+        else if (st === 'crashed') { breakApart(); onPhase('crashed'); }
+        else if (st === 'escape') onPhase('escape trajectory');
+        else onPhase(st === 'orbit' || st === 'low-orbit' ? 'orbit' : 'meco');
+        f?.resolve?.(f.result);
     }
 
-    function tickStaticFire(now) {
-        const thr = clamp01(currentDesign?.stages?.[0]?.throttle ?? 1);
-        const exp0 = padExpansion();
-        plumes.forEach((p) => { p.visible = thr > 0; tickPlume(p, now, thr, 0, exp0); });
-        groundFX.group.visible = thr > 0;
-        if (groundFX.group.visible) groundFX.tick(now, thr, 1);
-        // Exaggerated gimbal sweep (a Lissajous figure) so the vectoring is obvious.
-        applyGimbal(
-            Math.sin(now * 1.3) * 0.09 * thr,
-            Math.sin(now * 0.9 + 1.0) * 0.09 * thr,
-        );
+    // Structural failure: the stack is gone in a fireball and a debris cloud.
+    // Cosmetic — the physics already ended the flight at the breakup sample.
+    function breakApart() {
+        const centre = rocketFocusWorld(stack ? stack.bodyLength_m / 2 : 30);
+        const R = Math.max(4, (stack?.stages[0]?.r || 2) * 3);
+        for (let k = 0; k < 260; k++) {
+            const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, sp = 10 + Math.random() * 60;
+            const d = [Math.sqrt(1 - u * u) * Math.cos(a), u, Math.sqrt(1 - u * u) * Math.sin(a)];
+            particles.emit({
+                x: centre.x + d[0] * R * Math.random(), y: centre.y + d[1] * R * Math.random(), z: centre.z + d[2] * R * Math.random(),
+                vx: d[0] * sp, vy: d[1] * sp, vz: d[2] * sp,
+                size0: R * 0.8, size1: R * (3 + Math.random() * 4), life: 2 + Math.random() * 4,
+                color: k < 90 ? 0xffd28a : k < 170 ? 0xff7a2a : 0x6a625a,
+                alpha: k < 170 ? 0.95 : 0.6, drag: 0.8, buoy: env?.body.rho0_kg_m3 > 1e-6 ? 2 : 0,
+            });
+        }
+        for (const g of stageGroups) if (g.parent === rocketRoot) g.visible = false;
+    }
+    function abort() { if (flight) endFlight(); }
+
+    function reset() {
+        const was = flight; flight = null; staticFire = false;
+        engineLight.intensity = 0;
+        if (currentDesign) build(currentDesign);
+        was?.resolve?.(was.result);
+        onPhase('idle');
+    }
+
+    function tickStaticFire(now, dt) {
+        const thr = clamp(currentDesign?.stages?.[0]?.throttle ?? 1, 0, 1);
+        if (!engineSets[0]?.lit) setPlumes(0, true);
+        tickEngines(0, now, thr, 0, padExpansion(), dt);
+        placeEngineLight(0, thr);
+        emitGroundCloud(thr, dt);
+        // A Lissajous sweep across the engine's REAL gimbal range (a fixed
+        // engine — Raptor Vacuum — honestly does not move).
+        const lim = engineSets[0].gimbalRad;
+        applyGimbal(0, Math.sin(now * 1.3) * lim * thr, Math.sin(now * 0.9 + 1.0) * lim * thr);
         onTick({ phase: 'static-fire', t: now, altKm: 0, vKms: 0, throttle: thr,
-                 thrustMN: stage0ThrustFull_kN * thr / 1000 });
+                 thrustMN: engineSets[0].fullThrust * thr / 1000 });
     }
 
     // ── Render loop ─────────────────────────────────────────────────────────
-    let raf = 0, running = true;
+    let raf = 0, running = true, lastNow = 0;
+    let timeScale = 1;                // test hook: 0 freezes the flight clock (captures on software GL)
+    const clock = new THREE.Clock();
+    let rcsPrev = 0;
     function render() {
         if (!running) return;
         raf = requestAnimationFrame(render);
         const now = clock.getElapsedTime();
+        const dt = Math.min(0.25, Math.max(0, now - lastNow)) * timeScale;
+        lastNow = now;
         if (autoRotate && !flight && !staticFire) rocketRoot.rotation.y += 0.0035;
         tickBeacons(padBeacons, now);
-        if (flight) tickFlight(now);
-        else if (staticFire) tickStaticFire(now);
+        if (flight) tickFlight(dt, now);
+        else if (staticFire) tickStaticFire(now, dt);
+        if (rcsPuffT > 0 || rcsPrev > 0) {
+            rcsPuffT = Math.max(0, rcsPuffT - dt);
+            const o = rcsPuffT > 0 ? (0.5 + 0.5 * Math.sin(now * 40)) * Math.min(1, rcsPuffT) * 0.8 : 0;
+            for (const p of rcs) { p.material.opacity = o; p.scale.setScalar(0.6 + o); }
+            rcsPrev = rcsPuffT;
+        }
+        tickOrbitView(dt);
         controls.update();
+        updateEnv();
+        particles.update(dt, camera, renderer.domElement.height / renderer.getPixelRatio());
         renderer.render(scene, camera);
     }
 
@@ -643,128 +1315,108 @@ export function createRocketScene(canvas, opts = {}) {
         ro.disconnect();
         controls.dispose();
         disposeRocket();
-        groundFX.dispose();
-        stars.geometry.dispose(); stars.material.dispose();
+        padRoot.clear(); disposeSet(padOwned);
+        particles.dispose();
+        if (env) { env.sky.dispose(); env.stars.dispose(); env.planet.dispose(); env.ground.geometry.dispose(); env.ground.material.map?.dispose(); env.ground.material.dispose(); }
         renderer.dispose();
     }
 
+    /** Test / inspection hook (tests/spaceship-designer-smoke.spec.js). */
+    // Ring radius extremes about the planet centre, in metres (debug/test).
+    function ringRadius(pick) {
+        const a = orbitRing.geometry.attributes.position, R = env.planet.R;
+        const rs = [];
+        for (let i = 0; i < a.count; i++) rs.push(Math.hypot(a.getX(i), a.getY(i) + R));
+        return pick(...rs);
+    }
+    function debug() {
+        rocketRoot.updateMatrixWorld(true);
+        let lowestExit = Infinity;
+        engineSets.forEach((es, i) => {
+            if (stageGroups[i]?.parent !== rocketRoot) return;
+            for (const p of es.pivots) {
+                const v = new THREE.Vector3(0, -es.geo.bellLen_m, 0);
+                p.localToWorld(v);
+                if (i === 0) lowestExit = Math.min(lowestExit, v.y);
+            }
+        });
+        return {
+            stages: stageGroups.length,
+            engines: engineSets.map((es) => es.pivots.length),
+            lit: engineSets.map((es) => es.lit),
+            attached: stageGroups.map((g) => g.parent === rocketRoot),
+            fairingOff: noseParts.halves.length ? noseParts.halves.every((h) => h.parent !== rocketRoot && h.parent?.parent !== rocketRoot) : null,
+            deckTop: DECK_TOP, mountTop: baseY, lowestStage1Exit: lowestExit,
+            rocket: rocketRoot.position.toArray(), rotZ: rocketRoot.rotation.z,
+            camToTarget: camera.position.distanceTo(controls.target),
+            flightT: flight?.t ?? null, particles: particles.live,
+            fog: scene.fog.density, near: camera.near, camPos: camera.position.toArray(),
+            body: env?.body.id ?? null, site: env?.site ?? null,
+            orbitRing: orbitRing ? { points: orbitRing.geometry.attributes.position.count,
+                rMin: ringRadius(Math.min), rMax: ringRadius(Math.max) } : null,
+            orbitView: !!orbitView,
+            vapor: vaporCone ? { visible: vaporCone.visible, opacity: vaporCone.material.opacity } : null,
+            shake: flight?.shake?.length() ?? 0,
+        };
+    }
+
     return {
-        build,
-        launch,
-        abort,
-        reset,
-        setStaticFire,
+        build, launch, abort, reset, setStaticFire,
         get isStaticFiring() { return staticFire; },
         setView,
         setAutoRotate: (v) => { autoRotate = !!v; },
-        dispose,
+        setTimeScale: (k) => { timeScale = Math.max(0, +k || 0); },
+        debug, dispose,
         get design() { return currentDesign; },
     };
 }
 
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
+function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
 
-/**
- * Ground exhaust bloom — a flat additive disc + an expanding shock ring that
- * pulse at the base of the booster while it fires. Purely cosmetic; intensity
- * is driven by throttle and a 0..1 `mix` so it can fade out with altitude.
- */
-function makeGroundFX() {
-    const group = new THREE.Group();
-    group.rotation.x = -Math.PI / 2;           // lie flat on the ground
-
-    const discMat = new THREE.MeshBasicMaterial({
-        color: 0xffd9a0, transparent: true, opacity: 0,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
-    });
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 48), discMat);
-    group.add(disc);
-
-    const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffe6c2, transparent: true, opacity: 0,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
-    });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 48), ringMat);
-    group.add(ring);
-
-    let baseR = 8;
-    return {
-        group, disc, ring,
-        configure(radius, color) {
-            baseR = Math.max(2, radius);
-            disc.material.color.set(color);
-            ring.material.color.set(color).lerp(new THREE.Color(0xffffff), 0.4);
-        },
-        tick(t, throttle, mix) {
-            const k = clamp01(throttle) * clamp01(mix);
-            // Billowing disc — breathes with a fast flicker so it doesn't look static.
-            const flick = 0.85 + Math.sin(t * 22) * 0.15;
-            const dR = baseR * (0.9 + 0.25 * Math.sin(t * 6)) * (0.6 + 0.6 * k);
-            disc.scale.setScalar(dR);
-            disc.material.opacity = 0.5 * k * flick;
-            // Shock ring expands outward then resets — reads as rolling exhaust.
-            const phase = (t * 0.8) % 1;
-            ring.scale.setScalar(baseR * (1 + phase * 1.8));
-            ring.material.opacity = 0.45 * k * (1 - phase);
-        },
-        dispose() {
-            disc.geometry.dispose(); disc.material.dispose();
-            ring.geometry.dispose(); ring.material.dispose();
-        },
-    };
-}
-
-// ── Geometry helpers ─────────────────────────────────────────────────────────
-
-/** Concentric-ring engine cluster positions inside `rMax`. */
-function clusterPositions(count, rMax) {
-    if (count <= 1) return [[0, 0]];
-    const pos = [[0, 0]];                       // center engine
-    let remaining = count - 1;
-    let ring = 1;
-    const ringGap = rMax / (Math.ceil(Math.sqrt(count) / 1.6) + 0.5);
-    while (remaining > 0) {
-        const r = Math.min(rMax, ring * ringGap);
-        const cap = Math.max(6, Math.floor((2 * Math.PI * r) / (ringGap * 0.9)));
-        const n = Math.min(remaining, cap);
-        for (let i = 0; i < n; i++) {
-            const a = (i / n) * Math.PI * 2 + (ring % 2 ? 0 : Math.PI / n);
-            pos.push([Math.cos(a) * r, Math.sin(a) * r]);
-        }
-        remaining -= n;
-        ring++;
-        if (ring > 6) break;
+/** Tiling greyscale mottling for the pad apron (multiplied by the body's ground
+ *  colour). Cosmetic texture only — it encodes no terrain. */
+function groundTexture() {
+    const N = 256, c = document.createElement('canvas');
+    c.width = c.height = N;
+    const g = c.getContext('2d');
+    g.fillStyle = '#d0d0d0'; g.fillRect(0, 0, N, N);
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 900; k++) {
+        const x = rnd() * N, y = rnd() * N, r = 2 + rnd() * 18, v = 150 + rnd() * 105;
+        g.fillStyle = `rgba(${v},${v},${v},0.35)`;
+        for (const [dx, dy] of [[0, 0], [N, 0], [-N, 0], [0, N], [0, -N]]) { g.beginPath(); g.arc(x + dx, y + dy, r, 0, Math.PI * 2); g.fill(); }
     }
-    return pos.slice(0, count);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(400, 400);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
 }
 
-/** Nearest-neighbour spacing among cluster positions (for bell sizing). */
-function nearestSpacing(positions) {
-    if (positions.length < 2) return 2;
-    let min = Infinity;
-    for (let i = 0; i < positions.length; i++) {
-        for (let j = i + 1; j < positions.length; j++) {
-            const dx = positions[i][0] - positions[j][0];
-            const dz = positions[i][1] - positions[j][1];
-            min = Math.min(min, Math.hypot(dx, dz));
+// Soft vapor texture: transparent at the apex and the trailing edge, densest
+// just aft of the shoulder, streaked along the flow.
+let _vaporTex = null;
+function vaporTexture() {
+    if (_vaporTex) return _vaporTex;
+    const W = 64, H = 128;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const img = g.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+        const v = 1 - y / (H - 1);                 // canvas top = cone apex (uv.y = 1)
+        const along = Math.pow(Math.sin(Math.PI * Math.min(1, v * 1.15)), 1.6) * Math.exp(-v * 1.2);
+        for (let x = 0; x < W; x++) {
+            const streak = 0.75 + 0.25 * Math.sin(x * 0.9 + Math.sin(x * 0.37) * 3);
+            const i = (y * W + x) * 4;
+            img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+            img.data[i + 3] = Math.round(255 * Math.max(0, along * streak));
         }
     }
-    return isFinite(min) ? min : 2;
-}
-
-function makeStars() {
-    const N = 1400;
-    const geo = new THREE.BufferGeometry();
-    const arr = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) {
-        const r = 800 + Math.random() * 1500;
-        const th = Math.random() * Math.PI * 2;
-        const ph = Math.acos(2 * Math.random() - 1);
-        arr[i * 3] = r * Math.sin(ph) * Math.cos(th);
-        arr[i * 3 + 1] = Math.abs(r * Math.cos(ph)) + 50;
-        arr[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
-    }
-    geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.4, sizeAttenuation: false, transparent: true, opacity: 0, fog: false });
-    return new THREE.Points(geo, mat);
+    g.putImageData(img, 0, 0);
+    _vaporTex = new THREE.CanvasTexture(c);
+    _vaporTex.colorSpace = THREE.SRGBColorSpace;
+    return _vaporTex;
 }

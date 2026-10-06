@@ -165,10 +165,15 @@ const PLUME_FRAG = /* glsl */`
 function makePlumeBody({ baseRadius, length, coreColor, midColor, outerColor }) {
     // High segment count so the vertex-shader sculpt is smooth, not faceted.
     const geo = new THREE.ConeGeometry(baseRadius, length, 36, 64, true);
-    // Move geometry so the BASE sits at the origin (rather than centered),
-    // then rotate so the apex points -Y (downstream).
-    geo.translate(0, -length / 2, 0);
+    // Flip so the apex points -Y (downstream), THEN shift so the BASE (the
+    // bell exit, uv.y = 0) sits at the origin. The order matters: until
+    // 2026-10 this translated first and rotated second, which left the apex
+    // at the origin and the wide, brightest end at +length — every plume on
+    // the site pointed UP into its own vehicle (mostly hidden inside the
+    // opaque body, so it read as "the plume is tiny"). Pinned by
+    // tests/spaceship-designer-smoke.spec.js ("the shared plume points downstream").
     geo.rotateX(Math.PI);
+    geo.translate(0, -length / 2, 0);
 
     const uniforms = {
         uTime:       { value: 0 },
