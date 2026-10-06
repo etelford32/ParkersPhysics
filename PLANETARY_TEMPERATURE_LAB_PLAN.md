@@ -285,7 +285,7 @@ The full list is in `results-2026-10-05.json` under `I`.
 | # | Finding | Rule |
 |---|---|---|
 | R1 | Harness reproduces C3S to 0.01 K (absolute) and 0.02 K (2021 anomaly) | The planet strip's global anomaly is a **real** number, not decoration. Gate it in node tests with the same reference values |
-| R2 | Harmonics beat the ±7-day window; N = 4 is the CV optimum and N = 5 overfits | Normal = **N = 4 mean + N = 2 variance**, per variable per cell. One function, `js/temperature-normals.js` |
+| R2 | Harmonics beat the ±7-day window; N = 4 is the CV optimum and N = 5 overfits | Normal = **N = 4 mean + N = 2 variance**, per variable per cell; quantile curves **N = 3** (measured by the Phase-1 build's own split-half CV, `assets/temperature/build-report.json`). One reader, `js/temperature-normals.js` |
 | R3 | Diurnal K = 2 captures nearly all of it (0.584 vs 0.567 at K = 3) | Hour-of-day normal = annual N = 3 × diurnal K = 2 (35 coef/cell), lazy-loaded by EarthView only |
 | R4 | Gaussian tails miscalibrate up to **3×** at 1 % (high-latitude sea, tropical land) | **Rarity labels use empirical quantile curves** (stored per cell, harmonic-smoothed), never `Φ(z)`. z is kept for colour scales only |
 | R5 | Raw-ΔT rankings are 66–75 % poleward of 50° and share 11–33 % of entries with rarity rankings | "Most above/below normal" **ranks by rarity** (empirical percentile) and prints ΔT beside it. A raw-ΔT sort is an explicit secondary option, never the default |
@@ -311,10 +311,12 @@ panel and the node tests import that one file.
 - **Form:** per cell, per variable:
   - the mean is N = 4 annual harmonics;
   - the variance is N = 2 harmonics;
-  - quantile curves (p01, p05, p10, p25, p50, p75, p90, p95, p99) are N = 2 harmonics fitted
-    to the windowed empirical quantiles;
-  - a **record envelope** (the ±7-day, 30-year max/min) is stored per pentad, because records
-    are not smooth and a harmonic would understate them.
+  - quantile curves (p01, p05, p10, p33, p50, p67, p90, p95, p99 — p33/p67 because they are
+    the class edges below) are N = 3 harmonics fitted to the windowed empirical quantiles.
+    N = 3 beat N = 2 at every level and N = 4 at the tails, by split-half CV;
+  - a **record envelope** is stored per pentad, because records are not smooth and a harmonic
+    would understate them. It is the max/min of a ±9-day pool, a superset of every member
+    date's ±7-day pool, so "beyond the record" can only under-claim.
 - **Hour-of-day normal (EarthView only):** annual N = 3 × diurnal K = 2 on hourly T2m.
 - **Representativeness correction:** a per-cell seasonal offset (N = 1) aligning the 1.5°
   normal with the live source's point values (§4.2).
@@ -451,8 +453,8 @@ sandbox. WB2 happens to be reachable here, which is how §2 ran.
 | File | Contents | Size | Consumed by |
 |---|---|---|---|
 | `normals-1991-2020.bin` | daily normals | ~115–140 KB deflated | Edge route + browser |
-| `quantiles-1991-2020.bin` | quantile curves | ~0.4 MB | Edge route only |
-| `records-1991-2020.bin` | pentad record envelope | ~2 MB | Edge route only |
+| `quantiles-1991-2020.bin` | quantile curves | 0.98 MB (0.69 deflated) | Edge route only |
+| `records-1991-2020.bin` | pentad record envelope | 2.27 MB (1.22 deflated) | Edge route only |
 | `hourly-1991-2020.bin` | hour-of-day normal | ~180 KB | EarthView only, lazy |
 
 5. Emit `tests/fixtures/temperature/normals-check.json`: 200 random (cell, doy, hour)
@@ -786,7 +788,7 @@ clean:
 |---|---|---|
 | **0 (this doc)** | Spike + plan | §2 numbers reproducible (§13) |
 | **0b — restore the primary grid source** *(blocks launch)* | **Step 1 shipped 2026-10-06 (honesty + diagnosis).** The premise above was wrong: the cron surfaced Open-Meteo's reason only when *every* attempt failed, and threw it away when MET Norway won, so no log line or heartbeat field held it. Now a fallback win (i) `console.warn`s every earlier attempt's reason, (ii) writes it to `pipeline_heartbeat` via `record_pipeline_failure` *before* `record_pipeline_success` (streak still ends at 0, so the watchdog email stays reserved for "nothing written"), and (iii) returns `degraded` + `attempt_failures`. `status.html` / `admin.html` score a fallback source amber ("degraded · fallback source") through `js/pipeline-registry.js` `isFallbackSource`, and `/api/weather/grid` serves the frame with `freshness:'stale'`. Rate limits that arrive as a 429 now short-circuit the same-IP gfs retry, like the 200 envelope always did. `OPEN_METEO_API_KEY` (optional) moves both Open-Meteo attempts to `customer-api` with `&apikey=`; the key is scrubbed from every reason. Gate: `node tests/weather-grid-pipeline.mjs` (fails on the pre-fix code). **Step 2:** after deploy, read `pipeline_heartbeat.last_failure_reason` for `weather_grid` (or one Vercel log line), which names the cause. **Step 3:** fix it — (a) set `OPEN_METEO_API_KEY` (D12), (b) re-pace chunks under the per-minute cap, or (c) a different primary | Step 1: done. Exit: 24 h of `open-meteo*` frames in `weather_grid_cache`; heartbeat amber on fallback |
-| **1 — normals** | `scripts/build-temperature-normals.py`, the assets + `SOURCES.md`, `js/temperature-normals.js`, `tests/temperature-normals.mjs` | Python↔JS fixture to 1e-3 K; harness (R1) re-run on the built asset; quantile curves within 0.3 K of the windowed empirical quantiles (to be measured) |
+| **1 — normals** *(shipped 2026-10-06)* | `scripts/build-temperature-normals.py`, the four assets + `SOURCES.md` + `build-report.json`, `js/temperature-normals.js`, `tests/temperature-normals.mjs` | **Met:** Python↔JS fixture (200 cases) agrees to < 1e-6 K; R1 on the shipped file 14.387 °C vs C3S 14.38. **Replaced:** the "within 0.3 K of the windowed quantiles" gate was the wrong test — the windowed quantile is itself the noisy estimator, so the right gate is split-half CV against held-out years, where the N = 3 curves beat the unsmoothed window at every level (p10 0.661 vs 0.739 K, p99 0.824 vs 0.973). Representativeness is NOT in these files (every header says so) — Phase 1b |
 | **1b — representativeness** | Offset against Open-Meteo ERA5 points (§4.2 step 3) | Residual live-minus-normal mean over the first 30 days of `temperature_daily_cells` reported per region |
 | **2 — live aggregate** | Migration (3 tables, `compute_temperature_lab`, the 13:30 rollup), `js/geo-regions.js` move (+ `api/weather/extremes.js` imports it), `/api/temperature/snapshot`, registry entry, CLAUDE.md §4.2 note | `node tests/geo-regions.mjs tests/temperature-lab-model.mjs`; route self-reports `freshness`; `node tests/pipeline-registry.mjs` |
 | **3 — site network** | Census in the build script, `js/temperature-sites.js`, the cron, `vercel.json` | `node tests/temperature-sites.mjs`; cron writes; stale path tested |
