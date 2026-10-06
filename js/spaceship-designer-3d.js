@@ -986,6 +986,9 @@ export function createRocketScene(canvas, opts = {}) {
         }
         const fairEv = f.events.find((e) => e.kind === 'fairing');
         if (fairEv && !f.fairingOff && f.t >= fairEv.t) { jettisonFairing(); onPhase('fairing sep'); }
+        // Ullage: RCS settles the propellant before the circularisation relight.
+        const circEv = f.events.find((e) => e.kind === 'circularize');
+        if (circEv && !f.ullaged && f.t >= circEv.t - 3) { f.ullaged = true; rcsPuffT = Math.max(rcsPuffT, 2); }
 
         // Pose the vehicle on the real trajectory.
         const pose = poseAt(s, f.R, baseY);
@@ -1030,8 +1033,13 @@ export function createRocketScene(canvas, opts = {}) {
         padArms.forEach((p) => { p.rotation.y = Math.min(1.2, p.rotation.y + dtWall * 0.8); });
         tickDebris(dtF);
 
+        // Phase label from the guided ascent's own phase (coast / circularize
+        // are the two-burn insertion; 'staging' is the brief inter-stage coast).
         let phase;
-        if (s.coasting) phase = 'staging';
+        if (f.result.status === 'no-liftoff') phase = 'held on the pad';
+        else if (s.phase === 'coast') phase = 'coast to apoapsis';
+        else if (s.phase === 'circularize') phase = 'circularization burn';
+        else if (s.coasting) phase = 'staging';
         else if (f.t < 6) phase = 'liftoff';
         else phase = active > 1 ? 'stage ' + active : 'ascent';
         if (phase !== f.phase) { f.phase = phase; onPhase(phase); }
@@ -1058,8 +1066,32 @@ export function createRocketScene(canvas, opts = {}) {
         engineLight.intensity = 0;
         flight = null;
         lastTrailPos = null;
-        onPhase('meco');
+        const st = f?.result?.status;
+        if (st === 'breakup') { breakApart(); onPhase('breakup'); }
+        else if (st === 'no-liftoff') onPhase('no liftoff');
+        else if (st === 'crashed') { breakApart(); onPhase('crashed'); }
+        else if (st === 'escape') onPhase('escape trajectory');
+        else onPhase(st === 'orbit' || st === 'low-orbit' ? 'orbit' : 'meco');
         f?.resolve?.(f.result);
+    }
+
+    // Structural failure: the stack is gone in a fireball and a debris cloud.
+    // Cosmetic — the physics already ended the flight at the breakup sample.
+    function breakApart() {
+        const centre = rocketFocusWorld(stack ? stack.bodyLength_m / 2 : 30);
+        const R = Math.max(4, (stack?.stages[0]?.r || 2) * 3);
+        for (let k = 0; k < 260; k++) {
+            const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, sp = 10 + Math.random() * 60;
+            const d = [Math.sqrt(1 - u * u) * Math.cos(a), u, Math.sqrt(1 - u * u) * Math.sin(a)];
+            particles.emit({
+                x: centre.x + d[0] * R * Math.random(), y: centre.y + d[1] * R * Math.random(), z: centre.z + d[2] * R * Math.random(),
+                vx: d[0] * sp, vy: d[1] * sp, vz: d[2] * sp,
+                size0: R * 0.8, size1: R * (3 + Math.random() * 4), life: 2 + Math.random() * 4,
+                color: k < 90 ? 0xffd28a : k < 170 ? 0xff7a2a : 0x6a625a,
+                alpha: k < 170 ? 0.95 : 0.6, drag: 0.8, buoy: env?.body.rho0_kg_m3 > 1e-6 ? 2 : 0,
+            });
+        }
+        for (const g of stageGroups) if (g.parent === rocketRoot) g.visible = false;
     }
     function abort() { if (flight) endFlight(); }
 

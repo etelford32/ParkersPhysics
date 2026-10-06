@@ -19,7 +19,9 @@
  */
 
 import { ENGINES } from './launch-engines.js';
-import { LAUNCH_BODIES, simulateAscent, atmosphericPressure, surfaceRotationSpeed } from './launch-physics.js';
+import { LAUNCH_BODIES, atmosphericPressure, surfaceRotationSpeed } from './launch-physics.js';
+import { optimizedAscent, atmosphereTopKm, Q_BREAKUP_FACTOR } from './spaceship-designer-ascent.js';
+import { missionOptions } from './spaceship-designer-mission.js';
 
 const G0 = 9.80665;            // m/s² — standard gravity (Isp definition)
 
@@ -334,7 +336,20 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
         const thrustVac = (e.vac_kn || e.sl_kn || 0) * s.engineCount * clamp(s.throttle ?? 1, 0.4, 1);
         // Lower stages quote sea-level Isp, upper stages vacuum Isp.
         const isp = (e.isp_vac && e.isp_sl) ? e.isp_sl : (e.isp_vac || e.isp_sl || 300);
-        return { ...s, engine: e, prop, propMass, dryMass, wetMass, thrustSL_kN: thrustSL, thrustVac_kN: thrustVac, isp_s: isp, ispVac_s: e.isp_vac || isp };
+        const ispVac = e.isp_vac || isp;
+        // At THIS body's surface: the flight's own nozzle law F = F_vac − p₀·Aₑ
+        // with Aₑ backed out of the two ratings (identical to sea level on
+        // Earth; ~vacuum on Mars; zero against Venus's 92 bar). Isp moves with
+        // thrust at fixed mass flow, interpolated between the two published
+        // ratings so Earth reproduces the catalog sea-level figure exactly.
+        const p0 = body.p0_pa || 0;
+        const Ae = Math.max(0, (thrustVac - thrustSL) * 1000 / 101325);
+        const thrustSurf = Math.max(0, thrustVac - p0 * Ae / 1000);
+        const span = thrustVac - thrustSL;
+        const frac = span > 1e-9 ? (thrustSurf - thrustSL) / span : 1;
+        const ispSurf = thrustSurf > 0 ? Math.max(0, isp + frac * (ispVac - isp)) : 0;
+        return { ...s, engine: e, prop, propMass, dryMass, wetMass, thrustSL_kN: thrustSL, thrustVac_kN: thrustVac,
+                 thrustSurface_kN: thrustSurf, ispSurface_s: ispSurf, isp_s: isp, ispVac_s: ispVac };
     });
 
     const totalWet = stages.reduce((a, s) => a + s.wetMass, 0) + topMass;
@@ -348,20 +363,23 @@ export function computeStats(design, body = LAUNCH_BODIES[design.bodyId] || LAUN
         const above = stages.slice(i + 1).reduce((a, s) => a + s.wetMass, 0) + topMass;
         const m0 = stages[i].wetMass + above;
         const mf = stages[i].dryMass + above;
-        const ispUse = i === 0 ? stages[i].isp_s : stages[i].ispVac_s;
+        const ispUse = i === 0 ? stages[i].ispSurface_s : stages[i].ispVac_s;
         const ve = ispUse * G0;
         const dv = (mf > 0 && m0 > mf) ? ve * Math.log(m0 / mf) : 0;
         stages[i].dv_kms = dv / 1000;
-        // Stage 1 lights on the ground (sea-level thrust); every later stage
-        // lights near vacuum, so its TWR is quoted on its VACUUM thrust — a
-        // vacuum engine's sea-level rating is 0 and used to read "TWR 0.00".
-        // (Still against surface g: that is the conventional, conservative figure.)
-        const F_kN = i === 0 ? stages[i].thrustSL_kN : stages[i].thrustVac_kN;
+        // Stage 1 lights on the ground (thrust at the BODY's surface pressure);
+        // every later stage lights near vacuum, so its TWR is quoted on its
+        // VACUUM thrust — a vacuum engine's sea-level rating is 0 and used to
+        // read "TWR 0.00". (Against surface g: the conventional, conservative figure.)
+        const F_kN = i === 0 ? stages[i].thrustSurface_kN : stages[i].thrustVac_kN;
         stages[i].twr = F_kN * 1000 / Math.max(m0 * g_body, 1e-9);
         dvTotal += dv;
     }
 
-    const liftoffThrust = stages[0]?.thrustSL_kN || 0;
+    // Liftoff thrust at the launch body's own surface pressure — it used to be
+    // the Earth sea-level rating everywhere, so Venus advertised TWR 1.31 for
+    // a rocket whose nozzles cannot push against 92 bar at all.
+    const liftoffThrust = stages[0]?.thrustSurface_kN || 0;
     const liftoffTWR = liftoffThrust * 1000 / Math.max(totalWet * g_body, 1e-9);
     // Geometry comes from the ONE stack layout the 3D view draws: interstages
     // that house the upper engines count toward the body length, and a cluster
@@ -924,7 +942,9 @@ export function runAscent(design) {
         dry_frac: clamp((stats.totalDry_kg) / stats.totalWet_kg, 0.02, 0.6),
     };
 
-    const result = simulateAscent({ body, vehicle, target_alt_km: design.targetAltKm || 200 });
+    // The designer's own guided two-burn insertion (spaceship-designer-ascent.js);
+    // launch-physics.simulateAscent stays the planners' calibrated integrator.
+    const result = optimizedAscent({ body, vehicle, target_alt_km: design.targetAltKm || 200 });
 
     // Enrich each powered-ascent sample with the aero force breakdown and the
     // active nozzle's expansion state (drives the live panels and the plume).
@@ -962,10 +982,16 @@ function emptyAscent(body) {
 /** Human-readable verdict for the scorecard. */
 export function gradeAscent(result) {
     if (result.status === 'orbit') {
-        const margin = result.final_vt_kms - result.v_orb_circ_kms;
-        if (margin > 0.5) return { grade: 'S', label: 'Orbit with margin to spare', tone: 'good' };
+        // Margin = Δv still aboard in orbit. "To spare" means enough to leave
+        // the body entirely (C3 = 0 from this orbit: (√2 − 1)·v_circ).
+        const escape = (Math.SQRT2 - 1) * (result.v_orb_circ_kms || 0);
+        if ((result.remaining_dv_kms ?? 0) >= escape) return { grade: 'S', label: 'Orbit — with the Δv to leave it', tone: 'good' };
         return { grade: 'A', label: 'Made orbit', tone: 'good' };
     }
+    if (result.status === 'low-orbit') return { grade: 'B', label: 'In orbit, below the target altitude', tone: 'warn' };
+    if (result.status === 'escape') return { grade: 'C', label: 'Overshot — escape trajectory, no orbit', tone: 'warn' };
+    if (result.status === 'breakup') return { grade: 'F', label: 'Broke up at max-Q', tone: 'bad' };
+    if (result.status === 'no-liftoff') return { grade: 'F', label: 'Never left the pad', tone: 'bad' };
     if (result.status === 'fuel-out') {
         const frac = result.final_vt_kms / (result.v_orb_circ_kms || 1);
         if (frac > 0.8) return { grade: 'B', label: 'So close — short on Δv', tone: 'warn' };
@@ -977,4 +1003,15 @@ export function gradeAscent(result) {
     return { grade: 'C', label: 'Flight ended early', tone: 'warn' };
 }
 
-export { LAUNCH_BODIES, G0, surfaceRotationSpeed };
+/**
+ * Where the vehicle can go from the orbit it reached: the mission kernel's
+ * destinations against the Δv still aboard. Null when it did not make orbit.
+ */
+export function missionFromResult(design, result) {
+    if (!result || (result.status !== 'orbit' && result.status !== 'low-orbit')) return null;
+    const park = Math.max(0, ((result.orbit?.peri_km ?? 0) + Math.min(result.orbit?.apo_km ?? 0, 1e6)) / 2);
+    return { parkAltKm: park, dvLeftKms: result.remaining_dv_kms || 0,
+             options: missionOptions(design.bodyId || 'earth', park, result.remaining_dv_kms || 0) };
+}
+
+export { LAUNCH_BODIES, G0, surfaceRotationSpeed, atmosphereTopKm, Q_BREAKUP_FACTOR };

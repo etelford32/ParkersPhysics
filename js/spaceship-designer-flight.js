@@ -131,6 +131,21 @@ export function flightEvents(result, design, body) {
             : (p.alt_km > 20 && (p.q_kPa ?? 1) < FAIRING_Q_KPA));
         if (hit) ev.push({ t: hit.t, kind: 'fairing' });
     }
+    // Guided-ascent phases (spaceship-designer-ascent.js): the unpowered coast
+    // to apoapsis is a WINDOW [t, t1]; the circularisation burn's ignition is
+    // an event in its own right (slow motion, like staging).
+    const T = result?.trajectory || [];
+    let coastStart = null;
+    for (let i = 0; i < T.length; i++) {
+        const p = T[i];
+        if (p.phase === 'coast' && coastStart == null) coastStart = p.t;
+        if (p.phase !== 'coast' && coastStart != null) {
+            ev.push({ t: coastStart, t1: p.t, kind: 'coast' });
+            coastStart = null;
+        }
+        if (p.phase === 'circularize' && T[i - 1]?.phase !== 'circularize') ev.push({ t: p.t, kind: 'circularize' });
+    }
+    if (coastStart != null && T.length) ev.push({ t: coastStart, t1: T[T.length - 1].t, kind: 'coast' });
     return ev.sort((a, b) => a.t - b.t);
 }
 
@@ -139,19 +154,36 @@ export function flightEvents(result, design, body) {
  *   • Real time for the first REALTIME_S — the vehicle clearing the tower is
  *     the shot people came for, and at 25× it is gone in a frame.
  *   • Eases up to a cruise rate that plays the whole burn in ~CRUISE_WALL_S.
- *   • Drops to EVENT_RATE from 1.5 s before to 8 s after every staging and
- *     fairing event, so separation is watchable instead of a one-frame pop.
+ *   • Drops to EVENT_RATE from 1.5 s before to 8 s after every staging,
+ *     fairing and circularisation-ignition event, so separation is
+ *     watchable instead of a one-frame pop.
+ *   • Races through an unpowered COAST window in ~COAST_WALL_S (an airless
+ *     ascent coasts up to ~45 min to apoapsis; at cruise rate that was a
+ *     minute of nothing happening). The cruise rate itself is set from the
+ *     POWERED time only, so a long coast does not speed up the burns.
  * Pure function of t, so a flight replays identically.
  */
 export const REALTIME_S = 4;
 export const CRUISE_WALL_S = 24;
 export const EVENT_RATE = 2.5;
+export const COAST_WALL_S = 5;
 export function playbackRate(t, events, burnS) {
-    const cruise = Math.min(60, Math.max(6, (burnS || 300) / CRUISE_WALL_S));
+    const coasts = (events || []).filter((e) => e.kind === 'coast');
+    const poweredS = Math.max(60, (burnS || 300) - coasts.reduce((a, c) => a + (c.t1 - c.t), 0));
+    const cruise = Math.min(60, Math.max(6, poweredS / CRUISE_WALL_S));
     const ramp = smooth01((t - REALTIME_S) / 14);
     let rate = 1 + (cruise - 1) * ramp;
+    for (const c of coasts) {
+        const len = c.t1 - c.t;
+        if (t > c.t && t < c.t1 && len > 30) {
+            const fast = len / COAST_WALL_S;
+            // Ease in over the first 3 % and out over the last 5 % of the coast.
+            const w = Math.min(smooth01((t - c.t) / (0.03 * len)), smooth01((c.t1 - t) / (0.05 * len)));
+            rate = Math.max(rate, rate + (fast - rate) * w);
+        }
+    }
     for (const e of events || []) {
-        if (e.kind !== 'staging' && e.kind !== 'fairing') continue;
+        if (e.kind !== 'staging' && e.kind !== 'fairing' && e.kind !== 'circularize') continue;
         const d = t - e.t;
         if (d > -1.5 && d < 8) rate = Math.min(rate, EVENT_RATE);
         else if (d > -6 && d <= -1.5) rate = Math.min(rate, EVENT_RATE + (cruise - EVENT_RATE) * smooth01((-1.5 - d) / 4.5));

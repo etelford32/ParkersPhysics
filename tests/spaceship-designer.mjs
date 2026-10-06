@@ -21,11 +21,21 @@
  *   • THE ENGINE DECIDES THE PROPELLANT, and the legacy spec-id engineId
  *     ('raptor_2_vac') that used to fly a Merlin resolves to Raptor Vacuum.
  *   • FLIGHT POSES ARE TRUE GEOMETRY on a true-radius planet.
+ *   • THE GUIDANCE STOPS AT ORBIT. The two-burn insertion ends in a bound
+ *     orbit at the target on every airless world (the old path flew the Moon
+ *     run to 2.87 km/s — past lunar ESCAPE — and graded it "Orbit"), the
+ *     lunar ascent costs what Apollo's did (~1.85 km/s), and the honest
+ *     failures are reported as such: Venus never lifts off, an over-powered
+ *     booster breaks up in Titan's air.
+ *   • DESTINATIONS ARE TEXTBOOK. TLI 3.13, LOI 0.82, TMI 3.61, Earth escape
+ *     3.22, GTO 2.44 + 1.47, Earth–Mars Hohmann 259 d, synodic 780 d.
  */
 
 import assert from 'node:assert/strict';
 import * as E from '../js/spaceship-designer-engine.js';
 import * as F from '../js/spaceship-designer-flight.js';
+import * as A from '../js/spaceship-designer-ascent.js';
+import * as M from '../js/spaceship-designer-mission.js';
 
 let passed = 0;
 const ok = (name) => { console.log(`  ✓ ${name}`); passed += 1; };
@@ -237,6 +247,87 @@ console.log('launch site');
     const b = E.runAscent({ ...E.defaultDesign(), launchLongitude: 131.0 });
     assert.equal(a.final_vt_kms, b.final_vt_kms, 'longitude changes no ascent number');
     ok('wrap/clamp, legacy meridians, presets, padBasis orientation, Δv-neutral longitude');
+}
+
+// ── Guided ascent (two-burn insertion) ───────────────────────────────────────
+console.log('guided ascent');
+{
+    const mu = 3.986e14, r = 6.578e6, vc = Math.sqrt(mu / r);
+    const c = A.orbitElements(mu, r, 0, vc);
+    near(c.peri_r, r, 1, 'circular: periapsis = r'); near(c.apo_r, r, 1, 'circular: apoapsis = r');
+    assert.equal(A.orbitElements(mu, r, 0, vc * Math.SQRT2 * 1.001).apo_r, Infinity, 'above escape speed: unbound');
+    near(A.atmosphereTopKm(E.LAUNCH_BODIES.earth), 99.6, 0.5, 'Earth atmosphere top ≈ Kármán line');
+    assert.equal(A.atmosphereTopKm(E.LAUNCH_BODIES.moon), 0, 'airless');
+    assert.ok(A.atmosphereTopKm(E.LAUNCH_BODIES.titan) > 200, 'Titan’s air reaches far higher than Earth’s');
+
+    const fly = (body, extra = {}) => E.runAscent(E.normalizeDesign({ ...E.defaultDesign(), bodyId: body, ...extra }));
+    const earth = fly('earth');
+    assert.equal(earth.status, 'orbit');
+    assert.ok(earth.orbit.peri_km >= 0.9 * 200 && earth.orbit.apo_km < 260, `Earth orbit near target (${earth.orbit.peri_km.toFixed(0)} × ${earth.orbit.apo_km.toFixed(0)})`);
+    assert.ok(earth.dv_used_kms > 9.0 && earth.dv_used_kms < 10.5, `Earth Δv to LEO ${earth.dv_used_kms.toFixed(2)} km/s`);
+    for (const b of ['moon', 'mercury', 'europa', 'enceladus', 'mars']) {
+        const r2 = fly(b);
+        assert.equal(r2.status, 'orbit', `${b} reaches orbit`);
+        assert.ok(Number.isFinite(r2.orbit.apo_km) && r2.orbit.energy < 0, `${b}: bound orbit, not escape`);
+        assert.ok(r2.orbit.peri_km >= 0.9 * 200 && r2.orbit.apo_km < 300, `${b}: at the target (${r2.orbit.peri_km.toFixed(0)} × ${r2.orbit.apo_km.toFixed(0)})`);
+    }
+    const moon = fly('moon');
+    assert.ok(moon.dv_used_kms > 1.75 && moon.dv_used_kms < 2.1, `lunar ascent ${moon.dv_used_kms.toFixed(2)} km/s (Apollo LM ≈ 1.85)`);
+    assert.equal(fly('venus').status, 'no-liftoff', 'Venus: no thrust against 92 bar');
+    const titan = fly('titan');
+    assert.equal(titan.status, 'breakup');
+    assert.ok(titan.max_q_kPa > A.Q_BREAKUP_FACTOR * 35, 'Titan breakup is a measured q exceedance');
+
+    // Rotation assist now shows up as Δv LEFT (both runs stop at circular).
+    assert.ok(fly('earth', { launchLatitude: 0 }).remaining_dv_kms > fly('earth', { launchLatitude: 90 }).remaining_dv_kms, 'equator beats pole');
+    // Δv left is the rocket equation on what is left, stage by stage.
+    near(earth.remaining_stages.reduce((a, x) => a + x.dv_kms, 0), earth.remaining_dv_kms, 1e-9, 'remaining Δv sums its stages');
+    // Deterministic (the turn search must not depend on anything ambient).
+    assert.deepEqual(E.runAscent(E.defaultDesign()).orbit, earth.orbit, 'deterministic');
+    // The planners' integrator is untouched: the designer no longer calls it.
+    assert.equal(earth.guidance, 'insertion');
+
+    // Liftoff thrust at the BODY's surface pressure (the flight's own law).
+    const st = (b) => E.computeStats(E.normalizeDesign({ ...E.defaultDesign(), bodyId: b }));
+    near(st('earth').liftoffThrust_kN, 854 * 9, 1e-6, 'Earth: the sea-level rating, exactly');
+    assert.equal(st('venus').liftoffThrust_kN, 0, 'Venus: a Merlin cannot push against 92 bar');
+    assert.ok(st('mars').liftoffThrust_kN > st('earth').liftoffThrust_kN, 'Mars: near-vacuum thrust');
+
+    // Playback: an airless ascent coasts ~50 min; it must still play briskly.
+    const ev = F.flightEvents(moon, E.defaultDesign(), E.LAUNCH_BODIES.moon);
+    assert.ok(ev.some((e) => e.kind === 'coast') && ev.some((e) => e.kind === 'circularize'), 'coast + circularize events');
+    const wall = F.playbackDuration(moon.trajectory[moon.trajectory.length - 1].t, ev);
+    assert.ok(wall < 60, `lunar ascent plays in ${wall.toFixed(1)} s`);
+    ok('bound orbits at target on 6 worlds, Apollo-class lunar Δv, Venus/Titan failures, surface thrust, playback');
+}
+
+// ── Beyond orbit (mission kernel) ────────────────────────────────────────────
+console.log('mission budgets');
+{
+    const b = (o, alt, d) => M.transferBudget(o, alt, d);
+    near(b('earth', 200, 'moon').depart_kms, 3.13, 0.02, 'TLI from 200 km');
+    near(b('earth', 200, 'moon').capture_kms, 0.82, 0.04, 'lunar orbit insertion');
+    near(b('earth', 200, 'mars').depart_kms, 3.61, 0.02, 'trans-Mars injection');
+    near(b('earth', 200, 'escape').depart_kms, 3.22, 0.01, 'Earth escape (C3 = 0)');
+    const geo = b('earth', 200, 'geo');
+    near(geo.depart_kms, 2.45, 0.02, 'GTO'); near(geo.capture_kms, 1.47, 0.02, 'GEO circularisation');
+    near(b('earth', 200, 'mars').tof_days, 259, 1, 'Earth–Mars Hohmann');
+    near(b('earth', 200, 'mars').window_days, 780, 1, 'Mars synodic period');
+    near(b('earth', 200, 'venus').window_days, 584, 1, 'Venus synodic period');
+    near(b('moon', 100, 'earth').depart_kms, 0.82, 0.05, 'trans-Earth injection');
+    // Symmetry: Earth→Mars departure equals Mars→Earth capture-free arrival speed pairing.
+    near(b('earth', 200, 'mars').vinf_depart_kms, b('mars', 200, 'earth').vinf_arrive_kms, 1e-9, 'v∞ symmetric');
+    for (const [o, list] of Object.entries(M.DESTINATIONS)) {
+        for (const d of list) {
+            const x = b(o, 200, d);
+            assert.ok(x && Number.isFinite(x.total_kms) && x.total_kms > 0, `${o} → ${d} modelled`);
+        }
+    }
+    const opts = M.missionOptions('earth', 200, 4.0);
+    const r = Object.fromEntries(opts.map((x) => [x.id, x.reach]));
+    assert.equal(r.moon, 'orbit'); assert.equal(r.mars, 'aero'); assert.equal(r.escape, 'orbit');
+    assert.equal(M.missionOptions('earth', 200, 1.0).find((x) => x.id === 'moon').reach, 'no');
+    ok('TLI/LOI/TMI/escape/GTO/GEO, Hohmann times, synodic windows, reach logic');
 }
 
 console.log(`\n${passed} groups passed`);

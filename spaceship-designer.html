@@ -99,6 +99,12 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
 .ssd-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 .ssd-note{font-size:11px;color:var(--c-text-mut);line-height:1.4}
+.ssd-table{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.ssd-table th{font-size:10px;font-weight:600;color:var(--c-text-mut);text-transform:uppercase;letter-spacing:.05em;text-align:left;
+  padding:4px 6px;border-bottom:1px solid var(--c-line)}
+.ssd-table td{padding:6px;border-bottom:1px dashed rgba(120,160,200,.10);vertical-align:top}
+.ssd-table .n{text-align:right;white-space:nowrap}
+.ssd-table .mut{color:var(--c-text-mut);font-size:10.5px}
 .ssd-bay{font-size:11.5px;color:var(--c-text-2);line-height:1.5;display:flex;flex-direction:column;gap:2px;
   border-left:2px solid var(--c-accent-border);padding:2px 0 2px 8px}
 .ssd-chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
@@ -310,9 +316,14 @@ input:focus,select:focus{outline:none;border-color:var(--c-accent-border)}
     <div class="ssd-card">
       <h2>Flight Result</h2>
       <div class="ssd-body" id="ssd-result">
-        <div class="ssd-note">Press <strong>Launch</strong> to fly your design to orbit. The ascent uses the same
-          validated integrator as the Launch Planner — drag, gravity loss and the rocket equation are all real.</div>
+        <div class="ssd-note">Press <strong>Launch</strong> to fly your design to orbit. The guidance flies a real
+          two-burn insertion — a gravity turn optimised for <em>this</em> vehicle, engine cut-off when the apoapsis
+          reaches the target, a coast, and a circularisation burn — through drag, gravity and the rocket equation.</div>
       </div>
+    </div>
+    <div class="ssd-card" id="ssd-beyond-card" hidden>
+      <h2>Beyond Orbit <span class="ssd-pill" id="ssd-beyond-dv">—</span></h2>
+      <div class="ssd-body" id="ssd-beyond"></div>
     </div>
   </div>
 
@@ -421,7 +432,7 @@ import { auth } from './js/auth.js';
 import { getSupabase } from './js/supabase-config.js';
 import { openGate, consumeResume } from './js/gate-modal.js';
 import {
-  defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent,
+  defaultDesign, computeStats, computeAero, computeNozzle, expansionState, runAscent, gradeAscent, missionFromResult,
   normalizeDesign, engineFor, engineGeometry, stackLayout, clusterLayout,
   LAUNCH_SITES, defaultLaunchSite, matchLaunchSite, wrapLon, formatLatLon,
   PROPELLANTS, ENGINE_CATALOG, NOSECONE_TYPES, FIN_TYPES, COCKPIT_LAYOUTS,
@@ -883,9 +894,22 @@ function showResult(result) {
   const km = (x) => (x ?? 0).toFixed(0);
   const ks = (x) => (x ?? 0).toFixed(2);
   const statusLabel = {
-    orbit: 'Orbit achieved', 'fuel-out': 'MECO — out of propellant',
+    orbit: 'Orbit achieved', 'low-orbit': 'Orbit — below target', 'fuel-out': 'Out of propellant',
+    escape: 'Escape trajectory', breakup: 'Structural breakup', 'no-liftoff': 'No liftoff',
     crashed: 'Crashed', 'time-out': 'Flight timed out', invalid: 'Invalid design',
   }[result.status] || result.status;
+  const o = result.orbit || {};
+  const orbitTxt = !Number.isFinite(o.apo_km) ? 'unbound (escaping)'
+    : `${km(Math.max(o.peri_km, -9999))} × ${km(o.apo_km)} km`;
+  const ins = result.insertion || {};
+  const insertionRows = result.guidance === 'insertion' && (result.status === 'orbit' || result.status === 'low-orbit' || result.status === 'escape') ? `
+    <div class="ssd-stat"><span class="k">Orbit (periapsis × apoapsis)</span><span class="v">${orbitTxt}</span></div>
+    <div class="ssd-stat"><span class="k">Gravity turn (optimised)</span><span class="v">horizontal by ${(result.turn_alt_km ?? 0).toFixed(0)} km · ${result.turn_search ?? 1} trial ascents</span></div>
+    ${ins.meco1_t != null ? `<div class="ssd-stat"><span class="k">MECO-1 → circularise</span><span class="v">T+${ins.meco1_t.toFixed(0)} s → T+${(ins.circ_start_t ?? ins.meco1_t).toFixed(0)} s · ${(ins.circ_dv_kms * 1000).toFixed(0)} m/s</span></div>` : ''}
+    <div class="ssd-stat"><span class="k">Δv left in orbit</span><span class="v" style="color:var(--c-accent)">${ks(result.remaining_dv_kms)} km/s</span></div>`
+    : `
+    <div class="ssd-stat"><span class="k">Altitude at end of flight</span><span class="v">${km(result.final_alt_km)} km</span></div>
+    <div class="ssd-stat"><span class="k">Horizontal speed reached</span><span class="v">${ks(result.final_vt_kms)} of ${ks(result.v_orb_circ_kms)} km/s</span></div>`;
   const ev = result.staging_events || [];
   const stagingRows = ev.length
     ? `<div class="ssd-stat" style="border:none"><span class="k">Staging</span><span class="v">${
@@ -897,18 +921,49 @@ function showResult(result) {
       <div><div style="font-weight:700">${statusLabel}</div>
         <div class="ssd-note">${g.label}</div></div>
     </div>
-    <div class="ssd-stat"><span class="k">Apoapsis at MECO</span><span class="v">${km(result.final_alt_km)} km</span></div>
-    <div class="ssd-stat"><span class="k">Velocity at MECO</span><span class="v">${ks(result.final_vt_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Orbital speed needed</span><span class="v">${ks(result.v_orb_circ_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Δv used</span><span class="v">${ks(result.dv_used_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Gravity loss</span><span class="v">${ks(result.dv_grav_loss_kms)} km/s</span></div>
-    <div class="ssd-stat"><span class="k">Drag loss</span><span class="v">${ks(result.dv_drag_loss_kms)} km/s</span></div>
+    ${result.reason ? `<div class="ssd-lockmsg" style="color:var(--c-text-2)">${result.reason}</div>` : ''}
+    ${insertionRows}
+    <div class="ssd-stat"><span class="k">Δv used (gravity · drag · steering losses)</span><span class="v">${ks(result.dv_used_kms)} km/s
+      <span style="color:var(--c-text-mut);font-weight:500">(${ks(result.dv_grav_loss_kms)} · ${ks(result.dv_drag_loss_kms)} · ${ks(result.dv_steer_loss_kms)})</span></span></div>
     ${(result.v_rotation_kms ?? 0) > 0.001 ? `<div class="ssd-stat"><span class="k">Rotation assist</span><span class="v" style="color:var(--c-good)">+${ks(result.v_rotation_kms)} km/s @ ${(result.launch_lat_deg ?? 0).toFixed(0)}°</span></div>` : ''}
     <div class="ssd-stat"><span class="k">Peak acceleration</span><span class="v"${(result.max_accel_g ?? 0) > (result.accel_limit_g ?? 99) + 0.1 ? ' style="color:var(--c-warn)"' : ''}>${(result.max_accel_g ?? 0).toFixed(1)} g${result.accel_limit_g ? ` / ${result.accel_limit_g} g cap` : ''}</span></div>
-    <div class="ssd-stat"><span class="k">Max-Q</span><span class="v">${(result.max_q_kPa ?? 0).toFixed(0)} kPa</span></div>
+    <div class="ssd-stat"><span class="k">Max-Q</span><span class="v"${(result.max_q_kPa ?? 0) > (result.q_limit_kPa || 1e9) ? ' style="color:var(--c-bad)"' : ''}>${(result.max_q_kPa ?? 0).toFixed(0)} kPa${result.q_limit_kPa ? ` / ${result.q_limit_kPa} limit` : ''}</span></div>
     <div class="ssd-stat"><span class="k">Max Mach (in atmosphere)</span><span class="v">${(result.max_mach ?? 0).toFixed(1)}</span></div>
     <div class="ssd-stat"${stagingRows ? '' : ' style="border:none"'}><span class="k">Peak aero drag</span><span class="v">${(result.max_drag_kN ?? 0).toFixed(0)} kN @ ${(result.max_drag_alt_km ?? 0).toFixed(0)} km</span></div>
     ${stagingRows}`;
+  showBeyond(result);
+}
+
+// "Where can it go from here?" — the mission kernel's patched-conic Hohmann
+// budgets against the Δv still aboard (spaceship-designer-mission.js).
+const REACH = {
+  orbit: ['✓ orbit', 'var(--c-good)'], aero: ['✓ with aerocapture', 'var(--c-accent)'],
+  flyby: ['flyby only', 'var(--c-warn)'], no: ['out of reach', 'var(--c-text-mut)'],
+};
+function showBeyond(result) {
+  const card = $('ssd-beyond-card');
+  const m = missionFromResult(design, result);
+  if (!m) { card.hidden = true; return; }
+  card.hidden = false;
+  $('ssd-beyond-dv').textContent = m.dvLeftKms.toFixed(2) + ' km/s left';
+  const days = (d) => d == null ? '—' : d < 2 ? (d * 24).toFixed(0) + ' h' : d < 60 ? d.toFixed(1) + ' d' : d.toFixed(0) + ' d';
+  const rows = m.options.map((x) => {
+    const [txt, col] = REACH[x.reach];
+    const legs = x.kind === 'escape' ? x.depart_kms.toFixed(2)
+      : `${x.depart_kms.toFixed(2)} + ${x.capture_kms.toFixed(2)}${x.aero ? '<sup>a</sup>' : ''}`;
+    return `<tr><td>${x.name}</td><td class="n">${legs}</td><td class="n">${x.total_kms.toFixed(2)}</td>
+      <td class="n">${days(x.tof_days)}${x.window_days ? `<br><span class="mut">every ${(x.window_days / 30.44).toFixed(0)} mo</span>` : ''}</td>
+      <td style="color:${col};font-weight:700">${txt}</td></tr>`;
+  }).join('');
+  $('ssd-beyond').innerHTML = `
+    <table class="ssd-table">
+      <thead><tr><th>Destination</th><th class="n">Depart + capture (km/s)</th><th class="n">Total</th><th class="n">Transit · window</th><th>Reach</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="ssd-note">From a ${m.parkAltKm.toFixed(0)} km parking orbit: ideal Hohmann transfers between circular,
+      coplanar orbits (patched conics), capture into a low orbit at the destination. Ignored: plane changes and launch
+      inclination, finite-burn losses, the planets' eccentric orbits. <sup>a</sup> The destination has an atmosphere —
+      aerobraking can replace most of the capture burn.</div>`;
 }
 
 // ── Hangar (save / load) ─────────────────────────────────────────────────────
@@ -1102,7 +1157,7 @@ function wire() {
       $('hud-thr').textContent = Math.round((s.throttle ?? 0) * 100) + '%';
       $('hud-thrust').textContent = (s.thrustMN ?? 0).toFixed(2) + ' MN';
       $('hud-track').textContent = s.pitchDeg != null
-        ? `${s.pitchDeg.toFixed(0)}° · ${(s.downrangeKm ?? 0).toFixed((s.downrangeKm ?? 0) >= 100 ? 0 : 1)} km` : '—';
+        ? `${s.pitchDeg.toFixed(0)}° · ${Math.max(0, s.downrangeKm ?? 0).toFixed((s.downrangeKm ?? 0) >= 100 ? 0 : 1)} km` : '—';
       const warp = $('ssd-warp');
       warp.hidden = !(s.rate > 1.05);
       if (s.rate > 1.05) warp.textContent = `playback ×${s.rate.toFixed(s.rate < 10 ? 1 : 0)} · T+${(s.t ?? 0).toFixed(0)} s`;
@@ -1161,7 +1216,14 @@ function wire() {
       const poleD = { ...defaultDesign(), launchLatitude: 90 };
       const eq = runAscent(eqD), pole = runAscent(poleD);
       checks.push(['rotation assist > 0', r.v_rotation_kms > 0]);
-      checks.push(['equator beats pole', (eq.final_vt_kms - eq.v_orb_circ_kms) > (pole.final_vt_kms - pole.v_orb_circ_kms)]);
+      // Both now stop at circular speed; the rotation assist shows up as Δv LEFT.
+      checks.push(['equator beats pole', eq.remaining_dv_kms > pole.remaining_dv_kms]);
+      // Guided insertion: no airless overshoot to escape, honest failures.
+      const moon = runAscent({ ...defaultDesign(), bodyId: 'moon' });
+      checks.push(['moon: orbit, not escape', moon.status === 'orbit' && Number.isFinite(moon.orbit.apo_km)]);
+      checks.push(['venus: no liftoff against 92 bar', runAscent({ ...defaultDesign(), bodyId: 'venus' }).status === 'no-liftoff']);
+      const mission = missionFromResult(defaultDesign(), r);
+      checks.push(['mission budgets present', !!mission && mission.options.some((x) => x.id === 'moon')]);
       checks.push(['accel capped at limit', r.max_accel_g <= r.accel_limit_g + 0.05]);
       checks.push(['traj carries throttle', r.trajectory.every((p) => Number.isFinite(p.throttle))]);
       return { ok: checks.every((c) => c[1]), checks };
