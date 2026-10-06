@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planetary Temperature Lab · Hottest, Coldest, Most Unusual · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/temperature-lab.html">
+<meta name="description" content="Where Earth is hottest, coldest and most unusual for the date right now: the trailing 24 hours of a global model analysis scored against the 1991–2020 ERA5 normal, ranked by how rare the day is for each place — with every baseline and every limit stated.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/temperature-lab.html">
+<meta property="og:title" content="Planetary Temperature Lab — where Earth is hottest, coldest and most unusual right now">
+<meta property="og:description" content="Live scorecards against the 1991–2020 normal, ranked by rarity rather than raw degrees, with your own place's week and month alongside.">
+<meta property="og:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Planetary Temperature Lab — Parkers Physics">
+<meta name="twitter:description" content="Hottest, coldest and most unusual right now — against the 1991–2020 normal.">
+<meta name="twitter:image" content="https://parkersphysics.com/ParkersPhysics_logo2.jpg">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     Page CSS is tlp- prefixed; the lab's own components are tl- (injected by
+     js/temperature-lab-panel.js). Intentionally NO nav styling here. -->
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+:root { --tlp-bg: #060a14; --tlp-text: #c9d6e8; --tlp-dim: #7487a6; --tlp-accent: #6fd3ff; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--tlp-bg); color: var(--tlp-text); min-height: 100vh;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+.tlp-hero { padding: 86px 22px 6px; max-width: 1240px; margin: 0 auto; }
+.tlp-hero h1 { margin: 0 0 6px; font-size: 1.55rem; letter-spacing: .03em; color: #f2f7ff; }
+.tlp-hero h1 span { color: var(--tlp-accent); }
+.tlp-hero p { margin: 0; font-size: .86rem; color: var(--tlp-dim); max-width: 880px; line-height: 1.55; }
+.tlp-main { max-width: 1240px; margin: 14px auto 0; padding: 0 22px; }
+.tlp-methods { max-width: 1240px; margin: 6px auto 40px; padding: 0 22px; font-size: .8rem; line-height: 1.65; color: var(--tlp-dim); }
+.tlp-methods h2 { font-size: .95rem; color: #e8f0fb; margin: 18px 0 6px; }
+.tlp-methods b { color: var(--tlp-text); }
+.tlp-methods code { font-size: .92em; color: #a9c6e8; }
+@media (max-width: 768px) {
+    .tlp-hero { padding: 72px 16px 4px; }
+    .tlp-hero h1 { font-size: 1.25rem; }
+    .tlp-main, .tlp-methods { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260809"; initNav("temperature-lab");</script>
+
+<header class="tlp-hero">
+    <h1>Planetary Temperature <span>Lab</span></h1>
+    <p>
+        Where Earth is hottest, coldest and most unusual for the date right now. The last 24 hours of
+        the global model analysis behind EarthView, scored point by point against the 1991–2020 normal
+        (ERA5) and ranked by how <em>rare</em> the day is for that place and date, not by raw degrees,
+        because a 4° departure in the steady tropics is stranger than a 9° one in Siberia.
+    </p>
+</header>
+
+<main class="tlp-main">
+    <div id="tl-host"></div>
+</main>
+
+<section class="tlp-methods" aria-labelledby="tlp-methods-h">
+    <h2 id="tlp-methods-h">Methods &amp; limits</h2>
+    <p>
+        <b>The live field.</b> The hourly global grid EarthView already fetches (2,592 points at 5°),
+        aggregated over the trailing 24 hourly frames into a per-point maximum, minimum and mean. It is
+        <b>model analysis at sampled grid points, not station observations</b>: a 5° point is an area
+        average, so the hottest point here is the hottest of the points we sample, not the hottest place
+        on Earth. When the window includes the coarse fallback source, the page says so — that field
+        understates extremes by several degrees.
+    </p>
+    <p>
+        <b>The normal.</b> ERA5 1991–2020, the WMO standard normal, as daily mean / max / min smoothed
+        with four annual harmonics (two for the variance), plus percentile curves at p01 … p99 and the
+        1991–2020 range for every date. Each was chosen by split-half cross-validation on held-out years;
+        the numbers are in <code>PLANETARY_TEMPERATURE_LAB_PLAN.md</code> §2 and the build report.
+        The normals are 1.5° box means with no correction yet for the difference between a box and a
+        point, and they say so.
+    </p>
+    <p>
+        <b>Rarity, not degrees.</b> "Most above normal" ranks by the empirical percentile of the 24-hour
+        mean for that place and date. Ranked by raw degrees, two-thirds of a top ten sits poleward of 50°,
+        because the high latitudes are simply more variable; ranked by rarity, a tropical day can lead.
+        "Beyond 1991–2020" means beyond anything in the ERA5 reference for that date at that grid point —
+        not a station record.
+    </p>
+    <p>
+        <b>Two normals on one page.</b> The map and the "last 24 h" reading use the 1991–2020 ERA5 normal.
+        Your place's week and month come from Open-Meteo's forecast and are compared with the recent
+        normal at that exact point from Open-Meteo's archive. Each says which it uses.
+    </p>
+    <p>
+        <b>Data.</b> Open-Meteo (live grid, forecast and archive) · Copernicus ERA5 via WeatherBench2
+        (normals) · coastlines from the NASA-derived water mask already used by EarthView.
+    </p>
+</section>
+
+<script type="module">
+import { bootTemperatureLab } from './js/temperature-lab-page.js';
+bootTemperatureLab(document.getElementById('tl-host'));
+</script>
+</body>
+</html>

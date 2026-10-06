@@ -68,6 +68,9 @@ import {
 } from './verdict-engine.js';
 import { shueStandoffRe } from './hero-live-hud.js';
 import { localDayStart, addDaysNoon } from './temp-outlook.js';
+import {
+    WARM_COL, COOL_COL, MONTH_SHORT, monthCalendarHtml, CALENDAR_CSS,
+} from './temp-calendar-view.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PURE MODEL — node-testable, no DOM below this line until the renderer
@@ -515,27 +518,7 @@ details.sc-tbl th{color:var(--sc-ink4);font-weight:600}
 .sc-wk rect.hit:hover,.sc-wk rect.hit:focus{fill:rgba(255,255,255,.05)}
 .sc-legend{display:flex;gap:12px 16px;flex-wrap:wrap;font-size:.68rem;color:var(--sc-ink4);margin-top:4px;line-height:1.5}
 .sc-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:5px;box-sizing:border-box}
-/* month calendar */
-.sc-cal{margin-top:6px}
-.sc-cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--sc-ink4);text-align:center;margin-bottom:3px}
-.sc-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
-.sc-cal .d{position:relative;min-height:50px;border-radius:7px;background:var(--sc-s2);border:1px solid transparent;padding:4px 5px 3px;
-  font-size:.7rem;line-height:1.25;color:var(--sc-ink3);display:flex;flex-direction:column;justify-content:space-between;cursor:default;outline:none;min-width:0}
-.sc-cal .d.pad{background:transparent}
-.sc-cal .d .dn{font-size:.66rem;color:var(--sc-ink3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sc-cal .d .dn b{color:var(--sc-ink2);font-weight:650}
-.sc-cal .d .hl{font-variant-numeric:tabular-nums;color:var(--sc-ink);font-weight:650;white-space:nowrap;font-size:.76rem}
-.sc-cal .d .hl small{color:var(--sc-ink3);font-weight:500;font-size:.9em}
-.sc-cal .d.past{opacity:.74}
-.sc-cal .d.past .hl{font-weight:500;color:var(--sc-ink2)}
-.sc-cal .d.today{border-color:var(--sc-accent);box-shadow:0 0 0 1px var(--sc-accent) inset;opacity:1}
-.sc-cal .d[data-tier="nwp-ext"] .hl{font-weight:560}
-.sc-cal .d[data-tier="blend"]{border-style:dashed;border-color:rgba(154,133,255,.3)}
-.sc-cal .d[data-tier="blend"] .hl{font-weight:500;color:var(--sc-ink2)}
-.sc-cal .d[data-tier="none"] .hl{color:var(--sc-ink4);font-weight:400}
-.sc-cal .d:not(.pad):hover,.sc-cal .d:not(.pad):focus{border-color:rgba(255,255,255,.4)}
-@container (max-width:520px){.sc-cal .d{min-height:40px;padding:3px 3px 2px;font-size:.62rem}.sc-cal .d .dn{font-size:.56rem}}
+${CALENDAR_CSS}
 /* hover tip: one element per console, positioned in the console's box */
 .sc-tip{position:absolute;z-index:6;pointer-events:none;display:none;background:#1b1140;border:1px solid var(--sc-border);border-radius:9px;
   padding:7px 10px;font-size:.72rem;line-height:1.45;color:var(--sc-ink2);white-space:pre-line;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:250px}
@@ -713,15 +696,8 @@ function weekBandSvg(week) {
     return `<svg class="sc-spark" style="max-width:480px" viewBox="0 0 ${W} ${H}" role="img" aria-label="7-day temperature range">${g}</svg>`;
 }
 
-// Warming / cooling: the tab's own accent for a day that warms across
-// midnight, a blue for one that cools. The pair validates for CVD and
-// normal-vision separation and for contrast on the console surface
-// (dataviz validator, 2026-09-21); the lightness band it fails is the
-// console's deliberate neon-on-black house style, shared by every colour
-// on this card.
-const WARM_COL = '#ff8c5a', COOL_COL = '#6ea8ff';
-const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const fmtSigned = (v) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${Math.abs(Math.round(v))}°`;
+// WARM_COL / COOL_COL / MONTH_SHORT and the month calendar live in
+// js/temp-calendar-view.js (one renderer for this tab and the Temperature Lab).
 
 /**
  * The week: the hourly temperature line across seven local days with ONE
@@ -780,59 +756,6 @@ function weekCandlesSvg(wk, now, { narrow = false } = {}) {
             + `<text x="${x(now) + 4}" y="${T + 10}" font-size="9" fill="#cdc4f0">now</text>`;
     }
     return `<svg class="sc-svg sc-wk" viewBox="0 0 ${W} ${H}" role="group" aria-label="Seven-day hourly temperature with one candlestick per day">${g}${hits}</svg>`;
-}
-
-/** Cell background: departure from the date's normal, warm or cool, magnitude → mix. */
-function anomalyStyle(anomF) {
-    if (!isNum(anomF)) return '';
-    const pct = Math.round(clamp01(Math.abs(anomF) / 12) * 55);
-    if (pct < 4) return '';
-    return ` style="background:color-mix(in srgb,${anomF > 0 ? WARM_COL : COOL_COL} ${pct}%,var(--sc-s2))"`;
-}
-
-function calendarCellTip(c, temp) {
-    const date = new Date(c.t).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
-    const years = temp.clim ? `${temp.clim.years[0]}–${temp.clim.years[1]}` : '';
-    const anom = isNum(c.anomF) ? `\n${fmtSigned(c.anomF)} vs the ${years} normal for the date` : '';
-    if (c.past) {
-        if (c.hiF == null) return `${date}\nNo record for this day.`;
-        return `${date}\nObserved high ${Math.round(c.hiF)}° · low ${Math.round(c.loF)}°${anom}\n${c.source === 'archive' ? 'ERA5 reanalysis archive' : 'Model analysis — the archive publishes ~2 days behind'}`;
-    }
-    const when = c.lead === 0 ? 'today' : c.lead === 1 ? 'tomorrow' : `in ${c.lead} days`;
-    if (c.source === 'none') return `${date} · ${when}\nNo outlook yet — the archive normals are still loading.`;
-    const val = `High ${Math.round(c.hiF)}° · Low ${Math.round(c.loF)}°`;
-    if (c.source === 'nwp') {
-        return `${date} · ${when}\n${val}${anom}\n${c.tier === 'nwp-near' ? 'Model forecast — day-to-day skill' : 'Extended model run — skill fades past ~10 days'}`;
-    }
-    const tau = temp.outlook?.tau;
-    const trend = c.rho > 0.05 ? `the model's day-16 departure at ${Math.round(c.rho * 100)}%` : 'no model trend left';
-    return `${date} · ${when}\n${val}${anom}\nNormal for the date + ${trend}${isNum(tau) ? ` (τ ${tau.toFixed(1)} d)` : ''}`
-        + (isNum(c.sigmaF) ? `\nTypical miss ±${Math.round(c.sigmaF)}°` : '');
-}
-
-/** The 30-day calendar: this month's page through today + 30. */
-function monthCalendarHtml(temp) {
-    const cal = temp.calendar;
-    if (!cal?.weeks?.length) return '';
-    const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    let g = `<div class="sc-cal" role="grid" aria-label="30-day temperature outlook calendar">`
-        + `<div class="sc-cal-head" role="row">${DOW.map((d) => `<span role="columnheader">${d}</span>`).join('')}</div>`;
-    for (const week of cal.weeks) {
-        g += '<div class="sc-cal-grid" role="row">';
-        for (const c of week) {
-            if (c.pad) { g += '<div class="d pad" role="gridcell" aria-hidden="true"></div>'; continue; }
-            const dn = c.monthStart ? `<b>${MONTH_SHORT[c.month]} ${c.day}</b>` : c.isToday ? `<b>${c.day}</b>` : String(c.day);
-            const hl = c.hiF != null && c.loF != null ? `${Math.round(c.hiF)}<small>/${Math.round(c.loF)}</small>` : '<small>—</small>';
-            const cls = `d${c.past ? ' past' : ''}${c.isToday ? ' today' : ''}`;
-            const tip = calendarCellTip(c, temp);
-            g += `<div class="${cls}" role="gridcell" tabindex="0" data-key="${c.key}" data-tier="${c.tier}" data-src="${c.source}" data-lead="${c.lead}"`
-                + `${anomalyStyle(c.anomF)} aria-label="${esc(tip.replace(/\n/g, '. '))}" data-tip="${esc(tip)}">`
-                + `<span class="dn">${dn}</span><span class="hl">${hl}</span></div>`;
-        }
-        g += '</div>';
-    }
-    g += '</div>';
-    return g;
 }
 
 /** The year arc: multi-year mean solar input vs temperature, with lag. */

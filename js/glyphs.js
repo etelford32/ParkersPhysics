@@ -62,6 +62,16 @@ export const GLYPHS = {
         `<path d="M2.6 19a9.4 9.4 0 0 1 18.8 0"/>` +
         `<path d="M5.6 19a6.4 6.4 0 0 1 12.8 0"/>` +
         `<path d="M8.8 19a3.2 3.2 0 0 1 6.4 0"/>`,
+    thermometer:
+        // Planetary Temperature Lab: the stem is the mark's AXIS, the filled
+        // bulb its NODE, and the ticks to one side are the scale the reading
+        // is judged against — the lab is about departure from a normal, so
+        // the scale gets a mark of its own rather than being implied.
+        `<path d="M10 14.6V5.4a2 2 0 0 1 4 0v9.2"/>` +
+        `<circle cx="12" cy="17.4" r="3.4"/>` +
+        NODE(12, 17.4, 1.7) +
+        `<path d="M12 15.4V8.4"/>` +
+        `<path d="M16.6 6.2h2.4M16.6 9.2h1.6M16.6 12.2h2.4"/>`,
     'space-weather':
         `<circle cx="8.6" cy="8.4" r="3.6"/>` +
         `<path d="M8.6 2.2v1.4M8.6 13.2v1.4M2.4 8.4h1.4M13.4 8.4h1.4M4.2 4l1 1M12 11.8l1 1M4.2 12.8l1-1M12 5l1-1"/>` +

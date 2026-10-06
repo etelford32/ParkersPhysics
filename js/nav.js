@@ -144,6 +144,7 @@ const NAV_ITEMS = {
         { section: 'Earth systems' },
         { href: 'earth.html',            label: 'EarthView',        sub: 'Predictive weather + magnetosphere',      tier: 'public', icon: 'earth' },
         { href: 'pollution.html',        label: 'Pollution Lab',    sub: 'Live AQI · hotspot ML · climate forcing', tier: 'public', icon: 'atmosphere', badge: 'NEW', id: 'pollution' },
+        { href: 'temperature-lab.html',  label: 'Temperature Lab',  sub: 'Hottest · coldest · most unusual now',    tier: 'public', icon: 'thermometer', badge: 'NEW', id: 'temperature-lab' },
         { href: 'upper-atmosphere.html', label: 'Upper Atmosphere', sub: 'Thermosphere + exosphere simulator',      tier: 'public', icon: 'atmosphere', id: 'upper-atmosphere' },
         { section: 'Orbital operations' },
         { href: 'operations.html',     label: 'Operations',     sub: 'Fleet & debris analysis console',       tier: 'public', icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },

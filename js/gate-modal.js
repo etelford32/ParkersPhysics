@@ -186,7 +186,39 @@ export const GATE_VARIANTS = Object.freeze({
         success:  'You’re in. Explore as far as you like.',
     },
 
+    // Planetary Temperature Lab (PLANETARY_TEMPERATURE_LAB_PLAN.md §7.2) —
+    // the ladder is js/temperature-lab-access.js; these fire on REACH.
+    'temp-lab-scorecards': {
+        gateType: 'free',
+        eyebrow:  'Free account',
+        headline: 'See the full top ten.',
+        body:     'A free account opens the top ten in every scorecard, plus land / ocean and region filters.',
+        primary:  { label: 'Open the top ten — free', plan: 'free' },
+        secondary:{ label: 'Maybe later', kind: 'dismiss' },
+        finePrint:'No credit card. Free forever. (The 30-day outlook is a Basic feature.)',
+        success:  'Here are the full cards.',
+    },
+    'temp-lab-outlook-week': {
+        gateType: 'free',
+        eyebrow:  'Free account',
+        headline: 'See your whole week against normal.',
+        body:     'A free account opens the 7-day outlook for your place, day by day against its 1991–2020 normal.',
+        primary:  { label: 'Open my week — free', plan: 'free' },
+        secondary:{ label: 'Maybe later', kind: 'dismiss' },
+        finePrint:'No credit card. Free forever. (The 30-day outlook is a Basic feature.)',
+        success:  "Here's your week.",
+    },
+
     // ── Gate 2 · paid upsell (D1: Basic $9.99 / Advanced $100) ──────────────
+    'temp-lab-outlook-30day': {
+        gateType: 'paid',
+        eyebrow:  'Basic',
+        headline: "You've got the week. Want the month?",
+        body:     'Basic unlocks the 30-day temperature outlook for your place — every day against its normal, with the expected miss.',
+        primary:  { label: 'Start Basic — $9.99/mo', plan: 'basic' },
+        secondary:{ label: 'Stay on free', kind: 'dismiss' },
+        finePrint:'Cancel anytime.',
+    },
     'outlook-30day': {
         gateType: 'paid',
         eyebrow:  'Basic',

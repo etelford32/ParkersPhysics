@@ -7,7 +7,7 @@
  * here), the page unlocks optimistically, and the modal shows "check your
  * inbox". Paid gates instead route to signup.html for Stripe checkout.
  *
- *   1. GATE_VARIANTS holds all 15 copy variants with the required fields.
+ *   1. GATE_VARIANTS holds all 18 copy variants with the required fields.
  *   2. A FREE gate renders a dimmed modal with an inline email form (no
  *      redirect); submitting posts to the endpoint, sets the provisional
  *      member flag, and swaps to the success state.
@@ -48,7 +48,7 @@ function mockAuth(plan, role) {
 // ─────────────────────────────────────────────────────────────────────
 
 test.describe('gate-modal component', () => {
-    test('registry holds all 15 variants with the required shell fields', async ({ page }) => {
+    test('registry holds all 18 variants with the required shell fields', async ({ page }) => {
         await page.goto('/');
         const report = await page.evaluate(async () => {
             const m = await import('/js/gate-modal.js');
@@ -63,10 +63,10 @@ test.describe('gate-modal component', () => {
             const paid = keys.filter(k => m.GATE_VARIANTS[k].gateType === 'paid').length;
             return { count: keys.length, bad, free, paid };
         });
-        expect(report.count).toBe(15);
+        expect(report.count).toBe(18);
         expect(report.bad).toEqual([]);
-        expect(report.free).toBe(11);
-        expect(report.paid).toBe(4);
+        expect(report.free).toBe(13);
+        expect(report.paid).toBe(5);
     });
 
     test('free gate mounts a dimmed modal with an inline email form (no redirect)', async ({ page }) => {
