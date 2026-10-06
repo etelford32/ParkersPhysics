@@ -1,0 +1,8 @@
+# Phase-0 spike only (offline, not deployed). Python 3.11. See PLANETARY_TEMPERATURE_LAB_PLAN.md §2.
+xarray>=2025.1
+zarr>=3
+fsspec
+aiohttp
+requests
+numpy
+scipy
