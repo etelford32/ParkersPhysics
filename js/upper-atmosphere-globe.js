@@ -652,7 +652,14 @@ export class AtmosphereGlobe {
         // hardcoded mean elements; the fetch resolves a few hundred ms
         // later and patches the probe in place. Failures fall back
         // silently to the hardcoded values.
-        this._fetchLiveTLEs().catch(err => {
+        this._fetchLiveTLEs().then((n) => {
+            // One retry once boot has settled: a probe that missed its
+            // upgrade under boot load stays on mean elements for the whole
+            // session otherwise (the refresh pill says "live" for the rest).
+            if (n < Object.values(this._satProbes || {}).filter(p => p.spec?.orbital?.noradId).length) {
+                setTimeout(() => this._fetchLiveTLEs().catch(() => {}), 8000);
+            }
+        }).catch(err => {
             console.debug('[upper-atmosphere] live TLE upgrade skipped:', err?.message || err);
         });
         // Background debris sample — 50 LEO debris pieces in the same
@@ -2510,7 +2517,13 @@ export class AtmosphereGlobe {
         const fetchOne = async (probe) => {
             const id = probe.spec.orbital.noradId;
             const ctl = new AbortController();
-            const t = setTimeout(() => ctl.abort(), 4000);
+            // 12 s, not 4: the fetch is issued during boot, and on a slow
+            // renderer the main thread is busy for seconds — the response
+            // could not be turned round inside 4 s and every probe silently
+            // kept its hard-coded elements (measured on SwiftShader: the ISS
+            // probe never got its SGP4 lines, the one-satellite-one-place
+            // gate timed out). A hung upstream still ends here.
+            const t = setTimeout(() => ctl.abort(), 12000);
             try {
                 const r = await fetch(`/api/celestrak/tle?norad=${id}`, {
                     signal: ctl.signal,

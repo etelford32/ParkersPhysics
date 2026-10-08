@@ -1146,6 +1146,14 @@ says what it is and what lives there, with the live numbers for it.
   probes only with the pointer on the canvas, yields to a hovered ring,
   and parks in the clear band between the column and the dock.
 
+**Found by the gates on the way, pre-existing (bisected to before this
+work):** the boot-time live-TLE upgrade aborted itself after 4 s, and on a
+saturated software renderer the main thread cannot turn the responses round
+in time, so every probe silently kept its hard-coded elements and the
+one-satellite-one-place gate waited 30 s for an ISS SGP4 state that never
+came. The abort is now 12 s (a hung upstream still ends there) and the
+upgrade retries once, 8 s after boot, if any probe missed it.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
