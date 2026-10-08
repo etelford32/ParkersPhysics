@@ -112,7 +112,7 @@ import { ExploreLayer } from './upper-atmosphere-explore.js';
 // The operational altitude bands (entry interface → top of LEO): the
 // PURE table + the analytic limb-ring pass that draws it as a ruler.
 import { OpsBandsLayer } from './upper-atmosphere-ops-bands-layer.js';
-import { bandForAltitude as opsBandForAltitude } from './upper-atmosphere-ops-bands.js';
+import { bandForAltitude as opsBandForAltitude, rayClosestApproach as opsRayClosestApproach, pickOpsBand, OPS_BANDS } from './upper-atmosphere-ops-bands.js';
 import { frameClock } from './upper-atmosphere-frame-clock.js';
 import {
     divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8, pointsOfInterest,
@@ -4960,8 +4960,45 @@ export class AtmosphereGlobe {
     setOpsBandsVisible(on)   { this._opsBands?.setVisible(on); }
     getOpsBandsVisible()     { return this._opsBands?.getVisible() ?? false; }
     isOpsBandsDrawn()        { return this._opsBands?.isDrawn() ?? false; }
-    setOpsBandFocus(id)      { this._opsBands?.setFocus(id); }
-    getOpsBandFocus()        { return this._opsBands?.getFocus() ?? null; }
+    setOpsBandFocus(id)      { this.selectOpsBand(id); }
+    getOpsBandFocus()        { return this._opsBands?.getSelected() ?? null; }
+    /**
+     * Select a band (id or null): it expands into its shell on the canvas,
+     * the others dim, and 'ua-ops-band' {kind:'select', id, band} is
+     * dispatched for the card, the ruler, the column and the legend.
+     */
+    selectOpsBand(id) {
+        const prev = this._opsBands?.getSelected() ?? null;
+        const next = id == null ? null : (OPS_BANDS.find(b => b.id === id)?.id ?? null);
+        if (next === prev) return prev;
+        this._opsBands?.setSelected(next);
+        const band = next ? OPS_BANDS.find(b => b.id === next) : null;
+        try { window.dispatchEvent(new CustomEvent('ua-ops-band', { detail: { kind: 'select', id: next, band } })); } catch (_) { /* no window */ }
+        return next;
+    }
+    getSelectedOpsBand()     { const id = this._opsBands?.getSelected(); return id ? OPS_BANDS.find(b => b.id === id) : null; }
+    getOpsBandHover()        { return this._opsBandHover || null; }
+    getOpsBandExpandWeights(){ return this._opsBands?.getExpandWeights() ?? []; }
+    /**
+     * Which band a canvas point aims at: the ray's closest approach (kernel
+     * `rayClosestApproach`) picked by `pickOpsBand` with a 6 px tolerance
+     * converted through the pixel angle at the tangent range.
+     */
+    pickOpsBandAt(clientX, clientY) {
+        if (!this._opsBands?.isDrawn()) return null;
+        const rect = this.canvas.getBoundingClientRect();
+        const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1,
+                                      ((clientY - rect.top) / rect.height) * -2 + 1);
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(ndc, this._camera);
+        const o = ray.ray.origin, d = ray.ray.direction;
+        const ca = opsRayClosestApproach([o.x, o.y, o.z], [d.x, d.y, d.z]);
+        if (!(ca.tc > 0)) return null;
+        const pixAng = 2 * Math.tan((this._camera.fov * Math.PI / 180) / 2) / Math.max(1, this.canvas.clientHeight);
+        const tolR = 6 * pixAng * ca.tc;
+        const pick = pickOpsBand({ b: ca.b, dist: ca.dist, tolR });
+        return pick ? { ...pick, b: ca.b, tolR, x: clientX - rect.left, y: clientY - rect.top } : null;
+    }
     /** The operational band the camera is in (null outside 80–2000 km). */
     getCameraOpsBand()       { return opsBandForAltitude(this.getCameraAltitudeKm()); }
     setMembranesVisible(on)  { this._explore?.setMembranesVisible(on); }
@@ -5404,7 +5441,13 @@ export class AtmosphereGlobe {
                 for (let p = o; p; p = p.parent) if (!p.visible) return false;
                 return true;
             };
-            const hits = this._raycaster.intersectObjects(hittable(), true).filter(h => shown(h.object));
+            let hits = this._raycaster.intersectObjects(hittable(), true).filter(h => shown(h.object));
+            // The ops bands' rings answer the cursor ahead of the layer shells
+            // (hidden but hittable so the tooltip can still name a layer): a
+            // ring edge is a target, a shell is only a name.
+            const bandPick = this.pickOpsBandAt(e.clientX, e.clientY);
+            const ringHover = bandPick?.part === 'edge';
+            if (ringHover && hits.length && _userDataForHit(hits[0])?.kind === 'layer-shell') hits = [];
             if (hits.length > 0) {
                 const ud = _userDataForHit(hits[0]);
                 tip.innerHTML = _tipHTML(ud, this._profile, this._swState);
@@ -5419,13 +5462,24 @@ export class AtmosphereGlobe {
                 this._hoveredDebrisIdx = ud?.kind === 'debris-piece'
                     ? ud.debrisIdx
                     : null;
+                if (this._opsBandHover) { this._opsBandHover = null; this._opsBands?.setHover(null); }
                 this.canvas.style.cursor = 'pointer';
             } else {
                 tip.style.opacity = '0';
                 this._hoveredUserData = null;
                 this._hoveredDebrisIdx = null;
+                // The ops bands' rings answer the cursor where nothing else
+                // does: a ring edge brightens and the instruments name it.
+                const pick = bandPick;
+                const hoverId = ringHover ? pick.band.id : null;
+                if (hoverId !== (this._opsBandHover?.band.id ?? null) || (pick && this._opsBandHover && pick.part !== this._opsBandHover.part)) {
+                    this._opsBands?.setHover(hoverId);
+                }
+                this._opsBandHover = pick;
                 const m = this._controls.getMode();
-                if (m === 'fly' || m === 'explore') {
+                if (hoverId) {
+                    this.canvas.style.cursor = 'pointer';
+                } else if (m === 'fly' || m === 'explore') {
                     this.canvas.style.cursor = 'crosshair';
                 } else {
                     this.canvas.style.cursor = 'grab';
@@ -5435,6 +5489,8 @@ export class AtmosphereGlobe {
         const onLeave = () => {
             tip.style.opacity = '0';
             this._hoveredDebrisIdx = null;
+            this._opsBandHover = null;
+            this._opsBands?.setHover(null);
             this.canvas.style.cursor = 'grab';
         };
         // Click handler: clicking on the ISS probe flies the camera to it.
@@ -5513,6 +5569,16 @@ export class AtmosphereGlobe {
                         }
                     }));
                 } catch (_) { /* ignore */ }
+            } else {
+                // Nothing a click acts on under the cursor (the hover raycast
+                // also reports the shells, the magnetopause, field lines —
+                // names, not targets; the dive's rule): a ring (or a band's wash)
+                // selects that band; empty space clears the selection; the
+                // selected band's own ring toggles it off.
+                const pick = this.pickOpsBandAt(e.clientX, e.clientY);
+                const cur = this._opsBands?.getSelected() ?? null;
+                if (pick) this.selectOpsBand(pick.band.id === cur ? null : pick.band.id);
+                else if (cur) this.selectOpsBand(null);
             }
         };
         this.canvas.addEventListener('mousemove', onMove);

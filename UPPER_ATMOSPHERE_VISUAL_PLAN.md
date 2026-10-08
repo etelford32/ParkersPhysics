@@ -1115,6 +1115,37 @@ the decay zone's King–Hele estimate LENGTHENS under a storm — pinned as
 measured rather than "fixed", because the estimate integrates the modelled
 profile below the orbit, which the hot storm thins.
 
+### 9.15 The rings are layers (2026-10-08)
+
+§9.14 drew the operational bands as a ruler on the limb. They are now
+LAYERS: hover a ring and it brightens and names itself at the cursor; click
+it and the band is SELECTED — the others dim to a third, the band expands
+into a translucent shell of its true extent, and a card under the readout
+says what it is and what lives there, with the live numbers for it.
+
+| piece | what it is | tested by |
+|---|---|---|
+| kernel `rayClosestApproach` · `pickOpsBand` · `shellChord` · `shellChordMax` | PURE: a ray's closest approach to the centre; which band a ray picks (EDGES first within a pixel tolerance — a ring is what a cursor aims at — then the wash; a shared edge belongs to the band ABOVE it, the ceiling to the top band; the disc and the inside of a band pick nothing); the ray's path through a spherical shell on the camera's side of the planet, and its longest value (the lower tangent) | `node tests/upper-atmosphere-ops-bands.mjs` (+3: the chord is pinned against the two-sided and near-side closed forms and is continuous across the limb) |
+| the layer | `uHover` / `uSel` / `uExpand[]` uniforms; the shell is the kernel's chord transliterated into GLSL, normalised by the lower-tangent chord, under a √ DISPLAY STRETCH (face-on a 100 km layer is 4 % of its limb chord — it would not show over the disc at all); the expansion eases on the frame clock with τ 0.22 s and is withheld while the camera is inside the band's top | `tests/upper-atmosphere-ops-layers.spec.js` (3) |
+| globe | `pickOpsBandAt(x, y)` (kernel pick with a 6 px tolerance through the pixel angle at the tangent range), hover in the tooltip's mousemove, click in its pointerup, `selectOpsBand(id)` → the `ua-ops-band` event | same |
+| `js/upper-atmosphere-ops-band-card.js` | DOM: name · extent · ops text · examples · ρ / H / v / period / drag decel / drop per orbit / decay / T from `bandMetrics` (re-printed every 2 s), ‹ › along the ladder, ✕, "Go there" (`goToAltitude`), "Limb view" (`flyToLimb`); mounted in the camera dock under the readout | same |
+| the instruments | the hover chip at the cursor (band · extent · what a click does), the ruler's selected segment thick and always named, the others dim; the probe YIELDS to a hovered ring and only probes while the pointer is on the WebGL canvas | same + volume spec |
+| the column strip, the legend rows, the readout's band tag | all select / toggle the same selection; Esc clears | same |
+
+**Three things the first pass got wrong, each measured.**
+- The hover raycast reports the five old layer shells (hidden but hittable
+  so the tooltip can still name a layer) over the whole band, so a ring
+  under the cursor never reached the ops pick: a ring edge now beats a
+  shell hit, and a click on anything that is not a click TARGET (the dive's
+  rule: probe, debris, catalogue point) is "empty sky" for the selection.
+- At the home framing every ring arc lies under some chrome (the column,
+  the toolbar, the dock, the dock column); the gate zooms out twice and
+  SCANS bearings for a point whose element-from-point is the canvas.
+- The limb probe listened on the host, so a pointer over the band card
+  still moved the probe and its card parked across the band card; it now
+  probes only with the pointer on the canvas, yields to a hovered ring,
+  and parks in the clear band between the column and the dock.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

@@ -164,4 +164,60 @@ ok('the ladder fraction is the explore column\'s own log mapping', () => {
     assert.equal(K.ladderFraction(5000), 1);
 });
 
+ok('rayClosestApproach: b and range from the camera', () => {
+    const r = K.rayClosestApproach([0, 0, 4], [0, 0, -1]);
+    near(r.b, 0, 1e-12, 'straight at the centre'); near(r.tc, 4, 1e-12, 'range'); near(r.dist, 4, 1e-12, 'dist');
+    const r2 = K.rayClosestApproach([0, 0, 4], [0.3, 0, -1]);
+    near(r2.b, 4 * 0.3 / Math.hypot(0.3, 1), 1e-12, 'off-axis b');
+    assert.ok(K.rayClosestApproach([0, 0, 4], [0, 0, 1]).tc < 0, 'pointing away');
+});
+
+ok('pickOpsBand: edges within tolerance first, then the wash, nothing on the disc or from inside', () => {
+    const R = K.R_EARTH_KM;
+    const rStation = 1 + 350 / R, rSso = 1 + 600 / R;
+    const dist = 4;
+    // On the station band's lower edge ring (350 km), within tolerance.
+    let p = K.pickOpsBand({ b: rStation + 0.0004, dist, tolR: 0.001 });
+    assert.equal(p.part, 'edge'); assert.equal(p.band.id, 'station'); assert.equal(p.edgeKm, 350);
+    // The same radius is also the VLEO band's upper edge: it belongs to the band ABOVE.
+    assert.notEqual(p.band.id, 'vleo');
+    // Between edges, outside tolerance: the wash of the band the ray is in.
+    p = K.pickOpsBand({ b: (rStation + 1 + 450 / R) / 2, dist, tolR: 0.0005 });
+    assert.equal(p.part, 'fill'); assert.equal(p.band.id, 'station');
+    // The model ceiling belongs to the top band.
+    p = K.pickOpsBand({ b: 1 + 2000 / R - 0.0001, dist, tolR: 0.001 });
+    assert.equal(p.part, 'edge'); assert.equal(p.band.id, 'leo-top'); assert.equal(p.edgeKm, 2000);
+    // The nearest edge wins when two are within tolerance.
+    p = K.pickOpsBand({ b: rSso - 0.0002, dist, tolR: 0.01 });
+    assert.equal(p.edgeKm, 600);
+    // Rays into the disc and above the band pick nothing.
+    assert.equal(K.pickOpsBand({ b: 0.9, dist, tolR: 0.01 }), null);
+    assert.equal(K.pickOpsBand({ b: 1.5, dist, tolR: 0.01 }), null);
+    // From inside a band there is no ring for its edges above the camera and no wash.
+    const inside = 1 + 400 / R;
+    assert.equal(K.pickOpsBand({ b: inside - 0.001, dist: inside, tolR: 0.0005 }), null);
+});
+
+ok('shellChord: the chord through a shell, occluded by the planet, longest at the lower tangent', () => {
+    const lo = 1.05, hi = 1.10;
+    // Clearing the planet: twice (outer − inner).
+    near(K.shellChord(1.0, lo, hi), 2 * (Math.sqrt(hi * hi - 1) - Math.sqrt(lo * lo - 1)), 1e-12, 'b = 1');
+    // Tangent to the lower edge: no inner part, the maximum.
+    near(K.shellChord(lo, lo, hi), 2 * Math.sqrt(hi * hi - lo * lo), 1e-12, 'tangent');
+    near(K.shellChordMax(lo, hi), K.shellChord(lo, lo, hi), 1e-12, 'max is the lower tangent');
+    for (const b of [1.0, 1.02, 1.05, 1.07, 1.09]) assert.ok(K.shellChord(b, lo, hi) <= K.shellChordMax(lo, hi) + 1e-12, `b=${b} ≤ max`);
+    // Hitting the planet: the near side only — half of the two-sided chord
+    // when the ray never reaches the shell's inner edge before the ground.
+    near(K.shellChord(0.5, lo, hi), Math.sqrt(hi * hi - 0.25) - Math.sqrt(lo * lo - 0.25), 1e-12, 'near side');
+    // A ray grazing the planet inside the shell (lo ≤ b < 1): ends on the ground.
+    const lo2 = 0.99;
+    near(K.shellChord(0.995, lo2, hi), Math.sqrt(hi * hi - 0.995 ** 2) - Math.sqrt(1 - 0.995 ** 2), 1e-12, 'ends on ground');
+    // Outside the shell: nothing. Degenerate shell: nothing.
+    assert.equal(K.shellChord(1.2, lo, hi), 0);
+    assert.equal(K.shellChord(1.0, hi, lo), 0);
+    assert.equal(K.shellChordMax(hi, lo), 0);
+    // Continuous across b = 1 (the planet's limb): the two formulas agree there.
+    near(K.shellChord(1 - 1e-9, lo, hi), K.shellChord(1, lo, hi) / 2, 1e-6, 'limb continuity (near side = half)');
+});
+
 console.log(`\n${passed} passed`);

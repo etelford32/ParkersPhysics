@@ -222,3 +222,76 @@ export function ladderFraction(altKm, floorKm = OPS_FLOOR_KM, ceilKm = OPS_CEIL_
     const z = Math.min(ceilKm, Math.max(floorKm, altKm));
     return Math.log(z / floorKm) / Math.log(ceilKm / floorKm);
 }
+
+// ── Picking and the expanded shell (PURE; the layer and the globe mirror these) ─
+
+/**
+ * A ray's closest approach to the planet centre: `b` (scene units, 1 = the
+ * surface) and the range `tc` along the ray to that point. The origin is
+ * the camera. A ray pointing away from the planet has tc ≤ 0.
+ */
+export function rayClosestApproach(origin, dir) {
+    const [ox, oy, oz] = origin;
+    let [dx, dy, dz] = dir;
+    const L = Math.hypot(dx, dy, dz) || 1;
+    dx /= L; dy /= L; dz /= L;
+    const tc = -(ox * dx + oy * dy + oz * dz);
+    const oo = ox * ox + oy * oy + oz * oz;
+    const b = Math.sqrt(Math.max(0, oo - tc * tc));
+    return { b, tc, dist: Math.sqrt(oo) };
+}
+
+/**
+ * Which band a ray picks. EDGES first — a ring is the thing a cursor aims
+ * at — within `tolR` of an edge's shell radius (a pixel tolerance converted
+ * by the caller: pixAng × tc × px), only for edges the camera is outside
+ * (a ring exists only when dist > its radius); then the band whose wash the
+ * ray falls in (lo ≤ b < hi). Rays that hit the planet (b < 1) pick nothing
+ * — the disc is the globe's own click target.
+ * @returns {{ band, index, part:'edge'|'fill', edgeKm?:number }|null}
+ */
+export function pickOpsBand({ b, dist, tolR = 0 }) {
+    if (!Number.isFinite(b) || !Number.isFinite(dist) || b < 1) return null;
+    let best = null, bestD = Infinity;
+    OPS_BANDS.forEach((band, index) => {
+        for (const km of [band.minKm, band.maxKm]) {
+            // A shared edge belongs to the band ABOVE it (its lower edge),
+            // except the model ceiling, which belongs to the top band.
+            if (km === band.maxKm && index !== OPS_BANDS.length - 1) continue;
+            const r = 1 + km / R_EARTH_KM;
+            if (r >= dist) continue;
+            const d = Math.abs(b - r);
+            if (d <= tolR && d < bestD) { bestD = d; best = { band, index, part: 'edge', edgeKm: km }; }
+        }
+    });
+    if (best) return best;
+    const index = OPS_BANDS.findIndex(band => b >= 1 + band.minKm / R_EARTH_KM && b < 1 + band.maxKm / R_EARTH_KM);
+    if (index < 0) return null;
+    const band = OPS_BANDS[index];
+    if (dist <= 1 + band.maxKm / R_EARTH_KM) return null;     // inside it: no wash to pick
+    return { band, index, part: 'fill' };
+}
+
+/**
+ * Path length of a ray with closest approach `b` through the spherical
+ * shell lo ≤ r ≤ hi, on the camera's side of the planet — i.e. what a
+ * translucent layer of the atmosphere would look like from outside:
+ * the full chord where the ray clears the planet, the near-side chord only
+ * where the ray hits it. Radii in scene units (1 = the surface). The camera
+ * is assumed outside hi (the layer skips the pass otherwise).
+ */
+export function shellChord(b, lo, hi) {
+    if (!(hi > lo) || !(b >= 0) || b >= hi) return 0;
+    const outer = Math.sqrt(hi * hi - b * b);
+    const inner = b < lo ? Math.sqrt(lo * lo - b * b) : 0;
+    if (b >= 1) return 2 * (outer - inner);                    // clears the planet
+    const ground = Math.sqrt(1 - b * b);                        // the ray ends on the planet
+    return outer - Math.max(inner, ground);                     // near side only
+}
+
+/** The longest chord through a shell from outside: tangent to its lower edge. */
+export function shellChordMax(lo, hi) {
+    if (!(hi > lo)) return 0;
+    const tangentAt = Math.max(lo, 1);
+    return shellChord(tangentAt, lo, hi);
+}

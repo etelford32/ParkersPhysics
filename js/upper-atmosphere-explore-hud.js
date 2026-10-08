@@ -111,7 +111,7 @@ export class ExploreHud {
         // matches the ring on the limb).
         const ops = OPS_BANDS.map(b => {
             const lo = gaugeFraction(b.minKm), hi = gaugeFraction(b.maxKm);
-            return `<i style="bottom:${(lo * 100).toFixed(2)}%;height:${((hi - lo) * 100).toFixed(2)}%;--c:${opsHex(b.colorHex)}" title="${esc(b.name)} · ${b.minKm}–${b.maxKm} km"></i>`
+            return `<i data-band="${b.id}" style="bottom:${(lo * 100).toFixed(2)}%;height:${((hi - lo) * 100).toFixed(2)}%;--c:${opsHex(b.colorHex)}" title="${esc(b.name)} · ${b.minKm}–${b.maxKm} km · click to select"></i>`
                  + `<span class="ua-xg-opsname" data-band="${b.id}" style="bottom:${(((lo + hi) / 2) * 100).toFixed(2)}%;--c:${opsHex(b.colorHex)}">${esc(b.short)}</span>`;
         }).join('');
         g.innerHTML = `<div class="ua-xg-cap">ALT</div><div class="ua-xg-bar">${bands}${ticks}`
@@ -146,7 +146,27 @@ export class ExploreHud {
         };
         // Clicks only: the canvas under the gauge must not see this press.
         g.addEventListener('mousedown', (e) => e.stopPropagation());
-        g.addEventListener('click', (e) => { e.stopPropagation(); go(e.clientY); });
+        g.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // The ops strip (and its names) SELECT the band — the same
+            // selection a click on its ring makes; the bar itself goes there.
+            const strip = e.target.closest('.ua-xg-ops i, .ua-xg-opsname');
+            if (strip) {
+                const title = strip.getAttribute('title') || '';
+                const band = OPS_BANDS.find(b => strip.dataset.band === b.id || title.startsWith(b.name));
+                if (band) { this.globe.selectOpsBand?.(this.globe.getSelectedOpsBand?.()?.id === band.id ? null : band.id); return; }
+            }
+            go(e.clientY);
+        });
+        this._onBandSel = (e) => {
+            if (e.detail?.kind !== 'select') return;
+            for (const el of g.querySelectorAll('.ua-xg-ops i, .ua-xg-opsname')) {
+                const id = el.dataset.band || OPS_BANDS.find(b => (el.getAttribute('title') || '').startsWith(b.name))?.id;
+                el.classList.toggle('is-sel', !!e.detail.id && id === e.detail.id);
+                el.classList.toggle('is-dim', !!e.detail.id && id !== e.detail.id);
+            }
+        };
+        window.addEventListener('ua-ops-band', this._onBandSel);
         g.addEventListener('keydown', (e) => {
             const cur = this.globe.getCameraAltitudeKm?.();
             if (!Number.isFinite(cur)) return;

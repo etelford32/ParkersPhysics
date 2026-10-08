@@ -130,6 +130,11 @@ export class AtmosphereInstruments {
         this._ctx = c.getContext('2d');
 
         this._onMove = (e) => {
+            // Only the WebGL canvas counts (the overlay is pointer-inert, so
+            // it is the target under it): a pointer over the dock, the card
+            // or the column is not probing the render, and the probe card
+            // used to park itself across the band card from there.
+            if (e.target !== this._globe.canvas) { this._pointer = null; this._probe = null; return; }
             const r = c.getBoundingClientRect();
             this._pointer = { x: e.clientX - r.left, y: e.clientY - r.top };
         };
@@ -180,7 +185,45 @@ export class AtmosphereInstruments {
         const state = this._getState?.() ?? {};
         this._drawRuler(ctx);
         this._drawCompass(ctx, state);
-        if (this._probeOn && this._pointer) this._drawProbe(ctx, state);
+        // A hovered ring is answered by its chip, not the probe: the two
+        // drew on top of each other at the cursor.
+        const ringHover = this._globe.getOpsBandHover?.()?.part === 'edge';
+        if (this._probeOn && this._pointer && !ringHover) this._drawProbe(ctx, state);
+        this._drawBandHover(ctx);
+    }
+
+    /**
+     * The hovered ring, named at the cursor: band name, extent, and what a
+     * click will do. The pick is the globe's (kernel `pickOpsBand`); this
+     * only prints it. Drawn ABOVE the probe so the ring's name is never
+     * under the probe card.
+     */
+    _drawBandHover(ctx) {
+        const h = this._globe.getOpsBandHover?.();
+        if (!h || h.part !== 'edge' || !this._pointer) return;
+        const sel = this._globe.getSelectedOpsBand?.();
+        const b = h.band;
+        const col = opsHex(b.colorHex);
+        const title = `${b.name} · ${b.minKm}–${b.maxKm} km`;
+        const sub = sel?.id === b.id ? 'click to deselect' : 'click to expand this layer';
+        ctx.save();
+        ctx.font = '700 10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        const w = Math.max(ctx.measureText(title).width, ctx.measureText(sub).width) + 18;
+        const hgt = 34;
+        let x = this._pointer.x + 14, y = this._pointer.y - hgt - 10;
+        if (x + w > this._w - 6) x = this._pointer.x - w - 14;
+        if (y < 6) y = this._pointer.y + 18;
+        ctx.fillStyle = CSS.panelBg;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(x, y, w, hgt, 4); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = col;
+        ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+        ctx.fillText(title, x + 9, y + 6);
+        ctx.font = '500 9px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillStyle = CSS.dim;
+        ctx.fillText(sub, x + 9, y + 20);
+        ctx.restore();
     }
 
     // ── 1. altitude ruler ────────────────────────────────────────────────
@@ -311,6 +354,8 @@ export class AtmosphereInstruments {
         // Perpendicular, away from the side the tick labels use.
         const px = -uy, py = ux;
         const off = 7;
+        const sel = this._globe.getSelectedOpsBand?.()?.id ?? null;
+        const hov = this._globe.getOpsBandHover?.();
         ctx.save();
         ctx.lineCap = 'butt';
         for (const b of OPS_BANDS) {
@@ -318,17 +363,19 @@ export class AtmosphereInstruments {
             if (!Number.isFinite(ra) || !Number.isFinite(rb) || rb <= ra) continue;
             const a = at(ra), c = at(rb);
             const col = opsHex(b.colorHex);
+            const isSel = sel === b.id, isHov = hov?.part === 'edge' && hov.band.id === b.id;
             ctx.strokeStyle = col;
-            ctx.globalAlpha = 0.85;
-            ctx.lineWidth = 3;
+            ctx.globalAlpha = sel && !isSel ? 0.35 : 0.85;
+            ctx.lineWidth = isSel || isHov ? 6 : 3;
             ctx.beginPath();
             ctx.moveTo(a.x + px * off, a.y + py * off);
             ctx.lineTo(c.x + px * off, c.y + py * off);
             ctx.stroke();
             const len = rb - ra;
-            ctx.font = '700 8.5px ui-monospace, SFMono-Regular, Menlo, monospace';
+            ctx.font = `700 ${isSel ? 10 : 8.5}px ui-monospace, SFMono-Regular, Menlo, monospace`;
             const tw = ctx.measureText(b.short).width;
-            if (len < tw + 8) continue;
+            // The selected band is always named (a leader if its segment is short).
+            if (len < tw + 8 && !isSel) continue;
             const mx = (a.x + c.x) / 2 + px * (off + 9), my = (a.y + c.y) / 2 + py * (off + 9);
             ctx.save();
             ctx.translate(mx, my);
@@ -501,6 +548,10 @@ export class AtmosphereInstruments {
         const avoid = this._avoidRects();
         // Park below whichever chrome sits highest on the canvas.
         const hud = avoid[0] ?? { x: 0, y: 0, w: 0, h: 0 };
+        // The explore column's right edge (a tall rect on the left) and the
+        // published floor above the time dock.
+        const colRight = Math.max(0, ...avoid.filter(r => r.x < 40 && r.h > 150).map(r => r.x + r.w));
+        const floor = parseFloat(getComputedStyle(this._host).getPropertyValue('--ua-atmo-floor')) || 74;
         const cands = [
             [p.x + 18, p.y - H / 2],
             [p.x - 18 - W, p.y - H / 2],
@@ -508,13 +559,17 @@ export class AtmosphereInstruments {
             [p.x - 18 - W, p.y + 18],
             [p.x + 18, p.y - H - 18],
             [p.x - 18 - W, p.y - H - 18],
-            // Parking spots. The camera HUD's time-warp row spans nearly
-            // the full width of this canvas, so when the pointer is up
-            // there NO near-cursor placement is clean and the card would
-            // otherwise sit on top of live controls. Park it clear and let
-            // the leader line carry the association instead.
+            // Parking spots. The camera dock (with the band card open) can
+            // run most of the canvas height on the right, the explore
+            // column the left, the toolbar + dock the bottom — so the clear
+            // ground is the band between the column and the dock, top and
+            // bottom. Park it there and let the leader line carry the
+            // association instead.
             [16, hud.y + hud.h + 14],
             [this._w - W - 16, hud.y + hud.h + 14],
+            [colRight + 16, 16],
+            [hud.x - W - 16, 16],
+            [colRight + 16, this._h - H - floor - 16],
             [16, this._h - H - 16],
         ];
         let best = null, bestCost = Infinity;
