@@ -1154,6 +1154,39 @@ one-satellite-one-place gate waited 30 s for an ISS SGP4 state that never
 came. The abort is now 12 s (a hung upstream still ends there) and the
 upgrade retries once, 8 s after boot, if any probe missed it.
 
+### 9.16 Every panel is a window, and Basic+ remembers the arrangement (2026-10-08)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/stage-layout.js` | PURE: the layout document (`{v, panels:{id:{anchor,dx,dy,w,h,open}}}`), corner anchoring (`anchorFromRect` / `placeFromAnchor`, exact round trip), clamping to MIN_VISIBLE_PX, `withPanel`, and `layoutMemoryAllowed` — the ONE gate, delegating to dashboard-sync's `tierAllowsSync` so the stage, the console and the climate lab draw the paid line in the same place | `node tests/stage-layout.mjs` (5) |
+| `js/upper-atmosphere-stage-windows.js` | DOM: a title bar (grip · name · fold ▾ · home ⌂) and a resize grip on the camera dock, the render dock (legend + toolbar, now ONE anchored column), the time dock, the altitude column and the flight deck; drag by the bar (pointer capture, 4 px click threshold, converts the CSS home to left/top on the first real move), fold to the bar, resize on the axes the panel can use, home on ⌂ or a double-click (every inline style removed); re-placed from the corner on every stage resize | `tests/upper-atmosphere-stage-windows.spec.js` (3) |
+| `js/dashboard-sync.js` `initDocSync` | the SAME transport as the console's bundle sync for ONE document: local-first, migration-guarded, tier-gated, last-write-wins by updated_at | the module's existing node gate (pure helpers unchanged) |
+| the page | the ⧉ layout chip + menu (state line · every panel home · fold all · unfold all); `--ua-render-dock-h` replaces `--ua-toolbar-h` (the column clears the dock by its measured height) | ops-hud spec's negative control re-pointed at the dock |
+| dashboard.html `#stage-layout-card` | the tease: what the stage can do, a badge from the same gate (Remembered / Basic+), "Open the stage" and, for free accounts, "Remember mine →" (pricing) | — |
+
+**Who remembers.** Everyone can arrange the stage for the session. Basic+
+("intro" is the legacy alias of basic; testers and admins ride along)
+keeps the document in `localStorage` (`pp-stage-layout.upper-atmosphere-stage`)
+and pushes it to the dashboards table through `initDocSync`, so it follows
+them across devices; a free visitor's arrangement is gone on reload and
+the ⧉ menu's state line says so with the upgrade link — the gate is
+tested as a NEGATIVE CONTROL (a free account drags, nothing is stored, a
+reload is home).
+
+**Positions are corner-relative, never absolute.** A dock dragged a little
+off the top-right is stored as (top-right, dx, dy) and re-placed from that
+corner on every stage resize, so it stays top-right at 1224 px and at
+584 px; absolute pixels would strand it mid-canvas or off it. Clamping
+keeps MIN_VISIBLE_PX (36) of every panel on the stage — the draggable-panel
+rule: the user must always have something to grab.
+
+**Measured on the way.** The time dock's bar is 104 px wide and its two
+buttons start at 64 px: a drag that presses the bar's right half presses a
+button and nothing moves (the gate presses the grip). The dock spans the
+stage, so its centre sits on the midline and either bottom corner is the
+nearest — the gate accepts both and checks the offsets against the corner
+that was chosen.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

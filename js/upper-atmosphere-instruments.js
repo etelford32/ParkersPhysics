@@ -762,8 +762,8 @@ export class AtmosphereInstruments {
      * works on a page that does not have them.
      */
     _avoidRects() {
-        const sel = ['#ua-camera-hud', '#ua-globe-legend', '#ua-atmo-controls',
-                     '#ua-time-dock', '#ua-time-scrubber-host', '#ua-explore-gauge', '#ua-flight-deck'];
+        const sel = ['#ua-camera-hud', '#ua-render-dock', '#ua-globe-legend', '#ua-atmo-controls',
+                     '#ua-time-dock', '#ua-time-scrubber-host', '#ua-explore-gauge', '#ua-flight-deck', '#ua-layout-menu'];
         const hb = this._host.getBoundingClientRect();
         const out = [];
         for (const q of sel) {

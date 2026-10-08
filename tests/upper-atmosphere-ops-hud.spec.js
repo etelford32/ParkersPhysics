@@ -105,14 +105,15 @@ for (const vp of [{ width: 1280, height: 720 }, { width: 1440, height: 900 }, { 
     });
 }
 
-test('NEGATIVE CONTROL: the legend sits above the toolbar only because the toolbar is MEASURED', async ({ page }) => {
+test('NEGATIVE CONTROL: the explore column clears the render dock only because the dock is MEASURED', async ({ page }) => {
     await boot(page, { viewport: { width: 1440, height: 900 } });
     const before = await rects(page);
-    expect(overlaps(before['#ua-globe-legend'], before['#ua-atmo-controls'])).toBe(false);
-    // Put the pre-fix constant back: a zero toolbar height.
-    await page.evaluate(() => document.getElementById('ua-globe-wrap').style.setProperty('--ua-toolbar-h', '0px'));
+    expect(overlaps(before['#ua-explore-gauge'], before['#ua-atmo-controls'])).toBe(false);
+    expect(overlaps(before['#ua-explore-gauge'], before['#ua-globe-legend'])).toBe(false);
+    // Put the pre-fix constant back: a zero dock height.
+    await page.evaluate(() => document.getElementById('ua-globe-wrap').style.setProperty('--ua-render-dock-h', '0px'));
     const after = await rects(page);
-    expect(overlaps(after['#ua-globe-legend'], after['#ua-atmo-controls']), 'the control must overlap').toBe(true);
+    expect(overlaps(after['#ua-explore-gauge'], after['#ua-globe-legend']) || overlaps(after['#ua-explore-gauge'], after['#ua-atmo-controls']), 'the control must overlap').toBe(true);
 });
 
 test('the time-warp chips live in the scrubber head, not the camera dock, and still drive the bus', async ({ page }) => {

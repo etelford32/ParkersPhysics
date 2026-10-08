@@ -100,6 +100,85 @@ function composeDoc(page) {
     };
 }
 
+/**
+ * The same transport for ONE JSON document a page keeps in localStorage —
+ * the Upper Atmosphere stage's window layout is the first (plan §9.16).
+ * Same posture as initDashboardSync (local-first, migration-guarded,
+ * tier-gated, last-write-wins by updated_at), without the space-weather
+ * console's three-store bundle: the page hands over `getDoc()` and
+ * `applyDoc(doc)` and names the event that means "saved".
+ * @param {object} o
+ * @param {string} o.page        the dashboards row's page key
+ * @param {() => object|null} o.getDoc
+ * @param {(doc:object) => void} o.applyDoc   land a newer remote doc locally (no reload here — the page re-applies)
+ * @param {string} [o.saveEvent] window event that queues a push
+ * @param {number} [o.version]
+ */
+export function initDocSync({ page, getDoc, applyDoc, saveEvent = null, name = 'default', version = 1 } = {}) {
+    if (typeof window === 'undefined' || !page) return null;
+    const sync = { state: 'off', lastError: null, push, pull };
+    try {
+        if (!isConfigured()) { sync.state = 'off:unconfigured'; return sync; }
+        const acct = readJson('pp_auth') ||
+            (() => { try { return JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch { return null; } })();
+        if (!acct?.signedIn) { sync.state = 'off:signed-out'; return sync; }
+        if (!tierAllowsSync(acct.plan, acct.role)) { sync.state = 'off:tier'; return sync; }
+        const token = sessionToken();
+        if (!token) { sync.state = 'off:no-session'; return sync; }
+        sync.userId = acct.id;
+        sync.headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+        sync.state = 'ready';
+        pull();
+        if (saveEvent) {
+            let t = null;
+            window.addEventListener(saveEvent, () => { clearTimeout(t); t = setTimeout(push, 1500); });
+        }
+    } catch (e) {
+        sync.state = 'error';
+        sync.lastError = String(e?.message ?? e);
+    }
+    return sync;
+
+    async function pull() {
+        try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/dashboards`
+                + `?page=eq.${encodeURIComponent(page)}&name=eq.${encodeURIComponent(name)}`
+                + '&select=doc,updated_at', { headers: sync.headers });
+            if (res.status === 404) { sync.state = 'migration-pending'; return; }
+            if (!res.ok) throw new Error(`pull HTTP ${res.status}`);
+            const rows = await res.json();
+            const row = Array.isArray(rows) ? rows[0] : null;
+            sync.state = 'synced';
+            if (!row) return;
+            if (pickNewer(readJson(metaKey(page)), row) !== 'remote') return;
+            applyDoc(row.doc || null);
+            writeJson(metaKey(page), { updatedAt: row.updated_at });
+        } catch (e) {
+            sync.state = 'error';
+            sync.lastError = String(e?.message ?? e);
+        }
+    }
+
+    async function push() {
+        try {
+            if (sync.state === 'migration-pending' || !sync.userId) return;
+            const updatedAt = new Date().toISOString();
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/dashboards?on_conflict=user_id,page,name`, {
+                method: 'POST',
+                headers: { ...sync.headers, Prefer: 'resolution=merge-duplicates' },
+                body: JSON.stringify([{ user_id: sync.userId, page, name, doc: getDoc() || {}, version, updated_at: updatedAt }]),
+            });
+            if (res.status === 404) { sync.state = 'migration-pending'; return; }
+            if (!res.ok) throw new Error(`push HTTP ${res.status}`);
+            writeJson(metaKey(page), { updatedAt });
+            sync.state = 'synced';
+        } catch (e) {
+            sync.state = 'error';
+            sync.lastError = String(e?.message ?? e);
+        }
+    }
+}
+
 export function initDashboardSync({ page = 'space-weather', name = 'default' } = {}) {
     if (typeof window === 'undefined') return null;
     const sync = { state: 'off', lastError: null, push, pull };

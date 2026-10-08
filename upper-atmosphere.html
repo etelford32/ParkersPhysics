@@ -298,9 +298,9 @@ input[type=range]::-moz-range-thumb {
  * controls via the MEASURED --ua-atmo-floor (never a constant). */
 .ua-xg {
     position:absolute; left:12px; top:14px;
-    /* Clears the legend pill, which clears the toolbar by ITS measured
-     * height (two rows at laptop widths): floor + toolbar + pill + gaps. */
-    bottom:calc(var(--ua-atmo-floor, 74px) + var(--ua-toolbar-h, 24px) + var(--ua-row-h, 24px) + 20px);
+    /* Clears the render dock (legend pill + toolbar, two rows at laptop
+     * widths) by ITS measured height — never a constant. */
+    bottom:calc(var(--ua-atmo-floor, 74px) + var(--ua-render-dock-h, 54px) + 14px);
     width:118px; z-index:5;
     display:flex; flex-direction:column; align-items:flex-start; gap:5px;
     cursor:pointer; user-select:none;
@@ -2535,23 +2535,26 @@ body.ua-immersive-on { overflow:hidden; }
 #ua-cam-readout .ua-cam-band-tag { text-transform:uppercase; }
 #ua-cam-band[hidden] { display:none; }
 
-/* ── Render toolbar + legend pill (bottom-left) ────────────────────────── */
-#ua-atmo-controls {
+/* ── Render dock: the legend pill over the toolbar, ONE anchored column ──
+ * (the two used to be anchored separately and the pill cleared the
+ * toolbar by its measured height; as one window they move together). */
+#ua-render-dock {
     position:absolute; left:var(--ua-sp-5);
     bottom:var(--ua-atmo-floor, 74px);
-    display:flex; flex-wrap:wrap; gap:var(--ua-sp-3); align-items:center;
+    display:flex; flex-direction:column; align-items:flex-start; gap:var(--ua-sp-3);
     z-index:8; max-width:calc(100% - 24px);
+}
+#ua-atmo-controls {
+    display:flex; flex-wrap:wrap; gap:var(--ua-sp-3); align-items:center;
+    max-width:100%;
 }
 #ua-atmo-controls .ua-atmo-group { display:inline-flex; gap:0; align-items:stretch; }
 #ua-atmo-controls .ua-atmo-btn--live { color:#04121c !important; background:var(--ua-amber) !important; border-color:var(--ua-amber) !important; }
 #ua-atmo-controls .ua-atmo-select { padding:0 var(--ua-sp-3); appearance:none; -webkit-appearance:none; }
 #ua-atmo-controls .ua-atmo-btn[disabled] { opacity:.45; cursor:default; }
 #ua-globe-legend {
-    position:absolute; left:var(--ua-sp-5);
-    /* Above the toolbar by its MEASURED height (it wraps to two rows at
-     * laptop widths — a constant row here put the pill under the chips). */
-    bottom:calc(var(--ua-atmo-floor, 74px) + var(--ua-toolbar-h, 24px) + var(--ua-sp-3));
-    max-width:min(380px, calc(100% - 24px));
+    position:relative;
+    max-width:min(380px, 100%);
     max-height:min(340px, 55%); overflow-y:auto;
     background:var(--ua-surf-4); backdrop-filter:var(--ua-glass);
     border:1px solid var(--ua-border); border-radius:var(--ua-r-md);
@@ -2677,6 +2680,79 @@ body.ua-immersive-on { overflow:hidden; }
 #ua-legend-body dt[data-band].is-sel { color:var(--ua-text-primary); }
 #ua-cam-readout .ua-cam-band-tag { cursor:pointer; }
 #ua-cam-readout .ua-cam-band-tag:hover { filter:brightness(1.3); }
+
+/* ── Stage windows (js/upper-atmosphere-stage-windows.js) ─────────────
+ * Every piece of chrome over the canvas carries a title bar (grip · name ·
+ * fold · home) and a resize grip. Folded, only the bar remains. */
+.ua-win { --ua-win-c: var(--ua-cyan); }
+.ua-win-bar {
+    display:flex; align-items:center; gap:var(--ua-sp-2);
+    height:20px; padding:0 var(--ua-sp-2) 0 var(--ua-sp-3);
+    font:700 var(--ua-fs-xs)/1 var(--ua-mono); letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ua-text-faint); cursor:grab; user-select:none; touch-action:none;
+    pointer-events:auto;
+    background:var(--ua-surf-3); border:1px solid rgba(var(--ua-cyan-rgb), .22);
+    border-radius:var(--ua-r-md); backdrop-filter:var(--ua-glass);
+    margin-bottom:var(--ua-sp-2);
+}
+.ua-win-bar:hover { color:var(--ua-text-muted); border-color:rgba(var(--ua-cyan-rgb), .35); }
+.ua-win-bar:focus-visible { outline:2px solid var(--ua-cyan); outline-offset:1px; }
+.ua-win.is-dragging .ua-win-bar { cursor:grabbing; }
+.ua-win.is-dragging, .ua-win.is-resizing { opacity:.92; }
+.ua-win-grip { letter-spacing:-.15em; opacity:.6; }
+.ua-win-title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ua-win-btn {
+    width:18px; height:16px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+    font:600 11px/1 var(--ua-mono); color:var(--ua-text-faint); background:transparent; border:0; border-radius:3px; cursor:pointer;
+}
+.ua-win-btn:hover { color:var(--ua-text-primary); background:rgba(var(--ua-cyan-rgb), .18); }
+.ua-win[data-collapsed="1"] > :not(.ua-win-bar) { display:none !important; }
+.ua-win[data-collapsed="1"] .ua-win-bar { margin-bottom:0; }
+.ua-win[data-collapsed="1"] [data-win-act="fold"] span[aria-hidden] { display:inline-block; transform:rotate(180deg); }
+/* An id-level max-width (the camera dock's 360 px, the render dock's) must
+ * yield to a user size: the floating rule outranks the id. */
+#ua-globe-wrap .ua-win[data-floating="1"] { max-width:none; }
+.ua-win-resize {
+    position:absolute; right:2px; bottom:2px; width:14px; height:14px; z-index:3;
+    cursor:nwse-resize; touch-action:none;
+    background:linear-gradient(135deg, transparent 50%, rgba(var(--ua-cyan-rgb), .55) 50%, rgba(var(--ua-cyan-rgb), .55) 60%, transparent 60%, transparent 75%, rgba(var(--ua-cyan-rgb), .55) 75%, rgba(var(--ua-cyan-rgb), .55) 85%, transparent 85%);
+    border-bottom-right-radius:var(--ua-r-md); opacity:.6;
+}
+.ua-win-resize:hover { opacity:1; }
+.ua-win-resize--x { cursor:ew-resize; }
+.ua-win-resize--y { cursor:ns-resize; }
+/* The camera dock is a column of its rows; its bar sits above them and
+ * the dock itself is pointer-inert (its children re-enable). The time dock
+ * and the render dock gain a little room at the bottom for the grip. */
+#ua-camera-hud > .ua-win-bar { align-self:stretch; pointer-events:auto; }
+#ua-camera-hud > .ua-win-resize { pointer-events:auto; }
+#ua-time-dock > .ua-win-bar { pointer-events:auto; width:max-content; }
+#ua-time-dock > .ua-win-resize { pointer-events:auto; }
+#ua-explore-gauge > .ua-win-bar { width:118px; }
+#ua-explore-gauge[data-collapsed="1"] { bottom:auto !important; height:auto !important; }
+#ua-explore-gauge > .ua-win-resize { right:auto; left:0; }
+#ua-flight-deck > .ua-win-bar { margin:var(--ua-sp-2) var(--ua-sp-2) 0; }
+/* The layout menu under the ⧉ chip. */
+.ua-layout-menu {
+    pointer-events:auto; align-self:flex-end; width:min(280px, 100%);
+    background:var(--ua-surf-4); backdrop-filter:var(--ua-glass);
+    border:1px solid var(--ua-border); border-radius:var(--ua-r-md);
+    padding:var(--ua-sp-3); display:flex; flex-direction:column; gap:var(--ua-sp-2);
+    font:var(--ua-fs-xs)/1.4 var(--ua-mono); color:var(--ua-text-muted);
+}
+.ua-layout-menu[hidden] { display:none !important; }
+.ua-layout-menu button {
+    height:var(--ua-row-h); padding:0 var(--ua-sp-4); text-align:left;
+    font:600 var(--ua-fs-sm)/1 var(--ua-mono); color:var(--ua-text-default);
+    background:var(--ua-surf-3); border:1px solid var(--ua-border); border-radius:var(--ua-r-md); cursor:pointer;
+}
+.ua-layout-menu button:hover { color:var(--ua-text-primary); border-color:var(--ua-cyan-bdr); }
+.ua-layout-state { font-weight:700; letter-spacing:.04em; padding:2px 0 4px; }
+.ua-layout-state[data-state="remembered"] { color:var(--ua-green); }
+.ua-layout-state[data-state="session"], .ua-layout-state[data-state="guest"] { color:var(--ua-amber); }
+.ua-layout-state a { color:var(--ua-cyan); }
+.ua-layout-tip { margin:0; font:italic var(--ua-fs-xs)/1.4 var(--ua-sans); color:var(--ua-text-faint); }
+#ua-layout-btn[aria-expanded="true"] { color:#04121c; background:var(--ua-cyan); border-color:var(--ua-cyan); }
 
 /* ── Flight deck: reads the same tokens ───────────────────────────────── */
 #ua-flight-deck { background:var(--ua-surf-4); backdrop-filter:var(--ua-glass); border-color:var(--ua-border); border-radius:var(--ua-r-lg); }
@@ -3397,6 +3473,15 @@ body.ua-immersive-on { overflow:hidden; }
                         title="Fly to the live ISS probe (420 km · 51.6°) and lock follow">↥ ISS</button>
                 <button type="button" id="ua-cam-stop-follow" class="ua-cam-stop is-hidden"
                         title="Stop following the current target (camera stays put, you can orbit/fly freely)">⏹ Stop follow</button>
+                <button type="button" id="ua-layout-btn" class="ua-ico" aria-haspopup="true" aria-expanded="false"
+                        title="Layout — every panel on the stage can be dragged by its bar, folded and resized; Basic+ remembers the arrangement">⧉<span class="ua-sr">Layout</span></button>
+            </div>
+            <div id="ua-layout-menu" class="ua-layout-menu" hidden role="menu" aria-label="Stage layout">
+                <div class="ua-layout-state" id="ua-layout-state"></div>
+                <button type="button" role="menuitem" data-layout="home">⌂ Every panel home</button>
+                <button type="button" role="menuitem" data-layout="fold">▾ Fold all</button>
+                <button type="button" role="menuitem" data-layout="unfold">▴ Unfold all</button>
+                <p class="ua-layout-tip">Drag a panel by its ⋮⋮ bar · double-click the bar to send it home · drag the corner to resize.</p>
             </div>
             <!-- The readout: altitude · physics layer · ops band in the header
                  (always visible), the gas physics folded under it. The fold
@@ -3511,6 +3596,16 @@ body.ua-immersive-on { overflow:hidden; }
              on the canvas because they ARE the instrument: the density
              render and the airglow render are different physical claims
              and being able to separate them is the point. -->
+        <div id="ua-render-dock">
+        <div id="ua-globe-legend" data-open="0">
+            <button type="button" id="ua-legend-toggle"
+                    aria-expanded="false" aria-controls="ua-legend-body">
+                <b>legend</b>
+                <span id="ua-legend-summary">continuous column · log₁₀ scale</span>
+                <span class="ua-legend-caret" aria-hidden="true">▴</span>
+            </button>
+            <dl id="ua-legend-body" hidden></dl>
+        </div>
         <div id="ua-atmo-controls" role="group" aria-label="Atmosphere render">
             <span class="ua-atmo-group ua-seg" role="group" aria-label="Show">
                 <span class="ua-seg-label">show</span>
@@ -3561,14 +3656,6 @@ body.ua-immersive-on { overflow:hidden; }
             </span>
         </div>
 
-        <div id="ua-globe-legend" data-open="0">
-            <button type="button" id="ua-legend-toggle"
-                    aria-expanded="false" aria-controls="ua-legend-body">
-                <b>legend</b>
-                <span id="ua-legend-summary">continuous column · log₁₀ scale</span>
-                <span class="ua-legend-caret" aria-hidden="true">▴</span>
-            </button>
-            <dl id="ua-legend-body" hidden></dl>
         </div>
     </section>
 
@@ -3615,6 +3702,9 @@ body.ua-immersive-on { overflow:hidden; }
     import { CameraRigPanel } from './js/upper-atmosphere-camera-rig-panel.js';
     import { CmePanel } from './js/upper-atmosphere-cme-panel.js';
     import { OpsBandCard } from './js/upper-atmosphere-ops-band-card.js';
+    // Every panel over the stage is a window (drag · fold · resize), and
+    // Basic+ remembers the arrangement (js/stage-layout.js is the rule).
+    import { StageWindows } from './js/upper-atmosphere-stage-windows.js';
 
     const canvas = document.getElementById('ua-globe');
     // 3.2 is NOT the Reset home (3.4, y = 0.65 d) on purpose — see the boot
@@ -3839,8 +3929,48 @@ body.ua-immersive-on { overflow:hidden; }
         getState: () => ({ f107: ui.state?.f107 ?? 150, ap: ui.state?.ap ?? 15 }),
     });
 
+    /* ─── Stage windows + the layout menu ──────────────────────────── */
+    const stageWindows = new StageWindows({
+        stage: document.getElementById('ua-globe-wrap'),
+        panels: [
+            { id: 'camera', el: document.getElementById('ua-camera-hud'), title: 'Camera', axis: 'x', minW: 240, maxW: 640 },
+            { id: 'render', el: document.getElementById('ua-render-dock'), title: 'Render', axis: 'x', minW: 200, maxW: 1100 },
+            { id: 'time', el: document.getElementById('ua-time-dock'), title: 'Time', axis: 'x', minW: 320 },
+            { id: 'column', el: document.getElementById('ua-explore-gauge'), title: 'Altitude', axis: 'y', minW: 60, minH: 160 },
+            { id: 'flight', el: document.getElementById('ua-flight-deck'), title: 'Flight deck', axis: 'xy', minW: 220, minH: 120 },
+        ].filter(p => p.el),
+    });
+    (() => {
+        const btn = document.getElementById('ua-layout-btn');
+        const menu = document.getElementById('ua-layout-menu');
+        const state = document.getElementById('ua-layout-state');
+        if (!btn || !menu) return;
+        const paintState = () => {
+            const st = stageWindows.memoryState();
+            state.dataset.state = st;
+            state.innerHTML = st === 'remembered'
+                ? '✓ Your layout is remembered — here and on your other devices.'
+                : st === 'session'
+                ? 'Layout resets on reload · <a href="pricing.html">Basic and above</a> remember it.'
+                : 'Layout resets on reload · <a href="signin.html">sign in</a> with Basic or above to keep it.';
+        };
+        const open = (on) => { menu.hidden = !on; btn.setAttribute('aria-expanded', on ? 'true' : 'false'); if (on) paintState(); };
+        btn.addEventListener('click', (e) => { e.stopPropagation(); open(menu.hidden); });
+        menu.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-layout]');
+            if (!b) return;
+            if (b.dataset.layout === 'home') stageWindows.homeAll();
+            else if (b.dataset.layout === 'fold') stageWindows.collapseAll(true);
+            else if (b.dataset.layout === 'unfold') stageWindows.collapseAll(false);
+            open(false);
+        });
+        document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) open(false); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) open(false); });
+        window.addEventListener('auth-changed', paintState);
+    })();
+
     // Expose for devtools poking.
-    window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber,
+    window.__ua = { engine, globe, ui, fleetPanel, zoneDashboard, timeScrubber, stageWindows,
                     flight: { deck: flightDeck, panel: flightPanel, layer: globe.getFlightLayer() },
                     explore: exploreHud, rig: rigPanel, cme: cmePanel, bandCard };
 
@@ -4033,12 +4163,13 @@ body.ua-immersive-on { overflow:hidden; }
             place();
             new ResizeObserver(place).observe(dock);
         }
-        // …and the legend pill clears the toolbar by ITS measured height.
-        const toolbar = document.getElementById('ua-atmo-controls');
-        if (wrap && toolbar) {
-            const placeBar = () => wrap.style.setProperty('--ua-toolbar-h', `${toolbar.offsetHeight || 24}px`);
-            placeBar();
-            new ResizeObserver(placeBar).observe(toolbar);
+        // …and the explore column clears the render dock (legend + toolbar)
+        // by ITS measured height.
+        const renderDock = document.getElementById('ua-render-dock');
+        if (wrap && renderDock) {
+            const placeDock = () => wrap.style.setProperty('--ua-render-dock-h', `${renderDock.offsetHeight || 54}px`);
+            placeDock();
+            new ResizeObserver(placeDock).observe(renderDock);
         }
 
         /* ─── The readout folds (remembered per viewer, best effort) ── */
