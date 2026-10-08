@@ -298,7 +298,9 @@ input[type=range]::-moz-range-thumb {
  * controls via the MEASURED --ua-atmo-floor (never a constant). */
 .ua-xg {
     position:absolute; left:12px; top:14px;
-    bottom:calc(var(--ua-atmo-floor, 74px) + 66px);
+    /* Clears the legend pill, which clears the toolbar by ITS measured
+     * height (two rows at laptop widths): floor + toolbar + pill + gaps. */
+    bottom:calc(var(--ua-atmo-floor, 74px) + var(--ua-toolbar-h, 24px) + var(--ua-row-h, 24px) + 20px);
     width:118px; z-index:5;
     display:flex; flex-direction:column; align-items:flex-start; gap:5px;
     cursor:pointer; user-select:none;
