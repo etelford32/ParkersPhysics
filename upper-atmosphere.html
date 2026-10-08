@@ -2555,7 +2555,10 @@ body.ua-immersive-on { overflow:hidden; }
 #ua-globe-legend {
     position:relative;
     max-width:min(380px, 100%);
-    max-height:min(340px, 55%); overflow-y:auto;
+    /* A px/vh cap, never a % of the dock: the dock is sized by the legend, and
+     * a percentage of its own result flip-flopped between two layouts every
+     * frame (the toggle never settled under a click). */
+    max-height:min(340px, 45vh); overflow-y:auto;
     background:var(--ua-surf-4); backdrop-filter:var(--ua-glass);
     border:1px solid var(--ua-border); border-radius:var(--ua-r-md);
     font:var(--ua-fs-xs)/1.5 var(--ua-mono); color:var(--ua-text-muted);
