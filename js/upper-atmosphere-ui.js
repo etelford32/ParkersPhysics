@@ -38,6 +38,7 @@ import {
 } from './collision-avoidance.js';
 import { buildAnalyticsBundle }
     from './upper-atmosphere-space-weather-analytics.js';
+import { bandMetrics, hexCss } from './upper-atmosphere-ops-bands.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
 const SPECIES_COLORS = {
@@ -825,6 +826,8 @@ export class UpperAtmosphereUI {
 
         if (sample.outOfDomain) {
             camLayer.textContent = altKm < 80 ? '< sim domain' : '—';
+            if (this.el.camBand) this.el.camBand.hidden = true;
+            if (this.el.camOpsRow) this.el.camOpsRow.hidden = true;
             camRho.textContent = '—';
             camT.textContent   = '—';
             camKn.textContent  = '—';
@@ -839,6 +842,30 @@ export class UpperAtmosphereUI {
             ? `#${sample.layer.colorHigh.toString(16).padStart(6, '0')}`
             : '#0cc';
         camLayer.innerHTML = `<span class="ua-cam-layer-tag" style="color:${layerHi};border-color:${layerHi}66">${layerName}</span>`;
+        // The operational band (js/upper-atmosphere-ops-bands.js) beside the
+        // physics layer, and its orbit row: circular speed · period · the
+        // King–Hele decay estimate at the reference B, from the ONE engine.
+        const { camBand, camOpsRow, camOpsV } = this.el;
+        const band = sample.opsBand || null;
+        if (camBand) {
+            camBand.hidden = !band;
+            if (band) {
+                const c = hexCss(band.colorHex);
+                const key = `${band.id}`;
+                if (camBand.dataset.band !== key) {
+                    camBand.dataset.band = key;
+                    camBand.innerHTML = `<span class="ua-cam-band-tag" style="color:${c}" title="${band.name} · ${band.minKm}–${band.maxKm} km\n${band.ops}">${band.short}</span>`;
+                }
+            }
+        }
+        if (camOpsRow) {
+            const inBand = !!band && altKm <= 2000;
+            camOpsRow.hidden = !inBand;
+            if (inBand && camOpsV) {
+                const m = bandMetrics(band, { f107Sfu: this.state.f107, ap: this.state.ap, altKm });
+                camOpsV.textContent = `${m.vKmS.toFixed(2)} km/s · ${m.periodMin.toFixed(1)} min · decay ~${m.lifetime.text} @B${m.ballisticKgM2}`;
+            }
+        }
         camRho.textContent = sample.ρ.toExponential(2) + ' kg/m³';
         camT.textContent   = `${sample.T.toFixed(0)} K`;
         camKn.textContent  = Number.isFinite(sample.knudsen)
@@ -1703,12 +1730,18 @@ export class UpperAtmosphereUI {
         }
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
+        // Label every n-th decade so labels never overprint: the plots column
+        // is 340 px and the ρ axis spans ~11 decades.
+        const decadePx = Math.abs(xOf(minLR + 1) - xOf(minLR));
+        const labelW = ctx.measureText(`10^${minLR}`).width + 6;
+        const every = Math.max(1, Math.ceil(labelW / Math.max(1, decadePx)));
         for (let lr = minLR; lr <= maxLR; lr++) {
             const x = xOf(lr);
             ctx.beginPath();
             ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b);
             ctx.strokeStyle = 'rgba(255,255,255,0.04)';
             ctx.stroke();
+            if ((lr - minLR) % every !== 0) continue;
             ctx.fillStyle = '#889';
             ctx.fillText(`10^${lr}`, x, H - pad.b + 4);
         }

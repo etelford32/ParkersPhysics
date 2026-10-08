@@ -109,6 +109,10 @@ import { FlightLayer } from './upper-atmosphere-flight-layer.js';
 // camera-local gas cloud is re-sampled from the engine at its altitude.
 import { AtmosphereTransit } from './upper-atmosphere-transit.js';
 import { ExploreLayer } from './upper-atmosphere-explore.js';
+// The operational altitude bands (entry interface → top of LEO): the
+// PURE table + the analytic limb-ring pass that draws it as a ruler.
+import { OpsBandsLayer } from './upper-atmosphere-ops-bands-layer.js';
+import { bandForAltitude as opsBandForAltitude } from './upper-atmosphere-ops-bands.js';
 import { frameClock } from './upper-atmosphere-frame-clock.js';
 import {
     divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8, pointsOfInterest,
@@ -684,6 +688,9 @@ export class AtmosphereGlobe {
         this._explore = new ExploreLayer(this._scene, {
             getPoiInputs: () => this._poiInputs(),
         });
+        // The operational bands on the limb (js/upper-atmosphere-ops-bands-layer.js):
+        // ON by default — the ruler an operator reads the render against.
+        this._opsBands = new OpsBandsLayer(this._scene);
         this._initResize();
         this._initTooltip();
         this._initDiveOnDoubleClick();
@@ -1584,7 +1591,11 @@ export class AtmosphereGlobe {
         const { clientWidth: w, clientHeight: h } = this.canvas;
         const aspect = Math.max(w / Math.max(h, 1), 1);
         this._camera = new THREE.PerspectiveCamera(40, aspect, 0.01, 1000);
-        this._camera.position.set(0, 0.6, this.opts.cameraDistance);
+        // The boot pose IS the Reset home (camera.js resetView: y = 0.65 d):
+        // the page used to open 20 % closer than Reset lands, which clipped
+        // the 2000 km band top and bottom on the taller stage and meant the
+        // first Reset moved the camera somewhere the visitor had never been.
+        this._camera.position.set(0, 0.65 * this.opts.cameraDistance, this.opts.cameraDistance);
 
         // Sun direction — derived from the actual sub-solar point at
         // the current wall-clock time. The day-side terminator on the
@@ -4753,7 +4764,7 @@ export class AtmosphereGlobe {
             ap,
             layerThicknessKm: layer ? Math.max(1, layer.maxKm - layer.minKm) : null,
         });
-        return { ...phys, layer };
+        return { ...phys, layer, opsBand: opsBandForAltitude(altKm) };
     }
 
     _initInstruments() {
@@ -4942,6 +4953,14 @@ export class AtmosphereGlobe {
     getPointsOfInterest()    { this._explore?.refreshPois(false); return this._explore?.getPois() ?? []; }
     getExploreDiscoveries()  { return this._explore?.getDiscoveries() ?? { found: [], total: 0 }; }
     resetExploreDiscoveries() { this._explore?.resetDiscoveries(); }
+    // ── Operational bands (the limb ruler) ───────────────────────────────
+    setOpsBandsVisible(on)   { this._opsBands?.setVisible(on); }
+    getOpsBandsVisible()     { return this._opsBands?.getVisible() ?? false; }
+    isOpsBandsDrawn()        { return this._opsBands?.isDrawn() ?? false; }
+    setOpsBandFocus(id)      { this._opsBands?.setFocus(id); }
+    getOpsBandFocus()        { return this._opsBands?.getFocus() ?? null; }
+    /** The operational band the camera is in (null outside 80–2000 km). */
+    getCameraOpsBand()       { return opsBandForAltitude(this.getCameraAltitudeKm()); }
     setMembranesVisible(on)  { this._explore?.setMembranesVisible(on); }
     getMembranesVisible()    { return this._explore?.getMembranesVisible() ?? false; }
     getMembraneWeights()     { return this._explore?.getMembraneWeights() ?? []; }
@@ -5759,6 +5778,7 @@ export class AtmosphereGlobe {
         this._explore?.update(this._camera, {
             viewportHeight: this.canvas.clientHeight, travelling,
         });
+        this._opsBands?.update(this._camera, { viewportHeight: this.canvas.clientHeight });
         this._updateExploreFocus(camMode);
         this._updateNearPlane();
         this._cme?.update(this._camera, dtWall);

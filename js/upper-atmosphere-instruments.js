@@ -58,6 +58,7 @@ import {
 } from './upper-atmosphere-column.js';
 import { pointPhysics } from './upper-atmosphere-physics.js';
 import { layerForAltitude, ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
+import { OPS_BANDS, OPS_EDGES_KM, hexCss as opsHex } from './upper-atmosphere-ops-bands.js';
 
 const RULER_ALTS = [100, 200, 400, 800, 1200, 2000];
 // The limb scale's candidate ticks (labels are thinned to a minimum spacing),
@@ -103,11 +104,15 @@ export class AtmosphereInstruments {
         this._probe = null;        // cached probe result
         this._lastProbeKey = '';
         // Screen bearing for the altitude ruler, measured from the disc
-        // centre in canvas coordinates (+x right, +y DOWN). 200° is
-        // left-and-slightly-up: the camera HUD owns the top-right of this
-        // canvas, the legend the bottom-left and the time strip the bottom,
-        // which leaves the left flank.
-        this._rulerBearingRad = 200 * Math.PI / 180;
+        // centre in canvas coordinates (+x right, +y DOWN). It is CHOSEN per
+        // frame from four candidates by how much live chrome the ruler's
+        // run would cross (the camera dock top-right, the explore column
+        // left, the toolbar bottom-left, the time dock bottom), with
+        // hysteresis so it does not flicker between equals. 20° (right and
+        // a little down) is first: it lands between the readout and the
+        // dock, where nothing else lives.
+        this._rulerBearingRad = 20 * Math.PI / 180;
+        this._rulerCands = [20, 160, 340, 200].map(d => d * Math.PI / 180);
         // Region the probe card must not cover: the camera HUD.
         this._avoid = { x: 0, y: 0, w: 0, h: 0 };
 
@@ -195,11 +200,12 @@ export class AtmosphereInstruments {
         if (!geo.ticks?.length) return;
         const { centre, ticks, surfaceRadius } = geo;
 
-        const brg = this._rulerBearingRad;
+        const brg = this._rulerBearingRad = this._pickRulerBearing(geo);
         const ux = Math.cos(brg), uy = Math.sin(brg);
         const at = (r) => ({ x: centre.x + ux * r, y: centre.y + uy * r });
 
         ctx.save();
+        this._drawOpsBands(ctx, at, ux, uy);
         ctx.font = '600 10px ui-monospace, SFMono-Regular, Menlo, monospace';
         ctx.textBaseline = 'middle';
         ctx.textAlign = ux < -0.2 ? 'right' : 'left';
@@ -256,6 +262,84 @@ export class AtmosphereInstruments {
             ctx.globalAlpha = 0.95;
             ctx.fillStyle = col;
             ctx.fillText(label, lp.x + ux * 8, lp.y + uy * 8);
+        }
+        ctx.restore();
+    }
+
+    /**
+     * Which way the ruler hangs: the candidate bearing whose run (surface →
+     * outer tick, plus label room) crosses the least chrome. Ties keep the
+     * current bearing. A run entirely off-canvas scores as fully covered.
+     */
+    _pickRulerBearing(geo) {
+        const { centre, ticks, surfaceRadius } = geo;
+        const r0 = Number.isFinite(surfaceRadius) ? surfaceRadius : 0;
+        const r1 = (ticks[ticks.length - 1]?.screenRadius ?? r0) + 70;
+        const rects = this._avoidRects();
+        const score = (brg) => {
+            const ux = Math.cos(brg), uy = Math.sin(brg);
+            let cost = 0, n = 0;
+            for (let r = r0; r <= r1; r += 8) {
+                const x = centre.x + ux * r, y = centre.y + uy * r;
+                n++;
+                if (x < 0 || x > this._w || y < 0 || y > this._h) { cost++; continue; }
+                if (rects.some(q => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h)) cost++;
+            }
+            return n ? cost / n : 1;
+        };
+        let best = this._rulerBearingRad, bestCost = score(best);
+        for (const c of this._rulerCands) {
+            const k = score(c);
+            if (k < bestCost - 0.05) { best = c; bestCost = k; }
+        }
+        return best;
+    }
+
+    /**
+     * The OPERATIONAL BANDS along the ruler's spine (kernel table; the ring
+     * pass on the canvas draws the same edges on the limb): a coloured
+     * segment per band at its true radii, offset to the spine's far side so
+     * the numeric ticks keep their side, named along the spine when the
+     * segment is long enough to carry its label. The low bands are a few
+     * pixels at whole-globe framing — their colour still matches the ring.
+     */
+    _drawOpsBands(ctx, at, ux, uy) {
+        if (!this._globe.getOpsBandsVisible?.()) return;
+        const geo = this._globe.limbTicks?.(OPS_EDGES_KM);
+        if (!geo?.ticks?.length) return;
+        const rOf = new Map(geo.ticks.map(t => [t.altKm, t.screenRadius]));
+        // Perpendicular, away from the side the tick labels use.
+        const px = -uy, py = ux;
+        const off = 7;
+        ctx.save();
+        ctx.lineCap = 'butt';
+        for (const b of OPS_BANDS) {
+            const ra = rOf.get(b.minKm), rb = rOf.get(b.maxKm);
+            if (!Number.isFinite(ra) || !Number.isFinite(rb) || rb <= ra) continue;
+            const a = at(ra), c = at(rb);
+            const col = opsHex(b.colorHex);
+            ctx.strokeStyle = col;
+            ctx.globalAlpha = 0.85;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(a.x + px * off, a.y + py * off);
+            ctx.lineTo(c.x + px * off, c.y + py * off);
+            ctx.stroke();
+            const len = rb - ra;
+            ctx.font = '700 8.5px ui-monospace, SFMono-Regular, Menlo, monospace';
+            const tw = ctx.measureText(b.short).width;
+            if (len < tw + 8) continue;
+            const mx = (a.x + c.x) / 2 + px * (off + 9), my = (a.y + c.y) / 2 + py * (off + 9);
+            ctx.save();
+            ctx.translate(mx, my);
+            // Text runs along the spine, never upside down.
+            let ang = Math.atan2(uy, ux);
+            if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+            ctx.rotate(ang);
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillStyle = col; ctx.globalAlpha = 0.95;
+            ctx.fillText(b.short, 0, 0);
+            ctx.restore();
         }
         ctx.restore();
     }
@@ -624,7 +708,7 @@ export class AtmosphereInstruments {
      */
     _avoidRects() {
         const sel = ['#ua-camera-hud', '#ua-globe-legend', '#ua-atmo-controls',
-                     '#ua-time-scrubber-host', '#ua-explore-gauge'];
+                     '#ua-time-dock', '#ua-time-scrubber-host', '#ua-explore-gauge', '#ua-flight-deck'];
         const hb = this._host.getBoundingClientRect();
         const out = [];
         for (const q of sel) {
@@ -652,7 +736,10 @@ export class AtmosphereInstruments {
         if (!c) return;
 
         const R = 27;
-        const cx = this._w - R - 22, cy = this._h - R - 26;
+        // Above the time dock, whose height the page publishes (measured,
+        // never a constant) as --ua-atmo-floor on the host.
+        const floor = parseFloat(getComputedStyle(this._host).getPropertyValue('--ua-atmo-floor')) || 74;
+        const cx = this._w - R - 22, cy = this._h - R - floor - 14;
 
         ctx.save();
         ctx.translate(cx, cy);

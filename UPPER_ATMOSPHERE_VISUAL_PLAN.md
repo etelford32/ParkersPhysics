@@ -1022,6 +1022,93 @@ behaviour is right; it now waits for the request with the new F10.7 and for
 the pill to return to SPARTA. The suite's `beforeAll` fails with the start
 instructions when the API is down.
 
+### 9.14 The ops HUD: the stage as an instrument (2026-10-08)
+
+The stage was a fixed 500 px card (644×500 on a 1440×900 laptop) with the
+chrome — a 3-row camera HUD whose time-warp row spanned most of the width, an
+8-row readout in the middle of the planet, the explore column, the limb ruler
+under it, a legend, an 11-button control row, the scrubber and the explore
+POI labels — covering most of the render. The owner's ask: compact, on the
+design tokens, and able to tell the atmosphere's layers apart for spacecraft.
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-ops-bands.js` | PURE: the OPERATIONAL bands (entry interface · decay zone · VLEO · station band · constellation shells · SSO · upper LEO · top of LEO, 80–2000 km contiguous) and the numbers printed beside them from the ENGINE's density: circular speed, period, drag deceleration, height lost per orbit, King–Hele lifetime at a disclosed reference B | `node tests/upper-atmosphere-ops-bands.mjs` (8) |
+| `js/upper-atmosphere-ops-bands-layer.js` | the analytic limb-ring pass (one bounding sphere; a ring where a ray's closest approach equals a band edge, a faint wash between edges; pixel-footprint width; skipped inside the lowest edge) | `tests/upper-atmosphere-ops-hud.spec.js` |
+| the page | viewport-driven stage, ONE token block on `#ua-globe-wrap`, the camera dock, the time dock, the toolbar, the legend pill, the folding readout | same (7) |
+
+**The stage is viewport-driven.** `clamp(540px, 100vh − 178px, 1100px)`:
+178 is the nav + the compact hero + the page padding, so the whole stage is
+on screen at load and sticks at 14 px once the page scrolls. The hero's
+introduction went behind a disclosure and the plots column gave up 80 px.
+Measured stage: 744×722 at 1440×900 (was 644×500), 958×542 at the test
+viewport, 1224×902 at 1920×1080.
+
+**One token set.** Every piece of chrome over the canvas reads the block on
+`#ua-globe-wrap` (`--ua-cyan` #5fd8ff + its rgb triplet, three surfaces,
+four text shades, a 4 px spacing grid, three radii, one 24 px control
+height, one monospace stack) — the readout used to carry its own mirror with
+`--ua-cyan: #0ff` while the toolbar used #5fd8ff, and the fleet-UI block it
+mirrored defines `--ua-cyan-mid: var(--ua-cyan-mid)` (a cycle, so every
+`var(--ua-cyan-mid)` in the scrubber had been computing to nothing). The
+scrubber host dropped its `.ua-pane-analysis` scope for the same reason.
+
+**Where things went.**
+- Camera dock (top-right): the mode switch as a segment beside the full
+  screen button (still ≥ 44 × 120, still > 2× Reset's area — the §9.11
+  rule), one row of view presets + the drag-tool segment + ISS + Stop follow,
+  then the readout: altitude · physics layer · OPS BAND in a header that
+  stays, the six gas rows in a two-column grid that FOLDS (remembered in
+  localStorage, best effort) with the orbit row (speed · period · decay for
+  the band the camera is in) and the nav / transit rows under it.
+- Time dock (bottom): the time-warp chips moved INTO the scrubber's head
+  (the bootstrap reparents the row after the scrubber mounts — its listeners
+  are on the row, so they travel). UTC · mode · chips · ⟳ Now is one line;
+  the scrubber's own ⏭ Now is folded away (one control, one action).
+- Toolbar (bottom-left): four labelled segments — show (ρ column · airglow ·
+  gas), view (anomaly · plasma · shells), instruments (ops bands · probe),
+  transit (⇣ ⇡ rate) — and the legend as a one-line pill above it, clearing
+  the toolbar by its MEASURED height (`--ua-toolbar-h`: the toolbar wraps
+  to two rows at laptop widths, and a constant put the pill under it; the
+  gate's negative control zeroes the measurement and must see the overlap).
+- The explore column starts at the top (the HUD no longer spans the width)
+  and carries an OPS STRIP beside the physics bar on the same log scale,
+  named where a band is tall enough to carry its label.
+- The limb ruler now PICKS its bearing per frame from four candidates by how
+  much live chrome its run would cross (hysteresis against flicker), and
+  draws the band segments beside its spine, named along the spine where the
+  segment is longer than the label. The compass clears the dock by the
+  published floor.
+- POI labels are hidden where they would print across chrome (they used to
+  cross the readout's numbers); the beacon still marks the place and the
+  panel lists it.
+- The boot pose is the Reset home (`y = 0.65 d`, d = 3.4): the page used to
+  open 20 % closer than Reset lands, which clipped the 2000 km band top and
+  bottom on the taller stage.
+- The density plot thins its decade labels to what fits (eleven decades in
+  340 px overprinted).
+
+**Three `[hidden]` guards were each needed** (the Mars feature-index trap,
+again): the transit hold button inside a segment, the readout's folded
+rows, and the explore column's unfit band names each carry an author
+`display`, which beats the UA sheet's `[hidden]`.
+
+**The bands are a ruler and the page says so.** Band edges are planning
+conventions (below 200 km you are down within days; above 600 km passive
+decay no longer meets the 5-year rule), not features of the gas — the
+legend's ops row says RULER, and the palette is deliberately distinct from
+the physics layers' (orange thermosphere / violet exosphere; the node gate
+checks no colour is shared). The lifetime is King–Hele's closed form for a
+circular orbit in an exponential atmosphere with the LOCAL scale height
+(pinned against a hand integration), at B = 50 kg/m², and the readout prints
+`@B50` beside it: it scales linearly in B and the page does not know the
+vehicle. Two things it says about the model: below 120 km the engine's
+density is T∞-independent, so a storm leaves the entry band's number alone;
+and at 160 km the density PIVOTS (×1.04 at Ap 300 while H grows ×1.6), so
+the decay zone's King–Hele estimate LENGTHENS under a storm — pinned as
+measured rather than "fixed", because the estimate integrates the modelled
+profile below the orbit, which the hot storm thins.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

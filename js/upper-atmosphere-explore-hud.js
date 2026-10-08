@@ -36,6 +36,7 @@
  */
 
 import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
+import { OPS_BANDS, hexCss as opsHex } from './upper-atmosphere-ops-bands.js';
 import {
     BOUNDARIES, MILESTONES, gaugeFraction, gaugeAltitude, EXPLORE,
     MODEL_FLOOR_KM, MODEL_CEIL_KM,
@@ -103,12 +104,34 @@ export class ExploreHud {
         }).join('');
         const ticks = BOUNDARIES.map(b => `<div class="ua-xg-tick${b.kind === 'line' ? ' ua-xg-tick--line' : ''}" style="bottom:${(gaugeFraction(b.km) * 100).toFixed(2)}%">`
             + `<span>${b.km}${SHORT[b.id] ? ` <em>${esc(SHORT[b.id])}</em>` : ''}</span></div>`).join('');
+        // The OPS strip beside the physics bar: the operational bands
+        // (js/upper-atmosphere-ops-bands.js) on the same log scale, each
+        // named at its mid-height when it is tall enough to carry a label
+        // (the low bands are a few pixels at this scale; their colour still
+        // matches the ring on the limb).
+        const ops = OPS_BANDS.map(b => {
+            const lo = gaugeFraction(b.minKm), hi = gaugeFraction(b.maxKm);
+            return `<i style="bottom:${(lo * 100).toFixed(2)}%;height:${((hi - lo) * 100).toFixed(2)}%;--c:${opsHex(b.colorHex)}" title="${esc(b.name)} · ${b.minKm}–${b.maxKm} km"></i>`
+                 + `<span class="ua-xg-opsname" data-band="${b.id}" style="bottom:${(((lo + hi) / 2) * 100).toFixed(2)}%;--c:${opsHex(b.colorHex)}">${esc(b.short)}</span>`;
+        }).join('');
         g.innerHTML = `<div class="ua-xg-cap">ALT</div><div class="ua-xg-bar">${bands}${ticks}`
+            + `<div class="ua-xg-ops" aria-hidden="true">${ops}</div>`
             + `<div class="ua-xg-pois"></div>`
             + `<div class="ua-xg-cam" style="bottom:100%"><span class="ua-xg-cam-v">—</span></div></div>`;
         this.wrap.appendChild(g);
         this._gauge = g;
         this._gaugeBar = g.querySelector('.ua-xg-bar');
+        // A band name only where the band is tall enough to carry it.
+        this._fitOpsNames = () => {
+            const h = this._gaugeBar.clientHeight;
+            for (const el of g.querySelectorAll('.ua-xg-opsname')) {
+                const b = OPS_BANDS.find(x => x.id === el.dataset.band);
+                const px = b ? (gaugeFraction(b.maxKm) - gaugeFraction(b.minKm)) * h : 0;
+                el.hidden = px < 11;
+            }
+        };
+        this._fitOpsNames();
+        new ResizeObserver(this._fitOpsNames).observe(g);
         this._gaugeCam = g.querySelector('.ua-xg-cam');
         this._gaugeCamV = g.querySelector('.ua-xg-cam-v');
         this._gaugePois = g.querySelector('.ua-xg-pois');
@@ -211,11 +234,31 @@ export class ExploreHud {
         l.addEventListener('mousedown', (e) => { if (e.target.closest('[data-poi]')) e.stopPropagation(); });
     }
 
+    /** Chrome the POI labels must not sit on (canvas-relative rects). */
+    _chromeRects() {
+        const wb = this.wrap.getBoundingClientRect();
+        const out = [];
+        for (const q of ['#ua-camera-hud > *', '#ua-atmo-controls', '#ua-globe-legend', '#ua-time-dock', '#ua-explore-gauge', '#ua-flight-deck']) {
+            for (const el of this.wrap.querySelectorAll(q)) {
+                if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
+                const r = el.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) out.push({ x: r.left - wb.left, y: r.top - wb.top, w: r.width, h: r.height });
+            }
+        }
+        return out;
+    }
+
     _placeLabels(pois) {
         const g = this.globe;
         const cam = g._camera?.position;
         const on = g.getBeaconsVisible?.() !== false;
         const seen = new Set();
+        // Labels under the HUD, the toolbar, the dock or the column are
+        // hidden rather than drawn through them (they used to print across
+        // the readout's numbers). The beacon on the globe still shows where
+        // the point is; the panel lists every one by name.
+        const chrome = this._chromeRects();
+        const covered = (x, y, w, h) => chrome.some(r => x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y);
         for (const p of pois) {
             if (!p.scenePos) continue;
             let el = this._labelEls.get(p.id);
@@ -251,10 +294,13 @@ export class ExploreHud {
                 if (!el.hidden) el.hidden = true;
                 continue;
             }
-            el.hidden = false;
-            el.style.transform = `translate(${Math.round(scr.x + 10)}px, ${Math.round(scr.y - 9)}px)`;
             const text = `${p.discovered ? '✓ ' : ''}${p.name} · ${fmtKm(p.altKm)}`;
             if (el.textContent !== text) el.textContent = text;
+            const lx = Math.round(scr.x + 10), ly = Math.round(scr.y - 9);
+            const lw = el.offsetWidth || 120, lh = el.offsetHeight || 18;
+            if (covered(lx, ly, lw, lh)) { if (!el.hidden) el.hidden = true; continue; }
+            el.hidden = false;
+            el.style.transform = `translate(${lx}px, ${ly}px)`;
             el.style.setProperty('--ua-xl-c', hex(p.colorHex));
             el.classList.toggle('ua-xl-tag--found', !!p.discovered);
             el.title = `${p.blurb}\n\nPlaced by: ${p.placedBy}\nClick to dive here.`;
