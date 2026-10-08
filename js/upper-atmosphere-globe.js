@@ -1591,11 +1591,14 @@ export class AtmosphereGlobe {
         const { clientWidth: w, clientHeight: h } = this.canvas;
         const aspect = Math.max(w / Math.max(h, 1), 1);
         this._camera = new THREE.PerspectiveCamera(40, aspect, 0.01, 1000);
-        // The boot pose IS the Reset home (camera.js resetView: y = 0.65 d):
-        // the page used to open 20 % closer than Reset lands, which clipped
-        // the 2000 km band top and bottom on the taller stage and meant the
-        // first Reset moved the camera somewhere the visitor had never been.
-        this._camera.position.set(0, 0.65 * this.opts.cameraDistance, this.opts.cameraDistance);
+        // NOT the Reset home (camera.js resetView: y = 0.65 d). Opening at
+        // the home pose was tried on 2026-10-08 so the 2000 km band would fit
+        // the taller stage, and it fails tests/upper-atmosphere-camera-feel:
+        // the dive kernel's landing blend swings the view 6.3° in one frame
+        // from a camera that high (2.49° from here — the gate's 2.5° bound
+        // was calibrated on this pose; measured in node on `divePath`). The
+        // band fits after a Reset; the dive from home is the kernel's to fix.
+        this._camera.position.set(0, 0.6, this.opts.cameraDistance);
 
         // Sun direction — derived from the actual sub-solar point at
         // the current wall-clock time. The day-side terminator on the

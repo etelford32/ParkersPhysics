@@ -1082,9 +1082,15 @@ scrubber host dropped its `.ua-pane-analysis` scope for the same reason.
 - POI labels are hidden where they would print across chrome (they used to
   cross the readout's numbers); the beacon still marks the place and the
   panel lists it.
-- The boot pose is the Reset home (`y = 0.65 d`, d = 3.4): the page used to
-  open 20 % closer than Reset lands, which clipped the 2000 km band top and
-  bottom on the taller stage.
+- The boot pose is UNCHANGED (0, 0.6, 3.2), and that was measured, not
+  assumed: opening at the Reset home (y = 0.65 d, d = 3.4) fits the whole
+  2000 km band on the taller stage, and fails the camera-feel gate — the
+  dive kernel's landing blend swings the view 6.26° in one frame from a
+  camera that high against a 2.5° bound that the old pose meets at 2.49°
+  (probed in node on `divePath`: y = 0.6 → 2.44–2.49°, y = 1.0 → 2.98°,
+  y = 2.2 → 6.26°, always at the landing frame). So the band fits after a
+  Reset, and a dive FROM the Reset home snaps today — the kernel's path, an
+  open item below.
 - The density plot thins its decade labels to what fits (eleven decades in
   340 px overprinted).
 
@@ -1138,6 +1144,12 @@ profile below the orbit, which the hot storm thins.
 - **Airglow radiance.** The volume emission rates are order-of-magnitude
   typical values used for *relative* brightness. This is not a radiance
   calculation and the page must not present it as one.
+- **A dive from the Reset home snaps at the landing.** `divePath`'s
+  forward blend turns 6.26° in the landing frame from the Reset pose (y =
+  0.65 d) against the 2.5° no-snap bound, and 2.49° from the boot pose —
+  which is why the page still opens at (0, 0.6, 3.2) rather than at the
+  home it resets to (§9.14). The fix belongs in the kernel's end-of-path
+  heading blend, with the camera-feel gate as its judge.
 - **The `dt` bug in §6.** The controls are fixed (§9.3); particles, drag
   tracers and the substorm still take the ~0 value. Worth its own change,
   with the animation-speed consequences looked at deliberately.

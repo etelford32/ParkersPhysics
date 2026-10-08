@@ -3569,9 +3569,9 @@ body.ua-immersive-on { overflow:hidden; }
     import { CmePanel } from './js/upper-atmosphere-cme-panel.js';
 
     const canvas = document.getElementById('ua-globe');
-    // 3.4 = the Reset home (camera.js resetView): the whole 80–2000 km band
-    // fits the stage's vertical fov from there.
-    const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.4 });
+    // 3.2 is NOT the Reset home (3.4, y = 0.65 d) on purpose — see the boot
+    // pose note in upper-atmosphere-globe.js _initScene.
+    const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.2 });
 
     const ui = new UpperAtmosphereUI({
         engine,
