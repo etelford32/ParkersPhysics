@@ -13,7 +13,15 @@
  *     is home — NEGATIVE CONTROL for the gate;
  *   • the ⧉ menu says which of the two it is and "every panel home" clears;
  *   • a window that was moved is re-placed from its corner when the stage
- *     resizes (the anchoring rule), and stays inside the stage.
+ *     resizes (the anchoring rule), and stays inside the stage;
+ *   • THE WHOLE BAR DRAGS: a press on the fold button that travels moves
+ *     the panel and does NOT fold it, a press that does not travel folds it
+ *     (the 104 px time-dock bar whose right half is its buttons); Escape
+ *     mid-drag puts the panel back; an edge within SNAP_PX of the stage
+ *     gutter lands on it; the grip FACES THE OPEN STAGE (the top-right
+ *     camera dock's sits bottom-left, dragging it left widens the dock with
+ *     the right edge pinned, the bar prints the live size) and a
+ *     double-click on it restores the home size where the panel stands.
  */
 
 import { test, expect } from '@playwright/test';
@@ -91,17 +99,109 @@ test('bars on every dock; drag moves and anchors, fold leaves the bar, home clea
     expect(Math.abs(doc.panels.time.dy - after.bottom)).toBeLessThanOrEqual(2.5);   // offsets are stored rounded
     expect(Math.abs(doc.panels.time.dx - (doc.panels.time.anchor === 'bl' ? after.left : after.right))).toBeLessThanOrEqual(2.5);
 
-    // Resize the camera dock from its grip: +80 px wide.
-    const w0 = (await rect(page, '#ua-camera-hud')).w;
+    // Resize the camera dock from its grip: the dock is top-right, so the
+    // grip FACES THE OPEN STAGE (bottom-left) and dragging it LEFT widens
+    // the dock by 80 px with the right edge pinned; the bar prints the size.
+    const r0 = await rect(page, '#ua-camera-hud');
+    await expect(page.locator('#ua-camera-hud')).toHaveAttribute('data-grip', 'l');
     const grip = await page.locator('#ua-camera-hud > .ua-win-resize').boundingBox();
-    await page.mouse.move(grip.x + 6, grip.y + 6);
+    expect(grip.x - r0.x, 'grip sits at the dock\'s LEFT edge').toBeLessThan(4);
+    await page.mouse.move(grip.x + 8, grip.y + 8);
     await page.mouse.down();
-    await page.mouse.move(grip.x + 86, grip.y + 6, { steps: 6 });
+    await page.mouse.move(grip.x + 8 - 80, grip.y + 8, { steps: 6 });
+    await expect(page.locator('#ua-camera-hud .ua-win-size')).toHaveText(/^\d+ px$/);
     await page.mouse.up();
     await page.waitForTimeout(100);
-    const w1 = (await rect(page, '#ua-camera-hud')).w;
-    expect(Math.abs((w1 - w0) - 80)).toBeLessThan(3);
-    expect(Math.abs((await stored(page)).panels.camera.w - w1)).toBeLessThanOrEqual(2.5);
+    const r1 = await rect(page, '#ua-camera-hud');
+    expect(Math.abs((r1.w - r0.w) - 80)).toBeLessThan(3);
+    expect(Math.abs(r1.right - r0.right), 'right edge pinned').toBeLessThanOrEqual(2.5);   // stored offsets are whole px
+    await expect(page.locator('#ua-camera-hud .ua-win-size')).toBeEmpty();
+    expect(Math.abs((await stored(page)).panels.camera.w - r1.w)).toBeLessThanOrEqual(2.5);
+    // Double-click the grip: the home SIZE (measured under the home caps and
+    // pinned — a floating panel's content width is 91 px wider), the place kept.
+    const grip2 = await page.locator('#ua-camera-hud > .ua-win-resize').boundingBox();
+    await page.mouse.dblclick(grip2.x + 8, grip2.y + 8);
+    await page.waitForTimeout(100);
+    const r2 = await rect(page, '#ua-camera-hud');
+    expect(Math.abs(r2.w - r0.w)).toBeLessThan(3);
+    expect(Math.abs(r2.right - r0.right), 'still against the right gutter').toBeLessThanOrEqual(2.5);   // left + width are whole px, the home rect is not
+    expect(Math.abs((await stored(page)).panels.camera.w - r0.w)).toBeLessThanOrEqual(2.5);
+});
+
+test('the whole bar drags: a press on ▾ that travels moves, one that does not folds; Esc cancels; edges snap', async ({ page }) => {
+    await boot(page, { plan: 'basic' });
+    const fold = page.locator('#ua-time-dock > .ua-win-bar [data-win-act="fold"]');
+    const before = await rect(page, '#ua-time-dock');
+    // Press ON the fold button and travel 120 px up: the dock moves, nothing folds.
+    let b = await fold.boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2 - 120 * i / 8);
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+    const moved = await rect(page, '#ua-time-dock');
+    expect(Math.abs((before.top - moved.top) - 120), 'the press on the button dragged the dock').toBeLessThan(3);
+    expect(await page.evaluate(() => document.getElementById('ua-time-dock').dataset.collapsed || '0')).toBe('0');
+    await expect(page.locator('#ua-time-dock .ua-scrub')).toBeVisible();
+    expect((await stored(page)).panels.time.anchor).toMatch(/^b[lr]$/);
+    // A press that does NOT travel is the click: it folds.
+    await page.waitForTimeout(450);     // past the drag tail
+    await fold.click();
+    await expect(page.locator('#ua-time-dock .ua-scrub')).toBeHidden();
+    expect((await stored(page)).panels.time.open).toBe(false);
+    await fold.click();
+    await expect(page.locator('#ua-time-dock .ua-scrub')).toBeVisible();
+
+    // Escape mid-drag: the dock goes back exactly where it was.
+    b = await page.locator('#ua-time-dock > .ua-win-bar').boundingBox();
+    await page.mouse.move(b.x + 18, b.y + b.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i++) await page.mouse.move(b.x + 18 + 15 * i, b.y + b.height / 2 - 60 * i / 6);
+    const midway = await rect(page, '#ua-time-dock');
+    expect(Math.abs(midway.top - moved.top)).toBeGreaterThan(40);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    const back = await rect(page, '#ua-time-dock');
+    expect(Math.abs(back.top - moved.top)).toBeLessThan(1.5);
+    expect(Math.abs(back.left - moved.left)).toBeLessThan(1.5);
+
+    // A bottom-anchored dock resized narrower re-wraps its toolbar TALLER and
+    // must grow UP: its bottom stays, and the time dock's bar under it is
+    // still the thing at its own centre (it was buried — measured).
+    await page.waitForTimeout(450);     // past the Escape drag's tail
+    await page.click('#ua-time-dock > .ua-win-bar [data-win-act="home"]');   // the time dock home, under the dock about to be raised
+    const rd0 = await rect(page, '#ua-render-dock');
+    await expect(page.locator('#ua-render-dock')).toHaveAttribute('data-grip', 'r');   // spans the stage: the tie is the right grip
+    const rgrip = await page.locator('#ua-render-dock > .ua-win-resize').boundingBox();
+    await page.mouse.move(rgrip.x + 8, rgrip.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(rgrip.x + 8 - 300, rgrip.y + 8, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    const rd1 = await rect(page, '#ua-render-dock');
+    expect(rd1.h, 'the toolbar re-wrapped taller').toBeGreaterThan(rd0.h + 20);
+    expect(Math.abs(rd1.bottom - rd0.bottom), 'bottom pinned').toBeLessThanOrEqual(2.5);
+    const tb = await page.locator('#ua-time-dock > .ua-win-bar').boundingBox();
+    expect(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('.ua-win')?.id, [tb.x + 18, tb.y + tb.height / 2])).toBe('ua-time-dock');
+
+    // Snap: the camera dock dragged 7 px off its top-right home lands ON the
+    // 12 px gutter (not 7 px off it); Alt holds the snap off.
+    await dragBar(page, '#ua-camera-hud', -7, 7);
+    const snapped = await rect(page, '#ua-camera-hud');
+    expect(Math.abs(snapped.right - 12)).toBeLessThan(1.5);
+    expect(Math.abs(snapped.top - 12)).toBeLessThan(1.5);
+    const bar = await page.locator('#ua-camera-hud > .ua-win-bar').boundingBox();
+    await page.keyboard.down('Alt');
+    await page.mouse.move(bar.x + 18, bar.y + bar.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i++) await page.mouse.move(bar.x + 18 - 7 * i / 6, bar.y + bar.height / 2 + 7 * i / 6);
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    await page.waitForTimeout(100);
+    const free = await rect(page, '#ua-camera-hud');
+    expect(Math.abs(free.right - 19)).toBeLessThan(1.5);
+    expect(Math.abs(free.top - 19)).toBeLessThan(1.5);
 });
 
 test('memory is the tier gate: Basic survives a reload, free resets (negative control)', async ({ page }) => {

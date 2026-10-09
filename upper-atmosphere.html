@@ -2686,44 +2686,70 @@ body.ua-immersive-on { overflow:hidden; }
 
 /* ── Stage windows (js/upper-atmosphere-stage-windows.js) ─────────────
  * Every piece of chrome over the canvas carries a title bar (grip · name ·
- * fold · home) and a resize grip. Folded, only the bar remains. */
+ * fold · home) and a resize grip. Folded, only the bar remains. THE WHOLE
+ * BAR IS THE DRAG SURFACE, buttons included (the module turns a press that
+ * travels into a drag), so the bar never needs to be wide enough to leave
+ * room beside its buttons — but it has a floor anyway, so a grab target is
+ * never a 104 px sliver. The buttons rest quiet and come up with the bar. */
 .ua-win { --ua-win-c: var(--ua-cyan); }
 .ua-win-bar {
     display:flex; align-items:center; gap:var(--ua-sp-2);
-    height:20px; padding:0 var(--ua-sp-2) 0 var(--ua-sp-3);
+    height:22px; min-width:132px; padding:0 var(--ua-sp-2) 0 var(--ua-sp-3);
     font:700 var(--ua-fs-xs)/1 var(--ua-mono); letter-spacing:.08em; text-transform:uppercase;
     color:var(--ua-text-faint); cursor:grab; user-select:none; touch-action:none;
     pointer-events:auto;
     background:var(--ua-surf-3); border:1px solid rgba(var(--ua-cyan-rgb), .22);
     border-radius:var(--ua-r-md); backdrop-filter:var(--ua-glass);
     margin-bottom:var(--ua-sp-2);
+    transition:border-color .15s, color .15s;
 }
-.ua-win-bar:hover { color:var(--ua-text-muted); border-color:rgba(var(--ua-cyan-rgb), .35); }
+.ua-win-bar:hover, .ua-win-bar:focus-within { color:var(--ua-text-muted); border-color:rgba(var(--ua-cyan-rgb), .45); }
 .ua-win-bar:focus-visible { outline:2px solid var(--ua-cyan); outline-offset:1px; }
-.ua-win.is-dragging .ua-win-bar { cursor:grabbing; }
-.ua-win.is-dragging, .ua-win.is-resizing { opacity:.92; }
+.ua-win.is-dragging .ua-win-bar, .ua-win.is-dragging .ua-win-btn { cursor:grabbing; }
+.ua-win.is-dragging { opacity:.92; }
+.ua-win.is-dragging .ua-win-bar { border-color:var(--ua-cyan); box-shadow:0 0 0 1px rgba(var(--ua-cyan-rgb), .35), var(--ua-shadow); }
+.ua-win.is-resizing { opacity:.96; }
+.ua-win.is-resizing > .ua-win-bar { border-color:var(--ua-cyan); }
 .ua-win-grip { letter-spacing:-.15em; opacity:.6; }
+.ua-win-bar:hover .ua-win-grip { opacity:1; color:var(--ua-cyan); }
 .ua-win-title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* The live size while the grip is held (empty otherwise, so it takes no room). */
+.ua-win-size { font-weight:500; letter-spacing:0; text-transform:none; color:var(--ua-cyan); white-space:nowrap; }
+.ua-win-size:empty { display:none; }
 .ua-win-btn {
-    width:18px; height:16px; padding:0; display:inline-flex; align-items:center; justify-content:center;
-    font:600 11px/1 var(--ua-mono); color:var(--ua-text-faint); background:transparent; border:0; border-radius:3px; cursor:pointer;
+    width:20px; height:18px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:none;
+    font:600 11px/1 var(--ua-mono); color:var(--ua-text-faint); background:transparent; border:0; border-radius:3px;
+    cursor:pointer; opacity:.6; transition:opacity .15s;
 }
+.ua-win-bar:hover .ua-win-btn, .ua-win-bar:focus-within .ua-win-btn { opacity:1; }
 .ua-win-btn:hover { color:var(--ua-text-primary); background:rgba(var(--ua-cyan-rgb), .18); }
+.ua-win-btn:focus-visible { outline:2px solid var(--ua-cyan); outline-offset:-1px; }
 .ua-win[data-collapsed="1"] > :not(.ua-win-bar) { display:none !important; }
 .ua-win[data-collapsed="1"] .ua-win-bar { margin-bottom:0; }
 .ua-win[data-collapsed="1"] [data-win-act="fold"] span[aria-hidden] { display:inline-block; transform:rotate(180deg); }
 /* An id-level max-width (the camera dock's 360 px, the render dock's) must
- * yield to a user size: the floating rule outranks the id. */
+ * yield to a user size: the floating rule outranks the id. Audited: the
+ * camera dock (max-width), the render dock (max-width) and the legend inside
+ * it (its own max-width — it follows the dock below), the flight deck
+ * (width:min(312px, 44%) — inline width wins), the time dock (left/right
+ * insets — the module sets right:auto), the column (no cap). */
 #ua-globe-wrap .ua-win[data-floating="1"] { max-width:none; }
+/* The grip: an 18 px target with the glyph drawn in its outer corner, dim
+ * at rest, up whenever the PANEL is hovered (a grip only visible when the
+ * grip itself is hovered is a grip nobody finds), and it FACES THE OPEN
+ * STAGE — data-grip="l" puts it bottom-left (a right-side dock grows
+ * leftwards with its right edge pinned). */
 .ua-win-resize {
-    position:absolute; right:2px; bottom:2px; width:14px; height:14px; z-index:3;
+    position:absolute; right:0; bottom:0; width:18px; height:18px; z-index:3;
     cursor:nwse-resize; touch-action:none;
-    background:linear-gradient(135deg, transparent 50%, rgba(var(--ua-cyan-rgb), .55) 50%, rgba(var(--ua-cyan-rgb), .55) 60%, transparent 60%, transparent 75%, rgba(var(--ua-cyan-rgb), .55) 75%, rgba(var(--ua-cyan-rgb), .55) 85%, transparent 85%);
-    border-bottom-right-radius:var(--ua-r-md); opacity:.6;
+    background:linear-gradient(135deg, transparent 55%, rgba(var(--ua-cyan-rgb), .7) 55%, rgba(var(--ua-cyan-rgb), .7) 63%, transparent 63%, transparent 77%, rgba(var(--ua-cyan-rgb), .7) 77%, rgba(var(--ua-cyan-rgb), .7) 85%, transparent 85%);
+    border-bottom-right-radius:var(--ua-r-md); opacity:.35; transition:opacity .15s;
 }
-.ua-win-resize:hover { opacity:1; }
+.ua-win:hover > .ua-win-resize, .ua-win.is-resizing > .ua-win-resize, .ua-win-resize:hover { opacity:1; }
 .ua-win-resize--x { cursor:ew-resize; }
 .ua-win-resize--y { cursor:ns-resize; }
+.ua-win[data-grip="l"] > .ua-win-resize { right:auto; left:0; transform:scaleX(-1); cursor:nesw-resize; }
+.ua-win[data-grip="l"] > .ua-win-resize--x { cursor:ew-resize; }
 /* The camera dock is a column of its rows; its bar sits above them and
  * the dock itself is pointer-inert (its children re-enable). The time dock
  * and the render dock gain a little room at the bottom for the grip. */
@@ -2731,10 +2757,17 @@ body.ua-immersive-on { overflow:hidden; }
 #ua-camera-hud > .ua-win-resize { pointer-events:auto; }
 #ua-time-dock > .ua-win-bar { pointer-events:auto; width:max-content; }
 #ua-time-dock > .ua-win-resize { pointer-events:auto; }
-#ua-explore-gauge > .ua-win-bar { width:118px; }
+#ua-explore-gauge > .ua-win-bar { width:132px; }
 #ua-explore-gauge[data-collapsed="1"] { bottom:auto !important; height:auto !important; }
 #ua-explore-gauge > .ua-win-resize { right:auto; left:0; }
 #ua-flight-deck > .ua-win-bar { margin:var(--ua-sp-2) var(--ua-sp-2) 0; }
+/* THE LEGEND FOLLOWS THE DOCK. The render dock is sized by its legend at
+ * home (the legend's own 380 px cap); once the USER has sized the dock the
+ * legend and the toolbar span it, so widening the dock widens what it
+ * holds — before this a wider dock only re-wrapped the toolbar and the
+ * legend stayed 380 px, which read as a resize that did nothing. */
+#ua-render-dock[data-floating="1"] #ua-globe-legend { max-width:100%; width:100%; }
+#ua-render-dock[data-floating="1"] #ua-atmo-controls { width:100%; }
 /* The layout menu under the ⧉ chip. */
 .ua-layout-menu {
     pointer-events:auto; align-self:flex-end; width:min(280px, 100%);
@@ -3484,7 +3517,7 @@ body.ua-immersive-on { overflow:hidden; }
                 <button type="button" role="menuitem" data-layout="home">⌂ Every panel home</button>
                 <button type="button" role="menuitem" data-layout="fold">▾ Fold all</button>
                 <button type="button" role="menuitem" data-layout="unfold">▴ Unfold all</button>
-                <p class="ua-layout-tip">Drag a panel by its ⋮⋮ bar · double-click the bar to send it home · drag the corner to resize.</p>
+                <p class="ua-layout-tip">Drag a panel anywhere on its bar · double-click the bar to send it home · drag the corner grip to resize (it faces the open stage; double-click it for the default size) · edges snap to the stage margin, hold Alt to place freely · Esc cancels a drag.</p>
             </div>
             <!-- The readout: altitude · physics layer · ops band in the header
                  (always visible), the gas physics folded under it. The fold

@@ -23,7 +23,11 @@
  * `placeFromAnchor` turns an entry back into left/top for a stage of the
  * current size and CLAMPS it so at least MIN_VISIBLE_PX of the panel stay
  * inside the stage (the draggable-panel rule: the user must always have
- * something to grab). `anchorFromRect` is its inverse on drop.
+ * something to grab). `anchorFromRect` is its inverse on drop. `snapRect`
+ * lands a dragged edge exactly on the stage gutter when it comes within
+ * SNAP_PX of it. `gripSide` / `resizeFrom` are the resize rules: the grip
+ * faces the OPEN stage and a size is clamped to the edge it grows toward,
+ * so a resize can never push a panel off the stage.
  *
  * WHO REMEMBERS
  * ─────────────
@@ -92,6 +96,68 @@ export function clampRect(rect, stage, minVisible = MIN_VISIBLE_PX) {
     };
 }
 
+/** Edge snap distance and the stage inset the edges snap TO (the page's
+ *  --ua-sp-5 gutter, where every CSS home sits). */
+export const SNAP_PX = 10;
+export const SNAP_INSET_PX = 12;
+
+/**
+ * Snap a dragged rect's edges to the stage gutter when they come within
+ * SNAP_PX of it, so a dock dragged back toward its corner lands EXACTLY
+ * where its CSS home was rather than 3 px off it. Left/right and top/bottom
+ * are independent; the nearer edge on each axis wins. Returns a new rect.
+ */
+export function snapRect(rect, stage, { inset = SNAP_INSET_PX, tol = SNAP_PX } = {}) {
+    let { left, top } = rect;
+    const dl = Math.abs(left - inset), dr = Math.abs((stage.w - inset) - (left + rect.w));
+    if (dl <= tol && dl <= dr) left = inset;
+    else if (dr <= tol) left = stage.w - inset - rect.w;
+    const dt = Math.abs(top - inset), db = Math.abs((stage.h - inset) - (top + rect.h));
+    if (dt <= tol && dt <= db) top = inset;
+    else if (db <= tol) top = stage.h - inset - rect.h;
+    return { left, top, w: rect.w, h: rect.h };
+}
+
+/**
+ * Which side a panel's resize grip faces: 'l' when the panel's centre sits
+ * clearly in the right half of the stage, 'r' otherwise. A grip faces the
+ * OPEN stage — a dock parked top-right has nowhere to grow on its right, so
+ * its grip sits bottom-left and dragging it left widens the dock with its
+ * right edge pinned (dragging a bottom-right grip rightwards there only
+ * pushed the dock off the stage). A panel that SPANS the stage (the time
+ * dock, the render dock at home) has its centre on the midline to within
+ * a fraction of a pixel, and a fractional width tipped it left — measured:
+ * both docks grew left-side grips, and a press meant for one dock's grip
+ * landed on the other's. A tie, to GRIP_TIE_PX, is the conventional
+ * bottom-right.
+ */
+export const GRIP_TIE_PX = 2;
+export function gripSide(rect, stage) {
+    return (rect.left + rect.w / 2) - stage.w / 2 > GRIP_TIE_PX ? 'l' : 'r';
+}
+
+/**
+ * The size a resize drag arrives at. `side` is the grip's side ('l'|'r'),
+ * `dx`/`dy` the pointer travel; the width is clamped so the panel's far edge
+ * never leaves the stage gutter, the height so its bottom never does, and
+ * for a left grip the left edge moves with the width so the right edge is
+ * pinned. Returns { w, h, left } (left only changes for a left grip; w or h
+ * are undefined on an axis the panel does not resize on).
+ */
+export function resizeFrom(start, delta, stage, { axis = 'xy', side = 'r', minW = 120, minH = 24, maxW = Infinity, maxH = Infinity, inset = SNAP_INSET_PX } = {}) {
+    const wantW = axis === 'y' ? undefined : (side === 'l' ? start.w - delta.dx : start.w + delta.dx);
+    const wantH = axis === 'x' ? undefined : start.h + delta.dy;
+    const roomW = side === 'l' ? (start.left + start.w) - inset : (stage.w - inset) - start.left;
+    const roomH = (stage.h - inset) - start.top;
+    const sz = clampSize({ w: wantW, h: wantH }, {
+        minW, minH,
+        maxW: Math.min(maxW, Math.max(minW, roomW)),
+        maxH: Math.min(maxH, Math.max(minH, roomH)),
+    });
+    const left = (side === 'l' && sz.w !== undefined) ? start.left + (start.w - sz.w) : start.left;
+    return { w: sz.w, h: sz.h, left };
+}
+
 /** A size within the panel's limits. */
 export function clampSize(size, limits = {}) {
     const { minW = 120, minH = 24, maxW = Infinity, maxH = Infinity } = limits;
@@ -107,13 +173,16 @@ export function clampSize(size, limits = {}) {
  * INTO the stage on both axes, so a stored offset never depends on which
  * side it was measured from).
  */
-export function anchorFromRect(rect, stage) {
+export function anchorFromRect(rect, stage, anchor = null) {
     const cx = rect.left + rect.w / 2, cy = rect.top + rect.h / 2;
-    const right = cx > stage.w / 2, bottom = cy > stage.h / 2;
-    const anchor = (bottom ? 'b' : 't') + (right ? 'r' : 'l');
+    const a = ANCHORS.includes(anchor) ? anchor : null;
+    // A forced corner (the panel's EXISTING anchor, kept across a width-only
+    // resize so a bottom-anchored dock stays bottom-anchored) or the nearest.
+    const right = a ? a[1] === 'r' : cx > stage.w / 2;
+    const bottom = a ? a[0] === 'b' : cy > stage.h / 2;
     const dx = right ? stage.w - (rect.left + rect.w) : rect.left;
     const dy = bottom ? stage.h - (rect.top + rect.h) : rect.top;
-    return { anchor, dx, dy };
+    return { anchor: (bottom ? 'b' : 't') + (right ? 'r' : 'l'), dx, dy };
 }
 
 /**

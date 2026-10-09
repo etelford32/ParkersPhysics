@@ -1158,8 +1158,8 @@ upgrade retries once, 8 s after boot, if any probe missed it.
 
 | piece | what it is | tested by |
 |---|---|---|
-| `js/stage-layout.js` | PURE: the layout document (`{v, panels:{id:{anchor,dx,dy,w,h,open}}}`), corner anchoring (`anchorFromRect` / `placeFromAnchor`, exact round trip), clamping to MIN_VISIBLE_PX, `withPanel`, and `layoutMemoryAllowed` — the ONE gate, delegating to dashboard-sync's `tierAllowsSync` so the stage, the console and the climate lab draw the paid line in the same place | `node tests/stage-layout.mjs` (5) |
-| `js/upper-atmosphere-stage-windows.js` | DOM: a title bar (grip · name · fold ▾ · home ⌂) and a resize grip on the camera dock, the render dock (legend + toolbar, now ONE anchored column), the time dock, the altitude column and the flight deck; drag by the bar (pointer capture, 4 px click threshold, converts the CSS home to left/top on the first real move), fold to the bar, resize on the axes the panel can use, home on ⌂ or a double-click (every inline style removed); re-placed from the corner on every stage resize | `tests/upper-atmosphere-stage-windows.spec.js` (3) |
+| `js/stage-layout.js` | PURE: the layout document (`{v, panels:{id:{anchor,dx,dy,w,h,open}}}`), corner anchoring (`anchorFromRect` / `placeFromAnchor`, exact round trip), clamping to MIN_VISIBLE_PX, `withPanel`, `layoutMemoryAllowed` — the ONE gate, delegating to dashboard-sync's `tierAllowsSync` so the stage, the console and the climate lab draw the paid line in the same place — and the 2026-10-09 UX rules: `snapRect` (an edge within SNAP_PX = 10 of the 12 px stage gutter lands ON it), `gripSide` (the resize grip faces the OPEN stage) and `resizeFrom` (a size clamped to the edge it grows toward; a left grip pins the right edge) | `node tests/stage-layout.mjs` (7) |
+| `js/upper-atmosphere-stage-windows.js` | DOM: a title bar (grip · name · live size · fold ▾ · home ⌂) and a resize grip on the camera dock, the render dock (legend + toolbar, now ONE anchored column), the time dock, the altitude column and the flight deck; drag by the WHOLE bar, buttons included (4 px click threshold, the pointer captured only once the drag is real, the CSS home converted to left/top on the first real move, edges snapped, Alt for free placement, Esc puts it back), fold to the bar, resize on the axes the panel can use from a grip that faces the open stage (live `w × h` in the bar; double-click = home size where it stands), home on ⌂ or a double-click (every inline style removed); re-placed from the corner on every stage resize | `tests/upper-atmosphere-stage-windows.spec.js` (4) |
 | `js/dashboard-sync.js` `initDocSync` | the SAME transport as the console's bundle sync for ONE document: local-first, migration-guarded, tier-gated, last-write-wins by updated_at | the module's existing node gate (pure helpers unchanged) |
 | the page | the ⧉ layout chip + menu (state line · every panel home · fold all · unfold all); `--ua-render-dock-h` replaces `--ua-toolbar-h` (the column clears the dock by its measured height) | ops-hud spec's negative control re-pointed at the dock |
 | dashboard.html `#stage-layout-card` | the tease: what the stage can do, a badge from the same gate (Remembered / Basic+), "Open the stage" and, for free accounts, "Remember mine →" (pricing) | — |
@@ -1180,12 +1180,71 @@ corner on every stage resize, so it stays top-right at 1224 px and at
 keeps MIN_VISIBLE_PX (36) of every panel on the stage — the draggable-panel
 rule: the user must always have something to grab.
 
-**Measured on the way.** The time dock's bar is 104 px wide and its two
-buttons start at 64 px: a drag that presses the bar's right half presses a
-button and nothing moves (the gate presses the grip). The dock spans the
-stage, so its centre sits on the midline and either bottom corner is the
-nearest — the gate accepts both and checks the offsets against the corner
-that was chosen.
+**Measured on the way.** The dock spans the stage, so its centre sits on
+the midline and either bottom corner is the nearest — the gate accepts both
+and checks the offsets against the corner that was chosen.
+
+**The UX pass (2026-10-09)** — three things the first gate caught, each of
+which a user would have met as "it does nothing":
+
+1. *A narrow bar's right half was its buttons.* The time dock's bar was
+   104 px wide with fold/home from 64 px: a natural grab on its right half
+   pressed a button and nothing moved. Now THE WHOLE BAR IS THE DRAG
+   SURFACE — a press on ▾ or ⌂ that travels past 4 px becomes a drag (the
+   pointer is captured only then, so an untouched press stays the button's
+   own click) and the click that follows a drag is swallowed for 400 ms, as
+   is a double-click that is really two quick drags. Bars also have a
+   132 px floor and a 22 px height. The gate presses ON the fold button,
+   travels 120 px and checks the dock moved and did not fold, then clicks
+   it and checks it folds. Escape mid-drag puts the panel back exactly
+   (home included, floating or not); edges within SNAP_PX of the stage
+   gutter land ON it, Alt holds the snap off (both gated).
+2. *The resize grip could push a dock off the stage, and an id-level cap
+   could swallow the size.* The camera dock sits top-right: a bottom-right
+   grip dragged rightwards there only pushed it off the stage. The grip now
+   FACES THE OPEN STAGE (`data-grip`, kernel `gripSide`: bottom-left for a
+   panel whose centre is in the right half) and `resizeFrom` clamps the
+   size to the edge it grows toward, pinning the right edge for a left grip
+   — gated: dragging the camera dock's grip LEFT 80 px widens it 80 with the
+   right edge within 2 px of where it was. The grip is an 18 px target shown
+   whenever the PANEL is hovered (a grip visible only when the grip is
+   hovered is a grip nobody finds), the bar prints the live `w × h` while it
+   is held, and a double-click on it restores the home size where the panel
+   stands. The caps were audited (camera dock max-width, render dock
+   max-width + the legend's own, flight deck `width:min(312px,44%)`, time
+   dock insets, the column's none): the floating rule outranks every one.
+   MEASURED SCAR: the home size of a FLOATING panel cannot be read by
+   clearing its inline width — out from under its id cap the camera dock
+   came back 91 px wider than home — so `homeSize` re-applies the caps for
+   one layout, measures, and PINS the result as the panel's size (which is
+   also what makes it survive a reload).
+3. *The legend inside the render dock.* Its max-height was a share of the
+   dock it sizes and flip-flopped the layout every frame (a px/vh cap now),
+   and its own 380 px max-width meant widening the dock only re-wrapped the
+   toolbar — a resize that visibly did nothing. Once the user has sized the
+   dock (`data-floating`), the legend and the toolbar span it.
+
+Two more surfaced while gating those:
+
+4. *A floating panel must still grow from its corner.* Floating converts
+   the CSS home to left/top, so the render dock, narrowed, re-wrapped its
+   toolbar taller and grew DOWNWARD over the time dock's bar — buried, and
+   a press on it went to the dock above. Every panel carries a
+   ResizeObserver that re-places it from its STORED corner whenever its
+   size changes (bottom-anchored ⇒ bottom pinned, grows up; right-anchored
+   ⇒ right pinned), skipped while the pointer is driving it, and a
+   width-only resize keeps the corner it started from (`anchorFromRect`
+   takes a forced corner) — gated: the render dock narrowed by 300 px grows
+   20+ px taller with its bottom within 2.5 px, and `elementFromPoint` at
+   the time dock's bar is still the time dock. A spanning panel's centre
+   sits ON the midline, and a fractional width tipped both docks to a LEFT
+   grip, which is how the second press landed on the wrong dock: a tie to
+   `GRIP_TIE_PX` is the conventional right grip.
+5. *Rects are measured from the stage's PADDING box.* The stage carries a
+   1 px border; measured from its border box every float and re-place
+   slipped a pixel, and a grip double-click (two zero-travel resize cycles
+   plus the home-size pass) drifted 6 px off the gutter. `_rectOf`
+   subtracts `clientLeft`/`clientTop`; the double-click now lands exact.
 
 ## 8. What is still open
 
