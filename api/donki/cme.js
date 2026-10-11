@@ -18,11 +18,11 @@
  * CDN for 24 h (recent-lookback stays at 15 min so the live page
  * picks up new events promptly).
  */
-import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+import { jsonOk, jsonError, isoTag } from '../_lib/responses.js';
+import { fetchDonki } from '../_lib/donki-fetch.js';
 
 export const config = { runtime: 'edge' };
 
-const DONKI_CME_BASE = 'https://api.nasa.gov/DONKI/CMEAnalysis';
 const CACHE_TTL      = 900;   // 15 min
 // Long SWR (30 min, matching the prewarm-medium cron cadence): api.nasa.gov
 // routinely takes 8-15 s cold. With SWR >= the prewarm interval the CDN can
@@ -86,34 +86,21 @@ export default async function handler(request) {
 
     const fmt   = d => d.toISOString().slice(0, 10);
 
-    const donkiURL = `${DONKI_CME_BASE}?startDate=${fmt(start)}&endDate=${fmt(end)}&api_key=${nasaKey}`;
+    // fetchDonki (api/_lib/donki-fetch.js): api.nasa.gov first, then CCMC's
+    // own DONKI host; a 200 HTML page is a FAILURE with its <title> in the
+    // reason, never a JSON parse crash. api.nasa.gov served HTML from
+    // 2026-09-30 and this route's res.json() turned every CME page into a
+    // feed-down state. WSA-ENLIL runs in parallel and is best-effort.
+    const q = { startDate: fmt(start), endDate: fmt(end), apiKey: nasaKey, timeoutMs: 10_000 };
+    const enlilPromise = fetchDonki('WSAEnlilSimulations', q)
+        .then((r) => (r.ok ? r.data : null), () => null);
 
-    // WSA-ENLIL fetch starts NOW, in parallel with CMEAnalysis. It was
-    // previously awaited sequentially after the CME parse, stacking two
-    // slow NASA round-trips (10 s + 12 s worst case = 22 s) — enough to
-    // blow the status probe's timeout and pin real visitors. Best-effort:
-    // resolves to null on any failure, never rejects (an abandoned promise
-    // after an early return below must not surface as unhandled).
-    const enlilURL = `https://api.nasa.gov/DONKI/WSAEnlilSimulations?startDate=${fmt(start)}&endDate=${fmt(end)}&api_key=${nasaKey}`;
-    const enlilPromise = (async () => {
-        try {
-            const eres = await fetchWithTimeout(enlilURL, {
-                headers: { Accept: 'application/json' }, timeoutMs: 12_000,
-            });
-            if (!eres.ok) return null;
-            const sims = await eres.json();
-            return Array.isArray(sims) ? sims : null;
-        } catch { return null; }
-    })();
-
-    let raw;
-    try {
-        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
-    } catch (e) {
-        return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
+    const cmeRes = await fetchDonki('CMEAnalysis', q);
+    if (!cmeRes.ok) {
+        return jsonError('upstream_unavailable', cmeRes.error, { source: 'NASA DONKI' });
     }
+    const raw = cmeRes.data;
+    const donkiHost = cmeRes.host;
 
     if (!Array.isArray(raw)) {
         return jsonError('parse_error', 'Unexpected DONKI CMEAnalysis format', { source: 'NASA DONKI' });
@@ -200,6 +187,9 @@ export default async function handler(request) {
         // Diagnosability: 'demo' means the shared 30 req/hr DEMO_KEY quota —
         // the usual cause of intermittent 429s on this proxy. Never the key.
         key_mode:  nasaKey === 'DEMO_KEY' ? 'demo' : 'configured',
+        // Which DONKI host answered ('api.nasa.gov' | 'ccmc') — a gateway
+        // outage shows up here instead of as an empty CME page.
+        donki_host: donkiHost,
         data: {
             updated:         new Date().toISOString(),
             window:          {

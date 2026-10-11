@@ -91,3 +91,57 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.validation_pdyn_series(INTEGER) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.validation_pdyn_series(INTEGER) FROM authenticated;
+
+-- ── Addendum (migration validation_runs_flux_rope_kind, written 2026-10-11) ──
+-- Fourth loop: the flux-rope-v1 per-flare ledger (FLUX_ROPE_SIMULATOR_PLAN.md
+-- "daily validation"). api/cron/validation-rerun.js has inserted
+-- kind='flux-rope' rows since 2026-07-28, but this CHECK was never widened,
+-- so EVERY insert failed with 23514 (first logged scored run: 2026-09-16,
+-- 10 events) and the model's real-data skill was thrown away. Pure widening:
+-- no existing row changes, nothing reads the constraint.
+ALTER TABLE public.validation_runs DROP CONSTRAINT IF EXISTS validation_runs_kind_check;
+ALTER TABLE public.validation_runs
+    ADD CONSTRAINT validation_runs_kind_check
+    CHECK (kind IN ('backmap', 'recurrence', 'cme', 'flux-rope'));
+
+-- Same migration: the public leaderboard view scores ONE honest lock per
+-- (event, model) — the latest that was still a forecast when issued
+-- (predicted arrival after issue) AND, for an arrival, issued before the
+-- observed shock. The original view averaged EVERY row, and the daily
+-- re-run kept appending rows after a CME had hit (the provider had already
+-- assimilated the shock from live L1): on the 2026-09 ledger flux-rope-v1
+-- read MAE 26.4 h over 8 events from leaked rows vs 18.1 h over the 6 with
+-- an honest lock. Mirrors js/flux-rope-validation.js selectScorableLock
+-- (api/cme/skill.js uses it for the per-event rows; the cron scores with it).
+CREATE OR REPLACE VIEW public.cme_model_skill
+WITH (security_invoker = false) AS
+WITH honest AS (
+    SELECT DISTINCT ON (f.event_id, f.model_id) f.*
+    FROM public.cme_arrival_forecasts f
+    JOIN public.cme_l1_observations o USING (event_id)
+    WHERE f.predicted_arrival_utc > f.issued_at
+      AND (NOT o.arrived OR o.shock_arrival_utc IS NULL OR f.issued_at < o.shock_arrival_utc)
+    ORDER BY f.event_id, f.model_id, f.issued_at DESC
+)
+SELECT
+    f.model_id,
+    e.is_hindcast,
+    count(*)                                   AS n_scored,
+    count(*) FILTER (WHERE o.arrived AND f.predicted_hit
+        AND abs(extract(epoch FROM (f.predicted_arrival_utc - o.shock_arrival_utc))) <= 43200)
+                                               AS hits_12h,
+    avg(abs(extract(epoch FROM (f.predicted_arrival_utc - o.shock_arrival_utc))) / 3600.0)
+        FILTER (WHERE o.arrived AND o.shock_arrival_utc IS NOT NULL)
+                                               AS mae_hours,
+    avg(extract(epoch FROM (f.predicted_arrival_utc - o.shock_arrival_utc)) / 3600.0)
+        FILTER (WHERE o.arrived AND o.shock_arrival_utc IS NOT NULL)
+                                               AS bias_hours,   -- + = predicted late
+    count(*) FILTER (WHERE f.predicted_hit AND NOT o.arrived)   AS false_alarms,
+    count(*) FILTER (WHERE NOT f.predicted_hit AND o.arrived)   AS misses
+FROM honest f
+JOIN public.cme_events e USING (event_id)
+JOIN public.cme_l1_observations o USING (event_id)
+GROUP BY f.model_id, e.is_hindcast;
+
+REVOKE ALL ON public.cme_model_skill FROM anon;
+REVOKE ALL ON public.cme_model_skill FROM authenticated;

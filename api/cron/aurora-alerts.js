@@ -33,6 +33,7 @@
  * Manual: ?dry=1 evaluates and reports without sending or ledger writes.
  */
 
+import { fetchDonki } from '../_lib/donki-fetch.js';
 import { readFile } from 'node:fs/promises';
 import { evaluateTier, shouldSend, tierEmail } from '../_lib/aurora-tiers.js';
 
@@ -104,10 +105,14 @@ async function fluxRopeSummary() {
         const end = new Date();
         const start = new Date(end.getTime() - 7 * 86_400_000);
         const iso = (d) => d.toISOString().slice(0, 10);
-        const raw = await getJson(
-            `https://api.nasa.gov/DONKI/CMEAnalysis?startDate=${iso(start)}&endDate=${iso(end)}&mostAccurateOnly=true&api_key=${NASA_KEY}`,
-            15_000,
-        );
+        // Shared fetcher: gateway → CCMC fallback, HTML classified (the
+        // 2026-09-30 api.nasa.gov outage — api/_lib/donki-fetch.js).
+        const dk = await fetchDonki('CMEAnalysis', {
+            startDate: iso(start), endDate: iso(end), apiKey: NASA_KEY,
+            params: { mostAccurateOnly: true }, timeoutMs: 15_000,
+        });
+        if (!dk.ok) throw new Error(dk.error);
+        const raw = dk.data;
         const cmes = (Array.isArray(raw) ? raw : [])
             .filter((c) => Number.isFinite(c.speed) && c.time21_5)
             .map((c) => {
