@@ -92,7 +92,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.validation_pdyn_series(INTEGER) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.validation_pdyn_series(INTEGER) FROM authenticated;
 
--- ── Addendum (migration validation_runs_flux_rope_kind, written 2026-10-11) ──
+-- ── Addendum (migration validation_runs_flux_rope_kind, APPLIED 2026-10-11) ──
 -- Fourth loop: the flux-rope-v1 per-flare ledger (FLUX_ROPE_SIMULATOR_PLAN.md
 -- "daily validation"). api/cron/validation-rerun.js has inserted
 -- kind='flux-rope' rows since 2026-07-28, but this CHECK was never widened,
