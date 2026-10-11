@@ -14,8 +14,8 @@ name: flux-rope-validation
 #                             the three 2026-10 bugs with negative controls
 #   validation-rerun-ledger   the cron's ledger block end-to-end against a
 #                             fake PostgREST (1000-row cap, kind CHECK) and a
-#                             gateway answering HTML (the 2026-09-30 outage)
-#   donki-fetch               the DONKI host-fallback fetcher
+#                             DONKI hosts answering HTML (the 2026-09-30 move)
+#   donki-upstream            the DONKI host race (moved CCMC host + gateway)
 #
 # Until this workflow no CI job ran any of these: the ledger was dead for
 # 11 days and its scored runs were rejected for two months with every
@@ -31,10 +31,10 @@ on:
       - 'js/solar-wind-driver.js'
       - 'api/cron/validation-rerun.js'
       - 'api/cme/skill.js'
-      - 'api/_lib/donki-fetch.js'
+      - 'api/_lib/donki-upstream.js'
       - 'tests/flux-rope-*.mjs'
       - 'tests/validation-*.mjs'
-      - 'tests/donki-fetch.mjs'
+      - 'tests/donki-upstream.mjs'
       - 'tests/forecast-verification.mjs'
       - 'tests/fixtures/flux-rope-ledger-*.json'
       - '.github/workflows/flux-rope-validation.yml'
@@ -47,10 +47,10 @@ on:
       - 'js/solar-wind-driver.js'
       - 'api/cron/validation-rerun.js'
       - 'api/cme/skill.js'
-      - 'api/_lib/donki-fetch.js'
+      - 'api/_lib/donki-upstream.js'
       - 'tests/flux-rope-*.mjs'
       - 'tests/validation-*.mjs'
-      - 'tests/donki-fetch.mjs'
+      - 'tests/donki-upstream.mjs'
       - 'tests/forecast-verification.mjs'
       - 'tests/fixtures/flux-rope-ledger-*.json'
       - '.github/workflows/flux-rope-validation.yml'
@@ -90,5 +90,5 @@ jobs:
         run: node tests/flux-rope-ledger-real.mjs
       - name: cron ledger end-to-end (fake PostgREST + DONKI outage)
         run: |
-          node tests/donki-fetch.mjs
+          node tests/donki-upstream.mjs
           node tests/validation-rerun-ledger.mjs

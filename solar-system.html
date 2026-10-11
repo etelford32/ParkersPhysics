@@ -906,6 +906,8 @@ import { airlessSphereMaterial } from './js/airless-body.js';
 import { BODY_ALBEDO, shadowIllumination, reflectedIrradianceFraction, SUN_RADIUS_KM } from './js/eclipse-geometry.js';
 import { AU_KM } from './js/neo-orbits.js';
 import { NeoLayer } from './js/neo-layer.js';
+import { createReticle, tintReticle, seatReticle } from './js/selection-reticle.js';
+import { makeScreenRing } from './js/screen-line.js';
 import { TONE_DECODE_GLSL } from './js/tone-decode.js';
 import { NeoPanel } from './js/neo-panel.js';
 
@@ -1649,7 +1651,9 @@ function simDist(dAU) { return 2.5 + 4.2 * Math.log(1 + dAU * 1.8); }
 const planetVS = /* glsl */`
     varying vec3 vWorldNormal;
     varying vec3 vWorldPos;
+    varying vec2 vUv;
     void main() {
+        vUv = uv;
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorldPos    = wp.xyz;
         vWorldNormal = normalize(mat3(modelMatrix) * normal);
@@ -1668,9 +1672,13 @@ const planetFS = /* glsl */`${TONE_DECODE_GLSL}
     uniform float u_bz_s;      // southward IMF Bz normalised 0–1
     uniform float u_xray;      // GOES X-ray intensity 0–1
     uniform float u_storm;     // NOAA G-scale 0–5
+    // ── Surface map (archival; 0 for planets that have none) ──
+    uniform sampler2D u_map;
+    uniform float u_hasMap;
 
     varying vec3 vWorldNormal;
     varying vec3 vWorldPos;
+    varying vec2 vUv;
 
     void main() {
         vec3  nrm    = normalize(vWorldNormal);
@@ -1682,7 +1690,10 @@ const planetFS = /* glsl */`${TONE_DECODE_GLSL}
         float rim     = 1.0 - facing;
 
         // ── Diffuse + ambient base ──────────────────────────────────
-        vec3 col = u_base * (max(sunFace, 0.0) * 0.88 + 0.08);
+        // A surface map REPLACES the flat base colour (it is an sRGB image, like
+        // the u_base colour picks, so it rides the same toneDecode below).
+        vec3 base = u_hasMap > 0.5 ? texture2D(u_map, vUv).rgb : u_base;
+        vec3 col = base * (max(sunFace, 0.0) * 0.88 + 0.08);
 
         // ── Atmospheric limb scatter (sunward side) ─────────────────
         if (u_atm > 0.0) {
@@ -1919,11 +1930,12 @@ const PLANETS = [
 PLANETS.forEach(p => {
     p.dist  = simDist(p.dAU);
 
-    // Orbit ring
-    const og = new THREE.RingGeometry(p.dist - 0.012, p.dist + 0.012, 128);
-    const om = new THREE.MeshBasicMaterial({ color:p.color, transparent:true, opacity:0.18, side:THREE.DoubleSide });
-    const orb = new THREE.Mesh(og, om);
-    orb.rotation.x = Math.PI / 2;
+    // Orbit ring — CONSTANT SCREEN WIDTH (js/screen-line.js). It was a
+    // RingGeometry 0.024 scene units wide, which perspective turned into a
+    // ~20 px bar behind a locked planet. Built in the XZ plane directly.
+    const orb = makeScreenRing(p.dist, { color: p.color, opacity: 0.30, widthPx: 1.6 });
+    orb.name = `orbit-${p.name.toLowerCase()}`;
+    p.orbitRing = orb;
     scene.add(orb);
 
     // Planet sphere — Jupiter gets its own cloud-band shader; others get the
@@ -2051,7 +2063,27 @@ PLANETS.forEach(p => {
     p.uniforms.u_bz_s  = { value: 0.0 };
     p.uniforms.u_xray  = { value: 0.0 };
     p.uniforms.u_storm = { value: 0.0 };
+    p.uniforms.u_map    = { value: null };
+    p.uniforms.u_hasMap = { value: 0.0 };
 });
+
+// ── Mars surface map ──────────────────────────────────────────────────────────
+// The self-hosted Viking MDIM mosaic mars.html already ships
+// (assets/mars/SOURCES.md). ARCHIVAL imagery on the orrery's own spin — the
+// orientation is not tied to the IAU prime meridian (the page's planets spin
+// on an accumulated rotation), and the data card says so. A failed load keeps
+// the flat colour: u_hasMap stays 0, nothing invented.
+{
+    const marsP = PLANETS.find(p => p.name === 'Mars');
+    if (marsP?.uniforms) {
+        new THREE.TextureLoader().load('/assets/mars/mars-viking-jpl.jpg', (tex) => {
+            tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy?.() ?? 1);
+            marsP.uniforms.u_map.value = tex;
+            marsP.uniforms.u_hasMap.value = 1.0;
+        }, undefined, () => { /* flat colour stays */ });
+        marsP.data['Surface map'] = 'Viking MDIM mosaic (archival, NASA/JPL/USGS) · orientation illustrative';
+    }
+}
 
 // ── Shared simple vertex shader (no distortion) ───────────────────────────────
 const simpleVS = `void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
@@ -2334,6 +2366,7 @@ PLANETS.forEach(p => {
             // Exposed for selection / data card / camera-follow (mirrors planet shape).
             name:   key.charAt(0).toUpperCase() + key.slice(1),
             type:   `Moon of ${p.name}`,
+            isMoon: true,
             radius: visR,
             color:  cfg.color,
             mesh,                 // ← needed by selectBody / targetBody camera follow
@@ -3423,6 +3456,23 @@ const tbl        = document.getElementById('planet-table');
 const panelName  = document.getElementById('panel-planet-name');
 const panelType  = document.getElementById('panel-planet-type');
 
+// ONE selection mark for every body (js/selection-reticle.js). NEOs wear the
+// layer's own instance of it; this one rides the Sun, planets and moons, which
+// until 2026-10 showed no mark at all when selected.
+const bodyReticle = createReticle('body-selected-marker');
+scene.add(bodyReticle);
+let _reticleMesh = null, _reticleRadius = 0;
+const _cReticle = new THREE.Color();
+function _markBody(mesh, colorHex) {
+    _reticleMesh = mesh;
+    bodyReticle.visible = !!mesh;
+    if (!mesh) return;
+    const g = mesh.geometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    _reticleRadius = g.boundingSphere.radius * Math.max(mesh.scale.x, mesh.scale.y, mesh.scale.z);
+    tintReticle(bodyReticle, _cReticle.set(colorHex ?? 0xffffff).lerp(new THREE.Color(0xffffff), 0.35));
+}
+
 // ── SELECTED vs NOTHING SELECTED ─────────────────────────────────────────────
 // `selectBody(null)` means "select the SUN" (it has no planet record), so a
 // null `selectedBody` cannot also mean "nothing is selected" — `hasSelection`
@@ -3450,6 +3500,7 @@ function deselectBody() {
     selectedBody = null;
     targetBody   = null;
     neoLayer.select(null);
+    _markBody(null);
     cameraMode = 'free';
     _setModeUI();
     hudBody.textContent   = '—';
@@ -3465,6 +3516,8 @@ selChipX.addEventListener('click', () => deselectBody());
 function selectBody(p) {
     selectedBody = p;
     hasSelection = true;
+    // NEOs carry the layer's reticle; everything else carries bodyReticle.
+    _markBody(p && p.neoIndex == null ? p.mesh : null, p?.color);
     // A planet / moon / Sun selection clears any NEO selection (orbit line,
     // marker, label). NEO bodies arrive already selected on the layer.
     if (!p || p.neoIndex == null) neoLayer.select(null);
@@ -3552,6 +3605,7 @@ function _selectAt(e) {
         const obj  = hits[0].object;
         const body = obj === sunMesh ? null : obj.userData;
         selectBody(body);
+        if (obj === sunMesh) _markBody(sunMesh, 0xffd27a);
 
         // Double-click on Earth → open Earth simulation
         const now  = e.timeStamp;
@@ -3818,10 +3872,16 @@ function _setModeUI() {
  *  Jupiter (radius ≈ 1.4) gets a wider establishing shot. */
 function _lockDistance(body) {
     const r = Math.max(body?.radius ?? 0.05, 0.005);
-    // NEO bodies are rock meshes a few hundredths of a unit across; the 0.35
-    // floor (sized for planets) left them ~40 px. Their floor is the near plane
-    // with margin, so the lock frames the rock (js/neo-rocks.js drawnRockRadius).
-    if (body?.neoIndex != null) return Math.max(r * 7, 0.09);
+    // NEO bodies are rock meshes a few THOUSANDTHS of a unit across since the
+    // 2026-10 size pass (NEO_LAYER_PLAN.md §5); the 0.35 planet floor would
+    // leave them a pixel or two. Their floor is the near plane (0.01) with 3×
+    // margin and equals controls.minDistance below, so a 100 m rock locks at
+    // ~25 px and a 10 km one fills ~150 px (js/neo-rocks.js drawnRockRadius).
+    if (body?.neoIndex != null) return Math.max(r * 12, 0.03);
+    // MOONS were held off by the PLANET floor (0.35, plus controls.minDistance
+    // 0.5 in setCamLock), so Phobos (r 0.0056) locked as a ~20 px speck. A moon
+    // gets its own tight floor: it fills ~a fifth of the view on lock.
+    if (body?.isMoon) return Math.max(r * 10, 0.04);
     return Math.max(r * 8, 0.35);
 }
 
@@ -3833,7 +3893,7 @@ function setCamLock(body) {
     targetBody = body;
     // OrbitControls clamps the orbit radius: 0.5 is right for planets and far
     // too far for a rock mesh a few hundredths of a unit across.
-    controls.minDistance = body.neoIndex != null ? 0.03 : 0.5;
+    controls.minDistance = body.neoIndex != null ? 0.03 : body.isMoon ? Math.max(body.radius * 2.5, 0.012) : 0.5;
     const tp = body.mesh.position;
     // Preserve current view direction; just rescale to the new lock distance.
     const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
@@ -4275,7 +4335,7 @@ window.__neoLab = {
     // The camera and the canvas are exposed so the browser gate can turn a
     // drawn position into a PIXEL and click it — the pick contract is stated in
     // pixels, so a test that cannot measure pixels cannot check it.
-    camera, canvas: renderer.domElement, THREE,
+    camera, canvas: renderer.domElement, THREE, bodyReticle, scene, planets: PLANETS,
     get selectedBody() { return selectedBody; },
     get simJD() { return neoLayer._lastJd; },
     // Test support: what the two pick paths see at a canvas pixel, WITHOUT
@@ -4622,6 +4682,10 @@ function animate() {
     }
 
     controls.update();
+    if (_reticleMesh && bodyReticle.visible) {
+        camera.updateMatrixWorld();
+        seatReticle(bodyReticle, _reticleMesh.getWorldPosition(bodyReticle.position), _reticleRadius, camera, renderer.domElement.clientHeight || window.innerHeight);
+    }
     renderer.render(scene, camera);
     tickFPS();
 }

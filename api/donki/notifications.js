@@ -9,12 +9,17 @@
  * Returns the last 7 days of notifications, sorted newest-first.
  * FREE plan: last 5 notifications.
  * PRO plan:  full list.
+ *
+ * `body` is the message text (Summary section first, ≤400 chars) or null
+ * when upstream carries none; `body_source` / `body_coverage` / `item_keys`
+ * (and `note` on a total miss) say which — api/_lib/donki-notifications.js.
  */
-import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+import { jsonOk, jsonError, isoTag } from '../_lib/responses.js';
+import { fetchDonki, nasaApiKey } from '../_lib/donki-upstream.js';
+import { mapNotifications } from '../_lib/donki-notifications.js';
 
 export const config = { runtime: 'edge' };
 
-const DONKI_NOTIFY_BASE = 'https://api.nasa.gov/DONKI/notifications';
 const CACHE_TTL         = 900;
 // Long SWR (30 min, matching the prewarm-medium cadence) — same rationale
 // as cme.js: api.nasa.gov is slow cold; with SWR >= the prewarm interval
@@ -31,20 +36,18 @@ function isPro(request) {
 }
 
 export default async function handler(request) {
-    const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
+    const nasaKey = nasaApiKey();
     const pro     = isPro(request);
 
     const now   = new Date();
     const start = new Date(now.getTime() - DEFAULT_DAYS * 86_400_000);
     const fmt   = d => d.toISOString().slice(0, 10);
 
-    const donkiURL = `${DONKI_NOTIFY_BASE}?type=all&startDate=${fmt(start)}&endDate=${fmt(now)}&api_key=${nasaKey}`;
-
-    let raw;
+    // CCMC origin raced against the api.nasa.gov gateway — see donki-upstream.js.
+    let raw, upstream;
     try {
-        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        ({ data: raw, host: upstream } = await fetchDonki('notifications',
+            { type: 'all', startDate: fmt(start), endDate: fmt(now) }));
     } catch (e) {
         return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
     }
@@ -53,23 +56,18 @@ export default async function handler(request) {
         return jsonError('parse_error', 'Unexpected DONKI notifications format', { source: 'NASA DONKI' });
     }
 
-    const notes = raw
-        .filter(n => n?.messageIssueTime)
-        .map(n => ({
-            type:        n.messageType   ?? null,
-            issue_time:  isoTag(n.messageIssueTime),
-            id:          n.messageID     ?? null,
-            url:         n.messageURL    ?? null,
-            body:        (n.messageBody ?? '').slice(0, 400),   // trim verbose bodies
-        }))
-        .sort((a, b) => (b.issue_time ?? '').localeCompare(a.issue_time ?? ''));
+    // Body text resolves from a candidate list and self-reports where it came
+    // from — the new CCMC host served `messageBody: "## "` (see the module).
+    const { notes, report } = mapNotifications(raw, { isoTag });
 
     const limited = pro ? notes : notes.slice(0, FREE_LIMIT);
 
     return jsonOk({
         source:    'NASA DONKI notifications via Vercel Edge',
         key_mode:  nasaKey === 'DEMO_KEY' ? 'demo' : 'configured',
+        upstream,
         plan:      pro ? 'pro' : 'free',
+        ...report,
         data: {
             updated:       new Date().toISOString(),
             total_count:   notes.length,

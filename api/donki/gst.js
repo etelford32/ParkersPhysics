@@ -19,11 +19,11 @@
  *   Kp 8    → G4
  *   Kp ≥ 9  → G5
  */
-import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+import { jsonOk, jsonError, isoTag } from '../_lib/responses.js';
+import { fetchDonki, nasaApiKey } from '../_lib/donki-upstream.js';
 
 export const config = { runtime: 'edge' };
 
-const DONKI_GST_BASE = 'https://api.nasa.gov/DONKI/GST';
 const CACHE_TTL      = 900;   // 15 min
 const CACHE_SWR      = 120;
 const DEFAULT_DAYS   = 7;
@@ -40,7 +40,7 @@ function kpToGScale(kp) {
 }
 
 export default async function handler(request) {
-    const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
+    const nasaKey = nasaApiKey();
 
     const url    = new URL(request.url);
     const rawDay = parseInt(url.searchParams.get('days') ?? DEFAULT_DAYS, 10);
@@ -50,13 +50,11 @@ export default async function handler(request) {
     const start = new Date(now.getTime() - days * 86_400_000);
     const fmt   = d => d.toISOString().slice(0, 10);
 
-    const donkiURL = `${DONKI_GST_BASE}?startDate=${fmt(start)}&endDate=${fmt(now)}&api_key=${nasaKey}`;
-
-    let raw;
+    // CCMC origin raced against the api.nasa.gov gateway — see donki-upstream.js.
+    let raw, upstream;
     try {
-        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        ({ data: raw, host: upstream } = await fetchDonki('GST',
+            { startDate: fmt(start), endDate: fmt(now) }));
     } catch (e) {
         return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
     }
@@ -107,6 +105,7 @@ export default async function handler(request) {
     return jsonOk({
         source: 'NASA DONKI GST via Vercel Edge',
         key_mode:  nasaKey === 'DEMO_KEY' ? 'demo' : 'configured',
+        upstream,
         data: {
             updated:       new Date().toISOString(),
             event_count:   events.length,

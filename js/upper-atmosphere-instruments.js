@@ -58,6 +58,7 @@ import {
 } from './upper-atmosphere-column.js';
 import { pointPhysics } from './upper-atmosphere-physics.js';
 import { layerForAltitude, ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
+import { OPS_BANDS, OPS_EDGES_KM, hexCss as opsHex } from './upper-atmosphere-ops-bands.js';
 
 const RULER_ALTS = [100, 200, 400, 800, 1200, 2000];
 // The limb scale's candidate ticks (labels are thinned to a minimum spacing),
@@ -103,11 +104,15 @@ export class AtmosphereInstruments {
         this._probe = null;        // cached probe result
         this._lastProbeKey = '';
         // Screen bearing for the altitude ruler, measured from the disc
-        // centre in canvas coordinates (+x right, +y DOWN). 200° is
-        // left-and-slightly-up: the camera HUD owns the top-right of this
-        // canvas, the legend the bottom-left and the time strip the bottom,
-        // which leaves the left flank.
-        this._rulerBearingRad = 200 * Math.PI / 180;
+        // centre in canvas coordinates (+x right, +y DOWN). It is CHOSEN per
+        // frame from four candidates by how much live chrome the ruler's
+        // run would cross (the camera dock top-right, the explore column
+        // left, the toolbar bottom-left, the time dock bottom), with
+        // hysteresis so it does not flicker between equals. 20° (right and
+        // a little down) is first: it lands between the readout and the
+        // dock, where nothing else lives.
+        this._rulerBearingRad = 20 * Math.PI / 180;
+        this._rulerCands = [20, 160, 340, 200].map(d => d * Math.PI / 180);
         // Region the probe card must not cover: the camera HUD.
         this._avoid = { x: 0, y: 0, w: 0, h: 0 };
 
@@ -125,6 +130,11 @@ export class AtmosphereInstruments {
         this._ctx = c.getContext('2d');
 
         this._onMove = (e) => {
+            // Only the WebGL canvas counts (the overlay is pointer-inert, so
+            // it is the target under it): a pointer over the dock, the card
+            // or the column is not probing the render, and the probe card
+            // used to park itself across the band card from there.
+            if (e.target !== this._globe.canvas) { this._pointer = null; this._probe = null; return; }
             const r = c.getBoundingClientRect();
             this._pointer = { x: e.clientX - r.left, y: e.clientY - r.top };
         };
@@ -175,7 +185,45 @@ export class AtmosphereInstruments {
         const state = this._getState?.() ?? {};
         this._drawRuler(ctx);
         this._drawCompass(ctx, state);
-        if (this._probeOn && this._pointer) this._drawProbe(ctx, state);
+        // A hovered ring is answered by its chip, not the probe: the two
+        // drew on top of each other at the cursor.
+        const ringHover = this._globe.getOpsBandHover?.()?.part === 'edge';
+        if (this._probeOn && this._pointer && !ringHover) this._drawProbe(ctx, state);
+        this._drawBandHover(ctx);
+    }
+
+    /**
+     * The hovered ring, named at the cursor: band name, extent, and what a
+     * click will do. The pick is the globe's (kernel `pickOpsBand`); this
+     * only prints it. Drawn ABOVE the probe so the ring's name is never
+     * under the probe card.
+     */
+    _drawBandHover(ctx) {
+        const h = this._globe.getOpsBandHover?.();
+        if (!h || h.part !== 'edge' || !this._pointer) return;
+        const sel = this._globe.getSelectedOpsBand?.();
+        const b = h.band;
+        const col = opsHex(b.colorHex);
+        const title = `${b.name} · ${b.minKm}–${b.maxKm} km`;
+        const sub = sel?.id === b.id ? 'click to deselect' : 'click to expand this layer';
+        ctx.save();
+        ctx.font = '700 10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        const w = Math.max(ctx.measureText(title).width, ctx.measureText(sub).width) + 18;
+        const hgt = 34;
+        let x = this._pointer.x + 14, y = this._pointer.y - hgt - 10;
+        if (x + w > this._w - 6) x = this._pointer.x - w - 14;
+        if (y < 6) y = this._pointer.y + 18;
+        ctx.fillStyle = CSS.panelBg;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(x, y, w, hgt, 4); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = col;
+        ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+        ctx.fillText(title, x + 9, y + 6);
+        ctx.font = '500 9px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillStyle = CSS.dim;
+        ctx.fillText(sub, x + 9, y + 20);
+        ctx.restore();
     }
 
     // ── 1. altitude ruler ────────────────────────────────────────────────
@@ -195,11 +243,12 @@ export class AtmosphereInstruments {
         if (!geo.ticks?.length) return;
         const { centre, ticks, surfaceRadius } = geo;
 
-        const brg = this._rulerBearingRad;
+        const brg = this._rulerBearingRad = this._pickRulerBearing(geo);
         const ux = Math.cos(brg), uy = Math.sin(brg);
         const at = (r) => ({ x: centre.x + ux * r, y: centre.y + uy * r });
 
         ctx.save();
+        this._drawOpsBands(ctx, at, ux, uy);
         ctx.font = '600 10px ui-monospace, SFMono-Regular, Menlo, monospace';
         ctx.textBaseline = 'middle';
         ctx.textAlign = ux < -0.2 ? 'right' : 'left';
@@ -256,6 +305,88 @@ export class AtmosphereInstruments {
             ctx.globalAlpha = 0.95;
             ctx.fillStyle = col;
             ctx.fillText(label, lp.x + ux * 8, lp.y + uy * 8);
+        }
+        ctx.restore();
+    }
+
+    /**
+     * Which way the ruler hangs: the candidate bearing whose run (surface →
+     * outer tick, plus label room) crosses the least chrome. Ties keep the
+     * current bearing. A run entirely off-canvas scores as fully covered.
+     */
+    _pickRulerBearing(geo) {
+        const { centre, ticks, surfaceRadius } = geo;
+        const r0 = Number.isFinite(surfaceRadius) ? surfaceRadius : 0;
+        const r1 = (ticks[ticks.length - 1]?.screenRadius ?? r0) + 70;
+        const rects = this._avoidRects();
+        const score = (brg) => {
+            const ux = Math.cos(brg), uy = Math.sin(brg);
+            let cost = 0, n = 0;
+            for (let r = r0; r <= r1; r += 8) {
+                const x = centre.x + ux * r, y = centre.y + uy * r;
+                n++;
+                if (x < 0 || x > this._w || y < 0 || y > this._h) { cost++; continue; }
+                if (rects.some(q => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h)) cost++;
+            }
+            return n ? cost / n : 1;
+        };
+        let best = this._rulerBearingRad, bestCost = score(best);
+        for (const c of this._rulerCands) {
+            const k = score(c);
+            if (k < bestCost - 0.05) { best = c; bestCost = k; }
+        }
+        return best;
+    }
+
+    /**
+     * The OPERATIONAL BANDS along the ruler's spine (kernel table; the ring
+     * pass on the canvas draws the same edges on the limb): a coloured
+     * segment per band at its true radii, offset to the spine's far side so
+     * the numeric ticks keep their side, named along the spine when the
+     * segment is long enough to carry its label. The low bands are a few
+     * pixels at whole-globe framing — their colour still matches the ring.
+     */
+    _drawOpsBands(ctx, at, ux, uy) {
+        if (!this._globe.getOpsBandsVisible?.()) return;
+        const geo = this._globe.limbTicks?.(OPS_EDGES_KM);
+        if (!geo?.ticks?.length) return;
+        const rOf = new Map(geo.ticks.map(t => [t.altKm, t.screenRadius]));
+        // Perpendicular, away from the side the tick labels use.
+        const px = -uy, py = ux;
+        const off = 7;
+        const sel = this._globe.getSelectedOpsBand?.()?.id ?? null;
+        const hov = this._globe.getOpsBandHover?.();
+        ctx.save();
+        ctx.lineCap = 'butt';
+        for (const b of OPS_BANDS) {
+            const ra = rOf.get(b.minKm), rb = rOf.get(b.maxKm);
+            if (!Number.isFinite(ra) || !Number.isFinite(rb) || rb <= ra) continue;
+            const a = at(ra), c = at(rb);
+            const col = opsHex(b.colorHex);
+            const isSel = sel === b.id, isHov = hov?.part === 'edge' && hov.band.id === b.id;
+            ctx.strokeStyle = col;
+            ctx.globalAlpha = sel && !isSel ? 0.35 : 0.85;
+            ctx.lineWidth = isSel || isHov ? 6 : 3;
+            ctx.beginPath();
+            ctx.moveTo(a.x + px * off, a.y + py * off);
+            ctx.lineTo(c.x + px * off, c.y + py * off);
+            ctx.stroke();
+            const len = rb - ra;
+            ctx.font = `700 ${isSel ? 10 : 8.5}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+            const tw = ctx.measureText(b.short).width;
+            // The selected band is always named (a leader if its segment is short).
+            if (len < tw + 8 && !isSel) continue;
+            const mx = (a.x + c.x) / 2 + px * (off + 9), my = (a.y + c.y) / 2 + py * (off + 9);
+            ctx.save();
+            ctx.translate(mx, my);
+            // Text runs along the spine, never upside down.
+            let ang = Math.atan2(uy, ux);
+            if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+            ctx.rotate(ang);
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillStyle = col; ctx.globalAlpha = 0.95;
+            ctx.fillText(b.short, 0, 0);
+            ctx.restore();
         }
         ctx.restore();
     }
@@ -417,6 +548,10 @@ export class AtmosphereInstruments {
         const avoid = this._avoidRects();
         // Park below whichever chrome sits highest on the canvas.
         const hud = avoid[0] ?? { x: 0, y: 0, w: 0, h: 0 };
+        // The explore column's right edge (a tall rect on the left) and the
+        // published floor above the time dock.
+        const colRight = Math.max(0, ...avoid.filter(r => r.x < 40 && r.h > 150).map(r => r.x + r.w));
+        const floor = parseFloat(getComputedStyle(this._host).getPropertyValue('--ua-atmo-floor')) || 74;
         const cands = [
             [p.x + 18, p.y - H / 2],
             [p.x - 18 - W, p.y - H / 2],
@@ -424,13 +559,17 @@ export class AtmosphereInstruments {
             [p.x - 18 - W, p.y + 18],
             [p.x + 18, p.y - H - 18],
             [p.x - 18 - W, p.y - H - 18],
-            // Parking spots. The camera HUD's time-warp row spans nearly
-            // the full width of this canvas, so when the pointer is up
-            // there NO near-cursor placement is clean and the card would
-            // otherwise sit on top of live controls. Park it clear and let
-            // the leader line carry the association instead.
+            // Parking spots. The camera dock (with the band card open) can
+            // run most of the canvas height on the right, the explore
+            // column the left, the toolbar + dock the bottom — so the clear
+            // ground is the band between the column and the dock, top and
+            // bottom. Park it there and let the leader line carry the
+            // association instead.
             [16, hud.y + hud.h + 14],
             [this._w - W - 16, hud.y + hud.h + 14],
+            [colRight + 16, 16],
+            [hud.x - W - 16, 16],
+            [colRight + 16, this._h - H - floor - 16],
             [16, this._h - H - 16],
         ];
         let best = null, bestCost = Infinity;
@@ -623,8 +762,8 @@ export class AtmosphereInstruments {
      * works on a page that does not have them.
      */
     _avoidRects() {
-        const sel = ['#ua-camera-hud', '#ua-globe-legend', '#ua-atmo-controls',
-                     '#ua-time-scrubber-host', '#ua-explore-gauge'];
+        const sel = ['#ua-camera-hud', '#ua-render-dock', '#ua-globe-legend', '#ua-atmo-controls',
+                     '#ua-time-dock', '#ua-time-scrubber-host', '#ua-explore-gauge', '#ua-flight-deck', '#ua-layout-menu'];
         const hb = this._host.getBoundingClientRect();
         const out = [];
         for (const q of sel) {
@@ -652,7 +791,10 @@ export class AtmosphereInstruments {
         if (!c) return;
 
         const R = 27;
-        const cx = this._w - R - 22, cy = this._h - R - 26;
+        // Above the time dock, whose height the page publishes (measured,
+        // never a constant) as --ua-atmo-floor on the host.
+        const floor = parseFloat(getComputedStyle(this._host).getPropertyValue('--ua-atmo-floor')) || 74;
+        const cx = this._w - R - 22, cy = this._h - R - floor - 14;
 
         ctx.save();
         ctx.translate(cx, cy);

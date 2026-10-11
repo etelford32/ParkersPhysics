@@ -34,21 +34,165 @@ import * as THREE from 'three';
 // to avoid forcing a lighting pass — the page already has a busy
 // shader budget for the atmosphere shells.
 
+// LIT, PHYSICALLY BASED (2026-10-11, plan §9.19 phase 1). The scene's only
+// light was a faint ambient and every hull was an unlit flat colour, so a
+// spacecraft read the same from the Sun side and from the shadow side. The
+// upper-atmosphere globe now carries a sun-aligned DirectionalLight, an
+// earthshine HemisphereLight aimed from the planet below the target, and
+// hands these materials a SPACE ENVIRONMENT so metals have something to
+// reflect — a metal with no environment under one light is a black shape
+// with a highlight. `buildSpaceEnvironment` (black sky, a lit Earth below,
+// the Sun's disc) is the PROCEDURAL baseline every model wears in the orbit
+// view; in close-up the globe swaps in the REAL planet (phase 4: a cube
+// render of the skin from the followed object's position, through PMREM)
+// via the same `setModelEnvironment`. Roughness/metalness are generic spacecraft
+// finishes (aluminium skin, gold MLI, glossy cells, white radiators), not
+// measured BRDFs.
 const _M = {
-    bus:       new THREE.MeshBasicMaterial({ color: 0xeeeeee }),                   // white aluminum
-    busDark:   new THREE.MeshBasicMaterial({ color: 0x9aa6b8 }),                   // shaded panels
-    truss:     new THREE.MeshBasicMaterial({ color: 0xb8c0cc }),                   // structural
-    panel:     new THREE.MeshBasicMaterial({ color: 0x1a2a6c }),                   // solar cells
-    panelEdge: new THREE.MeshBasicMaterial({ color: 0xffd060 }),                   // gold edge trim
-    antenna:   new THREE.MeshBasicMaterial({ color: 0xffd060 }),                   // gold-MLI dish
-    nozzle:    new THREE.MeshBasicMaterial({ color: 0x4a4a52 }),                   // engine bell
-    radiator:  new THREE.MeshBasicMaterial({ color: 0xe8e8f0 }),                   // white thermal
+    bus:       new THREE.MeshStandardMaterial({ color: 0xdfe3e8, metalness: 0.85, roughness: 0.38 }),   // aluminium skin
+    busDark:   new THREE.MeshStandardMaterial({ color: 0x8a96a8, metalness: 0.60, roughness: 0.55 }),   // shaded panels
+    truss:     new THREE.MeshStandardMaterial({ color: 0xb8c0cc, metalness: 0.80, roughness: 0.45 }),   // structural
+    panel:     new THREE.MeshStandardMaterial({ color: 0x101c4e, metalness: 0.35, roughness: 0.20 }),   // solar cells (glossy)
+    panelEdge: new THREE.MeshStandardMaterial({ color: 0xffd060, metalness: 1.00, roughness: 0.32 }),   // gold edge trim
+    antenna:   new THREE.MeshStandardMaterial({ color: 0xffd060, metalness: 1.00, roughness: 0.35 }),   // gold-MLI dish
+    nozzle:    new THREE.MeshStandardMaterial({ color: 0x3a3a42, metalness: 0.90, roughness: 0.55 }),   // engine bell
+    radiator:  new THREE.MeshStandardMaterial({ color: 0xf0f0f4, metalness: 0.10, roughness: 0.70 }),   // white thermal
 };
+const _tinted = [];
+// LIT, and therefore TONE-MAPPED (plan §9.19 phase 5): the globe runs the
+// renderer's filmic curve only while a model is in close-up, and exempts
+// every material in the scene that does not carry this flag — the planet
+// skin, the airglow, the ops rings and the catalogue dots are data
+// visualisation, not light transport. A new model material must be lit
+// through here (or `markLit`) or it renders a stop darker than its
+// neighbours under the chase exposure.
+for (const m of Object.values(_M)) m.userData.lit = true;
+export function markLit(m) { m.userData.lit = true; return m; }
+export const isLitMaterial = (m) => !!m?.userData?.lit;
 
-/** Convenience: tint a fresh basic material. Used when the spec wants
+/** Convenience: tint a fresh lit material. Used when the spec wants
  *  the bus colour-coded (Starlink shells in blue, Iridium in purple…). */
 function _matTinted(hex) {
-    return new THREE.MeshBasicMaterial({ color: new THREE.Color(hex) });
+    const m = markLit(new THREE.MeshStandardMaterial({ color: new THREE.Color(hex), metalness: 0.45, roughness: 0.45 }));
+    if (_env) m.envMap = _env;
+    _tinted.push(m);
+    return m;
+}
+
+let _env = null;
+/** Every model material (shared + tinted) reflects this environment. */
+export function setModelEnvironment(tex, intensity = 1.0) {
+    _env = tex || null;
+    for (const m of [...Object.values(_M), ..._tinted]) { m.envMap = _env; m.envMapIntensity = intensity; m.needsUpdate = true; }
+}
+
+/**
+ * A procedural environment for spacecraft materials: an equirectangular
+ * canvas — black space above, the lit Earth's blue-white filling the lower
+ * hemisphere with a bright limb band at the horizon, a small Sun disc —
+ * run through PMREM. Symbolic (the real environment is the planet's own
+ * image), cheap (128×64), and enough to give a hull its reflections.
+ */
+export function buildSpaceEnvironment(renderer, { sunAzDeg = 30, sunElDeg = 25 } = {}) {
+    const W = 128, H = 64;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(W, H);
+    for (let j = 0; j < H; j++) {
+        const el = 90 - (j + 0.5) / H * 180;        // +90 top … −90 bottom
+        for (let i = 0; i < W; i++) {
+            const az = (i + 0.5) / W * 360 - 180;
+            let r = 2, g = 3, b = 8;                    // space
+            if (el < 0) {                                // the Earth below the horizon
+                const t = Math.min(1, -el / 90);
+                r = 70 + 40 * t; g = 110 + 40 * t; b = 170 + 30 * t;
+            }
+            if (el < 4 && el > -10) {                    // the limb's airglow band
+                const w = Math.exp(-((el + 1) * (el + 1)) / 8);
+                r += 120 * w; g += 150 * w; b += 170 * w;
+            }
+            const dAz = Math.abs(((az - sunAzDeg + 540) % 360) - 180), dEl = el - sunElDeg;
+            if (dAz * dAz + dEl * dEl < 9) { r = 255; g = 250; b = 235; }     // the Sun
+            const o = (j * W + i) * 4;
+            img.data[o] = Math.min(255, r); img.data[o + 1] = Math.min(255, g); img.data[o + 2] = Math.min(255, b); img.data[o + 3] = 255;
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+    const tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromEquirectangular(tex).texture;
+    pmrem.dispose(); tex.dispose();
+    return env;
+}
+
+/**
+ * A solar-array pivot: the array (and its trim) in a Group tagged
+ * `userData.solarArray = { axis: 'x' }` so the globe can turn it about the
+ * boom/truss axis toward the Sun (kernel `arrayAlpha`). `collectSolarArrays`
+ * finds them once per model.
+ */
+function _wing(x, y, z, children) {
+    const w = new THREE.Group();
+    w.position.set(x, y, z);
+    w.userData.solarArray = { axis: 'x' };
+    // An array is a flat specular surface: its local +Y normal can throw
+    // the Sun at the camera (plan §9.19 phase 3). Cells are not mirrors:
+    // a wide, weak flare.
+    w.userData.glint = { sigmaDeg: 2.5, gain: 0.6, normal: [0, 1, 0] };
+    for (const ch of children) w.add(ch);
+    return w;
+}
+export function collectSolarArrays(group) {
+    const out = [];
+    group.traverse((o) => { if (o.userData?.solarArray) out.push(o); });
+    return out;
+}
+/** Every surface that can flare: its object (the normal is in ITS local frame) and the glint spec. */
+export function collectGlintSurfaces(group) {
+    const out = [];
+    group.traverse((o) => { if (o.userData?.glint) out.push(o); });
+    return out;
+}
+/** Shadows (plan §9.19 phase 2): every mesh of a model casts and receives. */
+export function enableModelShadows(group, on = true) {
+    group.traverse((o) => { if (o.isMesh) { o.castShadow = on; o.receiveShadow = on; } });
+}
+
+let _glintTex = null;
+/**
+ * The flare sprite: a star glare (a hot core, a soft halo and four
+ * diffraction spikes) drawn once to a canvas, additive, scaled by the
+ * glint value at render time. A sprite, not a post-process bloom: this
+ * page renders directly and a full-frame pass is a GPU-only upgrade (the
+ * plan's phase 3 note); the mip-chain bloom of sun-post.js is the one to
+ * reuse when it comes, never a thresholded UnrealBloom.
+ */
+export function makeGlintSprite() {
+    if (!_glintTex) {
+        const N = 128, c = document.createElement('canvas'); c.width = c.height = N;
+        const ctx = c.getContext('2d');
+        const g = ctx.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+        g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.08, 'rgba(255,250,235,0.95)');
+        g.addColorStop(0.25, 'rgba(255,235,200,0.35)'); g.addColorStop(0.6, 'rgba(255,220,180,0.08)'); g.addColorStop(1, 'rgba(255,220,180,0)');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, N, N);
+        ctx.globalCompositeOperation = 'lighter';
+        for (const a of [0, Math.PI / 2]) {
+            const sg = ctx.createLinearGradient(N / 2 - Math.cos(a) * N / 2, N / 2 - Math.sin(a) * N / 2, N / 2 + Math.cos(a) * N / 2, N / 2 + Math.sin(a) * N / 2);
+            sg.addColorStop(0, 'rgba(255,245,225,0)'); sg.addColorStop(0.5, 'rgba(255,245,225,0.7)'); sg.addColorStop(1, 'rgba(255,245,225,0)');
+            ctx.save(); ctx.translate(N / 2, N / 2); ctx.rotate(a); ctx.fillStyle = sg; ctx.translate(-N / 2, -N / 2);
+            ctx.fillRect(0, N / 2 - 1.5, N, 3); ctx.restore();
+        }
+        _glintTex = new THREE.CanvasTexture(c);
+        _glintTex.colorSpace = THREE.SRGBColorSpace;
+    }
+    const sp = new THREE.Sprite(markLit(new THREE.SpriteMaterial({ map: _glintTex, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending })));
+    sp.scale.setScalar(0.0001);
+    sp.visible = false;
+    sp.raycast = () => {};
+    sp.userData = { kind: 'glint', untargetable: true };
+    return sp;
 }
 
 // ── ISS ─────────────────────────────────────────────────────────────────────
@@ -105,15 +249,13 @@ export function buildISSModel() {
     ];
     for (const p of positions) {
         const arr = new THREE.Mesh(arrayGeom, _M.panel);
-        arr.position.set(p.x, p.y, p.z);
-        g.add(arr);
         // Thin gold trim along the long edge — sells the silhouette.
         const trim = new THREE.Mesh(
             new THREE.BoxGeometry(0.013, 0.0007, 0.0008),
             _M.panelEdge,
         );
-        trim.position.set(p.x, p.y + 0.0008 * Math.sign(p.y), p.z);
-        g.add(trim);
+        trim.position.set(0, 0.0008 * Math.sign(p.y), 0);
+        g.add(_wing(p.x, p.y, p.z, [arr, trim]));
     }
 
     // Two thermal-control radiators perpendicular to solar arrays —
@@ -179,8 +321,7 @@ export function buildHubbleModel() {
             new THREE.BoxGeometry(0.020, 0.0005, 0.008),
             _M.panel,
         );
-        wing.position.set(sgn * 0.012, 0, 0);
-        g.add(wing);
+        g.add(_wing(sgn * 0.012, 0, 0, [wing]));
         // Boom connecting wing to bus.
         const boom = new THREE.Mesh(
             new THREE.CylinderGeometry(0.0008, 0.0008, 0.005, 6),
@@ -236,8 +377,7 @@ export function buildStarlinkModel(tintHex = '#60a0ff') {
         new THREE.BoxGeometry(0.030, 0.0006, 0.008),
         _M.panel,
     );
-    panel.position.set(0.020, 0, 0);
-    g.add(panel);
+    g.add(_wing(0.020, 0, 0, [panel]));
     // Boom mounting the panel.
     const boom = new THREE.Mesh(
         new THREE.CylinderGeometry(0.0007, 0.0007, 0.006, 6),
@@ -280,6 +420,9 @@ export function buildIridiumModel(tintHex = '#a080ff') {
         );
         pn.position.set(Math.cos(ang) * 0.009, Math.sin(ang) * 0.009, 0);
         pn.rotation.z = ang;
+        // The MMA is a polished aluminium plate: narrow, bright flares
+        // (the real ones reached −8 mag). Its outward normal is local +Y.
+        pn.userData.glint = { sigmaDeg: 0.7, gain: 1.6, normal: [0, 1, 0] };
         g.add(pn);
     }
 
@@ -288,8 +431,7 @@ export function buildIridiumModel(tintHex = '#a080ff') {
         new THREE.BoxGeometry(0.020, 0.0006, 0.007),
         _M.panel,
     );
-    panel.position.set(0.018, 0, 0);
-    g.add(panel);
+    g.add(_wing(0.018, 0, 0, [panel]));
 
     return g;
 }
@@ -317,8 +459,7 @@ export function buildGenericSatModel(tintHex = '#cccccc') {
             new THREE.BoxGeometry(0.018, 0.0005, 0.007),
             _M.panel,
         );
-        wing.position.set(sgn * 0.013, 0, 0);
-        g.add(wing);
+        g.add(_wing(sgn * 0.013, 0, 0, [wing]));
     }
 
     // Small high-gain antenna dish nadir (+Y down? we use −Y for nadir

@@ -94,6 +94,21 @@ check('seed: size cap respected',
     check('train select: then the oldest anchor',
         capped2.length === 5 && !capped2.some((c) => c.id === 'cme-23h'));
 
+    // Quiet-corridor scope: same in-flight rule, every direction, no anchor.
+    const quiet = selectTrainCmes([passed, farFlank, flankPartner, mk(-2)],
+        { nowMs: NOW, scope: 'all' });
+    check('scope all: off-axis CMEs in flight are kept without an anchor',
+        quiet.map((c) => c.id).join(',') === 'cme-10h,cme-5h', quiet.map((c) => c.id).join(','));
+    check('scope all: passed + future-dated rows still dropped',
+        !quiet.some((c) => c.id === 'cme-140h' || c.id === 'cme--2h'));
+    check('scope default stays Earth-relevant (no widening)',
+        selectTrainCmes([farFlank, flankPartner], { nowMs: NOW }).length === 0);
+    const qcap = selectTrainCmes(crowd.map((c) => ({ ...c, earthDirected: false, lonDeg: 90 })),
+        { nowMs: NOW, maxRopes: 3, scope: 'all' });
+    check('scope all: over the cap the OLDEST drops (newest stay in view)',
+        qcap.map((c) => c.id).join(',') === 'cme-7h,cme-3h,cme-1h',
+        qcap.map((c) => c.id).join(','));
+
     // Seeding: epoch = earliest launch = rope 0, offsets forward, §16 ON.
     const train = donkiToTrainPreset(sel, { ambientWKms: 430 });
     check('train seed: epoch is the EARLIEST launch (rope 0 = the reference)',

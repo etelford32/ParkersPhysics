@@ -81,6 +81,10 @@ import {
 // the test hook's stepped frames drive them exactly.
 import { frameClock } from './upper-atmosphere-frame-clock.js';
 import {
+    CHASE, chasePose, chaseFromEye, zoomDistance, scaleDistance, orbitBy, easeK, angleTowards,
+    arcSpec, arcAt,
+} from './upper-atmosphere-sat-view.js';
+import {
     RIG, DRAG_TOOLS, clampFov, clampPivot, liftAboveSurface, panPivot, swivelTarget,
     orbitAround, dollyToward,
 } from './upper-atmosphere-camera-rig.js';
@@ -348,6 +352,8 @@ export class CameraController {
     dolly(factor) {
         if (!(factor > 0)) return;
         this.cancelPath('dolly');
+        // A chase zooms its range; the ± buttons and the wheel agree.
+        if (this._follow?.chase) { this._follow.chase.distT = scaleDistance(this._follow.chase.distT, factor); return; }
         if (this._mode === 'orbit') {
             const o = this._orbit;
             const p = dollyToward({
@@ -567,7 +573,7 @@ export class CameraController {
      * @param {THREE.Vector3} [lookAtPos]
      * @param {number}        [durationSec=1.4]
      */
-    flyTo(targetPos, lookAtPos = null, durationSec = 1.4, { up = null, fovDeg = null, endOrbit = null } = {}) {
+    flyTo(targetPos, lookAtPos = null, durationSec = 1.4, { up = null, fovDeg = null, endOrbit = null, arc = false } = {}) {
         // A flyTo (Reset, Top, click-to-fly) supersedes a transition, and
         // cannot run under explore: at its end the explore state would be
         // stale and the next explore step would snap the camera back into
@@ -600,8 +606,25 @@ export class CameraController {
             // Orbit frame to enter on landing (a limb view, or back to the
             // planet); null keeps the old behaviour per mode.
             endOrbit:  endOrbit ? { up: endOrbit.up.clone(), target: endOrbit.target.clone() } : null,
+            // THE ARC (kernel arcSpec/arcAt): a flight between two points on
+            // the shell goes up and over, never through the planet; the
+            // look point sweeps with it and up is the local radial.
+            arc: arc && lookAtPos ? arcSpec(
+                [start.pos.x, start.pos.y, start.pos.z], [targetPos.x, targetPos.y, targetPos.z],
+                this._lookPointGuess(start.pos), [lookAtPos.x, lookAtPos.y, lookAtPos.z]) : null,
         };
     }
+    /** Where the camera is looking now, at the planet's shell distance along its forward ray (the arc's l0). */
+    _lookPointGuess(pos) {
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        // The point on the forward ray nearest the planet's centre, or 1 R⊕
+        // ahead when the ray points away.
+        const t = Math.max(0.3, -pos.dot(f));
+        const l = pos.clone().addScaledVector(f, t);
+        return [l.x, l.y, l.z];
+    }
+    /** The arc of the flight in progress (tests), or null. */
+    getFlightArc() { return this._anim?.arc ?? null; }
 
     /**
      * Engage follow-mode on a moving target. The supplied callback is
@@ -626,7 +649,11 @@ export class CameraController {
      * @param {number} [opts.smoothing]      time-constant in seconds
      *   for the position spring. 0 = snap; 0.3 = noticeably smooth.
      */
-    followObject(getPositionFn, { offset = null, smoothing = 0.15 } = {}) {
+    followObject(getPositionFn, {
+        offset = null, smoothing = 0.15,
+        chase = false, getVel = null, az = CHASE.azDefault, el = CHASE.elDefault, dist = CHASE.defaultR,
+        seedFromEye = false,
+    } = {}) {
         if (typeof getPositionFn !== 'function') return;
         // Switch to fly mode (without breaking the follow lock).
         if (this._mode !== 'fly') this.setMode('fly', { fromFollow: true });
@@ -634,10 +661,56 @@ export class CameraController {
             getPos: getPositionFn,
             offset: offset ? offset.clone() : null,   // null → use radial-out default
             smoothing,
+            getVel: typeof getVel === 'function' ? getVel : null,
+            // THE CHASE (js/upper-atmosphere-sat-view.js): the eye stands at
+            // pos + dist·dir(az, el) in the target's LVLH frame EXACTLY each
+            // frame; az/el/dist ease toward the user's targets (azT…). With
+            // `seedFromEye` the first step reads az/el/dist off wherever the
+            // camera already is, so a fly-in hands over with no snap.
+            chase: chase ? {
+                az, el, dist, azT: az, elT: el, distT: dist,
+                seedFromEye: !!seedFromEye,
+                vel: null, lastPos: null, lastT: -Infinity,
+            } : null,
         };
     }
 
-    stopFollowing() { this._follow = null; }
+    stopFollowing() {
+        if (this._follow?.chase) {
+            // Back to the world basis; the fly camera picks up the view as is.
+            this.setUpVector(new THREE.Vector3(0, 1, 0), { keepView: false });
+            this.syncOrientationFromCamera();
+        }
+        this._follow = null;
+    }
+    /** True while the follow is a chase (orbit / zoom about the target). */
+    isChasing() { return !!this._follow?.chase; }
+    /** Zoom the chase by wheel notches (positive = closer). */
+    zoomFollow(notches) {
+        const c = this._follow?.chase;
+        if (!c || !Number.isFinite(notches)) return;
+        c.distT = zoomDistance(c.distT, notches);
+    }
+    /** Orbit the chase camera about its target by a drag of (dx, dy) px. */
+    orbitFollowBy(dx, dy) {
+        const c = this._follow?.chase;
+        if (!c) return;
+        const o = orbitBy(c.azT, c.elT, dx, dy);
+        c.azT = o.az; c.elT = o.el;
+    }
+    /** Ease the chase back to its default framing (behind, above, default range). */
+    reframeFollow() {
+        const c = this._follow?.chase;
+        if (!c) return;
+        c.azT = CHASE.azDefault; c.elT = CHASE.elDefault; c.distT = CHASE.defaultR;
+    }
+    /** The chase's live numbers for the HUD, or null. */
+    getFollowState() {
+        const c = this._follow?.chase;
+        if (!c) return null;
+        const v = c.vel;
+        return { az: c.az, el: c.el, dist: c.dist, distT: c.distT, speedScene: v ? Math.hypot(v[0], v[1], v[2]) : 0 };
+    }
     /** True while a flyTo tween (Reset, Top, click-to-fly) is in progress. */
     isFlying()      { return !!this._anim; }
     isFollowing()   { return !!this._follow; }
@@ -857,6 +930,15 @@ export class CameraController {
             if (this._mode === 'fly' || this._mode === 'explore') this.dom.style.cursor = 'crosshair';
         };
         const onWheel = () => { if (this._path) this.cancelPath('wheel'); };
+        // The chase's wheel: a zoom about the TARGET, not a page scroll. Its
+        // own non-passive listener so it can preventDefault; a trackpad's
+        // small deltas are fractions of a notch.
+        const onWheelChase = (e) => {
+            if (!this._follow?.chase) return;
+            e.preventDefault();
+            const mag = e.deltaMode === 1 ? 1 : Math.min(1, Math.max(0.15, Math.abs(e.deltaY) / 100));
+            this.zoomFollow(e.deltaY > 0 ? -mag : mag);
+        };
         const onMouseMove = (e) => {
             if (!this._dragging) return;
             if (this._mode === 'explore') {
@@ -871,6 +953,8 @@ export class CameraController {
             const dy = e.clientY - this._lastMouse.y;
             this._lastMouse.x = e.clientX;
             this._lastMouse.y = e.clientY;
+            // A chase's drag orbits the camera about its target.
+            if (this._follow?.chase) { this.orbitFollowBy(dx, dy); return; }
             this._yaw   -= dx * FLY_LOOK_SENS;
             this._pitch -= dy * FLY_LOOK_SENS;
             // Clamp pitch a hair below the poles to avoid gimbal flip.
@@ -922,6 +1006,7 @@ export class CameraController {
         window.addEventListener('blur',    onBlur);
         this.dom.addEventListener('mousedown', onMouseDown);
         this.dom.addEventListener('wheel', onWheel, { passive: true });
+        this.dom.addEventListener('wheel', onWheelChase, { passive: false });
         this.dom.addEventListener('pointerdown', onPointerDownCapture, { capture: true });
         this.dom.addEventListener('pointermove', onPointerMoveSwivel);
         this.dom.addEventListener('pointerup', onPointerUpSwivel);
@@ -935,6 +1020,7 @@ export class CameraController {
             window.removeEventListener('keyup',   onKU);
             window.removeEventListener('blur',    onBlur);
             this.dom.removeEventListener('wheel', onWheel);
+            this.dom.removeEventListener('wheel', onWheelChase);
             this.dom.removeEventListener('pointerdown', onPointerDownCapture, { capture: true });
             this.dom.removeEventListener('pointermove', onPointerMoveSwivel);
             this.dom.removeEventListener('pointerup', onPointerUpSwivel);
@@ -1017,6 +1103,7 @@ export class CameraController {
         let tgt;
         try { tgt = f.getPos(); } catch (_) { tgt = null; }
         if (!tgt || !Number.isFinite(tgt.x)) { this._follow = null; return; }
+        if (f.chase) { this._stepChase(f, tgt, dt); return; }
 
         // Default offset: 0.18 R⊕ radially outward from the target so
         // the camera looks at the target with Earth's limb behind it.
@@ -1053,6 +1140,59 @@ export class CameraController {
         this.syncOrientationFromCamera();
     }
 
+    /**
+     * The chase step. The eye is placed EXACTLY at the kernel's pose for the
+     * target's position THIS frame (an eased position lags a 7.7 km/s target
+     * out of the frame at close range); the user's az/el/dist ease toward
+     * their targets. Velocity comes from the target (`getVel`) or, failing
+     * that, from a finite difference on the frame clock, and the last good
+     * one is kept across a paused clock.
+     */
+    _stepChase(f, tgt, dt) {
+        const c = f.chase;
+        const pos = [tgt.x, tgt.y, tgt.z];
+        let vel = null;
+        try {
+            const v = f.getVel?.();
+            if (v && Number.isFinite(v.x) && (v.x || v.y || v.z)) vel = [v.x, v.y, v.z];
+        } catch (_) { vel = null; }
+        const now = frameClock.now() / 1000;
+        if (!vel && c.lastPos && now > c.lastT) {
+            const d = [pos[0] - c.lastPos[0], pos[1] - c.lastPos[1], pos[2] - c.lastPos[2]];
+            const n = Math.hypot(d[0], d[1], d[2]);
+            if (n > 1e-12) { const s = 1 / (now - c.lastT); vel = [d[0] * s, d[1] * s, d[2] * s]; }
+        }
+        if (!vel) vel = c.vel;
+        c.lastPos = pos; c.lastT = now;
+        if (vel) c.vel = vel;
+        if (c.seedFromEye) {
+            const e = this.camera.position;
+            const sd = chaseFromEye([e.x, e.y, e.z], pos, vel);
+            c.az = sd.az; c.el = sd.el; c.dist = sd.dist;
+            c.seedFromEye = false;
+        }
+        // Keys: W/S close in / back off, A/D orbit round, Q/E lower / raise.
+        const k = this._keys;
+        if (k.has('w')) c.distT = scaleDistance(c.distT, Math.exp(-CHASE.keyZoomRate * dt));
+        if (k.has('s')) c.distT = scaleDistance(c.distT, Math.exp(CHASE.keyZoomRate * dt));
+        if (k.has('a') || k.has('d') || k.has('q') || k.has('e')) {
+            const o = orbitBy(c.azT, c.elT,
+                ((k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0)) * CHASE.keyOrbitRate * dt / CHASE.dragSens,
+                ((k.has('e') ? 1 : 0) - (k.has('q') ? 1 : 0)) * CHASE.keyOrbitRate * dt / CHASE.dragSens);
+            c.azT = o.az; c.elT = o.el;
+        }
+        const ko = easeK(dt, CHASE.tauOrbit), kz = easeK(dt, CHASE.tauZoom);
+        c.az = angleTowards(c.az, c.azT, ko);
+        c.el += (c.elT - c.el) * ko;
+        c.dist = Math.exp(Math.log(c.dist) + (Math.log(c.distT) - Math.log(c.dist)) * kz);
+        const p = chasePose({ pos, vel, az: c.az, el: c.el, dist: c.dist });
+        this.camera.position.set(p.eye[0], p.eye[1], p.eye[2]);
+        // A wide chase from below the orbit plane can reach under the ground.
+        if (this.camera.position.length() < 1.002) this.camera.position.setLength(1.002);
+        this.camera.up.set(p.up[0], p.up[1], p.up[2]);
+        this.camera.lookAt(tgt);
+    }
+
     _stepAnim() {
         const a = this._anim;
         const now = frameClock.now() / 1000;
@@ -1061,8 +1201,16 @@ export class CameraController {
         // Ease in/out (smoothstep).
         const k = t * t * (3 - 2 * t);
 
-        this.camera.position.lerpVectors(a.startPos, a.endPos, k);
-        this.camera.quaternion.slerpQuaternions(a.startQuat, a.endQuat, k);
+        if (a.arc) {
+            const q = arcAt(a.arc, k);
+            this.camera.position.set(q.eye[0], q.eye[1], q.eye[2]);
+            this.camera.up.copy(this.camera.position).normalize();
+            this.camera.lookAt(q.look[0], q.look[1], q.look[2]);
+            if (t >= 1) this.camera.quaternion.copy(a.endQuat);   // the exact end pose
+        } else {
+            this.camera.position.lerpVectors(a.startPos, a.endPos, k);
+            this.camera.quaternion.slerpQuaternions(a.startQuat, a.endQuat, k);
+        }
         if (a.fov1 !== a.fov0) {
             this.camera.fov = a.fov0 + (a.fov1 - a.fov0) * k;
             this.camera.updateProjectionMatrix();

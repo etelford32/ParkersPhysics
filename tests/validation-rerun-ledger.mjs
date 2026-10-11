@@ -2,8 +2,9 @@
 // validation cron's LEDGER block (api/cron/validation-rerun.js) against:
 //   · a fake PostgREST that enforces what production does — the 1000-row
 //     page cap and the validation_runs kind CHECK constraint;
-//   · api.nasa.gov answering 200 + an HTML page (the 2026-09-30 outage);
-//   · CCMC's DONKI host serving the REAL Sep 2026 train (kinematics frozen
+//   · BOTH old DONKI hosts (api.nasa.gov, kauai.ccmc) answering 200 + CCMC's
+//     HTML announcements page (the 2026-09-30 move);
+//   · the MOVED CCMC host (ccmc.gsfc.nasa.gov/DONKI-API) serving the REAL Sep 2026 train (kinematics frozen
 //     in the production locks, tests/fixtures/flux-rope-ledger-2026-09.json);
 //   · the REAL L1 minute data for truth.
 // The committed WASM runs the shared provider for real. No network:
@@ -111,13 +112,13 @@ for (const l of fx.locks) {
 const calls = { nasaHtml: 0, ccmc: 0, rtsw: 0 };
 globalThis.fetch = async (url, init = {}) => {
     const u = new URL(url);
-    if (u.host === 'api.nasa.gov') {
+    if (u.host === 'api.nasa.gov' || u.host === 'kauai.ccmc.gsfc.nasa.gov') {
         calls.nasaHtml++;
         return { ok: true, status: 200, headers: { get: () => 'text/html' },
             text: async () => '<!DOCTYPE html><html><head><title>Service Update</title></head></html>',
             json: async () => { throw new SyntaxError(`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`); } };
     }
-    if (u.host === 'kauai.ccmc.gsfc.nasa.gov') {
+    if (u.host === 'ccmc.gsfc.nasa.gov' && u.pathname.startsWith('/DONKI-API/get/')) {
         calls.ccmc++;
         const path = u.pathname.split('/').pop();
         if (path === 'CMEAnalysis') {
@@ -178,7 +179,7 @@ Date.now = realNow;
 
 // ── Assertions ───────────────────────────────────────────────────────────────
 const fr = out?.fluxRope ?? {};
-check('DONKI: gateway HTML did not take the ledger down (fell back to CCMC)',
+check('DONKI: old hosts\' HTML did not take the ledger down (moved CCMC host answered)',
     calls.nasaHtml >= 1 && calls.ccmc >= 1 && out?.donkiSources?.CMEAnalysis === 'ccmc'
     && !String(out?.cmeProgram?.reason ?? '').includes('Unexpected token'),
     JSON.stringify(out?.donkiSources));

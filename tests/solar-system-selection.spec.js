@@ -455,6 +455,9 @@ test.describe('solar-system.html — DESKTOP layout 1280×720', () => {
 // patch of sky, which is exactly the overlapping pair that was reported).
 
 async function pinShowerDate(page) {
+    // Radiants and object labels are DEFAULT-OFF (owner request, 2026-10-11):
+    // this gate is about how the labels behave once a visitor switches them on.
+    await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: true, labels: true }));
     await page.evaluate(() => {
         const el = document.getElementById('tc-date-picker');
         el.value = '2026-10-21T12:00';

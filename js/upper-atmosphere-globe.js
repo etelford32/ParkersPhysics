@@ -47,8 +47,20 @@ import { annotate as annotateDebris, summariseByFamily, DEBRIS_FAMILIES }
     from './debris-catalog.js';
 import { CONSTELLATIONS, spawnConstellationPositions }
     from './constellation-catalog.js';
-import { buildSatelliteModel, buildSatelliteModelLow }
-    from './satellite-models.js';
+import {
+    buildSatelliteModel, buildSatelliteModelLow, buildRocketBodyModel, buildDebrisFragmentModel,
+    collectSolarArrays, collectGlintSurfaces, enableModelShadows, makeGlintSprite,
+    setModelEnvironment, buildSpaceEnvironment, isLitMaterial,
+} from './satellite-models.js';
+import {
+    attitudeBasis, toBody, arrayAlpha, illumination, betaAngle, subSatellite,
+    groundTrackSamples, nextShadowEvent, glint,
+} from './upper-atmosphere-sat-attitude.js';
+import {
+    CHASE, chasePose, modelScale, nearPlaneFor, flyInDuration, altitudeNeighbour,
+    modelFamily, TRUE_SPAN_M, ARTISTIC_SPAN_R, safeCentre, arcSpec, MODEL_REF_R,
+    ENV, envRefreshDue, EXPOSURE, chaseExposure, easeK,
+} from './upper-atmosphere-sat-view.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
     from './upper-atmosphere-layers.js';
@@ -109,6 +121,10 @@ import { FlightLayer } from './upper-atmosphere-flight-layer.js';
 // camera-local gas cloud is re-sampled from the engine at its altitude.
 import { AtmosphereTransit } from './upper-atmosphere-transit.js';
 import { ExploreLayer } from './upper-atmosphere-explore.js';
+// The operational altitude bands (entry interface → top of LEO): the
+// PURE table + the analytic limb-ring pass that draws it as a ruler.
+import { OpsBandsLayer } from './upper-atmosphere-ops-bands-layer.js';
+import { bandForAltitude as opsBandForAltitude, rayClosestApproach as opsRayClosestApproach, pickOpsBand, OPS_BANDS } from './upper-atmosphere-ops-bands.js';
 import { frameClock } from './upper-atmosphere-frame-clock.js';
 import {
     divePath, climbPath, EXPLORE, describeState, orbitalSpeedKmS, compass8, pointsOfInterest,
@@ -154,6 +170,16 @@ const R_EARTH_KM = 6371;
 // than this a marker holds that angular size (~0.7°), so a transit or
 // chase camera sees a dot, not a moon.
 const PROBE_MARKER_REF_RUNIT = 2.0;
+const SUN_LIGHT_INTENSITY = 2.3;      // the key light at full Sun (scaled by the followed object's illumination)
+// The reflection environment's render layer (plan §9.19 phase 4): the cube
+// camera at the followed object sees ONLY what carries this layer — the
+// planet skin, its limb rim and the stars. The avatar itself must not be on
+// it (a camera inside a model reflects the model's inside), nor the volume
+// march (six more faces of it per refresh), nor the symbolic layers.
+const ENV_LAYER = 7;
+const _attM = new THREE.Matrix4(), _attX = new THREE.Vector3(), _attY = new THREE.Vector3(), _attZ = new THREE.Vector3();
+const _trackScratch = new THREE.Vector3();
+const _glQ = new THREE.Quaternion(), _glP = new THREE.Vector3(), _glN = new THREE.Vector3(), _glV = new THREE.Vector3();
 
 // The planet's icosphere detail. three's `detail` is LINEAR: 5 was 720
 // faces with ~10.6° edges whose chords sag 27 km below the sphere — a
@@ -648,7 +674,14 @@ export class AtmosphereGlobe {
         // hardcoded mean elements; the fetch resolves a few hundred ms
         // later and patches the probe in place. Failures fall back
         // silently to the hardcoded values.
-        this._fetchLiveTLEs().catch(err => {
+        this._fetchLiveTLEs().then((n) => {
+            // One retry once boot has settled: a probe that missed its
+            // upgrade under boot load stays on mean elements for the whole
+            // session otherwise (the refresh pill says "live" for the rest).
+            if (n < Object.values(this._satProbes || {}).filter(p => p.spec?.orbital?.noradId).length) {
+                setTimeout(() => this._fetchLiveTLEs().catch(() => {}), 8000);
+            }
+        }).catch(err => {
             console.debug('[upper-atmosphere] live TLE upgrade skipped:', err?.message || err);
         });
         // Background debris sample — 50 LEO debris pieces in the same
@@ -684,6 +717,9 @@ export class AtmosphereGlobe {
         this._explore = new ExploreLayer(this._scene, {
             getPoiInputs: () => this._poiInputs(),
         });
+        // The operational bands on the limb (js/upper-atmosphere-ops-bands-layer.js):
+        // ON by default — the ruler an operator reads the render against.
+        this._opsBands = new OpsBandsLayer(this._scene);
         this._initResize();
         this._initTooltip();
         this._initDiveOnDoubleClick();
@@ -1584,6 +1620,13 @@ export class AtmosphereGlobe {
         const { clientWidth: w, clientHeight: h } = this.canvas;
         const aspect = Math.max(w / Math.max(h, 1), 1);
         this._camera = new THREE.PerspectiveCamera(40, aspect, 0.01, 1000);
+        // NOT the Reset home (camera.js resetView: y = 0.65 d). Opening at
+        // the home pose was tried on 2026-10-08 so the 2000 km band would fit
+        // the taller stage, and it fails tests/upper-atmosphere-camera-feel:
+        // the dive kernel's landing blend swings the view 6.3° in one frame
+        // from a camera that high (2.49° from here — the gate's 2.5° bound
+        // was calibrated on this pose; measured in node on `divePath`). The
+        // band fits after a Reset; the dive from home is the kernel's to fix.
         this._camera.position.set(0, 0.6, this.opts.cameraDistance);
 
         // Sun direction — derived from the actual sub-solar point at
@@ -1615,10 +1658,414 @@ export class AtmosphereGlobe {
         // gray fallback until the CDN responds.
         this._skin.loadTextures().catch(() => {});
 
-        // EarthSkin shader handles its own lighting (sun_dir uniform) so
-        // we don't add a DirectionalLight. Still add a faint ambient so
-        // the tori look right on the dark side.
-        this._scene.add(new THREE.AmbientLight(0x334466, 0.3));
+        // EarthSkin shader handles its own lighting (sun_dir uniform). The
+        // lit things in this scene are the spacecraft models (plan §9.19
+        // phase 1): a sun-aligned key light whose intensity follows the
+        // FOLLOWED object's illumination (umbra → off), an earthshine
+        // hemisphere aimed from the planet below it, a faint ambient so a
+        // hull in shadow is a silhouette rather than nothing, and a
+        // procedural space environment for the metals' reflections.
+        this._scene.add(new THREE.AmbientLight(0x1c2434, 0.35));
+        this._sunLight = new THREE.DirectionalLight(0xfff3e0, SUN_LIGHT_INTENSITY);
+        this._sunLight.position.set(20, 0, 0);
+        this._sunLight.target.position.set(0, 0, 0);
+        this._scene.add(this._sunLight, this._sunLight.target);
+        // Phase 2: a shadow map SCOPED TO THE FOLLOWED HULL. The orthographic
+        // shadow camera is re-fitted every frame to the avatar's drawn
+        // extent and placed just sunward of it (a directional light's
+        // direction is position → target, so moving both keeps the Sun
+        // where it is), so the arrays shade the bus and the truss shades
+        // the modules. Only the models cast or receive (the skin and the
+        // volume are their own shaders); nothing casts when nothing is
+        // followed, and the pass is skipped then.
+        this._renderer.shadowMap.enabled = true;
+        this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this._sunLight.castShadow = false;
+        this._sunLight.shadow.mapSize.set(1024, 1024);
+        this._sunLight.shadow.bias = -0.00002;
+        this._sunLight.shadow.normalBias = 0.0003;
+        this._sunLight.shadow.camera.near = 0.0005;
+        this._sunLight.shadow.camera.far = 0.2;
+        this._earthShine = new THREE.HemisphereLight(0x05070f, 0x7f9cc4, 0.5);
+        this._earthShine.position.set(0, 1, 0);
+        this._scene.add(this._earthShine);
+        try { this._envProcedural = buildSpaceEnvironment(this._renderer); setModelEnvironment(this._envProcedural, ENV.intensity); }
+        catch (_) { /* no PMREM (a context lost before boot): the materials stay lit by the lights alone */ }
+        // Phase 4: the REAL planet as the reflection environment while a
+        // model is in close-up — a cube render from the followed object's
+        // position of the skin + limb rim (+ stars), through PMREM, swapped
+        // in through the same setModelEnvironment the procedural baseline
+        // uses and swapped back out on release. LDR faces on purpose: the
+        // skin writes display values, and a byte target can be read back by
+        // the gate. The refresh rule is the kernel's (`envRefreshDue`).
+        this._envState = { mode: 'procedural', renders: 0, lastMs: null, lastPos: null, why: null };
+        try {
+            this._envTarget = new THREE.WebGLCubeRenderTarget(ENV.faceSize, { generateMipmaps: false });
+            this._envCam = new THREE.CubeCamera(ENV.near, ENV.far, this._envTarget);
+            this._envCam.layers.set(ENV_LAYER);
+            this._envPmrem = new THREE.PMREMGenerator(this._renderer);
+            this._skin.earthMesh?.layers.enable(ENV_LAYER);
+            this._skin._atmMesh?.layers.enable(ENV_LAYER);
+        } catch (_) { this._envCam = null; }
+        // Phase 5: the filmic curve is OFF here (the orbit view is data
+        // visualisation) and switches on only for the chase close-up, where
+        // every non-lit material is exempted — see _updateExposure.
+        this._renderer.toneMapping = THREE.NoToneMapping;
+        this._renderer.toneMappingExposure = 1;
+        this._exposureLift = true;
+        this._renderState = { toneMapping: 'none', exposure: 1, lift: 1, active: false };
+    }
+
+    /**
+     * Phase 4, per frame. While a model is in close-up the cube camera sits
+     * AT the followed object and re-renders the environment on the kernel's
+     * cadence; the PMREM is rebuilt into the same target. Nothing is
+     * rendered on an offscreen frame. On release the procedural baseline
+     * comes back.
+     */
+    _updateEnvironment(render) {
+        const st = this._envState;
+        if (!st || !this._envCam) return;
+        const aux = this._followAux;
+        const hero = aux?.pos && aux?.modelScale > 0 ? aux.pos : null;
+        if (!hero) {
+            if (st.mode !== 'procedural') { setModelEnvironment(this._envProcedural, ENV.intensity); st.mode = 'procedural'; st.lastMs = null; st.lastPos = null; st.why = null; }
+            return;
+        }
+        if (!render) return;
+        const now = frameClock.now();
+        const due = envRefreshDue({ lastMs: st.lastMs, nowMs: now, lastPos: st.lastPos, pos: [hero.x, hero.y, hero.z] });
+        if (!due.due) return;
+        this._renderEnvironmentAt(hero, now, due.why);
+    }
+    _renderEnvironmentAt(pos, now = frameClock.now(), why = 'forced') {
+        const st = this._envState;
+        this._envCam.position.copy(pos);
+        // The stars ride the main camera; for the six faces they ride this one.
+        const starsAt = this._stars ? this._stars.position.clone() : null;
+        if (this._stars) this._stars.position.copy(pos);
+        const tm = this._renderer.toneMapping, cast = this._sunLight?.castShadow ?? false;
+        this._renderer.toneMapping = THREE.NoToneMapping;   // the faces are the skin's own values
+        if (this._sunLight) this._sunLight.castShadow = false;   // nothing on the layer casts: skip six shadow passes
+        this._envCam.update(this._renderer, this._scene);
+        this._renderer.toneMapping = tm;
+        if (this._sunLight) this._sunLight.castShadow = cast;
+        if (starsAt) this._stars.position.copy(starsAt);
+        // The PMREM is rebuilt INTO the same target (same size every time).
+        this._envPmremTarget = this._envPmrem.fromCubemap(this._envTarget.texture, this._envPmremTarget || undefined);
+        setModelEnvironment(this._envPmremTarget.texture, ENV.intensity);
+        st.mode = 'planet'; st.renders++; st.lastMs = now; st.lastPos = [pos.x, pos.y, pos.z]; st.why = why;
+    }
+    /** Test hook / API: re-render the environment now (no-op unless a model is in close-up). */
+    refreshEnvironment() {
+        const aux = this._followAux;
+        if (!this._envCam || !(aux?.pos && aux?.modelScale > 0)) return false;
+        this._renderEnvironmentAt(aux.pos);
+        return true;
+    }
+    getEnvironmentState() {
+        const st = this._envState;
+        if (!st) return null;
+        return { mode: st.mode, renders: st.renders, why: st.why, ageS: st.lastMs == null ? null : (frameClock.now() - st.lastMs) / 1000, faceSize: ENV.faceSize };
+    }
+    /** Mean RGB level (0–255) of each cube face of the environment render, +X −X +Y −Y +Z −Z — the gate's readback. */
+    _envFaceMeans() {
+        if (!this._envTarget) return null;
+        const N = ENV.faceSize, buf = new Uint8Array(N * N * 4), out = [];
+        for (let f = 0; f < 6; f++) {
+            this._renderer.readRenderTargetPixels(this._envTarget, 0, 0, N, N, buf, f);
+            let s = 0;
+            for (let i = 0; i < buf.length; i += 4) s += buf[i] + buf[i + 1] + buf[i + 2];
+            out.push(s / (N * N * 3));
+        }
+        return out;
+    }
+
+    /**
+     * Phase 5, per frame: the renderer's filmic curve for the lit hull in
+     * close-up only. On entry every material in the scene that is not a
+     * model's (`isLitMaterial`) is exempted (`toneMapped = false` — a
+     * program-parameter, so it costs no recompile while the renderer's own
+     * curve is off, and the lit materials recompile once per direction,
+     * cached), and the sweep repeats on a slow cadence for anything added
+     * during the chase. The exposure eases to the kernel's value (base when
+     * sunlit, lifted toward `eclipseGain` in shadow) on the frame clock.
+     */
+    _updateExposure(dtWall) {
+        const r = this._renderer;
+        if (!r || !this._renderState) return;
+        const aux = this._followAux;
+        const ex = chaseExposure({ fraction: aux?.sun?.fraction ?? 1, modelScale: aux?.modelScale ?? 0, lift: this._exposureLift });
+        const rs = this._renderState;
+        if (ex.active) {
+            if (r.toneMapping !== THREE.ACESFilmicToneMapping) {
+                this._exemptFromToneMapping();
+                r.toneMapping = THREE.ACESFilmicToneMapping;
+                r.toneMappingExposure = ex.exposure;     // a hard switch: nothing on screen is lit yet
+                this._exposureSweepAt = frameClock.now();
+            } else if (frameClock.now() - (this._exposureSweepAt || 0) > 2000) {
+                this._exemptFromToneMapping();
+                this._exposureSweepAt = frameClock.now();
+            }
+            const k = easeK(dtWall, EXPOSURE.tauS);
+            r.toneMappingExposure += (ex.exposure - r.toneMappingExposure) * k;
+            rs.toneMapping = 'aces'; rs.exposure = r.toneMappingExposure; rs.lift = ex.lift; rs.active = true;
+        } else if (r.toneMapping !== THREE.NoToneMapping || rs.active) {
+            r.toneMapping = THREE.NoToneMapping;
+            r.toneMappingExposure = 1;
+            rs.toneMapping = 'none'; rs.exposure = 1; rs.lift = 1; rs.active = false;
+        }
+    }
+    _exemptFromToneMapping() {
+        let lit = 0, exempt = 0;
+        this._scene.traverse((o) => {
+            const m = o.material;
+            if (!m) return;
+            for (const mat of Array.isArray(m) ? m : [m]) {
+                if (isLitMaterial(mat)) { lit++; continue; }
+                if (mat.toneMapped !== false) { mat.toneMapped = false; }
+                exempt++;
+            }
+        });
+        this._exposureSweep = { lit, exempt };
+        return this._exposureSweep;
+    }
+    /** Test hook: disable the eclipse exposure lift (the gate's negative control). */
+    setExposureLift(on) { this._exposureLift = !!on; }
+    getRenderState() {
+        const rs = this._renderState;
+        if (!rs) return null;
+        return { ...rs, exposureTarget: chaseExposure({ fraction: this._followAux?.sun?.fraction ?? 1, modelScale: this._followAux?.modelScale ?? 0, lift: this._exposureLift }).exposure,
+            env: this.getEnvironmentState()?.mode ?? null, envAgeS: this.getEnvironmentState()?.ageS ?? null };
+    }
+
+    /** Test hook: hold the scene's sun vector (null releases it). */
+    setSunDirOverride(v) { this._sunDirOverride = v ? new THREE.Vector3(v.x ?? v[0], v.y ?? v[1], v.z ?? v[2]).normalize() : null; }
+    _sunDirArr() { const d = this._sunDir; return d ? [d.x, d.y, d.z] : [1, 0, 0]; }
+
+    /**
+     * Per frame: the key light along the Sun, dimmed by the followed
+     * object's illumination (the one spacecraft in close-up is the one
+     * whose shadow matters; the catalogue's 30 000 dots are unlit points);
+     * the earthshine hemisphere's up = the followed object's radial (the
+     * camera's when nothing is followed).
+     */
+    _updateLighting() {
+        if (!this._sunLight) return;
+        const d = this._sunDir || new THREE.Vector3(1, 0, 0);
+        const aux = this._followAux;
+        const frac = aux?.sun?.fraction ?? 1;
+        this._sunLight.intensity = SUN_LIGHT_INTENSITY * frac;
+        const ref = aux?.pos || this._camera.position;
+        const n = Math.hypot(ref.x, ref.y, ref.z) || 1;
+        this._earthShine.position.set(ref.x / n, ref.y / n, ref.z / n);
+        // The shadow scope: the followed hull's drawn extent (the artistic
+        // span × the angular hold), while the model tier is what is drawn.
+        const hero = aux?.pos && aux?.modelScale > 0 ? aux : null;
+        if (hero && frac > 0) {
+            const e = ARTISTIC_SPAN_R * 0.9 * hero.modelScale;
+            const sc = this._sunLight.shadow.camera;
+            if (Math.abs(sc.right - e) > 0.01 * e) {
+                sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e;
+                sc.near = e * 0.1; sc.far = e * 4;
+                sc.updateProjectionMatrix();
+            }
+            this._sunLight.position.set(hero.pos.x + d.x * e * 2, hero.pos.y + d.y * e * 2, hero.pos.z + d.z * e * 2);
+            this._sunLight.target.position.copy(hero.pos);
+            this._sunLight.castShadow = true;
+        } else {
+            this._sunLight.position.set(d.x * 20, d.y * 20, d.z * 20);
+            this._sunLight.target.position.set(0, 0, 0);
+            this._sunLight.castShadow = false;
+        }
+        this._sunLight.target.updateMatrixWorld();
+    }
+
+    /**
+     * Phase 3: the glints. For every flare surface of a model (kernel
+     * `glint`: the mirror of the Sun about the surface normal against the
+     * direction to the camera, a Gaussian of the surface's own width), the
+     * sprite on it is scaled and faded by the value × the illumination (no
+     * flare in umbra) × the surface's gain. Returns the strongest.
+     */
+    _stepGlintsFor(entries, frac) {
+        const cam = this._camera.position;
+        const sd = this._sunDirArr();
+        let best = { max: 0, thetaDeg: null, surface: null };
+        for (const en of entries || []) {
+            en.o.getWorldQuaternion(_glQ);
+            en.o.getWorldPosition(_glP);
+            _glN.set(en.spec.normal[0], en.spec.normal[1], en.spec.normal[2]).applyQuaternion(_glQ);
+            _glV.copy(cam).sub(_glP).normalize();
+            const r = glint({ normal: [_glN.x, _glN.y, _glN.z], sunDir: sd, toCamera: [_glV.x, _glV.y, _glV.z], sigmaDeg: en.spec.sigmaDeg });
+            const v = r.value * frac * (en.spec.gain ?? 1);
+            const sp = en.sprite;
+            if (v > 0.02) {
+                sp.visible = true;
+                sp.material.opacity = Math.min(1, v);
+                sp.scale.setScalar(0.012 + 0.06 * Math.min(1, v));
+            } else { sp.visible = false; sp.material.opacity = 0; }
+            if (r.value * (en.spec.gain ?? 1) > best.max) best = { max: r.value * (en.spec.gain ?? 1), thetaDeg: r.thetaDeg, surface: en.o.userData.solarArray ? 'array' : 'antenna' };
+        }
+        return best;
+    }
+    /** Build the glint entries (surface + its sprite) of a model group once. */
+    _glintEntries(grp) {
+        return collectGlintSurfaces(grp).map((o) => { const sprite = makeGlintSprite(); o.add(sprite); return { o, spec: o.userData.glint, sprite }; });
+    }
+    _stepGlints() {
+        const frac = this._followAux?.sun?.fraction ?? 1;
+        let best = { max: 0, thetaDeg: null, surface: null };
+        const av = this._avatar;
+        if (av?.grp.visible) best = this._stepGlintsFor(av.glints, frac);
+        for (const id in this._satProbes || {}) {
+            const pr = this._satProbes[id];
+            if (!pr._glints) pr._glints = [...this._glintEntries(pr.midGrp || new THREE.Group()), ...this._glintEntries(pr.nearGrp || new THREE.Group())];
+            const f = this._followId?.kind === 'sat' && this._followId.id === id ? frac : (illumination([pr.mesh.position.x, pr.mesh.position.y, pr.mesh.position.z], this._sunDirArr()).fraction);
+            const b = this._stepGlintsFor(pr._glints, f);
+            if (this._followId?.kind === 'sat' && this._followId.id === id && b.max > best.max) best = b;
+        }
+        if (this._followAux) this._followAux.glint = best;
+    }
+
+    /**
+     * THE ATTITUDE (kernel attitudeBasis, a MODEL per family): orient a
+     * model group by its body axes, turn its solar-array pivots toward the
+     * Sun, and return what the HUD prints. `vel` is a direction.
+     */
+    _applyAttitude(grp, arrays, { family, pos, vel, id }) {
+        const sd = this._sunDirArr();
+        const b = attitudeBasis({
+            family, pos: [pos.x, pos.y, pos.z], vel: vel ? [vel.x, vel.y, vel.z] : null, sunDir: sd,
+            tS: this._sceneTimeMs() / 1000, id,
+        });
+        _attM.makeBasis(_attX.set(b.x[0], b.x[1], b.x[2]), _attY.set(b.y[0], b.y[1], b.y[2]), _attZ.set(b.z[0], b.z[1], b.z[2]));
+        grp.quaternion.setFromRotationMatrix(_attM);
+        let alphaRad = 0, cosIncidence = null;
+        if (b.mode.arrays === 'alpha-tracking' || b.mode.arrays === 'fixed-to-sun') {
+            const a = arrayAlpha(toBody(sd, b));
+            alphaRad = b.mode.arrays === 'alpha-tracking' ? a.alphaRad : 0;
+            cosIncidence = b.mode.arrays === 'alpha-tracking' ? a.cosIncidence : Math.max(0, toBody(sd, b)[1]);
+            for (const w of arrays || []) w.rotation.x = alphaRad;
+        }
+        return { modeId: b.mode.id, label: b.mode.label, arrays: b.mode.arrays, alphaDeg: alphaRad * 180 / Math.PI, cosIncidence };
+    }
+
+    /** The sun geometry of a followed object (physics, not model): illumination, beta, the next shadow boundary. */
+    _sunGeometry(pos, vel, positionAt) {
+        const sd = this._sunDirArr();
+        const p = [pos.x, pos.y, pos.z];
+        const ill = illumination(p, sd);
+        const beta = vel ? betaAngle(p, [vel.x, vel.y, vel.z], sd) : null;
+        // The shadow scan walks the propagator 360 steps: once per 4 s of frame clock.
+        const now = frameClock.now();
+        if (positionAt && (!this._nextShadow || now - this._nextShadow.at > 4000 || this._nextShadow.key !== this._followKey())) {
+            let ev = null;
+            try { ev = beta?.eclipseFree ? null : nextShadowEvent({ positionAt, nowMs: this._sceneTimeMs(), sunDir: sd, stepS: 20, horizonS: 7200 }); } catch (_) { ev = null; }
+            this._nextShadow = { at: now, key: this._followKey(), ev };
+        }
+        return { state: ill.state, fraction: ill.fraction, betaDeg: beta?.betaDeg ?? null, criticalDeg: beta?.criticalDeg ?? null,
+            eclipseFree: beta?.eclipseFree ?? null, next: this._nextShadow?.ev ?? null };
+    }
+    _followKey() { const f = this._followId; return f ? `${f.kind}:${f.id ?? f.idx}` : null; }
+
+    /** The followed object's Earth-fixed position at any instant, by its own propagator. */
+    _followPositionAt() {
+        const f = this._followId;
+        if (f?.kind === 'sat') {
+            const probe = this._satProbes?.[f.id];
+            if (!probe) return null;
+            return (ms) => {
+                const q = _eciSceneToEarthFixed(_lookupProbePositionAt(probe, ms), this._gmstRad(ms));
+                return [q.x, q.y, q.z];
+            };
+        }
+        if (f?.kind === 'catalog') {
+            const cf = this._catFollow;
+            const el = cf?.tle ? (cf._el || (cf._el = meanElements(cf.tle))) : null;
+            if (!el) return null;
+            const table = cf._perifocal || (cf._perifocal = perifocalTable(el));
+            return (ms) => {
+                const q = inertialSceneAt(el, ms, table);
+                const r = _eciSceneToEarthFixed({ x: q[0], y: q[1], z: q[2] }, this._gmstRad(ms), _trackScratch);
+                return [r.x, r.y, r.z];
+            };
+        }
+        return null;
+    }
+
+    // ── The ground track of the followed object ───────────────────────────
+    _ensureTrack() {
+        if (this._track) return this._track;
+        const mk = (n, opacity) => {
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+            geo.setDrawRange(0, 0);
+            // An OVERLAY: 10 km above the surface the track sits inside the
+            // skin's rim shell and is depth-killed (measured: invisible from
+            // the chase); like the ops rings it is a ruler, drawn on top.
+            const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity, depthWrite: false, depthTest: false }));
+            line.renderOrder = 998;
+            line.frustumCulled = false; line.raycast = () => {}; line.visible = false;
+            line.userData = { kind: 'ground-track', untargetable: true };
+            this._scene.add(line);
+            return line;
+        };
+        const nadir = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+            new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false, depthTest: false }));
+        nadir.renderOrder = 998;
+        nadir.frustumCulled = false; nadir.raycast = () => {}; nadir.visible = false;
+        this._scene.add(nadir);
+        const marker = new THREE.Mesh(new THREE.RingGeometry(0.004, 0.006, 32),
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false, depthTest: false }));
+        marker.renderOrder = 998;
+        marker.raycast = () => {}; marker.visible = false;
+        this._scene.add(marker);
+        this._track = { past: mk(400, 0.85), future: mk(400, 0.4), nadir, marker, key: null, builtMs: NaN };
+        return this._track;
+    }
+    /**
+     * Rebuild the past / future surface lines when the target changes or
+     * the scene instant has moved 30 s; re-seat the nadir line and the
+     * sub-satellite marker every frame from the live position.
+     */
+    _stepGroundTrack(pos, positionAt, color) {
+        const t = this._ensureTrack();
+        const ms = this._sceneTimeMs();
+        const key = this._followKey();
+        if (positionAt && (t.key !== key || !Number.isFinite(t.builtMs) || Math.abs(ms - t.builtMs) > 30e3)) {
+            const g = groundTrackSamples({ positionAt, nowMs: ms, pastS: 2700, futureS: 5400, stepS: 30 });
+            for (const [line, pts] of [[t.past, g.past], [t.future, g.future]]) {
+                const a = line.geometry.attributes.position.array;
+                const n = Math.min(pts.length, 400);
+                for (let i = 0; i < n; i++) { a[i * 3] = pts[i][0]; a[i * 3 + 1] = pts[i][1]; a[i * 3 + 2] = pts[i][2]; }
+                line.geometry.attributes.position.needsUpdate = true;
+                line.geometry.setDrawRange(0, n);
+            }
+            t.key = key; t.builtMs = ms;
+        }
+        if (color) { t.past.material.color.copy(color); t.future.material.color.copy(color); t.marker.material.color.copy(color); t.nadir.material.color.copy(color); }
+        const r = pos.length() || 1;
+        const surf = pos.clone().multiplyScalar(1.0015 / r);
+        const na = t.nadir.geometry.attributes.position.array;
+        na[0] = pos.x; na[1] = pos.y; na[2] = pos.z; na[3] = surf.x; na[4] = surf.y; na[5] = surf.z;
+        t.nadir.geometry.attributes.position.needsUpdate = true;
+        t.marker.position.copy(surf);
+        t.marker.lookAt(surf.clone().multiplyScalar(2));
+        t.past.visible = t.future.visible = t.nadir.visible = t.marker.visible = true;
+        return subSatellite([pos.x, pos.y, pos.z]);
+    }
+    _hideTrack() {
+        const t = this._track;
+        if (!t) return;
+        t.past.visible = t.future.visible = t.nadir.visible = t.marker.visible = false;
+        t.key = null;
+    }
+    getGroundTrackState() {
+        const t = this._track;
+        if (!t) return null;
+        return { visible: t.past.visible, past: t.past.geometry.drawRange.count, future: t.future.geometry.drawRange.count,
+            marker: t.marker.position.toArray(), key: t.key };
     }
 
     _buildLayerShells() {
@@ -2054,6 +2501,8 @@ export class AtmosphereGlobe {
         // separate so future poly-count work plugs in cleanly.
         const midGrp = buildSatelliteModel(spec);
         const nearGrp = buildSatelliteModelLow(spec);
+        enableModelShadows(midGrp, true);
+        enableModelShadows(nearGrp, true);
 
         // LOD distance thresholds. Three.js picks the highest-index
         // level whose distance ≤ camera-to-LOD distance; smaller
@@ -2113,7 +2562,8 @@ export class AtmosphereGlobe {
         // real TLE epoch + sat.mean_anomaly when live data arrives.
         const M0 = spec.orbital.meanAnomalyDeg0 * Math.PI / 180;
         const probe = {
-            mesh, pathLine, spec, farGrp,
+            mesh, pathLine, spec, farGrp, midGrp, nearGrp,
+            _vel: null,               // unit velocity direction in the scene (set per frame)
             _phase0:        M0,
             _M_epoch_rad:   M0,
             _epochMs:       Date.now(),
@@ -2161,31 +2611,45 @@ export class AtmosphereGlobe {
      * it the camera just flies to where the satellite WAS at the
      * moment of click, and the satellite then propagates away.
      */
-    flyToSatellite(id = 'iss', durationSec = 1.6, { follow = false } = {}) {
+    flyToSatellite(id = 'iss', durationSec = null, { follow = false } = {}) {
         const probe = this._satProbes?.[id];
         if (!probe) return;
-        const pos = probe.mesh.position.clone();
-        // Offset behind the velocity-side of the probe so the camera
-        // sees it move forward through the layer.
-        const radial = pos.clone().normalize();
-        const offset = radial.multiplyScalar(0.18);
-        const target = pos.clone().add(offset);
+        this._flyToChase({
+            pos: probe.mesh.position, vel: probe._vel, durationSec, follow,
+            engage: () => { if (this._satProbes?.[id]) this.followSatellite(id); },
+        });
+    }
+
+    /**
+     * The ONE fly-in to a chase (js/upper-atmosphere-sat-view.js): the
+     * camera flies to the default chase pose of the target's CURRENT
+     * position (behind, above, CHASE.defaultR), over a duration that is log
+     * in how far it has to go, and the chase then begins FROM WHEREVER THE
+     * CAMERA IS (seedFromEye) and eases onto the moving target — there is
+     * no snap at the hand-off, however far the target travelled during the
+     * flight. Returns the duration.
+     */
+    _flyToChase({ pos, vel, durationSec = null, follow = false, engage }) {
+        const p = chasePose({ pos: [pos.x, pos.y, pos.z], vel: vel ? [vel.x, vel.y, vel.z] : null });
+        const eye = new THREE.Vector3(p.eye[0], p.eye[1], p.eye[2]);
+        // Timed by the ARC's length (up and over, never a chord through the planet).
+        const c0 = this._camera.position;
+        const path = arcSpec([c0.x, c0.y, c0.z], [eye.x, eye.y, eye.z], [c0.x, c0.y, c0.z], [pos.x, pos.y, pos.z]);
+        const dur = Number.isFinite(durationSec) ? durationSec : flyInDuration(path.length);
         if (this._controls.getMode?.() === 'orbit') {
             this._controls.setMode('fly');
         }
-        this.flyTo(target, pos, durationSec);
+        this.flyTo(eye, pos.clone(), dur, { up: new THREE.Vector3(p.up[0], p.up[1], p.up[2]), arc: true });
         if (follow) {
-            // Engage follow after the flyTo's smoothstep completes —
-            // delay by the animation duration so the spring doesn't
-            // fight the fly-in. The timer is GENERATION-checked: a Reset,
-            // Top, Stop-follow or mode change made during the fly-in must
-            // not be overridden by a lock that lands a second later (that
-            // re-lock is how a visitor got stuck chasing the ISS, 2026-10).
+            // Engage follow after the flyTo's smoothstep completes. The timer
+            // is GENERATION-checked: a Reset, Top, Stop-follow or mode change
+            // made during the fly-in must not be overridden by a lock that
+            // lands a second later (that re-lock is how a visitor got stuck
+            // chasing the ISS, 2026-10).
             const gen = this._armPendingFollow();
-            setTimeout(() => {
-                if (gen === this._followGen && this._satProbes?.[id]) this.followSatellite(id);
-            }, durationSec * 1000);
+            setTimeout(() => { if (gen === this._followGen) engage(); }, dur * 1000);
         }
+        return dur;
     }
 
     /** A new deferred-follow ticket; any newer camera command invalidates it. */
@@ -2209,8 +2673,333 @@ export class AtmosphereGlobe {
     followSatellite(id) {
         const probe = this._satProbes?.[id];
         if (!probe?.mesh) return;
-        this._controls.followObject?.(() => probe.mesh.position);
+        this._controls.followObject?.(() => probe.mesh.position, {
+            chase: true, getVel: () => probe._vel, seedFromEye: true,
+        });
         this._followId = { kind: 'sat', id };
+    }
+
+    // ── Chasing a CATALOGUE satellite (any SGP4 dot) ──────────────────────
+    /**
+     * Follow a catalogue object by NORAD id: the dot's own drawn position
+     * (the tracker's SGP4, Earth-fixed scene) is the target, its velocity
+     * is a finite difference on the SCENE clock (so a time warp reads
+     * right), and an AVATAR — the model family for its name/group, held at
+     * a symbolic angular size (kernel `modelScale`) — stands on the dot
+     * while it is followed, with a short trail and the tracker's own
+     * highlight label. Returns false when the id is not loaded.
+     */
+    followCatalog(noradId) {
+        const t = this._catalogTracker;
+        const norad = Number(noradId);
+        const idx = t?._indexByNorad?.get?.(norad);
+        const sat = idx != null ? t._satellites[idx] : null;
+        if (!sat) return false;
+        const cf = this._catFollow && this._catFollow.norad === norad ? this._catFollow : {
+            norad, name: sat.tle?.name || `NORAD ${norad}`, group: sat.group, tle: sat.tle,
+            pos: new THREE.Vector3(), vel: new THREE.Vector3(), prevPos: null, prevMs: NaN,
+            color: t._groups?.get?.(sat.group)?.color ?? new THREE.Color(0x66e0ff),
+        };
+        this._catFollow = cf;
+        // The id BEFORE the priming step: the step's release path clears a
+        // state whose follow id is not a catalogue follow (measured: the
+        // camera chased a frozen origin for the whole session).
+        this._followId = { kind: 'catalog', id: norad };
+        this._stepCatalogFollow(true);
+        this._controls.followObject?.(() => cf.pos, {
+            chase: true, getVel: () => (cf.vel.lengthSq() > 0 ? cf.vel : null), seedFromEye: true,
+        });
+        this.setFocusSatellite(norad);
+        try { t.setHighlight?.(norad, { label: cf.name, color: cf.color.getHex?.() ?? 0x66e0ff }); } catch (_) { /* no sprite */ }
+        return true;
+    }
+
+    /** Fly to a catalogue dot and (with follow) chase it. */
+    flyToCatalog(noradId, durationSec = null, { follow = false } = {}) {
+        const t = this._catalogTracker;
+        const norad = Number(noradId);
+        const p = t?.getPositionXYZ?.(norad);
+        // A slot the worker has not published yet reads (0, 0, 0): not a destination.
+        if (!p || Math.hypot(p.x, p.y, p.z) < 0.5) return false;
+        const pos = new THREE.Vector3(p.x, p.y, p.z);
+        const vel = this._catalogVelocityEstimate(norad);
+        this._flyToChase({ pos, vel, durationSec, follow, engage: () => this.followCatalog(norad) });
+        return true;
+    }
+
+    /** Velocity direction (scene) of a catalogue object from its mean elements, for a fly-in's framing. */
+    _catalogVelocityEstimate(norad) {
+        const t = this._catalogTracker;
+        const idx = t?._indexByNorad?.get?.(norad);
+        const sat = idx != null ? t._satellites[idx] : null;
+        const el = sat ? meanElements(sat.tle) : null;
+        if (!el) return null;
+        const ms = this._catalogClockMs();
+        const gmst = this._gmstRad(ms);
+        const a = inertialSceneAt(el, ms), b = inertialSceneAt(el, ms + 1000);
+        return _eciSceneToEarthFixed({ x: b[0] - a[0], y: b[1] - a[1], z: b[2] - a[2] }, gmst, new THREE.Vector3()).normalize();
+    }
+
+    /**
+     * Per frame: the followed catalogue object's position and velocity, its
+     * avatar (model, pose, symbolic scale) and trail. Everything hides the
+     * frame the follow ends, by whichever of the ten release paths.
+     */
+    _stepCatalogFollow(force = false) {
+        const cf = this._catFollow;
+        const live = !!cf && this._followId?.kind === 'catalog' && this._followId.id === cf?.norad
+            && (force || !!this._controls.isFollowing?.() || !!this._controls.isFlying?.());
+        if (!live) {
+            if (this._avatar?.grp.visible) {
+                this._avatar.grp.visible = false;
+                this._avatar.trail.visible = false;
+                try { this._catalogTracker?.clearHighlight?.(); } catch (_) { /* none */ }
+            }
+            if (cf && this._followId?.kind !== 'catalog') this._catFollow = null;
+            return;
+        }
+        const t = this._catalogTracker;
+        const p = t?.getPositionXYZ?.(cf.norad);
+        if (!p || Math.hypot(p.x, p.y, p.z) < 0.5) return;     // not published yet / decayed
+        const ms = this._catalogClockMs();
+        if (cf.prevPos && Number.isFinite(cf.prevMs) && ms !== cf.prevMs) {
+            const dtS = (ms - cf.prevMs) / 1000;
+            const v = new THREE.Vector3(p.x - cf.prevPos.x, p.y - cf.prevPos.y, p.z - cf.prevPos.z).divideScalar(dtS);
+            // A scrub of hours is a teleport, not a velocity.
+            if (Math.abs(dtS) < 120 && v.lengthSq() > 0) cf.vel.copy(v);
+        }
+        if (!cf.prevPos) cf.prevPos = new THREE.Vector3();
+        if (ms !== cf.prevMs) { cf.prevPos.set(p.x, p.y, p.z); cf.prevMs = ms; }
+        cf.pos.set(p.x, p.y, p.z);
+        if (cf.vel.lengthSq() === 0) { const e = this._catalogVelocityEstimate(cf.norad); if (e) cf.vel.copy(e).multiplyScalar(0.0012); }
+
+        // The avatar.
+        const family = modelFamily({ noradId: cf.norad, name: cf.name, group: cf.group });
+        const av = this._ensureAvatar(family, cf.color);
+        av.grp.visible = true;
+        av.grp.position.copy(cf.pos);
+        const d = this._camera.position.distanceTo(cf.pos);
+        // The tracker's highlight is a WORLD-sized sprite made for the orbit
+        // view: inside the model-hold range it filled the frame white
+        // (measured at 70 km). There the avatar and the card name the
+        // target; the sprite returns as the camera backs off past MODEL_REF_R.
+        const hs = t._highlightSprite;
+        if (hs) hs.visible = d > MODEL_REF_R;
+        av.grp.scale.setScalar(modelScale(d));
+        cf.attitude = this._applyAttitude(av.grp, av.arrays, { family, pos: cf.pos, vel: cf.vel.lengthSq() > 0 ? cf.vel : null, id: cf.norad });
+        // The trail: a point every TRAIL_STEP of travel, oldest fading out.
+        const tr = av.trail;
+        const last = tr.userData.last;
+        if (!last || last.distanceTo(cf.pos) > 0.0008) {
+            tr.userData.pts.push(cf.pos.clone());
+            if (tr.userData.pts.length > 120) tr.userData.pts.shift();
+            tr.userData.last = cf.pos.clone();
+            const pts = tr.userData.pts, n = pts.length;
+            const pa = tr.geometry.attributes.position.array, ca = tr.geometry.attributes.color.array;
+            for (let i = 0; i < 120; i++) {
+                const q = pts[Math.min(i, n - 1)];
+                pa[i * 3] = q.x; pa[i * 3 + 1] = q.y; pa[i * 3 + 2] = q.z;
+                const w = n > 1 ? Math.pow(Math.min(i, n - 1) / (n - 1), 1.5) : 0;
+                ca[i * 3] = cf.color.r * w; ca[i * 3 + 1] = cf.color.g * w; ca[i * 3 + 2] = cf.color.b * w;
+            }
+            tr.geometry.attributes.position.needsUpdate = true;
+            tr.geometry.attributes.color.needsUpdate = true;
+            tr.geometry.setDrawRange(0, 120);
+        }
+        tr.visible = true;
+    }
+
+    /** The one avatar: rebuilt when the model family changes, reused otherwise. */
+    _ensureAvatar(family, color) {
+        if (this._avatar && this._avatar.family === family) return this._avatar;
+        if (this._avatar) {
+            this._scene.remove(this._avatar.grp);
+            this._scene.remove(this._avatar.trail);
+        }
+        const tint = '#' + (color?.getHexString?.() ?? '66e0ff');
+        const spec = { id: family === 'iss' ? 'iss' : family === 'hubble' ? 'hubble' : family, color: tint, _constellationId: family };
+        const grp = family === 'rocket' ? buildRocketBodyModel(tint)
+            : family === 'debris' ? buildDebrisFragmentModel(tint)
+            : buildSatelliteModel(spec);
+        grp.name = 'catalog-avatar';
+        grp.visible = false;
+        grp.traverse((o) => { o.userData = { ...(o.userData || {}), kind: 'catalog-avatar', untargetable: true }; o.raycast = () => {}; });
+        this._scene.add(grp);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(120 * 3), 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(120 * 3), 3));
+        const trail = new THREE.Line(geo, new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        trail.userData = { pts: [], last: null, kind: 'catalog-avatar-trail' };
+        trail.raycast = () => {};
+        trail.visible = false;
+        trail.frustumCulled = false;
+        this._scene.add(trail);
+        enableModelShadows(grp, true);
+        this._avatar = { family, grp, trail, arrays: collectSolarArrays(grp), glints: this._glintEntries(grp) };
+        return this._avatar;
+    }
+
+    /**
+     * The followed object's sun geometry, attitude readout and ground track,
+     * once per frame; cleared (and the track hidden) the frame the follow
+     * ends. `_followAux.pos` also aims the earthshine.
+     */
+    _stepFollowAux() {
+        const f = this._followId;
+        const live = f && (this._controls.isFollowing?.() || this._controls.isFlying?.());
+        let pos = null, vel = null, attitude = null, color = null;
+        if (live && f.kind === 'sat') {
+            const probe = this._satProbes?.[f.id];
+            if (probe) { pos = probe.mesh.position; vel = probe._vel; attitude = probe._attitude; color = new THREE.Color(probe.spec.color || '#9fe3ff'); }
+        } else if (live && f.kind === 'catalog') {
+            const cf = this._catFollow;
+            if (cf && cf.pos.lengthSq() > 0.25) { pos = cf.pos; vel = cf.vel.lengthSq() > 0 ? cf.vel : null; attitude = cf.attitude; color = cf.color; }
+        }
+        if (!pos) { this._followAux = null; this._hideTrack(); return; }
+        const positionAt = this._followPositionAt();
+        const sun = this._sunGeometry(pos, vel, positionAt);
+        const ground = this._stepGroundTrack(pos, positionAt, color);
+        const dist = this._camera.position.distanceTo(pos);
+        this._followAux = { pos, sun, attitude, ground: { latDeg: ground.latDeg, lonDeg: ground.lonDeg },
+            modelScale: dist < 0.3 ? modelScale(dist) : 0, glint: this._followAux?.glint ?? null };
+    }
+
+    /**
+     * What the HUD prints about the followed object: name, ids, altitude,
+     * speed, period, inclination, the chase range and framing, and the
+     * avatar's symbolic scale against the true span. Null when not
+     * following (or still flying in).
+     */
+    getFollowInfo() {
+        const f = this._followId;
+        if (!f) return null;
+        const flying = !!this._controls.isFlying?.();
+        if (!this._controls.isFollowing?.() && !flying) return null;
+        const chase = this._controls.getFollowState?.() ?? null;
+        const out = { kind: f.kind, id: f.id ?? f.idx ?? null, name: null, noradId: null, altKm: null, speedKmS: null,
+            periodMin: null, inclinationDeg: null, family: 'generic', flying, chase: null };
+        if (f.kind === 'sat') {
+            const probe = this._satProbes?.[f.id];
+            if (!probe) return null;
+            out.name = probe.spec.name; out.noradId = probe.spec.orbital?.noradId ?? null;
+            out.altKm = probe.mesh.userData.altKm ?? null;
+            out.periodMin = probe.spec.orbital?.periodMin ?? null;
+            out.inclinationDeg = probe.spec.orbital?.inclinationDeg ?? null;
+            out.family = modelFamily({ noradId: out.noradId, name: out.name, group: probe.spec._constellationId || '' });
+        } else if (f.kind === 'catalog') {
+            const cf = this._catFollow;
+            if (!cf) return null;
+            out.name = cf.name; out.noradId = cf.norad;
+            const r = cf.pos.length();
+            out.altKm = r > 0.5 ? sceneToPageAltKm(r) : null;
+            out.periodMin = cf.tle?.period_min ?? null;
+            out.inclinationDeg = cf.tle?.inclination ?? null;
+            out.family = modelFamily({ noradId: cf.norad, name: cf.name, group: cf.group });
+        } else if (f.kind === 'debris') {
+            out.name = `debris #${f.idx}`;
+        } else if (f.kind === 'flight') {
+            out.name = 'flight probe';
+        }
+        // Speed from the circular relation at the drawn radius — the probes'
+        // stored velocity is a unit direction and the catalogue's finite
+        // difference is in the Earth-FIXED frame.
+        if (Number.isFinite(out.altKm) && out.periodMin > 0) {
+            out.speedKmS = 2 * Math.PI * (PAGE_RE_KM + out.altKm) / (out.periodMin * 60);
+        }
+        const aux = this._followAux;
+        if (aux) { out.attitude = aux.attitude; out.sun = aux.sun; out.ground = aux.ground; out.glint = aux.glint; }
+        out.render = this.getRenderState();
+        if (chase) {
+            out.chase = {
+                distKm: chase.dist * PAGE_RE_KM, distR: chase.dist,
+                azDeg: chase.az * 180 / Math.PI, elDeg: chase.el * 180 / Math.PI,
+                modelScale: modelScale(chase.dist),
+                trueSpanM: TRUE_SPAN_M[out.family] ?? TRUE_SPAN_M.generic,
+                // What is on screen: the artistic span × the hold factor, in km.
+                drawnSpanKm: ARTISTIC_SPAN_R * modelScale(chase.dist) * PAGE_RE_KM,
+            };
+        }
+        return out;
+    }
+
+    /** Every followable object with a page altitude: the named probes and the loaded, visible catalogue. */
+    _followCandidates() {
+        const out = [];
+        for (const id in this._satProbes || {}) {
+            const pr = this._satProbes[id];
+            const altKm = pr.mesh?.userData?.altKm;
+            if (Number.isFinite(altKm)) out.push({ id: `probe:${id}`, kind: 'sat', key: id, altKm, name: pr.spec.name });
+        }
+        const t = this._catalogTracker;
+        if (t?._satellites) {
+            for (const sat of t._satellites) {
+                if (t._groups?.get?.(sat.group)?.visible === false) continue;
+                const norad = sat.tle?.norad_id;
+                if (norad == null) continue;
+                // Skip a catalogue twin of a named probe (one satellite, one place).
+                if (Object.values(this._satProbes || {}).some((pr) => pr.spec.orbital?.noradId === norad)) continue;
+                const altKm = this._catalogPageAltKm(sat);
+                if (Number.isFinite(altKm)) out.push({ id: `cat:${norad}`, kind: 'catalog', key: norad, altKm, name: sat.tle?.name });
+            }
+        }
+        return out;
+    }
+
+    /**
+     * THE ALTITUDE TOUR: hop to the next spacecraft above (dir +1) or below
+     * (−1) the one followed — by page altitude, across the named probes and
+     * every loaded catalogue object, wrapping at the ends (kernel
+     * `altitudeNeighbour`). With nothing followed it starts from the
+     * camera's own altitude. Returns the pick or null.
+     */
+    followNeighbourByAltitude(dir = 1) {
+        const info = this.getFollowInfo();
+        const cur = info
+            ? { id: info.kind === 'catalog' ? `cat:${info.id}` : `probe:${info.id}`, altKm: info.altKm ?? 0 }
+            : { id: null, altKm: sceneToPageAltKm(this._camera.position.length()) };
+        const pick = altitudeNeighbour(this._followCandidates(), cur, dir);
+        if (!pick) return null;
+        this._cancelPendingFollow();
+        if (pick.kind === 'sat') { this._followId = { kind: 'sat', id: pick.key }; this.flyToSatellite(pick.key, null, { follow: true }); }
+        else { this._followId = { kind: 'catalog', id: pick.key }; this.flyToCatalog(pick.key, null, { follow: true }); }
+        return pick;
+    }
+    /** The chase's own controls, for the follow card. */
+    zoomFollow(notches)   { this._controls.zoomFollow?.(notches); }
+    reframeFollow()       { this._controls.reframeFollow?.(); }
+
+    /**
+     * THE SAFE FRAME (kernel `safeCentre`): while chasing, the projection's
+     * principal point is moved to the centre of the part of the stage no
+     * dock covers, so the target is framed in the open and not under the
+     * readout (where the canvas centre sits with the camera dock up —
+     * measured). The page supplies the live chrome rects through
+     * `setChaseSafeFrame(() => [{x,y,w,h}…])`, measured from the DOM, never
+     * typed; nothing is shifted when the chase ends. Raycasts and the
+     * instruments' projection read the offset projection, so picking is
+     * unaffected.
+     */
+    setChaseSafeFrame(provider) { this._safeFrameProvider = typeof provider === 'function' ? provider : null; }
+    getChaseSafeFrame() { return this._safeFrame ?? null; }
+    _updateChaseFraming() {
+        const cam = this._camera;
+        const chasing = !!this._controls.isChasing?.();
+        if (!chasing || !this._safeFrameProvider) {
+            if (this._safeFrame) { cam.clearViewOffset(); this._safeFrame = null; }
+            return;
+        }
+        const W = this.canvas.clientWidth, H = this.canvas.clientHeight;
+        if (!(W > 0 && H > 0)) return;
+        let rects = [];
+        try { rects = this._safeFrameProvider() || []; } catch (_) { rects = []; }
+        const c = safeCentre({ w: W, h: H }, rects);
+        const ox = Math.round(W / 2 - c.cx), oy = Math.round(H / 2 - c.cy);
+        const sf = this._safeFrame;
+        if (sf && sf.W === W && sf.H === H && sf.ox === ox && sf.oy === oy) return;
+        cam.setViewOffset(W, H, ox, oy, W, H);
+        this._safeFrame = { W, H, ox, oy, cx: c.cx, cy: c.cy, box: c.box };
     }
 
     /** Stop any active follow (mode + flyTo unchanged). */
@@ -2496,7 +3285,13 @@ export class AtmosphereGlobe {
         const fetchOne = async (probe) => {
             const id = probe.spec.orbital.noradId;
             const ctl = new AbortController();
-            const t = setTimeout(() => ctl.abort(), 4000);
+            // 12 s, not 4: the fetch is issued during boot, and on a slow
+            // renderer the main thread is busy for seconds — the response
+            // could not be turned round inside 4 s and every probe silently
+            // kept its hard-coded elements (measured on SwiftShader: the ISS
+            // probe never got its SGP4 lines, the one-satellite-one-place
+            // gate timed out). A hung upstream still ends here.
+            const t = setTimeout(() => ctl.abort(), 12000);
             try {
                 const r = await fetch(`/api/celestrak/tle?norad=${id}`, {
                     signal: ctl.signal,
@@ -3062,7 +3857,7 @@ export class AtmosphereGlobe {
             noradId: sat.tle?.norad_id,
             line1:  sat.tle?.line1,
             line2:  sat.tle?.line2,
-            tooltip: `Click to analyze trajectory · alt ${(this._catalogPageAltKm(sat) ?? 0).toFixed(0)} km`,
+            tooltip: `Click to fly in and chase it · alt ${(this._catalogPageAltKm(sat) ?? 0).toFixed(0)} km`,
         };
     }
 
@@ -4613,7 +5408,7 @@ export class AtmosphereGlobe {
         // Skin: only push uniform updates when the angle has actually
         // moved meaningfully (>0.01° ≈ 1.7e-4 rad). Sub-solar drift is
         // ≈15°/hour so this still fires several times a minute.
-        const next = _subSolarToVec3(ssp.lat, ssp.lon);
+        const next = this._sunDirOverride ? this._sunDirOverride.clone() : _subSolarToVec3(ssp.lat, ssp.lon);
         if (!this._sunDir) this._sunDir = next;
         else {
             // copy in place so consumers that captured the reference
@@ -4697,6 +5492,7 @@ export class AtmosphereGlobe {
         this._stars = new THREE.Points(geom, mat);
         this._stars.renderOrder = -10;
         this._stars.frustumCulled = false;
+        this._stars.layers.enable(ENV_LAYER);
         this._scene.add(this._stars);
     }
 
@@ -4726,8 +5522,8 @@ export class AtmosphereGlobe {
      * Smoothly fly the camera to a world-space target, optionally aiming
      * at lookAt. Used by satellite click-to-fly and ISS focus.
      */
-    flyTo(targetVec3, lookAtVec3 = null, duration = 1.4) {
-        this._controls.flyTo(targetVec3, lookAtVec3, duration);
+    flyTo(targetVec3, lookAtVec3 = null, duration = 1.4, opts = {}) {
+        this._controls.flyTo(targetVec3, lookAtVec3, duration, opts);
     }
 
     /**
@@ -4753,7 +5549,7 @@ export class AtmosphereGlobe {
             ap,
             layerThicknessKm: layer ? Math.max(1, layer.maxKm - layer.minKm) : null,
         });
-        return { ...phys, layer };
+        return { ...phys, layer, opsBand: opsBandForAltitude(altKm) };
     }
 
     _initInstruments() {
@@ -4942,6 +5738,51 @@ export class AtmosphereGlobe {
     getPointsOfInterest()    { this._explore?.refreshPois(false); return this._explore?.getPois() ?? []; }
     getExploreDiscoveries()  { return this._explore?.getDiscoveries() ?? { found: [], total: 0 }; }
     resetExploreDiscoveries() { this._explore?.resetDiscoveries(); }
+    // ── Operational bands (the limb ruler) ───────────────────────────────
+    setOpsBandsVisible(on)   { this._opsBands?.setVisible(on); }
+    getOpsBandsVisible()     { return this._opsBands?.getVisible() ?? false; }
+    isOpsBandsDrawn()        { return this._opsBands?.isDrawn() ?? false; }
+    setOpsBandFocus(id)      { this.selectOpsBand(id); }
+    getOpsBandFocus()        { return this._opsBands?.getSelected() ?? null; }
+    /**
+     * Select a band (id or null): it expands into its shell on the canvas,
+     * the others dim, and 'ua-ops-band' {kind:'select', id, band} is
+     * dispatched for the card, the ruler, the column and the legend.
+     */
+    selectOpsBand(id) {
+        const prev = this._opsBands?.getSelected() ?? null;
+        const next = id == null ? null : (OPS_BANDS.find(b => b.id === id)?.id ?? null);
+        if (next === prev) return prev;
+        this._opsBands?.setSelected(next);
+        const band = next ? OPS_BANDS.find(b => b.id === next) : null;
+        try { window.dispatchEvent(new CustomEvent('ua-ops-band', { detail: { kind: 'select', id: next, band } })); } catch (_) { /* no window */ }
+        return next;
+    }
+    getSelectedOpsBand()     { const id = this._opsBands?.getSelected(); return id ? OPS_BANDS.find(b => b.id === id) : null; }
+    getOpsBandHover()        { return this._opsBandHover || null; }
+    getOpsBandExpandWeights(){ return this._opsBands?.getExpandWeights() ?? []; }
+    /**
+     * Which band a canvas point aims at: the ray's closest approach (kernel
+     * `rayClosestApproach`) picked by `pickOpsBand` with a 6 px tolerance
+     * converted through the pixel angle at the tangent range.
+     */
+    pickOpsBandAt(clientX, clientY) {
+        if (!this._opsBands?.isDrawn()) return null;
+        const rect = this.canvas.getBoundingClientRect();
+        const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1,
+                                      ((clientY - rect.top) / rect.height) * -2 + 1);
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(ndc, this._camera);
+        const o = ray.ray.origin, d = ray.ray.direction;
+        const ca = opsRayClosestApproach([o.x, o.y, o.z], [d.x, d.y, d.z]);
+        if (!(ca.tc > 0)) return null;
+        const pixAng = 2 * Math.tan((this._camera.fov * Math.PI / 180) / 2) / Math.max(1, this.canvas.clientHeight);
+        const tolR = 6 * pixAng * ca.tc;
+        const pick = pickOpsBand({ b: ca.b, dist: ca.dist, tolR });
+        return pick ? { ...pick, b: ca.b, tolR, x: clientX - rect.left, y: clientY - rect.top } : null;
+    }
+    /** The operational band the camera is in (null outside 80–2000 km). */
+    getCameraOpsBand()       { return opsBandForAltitude(this.getCameraAltitudeKm()); }
     setMembranesVisible(on)  { this._explore?.setMembranesVisible(on); }
     getMembranesVisible()    { return this._explore?.getMembranesVisible() ?? false; }
     getMembraneWeights()     { return this._explore?.getMembraneWeights() ?? []; }
@@ -5033,7 +5874,9 @@ export class AtmosphereGlobe {
     _updateNearPlane() {
         const cam = this._camera;
         const altR = cam.position.length() - 1;
-        const near = Math.max(0.002, Math.min(0.01, 0.25 * altR));
+        // A chase 10 km behind a station would be clipped by the altitude
+        // rule alone: the kernel tightens near to 0.2 × the chase range.
+        const near = nearPlaneFor(altR, this._controls.getFollowState?.()?.dist ?? null);
         if (Math.abs(near - cam.near) > 0.02 * cam.near) {
             cam.near = near;
             cam.updateProjectionMatrix();
@@ -5382,7 +6225,13 @@ export class AtmosphereGlobe {
                 for (let p = o; p; p = p.parent) if (!p.visible) return false;
                 return true;
             };
-            const hits = this._raycaster.intersectObjects(hittable(), true).filter(h => shown(h.object));
+            let hits = this._raycaster.intersectObjects(hittable(), true).filter(h => shown(h.object));
+            // The ops bands' rings answer the cursor ahead of the layer shells
+            // (hidden but hittable so the tooltip can still name a layer): a
+            // ring edge is a target, a shell is only a name.
+            const bandPick = this.pickOpsBandAt(e.clientX, e.clientY);
+            const ringHover = bandPick?.part === 'edge';
+            if (ringHover && hits.length && _userDataForHit(hits[0])?.kind === 'layer-shell') hits = [];
             if (hits.length > 0) {
                 const ud = _userDataForHit(hits[0]);
                 tip.innerHTML = _tipHTML(ud, this._profile, this._swState);
@@ -5397,13 +6246,24 @@ export class AtmosphereGlobe {
                 this._hoveredDebrisIdx = ud?.kind === 'debris-piece'
                     ? ud.debrisIdx
                     : null;
+                if (this._opsBandHover) { this._opsBandHover = null; this._opsBands?.setHover(null); }
                 this.canvas.style.cursor = 'pointer';
             } else {
                 tip.style.opacity = '0';
                 this._hoveredUserData = null;
                 this._hoveredDebrisIdx = null;
+                // The ops bands' rings answer the cursor where nothing else
+                // does: a ring edge brightens and the instruments name it.
+                const pick = bandPick;
+                const hoverId = ringHover ? pick.band.id : null;
+                if (hoverId !== (this._opsBandHover?.band.id ?? null) || (pick && this._opsBandHover && pick.part !== this._opsBandHover.part)) {
+                    this._opsBands?.setHover(hoverId);
+                }
+                this._opsBandHover = pick;
                 const m = this._controls.getMode();
-                if (m === 'fly' || m === 'explore') {
+                if (hoverId) {
+                    this.canvas.style.cursor = 'pointer';
+                } else if (m === 'fly' || m === 'explore') {
                     this.canvas.style.cursor = 'crosshair';
                 } else {
                     this.canvas.style.cursor = 'grab';
@@ -5413,6 +6273,8 @@ export class AtmosphereGlobe {
         const onLeave = () => {
             tip.style.opacity = '0';
             this._hoveredDebrisIdx = null;
+            this._opsBandHover = null;
+            this._opsBands?.setHover(null);
             this.canvas.style.cursor = 'grab';
         };
         // Click handler: clicking on the ISS probe flies the camera to it.
@@ -5475,6 +6337,12 @@ export class AtmosphereGlobe {
             } else if (ud?.kind === 'catalog-point' && (ud.line1 || ud.noradId)) {
                 // The picked object's own orbit, drawn brighter than its suite's.
                 if (ud.noradId != null) this.setFocusSatellite(ud.noradId);
+                // A catalogue dot is a destination like a named probe: fly in
+                // and chase it (its avatar stands on the dot while followed).
+                if (ud.noradId != null && !this._isFollowTarget('catalog', Number(ud.noradId))) {
+                    this._followId = { kind: 'catalog', id: Number(ud.noradId) };
+                    this.flyToCatalog(ud.noradId, null, { follow: true });
+                }
                 // Click on any live-catalog point → push into the
                 // trajectory analyzer panel. Pass TLE inline if we have
                 // it; analyzer falls back to /api/celestrak/tle?norad=
@@ -5491,6 +6359,16 @@ export class AtmosphereGlobe {
                         }
                     }));
                 } catch (_) { /* ignore */ }
+            } else {
+                // Nothing a click acts on under the cursor (the hover raycast
+                // also reports the shells, the magnetopause, field lines —
+                // names, not targets; the dive's rule): a ring (or a band's wash)
+                // selects that band; empty space clears the selection; the
+                // selected band's own ring toggles it off.
+                const pick = this.pickOpsBandAt(e.clientX, e.clientY);
+                const cur = this._opsBands?.getSelected() ?? null;
+                if (pick) this.selectOpsBand(pick.band.id === cur ? null : pick.band.id);
+                else if (cur) this.selectOpsBand(null);
             }
         };
         this.canvas.addEventListener('mousemove', onMove);
@@ -5746,6 +6624,11 @@ export class AtmosphereGlobe {
             this._catalogTracker.tick(this._catalogClockMs());
         }
         if (this._suiteRings) this._stepSuiteRings();
+        this._stepCatalogFollow();
+        this._stepFollowAux();
+        this._updateLighting();
+        this._updateEnvironment(render);
+        this._updateExposure(dtWall);
 
         this._controls.update(dtWall);
         // After the controls: while a transit is active it owns the pose,
@@ -5759,7 +6642,10 @@ export class AtmosphereGlobe {
         this._explore?.update(this._camera, {
             viewportHeight: this.canvas.clientHeight, travelling,
         });
+        this._opsBands?.update(this._camera, { viewportHeight: this.canvas.clientHeight });
         this._updateExploreFocus(camMode);
+        this._stepGlints();
+        this._updateChaseFraming();
         this._updateNearPlane();
         this._cme?.update(this._camera, dtWall);
         // The star backdrop rides the camera: it is at infinity, and with the
@@ -5895,13 +6781,21 @@ export class AtmosphereGlobe {
                     _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR),
                     gmst, new THREE.Vector3());
             }
-            const radial = probe.mesh.position.clone().normalize();
-            const m = new THREE.Matrix4().lookAt(
-                probe.mesh.position,
-                probe.mesh.position.clone().add(v),
-                radial,
-            );
-            probe.mesh.quaternion.setFromRotationMatrix(m);
+            // The chase camera reads this (unit direction, Earth-fixed scene).
+            probe._vel = probe._vel ? probe._vel.copy(v) : v.clone();
+            // The nominal attitude for the probe's family (kernel), arrays to the Sun.
+            if (!probe._arrays) probe._arrays = [...collectSolarArrays(probe.midGrp || new THREE.Group()), ...collectSolarArrays(probe.nearGrp || new THREE.Group())];
+            if (!probe._family) probe._family = modelFamily({ noradId: probe.spec.orbital?.noradId, name: probe.spec.name, group: probe.spec._constellationId || '' });
+            probe._attitude = this._applyAttitude(probe.mesh, probe._arrays, { family: probe._family, pos: probe.mesh.position, vel: v, id: probe.spec.id });
+            // The model tiers hold their angular size inside MODEL_REF_R
+            // (kernel modelScale): a zoom into the ISS reads as approach —
+            // the planet and the neighbours grow, the symbol does not —
+            // instead of the hull filling the frame and the tiers popping.
+            if (cam) {
+                const sc = modelScale(cam.position.distanceTo(probe.mesh.position));
+                probe.midGrp?.scale.setScalar(sc);
+                probe.nearGrp?.scale.setScalar(sc);
+            }
         }
     }
 
