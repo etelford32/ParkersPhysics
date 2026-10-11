@@ -14,14 +14,14 @@
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:url" content="https://parkersphysics.com/privacy">
 <meta property="og:title" content="Privacy Policy — Parkers Physics">
-<meta property="og:description" content="How Parkers Physics collects, uses, and safeguards personal data. GDPR, CCPA, and state-privacy-law disclosures for our website, API, and simulations.">
+<meta property="og:description" content="How Parkers Physics collects, uses, and safeguards personal data. Location, analytics, alerts, retention, and GDPR / CCPA / state-law disclosures for our website, data endpoints, and simulations.">
 <meta property="og:image" content="https://parkersphysics.com/static/og/privacy.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Privacy Policy — Parkers Physics">
-<meta name="twitter:description" content="How Parkers Physics collects, uses, and safeguards personal data. GDPR, CCPA, and state-privacy-law disclosures for our website, API, and simulations.">
+<meta name="twitter:description" content="How Parkers Physics collects, uses, and safeguards personal data. Location, analytics, alerts, retention, and GDPR / CCPA / state-law disclosures for our website, data endpoints, and simulations.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/privacy.jpg">
 
     <meta name="description" content="Parkers Physics App Privacy Policy. Learn how we collect, use, and protect your data.">
@@ -125,7 +125,7 @@
         .toc a { color: #a080ff; text-decoration: none; font-size: .88rem; }
         .toc a:hover { color: #ffd700; text-decoration: underline; }
 
-        .legal-section { margin-bottom: 2.5rem; }
+        .legal-section { margin-bottom: 2.5rem; scroll-margin-top: 70px; }
         .legal-section h2 {
             font-size: 1.15rem; color: #ffd700;
             border-bottom: 1px solid rgba(255,200,0,.18);
@@ -156,6 +156,24 @@
             border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0;
             color: #c0a0ff; font-size: .88rem; line-height: 1.65;
         }
+
+        .summary-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: .75rem; margin: 1rem 0 2rem;
+        }
+        .summary-grid > div {
+            background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 6px; padding: .85rem 1rem; color: #aaa; font-size: .85rem; line-height: 1.6;
+        }
+        .summary-grid strong { color: #ddd; display: block; margin-bottom: .25rem; }
+        .table-wrap { overflow-x: auto; margin: 1rem 0; }
+        .legal-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+        .legal-table th, .legal-table td {
+            text-align: left; vertical-align: top; padding: .55rem .7rem;
+            border-bottom: 1px solid rgba(255,255,255,.08); color: #aaa; line-height: 1.55;
+        }
+        .legal-table th { color: #ffd700; font-weight: 600; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+        .legal-table code { overflow-wrap: anywhere; }
 
         /* ─── Footer ──────────────────────────────────────────────────── */
         footer {
@@ -209,31 +227,39 @@
 <!-- ═══════════════════════════════════════════════════ HERO ═══ -->
 <div class="legal-hero">
     <h1>Privacy Policy</h1>
-    <p class="legal-meta"><strong>Effective Date:</strong> May 4, 2026 &nbsp;·&nbsp; <strong>Last Updated:</strong> May 4, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 2.1</p>
+    <p class="legal-meta"><strong>Effective Date:</strong> October 11, 2026 &nbsp;·&nbsp; <strong>Last Updated:</strong> October 11, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 3.0</p>
 </div>
 
 <!-- ═══════════════════════════════════════════════════ BODY ═══ -->
 <div class="legal-body">
 
     <div class="highlight-box">
-        <strong>Telford Projects LLC</strong>, operating <strong>Parkers Physics App</strong> ("we," "us," "our"), is committed to protecting your privacy and to handling personal data lawfully, fairly, and transparently. This Policy explains what we collect, why we collect it, the legal basis for doing so, who we share it with, and the rights you have. <strong>We do not sell your personal information</strong> and we do not use it for cross-context behavioral advertising.
+        <strong>Telford Projects LLC</strong>, operating <strong>Parkers Physics App</strong> at parkersphysics.com ("we," "us," "our"), is committed to handling personal data lawfully, fairly, and transparently. This Policy explains what we collect, why, the legal basis, who we share it with, how long we keep it, and the rights you have. <strong>We do not sell your personal information</strong>, we do not show third-party advertising, and we do not use your data for cross-context behavioral advertising.
     </div>
 
-    <nav class="toc" aria-label="Table of Contents">
+    <div class="summary-grid">
+        <div><strong>Most of the Service works without an account.</strong> Space-weather data, simulations and forecasts are public. Without an account we store your preferences only in your own browser.</div>
+        <div><strong>Your location is used to answer "what does this mean where I am?"</strong> It is collected only if you share it (browser permission, a search, or a saved place), and is sent to weather / geocoding services so they can answer.</div>
+        <div><strong>Analytics are opt-in.</strong> Google Analytics and our first-party usage analytics stay off until you accept them in the cookie banner. A Global Privacy Control signal is treated as a "no".</div>
+        <div><strong>Minimal operational telemetry is always on.</strong> Crash reports, page-performance numbers and anonymous sign-up funnel steps, with no IP address, no email, and query strings stripped.</div>
+    </div>
+
+    <div class="toc" role="navigation" aria-label="Table of Contents">
         <h3>Contents</h3>
         <ol>
             <li><a href="#controller">Controller &amp; Scope</a></li>
             <li><a href="#data-collected">Data We Collect</a></li>
+            <li><a href="#location">Location Data</a></li>
             <li><a href="#how-used">How We Use Your Data</a></li>
             <li><a href="#legal-basis">Legal Bases (GDPR / UK GDPR)</a></li>
-            <li><a href="#third-party">Third-Party Services &amp; Sub-Processors</a></li>
-            <li><a href="#api-use">API Use &amp; Authenticated API Access</a></li>
-            <li><a href="#cookies">Cookies &amp; Local Storage</a></li>
+            <li><a href="#third-party">Service Providers &amp; Third-Party Services</a></li>
+            <li><a href="#api-use">Public Data Endpoints &amp; API Access</a></li>
+            <li><a href="#cookies">Cookies, Browser Storage &amp; Analytics</a></li>
             <li><a href="#sharing">Data Sharing &amp; Disclosures</a></li>
             <li><a href="#international">International Data Transfers</a></li>
             <li><a href="#retention">Data Retention</a></li>
             <li><a href="#security">Security</a></li>
-            <li><a href="#children">Children's Privacy</a></li>
+            <li><a href="#children">Children, Students &amp; Classrooms</a></li>
             <li><a href="#rights">Your Rights (GDPR &amp; UK GDPR)</a></li>
             <li><a href="#ccpa">California Privacy Rights (CCPA / CPRA)</a></li>
             <li><a href="#other-us-states">Other U.S. State Privacy Rights</a></li>
@@ -241,7 +267,7 @@
             <li><a href="#changes">Changes to This Policy</a></li>
             <li><a href="#contact">Contact &amp; Data Protection</a></li>
         </ol>
-    </nav>
+    </div>
 
     <section class="legal-section" id="controller">
         <h2>1. Controller &amp; Scope</h2>
@@ -251,243 +277,286 @@
             <li><strong>Privacy contact:</strong> <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a></li>
             <li><strong>Postal contact:</strong> available on request via the privacy email above.</li>
         </ul>
-        <p>This Policy applies to the Parkers Physics App website at parkersphysics.com, any installable Progressive Web App built from it, our public and authenticated APIs, and all interactive simulations and data feeds provided therein (collectively, the "Service"). It does not apply to third-party sites we link to, which have their own privacy policies.</p>
+        <p>This Policy applies to the website at parkersphysics.com and everything served from it: the space-weather dashboards and forecasts, EarthView, the interactive simulations and labs, the account dashboard, alert emails, our contact and access-request forms, and our public data endpoints (collectively, the "Service"). It does not apply to third-party sites we link to, which have their own privacy policies.</p>
         <p>Where this Policy refers to "personal data" or "personal information," those terms have the meanings given in the GDPR/UK GDPR and the California Consumer Privacy Act (CCPA), as amended by the California Privacy Rights Act (CPRA), respectively.</p>
     </section>
 
     <section class="legal-section" id="data-collected">
         <h2>2. Data We Collect</h2>
-        <p>We practice data minimization: we collect only what is necessary to operate, secure, and improve the Service. The personal data we may process falls into the following categories.</p>
+        <p>We practice data minimization: we collect only what is needed to operate, secure, and improve the Service. What we process depends on how you use it.</p>
+
+        <h3>2a. If you create an account</h3>
         <ul>
-            <li><strong>Identifiers &amp; Account Data</strong> (CCPA cat. A) — name (or display name), email address, salted+hashed password, account ID, optional institution / affiliation.</li>
-            <li><strong>Customer Records</strong> (CCPA cat. B) — billing name, billing country, last 4 digits of payment card and card brand (received from Stripe; we never see the full PAN), subscription tier and history.</li>
-            <li><strong>Commercial Information</strong> (CCPA cat. D) — products / plans purchased, transaction timestamps, refund history.</li>
-            <li><strong>Internet / Network Activity</strong> (CCPA cat. F) — pages visited within the Service, simulations launched, feature interactions, click events, error and crash reports, request timestamps, referral URL.</li>
-            <li><strong>Geolocation (coarse only)</strong> (CCPA cat. G) — country and approximate region inferred from IP address, used for compliance routing (e.g., GDPR vs. CCPA experiences) and abuse prevention. We do <strong>not</strong> collect precise device geolocation.</li>
-            <li><strong>Device &amp; Technical Data</strong> — IP address, browser type and version, operating system, viewport / screen resolution, device type, language, time zone.</li>
-            <li><strong>User-Provided Content</strong> — saved simulation parameters, named locations, dashboard configurations, support correspondence, feedback you submit.</li>
-            <li><strong>API &amp; Developer Data</strong> — API key identifiers (we store hashes of full keys, not the keys themselves), the labels and intended-use descriptions you provide when issuing a key, request logs (timestamp, source IP, endpoint, status code, response size), and aggregate usage counters used for billing and rate-limit enforcement. See Section 6 for detail.</li>
-            <li><strong>Inferences</strong> (CCPA cat. K) — limited operational inferences such as "active in the last 30 days" or "uses launch-planner feature regularly," used to prioritize features and improve the Service.</li>
+            <li><strong>Account data</strong> — email address, display name, account ID, and either a password (stored only as a salted hash by our authentication provider) or, if you choose "Sign in with Google," the basic profile Google returns (name, email address, profile identifier). We never receive your Google password.</li>
+            <li><strong>Plan &amp; role</strong> — your subscription plan, account role, and any invite or beta code you redeemed.</li>
+            <li><strong>Home location</strong> — if you set one (see <a href="#location">Section 3</a>).</li>
+            <li><strong>Alert preferences</strong> — which notifications you turned on (for example aurora, geomagnetic storm, solar flare, CME, radio blackout, GPS/GNSS, power-grid, ionospheric disturbance, satellite pass, conjunction/collision, temperature, active-region emergence) and their thresholds, email preferences, saved places with per-place alert settings and time zone, satellites you watch, and a history of alerts sent to you.</li>
+            <li><strong>Things you create</strong> — saved dashboard layouts and panel settings, Climate Lab preferences, and Spaceship Designer designs. Designs are private unless you mark one public.</li>
+            <li><strong>Profile change log</strong> — a security audit record of changes to plan, role, and similar account fields (who changed what, and when).</li>
         </ul>
-        <p>We do <strong>not</strong> collect biometric data, government identifiers, precise geolocation, sensitive characteristics protected by anti-discrimination law, content of private communications other than what you send us directly, or social-media credentials. We do not knowingly process "special category" personal data within the meaning of GDPR Article 9.</p>
+
+        <h3>2b. If you subscribe or pay</h3>
+        <ul>
+            <li><strong>Billing records</strong> — Stripe customer, subscription, and price identifiers, subscription status, and renewal date. Payments are handled entirely by Stripe; <strong>we never receive or store your card number</strong>, and we do not store card details of any kind.</li>
+        </ul>
+
+        <h3>2c. If you sign up for aurora alerts (no account needed)</h3>
+        <ul>
+            <li>Your email address, the confirmation status of the double opt-in, any campaign (UTM) tags on the link you arrived from, and — if you provide them — your alert threshold (Kp), approximate location (latitude/longitude) and city name, so we can alert you when aurora may be visible where you are. We also record when we last alerted you, to avoid repeat emails.</li>
+        </ul>
+
+        <h3>2d. If you contact us</h3>
+        <ul>
+            <li><strong>Request-access / enterprise inquiries</strong> — name, email, organization, role/title, use-case selections, and your message.</li>
+            <li><strong>Feedback and bug reports</strong> — subject, message, optional reply-to email, and the page you were on.</li>
+            <li>For both forms we also store the submitting <strong>IP address and browser user-agent</strong>, used only for spam and abuse prevention.</li>
+            <li>Anything you send to our support, sales, or privacy email addresses.</li>
+        </ul>
+
+        <h3>2e. When you browse — with your consent</h3>
+        <ul>
+            <li><strong>Usage analytics</strong> (only after you accept analytics in the cookie banner) — pages viewed, page titles, feature and simulation interactions, scroll depth, the referring site and campaign tags, screen size, browser language, a session identifier, and, if you are signed in, your account ID and plan. These are recorded in our own database and in Google Analytics 4 (see <a href="#cookies">Section 8</a>).</li>
+            <li><strong>Session activity</strong> — when a session started and was last active, the current page, and your browser family (the user-agent with device details stripped).</li>
+        </ul>
+
+        <h3>2f. When you browse — always</h3>
+        <p>A small amount of operational telemetry is collected from every visitor because the Service cannot be kept working without it. It contains <strong>no IP address, no email address, and no URL query strings</strong>:</p>
+        <ul>
+            <li><strong>Error reports</strong> — error messages and stack traces (with email addresses, access tokens and keys automatically redacted), the page path, and a random per-tab session ID; your account ID if you are signed in.</li>
+            <li><strong>Performance measurements</strong> — page-load and responsiveness timings (Core Web Vitals) for a sample of visits.</li>
+            <li><strong>Sign-in failures</strong> — the reason a sign-in failed and a shortened browser string. The email address involved is stored only as a keyed, one-way hash; plaintext emails are never written to this log.</li>
+            <li><strong>Funnel &amp; experiment steps</strong> — which step of sign-up a visitor reached, which version of a page they saw in an A/B test, and a coarse interest category inferred from the pages visited (for example "educator" or "operator"), keyed to a random visitor token stored in your browser and never joined to your identity.</li>
+            <li><strong>Your cookie-banner choice</strong> — whether the banner was shown and what you chose (we have to record this before you consent; it is the consent decision itself).</li>
+        </ul>
+        <p>Like any website, our hosting provider also receives your IP address and standard request headers in order to deliver pages (see Section 6).</p>
+
+        <h3>What we do not collect</h3>
+        <p>We do not collect biometric data, government identifiers, financial account or card numbers, health data, or other "special category" data within the meaning of GDPR Article 9. We do not read your contacts, and we do not use device fingerprinting.</p>
+    </section>
+
+    <section class="legal-section" id="location">
+        <h2>3. Location Data</h2>
+        <p>Much of the Service answers location-specific questions — aurora visibility, local weather and air quality, satellite passes, sky conditions, and nearby alerts. Location is <strong>always optional</strong>, and is collected only in these ways:</p>
+        <ul>
+            <li><strong>Device location</strong> — only if you press a "use my location" control and grant your browser's location permission. This is precise location; you can revoke the permission in your browser at any time.</li>
+            <li><strong>Search</strong> — a place name you type into a location search.</li>
+            <li><strong>Saved places / Home</strong> — locations you choose to save.</li>
+        </ul>
+        <p><strong>Where it goes:</strong></p>
+        <ul>
+            <li>Your current location is kept in your browser's local storage so every page can use it. If you are signed in and set a Home location or saved places, they are stored with your account so alerts can be computed for them.</li>
+            <li>To fetch local conditions, your browser sends the coordinates <strong>directly</strong> to the weather and geocoding services listed in Section 6 (Open-Meteo, OpenStreetMap Nominatim, and the U.S. National Weather Service). Those services receive the coordinates (or the place name you searched) and, inherently, your IP address. They are not given your name, email, or account ID.</li>
+            <li>Some of our own server endpoints receive coordinates in order to return localized data; we do not log them against your identity.</li>
+        </ul>
+        <p>We do not infer your location from your IP address, we do not track your location in the background, and we do not build a location history. Precise location is "sensitive personal information" under California law; we use it only to provide the location-specific features you request.</p>
     </section>
 
     <section class="legal-section" id="how-used">
-        <h2>3. How We Use Your Data</h2>
-        <p>We use personal data only for the purposes set out below. We do not use your data to serve third-party advertisements, and we do not engage in cross-context behavioral advertising.</p>
+        <h2>4. How We Use Your Data</h2>
+        <p>We use personal data only for the purposes below. We do not serve third-party advertisements.</p>
         <ul>
-            <li>Authenticate you and maintain your signed-in session</li>
-            <li>Deliver subscription features and feature gating according to your plan tier</li>
-            <li>Process payments and issue receipts (via Stripe)</li>
-            <li>Send transactional emails: account confirmation, password reset, security alerts, billing receipts, plan changes, service-impacting incidents</li>
-            <li>Send optional product updates only where you have opted in (or for U.S. recipients on a CAN-SPAM compliant basis you can unsubscribe from at any time)</li>
-            <li>Send aurora / geomagnetic-storm alert emails if you subscribe to them (no account required). These emails are stored for the sole purpose of storm notifications, require a double opt-in confirmation, store only your email address and any campaign (UTM) tags — never your IP or a device fingerprint — and are removable at any time via the one-click unsubscribe link in every message.</li>
-            <li>Detect, investigate, and prevent fraud, abuse, account takeover, denial-of-service, scraping, and other security incidents</li>
-            <li>Diagnose errors, monitor performance, and improve simulations, data feeds, and user interfaces</li>
-            <li>Compute aggregate, de-identified statistics about usage of the Service</li>
-            <li>Comply with our legal obligations and enforce our <a href="eula.html">EULA</a></li>
+            <li>Authenticate you and keep you signed in</li>
+            <li>Provide the features of your plan, including location-specific forecasts, dashboards, and saved configurations</li>
+            <li>Compute and send the alerts you subscribe to (account alerts and the no-account aurora alerts), and keep a history of them</li>
+            <li>Process payments and manage subscriptions (via Stripe)</li>
+            <li>Send transactional emails: account confirmation, password reset, security notices, billing and plan changes, class invitations, and service-impacting incidents</li>
+            <li>Respond to access requests, feedback, and support correspondence</li>
+            <li>Detect and prevent fraud, abuse, spam, account takeover, and denial-of-service</li>
+            <li>Diagnose errors, monitor performance, and improve simulations, data feeds, and interfaces</li>
+            <li>Understand, in aggregate, how the Service is used — including A/B tests of page designs — so we can prioritize work</li>
+            <li>Comply with legal obligations and enforce our <a href="eula.html">EULA</a></li>
         </ul>
+        <p>Aurora-alert emails use your email address only for storm notifications; every message has a one-click unsubscribe link.</p>
     </section>
 
     <section class="legal-section" id="legal-basis">
-        <h2>4. Legal Bases for Processing (GDPR / UK GDPR)</h2>
+        <h2>5. Legal Bases for Processing (GDPR / UK GDPR)</h2>
         <p>If you are in the European Economic Area, the United Kingdom, or Switzerland, we rely on the following legal bases under Article 6 GDPR / UK GDPR:</p>
         <ul>
-            <li><strong>Contract</strong> (Art. 6(1)(b)) — to create and operate your account, deliver features included in your plan, process payments, and provide customer support.</li>
-            <li><strong>Legitimate interests</strong> (Art. 6(1)(f)) — to keep the Service secure and reliable, prevent abuse and fraud, debug errors, analyze usage in aggregate, and improve our scientific simulations and data products. We balance these interests against your rights and freedoms; you may object at any time (see Section 13).</li>
-            <li><strong>Consent</strong> (Art. 6(1)(a)) — for non-essential cookies and similar technologies, and for any optional marketing communications. You may withdraw consent at any time without affecting the lawfulness of prior processing.</li>
-            <li><strong>Legal obligation</strong> (Art. 6(1)(c)) — to retain transaction and tax records, respond to lawful requests from authorities, and meet other obligations imposed by law.</li>
+            <li><strong>Contract</strong> (Art. 6(1)(b)) — to create and operate your account, deliver the features and alerts you set up (including location-based ones), process payments, and provide support.</li>
+            <li><strong>Consent</strong> (Art. 6(1)(a)) — for usage analytics and Google Analytics, for device location, and for the no-account aurora alerts (confirmed by double opt-in). You may withdraw consent at any time without affecting prior lawful processing.</li>
+            <li><strong>Legitimate interests</strong> (Art. 6(1)(f)) — for the operational telemetry in Section 2f (keeping the Service working and secure), abuse prevention on our forms, security audit logging, and answering inquiries you send us. You may object at any time (see Section 14).</li>
+            <li><strong>Legal obligation</strong> (Art. 6(1)(c)) — to retain transaction and tax records and respond to lawful requests from authorities.</li>
         </ul>
     </section>
 
     <section class="legal-section" id="third-party">
-        <h2>5. Third-Party Services &amp; Sub-Processors</h2>
-        <p>We rely on a small number of trusted vendors who act as <strong>processors</strong> (in GDPR terms) or <strong>service providers / contractors</strong> (in CCPA terms). They process personal data only on our documented instructions and under written contracts that include confidentiality, security, sub-processor, and data-deletion obligations.</p>
+        <h2>6. Service Providers &amp; Third-Party Services</h2>
+        <h3>6a. Service providers (processors)</h3>
+        <p>These vendors process personal data on our behalf under contracts that restrict their use of it:</p>
         <ul>
-            <li><strong>Supabase Inc.</strong> — managed Postgres database, authentication, and storage. Hosts account records, hashed passwords, saved configurations. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
-            <li><strong>Vercel Inc.</strong> — hosting and edge network. Processes request metadata (IP, URL, timing) for delivery and security. <a href="https://vercel.com/legal/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
-            <li><strong>Stripe, Inc.</strong> — payment processing. Acts as an independent controller for fraud-prevention and regulatory purposes. We never see full card numbers. <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
-            <li><strong>Transactional email provider</strong> (e.g., Resend / Postmark / equivalent) — delivers account, security, and billing emails.</li>
+            <li><strong>Supabase Inc.</strong> — database, authentication, and scheduled jobs (U.S. East region). Hosts account records, preferences, alert settings, form submissions, and telemetry. <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Vercel Inc.</strong> — website hosting and server functions. Processes request metadata (IP address, URL, user-agent, timing) to deliver pages and protect the Service. <a href="https://vercel.com/legal/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Resend</strong> — sends our transactional, alert, and confirmation emails, and reports delivery events (delivered, bounced, complained) back to us. <a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Google LLC — Google Analytics 4</strong> — usage measurement, <strong>only if you accept analytics cookies</strong>. If you are signed in, your account ID (never your email or name) and plan are attached so we can measure retention. Our site code turns off Google Signals and ad personalization and denies Google's advertising consent signals, so this data is not used for advertising. If you withdraw consent we stop sending data to Google Analytics and delete its cookies. <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
         </ul>
-        <p>We display live data from the following public scientific data sources. <strong>No personally identifiable information is transmitted to these services</strong>; requests are made without user identifiers and may be proxied through our servers:</p>
+        <h3>6b. Independent services you interact with</h3>
         <ul>
-            <li><strong>NASA DONKI</strong> — CME and geomagnetic storm catalog (api.nasa.gov)</li>
-            <li><strong>NOAA Space Weather Prediction Center (SWPC)</strong> — solar wind, Kp index, X-ray flux, geomagnetic alerts (services.swpc.noaa.gov)</li>
-            <li><strong>JPL Horizons</strong> — planetary ephemerides, NEO data (ssd.jpl.nasa.gov)</li>
-            <li><strong>NASA / ESA SOHO, STEREO, SDO</strong> — solar imagery</li>
-            <li><strong>National Weather Service</strong> — terrestrial alerts (api.weather.gov)</li>
-            <li><strong>CelesTrak</strong> and similar public catalogs — orbital elements (TLEs)</li>
+            <li><strong>Stripe, Inc.</strong> — payment processing and the billing portal. Stripe collects your payment details directly and acts as an independent controller for fraud prevention and regulatory purposes. <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Google Sign-In</strong> — if you choose to sign in with Google, Google authenticates you and shares your basic profile with us. <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</li>
+            <li><strong>Location services, called from your browser</strong> — <a href="https://open-meteo.com/en/terms" target="_blank" rel="noopener">Open-Meteo</a> (forecasts, air quality, historical weather), <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener">OpenStreetMap Nominatim</a> (place search and reverse geocoding), and the <a href="https://www.weather.gov/privacy" target="_blank" rel="noopener">U.S. National Weather Service</a> (local alerts) receive the coordinates or place name you supply, as described in Section 3.</li>
+            <li><strong>Content delivery networks</strong> — some pages load open-source libraries from jsDelivr and unpkg and fonts from Google Fonts. As with any web request, those providers receive your IP address and browser information. No account information is sent.</li>
         </ul>
-        <p>An up-to-date list of sub-processors is available on request to <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a> and is referenced in our <a href="dpa.html">Data Processing Agreement</a>.</p>
+        <h3>6c. Scientific data sources</h3>
+        <p>We display data from public scientific sources including NOAA's Space Weather Prediction Center, NASA (DONKI, SDO, and other missions), JPL Horizons and the JPL Small-Body Database, USGS, the National Weather Service, MET Norway, the Copernicus Atmosphere Monitoring Service, and CelesTrak. These requests are made by our servers (or are cached) and <strong>carry no information about you</strong>. Some imagery is loaded by your browser directly from public archives, which receive only standard request metadata.</p>
+        <p>An up-to-date list of service providers is available on request to <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>.</p>
     </section>
 
     <section class="legal-section" id="api-use">
-        <h2>6. API Use &amp; Authenticated API Access</h2>
-        <p>This Section explains how we handle personal data when you (or systems acting on your behalf) use our HTTP REST API, WebSocket streams, or embeddable widgets (the "API"). Use of the API is also subject to Section 7 of our <a href="eula.html">EULA</a> and our <a href="api-policy.html">API &amp; Data Policy</a>.</p>
-
-        <h3>6a. What we collect when you use the API</h3>
-        <ul>
-            <li><strong>API key metadata</strong> — a public key identifier, a salted hash of the secret portion (we cannot recover the secret after creation), the issuing account, the label and intended-use description you provided, the plan tier, and the creation / last-rotated / revoked timestamps.</li>
-            <li><strong>Request logs</strong> — timestamp, source IP address, HTTP method, endpoint path, query-parameter shape (not values containing personal data), response status code, response size in bytes, latency, and a coarse client identifier (such as the User-Agent or a derived fingerprint hash) used for abuse detection.</li>
-            <li><strong>Usage counters</strong> — per-key and per-account request totals, used to enforce rate limits and to bill metered plans.</li>
-            <li><strong>Error and security events</strong> — authentication failures, rate-limit hits, anomaly-detection signals.</li>
-        </ul>
-        <p>We do <strong>not</strong> log full request bodies by default. We may sample requests for debugging with appropriate access controls, and only when necessary to investigate a specific incident or to fix a defect. We do not log Authorization headers or other secrets.</p>
-
-        <h3>6b. Why we process this data &amp; legal bases</h3>
-        <ul>
-            <li><strong>Provide and bill the API</strong> (contract — GDPR Art. 6(1)(b)).</li>
-            <li><strong>Enforce rate limits, detect abuse, prevent fraud, secure the platform</strong> (legitimate interests — Art. 6(1)(f)).</li>
-            <li><strong>Debug defects and improve reliability</strong> (legitimate interests).</li>
-            <li><strong>Meet legal, tax, and audit obligations</strong> (legal obligation — Art. 6(1)(c)).</li>
-        </ul>
-
-        <h3>6c. Outbound calls to upstream scientific data sources</h3>
-        <p>When the Service or API serves you data sourced from upstream public APIs (NOAA SWPC, NASA DONKI, JPL Horizons, NWS, CelesTrak, etc.), our backend makes the upstream request on your behalf. <strong>We do not forward your account identifiers, IP address, or API key to those upstream sources.</strong> Where we serve cached responses, no upstream call is made at all.</p>
-
-        <h3>6d. Embedding and developer use cases</h3>
-        <p>If you embed our widgets or render our data on a site you operate, the site visitor's browser will exchange standard HTTP metadata (IP, User-Agent, Referer header) with our infrastructure to deliver the embed. You are responsible for disclosing this in your own site's privacy notice.</p>
-
-        <h3>6e. Retention specific to the API</h3>
-        <ul>
-            <li><strong>API key metadata</strong> — retained while the key is active, plus 12 months after revocation for fraud and audit purposes.</li>
-            <li><strong>API request logs</strong> — full-fidelity logs retained up to 90 days; aggregated counters and security event records retained up to 13 months.</li>
-            <li><strong>Billing-relevant usage records</strong> — retained for up to 7 years to satisfy U.S. tax requirements.</li>
-        </ul>
-
-        <h3>6f. Your control</h3>
-        <p>You can rotate or revoke API keys at any time from your developer dashboard. Deleting your account also revokes all associated keys. You may request export of API key metadata and aggregated usage counters under Sections 13 and 14.</p>
+        <h2>7. Public Data Endpoints &amp; API Access</h2>
+        <p>The data endpoints that power our pages (under <code>/api/</code>) serve public scientific data and do not require an account or key. When they are called — by our pages or by anyone else — we process the request's IP address only <strong>in memory</strong> to enforce rate limits; it is not written to our database. Our hosting provider keeps its own short-lived request logs (Section 6a). Use of these endpoints is also subject to our <a href="api-policy.html">API &amp; Data Policy</a> and Section 7 of our <a href="eula.html">EULA</a>.</p>
+        <p>We do not currently issue personal API keys. If we introduce authenticated API access, we will update this Policy before it launches to describe what is logged and for how long.</p>
+        <p>If you embed or link to our pages or data from a site you operate, your visitors' browsers exchange standard request metadata (IP, user-agent, referrer) with our infrastructure; please disclose this in your own privacy notice.</p>
     </section>
 
     <section class="legal-section" id="cookies">
-        <h2>7. Cookies &amp; Local Storage</h2>
-        <p>We classify the cookies and similar technologies we use as follows. EU/EEA, UK, and Swiss visitors are presented with a consent banner on first visit; non-essential categories are <strong>off by default</strong> until you opt in.</p>
-        <ul>
-            <li><strong>Strictly necessary</strong> (always on): authentication session, CSRF token, load balancing, consent-state cookie. These are required to operate the Service and cannot be disabled.</li>
-            <li><strong>Functional / preference</strong> (consent-based outside the U.S.): saved UI settings, simulation parameters, named locations. Stored in browser <code>localStorage</code> on your device.</li>
-            <li><strong>Analytics</strong> (consent-based outside the U.S.): privacy-respecting, first-party analytics about page views and feature usage. We do not use ad-tech analytics.</li>
-            <li><strong>No advertising or cross-site tracking cookies</strong> are set by us.</li>
-        </ul>
-        <p>You can change your choices at any time using the <strong>Cookie Settings</strong> link in our footer, or by clearing site data in your browser. Choices are stored locally on your device, so they may need to be re-set on each browser you use.</p>
+        <h2>8. Cookies, Browser Storage &amp; Analytics</h2>
+        <p>The Service mostly uses your browser's <code>localStorage</code> and <code>sessionStorage</code> rather than cookies. Everyone sees a consent banner on their first visit, <strong>wherever they are</strong>, and the optional categories are <strong>off until you opt in</strong>. If your browser sends a <strong>Global Privacy Control</strong> signal, we treat it as a refusal of functional and analytics storage.</p>
+        <div class="table-wrap">
+        <table class="legal-table">
+            <thead><tr><th>Category</th><th>What it does</th><th>Examples</th></tr></thead>
+            <tbody>
+                <tr><td><strong>Strictly necessary</strong><br>(always on)</td><td>Keeps you signed in, remembers your consent choice, measures errors and performance, keeps A/B-test assignments stable</td><td>Supabase sign-in token (<code>sb-…-auth-token</code>), <code>pp_auth</code>, <code>pp_consent_v1</code>, <code>pp_telemetry_session</code>, <code>pp_vid</code>, <code>pp_funnel_id</code>, <code>pp_exp_seen</code>, <code>pp_persona</code>, <code>pp_home_v</code> (cookie)</td></tr>
+                <tr><td><strong>Functional</strong></td><td>Remembers your location, saved places, layouts, and settings on this device</td><td><code>ppx_user_location</code>, <code>ppx_user_locations</code>, <code>pp-earth-saved-locations</code>, <code>pp_climate_lab_v1</code>, <code>pp-layout-lab</code></td></tr>
+                <tr><td><strong>Analytics</strong><br>(opt-in)</td><td>Counts page views and feature use so we can improve the Service</td><td><code>pp_analytics_session</code>; Google Analytics cookies <code>_ga</code> and <code>_ga_&lt;id&gt;</code></td></tr>
+            </tbody>
+        </table>
+        </div>
+        <p>If you choose "Keep me signed in" off, the sign-in token is kept in <code>sessionStorage</code> and cleared when you close the tab. We set <strong>no advertising or cross-site tracking cookies</strong>.</p>
+        <p>You can change your choices at any time with the <a href="#" data-open-cookie-settings>Cookie Settings</a> link in our footer, or by clearing site data in your browser. Choices are stored on your device, so they need to be set on each browser you use.</p>
     </section>
 
     <section class="legal-section" id="sharing">
-        <h2>8. Data Sharing &amp; Disclosures</h2>
-        <p>We do not sell your personal information and we do not "share" it for cross-context behavioral advertising as those terms are defined under the CCPA/CPRA. We disclose personal data only in these limited situations:</p>
+        <h2>9. Data Sharing &amp; Disclosures</h2>
+        <p>We do not sell your personal information and we do not "share" it for cross-context behavioral advertising as those terms are defined under the CCPA/CPRA. We disclose personal data only:</p>
         <ul>
-            <li><strong>Sub-processors / service providers</strong> listed in Section 5, under written agreements that prohibit independent use of the data.</li>
-            <li><strong>Legal compliance:</strong> when required by applicable law, valid legal process (subpoena, warrant, court order), or to respond to lawful requests by public authorities, including for national security or law-enforcement purposes. We will narrowly construe such requests and notify users where we are legally permitted to do so.</li>
-            <li><strong>Protection of rights and safety:</strong> to investigate fraud or security incidents, to enforce our <a href="eula.html">EULA</a>, or to protect the rights, property, or safety of Telford Projects LLC, our users, or the public.</li>
-            <li><strong>Business transfer:</strong> in connection with a merger, acquisition, financing, reorganization, or sale of assets, with notice to affected users where required.</li>
-            <li><strong>With your consent:</strong> for any other purpose you specifically agree to.</li>
+            <li><strong>To service providers</strong> listed in Section 6, to operate the Service.</li>
+            <li><strong>Within classroom and institution accounts</strong> — an educator or account administrator can see the names, emails, and seat status of the members they invited (see Section 13).</li>
+            <li><strong>Publicly, at your choice</strong> — for example a Spaceship Designer design you mark public.</li>
+            <li><strong>For legal compliance</strong> — when required by law, valid legal process, or lawful requests by public authorities. We narrowly construe such requests and notify users where permitted.</li>
+            <li><strong>To protect rights and safety</strong> — to investigate fraud or security incidents, enforce our <a href="eula.html">EULA</a>, or protect Telford Projects LLC, our users, or the public.</li>
+            <li><strong>In a business transfer</strong> — a merger, acquisition, financing, reorganization, or sale of assets, with notice where required.</li>
+            <li><strong>With your consent</strong> — for any other purpose you specifically agree to.</li>
         </ul>
     </section>
 
     <section class="legal-section" id="international">
-        <h2>9. International Data Transfers</h2>
-        <p>Telford Projects LLC is established in the United States and our primary infrastructure is located in the United States. If you access the Service from the EEA, the United Kingdom, Switzerland, or another jurisdiction outside the U.S., your personal data will be transferred to and processed in the United States, which has different data-protection rules than your home country.</p>
-        <p>For transfers of personal data from the EEA, UK, or Switzerland to the United States or other third countries, we rely on the following safeguards as applicable:</p>
+        <h2>10. International Data Transfers</h2>
+        <p>Telford Projects LLC is established in the United States and our database is hosted in the United States (us-east-1). If you use the Service from outside the U.S., your personal data will be transferred to and processed in the United States, which has different data-protection rules than your home country.</p>
+        <p>For transfers from the EEA, UK, or Switzerland we rely, as applicable, on:</p>
         <ul>
-            <li>The European Commission's <strong>Standard Contractual Clauses</strong> (Decision 2021/914) and the UK <strong>International Data Transfer Addendum</strong> issued by the ICO.</li>
-            <li>Where available, the <strong>EU–U.S. Data Privacy Framework</strong> and its UK / Swiss extensions for vendors that are certified.</li>
-            <li>Supplementary technical and organizational measures (encryption in transit and at rest, access controls, minimization).</li>
+            <li>The European Commission's <strong>Standard Contractual Clauses</strong> (Decision 2021/914) and the UK <strong>International Data Transfer Addendum</strong>, as incorporated in our providers' data processing terms.</li>
+            <li>The <strong>EU–U.S. Data Privacy Framework</strong> and its UK / Swiss extensions for providers that are certified.</li>
+            <li>Supplementary measures: encryption in transit and at rest, access controls, and minimization.</li>
         </ul>
         <p>You may request a copy of the relevant transfer mechanism by emailing <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>.</p>
     </section>
 
     <section class="legal-section" id="retention">
-        <h2>10. Data Retention</h2>
-        <p>We retain personal data only as long as needed for the purposes described in this Policy or as required by law. Specific retention windows include:</p>
-        <ul>
-            <li><strong>Account data</strong> — for the life of your account; deleted within 30 days of a verified deletion request, except where retention is required by law.</li>
-            <li><strong>Authentication and security logs</strong> — up to 12 months from the event.</li>
-            <li><strong>Aggregate usage / analytics logs</strong> — up to 24 months, then deleted or irreversibly aggregated.</li>
-            <li><strong>Billing and tax records</strong> — up to 7 years following the transaction, as required by U.S. tax law.</li>
-            <li><strong>Support correspondence</strong> — up to 3 years from the last exchange.</li>
-            <li><strong>Backups</strong> — encrypted backups are retained on a rolling basis (typically 30 days) before being overwritten; deletion requests are honored in production immediately and propagate through backup rotation.</li>
-            <li><strong>API key metadata, request logs, and usage counters</strong> — see Section 6e for the API-specific retention table.</li>
-        </ul>
+        <h2>11. Data Retention</h2>
+        <p>We keep personal data only as long as needed for the purposes in this Policy or as required by law. Automated deletion jobs enforce the shorter windows below.</p>
+        <div class="table-wrap">
+        <table class="legal-table">
+            <thead><tr><th>Data</th><th>How long</th></tr></thead>
+            <tbody>
+                <tr><td>Account data, preferences, saved places, dashboards, designs</td><td>For the life of your account; deleted within 30 days of a verified deletion request, except where law requires retention</td></tr>
+                <tr><td>Usage analytics events (first-party) and account milestones (for example, sign-up and first alert)</td><td>180 days, deleted automatically</td></tr>
+                <tr><td>Google Analytics data</td><td>No longer than 14 months (the maximum Google Analytics allows)</td></tr>
+                <tr><td>Alert history</td><td>90 days, deleted automatically</td></tr>
+                <tr><td>Error, sign-in-failure, not-found, and redirect telemetry</td><td>30 days, deleted automatically</td></tr>
+                <tr><td>Performance telemetry</td><td>14 days, deleted automatically</td></tr>
+                <tr><td>Session activity, funnel and experiment steps, cookie-banner decisions, and the security audit log of account changes</td><td>30 days, deleted automatically</td></tr>
+                <tr><td>Aurora-alert subscriptions</td><td>Until you unsubscribe. The record is then marked unsubscribed so we never email you again; email us to have it deleted entirely</td></tr>
+                <tr><td>Access requests, feedback, and support correspondence</td><td>Up to 3 years from the last exchange</td></tr>
+                <tr><td>Billing and tax records</td><td>Up to 7 years after the transaction, as required by U.S. tax law</td></tr>
+                <tr><td>Backups</td><td>Rolling backups maintained by our database provider; deletions reach backups as they rotate</td></tr>
+            </tbody>
+        </table>
+        </div>
+        <p>Data kept in your own browser stays there until you clear it.</p>
     </section>
 
     <section class="legal-section" id="security">
-        <h2>11. Security</h2>
-        <p>We implement administrative, technical, and organizational measures appropriate to the risk, including:</p>
+        <h2>12. Security</h2>
+        <p>We use administrative, technical, and organizational measures appropriate to the risk, including:</p>
         <ul>
-            <li>HTTPS / TLS for all traffic between your browser and the Service</li>
-            <li>Encryption at rest for the production database and backups</li>
-            <li>Salted password hashing using a memory-hard algorithm</li>
-            <li>Row-Level Security policies in our database to enforce per-user access</li>
-            <li>Multi-factor authentication for administrative access</li>
-            <li>Principle of least privilege for staff and vendor access</li>
-            <li>Application-level rate limiting and abuse detection</li>
-            <li>Monitoring, logging, and dependency vulnerability scanning</li>
+            <li>HTTPS / TLS for all traffic to the Service</li>
+            <li>Encryption at rest for the production database</li>
+            <li>Passwords stored only as salted bcrypt hashes by our authentication provider; we never see them</li>
+            <li>Row-Level Security in our database so each account can read only its own data</li>
+            <li>Keyed one-way hashing of email addresses in sign-in-failure logs, and automatic redaction of emails, tokens, and keys from error reports</li>
+            <li>An audit log of changes to account roles and plans</li>
+            <li>Least-privilege access for staff and server functions, rate limiting, and spam traps on public forms</li>
+            <li>Monitoring, logging, and dependency updates</li>
         </ul>
-        <p>No system is perfectly secure. If you suspect unauthorized access to your account or believe you have discovered a security vulnerability, please contact <a href="mailto:security@parkersphysics.com">security@parkersphysics.com</a>. Where required by law, we will notify affected users and supervisory authorities of personal-data breaches without undue delay (and within 72 hours under GDPR Article 33 where feasible).</p>
+        <p>No system is perfectly secure. If you suspect unauthorized access to your account or have found a vulnerability, contact <a href="mailto:security@parkersphysics.com">security@parkersphysics.com</a>. Where required by law, we will notify affected users and supervisory authorities of personal-data breaches without undue delay (and within 72 hours under GDPR Article 33 where feasible).</p>
     </section>
 
     <section class="legal-section" id="children">
-        <h2>12. Children's Privacy</h2>
-        <p>Parkers Physics App is intended for users aged <strong>13 and older</strong> in the United States and <strong>16 and older</strong> in the European Economic Area, the United Kingdom, and Switzerland. We do not knowingly collect personal data from children below those ages. If we learn that we have done so, we will delete the data promptly and terminate the account. Parents or guardians who believe their child has provided us with personal data should contact <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>.</p>
+        <h2>13. Children, Students &amp; Classrooms</h2>
+        <p>Parkers Physics App is intended for users aged <strong>13 and older</strong> in the United States and <strong>16 and older</strong> in the EEA, the United Kingdom, and Switzerland. We do not knowingly collect personal data from children below those ages. If we learn that we have, we will delete it promptly and close the account. Parents or guardians who believe their child has given us personal data should contact <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>.</p>
+        <p><strong>Classroom seats.</strong> Educator and institution plans can invite students or members by email. We send the invitation, and the invited person creates their own account. The educator or institution can see each seat's name, email, and status, and can remove a seat. Educators are responsible for having the authority (for example, school or parental consent where required) to invite their students, and must not invite anyone below the ages above. We use student data only to provide the Service and never for advertising.</p>
     </section>
 
     <section class="legal-section" id="rights">
-        <h2>13. Your Rights (GDPR &amp; UK GDPR)</h2>
-        <p>If you are in the EEA, the United Kingdom, or Switzerland, you have the following rights under the GDPR and UK GDPR. Exercising these rights is free and we will respond within one month (extendable by two further months for complex requests, with notice).</p>
+        <h2>14. Your Rights (GDPR &amp; UK GDPR)</h2>
+        <p>If you are in the EEA, the United Kingdom, or Switzerland, you have the following rights. Exercising them is free, and we will respond within one month (extendable by two further months for complex requests, with notice).</p>
         <ul>
-            <li><strong>Right of access</strong> (Art. 15) — obtain confirmation of whether we process your personal data and a copy of it.</li>
-            <li><strong>Right to rectification</strong> (Art. 16) — correct inaccurate or incomplete data.</li>
-            <li><strong>Right to erasure / "to be forgotten"</strong> (Art. 17) — request deletion in defined circumstances.</li>
-            <li><strong>Right to restrict processing</strong> (Art. 18).</li>
-            <li><strong>Right to data portability</strong> (Art. 20) — receive your data in a structured, commonly used, machine-readable format.</li>
-            <li><strong>Right to object</strong> (Art. 21) — object to processing based on our legitimate interests, including profiling.</li>
-            <li><strong>Right to withdraw consent</strong> (Art. 7(3)) — at any time, without affecting prior lawful processing.</li>
-            <li><strong>Right not to be subject to solely automated decisions</strong> with legal or similarly significant effects (Art. 22) — see Section 16.</li>
-            <li><strong>Right to lodge a complaint</strong> with your local supervisory authority (e.g., the Irish DPC, the UK ICO, the Swiss FDPIC) or with the authority of your habitual residence, place of work, or place of the alleged infringement.</li>
+            <li><strong>Access</strong> (Art. 15) — confirmation of whether we process your data, and a copy of it.</li>
+            <li><strong>Rectification</strong> (Art. 16) — correct inaccurate or incomplete data. Most account fields can be edited directly in your account settings.</li>
+            <li><strong>Erasure</strong> (Art. 17) — request deletion in defined circumstances.</li>
+            <li><strong>Restriction</strong> (Art. 18) of processing.</li>
+            <li><strong>Portability</strong> (Art. 20) — receive your data in a structured, machine-readable format.</li>
+            <li><strong>Objection</strong> (Art. 21) — object to processing based on our legitimate interests.</li>
+            <li><strong>Withdraw consent</strong> (Art. 7(3)) — at any time, for example through Cookie Settings, your browser's location permission, or the unsubscribe link in any alert email.</li>
+            <li><strong>Not to be subject to solely automated decisions</strong> with legal or similarly significant effects (Art. 22) — see Section 17.</li>
+            <li><strong>Complain</strong> to your supervisory authority (e.g., the Irish DPC, the UK ICO, the Swiss FDPIC) or the authority where you live, work, or where the alleged infringement occurred.</li>
         </ul>
-        <p>To exercise any right, email <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>. We may need to verify your identity before responding.</p>
+        <p>To exercise any right, email <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a> from the address on your account. We may need to verify your identity before responding.</p>
     </section>
 
     <section class="legal-section" id="ccpa">
-        <h2>14. California Privacy Rights (CCPA / CPRA)</h2>
-        <p>If you are a California resident, you have the following rights under the California Consumer Privacy Act, as amended by the California Privacy Rights Act:</p>
+        <h2>15. California Privacy Rights (CCPA / CPRA)</h2>
+        <p>If you are a California resident, you have the following rights:</p>
         <ul>
             <li><strong>Right to know</strong> the categories and specific pieces of personal information we collect, the sources, the business purposes, and the categories of recipients.</li>
-            <li><strong>Right to delete</strong> personal information we have collected from you, subject to statutory exceptions.</li>
+            <li><strong>Right to delete</strong> personal information we collected from you, subject to statutory exceptions.</li>
             <li><strong>Right to correct</strong> inaccurate personal information.</li>
-            <li><strong>Right to opt out of sale or sharing</strong> of personal information. <strong>We do not sell or share personal information for cross-context behavioral advertising</strong>, so no opt-out is operationally required, but you may confirm in writing.</li>
-            <li><strong>Right to limit use of sensitive personal information.</strong> We do not collect sensitive personal information as defined by the CPRA beyond log-in credentials necessary to access your account, which we use only to authenticate you.</li>
+            <li><strong>Right to opt out of sale or sharing.</strong> <strong>We do not sell or share personal information</strong> for cross-context behavioral advertising. We honor Global Privacy Control signals as an opt-out preference.</li>
+            <li><strong>Right to limit use of sensitive personal information.</strong> The sensitive personal information we process is account log-in credentials and, if you provide it, precise geolocation. We use them only to authenticate you and to provide the location-specific features you request — uses that do not give rise to the right to limit.</li>
             <li><strong>Right to non-discrimination</strong> for exercising any of these rights.</li>
         </ul>
-        <p>Categories of personal information we have collected in the prior 12 months: identifiers (Cat. A); customer records (Cat. B); commercial information (Cat. D); internet/network activity (Cat. F); coarse geolocation (Cat. G); inferences (Cat. K). Categories disclosed for a business purpose: A, B, D, F to our sub-processors listed in Section 5. Categories sold or shared: <strong>none</strong>.</p>
-        <p>You may exercise these rights by emailing <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a> or by submitting an authorized agent's request with documentation of authority. We honor browser-level Global Privacy Control (GPC) signals as a valid opt-out preference.</p>
+        <p><strong>Categories collected in the prior 12 months:</strong> identifiers (A); customer records (B); commercial information (D); internet or other electronic network activity (F); geolocation, including precise geolocation if you provide it (G); professional information you submit in an access request (I); and inferences — a coarse interest category used to tailor page content (K). Sources: you, your browser, Google (if you use Google Sign-In), and Stripe. <strong>Categories disclosed for a business purpose:</strong> A, B, D, F, G, I, and K to the service providers in Section 6. <strong>Categories sold or shared:</strong> none.</p>
+        <p>To exercise these rights, email <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>, or have an authorized agent submit a request with documentation of authority.</p>
         <p><strong>"Shine the Light" (Cal. Civ. Code §1798.83):</strong> we do not share personal information with third parties for their direct marketing purposes.</p>
     </section>
 
     <section class="legal-section" id="other-us-states">
-        <h2>15. Other U.S. State Privacy Rights</h2>
-        <p>If you are a resident of Virginia, Colorado, Connecticut, Utah, Texas, Oregon, Montana, or another U.S. state with a comprehensive consumer-privacy law, you have rights substantially similar to those described in Sections 13 and 14 — including rights to access, correct, delete, obtain a portable copy, and opt out of targeted advertising and sales (we conduct neither). To exercise any right, contact <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>. You may appeal a denial of your request by replying to our response email; we will respond to appeals within the statutory window applicable to your state.</p>
+        <h2>16. Other U.S. State Privacy Rights</h2>
+        <p>If you live in Virginia, Colorado, Connecticut, Utah, Texas, Oregon, Montana, or another U.S. state with a comprehensive consumer-privacy law, you have rights substantially similar to those in Sections 14 and 15 — to access, correct, delete, and obtain a portable copy of your data, and to opt out of targeted advertising, sales, and profiling (we do none of these). Where state law requires consent to process precise geolocation, we obtain it through your browser's location permission or by your entering a location. To exercise any right, contact <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a>. You may appeal a denial by replying to our response; we will answer appeals within the period your state's law requires.</p>
     </section>
 
     <section class="legal-section" id="automated">
-        <h2>16. Automated Decision-Making</h2>
-        <p>We do not use solely automated decision-making, including profiling, that produces legal or similarly significant effects on you. Automated processes used for fraud and abuse detection, rate limiting, and feature gating are subject to human review when their outcomes are challenged.</p>
+        <h2>17. Automated Decision-Making</h2>
+        <p>We do not use solely automated decision-making, including profiling, that produces legal or similarly significant effects on you. Space-weather alerts and forecasts are generated automatically from scientific models and your chosen thresholds; they are information, not decisions about you. Automated rate limiting, spam filtering, and plan-based feature access are reviewed by a person if you challenge an outcome.</p>
     </section>
 
     <section class="legal-section" id="changes">
-        <h2>17. Changes to This Policy</h2>
-        <p>We may update this Policy from time to time. If we make material changes, we will notify registered users by email at least 14 days before the changes take effect and update the "Last Updated" date at the top of this page. Prior versions are archived and available on request. Continued use of the Service after the effective date constitutes acceptance of the revised Policy.</p>
+        <h2>18. Changes to This Policy</h2>
+        <p>We may update this Policy as the Service changes. If we make material changes, we will notify registered users by email at least 14 days before they take effect and update the dates at the top of this page. Prior versions are archived and available on request.</p>
+        <p><strong>What changed in version 3.0 (October 2026):</strong> added a dedicated location section (location is used and may be precise when you share it); disclosed Google Analytics, Google Sign-In, Resend, the location services, and the content delivery networks; described the always-on operational telemetry and A/B testing; listed the browser-storage keys we use; replaced estimated retention periods with the windows our automatic deletion jobs enforce (30 days for session, funnel, consent, and audit records); described classroom seats; corrected the API section (we do not currently issue API keys) and the billing data we hold (no card details).</p>
     </section>
 
     <section class="legal-section" id="contact">
-        <h2>18. Contact &amp; Data Protection</h2>
+        <h2>19. Contact &amp; Data Protection</h2>
         <ul>
             <li><strong>Controller:</strong> Telford Projects LLC, d/b/a Parkers Physics App</li>
             <li><strong>Privacy:</strong> <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a></li>
             <li><strong>Security:</strong> <a href="mailto:security@parkersphysics.com">security@parkersphysics.com</a></li>
             <li><strong>Support:</strong> <a href="mailto:support@parkersphysics.com">support@parkersphysics.com</a></li>
-            <li><strong>Data Processing Agreement:</strong> see <a href="dpa.html">parkersphysics.com/dpa</a></li>
+            <li><strong>Data Processing Agreement:</strong> organizational customers can request one at <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a></li>
         </ul>
-        <p>We have not appointed a Data Protection Officer (DPO) because our processing activities do not currently meet the thresholds set by GDPR Article 37. If you are an EEA-based controller and require a written representative under Article 27 to be appointed in the EU as a condition of using our Service, contact us to discuss arrangements.</p>
+        <p>We have not appointed a Data Protection Officer because our processing does not currently meet the thresholds in GDPR Article 37. If you are an EEA-based controller and need an Article 27 representative appointed as a condition of using the Service, contact us to discuss arrangements.</p>
     </section>
 
 </div>
@@ -497,6 +566,7 @@
     <p>© 2026 Parkers Physics App &nbsp;·&nbsp;
         <a href="index.html">Home</a> &nbsp;·&nbsp;
         <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+        <a href="#" data-open-cookie-settings>Cookie Settings</a> &nbsp;·&nbsp;
         <a href="eula.html">EULA</a> &nbsp;·&nbsp;
         <a href="api-policy.html">API Policy</a> &nbsp;·&nbsp;
         <a href="pricing.html">Pricing</a> &nbsp;·&nbsp;
@@ -512,6 +582,14 @@
         burger.setAttribute('aria-expanded', open);
     });
 </script>
-<script type="module">import './js/analytics.js';</script>
+<script type="module">
+    import './js/cookie-consent.js';
+    import './js/analytics.js';
+    // "Cookie Settings" links open the consent modal (cookie-consent.js listens).
+    document.querySelectorAll('[data-open-cookie-settings]').forEach(a => a.addEventListener('click', e => {
+        e.preventDefault();
+        window.dispatchEvent(new Event('open-cookie-settings'));
+    }));
+</script>
 </body>
 </html>

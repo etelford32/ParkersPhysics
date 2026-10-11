@@ -60,6 +60,8 @@ body {
 }
 .frl-badge.demo { color:#ffd75e; border-color:rgba(255,215,94,.4); }
 .frl-badge.demo::before { background:#ffd75e; box-shadow:0 0 8px #ffd75e; }
+.frl-badge.quiet { color:#8fd3ff; border-color:rgba(143,211,255,.4); }
+.frl-badge.quiet::before { background:#8fd3ff; box-shadow:0 0 8px #8fd3ff; }
 .frl-mode-note { font-size:.74rem; color:#8b94ad; padding:0 22px 4px; max-width:1500px; margin:0 auto; line-height:1.5; }
 .frl-mode-note b { color:#cdd5e4; }
 .frl-mode-note a, .frl-mode-note button {
@@ -329,6 +331,7 @@ class TauClock {
 const GRID = { t0S: 0, dtS: 600, hours: 132, n: 0 };
 const state = {
     mode: 'boot',          // 'live' | 'demo' | 'boot'
+    scope: 'earth',        // live train scope: 'earth' (corridor) | 'all' (quiet corridor)
     preset: null,          // the applied train preset
     launchMs: null,        // epoch = rope 0 launch
     ropes: [],
@@ -362,8 +365,12 @@ function setGrid(lastOffsetS) {
 
 function nowH() { return state.launchMs ? (Date.now() - state.launchMs) / 3600e3 : 0; }
 
-/** Apply a LIVE compounding train selected from the DONKI catalog. */
-function applyLiveTrain(sel, ambientWKms) {
+/**
+ * Apply a LIVE compounding train selected from the DONKI catalog.
+ * scope 'earth' = the Earth-relevant train; 'all' = the quiet-corridor view
+ * (every CME still in flight, any direction — the kernel reports the miss).
+ */
+function applyLiveTrain(sel, ambientWKms, scope = 'earth') {
     const preset = donkiToTrainPreset(sel, { ambientWKms });
     // Background-noise wiring (review F2): the sheath ambient-variability
     // seed δ is MEASURED, not the 2.5 nT climatology — disclosed in the
@@ -371,6 +378,7 @@ function applyLiveTrain(sel, ambientWKms) {
     const delta = sheathDeltaFromNoise(state.noise);
     preset.ropes = preset.ropes.map((r) => ({ ...r, sheathDeltaNt: delta }));
     state.mode = 'live';
+    state.scope = scope;
     state.preset = preset;
     state.launchMs = Date.parse(preset.launchIso);
     state.ropes = preset.ropes;
@@ -380,8 +388,11 @@ function applyLiveTrain(sel, ambientWKms) {
     state.obsDriver = state.rtsw;
     state.sigmaNt = assimSigmaFromNoise(state.noise);
     setGrid(preset.ropes[preset.ropes.length - 1].launchOffsetS);
-    $('frl-mode').className = 'frl-badge';
-    $('frl-mode').textContent = `LIVE · ${preset.ropes.length} CME${preset.ropes.length > 1 ? 's' : ''} IN FLIGHT`;
+    const n = preset.ropes.length, plural = n > 1 ? 's' : '';
+    $('frl-mode').className = scope === 'all' ? 'frl-badge quiet' : 'frl-badge';
+    $('frl-mode').textContent = scope === 'all'
+        ? `LIVE · EARTH CORRIDOR QUIET · ${n} CME${plural} ELSEWHERE`
+        : `LIVE · ${n} CME${plural} IN FLIGHT`;
     $('frl-focus').checked = true;
     // Real time: the cursor IS wall-clock now, advancing at τ = 1.
     clock.scrub(Math.min(GRID.hours, Math.max(0, nowH())) * 3600);
@@ -404,6 +415,7 @@ async function applyDemo(reasonHtml) {
         cmes: null,
     };
     state.mode = 'demo';
+    state.scope = 'earth';
     state.preset = preset;
     state.launchMs = Date.parse(preset.launchIso);
     state.ropes = preset.ropes;
@@ -664,7 +676,7 @@ function renderTrain() {
             <div class="frl-cme-sub">
                 v₀ ${Math.round(r.v0Kms)} km/s · dir ${r.lonDeg >= 0 ? '+' : ''}${Math.round(r.lonDeg)}°/${r.latDeg >= 0 ? '+' : ''}${Math.round(r.latDeg)}° ·
                 σ₁AU ${r.sigma1AuAu.toFixed(3)} AU
-                ${cme ? ` · cone ½-angle ${Math.round(cme.halfAngleDeg)}°${cme.earthDirected ? ' · Earth-directed' : ' · glancing candidate'}` : ''}
+                ${cme ? ` · cone ½-angle ${Math.round(cme.halfAngleDeg)}°${cme.earthDirected ? ' · Earth-directed' : state.scope === 'all' ? ' · off the Sun–Earth line' : ' · glancing candidate'}` : ''}
                 · apex <b class="frl-apex" data-idx="${i}">—</b>
             </div>
         </div>`;
@@ -677,7 +689,7 @@ function renderMembership(sel) {
     const anchors = state.catalog.filter((c) => c.earthDirected).length;
     const passed = anchors - sel.filter((c) => c.earthDirected).length;
     el.innerHTML = `Catalog (7 d): ${state.catalog.length} analyses · ${anchors} Earth-directed
-        · <b>${sel.length} in the modeled train</b>${passed > 0
+        · <b>${sel.length} in the modeled ${state.scope === 'all' ? 'heliosphere view' : 'train'}</b>${passed > 0
             ? ` · ${passed} already past L1 (excluded — honesty, not amnesia)` : ''}.
         Membership: launched inside the window, or still in transit.`;
 }
@@ -970,34 +982,55 @@ function liveAmbientW() {
     return n ? Math.round(s / n) : 400;
 }
 
-/** Try to (re)build the live train; returns true when live mode applied. */
+/**
+ * Try to (re)build the live train; returns true when live mode applied.
+ * Order: the Earth-relevant train → the quiet-corridor view (every CME
+ * still in flight, any direction) → the Gannon DEMO only when the catalog
+ * holds nothing in flight at all. The live catalogue drives the kernel
+ * whenever it has anything to drive it with.
+ */
 function tryLive(force = false) {
     if (!state.catalog) return false;
-    const sel = selectTrainCmes(state.catalog, {
+    const opts = {
         nowMs: Date.now(),
         windowH: parseInt($('frl-window').value, 10),
         maxRopes: kernel.maxRopes,
-    });
+    };
+    let scope = 'earth';
+    let sel = selectTrainCmes(state.catalog, opts);
     if (!sel.length) {
-        if (force || state.mode === 'boot') {
-            applyDemo(`<b>Corridor quiet</b> — the DONKI catalog is reachable but no
-                Earth-directed CME is currently in flight for this window.`);
+        scope = 'all';
+        sel = selectTrainCmes(state.catalog, { ...opts, scope });
+    }
+    if (!sel.length) {
+        if (force || state.mode !== 'demo') {
+            applyDemo(`<b>Heliosphere quiet</b> — the DONKI catalog is reachable but
+                holds no CME in flight in any direction for this window.`);
             renderMembership([]);
         }
         return false;
     }
-    if (state.mode === 'live' && !force
+    if (state.mode === 'live' && !force && state.scope === scope
         && state.preset?.cmes?.length === sel.length
         && state.preset.cmes.every((c, i) => c.id === sel[i].id)) {
         return true;   // same train — no churn
     }
-    applyLiveTrain(sel, liveAmbientW());
+    applyLiveTrain(sel, liveAmbientW(), scope);
     const winH = parseInt($('frl-window').value, 10);
-    $('frl-mode-note').innerHTML = `<b>Live compounding watch</b> — modeling
-        ${sel.length} Earth-relevant CME${sel.length > 1 ? 's' : ''} (launched in the
-        last ${winH} h or still in transit) as one §16-interacting train, epoch
-        ${fmtUtc(state.launchMs)}. The now-line advances in real time; the ensemble
-        re-conditions on L1 data as it arrives.`;
+    const n = sel.length, plural = n > 1 ? 's' : '';
+    $('frl-mode-note').innerHTML = scope === 'all'
+        ? `<b>Live · Earth corridor quiet</b> — no Earth-directed CME is in flight,
+            so the engine is propagating the ${n} CME${plural} DONKI has catalogued
+            elsewhere in the heliosphere (launched in the last ${winH} h or still in
+            transit) as one §16-interacting train, epoch ${fmtUtc(state.launchMs)}.
+            Their directions are DONKI's cone fits; the ensemble's P(hit) is the
+            model's own answer to "does any of it reach Earth". The now-line runs
+            in real time on live L1 data.`
+        : `<b>Live compounding watch</b> — modeling
+            ${n} Earth-relevant CME${plural} (launched in the
+            last ${winH} h or still in transit) as one §16-interacting train, epoch
+            ${fmtUtc(state.launchMs)}. The now-line advances in real time; the ensemble
+            re-conditions on L1 data as it arrives.`;
     renderMembership(sel);
     return true;
 }
@@ -1076,8 +1109,9 @@ async function boot() {
         console.info('flux-rope-live: DONKI unavailable', e?.message ?? e);
     }
     if (!state.catalog) {
-        await applyDemo(`<b>Live catalog unreachable</b> — the DONKI proxy did not
-            answer (offline or blocked network).`);
+        await applyDemo(`<b>Live catalog unreachable</b> — the DONKI relay did not
+            answer (both NASA hosts down, or this network is offline). Retrying every
+            2 min; the page switches to live on its own.`);
     } else if (!tryLive(true)) {
         /* quiet corridor → demo applied inside tryLive */
     }
@@ -1102,7 +1136,9 @@ async function boot() {
             }
         } catch { /* keep the last record */ }
     }, 5 * 60e3);
-    setInterval(async () => {
+    // Catalog: every 15 min once we hold one; every 2 min while we don't,
+    // so a DONKI outage recovers to live without a reload.
+    const refreshCatalog = async () => {
         try {
             state.catalog = await fetchDonkiCmes({ days: 7 });
             if (state.mode === 'live' || !state.userTouched) tryLive();
@@ -1113,7 +1149,9 @@ async function boot() {
                 $('frl-mode-note').append(' · ', btn);
             }
         } catch { /* keep the last catalog */ }
-    }, 15 * 60e3);
+        setTimeout(refreshCatalog, (state.catalog ? 15 : 2) * 60e3);
+    };
+    setTimeout(refreshCatalog, (state.catalog ? 15 : 2) * 60e3);
 }
 
 await boot();
