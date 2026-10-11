@@ -17,9 +17,16 @@
  *   body_coverage  rows with real text / rows
  *   item_keys      the union of upstream KEY NAMES (never values)
  *
- * One production request settles it: `curl …/api/donki/notifications |
- * jq '.body_source, .body_coverage, .item_keys'`. Then record the winning
- * key first in BODY_CANDIDATES.
+ * SETTLED 2026-10-11 (preview of this branch, upstream `ccmc`, 26 rows):
+ * item_keys = [messageBody, messageID, messageIssueTime, messageType,
+ * messageURL] — the old five, nothing new — and body_coverage 0/26. The
+ * new host's `messageBody` is a stub with no text in it and the message
+ * lives ONLY on its view page (`messageURL`, ccmc.gsfc.nasa.gov/DONKI/
+ * view/Alert/<n>/1). So today every body is null and the response carries
+ * the `note`. The candidate list stays: if CCMC restores the text (in
+ * messageBody or a new key) it flows back with no code change, and the
+ * self-report says which key carried it. Re-check with `curl …/api/donki/
+ * notifications | jq '.body_source, .body_coverage, .item_keys'`.
  *
  * A body with no letters or digits once the markdown heading markers are
  * stripped ("## ", "##\n##") is NOT text: it is null, and when no row has
