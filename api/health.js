@@ -38,7 +38,12 @@ const UPSTREAMS = [
     // kauai URL kept answering 200 with an HTML announcement page, so this
     // row stayed green for eleven days while every DONKI route 503'd —
     // hence `expectJson`: a 200 that is not JSON is DOWN.
-    { source: 'donki-cme',    url: `${DONKI_HOSTS[0].base}/CME`, edge_authoritative: true, expectJson: true },
+    // The new host answers 400 without an explicit range, so the window is
+    // built per request (a getter — ping() destructures `url` each call).
+    { source: 'donki-cme', get url() {
+        const d = (ms) => new Date(ms).toISOString().slice(0, 10);
+        return `${DONKI_HOSTS[0].base}/CME?startDate=${d(Date.now() - 86_400_000)}&endDate=${d(Date.now())}`;
+    }, edge_authoritative: true, expectJson: true },
     // SDO browse frames — proxied by /api/solar/aia (the observed disk on
     // sun.html + the Stage / globe / heliosphere live Suns), so this row IS
     // authoritative. Smallest frame NASA serves, to keep the probe cheap.
