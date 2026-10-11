@@ -196,9 +196,9 @@ nav {
     #sel-chip { padding-left:16px; font-size:13px; }
 }
 @media (max-width:768px) {
-    /* --tc-clear = canvas bottom − time-controls top, measured (the row wraps
-       to a different height on every phone width). */
-    #sel-chip { top:auto; bottom:calc(var(--tc-clear, 110px) + 10px); }
+    /* --rib-clear = canvas bottom − ribbon top, measured (the time-control row
+       under the ribbon wraps to a different height on every phone width). */
+    #sel-chip { top:auto; bottom:calc(var(--rib-clear, 140px) + 8px); }
     #sel-chip-hint { display:none; }
 }
 
@@ -222,9 +222,46 @@ nav {
 #hud .sep { border-top:1px solid rgba(255,200,0,.12); margin:5px 0; }
 #fps-display { color:#40ff80; font-weight:600; }
 
+/* ─── HUD header / phone collapse ────────────────────────────── */
+#hud-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+#hud-toggle { display:none; }
+@media (max-width:768px) {
+    /* The full HUD was ~245×430 px on a 390 px phone: it hid the Sun at the
+       default camera and sat under the Weather/Info buttons. On phones it
+       docks BELOW that button row and boots collapsed to name / selection /
+       date; "More" opens the rest, which then scrolls inside the canvas. */
+    #hud { top:56px; min-width:0; padding:7px 10px 7px 12px; line-height:1.6; max-width:calc(100% - 24px); }
+    #hud.collapsed #hud-more { display:none; }
+    #hud:not(.collapsed) {
+        pointer-events:auto; overflow-y:auto; overscroll-behavior:contain;
+        /* floor = ribbon + the selection chip that docks on it (52 + 8 px) */
+        max-height:calc(100% - 56px - var(--rib-clear, 160px) - 72px);
+    }
+    #hud-toggle {
+        display:inline-flex; align-items:center; pointer-events:auto;
+        min-height:44px; padding:0 14px; margin:-8px -6px -8px 0; border-radius:22px;
+        background:rgba(255,200,0,.08); border:1px solid rgba(255,200,0,.28);
+        color:#ffd700; font:inherit; font-size:11px; cursor:pointer; touch-action:manipulation;
+    }
+    /* Kp / wind / Earth G stay; Bz and flare are already in the live strip
+       under the nav, and the full ribbon was 642 px on a 390 px screen. */
+    #sw-ribbon { gap:6px; padding:5px 10px; letter-spacing:.2px; }
+    #sw-ribbon .sw-opt, #sw-earth-gl { display:none; }
+}
+@media (max-width:380px) {
+    #sw-ribbon { font-size:9px; gap:5px; }
+    #sw-ribbon .sw-val { font-size:9.5px; min-width:0; }
+}
+
+
 /* ─── Space Weather ribbon ───────────────────────────────────── */
+/* Docked ABOVE the time controls by measurement (--tc-clear, set in the page
+   module): at a fixed bottom:58px it overlapped the time-control row on
+   desktop and, on phones where that row wraps, covered its second line
+   outright — +1d…+1yr and every speed button were untappable at 360 px. */
 #sw-ribbon {
-    position:absolute; bottom:58px; left:50%; transform:translateX(-50%);
+    position:absolute; bottom:calc(var(--tc-clear, 52px) + 6px); left:50%; transform:translateX(-50%);
+    max-width:calc(100% - 24px); overflow:hidden;
     z-index:55; display:flex; align-items:center; gap:14px;
     background:rgba(0,0,0,.72); backdrop-filter:blur(10px);
     border:1px solid rgba(80,160,255,.22); border-radius:20px;
@@ -285,7 +322,9 @@ nav {
 
 /* ─── Time controls bar ──────────────────────────────────── */
 #time-controls {
-    position:absolute; bottom:44px; left:12px; z-index:15;
+    /* 50 px clears the speed slider row (bottom 16 + ~30 tall); at 44 it
+       overlapped it by 2 px on every viewport. */
+    position:absolute; bottom:50px; left:12px; z-index:15;
     display:flex; align-items:center; gap:4px; flex-wrap:wrap;
     pointer-events:auto; max-width:calc(100% - 24px);
 }
@@ -468,10 +507,16 @@ import './js/telemetry.js';
             <button type="button" id="sel-chip-x" aria-label="Deselect" title="Deselect (Esc)">✕</button>
         </div>
         <!-- HUD -->
-        <div id="hud">
-            <h3 id="hud-name">Solar System</h3>
+        <div id="hud" class="collapsed">
+            <div id="hud-head">
+                <h3 id="hud-name">Solar System</h3>
+                <!-- Phones only (CSS): the HUD boots collapsed to these three
+                     lines; the rest is one tap away. -->
+                <button type="button" id="hud-toggle" aria-expanded="false" aria-controls="hud-more">More ▾</button>
+            </div>
             <div>Selected: <span class="val" id="hud-body">—</span></div>
             <div>Date: <span class="val" id="hud-year" style="font-variant-numeric:tabular-nums">—</span></div>
+            <div id="hud-more">
             <div style="display:flex;justify-content:space-between;margin-top:1px;">
                 <span class="dim">Ephemeris</span>
                 <span id="hud-ephem" style="font-size:9px;color:#445566;letter-spacing:.2px">Meeus</span>
@@ -535,6 +580,7 @@ import './js/telemetry.js';
             </div>
             <div class="sep"></div>
             <div class="dim" style="margin-top:0"><span class="hint-fine">Drag · Scroll · Click a body · Esc deselects</span><span class="hint-touch">Drag · Pinch · Tap a body · tap empty sky to deselect</span></div>
+            </div>
         </div>
 
         <!-- Overlay buttons -->
@@ -592,21 +638,21 @@ import './js/telemetry.js';
                 <span class="sw-lbl">Wind</span>
                 <span class="sw-val" id="sw-speed">—</span>
             </div>
-            <div class="sw-item" style="margin-left:-6px">
+            <div class="sw-item sw-opt" style="margin-left:-6px">
                 <span class="sw-lbl">km/s</span>
             </div>
-            <div id="sw-sep"></div>
-            <div class="sw-item">
+            <div id="sw-sep" class="sw-opt"></div>
+            <div class="sw-item sw-opt">
                 <span class="sw-lbl">IMF Bz</span>
                 <span class="sw-val" id="sw-bz">—</span>
                 <span class="sw-lbl">nT</span>
             </div>
-            <div id="sw-sep"></div>
-            <div class="sw-item">
+            <div id="sw-sep" class="sw-opt"></div>
+            <div class="sw-item sw-opt">
                 <span class="sw-lbl">Flare</span>
                 <span class="sw-val" id="sw-flare">—</span>
             </div>
-            <div id="sw-sep"></div>
+            <div id="sw-sep" class="sw-opt"></div>
             <span id="sw-flare-badge"></span>
             <div id="sw-sep"></div>
             <div class="sw-item">
@@ -3909,16 +3955,41 @@ if (!_watchStrip()) {
 window.addEventListener('resize', fitAppHeight);
 fitAppHeight();
 
-// The phone selection chip docks just above the time controls (see #sel-chip).
-const _tcEl = document.getElementById('time-controls');
-function fitSelChip() {
+// The bottom overlays STACK by measurement: time controls (which wrap to a
+// different height at every width) → the ribbon above them (--tc-clear) →
+// the phone selection chip and the expanded phone HUD's floor (--rib-clear).
+// The ribbon's clearance is computed, not read back from its own rect, so a
+// ResizeObserver (which fires on size, never on position) is enough.
+const _tcEl  = document.getElementById('time-controls');
+const _ribEl = document.getElementById('sw-ribbon');
+function fitBottomStack() {
     if (!_tcEl) return;
-    const clear = Math.round(cWrap.getBoundingClientRect().bottom - _tcEl.getBoundingClientRect().top);
-    if (clear > 0) cWrap.style.setProperty('--tc-clear', `${clear}px`);
+    const tcClear = Math.round(cWrap.getBoundingClientRect().bottom - _tcEl.getBoundingClientRect().top);
+    if (!(tcClear > 0)) return;
+    cWrap.style.setProperty('--tc-clear', `${tcClear}px`);
+    const ribH = _ribEl && getComputedStyle(_ribEl).display !== 'none' ? _ribEl.offsetHeight : 0;
+    cWrap.style.setProperty('--rib-clear', `${tcClear + (ribH ? 6 + ribH : 0)}px`);
 }
-new ResizeObserver(fitSelChip).observe(_tcEl ?? cWrap);
-new ResizeObserver(fitSelChip).observe(cWrap);
-fitSelChip();
+const _stackRo = new ResizeObserver(fitBottomStack);
+[_tcEl, _ribEl, cWrap].forEach(el => el && _stackRo.observe(el));
+fitBottomStack();
+
+// Phone HUD collapse (CSS applies it only ≤768 px). The choice is a per-viewer
+// convenience, so it lives in localStorage — wrapped, because private windows
+// throw — and the page renders correctly without it.
+const HUD_OPEN_KEY = 'pp_orrery_hud_open';
+const hudEl = document.getElementById('hud');
+const hudToggle = document.getElementById('hud-toggle');
+function setHudOpen(open, persist = true) {
+    hudEl.classList.toggle('collapsed', !open);
+    hudToggle.setAttribute('aria-expanded', String(open));
+    hudToggle.textContent = open ? 'Less ▴' : 'More ▾';
+    if (persist) { try { localStorage.setItem(HUD_OPEN_KEY, open ? '1' : '0'); } catch {} }
+}
+let _hudOpen = false;
+try { _hudOpen = localStorage.getItem(HUD_OPEN_KEY) === '1'; } catch {}
+setHudOpen(_hudOpen, false);
+hudToggle.addEventListener('click', () => setHudOpen(hudEl.classList.contains('collapsed')));
 
 // ═══════════════════════════════════════════════════════
 //  TIME CONTROLS — jump, warp, date picker

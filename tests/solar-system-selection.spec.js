@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Browser gate for LETTING GO of a selection on solar-system.html.
+ * Browser gate for LETTING GO of a selection on solar-system.html — and for
+ * the canvas chrome around it on each form factor (the LAYOUT describes at the
+ * bottom: phone HUD collapse, the measured bottom stack, the ribbon fitting).
  *
  * Selecting was well covered (tests/solar-system-neo-smoke.spec.js pins that a
  * click selects, a drag does not, and empty sky selects nothing). Deselecting
@@ -337,3 +339,186 @@ test.describe('solar-system.html — deselect on PHONE (touch)', () => {
         expect((await state(page)).has).toBe(false);
     });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LAYOUT. Every rectangle below is the RENDERED box, so a rule that silently
+// loses on cascade order (the first version of the phone HUD rule did, and sat
+// under the Weather button) fails here rather than in a screenshot.
+
+const boxes = (page) => page.evaluate(() => {
+    const r = (id) => { const e = document.getElementById(id); if (!e || getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width, h: b.height }; };
+    const c = document.getElementById('canvas-wrap').getBoundingClientRect();
+    return {
+        vw: innerWidth, vh: innerHeight, canvas: { left: c.left, right: c.right, top: c.top, bottom: c.bottom },
+        hud: r('hud'), more: r('hud-more'), toggle: r('hud-toggle'), weather: r('btn-sw'), info: r('btn-panel-open'),
+        chip: r('sel-chip'), ribbon: r('sw-ribbon'), tc: r('time-controls'), speed: r('speed-ctrl'), center: r('btn-center'),
+        ribbonScroll: (() => { const e = document.getElementById('sw-ribbon'); return e.scrollWidth - e.clientWidth; })(),
+        hudScrolls: (() => { const e = document.getElementById('hud'); return e.scrollHeight > e.clientHeight + 1; })(),
+    };
+});
+const overlaps = (a, b) => !!a && !!b && a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+
+function expectBottomStackClear(g) {
+    const stack = { chip: g.chip, ribbon: g.ribbon, timeControls: g.tc, speed: g.speed, center: g.center };
+    const names = Object.keys(stack).filter(k => stack[k]);
+    for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
+        expect(overlaps(stack[names[i]], stack[names[j]]), `${names[i]} overlaps ${names[j]}`).toBe(false);
+    }
+    for (const k of names) {
+        expect(stack[k].left, `${k} inside the left edge`).toBeGreaterThanOrEqual(0);
+        expect(stack[k].right, `${k} inside the right edge`).toBeLessThanOrEqual(g.vw + 0.5);
+        expect(stack[k].bottom, `${k} on screen`).toBeLessThanOrEqual(g.vh + 0.5);
+    }
+}
+
+for (const vp of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
+    test.describe(`solar-system.html — PHONE layout ${vp.width}×${vp.height}`, () => {
+        test.setTimeout(120_000);
+        test.use({ viewport: vp, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+
+        test('the HUD boots collapsed below the button row and leaves the centre of the sky clear', async ({ page }) => {
+            const errors = await openPage(page);
+            await page.evaluate(() => window.__neoLab.selectBody(null));
+            const g = await boxes(page);
+            expect(g.more, 'HUD details hidden on boot').toBeNull();
+            expect(g.toggle, 'the More toggle is shown').not.toBeNull();
+            expect(g.toggle.h, 'toggle meets the 44 px touch floor').toBeGreaterThanOrEqual(44);
+            expect(overlaps(g.hud, g.weather), 'HUD clear of ⚡ Weather').toBe(false);
+            expect(overlaps(g.hud, g.info), 'HUD clear of ☰ Info').toBe(false);
+            const cx = (g.canvas.left + g.canvas.right) / 2, cy = (g.canvas.top + g.canvas.bottom) / 2;
+            expect(g.hud.bottom, 'collapsed HUD stays in the top band').toBeLessThan(g.canvas.top + (g.canvas.bottom - g.canvas.top) * 0.35);
+            expect(!(cx > g.hud.left && cx < g.hud.right && cy > g.hud.top && cy < g.hud.bottom), 'HUD off the canvas centre').toBe(true);
+            // The Sun is drawn at the canvas centre at the default camera; it must be visible, not under the HUD.
+            const sun = await page.evaluate(() => window.__neoLab.bodyPixel('Sun'));
+            expect(!(sun.x > g.hud.left && sun.x < g.hud.right && sun.y > g.hud.top && sun.y < g.hud.bottom), 'the Sun is not under the HUD').toBe(true);
+            expect(errors).toEqual([]);
+        });
+
+        test('More opens the HUD inside the space above the bottom controls, and the choice persists', async ({ page }) => {
+            await openPage(page);
+            await page.evaluate(() => window.__neoLab.selectBody(null));
+            await page.locator('#hud-toggle').tap();
+            await expect(page.locator('#hud-toggle')).toHaveAttribute('aria-expanded', 'true');
+            await expect(page.locator('#tog-wind'), 'the layer toggles are reachable when open').toBeVisible();
+            const g = await boxes(page);
+            expect(g.more).not.toBeNull();
+            expect(g.hud.bottom, 'open HUD stops above the selection chip').toBeLessThanOrEqual(g.chip.top + 0.5);
+            expect(overlaps(g.hud, g.ribbon) || overlaps(g.hud, g.tc), 'open HUD clear of the bottom stack').toBe(false);
+            if (g.hudScrolls) {
+                // Content that does not fit scrolls INSIDE the HUD (it takes pointer events while open).
+                await page.evaluate(() => { document.getElementById('hud').scrollTop = 9999; });
+                expect(await page.evaluate(() => document.getElementById('hud').scrollTop)).toBeGreaterThan(0);
+            }
+            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.waitForFunction(() => !!window.__neoLab?.bodyPixel, null, { timeout: 45_000 });
+            await expect(page.locator('#hud-toggle'), 'opened HUD stays open across a reload').toHaveAttribute('aria-expanded', 'true');
+            await page.locator('#hud-toggle').tap();
+            await expect(page.locator('#hud-more')).toBeHidden();
+        });
+
+        test('ribbon, chip, time controls, speed and Center stack without overlap, all on screen', async ({ page }) => {
+            await openPage(page);
+            await page.evaluate(() => window.__neoLab.selectBody(null));
+            const g = await boxes(page);
+            expect(g.ribbonScroll, 'ribbon content fits its box (nothing clipped)').toBeLessThanOrEqual(1);
+            expectBottomStackClear(g);
+            // Every time-control button is hittable at its centre — the ribbon used to cover the second row.
+            const blocked = await page.evaluate(() => [...document.querySelectorAll('#time-controls button, #time-controls input')]
+                .filter(el => { const b = el.getBoundingClientRect(); const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return hit !== el && !el.contains(hit); })
+                .map(el => el.id || el.textContent.trim()));
+            expect(blocked, 'time-control buttons covered by something else').toEqual([]);
+        });
+    });
+}
+
+test.describe('solar-system.html — DESKTOP layout 1280×720', () => {
+    test.setTimeout(120_000);
+    test.use({ viewport: { width: 1280, height: 720 } });
+
+    test('the HUD stays fully open with no toggle, and the bottom stack is clear', async ({ page }) => {
+        await openPage(page);
+        await page.evaluate(() => window.__neoLab.selectBody(null));
+        const g = await boxes(page);
+        expect(g.toggle, 'no collapse toggle on desktop').toBeNull();
+        expect(g.more, 'HUD details visible on desktop').not.toBeNull();
+        expect(g.canvas.bottom, 'canvas ends at the bottom of the screen').toBeLessThanOrEqual(g.vh + 0.5);
+        expectBottomStackClear(g);
+    });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SHOWER LABELS. Fixed-pixel sprites anchored ~1 unit from Earth: at the
+// system-wide framing every active shower's label landed on Earth's few pixels
+// and printed over the others (reported as garbled text on the opening view).
+// The date is PINNED to the Orionids peak so the gate does not depend on which
+// showers happen to be active on the day CI runs (Orionids + S. Taurids share a
+// patch of sky, which is exactly the overlapping pair that was reported).
+
+async function pinShowerDate(page) {
+    await page.evaluate(() => {
+        const el = document.getElementById('tc-date-picker');
+        el.value = '2026-10-21T12:00';
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForFunction(() => window.__neoLab.layer._radiants.length >= 2, null, { timeout: 45_000 });
+}
+const radiantLabels = (page) => page.evaluate(() => {
+    const lab = window.__neoLab, cam = lab.camera, r = lab.canvas.getBoundingClientRect();
+    return lab.layer._radiants.map(q => {
+        const p = q.label.getWorldPosition(new lab.THREE.Vector3()).project(cam);
+        return { code: q.code, text: q.label.userData.text, visible: q.label.visible,
+            x: r.left + (p.x * 0.5 + 0.5) * r.width, y: r.top + (-p.y * 0.5 + 0.5) * r.height,
+            onScreen: p.z > -1 && p.z < 1 && Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1 };
+    });
+});
+
+for (const [form, use] of [
+    ['DESKTOP', { viewport: { width: 1280, height: 720 } }],
+    ['PHONE', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }],
+]) {
+    test.describe(`solar-system.html — shower labels (${form})`, () => {
+        test.setTimeout(120_000);
+        test.use(use);
+
+        test('no shower label at the system-wide view; close to Earth they show without overlapping', async ({ page }) => {
+            await openPage(page);
+            await pinShowerDate(page);
+            await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+            const wide = await radiantLabels(page);
+            expect(wide.length).toBeGreaterThanOrEqual(2);
+            expect(wide.filter(l => l.visible).map(l => l.text), 'no shower label on the opening framing').toEqual([]);
+
+            // Earth View preset: the radiant arrows now span most of the frame.
+            await page.evaluate(() => document.getElementById('cam-earth').click());
+            if (form === 'DESKTOP') {
+                await page.waitForFunction(() => window.__neoLab.layer._radiants.some(q => q.label.visible), null, { timeout: 20_000 });
+            } else {
+                // A portrait phone's Earth View can leave every radiant label
+                // outside the safe box — then NONE is drawn, by design.
+                await page.waitForTimeout(800);
+            }
+            const shown = (await radiantLabels(page)).filter(l => l.visible);
+            if (form === 'DESKTOP') expect(shown.length, 'at least one shower named up close').toBeGreaterThan(0);
+            // …and never under the page's own chrome.
+            const chrome = await page.evaluate(() => ['hud', 'time-controls', 'sw-ribbon', 'speed-ctrl', 'sel-chip', 'btn-center']
+                .map(id => document.getElementById(id)).filter(e => e && getComputedStyle(e).display !== 'none')
+                .map(e => { const b = e.getBoundingClientRect(); return { id: e.id, left: b.left, right: b.right, top: b.top, bottom: b.bottom }; }));
+            for (const l of shown) for (const c of chrome) {
+                expect(l.x > c.left && l.x < c.right && l.y > c.top && l.y < c.bottom, `${l.code} label anchored under #${c.id}`).toBe(false);
+            }
+            // On a portrait phone a radiant can point off the narrow frame; only
+            // labels actually on screen can collide.
+            const near = shown.filter(l => l.onScreen);
+            // Drawn labels are ~19 px tall: any two whose anchors sit closer
+            // than a line height and a short word apart would print over each other.
+            for (let i = 0; i < near.length; i++) for (let j = i + 1; j < near.length; j++) {
+                const dx = Math.abs(near[i].x - near[j].x), dy = Math.abs(near[i].y - near[j].y);
+                expect(dx > 60 || dy > 18, `${near[i].code} and ${near[j].code} labels overlap`).toBe(true);
+            }
+
+            // Back out to the top view: they go again.
+            await page.evaluate(() => document.getElementById('cam-top').click());
+            await page.waitForFunction(() => !window.__neoLab.layer._radiants.some(q => q.label.visible), null, { timeout: 20_000 });
+        });
+    });
+}
