@@ -6,14 +6,17 @@
 // failure not a result, the key goes only to the gateway, and an error
 // message never carries a URL or the key.
 import assert from 'node:assert/strict';
-import { DONKI_HOSTS, donkiUrl, fetchDonki } from '../api/_lib/donki-upstream.js';
+import { DONKI_HOSTS, donkiUrl, fetchDonki, describeBody } from '../api/_lib/donki-upstream.js';
 
 const KEY = 'SECRETKEY123';
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log('  ok', name); };
 
-const jsonRes = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
-const htmlRes = () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } });
+const hdrs = (type) => ({ get: (k) => (k.toLowerCase() === 'content-type' ? type : null) });
+const jsonRes = (body, status = 200) => ({ ok: status < 400, status,
+    headers: hdrs('application/json'), text: async () => JSON.stringify(body) });
+const htmlRes = (html = '<html><head><title>Down</title></head><body><h1>DONKI is unavailable</h1></body></html>') =>
+    ({ ok: true, status: 200, headers: hdrs('text/html; charset=utf-8'), text: async () => html });
 const hostOf = (url) => (url.startsWith('https://kauai.ccmc') ? 'ccmc' : 'api.nasa.gov');
 
 /** Mock fetch: per-host behaviour = response factory | 'hang' | Error. */
@@ -69,6 +72,22 @@ await t('an HTML 200 is a host failure, not a result', async () => {
     });
     assert.equal(r.host, 'api.nasa.gov');
     assert.deepEqual(r.data, [{ ok: true }]);
+});
+
+await t('a non-JSON answer is DESCRIBED (outage page vs empty), key + URLs redacted', async () => {
+    const page = `<html><body><p>Service down. Retry https://api.nasa.gov/x?api_key=${KEY}</p><script>var k="${KEY}"</script></body></html>`;
+    await assert.rejects(
+        fetchDonki('CMEAnalysis', {}, {
+            apiKey: KEY, timeoutMs: 200,
+            fetchImpl: mockFetch({ ccmc: () => htmlRes(page), 'api.nasa.gov': () => htmlRes('') }),
+        }),
+        (e) => {
+            assert.match(e.message, /ccmc returned non-JSON \(text\/html, \d+ B: "Service down\. Retry \[url\]"\)/);
+            assert.match(e.message, /api\.nasa\.gov returned non-JSON \(text\/html, empty body\)/);
+            assert.ok(!e.message.includes(KEY), 'key leaked');
+            return true;
+        });
+    assert.equal(describeBody({ headers: hdrs(null) }, 'x', ''), 'no content-type, 1 B: "x"');
 });
 
 await t('the loser is aborted once a host wins', async () => {

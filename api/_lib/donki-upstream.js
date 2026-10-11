@@ -35,6 +35,21 @@ export function nasaApiKey() {
     return (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
 }
 
+/**
+ * One-line description of a body that failed to parse: content type, size,
+ * and the first visible text with tags stripped and the key redacted. Lets
+ * the 503 say WHAT DONKI served (outage page vs empty body) without a URL.
+ */
+export function describeBody(res, text, apiKey = '') {
+    const type = (res.headers?.get?.('content-type') || 'no content-type').split(';')[0];
+    if (!text || !text.trim()) return `${type}, empty body`;
+    let gist = text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (apiKey) gist = gist.split(apiKey).join('[key]');
+    gist = gist.replace(/https?:\/\/\S+/g, '[url]').slice(0, 120);
+    return `${type}, ${text.length} B: "${gist}"`;
+}
+
 /** Build one host's URL. Pure — exported for the node gate. */
 export function donkiUrl(host, path, params = {}, apiKey = 'DEMO_KEY') {
     const q = new URLSearchParams();
@@ -69,9 +84,12 @@ export async function fetchDonki(path, params = {}, {
                 throw new Error(`${host.id} ${controllers[i].signal.aborted ? 'timeout' : 'network error'}`);
             }
             if (!res.ok) throw new Error(`${host.id} HTTP ${res.status}`);
+            // Read as text first so a non-JSON answer can be DESCRIBED: an
+            // outage page and an empty "no records" body need different fixes.
+            const text = await res.text();
             let data;
-            try { data = await res.json(); } catch {
-                throw new Error(`${host.id} returned non-JSON`);
+            try { data = JSON.parse(text); } catch {
+                throw new Error(`${host.id} returned non-JSON (${describeBody(res, text, apiKey)})`);
             }
             return { data, host: host.id, i };
         } finally {
