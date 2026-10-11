@@ -60,6 +60,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { fetchWithTimeout } from '../_lib/responses.js';
+import { fetchDonki } from '../_lib/donki-upstream.js';
 import {
     backmapRows, backmapScore, runHindcast, BACKMAP,
     detectShockArrivals, scoreCmeArrivals,
@@ -182,16 +183,11 @@ async function fetchPdynSeries() {
  * this runtime's env, same as the /api/donki/cme proxy.
  */
 async function fetchDonkiCatalog(windowStart, windowEnd) {
-    const NASA_KEY = process.env.NASA_API_KEY || 'DEMO_KEY';
     const fmt = ms => new Date(ms).toISOString().slice(0, 10);
     const start = fmt(windowStart - 5 * DAY), end = fmt(windowEnd + DAY);
-    const get = async (path) => {
-        const res = await fetchWithTimeout(
-            `https://api.nasa.gov/DONKI/${path}?startDate=${start}&endDate=${end}&api_key=${NASA_KEY}`,
-            { headers: { Accept: 'application/json' }, timeoutMs: 12_000 });
-        if (!res.ok) throw new Error(`DONKI ${path} ${res.status}`);
-        return res.json();
-    };
+    // CCMC origin raced against the api.nasa.gov gateway — see donki-upstream.js.
+    const get = async (path) =>
+        (await fetchDonki(path, { startDate: start, endDate: end })).data;
     // FLR rides along for the per-flare ledger ("for each flare"); its
     // failure never blocks the CME program — flare tags are enrichment.
     const [analyses, sims, flrRaw] = await Promise.all([

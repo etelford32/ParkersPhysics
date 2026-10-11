@@ -1,0 +1,89 @@
+/**
+ * donki-upstream.js — the ONE way server code reaches NASA DONKI.
+ *
+ * DONKI lives at CCMC (kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/<path>).
+ * api.nasa.gov/DONKI/<path> is a key-metered GATEWAY in front of that same
+ * origin — same paths, same query parameters, same JSON. Until 2026-10-11
+ * every route here went through the gateway only, and it went down for
+ * us (HTTP 404 on 2026-10-06, then a 10 s timeout on every request) while
+ * the origin stayed up: `api/health.js` already probed the origin and kept
+ * reporting DONKI green while /api/donki/cme served 503, flux-rope-live.html
+ * could never leave its DEMO badge, and the aurora cron ran without its
+ * flux-rope layer. Nothing errored loudly.
+ *
+ * So every call RACES both hosts and the first VALID JSON wins (the loser
+ * is aborted). A 200 that is not JSON — an HTML error page — counts as a
+ * failure of that host, not a result. The origin needs no key; the gateway
+ * gets NASA_API_KEY.
+ *
+ * Errors NEVER carry the request URL: the gateway URL contains the API key,
+ * and the aurora cron used to print it into the Vercel logs verbatim. A
+ * failure reads e.g. "DONKI CMEAnalysis: ccmc timeout; api.nasa.gov HTTP 404".
+ */
+
+export const DONKI_HOSTS = Object.freeze([
+    Object.freeze({ id: 'ccmc',         base: 'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get', keyed: false }),
+    Object.freeze({ id: 'api.nasa.gov', base: 'https://api.nasa.gov/DONKI',                    keyed: true  }),
+]);
+
+/** Per-attempt budget. CCMC answered in ~7 s cold (api/health.js, 2026-10-11);
+ *  the edge runtime must begin its response inside 25 s, and both hosts run
+ *  in parallel, so this is the whole upstream wait. */
+export const DONKI_TIMEOUT_MS = 15_000;
+
+export function nasaApiKey() {
+    return (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
+}
+
+/** Build one host's URL. Pure — exported for the node gate. */
+export function donkiUrl(host, path, params = {}, apiKey = 'DEMO_KEY') {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v != null) q.set(k, String(v));
+    if (host.keyed) q.set('api_key', apiKey);
+    const qs = q.toString();
+    return `${host.base}/${path}${qs ? `?${qs}` : ''}`;
+}
+
+/**
+ * Fetch one DONKI product from whichever host answers first with JSON.
+ * @returns {Promise<{ data: any, host: string }>}
+ * @throws Error whose message names each host's failure (never a URL).
+ */
+export async function fetchDonki(path, params = {}, {
+    timeoutMs = DONKI_TIMEOUT_MS,
+    apiKey = nasaApiKey(),
+    fetchImpl = fetch,
+    hosts = DONKI_HOSTS,
+} = {}) {
+    const controllers = hosts.map(() => new AbortController());
+    const attempts = hosts.map(async (host, i) => {
+        const timer = setTimeout(() => controllers[i].abort(new Error('timeout')), timeoutMs);
+        try {
+            let res;
+            try {
+                res = await fetchImpl(donkiUrl(host, path, params, apiKey), {
+                    signal: controllers[i].signal,
+                    headers: { Accept: 'application/json', 'User-Agent': 'parkersphysics.com (DONKI relay)' },
+                });
+            } catch (e) {
+                throw new Error(`${host.id} ${controllers[i].signal.aborted ? 'timeout' : 'network error'}`);
+            }
+            if (!res.ok) throw new Error(`${host.id} HTTP ${res.status}`);
+            let data;
+            try { data = await res.json(); } catch {
+                throw new Error(`${host.id} returned non-JSON`);
+            }
+            return { data, host: host.id, i };
+        } finally {
+            clearTimeout(timer);
+        }
+    });
+    try {
+        const win = await Promise.any(attempts);
+        controllers.forEach((c, i) => { if (i !== win.i) c.abort(new Error('lost race')); });
+        return { data: win.data, host: win.host };
+    } catch (agg) {
+        const why = (agg?.errors ?? [agg]).map((e) => e?.message ?? String(e)).join('; ');
+        throw new Error(`DONKI ${path}: ${why}`);
+    }
+}
