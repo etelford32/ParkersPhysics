@@ -443,7 +443,7 @@ totality, and emergent earthshine phase). `js/airless-body.js` is in the
   not tied to UT (rotation.y accumulates), so a lat/lon marker would be
   placed on the wrong meridian. Tie the Earth mesh to GMST first.
 
-## 5. Sizing + LOD — PLAN (2026-10-11, not built)
+## 5. Sizing + LOD — PLAN (2026-10-11; Phase 1 SHIPPED same day, P2/P3 open)
 
 Owner report: "NEO objects all appear way too large, the LOD system is not
 100% working for 3D, the perspective changes way too much." Shipped the same
@@ -500,6 +500,17 @@ the world, because a world-space inflation is magnified by perspective.
   0.010 floor in `drawnRockRadius` (log term only, scaled to ≤ 0.1× drawn
   Moon for a 10 km body). Fixes the ballooning; risks the LOD handoff jump,
   which P2 closes.
+  **Shipped:** `drawnRockRadius` = max(5e-5, 0.0016·log10(1 + 10D)) —
+  10 km → 0.0032 (0.1× drawn Moon), 1 km → 0.0017, 100 m → 0.00048 (was
+  0.032 / 0.0215 / 0.0133); `SPRITE.maxBodyPx` 8 caps the impostor body in
+  BOTH `POINT_VS` and the `drawnPx()` mirror; `_lockDistance`'s NEO branch is
+  max(12 r, 0.03) (= controls.minDistance, 3× the 0.01 near plane); meteoroid
+  grains scaled ×0.16 with it; the panel note discloses the remaining
+  enlargement. `js/neo-watch/stage.js` (Earth = 1 unit there) keeps the OLD map
+  as its own `stageRockRadius` so that page did not move. The handoff jump the
+  cap can introduce is only for bodies whose true drawn size exceeds 8 px,
+  i.e. within ~0.7 units of a 10 km rock — inside ROCK_RANGE, where the 24
+  nearest are meshes; P2 closes it for the rest.
 - **P2:** mesh pool = selected (+ in-zone flybys); handoff radius computed
   from the marker's angular size at the moment of handoff; `_lockDistance`
   from the mesh radius.

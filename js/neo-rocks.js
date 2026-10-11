@@ -39,8 +39,18 @@
  * ── Scale ─────────────────────────────────────────────────────────────────
  * `drawnRockRadius(diamKm)` is a LOG map from real diameter to scene units:
  * a 30 m rock and Eros differ by 500× in size, and on a log-scale orrery
- * where Earth is 0.12 units that has to compress to ~4×. Disclosed in the
- * panel note. Sizes are never used for any physics.
+ * where Earth is 0.12 units that has to compress. Disclosed in the panel
+ * note. Sizes are never used for any physics.
+ *
+ * SIZE PLAN PHASE 1 (2026-10-11, NEO_LAYER_PLAN.md §5): the map used to be
+ * 0.010 + 0.011·log10(1 + 10d) — a 0.010 FLOOR that drew a 30 m rock a
+ * third the size of the drawn Moon (0.032) and a 10 km one as big as it,
+ * i.e. 10²–10⁴× inflated against the drawn Earth IN WORLD UNITS, which
+ * perspective then magnified into moon-sized balls whenever the camera came
+ * near Earth. The floor is gone and the gain is set so a 10 km body is
+ * 0.1× the drawn Moon (ROCK_SIZE.gain · log10(101) ≈ 0.0032). Still
+ * inflated (≈34× at 10 km, ≈500× at 100 m — disclosed), but no longer
+ * comparable to a planet or moon.
  */
 
 import * as THREE from 'three';
@@ -79,9 +89,13 @@ export function rng(seed) {
 }
 
 /** Real diameter (km) → drawn radius (scene units), log-compressed. */
+export const ROCK_SIZE = Object.freeze({
+    gain: 0.0016,      // scene units per decade of (1 + 10·D/km)
+    floor: 0.00005,    // a defined, never-zero radius for D → 0
+});
 export function drawnRockRadius(diamKm) {
     const d = Number.isFinite(diamKm) && diamKm > 0 ? diamKm : 0.1;
-    return 0.010 + 0.011 * Math.log10(1 + 10 * d);
+    return Math.max(ROCK_SIZE.floor, ROCK_SIZE.gain * Math.log10(1 + 10 * d));
 }
 
 /** Shape family for an object: the known one, else seeded. */
@@ -333,7 +347,9 @@ export class MeteoroidStream {
             this.seed[i] = r();
             this.jit[i * 3] = r() * 2 - 1; this.jit[i * 3 + 1] = r() * 2 - 1; this.jit[i * 3 + 2] = r() * 2 - 1;
             // Power-law sizes: many pebbles, a few boulders.
-            this.size[i] = 0.0022 + 0.0075 * Math.pow(r(), 3);
+            // Scaled with the §5 Phase-1 rock map (×0.16): grains must never
+            // draw larger than the kilometre asteroids beside them.
+            this.size[i] = 0.00035 + 0.0012 * Math.pow(r(), 3);
             const th = r() * Math.PI * 2, ph = Math.acos(r() * 2 - 1);
             this.axis.push(new THREE.Vector3(Math.sin(ph) * Math.cos(th), Math.sin(ph) * Math.sin(th), Math.cos(ph)));
             this.rate[i] = 2 + r() * 6;

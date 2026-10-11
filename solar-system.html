@@ -3667,10 +3667,12 @@ function _setModeUI() {
  *  Jupiter (radius ≈ 1.4) gets a wider establishing shot. */
 function _lockDistance(body) {
     const r = Math.max(body?.radius ?? 0.05, 0.005);
-    // NEO bodies are rock meshes a few hundredths of a unit across; the 0.35
-    // floor (sized for planets) left them ~40 px. Their floor is the near plane
-    // with margin, so the lock frames the rock (js/neo-rocks.js drawnRockRadius).
-    if (body?.neoIndex != null) return Math.max(r * 7, 0.09);
+    // NEO bodies are rock meshes a few THOUSANDTHS of a unit across since the
+    // 2026-10 size pass (NEO_LAYER_PLAN.md §5); the 0.35 planet floor would
+    // leave them a pixel or two. Their floor is the near plane (0.01) with 3×
+    // margin and equals controls.minDistance below, so a 100 m rock locks at
+    // ~25 px and a 10 km one fills ~150 px (js/neo-rocks.js drawnRockRadius).
+    if (body?.neoIndex != null) return Math.max(r * 12, 0.03);
     return Math.max(r * 8, 0.35);
 }
 

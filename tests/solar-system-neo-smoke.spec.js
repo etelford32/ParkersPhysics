@@ -419,7 +419,9 @@ test.describe('solar-system.html — near-Earth objects', () => {
                 atLocal: slot.mesh.position.distanceTo(L.localGroup.position) < 2, meshed: L._meshed.has(i), tails: L.cometTailsActive };
         });
         expect(rocks.verts).toBeGreaterThan(500);
-        expect(rocks.scale).toBeGreaterThan(0.009); expect(rocks.scale).toBeLessThan(0.05);
+        // §5 Phase 1: no rock is drawn anywhere near the drawn Moon (0.032) — a
+        // 10 km body is 0.1× it.
+        expect(rocks.scale).toBeGreaterThan(0.00004); expect(rocks.scale).toBeLessThan(0.0035);
         expect(rocks.spriteAlpha).toBe(0);
         expect(rocks.atLocal).toBe(true);
         expect(rocks.meshed).toBe(true);
@@ -694,7 +696,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
             // The drawn radius is the SAME diameter the mesh pool uses, and the
             // diameter is derived through THIS object's albedo when unmeasured.
             const km = K.diameterKm(o.el, optics).km;
-            expect(o.radius, `${des} radius is drawnRockRadius(diameterKm)`).toBeCloseTo(0.010 + 0.011 * Math.log10(1 + 10 * km), 5);
+            expect(o.radius, `${des} radius is drawnRockRadius(diameterKm)`).toBeCloseTo(Math.max(0.00005, 0.0016 * Math.log10(1 + 10 * km)), 6);
         }
         // A dark body is derived BIGGER from the same H — the albedo is inside
         // the square root, and assuming 0.14 for everything is what shrank them.

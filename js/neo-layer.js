@@ -193,6 +193,11 @@ const DPR = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRati
  */
 const SPRITE = Object.freeze({
     minPx: 2.0,        // an unresolved body is drawn this big and no smaller
+    // A PIXEL CEILING on the impostor's body (NEO_LAYER_PLAN.md §5, Phase 1).
+    // The size map is still inflated, so an impostor close to the camera would
+    // otherwise grow as 1/depth without bound; past this it is a marker, not
+    // a disc. Bodies that should be resolved are the rock MESHES (ROCK_RANGE).
+    maxBodyPx: 8.0,
     reticlePx: 11.0,   // an attention ring stays a legible target at any size
     padComa: 1.40,     // extra quad for a comet's coma
     // The display normalisation and compression, both DISCLOSED. `gain` is set
@@ -216,7 +221,7 @@ function pxPerUnit(camera, viewH, clipW) {
 }
 /** gl_PointSize in CSS px — the JS mirror of POINT_VS. Keep the two in step. */
 function drawnPx(radius, scale, coma = 0, pulse = 0) {
-    const body = 2 * radius * scale;
+    const body = Math.min(SPRITE.maxBodyPx, 2 * radius * scale);
     const quad = Math.max(SPRITE.minPx, body) * (1 + coma * SPRITE.padComa);
     return Math.max(quad, pulse * SPRITE.reticlePx);
 }
@@ -273,6 +278,7 @@ const POINT_VS = /* glsl */`${AIRLESS_GLSL}
     uniform float u_dpr;
     uniform float u_viewPx;      // drawing-buffer height, device px
     uniform float u_minPx;
+    uniform float u_maxBodyPx;
     uniform float u_reticlePx;
     uniform float u_padComa;
     uniform float u_B0;
@@ -313,7 +319,7 @@ const POINT_VS = /* glsl */`${AIRLESS_GLSL}
 
         float clipW = max(-mv.z, 1e-4);
         // TRUE projected size: projectionMatrix[1][1] is 1/tan(fov/2).
-        float bodyPx = 2.0 * aRadius * (projectionMatrix[1][1] * u_viewPx * 0.5) / clipW;
+        float bodyPx = min(u_maxBodyPx * u_dpr, 2.0 * aRadius * (projectionMatrix[1][1] * u_viewPx * 0.5) / clipW);
         float quad = max(u_minPx * u_dpr, bodyPx) * (1.0 + aComa * u_padComa);
         quad = max(quad, aPulse * u_reticlePx * u_dpr);
         gl_PointSize = quad;
@@ -374,7 +380,7 @@ const POINT_FS = /* glsl */`${TONE_DECODE_GLSL}${AIRLESS_GLSL}
 
         // OPACITY RISES WITH THE LIGHT THE BODY ACTUALLY RETURNS. The drawn disc
         // is inflated by the log size map (drawnRockRadius draws a 1 km rock at
-        // ~2 000 km), so a fully opaque body would occult a patch of sky
+        // ~170 km against the drawn Earth), so a fully opaque body would occult a patch of sky
         // thousands of times larger than the real one can — a backlit object
         // came out as a solid black hole in the scene, which is a bigger lie
         // than the dimming. The floor keeps a body crossing a bright background
@@ -405,6 +411,7 @@ function makePointsMaterial() {
             u_time:      { value: 0 },
             u_viewPx:    { value: 720 * DPR },       // replaced on the first update()
             u_minPx:     { value: SPRITE.minPx },
+            u_maxBodyPx: { value: SPRITE.maxBodyPx },
             u_reticlePx: { value: SPRITE.reticlePx },
             u_padComa:   { value: SPRITE.padComa },
             u_gain:      { value: SPRITE.gain },

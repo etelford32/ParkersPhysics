@@ -318,7 +318,7 @@ export class NeoPanel {
             radial scale (ecliptic of date). Inside 20 lunar distances it moves to an Earth-anchored frame drawn on the Moon's own
             compression — the 1 LD ring passes through the drawn Moon — and the two cross-fade between 14 and 20 LD. Planets ride
             mean-motion circles; flyby geometry uses Earth's true VSOP87D position. Close-approach rows are JPL's integrated orbits;
-            drawn positions are two-body from JPL osculating elements. ${epochNote}
+            drawn positions are two-body from JPL osculating elements. Body SIZES are log-compressed and still enlarged (a 10 km rock is drawn ~34× its true size against the drawn Earth, a 100 m one ~500×); far-field markers are capped at 8 px. ${epochNote}
             <br><br>${esc(this.photometryNote())}`;
     }
 
