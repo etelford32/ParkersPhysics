@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Data Processing Agreement — Parkers Physics App</title>
+<link rel="canonical" href="https://parkersphysics.com/dpa">
+<meta name="description" content="Parkers Physics App Data Processing Agreement (DPA). The terms under which Telford Projects LLC processes personal data on behalf of customers, including sub-processors, security, breach notification and international transfers.">
+<meta name="theme-color" content="#0a0a1a">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/dpa">
+<meta property="og:title" content="Data Processing Agreement — Parkers Physics">
+<meta property="og:description" content="The terms under which Telford Projects LLC processes personal data on behalf of Parkers Physics App customers.">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Data Processing Agreement — Parkers Physics">
+<meta name="twitter:description" content="The terms under which Telford Projects LLC processes personal data on behalf of Parkers Physics App customers.">
+
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="stylesheet" href="js/nav-styles.css">
+
+<style>
+/* ── Legal page shell (mirrors eula.html / privacy.html body styles) ──
+ * NOTE: no `nav`/`.nav-*` selectors here — scripts/lint-nav.mjs treats
+ * inline nav CSS as ghost CSS and fails CI. The table of contents is a
+ * <div>, not a second <nav>, so js/nav-styles.css cannot reach it.
+ * ──────────────────────────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+    color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+}
+
+.legal-hero {
+    padding: 5.5rem 2rem 1.5rem; text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.legal-hero h1 {
+    font-size: 2.4rem;
+    background: linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    margin-bottom: .5rem;
+}
+.legal-meta { color: #888; font-size: .85rem; }
+.legal-meta strong { color: #aaa; }
+
+.legal-body { width: 100%; max-width: 800px; margin: 0 auto; padding: 2.5rem 2rem 4rem; flex: 1; }
+.toc {
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 2.5rem;
+}
+.toc h2 { font-size: .85rem; color: #ffd700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: .75rem; }
+.toc ol { padding-left: 1.2rem; }
+.toc li { margin-bottom: .3rem; }
+.toc a { color: #a080ff; text-decoration: none; font-size: .88rem; }
+.toc a:hover { color: #ffd700; text-decoration: underline; }
+
+.legal-section { margin-bottom: 2.5rem; }
+.legal-section h2 {
+    font-size: 1.15rem; color: #ffd700;
+    border-bottom: 1px solid rgba(255,200,0,.18);
+    padding-bottom: .4rem; margin-bottom: 1rem;
+}
+.legal-section h3 {
+    font-size: 1rem; color: #e8e0c0;
+    margin-top: 1.6rem; margin-bottom: .55rem;
+}
+.legal-section p, .legal-section li, .legal-section td, .legal-section th {
+    color: #b0b0c8; font-size: .92rem; line-height: 1.75;
+}
+.legal-section p + p { margin-top: .7rem; }
+.legal-section ul, .legal-section ol { padding-left: 1.4rem; margin: .6rem 0; }
+.legal-section li { margin-bottom: .3rem; }
+.legal-section strong { color: #ddd; }
+.legal-section a { color: #a080ff; }
+.legal-section a:hover { color: #ffd700; }
+
+.legal-table { width: 100%; border-collapse: collapse; margin: .8rem 0; }
+.legal-table th, .legal-table td {
+    text-align: left; vertical-align: top;
+    padding: .55rem .7rem; border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.legal-table th { color: #e8e0c0; font-weight: 600; width: 32%; }
+
+.highlight-box {
+    background: rgba(128,64,255,.08); border: 1px solid rgba(128,64,255,.22);
+    border-radius: 6px; padding: 1rem 1.25rem; margin: 0 0 2rem;
+    color: #c0a0ff; font-size: .88rem; line-height: 1.65;
+}
+.highlight-box a { color: #ffd700; }
+
+.legal-footer {
+    background: rgba(0,0,0,.4); border-top: 1px solid rgba(255,255,255,.07);
+    padding: 1.5rem 2rem; text-align: center; color: #777; font-size: .82rem;
+}
+.legal-footer a { color: #888; text-decoration: none; }
+.legal-footer a:hover { color: #ffd700; }
+
+@media (max-width: 768px) {
+    .legal-hero { padding: 4.5rem 16px 1.25rem; }
+    .legal-hero h1 { font-size: 1.8rem; }
+    .legal-body { padding: 1.5rem 16px 3rem; }
+    .legal-table th, .legal-table td { display: block; width: 100%; padding: .35rem 0; }
+    .legal-table th { border-bottom: none; padding-top: .7rem; }
+}
+</style>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "@id": "https://parkersphysics.com/dpa#page",
+  "url": "https://parkersphysics.com/dpa",
+  "name": "Data Processing Agreement",
+  "description": "Data Processing Agreement for the Parkers Physics App and APIs.",
+  "isPartOf": { "@id": "https://parkersphysics.com/#website" },
+  "publisher": { "@id": "https://parkersphysics.com/#org" },
+  "inLanguage": "en-US"
+}
+</script>
+</head>
+<body>
+
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("");</script>
+
+<main>
+
+<header class="legal-hero">
+    <h1>Data Processing Agreement</h1>
+    <p class="legal-meta"><strong>Effective Date:</strong> October 11, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 1.0</p>
+</header>
+
+<div class="legal-body">
+
+    <div class="highlight-box">
+        This Data Processing Agreement ("DPA") forms part of the <a href="eula.html">End User License Agreement</a> (the "Agreement") between Telford Projects LLC, d/b/a Parkers Physics App ("Parkers Physics", "we", "us") and the customer that accepted it ("Customer", "you"). It applies only where we process personal data <strong>on your behalf</strong>. How we handle personal data as a controller in our own right (your own account, billing, site analytics) is described in our <a href="privacy.html">Privacy Policy</a>.
+    </div>
+
+    <div class="toc">
+        <h2>Contents</h2>
+        <ol>
+            <li><a href="#scope">Scope &amp; Roles</a></li>
+            <li><a href="#definitions">Definitions</a></li>
+            <li><a href="#instructions">Processing on Instructions</a></li>
+            <li><a href="#details">Details of the Processing</a></li>
+            <li><a href="#confidentiality">Confidentiality</a></li>
+            <li><a href="#security">Security Measures</a></li>
+            <li><a href="#subprocessors">Sub-Processors</a></li>
+            <li><a href="#assistance">Data Subject Requests &amp; Assistance</a></li>
+            <li><a href="#breach">Personal Data Breach Notification</a></li>
+            <li><a href="#transfers">International Transfers</a></li>
+            <li><a href="#audits">Audits &amp; Information</a></li>
+            <li><a href="#deletion">Return &amp; Deletion</a></li>
+            <li><a href="#ccpa">U.S. State Privacy Laws (CCPA / CPRA)</a></li>
+            <li><a href="#general">Liability, Precedence &amp; Governing Law</a></li>
+            <li><a href="#execution">Signed Copies &amp; Contact</a></li>
+        </ol>
+    </div>
+
+    <section class="legal-section" id="scope">
+        <h2>1. Scope &amp; Roles</h2>
+        <p>This DPA applies where Customer, as a <strong>controller</strong> (or as a processor acting for its own controller), causes personal data to be processed by Parkers Physics in the course of providing the Parkers Physics App, its APIs, and related services (the "Service"). Typical cases include institutional, educator, and enterprise accounts that add seats, students, or team members, and API integrations that pass end-user identifiers to the Service.</p>
+        <p>For that personal data, Parkers Physics acts as a <strong>processor</strong> (GDPR / UK GDPR) and as a <strong>service provider</strong> or <strong>contractor</strong> (CCPA / CPRA). Customer is responsible for the lawfulness of the personal data it provides, including having an appropriate legal basis and giving any required notices to data subjects.</p>
+    </section>
+
+    <section class="legal-section" id="definitions">
+        <h2>2. Definitions</h2>
+        <p>"<strong>Data Protection Laws</strong>" means all laws on the processing of personal data that apply to a party's processing under the Agreement, including the EU General Data Protection Regulation 2016/679 ("GDPR"), the GDPR as retained in UK law ("UK GDPR") and the UK Data Protection Act 2018, the Swiss Federal Act on Data Protection, and the California Consumer Privacy Act as amended by the California Privacy Rights Act ("CCPA").</p>
+        <p>"<strong>Customer Personal Data</strong>" means personal data that Parkers Physics processes on behalf of Customer under the Agreement. "<strong>Controller</strong>", "<strong>processor</strong>", "<strong>data subject</strong>", "<strong>personal data</strong>", "<strong>personal data breach</strong>", and "<strong>processing</strong>" have the meanings given in the GDPR. "<strong>Sub-processor</strong>" means a third party engaged by Parkers Physics to process Customer Personal Data.</p>
+    </section>
+
+    <section class="legal-section" id="instructions">
+        <h2>3. Processing on Instructions</h2>
+        <p>Parkers Physics will process Customer Personal Data only on Customer's documented instructions, unless required otherwise by applicable law, in which case we will inform Customer of that legal requirement before processing unless the law prohibits it. The Agreement, this DPA, and Customer's configuration and use of the Service are Customer's complete instructions. Additional instructions require our written agreement.</p>
+        <p>We will tell Customer promptly if, in our opinion, an instruction infringes Data Protection Laws. We do not sell Customer Personal Data and do not use it to train machine-learning models or for advertising.</p>
+    </section>
+
+    <section class="legal-section" id="details">
+        <h2>4. Details of the Processing</h2>
+        <table class="legal-table">
+            <tr><th scope="row">Subject matter</th><td>Provision of the Service under the Agreement.</td></tr>
+            <tr><th scope="row">Duration</th><td>The term of the Agreement, plus the deletion period in Section 12.</td></tr>
+            <tr><th scope="row">Nature and purpose</th><td>Hosting, storage, authentication, account and seat management, delivery of alerts and notifications, API access and rate limiting, security, support, and other processing needed to provide the Service.</td></tr>
+            <tr><th scope="row">Categories of data subjects</th><td>Customer's authorized users, including staff, team members, instructors, and students added to institutional or educator seats, and end users whose identifiers Customer sends through the API.</td></tr>
+            <tr><th scope="row">Categories of personal data</th><td>Name, email address, account and seat identifiers, role and plan, saved locations and alert preferences, authentication and security logs, API request metadata (IP address, timestamps, endpoints), and support correspondence.</td></tr>
+            <tr><th scope="row">Special categories</th><td>None intended. Customer must not submit special categories of personal data (GDPR Article 9) or data relating to criminal convictions to the Service.</td></tr>
+            <tr><th scope="row">Frequency</th><td>Continuous, for as long as Customer uses the Service.</td></tr>
+        </table>
+    </section>
+
+    <section class="legal-section" id="confidentiality">
+        <h2>5. Confidentiality</h2>
+        <p>Parkers Physics will ensure that every person it authorizes to process Customer Personal Data has committed to confidentiality or is under an appropriate statutory obligation of confidentiality, and has access only to the extent needed to provide the Service.</p>
+    </section>
+
+    <section class="legal-section" id="security">
+        <h2>6. Security Measures</h2>
+        <p>Parkers Physics will implement and maintain technical and organizational measures appropriate to the risk, as required by GDPR Article 32. These include, at a minimum:</p>
+        <ul>
+            <li>TLS encryption for all traffic between clients and the Service</li>
+            <li>Encryption at rest for the production database and backups</li>
+            <li>Salted password hashing using a memory-hard algorithm</li>
+            <li>Row-Level Security policies enforcing per-user and per-account access in the database</li>
+            <li>Multi-factor authentication and least-privilege access for administrative and vendor accounts</li>
+            <li>Application-level rate limiting and abuse detection</li>
+            <li>Monitoring, logging, and dependency vulnerability scanning</li>
+        </ul>
+        <p>We may update these measures over time, provided the overall level of protection is not reduced.</p>
+    </section>
+
+    <section class="legal-section" id="subprocessors">
+        <h2>7. Sub-Processors</h2>
+        <p>Customer gives general authorization for Parkers Physics to engage sub-processors. We will impose on each sub-processor, by written contract, data-protection obligations no less protective than those in this DPA, and we remain liable to Customer for each sub-processor's performance of those obligations. Our current sub-processors are:</p>
+        <table class="legal-table">
+            <tr><th scope="row">Supabase Inc.</th><td>Managed Postgres database, authentication, and storage. United States.</td></tr>
+            <tr><th scope="row">Vercel Inc.</th><td>Hosting, serverless functions, and edge network (request metadata). United States, with global edge locations.</td></tr>
+            <tr><th scope="row">Transactional email provider</th><td>Delivery of account, security, alert, and billing emails (e.g., Resend). United States.</td></tr>
+        </table>
+        <p><strong>Stripe, Inc.</strong> processes payment data as an independent controller for its own fraud-prevention and regulatory purposes, and is therefore not a sub-processor under this DPA. The public scientific data sources listed in Section 5 of our <a href="privacy.html#third-party">Privacy Policy</a> (NASA, NOAA, JPL, CelesTrak, and others) receive no Customer Personal Data.</p>
+        <p>We will give Customer at least <strong>30 days' notice</strong> before a new sub-processor processes Customer Personal Data, by email to the account owner or by updating this page. Customer may object on reasonable data-protection grounds within that period. If we cannot reasonably accommodate the objection, Customer may terminate the affected part of the Service and receive a pro-rata refund of prepaid fees for it.</p>
+    </section>
+
+    <section class="legal-section" id="assistance">
+        <h2>8. Data Subject Requests &amp; Assistance</h2>
+        <p>Taking into account the nature of the processing, Parkers Physics will assist Customer by appropriate technical and organizational measures in responding to requests from data subjects to exercise their rights under Data Protection Laws. If we receive such a request directly, we will forward it to Customer without undue delay and will not respond to it except on Customer's instructions or as required by law.</p>
+        <p>We will also provide reasonable assistance with Customer's data protection impact assessments and prior consultations with supervisory authorities, to the extent they concern our processing and the information is not otherwise available to Customer.</p>
+    </section>
+
+    <section class="legal-section" id="breach">
+        <h2>9. Personal Data Breach Notification</h2>
+        <p>Parkers Physics will notify Customer without undue delay, and where feasible within <strong>72 hours</strong>, after becoming aware of a personal data breach affecting Customer Personal Data. The notice will describe, to the extent known, the nature of the breach, the categories and approximate number of data subjects and records concerned, the likely consequences, and the measures taken or proposed. Where all of this information is not available at once, we will provide it in phases as it becomes available.</p>
+        <p>Notifying a breach is not an admission of fault or liability.</p>
+    </section>
+
+    <section class="legal-section" id="transfers">
+        <h2>10. International Transfers</h2>
+        <p>Telford Projects LLC is established in the United States and the Service is primarily hosted there. Where Customer Personal Data is transferred from the European Economic Area, the United Kingdom, or Switzerland to a country without an adequacy decision, the parties agree that:</p>
+        <ul>
+            <li>the European Commission's <strong>Standard Contractual Clauses</strong> (Decision 2021/914) are incorporated by reference, using <strong>Module Two</strong> (controller to processor) or <strong>Module Three</strong> (processor to processor) as applicable, with the optional docking clause (Clause 7) included, option 2 (general authorization) in Clause 9, the governing law and courts of Ireland in Clauses 17 and 18, and the information in Sections 4 and 6 of this DPA as Annexes I and II;</li>
+            <li>for UK transfers, the ICO's <strong>International Data Transfer Addendum</strong> to those clauses applies; and</li>
+            <li>for Swiss transfers, the clauses apply with references to the GDPR read as references to the Swiss Federal Act on Data Protection, and the Swiss Federal Data Protection and Information Commissioner as the competent supervisory authority.</li>
+        </ul>
+        <p>Where a sub-processor is certified under the <strong>EU–U.S. Data Privacy Framework</strong> (or its UK and Swiss extensions), we may rely on that certification for onward transfers to it.</p>
+    </section>
+
+    <section class="legal-section" id="audits">
+        <h2>11. Audits &amp; Information</h2>
+        <p>Parkers Physics will make available to Customer the information reasonably necessary to demonstrate compliance with this DPA, including written responses to reasonable security questionnaires and any available third-party certifications or reports of our sub-processors.</p>
+        <p>Where that information is not sufficient, or where a supervisory authority requires it, Customer may conduct an audit, at its own cost, no more than once in any 12-month period, on at least 30 days' written notice, during normal business hours, and under appropriate confidentiality obligations. Audits must not unreasonably disrupt the Service or give access to other customers' data.</p>
+    </section>
+
+    <section class="legal-section" id="deletion">
+        <h2>12. Return &amp; Deletion</h2>
+        <p>On termination of the Agreement, or on Customer's written request, Parkers Physics will delete Customer Personal Data from production systems within <strong>30 days</strong>, unless applicable law requires us to keep it. Before deletion, Customer may export its data using the Service's export features or by contacting us. Data in encrypted backups is overwritten as the backups rotate, typically within a further 30 days, and is not restored to production in the meantime.</p>
+    </section>
+
+    <section class="legal-section" id="ccpa">
+        <h2>13. U.S. State Privacy Laws (CCPA / CPRA)</h2>
+        <p>Where the CCPA or a similar U.S. state privacy law applies, Parkers Physics acts as Customer's service provider or contractor and will not:</p>
+        <ul>
+            <li>sell or share Customer Personal Data (as those terms are defined in the CCPA);</li>
+            <li>retain, use, or disclose it for any purpose other than the business purposes specified in the Agreement, or outside the direct business relationship with Customer; or</li>
+            <li>combine it with personal data received from or on behalf of other persons, except as the CCPA permits.</li>
+        </ul>
+        <p>We will comply with the CCPA's applicable obligations, provide the same level of privacy protection it requires, and notify Customer if we can no longer meet those obligations. Customer may take reasonable steps to stop and remediate any unauthorized use. We certify that we understand and will comply with these restrictions.</p>
+    </section>
+
+    <section class="legal-section" id="general">
+        <h2>14. Liability, Precedence &amp; Governing Law</h2>
+        <p>Each party's liability arising out of or related to this DPA is subject to the limitations and exclusions of liability in the Agreement, except where Data Protection Laws or the Standard Contractual Clauses do not permit such a limitation.</p>
+        <p>If there is a conflict, the following order of precedence applies: (1) the Standard Contractual Clauses, where they apply; (2) this DPA; (3) the Agreement. Except as the Standard Contractual Clauses require otherwise, this DPA is governed by the law that governs the Agreement.</p>
+        <p>We may update this DPA to reflect changes in law or in our sub-processors. We will not reduce the protection it gives Customer Personal Data during a paid subscription term without Customer's agreement, and we will notify registered account owners of material changes at least 14 days before they take effect.</p>
+    </section>
+
+    <section class="legal-section" id="execution">
+        <h2>15. Signed Copies &amp; Contact</h2>
+        <p>This DPA takes effect for Customer when Customer accepts the Agreement; no separate signature is required. If your organization needs a countersigned copy for its records, email <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a> with your legal entity name and account email.</p>
+        <ul>
+            <li><strong>Processor:</strong> Telford Projects LLC, d/b/a Parkers Physics App</li>
+            <li><strong>Privacy and DPA requests:</strong> <a href="mailto:privacy@parkersphysics.com">privacy@parkersphysics.com</a></li>
+            <li><strong>Security incidents:</strong> <a href="mailto:security@parkersphysics.com">security@parkersphysics.com</a></li>
+            <li><strong>Legal:</strong> <a href="mailto:legal@parkersphysics.com">legal@parkersphysics.com</a></li>
+        </ul>
+    </section>
+
+</div>
+
+</main>
+
+<footer class="legal-footer">
+    <p>© 2026 Parkers Physics App &nbsp;·&nbsp;
+        <a href="index.html">Home</a> &nbsp;·&nbsp;
+        <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+        <a href="eula.html">EULA</a> &nbsp;·&nbsp;
+        <a href="api-policy.html">API Policy</a> &nbsp;·&nbsp;
+        <a href="dpa.html">DPA</a> &nbsp;·&nbsp;
+        <a href="mailto:support@parkersphysics.com">Contact</a>
+    </p>
+</footer>
+
+<script type="module">import './js/analytics.js';</script>
+<script type="module" src="/js/cookie-consent.js?v=20260504"></script>
+</body>
+</html>
