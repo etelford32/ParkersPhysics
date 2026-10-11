@@ -1,9 +1,10 @@
 /**
  * neo-rocks.js — 3D bodies for the near-Earth object layer
  * ═══════════════════════════════════════════════════════════════════════════
- * Procedural, seeded asteroid / comet-nucleus meshes and the instanced
- * meteoroid streams that stand in for point sprites whenever an object is
- * close enough to the camera to have a shape at all.
+ * Procedural, seeded asteroid / comet-nucleus meshes that stand in for point
+ * sprites whenever an object is resolved on screen. (The instanced meteoroid
+ * "boulders" that used to live here were removed 2026-10, NEO_LAYER_PLAN.md
+ * §5 P3: shower grains are millimetre dust and are drawn as streaks.)
  *
  * ── Shapes ────────────────────────────────────────────────────────────────
  * A rock is an icosphere displaced by (a) a low-frequency lumpy field — a sum
@@ -33,8 +34,8 @@
  * nothing else. Level is the object's own albedo times the illumination
  * reaching it; the H–G phase function is NOT applied on top of the BRDF (it is
  * disc-integrated — see that header). Plus a rim so a dark limb still reads
- * against black, and a per-vertex regolith speckle. The shader handles
- * `instanceMatrix` so the same material drives the InstancedMesh streams.
+ * against black, and a per-vertex regolith speckle. The shader still handles
+ * `instanceMatrix`, so it can drive an InstancedMesh.
  *
  * ── Scale ─────────────────────────────────────────────────────────────────
  * `drawnRockRadius(diamKm)` is a LOG map from real diameter to scene units:
@@ -324,55 +325,3 @@ export function spinFor(des, seed) {
     return { axis, periodH, phase: r() * Math.PI * 2 };
 }
 
-/**
- * A meteoroid stream: `count` small rocks on a converging cone that pour in
- * from the radiant direction toward Earth (the origin of the parent group),
- * each tumbling. CPU-updated (a few hundred matrix composes per frame).
- */
-export class MeteoroidStream {
-    constructor({ count = 140, seed = 1, colorHex = 0x8f877c } = {}) {
-        this.count = count;
-        const geo = rockGeometry({ seed, shape: 'potato', detail: 2 });   // 80 faces per meteoroid
-        this.mesh = new THREE.InstancedMesh(geo, rockMaterial(colorHex), count);
-        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        this.mesh.frustumCulled = false;
-        this.mesh.name = 'neo-meteoroids';
-        const r = rng(seed ^ 0x7f4a7c15);
-        this.seed = new Float32Array(count);
-        this.jit = new Float32Array(count * 3);
-        this.size = new Float32Array(count);
-        this.axis = [];
-        this.rate = new Float32Array(count);
-        for (let i = 0; i < count; i++) {
-            this.seed[i] = r();
-            this.jit[i * 3] = r() * 2 - 1; this.jit[i * 3 + 1] = r() * 2 - 1; this.jit[i * 3 + 2] = r() * 2 - 1;
-            // Power-law sizes: many pebbles, a few boulders.
-            // Scaled with the §5 Phase-1 rock map (×0.16): grains must never
-            // draw larger than the kilometre asteroids beside them.
-            this.size[i] = 0.00035 + 0.0012 * Math.pow(r(), 3);
-            const th = r() * Math.PI * 2, ph = Math.acos(r() * 2 - 1);
-            this.axis.push(new THREE.Vector3(Math.sin(ph) * Math.cos(th), Math.sin(ph) * Math.sin(th), Math.cos(ph)));
-            this.rate[i] = 2 + r() * 6;
-        }
-        this.dir = new THREE.Vector3(0, 1, 0);
-        this.speed = 0.5;
-        this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = new THREE.Vector3(); this._s = new THREE.Vector3();
-    }
-    setDirection(v) { this.dir.copy(v).normalize(); }
-    setSpeed(s) { this.speed = s; }
-    update(t) {
-        const { dir, _m, _q, _p, _s } = this;
-        for (let i = 0; i < this.count; i++) {
-            const s = (this.seed[i] + t * this.speed) % 1;               // 0 far out → 1 at Earth
-            const along = 1.25 + (0.16 - 1.25) * s;
-            const spread = 0.05 + 0.13 * (1 - s);
-            _p.set(dir.x * along + this.jit[i * 3] * spread, dir.y * along + this.jit[i * 3 + 1] * spread, dir.z * along + this.jit[i * 3 + 2] * spread);
-            _q.setFromAxisAngle(this.axis[i], t * this.rate[i] + this.seed[i] * 6.28);
-            _s.setScalar(this.size[i]);
-            _m.compose(_p, _q, _s);
-            this.mesh.setMatrixAt(i, _m);
-        }
-        this.mesh.instanceMatrix.needsUpdate = true;
-    }
-    dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
-}

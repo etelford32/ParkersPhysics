@@ -443,7 +443,7 @@ totality, and emergent earthshine phase). `js/airless-body.js` is in the
   not tied to UT (rotation.y accumulates), so a lat/lon marker would be
   placed on the wrong meridian. Tie the Earth mesh to GMST first.
 
-## 5. Sizing + LOD — PLAN (2026-10-11; Phases 1 + 2 SHIPPED same day, P3 open)
+## 5. Sizing + LOD — PLAN (2026-10-11; Phases 1–3 SHIPPED same day)
 
 Owner report: "NEO objects all appear way too large, the LOD system is not
 100% working for 3D, the perspective changes way too much." Shipped the same
@@ -534,6 +534,16 @@ the world, because a world-space inflation is magnified by perspective.
   boulders on a converging cone read as debris falling on Earth. Replace the
   `MeteoroidStream` meshes with the existing faint streak points only (or a
   radiant glyph), keeping the panel's shower list as the source of truth.
+  **P3 shipped:** `MeteoroidStream` (instanced boulders) is DELETED from
+  `js/neo-rocks.js`; the cone arrowhead pointing INTO Earth is gone. A shower
+  is now one `LineSegments` of faint short streaks (`makeStream`, all motion
+  in `STREAM_VS`) on PARALLEL tracks along the radiant axis, filling a
+  cylinder of `STREAM.spreadR` = 4 drawn Earth radii; a track whose impact
+  parameter is inside the drawn atmosphere (`atmo` 1.03 R) ends at its entry
+  point, every other grain passes by. Count rides ZHR × activity; speed is
+  RELATIVE (`speedPerKms`) — no grain carries a size. The radiant guide is a
+  hairline OUTSIDE the stream pointing at the radiant. Still default-OFF.
+  Frames 11–12 of the viewpoint capture show it.
 - **Gates:** extend `tests/solar-system-neo-smoke.spec.js` with a dolly test:
   the drawn px of a fixed in-zone object must change < 2× as the camera goes
   from 20 → 0.5 units from Earth (today it grows as 1/distance), and the handoff

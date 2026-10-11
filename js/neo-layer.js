@@ -45,7 +45,7 @@ import {
     solarLongitudeDeg, activeShowers, nextShower, radiantEclipticUnit,
 } from './neo-orbits.js';
 
-import { rockGeometry, rockMaterial, drawnRockRadius, shapeFor, spinFor, hash32, MeteoroidStream } from './neo-rocks.js';
+import { rockGeometry, rockMaterial, drawnRockRadius, shapeFor, spinFor, hash32, rng } from './neo-rocks.js';
 import { AIRLESS_GLSL, AIRLESS_DISPLAY, OPPOSITION } from './airless-body.js';
 import { createReticle, tintReticle, seatReticle, RETICLE } from './selection-reticle.js';
 import { shadowIllumination, reflectedIrradianceFraction, BODY_ALBEDO, EARTH_RADIUS_KM } from './eclipse-geometry.js';
@@ -455,34 +455,62 @@ const TAIL_VERTS = 2 * TAIL_SEG * 2;
 const TAIL_MAX_R = 3.5;
 
 // ── Meteoroid streams ───────────────────────────────────────────────────────
-// A shower is drawn as what it is: a stream of particles converging on Earth
-// from the radiant direction at the stream's speed. Everything is in the
-// vertex shader (seed + time), so a stream costs the CPU nothing.
+// A METEOR SHOWER IS EARTH SWEEPING THROUGH A STREAM OF PARALLEL GRAINS
+// (NEO_LAYER_PLAN.md §5, Phase 3). The grains are millimetre-to-centimetre
+// dust on near-identical heliocentric orbits, so in Earth's frame they arrive
+// on PARALLEL tracks from the radiant direction, at the stream's geocentric
+// speed — they do not converge on the planet. Until 2026-10 this drew both a
+// point stream CONVERGING to 0.16 units and a few hundred instanced BOULDERS
+// (0.002–0.01 units, the size of kilometre asteroids) pouring into Earth: it
+// read as debris falling on the planet, and it was the wrong geometry.
+//
+// Now: faint SHORT STREAKS (GL lines, additive) on parallel tracks filling a
+// cylinder of `spread` Earth radii about the Earth–radiant axis, drifting from
+// the radiant side past the planet. A track whose impact parameter is inside
+// the drawn atmosphere (`u_earthR · ATMO`) ENDS there — that is the meteor;
+// every other grain passes by, which is what most of a stream does. Grains are
+// unresolvable, so the streak carries no size at all, only direction, speed
+// (relative, disclosed) and a count that rides ZHR × activity. Everything is in
+// the vertex shader (seed + time), so a stream costs the CPU nothing.
+const STREAM = Object.freeze({ halfLen: 1.2, spreadR: 4.0, streak: 0.07, atmo: 1.03, speedPerKms: 0.15 / 40 });
 const STREAM_VS = /* glsl */`
     attribute float aSeed;
-    attribute vec3  aJitter;
-    uniform vec3  u_dir;
+    attribute vec2  aJitter;     // impact-parameter offset, unit disc
+    attribute float aEnd;        // 0 = head (downstream), 1 = tail (toward the radiant)
+    uniform vec3  u_dir;         // unit vector TOWARD the radiant
+    uniform vec3  u_e1;
+    uniform vec3  u_e2;
     uniform float u_time;
     uniform float u_speed;
-    uniform float u_dpr;
+    uniform float u_earthR;
+    uniform float u_halfLen;
+    uniform float u_spread;
+    uniform float u_streak;
+    uniform float u_atmo;
     varying float vFade;
+    varying float vHead;
     void main() {
-        float s = fract(aSeed + u_time * u_speed);                      // 0 far out → 1 at Earth
-        vec3 p = u_dir * mix(1.25, 0.16, s) + aJitter * (0.05 + 0.13 * (1.0 - s));
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        gl_PointSize = (2.2 + 2.0 * s) * u_dpr * clamp(30.0 / max(-mv.z, 0.05), 0.6, 2.0);
-        vFade = smoothstep(0.0, 0.12, s) * (1.0 - smoothstep(0.88, 1.0, s));
-        gl_Position = projectionMatrix * mv;
+        float s = fract(aSeed + u_time * u_speed);                  // 0 upstream → 1 downstream
+        float along = mix(u_halfLen, -u_halfLen, s) + aEnd * u_streak;
+        vec3 perp = (u_e1 * aJitter.x + u_e2 * aJitter.y) * u_spread;
+        vec3 p = u_dir * along + perp;
+        float rho = length(perp);
+        float ra = u_earthR * u_atmo;
+        // Tracks that strike the atmosphere end at the ENTRY point (upstream side).
+        float entry = sqrt(max(ra * ra - rho * rho, 0.0));
+        float gone = step(rho, ra) * step(along, entry);
+        vFade = smoothstep(0.0, 0.15, s) * (1.0 - smoothstep(0.85, 1.0, s)) * (1.0 - gone);
+        vHead = 1.0 - aEnd;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
     }
 `;
 const STREAM_FS = /* glsl */`${TONE_DECODE_GLSL}
     uniform vec3 u_color;
     varying float vFade;
+    varying float vHead;
     void main() {
-        vec2 c = (gl_PointCoord - 0.5) * 2.0;
-        float d2 = dot(c, c);
-        if (d2 > 1.0) discard;
-        float a = exp(-d2 * 4.0) * vFade * 0.35;   // faint streaks; the rocks carry the stream
+        float a = (0.15 + 0.85 * vHead) * vFade * 0.5;          // bright head, fading tail
+        if (a <= 0.002) discard;
         gl_FragColor = vec4(u_color, a);               // premultiply AFTER the encode — see POINT_FS
         gl_FragColor.rgb = toneDecode(gl_FragColor.rgb);   // sRGB colour picks → linear
         #include <tonemapping_fragment>
@@ -490,28 +518,38 @@ const STREAM_FS = /* glsl */`${TONE_DECODE_GLSL}
         gl_FragColor.rgb *= a;
     }
 `;
-function makeStream(count, colorHex) {
+function makeStream(count, colorHex, seed, earthR) {
+    const r = rng(seed);
     const g = new THREE.BufferGeometry();
-    const seed = new Float32Array(count), jit = new Float32Array(count * 3), pos = new Float32Array(count * 3);
+    const n = count * 2;
+    const pos = new Float32Array(n * 3), aSeed = new Float32Array(n), jit = new Float32Array(n * 2), end = new Float32Array(n);
     for (let i = 0; i < count; i++) {
-        seed[i] = Math.random();
-        jit[i * 3] = Math.random() * 2 - 1; jit[i * 3 + 1] = Math.random() * 2 - 1; jit[i * 3 + 2] = Math.random() * 2 - 1;
+        const sd = r(), rad = Math.sqrt(r()), th = r() * Math.PI * 2;
+        for (let v = 0; v < 2; v++) {
+            const k = i * 2 + v;
+            aSeed[k] = sd; jit[k * 2] = rad * Math.cos(th); jit[k * 2 + 1] = rad * Math.sin(th); end[k] = v;
+        }
     }
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
-    g.setAttribute('aJitter', new THREE.BufferAttribute(jit, 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(aSeed, 1));
+    g.setAttribute('aJitter', new THREE.BufferAttribute(jit, 2));
+    g.setAttribute('aEnd', new THREE.BufferAttribute(end, 1));
     const m = new THREE.ShaderMaterial({
         vertexShader: STREAM_VS, fragmentShader: STREAM_FS,
         uniforms: {
-            u_dir: { value: new THREE.Vector3(0, 1, 0) }, u_time: { value: 0 }, u_speed: { value: 0.5 },
-            u_dpr: { value: DPR }, u_color: { value: new THREE.Color(colorHex) },
+            u_dir: { value: new THREE.Vector3(0, 1, 0) }, u_e1: { value: new THREE.Vector3(1, 0, 0) }, u_e2: { value: new THREE.Vector3(0, 0, 1) },
+            u_time: { value: 0 }, u_speed: { value: 0.2 },
+            u_earthR: { value: earthR }, u_halfLen: { value: STREAM.halfLen }, u_spread: { value: STREAM.spreadR * earthR },
+            u_streak: { value: STREAM.streak }, u_atmo: { value: STREAM.atmo },
+            u_color: { value: new THREE.Color(colorHex) },
         },
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
-    const pts = new THREE.Points(g, m);
-    pts.frustumCulled = false;
-    pts.renderOrder = 7;
-    return pts;
+    const lines = new THREE.LineSegments(g, m);
+    lines.frustumCulled = false;
+    lines.renderOrder = 7;
+    lines.userData.parallel = true;   // the gate reads it: tracks are parallel, never convergent
+    return lines;
 }
 
 /** Canvas-text sprite with constant on-screen size. */
@@ -650,7 +688,7 @@ export class NeoLayer extends Emitter {
         this._worker?.terminate();
         for (const slot of this._rockSlots) slot.mesh.material.dispose();
         for (const [, g] of this._geoCache) g.geo.dispose();
-        for (const r of this._radiants) r.rocks.dispose();
+        for (const r of this._radiants) { r.stream.geometry.dispose(); r.stream.material.dispose(); }
         this.scene.remove(this.group);
     }
 
@@ -1594,7 +1632,7 @@ export class NeoLayer extends Emitter {
         if (this.orbitLine) this.orbitLine.visible = this.visible.orbit;
         this.localGroup.visible = this.visible.local;
         for (const [, line] of this._trails) line.visible = this.visible.local;
-        for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.cone.visible = v; r.label.visible = v && this.visible.labels; r.stream.visible = v; r.rocks.mesh.visible = v; }
+        for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.label.visible = v && this.visible.labels; r.stream.visible = v; }
         for (const slot of this._rockSlots) if (slot.index >= 0) slot.mesh.material.uniforms.u_base.value.copy(colorFor(this.els[slot.index], this.visible.colorMode, _cB));
         if (this.rGeo) this._refreshCometTails();
         this._applyStyles();
@@ -1743,9 +1781,9 @@ export class NeoLayer extends Emitter {
         const wantCodes = new Set(want.map(x => x.shower.code));
         for (const r of this._radiants.slice()) {
             if (!wantCodes.has(r.code)) {
-                this.localGroup.remove(r.line, r.cone, r.label, r.stream, r.rocks.mesh);
-                r.line.geometry.dispose(); r.cone.geometry.dispose(); r.label.material.map.dispose();
-                r.stream.geometry.dispose(); r.stream.material.dispose(); r.rocks.dispose();
+                this.localGroup.remove(r.line, r.label, r.stream);
+                r.line.geometry.dispose(); r.line.material.dispose(); r.label.material.map.dispose();
+                r.stream.geometry.dispose(); r.stream.material.dispose();
                 this._radiants.splice(this._radiants.indexOf(r), 1);
             }
         }
@@ -1755,39 +1793,38 @@ export class NeoLayer extends Emitter {
             let r = this._radiants.find(q => q.code === s.code);
             const u0 = radiantEclipticUnit(s.ra, s.dec);
             const u = rotateAboutPole(u0.x, u0.y, u0.z, prec);
-            // Scene axis swap; arrow points INBOUND (meteoroids come from the radiant).
+            // Scene axis swap; `dir` points TOWARD the radiant (grains arrive from there).
             const dir = new THREE.Vector3(u.x, u.z, u.y);
-            const tail = dir.clone().multiplyScalar(1.05), head = dir.clone().multiplyScalar(0.34);
-            // The shaft is a thin cylinder, not a GL line: WebGL lines are 1 px
-            // wide whatever the zoom and vanish against the point cloud.
-            const len = tail.length() - head.length();
-            const mid = head.clone().add(tail).multiplyScalar(0.5);
+            // A hairline guide OUTSIDE the stream's own extent, pointing at the
+            // radiant — no arrowhead into Earth (that read as an impact vector).
+            const inner = dir.clone().multiplyScalar(STREAM.halfLen * 0.75), outer = dir.clone().multiplyScalar(STREAM.halfLen * 1.15);
+            const len = outer.length() - inner.length();
+            const mid = inner.clone().add(outer).multiplyScalar(0.5);
             if (!r) {
-                // A hairline guide with a small head; the STREAM carries the visual weight.
-                const shaftMat = new THREE.MeshBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending });
-                const line = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, len, 6), shaftMat);
-                const cone = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.07, 10), shaftMat);
+                // The shaft is a thin cylinder, not a GL line: WebGL lines are 1 px
+                // wide whatever the zoom and vanish against the point cloud.
+                const shaftMat = new THREE.MeshBasicMaterial({ color: NEO_COLORS.radiant, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending });
+                const line = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, len, 6), shaftMat);
                 const label = makeLabel(`☄ ${s.name} · ZHR ~${Math.round(s.zhr * x.activity)} · ${s.vKms} km/s`, { color: '#ffd27a', size: 19 });
-                const stream = makeStream(Math.round(70 + 170 * x.activity), 0xfff1c8);
-                // The meteoroids themselves: instanced tumbling rocks on the same cone.
-                const rocks = new MeteoroidStream({ count: Math.round(90 + 130 * x.activity), seed: hash32(s.code) });
+                const stream = makeStream(Math.round(60 + 220 * x.activity), 0xfff1c8, hash32(s.code), this.earthR);
                 line.name = `neo-radiant-${s.code}`;
                 stream.name = `neo-stream-${s.code}`;
-                rocks.mesh.name = `neo-meteoroids-${s.code}`;
-                this.localGroup.add(line, cone, label, stream, rocks.mesh);
-                r = { code: s.code, line, cone, label, stream, rocks };
+                this.localGroup.add(line, label, stream);
+                r = { code: s.code, line, label, stream };
                 this._radiants.push(r);
             }
             r.line.position.copy(mid);
             r.line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-            r.cone.position.copy(head);
-            r.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
-            r.label.position.copy(tail).addScalar(0.02);
-            r.stream.material.uniforms.u_dir.value.copy(dir);
-            r.stream.material.uniforms.u_speed.value = s.vKms / 40;   // faster streams pour in faster
-            r.rocks.setDirection(dir); r.rocks.setSpeed(s.vKms / 40);
+            r.label.position.copy(outer).addScalar(0.02);
+            const U = r.stream.material.uniforms;
+            U.u_dir.value.copy(dir);
+            // Any orthonormal pair across the track defines the impact-parameter disc.
+            const ref = Math.abs(dir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+            U.u_e1.value.crossVectors(dir, ref).normalize();
+            U.u_e2.value.crossVectors(dir, U.u_e1.value).normalize();
+            U.u_speed.value = s.vKms * STREAM.speedPerKms;   // relative: a 71 km/s Leonid outruns a 22 km/s Draconid
             const vis = this.visible.radiants;
-            r.line.visible = vis; r.cone.visible = vis; r.label.visible = vis && this.visible.labels; r.stream.visible = vis; r.rocks.mesh.visible = vis;
+            r.line.visible = vis; r.label.visible = vis && this.visible.labels; r.stream.visible = vis;
         }
     }
 
@@ -1808,7 +1845,7 @@ export class NeoLayer extends Emitter {
         // a resize that missed it would silently mis-size the whole population
         // (and the pick radius with it).
         if (f.viewPx > 0) this._pointsMat.uniforms.u_viewPx.value = f.viewPx;
-        for (const r of this._radiants) { r.stream.material.uniforms.u_time.value = this._t; r.rocks.update(this._t); }
+        for (const r of this._radiants) r.stream.material.uniforms.u_time.value = this._t;
         this._camera = f.camera ?? this._camera;   // the label de-clutter projects with it
         this._earthDrawn.copy(f.earthDrawn);
         this._pointsMat.uniforms.u_earthWorld.value.copy(this._earthDrawn);

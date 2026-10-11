@@ -455,16 +455,30 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(sel.shape).toBe('elongated');
         expect(sel.periodH).toBe(30.6);
         expect(Math.abs(sel.bodyRadius - sel.scale)).toBeLessThan(1e-9);
-        // Meteoroid streams are instanced rock meshes — OFF by default, on via the toggle.
+        // Meteor showers — OFF by default, on via the toggle. §5 Phase 3: the
+        // stream is faint PARALLEL streaks (grains are mm dust), never
+        // instanced boulders converging on Earth.
         expect(await page.evaluate(() => window.__neoLab.layer.visible.radiants)).toBe(false);
         await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: true }));
         await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
         await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 45_000 });
-        const stream = await page.evaluate(() => { const r = window.__neoLab.layer._radiants[0]; return { code: r.code, instanced: !!r.rocks.mesh.isInstancedMesh, count: r.rocks.mesh.count, visible: r.rocks.mesh.visible }; });
+        const stream = await page.evaluate(() => {
+            const L = window.__neoLab.layer, r = L._radiants[0], U = r.stream.material.uniforms;
+            const meshes = []; L.localGroup.traverse(o => { if (o.isInstancedMesh) meshes.push(o.name); });
+            return { code: r.code, lines: !!r.stream.isLineSegments, parallel: r.stream.userData.parallel === true,
+                streaks: r.stream.geometry.attributes.aSeed.count / 2, visible: r.stream.visible, instanced: meshes,
+                // the impact-parameter basis is orthonormal and ⟂ to the radiant
+                ortho: Math.max(Math.abs(U.u_dir.value.dot(U.u_e1.value)), Math.abs(U.u_dir.value.dot(U.u_e2.value)), Math.abs(U.u_e1.value.dot(U.u_e2.value))),
+                spreadInEarthR: U.u_spread.value / U.u_earthR.value };
+        });
         expect(stream.code).toBe('PER');
-        expect(stream.instanced).toBe(true);
-        expect(stream.count).toBeGreaterThan(100);
+        expect(stream.lines).toBe(true);
+        expect(stream.parallel).toBe(true);
+        expect(stream.streaks).toBeGreaterThan(100);
         expect(stream.visible).toBe(true);
+        expect(stream.instanced, 'no instanced meteoroid boulders').toEqual([]);
+        expect(stream.ortho).toBeLessThan(1e-6);
+        expect(stream.spreadInEarthR).toBeGreaterThan(1);   // most grains pass Earth by
         // Colour modes: natural by default, class palette on request.
         await page.click('#btn-panel-open');
         const before = await page.evaluate(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return { mode: L.visible.colorMode, rgb: [L._col[i * 3], L._col[i * 3 + 1], L._col[i * 3 + 2]] }; });
@@ -898,6 +912,16 @@ test.describe('solar-system.html — NEO viewpoints (screenshots)', () => {
         await page.mouse.click(sun.x, sun.y);
         const s10 = await shot('sun-selected', 'Sun clicked — reticle on the Sun');
         expect(s10.bodyRing).toBe(true);
+
+        // Meteor shower (opt-in): the Perseids at their peak, Earth View.
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: true }));
+        await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
+        await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 45_000 });
+        await page.click('#cam-earth');
+        await shot('perseids-stream', 'Perseids ON (opt-in): faint parallel streaks from the radiant; grains on Earth-crossing tracks end at the atmosphere, the rest pass by');
+        await page.evaluate(() => { const lab = window.__neoLab; lab.camera.position.lerp(lab.layer._earthDrawn, 0.55); });
+        await shot('perseids-close', 'closer on the same stream — no boulders, no convergence on Earth');
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: false }));
 
         await page.click('#cam-earth');
         await page.evaluate(() => window.__neoLab.layer.setVisible({ labels: true }));
