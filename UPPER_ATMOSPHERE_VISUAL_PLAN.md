@@ -1022,6 +1022,358 @@ behaviour is right; it now waits for the request with the new F10.7 and for
 the pill to return to SPARTA. The suite's `beforeAll` fails with the start
 instructions when the API is down.
 
+### 9.14 The ops HUD: the stage as an instrument (2026-10-08)
+
+The stage was a fixed 500 px card (644×500 on a 1440×900 laptop) with the
+chrome — a 3-row camera HUD whose time-warp row spanned most of the width, an
+8-row readout in the middle of the planet, the explore column, the limb ruler
+under it, a legend, an 11-button control row, the scrubber and the explore
+POI labels — covering most of the render. The owner's ask: compact, on the
+design tokens, and able to tell the atmosphere's layers apart for spacecraft.
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-ops-bands.js` | PURE: the OPERATIONAL bands (entry interface · decay zone · VLEO · station band · constellation shells · SSO · upper LEO · top of LEO, 80–2000 km contiguous) and the numbers printed beside them from the ENGINE's density: circular speed, period, drag deceleration, height lost per orbit, King–Hele lifetime at a disclosed reference B | `node tests/upper-atmosphere-ops-bands.mjs` (8) |
+| `js/upper-atmosphere-ops-bands-layer.js` | the analytic limb-ring pass (one bounding sphere; a ring where a ray's closest approach equals a band edge, a faint wash between edges; pixel-footprint width; skipped inside the lowest edge) | `tests/upper-atmosphere-ops-hud.spec.js` |
+| the page | viewport-driven stage, ONE token block on `#ua-globe-wrap`, the camera dock, the time dock, the toolbar, the legend pill, the folding readout | same (7) |
+
+**The stage is viewport-driven.** `clamp(540px, 100vh − 178px, 1100px)`:
+178 is the nav + the compact hero + the page padding, so the whole stage is
+on screen at load and sticks at 14 px once the page scrolls. The hero's
+introduction went behind a disclosure and the plots column gave up 80 px.
+Measured stage: 744×722 at 1440×900 (was 644×500), 958×542 at the test
+viewport, 1224×902 at 1920×1080.
+
+**One token set.** Every piece of chrome over the canvas reads the block on
+`#ua-globe-wrap` (`--ua-cyan` #5fd8ff + its rgb triplet, three surfaces,
+four text shades, a 4 px spacing grid, three radii, one 24 px control
+height, one monospace stack) — the readout used to carry its own mirror with
+`--ua-cyan: #0ff` while the toolbar used #5fd8ff, and the fleet-UI block it
+mirrored defines `--ua-cyan-mid: var(--ua-cyan-mid)` (a cycle, so every
+`var(--ua-cyan-mid)` in the scrubber had been computing to nothing). The
+scrubber host dropped its `.ua-pane-analysis` scope for the same reason.
+
+**Where things went.**
+- Camera dock (top-right): the mode switch as a segment beside the full
+  screen button (still ≥ 44 × 120, still > 2× Reset's area — the §9.11
+  rule), one row of view presets + the drag-tool segment + ISS + Stop follow,
+  then the readout: altitude · physics layer · OPS BAND in a header that
+  stays, the six gas rows in a two-column grid that FOLDS (remembered in
+  localStorage, best effort) with the orbit row (speed · period · decay for
+  the band the camera is in) and the nav / transit rows under it.
+- Time dock (bottom): the time-warp chips moved INTO the scrubber's head
+  (the bootstrap reparents the row after the scrubber mounts — its listeners
+  are on the row, so they travel). UTC · mode · chips · ⟳ Now is one line;
+  the scrubber's own ⏭ Now is folded away (one control, one action).
+- Toolbar (bottom-left): four labelled segments — show (ρ column · airglow ·
+  gas), view (anomaly · plasma · shells), instruments (ops bands · probe),
+  transit (⇣ ⇡ rate) — and the legend as a one-line pill above it, clearing
+  the toolbar by its MEASURED height (`--ua-toolbar-h`: the toolbar wraps
+  to two rows at laptop widths, and a constant put the pill under it; the
+  gate's negative control zeroes the measurement and must see the overlap).
+- The explore column starts at the top (the HUD no longer spans the width)
+  and carries an OPS STRIP beside the physics bar on the same log scale,
+  named where a band is tall enough to carry its label.
+- The limb ruler now PICKS its bearing per frame from four candidates by how
+  much live chrome its run would cross (hysteresis against flicker), and
+  draws the band segments beside its spine, named along the spine where the
+  segment is longer than the label. The compass clears the dock by the
+  published floor.
+- POI labels are hidden where they would print across chrome (they used to
+  cross the readout's numbers); the beacon still marks the place and the
+  panel lists it.
+- The boot pose is UNCHANGED (0, 0.6, 3.2), and that was measured, not
+  assumed: opening at the Reset home (y = 0.65 d, d = 3.4) fits the whole
+  2000 km band on the taller stage, and fails the camera-feel gate — the
+  dive kernel's landing blend swings the view 6.26° in one frame from a
+  camera that high against a 2.5° bound that the old pose meets at 2.49°
+  (probed in node on `divePath`: y = 0.6 → 2.44–2.49°, y = 1.0 → 2.98°,
+  y = 2.2 → 6.26°, always at the landing frame). So the band fits after a
+  Reset, and a dive FROM the Reset home snaps today — the kernel's path, an
+  open item below.
+- The density plot thins its decade labels to what fits (eleven decades in
+  340 px overprinted).
+
+**Three `[hidden]` guards were each needed** (the Mars feature-index trap,
+again): the transit hold button inside a segment, the readout's folded
+rows, and the explore column's unfit band names each carry an author
+`display`, which beats the UA sheet's `[hidden]`.
+
+**The bands are a ruler and the page says so.** Band edges are planning
+conventions (below 200 km you are down within days; above 600 km passive
+decay no longer meets the 5-year rule), not features of the gas — the
+legend's ops row says RULER, and the palette is deliberately distinct from
+the physics layers' (orange thermosphere / violet exosphere; the node gate
+checks no colour is shared). The lifetime is King–Hele's closed form for a
+circular orbit in an exponential atmosphere with the LOCAL scale height
+(pinned against a hand integration), at B = 50 kg/m², and the readout prints
+`@B50` beside it: it scales linearly in B and the page does not know the
+vehicle. Two things it says about the model: below 120 km the engine's
+density is T∞-independent, so a storm leaves the entry band's number alone;
+and at 160 km the density PIVOTS (×1.04 at Ap 300 while H grows ×1.6), so
+the decay zone's King–Hele estimate LENGTHENS under a storm — pinned as
+measured rather than "fixed", because the estimate integrates the modelled
+profile below the orbit, which the hot storm thins.
+
+### 9.15 The rings are layers (2026-10-08)
+
+§9.14 drew the operational bands as a ruler on the limb. They are now
+LAYERS: hover a ring and it brightens and names itself at the cursor; click
+it and the band is SELECTED — the others dim to a third, the band expands
+into a translucent shell of its true extent, and a card under the readout
+says what it is and what lives there, with the live numbers for it.
+
+| piece | what it is | tested by |
+|---|---|---|
+| kernel `rayClosestApproach` · `pickOpsBand` · `shellChord` · `shellChordMax` | PURE: a ray's closest approach to the centre; which band a ray picks (EDGES first within a pixel tolerance — a ring is what a cursor aims at — then the wash; a shared edge belongs to the band ABOVE it, the ceiling to the top band; the disc and the inside of a band pick nothing); the ray's path through a spherical shell on the camera's side of the planet, and its longest value (the lower tangent) | `node tests/upper-atmosphere-ops-bands.mjs` (+3: the chord is pinned against the two-sided and near-side closed forms and is continuous across the limb) |
+| the layer | `uHover` / `uSel` / `uExpand[]` uniforms; the shell is the kernel's chord transliterated into GLSL, normalised by the lower-tangent chord, under a √ DISPLAY STRETCH (face-on a 100 km layer is 4 % of its limb chord — it would not show over the disc at all); the expansion eases on the frame clock with τ 0.22 s and is withheld while the camera is inside the band's top | `tests/upper-atmosphere-ops-layers.spec.js` (3) |
+| globe | `pickOpsBandAt(x, y)` (kernel pick with a 6 px tolerance through the pixel angle at the tangent range), hover in the tooltip's mousemove, click in its pointerup, `selectOpsBand(id)` → the `ua-ops-band` event | same |
+| `js/upper-atmosphere-ops-band-card.js` | DOM: name · extent · ops text · examples · ρ / H / v / period / drag decel / drop per orbit / decay / T from `bandMetrics` (re-printed every 2 s), ‹ › along the ladder, ✕, "Go there" (`goToAltitude`), "Limb view" (`flyToLimb`); mounted in the camera dock under the readout | same |
+| the instruments | the hover chip at the cursor (band · extent · what a click does), the ruler's selected segment thick and always named, the others dim; the probe YIELDS to a hovered ring and only probes while the pointer is on the WebGL canvas | same + volume spec |
+| the column strip, the legend rows, the readout's band tag | all select / toggle the same selection; Esc clears | same |
+
+**Three things the first pass got wrong, each measured.**
+- The hover raycast reports the five old layer shells (hidden but hittable
+  so the tooltip can still name a layer) over the whole band, so a ring
+  under the cursor never reached the ops pick: a ring edge now beats a
+  shell hit, and a click on anything that is not a click TARGET (the dive's
+  rule: probe, debris, catalogue point) is "empty sky" for the selection.
+- At the home framing every ring arc lies under some chrome (the column,
+  the toolbar, the dock, the dock column); the gate zooms out twice and
+  SCANS bearings for a point whose element-from-point is the canvas.
+- The limb probe listened on the host, so a pointer over the band card
+  still moved the probe and its card parked across the band card; it now
+  probes only with the pointer on the canvas, yields to a hovered ring,
+  and parks in the clear band between the column and the dock.
+
+**Found by the gates on the way, pre-existing (bisected to before this
+work):** the boot-time live-TLE upgrade aborted itself after 4 s, and on a
+saturated software renderer the main thread cannot turn the responses round
+in time, so every probe silently kept its hard-coded elements and the
+one-satellite-one-place gate waited 30 s for an ISS SGP4 state that never
+came. The abort is now 12 s (a hung upstream still ends there) and the
+upgrade retries once, 8 s after boot, if any probe missed it.
+
+### 9.16 Every panel is a window, and Basic+ remembers the arrangement (2026-10-08)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/stage-layout.js` | PURE: the layout document (`{v, panels:{id:{anchor,dx,dy,w,h,open}}}`), corner anchoring (`anchorFromRect` / `placeFromAnchor`, exact round trip), clamping to MIN_VISIBLE_PX, `withPanel`, `layoutMemoryAllowed` — the ONE gate, delegating to dashboard-sync's `tierAllowsSync` so the stage, the console and the climate lab draw the paid line in the same place — and the 2026-10-09 UX rules: `snapRect` (an edge within SNAP_PX = 10 of the 12 px stage gutter lands ON it), `gripSide` (the resize grip faces the OPEN stage) and `resizeFrom` (a size clamped to the edge it grows toward; a left grip pins the right edge) | `node tests/stage-layout.mjs` (7) |
+| `js/upper-atmosphere-stage-windows.js` | DOM: a title bar (grip · name · live size · fold ▾ · home ⌂) and a resize grip on the camera dock, the render dock (legend + toolbar, now ONE anchored column), the time dock, the altitude column and the flight deck; drag by the WHOLE bar, buttons included (4 px click threshold, the pointer captured only once the drag is real, the CSS home converted to left/top on the first real move, edges snapped, Alt for free placement, Esc puts it back), fold to the bar, resize on the axes the panel can use from a grip that faces the open stage (live `w × h` in the bar; double-click = home size where it stands), home on ⌂ or a double-click (every inline style removed); re-placed from the corner on every stage resize | `tests/upper-atmosphere-stage-windows.spec.js` (4) |
+| `js/dashboard-sync.js` `initDocSync` | the SAME transport as the console's bundle sync for ONE document: local-first, migration-guarded, tier-gated, last-write-wins by updated_at | the module's existing node gate (pure helpers unchanged) |
+| the page | the ⧉ layout chip + menu (state line · every panel home · fold all · unfold all); `--ua-render-dock-h` replaces `--ua-toolbar-h` (the column clears the dock by its measured height) | ops-hud spec's negative control re-pointed at the dock |
+| dashboard.html `#stage-layout-card` | the tease: what the stage can do, a badge from the same gate (Remembered / Basic+), "Open the stage" and, for free accounts, "Remember mine →" (pricing) | — |
+
+**Who remembers.** Everyone can arrange the stage for the session. Basic+
+("intro" is the legacy alias of basic; testers and admins ride along)
+keeps the document in `localStorage` (`pp-stage-layout.upper-atmosphere-stage`)
+and pushes it to the dashboards table through `initDocSync`, so it follows
+them across devices; a free visitor's arrangement is gone on reload and
+the ⧉ menu's state line says so with the upgrade link — the gate is
+tested as a NEGATIVE CONTROL (a free account drags, nothing is stored, a
+reload is home).
+
+**Positions are corner-relative, never absolute.** A dock dragged a little
+off the top-right is stored as (top-right, dx, dy) and re-placed from that
+corner on every stage resize, so it stays top-right at 1224 px and at
+584 px; absolute pixels would strand it mid-canvas or off it. Clamping
+keeps MIN_VISIBLE_PX (36) of every panel on the stage — the draggable-panel
+rule: the user must always have something to grab.
+
+**Measured on the way.** The dock spans the stage, so its centre sits on
+the midline and either bottom corner is the nearest — the gate accepts both
+and checks the offsets against the corner that was chosen.
+
+**The UX pass (2026-10-09)** — three things the first gate caught, each of
+which a user would have met as "it does nothing":
+
+1. *A narrow bar's right half was its buttons.* The time dock's bar was
+   104 px wide with fold/home from 64 px: a natural grab on its right half
+   pressed a button and nothing moved. Now THE WHOLE BAR IS THE DRAG
+   SURFACE — a press on ▾ or ⌂ that travels past 4 px becomes a drag (the
+   pointer is captured only then, so an untouched press stays the button's
+   own click) and the click that follows a drag is swallowed for 400 ms, as
+   is a double-click that is really two quick drags. Bars also have a
+   132 px floor and a 22 px height. The gate presses ON the fold button,
+   travels 120 px and checks the dock moved and did not fold, then clicks
+   it and checks it folds. Escape mid-drag puts the panel back exactly
+   (home included, floating or not); edges within SNAP_PX of the stage
+   gutter land ON it, Alt holds the snap off (both gated).
+2. *The resize grip could push a dock off the stage, and an id-level cap
+   could swallow the size.* The camera dock sits top-right: a bottom-right
+   grip dragged rightwards there only pushed it off the stage. The grip now
+   FACES THE OPEN STAGE (`data-grip`, kernel `gripSide`: bottom-left for a
+   panel whose centre is in the right half) and `resizeFrom` clamps the
+   size to the edge it grows toward, pinning the right edge for a left grip
+   — gated: dragging the camera dock's grip LEFT 80 px widens it 80 with the
+   right edge within 2 px of where it was. The grip is an 18 px target shown
+   whenever the PANEL is hovered (a grip visible only when the grip is
+   hovered is a grip nobody finds), the bar prints the live `w × h` while it
+   is held, and a double-click on it restores the home size where the panel
+   stands. The caps were audited (camera dock max-width, render dock
+   max-width + the legend's own, flight deck `width:min(312px,44%)`, time
+   dock insets, the column's none): the floating rule outranks every one.
+   MEASURED SCAR: the home size of a FLOATING panel cannot be read by
+   clearing its inline width — out from under its id cap the camera dock
+   came back 91 px wider than home — so `homeSize` re-applies the caps for
+   one layout, measures, and PINS the result as the panel's size (which is
+   also what makes it survive a reload).
+3. *The legend inside the render dock.* Its max-height was a share of the
+   dock it sizes and flip-flopped the layout every frame (a px/vh cap now),
+   and its own 380 px max-width meant widening the dock only re-wrapped the
+   toolbar — a resize that visibly did nothing. Once the user has sized the
+   dock (`data-floating`), the legend and the toolbar span it.
+
+Two more surfaced while gating those:
+
+4. *A floating panel must still grow from its corner.* Floating converts
+   the CSS home to left/top, so the render dock, narrowed, re-wrapped its
+   toolbar taller and grew DOWNWARD over the time dock's bar — buried, and
+   a press on it went to the dock above. Every panel carries a
+   ResizeObserver that re-places it from its STORED corner whenever its
+   size changes (bottom-anchored ⇒ bottom pinned, grows up; right-anchored
+   ⇒ right pinned), skipped while the pointer is driving it, and a
+   width-only resize keeps the corner it started from (`anchorFromRect`
+   takes a forced corner) — gated: the render dock narrowed by 300 px grows
+   20+ px taller with its bottom within 2.5 px, and `elementFromPoint` at
+   the time dock's bar is still the time dock. A spanning panel's centre
+   sits ON the midline, and a fractional width tipped both docks to a LEFT
+   grip, which is how the second press landed on the wrong dock: a tie to
+   `GRIP_TIE_PX` is the conventional right grip.
+5. *Rects are measured from the stage's PADDING box.* The stage carries a
+   1 px border; measured from its border box every float and re-place
+   slipped a pixel, and a grip double-click (two zero-travel resize cycles
+   plus the home-size pass) drifted 6 px off the gutter. `_rectOf`
+   subtracts `clientLeft`/`clientTop`; the double-click now lands exact.
+
+### 9.17 Zooming in to one spacecraft: the chase, the avatars, the altitude tour (2026-10-11)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-sat-view.js` | PURE: the LVLH frame (`lvlhBasis`), the chase pose and its inverse (`chasePose` / `chaseFromEye`), the log zoom ladder (`zoomDistance`, `scaleDistance`), drag orbit (`orbitBy`), the model's angular hold (`modelScale`, `MODEL_REF_R`, `ARTISTIC_SPAN_R`), the chase-aware near plane (`nearPlaneFor`), the fly-in duration, the altitude tour (`altitudeNeighbour`), model families from catalogue strings, the SAFE FRAME (`safeCentre`) and the ARC flight (`arcSpec` / `arcAt`) | `node tests/upper-atmosphere-sat-view.mjs` (9) |
+| `js/upper-atmosphere-camera.js` | `followObject({ chase: true, getVel, seedFromEye })`: the eye at pos + dist·dir(az, el) EXACTLY each frame, az/el/dist eased toward the user's targets; wheel (own non-passive listener), drag, W/S A/D Q/E and the ± buttons drive them; `flyTo({ arc: true })` flies the kernel's arc | `tests/upper-atmosphere-sat-chase.spec.js` |
+| `js/upper-atmosphere-globe.js` | `followSatellite` is a chase; `followCatalog` / `flyToCatalog` chase any SGP4 dot with an AVATAR (model family by name/group, held in angle), a trail and the tracker's highlight label; `getFollowInfo`, `followNeighbourByAltitude`, `setChaseSafeFrame`; a catalogue click flies in and chases; the probe model tiers scale continuously | same |
+| `js/upper-atmosphere-follow-card.js` | the card under the readout: name · NORAD · alt · v · period · incl · the chase range and framing · ▼ lower / ▲ higher / ⟲ reframe · the symbolic-scale disclosure; `,` / `.` are the tour keys | same |
+
+**The camera tracks exactly; only the user's input is eased.** A LEO target
+moves 7.7 km/s; at 10 km range an eased position lags it by degrees per
+frame and the spacecraft slides out of the frame (the star-collider rule,
+measured there as 75° of orbit). The gate advances the bus a second per
+frame and pins eye-to-target − dist < 1e-9 — and runs the legacy eased
+follow on the same target as the NEGATIVE CONTROL (it lags by far more).
+
+**Distance is logarithmic** (9.6 km → 3800 km, one notch = ×1.18), **the
+model is symbolic and says so**: a 109 m station is three orders below
+float32's grain at r = 1.07, so the models keep their artistic span
+(~0.04 R⊕) and `modelScale` HOLDS their angular size inside `MODEL_REF_R`
+— closing in makes the planet, the orbit arc and the neighbours grow while
+the symbol stays the same size, which reads as approach rather than as a
+wall of hull. The card prints the drawn span, the factor and the true span.
+The near plane tightens to 0.2 × the chase range (the altitude rule alone
+clipped the target). The tracker's highlight sprite is WORLD-sized and
+filled the frame white at 70 km (measured): it yields to the avatar inside
+`MODEL_REF_R` and returns as the camera backs off (gated both ways).
+
+**Three scars, each measured.** (1) `followCatalog` primed its per-frame
+step before setting the follow id, and the step's release path cleared the
+new state — the camera chased a frozen origin for the whole session; the
+id is set first, and a dot the worker has not published yet (a (0, 0, 0)
+slot) is refused as a destination. (2) The canvas centre sits under the
+camera dock: the chase moves the projection's principal point to the centre
+of the stage no dock covers (`safeCentre` over the page's live rects, the
+Mars safe-frame rule; `setViewOffset`, cleared on release), and a strip
+narrower than the floor is widened about its own centre, never abandoned
+for the whole stage (the first version put the centre back on the dock's
+edge at a 742 px stage). (3) The tour's hop from one Starlink plane to
+another flew a straight chord through the planet: `_flyToChase` flies the
+kernel's ARC (great-circle slerp, radius lifted by 0.35 R⊕ per radian
+swept, the look point sweeping too; a local hop stays straight) and is
+timed by its length. The hand-off keeps its wall-clock timer (the escape
+hatch gate's negative control depends on it) and is safe either way: the
+chase SEEDS FROM THE EYE, so if the timer fires early the chase waits for
+the flight and starts exactly where it left the camera — never a snap.
+
+**Also fixed on the way:** the camera's R / Esc keys yielded to EVERY
+focused input, including the suites panel's checkboxes — Esc could not let
+go of a chase after enabling a suite; they yield to text entry only.
+
+**Known limits.** The avatar's orientation is velocity-aligned with +Y
+radial (the probes' convention) — no attitude data; the trail is sampled
+by distance (5 km) and holds 120 points; the catalogue velocity is a
+finite difference in the Earth-fixed frame (the speed readout uses the
+circular relation at the drawn radius instead). Not verified on a real GPU.
+
+### 9.18 Attitude, sun geometry and the ground track of the followed spacecraft (2026-10-11)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-sat-attitude.js` | PURE: `ATTITUDE_MODES` per model family (lvlh-xvv · nadir · inertial · tumble), `attitudeBasis` (body axes as world vectors; tumble about a per-id axis from a mixed hash), `arrayAlpha` (the single-gimbal angle that points an array's normal at the Sun and the incidence it reaches), `illumination` (umbra / penumbra / sunlit from the Earth's and Sun's angular radii at the craft, penumbra fraction linear across the disc), `betaAngle` (+ the critical β = asin(1/r) above which an orbit is eclipse-free), `subSatellite` (the page's one frame, pinned against the column kernel), `groundTrackSamples`, `nextShadowEvent` | `node tests/upper-atmosphere-sat-attitude.mjs` (7) |
+| `js/satellite-models.js` | solar arrays are PIVOT GROUPS tagged `userData.solarArray` (`collectSolarArrays`), turned about body X by the globe | the chase gate |
+| `js/upper-atmosphere-globe.js` | `_applyAttitude` on every probe and the avatar (replaces the old velocity lookAt), `_sunGeometry` (illumination, β, the next shadow boundary scanned every 4 s of frame clock), the ground track layer (`_stepGroundTrack`: past 45 min + future 90 min on the surface sphere, the sub-satellite marker and nadir line re-seated every frame, rebuilt every 30 s of scene time or on a new target — from the object's OWN propagator turned by GMST at each sample's instant), `getFollowInfo().attitude/sun/ground`, `setSunDirOverride` (test hook) | `tests/upper-atmosphere-sat-chase.spec.js` |
+| `js/upper-atmosphere-follow-card.js` | attitude · sun · ground rows | same |
+
+**The attitude is a model and says so.** Nothing in a TLE carries attitude,
+so each family gets its NOMINAL mode and the card prints "(modelled)":
+stations fly LVLH with −Z on the velocity and the arrays alpha-tracking
+about the truss (one axis — the ISS's beta gimbals are not modelled);
+comms / nav / Earth-observation / generic point nadir with the wing
+tracking; observatories hold the arrays on the Sun and the tube 90° off it
+(the target is unknown); rocket bodies and debris tumble slowly about an
+axis seeded by the id. **The sun geometry is physics**: β, the critical β,
+umbra / penumbra / sunlit, and the next shadow boundary all come from the
+position, the velocity and the sun vector. **The ground track is the same
+propagator as the dot** (SGP4 for a probe through `_lookupProbePositionAt`;
+the catalogue's mean elements + J2 for the line, which the plan §9.11
+measured within 8 km of SGP4 in LEO — the DOT stays SGP4). It is drawn as
+an OVERLAY (depth test off, render order 998): at 10 km above the surface
+it sat inside the skin's rim shell and was depth-killed — measured,
+invisible from the chase.
+
+**Measured on the way.** FNV-1a over one or two bytes barely avalanches
+('a' and 'b' hashed 0.004 apart and two debris pieces tumbled about the
+same axis) — murmur3's final mix is applied. The eclipse NEGATIVE CONTROL
+cannot flip the Sun through the centre: a broadside satellite is sunlit
+from both sides; it holds the Sun along the target's anti-radial (exactly
+behind the planet → umbra, key light 0) and radial (full sun, light 2.3).
+
+### 9.19 Lighting — the plan, and phases 1–5 (2026-10-11)
+
+The scene had one faint `AmbientLight` and every spacecraft was an unlit
+flat colour: a hull read the same from the Sun side and the shadow side,
+and nothing on the model said where the Sun was. The roadmap, in the order
+the payoff arrives; all five are in.
+
+| phase | what | status |
+|---|---|---|
+| 1 | **Lit spacecraft.** `satellite-models.js` materials are `MeshStandardMaterial` with generic spacecraft finishes (aluminium skin, gold MLI, glossy cells, white radiators — not measured BRDFs). The globe adds a sun-aligned `DirectionalLight` (`SUN_LIGHT_INTENSITY` 2.3) whose intensity is the FOLLOWED object's illumination fraction (umbra → off; the hero object is the one whose shadow matters, the dots are unlit points), an earthshine `HemisphereLight` aimed from the planet below the target, a fainter ambient so a hull in umbra is a silhouette, and a procedural SPACE ENVIRONMENT (`buildSpaceEnvironment`: black sky, the lit Earth filling the lower hemisphere, a limb band, the Sun's disc → PMREM) handed to every model material through `setModelEnvironment`, because a metal with no environment under one light is a black shape with a highlight. | **done**, gated (light = 2.3 × fraction; umbra → 0; materials are Standard) |
+| 2 | **Self-shadowing and the terminator on the hull.** A shadow map from the key light, scoped to the HERO only: `PCFSoftShadowMap`, one 1024² map, bias −0.00002 / normalBias 0.0003, the orthographic frustum sized to the drawn avatar (`extent = ARTISTIC_SPAN_R × 0.9 × modelScale`, held with 1 % hysteresis so the frustum does not re-fit every frame), the light placed at hero + 2·extent·sunDir, and `castShadow` ON only while following with `modelScale > 0` and an illumination fraction > 0 (`enableModelShadows` flips cast/receive on the avatar's meshes — the dots are a population, §9.5, and never cast). So the ISS's upper arrays shade the lower ones and the truss shadows the modules; in umbra the map is off, not black. **Measured scars:** the first gate measured a 240 px block around the ISS and got EXACTLY zero difference (the shaded lower arrays sit under the upper ones from the chase angle), and a Starlink's single wing lit along its own axis casts a sliver — the gate now measures the WHOLE-FRAME pixel sum on the ISS with the Sun along its radial, castShadow on vs off (80 361 581 vs 80 625 603 on SwiftShader); the extent / light-distance assertions carry relative tolerances (2 % / 3 %) because the hysteresis makes an exact comparison flap. Cost on SwiftShader: within the chase gate's budget (3 tests in 1.3 min). | **done**, gated (config + measured self-shadow) |
+| 3 | **Specular events.** The Iridium-flare class of highlight. `sat-attitude.js` `glint({normal, sunDir, toCamera, sigmaDeg})` is the PURE kernel: the mirror direction R = 2(N·L)N − L, a Gaussian in the ANGLE between R and the camera (σ per surface, in degrees), zero when the surface is unlit or facing away; `trackingArrayFlareSun(toCameraBody)` is its inverse for the gate (the Sun that puts the mirror exactly on the camera, in the body frame, so the test can PLACE a flare rather than hunt for one). Each model surface that can flare carries `userData.glint = {sigmaDeg, gain, normal}` (solar wings 2.5° / 0.6; the Iridium MMA panels 0.7° / 1.6 — the real −8 mag flare was the MMAs, not the arrays); the globe evaluates every glint surface of the followed avatar per frame in WORLD space through the surface's live quaternion (so a tracking array that has turned by `arrayAlpha` flares where it actually points), weighs value × illumination × gain, and drives an ADDITIVE canvas star-glare sprite (`makeGlintSprite`, visible above 0.02, scale 0.012 + 0.06·v) at the surface — a sprite, not a bloom pass: the volume render already owns the frame's post, and a thresholded bloom is the sun.html scar. The follow card's sun row appends `✦ flare toward you (surface, NN %)` above 0.05 and `getFollowInfo().glint` publishes `{max, surface, count}`. **Gate:** orbit the chase to (220°, 0), override the Sun with `setSunDirOverride(trackingArrayFlareSun(...))` → `glint.max > 0.54`, surface `'array'`, sprite visible with opacity > 0.5 and scale > 0.04, card text present; NEGATIVE CONTROL: Sun along the camera direction → max < 0.05 and the sprite hidden. | **done**, gated (flare + control) |
+| 4 | **The environment is the real planet.** While a model is in close-up (`modelScale > 0`) a `CubeCamera` sits AT the followed object and renders six 64² faces of what carries `ENV_LAYER` — the skin, its limb rim and the stars; never the avatar (a camera inside a model reflects the model's inside), the volume march or the symbolic layers — through PMREM (`fromCubemap`, rebuilt into the same target) and into the models via the same `setModelEnvironment` the procedural baseline uses; on release the baseline comes back. Refresh is the PURE `envRefreshDue` rule (`ENV`: 4 s cadence at rest, a motion trigger at ~320 km of target travel rate-limited to 1 s — under warp the object crosses the terminator in a frame and six faces + PMREM per frame is a measurable cost), rendered only on a rendered frame, with the key light's shadow pass off for the six faces (nothing on the layer casts). Faces are LDR (the skin writes display values) so the gate can read them back: `_envFaceMeans()`. **Measured (SwiftShader, 1440×900):** a refresh costs ~3 ms; with the Sun along the target's radial the planet half of the environment reads 4.4–4.8/255 (the hermetic gate's skin is the gray texture fallback — production's day map is brighter) and 0.4–0.75 with the Sun opposite — the environment is the planet under the spacecraft, not a picture. **With the REAL NASA maps** (the self-hosted `assets/earth/*-2k.webp`, the same imagery production loads from the CDN; measured 2026-10-11 on the deployed commit, routed locally because the sandbox cannot reach unpkg): the planet half reads 17.5–17.6 sunlit and 4.5–5.1 at night (city lights), a refresh costs 65 ms the first time (texture upload) and 3–4 ms after, and the reflection is the sunlit hull's DOMINANT light — the ISS's hull pixels read 112.6 with the planet environment and 43.8 with `setModelEnvironment(null)`, a 2.6× difference. The skin's AURORA is in it too: the ISS over the southern oval at Kp 3 read 2.8 on its nadir face at night (0.46 with the aurora off), so the gate's day/night comparison holds `u_aurora_on` at 0 for both readings — a night face lit by the oval is the feature working, not the control failing. No Sun disc in the environment: the key light owns the direct specular, and a disc in the env would count it twice. | **done**, gated (envMap identity, lit vs night faces, cadence) |
+| 5 | **Exposure.** The renderer's filmic curve (`ACESFilmicToneMapping`) is ON only in the chase close-up and OFF in the orbit view, and even in the chase it reaches ONLY the lit materials: on entry `_exemptFromToneMapping` sweeps the scene and sets `toneMapped = false` on every material without the models' `userData.lit` flag (`markLit` / `isLitMaterial` in satellite-models.js — the planet skin, the airglow, the ops rings, the catalogue dots, the stars and the trails are data visualisation, plan §3, not light transport), repeating on a 2 s cadence for anything added during the chase; `toneMapped` is a program parameter, so the sweep costs no recompile while the renderer's curve is off, and the lit set recompiles once per direction (cached). The exposure is the PURE `chaseExposure` (`EXPOSURE`): base 1.15 when sunlit (chosen so the whole-frame level matches the uncurved render — 121.08 M vs 121.22 M measured — while the 2.3× key rolls off instead of clipping), LIFTED linearly in the shadow fraction toward ×2.6 in umbra (the hull is earthshine-lit there; this is what a camera's auto-exposure does), eased on the frame clock with τ 0.6 s, and the card says `exposure ×2.6 (eclipse)` / `filmic exposure` and which environment it reflects. **Measured:** against the `setExposureLift(false)` control, the eclipsed hull's own pixels (the set that differs between the lifted frame and the SAME frame re-rendered at base exposure — back to back, no frames stepped: a stepped control let the volume march's jitter into the mask, 188 k px at one framing) read 1.27–1.28× brighter on the gray fallback skin and 2.19× (81 vs 37) with the real maps, where the eclipsed hull sits in the dim, near-linear part of the encode — a ×2.6 lift on an earthshine-lit mid-grey hull is ~1.25 in DISPLAY levels once the filmic shoulder and the sRGB encode compress it (0.55 → 0.87 linear is 0.76 → 0.94 encoded), and a whole-frame sum is the wrong instrument (it moved 1.9 % at one framing and 0.14 % at another); the census finds 208 lit and 419 exempt materials and nothing tone-mapped without the flag. Release restores NoToneMapping / exposure 1. | **done**, gated (curve on/off, census, lift vs control, card) |
+
+**Rejected for now:** `scene.environment` (it would also light anything
+Standard that any later module adds — the per-material `envMap` keeps the
+environment the models' own); real-time shadows on every catalogue dot
+(points are unlit by design — §9.5 caps them, they are a population, not
+bodies); a per-frame environment refresh (six faces + PMREM every frame —
+the cadence rule exists because warp makes "every few seconds of scene
+time" mean every frame); a scene-wide tone curve (the orbit view is a data
+visualisation and its levels are tuned as one — the curve reaches lit
+materials only, by flag, never by default).
+
+**Verified on the deployed commit (2026-10-11):** the Vercel preview for
+`234cdb9` is READY and serves the phase 4–5 modules (fetched through the
+Vercel API: `upper-atmosphere-sat-view.js` carries `chaseExposure`/`ENV`,
+`satellite-models.js` carries `markLit`). The real-map measurements above
+were taken on that commit with the same NASA imagery the preview serves,
+loaded from the repo's self-hosted copies because this sandbox's network
+policy denies `*.vercel.app` and `unpkg.com`. **Still open:** every number
+is SwiftShader — the hermetic gates keep the gray fallback (the real night
+map's city lights bring the day/night face ratio down to 3.4× against the
+gate's 3× bound, so routing the maps there would make it marginal), and how
+the hull's reflections READ on a GPU is unverified until someone opens the
+preview on hardware.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches
@@ -1051,6 +1403,12 @@ instructions when the API is down.
 - **Airglow radiance.** The volume emission rates are order-of-magnitude
   typical values used for *relative* brightness. This is not a radiance
   calculation and the page must not present it as one.
+- **A dive from the Reset home snaps at the landing.** `divePath`'s
+  forward blend turns 6.26° in the landing frame from the Reset pose (y =
+  0.65 d) against the 2.5° no-snap bound, and 2.49° from the boot pose —
+  which is why the page still opens at (0, 0.6, 3.2) rather than at the
+  home it resets to (§9.14). The fix belongs in the kernel's end-of-path
+  heading blend, with the camera-feel gate as its judge.
 - **The `dt` bug in §6.** The controls are fixed (§9.3); particles, drag
   tracers and the substorm still take the ~0 value. Worth its own change,
   with the animation-speed consequences looked at deliberately.
