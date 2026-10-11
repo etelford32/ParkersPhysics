@@ -231,9 +231,23 @@ function _initGA() {
 
     window.dataLayer = window.dataLayer || [];
     window.gtag = function() { window.dataLayer.push(arguments); };
+    // privacy.html §6/§8 promise GA is measurement only, never advertising.
+    // Enforced HERE, not in the GA property settings, so it holds whatever
+    // the property says: the three ad consent signals are denied (Consent
+    // Mode v2) and Google Signals / ad personalization are off per hit.
+    // analytics_storage is granted because this function only runs after
+    // the visitor opted in to analytics (see the consent gate below).
+    window.gtag('consent', 'default', {
+        ad_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied',
+        analytics_storage: 'granted',
+    });
     window.gtag('js', new Date());
     window.gtag('config', GA_MEASUREMENT_ID, {
         send_page_view: false,
+        allow_google_signals: false,
+        allow_ad_personalization_signals: false,
     });
     // The gtag() shim queues into dataLayer; gtag.js replays the queue on
     // load. So sends are safe the moment the queue + config exist — gating
@@ -415,6 +429,24 @@ function _onScroll() {
 // are not called and any events buffered in memory are dropped on consent
 // withdrawal. See js/cookie-consent.js.
 
+// Expire GA's first-party cookies (_ga, _ga_<container>) on consent withdrawal.
+// gtag sets them on the registrable domain, so try the bare host and each
+// parent domain — a cookie is only removed by the exact domain it was set on.
+function _clearGaCookies() {
+    try {
+        const names = document.cookie.split(';')
+            .map(c => c.split('=')[0].trim())
+            .filter(n => n === '_ga' || n.startsWith('_ga_'));
+        if (!names.length) return;
+        const parts = location.hostname.split('.');
+        const domains = [''];
+        for (let i = 0; i < parts.length - 1; i++) domains.push('; domain=.' + parts.slice(i).join('.'));
+        for (const n of names) for (const d of domains) {
+            document.cookie = `${n}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/${d}`;
+        }
+    } catch (_) { /* never throw from consent handling */ }
+}
+
 function _hasAnalyticsConsent() {
     try { return window.ppConsent?.has?.('analytics') === true; } catch (_) { return false; }
 }
@@ -482,6 +514,14 @@ class Analytics {
                     // Consent withdrawn: stop heartbeat, drop buffered events.
                     if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
                     _buffer.splice(0, _buffer.length);
+                    // GA too, or it keeps receiving hits for the rest of this
+                    // page view: deny storage, stop our sends (every gtag call
+                    // here is gated on _gaActive), and expire its cookies.
+                    if (_gaActive) {
+                        try { window.gtag('consent', 'update', { analytics_storage: 'denied' }); } catch (_) {}
+                        _gaActive = false;
+                    }
+                    _clearGaCookies();
                 }
             });
         }
