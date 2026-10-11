@@ -39,10 +39,13 @@ import * as THREE from 'three';
 // spacecraft read the same from the Sun side and from the shadow side. The
 // upper-atmosphere globe now carries a sun-aligned DirectionalLight, an
 // earthshine HemisphereLight aimed from the planet below the target, and
-// hands these materials a procedural SPACE ENVIRONMENT (`buildSpaceEnvironment`:
-// black sky, the lit Earth below, the Sun's disc) so metals have something
-// to reflect — a metal with no environment under one light is a black
-// shape with a highlight. Roughness/metalness are generic spacecraft
+// hands these materials a SPACE ENVIRONMENT so metals have something to
+// reflect — a metal with no environment under one light is a black shape
+// with a highlight. `buildSpaceEnvironment` (black sky, a lit Earth below,
+// the Sun's disc) is the PROCEDURAL baseline every model wears in the orbit
+// view; in close-up the globe swaps in the REAL planet (phase 4: a cube
+// render of the skin from the followed object's position, through PMREM)
+// via the same `setModelEnvironment`. Roughness/metalness are generic spacecraft
 // finishes (aluminium skin, gold MLI, glossy cells, white radiators), not
 // measured BRDFs.
 const _M = {
@@ -56,11 +59,21 @@ const _M = {
     radiator:  new THREE.MeshStandardMaterial({ color: 0xf0f0f4, metalness: 0.10, roughness: 0.70 }),   // white thermal
 };
 const _tinted = [];
+// LIT, and therefore TONE-MAPPED (plan §9.19 phase 5): the globe runs the
+// renderer's filmic curve only while a model is in close-up, and exempts
+// every material in the scene that does not carry this flag — the planet
+// skin, the airglow, the ops rings and the catalogue dots are data
+// visualisation, not light transport. A new model material must be lit
+// through here (or `markLit`) or it renders a stop darker than its
+// neighbours under the chase exposure.
+for (const m of Object.values(_M)) m.userData.lit = true;
+export function markLit(m) { m.userData.lit = true; return m; }
+export const isLitMaterial = (m) => !!m?.userData?.lit;
 
 /** Convenience: tint a fresh lit material. Used when the spec wants
  *  the bus colour-coded (Starlink shells in blue, Iridium in purple…). */
 function _matTinted(hex) {
-    const m = new THREE.MeshStandardMaterial({ color: new THREE.Color(hex), metalness: 0.45, roughness: 0.45 });
+    const m = markLit(new THREE.MeshStandardMaterial({ color: new THREE.Color(hex), metalness: 0.45, roughness: 0.45 }));
     if (_env) m.envMap = _env;
     _tinted.push(m);
     return m;
@@ -174,7 +187,7 @@ export function makeGlintSprite() {
         _glintTex = new THREE.CanvasTexture(c);
         _glintTex.colorSpace = THREE.SRGBColorSpace;
     }
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: _glintTex, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+    const sp = new THREE.Sprite(markLit(new THREE.SpriteMaterial({ map: _glintTex, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending })));
     sp.scale.setScalar(0.0001);
     sp.visible = false;
     sp.raycast = () => {};

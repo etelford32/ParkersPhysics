@@ -34,6 +34,19 @@
  *     the tracked wing throws the Sun into the camera, the glint reads > 0.9
  *     and its sprite is up — NEGATIVE CONTROL: the Sun at the camera's own
  *     direction gives no flare;
+ *   • LIGHTING PHASES 4 + 5 (plan §9.19): in close-up the models' reflection
+ *     environment is a cube render of the PLANET from the followed object
+ *     (the model materials' envMap is the PMREM of that render, refreshed
+ *     on the kernel's cadence and held between) — MEASURED on the faces
+ *     read back: with the Sun along the target's radial the planet half of
+ *     the environment is lit, with it opposite the same faces are dark
+ *     (the negative control); the renderer's filmic curve is ON only in the
+ *     chase (ACES, exposure at the kernel's base when sunlit, lifted toward
+ *     eclipseGain in umbra — MEASURED: the frame is brighter with the lift
+ *     than with it disabled, the control), every non-lit material in the
+ *     scene is exempt (the skin's `toneMapped` is false; the census finds no
+ *     tone-mapped material without the lit flag), the card discloses both,
+ *     and release restores NoToneMapping and the procedural environment;
  *   • the altitude tour: "higher" from the ISS lands on the next object up
  *     by page altitude and the flight is an ARC (lifted, never inside the
  *     planet) — NEGATIVE CONTROL: the straight chord between the two eyes
@@ -149,6 +162,86 @@ test('the chase tracks a moving target exactly, eases to range, zooms on the lad
     }, [DT]);
     expect(sh.cast).toBe(true);
     expect(sh.without - sh.withShadow, 'the shadow darkens the hull').toBeGreaterThan(0);
+
+    // PHASE 4 — the environment is the planet, rendered from the target.
+    const env = await page.evaluate(([dt]) => {
+        const g = window.__ua.globe, probe = g._satProbes.iss;
+        const radial = probe.mesh.position.clone().normalize();
+        // The skin's aurora is part of the environment too (a high-latitude
+        // target over the night-side oval reads 2.8 vs 0.46 on the nadir
+        // faces — measured), so the day-vs-night comparison holds it OFF for
+        // both readings and measures the surface alone.
+        const au = g._skin.earthU.u_aurora_on, auroraWas = au.value; au.value = 0;
+        g.setSunDirOverride(radial); g.stepFrames(3, dt, { render: 'none' });
+        const t0 = performance.now(); const forced = g.refreshEnvironment(); const ms = performance.now() - t0;
+        const lit = g._envFaceMeans(), stLit = g.getEnvironmentState();
+        let mat = null; (probe.nearGrp.visible ? probe.nearGrp : probe.midGrp).traverse((o) => { if (!mat && o.isMesh && o.material?.envMap) mat = o.material; });
+        const envIsPlanet = !!mat && mat.envMap === g._envPmremTarget?.texture;
+        g.setSunDirOverride(radial.clone().negate()); g.stepFrames(3, dt, { render: 'none' }); g.refreshEnvironment();
+        const dark = g._envFaceMeans();
+        // The cadence: after the interval a RENDERED frame refreshes (and says why); the next one holds.
+        g.stepFrames(Math.ceil(4.1 / dt), dt, { render: 'none' });
+        const n0 = g.getEnvironmentState().renders;
+        g.stepFrames(1, dt, { render: 'last' }); const bumped = g.getEnvironmentState();
+        g.stepFrames(1, dt, { render: 'last' }); const held = g.getEnvironmentState();
+        au.value = auroraWas;
+        g.setSunDirOverride(null); g.stepFrames(2, dt, { render: 'none' });
+        return { forced, ms, lit, dark, stLit, envIsPlanet, cadence: { bumped: bumped.renders === n0 + 1, why: bumped.why, held: held.renders === n0 + 1 } };
+    }, [DT]);
+    expect(env.forced).toBe(true);
+    expect(env.stLit.mode).toBe('planet');
+    expect(env.envIsPlanet, 'the model materials reflect the planet render').toBe(true);
+    expect(Math.max(...env.lit), 'a lit planet in the environment').toBeGreaterThan(2);
+    expect(Math.max(...env.lit), 'sunlit under the target vs night under it (control)').toBeGreaterThan(3 * Math.max(...env.dark));
+    expect(env.cadence).toEqual({ bumped: true, why: 'interval', held: true });
+    expect(env.ms).toBeLessThan(2000);
+
+    // PHASE 5 — the filmic curve for the lit hull only, with the eclipse lift.
+    const ex = await page.evaluate(async ([dt]) => {
+        const THREE = await import('three'); const V = await import('./js/upper-atmosphere-sat-view.js');
+        const g = window.__ua.globe, r = g._renderer, probe = g._satProbes.iss, cam = g._camera;
+        const radial = probe.mesh.position.clone().normalize();
+        // Only the lit materials pass through the curve, so the pixels that
+        // DIFFER between the lifted frame and the control frame are the hull:
+        // measure the hull's own level, not its share of the frame (a whole-
+        // frame sum moved 1.9 % at one framing and 0.14 % at another).
+        const grab = () => { const W = g.canvas.width, H = g.canvas.height, gl = r.getContext(); const buf = new Uint8Array(W * H * 4); r.render(g._scene, cam); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf); return buf; };
+        // (the volume march jitters by a level or two between renders, so a
+        // pixel counts as the hull only past that: |Δ| > 9 of 765)
+        const hullLevels = (a, b) => { let n = 0, sa = 0, sb = 0, any = 0; for (let i = 0; i < a.length; i += 4) { const la = a[i] + a[i + 1] + a[i + 2], lb = b[i] + b[i + 1] + b[i + 2]; if (la !== lb) any++; if (Math.abs(la - lb) > 9) { n++; sa += la; sb += lb; } } return { px: n, any, a: n ? sa / n : 0, b: n ? sb / n : 0 }; };
+        g.setSunDirOverride(radial); g.stepFrames(300, dt, { render: 'none' });
+        const lit = { tm: r.toneMapping, exp: r.toneMappingExposure, rs: g.getRenderState() };
+        let litN = 0, bad = []; g._scene.traverse((o) => { const m = o.material; if (!m) return; for (const mat of Array.isArray(m) ? m : [m]) { if (mat.userData?.lit) litN++; else if (mat.toneMapped !== false) bad.push(o.name || o.type); } });
+        const skin = g._skin.earthMesh.material.toneMapped;
+        g.setSunDirOverride(radial.clone().negate()); g.stepFrames(300, dt, { render: 'none' });
+        window.__ua.followCard.refresh();
+        const card = document.getElementById('ua-follow-card').textContent;
+        const dark = { exp: r.toneMappingExposure, rs: g.getRenderState(), state: g.getFollowInfo().sun.state };
+        const liftedFrame = grab();
+        g.setExposureLift(false); g.stepFrames(300, dt, { render: 'none' });   // CONTROL: no lift
+        const ctrl = { exp: r.toneMappingExposure };
+        const hull = hullLevels(liftedFrame, grab());
+        g.setExposureLift(true); g.setSunDirOverride(null); g.stepFrames(2, dt, { render: 'none' });
+        return { ACES: THREE.ACESFilmicToneMapping, K: V.EXPOSURE, lit, dark, ctrl, hull, census: { litN, bad: bad.slice(0, 5) }, skin, card };
+    }, [DT]);
+    expect(ex.lit.tm).toBe(ex.ACES);
+    expect(Math.abs(ex.lit.exp - ex.K.base)).toBeLessThan(0.02);
+    expect(ex.lit.rs.lift).toBe(1);
+    expect(ex.census.litN).toBeGreaterThan(0);
+    expect(ex.census.bad, 'no tone-mapped material without the lit flag').toEqual([]);
+    expect(ex.skin, 'the planet skin never passes through the curve').toBe(false);
+    expect(ex.dark.state).toBe('umbra');
+    expect(Math.abs(ex.dark.rs.lift - ex.K.eclipseGain)).toBeLessThan(1e-9);
+    expect(Math.abs(ex.dark.exp - ex.K.base * ex.K.eclipseGain)).toBeLessThan(0.05);
+    expect(Math.abs(ex.ctrl.exp - ex.K.base)).toBeLessThan(0.02);
+    expect(ex.hull.px, 'the hull is on screen').toBeGreaterThan(100);
+    // A ×2.6 lift on an earthshine-lit mid-grey hull reads ~1.25 in DISPLAY
+    // levels: the filmic shoulder and the sRGB encode both compress it
+    // (0.55 → 0.87 linear is 0.76 → 0.94 encoded). Measured 1.27–1.28; the
+    // control (lift off) is 1.00 by construction.
+    expect(ex.hull.a / Math.max(1, ex.hull.b), 'the lift brightens the eclipsed hull (control: lift off)').toBeGreaterThan(1.15);
+    expect(ex.card).toContain('reflections: live planet');
+    expect(ex.card).toContain('exposure ×');
 
     // Drag: az moves by dx·sens (eased), the range does not.
     const r = await page.locator('#ua-globe').boundingBox();
@@ -344,6 +437,9 @@ test('a catalogue dot is followable: avatar, highlight, card and disclosure; Esc
     const e = await page.evaluate(() => { const g = window.__ua.globe; return { following: g.isFollowing(), avatar: g._avatar?.grp.visible, trail: g._avatar?.trail.visible, highlight: g._catalogTracker._highlightSprite?.visible, card: document.getElementById('ua-follow-card').hidden, view: g._camera.view?.enabled ?? false, safe: g.getChaseSafeFrame(), track: g.getGroundTrackState().visible, light: g._sunLight.intensity }; });
     expect(e).toEqual({ following: false, avatar: false, trail: false, highlight: false, card: true, view: false, safe: null, track: false, light: 2.3 });
     expect(await page.evaluate(() => window.__ua.globe._sunLight.castShadow)).toBe(false);
+    // Phases 4–5 release: the curve is off and the procedural environment is back.
+    expect(await page.evaluate(() => { const g = window.__ua.globe; return { tm: g._renderer.toneMapping, exp: g._renderer.toneMappingExposure, env: g.getEnvironmentState().mode, rs: g.getRenderState().toneMapping }; }))
+        .toEqual({ tm: 0, exp: 1, env: 'procedural', rs: 'none' });
 });
 
 test('the altitude tour hops to the next object up by page altitude on an ARC, never through the planet', async ({ page }) => {

@@ -328,3 +328,48 @@ export function arcAt(spec, k) {
     const lr = spec.lr0 + (spec.lr1 - spec.lr0) * t;
     return { eye: [d[0] * r, d[1] * r, d[2] * r], look: [ld[0] * lr, ld[1] * lr, ld[2] * lr] };
 }
+
+// ── Lighting phases 4–5 (plan §9.19): the environment refresh rule and the
+//    chase exposure. Both PURE; the globe applies them.
+//
+// Phase 4: the models reflect the REAL planet — a 6-face cube render of the
+// skin + limb rim + stars from the followed object's position, through
+// PMREM. It is refreshed on a cadence (the planet under a LEO object turns
+// ~0.3° in 4 s at 1×) and on motion (under warp the same object crosses
+// the terminator in a frame), never per frame: six faces plus the PMREM
+// pass are a measurable cost on a software rasteriser, so a motion refresh
+// is rate-limited to `minMs`.
+export const ENV = Object.freeze({
+    faceSize: 64,        // px per cube face — a reflection environment, not an image
+    intervalMs: 4000,    // the cadence at rest
+    minMs: 1000,         // the floor between motion-triggered refreshes
+    moveR: 0.05,         // R⊕ of target motion that forces a refresh (~320 km, ~3° of ground)
+    near: 0.002, far: 40,
+    intensity: 0.9,
+});
+export function envRefreshDue({ lastMs = null, nowMs = 0, lastPos = null, pos = null } = {}, K = ENV) {
+    if (lastMs == null || !lastPos || !pos) return { due: true, why: 'first' };
+    const age = nowMs - lastMs;
+    if (age >= K.intervalMs) return { due: true, why: 'interval' };
+    if (age >= K.minMs && norm([pos[0] - lastPos[0], pos[1] - lastPos[1], pos[2] - lastPos[2]]) >= K.moveR) return { due: true, why: 'moved' };
+    return { due: false, why: null };
+}
+
+// Phase 5: exposure. The lit hull goes through the renderer's filmic curve
+// ONLY while a model is on screen (`modelScale > 0`, the chase); the orbit
+// view's planet skin, airglow, ops rings and dots are data visualisation and
+// never pass through a tone curve (the globe exempts every non-lit material).
+// In eclipse the key light is off and the hull is lit by earthshine alone,
+// so the exposure LIFTS toward `eclipseGain` with the shadow fraction — what
+// a camera's auto-exposure does, and disclosed on the card.
+export const EXPOSURE = Object.freeze({
+    base: 1.15,          // sunlit: the filmic shoulder rolls the 2.3× key off instead of clipping it
+    eclipseGain: 2.6,    // in umbra, × this
+    tauS: 0.6,           // the eased approach, seconds of frame clock
+});
+export function chaseExposure({ fraction = 1, modelScale = 0, lift = true } = {}, K = EXPOSURE) {
+    if (!(modelScale > 0)) return { active: false, exposure: 1, lift: 1 };
+    const f = clamp(Number.isFinite(fraction) ? fraction : 1, 0, 1);
+    const l = lift ? 1 + (K.eclipseGain - 1) * (1 - f) : 1;
+    return { active: true, exposure: K.base * l, lift: l };
+}

@@ -203,4 +203,31 @@ ok('the arc flight: exact ends, never through the planet, lifted by the angle, s
     assert.ok(sp.length > loc.length);
 });
 
+ok('lighting phase 4: the environment refresh rule — first, cadence, motion (rate-limited)', () => {
+    const K = V.ENV;
+    assert.equal(V.envRefreshDue({}).due, true);
+    assert.equal(V.envRefreshDue({ lastMs: 0, nowMs: K.intervalMs - 1, lastPos: [1, 0, 0], pos: [1, 0, 0] }).due, false, 'at rest, inside the cadence');
+    assert.equal(V.envRefreshDue({ lastMs: 0, nowMs: K.intervalMs, lastPos: [1, 0, 0], pos: [1, 0, 0] }).why, 'interval');
+    // Motion forces a refresh — but never faster than minMs (under warp the
+    // object crosses moveR every frame).
+    assert.equal(V.envRefreshDue({ lastMs: 0, nowMs: K.minMs - 1, lastPos: [1, 0, 0], pos: [1 + 2 * K.moveR, 0, 0] }).due, false, 'rate-limited');
+    assert.equal(V.envRefreshDue({ lastMs: 0, nowMs: K.minMs, lastPos: [1, 0, 0], pos: [1 + K.moveR, 0, 0] }).why, 'moved');
+    assert.equal(V.envRefreshDue({ lastMs: 0, nowMs: K.minMs, lastPos: [1, 0, 0], pos: [1 + 0.5 * K.moveR, 0, 0] }).due, false, 'under the motion threshold');
+    assert.ok(K.faceSize <= 128 && K.minMs > 0 && K.minMs <= K.intervalMs);
+});
+
+ok('lighting phase 5: the chase exposure — identity off the chase, base when sunlit, lifted in umbra, control removes the lift', () => {
+    const K = V.EXPOSURE;
+    assert.deepEqual(V.chaseExposure({ fraction: 0, modelScale: 0 }), { active: false, exposure: 1, lift: 1 }, 'orbit view: no tone curve');
+    const lit = V.chaseExposure({ fraction: 1, modelScale: 0.4 });
+    assert.equal(lit.active, true); near(lit.exposure, K.base, 1e-12); assert.equal(lit.lift, 1);
+    const dark = V.chaseExposure({ fraction: 0, modelScale: 0.4 });
+    near(dark.lift, K.eclipseGain, 1e-12); near(dark.exposure, K.base * K.eclipseGain, 1e-12);
+    const pen = V.chaseExposure({ fraction: 0.5, modelScale: 0.4 });
+    near(pen.lift, 1 + (K.eclipseGain - 1) * 0.5, 1e-12, 'linear in the shadow fraction');
+    assert.equal(V.chaseExposure({ fraction: 0, modelScale: 0.4, lift: false }).exposure, K.base, 'the negative control holds base');
+    assert.equal(V.chaseExposure({ fraction: NaN, modelScale: 0.4 }).lift, 1, 'an unknown fraction reads as sunlit, never as a lift');
+    assert.ok(K.eclipseGain > 1 && K.base > 0 && K.tauS > 0);
+});
+
 console.log(`\n${passed} passed`);

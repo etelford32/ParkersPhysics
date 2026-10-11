@@ -17,6 +17,13 @@
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (v, d = 0) => (Number.isFinite(v) ? v.toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }) : '—');
+// Phases 4–5 disclosure: what the close-up render is doing to the light.
+function renderNote(r) {
+    if (!r?.active) return '';
+    const env = r.env === 'planet' ? 'reflections: live planet' : 'reflections: procedural sky';
+    const lift = r.lift > 1.05 ? ` · exposure ×${fmt(r.lift, 1)} (eclipse)` : ' · filmic exposure';
+    return ` · ${env}${lift}`;
+}
 
 export class FollowCard {
     /**
@@ -116,6 +123,7 @@ export class FollowCard {
             const factor = (c.drawnSpanKm * 1000) / Math.max(0.1, c.trueSpanM);
             f.note.textContent = `symbolic model: drawn ${fmt(c.drawnSpanKm, c.drawnSpanKm < 10 ? 1 : 0)} km across`
                 + ` (×${fmt(factor)} its true ≈${fmt(c.trueSpanM)} m span${sc < 0.999 ? ', held in angle as you close in' : ''})`
+                + renderNote(info.render)
                 + ' · wheel / W S zoom · drag / A D Q E orbit · , . tour';
         } else {
             f.cam.textContent = '—';

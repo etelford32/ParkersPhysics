@@ -50,7 +50,7 @@ import { CONSTELLATIONS, spawnConstellationPositions }
 import {
     buildSatelliteModel, buildSatelliteModelLow, buildRocketBodyModel, buildDebrisFragmentModel,
     collectSolarArrays, collectGlintSurfaces, enableModelShadows, makeGlintSprite,
-    setModelEnvironment, buildSpaceEnvironment,
+    setModelEnvironment, buildSpaceEnvironment, isLitMaterial,
 } from './satellite-models.js';
 import {
     attitudeBasis, toBody, arrayAlpha, illumination, betaAngle, subSatellite,
@@ -59,6 +59,7 @@ import {
 import {
     CHASE, chasePose, modelScale, nearPlaneFor, flyInDuration, altitudeNeighbour,
     modelFamily, TRUE_SPAN_M, ARTISTIC_SPAN_R, safeCentre, arcSpec, MODEL_REF_R,
+    ENV, envRefreshDue, EXPOSURE, chaseExposure, easeK,
 } from './upper-atmosphere-sat-view.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
@@ -170,6 +171,12 @@ const R_EARTH_KM = 6371;
 // chase camera sees a dot, not a moon.
 const PROBE_MARKER_REF_RUNIT = 2.0;
 const SUN_LIGHT_INTENSITY = 2.3;      // the key light at full Sun (scaled by the followed object's illumination)
+// The reflection environment's render layer (plan §9.19 phase 4): the cube
+// camera at the followed object sees ONLY what carries this layer — the
+// planet skin, its limb rim and the stars. The avatar itself must not be on
+// it (a camera inside a model reflects the model's inside), nor the volume
+// march (six more faces of it per refresh), nor the symbolic layers.
+const ENV_LAYER = 7;
 const _attM = new THREE.Matrix4(), _attX = new THREE.Vector3(), _attY = new THREE.Vector3(), _attZ = new THREE.Vector3();
 const _trackScratch = new THREE.Vector3();
 const _glQ = new THREE.Quaternion(), _glP = new THREE.Vector3(), _glN = new THREE.Vector3(), _glV = new THREE.Vector3();
@@ -1682,8 +1689,154 @@ export class AtmosphereGlobe {
         this._earthShine = new THREE.HemisphereLight(0x05070f, 0x7f9cc4, 0.5);
         this._earthShine.position.set(0, 1, 0);
         this._scene.add(this._earthShine);
-        try { setModelEnvironment(buildSpaceEnvironment(this._renderer), 0.9); }
+        try { this._envProcedural = buildSpaceEnvironment(this._renderer); setModelEnvironment(this._envProcedural, ENV.intensity); }
         catch (_) { /* no PMREM (a context lost before boot): the materials stay lit by the lights alone */ }
+        // Phase 4: the REAL planet as the reflection environment while a
+        // model is in close-up — a cube render from the followed object's
+        // position of the skin + limb rim (+ stars), through PMREM, swapped
+        // in through the same setModelEnvironment the procedural baseline
+        // uses and swapped back out on release. LDR faces on purpose: the
+        // skin writes display values, and a byte target can be read back by
+        // the gate. The refresh rule is the kernel's (`envRefreshDue`).
+        this._envState = { mode: 'procedural', renders: 0, lastMs: null, lastPos: null, why: null };
+        try {
+            this._envTarget = new THREE.WebGLCubeRenderTarget(ENV.faceSize, { generateMipmaps: false });
+            this._envCam = new THREE.CubeCamera(ENV.near, ENV.far, this._envTarget);
+            this._envCam.layers.set(ENV_LAYER);
+            this._envPmrem = new THREE.PMREMGenerator(this._renderer);
+            this._skin.earthMesh?.layers.enable(ENV_LAYER);
+            this._skin._atmMesh?.layers.enable(ENV_LAYER);
+        } catch (_) { this._envCam = null; }
+        // Phase 5: the filmic curve is OFF here (the orbit view is data
+        // visualisation) and switches on only for the chase close-up, where
+        // every non-lit material is exempted — see _updateExposure.
+        this._renderer.toneMapping = THREE.NoToneMapping;
+        this._renderer.toneMappingExposure = 1;
+        this._exposureLift = true;
+        this._renderState = { toneMapping: 'none', exposure: 1, lift: 1, active: false };
+    }
+
+    /**
+     * Phase 4, per frame. While a model is in close-up the cube camera sits
+     * AT the followed object and re-renders the environment on the kernel's
+     * cadence; the PMREM is rebuilt into the same target. Nothing is
+     * rendered on an offscreen frame. On release the procedural baseline
+     * comes back.
+     */
+    _updateEnvironment(render) {
+        const st = this._envState;
+        if (!st || !this._envCam) return;
+        const aux = this._followAux;
+        const hero = aux?.pos && aux?.modelScale > 0 ? aux.pos : null;
+        if (!hero) {
+            if (st.mode !== 'procedural') { setModelEnvironment(this._envProcedural, ENV.intensity); st.mode = 'procedural'; st.lastMs = null; st.lastPos = null; st.why = null; }
+            return;
+        }
+        if (!render) return;
+        const now = frameClock.now();
+        const due = envRefreshDue({ lastMs: st.lastMs, nowMs: now, lastPos: st.lastPos, pos: [hero.x, hero.y, hero.z] });
+        if (!due.due) return;
+        this._renderEnvironmentAt(hero, now, due.why);
+    }
+    _renderEnvironmentAt(pos, now = frameClock.now(), why = 'forced') {
+        const st = this._envState;
+        this._envCam.position.copy(pos);
+        // The stars ride the main camera; for the six faces they ride this one.
+        const starsAt = this._stars ? this._stars.position.clone() : null;
+        if (this._stars) this._stars.position.copy(pos);
+        const tm = this._renderer.toneMapping, cast = this._sunLight?.castShadow ?? false;
+        this._renderer.toneMapping = THREE.NoToneMapping;   // the faces are the skin's own values
+        if (this._sunLight) this._sunLight.castShadow = false;   // nothing on the layer casts: skip six shadow passes
+        this._envCam.update(this._renderer, this._scene);
+        this._renderer.toneMapping = tm;
+        if (this._sunLight) this._sunLight.castShadow = cast;
+        if (starsAt) this._stars.position.copy(starsAt);
+        // The PMREM is rebuilt INTO the same target (same size every time).
+        this._envPmremTarget = this._envPmrem.fromCubemap(this._envTarget.texture, this._envPmremTarget || undefined);
+        setModelEnvironment(this._envPmremTarget.texture, ENV.intensity);
+        st.mode = 'planet'; st.renders++; st.lastMs = now; st.lastPos = [pos.x, pos.y, pos.z]; st.why = why;
+    }
+    /** Test hook / API: re-render the environment now (no-op unless a model is in close-up). */
+    refreshEnvironment() {
+        const aux = this._followAux;
+        if (!this._envCam || !(aux?.pos && aux?.modelScale > 0)) return false;
+        this._renderEnvironmentAt(aux.pos);
+        return true;
+    }
+    getEnvironmentState() {
+        const st = this._envState;
+        if (!st) return null;
+        return { mode: st.mode, renders: st.renders, why: st.why, ageS: st.lastMs == null ? null : (frameClock.now() - st.lastMs) / 1000, faceSize: ENV.faceSize };
+    }
+    /** Mean RGB level (0–255) of each cube face of the environment render, +X −X +Y −Y +Z −Z — the gate's readback. */
+    _envFaceMeans() {
+        if (!this._envTarget) return null;
+        const N = ENV.faceSize, buf = new Uint8Array(N * N * 4), out = [];
+        for (let f = 0; f < 6; f++) {
+            this._renderer.readRenderTargetPixels(this._envTarget, 0, 0, N, N, buf, f);
+            let s = 0;
+            for (let i = 0; i < buf.length; i += 4) s += buf[i] + buf[i + 1] + buf[i + 2];
+            out.push(s / (N * N * 3));
+        }
+        return out;
+    }
+
+    /**
+     * Phase 5, per frame: the renderer's filmic curve for the lit hull in
+     * close-up only. On entry every material in the scene that is not a
+     * model's (`isLitMaterial`) is exempted (`toneMapped = false` — a
+     * program-parameter, so it costs no recompile while the renderer's own
+     * curve is off, and the lit materials recompile once per direction,
+     * cached), and the sweep repeats on a slow cadence for anything added
+     * during the chase. The exposure eases to the kernel's value (base when
+     * sunlit, lifted toward `eclipseGain` in shadow) on the frame clock.
+     */
+    _updateExposure(dtWall) {
+        const r = this._renderer;
+        if (!r || !this._renderState) return;
+        const aux = this._followAux;
+        const ex = chaseExposure({ fraction: aux?.sun?.fraction ?? 1, modelScale: aux?.modelScale ?? 0, lift: this._exposureLift });
+        const rs = this._renderState;
+        if (ex.active) {
+            if (r.toneMapping !== THREE.ACESFilmicToneMapping) {
+                this._exemptFromToneMapping();
+                r.toneMapping = THREE.ACESFilmicToneMapping;
+                r.toneMappingExposure = ex.exposure;     // a hard switch: nothing on screen is lit yet
+                this._exposureSweepAt = frameClock.now();
+            } else if (frameClock.now() - (this._exposureSweepAt || 0) > 2000) {
+                this._exemptFromToneMapping();
+                this._exposureSweepAt = frameClock.now();
+            }
+            const k = easeK(dtWall, EXPOSURE.tauS);
+            r.toneMappingExposure += (ex.exposure - r.toneMappingExposure) * k;
+            rs.toneMapping = 'aces'; rs.exposure = r.toneMappingExposure; rs.lift = ex.lift; rs.active = true;
+        } else if (r.toneMapping !== THREE.NoToneMapping || rs.active) {
+            r.toneMapping = THREE.NoToneMapping;
+            r.toneMappingExposure = 1;
+            rs.toneMapping = 'none'; rs.exposure = 1; rs.lift = 1; rs.active = false;
+        }
+    }
+    _exemptFromToneMapping() {
+        let lit = 0, exempt = 0;
+        this._scene.traverse((o) => {
+            const m = o.material;
+            if (!m) return;
+            for (const mat of Array.isArray(m) ? m : [m]) {
+                if (isLitMaterial(mat)) { lit++; continue; }
+                if (mat.toneMapped !== false) { mat.toneMapped = false; }
+                exempt++;
+            }
+        });
+        this._exposureSweep = { lit, exempt };
+        return this._exposureSweep;
+    }
+    /** Test hook: disable the eclipse exposure lift (the gate's negative control). */
+    setExposureLift(on) { this._exposureLift = !!on; }
+    getRenderState() {
+        const rs = this._renderState;
+        if (!rs) return null;
+        return { ...rs, exposureTarget: chaseExposure({ fraction: this._followAux?.sun?.fraction ?? 1, modelScale: this._followAux?.modelScale ?? 0, lift: this._exposureLift }).exposure,
+            env: this.getEnvironmentState()?.mode ?? null, envAgeS: this.getEnvironmentState()?.ageS ?? null };
     }
 
     /** Test hook: hold the scene's sun vector (null releases it). */
@@ -2757,6 +2910,7 @@ export class AtmosphereGlobe {
         }
         const aux = this._followAux;
         if (aux) { out.attitude = aux.attitude; out.sun = aux.sun; out.ground = aux.ground; out.glint = aux.glint; }
+        out.render = this.getRenderState();
         if (chase) {
             out.chase = {
                 distKm: chase.dist * PAGE_RE_KM, distR: chase.dist,
@@ -5338,6 +5492,7 @@ export class AtmosphereGlobe {
         this._stars = new THREE.Points(geom, mat);
         this._stars.renderOrder = -10;
         this._stars.frustumCulled = false;
+        this._stars.layers.enable(ENV_LAYER);
         this._scene.add(this._stars);
     }
 
@@ -6472,6 +6627,8 @@ export class AtmosphereGlobe {
         this._stepCatalogFollow();
         this._stepFollowAux();
         this._updateLighting();
+        this._updateEnvironment(render);
+        this._updateExposure(dtWall);
 
         this._controls.update(dtWall);
         // After the controls: while a transit is active it owns the pose,
