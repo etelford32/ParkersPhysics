@@ -268,6 +268,7 @@ export function createTrackPanel({
     const STAGES = {
         glass: 'settling a uniform glass',
         match: 'matching it to today\'s web',
+        '2lpt': 'splitting the displacement into first and second order (2LPT)',
         run: 'running z = 9 → today → +6 Gyr',
         galaxies: 'landing every galaxy where it is seen',
     };
@@ -283,7 +284,8 @@ export function createTrackPanel({
             const dg = r.result.diagnostics;
             const inner = dg.fieldBins.filter(b => b.r1 <= rEff).map(b => b.rel);
             const g = dg.galaxyResidualsMpc[dg.galaxyResidualsMpc.length - 1];
-            return `Reconstructed: ${dg.elements.toLocaleString('en-US')} elements from z = 9 · today's gravity `
+            return `Reconstructed: ${dg.elements.toLocaleString('en-US')} elements from z = 9 `
+                + `(${dg.ics === '2lpt' ? '2LPT' : 'Zel\'dovich'} ICs) · today's gravity `
                 + `reproduced to ${num(100 * Math.max(...inner), 0)} % inside R_eff (${num(100 * dg.fieldError, 0)} % overall) · `
                 + `galaxies land within ${num(1000 * g, 0)} kpc · ${num(dg.seconds, 0)} s.`;
         }

@@ -384,7 +384,7 @@ Scars — each measured, each silent:
 Running the web backward is not "the same integrator with dt < 0": gravity
 amplifies forward, so a backward run grows every error and every grain of the
 sampling into the past. The well-posed question is "which SMOOTH early state
-evolves into today's field", answered in §4e.
+evolves into today's field", answered in §4e; its ICs are second order since §4f.
 
 ## 4e. Reconstructing the initial conditions (2026-10-11, fourth pass)
 
@@ -398,7 +398,7 @@ t₀ + 6 Gyr for the whole span, every galaxy shot to where it is seen.
 |------|------|------------------------------------|
 | 1. Glass | a uniform quiet sphere relaxed under REPULSIVE gravity, overdamped, until no element feels a force | the standard pre-initial load; relaxing the observed quiet start instead slid its lattice sideways ~2 Mpc (grain motion with no physics) and that poisoned every displacement built on it |
 | 2. Gravitational matching | x ← x + r·[F_obs − F_now]/(4πGρ̄₀) until the elements' field is the observed one | in linear theory F/(4πGρ̄₀) IS the displacement, so this is Zel'dovich iterated to its fixed point; curl-free and smooth (a sum of gravitational fields), hence near-least-action; EXACT for a spherical void (gated against the shell table, 2.5 %) |
-| 3. Zel'dovich ICs at z = 9 | x = q + (D_i/D_obs)ψ, u = aHf(D_i/D_obs)ψ, ψ = X − q, nothing iterated on top | see the two rejections below |
+| 3. 2LPT ICs at z = 9 (§4f) | ψ = X − q split by fixed point into s₁ + D₂ₒs₂[s₁]; x = q + d₁s₁ + d₂s₂, u = aH(d₁′s₁ + d₂′s₂); nothing iterated on top | Zel'dovich (x = q + (D_i/D_obs)ψ) over-counts the second-order part ~7×; see §4f, and the two rejections below |
 | Galaxies | first guess from the elements' ψ, then SHOT through stored snapshots by moving their START | test particles are independent (bitwise) and well-conditioned this way; moving ψ with q pinned barely converged |
 | Per-particle softening | each source smoothed at 2 × its own cell size | with one global h, galaxies in the zoom's coarse outskirts stalled 0.5–10 Mpc off target |
 | Uniform 12 Mpc layout, ~35 000 elements | NOT the forecast's zoom | the zoom's outskirts (h → 48 Mpc) missed the web's 11 Mpc clumps by 50–66 % where most galaxies sit; uniform 14 Mpc still 29 %; 12 Mpc ≤ 10 % (matched) |
@@ -431,16 +431,63 @@ markers +14 % from z = 9 to z_obs).
 
 On the page (browser gate + measured): ~115 s in a Worker (glass 1 s, match
 23 s, run 35 s, galaxies 35 s); today's gravity reproduced to 7–9 % inside
-R_eff, 21 % at 1.3–1.6 R_eff and 34–42 % out on the clumpy wall — where
-Zel'dovich ICs under-collapse the nodes between z = 9 and today. The page
+R_eff with Zel'dovich ICs (2.7–4.1 % with 2LPT, §4f), 21 % at 1.3–1.6 R_eff
+and 34–42 % out on the clumpy wall — RESOLUTION, not order: the elements'
+~24 Mpc cannot rebuild the web's ~11 Mpc nodes, and 2LPT left the wall
+unchanged. The page
 prints its own run's numbers. Galaxies land within ~4 kpc. A run's
 reconstructed matter is ONE population (the web's mass is in the elements),
 so the table prints no void/web split for it rather than "100 %".
 
-Next, honestly: a nonlinear-aware inverse — 2LPT ICs, or a Bayesian forward
-model whose prior regularises the shooting that failed above — and, before
-any of it matters for science, a REAL density field in place of the model
-web (§6).
+### 4f. Second-order initial conditions (2LPT) — `js/bootes-lpt.js`
+
+The matched displacement ψ = X − q is the FULL displacement to today. To
+second order (Bouchet et al. 1995; Scoccimarro 1998) x = q + D₁s₁ + D₂s₂ with
+s₂ = ∇φ₂, ∇²φ₂ = Σ_{i>j}[s₁ᵢ,ᵢs₁ⱼ,ⱼ − s₁ᵢ,ⱼ²], and the second-order part grows
+as D₁² — so Zel'dovich ICs, which scale all of ψ back by D_i/D_obs, carry it
+into z = 9 ~7× too large. The 2LPT inverse (D₁(a_obs) = 1) solves
+ψ = s₁ + D₂ₒs₂[s₁] by fixed point (contracts ~6× per pass; 4 passes) and lays
+both orders down with their own growing-mode velocities.
+
+| Piece | How | Gated |
+|-------|-----|-------|
+| D₁, D₂, D₁′, D₂′ | the exact ODE (RK4 in ln a from D₁ = a, D₂ = −3a²/7) | D₁ = the growth INTEGRAL to 1e-8; −(3/7)D₁²Ω_m^(−1/143) to 0.02 %, f₂ = 2Ω_m^(6/11) to 0.4 % |
+| ∂s₁/∂q on the glass | weighted local least squares within h = 2 × spacing, symmetrised | exact for a linear field at every element, rim included |
+| ∇²φ₂ = S | the N-body TREE: elements carry S·V/(4πG), positive and negative parts in separate trees (a mixed-sign monopole has no centre), spline-softened; ISOLATED boundary = "matter beyond is the mean" | uniform source ball: Sq/3 inside (1 %), SR³q/3\|q\|³ outside; a plane wave (1-D, where Zel'dovich is exact) gives 0.1 % of a spherical strain's s₂ |
+| The map | — | an exact Newton + Λ top-hat shell gives δ = Δ + 0.812Δ² (17/21·Ω_m^(−1/143) = 0.816); at \|Δ\| = 0.05 the 2LPT map misses it by 5e-6, Zel'dovich by 4e-4 |
+
+MEASURED, and what decided it (`tests/bootes-lpt.mjs`, twins on a 140 Mpc
+glass; the page run):
+
+- **Planted void twin** (δ_L = −1.5, run forward, reconstructed from a
+  different glass): recovered linear field 8.8 → 4.0 %; run forward, today's
+  displacement 7.2 → 3.4 %. At δ_L = −1: 7.7 → 4.9 %.
+- **Planted cluster twin** (δ_L = +0.5 / +0.8): Zel'dovich WINS, 5.4 / 3.4 %
+  vs 6.2 / 4.7 %. Not because it is right: the softened integrator grows a
+  40 Mpc mode ~3.5 % too slowly, and Zel'dovich's double-counted collapse
+  happens to offset that. 2LPT's recovered amplitude sits at 0.965 for
+  EITHER sign of δ — the deficit, exposed. Calibrating it by a tiny-amplitude
+  linear forward run was tried and is unmeasurable (the glass's own grain
+  dominates at linear amplitude: g came out 0.28–0.80 depending on the field).
+- **Random 3 Mpc wave field**: a tie (8.1 vs 8.4 %) — there the second-order
+  part is ~2 % of ψ and the error is grain + softening.
+- **The page** (void + web, uniform 12 Mpc, 35 233 elements): today's gravity
+  in the void's core 7.4 → 2.7 % (30–60 Mpc) and 7.1 → 4.1 % (60–90 Mpc);
+  beyond R_eff unchanged to ±1 % (19.6, 35.1, 39.7, 42.0 %) — which is what
+  located the wall's error in RESOLUTION. +6 s on a ~110 s run. Galaxies,
+  node accretion and the z = 9 linearity check (amplitude 0.82 → 0.83)
+  unchanged.
+
+So 2LPT is the default (`RECON_CONFIG.ics`; `'za'` stays as the A/B
+reference). Galaxies take s₁ as their first guess; their shots absorb the
+rest.
+
+Next, honestly: the softened integrator's linear-growth deficit (now the
+largest remaining error inside the void — a scale-dependent transfer that
+would need its own measurement, not a scalar), a Bayesian forward model whose
+prior regularises the shooting that failed above, finer elements on the wall
+(that error is resolution) — and, before any of it matters for science, a
+REAL density field in place of the model web (§6).
 
 ---
 

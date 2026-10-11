@@ -256,8 +256,13 @@ const glass = RC.buildGlass({ ...CFG, ...SIM });
         const inner = dg.fieldBins.filter(b => b.r1 <= rEff);
         const worstInner = Math.max(...inner.map(b => b.rel));
         assert.ok(worstInner < 0.15 && dg.fieldError < 0.2, `field match: inner ${worstInner}, overall ${dg.fieldError}`);
-        ok(`today's gravity: the reconstructed universe reproduces the observed model's force at the `
-            + `galaxies to ≤ ${(100 * worstInner).toFixed(0)} % inside R_eff, ${(100 * dg.fieldError).toFixed(0)} % overall`);
+        // The page's ICs are 2LPT (js/bootes-lpt.js, tests/bootes-lpt.mjs);
+        // measured on this layout the void interior went 7.5 → 3.4 % (§4f).
+        assert.equal(dg.ics, '2lpt');
+        assert.ok(dg.fieldBins[0].rel < 0.06, `2LPT void interior ${dg.fieldBins[0].rel}`);
+        ok(`today's gravity: the reconstructed universe (2LPT ICs) reproduces the observed model's force at the `
+            + `galaxies to ${(100 * dg.fieldBins[0].rel).toFixed(1)} % in the void's core, ≤ ${(100 * worstInner).toFixed(0)} % inside R_eff, `
+            + `${(100 * dg.fieldError).toFixed(0)} % overall`);
     }
 
     // 8. Galaxies.

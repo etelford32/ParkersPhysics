@@ -46,9 +46,20 @@
  *    the early universe had no 10¹⁵ M☉ points in it, only a slightly denser
  *    patch. That is what makes the result an initial condition.
  *
- * 3. ZEL'DOVICH INITIAL CONDITIONS at a_init: positions q + (D_i/D_obs)ψ,
- *    growing-mode velocities a·H·f·(D_i/D_obs)ψ, with ψ = X − q the matched
- *    displacement — and NOTHING iterated on top. Forward "shooting" (re-run,
+ * 3. 2LPT INITIAL CONDITIONS at a_init (js/bootes-lpt.js, the default since
+ *    plan §4f): the matched displacement ψ = X − q is split into its linear
+ *    part s₁ and the second-order part D₂ₒs₂[s₁] that grew as D₁² (inverted
+ *    by fixed point), and both are laid down — x = q + d₁s₁ + d₂s₂,
+ *    u = aH(d₁′s₁ + d₂′s₂). Zel'dovich ICs (`ics: 'za'`, positions
+ *    q + (D_i/D_obs)ψ, velocities a·H·f·(D_i/D_obs)ψ) scale the second-order
+ *    part back as if it were linear, over-counting it ~7× at z = 9: measured
+ *    on the page, 2LPT took today's gravity in the void's core 7.4 → 2.7 %
+ *    (60–90 Mpc 7.1 → 4.1 %) and changed nothing on the wall — so the wall's
+ *    error is RESOLUTION, not order. In a planted-CLUSTER twin Zel'dovich does
+ *    better (3.4 vs 4.7 %), by cancellation: its double-counted collapse
+ *    offsets the softened integrator's own ~3.5 % linear-growth deficit,
+ *    which 2LPT exposes (its amplitude sits at 0.965 for either sign of δ).
+ *    And NOTHING is iterated on top. Forward "shooting" (re-run,
  *    feed the miss back into ψ) was built and MEASURED out: it drives the
  *    elements onto their matched positions (0.03 Mpc rms) while making the
  *    initial field WORSE — in the twin test (plant a known initial field, run
@@ -60,9 +71,10 @@
  *    (~3 Mpc) is grain — the observed smooth matter is a quiet-start lattice
  *    no glass reproduces particle for particle — and the FIELD is what the
  *    reconstruction claims (`fieldMatch`, gated): on the page, today's
- *    gravity is reproduced to 7–9 % inside R_eff, 20 % just outside it and
- *    35–42 % out on the clumpy wall, where Zel'dovich ICs under-collapse the
- *    web's nodes between z = 9 and today.
+ *    gravity is reproduced to 3–4 % in the void's core (2LPT; 7–9 % with
+ *    Zel'dovich ICs), ≤ 8 % inside R_eff, 20 % just outside it and
+ *    35–42 % out on the clumpy wall, where the elements' ~24 Mpc resolution
+ *    cannot rebuild the web's ~11 Mpc nodes (2LPT moved the core, not this).
  *    FIELD FEEDBACK (re-run, then push ψ by the gravity the evolved state
  *    still lacks) was also built and measured out: it improved today's field
  *    (16 → 10 % on the gate layout) and, in the twin test, the recovered
@@ -70,8 +82,9 @@
  *    made the initial field WORSE, erratically (15 → 39 % after one pass,
  *    20 % after two). Improving today's match while corrupting the past is
  *    over-fitting, and nothing on the page could tell the reader which they
- *    were looking at. A nonlinear-aware inverse (2LPT, or a Bayesian forward
- *    model with a prior that regularises it) is the honest next step.
+ *    were looking at. 2LPT (above) is the nonlinear-aware inverse that DID
+ *    survive measurement; a Bayesian forward model with a prior that
+ *    regularises the shooting is the next one.
  *
  * a_init = 0.1 (z = 9, 0.55 Gyr) ON PURPOSE: from z = 19 the same pipeline
  * converged at ~0.6 per shot against ~0.4 from z = 9 — 15× of growth turns
@@ -106,6 +119,7 @@ import {
     meanSphereForce,
     replayTestParticles, DEFAULT_THETA, DEFAULT_LEAF,
 } from './bootes-nbody.js';
+import { invert2LPT, lptGrowth, lptState } from './bootes-lpt.js';
 
 /**
  * The page's reconstruction, in ONE place (worker, runner and gate read it).
@@ -128,6 +142,9 @@ export const RECON_CONFIG = Object.freeze({
     stepsAfterObs: 24,
     testShots: 4,
     seed: 11,
+    /** 'za' (Zel'dovich) or '2lpt' (js/bootes-lpt.js) — see §3 of the header. */
+    ics: '2lpt',
+    lptIterations: 4,
 });
 
 const fourPiGRho = (cosmo) => 4 * Math.PI * G_MPC * meanMatterDensityMsunMpc3(cosmo);
@@ -471,7 +488,28 @@ export function reconstructRun({
         buildSchedule({ aStart: aObs, aEnd, steps: recon.stepsAfterObs, cosmo }));
     const n = glass.n;
     const group = new Uint8Array(n);
-    const ic = zeldovichState(glass.pos, psi, recon.aInit, aObs, cosmo);
+    // The ICs. 2LPT splits the matched Ψ into its linear part s₁ and the
+    // second-order part D₂ₒs₂ that grew as D₁², and lays both down at aInit;
+    // the galaxies' first guess then reads s₁ (their shots absorb the rest).
+    let ic, lpt = null, galaxyPsi = psi;
+    if ((recon.ics ?? 'za') === '2lpt') {
+        onProgress?.('2lpt', 0, 1);
+        const growth = lptGrowth(recon.aInit, aObs, cosmo);
+        const h = 2 * glass.spacing;
+        const inv = invert2LPT(glass.pos, psi, {
+            d2Obs: growth.d2Obs, iterations: recon.lptIterations ?? 4,
+            volume: Float64Array.from(glass.mass, (m) => m / rho),
+            hsoft: Float64Array.from(glass.mass, () => h), h, ...sim,
+        });
+        ic = lptState(glass.pos, inv.s1, inv.s2, recon.aInit, growth, cosmo);
+        let s2 = 0;
+        for (let k = 0; k < psi.length; k++) s2 += (growth.d2Obs * inv.s2[k]) ** 2;
+        lpt = { history: inv.history, secondOrderRmsMpc: Math.sqrt(s2 / n) };
+        galaxyPsi = inv.s1;
+        onProgress?.('2lpt', 1, 1);
+    } else {
+        ic = zeldovichState(glass.pos, psi, recon.aInit, aObs, cosmo);
+    }
     const run = createSimulation({
         pos: ic.pos, vel: ic.vel, mass: glass.mass, group, nMassive: n, aStart: recon.aInit,
         softening: [glass.softening, glass.softening], background, cosmo, ...sim,
@@ -490,7 +528,7 @@ export function reconstructRun({
     let disp = 0;
     for (let k = 0; k < psi.length; k++) disp += psi[k] * psi[k];
     // The galaxies.
-    const psi0 = interpolateDisplacement(testPoints, match.X, psi, 2 * glass.spacing);
+    const psi0 = interpolateDisplacement(testPoints, match.X, galaxyPsi, 2 * glass.spacing);
     const gal = shootGalaxies({
         snapshots, schedule, mass: glass.mass, group, nMassive: n,
         softening: [glass.softening, glass.softening], background, targets: testPoints, psi0,
@@ -508,13 +546,16 @@ export function reconstructRun({
         testPos, rec: { ...gal.rec, split: false }, nRec: nTest, accreted: markers,
         snapshots, schedule, mass: glass.mass, group, nMassive: n,
         softening: [glass.softening, glass.softening], background,
-        matched: match.X, psi, spacing: glass.spacing,
+        matched: match.X, psi: galaxyPsi, spacing: glass.spacing,
         diagnostics: {
             elements: n,
             aInit: recon.aInit,
             glassResidualMpc: glass.residual,
             matchResidualMpc: match.history[match.history.length - 1],
             displacementRmsMpc: Math.sqrt(disp / n),
+            ics: recon.ics ?? 'za',
+            secondOrderRmsMpc: lpt ? lpt.secondOrderRmsMpc : 0,
+            lptHistory: lpt ? lpt.history : null,
             fieldError: field.overall,
             fieldBins: field.bins,
             galaxyResidualsMpc: gal.residuals,
