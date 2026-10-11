@@ -1,0 +1,236 @@
+/**
+ * upper-atmosphere-sat-chase.spec.js — zooming in to one spacecraft
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Hermetic: the synthetic catalogue (tests/fixtures/sat-suites-synthetic.mjs)
+ * on the manual frame clock, the bus stepped by hand. Pins (plan §9.17):
+ *   • THE CAMERA TRACKS EXACTLY: with the bus advancing a second per frame
+ *     the ISS moves ~7.7 km/frame and the eye-to-target distance equals the
+ *     chase's own `dist` to 1e-9 on every frame — NEGATIVE CONTROL: the
+ *     legacy eased follow (no chase) lags the same target by far more;
+ *   • the chase eases to CHASE.defaultR from wherever the camera was; the
+ *     wheel zooms it on the log ladder (three notches = ÷1.18³); the probe
+ *     model's scale is the kernel's `modelScale` at that range and the near
+ *     plane tightens under the range;
+ *   • a drag orbits the camera about the target (az moves, range does not);
+ *   • a CATALOGUE dot is followable: its avatar stands on the dot (model
+ *     family from the name), scaled, the tracker's highlight labels it, the
+ *     follow card names it with the symbolic-scale disclosure; Esc releases
+ *     and the avatar, highlight and card go;
+ *   • while chasing, the projection's principal point sits in the clear
+ *     part of the stage (the kernel's safe centre), and clears on release;
+ *   • the altitude tour: "higher" from the ISS lands on the next object up
+ *     by page altitude and the flight is an ARC (lifted, never inside the
+ *     planet) — NEGATIVE CONTROL: the straight chord between the two eyes
+ *     passes below the lower end.
+ */
+
+import { test, expect } from '@playwright/test';
+import { routeSyntheticCatalogue } from './fixtures/sat-suites-synthetic.mjs';
+
+const URL = '/upper-atmosphere.html';
+const DT = 1 / 60;
+const EPOCH = Math.floor(Date.now() / 3600e3) * 3600e3 - 3600e3;
+test.describe.configure({ timeout: 240_000 });
+
+async function boot(page) {
+    await page.route('**/api/donki/**', (r) => r.fulfill({ status: 503, contentType: 'application/json', body: '{}' }));
+    await routeSyntheticCatalogue(page, EPOCH);
+    await page.goto(URL);
+    await page.waitForFunction(() => !!window.__ua?.globe?.stepFrames && !!window.__ua?.satSuites && !!window.__ua?.followCard, null, { timeout: 60_000 });
+    const consent = page.locator('.pp-consent-banner');
+    await consent.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
+    if (await consent.isVisible().catch(() => false)) await consent.locator('[data-action="reject"]').click().catch(() => {});
+    await page.waitForTimeout(600);
+    await page.locator('#ua-aside-tabs [data-ua-tab="analysis"]').click();
+    await page.evaluate((EPOCH) => {
+        const g = window.__ua.globe;
+        g.setBeaconsVisible?.(false);
+        g.setManualClock(true, { startMs: 1e6 });
+        const b = g._timeBus; b.pause(); b.setSimTime(EPOCH + 3600e3);
+        g.stepFrames(3, 1 / 60, { render: 'none' });
+    }, EPOCH);
+}
+const step = (page, n) => page.evaluate(([n, dt]) => window.__ua.globe.stepFrames(n, dt, { render: 'none' }), [n, DT]);
+/** Advance the bus by `ms` per frame for n frames; returns the worst |eye−target| − dist. */
+const stepMoving = (page, n, ms, targetSel = 'iss') => page.evaluate(([n, dt, ms, sel]) => {
+    const g = window.__ua.globe, c = g._controls, b = g._timeBus;
+    const tgt = () => sel === 'iss' ? g._satProbes.iss.mesh.position : g._catFollow.pos;
+    let worst = 0, moved = 0;
+    for (let i = 0; i < n; i++) {
+        const before = tgt().clone();
+        b.setSimTime(b.getSimTime() + ms);
+        g.stepFrames(1, dt, { render: 'none' });
+        moved = Math.max(moved, tgt().distanceTo(before));
+        const st = c.getFollowState();
+        if (st) worst = Math.max(worst, Math.abs(g._camera.position.distanceTo(tgt()) - st.dist));
+    }
+    return { worst, movedKm: moved * 6371 };
+}, [n, DT, ms, targetSel]);
+async function enableSuite(page, group) {
+    await page.locator(`#ua-sat-suites label[data-group="${group}"]`).click();
+    await page.waitForFunction((g) => (window.__ua.globe.getCatalogStatus().groups.find((x) => x.name === g)?.count ?? 0) > 0, group, { timeout: 30_000 });
+    // The worker publishes positions asynchronously; a slot reads (0,0,0) until then.
+    for (let i = 0; i < 60; i++) {
+        const ok = await page.evaluate(([dt]) => { const g = window.__ua.globe; g.stepFrames(1, dt, { render: 'none' }); const p = g._catalogTracker.getPositionXYZ(70003); return !!p && Math.hypot(p.x, p.y, p.z) > 0.9; }, [DT]);
+        if (ok) return;
+        await page.waitForTimeout(100);
+    }
+    throw new Error('catalogue positions never published');
+}
+
+test('the chase tracks a moving target exactly, eases to range, zooms on the ladder, orbits on drag', async ({ page }) => {
+    await boot(page);
+    const K = await page.evaluate(async () => { const m = await import('./js/upper-atmosphere-sat-view.js'); return { defaultR: m.CHASE.defaultR, notch: m.CHASE.zoomNotch, refR: m.MODEL_REF_R, sens: m.CHASE.dragSens }; });
+    await page.evaluate(() => window.__ua.globe.followSatellite('iss'));
+    await step(page, 90);
+    const st0 = await page.evaluate(() => window.__ua.globe._controls.getFollowState());
+    expect(Math.abs(st0.dist - K.defaultR) / K.defaultR, 'eased to the default range').toBeLessThan(0.01);
+
+    // Moving target: a second of bus time per frame (~7.7 km), exact to 1e-9.
+    const mv = await stepMoving(page, 40, 1000);
+    expect(mv.movedKm).toBeGreaterThan(5);
+    expect(mv.worst).toBeLessThan(1e-9);
+    // NEGATIVE CONTROL: the legacy eased follow (no chase) lags by far more.
+    const lag = await page.evaluate(([dt]) => {
+        const g = window.__ua.globe, c = g._controls, b = g._timeBus, probe = g._satProbes.iss;
+        c.followObject(() => probe.mesh.position, { smoothing: 0.15 });
+        let worst = 0;
+        for (let i = 0; i < 20; i++) { b.setSimTime(b.getSimTime() + 1000); g.stepFrames(1, dt, { render: 'none' }); worst = Math.max(worst, Math.abs(g._camera.position.distanceTo(probe.mesh.position) - 0.18)); }
+        return worst;
+    }, [DT]);
+    expect(lag).toBeGreaterThan(1e-4);
+    await page.evaluate(() => window.__ua.globe.followSatellite('iss'));
+    await step(page, 120);
+
+    // Wheel: three notches in → ÷ notch³; model scale and near plane follow.
+    await page.evaluate(() => { for (let i = 0; i < 3; i++) window.__ua.globe.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true })); });
+    await step(page, 150);
+    const z = await page.evaluate(() => { const g = window.__ua.globe; const st = g._controls.getFollowState(); return { dist: st.dist, distT: st.distT, mid: g._satProbes.iss.midGrp.scale.x, nearGrp: g._satProbes.iss.nearGrp.scale.x, near: g._camera.near }; });
+    expect(Math.abs(z.distT - K.defaultR / K.notch ** 3)).toBeLessThan(1e-9);
+    expect(Math.abs(z.dist - z.distT) / z.distT).toBeLessThan(0.01);
+    expect(Math.abs(z.mid - z.dist / K.refR)).toBeLessThan(0.02);
+    expect(z.nearGrp).toBeCloseTo(z.mid, 6);
+    expect(z.near).toBeLessThan(z.dist);
+    expect(z.near).toBeLessThan(0.21 * z.dist + 1e-9);
+
+    // Drag: az moves by dx·sens (eased), the range does not.
+    const r = await page.locator('#ua-globe').boundingBox();
+    const cx = r.x + r.width * 0.3, cy = r.y + r.height * 0.5;
+    await page.mouse.move(cx, cy); await page.mouse.down();
+    await page.mouse.move(cx + 120, cy, { steps: 6 });
+    await page.mouse.up();
+    await step(page, 120);
+    const d = await page.evaluate(() => window.__ua.globe._controls.getFollowState());
+    const expectAz = ((Math.PI - 120 * K.sens + Math.PI) % (2 * Math.PI)) - Math.PI;
+    expect(Math.abs(Math.atan2(Math.sin(d.az - expectAz), Math.cos(d.az - expectAz)))).toBeLessThan(0.02);
+    expect(Math.abs(d.dist - z.dist) / z.dist).toBeLessThan(0.01);
+});
+
+test('a catalogue dot is followable: avatar, highlight, card and disclosure; Esc releases; the safe frame', async ({ page }) => {
+    await boot(page);
+    await enableSuite(page, 'starlink');
+    const ok = await page.evaluate(() => window.__ua.globe.flyToCatalog(70003, 0.5, { follow: true }));
+    expect(ok).toBe(true);
+    await step(page, 40);                 // the flight (frame clock)
+    await page.waitForTimeout(800);       // the hand-off timer (wall clock)
+    await step(page, 120);
+    const mv = await stepMoving(page, 30, 500, 'cat');
+    expect(mv.worst).toBeLessThan(1e-9);
+    const s = await page.evaluate(async () => {
+        const g = window.__ua.globe; const m = await import('./js/upper-atmosphere-sat-view.js');
+        window.__ua.followCard.refresh();
+        const st = g._controls.getFollowState();
+        const card = document.getElementById('ua-follow-card');
+        return {
+            following: g.isFollowing(), target: g.getFollowTarget(), info: g.getFollowInfo(),
+            avatarVisible: g._avatar?.grp.visible, family: g._avatar?.family,
+            avatarScale: g._avatar?.grp.scale.x, expectScale: m.modelScale(st.dist),
+            onDot: g._avatar?.grp.position.distanceTo(g._catFollow.pos),
+            highlight: g._catalogTracker._highlightNoradId, highlightVisible: g._catalogTracker._highlightSprite?.visible,
+            cardHidden: card.hidden, cardText: card.textContent.replace(/\s+/g, ' '),
+            safe: g.getChaseSafeFrame(), view: g._camera.view ? { ox: g._camera.view.offsetX, oy: g._camera.view.offsetY, on: g._camera.view.enabled } : null,
+            camDock: document.getElementById('ua-camera-hud').getBoundingClientRect().left - g.canvas.getBoundingClientRect().left,
+        };
+    });
+    expect(s.following).toBe(true);
+    expect(s.target).toEqual({ kind: 'catalog', id: 70003 });
+    expect(s.info.name).toBe('STARLINK-SYN 0-3');
+    expect(s.info.family).toBe('starlink');
+    expect(s.family).toBe('starlink');
+    expect(s.avatarVisible).toBe(true);
+    expect(s.onDot).toBeLessThan(1e-9);
+    expect(Math.abs(s.avatarScale - s.expectScale)).toBeLessThan(0.02);
+    expect(s.highlight).toBe(70003);
+    // Inside the model-hold range the world-sized highlight sprite yields to
+    // the avatar (it filled the frame white at 70 km — measured) …
+    expect(s.highlightVisible).toBe(false);
+    // … and returns once the camera backs off past MODEL_REF_R (8 notches out).
+    await page.evaluate(() => { for (let i = 0; i < 8; i++) window.__ua.globe.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true })); });
+    await step(page, 150);
+    const far = await page.evaluate(async () => { const m = await import('./js/upper-atmosphere-sat-view.js'); const g = window.__ua.globe; return { dist: g._controls.getFollowState().dist, ref: m.MODEL_REF_R, hl: g._catalogTracker._highlightSprite?.visible, scale: g._avatar.grp.scale.x }; });
+    expect(far.dist).toBeGreaterThan(far.ref);
+    expect(far.hl).toBe(true);
+    expect(far.scale).toBe(1);
+    await page.evaluate(() => { for (let i = 0; i < 8; i++) window.__ua.globe.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true })); });
+    await step(page, 150);
+    expect(s.cardHidden).toBe(false);
+    expect(s.cardText).toContain('STARLINK-SYN 0-3');
+    expect(s.cardText).toMatch(/symbolic model: drawn [\d.,]+ km across/);
+    expect(s.cardText).toMatch(/true ≈3 m span/);
+    // The safe frame: the principal point sits left of the camera dock, in the clear.
+    expect(s.view?.on).toBe(true);
+    expect(s.safe.cx).toBeLessThan(s.camDock);
+    expect(s.safe.cx).toBeGreaterThan(60);
+    expect(s.view.ox).toBe(Math.round(s.safe.W / 2 - s.safe.cx));
+
+    // Esc releases: avatar, highlight, card and the view offset all go.
+    await page.locator('#ua-globe').hover();
+    await page.keyboard.press('Escape');
+    await step(page, 3);
+    await page.evaluate(() => window.__ua.followCard.refresh());
+    const e = await page.evaluate(() => { const g = window.__ua.globe; return { following: g.isFollowing(), avatar: g._avatar?.grp.visible, trail: g._avatar?.trail.visible, highlight: g._catalogTracker._highlightSprite?.visible, card: document.getElementById('ua-follow-card').hidden, view: g._camera.view?.enabled ?? false, safe: g.getChaseSafeFrame() }; });
+    expect(e).toEqual({ following: false, avatar: false, trail: false, highlight: false, card: true, view: false, safe: null });
+});
+
+test('the altitude tour hops to the next object up by page altitude on an ARC, never through the planet', async ({ page }) => {
+    await boot(page);
+    await enableSuite(page, 'starlink');
+    await page.evaluate(() => window.__ua.globe.followSatellite('iss'));
+    await step(page, 90);
+    const issAlt = await page.evaluate(() => window.__ua.globe.getFollowInfo().altKm);
+    const pick = await page.evaluate(() => window.__ua.globe.followNeighbourByAltitude(1));
+    // The next object up may be a named probe or a catalogue dot: the tour
+    // spans both. Either way it is higher than the ISS.
+    expect(['sat', 'catalog']).toContain(pick.kind);
+    expect(pick.altKm).toBeGreaterThan(issAlt);
+    // The flight is an arc: sample it frame by frame; the eye never dips
+    // below the lower of its two ends, and rises above both mid-way.
+    const flight = await page.evaluate(([dt]) => {
+        const g = window.__ua.globe, c = g._controls;
+        const arc = c.getFlightArc();
+        const rs = [];
+        for (let i = 0; i < 400 && c.isFlying(); i++) { g.stepFrames(1, dt, { render: 'none' }); rs.push(g._camera.position.length()); }
+        return { arc: arc && { r0: arc.r0, r1: arc.r1, bulge: arc.bulge, angle: arc.angle, straight: arc.straight }, min: Math.min(...rs), max: Math.max(...rs), n: rs.length };
+    }, [DT]);
+    expect(flight.arc).not.toBeNull();
+    expect(flight.arc.straight).toBe(false);
+    expect(flight.min).toBeGreaterThan(Math.min(flight.arc.r0, flight.arc.r1) - 1e-6);
+    expect(flight.max).toBeGreaterThan(Math.max(flight.arc.r0, flight.arc.r1) + 0.5 * flight.arc.bulge);
+    // NEGATIVE CONTROL: the straight chord between the same two eyes dives
+    // below the lower end (into the planet for a wide hop).
+    const chordLow = await page.evaluate(async ([r0, r1, angle]) => {
+        // The chord's closest approach for two points at r0, r1 separated by `angle`.
+        const a = [r0, 0, 0], b = [r1 * Math.cos(angle), r1 * Math.sin(angle), 0];
+        let min = Infinity;
+        for (let i = 0; i <= 200; i++) { const t = i / 200; min = Math.min(min, Math.hypot(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)); }
+        return min;
+    }, [flight.arc.r0, flight.arc.r1, flight.arc.angle]);
+    expect(chordLow).toBeLessThan(Math.min(flight.arc.r0, flight.arc.r1) - 0.01);
+    // After the hand-off the chase holds the picked object.
+    await page.waitForTimeout(2600);
+    await step(page, 60);
+    const info = await page.evaluate(() => window.__ua.globe.getFollowInfo());
+    expect(info.kind).toBe(pick.kind);
+    expect(info.id).toBe(pick.key);
+    expect(info.altKm).toBeGreaterThan(issAlt);
+});

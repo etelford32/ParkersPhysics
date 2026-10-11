@@ -1246,6 +1246,63 @@ Two more surfaced while gating those:
    plus the home-size pass) drifted 6 px off the gutter. `_rectOf`
    subtracts `clientLeft`/`clientTop`; the double-click now lands exact.
 
+### 9.17 Zooming in to one spacecraft: the chase, the avatars, the altitude tour (2026-10-11)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-sat-view.js` | PURE: the LVLH frame (`lvlhBasis`), the chase pose and its inverse (`chasePose` / `chaseFromEye`), the log zoom ladder (`zoomDistance`, `scaleDistance`), drag orbit (`orbitBy`), the model's angular hold (`modelScale`, `MODEL_REF_R`, `ARTISTIC_SPAN_R`), the chase-aware near plane (`nearPlaneFor`), the fly-in duration, the altitude tour (`altitudeNeighbour`), model families from catalogue strings, the SAFE FRAME (`safeCentre`) and the ARC flight (`arcSpec` / `arcAt`) | `node tests/upper-atmosphere-sat-view.mjs` (9) |
+| `js/upper-atmosphere-camera.js` | `followObject({ chase: true, getVel, seedFromEye })`: the eye at pos + dist·dir(az, el) EXACTLY each frame, az/el/dist eased toward the user's targets; wheel (own non-passive listener), drag, W/S A/D Q/E and the ± buttons drive them; `flyTo({ arc: true })` flies the kernel's arc | `tests/upper-atmosphere-sat-chase.spec.js` |
+| `js/upper-atmosphere-globe.js` | `followSatellite` is a chase; `followCatalog` / `flyToCatalog` chase any SGP4 dot with an AVATAR (model family by name/group, held in angle), a trail and the tracker's highlight label; `getFollowInfo`, `followNeighbourByAltitude`, `setChaseSafeFrame`; a catalogue click flies in and chases; the probe model tiers scale continuously | same |
+| `js/upper-atmosphere-follow-card.js` | the card under the readout: name · NORAD · alt · v · period · incl · the chase range and framing · ▼ lower / ▲ higher / ⟲ reframe · the symbolic-scale disclosure; `,` / `.` are the tour keys | same |
+
+**The camera tracks exactly; only the user's input is eased.** A LEO target
+moves 7.7 km/s; at 10 km range an eased position lags it by degrees per
+frame and the spacecraft slides out of the frame (the star-collider rule,
+measured there as 75° of orbit). The gate advances the bus a second per
+frame and pins eye-to-target − dist < 1e-9 — and runs the legacy eased
+follow on the same target as the NEGATIVE CONTROL (it lags by far more).
+
+**Distance is logarithmic** (9.6 km → 3800 km, one notch = ×1.18), **the
+model is symbolic and says so**: a 109 m station is three orders below
+float32's grain at r = 1.07, so the models keep their artistic span
+(~0.04 R⊕) and `modelScale` HOLDS their angular size inside `MODEL_REF_R`
+— closing in makes the planet, the orbit arc and the neighbours grow while
+the symbol stays the same size, which reads as approach rather than as a
+wall of hull. The card prints the drawn span, the factor and the true span.
+The near plane tightens to 0.2 × the chase range (the altitude rule alone
+clipped the target). The tracker's highlight sprite is WORLD-sized and
+filled the frame white at 70 km (measured): it yields to the avatar inside
+`MODEL_REF_R` and returns as the camera backs off (gated both ways).
+
+**Three scars, each measured.** (1) `followCatalog` primed its per-frame
+step before setting the follow id, and the step's release path cleared the
+new state — the camera chased a frozen origin for the whole session; the
+id is set first, and a dot the worker has not published yet (a (0, 0, 0)
+slot) is refused as a destination. (2) The canvas centre sits under the
+camera dock: the chase moves the projection's principal point to the centre
+of the stage no dock covers (`safeCentre` over the page's live rects, the
+Mars safe-frame rule; `setViewOffset`, cleared on release), and a strip
+narrower than the floor is widened about its own centre, never abandoned
+for the whole stage (the first version put the centre back on the dock's
+edge at a 742 px stage). (3) The tour's hop from one Starlink plane to
+another flew a straight chord through the planet: `_flyToChase` flies the
+kernel's ARC (great-circle slerp, radius lifted by 0.35 R⊕ per radian
+swept, the look point sweeping too; a local hop stays straight) and is
+timed by its length. The hand-off keeps its wall-clock timer (the escape
+hatch gate's negative control depends on it) and is safe either way: the
+chase SEEDS FROM THE EYE, so if the timer fires early the chase waits for
+the flight and starts exactly where it left the camera — never a snap.
+
+**Also fixed on the way:** the camera's R / Esc keys yielded to EVERY
+focused input, including the suites panel's checkboxes — Esc could not let
+go of a chase after enabling a suite; they yield to text entry only.
+
+**Known limits.** The avatar's orientation is velocity-aligned with +Y
+radial (the probes' convention) — no attitude data; the trail is sampled
+by distance (5 km) and holds 120 points; the catalogue velocity is a
+finite difference in the Earth-fixed frame (the speed readout uses the
+circular relation at the drawn radius instead). Not verified on a real GPU.
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

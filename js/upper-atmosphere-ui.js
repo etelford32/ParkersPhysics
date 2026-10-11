@@ -178,7 +178,12 @@ export class UpperAtmosphereUI {
         // (Esc still leaves immersive first — that handler owns it there).
         document.addEventListener('keydown', (e) => {
             const tag = (e.target?.tagName || '').toLowerCase();
-            if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
+            // Yield to TEXT entry only. A focused checkbox (the suites panel's
+            // labels focus theirs on click) is not typing, and Esc must still
+            // let go of a chase from there (measured: it did not).
+            const typing = tag === 'textarea' || tag === 'select' || e.target?.isContentEditable
+                || (tag === 'input' && !['checkbox', 'radio', 'button', 'range', 'submit'].includes(e.target.type));
+            if (typing) return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             if (e.key === 'r' || e.key === 'R') {
                 e.preventDefault();
@@ -186,6 +191,13 @@ export class UpperAtmosphereUI {
             } else if (e.key === 'Escape' && this.globe.isFollowing?.()
                        && !document.body.classList.contains('ua-immersive-on')) {
                 this.globe.stopFollowing?.();
+                this._refreshFollowUi();
+            } else if ((e.key === ',' || e.key === '.') && this.globe.followNeighbourByAltitude) {
+                // The altitude tour: , chases the next spacecraft below, . the
+                // next above — from the followed one, or from the camera's
+                // own altitude when nothing is followed yet.
+                e.preventDefault();
+                this.globe.followNeighbourByAltitude(e.key === '.' ? 1 : -1);
                 this._refreshFollowUi();
             }
         });
@@ -283,8 +295,9 @@ export class UpperAtmosphereUI {
             this.el.camMode.classList.toggle('ua-cam-mode--follow', on);
             if (on) {
                 const tgt = this.globe.getFollowTarget?.();
-                this.el.camMode.textContent = tgt?.kind === 'sat'
-                    ? `following ${tgt.id}`
+                const info = this.globe.getFollowInfo?.();
+                this.el.camMode.textContent = info?.name
+                    ? `chasing ${info.name}`
                     : tgt?.kind === 'debris'
                         ? `following debris #${tgt.idx}`
                         : tgt?.kind === 'flight'
@@ -293,7 +306,9 @@ export class UpperAtmosphereUI {
             }
         }
         if (this.el.camHint && on) {
-            this.el.camHint.textContent = 'tracking target · Orbit/Fly/Reset to release';
+            this.el.camHint.textContent = this.globe.getFollowInfo?.()?.chase
+                ? 'wheel zooms · drag orbits the target · , . tour altitudes · Esc releases'
+                : 'tracking target · Orbit/Fly/Reset to release';
         }
     }
 
