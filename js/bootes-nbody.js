@@ -64,9 +64,11 @@
  *
  * WHAT THIS IS NOT, stated where it is used
  * ─────────────────────────────────────────
- *  - It runs FORWARD only. The past needs initial conditions for the web's
- *    clumps — an inverse problem (reconstruction) this page does not solve.
- *    The past stays the shell reconstruction. BOOTES_VOID_PLAN.md §4d.
+ *  - A forecast run starts at z_obs. The PAST is js/bootes-reconstruct.js:
+ *    initial conditions at z = 9 found by matching a glass to today's field,
+ *    run forward with this same kernel (BOOTES_VOID_PLAN.md §4e). Never
+ *    integrate this kernel backwards instead — gravity amplifies every error
+ *    into the past.
  *  - Collisionless matter only: no gas, no star formation, no feedback.
  *  - Softened at ε (the web's own particle spacing, ~11 Mpc): structure
  *    below ε is not resolved, and a node is a softened blob, not a cluster.
@@ -117,7 +119,7 @@ export const PAGE_CONFIG = Object.freeze({
  * its parent's — which is what lets the mass moments be filled in ONE reverse
  * sweep.
  */
-export function buildTree(pos, mass, members, { leafSize = DEFAULT_LEAF } = {}) {
+export function buildTree(pos, mass, members, { leafSize = DEFAULT_LEAF, hsoft = null } = {}) {
     const n = members.length;
     const perm = Int32Array.from(members);
     let cap = Math.max(64, Math.ceil(n / 2) + 16);
@@ -140,7 +142,7 @@ export function buildTree(pos, mass, members, { leafSize = DEFAULT_LEAF } = {}) 
         cap = nc;
     };
     if (n === 0) {
-        return { count: 0, perm, cx, cy, cz, m, q, half, off, start, end, child, nChild, pos, mass };
+        return { count: 0, perm, cx, cy, cz, m, q, half, off, start, end, child, nChild, pos, mass, hsoft, hmax: null };
     }
 
     // Root cube: the bounding box, made cubic and padded so no particle sits
@@ -238,7 +240,21 @@ export function buildTree(pos, mass, members, { leafSize = DEFAULT_LEAF } = {}) 
         q[5 * node] = qxx; q[5 * node + 1] = qyy; q[5 * node + 2] = qxy;
         q[5 * node + 3] = qxz; q[5 * node + 4] = qyz;
     }
-    return { count, perm, cx, cy, cz, m, q, half, off, start, end, child, nChild, pos, mass };
+    // Per-particle softening: the largest h in each cell, children first.
+    let hmax = null;
+    if (hsoft) {
+        hmax = new Float64Array(count);
+        for (let node = count - 1; node >= 0; node--) {
+            let h = 0;
+            if (child[node] < 0) {
+                for (let k = start[node]; k < end[node]; k++) h = Math.max(h, hsoft[perm[k]]);
+            } else {
+                for (let c = child[node]; c < child[node] + nChild[node]; c++) h = Math.max(h, hmax[c]);
+            }
+            hmax[node] = h;
+        }
+    }
+    return { count, perm, cx, cy, cz, m, q, half, off, start, end, child, nChild, pos, mass, hsoft, hmax };
 }
 
 const STACK = new Int32Array(1 << 14);
@@ -262,6 +278,15 @@ const STACK = new Int32Array(1 << 14);
  */
 export const plummer = (eps) => Object.freeze({ kind: 'plummer', eps });
 export const spline = (h) => Object.freeze({ kind: 'spline', h });
+/**
+ * Spline softening PER SOURCE PARTICLE: `h` is a Float64Array indexed like
+ * the mass array, `hEdge` the h the mean sphere is smoothed with at its rim.
+ * For a zoom whose spacing grows outward, a single h is either too coarse in
+ * the core or below the spacing in the outskirts — and below the spacing the
+ * field is grainy enough to trap a test particle (measured: galaxies beyond
+ * 1.6 R_eff did not converge in the reconstruction until h followed spacing).
+ */
+export const splinePerParticle = (h, hEdge) => Object.freeze({ kind: 'spline-per-particle', h, hEdge });
 
 /**
  * Comoving force sum at (x, y, z): Σ G m K(d) d, (km/s)²/Mpc, monopole +
@@ -272,6 +297,9 @@ export const spline = (h) => Object.freeze({ kind: 'spline', h });
 export function treeForce(tree, x, y, z, theta, soft, out, o = 0) {
     if (!tree.count) return out;
     const { cx, cy, cz, m, q, half, off, start, end, child, nChild, perm, pos, mass } = tree;
+    if (soft.kind === 'spline-per-particle') {
+        return treeForcePerParticle(tree, x, y, z, theta, out, o);
+    }
     const invTheta = 1 / theta;
     const isPlummer = soft.kind === 'plummer';
     const e2 = isPlummer ? soft.eps * soft.eps : 0;
@@ -330,6 +358,59 @@ export function treeForce(tree, x, y, z, theta, soft, out, o = 0) {
     return out;
 }
 
+/**
+ * The per-particle spline walk: every SOURCE carries its own h (`hsoft`, the
+ * zoom's local spacing × 2). A cell is accepted as a multipole only when the
+ * field point lies outside the largest h it contains — so every accepted
+ * interaction is exactly Newtonian and the quadrupole always applies — and a
+ * leaf is summed with each source's own kernel.
+ */
+function treeForcePerParticle(tree, x, y, z, theta, out, o) {
+    const { cx, cy, cz, m, q, half, off, start, end, child, nChild, perm, pos, mass, hsoft, hmax } = tree;
+    const invTheta = 1 / theta;
+    let fx = 0, fy = 0, fz = 0;
+    let sp = 0;
+    STACK[sp++] = 0;
+    while (sp) {
+        const node = STACK[--sp];
+        const dx = cx[node] - x, dy = cy[node] - y, dz = cz[node] - z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        const crit = 2 * half[node] * invTheta + off[node];
+        if (d2 > crit * crit && d2 >= hmax[node] * hmax[node]) {
+            const ir2 = 1 / d2;
+            const fac = ir2 * Math.sqrt(ir2);
+            const f = G_MPC * m[node] * fac;
+            const ir5 = fac * ir2;
+            const b = 5 * node;
+            const qxx = q[b], qyy = q[b + 1], qxy = q[b + 2], qxz = q[b + 3], qyz = q[b + 4];
+            const qzz = -qxx - qyy;
+            const Qx = qxx * dx + qxy * dy + qxz * dz;
+            const Qy = qxy * dx + qyy * dy + qyz * dz;
+            const Qz = qxz * dx + qyz * dy + qzz * dz;
+            const quad = 2.5 * (dx * Qx + dy * Qy + dz * Qz) * ir5 * ir2;
+            fx += f * dx + G_MPC * (quad * dx - Qx * ir5);
+            fy += f * dy + G_MPC * (quad * dy - Qy * ir5);
+            fz += f * dz + G_MPC * (quad * dz - Qz * ir5);
+        } else if (child[node] < 0) {
+            for (let k = start[node]; k < end[node]; k++) {
+                const j = perm[k];
+                const ex = pos[j * 3] - x, ey = pos[j * 3 + 1] - y, ez = pos[j * 3 + 2] - z;
+                const r2 = ex * ex + ey * ey + ez * ez;
+                const h = hsoft[j];
+                let fac;
+                if (r2 >= h * h) fac = 1 / (r2 * Math.sqrt(r2));
+                else { const hi = 1 / h; fac = splineFac(Math.sqrt(r2) * hi, hi * hi * hi); }
+                const f = G_MPC * mass[j] * fac;
+                fx += f * ex; fy += f * ey; fz += f * ez;
+            }
+        } else {
+            for (let c = child[node]; c < child[node] + nChild[node]; c++) STACK[sp++] = c;
+        }
+    }
+    out[o] += fx; out[o + 1] += fy; out[o + 2] += fz;
+    return out;
+}
+
 /** Gadget-2 spline force factor inside h (force = G m · fac · d). */
 function splineFac(u, hinv3) {
     return u < 0.5
@@ -340,6 +421,22 @@ function splineFac(u, hinv3) {
 
 /** The same sum by brute force — the oracle the tree is gated against. */
 export function directForce(pos, mass, members, x, y, z, soft, out, o = 0) {
+    if (soft.kind === 'spline-per-particle') {
+        let fx = 0, fy = 0, fz = 0;
+        for (let k = 0; k < members.length; k++) {
+            const j = members[k];
+            const ex = pos[j * 3] - x, ey = pos[j * 3 + 1] - y, ez = pos[j * 3 + 2] - z;
+            const r2 = ex * ex + ey * ey + ez * ez;
+            const h = soft.h[j];
+            let fac;
+            if (r2 >= h * h) fac = 1 / (r2 * Math.sqrt(r2));
+            else { const hi = 1 / h; fac = splineFac(Math.sqrt(r2) * hi, hi * hi * hi); }
+            const f = G_MPC * mass[j] * fac;
+            fx += f * ex; fy += f * ey; fz += f * ez;
+        }
+        out[o] += fx; out[o + 1] += fy; out[o + 2] += fz;
+        return out;
+    }
     const isPlummer = soft.kind === 'plummer';
     const e2 = isPlummer ? soft.eps * soft.eps : 0;
     const h = isPlummer ? 0 : soft.h;
@@ -377,9 +474,9 @@ export function splineDensity(r, h) {
  * smoothed edge. Dispatches on the kernel.
  */
 export function meanSphereForce(R, rho, soft, opts) {
-    return soft.kind === 'plummer'
-        ? softenedSphereForce(R, rho, soft.eps, opts)
-        : splineSphereForce(R, rho, soft.h, opts);
+    if (soft.kind === 'plummer') return softenedSphereForce(R, rho, soft.eps, opts);
+    // Per-particle h: the smoothing that matters is the rim's.
+    return splineSphereForce(R, rho, soft.kind === 'spline-per-particle' ? soft.hEdge : soft.h, opts);
 }
 
 /**
@@ -557,7 +654,9 @@ export function createSimulation({
 
     function trees() {
         if (solver === 'spherical') return memberArrays.map(mem => sphericalShells(x, mass, mem));
-        return memberArrays.map(mem => buildTree(x, mass, mem, { leafSize }));
+        return memberArrays.map((mem, g) => buildTree(x, mass, mem, {
+            leafSize, hsoft: softening[g].kind === 'spline-per-particle' ? softening[g].h : null,
+        }));
     }
 
     /** Forces on particles [from, to) against the given trees. */
@@ -618,6 +717,14 @@ export function createSimulation({
         n, nMassive, x, p, fBg, fWeb, mass, group, softening, theta,
         get a() { return a; },
         get trees() { return current; },
+        /**
+         * Rebuild the trees and every force at the CURRENT positions, with no
+         * dynamics — the reconstruction's relaxation moves `x` itself.
+         */
+        refreshForces() {
+            current = trees();
+            forces(current);
+        },
         /** One KDK step `s` of `schedule`. */
         step(schedule, s) {
             kick(schedule.kick1[s]);
@@ -873,7 +980,7 @@ export function quietSphere({
     edges[edges.length - 1] = radius;
     if (edges.length > 2 && radius - edges[edges.length - 2] < 0.4 * spacing) edges.splice(edges.length - 2, 1);
 
-    const pos = [], mass = [], shellR = [], shellId = [];
+    const pos = [], mass = [], shellR = [], shellId = [], cellSize = [];
     const golden = Math.PI * (3 - Math.sqrt(5));
     for (let k = 0; k + 1 < edges.length; k++) {
         const ra = edges[k], rb = edges[k + 1];
@@ -933,11 +1040,13 @@ export function quietSphere({
             mass.push(M / K);
             shellR.push(rk);
             shellId.push(k);
+            cellSize.push(s);
         }
     }
     return {
         pos: Float64Array.from(pos), mass: Float64Array.from(mass),
         radius0: Float64Array.from(shellR), shell: Int32Array.from(shellId),
+        cellSize: Float64Array.from(cellSize),
         edges: Float64Array.from(edges),
     };
 }
@@ -1128,13 +1237,21 @@ export function massNearNodes(x, mass, group, nMassive, nodeIndices, radiusMpc) 
 
 // ── Reading a finished run ──────────────────────────────────────────────────
 
-/** Where scale factor `a` falls between a run's frames (uniform in ln a). */
+/**
+ * Where scale factor `a` falls between a run's frames. A binary search on the
+ * frames' own ln a — a reconstruction run is two uniform segments with
+ * different steps (z = 9 → z_obs, then z_obs → the end), so assuming one
+ * uniform spacing would misplace every frame after the join.
+ */
 export function locateFrame(N, a) {
     const n = N.length;
-    const x = (Math.log(a) - N[0]) / (N[n - 1] - N[0]) * (n - 1);
-    const xi = Math.max(0, Math.min(n - 1, x));
-    const i = Math.min(n - 2, Math.floor(xi));
-    return { i, t: xi - i, inside: x >= -1e-9 && x <= n - 1 + 1e-9 };
+    const x = Math.log(a);
+    const inside = x >= N[0] - 1e-9 && x <= N[n - 1] + 1e-9;
+    if (x <= N[0]) return { i: 0, t: 0, inside };
+    if (x >= N[n - 1]) return { i: n - 2, t: 1, inside };
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (N[mid] <= x) lo = mid; else hi = mid; }
+    return { i: lo, t: (x - N[lo]) / (N[lo + 1] - N[lo]), inside };
 }
 
 /**
@@ -1169,15 +1286,18 @@ export function recordSampleAt(rec, nRec, k, N, ep, toKmsPerGyr) {
     const r = mag(pos);
     const radial = (v) => (r > 1e-9 ? (v[0] * pos[0] + v[1] * pos[1] + v[2] * pos[2]) / r : 0);
     const mv = mag(gv), mw = mag(gw);
+    // A reconstruction's matter is one population (the web's mass is in the
+    // elements), so it has no void/web split to report — say so, not 100 %.
+    const split = rec.split !== false;
     return {
         tGyr: ep.tGyr, z: ep.z,
         positionMpc: pos,
         rMpc: r,
         gA: toKmsPerGyr(mag(g)),
-        gVoid: toKmsPerGyr(mv),
-        gWeb: toKmsPerGyr(mw),
+        gVoid: split ? toKmsPerGyr(mv) : NaN,
+        gWeb: split ? toKmsPerGyr(mw) : NaN,
         gRadial: toKmsPerGyr(radial(g)),
-        voidShare: (mv + mw) > 0 ? mv / (mv + mw) : 0,
+        voidShare: split ? ((mv + mw) > 0 ? mv / (mv + mw) : 0) : NaN,
         vKms: mag(vel),
         vRadialKms: radial(vel),
         delta: NaN,

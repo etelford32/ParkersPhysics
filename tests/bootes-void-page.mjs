@@ -148,13 +148,14 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
             `track-panel.js handles a control "${key}" that the markup never declares`);
     }
     for (const id of ['bv-track-play', 'bv-track-obs', 'bv-track-now', 'bv-track-add-deep',
-        'bv-track-add-random', 'bv-track-add-probe', 'bv-track-pick', 'bv-track-clear', 'bv-track-rows']) {
+        'bv-track-add-random', 'bv-track-add-probe', 'bv-track-pick', 'bv-track-clear', 'bv-track-rows',
+        'bv-track-recon']) {
         assert.ok(html.includes(`id="${id}"`), `#${id} is missing from the markup`);
         assert.ok(trackPanel.includes(`#${id}`), `#${id} is in the markup but track-panel.js never wires it`);
     }
     assert.ok(/#bv-track-pick\[hidden\]\s*\{[^}]*display\s*:\s*none/.test(html),
         '#bv-track-pick is hidden without WebGL and needs its own [hidden] rule');
-    ok(`tracker controls agree in both directions (${declared.length} controls + 9 ids)`);
+    ok(`tracker controls agree in both directions (${declared.length} controls + 10 ids)`);
 
     // The N-body mode: offered in the markup, handled by the panel, and the
     // accretion label's radius is the runner's own constant (typed twice —
@@ -162,7 +163,10 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
     const runner = read('../js/bootes/nbody-runner.js');
     assert.ok(/<option value="nbody"/.test(html), 'the Dynamics select must offer the N-body forecast');
     assert.ok(/state\.mode === 'nbody'/.test(trackPanel), "track-panel.js must handle mode 'nbody'");
-    const radius = runner.match(/ACCRETION_RADIUS_MPC = (\d+)/)?.[1];
+    const recon = read('../js/bootes-reconstruct.js');
+    assert.ok(/ACCRETION_RADIUS_MPC = NODE_RADIUS_MPC/.test(runner),
+        'the forecast and the reconstruction must share ONE node radius');
+    const radius = recon.match(/NODE_RADIUS_MPC = (\d+)/)?.[1];
     assert.ok(radius && html.includes(`≤ ${radius} Mpc of nodes`),
         `the accretion label must quote ACCRETION_RADIUS_MPC (${radius} Mpc)`);
     ok(`the N-body forecast is offered, handled, and its ${radius} Mpc label matches the runner`);

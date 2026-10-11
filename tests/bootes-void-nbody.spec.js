@@ -97,7 +97,7 @@ test.describe('Boötes Void — N-body forecast', () => {
         await page.evaluate((t) => window.__bootesLab.tracker.setTime(t), t0 + 5);
         await expect.poll(() => page.locator('#bv-track-rows tr').first().locator('td').nth(6).textContent())
             .toBe('N-body');
-        await expect(page.locator('[data-bv="trackAccretion"]').first()).toContainText('% since z_obs');
+        await expect(page.locator('[data-bv="trackAccretion"]').first()).toContainText('% vs z_obs');
         await expect(page.locator('[data-bv="trackNlGain"]').first()).toContainText('kpc from the shell');
         await expect(page.locator('[data-bv="trackRegime"]').first()).toContainText('self-gravitating');
         expect(errors).toEqual([]);
@@ -169,9 +169,88 @@ test.describe('Boötes Void — N-body forecast', () => {
         expect(await b.evaluate(() => typeof Worker)).toBe('undefined');
         await runNbody(b);
         const local = await sampleA(b, t0 + 4);
-        await ctxB.close();
         expect(local.main.nbody).toBe(true);
         expect(local.main.pos).toEqual(withWorker.main.pos);
         expect(local.main.v).toBe(withWorker.main.v);
+        // The reconstruction is a minute of gravity: without a Worker it is
+        // NOT run on the page, and the card says why.
+        await expect(b.locator('#bv-track-recon')).toBeDisabled();
+        await expect(b.locator('[data-bv="trackRecon"]').first()).toContainText('background worker');
+        await ctxB.close();
+    });
+
+    test('reconstruct the past: one N-body run from z = 9 that lands on today\'s web', async ({ page }) => {
+        test.setTimeout(420_000);
+        const errors = [];
+        page.on('pageerror', e => errors.push(String(e)));
+        await ready(page);
+        await expect(page.locator('#bv-track-recon')).toBeDisabled();          // nonlinear mode
+        await runNbody(page);
+        await expect(page.locator('#bv-track-recon')).toBeEnabled();
+        await page.click('#bv-track-recon');
+        await expect(page.locator('#bv-track-card')).toHaveAttribute('data-recon', 'running');
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Reconstructing');
+        await page.waitForFunction(
+            () => document.querySelector('#bv-track-card')?.dataset.recon === 'ready',
+            null, { timeout: 360_000 });
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Reconstructed:');
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('from z = 9');
+
+        const out = await page.evaluate(() => {
+            const tr = window.__bootesLab.tracker;
+            const r = tr.nbody;
+            const dg = r.recon.result.diagnostics;
+            const tl = tr.timeline;
+            const g = tr.tracked[0];
+            const z = tl.zObs;
+            const atObs = r.reconSampleFor(g.xObsMpc, { tGyr: tl.tObsGyr, a: 1 / (1 + z), z });
+            const past = g.main.at(tl.epochs.find(e => e.tGyr > 2));
+            const shellPast = g.linear.at(tl.epochs.find(e => e.tGyr > 2));
+            const fut = g.main.at(tl.epochs[tl.epochs.length - 1]);
+            return {
+                dg,
+                land: Math.hypot(...atObs.positionMpc.map((c, i) => c - g.xObsMpc[i])),
+                past: { rec: !!past.reconstructed, pos: past.positionMpc, share: past.voidShare },
+                shellPast: shellPast.positionMpc,
+                fut: !!fut.reconstructed,
+                aInit: r.reconAInit,
+            };
+        });
+        expect(out.aInit).toBeCloseTo(0.1, 6);
+        expect(out.land).toBeLessThan(0.2);                     // galaxy A lands where it is seen
+        expect(out.past.rec).toBe(true);                        // the past is the run now
+        expect(out.past.share).toBeNaN();                       // no void/web split to claim
+        expect(out.fut).toBe(true);                             // and so is the future
+        const d = Math.hypot(...out.past.pos.map((c, i) => c - out.shellPast[i]));
+        expect(d).toBeGreaterThan(1e-3);
+        expect(d).toBeLessThan(10);
+        const inner = out.dg.fieldBins.filter(b => b.r1 <= 92).map(b => b.rel);
+        expect(Math.max(...inner)).toBeLessThan(0.2);
+        expect(out.dg.galaxyResidualsMpc.at(-1)).toBeLessThan(0.1);
+
+        // The stage draws the reconstruction's own frames in the PAST.
+        const match = await page.evaluate(() => new Promise((resolve) => {
+            const lab = window.__bootesLab;
+            const ep = lab.tracker.timeline.epochs.find(e => e.tGyr > 3);
+            lab.tracker.setTime(ep.tGyr);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                const want = lab.tracker.nbody.reconTracersAt(ep.a);
+                const got = lab.scene.groups.tracers.children[0].geometry.getAttribute('position').array;
+                let worst = 0;
+                for (let i = 0; i < 300; i++) worst = Math.max(worst, Math.abs(got[i] * 20 - want[i]));
+                resolve(worst);
+            }));
+        }));
+        expect(match).toBeLessThan(1e-3);
+        await expect(page.locator('[data-bv="trackRegime"]').first()).toContainText('BEFORE the observed epoch');
+        await expect(page.locator('[data-bv="trackAccretion"]').first()).toContainText('(reconstruction)');
+
+        // A galaxy added afterwards is flown through the reconstructed matter.
+        await page.click('#bv-track-add-random');
+        await expect.poll(() => page.evaluate(() => {
+            const tr = window.__bootesLab.tracker;
+            return !!tr.tracked[1]?.main.at(tr.timeline.epochs.find(e => e.tGyr > 2)).reconstructed;
+        }), { timeout: 60000 }).toBe(true);
+        expect(errors).toEqual([]);
     });
 });

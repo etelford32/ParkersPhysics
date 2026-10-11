@@ -16,16 +16,28 @@
  * NO WORKER (a sandboxed iframe, an old engine): the same steppable run
  * executes on the page one step per macrotask, so the stage stays live and
  * the result is identical — the kernel does not know where it runs.
+ *
+ * THE RECONSTRUCTION (js/bootes-reconstruct.js, plan §4d Phase 2) is a second,
+ * opt-in run on the SAME model state: the forecast's observed massive state
+ * is copied before it is handed to the worker and becomes the target the
+ * glass is matched to. It needs ~2 minutes of tree gravity, so it runs ONLY in
+ * a Worker — on the page it would freeze the stage for that long, and the
+ * status says so instead of doing it.
  */
 
 import {
     PAGE_CONFIG, buildInitialConditions, observedState, createSimulation, createRun,
     buildSchedule, replayTestParticles, locateFrame, interpolateRows, recordSampleAt,
 } from '../bootes-nbody.js';
+import { RECON_CONFIG, NODE_RADIUS_MPC } from '../bootes-reconstruct.js';
 import { toKmsPerGyr } from '../bootes-force-probe.js';
 
-/** Smooth matter within this radius of a node counts as "on" it. */
-export const ACCRETION_RADIUS_MPC = 20;
+/**
+ * Smooth matter within this radius of a node counts as "on" it — the SAME
+ * radius the reconstruction's node history uses, so the forecast's and the
+ * reconstruction's "matter on the nodes" mean one thing.
+ */
+export const ACCRETION_RADIUS_MPC = NODE_RADIUS_MPC;
 
 const pointKey = (x) => x.map(c => c.toPrecision(10)).join(',');
 
@@ -50,6 +62,18 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         pending: new Set(),
         derived: null,
         table: null,
+        observed: null,         // the forecast's massive state at z_obs (a copy)
+    };
+    const rc = {
+        status: 'idle',         // idle | running | ready | error | unavailable
+        id: 0,
+        key: null,
+        stage: null, done: 0, total: 0,
+        result: null,
+        error: null,
+        recs: new Map(),
+        pending: new Set(),
+        testKeys: [],
     };
 
     function ensureWorker() {
@@ -78,6 +102,7 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
     }
 
     function handle(m) {
+        if (String(m.type).startsWith('recon')) { handleRecon(m); return; }
         if (m.id !== st.id) return;                       // a stale run
         if (m.type === 'progress') {
             st.step = m.step;
@@ -104,6 +129,86 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         }
     }
 
+    function handleRecon(m) {
+        if (m.id !== rc.id) return;
+        if (m.type === 'recon-progress') {
+            rc.stage = m.stage; rc.done = m.done; rc.total = m.total;
+        } else if (m.type === 'recon-done') {
+            rc.result = m.result;
+            rc.status = 'ready';
+            rc.testKeys.forEach((key, k) => {
+                if (key) rc.recs.set(key, { rec: m.result.rec, nRec: m.result.nRec, k });
+            });
+            rc.pending.clear();
+        } else if (m.type === 'recon-replay') {
+            const nRec = m.keys.length;
+            m.keys.forEach((key, k) => { rc.recs.set(key, { rec: m.rec, nRec, k }); rc.pending.delete(key); });
+        } else if (m.type === 'recon-error') {
+            if (rc.status === 'ready') rc.pending.clear();
+            else rc.status = 'error';
+            rc.error = m.message;
+        }
+        onChange(st);
+    }
+
+    /**
+     * Reconstruct the initial conditions of the CURRENT model state and run
+     * it from z = 9 to the end of the axis. `trackedPts` are recorded too.
+     */
+    function reconstruct(trackedPts = []) {
+        if (!st.observed || !st.derived) return false;
+        const w = ensureWorker();
+        if (!w) { rc.status = 'unavailable'; onChange(st); return false; }
+        rc.id = ++seq;
+        rc.key = st.key;
+        rc.status = 'running';
+        rc.stage = 'glass'; rc.done = 0; rc.total = RECON_CONFIG.glassIterations;
+        rc.result = null; rc.error = null;
+        rc.recs.clear(); rc.pending.clear();
+        const tracerPts = st.derived.tracers.flatMap(t => t.offsetMpc);
+        const nodePts = st.derived.web.nodes.flatMap(n => n.offsetMpc);
+        const keys = [];
+        const extra = [];
+        for (const p of trackedPts) {
+            const k = pointKey(p);
+            if (keys.includes(k)) continue;
+            keys.push(k);
+            extra.push(...p);
+        }
+        // Row k of the result is test point k: tracers, then nodes, then the
+        // tracked galaxies (only those carry keys).
+        rc.testKeys = [...new Array(st.nTracers + st.nNodes).fill(null), ...keys];
+        keys.forEach(k => rc.pending.add(k));
+        const { radius, spacing, refineRadius } = RECON_CONFIG.layout(rEff);
+        w.postMessage({
+            type: 'reconstruct', id: rc.id,
+            args: {
+                observed: st.observed,
+                config: { radius, spacing, refineRadius },
+                testPoints: Float64Array.from([...tracerPts, ...nodePts, ...extra]),
+                nodeMarkers: { from: st.nTracers, count: st.nNodes },
+                aObs: 1 / (1 + zObs), aEnd, sim: { ...PAGE_CONFIG.sim },
+            },
+        });
+        onChange(st);
+        return true;
+    }
+
+    /** Fly galaxies tracked after the reconstruction through it. */
+    function reconRequest(points) {
+        if (rc.status !== 'ready' || !worker) return;
+        const keys = [], flat = [];
+        for (const p of points) {
+            const k = pointKey(p);
+            if (rc.recs.has(k) || rc.pending.has(k) || keys.includes(k)) continue;
+            keys.push(k);
+            flat.push(...p);
+        }
+        if (!keys.length) return;
+        keys.forEach(k => rc.pending.add(k));
+        worker.postMessage({ type: 'recon-replay', id: rc.id, keys, points: Float64Array.from(flat) });
+    }
+
     /**
      * Start (or keep) the run for this model state. `derived` is the page's
      * model ({ profile, web, tracers }); `trackedPts` the galaxies to record.
@@ -111,6 +216,12 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
     function start(derived, table, trackedPts = [], key = null) {
         if (key && key === st.key && st.status !== 'error') { request(trackedPts); return; }
         local = null;
+        if (rc.key !== key) {
+            // A new model state: any reconstruction belonged to the old one.
+            rc.id = ++seq; rc.status = 'idle'; rc.result = null; rc.recs.clear(); rc.pending.clear();
+            rc.key = null;
+        }
+        st.observed = null;
         st.key = key;
         st.id = ++seq;
         st.status = 'building';
@@ -141,6 +252,13 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
                     voidProfile: derived.profile, web: derived.web, table, zObs, testPoints,
                     ...PAGE_CONFIG.ic(rEff),
                 });
+                // The reconstruction's target, copied before the buffers are
+                // transferred to the worker for the forecast.
+                st.observed = {
+                    pos: Float64Array.from(ic.pos.subarray(0, 3 * ic.nMassive)),
+                    mass: Float64Array.from(ic.mass), group: Uint8Array.from(ic.group),
+                    softening: ic.softening,
+                };
                 st.nTracers = derived.tracers.length;
                 st.nNodes = derived.web.nodes.length;
                 st.counts = { smooth: ic.nBackground, web: ic.nWeb, galaxies: ic.nTest };
@@ -268,5 +386,39 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
             return v[0] / res.accreted[0];
         },
         get aStart() { return ready() ? st.result.a[0] : null; },
+
+        // ── The reconstruction ──
+        recon: rc,
+        reconstruct,
+        reconRequest,
+        get canReconstruct() { return !!st.observed && !workerBroken; },
+        get workerAvailable() { return !workerBroken; },
+        get reconReady() { return rc.status === 'ready' && !!rc.result; },
+        get reconAInit() { return rc.result ? rc.result.a[0] : null; },
+        reconSampleFor(xObs, ep) {
+            if (!(rc.status === 'ready' && rc.result)) return null;
+            const r = rc.recs.get(pointKey(xObs));
+            if (!r) return null;
+            return recordSampleAt(r.rec, r.nRec, r.k, rc.result.N, ep, toKmsPerGyr);
+        },
+        reconTracersAt(a, out) {
+            if (!(rc.status === 'ready' && rc.result)) return null;
+            const res = rc.result;
+            return interpolateRows(res.testPos, res.nTest, 3, locateFrame(res.N, a),
+                out ?? new Float32Array(st.nTracers * 3), 0, st.nTracers);
+        },
+        reconNodesAt(a) {
+            if (!(rc.status === 'ready' && rc.result)) return null;
+            const res = rc.result;
+            return interpolateRows(res.testPos, res.nTest, 3, locateFrame(res.N, a),
+                new Float32Array(st.nNodes * 3), st.nTracers, st.nNodes);
+        },
+        /** Matter within NODE_RADIUS of the node markers, ÷ its z_obs value. */
+        reconAccretionAt(a) {
+            if (!(rc.status === 'ready' && rc.result?.accreted)) return null;
+            const res = rc.result;
+            const v = interpolateRows(res.accreted, 1, 1, locateFrame(res.N, a), new Float64Array(1));
+            return v[0] / res.accreted[res.obsFrame];
+        },
     };
 }

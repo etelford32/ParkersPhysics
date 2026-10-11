@@ -379,23 +379,68 @@ Scars — each measured, each silent:
 | A particle excluded from its own enclosed mass | 0.1 % in a z = 19 shell's end radius | half its own mass counts as inside (it stands for its stratum) |
 | "Momentum drift 3.7 %" | looked like a conservation bug | it is not conserved: the mean subtraction is an external background and the clumped web's centre of mass is off-origin. The gate checks Newton III on the INTERNAL forces instead (1e-5) |
 
-### Phase 2 — the past as an N-body (documented, not built)
+### Phase 2 — the past as an N-body (2026-10-11, built: §4e)
 
-Running the web BACKWARD is not "the same integrator with dt < 0": gravity
-amplifies forward and the inverse problem is ill-posed — a clumped web at z_obs
-is consistent with many initial fields, and noise in it grows backwards. What
-it would take:
+Running the web backward is not "the same integrator with dt < 0": gravity
+amplifies forward, so a backward run grows every error and every grain of the
+sampling into the past. The well-posed question is "which SMOOTH early state
+evolves into today's field", answered in §4e.
 
-1. A reconstruction of the initial linear field from the observed (here:
-   modelled) web — constrained realisations (Hoffman & Ribak 1991), or
-   least-action / Monge–Ampère–Kantorovich reconstruction (Peebles 1989;
-   Brenier et al. 2003), or a forward-model Bayesian sampler (BORG-style).
-2. Initial conditions at z ≈ 50–100 drawn from it (2LPT), run FORWARD with this
-   kernel, and scored against the observed state at z_obs.
-3. Only then would the track before z_obs be N-body; until then it is the shell
-   reconstruction, and the card says so. Running the shell flow backwards is
-   well-posed only because the spherical problem has one degree of freedom per
-   shell and an exact inverse (`shellTable.invert`).
+## 4e. Reconstructing the initial conditions (2026-10-11, fourth pass)
+
+Asked for directly: "start phase 2, reconstruct the web's initial
+conditions". Kernel `js/bootes-reconstruct.js` (PURE) → the worker's
+`reconstruct` message → "Reconstruct the past" in the tracker's N-body mode.
+Once it lands, the N-body mode draws ONE run from z = 9 through z_obs to
+t₀ + 6 Gyr for the whole span, every galaxy shot to where it is seen.
+
+| Step | What | Why this and not the obvious thing |
+|------|------|------------------------------------|
+| 1. Glass | a uniform quiet sphere relaxed under REPULSIVE gravity, overdamped, until no element feels a force | the standard pre-initial load; relaxing the observed quiet start instead slid its lattice sideways ~2 Mpc (grain motion with no physics) and that poisoned every displacement built on it |
+| 2. Gravitational matching | x ← x + r·[F_obs − F_now]/(4πGρ̄₀) until the elements' field is the observed one | in linear theory F/(4πGρ̄₀) IS the displacement, so this is Zel'dovich iterated to its fixed point; curl-free and smooth (a sum of gravitational fields), hence near-least-action; EXACT for a spherical void (gated against the shell table, 2.5 %) |
+| 3. Zel'dovich ICs at z = 9 | x = q + (D_i/D_obs)ψ, u = aHf(D_i/D_obs)ψ, ψ = X − q, nothing iterated on top | see the two rejections below |
+| Galaxies | first guess from the elements' ψ, then SHOT through stored snapshots by moving their START | test particles are independent (bitwise) and well-conditioned this way; moving ψ with q pinned barely converged |
+| Per-particle softening | each source smoothed at 2 × its own cell size | with one global h, galaxies in the zoom's coarse outskirts stalled 0.5–10 Mpc off target |
+| Uniform 12 Mpc layout, ~35 000 elements | NOT the forecast's zoom | the zoom's outskirts (h → 48 Mpc) missed the web's 11 Mpc clumps by 50–66 % where most galaxies sit; uniform 14 Mpc still 29 %; 12 Mpc ≤ 10 % (matched) |
+| z = 9, not z = 19 | | from z = 19, 15× of growth turns the glass's residual grain into scatter (convergence 0.6/shot vs 0.4) — and z = 9 is before the tracker's 1 Gyr axis begins |
+
+Measured REJECTIONS, each with its number (do not re-try blind):
+
+- **Position shooting** (re-run, feed the miss back into ψ, secant gain):
+  lands the elements to 0.03 Mpc — and makes the initial field WORSE. In
+  the twin test the recovered field went 9 % → 21–25 % (smoothed at the
+  resolution), 41 % → 149 % unsmoothed: softening makes sub-resolution
+  modes respond weakly and the shots amplify them chasing grain (the ~3 Mpc
+  element-level miss is the quiet-start lattice no glass reproduces).
+  Smoothing the correction or dropping the gain to 1 did not rescue it.
+- **Field feedback** (re-run, push ψ by the gravity still missing): today's
+  field 16 → 10 %, and the twin's initial field 8.1 → 6.4 % at a void-like
+  amplitude — but at δ ≈ 1 the initial field got WORSE, erratically
+  (15 → 39 % after one pass, 20 % after two). Better today, corrupted past,
+  and nothing the reader sees could tell which: over-fitting.
+
+Gated (`tests/bootes-reconstruct.mjs`, 9 checks, ~25 s on a reduced layout):
+per-particle tree == direct; the two-segment frame clock; the glass quiets
+16×; the spherical identity (2.5 %); the TWIN EXPERIMENT — a planted initial
+field recovered from a DIFFERENT glass to 9 % (correlation 0.996) at the
+elements' resolution, which is the truth's own nonlinearity; the z = 9 state
+is a linear growing mode (its own gravity IS 4πGρ̄₀ × its displacement:
+correlation 0.89); today's gravity reproduced; galaxies landed to kpc and
+independent bitwise; the nodes grow (matter within 20 Mpc of the node
+markers +14 % from z = 9 to z_obs).
+
+On the page (browser gate + measured): ~115 s in a Worker (glass 1 s, match
+23 s, run 35 s, galaxies 35 s); today's gravity reproduced to 7–9 % inside
+R_eff, 21 % at 1.3–1.6 R_eff and 34–42 % out on the clumpy wall — where
+Zel'dovich ICs under-collapse the nodes between z = 9 and today. The page
+prints its own run's numbers. Galaxies land within ~4 kpc. A run's
+reconstructed matter is ONE population (the web's mass is in the elements),
+so the table prints no void/web split for it rather than "100 %".
+
+Next, honestly: a nonlinear-aware inverse — 2LPT ICs, or a Bayesian forward
+model whose prior regularises the shooting that failed above — and, before
+any of it matters for science, a REAL density field in place of the model
+web (§6).
 
 ---
 
@@ -408,12 +453,12 @@ it would take:
 - **No claim of detection.** Two of the eight tests are labelled *honest null*
   because current instruments cannot detect them for a single void. That is the
   correct answer and saying so is the point.
-- **No N-body PAST.** The tracker's N-body mode (§4d) runs forward only; the
-  past is the exact spherical-shell reconstruction plus the linear web, because
-  an N-body past needs a reconstruction of the web's initial field (§4d
-  Phase 2). The page's Tests 1–8 stay on linear theory plus the spherical
-  correction, which is what the void literature uses and what keeps every
-  relation checkable as an identity.
+- **No N-body past by default.** The tracker's N-body mode (§4d) runs forward
+  from the observed state; the past becomes an N-body only when the reader
+  asks for the reconstruction (§4e), because it costs ~2 minutes and is ONE
+  of many pasts compatible with today. The page's Tests 1–8 stay on linear
+  theory plus the spherical correction, which is what the void literature
+  uses and what keeps every relation checkable as an identity.
 - **No WASM.** The whole kernel is ~1 ms per profile rebuild and ~80 ms for the
   influence scan. There is nothing here that needs Rust, and adding it would put
   a compiled artefact between the reader and numbers whose selling point is that
@@ -457,7 +502,8 @@ node tests/bootes-void-page.mjs       # 10 checks — the DOM contract (incl. pr
 node tests/bootes-force-probe.mjs     #  9 checks — the force probe's identities
 node tests/bootes-void-tracker.mjs    # 12 checks — the tracker's clock, linear + nonlinear shells
 node tests/bootes-nbody.mjs           # 10 checks — the N-body kernel (~15 s)
-npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js tests/bootes-void-tracker.spec.js tests/bootes-void-nbody.spec.js   # 17 + 6 + 11 + 4
+node tests/bootes-reconstruct.mjs     #  9 checks — the initial-conditions reconstruction (~25 s)
+npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js tests/bootes-void-tracker.spec.js tests/bootes-void-nbody.spec.js   # 17 + 6 + 11 + 5
 node tests/site-sections.mjs tests/simulations-catalog.mjs tests/glyphs.mjs
 node scripts/lint-nav.mjs
 ```

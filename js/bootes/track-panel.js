@@ -30,6 +30,13 @@
  * mode is the SHELL tracker, so what the self-gravitating web changes is
  * drawn, not asserted. Until the run finishes the future falls back to the
  * shell tracker and the status line says so.
+ *
+ * "Reconstruct the past" (js/bootes-reconstruct.js, plan §4d Phase 2) adds the
+ * other half: initial conditions at z = 9 that the same N-body evolves into
+ * today's model web, run through to the end of the axis. Once it lands, the
+ * N-body mode draws THAT run for the whole span — past and future from one
+ * simulation, each galaxy shot to where it is observed — and the readout
+ * prints how well it reproduces today's gravity.
  */
 
 import {
@@ -112,10 +119,12 @@ export function createTrackPanel({
     const keyOf = (d) => `${d.web.seed}|${d.web.clumpiness}|${d.profile.params.deltaC}|${d.profile.params.rsMpc}`;
 
     // ── The N-body forecast ─────────────────────────────────────────────────
+    const reconBtn = root.querySelector('#bv-track-recon');
     const runner = createNbodyRunner({
         zObs, rEff, aEnd: scaleFactorAtTime(timeline.tEndGyr),
         onChange: () => {
             if (runner.ready) runner.request(state.tracked.map(t => t.xObsMpc));
+            if (runner.reconReady) runner.reconRequest(state.tracked.map(t => t.xObsMpc));
             recomposeNbody();
             schedule();
         },
@@ -125,9 +134,18 @@ export function createTrackPanel({
         if (state.mode !== 'nbody' || !d) return;
         runner.start(d, shells, state.tracked.map(t => t.xObsMpc), keyOf(d));
     }
-    /** The shell track until z_obs, the N-body record after it (once run). */
+    /**
+     * The reconstruction for its whole span once it has landed; otherwise the
+     * shell track until z_obs and the forecast record after it (once run).
+     */
     function composeNbody(xObsMpc, base) {
-        const at = (ep) => (ep.tGyr > tObs + 1e-9 ? runner.sampleFor(xObsMpc, ep) : null) ?? base.at(ep);
+        const at = (ep) => {
+            if (runner.reconReady && ep.a >= runner.reconAInit) {
+                const r = runner.reconSampleFor(xObsMpc, ep);
+                if (r) return { ...r, reconstructed: true };
+            }
+            return (ep.tGyr > tObs + 1e-9 ? runner.sampleFor(xObsMpc, ep) : null) ?? base.at(ep);
+        };
         return { ...base, mode: 'nbody', at, samples: timeline.epochs.map(at) };
     }
     function recomposeNbody() {
@@ -188,7 +206,11 @@ export function createTrackPanel({
         };
         letterCursor++;
         state.tracked.push(entry);
-        if (state.mode === 'nbody') { ensureRun(); runner.request([entry.xObsMpc]); }
+        if (state.mode === 'nbody') {
+            ensureRun();
+            runner.request([entry.xObsMpc]);
+            runner.reconRequest([entry.xObsMpc]);
+        }
         paint();
         return entry;
     }
@@ -243,6 +265,31 @@ export function createTrackPanel({
         return 'N-body run: idle';
     }
 
+    const STAGES = {
+        glass: 'settling a uniform glass',
+        match: 'matching it to today\'s web',
+        run: 'running z = 9 → today → +6 Gyr',
+        galaxies: 'landing every galaxy where it is seen',
+    };
+    function reconStatus() {
+        const r = runner.recon;
+        if (state.mode !== 'nbody') return 'Reconstruction: N-body mode only.';
+        if (r.status === 'unavailable' || !runner.workerAvailable) {
+            return 'Reconstruction needs a background worker (~2 min of gravity would freeze this page).';
+        }
+        if (r.status === 'running') return `Reconstructing: ${STAGES[r.stage] ?? r.stage} (${r.done}/${r.total})…`;
+        if (r.status === 'error') return `Reconstruction failed (${r.error}).`;
+        if (r.status === 'ready') {
+            const dg = r.result.diagnostics;
+            const inner = dg.fieldBins.filter(b => b.r1 <= rEff).map(b => b.rel);
+            const g = dg.galaxyResidualsMpc[dg.galaxyResidualsMpc.length - 1];
+            return `Reconstructed: ${dg.elements.toLocaleString('en-US')} elements from z = 9 · today's gravity `
+                + `reproduced to ${num(100 * Math.max(...inner), 0)} % inside R_eff (${num(100 * dg.fieldError, 0)} % overall) · `
+                + `galaxies land within ${num(1000 * g, 0)} kpc · ${num(dg.seconds, 0)} s.`;
+        }
+        return 'Reconstruction: not run — the past shown is the shell reconstruction.';
+    }
+
     function paint() {
         const d = getDerived();
         if (!d) return;
@@ -271,6 +318,12 @@ export function createTrackPanel({
                 ? 'Linear mode: every tracked galaxy is in the linear range here (|Δ|, |δ| ≤ 0.5).'
                 : `Linear mode: ${outside} of ${state.tracked.length} tracked galaxies sit where |Δ| or |δ| > 0.5 — `
                   + 'past where linear theory is accurate. Switch to nonlinear.');
+        } else if (state.mode === 'nbody' && runner.reconReady && ep.a >= runner.reconAInit) {
+            set('trackRegime', ep.tGyr < tObs - 1e-9
+                ? 'Reconstructed N-body, BEFORE the observed epoch: the same self-gravitating run, started '
+                  + 'from initial conditions at z = 9 that evolve into today\'s web.'
+                : 'Reconstructed N-body: one self-gravitating run from z = 9, through the observed epoch, '
+                  + 'into the forecast.');
         } else if (state.mode === 'nbody') {
             set('trackRegime', ep.tGyr > tObs + 1e-9
                 ? (runner.ready
@@ -312,10 +365,12 @@ export function createTrackPanel({
             ? `b = ${num(b * (1 - BIAS_BAND), 2)} – ${num(b * (1 + BIAS_BAND), 2)} (±${BIAS_BAND * 100} %)`
             : 'off');
         set('trackNbody', nbodyStatus());
-        const acc = state.mode === 'nbody' && ep.tGyr > tObs + 1e-9 ? runner.accretionAt(ep.a) : null;
+        set('trackRecon', reconStatus());
+        const reconAcc = state.mode === 'nbody' && runner.reconReady ? runner.reconAccretionAt(ep.a) : null;
+        const acc = reconAcc ?? (state.mode === 'nbody' && ep.tGyr > tObs + 1e-9 ? runner.accretionAt(ep.a) : null);
         set('trackAccretion', acc == null
             ? (state.mode === 'nbody' ? 'after z_obs' : 'N-body only')
-            : `${signed((acc - 1) * 100, 1)} % since z_obs`);
+            : `${signed((acc - 1) * 100, 1)} % vs z_obs${reconAcc != null ? ' (reconstruction)' : ''}`);
         set('trackFrame', state.frame === 'proper'
             ? `proper distances: everything drawn × a(t)/a_obs = ${num(ep.a * (1 + zObs), 3)} — `
               + 'mostly cosmic expansion, which is NOT the void\'s doing'
@@ -326,6 +381,12 @@ export function createTrackPanel({
         paintStage(ep, atObs, d);
         card?.setAttribute('data-track-ready', '1');
         card?.setAttribute('data-nbody', state.mode === 'nbody' ? runner.state.status : 'off');
+        card?.setAttribute('data-recon', runner.recon.status);
+        if (reconBtn) {
+            reconBtn.disabled = state.mode !== 'nbody' || runner.recon.status === 'running'
+                || !runner.canReconstruct;
+            reconBtn.textContent = runner.reconReady ? 'Reconstruct again' : 'Reconstruct the past (~2 min)';
+        }
         card?.setAttribute('data-track-t', state.tGyr.toFixed(4));
     }
 
@@ -443,9 +504,12 @@ export function createTrackPanel({
             const b = ensureBulk(d);
             // After z_obs in N-body mode, the field and the web are the run's
             // own particles; before it (or until it lands), the shell flow.
-            const nb = state.mode === 'nbody' && ep.tGyr > tObs + 1e-9 && runner.ready;
-            scene.setTracerOffsetsMpc(nb ? runner.tracerPositionsAt(ep.a, b.out) : b.tracers.positionsAt(ep, b.out));
-            const nodePos = nb ? runner.nodePositionsAt(ep.a) : b.nodes.positionsAt(ep);
+            const rec = state.mode === 'nbody' && runner.reconReady && ep.a >= runner.reconAInit;
+            const nb = !rec && state.mode === 'nbody' && ep.tGyr > tObs + 1e-9 && runner.ready;
+            scene.setTracerOffsetsMpc(rec ? runner.reconTracersAt(ep.a, b.out)
+                : nb ? runner.tracerPositionsAt(ep.a, b.out) : b.tracers.positionsAt(ep, b.out));
+            const nodePos = rec ? runner.reconNodesAt(ep.a)
+                : nb ? runner.nodePositionsAt(ep.a) : b.nodes.positionsAt(ep);
             scene.buildWeb({
                 nodes: d.web.nodes.map((n, i) => ({
                     ...n, offsetMpc: [nodePos[i * 3], nodePos[i * 3 + 1], nodePos[i * 3 + 2]],
@@ -542,6 +606,11 @@ export function createTrackPanel({
         if (el.type === 'checkbox' || el.tagName === 'SELECT') el.addEventListener('change', handler);
     }
     playBtn?.addEventListener('click', () => setPlaying(!state.playing));
+    reconBtn?.addEventListener('click', () => {
+        if (state.mode !== 'nbody') return;
+        ensureRun();
+        if (!runner.reconstruct(state.tracked.map(t => t.xObsMpc))) schedule();
+    });
     root.querySelector('#bv-track-obs')?.addEventListener('click', () => { setPlaying(false); setTime(tObs); });
     root.querySelector('#bv-track-now')?.addEventListener('click', () => { setPlaying(false); setTime(t0); });
     root.querySelector('#bv-track-add-deep')?.addEventListener('click', () => {

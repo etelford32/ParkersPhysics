@@ -9,11 +9,16 @@
  *   { type: 'run', id, ic, aEnd, steps, sim, record, accretion }
  *       ic = { pos, vel, mass, group, nMassive, aStart, softening, background }
  *   { type: 'replay', id, keys, points, velocities }   — against the LAST run
+ *   { type: 'reconstruct', id, args }   — js/bootes-reconstruct.js reconstructRun
+ *   { type: 'recon-replay', id, keys, points }        — galaxies through it
  * Messages out:
  *   { type: 'progress', id, step, steps }
  *   { type: 'done', id, result, ms }              — typed arrays transferred
  *   { type: 'replay', id, keys, rec }
- *   { type: 'error', id, message }
+ *   { type: 'recon-progress', id, stage, done, total }
+ *   { type: 'recon-done', id, result }
+ *   { type: 'recon-replay', id, keys, rec }
+ *   { type: 'error' | 'recon-error', id, message }
  *
  * The last run's massive snapshots stay here (~8 MB) so a galaxy tracked
  * after the run can be flown through the same matter without re-running it —
@@ -23,8 +28,10 @@
 import {
     createSimulation, createRun, buildSchedule, replayTestParticles,
 } from '../bootes-nbody.js';
+import { reconstructRun, shootGalaxies, interpolateDisplacement } from '../bootes-reconstruct.js';
 
 let last = null;
+let recon = null;           // the last reconstruction's matter, for galaxy replays
 
 const transferablesOf = (obj) => {
     const out = [];
@@ -65,8 +72,39 @@ self.onmessage = (e) => {
                 softening: last.softening, background: last.background, ...last.sim,
             });
             self.postMessage({ type: 'replay', id: m.id, keys: m.keys, rec }, transferablesOf(rec));
+        } else if (m.type === 'reconstruct') {
+            const out = reconstructRun({
+                ...m.args,
+                onProgress: (stage, done, total) => self.postMessage({
+                    type: 'recon-progress', id: m.id, stage, done, total,
+                }),
+            });
+            recon = {
+                snapshots: out.snapshots, schedule: out.schedule, mass: out.mass, group: out.group,
+                nMassive: out.nMassive, softening: out.softening, background: out.background,
+                matched: out.matched, psi: out.psi, spacing: out.spacing, aObs: m.args.aObs, sim: m.args.sim,
+            };
+            const result = {
+                frames: out.frames, nTest: out.nTest, N: out.N, a: out.a, obsFrame: out.obsFrame,
+                testPos: out.testPos, rec: out.rec, nRec: out.nRec, accreted: out.accreted,
+                diagnostics: out.diagnostics,
+            };
+            self.postMessage({ type: 'recon-done', id: m.id, result }, transferablesOf(result));
+        } else if (m.type === 'recon-replay') {
+            if (!recon) throw new Error('no reconstruction to replay against');
+            const psi0 = interpolateDisplacement(m.points, recon.matched, recon.psi, 2 * recon.spacing);
+            const gal = shootGalaxies({
+                snapshots: recon.snapshots, schedule: recon.schedule, mass: recon.mass, group: recon.group,
+                nMassive: recon.nMassive, softening: recon.softening, background: recon.background,
+                targets: m.points, psi0, aObs: recon.aObs, ...recon.sim,
+            });
+            const rec = { ...gal.rec, split: false };
+            self.postMessage({ type: 'recon-replay', id: m.id, keys: m.keys, rec }, transferablesOf(rec));
         }
     } catch (err) {
-        self.postMessage({ type: 'error', id: m.id, message: String(err?.message ?? err) });
+        self.postMessage({
+            type: String(m.type).startsWith('recon') ? 'recon-error' : 'error',
+            id: m.id, message: String(err?.message ?? err),
+        });
     }
 };
