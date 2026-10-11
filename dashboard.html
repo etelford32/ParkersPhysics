@@ -738,6 +738,49 @@ footer a:hover{color:var(--text)}
           </div>
         </div>
       </div>
+
+    <!-- Stage layouts: every panel over the Upper Atmosphere stage can be
+         dragged, folded and resized; REMEMBERING the arrangement (locally
+         and across devices through public.dashboards) is Basic+ — the same
+         gate as the console's cloud sync (js/stage-layout.js
+         layoutMemoryAllowed). Free visitors see the feature and the line. -->
+    <div class="card" id="stage-layout-card" style="margin-bottom:16px">
+        <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
+          <div style="min-width:0">
+            <div style="font-size:.82rem;font-weight:700;color:#e8f4ff;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              Your stage layouts
+              <span id="stage-layout-state" class="plan-badge plan-free" data-state="unknown" style="font-size:.6rem">…</span>
+            </div>
+            <div style="font-size:.68rem;color:var(--muted)" id="stage-layout-copy">Drag, fold and resize every panel over the Upper Atmosphere stage — camera dock, render controls, time dock, altitude column, flight deck. Basic and above remember the arrangement on every device.</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a href="upper-atmosphere.html" class="btn-sm" style="background:rgba(95,216,255,.14);color:#bfeeff;border:1px solid rgba(95,216,255,.45);font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Open the stage →</a>
+            <a href="pricing.html" id="stage-layout-upgrade" class="btn-sm" hidden style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Remember mine →</a>
+          </div>
+        </div>
+      </div>
+      <script type="module">
+        // The badge reads the SAME gate the stage uses, so the tease and the
+        // feature cannot disagree about who is remembered.
+        import { auth } from './js/auth.js';
+        import { layoutMemoryAllowed } from './js/stage-layout.js';
+        const paint = () => {
+            const badge = document.getElementById('stage-layout-state');
+            const up = document.getElementById('stage-layout-upgrade');
+            const copy = document.getElementById('stage-layout-copy');
+            if (!badge) return;
+            const plan = auth.getPlan?.() ?? 'free', role = auth.getRole?.() ?? 'user';
+            const on = layoutMemoryAllowed(plan, role);
+            badge.dataset.state = on ? 'remembered' : 'locked';
+            badge.textContent = on ? 'Remembered' : 'Basic+';
+            badge.className = `plan-badge ${on ? 'plan-advanced' : 'plan-free'}`;
+            badge.style.fontSize = '.6rem';
+            if (up) up.hidden = on;
+            if (copy && on) copy.textContent = 'Every panel over the Upper Atmosphere stage is yours to drag, fold and resize — and your arrangement follows you to every device.';
+        };
+        paint();
+        window.addEventListener('auth-changed', paint);
+      </script>
   </section>
 
   <!-- ══ SAT · SATELLITES ═══════════════════════════════════════════════ -->
