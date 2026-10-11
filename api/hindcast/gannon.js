@@ -33,12 +33,13 @@
  * NASA API key from NASA_API_KEY env var. NEVER exposed to browser.
  */
 
-import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+import { jsonOk, jsonError, isoTag } from '../_lib/responses.js';
+import { fetchDonki, DONKI_HOSTS } from '../_lib/donki-upstream.js';
 
 export const config = { runtime: 'edge' };
 
-const DONKI_CME_BASE = 'https://api.nasa.gov/DONKI/CMEAnalysis';
-const DONKI_FLR_BASE = 'https://api.nasa.gov/DONKI/FLR';
+const DONKI_CME_BASE = `${DONKI_HOSTS[0].base}/CMEAnalysis`;
+const DONKI_FLR_BASE = `${DONKI_HOSTS[0].base}/FLR`;
 const GANNON_START   = '2024-05-08';   // catches the X1.0 from AR 13664
 const GANNON_END     = '2024-05-13';   // covers the X5.8 recovery CME
 const GANNON_ANCHOR  = '2024-05-10T12:00:00Z';   // h=0 anchor used by the bundle
@@ -86,21 +87,14 @@ function _matchEvent(donkiCme, donkiFlares) {
 }
 
 export default async function handler(_request) {
-    const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
-
-    const cmeURL = `${DONKI_CME_BASE}?startDate=${GANNON_START}&endDate=${GANNON_END}&api_key=${nasaKey}`;
-    const flrURL = `${DONKI_FLR_BASE}?startDate=${GANNON_START}&endDate=${GANNON_END}&api_key=${nasaKey}`;
-
+    // CCMC origin raced against the api.nasa.gov gateway — see donki-upstream.js.
+    const range = { startDate: GANNON_START, endDate: GANNON_END };
     let donkiCmes, donkiFlares;
     try {
-        const [cmeRes, flrRes] = await Promise.all([
-            fetchWithTimeout(cmeURL, { headers: { Accept: 'application/json' } }),
-            fetchWithTimeout(flrURL, { headers: { Accept: 'application/json' } }),
+        [{ data: donkiCmes }, { data: donkiFlares }] = await Promise.all([
+            fetchDonki('CMEAnalysis', range),
+            fetchDonki('FLR', range),
         ]);
-        if (!cmeRes.ok) throw new Error(`CME: HTTP ${cmeRes.status}`);
-        if (!flrRes.ok) throw new Error(`FLR: HTTP ${flrRes.status}`);
-        donkiCmes   = await cmeRes.json();
-        donkiFlares = await flrRes.json();
     } catch (e) {
         return jsonError('upstream_unavailable', e.message,
             { source: 'NASA DONKI' });

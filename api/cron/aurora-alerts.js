@@ -35,6 +35,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { evaluateTier, shouldSend, tierEmail } from '../_lib/aurora-tiers.js';
+import { fetchDonki } from '../_lib/donki-upstream.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
@@ -42,7 +43,6 @@ const RESEND_KEY = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL = process.env.AURORA_FROM_EMAIL || 'Parkers Physics <aurora@parkersphysics.com>';
 const SITE_URL = process.env.SITE_URL || 'https://parkersphysics.com';
 const CRON_SECRET = process.env.CRON_SECRET || '';
-const NASA_KEY = process.env.NASA_API_KEY || 'DEMO_KEY';
 
 const NOAA_KP_1M = 'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json';
 const NOAA_KP_FC = 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json';
@@ -104,10 +104,10 @@ async function fluxRopeSummary() {
         const end = new Date();
         const start = new Date(end.getTime() - 7 * 86_400_000);
         const iso = (d) => d.toISOString().slice(0, 10);
-        const raw = await getJson(
-            `https://api.nasa.gov/DONKI/CMEAnalysis?startDate=${iso(start)}&endDate=${iso(end)}&mostAccurateOnly=true&api_key=${NASA_KEY}`,
-            15_000,
-        );
+        // CCMC origin raced against the api.nasa.gov gateway (donki-upstream.js);
+        // its errors never carry the URL — this line used to log the API key.
+        const { data: raw } = await fetchDonki('CMEAnalysis',
+            { startDate: iso(start), endDate: iso(end), mostAccurateOnly: true });
         const cmes = (Array.isArray(raw) ? raw : [])
             .filter((c) => Number.isFinite(c.speed) && c.time21_5)
             .map((c) => {
