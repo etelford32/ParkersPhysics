@@ -207,6 +207,54 @@ Stage — this rig never has to rebuild OrbitControls. See its header.
 
 ---
 
+## 4b. The force probe (2026-10-11)
+
+`js/bootes-force-probe.js` (PURE) → `js/bootes/probe-panel.js` (DOM) →
+`js/bootes/probe-layer.js` (stage glyphs + pointer). The page's eight tests
+answer along radial profiles and fixed sample shells — right for a summary,
+wrong for exploring. The probe evaluates the whole chain at ANY point, live,
+as it is dragged (~0.2 ms per probe, ~1.2 ms per ray sweep, ~2.2 ms per
+streamline, measured in node; coalesced to one evaluation per frame).
+
+At the probe: the peculiar acceleration split five ways (void δ⁻, smooth wall
+δ⁺, clumped web = model B, clumping = web − smooth wall, total A), each radial /
+tangential; the void share (the SAME definition as `counterfactualAt`); the
+linear velocity v = 2fg/(3Ωm H); Φ (void analytic + web softened point masses);
+the full tidal tensor with its axes, the stretch/squeeze across a 10 Mpc rod and
+the T-web class (threshold exposed, default λ_th = 0.2); the web force broken
+down by model node and filament with PROJECTED shares (they sum to 1 exactly);
+the streamline of the total field both ways; and the radial components along
+the probe's own ray, beside Test 4's direction median.
+
+**It adds up what the two kernels say and computes nothing new**, so every
+check in `tests/bootes-force-probe.mjs` is an identity against them: the one-pass
+web sum IS `externalGravityAt` / `externalTidalAt` (1e-12); void + smooth wall IS
+the full profile; Σ structures IS the web force; the void's linear velocity IS
+`radialVelocityKms(…, {linear:true})`; g = −∇Φ and T = −∂g/∂x_phys ÷ 4πGρ̄ hold
+by finite differences across the probe's own outputs (every (1+z) power in
+play); tr T = δ. Three of those residuals are also printed LIVE under the card
+at whatever point the reader chose.
+
+Load-bearing details, each found while building it:
+
+| Thing | Why |
+|-------|-----|
+| `radialSplit` takes the tangential part from the RESIDUAL VECTOR, not √(|v|² − v_r²) | the square-root form cancels and gave the exactly-radial void term a ~1e-8 tangential part |
+| `probeAt` REFUSES a web built at a different z | the (1+z)² bias got in once through two halves evaluated at different redshifts |
+| Node particles are joined to their node by `offsetMpc` ARRAY IDENTITY | no tolerance or nearest-match; the gate asserts the structures partition the particles with no 'other' group |
+| Shift-drag / armed-tool listeners are CAPTURE-phase + `stopImmediatePropagation` on down AND move | either guard alone suffices; with both removed OrbitControls pans the camera 3.6 units — the browser gate's negative control |
+| The clamp is max(2.6 R_eff, farthest node × 1.05) | the wall's r⁻³ tail puts nodes past the chart edge; clamping at 2.6 R_eff stopped a contributor's "go" 12 Mpc short of the structure it named |
+| The ring marker is a `sizeAttenuation:false` sprite OUTSIDE the scaled glyph group | the dot alone vanished among 700 field arrows; a parent scale would multiply a non-attenuated sprite's size |
+| Keys are written LITERALLY (`set('probeGVoidR', …)`), never from a prefix | the data-bv gate finds keys by matching `set('…')` in the source |
+
+Disclosed on the card: the web rows describe THIS seeded realisation (re-roll and
+they move; the void rows do not — the browser gate asserts both), velocity is
+linear (no honest non-spherical quasi-linear correction), the streamline is
+today's flow and not a trajectory, and the T-web class below the softening
+length describes the softened mass.
+
+---
+
 ## 5. What is deliberately NOT here
 
 - **No galaxy catalogue.** Astronomy archives are egress-blocked at build time.
@@ -256,8 +304,9 @@ profile in the middle.*
 node tests/bootes-void-model.mjs      # 17 checks — the physics kernel
 node tests/bootes-web-model.mjs       # 12 checks — the web + published inputs
 node tests/bootes-camera-math.mjs     #  9 checks — the camera + scale arithmetic
-node tests/bootes-void-page.mjs       #  7 checks — the DOM contract
-npx playwright test tests/bootes-void-smoke.spec.js   # 17 checks
+node tests/bootes-void-page.mjs       #  8 checks — the DOM contract (incl. the probe's)
+node tests/bootes-force-probe.mjs     #  9 checks — the force probe's identities
+npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js   # 17 + 6 checks
 node tests/site-sections.mjs tests/simulations-catalog.mjs tests/glyphs.mjs
 node scripts/lint-nav.mjs
 ```

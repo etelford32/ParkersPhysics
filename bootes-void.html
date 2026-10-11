@@ -280,6 +280,63 @@ details.bv-details[open] > summary::after { content:' ▴'; }
 .bv-foot ul { margin:0 0 0 18px; }
 .bv-foot li { margin-bottom:3px; }
 
+
+/* ── Force probe ──────────────────────────────────────────────────────────
+   The HUD chip sits in .bv-hud-right, which is pointer-events:none so it
+   never eats a drag — the tool button re-enables itself explicitly. */
+.bv-probe-hud {
+    pointer-events:auto; display:flex; align-items:center; gap:8px;
+    background:rgba(3,1,14,.72); border:1px solid rgba(199,146,234,.38);
+    border-radius:999px; padding:3px 4px 3px 11px; font-size:.7rem; color:#d9c2ef;
+    font-variant-numeric:tabular-nums; backdrop-filter:blur(3px);
+}
+#bv-probe-tool {
+    background:rgba(199,146,234,.12); color:#c792ea; font:inherit; font-size:.7rem;
+    border:1px solid rgba(199,146,234,.45); border-radius:999px; padding:3px 10px; cursor:pointer;
+}
+#bv-probe-tool[aria-pressed="true"] { background:rgba(199,146,234,.32); color:#fff; }
+#bv-probe-tool[hidden] { display:none; }
+.bv-probe { margin-bottom:16px; }
+.bv-probe-grid { display:grid; grid-template-columns:250px minmax(0,1.25fr) minmax(0,1fr); gap:16px; }
+.bv-probe-ctl label { display:block; margin-bottom:7px; color:#9aa4bd; font-size:.74rem; }
+.bv-probe-ctl input[type=range], .bv-probe-ctl select { width:100%; }
+.bv-probe-ctl input[type=range] { accent-color:#c792ea; margin-top:3px; }
+.bv-probe-ctl select {
+    background:#0a0f24; color:#cdd5e4; border:1px solid rgba(90,110,160,.4);
+    border-radius:7px; padding:5px 7px; font:inherit; font-size:.74rem;
+}
+.bv-probe-ctl .bv-val { color:#c792ea; font-variant-numeric:tabular-nums; font-weight:600; }
+.bv-ftable { width:100%; border-collapse:collapse; font-size:.76rem; font-variant-numeric:tabular-nums; }
+.bv-ftable th { color:#7d879e; font-weight:600; text-align:right; padding:3px 6px; font-size:.68rem; }
+.bv-ftable th:first-child, .bv-ftable td:first-child { text-align:left; }
+.bv-ftable td { color:#cdd5e4; text-align:right; padding:3px 6px; border-top:1px solid rgba(90,110,160,.16); }
+.bv-ftable .bv-sw { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+.bv-ftable tr.bv-total td { font-weight:700; color:#e6d3f7; }
+.bv-ftable td small { color:#6f7893; font-weight:400; }
+#bv-probe-contrib { margin:4px 0 0 0; padding:0; list-style:none; font-size:.72rem; }
+#bv-probe-contrib li {
+    display:grid; grid-template-columns:1fr auto; gap:1px 8px; align-items:center;
+    padding:4px 0; border-top:1px solid rgba(90,110,160,.14); color:#cdd5e4;
+}
+#bv-probe-contrib li em { grid-column:1; font-style:normal; color:#7d879e; font-size:.67rem; }
+#bv-probe-contrib li .bv-probe-go {
+    grid-column:2; grid-row:1 / span 2; background:none; color:#c792ea; font:inherit; font-size:.66rem;
+    border:1px solid rgba(199,146,234,.4); border-radius:6px; padding:2px 8px; cursor:pointer;
+}
+.bv-probe h4 {
+    font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:#7d879e;
+    font-weight:700; margin:12px 0 5px;
+}
+.bv-probe h4:first-child { margin-top:0; }
+.bv-probe .bv-check-line { font-size:.66rem; color:#6f7893; margin-top:8px; font-variant-numeric:tabular-nums; }
+@media (max-width: 1180px) {
+    .bv-probe-grid { grid-template-columns:240px minmax(0,1fr); }
+    .bv-probe-grid > :last-child { grid-column:1 / -1; }
+}
+@media (max-width: 980px) {
+    .bv-probe-grid { grid-template-columns:1fr; }
+}
+
 @media (max-width: 980px) {
     .bv-stage-grid { grid-template-columns:1fr; }
     .bv-rail { max-height:none; }
@@ -370,6 +427,10 @@ details.bv-details[open] > summary::after { content:' ▴'; }
         </div>
 
         <div class="bv-hud-right">
+            <div class="bv-probe-hud" title="Shift-drag on the stage moves the force probe. On touch, arm the tool first.">
+                <span>⊕ <span data-bv="probeHud">—</span></span>
+                <button type="button" id="bv-probe-tool" aria-pressed="false">Probe tool</button>
+            </div>
             <div class="bv-cam">
                 <span><b data-bv="camDistance">—</b> out</span>
                 <span>az <b data-bv="camAzimuth">—</b></span>
@@ -473,6 +534,108 @@ details.bv-details[open] > summary::after { content:' ▴'; }
             </details>
         </div>
     </aside>
+</section>
+
+<!-- ── Force probe ───────────────────────────────────────────────────── -->
+<!-- Every number here comes from js/bootes-force-probe.js (node-gated by
+     tests/bootes-force-probe.mjs); js/bootes/probe-panel.js only formats it. -->
+<section class="bv-card bv-probe" id="bv-probe-card">
+    <h2>Force probe — measure any point <span class="bv-tag">live</span></h2>
+    <p class="bv-q">
+        <strong>Shift-drag</strong> anywhere on the stage (or arm <em>Probe tool</em> and drag — the
+        touch path) to move the probe; it slides at its current depth, facing you. The sliders, the jump
+        list and each structure's <em>go</em> button move it too. Every term is recomputed at that point
+        from the same kernels as the tests below: the void's deficit and the smooth wall analytically,
+        the clumped web particle by particle. On the stage, the
+        <span style="color:#4fc3f7">void</span>, <span style="color:#ff9a56">web</span> and
+        <span style="color:#c792ea">total</span> arrows share one scale <em>at the probe</em>; the bars are
+        the tidal axes (<span style="color:#ff6f91">squeeze</span> /
+        <span style="color:#8ee3c8">stretch</span>), the violet line the streamline.
+    </p>
+    <div class="bv-probe-grid">
+        <div class="bv-probe-ctl">
+            <h4>Position</h4>
+            <p class="bv-hint" data-bv="probePos">—</p>
+            <label>Distance from centre <span class="bv-val" data-bv="probeRVal">—</span>
+                <input type="range" data-bv-probe="r" min="0" max="2.6" step="0.01" value="0.8"></label>
+            <label>Azimuth <span class="bv-val" data-bv="probeAzVal">—</span>
+                <input type="range" data-bv-probe="az" min="0" max="359" step="1" value="0"></label>
+            <label>Elevation <span class="bv-val" data-bv="probeElVal">—</span>
+                <input type="range" data-bv-probe="el" min="-90" max="90" step="1" value="0"></label>
+            <label>
+                <select data-bv-probe="jump" aria-label="Jump the probe to a place">
+                    <option value="" selected>Jump to…</option>
+                    <option value="centre">The void centre</option>
+                    <option value="los-in">Sightline, halfway in (0.5 R_eff)</option>
+                    <option value="los-wall">Sightline, on the wall (1 R_eff)</option>
+                    <option value="los-out">Sightline, beyond the wall (1.8 R_eff)</option>
+                    <option value="los-far">Far side of the void (1 R_eff)</option>
+                </select>
+            </label>
+            <h4>Show</h4>
+            <label class="bv-check"><input type="checkbox" data-bv-probe="visible" checked> Probe on the stage</label>
+            <label class="bv-check"><input type="checkbox" data-bv-probe="axes" checked> Tidal axes</label>
+            <label class="bv-check"><input type="checkbox" data-bv-probe="stream" checked> Streamline</label>
+            <h4>T-web classifier</h4>
+            <label>Threshold λ<sub>th</sub> = <span class="bv-val" data-bv="probeTwebTh">—</span>
+                <input type="range" data-bv-probe="tweb" min="0" max="0.6" step="0.02" value="0.2"></label>
+            <p class="bv-hint">
+                A point is a void, sheet, filament or knot by how many tidal eigenvalues exceed
+                λ<sub>th</sub> (Hahn et al. 2007; Forero-Romero et al. 2009). The threshold is a
+                classifier setting, not physics.
+            </p>
+        </div>
+
+        <div>
+            <h4>Peculiar acceleration at the probe <small style="text-transform:none;letter-spacing:0">(km/s per Gyr · radial + = away from the centre)</small></h4>
+            <table class="bv-ftable">
+                <thead><tr><th>term</th><th>|g|</th><th>radial</th><th>tangential</th></tr></thead>
+                <tbody>
+                    <tr><td><span class="bv-sw" style="background:#4fc3f7"></span>Void deficit δ⁻</td>
+                        <td data-bv="probeGVoid">—</td><td data-bv="probeGVoidR">—</td><td data-bv="probeGVoidT">—</td></tr>
+                    <tr><td><span class="bv-sw" style="background:#ff9a56;opacity:.5"></span>Wall, smooth shell δ⁺</td>
+                        <td data-bv="probeGWall">—</td><td data-bv="probeGWallR">—</td><td data-bv="probeGWallT">—</td></tr>
+                    <tr><td><span class="bv-sw" style="background:#ff9a56"></span>Wall, clumped web <small>= model B</small></td>
+                        <td data-bv="probeGWeb">—</td><td data-bv="probeGWebR">—</td><td data-bv="probeGWebT">—</td></tr>
+                    <tr><td><span class="bv-sw" style="background:#7ee787"></span>Clumping <small>web − smooth</small></td>
+                        <td data-bv="probeGClump">—</td><td data-bv="probeGClumpR">—</td><td data-bv="probeGClumpT">—</td></tr>
+                    <tr class="bv-total"><td><span class="bv-sw" style="background:#c792ea"></span>Total, model A <small>void + web</small></td>
+                        <td data-bv="probeGA">—</td><td data-bv="probeGAR">—</td><td data-bv="probeGAT">—</td></tr>
+                </tbody>
+            </table>
+            <dl class="bv-rows" style="margin-top:10px">
+                <dt>Local δ (smooth profile)</dt><dd data-bv="probeDelta">—</dd>
+                <dt>Void share of |g|</dt><dd data-bv="probeVoidShare">—</dd>
+                <dt>Peculiar velocity (linear)</dt><dd><span data-bv="probeVel">—</span> · <span data-bv="probeVelRadial">—</span></dd>
+                <dt>Potential Φ, model A</dt><dd data-bv="probePhi">—</dd>
+                <dt>Potential Φ, void alone</dt><dd data-bv="probePhiVoid">—</dd>
+            </dl>
+            <h4>Tidal field (void + web, units of 4πGρ̄)</h4>
+            <dl class="bv-rows">
+                <dt>λ₁</dt><dd data-bv="probeL1">—</dd>
+                <dt>λ₂</dt><dd data-bv="probeL2">—</dd>
+                <dt>λ₃</dt><dd data-bv="probeL3">—</dd>
+                <dt>T-web class</dt><dd data-bv="probeTweb">—</dd>
+                <dt>…in the smooth model</dt><dd data-bv="probeTwebSmooth">—</dd>
+            </dl>
+            <p class="bv-verdict" data-bv="probeStream">—</p>
+        </div>
+
+        <div>
+            <h4>Along the probe's ray</h4>
+            <canvas data-bv-chart="probeRay" aria-label="Radial force components along the ray from the void centre through the probe"></canvas>
+            <h4>Who pulls the hardest here</h4>
+            <ol id="bv-probe-contrib"></ol>
+            <p class="bv-verdict bv-caution">
+                The web rows describe <strong>this seeded realisation</strong>: re-roll it and they move,
+                while the void and smooth-wall rows do not. Velocity is linear theory (no non-spherical
+                quasi-linear correction exists to apply honestly); the streamline follows today's flow, not
+                any galaxy's path; the tidal class below the web's softening length
+                (<span data-bv="probeSoftening">—</span>) describes the softened mass, not finer structure.
+            </p>
+            <p class="bv-check-line">Identities at this point: <span data-bv="probeCheck">—</span></p>
+        </div>
+    </div>
 </section>
 
 <!-- ── Headline numbers ──────────────────────────────────────────────── -->

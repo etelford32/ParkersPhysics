@@ -489,3 +489,35 @@ export function drawCompensation(canvas, { radii, cumulativeMass, rEff, rs }) {
     ctx.fillText(`residual ${residual.toFixed(1)}`, proj.px(radii[radii.length - 1]) - 4,
         proj.py(residual) - 3);
 }
+
+/**
+ * The force probe's own ray: the RADIAL part of each force term along the line
+ * from the void centre through the probe, positive = away from the centre.
+ *
+ * Test 4's influence chart is a MEDIAN over 48 directions; this is the one
+ * direction the reader picked, so the two can be laid side by side and the
+ * anisotropy that the median hides is right there. The probe's own radius is
+ * marked so the readout table and the curve can be matched by eye.
+ */
+export function drawProbeRay(canvas, { sweep, rEff, probeR }) {
+    const { ctx, w, h } = prepare(canvas);
+    if (!sweep?.length) return;
+    const xs = sweep.map(s => s.radiusMpc);
+    const [lo, hi] = rangeOf(sweep.flatMap(s => [s.void, s.web, s.A]), { includeZero: true });
+    const proj = frame(ctx, w, h, {
+        xMin: 0, xMax: xs[xs.length - 1], yMin: lo, yMax: hi,
+        xLabel: 'r along the probe ray  (Mpc)', yLabel: 'radial g  (km/s/Gyr, + out)',
+        markX: [
+            { x: rEff, label: 'R_eff', color: PALETTE.faint },
+            { x: probeR, label: 'probe', color: 'rgba(255,255,255,.55)' },
+        ],
+    });
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.wall]), PALETTE.wall, { width: 1.1, dash: [3, 3] });
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.void]), PALETTE.void);
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.web]), PALETTE.wall);
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.A]), PALETTE.total, { width: 2.2 });
+    legend(ctx, w, [
+        ['void', PALETTE.void], ['web', PALETTE.wall], ['smooth wall', PALETTE.wall, [3, 3]],
+        ['A = void + web', PALETTE.total],
+    ]);
+}

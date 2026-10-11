@@ -35,7 +35,11 @@ import { fileURLToPath } from 'node:url';
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 const html = read('../bootes-void.html');
-const page = read('../js/bootes/page.js');
+// The probe panel writes through page.js's own `set` and draws its own chart,
+// so for the data-bv / chart contract it IS part of the page module.
+const probePanel = read('../js/bootes/probe-panel.js');
+const pageOnly = read('../js/bootes/page.js');
+const page = pageOnly + '\n' + probePanel;
 const charts = read('../js/bootes/charts.js');
 
 let passed = 0;
@@ -96,16 +100,38 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
                 'layer toggles need the layer: branch in page.js');
             continue;
         }
-        assert.ok(new RegExp(`key === '${key}'`).test(page),
+        assert.ok(new RegExp(`key === '${key}'`).test(pageOnly),
             `control "${key}" is declared in the markup but page.js has no branch for it`);
     }
     // And every branch in page.js corresponds to a control that exists.
-    const handled = matchAll(page, /key === '([a-zA-Z0-9_]+)'/g);
+    const handled = matchAll(pageOnly, /key === '([a-zA-Z0-9_]+)'/g);
     for (const key of handled) {
         assert.ok(declared.includes(key),
             `page.js handles a control "${key}" that the markup never declares`);
     }
     ok(`controls agree in both directions (${declared.length} controls)`);
+}
+
+// ── 3b. Probe controls ──────────────────────────────────────────────────────
+{
+    // The force probe's inputs are `data-bv-probe`, handled by
+    // js/bootes/probe-panel.js — same both-directions contract as above, so a
+    // slider that drives nothing (or a branch for a slider that was removed)
+    // fails here instead of silently doing nothing in the browser.
+    const declared = matchAll(html, /data-bv-probe="([a-zA-Z0-9_]+)"/g);
+    assert.ok(declared.length >= 7, `expected the probe's control set (found ${declared.length})`);
+    for (const key of declared) {
+        assert.ok(new RegExp(`key === '${key}'`).test(probePanel),
+            `probe control "${key}" is in the markup but probe-panel.js has no branch for it`);
+    }
+    for (const key of matchAll(probePanel, /key === '([a-zA-Z0-9_]+)'/g)) {
+        assert.ok(declared.includes(key),
+            `probe-panel.js handles a control "${key}" that the markup never declares`);
+    }
+    assert.ok(/id="bv-probe-tool"/.test(html) && /#bv-probe-tool\[hidden\]\s*\{[^}]*display\s*:\s*none/.test(html),
+        'the probe tool button exists and, being hidden without WebGL while carrying an author '
+        + 'display, needs its own [hidden] rule');
+    ok(`probe controls agree in both directions (${declared.length} controls)`);
 }
 
 // ── 4. Charts ───────────────────────────────────────────────────────────────
@@ -170,12 +196,13 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
 // ── 7. No stray physics in the view layer ───────────────────────────────────
 {
     const scene = read('../js/bootes/scene.js');
+    const probeLayer = read('../js/bootes/probe-layer.js');
     // Match IMPORT STATEMENTS, not mentions. Both files name the kernels in
     // their headers to say what they deliberately do not do, and a naive
     // substring search fails on the very comment that documents the rule.
     const imports = (src) => [...src.matchAll(/^\s*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm)]
         .map(m => m[1]);
-    for (const [file, src] of [['scene.js', scene], ['charts.js', charts]]) {
+    for (const [file, src] of [['scene.js', scene], ['charts.js', charts], ['probe-layer.js', probeLayer]]) {
         for (const spec of imports(src)) {
             assert.ok(!/bootes-(void|web)-model/.test(spec),
                 `js/bootes/${file} must not import a physics kernel (found "${spec}") — `

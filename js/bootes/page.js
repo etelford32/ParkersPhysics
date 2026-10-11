@@ -50,6 +50,7 @@ import {
     losUnitFromVoid, resolvedAnchors,
 } from '../bootes-void-data.js';
 import { createBootesScene } from './scene.js';
+import { createProbePanel } from './probe-panel.js';
 import { VIEWPOINTS, VIEWPOINT_IDS, KEY_BINDINGS, scaleBar } from './camera-math.js';
 import {
     drawDensity, drawVelocity, drawContinuity, drawInfluence,
@@ -155,6 +156,16 @@ export function initBootesPage(root = document) {
         },
     }) : null;
     if (!scene && fallback) fallback.hidden = false;
+
+    // The force probe. It reads the SAME `derived` the rest of the page paints
+    // from (one recompute, one source of truth) and writes through the same
+    // `set`, so its keys are covered by the data-bv gate like every other
+    // readout. It works without WebGL too — the readouts and the ray chart
+    // need no stage; only Shift-drag does.
+    const probePanel = createProbePanel({
+        root, set, scene, charts, getDerived: () => derived,
+        rEff, z: Z, anchors, losUnit,
+    });
 
     // ── Viewpoint buttons, rendered FROM the viewpoint table ────────────────
     //
@@ -272,6 +283,7 @@ export function initBootesPage(root = document) {
         paintReadouts();
         paintCharts();
         paintScene();
+        probePanel.refresh();
     }
 
     // ── Readouts ────────────────────────────────────────────────────────────
@@ -632,11 +644,15 @@ export function initBootesPage(root = document) {
 
     const onResize = () => {
         scene?.resize();
-        if (derived) paintCharts();
+        if (derived) { paintCharts(); probePanel.paintChart(); }
     };
     globalThis.addEventListener('resize', onResize);
 
     recompute();
+    // Paint the probe in the same task as the first recompute, so the card
+    // never boots on its em-dashes waiting for an animation frame (and a
+    // backgrounded tab, which gets no frames, still shows numbers).
+    probePanel.evaluateNow();
     // Snap, do not fly, on boot: a flight from the constructor's placeholder
     // pose is a camera move nobody asked for and it fights a reader who starts
     // dragging immediately.
@@ -652,6 +668,7 @@ export function initBootesPage(root = document) {
         // camera that moved from a label that happened to change.
         get scene() { return scene; },
         get derived() { return derived; },
+        get probe() { return probePanel; },
         recompute,
         setControl(key, value) {
             if (key in state) state[key] = value;

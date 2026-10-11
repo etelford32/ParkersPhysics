@@ -37,6 +37,7 @@
 import * as THREE from 'three';
 import { createCameraRig } from './camera.js';
 import { buildScaleRefs } from './scale-refs.js';
+import { createProbeLayer } from './probe-layer.js';
 
 /** Mpc per scene unit. Only conversion in the file. */
 export const SCENE_SCALE = 20;
@@ -179,6 +180,12 @@ export function createBootesScene(canvas, {
         refs: new THREE.Group(),
     };
     Object.values(groups).forEach(g => scene.add(g));
+
+    // The force probe: its own group, its own pointer path (Shift-drag / the
+    // armed tool), drawn over everything. See bootes/probe-layer.js.
+    const probe = createProbeLayer({
+        root: scene, canvas, camera, toScene: mpc, fromScene: (u) => u * SCENE_SCALE,
+    });
 
     const disposables = [];
     const track = (obj) => { disposables.push(obj); return obj; };
@@ -439,6 +446,7 @@ export function createBootesScene(canvas, {
         // the scale from in here, so the sphere simply steps aside — it is the
         // one object whose whole job is to be seen from outside.
         if (shellWire) shellWire.visible = camera.position.length() > shellRadiusScene * 0.99;
+        probe.update();
 
         // Re-scale the arrow glyphs when the camera has moved far enough to
         // matter. Throttled to every 12th frame and gated on a 15 % change,
@@ -464,7 +472,7 @@ export function createBootesScene(canvas, {
     observer?.observe(canvas);
 
     return {
-        renderer, scene, camera, controls, groups, rig,
+        renderer, scene, camera, controls, groups, rig, probe,
         resize,
         buildShell, buildTracers, buildWeb, buildMarkers, buildField,
         setLayerVisible(name, on) {
@@ -492,6 +500,7 @@ export function createBootesScene(canvas, {
             running = false;
             observer?.disconnect();
             Object.values(groups).forEach(clear);
+            probe.dispose();
             rig.dispose();
             renderer.dispose();
         },
