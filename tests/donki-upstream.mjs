@@ -1,7 +1,7 @@
 // node tests/donki-upstream.mjs — gates api/_lib/donki-upstream.js (no network).
 //
-// The helper exists because the api.nasa.gov DONKI gateway went down while
-// the CCMC origin stayed up (2026-10), starving flux-rope-live.html. These
+// The helper exists because CCMC moved DONKI (2026-09-30) and both old hosts
+// started serving an HTML announcement page, starving flux-rope-live.html. These
 // pin: both hosts are tried, the first VALID JSON wins, an HTML 200 is a
 // failure not a result, the key goes only to the gateway, and an error
 // message never carries a URL or the key.
@@ -17,7 +17,7 @@ const jsonRes = (body, status = 200) => ({ ok: status < 400, status,
     headers: hdrs('application/json'), text: async () => JSON.stringify(body) });
 const htmlRes = (html = '<html><head><title>Down</title></head><body><h1>DONKI is unavailable</h1></body></html>') =>
     ({ ok: true, status: 200, headers: hdrs('text/html; charset=utf-8'), text: async () => html });
-const hostOf = (url) => (url.startsWith('https://kauai.ccmc') ? 'ccmc' : 'api.nasa.gov');
+const hostOf = (url) => (url.startsWith('https://ccmc.gsfc') ? 'ccmc' : 'api.nasa.gov');
 
 /** Mock fetch: per-host behaviour = response factory | 'hang' | Error. */
 function mockFetch(behaviour, calls = []) {
@@ -40,12 +40,12 @@ await t('URL shapes: origin unkeyed, gateway keyed, same path + params', () => {
     const [ccmc, gw] = DONKI_HOSTS;
     const p = { startDate: '2026-10-01', endDate: '2026-10-08', mostAccurateOnly: true, skip: null };
     assert.equal(donkiUrl(ccmc, 'CMEAnalysis', p, KEY),
-        'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CMEAnalysis?startDate=2026-10-01&endDate=2026-10-08&mostAccurateOnly=true');
+        'https://ccmc.gsfc.nasa.gov/DONKI-API/get/CMEAnalysis?startDate=2026-10-01&endDate=2026-10-08&mostAccurateOnly=true');
     assert.equal(donkiUrl(gw, 'CMEAnalysis', p, KEY),
         `https://api.nasa.gov/DONKI/CMEAnalysis?startDate=2026-10-01&endDate=2026-10-08&mostAccurateOnly=true&api_key=${KEY}`);
 });
 
-await t('gateway timing out → origin answers (the 2026-10 outage)', async () => {
+await t('gateway timing out → new CCMC host answers', async () => {
     const calls = [];
     const r = await fetchDonki('CMEAnalysis', {}, {
         apiKey: KEY, timeoutMs: 200,

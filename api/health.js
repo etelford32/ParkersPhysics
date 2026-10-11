@@ -16,10 +16,10 @@
  * because the page proxies those through the edge.
  */
 import { jsonOk, fetchWithTimeout, DEFAULT_USER_AGENT } from './_lib/responses.js';
+import { DONKI_HOSTS } from './_lib/donki-upstream.js';
 
 export const config = { runtime: 'edge' };
 
-const NASA_KEY = (typeof process !== 'undefined' && process.env && process.env.NASA_API_KEY) || 'DEMO_KEY';
 
 // source → url. Kept tiny on purpose; HEAD-ish GETs with a short timeout.
 const UPSTREAMS = [
@@ -34,7 +34,11 @@ const UPSTREAMS = [
     { source: 'swpc-dst-kyoto', url: 'https://services.swpc.noaa.gov/products/kyoto-dst.json',                  edge_authoritative: false },
     { source: 'swpc-f107',      url: 'https://services.swpc.noaa.gov/json/f107_cm_flux.json',                   edge_authoritative: false },
     { source: 'swpc-ap-daily',  url: 'https://services.swpc.noaa.gov/text/daily-geomagnetic-indices.txt',       edge_authoritative: false },
-    { source: 'donki-cme',    url: `https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?api_key=${NASA_KEY}`, edge_authoritative: true },
+    // DONKI moved 2026-09-30 (api/_lib/donki-upstream.js header). The old
+    // kauai URL kept answering 200 with an HTML announcement page, so this
+    // row stayed green for eleven days while every DONKI route 503'd —
+    // hence `expectJson`: a 200 that is not JSON is DOWN.
+    { source: 'donki-cme',    url: `${DONKI_HOSTS[0].base}/CME`, edge_authoritative: true, expectJson: true },
     // SDO browse frames — proxied by /api/solar/aia (the observed disk on
     // sun.html + the Stage / globe / heliosphere live Suns), so this row IS
     // authoritative. Smallest frame NASA serves, to keep the probe cheap.
@@ -71,13 +75,17 @@ const UPSTREAMS = [
     { source: 'open-meteo-cams', url: 'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=28.61&longitude=77.21&current=us_aqi', edge_authoritative: true },
 ];
 
-async function ping({ source, url, edge_authoritative }) {
+async function ping({ source, url, edge_authoritative, expectJson = false }) {
     const t0 = Date.now();
     try {
         const res = await fetchWithTimeout(url, { timeoutMs: 8000, headers: { Accept: 'application/json' } });
+        const type = res.headers.get('content-type') || '';
+        const wrongType = expectJson && res.ok && !/json/i.test(type);
+        res.body?.cancel?.();
         return {
             source,
-            ok: res.ok,
+            ok: res.ok && !wrongType,
+            ...(wrongType ? { error: `expected JSON, got ${type.split(';')[0] || 'no content-type'}` } : {}),
             http_status: res.status,
             latency_ms: Date.now() - t0,
             edge_authoritative,

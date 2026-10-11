@@ -1,32 +1,39 @@
 /**
  * donki-upstream.js — the ONE way server code reaches NASA DONKI.
  *
- * DONKI lives at CCMC (kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/<path>).
- * api.nasa.gov/DONKI/<path> is a key-metered GATEWAY in front of that same
- * origin — same paths, same query parameters, same JSON. Until 2026-10-11
- * every route here went through the gateway only, and it went down for
- * us (HTTP 404 on 2026-10-06, then a 10 s timeout on every request) while
- * the origin stayed up: `api/health.js` already probed the origin and kept
- * reporting DONKI green while /api/donki/cme served 503, flux-rope-live.html
- * could never leave its DEMO badge, and the aurora cron ran without its
- * flux-rope layer. Nothing errored loudly.
+ * CCMC MOVED DONKI on 2026-09-30. The web service now lives at
+ * ccmc.gsfc.nasa.gov/DONKI-API/get/<product> (keyless, same query
+ * parameters, same JSON, date ranges capped at 60 days). BOTH old hosts —
+ * kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get and the api.nasa.gov/DONKI gateway
+ * in front of it — now answer HTTP 200 with CCMC's ~58 KB "Announcements"
+ * HTML page (measured on a Vercel preview 2026-10-11, both hosts, even for
+ * the Gannon 2024 window). Before that the gateway also 404'd and timed
+ * out. Every /api/donki/* route therefore returned 503, flux-rope-live.html
+ * could never leave its DEMO badge, the aurora cron lost its flux-rope
+ * layer, and status.html stayed GREEN because api/health.js only checked
+ * for a 200. Nothing errored loudly for eleven days.
  *
- * So every call RACES both hosts and the first VALID JSON wins (the loser
- * is aborted). A 200 that is not JSON — an HTML error page — counts as a
- * failure of that host, not a result. The origin needs no key; the gateway
- * gets NASA_API_KEY.
+ * So: the new host is primary, and the gateway is RACED alongside it as a
+ * hedge (NASA may re-point it; today it costs one fast HTML answer). The
+ * first VALID JSON wins and the loser is aborted. A 200 that is not JSON
+ * counts as a failure of that host, never a result, and the error
+ * DESCRIBES it (type, size, visible text) — that description is what
+ * diagnosed the migration. The gateway gets NASA_API_KEY; the new host
+ * needs none.
  *
  * Errors NEVER carry the request URL: the gateway URL contains the API key,
- * and the aurora cron used to print it into the Vercel logs verbatim. A
- * failure reads e.g. "DONKI CMEAnalysis: ccmc timeout; api.nasa.gov HTTP 404".
+ * and the aurora cron used to print it into the Vercel logs verbatim.
  */
 
 export const DONKI_HOSTS = Object.freeze([
-    Object.freeze({ id: 'ccmc',         base: 'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get', keyed: false }),
-    Object.freeze({ id: 'api.nasa.gov', base: 'https://api.nasa.gov/DONKI',                    keyed: true  }),
+    Object.freeze({ id: 'ccmc',         base: 'https://ccmc.gsfc.nasa.gov/DONKI-API/get', keyed: false }),
+    Object.freeze({ id: 'api.nasa.gov', base: 'https://api.nasa.gov/DONKI',               keyed: true  }),
 ]);
 
-/** Per-attempt budget. CCMC answered in ~7 s cold (api/health.js, 2026-10-11);
+/** The new host rejects ranges over this (HTTP 400). Every caller is inside it. */
+export const DONKI_MAX_RANGE_DAYS = 60;
+
+/** Per-attempt budget. The old CCMC host answered in ~7 s cold (2026-10-11);
  *  the edge runtime must begin its response inside 25 s, and both hosts run
  *  in parallel, so this is the whole upstream wait. */
 export const DONKI_TIMEOUT_MS = 15_000;
