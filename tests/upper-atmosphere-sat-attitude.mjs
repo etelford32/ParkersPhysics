@@ -170,4 +170,29 @@ ok('groundTrackSamples and nextShadowEvent on a circular orbit crossing the shad
     assert.equal(A.nextShadowEvent({ positionAt, nowMs: 0, sunDir: [0, 0, 1], stepS: 30 }), null);
 });
 
+ok('glint: 1 on the mirror direction, Gaussian off it, 0 unlit or back-facing; the tracking-array flare Sun', () => {
+    const n = [0, 1, 0];
+    const L = [Math.sin(0.5), Math.cos(0.5), 0];                 // 28.6° from the normal
+    const R = [-Math.sin(0.5), Math.cos(0.5), 0];                // its mirror
+    near(A.glint({ normal: n, sunDir: L, toCamera: R }).value, 1, 1e-12, 'on the mirror ray');
+    const off = A.glint({ normal: n, sunDir: L, toCamera: [-Math.sin(0.5 + 0.03), Math.cos(0.5 + 0.03), 0], sigmaDeg: 1.5 });
+    near(off.thetaDeg, 0.03 * 180 / Math.PI, 1e-9);
+    near(off.value, Math.exp(-(off.thetaDeg ** 2) / 1.5 ** 2), 1e-12);
+    assert.ok(A.glint({ normal: n, sunDir: L, toCamera: R, sigmaDeg: 0.5 }).value === 1 && off.value < 1);
+    assert.equal(A.glint({ normal: n, sunDir: [0, -1, 0], toCamera: R }).value, 0, 'unlit face');
+    assert.equal(A.glint({ normal: n, sunDir: L, toCamera: [0, -1, 0] }).value, 0, 'camera behind the face');
+    assert.equal(A.glint({ normal: n, sunDir: L, toCamera: [1, 0.001, 0] }).value < 1e-6, true, 'far off the mirror ray');
+    // A tracking array: the Sun at the camera mirrored in X makes the flare
+    // land on the camera once the array has tracked.
+    const vBody = [0.4, 0.5, 0.768];
+    const sBody = A.trackingArrayFlareSun(vBody);
+    near(len(sBody), 1, 1e-12);
+    const alpha = A.arrayAlpha(sBody).alphaRad;
+    const nTracked = [0, Math.cos(alpha), Math.sin(alpha)];
+    near(A.glint({ normal: nTracked, sunDir: sBody, toCamera: vBody }).value, 1, 1e-9, 'flare on the camera');
+    // The unmirrored Sun (the gate's negative control) does not.
+    const nCtl = (() => { const a = A.arrayAlpha(vBody).alphaRad; return [0, Math.cos(a), Math.sin(a)]; })();
+    assert.ok(A.glint({ normal: nCtl, sunDir: vBody, toCamera: vBody }).value < 1e-6);
+});
+
 console.log(`\n${passed} passed`);

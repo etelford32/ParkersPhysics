@@ -124,6 +124,10 @@ function _wing(x, y, z, children) {
     const w = new THREE.Group();
     w.position.set(x, y, z);
     w.userData.solarArray = { axis: 'x' };
+    // An array is a flat specular surface: its local +Y normal can throw
+    // the Sun at the camera (plan §9.19 phase 3). Cells are not mirrors:
+    // a wide, weak flare.
+    w.userData.glint = { sigmaDeg: 2.5, gain: 0.6, normal: [0, 1, 0] };
     for (const ch of children) w.add(ch);
     return w;
 }
@@ -131,6 +135,51 @@ export function collectSolarArrays(group) {
     const out = [];
     group.traverse((o) => { if (o.userData?.solarArray) out.push(o); });
     return out;
+}
+/** Every surface that can flare: its object (the normal is in ITS local frame) and the glint spec. */
+export function collectGlintSurfaces(group) {
+    const out = [];
+    group.traverse((o) => { if (o.userData?.glint) out.push(o); });
+    return out;
+}
+/** Shadows (plan §9.19 phase 2): every mesh of a model casts and receives. */
+export function enableModelShadows(group, on = true) {
+    group.traverse((o) => { if (o.isMesh) { o.castShadow = on; o.receiveShadow = on; } });
+}
+
+let _glintTex = null;
+/**
+ * The flare sprite: a star glare (a hot core, a soft halo and four
+ * diffraction spikes) drawn once to a canvas, additive, scaled by the
+ * glint value at render time. A sprite, not a post-process bloom: this
+ * page renders directly and a full-frame pass is a GPU-only upgrade (the
+ * plan's phase 3 note); the mip-chain bloom of sun-post.js is the one to
+ * reuse when it comes, never a thresholded UnrealBloom.
+ */
+export function makeGlintSprite() {
+    if (!_glintTex) {
+        const N = 128, c = document.createElement('canvas'); c.width = c.height = N;
+        const ctx = c.getContext('2d');
+        const g = ctx.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+        g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.08, 'rgba(255,250,235,0.95)');
+        g.addColorStop(0.25, 'rgba(255,235,200,0.35)'); g.addColorStop(0.6, 'rgba(255,220,180,0.08)'); g.addColorStop(1, 'rgba(255,220,180,0)');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, N, N);
+        ctx.globalCompositeOperation = 'lighter';
+        for (const a of [0, Math.PI / 2]) {
+            const sg = ctx.createLinearGradient(N / 2 - Math.cos(a) * N / 2, N / 2 - Math.sin(a) * N / 2, N / 2 + Math.cos(a) * N / 2, N / 2 + Math.sin(a) * N / 2);
+            sg.addColorStop(0, 'rgba(255,245,225,0)'); sg.addColorStop(0.5, 'rgba(255,245,225,0.7)'); sg.addColorStop(1, 'rgba(255,245,225,0)');
+            ctx.save(); ctx.translate(N / 2, N / 2); ctx.rotate(a); ctx.fillStyle = sg; ctx.translate(-N / 2, -N / 2);
+            ctx.fillRect(0, N / 2 - 1.5, N, 3); ctx.restore();
+        }
+        _glintTex = new THREE.CanvasTexture(c);
+        _glintTex.colorSpace = THREE.SRGBColorSpace;
+    }
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: _glintTex, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+    sp.scale.setScalar(0.0001);
+    sp.visible = false;
+    sp.raycast = () => {};
+    sp.userData = { kind: 'glint', untargetable: true };
+    return sp;
 }
 
 // ── ISS ─────────────────────────────────────────────────────────────────────
@@ -358,6 +407,9 @@ export function buildIridiumModel(tintHex = '#a080ff') {
         );
         pn.position.set(Math.cos(ang) * 0.009, Math.sin(ang) * 0.009, 0);
         pn.rotation.z = ang;
+        // The MMA is a polished aluminium plate: narrow, bright flares
+        // (the real ones reached −8 mag). Its outward normal is local +Y.
+        pn.userData.glint = { sigmaDeg: 0.7, gain: 1.6, normal: [0, 1, 0] };
         g.add(pn);
     }
 

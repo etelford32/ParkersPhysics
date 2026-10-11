@@ -240,3 +240,39 @@ export function nextShadowEvent({ positionAt, nowMs, sunDir, stepS = 20, horizon
     }
     return null;
 }
+
+/**
+ * THE GLINT (plan §9.19 phase 3). A flat specular surface — a solar array,
+ * an Iridium main-mission antenna — throws the Sun's image along the
+ * mirror direction R = 2(N·L)N − L; a camera within a small angle of R
+ * sees a flare (the Iridium flares reached −8 mag from a ~1° misalignment).
+ * `glint` returns the flare's strength as a Gaussian in the angle between
+ * R and the direction to the camera, with `sigmaDeg` the surface's
+ * effective half-width (its flatness and the Sun's 0.27° radius together;
+ * a disclosed per-surface figure, not a measured BRDF), zero when the face
+ * is unlit (N·L ≤ 0) or turned away from the camera (N·V ≤ 0). `normal`,
+ * `sunDir` (toward the Sun) and `toCamera` are unit world vectors.
+ */
+export function glint({ normal, sunDir, toCamera, sigmaDeg = 1.5 }) {
+    const n = unit(normal), l = unit(sunDir), v = unit(toCamera);
+    const nl = dot(n, l), nv = dot(n, v);
+    if (nl <= 0 || nv <= 0) return { value: 0, thetaDeg: null, lit: nl > 0, facing: nv > 0 };
+    const r = unit(sub(scale(n, 2 * nl), l));
+    const theta = Math.acos(clamp(dot(r, v), -1, 1)) * 180 / Math.PI;
+    const value = Math.exp(-(theta * theta) / (sigmaDeg * sigmaDeg));
+    return { value, thetaDeg: theta, lit: true, facing: true };
+}
+
+/**
+ * The Sun direction that makes a single-axis-tracking array (about body X)
+ * flare INTO the camera: the array's normal follows the Sun's Y–Z
+ * projection, so the mirror direction is the Sun mirrored in body X, and
+ * the camera sees the flare when the Sun sits at the camera's own body
+ * direction mirrored in X. Used by the gate to stage a flare; also what a
+ * flare predictor would invert. `toCameraBody` is the unit camera
+ * direction in the body frame; returns the Sun direction in the body frame.
+ */
+export function trackingArrayFlareSun(toCameraBody) {
+    const v = unit(toCameraBody);
+    return [-v[0], v[1], v[2]];
+}

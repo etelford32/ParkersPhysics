@@ -100,7 +100,8 @@ export class FollowCard {
             const nxt = su.next ? ` · ${su.next.kind === 'enter' ? 'shadow' : 'sunrise'} in ${fmt(su.next.inS / 60)} min`
                 : su.eclipseFree ? ' · eclipse-free orbit' : '';
             const lit = su.state === 'sunlit' ? 'sunlit' : su.state === 'umbra' ? 'in umbra' : `penumbra ${fmt(su.fraction * 100)} %`;
-            f.sun.textContent = `β ${fmt(su.betaDeg, 1)}° (crit ${fmt(su.criticalDeg, 1)}°) · ${lit}${nxt}`;
+            const gl = info.glint && info.glint.max > 0.05 ? ` · ✦ flare toward you (${info.glint.surface}, ${fmt(info.glint.max * 100)} %)` : '';
+            f.sun.textContent = `β ${fmt(su.betaDeg, 1)}° (crit ${fmt(su.criticalDeg, 1)}°) · ${lit}${nxt}${gl}`;
         } else f.sun.textContent = '—';
         f.ground.textContent = gr ? `${fmt(Math.abs(gr.latDeg), 2)}°${gr.latDeg >= 0 ? 'N' : 'S'} ${fmt(Math.abs(gr.lonDeg), 2)}°${gr.lonDeg >= 0 ? 'E' : 'W'} · track ±45/90 min` : '—';
         const c = info.chase;

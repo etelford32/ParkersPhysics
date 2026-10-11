@@ -49,11 +49,12 @@ import { CONSTELLATIONS, spawnConstellationPositions }
     from './constellation-catalog.js';
 import {
     buildSatelliteModel, buildSatelliteModelLow, buildRocketBodyModel, buildDebrisFragmentModel,
-    collectSolarArrays, setModelEnvironment, buildSpaceEnvironment,
+    collectSolarArrays, collectGlintSurfaces, enableModelShadows, makeGlintSprite,
+    setModelEnvironment, buildSpaceEnvironment,
 } from './satellite-models.js';
 import {
     attitudeBasis, toBody, arrayAlpha, illumination, betaAngle, subSatellite,
-    groundTrackSamples, nextShadowEvent,
+    groundTrackSamples, nextShadowEvent, glint,
 } from './upper-atmosphere-sat-attitude.js';
 import {
     CHASE, chasePose, modelScale, nearPlaneFor, flyInDuration, altitudeNeighbour,
@@ -171,6 +172,7 @@ const PROBE_MARKER_REF_RUNIT = 2.0;
 const SUN_LIGHT_INTENSITY = 2.3;      // the key light at full Sun (scaled by the followed object's illumination)
 const _attM = new THREE.Matrix4(), _attX = new THREE.Vector3(), _attY = new THREE.Vector3(), _attZ = new THREE.Vector3();
 const _trackScratch = new THREE.Vector3();
+const _glQ = new THREE.Quaternion(), _glP = new THREE.Vector3(), _glN = new THREE.Vector3(), _glV = new THREE.Vector3();
 
 // The planet's icosphere detail. three's `detail` is LINEAR: 5 was 720
 // faces with ~10.6° edges whose chords sag 27 km below the sphere — a
@@ -1661,6 +1663,22 @@ export class AtmosphereGlobe {
         this._sunLight.position.set(20, 0, 0);
         this._sunLight.target.position.set(0, 0, 0);
         this._scene.add(this._sunLight, this._sunLight.target);
+        // Phase 2: a shadow map SCOPED TO THE FOLLOWED HULL. The orthographic
+        // shadow camera is re-fitted every frame to the avatar's drawn
+        // extent and placed just sunward of it (a directional light's
+        // direction is position → target, so moving both keeps the Sun
+        // where it is), so the arrays shade the bus and the truss shades
+        // the modules. Only the models cast or receive (the skin and the
+        // volume are their own shaders); nothing casts when nothing is
+        // followed, and the pass is skipped then.
+        this._renderer.shadowMap.enabled = true;
+        this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this._sunLight.castShadow = false;
+        this._sunLight.shadow.mapSize.set(1024, 1024);
+        this._sunLight.shadow.bias = -0.00002;
+        this._sunLight.shadow.normalBias = 0.0003;
+        this._sunLight.shadow.camera.near = 0.0005;
+        this._sunLight.shadow.camera.far = 0.2;
         this._earthShine = new THREE.HemisphereLight(0x05070f, 0x7f9cc4, 0.5);
         this._earthShine.position.set(0, 1, 0);
         this._scene.add(this._earthShine);
@@ -1681,14 +1699,80 @@ export class AtmosphereGlobe {
      */
     _updateLighting() {
         if (!this._sunLight) return;
-        const d = this._sunDir;
-        if (d) this._sunLight.position.set(d.x * 20, d.y * 20, d.z * 20);
+        const d = this._sunDir || new THREE.Vector3(1, 0, 0);
         const aux = this._followAux;
         const frac = aux?.sun?.fraction ?? 1;
         this._sunLight.intensity = SUN_LIGHT_INTENSITY * frac;
         const ref = aux?.pos || this._camera.position;
         const n = Math.hypot(ref.x, ref.y, ref.z) || 1;
         this._earthShine.position.set(ref.x / n, ref.y / n, ref.z / n);
+        // The shadow scope: the followed hull's drawn extent (the artistic
+        // span × the angular hold), while the model tier is what is drawn.
+        const hero = aux?.pos && aux?.modelScale > 0 ? aux : null;
+        if (hero && frac > 0) {
+            const e = ARTISTIC_SPAN_R * 0.9 * hero.modelScale;
+            const sc = this._sunLight.shadow.camera;
+            if (Math.abs(sc.right - e) > 0.01 * e) {
+                sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e;
+                sc.near = e * 0.1; sc.far = e * 4;
+                sc.updateProjectionMatrix();
+            }
+            this._sunLight.position.set(hero.pos.x + d.x * e * 2, hero.pos.y + d.y * e * 2, hero.pos.z + d.z * e * 2);
+            this._sunLight.target.position.copy(hero.pos);
+            this._sunLight.castShadow = true;
+        } else {
+            this._sunLight.position.set(d.x * 20, d.y * 20, d.z * 20);
+            this._sunLight.target.position.set(0, 0, 0);
+            this._sunLight.castShadow = false;
+        }
+        this._sunLight.target.updateMatrixWorld();
+    }
+
+    /**
+     * Phase 3: the glints. For every flare surface of a model (kernel
+     * `glint`: the mirror of the Sun about the surface normal against the
+     * direction to the camera, a Gaussian of the surface's own width), the
+     * sprite on it is scaled and faded by the value × the illumination (no
+     * flare in umbra) × the surface's gain. Returns the strongest.
+     */
+    _stepGlintsFor(entries, frac) {
+        const cam = this._camera.position;
+        const sd = this._sunDirArr();
+        let best = { max: 0, thetaDeg: null, surface: null };
+        for (const en of entries || []) {
+            en.o.getWorldQuaternion(_glQ);
+            en.o.getWorldPosition(_glP);
+            _glN.set(en.spec.normal[0], en.spec.normal[1], en.spec.normal[2]).applyQuaternion(_glQ);
+            _glV.copy(cam).sub(_glP).normalize();
+            const r = glint({ normal: [_glN.x, _glN.y, _glN.z], sunDir: sd, toCamera: [_glV.x, _glV.y, _glV.z], sigmaDeg: en.spec.sigmaDeg });
+            const v = r.value * frac * (en.spec.gain ?? 1);
+            const sp = en.sprite;
+            if (v > 0.02) {
+                sp.visible = true;
+                sp.material.opacity = Math.min(1, v);
+                sp.scale.setScalar(0.012 + 0.06 * Math.min(1, v));
+            } else { sp.visible = false; sp.material.opacity = 0; }
+            if (r.value * (en.spec.gain ?? 1) > best.max) best = { max: r.value * (en.spec.gain ?? 1), thetaDeg: r.thetaDeg, surface: en.o.userData.solarArray ? 'array' : 'antenna' };
+        }
+        return best;
+    }
+    /** Build the glint entries (surface + its sprite) of a model group once. */
+    _glintEntries(grp) {
+        return collectGlintSurfaces(grp).map((o) => { const sprite = makeGlintSprite(); o.add(sprite); return { o, spec: o.userData.glint, sprite }; });
+    }
+    _stepGlints() {
+        const frac = this._followAux?.sun?.fraction ?? 1;
+        let best = { max: 0, thetaDeg: null, surface: null };
+        const av = this._avatar;
+        if (av?.grp.visible) best = this._stepGlintsFor(av.glints, frac);
+        for (const id in this._satProbes || {}) {
+            const pr = this._satProbes[id];
+            if (!pr._glints) pr._glints = [...this._glintEntries(pr.midGrp || new THREE.Group()), ...this._glintEntries(pr.nearGrp || new THREE.Group())];
+            const f = this._followId?.kind === 'sat' && this._followId.id === id ? frac : (illumination([pr.mesh.position.x, pr.mesh.position.y, pr.mesh.position.z], this._sunDirArr()).fraction);
+            const b = this._stepGlintsFor(pr._glints, f);
+            if (this._followId?.kind === 'sat' && this._followId.id === id && b.max > best.max) best = b;
+        }
+        if (this._followAux) this._followAux.glint = best;
     }
 
     /**
@@ -2264,6 +2348,8 @@ export class AtmosphereGlobe {
         // separate so future poly-count work plugs in cleanly.
         const midGrp = buildSatelliteModel(spec);
         const nearGrp = buildSatelliteModelLow(spec);
+        enableModelShadows(midGrp, true);
+        enableModelShadows(nearGrp, true);
 
         // LOD distance thresholds. Three.js picks the highest-index
         // level whose distance ≤ camera-to-LOD distance; smaller
@@ -2597,7 +2683,8 @@ export class AtmosphereGlobe {
         trail.visible = false;
         trail.frustumCulled = false;
         this._scene.add(trail);
-        this._avatar = { family, grp, trail, arrays: collectSolarArrays(grp) };
+        enableModelShadows(grp, true);
+        this._avatar = { family, grp, trail, arrays: collectSolarArrays(grp), glints: this._glintEntries(grp) };
         return this._avatar;
     }
 
@@ -2621,7 +2708,9 @@ export class AtmosphereGlobe {
         const positionAt = this._followPositionAt();
         const sun = this._sunGeometry(pos, vel, positionAt);
         const ground = this._stepGroundTrack(pos, positionAt, color);
-        this._followAux = { pos, sun, attitude, ground: { latDeg: ground.latDeg, lonDeg: ground.lonDeg } };
+        const dist = this._camera.position.distanceTo(pos);
+        this._followAux = { pos, sun, attitude, ground: { latDeg: ground.latDeg, lonDeg: ground.lonDeg },
+            modelScale: dist < 0.3 ? modelScale(dist) : 0, glint: this._followAux?.glint ?? null };
     }
 
     /**
@@ -2667,7 +2756,7 @@ export class AtmosphereGlobe {
             out.speedKmS = 2 * Math.PI * (PAGE_RE_KM + out.altKm) / (out.periodMin * 60);
         }
         const aux = this._followAux;
-        if (aux) { out.attitude = aux.attitude; out.sun = aux.sun; out.ground = aux.ground; }
+        if (aux) { out.attitude = aux.attitude; out.sun = aux.sun; out.ground = aux.ground; out.glint = aux.glint; }
         if (chase) {
             out.chase = {
                 distKm: chase.dist * PAGE_RE_KM, distR: chase.dist,
@@ -6398,6 +6487,7 @@ export class AtmosphereGlobe {
         });
         this._opsBands?.update(this._camera, { viewportHeight: this.canvas.clientHeight });
         this._updateExploreFocus(camMode);
+        this._stepGlints();
         this._updateChaseFraming();
         this._updateNearPlane();
         this._cme?.update(this._camera, dtWall);

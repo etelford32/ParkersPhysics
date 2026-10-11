@@ -25,6 +25,15 @@
  *     opposite flips the state and the light follows — the ground track's
  *     lines lie on the surface sphere with the marker under the target, and
  *     the card prints the mode, β and the sub-satellite point;
+ *   • LIGHTING PHASES 2 + 3 (plan §9.19): the key light casts a shadow map
+ *     scoped to the followed hull (the shadow camera's extent follows the
+ *     model scale) and a MEASURED self-shadow — with the Sun along the wing
+ *     axis the wing shades the bus, the pixel sum under the target is lower
+ *     with the shadow pass on than off; a flare: with the Sun staged at the
+ *     camera's body direction mirrored in X (kernel trackingArrayFlareSun)
+ *     the tracked wing throws the Sun into the camera, the glint reads > 0.9
+ *     and its sprite is up — NEGATIVE CONTROL: the Sun at the camera's own
+ *     direction gives no flare;
  *   • the altitude tour: "higher" from the ISS lands on the next object up
  *     by page altitude and the flight is an ARC (lifted, never inside the
  *     planet) — NEGATIVE CONTROL: the straight chord between the two eyes
@@ -119,6 +128,27 @@ test('the chase tracks a moving target exactly, eases to range, zooms on the lad
     expect(z.nearGrp).toBeCloseTo(z.mid, 6);
     expect(z.near).toBeLessThan(z.dist);
     expect(z.near).toBeLessThan(0.21 * z.dist + 1e-9);
+
+    // PHASE 2, MEASURED: with the Sun along the ISS's radial the upper arrays
+    // shade the pair below them and the truss — the frame is darker with the
+    // shadow pass on than with it off (the whole frame: from above and
+    // behind, the shaded lower arrays are partly under the upper ones, and a
+    // block around the target missed them — measured, the sums were equal).
+    const sh = await page.evaluate(([dt]) => {
+        const g = window.__ua.globe, probe = g._satProbes.iss, cam = g._camera;
+        g.setSunDirOverride(probe.mesh.position.clone().normalize());
+        g.stepFrames(3, dt, { render: 'none' });
+        const W = g.canvas.width, H = g.canvas.height, gl = g._renderer.getContext();
+        const block = () => { const buf = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf); let sum = 0; for (let i = 0; i < buf.length; i += 4) sum += buf[i] + buf[i + 1] + buf[i + 2]; return sum; };
+        g._renderer.render(g._scene, cam); const withShadow = block();
+        const cast = g._sunLight.castShadow;
+        g._sunLight.castShadow = false; g._renderer.render(g._scene, cam); const without = block();
+        g._sunLight.castShadow = cast;
+        g.setSunDirOverride(null); g.stepFrames(2, dt, { render: 'none' });
+        return { withShadow, without, cast, lit: g.getFollowInfo()?.sun?.state };
+    }, [DT]);
+    expect(sh.cast).toBe(true);
+    expect(sh.without - sh.withShadow, 'the shadow darkens the hull').toBeGreaterThan(0);
 
     // Drag: az moves by dx·sens (eased), the range does not.
     const r = await page.locator('#ua-globe').boundingBox();
@@ -257,6 +287,55 @@ test('a catalogue dot is followable: avatar, highlight, card and disclosure; Esc
     expect(flipped.lit).toEqual({ state: 'sunlit', light: 2.3 });
     expect(flipped.back).toBe(flipped.was);
 
+    // PHASE 2 — the shadow map is SCOPED to the followed hull (the measured
+    // self-shadow is in the ISS test: eight stacked arrays).
+    const sh = await page.evaluate(() => {
+        const g = window.__ua.globe, av = g._avatar;
+        return { enabled: g._renderer.shadowMap.enabled, cast: g._sunLight.castShadow, extent: g._sunLight.shadow.camera.right, scale: av.grp.scale.x,
+            meshes: (() => { let n = 0, c = 0; av.grp.traverse((o) => { if (o.isMesh) { n++; if (o.castShadow && o.receiveShadow) c++; } }); return { n, c }; })(),
+            lightDist: g._sunLight.position.distanceTo(av.grp.position) };
+    });
+    expect(sh.enabled).toBe(true);
+    expect(sh.cast).toBe(true);
+    expect(sh.meshes.n).toBeGreaterThan(0);
+    expect(sh.meshes.c).toBe(sh.meshes.n);
+    expect(Math.abs(sh.extent - 0.04 * 0.9 * sh.scale) / (0.04 * 0.9 * sh.scale)).toBeLessThan(0.02);   // re-fitted with 1 % hysteresis
+    expect(Math.abs(sh.lightDist - 2 * sh.extent) / (2 * sh.extent)).toBeLessThan(0.03);   // 2 extents sunward of the hull
+
+    // PHASE 3 — a staged flare, and its negative control.
+    const fl = await page.evaluate(async ([dt]) => {
+        const THREE = await import('three');
+        const K = await import('./js/upper-atmosphere-sat-attitude.js');
+        const g = window.__ua.globe, av = g._avatar, cam = g._camera;
+        g._controls.orbitFollowBy(220, 0);                 // off the orbit plane: a mirror in X then matters
+        g.stepFrames(150, dt, { render: 'none' });
+        const q = av.grp.quaternion.clone();
+        const wing = av.arrays[0], wp = new THREE.Vector3(); wing.getWorldPosition(wp);
+        const v = cam.position.clone().sub(wp).normalize();
+        const vBody = v.clone().applyQuaternion(q.clone().invert());
+        const sBody = K.trackingArrayFlareSun([vBody.x, vBody.y, vBody.z]);
+        g.setSunDirOverride(new THREE.Vector3(...sBody).applyQuaternion(q));
+        g.stepFrames(3, dt, { render: 'none' });
+        const en = av.glints.find((e) => e.o === wing);
+        const on = { glint: g.getFollowInfo().glint, visible: en.sprite.visible, opacity: en.sprite.material.opacity, scale: en.sprite.scale.x };
+        window.__ua.followCard.refresh();
+        const card = document.getElementById('ua-follow-card').textContent;
+        g.setSunDirOverride(v);                             // CONTROL: the Sun at the camera's own direction
+        g.stepFrames(3, dt, { render: 'none' });
+        const off = { glint: g.getFollowInfo().glint, visible: en.sprite.visible };
+        g.setSunDirOverride(null); g.stepFrames(2, dt, { render: 'none' });
+        return { vBodyX: vBody.x, on, off, card };
+    }, [DT]);
+    expect(Math.abs(fl.vBodyX)).toBeGreaterThan(0.2);
+    expect(fl.on.glint.max).toBeGreaterThan(0.9 * 0.6);     // × the array's gain
+    expect(fl.on.glint.surface).toBe('array');
+    expect(fl.on.visible).toBe(true);
+    expect(fl.on.opacity).toBeGreaterThan(0.5);
+    expect(fl.on.scale).toBeGreaterThan(0.04);
+    expect(fl.card).toContain('flare toward you');
+    expect(fl.off.glint.max).toBeLessThan(0.05);
+    expect(fl.off.visible).toBe(false);
+
     // Esc releases: avatar, highlight, card and the view offset all go.
     await page.locator('#ua-globe').hover();
     await page.keyboard.press('Escape');
@@ -264,6 +343,7 @@ test('a catalogue dot is followable: avatar, highlight, card and disclosure; Esc
     await page.evaluate(() => window.__ua.followCard.refresh());
     const e = await page.evaluate(() => { const g = window.__ua.globe; return { following: g.isFollowing(), avatar: g._avatar?.grp.visible, trail: g._avatar?.trail.visible, highlight: g._catalogTracker._highlightSprite?.visible, card: document.getElementById('ua-follow-card').hidden, view: g._camera.view?.enabled ?? false, safe: g.getChaseSafeFrame(), track: g.getGroundTrackState().visible, light: g._sunLight.intensity }; });
     expect(e).toEqual({ following: false, avatar: false, trail: false, highlight: false, card: true, view: false, safe: null, track: false, light: 2.3 });
+    expect(await page.evaluate(() => window.__ua.globe._sunLight.castShadow)).toBe(false);
 });
 
 test('the altitude tour hops to the next object up by page altitude on an ARC, never through the planet', async ({ page }) => {
