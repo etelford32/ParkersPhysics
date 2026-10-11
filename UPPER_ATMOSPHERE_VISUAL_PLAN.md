@@ -1303,6 +1303,60 @@ by distance (5 km) and holds 120 points; the catalogue velocity is a
 finite difference in the Earth-fixed frame (the speed readout uses the
 circular relation at the drawn radius instead). Not verified on a real GPU.
 
+### 9.18 Attitude, sun geometry and the ground track of the followed spacecraft (2026-10-11)
+
+| piece | what it is | tested by |
+|---|---|---|
+| `js/upper-atmosphere-sat-attitude.js` | PURE: `ATTITUDE_MODES` per model family (lvlh-xvv · nadir · inertial · tumble), `attitudeBasis` (body axes as world vectors; tumble about a per-id axis from a mixed hash), `arrayAlpha` (the single-gimbal angle that points an array's normal at the Sun and the incidence it reaches), `illumination` (umbra / penumbra / sunlit from the Earth's and Sun's angular radii at the craft, penumbra fraction linear across the disc), `betaAngle` (+ the critical β = asin(1/r) above which an orbit is eclipse-free), `subSatellite` (the page's one frame, pinned against the column kernel), `groundTrackSamples`, `nextShadowEvent` | `node tests/upper-atmosphere-sat-attitude.mjs` (7) |
+| `js/satellite-models.js` | solar arrays are PIVOT GROUPS tagged `userData.solarArray` (`collectSolarArrays`), turned about body X by the globe | the chase gate |
+| `js/upper-atmosphere-globe.js` | `_applyAttitude` on every probe and the avatar (replaces the old velocity lookAt), `_sunGeometry` (illumination, β, the next shadow boundary scanned every 4 s of frame clock), the ground track layer (`_stepGroundTrack`: past 45 min + future 90 min on the surface sphere, the sub-satellite marker and nadir line re-seated every frame, rebuilt every 30 s of scene time or on a new target — from the object's OWN propagator turned by GMST at each sample's instant), `getFollowInfo().attitude/sun/ground`, `setSunDirOverride` (test hook) | `tests/upper-atmosphere-sat-chase.spec.js` |
+| `js/upper-atmosphere-follow-card.js` | attitude · sun · ground rows | same |
+
+**The attitude is a model and says so.** Nothing in a TLE carries attitude,
+so each family gets its NOMINAL mode and the card prints "(modelled)":
+stations fly LVLH with −Z on the velocity and the arrays alpha-tracking
+about the truss (one axis — the ISS's beta gimbals are not modelled);
+comms / nav / Earth-observation / generic point nadir with the wing
+tracking; observatories hold the arrays on the Sun and the tube 90° off it
+(the target is unknown); rocket bodies and debris tumble slowly about an
+axis seeded by the id. **The sun geometry is physics**: β, the critical β,
+umbra / penumbra / sunlit, and the next shadow boundary all come from the
+position, the velocity and the sun vector. **The ground track is the same
+propagator as the dot** (SGP4 for a probe through `_lookupProbePositionAt`;
+the catalogue's mean elements + J2 for the line, which the plan §9.11
+measured within 8 km of SGP4 in LEO — the DOT stays SGP4). It is drawn as
+an OVERLAY (depth test off, render order 998): at 10 km above the surface
+it sat inside the skin's rim shell and was depth-killed — measured,
+invisible from the chase.
+
+**Measured on the way.** FNV-1a over one or two bytes barely avalanches
+('a' and 'b' hashed 0.004 apart and two debris pieces tumbled about the
+same axis) — murmur3's final mix is applied. The eclipse NEGATIVE CONTROL
+cannot flip the Sun through the centre: a broadside satellite is sunlit
+from both sides; it holds the Sun along the target's anti-radial (exactly
+behind the planet → umbra, key light 0) and radial (full sun, light 2.3).
+
+### 9.19 Lighting — the plan, and phase 1 (2026-10-11)
+
+The scene had one faint `AmbientLight` and every spacecraft was an unlit
+flat colour: a hull read the same from the Sun side and the shadow side,
+and nothing on the model said where the Sun was. The roadmap, in the order
+the payoff arrives; phase 1 is in.
+
+| phase | what | status |
+|---|---|---|
+| 1 | **Lit spacecraft.** `satellite-models.js` materials are `MeshStandardMaterial` with generic spacecraft finishes (aluminium skin, gold MLI, glossy cells, white radiators — not measured BRDFs). The globe adds a sun-aligned `DirectionalLight` (`SUN_LIGHT_INTENSITY` 2.3) whose intensity is the FOLLOWED object's illumination fraction (umbra → off; the hero object is the one whose shadow matters, the dots are unlit points), an earthshine `HemisphereLight` aimed from the planet below the target, a fainter ambient so a hull in umbra is a silhouette, and a procedural SPACE ENVIRONMENT (`buildSpaceEnvironment`: black sky, the lit Earth filling the lower hemisphere, a limb band, the Sun's disc → PMREM) handed to every model material through `setModelEnvironment`, because a metal with no environment under one light is a black shape with a highlight. | **done**, gated (light = 2.3 × fraction; umbra → 0; materials are Standard) |
+| 2 | **Self-shadowing and the terminator on the hull.** Shadow map from the key light for the followed object only (a 512² map scoped to the avatar's bounds), so the arrays shade the bus and the truss shadows the modules. Cost on SwiftShader to be measured before it ships; the avatar is one object so the map is cheap on a GPU. | planned |
+| 3 | **Specular events.** The Iridium-flare class of highlight: a glint term when the array/antenna normal's reflection of the Sun passes the camera (the models already know their array normals from `arrayAlpha`), a disclosed bloom on it reusing `sun-post.js`'s mip-chain bloom — never a thresholded UnrealBloom (the sun.html scar). | planned |
+| 4 | **The environment is the real planet.** Replace the procedural equirect with a low-res render of the globe from the target's position (a 6-face cubemap at 64², refreshed every few seconds of scene time) so the reflections show the terminator and the clouds actually under the spacecraft. | planned |
+| 5 | **Exposure.** The chase's close-up is lit for a hull at 1 AU while the planet's skin is tuned for the orbit view; a per-mode exposure (chase vs orbit) through the renderer's tone mapping, with the airglow and the ops rings exempt (they are data visualisation, plan §3). | planned |
+
+**Rejected for now:** `scene.environment` (it would also light anything
+Standard that any later module adds — the per-material `envMap` keeps the
+environment the models' own); real-time shadows on every catalogue dot
+(points are unlit by design — §9.5 caps them, they are a population, not
+bodies).
+
 ## 8. What is still open
 
 - **Storm-time equatorward propagation.** Auroral Joule heating launches

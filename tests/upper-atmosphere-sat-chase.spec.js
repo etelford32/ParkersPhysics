@@ -18,6 +18,13 @@
  *     and the avatar, highlight and card go;
  *   • while chasing, the projection's principal point sits in the clear
  *     part of the stage (the kernel's safe centre), and clears on release;
+ *   • ATTITUDE, SUN AND GROUND (plan §9.18/§9.19): the avatar's quaternion
+ *     is the kernel's nominal basis for its family, its array pivots sit at
+ *     the kernel's alpha, the key light's intensity is the kernel's
+ *     illumination fraction — NEGATIVE CONTROL: the sun vector held
+ *     opposite flips the state and the light follows — the ground track's
+ *     lines lie on the surface sphere with the marker under the target, and
+ *     the card prints the mode, β and the sub-satellite point;
  *   • the altitude tour: "higher" from the ISS lands on the next object up
  *     by page altitude and the flight is an ARC (lifted, never inside the
  *     planet) — NEGATIVE CONTROL: the straight chord between the two eyes
@@ -183,13 +190,80 @@ test('a catalogue dot is followable: avatar, highlight, card and disclosure; Esc
     expect(s.safe.cx).toBeGreaterThan(60);
     expect(s.view.ox).toBe(Math.round(s.safe.W / 2 - s.safe.cx));
 
+    // ATTITUDE / SUN / GROUND on the same catalogue chase.
+    const ag = await page.evaluate(async () => {
+        const K = await import('./js/upper-atmosphere-sat-attitude.js');
+        const THREE = await import('three');
+        const g = window.__ua.globe, cf = g._catFollow, av = g._avatar;
+        const sd = g._sunDir.toArray();
+        const b = K.attitudeBasis({ family: 'starlink', pos: cf.pos.toArray(), vel: cf.vel.toArray(), sunDir: sd, tS: g.getSceneTimeMs() / 1000, id: cf.norad });
+        const m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...b.x), new THREE.Vector3(...b.y), new THREE.Vector3(...b.z));
+        const q = new THREE.Quaternion().setFromRotationMatrix(m);
+        const alpha = K.arrayAlpha(K.toBody(sd, b)).alphaRad;
+        const ill = K.illumination(cf.pos.toArray(), sd);
+        const info = g.getFollowInfo();
+        const tr = g.getGroundTrackState();
+        const pastPts = (() => { const a = g._track.past.geometry.attributes.position.array, n = tr.past; const out = []; for (let i = 0; i < n; i++) out.push(Math.hypot(a[i * 3], a[i * 3 + 1], a[i * 3 + 2])); return out; })();
+        const mk = new THREE.Vector3(...tr.marker).normalize();
+        window.__ua.followCard.refresh();
+        return {
+            qAngle: av.grp.quaternion.angleTo(q), arrays: av.arrays.length, arrayRot: av.arrays.map((w) => w.rotation.x), alpha,
+            light: g._sunLight.intensity, lightFull: g._sunLight.intensity / Math.max(1e-9, ill.fraction || 1), fraction: ill.fraction, state: ill.state,
+            infoSun: info.sun, infoAtt: info.attitude, infoGround: info.ground,
+            track: tr, pastR: [Math.min(...pastPts), Math.max(...pastPts)],
+            markerDot: mk.dot(cf.pos.clone().normalize()),
+            earthShineDot: g._earthShine.position.clone().normalize().dot(cf.pos.clone().normalize()),
+            lit: Object.values(av.grp.children).some((o) => o.material?.isMeshStandardMaterial || o.children?.some((c) => c.material?.isMeshStandardMaterial)),
+            card: document.getElementById('ua-follow-card').textContent.replace(/\s+/g, ' '),
+        };
+    });
+    expect(ag.qAngle).toBeLessThan(1e-6);
+    expect(ag.arrays).toBeGreaterThan(0);
+    for (const r of ag.arrayRot) expect(Math.abs(r - ag.alpha)).toBeLessThan(1e-9);
+    expect(ag.infoAtt.modeId).toBe('nadir');
+    expect(ag.infoSun.state).toBe(ag.state);
+    expect(Math.abs(ag.light - 2.3 * ag.fraction)).toBeLessThan(1e-9);
+    expect(ag.track.visible).toBe(true);
+    expect(ag.track.past).toBeGreaterThan(50);
+    expect(ag.track.future).toBeGreaterThan(100);
+    expect(ag.pastR[0]).toBeGreaterThan(1.0015 - 1e-6);   // a Float32Array holds the surface points
+    expect(ag.pastR[1]).toBeLessThan(1.0015 + 1e-6);
+    expect(ag.markerDot).toBeGreaterThan(1 - 1e-9);
+    expect(ag.earthShineDot).toBeGreaterThan(1 - 1e-9);
+    expect(ag.lit).toBe(true);
+    expect(Number.isFinite(ag.infoSun.betaDeg)).toBe(true);
+    expect(ag.infoGround.latDeg).toBeGreaterThan(-90);
+    expect(ag.card).toContain('nadir-pointing');
+    expect(ag.card).toMatch(/β -?[\d.]+°/);
+    expect(ag.card).toMatch(/\d+\.\d+°[NS] \d+\.\d+°[EW]/);
+    // NEGATIVE CONTROL: the Sun held along the target's anti-radial puts it
+    // exactly behind the planet (umbra, key light off); along its radial, in
+    // full sun (light at full). Flipping the Sun through the centre would
+    // NOT do: a broadside satellite is sunlit from both sides.
+    const flipped = await page.evaluate(async ([dt]) => {
+        const g = window.__ua.globe, cf = g._catFollow;
+        const was = g.getFollowInfo().sun.state;
+        g.setSunDirOverride(cf.pos.clone().normalize().negate());
+        g.stepFrames(2, dt, { render: 'none' });
+        const dark = { state: g.getFollowInfo().sun.state, light: g._sunLight.intensity };
+        g.setSunDirOverride(cf.pos.clone().normalize());
+        g.stepFrames(2, dt, { render: 'none' });
+        const lit = { state: g.getFollowInfo().sun.state, light: g._sunLight.intensity };
+        g.setSunDirOverride(null);
+        g.stepFrames(2, dt, { render: 'none' });
+        return { was, dark, lit, back: g.getFollowInfo().sun.state };
+    }, [DT]);
+    expect(flipped.dark).toEqual({ state: 'umbra', light: 0 });
+    expect(flipped.lit).toEqual({ state: 'sunlit', light: 2.3 });
+    expect(flipped.back).toBe(flipped.was);
+
     // Esc releases: avatar, highlight, card and the view offset all go.
     await page.locator('#ua-globe').hover();
     await page.keyboard.press('Escape');
     await step(page, 3);
     await page.evaluate(() => window.__ua.followCard.refresh());
-    const e = await page.evaluate(() => { const g = window.__ua.globe; return { following: g.isFollowing(), avatar: g._avatar?.grp.visible, trail: g._avatar?.trail.visible, highlight: g._catalogTracker._highlightSprite?.visible, card: document.getElementById('ua-follow-card').hidden, view: g._camera.view?.enabled ?? false, safe: g.getChaseSafeFrame() }; });
-    expect(e).toEqual({ following: false, avatar: false, trail: false, highlight: false, card: true, view: false, safe: null });
+    const e = await page.evaluate(() => { const g = window.__ua.globe; return { following: g.isFollowing(), avatar: g._avatar?.grp.visible, trail: g._avatar?.trail.visible, highlight: g._catalogTracker._highlightSprite?.visible, card: document.getElementById('ua-follow-card').hidden, view: g._camera.view?.enabled ?? false, safe: g.getChaseSafeFrame(), track: g.getGroundTrackState().visible, light: g._sunLight.intensity }; });
+    expect(e).toEqual({ following: false, avatar: false, trail: false, highlight: false, card: true, view: false, safe: null, track: false, light: 2.3 });
 });
 
 test('the altitude tour hops to the next object up by page altitude on an ARC, never through the planet', async ({ page }) => {

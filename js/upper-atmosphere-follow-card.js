@@ -46,6 +46,9 @@ export class FollowCard {
             + `<span class="ua-fc-k">period</span><span class="ua-fc-v" data-f="period">—</span>`
             + `<span class="ua-fc-k">incl</span><span class="ua-fc-v" data-f="incl">—</span>`
             + `<span class="ua-fc-k">camera</span><span class="ua-fc-v ua-fc-v--wide" data-f="cam">—</span>`
+            + `<span class="ua-fc-k">attitude</span><span class="ua-fc-v ua-fc-v--wide" data-f="att">—</span>`
+            + `<span class="ua-fc-k">sun</span><span class="ua-fc-v ua-fc-v--wide" data-f="sun">—</span>`
+            + `<span class="ua-fc-k">ground</span><span class="ua-fc-v ua-fc-v--wide" data-f="ground">—</span>`
             + `</div>`
             + `<div class="ua-fc-tour" role="group" aria-label="Altitude tour">`
             + `<button type="button" data-act="lower" title="Chase the next spacecraft BELOW this one (,)">▼ lower</button>`
@@ -91,6 +94,15 @@ export class FollowCard {
         f.speed.textContent = Number.isFinite(info.speedKmS) ? `${fmt(info.speedKmS, 2)} km/s` : '—';
         f.period.textContent = Number.isFinite(info.periodMin) ? `${fmt(info.periodMin, 1)} min` : '—';
         f.incl.textContent = Number.isFinite(info.inclinationDeg) ? `${fmt(info.inclinationDeg, 1)}°` : '—';
+        const at = info.attitude, su = info.sun, gr = info.ground;
+        f.att.textContent = at ? `${at.label}${Number.isFinite(at.cosIncidence) ? ` · arrays cos i ${fmt(at.cosIncidence, 2)}` : ''} (modelled)` : '—';
+        if (su) {
+            const nxt = su.next ? ` · ${su.next.kind === 'enter' ? 'shadow' : 'sunrise'} in ${fmt(su.next.inS / 60)} min`
+                : su.eclipseFree ? ' · eclipse-free orbit' : '';
+            const lit = su.state === 'sunlit' ? 'sunlit' : su.state === 'umbra' ? 'in umbra' : `penumbra ${fmt(su.fraction * 100)} %`;
+            f.sun.textContent = `β ${fmt(su.betaDeg, 1)}° (crit ${fmt(su.criticalDeg, 1)}°) · ${lit}${nxt}`;
+        } else f.sun.textContent = '—';
+        f.ground.textContent = gr ? `${fmt(Math.abs(gr.latDeg), 2)}°${gr.latDeg >= 0 ? 'N' : 'S'} ${fmt(Math.abs(gr.lonDeg), 2)}°${gr.lonDeg >= 0 ? 'E' : 'W'} · track ±45/90 min` : '—';
         const c = info.chase;
         if (info.flying && !c) {
             f.cam.textContent = 'flying in…';
