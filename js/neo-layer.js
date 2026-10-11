@@ -47,6 +47,7 @@ import {
 
 import { rockGeometry, rockMaterial, drawnRockRadius, shapeFor, spinFor, hash32, MeteoroidStream } from './neo-rocks.js';
 import { AIRLESS_GLSL, AIRLESS_DISPLAY, OPPOSITION } from './airless-body.js';
+import { createReticle, tintReticle, seatReticle, RETICLE } from './selection-reticle.js';
 import { shadowIllumination, reflectedIrradianceFraction, BODY_ALBEDO, EARTH_RADIUS_KM } from './eclipse-geometry.js';
 
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
@@ -551,7 +552,12 @@ export class NeoLayer extends Emitter {
         this.watch = { approaches: [], sentry: [], fireballs: [], window: null };
         // population: 'all' | 'bright' (H ≤ 22, PHAs, comets, interstellar) | 'pha'
         // colorMode: 'natural' (S/C-type tints) | 'class' (the legend's data-viz palette)
-        this.visible = { asteroids: true, comets: true, population: 'all', local: true, radiants: true, orbit: true, labels: true, colorMode: 'natural' };
+        this.visible = { asteroids: true, comets: true, population: 'all', local: true, radiants: false, orbit: true, labels: false, colorMode: 'natural' };
+        // labels + radiants are OFF BY DEFAULT (2026-10, owner request): a
+        // name is one HOVER (tooltip) or CLICK (selected label) away, and a
+        // dozen stacked in-zone names plus the shower captions buried the
+        // Earth–Moon view. The meteor streams read as debris FALLING ON
+        // EARTH at boulder size. Both stay one checkbox away in the panel.
 
         // Frame state from the worker.
         this.frameJd = null;
@@ -970,17 +976,9 @@ export class NeoLayer extends Emitter {
     }
 
     _buildSelectedMarker(name = 'neo-selected-marker', dim = 1) {
-        // A thin reticle in the object's own colour, not a grey washer.
-        const group = new THREE.Group();
-        group.name = name;
-        const ring = (ri, ro, opacity) => new THREE.Mesh(new THREE.RingGeometry(ri, ro, 64),
-            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity, side: THREE.DoubleSide,
-                depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
-        // Hairlines: the lock camera sits ~0.1 unit from the rock, so a ring
-        // 0.0025 thick was a 25 px band.
-        group.add(ring(0.0222, 0.0228, 0.95 * dim), ring(0.0300, 0.0303, 0.30 * dim));
-        group.visible = false;
-        group.renderOrder = 15;
+        // The page's ONE selection mark (js/selection-reticle.js) — planets,
+        // moons and the Sun wear the same one, tinted per body.
+        const group = createReticle(name, dim);
         this.group.add(group);
         return group;
     }
@@ -1429,7 +1427,7 @@ export class NeoLayer extends Emitter {
             const p = this.drawnPosition(index, this.anchor.position);
             if (p) this.selectedMarker.position.copy(p);
             const tint = colorFor(this.els[index], this.visible.colorMode, _cB).lerp(_cB.clone().set(0xffffff), 0.35).clone();
-            for (const m of this.selectedMarker.children) m.material.color.copy(tint);
+            tintReticle(this.selectedMarker, tint);
             this._buildOrbit(index);
             const s = makeLabel(displayName(this.els[index]), { color: '#ffffff', size: 21, weight: 600 });
             this.group.add(s); this._labels.set(key, s);
@@ -1549,7 +1547,7 @@ export class NeoLayer extends Emitter {
         if (this.orbitLine) this.orbitLine.visible = this.visible.orbit;
         this.localGroup.visible = this.visible.local;
         for (const [, line] of this._trails) line.visible = this.visible.local;
-        for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.cone.visible = v; r.label.visible = v; r.stream.visible = v; r.rocks.mesh.visible = v; }
+        for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.cone.visible = v; r.label.visible = v && this.visible.labels; r.stream.visible = v; r.rocks.mesh.visible = v; }
         for (const slot of this._rockSlots) if (slot.index >= 0) slot.mesh.material.uniforms.u_base.value.copy(colorFor(this.els[slot.index], this.visible.colorMode, _cB));
         if (this.rGeo) this._refreshCometTails();
         this._applyStyles();
@@ -1742,7 +1740,7 @@ export class NeoLayer extends Emitter {
             r.stream.material.uniforms.u_speed.value = s.vKms / 40;   // faster streams pour in faster
             r.rocks.setDirection(dir); r.rocks.setSpeed(s.vKms / 40);
             const vis = this.visible.radiants;
-            r.line.visible = vis; r.cone.visible = vis; r.label.visible = vis; r.stream.visible = vis; r.rocks.mesh.visible = vis;
+            r.line.visible = vis; r.cone.visible = vis; r.label.visible = vis && this.visible.labels; r.stream.visible = vis; r.rocks.mesh.visible = vis;
         }
     }
 
@@ -1752,6 +1750,9 @@ export class NeoLayer extends Emitter {
      * @param {{ jd:number, earthOfDate:{x_AU,y_AU,z_AU,lon_rad}, earthFn?:(jd)=>object,
      *           earthDrawn:THREE.Vector3, t:number, simMs?:number, camera?:THREE.Camera, camDist?:number }} f
      */
+    /** Canvas height in CSS px (viewPx is device px). */
+    _viewCssH(f) { return (f.viewPx > 0 ? f.viewPx / DPR : 720); }
+
     update(f) {
         this._t = f.t ?? this._t + 0.016;
         this._pointsMat.uniforms.u_time.value = this._t;
@@ -1806,9 +1807,7 @@ export class NeoLayer extends Emitter {
         if (this.hoverIndex != null && this.hoverMarker.visible) {
             const hp = this.drawnPosition(this.hoverIndex, this.hoverMarker.position);
             if (hp) {
-                const hr = this._rockRadius(this.els[this.hoverIndex]);
-                this.hoverMarker.scale.setScalar(Math.max(hr * 2.1 / 0.021, Math.min(9, Math.max(1.25, (f.camDist ?? 20) * 0.10))));
-                this.hoverMarker.lookAt(f.camera ? f.camera.position : new THREE.Vector3(0, 50, 0));
+                if (f.camera) seatReticle(this.hoverMarker, hp, this._rockRadius(this.els[this.hoverIndex]), f.camera, this._viewCssH(f), RETICLE.HOVER_GROW);
             } else {
                 this.hoverMarker.visible = false;
             }
@@ -1818,9 +1817,7 @@ export class NeoLayer extends Emitter {
             const p = this.drawnPosition(this.selectedIndex, this.anchor.position);
             if (p) {
                 this.selectedMarker.position.copy(p);
-                const rr = this._rockRadius(this.els[this.selectedIndex]);
-                this.selectedMarker.scale.setScalar(Math.max(rr * 1.7 / 0.021, Math.min(8, Math.max(1, (f.camDist ?? 20) * 0.08))));
-                this.selectedMarker.lookAt(f.camera ? f.camera.position : new THREE.Vector3(0, 50, 0));
+                if (f.camera) seatReticle(this.selectedMarker, p, this._rockRadius(this.els[this.selectedIndex]), f.camera, this._viewCssH(f));
                 const s = this._labels.get('selected');
                 if (s) s.position.set(p.x, p.y + 0.03, p.z);
             }

@@ -808,6 +808,7 @@ import { airlessSphereMaterial } from './js/airless-body.js';
 import { BODY_ALBEDO, shadowIllumination, reflectedIrradianceFraction, SUN_RADIUS_KM } from './js/eclipse-geometry.js';
 import { AU_KM } from './js/neo-orbits.js';
 import { NeoLayer } from './js/neo-layer.js';
+import { createReticle, tintReticle, seatReticle } from './js/selection-reticle.js';
 import { TONE_DECODE_GLSL } from './js/tone-decode.js';
 import { NeoPanel } from './js/neo-panel.js';
 
@@ -3325,8 +3326,27 @@ const tbl        = document.getElementById('planet-table');
 const panelName  = document.getElementById('panel-planet-name');
 const panelType  = document.getElementById('panel-planet-type');
 
+// ONE selection mark for every body (js/selection-reticle.js). NEOs wear the
+// layer's own instance of it; this one rides the Sun, planets and moons, which
+// until 2026-10 showed no mark at all when selected.
+const bodyReticle = createReticle('body-selected-marker');
+scene.add(bodyReticle);
+let _reticleMesh = null, _reticleRadius = 0;
+const _cReticle = new THREE.Color();
+function _markBody(mesh, colorHex) {
+    _reticleMesh = mesh;
+    bodyReticle.visible = !!mesh;
+    if (!mesh) return;
+    const g = mesh.geometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    _reticleRadius = g.boundingSphere.radius * Math.max(mesh.scale.x, mesh.scale.y, mesh.scale.z);
+    tintReticle(bodyReticle, _cReticle.set(colorHex ?? 0xffffff).lerp(new THREE.Color(0xffffff), 0.35));
+}
+
 function selectBody(p) {
     selectedBody = p;
+    // NEOs carry the layer's reticle; everything else carries bodyReticle.
+    _markBody(p && p.neoIndex == null ? p.mesh : null, p?.color);
     // A planet / moon / Sun selection clears any NEO selection (orbit line,
     // marker, label). NEO bodies arrive already selected on the layer.
     if (!p || p.neoIndex == null) neoLayer.select(null);
@@ -3407,6 +3427,7 @@ function _selectAt(e) {
         const obj  = hits[0].object;
         const body = obj === sunMesh ? null : obj.userData;
         selectBody(body);
+        if (obj === sunMesh) _markBody(sunMesh, 0xffd27a);
 
         // Double-click on Earth → open Earth simulation
         const now  = performance.now();
@@ -4025,7 +4046,7 @@ window.__neoLab = {
     // The camera and the canvas are exposed so the browser gate can turn a
     // drawn position into a PIXEL and click it — the pick contract is stated in
     // pixels, so a test that cannot measure pixels cannot check it.
-    camera, canvas: renderer.domElement, THREE,
+    camera, canvas: renderer.domElement, THREE, bodyReticle,
     get selectedBody() { return selectedBody; },
     get simJD() { return neoLayer._lastJd; },
     // Test support: what the two pick paths see at a canvas pixel, WITHOUT
@@ -4372,6 +4393,10 @@ function animate() {
     }
 
     controls.update();
+    if (_reticleMesh && bodyReticle.visible) {
+        camera.updateMatrixWorld();
+        seatReticle(bodyReticle, _reticleMesh.getWorldPosition(bodyReticle.position), _reticleRadius, camera, renderer.domElement.clientHeight || window.innerHeight);
+    }
     renderer.render(scene, camera);
     tickFPS();
 }

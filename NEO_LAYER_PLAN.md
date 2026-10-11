@@ -442,3 +442,72 @@ totality, and emergent earthshine phase). `js/airless-body.js` is in the
 - Fireballs are listed, not drawn on the sphere: Earth's drawn rotation is
   not tied to UT (rotation.y accumulates), so a lat/lon marker would be
   placed on the wrong meridian. Tie the Earth mesh to GMST first.
+
+## 5. Sizing + LOD — PLAN (2026-10-11, not built)
+
+Owner report: "NEO objects all appear way too large, the LOD system is not
+100% working for 3D, the perspective changes way too much." Shipped the same
+day as the label/reticle pass (labels + meteor radiants default OFF; one
+shared `js/selection-reticle.js` for NEOs, planets, moons and the Sun).
+
+### 5.1 What is wrong, measured
+
+`drawnRockRadius(d) = 0.010 + 0.011·log10(1 + 10d)` (js/neo-rocks.js) is in
+scene units where the drawn Earth is 0.12 and the drawn Moon 0.032:
+
+| diameter | drawn radius | vs drawn Moon | inflation vs drawn Earth |
+|---|---|---|---|
+| 30 m  | 0.0113 | 0.35× | 4.0e4 |
+| 100 m | 0.0133 | 0.41× | 1.4e4 |
+| 1 km  | 0.0215 | 0.66× | 2.3e3 |
+| 10 km | 0.0320 | 0.99× | 3.4e2 |
+
+So a 30 m rock is drawn a third the size of the Moon, and the 0.010 floor
+means EVERY object is at least that big. §2d made the impostor the TRUE
+PROJECTED size of this radius — correct for the LOD handoff, but it means the
+inflation is now perspective-correct too: dots are fine from 55 units out
+(sub-pixel → `minPx`), and balloon into a field of moon-sized balls the
+moment the camera comes within ~1 unit of Earth (the 2026-10-11 screenshot,
+camera locked on the Moon). "The perspective changes too much" is that 1/z
+growth on a size that should never have been resolvable.
+
+### 5.2 The rule to adopt
+
+**A body may be drawn larger than true only in PIXELS, never in WORLD
+units.** Distances are compressed (disclosed); sizes must not be inflated in
+the world, because a world-space inflation is magnified by perspective.
+
+1. **Far field and in-zone impostors: angular, not projected.** Size =
+   max(true projected size of the TRUE diameter on the local/helio frame,
+   a pixel marker `minPx + k·log10(D)` capped at ~4 px). Real NEOs are
+   unresolved from everywhere except a lock, so in practice this is a
+   magnitude-style marker whose size does not change as you dolly in.
+2. **Meshes only when locked/selected.** The rock pool's "nearest to camera
+   inside ROCK_RANGE" rule goes; meshes are the selected object plus (opt.)
+   in-zone flybys. A mesh is drawn at a WORLD radius chosen so it subtends
+   the same angle the marker did at handoff (continuity) — i.e. the mesh is a
+   magnifier the camera carries, and the lock distance `_lockDistance` is
+   derived from that radius, not floored at 0.09.
+3. **One scale knob, disclosed.** If a world inflation survives anywhere (the
+   locked mesh), it is ONE constant beside `drawnRockRadius`, printed on the
+   data card ("drawn ×N true size"), like the vertical exaggerations elsewhere.
+4. **Pick radius follows the drawn size** — `drawnPx()` stays the one JS
+   mirror of `POINT_VS`; change both together.
+
+### 5.3 Phases
+
+- **P1 (small):** cap impostor `gl_PointSize` at a pixel ceiling and drop the
+  0.010 floor in `drawnRockRadius` (log term only, scaled to ≤ 0.1× drawn
+  Moon for a 10 km body). Fixes the ballooning; risks the LOD handoff jump,
+  which P2 closes.
+- **P2:** mesh pool = selected (+ in-zone flybys); handoff radius computed
+  from the marker's angular size at the moment of handoff; `_lockDistance`
+  from the mesh radius.
+- **P3:** meteor streams. Meteoroids are mm–cm grains; instanced
+  boulders on a converging cone read as debris falling on Earth. Replace the
+  `MeteoroidStream` meshes with the existing faint streak points only (or a
+  radiant glyph), keeping the panel's shower list as the source of truth.
+- **Gates:** extend `tests/solar-system-neo-smoke.spec.js` with a dolly test:
+  the drawn px of a fixed in-zone object must change < 2× as the camera goes
+  from 20 → 0.5 units from Earth (today it grows as 1/distance), and the handoff
+  jump at ROCK_RANGE must stay < 1 px.

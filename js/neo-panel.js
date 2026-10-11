@@ -92,7 +92,8 @@ export class NeoPanel {
                 <label><input type="checkbox" data-vis="asteroids" checked> Asteroids</label>
                 <label><input type="checkbox" data-vis="comets" checked> Comets</label>
                 <label><input type="checkbox" data-vis="local" checked> Near-Earth frame</label>
-                <label><input type="checkbox" data-vis="radiants" checked> Meteor radiants</label>
+                <label><input type="checkbox" data-vis="radiants"> Meteor radiants</label>
+                <label title="Off by default: hover an object to name it, click to select and label it"><input type="checkbox" data-vis="labels"> Object labels</label>
                 <label><input type="checkbox" data-vis="orbit" checked> Selected orbit</label>
                 <label title="Natural tints (S/C-type greys, blue-white comets) or the data-viz class palette"><input type="checkbox" data-vis="colorMode"> Colour by class</label>
                 <label>Show <select data-pop>

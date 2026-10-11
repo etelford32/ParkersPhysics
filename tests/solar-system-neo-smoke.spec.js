@@ -278,7 +278,11 @@ test.describe('solar-system.html — near-Earth objects', () => {
         // Inside the fade band the heliocentric instance is off; outside it is on.
         expect(s.helioAlpha3).toBe(0);
         expect(s.helioAlpha30).toBeGreaterThan(0.3);   // H 24 ⇒ a faint sprite, but ON
-        expect(s.labels.some(k => k.startsWith('local:'))).toBe(true);
+        // Object labels are OFF by default (hover names, click selects + labels);
+        // the panel toggle brings the nearest few back.
+        expect(s.labels.some(k => k.startsWith('local:'))).toBe(false);
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ labels: true }));
+        await page.waitForFunction(() => [...window.__neoLab.layer._labels.keys()].some(k => k.startsWith('local:')), null, { timeout: 15_000 });
         expect(s.hudClosest).toContain('FLYBY-3LD');
         expect(s.closestBox).toContain('FLYBY-3LD');
         expect(s.ringNames).toEqual(['neo-ring-1ld', 'neo-ring-5ld', 'neo-ring-10ld', 'neo-ring-20ld']);
@@ -332,10 +336,17 @@ test.describe('solar-system.html — near-Earth objects', () => {
 
         // Selecting a planet clears the NEO selection.
         await page.locator('#planet-btns button', { hasText: 'Earth' }).first().click();
+        // The reticle is seated by the render loop — wait for a frame to land it.
+        await page.waitForFunction(() => window.__neoLab.bodyReticle.position.distanceTo(window.__neoLab.layer._earthDrawn) < 1e-3, null, { timeout: 15_000 });
         const cleared = await page.evaluate(() => ({
             sel: window.__neoLab.layer.selectedIndex, orbit: !!window.__neoLab.layer.orbitLine,
             marker: window.__neoLab.layer.selectedMarker.visible, body: window.__neoLab.selectedBody?.name,
+            bodyRing: window.__neoLab.bodyReticle.visible,
+            ringOnEarth: window.__neoLab.bodyReticle.position.distanceTo(window.__neoLab.layer._earthDrawn) < 1e-3,
         }));
+        // A planet wears the SAME reticle a NEO does (js/selection-reticle.js).
+        expect(cleared.bodyRing).toBe(true);
+        expect(cleared.ringOnEarth).toBe(true);
         expect(cleared.sel).toBeNull();
         expect(cleared.orbit).toBe(false);
         expect(cleared.marker).toBe(false);
@@ -426,7 +437,9 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(sel.shape).toBe('elongated');
         expect(sel.periodH).toBe(30.6);
         expect(Math.abs(sel.bodyRadius - sel.scale)).toBeLessThan(1e-9);
-        // Meteoroid streams are instanced rock meshes.
+        // Meteoroid streams are instanced rock meshes — OFF by default, on via the toggle.
+        expect(await page.evaluate(() => window.__neoLab.layer.visible.radiants)).toBe(false);
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: true }));
         await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
         await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 45_000 });
         const stream = await page.evaluate(() => { const r = window.__neoLab.layer._radiants[0]; return { code: r.code, instanced: !!r.rocks.mesh.isInstancedMesh, count: r.rocks.mesh.count, visible: r.rocks.mesh.visible }; });
