@@ -185,30 +185,27 @@ async function fetchPdynSeries() {
  */
 async function fetchDonkiCatalog(windowStart, windowEnd) {
     const fmt = ms => new Date(ms).toISOString().slice(0, 10);
-    const q = { startDate: fmt(windowStart - 5 * DAY), endDate: fmt(windowEnd + DAY) };
-    // CCMC origin raced against the api.nasa.gov gateway (donki-upstream.js):
-    // a 200 HTML body is a host failure, never a JSON parse crash — the
-    // gateway answered HTML from 2026-09-30 and `res.json()` here took the
-    // whole ledger down with "Unexpected token '<'" for 11 days. fetchDonki
-    // throws on a total miss; settle each product so ENLIL / FLR stay
-    // enrichment and only CMEAnalysis can stop the catalog.
-    const settle = (path) => fetchDonki(path, q).then(
-        (r) => ({ ok: true, data: r.data, host: r.host }),
-        (e) => ({ ok: false, error: String(e?.message || e) }));
-    const [an, sm, fl] = await Promise.all([
-        settle('CMEAnalysis'), settle('WSAEnlilSimulations'), settle('FLR'),
-    ]);
-    // CMEAnalysis is the catalog: without it there is nothing to lock.
-    if (!an.ok) throw new Error(an.error);
-    // ENLIL and FLR are enrichment — their failure is recorded, not fatal.
-    const analyses = an.data;
-    const sims = sm.ok ? sm.data : [];
-    const flrRaw = fl.ok ? fl.data : [];
-    const sources = {
-        CMEAnalysis: an.host,
-        WSAEnlilSimulations: sm.ok ? sm.host : `failed: ${sm.error}`,
-        FLR: fl.ok ? fl.host : `failed: ${fl.error}`,
+    const start = fmt(windowStart - 5 * DAY), end = fmt(windowEnd + DAY);
+    // CCMC origin raced against the api.nasa.gov gateway — see
+    // donki-upstream.js (DONKI moved hosts 2026-09-30; both old hosts serve
+    // an HTML announcements page). Each product records WHICH host answered
+    // (or why it failed) for the run's structured log line.
+    const sources = {};
+    const get = async (path) => {
+        try {
+            const r = await fetchDonki(path, { startDate: start, endDate: end });
+            sources[path] = r.host;
+            return r.data;
+        } catch (e) {
+            sources[path] = `failed: ${String(e?.message || e).slice(0, 200)}`;
+            throw e;
+        }
     };
+    // CMEAnalysis is the catalog — without it there is nothing to lock.
+    // ENLIL and FLR are enrichment: their failure is recorded, never fatal.
+    const [analyses, sims, flrRaw] = await Promise.all([
+        get('CMEAnalysis'), get('WSAEnlilSimulations').catch(() => []), get('FLR').catch(() => []),
+    ]);
     // Newest Earth-arrival simulation per cme id.
     const enlilByCme = new Map();
     for (const s of Array.isArray(sims) ? sims : []) {

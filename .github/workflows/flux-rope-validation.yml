@@ -14,8 +14,8 @@ name: flux-rope-validation
 #                             the three 2026-10 bugs with negative controls
 #   validation-rerun-ledger   the cron's ledger block end-to-end against a
 #                             fake PostgREST (1000-row cap, kind CHECK) and a
-#                             gateway answering HTML (the 2026-09-30 outage)
-#   donki-upstream            the DONKI two-host fetcher
+#                             DONKI hosts answering HTML (the 2026-09-30 move)
+#   donki-upstream            the DONKI host race (moved CCMC host + gateway)
 #
 # Until this workflow no CI job ran any of these: the ledger was dead for
 # 11 days and its scored runs were rejected for two months with every

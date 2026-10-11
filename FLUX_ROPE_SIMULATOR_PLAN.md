@@ -357,13 +357,12 @@ the same crate.
   · Bz truth never resolved: 48 h of 1-min rows were read in ONE PostgREST
     request, which Supabase caps at 1000 rows → 35% coverage < the 60%
     floor → 'pending' forever. sbGetAll pages it.
-  · api.nasa.gov answered DONKI with an HTML page from 2026-09-30; every
-    caller's res.json() threw, the WHOLE ledger (all four CME models)
-    locked nothing for 11 days and /api/donki/cme went feed-down.
-    Fixed by api/_lib/donki-upstream.js (#1039): the new CCMC host is
-    raced against the gateway, an HTML 200 is a host failure, and the
-    cron reports which host answered per product (`donkiSources` in the
-    ledger log line; `upstream` on the /api/donki/* proxies).
+  · CCMC moved DONKI on 2026-09-30 and both old hosts began answering an
+    HTML announcements page; every caller's res.json() threw, so the WHOLE
+    ledger (all four CME models) locked nothing for 11 days. Fixed on main
+    by #1039 (api/_lib/donki-upstream.js: the new ccmc.gsfc.nasa.gov
+    DONKI-API host raced against the gateway); the cron now also logs
+    which host answered each product.
   · LEAKAGE: no issue-before-arrival guard on the flux-rope lock, and
     scoring took the LATEST lock — on 4 of 8 arrivals it was issued AFTER
     the shock (already assimilated from live L1); 7 locks predicted an
@@ -398,7 +397,7 @@ the same crate.
   flux-rope node gate ran in CI before): tests/flux-rope-ledger-real.mjs,
   tests/validation-rerun-ledger.mjs (the cron end-to-end vs a fake
   PostgREST with the 1000-row cap + kind CHECK and an HTML gateway; the
-  pre-fix cron fails 8/9), tests/donki-upstream.mjs.
+  pre-fix cron fails 8/9).
 
 ## 5. Data inputs
 
