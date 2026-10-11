@@ -372,6 +372,10 @@
       "destination": "/api-policy.html"
     },
     {
+      "source": "/dpa",
+      "destination": "/dpa.html"
+    },
+    {
       "source": "/contact-enterprise",
       "destination": "/contact-enterprise.html"
     },

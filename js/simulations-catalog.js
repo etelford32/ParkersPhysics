@@ -368,6 +368,7 @@ export const NON_SIMULATION_PAGES = new Set([
     'dashboard.html',
     'deep-space.html',          // section hub — scripts/build-section-pages.mjs
     'design-tokens.html',
+    'dpa.html',
     'earth-orbit.html',         // section hub
     'eula.html',
     'feedback.html',
