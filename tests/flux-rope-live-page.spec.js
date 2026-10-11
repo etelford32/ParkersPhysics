@@ -85,6 +85,45 @@ test.describe('compounding flux rope simulator (flux-rope-live.html)', () => {
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+    test('quiet Earth corridor: off-axis CMEs still run LIVE through the kernel', async ({ page }) => {
+        // Most days nothing is aimed at Earth. The page used to fall back to
+        // the 2024 Gannon replay then; it now propagates every CME in flight
+        // (any direction) and lets the ensemble report the miss.
+        const now = Date.now();
+        const iso = (hAgo) => new Date(now - hAgo * 3600e3).toISOString();
+        await page.route('**/api/donki/**', (r) => r.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: { cmes: [
+                { time: iso(10), cme_id: 'FLANK-W', most_accurate: true, speed_km_s: 700,
+                  latitude_deg: 10, longitude_deg: 85, half_angle_deg: 25,
+                  earth_directed: false, note: '' },
+                { time: iso(30), cme_id: 'FLANK-E', most_accurate: true, speed_km_s: 500,
+                  latitude_deg: -15, longitude_deg: -95, half_angle_deg: 30,
+                  earth_directed: false, note: '' },
+            ] } }),
+        }));
+        await page.route('**/services.swpc.noaa.gov/**', (r) => r.abort());
+        await page.route('**/api/noaa/**', (r) => r.abort());
+        await page.route('**/api/cme/**', (r) => r.abort());
+        await page.goto('/flux-rope-live.html', { waitUntil: 'domcontentloaded' });
+
+        await expect(page.locator('#frl-mode')).toHaveText(
+            /LIVE · EARTH CORRIDOR QUIET · 2 CMEs ELSEWHERE/, { timeout: 20_000 });
+        await expect(page.locator('#frl-mode')).toHaveClass(/quiet/);
+        await expect(page.locator('#frl-mode-note')).toHaveText(/Earth corridor quiet/);
+        await expect(page.locator('#frl-train .frl-cme')).toHaveCount(2);
+        await expect(page.locator('#frl-train')).toHaveText(/off the Sun–Earth line/);
+        await expect(page.locator('#frl-membership')).toHaveText(/2 in the modeled heliosphere view/);
+        // The model, not a replay, answers the hit question — and says miss.
+        await expect(page.locator('#frl-s-phit')).not.toHaveText('—', { timeout: 20_000 });
+        const pHit = parseFloat(await page.locator('#frl-s-phit').innerText());
+        expect(pHit).toBeLessThan(20);
+        // Real time: epoch is the older CME, 30 h ago.
+        const cursor = parseFloat(await page.locator('#frl-time').inputValue());
+        expect(Math.abs(cursor - 30)).toBeLessThan(0.5);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
     test('mocked live feeds: LIVE train, real-time now-line, measured noise', async ({ page }) => {
         const now = Date.now();
         const iso = (hAgo) => new Date(now - hAgo * 3600e3).toISOString();
