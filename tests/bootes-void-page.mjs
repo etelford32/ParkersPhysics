@@ -38,8 +38,9 @@ const html = read('../bootes-void.html');
 // The probe panel writes through page.js's own `set` and draws its own chart,
 // so for the data-bv / chart contract it IS part of the page module.
 const probePanel = read('../js/bootes/probe-panel.js');
+const trackPanel = read('../js/bootes/track-panel.js');
 const pageOnly = read('../js/bootes/page.js');
-const page = pageOnly + '\n' + probePanel;
+const page = pageOnly + '\n' + probePanel + '\n' + trackPanel;
 const charts = read('../js/bootes/charts.js');
 
 let passed = 0;
@@ -134,6 +135,28 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
     ok(`probe controls agree in both directions (${declared.length} controls)`);
 }
 
+// ── 3c. Galaxy-tracker controls ─────────────────────────────────────────────
+{
+    const declared = matchAll(html, /data-bv-track="([a-zA-Z0-9_]+)"/g);
+    assert.ok(declared.length >= 3, `expected the tracker's control set (found ${declared.length})`);
+    for (const key of declared) {
+        assert.ok(new RegExp(`key === '${key}'`).test(trackPanel),
+            `tracker control "${key}" is in the markup but track-panel.js has no branch for it`);
+    }
+    for (const key of matchAll(trackPanel, /key === '([a-zA-Z0-9_]+)'/g)) {
+        assert.ok(declared.includes(key),
+            `track-panel.js handles a control "${key}" that the markup never declares`);
+    }
+    for (const id of ['bv-track-play', 'bv-track-obs', 'bv-track-now', 'bv-track-add-deep',
+        'bv-track-add-random', 'bv-track-add-probe', 'bv-track-pick', 'bv-track-clear', 'bv-track-rows']) {
+        assert.ok(html.includes(`id="${id}"`), `#${id} is missing from the markup`);
+        assert.ok(trackPanel.includes(`#${id}`), `#${id} is in the markup but track-panel.js never wires it`);
+    }
+    assert.ok(/#bv-track-pick\[hidden\]\s*\{[^}]*display\s*:\s*none/.test(html),
+        '#bv-track-pick is hidden without WebGL and needs its own [hidden] rule');
+    ok(`tracker controls agree in both directions (${declared.length} controls + 9 ids)`);
+}
+
 // ── 4. Charts ───────────────────────────────────────────────────────────────
 {
     const canvases = matchAll(html, /data-bv-chart="([a-zA-Z0-9_]+)"/g);
@@ -197,12 +220,13 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
 {
     const scene = read('../js/bootes/scene.js');
     const probeLayer = read('../js/bootes/probe-layer.js');
+    const trackLayer = read('../js/bootes/track-layer.js');
     // Match IMPORT STATEMENTS, not mentions. Both files name the kernels in
     // their headers to say what they deliberately do not do, and a naive
     // substring search fails on the very comment that documents the rule.
     const imports = (src) => [...src.matchAll(/^\s*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm)]
         .map(m => m[1]);
-    for (const [file, src] of [['scene.js', scene], ['charts.js', charts], ['probe-layer.js', probeLayer]]) {
+    for (const [file, src] of [['scene.js', scene], ['charts.js', charts], ['probe-layer.js', probeLayer], ['track-layer.js', trackLayer]]) {
         for (const spec of imports(src)) {
             assert.ok(!/bootes-(void|web)-model/.test(spec),
                 `js/bootes/${file} must not import a physics kernel (found "${spec}") — `

@@ -38,6 +38,7 @@ import * as THREE from 'three';
 import { createCameraRig } from './camera.js';
 import { buildScaleRefs } from './scale-refs.js';
 import { createProbeLayer } from './probe-layer.js';
+import { createTrackLayer } from './track-layer.js';
 
 /** Mpc per scene unit. Only conversion in the file. */
 export const SCENE_SCALE = 20;
@@ -186,6 +187,8 @@ export function createBootesScene(canvas, {
     const probe = createProbeLayer({
         root: scene, canvas, camera, toScene: mpc, fromScene: (u) => u * SCENE_SCALE,
     });
+    // The galaxy tracker's paths and markers. See bootes/track-layer.js.
+    const tracks = createTrackLayer({ root: scene, toScene: mpc });
 
     const disposables = [];
     const track = (obj) => { disposables.push(obj); return obj; };
@@ -229,8 +232,17 @@ export function createBootesScene(canvas, {
     }
 
     // ── Tracer galaxies ─────────────────────────────────────────────────────
+    //
+    // The geometry and a copy of its as-built positions are kept so the galaxy
+    // tracker can MOVE the field through cosmic time (`setTracerOffsetsMpc`)
+    // by rewriting one attribute, and put it back exactly with null — a
+    // rebuild per scrub frame would re-upload 3 500 colours for nothing.
+    let tracerGeo = null;
+    let tracerBase = null;
     function buildTracers(tracers, { redshiftSpace = null } = {}) {
         clear(groups.tracers);
+        tracerGeo = null;
+        tracerBase = null;
         if (!tracers?.length) return;
         const positions = new Float32Array(tracers.length * 3);
         const colors = new Float32Array(tracers.length * 3);
@@ -247,6 +259,8 @@ export function createBootesScene(canvas, {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        tracerGeo = geo;
+        tracerBase = positions.slice();
         const mat = new THREE.PointsMaterial({
             size: 0.085, vertexColors: true, transparent: true, opacity: 0.9,
             sizeAttenuation: true, depthWrite: false, map: softDot(),
@@ -425,6 +439,56 @@ export function createBootesScene(canvas, {
             }), mpc(6), mpc(22)))));
     }
 
+    /**
+     * Move the tracer field: `offsets` is a flat Mpc array in tracer order, or
+     * null to restore the as-built (observed-epoch, possibly redshift-space)
+     * positions.
+     */
+    function setTracerOffsetsMpc(offsets) {
+        if (!tracerGeo) return;
+        const attr = tracerGeo.getAttribute('position');
+        if (!offsets) attr.array.set(tracerBase);
+        else for (let i = 0; i < attr.array.length; i++) attr.array[i] = mpc(offsets[i]);
+        attr.needsUpdate = true;
+        tracerGeo.computeBoundingSphere();
+    }
+
+    /**
+     * Screen-space pick over the tracers' CURRENT positions — the same
+     * projection rule as the cluster picker in bootes/camera.js (a Points
+     * raycast needs a world threshold that is right at one zoom only).
+     * Returns the tracer index or -1.
+     */
+    const pickTmp = new THREE.Vector3();
+    function pickTracer(clientX, clientY, radiusPx = 14) {
+        if (!tracerGeo || !groups.tracers.visible) return -1;
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return -1;
+        const arr = tracerGeo.getAttribute('position').array;
+        let best = -1;
+        let bestD = radiusPx;
+        for (let i = 0; i < arr.length / 3; i++) {
+            pickTmp.set(arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]).project(camera);
+            if (pickTmp.z > 1 || pickTmp.z < -1) continue;
+            const sx = rect.left + ((pickTmp.x + 1) / 2) * rect.width;
+            const sy = rect.top + ((1 - pickTmp.y) / 2) * rect.height;
+            const d = Math.hypot(sx - clientX, sy - clientY);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+
+    /** Screen position of a point given in Mpc (tests + HUD anchoring). */
+    function screenOfMpc(p) {
+        const rect = canvas.getBoundingClientRect();
+        pickTmp.set(mpc(p[0]), mpc(p[1]), mpc(p[2])).project(camera);
+        return {
+            x: rect.left + ((pickTmp.x + 1) / 2) * rect.width,
+            y: rect.top + ((1 - pickTmp.y) / 2) * rect.height,
+            behind: pickTmp.z > 1,
+        };
+    }
+
     // ── Render loop ─────────────────────────────────────────────────────────
     let running = true;
     let visible = true;
@@ -472,7 +536,8 @@ export function createBootesScene(canvas, {
     observer?.observe(canvas);
 
     return {
-        renderer, scene, camera, controls, groups, rig, probe,
+        renderer, scene, camera, controls, groups, rig, probe, tracks,
+        setTracerOffsetsMpc, pickTracer, screenOfMpc,
         resize,
         buildShell, buildTracers, buildWeb, buildMarkers, buildField,
         setLayerVisible(name, on) {
@@ -501,6 +566,7 @@ export function createBootesScene(canvas, {
             observer?.disconnect();
             Object.values(groups).forEach(clear);
             probe.dispose();
+            tracks.dispose();
             rig.dispose();
             renderer.dispose();
         },

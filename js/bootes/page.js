@@ -51,6 +51,7 @@ import {
 } from '../bootes-void-data.js';
 import { createBootesScene } from './scene.js';
 import { createProbePanel } from './probe-panel.js';
+import { createTrackPanel } from './track-panel.js';
 import { VIEWPOINTS, VIEWPOINT_IDS, KEY_BINDINGS, scaleBar } from './camera-math.js';
 import {
     drawDensity, drawVelocity, drawContinuity, drawInfluence,
@@ -166,6 +167,17 @@ export function initBootesPage(root = document) {
         root, set, scene, charts, getDerived: () => derived,
         rEff, z: Z, anchors, losUnit,
     });
+
+    // The galaxy tracker: the void's galaxies — and the stars and nebulae they
+    // carry — through cosmic time, in linear theory. Same `derived`, same
+    // `set`. Arming its pick tool disarms the probe's (whose capture-phase
+    // listener would otherwise swallow the tap), and vice versa.
+    const trackPanel = createTrackPanel({
+        root, set, scene, charts, getDerived: () => derived, rEff, z: Z,
+        getProbePosition: () => probePanel.state.positionMpc,
+        onArmPick: () => probePanel.setArmed(false),
+    });
+    root.querySelector('#bv-probe-tool')?.addEventListener('click', () => trackPanel.setPickArmed(false));
 
     // ── Viewpoint buttons, rendered FROM the viewpoint table ────────────────
     //
@@ -284,6 +296,7 @@ export function initBootesPage(root = document) {
         paintCharts();
         paintScene();
         probePanel.refresh();
+        trackPanel.refresh();
     }
 
     // ── Readouts ────────────────────────────────────────────────────────────
@@ -563,6 +576,9 @@ export function initBootesPage(root = document) {
         set('fieldMax', shown);
 
         for (const [name, on] of Object.entries(state.layers)) scene.setLayerVisible(name, on);
+        // A tracker that had moved the field to another epoch has just had it
+        // put back at z_obs underneath it.
+        trackPanel?.onScenePainted();
     }
 
     // ── Control wiring ──────────────────────────────────────────────────────
@@ -644,7 +660,7 @@ export function initBootesPage(root = document) {
 
     const onResize = () => {
         scene?.resize();
-        if (derived) { paintCharts(); probePanel.paintChart(); }
+        if (derived) { paintCharts(); probePanel.paintChart(); trackPanel.paintCharts(); }
     };
     globalThis.addEventListener('resize', onResize);
 
@@ -669,6 +685,7 @@ export function initBootesPage(root = document) {
         get scene() { return scene; },
         get derived() { return derived; },
         get probe() { return probePanel; },
+        get tracker() { return trackPanel; },
         recompute,
         setControl(key, value) {
             if (key in state) state[key] = value;

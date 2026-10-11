@@ -521,3 +521,59 @@ export function drawProbeRay(canvas, { sweep, rEff, probeR }) {
         ['A = void + web', PALETTE.total],
     ]);
 }
+
+/**
+ * The galaxy tracker's small multiples: one quantity against COSMIC TIME, one
+ * line per tracked galaxy in that galaxy's own colour, a crosshair at the
+ * scrubbed instant, and the epochs that matter marked (when the light we see
+ * left Boötes, and today). Three of these share one x-range so a crosshair
+ * means the same instant in all of them — never a dual axis.
+ *
+ * `includeZero` is per chart: |g| and speed are drawn from zero so a fall
+ * reads as a fall, distance from the centre is not (zero there is the void's
+ * centre, which no tracked galaxy approaches).
+ */
+export function drawTrackSeries(canvas, {
+    series, tMin, tMax, cursorT = null, marks = [], yLabel, includeZero = true,
+}) {
+    const { ctx, w, h } = prepare(canvas);
+    const all = series.flatMap(s => s.points.map(p => p[1]));
+    if (!all.length) return;
+    const [lo, hi] = rangeOf(all, { includeZero });
+    const proj = frame(ctx, w, h, {
+        xMin: tMin, xMax: tMax, yMin: lo, yMax: hi,
+        xLabel: 'cosmic time  (Gyr)', yLabel,
+        markX: marks,
+    });
+    for (const s of series) series_(ctx, proj, s);
+    if (cursorT != null && cursorT >= tMin && cursorT <= tMax) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,.55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(proj.px(cursorT), proj.padT);
+        ctx.lineTo(proj.px(cursorT), h - proj.padB);
+        ctx.stroke();
+        // Dots where the crosshair meets each line.
+        for (const s of series) {
+            const y = interpAt(s.points, cursorT);
+            if (y == null) continue;
+            ctx.fillStyle = s.color;
+            ctx.beginPath(); ctx.arc(proj.px(cursorT), proj.py(y), 3, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+function series_(ctx, proj, s) {
+    series(ctx, proj, s.points, s.color, { width: 1.8 });
+}
+
+function interpAt(points, x) {
+    for (let i = 1; i < points.length; i++) {
+        const [x0, y0] = points[i - 1];
+        const [x1, y1] = points[i];
+        if (x >= x0 && x <= x1) return y0 + (y1 - y0) * (x - x0) / ((x1 - x0) || 1);
+    }
+    return null;
+}

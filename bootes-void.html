@@ -319,10 +319,12 @@ details.bv-details[open] > summary::after { content:' ▴'; }
     padding:4px 0; border-top:1px solid rgba(90,110,160,.14); color:#cdd5e4;
 }
 #bv-probe-contrib li em { grid-column:1; font-style:normal; color:#7d879e; font-size:.67rem; }
-#bv-probe-contrib li .bv-probe-go {
-    grid-column:2; grid-row:1 / span 2; background:none; color:#c792ea; font:inherit; font-size:.66rem;
+#bv-probe-contrib li .bv-probe-go { grid-column:2; grid-row:1 / span 2; }
+.bv-probe-go {
+    background:none; color:#c792ea; font:inherit; font-size:.66rem;
     border:1px solid rgba(199,146,234,.4); border-radius:6px; padding:2px 8px; cursor:pointer;
 }
+.bv-probe-go + .bv-probe-go { margin-left:4px; }
 .bv-probe h4 {
     font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:#7d879e;
     font-weight:700; margin:12px 0 5px;
@@ -335,6 +337,25 @@ details.bv-details[open] > summary::after { content:' ▴'; }
 }
 @media (max-width: 980px) {
     .bv-probe-grid { grid-template-columns:1fr; }
+}
+
+
+/* ── Galaxy tracker ───────────────────────────────────────────────────── */
+.bv-track-grid { display:grid; grid-template-columns:300px minmax(0,1fr); gap:16px; }
+.bv-track-ctl .bv-btnrow { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px; }
+.bv-track-ctl .bv-btnrow .bv-btn { width:auto; flex:1 1 auto; }
+.bv-track-ctl input[type=range] { width:100%; accent-color:#f5c542; }
+#bv-track-play[aria-pressed="true"], #bv-track-pick[aria-pressed="true"] {
+    background:rgba(245,197,66,.25); color:#fff; border-color:rgba(245,197,66,.6);
+}
+#bv-track-pick[hidden] { display:none; }
+.bv-track-time { font-size:1rem; font-weight:700; color:#f5c542; font-variant-numeric:tabular-nums; }
+.bv-track-charts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.bv-track-charts canvas { height:170px; }
+@media (max-width: 1180px) { .bv-track-charts { grid-template-columns:1fr 1fr; } }
+@media (max-width: 980px) {
+    .bv-track-grid { grid-template-columns:1fr; }
+    .bv-track-charts { grid-template-columns:1fr; }
 }
 
 @media (max-width: 980px) {
@@ -634,6 +655,78 @@ details.bv-details[open] > summary::after { content:' ▴'; }
                 (<span data-bv="probeSoftening">—</span>) describes the softened mass, not finer structure.
             </p>
             <p class="bv-check-line">Identities at this point: <span data-bv="probeCheck">—</span></p>
+        </div>
+    </div>
+</section>
+
+<!-- ── Galaxy tracker ─────────────────────────────────────────────────── -->
+<!-- Every number here comes from js/bootes-void-tracker.js (node-gated by
+     tests/bootes-void-tracker.mjs); js/bootes/track-panel.js only formats it. -->
+<section class="bv-card bv-probe" id="bv-track-card">
+    <h2>Galaxy tracker — the void's galaxies through cosmic time <span class="bv-tag">linear theory</span></h2>
+    <p class="bv-q">
+        At ~230 Mpc no single star or nebula in Boötes can be resolved. What surveys find inside the void are
+        about 60 <strong>galaxies</strong>, and the H&nbsp;I and emission-line studies of them (Szomoru et al. 1996;
+        Cruzen et al. 2002) find them gas-rich, blue and forming stars — their H&nbsp;II regions <em>are</em> the
+        void's nebulae. A galaxy carries its stars and nebulae with it, so following a galaxy follows them. Pick
+        galaxies, then scrub cosmic time: each moves along its Zel'dovich path, and the charts show the force on
+        it, its speed and its distance from the void centre from 1 Gyr after the Big Bang to 6 Gyr past today.
+        The galaxies here are the page's <strong>model</strong> tracers, not catalogued ones.
+    </p>
+    <div class="bv-track-grid">
+        <div class="bv-track-ctl">
+            <h4>Cosmic time</h4>
+            <div class="bv-track-time" data-bv="trackTime">—</div>
+            <p class="bv-hint" data-bv="trackEpoch">—</p>
+            <input type="range" data-bv-track="t" min="1" max="19.8" step="0.01" value="13.07"
+                   aria-label="Cosmic time in billions of years">
+            <div class="bv-btnrow">
+                <button class="bv-btn" type="button" id="bv-track-play" aria-pressed="false">▶ Play</button>
+                <button class="bv-btn" type="button" id="bv-track-obs">Observed epoch</button>
+                <button class="bv-btn" type="button" id="bv-track-now">Today</button>
+            </div>
+            <dl class="bv-rows">
+                <dt>Void depth δ ∝ D</dt><dd data-bv="trackGrowth">—</dd>
+                <dt>Pull g ∝ (1+z)²D</dt><dd data-bv="trackGScale">—</dd>
+                <dt>Outflow v ∝ aHfD</dt><dd data-bv="trackVScale">—</dd>
+            </dl>
+            <p class="bv-hint" style="margin-top:4px">each relative to the observed epoch</p>
+            <h4>Galaxies</h4>
+            <div class="bv-btnrow">
+                <button class="bv-btn" type="button" id="bv-track-add-deep">+ Deepest</button>
+                <button class="bv-btn" type="button" id="bv-track-add-random">+ Random</button>
+                <button class="bv-btn" type="button" id="bv-track-add-probe">+ At the probe</button>
+                <button class="bv-btn" type="button" id="bv-track-pick" aria-pressed="false">Pick on stage</button>
+                <button class="bv-btn" type="button" id="bv-track-clear">Clear</button>
+            </div>
+            <label class="bv-check"><input type="checkbox" data-bv-track="animate" checked> Move every galaxy on the stage</label>
+            <label class="bv-check"><input type="checkbox" data-bv-track="paths" checked> Show tracked paths</label>
+        </div>
+        <div>
+            <table class="bv-ftable">
+                <thead><tr><th>galaxy</th><th>r, Mpc (drift since 1 Gyr)</th><th>|g| (km/s/Gyr)</th><th>void share</th>
+                    <th>v (radial), km/s</th><th>δ</th><th>T-web</th><th></th></tr></thead>
+                <tbody id="bv-track-rows"></tbody>
+            </table>
+            <div class="bv-track-charts" style="margin-top:10px">
+                <canvas data-bv-chart="trackG" aria-label="Gravitational pull on each tracked galaxy over cosmic time"></canvas>
+                <canvas data-bv-chart="trackV" aria-label="Peculiar speed of each tracked galaxy over cosmic time"></canvas>
+                <canvas data-bv-chart="trackR" aria-label="Distance of each tracked galaxy from the void centre over cosmic time"></canvas>
+            </div>
+            <p class="bv-verdict">
+                <strong>Read the first chart against the third.</strong> The void deepens with time and pushes its
+                galaxies outward ever faster — yet the pull on them, in physical units, was strongest when the
+                universe was young: it goes as (1+z)²D, which is ∝ (1+z) while matter dominates. A shallower void in a
+                denser universe pulled harder. Dark energy then freezes D, and every curve flattens.
+            </p>
+            <p class="bv-verdict bv-caution">
+                <span data-bv="trackLinear">—</span> The paths are the Zel'dovich approximation — straight comoving
+                lines through each galaxy's starting point, fields scaled from the observed epoch — not an N-body
+                orbit — and the motion is SMALL: a void galaxy drifts a few to ~15 Mpc in 18 Gyr, nothing on the
+                stage is magnified to make it look bigger. Use <em>fly to</em> (and hide the vector-field layer)
+                to watch a path up close. Times after today are linear-theory forecasts. The galaxies are model tracers; re-rolling the
+                web re-tracks each one from the same observed point.
+            </p>
         </div>
     </div>
 </section>

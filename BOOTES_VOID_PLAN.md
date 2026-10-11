@@ -253,6 +253,39 @@ linear (no honest non-spherical quasi-linear correction), the streamline is
 today's flow and not a trajectory, and the T-web class below the softening
 length describes the softened mass.
 
+## 4c. The galaxy tracker (2026-10-11)
+
+`js/bootes-void-tracker.js` (PURE) → `js/bootes/track-panel.js` (DOM) →
+`js/bootes/track-layer.js` (stage paths + rings). Asked for as "track the stars
+and nebulae inside the void": at ~230 Mpc nothing smaller than a galaxy is
+resolved, and the void's ~60 galaxies are gas-rich star-formers (Szomoru 1996,
+Cruzen 2002) whose H II regions are its nebulae — so the tracker follows
+GALAXIES, says why on the card, and says they are model tracers.
+
+Linear theory run in time, with no other dynamics: δ and the tidal field ∝ D,
+physical g ∝ (1+z)²D (the model kernel's own two (1+z) powers), Zel'dovich
+paths x(t) = x_obs + (D/D_obs − 1)ψ with ψ from the probe's linear velocity at
+z_obs, v = aHfDψ. Timeline 1 Gyr → t₀ + 6 Gyr, 140 epochs shared by every
+tracked galaxy so a chart crosshair is one instant.
+
+The result the card leads with: the void DEEPENS and its outflow SPEEDS UP,
+but the physical pull on its galaxies was strongest when the universe was
+young (g ∝ (1+z) in the matter era) — a shallower void in a denser universe
+pulled harder — and Λ then flattens every curve.
+
+| Thing | Why |
+|-------|-----|
+| f is the EXACT dlnD/dlna in the tracker, not γ = 0.55 | with γ the reported speed was not the path's own derivative (4e-4 off at t = 4 Gyr); γ is 0.4 % off at z_obs and 2 % by a = 1.4 |
+| ψ = v_probe / (aHf_exact) at z_obs | so the tracked galaxy reads EXACTLY what the force probe reads at z_obs (gated) |
+| Cosmic time is Simpson in √a | the √a matter-era integrand has infinite slope at 0 in `a` |
+| A tracked galaxy is its observed POSITION, not a tracer index | a re-roll re-samples the tracers; an index would silently follow a different galaxy. Rows say "re-tracked" |
+| At the observed epoch the stage is restored EXACTLY (`setTracerOffsetsMpc(null)` + the original web) | every other readout on the page is an observed-epoch claim about that picture — gated with strict equality |
+| The motion is NOT magnified | void galaxies drift a few to ~15 Mpc in 18 Gyr; the table prints the drift and "fly to" brings the camera to it instead |
+| Track colours avoid the term palette | void blue / web orange / clumping green / total violet already mean something on the same stage |
+
+Disclosed: linear theory past |δ| = 0.5 (flagged live — the void centre is
+≈ −0.6 at z_obs), straight Zel'dovich paths, times after today are forecasts.
+
 ---
 
 ## 5. What is deliberately NOT here
@@ -304,9 +337,10 @@ profile in the middle.*
 node tests/bootes-void-model.mjs      # 17 checks — the physics kernel
 node tests/bootes-web-model.mjs       # 12 checks — the web + published inputs
 node tests/bootes-camera-math.mjs     #  9 checks — the camera + scale arithmetic
-node tests/bootes-void-page.mjs       #  8 checks — the DOM contract (incl. the probe's)
+node tests/bootes-void-page.mjs       #  9 checks — the DOM contract (incl. probe + tracker)
 node tests/bootes-force-probe.mjs     #  9 checks — the force probe's identities
-npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js   # 17 + 6 checks
+node tests/bootes-void-tracker.mjs    #  7 checks — the galaxy tracker's clock, scalings, paths
+npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js tests/bootes-void-tracker.spec.js   # 17 + 6 + 7
 node tests/site-sections.mjs tests/simulations-catalog.mjs tests/glyphs.mjs
 node scripts/lint-nav.mjs
 ```
