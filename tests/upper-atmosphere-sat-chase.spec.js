@@ -204,11 +204,13 @@ test('the chase tracks a moving target exactly, eases to range, zooms on the lad
         // Only the lit materials pass through the curve, so the pixels that
         // DIFFER between the lifted frame and the control frame are the hull:
         // measure the hull's own level, not its share of the frame (a whole-
-        // frame sum moved 1.9 % at one framing and 0.14 % at another).
+        // frame sum moved 1.9 % at one framing and 0.14 % at another). The
+        // two frames are rendered BACK TO BACK with only the exposure swapped
+        // (no frames stepped between them — a stepped control let the volume
+        // march's jitter into the mask), so a pixel that differs at all is
+        // the hull; the > 3 floor only drops rounding.
         const grab = () => { const W = g.canvas.width, H = g.canvas.height, gl = r.getContext(); const buf = new Uint8Array(W * H * 4); r.render(g._scene, cam); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf); return buf; };
-        // (the volume march jitters by a level or two between renders, so a
-        // pixel counts as the hull only past that: |Δ| > 9 of 765)
-        const hullLevels = (a, b) => { let n = 0, sa = 0, sb = 0, any = 0; for (let i = 0; i < a.length; i += 4) { const la = a[i] + a[i + 1] + a[i + 2], lb = b[i] + b[i + 1] + b[i + 2]; if (la !== lb) any++; if (Math.abs(la - lb) > 9) { n++; sa += la; sb += lb; } } return { px: n, any, a: n ? sa / n : 0, b: n ? sb / n : 0 }; };
+        const hullLevels = (a, b) => { let n = 0, sa = 0, sb = 0, any = 0; for (let i = 0; i < a.length; i += 4) { const la = a[i] + a[i + 1] + a[i + 2], lb = b[i] + b[i + 1] + b[i + 2]; if (la !== lb) any++; if (Math.abs(la - lb) > 3) { n++; sa += la; sb += lb; } } return { px: n, any, a: n ? sa / n : 0, b: n ? sb / n : 0 }; };
         g.setSunDirOverride(radial); g.stepFrames(300, dt, { render: 'none' });
         const lit = { tm: r.toneMapping, exp: r.toneMappingExposure, rs: g.getRenderState() };
         let litN = 0, bad = []; g._scene.traverse((o) => { const m = o.material; if (!m) return; for (const mat of Array.isArray(m) ? m : [m]) { if (mat.userData?.lit) litN++; else if (mat.toneMapped !== false) bad.push(o.name || o.type); } });
@@ -218,9 +220,14 @@ test('the chase tracks a moving target exactly, eases to range, zooms on the lad
         const card = document.getElementById('ua-follow-card').textContent;
         const dark = { exp: r.toneMappingExposure, rs: g.getRenderState(), state: g.getFollowInfo().sun.state };
         const liftedFrame = grab();
-        g.setExposureLift(false); g.stepFrames(300, dt, { render: 'none' });   // CONTROL: no lift
+        // CONTROL: the lift off. The kernel's control value is asserted on the
+        // eased exposure (300 frames), the pixel control is the SAME frame at
+        // base exposure.
+        const expLifted = r.toneMappingExposure;
+        r.toneMappingExposure = V.EXPOSURE.base; const ctrlFrame = grab(); r.toneMappingExposure = expLifted;
+        const hull = hullLevels(liftedFrame, ctrlFrame);
+        g.setExposureLift(false); g.stepFrames(300, dt, { render: 'none' });
         const ctrl = { exp: r.toneMappingExposure };
-        const hull = hullLevels(liftedFrame, grab());
         g.setExposureLift(true); g.setSunDirOverride(null); g.stepFrames(2, dt, { render: 'none' });
         return { ACES: THREE.ACESFilmicToneMapping, K: V.EXPOSURE, lit, dark, ctrl, hull, census: { litN, bad: bad.slice(0, 5) }, skin, card };
     }, [DT]);
