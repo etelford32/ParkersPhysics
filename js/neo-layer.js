@@ -55,12 +55,27 @@ const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
 // ── Mesh LOD ────────────────────────────────────────────────────────────────
 // A sprite is honest for a 30 m rock two AU away; it is not for the object
 // you locked the camera on. A pool of ROCK_SLOTS rock meshes is assigned, at
-// ~10 Hz, to the selected object, the flybys inside the Earth-local frame and
-// the objects nearest the camera within ROCK_RANGE scene units; their sprites
-// are suppressed while a mesh stands in. Geometries are seeded per object and
-// cached (GEO_CACHE_MAX), so a body always has the same shape.
+// ~10 Hz, to the bodies that are RESOLVED — whose true projected diameter
+// (`drawnRockRadius` through the perspective division, exactly what POINT_VS
+// draws) has reached ROCK_HANDOFF.enterPx — biggest on screen first, with the
+// selected body ahead of the queue. Their sprites are suppressed while a mesh
+// stands in. Geometries are seeded per object and cached (GEO_CACHE_MAX), so a
+// body always has the same shape.
+//
+// THE HANDOFF IS IN PIXELS, NOT SCENE UNITS (NEO_LAYER_PLAN.md §5, Phase 2).
+// It used to be "selected + in-zone flybys + nearest within ROCK_RANGE = 2.5
+// units", a WORLD distance. After the Phase-1 size pass a 100 m rock at 2.5
+// units is a fraction of a pixel, so a pooled flyby became an INVISIBLE mesh
+// whose sprite had been switched off — and a camera-distance rule cannot be
+// continuous for bodies whose sizes span 60×. The handoff now happens BELOW
+// the impostor's pixel cap (enterPx < SPRITE.maxBodyPx), where the impostor is
+// still drawn at its true size, so dot and mesh subtend the same angle at the
+// moment they swap; the gap to leavePx is hysteresis so a body on the line
+// does not flicker. The cap only engages for resolved bodies the full pool
+// could not take.
 const ROCK_SLOTS = 24;
-const ROCK_RANGE = 2.5;
+const ROCK_HANDOFF = Object.freeze({ enterPx: 6.0, leavePx: 4.5 });   // CSS px, true diameter
+const _vRock = new THREE.Vector3();
 const GEO_CACHE_MAX = 48;
 const _Y = new THREE.Vector3(0, 1, 0);
 const _qSpin = new THREE.Quaternion();
@@ -179,7 +194,7 @@ const DPR = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRati
  *     ~13 scene units drew at the ceiling and everything past ~54 at the floor,
  *     so a whole framing of the orrery came out as one wall of same-size rocks.
  *   · THE LOD HANDOFF IS CONTINUOUS. The impostor and the rock mesh that
- *     replaces it inside ROCK_RANGE now subtend the same angle, so an object
+ *     replaces it at ROCK_HANDOFF now subtend the same angle, so an object
  *     does not jump size as it crosses the line.
  *   · RELATIVE SIZES MEAN SOMETHING. They are the (disclosed, log-compressed)
  *     real diameters — measured where JPL publishes one, else derived from H
@@ -196,7 +211,7 @@ const SPRITE = Object.freeze({
     // A PIXEL CEILING on the impostor's body (NEO_LAYER_PLAN.md §5, Phase 1).
     // The size map is still inflated, so an impostor close to the camera would
     // otherwise grow as 1/depth without bound; past this it is a marker, not
-    // a disc. Bodies that should be resolved are the rock MESHES (ROCK_RANGE).
+    // a disc. Resolved bodies are the rock MESHES (ROCK_HANDOFF, below the cap).
     maxBodyPx: 8.0,
     reticlePx: 11.0,   // an attention ring stays a legible target at any size
     padComa: 1.40,     // extra quad for a comet's coma
@@ -231,7 +246,7 @@ function drawnPx(radius, scale, coma = 0, pulse = 0) {
 // Gaussian PSF with a diffraction cross — the rendering convention for a point
 // SOURCE of light — and 38 000 of them blended additively into an orange haze
 // that read as the population glowing on its own. Worse, the rock meshes that
-// stand in inside ROCK_RANGE are shaded SUNLIT BODIES (js/neo-rocks.js), so an
+// stand in once resolved (ROCK_HANDOFF) are shaded SUNLIT BODIES (js/neo-rocks.js), so an
 // object changed species as it crossed the LOD line: a light out here, a rock
 // up close. The sprite is now the same body the mesh is, drawn as a SPHERE
 // IMPOSTOR, and everything about its appearance is computed photometry:
@@ -1311,28 +1326,53 @@ export class NeoLayer extends Emitter {
             const want = [], seen = new Set();
             const visOf = (k) => (this._baseVis ? this._baseVis[k] : 1);
             const add = (k) => { if (k != null && k >= 0 && !seen.has(k) && visOf(k)) { seen.add(k); want.push(k); } };
-            add(this.selectedIndex);
-            for (const k of this.inZone.slice(0, 12)) add(k);
-            // Nearest to the camera inside ROCK_RANGE, from the heliocentric-frame positions.
-            const cx = f.camera.position.x, cy = f.camera.position.y, cz = f.camera.position.z;
-            const R2 = ROCK_RANGE * ROCK_RANGE;
-            const near = [];
-            for (let k = 0; k < this.count; k++) {
-                if (!visOf(k)) continue;
-                const dx = this._pos[k * 3] - cx, dy = this._pos[k * 3 + 1] - cy, dz = this._pos[k * 3 + 2] - cz;
-                const d2 = dx * dx + dy * dy + dz * dz;
-                if (d2 > R2) continue;
-                if (near.length < ROCK_SLOTS || d2 < near[near.length - 1].d2) {
-                    let i = near.length; near.push(null);
-                    while (i > 0 && near[i - 1].d2 > d2) { near[i] = near[i - 1]; i--; }
-                    near[i] = { k, d2 };
-                    if (near.length > ROCK_SLOTS) near.pop();
-                }
+            const held = new Set(this._rockSlots.filter(sl => sl.index >= 0).map(sl => sl.index));
+            // TRUE projected diameter in CSS px, the same expression as POINT_VS
+            // (bodyPx before its cap) — pixels-per-unit at view depth.
+            const cam = f.camera;
+            cam.updateMatrixWorld();
+            const vm = cam.matrixWorldInverse.elements;
+            const pxNum = cam.projectionMatrix.elements[5] * this._viewCssH(f) * 0.5;
+            const enter = ROCK_HANDOFF.enterPx, leave = ROCK_HANDOFF.leavePx;
+            const pm = cam.projectionMatrix.elements;
+            const sizePx = (k, x, y, z) => {
+                const depth = -(vm[2] * x + vm[6] * y + vm[10] * z + vm[14]);
+                if (depth <= 1e-6) return 0;                                 // behind the camera
+                // OFF-SCREEN IS NOT RESOLVED: without this the pool filled with
+                // bodies beside or behind the view (24 meshes, none visible —
+                // measured on the Earth View preset) while on-screen ones that
+                // had crossed the line stayed capped dots.
+                const nx = pm[0] * (vm[0] * x + vm[4] * y + vm[8] * z + vm[12]) / depth;
+                const ny = pm[5] * (vm[1] * x + vm[5] * y + vm[9] * z + vm[13]) / depth;
+                if (Math.abs(nx) > 1.1 || Math.abs(ny) > 1.1) return 0;
+                return 2 * this._radius[k] * pxNum / depth;
+            };
+            const resolved = [];
+            const consider = (k, px) => {
+                if (!visOf(k)) return;
+                if (px >= enter || (held.has(k) && px >= leave)) resolved.push({ k, px });
+            };
+            // In-zone bodies are drawn on the Earth-local frame, not at their
+            // heliocentric position — measure them where they are drawn.
+            const zone = this.inZone || [];
+            const inZone = new Set(zone);
+            for (const k of zone) {
+                const p = this.drawnPosition(k, _vRock);
+                if (p) consider(k, sizePx(k, p.x, p.y, p.z));
             }
-            for (const n of near) { if (want.length >= ROCK_SLOTS) break; add(n.k); }
+            for (let k = 0; k < this.count; k++) {
+                if (inZone.has(k)) continue;
+                consider(k, sizePx(k, this._pos[k * 3], this._pos[k * 3 + 1], this._pos[k * 3 + 2]));
+            }
+            // The selected body jumps the queue (it is the one being looked at),
+            // but it is still meshed only once resolved: an unresolved selection
+            // is its dot plus the reticle, never an invisible sub-pixel mesh.
+            resolved.sort((a, b) => (b.k === this.selectedIndex) - (a.k === this.selectedIndex) || b.px - a.px);
+            for (const r of resolved) { if (want.length >= ROCK_SLOTS) break; add(r.k); }
+            this.rockOverflow = Math.max(0, resolved.length - ROCK_SLOTS);   // resolved but capped (disclosed)
             const wantSet = new Set(want);
             for (const slot of this._rockSlots) if (slot.index >= 0 && !wantSet.has(slot.index)) { slot.index = -1; slot.mesh.visible = false; }
-            const held = new Set(this._rockSlots.map(sl => sl.index));
+            held.clear(); for (const sl of this._rockSlots) held.add(sl.index);
             for (const k of want) {
                 if (held.has(k)) continue;
                 const slot = this._rockSlots.find(sl => sl.index < 0);
@@ -1825,8 +1865,16 @@ export class NeoLayer extends Emitter {
             if (p) {
                 this.selectedMarker.position.copy(p);
                 if (f.camera) seatReticle(this.selectedMarker, p, this._rockRadius(this.els[this.selectedIndex]), f.camera, this._viewCssH(f));
+                // The name sits just above the reticle in SCREEN terms (camera
+                // up × the ring's own pixel-floored radius). A fixed +0.03 in
+                // world Y put it at the lock camera's own distance (the lock
+                // floor is 0.03) — off the top of the frame on every lock.
                 const s = this._labels.get('selected');
-                if (s) s.position.set(p.x, p.y + 0.03, p.z);
+                if (s) {
+                    if (f.camera) _vLbl.set(0, 1, 0).applyQuaternion(f.camera.quaternion).multiplyScalar(this.selectedMarker.scale.x * 1.75);
+                    else _vLbl.set(0, 0.03, 0);
+                    s.position.copy(p).add(_vLbl);
+                }
             }
             if (this._orbitBuiltJd != null && Math.abs(f.jd - this._orbitBuiltJd) > 30) this._buildOrbit(this.selectedIndex);
         }

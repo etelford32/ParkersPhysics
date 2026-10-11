@@ -443,7 +443,7 @@ totality, and emergent earthshine phase). `js/airless-body.js` is in the
   not tied to UT (rotation.y accumulates), so a lat/lon marker would be
   placed on the wrong meridian. Tie the Earth mesh to GMST first.
 
-## 5. Sizing + LOD — PLAN (2026-10-11; Phase 1 SHIPPED same day, P2/P3 open)
+## 5. Sizing + LOD — PLAN (2026-10-11; Phases 1 + 2 SHIPPED same day, P3 open)
 
 Owner report: "NEO objects all appear way too large, the LOD system is not
 100% working for 3D, the perspective changes way too much." Shipped the same
@@ -514,6 +514,22 @@ the world, because a world-space inflation is magnified by perspective.
 - **P2:** mesh pool = selected (+ in-zone flybys); handoff radius computed
   from the marker's angular size at the moment of handoff; `_lockDistance`
   from the mesh radius.
+  **P2 shipped:** the pool rule is now IN PIXELS — a body is meshed when its
+  TRUE projected diameter (the POINT_VS expression, before the cap) reaches
+  `ROCK_HANDOFF.enterPx` 6 and released below `leavePx` 4.5 (hysteresis),
+  ON SCREEN only (NDC ±1.1), biggest first with the selection ahead of the
+  queue; `ROCK_RANGE` is gone. Because 6 < `maxBodyPx` 8 the swap happens
+  where the dot is still true size, so dot and mesh subtend the same angle.
+  Two bugs this closed, both measured from the viewpoint captures: (1) after
+  P1 a pooled in-zone flyby was a SUB-PIXEL mesh with its sprite switched off,
+  i.e. invisible; (2) without the frustum test the Earth View preset filled
+  all 24 slots with bodies beside/behind the camera (24 meshed, none on
+  screen). The selected NEO's name label also moved from a fixed +0.03 world
+  units (= the lock distance, so off-frame on every lock) to camera-up × the
+  reticle's pixel-floored radius. `layer.rockOverflow` counts resolved bodies
+  the full pool left as capped dots. Visual check: `NEO_SHOTS=<dir> npx
+  playwright test tests/solar-system-neo-smoke.spec.js -g viewpoints` writes
+  11 numbered frames + `views.json` over a seeded 2,500-object crowd.
 - **P3:** meteor streams. Meteoroids are mm–cm grains; instanced
   boulders on a converging cone read as debris falling on Earth. Replace the
   `MeteoroidStream` meshes with the existing faint streak points only (or a
