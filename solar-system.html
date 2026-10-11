@@ -137,7 +137,11 @@ nav {
 }
 
 /* ─── App shell ──────────────────────────────────────────────── */
-#app { position:relative; width:100%; height:calc(100vh - 48px); overflow:hidden; }
+/* --app-top is MEASURED (fitAppHeight in the page module): the nav is 50 px and
+   js/live-status-bar.js injects a 32 px sticky strip under it, so the old fixed
+   calc(100vh - 48px) ran the canvas 34 px past the bottom of the screen and cut
+   off the speed control and the ⊙ Center button on every viewport. */
+#app { position:relative; width:100%; height:calc(100vh - var(--app-top, 48px)); height:calc(100dvh - var(--app-top, 48px)); overflow:hidden; }
 #canvas-wrap {
     position:absolute; inset:0;
     background:radial-gradient(ellipse at 50% 50%, #01020d 0%, #000105 60%, #000 100%);
@@ -154,6 +158,48 @@ nav {
     background:rgba(6,8,14,.92); border:1px solid rgba(255,220,150,.28);
     color:#ffe9a8; font-size:11px; line-height:1.35; letter-spacing:.2px;
     box-shadow:0 4px 14px rgba(0,0,0,.55);
+}
+
+/* ─── Selection chip ─────────────────────────────────────────── */
+/* The one ALWAYS-VISIBLE way out of a selection. Clicking empty sky and Esc
+   also deselect, but neither is discoverable, and on a phone the info panel
+   is a closed drawer — without this a tap-selected body could only be let go
+   of by tapping a patch of sky the HUD may be covering. Desktop: top-centre
+   (the band between the HUD and the top-right buttons is empty). Phone:
+   bottom-centre above the time controls, inside thumb reach, with a 44 px
+   close target (the repo's touch floor). tests/solar-system-selection.spec.js */
+#sel-chip {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:60;
+    display:none; align-items:center; gap:8px;
+    max-width:min(420px, calc(100% - 24px));
+    padding:3px 3px 3px 12px; border-radius:999px;
+    background:rgba(4,3,16,.86); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,200,0,.30);
+    font-size:11px; color:#ccc; white-space:nowrap;
+}
+#sel-chip.show { display:flex; }
+#sel-chip-name { color:#ffd700; font-weight:600; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+#sel-chip-hint { color:#776; font-size:9.5px; }
+#sel-chip-x {
+    flex:none; width:26px; height:26px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.16);
+    color:#bbb; font-size:12px; line-height:1; cursor:pointer; font-family:inherit;
+    touch-action:manipulation;
+}
+#sel-chip-x:hover, #sel-chip-x:focus-visible { background:rgba(255,80,80,.18); border-color:rgba(255,80,80,.5); color:#ff8080; }
+.hint-touch { display:none; }
+@media (pointer:coarse) {
+    .hint-fine { display:none; }
+    .hint-touch { display:inline; }
+    #sel-chip-x { width:44px; height:44px; font-size:15px; }
+    #sel-chip { padding-left:16px; font-size:13px; }
+}
+@media (max-width:768px) {
+    /* --rib-clear = canvas bottom − ribbon top, measured (the time-control row
+       under the ribbon wraps to a different height on every phone width). */
+    #sel-chip { top:auto; bottom:calc(var(--rib-clear, 140px) + 8px); }
+    #sel-chip-hint { display:none; }
 }
 
 /* ─── HUD ────────────────────────────────────────────────────── */
@@ -176,9 +222,46 @@ nav {
 #hud .sep { border-top:1px solid rgba(255,200,0,.12); margin:5px 0; }
 #fps-display { color:#40ff80; font-weight:600; }
 
+/* ─── HUD header / phone collapse ────────────────────────────── */
+#hud-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+#hud-toggle { display:none; }
+@media (max-width:768px) {
+    /* The full HUD was ~245×430 px on a 390 px phone: it hid the Sun at the
+       default camera and sat under the Weather/Info buttons. On phones it
+       docks BELOW that button row and boots collapsed to name / selection /
+       date; "More" opens the rest, which then scrolls inside the canvas. */
+    #hud { top:56px; min-width:0; padding:7px 10px 7px 12px; line-height:1.6; max-width:calc(100% - 24px); }
+    #hud.collapsed #hud-more { display:none; }
+    #hud:not(.collapsed) {
+        pointer-events:auto; overflow-y:auto; overscroll-behavior:contain;
+        /* floor = ribbon + the selection chip that docks on it (52 + 8 px) */
+        max-height:calc(100% - 56px - var(--rib-clear, 160px) - 72px);
+    }
+    #hud-toggle {
+        display:inline-flex; align-items:center; pointer-events:auto;
+        min-height:44px; padding:0 14px; margin:-8px -6px -8px 0; border-radius:22px;
+        background:rgba(255,200,0,.08); border:1px solid rgba(255,200,0,.28);
+        color:#ffd700; font:inherit; font-size:11px; cursor:pointer; touch-action:manipulation;
+    }
+    /* Kp / wind / Earth G stay; Bz and flare are already in the live strip
+       under the nav, and the full ribbon was 642 px on a 390 px screen. */
+    #sw-ribbon { gap:6px; padding:5px 10px; letter-spacing:.2px; }
+    #sw-ribbon .sw-opt, #sw-earth-gl { display:none; }
+}
+@media (max-width:380px) {
+    #sw-ribbon { font-size:9px; gap:5px; }
+    #sw-ribbon .sw-val { font-size:9.5px; min-width:0; }
+}
+
+
 /* ─── Space Weather ribbon ───────────────────────────────────── */
+/* Docked ABOVE the time controls by measurement (--tc-clear, set in the page
+   module): at a fixed bottom:58px it overlapped the time-control row on
+   desktop and, on phones where that row wraps, covered its second line
+   outright — +1d…+1yr and every speed button were untappable at 360 px. */
 #sw-ribbon {
-    position:absolute; bottom:58px; left:50%; transform:translateX(-50%);
+    position:absolute; bottom:calc(var(--tc-clear, 52px) + 6px); left:50%; transform:translateX(-50%);
+    max-width:calc(100% - 24px); overflow:hidden;
     z-index:55; display:flex; align-items:center; gap:14px;
     background:rgba(0,0,0,.72); backdrop-filter:blur(10px);
     border:1px solid rgba(80,160,255,.22); border-radius:20px;
@@ -239,7 +322,9 @@ nav {
 
 /* ─── Time controls bar ──────────────────────────────────── */
 #time-controls {
-    position:absolute; bottom:44px; left:12px; z-index:15;
+    /* 50 px clears the speed slider row (bottom 16 + ~30 tall); at 44 it
+       overlapped it by 2 px on every viewport. */
+    position:absolute; bottom:50px; left:12px; z-index:15;
     display:flex; align-items:center; gap:4px; flex-wrap:wrap;
     pointer-events:auto; max-width:calc(100% - 24px);
 }
@@ -415,11 +500,23 @@ import './js/telemetry.js';
         <!-- What a click would select, for a population drawn as dark bodies a
              few pixels across (js/neo-layer.js hover/hoverText). -->
         <div id="neo-hover-tip" role="status" aria-live="off"></div>
+        <!-- What is selected, and the always-visible way to let go of it. -->
+        <div id="sel-chip" role="status" aria-live="polite">
+            <span id="sel-chip-name">—</span>
+            <span id="sel-chip-hint">Esc · click empty space</span>
+            <button type="button" id="sel-chip-x" aria-label="Deselect" title="Deselect (Esc)">✕</button>
+        </div>
         <!-- HUD -->
-        <div id="hud">
-            <h3 id="hud-name">Solar System</h3>
+        <div id="hud" class="collapsed">
+            <div id="hud-head">
+                <h3 id="hud-name">Solar System</h3>
+                <!-- Phones only (CSS): the HUD boots collapsed to these three
+                     lines; the rest is one tap away. -->
+                <button type="button" id="hud-toggle" aria-expanded="false" aria-controls="hud-more">More ▾</button>
+            </div>
             <div>Selected: <span class="val" id="hud-body">—</span></div>
             <div>Date: <span class="val" id="hud-year" style="font-variant-numeric:tabular-nums">—</span></div>
+            <div id="hud-more">
             <div style="display:flex;justify-content:space-between;margin-top:1px;">
                 <span class="dim">Ephemeris</span>
                 <span id="hud-ephem" style="font-size:9px;color:#445566;letter-spacing:.2px">Meeus</span>
@@ -482,7 +579,8 @@ import './js/telemetry.js';
                 <span class="val" id="hud-neo-closest" style="color:#ffe9a8;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">—</span>
             </div>
             <div class="sep"></div>
-            <div class="dim" style="margin-top:0">Drag · Scroll · Click a body</div>
+            <div class="dim" style="margin-top:0"><span class="hint-fine">Drag · Scroll · Click a body · Esc deselects</span><span class="hint-touch">Drag · Pinch · Tap a body · tap empty sky to deselect</span></div>
+            </div>
         </div>
 
         <!-- Overlay buttons -->
@@ -540,21 +638,21 @@ import './js/telemetry.js';
                 <span class="sw-lbl">Wind</span>
                 <span class="sw-val" id="sw-speed">—</span>
             </div>
-            <div class="sw-item" style="margin-left:-6px">
+            <div class="sw-item sw-opt" style="margin-left:-6px">
                 <span class="sw-lbl">km/s</span>
             </div>
-            <div id="sw-sep"></div>
-            <div class="sw-item">
+            <div id="sw-sep" class="sw-opt"></div>
+            <div class="sw-item sw-opt">
                 <span class="sw-lbl">IMF Bz</span>
                 <span class="sw-val" id="sw-bz">—</span>
                 <span class="sw-lbl">nT</span>
             </div>
-            <div id="sw-sep"></div>
-            <div class="sw-item">
+            <div id="sw-sep" class="sw-opt"></div>
+            <div class="sw-item sw-opt">
                 <span class="sw-lbl">Flare</span>
                 <span class="sw-val" id="sw-flare">—</span>
             </div>
-            <div id="sw-sep"></div>
+            <div id="sw-sep" class="sw-opt"></div>
             <span id="sw-flare-badge"></span>
             <div id="sw-sep"></div>
             <div class="sw-item">
@@ -600,7 +698,7 @@ import './js/telemetry.js';
                     </div>
                     <div style="margin-top:6px;font-size:8.5px;color:#445;line-height:1.4">
                         Hotkeys: <b>F</b> free · <b>L</b> lock · <b>T</b> toggle ·
-                        <b>1</b>‑<b>4</b> presets · <b>[ ]</b> prev/next body
+                        <b>1</b>‑<b>4</b> presets · <b>[ ]</b> prev/next body · <b>Esc</b> deselect
                     </div>
                 </div>
             </div>
@@ -3375,8 +3473,49 @@ function _markBody(mesh, colorHex) {
     tintReticle(bodyReticle, _cReticle.set(colorHex ?? 0xffffff).lerp(new THREE.Color(0xffffff), 0.35));
 }
 
+// ── SELECTED vs NOTHING SELECTED ─────────────────────────────────────────────
+// `selectBody(null)` means "select the SUN" (it has no planet record), so a
+// null `selectedBody` cannot also mean "nothing is selected" — `hasSelection`
+// is that bit. deselectBody() is the ONE way out of a selection: empty-sky
+// click/tap, Esc and the #sel-chip ✕ all route through it. It releases the
+// camera lock WHERE THE CAMERA IS (no fly-back: letting go must not move the
+// view) and puts the panel back to its boot state.
+let hasSelection = false;
+const selChip     = document.getElementById('sel-chip');
+const selChipName = document.getElementById('sel-chip-name');
+const selChipX    = document.getElementById('sel-chip-x');
+const _panelBoot  = { name: panelName.textContent, type: panelType.textContent, table: tbl.innerHTML };
+
+function _renderSelChip() {
+    selChip.classList.toggle('show', hasSelection);
+    if (!hasSelection) return;
+    const name = selectedBody ? (selectedBody.name ?? '—') : 'Sun';
+    selChipName.textContent = name;
+    selChipX.setAttribute('aria-label', `Deselect ${name}`);
+}
+
+function deselectBody() {
+    if (!hasSelection && neoLayer.selectedIndex == null) return false;
+    hasSelection = false;
+    selectedBody = null;
+    targetBody   = null;
+    neoLayer.select(null);
+    _markBody(null);
+    cameraMode = 'free';
+    _setModeUI();
+    hudBody.textContent   = '—';
+    panelName.textContent = _panelBoot.name;
+    panelType.textContent = _panelBoot.type;
+    tbl.innerHTML         = _panelBoot.table;
+    document.getElementById('sec-earth-sw').style.display = 'none';
+    _renderSelChip();
+    return true;
+}
+selChipX.addEventListener('click', () => deselectBody());
+
 function selectBody(p) {
     selectedBody = p;
+    hasSelection = true;
     // NEOs carry the layer's reticle; everything else carries bodyReticle.
     _markBody(p && p.neoIndex == null ? p.mesh : null, p?.color);
     // A planet / moon / Sun selection clears any NEO selection (orbit line,
@@ -3394,6 +3533,7 @@ function selectBody(p) {
             <tr><td>Luminosity</td><td>3.83×10²⁶ W</td></tr>
             <tr><td>Age</td><td>4.6 Gyr</td></tr>`;
         targetBody = null;
+        document.getElementById('sec-earth-sw').style.display = 'none';
         // Drop out of lock mode — Sun is always at world origin so 'free' is correct.
         if (typeof cameraMode !== 'undefined') { cameraMode = 'free'; _setModeUI?.(); }
     } else {
@@ -3410,6 +3550,7 @@ function selectBody(p) {
         // The animate loop reads `cameraMode` and only follows when it's 'lock'.
         if (typeof setCamLock === 'function') setCamLock(p);
     }
+    _renderSelChip();
 }
 let targetBody = null;
 // `cameraMode` is declared in the CAMERA section below; selectBody only touches
@@ -3422,8 +3563,13 @@ const meshes    = PLANETS.map(p => p.mesh);
 meshes.push(sunMesh);
 allMoonMeshes.forEach(m => meshes.push(m));
 
-// Double-click tracking — double-clicking Earth zooms into the Earth simulation
-let _lastClickMs = 0;
+// Double-click tracking — double-clicking Earth zooms into the Earth simulation.
+// Timed on event.timeStamp, never performance.now(): on a busy frame a pointer
+// event is DELIVERED hundreds of ms after it was generated, and a handler-clock
+// window silently dropped real double-taps (the mars.html 914 ms scar). 500 ms
+// is what Chromium and iOS synthesise for dblclick.
+const DOUBLE_TAP_MS = 500;
+let _lastClickMs = -Infinity;
 let _lastClickName = '';
 
 // ── A CLICK IS NOT THE START OF A DRAG ───────────────────────────────────────
@@ -3462,9 +3608,9 @@ function _selectAt(e) {
         if (obj === sunMesh) _markBody(sunMesh, 0xffd27a);
 
         // Double-click on Earth → open Earth simulation
-        const now  = performance.now();
+        const now  = e.timeStamp;
         const name = body?.name ?? 'Sun';
-        if (name === 'Earth' && now - _lastClickMs < 400 && _lastClickName === 'Earth') {
+        if (name === 'Earth' && now - _lastClickMs < DOUBLE_TAP_MS && _lastClickName === 'Earth') {
             navigateTo('earth.html');
         }
         _lastClickMs   = now;
@@ -3474,12 +3620,39 @@ function _selectAt(e) {
     // No planet / moon under the cursor — ask the NEO layer what is, in PIXELS.
     // (js/neo-layer.js pick(): the accept radius is the object's DRAWN radius.)
     const nb = neoLayer.pick({ camera, raycaster, ndc: { x: mouse.x, y: mouse.y }, pixels: { w: rect.width, h: rect.height } });
-    if (nb) { const body = neoLayer.select(nb.index); if (body) selectBody(body); }
+    if (nb) { const body = neoLayer.select(nb.index); if (body) selectBody(body); return; }
+    // Nothing under the pointer at all: a clean click / tap on empty sky lets
+    // go of the selection. Only a CLEAN one reaches here (onPointerUp's slop +
+    // duration tests), so ending a camera drag never deselects.
+    _lastClickName = '';
+    deselectBody();
 }
+
+// ── A PINCH IS NOT A TAP ─────────────────────────────────────────────────────
+// `_press` tracks ONE pointer. A second finger used to overwrite it, so a pinch
+// whose second finger lifted without travelling read as a TAP at that finger —
+// harmless while empty sky did nothing, a lost selection once it deselects.
+// Any gesture that ever had two touches down is the camera's until every
+// finger is up. Window-level up/cancel keep the set honest when a finger
+// lifts off the canvas.
+const _touchesDown = new Set();
+let _multiTouch = false;
+function _touchEnded(e) {
+    if (e.pointerType === 'mouse') return;
+    _touchesDown.delete(e.pointerId);
+    if (_touchesDown.size === 0) _multiTouch = false;
+}
+window.addEventListener('pointerup', _touchEnded, true);
+window.addEventListener('pointercancel', _touchEnded, true);
 
 function onPointerDown(e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;   // right / middle belong to the camera
-    _press = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), drag: false, slop: _slopFor(e) };
+    if (e.pointerType !== 'mouse') {
+        _touchesDown.add(e.pointerId);
+        if (_touchesDown.size > 1) _multiTouch = true;
+        if (_multiTouch) { _press = null; _hoverHide(); return; }
+    }
+    _press = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, drag: false, slop: _slopFor(e) };
     _hoverHide();
 }
 function onPointerMove(e) {
@@ -3492,8 +3665,8 @@ function onPointerMove(e) {
 function onPointerUp(e) {
     const p = _press;
     _press = null;
-    if (!p || e.pointerId !== p.id || p.drag) return;
-    if (performance.now() - p.t > CLICK_MAX_MS) return;
+    if (!p || e.pointerId !== p.id || p.drag || _multiTouch) return;
+    if (e.timeStamp - p.t > CLICK_MAX_MS) return;
     if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > p.slop) return;
     _selectAt(e);
 }
@@ -3779,6 +3952,13 @@ window.addEventListener('keydown', (ev) => {
     const tgt = ev.target;
     if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
     const k = ev.key.toLowerCase();
+    if (k === 'escape') {
+        // Esc lets go of the selection; with nothing selected it closes the
+        // info drawer instead (the panel's ✕ has no key otherwise).
+        if (deselectBody()) { ev.preventDefault(); return; }
+        if (panel.classList.contains('open')) { closePanel(); ev.preventDefault(); }
+        return;
+    }
     if (_PRESET_KEYS[k]) { setCam(_PRESET_KEYS[k]); ev.preventDefault(); return; }
     if (k === 'f') { setCamFree();                    ev.preventDefault(); return; }
     if (k === 'l') { if (targetBody) setCamLock(targetBody); ev.preventDefault(); return; }
@@ -3792,9 +3972,12 @@ window.addEventListener('keydown', (ev) => {
         // Cycle through the all-bodies list (Sun + planets + moons)
         const flat = [null, ...PLANETS];
         for (const p of PLANETS) if (p.moons) for (const m of p.moons) flat.push(m);
-        const cur = flat.indexOf(selectedBody);
         const dir = (k === ']') ? 1 : -1;
-        const nxt = flat[((cur + dir) + flat.length) % flat.length];
+        // With nothing selected, ] starts at the Sun and [ at the last moon
+        // (indexOf(null) would otherwise read "nothing" as "the Sun").
+        const nxt = hasSelection
+            ? flat[((flat.indexOf(selectedBody) + dir) + flat.length) % flat.length]
+            : flat[dir > 0 ? 0 : flat.length - 1];
         selectBody(nxt);
         ev.preventDefault();
     }
@@ -3813,6 +3996,60 @@ function resize() {
 const ro = new ResizeObserver(resize);
 ro.observe(cWrap);
 resize();
+
+// #app fills what is left of the screen below the chrome above it. Measured,
+// not typed: the status strip arrives asynchronously (and can change height),
+// and the chrome's own height differs by breakpoint.
+function fitAppHeight() {
+    const app = document.getElementById('app');
+    const top = Math.max(0, Math.round(app.getBoundingClientRect().top + window.scrollY));
+    document.documentElement.style.setProperty('--app-top', `${top}px`);
+}
+const _chromeRo = new ResizeObserver(fitAppHeight);
+_chromeRo.observe(document.querySelector('nav'));
+const _watchStrip = () => { const b = document.getElementById('lsb-bar'); if (b) { _chromeRo.observe(b); return true; } return false; };
+if (!_watchStrip()) {
+    const mo = new MutationObserver(() => { if (_watchStrip()) { mo.disconnect(); fitAppHeight(); } });
+    mo.observe(document.body, { childList: true, subtree: true });
+}
+window.addEventListener('resize', fitAppHeight);
+fitAppHeight();
+
+// The bottom overlays STACK by measurement: time controls (which wrap to a
+// different height at every width) → the ribbon above them (--tc-clear) →
+// the phone selection chip and the expanded phone HUD's floor (--rib-clear).
+// The ribbon's clearance is computed, not read back from its own rect, so a
+// ResizeObserver (which fires on size, never on position) is enough.
+const _tcEl  = document.getElementById('time-controls');
+const _ribEl = document.getElementById('sw-ribbon');
+function fitBottomStack() {
+    if (!_tcEl) return;
+    const tcClear = Math.round(cWrap.getBoundingClientRect().bottom - _tcEl.getBoundingClientRect().top);
+    if (!(tcClear > 0)) return;
+    cWrap.style.setProperty('--tc-clear', `${tcClear}px`);
+    const ribH = _ribEl && getComputedStyle(_ribEl).display !== 'none' ? _ribEl.offsetHeight : 0;
+    cWrap.style.setProperty('--rib-clear', `${tcClear + (ribH ? 6 + ribH : 0)}px`);
+}
+const _stackRo = new ResizeObserver(fitBottomStack);
+[_tcEl, _ribEl, cWrap].forEach(el => el && _stackRo.observe(el));
+fitBottomStack();
+
+// Phone HUD collapse (CSS applies it only ≤768 px). The choice is a per-viewer
+// convenience, so it lives in localStorage — wrapped, because private windows
+// throw — and the page renders correctly without it.
+const HUD_OPEN_KEY = 'pp_orrery_hud_open';
+const hudEl = document.getElementById('hud');
+const hudToggle = document.getElementById('hud-toggle');
+function setHudOpen(open, persist = true) {
+    hudEl.classList.toggle('collapsed', !open);
+    hudToggle.setAttribute('aria-expanded', String(open));
+    hudToggle.textContent = open ? 'Less ▴' : 'More ▾';
+    if (persist) { try { localStorage.setItem(HUD_OPEN_KEY, open ? '1' : '0'); } catch {} }
+}
+let _hudOpen = false;
+try { _hudOpen = localStorage.getItem(HUD_OPEN_KEY) === '1'; } catch {}
+setHudOpen(_hudOpen, false);
+hudToggle.addEventListener('click', () => setHudOpen(hudEl.classList.contains('collapsed')));
 
 // ═══════════════════════════════════════════════════════
 //  TIME CONTROLS — jump, warp, date picker
@@ -4080,7 +4317,21 @@ neoLayer.on('catalog', _renderNeoLedger);
 
 // Test / console hook (tests/solar-system-neo-smoke.spec.js reads this).
 window.__neoLab = {
-    layer: neoLayer, panel: neoPanel, simDist, selectBody,
+    layer: neoLayer, panel: neoPanel, simDist, selectBody, deselectBody,
+    get hasSelection() { return hasSelection; },
+    get cameraMode() { return cameraMode; },
+    get controlsTarget() { return controls.target.toArray(); },
+    get cameraPosition() { return camera.position.toArray(); },
+    /** Client-pixel centre + drawn radius of a planet/moon/'Sun', so the
+     *  selection gate can click a body the way a person does. */
+    bodyPixel(name) {
+        const rec = name === 'Sun' ? { mesh: sunMesh } : [...PLANETS, ...PLANETS.flatMap(p => p.moons ?? [])].find(b => b.name === name);
+        if (!rec?.mesh) return null;
+        const r = renderer.domElement.getBoundingClientRect();
+        const c = rec.mesh.position.clone().project(camera);
+        if (!(c.z > -1 && c.z < 1)) return null;
+        return { x: r.left + (c.x * 0.5 + 0.5) * r.width, y: r.top + (-c.y * 0.5 + 0.5) * r.height };
+    },
     // The camera and the canvas are exposed so the browser gate can turn a
     // drawn position into a PIXEL and click it — the pick contract is stated in
     // pixels, so a test that cannot measure pixels cannot check it.

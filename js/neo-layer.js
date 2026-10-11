@@ -97,6 +97,16 @@ const _cHover = new THREE.Color();
 // the NDC y range, so 0.055 is a little under one label of clearance).
 const LOCAL_LABEL_MAX = 8;
 const LABEL_SEP_NDC = { x: 0.26, y: 0.055 };
+// Radiant guide scale (Earth-local units) and the share of the view height it
+// must span before its shower label is drawn (_placeRadiantLabels). The guide
+// shaft itself is sized off STREAM.halfLen; this is the gate's yardstick.
+const RADIANT_TAIL = 1.05;
+const RADIANT_LABEL_MIN_FRAC = 0.25;
+const RADIANT_LABEL_AT = 0.72;                // label anchor, along the radiant axis
+// A shower label is drawn only inside this NDC box: the frame edges are where
+// the page chrome sits (HUD left, time bar + ribbon bottom), and a label half
+// under a button is the garble this rule exists to stop.
+const RADIANT_LABEL_SAFE = { x: 0.82, yTop: 0.82, yBottom: -0.62 };
 const _vLbl = new THREE.Vector3();
 
 export const NEO_COLORS = Object.freeze({
@@ -1632,7 +1642,8 @@ export class NeoLayer extends Emitter {
         if (this.orbitLine) this.orbitLine.visible = this.visible.orbit;
         this.localGroup.visible = this.visible.local;
         for (const [, line] of this._trails) line.visible = this.visible.local;
-        for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.label.visible = v && this.visible.labels; r.stream.visible = v; }
+        for (const r of this._radiants) { const v = this.visible.radiants; r.line.visible = v; r.stream.visible = v; }
+        this._placeRadiantLabels(true);
         for (const slot of this._rockSlots) if (slot.index >= 0) slot.mesh.material.uniforms.u_base.value.copy(colorFor(this.els[slot.index], this.visible.colorMode, _cB));
         if (this.rGeo) this._refreshCometTails();
         this._applyStyles();
@@ -1815,7 +1826,10 @@ export class NeoLayer extends Emitter {
             }
             r.line.position.copy(mid);
             r.line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-            r.label.position.copy(outer).addScalar(0.02);
+            // Inside the guide, not at its far tip: the tip lands at the frame
+            // edge under the time bar from the Earth View framing (0.72 is the
+            // anchor the shower-label gate was measured on).
+            r.label.position.copy(dir).multiplyScalar(RADIANT_LABEL_AT).addScalar(0.02);
             const U = r.stream.material.uniforms;
             U.u_dir.value.copy(dir);
             // Any orthonormal pair across the track defines the impact-parameter disc.
@@ -1824,7 +1838,53 @@ export class NeoLayer extends Emitter {
             U.u_e2.value.crossVectors(dir, U.u_e1.value).normalize();
             U.u_speed.value = s.vKms * STREAM.speedPerKms;   // relative: a 71 km/s Leonid outruns a 22 km/s Draconid
             const vis = this.visible.radiants;
-            r.line.visible = vis; r.label.visible = vis && this.visible.labels; r.stream.visible = vis;
+            r.line.visible = vis; r.stream.visible = vis;
+        }
+        // Strongest first (`want` is ranked by ZHR × activity): the label
+        // de-clutter keeps the first of any overlapping pair.
+        const rank = new Map(want.map((x, i) => [x.shower.code, i]));
+        this._radiants.sort((a, b) => rank.get(a.code) - rank.get(b.code));
+        this._placeRadiantLabels(true);
+    }
+
+    // ── SHOWER LABELS FOLLOW THE SAME ZOOM RULE AS EVERY OTHER LOCAL LABEL ──
+    // They are fixed-pixel sprites (sizeAttenuation:false) anchored ~1 unit out
+    // from Earth, so at the system-wide framing all three active showers'
+    // labels landed on Earth's few pixels and printed over one another
+    // ("S. Taurids ZHR~3 · 27 km/s" through "Orionids ZHR…" — reported as
+    // garbled text on the opening view). The ring and object labels have had a
+    // zoom gate all along; these had none. Now: shown only once the radiant
+    // arrows span RADIANT_LABEL_MIN_FRAC of the view (the arrows are what the
+    // labels name — while they are a few pixels the label names nothing), and
+    // strongest-first through the same screen-separation test as the object
+    // labels, so two radiants in one patch of sky (Orionids / S. Taurids both
+    // sit in Orion–Taurus) never print on top of each other. Unlike the object
+    // labels, a radiant label near the FRAME EDGE is dropped too
+    // (RADIANT_LABEL_SAFE): there are only ever ≤3, nothing churns, and the
+    // edge is where the page's own buttons are.
+    _placeRadiantLabels(force = false) {
+        const cam = this._camera;
+        if (!this._radiants.length) return;
+        let show = this.visible.radiants && this.visible.labels && !!cam;
+        if (show) {
+            const dEarth = Math.max(0.05, cam.position.distanceTo(this._earthDrawn));
+            // fov 50°: a radius r at distance d spans ≈ 1.07·r/d of the view height.
+            show = 1.07 * RADIANT_TAIL / dEarth > RADIANT_LABEL_MIN_FRAC;
+        }
+        if (!show) {
+            if (force || this._radiantLabelsOn) for (const r of this._radiants) r.label.visible = false;
+            this._radiantLabelsOn = false;
+            return;
+        }
+        this._radiantLabelsOn = true;
+        const placed = [];
+        for (const r of this._radiants) {          // _radiants is strongest-first
+            const p = r.label.getWorldPosition(_vLbl).project(cam);
+            const S = RADIANT_LABEL_SAFE;
+            let clear = p.z > -1 && p.z < 1 && Math.abs(p.x) <= S.x && p.y <= S.yTop && p.y >= S.yBottom;
+            if (clear) for (const q of placed) if (Math.abs(q.x - p.x) < LABEL_SEP_NDC.x && Math.abs(q.y - p.y) < LABEL_SEP_NDC.y) { clear = false; break; }
+            if (clear) placed.push({ x: p.x, y: p.y });
+            r.label.visible = clear;
         }
     }
 
@@ -1881,6 +1941,7 @@ export class NeoLayer extends Emitter {
             }
         }
         if (jdChanged) this._requestFrame(false);
+        this._placeRadiantLabels();
         // Radiants ride the sim date (λ☉ moves ~1°/day, cheap to re-evaluate every ~0.1 d).
         if (this._radiantJd == null || Math.abs(f.jd - this._radiantJd) > 0.1) { this._radiantJd = f.jd; this._refreshRadiants(f.jd, f.earthOfDate.lon_rad); }
         // Flyby highlight set depends on the sim date (±7 d) — refresh every sim-day.
