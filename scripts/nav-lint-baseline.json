@@ -1,5 +1,5 @@
 {
-  "_comment": "Known nav non-compliance (Phase 1–4 worklist). CI ratchet: pages here may keep ONLY these violation types until standardized. Remove an entry once fixed, or run --write-baseline. Never add by hand.",
+  "_comment": "Known nav non-compliance (Phase 1\u20134 worklist). CI ratchet: pages here may keep ONLY these violation types until standardized. Remove an entry once fixed, or run --write-baseline. Never add by hand.",
   "api-policy.html": [
     "ghostCss",
     "noNavJs",
@@ -24,11 +24,6 @@
   ],
   "earth.html": [
     "ghostCss"
-  ],
-  "eula.html": [
-    "ghostCss",
-    "noNavJs",
-    "noNavStyles"
   ],
   "feedback.html": [
     "ghostCss"
