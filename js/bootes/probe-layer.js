@@ -239,11 +239,14 @@ export function createProbeLayer({ root, canvas, camera, toScene, fromScene }) {
         raycaster.setFromCamera(ndc, camera);
         camera.getWorldDirection(viewDir);
         const anchor = positionMpc
-            ? new THREE.Vector3(...positionMpc.map(toScene))
+            ? new THREE.Vector3(...positionMpc.map(toScene)).multiplyScalar(group.scale.x || 1)
             : new THREE.Vector3(0, 0, 0);
         plane.setFromNormalAndCoplanarPoint(viewDir, anchor);
         if (!raycaster.ray.intersectPlane(plane, hit)) return null;
-        return [fromScene(hit.x), fromScene(hit.y), fromScene(hit.z)];
+        // The tracker's proper-distance frame scales this group; a drag must
+        // land in COMOVING Mpc like every probe position.
+        const k = 1 / (group.scale.x || 1);
+        return [fromScene(hit.x * k), fromScene(hit.y * k), fromScene(hit.z * k)];
     }
 
     const wants = (event) => enabled && event.button === 0 && (event.shiftKey || armed);

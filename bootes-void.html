@@ -345,6 +345,12 @@ details.bv-details[open] > summary::after { content:' ▴'; }
 .bv-track-ctl .bv-btnrow { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px; }
 .bv-track-ctl .bv-btnrow .bv-btn { width:auto; flex:1 1 auto; }
 .bv-track-ctl input[type=range] { width:100%; accent-color:#f5c542; }
+.bv-track-ctl label { display:block; margin-bottom:7px; color:#9aa4bd; font-size:.74rem; }
+.bv-track-ctl label.bv-check { display:flex; }
+.bv-track-ctl select {
+    width:100%; margin-top:3px; background:#0a0f24; color:#cdd5e4; border:1px solid rgba(90,110,160,.4);
+    border-radius:7px; padding:5px 7px; font:inherit; font-size:.74rem;
+}
 #bv-track-play[aria-pressed="true"], #bv-track-pick[aria-pressed="true"] {
     background:rgba(245,197,66,.25); color:#fff; border-color:rgba(245,197,66,.6);
 }
@@ -663,14 +669,17 @@ details.bv-details[open] > summary::after { content:' ▴'; }
 <!-- Every number here comes from js/bootes-void-tracker.js (node-gated by
      tests/bootes-void-tracker.mjs); js/bootes/track-panel.js only formats it. -->
 <section class="bv-card bv-probe" id="bv-track-card">
-    <h2>Galaxy tracker — the void's galaxies through cosmic time <span class="bv-tag">linear theory</span></h2>
+    <h2>Galaxy tracker — the void's galaxies through cosmic time <span class="bv-tag">nonlinear shells</span></h2>
     <p class="bv-q">
         At ~230 Mpc no single star or nebula in Boötes can be resolved. What surveys find inside the void are
         about 60 <strong>galaxies</strong>, and the H&nbsp;I and emission-line studies of them (Szomoru et al. 1996;
         Cruzen et al. 2002) find them gas-rich, blue and forming stars — their H&nbsp;II regions <em>are</em> the
         void's nebulae. A galaxy carries its stars and nebulae with it, so following a galaxy follows them. Pick
-        galaxies, then scrub cosmic time: each moves along its Zel'dovich path, and the charts show the force on
-        it, its speed and its distance from the void centre from 1 Gyr after the Big Bang to 6 Gyr past today.
+        galaxies, then scrub cosmic time. Each galaxy's spherical shell is evolved with the EXACT nonlinear
+        shell equation in ΛCDM (inverted from the observed profile), with the lumpy web's pull added in linear
+        theory on top. The charts show the force on it, its speed and its distance from the void
+        centre from 1 Gyr after the Big Bang to 6 Gyr past today, with the ±20 % bias band and the old linear
+        answer ghosted for comparison.
         The galaxies here are the page's <strong>model</strong> tracers, not catalogued ones.
     </p>
     <div class="bv-track-grid">
@@ -701,11 +710,27 @@ details.bv-details[open] > summary::after { content:' ▴'; }
             </div>
             <label class="bv-check"><input type="checkbox" data-bv-track="animate" checked> Move every galaxy on the stage</label>
             <label class="bv-check"><input type="checkbox" data-bv-track="paths" checked> Show tracked paths</label>
+            <label class="bv-check"><input type="checkbox" data-bv-track="follow"> Camera follows galaxy A</label>
+            <h4>Model</h4>
+            <label>Dynamics
+                <select data-bv-track="mode">
+                    <option value="nonlinear" selected>Nonlinear shells + linear web (default)</option>
+                    <option value="linear">Linear theory only (reference)</option>
+                </select>
+            </label>
+            <label>Distances on the stage
+                <select data-bv-track="frame">
+                    <option value="comoving" selected>Comoving — expansion divided out</option>
+                    <option value="proper">Proper — include cosmic expansion</option>
+                </select>
+            </label>
+            <p class="bv-hint" data-bv="trackFrame">—</p>
+            <label class="bv-check"><input type="checkbox" data-bv-track="band" checked> Bias band <span class="bv-val" data-bv="trackBand">—</span></label>
         </div>
         <div>
             <table class="bv-ftable">
                 <thead><tr><th>galaxy</th><th>r, Mpc (drift since 1 Gyr)</th><th>|g| (km/s/Gyr)</th><th>void share</th>
-                    <th>v (radial), km/s</th><th>δ</th><th>T-web</th><th></th></tr></thead>
+                    <th>v (radial), km/s</th><th>Δ(&lt;r)</th><th>T-web</th><th></th></tr></thead>
                 <tbody id="bv-track-rows"></tbody>
             </table>
             <div class="bv-track-charts" style="margin-top:10px">
@@ -719,13 +744,16 @@ details.bv-details[open] > summary::after { content:' ▴'; }
                 universe was young: it goes as (1+z)²D, which is ∝ (1+z) while matter dominates. A shallower void in a
                 denser universe pulled harder. Dark energy then freezes D, and every curve flattens.
             </p>
+            <p class="bv-verdict" data-bv="trackNlGain">—</p>
             <p class="bv-verdict bv-caution">
-                <span data-bv="trackLinear">—</span> The paths are the Zel'dovich approximation — straight comoving
-                lines through each galaxy's starting point, fields scaled from the observed epoch — not an N-body
-                orbit — and the motion is SMALL: a void galaxy drifts a few to ~15 Mpc in 18 Gyr, nothing on the
-                stage is magnified to make it look bigger. Use <em>fly to</em> (and hide the vector-field layer)
-                to watch a path up close. Times after today are linear-theory forecasts. The galaxies are model tracers; re-rolling the
-                web re-tracks each one from the same observed point.
+                <span data-bv="trackRegime">—</span> What is exact and what is not: each galaxy's SPHERICAL shell
+                follows Newton's shell equation in ΛCDM exactly until it crosses a neighbouring shell (flagged); the
+                lumpy web's extra pull is first-order, and the web's own mass does not respond to the void — this is
+                not an N-body run. The shaded band is the page's dominant systematic, tracer bias b ± 20 %, run
+                through the whole model; it is not a statistical interval. Times after today are model forecasts.
+                The motion in comoving distances is SMALL — a few to ~15 Mpc in 18 Gyr — and nothing is magnified;
+                switch to proper distances to see the expansion it rides on, or let the camera follow galaxy A. The
+                galaxies are model tracers; re-rolling the web re-tracks each one from the same observed point.
             </p>
         </div>
     </div>

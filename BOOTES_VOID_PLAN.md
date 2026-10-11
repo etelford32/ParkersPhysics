@@ -286,6 +286,42 @@ pulled harder — and Λ then flattens every curve.
 Disclosed: linear theory past |δ| = 0.5 (flagged live — the void centre is
 ≈ −0.6 at z_obs), straight Zel'dovich paths, times after today are forecasts.
 
+### 4c.1 Nonlinear shells, the bias band, proper distances (2026-10-11, second pass)
+
+Asked for directly: the four caveats the first tracker shipped with. What each
+became:
+
+| Caveat | Now |
+|--------|-----|
+| "linear theory, straight lines" | DEFAULT mode is nonlinear: each galaxy's SPHERICAL shell (the full profile δ⁻ + δ⁺) follows Newton's shell equation in ΛCDM — `y'' + (2 − 1.5Ωm)y' = −(Ωm/2)(y⁻² − y)`, Λ cancels between shell and background — integrated once into a table (`shellTable`, ~0.1 s) and INVERTED at z_obs because the profile is the observed nonlinear state. The clumped part (web − smooth wall) stays linear on top. Linear mode is kept as the A/B reference and ghosted on the charts |
+| "the centre is too deep for linear theory" | gone with the above; the live flag is now SHELL CROSSING (local δ from neighbouring shells, 1 + δ = d(q³)/d(r³)), where any spherical model stops |
+| "times after today are forecasts" | still forecasts, now with the page's dominant systematic run through them: the whole model (profile + web + dynamics) at b × 0.8 and b × 1.2, shaded on every chart. A systematic band, not a statistical interval — the card says so |
+| "the motion is small" | still not magnified. Added a PROPER-distance frame (the drawn universe × a(t)/a_obs, exactly 1 at z_obs) so the reader sees how much growth is cosmic expansion, and a follow camera that TRANSLATES the rig by exactly the galaxy's motion (star-collider rule) |
+
+Measured and gated (`tests/bootes-void-tracker.mjs` §8–12):
+
+- The table reproduces the exact Ωm = 1 parametric solution to 9e-4 in (1+Δ)
+  out to Δ_L = −4, and its linear limit at every epoch.
+- Bernardeau's ν = 3/2 closed form is 1.1 % off at Δ_L = −1 and 5.9 % at −5 —
+  MEASURED, and the gate fails if the table is ever replaced by the formula.
+- At z_obs: position, force and void share equal the probe's exactly; local δ
+  from shell spacing equals the profile's δ (mass conservation).
+- Nonlinear outflow is +12 % over linear at 0.45 R_eff.
+- Paths bow by ~6 kpc over ~10 Mpc near the wall — REAL BUT SMALL (both clocks
+  are monotone). Gated at > 1 kpc vs linear's exactly-zero; never oversold.
+- SHELL CROSSING never happens in the page's void, nor in any smooth HSW
+  profile tried (α up to 8, β up to 40). It fires inside a thin dense wall —
+  at a = 1.21 with Ωm = 1 and a = 1.47 in ΛCDM: dark energy stalls the
+  growth that drives it. A void edge that has not crossed by now essentially
+  never will.
+
+Scars from this pass: `drawTrackSeries`' `series` parameter shadows the
+module's `series()` helper (the ghost line called the array) — reached through
+`drawLine`; the band and ghost re-use the ONE timeline so a crosshair is one
+instant; proper-frame label sprites are counter-scaled (they are text, not
+geometry) and the probe's drag divides by its group scale so it still lands in
+comoving Mpc.
+
 ---
 
 ## 5. What is deliberately NOT here
@@ -339,8 +375,8 @@ node tests/bootes-web-model.mjs       # 12 checks — the web + published inputs
 node tests/bootes-camera-math.mjs     #  9 checks — the camera + scale arithmetic
 node tests/bootes-void-page.mjs       #  9 checks — the DOM contract (incl. probe + tracker)
 node tests/bootes-force-probe.mjs     #  9 checks — the force probe's identities
-node tests/bootes-void-tracker.mjs    #  7 checks — the galaxy tracker's clock, scalings, paths
-npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js tests/bootes-void-tracker.spec.js   # 17 + 6 + 7
+node tests/bootes-void-tracker.mjs    # 12 checks — the tracker's clock, linear + nonlinear shells
+npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js tests/bootes-void-tracker.spec.js   # 17 + 6 + 11
 node tests/site-sections.mjs tests/simulations-catalog.mjs tests/glyphs.mjs
 node scripts/lint-nav.mjs
 ```

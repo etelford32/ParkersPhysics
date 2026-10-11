@@ -172,8 +172,27 @@ export function initBootesPage(root = document) {
     // carry — through cosmic time, in linear theory. Same `derived`, same
     // `set`. Arming its pick tool disarms the probe's (whose capture-phase
     // listener would otherwise swallow the tap), and vice versa.
+    // The galaxy tracker's ±20 % bias band needs the WHOLE model at another
+    // bias — profile AND web (the web's mass is the profile's wall) — with the
+    // same seed and clumpiness, so the band is the bias systematic and nothing
+    // else. Cached per (preset, bias, seed, clumpiness); a recompute clears it.
+    const variantCache = new Map();
+    function getVariant(bias) {
+        const key = `${state.preset}|${bias.toFixed(4)}|${state.seed}|${state.clumpiness}`;
+        if (!variantCache.has(key)) {
+            if (variantCache.size > 8) variantCache.clear();
+            const profile = buildProfile(bias);
+            const web = createCosmicWeb({
+                voidProfile: profile, anchors, seed: state.seed, clumpiness: state.clumpiness, z: Z,
+            });
+            variantCache.set(key, { profile, web });
+        }
+        return variantCache.get(key);
+    }
+
     const trackPanel = createTrackPanel({
         root, set, scene, charts, getDerived: () => derived, rEff, z: Z,
+        getVariant, getBias: () => state.bias,
         getProbePosition: () => probePanel.state.positionMpc,
         onArmPick: () => probePanel.setArmed(false),
     });
@@ -262,9 +281,9 @@ export function initBootesPage(root = document) {
     let derived = null;
     let pending = null;
 
-    function buildProfile() {
+    function buildProfile(bias = state.bias) {
         const preset = PROFILE_PRESETS[state.preset] ?? PROFILE_PRESETS['hsw-supervoid'];
-        const deltaC = matterContrastFromGalaxy(preset.centralGalaxyContrast, state.bias);
+        const deltaC = matterContrastFromGalaxy(preset.centralGalaxyContrast, bias);
         return createVoidProfile({
             deltaC,
             rvMpc: rEff,

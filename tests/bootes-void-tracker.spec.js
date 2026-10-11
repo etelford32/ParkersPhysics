@@ -40,7 +40,7 @@ test.describe('Boötes Void — galaxy tracker', () => {
         page.on('pageerror', e => errors.push(String(e)));
         await ready(page);
         expect(await rows(page)).toBe(1);
-        for (const key of ['trackTime', 'trackEpoch', 'trackGrowth', 'trackGScale', 'trackVScale', 'trackLinear']) {
+        for (const key of ['trackTime', 'trackEpoch', 'trackGrowth', 'trackGScale', 'trackVScale', 'trackRegime', 'trackNlGain', 'trackBand', 'trackFrame']) {
             expect((await text(page, key)).trim(), key).not.toBe('—');
         }
         // Booted at the observed epoch: every scaling is exactly 1.
@@ -115,7 +115,7 @@ test.describe('Boötes Void — galaxy tracker', () => {
         expect(await rows(page)).toBe(2);
         await page.click('#bv-track-clear');
         expect(await rows(page)).toBe(0);
-        await expect(page.locator('[data-bv="trackLinear"]').first()).toContainText('Nothing tracked');
+        await expect(page.locator('[data-bv="trackRegime"]').first()).toContainText('Nothing tracked');
     });
 
     test('the pick tool adds the galaxy under a tap and disarms the probe tool', async ({ page }) => {
@@ -172,5 +172,78 @@ test.describe('Boötes Void — galaxy tracker', () => {
         await expect(page.locator('#bv-track-rows tr').first()).toContainText('re-tracked', { timeout: 10000 });
         const after = await page.evaluate(() => window.__bootesLab.tracker.state.tracked[0].xObsMpc);
         expect(after).toEqual(before);
+    });
+
+    test('nonlinear is the default; switching to linear changes the numbers and says so', async ({ page }) => {
+        await ready(page);
+        await expect(page.locator('[data-bv-track="mode"]')).toHaveValue('nonlinear');
+        await expect(page.locator('[data-bv="trackNlGain"]').first()).toContainText('nonlinear vs');
+        const vNL = await page.evaluate(() => window.__bootesLab.tracker.tracked[0].main.samples.at(-1).vKms);
+        await page.selectOption('[data-bv-track="mode"]', 'linear');
+        await expect(page.locator('[data-bv="trackNlGain"]').first()).toContainText('Linear mode');
+        await expect(page.locator('[data-bv="trackRegime"]').first()).toContainText('Linear mode');
+        const vLin = await page.evaluate(() => window.__bootesLab.tracker.tracked[0].main.samples.at(-1).vKms);
+        expect(vNL).toBeGreaterThan(vLin * 1.02);            // the deepest void galaxy outruns linear theory
+        await page.selectOption('[data-bv-track="mode"]', 'nonlinear');
+        await expect(page.locator('[data-bv="trackRegime"]').first()).toContainText('Nonlinear mode');
+    });
+
+    test('the bias band brackets the line and can be turned off', async ({ page }) => {
+        await ready(page);
+        await expect(page.locator('[data-bv="trackBand"]').first()).toContainText('b = 1.20 – 1.80');
+        const ok = await page.evaluate(() => {
+            const t = window.__bootesLab.tracker.tracked[0];
+            if (!t.band || t.band.length !== 2) return 'no band';
+            // The galaxy is observed at the same place for every b; the band
+            // must open away from z_obs, and the main line sits inside it.
+            let opened = false;
+            for (let k = 0; k < t.main.samples.length; k++) {
+                const vals = [t.main.samples[k].gA, t.band[0].samples[k].gA, t.band[1].samples[k].gA];
+                if (Math.max(...vals) - Math.min(...vals) > 0.05 * vals[0]) opened = true;
+            }
+            return opened ? 'ok' : 'band never opened';
+        });
+        expect(ok).toBe('ok');
+        await page.locator('[data-bv-track="band"]').uncheck();
+        await expect(page.locator('[data-bv="trackBand"]').first()).toHaveText('off');
+        expect(await page.evaluate(() => window.__bootesLab.tracker.tracked[0].band)).toBeNull();
+    });
+
+    test('proper distances scale the drawn universe by a(t)/a_obs, and are exactly 1 at z_obs', async ({ page }) => {
+        await ready(page);
+        await page.selectOption('[data-bv-track="frame"]', 'proper');
+        await page.evaluate(() => window.__bootesLab.tracker.setTime(3));
+        await expect.poll(() => page.locator('#bv-track-card').getAttribute('data-track-t')).toBe('3.0000');
+        const s3 = await page.evaluate(() => window.__bootesLab.scene.worldScale);
+        expect(s3).toBeGreaterThan(0.2);
+        expect(s3).toBeLessThan(0.5);                       // a(3 Gyr) ≈ 0.31
+        await expect(page.locator('[data-bv="trackFrame"]').first()).toContainText('proper distances');
+        await page.click('#bv-track-obs');
+        await expect.poll(() => page.evaluate(() => window.__bootesLab.scene.worldScale)).toBe(1);
+        await page.selectOption('[data-bv-track="frame"]', 'comoving');
+    });
+
+    test('follow translates the camera rig by exactly the galaxy\'s motion', async ({ page }) => {
+        await ready(page);
+        await page.evaluate(() => {
+            const rot = document.querySelector('[data-bv-control="autorotate"]');
+            if (rot.checked) rot.click();
+        });
+        await page.locator('[data-bv-track="follow"]').check();
+        await page.waitForTimeout(1600);                  // the one-shot fly-to settles
+        const offset = () => page.evaluate(() => {
+            const sc = window.__bootesLab.scene;
+            return sc.camera.position.toArray().map((c, i) => c - sc.controls.target.toArray()[i]);
+        });
+        const o0 = await offset();
+        const t0 = await page.evaluate(() => window.__bootesLab.scene.controls.target.toArray());
+        await page.evaluate(() => window.__bootesLab.tracker.setTime(6));
+        await expect.poll(() => page.locator('#bv-track-card').getAttribute('data-track-t')).toBe('6.0000');
+        await page.waitForTimeout(300);
+        const o1 = await offset();
+        const t1 = await page.evaluate(() => window.__bootesLab.scene.controls.target.toArray());
+        // The target moved; the camera kept its exact offset from it.
+        expect(Math.hypot(...t1.map((c, i) => c - t0[i]))).toBeGreaterThan(1e-4);
+        expect(Math.hypot(...o1.map((c, i) => c - o0[i]))).toBeLessThan(1e-3);
     });
 });

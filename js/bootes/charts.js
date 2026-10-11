@@ -537,7 +537,11 @@ export function drawTrackSeries(canvas, {
     series, tMin, tMax, cursorT = null, marks = [], yLabel, includeZero = true,
 }) {
     const { ctx, w, h } = prepare(canvas);
-    const all = series.flatMap(s => s.points.map(p => p[1]));
+    const all = series.flatMap(s => [
+        ...s.points.map(p => p[1]),
+        ...(s.band ?? []).flatMap(b => [b[1], b[2]]),
+        ...(s.ghost ?? []).map(p => p[1]),
+    ]);
     if (!all.length) return;
     const [lo, hi] = rangeOf(all, { includeZero });
     const proj = frame(ctx, w, h, {
@@ -545,6 +549,14 @@ export function drawTrackSeries(canvas, {
         xLabel: 'cosmic time  (Gyr)', yLabel,
         markX: marks,
     });
+    // Bands first (under everything), then the ghosted linear references,
+    // then the lines themselves.
+    for (const s of series) {
+        if (s.band) band(ctx, proj, s.band, hexAlpha(s.color, 0.16));
+    }
+    for (const s of series) {
+        if (s.ghost) drawLine(ctx, proj, s.ghost, hexAlpha(s.color, 0.55), { width: 1.1, dash: [4, 3] });
+    }
     for (const s of series) series_(ctx, proj, s);
     if (cursorT != null && cursorT >= tMin && cursorT <= tMax) {
         ctx.save();
@@ -565,6 +577,12 @@ export function drawTrackSeries(canvas, {
     }
 }
 
+// `series` is shadowed by drawTrackSeries' own parameter of that name, so the
+// module-level helper is reached through these two names inside it.
+function drawLine(ctx, proj, points, color, opts) {
+    series(ctx, proj, points, color, opts);
+}
+
 function series_(ctx, proj, s) {
     series(ctx, proj, s.points, s.color, { width: 1.8 });
 }
@@ -576,4 +594,10 @@ function interpAt(points, x) {
         if (x >= x0 && x <= x1) return y0 + (y1 - y0) * (x - x0) / ((x1 - x0) || 1);
     }
     return null;
+}
+
+/** '#rrggbb' + alpha → rgba(). */
+function hexAlpha(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }

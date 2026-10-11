@@ -22,7 +22,7 @@
  */
 
 import {
-    buildTimeline, trackGalaxy, epochAt, displacementField, displacedPositions,
+    buildTimeline, trackGalaxy, epochAt, shellTable, bulkMotion,
 } from '../bootes-void-tracker.js';
 import { drawTrackSeries } from './charts.js';
 
@@ -42,9 +42,18 @@ const signed = (v, d = 1) => (Number.isFinite(v) ? `${v >= 0 ? '+' : '−'}${Mat
 /** Play speed: Gyr of cosmic time per second of wall clock. */
 const PLAY_GYR_PER_S = 1.6;
 
+/**
+ * The band's half-width in tracer bias: ±20 %, the page's own stated error
+ * budget (the bias slider's hint, js/bootes-void-model.js header). The band is
+ * that ONE systematic run through the whole tracker — profile, web and
+ * dynamics rebuilt at b × 0.8 and b × 1.2 — not a statistical interval.
+ */
+export const BIAS_BAND = 0.2;
+
 export function createTrackPanel({
     root, set, scene, charts, getDerived, rEff, z: zObs,
     getProbePosition = () => null, onArmPick = null,
+    getVariant = null, getBias = () => null,
 }) {
     const card = root.querySelector('#bv-track-card');
     const table = root.querySelector('#bv-track-rows');
@@ -58,15 +67,23 @@ export function createTrackPanel({
     const timeline = buildTimeline({ zObs, tStartGyr: 1, samples: 140 });
     const tObs = timeline.tObsGyr;
     const t0 = timeline.t0Gyr;
+    // The exact spherical-shell solution, integrated once per page (~0.1 s):
+    // it depends only on the cosmology and z_obs, never on the profile.
+    const shells = shellTable({ zObs });
 
     const state = {
         tGyr: tObs,
         animate: true,
         paths: true,
-        tracked: [],            // { key, letter, color, xObsMpc, track, retracked }
+        tracked: [],            // { key, letter, color, xObsMpc, track, linear, band, retracked }
         playing: false,
         pickArmed: false,
+        mode: 'nonlinear',      // or 'linear' — the A/B reference
+        band: true,
+        frame: 'comoving',      // or 'proper'
+        follow: false,
     };
+    let followLast = null;      // scene-space position the camera rig last followed
     let letterCursor = 0;
     let bulk = null;            // { key, tracerPts, nodePts, psiTracers, psiNodes }
     let derivedKey = '';
@@ -83,9 +100,35 @@ export function createTrackPanel({
     const keyOf = (d) => `${d.web.seed}|${d.web.clumpiness}|${d.profile.params.deltaC}|${d.profile.params.rsMpc}`;
 
     // ── Tracking ────────────────────────────────────────────────────────────
+    const trackWith = (xObsMpc, d, mode) => trackGalaxy(xObsMpc, {
+        voidProfile: d.profile, web: d.web, zObs, timeline, mode, table: shells,
+    });
+
+    /**
+     * Everything one tracked galaxy needs: the track in the chosen mode, the
+     * LINEAR track beside it (drawn ghosted, so the nonlinear correction is
+     * visible rather than asserted), and the bias band. Each variant starts
+     * from the SAME observed position — the galaxy is seen where it is
+     * whatever b is; b changes the matter around it.
+     */
     function track(xObsMpc) {
         const d = getDerived();
-        return trackGalaxy(xObsMpc, { voidProfile: d.profile, web: d.web, zObs, timeline });
+        const main = trackWith(xObsMpc, d, state.mode);
+        const linear = state.mode === 'nonlinear' ? trackWith(xObsMpc, d, 'linear') : null;
+        let band = null;
+        if (state.band && getVariant) {
+            const b = getBias();
+            band = [1 - BIAS_BAND, 1 + BIAS_BAND]
+                .map(f => getVariant(b * f))
+                .filter(Boolean)
+                .map(v => trackWith(xObsMpc, v, state.mode));
+            if (band.length !== 2) band = null;
+        }
+        return { main, linear, band };
+    }
+    function retrackAll() {
+        for (const t of state.tracked) Object.assign(t, track(t.xObsMpc));
+        bulk = null;
     }
 
     function add(xObsMpc) {
@@ -98,7 +141,7 @@ export function createTrackPanel({
             letter: LETTERS[letterCursor % LETTERS.length],
             color,
             xObsMpc: [...xObsMpc],
-            track: track(xObsMpc),
+            ...track(xObsMpc),
             retracked: false,
         };
         letterCursor++;
@@ -152,7 +195,7 @@ export function createTrackPanel({
         set('trackEpoch', atObs
             ? 'the observed epoch — when the light we see left Boötes'
             : state.tGyr > t0
-                ? `${num(state.tGyr - t0, 2)} Gyr after today — a linear-theory forecast`
+                ? `${num(state.tGyr - t0, 2)} Gyr after today — a model forecast, not an observation`
                 : dt < 0
                     ? `${num(-dt, 2)} Gyr before the light we see left Boötes`
                     : `${num(dt, 2)} Gyr after it (today is t = ${num(t0, 2)} Gyr)`);
@@ -160,14 +203,41 @@ export function createTrackPanel({
         set('trackGScale', `× ${num(ep.gravity, 3)}`);
         set('trackVScale', `× ${num(ep.velocity, 3)}`);
 
-        const samples = state.tracked.map(t => t.track.at(ep));
-        const nonlinear = samples.filter(s => !s.linearOk).length;
-        set('trackLinear', state.tracked.length === 0
-            ? 'Nothing tracked — add a galaxy.'
-            : nonlinear === 0
-                ? 'Every tracked galaxy is in the linear range here (|δ| ≤ 0.5).'
-                : `${nonlinear} of ${state.tracked.length} tracked galaxies sit where |δ| > 0.5 — past where `
-                  + 'linear theory is accurate; read their curves as indicative.');
+        const samples = state.tracked.map(t => t.main.at(ep));
+        if (state.tracked.length === 0) set('trackRegime', 'Nothing tracked — add a galaxy.');
+        else if (state.mode === 'linear') {
+            const outside = samples.filter(s => !s.linearOk).length;
+            set('trackRegime', outside === 0
+                ? 'Linear mode: every tracked galaxy is in the linear range here (|Δ|, |δ| ≤ 0.5).'
+                : `Linear mode: ${outside} of ${state.tracked.length} tracked galaxies sit where |Δ| or |δ| > 0.5 — `
+                  + 'past where linear theory is accurate. Switch to nonlinear.');
+        } else {
+            const crossed = samples.filter(s => s.shellCrossed).length;
+            set('trackRegime', crossed === 0
+                ? 'Nonlinear mode: the spherical part is exact here — no tracked galaxy\'s shell has crossed '
+                  + 'its neighbour.'
+                : `Nonlinear mode: ${crossed} tracked galaxy shell(s) have CROSSED a neighbour — the wall is `
+                  + 'forming there and no spherical model holds past this instant.');
+        }
+        const a = state.tracked[0];
+        if (a && a.linear) {
+            const nl = a.main.at(ep);
+            const li = a.linear.at(ep);
+            set('trackNlGain', `Galaxy ${a.letter}: ${num(nl.vKms, 0)} km/s nonlinear vs ${num(li.vKms, 0)} linear `
+                + `(${signed((nl.vKms / li.vKms - 1) * 100, 0)} %); |g| ${num(nl.gA, 2)} vs ${num(li.gA, 2)} km/s/Gyr`);
+        } else {
+            set('trackNlGain', state.mode === 'linear'
+                ? 'Linear mode — the reference the nonlinear tracker is compared against.'
+                : '—');
+        }
+        const b = getBias();
+        set('trackBand', state.band && Number.isFinite(b)
+            ? `b = ${num(b * (1 - BIAS_BAND), 2)} – ${num(b * (1 + BIAS_BAND), 2)} (±${BIAS_BAND * 100} %)`
+            : 'off');
+        set('trackFrame', state.frame === 'proper'
+            ? `proper distances: everything drawn × a(t)/a_obs = ${num(ep.a * (1 + zObs), 3)} — `
+              + 'mostly cosmic expansion, which is NOT the void\'s doing'
+            : 'comoving distances: cosmic expansion divided out, only the void\'s own motion shows');
 
         paintTable(samples);
         paintCharts();
@@ -186,15 +256,15 @@ export function createTrackPanel({
             // motion: void galaxies move a few to ~15 Mpc in 18 Gyr, which is
             // why the stage needs "fly to" to show it rather than a magnified
             // displacement.
-            const r0 = t.track.samples[0].rMpc;
+            const r0 = t.main.samples[0].rMpc;
             const cells = [
                 null,
                 `${num(s.rMpc, 1)} (${signed(s.rMpc - r0, 1)})`,
                 `${num(s.gA, 2)}`,
                 `${num(s.voidShare * 100, 0)} %`,
                 `${num(s.vKms, 0)} (${signed(s.vRadialKms, 0)})`,
-                signed(s.delta, 2),
-                s.tweb.name,
+                signed(s.deltaEnclosed, 2),
+                s.shellCrossed ? 'crossed' : s.tweb.name,
             ];
             const name = document.createElement('td');
             const sw = document.createElement('span');
@@ -237,9 +307,17 @@ export function createTrackPanel({
             { x: t0, label: 'today', color: 'rgba(255,255,255,.35)' },
         ];
         const common = { tMin: timeline.tStartGyr, tMax: timeline.tEndGyr, cursorT: state.tGyr, marks };
-        const lines = (pick) => state.tracked.map(t => ({
+        const lines = (pick) => state.tracked.map((t, i) => ({
             color: t.color,
-            points: t.track.samples.map(s => [s.tGyr, pick(s)]),
+            points: t.main.samples.map(s => [s.tGyr, pick(s)]),
+            band: t.band ? t.main.samples.map((s, k) => {
+                const vals = [pick(s), pick(t.band[0].samples[k]), pick(t.band[1].samples[k])]
+                    .filter(Number.isFinite);
+                return [s.tGyr, Math.min(...vals), Math.max(...vals)];
+            }) : null,
+            // The linear reference, ghosted, for the FIRST galaxy only — one
+            // comparison line reads; three of them are a thicket.
+            ghost: i === 0 && t.linear ? t.linear.samples.map(s => [s.tGyr, pick(s)]) : null,
         }));
         if (c('trackG')) {
             drawTrackSeries(c('trackG'), { ...common, series: lines(s => s.gA),
@@ -256,16 +334,17 @@ export function createTrackPanel({
     }
 
     function ensureBulk(d) {
-        const key = keyOf(d);
+        const key = `${keyOf(d)}|${state.mode}`;
         if (bulk && bulk.key === key) return bulk;
         const tracerPts = d.tracers.map(t => t.offsetMpc);
         const nodePts = d.web.nodes.map(n => n.offsetMpc);
+        const opts = { voidProfile: d.profile, web: d.web, zObs, mode: state.mode, table: shells };
         bulk = {
-            key, tracerPts, nodePts,
-            psiTracers: displacementField(tracerPts, { voidProfile: d.profile, web: d.web, zObs }),
-            psiNodes: displacementField(nodePts, { voidProfile: d.profile, web: d.web, zObs }),
+            key,
+            tracers: bulkMotion(tracerPts, opts),
+            nodes: bulkMotion(nodePts, opts),
             out: new Float32Array(tracerPts.length * 3),
-            moved: false,
+            moved: bulk?.moved ?? false,
         };
         return bulk;
     }
@@ -276,8 +355,8 @@ export function createTrackPanel({
         // at the observed epoch.
         if (state.animate && !atObs) {
             const b = ensureBulk(d);
-            scene.setTracerOffsetsMpc(displacedPositions(b.tracerPts, b.psiTracers, ep.D, b.out));
-            const nodePos = displacedPositions(b.nodePts, b.psiNodes, ep.D);
+            scene.setTracerOffsetsMpc(b.tracers.positionsAt(ep, b.out));
+            const nodePos = b.nodes.positionsAt(ep);
             scene.buildWeb({
                 nodes: d.web.nodes.map((n, i) => ({
                     ...n, offsetMpc: [nodePos[i * 3], nodePos[i * 3 + 1], nodePos[i * 3 + 2]],
@@ -290,13 +369,34 @@ export function createTrackPanel({
             scene.buildWeb(d.web);
             bulk.moved = false;
         }
+        // PROPER vs COMOVING. In proper distances the whole drawn universe is
+        // scaled by a(t)/a_obs — at t = 1 Gyr it is ~1/5 the size — so the
+        // reader sees how much of the growth is cosmic expansion and how much
+        // the void's own. At the observed epoch the factor is exactly 1, so
+        // that frame and every observed-epoch readout still agree.
+        // Pinned to EXACTLY 1 at z_obs: a(t) comes out of a bisection on the
+        // cosmic clock and lands at 0.9999999999999998 there, which would put
+        // the observed-epoch picture a hair off every readout drawn against it.
+        const worldScale = state.frame === 'proper' && !atObs ? ep.a * (1 + zObs) : 1;
+        scene.setWorldScale?.(worldScale);
+
         const k = cursorIndex(state.tGyr);
+        // Follow: translate the camera rig by exactly the tracked galaxy's
+        // drawn motion — never an eased chase (the star-collider rule: an
+        // eased follow trailed its target and read as the target drifting).
+        if (state.follow && state.tracked[0]) {
+            const p = state.tracked[0].main.at(ep).positionMpc.map(c => c * worldScale);
+            if (followLast) scene.translateRigMpc?.(p.map((c, i) => c - followLast[i]));
+            followLast = p;
+        } else {
+            followLast = null;
+        }
         scene.tracks.set(state.tracked.map(t => ({
             color: t.color,
-            pathMpc: t.track.samples.map(s => s.positionMpc),
+            pathMpc: t.main.samples.map(s => s.positionMpc),
             cursorIndex: k,
-            currentMpc: t.track.at(ep).positionMpc,
-            startMpc: t.track.lagrangianMpc,
+            currentMpc: t.main.at(ep).positionMpc,
+            startMpc: t.main.lagrangianMpc,
         })), { paths: state.paths });
     }
 
@@ -336,9 +436,21 @@ export function createTrackPanel({
             if (key === 't') { setPlaying(false); setTime(Number(el.value)); }
             else if (key === 'animate') { state.animate = el.checked; schedule(); }
             else if (key === 'paths') { state.paths = el.checked; schedule(); }
+            else if (key === 'mode') { state.mode = el.value; retrackAll(); schedule(); }
+            else if (key === 'band') { state.band = el.checked; retrackAll(); schedule(); }
+            else if (key === 'frame') { state.frame = el.value; schedule(); }
+            else if (key === 'follow') {
+                state.follow = el.checked;
+                followLast = null;
+                if (el.checked && state.tracked[0]) {
+                    const p = state.tracked[0].main.at(epochAt(state.tGyr, zObs)).positionMpc;
+                    scene?.focusOnMpc(p, { distanceMpc: 40 });
+                }
+                schedule();
+            }
         };
         el.addEventListener('input', handler);
-        if (el.type === 'checkbox') el.addEventListener('change', handler);
+        if (el.type === 'checkbox' || el.tagName === 'SELECT') el.addEventListener('change', handler);
     }
     playBtn?.addEventListener('click', () => setPlaying(!state.playing));
     root.querySelector('#bv-track-obs')?.addEventListener('click', () => { setPlaying(false); setTime(tObs); });
@@ -394,11 +506,8 @@ export function createTrackPanel({
             const key = keyOf(d);
             const changed = key !== derivedKey && derivedKey !== '';
             derivedKey = key;
-            bulk = null;
-            for (const t of state.tracked) {
-                t.track = track(t.xObsMpc);
-                if (changed) t.retracked = true;
-            }
+            retrackAll();
+            if (changed) for (const t of state.tracked) t.retracked = true;
             // First boot only: start with the deepest void galaxy so the card
             // never opens on an empty table. A reader who clears it keeps it
             // cleared across later recomputes.
@@ -415,6 +524,7 @@ export function createTrackPanel({
         setPickArmed,
         add,
         get timeline() { return timeline; },
+        get shells() { return shells; },
         get state() {
             return { ...state, tracked: state.tracked.map(t => ({ letter: t.letter, color: t.color, xObsMpc: [...t.xObsMpc] })) };
         },

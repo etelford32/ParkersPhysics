@@ -468,7 +468,8 @@ export function createBootesScene(canvas, {
         let best = -1;
         let bestD = radiusPx;
         for (let i = 0; i < arr.length / 3; i++) {
-            pickTmp.set(arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]).project(camera);
+            pickTmp.set(arr[i * 3] * worldScale, arr[i * 3 + 1] * worldScale, arr[i * 3 + 2] * worldScale)
+                .project(camera);
             if (pickTmp.z > 1 || pickTmp.z < -1) continue;
             const sx = rect.left + ((pickTmp.x + 1) / 2) * rect.width;
             const sy = rect.top + ((1 - pickTmp.y) / 2) * rect.height;
@@ -478,10 +479,42 @@ export function createBootesScene(canvas, {
         return best;
     }
 
+    /**
+     * Draw the modelled universe at `s` × its comoving size — the galaxy
+     * tracker's PROPER-distance frame (s = a(t)/a_obs). Every group that holds
+     * model geometry scales together, the probe and the tracks included, so
+     * nothing drifts against anything else. Screen-sized label sprites in the
+     * ruler are COUNTER-scaled so a label stays legible rather than shrinking
+     * to nothing at early times (they are text, not geometry).
+     */
+    let worldScale = 1;
+    function setWorldScale(s) {
+        if (!(s > 0) || Math.abs(s - worldScale) < 1e-9) return;
+        worldScale = s;
+        for (const name of ['tracers', 'web', 'shell', 'field', 'markers', 'refs']) {
+            groups[name].scale.setScalar(s);
+        }
+        probe.group.scale.setScalar(s);
+        tracks.group.scale.setScalar(s);
+        groups.refs.traverse((o) => {
+            if (!o.isSprite || o.material?.sizeAttenuation !== false) return;
+            if (!o.userData.baseScale) o.userData.baseScale = o.scale.clone();
+            o.scale.copy(o.userData.baseScale).multiplyScalar(1 / s);
+        });
+    }
+
+    /** Move the camera AND its orbit target by the same vector (Mpc). */
+    function translateRigMpc(d) {
+        const v = new THREE.Vector3(mpc(d[0]), mpc(d[1]), mpc(d[2]));
+        camera.position.add(v);
+        controls.target.add(v);
+        controls.update();
+    }
+
     /** Screen position of a point given in Mpc (tests + HUD anchoring). */
     function screenOfMpc(p) {
         const rect = canvas.getBoundingClientRect();
-        pickTmp.set(mpc(p[0]), mpc(p[1]), mpc(p[2])).project(camera);
+        pickTmp.set(mpc(p[0]) * worldScale, mpc(p[1]) * worldScale, mpc(p[2]) * worldScale).project(camera);
         return {
             x: rect.left + ((pickTmp.x + 1) / 2) * rect.width,
             y: rect.top + ((1 - pickTmp.y) / 2) * rect.height,
@@ -537,7 +570,8 @@ export function createBootesScene(canvas, {
 
     return {
         renderer, scene, camera, controls, groups, rig, probe, tracks,
-        setTracerOffsetsMpc, pickTracer, screenOfMpc,
+        setTracerOffsetsMpc, pickTracer, screenOfMpc, setWorldScale, translateRigMpc,
+        get worldScale() { return worldScale; },
         resize,
         buildShell, buildTracers, buildWeb, buildMarkers, buildField,
         setLayerVisible(name, on) {
