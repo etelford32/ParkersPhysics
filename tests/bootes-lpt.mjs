@@ -26,7 +26,9 @@
  *      ICs land closer to today. (A planted CLUSTER is the measured
  *      exception: Zel'dovich's double-counted collapse there happens to
  *      cancel the softened integrator's own linear-growth deficit — see the
- *      plan; the page's reconstruction is decided on the void + web, §4f.)
+ *      plan; the page's reconstruction is decided on the void + web, §4f.
+ *      That deficit is deconvolved out by js/bootes-softgrowth.js, §4g, which
+ *      closes the cluster gap on the forward claim.)
  */
 
 import assert from 'node:assert/strict';

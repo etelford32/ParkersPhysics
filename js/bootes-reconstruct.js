@@ -59,6 +59,10 @@
  *    better (3.4 vs 4.7 %), by cancellation: its double-counted collapse
  *    offsets the softened integrator's own ~3.5 % linear-growth deficit,
  *    which 2LPT exposes (its amplitude sits at 0.965 for either sign of δ).
+ *    That deficit is now REMOVED (js/bootes-softgrowth.js, plan §4g): s₁ is
+ *    laid down as T(k)⁻¹s₁, the integrator's own softened-growth transfer
+ *    deconvolved up to kh ≈ 3 — void twin 4.0 → 1.7 %, cluster forward miss
+ *    4.6 → 3.1 % (Zel'dovich 3.3), page 60–90 Mpc 4.1 → 3.0 %.
  *    And NOTHING is iterated on top. Forward "shooting" (re-run,
  *    feed the miss back into ψ) was built and MEASURED out: it drives the
  *    elements onto their matched positions (0.03 Mpc rms) while making the
@@ -119,7 +123,8 @@ import {
     meanSphereForce,
     replayTestParticles, DEFAULT_THETA, DEFAULT_LEAF,
 } from './bootes-nbody.js';
-import { invert2LPT, lptGrowth, lptState } from './bootes-lpt.js';
+import { invert2LPT, lptGrowth, lptState, secondOrderDisplacement } from './bootes-lpt.js';
+import { deconvolutionKernel, deconvolveGrowth } from './bootes-softgrowth.js';
 
 /**
  * The page's reconstruction, in ONE place (worker, runner and gate read it).
@@ -145,6 +150,13 @@ export const RECON_CONFIG = Object.freeze({
     /** 'za' (Zel'dovich) or '2lpt' (js/bootes-lpt.js) — see §3 of the header. */
     ics: '2lpt',
     lptIterations: 4,
+    /**
+     * Taper κ of the softened-growth deconvolution (js/bootes-softgrowth.js,
+     * plan §4g): s₁ is laid down as T(k)⁻¹s₁ up to kh ≈ κ so the softened
+     * integrator grows it into today's field. null switches it off (A/B).
+     * 2LPT only — on Zel'dovich ICs it un-hides their double-counted collapse.
+     */
+    growthKappa: 3,
 });
 
 const fourPiGRho = (cosmo) => 4 * Math.PI * G_MPC * meanMatterDensityMsunMpc3(cosmo);
@@ -501,11 +513,21 @@ export function reconstructRun({
             volume: Float64Array.from(glass.mass, (m) => m / rho),
             hsoft: Float64Array.from(glass.mass, () => h), h, ...sim,
         });
-        ic = lptState(glass.pos, inv.s1, inv.s2, recon.aInit, growth, cosmo);
+        let s1 = inv.s1, s2f = inv.s2, corr = 0;
+        if (recon.growthKappa != null) {
+            // The softened integrator grows mode k to T(k) < 1 of the ideal;
+            // lay s₁ down as T⁻¹s₁ so it lands on today's field (plan §4g).
+            const volume = Float64Array.from(glass.mass, (m) => m / rho);
+            const ker = deconvolutionKernel({ h, aInit: recon.aInit, aObs, kappa: recon.growthKappa, cosmo });
+            s1 = deconvolveGrowth(glass.pos, inv.s1, volume, ker);
+            s2f = secondOrderDisplacement(glass.pos, s1, { volume, hsoft: Float64Array.from(glass.mass, () => h), h, ...sim });
+            for (let k = 0; k < psi.length; k++) corr += (s1[k] - inv.s1[k]) ** 2;
+        }
+        ic = lptState(glass.pos, s1, s2f, recon.aInit, growth, cosmo);
         let s2 = 0;
-        for (let k = 0; k < psi.length; k++) s2 += (growth.d2Obs * inv.s2[k]) ** 2;
-        lpt = { history: inv.history, secondOrderRmsMpc: Math.sqrt(s2 / n) };
-        galaxyPsi = inv.s1;
+        for (let k = 0; k < psi.length; k++) s2 += (growth.d2Obs * s2f[k]) ** 2;
+        lpt = { history: inv.history, secondOrderRmsMpc: Math.sqrt(s2 / n), growthCorrectionRmsMpc: Math.sqrt(corr / n) };
+        galaxyPsi = s1;
         onProgress?.('2lpt', 1, 1);
     } else {
         ic = zeldovichState(glass.pos, psi, recon.aInit, aObs, cosmo);
@@ -556,6 +578,8 @@ export function reconstructRun({
             ics: recon.ics ?? 'za',
             secondOrderRmsMpc: lpt ? lpt.secondOrderRmsMpc : 0,
             lptHistory: lpt ? lpt.history : null,
+            growthKappa: lpt && recon.growthKappa != null ? recon.growthKappa : null,
+            growthCorrectionRmsMpc: lpt ? lpt.growthCorrectionRmsMpc : 0,
             fieldError: field.overall,
             fieldBins: field.bins,
             galaxyResidualsMpc: gal.residuals,

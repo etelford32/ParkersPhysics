@@ -259,8 +259,12 @@ const glass = RC.buildGlass({ ...CFG, ...SIM });
         // The page's ICs are 2LPT (js/bootes-lpt.js, tests/bootes-lpt.mjs);
         // measured on this layout the void interior went 7.5 → 3.4 % (§4f).
         assert.equal(dg.ics, '2lpt');
+        // …and laid down through the softened integrator's own transfer
+        // (js/bootes-softgrowth.js, tests/bootes-softgrowth.mjs, plan §4g).
+        assert.equal(dg.growthKappa, RC.RECON_CONFIG.growthKappa);
+        assert.ok(dg.growthCorrectionRmsMpc > 0.05 * dg.secondOrderRmsMpc, 'growth correction applied');
         assert.ok(dg.fieldBins[0].rel < 0.06, `2LPT void interior ${dg.fieldBins[0].rel}`);
-        ok(`today's gravity: the reconstructed universe (2LPT ICs) reproduces the observed model's force at the `
+        ok(`today's gravity: the reconstructed universe (2LPT ICs, softened-growth deconvolved) reproduces the observed model's force at the `
             + `galaxies to ${(100 * dg.fieldBins[0].rel).toFixed(1)} % in the void's core, ≤ ${(100 * worstInner).toFixed(0)} % inside R_eff, `
             + `${(100 * dg.fieldError).toFixed(0)} % overall`);
     }

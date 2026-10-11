@@ -482,12 +482,74 @@ So 2LPT is the default (`RECON_CONFIG.ics`; `'za'` stays as the A/B
 reference). Galaxies take s₁ as their first guess; their shots absorb the
 rest.
 
-Next, honestly: the softened integrator's linear-growth deficit (now the
-largest remaining error inside the void — a scale-dependent transfer that
-would need its own measurement, not a scalar), a Bayesian forward model whose
-prior regularises the shooting that failed above, finer elements on the wall
-(that error is resolution) — and, before any of it matters for science, a
-REAL density field in place of the model web (§6).
+### 4g. The softened integrator's own growth — `js/bootes-softgrowth.js`
+
+What §4f exposed: the N-body softens each element with the compact spline of
+support h = 2 × spacing, and for that kernel the softened pull of a point IS
+the Newtonian pull of the spline-shaped mass — so mode k feels ŵ_h(k) × the
+force and grows to T(k) < 1 of ideal by a_obs (the growth ODE with
+(3/2)Ω_m ŵ D, started in the IDEAL growing mode we lay down). On the page
+(h = 24 Mpc) T = 0.979 / 0.881 / 0.804 at λ = 200 / 80 / 60 Mpc.
+
+MEASURED before building anything (curl-free plane waves on the glass; a
+windowed plane-wave DISPLACEMENT has a curl part that does not grow and
+first read 0.71 at λ = 200 — that was the test, not the integrator):
+
+| Probe | Result |
+|-------|--------|
+| 90 steps vs 30 | 0.9214 vs 0.9208 — not time-stepping |
+| θ 0.25 vs 0.5 | identical — not the tree |
+| sphere 220 vs 140 Mpc | λ = 80: 0.805 → 0.834 against T = 0.844 — the residual below T is the test WINDOW spreading the field onto higher k |
+| the tree's softened pull vs the enclosed mass of the transformed kernel | 1.4e-8 — ŵ is the integrator's own kernel |
+
+THE FIX lays s₁ down as T(k)⁻¹s₁ so the softened integrator grows it into
+today's field. Matching compares SOFTENED fields on both sides, so the
+matched Ψ is today's displacement and needs no correction itself. T⁻¹ is
+isotropic, so it is a RADIAL CONVOLUTION applied on the glass — no grid:
+C(q) = ∫K(|q−q′|)[s₁(q′) − s₁(q)]d³q′ with K the transform of
+G(k) = (1/T − 1)·exp(−(kh/κ)⁴), κ = 3, tabulated to 6h. Each choice was
+measured:
+
+- **Difference form**: K integrates to zero (G(0) = 0) — a positive core
+  and a negative ring — so summed against s₁ itself the glass's quadrature
+  error times the whole field would be the answer. On the glass a plane wave
+  gets the table's response to 0.15 % of the field, rim included (the rim is
+  continued as s₁(q), never zero).
+- **Taper**: a GAUSSIAN taper cut the correction 30 % already at λ = 120 Mpc
+  (convolution exact — the taper was the loss); a flat-top exp(−(kh/κ)⁸)
+  RANG, and truncated at 4h the kernel no longer integrated to zero
+  (κ = 3.5 overshot to 1.044). Quartic at 6h: 99.4 % of 1/T − 1 at
+  λ = 200 Mpc, rolling off where κ says. 5h lost 3–6 % at long waves.
+- **κ**: 3, 3.5 and 4 gave the SAME twin numbers to 0.1 % — so the most
+  conservative, κ = 3 (least amplification of sub-resolution grain, the
+  failure that rejected shooting in §4e).
+- **2LPT only.** Zel'dovich + deconvolution made the CLUSTER twin worse
+  (4.1 → 5.3 %, amplitude 1.03): it removes the deficit that was hiding
+  Zel'dovich's double-counted collapse — §4f's explanation, confirmed.
+
+Twins (same glasses; recovered linear field | forward miss):
+
+| Planted | Zel'dovich | 2LPT | 2LPT + deconvolution |
+|---------|-----------|------|----------------------|
+| void δ_L = −1.5 | 8.8 \| 7.2 % | 4.0 \| 3.4 % (amp 0.965) | **1.7 \| 1.3 %** (amp 0.999) |
+| cluster δ_L = +0.8 | 4.1 \| 3.3 % | 5.3 \| 4.6 % | 4.4 \| **3.1 %** (amp 1.004) |
+| random 3 Mpc waves | 8.6 \| 6.8 % | 8.4 \| 7.2 % | **6.6 \| 4.9 %** |
+
+The cluster's §4f loss is closed on the forward claim (what the page
+prints) and within 0.3 % on the recovered field. On the page (void + web,
+35 233 elements), today's gravity: 30–60 Mpc 2.7 → 2.6 %, 60–90 4.1 → 3.0,
+90–120 8.0 → 7.1, 120–150 19.6 → 18.6, and on the wall 35.1 / 39.7 / 42.0 →
+33.0 / 37.9 / 41.5 %; overall 27.5 → 26.6 %. +8 s (~122 s total). Node
+accretion +19.5 → +21.8 % to z_obs. Gated: `tests/bootes-softgrowth.mjs`.
+
+NOT corrected, and disclosed where it is used: the second-order term's own
+softening deficit (~T on a term ~5 % of Ψ) and modes above the taper, which
+the reconstruction never claimed.
+
+Next, honestly: a Bayesian forward model whose prior regularises the
+shooting that failed above, finer elements on the wall (that error is
+resolution, and now the dominant one) — and, before any of it matters for
+science, a REAL density field in place of the model web (§6).
 
 ---
 
