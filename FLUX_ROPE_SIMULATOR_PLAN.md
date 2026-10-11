@@ -352,8 +352,8 @@ the same crate.
   · validation_runs_kind_check admitted only backmap/recurrence/cme, so
     every kind='flux-rope' insert failed 23514 (logged 2026-09-16 with 10
     scored events, discarded). Migration addendum in
-    supabase-validation-runs-migration.sql — WRITTEN, apply on the
-    author's go.
+    supabase-validation-runs-migration.sql — APPLIED 2026-10-11 on the
+    author's go (constraint + honest cme_model_skill view).
   · Bz truth never resolved: 48 h of 1-min rows were read in ONE PostgREST
     request, which Supabase caps at 1000 rows → 35% coverage < the 60%
     floor → 'pending' forever. sbGetAll pages it.
