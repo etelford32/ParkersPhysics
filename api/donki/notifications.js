@@ -9,9 +9,14 @@
  * Returns the last 7 days of notifications, sorted newest-first.
  * FREE plan: last 5 notifications.
  * PRO plan:  full list.
+ *
+ * `body` is the message text (Summary section first, ≤400 chars) or null
+ * when upstream carries none; `body_source` / `body_coverage` / `item_keys`
+ * (and `note` on a total miss) say which — api/_lib/donki-notifications.js.
  */
 import { jsonOk, jsonError, isoTag } from '../_lib/responses.js';
 import { fetchDonki, nasaApiKey } from '../_lib/donki-upstream.js';
+import { mapNotifications } from '../_lib/donki-notifications.js';
 
 export const config = { runtime: 'edge' };
 
@@ -51,16 +56,9 @@ export default async function handler(request) {
         return jsonError('parse_error', 'Unexpected DONKI notifications format', { source: 'NASA DONKI' });
     }
 
-    const notes = raw
-        .filter(n => n?.messageIssueTime)
-        .map(n => ({
-            type:        n.messageType   ?? null,
-            issue_time:  isoTag(n.messageIssueTime),
-            id:          n.messageID     ?? null,
-            url:         n.messageURL    ?? null,
-            body:        (n.messageBody ?? '').slice(0, 400),   // trim verbose bodies
-        }))
-        .sort((a, b) => (b.issue_time ?? '').localeCompare(a.issue_time ?? ''));
+    // Body text resolves from a candidate list and self-reports where it came
+    // from — the new CCMC host served `messageBody: "## "` (see the module).
+    const { notes, report } = mapNotifications(raw, { isoTag });
 
     const limited = pro ? notes : notes.slice(0, FREE_LIMIT);
 
@@ -69,6 +67,7 @@ export default async function handler(request) {
         key_mode:  nasaKey === 'DEMO_KEY' ? 'demo' : 'configured',
         upstream,
         plan:      pro ? 'pro' : 'free',
+        ...report,
         data: {
             updated:       new Date().toISOString(),
             total_count:   notes.length,
