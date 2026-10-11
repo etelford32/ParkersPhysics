@@ -113,7 +113,15 @@ import {
     earthHelioJ2000, hillRadiusKm, soiRadiusKm,
 } from '../neo-space.js';
 import { FLAG } from '../neo-orbits.js';
-import { rockGeometry, rockMaterial, shapeFor, spinFor, hash32, drawnRockRadius } from '../neo-rocks.js';
+import { rockGeometry, rockMaterial, shapeFor, spinFor, hash32 } from '../neo-rocks.js';
+
+// This stage's OWN rock size map (Earth = 1 scene unit here, not 0.12). It is
+// the orrery's pre-2026-10 drawnRockRadius, kept verbatim when the orrery's
+// map was shrunk (NEO_LAYER_PLAN.md §5) so this page did not change with it.
+function stageRockRadius(diamKm) {
+    const d = Number.isFinite(diamKm) && diamKm > 0 ? diamKm : 0.1;
+    return 0.010 + 0.011 * Math.log10(1 + 10 * d);
+}
 
 /**
  * The drawn atmosphere's outer radius, in Earth radii — 160 km. Not where the
@@ -1186,7 +1194,7 @@ export class NeoStage {
             const p = geoToScene(this.geo[o], this.geo[o + 1], this.geo[o + 2], { trueScale: this.trueScale });
             slot.mesh.position.set(p.x, p.y, p.z);
             // Sizes are the orrery's disclosed log map; never used for physics.
-            const drawn = drawnRockRadius(meta?.diam ?? null);
+            const drawn = stageRockRadius(meta?.diam ?? null);
             slot.mesh.scale.setScalar(Math.max(0.03, drawn * 1.6));
             slot.mesh.visible = true;
             slot.index = k;

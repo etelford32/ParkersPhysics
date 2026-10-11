@@ -92,7 +92,8 @@ export class NeoPanel {
                 <label><input type="checkbox" data-vis="asteroids" checked> Asteroids</label>
                 <label><input type="checkbox" data-vis="comets" checked> Comets</label>
                 <label><input type="checkbox" data-vis="local" checked> Near-Earth frame</label>
-                <label><input type="checkbox" data-vis="radiants" checked> Meteor radiants</label>
+                <label><input type="checkbox" data-vis="radiants"> Meteor radiants</label>
+                <label title="Off by default: hover an object to name it, click to select and label it"><input type="checkbox" data-vis="labels"> Object labels</label>
                 <label><input type="checkbox" data-vis="orbit" checked> Selected orbit</label>
                 <label title="Natural tints (S/C-type greys, blue-white comets) or the data-viz class palette"><input type="checkbox" data-vis="colorMode"> Colour by class</label>
                 <label>Show <select data-pop>
@@ -317,7 +318,7 @@ export class NeoPanel {
             radial scale (ecliptic of date). Inside 20 lunar distances it moves to an Earth-anchored frame drawn on the Moon's own
             compression — the 1 LD ring passes through the drawn Moon — and the two cross-fade between 14 and 20 LD. Planets ride
             mean-motion circles; flyby geometry uses Earth's true VSOP87D position. Close-approach rows are JPL's integrated orbits;
-            drawn positions are two-body from JPL osculating elements. ${epochNote}
+            drawn positions are two-body from JPL osculating elements. Body SIZES are log-compressed and still enlarged (a 10 km rock is drawn ~34× its true size against the drawn Earth, a 100 m one ~500×); an object becomes a 3D rock once it is ~6 px across on screen; until then it is a dot no bigger than 8 px. ${epochNote}
             <br><br>${esc(this.photometryNote())}`;
     }
 
