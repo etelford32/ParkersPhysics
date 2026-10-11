@@ -442,3 +442,109 @@ totality, and emergent earthshine phase). `js/airless-body.js` is in the
 - Fireballs are listed, not drawn on the sphere: Earth's drawn rotation is
   not tied to UT (rotation.y accumulates), so a lat/lon marker would be
   placed on the wrong meridian. Tie the Earth mesh to GMST first.
+
+## 5. Sizing + LOD — PLAN (2026-10-11; Phases 1–3 SHIPPED same day)
+
+Owner report: "NEO objects all appear way too large, the LOD system is not
+100% working for 3D, the perspective changes way too much." Shipped the same
+day as the label/reticle pass (labels + meteor radiants default OFF; one
+shared `js/selection-reticle.js` for NEOs, planets, moons and the Sun).
+
+### 5.1 What is wrong, measured
+
+`drawnRockRadius(d) = 0.010 + 0.011·log10(1 + 10d)` (js/neo-rocks.js) is in
+scene units where the drawn Earth is 0.12 and the drawn Moon 0.032:
+
+| diameter | drawn radius | vs drawn Moon | inflation vs drawn Earth |
+|---|---|---|---|
+| 30 m  | 0.0113 | 0.35× | 4.0e4 |
+| 100 m | 0.0133 | 0.41× | 1.4e4 |
+| 1 km  | 0.0215 | 0.66× | 2.3e3 |
+| 10 km | 0.0320 | 0.99× | 3.4e2 |
+
+So a 30 m rock is drawn a third the size of the Moon, and the 0.010 floor
+means EVERY object is at least that big. §2d made the impostor the TRUE
+PROJECTED size of this radius — correct for the LOD handoff, but it means the
+inflation is now perspective-correct too: dots are fine from 55 units out
+(sub-pixel → `minPx`), and balloon into a field of moon-sized balls the
+moment the camera comes within ~1 unit of Earth (the 2026-10-11 screenshot,
+camera locked on the Moon). "The perspective changes too much" is that 1/z
+growth on a size that should never have been resolvable.
+
+### 5.2 The rule to adopt
+
+**A body may be drawn larger than true only in PIXELS, never in WORLD
+units.** Distances are compressed (disclosed); sizes must not be inflated in
+the world, because a world-space inflation is magnified by perspective.
+
+1. **Far field and in-zone impostors: angular, not projected.** Size =
+   max(true projected size of the TRUE diameter on the local/helio frame,
+   a pixel marker `minPx + k·log10(D)` capped at ~4 px). Real NEOs are
+   unresolved from everywhere except a lock, so in practice this is a
+   magnitude-style marker whose size does not change as you dolly in.
+2. **Meshes only when locked/selected.** The rock pool's "nearest to camera
+   inside ROCK_RANGE" rule goes; meshes are the selected object plus (opt.)
+   in-zone flybys. A mesh is drawn at a WORLD radius chosen so it subtends
+   the same angle the marker did at handoff (continuity) — i.e. the mesh is a
+   magnifier the camera carries, and the lock distance `_lockDistance` is
+   derived from that radius, not floored at 0.09.
+3. **One scale knob, disclosed.** If a world inflation survives anywhere (the
+   locked mesh), it is ONE constant beside `drawnRockRadius`, printed on the
+   data card ("drawn ×N true size"), like the vertical exaggerations elsewhere.
+4. **Pick radius follows the drawn size** — `drawnPx()` stays the one JS
+   mirror of `POINT_VS`; change both together.
+
+### 5.3 Phases
+
+- **P1 (small):** cap impostor `gl_PointSize` at a pixel ceiling and drop the
+  0.010 floor in `drawnRockRadius` (log term only, scaled to ≤ 0.1× drawn
+  Moon for a 10 km body). Fixes the ballooning; risks the LOD handoff jump,
+  which P2 closes.
+  **Shipped:** `drawnRockRadius` = max(5e-5, 0.0016·log10(1 + 10D)) —
+  10 km → 0.0032 (0.1× drawn Moon), 1 km → 0.0017, 100 m → 0.00048 (was
+  0.032 / 0.0215 / 0.0133); `SPRITE.maxBodyPx` 8 caps the impostor body in
+  BOTH `POINT_VS` and the `drawnPx()` mirror; `_lockDistance`'s NEO branch is
+  max(12 r, 0.03) (= controls.minDistance, 3× the 0.01 near plane); meteoroid
+  grains scaled ×0.16 with it; the panel note discloses the remaining
+  enlargement. `js/neo-watch/stage.js` (Earth = 1 unit there) keeps the OLD map
+  as its own `stageRockRadius` so that page did not move. The handoff jump the
+  cap can introduce is only for bodies whose true drawn size exceeds 8 px,
+  i.e. within ~0.7 units of a 10 km rock — inside ROCK_RANGE, where the 24
+  nearest are meshes; P2 closes it for the rest.
+- **P2:** mesh pool = selected (+ in-zone flybys); handoff radius computed
+  from the marker's angular size at the moment of handoff; `_lockDistance`
+  from the mesh radius.
+  **P2 shipped:** the pool rule is now IN PIXELS — a body is meshed when its
+  TRUE projected diameter (the POINT_VS expression, before the cap) reaches
+  `ROCK_HANDOFF.enterPx` 6 and released below `leavePx` 4.5 (hysteresis),
+  ON SCREEN only (NDC ±1.1), biggest first with the selection ahead of the
+  queue; `ROCK_RANGE` is gone. Because 6 < `maxBodyPx` 8 the swap happens
+  where the dot is still true size, so dot and mesh subtend the same angle.
+  Two bugs this closed, both measured from the viewpoint captures: (1) after
+  P1 a pooled in-zone flyby was a SUB-PIXEL mesh with its sprite switched off,
+  i.e. invisible; (2) without the frustum test the Earth View preset filled
+  all 24 slots with bodies beside/behind the camera (24 meshed, none on
+  screen). The selected NEO's name label also moved from a fixed +0.03 world
+  units (= the lock distance, so off-frame on every lock) to camera-up × the
+  reticle's pixel-floored radius. `layer.rockOverflow` counts resolved bodies
+  the full pool left as capped dots. Visual check: `NEO_SHOTS=<dir> npx
+  playwright test tests/solar-system-neo-smoke.spec.js -g viewpoints` writes
+  11 numbered frames + `views.json` over a seeded 2,500-object crowd.
+- **P3:** meteor streams. Meteoroids are mm–cm grains; instanced
+  boulders on a converging cone read as debris falling on Earth. Replace the
+  `MeteoroidStream` meshes with the existing faint streak points only (or a
+  radiant glyph), keeping the panel's shower list as the source of truth.
+  **P3 shipped:** `MeteoroidStream` (instanced boulders) is DELETED from
+  `js/neo-rocks.js`; the cone arrowhead pointing INTO Earth is gone. A shower
+  is now one `LineSegments` of faint short streaks (`makeStream`, all motion
+  in `STREAM_VS`) on PARALLEL tracks along the radiant axis, filling a
+  cylinder of `STREAM.spreadR` = 4 drawn Earth radii; a track whose impact
+  parameter is inside the drawn atmosphere (`atmo` 1.03 R) ends at its entry
+  point, every other grain passes by. Count rides ZHR × activity; speed is
+  RELATIVE (`speedPerKms`) — no grain carries a size. The radiant guide is a
+  hairline OUTSIDE the stream pointing at the radiant. Still default-OFF.
+  Frames 11–12 of the viewpoint capture show it.
+- **Gates:** extend `tests/solar-system-neo-smoke.spec.js` with a dolly test:
+  the drawn px of a fixed in-zone object must change < 2× as the camera goes
+  from 20 → 0.5 units from Earth (today it grows as 1/distance), and the handoff
+  jump at ROCK_RANGE must stay < 1 px.
