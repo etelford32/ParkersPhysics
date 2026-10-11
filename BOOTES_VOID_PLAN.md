@@ -432,9 +432,10 @@ markers +14 % from z = 9 to z_obs).
 On the page (browser gate + measured): ~115 s in a Worker (glass 1 s, match
 23 s, run 35 s, galaxies 35 s); today's gravity reproduced to 7–9 % inside
 R_eff with Zel'dovich ICs (2.7–4.1 % with 2LPT, §4f), 21 % at 1.3–1.6 R_eff
-and 34–42 % out on the clumpy wall — RESOLUTION, not order: the elements'
-~24 Mpc cannot rebuild the web's ~11 Mpc nodes, and 2LPT left the wall
-unchanged. The page
+and 34–42 % out on the clumpy wall — NOT order (2LPT left it unchanged)
+and, as §4h measured, not the elements' resolution either: it is the
+forecast's own grainy sampling of the wall, which no smooth past can grow
+into. The page
 prints its own run's numbers. Galaxies land within ~4 kpc. A run's
 reconstructed matter is ONE population (the web's mass is in the elements),
 so the table prints no void/web split for it rather than "100 %".
@@ -473,8 +474,9 @@ glass; the page run):
   part is ~2 % of ψ and the error is grain + softening.
 - **The page** (void + web, uniform 12 Mpc, 35 233 elements): today's gravity
   in the void's core 7.4 → 2.7 % (30–60 Mpc) and 7.1 → 4.1 % (60–90 Mpc);
-  beyond R_eff unchanged to ±1 % (19.6, 35.1, 39.7, 42.0 %) — which is what
-  located the wall's error in RESOLUTION. +6 s on a ~110 s run. Galaxies,
+  beyond R_eff unchanged to ±1 % (19.6, 35.1, 39.7, 42.0 %) — read at the
+  time as RESOLUTION; §4h measured that wrong (it is the target's grain).
+  +6 s on a ~110 s run. Galaxies,
   node accretion and the z = 9 linearity check (amplitude 0.82 → 0.83)
   unchanged.
 
@@ -546,10 +548,34 @@ NOT corrected, and disclosed where it is used: the second-order term's own
 softening deficit (~T on a term ~5 % of Ψ) and modes above the taper, which
 the reconstruction never claimed.
 
-Next, honestly: a Bayesian forward model whose prior regularises the
-shooting that failed above, finer elements on the wall (that error is
-resolution, and now the dominant one) — and, before any of it matters for
-science, a REAL density field in place of the model web (§6).
+### 4h. Finer elements on the wall — measured, and NOT the lever
+
+§4f/§4g read the wall's 33–41 % as the elements' RESOLUTION. Measured
+before building the refinement (page configuration throughout):
+
+| Probe | Result |
+|-------|--------|
+| the MATCHED state (elements placed on today's field, before any evolution) | the wall to **8.7–9.5 %** at 12 Mpc — the elements CAN represent it; the 33–41 % is gained in evolution |
+| uniform 9 Mpc elements, full run | wall 33 / 38 / 41.5 → 22 / 24 / 28 %, overall 26.6 → 17.7 % — but 112 412 elements, 445 s (3.6×) |
+| a bare glass run z = 9 → z_obs | 0.007 Mpc smoothed drift, rim included — the glass is not the floor |
+| fine 9 Mpc elements within 30 Mpc of web matter (+36 % elements, 150 s) | wall galaxies 0–15 Mpc from web matter 32.6 → 24.3 %, 15–25 Mpc 37.1 → 28.7 % — but those carry 13 % of the wall's error; galaxies > 40 Mpc from any web matter carry **76 %** and did not move (37.7 → 37.6 %) |
+| the TARGET's smooth field vs the EXACT void (deficit) field (force probe, scale-fitted on r < 90 Mpc) | page layout (13 427 particles, zoom cells → 24 Mpc at the rim, ONE h = 24): 7 % in the core, **91 / 177 / 229 %** at 150 / 180 / 210 Mpc; per-particle h = 2 × cell: 64 / 96 / 103 %; uniform 12 Mpc: 40 / 52 / 58 %; uniform 9 Mpc: 29 / 40 / 45 % |
+| uniform 12 Mpc, seed 7 vs seed 99 | 50 / 71 / 71 % apart on the wall — √2 × each one's miss against the exact field: it is GRAIN, not a systematic |
+
+So the wall's "error" is mostly the forecast's OWN sampling grain (outside
+the void the deficit's true pull decays, the quiet start's grain does not),
+which a smooth past cannot grow into — uniform 9 Mpc elements "improved"
+it by copying more of the grain. The refined (mixed-resolution) glass was
+built, measured as above and NOT shipped. The lever is the FORECAST's
+observed state on the wall (finer outer sampling and/or per-particle 2 ×
+cell softening, which the reconstruction already uses and the forecast never
+adopted) — a change to the N-body forecast mode, its cost and its published
+numbers, so it waits on the author. Its galaxies feel the same grain.
+
+Next, honestly: the forecast's wall sampling (above); a Bayesian forward
+model whose prior regularises the shooting that failed in §4e — and, before
+any of it matters for science, a REAL density field in place of the model
+web (§6).
 
 ---
 

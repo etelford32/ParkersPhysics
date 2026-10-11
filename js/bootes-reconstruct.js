@@ -54,8 +54,11 @@
  *    q + (D_i/D_obs)ψ, velocities a·H·f·(D_i/D_obs)ψ) scale the second-order
  *    part back as if it were linear, over-counting it ~7× at z = 9: measured
  *    on the page, 2LPT took today's gravity in the void's core 7.4 → 2.7 %
- *    (60–90 Mpc 7.1 → 4.1 %) and changed nothing on the wall — so the wall's
- *    error is RESOLUTION, not order. In a planted-CLUSTER twin Zel'dovich does
+ *    (60–90 Mpc 7.1 → 4.1 %) and changed nothing on the wall — the wall's
+ *    error is not order, and (plan §4h, measured) not the elements'
+ *    resolution either: the matched state reproduces the wall to 9 %; the
+ *    rest is the forecast's own grainy sampling of the wall, which no smooth
+ *    past grows into. In a planted-CLUSTER twin Zel'dovich does
  *    better (3.4 vs 4.7 %), by cancellation: its double-counted collapse
  *    offsets the softened integrator's own ~3.5 % linear-growth deficit,
  *    which 2LPT exposes (its amplitude sits at 0.965 for either sign of δ).
