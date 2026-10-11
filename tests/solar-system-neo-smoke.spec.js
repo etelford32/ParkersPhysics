@@ -818,6 +818,39 @@ function crowdRows(nowJd, { n = 2500, flybys = 40, seed = 7 } = {}) {
     return rows;
 }
 
+test.describe('solar-system.html — orbits, Mars map, moons', () => {
+    test('planet orbits are a constant SCREEN width, Mars wears its map, and a locked moon fills the view', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        // Orbit rings: the old RingGeometry (world-width ribbon) is gone.
+        const orbits = await page.evaluate(() => {
+            const out = [];
+            window.__neoLab.scene.traverse(o => { if (o.name && o.name.startsWith('orbit-')) out.push({ name: o.name, px: o.userData.screenWidthPx, ring: o.geometry.type }); });
+            return out;
+        });
+        expect(orbits.map(o => o.name)).toContain('orbit-mars');
+        for (const o of orbits) { expect(o.px).toBeGreaterThan(0.5); expect(o.px).toBeLessThan(4); expect(o.ring).not.toBe('RingGeometry'); }
+        // Mars: the Viking mosaic loads into the planet shader.
+        await page.waitForFunction(() => {
+            const m = window.__neoLab.planets.find(p => p.name === 'Mars');
+            return m.uniforms.u_hasMap.value === 1 && !!m.uniforms.u_map.value?.image;
+        }, null, { timeout: 30_000 });
+        // A locked moon is a body you can see, not a speck: Phobos fills > 60 px.
+        await page.evaluate(() => { const b = [...document.querySelectorAll('#moon-btns button')].find(x => x.textContent.trim() === 'Phobos'); b.click(); });
+        await page.waitForTimeout(800);
+        const px = await page.evaluate(() => {
+            const lab = window.__neoLab, b = lab.selectedBody, cam = lab.camera, h = lab.canvas.getBoundingClientRect().height;
+            const d = cam.position.distanceTo(b.mesh.position);
+            return { name: b.name, px: 2 * b.radius * (cam.projectionMatrix.elements[5] * h * 0.5) / d };
+        });
+        expect(px.name).toBe('Phobos');
+        expect(px.px).toBeGreaterThan(60);
+        expect(errors).toEqual([]);
+    });
+});
+
 test.describe('solar-system.html — NEO viewpoints (screenshots)', () => {
     test.skip(!process.env.NEO_SHOTS, 'set NEO_SHOTS=<dir> to capture the viewpoint screenshots');
     test('viewpoints: overview, Earth frame, planet/moon/Sun/NEO selection, hover, lock, zoom-out', async ({ page }) => {
