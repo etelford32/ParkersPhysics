@@ -84,7 +84,8 @@
  *  - nonlinear: exact for the SPHERICAL part until shell crossing; the
  *    clumped (non-spherical) part is still first order, evaluated at the
  *    displaced position and scaled. Not an N-body — the web's own masses do
- *    not respond to the void. Disclosed on the card.
+ *    not respond to the void. Disclosed on the card. The tracker's third mode
+ *    removes that for the FUTURE: js/bootes-nbody.js.
  *  - Both: the clumped web's excess mass grows linearly (∝ D) with time.
  *  - The cosmology neglects radiation (as the model kernel does), so t₀ comes
  *    out 13.792 Gyr against Planck's 13.787 (0.04 %); nothing here lives at

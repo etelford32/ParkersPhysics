@@ -669,7 +669,7 @@ details.bv-details[open] > summary::after { content:' ▴'; }
 <!-- Every number here comes from js/bootes-void-tracker.js (node-gated by
      tests/bootes-void-tracker.mjs); js/bootes/track-panel.js only formats it. -->
 <section class="bv-card bv-probe" id="bv-track-card">
-    <h2>Galaxy tracker — the void's galaxies through cosmic time <span class="bv-tag">nonlinear shells</span></h2>
+    <h2>Galaxy tracker — the void's galaxies through cosmic time <span class="bv-tag">nonlinear shells · N-body</span></h2>
     <p class="bv-q">
         At ~230 Mpc no single star or nebula in Boötes can be resolved. What surveys find inside the void are
         about 60 <strong>galaxies</strong>, and the H&nbsp;I and emission-line studies of them (Szomoru et al. 1996;
@@ -715,9 +715,14 @@ details.bv-details[open] > summary::after { content:' ▴'; }
             <label>Dynamics
                 <select data-bv-track="mode">
                     <option value="nonlinear" selected>Nonlinear shells + linear web (default)</option>
+                    <option value="nbody">N-body forecast (~10 s run)</option>
                     <option value="linear">Linear theory only (reference)</option>
                 </select>
             </label>
+            <p class="bv-hint" data-bv="trackNbody">—</p>
+            <dl class="bv-rows">
+                <dt>Matter ≤ 20 Mpc of nodes</dt><dd data-bv="trackAccretion">—</dd>
+            </dl>
             <label>Distances on the stage
                 <select data-bv-track="frame">
                     <option value="comoving" selected>Comoving — expansion divided out</option>
@@ -747,9 +752,14 @@ details.bv-details[open] > summary::after { content:' ▴'; }
             <p class="bv-verdict" data-bv="trackNlGain">—</p>
             <p class="bv-verdict bv-caution">
                 <span data-bv="trackRegime">—</span> What is exact and what is not: each galaxy's SPHERICAL shell
-                follows Newton's shell equation in ΛCDM exactly until it crosses a neighbouring shell (flagged); the
-                lumpy web's extra pull is first-order, and the web's own mass does not respond to the void — this is
-                not an N-body run. The shaded band is the page's dominant systematic, tracer bias b ± 20 %, run
+                follows Newton's shell equation in ΛCDM exactly until it crosses a neighbouring shell (flagged); in
+                that mode the lumpy web's extra pull is first-order and the web's own mass does not move. The
+                <strong>N-body forecast</strong> removes both limits for the future: ~14 000 particles (the void's
+                smooth matter plus the web's 802) gravitate on each other in the expanding universe, so the web's
+                pull is fully nonlinear and its nodes accrete — but it runs FORWARD only. Before the observed epoch it
+                shows the shell reconstruction, because running the past needs the web's initial conditions, which
+                this page does not reconstruct. It is resolved to ~24 Mpc for the smooth matter and ~11 Mpc for the
+                web, and each galaxy is a massless test particle. The shaded band is the page's dominant systematic, tracer bias b ± 20 %, run
                 through the whole model; it is not a statistical interval. Times after today are model forecasts.
                 The motion in comoving distances is SMALL — a few to ~15 Mpc in 18 Gyr — and nothing is magnified;
                 switch to proper distances to see the expansion it rides on, or let the camera follow galaxy A. The

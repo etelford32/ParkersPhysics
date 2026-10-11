@@ -19,12 +19,24 @@
  * observed epoch the stage is put back EXACTLY as the rest of the page drew it
  * (`setTracerOffsetsMpc(null)` + the original web), so every other readout on
  * the page — which is an observed-epoch claim — stays true of the picture.
+ *
+ * THE N-BODY MODE IS A FORECAST, AND ONLY A FORECAST. "N-body forecast" runs
+ * every particle — the void's smooth matter and the web's mass — under its
+ * own gravity FORWARD from the observed epoch (js/bootes-nbody.js, in a
+ * worker via bootes/nbody-runner.js). Before z_obs the track is the shell
+ * reconstruction, exactly as in the nonlinear mode: running the past as an
+ * N-body needs initial conditions for the web's clumps, an inverse problem
+ * this page does not solve (BOOTES_VOID_PLAN.md §4d). The ghost line in this
+ * mode is the SHELL tracker, so what the self-gravitating web changes is
+ * drawn, not asserted. Until the run finishes the future falls back to the
+ * shell tracker and the status line says so.
  */
 
 import {
-    buildTimeline, trackGalaxy, epochAt, shellTable, bulkMotion,
+    buildTimeline, trackGalaxy, epochAt, shellTable, bulkMotion, scaleFactorAtTime,
 } from '../bootes-void-tracker.js';
 import { drawTrackSeries } from './charts.js';
+import { createNbodyRunner } from './nbody-runner.js';
 
 /**
  * One colour per tracked galaxy, bound to the GALAXY (a removed galaxy frees
@@ -78,7 +90,7 @@ export function createTrackPanel({
         tracked: [],            // { key, letter, color, xObsMpc, track, linear, band, retracked }
         playing: false,
         pickArmed: false,
-        mode: 'nonlinear',      // or 'linear' — the A/B reference
+        mode: 'nonlinear',      // or 'linear' (the A/B reference) or 'nbody' (forecast)
         band: true,
         frame: 'comoving',      // or 'proper'
         follow: false,
@@ -99,6 +111,30 @@ export function createTrackPanel({
 
     const keyOf = (d) => `${d.web.seed}|${d.web.clumpiness}|${d.profile.params.deltaC}|${d.profile.params.rsMpc}`;
 
+    // ── The N-body forecast ─────────────────────────────────────────────────
+    const runner = createNbodyRunner({
+        zObs, rEff, aEnd: scaleFactorAtTime(timeline.tEndGyr),
+        onChange: () => {
+            if (runner.ready) runner.request(state.tracked.map(t => t.xObsMpc));
+            recomposeNbody();
+            schedule();
+        },
+    });
+    function ensureRun() {
+        const d = getDerived();
+        if (state.mode !== 'nbody' || !d) return;
+        runner.start(d, shells, state.tracked.map(t => t.xObsMpc), keyOf(d));
+    }
+    /** The shell track until z_obs, the N-body record after it (once run). */
+    function composeNbody(xObsMpc, base) {
+        const at = (ep) => (ep.tGyr > tObs + 1e-9 ? runner.sampleFor(xObsMpc, ep) : null) ?? base.at(ep);
+        return { ...base, mode: 'nbody', at, samples: timeline.epochs.map(at) };
+    }
+    function recomposeNbody() {
+        if (state.mode !== 'nbody') return;
+        for (const t of state.tracked) if (t.linear) t.main = composeNbody(t.xObsMpc, t.linear);
+    }
+
     // ── Tracking ────────────────────────────────────────────────────────────
     const trackWith = (xObsMpc, d, mode) => trackGalaxy(xObsMpc, {
         voidProfile: d.profile, web: d.web, zObs, timeline, mode, table: shells,
@@ -113,15 +149,21 @@ export function createTrackPanel({
      */
     function track(xObsMpc) {
         const d = getDerived();
-        const main = trackWith(xObsMpc, d, state.mode);
-        const linear = state.mode === 'nonlinear' ? trackWith(xObsMpc, d, 'linear') : null;
+        const nbody = state.mode === 'nbody';
+        // In N-body mode the shell tracker is both the past AND the ghost.
+        const shellMode = nbody ? 'nonlinear' : state.mode;
+        let main = trackWith(xObsMpc, d, shellMode);
+        let linear = state.mode === 'nonlinear' ? trackWith(xObsMpc, d, 'linear') : null;
+        if (nbody) { linear = main; main = composeNbody(xObsMpc, linear); }
         let band = null;
         if (state.band && getVariant) {
             const b = getBias();
+            // The band is the shell model at b ± 20 %. In N-body mode it stops
+            // at z_obs: a band on the forecast would need two more runs.
             band = [1 - BIAS_BAND, 1 + BIAS_BAND]
                 .map(f => getVariant(b * f))
                 .filter(Boolean)
-                .map(v => trackWith(xObsMpc, v, state.mode));
+                .map(v => trackWith(xObsMpc, v, shellMode));
             if (band.length !== 2) band = null;
         }
         return { main, linear, band };
@@ -146,6 +188,7 @@ export function createTrackPanel({
         };
         letterCursor++;
         state.tracked.push(entry);
+        if (state.mode === 'nbody') { ensureRun(); runner.request([entry.xObsMpc]); }
         paint();
         return entry;
     }
@@ -183,6 +226,23 @@ export function createTrackPanel({
         return k;
     }
 
+    function nbodyStatus() {
+        if (state.mode !== 'nbody') return 'N-body run: off — choose "N-body forecast" above.';
+        const r = runner.state;
+        const parts = r.counts
+            ? `${(r.counts.smooth + r.counts.web).toLocaleString('en-US')} particles `
+              + `(${r.counts.web} of them the web), ${r.counts.galaxies.toLocaleString('en-US')} galaxies as test particles`
+            : '';
+        if (r.status === 'building') return 'N-body run: building the observed-epoch initial conditions…';
+        if (r.status === 'running') return `N-body run: step ${r.step} of ${r.steps} · ${parts}`;
+        if (r.status === 'error') return `N-body run failed (${r.error}) — the future shown is the shell tracker's.`;
+        if (r.status === 'ready') {
+            const pend = r.pending.size ? ` · ${r.pending.size} new galaxy(ies) being flown through it` : '';
+            return `N-body run: done in ${num(r.ms / 1000, 1)} s · ${parts}${pend}.`;
+        }
+        return 'N-body run: idle';
+    }
+
     function paint() {
         const d = getDerived();
         if (!d) return;
@@ -211,6 +271,14 @@ export function createTrackPanel({
                 ? 'Linear mode: every tracked galaxy is in the linear range here (|Δ|, |δ| ≤ 0.5).'
                 : `Linear mode: ${outside} of ${state.tracked.length} tracked galaxies sit where |Δ| or |δ| > 0.5 — `
                   + 'past where linear theory is accurate. Switch to nonlinear.');
+        } else if (state.mode === 'nbody') {
+            set('trackRegime', ep.tGyr > tObs + 1e-9
+                ? (runner.ready
+                    ? 'N-body forecast: every particle — the void\'s matter and the web — self-gravitating; '
+                      + 'the web\'s pull is fully nonlinear here.'
+                    : 'N-body forecast still running — the future shown is the shell tracker\'s until it lands.')
+                : 'N-body mode, before the observed epoch: this is the shell reconstruction (the N-body '
+                  + 'runs forward only).');
         } else {
             const crossed = samples.filter(s => s.shellCrossed).length;
             set('trackRegime', crossed === 0
@@ -220,7 +288,16 @@ export function createTrackPanel({
                   + 'forming there and no spherical model holds past this instant.');
         }
         const a = state.tracked[0];
-        if (a && a.linear) {
+        if (a && a.linear && state.mode === 'nbody') {
+            const nb = a.main.at(ep);
+            const sh = a.linear.at(ep);
+            const dKpc = 1000 * Math.hypot(...nb.positionMpc.map((c, i) => c - sh.positionMpc[i]));
+            set('trackNlGain', nb.nbody
+                ? `Galaxy ${a.letter}: the self-gravitating web moves it ${num(dKpc, 0)} kpc from the shell `
+                  + `tracker's position; ${num(nb.vKms, 0)} km/s vs ${num(sh.vKms, 0)}; `
+                  + `|g| ${num(nb.gA, 2)} vs ${num(sh.gA, 2)} km/s/Gyr (ghost line = shell tracker)`
+                : `Galaxy ${a.letter}: shell tracker (the N-body takes over after the observed epoch).`);
+        } else if (a && a.linear) {
             const nl = a.main.at(ep);
             const li = a.linear.at(ep);
             set('trackNlGain', `Galaxy ${a.letter}: ${num(nl.vKms, 0)} km/s nonlinear vs ${num(li.vKms, 0)} linear `
@@ -234,6 +311,11 @@ export function createTrackPanel({
         set('trackBand', state.band && Number.isFinite(b)
             ? `b = ${num(b * (1 - BIAS_BAND), 2)} – ${num(b * (1 + BIAS_BAND), 2)} (±${BIAS_BAND * 100} %)`
             : 'off');
+        set('trackNbody', nbodyStatus());
+        const acc = state.mode === 'nbody' && ep.tGyr > tObs + 1e-9 ? runner.accretionAt(ep.a) : null;
+        set('trackAccretion', acc == null
+            ? (state.mode === 'nbody' ? 'after z_obs' : 'N-body only')
+            : `${signed((acc - 1) * 100, 1)} % since z_obs`);
         set('trackFrame', state.frame === 'proper'
             ? `proper distances: everything drawn × a(t)/a_obs = ${num(ep.a * (1 + zObs), 3)} — `
               + 'mostly cosmic expansion, which is NOT the void\'s doing'
@@ -243,6 +325,7 @@ export function createTrackPanel({
         paintCharts();
         paintStage(ep, atObs, d);
         card?.setAttribute('data-track-ready', '1');
+        card?.setAttribute('data-nbody', state.mode === 'nbody' ? runner.state.status : 'off');
         card?.setAttribute('data-track-t', state.tGyr.toFixed(4));
     }
 
@@ -310,13 +393,15 @@ export function createTrackPanel({
         const lines = (pick) => state.tracked.map((t, i) => ({
             color: t.color,
             points: t.main.samples.map(s => [s.tGyr, pick(s)]),
-            band: t.band ? t.main.samples.map((s, k) => {
+            band: t.band ? t.main.samples.flatMap((s, k) => {
+                if (state.mode === 'nbody' && s.tGyr > tObs + 1e-9) return [];
                 const vals = [pick(s), pick(t.band[0].samples[k]), pick(t.band[1].samples[k])]
                     .filter(Number.isFinite);
-                return [s.tGyr, Math.min(...vals), Math.max(...vals)];
+                return [[s.tGyr, Math.min(...vals), Math.max(...vals)]];
             }) : null,
-            // The linear reference, ghosted, for the FIRST galaxy only — one
-            // comparison line reads; three of them are a thicket.
+            // The reference, ghosted, for the FIRST galaxy only — one comparison
+            // line reads; three of them are a thicket. Linear theory under the
+            // nonlinear mode; the shell tracker under the N-body mode.
             ghost: i === 0 && t.linear ? t.linear.samples.map(s => [s.tGyr, pick(s)]) : null,
         }));
         if (c('trackG')) {
@@ -334,11 +419,12 @@ export function createTrackPanel({
     }
 
     function ensureBulk(d) {
-        const key = `${keyOf(d)}|${state.mode}`;
+        const mode = state.mode === 'nbody' ? 'nonlinear' : state.mode;
+        const key = `${keyOf(d)}|${mode}`;
         if (bulk && bulk.key === key) return bulk;
         const tracerPts = d.tracers.map(t => t.offsetMpc);
         const nodePts = d.web.nodes.map(n => n.offsetMpc);
-        const opts = { voidProfile: d.profile, web: d.web, zObs, mode: state.mode, table: shells };
+        const opts = { voidProfile: d.profile, web: d.web, zObs, mode, table: shells };
         bulk = {
             key,
             tracers: bulkMotion(tracerPts, opts),
@@ -355,8 +441,11 @@ export function createTrackPanel({
         // at the observed epoch.
         if (state.animate && !atObs) {
             const b = ensureBulk(d);
-            scene.setTracerOffsetsMpc(b.tracers.positionsAt(ep, b.out));
-            const nodePos = b.nodes.positionsAt(ep);
+            // After z_obs in N-body mode, the field and the web are the run's
+            // own particles; before it (or until it lands), the shell flow.
+            const nb = state.mode === 'nbody' && ep.tGyr > tObs + 1e-9 && runner.ready;
+            scene.setTracerOffsetsMpc(nb ? runner.tracerPositionsAt(ep.a, b.out) : b.tracers.positionsAt(ep, b.out));
+            const nodePos = nb ? runner.nodePositionsAt(ep.a) : b.nodes.positionsAt(ep);
             scene.buildWeb({
                 nodes: d.web.nodes.map((n, i) => ({
                     ...n, offsetMpc: [nodePos[i * 3], nodePos[i * 3 + 1], nodePos[i * 3 + 2]],
@@ -436,7 +525,7 @@ export function createTrackPanel({
             if (key === 't') { setPlaying(false); setTime(Number(el.value)); }
             else if (key === 'animate') { state.animate = el.checked; schedule(); }
             else if (key === 'paths') { state.paths = el.checked; schedule(); }
-            else if (key === 'mode') { state.mode = el.value; retrackAll(); schedule(); }
+            else if (key === 'mode') { state.mode = el.value; ensureRun(); retrackAll(); schedule(); }
             else if (key === 'band') { state.band = el.checked; retrackAll(); schedule(); }
             else if (key === 'frame') { state.frame = el.value; schedule(); }
             else if (key === 'follow') {
@@ -506,6 +595,7 @@ export function createTrackPanel({
             const key = keyOf(d);
             const changed = key !== derivedKey && derivedKey !== '';
             derivedKey = key;
+            ensureRun();
             retrackAll();
             if (changed) for (const t of state.tracked) t.retracked = true;
             // First boot only: start with the deepest void galaxy so the card
@@ -525,6 +615,7 @@ export function createTrackPanel({
         add,
         get timeline() { return timeline; },
         get shells() { return shells; },
+        get nbody() { return runner; },
         get state() {
             return { ...state, tracked: state.tracked.map(t => ({ letter: t.letter, color: t.color, xObsMpc: [...t.xObsMpc] })) };
         },

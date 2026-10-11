@@ -258,7 +258,7 @@ const STACK = new Int32Array(1 << 14);
  *       Gauss's law to O(h²∇²δ).
  * Each source is smoothed at its own resolution ("source softening"), so the
  * pair force between the two groups is not exactly antisymmetric and total
- * momentum is conserved only to the tree's accuracy (measured, gated).
+ * Newton's third law holds only to the tree's accuracy (measured, gated).
  */
 export const plummer = (eps) => Object.freeze({ kind: 'plummer', eps });
 export const spline = (h) => Object.freeze({ kind: 'spline', h });
@@ -678,14 +678,20 @@ export function enclosedContrast(x, mass, nMassive, { rho, radius }) {
 
 /**
  * Run a simulation through a schedule, recording a frame at every step.
- *   record       Int32Array of TEST-particle indices (0-based among tests)
- *                whose velocity, split acceleration and Δ(<r) are kept.
+ *   record         Int32Array of TEST-particle indices (0-based among tests)
+ *                  whose velocity, split acceleration and Δ(<r) are kept.
  *   keepSnapshots  keep every massive snapshot (Float64) for replays.
+ *   accretion      { nodes: Int32Array of massive indices, radiusMpc } —
+ *                  smooth mass near those nodes, per frame.
  * Returns plain typed arrays, so a worker can transfer them.
+ *
+ * `createRun` is the same thing one step at a time (the worker reports
+ * progress between steps; the no-Worker fallback yields to the page between
+ * them); `runSimulation` drives it to the end.
  */
-export function runSimulation(sim, schedule, {
+export function createRun(sim, schedule, {
     record = new Int32Array(0), keepSnapshots = false, background = null,
-    onProgress = null, webIndices = null,
+    webIndices = null, accretion = null,
 } = {}) {
     const { nMassive, n } = sim;
     const nTest = n - nMassive;
@@ -703,6 +709,7 @@ export function runSimulation(sim, schedule, {
         deltaEnc: new Float64Array(frames * nr),
     };
     const snapshots = keepSnapshots ? [] : null;
+    const accreted = accretion ? new Float64Array(frames) : null;
 
     const capture = (f) => {
         const x = sim.x;
@@ -735,19 +742,40 @@ export function runSimulation(sim, schedule, {
                     ? enc(Math.hypot(x[3 * i], x[3 * i + 1], x[3 * i + 2])) : NaN;
             }
         }
+        if (accreted) {
+            const m = massNearNodes(x, sim.mass, sim.group, nMassive, accretion.nodes, accretion.radiusMpc);
+            accreted[f] = m.reduce((acc, v) => acc + v, 0);
+        }
         if (snapshots) snapshots.push(Float64Array.from(x.subarray(0, 3 * nMassive)));
     };
 
     capture(0);
-    for (let s = 0; s < schedule.steps; s++) {
-        sim.step(schedule, s);
-        capture(s + 1);
-        if (onProgress) onProgress(s + 1, schedule.steps);
-    }
+    let s = 0;
     return {
-        frames, nTest, N: schedule.N, a: schedule.a,
-        testPos, webPos, webIndices: web, record, rec, snapshots,
+        get done() { return s >= schedule.steps; },
+        get stepsDone() { return s; },
+        /** Advance one step; returns true while more remain. */
+        step() {
+            if (s >= schedule.steps) return false;
+            sim.step(schedule, s);
+            s++;
+            capture(s);
+            return s < schedule.steps;
+        },
+        result() {
+            return {
+                frames, nTest, N: schedule.N, a: schedule.a,
+                testPos, webPos, webIndices: web, record, rec, snapshots, accreted,
+            };
+        },
     };
+}
+
+export function runSimulation(sim, schedule, opts = {}) {
+    const run = createRun(sim, schedule, opts);
+    while (run.step()) opts.onProgress?.(run.stepsDone, schedule.steps);
+    if (schedule.steps) opts.onProgress?.(run.stepsDone, schedule.steps);
+    return run.result();
 }
 
 /**
@@ -985,6 +1013,38 @@ export function clumpVelocities(points, { voidProfile, web, zObs, cosmo = COSMOL
 }
 
 /**
+ * Position and peculiar velocity at `aStart` of particles OBSERVED at
+ * `points` (comoving, z_obs): each rides its own spherical shell (the exact
+ * flow) plus the clumped part's linear growing mode. The ONE definition of a
+ * particle's initial state — `buildInitialConditions` uses it for every
+ * particle, and the panel uses it for a galaxy tracked after a run finished,
+ * so a replayed galaxy starts exactly as an inline one would have.
+ */
+export function observedState(points, { voidProfile, web = null, table, zObs, aStart = null, cosmo = COSMOLOGY }) {
+    const n = points.length / 3;
+    const aObs = 1 / (1 + zObs);
+    const a0 = aStart ?? aObs;
+    const flow = sphericalFlow(voidProfile, table, { rMax: voidProfile.params.rvMpc * 5.9, cosmo });
+    const clump = web ? clumpVelocities(points, { voidProfile, web, zObs, cosmo }) : new Float64Array(3 * n);
+    // Clump velocity rides the linear growing mode from z_obs to a0.
+    const vScale = a0 === aObs ? 1 : clumpScale(a0, aObs, cosmo);
+    const pos = new Float64Array(3 * n), vel = new Float64Array(3 * n);
+    for (let i = 0; i < n; i++) {
+        const o = 3 * i;
+        const r = Math.hypot(points[o], points[o + 1], points[o + 2]);
+        const st = flow.at(r, a0);
+        const s = r > 1e-9 ? st.r / r : 1;
+        const ur = r > 1e-9 ? st.u / r : 0;
+        for (let d = 0; d < 3; d++) {
+            const unit = points[o + d];
+            pos[o + d] = unit * s;
+            vel[o + d] = unit * ur + clump[o + d] * vScale;
+        }
+    }
+    return { pos, vel };
+}
+
+/**
  * The observed state at z_obs, ready for `createSimulation`:
  *   massive = quiet-start ρ̄(1+δ⁻) inside `radius` (group 0) + the web (group 1)
  *   tests   = `testPoints` (Float64Array 3k), massless
@@ -1023,24 +1083,9 @@ export function buildInitialConditions({
     }
     pos.set(testPoints, 3 * nMassive);
 
-    const rMaxFlow = voidProfile.params.rvMpc * 5.9;
-    const flow = sphericalFlow(voidProfile, table, { rMax: rMaxFlow, cosmo });
-    const clump = web ? clumpVelocities(pos, { voidProfile, web, zObs, cosmo }) : new Float64Array(3 * n);
-    const vel = new Float64Array(3 * n);
-    // Clump velocity rides the linear growing mode from z_obs to a0.
-    const vScale = a0 === aObs ? 1 : clumpScale(a0, aObs, cosmo);
-    for (let i = 0; i < n; i++) {
-        const o = 3 * i;
-        const r = Math.hypot(pos[o], pos[o + 1], pos[o + 2]);
-        const st = flow.at(r, a0);
-        const s = r > 1e-9 ? st.r / r : 1;
-        const ur = r > 1e-9 ? st.u / r : 0;
-        for (let d = 0; d < 3; d++) {
-            const unit = pos[o + d];
-            pos[o + d] = unit * s;
-            vel[o + d] = unit * ur + clump[o + d] * vScale;
-        }
-    }
+    const st = observedState(pos, { voidProfile, web, table, zObs, aStart: a0, cosmo });
+    pos.set(st.pos);
+    const vel = st.vel;
     return {
         pos, vel, mass, group, nMassive, nBackground: nBg, nWeb, nTest,
         aStart: a0,
@@ -1079,4 +1124,68 @@ export function massNearNodes(x, mass, group, nMassive, nodeIndices, radiusMpc) 
         out[k] = m;
     });
     return out;
+}
+
+// ── Reading a finished run ──────────────────────────────────────────────────
+
+/** Where scale factor `a` falls between a run's frames (uniform in ln a). */
+export function locateFrame(N, a) {
+    const n = N.length;
+    const x = (Math.log(a) - N[0]) / (N[n - 1] - N[0]) * (n - 1);
+    const xi = Math.max(0, Math.min(n - 1, x));
+    const i = Math.min(n - 2, Math.floor(xi));
+    return { i, t: xi - i, inside: x >= -1e-9 && x <= n - 1 + 1e-9 };
+}
+
+/**
+ * Rows `[from, from + count)` of a frame-major array (`stride` values per
+ * row) interpolated at `loc`, into `out`. Linear in ln a between frames:
+ * the run is converged at a quarter of its steps (gated), so the frames are
+ * far denser than the motion's curvature.
+ */
+export function interpolateRows(arr, rowsPerFrame, stride, loc, out, from = 0, count = rowsPerFrame) {
+    const { i, t } = loc;
+    const A = (i * rowsPerFrame + from) * stride, B = ((i + 1) * rowsPerFrame + from) * stride;
+    for (let k = 0; k < count * stride; k++) out[k] = arr[A + k] + t * (arr[B + k] - arr[A + k]);
+    return out;
+}
+
+/**
+ * One tracked galaxy's sample at epoch `ep` from a run's record — the same
+ * fields the tracker's samples carry, so the panel draws either without
+ * knowing which made it. What the N-body cannot say, it does not: no T-web
+ * class and no local δ (the field is particles, not a profile), and the
+ * spherical-shell flags do not apply.
+ *   rec      { pos, vel, gVoid, gWeb, deltaEnc } (frame-major), `nRec` rows
+ *   k        this galaxy's row
+ */
+export function recordSampleAt(rec, nRec, k, N, ep, toKmsPerGyr) {
+    const loc = locateFrame(N, ep.a);
+    const v3 = (arr) => interpolateRows(arr, nRec, 3, loc, new Array(3), k, 1);
+    const pos = v3(rec.pos), vel = v3(rec.vel), gv = v3(rec.gVoid), gw = v3(rec.gWeb);
+    const dEnc = interpolateRows(rec.deltaEnc, nRec, 1, loc, new Array(1), k, 1)[0];
+    const g = [gv[0] + gw[0], gv[1] + gw[1], gv[2] + gw[2]];
+    const mag = (v) => Math.hypot(v[0], v[1], v[2]);
+    const r = mag(pos);
+    const radial = (v) => (r > 1e-9 ? (v[0] * pos[0] + v[1] * pos[1] + v[2] * pos[2]) / r : 0);
+    const mv = mag(gv), mw = mag(gw);
+    return {
+        tGyr: ep.tGyr, z: ep.z,
+        positionMpc: pos,
+        rMpc: r,
+        gA: toKmsPerGyr(mag(g)),
+        gVoid: toKmsPerGyr(mv),
+        gWeb: toKmsPerGyr(mw),
+        gRadial: toKmsPerGyr(radial(g)),
+        voidShare: (mv + mw) > 0 ? mv / (mv + mw) : 0,
+        vKms: mag(vel),
+        vRadialKms: radial(vel),
+        delta: NaN,
+        deltaEnclosed: dEnc,
+        tidal: [NaN, NaN, NaN],
+        tweb: { name: 'N-body', count: NaN },
+        linearOk: true,
+        shellCrossed: false,
+        nbody: true,
+    };
 }

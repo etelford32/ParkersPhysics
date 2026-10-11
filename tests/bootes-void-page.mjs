@@ -155,6 +155,17 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
     assert.ok(/#bv-track-pick\[hidden\]\s*\{[^}]*display\s*:\s*none/.test(html),
         '#bv-track-pick is hidden without WebGL and needs its own [hidden] rule');
     ok(`tracker controls agree in both directions (${declared.length} controls + 9 ids)`);
+
+    // The N-body mode: offered in the markup, handled by the panel, and the
+    // accretion label's radius is the runner's own constant (typed twice —
+    // once in prose — so this pins the prose to the number).
+    const runner = read('../js/bootes/nbody-runner.js');
+    assert.ok(/<option value="nbody"/.test(html), 'the Dynamics select must offer the N-body forecast');
+    assert.ok(/state\.mode === 'nbody'/.test(trackPanel), "track-panel.js must handle mode 'nbody'");
+    const radius = runner.match(/ACCRETION_RADIUS_MPC = (\d+)/)?.[1];
+    assert.ok(radius && html.includes(`≤ ${radius} Mpc of nodes`),
+        `the accretion label must quote ACCRETION_RADIUS_MPC (${radius} Mpc)`);
+    ok(`the N-body forecast is offered, handled, and its ${radius} Mpc label matches the runner`);
 }
 
 // ── 4. Charts ───────────────────────────────────────────────────────────────

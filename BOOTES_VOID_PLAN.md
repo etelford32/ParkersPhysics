@@ -322,6 +322,81 @@ instant; proper-frame label sprites are counter-scaled (they are text, not
 geometry) and the probe's drag divides by its group scale so it still lands in
 comoving Mpc.
 
+## 4d. The N-body forecast (2026-10-11, third pass)
+
+Asked for directly: "the web's lumpy pull is linear — work towards an N-body
+simulation". Phase 1 shipped as a third tracker mode, **N-body forecast**:
+every particle — the void's smooth matter (~13 400, quiet start sampling
+ρ̄(1 + δ⁻) to 2.6 R_eff) and the web's 802 mass particles — gravitates on every
+other in the expanding ΛCDM background, FORWARD from the observed epoch to
+t₀ + 6 Gyr. The web's pull is therefore fully nonlinear and the web itself
+responds. Kernel `js/bootes-nbody.js` (PURE) → `js/bootes/nbody-worker.js`
+(thin shell) → `js/bootes/nbody-runner.js` (builds the ICs, falls back to
+stepping on the page without a Worker) → `js/bootes/track-panel.js`.
+
+| Decision | Why |
+|----------|-----|
+| Barnes–Hut octree, monopole + QUADRUPOLE, θ = 0.5, leaf 16 | the force error must be quoted against the PECULIAR force: the raw sum is dominated by the mean density's pull, so a monopole tree's 1 % raw error was a ~50 % error at the wall. Quadrupoles cut it 10×; at θ = 0.5 it is ~0.9 % of the rms peculiar force (gated) |
+| Comoving x, canonical p = a·u, KDK leapfrog in N = ln a, drift/kick coefficients ∫dN/(a²H), ∫dN/(aH) integrated per step | symplectic in the comoving Hamiltonian; 6 steps are within 0.05 % of 24 on the page's run (gated) |
+| The mean density is SUBTRACTED as a kernel-smoothed uniform sphere (`meanSphereForce`) | only the peculiar force acts, and a uniform particle sphere feels ≤ 0.07 % of the raw pull INCLUDING across its smoothed edge (gated) |
+| The void's smooth matter uses Gadget-2's COMPACT spline (h = 24 Mpc on the page); the web keeps the probe's PLUMMER ε | Plummer's density tail falls as r⁻⁵, its second moment diverges, and smoothing a void with it weakened the deficit's pull by ~ε²·ln — 4 % at ε = 4.8 Mpc, 26 % at 12 Mpc, measured. The web stays Plummer so the N-body's web force at z_obs IS the probe's (gated to the tree's 0.1 %) |
+| Quiet start: shells of Fibonacci directions, randomly rotated, radii STRATIFIED IN MASS within each shell | positions carry no Poisson noise; see the scars below for why both "stratified" and "in mass" are load-bearing |
+| Initial velocity = exact spherical shell flow (the tracker's table) + the clumped part's linear growing mode at the probe's f | an N-body galaxy leaves z_obs with the shell tracker's velocity (gated to < 0.2 %) — the two modes JOIN at z_obs and part only after it |
+| Galaxies are massless TEST particles; the worker keeps the matter's snapshots | a galaxy tracked after the run is flown through the same matter with no re-run, bitwise what an inline test particle gives (gated) |
+| The mode is a FORECAST only; before z_obs it shows the shell reconstruction | see Phase 2 below — the past is not faked |
+
+Measured (page configuration, `tests/bootes-nbody.mjs` + the browser gate):
+8.4 s in a Worker; the self-gravitating web moves the deepest void galaxy
+~6 kpc from the shell tracker over the next 6 Gyr (median tracer 35 kpc, p90
+75 kpc, against a median forecast displacement of 0.2 Mpc); smooth matter
+within 20 Mpc of the web's nodes grows +3.7–4.6 %. REAL BUT SMALL: Λ is
+switching growth off (D rises only ×1.18 from z_obs to t₀ + 6 Gyr), and the
+page says so rather than magnifying it.
+
+Physics gates (each against something the N-body code does not contain):
+- FULL HISTORY, z = 19 → z_obs, with the exact SPHERICAL solver (Gauss's law
+  on the particles' own enclosed mass, no tree): every shell lands on the
+  ΛCDM shell ODE to 0.09 % of its displacement — the integrator, ICs and mean
+  subtraction, isolated.
+- FORWARD, z_obs → t₀ + 6 Gyr, 3D tree: shells track the ODE to 0.4 %.
+- LINEAR GROWTH, 3D tree: a broad 1 % mode grows ×15.3 = D(z_obs)/D(19) to
+  0.5 % (discreteness noise, ~30× the signal at z = 19, cancels against a
+  matched uniform run with the identical layout).
+- Recorded, not gated: the 3D tree run from z = 19 undershoots the shell ODE by
+  5 % in the interior and up to ~15 % across the steep wall (β = 9) at
+  h = 16–24 Mpc. That is the smooth matter's RESOLUTION smoothing the wall,
+  not an error — and it is why the page runs forward only from z_obs, where
+  the same configuration is within 0.4 %.
+
+Scars — each measured, each silent:
+
+| Bug | How it presented | Fix |
+|-----|------------------|-----|
+| Tree error quoted against the RAW force | "1 % median" looked fine; at the wall the peculiar force is ~2 % of the raw, so it was a 50 % error | quadrupoles + the gate measures against the rms PECULIAR force |
+| Plummer softening on a smooth void | full-history run 26 % short at ε = 12 Mpc; Gauss's-law check 4 % low even at ε = 4.8 | compact spline for the smooth matter |
+| Shells STACKED on one radius | a uniform quiet sphere pulled 5.8 % weak at r = 20 Mpc (∝ (s/r)², independent of ε) — a midpoint-rule quadrature of the radial mass | radii stratified within each shell |
+| Stratified uniformly in VOLUME | an exact spherical solver missed the shell ODE by 11 % from z = 19; the particle masses put 0.9 % too much mass inside r = 80 Mpc across the steep wall | stratified in MASS (inverse CDF of 4πρ̄(1+δ)r²) |
+| A particle excluded from its own enclosed mass | 0.1 % in a z = 19 shell's end radius | half its own mass counts as inside (it stands for its stratum) |
+| "Momentum drift 3.7 %" | looked like a conservation bug | it is not conserved: the mean subtraction is an external background and the clumped web's centre of mass is off-origin. The gate checks Newton III on the INTERNAL forces instead (1e-5) |
+
+### Phase 2 — the past as an N-body (documented, not built)
+
+Running the web BACKWARD is not "the same integrator with dt < 0": gravity
+amplifies forward and the inverse problem is ill-posed — a clumped web at z_obs
+is consistent with many initial fields, and noise in it grows backwards. What
+it would take:
+
+1. A reconstruction of the initial linear field from the observed (here:
+   modelled) web — constrained realisations (Hoffman & Ribak 1991), or
+   least-action / Monge–Ampère–Kantorovich reconstruction (Peebles 1989;
+   Brenier et al. 2003), or a forward-model Bayesian sampler (BORG-style).
+2. Initial conditions at z ≈ 50–100 drawn from it (2LPT), run FORWARD with this
+   kernel, and scored against the observed state at z_obs.
+3. Only then would the track before z_obs be N-body; until then it is the shell
+   reconstruction, and the card says so. Running the shell flow backwards is
+   well-posed only because the spherical problem has one degree of freedom per
+   shell and an exact inverse (`shellTable.invert`).
+
 ---
 
 ## 5. What is deliberately NOT here
@@ -333,13 +408,18 @@ comoving Mpc.
 - **No claim of detection.** Two of the eight tests are labelled *honest null*
   because current instruments cannot detect them for a single void. That is the
   correct answer and saying so is the point.
-- **No N-body.** The dynamics are linear theory plus a spherical-collapse
-  correction, which is what the void literature uses at these scales and what
-  makes every relation checkable as an identity.
+- **No N-body PAST.** The tracker's N-body mode (§4d) runs forward only; the
+  past is the exact spherical-shell reconstruction plus the linear web, because
+  an N-body past needs a reconstruction of the web's initial field (§4d
+  Phase 2). The page's Tests 1–8 stay on linear theory plus the spherical
+  correction, which is what the void literature uses and what keeps every
+  relation checkable as an identity.
 - **No WASM.** The whole kernel is ~1 ms per profile rebuild and ~80 ms for the
   influence scan. There is nothing here that needs Rust, and adding it would put
   a compiled artefact between the reader and numbers whose selling point is that
-  they are traceable.
+  they are traceable. The N-body forecast (~8 s in a Worker) is the one place
+  WASM would pay; it stays JS so the node gate runs the very code the page
+  runs — revisit only if the particle count must grow.
 
 ---
 
@@ -373,10 +453,11 @@ profile in the middle.*
 node tests/bootes-void-model.mjs      # 17 checks — the physics kernel
 node tests/bootes-web-model.mjs       # 12 checks — the web + published inputs
 node tests/bootes-camera-math.mjs     #  9 checks — the camera + scale arithmetic
-node tests/bootes-void-page.mjs       #  9 checks — the DOM contract (incl. probe + tracker)
+node tests/bootes-void-page.mjs       # 10 checks — the DOM contract (incl. probe + tracker + N-body mode)
 node tests/bootes-force-probe.mjs     #  9 checks — the force probe's identities
 node tests/bootes-void-tracker.mjs    # 12 checks — the tracker's clock, linear + nonlinear shells
-npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js tests/bootes-void-tracker.spec.js   # 17 + 6 + 11
+node tests/bootes-nbody.mjs           # 10 checks — the N-body kernel (~15 s)
+npx playwright test tests/bootes-void-smoke.spec.js tests/bootes-void-probe.spec.js tests/bootes-void-tracker.spec.js tests/bootes-void-nbody.spec.js   # 17 + 6 + 11 + 4
 node tests/site-sections.mjs tests/simulations-catalog.mjs tests/glyphs.mjs
 node scripts/lint-nav.mjs
 ```
