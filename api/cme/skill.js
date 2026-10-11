@@ -20,6 +20,7 @@
  */
 
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { selectScorableLock } from '../../js/flux-rope-validation.js';
 
 export const config = { runtime: 'edge' };
 
@@ -62,16 +63,30 @@ export default async function handler(request) {
         return jsonError('upstream_unavailable', e.message, { source: 'supabase' });
     }
 
-    // Trim events: latest forecast per model, truth flattened.
+    // Trim events: ONE forecast per model, truth flattened. The one shown
+    // is the latest that was still a FORECAST — issued before its own
+    // predicted arrival and before the observed shock (selectScorableLock,
+    // the same rule the cron scores with). "Latest row" used to be shown
+    // here, and the daily re-run kept locking after the CME had hit: on the
+    // 2026-09 ledger 4 of 8 arrived events displayed a row issued AFTER the
+    // shock as the model's forecast (tests/flux-rope-ledger-real.mjs).
     const trimmed = (events ?? []).map(ev => {
-        const byModel = {};
-        for (const f of ev.cme_arrival_forecasts ?? []) {
-            const prev = byModel[f.model_id];
-            if (!prev || String(f.issued_at) > String(prev.issued_at)) byModel[f.model_id] = f;
-        }
         const truth = (ev.cme_l1_observations ?? [])[0]
             ?? (ev.cme_l1_observations && !Array.isArray(ev.cme_l1_observations)
                 ? ev.cme_l1_observations : null);   // 1:1 FK may embed as object
+        const sel = {
+            arrived: truth?.arrived === true,
+            shockMs: truth?.shock_arrival_utc ? Date.parse(truth.shock_arrival_utc) : NaN,
+        };
+        const rowsByModel = {};
+        for (const f of ev.cme_arrival_forecasts ?? []) {
+            (rowsByModel[f.model_id] ??= []).push(f);
+        }
+        const byModel = {};
+        for (const [m, rows] of Object.entries(rowsByModel)) {
+            const { lock } = selectScorableLock(rows, sel);
+            if (lock) byModel[m] = lock;
+        }
         return {
             event_id: ev.event_id,
             donki_id: ev.donki_id,

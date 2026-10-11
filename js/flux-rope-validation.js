@@ -264,6 +264,112 @@ export function fluxRopeForecastRows({
     return rows;
 }
 
+// ── Forecast honesty: what may be LOCKED, and which lock may be SCORED ───────
+//
+// Measured on the production ledger 2026-10-11 (tests/flux-rope-ledger-real.mjs
+// pins it on the real rows): the lock step had no issue-before-arrival guard,
+// so the daily re-run kept appending rows after a CME had already hit — 4 of
+// the 8 arrived events were scored on a lock ISSUED AFTER the observed shock
+// (the provider had already assimilated the shock from live L1), and several
+// rows predicted an arrival that was already in the past at issue time. Both
+// are postdictions; scoring them reported a 26.4 h MAE that was neither the
+// model's skill nor honest about it. The CME ledger (enlil/dbm/ballistic)
+// always had this guard (`predMs > nowMs` in validation-rerun) — these two
+// functions are the flux-rope equivalent, pure and node-gated.
+
+/**
+ * Filter freshly built lock rows down to the ones that are still genuine
+ * FORECASTS at `nowMs`: the predicted arrival must lie in the future, and the
+ * event must not already have L1 truth (`resolvedEventIds`) — once a shock
+ * is on the record, any new row has seen it through the particle filter.
+ */
+export function filterLockableRows(rows, { nowMs, resolvedEventIds = new Set() } = {}) {
+    const kept = [], dropped = { postdiction: 0, resolved: 0 };
+    for (const r of rows ?? []) {
+        if (resolvedEventIds.has(r.event_id)) { dropped.resolved++; continue; }
+        if (!(Date.parse(r.predicted_arrival_utc) > nowMs)) { dropped.postdiction++; continue; }
+        kept.push(r);
+    }
+    return { rows: kept, dropped };
+}
+
+/**
+ * Pick the ONE lock of an event that may be scored against `truth`: the
+ * latest lock that was (a) a forecast when issued (predicted arrival after
+ * issue time) and (b) issued strictly before the observed shock. For a
+ * false alarm (`truth.arrived === false`) only (a) applies. Returns
+ * `{ lock, rejected: { postdiction, afterShock } }`; `lock` is null when no
+ * lock qualifies — the event is then NOT scored (an honest gap, never a
+ * fallback to a leaked row).
+ */
+export function selectScorableLock(locks, truth) {
+    const rejected = { postdiction: 0, afterShock: 0 };
+    const shockMs = truth?.arrived ? truth.shockMs : NaN;
+    let best = null, bestIssued = -Infinity;
+    for (const l of locks ?? []) {
+        const issued = Date.parse(l.issued_at);
+        const pred = Date.parse(l.predicted_arrival_utc);
+        if (!(Number.isFinite(issued) && Number.isFinite(pred))) continue;
+        if (Number.isFinite(shockMs) && !(issued < shockMs)) { rejected.afterShock++; continue; }
+        if (!(pred > issued)) { rejected.postdiction++; continue; }
+        if (issued > bestIssued) { best = l; bestIssued = issued; }
+    }
+    return { lock: best, rejected };
+}
+
+/**
+ * Paired arrival skill: every model scored on the SAME events with the SAME
+ * lock-selection rule (selectScorableLock), so the flux-rope numbers are
+ * directly comparable with enlil / dbm-v1 / ballistic-v1 on the ledger.
+ * `locks`: rows {event_id, model_id, issued_at, predicted_arrival_utc};
+ * `truthByEvent`: Map event_id → {arrived, shockMs}. Only ARRIVED events
+ * count. Returns { [model_id]: { n, maeH, biasH, medianAbsH, hit12, events } }
+ * plus `paired`: the stats restricted to events EVERY model scored.
+ */
+export function pairedArrivalSkill(locks, truthByEvent) {
+    const byModel = new Map();
+    for (const l of locks ?? []) {
+        const key = `${l.model_id}|${l.event_id}`;
+        if (!byModel.has(key)) byModel.set(key, []);
+        byModel.get(key).push(l);
+    }
+    const errs = {};   // model → Map(event → errH)
+    for (const [key, ls] of byModel) {
+        const [model, eid] = [key.slice(0, key.indexOf('|')), key.slice(key.indexOf('|') + 1)];
+        const t = truthByEvent.get(eid);
+        if (!t?.arrived || !Number.isFinite(t.shockMs)) continue;
+        const { lock } = selectScorableLock(ls, t);
+        if (!lock) continue;
+        (errs[model] ??= new Map()).set(eid,
+            (Date.parse(lock.predicted_arrival_utc) - t.shockMs) / 3.6e6);
+    }
+    const stats = (vals) => {
+        const a = vals.filter(Number.isFinite);
+        if (!a.length) return { n: 0, maeH: null, biasH: null, medianAbsH: null, hit12: 0 };
+        const abs = a.map(Math.abs).sort((x, y) => x - y);
+        const mid = abs.length >> 1;
+        return {
+            n: a.length,
+            maeH: abs.reduce((s, x) => s + x, 0) / a.length,
+            biasH: a.reduce((s, x) => s + x, 0) / a.length,
+            medianAbsH: abs.length % 2 ? abs[mid] : 0.5 * (abs[mid - 1] + abs[mid]),
+            hit12: abs.filter((x) => x <= 12).length,
+        };
+    };
+    const out = { models: {}, paired: { events: [], models: {} } };
+    for (const [m, mp] of Object.entries(errs)) {
+        out.models[m] = { ...stats([...mp.values()]), events: [...mp.keys()].sort() };
+    }
+    const models = Object.keys(errs);
+    if (models.length) {
+        const common = [...errs[models[0]].keys()]
+            .filter((e) => models.every((m) => errs[m].has(e))).sort();
+        out.paired.events = common;
+        for (const m of models) out.paired.models[m] = stats(common.map((e) => errs[m].get(e)));
+    }
+    return out;
+}
+
 /** Train-onset arrival quantiles [h] from the prior's per-member arrivals. */
 export function arrivalQuantilesH(arrivalH, levels = ARRIVAL_Q_LEVELS) {
     const a = Array.from(arrivalH ?? []).filter(Number.isFinite).sort((x, y) => x - y);
@@ -325,6 +431,12 @@ export function scoreFluxRopeEvent({ forecast, truth, launchIso }) {
     const launchMs = Date.parse(inp.launch ?? launchIso);
     const out = {
         event_id: forecast?.event_id ?? null,
+        // Which lock was scored and how far ahead it was issued — the
+        // telemetry that makes a leaked or last-minute lock visible.
+        issued_at: forecast?.issued_at ?? null,
+        leadH: (truth?.arrived && Number.isFinite(truth.shockMs)
+                && Number.isFinite(Date.parse(forecast?.issued_at)))
+            ? (truth.shockMs - Date.parse(forecast.issued_at)) / 3.6e6 : null,
         flare: inp.flare ?? null,
         arrived: truth?.arrived === true,
         predicted_hit: forecast?.predicted_hit ?? null,
@@ -406,11 +518,36 @@ export function scoreFluxRopeEvent({ forecast, truth, launchIso }) {
         if (Number.isFinite(launchMs) && Number.isFinite(inp.v0_kms)) {
             const transitS = (truth.shockMs - launchMs) / 1000;
             if (transitS > 3600) {
-                const r = Number.isFinite(truth.vAtShockKms)
+                // Two observables first (transit + arrival speed → Γ AND w).
+                // On REAL events it refuses almost always (8/8 on the
+                // 2026-09 ledger, tests/flux-rope-ledger-real.mjs): the
+                // "arrival speed" is the DOWNSTREAM plasma speed in the
+                // first post-shock hour, which Rankine–Hugoniot puts below
+                // the shock's own propagation speed — a DBM profile that
+                // ends that slow cannot also cover 1 AU that fast. So fall
+                // back to transit-only Γ against the MEASURED upstream wind
+                // (truth.upstreamVKms, the ambient the CME was decelerating
+                // into). Never against the lock's w_eff: for a §16 follower
+                // that is the leader's WAKE speed (775–1229 km/s on the
+                // ledger), which retrieves nothing physical. No measured
+                // upstream ⇒ honest refusal.
+                let r = Number.isFinite(truth.vAtShockKms)
                     ? invertGammaW({ v0Kms: inp.v0_kms, transitS, vArrKms: truth.vAtShockKms })
-                    : invertGamma({ v0Kms: inp.v0_kms, wKms: inp.w_eff_kms ?? 400, transitS });
+                    : { ok: false, reason: 'no-arrival-speed' };
+                let method = 'transit+speed';
+                if (!r.ok && Number.isFinite(truth.upstreamVKms)) {
+                    const twoObsReason = r.reason;
+                    r = invertGamma({ v0Kms: inp.v0_kms, wKms: truth.upstreamVKms, transitS });
+                    method = 'transit+upstream-w';
+                    if (r.ok) r.wKms = truth.upstreamVKms;
+                    else r.reason = `${twoObsReason}; ${r.reason}`;
+                }
                 out.inversion = r.ok
-                    ? { ok: true, gammaPerKm: r.gammaPerKm, wKms: r.wKms ?? inp.w_eff_kms ?? null }
+                    ? { ok: true, method, gammaPerKm: r.gammaPerKm, wKms: r.wKms ?? null,
+                        // The drag the LOCK flew with — the retrieval is only
+                        // useful as a comparison against it.
+                        lockedGammaPerKm: Number.isFinite(inp.gamma_eff_per_km)
+                            ? inp.gamma_eff_per_km : null }
                     : { ok: false, reason: r.reason };
             }
         }
@@ -439,12 +576,25 @@ export function aggregateFluxRopeScores(events) {
         hits: scored.filter((e) => e.hit12).length,
         maeHours: mean(scored.map((e) => Math.abs(e.arrivalErrH))),
         biasHours: mean(scored.map((e) => e.arrivalErrH)),
+        meanLeadH: mean(scored.map((e) => e.leadH)),
         crpsArrivalH: mean(scored.map((e) => e.crpsArrivalH)),
         brierHit: mean((events ?? []).map((e) => e?.brierHit)),
         brier10: mean(scored.map((e) => e.brier10)),
         brier20: mean(scored.map((e) => e.brier20)),
         minBzMaeNt: mean(scored.map((e) => Math.abs(e.minBzErrNt))),
         inversions: scored.map((e) => e.inversion).filter((r) => r?.ok),
+        // Median of Γ_retrieved / Γ_locked over the ok-retrievals: > 1 = the
+        // real CMEs felt MORE drag than the ensemble flew with (the early-
+        // arrival direction). Geometric (log) median — Γ is log-normal.
+        dragRatioMedian: (() => {
+            const lr = scored.map((e) => e.inversion)
+                .filter((r) => r?.ok && r.lockedGammaPerKm > 0 && r.gammaPerKm > 0)
+                .map((r) => Math.log(r.gammaPerKm / r.lockedGammaPerKm))
+                .sort((a, b) => a - b);
+            if (!lr.length) return null;
+            const m = lr.length >> 1;
+            return Math.exp(lr.length % 2 ? lr[m] : 0.5 * (lr[m - 1] + lr[m]));
+        })(),
         compounding: cps.length ? {
             n: cps.length,
             nFollowers: followers.length,

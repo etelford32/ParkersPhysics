@@ -71,6 +71,7 @@ import { CmeEvent } from '../../js/cme-propagation.js';
 import {
     parseDonkiFlares, fluxRopeForecastRows, arrivalQuantilesH,
     resolveBzTruth, scoreFluxRopeEvent, aggregateFluxRopeScores,
+    selectScorableLock, filterLockableRows, pairedArrivalSkill,
     FLUX_ROPE_MODEL_ID, ARRIVAL_Q_LEVELS,
 } from '../../js/flux-rope-validation.js';
 import { retrievedPopulation } from '../../js/flux-rope-inversion.js';
@@ -184,15 +185,30 @@ async function fetchPdynSeries() {
  */
 async function fetchDonkiCatalog(windowStart, windowEnd) {
     const fmt = ms => new Date(ms).toISOString().slice(0, 10);
-    const start = fmt(windowStart - 5 * DAY), end = fmt(windowEnd + DAY);
-    // CCMC origin raced against the api.nasa.gov gateway — see donki-upstream.js.
-    const get = async (path) =>
-        (await fetchDonki(path, { startDate: start, endDate: end })).data;
-    // FLR rides along for the per-flare ledger ("for each flare"); its
-    // failure never blocks the CME program — flare tags are enrichment.
-    const [analyses, sims, flrRaw] = await Promise.all([
-        get('CMEAnalysis'), get('WSAEnlilSimulations'), get('FLR').catch(() => []),
+    const q = { startDate: fmt(windowStart - 5 * DAY), endDate: fmt(windowEnd + DAY) };
+    // CCMC origin raced against the api.nasa.gov gateway (donki-upstream.js):
+    // a 200 HTML body is a host failure, never a JSON parse crash — the
+    // gateway answered HTML from 2026-09-30 and `res.json()` here took the
+    // whole ledger down with "Unexpected token '<'" for 11 days. fetchDonki
+    // throws on a total miss; settle each product so ENLIL / FLR stay
+    // enrichment and only CMEAnalysis can stop the catalog.
+    const settle = (path) => fetchDonki(path, q).then(
+        (r) => ({ ok: true, data: r.data, host: r.host }),
+        (e) => ({ ok: false, error: String(e?.message || e) }));
+    const [an, sm, fl] = await Promise.all([
+        settle('CMEAnalysis'), settle('WSAEnlilSimulations'), settle('FLR'),
     ]);
+    // CMEAnalysis is the catalog: without it there is nothing to lock.
+    if (!an.ok) throw new Error(an.error);
+    // ENLIL and FLR are enrichment — their failure is recorded, not fatal.
+    const analyses = an.data;
+    const sims = sm.ok ? sm.data : [];
+    const flrRaw = fl.ok ? fl.data : [];
+    const sources = {
+        CMEAnalysis: an.host,
+        WSAEnlilSimulations: sm.ok ? sm.host : `failed: ${sm.error}`,
+        FLR: fl.ok ? fl.host : `failed: ${fl.error}`,
+    };
     // Newest Earth-arrival simulation per cme id.
     const enlilByCme = new Map();
     for (const s of Array.isArray(sims) ? sims : []) {
@@ -235,7 +251,7 @@ async function fetchDonkiCatalog(windowStart, windowEnd) {
             earthRelevant: (Number.isFinite(half) && miss <= half + 20) || sim?.isEarthGB === true,
         });
     }
-    return { rows, flares: parseDonkiFlares(flrRaw) };
+    return { rows, flares: parseDonkiFlares(flrRaw), sources };
 }
 
 /** Study-3 verifiable predictions from the catalog (ETA inside window). */
@@ -273,6 +289,24 @@ async function sbGet(path) {
     });
     if (!res.ok) throw new Error(`GET ${path.split('?')[0]} ${res.status}`);
     return res.json();
+}
+
+/**
+ * Read EVERY row of a query, page by page. PostgREST answers at most
+ * `max-rows` (1000 on Supabase) whatever `limit` says — the flux-rope Bz
+ * truth asked for 48 h of minute rows (2880) in one request, got 1000
+ * (~16.7 h, 35% coverage < the 60% floor) and every arrival stayed
+ * 'pending' forever (tests/flux-rope-ledger-real.mjs pins that negative
+ * control). `path` must carry its own `order=`, or pages may overlap.
+ */
+async function sbGetAll(path, { pageSize = 1000, maxRows = 20_000 } = {}) {
+    const out = [];
+    for (let offset = 0; offset < maxRows; offset += pageSize) {
+        const page = await sbGet(`${path}&limit=${pageSize}&offset=${offset}`);
+        out.push(...page);
+        if (page.length < pageSize) break;
+    }
+    return out;
 }
 
 async function sbInsert(table, rows, prefer = 'return=minimal') {
@@ -524,7 +558,17 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             for (const r of existing) {
                 if (!latest.has(r.event_id)) latest.set(r.event_id, Date.parse(r.predicted_arrival_utc));
             }
-            const toInsert = rows.filter(r =>
+            // Issue-before-arrival honesty (the CME ledger always had it;
+            // this one did not): no row whose predicted arrival is already
+            // past, and none for an event whose shock is already on the
+            // record — the provider has assimilated it from live L1 by then.
+            const obsRows = await sbGet(`cme_l1_observations?event_id=${inList}&select=event_id`);
+            const guard = filterLockableRows(rows, {
+                nowMs, resolvedEventIds: new Set(obsRows.map(o => o.event_id)),
+            });
+            summary.droppedPostdiction = guard.dropped.postdiction;
+            summary.droppedResolved = guard.dropped.resolved;
+            const toInsert = guard.rows.filter(r =>
                 needsNewIssue(latest.get(r.event_id) ?? null, Date.parse(r.predicted_arrival_utc)));
             await sbInsert('cme_arrival_forecasts', toInsert);
             summary.locked = toInsert.length;
@@ -534,16 +578,17 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
     // 3 ── Bz-structure truth enrichment + per-flare probabilistic scoring
     //      over the trailing 20 days of locked flux-rope rows.
     const since = iso(nowMs - 20 * DAY);
-    const frRows = await sbGet(
+    const frRows = await sbGetAll(
         `cme_arrival_forecasts?model_id=eq.${FLUX_ROPE_MODEL_ID}` +
         `&issued_at=gte.${encodeURIComponent(since)}` +
-        '&select=event_id,predicted_arrival_utc,predicted_hit,inputs,issued_at&order=issued_at.desc');
+        '&select=event_id,predicted_arrival_utc,predicted_hit,inputs,issued_at&order=issued_at.desc,id.desc');
     if (!frRows.length) return summary;
-    const latestByEvent = new Map();
+    const locksByEvent = new Map();
     for (const r of frRows) {
-        if (!latestByEvent.has(r.event_id)) latestByEvent.set(r.event_id, r);
+        if (!locksByEvent.has(r.event_id)) locksByEvent.set(r.event_id, []);
+        locksByEvent.get(r.event_id).push(r);
     }
-    const evIn = `in.(${[...latestByEvent.keys()].map(encodeURIComponent).join(',')})`;
+    const evIn = `in.(${[...locksByEvent.keys()].map(encodeURIComponent).join(',')})`;
     const [obs, events] = await Promise.all([
         sbGet(`cme_l1_observations?event_id=${evIn}` +
               '&select=event_id,arrived,shock_arrival_utc,observed_bz_min_nt,observed_speed_kms'),
@@ -551,9 +596,10 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
     ]);
     const launchByEvent = new Map(events.map(e => [e.event_id, e.launch_time_utc]));
     const scores = [];
+    const rejected = { postdiction: 0, afterShock: 0, unscorable: 0 };
+    const truthByEvent = new Map();
     for (const o of obs) {
-        const locked = latestByEvent.get(o.event_id);
-        if (!locked) continue;
+        if (!locksByEvent.has(o.event_id)) continue;
         const truth = {
             arrived: o.arrived === true,
             shockMs: o.shock_arrival_utc ? Date.parse(o.shock_arrival_utc) : NaN,
@@ -566,9 +612,9 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             try {
                 const t0 = iso(truth.shockMs - 60e3);
                 const t1 = iso(truth.shockMs + 48 * 3.6e6);
-                const ds = await sbGet(
+                const ds = await sbGetAll(
                     `sw_geomag_dataset?t=gte.${encodeURIComponent(t0)}&t=lte.${encodeURIComponent(t1)}` +
-                    '&select=t,sw_bz_nt,sw_v_km_s,sw_flag&order=t.asc&limit=3000');
+                    '&select=t,sw_bz_nt,sw_v_km_s,sw_flag&order=t.asc');
                 const bt = resolveBzTruth({
                     rows: ds.map(r => ({
                         tMs: Date.parse(r.t),
@@ -589,14 +635,48 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
                 }
             } catch { /* retried next run */ }
         }
+        if (truth.arrived && Number.isFinite(truth.shockMs)) {
+            // Ambient wind ahead of the shock — the drag inversion's w
+            // when the two-observable retrieval refuses (it does on real
+            // events: downstream plasma speed ≠ shock speed).
+            try {
+                const up = await sbGetAll(
+                    `sw_geomag_dataset?t=gte.${encodeURIComponent(iso(truth.shockMs - 6 * 3.6e6))}` +
+                    `&t=lt.${encodeURIComponent(iso(truth.shockMs - 10 * 60e3))}` +
+                    '&sw_flag=eq.ok&select=t,sw_v_km_s&order=t.asc');
+                const vs = up.map(r => r.sw_v_km_s).filter(Number.isFinite).sort((a, b) => a - b);
+                if (vs.length >= 120) {
+                    const m = vs.length >> 1;
+                    truth.upstreamVKms = vs.length % 2 ? vs[m] : 0.5 * (vs[m - 1] + vs[m]);
+                }
+            } catch { /* inversion falls back to an honest refusal */ }
+        }
         if ((truth.arrived && Number.isFinite(truth.shockMs)) || o.arrived === false) {
+            truthByEvent.set(o.event_id, truth);
+            // Leakage-proof selection: the latest lock that was a forecast
+            // when issued AND was issued before the shock. Never the latest
+            // row blindly — it was issued after the shock on 4 of 8 real
+            // arrivals (tests/flux-rope-ledger-real.mjs).
+            const sel = selectScorableLock(locksByEvent.get(o.event_id), truth);
+            rejected.postdiction += sel.rejected.postdiction;
+            rejected.afterShock += sel.rejected.afterShock;
+            if (!sel.lock) { rejected.unscorable++; continue; }
             scores.push(scoreFluxRopeEvent({
-                forecast: locked, truth, launchIso: launchByEvent.get(o.event_id),
+                forecast: sel.lock, truth, launchIso: launchByEvent.get(o.event_id),
             }));
         }
     }
+    summary.rejected = rejected;
     if (scores.length) {
         const agg = aggregateFluxRopeScores(scores);
+        // Every model on the SAME events under the SAME selection rule —
+        // the like-for-like comparison /api/cme/skill can quote.
+        let paired = null;
+        try {
+            const allLocks = await sbGetAll(`cme_arrival_forecasts?event_id=${evIn}` +
+                '&select=event_id,model_id,issued_at,predicted_arrival_utc&order=id.asc');
+            paired = pairedArrivalSkill(allLocks, truthByEvent);
+        } catch { paired = null; }
         await insertRun({
             kind: 'flux-rope',
             window_start: since,
@@ -609,6 +689,15 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             metrics: {
                 maeHours: agg.maeHours,
                 biasHours: agg.biasHours,
+                // How far ahead the scored locks were issued, and how many
+                // were refused as leaked / postdictions (telemetry for the
+                // honesty rules themselves).
+                meanLeadH: agg.meanLeadH,
+                rejected,
+                paired: paired ? { events: paired.paired.events, models: paired.paired.models } : null,
+                // Γ_retrieved / Γ_locked (geometric median): > 1 = real
+                // CMEs felt more drag than the ensemble flew with.
+                dragRatioMedian: agg.dragRatioMedian,
                 crpsArrivalH: agg.crpsArrivalH,
                 brierHit: agg.brierHit,
                 brier10: agg.brier10,
@@ -655,7 +744,7 @@ async function runValidation(req) {
     //    only — see the header postmortem: HEK trouble or a late-run budget
     //    kill must never starve the record-before-predict ledger).
     const nowMs = Date.now();
-    let catalog = [], flares = [], pdynSeries = [];
+    let catalog = [], flares = [], pdynSeries = [], donkiSources = null;
     let cmeProgram = { reason: 'not_run' };
     try {
         const [donki, pdyn] = await Promise.all([
@@ -664,6 +753,7 @@ async function runValidation(req) {
         ]);
         catalog = donki.rows;
         flares = donki.flares;
+        donkiSources = donki.sources;
         pdynSeries = pdyn;
         cmeProgram = await lockAndResolveCme(catalog, pdynSeries, nowMs);
     } catch (e) {
@@ -681,7 +771,14 @@ async function runValidation(req) {
         fluxRope = { reason: `flux_rope_failed: ${String(e?.message || e)}` };
         console.error('validation-rerun:', fluxRope.reason);
     }
-    const ledger = { cmeProgram, fluxRope };
+    const ledger = { cmeProgram, fluxRope, donkiSources };
+    // ONE structured line per run, success or not: which DONKI host
+    // answered, what was locked / dropped / scored. Before this the only
+    // trace of an 11-day outage was a JSON parse error, and a month of
+    // rejected flux-rope inserts was visible only to someone grepping.
+    console.log('validation-rerun ledger ' + JSON.stringify({
+        catalog: catalog.length, donki: donkiSources, cme: cmeProgram, fluxRope,
+    }));
 
     // ── Studies 1–3 (wind-bucket + HEK dependent). Early-outs carry the
     //    ledger results — partial success is success.
