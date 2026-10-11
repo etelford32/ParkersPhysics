@@ -81,6 +81,15 @@ const _cHover = new THREE.Color();
 // the NDC y range, so 0.055 is a little under one label of clearance).
 const LOCAL_LABEL_MAX = 8;
 const LABEL_SEP_NDC = { x: 0.26, y: 0.055 };
+// Radiant arrow length (Earth-local units) and the share of the view height it
+// must span before its shower label is drawn (_placeRadiantLabels).
+const RADIANT_TAIL = 1.05;
+const RADIANT_LABEL_MIN_FRAC = 0.25;
+const RADIANT_LABEL_AT = 0.72;                // label anchor, along the arrow
+// A shower label is drawn only inside this NDC box: the frame edges are where
+// the page chrome sits (HUD left, time bar + ribbon bottom), and a label half
+// under a button is the garble this rule exists to stop.
+const RADIANT_LABEL_SAFE = { x: 0.82, yTop: 0.82, yBottom: -0.62 };
 const _vLbl = new THREE.Vector3();
 
 export const NEO_COLORS = Object.freeze({
@@ -1712,7 +1721,7 @@ export class NeoLayer extends Emitter {
             const u = rotateAboutPole(u0.x, u0.y, u0.z, prec);
             // Scene axis swap; arrow points INBOUND (meteoroids come from the radiant).
             const dir = new THREE.Vector3(u.x, u.z, u.y);
-            const tail = dir.clone().multiplyScalar(1.05), head = dir.clone().multiplyScalar(0.34);
+            const tail = dir.clone().multiplyScalar(RADIANT_TAIL), head = dir.clone().multiplyScalar(0.34);
             // The shaft is a thin cylinder, not a GL line: WebGL lines are 1 px
             // wide whatever the zoom and vanish against the point cloud.
             const len = tail.length() - head.length();
@@ -1737,12 +1746,60 @@ export class NeoLayer extends Emitter {
             r.line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
             r.cone.position.copy(head);
             r.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
-            r.label.position.copy(tail).addScalar(0.02);
+            // Mid-shaft, not the far tip: the tip is ~1 unit out and from the
+            // Earth View framing it lands at the frame edge, under the time bar.
+            r.label.position.copy(dir).multiplyScalar(RADIANT_LABEL_AT).addScalar(0.02);
             r.stream.material.uniforms.u_dir.value.copy(dir);
             r.stream.material.uniforms.u_speed.value = s.vKms / 40;   // faster streams pour in faster
             r.rocks.setDirection(dir); r.rocks.setSpeed(s.vKms / 40);
             const vis = this.visible.radiants;
-            r.line.visible = vis; r.cone.visible = vis; r.label.visible = vis; r.stream.visible = vis; r.rocks.mesh.visible = vis;
+            r.line.visible = vis; r.cone.visible = vis; r.stream.visible = vis; r.rocks.mesh.visible = vis;
+        }
+        // Strongest first (`want` is ranked by ZHR × activity): the label
+        // de-clutter keeps the first of any overlapping pair.
+        const rank = new Map(want.map((x, i) => [x.shower.code, i]));
+        this._radiants.sort((a, b) => rank.get(a.code) - rank.get(b.code));
+        this._placeRadiantLabels(true);
+    }
+
+    // ── SHOWER LABELS FOLLOW THE SAME ZOOM RULE AS EVERY OTHER LOCAL LABEL ──
+    // They are fixed-pixel sprites (sizeAttenuation:false) anchored ~1 unit out
+    // from Earth, so at the system-wide framing all three active showers'
+    // labels landed on Earth's few pixels and printed over one another
+    // ("S. Taurids ZHR~3 · 27 km/s" through "Orionids ZHR…" — reported as
+    // garbled text on the opening view). The ring and object labels have had a
+    // zoom gate all along; these had none. Now: shown only once the radiant
+    // arrows span RADIANT_LABEL_MIN_FRAC of the view (the arrows are what the
+    // labels name — while they are a few pixels the label names nothing), and
+    // strongest-first through the same screen-separation test as the object
+    // labels, so two radiants in one patch of sky (Orionids / S. Taurids both
+    // sit in Orion–Taurus) never print on top of each other. Unlike the object
+    // labels, a radiant label near the FRAME EDGE is dropped too
+    // (RADIANT_LABEL_SAFE): there are only ever ≤3, nothing churns, and the
+    // edge is where the page's own buttons are.
+    _placeRadiantLabels(force = false) {
+        const cam = this._camera;
+        if (!this._radiants.length) return;
+        let show = this.visible.radiants && this.visible.labels && !!cam;
+        if (show) {
+            const dEarth = Math.max(0.05, cam.position.distanceTo(this._earthDrawn));
+            // fov 50°: a radius r at distance d spans ≈ 1.07·r/d of the view height.
+            show = 1.07 * RADIANT_TAIL / dEarth > RADIANT_LABEL_MIN_FRAC;
+        }
+        if (!show) {
+            if (force || this._radiantLabelsOn) for (const r of this._radiants) r.label.visible = false;
+            this._radiantLabelsOn = false;
+            return;
+        }
+        this._radiantLabelsOn = true;
+        const placed = [];
+        for (const r of this._radiants) {          // _radiants is strongest-first
+            const p = r.label.getWorldPosition(_vLbl).project(cam);
+            const S = RADIANT_LABEL_SAFE;
+            let clear = p.z > -1 && p.z < 1 && Math.abs(p.x) <= S.x && p.y <= S.yTop && p.y >= S.yBottom;
+            if (clear) for (const q of placed) if (Math.abs(q.x - p.x) < LABEL_SEP_NDC.x && Math.abs(q.y - p.y) < LABEL_SEP_NDC.y) { clear = false; break; }
+            if (clear) placed.push({ x: p.x, y: p.y });
+            r.label.visible = clear;
         }
     }
 
@@ -1796,6 +1853,7 @@ export class NeoLayer extends Emitter {
             }
         }
         if (jdChanged) this._requestFrame(false);
+        this._placeRadiantLabels();
         // Radiants ride the sim date (λ☉ moves ~1°/day, cheap to re-evaluate every ~0.1 d).
         if (this._radiantJd == null || Math.abs(f.jd - this._radiantJd) > 0.1) { this._radiantJd = f.jd; this._refreshRadiants(f.jd, f.earthOfDate.lon_rad); }
         // Flyby highlight set depends on the sim date (±7 d) — refresh every sim-day.
