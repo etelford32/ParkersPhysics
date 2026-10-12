@@ -13,7 +13,11 @@
  *     galaxy's own colour (the colour follows the GALAXY, never its slot in a
  *     list — the SkyView rule);
  *   - a small hollow tick at its Lagrangian start q, where it was when the
- *     void had not yet formed.
+ *     void had not yet formed;
+ *   - once a posterior ensemble has run (js/bootes-ensemble.js), each
+ *     MEMBER's path, faint and thin — the spread of the reconstructed past,
+ *     drawn as the members themselves rather than as a band the eye would
+ *     read as a hard edge.
  *
  * Drawn over everything (depthTest off) for the same reason as the probe: it
  * is an instrument overlay on a field of 3 500 additive dots.
@@ -58,12 +62,22 @@ export function createTrackLayer({ root, toScene }) {
     const v3 = (p) => new THREE.Vector3(toScene(p[0]), toScene(p[1]), toScene(p[2]));
 
     /**
-     * tracks: [{ color, pathMpc: [[x,y,z]…], cursorIndex, currentMpc, startMpc }]
+     * tracks: [{ color, pathMpc: [[x,y,z]…], cursorIndex, currentMpc, startMpc, ghostsMpc? }]
      */
     function set(tracks, { paths = true } = {}) {
         clear();
         for (const tr of tracks) {
             const color = new THREE.Color(tr.color);
+            if (paths) {
+                for (const ghost of tr.ghostsMpc ?? []) {
+                    const line = new THREE.Line(
+                        new THREE.BufferGeometry().setFromPoints(ghost.map(v3)),
+                        overlay(new THREE.LineBasicMaterial({ color, opacity: 0.28 })));
+                    line.renderOrder = 23;
+                    line.name = 'ensemble-member';
+                    group.add(line);
+                }
+            }
             if (paths && tr.pathMpc?.length > 1) {
                 const k = Math.max(1, Math.min(tr.pathMpc.length, (tr.cursorIndex ?? 0) + 1));
                 const past = tr.pathMpc.slice(0, k);

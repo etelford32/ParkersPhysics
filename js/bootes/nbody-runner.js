@@ -23,6 +23,14 @@
  * glass is matched to. It needs ~4 minutes of tree gravity, so it runs ONLY in
  * a Worker — on the page it would freeze the stage for that long, and the
  * status says so instead of doing it.
+ *
+ * THE ENSEMBLE (js/bootes-ensemble.js, plan §4m) is a third, opt-in step on a
+ * finished reconstruction: N more reconstructions, each in its OWN Worker
+ * (they run in parallel), each redrawing the discreteness noise (its own
+ * glass, a fresh draw of the target's grain). Their spread is the
+ * uncertainty the card prints and the faint paths the stage draws; the
+ * drawn run stays the main reconstruction. The member Workers are kept so a
+ * galaxy tracked later is replayed through every member too.
  */
 
 import {
@@ -31,6 +39,7 @@ import {
     relaxTables, createRelaxer,
 } from '../bootes-nbody.js';
 import { RECON_CONFIG, NODE_RADIUS_MPC } from '../bootes-reconstruct.js';
+import { ENSEMBLE_CONFIG, memberSeeds, spreadSummary } from '../bootes-ensemble.js';
 import { toKmsPerGyr } from '../bootes-force-probe.js';
 
 /**
@@ -80,6 +89,16 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         recs: new Map(),
         pending: new Set(),
         testKeys: [],
+        args: null,             // the reconstruct message's args — the ensemble re-sends them
+    };
+    const ens = {
+        status: 'idle',         // idle | running | ready | error
+        id: 0,
+        total: 0,
+        members: [],            // per member: { stage, done, total, result, recs } (null result while running)
+        workers: [],
+        summary: null,          // { N, a: [3 epochs], inside: [...], outside: [...] }
+        error: null,
     };
 
     function ensureWorker() {
@@ -191,23 +210,88 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         rc.testKeys = [...new Array(st.nTracers + st.nNodes).fill(null), ...keys];
         keys.forEach(k => rc.pending.add(k));
         const { radius, spacing, refineRadius } = RECON_CONFIG.layout(rEff);
-        w.postMessage({
-            type: 'reconstruct', id: rc.id,
-            args: {
-                observed: st.observed,
-                config: { radius, spacing, refineRadius },
-                testPoints: Float64Array.from([...tracerPts, ...nodePts, ...extra]),
-                nodeMarkers: { from: st.nTracers, count: st.nNodes },
-                aObs: 1 / (1 + zObs), aEnd, sim: { ...PAGE_CONFIG.sim },
-            },
-        });
+        rc.args = {
+            observed: st.observed,
+            config: { radius, spacing, refineRadius },
+            testPoints: Float64Array.from([...tracerPts, ...nodePts, ...extra]),
+            nodeMarkers: { from: st.nTracers, count: st.nNodes },
+            aObs: 1 / (1 + zObs), aEnd, sim: { ...PAGE_CONFIG.sim },
+        };
+        stopEnsemble();
+        w.postMessage({ type: 'reconstruct', id: rc.id, args: rc.args });
         onChange(st);
         return true;
+    }
+
+    function stopEnsemble() {
+        ens.workers.forEach((w) => w?.terminate());
+        ens.workers = [];
+        ens.status = 'idle';
+        ens.members = [];
+        ens.summary = null;
+        ens.error = null;
+        ens.id = ++seq;
+    }
+
+    /**
+     * The posterior ensemble of the CURRENT reconstruction: `members` more
+     * runs in parallel Workers, each with its own glass and its own draw of
+     * the target's grain (ENSEMBLE_CONFIG; the option exists for the browser
+     * gate, which runs two).
+     */
+    function ensemble({ members = ENSEMBLE_CONFIG.members } = {}) {
+        if (!(rc.status === 'ready' && rc.result && rc.args) || workerBroken) return false;
+        stopEnsemble();
+        const id = ens.id;
+        ens.status = 'running';
+        ens.total = members;
+        ens.members = Array.from({ length: members }, () => ({ stage: 'glass', done: 0, total: 1, result: null, recs: new Map() }));
+        for (let k = 0; k < members; k++) {
+            let w;
+            try {
+                w = new Worker(new URL('./nbody-worker.js', import.meta.url), { type: 'module' });
+            } catch (err) {
+                ens.status = 'error'; ens.error = String(err?.message ?? err); onChange(st); return false;
+            }
+            w.onmessage = (e) => handleMember(id, k, e.data);
+            w.onerror = (e) => { e.preventDefault?.(); if (id === ens.id) { ens.status = 'error'; ens.error = 'a member worker failed to load'; onChange(st); } };
+            ens.workers.push(w);
+            w.postMessage({ type: 'reconstruct', id: rc.id, args: { ...rc.args, member: memberSeeds(k + 1) } });
+        }
+        onChange(st);
+        return true;
+    }
+
+    function handleMember(id, k, m) {
+        if (id !== ens.id) return;
+        const mem = ens.members[k];
+        if (m.type === 'recon-progress') {
+            mem.stage = m.stage; mem.done = m.done; mem.total = m.total;
+        } else if (m.type === 'recon-done') {
+            mem.result = m.result;
+            rc.testKeys.forEach((key, j) => { if (key) mem.recs.set(key, { rec: m.result.rec, nRec: m.result.nRec, k: j }); });
+            if (ens.members.every((x) => x.result)) {
+                const nT = st.nTracers;
+                const pts = rc.args.testPoints.subarray(0, 3 * nT);
+                const per = [0, 1, 2].map((e) => spreadSummary(ens.members.map((x) => x.result.past.fields[e].subarray(0, 3 * nT)), pts, rEff));
+                ens.summary = {
+                    N: ens.members.length, a: ens.members[0].result.past.a,
+                    inside: per.map((p) => p.inside), outside: per.map((p) => p.outside),
+                };
+                ens.status = 'ready';
+            }
+        } else if (m.type === 'recon-replay') {
+            m.keys.forEach((key, j) => { mem.recs.set(key, { rec: m.rec, nRec: m.keys.length, k: j }); mem.pending?.delete(key); });
+        } else if (m.type === 'recon-error') {
+            ens.status = 'error'; ens.error = m.message;
+        }
+        onChange(st);
     }
 
     /** Fly galaxies tracked after the reconstruction through it. */
     function reconRequest(points) {
         if (rc.status !== 'ready' || !worker) return;
+        ensembleRequest(points);
         const keys = [], flat = [];
         for (const p of points) {
             const k = pointKey(p);
@@ -218,6 +302,24 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         if (!keys.length) return;
         keys.forEach(k => rc.pending.add(k));
         worker.postMessage({ type: 'recon-replay', id: rc.id, keys, points: Float64Array.from(flat) });
+    }
+
+    /** Fly tracked galaxies a member lacks (tracked after the ensemble ran, or after the reconstruction) through it. */
+    function ensembleRequest(points) {
+        if (ens.status !== 'ready') return;
+        ens.members.forEach((mem, k) => {
+            mem.pending ??= new Set();
+            const keys = [], flat = [];
+            for (const p of points) {
+                const key = pointKey(p);
+                if (mem.recs.has(key) || mem.pending.has(key) || keys.includes(key)) continue;
+                keys.push(key);
+                flat.push(...p);
+            }
+            if (!keys.length) return;
+            keys.forEach((key) => mem.pending.add(key));
+            ens.workers[k]?.postMessage({ type: 'recon-replay', id: rc.id, keys, points: Float64Array.from(flat) });
+        });
     }
 
     /**
@@ -453,6 +555,19 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
             const res = rc.result;
             return interpolateRows(res.testPos, res.nTest, 3, locateFrame(res.N, a),
                 new Float32Array(st.nNodes * 3), st.nTracers, st.nNodes);
+        },
+        // ── The ensemble ──
+        ens,
+        ensemble,
+        get ensembleReady() { return ens.status === 'ready' && !!ens.summary; },
+        /** Each finished member's sample of a tracked galaxy at epoch `ep` (null where it has none). */
+        ensembleSamplesFor(xObs, ep) {
+            if (ens.status !== 'ready') return [];
+            const key = pointKey(xObs);
+            return ens.members.map((mem) => {
+                const r = mem.recs.get(key);
+                return r && mem.result ? recordSampleAt(r.rec, r.nRec, r.k, mem.result.N, ep, toKmsPerGyr) : null;
+            });
         },
         /** Matter within NODE_RADIUS of the node markers, ÷ its z_obs value. */
         reconAccretionAt(a) {

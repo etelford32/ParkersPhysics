@@ -842,10 +842,77 @@ ensemble over glass seeds would be the honest sampler: each costs a full
 reconstruction). The Jacobian is linear; in collapsed clumps the response
 exceeds T(k), which is why the gain is searched and capped.
 
-Next, honestly: a posterior ENSEMBLE over glass seeds (randomised maximum
-likelihood) to put an uncertainty on the past the page can print — and,
-before any of it matters for science, a REAL density field in place of the
-model web (§6).
+(§4m builds that ensemble.)
+
+### 4m. The posterior ensemble — `js/bootes-ensemble.js`
+
+The forward model returns ONE past (the MAP). Randomised maximum likelihood
+turns a MAP fitter into approximate posterior samples for a near-linear,
+Gaussian-noise problem (Kitanidis 1995; Oliver et al. 1996): re-fit with
+every noise source redrawn. The reconstruction's noise is discreteness, from
+two independent sources, so a MEMBER (`reconstructRun({ member })`) redraws
+both — its own glass (`glassSeed`: the elements' grain) and a fresh draw of
+the target's grain added to the forward model's data (`noiseSeed`: the field
+of another bare glass at the data points, scaled to σ_target). The
+band-limit prior has nothing to redraw. Each run now returns `past`: its
+gravity at the test points at z = 9, a ≈ 0.2 and today.
+
+MEASURED, page-scale planted twin (4 members, gravity at 1 200 tracers;
+calibration by `calibration()`: R = |mean − truth| / (σ √(1 + 1/N)) is 1 for
+a calibrated ensemble, and coverage is the share of points inside their 1σ
+at the exact F(3, 3(N − 1)) 68 % quantile — the χ²₃/3 threshold read 63 %
+on calibrated synthetic draws at N = 4):
+
+| core / wall / out | one member | ensemble mean | spread | R | coverage |
+|---|---|---|---|---|---|
+| z = 9 | 3.1 / 10.1 / 28.8 % | **2.3 / 7.8 / 21.7** | 2.3 / 7.3 / 22.0 | 0.88 / 0.96 / 0.88 | 71 / 75 / 79 % |
+| z = 4 | 1.7 / 5.3 / 15.5 | 1.3 / 4.2 / 12.0 | 1.3 / 3.7 / 11.4 | 0.89 / 1.01 / 0.95 | 73 / 70 / 77 % |
+| z = 2 | 1.1 / 3.4 / 10.0 | 0.8 / 2.8 / 7.9 | 0.9 / 2.3 / 7.0 | 0.85 / 1.09 / 1.01 | 84 / 70 / 77 % |
+| today | 0.7 / 1.7 / 5.1 | 0.5 / 1.5 / 4.2 | 0.5 / 1.0 / 3.2 | 0.95 / 1.33 / 1.19 | 70 / 67 / 71 % |
+
+The mean beats one member everywhere (averaging cancels each member's grain)
+and the spread is close to calibrated — slightly wide in the core early,
+narrow on the wall today. A glass-only control (no data draw) came out the
+same to the digit, so the spread IS the elements' grain.
+
+AT THE GATE'S SCALE IT IS NOT CALIBRATED, and the reason bounds what the
+spread can claim: R = 1.37 / 1.45 (z = 9), 1.62 / 1.87 (z ≈ 4), 1.76 / 3.11
+(today), inside / outside R_eff. Three causes were measured OUT: the forward
+model (switched off: R 1.42–2.82, the same), convergence (12 steps instead
+of 4: R 1.32–2.90, the same), and the twin truth's own glass grain
+(subtracted: z = 9 1.37 → 1.22, later epochs unchanged). What is left is a
+SYSTEMATIC, resolution-limited method error, common to every member — the
+gate's elements are coarser (h = 28 vs 24 Mpc) and it grows towards today and
+onto the wall where the 11 Mpc clumps sit. No resampling of the noise can
+see a bias every sample shares. So the spread is a LOWER BOUND on the
+uncertainty, the page says so, and the gate PINS the gate-scale shortfall
+(R inside the recorded band, ≥ 1) — the TIGA rule: "improving" it by
+widening the spread must fail, and a change that moves it must update the
+record. One harness scar on the way: a member script that evaluated fields
+at θ = 0.6 while the fit used 0.5 measured the "grain" at 117 instead of 42
+(km/s)²/Mpc — tree error rides along with grain, so data, model and noise
+must all be evaluated with the same `sim`.
+
+ON THE PAGE: "Estimate the uncertainty" (after a reconstruction) runs
+`ENSEMBLE_CONFIG.members` = 4 members in parallel Workers (~5–10 min), prints
+the spread inside / outside R_eff at z = 9, z ≈ 4 and today with the
+lower-bound statement and the ±1/√(2(N − 1)) uncertainty of a 4-member
+spread, and draws each member's path faintly behind every tracked galaxy (a
+galaxy tracked later is replayed through every member Worker). The drawn run
+stays the main reconstruction.
+
+GATES: `tests/bootes-ensemble.mjs` — the statistics in closed form, F
+quantiles (χ²₃/3 limit, F(2, 2) median 1), the calibration metric on draws
+with a known answer (R 0.997, coverage 68 %) and its under-dispersed
+negative control (R > 1.7), and the pipeline end to end on a gate-scale
+planted twin (mean beats one member everywhere; shortfall pinned); the
+browser gate runs a 2-member ensemble through the real Workers and checks
+the card, the spread and one faint path per member per galaxy.
+
+Next, honestly: an error model for the METHOD bias (measured on twins at
+the page's scale, added in quadrature) so the printed band is calibrated
+rather than a lower bound — and, before any of it matters for science, a
+REAL density field in place of the model web (§6).
 
 ---
 

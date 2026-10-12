@@ -715,15 +715,17 @@ details.bv-details[open] > summary::after { content:' ▴'; }
             <label>Dynamics
                 <select data-bv-track="mode">
                     <option value="nonlinear" selected>Nonlinear shells + linear web (default)</option>
-                    <option value="nbody">N-body forecast (~10 s run)</option>
+                    <option value="nbody">N-body forecast (~30 s run)</option>
                     <option value="linear">Linear theory only (reference)</option>
                 </select>
             </label>
             <p class="bv-hint" data-bv="trackNbody">—</p>
             <div class="bv-btnrow">
                 <button class="bv-btn" type="button" id="bv-track-recon" disabled>Reconstruct the past (~4 min)</button>
+                <button class="bv-btn" type="button" id="bv-track-ens" disabled>Estimate the uncertainty</button>
             </div>
             <p class="bv-hint" data-bv="trackRecon">—</p>
+            <p class="bv-hint" data-bv="trackEns">—</p>
             <dl class="bv-rows">
                 <dt>Matter ≤ 20 Mpc of nodes</dt><dd data-bv="trackAccretion">—</dd>
             </dl>
@@ -783,7 +785,11 @@ details.bv-details[open] > summary::after { content:' ▴'; }
                 history with a known start at z&nbsp;=&nbsp;19, reconstructed from its final frame alone by this same
                 pipeline, came back with its gravity right to ~4&nbsp;% inside the void and ~11&nbsp;% on the wall at
                 z&nbsp;=&nbsp;9, ~2&nbsp;% / ~6&nbsp;% at z&nbsp;=&nbsp;4 and ~1&nbsp;% / ~2&nbsp;% today. Those are that test's numbers, not
-                this run's; the true past of the real Boötes is not known to check against. It is resolved to ~24 Mpc for the smooth matter and ~11 Mpc for the
+                this run's; the true past of the real Boötes is not known to check against. <strong>Estimate the
+                uncertainty</strong> then re-runs the whole reconstruction four more times, each with its own fresh
+                graininess, and shows their spread (and their paths, faintly); on the same planted test that spread
+                covered the truth about as often as an honest 68&nbsp;% error bar should — but it only samples graininess,
+                not the method's own resolution limit, so it is printed as a lower bound. It is resolved to ~24 Mpc for the smooth matter and ~11 Mpc for the
                 web, and each galaxy is a massless test particle. The shaded band is the page's dominant systematic, tracer bias b ± 20 %, run
                 through the whole model; it is not a statistical interval. Times after today are model forecasts.
                 The motion in comoving distances is SMALL — a few to ~15 Mpc in 18 Gyr — and nothing is magnified;

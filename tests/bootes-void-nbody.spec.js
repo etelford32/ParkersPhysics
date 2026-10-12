@@ -196,7 +196,7 @@ test.describe('Boötes Void — N-body forecast', () => {
 
     test('reconstruct the past: one N-body run from z = 9 that lands on today\'s web', async ({ page }) => {
         // ~4 min of gravity since the forward model (plan §4l), more on a loaded box.
-        test.setTimeout(840_000);
+        test.setTimeout(1_800_000);
         const errors = [];
         page.on('pageerror', e => errors.push(String(e)));
         await ready(page);
@@ -280,6 +280,37 @@ test.describe('Boötes Void — N-body forecast', () => {
             const tr = window.__bootesLab.tracker;
             return !!tr.tracked[1]?.main.at(tr.timeline.epochs.find(e => e.tGyr > 2)).reconstructed;
         }), { timeout: 60000 }).toBe(true);
+
+        // THE POSTERIOR ENSEMBLE (plan §4m), through the real Workers: two
+        // members here (four on the page — each is a full reconstruction).
+        await expect(page.locator('#bv-track-ens')).toBeEnabled();
+        await page.evaluate(() => window.__bootesLab.tracker.nbody.ensemble({ members: 2 }));
+        await expect(page.locator('#bv-track-card')).toHaveAttribute('data-ens', 'running');
+        await page.waitForFunction(
+            () => document.querySelector('#bv-track-card')?.dataset.ens === 'ready',
+            null, { timeout: 900_000 });
+        await expect(page.locator('[data-bv="trackEns"]').first()).toContainText('2-member ensemble');
+        await expect(page.locator('[data-bv="trackEns"]').first()).toContainText('LOWER BOUND');
+        // The galaxy tracked after the reconstruction is replayed through each member too.
+        await expect.poll(() => page.evaluate(() => {
+            const lab = window.__bootesLab;
+            lab.tracker.setTime(lab.tracker.timeline.epochs.find(e => e.tGyr > 2).tGyr);
+            return lab.scene.tracks.group.children.filter(c => c.name === 'ensemble-member').length;
+        }), { timeout: 120000 }).toBe(4);
+        const ens = await page.evaluate(() => new Promise((resolve) => {
+            const lab = window.__bootesLab;
+            const s = lab.tracker.nbody.ens.summary;
+            lab.tracker.setTime(lab.tracker.timeline.epochs.find(e => e.tGyr > 2).tGyr);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                const ghosts = lab.scene.tracks.group.children.filter(c => c.name === 'ensemble-member');
+                resolve({ s, ghosts: ghosts.length, pts: ghosts.map(g => g.geometry.getAttribute('position').count) });
+            }));
+        }));
+        expect(ens.s.N).toBe(2);
+        for (const v of [...ens.s.inside, ...ens.s.outside]) { expect(v).toBeGreaterThan(0); expect(v).toBeLessThan(1); }
+        // Two members × the tracked galaxies, each a real path.
+        expect(ens.ghosts).toBe(2 * 2);
+        for (const n of ens.pts) expect(n).toBeGreaterThan(5);
         expect(errors).toEqual([]);
     });
 });

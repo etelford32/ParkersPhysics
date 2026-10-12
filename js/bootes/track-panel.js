@@ -44,6 +44,9 @@ import {
 } from '../bootes-void-tracker.js';
 import { drawTrackSeries } from './charts.js';
 import { createNbodyRunner } from './nbody-runner.js';
+import { ENSEMBLE_CONFIG } from '../bootes-ensemble.js';
+
+const ENSEMBLE_MEMBERS = ENSEMBLE_CONFIG.members;
 
 /**
  * One colour per tracked galaxy, bound to the GALAXY (a removed galaxy frees
@@ -120,6 +123,7 @@ export function createTrackPanel({
 
     // ── The N-body forecast ─────────────────────────────────────────────────
     const reconBtn = root.querySelector('#bv-track-recon');
+    const ensBtn = root.querySelector('#bv-track-ens');
     const runner = createNbodyRunner({
         zObs, rEff, aEnd: scaleFactorAtTime(timeline.tEndGyr),
         onChange: () => {
@@ -307,6 +311,39 @@ export function createTrackPanel({
         return 'Reconstruction: not run — the past shown is the shell reconstruction.';
     }
 
+    /**
+     * The posterior ensemble (js/bootes-ensemble.js, plan §4m). Its spread is
+     * the DISCRETENESS part of the uncertainty only — a lower bound, which the
+     * planted twin measured as 0.9–1.3× short at this scale (the method's
+     * resolution-limited bias is common to every member and no resampling
+     * can see it). The text says both.
+     */
+    function ensStatus() {
+        const e = runner.ens;
+        if (state.mode !== 'nbody' || !runner.reconReady) {
+            return 'Uncertainty: reconstruct the past first; an ensemble then re-runs it with fresh discreteness.';
+        }
+        if (e.status === 'running') {
+            const done = e.members.filter((m) => m.result).length;
+            const stages = e.members.filter((m) => !m.result).map((m) => STAGES[m.stage] ?? m.stage);
+            return `Ensemble: ${done} of ${e.total} members done — each a full reconstruction with its own glass and its own `
+                + `draw of the target's grain, ${e.total} in parallel (${stages[0] ?? ''})…`;
+        }
+        if (e.status === 'error') return `Ensemble failed (${e.error}).`;
+        if (e.status === 'ready' && e.summary) {
+            const s = e.summary;
+            const pc = (v) => `±${num(100 * v, 1)} %`;
+            return `Uncertainty from a ${s.N}-member ensemble (randomised maximum likelihood: each member redraws the `
+                + `discreteness noise): the reconstructed gravity is known to ${pc(s.inside[0])} at z = 9, ${pc(s.inside[1])} `
+                + `at z ≈ 4 and ${pc(s.inside[2])} today inside R_eff (${pc(s.outside[0])} / ${pc(s.outside[1])} / `
+                + `${pc(s.outside[2])} outside). A LOWER BOUND: on a planted twin at this scale the truth missed by 0.9–1.3× `
+                + `this spread — the method's own resolution limit is common to every member and is not sampled. With `
+                + `${s.N} members the spread is itself uncertain by ±${num(100 / Math.sqrt(2 * (s.N - 1)), 0)} %. The faint `
+                + `paths on the stage are the members; the drawn run is the main reconstruction.`;
+        }
+        return `Uncertainty: not estimated — ${ENSEMBLE_MEMBERS} more reconstructions in parallel Workers (~5–10 min).`;
+    }
+
     function paint() {
         const d = getDerived();
         if (!d) return;
@@ -383,6 +420,7 @@ export function createTrackPanel({
             : 'off');
         set('trackNbody', nbodyStatus());
         set('trackRecon', reconStatus());
+        set('trackEns', ensStatus());
         const reconAcc = state.mode === 'nbody' && runner.reconReady ? runner.reconAccretionAt(ep.a) : null;
         const acc = reconAcc ?? (state.mode === 'nbody' && ep.tGyr > tObs + 1e-9 ? runner.accretionAt(ep.a) : null);
         set('trackAccretion', acc == null
@@ -404,6 +442,12 @@ export function createTrackPanel({
                 || !runner.canReconstruct;
             reconBtn.textContent = runner.reconReady ? 'Reconstruct again' : 'Reconstruct the past (~4 min)';
         }
+        if (ensBtn) {
+            ensBtn.disabled = state.mode !== 'nbody' || !runner.reconReady || runner.ens.status === 'running'
+                || !runner.workerAvailable;
+            ensBtn.textContent = runner.ensembleReady ? 'Re-estimate the uncertainty' : 'Estimate the uncertainty';
+        }
+        card?.setAttribute('data-ens', runner.ens.status);
         card?.setAttribute('data-track-t', state.tGyr.toFixed(4));
     }
 
@@ -561,8 +605,16 @@ export function createTrackPanel({
         } else {
             followLast = null;
         }
+        // The ensemble's members, faint, over the reconstruction's own span.
+        const ghostsFor = (t) => {
+            if (state.mode !== 'nbody' || !runner.ensembleReady) return [];
+            const eps = timeline.epochs.filter((e) => e.a >= runner.reconAInit);
+            const per = eps.map((e) => runner.ensembleSamplesFor(t.xObsMpc, e));
+            return per[0]?.map((_, m) => per.map((row) => row[m]?.positionMpc).filter(Boolean)).filter((p) => p.length > 1) ?? [];
+        };
         scene.tracks.set(state.tracked.map(t => ({
             color: t.color,
+            ghostsMpc: ghostsFor(t),
             pathMpc: t.main.samples.map(s => s.positionMpc),
             cursorIndex: k,
             currentMpc: t.main.at(ep).positionMpc,
@@ -623,6 +675,11 @@ export function createTrackPanel({
         if (el.type === 'checkbox' || el.tagName === 'SELECT') el.addEventListener('change', handler);
     }
     playBtn?.addEventListener('click', () => setPlaying(!state.playing));
+    ensBtn?.addEventListener('click', () => {
+        if (state.mode !== 'nbody' || !runner.reconReady) return;
+        runner.ensemble();
+        schedule();
+    });
     reconBtn?.addEventListener('click', () => {
         if (state.mode !== 'nbody') return;
         ensureRun();
