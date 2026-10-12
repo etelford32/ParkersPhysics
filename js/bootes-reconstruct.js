@@ -97,7 +97,19 @@
  *    over-fitting, and nothing on the page could tell the reader which they
  *    were looking at. 2LPT (above) is the nonlinear-aware inverse that DID
  *    survive measurement; a Bayesian forward model with a prior that
- *    regularises the shooting is the next one.
+ *    regularises the shooting is the next one. Re-measured in plan §4k
+ *    with a CLEAN low-pass (the quartic taper in difference form, not a
+ *    Gaussian, which biases the void's steep profile) and judged against a
+ *    planted TRUTH at every epoch: still worse every pass — the forward run
+ *    already lands closer to the truth than the matched state does, and
+ *    re-matching pulls it back.
+ *  - THE PAST IS MEASURED (plan §4k, gated in check 10): a planted truth
+ *    laid down at z = 19 and reconstructed from its last frame is
+ *    recovered to 3.9 / 11.4 % (gravity, core / wall) at z = 9, 2.4 / 7.0 %
+ *    at z = 4, 0.9 / 2.9 % today at page scale. Most of what z = 9 used to
+ *    miss was the glass's own grain (`RECON_CONFIG.glassRates`). A later
+ *    start is NOT better: it only does less N-body, and against the truth
+ *    it recovers the same past and a worse today.
  *
  * a_init = 0.1 (z = 9, 0.55 Gyr) ON PURPOSE: from z = 19 the same pipeline
  * converged at ~0.6 per shot against ~0.4 from z = 9 — 15× of growth turns
@@ -129,7 +141,7 @@ import {
 } from './bootes-void-model.js';
 import {
     G_MPC, buildTree, treeForce, quietSphere, splinePerParticle, createSimulation, buildSchedule,
-    meanSphereForce,
+    meanSphereForce, chebyshevRates,
     replayTestParticles, DEFAULT_THETA, DEFAULT_LEAF,
 } from './bootes-nbody.js';
 import { invert2LPT, lptGrowth, lptState, secondOrderDisplacement } from './bootes-lpt.js';
@@ -150,6 +162,17 @@ export const RECON_CONFIG = Object.freeze({
     layout: (rEffMpc) => ({ radius: 2.6 * rEffMpc, spacing: 12, refineRadius: Infinity }),
     aInit: 0.1,
     glassIterations: 40,
+    /**
+     * The glass's step sizes (plan §4k): the Chebyshev schedule over
+     * ŵ ∈ [0.25, 1], as the forecast's relaxation. A fixed 0.7 left grain
+     * near the softening scale — ~75 (km/s)²/Mpc of force, 4–11 % of the
+     * z = 9 signal, since a glass's residual does not grow while the signal
+     * goes as D — that this halves for the same 40 passes (planted twin:
+     * z = 9 gravity 5.5 / 13.6 → 3.9 / 11.4 % core / wall). null = fixed
+     * `rate`. NOT used for MATCHING: there a Chebyshev schedule diverged
+     * (clumps respond to a displacement by more than ŵ — measured).
+     */
+    glassRates: Object.freeze(chebyshevRates(20, 0.25)),
     matchIterations: 30,
     rate: 0.7,
     stepsToObs: 30,
@@ -186,9 +209,11 @@ const rmsOf = (arr, n) => {
  */
 export function buildGlass({
     radius, spacing, refineRadius = Infinity, seed = RECON_CONFIG.seed, softening = null,
-    iterations = RECON_CONFIG.glassIterations, rate = RECON_CONFIG.rate,
+    iterations = RECON_CONFIG.glassIterations, rates = RECON_CONFIG.glassRates, rate = null,
     theta = DEFAULT_THETA, leafSize = DEFAULT_LEAF, cosmo = COSMOLOGY, onProgress = null,
 }) {
+    // A fixed `rate` (the old glass, kept as the A/B) overrides the schedule.
+    const steps = rate != null ? [rate] : rates ?? [RECON_CONFIG.rate];
     const rho = meanMatterDensityMsunMpc3(cosmo);
     const k4 = fourPiGRho(cosmo);
     const qs = quietSphere({ deltaFn: () => 0, radius, spacing, refineRadius, rho, seed });
@@ -207,7 +232,8 @@ export function buildGlass({
     const history = [forceRms(sim, n) / k4];          // [0] is the quiet start itself
     for (let it = 0; it < iterations; it++) {
         // Repulsive: move AGAINST the peculiar force.
-        for (let k = 0; k < 3 * n; k++) sim.x[k] -= rate * (sim.fBg[k] + sim.fWeb[k]) / k4;
+        const rk = steps[it % steps.length];
+        for (let k = 0; k < 3 * n; k++) sim.x[k] -= rk * (sim.fBg[k] + sim.fWeb[k]) / k4;
         sim.refreshForces();
         history.push(forceRms(sim, n) / k4);
         onProgress?.(it + 1, iterations);
@@ -499,7 +525,8 @@ export function reconstructRun({
     const t0 = Date.now();
     const glass = buildGlass({
         radius: config.radius, spacing: config.spacing, refineRadius: config.refineRadius,
-        seed: recon.seed, iterations: recon.glassIterations, rate: recon.rate, cosmo, ...sim,
+        seed: recon.seed, iterations: recon.glassIterations,
+        ...(recon.glassRates ? { rates: recon.glassRates } : { rate: recon.rate }), cosmo, ...sim,
         onProgress: (d, t) => onProgress?.('glass', d, t),
     });
     const match = matchObserved({

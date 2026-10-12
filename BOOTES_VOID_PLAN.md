@@ -693,10 +693,82 @@ in (km/s)²/Mpc beside `rel` (gated: rel ≡ abs/field), and the page quotes
 the outside of R_eff against the void's PEAK pull ("within ~2 % … out to the
 rim", browser-gated < 5 %), never as a share of the vanishing local field.
 
-Next, honestly: the forward run's ~200 (km/s)²/Mpc floor (the reconstruction's
-remaining error everywhere, not just the rim); a Bayesian forward model whose
-prior regularises the shooting that failed in §4e — and, before any of it
-matters for science, a REAL density field in place of the model web (§6).
+### 4k. The forward run's floor — it is the MATCHING, and the past is now measured
+
+The reconstruction's run misses the observed target by ~200 (km/s)²/Mpc
+everywhere while the matched state (before the run) holds ~100. Each lever
+was measured on the page configuration, forking the run from one cached
+glass + match (run vs target, (km/s)²/Mpc at 30 / 60 / 90 / 120 / 150 / 180 /
+210 Mpc; base 177 / 195 / 353 / 256 / 221 / 208 / 236):
+
+| Lever | Result | Verdict |
+|-------|--------|---------|
+| 60 steps instead of 30 | identical to the unit | not time-stepping |
+| run at θ = 0.3 | WORSE on the ridge (−212 radial at 90–150) | the match is made at θ = 0.5; consistency beats accuracy |
+| κ = 4 / 5 / 7 deconvolution | position miss 0.65 → 0.50 Mpc but the 90 Mpc bin 353 → 429–465 | not the under-grown high-k modes |
+| Ψ Gaussian-smoothed 4 / 6 / 9 Mpc | worse, up to −550 radial in the core | a Nadaraya–Watson smoother biases the void's own steep profile |
+| Zel'dovich ICs | core ~1 000 | 2LPT stays |
+| later start, a_init 0.15 → 0.5 | monotone 236 → 139 at the rim | A TRAP — see below |
+
+The miss grows with the run's length, which looked like an argument for a
+later start. It is not one: at a_init = a_obs the ICs ARE the matched state,
+so a later start "improves" today only by doing less N-body. The question
+is the PAST, and that needs a truth:
+
+- **SELF-TWIN** (the run's own end state — reachable by construction —
+  reconstructed by the same pipeline): it misses that state by 0.23 Mpc
+  against 0.65 Mpc for the matched state. Two thirds of the miss is content
+  in the MATCHED state that no smooth past evolves into.
+- **PLANTED TWIN** (the page's matched field laid down as a 2LPT past at
+  z = 19 on another glass, evolved with snapshots; the pipeline sees only the
+  last frame; gravity at 1 200 points, core / wall 92–160 / out 160–200 Mpc):
+  the start epoch does NOT change the recovered past (z = 9: 6.1 / 15.9 % for
+  a_init 0.1, 6.2 / 16.1 for 0.2, 6.5 / 16.3 for 0.33) and a later start makes
+  TODAY's outskirts worse against the truth (27 → 43 %). And the forward run
+  lands CLOSER to the truth than the matched state does (today 1.1 / 3.2 /
+  27 % vs 1.4 / 3.5 / 46 %): the dynamics repairs part of the matching's
+  error. Part of "run vs target" is the matching's imprint, not a defect of
+  the run.
+- **FIELD FEEDBACK, re-measured with a clean low-pass** (the quartic taper in
+  the deconvolution's difference form, which preserves linear and quadratic
+  fields — unlike the Gaussian §4e used) and judged against the TRUTH: worse
+  at every epoch, every iteration (outskirts today 27 → 37 → 41 → 44 %).
+  Re-matching pulls the run back towards the state that is further from the
+  truth. The §4e rejection stands, now for a measured reason.
+- **MATCHING is converged** at 15–30 passes (60 and 100 change nothing or
+  worsen it); a Chebyshev schedule in the MATCHING diverges (wall 3.5 →
+  260 %) — in collapsed clumps a displacement changes the force by MORE than
+  ŵ, so large steps overshoot. Not a linear relaxation; rejected.
+- **THE GLASS'S GRAIN.** The twin's z = 9 error (6.1 / 16.3 %) was almost
+  entirely the two glasses' different discreteness (5.5 / 15.2 % from the
+  bare glasses alone). A glass's residual force does not grow while the
+  signal goes as D, so it is 4–11 % of the z = 9 signal and ~75 (km/s)²/Mpc
+  absolute (158 at its rim). **The fix: the glass uses the same Chebyshev
+  schedule as the forecast's relaxation** (`RECON_CONFIG.glassRates`, ŵ ∈
+  [0.25, 1]; repulsion on a uniform glass IS a stable linear relaxation,
+  unlike matching): residual 0.031 → 0.017, grain ~75 → ~48, rim 158 → 97 —
+  what 120 fixed-rate passes give, at 40 passes' cost.
+
+| Planted twin, truth on a 200-pass Chebyshev glass (grain 1.9 / 5.7 % of z = 9) | z = 9 | z = 4 | z = 2 | today |
+|-----|-----|-----|-----|-----|
+| fixed-rate glass (core / wall / out) | 5.5 / 13.6 / 41.7 % | 3.0 / 7.9 / 22.7 | 2.3 / 5.3 / 15.5 | 1.2 / 3.2 / 8.9 |
+| **Chebyshev glass (shipped)** | **3.9 / 11.4 / 32.4 %** | 2.4 / 7.0 / 18.4 | 1.8 / 4.9 / 13.2 | 0.9 / 2.9 / 8.4 |
+
+Against the observed target, the page run: overall 5.5 → 5.2 %, rim
+236 → 212 (km/s)²/Mpc — today's signal is ~8× z = 9's, so the grain barely
+shows there; the past is where it mattered. THE PAST IS NOW GATED
+(`tests/bootes-reconstruct.mjs` check 10, reduced layout: the observed model
+matched on a 120-pass glass, laid down at z = 19, evolved, reconstructed from
+its last frame — 5.2 / 17.3 % inside / outside R_eff at z = 9, 3.4 / 11.0 %
+at z = 4, 1.7 / 5.7 % today; the fixed-rate glass 5.9 / 19.1 % at z = 9) and
+the page states the page-scale numbers above as the twin's, not the run's.
+
+Next, honestly: what is left of the z = 9 error past the glass (~3 % in the
+void, ~10 % on the wall) is the matched state's unreachable content and the
+web's clumps (~500 (km/s)²/Mpc at the nodes vs ~175 away from them); a
+Bayesian forward model whose prior regularises that is the step after — and,
+before any of it matters for science, a REAL density field in place of the
+model web (§6).
 
 ---
 

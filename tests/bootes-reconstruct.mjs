@@ -3,7 +3,7 @@
  * bootes-reconstruct.mjs — gate for js/bootes-reconstruct.js, the web's
  * initial conditions (BOOTES_VOID_PLAN.md §4d Phase 2).
  *
- * Run: node tests/bootes-reconstruct.mjs        (~40 s)
+ * Run: node tests/bootes-reconstruct.mjs        (~2 min)
  *
  *   1. PER-PARTICLE SOFTENING: the tree equals the direct sum when every cell
  *      is opened, and each source is smoothed at its OWN h.
@@ -25,6 +25,13 @@
  *      others (a galaxy shot alone is bitwise the same galaxy shot in a crowd).
  *   9. THE NODES GREW: matter around where the web's nodes end up rises from
  *      z = 9 to today.
+ *  10. THE PAST, against a planted truth (plan §4k): the observed model is
+ *      matched on a near-grain-free glass, its 2LPT past laid down at z = 19
+ *      and run forward with snapshots — a known history. The pipeline sees
+ *      only its last frame and must recover its GRAVITY at z = 9 and z = 4,
+ *      not just today's; and the glass's Chebyshev schedule must beat the
+ *      fixed-rate glass it replaced at z = 9 (its grain is 4–11 % of the
+ *      z = 9 signal at page scale).
  */
 
 import assert from 'node:assert/strict';
@@ -39,6 +46,8 @@ import {
 import { shellTable, scaleFactorAtTime, cosmicTimeGyr } from '../js/bootes-void-tracker.js';
 import * as NB from '../js/bootes-nbody.js';
 import * as RC from '../js/bootes-reconstruct.js';
+import { invert2LPT, lptGrowth, lptState, secondOrderDisplacement } from '../js/bootes-lpt.js';
+import { deconvolutionKernel, deconvolveGrowth } from '../js/bootes-softgrowth.js';
 
 let passed = 0;
 const ok = (name) => { console.log(`  ✓ ${name}`); passed++; };
@@ -111,8 +120,11 @@ const glass = RC.buildGlass({ ...CFG, ...SIM });
 {
     const first = glass.history[0], last = glass.residual;
     assert.ok(last < 0.07 && last < first / 10, `glass residual ${first} → ${last} Mpc`);
+    // The A/B: the fixed-rate glass the Chebyshev schedule replaced (plan §4k).
+    const fixed = RC.buildGlass({ ...CFG, ...SIM, rate: 0.7 });
+    assert.ok(last < 0.7 * fixed.residual, `glass schedule: ${last} vs fixed rate ${fixed.residual}`);
     ok(`glass: residual displacement-force ${first.toFixed(2)} → ${last.toFixed(3)} Mpc (quiet start → glass) over `
-        + `${glass.history.length - 1} repulsive steps (${glass.n} elements)`);
+        + `${glass.history.length - 1} repulsive Chebyshev steps (${glass.n} elements; a fixed rate 0.7: ${fixed.residual.toFixed(3)})`);
 }
 
 // ── 4. Spherical identity ───────────────────────────────────────────────────
@@ -310,6 +322,86 @@ const glass = RC.buildGlass({ ...CFG, ...SIM });
         ok(`the nodes grew: matter within ${RC.NODE_RADIUS_MPC} Mpc of where the web's nodes end up rises `
             + `${(100 * (now / start - 1)).toFixed(0)} % from z = 9 to z_obs, then ${(100 * (end / now - 1)).toFixed(1)} % more`);
     }
+}
+
+// ── 10. The past, against a planted truth ──────────────────────────────────
+{
+    const R = 1.6 * rEff, cfg = { radius: R, spacing: 14, refineRadius: Infinity }, h = 28;
+    const EP = [0.1, 0.2, A_OBS];
+    // The pipeline's own ICs: 2LPT inverse + softened-growth deconvolution.
+    const lptICs = (gl, X, aI) => {
+        const vol = Float64Array.from(gl.mass, (m) => m / rho), hs = Float64Array.from(gl.mass, () => h);
+        const g = lptGrowth(aI, A_OBS);
+        const psi = X.map((v, k) => v - gl.pos[k]);
+        const inv = invert2LPT(gl.pos, psi, { d2Obs: g.d2Obs, iterations: 4, volume: vol, hsoft: hs, h, ...SIM });
+        const s1 = deconvolveGrowth(gl.pos, inv.s1, vol, deconvolutionKernel({ h, aInit: aI, aObs: A_OBS, kappa: 3 }));
+        const s2 = secondOrderDisplacement(gl.pos, s1, { volume: vol, hsoft: hs, h, ...SIM });
+        return lptState(gl.pos, s1, s2, aI, g);
+    };
+    const evolve = (gl, ic, a0) => {
+        const sim = NB.createSimulation({
+            pos: ic.pos, vel: ic.vel, mass: gl.mass, group: new Uint8Array(gl.n), nMassive: gl.n, aStart: a0,
+            softening: [gl.softening, gl.softening], background: { radius: gl.radius, rho }, ...SIM,
+        });
+        const out = {};
+        let a = a0;
+        for (const e of EP) {
+            if (e > a) {
+                const sch = NB.buildSchedule({ aStart: a, aEnd: e, steps: Math.max(3, Math.round(13 * Math.log(e / a))) });
+                for (let s = 0; s < sch.steps; s++) sim.step(sch, s);
+                a = e;
+            }
+            out[e] = Float64Array.from(sim.x);
+        }
+        return out;
+    };
+    // THE TRUTH: the observed model matched on a well-relaxed glass, its past
+    // laid down at z = 19 (not the pipeline's z = 9) and evolved.
+    const obs = NB.buildInitialConditions({ voidProfile: profile, web, table, zObs: Z, radius: R, spacing: 12, refineRadius: Infinity, seed: 7 });
+    const gT = RC.buildGlass({ ...cfg, seed: 31, iterations: 120, ...SIM });
+    const XT = RC.matchObserved({ glass: gT, observed: { pos: obs.pos, mass: obs.mass, group: obs.group, softening: obs.softening }, ...SIM }).X;
+    const truth = evolve(gT, lptICs(gT, XT, 0.05), 0.05);
+    const rng = mulberry32(99);
+    const pts = [];
+    while (pts.length < 500) {
+        const p = [(2 * rng() - 1) * R, (2 * rng() - 1) * R, (2 * rng() - 1) * R], r = Math.hypot(...p);
+        if (r > 10 && r < 0.9 * R) pts.push(p);
+    }
+    const fieldOf = (P, gl) => {
+        const t = NB.buildTree(P, gl.mass, Int32Array.from({ length: gl.n }, (_, i) => i), { leafSize: 16, hsoft: gl.softening.h });
+        const sp = NB.meanSphereForce(gl.radius, rho, gl.softening);
+        return pts.map(([x, y, z]) => {
+            const b = new Float64Array(3);
+            NB.treeForce(t, x, y, z, 0.5, gl.softening, b);
+            const r = Math.hypot(x, y, z), s = sp(r) / r;
+            return [b[0] - s * x, b[1] - s * y, b[2] - s * z];
+        });
+    };
+    // Relative gravity error, inside R_eff and outside it.
+    const score = (F, T) => {
+        const acc = [[0, 0], [0, 0]];
+        pts.forEach((p, i) => {
+            const k = Math.hypot(...p) < rEff ? 0 : 1;
+            for (let d = 0; d < 3; d++) { acc[k][0] += (F[i][d] - T[i][d]) ** 2; acc[k][1] += T[i][d] ** 2; }
+        });
+        return acc.map(([e, t]) => Math.sqrt(e / t));
+    };
+    const tF = Object.fromEntries(EP.map((e) => [e, fieldOf(truth[e], gT)]));
+    const observedTruth = { pos: truth[A_OBS], mass: gT.mass, group: new Uint8Array(gT.n), softening: [gT.softening, NB.plummer(1)] };
+    const recover = (glassOpts) => {
+        const gB = RC.buildGlass({ ...cfg, seed: 23, ...SIM, ...glassOpts });
+        const X = RC.matchObserved({ glass: gB, observed: observedTruth, ...SIM }).X;
+        const sn = evolve(gB, lptICs(gB, X, 0.1), 0.1);
+        return Object.fromEntries(EP.map((e) => [e, score(fieldOf(sn[e], gB), tF[e])]));
+    };
+    const now = recover({}), old = recover({ rate: 0.7 });
+    const z9 = now[0.1], z4 = now[0.2], z0 = now[A_OBS];
+    assert.ok(z9[0] < 0.07 && z9[1] < 0.2 && z4[0] < 0.045 && z0[0] < 0.025 && z0[1] < 0.07, `past: ${JSON.stringify(now)}`);
+    assert.ok(z9[0] < old[0.1][0] && z9[1] < old[0.1][1], `glass schedule at z = 9: ${z9} vs fixed ${old[0.1]}`);
+    const pc = (v) => `${(100 * v[0]).toFixed(1)} / ${(100 * v[1]).toFixed(1)} %`;
+    ok(`the past, against a planted truth (z = 19 start, reconstructed from its last frame only): gravity inside / `
+        + `outside R_eff recovered to ${pc(z9)} at z = 9, ${pc(z4)} at z = 4, ${pc(z0)} today `
+        + `(the fixed-rate glass: ${pc(old[0.1])} at z = 9)`);
 }
 
 console.log(`\n${passed} checks passed — js/bootes-reconstruct.js`);
