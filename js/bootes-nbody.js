@@ -80,7 +80,7 @@
 
 import {
     COSMOLOGY, G_SI, MPC_M, MSUN_KG, hubbleKmsMpc, growthRate, growthFactor,
-    meanMatterDensityMsunMpc3, splitProfile, voidGravityVector,
+    meanMatterDensityMsunMpc3, splitProfile, voidGravityVector, gravityRadialSI,
 } from './bootes-void-model.js';
 import { mulberry32 } from './bootes-web-model.js';
 import { velocityPerAcceleration } from './bootes-force-probe.js';
@@ -97,15 +97,25 @@ export const DEFAULT_LEAF = 8;
 /**
  * The page's run, in one place so the worker, the panel and the gate cannot
  * drift apart. Measured on that configuration (tests/bootes-nbody.mjs):
- * ~14 200 massive particles + ~3 500 galaxies, ~0.3 s per step in V8;
+ * ~36 000 massive particles + ~3 500 galaxies, ~0.6 s per step in V8 plus
+ * ~13 s for the 20 relaxation passes (~30 s a run, in a Worker);
  * θ = 0.5 with quadrupoles keeps the force error at ~0.6 % of the rms
  * peculiar force; 24 steps are converged (6 steps are already within ~1 %).
  *   radius 2.6 R_eff   the smooth matter is sampled to where the tracers are
- *   spacing 12 Mpc     inside 1.3 R_eff, growing ∝ r beyond (a zoom)
+ *   spacing 12 Mpc     UNIFORM to the rim (plan §4i — the zoom it replaced
+ *                      coarsened to 24 Mpc cells and its grain outweighed
+ *                      the model's field on the wall)
  *   spline h = 24 Mpc  (2× spacing) — the smooth matter's resolution
+ *   relax 20 passes    the quiet start's non-spherical grain relaxed away,
+ *                      its profile kept (`createRelaxer`)
  */
 export const PAGE_CONFIG = Object.freeze({
-    ic: (rEffMpc) => ({ radius: 2.6 * rEffMpc, spacing: 12, refineRadius: 1.3 * rEffMpc, seed: 7 }),
+    // UNIFORM 12 Mpc to the rim (plan §4i): the zoom that coarsened to 24 Mpc
+    // cells beyond 1.3 R_eff sampled the wall's field 172–629 % off the exact
+    // model (it is small there: the void and its wall nearly cancel).
+    ic: (rEffMpc) => ({ radius: 2.6 * rEffMpc, spacing: 12, refineRadius: Infinity, seed: 7 }),
+    // …and its lattice grain RELAXED away before the run (`createRelaxer`).
+    relax: Object.freeze({ iterations: 20, rate: 0.7 }),
     sim: Object.freeze({ theta: 0.5, leafSize: 16 }),
     steps: 24,
 });
@@ -1202,6 +1212,156 @@ export function buildInitialConditions({
         // default; the web stays on the probe's Plummer ε.
         softening: [spline(splineH ?? 2 * spacing), plummer(web ? web.softeningMpc : 0.6 * spacing)],
         background: { radius, rho }, radiusObs: qs.radius0, shell: qs.shell, edges: qs.edges,
+    };
+}
+
+// ── Relaxing away the quiet start's grain (plan §4i) ──────────────────────
+
+/**
+ * The radial tables a smooth particle's velocity needs where it ends up, as
+ * plain typed arrays so they can be built on the page and sent to a Worker
+ * (the profile, the web and the shell table cannot be): the spherical shell
+ * flow and the smooth wall's pull — the two pieces `observedState` evaluates
+ * besides the web's own particles, which come with the initial conditions.
+ */
+export function relaxTables({ voidProfile, web = null, table, zObs, rMax, nodes = 2400, cosmo = COSMOLOGY }) {
+    const aObs = 1 / (1 + zObs);
+    const { wall } = splitProfile(voidProfile);
+    const flow = sphericalFlow(voidProfile, table, { rMax: voidProfile.params.rvMpc * 5.9, cosmo });
+    const dr = rMax / nodes;
+    const uFlow = new Float64Array(nodes + 1), gWall = new Float64Array(nodes + 1);
+    for (let i = 0; i <= nodes; i++) {
+        const r = Math.max(i * dr, 1e-3);
+        uFlow[i] = flow.at(r, aObs).u;
+        gWall[i] = gravityRadialSI(r, wall, { z: zObs, cosmo });
+    }
+    return {
+        aObs, zObs, dr, nodes, uFlow, gWall,
+        eps: web ? web.softeningMpc : 0, vk: velocityPerAcceleration(zObs, cosmo) / 1000,
+    };
+}
+
+function tableAt(arr, dr, nodes, r) {
+    const x = Math.min(nodes, Math.max(0, r / dr));
+    const i = Math.min(nodes - 1, Math.floor(x));
+    const t = x - i;
+    return arr[i] + t * (arr[i + 1] - arr[i]);
+}
+
+/**
+ * Relax away the GRAIN of the smooth matter's quiet start, keeping its
+ * profile, then give every moved particle the velocity `observedState` would
+ * give it where it now sits. Steppable (`step()` → false when done) so the
+ * no-Worker path can yield between passes.
+ *
+ * The model's smooth field is the void's deficit — purely RADIAL — and the
+ * quiet start already carries its radial part exactly (mass-stratified
+ * shells: the enclosed mass at every particle is the profile's to 0.007 %).
+ * What it gets wrong is everything else: the lattice's grain, a fixed force
+ * noise that outside the void, where the void and its wall nearly cancel,
+ * was LARGER than the model's field (plan §4i). So each pass takes the
+ * particles' own peculiar field, subtracts its SHELL-AVERAGED radial part
+ * (the monopole, in thin radial bins) and moves every particle against what
+ * is left, r·F_grain/4πGρ̄₀ — repulsive glass relaxation (the reconstruction's
+ * step 1) restricted to the non-spherical part, so each shell keeps its mass.
+ *
+ * MEASURED REJECTION: the first version relaxed the whole field onto the
+ * analytic deficit field. The particles' field and that table differ by a
+ * UNIFORM ~0.7 % (softening + tree), which no arrangement can remove; every
+ * pass pushed mass outward to try, and 20 passes bent the enclosed contrast
+ * by up to 0.11 (−0.62 for −0.56 at 20 Mpc) while the residual it was
+ * minimising fell nicely. Matching the spherical part to an independent
+ * table re-derives what the quiet start already has exactly — so it doesn't.
+ *
+ * The particles move ~1 Mpc rms — enough that their velocities must follow
+ * (a stale velocity near a clump is ~10 km/s, the size of the whole 6 Gyr
+ * effect), so they are recomputed with the SAME arithmetic as
+ * `clumpVelocities` + the shell flow.
+ */
+export function createRelaxer({
+    pos, vel, mass, group, nBackground, softening, background, aStart, tables,
+    iterations = PAGE_CONFIG.relax.iterations, rate = PAGE_CONFIG.relax.rate, binMpc = 2,
+    theta = DEFAULT_THETA, leafSize = DEFAULT_LEAF, cosmo = COSMOLOGY,
+}) {
+    if (Math.abs(aStart - tables.aObs) > 1e-12) throw new Error('relax: the observed state must start at z_obs');
+    const nB = nBackground;
+    const k4 = 4 * Math.PI * G_MPC * meanMatterDensityMsunMpc3(cosmo);
+    const { dr, nodes } = tables;
+    const sim = createSimulation({
+        pos: Float64Array.from(pos.subarray(0, 3 * nB)), vel: new Float64Array(3 * nB),
+        mass: Float64Array.from(mass.subarray(0, nB)), group: new Uint8Array(nB), nMassive: nB, aStart: 1,
+        softening: [softening[0], softening[0]], background, theta, leafSize, cosmo,
+    });
+    const nBins = Math.ceil(1.2 * background.radius / binMpc) + 1;
+    const fr = new Float64Array(nBins), wb = new Float64Array(nBins);
+    const grain = new Float64Array(3 * nB);
+    const measure = () => {
+        fr.fill(0); wb.fill(0);
+        for (let i = 0; i < nB; i++) {
+            const o = 3 * i, x = sim.x[o], y = sim.x[o + 1], z = sim.x[o + 2];
+            const r = Math.hypot(x, y, z);
+            if (r < 1e-9) continue;
+            const b = Math.min(nBins - 1, Math.floor(r / binMpc));
+            fr[b] += sim.mass[i] * ((sim.fBg[o] + sim.fWeb[o]) * x + (sim.fBg[o + 1] + sim.fWeb[o + 1]) * y
+                + (sim.fBg[o + 2] + sim.fWeb[o + 2]) * z) / r;
+            wb[b] += sim.mass[i];
+        }
+        let s = 0;
+        for (let i = 0; i < nB; i++) {
+            const o = 3 * i, x = sim.x[o], y = sim.x[o + 1], z = sim.x[o + 2];
+            const r = Math.hypot(x, y, z);
+            const b = Math.min(nBins - 1, Math.floor(r / binMpc));
+            const mono = r > 1e-9 && wb[b] > 0 ? fr[b] / wb[b] / r : 0;
+            grain[o] = sim.fBg[o] + sim.fWeb[o] - mono * x;
+            grain[o + 1] = sim.fBg[o + 1] + sim.fWeb[o + 1] - mono * y;
+            grain[o + 2] = sim.fBg[o + 2] + sim.fWeb[o + 2] - mono * z;
+            s += grain[o] ** 2 + grain[o + 1] ** 2 + grain[o + 2] ** 2;
+        }
+        return Math.sqrt(s / nB) / k4;
+    };
+    const history = [measure()];
+    let done = 0;
+    return {
+        get stepsDone() { return done; },
+        iterations,
+        history,
+        step() {
+            if (done >= iterations) return false;
+            for (let k = 0; k < 3 * nB; k++) sim.x[k] -= rate * grain[k] / k4;
+            sim.refreshForces();
+            history.push(measure());
+            done++;
+            return done < iterations;
+        },
+        /** The relaxed state: positions and velocities, every other particle untouched. */
+        result() {
+            const outPos = Float64Array.from(pos), outVel = Float64Array.from(vel);
+            outPos.set(sim.x, 0);
+            const webIdx = [];
+            for (let j = nB; j < mass.length; j++) if (group[j]) webIdx.push(j);
+            const eps2 = tables.eps * tables.eps, zf = 1 + tables.zObs;
+            let shift = 0;
+            for (let i = 0; i < nB; i++) {
+                const o = 3 * i, x = sim.x[o], y = sim.x[o + 1], z = sim.x[o + 2];
+                for (let d = 0; d < 3; d++) shift += (sim.x[o + d] - pos[o + d]) ** 2;
+                const r = Math.hypot(x, y, z);
+                const ur = r > 1e-9 ? tableAt(tables.uFlow, dr, nodes, r) / r : 0;
+                // The clumped part — written as in `clumpVelocities`.
+                let gx = 0, gy = 0, gz = 0;
+                for (const j of webIdx) {
+                    const dx = pos[3 * j] - x, dy = pos[3 * j + 1] - y, dz = pos[3 * j + 2] - z;
+                    const rr = Math.sqrt(dx * dx + dy * dy + dz * dz + eps2);
+                    const rPhysM = rr * MPC_M / zf;
+                    const g = G_SI * (mass[j] * MSUN_KG) / (rPhysM * rPhysM);
+                    gx += g * dx / rr; gy += g * dy / rr; gz += g * dz / rr;
+                }
+                const w = r > 1e-9 ? tableAt(tables.gWall, dr, nodes, r) / r : 0;
+                outVel[o] = x * ur + (gx - w * x) * tables.vk;
+                outVel[o + 1] = y * ur + (gy - w * y) * tables.vk;
+                outVel[o + 2] = z * ur + (gz - w * z) * tables.vk;
+            }
+            return { pos: outPos, vel: outVel, shiftRmsMpc: Math.sqrt(shift / nB), history: history.slice() };
+        },
     };
 }
 

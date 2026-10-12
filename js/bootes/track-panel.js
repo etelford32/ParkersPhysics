@@ -256,6 +256,9 @@ export function createTrackPanel({
               + `(${r.counts.web} of them the web), ${r.counts.galaxies.toLocaleString('en-US')} galaxies as test particles`
             : '';
         if (r.status === 'building') return 'N-body run: building the observed-epoch initial conditions…';
+        if (r.status === 'running' && r.stage === 'relax') {
+            return `N-body run: settling the sampled matter onto the model's exact field (pass ${r.relaxStep} of ${r.relaxSteps}) · ${parts}`;
+        }
         if (r.status === 'running') return `N-body run: step ${r.step} of ${r.steps} · ${parts}`;
         if (r.status === 'error') return `N-body run failed (${r.error}) — the future shown is the shell tracker's.`;
         if (r.status === 'ready') {

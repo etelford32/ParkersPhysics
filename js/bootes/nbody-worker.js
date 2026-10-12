@@ -6,14 +6,17 @@
  * gravity in V8; here it cannot freeze the stage.
  *
  * Messages in:
- *   { type: 'run', id, ic, aEnd, steps, sim, record, accretion }
- *       ic = { pos, vel, mass, group, nMassive, aStart, softening, background }
+ *   { type: 'run', id, ic, aEnd, steps, sim, record, accretion, relax }
+ *       ic = { pos, vel, mass, group, nMassive, nBackground, aStart, softening, background }
+ *       relax = { tables, iterations, rate } — relax the smooth matter onto the
+ *       exact model field first (bootes-nbody.js createRelaxer, plan §4i)
  *   { type: 'replay', id, keys, points, velocities }   — against the LAST run
  *   { type: 'reconstruct', id, args }   — js/bootes-reconstruct.js reconstructRun
  *   { type: 'recon-replay', id, keys, points }        — galaxies through it
  * Messages out:
- *   { type: 'progress', id, step, steps }
- *   { type: 'done', id, result, ms }              — typed arrays transferred
+ *   { type: 'progress', id, stage, step, steps }  — stage 'relax' | 'run'
+ *   { type: 'done', id, result, ms }              — typed arrays transferred;
+ *       result.observedPos is the RELAXED massive state (the reconstruction's target)
  *   { type: 'replay', id, keys, rec }
  *   { type: 'recon-progress', id, stage, done, total }
  *   { type: 'recon-done', id, result }
@@ -26,7 +29,7 @@
  */
 
 import {
-    createSimulation, createRun, buildSchedule, replayTestParticles,
+    createSimulation, createRun, buildSchedule, replayTestParticles, createRelaxer,
 } from '../bootes-nbody.js';
 import { reconstructRun, shootGalaxies, interpolateDisplacement } from '../bootes-reconstruct.js';
 
@@ -49,15 +52,27 @@ self.onmessage = (e) => {
     try {
         if (m.type === 'run') {
             const t0 = performance.now();
-            const { ic } = m;
+            const ic = { ...m.ic };
+            let relaxInfo = null;
+            if (m.relax) {
+                const rl = createRelaxer({ ...ic, tables: m.relax.tables, iterations: m.relax.iterations, rate: m.relax.rate, ...m.sim });
+                const total = rl.iterations;
+                self.postMessage({ type: 'progress', id: m.id, stage: 'relax', step: 0, steps: total });
+                while (rl.step()) self.postMessage({ type: 'progress', id: m.id, stage: 'relax', step: rl.stepsDone, steps: total });
+                const out = rl.result();
+                ic.pos = out.pos; ic.vel = out.vel;
+                relaxInfo = { history: out.history, shiftRmsMpc: out.shiftRmsMpc };
+            }
+            const observedPos = Float64Array.from(ic.pos.subarray(0, 3 * ic.nMassive));
             const sim = createSimulation({ ...ic, ...m.sim });
             const schedule = buildSchedule({ aStart: ic.aStart, aEnd: m.aEnd, steps: m.steps });
             const run = createRun(sim, schedule, {
                 record: m.record, keepSnapshots: true, background: ic.background, accretion: m.accretion,
             });
-            while (run.step()) self.postMessage({ type: 'progress', id: m.id, step: run.stepsDone, steps: m.steps });
-            self.postMessage({ type: 'progress', id: m.id, step: run.stepsDone, steps: m.steps });
-            const { snapshots, ...result } = run.result();
+            while (run.step()) self.postMessage({ type: 'progress', id: m.id, stage: 'run', step: run.stepsDone, steps: m.steps });
+            self.postMessage({ type: 'progress', id: m.id, stage: 'run', step: run.stepsDone, steps: m.steps });
+            const { snapshots, ...rest } = run.result();
+            const result = { ...rest, observedPos, relax: relaxInfo };
             last = {
                 snapshots, schedule, mass: ic.mass, group: ic.group, nMassive: ic.nMassive,
                 softening: ic.softening, background: ic.background, sim: m.sim,

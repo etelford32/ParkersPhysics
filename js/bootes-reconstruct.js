@@ -78,10 +78,10 @@
  *    (~3 Mpc) is grain — the observed smooth matter is a quiet-start lattice
  *    no glass reproduces particle for particle — and the FIELD is what the
  *    reconstruction claims (`fieldMatch`, gated): on the page, today's
- *    gravity is reproduced to 3–4 % in the void's core (2LPT; 7–9 % with
- *    Zel'dovich ICs), ≤ 8 % inside R_eff, 20 % just outside it and
- *    35–42 % out on the clumpy wall, where the elements' ~24 Mpc resolution
- *    cannot rebuild the web's ~11 Mpc nodes (2LPT moved the core, not this).
+ *    gravity is reproduced to ~1 % in the void's core, ≤ 4 % inside R_eff,
+ *    7–19 % on the wall and ~35 % at the sampled sphere's rim (plan §4i,
+ *    against the forecast's RELAXED observed state; before that relaxation
+ *    the wall read 33–41 %, most of it the target's own sampling grain).
  *    FIELD FEEDBACK (re-run, then push ψ by the gravity the evolved state
  *    still lacks) was also built and measured out: it improved today's field
  *    (16 → 10 % on the gate layout) and, in the twin test, the recovered

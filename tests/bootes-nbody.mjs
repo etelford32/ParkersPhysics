@@ -28,15 +28,21 @@
  *   9. Galaxies are TEST particles: adding them changes the matter not one
  *      bit, and a replay through stored snapshots equals the inline run.
  *  10. Step convergence and Newton's third law on the page's own configuration.
+ *  11. RELAXING THE GRAIN AWAY (plan §4i): the moved particles get exactly
+ *      `observedState`'s velocity where they now sit, the field's error
+ *      against the EXACT deficit field (force probe) falls several-fold, and
+ *      the enclosed contrast is still the profile's — the first version
+ *      relaxed onto an analytic table and bent it by 0.11, so this is the
+ *      check that guards the design.
  */
 
 import assert from 'node:assert/strict';
 
 import {
-    createVoidProfile, matterContrastFromGalaxy, buildProfile, growthFactor,
+    createVoidProfile, matterContrastFromGalaxy, buildProfile, growthFactor, splitProfile, gravityRadialSI,
     meanMatterDensityMsunMpc3, pointGravityVector,
 } from '../js/bootes-void-model.js';
-import { createCosmicWeb, sampleTracers } from '../js/bootes-web-model.js';
+import { createCosmicWeb, sampleTracers, mulberry32 } from '../js/bootes-web-model.js';
 import {
     PROFILE_PRESETS, DEFAULT_BIAS, voidRedshift, effectiveRadiusMpc, resolvedAnchors,
 } from '../js/bootes-void-data.js';
@@ -388,6 +394,75 @@ const shellErr = (ic, sim, aStart, aEnd, rLo, rHi) => {
     assert.ok(worst < 0.03, `Δ(<r) at z_obs vs profile: ${worst}`);
     ok(`the page's run: ${NB.PAGE_CONFIG.steps} steps converged (6 steps is ${(100 * conv).toFixed(2)} % of the `
         + `displacement off), internal forces sum to ${dP.toExponential(1)} of Σm|F| (Newton III, to the tree), Δ(<r) at z_obs = the profile ±${worst.toFixed(3)}`);
+}
+
+// ── 11. Relaxing the quiet start's grain away ───────────────────────────────
+{
+    const R = 1.6 * rEff;
+    const cfg = { radius: R, spacing: 14, refineRadius: Infinity, seed: 7 };
+    const ic = NB.buildInitialConditions({ voidProfile: profile, web, table, zObs: Z, ...cfg });
+    const tables = NB.relaxTables({ voidProfile: profile, web, table, zObs: Z, rMax: R * 1.02 });
+    assert.throws(() => NB.createRelaxer({ ...ic, aStart: 0.5, tables }), /z_obs/);
+    // Zero passes: the table velocities ARE observedState's.
+    const zero = NB.createRelaxer({ ...ic, tables, iterations: 0, ...NB.PAGE_CONFIG.sim }).result();
+    let e0 = 0, t0 = 0;
+    for (let k = 0; k < 3 * ic.nBackground; k++) { e0 += (zero.vel[k] - ic.vel[k]) ** 2; t0 += ic.vel[k] ** 2; }
+    const rl = NB.createRelaxer({ ...ic, tables, ...NB.PAGE_CONFIG.sim });
+    while (rl.step());
+    const out = rl.result();
+    // Relaxed: the velocities are observedState's AT THE NEW POSITIONS.
+    const fresh = NB.observedState(out.pos.subarray(0, 3 * ic.nBackground), { voidProfile: profile, web, table, zObs: Z });
+    let e1 = 0, t1 = 0;
+    for (let k = 0; k < 3 * ic.nBackground; k++) { e1 += (out.vel[k] - fresh.vel[k]) ** 2; t1 += fresh.vel[k] ** 2; }
+    const vel0 = Math.sqrt(e0 / t0), vel1 = Math.sqrt(e1 / t1);
+    assert.ok(vel0 < 1e-5 && vel1 < 1e-4, `velocities: ${vel0}, ${vel1}`);
+    // The grain against the EXACT deficit field, at points inside the sphere.
+    const { deficit } = splitProfile(profile);
+    const conv = A_OBS * A_OBS / NB.ACC_TO_SI;
+    const rng = mulberry32(41);
+    const probes = [];
+    while (probes.length < 600) {
+        const p = [(2 * rng() - 1) * R, (2 * rng() - 1) * R, (2 * rng() - 1) * R];
+        const r = Math.hypot(...p);
+        if (r > 10 && r < 0.95 * R) probes.push(p);
+    }
+    const grain = (pos) => {
+        const n = ic.nBackground;
+        const tree = NB.buildTree(pos, ic.mass, Int32Array.from({ length: n }, (_, i) => i), { leafSize: 16 });
+        const sph = NB.meanSphereForce(R, rho, ic.softening[0]);
+        const acc = { in: [0, 0], out: [0, 0] };
+        for (const p of probes) {
+            const r = Math.hypot(...p), b = new Float64Array(3);
+            NB.treeForce(tree, ...p, 0.5, ic.softening[0], b);
+            const gx = conv * gravityRadialSI(r, deficit, { z: Z }) / r;
+            const bin = r < 0.6 * R ? acc.in : acc.out;
+            for (let d = 0; d < 3; d++) {
+                const ex = gx * p[d];
+                bin[0] += (b[d] - sph(r) / r * p[d] - ex) ** 2; bin[1] += ex * ex;
+            }
+        }
+        return { in: Math.sqrt(acc.in[0] / acc.in[1]), out: Math.sqrt(acc.out[0] / acc.out[1]) };
+    };
+    const before = grain(ic.pos), after = grain(out.pos);
+    // The core keeps a floor that is the SOFTENING (h = 28 Mpc here, against
+    // the bare field), not grain: measured 9.2 → 3.7 % inside, 18.6 → 2.4 %
+    // outside on this layout.
+    assert.ok(after.in < before.in / 2 && after.out < before.out / 4, `grain: ${JSON.stringify({ before, after })}`);
+    // The profile survives: the enclosed contrast of the relaxed smooth matter.
+    const rs = Array.from({ length: ic.nBackground }, (_, i) => rad(out.pos, i)).sort((u, v) => u - v);
+    const mEach = ic.mass[0];
+    let worst = 0;
+    for (const r of [30, 60, 90, 120]) {
+        let m = 0;
+        for (let i = 0; i < ic.nBackground; i++) if (rad(out.pos, i) < r) m += ic.mass[i];
+        const d = m / (rho * 4 / 3 * Math.PI * r ** 3) - 1;
+        worst = Math.max(worst, Math.abs(d - deficit.integratedAt(r)));
+    }
+    assert.ok(worst < 0.01 && rs.length === ic.nBackground && mEach > 0, `enclosed contrast after relaxing: ${worst}`);
+    ok(`relaxing the grain away: ${rl.iterations} passes move the smooth matter ${out.shiftRmsMpc.toFixed(2)} Mpc rms; `
+        + `its grain against the exact deficit field ${(100 * before.in).toFixed(1)} → ${(100 * after.in).toFixed(1)} % in the core, `
+        + `${(100 * before.out).toFixed(1)} → ${(100 * after.out).toFixed(1)} % outside; velocities are observedState's where the particles `
+        + `now sit (${vel1.toExponential(1)}); Δ(<r) still the profile's ±${worst.toFixed(3)}`);
 }
 
 console.log(`\n${passed} checks passed — js/bootes-nbody.js`);

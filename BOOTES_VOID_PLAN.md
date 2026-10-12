@@ -326,8 +326,9 @@ comoving Mpc.
 
 Asked for directly: "the web's lumpy pull is linear — work towards an N-body
 simulation". Phase 1 shipped as a third tracker mode, **N-body forecast**:
-every particle — the void's smooth matter (~13 400, quiet start sampling
-ρ̄(1 + δ⁻) to 2.6 R_eff) and the web's 802 mass particles — gravitates on every
+every particle — the void's smooth matter (~35 200 since §4i: a uniform
+12 Mpc quiet start sampling ρ̄(1 + δ⁻) to 2.6 R_eff, its grain relaxed away)
+and the web's 802 mass particles — gravitates on every
 other in the expanding ΛCDM background, FORWARD from the observed epoch to
 t₀ + 6 Gyr. The web's pull is therefore fully nonlinear and the web itself
 responds. Kernel `js/bootes-nbody.js` (PURE) → `js/bootes/nbody-worker.js`
@@ -346,10 +347,12 @@ stepping on the page without a Worker) → `js/bootes/track-panel.js`.
 | The mode is a FORECAST only; before z_obs it shows the shell reconstruction | see Phase 2 below — the past is not faked |
 
 Measured (page configuration, `tests/bootes-nbody.mjs` + the browser gate):
-8.4 s in a Worker; the self-gravitating web moves the deepest void galaxy
-~6 kpc from the shell tracker over the next 6 Gyr (median tracer 35 kpc, p90
-75 kpc, against a median forecast displacement of 0.2 Mpc); smooth matter
-within 20 Mpc of the web's nodes grows +3.7–4.6 %. REAL BUT SMALL: Λ is
+~30 s in a Worker since §4i (was 8.4 s); the self-gravitating web moves the
+deepest void galaxy ~4 kpc from the shell tracker over the next 6 Gyr (median
+tracer 2 kpc, p90 4 kpc, against a median forecast displacement of 0.19 Mpc);
+smooth matter within 20 Mpc of the web's nodes grows +4.1 %. Until §4i this
+read 6 / 35 / 75 kpc: that was the old layout's LATTICE GRAIN pushing the
+galaxies about, not the web (measured — §4i). REAL BUT SMALL: Λ is
 switching growth off (D rises only ×1.18 from z_obs to t₀ + 6 Gyr), and the
 page says so rather than magnifying it.
 
@@ -567,15 +570,63 @@ the void the deficit's true pull decays, the quiet start's grain does not),
 which a smooth past cannot grow into — uniform 9 Mpc elements "improved"
 it by copying more of the grain. The refined (mixed-resolution) glass was
 built, measured as above and NOT shipped. The lever is the FORECAST's
-observed state on the wall (finer outer sampling and/or per-particle 2 ×
-cell softening, which the reconstruction already uses and the forecast never
-adopted) — a change to the N-body forecast mode, its cost and its published
-numbers, so it waits on the author. Its galaxies feel the same grain.
+observed state on the wall — done, with the author's go, in §4i.
 
-Next, honestly: the forecast's wall sampling (above); a Bayesian forward
-model whose prior regularises the shooting that failed in §4e — and, before
-any of it matters for science, a REAL density field in place of the model
-web (§6).
+### 4i. The forecast's observed state, sampled and relaxed — `createRelaxer`
+
+The N-body's smooth matter is a quiet start of the void's deficit. Measured
+against the EXACT model field at the tracers (force probe; errors relative to
+the model's TOTAL field there — deficit + web — which is small on the wall
+because the void and its wall nearly cancel):
+
+| Observed state | Particles | Core 30–60 | Wall 150 / 180 / 210 Mpc |
+|----------------|-----------|-----------|----------------------|
+| old zoom (cells → 24 Mpc beyond 1.3 R_eff, one h = 24) | 13 427 | 7.7 % | 172 / 415 / 629 % |
+| zoom + per-particle 2 × cell softening | 13 427 | 7.7 % | 121 / 225 / 282 % |
+| **uniform 12 Mpc** | 35 233 | 7.2 % | 76 / 122 / 158 % |
+| old zoom, relaxed | 13 427 | 2.4 % | 37 / 131 / 278 % |
+| **uniform 12 Mpc, relaxed (shipped)** | 35 233 | 2.3 % | **8.4 / 13 / 20.5 %** |
+
+(The relaxed core keeps a ~2–3 % floor against the BARE field that is the
+24 Mpc softening, not grain.) Two seeds of the unrelaxed uniform layout
+differ by 50–71 % on the wall — √2 × each one's miss — so it is grain.
+
+THE RELAXATION removes only the NON-SPHERICAL part of the smooth matter's
+field: each pass subtracts the shell-averaged radial force (2 Mpc bins) and
+moves every particle against the rest, r·F_grain/4πGρ̄₀ (the glass
+relaxation of §4e step 1, restricted). The quiet start already carries the
+profile's spherical part exactly, so that is kept (gated: Δ(<r) ±0.009 after
+20 passes). Velocities are recomputed where the particles now sit with the
+SAME arithmetic as `observedState` (gated to 1e-6) — they move ~1.7 Mpc rms,
+and a stale velocity near a clump is ~10 km/s, the size of the effect.
+MEASURED REJECTION: relaxing the WHOLE field onto the analytic deficit table.
+The particles and the table differ by a uniform ~0.7 % (softening + tree)
+that no arrangement removes; every pass pushed mass outward chasing it, and
+20 passes bent the enclosed contrast by up to 0.11 (−0.62 for −0.56 at
+20 Mpc) while the residual it minimised fell nicely. The gate now checks the
+profile, which is what caught it.
+
+| What moved (page configuration) | Before | After |
+|---------------------------------|--------|-------|
+| forecast: deepest galaxy vs the shell tracker, 6 Gyr | 7 kpc | 4 kpc |
+| forecast: tracers, median / p90 | 35 / 75 kpc | **2 / 4 kpc** |
+| forecast: matter ≤ 20 Mpc of the nodes | +4.6 % | +4.1 % |
+| forecast: wall-clock in a Worker | ~8 s | ~30 s (20 passes ≈ 13 s) |
+| reconstruction: today's gravity 30–60 / 60–90 / 90–120 Mpc | 2.6 / 3.0 / 7.1 % | **1.4 / 1.4 / 4.0 %** |
+| reconstruction: 120–150 / 150–180 / 180–210 / 210–240 Mpc | 18.6 / 33.0 / 37.9 / 41.5 % | **6.7 / 12.1 / 19.1 / 35.8 %** |
+| reconstruction: overall | 26.6 % | **6.2 %** |
+
+The forecast's headline effect SHRANK, and that is the finding: the
+self-gravitating web's own pull on a galaxy over the next 6 Gyr is a few kpc,
+and most of what the page used to print was the sampling. Intermediate
+layouts land in between (uniform unrelaxed 16 / 28 kpc, relaxed zoom
+5–7 / 27–30 kpc), tracking the grain level. The outermost bin is the sphere's
+rim, where the model's field is weakest.
+
+Next, honestly: the rim (sample past 2.6 R_eff, or taper what the page claims
+there); a Bayesian forward model whose prior regularises the shooting that
+failed in §4e — and, before any of it matters for science, a REAL density
+field in place of the model web (§6).
 
 ---
 

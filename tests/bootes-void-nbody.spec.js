@@ -59,6 +59,21 @@ test.describe('Boötes Void — N-body forecast', () => {
         await expect(page.locator('[data-bv="trackNbody"]').first()).toContainText('done in');
         await expect(page.locator('[data-bv="trackNbody"]').first()).toContainText('galaxies as test particles');
 
+        // THE RELAXATION ran in the worker before the run (plan §4i): the
+        // quiet start's grain fell, the particles moved ~1–3 Mpc, and the
+        // reconstruction's target is that relaxed state.
+        const relax = await page.evaluate(() => {
+            const st = window.__bootesLab.tracker.nbody.state;
+            const h = st.relax?.history ?? [];
+            return { passes: h.length - 1, first: h[0], last: h[h.length - 1], shift: st.relax?.shiftRmsMpc,
+                observed: st.observed ? st.observed.pos.length / 3 : 0, massive: st.observed ? st.observed.mass.length : -1 };
+        });
+        expect(relax.passes).toBe(20);
+        expect(relax.last).toBeLessThan(relax.first / 5);
+        expect(relax.shift).toBeGreaterThan(0.5);
+        expect(relax.shift).toBeLessThan(4);
+        expect(relax.observed).toBe(relax.massive);
+
         // THE JOIN. Frame 0 of the run is the observed state: galaxy A sits
         // at its observed point with the shell tracker's velocity.
         const join = await page.evaluate(() => {

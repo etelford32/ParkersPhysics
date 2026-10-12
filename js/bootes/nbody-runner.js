@@ -28,6 +28,7 @@
 import {
     PAGE_CONFIG, buildInitialConditions, observedState, createSimulation, createRun,
     buildSchedule, replayTestParticles, locateFrame, interpolateRows, recordSampleAt,
+    relaxTables, createRelaxer,
 } from '../bootes-nbody.js';
 import { RECON_CONFIG, NODE_RADIUS_MPC } from '../bootes-reconstruct.js';
 import { toKmsPerGyr } from '../bootes-force-probe.js';
@@ -52,6 +53,10 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         id: 0,
         step: 0,
         steps: PAGE_CONFIG.steps,
+        stage: null,            // 'relax' | 'run' while running
+        relaxStep: 0,
+        relaxSteps: PAGE_CONFIG.relax.iterations,
+        relax: null,            // { history, shiftRmsMpc } of the finished run
         ms: null,
         error: null,
         counts: null,           // { smooth, web, galaxies }
@@ -62,7 +67,8 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         pending: new Set(),
         derived: null,
         table: null,
-        observed: null,         // the forecast's massive state at z_obs (a copy)
+        observed: null,         // the forecast's RELAXED massive state at z_obs, once the run is done
+        observedMeta: null,
     };
     const rc = {
         status: 'idle',         // idle | running | ready | error | unavailable
@@ -105,11 +111,16 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         if (String(m.type).startsWith('recon')) { handleRecon(m); return; }
         if (m.id !== st.id) return;                       // a stale run
         if (m.type === 'progress') {
-            st.step = m.step;
+            st.stage = m.stage ?? 'run';
+            if (st.stage === 'relax') { st.relaxStep = m.step; st.relaxSteps = m.steps; } else st.step = m.step;
             onChange(st);
         } else if (m.type === 'done') {
             st.result = m.result;
             st.ms = m.ms;
+            st.relax = m.result.relax ?? null;
+            // The reconstruction matches THIS state — the relaxed one the
+            // forecast actually ran (plan §4i), not the raw quiet start.
+            st.observed = { pos: m.result.observedPos, ...st.observedMeta };
             st.status = 'ready';
             const nRec = m.result.record.length;
             st.recordKeys.forEach((key, k) => st.recs.set(key, { rec: m.result.rec, nRec, k }));
@@ -252,13 +263,18 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
                     voidProfile: derived.profile, web: derived.web, table, zObs, testPoints,
                     ...PAGE_CONFIG.ic(rEff),
                 });
-                // The reconstruction's target, copied before the buffers are
-                // transferred to the worker for the forecast.
-                st.observed = {
-                    pos: Float64Array.from(ic.pos.subarray(0, 3 * ic.nMassive)),
+                // The reconstruction's target arrives with the finished run
+                // (the relaxed positions); its masses/groups are copied now,
+                // before the buffers are transferred to the worker.
+                st.observed = null;
+                st.observedMeta = {
                     mass: Float64Array.from(ic.mass), group: Uint8Array.from(ic.group),
                     softening: ic.softening,
                 };
+                const tables = relaxTables({
+                    voidProfile: derived.profile, web: derived.web, table, zObs,
+                    rMax: PAGE_CONFIG.ic(rEff).radius * 1.02,
+                });
                 st.nTracers = derived.tracers.length;
                 st.nNodes = derived.web.nodes.length;
                 st.counts = { smooth: ic.nBackground, web: ic.nWeb, galaxies: ic.nTest };
@@ -276,10 +292,12 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
                     type: 'run', id,
                     ic: {
                         pos: ic.pos, vel: ic.vel, mass: ic.mass, group: ic.group, nMassive: ic.nMassive,
-                        aStart: ic.aStart, softening: ic.softening, background: ic.background,
+                        nBackground: ic.nBackground, aStart: ic.aStart, softening: ic.softening, background: ic.background,
                     },
                     aEnd, steps: PAGE_CONFIG.steps, sim: { ...PAGE_CONFIG.sim }, record, accretion,
+                    relax: { tables, ...PAGE_CONFIG.relax },
                 };
+                st.stage = 'relax'; st.relaxStep = 0; st.step = 0;
                 st.status = 'running';
                 onChange(st);
                 const w = ensureWorker();
@@ -299,7 +317,28 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
     /** The no-Worker path: the identical steppable run, one step per task. */
     function runLocally(msg) {
         const t0 = performance.now();
-        const { ic } = msg;
+        const ic = { ...msg.ic };
+        // The same relaxation as the worker's, one pass per task.
+        const rl = msg.relax
+            ? createRelaxer({ ...ic, tables: msg.relax.tables, iterations: msg.relax.iterations, rate: msg.relax.rate, ...msg.sim })
+            : null;
+        const relaxTick = () => {
+            if (msg.id !== st.id) return;
+            if (rl && rl.step()) {
+                handle({ type: 'progress', id: msg.id, stage: 'relax', step: rl.stepsDone, steps: rl.iterations });
+                setTimeout(relaxTick, 0);
+                return;
+            }
+            let relaxInfo = null;
+            if (rl) {
+                const out = rl.result();
+                ic.pos = out.pos; ic.vel = out.vel;
+                relaxInfo = { history: out.history, shiftRmsMpc: out.shiftRmsMpc };
+            }
+            startRun(relaxInfo);
+        };
+        const startRun = (relaxInfo) => {
+        const observedPos = Float64Array.from(ic.pos.subarray(0, 3 * ic.nMassive));
         const sim = createSimulation({ ...ic, ...msg.sim });
         const schedule = buildSchedule({ aStart: ic.aStart, aEnd: msg.aEnd, steps: msg.steps });
         const run = createRun(sim, schedule, {
@@ -310,11 +349,13 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
             const more = run.step();
             handle({ type: 'progress', id: msg.id, step: run.stepsDone, steps: msg.steps });
             if (more) { setTimeout(tick, 0); return; }
-            const { snapshots, ...result } = run.result();
+            const { snapshots, ...rest } = run.result();
             local = { snapshots, schedule, ic, sim: msg.sim };
-            handle({ type: 'done', id: msg.id, result, ms: performance.now() - t0 });
+            handle({ type: 'done', id: msg.id, result: { ...rest, observedPos, relax: relaxInfo }, ms: performance.now() - t0 });
         };
         setTimeout(tick, 0);
+        };
+        setTimeout(relaxTick, 0);
     }
 
     /** Make sure every point has a record; replay the ones that do not. */
