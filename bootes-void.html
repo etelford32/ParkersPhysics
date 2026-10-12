@@ -721,7 +721,7 @@ details.bv-details[open] > summary::after { content:' ▴'; }
             </label>
             <p class="bv-hint" data-bv="trackNbody">—</p>
             <div class="bv-btnrow">
-                <button class="bv-btn" type="button" id="bv-track-recon" disabled>Reconstruct the past (~2 min)</button>
+                <button class="bv-btn" type="button" id="bv-track-recon" disabled>Reconstruct the past (~4 min)</button>
             </div>
             <p class="bv-hint" data-bv="trackRecon">—</p>
             <dl class="bv-rows">
@@ -769,16 +769,20 @@ details.bv-details[open] > summary::after { content:' ▴'; }
                 order in Lagrangian perturbation theory (2LPT: the part of today's displacement that grew as D² is
                 separated out rather than scaled back as if it were linear) and corrected for the simulation's own
                 softening, which grows each wave a little slower than the real universe would (the start is pre-boosted
-                by exactly that shortfall, measured mode by mode), and then draws that ONE run for the
+                by exactly that shortfall, measured mode by mode). That start is then FITTED: a Bayesian forward model
+                runs the whole N-body from it, compares the result with today's gravity at 30&nbsp;000 random points, and
+                corrects the start — only on scales the simulation resolves (its prior), only as far as the
+                simulation's own graininess allows (its noise), keeping a step only if it fits better — so the past is
+                chosen by the dynamics, not just by a snapshot. It then draws that ONE run for the
                 whole span, each galaxy landed where it is seen. It reproduces today's gravity well inside the void
-                (~1&nbsp;% in the core, ≤&nbsp;4&nbsp;% to R_eff), and beyond R_eff it misses by a roughly CONSTANT amount, about
+                (~1&nbsp;% from the core out to R_eff), and beyond R_eff it misses by a roughly CONSTANT amount, under
                 2&nbsp;% of the void's peak pull, out to the rim of the sampled sphere. As a share of the local field
-                that reads 6–18&nbsp;% on the clumpy wall and ~30&nbsp;% at the rim, but only because the void and its
+                that reads 4–9&nbsp;% on the clumpy wall and ~18&nbsp;% at the rim, but only because the void and its
                 wall cancel out there and the field itself is ~20× weaker; the line under the button prints this
                 run's own numbers. Matching today is not proof of the past, so the PAST was tested separately: a planted
                 history with a known start at z&nbsp;=&nbsp;19, reconstructed from its final frame alone by this same
                 pipeline, came back with its gravity right to ~4&nbsp;% inside the void and ~11&nbsp;% on the wall at
-                z&nbsp;=&nbsp;9, ~2&nbsp;% / ~7&nbsp;% at z&nbsp;=&nbsp;4 and ~1&nbsp;% / ~3&nbsp;% today. Those are that test's numbers, not
+                z&nbsp;=&nbsp;9, ~2&nbsp;% / ~6&nbsp;% at z&nbsp;=&nbsp;4 and ~1&nbsp;% / ~2&nbsp;% today. Those are that test's numbers, not
                 this run's; the true past of the real Boötes is not known to check against. It is resolved to ~24 Mpc for the smooth matter and ~11 Mpc for the
                 web, and each galaxy is a massless test particle. The shaded band is the page's dominant systematic, tracer bias b ± 20 %, run
                 through the whole model; it is not a statistical interval. Times after today are model forecasts.

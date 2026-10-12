@@ -3,7 +3,7 @@
  * bootes-reconstruct.mjs — gate for js/bootes-reconstruct.js, the web's
  * initial conditions (BOOTES_VOID_PLAN.md §4d Phase 2).
  *
- * Run: node tests/bootes-reconstruct.mjs        (~2 min)
+ * Run: node tests/bootes-reconstruct.mjs        (~3 min)
  *
  *   1. PER-PARTICLE SOFTENING: the tree equals the direct sum when every cell
  *      is opened, and each source is smoothed at its OWN h.
@@ -32,6 +32,10 @@
  *      not just today's; and the glass's Chebyshev schedule must beat the
  *      fixed-rate glass it replaced at z = 9 (its grain is 4–11 % of the
  *      z = 9 signal at page scale).
+ *  11. THE BAYESIAN FORWARD MODEL (plan §4l), on the same twin: fitting the
+ *      initial field to today's field at seeded points must improve the
+ *      recovered PAST at every epoch, inside and outside R_eff, against the
+ *      truth — today's fit alone is not the claim.
  */
 
 import assert from 'node:assert/strict';
@@ -48,6 +52,7 @@ import * as NB from '../js/bootes-nbody.js';
 import * as RC from '../js/bootes-reconstruct.js';
 import { invert2LPT, lptGrowth, lptState, secondOrderDisplacement } from '../js/bootes-lpt.js';
 import { deconvolutionKernel, deconvolveGrowth } from '../js/bootes-softgrowth.js';
+import * as FM from '../js/bootes-forward-model.js';
 
 let passed = 0;
 const ok = (name) => { console.log(`  ✓ ${name}`); passed++; };
@@ -388,20 +393,47 @@ const glass = RC.buildGlass({ ...CFG, ...SIM });
     };
     const tF = Object.fromEntries(EP.map((e) => [e, fieldOf(truth[e], gT)]));
     const observedTruth = { pos: truth[A_OBS], mass: gT.mass, group: new Uint8Array(gT.n), softening: [gT.softening, NB.plummer(1)] };
-    const recover = (glassOpts) => {
+    // The forward model's data: the truth's field today at seeded points; its
+    // noise: the two glasses' grain there (plan §4l).
+    const P = FM.dataPoints({ radius: R, n: 8000, seed: 2026 });
+    const field = FM.fieldAtPoints({ sources: [{ pos: truth[A_OBS], mass: gT.mass, softening: gT.softening }], radius: R, points: P, meanSoftening: gT.softening });
+    const grain = (gl) => FM.rmsVector(FM.fieldAtPoints({ sources: [{ pos: gl.pos, mass: gl.mass, softening: gl.softening }], radius: R, points: P, meanSoftening: gl.softening }));
+    let fitInfo = null;
+    const recover = (glassOpts, { forward = false } = {}) => {
         const gB = RC.buildGlass({ ...cfg, seed: 23, ...SIM, ...glassOpts });
         const X = RC.matchObserved({ glass: gB, observed: observedTruth, ...SIM }).X;
-        const sn = evolve(gB, lptICs(gB, X, 0.1), 0.1);
+        let ic = lptICs(gB, X, 0.1);
+        if (forward) {
+            const vol = Float64Array.from(gB.mass, (m) => m / rho), hs = Float64Array.from(gB.mass, () => h);
+            const g = lptGrowth(0.1, A_OBS);
+            const inv = invert2LPT(gB.pos, X.map((v, k) => v - gB.pos[k]), { d2Obs: g.d2Obs, iterations: 4, volume: vol, hsoft: hs, h, ...SIM });
+            const s1 = deconvolveGrowth(gB.pos, inv.s1, vol, deconvolutionKernel({ h, aInit: 0.1, aObs: A_OBS, kappa: 3 }));
+            const fit = FM.forwardModelFit({
+                glass: gB, s1, aInit: 0.1, aObs: A_OBS, data: { points: P, field }, noise: Math.hypot(grain(gB), grain(gT)),
+                config: RC.RECON_CONFIG.forwardModel, sim: SIM,
+            });
+            fitInfo = fit;
+            ic = lptState(gB.pos, fit.s1, fit.s2, 0.1, g);
+        }
+        const sn = evolve(gB, ic, 0.1);
         return Object.fromEntries(EP.map((e) => [e, score(fieldOf(sn[e], gB), tF[e])]));
     };
-    const now = recover({}), old = recover({ rate: 0.7 });
+    const now = recover({}), old = recover({ rate: 0.7 }), fwd = recover({}, { forward: true });
     const z9 = now[0.1], z4 = now[0.2], z0 = now[A_OBS];
     assert.ok(z9[0] < 0.07 && z9[1] < 0.2 && z4[0] < 0.045 && z0[0] < 0.025 && z0[1] < 0.07, `past: ${JSON.stringify(now)}`);
     assert.ok(z9[0] < old[0.1][0] && z9[1] < old[0.1][1], `glass schedule at z = 9: ${z9} vs fixed ${old[0.1]}`);
+    // The Bayesian forward model (plan §4l) must improve the PAST, not just
+    // today's fit: every epoch, both regions, against the truth.
+    for (const e of EP) for (const k of [0, 1]) assert.ok(fwd[e][k] < now[e][k], `forward model at a = ${e}, region ${k}: ${fwd[e][k]} vs ${now[e][k]}`);
+    const m = fitInfo.history.map((x) => x.misfit);
+    for (let i = 1; i < m.length; i++) assert.ok(m[i] < m[i - 1], `forward-model misfit must fall: ${m}`);
     const pc = (v) => `${(100 * v[0]).toFixed(1)} / ${(100 * v[1]).toFixed(1)} %`;
     ok(`the past, against a planted truth (z = 19 start, reconstructed from its last frame only): gravity inside / `
         + `outside R_eff recovered to ${pc(z9)} at z = 9, ${pc(z4)} at z = 4, ${pc(z0)} today `
         + `(the fixed-rate glass: ${pc(old[0.1])} at z = 9)`);
+    ok(`the Bayesian forward model on top: ${m.length - 1} Gauss–Newton steps take the misfit to today's field `
+        + `${(100 * m[0]).toFixed(1)} → ${(100 * m[m.length - 1]).toFixed(1)} % (χ²_ν ${fitInfo.chi2.toFixed(2)}, stopped by ${fitInfo.stoppedBy}) and `
+        + `the recovered past to ${pc(fwd[0.1])} at z = 9, ${pc(fwd[0.2])} at z = 4, ${pc(fwd[A_OBS])} today`);
 }
 
 console.log(`\n${passed} checks passed — js/bootes-reconstruct.js`);

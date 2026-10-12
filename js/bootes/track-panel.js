@@ -272,6 +272,7 @@ export function createTrackPanel({
         glass: 'settling a uniform glass',
         match: 'matching it to today\'s web',
         '2lpt': 'splitting the displacement into first and second order (2LPT) and correcting for the softened growth',
+        refine: 'fitting the start to today\'s gravity (Bayesian forward model: each step is a full N-body run)',
         run: 'running z = 9 → today → +6 Gyr',
         galaxies: 'landing every galaxy where it is seen',
     };
@@ -279,7 +280,7 @@ export function createTrackPanel({
         const r = runner.recon;
         if (state.mode !== 'nbody') return 'Reconstruction: N-body mode only.';
         if (r.status === 'unavailable' || !runner.workerAvailable) {
-            return 'Reconstruction needs a background worker (~2 min of gravity would freeze this page).';
+            return 'Reconstruction needs a background worker (~4 min of gravity would freeze this page).';
         }
         if (r.status === 'running') return `Reconstructing: ${STAGES[r.stage] ?? r.stage} (${r.done}/${r.total})…`;
         if (r.status === 'error') return `Reconstruction failed (${r.error}).`;
@@ -296,6 +297,11 @@ export function createTrackPanel({
                 + `(${dg.ics === '2lpt' ? '2LPT' : 'Zel\'dovich'} ICs${dg.growthKappa != null ? ', softening-corrected' : ''}) · today's gravity `
                 + `reproduced to ${num(100 * Math.max(...inner), 0)} % inside R_eff (${num(100 * dg.fieldError, 0)} % overall); `
                 + `outside it the miss stays within ${num(100 * outer / peak, 1)} % of the void's peak pull out to the rim · `
+                + (dg.forwardModel
+                    ? `start fitted to today's gravity by a Bayesian forward model (${dg.forwardModel.iterations} N-body steps, `
+                        + `misfit ${num(100 * dg.forwardModel.misfitBefore, 1)} → ${num(100 * dg.forwardModel.misfitAfter, 1)} %, `
+                        + `χ²/ν ${num(dg.forwardModel.chi2, 1)} against the elements' own grain) · `
+                    : '')
                 + `galaxies land within ${num(1000 * g, 0)} kpc · ${num(dg.seconds, 0)} s.`;
         }
         return 'Reconstruction: not run — the past shown is the shell reconstruction.';
@@ -396,7 +402,7 @@ export function createTrackPanel({
         if (reconBtn) {
             reconBtn.disabled = state.mode !== 'nbody' || runner.recon.status === 'running'
                 || !runner.canReconstruct;
-            reconBtn.textContent = runner.reconReady ? 'Reconstruct again' : 'Reconstruct the past (~2 min)';
+            reconBtn.textContent = runner.reconReady ? 'Reconstruct again' : 'Reconstruct the past (~4 min)';
         }
         card?.setAttribute('data-track-t', state.tGyr.toFixed(4));
     }

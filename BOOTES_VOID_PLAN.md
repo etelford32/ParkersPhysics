@@ -763,10 +763,87 @@ its last frame — 5.2 / 17.3 % inside / outside R_eff at z = 9, 3.4 / 11.0 %
 at z = 4, 1.7 / 5.7 % today; the fixed-rate glass 5.9 / 19.1 % at z = 9) and
 the page states the page-scale numbers above as the twin's, not the run's.
 
-Next, honestly: what is left of the z = 9 error past the glass (~3 % in the
-void, ~10 % on the wall) is the matched state's unreachable content and the
-web's clumps (~500 (km/s)²/Mpc at the nodes vs ~175 away from them); a
-Bayesian forward model whose prior regularises that is the step after — and,
+What is left of the z = 9 error past the glass (~3 % in the void, ~10 % on
+the wall) is the matched state's unreachable content and the web's clumps
+(~500 (km/s)²/Mpc at the nodes vs ~175 away from them) — §4l.
+
+### 4l. The Bayesian forward model — `js/bootes-forward-model.js`
+
+The fix §4e asked for ("a Bayesian forward model whose prior regularises the
+shooting") and §4k made measurable. The insight from §4k: every earlier
+correction failed because its DATA were wrong, not its step — field feedback
+re-matched at the ELEMENTS' positions, where each element sits on its own
+lattice's grain, and so pulled the run back towards the matched state (which
+is further from the truth than the run). Measured on the clean-glass planted
+twin, that feedback even made today's fit at the tracer points worse, the
+very quantity it was "fitting". So the forward model is defined by its
+likelihood:
+
+- **DATA**: today's observed gravity at 30 000 SEEDED RANDOM POINTS (never
+  the elements), through the matching's own trees.
+- **MODEL**: the page's own N-body run from the 2LPT ICs of s₁ (trial runs
+  at 15 steps — the same misfit as 30, 3.29 vs 3.29 %; 10 steps 3.31 %).
+- **NOISE**: σ² = σ²_elements + σ²_target, each a glass's (or the target's)
+  residual grain at the points. On the twin: 41.5 and 53.2 (km/s)²/Mpc; the
+  measured difference of the two grains is 65.5 = 1.32 % of the data, and
+  the √(σ₁² + σ₂²) rule gives 67.5. The page passes no target grain, so it
+  uses the elements' own for both (75 (km/s)²/Mpc on the page).
+- **PRIOR**: a band limit. The correction lives in k h < κ = 5 (the
+  quartic taper, applied in DIFFERENCE form, which keeps linear and
+  quadratic fields exactly — not a Gaussian smoother, which §4k measured
+  biasing the void's steep profile); outside the band the 2LPT estimate is
+  held. Inside it the prior is flat. Not a ΛCDM power spectrum, on purpose:
+  the page's web is a model, not a realisation of one.
+- **STEP**: Gauss–Newton with the integrator's own LINEAR RESPONSE as the
+  Jacobian — the point residual as a displacement (ΔF/4πGρ̄₀, the matching's
+  relation), carried to each element where the RUN put it, band-limited,
+  deconvolved by T(k) (§4g). Gain line-searched 2 → 1 → ½.
+- **STOP**: χ²_ν ≤ 1 (discrepancy principle), no descent, or 4 steps.
+
+Measured, page scale, the clean-glass planted twin (gravity vs the TRUTH,
+core / wall / out; a 6-step run is shown for the shape of the curve):
+
+| | misfit | z = 9 | z = 4 | today |
+|---|---|---|---|---|
+| matched state | 5.56 % | | | |
+| 2LPT + Chebyshev glass (§4k) | 3.29 % | 3.9 / 11.4 / 32.4 | 2.4 / 7.0 / 18.4 | 0.9 / 2.9 / 8.4 |
+| gain 1, 3 steps | 2.40 % | 4.0 / 11.2 / 31.6 | 2.4 / 6.7 / 16.8 | 0.8 / 2.5 / 6.1 |
+| **gain 2, 4 steps (shipped)** | 1.84 % | **3.8 / 10.9 / 31.2** | **2.3 / 6.3 / 16.2** | **0.7 / 2.0 / 5.3** |
+| gain 1, 10 steps | 1.77 % | 3.8 / 10.8 / 31.1 | 2.3 / 6.3 / 16.1 | 0.7 / 1.9 / 5.2 |
+
+No overfitting appeared before the iteration cap (every epoch improved at
+every step out to 10), z = 9 moves least because it sits on the twin's own
+grain floor (truth glass 1.9 / 5.7 / 19.8 % of the z = 9 signal), and κ = 3,
+4, 5 behave alike (5 marginally best). REJECTED, measured: gain 3 overshoots
+— its first step made today's core WORSE against the truth (0.8 → 0.9 %)
+while the misfit fell, and its second step was refused; and the §4k field
+feedback (data at the elements), again.
+
+On the page (`RECON_CONFIG.forwardModel`, the Worker): misfit 4.24 → 2.53 %
+(χ²_ν 2.8 — it stops on the step cap, not the noise), today's gravity
+against the observed target 5.2 → 3.3 % overall, bins 0.8 / 0.9 / 2.6 / 4.2 /
+6.1 / 8.5 / 18.3 % at 30 … 210 Mpc (absolute 108–247 (km/s)²/Mpc, was
+190–332), for +117 s (~4.3 min a reconstruction).
+
+GATES: `tests/bootes-forward-model.mjs` — the data are linear in their
+sources, the band passes linear fields and λ = 200 Mpc to 0.5 % and keeps
+12 % of the element scale, a fit started AT the truth stops at once with s₁
+untouched to the bit, and a PLANTED band-limited change to the initial field
+(0.6 Mpc rms, λ 90–180 Mpc) is recovered from today's field alone to 16 %
+(correlation 0.988); `tests/bootes-reconstruct.mjs` check 11 — on the
+gate-scale planted twin the fit must improve the recovered past at EVERY
+epoch inside and outside R_eff (measured 5.2 / 17.3 → 4.8 / 15.4 % at z = 9,
+3.4 / 11.0 → 3.0 / 9.0 at z = 4, 1.7 / 5.7 → 1.4 / 3.8 today); the browser
+gate requires the Worker's fit to lower the misfit at every accepted step.
+
+WHAT IT IS NOT: a posterior SAMPLE — it is the MAP estimate, and the past's
+uncertainty is the planted twin's measured error, not a computed spread (an
+ensemble over glass seeds would be the honest sampler: each costs a full
+reconstruction). The Jacobian is linear; in collapsed clumps the response
+exceeds T(k), which is why the gain is searched and capped.
+
+Next, honestly: a posterior ENSEMBLE over glass seeds (randomised maximum
+likelihood) to put an uncertainty on the past the page can print — and,
 before any of it matters for science, a REAL density field in place of the
 model web (§6).
 

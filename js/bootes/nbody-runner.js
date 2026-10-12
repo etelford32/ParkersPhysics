@@ -20,7 +20,7 @@
  * THE RECONSTRUCTION (js/bootes-reconstruct.js, plan §4d Phase 2) is a second,
  * opt-in run on the SAME model state: the forecast's observed massive state
  * is copied before it is handed to the worker and becomes the target the
- * glass is matched to. It needs ~2 minutes of tree gravity, so it runs ONLY in
+ * glass is matched to. It needs ~4 minutes of tree gravity, so it runs ONLY in
  * a Worker — on the page it would freeze the stage for that long, and the
  * status says so instead of doing it.
  */

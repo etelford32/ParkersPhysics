@@ -195,7 +195,8 @@ test.describe('Boötes Void — N-body forecast', () => {
     });
 
     test('reconstruct the past: one N-body run from z = 9 that lands on today\'s web', async ({ page }) => {
-        test.setTimeout(420_000);
+        // ~4 min of gravity since the forward model (plan §4l), more on a loaded box.
+        test.setTimeout(840_000);
         const errors = [];
         page.on('pageerror', e => errors.push(String(e)));
         await ready(page);
@@ -207,8 +208,9 @@ test.describe('Boötes Void — N-body forecast', () => {
         await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Reconstructing');
         await page.waitForFunction(
             () => document.querySelector('#bv-track-card')?.dataset.recon === 'ready',
-            null, { timeout: 360_000 });
+            null, { timeout: 720_000 });
         await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Reconstructed:');
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Bayesian forward model');
         await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('from z = 9');
 
         const out = await page.evaluate(() => {
@@ -248,6 +250,12 @@ test.describe('Boötes Void — N-body forecast', () => {
         const outer = out.dg.fieldBins.filter(b => b.r1 > 92).map(b => b.abs);
         expect(Math.max(...outer)).toBeLessThan(0.05 * peak);
         expect(out.dg.galaxyResidualsMpc.at(-1)).toBeLessThan(0.1);
+        // The forward model ran in the Worker and lowered today's misfit at
+        // every accepted step (plan §4l).
+        const fm = out.dg.forwardModel;
+        expect(fm.iterations).toBeGreaterThan(0);
+        expect(fm.misfitAfter).toBeLessThan(0.8 * fm.misfitBefore);
+        for (let i = 1; i < fm.history.length; i++) expect(fm.history[i].misfit).toBeLessThan(fm.history[i - 1].misfit);
 
         // The stage draws the reconstruction's own frames in the PAST.
         const match = await page.evaluate(() => new Promise((resolve) => {

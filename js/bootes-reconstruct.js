@@ -103,6 +103,14 @@
  *    planted TRUTH at every epoch: still worse every pass — the forward run
  *    already lands closer to the truth than the matched state does, and
  *    re-matching pulls it back.
+ *  - THE BAYESIAN FORWARD MODEL (plan §4l, js/bootes-forward-model.js,
+ *    gated in checks 10–11): after the 2LPT ICs, s₁ is FITTED so the N-body
+ *    run reproduces today's gravity at seeded random points — never at the
+ *    elements, which is what made field feedback fail — to a noise set by
+ *    the grain, under a band-limit prior; Gauss–Newton on the integrator's
+ *    linear response, gain line-searched. It improves the planted twin's
+ *    past at every epoch (z = 4 2.4 / 7.0 → 2.3 / 6.3 %, today 0.9 / 2.9 →
+ *    0.7 / 2.0 %) and the page's today 5.2 → 3.3 % overall, for +2 min.
  *  - THE PAST IS MEASURED (plan §4k, gated in check 10): a planted truth
  *    laid down at z = 19 and reconstructed from its last frame is
  *    recovered to 3.9 / 11.4 % (gravity, core / wall) at z = 9, 2.4 / 7.0 %
@@ -146,6 +154,7 @@ import {
 } from './bootes-nbody.js';
 import { invert2LPT, lptGrowth, lptState, secondOrderDisplacement } from './bootes-lpt.js';
 import { deconvolutionKernel, deconvolveGrowth } from './bootes-softgrowth.js';
+import { dataPoints, fieldAtPoints, forwardModelFit, rmsVector } from './bootes-forward-model.js';
 
 /**
  * The page's reconstruction, in ONE place (worker, runner and gate read it).
@@ -189,6 +198,23 @@ export const RECON_CONFIG = Object.freeze({
      * 2LPT only — on Zel'dovich ICs it un-hides their double-counted collapse.
      */
     growthKappa: 3,
+    /**
+     * The Bayesian forward-model fit (js/bootes-forward-model.js, plan §4l):
+     * after the 2LPT ICs, s₁ is fitted so the N-body RUN reproduces today's
+     * observed gravity at `points` random points, to a noise set by the
+     * elements' and the target's own grain, under a band-limit prior at
+     * κ = `bandKappa`. Gauss–Newton with the integrator's linear response,
+     * gain line-searched (2 → 1 → ½), trial runs at `innerSteps` (15 reach
+     * the same misfit as 30, measured). Stops at χ²_ν ≤ 1, no descent, or
+     * `maxIterations`. Measured on the clean-glass planted twin (4 steps):
+     * today's gravity 0.9 / 2.9 / 8.4 → 0.7 / 2.0 / 5.3 % (core / wall /
+     * out) against the TRUTH, z = 4 2.4 / 7.0 / 18.4 → 2.3 / 6.3 / 16.2 %,
+     * z = 9 unchanged within its grain floor. null switches it off (A/B).
+     */
+    forwardModel: Object.freeze({
+        points: 30000, pointSeed: 2026, bandKappa: 5, growthKappa: 3,
+        gains: Object.freeze([2, 1, 0.5]), maxIterations: 4, innerSteps: 15, chi2Stop: 1,
+    }),
 });
 
 const fourPiGRho = (cosmo) => 4 * Math.PI * G_MPC * meanMatterDensityMsunMpc3(cosmo);
@@ -521,6 +547,7 @@ export function shootGalaxies({
 export function reconstructRun({
     observed, config, testPoints, aObs, aEnd, nodeMarkers = null, cosmo = COSMOLOGY,
     sim = { theta: DEFAULT_THETA, leafSize: DEFAULT_LEAF }, recon = RECON_CONFIG, onProgress = null,
+    targetNoise = null,
 }) {
     const t0 = Date.now();
     const glass = buildGlass({
@@ -546,7 +573,7 @@ export function reconstructRun({
     // The ICs. 2LPT splits the matched Ψ into its linear part s₁ and the
     // second-order part D₂ₒs₂ that grew as D₁², and lays both down at aInit;
     // the galaxies' first guess then reads s₁ (their shots absorb the rest).
-    let ic, lpt = null, galaxyPsi = psi;
+    let ic, lpt = null, galaxyPsi = psi, fit = null;
     if ((recon.ics ?? 'za') === '2lpt') {
         onProgress?.('2lpt', 0, 1);
         const growth = lptGrowth(recon.aInit, aObs, cosmo);
@@ -565,6 +592,12 @@ export function reconstructRun({
             s1 = deconvolveGrowth(glass.pos, inv.s1, volume, ker);
             s2f = secondOrderDisplacement(glass.pos, s1, { volume, hsoft: Float64Array.from(glass.mass, () => h), h, ...sim });
             for (let k = 0; k < psi.length; k++) corr += (s1[k] - inv.s1[k]) ** 2;
+        }
+        if (recon.forwardModel) {
+            ({ s1, s2f, fit } = fitForwardModel({
+                glass, match, s1, aObs, recon, cosmo, sim, targetNoise,
+                onProgress: (d, t) => onProgress?.('refine', d, t),
+            }));
         }
         ic = lptState(glass.pos, s1, s2f, recon.aInit, growth, cosmo);
         let s2 = 0;
@@ -623,12 +656,48 @@ export function reconstructRun({
             lptHistory: lpt ? lpt.history : null,
             growthKappa: lpt && recon.growthKappa != null ? recon.growthKappa : null,
             growthCorrectionRmsMpc: lpt ? lpt.growthCorrectionRmsMpc : 0,
+            forwardModel: fit ? {
+                iterations: fit.history.length - 1, history: fit.history, stoppedBy: fit.stoppedBy,
+                noise: fit.noise, noiseParts: fit.noiseParts, chi2: fit.chi2,
+                misfitBefore: fit.history[0].misfit, misfitAfter: fit.history[fit.history.length - 1].misfit,
+            } : null,
             fieldError: field.overall,
             fieldBins: field.bins,
             galaxyResidualsMpc: gal.residuals,
             seconds: (Date.now() - t0) / 1000,
         },
     };
+}
+
+/**
+ * The forward-model step of `reconstructRun`: the observed field at seeded
+ * random points (the matching's own trees, so the data ARE the target the
+ * page matches), the noise from the bare glass's grain there plus the
+ * target's (`targetNoise`; null = the same as the glass's, which on the
+ * planted twin is within 3 % of the measured difference of the two grains),
+ * then `forwardModelFit`.
+ */
+function fitForwardModel({ glass, match, s1, aObs, recon, cosmo, sim, targetNoise, onProgress }) {
+    const fm = recon.forwardModel;
+    const points = dataPoints({ radius: glass.radius, n: fm.points, seed: fm.pointSeed });
+    const obs = match.observed;
+    const field = fieldAtPoints({
+        sources: [
+            { tree: match.obsTrees[0], softening: obs.softening[0], mass: obs.mass },
+            { tree: match.obsTrees[1], softening: obs.softening[1], mass: obs.mass },
+        ],
+        radius: glass.radius, points, meanSoftening: obs.softening[0], cosmo, ...sim,
+    });
+    const grain = rmsVector(fieldAtPoints({
+        sources: [{ pos: glass.pos, mass: glass.mass, softening: glass.softening }],
+        radius: glass.radius, points, meanSoftening: glass.softening, cosmo, ...sim,
+    }));
+    const target = targetNoise ?? grain;
+    const noise = Math.hypot(grain, target);
+    const fit = forwardModelFit({
+        glass, s1, aInit: recon.aInit, aObs, data: { points, field }, noise, config: fm, cosmo, sim, onProgress,
+    });
+    return { s1: fit.s1, s2f: fit.s2, fit: { ...fit, noiseParts: { elements: grain, target } } };
 }
 
 /** Rows [from, from+count) of every frame of a frame-major 3-vector array. */
