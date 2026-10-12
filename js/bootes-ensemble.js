@@ -35,6 +35,9 @@
  *    of the dominant systematic.
  *  - N is small (each member is a full reconstruction), so the spread is
  *    itself uncertain by ~1/√(2(N−1)) — ±41 % at N = 4. The page says N.
+ *  - It does not see the METHOD's resolution-limited bias, common to every
+ *    member: that is measured on planted twins (`methodBias`, `METHOD_BIAS`,
+ *    plan §4n) and added in quadrature.
  */
 
 /** The page's ensemble, in one place. */
@@ -43,6 +46,52 @@ export const ENSEMBLE_CONFIG = Object.freeze({
     glassSeedBase: 101,
     noiseSeedBase: 201,
 });
+
+/**
+ * THE METHOD BIAS at the page's scale (plan §4n): per region (inside /
+ * outside R_eff) at the page's three epochs (z = 9, z ≈ 4, today), the part
+ * of the ensemble mean's miss that its spread does not account for, as a
+ * fraction of the rms ensemble-mean field — `methodBias` on planted twins
+ * reconstructed at the page's own layout. The printed band is the spread and
+ * this in quadrature (`totalUncertainty`).
+ *
+ * MEASURED 2026-10-12 on TWO independent page-scale twins (different web
+ * realisations, different truth glasses, 4 members each): β = 0 at z = 9
+ * and z ≈ 4 in both regions on BOTH twins (the spread alone already scores
+ * R = 0.84–0.95 there), and today outside R_eff 2.71 % (twin A) / 2.41 %
+ * (twin B). Cross-validated — each twin's β applied to the OTHER: today
+ * outside R 1.46 → 1.06 and 1.39 → 0.94. The value below pools the two
+ * (rms). Coverage after the correction is 83–87 %, not 68 %: the misses are
+ * heavy-tailed (5 % of the points carry half of Σ miss², not concentrated at
+ * the dense points), so a flat floor that is right in rms over-covers the
+ * bulk. The page prints rms bands, which is the calibrated quantity.
+ *
+ * SCALE-SPECIFIC: at the gate's coarser layout (14 Mpc, R = 1.6 R_eff) the
+ * same pipeline's shortfall is R = 1.4–3.1 at every epoch. `measuredAt` is
+ * the configuration the numbers belong to and `methodBiasFor` returns null
+ * for any other, so a changed layout falls back to "a lower bound" until the
+ * twins are re-run.
+ */
+export const METHOD_BIAS = Object.freeze({
+    inside: Object.freeze([0, 0, 0]),
+    outside: Object.freeze([0, 0, 0.026]),
+    measuredAt: Object.freeze({
+        spacing: 12, radiusOverReff: 2.6, refineRadius: Infinity, aInit: 0.1, stepsToObs: 30,
+        ics: '2lpt', growthKappa: 3, forwardModel: true,
+    }),
+});
+
+/**
+ * The method bias for a reconstruction configuration, or null when the table
+ * was not measured at it (the page then says its spread is a lower bound).
+ */
+export function methodBiasFor(recon, rEff, table = METHOD_BIAS) {
+    const L = recon.layout(rEff), m = table.measuredAt;
+    const same = L.spacing === m.spacing && Math.abs(L.radius / rEff - m.radiusOverReff) < 1e-9
+        && L.refineRadius === m.refineRadius && recon.aInit === m.aInit && recon.stepsToObs === m.stepsToObs
+        && recon.ics === m.ics && recon.growthKappa === m.growthKappa && !!recon.forwardModel === m.forwardModel;
+    return same ? table : null;
+}
 
 /** Member k's two noise realisations (k = 1 … N). */
 export function memberSeeds(k, config = ENSEMBLE_CONFIG) {
@@ -144,35 +193,84 @@ export function fQuantile(q, d1, d2) {
  * 68 % threshold is that F's quantile (1.18 only as N → ∞; measured on
  * calibrated draws, the χ²₃ threshold read 63 % at N = 4).
  */
-export function calibration(fields, truth, regionOf) {
+export function calibration(fields, truth, regionOf, { bias = null } = {}) {
     const { N, mean, variance } = ensembleStats(fields);
-    const threshold = fQuantile(0.6827, 3, 3 * (N - 1));
     const regions = new Map();
     for (let i = 0; i < variance.length; i++) {
         const key = regionOf(i);
         if (key == null) continue;
-        if (!regions.has(key)) regions.set(key, { t: 0, single: 0, meanErr: 0, var: 0, cover: 0, n: 0 });
+        if (!regions.has(key)) regions.set(key, { t: 0, single: 0, meanErr: 0, var: 0, m2: 0, cover: 0, n: 0, pts: [] });
         const A = regions.get(key);
-        let tt = 0, me = 0, se = 0;
+        let tt = 0, me = 0, se = 0, mm = 0;
         for (let d = 0; d < 3; d++) {
             const T = truth[3 * i + d];
             tt += T * T;
+            mm += mean[3 * i + d] ** 2;
             me += (mean[3 * i + d] - T) ** 2;
             for (const f of fields) se += (f[3 * i + d] - T) ** 2 / N;
         }
-        A.t += tt; A.meanErr += me; A.single += se; A.var += variance[i]; A.n++;
-        if (me <= variance[i] * (1 + 1 / N) * threshold) A.cover++;
+        A.t += tt; A.meanErr += me; A.single += se; A.var += variance[i]; A.m2 += mm; A.n++;
+        A.pts.push(i, me);
     }
     const out = {};
     for (const [key, A] of regions) {
+        // The method-bias floor, flat within the region: β times the rms
+        // ensemble-mean field there (the normalisation spreadSummary prints).
+        const beta = bias?.[key] ?? 0;
+        const b2 = beta * beta * A.m2 / A.n;
+        const v2 = (A.var / A.n) * (1 + 1 / N);
+        // σ² is estimated from 3(N − 1) dof and β² is fixed, so the per-point
+        // statistic is F(3, ν) with ν from Welch–Satterthwaite (the known term
+        // only adds certainty: ν = 3(N − 1) at β = 0, → ∞ as β dominates).
+        const nu = Math.min(1e7, 3 * (N - 1) * ((v2 + b2) / v2) ** 2);
+        const threshold = fQuantile(0.6827, 3, nu);
+        for (let k = 0; k < A.pts.length; k += 2) {
+            const i = A.pts[k];
+            if (A.pts[k + 1] <= (variance[i] * (1 + 1 / N) + b2) * threshold) A.cover++;
+        }
         out[key] = {
             single: Math.sqrt(A.single / A.t),
             mean: Math.sqrt(A.meanErr / A.t),
             spread: Math.sqrt(A.var / A.t),
-            ratio: Math.sqrt(A.meanErr / (A.var * (1 + 1 / N))),
+            bias: beta,
+            ratio: Math.sqrt(A.meanErr / (A.var * (1 + 1 / N) + b2 * A.n)),
             coverage: A.cover / A.n,
             points: A.n,
         };
     }
     return out;
+}
+
+/**
+ * MEASURE the method bias on a planted twin: per region, the part of the
+ * mean's miss that the spread does not account for,
+ *   β² = max(0, Σ|x̄ − t|² − (1 + 1/N) Σ|σ|²) / Σ|x̄|²
+ * — the expected miss of the mean of N calibrated draws is σ²(1 + 1/N), and
+ * whatever is left over is common to every member. It is a fraction of the
+ * rms ensemble-mean field (the page's own normaliser, never the truth's, so
+ * it applies where no truth exists). Clamped at 0: a spread that already
+ * over-covers is not evidence of a negative bias.
+ */
+export function methodBias(fields, truth, regionOf) {
+    const { N, mean, variance } = ensembleStats(fields);
+    const acc = new Map();
+    for (let i = 0; i < variance.length; i++) {
+        const key = regionOf(i);
+        if (key == null) continue;
+        if (!acc.has(key)) acc.set(key, { me: 0, v: 0, m2: 0 });
+        const A = acc.get(key);
+        for (let d = 0; d < 3; d++) {
+            A.me += (mean[3 * i + d] - truth[3 * i + d]) ** 2;
+            A.m2 += mean[3 * i + d] ** 2;
+        }
+        A.v += variance[i];
+    }
+    const out = {};
+    for (const [key, A] of acc) out[key] = Math.sqrt(Math.max(0, A.me - (1 + 1 / N) * A.v) / A.m2);
+    return out;
+}
+
+/** The printed band: the discreteness spread and the method bias in quadrature. */
+export function totalUncertainty(spread, bias) {
+    return Math.hypot(spread, bias);
 }

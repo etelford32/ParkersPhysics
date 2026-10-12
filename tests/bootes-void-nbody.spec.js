@@ -290,7 +290,7 @@ test.describe('Boötes Void — N-body forecast', () => {
             () => document.querySelector('#bv-track-card')?.dataset.ens === 'ready',
             null, { timeout: 900_000 });
         await expect(page.locator('[data-bv="trackEns"]').first()).toContainText('2-member ensemble');
-        await expect(page.locator('[data-bv="trackEns"]').first()).toContainText('LOWER BOUND');
+        await expect(page.locator('[data-bv="trackEns"]').first()).toContainText('CALIBRATED');
         // The galaxy tracked after the reconstruction is replayed through each member too.
         await expect.poll(() => page.evaluate(() => {
             const lab = window.__bootesLab;
@@ -308,6 +308,10 @@ test.describe('Boötes Void — N-body forecast', () => {
         }));
         expect(ens.s.N).toBe(2);
         for (const v of [...ens.s.inside, ...ens.s.outside]) { expect(v).toBeGreaterThan(0); expect(v).toBeLessThan(1); }
+        // The printed band is the spread ⊕ the measured method bias, never below the spread.
+        for (const reg of ['inside', 'outside']) {
+            ens.s.total[reg].forEach((t, e) => expect(Math.abs(t - Math.hypot(ens.s[reg][e], ens.s.bias[reg][e]))).toBeLessThan(1e-12));
+        }
         // Two members × the tracked galaxies, each a real path.
         expect(ens.ghosts).toBe(2 * 2);
         for (const n of ens.pts) expect(n).toBeGreaterThan(5);

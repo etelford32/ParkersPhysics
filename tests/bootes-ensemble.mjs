@@ -11,6 +11,10 @@
  *      drawn from the truth's own distribution scores R ≈ 1 and ~68 %
  *      coverage; an UNDER-dispersed one (its draws halved — the negative
  *      control) scores R ≈ 2 and fails.
+ *   2b. THE METHOD-BIAS MODEL on draws with a planted bias common to every
+ *      member: recovered by the estimator, and spread ⊕ β calibrated on a
+ *      FRESH draw while the spread alone fails; the page's table is tied to
+ *      the configuration it was measured at.
  *   3. THE PIPELINE, end to end on a planted twin: N reconstructRun members,
  *      each with its own glass and its own draw of the target's grain, from
  *      the last frame of a known history. The ensemble MEAN must beat one
@@ -78,6 +82,65 @@ const ok = (name) => { console.log(`  ✓ ${name}`); passed++; };
     ok(`the calibration metric: draws from the truth's own distribution score R = ${good.ratio.toFixed(3)}, `
         + `coverage ${(100 * good.coverage).toFixed(1)} % (68 % is calibrated); the negative control with its draws halved `
         + `scores R = ${tight.ratio.toFixed(2)}, coverage ${(100 * tight.coverage).toFixed(0)} %`);
+}
+
+// ── 2b. The method-bias model ───────────────────────────────────────────────
+// A bias COMMON to every member (the method's resolution limit) is invisible
+// to the spread. Planted here on draws whose answer is known: the estimator
+// must recover it, and the spread plus the bias in quadrature must be
+// calibrated on a FRESH draw it was not measured on (R ≈ 1, ~68 % coverage),
+// while the spread alone (the negative control) must fail.
+{
+    const rng = mulberry32(29);
+    const gauss = () => { let u = 0; while (u === 0) u = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng()); };
+    const n = 20000, N = 4, sigma = 3, b = 4;
+    const twin = () => {
+        const mu = Float64Array.from({ length: 3 * n }, () => 10 * gauss());
+        // The member draws and the truth share mu; the truth also carries a
+        // per-point offset no member sees.
+        const truth = mu.map((v) => v + sigma * gauss() + b * gauss());
+        return { truth, fields: Array.from({ length: N }, () => mu.map((v) => v + sigma * gauss())) };
+    };
+    const A = twin(), B = twin();
+    const all = () => 'all';
+    const beta = EN.methodBias(A.fields, A.truth, all).all;
+    const rmsMean = Math.sqrt(EN.ensembleStats(A.fields).mean.reduce((s, v) => s + v * v, 0) / n);
+    const planted = Math.sqrt(3) * b / rmsMean;
+    const bare = EN.calibration(B.fields, B.truth, all).all;
+    const fixed = EN.calibration(B.fields, B.truth, all, { bias: { all: beta } }).all;
+    const zero = EN.calibration(B.fields, B.truth, all, { bias: { all: 0 } }).all;
+    const plain = EN.calibration(B.fields, B.truth, all);
+    // A calibrated ensemble has nothing left over (clamped, never negative).
+    const clean = (() => {
+        const mu = Float64Array.from({ length: 3 * n }, () => 10 * gauss());
+        const truth = mu.map((v) => v + sigma * gauss());
+        return EN.methodBias(Array.from({ length: N }, () => mu.map((v) => v + sigma * gauss())), truth, all).all;
+    })();
+    if (process.env.DEBUG) console.log({ beta, planted, bare, fixed, clean });
+    assert.ok(Math.abs(beta / planted - 1) < 0.06, `estimator: β ${beta} vs planted ${planted}`);
+    assert.ok(bare.ratio > 1.3 && bare.coverage < 0.55, `negative control (spread alone): ${JSON.stringify(bare)}`);
+    assert.ok(Math.abs(fixed.ratio - 1) < 0.04 && Math.abs(fixed.coverage - 0.6827) < 0.03, `held out: ${JSON.stringify(fixed)}`);
+    assert.ok(clean < 0.02 && zero.ratio === plain.all.ratio && zero.coverage === plain.all.coverage, `clean ${clean}`);
+    assert.ok(EN.totalUncertainty(0.03, 0.04) === Math.hypot(0.03, 0.04));
+    // The page's table: one β per region at the page's three epochs, measured, finite, never negative.
+    const MB = EN.METHOD_BIAS;
+    for (const reg of ['inside', 'outside']) {
+        assert.ok(MB[reg].length === 3 && MB[reg].every((v) => Number.isFinite(v) && v >= 0 && v < 0.5), `METHOD_BIAS.${reg}`);
+    }
+    // ...and it belongs to the page's CURRENT reconstruction: change the
+    // layout or the method and this fails until the twins are re-run (the
+    // page meanwhile falls back to "a lower bound").
+    const rE = effectiveRadiusMpc();
+    assert.ok(EN.methodBiasFor(RC.RECON_CONFIG, rE) === MB,
+        'METHOD_BIAS was measured at a different reconstruction configuration — re-run the page-scale twins (plan §4n)');
+    const coarser = { ...RC.RECON_CONFIG, layout: (r) => ({ ...RC.RECON_CONFIG.layout(r), spacing: 14 }) };
+    assert.ok(EN.methodBiasFor(coarser, rE) === null && EN.methodBiasFor({ ...RC.RECON_CONFIG, forwardModel: null }, rE) === null,
+        'a different layout or method must not inherit the table');
+    ok(`the method-bias model: a bias common to every member is recovered (β ${(100 * beta).toFixed(2)} vs planted `
+        + `${(100 * planted).toFixed(2)} % of the rms field); on a FRESH draw the spread alone scores R = ${bare.ratio.toFixed(2)}, `
+        + `coverage ${(100 * bare.coverage).toFixed(0)} % (the negative control) and the spread ⊕ β scores R = ${fixed.ratio.toFixed(3)}, `
+        + `coverage ${(100 * fixed.coverage).toFixed(1)} %; a calibrated ensemble measures β = ${(100 * clean).toFixed(2)} % and β = 0 changes nothing; `
+        + `the page's table belongs to its current reconstruction and a different layout or method inherits none`);
 }
 
 // ── 3. The pipeline on a planted twin ───────────────────────────────────────
@@ -166,7 +229,7 @@ const ok = (name) => { console.log(`  ✓ ${name}`); passed++; };
     const f = (s) => `R ${s.in.ratio.toFixed(2)} / ${s.out.ratio.toFixed(2)}, cover ${(100 * s.in.coverage).toFixed(0)} / ${(100 * s.out.coverage).toFixed(0)} %`;
     ok(`the pipeline on a planted twin: ${N} reconstructRun members, each with its own glass and its own draw of the target's `
         + `grain; the spread is a LOWER BOUND, the truth missing the mean by — z = 9 ${f(scores[0])}; z ≈ 4 ${f(scores[1])}; today ${f(scores[2])} `
-        + `(inside / outside R_eff; R = 1 is calibrated, gated inside the recorded band); the mean beats one member everywhere (z = 9: ${(100 * scores[0].in.single).toFixed(1)} → `
+        + `(inside / outside R_eff at the GATE’s coarser layout, where the page’s METHOD_BIAS does not apply; R = 1 is calibrated, gated inside the recorded band); the mean beats one member everywhere (z = 9: ${(100 * scores[0].in.single).toFixed(1)} → `
         + `${(100 * scores[0].in.mean).toFixed(1)} % inside, ${(100 * scores[0].out.single).toFixed(1)} → ${(100 * scores[0].out.mean).toFixed(1)} % outside)`);
 }
 

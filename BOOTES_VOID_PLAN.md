@@ -911,8 +911,73 @@ the card, the spread and one faint path per member per galaxy.
 
 Next, honestly: an error model for the METHOD bias (measured on twins at
 the page's scale, added in quadrature) so the printed band is calibrated
-rather than a lower bound — and, before any of it matters for science, a
-REAL density field in place of the model web (§6).
+rather than a lower bound — built in §4n — and, before any of it matters
+for science, a REAL density field in place of the model web (§6).
+
+### 4n. The method-bias error model — `METHOD_BIAS` / `methodBias`
+
+The ensemble's spread samples discreteness; a resolution-limited bias of the
+METHOD is common to every member and no resampling can see it. It is
+therefore MEASURED, on planted twins with a known truth, and added to the
+spread in quadrature.
+
+THE ESTIMATOR (`methodBias`, pure): the mean of N calibrated draws misses
+the truth by σ²(1 + 1/N), so whatever is left over is the bias,
+
+    β² = max(0, Σ|x̄ − t|² − (1 + 1/N) Σ|σ|²) / Σ|x̄|²
+
+per region, as a fraction of the rms ENSEMBLE-MEAN field — the page's own
+normaliser, never the truth's, so it applies where no truth exists. Clamped
+at 0: over-coverage is not evidence of a negative bias. `calibration` takes
+`{ bias }` and scores spread ⊕ β; its per-point coverage threshold is
+F(3, ν) with ν from Welch–Satterthwaite (σ² estimated on 3(N − 1) dof, β²
+fixed: ν = 3(N − 1) at β = 0 and → ∞ as β dominates).
+
+MEASURED at the page's layout (12 Mpc, 2.6 R_eff, 2LPT + κ 3 + the forward
+model), on TWO independent planted twins — different web realisations
+(seeds 20260907 / 20261012), different truth glasses (31 / 37), 4 RML
+members each, gravity at 1 200 tracers, regions inside / outside R_eff, the
+page's epochs z = 9 / z ≈ 4 / today:
+
+| | twin A β | twin B β | spread alone R (A / B) |
+|---|---|---|---|
+| z = 9 in / out | 0 / 0 | 0 / 0 | 0.87 / 0.90, 0.88 / 0.84 |
+| z ≈ 4 in / out | 0 / 0 | 0 / 0 | 0.87 / 0.91, 0.99 / 0.94 |
+| today in / out | 0 / 2.71 % | 0 / 2.41 % | 0.95 / 0.87, 1.46 / 1.39 |
+
+So at the page's scale the spread is ALREADY calibrated (slightly
+conservative) in the past, and the only measurable method bias is today
+outside R_eff. CROSS-VALIDATED — each twin's β applied to the OTHER twin:
+today outside R 1.46 → 1.06 (A with B's β) and 1.39 → 0.94 (B with A's β).
+The shipped table pools the two (rms, 2.6 %). The §4m "LOWER BOUND" came
+from the GATE-scale twin (14 Mpc, 1.6 R_eff, R 1.4–3.1): the bias is
+scale-specific, which is why the table carries `measuredAt` and
+`methodBiasFor` returns null for any other configuration — the page then
+prints the spread as a lower bound again, and the gate fails until the twins
+are re-run.
+
+WHAT THE CORRECTION IS NOT: per-point coverage after it is 83–87 %, not
+68 %. The misses today outside R_eff are HEAVY-TAILED — miss²/σ² quantiles
+0.87 (median, as calibrated) / 1.60 (68 %) / 4.2 (90 %) / 15.5 (99 %), the
+top 5 % of points carry half of Σ miss² — and the tail is NOT at the dense
+points (by truth-density quartile R = 1.44 / 1.14 / 1.59 / 1.64). A flat
+floor that is right in rms therefore over-covers the bulk and under-covers
+the tail. The page prints rms bands, which is the calibrated quantity; a
+per-point interval would need a tail model, and this is not one.
+
+ON THE PAGE: the ensemble card prints spread ⊕ β with "CALIBRATED in rms on
+the held-out twin (0.84–1.06)", names β, and keeps the N-member uncertainty
+and the model-error disclaimer (the profile, the web and b ± 20 % are not in
+it).
+
+GATES: `tests/bootes-ensemble.mjs` check 2b — a planted common bias is
+recovered (39.84 vs 39.78 %), the spread alone fails on a FRESH draw
+(R 1.56, coverage 34 %: the negative control) and spread ⊕ β passes there
+(R 0.994, coverage 68.9 %), a calibrated ensemble measures β ≈ 0 and β = 0
+changes nothing, and the table belongs to `RECON_CONFIG` (a coarser layout
+or no forward model inherits none). The page-scale twins (~4 min a member)
+are scratch runs, not in the gate; their numbers are recorded here. The
+browser gate checks total = hypot(spread, β) and the CALIBRATED card.
 
 ---
 

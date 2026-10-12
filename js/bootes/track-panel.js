@@ -312,11 +312,13 @@ export function createTrackPanel({
     }
 
     /**
-     * The posterior ensemble (js/bootes-ensemble.js, plan §4m). Its spread is
-     * the DISCRETENESS part of the uncertainty only — a lower bound, which the
-     * planted twin measured as 0.9–1.3× short at this scale (the method's
+     * The posterior ensemble (js/bootes-ensemble.js, plan §4m–§4n). Its
+     * spread is the DISCRETENESS part of the uncertainty; the method's
      * resolution-limited bias is common to every member and no resampling
-     * can see it). The text says both.
+     * can see it, so it is MEASURED on planted twins at this configuration
+     * and added in quadrature (`summary.total`). If the configuration is not
+     * the one the twins measured, `total` is null and the spread is printed
+     * as the lower bound it then is. The text says which.
      */
     function ensStatus() {
         const e = runner.ens;
@@ -333,13 +335,26 @@ export function createTrackPanel({
         if (e.status === 'ready' && e.summary) {
             const s = e.summary;
             const pc = (v) => `±${num(100 * v, 1)} %`;
+            const tail = ` With ${s.N} members the spread is itself uncertain by ±${num(100 / Math.sqrt(2 * (s.N - 1)), 0)} %; `
+                + `model error (the void profile, the web, the tracer bias — the b ± 20 % band) is not in it. The faint `
+                + `paths on the stage are the members; the drawn run is the main reconstruction.`;
+            if (s.total) {
+                const t = s.total, b = s.bias;
+                const biasNote = [...b.inside, ...b.outside].some((v) => v > 0)
+                    ? `the method bias (${pc(b.outside[2])} today outside R_eff; none measurable elsewhere)`
+                    : 'the method bias (none measurable)';
+                return `Uncertainty from a ${s.N}-member ensemble (randomised maximum likelihood: each member redraws the `
+                    + `discreteness noise) plus ${biasNote}, measured on two independent planted twins at this layout and `
+                    + `added in quadrature: the reconstructed gravity is known to ${pc(t.inside[0])} at z = 9, `
+                    + `${pc(t.inside[1])} at z ≈ 4 and ${pc(t.inside[2])} today inside R_eff (${pc(t.outside[0])} / `
+                    + `${pc(t.outside[1])} / ${pc(t.outside[2])} outside). CALIBRATED in rms on the held-out twin `
+                    + `(truth-miss / band 0.84–1.06; 1 is calibrated).${tail}`;
+            }
             return `Uncertainty from a ${s.N}-member ensemble (randomised maximum likelihood: each member redraws the `
                 + `discreteness noise): the reconstructed gravity is known to ${pc(s.inside[0])} at z = 9, ${pc(s.inside[1])} `
                 + `at z ≈ 4 and ${pc(s.inside[2])} today inside R_eff (${pc(s.outside[0])} / ${pc(s.outside[1])} / `
-                + `${pc(s.outside[2])} outside). A LOWER BOUND: on a planted twin at this scale the truth missed by 0.9–1.3× `
-                + `this spread — the method's own resolution limit is common to every member and is not sampled. With `
-                + `${s.N} members the spread is itself uncertain by ±${num(100 / Math.sqrt(2 * (s.N - 1)), 0)} %. The faint `
-                + `paths on the stage are the members; the drawn run is the main reconstruction.`;
+                + `${pc(s.outside[2])} outside). A LOWER BOUND: the method bias was not measured at this reconstruction's `
+                + `configuration, and it is common to every member, so no resampling sees it.${tail}`;
         }
         return `Uncertainty: not estimated — ${ENSEMBLE_MEMBERS} more reconstructions in parallel Workers (~5–10 min).`;
     }

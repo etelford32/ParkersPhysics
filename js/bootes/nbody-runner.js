@@ -39,7 +39,7 @@ import {
     relaxTables, createRelaxer,
 } from '../bootes-nbody.js';
 import { RECON_CONFIG, NODE_RADIUS_MPC } from '../bootes-reconstruct.js';
-import { ENSEMBLE_CONFIG, memberSeeds, spreadSummary } from '../bootes-ensemble.js';
+import { ENSEMBLE_CONFIG, memberSeeds, spreadSummary, methodBiasFor, totalUncertainty } from '../bootes-ensemble.js';
 import { toKmsPerGyr } from '../bootes-force-probe.js';
 
 /**
@@ -97,7 +97,7 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         total: 0,
         members: [],            // per member: { stage, done, total, result, recs } (null result while running)
         workers: [],
-        summary: null,          // { N, a: [3 epochs], inside: [...], outside: [...] }
+        summary: null,          // { N, a: [3 epochs], inside, outside (spread), bias, total (spread ⊕ bias, or null) }
         error: null,
     };
 
@@ -274,9 +274,18 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
                 const nT = st.nTracers;
                 const pts = rc.args.testPoints.subarray(0, 3 * nT);
                 const per = [0, 1, 2].map((e) => spreadSummary(ens.members.map((x) => x.result.past.fields[e].subarray(0, 3 * nT)), pts, rEff));
+                // The method bias (plan §4n) measured on planted twins at THIS
+                // configuration, or null — then the spread stands alone and is
+                // labelled a lower bound.
+                const mb = methodBiasFor(RECON_CONFIG, rEff);
+                const inside = per.map((p) => p.inside), outside = per.map((p) => p.outside);
                 ens.summary = {
-                    N: ens.members.length, a: ens.members[0].result.past.a,
-                    inside: per.map((p) => p.inside), outside: per.map((p) => p.outside),
+                    N: ens.members.length, a: ens.members[0].result.past.a, inside, outside,
+                    bias: mb && { inside: [...mb.inside], outside: [...mb.outside] },
+                    total: mb && {
+                        inside: inside.map((v, e) => totalUncertainty(v, mb.inside[e])),
+                        outside: outside.map((v, e) => totalUncertainty(v, mb.outside[e])),
+                    },
                 };
                 ens.status = 'ready';
             }
