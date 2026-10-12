@@ -50,6 +50,8 @@ import {
     losUnitFromVoid, resolvedAnchors,
 } from '../bootes-void-data.js';
 import { createBootesScene } from './scene.js';
+import { createProbePanel } from './probe-panel.js';
+import { createTrackPanel } from './track-panel.js';
 import { VIEWPOINTS, VIEWPOINT_IDS, KEY_BINDINGS, scaleBar } from './camera-math.js';
 import {
     drawDensity, drawVelocity, drawContinuity, drawInfluence,
@@ -156,6 +158,46 @@ export function initBootesPage(root = document) {
     }) : null;
     if (!scene && fallback) fallback.hidden = false;
 
+    // The force probe. It reads the SAME `derived` the rest of the page paints
+    // from (one recompute, one source of truth) and writes through the same
+    // `set`, so its keys are covered by the data-bv gate like every other
+    // readout. It works without WebGL too — the readouts and the ray chart
+    // need no stage; only Shift-drag does.
+    const probePanel = createProbePanel({
+        root, set, scene, charts, getDerived: () => derived,
+        rEff, z: Z, anchors, losUnit,
+    });
+
+    // The galaxy tracker: the void's galaxies — and the stars and nebulae they
+    // carry — through cosmic time, in linear theory. Same `derived`, same
+    // `set`. Arming its pick tool disarms the probe's (whose capture-phase
+    // listener would otherwise swallow the tap), and vice versa.
+    // The galaxy tracker's ±20 % bias band needs the WHOLE model at another
+    // bias — profile AND web (the web's mass is the profile's wall) — with the
+    // same seed and clumpiness, so the band is the bias systematic and nothing
+    // else. Cached per (preset, bias, seed, clumpiness); a recompute clears it.
+    const variantCache = new Map();
+    function getVariant(bias) {
+        const key = `${state.preset}|${bias.toFixed(4)}|${state.seed}|${state.clumpiness}`;
+        if (!variantCache.has(key)) {
+            if (variantCache.size > 8) variantCache.clear();
+            const profile = buildProfile(bias);
+            const web = createCosmicWeb({
+                voidProfile: profile, anchors, seed: state.seed, clumpiness: state.clumpiness, z: Z,
+            });
+            variantCache.set(key, { profile, web });
+        }
+        return variantCache.get(key);
+    }
+
+    const trackPanel = createTrackPanel({
+        root, set, scene, charts, getDerived: () => derived, rEff, z: Z,
+        getVariant, getBias: () => state.bias,
+        getProbePosition: () => probePanel.state.positionMpc,
+        onArmPick: () => probePanel.setArmed(false),
+    });
+    root.querySelector('#bv-probe-tool')?.addEventListener('click', () => trackPanel.setPickArmed(false));
+
     // ── Viewpoint buttons, rendered FROM the viewpoint table ────────────────
     //
     // Generated rather than written into the markup so the buttons, the
@@ -239,9 +281,9 @@ export function initBootesPage(root = document) {
     let derived = null;
     let pending = null;
 
-    function buildProfile() {
+    function buildProfile(bias = state.bias) {
         const preset = PROFILE_PRESETS[state.preset] ?? PROFILE_PRESETS['hsw-supervoid'];
-        const deltaC = matterContrastFromGalaxy(preset.centralGalaxyContrast, state.bias);
+        const deltaC = matterContrastFromGalaxy(preset.centralGalaxyContrast, bias);
         return createVoidProfile({
             deltaC,
             rvMpc: rEff,
@@ -272,6 +314,8 @@ export function initBootesPage(root = document) {
         paintReadouts();
         paintCharts();
         paintScene();
+        probePanel.refresh();
+        trackPanel.refresh();
     }
 
     // ── Readouts ────────────────────────────────────────────────────────────
@@ -551,6 +595,9 @@ export function initBootesPage(root = document) {
         set('fieldMax', shown);
 
         for (const [name, on] of Object.entries(state.layers)) scene.setLayerVisible(name, on);
+        // A tracker that had moved the field to another epoch has just had it
+        // put back at z_obs underneath it.
+        trackPanel?.onScenePainted();
     }
 
     // ── Control wiring ──────────────────────────────────────────────────────
@@ -632,11 +679,15 @@ export function initBootesPage(root = document) {
 
     const onResize = () => {
         scene?.resize();
-        if (derived) paintCharts();
+        if (derived) { paintCharts(); probePanel.paintChart(); trackPanel.paintCharts(); }
     };
     globalThis.addEventListener('resize', onResize);
 
     recompute();
+    // Paint the probe in the same task as the first recompute, so the card
+    // never boots on its em-dashes waiting for an animation frame (and a
+    // backgrounded tab, which gets no frames, still shows numbers).
+    probePanel.evaluateNow();
     // Snap, do not fly, on boot: a flight from the constructor's placeholder
     // pose is a camera move nobody asked for and it fights a reader who starts
     // dragging immediately.
@@ -652,6 +703,8 @@ export function initBootesPage(root = document) {
         // camera that moved from a label that happened to change.
         get scene() { return scene; },
         get derived() { return derived; },
+        get probe() { return probePanel; },
+        get tracker() { return trackPanel; },
         recompute,
         setControl(key, value) {
             if (key in state) state[key] = value;

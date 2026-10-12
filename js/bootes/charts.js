@@ -489,3 +489,115 @@ export function drawCompensation(canvas, { radii, cumulativeMass, rEff, rs }) {
     ctx.fillText(`residual ${residual.toFixed(1)}`, proj.px(radii[radii.length - 1]) - 4,
         proj.py(residual) - 3);
 }
+
+/**
+ * The force probe's own ray: the RADIAL part of each force term along the line
+ * from the void centre through the probe, positive = away from the centre.
+ *
+ * Test 4's influence chart is a MEDIAN over 48 directions; this is the one
+ * direction the reader picked, so the two can be laid side by side and the
+ * anisotropy that the median hides is right there. The probe's own radius is
+ * marked so the readout table and the curve can be matched by eye.
+ */
+export function drawProbeRay(canvas, { sweep, rEff, probeR }) {
+    const { ctx, w, h } = prepare(canvas);
+    if (!sweep?.length) return;
+    const xs = sweep.map(s => s.radiusMpc);
+    const [lo, hi] = rangeOf(sweep.flatMap(s => [s.void, s.web, s.A]), { includeZero: true });
+    const proj = frame(ctx, w, h, {
+        xMin: 0, xMax: xs[xs.length - 1], yMin: lo, yMax: hi,
+        xLabel: 'r along the probe ray  (Mpc)', yLabel: 'radial g  (km/s/Gyr, + out)',
+        markX: [
+            { x: rEff, label: 'R_eff', color: PALETTE.faint },
+            { x: probeR, label: 'probe', color: 'rgba(255,255,255,.55)' },
+        ],
+    });
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.wall]), PALETTE.wall, { width: 1.1, dash: [3, 3] });
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.void]), PALETTE.void);
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.web]), PALETTE.wall);
+    series(ctx, proj, sweep.map(s => [s.radiusMpc, s.A]), PALETTE.total, { width: 2.2 });
+    legend(ctx, w, [
+        ['void', PALETTE.void], ['web', PALETTE.wall], ['smooth wall', PALETTE.wall, [3, 3]],
+        ['A = void + web', PALETTE.total],
+    ]);
+}
+
+/**
+ * The galaxy tracker's small multiples: one quantity against COSMIC TIME, one
+ * line per tracked galaxy in that galaxy's own colour, a crosshair at the
+ * scrubbed instant, and the epochs that matter marked (when the light we see
+ * left Boötes, and today). Three of these share one x-range so a crosshair
+ * means the same instant in all of them — never a dual axis.
+ *
+ * `includeZero` is per chart: |g| and speed are drawn from zero so a fall
+ * reads as a fall, distance from the centre is not (zero there is the void's
+ * centre, which no tracked galaxy approaches).
+ */
+export function drawTrackSeries(canvas, {
+    series, tMin, tMax, cursorT = null, marks = [], yLabel, includeZero = true,
+}) {
+    const { ctx, w, h } = prepare(canvas);
+    const all = series.flatMap(s => [
+        ...s.points.map(p => p[1]),
+        ...(s.band ?? []).flatMap(b => [b[1], b[2]]),
+        ...(s.ghost ?? []).map(p => p[1]),
+    ]);
+    if (!all.length) return;
+    const [lo, hi] = rangeOf(all, { includeZero });
+    const proj = frame(ctx, w, h, {
+        xMin: tMin, xMax: tMax, yMin: lo, yMax: hi,
+        xLabel: 'cosmic time  (Gyr)', yLabel,
+        markX: marks,
+    });
+    // Bands first (under everything), then the ghosted linear references,
+    // then the lines themselves.
+    for (const s of series) {
+        if (s.band) band(ctx, proj, s.band, hexAlpha(s.color, 0.16));
+    }
+    for (const s of series) {
+        if (s.ghost) drawLine(ctx, proj, s.ghost, hexAlpha(s.color, 0.55), { width: 1.1, dash: [4, 3] });
+    }
+    for (const s of series) series_(ctx, proj, s);
+    if (cursorT != null && cursorT >= tMin && cursorT <= tMax) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,.55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(proj.px(cursorT), proj.padT);
+        ctx.lineTo(proj.px(cursorT), h - proj.padB);
+        ctx.stroke();
+        // Dots where the crosshair meets each line.
+        for (const s of series) {
+            const y = interpAt(s.points, cursorT);
+            if (y == null) continue;
+            ctx.fillStyle = s.color;
+            ctx.beginPath(); ctx.arc(proj.px(cursorT), proj.py(y), 3, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+// `series` is shadowed by drawTrackSeries' own parameter of that name, so the
+// module-level helper is reached through these two names inside it.
+function drawLine(ctx, proj, points, color, opts) {
+    series(ctx, proj, points, color, opts);
+}
+
+function series_(ctx, proj, s) {
+    series(ctx, proj, s.points, s.color, { width: 1.8 });
+}
+
+function interpAt(points, x) {
+    for (let i = 1; i < points.length; i++) {
+        const [x0, y0] = points[i - 1];
+        const [x1, y1] = points[i];
+        if (x >= x0 && x <= x1) return y0 + (y1 - y0) * (x - x0) / ((x1 - x0) || 1);
+    }
+    return null;
+}
+
+/** '#rrggbb' + alpha → rgba(). */
+function hexAlpha(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
