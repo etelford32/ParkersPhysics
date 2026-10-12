@@ -35,7 +35,12 @@ import { fileURLToPath } from 'node:url';
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 const html = read('../bootes-void.html');
-const page = read('../js/bootes/page.js');
+// The probe panel writes through page.js's own `set` and draws its own chart,
+// so for the data-bv / chart contract it IS part of the page module.
+const probePanel = read('../js/bootes/probe-panel.js');
+const trackPanel = read('../js/bootes/track-panel.js');
+const pageOnly = read('../js/bootes/page.js');
+const page = pageOnly + '\n' + probePanel + '\n' + trackPanel;
 const charts = read('../js/bootes/charts.js');
 
 let passed = 0;
@@ -96,16 +101,75 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
                 'layer toggles need the layer: branch in page.js');
             continue;
         }
-        assert.ok(new RegExp(`key === '${key}'`).test(page),
+        assert.ok(new RegExp(`key === '${key}'`).test(pageOnly),
             `control "${key}" is declared in the markup but page.js has no branch for it`);
     }
     // And every branch in page.js corresponds to a control that exists.
-    const handled = matchAll(page, /key === '([a-zA-Z0-9_]+)'/g);
+    const handled = matchAll(pageOnly, /key === '([a-zA-Z0-9_]+)'/g);
     for (const key of handled) {
         assert.ok(declared.includes(key),
             `page.js handles a control "${key}" that the markup never declares`);
     }
     ok(`controls agree in both directions (${declared.length} controls)`);
+}
+
+// ── 3b. Probe controls ──────────────────────────────────────────────────────
+{
+    // The force probe's inputs are `data-bv-probe`, handled by
+    // js/bootes/probe-panel.js — same both-directions contract as above, so a
+    // slider that drives nothing (or a branch for a slider that was removed)
+    // fails here instead of silently doing nothing in the browser.
+    const declared = matchAll(html, /data-bv-probe="([a-zA-Z0-9_]+)"/g);
+    assert.ok(declared.length >= 7, `expected the probe's control set (found ${declared.length})`);
+    for (const key of declared) {
+        assert.ok(new RegExp(`key === '${key}'`).test(probePanel),
+            `probe control "${key}" is in the markup but probe-panel.js has no branch for it`);
+    }
+    for (const key of matchAll(probePanel, /key === '([a-zA-Z0-9_]+)'/g)) {
+        assert.ok(declared.includes(key),
+            `probe-panel.js handles a control "${key}" that the markup never declares`);
+    }
+    assert.ok(/id="bv-probe-tool"/.test(html) && /#bv-probe-tool\[hidden\]\s*\{[^}]*display\s*:\s*none/.test(html),
+        'the probe tool button exists and, being hidden without WebGL while carrying an author '
+        + 'display, needs its own [hidden] rule');
+    ok(`probe controls agree in both directions (${declared.length} controls)`);
+}
+
+// ── 3c. Galaxy-tracker controls ─────────────────────────────────────────────
+{
+    const declared = matchAll(html, /data-bv-track="([a-zA-Z0-9_]+)"/g);
+    assert.ok(declared.length >= 3, `expected the tracker's control set (found ${declared.length})`);
+    for (const key of declared) {
+        assert.ok(new RegExp(`key === '${key}'`).test(trackPanel),
+            `tracker control "${key}" is in the markup but track-panel.js has no branch for it`);
+    }
+    for (const key of matchAll(trackPanel, /key === '([a-zA-Z0-9_]+)'/g)) {
+        assert.ok(declared.includes(key),
+            `track-panel.js handles a control "${key}" that the markup never declares`);
+    }
+    for (const id of ['bv-track-play', 'bv-track-obs', 'bv-track-now', 'bv-track-add-deep',
+        'bv-track-add-random', 'bv-track-add-probe', 'bv-track-pick', 'bv-track-clear', 'bv-track-rows',
+        'bv-track-recon']) {
+        assert.ok(html.includes(`id="${id}"`), `#${id} is missing from the markup`);
+        assert.ok(trackPanel.includes(`#${id}`), `#${id} is in the markup but track-panel.js never wires it`);
+    }
+    assert.ok(/#bv-track-pick\[hidden\]\s*\{[^}]*display\s*:\s*none/.test(html),
+        '#bv-track-pick is hidden without WebGL and needs its own [hidden] rule');
+    ok(`tracker controls agree in both directions (${declared.length} controls + 10 ids)`);
+
+    // The N-body mode: offered in the markup, handled by the panel, and the
+    // accretion label's radius is the runner's own constant (typed twice —
+    // once in prose — so this pins the prose to the number).
+    const runner = read('../js/bootes/nbody-runner.js');
+    assert.ok(/<option value="nbody"/.test(html), 'the Dynamics select must offer the N-body forecast');
+    assert.ok(/state\.mode === 'nbody'/.test(trackPanel), "track-panel.js must handle mode 'nbody'");
+    const recon = read('../js/bootes-reconstruct.js');
+    assert.ok(/ACCRETION_RADIUS_MPC = NODE_RADIUS_MPC/.test(runner),
+        'the forecast and the reconstruction must share ONE node radius');
+    const radius = recon.match(/NODE_RADIUS_MPC = (\d+)/)?.[1];
+    assert.ok(radius && html.includes(`≤ ${radius} Mpc of nodes`),
+        `the accretion label must quote ACCRETION_RADIUS_MPC (${radius} Mpc)`);
+    ok(`the N-body forecast is offered, handled, and its ${radius} Mpc label matches the runner`);
 }
 
 // ── 4. Charts ───────────────────────────────────────────────────────────────
@@ -170,12 +234,14 @@ const matchAll = (src, re) => uniq([...src.matchAll(re)].map(m => m[1]));
 // ── 7. No stray physics in the view layer ───────────────────────────────────
 {
     const scene = read('../js/bootes/scene.js');
+    const probeLayer = read('../js/bootes/probe-layer.js');
+    const trackLayer = read('../js/bootes/track-layer.js');
     // Match IMPORT STATEMENTS, not mentions. Both files name the kernels in
     // their headers to say what they deliberately do not do, and a naive
     // substring search fails on the very comment that documents the rule.
     const imports = (src) => [...src.matchAll(/^\s*import[\s\S]*?from\s+['"]([^'"]+)['"]/gm)]
         .map(m => m[1]);
-    for (const [file, src] of [['scene.js', scene], ['charts.js', charts]]) {
+    for (const [file, src] of [['scene.js', scene], ['charts.js', charts], ['probe-layer.js', probeLayer], ['track-layer.js', trackLayer]]) {
         for (const spec of imports(src)) {
             assert.ok(!/bootes-(void|web)-model/.test(spec),
                 `js/bootes/${file} must not import a physics kernel (found "${spec}") — `
