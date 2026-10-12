@@ -547,12 +547,15 @@ export function shootGalaxies({
 export function reconstructRun({
     observed, config, testPoints, aObs, aEnd, nodeMarkers = null, cosmo = COSMOLOGY,
     sim = { theta: DEFAULT_THETA, leafSize: DEFAULT_LEAF }, recon = RECON_CONFIG, onProgress = null,
-    targetNoise = null,
+    targetNoise = null, member = null,
 }) {
     const t0 = Date.now();
+    // An ensemble MEMBER (js/bootes-ensemble.js, plan §4m) redraws both noise
+    // sources: its own glass (the elements' grain) and, in the forward
+    // model, a fresh realisation of the target's grain added to the data.
     const glass = buildGlass({
         radius: config.radius, spacing: config.spacing, refineRadius: config.refineRadius,
-        seed: recon.seed, iterations: recon.glassIterations,
+        seed: member?.glassSeed ?? recon.seed, iterations: recon.glassIterations,
         ...(recon.glassRates ? { rates: recon.glassRates } : { rate: recon.rate }), cosmo, ...sim,
         onProgress: (d, t) => onProgress?.('glass', d, t),
     });
@@ -595,7 +598,7 @@ export function reconstructRun({
         }
         if (recon.forwardModel) {
             ({ s1, s2f, fit } = fitForwardModel({
-                glass, match, s1, aObs, recon, cosmo, sim, targetNoise,
+                glass, match, s1, aObs, recon, cosmo, sim, targetNoise, noiseSeed: member?.noiseSeed ?? null,
                 onProgress: (d, t) => onProgress?.('refine', d, t),
             }));
         }
@@ -623,6 +626,16 @@ export function reconstructRun({
         match, elements: snapshots[schedule.obsFrame], mass: glass.mass, softening: glass.softening,
         radius: glass.radius, points: testPoints, cosmo, ...sim,
     });
+    // The run's gravity at the test points at three epochs (z = 9, the frame
+    // nearest a = 0.2, today) — what an ensemble compares (plan §4m).
+    const pastFrames = [0, nearestFrame(schedule.a, 0.2), schedule.obsFrame];
+    const past = {
+        a: pastFrames.map((f) => schedule.a[f]),
+        fields: pastFrames.map((f) => fieldAtPoints({
+            sources: [{ pos: snapshots[f], mass: glass.mass, softening: glass.softening }],
+            radius: glass.radius, points: testPoints, meanSoftening: glass.softening, cosmo, ...sim,
+        })),
+    };
     let disp = 0;
     for (let k = 0; k < psi.length; k++) disp += psi[k] * psi[k];
     // The galaxies.
@@ -644,9 +657,10 @@ export function reconstructRun({
         testPos, rec: { ...gal.rec, split: false }, nRec: nTest, accreted: markers,
         snapshots, schedule, mass: glass.mass, group, nMassive: n,
         softening: [glass.softening, glass.softening], background,
-        matched: match.X, psi: galaxyPsi, spacing: glass.spacing,
+        matched: match.X, psi: galaxyPsi, spacing: glass.spacing, past,
         diagnostics: {
             elements: n,
+            member: member ? { ...member } : null,
             aInit: recon.aInit,
             glassResidualMpc: glass.residual,
             matchResidualMpc: match.history[match.history.length - 1],
@@ -658,7 +672,7 @@ export function reconstructRun({
             growthCorrectionRmsMpc: lpt ? lpt.growthCorrectionRmsMpc : 0,
             forwardModel: fit ? {
                 iterations: fit.history.length - 1, history: fit.history, stoppedBy: fit.stoppedBy,
-                noise: fit.noise, noiseParts: fit.noiseParts, chi2: fit.chi2,
+                noise: fit.noise, noiseParts: fit.noiseParts, noiseDraw: fit.noiseDraw, chi2: fit.chi2,
                 misfitBefore: fit.history[0].misfit, misfitAfter: fit.history[fit.history.length - 1].misfit,
             } : null,
             fieldError: field.overall,
@@ -677,7 +691,7 @@ export function reconstructRun({
  * planted twin is within 3 % of the measured difference of the two grains),
  * then `forwardModelFit`.
  */
-function fitForwardModel({ glass, match, s1, aObs, recon, cosmo, sim, targetNoise, onProgress }) {
+function fitForwardModel({ glass, match, s1, aObs, recon, cosmo, sim, targetNoise, noiseSeed = null, onProgress }) {
     const fm = recon.forwardModel;
     const points = dataPoints({ radius: glass.radius, n: fm.points, seed: fm.pointSeed });
     const obs = match.observed;
@@ -694,10 +708,34 @@ function fitForwardModel({ glass, match, s1, aObs, recon, cosmo, sim, targetNois
     }));
     const target = targetNoise ?? grain;
     const noise = Math.hypot(grain, target);
+    // An ensemble member's data: + one realisation of the target's grain —
+    // the field of another bare glass, scaled to σ_target.
+    let draw = 0;
+    if (noiseSeed != null) {
+        const other = buildGlass({
+            radius: glass.radius, spacing: glass.spacing, refineRadius: Infinity, seed: noiseSeed,
+            iterations: recon.glassIterations,
+            ...(recon.glassRates ? { rates: recon.glassRates } : { rate: recon.rate }), cosmo, ...sim,
+        });
+        const e = fieldAtPoints({
+            sources: [{ pos: other.pos, mass: other.mass, softening: other.softening }],
+            radius: glass.radius, points, meanSoftening: other.softening, cosmo, ...sim,
+        });
+        const scale = target / rmsVector(e);
+        for (let k = 0; k < field.length; k++) field[k] += scale * e[k];
+        draw = target;
+    }
     const fit = forwardModelFit({
         glass, s1, aInit: recon.aInit, aObs, data: { points, field }, noise, config: fm, cosmo, sim, onProgress,
     });
-    return { s1: fit.s1, s2f: fit.s2, fit: { ...fit, noiseParts: { elements: grain, target } } };
+    return { s1: fit.s1, s2f: fit.s2, fit: { ...fit, noiseParts: { elements: grain, target }, noiseDraw: draw } };
+}
+
+/** Index of the frame whose a is nearest `a`. */
+function nearestFrame(as, a) {
+    let best = 0;
+    for (let f = 1; f < as.length; f++) if (Math.abs(as[f] - a) < Math.abs(as[best] - a)) best = f;
+    return best;
 }
 
 /** Rows [from, from+count) of every frame of a frame-major 3-vector array. */

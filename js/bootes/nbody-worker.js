@@ -102,7 +102,7 @@ self.onmessage = (e) => {
             const result = {
                 frames: out.frames, nTest: out.nTest, N: out.N, a: out.a, obsFrame: out.obsFrame,
                 testPos: out.testPos, rec: out.rec, nRec: out.nRec, accreted: out.accreted,
-                diagnostics: out.diagnostics,
+                diagnostics: out.diagnostics, past: out.past,
             };
             self.postMessage({ type: 'recon-done', id: m.id, result }, transferablesOf(result));
         } else if (m.type === 'recon-replay') {
