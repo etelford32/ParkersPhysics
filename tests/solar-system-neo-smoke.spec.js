@@ -72,7 +72,7 @@ function flybyElements(des, ld, nowJd) {
     return [des, null, 24.0, 'APO', 1, 0, r, null, i, ((lon - 90) % 360 + 360) % 360, 0, 90, null, nowJd, 0.001, null];
 }
 
-function catalogBody(nowJd) {
+function catalogBody(nowJd, extraAsteroidRows = []) {
     const fields = ['pdes', 'full_name', 'H', 'class', 'neo', 'pha', 'e', 'a', 'q', 'i', 'om', 'w', 'ma', 'tp', 'epoch', 'moid', 'diameter'];
     const EPOCH = 2461000.5;
     const asteroidRows = [
@@ -85,6 +85,7 @@ function catalogBody(nowJd) {
         (() => { const f = flybyElements('FLYBY-3LD', 3, nowJd); return [f[0], '(FLYBY-3LD)', String(f[2]), f[3], 'Y', 'N', '0', String(f[6]), null, String(f[8]), String(f[9]), '0', '90', null, String(f[13]), '.001', null]; })(),
         (() => { const f = flybyElements('FLYBY-30LD', 30, nowJd); return [f[0], '(FLYBY-30LD)', String(f[2]), f[3], 'Y', 'N', '0', String(f[6]), null, String(f[8]), String(f[9]), '0', '90', null, String(f[13]), '.05', null]; })(),
     ];
+    asteroidRows.push(...extraAsteroidRows);
     const cometRows = [
         ['109P', '109P/Swift-Tuttle', null, 'HTC', 'Y', 'N', '.9632', '26.09', '.9595', '113.45', '139.38', '152.98', '5.1', null, String(EPOCH), '.0009', '26'],
         // 2P/Encke at perihelion AT TEST TIME (epoch = now, M = 0): r = 0.34 AU ⇒ active, with tails.
@@ -278,7 +279,11 @@ test.describe('solar-system.html — near-Earth objects', () => {
         // Inside the fade band the heliocentric instance is off; outside it is on.
         expect(s.helioAlpha3).toBe(0);
         expect(s.helioAlpha30).toBeGreaterThan(0.3);   // H 24 ⇒ a faint sprite, but ON
-        expect(s.labels.some(k => k.startsWith('local:'))).toBe(true);
+        // Object labels are OFF by default (hover names, click selects + labels);
+        // the panel toggle brings the nearest few back.
+        expect(s.labels.some(k => k.startsWith('local:'))).toBe(false);
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ labels: true }));
+        await page.waitForFunction(() => [...window.__neoLab.layer._labels.keys()].some(k => k.startsWith('local:')), null, { timeout: 15_000 });
         expect(s.hudClosest).toContain('FLYBY-3LD');
         expect(s.closestBox).toContain('FLYBY-3LD');
         expect(s.ringNames).toEqual(['neo-ring-1ld', 'neo-ring-5ld', 'neo-ring-10ld', 'neo-ring-20ld']);
@@ -332,10 +337,17 @@ test.describe('solar-system.html — near-Earth objects', () => {
 
         // Selecting a planet clears the NEO selection.
         await page.locator('#planet-btns button', { hasText: 'Earth' }).first().click();
+        // The reticle is seated by the render loop — wait for a frame to land it.
+        await page.waitForFunction(() => window.__neoLab.bodyReticle.position.distanceTo(window.__neoLab.layer._earthDrawn) < 1e-3, null, { timeout: 15_000 });
         const cleared = await page.evaluate(() => ({
             sel: window.__neoLab.layer.selectedIndex, orbit: !!window.__neoLab.layer.orbitLine,
             marker: window.__neoLab.layer.selectedMarker.visible, body: window.__neoLab.selectedBody?.name,
+            bodyRing: window.__neoLab.bodyReticle.visible,
+            ringOnEarth: window.__neoLab.bodyReticle.position.distanceTo(window.__neoLab.layer._earthDrawn) < 1e-3,
         }));
+        // A planet wears the SAME reticle a NEO does (js/selection-reticle.js).
+        expect(cleared.bodyRing).toBe(true);
+        expect(cleared.ringOnEarth).toBe(true);
         expect(cleared.sel).toBeNull();
         expect(cleared.orbit).toBe(false);
         expect(cleared.marker).toBe(false);
@@ -395,7 +407,22 @@ test.describe('solar-system.html — near-Earth objects', () => {
         await openPage(page);
         await waitForFrames(page);
         await page.waitForFunction(() => window.__neoLab.layer.inZone.length > 0, null, { timeout: 45_000 });
-        // A flyby 3 LD out is a lit rock mesh, and its sprite is suppressed.
+        // §5 Phase 2 — THE HANDOFF IS IN PIXELS. From the default framing a
+        // flyby 3 LD out is unresolved: it stays a visible DOT (a pooled mesh
+        // there was sub-pixel with its sprite switched off — invisible).
+        await page.waitForFunction(() => {
+            const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
+            return L._localIndices && L._localIndices.includes(i);
+        }, null, { timeout: 45_000 });
+        const far = await page.evaluate(() => {
+            const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
+            return { meshed: L._meshed.has(i), spriteAlpha: L._lalpha[L._localIndices.indexOf(i)] };
+        });
+        expect(far.meshed, 'unresolved flyby is not a mesh').toBe(false);
+        expect(far.spriteAlpha, 'unresolved flyby keeps its dot').toBeGreaterThan(0.5);
+        // Locking onto it brings the camera close enough to RESOLVE it, and
+        // the rock mesh takes over from the dot.
+        await page.evaluate(() => { const b = window.__neoLab.layer.selectByDes('FLYBY-3LD'); window.__neoLab.selectBody(b); });
         await page.waitForFunction(() => {
             const L = window.__neoLab.layer; const i = L.byDes.get('FLYBY-3LD');
             return L._rockSlots.some(sl => sl.index === i && sl.mesh.visible);
@@ -408,7 +435,9 @@ test.describe('solar-system.html — near-Earth objects', () => {
                 atLocal: slot.mesh.position.distanceTo(L.localGroup.position) < 2, meshed: L._meshed.has(i), tails: L.cometTailsActive };
         });
         expect(rocks.verts).toBeGreaterThan(500);
-        expect(rocks.scale).toBeGreaterThan(0.009); expect(rocks.scale).toBeLessThan(0.05);
+        // §5 Phase 1: no rock is drawn anywhere near the drawn Moon (0.032) — a
+        // 10 km body is 0.1× it.
+        expect(rocks.scale).toBeGreaterThan(0.00004); expect(rocks.scale).toBeLessThan(0.0035);
         expect(rocks.spriteAlpha).toBe(0);
         expect(rocks.atLocal).toBe(true);
         expect(rocks.meshed).toBe(true);
@@ -426,14 +455,30 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(sel.shape).toBe('elongated');
         expect(sel.periodH).toBe(30.6);
         expect(Math.abs(sel.bodyRadius - sel.scale)).toBeLessThan(1e-9);
-        // Meteoroid streams are instanced rock meshes.
+        // Meteor showers — OFF by default, on via the toggle. §5 Phase 3: the
+        // stream is faint PARALLEL streaks (grains are mm dust), never
+        // instanced boulders converging on Earth.
+        expect(await page.evaluate(() => window.__neoLab.layer.visible.radiants)).toBe(false);
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: true }));
         await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
         await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 45_000 });
-        const stream = await page.evaluate(() => { const r = window.__neoLab.layer._radiants[0]; return { code: r.code, instanced: !!r.rocks.mesh.isInstancedMesh, count: r.rocks.mesh.count, visible: r.rocks.mesh.visible }; });
+        const stream = await page.evaluate(() => {
+            const L = window.__neoLab.layer, r = L._radiants[0], U = r.stream.material.uniforms;
+            const meshes = []; L.localGroup.traverse(o => { if (o.isInstancedMesh) meshes.push(o.name); });
+            return { code: r.code, lines: !!r.stream.isLineSegments, parallel: r.stream.userData.parallel === true,
+                streaks: r.stream.geometry.attributes.aSeed.count / 2, visible: r.stream.visible, instanced: meshes,
+                // the impact-parameter basis is orthonormal and ⟂ to the radiant
+                ortho: Math.max(Math.abs(U.u_dir.value.dot(U.u_e1.value)), Math.abs(U.u_dir.value.dot(U.u_e2.value)), Math.abs(U.u_e1.value.dot(U.u_e2.value))),
+                spreadInEarthR: U.u_spread.value / U.u_earthR.value };
+        });
         expect(stream.code).toBe('PER');
-        expect(stream.instanced).toBe(true);
-        expect(stream.count).toBeGreaterThan(100);
+        expect(stream.lines).toBe(true);
+        expect(stream.parallel).toBe(true);
+        expect(stream.streaks).toBeGreaterThan(100);
         expect(stream.visible).toBe(true);
+        expect(stream.instanced, 'no instanced meteoroid boulders').toEqual([]);
+        expect(stream.ortho).toBeLessThan(1e-6);
+        expect(stream.spreadInEarthR).toBeGreaterThan(1);   // most grains pass Earth by
         // Colour modes: natural by default, class palette on request.
         await page.click('#btn-panel-open');
         const before = await page.evaluate(() => { const L = window.__neoLab.layer; const i = L.byDes.get('99942'); return { mode: L.visible.colorMode, rgb: [L._col[i * 3], L._col[i * 3 + 1], L._col[i * 3 + 2]] }; });
@@ -681,7 +726,7 @@ test.describe('solar-system.html — near-Earth objects', () => {
             // The drawn radius is the SAME diameter the mesh pool uses, and the
             // diameter is derived through THIS object's albedo when unmeasured.
             const km = K.diameterKm(o.el, optics).km;
-            expect(o.radius, `${des} radius is drawnRockRadius(diameterKm)`).toBeCloseTo(0.010 + 0.011 * Math.log10(1 + 10 * km), 5);
+            expect(o.radius, `${des} radius is drawnRockRadius(diameterKm)`).toBeCloseTo(Math.max(0.00005, 0.0016 * Math.log10(1 + 10 * km)), 6);
         }
         // A dark body is derived BIGGER from the same H — the albedo is inside
         // the square root, and assuming 0.14 for everything is what shrank them.
@@ -745,5 +790,176 @@ test.describe('solar-system.html — near-Earth objects', () => {
         expect(s.hud).toBe('feed down');
         expect(s.ledger).toContain('feed down');
         expect(errors.filter(e => !/api\/neo\//.test(e))).toEqual([]);
+    });
+});
+
+// ── Visual verification (opt-in) ────────────────────────────────────────────
+// `NEO_SHOTS=<dir> npx playwright test tests/solar-system-neo-smoke.spec.js -g "viewpoints"`
+// writes a numbered screenshot per viewpoint plus `views.json` (what the layer
+// reported at each one). Skipped in CI: it asserts the selection logic, but
+// its real product is the pictures. The catalogue is the mock above plus a
+// SEEDED synthetic crowd (Earth-crossing orbits + flybys inside 15 LD) so the
+// frames show a populated sky rather than fifteen objects.
+function crowdRows(nowJd, { n = 2500, flybys = 40, seed = 7 } = {}) {
+    let a = seed >>> 0;
+    const rnd = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const rows = [];
+    for (let k = 0; k < n; k++) {
+        const sma = 0.75 + rnd() * 1.6, e = rnd() * 0.6, H = 17 + rnd() * 9;
+        rows.push([`SYN-${k}`, `(SYN-${k})`, H.toFixed(2), sma < 1 ? 'ATE' : 'APO', 'Y', 'N', e.toFixed(4), sma.toFixed(4), (sma * (1 - e)).toFixed(4),
+            (rnd() * 25).toFixed(2), (rnd() * 360).toFixed(2), (rnd() * 360).toFixed(2), (rnd() * 360).toFixed(2), null, String(2461000.5), '.05', null]);
+    }
+    for (let k = 0; k < flybys; k++) {
+        const ld = 1.5 + rnd() * 13.5;
+        const f = flybyElements(`FLY-${k}`, ld, nowJd);
+        rows.push([f[0], `(FLY-${k})`, (21 + rnd() * 6).toFixed(2), 'APO', 'Y', 'N', '0', String(f[6]), null, String(f[8]),
+            String(f[9]), '0', String(90 + (rnd() - 0.5) * 1.6), null, String(f[13]), '.001', null]);
+    }
+    return rows;
+}
+
+test.describe('solar-system.html — orbits, Mars map, moons', () => {
+    test('planet orbits are a constant SCREEN width, Mars wears its map, and a locked moon fills the view', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForFrames(page);
+        // Orbit rings: the old RingGeometry (world-width ribbon) is gone.
+        const orbits = await page.evaluate(() => {
+            const out = [];
+            window.__neoLab.scene.traverse(o => { if (o.name && o.name.startsWith('orbit-')) out.push({ name: o.name, px: o.userData.screenWidthPx, ring: o.geometry.type }); });
+            return out;
+        });
+        expect(orbits.map(o => o.name)).toContain('orbit-mars');
+        for (const o of orbits) { expect(o.px).toBeGreaterThan(0.5); expect(o.px).toBeLessThan(4); expect(o.ring).not.toBe('RingGeometry'); }
+        // Mars: the Viking mosaic loads into the planet shader.
+        await page.waitForFunction(() => {
+            const m = window.__neoLab.planets.find(p => p.name === 'Mars');
+            return m.uniforms.u_hasMap.value === 1 && !!m.uniforms.u_map.value?.image;
+        }, null, { timeout: 30_000 });
+        // A locked moon is a body you can see, not a speck: Phobos fills > 60 px.
+        await page.evaluate(() => { const b = [...document.querySelectorAll('#moon-btns button')].find(x => x.textContent.trim() === 'Phobos'); b.click(); });
+        await page.waitForTimeout(800);
+        const px = await page.evaluate(() => {
+            const lab = window.__neoLab, b = lab.selectedBody, cam = lab.camera, h = lab.canvas.getBoundingClientRect().height;
+            const d = cam.position.distanceTo(b.mesh.position);
+            return { name: b.name, px: 2 * b.radius * (cam.projectionMatrix.elements[5] * h * 0.5) / d };
+        });
+        expect(px.name).toBe('Phobos');
+        expect(px.px).toBeGreaterThan(60);
+        expect(errors).toEqual([]);
+    });
+});
+
+test.describe('solar-system.html — NEO viewpoints (screenshots)', () => {
+    test.skip(!process.env.NEO_SHOTS, 'set NEO_SHOTS=<dir> to capture the viewpoint screenshots');
+    test('viewpoints: overview, Earth frame, planet/moon/Sun/NEO selection, hover, lock, zoom-out', async ({ page }) => {
+        test.setTimeout(420_000);
+        const dir = process.env.NEO_SHOTS;
+        const fs = await import('node:fs');
+        fs.mkdirSync(dir, { recursive: true });
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const nowJd = jdNow();
+        await mockJpl(page);
+        // Swap in the crowd catalogue (registered last ⇒ wins over mockJpl's route).
+        const crowd = crowdRows(nowJd);
+        await page.route('**/api/neo/catalog*', async (route) => {
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(catalogBody(nowJd, crowd)) });
+        });
+        await openPage(page);
+        await waitForFrames(page);
+        // The consent banner covers the bottom fifth of every frame.
+        for (const label of ['Reject non-essential', 'Accept all']) {
+            const b = page.getByRole('button', { name: label });
+            if (await b.count()) { await b.first().click().catch(() => {}); break; }
+        }
+        const log = [];
+        const state = () => page.evaluate(() => {
+            const lab = window.__neoLab, L = lab.layer;
+            return {
+                count: L.count, inZone: L.inZone.length, meshed: L._meshed.size, overflow: L.rockOverflow ?? 0,
+                labels: [...L._labels.keys()].filter(k => k.startsWith('local:')).length,
+                selected: lab.selectedBody?.name ?? null, neoSelected: L.selectedIndex != null ? L.els[L.selectedIndex].des : null,
+                neoRing: L.selectedMarker.visible, bodyRing: lab.bodyReticle.visible,
+                hover: L.hoverIndex != null ? L.els[L.hoverIndex].des : null, hoverRing: L.hoverMarker.visible,
+                camDist: +lab.camera.position.distanceTo(L._earthDrawn).toFixed(3),
+            };
+        });
+        let n = 0;
+        const shot = async (name, note) => {
+            await page.waitForTimeout(2500);
+            const file = `${String(++n).padStart(2, '0')}-${name}.png`;
+            await page.screenshot({ path: `${dir}/${file}` });
+            const s = await state();
+            log.push({ file, note, ...s });
+            return s;
+        };
+        const s1 = await shot('overview', 'default camera — the whole population, no object labels');
+        expect(s1.labels, 'object labels are off by default').toBe(0);
+
+        await page.click('#cam-earth');
+        const s2 = await shot('earth-frame', 'Earth View preset — in-zone flybys are unresolved dots, no labels');
+        expect(s2.labels).toBe(0);
+
+        await page.locator('#planet-btns button', { hasText: 'Earth' }).first().click();
+        const s3 = await shot('earth-selected', 'Earth selected — the shared reticle');
+        expect(s3.bodyRing).toBe(true); expect(s3.neoRing).toBe(false);
+
+        await page.evaluate(() => document.querySelectorAll('#moon-btns button')[0].click());
+        const s4 = await shot('moon-selected', 'Moon selected — same reticle');
+        expect(s4.selected).toBe('Moon'); expect(s4.bodyRing).toBe(true);
+
+        // Back to the Earth frame, free camera, and HOVER an isolated NEO with the real mouse.
+        await page.click('#cam-earth');
+        await page.waitForTimeout(1500);
+        const target = await isolatedTarget(page);
+        expect(target, 'an isolated NEO to hover').not.toBeNull();
+        await page.mouse.move(target.x, target.y);
+        const s5 = await shot('neo-hover', `hover ${target.des} — hover ring + tooltip, nothing selected yet`);
+        expect(s5.hoverRing).toBe(true); expect(s5.neoSelected).toBeNull();
+
+        // CLICK it (real pointer down/up) — selection fires on pointerup.
+        await page.mouse.down(); await page.mouse.up();
+        const s6 = await shot('neo-clicked', `clicked ${target.des} — selected ring + name label, camera locks on`);
+        expect(s6.neoSelected).toBe(target.des); expect(s6.neoRing).toBe(true); expect(s6.bodyRing).toBe(false);
+
+        await page.evaluate(() => { const b = window.__neoLab.layer.selectByDes('99942'); window.__neoLab.selectBody(b); });
+        const s7 = await shot('apophis-locked', 'Apophis locked — resolved, drawn as its rock mesh (sprite off)');
+        expect(s7.meshed).toBeGreaterThanOrEqual(1);
+
+        // Zoom out from the lock: the mesh hands back to the dot, the ring stays.
+        const canvas = page.locator('canvas').first();
+        const box = await canvas.boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        for (let k = 0; k < 14; k++) { await page.mouse.wheel(0, 900); await page.waitForTimeout(80); }
+        const s8 = await shot('apophis-zoomed-out', 'zoomed out from Apophis — unresolved again: dot + ring, mesh released');
+        expect(s8.neoRing).toBe(true);
+
+        await page.locator('#planet-btns button', { hasText: 'Mars' }).first().click();
+        const s9 = await shot('mars-selected', 'Mars selected — NEO selection cleared, planet reticle');
+        expect(s9.neoSelected).toBeNull(); expect(s9.bodyRing).toBe(true);
+
+        await page.click('#cam-top');
+        await page.waitForTimeout(1500);
+        const sun = await page.evaluate(() => { const lab = window.__neoLab; const r = lab.canvas.getBoundingClientRect(); const c = new lab.THREE.Vector3(0, 0, 0).project(lab.camera); return { x: r.left + (c.x * 0.5 + 0.5) * r.width, y: r.top + (-c.y * 0.5 + 0.5) * r.height }; });
+        await page.mouse.click(sun.x, sun.y);
+        const s10 = await shot('sun-selected', 'Sun clicked — reticle on the Sun');
+        expect(s10.bodyRing).toBe(true);
+
+        // Meteor shower (opt-in): the Perseids at their peak, Earth View.
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: true }));
+        await page.evaluate((v) => { const el = document.getElementById('tc-date-picker'); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, '2026-08-12T22:00');
+        await page.waitForFunction(() => window.__neoLab.layer._radiants.length > 0, null, { timeout: 45_000 });
+        await page.click('#cam-earth');
+        await shot('perseids-stream', 'Perseids ON (opt-in): faint parallel streaks from the radiant; grains on Earth-crossing tracks end at the atmosphere, the rest pass by');
+        await page.evaluate(() => { const lab = window.__neoLab; lab.camera.position.lerp(lab.layer._earthDrawn, 0.55); });
+        await shot('perseids-close', 'closer on the same stream — no boulders, no convergence on Earth');
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ radiants: false }));
+
+        await page.click('#cam-earth');
+        await page.evaluate(() => window.__neoLab.layer.setVisible({ labels: true }));
+        await shot('labels-on', 'Earth frame with the "Object labels" toggle ON (opt-in)');
+
+        fs.writeFileSync(`${dir}/views.json`, JSON.stringify(log, null, 2));
     });
 });

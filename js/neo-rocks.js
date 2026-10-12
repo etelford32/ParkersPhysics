@@ -1,9 +1,10 @@
 /**
  * neo-rocks.js — 3D bodies for the near-Earth object layer
  * ═══════════════════════════════════════════════════════════════════════════
- * Procedural, seeded asteroid / comet-nucleus meshes and the instanced
- * meteoroid streams that stand in for point sprites whenever an object is
- * close enough to the camera to have a shape at all.
+ * Procedural, seeded asteroid / comet-nucleus meshes that stand in for point
+ * sprites whenever an object is resolved on screen. (The instanced meteoroid
+ * "boulders" that used to live here were removed 2026-10, NEO_LAYER_PLAN.md
+ * §5 P3: shower grains are millimetre dust and are drawn as streaks.)
  *
  * ── Shapes ────────────────────────────────────────────────────────────────
  * A rock is an icosphere displaced by (a) a low-frequency lumpy field — a sum
@@ -33,14 +34,24 @@
  * nothing else. Level is the object's own albedo times the illumination
  * reaching it; the H–G phase function is NOT applied on top of the BRDF (it is
  * disc-integrated — see that header). Plus a rim so a dark limb still reads
- * against black, and a per-vertex regolith speckle. The shader handles
- * `instanceMatrix` so the same material drives the InstancedMesh streams.
+ * against black, and a per-vertex regolith speckle. The shader still handles
+ * `instanceMatrix`, so it can drive an InstancedMesh.
  *
  * ── Scale ─────────────────────────────────────────────────────────────────
  * `drawnRockRadius(diamKm)` is a LOG map from real diameter to scene units:
  * a 30 m rock and Eros differ by 500× in size, and on a log-scale orrery
- * where Earth is 0.12 units that has to compress to ~4×. Disclosed in the
- * panel note. Sizes are never used for any physics.
+ * where Earth is 0.12 units that has to compress. Disclosed in the panel
+ * note. Sizes are never used for any physics.
+ *
+ * SIZE PLAN PHASE 1 (2026-10-11, NEO_LAYER_PLAN.md §5): the map used to be
+ * 0.010 + 0.011·log10(1 + 10d) — a 0.010 FLOOR that drew a 30 m rock a
+ * third the size of the drawn Moon (0.032) and a 10 km one as big as it,
+ * i.e. 10²–10⁴× inflated against the drawn Earth IN WORLD UNITS, which
+ * perspective then magnified into moon-sized balls whenever the camera came
+ * near Earth. The floor is gone and the gain is set so a 10 km body is
+ * 0.1× the drawn Moon (ROCK_SIZE.gain · log10(101) ≈ 0.0032). Still
+ * inflated (≈34× at 10 km, ≈500× at 100 m — disclosed), but no longer
+ * comparable to a planet or moon.
  */
 
 import * as THREE from 'three';
@@ -79,9 +90,13 @@ export function rng(seed) {
 }
 
 /** Real diameter (km) → drawn radius (scene units), log-compressed. */
+export const ROCK_SIZE = Object.freeze({
+    gain: 0.0016,      // scene units per decade of (1 + 10·D/km)
+    floor: 0.00005,    // a defined, never-zero radius for D → 0
+});
 export function drawnRockRadius(diamKm) {
     const d = Number.isFinite(diamKm) && diamKm > 0 ? diamKm : 0.1;
-    return 0.010 + 0.011 * Math.log10(1 + 10 * d);
+    return Math.max(ROCK_SIZE.floor, ROCK_SIZE.gain * Math.log10(1 + 10 * d));
 }
 
 /** Shape family for an object: the known one, else seeded. */
@@ -310,53 +325,3 @@ export function spinFor(des, seed) {
     return { axis, periodH, phase: r() * Math.PI * 2 };
 }
 
-/**
- * A meteoroid stream: `count` small rocks on a converging cone that pour in
- * from the radiant direction toward Earth (the origin of the parent group),
- * each tumbling. CPU-updated (a few hundred matrix composes per frame).
- */
-export class MeteoroidStream {
-    constructor({ count = 140, seed = 1, colorHex = 0x8f877c } = {}) {
-        this.count = count;
-        const geo = rockGeometry({ seed, shape: 'potato', detail: 2 });   // 80 faces per meteoroid
-        this.mesh = new THREE.InstancedMesh(geo, rockMaterial(colorHex), count);
-        this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        this.mesh.frustumCulled = false;
-        this.mesh.name = 'neo-meteoroids';
-        const r = rng(seed ^ 0x7f4a7c15);
-        this.seed = new Float32Array(count);
-        this.jit = new Float32Array(count * 3);
-        this.size = new Float32Array(count);
-        this.axis = [];
-        this.rate = new Float32Array(count);
-        for (let i = 0; i < count; i++) {
-            this.seed[i] = r();
-            this.jit[i * 3] = r() * 2 - 1; this.jit[i * 3 + 1] = r() * 2 - 1; this.jit[i * 3 + 2] = r() * 2 - 1;
-            // Power-law sizes: many pebbles, a few boulders.
-            this.size[i] = 0.0022 + 0.0075 * Math.pow(r(), 3);
-            const th = r() * Math.PI * 2, ph = Math.acos(r() * 2 - 1);
-            this.axis.push(new THREE.Vector3(Math.sin(ph) * Math.cos(th), Math.sin(ph) * Math.sin(th), Math.cos(ph)));
-            this.rate[i] = 2 + r() * 6;
-        }
-        this.dir = new THREE.Vector3(0, 1, 0);
-        this.speed = 0.5;
-        this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = new THREE.Vector3(); this._s = new THREE.Vector3();
-    }
-    setDirection(v) { this.dir.copy(v).normalize(); }
-    setSpeed(s) { this.speed = s; }
-    update(t) {
-        const { dir, _m, _q, _p, _s } = this;
-        for (let i = 0; i < this.count; i++) {
-            const s = (this.seed[i] + t * this.speed) % 1;               // 0 far out → 1 at Earth
-            const along = 1.25 + (0.16 - 1.25) * s;
-            const spread = 0.05 + 0.13 * (1 - s);
-            _p.set(dir.x * along + this.jit[i * 3] * spread, dir.y * along + this.jit[i * 3 + 1] * spread, dir.z * along + this.jit[i * 3 + 2] * spread);
-            _q.setFromAxisAngle(this.axis[i], t * this.rate[i] + this.seed[i] * 6.28);
-            _s.setScalar(this.size[i]);
-            _m.compose(_p, _q, _s);
-            this.mesh.setMatrixAt(i, _m);
-        }
-        this.mesh.instanceMatrix.needsUpdate = true;
-    }
-    dispose() { this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
-}

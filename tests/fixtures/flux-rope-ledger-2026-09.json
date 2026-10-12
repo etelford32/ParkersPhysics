@@ -1,0 +1,2244 @@
+{
+ "_provenance": {
+  "what": "REAL ledger rows + REAL L1 truth for the flux-rope-v1 daily validation loop, Aug 26 - Sep 19 2026.",
+  "source": "Supabase aijsboodkivnhzfstvdq (production): cme_arrival_forecasts (flux-rope-v1 + the enlil/dbm-v1/ballistic-v1 baselines), cme_l1_observations, sw_geomag_dataset (NOAA SWPC RTSW 1-min L1). Pulled 2026-10-11. The NASA DONKI CME kinematics each lock used are frozen inside its inputs.",
+  "integrity": "bz.windows[].md5 and locks_md5 were computed SERVER-SIDE in Postgres over the same canonical encodings; tests/flux-rope-ledger-real.mjs recomputes both, so a transcription error fails the gate.",
+  "bz_encoding": "2 chars per minute, base64url alphabet (A-Z a-z 0-9 - _), code = round(bz*10)+2048 (0.1 nT steps); code 4095 ('__') = gap (null or sw_flag='gap').",
+  "locks_digest": "md5 over rows ordered (event_id, issued_at) of event_id|floor(issued ms)|floor(predicted ms)|v0_kms|w_eff_kms|round(gamma*1e10)|launch|epoch|p_hit, joined by newline"
+ },
+ "bz": {
+  "windows": [
+   {
+    "name": "A",
+    "startIso": "2026-09-09T04:30:00Z",
+    "stepS": 60,
+    "n": 2881,
+    "md5": "1526445ca63feb6a8218db2ce3f0ad29",
+    "code": "fnfsfUfVfufCfFfKfcfTfKf2fWfZfrfbfYftfofmflfafWfafqfofRfWfafifhfififkfdfYfLf6fMf1fbfefZfxfbfkfpfnfrf4fvfwfqfqf4fzfxf5gHf8f9gHf_gBgBf7fkf8fqfqf8f7fVgQghgOgRgRgHgJgcgXgWf2fyfqf5gGgDfzf-f8gHfrgPf5f5gXf3f9f-gKf7gDf1fxgNgPgKgAgMf3gNgBgPgJgOgRgWgsglgXf2gOgJgZfpflfyfxf6fvgLgGgGfyf2gEgbgPf9gIgAgGgCgcgHgFgJgegdgFgMgfgEgZgSgUgTgXgQgSgTgZglgWfdfbfagUgVhCffg9gXfnfkf_hIfohEfrhCgIfyfwgZgGgLgTgHgbgmgGgrglgygxgngkgjg0g6gjgcg4hCg-gmgygtgXhAg7g1gqgXgLgGhGf8gAgHgCgBgOgWgRgYgwgTgkgVgegggqgxgdgpgXgPgpgdgjgcgdgXgkgogxgbgYgRgXgZfwf9f6gEfmfbgBgTfgfhfbgafegUfcf4f-fXfbfbfwflfpfffTfvfNfofIfLfKfHfGfKfPfvfsfLf5fnfnfNfXfFfAfHfIfYfWfXfPfNfMfRfQfzf-f4fQfvf1gDfWf3f5fefdfhf7fwf7fnfTfjftfwfofgfcfhfhgAfgf_f9fZfVfefQfTfRfSfQfRgGgFfRfJfJgBfYfXfQfUfafUfWfefhfbfZfZfcfgfUfafWfdfQfRfbfYfQfbfefcfTfQfWfffRfOf3fZf9gBgBfhgDfggGf-gGf0fvgcgCgXf4f8f1f1f0gQgPf2gbgUgPgLgOgOgegYgQgfgagggNgQgPgSgRgXfigcglf9f0gfgofmf7fgf0fvfggZf5f4f4fpfofJfgfWfpfsfmfqfxfzfsf1fZgIgufUfffBf1f9gBgwglgNgSgfg3gegpgYgJgGgkfugDgegNf3f3fLf9gDgDfafyfdfdflfxfrf1gLf5gMfSgPgOgVgQflgLfugIgVgEf4fVf1f2f0fWfyfqfnfhfofafXgUgafNfpfJfEfMfrfNfGfKfMfLfLfMfFfHfWf3fqfKfIf3frfMfEfCfIe8e-e8fAe9e9fFfze8fWfCfufhfufPfFfGfJfKfDfLfQfCfBfWfSfOfHfHfFfEfLe_fUfQfFfFfDfIfDfHfFfPfOfufffLfKfMfJfGfGfGfHfKfLfJfVfRfIfAfJfCfjfgfcfPfYfZfXfRfafUfgfZfkfgfdfgfRfdfgfYfafofgfmfifrfjfpfzfTfSf2gIfUfbgFfafZfZfVfWgxgugqgnfSgpgdgqf-gcgYgOgTgwgRgggggWgOg2gxgKghgygggcgXgmgkg4gsgjgggmgjgegugegpgtgfgfg1gogmgcgTgcgdgugzgaghg0gmgbgcgfgggWghgfgrgVgfgagrgtgWgcgrgrgpgfgYgrgUghgbgPgWgpgOgZgbgXgQgSgPf1gVgLgKgDf_f1fwftfzfsfvfvfUfpfofvfnf6fuftf6fqfvfffifqfrfufrflfifgfxfffjfnfqgKgMfngFf5fnfufyfzfzfyf-f-fzfxf2ftf4f5fsf3fyf9f9fpfpfugDfqfqgIfpfogKfqfrfrgZgYfvgCfufwfmf8f4f0f1fgfjfzfxfdfsfbfmfWfofofpfpf4fpfuftfmfifqfdfvf2fbfdgKgTfxfcfbfxfNfefGfTfLfMgLgGgNgIfdfIfMfGfJfKfMfMfSfKfIfHfTfSfTfIfJfQfPfRfafSfXfXfXfXfbfbfbfYfcfVfbfXfZfYfXfcfafgfhfbfefgfhfkfjflfjfnfmfefmfdfqfdftfwfmflfqftfufoftfrfkfufnfufpfrfyfzfzfof2fnfpf9gEfogPfnfzfyfxfvfofrfqfsfqfqfqfqfqfmfwfwfufxf1f1fvf4fyf1f6f2fufwf0fsf0fofyfxf1fjfmfofsfufzfqfjf0fsfrfsfpfofmfsf-fvfvfvfyf1f0f0fzf3gIgGgQgWgRgCgSgDgOgOgRf5gWgRf2gDgXgXgbgZgbgegMgLgZgPgNgSgbgWgZgPgbgMgigGgighgLgagOgLgOgMgGfyfof1f4fyfvfuf6fyfxf2fzfngXffgYfzgTgTgJgQf1f1f_gDgDgWgFgsgxguf9f2f3f6gCgAf7gEf-f9f2gBgBf6f8f5f5f1f3gSgHgEgQgFf6frfyfjgEf8fkf1f9f9f7fhfxf9f7f2fxf0frfofsfzfrfofofufqf0ftfnfjflfffjfrfrfpfmfqfwfifnfufwf0f0f7f1fyfxfufsfufsfpfpfpfnfqfpfqfqfqfmfnfmfkfjfjfkfiflfjflfmfkfwf0f0frfnfkfpfnfnfnfofnfpfofpfofpfqfrfqfqfqfsfnfjflfmfpfnfmfmflfmfnflfjfmfnfsftfwfyfrfnfqfqfofofrfsfzf2f1f2fzf4f6f4fxf3f1fxfwf0f3fvfwfzfvfyfyfwfyf0fwfxfzfwfwfyfvfxfxfxfrfvfvfvftfpftfuftfsfwfofofnfkfqfvfrfrfrfpfyfzfrftf2f3f4f4f4fyf4f1fzf7f6fwf6f5fyfyfwf3f4fzf2f2f4f6f7f6f6f8f3f0f2f_f-f9fugBgBfsfsfvf-f4f2f0f2f5frfnftf9gEgCgJgBgEgMgIgJgMgMgOgPgGgGgIgHgEgGgHgDfzfyf3fyfxfzfyfuf4fwftfvfqftftfqfwfxfzfufsfnfpf7f0fnfqfqfwf4fjfnfvf1fmfpf2ftfvfyfwfvfwfwfxf0f3fyf1f1fyfxfxf2f8f5f2gPf2f1f9f-gDgIgDgKgPf4ftgIf_f6f4f3f4fdfdfufqfnftfufxf9f2f4f7f7f5f2f7gCgIgAgJgJgKgJf8f5f6f8f7gCgDgEgFf-gDgEf_f8f_gAgAgBgBgFgBgAf5f9f6fufwfyfnf2fpfyfZftfifefZfmfffnfsfqfifufyf2fkfqf_f7fxgQgTgQgMgFgIgBf_f2f6f8gLgCgEf3f2f4f8f_gQgKgEf8gPgNgXgcgVgNgNgDgUgSgHgNgTgPgUgPgKgIgFgHgSgFgEgKgFgGgFgJgLgHgLgQgPgMgDgCgPgOgKgHgNgRgPgEgUgVgUgAgTgVgNgWgegSf2gPgCf9fpgBgCgCgHgFgFgDf-f0f_gDf-f4fzf8f2f8f5f4gIf1f6f2f9f_f2f1f1fvfyf3fyfnfsf1fzfsf2f4fqf2f2f1f1fxfpfsftfwfnfmfmfsfrfqfpfsfufwfxfvfxftfxfxfxfvfxfzfyf0f1f2f3fsf2fmfof6f9fmfofoflf2f3f4f5fwf6fuf0f6f5f3f3f3f3frf1f1f0f0fnfnfzfefafffvfnfvftfwfxf1fyfnfxfyfifafbfcfffhflf7f5f9fdf8f-fff_fgfjfgf_fgfcfffnfofnfpfufmflfjfhfhfxfffdfgfsfgfffefofkfgfffrfhfffmfqfnflfpfrfrfuf0fxfxf3f0fzgAf-f4f9gCgFgBf4f-f-f_f4f9f-f9f1fzf2f0f5gDgBf1f4f0gBgBgEf2gHgBgAf6f_f9f4gBf5f1f9f-fzgEfygEgYgMgBf6gEf4gEgFf3f6f1f1f_gBgAgAfxf8gNf5fvgFfgfsfjgPgHfhfpfngDfmgDfmgKfuf_fpf0fxfxfxfqfefxfpf4fsfwfpfufufvfzf2fxfyf4f7fzf0fufufzfsfvfvf4f6fwfyf4fwfxfrfvfsfwf0fzftflfzfxfvftftfvfvfwfsfrfqfzf6ftfufvfvfqfrfpf_fvf6f8f4fxfxf5ftfvftf8f1f1fkfzftf-fwf0fwf8fsf6fjfqf2f3f4f3f1f2f3fffofkfofrfqfkfsfsfwfxfpfsfefnf2f2fqfofnfkfkfofpf_fpf0fmfkfnf0fzfsfrfnfcfafefefofofrfUfVfufvfgfffyfufYfWfxfxfufzfzfbfsftfyf7f8ftfzf4f4f_gHf-f7f4gHgGf_gEf7f0f8gDfwfxf0f2f1f2fzfxfqfrfsfyf5fzf8f_f5f-f2f-f7f4gAgHf4f4f-f-f2f-f1gAf_fwf_f2f5gFgEf5f_f2f4f5f2f6gBf6gKf9f-gBf7f-f9f_gDgGgIf5f9gAgDgCf6f_f_f_f5f_f9gAf_f9gAgBf9f8gCgFf-gCf_gHgFgEgOgMgUgDf5gJgLgDf_gGf2gHgHgUgBgMgRgKgJgOgGgQgUgJgVgRgVgPgLgRgQf-gJf2gdgQgegpgqgqgPgtgrgqgjgrgfgpgVgNgSgSgbgUgTgTgggZgbf9gCgFgDgCgGgAgLgYgcgIgHgegKgJgMgMgZgUgYgLgQgLgMgKgNgQgLgQgJgVgOgHgLgMgNgAgNgLf_gEf2gAgDgBgCf1fwgWf9gPf4f6f4gEgCf5f-f7f9f8f7f-f5f5f_f-f5f6f4gBgCgCgEf8gHf5fxfygQf4f2flgHgKfqgMfygOfjgGgUgYgBgFgcgWgQgIgKgIgIgMgKgLgJgKgBf9gGgAf8gSf5f4gVgUfxgSgQgJf1f3ftfyf3f1fyfzfqftfqgAf6f1f1f1fofsfxfzfufyfwfufzfwf3fuftgEfsgBfof7f9fqf3f9fqfyfyf-gEgBf-f_f9f-fqf3fqfpf0f1frfzfxfnf0f1fkfgfqfkfkfmfrfnfwfxfwfwgBgJgFgVgPf1gefsgffugXfwfrgCgOgSgWf4f8gAgCgIgPf9gZf8gb______________________________________________________________________________________________________________________________________________________________gbggglgogogQglf_fsgogpflfogofvgogogngngofzglfpftfsgkf3gAgPgWfmfkgWgefvfygngngoghfugbfvgJgBfwf0f0f0f0f0f3gIgLf6gSgPgRgPgSf-f1f8gRgNgDgHgOgJgGgIf_gJgIgLgMgKgOgNgMgJgLgNgPgNgQgWgfgMgbf_f9gCgXf_f6f3fuf5gbf6f-gAgngof_gLgUgpgbgXgYgagbgZgYgYgVgPgEgAgfgegmgngnf_gmgcgbgagcgegWf0fsfqf1f1fzfsf0gUgWgMgYgcgYgaghgQgCgGgcgefuftgighghgifugcf9fygegfgnglgYf-f4fxfzgBgPgLf0f4gKf5f7gAf6f_gFf1gBgAf_f9f6gAfmfefgfigIgEgHgHgKfWgGgEgFgJgOfYfXgJgIgCgUfZgFgEfdf-f9f6f7f7f6f9f5ftfnflfifjfifsflfjfmfhfgfcfefffofpfhfffefffifmflfhfefjfgfjfffifufsfyfofqf1fsfzf3f6frfmf2f6f7gGgOgMgEgYf0fxfzfzgUgVgSf0gRgSfpgJfufuftfvgGfxgIgOgFf-f4gZgafsgagXgSgRgQgUfxgBf3gIgBf_f5f5f9fufyf4f-f7f2f_f4f3f3gXgTgTgUgSf_f9fcgBfhf8gFgIgIgLgNgKfgfffifZfkfkfkfgfgfkf2f1f5f9gCfrfofqfpf1f_fufof6fmfpgVf2f0f3gYgXgCfugZftgbgbgcgdgHf9f_f2fzgFga"
+   },
+   {
+    "name": "B",
+    "startIso": "2026-09-15T18:30:00Z",
+    "stepS": 60,
+    "n": 4741,
+    "md5": "f9b33a90a4b59f4f84e4500d06dbc1f7",
+    "code": "eSfFfUePgGeXeleWeZereUeieiejeeeVeMeGeGeYeDeeebeLePeIeXeSejeSeNeLeKguePgNePePeVf_f8eKgMeIeIeLfJfIeYfZfufIe3fQfaemeVeveZebeYe-eafMfQfdfLedebe4e9fDe2eiegecemekeaeZeje9eieaeveseaeaeoeaeVeNemepeKejeseGeFeReCeTeNeIeNeOeAeCeNeTeBeBeCejeNeJeze6esejekeheZebeXfQfVfYegeqfSewfJfOe3eleneye2e5e2e2e4e-fWeqepenekemfce8fIfve_fGfVfRfQfZfZfbfXfQfwfvf2fQgJfOfDfCgpfNfPgQgYfHfHg2gwgwgsg9hEg6gNhAgvgsg3gzgagYgXgWgDgigff2e3elgvglfsgegZgRgafSfQfGfjfke7e6f-f9flfdfXgZgmhKhIgofzgKe9fNf3fUfofUfKfOfQgFgSg3fEe8fQfLhchee_hZhDf7fTfegHfhgRgFgDf-f6fWgPf6g0fwgrfbfZfTfRfPfafUg2gzghgBfTfVfQfPfpfnfbfIe3fefbfWe1fgewepfhelfkeneweve2e2e0evfCe9e3fCfFfohTfDe9e_hZgXgFg0gDgtf3gchAfHg_hCgogvgkf3fefOgkfyf6gIgCgfgHg0gigThMf2hAguhBhKhMhGgDg6gAfQgmfFgKf3fXfUgGfxf-ftgZgQgfg5gKfUfzgLgdfkfYfkfpfxgRf-gAgEgDgEglf9gJgbgmgvg5gogsg1hAhBhdhEhDgsgqgogghEhJhQhghjhVgohIgdhUg6hBhZglg1gmhIhMhRg9g3g_g8gugwg2gZgThSgZgGg5hAhRhDgkgUg5gygjhEgfgcggghgfgXgKf8gWgrgPgUf4f0glgsghgifqgGf2fzf7f6f5gSgOgNgSgTgigWgaglgog4g_g9gmgcg4gwglgngagdgvgggpg0gmgihLhPg-g8g7hGg5g2gngkfhfnfwgKf2gRgIgQgJgDf4gCgQgQgLgQgPgXgOgOgWgSgcgFgSgBgBgjfggHgkgkgggZgbgPgQgPgQgCgNgUfwfvgifsfrf1fnfdfZfcfcfefyfofrf6gGf5f0frfyf5f3fpfqfrfrftfxf3f3f8f6gGgMf0fkfrgCf7gDf5f6f5f2fdfkfnfofrf2gPgNgJgCgWgQgVgDf4fpfsgEf7gEgEf_gRf3fzf1gCfffXfkf_gGf-gEgfgogpgggvgrgOfQfXffgCgHfSfjfTfQfSf2f9gMgFfxfefTfsghgdghgGgegNgif0f_gSgeglgNg3gOgJgPgygXgvgQgUghgfgvhBhBg2g5gzg5g7g5g3g4gbgdgfghgXgMf8gegcflftf-gIfwfqgMgRgFgFgHgUgNgPgJf3gCgNg7g5g1g8gzgcglgxgzg0g-hFhDg2gug9g8gngygsgtgygrgzg0gxgugygtgsgogmgcgggfgqgXg6gyg3g-gJg8gTgVgUgvgogfgWgkgWgugtgoglgigpgegbgtgWgQgngrghgegYgJgJgMgIf2gIgPgTgagVfngUgRgdgogjf_fufugJf3f-gWgWgcgfgngegTgQgcgrg2gygwgvgmgXgBgwgtgnf8ghgUgdgugwgwgwgxgxgogwgvgzgsgtgog0g0g0gxgugxgvgugugrgwgsgwgwgtgngmgfgugegsgpfngqgZgQf_ftgDfofafsf8f8f-f9gUgNgQgTgXgWgagYgggVgWgYggglgogpgagngqgigfgmgmgqgngZf1gngpf1f1fzgkgfghfyfvfgfdgQgOf9f-gBgigegbgjgkgmgjgbgjgmgPgRgdgPgIgVglglfogXgefsfcf-f6fmfrfnfrfofofWflfkfhfefdfXfXfZfZfWfhfvfUfVfcfpgEgBgGf1gHgMftfUfZfhfpflfwfrflfkfjfjfjfpfwfqfkfufdfafpflfifpfqfcfefgfgflflfwfxfrfxgIf1gZgYf6gMgCgGgIgAgCgAf5fkfjfffofrfmfkfifmfwf0fifqf4fdfbfgfWfefffgfkfnfqfofYfofpfvfYfZf7gBgCgIgKgMfkgOgOgjgWgaglglgpf5f3fwgaf6gLgTgPgJgVgEgPgegHf7fxfvfpfZfufrfufvfufof8gCgLgKgUgZgTgWgYgbgjghgXgegTgWgdgigJfygKgcgXgcgfgigdgggQgegUgagVgUgZgcgcgZgWgXgYgTgWgWgUgggcgmgogjgkgVgegegcgGgMgfgogtgigxghgmgvghgkgngfgmgngsgugsgogwgwgtgmgqgggqgrgvgtg2g3gtgug4g5g4g1gxg2glgogygxgtg2g0gugwgsg5grgygqg0gggzgygzgxg2g0g0g1gzg0gqgrgwgvgzghgkgpgrg0gugwgvgsgsgwgqgogtgsgigkgvghgjgvgwgwgygugkgWgrg2gugtgqg7gng7gjglgjgkg7g2g6g5g5g1g4gygsgsgrg1gtgrgmgogqgqgygjgjgkgkgdgcgYgcgggggjgjghgjgdgmglgmgsgugwgvgtgtgtgrgugugqgrgogpgpgqgpgqgsgqgsgogogrgngogpgpgpgmgmgngpgogmgNgZgUgmgngfgcgpgfgfgqgqglgrgsgrgqgugqgngogrgsgsgsgugugxgpgjgigif8gFgMgxglgwgvgrgwgxgsgrgvgwgzgpgrgugxgsgogsgjgogggqgnglglgpgngqgsgqgnglgvgwgmgogpgngmgegegngmglgnglglgggbgcgggcgagggfgZgegcgXghgggbgeghgegZgZghghgjgngngOgsgtgtglgegggkgigggdggghghgeggghgggfgSgZgYgYgegUgRgZgUgOgggZgcgdgdgcgegbgcgdgcgUgWgZgNgegdgQgSghgfgfgUgRgZgcgcgcgWgbgUgagZgVgegegcgYgagXgZgYgYgWgWgWgUgUgTgUgRgPgOgNgNgNgLgKgLgJgCgFgIgJgSgSgHgIgHgDgDgagWf9gBgMgKgLgJgIgCgTf1f-gDgPgCf5gAgHgDgAf4fzgKgLgKgVgLf_gEgLgFgKgGgEgDgFgBgIgBgZf8f-gGgBgBgmgggcgpgagqgbglgSgegZgUgaf7f9gGgFgZgbgZgQgWgcgNgLgZgRgWgTgMgNgbf-fsfqfofngPftfuflgSgXgXgXgggUgkgQgbgJgFgRgQgdgBgCfmfhfgfcfdgYgXgVgWgUgQgKgNgOgBgBgFgRgNgUgPgKgOgWgVgZgagYgmgcgegUgUgcgXghgTgUgSgPgdgggQghgNgQgWgYgXgZgcgZgRgdgfgegXgTgMgYgMgcgngBgagagKgUgRf_f_f_gYgXgUgIgJgRgDf-gQgUgVf6f6f8gFgvgIgCf2gCf_f6gugrgKgKgIgUgOgVgegLgFgHgkgYglgmglgZgsglgpgpglgngqgsgjgjgogrgtgtgqgmgwgxgrgmgdgygxgqgogpgwgdgTgfgwgxgVgag0gLf3f2gmglgpgofmfhgbgSgcgfgWgVf1fofmfcfnflfzf0f8f9gAfygPf5fwgKfgfcfaf-f6fnftftf4f6fvfzfhf4fdf1f8fgfngDfzfwfrfpf3f4fwgBgKfifbfggKf6frfsf3ftfogJgHfjfdfhftgWgVgmf9fxfkgHfrf0f4gRgRglgegXgTglgug0grgngnglgmgngu________g3g2hBg1g0g8gqglgAfvfQflfugTg5gxg-hFhDg_gtgagyg3gxgngxgmgjgsgZgMgIgRgQgLgKgBgLgEgHf2f2f4fPflfmfygZgggngsgWgegUgZglgmgkglgigogqgrgUgagtgrgwgyglghgfgdgcgigUgGgTglgagggagggogbgqgTgkgHgZgigbgWgwgKglgCgCgggigMgSgagmglgfgZgRgcgMgEgVgKgcgdgOgSgEgDgYgWgfgggJgdgbghgWgUgagHgPgLgMgPgXgZgOf9gKgNgLf7gJf_gGgCgjgXgCfxgKgNgKgIgGf_gNgbgcgigogYgsgZgmghgpgugMgwglgjgpgrgagbgYgRg0gEf8gqgqgwgsgxgmghgZghghgfgYgjg0gQgGgFf-f5gAgkf8fxgPgSf_f_gagIgAgKf3f0frfgfgfegSfufuf1fhfafYfkfufqfqf8fyfxgcgZgRfifggOgVgZgVfwgMfwgBfzf2gKgOgNgPgSgFgEgEgEgGgGgXgBgCf9f9gVgTgUf_f-gTgVgSgSgZgUgUf9gZgagHgagdgcgCf8gfgWgSgQgHgBf-gSgJfzfzfwf4fvf3f4fqflfxf-f4gLgJf-gBgIfygBgHgFgAgCgGgDf_gOgMgOgMgTgZgbgXgOgcgMgfgfgTghgTgYgZgegUgXgYglgYgigfgfgdgdgcgVgcgdgdgSgJgNgUgUgQgPgUgQgQgRgUgTgRgUgWgZgZgZgagbgZgcgagFgIgcgYgagjgUgXgbgZgMgXgJgOgegUghgSgegWgYgYgTgPgIgmgPgRgMgkgigZgXgOgIgGf5f7f1gSgCf8gUgTgTgUgOgNgXgRgJgegBgbgcgKftgXgbf3f_gIgcgWgcgXgTgUgRgcgegbgYgegegSgSgdgbgXgYgZgYgSgMf3ftfifogOgQfogNgSfsgOgPgLfvgNgPgSgKgCf8f5gCgDgAf3fmfqfmfqflfsfufcfofafdflfdfbfdftfcfffgfpfofif1gAgDfXfZfifkfnfdfffefffgfefZfbfmfjfdfmfmfhfefefgfhfkfmfdfrfufqf9f3fyf3fdfffifjfifgfefffgfefZfqfpfWfXftfxfjfzfjflfwfwfsfkfkfkfbfqfqfrfsfrfhfwfdfdfbfYgCgHfWgIgHf9fWf8faf5f2f3fVf9fsftfjgEgGfpgJfxgGgEfififjfififjfgfigGf9fif5f8fdfdf_gMflflfkfjflgPgJfqgLfrgLgJf3gEfyfygkgggegagafvgZgdf0gZgYf1gbfgfgftfhgegdghf4gOgMghgighfofvfufpfwfugGgGfkgGgCfnf9f_gBgCgCf8f9f3f5f8f4f5f9gCf-f9f9f9gGgLgNgSgTgTf6gTgQfxf-f7gNf-gOgRgQgRgSgGf9f0fzfxf5fzf9fxfsgHgHfsgKgKgIfifffdgGgNgIgHgDgDgFgDf8gBgBf8f3gAf_f_f3gBgCgDgDgDf8gIgIgMf-gOf4gOf3f6gHgFgGfxfrf3gFgDgGfzf7gAgEgDgDf4f3gEgDgEgEf3gDf0f1gEgDfsftf-f_gAgAf_f9f8gBgDgDgDgFgFgLgCgLgPgDf_gAgPf9gPgJf7f5f5f3gAf_f9f1f5f4f5f3f0f9gMf2gJf3f9gJgQgAgQgDgDgPgPgSgWgDgEgDgBgIgDf-f_f8gDgJgIfzfffjfpfnfwfrfpfpgPgLgIfofofpf_f9gBf7f9f_gFgGflfpflgPgLf6fzf2fxfsftfxgIgIgMgFgVgUgRgafwgJf6f6gGgDgEf9gEgCgKgDgCgFf_gDgCgDf6f-gEgBgDf6f-f9gCgDgOgEgTf9gXf5gZgFgKgMgLgBgPgLgYgHgLgkgJgLgef_f9gggUgcgTgRgPgGgZf-gVgFgdgUgbgkgggdgYgTgXgVgbgkgigXgYgdgZgLgNgTgagXgagcgpgTgNgnglgngOgSgVgogWgkgSgcgagbgRgPgZgFgQgUgegigPf-gDgMgZgZgZgBgAgJgFgGf8gCf5f_gHgPgRgBgHgegmgegggggkgegTgZgZgTgdgJgQgSgUgPgIgSgNgTgQgXgUgGgJgNgegggCgQgWgJgJgZgWgQfkgYgTgRgGf6gGgCgSgWgSfxfkfifsgDgAgCf_f2fwfsfrfhfdfcfcfifngY__gSfifgfgf5gBf3f1fyfvftfpfrfvftfq____gCf0gAgDfzfsfofmfkfjfiflfpfsfmfkf_fgf9fuf8f5f9gDgDf_gGgMf_gOgAf3f9gPgUgEgEf_gNf3f0gTgEgLgEgKgHgQgGgXgjgbgbgWgXgagKgNgYgfghgdgXgUgegagbgIgbgegefqfsfqfnfggigkgmgjglgSgFf4fufsfifhf6f_f6ftfxgNfhfgfdgOgQgSgVfZgQfZfZgPgKfafafafafbfcfdfbgJfdgNgMgOfbgDgPfigSfjgPfifjfkgNfvf0gNgUgKf6frgRgUgTgTgSgOgWgZgbgUgagagagZf_f3gLfwf_gVfwfugZgYgZfnf5gFgMgXfyf1gHgCf8gJgIf9f6gaf6fegBgPfjfifmfmfkfhfjgEgFfkfofugGgGf4f_f7f-f5gXf1gZgSf8gFgLgOgMgMgMgKgLgNgNgKgBgJgKgKgOgKgNgPgIgRgEgIgUgPgSgOgOgOgNgJgKfufxf_fjgMgRgbfngUgQgQgMfqfofofnfoftfpfpfnfsfzf3f4f3f4f5f8f6f6f4f0gKgNgNgRf6f4gTgUf3gZgZf1f3f5gQgOgNgLgLgMgLgJgJgJgLf0gKfpfpflfmfngJfngIfmgJgGgIfngIfoflfjfkfhgKgIgLgLfpgIgGf-f_gFgJffflgPgGgLfofngIgIflfofofqgGfsfygCgNfxfwf8gJfsf0fyfvfsf4f_gIfpfififof9gEfugKfqfogHgIgEgCf4gBf7f6f1f6gBfyf5f2f8f6f4fxf0f_fqfsgAf4f2f4gBgBfxfygEf9gCgDfrfrfif9fuftfwf5f5f-gCf_gEfufwfvf3f7f2f9f6f5f3f5fvfrfufxfwfxfygAf3f7f1fzfyflfwfsfygBgLgJgDf_gAf_f_gEgTgLgQgQgCgMf-f6f3f6gGgPgLgHgJgFgGgDf-f_f_gCgFgLgDgDgFgIgCgHgIf-f8f7gGgBgAf3gDftf1fzf6gGgFgUgTgLf9gBf9f0f6gBfyfuf4f1f2fyfzgBf2f4fzf3f3gAf3f4gAfyfwf8f9f9gAfwfxfvf1f2f-f8f0fzf1f2gCfuftfvf-gOf3f3f5f0fsf4fzfsfxfzfwf9fygDftftgNgNgMgPgQgMgQgVf3gMgMf1gMgCgEgLgCf8f5gJgHgEgBf_f8gLf9f4f5f1f6f3f9f5f4gIgBgCgBgAgBf-f9f7gAf-f4f9f6f5f4gCgGgTgPgOgPf6f8f8f5f6f7gTgUf6gKgVgSf-gPf7gQf6f6f7f7f5gPf6f9gNf6f8f7f7gCgIgHf7gAf6f7f5gEgDftgCf0f1f2gHf0f0gNgTgPgQf9f-f7gFf6f-f0f0gHgFf3gBf4f5f6gHgFf0f2fvftf2f5f-f1f6gCgGgDf7f_f6f7f3f8f7f6f3gLgLgEgKfygOf2f8gBgBf3fyfwgGfxf5f2gAf7f0f0fzfxf8f7f1fyfyf0f0gDfvf2fzf1gPfxgFgIgHfwf2f-gMgLgVgVgEgNgGgNgPgOgSgRgagVgNgagZgggUgLgMgFgLghgagDgBgNgMgKgWgYgHgdgLgIgFgTgPgRgVgMgPf9gMgMgKgGgIgLgCgKf_gJgAf_gHgMgNgLgMgJgLgLgLgKgOgJgXgKgLgLgEgMgQgIgKgNgNgQgRgRgOgNf_gLgOf_f-gGgIgNgNgIgOgMgMgKgKgSgLgRgSgGgGgJgWgEgSgPgEgGgXgTgDgPgFgFgJgSgPgNgRgUgWgagPgKgHgNgVgVgVgYgNgMgmgLgLgkgQgmgngWgNgKgGgGgIgMgLgLgHgGgGgNgKgJgKgLgLgOgOgOgOgPgSgTgVgVgYgZgagZgIgdgcgcgbgZgTgSgYgOgWgWgPgPgTgXgXgXgTgZgbgVgcgYgWgdgggbgZgXgSgLgCgIgKgFf8f6f9gLgLgSgZgWgIgGgLgEgGgBgKf4gTgUgagXgQgLgXgYgcgdgdgZgYgZgfghgjgSgUgagUgWgagcgTghgighgegegagSgmgogngmglgbgagbgggQgcgeghghgogggqgmgigighghgXgWgagUgIgPgEgHgPgUgCf4fnfngngBgmgngngogpgmgogTgVgZgXgWgagmgfgmgkgKf9gDgogKgAgmgmglgJgjgPgTgJgkglgjgkgWgUgdgngfgighglgjgigfgfgWgmgGgVgZgngegngpgngqgpgrgrgngogqgqgpgpgpgogmgngpgqgpgoglgkglgogigigYglgpgpglgpgogKgSgngggjglgmgmgggZgZgjgZgVgggOgIgngCgGgpgmgpgCgngbgegWgggmglghgigdgagegggmgggmgngmglgkf4f4f2fvfvfqfqgifgfhfgflfpfrglgmf4gmgogogpgqgogqgkgqgWghgif_ffgbfmghfqfxgafzf1fvfxgVgMgQgVgXgegQgegdgggigigSgRgngcgkgggigfgZgkghgegngpgqgmgVgWgcghgfgWgXgUghgQgcgbgdgNgJf6fvgfgggjghgcgfgbgdgVgUgNgQgMgMgMgNgAgGgDgBf-gHgDf_fsfzf1f2fufifufrgTgGgBf0fnf2f-fufxgCf3f9f5f7f7gIf-f-f_f3f1f_f9f6gFf5f3gGfjf9f3gAgAftfmgKgMgGfuf0fwfsf5f2f0gQgDf6f3f-f-fvftfwfpf9fvgJf5gEf-f4f0fvfzfufwfugFfsfvfvfsfxfrfpfnf0fxfwf4fsfsfifsf6fsfyf4f7f3f9gCf8gGf6fzf4frgAftgBgAfjftgLgMgKgPgJf-gIgNgRgMgPgLgjgjgZgMgHgDgPgLgDgAgCgDgDfzf_gGgEgJf6f9f-gAf8f_gCgCgAf_gKgGgDgJgKgEf8f6gVgNgVgZgKgRgYgYgZgNgPgPgXgJgJgUgPgSgUgTgVgSgUgTgMgNgMgLgAgAgCgIgHgFgFf6f_gCgAgWf-f5f3gfgZgcgfgbgYgcgcgcgagcgggcgigjgjglgjgjgWgOglgkgigjgIgJfxgGgVgUgLgPgKgLgU________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________"
+   }
+  ]
+ },
+ "vFirstHour": {
+  "note": "RTSW speed (sw_flag=ok, km/s rounded) for the 61 minutes from each observed shock; null = flagged/missing.",
+  "2026-09-09T04:30:00Z": [
+   419,
+   417,
+   431,
+   415,
+   455,
+   463,
+   411,
+   448,
+   415,
+   412,
+   437,
+   442,
+   445,
+   411,
+   415,
+   408,
+   441,
+   434,
+   410,
+   396,
+   427,
+   431,
+   429,
+   409,
+   412,
+   405,
+   416,
+   419,
+   442,
+   439,
+   404,
+   438,
+   437,
+   433,
+   427,
+   446,
+   431,
+   400,
+   401,
+   437,
+   432,
+   420,
+   427,
+   401,
+   403,
+   434,
+   404,
+   441,
+   424,
+   402,
+   419,
+   400,
+   422,
+   400,
+   413,
+   428,
+   396,
+   398,
+   432,
+   430,
+   409
+  ],
+  "2026-09-15T18:30:00Z": [
+   752,
+   818,
+   846,
+   835,
+   762,
+   757,
+   620,
+   695,
+   729,
+   589,
+   597,
+   681,
+   761,
+   644,
+   596,
+   603,
+   746,
+   696,
+   749,
+   736,
+   722,
+   746,
+   786,
+   744,
+   734,
+   686,
+   704,
+   598,
+   692,
+   700,
+   649,
+   761,
+   751,
+   781,
+   781,
+   712,
+   737,
+   733,
+   773,
+   739,
+   757,
+   681,
+   639,
+   615,
+   729,
+   695,
+   617,
+   589,
+   622,
+   609,
+   556,
+   605,
+   734,
+   751,
+   756,
+   610,
+   641,
+   625,
+   588,
+   560,
+   666
+  ],
+  "2026-09-16T00:15:00Z": [
+   552,
+   520,
+   526,
+   541,
+   584,
+   541,
+   538,
+   549,
+   463,
+   480,
+   514,
+   515,
+   555,
+   564,
+   548,
+   484,
+   541,
+   530,
+   493,
+   529,
+   565,
+   550,
+   505,
+   537,
+   555,
+   554,
+   536,
+   522,
+   549,
+   545,
+   545,
+   574,
+   540,
+   544,
+   502,
+   414,
+   557,
+   543,
+   588,
+   587,
+   561,
+   547,
+   555,
+   596,
+   576,
+   541,
+   530,
+   542,
+   545,
+   551,
+   426,
+   542,
+   527,
+   537,
+   557,
+   522,
+   532,
+   530,
+   528,
+   525,
+   526
+  ],
+  "2026-09-16T11:00:00Z": [
+   531,
+   529,
+   535,
+   532,
+   530,
+   532,
+   538,
+   529,
+   538,
+   536,
+   537,
+   544,
+   550,
+   535,
+   532,
+   547,
+   535,
+   533,
+   530,
+   539,
+   538,
+   540,
+   538,
+   546,
+   531,
+   539,
+   551,
+   540,
+   537,
+   541,
+   551,
+   551,
+   551,
+   533,
+   540,
+   533,
+   530,
+   561,
+   528,
+   489,
+   528,
+   555,
+   526,
+   471,
+   538,
+   521,
+   570,
+   539,
+   581,
+   537,
+   542,
+   531,
+   531,
+   541,
+   541,
+   528,
+   538,
+   542,
+   538,
+   527,
+   530
+  ],
+  "2026-09-17T01:30:00Z": [
+   505,
+   507,
+   491,
+   493,
+   559,
+   551,
+   501,
+   489,
+   528,
+   517,
+   541,
+   561,
+   523,
+   539,
+   546,
+   565,
+   552,
+   557,
+   541,
+   559,
+   573,
+   536,
+   null,
+   551,
+   534,
+   566,
+   535,
+   547,
+   556,
+   536,
+   539,
+   563,
+   562,
+   550,
+   556,
+   547,
+   550,
+   551,
+   525,
+   540,
+   542,
+   560,
+   558,
+   560,
+   549,
+   554,
+   548,
+   552,
+   542,
+   555,
+   573,
+   543,
+   546,
+   544,
+   581,
+   512,
+   582,
+   522,
+   570,
+   566,
+   581
+  ]
+ },
+ "observations": [
+  {
+   "event_id": "PP-RT-2026-08-24T22:36:00-CME-001",
+   "arrived": false,
+   "shock_arrival_utc": null,
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-08-25T10:38:00-CME-001",
+   "arrived": false,
+   "shock_arrival_utc": null,
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-08-25T12:53:00-CME-001",
+   "arrived": false,
+   "shock_arrival_utc": null,
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-08-25T14:53:00-CME-001",
+   "arrived": false,
+   "shock_arrival_utc": null,
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-08-26T07:38:00-CME-001",
+   "arrived": false,
+   "shock_arrival_utc": null,
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-09T04:30:00+00:00",
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T11:09:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-09T04:30:00+00:00",
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T18:09:00-CME-001",
+   "arrived": false,
+   "shock_arrival_utc": null,
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-06T10:53:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-09T04:30:00+00:00",
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-08T13:59:00-CME-001",
+   "arrived": false,
+   "shock_arrival_utc": null,
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T10:23:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-16T00:15:00+00:00",
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T16:00:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-15T18:30:00+00:00",
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T19:48:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-16T11:00:00+00:00",
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T21:12:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-16T11:00:00+00:00",
+   "source": "RTSW"
+  },
+  {
+   "event_id": "PP-RT-2026-09-14T11:08:00-CME-001",
+   "arrived": true,
+   "shock_arrival_utc": "2026-09-17T01:30:00+00:00",
+   "source": "RTSW"
+  }
+ ],
+ "locks_md5": "23c1e9c203b32e34a3b7e197f20bb8cf",
+ "locks": [
+  {
+   "event_id": "PP-RT-2026-08-24T22:36:00-CME-001",
+   "issued_at": "2026-08-26T06:30:54.230882+00:00",
+   "predicted_arrival_utc": "2026-08-31T05:38:06.188+00:00",
+   "arrival_window_early": "2026-08-29T19:56:32.202+00:00",
+   "arrival_window_late": "2026-09-01T01:34:14.406+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 286,
+   "inputs": {
+    "p10": 0.1580000000000001,
+    "p20": 0.032000000000000015,
+    "seed": 289021952,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": {
+     "id": "2026-08-25T09:32:00-FLR-001",
+     "dt_h": 1.9,
+     "peak": "2026-08-25T10:02:00.000Z",
+     "class": "M6.9",
+     "region": 14513,
+     "location": "N03E05"
+    },
+    "p_hit": 0.5140000000000003,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-25T12:53:00-CME-001",
+     "2026-08-25T10:38:00-CME-001",
+     "2026-08-25T14:53:00-CME-001"
+    ],
+    "launch": "2026-08-25T11:57:00.000Z",
+    "v0_kms": 242,
+    "lat_deg": 11,
+    "lon_deg": -31,
+    "half_deg": 17,
+    "sigma_nt": 3.1376664419507687,
+    "min_bz_p5": -18.509868621826172,
+    "ropeIndex": 0,
+    "w_eff_kms": 334,
+    "min_bz_p50": -1.8751041889190674,
+    "sig_v0_kms": 115.5,
+    "noise_sigma_nt": 0.9192119999999998,
+    "sheath_delta_nt": 1,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-24T22:36:00-CME-001",
+   "issued_at": "2026-08-27T06:30:35.139451+00:00",
+   "predicted_arrival_utc": "2026-08-31T15:22:28.008+00:00",
+   "arrival_window_early": "2026-08-29T23:28:35.116+00:00",
+   "arrival_window_late": "2026-09-01T20:54:18.641+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 258,
+   "inputs": {
+    "p10": 0.2880000000000002,
+    "p20": 0.06600000000000004,
+    "seed": 3539697567,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": {
+     "id": "2026-08-25T09:32:00-FLR-001",
+     "dt_h": 1.9,
+     "peak": "2026-08-25T10:02:00.000Z",
+     "class": "M6.9",
+     "region": 14513,
+     "location": "N03E05"
+    },
+    "p_hit": 0.7060000000000005,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-25T12:53:00-CME-001",
+     "2026-08-25T10:38:00-CME-001",
+     "2026-08-25T14:53:00-CME-001",
+     "2026-08-26T07:38:00-CME-001"
+    ],
+    "launch": "2026-08-25T11:57:00.000Z",
+    "v0_kms": 242,
+    "lat_deg": 11,
+    "lon_deg": -31,
+    "half_deg": 17,
+    "sigma_nt": 3.2259550161773802,
+    "min_bz_p5": -22.838905334472656,
+    "ropeIndex": 0,
+    "w_eff_kms": 289,
+    "min_bz_p50": -2.955756187438965,
+    "sig_v0_kms": 115.5,
+    "noise_sigma_nt": 1.18608,
+    "sheath_delta_nt": 1.18608,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-24T22:36:00-CME-001",
+   "issued_at": "2026-09-01T06:31:26.854735+00:00",
+   "predicted_arrival_utc": "2026-08-30T08:45:11.736+00:00",
+   "arrival_window_early": "2026-08-29T18:11:04.975+00:00",
+   "arrival_window_late": "2026-08-30T19:14:34.16+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 356,
+   "inputs": {
+    "p10": 0.048055461561999024,
+    "p20": 0.004966634281886892,
+    "seed": 2933734129,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": {
+     "id": "2026-08-25T09:32:00-FLR-001",
+     "dt_h": 1.9,
+     "peak": "2026-08-25T10:02:00.000Z",
+     "class": "M6.9",
+     "region": 14513,
+     "location": "N03E05"
+    },
+    "p_hit": 0.18298866062963495,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-26T07:38:00-CME-001"
+    ],
+    "launch": "2026-08-25T11:57:00.000Z",
+    "v0_kms": 242,
+    "lat_deg": 11,
+    "lon_deg": -31,
+    "arrivalQ": {
+     "hours": [
+      113,
+      121.75,
+      131.75,
+      139.5,
+      145.5
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 17,
+    "sigma_nt": 3.3867075842381196,
+    "min_bz_p5": -24.060504913330078,
+    "ropeIndex": 0,
+    "w_eff_kms": 429,
+    "min_bz_p50": -3.353189706802368,
+    "sig_v0_kms": 100,
+    "noise_sigma_nt": 1.571556,
+    "sheath_delta_nt": 1.571556,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-25T10:38:00-CME-001",
+   "issued_at": "2026-08-26T06:30:54.230882+00:00",
+   "predicted_arrival_utc": "2026-08-28T10:57:04.794+00:00",
+   "arrival_window_early": "2026-08-28T03:09:21.578+00:00",
+   "arrival_window_late": "2026-08-28T18:30:10.586+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 607,
+   "inputs": {
+    "p10": 0.1580000000000001,
+    "p20": 0.032000000000000015,
+    "seed": 289021952,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": null,
+    "p_hit": 0.5140000000000003,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-25T12:53:00-CME-001",
+     "2026-08-25T10:38:00-CME-001",
+     "2026-08-25T14:53:00-CME-001"
+    ],
+    "launch": "2026-08-25T17:39:00.000Z",
+    "v0_kms": 510,
+    "lat_deg": 6,
+    "lon_deg": -24,
+    "half_deg": 35,
+    "sigma_nt": 3.1376664419507687,
+    "min_bz_p5": -18.509868621826172,
+    "ropeIndex": 2,
+    "w_eff_kms": 768,
+    "min_bz_p50": -1.8751041889190674,
+    "sig_v0_kms": 115.5,
+    "noise_sigma_nt": 0.9192119999999998,
+    "sheath_delta_nt": 1,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-25T12:53:00-CME-001",
+   "issued_at": "2026-08-26T06:30:54.230882+00:00",
+   "predicted_arrival_utc": "2026-08-28T02:42:46.863+00:00",
+   "arrival_window_early": "2026-08-27T21:13:40.298+00:00",
+   "arrival_window_late": "2026-08-28T09:50:42.522+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 563,
+   "inputs": {
+    "p10": 0.1580000000000001,
+    "p20": 0.032000000000000015,
+    "seed": 289021952,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": null,
+    "p_hit": 0.5140000000000003,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-25T12:53:00-CME-001",
+     "2026-08-25T10:38:00-CME-001",
+     "2026-08-25T14:53:00-CME-001"
+    ],
+    "launch": "2026-08-25T17:22:00.000Z",
+    "v0_kms": 770,
+    "lat_deg": -10,
+    "lon_deg": -31,
+    "arrivalQ": {
+     "hours": [
+      55,
+      61.25,
+      72.5,
+      87.25,
+      100.25
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 28,
+    "sigma_nt": 3.1376664419507687,
+    "min_bz_p5": -18.509868621826172,
+    "ropeIndex": 1,
+    "w_eff_kms": 334,
+    "min_bz_p50": -1.8751041889190674,
+    "sig_v0_kms": 115.5,
+    "noise_sigma_nt": 0.9192119999999998,
+    "sheath_delta_nt": 1,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-25T12:53:00-CME-001",
+   "issued_at": "2026-08-27T06:30:35.139451+00:00",
+   "predicted_arrival_utc": "2026-08-28T05:05:22.926+00:00",
+   "arrival_window_early": "2026-08-27T23:21:08.03+00:00",
+   "arrival_window_late": "2026-08-28T12:29:47.83+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 525,
+   "inputs": {
+    "p10": 0.2880000000000002,
+    "p20": 0.06600000000000004,
+    "seed": 3539697567,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": null,
+    "p_hit": 0.7060000000000005,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-25T12:53:00-CME-001",
+     "2026-08-25T10:38:00-CME-001",
+     "2026-08-25T14:53:00-CME-001",
+     "2026-08-26T07:38:00-CME-001"
+    ],
+    "launch": "2026-08-25T17:22:00.000Z",
+    "v0_kms": 770,
+    "lat_deg": -10,
+    "lon_deg": -31,
+    "arrivalQ": {
+     "hours": [
+      58,
+      66,
+      78,
+      97.75,
+      122
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 28,
+    "sigma_nt": 3.2259550161773802,
+    "min_bz_p5": -22.838905334472656,
+    "ropeIndex": 1,
+    "w_eff_kms": 289,
+    "min_bz_p50": -2.955756187438965,
+    "sig_v0_kms": 115.5,
+    "noise_sigma_nt": 1.18608,
+    "sheath_delta_nt": 1.18608,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-25T14:53:00-CME-001",
+   "issued_at": "2026-08-26T06:30:54.230882+00:00",
+   "predicted_arrival_utc": "2026-08-29T13:28:41.476+00:00",
+   "arrival_window_early": "2026-08-28T21:06:10.339+00:00",
+   "arrival_window_late": "2026-08-30T06:10:00.394+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 441,
+   "inputs": {
+    "p10": 0.1580000000000001,
+    "p20": 0.032000000000000015,
+    "seed": 289021952,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": null,
+    "p_hit": 0.5140000000000003,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-25T12:53:00-CME-001",
+     "2026-08-25T10:38:00-CME-001",
+     "2026-08-25T14:53:00-CME-001"
+    ],
+    "launch": "2026-08-25T23:07:00.000Z",
+    "v0_kms": 413,
+    "lat_deg": 5,
+    "lon_deg": 0,
+    "half_deg": 16,
+    "sigma_nt": 3.1376664419507687,
+    "min_bz_p5": -18.509868621826172,
+    "ropeIndex": 3,
+    "w_eff_kms": 522,
+    "min_bz_p50": -1.8751041889190674,
+    "sig_v0_kms": 115.5,
+    "noise_sigma_nt": 0.9192119999999998,
+    "sheath_delta_nt": 1,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-26T07:38:00-CME-001",
+   "issued_at": "2026-08-27T06:30:35.139451+00:00",
+   "predicted_arrival_utc": "2026-08-31T19:17:35.307+00:00",
+   "arrival_window_early": "2026-08-30T17:32:49.825+00:00",
+   "arrival_window_late": "2026-09-01T19:42:16.879+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 333,
+   "inputs": {
+    "p10": 0.2880000000000002,
+    "p20": 0.06600000000000004,
+    "seed": 3539697567,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": null,
+    "p_hit": 0.7060000000000005,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-25T12:53:00-CME-001",
+     "2026-08-25T10:38:00-CME-001",
+     "2026-08-25T14:53:00-CME-001",
+     "2026-08-26T07:38:00-CME-001"
+    ],
+    "launch": "2026-08-26T19:51:00.000Z",
+    "v0_kms": 278,
+    "lat_deg": 3,
+    "lon_deg": 2,
+    "half_deg": 18,
+    "sigma_nt": 3.2259550161773802,
+    "min_bz_p5": -22.838905334472656,
+    "ropeIndex": 4,
+    "w_eff_kms": 421,
+    "min_bz_p50": -2.955756187438965,
+    "sig_v0_kms": 115.5,
+    "noise_sigma_nt": 1.18608,
+    "sheath_delta_nt": 1.18608,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-08-26T07:38:00-CME-001",
+   "issued_at": "2026-09-01T06:31:26.854735+00:00",
+   "predicted_arrival_utc": "2026-08-31T18:13:53.676+00:00",
+   "arrival_window_early": "2026-08-30T20:39:12.616+00:00",
+   "arrival_window_late": "2026-09-01T14:42:12.008+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 337,
+   "inputs": {
+    "p10": 0.048055461561999024,
+    "p20": 0.004966634281886892,
+    "seed": 2933734129,
+    "epoch": "2026-08-25T11:57:00.000Z",
+    "flare": null,
+    "p_hit": 0.18298866062963495,
+    "train": [
+     "2026-08-24T22:36:00-CME-001",
+     "2026-08-26T07:38:00-CME-001"
+    ],
+    "launch": "2026-08-26T19:51:00.000Z",
+    "v0_kms": 278,
+    "lat_deg": 3,
+    "lon_deg": 2,
+    "half_deg": 18,
+    "sigma_nt": 3.3867075842381196,
+    "min_bz_p5": -24.060504913330078,
+    "ropeIndex": 1,
+    "w_eff_kms": 429,
+    "min_bz_p50": -3.353189706802368,
+    "sig_v0_kms": 100,
+    "noise_sigma_nt": 1.571556,
+    "sheath_delta_nt": 1.571556,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "issued_at": "2026-09-03T06:30:34.414385+00:00",
+   "predicted_arrival_utc": "2026-09-07T22:47:36.713+00:00",
+   "arrival_window_early": "2026-09-06T23:40:52.651+00:00",
+   "arrival_window_late": "2026-09-08T16:06:55.097+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 325,
+   "inputs": {
+    "p10": 0.02800000000000001,
+    "p20": 0.006,
+    "seed": 1466241841,
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.1340000000000001,
+    "train": [
+     "2026-09-02T10:24:00-CME-001"
+    ],
+    "launch": "2026-09-02T22:21:00.000Z",
+    "v0_kms": 280,
+    "lat_deg": 6,
+    "lon_deg": 27,
+    "arrivalQ": {
+     "hours": [
+      83,
+      90.25,
+      105,
+      112.5,
+      116.75
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 38,
+    "sigma_nt": 3.7835257929937516,
+    "min_bz_p5": -14.734488487243652,
+    "ropeIndex": 0,
+    "w_eff_kms": 378,
+    "min_bz_p50": -2.655358076095581,
+    "sig_v0_kms": 100,
+    "noise_sigma_nt": 2.305443,
+    "sheath_delta_nt": 2.305443,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "issued_at": "2026-09-04T06:30:33.884656+00:00",
+   "predicted_arrival_utc": "2026-09-07T20:23:41.348+00:00",
+   "arrival_window_early": "2026-09-06T23:33:20.243+00:00",
+   "arrival_window_late": "2026-09-08T12:06:46.134+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 335,
+   "inputs": {
+    "p10": 0.032000000000000015,
+    "p20": 0.006,
+    "seed": 1466241841,
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.1440000000000001,
+    "train": [
+     "2026-09-02T10:24:00-CME-001"
+    ],
+    "launch": "2026-09-02T22:21:00.000Z",
+    "v0_kms": 280,
+    "lat_deg": 6,
+    "lon_deg": 27,
+    "arrivalQ": {
+     "hours": [
+      83.5,
+      91.25,
+      105.25,
+      111.5,
+      115.75
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 38,
+    "sigma_nt": 3.9955561295999837,
+    "min_bz_p5": -15.677666664123535,
+    "ropeIndex": 0,
+    "w_eff_kms": 392,
+    "min_bz_p50": -2.648240089416504,
+    "sig_v0_kms": 100,
+    "noise_sigma_nt": 2.6390279999999997,
+    "sheath_delta_nt": 2.6390279999999997,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "issued_at": "2026-09-05T06:30:34.265013+00:00",
+   "predicted_arrival_utc": "2026-09-08T01:38:38.616+00:00",
+   "arrival_window_early": "2026-09-06T23:58:38.293+00:00",
+   "arrival_window_late": "2026-09-08T21:15:41.313+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 314,
+   "inputs": {
+    "p10": 0.02600000000000001,
+    "p20": 0.006,
+    "seed": 1466241841,
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.12600000000000008,
+    "train": [
+     "2026-09-02T10:24:00-CME-001"
+    ],
+    "launch": "2026-09-02T22:21:00.000Z",
+    "v0_kms": 280,
+    "lat_deg": 6,
+    "lon_deg": 27,
+    "arrivalQ": {
+     "hours": [
+      83.25,
+      90.25,
+      103.25,
+      113,
+      117.5
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 38,
+    "sigma_nt": 3.833758229752627,
+    "min_bz_p5": -16.006004333496094,
+    "ropeIndex": 0,
+    "w_eff_kms": 361,
+    "min_bz_p50": -2.702084541320801,
+    "sig_v0_kms": 100,
+    "noise_sigma_nt": 2.386986,
+    "sheath_delta_nt": 2.386986,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "issued_at": "2026-09-06T06:30:35.586061+00:00",
+   "predicted_arrival_utc": "2026-09-08T04:02:23.842+00:00",
+   "arrival_window_early": "2026-09-06T13:35:49.262+00:00",
+   "arrival_window_late": "2026-09-09T07:25:50.421+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 305,
+   "inputs": {
+    "p10": 0.4870506246291707,
+    "p20": 0.1530395253597132,
+    "seed": 2494138106,
+    "wake": {
+     "dv_kms": 0,
+     "leader": null,
+     "gamma_ratio": 1,
+     "delta_arrival_h": 0,
+     "arrival_indep_utc": "2026-09-08T04:02:23.842Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.5314616092566861,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-05T11:09:00-CME-001",
+     "2026-09-05T18:09:00-CME-001"
+    ],
+    "launch": "2026-09-02T22:21:00.000Z",
+    "v0_kms": 280,
+    "lat_deg": 6,
+    "lon_deg": 27,
+    "half_deg": 38,
+    "sigma_nt": 3.956636945206876,
+    "min_bz_p5": -27.501697540283203,
+    "ropeIndex": 0,
+    "w_eff_kms": 346,
+    "min_bz_p50": -3.723856210708618,
+    "sig_v0_kms": 166.5,
+    "noise_sigma_nt": 2.5797239999999997,
+    "sheath_delta_nt": 2.5797239999999997,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "issued_at": "2026-09-07T06:30:36.37471+00:00",
+   "predicted_arrival_utc": "2026-09-08T02:08:04.65+00:00",
+   "arrival_window_early": "2026-09-06T12:39:27.138+00:00",
+   "arrival_window_late": "2026-09-09T03:07:20.128+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 312,
+   "inputs": {
+    "p10": 0.6035476196372337,
+    "p20": 0.2670903784060592,
+    "seed": 493110553,
+    "wake": {
+     "dv_kms": 0,
+     "leader": null,
+     "gamma_ratio": 1,
+     "delta_arrival_h": 0,
+     "arrival_indep_utc": "2026-09-08T02:08:04.650Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.6981253973705115,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-05T11:09:00-CME-001",
+     "2026-09-05T18:09:00-CME-001",
+     "2026-09-06T10:53:00-CME-001"
+    ],
+    "launch": "2026-09-02T22:21:00.000Z",
+    "v0_kms": 280,
+    "lat_deg": 6,
+    "lon_deg": 27,
+    "half_deg": 38,
+    "sigma_nt": 4.5195815500535,
+    "min_bz_p5": -51.89467239379883,
+    "ropeIndex": 0,
+    "w_eff_kms": 358,
+    "min_bz_p50": -4.619016170501709,
+    "sig_v0_kms": 166.5,
+    "noise_sigma_nt": 3.380328,
+    "sheath_delta_nt": 3.380328,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "issued_at": "2026-09-08T06:30:35.879341+00:00",
+   "predicted_arrival_utc": "2026-09-07T06:24:55.044+00:00",
+   "arrival_window_early": "2026-09-06T08:45:17.428+00:00",
+   "arrival_window_late": "2026-09-07T18:24:51.436+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 397,
+   "inputs": {
+    "p10": 0.7197581825225896,
+    "p20": 0.5690670659502416,
+    "seed": 493110553,
+    "wake": {
+     "dv_kms": 0,
+     "leader": null,
+     "gamma_ratio": 1,
+     "delta_arrival_h": 0,
+     "arrival_indep_utc": "2026-09-07T06:24:55.044Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.6590183067930547,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-05T11:09:00-CME-001",
+     "2026-09-05T18:09:00-CME-001",
+     "2026-09-06T10:53:00-CME-001"
+    ],
+    "launch": "2026-09-02T22:21:00.000Z",
+    "v0_kms": 280,
+    "lat_deg": 6,
+    "lon_deg": 27,
+    "arrivalQ": {
+     "hours": [
+      90,
+      100.75,
+      107.25,
+      119.5,
+      126.25
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 38,
+    "sigma_nt": 6.898558680248794,
+    "min_bz_p5": -50.100425720214844,
+    "ropeIndex": 0,
+    "w_eff_kms": 476,
+    "min_bz_p50": -9.463912010192871,
+    "sig_v0_kms": 166.5,
+    "compounding": {
+     "on": {
+      "p10": 0.694,
+      "p20": 0.504,
+      "p_hit": 0.666,
+      "min_bz_p50": -4.904318809509277,
+      "arrival_p50_h": 107.25
+     },
+     "off": {
+      "p10": 0.81,
+      "p20": 0.622,
+      "p_hit": 0.728,
+      "min_bz_p50": -3.789196491241455,
+      "arrival_p50_h": 113
+     },
+     "delta": {
+      "p10": -0.1160000000000001,
+      "p20": -0.118,
+      "p_hit": -0.061999999999999944,
+      "min_bz_p50": -1.1151223182678223,
+      "arrival_p50_h": -5.75
+     },
+     "members": 500,
+     "amp_pred": 1.2942899163042545,
+     "arrival_q_off": {
+      "hours": [
+       90,
+       103.75,
+       113,
+       123.5,
+       136
+      ],
+      "levels": [
+       0.1,
+       0.25,
+       0.5,
+       0.75,
+       0.9
+      ]
+     }
+    },
+    "noise_sigma_nt": 6.212093999999999,
+    "sheath_delta_nt": 6,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "issued_at": "2026-09-09T06:30:35.495207+00:00",
+   "predicted_arrival_utc": "2026-09-07T02:36:38.95+00:00",
+   "arrival_window_early": "2026-09-06T08:22:01.686+00:00",
+   "arrival_window_late": "2026-09-07T13:11:20.282+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 416,
+   "inputs": {
+    "p10": 0.38455670153939997,
+    "p20": 0.02093436231072312,
+    "seed": 1767015984,
+    "wake": {
+     "dv_kms": 0,
+     "leader": null,
+     "gamma_ratio": 1,
+     "delta_arrival_h": 0,
+     "arrival_indep_utc": "2026-09-07T02:36:38.950Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.5829988597047159,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-06T10:53:00-CME-001",
+     "2026-09-08T13:59:00-CME-001"
+    ],
+    "launch": "2026-09-02T22:21:00.000Z",
+    "v0_kms": 280,
+    "lat_deg": 6,
+    "lon_deg": 27,
+    "arrivalQ": {
+     "hours": [
+      77,
+      94.25,
+      120.5,
+      134.25,
+      159.5
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 38,
+    "sigma_nt": 3.6063890916122734,
+    "min_bz_p5": -28.220813751220703,
+    "ropeIndex": 0,
+    "w_eff_kms": 501,
+    "min_bz_p50": -7.906991958618164,
+    "sig_v0_kms": 162.75,
+    "compounding": {
+     "on": {
+      "p10": 0.32,
+      "p20": 0.04,
+      "p_hit": 0.514,
+      "min_bz_p50": -5.03921365737915,
+      "arrival_p50_h": 120.5
+     },
+     "off": {
+      "p10": 0.29,
+      "p20": 0.022,
+      "p_hit": 0.522,
+      "min_bz_p50": -5.03921365737915,
+      "arrival_p50_h": 121.75
+     },
+     "delta": {
+      "p10": 0.030000000000000027,
+      "p20": 0.018000000000000002,
+      "p_hit": -0.008000000000000007,
+      "min_bz_p50": 0,
+      "arrival_p50_h": -1.25
+     },
+     "members": 500,
+     "amp_pred": 1,
+     "arrival_q_off": {
+      "hours": [
+       77.5,
+       95,
+       121.75,
+       136.25,
+       150.25
+      ],
+      "levels": [
+       0.1,
+       0.25,
+       0.5,
+       0.75,
+       0.9
+      ]
+     }
+    },
+    "noise_sigma_nt": 2.00151,
+    "sheath_delta_nt": 2.00151,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T11:09:00-CME-001",
+   "issued_at": "2026-09-06T06:30:35.586061+00:00",
+   "predicted_arrival_utc": "2026-09-07T18:27:44.138+00:00",
+   "arrival_window_early": "2026-09-07T12:19:22.769+00:00",
+   "arrival_window_late": "2026-09-08T02:59:57.507+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 612,
+   "inputs": {
+    "p10": 0.4870506246291707,
+    "p20": 0.1530395253597132,
+    "seed": 2494138106,
+    "wake": {
+     "dv_kms": 0,
+     "leader": 0,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": -7.61,
+     "arrival_indep_utc": "2026-09-08T02:04:21.719Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.5314616092566861,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-05T11:09:00-CME-001",
+     "2026-09-05T18:09:00-CME-001"
+    ],
+    "launch": "2026-09-05T14:35:00.000Z",
+    "v0_kms": 873,
+    "lat_deg": -5,
+    "lon_deg": -25,
+    "half_deg": 25,
+    "sigma_nt": 3.956636945206876,
+    "min_bz_p5": -27.501697540283203,
+    "ropeIndex": 1,
+    "w_eff_kms": 346,
+    "min_bz_p50": -3.723856210708618,
+    "sig_v0_kms": 166.5,
+    "noise_sigma_nt": 2.5797239999999997,
+    "sheath_delta_nt": 2.5797239999999997,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T11:09:00-CME-001",
+   "issued_at": "2026-09-08T06:30:35.879341+00:00",
+   "predicted_arrival_utc": "2026-09-07T14:03:30.521+00:00",
+   "arrival_window_early": "2026-09-07T08:25:18.193+00:00",
+   "arrival_window_late": "2026-09-07T22:09:10.853+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 713,
+   "inputs": {
+    "p10": 0.7197581825225896,
+    "p20": 0.5690670659502416,
+    "seed": 493110553,
+    "wake": {
+     "dv_kms": 0,
+     "leader": 0,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": -3.87,
+     "arrival_indep_utc": "2026-09-07T17:55:36.233Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.6590183067930547,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-05T11:09:00-CME-001",
+     "2026-09-05T18:09:00-CME-001",
+     "2026-09-06T10:53:00-CME-001"
+    ],
+    "launch": "2026-09-05T14:35:00.000Z",
+    "v0_kms": 873,
+    "lat_deg": -5,
+    "lon_deg": -25,
+    "half_deg": 25,
+    "sigma_nt": 6.898558680248794,
+    "min_bz_p5": -50.100425720214844,
+    "ropeIndex": 1,
+    "w_eff_kms": 476,
+    "min_bz_p50": -9.463912010192871,
+    "sig_v0_kms": 166.5,
+    "noise_sigma_nt": 6.212093999999999,
+    "sheath_delta_nt": 6,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T18:09:00-CME-001",
+   "issued_at": "2026-09-06T06:30:35.586061+00:00",
+   "predicted_arrival_utc": "2026-09-07T07:33:26.655+00:00",
+   "arrival_window_early": "2026-09-07T04:01:38.387+00:00",
+   "arrival_window_late": "2026-09-07T12:30:46.548+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 1031,
+   "inputs": {
+    "p10": 0.4870506246291707,
+    "p20": 0.1530395253597132,
+    "seed": 2494138106,
+    "wake": {
+     "dv_kms": 471,
+     "leader": 1,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": -17.75,
+     "arrival_indep_utc": "2026-09-08T01:18:35.769Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.5314616092566861,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-05T11:09:00-CME-001",
+     "2026-09-05T18:09:00-CME-001"
+    ],
+    "launch": "2026-09-05T20:53:00.000Z",
+    "v0_kms": 1110,
+    "lat_deg": -4,
+    "lon_deg": -21,
+    "arrivalQ": {
+     "hours": [
+      88.75,
+      101.25,
+      107.5,
+      115.5,
+      136.75
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 30,
+    "sigma_nt": 3.956636945206876,
+    "min_bz_p5": -27.501697540283203,
+    "ropeIndex": 2,
+    "w_eff_kms": 817,
+    "min_bz_p50": -3.723856210708618,
+    "sig_v0_kms": 166.5,
+    "compounding": {
+     "on": {
+      "p10": 0.492,
+      "p20": 0.156,
+      "p_hit": 0.546,
+      "min_bz_p50": -3.3902645111083984,
+      "arrival_p50_h": 107.5
+     },
+     "off": {
+      "p10": 0.498,
+      "p20": 0.104,
+      "p_hit": 0.598,
+      "min_bz_p50": -2.27070689201355,
+      "arrival_p50_h": 119.75
+     },
+     "delta": {
+      "p10": -0.006000000000000005,
+      "p20": 0.052000000000000005,
+      "p_hit": -0.051999999999999935,
+      "min_bz_p50": -1.1195576190948486,
+      "arrival_p50_h": -12.25
+     },
+     "members": 500,
+     "amp_pred": 1.4930436521915345,
+     "arrival_q_off": {
+      "hours": [
+       88.75,
+       109.5,
+       119.75,
+       129.25,
+       143.25
+      ],
+      "levels": [
+       0.1,
+       0.25,
+       0.5,
+       0.75,
+       0.9
+      ]
+     }
+    },
+    "noise_sigma_nt": 2.5797239999999997,
+    "sheath_delta_nt": 2.5797239999999997,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-06T10:53:00-CME-001",
+   "issued_at": "2026-09-07T06:30:36.37471+00:00",
+   "predicted_arrival_utc": "2026-09-08T00:03:38.706+00:00",
+   "arrival_window_early": "2026-09-07T19:54:41.956+00:00",
+   "arrival_window_late": "2026-09-08T05:38:39.161+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 1085,
+   "inputs": {
+    "p10": 0.6035476196372337,
+    "p20": 0.2670903784060592,
+    "seed": 493110553,
+    "wake": {
+     "dv_kms": 708,
+     "leader": 2,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": -18.11,
+     "arrival_indep_utc": "2026-09-08T18:10:30.732Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.6981253973705115,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-05T11:09:00-CME-001",
+     "2026-09-05T18:09:00-CME-001",
+     "2026-09-06T10:53:00-CME-001"
+    ],
+    "launch": "2026-09-06T13:58:00.000Z",
+    "v0_kms": 1085,
+    "lat_deg": -6,
+    "lon_deg": -32,
+    "half_deg": 37,
+    "sigma_nt": 4.5195815500535,
+    "min_bz_p5": -51.89467239379883,
+    "ropeIndex": 3,
+    "w_eff_kms": 1066,
+    "min_bz_p50": -4.619016170501709,
+    "sig_v0_kms": 166.5,
+    "noise_sigma_nt": 3.380328,
+    "sheath_delta_nt": 3.380328,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-06T10:53:00-CME-001",
+   "issued_at": "2026-09-09T06:30:35.495207+00:00",
+   "predicted_arrival_utc": "2026-09-08T10:31:31.202+00:00",
+   "arrival_window_early": "2026-09-08T07:20:03.298+00:00",
+   "arrival_window_late": "2026-09-08T14:38:53.213+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 704,
+   "inputs": {
+    "p10": 0.38455670153939997,
+    "p20": 0.02093436231072312,
+    "seed": 1767015984,
+    "wake": {
+     "dv_kms": 0,
+     "leader": null,
+     "gamma_ratio": 1,
+     "delta_arrival_h": 0,
+     "arrival_indep_utc": "2026-09-08T10:31:31.202Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.5829988597047159,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-06T10:53:00-CME-001",
+     "2026-09-08T13:59:00-CME-001"
+    ],
+    "launch": "2026-09-06T13:58:00.000Z",
+    "v0_kms": 1085,
+    "lat_deg": -6,
+    "lon_deg": -32,
+    "half_deg": 37,
+    "sigma_nt": 3.6063890916122734,
+    "min_bz_p5": -28.220813751220703,
+    "ropeIndex": 1,
+    "w_eff_kms": 501,
+    "min_bz_p50": -7.906991958618164,
+    "sig_v0_kms": 162.75,
+    "noise_sigma_nt": 2.00151,
+    "sheath_delta_nt": 2.00151,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-08T13:59:00-CME-001",
+   "issued_at": "2026-09-09T06:30:35.495207+00:00",
+   "predicted_arrival_utc": "2026-09-12T20:46:50.339+00:00",
+   "arrival_window_early": "2026-09-11T19:58:41.113+00:00",
+   "arrival_window_late": "2026-09-13T21:28:43.378+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 408,
+   "inputs": {
+    "p10": 0.38455670153939997,
+    "p20": 0.02093436231072312,
+    "seed": 1767015984,
+    "wake": {
+     "dv_kms": 0,
+     "leader": 0,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": 3.43,
+     "arrival_indep_utc": "2026-09-12T17:20:56.251Z"
+    },
+    "epoch": "2026-09-02T22:21:00.000Z",
+    "flare": null,
+    "p_hit": 0.5829988597047159,
+    "train": [
+     "2026-09-02T10:24:00-CME-001",
+     "2026-09-06T10:53:00-CME-001",
+     "2026-09-08T13:59:00-CME-001"
+    ],
+    "launch": "2026-09-08T21:47:00.000Z",
+    "v0_kms": 365,
+    "lat_deg": 19,
+    "lon_deg": 35,
+    "half_deg": 21,
+    "sigma_nt": 3.6063890916122734,
+    "min_bz_p5": -28.220813751220703,
+    "ropeIndex": 2,
+    "w_eff_kms": 501,
+    "min_bz_p50": -7.906991958618164,
+    "sig_v0_kms": 162.75,
+    "noise_sigma_nt": 2.00151,
+    "sheath_delta_nt": 2.00151,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-08T13:59:00-CME-001",
+   "issued_at": "2026-09-13T06:30:36.249471+00:00",
+   "predicted_arrival_utc": "2026-09-13T02:35:34.257+00:00",
+   "arrival_window_early": "2026-09-12T07:38:37.306+00:00",
+   "arrival_window_late": "2026-09-13T23:03:15.204+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 369,
+   "inputs": {
+    "p10": 0.10100245102829296,
+    "p20": 0.016261505214600958,
+    "seed": 3140000329,
+    "wake": {
+     "dv_kms": 0,
+     "leader": null,
+     "gamma_ratio": 1,
+     "delta_arrival_h": 0,
+     "arrival_indep_utc": "2026-09-13T02:35:34.257Z"
+    },
+    "epoch": "2026-09-08T21:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.35004906932450447,
+    "train": [
+     "2026-09-08T13:59:00-CME-001",
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001"
+    ],
+    "launch": "2026-09-08T21:47:00.000Z",
+    "v0_kms": 365,
+    "lat_deg": 19,
+    "lon_deg": 35,
+    "arrivalQ": {
+     "hours": [
+      104.75,
+      119.5,
+      131,
+      141.25,
+      146.75
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 21,
+    "sigma_nt": 4.837921686833717,
+    "min_bz_p5": -22.088594436645508,
+    "ropeIndex": 0,
+    "w_eff_kms": 389,
+    "min_bz_p50": -3.057765245437622,
+    "sig_v0_kms": 100,
+    "compounding": {
+     "on": {
+      "p10": 0.102,
+      "p20": 0.024,
+      "p_hit": 0.358,
+      "min_bz_p50": -2.940762519836426,
+      "arrival_p50_h": 131
+     },
+     "off": {
+      "p10": 0.122,
+      "p20": 0.026,
+      "p_hit": 0.424,
+      "min_bz_p50": -3.00213623046875,
+      "arrival_p50_h": 134.75
+     },
+     "delta": {
+      "p10": -0.020000000000000004,
+      "p20": -0.0019999999999999983,
+      "p_hit": -0.066,
+      "min_bz_p50": 0.06137371063232422,
+      "arrival_p50_h": -3.75
+     },
+     "members": 500,
+     "amp_pred": 0.9795566536889828,
+     "arrival_q_off": {
+      "hours": [
+       106.25,
+       122.25,
+       134.75,
+       142.75,
+       147
+      ],
+      "levels": [
+       0.1,
+       0.25,
+       0.5,
+       0.75,
+       0.9
+      ]
+     }
+    },
+    "noise_sigma_nt": 3.7954559999999993,
+    "sheath_delta_nt": 3.7954559999999993,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T10:23:00-CME-001",
+   "issued_at": "2026-09-13T06:30:36.249471+00:00",
+   "predicted_arrival_utc": "2026-09-16T00:50:21.666+00:00",
+   "arrival_window_early": "2026-09-14T22:54:25.929+00:00",
+   "arrival_window_late": "2026-09-16T14:34:55.178+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 295,
+   "inputs": {
+    "p10": 0.10100245102829296,
+    "p20": 0.016261505214600958,
+    "seed": 3140000329,
+    "wake": {
+     "dv_kms": 0,
+     "leader": 0,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": 11.35,
+     "arrival_indep_utc": "2026-09-15T13:29:28.429Z"
+    },
+    "epoch": "2026-09-08T21:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.35004906932450447,
+    "train": [
+     "2026-09-08T13:59:00-CME-001",
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001"
+    ],
+    "launch": "2026-09-10T02:47:00.000Z",
+    "v0_kms": 207,
+    "lat_deg": 5,
+    "lon_deg": 5,
+    "half_deg": 39,
+    "sigma_nt": 4.837921686833717,
+    "min_bz_p5": -22.088594436645508,
+    "ropeIndex": 1,
+    "w_eff_kms": 389,
+    "min_bz_p50": -3.057765245437622,
+    "sig_v0_kms": 100,
+    "noise_sigma_nt": 3.7954559999999993,
+    "sheath_delta_nt": 3.7954559999999993,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T10:23:00-CME-001",
+   "issued_at": "2026-09-16T06:30:36.685316+00:00",
+   "predicted_arrival_utc": "2026-09-14T14:02:53.351+00:00",
+   "arrival_window_early": "2026-09-13T18:12:59.31+00:00",
+   "arrival_window_late": "2026-09-14T18:25:38.753+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 407,
+   "inputs": {
+    "p10": 0.5746538188142278,
+    "p20": 0.1631151941902456,
+    "seed": 701563040,
+    "wake": {
+     "dv_kms": 0,
+     "leader": null,
+     "gamma_ratio": 1,
+     "delta_arrival_h": 0,
+     "arrival_indep_utc": "2026-09-14T14:02:53.351Z"
+    },
+    "epoch": "2026-09-10T02:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.7886898822720583,
+    "train": [
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001",
+     "2026-09-13T19:48:00-CME-001",
+     "2026-09-13T21:12:00-CME-001",
+     "2026-09-14T11:08:00-CME-001"
+    ],
+    "launch": "2026-09-10T02:47:00.000Z",
+    "v0_kms": 207,
+    "lat_deg": 5,
+    "lon_deg": 5,
+    "arrivalQ": {
+     "hours": [
+      76.25,
+      86.75,
+      101.5,
+      128.25,
+      153.5
+     ],
+     "levels": [
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      0.9
+     ]
+    },
+    "half_deg": 39,
+    "sigma_nt": 6.090412718939907,
+    "min_bz_p5": -24.550989151000977,
+    "ropeIndex": 0,
+    "w_eff_kms": 497,
+    "min_bz_p50": -8.754539489746094,
+    "sig_v0_kms": 195.75,
+    "compounding": {
+     "on": {
+      "p10": 0.494,
+      "p20": 0.282,
+      "p_hit": 0.698,
+      "min_bz_p50": -3.6299948692321777,
+      "arrival_p50_h": 101.5
+     },
+     "off": {
+      "p10": 0.538,
+      "p20": 0.258,
+      "p_hit": 0.728,
+      "min_bz_p50": -3.4243626594543457,
+      "arrival_p50_h": 101
+     },
+     "delta": {
+      "p10": -0.04400000000000004,
+      "p20": 0.023999999999999966,
+      "p_hit": -0.030000000000000027,
+      "min_bz_p50": -0.20563220977783203,
+      "arrival_p50_h": 0.5
+     },
+     "members": 500,
+     "amp_pred": 1.06004977574735,
+     "arrival_q_off": {
+      "hours": [
+       76.5,
+       87.25,
+       101,
+       128,
+       161.75
+      ],
+      "levels": [
+       0.1,
+       0.25,
+       0.5,
+       0.75,
+       0.9
+      ]
+     }
+    },
+    "noise_sigma_nt": 5.300294999999999,
+    "sheath_delta_nt": 5.300294999999999,
+    "gamma_eff_per_km": 2e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T16:00:00-CME-001",
+   "issued_at": "2026-09-13T06:30:36.249471+00:00",
+   "predicted_arrival_utc": "2026-09-15T07:22:06.257+00:00",
+   "arrival_window_early": "2026-09-14T05:26:48.76+00:00",
+   "arrival_window_late": "2026-09-16T08:51:25.65+00:00",
+   "predicted_hit": false,
+   "predicted_speed_at_l1": 316,
+   "inputs": {
+    "p10": 0.10100245102829296,
+    "p20": 0.016261505214600958,
+    "seed": 3140000329,
+    "wake": {
+     "dv_kms": 0,
+     "leader": 1,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": 4.53,
+     "arrival_indep_utc": "2026-09-15T02:50:24.754Z"
+    },
+    "epoch": "2026-09-08T21:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.35004906932450447,
+    "train": [
+     "2026-09-08T13:59:00-CME-001",
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001"
+    ],
+    "launch": "2026-09-10T04:39:00.000Z",
+    "v0_kms": 282,
+    "lat_deg": 1,
+    "lon_deg": 29,
+    "half_deg": 35,
+    "sigma_nt": 4.837921686833717,
+    "min_bz_p5": -22.088594436645508,
+    "ropeIndex": 2,
+    "w_eff_kms": 389,
+    "min_bz_p50": -3.057765245437622,
+    "sig_v0_kms": 100,
+    "noise_sigma_nt": 3.7954559999999993,
+    "sheath_delta_nt": 3.7954559999999993,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T16:00:00-CME-001",
+   "issued_at": "2026-09-16T06:30:36.685316+00:00",
+   "predicted_arrival_utc": "2026-09-14T17:08:10.768+00:00",
+   "arrival_window_early": "2026-09-13T09:59:00.145+00:00",
+   "arrival_window_late": "2026-09-15T12:22:25.204+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 380,
+   "inputs": {
+    "p10": 0.5746538188142278,
+    "p20": 0.1631151941902456,
+    "seed": 701563040,
+    "wake": {
+     "dv_kms": 0,
+     "leader": 0,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": 7.82,
+     "arrival_indep_utc": "2026-09-14T09:18:57.776Z"
+    },
+    "epoch": "2026-09-10T02:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.7886898822720583,
+    "train": [
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001",
+     "2026-09-13T19:48:00-CME-001",
+     "2026-09-13T21:12:00-CME-001",
+     "2026-09-14T11:08:00-CME-001"
+    ],
+    "launch": "2026-09-10T04:39:00.000Z",
+    "v0_kms": 282,
+    "lat_deg": 1,
+    "lon_deg": 29,
+    "half_deg": 35,
+    "sigma_nt": 6.090412718939907,
+    "min_bz_p5": -24.550989151000977,
+    "ropeIndex": 1,
+    "w_eff_kms": 497,
+    "min_bz_p50": -8.754539489746094,
+    "sig_v0_kms": 195.75,
+    "noise_sigma_nt": 5.300294999999999,
+    "sheath_delta_nt": 5.300294999999999,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T19:48:00-CME-001",
+   "issued_at": "2026-09-16T06:30:36.685316+00:00",
+   "predicted_arrival_utc": "2026-09-15T09:31:42.975+00:00",
+   "arrival_window_early": "2026-09-15T06:09:33.698+00:00",
+   "arrival_window_late": "2026-09-15T13:52:50.742+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 897,
+   "inputs": {
+    "p10": 0.5746538188142278,
+    "p20": 0.1631151941902456,
+    "seed": 701563040,
+    "wake": {
+     "dv_kms": 0,
+     "leader": 1,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": -5.46,
+     "arrival_indep_utc": "2026-09-15T14:59:12.973Z"
+    },
+    "epoch": "2026-09-10T02:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.7886898822720583,
+    "train": [
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001",
+     "2026-09-13T19:48:00-CME-001",
+     "2026-09-13T21:12:00-CME-001",
+     "2026-09-14T11:08:00-CME-001"
+    ],
+    "launch": "2026-09-13T22:26:00.000Z",
+    "v0_kms": 1305,
+    "lat_deg": 12,
+    "lon_deg": 39,
+    "half_deg": 23,
+    "sigma_nt": 6.090412718939907,
+    "min_bz_p5": -24.550989151000977,
+    "ropeIndex": 2,
+    "w_eff_kms": 497,
+    "min_bz_p50": -8.754539489746094,
+    "sig_v0_kms": 195.75,
+    "noise_sigma_nt": 5.300294999999999,
+    "sheath_delta_nt": 5.300294999999999,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T21:12:00-CME-001",
+   "issued_at": "2026-09-16T06:30:36.685316+00:00",
+   "predicted_arrival_utc": "2026-09-15T23:09:44.064+00:00",
+   "arrival_window_early": "2026-09-15T18:08:29.831+00:00",
+   "arrival_window_late": "2026-09-16T03:51:15.481+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 930,
+   "inputs": {
+    "p10": 0.5746538188142278,
+    "p20": 0.1631151941902456,
+    "seed": 701563040,
+    "wake": {
+     "dv_kms": 732,
+     "leader": 2,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": -15.33,
+     "arrival_indep_utc": "2026-09-16T14:29:34.425Z"
+    },
+    "epoch": "2026-09-10T02:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.7886898822720583,
+    "train": [
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001",
+     "2026-09-13T19:48:00-CME-001",
+     "2026-09-13T21:12:00-CME-001",
+     "2026-09-14T11:08:00-CME-001"
+    ],
+    "launch": "2026-09-14T01:59:00.000Z",
+    "v0_kms": 645,
+    "lat_deg": 1,
+    "lon_deg": 39,
+    "half_deg": 22,
+    "sigma_nt": 6.090412718939907,
+    "min_bz_p5": -24.550989151000977,
+    "ropeIndex": 3,
+    "w_eff_kms": 1229,
+    "min_bz_p50": -8.754539489746094,
+    "sig_v0_kms": 195.75,
+    "noise_sigma_nt": 5.300294999999999,
+    "sheath_delta_nt": 5.300294999999999,
+    "gamma_eff_per_km": 1e-8
+   }
+  },
+  {
+   "event_id": "PP-RT-2026-09-14T11:08:00-CME-001",
+   "issued_at": "2026-09-16T06:30:36.685316+00:00",
+   "predicted_arrival_utc": "2026-09-16T17:13:19.949+00:00",
+   "arrival_window_early": "2026-09-16T07:38:45.705+00:00",
+   "arrival_window_late": "2026-09-17T06:04:03.387+00:00",
+   "predicted_hit": true,
+   "predicted_speed_at_l1": 746,
+   "inputs": {
+    "p10": 0.5746538188142278,
+    "p20": 0.1631151941902456,
+    "seed": 701563040,
+    "wake": {
+     "dv_kms": 278,
+     "leader": 3,
+     "gamma_ratio": 0.5,
+     "delta_arrival_h": -5.63,
+     "arrival_indep_utc": "2026-09-16T22:50:54.941Z"
+    },
+    "epoch": "2026-09-10T02:47:00.000Z",
+    "flare": null,
+    "p_hit": 0.7886898822720583,
+    "train": [
+     "2026-09-09T10:23:00-CME-001",
+     "2026-09-09T16:00:00-CME-001",
+     "2026-09-13T19:48:00-CME-001",
+     "2026-09-13T21:12:00-CME-001",
+     "2026-09-14T11:08:00-CME-001"
+    ],
+    "launch": "2026-09-14T15:34:00.000Z",
+    "v0_kms": 744,
+    "lat_deg": 3,
+    "lon_deg": 40,
+    "half_deg": 24,
+    "sigma_nt": 6.090412718939907,
+    "min_bz_p5": -24.550989151000977,
+    "ropeIndex": 4,
+    "w_eff_kms": 775,
+    "min_bz_p50": -8.754539489746094,
+    "sig_v0_kms": 195.75,
+    "noise_sigma_nt": 5.300294999999999,
+    "sheath_delta_nt": 5.300294999999999,
+    "gamma_eff_per_km": 1e-8
+   }
+  }
+ ],
+ "baselines": [
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-03T06:30:33.610653+00:00",
+   "predicted_arrival_utc": "2026-09-08T11:55:25.892+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-03T06:30:33.610653+00:00",
+   "predicted_arrival_utc": "2026-09-07T04:20:14.86+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-02T10:24:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-03T06:30:33.610653+00:00",
+   "predicted_arrival_utc": "2026-09-06T16:00:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T11:09:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-06T06:30:33.366442+00:00",
+   "predicted_arrival_utc": "2026-09-07T09:25:29.61+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T11:09:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-06T06:30:33.366442+00:00",
+   "predicted_arrival_utc": "2026-09-08T11:19:37.124+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T11:09:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-06T06:30:33.366442+00:00",
+   "predicted_arrival_utc": "2026-09-08T02:52:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T11:09:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-07T06:30:33.813911+00:00",
+   "predicted_arrival_utc": "2026-09-07T20:36:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T18:09:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-06T06:30:33.366442+00:00",
+   "predicted_arrival_utc": "2026-09-07T06:34:39.504+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T18:09:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-06T06:30:33.366442+00:00",
+   "predicted_arrival_utc": "2026-09-08T10:12:32.501+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T18:09:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-06T06:30:33.366442+00:00",
+   "predicted_arrival_utc": "2026-09-07T23:21:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-05T18:09:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-07T06:30:33.813911+00:00",
+   "predicted_arrival_utc": "2026-09-07T20:36:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-06T10:53:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-07T06:30:33.813911+00:00",
+   "predicted_arrival_utc": "2026-09-08T00:26:14.423+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-06T10:53:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-07T06:30:33.813911+00:00",
+   "predicted_arrival_utc": "2026-09-09T04:01:52.37+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-06T10:53:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-07T06:30:33.813911+00:00",
+   "predicted_arrival_utc": "2026-09-08T18:41:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-08T13:59:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-09T06:30:33.445109+00:00",
+   "predicted_arrival_utc": "2026-09-13T04:15:03.424+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-08T13:59:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-09T06:30:33.445109+00:00",
+   "predicted_arrival_utc": "2026-09-13T00:19:12.829+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T10:23:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-13T06:30:33.608208+00:00",
+   "predicted_arrival_utc": "2026-09-17T15:27:46.618+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T10:23:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-13T06:30:33.608208+00:00",
+   "predicted_arrival_utc": "2026-09-14T08:36:27.416+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T16:00:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-13T06:30:33.608208+00:00",
+   "predicted_arrival_utc": "2026-09-15T17:16:35.496+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T16:00:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-13T06:30:33.608208+00:00",
+   "predicted_arrival_utc": "2026-09-14T10:36:51.077+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-09T16:00:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-13T06:30:33.608208+00:00",
+   "predicted_arrival_utc": "2026-09-13T23:00:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T19:48:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-16T06:30:33.578451+00:00",
+   "predicted_arrival_utc": "2026-09-16T07:39:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T21:12:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-16T06:30:33.578451+00:00",
+   "predicted_arrival_utc": "2026-09-16T11:58:07.984+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T21:12:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-16T06:30:33.578451+00:00",
+   "predicted_arrival_utc": "2026-09-17T07:02:24.985+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-13T21:12:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-16T06:30:33.578451+00:00",
+   "predicted_arrival_utc": "2026-09-17T12:00:00+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-14T11:08:00-CME-001",
+   "model_id": "ballistic-v1",
+   "issued_at": "2026-09-16T06:30:33.578451+00:00",
+   "predicted_arrival_utc": "2026-09-16T17:50:11.034+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-14T11:08:00-CME-001",
+   "model_id": "dbm-v1",
+   "issued_at": "2026-09-16T06:30:33.578451+00:00",
+   "predicted_arrival_utc": "2026-09-17T16:49:04.059+00:00"
+  },
+  {
+   "event_id": "PP-RT-2026-09-14T11:08:00-CME-001",
+   "model_id": "enlil",
+   "issued_at": "2026-09-16T06:30:33.578451+00:00",
+   "predicted_arrival_utc": "2026-09-17T06:00:00+00:00"
+  }
+ ],
+ "upstreamV6h": {
+  "note": "median RTSW speed (sw_flag=ok, km/s) over [shock-6h, shock-10min) — the ambient wind the CME was decelerating into; n=350 minutes each",
+  "2026-09-09T04:30:00Z": 414.759994506836,
+  "2026-09-15T18:30:00Z": 419.100006103516,
+  "2026-09-16T00:15:00Z": 511.349990844727,
+  "2026-09-16T11:00:00Z": 538.5,
+  "2026-09-17T01:30:00Z": 505.399993896484
+ }
+}

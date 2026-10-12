@@ -345,6 +345,60 @@ the same crate.
   the actual ε / wake_refresh_h / §21 fits once metrics.compounding has
   accumulated enough scored trains (the evidence base now exists).
 
+  ✅ THE LEDGER SCORED AGAINST REAL DATA — AND REPAIRED (2026-10-11).
+  First audit of what the daily loop actually did in production
+  (Supabase + Vercel logs). It had locked 55 flux-rope-v1 rows and seen 8
+  real L1 arrivals, but had NEVER produced a skill number:
+  · validation_runs_kind_check admitted only backmap/recurrence/cme, so
+    every kind='flux-rope' insert failed 23514 (logged 2026-09-16 with 10
+    scored events, discarded). Migration addendum in
+    supabase-validation-runs-migration.sql — APPLIED 2026-10-11 on the
+    author's go (constraint + honest cme_model_skill view).
+  · Bz truth never resolved: 48 h of 1-min rows were read in ONE PostgREST
+    request, which Supabase caps at 1000 rows → 35% coverage < the 60%
+    floor → 'pending' forever. sbGetAll pages it.
+  · CCMC moved DONKI on 2026-09-30 and both old hosts began answering an
+    HTML announcements page; every caller's res.json() threw, so the WHOLE
+    ledger (all four CME models) locked nothing for 11 days. Fixed on main
+    by #1039 (api/_lib/donki-upstream.js: the new ccmc.gsfc.nasa.gov
+    DONKI-API host raced against the gateway); the cron now also logs
+    which host answered each product.
+  · LEAKAGE: no issue-before-arrival guard on the flux-rope lock, and
+    scoring took the LATEST lock — on 4 of 8 arrivals it was issued AFTER
+    the shock (already assimilated from live L1); 7 locks predicted an
+    arrival already in the past. filterLockableRows (lock) +
+    selectScorableLock (score, /api/cme/skill, and the cme_model_skill
+    view in the same migration) fix it; the SQL view and the JS rule were
+    cross-checked against each other on production and agree to 0.01 h.
+  · The §5 two-observable inversion refused 8/8 real events: the
+    "arrival speed" is downstream plasma speed, below the shock speed, so
+    no DBM profile fits both. Fallback: transit-only Γ against the
+    MEASURED 6 h upstream wind — never the lock's w_eff (a follower's wake
+    speed, 775–1229 km/s).
+  HONEST REAL-DATA SKILL (6 arrivals with a pre-shock lock, mean lead
+  51 h; tests/flux-rope-ledger-real.mjs pins all of it on an md5-verified
+  fixture of the production rows + NOAA RTSW minute data): arrival MAE
+  18.1 h, bias −17.9 h (EARLY), 3/6 within ±12 h, min-Bz MAE 4.0 nT,
+  Brier(hit) 0.30. Paired on the 5 events every model scored: ballistic
+  19.3 < flux-rope 21.7 < dbm 22.6 < enlil 30.0 h — all early. (The old
+  leaked scoring said 26.4 h.) THE PHYSICS SIGNAL, recorded and NOT acted
+  on (6 events is curve-fitting territory — the standing rule): followers
+  are early by −16.3 h with §16 ON vs −13.2 h OFF (the wake makes it
+  worse), and the 3 retrievable events felt Γ_retrieved/Γ_locked ≈ 3.9×
+  the drag the ensemble flew with (locks fly Γ_eff 1–2×10⁻⁸ km⁻¹). Both
+  point the same way as the Gannon momentum overshoot: too little drag /
+  too strong a wake. The ledger now accumulates this automatically
+  (metrics.dragRatioMedian, compounding.followerBias*, paired); revisit
+  the Γ prior and §20 wake refresh once ≥5 retrievals land. Also on
+  record: the resolver attributed ONE shock (09-09 04:30) to three CMEs,
+  and for the 873 km/s Sep 5 CME no drag law reaches an 86 h transit —
+  attribution, not drag, is that miss.
+  NEW GATES (now in CI — .github/workflows/flux-rope-validation.yml; no
+  flux-rope node gate ran in CI before): tests/flux-rope-ledger-real.mjs,
+  tests/validation-rerun-ledger.mjs (the cron end-to-end vs a fake
+  PostgREST with the 1000-row cap + kind CHECK and an HTML gateway; the
+  pre-fix cron fails 8/9).
+
 ## 5. Data inputs
 
 Launch parameters seeded from NASA DONKI CME analyses (manual entry is the v1

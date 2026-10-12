@@ -1,0 +1,94 @@
+name: flux-rope-validation
+
+# The flux-rope engine and its daily validation loop, gated in node — no
+# browser, no npm install (every test imports only node:* and the repo's own
+# ES modules; the kernel gates load the COMMITTED WASM):
+#
+#   flux-rope-kernel-smoke    committed WASM vs the St. Patrick's 2015 / Gannon
+#                             pins (FLUX_ROPE_PHYSICS_SPEC.md)
+#   flux-rope-forecast/live   the shared provider + DONKI train seeding
+#   flux-rope-validation      lock rows, Bz truth, scoring (synthetic)
+#   flux-rope-ledger-real     the SAME loop on REAL production rows + REAL
+#                             NOAA RTSW L1 truth (Sep 2026, md5-verified
+#                             fixture) — pins the honest skill numbers and
+#                             the three 2026-10 bugs with negative controls
+#   validation-rerun-ledger   the cron's ledger block end-to-end against a
+#                             fake PostgREST (1000-row cap, kind CHECK) and a
+#                             DONKI hosts answering HTML (the 2026-09-30 move)
+#   donki-upstream            the DONKI host race (moved CCMC host + gateway)
+#
+# Until this workflow no CI job ran any of these: the ledger was dead for
+# 11 days and its scored runs were rejected for two months with every
+# kernel gate green.
+
+on:
+  push:
+    paths:
+      - 'js/flux-rope*.js'
+      - 'js/flux-rope-wasm/**'
+      - 'js/forecast-verification.js'
+      - 'js/validation-scoring.js'
+      - 'js/solar-wind-driver.js'
+      - 'api/cron/validation-rerun.js'
+      - 'api/cme/skill.js'
+      - 'api/_lib/donki-upstream.js'
+      - 'tests/flux-rope-*.mjs'
+      - 'tests/validation-*.mjs'
+      - 'tests/donki-upstream.mjs'
+      - 'tests/forecast-verification.mjs'
+      - 'tests/fixtures/flux-rope-ledger-*.json'
+      - '.github/workflows/flux-rope-validation.yml'
+  pull_request:
+    paths:
+      - 'js/flux-rope*.js'
+      - 'js/flux-rope-wasm/**'
+      - 'js/forecast-verification.js'
+      - 'js/validation-scoring.js'
+      - 'js/solar-wind-driver.js'
+      - 'api/cron/validation-rerun.js'
+      - 'api/cme/skill.js'
+      - 'api/_lib/donki-upstream.js'
+      - 'tests/flux-rope-*.mjs'
+      - 'tests/validation-*.mjs'
+      - 'tests/donki-upstream.mjs'
+      - 'tests/forecast-verification.mjs'
+      - 'tests/fixtures/flux-rope-ledger-*.json'
+      - '.github/workflows/flux-rope-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flux-rope-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-gates:
+    name: Flux rope engine + validation loop (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: kernel (committed WASM vs hindcast pins)
+        run: node tests/flux-rope-kernel-smoke.mjs
+      - name: shared provider + live seeding + noise
+        run: |
+          node tests/flux-rope-forecast.mjs
+          node tests/flux-rope-live.mjs
+          node tests/flux-rope-noise.mjs
+      - name: verification math + inversion + scoring (synthetic)
+        run: |
+          node tests/forecast-verification.mjs
+          node tests/flux-rope-inversion.mjs
+          node tests/flux-rope-validation.mjs
+          node tests/validation-scoring.mjs
+      - name: REAL ledger (production rows + NOAA RTSW truth)
+        run: node tests/flux-rope-ledger-real.mjs
+      - name: cron ledger end-to-end (fake PostgREST + DONKI outage)
+        run: |
+          node tests/donki-upstream.mjs
+          node tests/validation-rerun-ledger.mjs

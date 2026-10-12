@@ -261,11 +261,10 @@ function _renderBanner() {
         <div class="pp-consent-text">
             <strong>Your privacy choices</strong>
             We use strictly necessary cookies to run Parkers Physics App. With your consent, we also use
-            functional storage for your preferences and privacy-respecting analytics to improve the service.
+            functional storage for your preferences and usage analytics (including Google Analytics) to improve the service.
             We never use advertising or cross-site tracking. See our
-            <a href="/privacy.html">Privacy Policy</a> &middot;
-            <a href="/eula.html">EULA</a> &middot;
-            <a href="/dpa.html">DPA</a>.
+            <a href="/privacy.html#cookies">Privacy Policy</a> &middot;
+            <a href="/eula.html">EULA</a>.
         </div>
         <div class="pp-consent-actions">
             <button type="button" class="pp-consent-btn pp-consent-ghost" data-action="customize">Customize</button>
@@ -334,8 +333,8 @@ function _openModal() {
                         <span class="pp-consent-switch on disabled" aria-disabled="true" title="Required"></span>
                     </div>
                     <div class="pp-consent-cat-desc">
-                        Authentication, session, CSRF, load-balancing, and the cookie that remembers
-                        your consent choice. Always on.
+                        Keeps you signed in, remembers this consent choice, and sends anonymous
+                        error and performance reports (no IP, no email). Always on.
                     </div>
                 </div>
                 <div class="pp-consent-cat" data-cat="functional">
@@ -358,8 +357,8 @@ function _openModal() {
                               tabindex="0"></span>
                     </div>
                     <div class="pp-consent-cat-desc">
-                        Privacy-respecting, first-party usage statistics (page views, feature usage)
-                        used only to improve the service. No cross-site tracking, no ad-tech.
+                        Usage statistics (page views, feature usage) recorded by us and by Google
+                        Analytics, used only to improve the service. No advertising, no cross-site tracking.
                     </div>
                 </div>
             </div>

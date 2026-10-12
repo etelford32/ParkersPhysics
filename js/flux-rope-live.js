@@ -130,6 +130,15 @@ export function ballisticArrivalMs(cme) {
  * storm that fully passed returns [] rather than "forecasting" the past.
  * Over `maxRopes`, the oldest NON-anchor drops first, then the oldest
  * anchor. Result is launch-ascending — index 0 is the train epoch.
+ *
+ * `scope: 'all'` is the QUIET-CORRIDOR view (flux-rope-live.html only):
+ * the SAME in-flight membership rule with the Earth-relevance filter and
+ * the anchor requirement removed, so the page can still run the live
+ * catalogue through the kernel when nothing is aimed at Earth — the
+ * ensemble then reports the miss (low P(hit)) instead of the page falling
+ * back to a 2024 replay. Over the cap the OLDEST drops (the newest are the
+ * ones still inside the drawn heliosphere). The forecast provider never
+ * passes it — its Earth-relevance filter is not to be re-widened.
  */
 export function selectTrainCmes(cmes, {
     nowMs = Date.now(),
@@ -138,9 +147,11 @@ export function selectTrainCmes(cmes, {
     marginDeg = 20,
     transitLookbackH = TRAIN_TRANSIT_LOOKBACK_H,
     dwellMarginH = TRAIN_DWELL_MARGIN_H,
+    scope = 'earth',
 } = {}) {
+    const all = scope === 'all';
     const keep = (Array.isArray(cmes) ? cmes : []).filter((c) => {
-        if (!c?.timeIso || !earthRelevant(c, marginDeg)) return false;
+        if (!c?.timeIso || (!all && !earthRelevant(c, marginDeg))) return false;
         const launch = Date.parse(c.timeIso);
         if (!Number.isFinite(launch) || launch > nowMs) return false;
         const ageH = (nowMs - launch) / 3600e3;
@@ -148,10 +159,10 @@ export function selectTrainCmes(cmes, {
         return ageH <= windowH
             || ballisticArrivalMs(c) + dwellMarginH * 3600e3 >= nowMs;
     });
-    if (!keep.some((c) => c.earthDirected === true)) return [];
+    if (!all && !keep.some((c) => c.earthDirected === true)) return [];
     keep.sort((a, b) => Date.parse(a.timeIso) - Date.parse(b.timeIso));
     while (keep.length > maxRopes) {
-        const i = keep.findIndex((c) => c.earthDirected !== true);
+        const i = all ? 0 : keep.findIndex((c) => c.earthDirected !== true);
         keep.splice(i >= 0 ? i : 0, 1);
     }
     return keep;
@@ -297,7 +308,8 @@ export async function fetchStereoBeaconDriver() {
 
 /** Fetch recent DONKI CME analyses through the site's edge proxy. */
 export async function fetchDonkiCmes({ days = 7 } = {}) {
-    const resp = await fetch(`/api/donki/cme?days=${days}`);
+    // 25 s: the relay races two NASA hosts at 15 s each, plus edge overhead.
+    const resp = await fetch(`/api/donki/cme?days=${days}`, { signal: AbortSignal.timeout(25_000) });
     if (!resp.ok) throw new Error(`donki proxy: HTTP ${resp.status}`);
     return parseDonkiCmes(await resp.json());
 }
