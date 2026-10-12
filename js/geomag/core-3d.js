@@ -82,6 +82,11 @@ import {
     tangentCylinderLatitudeDeg, R_IC_M,
 } from './core-model.js';
 import { KYOTO_TABLE1 } from './observatories.js';
+import {
+    magnetopauseRadiusRe, bowShockRadiusRe, SCENE_TAIL_RE, MOON_RADIUS_KM, EARTH_RADIUS_KM,
+} from './geospace.js';
+import { airlessSphereMaterial } from '../airless-body.js';
+import { BODY_ALBEDO, reflectedIrradianceFraction } from '../eclipse-geometry.js';
 
 const R_EARTH = 1;
 const R_CMB = R_CMB_KM / REF_RADIUS_KM;
@@ -92,6 +97,15 @@ const R_IC = R_INNER_CORE_KM / REF_RADIUS_KM;
 // constructor and the render loop, and two of them disagreed.
 const DIST_MIN = 0.14;          // inside the inner core
 const DIST_MAX = 30;            // ~the sunward magnetopause
+// While the geospace layers are on, the envelope widens to take in the
+// magnetotail (Sun) and the Moon at its TRUE distance (~60 R_E). Radii stay
+// true; only the camera is allowed further out.
+const DIST_MAX_SUN = 90;
+const DIST_MAX_MOON = 190;
+const SCENE_RADIUS_GEO = SCENE_TAIL_RE + 6;
+const MOON_R = MOON_RADIUS_KM / EARTH_RADIUS_KM;   // 0.2727 R_E, true size
+const MOON_CATCH_PX = 26;
+const SUN_GLYPH_RE = SCENE_TAIL_RE + 4;            // past the bow shock AND the Moon's orbit
 const TARGET_MAX = 2.6;         // how far the pivot may be panned from centre
 const SCENE_RADIUS = 2.2;       // field lines run to 13,500 km = 2.12 R_E
 const NEAR_MIN = 0.0015;
@@ -154,6 +168,24 @@ export const OBSERVATORY_COLORS = Object.freeze({ north: 0xc792ea, south: 0x7fe6
 
 /** The tangent cylinder — geometry, not a material surface. */
 export const TANGENT_CYLINDER_COLOR = 0x7fe6c3;
+
+/**
+ * The Sun/Moon geospace layer. Exported for the key, like every other colour.
+ * The boundaries are WIREFRAMES on purpose: they are fitted surfaces, not
+ * material ones, and a translucent skin would also need a rim term — and a
+ * `pow(rim, n)` on a back face is identically 1 (SOLAR_SYSTEM_VISUAL_REVIEW
+ * S3), so it would draw as a flat plate.
+ */
+export const GEOSPACE_COLORS = Object.freeze({
+    sun: 0xfff0a0,
+    terminator: 0xffd36b,
+    dipoleAxis: 0xe08cff,
+    magnetopause: 0xa6e86a,
+    bowShock: 0xffaa66,
+    tailSection: 0xa6e86a,
+    moon: 0xd9d4c7,
+    moonOrbit: 0x8fa6d6,
+});
 
 /** The ring drawn at whatever the pointer probe is currently reading. */
 const PROBE_MARKER_COLOR = 0x7fe6c3;
@@ -374,6 +406,8 @@ export class CoreFieldScene {
         this.camera = new THREE.PerspectiveCamera(42, 1, NEAR_MAX, 100);
         this.camera.position.set(2.45, 1.25, 2.45);
 
+        this._distMax = DIST_MAX;
+        this._sceneRadius = SCENE_RADIUS;
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this._configureControls();
 
@@ -415,6 +449,7 @@ export class CoreFieldScene {
         this._buildSurface();
         this._buildObservatories();
         this._buildMantle();
+        this._buildGeospace();
         this.fieldLines = null;
 
         // Camera flight state. The layer switch MOVES the camera rather than
@@ -425,7 +460,7 @@ export class CoreFieldScene {
         // Handed to the key so it reads the same constants the materials do.
         this.palettes = {
             LAYER_PALETTE, LINE_COLORS, FIELD_RAMP,
-            OBSERVATORY_COLORS, TANGENT_CYLINDER_COLOR,
+            OBSERVATORY_COLORS, TANGENT_CYLINDER_COLOR, GEOSPACE_COLORS,
         };
 
         this._onResize = () => this.resize();
@@ -483,7 +518,7 @@ export class CoreFieldScene {
         // looks like from within" and "where this field stops being Earth's
         // problem".
         c.minDistance = DIST_MIN;
-        c.maxDistance = DIST_MAX;
+        c.maxDistance = this._distMax ?? DIST_MAX;
         c.zoomSpeed = 1.5;
         c.rotateSpeed = 0.85;
         c.enablePan = true;
@@ -620,7 +655,7 @@ export class CoreFieldScene {
         const t = this.controls.target;
         const off = _v1.copy(this.camera.position).sub(t);
         const d = off.length() || DIST_MIN;
-        off.setLength(Math.max(DIST_MIN, Math.min(DIST_MAX, d * factor)));
+        off.setLength(Math.max(DIST_MIN, Math.min(this._distMax, d * factor)));
         this.camera.position.copy(t).add(off);
         this._probeDirty = true;
     }
@@ -640,7 +675,7 @@ export class CoreFieldScene {
     flyTo({ dist, target, azimuthDeg, polarDeg } = {}) {
         this._flightT = null;
         this._flight = {
-            radius: dist == null ? null : Math.max(DIST_MIN, Math.min(DIST_MAX, dist)),
+            radius: dist == null ? null : Math.max(DIST_MIN, Math.min(this._distMax, dist)),
             target: target ? target.clone().clampLength(0, TARGET_MAX) : null,
             theta: azimuthDeg == null ? null : azimuthDeg * DEGR,
             phi: polarDeg == null ? null
@@ -720,7 +755,7 @@ export class CoreFieldScene {
     _updateCameraRange() {
         const dist = this.camera.position.distanceTo(this.controls.target);
         const near = Math.max(NEAR_MIN, Math.min(NEAR_MAX, dist * 0.02));
-        const far = dist + TARGET_MAX + SCENE_RADIUS + 1;
+        const far = dist + TARGET_MAX + this._sceneRadius + 1;
         if (Math.abs(near - this.camera.near) > near * 0.05
             || Math.abs(far - this.camera.far) > 0.5) {
             this.camera.near = near;
@@ -758,6 +793,11 @@ export class CoreFieldScene {
             case 'equator':  this.flyTo({ polarDeg: 90 }); break;
             case 'recentre': this.flyTo({ target: new THREE.Vector3(0, 0, 0) }); break;
             case 'wide':     this.flyTo({ dist: Math.min(DIST_MAX, this._framingDistance() * 2.4) }); break;
+            case 'geospace': this.flyTo({
+                dist: this.geo?.moonOn ? 165 : 48,
+                target: new THREE.Vector3(0, 0, 0),
+                polarDeg: 32,
+            }); break;
             default:         this.resetView();
         }
     }
@@ -823,6 +863,20 @@ export class CoreFieldScene {
      */
     _pick(ndcX, ndcY) {
         if (!this._c) return null;
+
+        // The Moon is a 0.27 R_E body at 60 R_E — a few pixels at most
+        // framings — so it is caught in SCREEN space, like the observatories,
+        // and only when it is on the near side of nothing (it never is behind
+        // the Earth from any camera inside its orbit, and outside it the
+        // depth test below handles the rest).
+        if (this.geo?.moonOn && this.moonMesh.visible) {
+            _v3.copy(this.moonMesh.position).project(this.camera);
+            if (_v3.z < 1) {
+                const dx = (_v3.x - ndcX) * this._cssW * 0.5;
+                const dy = (_v3.y - ndcY) * this._cssH * 0.5;
+                if (Math.hypot(dx, dy) < MOON_CATCH_PX) return this._moonProbe();
+            }
+        }
 
         // Observatories win ties. The dots are 0.022 R_E, which is about six
         // pixels at the External framing, so demanding a pixel-exact hit on
@@ -965,7 +1019,8 @@ export class CoreFieldScene {
     _placeProbeMarker(probe) {
         const m = this.probeMarker;
         if (!m) return;
-        if (!probe || !probe.point) { m.visible = false; return; }
+        // The Moon carries its own screen-size ring; a second one on it is noise.
+        if (!probe || !probe.point || probe.kind === 'moon') { m.visible = false; return; }
         // Just clear of the surface it is annotating, and scaled with the
         // camera so it stays a legible ring at 30 R_E without swamping the
         // patch it marks at 0.2.
@@ -1218,6 +1273,326 @@ export class CoreFieldScene {
             this.observatories.add(m);
         }
         this.group.add(this.observatories);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // GEOSPACE — the Sun, the Moon, and the boundaries the solar wind draws.
+    //
+    // Renderer only: every vector and radius comes from js/geomag/geospace.js
+    // (`geospaceState`), which owns the ephemeris, the aberration and the two
+    // boundary fits and has its own Node gate. The scene is EARTH-FIXED, so
+    // the Sun and the Moon sweep through it once a day; the page re-sends the
+    // state on its clock and nothing here keeps time of its own.
+    //
+    // Scale stays TRUE: the Moon is 0.2727 R_E at its real ~60 R_E, the
+    // magnetopause is where Shue puts it. The only thing NOT to scale is the
+    // Sun glyph, a DIRECTION marker parked beyond everything else drawn (the
+    // Sun is ~23,500 R_E away) and the key says so. It sat at 24 R_E once and,
+    // seen from outside, read as a Sun touching the bow-shock nose.
+    // ════════════════════════════════════════════════════════════════════════
+
+    _buildGeospace() {
+        const C = GEOSPACE_COLORS;
+        this.geo = { sunOn: false, moonOn: false, state: null, boundaryKey: '' };
+        this.geoGroup = new THREE.Group();
+        this.geoGroup.visible = false;
+        this.group.add(this.geoGroup);
+
+        // ── Sun: direction, terminator, sub-solar point ─────────────────
+        this.sunGroup = new THREE.Group();
+        this.geoGroup.add(this.sunGroup);
+        const ray = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(1.02, 0, 0), new THREE.Vector3(SUN_GLYPH_RE - 2, 0, 0)]);
+        this.sunRay = new THREE.Line(ray, new THREE.LineDashedMaterial({
+            color: C.sun, dashSize: 1.2, gapSize: 0.9, transparent: true, opacity: 0.6,
+        }));
+        this.sunRay.computeLineDistances();
+        this.sunGroup.add(this.sunRay);
+        this.sunGlyph = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: this._discTexture('#fff6c8', '#ffb347'), color: 0xffffff,
+            sizeAttenuation: false, depthWrite: false, transparent: true,
+        }));
+        this.sunGlyph.scale.setScalar(0.045);
+        this.sunGlyph.position.set(SUN_GLYPH_RE, 0, 0);
+        this.sunGroup.add(this.sunGlyph);
+        const term = [];
+        for (let i = 0; i <= 128; i++) {
+            const a = (i / 128) * Math.PI * 2;
+            term.push(new THREE.Vector3(0, Math.cos(a) * 1.004, Math.sin(a) * 1.004));
+        }
+        this.terminator = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(term),
+            new THREE.LineBasicMaterial({ color: C.terminator, transparent: true, opacity: 0.9 }));
+        this.sunGroup.add(this.terminator);
+        const sub = new THREE.Mesh(new THREE.RingGeometry(0.03, 0.045, 28), new THREE.MeshBasicMaterial({
+            color: C.sun, side: THREE.DoubleSide, transparent: true, opacity: 0.95,
+        }));
+        sub.position.set(1.006, 0, 0);
+        sub.lookAt(2, 0, 0);
+        this.subsolarRing = sub;
+        this.sunGroup.add(sub);
+
+        // The centred-dipole axis, so the tilt the readout prints is visible
+        // against the Sun line. North end carries a cone.
+        this.dipoleAxis = new THREE.Group();
+        const axisLine = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, -1.55, 0), new THREE.Vector3(0, 1.55, 0)]),
+            new THREE.LineBasicMaterial({ color: C.dipoleAxis, transparent: true, opacity: 0.9 }));
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.12, 14),
+            new THREE.MeshBasicMaterial({ color: C.dipoleAxis }));
+        tip.position.y = 1.6;
+        this.dipoleAxis.add(axisLine, tip);
+        this.sunGroup.add(this.dipoleAxis);
+
+        // ── Boundaries: built in a local frame (+x = flow source) ───────
+        this.boundaryGroup = new THREE.Group();
+        this.sunGroup.add(this.boundaryGroup);
+        this.magnetopause = null;
+        this.bowShock = null;
+
+        // ── Moon ────────────────────────────────────────────────────────
+        this.moonGroup = new THREE.Group();
+        this.geoGroup.add(this.moonGroup);
+        // The SAME shading the orrery's Moon uses (js/airless-body.js):
+        // Lommel–Seeliger, the opposition surge, earthshine from the right
+        // side of the sky, and Earth's shadow evaluated per fragment in real
+        // kilometres — so a lunar eclipse in the clock shows as one.
+        this.moonMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(MOON_R, 48, 32),
+            airlessSphereMaterial({
+                colorHex: C.moon, albedo: BODY_ALBEDO.moon,
+                bodyRadiusKm: MOON_RADIUS_KM, occulterRadiusKm: EARTH_RADIUS_KM, texMix: 0.7,
+            }));
+        this.moonGroup.add(this.moonMesh);
+        // A screen-size ring so a 3-pixel body is still findable at 150 R_E.
+        this.moonMarker = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 40), new THREE.MeshBasicMaterial({
+            color: C.moon, side: THREE.DoubleSide, transparent: true, opacity: 0.55, depthWrite: false,
+        }));
+        this.moonGroup.add(this.moonMarker);
+        this.moonOrbit = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({
+            color: C.moonOrbit, transparent: true, opacity: 0.45,
+        }));
+        this.moonGroup.add(this.moonOrbit);
+        // The magnetopause cross-section AT the Moon's downstream distance —
+        // the one circle that answers "is it inside?" by eye.
+        const sec = [];
+        for (let i = 0; i <= 96; i++) {
+            const a = (i / 96) * Math.PI * 2;
+            sec.push(new THREE.Vector3(0, Math.cos(a), Math.sin(a)));
+        }
+        this.tailSection = new THREE.Line(new THREE.BufferGeometry().setFromPoints(sec),
+            new THREE.LineDashedMaterial({
+                color: C.tailSection, dashSize: 0.06, gapSize: 0.04, transparent: true, opacity: 0.8,
+            }));
+        this.tailSection.computeLineDistances();
+        this.moonGroup.add(this.tailSection);
+    }
+
+    /** A soft disc for the Sun glyph — a canvas texture, no asset fetch. */
+    _discTexture(core, edge) {
+        if (typeof document === 'undefined') return null;
+        const c = document.createElement('canvas');
+        c.width = c.height = 64;
+        const g = c.getContext('2d');
+        const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grd.addColorStop(0, core);
+        grd.addColorStop(0.45, edge);
+        grd.addColorStop(1, 'rgba(255,170,70,0)');
+        g.fillStyle = grd;
+        g.fillRect(0, 0, 64, 64);
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        return tex;
+    }
+
+    /**
+     * One wireframe of revolution about +x: rings at downstream stations and
+     * meridians, from the nose to `xMin`. `radiusAt(θ)` is the boundary's own
+     * polar form; nothing about the shape is decided here.
+     */
+    _surfaceOfRevolution(radiusAt, xMin, color, opacity, thetaStop = Math.PI) {
+        const prof = [];
+        for (let th = 0; th < thetaStop; th += 0.01) {
+            const r = radiusAt(th);
+            const x = r * Math.cos(th);
+            if (!Number.isFinite(r) || x < xMin) break;
+            prof.push([x, r * Math.sin(th)]);
+        }
+        const pts = [];
+        const MER = 16;
+        for (let m = 0; m < MER; m++) {
+            const a = (m / MER) * Math.PI * 2;
+            const cy = Math.cos(a), cz = Math.sin(a);
+            for (let i = 1; i < prof.length; i++) {
+                pts.push(prof[i - 1][0], prof[i - 1][1] * cy, prof[i - 1][1] * cz,
+                    prof[i][0], prof[i][1] * cy, prof[i][1] * cz);
+            }
+        }
+        // Rings evenly spaced in X so the flaring reads, not in θ (which
+        // bunches them at the nose).
+        if (prof.length > 1) {
+            const xTop = prof[0][0];
+            const xEnd = prof[prof.length - 1][0];
+            const RINGS = 14;
+            for (let k = 0; k <= RINGS; k++) {
+                const x = xTop - ((xTop - xEnd) * k) / RINGS;
+                let j = prof.findIndex((p) => p[0] <= x);
+                if (j <= 0) j = k === 0 ? 0 : prof.length - 1;
+                const rho = prof[j][1];
+                if (rho < 1e-3) continue;
+                const N = 64;
+                for (let i = 0; i < N; i++) {
+                    const a0 = (i / N) * Math.PI * 2, a1 = ((i + 1) / N) * Math.PI * 2;
+                    pts.push(prof[j][0], rho * Math.cos(a0), rho * Math.sin(a0),
+                        prof[j][0], rho * Math.cos(a1), rho * Math.sin(a1));
+                }
+            }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        return new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+            color, transparent: true, opacity, depthWrite: false,
+        }));
+    }
+
+    _rebuildBoundaries(b) {
+        for (const m of [this.magnetopause, this.bowShock]) {
+            if (!m) continue;
+            this.boundaryGroup.remove(m);
+            m.geometry.dispose();
+            m.material.dispose();
+        }
+        this.magnetopause = this._surfaceOfRevolution(
+            (th) => magnetopauseRadiusRe(th, b.r0Re, b.alpha),
+            -SCENE_TAIL_RE, GEOSPACE_COLORS.magnetopause, 0.42);
+        // Where the two independent fits cross (extreme wind only), the bow
+        // shock stops — drawing it INSIDE the magnetopause would be a sheath
+        // of negative thickness. The page prints the crossing.
+        const bowMin = b.fitsCrossAtXRe != null ? b.fitsCrossAtXRe : -SCENE_TAIL_RE;
+        this.bowShock = this._surfaceOfRevolution(
+            (th) => bowShockRadiusRe(th, b.bowL), bowMin, GEOSPACE_COLORS.bowShock, 0.3);
+        this.boundaryGroup.add(this.magnetopause, this.bowShock);
+    }
+
+    /**
+     * Turn the layers on/off and/or hand over a new `geospaceState`. Either
+     * argument may be omitted. Widening the envelope is a CAPABILITY, not a
+     * flight — the camera only moves if the user zooms out or presses the
+     * Geospace preset (the page may start a flight, it may not hold the camera).
+     */
+    setGeospace({ sun, moon, state } = {}) {
+        const g = this.geo;
+        if (sun != null) g.sunOn = !!sun;
+        if (moon != null) g.moonOn = !!moon;
+        if (state) g.state = state;
+        this.geoGroup.visible = g.sunOn || g.moonOn;
+        this.sunGroup.visible = g.sunOn;
+        this.moonGroup.visible = g.moonOn;
+
+        const distMax = g.moonOn ? DIST_MAX_MOON : g.sunOn ? DIST_MAX_SUN : DIST_MAX;
+        this._sceneRadius = this.geoGroup.visible ? SCENE_RADIUS_GEO : SCENE_RADIUS;
+        if (distMax !== this._distMax) {
+            this._distMax = distMax;
+            this.controls.maxDistance = distMax;
+            // Shrinking the envelope with the camera outside it: bring the
+            // camera back inside rather than leave OrbitControls to snap it.
+            const d = this.camera.position.distanceTo(this.controls.target);
+            if (d > distMax) this.flyTo({ dist: distMax * 0.9 });
+        }
+        if (g.state) this._applyGeospaceState(g.state);
+    }
+
+    _applyGeospaceState(st) {
+        const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+        const X = new THREE.Vector3(1, 0, 0);
+        const Y = new THREE.Vector3(0, 1, 0);
+
+        // Sun ray, glyph, terminator and sub-solar ring all live in a frame
+        // whose +x is the Sun: one quaternion turns them together.
+        const sunDir = v3(st.sun.scene).normalize();
+        const qSun = new THREE.Quaternion().setFromUnitVectors(X, sunDir);
+        for (const o of [this.sunRay, this.sunGlyph, this.terminator]) o.quaternion.copy(qSun);
+        this.sunGlyph.position.copy(sunDir).multiplyScalar(SUN_GLYPH_RE);
+        this.subsolarRing.position.copy(sunDir).multiplyScalar(1.006);
+        this.subsolarRing.lookAt(sunDir.clone().multiplyScalar(2));
+        this.dipoleAxis.quaternion.setFromUnitVectors(Y, v3(st.dipoleAxisScene).normalize());
+
+        // Boundaries: rebuild only when the wind actually moved them.
+        const b = st.boundary;
+        const key = `${b.r0Re.toFixed(3)}|${b.alpha.toFixed(4)}|${b.bowL.toFixed(3)}|${b.fitsCrossAtXRe}`;
+        if (key !== this.geo.boundaryKey) {
+            this._rebuildBoundaries(b);
+            this.geo.boundaryKey = key;
+        }
+        const axis = v3(st.flowAxisScene).normalize();
+        this.boundaryGroup.quaternion.setFromUnitVectors(X, axis);
+
+        // Moon: true position, true size, the airless shader's real-km uniforms.
+        const m = st.moon;
+        this.moonMesh.position.set(m.scene[0], m.scene[1], m.scene[2]);
+        this.moonMarker.position.copy(this.moonMesh.position);
+        const u = this.moonMesh.material.uniforms;
+        u.u_sunFromBodyKm.value.set(...m.sunFromMoonKm);
+        u.u_occFromBodyKm.value.set(...m.earthFromMoonKm);
+        u.u_illum.value = 1 / (st.sun.distAU * st.sun.distAU);
+        u.u_shineDir.value.set(...m.earthFromMoonKm).normalize();
+        // Earthshine: Earth's reflected light AT the Moon, as a fraction of
+        // direct sunlight — eclipse-geometry.js, phase measured at the EARTH.
+        const sunKm = m.sunFromMoonKm.map((x, i) => x - m.earthFromMoonKm[i]);
+        u.u_shine.value = reflectedIrradianceFraction({
+            bodyFromPlanetKm: m.earthFromMoonKm.map((x) => -x),
+            sunFromPlanetKm: sunKm,
+            planetRadiusKm: EARTH_RADIUS_KM,
+            albedo: BODY_ALBEDO.earth,
+        });
+        const orbit = this.moonOrbit.geometry;
+        orbit.setAttribute('position', new THREE.BufferAttribute(m.orbitScene, 3));
+        orbit.computeBoundingSphere();
+
+        // Tail cross-section at the Moon's downstream distance, on the flow
+        // axis — drawn only where a tail exists (nightside).
+        if (m.tailRadiusRe) {
+            this.tailSection.visible = true;
+            this.tailSection.position.copy(axis).multiplyScalar(m.xRe);
+            this.tailSection.quaternion.setFromUnitVectors(X, axis);
+            this.tailSection.scale.setScalar(m.tailRadiusRe);
+        } else {
+            this.tailSection.visible = false;
+        }
+    }
+
+    /** Per-frame: keep the screen-space aids screen-sized. */
+    _updateGeospaceFrame() {
+        if (!this.geo?.moonOn || !this.moonGroup.visible) return;
+        const dCam = this.camera.position.distanceTo(this.moonMesh.position);
+        // ~10 px ring radius regardless of range, never smaller than the body.
+        const px = 10;
+        const worldPerPx = (2 * dCam * Math.tan((this.camera.fov * DEGR) / 2)) / (this._cssH || 420);
+        this.moonMarker.scale.setScalar(Math.max(MOON_R * 1.6, px * worldPerPx));
+        this.moonMarker.quaternion.copy(this.camera.quaternion);
+        // Up close the ring is a distraction on top of the body itself.
+        this.moonMarker.visible = dCam > 6;
+    }
+
+    _moonProbe() {
+        const st = this.geo.state;
+        if (!st) return null;
+        const m = st.moon;
+        return {
+            kind: 'moon',
+            label: 'Moon',
+            latDeg: m.sublunar.latDeg,
+            lonDeg: m.sublunar.lonDeg,
+            distRe: m.distRe,
+            region: m.region,
+            extrapolated: m.extrapolated,
+            tailRadiusRe: m.tailRadiusRe,
+            rhoRe: m.rhoRe,
+            xRe: m.xRe,
+            phase: m.phase,
+            point: this.moonMesh.position.clone(),
+        };
     }
 
     /**
@@ -1507,6 +1882,7 @@ export class CoreFieldScene {
                 if (o.material?.uniforms?.uTime) o.material.uniforms.uTime.value = t;
             });
         }
+        this._updateGeospaceFrame();
         this.controls.update();
         // Re-derive the cut from the camera each frame, so orbiting rotates the
         // opening with you instead of hiding it.
@@ -1535,6 +1911,7 @@ export class CoreFieldScene {
             if (o.geometry) o.geometry.dispose();
             if (o.material) {
                 if (o.material.uniforms?.uField?.value) o.material.uniforms.uField.value.dispose();
+                if (o.material.map) o.material.map.dispose();
                 o.material.dispose();
             }
         });
