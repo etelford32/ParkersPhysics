@@ -256,6 +256,9 @@ const glass = RC.buildGlass({ ...CFG, ...SIM });
         const inner = dg.fieldBins.filter(b => b.r1 <= rEff);
         const worstInner = Math.max(...inner.map(b => b.rel));
         assert.ok(worstInner < 0.15 && dg.fieldError < 0.2, `field match: inner ${worstInner}, overall ${dg.fieldError}`);
+        // Each bin also carries its miss and its field in (km/s)²/Mpc, and
+        // rel IS their ratio (plan §4j: the rim is read against `field`).
+        for (const b of dg.fieldBins) assert.ok(Math.abs(b.abs - b.rel * b.field) <= 1e-9 * b.field, `bin ${b.r0}`);
         // The page's ICs are 2LPT (js/bootes-lpt.js, tests/bootes-lpt.mjs);
         // measured on this layout the void interior went 7.5 → 3.4 % (§4f).
         assert.equal(dg.ics, '2lpt');

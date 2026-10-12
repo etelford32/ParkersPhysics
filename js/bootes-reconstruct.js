@@ -79,9 +79,15 @@
  *    no glass reproduces particle for particle — and the FIELD is what the
  *    reconstruction claims (`fieldMatch`, gated): on the page, today's
  *    gravity is reproduced to ~1 % in the void's core, ≤ 4 % inside R_eff,
- *    7–19 % on the wall and ~35 % at the sampled sphere's rim (plan §4i,
+ *    and outside R_eff to a FLAT miss of ~200–350 (km/s)²/Mpc — ≤ 2.3 % of
+ *    the void's peak pull out to the sampled sphere's rim (plan §4i–§4j,
  *    against the forecast's RELAXED observed state; before that relaxation
  *    the wall read 33–41 %, most of it the target's own sampling grain).
+ *    As a share of the LOCAL field that is 6–18 % on the wall and ~32 % in
+ *    the rim bin, because past R_eff the void and its wall cancel and the
+ *    field falls ~20× — the rim is that denominator, not a failure there
+ *    (§4j: neither truncation nor tree error; `fieldMatch` returns `abs`
+ *    and `field` per bin so it is read correctly).
  *    FIELD FEEDBACK (re-run, then push ψ by the gravity the evolved state
  *    still lacks) was also built and measured out: it improved today's field
  *    (16 → 10 % on the gate layout) and, in the twin test, the recovered
@@ -355,7 +361,14 @@ export function fieldMatch({
     return {
         overall: Math.sqrt(E / T),
         bins: [...bins].sort((u, v) => u[0] - v[0])
-            .map(([r0, B]) => ({ r0, r1: r0 + binMpc, rel: Math.sqrt(B.e / B.t), n: B.n })),
+            .map(([r0, B]) => ({
+                r0, r1: r0 + binMpc, rel: Math.sqrt(B.e / B.t), n: B.n,
+                // The same error in (km/s)²/Mpc, and the field it is divided
+                // by: past R_eff the void and its wall cancel, so `field`
+                // falls ~20× to the rim while `abs` stays flat (plan §4j) —
+                // read the rim's `rel` against that, never on its own.
+                abs: Math.sqrt(B.e / B.n), field: Math.sqrt(B.t / B.n),
+            })),
     };
 }
 

@@ -320,7 +320,7 @@ export function createNbodyRunner({ zObs, rEff, aEnd, onChange = () => {} }) {
         const ic = { ...msg.ic };
         // The same relaxation as the worker's, one pass per task.
         const rl = msg.relax
-            ? createRelaxer({ ...ic, tables: msg.relax.tables, iterations: msg.relax.iterations, rate: msg.relax.rate, ...msg.sim })
+            ? createRelaxer({ ...ic, tables: msg.relax.tables, iterations: msg.relax.iterations, rates: msg.relax.rates, ...msg.sim })
             : null;
         const relaxTick = () => {
             if (msg.id !== st.id) return;

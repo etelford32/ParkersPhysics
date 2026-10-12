@@ -95,6 +95,26 @@ export const DEFAULT_THETA = 0.6;
 export const DEFAULT_LEAF = 8;
 
 /**
+ * Chebyshev-accelerated step sizes for a relaxation whose modes respond with
+ * gains in [wMin, 1] (plan §4j): rate_j = 1/λ_j at the n Chebyshev nodes of
+ * that interval, so the product Π(1 − rate_j·w) is the smallest polynomial on
+ * it. Ordered largest, smallest, next largest, … so no stretch of large steps
+ * runs unchecked (the transient a large step puts on the w ≈ 1 modes is taken
+ * back by the next small one). A wMin of 0.15 or below grew the residual
+ * transiently and dragged the profile; 0.25 converged monotonically.
+ */
+export function chebyshevRates(n, wMin) {
+    const r = [];
+    for (let j = 1; j <= n; j++) {
+        r.push(1 / ((1 + wMin) / 2 + (1 - wMin) / 2 * Math.cos(Math.PI * (2 * j - 1) / (2 * n))));
+    }
+    r.sort((a, b) => a - b);
+    const out = [];
+    while (r.length) { out.push(r.pop()); if (r.length) out.push(r.shift()); }
+    return out;
+}
+
+/**
  * The page's run, in one place so the worker, the panel and the gate cannot
  * drift apart. Measured on that configuration (tests/bootes-nbody.mjs):
  * ~36 000 massive particles + ~3 500 galaxies, ~0.6 s per step in V8 plus
@@ -107,7 +127,8 @@ export const DEFAULT_LEAF = 8;
  *                      the model's field on the wall)
  *   spline h = 24 Mpc  (2× spacing) — the smooth matter's resolution
  *   relax 20 passes    the quiet start's non-spherical grain relaxed away,
- *                      its profile kept (`createRelaxer`)
+ *                      its profile kept (`createRelaxer`); the step sizes are
+ *                      the Chebyshev schedule over [0.25, 1] (plan §4j)
  */
 export const PAGE_CONFIG = Object.freeze({
     // UNIFORM 12 Mpc to the rim (plan §4i): the zoom that coarsened to 24 Mpc
@@ -115,7 +136,9 @@ export const PAGE_CONFIG = Object.freeze({
     // model (it is small there: the void and its wall nearly cancel).
     ic: (rEffMpc) => ({ radius: 2.6 * rEffMpc, spacing: 12, refineRadius: Infinity, seed: 7 }),
     // …and its lattice grain RELAXED away before the run (`createRelaxer`).
-    relax: Object.freeze({ iterations: 20, rate: 0.7 }),
+    // The step sizes are a Chebyshev schedule (plan §4j): a fixed 0.7 left the
+    // grain the softening barely feels — the floor that IS the rim's error.
+    relax: Object.freeze({ iterations: 20, rates: Object.freeze(chebyshevRates(20, 0.25)) }),
     sim: Object.freeze({ theta: 0.5, leafSize: 16 }),
     steps: 24,
 });
@@ -1273,6 +1296,22 @@ function tableAt(arr, dr, nodes, r) {
  * minimising fell nicely. Matching the spherical part to an independent
  * table re-derives what the quiet start already has exactly — so it doesn't.
  *
+ * TWO ADDITIONS (plan §4j), each because the rim's error was this grain:
+ *  - STEP SIZES. A fixed rate shrinks a grain mode by (1 − rate·ŵ) per pass,
+ *    ŵ the softened force's response to it. Modes near the softening scale
+ *    (ŵ ~ 0.3) barely felt 0.7, and their leftover force was a FLAT floor
+ *    (~150 (km/s)²/Mpc from 120 Mpc to the rim) that the vanishing field there
+ *    turned into 20 %. The default is a Chebyshev schedule over ŵ ∈ [0.25, 1]
+ *    (`chebyshevRates`): the same 20 passes take the floor to ~80.
+ *  - THE MONOPOLE PIN. Subtracting each shell's average radial force does not
+ *    stop the mass moving radially at second order, and larger steps moved
+ *    it more (Δ(<r) drifted 0.016 at rate 0.7, 0.022 at 1.5, 0.12 at an
+ *    aggressive schedule). After every pass each particle is put back at the
+ *    radius where the QUIET START had the same enclosed mass (rank by radius,
+ *    interpolate the start's cumulative mass) — only |x| changes, never the
+ *    direction, so the grain relaxation is untouched and the profile is the
+ *    quiet start's to ~1e-4 by construction, whatever the steps are.
+ *
  * The particles move ~1 Mpc rms — enough that their velocities must follow
  * (a stale velocity near a clump is ~10 km/s, the size of the whole 6 Gyr
  * effect), so they are recomputed with the SAME arithmetic as
@@ -1280,7 +1319,8 @@ function tableAt(arr, dr, nodes, r) {
  */
 export function createRelaxer({
     pos, vel, mass, group, nBackground, softening, background, aStart, tables,
-    iterations = PAGE_CONFIG.relax.iterations, rate = PAGE_CONFIG.relax.rate, binMpc = 2,
+    iterations = PAGE_CONFIG.relax.iterations, rates = PAGE_CONFIG.relax.rates, rate = null,
+    pinMonopole = true, binMpc = 2,
     theta = DEFAULT_THETA, leafSize = DEFAULT_LEAF, cosmo = COSMOLOGY,
 }) {
     if (Math.abs(aStart - tables.aObs) > 1e-12) throw new Error('relax: the observed state must start at z_obs');
@@ -1319,6 +1359,34 @@ export function createRelaxer({
         }
         return Math.sqrt(s / nB) / k4;
     };
+    // A fixed `rate` (the old relaxer, kept as the A/B) overrides the schedule.
+    const steps = rate != null ? [rate] : rates;
+    // The monopole pin: the radii the quiet start drew, sorted, with the
+    // enclosed mass at each (mid-particle, so equal masses land on the start's
+    // own radii exactly).
+    const order0 = Array.from({ length: nB }, (_, i) => i);
+    const rad = (P, i) => Math.hypot(P[3 * i], P[3 * i + 1], P[3 * i + 2]);
+    const r0s = new Float64Array(nB), c0 = new Float64Array(nB);
+    {
+        const rr = order0.map((i) => rad(sim.x, i));
+        const ord = order0.slice().sort((a, b) => rr[a] - rr[b]);
+        let c = 0;
+        ord.forEach((i, k) => { c += sim.mass[i]; r0s[k] = rr[i]; c0[k] = c - 0.5 * sim.mass[i]; });
+    }
+    const pin = () => {
+        const rr = order0.map((i) => rad(sim.x, i));
+        const ord = order0.slice().sort((a, b) => rr[a] - rr[b]);
+        let c = 0, j = 0;
+        for (const i of ord) {
+            c += sim.mass[i];
+            const cm = c - 0.5 * sim.mass[i];
+            while (j < nB - 2 && c0[j + 1] < cm) j++;
+            const t = Math.max(0, Math.min(1, (cm - c0[j]) / (c0[j + 1] - c0[j])));
+            const target = r0s[j] + t * (r0s[j + 1] - r0s[j]);
+            const s = rr[i] > 1e-9 ? target / rr[i] : 1;
+            sim.x[3 * i] *= s; sim.x[3 * i + 1] *= s; sim.x[3 * i + 2] *= s;
+        }
+    };
     const history = [measure()];
     let done = 0;
     return {
@@ -1327,7 +1395,9 @@ export function createRelaxer({
         history,
         step() {
             if (done >= iterations) return false;
-            for (let k = 0; k < 3 * nB; k++) sim.x[k] -= rate * grain[k] / k4;
+            const rk = steps[done % steps.length];
+            for (let k = 0; k < 3 * nB; k++) sim.x[k] -= rk * grain[k] / k4;
+            if (pinMonopole) pin();
             sim.refreshForces();
             history.push(measure());
             done++;

@@ -8,8 +8,8 @@
  * Messages in:
  *   { type: 'run', id, ic, aEnd, steps, sim, record, accretion, relax }
  *       ic = { pos, vel, mass, group, nMassive, nBackground, aStart, softening, background }
- *       relax = { tables, iterations, rate } — relax the smooth matter onto the
- *       exact model field first (bootes-nbody.js createRelaxer, plan §4i)
+ *       relax = { tables, iterations, rates } — relax the smooth matter's grain
+ *       away first, its profile pinned (bootes-nbody.js createRelaxer, plan §4i–§4j)
  *   { type: 'replay', id, keys, points, velocities }   — against the LAST run
  *   { type: 'reconstruct', id, args }   — js/bootes-reconstruct.js reconstructRun
  *   { type: 'recon-replay', id, keys, points }        — galaxies through it
@@ -55,7 +55,7 @@ self.onmessage = (e) => {
             const ic = { ...m.ic };
             let relaxInfo = null;
             if (m.relax) {
-                const rl = createRelaxer({ ...ic, tables: m.relax.tables, iterations: m.relax.iterations, rate: m.relax.rate, ...m.sim });
+                const rl = createRelaxer({ ...ic, tables: m.relax.tables, iterations: m.relax.iterations, rates: m.relax.rates, ...m.sim });
                 const total = rl.iterations;
                 self.postMessage({ type: 'progress', id: m.id, stage: 'relax', step: 0, steps: total });
                 while (rl.step()) self.postMessage({ type: 'progress', id: m.id, stage: 'relax', step: rl.stepsDone, steps: total });

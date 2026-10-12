@@ -459,10 +459,52 @@ const shellErr = (ic, sim, aStart, aEnd, rLo, rHi) => {
         worst = Math.max(worst, Math.abs(d - deficit.integratedAt(r)));
     }
     assert.ok(worst < 0.01 && rs.length === ic.nBackground && mEach > 0, `enclosed contrast after relaxing: ${worst}`);
+    // The pin (plan §4j): the relaxed enclosed mass is the QUIET START's, not
+    // merely near the profile — compared on the same radii.
+    const enclosedDrift = (P) => {
+        let w = 0;
+        for (const r of [30, 60, 90, 120, 150]) {
+            let m0 = 0, m1 = 0;
+            for (let i = 0; i < ic.nBackground; i++) {
+                if (rad(ic.pos, i) < r) m0 += ic.mass[i];
+                if (rad(P, i) < r) m1 += ic.mass[i];
+            }
+            w = Math.max(w, Math.abs(m1 - m0) / (rho * 4 / 3 * Math.PI * r ** 3));
+        }
+        return w;
+    };
+    const pinned = enclosedDrift(out.pos);
+    // The A/B: the old relaxer (fixed rate 0.7, no pin) leaves more grain
+    // outside — that floor was the rim's error — and lets the mass drift.
+    const old = NB.createRelaxer({ ...ic, tables, rate: 0.7, pinMonopole: false, ...NB.PAGE_CONFIG.sim });
+    while (old.step());
+    const oldOut = old.result(), oldGrain = grain(oldOut.pos), oldDrift = enclosedDrift(oldOut.pos);
+    assert.ok(pinned < 2e-3 && oldDrift > 2 * pinned, `pin: Δ(<r) drift ${pinned} (unpinned ${oldDrift})`);
+    assert.ok(after.out < 0.8 * oldGrain.out, `schedule: outside grain ${after.out} vs fixed rate ${oldGrain.out}`);
     ok(`relaxing the grain away: ${rl.iterations} passes move the smooth matter ${out.shiftRmsMpc.toFixed(2)} Mpc rms; `
         + `its grain against the exact deficit field ${(100 * before.in).toFixed(1)} → ${(100 * after.in).toFixed(1)} % in the core, `
-        + `${(100 * before.out).toFixed(1)} → ${(100 * after.out).toFixed(1)} % outside; velocities are observedState's where the particles `
-        + `now sit (${vel1.toExponential(1)}); Δ(<r) still the profile's ±${worst.toFixed(3)}`);
+        + `${(100 * before.out).toFixed(1)} → ${(100 * after.out).toFixed(1)} % outside (a fixed rate 0.7: `
+        + `${(100 * oldGrain.out).toFixed(1)} %); velocities are observedState's where the particles `
+        + `now sit (${vel1.toExponential(1)}); Δ(<r) still the profile's ±${worst.toFixed(3)} and the quiet start's `
+        + `${pinned === 0 ? "exactly" : "±" + pinned.toExponential(1)} (unpinned ±${oldDrift.toExponential(1)})`);
+}
+
+// ── 12. The Chebyshev step sizes ───────────────────────────────────────────
+{
+    const rates = NB.chebyshevRates(20, 0.25);
+    let worst = 0, fixed = 0;
+    for (let k = 0; k <= 400; k++) {
+        const w = 0.25 + 0.75 * k / 400;
+        worst = Math.max(worst, Math.abs(rates.reduce((p, r) => p * (1 - r * w), 1)));
+        fixed = Math.max(fixed, Math.abs((1 - 0.7 * w) ** 20));
+    }
+    // The minimax bound on [0.25, 1] is 2·(1/3)^20 ≈ 6e-10.
+    assert.ok(rates.length === 20 && worst < 1e-9 && fixed > 0.01, `chebyshev: ${worst} vs fixed ${fixed}`);
+    assert.deepEqual([...NB.PAGE_CONFIG.relax.rates], rates);
+    // Largest first, then alternating: no two large steps in a row.
+    for (let k = 0; k + 1 < rates.length; k += 2) assert.ok(rates[k] > rates[k + 1]);
+    ok(`the relaxation's step sizes: 20 Chebyshev rates over ŵ ∈ [0.25, 1] leave any mode there at most `
+        + `${worst.toExponential(1)} of itself (a fixed 0.7: ${fixed.toFixed(3)})`);
 }
 
 console.log(`\n${passed} checks passed — js/bootes-nbody.js`);

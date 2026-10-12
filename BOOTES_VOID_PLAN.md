@@ -349,8 +349,8 @@ stepping on the page without a Worker) → `js/bootes/track-panel.js`.
 Measured (page configuration, `tests/bootes-nbody.mjs` + the browser gate):
 ~30 s in a Worker since §4i (was 8.4 s); the self-gravitating web moves the
 deepest void galaxy ~4 kpc from the shell tracker over the next 6 Gyr (median
-tracer 2 kpc, p90 4 kpc, against a median forecast displacement of 0.19 Mpc);
-smooth matter within 20 Mpc of the web's nodes grows +4.1 %. Until §4i this
+tracer 1 kpc, p90 2 kpc since §4j, against a median forecast displacement of
+0.19 Mpc); smooth matter within 20 Mpc of the web's nodes grows +4.9 %. Until §4i this
 read 6 / 35 / 75 kpc: that was the old layout's LATTICE GRAIN pushing the
 galaxies about, not the web (measured — §4i). REAL BUT SMALL: Λ is
 switching growth off (D rises only ×1.18 from z_obs to t₀ + 6 Gyr), and the
@@ -596,7 +596,7 @@ field: each pass subtracts the shell-averaged radial force (2 Mpc bins) and
 moves every particle against the rest, r·F_grain/4πGρ̄₀ (the glass
 relaxation of §4e step 1, restricted). The quiet start already carries the
 profile's spherical part exactly, so that is kept (gated: Δ(<r) ±0.009 after
-20 passes). Velocities are recomputed where the particles now sit with the
+20 passes; since §4j it is PINNED to the quiet start's enclosed mass). Velocities are recomputed where the particles now sit with the
 SAME arithmetic as `observedState` (gated to 1e-6) — they move ~1.7 Mpc rms,
 and a stale velocity near a clump is ~10 km/s, the size of the effect.
 MEASURED REJECTION: relaxing the WHOLE field onto the analytic deficit table.
@@ -623,10 +623,80 @@ layouts land in between (uniform unrelaxed 16 / 28 kpc, relaxed zoom
 5–7 / 27–30 kpc), tracking the grain level. The outermost bin is the sphere's
 rim, where the model's field is weakest.
 
-Next, honestly: the rim (sample past 2.6 R_eff, or taper what the page claims
-there); a Bayesian forward model whose prior regularises the shooting that
-failed in §4e — and, before any of it matters for science, a REAL density
-field in place of the model web (§6).
+(§4j re-measures these with the relaxation it adds — the rim was this grain.)
+
+### 4j. The rim — a flat miss over a vanishing field, and the grain floor under it
+
+"Fix the rim" started from the outermost bins: the forecast's observed state
+20.5 % off the model at 210 Mpc, the reconstruction 35.8 % in 210–240 Mpc.
+MEASURED FIRST, the rim is not a place where anything goes wrong:
+
+| Forecast observed state (relaxed, §4i) | 30 | 60 | 90 | 120 | 150 | 180 | 210 Mpc |
+|-----|----|----|----|-----|-----|-----|-----|
+| miss, (km/s)²/Mpc | 418 | 522 | 203 | 183 | 166 | 159 | 151 |
+| model total field there | 15 133 | 16 003 | 8 752 | 3 776 | 2 032 | 1 242 | 748 |
+
+The miss is FLAT from the wall to the rim; the field it is divided by falls
+~20× because the void and its wall cancel outside the shell — the reason
+`influenceProfile` never reports reach as a fraction of the total (§3). Two
+tests ruled the edge itself out: sampling the smooth matter to 3.0 R_eff
+(275 Mpc, 52 278 particles) with the same tracers left every bin unchanged
+(210 Mpc: 151 → 166, noise), and evaluating at θ = 0.25 instead of 0.5 moved
+nothing (149), so it is neither truncation nor tree error. (The core's 400–500
+is the 24 Mpc SOFTENING, not grain: the particles' unsoftened monopole matches
+the exact field to < 0.1 % at 20–200 Mpc, the softened shell average reads
+2–3 % low inside the void.)
+
+THE FLOOR is the relaxation's leftover grain. A fixed rate shrinks a grain
+mode by (1 − rate·ŵ) per pass, ŵ the softened force's response to it; modes
+near the softening scale barely moved at 0.7. 40 passes took 151 → 98 at
+twice the cost; larger rates did better per pass but MOVED THE PROFILE
+(Δ(<r) drifted 0.016 at 0.7, 0.022 at 1.5, 0.12 at an aggressive Chebyshev
+schedule) — subtracting each shell's average radial force does not stop mass
+moving radially at second order. Two changes, both in `createRelaxer`:
+
+- **THE MONOPOLE PIN.** After every pass each particle is put back at the
+  radius where the QUIET START had the same enclosed mass (rank by radius,
+  interpolate the start's cumulative mass at mid-particle) — only |x| changes,
+  never the direction. Δ(<r) is then the quiet start's to ~1e-4 whatever the
+  steps are (gated: exact on the test layout, unpinned 9e-3).
+- **CHEBYSHEV STEP SIZES** over ŵ ∈ [0.25, 1] (`chebyshevRates`), largest and
+  smallest alternated so no run of large steps goes unchecked; the product
+  polynomial leaves any mode in that band ≤ 6e-10 of itself after 20 passes
+  (a fixed 0.7: 0.021). Measured with the pin, same 20 passes and cost:
+
+| Schedule (pinned) | 120 | 150 | 180 | 210 Mpc | history |
+|-------------------|-----|-----|-----|---------|---------|
+| fixed 0.7 | 185 | 168 | 161 | 153 | monotone |
+| fixed 1.9 | 109 | 101 | 89 | 83 | monotone |
+| Chebyshev [0.15, 1] | 102 | 90 | 77 | 70 | GREW to 0.45 first; Δ(<r) 1.6e-3 |
+| **Chebyshev [0.25, 1] (shipped)** | 109 | 100 | 88 | 81 | monotone, Δ(<r) 1e-4 |
+
+| What moved (page configuration, 1 200 tracers) | §4i | §4j |
+|---------------------------------|--------|-------|
+| forecast observed state, 150 / 180 / 210 Mpc | 8.1 / 12.8 / 20.2 % | **4.9 / 7.1 / 10.8 %** |
+| forecast observed state, core 30 / 60 Mpc | 2.8 / 3.3 % | 2.4 / 2.8 % |
+| forecast vs shell tracker, deepest / tracers median / p90 (6 Gyr) | 4 / 2 / 4 kpc | **4 / 1 / 2 kpc** |
+| forecast: matter ≤ 20 Mpc of the nodes | +4.1 % | +4.9 % |
+| reconstruction: 120 / 150 / 180 / 210 Mpc bins | 6.7 / 12.1 / 19.1 / 35.8 % | 6.3 / 11.2 / 17.8 / 31.9 % |
+| reconstruction: overall | 6.2 % | **5.5 %** |
+
+The reconstruction barely moved because its rim is ITS OWN flat floor, not
+the target's: its miss is 177 / 195 / 353 / 256 / 221 / 208 / 236
+(km/s)²/Mpc from the core to the rim, ≤ 2.3 % of the void's peak pull
+everywhere. The MATCHED state (before the forward run) is already at
+~80–130 with a small edge bump (133 in the rim bin vs ~80 just inside); the
+forward run from z = 9 adds ~200 roughly uniformly — the non-linear
+evolution 2LPT + the softened-growth correction do not capture, and not a
+rim effect. `fieldMatch` therefore now returns each bin's `abs` and `field`
+in (km/s)²/Mpc beside `rel` (gated: rel ≡ abs/field), and the page quotes
+the outside of R_eff against the void's PEAK pull ("within ~2 % … out to the
+rim", browser-gated < 5 %), never as a share of the vanishing local field.
+
+Next, honestly: the forward run's ~200 (km/s)²/Mpc floor (the reconstruction's
+remaining error everywhere, not just the rim); a Bayesian forward model whose
+prior regularises the shooting that failed in §4e — and, before any of it
+matters for science, a REAL density field in place of the model web (§6).
 
 ---
 

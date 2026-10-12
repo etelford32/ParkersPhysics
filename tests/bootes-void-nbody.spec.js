@@ -241,6 +241,12 @@ test.describe('Boötes Void — N-body forecast', () => {
         expect(d).toBeLessThan(10);
         const inner = out.dg.fieldBins.filter(b => b.r1 <= 92).map(b => b.rel);
         expect(Math.max(...inner)).toBeLessThan(0.2);
+        // The rim (plan §4j): the miss is FLAT in absolute terms out to the
+        // sampled sphere's edge — a few % of the void's peak pull — however
+        // large its share of the vanishing local field gets there.
+        const peak = Math.max(...out.dg.fieldBins.map(b => b.field));
+        const outer = out.dg.fieldBins.filter(b => b.r1 > 92).map(b => b.abs);
+        expect(Math.max(...outer)).toBeLessThan(0.05 * peak);
         expect(out.dg.galaxyResidualsMpc.at(-1)).toBeLessThan(0.1);
 
         // The stage draws the reconstruction's own frames in the PAST.

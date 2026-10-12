@@ -286,10 +286,16 @@ export function createTrackPanel({
         if (r.status === 'ready') {
             const dg = r.result.diagnostics;
             const inner = dg.fieldBins.filter(b => b.r1 <= rEff).map(b => b.rel);
+            // Past R_eff the void and its wall cancel, so a percentage of the
+            // LOCAL field grows towards the rim while the miss itself stays
+            // flat (plan §4j): quote the outside against the void's peak pull.
+            const peak = Math.max(...dg.fieldBins.map(b => b.field));
+            const outer = Math.max(...dg.fieldBins.filter(b => b.r1 > rEff).map(b => b.abs));
             const g = dg.galaxyResidualsMpc[dg.galaxyResidualsMpc.length - 1];
             return `Reconstructed: ${dg.elements.toLocaleString('en-US')} elements from z = 9 `
                 + `(${dg.ics === '2lpt' ? '2LPT' : 'Zel\'dovich'} ICs${dg.growthKappa != null ? ', softening-corrected' : ''}) · today's gravity `
-                + `reproduced to ${num(100 * Math.max(...inner), 0)} % inside R_eff (${num(100 * dg.fieldError, 0)} % overall) · `
+                + `reproduced to ${num(100 * Math.max(...inner), 0)} % inside R_eff (${num(100 * dg.fieldError, 0)} % overall); `
+                + `outside it the miss stays within ${num(100 * outer / peak, 1)} % of the void's peak pull out to the rim · `
                 + `galaxies land within ${num(1000 * g, 0)} kpc · ${num(dg.seconds, 0)} s.`;
         }
         return 'Reconstruction: not run — the past shown is the shell reconstruction.';
