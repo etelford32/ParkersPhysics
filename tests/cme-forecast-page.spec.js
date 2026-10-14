@@ -152,4 +152,60 @@ test.describe('CME Forecast public page', () => {
         await expect(page.locator('#cmef-skill-grid')).toContainText('Prospective skill is maturing');
         expect(errors, errors.join('\n')).toHaveLength(0);
     });
+    // The eruption outlook (js/cme-outlook-strip.js): its OWN strip, its own
+    // feeds, never chips. Live: seven cells with numbers; feeds down: an
+    // honest "unavailable" — never a 0 %.
+    test('eruption outlook strip: live and feeds-down', async ({ page }) => {
+        await page.route('**/api/cme/skill**', (route) => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: { updated: new Date().toISOString(), models: [], events: [] } }),
+        }));
+        const today = new Date().toISOString().slice(0, 10);
+        await page.route('**/api/noaa/regions**', (route) => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: { regions: [
+                { region: 14321, observed_date: today, location: 'N12E05', area: 420,
+                  m_flare_probability: 60, x_flare_probability: 15 },
+                { region: 14322, observed_date: today, location: 'S18E40', area: 150,
+                  m_flare_probability: 20, x_flare_probability: 1 },
+            ] } }),
+        }));
+        await page.route('**/api/hek/coronal-holes**', (route) => route.abort());
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto('/cme-forecast.html', { waitUntil: 'domcontentloaded' });
+
+        const strip = page.locator('#cmef-outlook');
+        await expect(strip).toHaveAttribute('data-state', 'ok', { timeout: 15_000 });
+        await expect(strip.locator('.cmef-ol-cell')).toHaveCount(7);
+        await expect(strip).toContainText('2 visible regions');
+        await expect(strip).toContainText('coronal holes · feed down');
+        await expect(strip.locator('.cmef-ol-cell.is-lb')).toHaveCount(4);
+        const texts = await strip.locator('.cmef-ol-p').allTextContents();
+        expect(texts.every((t) => /%$/.test(t)), texts.join(' ')).toBe(true);
+        expect(texts.some((t) => t === '0%')).toBe(false);
+        // Outlook never writes into the ledger's calendar.
+        await expect(page.locator('#cmef-calendar-grid .cmef-chip')).toHaveCount(0);
+        // Still one screen with the strip in place.
+        const fold = await page.evaluate(() => ({
+            bottom: Math.round(document.querySelector('.cmef').getBoundingClientRect().bottom),
+            viewport: document.documentElement.clientHeight,
+        }));
+        expect(fold.bottom).toBeLessThanOrEqual(fold.viewport);
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+    test('eruption outlook says unavailable when the regions feed is down', async ({ page }) => {
+        await page.route('**/api/cme/skill**', (route) => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: { updated: new Date().toISOString(), models: [], events: [] } }),
+        }));
+        await page.route('**/api/noaa/regions**', (route) => route.abort());
+        await page.route('**/api/hek/coronal-holes**', (route) => route.abort());
+        await page.goto('/cme-forecast.html', { waitUntil: 'domcontentloaded' });
+        const strip = page.locator('#cmef-outlook');
+        await expect(strip).toHaveAttribute('data-state', 'no-regions', { timeout: 15_000 });
+        await expect(strip).toContainText('unavailable · regions feed down');
+        await expect(strip.locator('.cmef-ol-p')).toHaveText(Array(7).fill('—'));
+        expect(errors, errors.join('\n')).toHaveLength(0);
+    });
 });
