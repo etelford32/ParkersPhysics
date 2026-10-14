@@ -48,6 +48,18 @@ Pricing hypothesis: **$3,500 fixed-scope founding assessment**. Test the offer
 with at least ten qualified conversations. Require three paid assessments
 before building customer-specific integrations.
 
+**2026-10 revision — Storm-Season Fleet Assessment (live on `request-access.html#offer`).**
+Buyer narrowed to university CubeSat programs and NewSpace startups (~5–100
+spacecraft, 350–600 km, no in-house flight dynamics). Spire / Planet / SpaceX
+wait until there are case studies. The offer is an ASSISTED, hand-run 90-day
+engagement over the customer's NORAD IDs: (1) drag & decay outlook,
+(2) storm alerts sent before each event, (3) a post-storm report scoring the
+forecast against the customer's own tracking data. Price **$3,000–$7,500 fixed,
+set by fleet size**. Goal: **3 paid pilots by year-end**, each written up as a
+case study; the case studies sell the annual contracts. The post-storm reports
+are also how principle 5 gets earned — keep the page free of accuracy claims
+until they do.
+
 ## Product principles
 
 1. **Decisions before dashboards.** Every view must answer an operational
