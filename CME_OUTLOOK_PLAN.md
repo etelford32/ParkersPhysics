@@ -125,3 +125,20 @@ the rest of the run is unaffected.
 - Source-region prior in the response table, if `flux-rope-v1-src` wins.
 - CME–HSS interaction (a CME riding a fast stream arrives early).
 - SWPC 3-day forecast as the second Brier baseline.
+
+## 7. Live-data check (2026-10-14)
+
+Run against the production relay the same day:
+
+- `/api/noaa/regions` serves SWPC's probabilities (field_map complete,
+  coverage 0.67). It also exposed a pre-existing bug: SWPC's numeric
+  `longitude` is east-positive and the relay labelled it west-positive, so
+  every region was mirrored. Fixed in `api/_lib/noaa-regions.js` (see
+  CLAUDE.md, corridor row). On the real snapshot the outlook peaks ~6 % on
+  day 4 as AR 4551 (S15E07, βγδ) rotates in; mirrored it read ~4 %.
+- `/api/hek/coronal-holes` was answering 503 (HEK returned HTML). The strip
+  shows "coronal holes · feed down" — correct behaviour, but the stream row
+  is empty until HEK recovers. Separately: the browser has no measured wind
+  record per hole, so its stream speeds are always the 450–650 km/s
+  climatology band ("HSS (clim.)"); wiring `holeWindAssociation` from the
+  L1 driver would give measured speeds.

@@ -206,5 +206,21 @@ check('top region attributed', centre.days[2].topRegions[0].region === '14321');
     })());
 }
 
+// ── 6. Today's REAL Sun (production relay snapshot, 2026-10-14) ──────────────
+{
+    const { readFileSync } = await import('node:fs');
+    const { normalizeSolarRegions } = await import('../api/_lib/noaa-regions.js');
+    const fx = JSON.parse(readFileSync(new URL('./fixtures/noaa-solar-regions-2026-10-14.json', import.meta.url), 'utf8'));
+    const real = issueOutlook({ regionRows: normalizeSolarRegions(fx.rows).regions, cells: RESPONSE_CELLS,
+        nowMs: Date.parse('2026-10-14T18:00:00Z') });
+    check('real snapshot: outlook issued from 10 regions', real.ok && real.coverage.regionsUsable === 10);
+    // AR 4551 (S15E07, BGD, M 25 % / X 10 %) is rotating INTO the
+    // geoeffective band, so the outlook must grow over days 1–4 and name it.
+    // Mirrored longitudes (the pre-fix relay) put it at W07 rotating out.
+    check('real snapshot: rises as AR 4551 rotates in', real.days[4].pArrival > real.days[1].pArrival
+        && real.days[4].topRegions[0].region === '4551',
+        real.days.map((d) => d.pArrival.toFixed(3)).join(' '));
+}
+
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
 console.log('\ncme-outlook: all checks passed');

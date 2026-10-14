@@ -83,6 +83,20 @@ function resolveKey(row, candidates) {
     return null;
 }
 
+/**
+ * "S15E07" → { latDeg: −15, lonDeg: −7 } — WEST-POSITIVE (the repo's one
+ * Stonyhurst convention, js/flare-geometry.js parseStonyhurst). Refuses
+ * SWPC's past-the-limb placeholders ("N09W0*"): those are not a longitude.
+ */
+function parseLocation(s) {
+    const m = String(s ?? '').toUpperCase().match(/([NS])\s*(\d{1,2})\s*([EW])\s*(\d{1,3})(?![\d*])/);
+    if (!m) return null;
+    return {
+        latDeg: (m[1] === 'N' ? 1 : -1) * Number(m[2]),
+        lonDeg: (m[3] === 'W' ? 1 : -1) * Number(m[4]),
+    };
+}
+
 /** Coerce to a finite number, or null. Handles SWPC's numeric-strings. */
 function toNumber(v) {
     const n = typeof v === 'string' ? parseFloat(v) : v;
@@ -138,6 +152,41 @@ export function normalizeSolarRegions(raw) {
         return out;
     });
 
+    // ── Longitude: WEST-POSITIVE, measured not assumed (2026-10-14) ──────
+    // SWPC's numeric `longitude` is EAST-positive: on the production feed of
+    // 2026-10-14 all 196 rows with a parseable location read the OPPOSITE
+    // sign ("S15E07" → longitude 7, "S08W34" → −34), while this relay had
+    // passed it through as `stonyhurst_lon_deg` — so the hero Sun, sun.html's
+    // watch panel and the CME outlook all placed every region mirrored E↔W.
+    // The hand-written fixture had assumed west-positive, which is why no
+    // test saw it. Now: the LOCATION string is the source (unambiguous);
+    // the numeric field is used only where the location is a past-limb
+    // placeholder ("W0*"), with its sign MEASURED from the rows that have
+    // both — so if SWPC ever flips it, this follows and `longitude_check`
+    // says so.
+    let mirrored = 0, same = 0;
+    for (const [i, row] of rows.entries()) {
+        const p = parseLocation(row[fieldMap.location]);
+        const n = regions[i].stonyhurst_lon_deg;
+        if (!p || n === null || p.lonDeg === 0) continue;
+        if (n === -p.lonDeg) mirrored++;
+        else if (n === p.lonDeg) same++;
+    }
+    const numericSign = same > mirrored ? 1 : -1;   // default: SWPC's measured convention
+    let fromLocation = 0, fromNumeric = 0;
+    for (const [i, row] of rows.entries()) {
+        const out = regions[i];
+        const p = parseLocation(row[fieldMap.location]);
+        if (p) {
+            out.stonyhurst_lon_deg = p.lonDeg;
+            if (out.latitude_deg === null) out.latitude_deg = p.latDeg;
+            fromLocation++;
+        } else if (out.stonyhurst_lon_deg !== null) {
+            out.stonyhurst_lon_deg = numericSign * out.stonyhurst_lon_deg;
+            fromNumeric++;
+        }
+    }
+
     // What fraction of regions carry BOTH an area and an M-class probability —
     // the pair the rank match needs. This is the number to watch: it is 0 both
     // when SWPC stops publishing probabilities and when our candidate list is
@@ -152,5 +201,15 @@ export function normalizeSolarRegions(raw) {
         unmapped_keys: [...unmapped].sort().slice(0, 40),
         probability_coverage: regions.length ? usable / regions.length : 0,
         region_count: regions.length,
+        // stonyhurst_lon_deg is west-positive; this says how each row got it
+        // and what sign the upstream numeric field was measured to carry.
+        longitude_check: {
+            convention: 'west-positive',
+            from_location: fromLocation,
+            from_numeric: fromNumeric,
+            numeric_upstream: numericSign === -1 ? 'east-positive' : 'west-positive',
+            agree_mirrored: mirrored,
+            agree_same: same,
+        },
     };
 }
