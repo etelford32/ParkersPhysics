@@ -58,6 +58,32 @@ async function mockFeed(page) {
 }
 
 /**
+ * The three real-time feeds the Sun/Moon layer polls, served synthetically.
+ * A storm-ish wind on purpose: 650 km/s, 12 cm⁻³, Bz −12 nT compresses the
+ * nose well inside the nominal 10.9 R_E, so a page that silently ignored the
+ * feed and drew NOMINAL_WIND would fail the r₀ assertion.
+ */
+async function mockGeoFeeds(page, { windDown = false } = {}) {
+    await page.route('**/api/solar-wind/latest*', (route) => route.fulfill(windDown
+        ? { status: 503, contentType: 'application/json', body: '{"error":"down"}' }
+        : {
+            status: 200, contentType: 'application/json',
+            body: JSON.stringify({
+                source: 'mock', age_min: 1.4, freshness: 'fresh',
+                data: { current: { speed_km_s: 650, density_cc: 12, bz_nT: -12 } },
+            }),
+        }));
+    await page.route('**/api/noaa/kp-1m*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ age_min: 0.8, data: { current: { kp: 6.33 } } }),
+    }));
+    await page.route('**/api/noaa/dst*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ age_min: 20, data: { current: { dst_nT: -88 } } }),
+    }));
+}
+
+/**
  * Collect page errors and console errors.
  *
  * Two classes are filtered, both narrowly and for a stated reason — a broad
@@ -812,6 +838,125 @@ test.describe('tiga.html', () => {
         // Leaving the canvas puts the hint back.
         await page.mouse.move(box.x + box.width / 2, box.y - 40);
         await expect(page.locator('#tg-readout-hint')).toBeVisible();
+    });
+
+    test('the Sun and Moon layers draw the LIVE wind’s boundaries and the Moon’s regime', async ({ page }) => {
+        test.setTimeout(180000);
+        const errors = watchErrors(page);
+        await killFeed(page);
+        await mockGeoFeeds(page);
+        await page.goto(PAGE, { waitUntil: 'load' });
+
+        // Off by default, and no feed is polled until a layer is on.
+        await expect(page.locator('#tg-geo-panel')).toBeHidden();
+
+        await page.click('#tg-geo-sun');
+        await expect(page.locator('#tg-geo-panel')).toBeVisible();
+        await expect(page.locator('#tg-geo-sun')).toHaveAttribute('aria-pressed', 'true');
+        // The feed reached the kernel: the mock wind, not NOMINAL_WIND.
+        await expect(page.locator('#tg-geo-windtag')).toHaveText('Measured at L1', { timeout: 20000 });
+        await expect(page.locator('#tg-geo-v')).toContainText('650');
+        const r0 = parseFloat(await page.locator('#tg-geo-r0').textContent());
+        // Shue at 8.5 nPa, Bz −12 ⇒ ~7.6 R_E; nominal wind would be 10.9.
+        expect(r0).toBeGreaterThan(6.5);
+        expect(r0).toBeLessThan(8.6);
+        await expect(page.locator('#tg-geo-kp')).toHaveText('6.33');
+        await expect(page.locator('#tg-geo-dst')).toContainText('-88');
+        // Aberration at 650 km/s is atan(~30/650) ≈ 2.6°.
+        const ab = parseFloat(await page.locator('#tg-geo-aberr').textContent());
+        expect(ab).toBeGreaterThan(2.2);
+        expect(ab).toBeLessThan(3.0);
+
+        await page.click('#tg-geo-moon');
+        const geo = await page.evaluate(() => {
+            const g = window.__tigaGeo.state;
+            return {
+                region: g.moon.region, distRe: g.moon.distRe, extrap: g.moon.extrapolated,
+                xRe: g.moon.xRe, liveDate: g.date.getTime(),
+            };
+        });
+        expect(geo.distRe).toBeGreaterThan(55);
+        expect(geo.distRe).toBeLessThan(64);
+        expect(['magnetotail', 'magnetosheath', 'solar-wind']).toContain(geo.region);
+        // Past both fits only on the night side — and then it must say so.
+        expect(geo.extrap).toBe(geo.xRe < -40);
+        if (geo.extrap) await expect(page.locator('#tg-geo-status')).toContainText('extrapolation');
+
+        // Scrubbing moves the clock, and the panel says the wind is held.
+        await page.locator('#tg-geo-offset').fill('48');
+        await page.locator('#tg-geo-offset').dispatchEvent('input');
+        await expect(page.locator('#tg-geo-tag')).toHaveText('Scrubbed clock');
+        await expect(page.locator('#tg-geo-status')).toContainText('wind is held');
+        const scrubbed = await page.evaluate(() => window.__tigaGeo.state.date.getTime());
+        expect(Math.abs(scrubbed - geo.liveDate - 48 * 3600e3)).toBeLessThan(120e3);
+        await page.click('#tg-geo-live');
+        await expect(page.locator('#tg-geo-tag')).toHaveText('Live');
+
+        // The 3D half, where WebGL exists: the Moon at TRUE distance and size,
+        // the envelope widened to reach it, and the key listing what is drawn.
+        await page.waitForFunction(
+            () => !document.getElementById('tg-stage-msg')
+                || /unavailable/.test(document.getElementById('tg-stage-msg').textContent),
+            null, { timeout: 90000 });
+        if (!(await page.locator('#tg-stage-msg').count())) {
+            const s3 = await page.evaluate(() => {
+                const sc = window.__tigaScene;
+                const st = window.__tigaGeo.state;
+                return {
+                    moonR: sc.moonMesh.position.length(), wantR: st.moon.distRe,
+                    moonSize: sc.moonMesh.geometry.parameters.radius,
+                    maxDist: sc.controls.maxDistance,
+                    mpVisible: sc.magnetopause?.visible && sc.sunGroup.visible,
+                };
+            });
+            expect(Math.abs(s3.moonR - s3.wantR)).toBeLessThan(1e-6);
+            expect(s3.moonSize).toBeCloseTo(1737.4 / 6371.2, 6);
+            expect(s3.maxDist).toBeGreaterThan(s3.wantR * 2);
+            expect(s3.mpVisible).toBe(true);
+            const labels = await page.locator('#tg-key-body li .tg-key-lb')
+                .evaluateAll((els) => els.map((e) => e.firstChild.textContent.trim()));
+            expect(labels).toEqual(expect.arrayContaining(['Magnetopause', 'Bow shock', 'Moon', 'Lunar orbit']));
+            // Key swatches are the exported constants, like every other row.
+            const bad = await page.evaluate(() => {
+                const C = window.__tigaScene.palettes.GEOSPACE_COLORS;
+                const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+                const want = { Magnetopause: hex(C.magnetopause), 'Bow shock': hex(C.bowShock), Moon: hex(C.moon) };
+                return [...document.querySelectorAll('#tg-key-body li')].map((li) => {
+                    const n = li.querySelector('.tg-key-lb').firstChild.textContent.trim();
+                    const got = li.querySelector('.tg-key-sw').dataset.color;
+                    return want[n] && want[n] !== got ? n : null;
+                }).filter(Boolean);
+            });
+            expect(bad).toEqual([]);
+
+            // Both layers off: the envelope shrinks back and nothing is drawn.
+            await page.click('#tg-geo-moon');
+            await page.click('#tg-geo-sun');
+            await expect(page.locator('#tg-geo-panel')).toBeHidden();
+            const off = await page.evaluate(() => ({
+                vis: window.__tigaScene.geoGroup.visible,
+                maxDist: window.__tigaScene.controls.maxDistance,
+            }));
+            expect(off.vis).toBe(false);
+            expect(off.maxDist).toBe(30);
+        }
+        expect(errors).toEqual([]);
+    });
+
+    test('a dead L1 feed is labelled NOMINAL, never passed off as live', async ({ page }) => {
+        const errors = watchErrors(page);
+        await killFeed(page);
+        await mockGeoFeeds(page, { windDown: true });
+        await page.goto(PAGE, { waitUntil: 'load' });
+        await page.click('#tg-geo-sun');
+        await expect(page.locator('#tg-geo-windtag')).toHaveText('Nominal — feed down', { timeout: 20000 });
+        await expect(page.locator('#tg-geo-feeds')).toContainText('down');
+        await expect(page.locator('#tg-geo-v')).toContainText('nominal');
+        // The geometry still renders from NOMINAL_WIND (r₀ ≈ 10.9 R_E).
+        const r0 = parseFloat(await page.locator('#tg-geo-r0').textContent());
+        expect(r0).toBeGreaterThan(10.5);
+        expect(r0).toBeLessThan(11.3);
+        expect(errors).toEqual([]);
     });
 
     test('every layer carries its honest label', async ({ page }) => {
