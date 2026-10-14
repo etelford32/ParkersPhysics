@@ -1,0 +1,320 @@
+/**
+ * bootes-void-nbody.spec.js — browser gate for the galaxy tracker's
+ * "N-body forecast" mode on bootes-void.html.
+ *
+ * Run: npx playwright test tests/bootes-void-nbody.spec.js
+ *
+ * The physics is pinned in node (tests/bootes-nbody.mjs). This checks what
+ * only a browser can: that the run happens in a Worker and lands, that the
+ * N-body future JOINS the shell tracker at the observed epoch (position and
+ * velocity) and leaves the past untouched, that the stage's field and web are
+ * the run's particles after z_obs and are put back exactly at z_obs, that a
+ * galaxy tracked after the run is flown through the stored matter, and that
+ * with no Worker the page computes the IDENTICAL forecast itself.
+ */
+
+import { test, expect } from '@playwright/test';
+
+const PAGE = '/bootes-void.html';
+const RUN_TIMEOUT = 150_000;
+
+async function ready(page) {
+    await page.goto(PAGE);
+    await page.waitForFunction(
+        () => document.querySelector('#bv-track-card')?.dataset.trackReady === '1',
+        null, { timeout: 25000 });
+}
+
+async function runNbody(page) {
+    await page.selectOption('[data-bv-track="mode"]', 'nbody');
+    await page.waitForFunction(
+        () => document.querySelector('#bv-track-card')?.dataset.nbody === 'ready',
+        null, { timeout: RUN_TIMEOUT });
+}
+
+const text = (page, key) => page.locator(`[data-bv="${key}"]`).first().textContent();
+
+/** Galaxy A at time t: the composed (N-body) sample and the shell tracker's. */
+const sampleA = (page, t) => page.evaluate((tt) => {
+    const tr = window.__bootesLab.tracker;
+    const tl = tr.timeline;
+    const k = tl.epochs.reduce((best, e, i) => (Math.abs(e.tGyr - tt) < Math.abs(tl.epochs[best].tGyr - tt) ? i : best), 0);
+    const ep = tl.epochs[k];
+    const g = tr.tracked[0];
+    const pick = (s) => ({ pos: s.positionMpc, v: s.vKms, g: s.gA, nbody: !!s.nbody, tGyr: s.tGyr });
+    return { main: pick(g.main.at(ep)), shell: pick(g.linear.at(ep)) };
+}, t);
+
+test.describe('Boötes Void — N-body forecast', () => {
+    test.setTimeout(RUN_TIMEOUT + 60_000);
+
+    test('runs in a worker, joins the shell tracker at z_obs, and takes over after it', async ({ page }) => {
+        const errors = [];
+        page.on('pageerror', e => errors.push(String(e)));
+        await ready(page);
+        await expect(page.locator('[data-bv="trackNbody"]').first()).toContainText('off');
+        expect(await page.evaluate(() => window.__bootesLab.tracker.nbody.state.status)).toBe('idle');
+        await runNbody(page);
+        expect(await page.evaluate(() => window.__bootesLab.tracker.nbody.state.status)).toBe('ready');
+        await expect(page.locator('[data-bv="trackNbody"]').first()).toContainText('done in');
+        await expect(page.locator('[data-bv="trackNbody"]').first()).toContainText('galaxies as test particles');
+
+        // THE RELAXATION ran in the worker before the run (plan §4i): the
+        // quiet start's grain fell, the particles moved ~1–3 Mpc, and the
+        // reconstruction's target is that relaxed state.
+        const relax = await page.evaluate(() => {
+            const st = window.__bootesLab.tracker.nbody.state;
+            const h = st.relax?.history ?? [];
+            return { passes: h.length - 1, first: h[0], last: h[h.length - 1], shift: st.relax?.shiftRmsMpc,
+                observed: st.observed ? st.observed.pos.length / 3 : 0, massive: st.observed ? st.observed.mass.length : -1 };
+        });
+        expect(relax.passes).toBe(20);
+        expect(relax.last).toBeLessThan(relax.first / 5);
+        expect(relax.shift).toBeGreaterThan(0.5);
+        expect(relax.shift).toBeLessThan(4);
+        expect(relax.observed).toBe(relax.massive);
+
+        // THE JOIN. Frame 0 of the run is the observed state: galaxy A sits
+        // at its observed point with the shell tracker's velocity.
+        const join = await page.evaluate(() => {
+            const tr = window.__bootesLab.tracker;
+            const g = tr.tracked[0];
+            const tObs = tr.timeline.tObsGyr;
+            const z = tr.timeline.zObs;
+            const ep = { tGyr: tObs + 1e-6, a: 1 / (1 + z), z, D: 1, gravity: 1, tidal: 1, velocity: 1 };
+            const nb = tr.nbody.sampleFor(g.xObsMpc, ep);
+            const sh = g.linear.at({ ...ep, tGyr: tObs });
+            return {
+                dPos: Math.hypot(...nb.positionMpc.map((c, i) => c - g.xObsMpc[i])),
+                dV: Math.abs(nb.vKms - sh.vKms) / sh.vKms,
+                dG: Math.abs(nb.gA - sh.gA) / sh.gA,
+            };
+        });
+        expect(join.dPos).toBeLessThan(1e-4);
+        expect(join.dV).toBeLessThan(2e-3);
+        // The force differs only by the smooth matter's resolution (~24 Mpc).
+        expect(join.dG).toBeLessThan(0.15);
+
+        // The past is the shell reconstruction, exactly.
+        const past = await sampleA(page, 5);
+        expect(past.main.nbody).toBe(false);
+        expect(past.main.pos).toEqual(past.shell.pos);
+
+        // The future is the run's, and it differs from the shell tracker by a
+        // real but small amount — the nonlinear web.
+        const t0 = await page.evaluate(() => window.__bootesLab.tracker.timeline.t0Gyr);
+        const fut = await sampleA(page, t0 + 5);
+        expect(fut.main.nbody).toBe(true);
+        const d = Math.hypot(...fut.main.pos.map((c, i) => c - fut.shell.pos[i]));
+        expect(d).toBeGreaterThan(1e-4);
+        expect(d).toBeLessThan(5);
+
+        await page.evaluate((t) => window.__bootesLab.tracker.setTime(t), t0 + 5);
+        await expect.poll(() => page.locator('#bv-track-rows tr').first().locator('td').nth(6).textContent())
+            .toBe('N-body');
+        await expect(page.locator('[data-bv="trackAccretion"]').first()).toContainText('% vs z_obs');
+        await expect(page.locator('[data-bv="trackNlGain"]').first()).toContainText('kpc from the shell');
+        await expect(page.locator('[data-bv="trackRegime"]').first()).toContainText('self-gravitating');
+        expect(errors).toEqual([]);
+    });
+
+    test('the stage draws the run\'s particles after z_obs and is restored exactly at z_obs', async ({ page }) => {
+        await ready(page);
+        const drawn = () => page.evaluate(() => {
+            const pts = window.__bootesLab.scene.groups.tracers.children[0];
+            return Array.from(pts.geometry.getAttribute('position').array.slice(0, 600));
+        });
+        const atObs = await drawn();
+        await runNbody(page);
+        const t0 = await page.evaluate(() => window.__bootesLab.tracker.timeline.t0Gyr);
+        await page.evaluate((t) => window.__bootesLab.tracker.setTime(t), t0 + 5);
+        await expect.poll(async () => {
+            const now = await drawn();
+            return now.some((c, i) => Math.abs(c - atObs[i]) > 1e-3);
+        }).toBe(true);
+        // The tracers drawn ARE the run's frames at that instant.
+        const match = await page.evaluate((t) => {
+            const lab = window.__bootesLab;
+            const tl = lab.tracker.timeline;
+            const ep = tl.epochs.reduce((b, e) => (Math.abs(e.tGyr - t) < Math.abs(b.tGyr - t) ? e : b));
+            lab.tracker.setTime(ep.tGyr);
+            return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+                const want = lab.tracker.nbody.tracerPositionsAt(ep.a);
+                const pts = lab.scene.groups.tracers.children[0];
+                const got = pts.geometry.getAttribute('position').array;
+                // scene.js draws Mpc / SCENE_SCALE (20).
+                let worst = 0;
+                for (let i = 0; i < 300; i++) worst = Math.max(worst, Math.abs(got[i] * 20 - want[i]));
+                resolve({ worst });
+            })));
+        }, t0 + 5);
+        expect(match.worst).toBeLessThan(1e-3);
+        await page.click('#bv-track-obs');
+        await expect.poll(async () => {
+            const now = await drawn();
+            return now.every((c, i) => c === atObs[i]);
+        }).toBe(true);
+    });
+
+    test('a galaxy tracked after the run is flown through the stored matter', async ({ page }) => {
+        await ready(page);
+        await runNbody(page);
+        await page.click('#bv-track-add-random');
+        const t0 = await page.evaluate(() => window.__bootesLab.tracker.timeline.t0Gyr);
+        await expect.poll(() => page.evaluate((t) => {
+            const tr = window.__bootesLab.tracker;
+            const ep = tr.timeline.epochs.find(e => e.tGyr > t);
+            return !!tr.tracked[1]?.main.at(ep).nbody;
+        }, t0 + 3), { timeout: 30000 }).toBe(true);
+    });
+
+    test('with no Worker the page computes the identical forecast itself', async ({ browser }) => {
+        const ctxA = await browser.newContext();
+        const a = await ctxA.newPage();
+        await ready(a);
+        await runNbody(a);
+        const t0 = await a.evaluate(() => window.__bootesLab.tracker.timeline.t0Gyr);
+        const withWorker = await sampleA(a, t0 + 4);
+        await ctxA.close();
+
+        const ctxB = await browser.newContext();
+        await ctxB.addInitScript(() => { delete window.Worker; });
+        const b = await ctxB.newPage();
+        await ready(b);
+        expect(await b.evaluate(() => typeof Worker)).toBe('undefined');
+        await runNbody(b);
+        const local = await sampleA(b, t0 + 4);
+        expect(local.main.nbody).toBe(true);
+        expect(local.main.pos).toEqual(withWorker.main.pos);
+        expect(local.main.v).toBe(withWorker.main.v);
+        // The reconstruction is a minute of gravity: without a Worker it is
+        // NOT run on the page, and the card says why.
+        await expect(b.locator('#bv-track-recon')).toBeDisabled();
+        await expect(b.locator('[data-bv="trackRecon"]').first()).toContainText('background worker');
+        await ctxB.close();
+    });
+
+    test('reconstruct the past: one N-body run from z = 9 that lands on today\'s web', async ({ page }) => {
+        // ~4 min of gravity since the forward model (plan §4l), more on a loaded box.
+        test.setTimeout(1_800_000);
+        const errors = [];
+        page.on('pageerror', e => errors.push(String(e)));
+        await ready(page);
+        await expect(page.locator('#bv-track-recon')).toBeDisabled();          // nonlinear mode
+        await runNbody(page);
+        await expect(page.locator('#bv-track-recon')).toBeEnabled();
+        await page.click('#bv-track-recon');
+        await expect(page.locator('#bv-track-card')).toHaveAttribute('data-recon', 'running');
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Reconstructing');
+        await page.waitForFunction(
+            () => document.querySelector('#bv-track-card')?.dataset.recon === 'ready',
+            null, { timeout: 720_000 });
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Reconstructed:');
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('Bayesian forward model');
+        await expect(page.locator('[data-bv="trackRecon"]').first()).toContainText('from z = 9');
+
+        const out = await page.evaluate(() => {
+            const tr = window.__bootesLab.tracker;
+            const r = tr.nbody;
+            const dg = r.recon.result.diagnostics;
+            const tl = tr.timeline;
+            const g = tr.tracked[0];
+            const z = tl.zObs;
+            const atObs = r.reconSampleFor(g.xObsMpc, { tGyr: tl.tObsGyr, a: 1 / (1 + z), z });
+            const past = g.main.at(tl.epochs.find(e => e.tGyr > 2));
+            const shellPast = g.linear.at(tl.epochs.find(e => e.tGyr > 2));
+            const fut = g.main.at(tl.epochs[tl.epochs.length - 1]);
+            return {
+                dg,
+                land: Math.hypot(...atObs.positionMpc.map((c, i) => c - g.xObsMpc[i])),
+                past: { rec: !!past.reconstructed, pos: past.positionMpc, share: past.voidShare },
+                shellPast: shellPast.positionMpc,
+                fut: !!fut.reconstructed,
+                aInit: r.reconAInit,
+            };
+        });
+        expect(out.aInit).toBeCloseTo(0.1, 6);
+        expect(out.land).toBeLessThan(0.2);                     // galaxy A lands where it is seen
+        expect(out.past.rec).toBe(true);                        // the past is the run now
+        expect(out.past.share).toBeNaN();                       // no void/web split to claim
+        expect(out.fut).toBe(true);                             // and so is the future
+        const d = Math.hypot(...out.past.pos.map((c, i) => c - out.shellPast[i]));
+        expect(d).toBeGreaterThan(1e-3);
+        expect(d).toBeLessThan(10);
+        const inner = out.dg.fieldBins.filter(b => b.r1 <= 92).map(b => b.rel);
+        expect(Math.max(...inner)).toBeLessThan(0.2);
+        // The rim (plan §4j): the miss is FLAT in absolute terms out to the
+        // sampled sphere's edge — a few % of the void's peak pull — however
+        // large its share of the vanishing local field gets there.
+        const peak = Math.max(...out.dg.fieldBins.map(b => b.field));
+        const outer = out.dg.fieldBins.filter(b => b.r1 > 92).map(b => b.abs);
+        expect(Math.max(...outer)).toBeLessThan(0.05 * peak);
+        expect(out.dg.galaxyResidualsMpc.at(-1)).toBeLessThan(0.1);
+        // The forward model ran in the Worker and lowered today's misfit at
+        // every accepted step (plan §4l).
+        const fm = out.dg.forwardModel;
+        expect(fm.iterations).toBeGreaterThan(0);
+        expect(fm.misfitAfter).toBeLessThan(0.8 * fm.misfitBefore);
+        for (let i = 1; i < fm.history.length; i++) expect(fm.history[i].misfit).toBeLessThan(fm.history[i - 1].misfit);
+
+        // The stage draws the reconstruction's own frames in the PAST.
+        const match = await page.evaluate(() => new Promise((resolve) => {
+            const lab = window.__bootesLab;
+            const ep = lab.tracker.timeline.epochs.find(e => e.tGyr > 3);
+            lab.tracker.setTime(ep.tGyr);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                const want = lab.tracker.nbody.reconTracersAt(ep.a);
+                const got = lab.scene.groups.tracers.children[0].geometry.getAttribute('position').array;
+                let worst = 0;
+                for (let i = 0; i < 300; i++) worst = Math.max(worst, Math.abs(got[i] * 20 - want[i]));
+                resolve(worst);
+            }));
+        }));
+        expect(match).toBeLessThan(1e-3);
+        await expect(page.locator('[data-bv="trackRegime"]').first()).toContainText('BEFORE the observed epoch');
+        await expect(page.locator('[data-bv="trackAccretion"]').first()).toContainText('(reconstruction)');
+
+        // A galaxy added afterwards is flown through the reconstructed matter.
+        await page.click('#bv-track-add-random');
+        await expect.poll(() => page.evaluate(() => {
+            const tr = window.__bootesLab.tracker;
+            return !!tr.tracked[1]?.main.at(tr.timeline.epochs.find(e => e.tGyr > 2)).reconstructed;
+        }), { timeout: 60000 }).toBe(true);
+
+        // THE POSTERIOR ENSEMBLE (plan §4m), through the real Workers: two
+        // members here (four on the page — each is a full reconstruction).
+        await expect(page.locator('#bv-track-ens')).toBeEnabled();
+        await page.evaluate(() => window.__bootesLab.tracker.nbody.ensemble({ members: 2 }));
+        await expect(page.locator('#bv-track-card')).toHaveAttribute('data-ens', 'running');
+        await page.waitForFunction(
+            () => document.querySelector('#bv-track-card')?.dataset.ens === 'ready',
+            null, { timeout: 900_000 });
+        await expect(page.locator('[data-bv="trackEns"]').first()).toContainText('2-member ensemble');
+        await expect(page.locator('[data-bv="trackEns"]').first()).toContainText('CALIBRATED');
+        // The galaxy tracked after the reconstruction is replayed through each member too.
+        await expect.poll(() => page.evaluate(() => {
+            const lab = window.__bootesLab;
+            lab.tracker.setTime(lab.tracker.timeline.epochs.find(e => e.tGyr > 2).tGyr);
+            return lab.scene.tracks.group.children.filter(c => c.name === 'ensemble-member').length;
+        }), { timeout: 120000 }).toBe(4);
+        const ens = await page.evaluate(() => new Promise((resolve) => {
+            const lab = window.__bootesLab;
+            const s = lab.tracker.nbody.ens.summary;
+            lab.tracker.setTime(lab.tracker.timeline.epochs.find(e => e.tGyr > 2).tGyr);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                const ghosts = lab.scene.tracks.group.children.filter(c => c.name === 'ensemble-member');
+                resolve({ s, ghosts: ghosts.length, pts: ghosts.map(g => g.geometry.getAttribute('position').count) });
+            }));
+        }));
+        expect(ens.s.N).toBe(2);
+        for (const v of [...ens.s.inside, ...ens.s.outside]) { expect(v).toBeGreaterThan(0); expect(v).toBeLessThan(1); }
+        // The printed band is the spread ⊕ the measured method bias, never below the spread.
+        for (const reg of ['inside', 'outside']) {
+            ens.s.total[reg].forEach((t, e) => expect(Math.abs(t - Math.hypot(ens.s[reg][e], ens.s.bias[reg][e]))).toBeLessThan(1e-12));
+        }
+        // Two members × the tracked galaxies, each a real path.
+        expect(ens.ghosts).toBe(2 * 2);
+        for (const n of ens.pts) expect(n).toBeGreaterThan(5);
+        expect(errors).toEqual([]);
+    });
+});

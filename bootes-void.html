@@ -280,6 +280,90 @@ details.bv-details[open] > summary::after { content:' ▴'; }
 .bv-foot ul { margin:0 0 0 18px; }
 .bv-foot li { margin-bottom:3px; }
 
+
+/* ── Force probe ──────────────────────────────────────────────────────────
+   The HUD chip sits in .bv-hud-right, which is pointer-events:none so it
+   never eats a drag — the tool button re-enables itself explicitly. */
+.bv-probe-hud {
+    pointer-events:auto; display:flex; align-items:center; gap:8px;
+    background:rgba(3,1,14,.72); border:1px solid rgba(199,146,234,.38);
+    border-radius:999px; padding:3px 4px 3px 11px; font-size:.7rem; color:#d9c2ef;
+    font-variant-numeric:tabular-nums; backdrop-filter:blur(3px);
+}
+#bv-probe-tool {
+    background:rgba(199,146,234,.12); color:#c792ea; font:inherit; font-size:.7rem;
+    border:1px solid rgba(199,146,234,.45); border-radius:999px; padding:3px 10px; cursor:pointer;
+}
+#bv-probe-tool[aria-pressed="true"] { background:rgba(199,146,234,.32); color:#fff; }
+#bv-probe-tool[hidden] { display:none; }
+.bv-probe { margin-bottom:16px; }
+.bv-probe-grid { display:grid; grid-template-columns:250px minmax(0,1.25fr) minmax(0,1fr); gap:16px; }
+.bv-probe-ctl label { display:block; margin-bottom:7px; color:#9aa4bd; font-size:.74rem; }
+.bv-probe-ctl input[type=range], .bv-probe-ctl select { width:100%; }
+.bv-probe-ctl input[type=range] { accent-color:#c792ea; margin-top:3px; }
+.bv-probe-ctl select {
+    background:#0a0f24; color:#cdd5e4; border:1px solid rgba(90,110,160,.4);
+    border-radius:7px; padding:5px 7px; font:inherit; font-size:.74rem;
+}
+.bv-probe-ctl .bv-val { color:#c792ea; font-variant-numeric:tabular-nums; font-weight:600; }
+.bv-ftable { width:100%; border-collapse:collapse; font-size:.76rem; font-variant-numeric:tabular-nums; }
+.bv-ftable th { color:#7d879e; font-weight:600; text-align:right; padding:3px 6px; font-size:.68rem; }
+.bv-ftable th:first-child, .bv-ftable td:first-child { text-align:left; }
+.bv-ftable td { color:#cdd5e4; text-align:right; padding:3px 6px; border-top:1px solid rgba(90,110,160,.16); }
+.bv-ftable .bv-sw { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+.bv-ftable tr.bv-total td { font-weight:700; color:#e6d3f7; }
+.bv-ftable td small { color:#6f7893; font-weight:400; }
+#bv-probe-contrib { margin:4px 0 0 0; padding:0; list-style:none; font-size:.72rem; }
+#bv-probe-contrib li {
+    display:grid; grid-template-columns:1fr auto; gap:1px 8px; align-items:center;
+    padding:4px 0; border-top:1px solid rgba(90,110,160,.14); color:#cdd5e4;
+}
+#bv-probe-contrib li em { grid-column:1; font-style:normal; color:#7d879e; font-size:.67rem; }
+#bv-probe-contrib li .bv-probe-go { grid-column:2; grid-row:1 / span 2; }
+.bv-probe-go {
+    background:none; color:#c792ea; font:inherit; font-size:.66rem;
+    border:1px solid rgba(199,146,234,.4); border-radius:6px; padding:2px 8px; cursor:pointer;
+}
+.bv-probe-go + .bv-probe-go { margin-left:4px; }
+.bv-probe h4 {
+    font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:#7d879e;
+    font-weight:700; margin:12px 0 5px;
+}
+.bv-probe h4:first-child { margin-top:0; }
+.bv-probe .bv-check-line { font-size:.66rem; color:#6f7893; margin-top:8px; font-variant-numeric:tabular-nums; }
+@media (max-width: 1180px) {
+    .bv-probe-grid { grid-template-columns:240px minmax(0,1fr); }
+    .bv-probe-grid > :last-child { grid-column:1 / -1; }
+}
+@media (max-width: 980px) {
+    .bv-probe-grid { grid-template-columns:1fr; }
+}
+
+
+/* ── Galaxy tracker ───────────────────────────────────────────────────── */
+.bv-track-grid { display:grid; grid-template-columns:300px minmax(0,1fr); gap:16px; }
+.bv-track-ctl .bv-btnrow { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px; }
+.bv-track-ctl .bv-btnrow .bv-btn { width:auto; flex:1 1 auto; }
+.bv-track-ctl input[type=range] { width:100%; accent-color:#f5c542; }
+.bv-track-ctl label { display:block; margin-bottom:7px; color:#9aa4bd; font-size:.74rem; }
+.bv-track-ctl label.bv-check { display:flex; }
+.bv-track-ctl select {
+    width:100%; margin-top:3px; background:#0a0f24; color:#cdd5e4; border:1px solid rgba(90,110,160,.4);
+    border-radius:7px; padding:5px 7px; font:inherit; font-size:.74rem;
+}
+#bv-track-play[aria-pressed="true"], #bv-track-pick[aria-pressed="true"] {
+    background:rgba(245,197,66,.25); color:#fff; border-color:rgba(245,197,66,.6);
+}
+#bv-track-pick[hidden] { display:none; }
+.bv-track-time { font-size:1rem; font-weight:700; color:#f5c542; font-variant-numeric:tabular-nums; }
+.bv-track-charts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.bv-track-charts canvas { height:170px; }
+@media (max-width: 1180px) { .bv-track-charts { grid-template-columns:1fr 1fr; } }
+@media (max-width: 980px) {
+    .bv-track-grid { grid-template-columns:1fr; }
+    .bv-track-charts { grid-template-columns:1fr; }
+}
+
 @media (max-width: 980px) {
     .bv-stage-grid { grid-template-columns:1fr; }
     .bv-rail { max-height:none; }
@@ -370,6 +454,10 @@ details.bv-details[open] > summary::after { content:' ▴'; }
         </div>
 
         <div class="bv-hud-right">
+            <div class="bv-probe-hud" title="Shift-drag on the stage moves the force probe. On touch, arm the tool first.">
+                <span>⊕ <span data-bv="probeHud">—</span></span>
+                <button type="button" id="bv-probe-tool" aria-pressed="false">Probe tool</button>
+            </div>
             <div class="bv-cam">
                 <span><b data-bv="camDistance">—</b> out</span>
                 <span>az <b data-bv="camAzimuth">—</b></span>
@@ -473,6 +561,245 @@ details.bv-details[open] > summary::after { content:' ▴'; }
             </details>
         </div>
     </aside>
+</section>
+
+<!-- ── Force probe ───────────────────────────────────────────────────── -->
+<!-- Every number here comes from js/bootes-force-probe.js (node-gated by
+     tests/bootes-force-probe.mjs); js/bootes/probe-panel.js only formats it. -->
+<section class="bv-card bv-probe" id="bv-probe-card">
+    <h2>Force probe — measure any point <span class="bv-tag">live</span></h2>
+    <p class="bv-q">
+        <strong>Shift-drag</strong> anywhere on the stage (or arm <em>Probe tool</em> and drag — the
+        touch path) to move the probe; it slides at its current depth, facing you. The sliders, the jump
+        list and each structure's <em>go</em> button move it too. Every term is recomputed at that point
+        from the same kernels as the tests below: the void's deficit and the smooth wall analytically,
+        the clumped web particle by particle. On the stage, the
+        <span style="color:#4fc3f7">void</span>, <span style="color:#ff9a56">web</span> and
+        <span style="color:#c792ea">total</span> arrows share one scale <em>at the probe</em>; the bars are
+        the tidal axes (<span style="color:#ff6f91">squeeze</span> /
+        <span style="color:#8ee3c8">stretch</span>), the violet line the streamline.
+    </p>
+    <div class="bv-probe-grid">
+        <div class="bv-probe-ctl">
+            <h4>Position</h4>
+            <p class="bv-hint" data-bv="probePos">—</p>
+            <label>Distance from centre <span class="bv-val" data-bv="probeRVal">—</span>
+                <input type="range" data-bv-probe="r" min="0" max="2.6" step="0.01" value="0.8"></label>
+            <label>Azimuth <span class="bv-val" data-bv="probeAzVal">—</span>
+                <input type="range" data-bv-probe="az" min="0" max="359" step="1" value="0"></label>
+            <label>Elevation <span class="bv-val" data-bv="probeElVal">—</span>
+                <input type="range" data-bv-probe="el" min="-90" max="90" step="1" value="0"></label>
+            <label>
+                <select data-bv-probe="jump" aria-label="Jump the probe to a place">
+                    <option value="" selected>Jump to…</option>
+                    <option value="centre">The void centre</option>
+                    <option value="los-in">Sightline, halfway in (0.5 R_eff)</option>
+                    <option value="los-wall">Sightline, on the wall (1 R_eff)</option>
+                    <option value="los-out">Sightline, beyond the wall (1.8 R_eff)</option>
+                    <option value="los-far">Far side of the void (1 R_eff)</option>
+                </select>
+            </label>
+            <h4>Show</h4>
+            <label class="bv-check"><input type="checkbox" data-bv-probe="visible" checked> Probe on the stage</label>
+            <label class="bv-check"><input type="checkbox" data-bv-probe="axes" checked> Tidal axes</label>
+            <label class="bv-check"><input type="checkbox" data-bv-probe="stream" checked> Streamline</label>
+            <h4>T-web classifier</h4>
+            <label>Threshold λ<sub>th</sub> = <span class="bv-val" data-bv="probeTwebTh">—</span>
+                <input type="range" data-bv-probe="tweb" min="0" max="0.6" step="0.02" value="0.2"></label>
+            <p class="bv-hint">
+                A point is a void, sheet, filament or knot by how many tidal eigenvalues exceed
+                λ<sub>th</sub> (Hahn et al. 2007; Forero-Romero et al. 2009). The threshold is a
+                classifier setting, not physics.
+            </p>
+        </div>
+
+        <div>
+            <h4>Peculiar acceleration at the probe <small style="text-transform:none;letter-spacing:0">(km/s per Gyr · radial + = away from the centre)</small></h4>
+            <table class="bv-ftable">
+                <thead><tr><th>term</th><th>|g|</th><th>radial</th><th>tangential</th></tr></thead>
+                <tbody>
+                    <tr><td><span class="bv-sw" style="background:#4fc3f7"></span>Void deficit δ⁻</td>
+                        <td data-bv="probeGVoid">—</td><td data-bv="probeGVoidR">—</td><td data-bv="probeGVoidT">—</td></tr>
+                    <tr><td><span class="bv-sw" style="background:#ff9a56;opacity:.5"></span>Wall, smooth shell δ⁺</td>
+                        <td data-bv="probeGWall">—</td><td data-bv="probeGWallR">—</td><td data-bv="probeGWallT">—</td></tr>
+                    <tr><td><span class="bv-sw" style="background:#ff9a56"></span>Wall, clumped web <small>= model B</small></td>
+                        <td data-bv="probeGWeb">—</td><td data-bv="probeGWebR">—</td><td data-bv="probeGWebT">—</td></tr>
+                    <tr><td><span class="bv-sw" style="background:#7ee787"></span>Clumping <small>web − smooth</small></td>
+                        <td data-bv="probeGClump">—</td><td data-bv="probeGClumpR">—</td><td data-bv="probeGClumpT">—</td></tr>
+                    <tr class="bv-total"><td><span class="bv-sw" style="background:#c792ea"></span>Total, model A <small>void + web</small></td>
+                        <td data-bv="probeGA">—</td><td data-bv="probeGAR">—</td><td data-bv="probeGAT">—</td></tr>
+                </tbody>
+            </table>
+            <dl class="bv-rows" style="margin-top:10px">
+                <dt>Local δ (smooth profile)</dt><dd data-bv="probeDelta">—</dd>
+                <dt>Void share of |g|</dt><dd data-bv="probeVoidShare">—</dd>
+                <dt>Peculiar velocity (linear)</dt><dd><span data-bv="probeVel">—</span> · <span data-bv="probeVelRadial">—</span></dd>
+                <dt>Potential Φ, model A</dt><dd data-bv="probePhi">—</dd>
+                <dt>Potential Φ, void alone</dt><dd data-bv="probePhiVoid">—</dd>
+            </dl>
+            <h4>Tidal field (void + web, units of 4πGρ̄)</h4>
+            <dl class="bv-rows">
+                <dt>λ₁</dt><dd data-bv="probeL1">—</dd>
+                <dt>λ₂</dt><dd data-bv="probeL2">—</dd>
+                <dt>λ₃</dt><dd data-bv="probeL3">—</dd>
+                <dt>T-web class</dt><dd data-bv="probeTweb">—</dd>
+                <dt>…in the smooth model</dt><dd data-bv="probeTwebSmooth">—</dd>
+            </dl>
+            <p class="bv-verdict" data-bv="probeStream">—</p>
+        </div>
+
+        <div>
+            <h4>Along the probe's ray</h4>
+            <canvas data-bv-chart="probeRay" aria-label="Radial force components along the ray from the void centre through the probe"></canvas>
+            <h4>Who pulls the hardest here</h4>
+            <ol id="bv-probe-contrib"></ol>
+            <p class="bv-verdict bv-caution">
+                The web rows describe <strong>this seeded realisation</strong>: re-roll it and they move,
+                while the void and smooth-wall rows do not. Velocity is linear theory (no non-spherical
+                quasi-linear correction exists to apply honestly); the streamline follows today's flow, not
+                any galaxy's path; the tidal class below the web's softening length
+                (<span data-bv="probeSoftening">—</span>) describes the softened mass, not finer structure.
+            </p>
+            <p class="bv-check-line">Identities at this point: <span data-bv="probeCheck">—</span></p>
+        </div>
+    </div>
+</section>
+
+<!-- ── Galaxy tracker ─────────────────────────────────────────────────── -->
+<!-- Every number here comes from js/bootes-void-tracker.js (node-gated by
+     tests/bootes-void-tracker.mjs); js/bootes/track-panel.js only formats it. -->
+<section class="bv-card bv-probe" id="bv-track-card">
+    <h2>Galaxy tracker — the void's galaxies through cosmic time <span class="bv-tag">nonlinear shells · N-body</span></h2>
+    <p class="bv-q">
+        At ~230 Mpc no single star or nebula in Boötes can be resolved. What surveys find inside the void are
+        about 60 <strong>galaxies</strong>, and the H&nbsp;I and emission-line studies of them (Szomoru et al. 1996;
+        Cruzen et al. 2002) find them gas-rich, blue and forming stars — their H&nbsp;II regions <em>are</em> the
+        void's nebulae. A galaxy carries its stars and nebulae with it, so following a galaxy follows them. Pick
+        galaxies, then scrub cosmic time. Each galaxy's spherical shell is evolved with the EXACT nonlinear
+        shell equation in ΛCDM (inverted from the observed profile), with the lumpy web's pull added in linear
+        theory on top. The charts show the force on it, its speed and its distance from the void
+        centre from 1 Gyr after the Big Bang to 6 Gyr past today, with the ±20 % bias band and the old linear
+        answer ghosted for comparison.
+        The galaxies here are the page's <strong>model</strong> tracers, not catalogued ones.
+    </p>
+    <div class="bv-track-grid">
+        <div class="bv-track-ctl">
+            <h4>Cosmic time</h4>
+            <div class="bv-track-time" data-bv="trackTime">—</div>
+            <p class="bv-hint" data-bv="trackEpoch">—</p>
+            <input type="range" data-bv-track="t" min="1" max="19.8" step="0.01" value="13.07"
+                   aria-label="Cosmic time in billions of years">
+            <div class="bv-btnrow">
+                <button class="bv-btn" type="button" id="bv-track-play" aria-pressed="false">▶ Play</button>
+                <button class="bv-btn" type="button" id="bv-track-obs">Observed epoch</button>
+                <button class="bv-btn" type="button" id="bv-track-now">Today</button>
+            </div>
+            <dl class="bv-rows">
+                <dt>Void depth δ ∝ D</dt><dd data-bv="trackGrowth">—</dd>
+                <dt>Pull g ∝ (1+z)²D</dt><dd data-bv="trackGScale">—</dd>
+                <dt>Outflow v ∝ aHfD</dt><dd data-bv="trackVScale">—</dd>
+            </dl>
+            <p class="bv-hint" style="margin-top:4px">each relative to the observed epoch</p>
+            <h4>Galaxies</h4>
+            <div class="bv-btnrow">
+                <button class="bv-btn" type="button" id="bv-track-add-deep">+ Deepest</button>
+                <button class="bv-btn" type="button" id="bv-track-add-random">+ Random</button>
+                <button class="bv-btn" type="button" id="bv-track-add-probe">+ At the probe</button>
+                <button class="bv-btn" type="button" id="bv-track-pick" aria-pressed="false">Pick on stage</button>
+                <button class="bv-btn" type="button" id="bv-track-clear">Clear</button>
+            </div>
+            <label class="bv-check"><input type="checkbox" data-bv-track="animate" checked> Move every galaxy on the stage</label>
+            <label class="bv-check"><input type="checkbox" data-bv-track="paths" checked> Show tracked paths</label>
+            <label class="bv-check"><input type="checkbox" data-bv-track="follow"> Camera follows galaxy A</label>
+            <h4>Model</h4>
+            <label>Dynamics
+                <select data-bv-track="mode">
+                    <option value="nonlinear" selected>Nonlinear shells + linear web (default)</option>
+                    <option value="nbody">N-body forecast (~30 s run)</option>
+                    <option value="linear">Linear theory only (reference)</option>
+                </select>
+            </label>
+            <p class="bv-hint" data-bv="trackNbody">—</p>
+            <div class="bv-btnrow">
+                <button class="bv-btn" type="button" id="bv-track-recon" disabled>Reconstruct the past (~4 min)</button>
+                <button class="bv-btn" type="button" id="bv-track-ens" disabled>Estimate the uncertainty</button>
+            </div>
+            <p class="bv-hint" data-bv="trackRecon">—</p>
+            <p class="bv-hint" data-bv="trackEns">—</p>
+            <dl class="bv-rows">
+                <dt>Matter ≤ 20 Mpc of nodes</dt><dd data-bv="trackAccretion">—</dd>
+            </dl>
+            <label>Distances on the stage
+                <select data-bv-track="frame">
+                    <option value="comoving" selected>Comoving — expansion divided out</option>
+                    <option value="proper">Proper — include cosmic expansion</option>
+                </select>
+            </label>
+            <p class="bv-hint" data-bv="trackFrame">—</p>
+            <label class="bv-check"><input type="checkbox" data-bv-track="band" checked> Bias band <span class="bv-val" data-bv="trackBand">—</span></label>
+        </div>
+        <div>
+            <table class="bv-ftable">
+                <thead><tr><th>galaxy</th><th>r, Mpc (drift since 1 Gyr)</th><th>|g| (km/s/Gyr)</th><th>void share</th>
+                    <th>v (radial), km/s</th><th>Δ(&lt;r)</th><th>T-web</th><th></th></tr></thead>
+                <tbody id="bv-track-rows"></tbody>
+            </table>
+            <div class="bv-track-charts" style="margin-top:10px">
+                <canvas data-bv-chart="trackG" aria-label="Gravitational pull on each tracked galaxy over cosmic time"></canvas>
+                <canvas data-bv-chart="trackV" aria-label="Peculiar speed of each tracked galaxy over cosmic time"></canvas>
+                <canvas data-bv-chart="trackR" aria-label="Distance of each tracked galaxy from the void centre over cosmic time"></canvas>
+            </div>
+            <p class="bv-verdict">
+                <strong>Read the first chart against the third.</strong> The void deepens with time and pushes its
+                galaxies outward ever faster — yet the pull on them, in physical units, was strongest when the
+                universe was young: it goes as (1+z)²D, which is ∝ (1+z) while matter dominates. A shallower void in a
+                denser universe pulled harder. Dark energy then freezes D, and every curve flattens.
+            </p>
+            <p class="bv-verdict" data-bv="trackNlGain">—</p>
+            <p class="bv-verdict bv-caution">
+                <span data-bv="trackRegime">—</span> What is exact and what is not: each galaxy's SPHERICAL shell
+                follows Newton's shell equation in ΛCDM exactly until it crosses a neighbouring shell (flagged); in
+                that mode the lumpy web's extra pull is first-order and the web's own mass does not move. The
+                <strong>N-body forecast</strong> removes both limits for the future: ~36 000 particles (the void's
+                smooth matter, its sampling grain relaxed away so it pulls like the smooth model it stands for, plus
+                the web's 802) gravitate on each other in the expanding universe, so the web's
+                pull is fully nonlinear and its nodes accrete — but it runs FORWARD only. Before the observed epoch it
+                shows the shell reconstruction — until you press <strong>Reconstruct the past</strong>, which finds
+                initial conditions at z&nbsp;=&nbsp;9 that the same N-body evolves into today's web (a uniform glass
+                gravitationally matched to the observed field: one smooth, near-least-action past among the many
+                compatible with today, resolved to the elements' ~24&nbsp;Mpc), laid down at z&nbsp;=&nbsp;9 to SECOND
+                order in Lagrangian perturbation theory (2LPT: the part of today's displacement that grew as D² is
+                separated out rather than scaled back as if it were linear) and corrected for the simulation's own
+                softening, which grows each wave a little slower than the real universe would (the start is pre-boosted
+                by exactly that shortfall, measured mode by mode). That start is then FITTED: a Bayesian forward model
+                runs the whole N-body from it, compares the result with today's gravity at 30&nbsp;000 random points, and
+                corrects the start — only on scales the simulation resolves (its prior), only as far as the
+                simulation's own graininess allows (its noise), keeping a step only if it fits better — so the past is
+                chosen by the dynamics, not just by a snapshot. It then draws that ONE run for the
+                whole span, each galaxy landed where it is seen. It reproduces today's gravity well inside the void
+                (~1&nbsp;% from the core out to R_eff), and beyond R_eff it misses by a roughly CONSTANT amount, under
+                2&nbsp;% of the void's peak pull, out to the rim of the sampled sphere. As a share of the local field
+                that reads 4–9&nbsp;% on the clumpy wall and ~18&nbsp;% at the rim, but only because the void and its
+                wall cancel out there and the field itself is ~20× weaker; the line under the button prints this
+                run's own numbers. Matching today is not proof of the past, so the PAST was tested separately: a planted
+                history with a known start at z&nbsp;=&nbsp;19, reconstructed from its final frame alone by this same
+                pipeline, came back with its gravity right to ~4&nbsp;% inside the void and ~11&nbsp;% on the wall at
+                z&nbsp;=&nbsp;9, ~2&nbsp;% / ~6&nbsp;% at z&nbsp;=&nbsp;4 and ~1&nbsp;% / ~2&nbsp;% today. Those are that test's numbers, not
+                this run's; the true past of the real Boötes is not known to check against. <strong>Estimate the
+                uncertainty</strong> then re-runs the whole reconstruction four more times, each with its own fresh
+                graininess, and shows their spread (and their paths, faintly); on the same planted test that spread
+                covered the truth about as often as an honest 68&nbsp;% error bar should in the past, but fell short today
+                outside the void, where the method's own resolution limit — common to every member, so no re-run sees it —
+                adds ~2.6&nbsp;%. That bias was measured on two independent planted tests and is added to the spread, each
+                test's value calibrating the other. It is resolved to ~24 Mpc for the smooth matter and ~11 Mpc for the
+                web, and each galaxy is a massless test particle. The shaded band is the page's dominant systematic, tracer bias b ± 20 %, run
+                through the whole model; it is not a statistical interval. Times after today are model forecasts.
+                The motion in comoving distances is SMALL — a few to ~15 Mpc in 18 Gyr — and nothing is magnified;
+                switch to proper distances to see the expansion it rides on, or let the camera follow galaxy A. The
+                galaxies are model tracers; re-rolling the web re-tracks each one from the same observed point.
+            </p>
+        </div>
+    </div>
 </section>
 
 <!-- ── Headline numbers ──────────────────────────────────────────────── -->
