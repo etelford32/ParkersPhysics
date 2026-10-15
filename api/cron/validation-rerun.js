@@ -75,6 +75,12 @@ import {
     FLUX_ROPE_MODEL_ID, ARRIVAL_Q_LEVELS,
 } from '../../js/flux-rope-validation.js';
 import { retrievedPopulation } from '../../js/flux-rope-inversion.js';
+import { SOURCE_PRIOR_MODEL_ID } from '../../js/cme-source-prior.js';
+import {
+    issueOutlook, outlookIssueRows, resolveOutlookRow, brierByLead, OUTLOOK_MODEL_ID,
+} from '../../js/cme-outlook.js';
+import { RESPONSE_CELLS } from '../../js/cme-outlook-response.js';
+import { normalizeSolarRegions } from '../_lib/noaa-regions.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -570,6 +576,63 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             await sbInsert('cme_arrival_forecasts', toInsert);
             summary.locked = toInsert.length;
         }
+
+        // 2b ── SHADOW: the same train with the source-region rope prior
+        //       (js/cme-source-prior.js — audit 2026-10-14: the live path
+        //       seeds tilt 0 / p_flip 0.5, i.e. no Bz information at all).
+        //       Locked as flux-rope-v1-src under the SAME honesty guards and
+        //       scored beside flux-rope-v1 on the same events (step 3), so
+        //       the ledger decides whether it replaces the default. Only
+        //       locked when at least one rope actually got a prior — an
+        //       unchanged train would be a duplicate of flux-rope-v1.
+        //       Its failure never touches the primary lock above.
+        try {
+            const fcSrc = await computeFluxRopeForecast({
+                sources: { cmes, rtsw, wasm, flares }, nowMs, sourcePrior: true,
+            });
+            const nPrior = fcSrc.sourcePriors?.filter(p => p?.ok).length ?? 0;
+            summary.shadow = { priors: nPrior, locked: 0 };
+            if (!fcSrc.idle && nPrior > 0) {
+                const effSrc = fcSrc.preset.ropes.map((_, i) => ({
+                    wEffKms: fcSrc.kernel.ropeWEffKms(i),
+                    gammaEffPerKm: fcSrc.kernel.ropeGammaEff(i),
+                }));
+                const srcRows = fluxRopeForecastRows({
+                    eventIdFor: (id) => rtEventId(id),
+                    cmes: fcSrc.cmes, ropes: fcSrc.preset.ropes, eff: effSrc,
+                    sigV0Kms: fcSrc.preset.spreads?.sigV0Kms ?? 100,
+                    launchMs: fcSrc.launchMs, seed: trainSeed(fcSrc.cmes),
+                    summary: fcSrc.summary,
+                    arrivalQH: arrivalQuantilesH(fcSrc.prior.arrivalH),
+                    sigmaNt: fcSrc.sigmaNt, sheathDeltaNt: fcSrc.sheathDeltaNt,
+                    noiseSigmaNt: fcSrc.noise?.ok ? fcSrc.noise.sigmaNt : null,
+                    flares, modelId: SOURCE_PRIOR_MODEL_ID,
+                    sourcePriors: fcSrc.sourcePriors,
+                });
+                if (srcRows.length) {
+                    const ids = srcRows.map(r => r.event_id);
+                    const inList = `in.(${ids.map(encodeURIComponent).join(',')})`;
+                    const [existing, obsRows] = await Promise.all([
+                        sbGet(`cme_arrival_forecasts?event_id=${inList}&model_id=eq.${SOURCE_PRIOR_MODEL_ID}` +
+                            '&select=event_id,predicted_arrival_utc&order=issued_at.desc'),
+                        sbGet(`cme_l1_observations?event_id=${inList}&select=event_id`),
+                    ]);
+                    const latest = new Map();
+                    for (const r of existing) {
+                        if (!latest.has(r.event_id)) latest.set(r.event_id, Date.parse(r.predicted_arrival_utc));
+                    }
+                    const guard = filterLockableRows(srcRows, {
+                        nowMs, resolvedEventIds: new Set(obsRows.map(o => o.event_id)),
+                    });
+                    const toInsert = guard.rows.filter(r =>
+                        needsNewIssue(latest.get(r.event_id) ?? null, Date.parse(r.predicted_arrival_utc)));
+                    await sbInsert('cme_arrival_forecasts', toInsert);
+                    summary.shadow.locked = toInsert.length;
+                }
+            }
+        } catch (e) {
+            summary.shadow = { reason: `shadow_failed: ${String(e?.message || e).slice(0, 200)}` };
+        }
     }
 
     // 3 ── Bz-structure truth enrichment + per-flare probabilistic scoring
@@ -674,6 +737,44 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
                 '&select=event_id,model_id,issued_at,predicted_arrival_utc&order=id.asc');
             paired = pairedArrivalSkill(allLocks, truthByEvent);
         } catch { paired = null; }
+        // Shadow (flux-rope-v1-src) on the SAME truth under the SAME
+        // selection rule, restricted to events it was locked for — the
+        // like-for-like Bz comparison (Brier, min-Bz error) the switch
+        // decision needs. Paired against v1 on exactly those events.
+        let shadow = null;
+        try {
+            const srcLocks = await sbGetAll(
+                `cme_arrival_forecasts?model_id=eq.${SOURCE_PRIOR_MODEL_ID}&event_id=${evIn}` +
+                '&select=event_id,predicted_arrival_utc,predicted_hit,inputs,issued_at&order=issued_at.desc,id.desc');
+            const byEv = new Map();
+            for (const r of srcLocks) {
+                if (!byEv.has(r.event_id)) byEv.set(r.event_id, []);
+                byEv.get(r.event_id).push(r);
+            }
+            const sScores = [], vScores = [];
+            for (const [eid, locks] of byEv) {
+                const truth = truthByEvent.get(eid);
+                if (!truth) continue;
+                const a = selectScorableLock(locks, truth).lock;
+                const b = selectScorableLock(locksByEvent.get(eid) ?? [], truth).lock;
+                if (!a || !b) continue;
+                const launchIso = launchByEvent.get(eid);
+                sScores.push(scoreFluxRopeEvent({ forecast: a, truth, launchIso }));
+                vScores.push(scoreFluxRopeEvent({ forecast: b, truth, launchIso }));
+            }
+            if (sScores.length) {
+                const pick = (g) => ({
+                    n: g.n_forecasts, brierHit: g.brierHit, brier10: g.brier10,
+                    brier20: g.brier20, minBzMaeNt: g.minBzMaeNt,
+                });
+                shadow = {
+                    model: SOURCE_PRIOR_MODEL_ID,
+                    events: sScores.length,
+                    src: pick(aggregateFluxRopeScores(sScores)),
+                    v1: pick(aggregateFluxRopeScores(vScores)),
+                };
+            }
+        } catch { shadow = null; }
         await insertRun({
             kind: 'flux-rope',
             window_start: since,
@@ -708,10 +809,148 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
                 // followerBiasOnH/ampObs-vs-ampPred are the §19–§21
                 // knob-fitting evidence (flux-rope-validation.js header).
                 compounding: agg.compounding,
+                // flux-rope-v1-src vs flux-rope-v1 on identical events.
+                shadow,
             },
             detail: { events: scores },
         });
         summary.scored = scores.length;
+    }
+    return summary;
+}
+
+/* ── cme-outlook-v0: daily eruption-outlook lock + resolution + Brier ──────
+   CME_OUTLOOK_PLAN.md §5. Its OWN table (cme_outlook_issues) — never the
+   arrival ledger. One issue per UTC day: inserted with ignore-duplicates
+   on (model_id, issue_day, valid_day), so the day's FIRST issue is the
+   record and a re-run cannot rewrite it. Resolution and the pure decision
+   rules live in js/cme-outlook.js (resolveOutlookRow, node-gated).
+   Table not yet created (migration written, not applied) ⇒ reason
+   'table_missing', logged, never fatal. */
+
+const SWPC_REGIONS = 'https://services.swpc.noaa.gov/json/solar_regions.json';
+
+function isMissingTable(status, text) {
+    return status === 404 || /PGRST205|42P01|does not exist|Could not find the table/i.test(text);
+}
+
+/** Exact row count for a PostgREST filter (HEAD + count=exact). */
+async function sbCount(path) {
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/${path}`, {
+        method: 'HEAD', timeoutMs: 8_000,
+        headers: { ...sbHeaders, Prefer: 'count=exact', Range: '0-0' },
+    });
+    if (!res.ok && res.status !== 206) throw new Error(`count ${path.split('?')[0]} ${res.status}`);
+    const total = Number(String(res.headers.get('content-range') ?? '').split('/')[1]);
+    return Number.isFinite(total) ? total : null;
+}
+
+async function lockResolveScoreOutlook(nowMs) {
+    const summary = { issued: null, resolved: 0, pending: 0, scored: null };
+
+    // 1 ── Issue + lock today's outlook.
+    let rows = [];
+    try {
+        // 6 s: this runs inside the 50 s watchdog after the ledger block.
+        const r = await fetchWithTimeout(SWPC_REGIONS, { timeoutMs: 6_000, headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const { regions } = normalizeSolarRegions(await r.json());
+        const outlook = issueOutlook({ regionRows: regions, cells: RESPONSE_CELLS, nowMs });
+        summary.issued = outlook.ok
+            ? { regions: outlook.coverage.regionsUsable, p: outlook.days.map(d => d.pArrival) }
+            : { reason: outlook.reason };
+        rows = outlookIssueRows(outlook);
+    } catch (e) {
+        summary.issued = { reason: `regions_failed: ${String(e?.message || e).slice(0, 120)}` };
+    }
+    if (rows.length) {
+        const res = await fetchWithTimeout(
+            `${SUPABASE_URL}/rest/v1/cme_outlook_issues?on_conflict=model_id,issue_day,valid_day`, {
+                method: 'POST', timeoutMs: 10_000,
+                headers: { ...sbHeaders, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+                body: JSON.stringify(rows),
+            });
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            if (isMissingTable(res.status, text)) return { ...summary, reason: 'table_missing' };
+            throw new Error(`insert cme_outlook_issues ${res.status}: ${text.slice(0, 160)}`);
+        }
+    }
+
+    // 2 ── Resolve rows whose valid day is ≥ 2 days past.
+    const cutoff = new Date(nowMs - 2 * DAY).toISOString().slice(0, 10);
+    let pending;
+    try {
+        pending = await sbGet(`cme_outlook_issues?model_id=eq.${OUTLOOK_MODEL_ID}&resolved_at=is.null` +
+            `&valid_day=lte.${cutoff}&select=id,valid_day,issued_at&order=valid_day.asc&limit=300`);
+    } catch (e) {
+        if (/ 404$/.test(String(e?.message))) return { ...summary, reason: 'table_missing' };
+        throw e;
+    }
+    if (pending.length) {
+        // Sorted HERE — never trust the response order for the window bounds.
+        const days = [...new Set(pending.map(r => r.valid_day))].sort();
+        const t0 = `${days[0]}T00:00:00Z`;
+        const t1 = new Date(Date.parse(`${days[days.length - 1]}T00:00:00Z`) + DAY).toISOString();
+        const obs = await sbGetAll(`cme_l1_observations?arrived=eq.true` +
+            `&shock_arrival_utc=gte.${encodeURIComponent(t0)}&shock_arrival_utc=lt.${encodeURIComponent(t1)}` +
+            '&select=event_id,shock_arrival_utc,observed_bz_min_nt&order=shock_arrival_utc.asc');
+        const ids = [...new Set(obs.map(o => o.event_id))];
+        const launches = ids.length ? await sbGet(`cme_events?event_id=in.(${ids.map(encodeURIComponent).join(',')})` +
+            '&select=event_id,launch_time_utc') : [];
+        const launchById = new Map(launches.map(e => [e.event_id, Date.parse(e.launch_time_utc)]));
+        const arrivals = obs.map(o => ({
+            shockMs: Date.parse(o.shock_arrival_utc),
+            launchMs: launchById.get(o.event_id) ?? NaN,
+            minBzNt: Number.isFinite(o.observed_bz_min_nt) ? o.observed_bz_min_nt : null,
+        }));
+        // L1 coverage per valid day (1-min dataset, good-quality rows).
+        const coverage = new Map();
+        await Promise.all(days.map(async (d) => {
+            try {
+                const a = `${d}T00:00:00Z`, b = new Date(Date.parse(a) + DAY).toISOString();
+                const n = await sbCount(`sw_geomag_dataset?t=gte.${encodeURIComponent(a)}` +
+                    `&t=lt.${encodeURIComponent(b)}&sw_flag=eq.ok&select=t`);
+                coverage.set(d, n == null ? null : n / 1440);
+            } catch { coverage.set(d, null); }
+        }));
+        for (const row of pending) {
+            const r = resolveOutlookRow({
+                validDay: row.valid_day, issuedAt: row.issued_at, arrivals,
+                coverage: coverage.get(row.valid_day) ?? null, nowMs,
+            });
+            if (r.status === 'resolved') {
+                await sbPatch(`cme_outlook_issues?id=eq.${row.id}`, {
+                    obs_arrival: r.obsArrival, obs_geo: r.obsGeo,
+                    resolved_at: new Date(nowMs).toISOString(), resolve_note: r.note ?? null,
+                });
+                summary.resolved++;
+            } else {
+                summary.pending++;
+                if (r.note !== 'too-early') {
+                    await sbPatch(`cme_outlook_issues?id=eq.${row.id}`, { resolve_note: r.note });
+                }
+            }
+        }
+    }
+
+    // 3 ── Score the resolved record (last 180 days): Brier per lead vs the
+    //      SAMPLE climatology (mean outcome over the same rows) — the
+    //      reference the plan says the outlook must beat.
+    const scored = await sbGetAll(`cme_outlook_issues?model_id=eq.${OUTLOOK_MODEL_ID}&resolved_at=not.is.null` +
+        `&valid_day=gte.${new Date(nowMs - 180 * DAY).toISOString().slice(0, 10)}` +
+        '&select=lead_days,p_arrival,p_geo,obs_arrival,obs_geo&order=id.asc');
+    if (scored.length) {
+        const arr = scored.map(r => ({ lead_days: r.lead_days, p: r.p_arrival, obs: r.obs_arrival }));
+        const geo = scored.filter(r => typeof r.obs_geo === 'boolean')
+            .map(r => ({ lead_days: r.lead_days, p: r.p_geo, obs: r.obs_geo }));
+        const rate = (xs) => xs.length ? xs.filter(x => x.obs).length / xs.length : NaN;
+        summary.scored = {
+            n: scored.length,
+            baseRateArrival: rate(arr),
+            arrival: brierByLead(arr, rate(arr)),
+            geo: brierByLead(geo, rate(geo)),
+        };
     }
     return summary;
 }
@@ -768,13 +1007,25 @@ async function runValidation(req) {
         fluxRope = { reason: `flux_rope_failed: ${String(e?.message || e)}` };
         console.error('validation-rerun:', fluxRope.reason);
     }
-    const ledger = { cmeProgram, fluxRope, donkiSources };
+    // Eruption outlook (CME_OUTLOOK_PLAN.md) — its own table, its own
+    // failure: it can never take the arrival ledger down with it.
+    let outlook = { reason: 'not_run' };
+    try {
+        outlook = await lockResolveScoreOutlook(Date.now());
+    } catch (e) {
+        outlook = { reason: `outlook_failed: ${String(e?.message || e).slice(0, 200)}` };
+        console.error('validation-rerun:', outlook.reason);
+    }
+    if (outlook.reason === 'table_missing') {
+        console.error('validation-rerun: cme_outlook_issues missing — apply supabase-cme-outlook-migration.sql');
+    }
+    const ledger = { cmeProgram, fluxRope, outlook, donkiSources };
     // ONE structured line per run, success or not: which DONKI host
     // answered, what was locked / dropped / scored. Before this the only
     // trace of an 11-day outage was a JSON parse error, and a month of
     // rejected flux-rope inserts was visible only to someone grepping.
     console.log('validation-rerun ledger ' + JSON.stringify({
-        catalog: catalog.length, donki: donkiSources, cme: cmeProgram, fluxRope,
+        catalog: catalog.length, donki: donkiSources, cme: cmeProgram, fluxRope, outlook,
     }));
 
     // ── Studies 1–3 (wind-bucket + HEK dependent). Early-outs carry the

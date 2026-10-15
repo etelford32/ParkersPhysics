@@ -93,6 +93,12 @@ export const FORECAST_DEFAULTS = Object.freeze({
     wasmUrl: './js/flux-rope-wasm/flux_rope_core.wasm',
     ambientNCc: 5,      // climatological density fill for the driver [cm⁻³]
     sigmaNt: null,      // L1 obs σ for the filter; null → derived from noise
+    // Source-region rope prior (js/cme-source-prior.js) — OPT-IN. Off is
+    // flux-rope-v1 exactly; on is the SHADOW model flux-rope-v1-src that the
+    // validation cron locks beside it until the ledger says which is better.
+    // Needs `sources.flares` (parseDonkiFlares rows) to find each CME's
+    // source region; a CME with no associated flare keeps the cone defaults.
+    sourcePrior: false,
 });
 
 /**
@@ -191,9 +197,26 @@ export async function computeFluxRopeForecast(opts = {}) {
     const sheathDeltaNt = sheathDeltaFromNoise(noise);
     const sigmaNt = cfg.sigmaNt ?? assimSigmaFromNoise(noise);
 
-    const preset = donkiToTrainPreset(picked, { ambientWKms: wKms });
+    let preset = donkiToTrainPreset(picked, { ambientWKms: wKms });
     preset.ropes = preset.ropes.map((r) => ({ ...r, sheathDeltaNt }));
     preset.rope = preset.ropes[0];
+    // Opt-in source-region prior. Imported lazily so the default path (every
+    // browser consumer) pays nothing for it.
+    let sourcePriors = null;
+    if (cfg.sourcePrior) {
+        const [{ sourceRopePrior, applySourcePriors }, { associateFlare }] = await Promise.all([
+            import('./cme-source-prior.js'), import('./flux-rope-validation.js'),
+        ]);
+        const flares = src.flares ?? [];
+        sourcePriors = preset.cmes.map((c) => {
+            const atMs = Date.parse(c.timeIso);
+            const flare = associateFlare(flares, atMs);
+            if (!flare) return { ok: false, reason: 'no-associated-flare' };
+            const p = sourceRopePrior({ sourceLocation: flare.sourceLocation, atMs });
+            return p.ok ? { ...p, flare: { id: flare.flrID, location: flare.sourceLocation } } : p;
+        });
+        preset = applySourcePriors(preset, sourcePriors).preset;
+    }
 
     const kernel = await loadFluxRopeKernel(src.wasm ?? cfg.wasmUrl);
     kernel.setRopes(preset.ropes);
@@ -274,6 +297,7 @@ export async function computeFluxRopeForecast(opts = {}) {
         sheathDeltaNt,               // the δ actually seeded (measured or fallback)
         sigmaNt,                     // the filter σ actually used
         driver,
+        sourcePriors,                // null unless cfg.sourcePrior (per rope, launch-ascending)
         summary: summarizeForecast(fan, prior, launchMs, { nRopes }),
     };
 }
