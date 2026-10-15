@@ -3,10 +3,14 @@
 -- P(an Earth-arriving CME on valid_day) from eruptions that had NOT
 -- happened at issue time. Design: CME_OUTLOOK_PLAN.md §5.
 --
--- STATUS: WRITTEN, NOT APPLIED (2026-10-14) — needs the author's go.
--- Until it is applied, api/cron/validation-rerun.js logs
--- `outlook: { reason: 'table_missing' }` and the rest of the run is
--- unaffected.
+-- STATUS: APPLIED 2026-10-15 as migration `cme_outlook_issues` (project
+-- aijsboodkivnhzfstvdq) on the author's go.
+--
+-- KEPT LIGHT ON PURPOSE: ~7 rows/day (≈2.6k/yr). The UNIQUE key is the
+-- only general index (it serves the insert's conflict check and every
+-- per-model read); a partial index covers the cron's pending scan and
+-- stays tiny because resolved rows leave it. `inputs` rides the lead-0
+-- row only. No created_at — issued_at is the record.
 --
 -- Why its own table and not cme_arrival_forecasts: an outlook is a
 -- probability per DAY for CMEs that do not exist yet, not an arrival time
@@ -39,14 +43,11 @@ CREATE TABLE IF NOT EXISTS public.cme_outlook_issues (
     obs_geo       BOOLEAN,     -- …and its observed min Bz < −10 nT (NULL = Bz unknown)
     resolved_at   TIMESTAMPTZ,
     resolve_note  TEXT,        -- e.g. 'l1-coverage-gap' when left unresolved
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (model_id, issue_day, valid_day)
 );
 
 CREATE INDEX IF NOT EXISTS cme_outlook_issues_pending
     ON public.cme_outlook_issues (valid_day) WHERE resolved_at IS NULL;
-CREATE INDEX IF NOT EXISTS cme_outlook_issues_model_lead
-    ON public.cme_outlook_issues (model_id, lead_days, valid_day DESC);
 
 ALTER TABLE public.cme_outlook_issues ENABLE ROW LEVEL SECURITY;
 -- (no policies — service-role only, by design)

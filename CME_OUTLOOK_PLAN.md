@@ -111,9 +111,10 @@ AFTER the issue time. A CME DONKI never flagged as Earth-relevant has no
 observation row and is invisible to the resolver; that is disclosed.
 Brier + climatology Brier per lead day are logged in the run line.
 
-**`supabase-cme-outlook-migration.sql` is written but NOT applied** (needs the
-author's go). Until it is, the cron logs `reason: 'table_missing'` loudly and
-the rest of the run is unaffected.
+**`supabase-cme-outlook-migration.sql` was APPLIED 2026-10-15** (author's go),
+kept light: the unique key plus one partial index on pending rows. In any
+environment without the table the cron logs `reason: 'table_missing'` and the
+rest of the run is unaffected.
 
 ## 6. Phase B and later
 
