@@ -197,6 +197,23 @@ body {
 .cmef-chip.is-edge em { font-style:normal; }
 .cmef-chip.is-edge i { width:5px; height:2px; border-radius:1px; box-shadow:none; opacity:.75; }
 .cmef-chip-more { font:700 .56rem/1.3 var(--cmef-mono); color:var(--cmef-faint); padding-left:3px; }
+/* Eruption outlook strip. Violet = the outlook's own hue (amber / blue /
+   mint are ledger statuses above it); shade ∝ √P, set per cell as --ol-shade. */
+.cmef-outlook { flex:0 0 auto; margin:2px 8px 4px; padding:5px 7px 4px; border:1px dashed rgba(199,146,234,.32); border-radius:var(--cmef-r-sm); background:rgba(199,146,234,.035); }
+.cmef-ol-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; font:600 .6rem/1.2 var(--cmef-mono); color:var(--cmef-faint); }
+.cmef-ol-head strong { font-size:.64rem; letter-spacing:.06em; text-transform:uppercase; color:var(--cmef-violet); }
+.cmef-ol-head em { margin-left:auto; font-style:normal; color:var(--cmef-muted); }
+.cmef-ol-row { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:2px; margin-top:4px; }
+.cmef-ol-cell { display:flex; flex-direction:column; gap:1px; min-width:0; padding:3px 4px; border-radius:4px; background:rgba(199,146,234,calc(.05 + .45 * var(--ol-shade,0))); font:600 .58rem/1.25 var(--cmef-mono); color:var(--cmef-muted); cursor:help; }
+.cmef-ol-cell.is-lb { background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.035) 0 4px,transparent 4px 8px); }
+.cmef-ol-day { color:var(--cmef-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cmef-ol-day small { font-size:.54rem; }
+.cmef-ol-p { font:700 .78rem/1.1 var(--cmef-mono); color:var(--cmef-text); }
+.cmef-ol-geo, .cmef-ol-hss { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cmef-ol-hss { color:var(--cmef-mint); min-height:.75rem; }
+.cmef-ol-hss.is-empty { visibility:hidden; }
+.cmef-ol-hss i { font-style:normal; margin-right:2px; }
+.cmef-ol-foot { margin-top:3px; font:500 .54rem/1.3 var(--cmef-mono); color:var(--cmef-faint); }
 .cmef-cal-legend { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:5px 11px 7px; border-top:1px solid var(--cmef-line); font:600 .62rem/1 var(--cmef-mono); color:var(--cmef-faint); }
 .cmef-cal-legend span { display:flex; align-items:center; gap:5px; }
 .cmef-cal-legend i { width:6px; height:6px; border-radius:50%; }
@@ -329,6 +346,12 @@ body {
     .cmef-day { padding:2px 3px 3px; }
     .cmef-chip { font-size:.54rem; gap:2px; padding:1px 2px; }
     .cmef-cal-legend { gap:8px; font-size:.56rem; }
+    .cmef-outlook { margin:2px 5px 4px; padding:4px 5px; }
+    .cmef-ol-head em { margin-left:0; flex-basis:100%; }
+    .cmef-ol-row { gap:1px; }
+    .cmef-ol-cell { padding:2px; font-size:.5rem; }
+    .cmef-ol-p { font-size:.66rem; }
+    .cmef-ol-geo { display:none; }
     .cmef-cal-legend .cmef-lock-note { flex-basis:100%; margin-left:0; text-align:left; }
     .cmef-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }
     .cmef-tape-label { display:none; }
@@ -422,6 +445,10 @@ body {
                     <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
                 </div>
                 <div class="cmef-cal-grid" id="cmef-calendar-grid" aria-label="Daily CME arrival outlook, UTC"></div>
+                <!-- Eruption outlook (js/cme-outlook-strip.js, CME_OUTLOOK_PLAN.md):
+                     probabilities for CMEs that have NOT launched yet. Its own
+                     visual language on purpose — never chips, never the ledger. -->
+                <section class="cmef-outlook" id="cmef-outlook" aria-label="Seven-day eruption outlook, UTC"></section>
                 <div class="cmef-cal-legend">
                     <span><i class="pending"></i>In flight</span>
                     <span><i class="window"></i>Window open</span>

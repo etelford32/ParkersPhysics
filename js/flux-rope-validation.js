@@ -179,6 +179,8 @@ export function fluxRopeForecastRows({
     sigmaNt, sheathDeltaNt, noiseSigmaNt = null,
     flares = [],          // parsed flares for association
     compounding = null,   // measureCompounding result (trains ≥ 2) or null
+    modelId = FLUX_ROPE_MODEL_ID,  // 'flux-rope-v1-src' for the source-prior shadow
+    sourcePriors = null,  // provider fc.sourcePriors (index-aligned), shadow only
 }) {
     const rows = [];
     let firstArrival = Infinity, firstIdx = -1;
@@ -202,7 +204,7 @@ export function fluxRopeForecastRows({
         const iso = (ms) => new Date(ms).toISOString();
         rows.push({
             event_id: eventIdFor(c.id),
-            model_id: FLUX_ROPE_MODEL_ID,
+            model_id: modelId,
             predicted_arrival_utc: iso(launchMs + w.arrivalS * 1000),
             arrival_window_early: iso(launchMs + w.earlyS * 1000),
             arrival_window_late: iso(launchMs + w.lateS * 1000),
@@ -230,6 +232,11 @@ export function fluxRopeForecastRows({
                 sigma_nt: sigmaNt,
                 sheath_delta_nt: sheathDeltaNt,
                 noise_sigma_nt: noiseSigmaNt,
+                ...(sourcePriors ? { source_prior: sourcePriors[i]?.ok
+                    ? { tilt_deg: sourcePriors[i].tiltDeg, handedness: sourcePriors[i].handedness,
+                        p_flip: sourcePriors[i].pFlip, cycle: sourcePriors[i].basis.cycle,
+                        source_lat_deg: sourcePriors[i].basis.sourceLatDeg }
+                    : { reason: sourcePriors[i]?.reason ?? 'none' } } : {}),
                 flare: flare ? {
                     id: flare.flrID, class: flare.classType,
                     peak: iso(flare.peakMs), region: flare.activeRegionNum,
