@@ -76,6 +76,7 @@ body{min-height:100vh;overflow-x:hidden;background:#03010e;color:var(--fg-2);fon
 .ra-offer-facts span{font-family:var(--font-mono);font-size:.74rem;color:var(--fg-4);text-transform:uppercase;letter-spacing:.06em;display:block}
 .ra-offer-cta{display:block;text-align:center;padding:12px;border-radius:8px;background:var(--grad-uv-pink);color:#fff;font-family:var(--font-display);font-weight:700;font-size:.8rem;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;box-shadow:var(--glow-uv-sm)}
 .ra-offer-cta:hover{filter:brightness(1.1)}
+.ra-offer-sample{display:block;text-align:center;font-size:.84rem;color:var(--uv-300)}
 .ra-offer-fine{grid-column:1 / -1;padding:14px 28px;border-top:1px solid rgba(157,58,255,.14);font-size:.8rem;color:var(--fg-4)}
 
 /* ── BODY GRID ──────────────────────────────────────────────────────────── */
@@ -192,6 +193,7 @@ footer.ra-footer a:hover{color:var(--uv-300)}
         <li><span>Better with</span>your own tracking or GPS ephemerides</li>
       </ul>
       <a class="ra-offer-cta" href="request-access.html?use_case=fleet_assessment#ra-form" id="ra-offer-cta">Request an assessment</a>
+      <a class="ra-offer-sample" href="sample-fleet-assessment.html">See a sample assessment &rarr;</a>
     </div>
     <p class="ra-offer-fine">
       Public-TLE inputs give a triage-grade result, not maneuver commands or
@@ -358,13 +360,13 @@ footer.ra-footer a:hover{color:var(--uv-300)}
         btn.disabled = true;
       } else {
         status.className = 'ra-status err';
-        status.textContent = data.detail || data.error || 'Something went wrong. Please email sales@parkerphysics.com directly.';
+        status.textContent = data.detail || data.error || 'Something went wrong. Please email etelford32@gmail.com directly.';
         btn.disabled = false;
         btn.textContent = defaultSubmitLabel;
       }
     } catch (err) {
       status.className = 'ra-status err';
-      status.textContent = 'Network error. Please email sales@parkerphysics.com directly.';
+      status.textContent = 'Network error. Please email etelford32@gmail.com directly.';
       btn.disabled = false;
       btn.textContent = defaultSubmitLabel;
     }
