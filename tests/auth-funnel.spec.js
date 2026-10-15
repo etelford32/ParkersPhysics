@@ -82,20 +82,20 @@ test.describe('auth funnel', () => {
         expect(stages, 'validation error emitted').toContain('signin_validation_error');
     });
 
-    test('signup.html emits signup_view + plan_selected on pill click', async ({ page }) => {
+    test('signup.html emits signup_view + persona_selected on chip click', async ({ page }) => {
         const events = attachFunnelInterceptor(page);
         await page.goto('/signup.html', { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(300);
 
-        // Click the basic plan pill — exact id from selectPlan map.
-        await page.click('#pill-basic').catch(() => {});
+        // Public test: the plan pills became persona chips (js/public-test.js).
+        await page.click('#persona-analyst');
         await page.waitForTimeout(100);
 
         await flushTelemetry(page);
 
         const stages = events.map(e => e.metadata?.stage);
         expect(stages, 'signup_view emitted').toContain('signup_view');
-        expect(stages, 'plan_selected emitted').toContain('signup_plan_selected');
+        expect(stages, 'persona_selected emitted').toContain('signup_persona_selected');
     });
 
     test('index.html emits landing_view + landing_cta_click on CTA', async ({ page }) => {

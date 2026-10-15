@@ -104,15 +104,27 @@ test.describe('Signup Form Validation', () => {
         await expect(privacyLink).toHaveAttribute('href', 'privacy.html');
     });
 
-    test('plan pills are selectable', async ({ page }) => {
-        // Default should be free (from URL param)
-        const freePill = page.locator('#pill-free');
-        await expect(freePill).toHaveClass(/selected/);
+    test('persona chips render; operator personas reveal the fleet fields', async ({ page }) => {
+        // Public test (js/public-test.js): no plan pills — the DB trigger
+        // sets the plan. One persona question routes the welcome path.
+        await expect(page.locator('#persona-chips input[name="persona"]')).toHaveCount(6);
+        await expect(page.locator('#operator-fields')).toBeHidden();
+        await page.click('#persona-teacher');
+        await expect(page.locator('#operator-fields')).toBeHidden();
+        await page.click('#persona-operator');
+        await expect(page.locator('#operator-fields')).toBeVisible();
+        await expect(page.locator('#plan-pills')).toHaveCount(0);
+    });
 
-        // Click basic
-        await page.click('#pill-basic');
-        await expect(page.locator('#pill-basic')).toHaveClass(/selected/);
-        await expect(freePill).not.toHaveClass(/selected/);
+    test('persona is required', async ({ page }) => {
+        await page.fill('#first-name', TEST_FIRST);
+        await page.fill('#last-name', TEST_LAST);
+        await page.fill('#email', TEST_EMAIL);
+        await page.fill('#password', TEST_PASSWORD);
+        await page.check('#terms');
+        await page.click('#btn-submit');
+        await expect(page.locator('#err-persona')).toBeVisible();
+        await expect(page.locator('#btn-submit')).toBeEnabled();
     });
 
     test('password strength indicator works', async ({ page }) => {
@@ -142,6 +154,7 @@ test.describe('Signup Submit', () => {
         await page.fill('#last-name', TEST_LAST);
         await page.fill('#email', TEST_EMAIL);
         await page.fill('#password', TEST_PASSWORD);
+        await page.click('#persona-enthusiast');
         await page.check('#terms');
         await page.click('#btn-submit');
 
@@ -210,28 +223,29 @@ test.describe('Reset Password Page', () => {
 // ── 6. Pricing Page ─────────────────────────────────────────────────────────
 
 test.describe('Pricing Page', () => {
-    test('shows three plan cards', async ({ page }) => {
+    test('shows the two plan cards', async ({ page }) => {
         await page.goto('/pricing.html');
         const cards = page.locator('.price-card');
-        await expect(cards).toHaveCount(3);
+        await expect(cards).toHaveCount(2);
+        await expect(page.locator('#card-intro .tier-name')).toHaveText('Intro');
+        await expect(page.locator('#card-advanced .tier-name')).toHaveText('Advanced');
     });
 
-    test('free CTA links to signup', async ({ page }) => {
+    test('public-test banner + tester CTAs link to signup', async ({ page }) => {
         await page.goto('/pricing.html');
-        const freeCta = page.locator('a:has-text("Start Free")');
-        await expect(freeCta).toHaveAttribute('href', /signup.*plan=free/);
+        await expect(page.locator('#test-banner')).toBeVisible();
+        await expect(page.locator('[data-pricing-cta="banner"]')).toHaveAttribute('href', /signup\.html/);
+        await expect(page.locator('[data-pricing-cta="intro"]')).toHaveAttribute('href', /signup.*tier=intro/);
+        await expect(page.locator('[data-pricing-cta="advanced"]')).toHaveAttribute('href', /signup.*tier=advanced/);
+        await expect(page.locator('[data-pricing-cta="pilot"]')).toHaveAttribute('href', 'request-access.html');
     });
 
-    test('basic CTA has checkout attribute', async ({ page }) => {
+    test('no checkout buttons while the public test runs', async ({ page }) => {
         await page.goto('/pricing.html');
-        const basicCta = page.locator('[data-checkout="basic"]');
-        await expect(basicCta).toBeVisible();
-    });
-
-    test('advanced CTA has checkout attribute', async ({ page }) => {
-        await page.goto('/pricing.html');
-        const advancedCta = page.locator('[data-checkout="advanced"]');
-        await expect(advancedCta).toBeVisible();
+        await expect(page.locator('[data-checkout]')).toHaveCount(0);
+        // Post-test prices are shown struck through, not charged.
+        await expect(page.locator('s[data-price="intro"]')).toHaveText('$9.99/mo');
+        await expect(page.locator('s[data-price="advanced"]')).toHaveText('$100/mo');
     });
 
     test('FAQ accordion toggles', async ({ page }) => {
@@ -433,28 +447,25 @@ test.describe('API Edge Functions', () => {
 // ── 10. Tier expansion (Educator / Institution / Enterprise) ───────────────
 
 test.describe('Tier expansion', () => {
-    test('pricing page renders all six tier cards', async ({ page }) => {
+    // 2026-10: the six-tier page collapsed to Intro + Advanced. Seats and
+    // site licences moved to a "Talk to us" line; the stored plan ids are
+    // unchanged (js/public-test.js planFamily folds them).
+    test('pricing page routes seats and licences to Talk to us', async ({ page }) => {
         await page.goto('/pricing.html');
-        await expect(page.locator('.tier-name', { hasText: /^Free Trial$/ })).toBeVisible();
-        await expect(page.locator('.tier-name', { hasText: /^Basic$/ })).toBeVisible();
-        await expect(page.locator('.tier-name', { hasText: /^Educator$/ })).toBeVisible();
-        await expect(page.locator('.tier-name', { hasText: /^Advanced$/ })).toBeVisible();
-        await expect(page.locator('.tier-name', { hasText: /^Institution$/ })).toBeVisible();
-        await expect(page.locator('.tier-name', { hasText: /^Enterprise$/ })).toBeVisible();
+        await expect(page.locator('.tier-name')).toHaveText(['Intro', 'Advanced']);
+        await expect(page.locator('[data-pricing-cta="talk"]')).toHaveAttribute('href', 'contact-enterprise.html');
     });
 
-    test('signup page exposes all five self-serve plan pills', async ({ page }) => {
+    test('signup page links seats / licences to contact-enterprise', async ({ page }) => {
         await page.goto('/signup.html');
-        for (const id of ['pill-free', 'pill-basic', 'pill-educator', 'pill-advanced', 'pill-institution']) {
-            await expect(page.locator('#' + id)).toBeVisible();
-        }
-        // Enterprise has no pill — it's a link to contact-enterprise.html
+        await expect(page.locator('#tester-badge')).toBeVisible();
         await expect(page.locator('a[href="contact-enterprise.html"]')).toBeVisible();
     });
 
-    test('?plan=educator pre-selects Educator pill', async ({ page }) => {
+    test('legacy ?plan=educator links still land on a working form', async ({ page }) => {
         await page.goto('/signup.html?plan=educator');
-        await expect(page.locator('#pill-educator')).toHaveClass(/selected/);
+        await expect(page.locator('#signup-form')).toBeVisible();
+        await expect(page.locator('#persona-chips input')).toHaveCount(6);
     });
 
     test('stripe checkout rejects enterprise plan', async ({ request }) => {
@@ -480,9 +491,9 @@ test.describe('Tier expansion', () => {
 
     test('?plan=basic&trial=tour-30day URL preserves trial param on signup', async ({ page }) => {
         await page.goto('/signup.html?plan=basic&trial=tour-30day');
-        // Plan pre-selection still works; trial param stays in the URL so
-        // the post-signup checkout call can forward it server-side.
-        await expect(page.locator('#pill-basic')).toHaveClass(/selected/);
+        // The trial param stays in the URL so the post-test checkout call
+        // can forward it server-side.
+        await expect(page.locator('#signup-form')).toBeVisible();
         const url = page.url();
         expect(url).toMatch(/trial=tour-30day/);
     });

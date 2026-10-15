@@ -555,20 +555,29 @@ class AuthManager {
      * Sign up with email, password, and profile data.
      * @returns {{ success: boolean, error?: string, needsConfirmation?: boolean }}
      */
-    async signUp({ email, password, name, plan = 'free' }) {
+    async signUp({ email, password, name, plan = 'free', meta = null }) {
         if (this._supabase) {
             try {
                 // Plan is decided server-side. The signup trigger
-                // (supabase-plan-lockdown-migration.sql) HARD-CODES plan='free'
-                // and IGNORES any client-supplied plan/role metadata — passing
-                // them here would be a silent no-op. We omit them entirely so
-                // the contract is obvious to readers and we don't tempt anyone
-                // into thinking client-side state controls billing tier.
+                // (supabase-public-test-signup-migration.sql) sets the plan
+                // itself and IGNORES any client-supplied plan/role metadata —
+                // passing them here would be a silent no-op. We omit them
+                // entirely so the contract is obvious to readers and we don't
+                // tempt anyone into thinking client-side state controls
+                // billing tier. `meta` carries ONLY the persona fields, run
+                // through the whitelist in js/public-test.js by the caller and
+                // re-validated by the trigger; plan/role are stripped here too.
+                const extra = {};
+                if (meta && typeof meta === 'object') {
+                    for (const k of ['persona', 'org_name', 'fleet_size', 'tester_updates']) {
+                        if (meta[k] !== undefined) extra[k] = meta[k];
+                    }
+                }
                 const { data, error } = await this._supabase.auth.signUp({
                     email,
                     password,
                     options: {
-                        data: { name },
+                        data: { name, ...extra },
                     },
                 });
                 if (error) return { success: false, error: error.message };
