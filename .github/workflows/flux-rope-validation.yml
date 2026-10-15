@@ -16,6 +16,12 @@ name: flux-rope-validation
 #                             fake PostgREST (1000-row cap, kind CHECK) and a
 #                             DONKI hosts answering HTML (the 2026-09-30 move)
 #   donki-upstream            the DONKI host race (moved CCMC host + gateway)
+#   cme-source-prior          source-region rope prior vs the committed WASM
+#                             (shadow model flux-rope-v1-src)
+#   cme-outlook(-strip)       eruption outlook kernel + baked response-table
+#                             drift vs the WASM (CME_OUTLOOK_PLAN.md)
+#   cme-outlook-cron          the cron's shadow lock + outlook lock/resolve/
+#                             score, incl. the migration-not-applied path
 #
 # Until this workflow no CI job ran any of these: the ledger was dead for
 # 11 days and its scored runs were rejected for two months with every
@@ -37,6 +43,12 @@ on:
       - 'tests/donki-upstream.mjs'
       - 'tests/forecast-verification.mjs'
       - 'tests/fixtures/flux-rope-ledger-*.json'
+      - 'js/cme-source-prior.js'
+      - 'js/cme-outlook*.js'
+      - 'js/hero-sun-model.js'
+      - 'api/_lib/noaa-regions.js'
+      - 'tests/cme-source-prior.mjs'
+      - 'tests/cme-outlook*.mjs'
       - '.github/workflows/flux-rope-validation.yml'
   pull_request:
     paths:
@@ -53,6 +65,12 @@ on:
       - 'tests/donki-upstream.mjs'
       - 'tests/forecast-verification.mjs'
       - 'tests/fixtures/flux-rope-ledger-*.json'
+      - 'js/cme-source-prior.js'
+      - 'js/cme-outlook*.js'
+      - 'js/hero-sun-model.js'
+      - 'api/_lib/noaa-regions.js'
+      - 'tests/cme-source-prior.mjs'
+      - 'tests/cme-outlook*.mjs'
       - '.github/workflows/flux-rope-validation.yml'
   workflow_dispatch:
 
@@ -92,3 +110,9 @@ jobs:
         run: |
           node tests/donki-upstream.mjs
           node tests/validation-rerun-ledger.mjs
+      - name: source-region prior + eruption outlook
+        run: |
+          node tests/cme-source-prior.mjs
+          node tests/cme-outlook.mjs
+          node tests/cme-outlook-strip.mjs
+          node tests/cme-outlook-cron.mjs

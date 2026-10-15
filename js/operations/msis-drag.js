@@ -53,7 +53,7 @@
  * committed WASM. Run it after ANY edit here.
  */
 
-const RE_KM   = 6378.135;      // WGS-72, matches satellite-tracker / SGP4
+export const RE_KM = 6378.135;  // WGS-72, matches satellite-tracker / SGP4
 const MU_SI   = 3.986008e14;   // WGS-72 μ, m³/s² (matches orbit-inspector)
 const DAY_S   = 86400;
 
@@ -239,35 +239,53 @@ export function orbitAverageRates(aKm, e, bc, rhoAt, nSamples = 24) {
  * Pure: density arrives as rhoAt(altKm) → kg/m³. Returns
  *   { lifetimeDays, dadtKmDay, finalE, steps, reentered }
  * with lifetimeDays = Infinity when the orbit survives the horizon.
+ *
+ * TIME-VARYING DRIVERS (optional, additive — js/decay/scheduled-decay.js
+ * is the caller): `rhoAtT(altKm, tDays)` replaces `rhoAt` when given, and
+ * `maxStepDays` (number, or fn(tDays) → days) caps each step so a driver
+ * change (a storm onset, the next day's F10.7) lands on a step boundary
+ * instead of being stepped over. `onStep(tDays, aKm, e)` reports the
+ * trajectory (called once at t = 0 and after every step). With none of
+ * the three set, the arithmetic is IDENTICAL to the constant-profile
+ * path — tests/decay-driver-schedule.mjs asserts that with assert.equal,
+ * so keep the expression order when editing.
  */
 export function integrateDecay({
     perigeeKm, apogeeKm, bc, rhoAt,
     maxDays = MAX_DAYS, reentryKm = REENTRY_KM,
     nSamples = 24, stepAKm = 2, maxSteps = 6000,
+    rhoAtT = null, maxStepDays = null, onStep = null,
 }) {
     let aKm = RE_KM + (perigeeKm + apogeeKm) / 2;
     let e   = Math.max(0, (apogeeKm - perigeeKm) / (2 * aKm));
     let t   = 0;
     let dadt0 = null;
     let steps = 0;
+    if (onStep) onStep(t, aKm, e);
 
     while (steps < maxSteps) {
         const perAlt = aKm * (1 - e) - RE_KM;
         if (perAlt <= reentryKm) {
             return { lifetimeDays: t, dadtKmDay: dadt0 ?? 0, finalE: e, steps, reentered: true };
         }
-        const { adotKmDay, edotPerDay } = orbitAverageRates(aKm, e, bc, rhoAt, nSamples);
+        const rhoNow = rhoAtT ? (alt) => rhoAtT(alt, t) : rhoAt;
+        const { adotKmDay, edotPerDay } = orbitAverageRates(aKm, e, bc, rhoNow, nSamples);
         if (dadt0 === null) dadt0 = adotKmDay;
         if (!(adotKmDay < -1e-12)) {
             // No meaningful decay at this state — stable within the horizon.
             return { lifetimeDays: Infinity, dadtKmDay: dadt0 ?? 0, finalE: e, steps, reentered: false };
         }
         let dt = stepAKm / Math.abs(adotKmDay);              // days
+        if (maxStepDays !== null) {
+            const cap = typeof maxStepDays === 'function' ? maxStepDays(t) : maxStepDays;
+            if (cap > 0) dt = Math.min(dt, cap);
+        }
         dt = Math.max(1e-4, Math.min(dt, maxDays - t + 1));
         aKm += adotKmDay * dt;
         e    = Math.max(0, e + edotPerDay * dt);
         t   += dt;
         steps++;
+        if (onStep) onStep(t, aKm, e);
         if (t >= maxDays) {
             return { lifetimeDays: Infinity, dadtKmDay: dadt0, finalE: e, steps, reentered: false };
         }

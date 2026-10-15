@@ -1004,7 +1004,13 @@ export async function initCmeForecastPage() {
         drawChart();
     }, 60_000);
     state.refreshTimer = window.setInterval(loadForecasts, REFRESH_MS);
-    await loadForecasts();
+    // The eruption outlook is a separate model on its own feeds; it is
+    // mounted after the ledger request is in flight and can never block it.
+    const ledger = loadForecasts();
+    import('./cme-outlook-strip.js')
+        .then(({ mountOutlookStrip }) => mountOutlookStrip($('cmef-outlook')))
+        .catch((e) => console.info('cme-forecast: outlook strip unavailable', e?.message ?? e));
+    await ledger;
 }
 
 if (typeof document !== 'undefined') {

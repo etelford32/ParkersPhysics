@@ -29,7 +29,7 @@
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY  — service-role; bypasses RLS for the insert + read
  *   RESEND_API_KEY        — for the sales-team notification email (optional)
- *   SALES_EMAIL           — destination address (default: sales@parkerphysics.com)
+ *   SALES_EMAIL           — destination address (default: etelford32@gmail.com)
  *   ALERT_FROM_EMAIL      — From: address (reused from alerts module)
  *   APP_URL               — used for the admin link in the notification email
  *   ALLOWED_ORIGINS       — comma-list; defaults to the canonical
@@ -42,7 +42,7 @@ const SUPABASE_URL  = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABA
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const RESEND_API    = 'https://api.resend.com/emails';
 const RESEND_KEY    = process.env.RESEND_API_KEY || '';
-const SALES_EMAIL   = process.env.SALES_EMAIL || 'sales@parkerphysics.com';
+const SALES_EMAIL   = process.env.SALES_EMAIL || 'etelford32@gmail.com';
 const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parkers Physics <noreply@parkerphysics.com>';
 const APP_URL       = process.env.APP_URL || 'https://parkersphysics.com';
 

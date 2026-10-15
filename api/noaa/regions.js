@@ -63,6 +63,7 @@ export default async function handler() {
             field_map:            norm.field_map,
             unmapped_keys:        norm.unmapped_keys,
             probability_coverage: norm.probability_coverage,
+            longitude_check:      norm.longitude_check,
             ...(probabilitiesMissing && norm.region_count
                 ? { note: 'No per-region flare probability field matched. Compare '
                         + 'unmapped_keys against FIELD_CANDIDATES in api/_lib/noaa-regions.js.' }

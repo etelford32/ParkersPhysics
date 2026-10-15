@@ -1,0 +1,61 @@
+name: decay-kernels
+
+# The orbit-decay kernels behind the Operations console's Decay Watch and the
+# Decay Brief (DECAY_BRIEF_PLAN.md), gated in node — a few seconds, no browser,
+# no npm install (the tests import only node:* and the repo's own ES modules,
+# plus the COMMITTED js/sgp4-wasm build for NRLMSISE-00):
+#
+#   operations-msis-drag.mjs    B* parsing + fallback ladder, the orbit-averaged
+#                               Gauss integrator, and the real-WASM density /
+#                               lifetime bands (CLAUDE.md "Operations console
+#                               decay math" row)
+#   decay-driver-schedule.mjs   time-varying drivers: the integrator hooks are
+#                               bit-identical when unused, source priority and
+#                               provenance, the NRLMSISE-00 conventions
+#                               (previous-day F10.7, centred F10.7A, 7-element
+#                               ap history), a closed-form declining-cycle
+#                               lifetime, storm-splice convergence
+#
+# js/sgp4-wasm/** is in the path filter ON PURPOSE: both gates evaluate MSIS
+# through the committed binary, so a rebuild must re-run them.
+
+on:
+  push:
+    paths:
+      - 'js/decay/**'
+      - 'js/operations/msis-drag.js'
+      - 'js/sgp4-wasm/**'
+      - 'tests/operations-msis-drag.mjs'
+      - 'tests/decay-*.mjs'
+      - '.github/workflows/decay-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/decay/**'
+      - 'js/operations/msis-drag.js'
+      - 'js/sgp4-wasm/**'
+      - 'tests/operations-msis-drag.mjs'
+      - 'tests/decay-*.mjs'
+      - '.github/workflows/decay-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: decay-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Decay kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Operations MSIS decay (constant drivers)
+        run: node tests/operations-msis-drag.mjs
+      - name: Scheduled decay (time-varying drivers)
+        run: node tests/decay-driver-schedule.mjs
