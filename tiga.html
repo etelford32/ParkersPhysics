@@ -180,6 +180,41 @@ body {
 .tg-field.tg-inert label { text-decoration:line-through; text-decoration-thickness:1px; }
 .tg-field.tg-inert input { cursor:not-allowed; }
 .tg-stagestats { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; margin-top:10px; }
+
+/* ── Sun / Moon geospace layer ─────────────────────────────────────────
+   Computation lives in js/geomag/geospace.js (node-gated); this is chrome. */
+.tg-nav-btn[hidden] { display:none !important; }
+.tg-geobar {
+    display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px;
+    margin-top:10px; padding:10px 14px;
+    background:rgba(6,9,28,.72); border:1px solid rgba(90,110,160,.24); border-radius:12px;
+}
+.tg-geobar .tg-geo-toggles { display:flex; gap:6px; flex-wrap:wrap; }
+.tg-toggle {
+    background:rgba(90,110,160,.12); color:#9aa4bd; border:1px solid rgba(90,110,160,.32);
+    border-radius:999px; padding:5px 12px; font-size:.74rem; cursor:pointer; min-height:32px;
+}
+.tg-toggle[aria-pressed="true"] { color:#0b0e26; font-weight:700; }
+.tg-toggle[data-geo="sun"][aria-pressed="true"]  { background:#ffd36b; border-color:#ffd36b; }
+.tg-toggle[data-geo="moon"][aria-pressed="true"] { background:#d9d4c7; border-color:#d9d4c7; }
+.tg-toggle[data-geo="live"][aria-pressed="true"] { background:#7fe6c3; border-color:#7fe6c3; }
+.tg-geo-clock { display:flex; align-items:center; gap:8px; flex:1 1 320px; min-width:0; font-size:.74rem; }
+.tg-geo-clock label { color:#8b94ad; white-space:nowrap; }
+.tg-geo-clock input[type=range] { flex:1 1 120px; min-width:80px; accent-color:#ffd36b; }
+.tg-geo-clock output { color:#e4e9f5; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.tg-geo-panel { margin-top:10px; }
+.tg-geo-panel[hidden] { display:none; }
+.tg-geo-panel .tg-stats { margin-top:6px; }
+.tg-geo-panel h4 {
+    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:#8b94ad;
+    margin:12px 0 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+}
+.tg-geo-panel h4 .tg-tag { margin-top:0; }
+.tg-geo-feeds { font-size:.7rem; color:#7c86a0; margin-top:10px; line-height:1.6; }
+.tg-geo-feeds b { color:#cdd5e4; font-weight:600; }
+.tg-geo-feeds .up { color:#7fe6c3; }
+.tg-geo-feeds .down { color:#ff8a7a; }
+.tg-geo-warn { color:#ffb454; }
 .tg-stage {
     position:relative; width:100%; height:560px; border-radius:10px; overflow:hidden;
     background:radial-gradient(circle at 50% 45%, #0a1030 0%, #03010e 72%);
@@ -366,6 +401,8 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
                     title="Look along the equator">Equator</button>
             <button type="button" class="tg-nav-btn tg-nav-opt" data-view="recentre"
                     title="Put the pivot back at Earth's centre">Recentre</button>
+            <button type="button" class="tg-nav-btn" data-view="geospace" id="tg-nav-geo" hidden
+                    title="Pull back to frame the magnetosphere and the Moon">Geospace</button>
             <span class="tg-nav-gap" aria-hidden="true"></span>
             <button type="button" class="tg-nav-btn tg-nav-zoom" data-view="in" aria-label="Zoom in"
                     title="Zoom in (+)">+</button>
@@ -433,6 +470,69 @@ table.tg-table tr.tg-hi td { color:#7fe6c3; }
         <div class="tg-stat"><div class="v good" id="tg-3d-survival">&mdash;</div><div class="k">reaches the surface</div></div>
     </div>
     <div class="tg-status" id="tg-3d-status" role="status" aria-live="polite"></div>
+
+    <!-- Sun / Moon geospace. Every number below comes from js/geomag/geospace.js
+         (node-gated by tests/geomag-geospace.mjs) fed with the live L1 wind;
+         the feeds are polled ONLY while a layer is on. -->
+    <div class="tg-geobar" id="tg-geobar" role="group" aria-label="Sun and Moon geospace layers">
+        <div class="tg-geo-toggles">
+            <button type="button" class="tg-toggle" data-geo="sun" id="tg-geo-sun" aria-pressed="false"
+                    title="Sun direction, terminator, dipole axis, and the magnetopause and bow shock from the live solar wind">&#9737; Sun &amp; magnetosphere</button>
+            <button type="button" class="tg-toggle" data-geo="moon" id="tg-geo-moon" aria-pressed="false"
+                    title="The Moon at its true distance and size, and whether it is in the magnetotail">&#9790; Moon</button>
+        </div>
+        <div class="tg-geo-clock">
+            <button type="button" class="tg-toggle" data-geo="live" id="tg-geo-live" aria-pressed="true"
+                    title="Track the real clock">Live</button>
+            <label for="tg-geo-offset">Clock</label>
+            <input type="range" id="tg-geo-offset" min="-360" max="360" step="1" value="0"
+                   aria-describedby="tg-geo-time">
+            <button type="button" class="tg-toggle" id="tg-geo-play" aria-pressed="false"
+                    title="Run the clock at 4 hours per second">&#9654; Play</button>
+            <output id="tg-geo-time">now</output>
+        </div>
+    </div>
+    <div class="tg-card tg-geo-panel" id="tg-geo-panel" hidden>
+        <h3>Sun&ndash;Earth&ndash;Moon geospace
+            <span class="tg-tag realtime" id="tg-geo-tag">Live</span></h3>
+        <p class="tg-note">
+            Ephemeris is exact to the quoted precision (Sun ~0.01&deg;, Moon Meeus ch.&nbsp;47).
+            The solar wind is the real-time L1 measurement; the boundaries are
+            <strong>empirical fits</strong> to it &mdash; magnetopause Shue et&nbsp;al.&nbsp;(1998), bow shock
+            Farris et&nbsp;al.&nbsp;(1991) &mdash; on an axis <strong>aberrated</strong> by Earth&rsquo;s
+            ~30&nbsp;km/s orbital motion. Both fits were made to near-Earth crossings: at the Moon
+            they are extrapolated, and the readout says so. Scrubbing the clock moves the Sun and the
+            Moon; the wind is held at its live value, because a wind forecast is not something this page has.
+        </p>
+        <h4>The Sun <span class="tg-tag derived">Ephemeris</span></h4>
+        <div class="tg-stats">
+            <div class="tg-stat"><div class="v" id="tg-geo-subsolar">&mdash;</div><div class="k">sub-solar point</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-tilt">&mdash;</div><div class="k">dipole tilt &psi;</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-aberr">&mdash;</div><div class="k">wind aberration</div></div>
+        </div>
+        <h4>Solar wind at L1 &rarr; the boundaries <span class="tg-tag realtime" id="tg-geo-windtag">Measured</span></h4>
+        <div class="tg-stats">
+            <div class="tg-stat"><div class="v" id="tg-geo-v">&mdash;</div><div class="k">speed</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-n">&mdash;</div><div class="k">density</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-bz">&mdash;</div><div class="k">IMF B<sub>z</sub></div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-p">&mdash;</div><div class="k">dynamic pressure</div></div>
+            <div class="tg-stat"><div class="v good" id="tg-geo-r0">&mdash;</div><div class="k">magnetopause nose</div></div>
+            <div class="tg-stat"><div class="v hot" id="tg-geo-bs">&mdash;</div><div class="k">bow shock nose</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-lag">&mdash;</div><div class="k">L1 &rarr; Earth</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-kp">&mdash;</div><div class="k">Kp (1-min est.)</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-dst">&mdash;</div><div class="k">Dst (Kyoto)</div></div>
+        </div>
+        <h4>The Moon <span class="tg-tag model" id="tg-geo-moontag">Ephemeris + extrapolated fit</span></h4>
+        <div class="tg-stats">
+            <div class="tg-stat"><div class="v" id="tg-geo-mdist">&mdash;</div><div class="k">distance</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-phase">&mdash;</div><div class="k">phase</div></div>
+            <div class="tg-stat"><div class="v good" id="tg-geo-region">&mdash;</div><div class="k">plasma regime</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-off">&mdash;</div><div class="k">off tail axis / tail radius</div></div>
+            <div class="tg-stat"><div class="v" id="tg-geo-next">&mdash;</div><div class="k" id="tg-geo-next-k">next tail crossing</div></div>
+        </div>
+        <div class="tg-status" id="tg-geo-status" role="status" aria-live="polite"></div>
+        <div class="tg-geo-feeds" id="tg-geo-feeds"></div>
+    </div>
 </section>
 
 <p class="tg-lede" style="padding-top:16px">
@@ -1056,6 +1156,7 @@ import {
     coeffsAt, fieldGrid, fieldGeodetic, dipole, dipoleFraction, lowesSpectrum, findSAA, NMAX, R_CMB_KM,
 } from './js/geomag/igrf.js';
 import { COASTLINES } from './js/geomag/coastlines.js';
+import { geospaceState, tailTransits, NOMINAL_WIND } from './js/geomag/geospace.js';
 import { dipoleTiltDay, dipoleTilt, toDipole, dipoleBasisForYear, decimalYear, smLongitudeAt, mltFromSmLongitude } from './js/geomag/dipole.js';
 import { classicalIndex, aliasAmplitude } from './js/geomag/tiga.js';
 import { KYOTO_TABLE1, SYMH6_TYPICAL, SYMH6_BALANCED, DST4 } from './js/geomag/observatories.js';
@@ -1827,7 +1928,15 @@ function renderProbe(p) {
     if (!p) { out.hidden = true; hint.hidden = false; return; }
     const where = `${fmtLat(p.latDeg)}, ${fmtLon(p.lonDeg)}`;
     let html;
-    if (p.kind === 'observatory') {
+    if (p.kind === 'moon') {
+        const REG = { magnetotail: 'in the magnetotail', magnetosheath: 'in the magnetosheath',
+            'solar-wind': 'in the solar wind' };
+        html = `<b>Moon</b> — ${p.distRe.toFixed(1)} R<sub>E</sub> · overhead at ${where} · `
+            + `${p.phase.name.toLowerCase()} · <u>${REG[p.region] || p.region}</u>`
+            + (p.tailRadiusRe ? ` · ${p.rhoRe.toFixed(1)} R<sub>E</sub> off the tail axis, tail radius `
+                + `<i>${p.tailRadiusRe.toFixed(1)} R<sub>E</sub></i>` : '')
+            + (p.extrapolated ? ' <em>— boundary fits extrapolated this far out</em>' : '');
+    } else if (p.kind === 'observatory') {
         // Both latitudes, side by side, for the reason observatories.js gives:
         // geographic and geomagnetic differ by up to 9.5° and mixing them up
         // is the exact error that cost this programme weeks.
@@ -1891,6 +2000,8 @@ async function boot3d() {
         syncStageControls();
         const active = layerButtons.find((b) => b.getAttribute('aria-selected') === 'true');
         scene3d.setLayer(active ? active.dataset.layer : 'external');
+        // Layers toggled before the GPU path finished booting.
+        if (GEO.sun || GEO.moon) applyGeo();
 
         // Release the GL context when the page goes away. Without this every
         // load leaks a WebGLRenderer: browsers cap live contexts (~16), and
@@ -1994,7 +2105,7 @@ function drawKey() {
     if (!scene3d) { host.hidden = true; return; }
     const layer = (layerButtons.find((b) => b.getAttribute('aria-selected') === 'true') || {}).dataset?.layer
         || 'external';
-    const rows = keyEntries(layer, $('tg-3d-interior').value);
+    const rows = [...keyEntries(layer, $('tg-3d-interior').value), ...geoKeyRows()];
     $('tg-key-body').innerHTML = rows.map((r) => {
         const cls = `tg-key-sw${r.ring ? ' tg-key-ring' : ''}${r.line ? ' tg-key-line' : ''}`;
         const style = r.ring ? `border-color:${r.color}` : `background:${r.color}`;
@@ -2302,6 +2413,293 @@ function renderLayer(name) {
         drawDecayLive();
     }
 }
+
+// ── Sun / Moon geospace ─────────────────────────────────────────────────────
+// The page computes NOTHING physical here: js/geomag/geospace.js owns the
+// ephemeris, the aberration and the two boundary fits (node-gated), and
+// core-3d.js draws its numbers. This block owns three things only: the
+// clock, the three real-time feeds, and printing.
+//
+// FEEDS, and why these three. The magnetosphere's shape is set by the wind
+// measured upstream at L1 (DSCOVR, ACE as backup) — that is the one input the
+// boundaries take. Kp (NOAA's 1-minute estimate) and Kyoto's Dst are the two
+// global geomagnetic indices printed alongside, as context and as the
+// classical comparison for the nowcast below; neither drives the geometry.
+// All three come through the site's own edge routes (already registered in
+// js/pipeline-registry.js), and they are polled ONLY while a layer is on.
+// A dead or expired wind feed falls back to NOMINAL_WIND and every number
+// derived from it is labelled NOMINAL — never presented as live.
+const GEO = {
+    sun: false, moon: false,
+    live: true, offsetH: 0, playing: false,
+    wind: null, windMeta: null, kp: null, kpMeta: null, dst: null, dstMeta: null,
+    timer: null, lastFeedMs: 0, lastDstMs: 0,
+    transits: null, transitKey: '', transitAnchorMs: 0,
+    state: null,
+};
+const H = 3600e3;
+
+async function geoFetch(url) {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 9000);
+    try {
+        const r = await fetch(url, { signal: ctl.signal, headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+    } finally {
+        clearTimeout(to);
+    }
+}
+
+async function geoPollFeeds(force = false) {
+    const now = Date.now();
+    if (!force && now - GEO.lastFeedMs < 55e3) return;
+    GEO.lastFeedMs = now;
+    const jobs = [
+        geoFetch('/api/solar-wind/latest').then((j) => {
+            const c = j?.data?.current || {};
+            const dead = j?.freshness === 'expired' || j?.freshness === 'missing';
+            GEO.windMeta = { ok: !dead, freshness: j?.freshness || 'unknown', ageMin: j?.age_min ?? null };
+            GEO.wind = dead ? null : {
+                speedKms: Number.isFinite(c.speed_km_s) ? c.speed_km_s : undefined,
+                densityCc: Number.isFinite(c.density_cc) ? c.density_cc : undefined,
+                bzNt: Number.isFinite(c.bz_nT) ? c.bz_nT : undefined,
+            };
+        }).catch((e) => { GEO.wind = null; GEO.windMeta = { ok: false, error: e.message }; }),
+        geoFetch('/api/noaa/kp-1m').then((j) => {
+            GEO.kp = j?.data?.current?.kp ?? null;
+            GEO.kpMeta = { ok: GEO.kp != null, ageMin: j?.age_min ?? null };
+        }).catch((e) => { GEO.kp = null; GEO.kpMeta = { ok: false, error: e.message }; }),
+    ];
+    // Dst is hourly; five minutes is already generous.
+    if (force || now - GEO.lastDstMs > 300e3) {
+        GEO.lastDstMs = now;
+        jobs.push(geoFetch('/api/noaa/dst').then((j) => {
+            GEO.dst = j?.data?.current?.dst_nT ?? null;
+            GEO.dstMeta = { ok: GEO.dst != null, ageMin: j?.age_min ?? null };
+        }).catch((e) => { GEO.dst = null; GEO.dstMeta = { ok: false, error: e.message }; }));
+    }
+    await Promise.all(jobs);
+    applyGeo();
+}
+
+const geoDate = () => new Date(Date.now() + (GEO.live ? 0 : GEO.offsetH * H));
+
+function fmtDur(ms) {
+    const a = Math.abs(ms);
+    const d = Math.floor(a / 86400e3);
+    const h = Math.floor((a % 86400e3) / H);
+    const m = Math.floor((a % H) / 60e3);
+    return d > 0 ? `${d} d ${h} h` : h > 0 ? `${h} h ${m} min` : `${m} min`;
+}
+const fmtUtc = (d) => `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+
+function geoTransitsFor(date, wind) {
+    // Scanning 36 days at 30-minute steps costs ~1,700 ephemeris evaluations;
+    // re-run only when the wind moves the boundary or the clock leaves the
+    // window it was computed for — never per scrub tick.
+    const b = geospaceBoundaryKey(wind);
+    const t = date.getTime();
+    if (GEO.transits && GEO.transitKey === b
+        && t > GEO.transitAnchorMs - 2 * 86400e3 && t < GEO.transitAnchorMs + 4 * 86400e3) {
+        return GEO.transits;
+    }
+    GEO.transitKey = b;
+    GEO.transitAnchorMs = t;
+    GEO.transits = tailTransits(new Date(t - 6 * 86400e3), 36, wind || NOMINAL_WIND);
+    return GEO.transits;
+}
+const geospaceBoundaryKey = (w) => (w
+    ? `${Math.round(w.speedKms ?? 0)}|${(w.densityCc ?? 0).toFixed(1)}|${(w.bzNt ?? 0).toFixed(1)}` : 'nominal');
+
+function applyGeo() {
+    const on = GEO.sun || GEO.moon;
+    $('tg-geo-panel').hidden = !on;
+    $('tg-nav-geo').hidden = !on;
+    const date = geoDate();
+    $('tg-geo-time').textContent = GEO.live
+        ? `${fmtUtc(date)} · live`
+        : `${fmtUtc(date)} · ${GEO.offsetH >= 0 ? '+' : '−'}${fmtDur(GEO.offsetH * H)}`;
+    if (!on) {
+        if (scene3d) scene3d.setGeospace({ sun: false, moon: false });
+        drawKey();
+        return;
+    }
+    const st = geospaceState(date, GEO.wind || NOMINAL_WIND);
+    GEO.state = st;
+    if (scene3d) scene3d.setGeospace({ sun: GEO.sun, moon: GEO.moon, state: st });
+    // Exposed read-only for tests/tiga-smoke.spec.js, like __tigaScene.
+    window.__tigaGeo = { state: st, live: GEO.live, wind: GEO.wind, windMeta: GEO.windMeta };
+
+    const b = st.boundary;
+    const nominal = !GEO.wind || b.fellBack.length > 0;
+    const live = GEO.live;
+    $('tg-geo-tag').textContent = live ? 'Live' : 'Scrubbed clock';
+    $('tg-geo-tag').className = `tg-tag ${live ? 'realtime' : 'provisional'}`;
+    $('tg-geo-windtag').textContent = !GEO.wind ? 'Nominal — feed down'
+        : b.fellBack.length ? `Partly nominal (${b.fellBack.join(', ')})` : 'Measured at L1';
+    $('tg-geo-windtag').className = `tg-tag ${nominal ? 'provisional' : 'realtime'}`;
+
+    $('tg-geo-subsolar').textContent = `${fmtLat(st.sun.subsolar.latDeg)}, ${fmtLon(st.sun.subsolar.lonDeg)}`;
+    $('tg-geo-tilt').innerHTML = `${st.dipoleTiltDeg >= 0 ? '+' : '−'}${Math.abs(st.dipoleTiltDeg).toFixed(1)}° `
+        + `<small>${st.dipoleTiltDeg >= 0 ? 'N pole sunward' : 'N pole anti-sunward'}</small>`;
+    $('tg-geo-aberr').innerHTML = `${st.aberrationDeg.toFixed(2)}° <small>tail trails orbit</small>`;
+    // A value is nominal when the whole feed is down OR when that one field
+    // was missing from a live row — tag it either way, per value.
+    const tagN = (k) => (!GEO.wind || b.fellBack.includes(k) ? ' <small>nominal</small>' : '');
+    $('tg-geo-v').innerHTML = `${b.speedKms.toFixed(0)} <small>km/s</small>${tagN('speedKms')}`;
+    $('tg-geo-n').innerHTML = `${b.densityCc.toFixed(1)} <small>cm⁻³</small>${tagN('densityCc')}`;
+    $('tg-geo-bz').innerHTML = `${b.bzNt >= 0 ? '+' : '−'}${Math.abs(b.bzNt).toFixed(1)} <small>nT ${b.bzNt < 0 ? 'south' : 'north'}</small>`
+        + tagN('bzNt');
+    $('tg-geo-p').innerHTML = `${b.pdynNPa.toFixed(2)} <small>nPa</small>`;
+    $('tg-geo-r0').innerHTML = `${b.r0Re.toFixed(1)} <small>R<sub>E</sub></small>`;
+    $('tg-geo-bs').innerHTML = `${b.bowNoseRe.toFixed(1)} <small>R<sub>E</sub></small>`;
+    $('tg-geo-lag').innerHTML = `${st.l1LagMin.toFixed(0)} <small>min</small>`;
+    $('tg-geo-kp').textContent = GEO.kp != null ? GEO.kp.toFixed(2) : '—';
+    $('tg-geo-dst').innerHTML = GEO.dst != null ? `${GEO.dst.toFixed(0)} <small>nT</small>` : '—';
+
+    const m = st.moon;
+    $('tg-geo-mdist').innerHTML = `${m.distRe.toFixed(1)} <small>R<sub>E</sub> · ${Math.round(m.distKm).toLocaleString()} km</small>`;
+    $('tg-geo-phase').innerHTML = `${m.phase.name} <small>${(m.phase.illuminatedFraction * 100).toFixed(0)}% lit</small>`;
+    const REGION = {
+        magnetotail: 'Magnetotail', magnetosheath: 'Magnetosheath',
+        'solar-wind': 'Solar wind', magnetosphere: 'Magnetosphere',
+    };
+    $('tg-geo-region').textContent = REGION[m.region] || m.region;
+    $('tg-geo-region').className = `v ${m.region === 'magnetotail' ? 'good' : m.region === 'magnetosheath' ? 'hot' : ''}`;
+    $('tg-geo-off').innerHTML = m.tailRadiusRe
+        ? `${m.rhoRe.toFixed(1)} / ${m.tailRadiusRe.toFixed(1)} <small>R<sub>E</sub></small>`
+        : `${m.rhoRe.toFixed(1)} <small>R<sub>E</sub> · dayside</small>`;
+
+    const wins = geoTransitsFor(date, GEO.wind);
+    const t = date.getTime();
+    const cur = wins.find((w) => (w.entryMs ?? -Infinity) <= t && t < (w.exitMs ?? Infinity));
+    const next = wins.find((w) => w.entryMs != null && w.entryMs > t);
+    if (m.region === 'magnetotail' && cur && cur.exitMs) {
+        $('tg-geo-next-k').textContent = 'leaves the tail';
+        $('tg-geo-next').innerHTML = `in ${fmtDur(cur.exitMs - t)} <small>${fmtUtc(new Date(cur.exitMs))}</small>`;
+    } else if (next) {
+        $('tg-geo-next-k').textContent = 'next tail crossing';
+        $('tg-geo-next').innerHTML = `in ${fmtDur(next.entryMs - t)} <small>for ${next.exitMs ? fmtDur(next.exitMs - next.entryMs) : '—'}</small>`;
+    } else {
+        $('tg-geo-next-k').textContent = 'next tail crossing';
+        $('tg-geo-next').textContent = '—';
+    }
+
+    const bits = [];
+    bits.push(`Dipole tilt ${st.dipoleTiltDeg.toFixed(1)}° — the Sun line against IGRF-14's centred dipole at this instant; `
+        + 'it swings ~18° every day because the dipole sits ~9° off the spin axis.');
+    if (m.extrapolated) {
+        bits.push(`The Moon is ${Math.abs(m.xRe).toFixed(0)} R_E downstream — past where either boundary fit was made, `
+            + 'so its regime is an extrapolation (tail flapping and IMF twisting move the boundary by a few R_E there).');
+    }
+    if (b.fitsCrossAtXRe != null) {
+        bits.push(`<span class="tg-geo-warn">Under this wind the two independent fits cross at X = ${b.fitsCrossAtXRe.toFixed(0)} R_E `
+            + '— the drawn bow shock stops there rather than show a sheath of negative thickness.</span>');
+    }
+    if (!GEO.live) bits.push('Clock scrubbed: the Sun and Moon move, the wind is held at its live value.');
+    $('tg-geo-status').innerHTML = bits.join(' ');
+
+    const feed = (name, meta, extra) => {
+        if (!meta) return `<b>${name}</b> <span>loading…</span>`;
+        if (!meta.ok) return `<b>${name}</b> <span class="down">down${meta.error ? ` (${meta.error})` : ''}</span>`;
+        const age = meta.ageMin != null ? ` · ${meta.ageMin.toFixed(1)} min old` : '';
+        return `<b>${name}</b> <span class="up">${extra}${age}${meta.freshness === 'stale' ? ' · stale' : ''}</span>`;
+    };
+    $('tg-geo-feeds').innerHTML = [
+        feed('Solar wind', GEO.windMeta, 'DSCOVR/ACE real-time (NOAA SWPC)'),
+        feed('Kp', GEO.kpMeta, 'NOAA SWPC 1-minute estimate'),
+        feed('Dst', GEO.dstMeta, 'Kyoto WDC quick-look'),
+    ].join(' &middot; ');
+    drawKey();
+}
+
+function geoKeyRows() {
+    if (!scene3d || !(GEO.sun || GEO.moon)) return [];
+    const C = scene3d.palettes.GEOSPACE_COLORS;
+    const rows = [];
+    if (GEO.sun) {
+        rows.push({ color: hex(C.sun), label: 'Sun direction', note: 'a marker — the Sun is ~23,500 R_E away' });
+        rows.push({ color: hex(C.terminator), line: true, label: 'Terminator' });
+        rows.push({ color: hex(C.dipoleAxis), line: true, label: 'Dipole axis', note: 'IGRF-14 centred dipole' });
+        rows.push({ color: hex(C.magnetopause), line: true, label: 'Magnetopause', note: 'Shue 1998, live wind' });
+        rows.push({ color: hex(C.bowShock), line: true, label: 'Bow shock', note: 'Farris 1991, live wind' });
+    }
+    if (GEO.moon) {
+        rows.push({ color: hex(C.moon), label: 'Moon', note: 'true size and distance' });
+        rows.push({ color: hex(C.moonOrbit), line: true, label: 'Lunar orbit', note: 'this sidereal month' });
+        rows.push({ color: hex(C.tailSection), ring: true, label: 'Tail at the Moon', note: 'magnetopause cross-section' });
+    }
+    return rows;
+}
+
+function geoTick() {
+    if (!(GEO.sun || GEO.moon)) { GEO.timer = null; return; }
+    geoPollFeeds();
+    if (GEO.live) applyGeo();
+    GEO.timer = setTimeout(geoTick, 30e3);
+}
+
+function setGeoLayer(which, on) {
+    GEO[which] = on;
+    $(`tg-geo-${which}`).setAttribute('aria-pressed', String(on));
+    applyGeo();
+    if ((GEO.sun || GEO.moon) && !GEO.timer) {
+        geoPollFeeds(true);
+        GEO.timer = setTimeout(geoTick, 30e3);
+    }
+}
+$('tg-geo-sun').addEventListener('click', () => {
+    const on = !GEO.sun;
+    setGeoLayer('sun', on);
+    // The boundaries start ~11 R_E out; from the default 3 R_E framing they
+    // are a few stray lines. One cancellable flight out, never a hold.
+    if (on && scene3d && scene3d.cameraState().dist < 8) scene3d.setViewPreset('geospace');
+});
+$('tg-geo-moon').addEventListener('click', () => {
+    const on = !GEO.moon;
+    setGeoLayer('moon', on);
+    // Turning the Moon on with the camera at a few R_E would add a layer you
+    // cannot see. One flight out, cancellable like every other framing.
+    if (on && scene3d && scene3d.cameraState().dist < 100) scene3d.setViewPreset('geospace');
+});
+$('tg-geo-live').addEventListener('click', () => {
+    GEO.live = true;
+    GEO.offsetH = 0;
+    GEO.playing = false;
+    $('tg-geo-play').setAttribute('aria-pressed', 'false');
+    $('tg-geo-offset').value = '0';
+    $('tg-geo-live').setAttribute('aria-pressed', 'true');
+    applyGeo();
+});
+$('tg-geo-offset').addEventListener('input', () => {
+    GEO.offsetH = Number($('tg-geo-offset').value);
+    GEO.live = false;
+    $('tg-geo-live').setAttribute('aria-pressed', 'false');
+    applyGeo();
+});
+let geoPlayT = null;
+function geoPlayStep(ts) {
+    if (!GEO.playing) return;
+    const dt = geoPlayT == null ? 0 : Math.min(0.25, (ts - geoPlayT) / 1000);
+    geoPlayT = ts;
+    GEO.offsetH += 4 * dt;
+    if (GEO.offsetH >= 360) { GEO.offsetH = 360; GEO.playing = false; $('tg-geo-play').setAttribute('aria-pressed', 'false'); }
+    $('tg-geo-offset').value = String(Math.round(GEO.offsetH));
+    applyGeo();
+    if (GEO.playing) requestAnimationFrame(geoPlayStep);
+}
+$('tg-geo-play').addEventListener('click', () => {
+    GEO.playing = !GEO.playing;
+    $('tg-geo-play').setAttribute('aria-pressed', String(GEO.playing));
+    if (GEO.playing) {
+        if (GEO.offsetH >= 360) GEO.offsetH = -360;
+        GEO.live = false;
+        $('tg-geo-live').setAttribute('aria-pressed', 'false');
+        geoPlayT = null;
+        requestAnimationFrame(geoPlayStep);
+    }
+});
 
 const initial = ['core', 'field', 'external'].includes(location.hash.slice(1))
     ? location.hash.slice(1) : 'external';

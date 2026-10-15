@@ -1,7 +1,7 @@
 # TIGA — status, decisions and open work
 
 **Page:** `tiga.html` · **Kernels:** `js/geomag/*` · **Edge:** `api/geomag/observatories.js`
-**Last updated:** 2026-07-26
+**Last updated:** 2026-10-12
 
 ---
 
@@ -62,6 +62,7 @@ js/geomag/
   ingest.js                live USGS → epochs → nowcast
   diffusion.js             ∂B/∂t = η∇²B on the core — SOLVED, validated to 0.03%
   field-lines.js           RK4 tracing + downward continuation to the CMB
+  geospace.js              Sun/Moon ephemeris, wind aberration, Shue + F91 boundaries (PURE)
   core-3d.js               three.js scene + three custom shaders (renderer only)
 api/geomag/observatories.js  USGS edge proxy
 tiga.html                    the three-layer page
@@ -99,6 +100,7 @@ node tests/geomag-core-model.mjs  # Bessel zeros, decay times, screening
 node tests/geomag-dynamo.mjs      # αΩ vs the SciPy eigensolver (~40 s)
 node tests/geomag-osse.mjs        # the definition floor, dropout, calibration
 node tests/geomag-diffusion.mjs   # the diffusion solve + field-line tracing
+node tests/geomag-geospace.mjs    # Sun/Moon ephemeris, aberration, boundaries
 npx playwright test tests/tiga-smoke.spec.js
 ```
 
@@ -241,6 +243,57 @@ the layer's conductivity and dynamo verdict in its place.
 The whole cluster is keyboard-reachable — the canvas is focusable, arrows
 orbit, `+`/`−` zoom, `R` resets. A data surface only a mouse can explore is a
 WCAG 2.1.1 failure, and this one carries readings.
+
+### 3.0.3 The Sun and the Moon — geospace layer (2026-10-12)
+
+Two toggles under the 3D view (☉ Sun & magnetosphere, ☾ Moon) and a clock
+(Live, ±15 d scrub, Play). The kernel is `js/geomag/geospace.js` — PURE,
+node-gated by `tests/geomag-geospace.mjs` (21 checks) — and `core-3d.js`
+only draws its numbers. Three kinds of quantity, and the panel labels each:
+
+| Kind | What | Source |
+|---|---|---|
+| Ephemeris | Sun direction/distance, Moon position, Earth's orbital velocity | `dipole.js` Almanac Sun (the SAME Sun as the dipole tilt — gated to 1e-9°), `horizons.js` `moonGeocentric` (the site's one lunar position), velocity differenced from the Sun vector |
+| Measured (real time) | Solar wind v, n, B_z at L1 · Kp · Dst | `/api/solar-wind/latest` (DSCOVR/ACE via the Supabase ring buffer), `/api/noaa/kp-1m`, `/api/noaa/dst` (Kyoto) — all already in `pipeline-registry.js`, polled ONLY while a layer is on |
+| Empirical model | Magnetopause, bow shock, Moon's plasma regime | Shue et al. 1998 (r₀, α from `ring-current-model.js`, the site's one copy, evaluated WITHOUT its θ ≤ 2 rad clamp) and Farris et al. 1991 (ellipse, e = 0.81, L₀ = 24.8 R_E at 1.8 nPa, ∝ P^−1/6) |
+
+Things that are load-bearing:
+
+1. **The axis is ABERRATED.** Earth's ~30 km/s through a ~400 km/s wind
+   turns the flow ~4° off the Sun line; the tail trails the orbital motion.
+   Measured consequence, gated with aberration OFF as the negative control:
+   the Moon's tail crossing is centred **7.9 h before full moon** (0.3 h
+   with the control). Residence 4.0–4.5 d per lunation, nominal wind.
+2. **At the Moon both fits are extrapolated** (~60 R_E vs near-Earth
+   crossings). Every result past X = −40 R_E carries `extrapolated: true`
+   and the page says so. Shue extrapolated gives a 27.6 R_E tail radius at
+   60 R_E (nominal), inside the ~25–30 R_E distant-tail observations.
+3. **The two fits can disagree.** Shue's tail flares harder as B_z goes
+   south; F91's ellipse does not. At 900 km/s, 30 cm⁻³, B_z −30 nT the
+   magnetopause pokes out through the bow shock at X ≈ −41 R_E — a sheath
+   of negative thickness. `fitsCrossAtXRe` reports it, the renderer stops
+   the bow shock there, the page prints it. None sunward of 70 R_E for
+   quiet, nominal or active wind (gated).
+4. **A dead feed is NOMINAL, per value.** `NOMINAL_WIND` (400 km/s,
+   5 cm⁻³, B_z 0) stands in and every value it supplies is tagged — a
+   partial row tags only the missing fields (`boundaryModel().fellBack`).
+   The first build tagged only partial rows; the browser gate caught it.
+5. **Scrubbing moves the Sun and the Moon, NOT the wind.** There is no wind
+   forecast here; the panel says the wind is held at its live value.
+6. **Scale stays true.** Moon 0.2727 R_E at its real distance; the camera
+   envelope widens (30 → 90 Sun, → 190 Moon) only while a layer is on and
+   shrinks back after. The only non-scale object is the Sun glyph — a
+   DIRECTION marker parked past the Moon's orbit (at 24 R_E it read as a Sun
+   touching the bow-shock nose). Toggling a layer may START a flight out;
+   it never holds the camera.
+7. **The Moon is shaded by `js/airless-body.js`** (Lommel–Seeliger,
+   opposition surge, earthshine via `eclipse-geometry.js`, Earth's shadow per
+   fragment in real km) — the same Moon the orrery draws, so a lunar eclipse
+   on the clock shows as one.
+
+Not modelled, and named on the page or in the kernel header: tail flapping,
+IMF-B_y twisting, dipole-tilt hinging of the plasma sheet, the lunar wake,
+the lunar ionospheric (L) and ocean-tide (M2) magnetic signals.
 
 ### 3.1 Numerical gates, all passing
 
