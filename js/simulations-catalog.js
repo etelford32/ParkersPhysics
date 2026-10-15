@@ -381,6 +381,7 @@ export const NON_SIMULATION_PAGES = new Set([
     'privacy.html',
     'request-access.html',
     'research.html',            // section hub
+    'sample-fleet-assessment.html', // operator marketing page (Storm-Season Fleet Assessment proof + simulator)
     'reset-password.html',
     'settings.html',
     'signin.html',
