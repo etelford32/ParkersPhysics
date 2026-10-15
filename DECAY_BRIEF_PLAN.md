@@ -1,6 +1,6 @@
 # Decay Brief — plan
 
-Status: **planned, not built** (2026-10-15)
+Status: **step 1 shipped** (2026-10-15) — steps 2–6 planned
 Owner: Parkers Physics
 Parent: `ORBIT_MARGIN_ROADMAP.md` (this is the free top-of-funnel artifact
 that leads into the $3,500 *Fleet Storm-Readiness Assessment* defined there)
@@ -111,12 +111,39 @@ whatever they turn out to be.
 
 | Step | Work | Output | Gate |
 |---|---|---|---|
-| 1 | `rhoAtT` option in `integrateDecay` + pure driver-schedule module | `js/decay/driver-schedule.js` | existing `tests/operations-msis-drag.mjs` unchanged and green; new test: a schedule held constant reproduces today's lifetime exactly |
+| 1 ✅ | `rhoAtT` / `maxStepDays` / `onStep` hooks in `integrateDecay` + pure driver schedule + scheduled decay + injected MSIS provider | `js/decay/{driver-schedule,scheduled-decay,msis-profile}.js` | **met** — see §4.1 |
 | 2 | Ballistic-coefficient fit from element history | `js/decay/fit-ballistic.js` | synthetic test: decay generated with a known B and noisy elements recovers B within its σ |
 | 3 | Data fetchers: Space-Track history (local CLI only, creds from env), predicted-cycle F10.7 (candidate list), GFZ realised indices | `scripts/decay/fetch-*.mjs` + committed fixtures | node tests run offline on fixtures |
 | 4 | Backtest harness over the re-entered set | `scripts/decay/backtest.mjs` → `DECAY_BACKTEST_RESULTS.md` | the gate in §3C |
 | 5 | Brief generator: NORAD ID in, JSON + one-page HTML (print-to-PDF) + one PNG chart for the email out | `scripts/decay/brief.mjs` | every number in the page comes from the JSON; caveats and provenance present |
 | 6 | Run for the Wave 1 satellites; owner reviews every brief by hand | `briefs/` (not committed: names + outreach) | owner sign-off per brief |
+
+### 4.1 Step 1 — what shipped (2026-10-15)
+
+- `js/operations/msis-drag.js` `integrateDecay` gained three optional
+  hooks. Unused, the arithmetic is bit-identical (asserted with
+  `assert.equal`); the existing gate is unchanged and green.
+- `js/decay/driver-schedule.js`: sources in priority order, uncovered
+  slots held and counted under `held`, storm splice, and the NRLMSISE-00
+  conventions (previous-day F10.7, centred 81-day F10.7A, 7-element ap
+  history). Output is merged 3-hour segments plus hour-level provenance.
+- `js/decay/scheduled-decay.js`: steps capped at every driver change,
+  profiles cached per (state, 15-day season bucket), `heldDays` reports
+  integration past the schedule's end, optional perigee/apogee track for
+  the brief's chart.
+- `js/decay/msis-profile.js`: the committed WASM injected, now fed the
+  schedule's F10.7A and ap history instead of scalars.
+- Measured in `tests/decay-driver-schedule.mjs` (CI `decay-kernels.yml`):
+  - a declining-flux lifetime matches its closed form within 1 %;
+  - the storm-spliced run matches a brute-force 0.02-day step within 1 %;
+  - MSIS density at 400 km rises further for a sustained storm than for
+    its first 3-hour slot, so the ap history reaches the model;
+  - illustrative only, not a forecast: a 420 km, B = 0.025 m²/kg CubeSat
+    under a slowly declining F10.7 lives ~179 days, and a three-day
+    G4-class Ap splice costs it ~3 days (39 distinct MSIS profiles).
+
+Not yet built: real data feeds (step 3), so no schedule here comes from
+observed or forecast indices yet.
 
 Everything kernel-side stays PURE and node-testable (the repo's standing
 rule); network fetches live only in the CLI scripts. The generator runs on a
