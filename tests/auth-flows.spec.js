@@ -244,7 +244,7 @@ test.describe('Pricing Page', () => {
         await page.goto('/pricing.html');
         await expect(page.locator('[data-checkout]')).toHaveCount(0);
         // Post-test prices are shown struck through, not charged.
-        await expect(page.locator('s[data-price="intro"]')).toHaveText('$9.99/mo');
+        await expect(page.locator('s[data-price="intro"]')).toHaveText('$10/mo');
         await expect(page.locator('s[data-price="advanced"]')).toHaveText('$100/mo');
     });
 

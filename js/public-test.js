@@ -29,12 +29,14 @@
 export const PUBLIC_TEST = true;
 
 /**
- * Post-test prices, shown struck through during the test. These are the
- * live Stripe prices of the plans each family maps to (basic / advanced),
- * so the page never shows a number checkout would not charge.
+ * Post-test prices, shown struck through during the test (owner's call,
+ * 2026-10-15: Intro $10/mo, Advanced $100/mo, no annual price yet).
+ * BEFORE CHECKOUT IS RE-ENABLED the Stripe price behind `basic` must be
+ * moved from $9.99 to $10.00 (and the $59/yr basic-yearly SKU retired or
+ * re-priced) — the page must never show a number checkout would not charge.
  */
 export const PRICES = Object.freeze({
-    intro:    Object.freeze({ monthlyUsd: 9.99, yearlyUsd: 59, checkoutPlan: 'basic' }),
+    intro:    Object.freeze({ monthlyUsd: 10,   yearlyUsd: null, checkoutPlan: 'basic' }),
     advanced: Object.freeze({ monthlyUsd: 100,  yearlyUsd: null, checkoutPlan: 'advanced' }),
 });
 
@@ -120,7 +122,7 @@ export function normalizeSignupMeta(input = {}) {
     return out;
 }
 
-/** "$9.99/mo" style label for a family's monthly price. */
+/** "$10/mo" style label for a family's monthly price. */
 export function monthlyLabel(family) {
     const p = PRICES[family];
     if (!p) return '';

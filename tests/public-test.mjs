@@ -97,10 +97,10 @@ for (const fam of ['intro', 'advanced']) {
     check(!!m, `pricing.html: no data-price="${fam}" element`);
     if (m) eq(m[1], monthlyLabel(fam), `pricing.html ${fam} price`);
 }
-check(pricing.includes(`$${PRICES.intro.yearlyUsd}/yr`), 'pricing.html must show the Intro yearly price');
+check(PRICES.intro.yearlyUsd !== null || !/\$\d+\/yr/.test(pricing), 'pricing.html shows a yearly price PRICES does not have');
 check(!/data-checkout=/.test(pricing.replace(/\/\/.*$/gm, '')) || !PUBLIC_TEST,
     'no checkout buttons on pricing.html while the public test runs');
-eq(monthlyLabel('intro'), '$9.99/mo', 'monthlyLabel intro');
+eq(monthlyLabel('intro'), '$10/mo', 'monthlyLabel intro');
 eq(monthlyLabel('advanced'), '$100/mo', 'monthlyLabel advanced');
 
 /* ── 7. auth.js forwards ONLY the persona keys ───────────────────────── */
