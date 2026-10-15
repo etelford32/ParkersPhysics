@@ -152,64 +152,6 @@
         .invite-details[open] summary::before { transform: rotate(90deg); }
         .signup-reassure { text-align: center; font-size: .78rem; color: #8a94a8; margin-top: 12px; line-height: 1.5; }
 
-        /* Plan selector */
-        .plan-pills {
-            display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 14px;
-        }
-        @media (max-width: 540px) { .plan-pills { grid-template-columns: repeat(2, 1fr); } }
-        .plan-pill {
-            border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
-            padding: 9px 4px; text-align: center; cursor: pointer;
-            transition: border-color .2s, background .2s;
-            background: rgba(255,255,255,.04);
-        }
-        .plan-pill:hover { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.08); }
-        .plan-pill.selected { border-color: #8040ff; background: rgba(128,64,255,.15); }
-        .plan-pill.selected.basic       { border-color: #ffd700; background: rgba(255,215,0,.1); }
-        .plan-pill.selected.educator    { border-color: #9ad36f; background: rgba(154,211,111,.1); }
-        .plan-pill.selected.advanced    { border-color: #8040ff; background: rgba(128,64,255,.15); }
-        .plan-pill.selected.institution { border-color: #ff8cc8; background: rgba(255,140,200,.12); }
-        .plan-pill-name { font-size: .76rem; font-weight: 700; color: #ddd; display: block; }
-        .plan-pill-price { font-size: .68rem; color: #777; display: block; margin-top: 2px; }
-        .plan-pill input[type=radio] { display: none; }
-
-        /* Live per-tier feature summary */
-        .plan-summary {
-            margin: 0 0 18px; padding: 14px 16px;
-            border: 1px solid rgba(255,255,255,.12); border-radius: 10px;
-            background: rgba(255,255,255,.03);
-            transition: border-color .2s, background .2s;
-        }
-        .plan-summary .ps-head {
-            display: flex; align-items: baseline; justify-content: space-between;
-            gap: 10px; margin-bottom: 6px;
-        }
-        .plan-summary .ps-name { font-size: .95rem; font-weight: 800; color: #fff; }
-        .plan-summary .ps-price { font-size: .8rem; font-weight: 700; color: #4eff91; white-space: nowrap; }
-        .plan-summary .ps-tag { font-size: .8rem; color: #aab; margin-bottom: 10px; line-height: 1.5; }
-        .plan-summary ul { list-style: none; }
-        .plan-summary li {
-            display: flex; align-items: flex-start; gap: 8px;
-            font-size: .82rem; color: #cdd; line-height: 1.45; padding: 4px 0;
-        }
-        .plan-summary li .ck { color: #4eff91; flex-shrink: 0; font-size: .82rem; margin-top: 1px; }
-        /* Accent the summary to match the selected pill */
-        .plan-summary.basic       { border-color: rgba(255,215,0,.4);   background: rgba(255,215,0,.05); }
-        .plan-summary.basic .ps-price       { color: #ffd700; }
-        .plan-summary.educator    { border-color: rgba(154,211,111,.4); background: rgba(154,211,111,.05); }
-        .plan-summary.educator .ps-price    { color: #9ad36f; }
-        .plan-summary.advanced    { border-color: rgba(128,64,255,.45); background: rgba(128,64,255,.08); }
-        .plan-summary.advanced .ps-price    { color: #b18cff; }
-        .plan-summary.institution { border-color: rgba(255,140,200,.4);  background: rgba(255,140,200,.06); }
-        .plan-summary.institution .ps-price { color: #ff8cc8; }
-
-        .enterprise-link {
-            display: block; margin: 0 0 22px; text-align: center;
-            font-size: .78rem; color: #888;
-        }
-        .enterprise-link a { color: #ffd700; text-decoration: none; font-weight: 600; }
-        .enterprise-link a:hover { text-decoration: underline; }
-
         /* Form fields */
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         @media (max-width: 480px) { .form-row { grid-template-columns: 1fr; } }
@@ -255,10 +197,6 @@
         .btn-submit:hover { opacity: .9; transform: translateY(-1px); }
         .btn-submit:active { transform: translateY(0); }
         .btn-submit:disabled { opacity: .5; cursor: not-allowed; transform: none; }
-        .btn-submit.basic-plan       { background: linear-gradient(45deg,#ffd700,#ff8c00); color: #0a0a1a; }
-        .btn-submit.educator-plan    { background: linear-gradient(45deg,#9ad36f,#3fa05a); color: #0a1a0a; }
-        .btn-submit.advanced-plan    { background: linear-gradient(45deg,#8040ff,#4080ff); }
-        .btn-submit.institution-plan { background: linear-gradient(45deg,#ff8cc8,#c845a0); color: #1a0a14; }
 
         .divider {
             display: flex; align-items: center; gap: 10px;
@@ -291,6 +229,51 @@
         footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
         footer a { color: #555; text-decoration: none; }
         footer a:hover { color: #ffd700; }
+
+        /* ── Public test (Founding Tester) sign-up — js/public-test.js ── */
+        .tester-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+            color: #ffb066; border: 1px solid rgba(255,176,102,.5);
+            background: rgba(255,176,102,.08); border-radius: 20px; padding: 4px 11px;
+            margin-bottom: 12px;
+        }
+        .tester-intro { font-size: .84rem; color: #aab; line-height: 1.55; margin-bottom: 18px; }
+        .tester-intro b { color: #fff; }
+        .persona-group { border: 0; margin: 0 0 16px; padding: 0; min-width: 0; }
+        .persona-group legend { font-size: .82rem; font-weight: 600; color: #ccc; margin-bottom: 7px; padding: 0; }
+        .persona-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+        @media (max-width: 480px) { .persona-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .persona-chip {
+            position: relative; display: block; cursor: pointer;
+            border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+            background: rgba(255,255,255,.04); padding: 8px 10px;
+            font-size: .8rem; font-weight: 600; color: #ddd; line-height: 1.3;
+            transition: border-color .15s, background .15s;
+        }
+        .persona-chip small { display: block; font-weight: 400; font-size: .68rem; color: #8a94a8; margin-top: 2px; }
+        .persona-chip:hover { border-color: rgba(255,255,255,.3); }
+        .persona-chip.advanced { border-style: dashed; }
+        .persona-chip input { position: absolute; opacity: 0; pointer-events: none; }
+        .persona-chip:has(input:checked) { border-color: #00c6ff; background: rgba(0,198,255,.1); color: #fff; }
+        .persona-chip:has(input:focus-visible) { outline: 2px solid #00c6ff; outline-offset: 2px; }
+        .operator-fields {
+            border: 1px dashed rgba(169,139,255,.5); border-radius: 8px;
+            padding: 12px 12px 4px; margin: 0 0 16px;
+        }
+        .operator-fields .of-head { font-size: .78rem; color: #d6ccff; margin-bottom: 10px; line-height: 1.45; }
+        .operator-fields select {
+            width: 100%; padding: 11px 14px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.05);
+            color: #fff; font-family: inherit; font-size: .9rem;
+        }
+        .operator-fields select option { background: #0a0a1a; }
+        .form-check.pilot { margin: 0 0 12px; }
+        .form-check.pledge { color: #b9c4d4; }
+        .form-check.pledge b { color: #fff; }
+        .form-check.optin { margin-top: -8px; }
+        .btn-submit.tester { background: linear-gradient(45deg,#00c6ff,#4080ff); color: #04121c; }
+        .side-features.tester li .dot { background: #ffb066; }
     </style>
 <script type="application/ld+json">
 {
@@ -335,62 +318,30 @@
         <!-- Left panel -->
         <div class="auth-side">
             <img src="ParkerPhaysics_logo1.png" class="auth-side-logo" alt="Logo">
-            <h1>Sign Up — Explore the Universe</h1>
-            <p>Parkers Physics is a physics-first space-weather platform: real-time NASA/NOAA data, MHD-grounded models, and interactive 3D simulations — straight in your browser, no install.</p>
-            <ul class="side-features">
-                <li><span class="dot"></span> 40+ simulations on one physics engine</li>
-                <li><span class="dot"></span> Live solar wind, Kp index &amp; IMF Bz</li>
-                <li><span class="dot"></span> Real NASA DONKI &amp; NOAA SWPC feeds</li>
-                <li><span class="dot"></span> Stars, black holes &amp; the galactic map</li>
-                <li><span class="dot"></span> Rust/WASM high-performance engine</li>
-                <li><span class="dot"></span> Free tier — no card required</li>
+            <h1>Join the public test</h1>
+            <p>Parkers Physics is a physics-first space-weather platform: real-time NASA/NOAA data, MHD-grounded models, and interactive 3D simulations, straight in your browser.</p>
+            <ul class="side-features tester">
+                <li><span class="dot"></span> Full access, Advanced included, for the whole test</li>
+                <li><span class="dot"></span> A feedback button on every page, tracked to "shipped"</li>
+                <li><span class="dot"></span> Useful reports earn a permanent discount at launch</li>
+                <li><span class="dot"></span> The most useful testers keep their plan free</li>
+                <li><span class="dot"></span> 30 days' notice before paid plans start</li>
+                <li><span class="dot"></span> No credit card</li>
             </ul>
         </div>
 
         <!-- Right form panel -->
         <div class="auth-form-panel">
             <div id="form-view">
-                <div class="form-title">Create your account</div>
+                <!-- Public test (js/public-test.js PUBLIC_TEST). The plan is set
+                     by the database trigger, never chosen here: every sign-up
+                     during the test is a tester with full access. The old
+                     plan pills are gone; paid checkout returns when the test
+                     ends (?tier= / legacy ?plan= still read for that path). -->
+                <div class="tester-badge" id="tester-badge">★ Founding Tester · free during the public test</div>
+                <div class="form-title">Create your tester account</div>
                 <div class="form-sub">Already have one? <a href="signin.html">Sign in →</a></div>
-
-                <!-- Plan selector -->
-                <div class="plan-pills" id="plan-pills">
-                    <label class="plan-pill free" id="pill-free">
-                        <input type="radio" name="plan" value="free">
-                        <span class="plan-pill-name">🔭 Free</span>
-                        <span class="plan-pill-price">Always free</span>
-                    </label>
-                    <label class="plan-pill basic" id="pill-basic">
-                        <input type="radio" name="plan" value="basic">
-                        <span class="plan-pill-name">⭐ Basic</span>
-                        <span class="plan-pill-price">$9.99 / mo</span>
-                    </label>
-                    <label class="plan-pill educator" id="pill-educator">
-                        <input type="radio" name="plan" value="educator">
-                        <span class="plan-pill-name">🎓 Educator</span>
-                        <span class="plan-pill-price">$25 / mo</span>
-                    </label>
-                    <label class="plan-pill advanced" id="pill-advanced">
-                        <input type="radio" name="plan" value="advanced">
-                        <span class="plan-pill-name">🚀 Advanced</span>
-                        <span class="plan-pill-price">$100 / mo</span>
-                    </label>
-                    <label class="plan-pill institution" id="pill-institution">
-                        <input type="radio" name="plan" value="institution">
-                        <span class="plan-pill-name">🏛️ Institution</span>
-                        <span class="plan-pill-price">$500 / mo</span>
-                    </label>
-                </div>
-
-                <!-- Live per-tier feature breakdown. Populated by
-                     renderPlanSummary() in the script block below; copy is
-                     kept in sync with pricing.html's canonical feature lists. -->
-                <div class="plan-summary" id="plan-summary" aria-live="polite"></div>
-
-                <div class="enterprise-link">
-                    Need a custom plan, custom data, or 200+ seats?
-                    <a href="contact-enterprise.html">Talk to Enterprise sales →</a>
-                </div>
+                <p class="tester-intro" id="tester-intro">You get <b>full access now</b>, Advanced included. In return, tell us what breaks. Testers whose reports help us improve keep a permanent discount, and the most useful stay free.</p>
 
                 <form id="signup-form" novalidate>
                     <div class="form-row">
@@ -419,6 +370,37 @@
                         <div class="form-error" id="err-pw">Password must be at least 8 characters.</div>
                     </div>
 
+                    <!-- Persona: one tap, routes the welcome path and the
+                         operator follow-up. Chips are rendered from
+                         js/public-test.js PERSONAS by the module below. -->
+                    <fieldset class="persona-group" id="persona-group">
+                        <legend>What brings you here?</legend>
+                        <div class="persona-chips" id="persona-chips"></div>
+                        <div class="form-error" id="err-persona">Pick the closest match. It helps us route your feedback.</div>
+                    </fieldset>
+
+                    <div class="operator-fields" id="operator-fields" hidden>
+                        <div class="of-head">Flying spacecraft? Tell us a little about the fleet (optional).</div>
+                        <div class="form-group">
+                            <label for="org-name">Organization</label>
+                            <input type="text" id="org-name" name="org_name" maxlength="120" autocomplete="organization" placeholder="Orbit Ops Inc.">
+                        </div>
+                        <div class="form-group">
+                            <label for="fleet-size">Fleet size</label>
+                            <select id="fleet-size" name="fleet_size">
+                                <option value="">Prefer not to say</option>
+                                <option value="1">1 spacecraft</option>
+                                <option value="2-10">2–10</option>
+                                <option value="11-100">11–100</option>
+                                <option value="100+">100+</option>
+                            </select>
+                        </div>
+                        <label class="form-check pilot">
+                            <input type="checkbox" id="pilot-request">
+                            I'd like a pilot call: a walkthrough and a hindcast on our own fleet.
+                        </label>
+                    </div>
+
                     <!-- Invite code (optional), COLLAPSED and last: an empty
                          optional field at the top of the form was the first
                          thing every landing-page arrival saw. Pre-filled and
@@ -434,14 +416,23 @@
                         </div>
                     </details>
 
-                    <label class="form-check">
+                    <!-- #terms carries the tester pledge during the test (one
+                         required box, not two). The id is load-bearing for
+                         the auth-flows / funnel specs. -->
+                    <label class="form-check pledge">
                         <input type="checkbox" id="terms" required>
-                        I agree to the <a href="eula.html" target="_blank">Terms of Service</a> and <a href="privacy.html" target="_blank">Privacy Policy</a>
+                        <span><span class="pledge-text" id="pledge-text"><b>I'm joining as a tester.</b> Features may change, data may be reset, and I'll report what breaks. </span>I agree to the <a href="eula.html" target="_blank">Terms of Service</a> and <a href="privacy.html" target="_blank">Privacy Policy</a>.</span>
                     </label>
                     <div class="form-error" id="err-terms" style="margin-top:-12px;margin-bottom:12px;">You must agree to continue.</div>
 
-                    <button type="submit" class="btn-submit" id="btn-submit">Create Account →</button>
-                    <p class="signup-reassure">Free forever on the Free plan — no credit card. Paid plans cancel anytime.</p>
+                    <label class="form-check optin" id="optin-row">
+                        <input type="checkbox" id="tester-updates">
+                        Email me when something I reported ships, plus test-phase news. (optional)
+                    </label>
+
+                    <button type="submit" class="btn-submit tester" id="btn-submit">Create my tester account →</button>
+                    <p class="signup-reassure" id="signup-reassure">Free while we test. No credit card. You get 30 days' notice before paid plans start.</p>
+                    <p class="signup-reassure">Need classroom seats or a site licence? <a href="contact-enterprise.html" style="color:#a080ff">Talk to us →</a></p>
                 </form>
 
                 <!-- Social auth — see signin.html for the same wiring. -->
@@ -455,6 +446,79 @@
                     document.getElementById('oauth-divider').style.display = '';
                     mountOAuthButtons('#oauth-mount', { source: 'signup' });
                 }
+            </script>
+
+            <!-- Public-test wiring: persona chips + operator reveal. Exposes
+                 window._ppPublicTest for the classic submit handler below
+                 (classic scripts can't import; it reads this AT SUBMIT TIME,
+                 by which point every deferred module has run). -->
+            <script type="module">
+                import {
+                    PUBLIC_TEST, PERSONAS, PRICES, familyFromParams,
+                    isOperatorPersona, normalizeSignupMeta,
+                } from './js/public-test.js';
+
+                const params = new URLSearchParams(location.search);
+                const arrivedFor = familyFromParams(params);   // 'intro' | 'advanced' | null
+                const chips = document.getElementById('persona-chips');
+                const opFields = document.getElementById('operator-fields');
+                const fire = (stage, props) => {
+                    try {
+                        if (window.ppFunnel) window.ppFunnel.step(stage, props);
+                        else (window.ppFunnelQueue = window.ppFunnelQueue || []).push(['step', stage, props]);
+                    } catch {}
+                };
+
+                for (const p of PERSONAS) {
+                    const label = document.createElement('label');
+                    label.className = 'persona-chip' + (p.family === 'advanced' ? ' advanced' : '');
+                    label.id = 'persona-' + p.id;
+                    const input = document.createElement('input');
+                    input.type = 'radio';
+                    input.name = 'persona';
+                    input.value = p.id;
+                    label.append(input, document.createTextNode(p.label));
+                    const sub = document.createElement('small');
+                    sub.textContent = p.sub;
+                    label.append(sub);
+                    chips.append(label);
+                }
+                chips.addEventListener('change', (e) => {
+                    const id = e.target?.value;
+                    if (!id) return;
+                    opFields.hidden = !isOperatorPersona(id);
+                    document.getElementById('err-persona')?.classList.remove('visible');
+                    fire('signup_persona_selected', { persona: id, arrived_for: arrivedFor });
+                });
+
+                if (!PUBLIC_TEST) {
+                    // After the test: the tester copy goes, the plain terms
+                    // line stays, and checkout runs for paid arrivals.
+                    for (const id of ['tester-badge', 'tester-intro', 'pledge-text', 'optin-row', 'signup-reassure']) {
+                        const el = document.getElementById(id);
+                        if (el) el.hidden = true;
+                    }
+                    document.querySelector('.form-title').textContent = 'Create your account';
+                    const btn = document.getElementById('btn-submit');
+                    btn.textContent = 'Create Account →';
+                }
+
+                window._ppPublicTest = {
+                    PUBLIC_TEST,
+                    arrivedFor,
+                    // Stored plan id checkout should charge after the test, or
+                    // null for a free sign-up. Always null while the test runs.
+                    checkoutPlan: PUBLIC_TEST ? null : (PRICES[arrivedFor]?.checkoutPlan || null),
+                    selectedPersona: () => chips.querySelector('input:checked')?.value || '',
+                    meta: () => normalizeSignupMeta({
+                        persona:        chips.querySelector('input:checked')?.value || '',
+                        org_name:       document.getElementById('org-name')?.value || '',
+                        fleet_size:     document.getElementById('fleet-size')?.value || '',
+                        tester_updates: PUBLIC_TEST && !!document.getElementById('tester-updates')?.checked,
+                    }),
+                    wantsPilot: () => !opFields.hidden && !!document.getElementById('pilot-request')?.checked,
+                };
+                fire('signup_public_test', { public_test: PUBLIC_TEST, arrived_for: arrivedFor, src: (params.get('src') || '').slice(0, 24) || null });
             </script>
 
             <!-- Success state -->
@@ -654,98 +718,6 @@
             return safe.length > 512 ? null : safe;
         } catch { return null; }
     };
-    const planMap = {
-        free:        'pill-free',
-        basic:       'pill-basic',
-        educator:    'pill-educator',
-        advanced:    'pill-advanced',
-        institution: 'pill-institution',
-    };
-    const PLAN_BTN_CLASS = {
-        basic:       ' basic-plan',
-        educator:    ' educator-plan',
-        advanced:    ' advanced-plan',
-        institution: ' institution-plan',
-    };
-
-    // Per-tier feature copy — the actual functionality each plan unlocks.
-    // Kept in sync with the canonical feature lists in pricing.html and the
-    // capability flags in js/tier-config.js. Update all three together.
-    const PLAN_FEATURES = {
-        free: {
-            name: '🔭 Free', price: 'Always free',
-            tag: 'Start exploring — no credit card required.',
-            items: [
-                '3 live simulations: Sun, Earth & Space Weather',
-                'Live NOAA solar-wind & Kp index readout',
-                '2D stellar modeler',
-                'Community access',
-            ],
-        },
-        basic: {
-            name: '⭐ Basic', price: '$9.99 / mo',
-            tag: 'The whole platform, fully unlocked.',
-            items: [
-                'All 17 simulations in full 3D (WebGL)',
-                'Live NASA DONKI & NOAA SWPC feeds',
-                'Stellar Wind, Fluid NSE & Black Hole sims',
-                'Galactic map + real-time solar system',
-                'Real-time Kp, Bz & X-ray flare alerts',
-            ],
-        },
-        educator: {
-            name: '🎓 Educator', price: '$25 / mo',
-            tag: 'Everything in Basic, built for the classroom.',
-            items: [
-                'Everything in Basic',
-                'Classroom license — 30 student seats',
-                'Embed simulations on your LMS or site',
-                'Lesson-plan templates, rubrics & educator Discord',
-            ],
-        },
-        advanced: {
-            name: '🚀 Advanced', price: '$100 / mo',
-            tag: 'For researchers and satellite operators.',
-            items: [
-                'Everything in Basic',
-                'Rust/WASM high-performance engine',
-                'SWMF magnetosphere pipeline access',
-                'REST API + CSV/JSON data export',
-                'Solar-wind prediction models',
-                'Priority & dedicated support',
-            ],
-        },
-        institution: {
-            name: '🏛️ Institution', price: '$500 / mo',
-            tag: 'Site-wide access, white-labeled.',
-            items: [
-                'Everything in Advanced',
-                'Site license — 200 named users',
-                'Custom branding & white-label',
-                'Single Sign-On (SAML / OIDC)',
-                'Department admin dashboard',
-                'SLA-backed priority support',
-            ],
-        },
-    };
-
-    function renderPlanSummary(val) {
-        const el = document.getElementById('plan-summary');
-        if (!el) return;
-        const f = PLAN_FEATURES[val] || PLAN_FEATURES.free;
-        // Annual-cadence arrivals (?plan=basic-annual) see the price they
-        // clicked, not the monthly figure. Only Basic has an annual SKU.
-        const price = (window._ppYearlyPlan === val && val === 'basic')
-            ? '$59 / yr — 2 months free' : f.price;
-        el.className = 'plan-summary' + (val !== 'free' ? ' ' + val : '');
-        el.innerHTML =
-            '<div class="ps-head"><span class="ps-name">' + f.name + '</span>' +
-            '<span class="ps-price">' + price + '</span></div>' +
-            '<div class="ps-tag">' + f.tag + '</div>' +
-            '<ul>' + f.items.map(i =>
-                '<li><span class="ck">✓</span><span>' + i + '</span></li>').join('') +
-            '</ul>';
-    }
     // ── Funnel helper — same load-order-safe shim as signin.html ─
     // LOAD-ORDER: this is a classic <script>, so it executes at PARSE time,
     // before every <script type="module"> on the page (modules are
@@ -782,30 +754,12 @@
         try { return (window.ppClassifyAuthError || (() => 'unknown'))(err); } catch { return 'unknown'; }
     };
 
-    function selectPlan(val) {
-        document.querySelectorAll('.plan-pill').forEach(p => p.classList.remove('selected'));
-        const pill = document.getElementById(planMap[val]);
-        if (pill) {
-            pill.classList.add('selected');
-            pill.querySelector('input').checked = true;
-        }
-        const btn = document.getElementById('btn-submit');
-        btn.className = 'btn-submit' + (PLAN_BTN_CLASS[val] || '');
-        renderPlanSummary(val);
-    }
-    // Expose for the invite-validation module above to auto-pick the
-    // tier the invite was issued for.
+    // The plan pills are gone (public test, js/public-test.js): the plan is
+    // set by the database trigger. The invite module above still calls
+    // window.selectPlan(res.plan) when a code validates — keep the hook so
+    // that call is a harmless hint instead of a TypeError.
+    function selectPlan(val) { window._ppInvitePlanHint = val || null; }
     window.selectPlan = selectPlan;
-    selectPlan(urlPlan);
-    _funnel.step('signup_plan_initial', { plan: urlPlan, source: _rawUrlPlan ? 'url' : 'default' });
-
-    document.querySelectorAll('.plan-pill').forEach(pill => {
-        pill.addEventListener('click', () => {
-            const planVal = pill.querySelector('input').value;
-            selectPlan(planVal);
-            _funnel.step('signup_plan_selected', { plan: planVal });
-        });
-    });
 
     // ── Time-to-first-interaction signal ─────────────────────────────
     let _engaged = false;
@@ -888,26 +842,43 @@
             termsErr.classList.remove('visible');
         }
 
+        // Persona (js/public-test.js). Required: one tap, and it routes the
+        // welcome path + operator follow-up. If the module failed to load the
+        // chips never rendered, so the check is skipped rather than blocking.
+        const _pt = window._ppPublicTest || null;
+        const _persona = _pt ? _pt.selectedPersona() : '';
+        if (_pt && !_persona) {
+            document.getElementById('err-persona')?.classList.add('visible');
+            valid = false; _failedFields.push('persona');
+        }
+
         if (!valid) {
             _funnel.step('signup_validation_error', { fields: _failedFields });
             return;
         }
 
-        const _selectedPlan = document.querySelector('.plan-pill.selected input')?.value || 'free';
+        // What the account will be: 'tester' during the public test (set by
+        // the DB trigger), otherwise the paid plan the visitor arrived for
+        // (checkout) or 'free'. Reported for the funnel only.
+        const _checkoutPlan = _pt?.checkoutPlan || null;
+        const _selectedPlan = _pt?.PUBLIC_TEST ? 'tester' : (_checkoutPlan || 'free');
         const _hasInvite = (typeof window._ppGetInvite === 'function') && !!window._ppGetInvite();
         _funnel.step('signup_submit', {
             plan:    _selectedPlan,
+            persona: _persona || null,
             invite:  _hasInvite,
             pw_score_max: _pwMaxScore,
         });
 
         const btn = document.getElementById('btn-submit');
+        const _btnLabel = btn.textContent;
         btn.disabled = true;
         btn.textContent = 'Creating account…';
 
         // Sign up via Supabase (or mock)
         (async () => {
-            const plan = document.querySelector('.plan-pill.selected input')?.value || 'free';
+            // 'free' means "no checkout": always so while the test runs.
+            const plan = _checkoutPlan || 'free';
             const firstName = document.getElementById('first-name').value;
             const lastName = document.getElementById('last-name').value;
             const emailVal = document.getElementById('email').value;
@@ -938,11 +909,14 @@
                 // signup must not request a paid plan or it'll trigger checkout.
                 // For non-class invites, trust the invite's plan over the radio.
                 plan: isClassSeat ? 'free' : (invite?.plan || plan),
+                // Persona fields only (whitelisted twice: js/public-test.js
+                // here, the trigger in the DB). Never plan/role.
+                meta: _pt ? _pt.meta() : null,
             });
 
             if (!result.success) {
                 btn.disabled = false;
-                btn.textContent = 'Create Account →';
+                btn.textContent = _btnLabel;
                 const errEl = document.getElementById('err-pw');
                 if (errEl) {
                     errEl.textContent = result.error || 'Signup failed — try a different email';
@@ -954,6 +928,29 @@
                     code:   _classifyErr(result.error),
                 });
                 return;
+            }
+
+            // Operator asked for a pilot call: file it in the SAME lead inbox
+            // request-access / contact-enterprise use (one sales inbox).
+            // Fire-and-forget — the account already exists, and a failed
+            // lead post must never look like a failed sign-up.
+            if (_pt?.wantsPilot?.()) {
+                const _m = _pt.meta();
+                _funnel.step('signup_pilot_requested', { persona: _m.persona || null, fleet_size: _m.fleet_size || null });
+                try {
+                    fetch('/api/contact/enterprise', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name:         `${firstName} ${lastName}`.trim().slice(0, 120) || emailVal,
+                            email:        emailVal,
+                            organization: _m.org_name || undefined,
+                            use_case:     ['satellite_operations'],
+                            message:      `Pilot request from tester sign-up. Persona: ${_m.persona}. Fleet size: ${_m.fleet_size || 'not given'}.`,
+                            hp_field:     '',
+                        }),
+                    }).catch(() => {});
+                } catch {}
             }
 
             // Class-seat invite: attach the new account to the parent's
@@ -1082,7 +1079,7 @@
             // flow stamps the event on first dashboard load instead.
             try {
                 const { logActivation } = await import('./js/activation.js');
-                logActivation('signup', { plan, source: invite ? 'invite' : 'organic' });
+                logActivation('signup', { plan: _selectedPlan, persona: _persona || null, source: invite ? 'invite' : 'organic' });
             } catch {}
 
             // Welcome email — fire-and-forget. The edge function is
