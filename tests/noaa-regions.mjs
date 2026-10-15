@@ -12,6 +12,7 @@
 // from one production request.
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
     normalizeSolarRegions, FIELD_CANDIDATES, PROBABILITY_FIELDS,
 } from '../api/_lib/noaa-regions.js';
@@ -23,14 +24,16 @@ import {
 const UPSTREAM = [
     {
         observed_date: '2026-08-19T00:00:00', region: 14101, location: 'S12W30',
-        latitude: -12, longitude: 30, carrington_longitude: 142, area: 240,
+        // SWPC's numeric longitude is EAST-positive (measured on the
+        // production feed 2026-10-14: 196/196 rows opposite their location).
+        latitude: -12, longitude: -30, carrington_longitude: 142, area: 240,
         spot_class: 'DAI', mag_class: 'BETA-GAMMA', number_spots: 14, extent: 9,
         c_flare_probability: 45, m_flare_probability: 15, x_flare_probability: 1,
         proton_probability: 1,
     },
     {
         observed_date: '2026-08-19T00:00:00', region: 14102, location: 'N05E10',
-        latitude: 5, longitude: -10, carrington_longitude: 182, area: 60,
+        latitude: 5, longitude: 10, carrington_longitude: 182, area: 60,
         spot_class: 'CAO', mag_class: 'BETA', number_spots: 4, extent: 5,
         c_flare_probability: 20, m_flare_probability: 5, x_flare_probability: 1,
         proton_probability: 1,
@@ -72,6 +75,40 @@ const UPSTREAM = [
     assert.equal(out.field_map.num_spots, 'number_spots');
     assert.deepEqual(out.unmapped_keys, [], 'a fully-understood row leaves nothing over');
     assert.equal(out.probability_coverage, 1);
+}
+
+// ── Longitude is WEST-positive whatever SWPC's numeric field says ─────────
+{
+    const out = normalizeSolarRegions(UPSTREAM);
+    assert.equal(out.regions[0].stonyhurst_lon_deg, 30, 'S12W30 is +30 (west)');
+    assert.equal(out.regions[1].stonyhurst_lon_deg, -10, 'N05E10 is −10 (east)');
+    assert.equal(out.longitude_check.numeric_upstream, 'east-positive');
+    assert.equal(out.longitude_check.from_location, 2);
+    // A past-limb placeholder uses the numeric field with the MEASURED sign.
+    const withPlaceholder = normalizeSolarRegions([...UPSTREAM,
+        { region: 14090, location: 'N09W0*', latitude: 9, longitude: -109, area: 0 }]);
+    assert.equal(withPlaceholder.regions[2].stonyhurst_lon_deg, 109, 'W0* → 109° west, from the numeric field');
+    assert.equal(withPlaceholder.longitude_check.from_numeric, 1);
+    // If SWPC ever publishes west-positive numerics, the measured sign follows.
+    const flipped = normalizeSolarRegions(UPSTREAM.map((r) => ({ ...r, longitude: -r.longitude }))
+        .concat([{ region: 14090, location: 'N09W0*', latitude: 9, longitude: 109, area: 0 }]));
+    assert.equal(flipped.longitude_check.numeric_upstream, 'west-positive');
+    assert.equal(flipped.regions[2].stonyhurst_lon_deg, 109);
+}
+
+// ── REAL production rows (2026-10-14): every location agrees after the fix ──
+{
+    const fx = JSON.parse(readFileSync(new URL('./fixtures/noaa-solar-regions-2026-10-14.json', import.meta.url), 'utf8'));
+    const out = normalizeSolarRegions(fx.rows);
+    assert.equal(out.longitude_check.numeric_upstream, 'east-positive', 'SWPC numeric longitude measured east-positive');
+    assert.equal(out.longitude_check.agree_same, 0);
+    for (const r of out.regions) {
+        const m = String(r.location).match(/([EW])(\d{1,3})$/);
+        if (!m) continue;   // past-limb placeholders
+        assert.equal(r.stonyhurst_lon_deg, (m[1] === 'W' ? 1 : -1) * Number(m[2]), `${r.region} ${r.location}`);
+    }
+    // The placeholder rows land beyond the WEST limb, never mirrored to the east.
+    for (const r of out.regions.filter((x) => /\*/.test(x.location))) assert.ok(r.stonyhurst_lon_deg > 90, r.location);
 }
 
 // ── Alternate spellings ──────────────────────────────────────────────────

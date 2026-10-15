@@ -363,6 +363,11 @@ What a cone fit does NOT constrain — B₁AU, twist, tilt, chirality — gets
 climatological defaults with deliberately WIDE priors (tilt σ 40°,
 chirality flip probability 0.5 = "unknown"): that honest prior is the
 starting posterior the §11 filter narrows as STEREO-A / L1 data arrives.
+(2026-10-14: an OPT-IN source-region prior for flare-associated CMEs —
+Hale + Joy + hemispheric helicity → γ, H, p_flip 0.3, σ_tilt unchanged —
+lives in `js/cme-source-prior.js` and is scored as the shadow model
+`flux-rope-v1-src`; these defaults remain flux-rope-v1. See
+CME_OUTLOOK_PLAN.md §3.)
 Ambient wind `w` is seeded from the live RTSW plasma mean when available.
 
 ### §12.1 Compounding-train seeding (2026-07-27)
