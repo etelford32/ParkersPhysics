@@ -48,6 +48,65 @@ const HOUR_DAY     = 1 / 24;
 export const DEFAULT_CD = 2.2;
 
 /**
+ * Spacecraft classes the sample fleet and the interactive simulator offer.
+ * Typical published masses; `areaM2` is the attitude-averaged mean
+ * cross-section with deployed panels. ONE table — the bake and the page
+ * both read it, and the page prints it as an assumption.
+ */
+export const SPACECRAFT_CLASSES = Object.freeze({
+    '3u':    { label: '3U CubeSat',      massKg: 4.0,   areaM2: 0.020 },
+    '6u':    { label: '6U CubeSat',      massKg: 10.0,  areaM2: 0.060 },
+    '12u':   { label: '12U CubeSat',     massKg: 20.0,  areaM2: 0.080 },
+    'micro': { label: '100 kg microsat', massKg: 100.0, areaM2: 0.600 },
+    'small': { label: '250 kg smallsat', massKg: 250.0, areaM2: 1.500 },
+});
+
+/**
+ * Historical storms the simulator replays. Ap is the real 3-hourly index
+ * from dsmc/fixtures/hindcast/<dir>/historical_ap.csv (GFZ definitive via
+ * CelesTrak SW-All — dsmc/pipeline/fetch_indices_offline.py). Never add a
+ * synth_* fixture here: those are constructed scenarios, not history.
+ */
+export const STORM_EVENTS = Object.freeze([
+    { key: 'feb2022',    dir: 'feb_2022_starlink',   label: 'Feb 2022 · Starlink storm', scale: 'G1–G2' },
+    { key: 'stpatrick',  dir: 'st_patrick_mar_2015', label: 'Mar 2015 · St. Patrick’s Day', scale: 'G4' },
+    { key: 'oct2024',    dir: 'october_2024',        label: 'Oct 2024',                  scale: 'G4' },
+    { key: 'gannon',     dir: 'gannon_may_2024',     label: 'May 2024 · Gannon',         scale: 'G5' },
+    { key: 'halloween',  dir: 'halloween_oct_2003',  label: 'Oct 2003 · Halloween',      scale: 'G5' },
+]);
+
+/**
+ * Parse a block of TLEs (2-line or 3-line with names; blank lines and
+ * stray whitespace tolerated) into assessment inputs. B comes from B*
+ * (σ ±35 %, msis-drag's figure for a B*-derived coefficient); an unusable
+ * B* falls back to a default with σ ±60 %. Returns { sats, rejected }.
+ */
+export function parseTleBlock(text, { defaultBc = 0.015 } = {}) {
+    const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const sats = [];
+    let rejected = 0;
+    for (let i = 0; i < lines.length; ) {
+        let name = null;
+        if (!lines[i].startsWith('1 ')) {
+            if (lines[i].startsWith('2 ')) { rejected++; i++; continue; }
+            name = lines[i++].replace(/^0 /, '');
+        }
+        const l1 = lines[i], l2 = lines[i + 1];
+        if (!l1?.startsWith('1 ') || !l2?.startsWith('2 ')) { rejected++; i++; continue; }
+        i += 2;
+        const el = elementsFromTle(l1, l2, { name });
+        if (!el || !(el.perigeeKm > 0)) { rejected++; continue; }
+        sats.push({
+            ...el, cls: null,
+            bc: el.bc ?? defaultBc,
+            bcSigmaFrac: el.bc ? 0.35 : 0.6,
+            bcSource: el.bc ? 'tle-bstar' : 'default',
+        });
+    }
+    return { sats, rejected };
+}
+
+/**
  * B = C_D · A / m  [m²/kg]. `areaM2` is the MEAN cross-section the orbit
  * sees (tumbling / attitude-averaged), not the largest face.
  */

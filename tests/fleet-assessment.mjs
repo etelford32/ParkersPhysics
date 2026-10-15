@@ -107,4 +107,35 @@ const sc = { id: 'T', perigeeKm: 420, apogeeKm: 420, bc: 0.011, bcSigmaFrac: 0.2
     ok('committed sample bake is current and carries the real storm peaks');
 }
 
+{
+    // The browser simulator and the sample bake must give the same number
+    // for the same inputs: same kernel, same provider, same storm data.
+    const { fleetFromRows, runSimulation, eventSeries } = await import('../js/fleet-storm-sim.js');
+    const { makeMsisProfileProvider } = await import('../js/fleet-assessment-msis.js');
+    const { parseTleBlock, STORM_EVENTS } = await import('../js/fleet-assessment.js');
+    const wasm = await import('../js/sgp4-wasm/sgp4_wasm.js');
+    await wasm.default({ module_or_path: await readFile(new URL('../js/sgp4-wasm/sgp4_wasm_bg.wasm', import.meta.url)) });
+    const profileFor = makeMsisProfileProvider(wasm, Date.parse('2026-10-15T00:00:00Z'));
+
+    const cat = JSON.parse(await readFile('data/marketing/storm-replay-events.json', 'utf8'));
+    assert.deepEqual(cat.events.map(e => e.key), STORM_EVENTS.map(e => e.key), 'catalogue follows STORM_EVENTS');
+    const gannon = cat.events.find(e => e.key === 'gannon');
+    assert.equal(eventSeries(gannon).series.length, gannon.ap.length);
+
+    const { sats, problems } = fleetFromRows([{ cls: '3u', altKm: 380 }, { cls: 'nope', altKm: 400 }, { cls: '6u', altKm: 9000 }]);
+    assert.equal(sats.length, 1); assert.equal(problems.length, 2);
+    const [sim] = runSimulation(sats, { profileFor, event: gannon, f107: 150 });
+    const bake = JSON.parse(await readFile('data/marketing/sample-fleet-assessment.json', 'utf8'));
+    const ref = bake.fleet.find(r => r.id === 'SAMPLE-01').events.find(e => e.key === 'gannon');
+    assert.ok(Math.abs(sim.e.extraLossKm - ref.extraLossKm) / ref.extraLossKm < 1e-4,
+        `simulator ${sim.e.extraLossKm} vs bake ${ref.extraLossKm}`);
+
+    const tle = 'ISS (ZARYA)\n1 25544U 98067A   08264.51782528 -.00002182  00000-0  30777-3 0  2927\n'
+        + '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537\n2 orphan line\n';
+    const p = parseTleBlock(tle);
+    assert.equal(p.sats.length, 1); assert.equal(p.rejected, 1);
+    assert.equal(p.sats[0].name, 'ISS (ZARYA)'); assert.equal(p.sats[0].bcSource, 'tle-bstar');
+    ok('browser simulator == sample bake; builder validation; TLE block parsing');
+}
+
 console.log(`\nfleet-assessment: ${passed} checks passed`);

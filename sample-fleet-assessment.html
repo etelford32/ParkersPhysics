@@ -103,6 +103,44 @@ footer.sa-footer{padding:30px 20px;text-align:center;font-size:.82rem;color:var(
 footer.sa-footer a{color:var(--fg-3);text-decoration:none;margin:0 6px}
 .sa-err{color:var(--status-danger)}
 
+/* ── interactive simulator (#simulate) ─────────────────────────────────── */
+.sim{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.sim-panel{background:var(--black-panel);border:1px solid rgba(157,58,255,.22);border-radius:14px;padding:20px}
+.sim-h{font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--fg-3);margin:0 0 10px}
+.sim-tabs{display:flex;gap:6px;margin-bottom:14px}
+.sim-tabs button{flex:1;padding:9px 10px;border-radius:8px;border:1px solid rgba(157,58,255,.25);background:transparent;color:var(--fg-3);font:600 .84rem var(--font-sans);cursor:pointer}
+.sim-tabs button[aria-selected="true"]{background:rgba(157,58,255,.18);color:var(--fg-1);border-color:var(--uv-400)}
+.sim-row{display:grid;grid-template-columns:22px 1fr 108px 36px;gap:8px;align-items:center;margin-bottom:8px}
+.sim-row-n{font-family:var(--font-mono);font-size:.74rem;color:var(--fg-4);text-align:right}
+.sim select,.sim input[type=number],.sim textarea{width:100%;background:var(--black-void);border:1px solid rgba(157,58,255,.25);border-radius:8px;color:var(--fg-1);font:500 .9rem var(--font-sans);padding:9px 10px;min-height:42px}
+.sim textarea{font-family:var(--font-mono);font-size:.74rem;min-height:170px;resize:vertical}
+.sim select:focus,.sim input:focus,.sim textarea:focus{outline:none;border-color:var(--uv-400);box-shadow:0 0 0 3px rgba(157,58,255,.18)}
+.sim-alt{position:relative;display:block}
+.sim-alt span{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:.78rem;color:var(--fg-4);pointer-events:none}
+.sim-alt input{padding-right:34px}
+.sim-x{width:36px;height:42px;border-radius:8px;border:1px solid rgba(157,58,255,.2);background:transparent;color:var(--fg-3);font-size:1.1rem;cursor:pointer}
+.sim-x:disabled{opacity:.3;cursor:not-allowed}
+.sim-add{margin-top:4px;padding:9px 14px;border-radius:8px;border:1px dashed rgba(157,58,255,.4);background:transparent;color:var(--uv-300);font:600 .84rem var(--font-sans);cursor:pointer}
+.sim-add:disabled{opacity:.4;cursor:not-allowed}
+.sim-help{font-size:.8rem;color:var(--fg-4);margin-top:8px}
+.sim-chips{display:flex;flex-direction:column;gap:7px;margin-bottom:16px}
+.sim-chip{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid rgba(157,58,255,.2);border-radius:9px;font-size:.88rem;cursor:pointer;min-height:42px}
+.sim-chip:has(input:checked){border-color:var(--uv-400);background:rgba(157,58,255,.12);color:var(--fg-1)}
+.sim-chip input{accent-color:var(--uv-500)}
+.sim-chip b{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-3);margin-left:4px}
+.sim-run{width:100%;margin-top:16px;padding:14px;border:none;border-radius:8px;background:var(--grad-uv-pink);color:#fff;font:700 .86rem var(--font-display);letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:var(--glow-uv-sm)}
+.sim-run:disabled{opacity:.55;cursor:wait}
+.sim-status{margin-top:10px;font-size:.84rem;color:var(--fg-3);min-height:1.3em}
+.sim-status.err{color:var(--status-danger)}
+.sim-results{margin-top:22px;display:grid;gap:18px}
+.sim-results[hidden]{display:none}
+.sim-results .sa-kpis{margin-top:0}
+.sim-cta{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between;padding:18px 20px;border-radius:12px;border:1px solid rgba(157,58,255,.3);background:linear-gradient(160deg,rgba(157,58,255,.14),rgba(255,31,156,.06))}
+.sim-cta p{margin:0;color:var(--fg-2);font-size:.92rem}
+.sim-cta a{display:inline-block;padding:12px 18px;border-radius:8px;background:var(--grad-uv-pink);color:#fff;font:700 .76rem var(--font-display);letter-spacing:.1em;text-transform:uppercase;text-decoration:none}
+.sa-hero-cta{display:inline-block;margin:18px 0 0 12px;color:var(--uv-300);font-size:.9rem}
+@media (max-width:820px){ .sim{grid-template-columns:1fr} .sa-hero-cta{margin-left:0;display:block} }
+
 @media (max-width:820px){
   .sa-kpis{grid-template-columns:1fr}
   .sa-two{grid-template-columns:1fr}
@@ -139,11 +177,71 @@ footer.sa-footer a{color:var(--fg-3);text-decoration:none;margin:0 6px}
       May 2024 Gannon superstorm. This is the analysis you'd get for your own NORAD IDs.
     </p>
     <div class="sa-badge" role="note">⚠ Sample fleet (not a real customer). The storm data is real.</div>
+    <a class="sa-hero-cta" href="#simulate">Run it on your own fleet ↓</a>
     <div class="sa-kpis" id="sa-kpis" aria-live="polite"></div>
   </div>
 </header>
 
 <main class="sa-wrap">
+
+  <!-- INTERACTIVE SIMULATOR — js/fleet-storm-sim.js. Runs entirely in the
+       visitor's browser on the same kernel + WASM as the sample bake. -->
+  <section class="sa-sec" id="simulate">
+    <span class="sa-eyebrow">Try it · runs in your browser</span>
+    <h2>Replay a real storm on your own fleet</h2>
+    <p class="sa-sub">
+      Add your satellites by class and altitude, or paste their TLEs from CelesTrak or Space-Track.
+      Pick a storm and we'll fly its real geomagnetic record through today's orbits.
+      Nothing you paste leaves this page.
+    </p>
+    <div class="sim" data-sim-root>
+      <div class="sim-panel">
+        <p class="sim-h">1 · Your fleet</p>
+        <div class="sim-tabs" role="tablist">
+          <button type="button" role="tab" data-sim-tab="build" aria-selected="true">Build a fleet</button>
+          <button type="button" role="tab" data-sim-tab="paste" aria-selected="false">Paste TLEs</button>
+        </div>
+        <div data-sim="build">
+          <div data-sim="rows"></div>
+          <button type="button" class="sim-add" data-sim="add">+ Add satellite</button>
+          <p class="sim-help">Masses and drag areas are typical for each class. Paste TLEs instead to use each satellite's own drag term (B*).</p>
+        </div>
+        <div data-sim="paste" hidden>
+          <textarea data-sim="tle" spellcheck="false" aria-label="TLEs, two or three lines per satellite"
+            placeholder="ISS (ZARYA)&#10;1 25544U 98067A   26287.50000000  .00016717  00000-0  30777-3 0  9993&#10;2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49815391563537"></textarea>
+          <p class="sim-help" data-sim="tle-note"></p>
+        </div>
+      </div>
+      <div class="sim-panel">
+        <p class="sim-h">2 · The storm</p>
+        <div class="sim-chips" data-sim="storms" role="radiogroup" aria-label="Historical storm"></div>
+        <p class="sim-h">3 · Solar activity</p>
+        <select data-sim="solar" aria-label="Solar activity"></select>
+        <button type="button" class="sim-run" data-sim="run">Run the storm replay</button>
+        <p class="sim-status" data-sim="status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+    <div class="sim-results" data-sim="results" hidden>
+      <div class="sa-kpis" data-sim="kpis"></div>
+      <div class="sa-card">
+        <p class="sim-h">The storm</p>
+        <div class="sa-chart" data-sim="ap"></div>
+        <p class="sa-note" data-sim="ap-caption"></p>
+      </div>
+      <div class="sa-card">
+        <p class="sim-h">Extra altitude lost beyond a quiet week</p>
+        <div class="sa-chart" data-sim="bars"></div>
+      </div>
+      <div class="sa-table-wrap"><table class="sa-table" data-sim="table"></table></div>
+      <p class="sa-note">NRLMSISE-00 driven by the real Ap, so storm losses are lower bounds. Lifetimes hold today's solar activity
+        for the rest of the mission. For a paid assessment we use your spacecraft's real mass, area and attitude, and check every
+        forecast against your tracking data.</p>
+      <div class="sim-cta">
+        <p>Want this for your real fleet, kept up to date through storm season?</p>
+        <a href="request-access.html?use_case=fleet_assessment#ra-form" data-sim="cta">Send me this assessment</a>
+      </div>
+    </div>
+  </section>
 
   <!-- 1 — fleet outlook -->
   <section class="sa-sec" id="outlook">
@@ -227,12 +325,10 @@ footer.sa-footer a{color:var(--fg-3);text-decoration:none;margin:0 6px}
 </footer>
 
 <script type="module">
+import { renderLossBars, kmOrM, esc } from './js/fleet-assessment-view.js';
 const $ = (id) => document.getElementById(id);
 const SVG = 'http://www.w3.org/2000/svg';
-const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmtLife = (d) => d == null ? '>100 y' : d < 365.25 ? `${Math.round(d)} d` : `${(d / 365.25).toFixed(1)} y`;
-const fmtKm = (k) => k >= 1 ? k.toFixed(2) : k >= 0.1 ? k.toFixed(2) : `${Math.round(k * 1000)} m`;
-const kmOrM = (k) => k >= 1 ? `${k.toFixed(1)} km` : `${Math.round(k * 1000)} m`;
 const ev = (r, key) => r.events.find(e => e.key === key);
 
 function el(tag, attrs = {}, parent) {
@@ -251,6 +347,20 @@ try {
 }
 const fleet = doc.fleet;
 window.__sampleAssessment = doc;
+
+/* Interactive simulator — mounts independently so a failure there never
+   takes the sample sections down (and vice versa). */
+(async () => {
+    const root = document.querySelector('#simulate');
+    try {
+        const cat = await (await fetch('data/marketing/storm-replay-events.json', { cache: 'no-cache' })).json();
+        const { mountFleetStormSim } = await import('./js/fleet-storm-sim.js');
+        window.__fleetSim = mountFleetStormSim(root, { events: cat.events });
+    } catch (err) {
+        console.warn('[sample-fleet-assessment] simulator unavailable:', err);
+        root.querySelector('[data-sim="status"]').textContent = 'The simulator failed to load. Please reload the page.';
+    }
+})();
 
 /* KPIs */
 {
@@ -296,46 +406,19 @@ window.__sampleAssessment = doc;
     $('sa-gannon-sub').textContent =
         `The real Ap from ${g.startIso.slice(0, 10)} onward (peaking at Ap ${g.peakAp}), replayed on each satellite in today's orbit. `
         + `Low CubeSats lose the most altitude. Every satellite loses about the same number of days of life, because a single storm shortens a long remaining life by only a small fraction.`;
-    const host = $('sa-gannon-chart');
-    // Size to the host so type stays at its CSS size on a phone.
-    const W = Math.max(330, Math.min(760, host.clientWidth || 760));
-    const narrow = W < 520;
-    const rowH = 34, padL = narrow ? 110 : 190, padR = 64, padT = 8;
     const short = (c) => c.replace(' CubeSat', '').replace('100 kg microsat', 'microsat');
-    const H = padT + fleet.length * rowH + 26;
-    const max = Math.max(...fleet.map(r => ev(r, 'gannon').extraLossBandKm[1]));
-    const x = (v) => padL + (v / max) * (W - padL - padR);
-    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Extra altitude lost per satellite in a Gannon-class week' }, host);
-    const ticks = narrow ? 2 : 4;
-    const ax = el('g', { class: 'axis' }, svg);
-    for (let i = 0; i <= ticks; i++) {
-        const v = max * i / ticks;
-        el('line', { x1: x(v), x2: x(v), y1: padT, y2: H - 22, stroke: 'var(--c-grid)' }, ax);
-        el('text', { x: x(v), y: H - 6, 'text-anchor': 'middle' }, ax).textContent = v < 1 ? `${Math.round(v * 1000)} m` : `${v.toFixed(1)} km`;
-    }
-    const tip = document.createElement('div'); tip.className = 'sa-tip'; host.appendChild(tip);
-    fleet.forEach((r, i) => {
+    renderLossBars($('sa-gannon-chart'), fleet.map(r => {
         const e = ev(r, 'gannon');
-        const y = padT + i * rowH + 8, bh = rowH - 16;
-        el('text', { x: padL - 10, y: y + bh / 2 + 4, 'text-anchor': 'end', class: 'lbl' }, svg).textContent = narrow ? `${short(r.cls)} · ${Math.round(r.perigeeKm)} km` : `${r.cls} · ${Math.round(r.perigeeKm)} km`;
-        const w = Math.max(2, x(e.extraLossKm) - padL);
-        el('path', { d: `M${padL},${y} h${w - 4} a4,4 0 0 1 4,4 v${bh - 8} a4,4 0 0 1 -4,4 h${-(w - 4)} z`, fill: 'var(--c-data)', opacity: .85 }, svg);
         const [lo, hi] = e.extraLossBandKm;
-        el('line', { x1: x(lo), x2: x(hi), y1: y + bh / 2, y2: y + bh / 2, stroke: 'var(--fg-2)', 'stroke-width': 1.5 }, svg);
-        for (const v of [lo, hi]) el('line', { x1: x(v), x2: x(v), y1: y + 3, y2: y + bh - 3, stroke: 'var(--fg-2)', 'stroke-width': 1.5 }, svg);
-        el('text', { x: x(hi) + 8, y: y + bh / 2 + 4, class: 'val' }, svg).textContent = kmOrM(e.extraLossKm);
-        const hit = el('rect', { x: 0, y: y - 6, width: W, height: rowH, fill: 'transparent' }, svg);
-        hit.addEventListener('pointerenter', () => {
-            tip.innerHTML = `<b>${esc(r.id)}</b> ${esc(r.cls)} · ${Math.round(r.perigeeKm)} km<br>`
+        return {
+            label: `${r.cls} · ${Math.round(r.perigeeKm)} km`,
+            shortLabel: `${short(r.cls)} · ${Math.round(r.perigeeKm)} km`,
+            value: e.extraLossKm, lo, hi,
+            tipHtml: `<b>${esc(r.id)}</b> ${esc(r.cls)} · ${Math.round(r.perigeeKm)} km<br>`
               + `<span>extra loss</span> ${kmOrM(e.extraLossKm)} (${kmOrM(lo)}–${kmOrM(hi)})<br>`
-              + `<span>life lost</span> ${(e.lifetimeLostDays ?? 0).toFixed(1)} d · <span>peak drag</span> ×${e.dragRatioPeak.toFixed(1)}`;
-            const box = host.getBoundingClientRect(), sb = svg.getBoundingClientRect();
-            tip.style.left = `${Math.min(box.width - 230, (x(hi) / W) * sb.width + 12)}px`;
-            tip.style.top = `${(y / H) * sb.height - 6}px`;
-            tip.classList.add('on');
-        });
-        hit.addEventListener('pointerleave', () => tip.classList.remove('on'));
-    });
+              + `<span>life lost</span> ${(e.lifetimeLostDays ?? 0).toFixed(1)} d · <span>peak drag</span> ×${e.dragRatioPeak.toFixed(1)}`,
+        };
+    }), { ariaLabel: 'Extra altitude lost per satellite in a Gannon-class week' });
 }
 
 /* 2 — Starlink drag-ratio line */

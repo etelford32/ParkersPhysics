@@ -316,6 +316,18 @@ footer.ra-footer a:hover{color:var(--uv-300)}
     btn.textContent = defaultSubmitLabel;
   }
 
+  // Hand-off from the fleet simulator (sample-fleet-assessment.html): its
+  // CTA leaves a plain-text summary in sessionStorage. Prefill only an
+  // EMPTY message, and consume it so a reload doesn't re-insert it.
+  try {
+    const simSummary = sessionStorage.getItem('pp_fleet_sim_summary');
+    const msgBox = document.getElementById('ra-message');
+    if (simSummary && msgBox && !msgBox.value.trim()) {
+      msgBox.value = simSummary + '\n\n';
+      sessionStorage.removeItem('pp_fleet_sim_summary');
+    }
+  } catch (_) { /* storage blocked: the form still works */ }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     status.className = 'ra-status';

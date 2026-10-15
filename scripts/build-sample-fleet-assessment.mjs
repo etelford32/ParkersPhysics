@@ -29,12 +29,12 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { makeRhoInterp, orbitAverageRates } from '../js/operations/msis-drag.js';
 import {
-    PROFILE_MIN_KM, PROFILE_MAX_KM, PROFILE_NPOINTS, makeRhoInterp, orbitAverageRates,
-} from '../js/operations/msis-drag.js';
-import {
-    assessSpacecraft, ballisticFromSpacecraft, elementsFromTle, parseApCsv, RE_KM,
+    assessSpacecraft, ballisticFromSpacecraft, parseTleBlock, parseApCsv, RE_KM,
+    SPACECRAFT_CLASSES, STORM_EVENTS,
 } from '../js/fleet-assessment.js';
+import { makeMsisProfileProvider } from '../js/fleet-assessment-msis.js';
 
 const args = process.argv.slice(2);
 const opt  = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
@@ -47,43 +47,20 @@ const BASELINE = { f107: Number(opt('--f107', 150)), ap: Number(opt('--ap', 7)) 
 const OUT      = resolve(opt('--out', 'data/marketing/sample-fleet-assessment.json'));
 const TLE_PATH = opt('--tle', null);
 
-/* ── NRLMSISE-00 provider (same shape as tests/operations-msis-drag.mjs) ── */
-const { default: initWasm, nrlmsise00_density_profile, nrlmsise00_profile_stride } =
-    await import('../js/sgp4-wasm/sgp4_wasm.js');
-await initWasm({ module_or_path: await readFile(new URL('../js/sgp4-wasm/sgp4_wasm_bg.wasm', import.meta.url)) });
-
-const STEP = (PROFILE_MAX_KM - PROFILE_MIN_KM) / (PROFILE_NPOINTS - 1);
-const ALTS = Float64Array.from({ length: PROFILE_NPOINTS }, (_, i) => PROFILE_MIN_KM + i * STEP);
-const _prof = new Map();
-function profileAt(f107, ap, dateMs = REF_MS) {
-    const key = `${f107}|${ap}|${dateMs}`;
-    if (_prof.has(key)) return _prof.get(key);
-    const d   = new Date(dateMs);
-    const doy = Math.floor((dateMs - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86400000);
-    const sec = d.getUTCHours() * 3600 + d.getUTCMinutes() * 60;
-    const stride = nrlmsise00_profile_stride();
-    const rho = new Float64Array(PROFILE_NPOINTS);
-    // Day/night average, equatorial — the operations console's provider.
-    for (const lst of [0, 12]) {
-        const lon  = ((lst - sec / 3600) * 15 + 540) % 360 - 180;
-        const flat = nrlmsise00_density_profile(d.getUTCFullYear(), doy, sec, 0, lon, lst,
-            f107, f107, new Float64Array(7).fill(ap), ALTS);
-        for (let i = 0; i < PROFILE_NPOINTS; i++) rho[i] += 0.5 * flat[i * stride + 6];
-    }
-    const p = { alt0: PROFILE_MIN_KM, step: STEP, rho };
-    _prof.set(key, p);
-    return p;
-}
+/* ── NRLMSISE-00 provider (shared with the browser simulator) ──────────── */
+const wasm = await import('../js/sgp4-wasm/sgp4_wasm.js');
+await wasm.default({ module_or_path: await readFile(new URL('../js/sgp4-wasm/sgp4_wasm_bg.wasm', import.meta.url)) });
+const profileAt = makeMsisProfileProvider(wasm, REF_MS);
 const profileFor = (f107, ap) => profileAt(f107, ap);
 
 /* ── Storm events: real GFZ Ap ─────────────────────────────────────────── */
 async function loadEvent(dir) {
     return parseApCsv(await readFile(resolve('dsmc/fixtures/hindcast', dir, 'historical_ap.csv'), 'utf8'));
 }
-const EVENTS = [
-    { key: 'feb2022', label: 'Feb 2022 (Starlink storm, G1–G2)', dir: 'feb_2022_starlink' },
-    { key: 'gannon',  label: 'May 2024 Gannon (G5)',            dir: 'gannon_may_2024' },
-];
+// The sample page's two storms (labels kept as published); the full
+// catalogue below feeds the interactive simulator.
+const PAGE_LABELS = { feb2022: 'Feb 2022 (Starlink storm, G1–G2)', gannon: 'May 2024 Gannon (G5)' };
+const EVENTS = STORM_EVENTS.filter(e => PAGE_LABELS[e.key]).map(e => ({ key: e.key, label: PAGE_LABELS[e.key], dir: e.dir }));
 for (const ev of EVENTS) ev.series = await loadEvent(ev.dir);
 
 /* ── The fleet ─────────────────────────────────────────────────────────── */
@@ -91,30 +68,17 @@ for (const ev of EVENTS) ev.series = await loadEvent(ev.dir);
 // classes use typical published masses; area is the attitude-averaged mean
 // cross-section (deployed panels included), C_D = 2.2. Every assumption is
 // written into the output so the page can print it.
+const C = SPACECRAFT_CLASSES;
 const SAMPLE_FLEET = [
-    { id: 'SAMPLE-01', cls: '3U CubeSat',      massKg: 4.0,   areaM2: 0.020, alt: 380 },
-    { id: 'SAMPLE-02', cls: '3U CubeSat',      massKg: 4.0,   areaM2: 0.020, alt: 420 },
-    { id: 'SAMPLE-03', cls: '6U CubeSat',      massKg: 10.0,  areaM2: 0.060, alt: 450 },
-    { id: 'SAMPLE-04', cls: '6U CubeSat',      massKg: 10.0,  areaM2: 0.060, alt: 475 },
-    { id: 'SAMPLE-05', cls: '12U CubeSat',     massKg: 20.0,  areaM2: 0.080, alt: 500 },
-    { id: 'SAMPLE-06', cls: '12U CubeSat',     massKg: 20.0,  areaM2: 0.080, alt: 525 },
-    { id: 'SAMPLE-07', cls: '100 kg microsat', massKg: 100.0, areaM2: 0.600, alt: 550 },
-    { id: 'SAMPLE-08', cls: '100 kg microsat', massKg: 100.0, areaM2: 0.600, alt: 575 },
-];
+    ['SAMPLE-01', '3u', 380], ['SAMPLE-02', '3u', 420], ['SAMPLE-03', '6u', 450], ['SAMPLE-04', '6u', 475],
+    ['SAMPLE-05', '12u', 500], ['SAMPLE-06', '12u', 525], ['SAMPLE-07', 'micro', 550], ['SAMPLE-08', 'micro', 575],
+].map(([id, k, alt]) => ({ id, cls: C[k].label, massKg: C[k].massKg, areaM2: C[k].areaM2, alt }));
 
 let fleet, fleetKind;
 if (TLE_PATH) {
-    const lines = (await readFile(TLE_PATH, 'utf8')).split(/\r?\n/).map(l => l.trimEnd()).filter(Boolean);
-    fleet = [];
-    for (let i = 0; i + 2 < lines.length + 1; ) {
-        let name = null;
-        if (!lines[i].startsWith('1 ')) name = lines[i++].trim();
-        const el = elementsFromTle(lines[i], lines[i + 1], { name });
-        i += 2;
-        if (!el) continue;
-        fleet.push({ ...el, cls: null, bc: el.bc ?? 0.015, bcSigmaFrac: el.bc ? 0.35 : 0.6,
-            bcSource: el.bc ? 'tle-bstar' : 'default' });
-    }
+    const parsed = parseTleBlock(await readFile(TLE_PATH, 'utf8'));
+    if (parsed.rejected) console.warn(`skipped ${parsed.rejected} unparseable TLE line(s)`);
+    fleet = parsed.sats;
     fleetKind = 'tle';
 } else {
     fleet = SAMPLE_FLEET.map(s => ({
@@ -201,6 +165,23 @@ await mkdir(dirname(OUT), { recursive: true });
 await writeFile(OUT, JSON.stringify(doc, round, 1) + '\n');
 
 console.log(`wrote ${OUT}`);
+
+/* ── Storm catalogue for the browser simulator ─────────────────────────── */
+if (!TLE_PATH && !args.includes('--out')) {
+    const catalog = [];
+    for (const e of STORM_EVENTS) {
+        const series = await loadEvent(e.dir);
+        catalog.push({ key: e.key, label: e.label, scale: e.scale,
+            source: `dsmc/fixtures/hindcast/${e.dir}/historical_ap.csv`,
+            startIso: new Date(series[0].tMs).toISOString(), stepHours: 3,
+            ap: series.map(x => x.ap) });
+    }
+    const evOut = resolve('data/marketing/storm-replay-events.json');
+    await writeFile(evOut, JSON.stringify({
+        _note: 'Generated by scripts/build-sample-fleet-assessment.mjs — do not hand-edit.',
+        referenceDate: REF_ISO, baseline: BASELINE, events: catalog }, null, 1) + '\n');
+    console.log(`wrote ${evOut}`);
+}
 for (const r of results) {
     const ev = Object.fromEntries(r.events.map(e => [e.key, e]));
     console.log(`${r.id.padEnd(10)} ${String(Math.round(r.perigeeKm)).padStart(4)} km  B=${r.bc.toFixed(4)}  `
