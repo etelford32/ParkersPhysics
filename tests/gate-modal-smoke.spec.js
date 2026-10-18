@@ -215,6 +215,8 @@ test.describe('satellite-designer (Storm Pilot) save gate', () => {
         await page.goto('/');
         await page.evaluate(() => localStorage.removeItem('pp_auth'));
         await page.goto('/satellite-designer.html');
+        const reject = page.locator('button[data-action="reject"]').first();      // cookie banner covers the title's foot
+        if (await reject.count()) await reject.click();
 
         const btn = page.locator('#sp-b-save');
         await expect(btn).toBeVisible({ timeout: 20_000 });

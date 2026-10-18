@@ -82,7 +82,7 @@ function renderTitle() {
     }
     const eOpen = endlessUnlocked(p, state.planet), best = p.best[state.planet];
     $('sp-b-endless').disabled = !eOpen;
-    $('sp-b-endless').textContent = eOpen ? `∞ Endless ${PLANETS[state.planet].name}${best ? ` · best ${fmtT(best)}` : ''}` : `∞ Endless · clear a ${PLANETS[state.planet].name} level`;
+    $('sp-b-endless').textContent = eOpen ? `∞ Endless ${PLANETS[state.planet].name}${best ? ` · best ${fmtT(best)}` : ''}` : `∞ Endless · clear a level here first`;
     $('sp-b-play').disabled = !levelUnlocked(p, state.level) || levelById(state.level)?.planet !== state.planet;
     renderAccount();
 }
