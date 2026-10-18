@@ -77,7 +77,7 @@ test.describe('gate-modal component', () => {
 
         const root = page.locator('#pp-gate-root');
         await expect(root).toBeVisible();
-        await expect(root.locator('.pp-gate-headline')).toHaveText('Nice build. Keep it.');
+        await expect(root.locator('.pp-gate-headline')).toHaveText('Nice flying. Keep your stars.');
         await expect(root.locator('.pp-gate-scrim')).toBeVisible();          // dims, never destroys
         await expect(root.locator('[data-gate-form]')).toBeVisible();
         await expect(root.locator('[data-gate-email]')).toBeVisible();       // email capture
@@ -210,23 +210,20 @@ test.describe('gate-modal component', () => {
 // Integration — designer save loops
 // ─────────────────────────────────────────────────────────────────────
 
-test.describe('satellite-designer save gate', () => {
-    test('signed-out pilot gets the free-save email gate; build kept as a draft', async ({ page }) => {
+test.describe('satellite-designer (Storm Pilot) save gate', () => {
+    test('signed-out pilot gets the free-save email gate from the title screen', async ({ page }) => {
         await page.goto('/');
         await page.evaluate(() => localStorage.removeItem('pp_auth'));
         await page.goto('/satellite-designer.html');
 
-        const btn = page.locator('#hangar-auth button', { hasText: /save my craft/i });
+        const btn = page.locator('#sp-b-save');
         await expect(btn).toBeVisible({ timeout: 20_000 });
         await btn.click();
 
         const root = page.locator('#pp-gate-root');
         await expect(root).toBeVisible();
-        await expect(root.locator('.pp-gate-headline')).toHaveText('Nice build. Keep it.');
+        await expect(root.locator('.pp-gate-headline')).toHaveText('Nice flying. Keep your stars.');
         await expect(root.locator('[data-gate-email]')).toBeVisible();
-
-        const draft = await page.evaluate(() => localStorage.getItem('pp_sd_draft'));
-        expect(draft).toBeTruthy();
     });
 });
 

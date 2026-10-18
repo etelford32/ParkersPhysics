@@ -165,10 +165,10 @@ export const SIMULATIONS = [
       tier: 'public', icon: 'rocket',
       blurb: 'Upcoming launches next to the range weather that decides whether they fly.' },
     // ── Build & fly ───────────────────────────────────────────────────────
-    { id: 'satellite-designer', href: 'satellite-designer.html', title: 'Satellite Designer',
+    { id: 'satellite-designer', href: 'satellite-designer.html', title: 'Storm Pilot',
       category: 'earth-orbit', group: 'build-fly',
       tier: 'public', icon: 'satellite', badge: 'NEW',
-      blurb: 'Build a spacecraft, then fly drag against thrust through a real storm.' },
+      blurb: 'Arcade game: fly a satellite through solar storms and real debris clouds at five worlds.' },
     { id: 'spaceship-designer', href: 'spaceship-designer.html', title: 'Space Ship Designer',
       category: 'earth-orbit', group: 'build-fly',
       tier: 'public', icon: 'rocket', badge: 'NEW',

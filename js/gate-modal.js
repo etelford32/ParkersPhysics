@@ -107,12 +107,12 @@ export const GATE_VARIANTS = Object.freeze({
     'save-satellite': {
         gateType: 'free',
         eyebrow:  'Free account',
-        headline: 'Nice build. Keep it.',
-        body:     'Create a free account to save your satellite and fly it through a real storm — live drag vs. thrust.',
-        primary:  { label: 'Save my craft — free', plan: 'free' },
+        headline: 'Nice flying. Keep your stars.',
+        body:     'Create a free account to save your Storm Pilot stars, unlock new worlds and ships, and keep your Endless best on every device.',
+        primary:  { label: 'Save my progress — free', plan: 'free' },
         secondary:{ label: 'Already have an account? Sign in', kind: 'signin' },
         finePrint:'No credit card. Free forever.',
-        success:  "Saved. Take it into the storm whenever you're ready.",
+        success:  'Signed in. Your stars are saved from now on.',
     },
     'save-rocket': {
         gateType: 'free',
