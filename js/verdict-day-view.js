@@ -305,9 +305,10 @@ export class DayView {
 
     _onKey(e) {
         if (e.key === 'Escape') {
-            // stopPropagation is load-bearing: js/nav.js has a document-level
-            // Escape handler that focuses the nav burger on EVERY Escape, which
-            // stole the focus close() just returned to the card.
+            // The view owns this Escape: stop it reaching document-level
+            // handlers. js/nav.js used to focus its burger on EVERY Escape and
+            // stole the focus close() just returned to the card (fixed there
+            // too — this keeps the view independent of what else listens).
             e.preventDefault();
             e.stopPropagation();
             this.close('escape');
