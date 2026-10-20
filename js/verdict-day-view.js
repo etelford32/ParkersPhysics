@@ -304,7 +304,15 @@ export class DayView {
     }
 
     _onKey(e) {
-        if (e.key === 'Escape') { e.preventDefault(); this.close('escape'); return; }
+        if (e.key === 'Escape') {
+            // stopPropagation is load-bearing: js/nav.js has a document-level
+            // Escape handler that focuses the nav burger on EVERY Escape, which
+            // stole the focus close() just returned to the card.
+            e.preventDefault();
+            e.stopPropagation();
+            this.close('escape');
+            return;
+        }
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
             // Leave arrow keys alone inside the scrollable hourly strip.
             if (e.target.closest?.('.ev-day-hours')) return;
