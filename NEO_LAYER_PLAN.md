@@ -49,8 +49,11 @@ through it.
    `precessionLongitudeRad(jd)` once per frame; the kernel test shows the
    unrotated error is > 2 LD for an object coincident with Earth.
 3. **Flyby geometry uses Earth's TRUE position, anchored at the DRAWN
-   Earth.** The planets ride mean-motion circles (`angle0` + uniform rate);
-   Earth's equation of centre alone is ±2° ≈ ±13 LD. Geocentric vectors are
+   Earth.** Until 2026-10-20 the planets rode mean-motion circles (`angle0` +
+   uniform rate) and Earth's equation of centre alone was ±2° ≈ ±13 LD; they
+   are now placed from the ephemeris at the sim JD (`js/orrery-planets.js`),
+   so the drawn Earth sits at the true longitude and `simDist(true r)`. The
+   anchor stays — the local map is still a different scale. Geocentric vectors are
    computed against `earthHeliocentric(jd)` and drawn relative to
    `earthP.mesh.position`. Numbers are honest; the anchor is a display
    convention, said so in the panel note.
