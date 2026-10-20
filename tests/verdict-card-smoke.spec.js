@@ -30,8 +30,11 @@ const DAY = 86_400_000;
 /** Open-Meteo forecast fixture: 48 h hourly + 8 daily rows, unixtime. */
 function wxFixture(nowMs) {
     const start = Math.floor(nowMs / HOUR) * HOUR;
-    const hours = 48;
+    // 8 days of hours (the real request is forecast_days=8) so every day
+    // the full-screen day view can open has an hourly series behind it.
+    const hours = 8 * 24;
     const time = [], temperature_2m = [], precipitation_probability = [], cloud_cover = [], uv_index = [];
+    const weather_code = [], wind_speed_10m = [], relative_humidity_2m = [];
     for (let i = 0; i < hours; i++) {
         time.push((start + i * HOUR) / 1000);
         // Prototype-shaped: 90° cooling to 66° overnight, back up by day.
@@ -39,11 +42,15 @@ function wxFixture(nowMs) {
         precipitation_probability.push(0);
         cloud_cover.push(12);
         uv_index.push(Math.max(0, 9 * Math.sin(((i - 6) / 24) * Math.PI)));
+        weather_code.push(0);
+        wind_speed_10m.push(7);
+        relative_humidity_2m.push(35);
     }
     // Local midnight (fixture tz is PDT = UTC−7).
     const d = new Date(nowMs - 7 * HOUR);
     const day0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 7);
-    const daily = { time: [], temperature_2m_max: [], temperature_2m_min: [], weather_code: [], cloud_cover_mean: [], precipitation_probability_max: [] };
+    const daily = { time: [], temperature_2m_max: [], temperature_2m_min: [], weather_code: [], cloud_cover_mean: [], precipitation_probability_max: [],
+        wind_speed_10m_max: [], wind_gusts_10m_max: [], wind_direction_10m_dominant: [], uv_index_max: [], sunrise: [], sunset: [] };
     for (let i = 0; i < 8; i++) {
         daily.time.push((day0 + i * DAY) / 1000);
         daily.temperature_2m_max.push(90 + i % 3);
@@ -51,10 +58,17 @@ function wxFixture(nowMs) {
         daily.weather_code.push(i === 2 ? 2 : 0);
         daily.cloud_cover_mean.push(i === 5 ? 80 : 15);
         daily.precipitation_probability_max.push(0);
+        daily.wind_speed_10m_max.push(14.2);
+        daily.wind_gusts_10m_max.push(23.8);
+        daily.wind_direction_10m_dominant.push(250);
+        daily.uv_index_max.push(8.6);
+        daily.sunrise.push((day0 + i * DAY + 6.5 * HOUR) / 1000);
+        daily.sunset.push((day0 + i * DAY + 18.5 * HOUR) / 1000);
     }
     return {
         timezone: 'America/Los_Angeles',
-        hourly: { time, temperature_2m, precipitation_probability, cloud_cover, uv_index },
+        hourly: { time, temperature_2m, precipitation_probability, cloud_cover, uv_index,
+            weather_code, wind_speed_10m, relative_humidity_2m },
         daily,
     };
 }
@@ -299,6 +313,56 @@ test.describe('EarthView verdict card', () => {
         await expect(card.locator('[data-ev="detail"]')).toContainText('UV index');
         await card.locator('[data-ev-detail-close]').click();
         await expect(card.locator('[data-ev="detail"]')).toHaveCount(0);
+    });
+
+    test('tapping a weekday opens the full-screen day forecast', async ({ page }) => {
+        test.slow();
+        await bootWithCard(page);
+        const card = page.locator('#ev-verdict-card');
+        await expect(card.locator('.ev-verdict-day')).toHaveCount(7, { timeout: 30_000 });
+        await expect(card.locator('.ev-verdict-day').nth(2).locator('.ev-verdict-dtemp')).toContainText('92', { timeout: 20_000 });
+
+        await card.locator('.ev-verdict-day').nth(2).click();
+        const view = page.locator('#ev-day-view');
+        await expect(view).toBeVisible();
+        await expect(view).toHaveAttribute('role', 'dialog');
+
+        // FULL SCREEN — mounted on <body>, so the card's backdrop-filter
+        // cannot trap it inside the card's 400 px box.
+        const box = await view.boundingBox();
+        const vp = page.viewportSize();
+        expect(Math.round(box.width)).toBe(vp.width);
+        expect(Math.round(box.height)).toBe(vp.height);
+
+        // The day the user tapped, with its real numbers from the feed.
+        await expect(view.locator('[data-evd-tab]')).toHaveCount(7);
+        await expect(view.locator('[data-evd-tab="2"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(view.locator('.ev-day-hi')).toHaveText('92°');
+        await expect(view.locator('.ev-day-lo')).toHaveText('68°');
+        await expect(view.locator('.ev-day-cond')).toHaveText('Partly cloudy');
+        await expect(view.locator('.ev-day-stats')).toContainText('WSW 14 mph');
+        await expect(view.locator('.ev-day-stats')).toContainText('gusts to 24 mph');
+        await expect(view.locator('.ev-day-stats')).toContainText('8.6');
+        await expect(view.locator('.ev-day-hour')).toHaveCount(24);
+        await expect(view.locator('.ev-day-charts svg')).toHaveCount(2);
+        await expect(view.locator('.ev-day-part')).toHaveCount(4);
+
+        // Keyboard: → moves to the next day; Esc closes and hands focus back.
+        await page.keyboard.press('ArrowRight');
+        await expect(view.locator('[data-evd-tab="3"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(view.locator('.ev-day-hi')).toHaveText('90°');
+        await view.locator('[data-evd-tab="0"]').click();
+        await expect(view.locator('.ev-day-label')).toHaveText('Today');
+        await page.keyboard.press('Escape');
+        await expect(view).toBeHidden();
+        await expect(card.locator('.ev-verdict-day').nth(2)).toBeFocused();
+
+        // ✕ closes too.
+        await card.locator('.ev-verdict-day').nth(5).click();
+        await expect(view).toBeVisible();
+        await expect(view.locator('[data-evd-tab="5"]')).toHaveAttribute('aria-selected', 'true');
+        await view.locator('[data-evd="close"]').click();
+        await expect(view).toBeHidden();
     });
 
     test('?verdict=0 disables the card', async ({ page }) => {

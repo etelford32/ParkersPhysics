@@ -6,7 +6,8 @@
  * "answer": a verdict word, a temperature-first sentence, six factor chips,
  * an 18-hour temperature series, a 7-day week strip, a best-night pick and
  * tonight's sky rows (aurora + ISS). `factorForecast` additionally builds
- * the per-chip predictive series behind the tap-a-chip detail graphs.
+ * the per-chip predictive series behind the tap-a-chip detail graphs, and
+ * `dayForecast` the full-screen view behind each tapped weekday.
  *
  * CONTRACT: every export in this file is a pure function — inputs → outputs.
  *   - No DOM. No fetch. No imports from feed modules.
@@ -19,8 +20,12 @@
  *   {
  *     swpc:     { kp, kpForecast:[{time:ms|Date, kp}] }
  *     wx:       { tempF, cloudPct }                    // current, at loc
- *     forecast: { hourly:[{time, tempF, precipProb, cloudPct, uv}], // ≥18 h
- *                 daily:[{date, hiF, loF, code, cloudPct, precipProbMax}] }
+ *     forecast: { hourly:[{time, tempF, precipProb, cloudPct, uv,   // ≥18 h
+ *                          code?, feelsF?, rhPct?, precipIn?, windMph?, gustMph?}],
+ *                 daily:[{date, hiF, loF, code, cloudPct, precipProbMax,
+ *                         feelsHiF?, feelsLoF?, precipIn?, snowIn?, precipHours?,
+ *                         windMaxMph?, gustMaxMph?, windDirDeg?, uvMax?,
+ *                         sunrise?, sunset?}] }   // ? = day-view only
  *     alerts:   [{event, headline, severity}]          // pre-filtered to loc
  *     iss:      { passes:[{rise, riseAz, peakTime, peakAlt, set, setAz,
  *                          durationMin, rangeKm}] }    // from pass-predictor
@@ -303,6 +308,39 @@ export function weatherGlyph(code) {
     return '⛈️';
 }
 
+// WMO weather code → plain-English condition (day-detail headline). Same
+// bands as weatherGlyph so the words and the glyph can never disagree.
+export function weatherDescription(code) {
+    if (!isNum(code)) return null;
+    const exact = {
+        0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast',
+        45: 'Fog', 48: 'Freezing fog',
+        51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle',
+        56: 'Freezing drizzle', 57: 'Heavy freezing drizzle',
+        61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+        66: 'Freezing rain', 67: 'Heavy freezing rain',
+        71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+        80: 'Rain showers', 81: 'Heavy showers', 82: 'Violent showers',
+        85: 'Snow showers', 86: 'Heavy snow showers',
+        95: 'Thunderstorms', 96: 'Thunderstorms with hail', 99: 'Severe thunderstorms with hail',
+    };
+    if (exact[code]) return exact[code];
+    // Unlisted codes: fall back to the glyph band's family word.
+    if (code <= 3) return 'Partly cloudy';
+    if (code <= 48) return 'Fog';
+    if (code <= 67) return 'Rain';
+    if (code <= 86) return 'Snow';
+    return 'Thunderstorms';
+}
+
+const COMPASS16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+/** Meteorological direction (degrees the wind blows FROM) → 16-point word. */
+function compassWord(deg) {
+    if (!isNum(deg)) return null;
+    return COMPASS16[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+}
+
 // ── Small shared lookups ────────────────────────────────────────────────────
 
 function daypart(hour) {
@@ -496,6 +534,7 @@ function buildWeek(inputs, now, kpEff) {
         const clearNight = isNum(d?.cloudPct) ? d.cloudPct < 40 : false;
         week.push({
             day: dayName,
+            date: dayStart,
             glyph: weatherGlyph(d?.code),
             hi: isNum(d?.hiF) ? Math.round(d.hiF) : null,
             lo: isNum(d?.loF) ? Math.round(d.loF) : null,
@@ -892,6 +931,228 @@ export function stormOutlook(fluxRope, now = Date.now()) {
         desc: `Flux-rope ensemble: ${sev} · P(hit) ${pct}% · window ${win(f.arrivalP10Ms)}–${win(f.arrivalP90Ms)}`,
         when: `+${Math.round(hours)} h`,
     };
+}
+
+// ── One day, in full (week strip → tap → full-screen day view) ──────────────
+
+const DAYPARTS = [
+    { id: 'overnight', label: 'Overnight', from: 0, to: 6 },
+    { id: 'morning', label: 'Morning', from: 6, to: 12 },
+    { id: 'afternoon', label: 'Afternoon', from: 12, to: 18 },
+    { id: 'evening', label: 'Evening', from: 18, to: 24 },
+];
+
+const mean = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+const maxOf = (xs) => xs.length ? Math.max(...xs) : null;
+const minOf = (xs) => xs.length ? Math.min(...xs) : null;
+const pick = (rows, k) => rows.map(r => r[k]).filter(isNum);
+
+/**
+ * The full forecast for ONE day of the week strip (index 0 = today, local
+ * day at the saved location). Powers the full-screen day view the card
+ * opens when a weekday is tapped.
+ *
+ * Every number comes from the per-location Open-Meteo daily/hourly rows
+ * already in `inputs.forecast` — nothing is extrapolated. A field the feed
+ * did not supply stays null (rendered '--'); a day with no daily row
+ * returns null rather than a fabricated forecast.
+ *
+ * The NIGHT block looks at the night that BEGINS on this day (evening →
+ * next morning), matching the week strip's sky pips: moon phase, dark-sky
+ * cloud cover, ISS passes, and an aurora call ONLY when NOAA's Kp forecast
+ * actually reaches that night (it covers ~3 days); beyond it the aurora
+ * state is 'unknown', never a quiet-sky guess dressed up as a forecast.
+ *
+ * @returns {null | {
+ *   index, date, dayEnd, label, dateLabel, isToday, partial,
+ *   glyph, condition, hi, lo, feelsHi, feelsLo,
+ *   precip:{probMax, totalIn, snowIn, hours, wettest:{t, prob}|null},
+ *   wind:{maxMph, gustMph, dir}, uv:{max, word, peakT},
+ *   humidity:{min, max}, sun:{rise, set, dayLengthH},
+ *   hours:[{t, tempF, feelsF, precipProb, precipIn, cloudPct, uv, windMph, code, glyph}],
+ *   dayparts:[{id, label, glyph, condition, tempF, precipProb, cloudPct}],
+ *   night:{moon, cloudPct, clear, issPasses, aurora:{state, title, desc}, kp},
+ *   summary
+ * }}
+ */
+export function dayForecast(inputs = {}, index = 0, now = Date.now()) {
+    const t0 = ms(now);
+    const tz = inputs.loc?.tz;
+    const daily = Array.isArray(inputs.forecast?.daily) ? inputs.forecast.daily.slice(0, 7) : [];
+    const i = Math.trunc(+index);
+    const d = daily[i];
+    if (!d || !isNum(ms(d.date))) return null;
+
+    const dayStart = ms(d.date);
+    // Next row's midnight when present — a DST day is 23 or 25 h long.
+    const nextStart = daily[i + 1] && isNum(ms(daily[i + 1].date)) ? ms(daily[i + 1].date) : dayStart + DAY_MS;
+    const hoursRows = (inputs.forecast?.hourly || [])
+        .filter(r => isNum(ms(r.time)) && ms(r.time) >= dayStart && ms(r.time) < nextStart)
+        .sort((a, b) => ms(a.time) - ms(b.time));
+
+    const hours = hoursRows.map(r => ({
+        t: ms(r.time),
+        tempF: isNum(r.tempF) ? r.tempF : null,
+        feelsF: isNum(r.feelsF) ? r.feelsF : null,
+        precipProb: isNum(r.precipProb) ? r.precipProb : null,
+        precipIn: isNum(r.precipIn) ? r.precipIn : null,
+        cloudPct: isNum(r.cloudPct) ? r.cloudPct : null,
+        uv: isNum(r.uv) ? r.uv : null,
+        windMph: isNum(r.windMph) ? r.windMph : null,
+        code: isNum(r.code) ? r.code : null,
+        glyph: weatherGlyph(r.code),
+    }));
+
+    const round = (v) => isNum(v) ? Math.round(v) : null;
+    const hi = round(isNum(d.hiF) ? d.hiF : maxOf(pick(hours, 'tempF')));
+    const lo = round(isNum(d.loF) ? d.loF : minOf(pick(hours, 'tempF')));
+
+    // Wettest hour — the one the day's precip probability peaks at.
+    let wettest = null;
+    for (const h of hours) {
+        if (isNum(h.precipProb) && (!wettest || h.precipProb > wettest.prob)) wettest = { t: h.t, prob: h.precipProb };
+    }
+    const probMax = isNum(d.precipProbMax) ? d.precipProbMax : (wettest ? wettest.prob : null);
+    if (wettest && !(wettest.prob > 0)) wettest = null;
+    const totalIn = isNum(d.precipIn) ? d.precipIn
+        : (pick(hours, 'precipIn').length ? pick(hours, 'precipIn').reduce((a, b) => a + b, 0) : null);
+
+    let uvPeak = null;
+    for (const h of hours) if (isNum(h.uv) && (!uvPeak || h.uv > uvPeak.uv)) uvPeak = h;
+    const uvMax = isNum(d.uvMax) ? d.uvMax : (uvPeak ? uvPeak.uv : null);
+    const uvPeakT = uvPeak ? uvPeak.t : null;
+
+    const rh = hoursRows.map(r => r.rhPct).filter(isNum);
+    const rise = isNum(d.sunrise) ? d.sunrise : null;
+    const set = isNum(d.sunset) ? d.sunset : null;
+
+    // Dayparts by LOCAL hour. The dominant code is the most severe one in
+    // the block (a 1-hour thunderstorm is the afternoon's headline).
+    const dayparts = DAYPARTS.map(p => {
+        const rows = hours.filter(h => {
+            const lh = localHour(h.t, tz);
+            return lh >= p.from && lh < p.to;
+        });
+        if (!rows.length) return { id: p.id, label: p.label, glyph: '·', condition: null, tempF: null, precipProb: null, cloudPct: null };
+        const codes = pick(rows, 'code');
+        const code = codes.length ? Math.max(...codes) : null;
+        return {
+            id: p.id, label: p.label,
+            glyph: weatherGlyph(code),
+            condition: weatherDescription(code),
+            tempF: round(mean(pick(rows, 'tempF'))),
+            precipProb: round(maxOf(pick(rows, 'precipProb'))),
+            cloudPct: round(mean(pick(rows, 'cloudPct'))),
+        };
+    });
+
+    // ── The night that begins on this day ──
+    const lat = inputs.loc?.lat, lon = inputs.loc?.lon;
+    const hasLoc = isNum(lat) && isNum(lon);
+    const nightFrom = dayStart + 12 * HOUR_MS;
+    const nightTo = nextStart + 12 * HOUR_MS;
+    const isDark = (t) => hasLoc && sunAltitudeDeg(lat, lon, t) < -12;
+    const darkRows = (inputs.forecast?.hourly || [])
+        .filter(r => isNum(ms(r.time)) && ms(r.time) >= nightFrom && ms(r.time) < nightTo && isNum(r.cloudPct) && isDark(ms(r.time)));
+    const nightCloud = darkRows.length ? round(mean(darkRows.map(r => r.cloudPct)))
+        : (isNum(d.cloudPct) ? round(d.cloudPct) : null);
+    const moon = moonPhase(dayStart + 22 * HOUR_MS);
+    const issPasses = (inputs.iss?.passes || [])
+        .filter(p => isNum(ms(p.rise)) && ms(p.rise) >= dayStart && ms(p.rise) < nextStart)
+        .sort((a, b) => ms(a.rise) - ms(b.rise));
+
+    let deepestAlt = 90;
+    if (hasLoc) {
+        for (let t = nightFrom; t < nightTo; t += HOUR_MS) deepestAlt = Math.min(deepestAlt, sunAltitudeDeg(lat, lon, t));
+    }
+    let kpNight = null;
+    for (const f of inputs.swpc?.kpForecast || []) {
+        const ft = ms(f.time);
+        if (!isNum(ft) || !isNum(f.kp) || ft < nightFrom || ft >= nightTo) continue;
+        if (hasLoc && !isDark(ft)) continue;
+        if (kpNight == null || f.kp > kpNight) kpNight = f.kp;
+    }
+    // Tonight also counts the live Kp — the same "effective" rule the
+    // headline aurora row uses.
+    if (i === 0 && isNum(inputs.swpc?.kp) && (kpNight == null || inputs.swpc.kp > kpNight)) kpNight = inputs.swpc.kp;
+
+    let aurora;
+    if (!hasLoc) {
+        aurora = { state: 'unknown', title: 'Aurora: set a location', desc: 'Save a location to get a personal aurora call.' };
+    } else if (kpNight == null) {
+        aurora = {
+            state: 'unknown', title: 'Aurora: beyond the Kp forecast',
+            desc: 'NOAA forecasts geomagnetic activity ~3 days out — check back closer to the night.',
+        };
+    } else {
+        const v = auroraVerdict(kpNight, magneticLatitude(lat, lon), nightCloud, deepestAlt);
+        aurora = { state: v.state, title: v.title, desc: v.desc };
+    }
+
+    const condition = weatherDescription(d.code);
+    const dayLabel = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : fmtDate(dayStart + 12 * HOUR_MS, tz, { weekday: 'long' });
+    const dateLabel = fmtDate(dayStart + 12 * HOUR_MS, tz, { weekday: 'long', month: 'short', day: 'numeric' });
+
+    const windDir = compassWord(d.windDirDeg);
+    const bits = [];
+    if (condition) bits.push(condition);
+    if (hi != null && lo != null) bits.push(`high ${hi}°, low ${lo}°`);
+    if (isNum(probMax)) {
+        bits.push(probMax < 10 ? 'little chance of precipitation'
+            : `${Math.round(probMax)}% chance of precipitation${wettest ? ` (peaking ${fmtClockShort(wettest.t, tz)})` : ''}`);
+    }
+    if (isNum(d.windMaxMph)) bits.push(`${windDir ? windDir + ' ' : ''}winds to ${Math.round(d.windMaxMph)} mph`);
+    const summary = bits.length ? `${bits[0]}${bits.length > 1 ? ' — ' + bits.slice(1).join(', ') : ''}.` : 'No forecast data for this day.';
+
+    return {
+        index: i,
+        date: dayStart,
+        dayEnd: nextStart,
+        label: dayLabel,
+        dateLabel,
+        isToday: t0 >= dayStart && t0 < nextStart,
+        partial: hours.length < 20,
+        glyph: weatherGlyph(d.code),
+        condition,
+        hi, lo,
+        feelsHi: round(d.feelsHiF),
+        feelsLo: round(d.feelsLoF),
+        precip: {
+            probMax: round(probMax),
+            totalIn: isNum(totalIn) ? Math.round(totalIn * 100) / 100 : null,
+            snowIn: isNum(d.snowIn) ? Math.round(d.snowIn * 10) / 10 : null,
+            hours: isNum(d.precipHours) ? d.precipHours : null,
+            wettest,
+        },
+        wind: {
+            maxMph: round(d.windMaxMph ?? maxOf(pick(hours, 'windMph'))),
+            gustMph: round(d.gustMaxMph),
+            dir: windDir,
+        },
+        uv: { max: isNum(uvMax) ? Math.round(uvMax * 10) / 10 : null, word: uvWord(uvMax), peakT: uvPeakT },
+        humidity: { min: round(minOf(rh)), max: round(maxOf(rh)) },
+        sun: { rise, set, dayLengthH: rise != null && set != null && set > rise ? (set - rise) / HOUR_MS : null },
+        hours,
+        dayparts,
+        night: {
+            moon: { glyph: moon.glyph, name: moon.name, illumPct: moon.illumPct },
+            cloudPct: nightCloud,
+            clear: isNum(nightCloud) ? nightCloud < 40 : null,
+            issPasses,
+            aurora,
+            kp: kpNight,
+        },
+        summary,
+    };
+}
+
+/** tz-aware Intl date formatting with a local-zone fallback (bad tz string). */
+function fmtDate(t, tz, opts) {
+    try {
+        return new Intl.DateTimeFormat('en-US', { ...opts, ...(tz ? { timeZone: tz } : {}) }).format(new Date(ms(t)));
+    } catch {
+        return new Intl.DateTimeFormat('en-US', opts).format(new Date(ms(t)));
+    }
 }
 
 export function computeVerdict(inputs = {}, now = new Date()) {
