@@ -27,14 +27,27 @@ const _size = new THREE.Vector2();
 /**
  * A closed circle of `radius` in the XZ plane (y = 0, the ecliptic of the
  * orrery's scene), drawn `widthPx` CSS pixels wide whatever the zoom.
+ * `radius` may also be a FUNCTION of the azimuth a (x = r·cos a, z = r·sin a)
+ * for a closed polar curve — the orrery's eccentric orbits
+ * (js/orrery-planets.js `orbitRadiusAtLon`). The tangent is then the curve's
+ * own derivative, so the ribbon keeps its pixel width round an ellipse.
  */
 export function makeScreenRing(radius, { segments = 256, color = 0xffffff, opacity = 0.2, widthPx = 1.5 } = {}) {
     const n = segments + 1;   // duplicate the seam vertex so the strip closes
+    const rAt = typeof radius === 'function' ? radius : () => radius;
     const pos = new Float32Array(n * 2 * 3), tan = new Float32Array(n * 2 * 3), side = new Float32Array(n * 2);
+    let rMax = 0;
     for (let i = 0; i < n; i++) {
         const a = (i / segments) * Math.PI * 2;
-        const x = Math.cos(a) * radius, z = Math.sin(a) * radius;
-        const tx = -Math.sin(a), tz = Math.cos(a);
+        const r = rAt(a);
+        rMax = Math.max(rMax, r);
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        // d/da of (r cos a, r sin a); for a constant r this is r·(−sin a, cos a),
+        // normalised below to exactly the circle's old tangent.
+        const h = 1e-4, dr = (rAt(a + h) - rAt(a - h)) / (2 * h);
+        let tx = dr * Math.cos(a) - r * Math.sin(a), tz = dr * Math.sin(a) + r * Math.cos(a);
+        const tl = Math.hypot(tx, tz) || 1;
+        tx /= tl; tz /= tl;
         for (let s = 0; s < 2; s++) {
             const k = i * 2 + s;
             pos[k * 3] = x; pos[k * 3 + 1] = 0; pos[k * 3 + 2] = z;
@@ -52,13 +65,13 @@ export function makeScreenRing(radius, { segments = 256, color = 0xffffff, opaci
     g.setAttribute('aTangent', new THREE.BufferAttribute(tan, 3));
     g.setAttribute('aSide', new THREE.BufferAttribute(side, 1));
     g.setIndex(index);
-    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), radius * 1.01);
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), rMax * 1.01);
 
     const uniforms = {
         u_viewport: { value: new THREE.Vector2(1280, 720) },   // drawing buffer, device px
         u_halfPx:   { value: widthPx * 0.5 },
         u_dpr:      { value: 1 },
-        u_tanStep:  { value: radius * 0.01 },
+        u_tanStep:  { value: rMax * 0.01 },
     };
     const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide });
     m.onBeforeCompile = (shader) => {
