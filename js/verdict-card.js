@@ -865,7 +865,16 @@ export class VerdictCard {
             <span data-ev="prov">${esc(this._provenanceText(inputs))}</span>
         </div>`);
 
+        // Keep keyboard focus across the ≥5 s re-render: innerHTML replaces
+        // every body button, so a focused day/chip would silently drop focus
+        // to <body> (this broke focus-return from the full-screen day view).
+        const active = document.activeElement;
+        const focusSel = active && this._body.contains(active)
+            ? (active.hasAttribute('data-ev-day') ? `[data-ev-day="${active.getAttribute('data-ev-day')}"]`
+                : active.hasAttribute('data-ev-chip') ? `[data-ev-chip="${active.getAttribute('data-ev-chip')}"]` : null)
+            : null;
         this._body.innerHTML = parts.join('');
+        if (focusSel) this._body.querySelector(focusSel)?.focus({ preventScroll: true });
         // After the body exists: the clock tick also fills the stats-strip
         // local/UTC pair, which lives in the freshly rendered body.
         this._tickClock();
