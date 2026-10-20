@@ -162,10 +162,15 @@ export class DayView {
      * @param {object} [opts]
      * @param {(action:string, meta?:object) => void} [opts.record] telemetry
      * @param {() => string|null} [opts.getLocName] location name for the footer
+     * @param {(index:number) => Element|null} [opts.focusTarget] where focus
+     *        returns on close. The card re-renders its body every ≥5 s, so
+     *        the button that opened the view is usually DETACHED by then —
+     *        the card hands back the CURRENT button for that day instead.
      */
     constructor(opts = {}) {
         this._record = opts.record || (() => {});
         this._getLocName = opts.getLocName || (() => null);
+        this._focusTarget = opts.focusTarget || null;
         this._index = -1;
         this._inputs = null;
         this._returnFocus = null;
@@ -248,6 +253,7 @@ export class DayView {
         this._index = index;
         if (!wasOpen) {
             this._returnFocus = document.activeElement;
+            this._openedIndex = index;
             this._root.hidden = false;
             document.documentElement.classList.add('ev-day-open');
             window.addEventListener('resize', this._onResize);
@@ -266,8 +272,9 @@ export class DayView {
         this._root.hidden = true;
         document.documentElement.classList.remove('ev-day-open');
         window.removeEventListener('resize', this._onResize);
-        const back = this._returnFocus;
+        let back = this._returnFocus;
         this._returnFocus = null;
+        if (!back?.isConnected && this._focusTarget) back = this._focusTarget(this._openedIndex);
         if (back && back.isConnected) back.focus({ preventScroll: true });
     }
 

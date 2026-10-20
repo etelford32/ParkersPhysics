@@ -1403,6 +1403,7 @@ export class VerdictCard {
             this._dayView = new DayView({
                 record,
                 getLocName: () => this._inputs?.loc?.name || null,
+                focusTarget: (i) => this._body?.querySelector(`[data-ev-day="${i}"]`) || null,
             });
         }
         this._dayView.open(offset, this._inputs, 'week');
