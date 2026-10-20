@@ -179,6 +179,37 @@ test.describe('Star Collider Lab', () => {
         expect(errors, 'errors during the camera test').toEqual([]);
     });
 
+    test('graphics ladder: the HDR path engages and its night sky matches the direct path', async ({ page }) => {
+        // AUTO resolves to 'standard' on a software rasteriser, so every other
+        // test here runs the direct path; this one forces the HDR chain. The sky
+        // check is the measured bug: three encodes the clear colour into the
+        // composer's linear target and the OutputPass encodes it again (the sky
+        // read 34,38,90), and an ACES curve then crushed it to 0,0,3.
+        test.setTimeout(90000);
+        const errors = collectErrors(page);
+        await page.goto(PAGE + '?detail=high');
+        await page.waitForFunction(() => window.__starCollider?.scene, null, { timeout: 30000 });
+        const st = await page.evaluate(() => window.__starCollider.scene.state);
+        expect(st.detail).toBe('high');
+        expect(st.hdr).toBe(true);
+        expect(st.children).toBeGreaterThanOrEqual(8);
+        await expect(page.locator('[data-sc="stageDetail"]')).toHaveText(/high · HDR/);
+        const sky = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => {
+            const s = window.__starCollider.scene; const gl = s.renderer.getContext();
+            if (s.state.hdr) s.post.composer.render(); else s.renderer.render(s.scene, s.camera);
+            const w = 160, h = 40; const a = new Uint8Array(w * h * 4);
+            gl.readPixels(8, 8, w, h, gl.RGBA, gl.UNSIGNED_BYTE, a);
+            r([0, 1, 2].map(c => { const v = []; for (let i = c; i < a.length; i += 4) v.push(a[i]); v.sort((x, y) => x - y); return v[v.length >> 1]; }));
+        })));
+        const hdrSky = await sky();
+        await page.selectOption('[data-sc-control="detail"]', 'standard');
+        expect(await page.evaluate(() => window.__starCollider.scene.state.hdr)).toBe(false);
+        const directSky = await sky();
+        for (let c = 0; c < 3; c++) expect(Math.abs(hdrSky[c] - directSky[c]), `sky ${JSON.stringify({ hdrSky, directSky })}`).toBeLessThanOrEqual(3);
+        expect(directSky[2]).toBeGreaterThan(12);   // still night-blue, not crushed to black
+        expect(errors, 'errors on the HDR path').toEqual([]);
+    });
+
     test('the WASM engine builds, runs, inspirals, and paints the stage', async ({ page }) => {
         test.setTimeout(120000);
         const errors = collectErrors(page);

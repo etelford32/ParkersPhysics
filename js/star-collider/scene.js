@@ -45,17 +45,86 @@
  * orange), heat (the thermal energy u alone — where the shocks are),
  * body (star A cyan, star B magenta — mixing at contact), bound (bound
  * material dim, unbound ejecta bright green — the kernel's own Bernoulli
- * flag, the same definition as the M_unbound readout). Points are additive
- * so overlapping particles brighten like a column density. Point size is
- * camera-distance scaled with a 2 px floor.
+ * flag, the same definition as the M_unbound readout).
+ *
+ * THE SPLAT (2026-10 HD pass). An SPH particle is not a dot: it is mass
+ * smeared over its smoothing kernel W(r, h). Each particle is therefore drawn
+ * as K sub-sprites (an InstancedBufferGeometry: K child vertices × one
+ * instance per particle) whose offsets are STRATIFIED SAMPLES of the cubic
+ * spline's radial mass distribution q²W(q), turned by a per-particle random
+ * rotation (seeded by the particle's kernel index, so the pattern is stable
+ * from frame to frame and never a lattice). h itself is not in the frame; it
+ * is recovered the way the kernel sets it, h ∝ (m/ρ)^{1/3}, i.e.
+ * h = h̄·10^{(log ρ̄ − log ρ)/3} with ρ̄ the mean density the page sized h̄ at —
+ * so ejecta and tidal tails swell exactly as the particles' own kernels do.
+ * Sprite size is the TRUE projected size (projectionMatrix × drawing-buffer
+ * height), so surface brightness is zoom-invariant; below the pixel floor the
+ * sprite's weight falls as (px/floor)² instead of inflating the light.
+ * Colours are sRGB picks DECODED to linear before they are added (additive
+ * blending is a sum of light, and a sum of display values is the khaki trap
+ * the orrery's tone pass documents), accumulated in a half-float target when
+ * the HDR path is on, then bloomed and Reinhard-tone-mapped by an OutputPass.
+ * The DETAIL ladder (`setDetail`): 'standard' = 4 children, no post (the
+ * direct path — and the AUTO choice on a software rasteriser, where a bloom
+ * chain costs whole frames); 'high' = 10 children + HDR + bloom (auto on a
+ * GPU); 'ultra' = 20 children. Children are capped at CHILD_BUDGET in total.
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const MAX_POINTS = 8192;
 const MAX_TRAIL = 1500;
 const TWEEN_S = 0.75;
+const CHILD_BUDGET = 72000;          // sub-sprites in total, across every particle
+const GAIN = { direct: 0.24, hdr: 0.34 };   // per-particle light, tuned on a 600-per-star GW170817 run
+export const DETAIL_LEVELS = Object.freeze({
+    // childSize is the sprite diameter in units of h: more children, finer grain.
+    standard: { children: 4,  childSize: 0.95, hdr: false, bloom: 0,    label: 'standard · 4 sub-sprites, direct render' },
+    high:     { children: 10, childSize: 0.70, hdr: true,  bloom: 0.32, label: 'high · 10 sub-sprites, HDR + bloom' },
+    ultra:    { children: 20, childSize: 0.55, hdr: true,  bloom: 0.38, label: 'ultra · 20 sub-sprites, HDR + bloom' },
+});
+
+/** The cubic spline's radial mass distribution q²W(q) on [0, 2], as an inverse CDF. */
+function kernelRadiusSampler() {
+    const W = (q) => q < 1 ? 1 - 1.5 * q * q + 0.75 * q * q * q : q < 2 ? 0.25 * (2 - q) ** 3 : 0;
+    const N = 512, cdf = new Float64Array(N + 1);
+    for (let i = 1; i <= N; i++) { const q = 2 * (i - 0.5) / N; cdf[i] = cdf[i - 1] + q * q * W(q); }
+    for (let i = 1; i <= N; i++) cdf[i] /= cdf[N];
+    return (u) => {
+        let lo = 0, hi = N;
+        while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cdf[m] < u) lo = m; else hi = m; }
+        const f = (u - cdf[lo]) / Math.max(cdf[hi] - cdf[lo], 1e-12);
+        return 2 * (lo + f) / N;
+    };
+}
+const sampleKernelRadius = kernelRadiusSampler();
+
+/**
+ * K child offsets in units of h: radii STRATIFIED in the kernel's mass CDF,
+ * directions on a Fibonacci sphere (so a small K still covers the sphere),
+ * plus a per-child brightness jitter — the granulation.
+ */
+export function kernelOffsets(K, seed = 97) {
+    let s = seed >>> 0;
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    const pos = new Float32Array(K * 3), jit = new Float32Array(K);
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    const order = Array.from({ length: K }, (_, i) => i);
+    for (let i = K - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+    for (let i = 0; i < K; i++) {
+        const q = sampleKernelRadius((i + rnd()) / K);
+        const k = order[i];
+        const y = 1 - 2 * (k + 0.5) / K, rr = Math.sqrt(Math.max(0, 1 - y * y)), th = golden * k;
+        pos[3 * i] = q * rr * Math.cos(th); pos[3 * i + 1] = q * y; pos[3 * i + 2] = q * rr * Math.sin(th);
+        jit[i] = 0.65 + 0.7 * rnd();
+    }
+    return { pos, jit };
+}
 
 export const VIEW_PRESETS = Object.freeze({
     top:     { polar: 0.04, azimuth: 0.0,  label: 'top (face-on)' },
@@ -70,39 +139,73 @@ export const COLOR_MODES = Object.freeze({
 });
 export const FOLLOW_MODES = Object.freeze(['system', 'A', 'B', 'none']);
 
+// NO BACKTICKS inside these GLSL literals — one terminates the template (the
+// orrery's scar). Child vertex = `position` (offset in units of h) + aJit;
+// instance attributes = the particle (iPos, iDens, iHeat, iFlag, iSeed).
 const POINT_VS = /* glsl */`
-    attribute float aDens;
-    attribute float aHeat;
-    attribute float aFlag;
-    uniform float uSize;
+    attribute float aJit;
+    attribute vec3 iPos;
+    attribute float iDens;
+    attribute float iHeat;
+    attribute float iFlag;
+    attribute float iSeed;
+    uniform float uSize;          // h at the reference (mean) density, scene units
     uniform float uPointScale;
     uniform float uDensMax;
     uniform float uDensSpan;
+    uniform float uDensRef;       // log10(rho_max / rho_mean) the page sized uSize at
     uniform float uHeatScale;
+    uniform float uViewportH;     // drawing-buffer height, px
+    uniform float uSpread;        // child offset scale (units of h)
+    uniform float uChildSize;     // sprite diameter (units of h)
+    uniform float uGain;
     varying float vDens;
     varying float vHeat;
     varying float vFlag;
+    varying float vW;
+    varying float vCore;
+    vec3 hash3(float n) {
+        return fract(sin(vec3(n * 0.1031 + 1.0, n * 0.1030 + 7.0, n * 0.0973 + 13.0) * vec3(127.1, 311.7, 74.7)) * 43758.5453);
+    }
+    vec3 rotq(vec4 q, vec3 v) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
     void main() {
-        vDens = clamp((aDens - (uDensMax - uDensSpan)) / uDensSpan, 0.0, 1.0);
-        vHeat = clamp(aHeat * uHeatScale, 0.0, 1.0);
-        vFlag = aFlag;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        float px = uSize * uPointScale * (240.0 / max(-mv.z, 0.05));
-        gl_PointSize = max(px, 2.0);
+        vDens = clamp((iDens - (uDensMax - uDensSpan)) / uDensSpan, 0.0, 1.0);
+        vHeat = clamp(iHeat * uHeatScale, 0.0, 1.0);
+        vFlag = iFlag;
+        // h = h_mean * (rho_mean / rho)^(1/3): the kernel's own adaptive length.
+        float hs = clamp(pow(10.0, (uDensMax - uDensRef - iDens) / 3.0), 0.6, 7.0);
+        float h = uSize * hs;
+        // Shoemake: a uniform random rotation per particle, stable across frames.
+        vec3 u = hash3(iSeed);
+        float s1 = sqrt(1.0 - u.x), s2 = sqrt(u.x);
+        vec4 q = vec4(s1 * sin(6.2831853 * u.y), s1 * cos(6.2831853 * u.y), s2 * sin(6.2831853 * u.z), s2 * cos(6.2831853 * u.z));
+        vec3 off = rotq(q, position) * h * uSpread;
+        vCore = 1.0 - clamp(length(position) * 0.5, 0.0, 1.0);
+        vec4 mv = modelViewMatrix * vec4(iPos + off, 1.0);
+        float depth = max(-mv.z, 1e-3);
+        float px = h * uChildSize * uPointScale * projectionMatrix[1][1] * 0.5 * uViewportH / depth;
+        const float FLOOR_PX = 1.6;
+        float dim = px < FLOOR_PX ? (px * px) / (FLOOR_PX * FLOOR_PX) : 1.0;
+        gl_PointSize = clamp(px, FLOOR_PX, 384.0);
+        // larger kernels spread the same light thinner (column density), gently
+        vW = uGain * aJit * max(dim, 0.04) / sqrt(hs);
         gl_Position = projectionMatrix * mv;
     }
 `;
 const POINT_FS = /* glsl */`
     precision highp float;
     uniform int uMode;
+    uniform float uLinear;        // 1 = decode sRGB picks to linear (HDR path)
     varying float vDens;
     varying float vHeat;
     varying float vFlag;
+    varying float vW;
+    varying float vCore;
     vec3 ramp(float t) {
-        vec3 c0 = vec3(0.06, 0.10, 0.45);
-        vec3 c1 = vec3(0.10, 0.55, 0.95);
-        vec3 c2 = vec3(0.65, 0.95, 1.00);
-        vec3 c3 = vec3(1.00, 0.97, 0.80);
+        vec3 c0 = vec3(0.10, 0.06, 0.42);
+        vec3 c1 = vec3(0.06, 0.38, 1.00);
+        vec3 c2 = vec3(0.30, 0.88, 1.00);
+        vec3 c3 = vec3(1.00, 0.95, 0.85);
         if (t < 0.33) return mix(c0, c1, t / 0.33);
         if (t < 0.66) return mix(c1, c2, (t - 0.33) / 0.33);
         return mix(c2, c3, (t - 0.66) / 0.34);
@@ -120,7 +223,8 @@ const POINT_FS = /* glsl */`
         vec2 d = gl_PointCoord - 0.5;
         float r2 = dot(d, d);
         if (r2 > 0.25) discard;
-        float a = exp(-r2 * 9.0);
+        // Gaussian footprint renormalised to reach exactly 0 at the sprite edge
+        float a = max(exp(-r2 * 14.0) - 0.0302, 0.0) * 1.0311;
         float body = mod(vFlag, 2.0);          // 0 = A, 1 = B
         float unbound = step(2.0, vFlag);      // 1 if ejecta
         vec3 col;
@@ -135,21 +239,98 @@ const POINT_FS = /* glsl */`
             col = mix(vec3(0.35, 0.42, 0.70), vec3(0.45, 1.00, 0.60), unbound);
             lum = mix(0.12 + 0.55 * vDens, 1.0, unbound);
         } else {
-            col = ramp(vDens);
+            // the kernel's inner children run a touch hotter than its rim
+            // gamma 2 on the ramp: the bulk of a star reads blue → cyan and only
+            // the top of the density range (the cores) runs to white
+            float t = clamp(vDens + 0.10 * (vCore - 0.5), 0.0, 1.0);
+            col = ramp(t * t);
             col = mix(col, vec3(1.0, 0.72, 0.35), vHeat * 0.8);
-            lum = 0.18 + 0.82 * vDens;
+            lum = 0.16 + 0.84 * vDens;
         }
-        gl_FragColor = vec4(col * lum * a, a * 0.9);
+        vec3 c = col * lum;
+        if (uLinear > 0.5) c = pow(c, vec3(2.2));
+        gl_FragColor = vec4(c, a * vW);
+    }
+`;
+
+/** Backdrop stars: magnitude-distributed sizes, blackbody-ish tints. */
+const SKY_VS = /* glsl */`
+    attribute float aSize;
+    attribute vec3 aColor;
+    uniform float uDpr;
+    varying vec3 vColor;
+    void main() {
+        vColor = aColor;
+        gl_PointSize = aSize * uDpr;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+const SKY_FS = /* glsl */`
+    precision highp float;
+    uniform float uLinear;
+    varying vec3 vColor;
+    void main() {
+        vec2 d = gl_PointCoord - 0.5;
+        float r2 = dot(d, d);
+        if (r2 > 0.25) discard;
+        float a = exp(-r2 * 22.0);
+        vec3 c = uLinear > 0.5 ? pow(vColor, vec3(2.2)) : vColor;
+        gl_FragColor = vec4(c, a);
+    }
+`;
+
+/** A star seen whole (the pre-run preview): a sphere of glowing gas, brighter
+    through its centre (longer chord) with a rim glow — not a wire cage. */
+const STAR_VS = /* glsl */`
+    varying vec3 vN;
+    varying vec3 vV;
+    void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vN = normalize(normalMatrix * normal);
+        vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+const STAR_FS = /* glsl */`
+    precision highp float;
+    uniform vec3 uColor;
+    uniform float uLinear;
+    varying vec3 vN;
+    varying vec3 vV;
+    void main() {
+        float mu = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
+        // chord through an n = 1 polytrope ~ mu^1.5, plus a thin limb glow
+        float core = pow(mu, 1.5);
+        float rim = pow(1.0 - mu, 4.0) * 0.6;
+        vec3 c = uColor * (0.12 + 0.55 * core) + vec3(1.0, 0.98, 0.92) * pow(mu, 8.0) * 0.35 + uColor * rim;
+        if (uLinear > 0.5) c = pow(c, vec3(2.2));
+        gl_FragColor = vec4(c, 0.5 + 0.45 * core);
     }
 `;
 
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 const k2s = (v, cps) => new THREE.Vector3(v[0] / cps, v[2] / cps, -v[1] / cps);
 
-export function createColliderScene(container, { onFrame, onCommand } = {}) {
+/** A software rasteriser (SwiftShader / llvmpipe) pays whole frames for a bloom chain. */
+function isSoftwareRenderer(renderer) {
+    try {
+        const gl = renderer.getContext();
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+        return /swiftshader|llvmpipe|software|basic render/i.test(name);
+    } catch { return false; }
+}
+
+export function createColliderScene(container, { onFrame, onCommand, detail = 'auto' } = {}) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setClearColor(0x04051a, 1);
+    const CLEAR = new THREE.Color(0x04051a);
+    // Into the composer's linear target three r160 encodes the clear colour
+    // to sRGB on the way IN, and the OutputPass encodes it again on the way out
+    // (measured: the sky read 34,38,90 instead of 4,5,26). Pre-decoding it once
+    // more makes the round trip land on the same night sky as the direct path.
+    const CLEAR_HDR = CLEAR.clone().convertSRGBToLinear();
+    renderer.setClearColor(CLEAR, 1);
     container.appendChild(renderer.domElement);
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
@@ -175,52 +356,118 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
     controls.zoomToCursor = false;
 
     // ── Static backdrop ─────────────────────────────────────────────────────
+    // A decorative sky (not a catalogue): sizes from a steep magnitude law so
+    // most stars are faint pinpricks, tints from a cool-to-hot palette.
+    const SKY_N = 3200;
     const starGeo = new THREE.BufferGeometry();
-    const starPos = new Float32Array(800 * 3);
+    const starPos = new Float32Array(SKY_N * 3), starSize = new Float32Array(SKY_N), starCol = new Float32Array(SKY_N * 3);
     let seed = 12345;
     const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    for (let i = 0; i < 800; i++) {
+    const tints = [[0.70, 0.80, 1.00], [0.85, 0.90, 1.00], [1.00, 0.98, 0.95], [1.00, 0.88, 0.72], [1.00, 0.76, 0.58]];
+    for (let i = 0; i < SKY_N; i++) {
         const r = 900, th = rnd() * Math.PI * 2, ph = Math.acos(2 * rnd() - 1);
         starPos[3 * i] = r * Math.sin(ph) * Math.cos(th);
         starPos[3 * i + 1] = r * Math.cos(ph);
         starPos[3 * i + 2] = r * Math.sin(ph) * Math.sin(th);
+        const m = Math.pow(rnd(), 3.2);                       // mostly faint
+        starSize[i] = 1.0 + 2.6 * m;
+        const t = tints[Math.min(tints.length - 1, Math.floor(rnd() * tints.length))];
+        const b = 0.18 + 0.75 * m;
+        starCol[3 * i] = t[0] * b; starCol[3 * i + 1] = t[1] * b; starCol[3 * i + 2] = t[2] * b;
     }
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x9fb0cc, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0.5 })));
+    starGeo.setAttribute('aSize', new THREE.BufferAttribute(starSize, 1));
+    starGeo.setAttribute('aColor', new THREE.BufferAttribute(starCol, 3));
+    const skyMat = new THREE.ShaderMaterial({
+        vertexShader: SKY_VS, fragmentShader: SKY_FS,
+        uniforms: { uDpr: { value: renderer.getPixelRatio() }, uLinear: { value: 0 } },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const sky = new THREE.Points(starGeo, skyMat);
+    sky.frustumCulled = false;
+    scene.add(sky);
 
     // ── The world group: everything that lives in the kernel's frame ────────
     const world = new THREE.Group();
     scene.add(world);
     const grid = new THREE.GridHelper(40, 40, 0x1d2a55, 0x111a3a);
     grid.material.transparent = true; grid.material.opacity = 0.55;
+    // Drawn BEFORE the additive gas and writing NO depth: a grid that wrote
+    // depth culled the gas behind the orbital plane along every grid line and
+    // cut dark stripes straight through the stars.
+    grid.material.depthWrite = false;
+    grid.renderOrder = -2;
     world.add(grid);
     const ring = new THREE.Mesh(new THREE.RingGeometry(3.98, 4.02, 128),
-        new THREE.MeshBasicMaterial({ color: 0x5ee1ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+        new THREE.MeshBasicMaterial({ color: 0x5ee1ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2;
+    ring.renderOrder = -1;
     world.add(ring);
 
-    // Particles
-    const geo = new THREE.BufferGeometry();
+    // Particles: K child vertices (the kernel samples) × one instance per particle.
     const pos = new Float32Array(MAX_POINTS * 3);
     const dens = new Float32Array(MAX_POINTS);
     const heat = new Float32Array(MAX_POINTS);
     const flag = new Float32Array(MAX_POINTS);
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute('aDens', new THREE.BufferAttribute(dens, 1).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute('aHeat', new THREE.BufferAttribute(heat, 1).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute('aFlag', new THREE.BufferAttribute(flag, 1).setUsage(THREE.DynamicDrawUsage));
-    geo.setDrawRange(0, 0);
+    const seedA = new Float32Array(MAX_POINTS);
+    const inst = {
+        iPos: new THREE.InstancedBufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage),
+        iDens: new THREE.InstancedBufferAttribute(dens, 1).setUsage(THREE.DynamicDrawUsage),
+        iHeat: new THREE.InstancedBufferAttribute(heat, 1).setUsage(THREE.DynamicDrawUsage),
+        iFlag: new THREE.InstancedBufferAttribute(flag, 1).setUsage(THREE.DynamicDrawUsage),
+        iSeed: new THREE.InstancedBufferAttribute(seedA, 1).setUsage(THREE.DynamicDrawUsage),
+    };
+    function buildParticleGeometry(K) {
+        const g = new THREE.InstancedBufferGeometry();
+        const { pos: off, jit } = kernelOffsets(K);
+        g.setAttribute('position', new THREE.BufferAttribute(off, 3));
+        g.setAttribute('aJit', new THREE.BufferAttribute(jit, 1));
+        for (const [k, a] of Object.entries(inst)) g.setAttribute(k, a);
+        g.instanceCount = 0;
+        return g;
+    }
+    let geo = buildParticleGeometry(DETAIL_LEVELS.standard.children);
     const mat = new THREE.ShaderMaterial({
         vertexShader: POINT_VS, fragmentShader: POINT_FS,
         uniforms: {
             uSize: { value: 0.12 }, uPointScale: { value: 1.0 }, uDensMax: { value: 0 }, uDensSpan: { value: 3 },
-            uHeatScale: { value: 20 }, uMode: { value: 0 },
+            uDensRef: { value: 0.5 }, uHeatScale: { value: 20 }, uMode: { value: 0 },
+            uViewportH: { value: 720 }, uSpread: { value: 0.65 }, uChildSize: { value: 1.1 }, uGain: { value: 0.3 },
+            uLinear: { value: 0 },
         },
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const points = new THREE.Points(geo, mat);
     points.frustumCulled = false;
     world.add(points);
+
+    // One shared uniform object: every sRGB-picked shader decodes to linear
+    // exactly when the HDR path is on (and only then).
+    const linearUniform = { value: 0 };
+    mat.uniforms.uLinear = linearUniform;
+    skyMat.uniforms.uLinear = linearUniform;
+    /** The bright lensed ring just outside a hole's shadow (r_ph ≈ 1.5 r_s, seen at ~2.6 r_s). */
+    function makePhotonGlow(r) {
+        const m = new THREE.ShaderMaterial({
+            vertexShader: STAR_VS,
+            fragmentShader: /* glsl */`
+                precision highp float;
+                uniform float uLinear;
+                varying vec3 vN;
+                varying vec3 vV;
+                void main() {
+                    float mu = abs(dot(normalize(vN), normalize(vV)));
+                    float ring = exp(-pow((mu - 0.18) / 0.10, 2.0));
+                    vec3 c = vec3(1.0, 0.72, 0.42) * ring * 0.9;
+                    if (uLinear > 0.5) c = pow(c, vec3(2.2)) * 1.6;
+                    gl_FragColor = vec4(c, ring);
+                }
+            `,
+            uniforms: { uLinear: linearUniform },
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+        });
+        return new THREE.Mesh(new THREE.SphereGeometry(r * 2.6, 48, 32), m);
+    }
 
     // Black holes
     const bhMeshes = [0, 1].map(() => {
@@ -229,6 +476,7 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
         const halo = new THREE.Mesh(new THREE.RingGeometry(1.35, 1.6, 96), new THREE.MeshBasicMaterial({ color: 0xffb066, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
         halo.rotation.x = -Math.PI / 2;
         g.add(halo);
+        g.add(makePhotonGlow(1));
         g.visible = false;
         world.add(g);
         return g;
@@ -259,6 +507,25 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
     const preview = new THREE.Group();
     world.add(preview);
 
+    // ── Post: HDR accumulation, bloom, ACES (the 'high' / 'ultra' rungs) ─────
+    const software = isSoftwareRenderer(renderer);
+    const canHdr = renderer.capabilities.isWebGL2;
+    let composer = null, bloomPass = null;
+    function ensureComposer() {
+        if (composer || !canHdr) return composer;
+        try {
+            composer = new EffectComposer(renderer);
+            composer.addPass(new RenderPass(scene, camera));
+            bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.32, 0.35, 0.85);
+            composer.addPass(bloomPass);
+            composer.addPass(new OutputPass());
+        } catch (err) {
+            console.warn('[star-collider] HDR path unavailable', err);
+            composer = null;
+        }
+        return composer;
+    }
+
     // ── State ───────────────────────────────────────────────────────────────
     const st = {
         codePerScene: 4, ringCode: 16,
@@ -271,13 +538,22 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
         tween: null,
         followSnap: true,
         running: true, visible: true, hovering: false,
+        detail: 'standard', hdr: false, children: DETAIL_LEVELS.standard.children,
+        nBudget: 1200, h0: 0.12, gainBase: 0.3,
     };
+    function sizeComposer(w, h) {
+        if (!composer) return;
+        composer.setPixelRatio(renderer.getPixelRatio());
+        composer.setSize(w, h);
+    }
 
     function resize() {
         const w = container.clientWidth || 640, h = container.clientHeight || 400;
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
+        mat.uniforms.uViewportH.value = h * renderer.getPixelRatio();
+        sizeComposer(w, h);
     }
     resize();
     const ro = new ResizeObserver(resize);
@@ -356,6 +632,37 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
         return Math.max(radiusScene, 0.05) / Math.sin(half) * 1.12;
     }
 
+    // ── Detail ladder ───────────────────────────────────────────────────────
+    function applyDetail() {
+        const L = DETAIL_LEVELS[st.detail] || DETAIL_LEVELS.standard;
+        const K = Math.max(2, Math.min(L.children, Math.floor(CHILD_BUDGET / Math.max(st.nBudget, 1))));
+        if (K !== st.children || geo.attributes.position.count !== K) {
+            const n = geo.instanceCount;
+            const old = geo;
+            geo = buildParticleGeometry(K);
+            geo.instanceCount = n;
+            points.geometry = geo;
+            old.dispose();
+            st.children = K;
+        }
+        st.hdr = !!(L.hdr && ensureComposer());
+        if (bloomPass) bloomPass.strength = L.bloom;
+        linearUniform.value = st.hdr ? 1 : 0;
+        renderer.setClearColor(st.hdr ? CLEAR_HDR : CLEAR, 1);
+        // REINHARD, not ACES: the ACES fit goes NEGATIVE below ~0.004 linear and
+        // crushed the night sky to 0,0,3 (measured); Reinhard is the identity in
+        // the darks and only rolls off the overlapping cores.
+        renderer.toneMapping = st.hdr ? THREE.ReinhardToneMapping : THREE.NoToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        // Per-child light: split the particle's light over its K children and
+        // normalise the column (∝ N^{1/3}) to a 600-per-star reference.
+        // Overlap per pixel goes as K·(sprite size)², so the gain divides by it.
+        const column = Math.cbrt(1200 / st.nBudget);
+        mat.uniforms.uChildSize.value = L.childSize;
+        mat.uniforms.uGain.value = GAIN[st.hdr ? 'hdr' : 'direct'] * column / (K * L.childSize * L.childSize);
+        if (st.hdr) sizeComposer(container.clientWidth || 640, container.clientHeight || 400);
+    }
+
     // ── Render loop ─────────────────────────────────────────────────────────
     let raf = 0, lastNow = performance.now();
     function loop() {
@@ -367,7 +674,8 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
         controls.update();
         if (!st.running || !st.visible) return;
         if (onFrame) onFrame();
-        renderer.render(scene, camera);
+        if (st.hdr && composer) composer.render();
+        else renderer.render(scene, camera);
     }
     loop();
 
@@ -395,7 +703,7 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
     const api = {
         renderer, scene, camera, controls, world,
         get state() {
-            return { view: st.view, follow: st.follow, corotating: st.corotating, colorMode: st.colorMode, trails: st.trailsOn,
+            return { detail: st.detail, hdr: st.hdr, children: st.children, software, view: st.view, follow: st.follow, corotating: st.corotating, colorMode: st.colorMode, trails: st.trailsOn,
                 pointScale: st.pointScale, hasFrame: st.hasFrame, tweening: !!st.tween,
                 lastMeta: st.cmA && st.cmB ? { cmA: st.cmA.slice(), cmB: st.cmB.slice(), sep: st.sep } : null,
                 followPoint: followPointWorld()?.toArray() ?? null };
@@ -409,7 +717,26 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
             coreMarks.forEach(m => m.scale.set(cr, cr, 1));
             bary.scale.setScalar(Math.max(0.5, rs / 4));
         },
-        setPointSize(sceneUnits) { mat.uniforms.uSize.value = sceneUnits; },
+        /**
+         * h̄ in scene units (the smoothing length at the stars' MEAN density),
+         * and the run's particle count, which sets the child budget and the
+         * gain: the column through a star grows as N^{1/3}, so the light per
+         * child is normalised by it to keep a 150- and a 2500-particle star
+         * equally bright.
+         */
+        setPointSize(sceneUnits, nTotal = st.nBudget) {
+            st.h0 = sceneUnits; st.nBudget = Math.max(1, nTotal | 0);
+            mat.uniforms.uSize.value = sceneUnits;
+            applyDetail();
+        },
+        /** 'auto' | 'standard' | 'high' | 'ultra' — see DETAIL_LEVELS. */
+        setDetail(level) {
+            const resolved = level === 'auto' || !DETAIL_LEVELS[level] ? (software || !canHdr ? 'standard' : 'high') : level;
+            st.detailRequested = level;
+            st.detail = resolved;
+            applyDetail();
+            if (onCommand) onCommand('view-state');
+        },
         setPointScale(mult) { st.pointScale = mult; mat.uniforms.uPointScale.value = mult; },
         setHeatScale(v) { mat.uniforms.uHeatScale.value = v; },
         setColorMode(mode) { if (!COLOR_MODES[mode]) return; st.colorMode = mode; mat.uniforms.uMode.value = COLOR_MODES[mode].id; if (onCommand) onCommand('view-state'); },
@@ -480,15 +807,13 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
                 dens[k] = frame[o + 3];
                 heat[k] = frame[o + 4];
                 flag[k] = stride >= 6 ? frame[o + 5] : 0;
+                seedA[k] = i;          // the KERNEL index: an accreted particle must not reshuffle the rest
                 if (dens[k] > dmax) dmax = dens[k];
                 if ((k & 3) === 0) radii.push(Math.hypot(sx - fp.x, sy - fp.y, sz - fp.z));
                 k++;
             }
-            geo.setDrawRange(0, k);
-            geo.attributes.position.needsUpdate = true;
-            geo.attributes.aDens.needsUpdate = true;
-            geo.attributes.aHeat.needsUpdate = true;
-            geo.attributes.aFlag.needsUpdate = true;
+            geo.instanceCount = k;
+            for (const a of Object.values(inst)) a.needsUpdate = true;
             if (Number.isFinite(dmax)) mat.uniforms.uDensMax.value = dmax;
             st.alive = k; st.hasFrame = k > 0 || bodies.some(b => b && b.kind === 'bh');
             if (radii.length) { radii.sort((a, b) => a - b); st.cloudRadius = Math.max(radii[Math.floor(radii.length * 0.96)], 0.2); }
@@ -532,7 +857,10 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
         },
         /** Pre-run preview: bodies [{kind, radius (code), pos (code[3])}]. */
         setPreview(bodies) {
-            while (preview.children.length) { const c = preview.children.pop(); c.geometry?.dispose?.(); c.material?.dispose?.(); }
+            while (preview.children.length) {
+                const c = preview.children.pop();
+                c.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+            }
             const cps = st.codePerScene;
             let maxR = 0.5;
             bodies.forEach((b, i) => {
@@ -540,13 +868,22 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
                 const p = k2s(b.pos, cps);
                 maxR = Math.max(maxR, p.length() + r);
                 let mesh;
+                mesh = new THREE.Group();
                 if (b.kind === 'bh') {
-                    mesh = new THREE.Group();
-                    mesh.add(new THREE.Mesh(new THREE.SphereGeometry(r, 32, 20), new THREE.MeshBasicMaterial({ color: 0x000000 })));
-                    const halo = new THREE.Mesh(new THREE.RingGeometry(r * 1.35, r * 1.6, 64), new THREE.MeshBasicMaterial({ color: 0xffb066, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }));
+                    mesh.add(new THREE.Mesh(new THREE.SphereGeometry(r, 48, 32), new THREE.MeshBasicMaterial({ color: 0x000000 })));
+                    const halo = new THREE.Mesh(new THREE.RingGeometry(r * 1.35, r * 1.6, 96), new THREE.MeshBasicMaterial({ color: 0xffb066, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }));
                     halo.rotation.x = -Math.PI / 2; mesh.add(halo);
+                    mesh.add(makePhotonGlow(r));
                 } else {
-                    mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), new THREE.MeshBasicMaterial({ color: coreColors[i] || 0xffffff, wireframe: true, transparent: true, opacity: 0.28 }));
+                    const col = new THREE.Color(coreColors[i] || 0xffffff);
+                    const glow = new THREE.ShaderMaterial({
+                        vertexShader: STAR_VS, fragmentShader: STAR_FS,
+                        uniforms: { uColor: { value: new THREE.Vector3(col.r, col.g, col.b) }, uLinear: linearUniform },
+                        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+                    });
+                    mesh.add(new THREE.Mesh(new THREE.SphereGeometry(r, 64, 40), glow));
+                    // a faint lat–long cage keeps the 'configured, not yet built' read
+                    mesh.add(new THREE.Mesh(new THREE.SphereGeometry(r * 1.002, 18, 10), new THREE.MeshBasicMaterial({ color: coreColors[i] || 0xffffff, wireframe: true, transparent: true, opacity: 0.035, depthWrite: false })));
                 }
                 mesh.position.copy(p);
                 preview.add(mesh);
@@ -560,7 +897,7 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
         /** Back-compat: frame the stage at a distance (used before the first frame). */
         frameAll(distance) { flyTo({ r: distance }, 0); },
         clear() {
-            geo.setDrawRange(0, 0); bhMeshes.forEach(m => { m.visible = false; });
+            geo.instanceCount = 0; bhMeshes.forEach(m => { m.visible = false; });
             coreMarks.forEach(m => { m.visible = false; }); sepLine.visible = false; bary.visible = false;
             api.clearTrails(); st.hasFrame = false; st.cmA = null; st.cmB = null; world.rotation.y = 0; st.rotAngle = 0;
         },
@@ -568,11 +905,19 @@ export function createColliderScene(container, { onFrame, onCommand } = {}) {
             cancelAnimationFrame(raf); ro.disconnect(); io.disconnect();
             document.removeEventListener('visibilitychange', onVis);
             window.removeEventListener('keydown', onKeyDown);
+            composer?.dispose?.();
             renderer.dispose();
         },
         get codePerScene() { return st.codePerScene; },
+        get detailLevels() { return DETAIL_LEVELS; },
+        /** Test/capture hook: the post chain (null on the direct path). */
+        get post() { return composer ? { composer, bloomPass } : null; },
         get ringCode() { return st.ringCode; },
         distanceToFit,
     };
+    // Initial rung, silently (the page renders the view state once it holds `scene`).
+    st.detailRequested = detail;
+    st.detail = detail === 'auto' || !DETAIL_LEVELS[detail] ? (software || !canHdr ? 'standard' : 'high') : detail;
+    applyDetail();
     return api;
 }

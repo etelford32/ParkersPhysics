@@ -64,11 +64,13 @@ body {
 .sc-wrap { max-width:1380px; margin:0 auto; padding:0 18px 60px; }
 
 /* ── Hero ─────────────────────────────────────────────────────────────── */
-.sc-hero { padding:26px 4px 10px; display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
-.sc-hero h1 { font-size:clamp(1.7rem, 3.4vw, 2.5rem); font-weight:700; color:#fff; letter-spacing:.2px; }
+/* The hero is ONE line so the stage opens at the top of the screen. */
+.sc-hero { padding:10px 22px 8px; display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; }
+.sc-hero h1 { font-size:clamp(1.2rem, 2.2vw, 1.55rem); font-weight:700; color:#fff; letter-spacing:.2px; }
 .sc-badge { font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--sc-amber); border:1px solid rgba(var(--sc-amber-rgb),.45); border-radius:999px; padding:3px 10px; }
-.sc-sub { flex-basis:100%; color:var(--sc-text-dim); font-size:.98rem; }
-.sc-lede { font-size:1.02rem; line-height:1.6; color:#c2cbdc; margin:8px 4px 14px; max-width:1050px; }
+.sc-sub { flex:1 1 320px; color:var(--sc-text-dim); font-size:.84rem; line-height:1.35; }
+@media (max-width:700px) { .sc-sub { display:none; } }
+.sc-lede { font-size:1.02rem; line-height:1.6; color:#c2cbdc; margin:4px 4px 14px; max-width:1050px; }
 .sc-lede strong { color:#fff; }
 
 /* ── Provenance banner ────────────────────────────────────────────────── */
@@ -77,38 +79,62 @@ body {
 .sc-provenance strong { color:#fff; }
 
 /* ── Collider: stage + console ────────────────────────────────────────── */
-.sc-collider { display:grid; grid-template-columns:minmax(0, 1fr) 340px; gap:14px; margin:0 4px 18px; align-items:start; }
-@media (max-width:1000px) { .sc-collider { grid-template-columns:1fr; } }
-/* The stage owns its height. Left to the grid it stretched to the console's
-   ~1100px on desktop and the merger sat in the top fifth of an empty grid. */
-#sc-stage-wrap { position:relative; border:1px solid var(--sc-border); border-radius:12px; overflow:hidden; background:#04051a; height:min(72vh, 720px); min-height:420px; }
-@media (max-width:1000px) { #sc-stage-wrap { height:min(60vh, 560px); } }
+/* ONE height for the stage and the console, sized to the viewport under the
+   50px nav + the one-line hero, so the stage is the first thing on screen and
+   the console scrolls inside itself instead of stretching the row. */
+:root { --sc-stage-h: clamp(440px, calc(100vh - 118px), 940px); }
+.sc-collider { display:grid; grid-template-columns:minmax(0, 1fr) 330px; gap:12px; margin:0 4px 18px; align-items:start; }
+@media (max-width:1000px) { .sc-collider { grid-template-columns:1fr; } :root { --sc-stage-h: clamp(380px, 62vh, 620px); } }
+#sc-stage-wrap { position:relative; border:1px solid var(--sc-border); border-radius:12px; overflow:hidden; background:#04051a; height:var(--sc-stage-h); }
 #sc-stage { position:absolute; inset:0; }
 #sc-stage-fallback { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:20px; text-align:center; color:var(--sc-text-dim); background:#04051a; }
 #sc-stage-fallback[hidden] { display:none; }
 .sc-hud { position:absolute; left:10px; top:10px; right:10px; display:flex; flex-wrap:wrap; gap:6px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.72rem; color:#bcd0ee; text-shadow:0 1px 3px #000; }
 .sc-hud span[data-sc] { color:#fff; }
-.sc-hud-b { position:absolute; left:10px; right:10px; bottom:10px; display:flex; flex-wrap:wrap; gap:4px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.7rem; color:#9fb0cc; text-shadow:0 1px 3px #000; }
+.sc-hud-b { position:absolute; left:10px; right:10px; bottom:10px; display:flex; flex-wrap:wrap; gap:4px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.68rem; color:#9fb0cc; text-shadow:0 1px 3px #000; }
 .sc-hud-b span[data-sc] { color:#dfe8ff; }
-.sc-console { border:1px solid var(--sc-border); border-radius:12px; background:var(--sc-panel); padding:12px 14px; display:flex; flex-direction:column; gap:10px; font-size:.86rem; }
-.sc-console h2 { font-size:.78rem; letter-spacing:.12em; text-transform:uppercase; color:var(--sc-accent); }
-.sc-console h3 { font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--sc-text-dim); margin-top:6px; }
-.sc-row { display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; align-items:center; }
-.sc-row label, .sc-field label { color:var(--sc-text-dim); font-size:.78rem; }
-.sc-field { display:flex; flex-direction:column; gap:3px; }
-.sc-console select, .sc-console input[type=number], .sc-console input[type=text] { width:100%; background:#0b1030; color:#e6edff; border:1px solid rgba(var(--sc-accent-rgb),.25); border-radius:6px; padding:5px 7px; font-size:.82rem; font-family:inherit; }
+
+.sc-console { border:1px solid var(--sc-border); border-radius:12px; background:var(--sc-panel); display:flex; flex-direction:column; font-size:.82rem; height:var(--sc-stage-h); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+@media (max-width:1000px) { .sc-console { height:auto; overflow:visible; } }
+.sc-console h3 { font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--sc-text-dim); }
+/* The run bar: Build & run and the run settings, pinned at the top. */
+.sc-runbar { position:sticky; top:0; z-index:2; background:rgba(9,13,34,.97); border-bottom:1px solid var(--sc-border); padding:10px 10px 8px; display:flex; flex-direction:column; gap:7px; border-radius:12px 12px 0 0; }
+.sc-runbtns { display:grid; grid-template-columns:1.7fr 1fr 1fr 1fr; gap:5px; }
+.sc-console button { background:rgba(var(--sc-accent-rgb),.12); color:#fff; border:1px solid rgba(var(--sc-accent-rgb),.4); border-radius:7px; padding:6px 6px; font-size:.78rem; cursor:pointer; font-family:inherit; white-space:nowrap; }
+.sc-console button:hover { background:rgba(var(--sc-accent-rgb),.24); }
+.sc-console button:focus-visible { outline:2px solid var(--sc-accent); outline-offset:1px; }
+.sc-console button.sc-primary { background:rgba(var(--sc-amber-rgb),.22); border-color:rgba(var(--sc-amber-rgb),.7); font-weight:600; font-size:.84rem; }
+.sc-console button.sc-primary:hover { background:rgba(var(--sc-amber-rgb),.34); }
+.sc-row { display:grid; grid-template-columns:1fr 1fr; gap:5px 7px; align-items:end; }
+.sc-row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px 6px; align-items:end; }
+.sc-row4 { display:grid; grid-template-columns:62px 1fr 1fr 1fr; gap:5px; align-items:end; }
+.sc-row label, .sc-row3 label, .sc-row4 label, .sc-field label { color:var(--sc-text-dim); font-size:.7rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sc-field { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.sc-console select, .sc-console input[type=number], .sc-console input[type=text] { width:100%; min-width:0; background:#0b1030; color:#e6edff; border:1px solid rgba(var(--sc-accent-rgb),.25); border-radius:6px; padding:4px 6px; font-size:.78rem; font-family:inherit; }
 .sc-console input[type=range] { width:100%; accent-color:var(--sc-accent); }
 .sc-console input:disabled { opacity:.45; }
-.sc-check { display:flex; align-items:center; gap:7px; color:#c2cbdc; font-size:.8rem; }
-.sc-check input { accent-color:var(--sc-accent); }
-.sc-buttons { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
-.sc-buttons button { flex:1 1 auto; background:rgba(var(--sc-accent-rgb),.12); color:#fff; border:1px solid rgba(var(--sc-accent-rgb),.4); border-radius:7px; padding:8px 10px; font-size:.84rem; cursor:pointer; font-family:inherit; }
-.sc-buttons button:hover { background:rgba(var(--sc-accent-rgb),.22); }
-.sc-buttons button.sc-primary { background:rgba(var(--sc-amber-rgb),.18); border-color:rgba(var(--sc-amber-rgb),.6); }
-.sc-buttons-sm button { padding:6px 8px; font-size:.78rem; }
-.sc-body-block { border:1px solid rgba(var(--sc-accent-rgb),.12); border-radius:8px; padding:8px; }
-.sc-body-block.sc-b { border-color:rgba(var(--sc-magenta),.25); }
-.sc-hint { font-size:.72rem; color:var(--sc-text-dim); line-height:1.4; }
+.sc-check { display:flex; align-items:center; gap:6px; color:#c2cbdc; font-size:.76rem; line-height:1.25; }
+.sc-check input { accent-color:var(--sc-accent); flex:0 0 auto; }
+.sc-checks { display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; }
+.sc-pick { padding:8px 10px 4px; display:flex; flex-direction:column; gap:6px; }
+/* Collapsible sections: everything below the run bar folds. */
+.sc-sec { border-top:1px solid rgba(var(--sc-accent-rgb),.10); }
+.sc-sec > summary { list-style:none; cursor:pointer; padding:8px 10px; display:flex; align-items:center; gap:8px; font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--sc-accent); user-select:none; }
+.sc-sec > summary::-webkit-details-marker { display:none; }
+.sc-sec > summary::before { content:''; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(-45deg); transition:transform .15s; margin-right:2px; }
+.sc-sec[open] > summary::before { transform:rotate(45deg); }
+.sc-sec > summary small { margin-left:auto; text-transform:none; letter-spacing:0; color:var(--sc-text-dim); font-size:.68rem; }
+.sc-sec > summary:hover { background:rgba(var(--sc-accent-rgb),.06); }
+.sc-sec-body { padding:2px 10px 10px; display:flex; flex-direction:column; gap:7px; }
+.sc-views { display:grid; grid-template-columns:repeat(4, 1fr); gap:4px; }
+.sc-body-block { border-left:2px solid rgba(var(--sc-accent-rgb),.55); padding:2px 0 2px 8px; display:flex; flex-direction:column; gap:5px; }
+.sc-body-block.sc-b { border-left-color:rgba(240,140,255,.6); }
+.sc-body-head { display:grid; grid-template-columns:auto 1fr; gap:6px; align-items:center; }
+.sc-body-head h3 { color:var(--sc-accent); }
+.sc-body-block.sc-b .sc-body-head h3 { color:var(--sc-magenta); }
+.sc-hint { font-size:.68rem; color:var(--sc-text-dim); line-height:1.4; }
+.sc-console > .sc-hint { padding:6px 10px 10px; border-top:1px solid rgba(var(--sc-accent-rgb),.10); }
+kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--sc-accent-rgb),.3); border-radius:3px; padding:0 3px; color:#dfe8ff; }
 
 /* ── Catalogue rail ───────────────────────────────────────────────────── */
 .sc-catalog-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin:8px 4px 8px; }
@@ -176,37 +202,10 @@ body {
 <header class="sc-wrap sc-hero">
     <h1>Star Collider Lab</h1>
     <span class="sc-badge">Experimental</span>
-    <span class="sc-sub">Neutron stars, black holes and white dwarfs from the catalogue — built on a nuclear equation of state, spiralled in at 3.5PN, smashed in a smoothed-particle engine, read out as a remnant, an ejecta budget and a kilonova.</span>
+    <span class="sc-sub">Real neutron stars, black holes and white dwarfs — built on a nuclear EOS, spiralled in at 3.5PN, smashed in a WASM SPH engine.</span>
 </header>
 
 <main id="main-content" class="sc-wrap">
-
-<p class="sc-lede">
-    A neutron-star merger is the one experiment that touches every scale of physics at once: the
-    nuclear equation of state sets the radius, the radius sets how the star deforms in its
-    partner's tide, the tide is written into the last gravitational-wave cycles, the total mass
-    decides whether the remnant survives, and what is thrown out decides what the telescopes see
-    a day later. <strong>This lab runs that whole chain, and lets you change any link in it.</strong>
-    The objects are real. The chain is the field's own: TOV structure, post-Newtonian inspiral,
-    numerical-relativity-calibrated fits for the aftermath, and a Newtonian SPH engine with
-    radiation reaction for the merger itself.
-</p>
-
-<div class="sc-provenance">
-    <span class="sc-prov-mark">MEASURED · MODELLED</span>
-    <div>
-        <strong>What is measured and what is modelled.</strong>
-        Every object's mass, spin, field and distance is a published measurement with its source on the
-        card; where a mass has never been measured the card says <em>assumed</em>. Radii marked
-        <em>measured</em> are NICER's; every other radius, every tidal deformability and every fate
-        is computed here from the equation of state you pick — eight piecewise-polytrope fits to
-        tabulated nuclear EOSs. The merger engine is Newtonian smoothed-particle hydrodynamics
-        with a bulk 2.5PN radiation-reaction driver — the Rasio &amp; Shapiro / Rosswog class of
-        simulation, not general-relativistic hydrodynamics — and its numbers are labelled
-        <em>SPH</em> wherever they sit next to a calibrated fit. Nothing on this page is fetched
-        from the network.
-    </div>
-</div>
 
 <!-- ── The collider ─────────────────────────────────────────────────────── -->
 <section class="sc-collider" aria-label="Collider stage and console">
@@ -234,101 +233,151 @@ body {
             <div>scale <span data-sc="stageScale">—</span></div>
             <div>camera <span data-sc="stageFrame">—</span></div>
             <div>colour <span data-sc="stageColour">—</span></div>
+            <div>render <span data-sc="stageDetail">—</span></div>
         </div>
     </div>
 
     <aside class="sc-console" aria-label="Collider console">
-        <h2>Collider console</h2>
-
-        <div class="sc-field">
-            <label for="sc-pair">Real pair</label>
-            <select id="sc-pair" data-sc-control="pair"></select>
-        </div>
-
-        <div class="sc-body-block">
-            <h3>Body A</h3>
-            <div class="sc-field"><label for="sc-bodyA">Object</label><select id="sc-bodyA" data-sc-control="bodyA"></select></div>
-            <div class="sc-row">
-                <div class="sc-field"><label for="sc-kindA">Kind</label>
-                    <select id="sc-kindA" data-sc-control="kindA"><option value="ns">Neutron star</option><option value="bh">Black hole</option><option value="wd">White dwarf</option></select></div>
-                <div class="sc-field"><label for="sc-massA">Mass (M☉)</label><input id="sc-massA" data-sc-control="massA" type="number" step="0.01" min="0.1" max="500"></div>
-                <div class="sc-field"><label for="sc-radiusA">Radius (km)</label><input id="sc-radiusA" data-sc-control="radiusA" type="number" step="0.1" min="1"></div>
-                <div class="sc-field"><label for="sc-chiA">Spin χ (aligned)</label><input id="sc-chiA" data-sc-control="chiA" type="number" step="0.01" min="-0.99" max="0.99"></div>
+        <div class="sc-runbar" role="group" aria-label="Build and run">
+            <div class="sc-runbtns">
+                <button type="button" class="sc-primary" data-sc-control="run" title="Build both stars on the EOS, relax them, and start the SPH merger">▶ Build &amp; run</button>
+                <button type="button" data-sc-control="pause" title="Pause (space)">Pause</button>
+                <button type="button" data-sc-control="resume" title="Resume (space)">Resume</button>
+                <button type="button" data-sc-control="reset" title="Stop and clear the run">Reset</button>
             </div>
-        </div>
-        <div class="sc-body-block sc-b">
-            <h3>Body B</h3>
-            <div class="sc-field"><label for="sc-bodyB">Object</label><select id="sc-bodyB" data-sc-control="bodyB"></select></div>
-            <div class="sc-row">
-                <div class="sc-field"><label for="sc-kindB">Kind</label>
-                    <select id="sc-kindB" data-sc-control="kindB"><option value="ns">Neutron star</option><option value="bh">Black hole</option><option value="wd">White dwarf</option></select></div>
-                <div class="sc-field"><label for="sc-massB">Mass (M☉)</label><input id="sc-massB" data-sc-control="massB" type="number" step="0.01" min="0.1" max="500"></div>
-                <div class="sc-field"><label for="sc-radiusB">Radius (km)</label><input id="sc-radiusB" data-sc-control="radiusB" type="number" step="0.1" min="1"></div>
-                <div class="sc-field"><label for="sc-chiB">Spin χ (aligned)</label><input id="sc-chiB" data-sc-control="chiB" type="number" step="0.01" min="-0.99" max="0.99"></div>
+            <div class="sc-row3">
+                <div class="sc-field"><label for="sc-particles" title="Particles per star — direct-summation gravity is O(N²)">Resolution</label><select id="sc-particles" data-sc-control="particles"></select></div>
+                <div class="sc-field"><label for="sc-warp">Pace</label><select id="sc-warp" data-sc-control="warp"></select></div>
+                <div class="sc-field"><label for="sc-detail" title="Render detail: sub-sprites sampled from each particle's smoothing kernel, HDR + bloom">Graphics</label>
+                    <select id="sc-detail" data-sc-control="detail">
+                        <option value="auto">auto</option><option value="standard">standard</option><option value="high">high · HDR</option><option value="ultra">ultra · HDR</option>
+                    </select></div>
             </div>
         </div>
 
-        <div class="sc-field">
-            <label for="sc-eos">Equation of state (neutron stars)</label>
-            <select id="sc-eos" data-sc-control="eos"></select>
+        <div class="sc-pick">
+            <div class="sc-row">
+                <div class="sc-field"><label for="sc-pair">Real pair</label><select id="sc-pair" data-sc-control="pair"></select></div>
+                <div class="sc-field"><label for="sc-eos">Equation of state</label><select id="sc-eos" data-sc-control="eos" title="Neutron-star equation of state"></select></div>
+            </div>
         </div>
 
-        <h3>Orbit</h3>
-        <div class="sc-row">
-            <div class="sc-field"><label for="sc-sep">Initial separation (km)</label><input id="sc-sep" data-sc-control="separation" type="number" step="1" min="1"></div>
-            <div class="sc-field"><label for="sc-dist">Distance to Earth (Mpc)</label><input id="sc-dist" data-sc-control="distance" type="number" step="1" min="0.001"></div>
-        </div>
-        <div class="sc-field">
-            <label for="sc-ecc">Eccentricity at apoapsis · <span data-sc="eccentricityOut">0.00</span></label>
-            <input id="sc-ecc" data-sc-control="eccentricity" type="range" min="0" max="0.6" step="0.01" value="0">
-        </div>
-        <label class="sc-check"><input type="checkbox" data-sc-control="corotate"> tidally locked stars (corotating)</label>
+        <details class="sc-sec" open>
+            <summary>View <small>camera · colour</small></summary>
+            <div class="sc-sec-body">
+                <div class="sc-views">
+                    <button type="button" data-sc-control="viewTop" title="key 1 — face-on to the orbital plane">Top</button>
+                    <button type="button" data-sc-control="viewEdge" title="key 2 — in the orbital plane">Edge</button>
+                    <button type="button" data-sc-control="viewOblique" title="key 3">Oblique</button>
+                    <button type="button" data-sc-control="frameSystem" title="key F — fit the particle cloud">Frame</button>
+                </div>
+                <div class="sc-row">
+                    <div class="sc-field"><label for="sc-follow">Follow</label>
+                        <select id="sc-follow" data-sc-control="follow">
+                            <option value="system">barycentre</option><option value="A">core A</option><option value="B">core B</option><option value="none">fixed origin</option>
+                        </select></div>
+                    <div class="sc-field"><label for="sc-colour">Colour by</label>
+                        <select id="sc-colour" data-sc-control="colorMode">
+                            <option value="density">density</option><option value="heat">shock heating</option><option value="body">body A / B</option><option value="bound">bound / ejecta</option>
+                        </select></div>
+                </div>
+                <div class="sc-field">
+                    <label for="sc-psize">Kernel size · <span data-sc="pointScaleOut">1.0×</span></label>
+                    <input id="sc-psize" data-sc-control="pointScale" type="range" min="0.4" max="3" step="0.1" value="1">
+                </div>
+                <div class="sc-checks">
+                    <label class="sc-check" title="key 4 — the cores held on the x-axis"><input type="checkbox" data-sc-control="frameCorotating"> corotating frame</label>
+                    <label class="sc-check" title="key T"><input type="checkbox" data-sc-control="trails" checked> core trails</label>
+                    <label class="sc-check"><input type="checkbox" data-sc-control="autorotate"> auto-rotate</label>
+                </div>
+            </div>
+        </details>
 
-        <h3>Engine</h3>
-        <div class="sc-row">
-            <div class="sc-field"><label for="sc-particles">Resolution</label><select id="sc-particles" data-sc-control="particles"></select></div>
-            <div class="sc-field"><label for="sc-warp">Pace</label><select id="sc-warp" data-sc-control="warp"></select></div>
-            <div class="sc-field"><label for="sc-visc">Artificial viscosity α</label><input id="sc-visc" data-sc-control="viscosity" type="number" step="0.1" min="0" max="3" value="1"></div>
-            <div class="sc-field"><label for="sc-gth">Thermal Γ<sub>th</sub></label><input id="sc-gth" data-sc-control="gammaTh" type="number" step="0.05" min="1.1" max="2.2" value="1.75"></div>
-        </div>
-        <label class="sc-check"><input type="checkbox" data-sc-control="pn25" checked> 2.5PN radiation reaction (the inspiral driver)</label>
-        <label class="sc-check"><input type="checkbox" data-sc-control="pn1"> 1PN conservative term <span class="sc-hint">(experimental — stalls at contact, fine on wide orbits)</span></label>
-        <label class="sc-check"><input type="checkbox" data-sc-control="autorotate"> auto-rotate the stage</label>
+        <details class="sc-sec">
+            <summary>Bodies <small>object · kind · M · R · χ</small></summary>
+            <div class="sc-sec-body">
+                <div class="sc-body-block">
+                    <div class="sc-body-head"><h3>A</h3><select id="sc-bodyA" data-sc-control="bodyA" aria-label="Body A object"></select></div>
+                    <div class="sc-row4">
+                        <div class="sc-field"><label for="sc-kindA">Kind</label>
+                            <select id="sc-kindA" data-sc-control="kindA"><option value="ns">NS</option><option value="bh">BH</option><option value="wd">WD</option></select></div>
+                        <div class="sc-field"><label for="sc-massA">M (M☉)</label><input id="sc-massA" data-sc-control="massA" type="number" step="0.01" min="0.1" max="500"></div>
+                        <div class="sc-field"><label for="sc-radiusA">R (km)</label><input id="sc-radiusA" data-sc-control="radiusA" type="number" step="0.1" min="1"></div>
+                        <div class="sc-field"><label for="sc-chiA" title="Aligned dimensionless spin">χ</label><input id="sc-chiA" data-sc-control="chiA" type="number" step="0.01" min="-0.99" max="0.99"></div>
+                    </div>
+                </div>
+                <div class="sc-body-block sc-b">
+                    <div class="sc-body-head"><h3>B</h3><select id="sc-bodyB" data-sc-control="bodyB" aria-label="Body B object"></select></div>
+                    <div class="sc-row4">
+                        <div class="sc-field"><label for="sc-kindB">Kind</label>
+                            <select id="sc-kindB" data-sc-control="kindB"><option value="ns">NS</option><option value="bh">BH</option><option value="wd">WD</option></select></div>
+                        <div class="sc-field"><label for="sc-massB">M (M☉)</label><input id="sc-massB" data-sc-control="massB" type="number" step="0.01" min="0.1" max="500"></div>
+                        <div class="sc-field"><label for="sc-radiusB">R (km)</label><input id="sc-radiusB" data-sc-control="radiusB" type="number" step="0.1" min="1"></div>
+                        <div class="sc-field"><label for="sc-chiB" title="Aligned dimensionless spin">χ</label><input id="sc-chiB" data-sc-control="chiB" type="number" step="0.01" min="-0.99" max="0.99"></div>
+                    </div>
+                </div>
+                <p class="sc-hint">NS neutron star · BH black hole · WD white dwarf. Or load any object from the catalogue below the stage.</p>
+            </div>
+        </details>
 
-        <h3>Camera &amp; analysis view</h3>
-        <div class="sc-buttons sc-buttons-sm">
-            <button type="button" data-sc-control="viewTop" title="key 1 — face-on to the orbital plane">Top</button>
-            <button type="button" data-sc-control="viewEdge" title="key 2 — in the orbital plane">Edge-on</button>
-            <button type="button" data-sc-control="viewOblique" title="key 3">Oblique</button>
-            <button type="button" data-sc-control="frameSystem" title="key F — fit the particle cloud">Frame</button>
-        </div>
-        <div class="sc-row">
-            <div class="sc-field"><label for="sc-follow">Follow</label>
-                <select id="sc-follow" data-sc-control="follow">
-                    <option value="system">system barycentre</option><option value="A">core A</option><option value="B">core B</option><option value="none">fixed origin</option>
-                </select></div>
-            <div class="sc-field"><label for="sc-colour">Colour by</label>
-                <select id="sc-colour" data-sc-control="colorMode">
-                    <option value="density">density</option><option value="heat">shock heating</option><option value="body">body A / B</option><option value="bound">bound / ejecta</option>
-                </select></div>
-        </div>
-        <div class="sc-field">
-            <label for="sc-psize">Point size · <span data-sc="pointScaleOut">1.0×</span></label>
-            <input id="sc-psize" data-sc-control="pointScale" type="range" min="0.4" max="3" step="0.1" value="1">
-        </div>
-        <label class="sc-check"><input type="checkbox" data-sc-control="frameCorotating"> corotating frame — the cores held on the x-axis <span class="sc-hint">(key 4)</span></label>
-        <label class="sc-check"><input type="checkbox" data-sc-control="trails" checked> core trails <span class="sc-hint">(key T)</span></label>
-        <p class="sc-hint">Keys while the pointer is over the stage: 1 / 2 / 3 views · F frame · S / A / B / 0 follow · 4 corotating · C colour · T trails · R reset · space pause. Follow moves the rig, never your orbit or zoom; any drag or wheel cancels a flight.</p>
+        <details class="sc-sec">
+            <summary>Orbit <small>separation · e · spin-up</small></summary>
+            <div class="sc-sec-body">
+                <div class="sc-row">
+                    <div class="sc-field"><label for="sc-sep">Separation (km)</label><input id="sc-sep" data-sc-control="separation" type="number" step="1" min="1"></div>
+                    <div class="sc-field"><label for="sc-dist">Distance (Mpc)</label><input id="sc-dist" data-sc-control="distance" type="number" step="1" min="0.001"></div>
+                </div>
+                <div class="sc-field">
+                    <label for="sc-ecc">Eccentricity at apoapsis · <span data-sc="eccentricityOut">0.00</span></label>
+                    <input id="sc-ecc" data-sc-control="eccentricity" type="range" min="0" max="0.6" step="0.01" value="0">
+                </div>
+                <label class="sc-check"><input type="checkbox" data-sc-control="corotate"> tidally locked stars (corotating)</label>
+            </div>
+        </details>
 
-        <div class="sc-buttons">
-            <button type="button" class="sc-primary" data-sc-control="run">Build &amp; run</button>
-            <button type="button" data-sc-control="pause">Pause</button>
-            <button type="button" data-sc-control="resume">Resume</button>
-            <button type="button" data-sc-control="reset">Reset</button>
-        </div>
-        <p class="sc-hint">Direct-summation gravity is O(N²): 600 particles per star runs at a few tens of steps per second on a laptop; 2 500 is a coffee break. The relaxation pass before each run is what makes the stars start in equilibrium.</p>
+        <details class="sc-sec">
+            <summary>Physics <small>viscosity · Γ<sub>th</sub> · PN</small></summary>
+            <div class="sc-sec-body">
+                <div class="sc-row">
+                    <div class="sc-field"><label for="sc-visc">Artificial viscosity α</label><input id="sc-visc" data-sc-control="viscosity" type="number" step="0.1" min="0" max="3" value="1"></div>
+                    <div class="sc-field"><label for="sc-gth">Thermal Γ<sub>th</sub></label><input id="sc-gth" data-sc-control="gammaTh" type="number" step="0.05" min="1.1" max="2.2" value="1.75"></div>
+                </div>
+                <label class="sc-check"><input type="checkbox" data-sc-control="pn25" checked> 2.5PN radiation reaction (the inspiral driver)</label>
+                <label class="sc-check"><input type="checkbox" data-sc-control="pn1"> 1PN conservative term <span class="sc-hint">(experimental — stalls at contact)</span></label>
+                <p class="sc-hint">Direct-summation gravity is O(N²): 600 particles per star runs at a few tens of steps per second on a laptop; 2 500 is a coffee break. The relaxation pass before each run is what makes the stars start in equilibrium.</p>
+            </div>
+        </details>
+
+        <p class="sc-hint">Over the stage: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> views · <kbd>F</kbd> frame · <kbd>S</kbd><kbd>A</kbd><kbd>B</kbd><kbd>0</kbd> follow · <kbd>4</kbd> corotating · <kbd>C</kbd> colour · <kbd>T</kbd> trails · <kbd>R</kbd> reset · <kbd>space</kbd> pause. Follow moves the rig, never your orbit or zoom; any drag or wheel cancels a flight.</p>
     </aside>
 </section>
+
+<p class="sc-lede">
+    A neutron-star merger is the one experiment that touches every scale of physics at once: the
+    nuclear equation of state sets the radius, the radius sets how the star deforms in its
+    partner's tide, the tide is written into the last gravitational-wave cycles, the total mass
+    decides whether the remnant survives, and what is thrown out decides what the telescopes see
+    a day later. <strong>This lab runs that whole chain, and lets you change any link in it.</strong>
+    The objects are real. The chain is the field's own: TOV structure, post-Newtonian inspiral,
+    numerical-relativity-calibrated fits for the aftermath, and a Newtonian SPH engine with
+    radiation reaction for the merger itself.
+</p>
+
+<div class="sc-provenance">
+    <span class="sc-prov-mark">MEASURED · MODELLED</span>
+    <div>
+        <strong>What is measured and what is modelled.</strong>
+        Every object's mass, spin, field and distance is a published measurement with its source on the
+        card; where a mass has never been measured the card says <em>assumed</em>. Radii marked
+        <em>measured</em> are NICER's; every other radius, every tidal deformability and every fate
+        is computed here from the equation of state you pick — eight piecewise-polytrope fits to
+        tabulated nuclear EOSs. The merger engine is Newtonian smoothed-particle hydrodynamics
+        with a bulk 2.5PN radiation-reaction driver — the Rasio &amp; Shapiro / Rosswog class of
+        simulation, not general-relativistic hydrodynamics — and its numbers are labelled
+        <em>SPH</em> wherever they sit next to a calibrated fit. Nothing on this page is fetched
+        from the network.
+    </div>
+</div>
 
 <!-- ── Catalogue ────────────────────────────────────────────────────────── -->
 <div class="sc-catalog-head">
