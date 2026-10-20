@@ -68,6 +68,20 @@
  * direct path — and the AUTO choice on a software rasteriser, where a bloom
  * chain costs whole frames); 'high' = 10 children + HDR + bloom (auto on a
  * GPU); 'ultra' = 20 children. Children are capped at CHILD_BUDGET in total.
+ *
+ * BEHAVIOUR (`setInteractions`): the worker runs interactions.js on the
+ * kernel's raw state and ships, per KERNEL index, the velocity, the kernel's
+ * real h, ∇·v, A–B mixing and the viscous heating rate, plus the A–B kernel
+ * pairs. Four colour modes read it (velocity relative to the barycentre,
+ * compression, mixing, live shock heating — each normalised by an EASED
+ * robust percentile so a single frame cannot flash the palette), the splats
+ * switch to the real h, and three line layers draw it: FLOW STREAKS (each
+ * particle's path over 4 % of an orbit; in the corotating frame the motion
+ * relative to the rotating axes, Ω fitted from the gas itself), PATHLINE
+ * TRACERS (≤ 240 particles, sampled every 1 % of an orbit of SIM time,
+ * stored un-rotated by the corotating angle at record time so they draw as
+ * corotating-frame paths) and A–B CONTACTS (gold = approaching, i.e. being
+ * viscously heated; violet = overlapping). None of it feeds back.
  */
 
 import * as THREE from 'three';
@@ -136,6 +150,13 @@ export const COLOR_MODES = Object.freeze({
     heat:    { id: 1, label: 'shock heating u (blue → white → red)' },
     body:    { id: 2, label: 'body membership · A cyan, B magenta' },
     bound:   { id: 3, label: 'gravitationally bound (dim) vs unbound ejecta (green)' },
+    // The four below read the interaction diagnostics (interactions.js, the
+    // kernel's own pair rules); until the first aux arrives they fall back
+    // to density.
+    velocity:    { id: 4, label: 'velocity vs the barycentre · infall blue, orbit white, outflow orange', aux: true },
+    compression: { id: 5, label: '∇·v · compressing orange-red, expanding blue', aux: true },
+    mixing:      { id: 6, label: 'interpenetration · own-star colour → gold where A and B gas share kernels', aux: true },
+    shocking:    { id: 7, label: 'viscous heating RATE now · where shocks are working', aux: true },
 });
 export const FOLLOW_MODES = Object.freeze(['system', 'A', 'B', 'none']);
 
@@ -149,6 +170,14 @@ const POINT_VS = /* glsl */`
     attribute float iHeat;
     attribute float iFlag;
     attribute float iSeed;
+    attribute vec3 iVel;          // kernel velocity, scene axes, code units
+    attribute vec4 iAux;          // h (scene units), div v, mixing, viscous heating rate
+    uniform float uHasAux;
+    uniform vec3 uCm;             // barycentre (scene-local) and its velocity
+    uniform vec3 uVcm;
+    uniform float uVelScale;
+    uniform float uDivScale;
+    uniform float uShockScale;
     uniform float uSize;          // h at the reference (mean) density, scene units
     uniform float uPointScale;
     uniform float uDensMax;
@@ -164,6 +193,11 @@ const POINT_VS = /* glsl */`
     varying float vFlag;
     varying float vW;
     varying float vCore;
+    varying float vVr;
+    varying float vSpd;
+    varying float vDiv;
+    varying float vMix;
+    varying float vShock;
     vec3 hash3(float n) {
         return fract(sin(vec3(n * 0.1031 + 1.0, n * 0.1030 + 7.0, n * 0.0973 + 13.0) * vec3(127.1, 311.7, 74.7)) * 43758.5453);
     }
@@ -174,7 +208,18 @@ const POINT_VS = /* glsl */`
         vFlag = iFlag;
         // h = h_mean * (rho_mean / rho)^(1/3): the kernel's own adaptive length.
         float hs = clamp(pow(10.0, (uDensMax - uDensRef - iDens) / 3.0), 0.6, 7.0);
+        // Once the interaction diagnostics arrive, the kernel's OWN h replaces
+        // the estimate (the frame carries no h; the aux channel does).
+        if (uHasAux > 0.5 && iAux.x > 0.0) hs = clamp(iAux.x / uSize, 0.4, 9.0);
         float h = uSize * hs;
+        vec3 vrel = iVel - uVcm;
+        vec3 rdir = iPos - uCm;
+        float rl = length(rdir);
+        vSpd = length(vrel) * uVelScale;
+        vVr = rl > 1e-6 ? dot(vrel, rdir / rl) * uVelScale : 0.0;
+        vDiv = iAux.y * uDivScale;
+        vMix = iAux.z;
+        vShock = iAux.w * uShockScale;
         // Shoemake: a uniform random rotation per particle, stable across frames.
         vec3 u = hash3(iSeed);
         float s1 = sqrt(1.0 - u.x), s2 = sqrt(u.x);
@@ -195,12 +240,18 @@ const POINT_VS = /* glsl */`
 const POINT_FS = /* glsl */`
     precision highp float;
     uniform int uMode;
+    uniform float uHasAux;
     uniform float uLinear;        // 1 = decode sRGB picks to linear (HDR path)
     varying float vDens;
     varying float vHeat;
     varying float vFlag;
     varying float vW;
     varying float vCore;
+    varying float vVr;
+    varying float vSpd;
+    varying float vDiv;
+    varying float vMix;
+    varying float vShock;
     vec3 ramp(float t) {
         vec3 c0 = vec3(0.10, 0.06, 0.42);
         vec3 c1 = vec3(0.06, 0.38, 1.00);
@@ -229,15 +280,37 @@ const POINT_FS = /* glsl */`
         float unbound = step(2.0, vFlag);      // 1 if ejecta
         vec3 col;
         float lum;
-        if (uMode == 1) {
+        // the interaction modes fall back to density until the first aux frame
+        int mode = (uHasAux < 0.5 && uMode >= 4) ? 0 : uMode;
+        if (mode == 1) {
             col = heatRamp(vHeat);
             lum = 0.25 + 0.75 * max(vHeat, 0.35 * vDens);
-        } else if (uMode == 2) {
+        } else if (mode == 2) {
             col = mix(vec3(0.30, 0.85, 1.00), vec3(0.95, 0.45, 1.00), body);
             lum = 0.22 + 0.78 * vDens;
-        } else if (uMode == 3) {
+        } else if (mode == 3) {
             col = mix(vec3(0.35, 0.42, 0.70), vec3(0.45, 1.00, 0.60), unbound);
             lum = mix(0.12 + 0.55 * vDens, 1.0, unbound);
+        } else if (mode == 4) {
+            // direction cosine of the motion relative to the barycentre:
+            // -1 infall (blue), 0 orbital (white), +1 outflow (orange)
+            float c = clamp(vVr / max(vSpd, 1e-4), -1.0, 1.0);
+            vec3 tang = vec3(0.86, 0.90, 1.00);
+            col = c < 0.0 ? mix(tang, vec3(0.20, 0.50, 1.00), -c) : mix(tang, vec3(1.00, 0.52, 0.16), c);
+            lum = 0.10 + 0.90 * clamp(vSpd, 0.0, 1.2);
+        } else if (mode == 5) {
+            float dv = clamp(vDiv, -1.0, 1.0);
+            col = dv < 0.0 ? mix(vec3(0.55, 0.60, 0.75), vec3(1.00, 0.36, 0.12), -dv) : mix(vec3(0.55, 0.60, 0.75), vec3(0.25, 0.55, 1.00), dv);
+            lum = max(0.08 + 0.22 * vDens, pow(abs(dv), 0.7));
+        } else if (mode == 6) {
+            float m = clamp(vMix * 2.0, 0.0, 1.0);
+            vec3 own = mix(vec3(0.30, 0.85, 1.00), vec3(0.95, 0.45, 1.00), body);
+            col = mix(own, vec3(1.00, 0.86, 0.45), m);
+            lum = 0.14 + 0.45 * vDens + 0.75 * m;
+        } else if (mode == 7) {
+            float sh = clamp(sqrt(max(vShock, 0.0)), 0.0, 1.0);
+            col = heatRamp(0.25 + 0.75 * sh);
+            lum = 0.05 + 0.10 * vDens + sh;
         } else {
             // the kernel's inner children run a touch hotter than its rim
             // gamma 2 on the ramp: the bulk of a star reads blue → cyan and only
@@ -336,7 +409,7 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     renderer.domElement.setAttribute('tabindex', '0');
-    renderer.domElement.setAttribute('aria-label', '3D merger stage — drag to orbit, wheel to zoom; keys 1/2/3 views, F frame, S/A/B follow, 4 corotating, C colour, T trails, R reset');
+    renderer.domElement.setAttribute('aria-label', '3D merger stage — drag to orbit, wheel to zoom; keys 1/2/3 views, F frame, S/A/B follow, 4 corotating, C colour, T trails, V streaks, P pathlines, X contacts, R reset');
     renderer.domElement.style.outline = 'none';
 
     const scene = new THREE.Scene();
@@ -410,12 +483,16 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
     const heat = new Float32Array(MAX_POINTS);
     const flag = new Float32Array(MAX_POINTS);
     const seedA = new Float32Array(MAX_POINTS);
+    const velA = new Float32Array(MAX_POINTS * 3);
+    const auxA = new Float32Array(MAX_POINTS * 4);
     const inst = {
         iPos: new THREE.InstancedBufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage),
         iDens: new THREE.InstancedBufferAttribute(dens, 1).setUsage(THREE.DynamicDrawUsage),
         iHeat: new THREE.InstancedBufferAttribute(heat, 1).setUsage(THREE.DynamicDrawUsage),
         iFlag: new THREE.InstancedBufferAttribute(flag, 1).setUsage(THREE.DynamicDrawUsage),
         iSeed: new THREE.InstancedBufferAttribute(seedA, 1).setUsage(THREE.DynamicDrawUsage),
+        iVel: new THREE.InstancedBufferAttribute(velA, 3).setUsage(THREE.DynamicDrawUsage),
+        iAux: new THREE.InstancedBufferAttribute(auxA, 4).setUsage(THREE.DynamicDrawUsage),
     };
     function buildParticleGeometry(K) {
         const g = new THREE.InstancedBufferGeometry();
@@ -434,6 +511,8 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             uDensRef: { value: 0.5 }, uHeatScale: { value: 20 }, uMode: { value: 0 },
             uViewportH: { value: 720 }, uSpread: { value: 0.65 }, uChildSize: { value: 1.1 }, uGain: { value: 0.3 },
             uLinear: { value: 0 },
+            uHasAux: { value: 0 }, uCm: { value: new THREE.Vector3() }, uVcm: { value: new THREE.Vector3() },
+            uVelScale: { value: 1 }, uDivScale: { value: 1 }, uShockScale: { value: 1 },
         },
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
@@ -503,6 +582,48 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
     const bary = new THREE.Mesh(new THREE.OctahedronGeometry(0.06), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 }));
     bary.visible = false; world.add(bary);
 
+    // ── Behaviour layers: flow streaks, pathline tracers, A–B contacts ──────
+    // All three read the interaction channel (`setInteractions`): velocities
+    // and pairs are the kernel's, positions the latest frame's. Lines are
+    // additive and write no depth, like the gas they annotate.
+    const LINE_VS = /* glsl */`
+        attribute vec4 aCol;
+        uniform float uLinear;
+        varying vec4 vCol;
+        void main() {
+            vCol = aCol;
+            if (uLinear > 0.5) vCol.rgb = pow(vCol.rgb, vec3(2.2));
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `;
+    const LINE_FS = /* glsl */`
+        precision highp float;
+        varying vec4 vCol;
+        void main() { gl_FragColor = vCol; }
+    `;
+    function makeLineLayer(maxVerts) {
+        const g = new THREE.BufferGeometry();
+        const p = new Float32Array(maxVerts * 3), c = new Float32Array(maxVerts * 4);
+        g.setAttribute('position', new THREE.BufferAttribute(p, 3).setUsage(THREE.DynamicDrawUsage));
+        g.setAttribute('aCol', new THREE.BufferAttribute(c, 4).setUsage(THREE.DynamicDrawUsage));
+        g.setDrawRange(0, 0);
+        const m = new THREE.ShaderMaterial({ vertexShader: LINE_VS, fragmentShader: LINE_FS, uniforms: { uLinear: linearUniform },
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+        const l = new THREE.LineSegments(g, m);
+        l.frustumCulled = false; l.visible = false;
+        world.add(l);
+        return { line: l, p, c, max: maxVerts };
+    }
+    const streaks = makeLineLayer(MAX_POINTS * 2);
+    const TRACER_MAX = 240, TRACER_LEN = 48;
+    const pathlines = makeLineLayer(TRACER_MAX * (TRACER_LEN - 1) * 2);
+    const LINK_MAX = 3000;
+    const contacts = makeLineLayer(LINK_MAX * 2);
+    const BODY_RGB = [[0.30, 0.85, 1.00], [0.95, 0.45, 1.00]];
+    const tracer = { ids: [], hist: null, head: 0, count: 0, lastT: -Infinity, body: [] };
+    const ia = { aux: null, links: null, n: 0, summary: null, cm: [0, 0, 0], vcm: [0, 0, 0] };
+    const scaleEma = { vel: 0, div: 0, shock: 0 };
+
     // Pre-run preview of the configured pair
     const preview = new THREE.Group();
     world.add(preview);
@@ -540,6 +661,7 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         running: true, visible: true, hovering: false,
         detail: 'standard', hdr: false, children: DETAIL_LEVELS.standard.children,
         nBudget: 1200, h0: 0.12, gainBase: 0.3,
+        streaksOn: true, pathlinesOn: true, contactsOn: true, streakTime: 0, tracerDt: 0,
     };
     function sizeComposer(w, h) {
         if (!composer) return;
@@ -632,6 +754,179 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         return Math.max(radiusScene, 0.05) / Math.sin(half) * 1.12;
     }
 
+    // ── Behaviour helpers ───────────────────────────────────────────────────
+    /** Per-instance velocity + aux, read by KERNEL index from the held channel. */
+    function fillAuxInstances(cnt, stride, frame) {
+        const cps = st.codePerScene, a = ia.aux, as = ia.stride || 7;
+        let k = 0;
+        for (let i = 0; i < cnt; i++) {
+            if (!Number.isFinite(frame[stride * i])) continue;
+            if (a && i < ia.n) {
+                const o = as * i;
+                velA[3 * k] = a[o] / cps; velA[3 * k + 1] = a[o + 2] / cps; velA[3 * k + 2] = -a[o + 1] / cps;
+                auxA[4 * k] = a[o + 3] / cps; auxA[4 * k + 1] = a[o + 4]; auxA[4 * k + 2] = a[o + 5]; auxA[4 * k + 3] = a[o + 6];
+            } else {
+                velA[3 * k] = velA[3 * k + 1] = velA[3 * k + 2] = 0;
+                auxA[4 * k] = 0; auxA[4 * k + 1] = 0; auxA[4 * k + 2] = 0; auxA[4 * k + 3] = 0;
+            }
+            k++;
+        }
+        const v = ia.vcm;
+        mat.uniforms.uVcm.value.set(v[0] / cps, v[2] / cps, -v[1] / cps);
+        if (st.cmA && st.cmB) {
+            const m = st.mA + st.mB || 1;
+            mat.uniforms.uCm.value.copy(k2s([(st.mA * st.cmA[0] + st.mB * st.cmB[0]) / m, (st.mA * st.cmA[1] + st.mB * st.cmB[1]) / m, (st.mA * st.cmA[2] + st.mB * st.cmB[2]) / m], cps));
+        }
+    }
+    function resetTracers() {
+        tracer.ids = []; tracer.hist = null; tracer.head = 0; tracer.count = 0; tracer.lastT = -Infinity;
+        pathlines.line.geometry.setDrawRange(0, 0); pathlines.line.visible = false;
+    }
+    /** Rotate scene-local (x, z) by −θ about +y: the inverse of world.rotation.y = θ. */
+    function unrotate(x, y, z, th) {
+        if (!th) return [x, y, z];
+        const c = Math.cos(th), s = Math.sin(th);
+        return [x * c - z * s, y, x * s + z * c];
+    }
+    function updateBehaviour(frame, cnt, stride, meta) {
+        const cps = st.codePerScene;
+        const a = ia.aux, as = ia.stride || 7;
+        const omega = meta && Number.isFinite(meta.omega) && Math.abs(meta.omega) > 1e-9 ? Math.abs(meta.omega) : 0;
+        const period = omega > 0 ? 2 * Math.PI / omega : 0;
+        // ── flow streaks: the path each particle covers in streakTime (4 % of an
+        //    orbit, so an orbiting star draws arcs a quarter of its radius long)
+        if (st.streaksOn && a && period > 0) {
+            st.streakTime = 0.04 * period;
+            const vc = ia.vcm;
+            // In the corotating frame a streak must be the motion RELATIVE to
+            // the rotating axes, or two stars held still on the x-axis would
+            // still draw orbital arcs. The rate is FITTED from the gas itself
+            // (rigid-rotation least squares about the barycentre, kernel
+            // axes), so its sign can never disagree with what is drawn.
+            let wz = 0, cxk = 0, cyk = 0;
+            if (st.corotating && st.cmA && st.cmB) {
+                const m = st.mA + st.mB || 1;
+                cxk = (st.mA * st.cmA[0] + st.mB * st.cmB[0]) / m; cyk = (st.mA * st.cmA[1] + st.mB * st.cmB[1]) / m;
+                let num = 0, den = 0;
+                for (let i = 0; i < cnt && i < ia.n; i++) {
+                    const o = stride * i; if (!Number.isFinite(frame[o])) continue;
+                    const q = as * i, rx = frame[o] - cxk, ry = frame[o + 1] - cyk;
+                    num += rx * (a[q + 1] - vc[1]) - ry * (a[q] - vc[0]); den += rx * rx + ry * ry;
+                }
+                wz = den > 0 ? num / den : 0;
+            }
+            let v = 0;
+            for (let i = 0; i < cnt && i < ia.n; i++) {
+                const o = stride * i;
+                if (!Number.isFinite(frame[o])) continue;
+                const q = as * i;
+                const hx = frame[o] / cps, hy = frame[o + 2] / cps, hz = -frame[o + 1] / cps;
+                // kernel-axes velocity, minus Ω × (r − r_cm) in the corotating frame
+                const ux = a[q] + wz * (frame[o + 1] - cyk), uy = a[q + 1] - wz * (frame[o] - cxk), uz = a[q + 2];
+                const dvx = ux - vc[0], dvy = uy - vc[1], dvz = uz - vc[2];
+                const T = st.streakTime / cps;
+                const tx = hx - ux * T, ty = hy - uz * T, tz = hz + uy * T;
+                const spd = Math.hypot(dvx, dvy, dvz) / (scaleEma.vel || 1);
+                const b = (frame[o + 5] | 0) & 1, rgb = BODY_RGB[b];
+                const alpha = Math.min(0.42, 0.08 + 0.32 * spd);
+                const P = streaks.p, C = streaks.c, pv = 3 * v, cv = 4 * v;
+                P[pv] = hx; P[pv + 1] = hy; P[pv + 2] = hz; P[pv + 3] = tx; P[pv + 4] = ty; P[pv + 5] = tz;
+                const w = 0.55 + 0.45 * Math.min(spd, 1);
+                C[cv] = rgb[0] * w + 0.3 * (1 - w); C[cv + 1] = rgb[1] * w + 0.3 * (1 - w); C[cv + 2] = rgb[2] * w + 0.3 * (1 - w); C[cv + 3] = alpha;
+                C[cv + 4] = rgb[0]; C[cv + 5] = rgb[1]; C[cv + 6] = rgb[2]; C[cv + 7] = 0;
+                v += 2;
+            }
+            streaks.line.geometry.setDrawRange(0, v);
+            streaks.line.geometry.attributes.position.needsUpdate = true;
+            streaks.line.geometry.attributes.aCol.needsUpdate = true;
+            streaks.line.visible = v > 0;
+        } else streaks.line.visible = false;
+
+        // ── pathline tracers: a fixed subset of particles (every k-th kernel
+        //    index), sampled every tracerDt of SIM time (1 % of an orbit), so
+        //    each line is the last ~half orbit of that parcel's history —
+        //    diffusion and mixing read as lines crossing the other star's.
+        if (st.pathlinesOn && period > 0 && meta?.time != null) {
+            if (!tracer.hist) {
+                const step = Math.max(1, Math.floor(cnt / TRACER_MAX));
+                tracer.ids = [];
+                for (let i = 0; i < cnt && tracer.ids.length < TRACER_MAX; i += step) if (Number.isFinite(frame[stride * i])) tracer.ids.push(i);
+                tracer.body = tracer.ids.map(i => (frame[stride * i + 5] | 0) & 1);
+                tracer.hist = new Float32Array(tracer.ids.length * TRACER_LEN * 3).fill(NaN);
+                tracer.head = 0; tracer.count = 0; tracer.lastT = -Infinity;
+                st.tracerDt = 0.01 * period;
+            }
+            if (meta.time - tracer.lastT >= st.tracerDt) {
+                tracer.lastT = meta.time;
+                const th = st.corotating ? st.rotAngle : 0;
+                tracer.ids.forEach((i, t) => {
+                    const o = stride * i, at = 3 * (t * TRACER_LEN + tracer.head);
+                    if (!Number.isFinite(frame[o])) { tracer.hist[at] = NaN; return; }
+                    const [x, y, z] = unrotate(frame[o] / cps, frame[o + 2] / cps, -frame[o + 1] / cps, th);
+                    tracer.hist[at] = x; tracer.hist[at + 1] = y; tracer.hist[at + 2] = z;
+                });
+                tracer.head = (tracer.head + 1) % TRACER_LEN;
+                tracer.count = Math.min(TRACER_LEN, tracer.count + 1);
+                // rebuild the segments, oldest → newest
+                let v = 0;
+                const L = tracer.count;
+                for (let t = 0; t < tracer.ids.length; t++) {
+                    const rgb = BODY_RGB[tracer.body[t]];
+                    for (let s = 0; s < L - 1; s++) {
+                        const i0 = (tracer.head - L + s + TRACER_LEN) % TRACER_LEN, i1 = (i0 + 1) % TRACER_LEN;
+                        const p0 = 3 * (t * TRACER_LEN + i0), p1 = 3 * (t * TRACER_LEN + i1);
+                        if (!Number.isFinite(tracer.hist[p0]) || !Number.isFinite(tracer.hist[p1])) continue;
+                        const a0 = 0.24 * (s / (L - 1)) ** 2, a1 = 0.24 * ((s + 1) / (L - 1)) ** 2;
+                        const P = pathlines.p, C = pathlines.c, H = tracer.hist, pv = 3 * v, cv = 4 * v;
+                        P[pv] = H[p0]; P[pv + 1] = H[p0 + 1]; P[pv + 2] = H[p0 + 2]; P[pv + 3] = H[p1]; P[pv + 4] = H[p1 + 1]; P[pv + 5] = H[p1 + 2];
+                        C[cv] = rgb[0]; C[cv + 1] = rgb[1]; C[cv + 2] = rgb[2]; C[cv + 3] = a0;
+                        C[cv + 4] = rgb[0]; C[cv + 5] = rgb[1]; C[cv + 6] = rgb[2]; C[cv + 7] = a1;
+                        v += 2;
+                    }
+                }
+                pathlines.line.geometry.setDrawRange(0, v);
+                pathlines.line.geometry.attributes.position.needsUpdate = true;
+                pathlines.line.geometry.attributes.aCol.needsUpdate = true;
+                pathlines.line.visible = v > 0;
+            }
+        } else if (!st.pathlinesOn) pathlines.line.visible = false;
+
+        // ── A–B contacts: every cross-body kernel overlap the worker found,
+        //    drawn at the CURRENT positions; gold where the pair is approaching
+        //    (Monaghan viscosity heating it), violet where it merely overlaps.
+        const links = ia.links;
+        if (st.contactsOn && links && links.length) {
+            let maxW = 0, maxH = 0;
+            for (let k = 0; k < links.length; k += 4) { if (links[k + 2] > maxW) maxW = links[k + 2]; if (links[k + 3] > maxH) maxH = links[k + 3]; }
+            // Every overlap is COUNTED (the HUD's A–B pairs); only those at the
+            // stars' own resolution are DRAWN — an overlap between two fat
+            // outskirt kernels is real but spans half the stage and read as a
+            // spider-web over the merger (measured on the first capture).
+            const maxLen = 4 * st.h0 * cps, maxLen2 = maxLen * maxLen;
+            const crowd = Math.min(1, Math.sqrt(600 / Math.max(1, ia.summary?.abPairs ?? links.length / 4)));
+            let v = 0;
+            for (let k = 0; k < links.length && v < contacts.max; k += 4) {
+                const i = links[k] | 0, j = links[k + 1] | 0;
+                const oi = stride * i, oj = stride * j;
+                if (i >= cnt || j >= cnt || !Number.isFinite(frame[oi]) || !Number.isFinite(frame[oj])) continue;
+                const ddx = frame[oi] - frame[oj], ddy = frame[oi + 1] - frame[oj + 1], ddz = frame[oi + 2] - frame[oj + 2];
+                if (ddx * ddx + ddy * ddy + ddz * ddz > maxLen2) continue;
+                const heatN = maxH > 0 ? links[k + 3] / maxH : 0, wN = maxW > 0 ? links[k + 2] / maxW : 0;
+                const rgb = heatN > 0 ? [1.0, 0.78, 0.38] : [0.62, 0.52, 1.0];
+                // fade with crowding: at first touch a few hundred pairs ARE the
+                // interface; inside the merged remnant every pair is A–B
+                const al = crowd * (heatN > 0 ? 0.12 + 0.45 * Math.sqrt(heatN) : 0.06 + 0.2 * wN);
+                contacts.p.set([frame[oi] / cps, frame[oi + 2] / cps, -frame[oi + 1] / cps, frame[oj] / cps, frame[oj + 2] / cps, -frame[oj + 1] / cps], 3 * v);
+                contacts.c.set([rgb[0], rgb[1], rgb[2], al, rgb[0], rgb[1], rgb[2], al], 4 * v);
+                v += 2;
+            }
+            contacts.line.geometry.setDrawRange(0, v);
+            contacts.line.geometry.attributes.position.needsUpdate = true;
+            contacts.line.geometry.attributes.aCol.needsUpdate = true;
+            contacts.line.visible = v > 0;
+        } else contacts.line.visible = false;
+    }
+
     // ── Detail ladder ───────────────────────────────────────────────────────
     function applyDetail() {
         const L = DETAIL_LEVELS[st.detail] || DETAIL_LEVELS.standard;
@@ -691,6 +986,7 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             's': () => api.setFollow('system'), 'a': () => api.setFollow('A'), 'b': () => api.setFollow('B'), '0': () => api.setFollow('none'),
             'c': () => { const ids = Object.keys(COLOR_MODES); api.setColorMode(ids[(ids.indexOf(st.colorMode) + 1) % ids.length]); },
             't': () => api.setTrails(!st.trailsOn), 'r': () => api.reset(),
+            'v': () => api.setStreaks(!st.streaksOn), 'p': () => api.setPathlines(!st.pathlinesOn), 'x': () => api.setContacts(!st.contactsOn),
             ' ': () => onCommand && onCommand('togglePause'),
             '+': () => flyTo({ r: currentSpherical().r * 0.8 }, 0.3), '=': () => flyTo({ r: currentSpherical().r * 0.8 }, 0.3),
             '-': () => flyTo({ r: currentSpherical().r * 1.25 }, 0.3),
@@ -705,6 +1001,9 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         get state() {
             return { detail: st.detail, hdr: st.hdr, children: st.children, software, view: st.view, follow: st.follow, corotating: st.corotating, colorMode: st.colorMode, trails: st.trailsOn,
                 pointScale: st.pointScale, hasFrame: st.hasFrame, tweening: !!st.tween,
+                streaks: st.streaksOn, pathlines: st.pathlinesOn, contacts: st.contactsOn, hasAux: !!ia.aux,
+                streakTime: st.streakTime, tracerWindow: st.tracerDt * (TRACER_LEN - 1), tracers: tracer.ids.length,
+                layerCounts: { streaks: streaks.line.geometry.drawRange.count / 2, pathlines: pathlines.line.geometry.drawRange.count / 2, contacts: contacts.line.geometry.drawRange.count / 2 },
                 lastMeta: st.cmA && st.cmB ? { cmA: st.cmA.slice(), cmB: st.cmB.slice(), sep: st.sep } : null,
                 followPoint: followPointWorld()?.toArray() ?? null };
         },
@@ -745,6 +1044,7 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         setCorotating(on) {
             st.corotating = !!on;
             if (!st.corotating) { world.rotation.y = 0; st.rotAngle = 0; }
+            resetTracers();
             st.followSnap = true;
             if (onCommand) onCommand('view-state');
         },
@@ -813,7 +1113,9 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
                 k++;
             }
             geo.instanceCount = k;
+            fillAuxInstances(cnt, stride, frame);
             for (const a of Object.values(inst)) a.needsUpdate = true;
+            updateBehaviour(frame, cnt, stride, meta);
             if (Number.isFinite(dmax)) mat.uniforms.uDensMax.value = dmax;
             st.alive = k; st.hasFrame = k > 0 || bodies.some(b => b && b.kind === 'bh');
             if (radii.length) { radii.sort((a, b) => a - b); st.cloudRadius = Math.max(radii[Math.floor(radii.length * 0.96)], 0.2); }
@@ -892,7 +1194,37 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             st.hasFrame = false; st.cmA = null; st.cmB = null;
             st.cloudRadius = maxR;
         },
-        clearTrails() { trails.forEach(t => { t.n = 0; t.line.geometry.setDrawRange(0, 0); t.line.visible = false; }); },
+        clearTrails() { trails.forEach(t => { t.n = 0; t.line.geometry.setDrawRange(0, 0); t.line.visible = false; }); resetTracers(); },
+        /**
+         * The interaction channel from the worker: aux (Float32Array, AUX_STRIDE
+         * per KERNEL index: vx, vy, vz, h, ∇·v, mixing, heating rate), links
+         * (i, j, w, heat) and the summary. Held until the next one arrives.
+         */
+        setInteractions(aux, links, summary, n, stride = 7) {
+            if (!aux) return;
+            ia.aux = aux; ia.links = links || null; ia.summary = summary || null; ia.n = n; ia.stride = stride;
+            // barycentre velocity (kernel axes) → robust display scales, eased
+            const vcm = summary?.cmVel || [0, 0, 0];
+            ia.vcm = vcm;
+            const sp = [], dv = [], sh = [];
+            for (let i = 0; i < n; i++) {
+                const o = stride * i;
+                if (!(aux[o + 3] > 0)) continue;
+                sp.push(Math.hypot(aux[o] - vcm[0], aux[o + 1] - vcm[1], aux[o + 2] - vcm[2]));
+                dv.push(Math.abs(aux[o + 4]));
+                if (aux[o + 6] > 0) sh.push(aux[o + 6]);
+            }
+            const pct = (a, q) => { if (!a.length) return 0; a.sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(q * a.length))]; };
+            const ease = (key, v) => { if (!(v > 0)) return; scaleEma[key] = scaleEma[key] > 0 ? 0.7 * scaleEma[key] + 0.3 * v : v; };
+            ease('vel', pct(sp, 0.95)); ease('div', pct(dv, 0.95)); ease('shock', pct(sh, 0.98));
+            mat.uniforms.uVelScale.value = scaleEma.vel > 0 ? 1 / scaleEma.vel : 1;
+            mat.uniforms.uDivScale.value = scaleEma.div > 0 ? 1 / scaleEma.div : 1;
+            mat.uniforms.uShockScale.value = scaleEma.shock > 0 ? 1 / scaleEma.shock : 1;
+            mat.uniforms.uHasAux.value = 1;
+        },
+        setStreaks(on) { st.streaksOn = !!on; if (!on) streaks.line.visible = false; if (onCommand) onCommand('view-state'); },
+        setPathlines(on) { st.pathlinesOn = !!on; if (!on) pathlines.line.visible = false; resetTracers(); if (onCommand) onCommand('view-state'); },
+        setContacts(on) { st.contactsOn = !!on; if (!on) contacts.line.visible = false; if (onCommand) onCommand('view-state'); },
         setAutoRotate(on) { controls.autoRotate = !!on; },
         /** Back-compat: frame the stage at a distance (used before the first frame). */
         frameAll(distance) { flyTo({ r: distance }, 0); },
@@ -900,6 +1232,9 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             geo.instanceCount = 0; bhMeshes.forEach(m => { m.visible = false; });
             coreMarks.forEach(m => { m.visible = false; }); sepLine.visible = false; bary.visible = false;
             api.clearTrails(); st.hasFrame = false; st.cmA = null; st.cmB = null; world.rotation.y = 0; st.rotAngle = 0;
+            ia.aux = null; ia.links = null; ia.summary = null; mat.uniforms.uHasAux.value = 0;
+            scaleEma.vel = scaleEma.div = scaleEma.shock = 0;
+            [streaks, pathlines, contacts].forEach(L => { L.line.visible = false; L.line.geometry.setDrawRange(0, 0); });
         },
         dispose() {
             cancelAnimationFrame(raf); ro.disconnect(); io.disconnect();

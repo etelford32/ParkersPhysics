@@ -49,7 +49,7 @@ test.describe('Star Collider Lab', () => {
         // its placeholder until a run is started, so it is excluded here and
         // checked in the run test.
         const hudKeys = new Set(['simTime', 'simSep', 'simFreq', 'simN', 'simSteps', 'simRate', 'simUnbound', 'simAccreted',
-            'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'stageScale']);
+            'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'simContact', 'stageScale']);
         const unfilled = await page.evaluate((hud) => [...document.querySelectorAll('[data-sc]')]
             .filter(el => !hud.includes(el.getAttribute('data-sc')))
             .filter(el => !el.textContent.trim() || el.textContent.trim() === '—')
@@ -133,12 +133,17 @@ test.describe('Star Collider Lab', () => {
         // worker-message timing on a software renderer.
         const afterFrame = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
         await afterFrame();
-        const followErr = await page.evaluate(() => {
+        // Read INSIDE an animation frame, after the stage's own loop callback
+        // (registered earlier, so it runs first): no worker message can land
+        // between the rig's update and the read. Read from a separate task, a
+        // slow software-GL render leaves time for the next core position to
+        // arrive first and the test measures message timing (0.43 measured).
+        const followErr = await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => {
             const s = window.__starCollider.scene; const st = s.state; const cps = s.codePerScene;
             const local = new (s.camera.position.constructor)(st.lastMeta.cmA[0] / cps, st.lastMeta.cmA[2] / cps, -st.lastMeta.cmA[1] / cps);
             const w = s.world.localToWorld(local);
-            return { err: w.distanceTo(s.controls.target), fp: st.followPoint, target: s.controls.target.toArray() };
-        });
+            resolve({ err: w.distanceTo(s.controls.target), fp: st.followPoint, target: s.controls.target.toArray() });
+        })));
         expect(followErr.err, JSON.stringify(followErr)).toBeLessThan(0.15);
         await expect(page.locator('[data-sc="stageFrame"]')).toHaveText(/following core A/);
 
@@ -229,6 +234,20 @@ test.describe('Star Collider Lab', () => {
             .filter(el => !el.textContent.trim() || el.textContent.trim() === '—').map(el => el.getAttribute('data-sc')));
         expect(hud, 'HUD readouts on placeholder while running').toEqual([]);
         await expect(page.locator('[data-sc="simEgw"]')).not.toHaveText(/^0 /);
+        // The interaction channel arrived and the behaviour layers drew from it:
+        // flow streaks for every live particle, pathline tracers once two
+        // samples exist, and the colour modes that read it reach the shader.
+        await page.waitForFunction(() => {
+            const v = window.__starCollider.scene.state;
+            return v.hasAux && v.layerCounts.streaks > 100 && v.layerCounts.pathlines > 50 && v.streakTime > 0;
+        }, null, { timeout: 60000 });
+        await expect(page.locator('[data-sc="simContact"]')).toHaveText(/A–B kernel pairs .* mixed .* shock heating/);
+        for (const mode of ['velocity', 'compression', 'mixing', 'shocking']) {
+            await page.selectOption('[data-sc-control="colorMode"]', mode);
+            expect(await page.evaluate(() => window.__starCollider.scene.state.colorMode)).toBe(mode);
+        }
+        await page.locator('[data-sc-control="pathlines"]').uncheck();
+        await page.waitForFunction(() => !window.__starCollider.scene.state.pathlines, null, { timeout: 5000 });
         // Stage painted: the WebGL canvas has non-background pixels somewhere in the middle.
         const painted = await page.evaluate(() => {
             const c = document.querySelector('#sc-stage canvas');

@@ -17,12 +17,37 @@
  *   ← { type:'frame', frame(Float32Array, transferred), diag, bodies, gw:[{t,hp,hx}…],
  *       perf:{stepsPerSec, msPerStep} }
  *
+ * Frames may also carry `aux` (Float32Array, AUX_STRIDE per particle: v, h,
+ * ∇·v, mixing, viscous heating rate), `links` (A–B kernel pairs, stride 4)
+ * and `interactions` (the summary) — js/star-collider/interactions.js run on
+ * the kernel's own raw state at ≤ AUX_HZ, so the main thread never does a
+ * neighbour search. `aux` is indexed by KERNEL particle index, like `frame`.
+ *
  * The GW samples are the quadrupole second derivative read off the kernel
  * after every chunk: hp ∝ Q̈xx − Q̈yy, hx ∝ 2 Q̈xy (face-on observer on +z),
  * in code units — the page scales them by 1/D.
  */
 
 import { loadKernel } from './kernel.js';
+import { computeInteractions, packInteractions } from './interactions.js';
+
+const AUX_HZ = 8;
+let lastAux = 0;
+let simParams = { alpha: 1, beta: 2, gammaTh: 1.75 };
+let bodyGamma = [2, 2];
+
+/** The interaction diagnostics on the kernel's current raw state. */
+function interactions() {
+    const n = kernel.n();
+    const state = {
+        n, pos: kernel.pos(), vel: kernel.vel(), h: kernel.h(), mass: kernel.mass(), rho: kernel.rho(),
+        u: kernel.u(), star: kernel.star(), alive: kernel.alive(),
+        bodies: [{ k: kernel.bodyK(0), gamma: bodyGamma[0] }, { k: kernel.bodyK(1), gamma: bodyGamma[1] }],
+    };
+    const r = computeInteractions(state, simParams, { maxLinks: 3000 });
+    const { aux, links } = packInteractions(state, r);
+    return { aux, links, summary: r.summary };
+}
 
 let kernel = null;
 let running = false;
@@ -45,7 +70,15 @@ function snapshot(includeFrame) {
     if (includeFrame) {
         const frame = kernel.frame();
         msg.frame = frame;
-        post(msg, [frame.buffer]);
+        const transfer = [frame.buffer];
+        const now = performance.now();
+        if (now - lastAux > 1000 / AUX_HZ) {
+            lastAux = now;
+            const ia = interactions();
+            msg.aux = ia.aux; msg.links = ia.links; msg.interactions = ia.summary;
+            transfer.push(ia.aux.buffer, ia.links.buffer);
+        }
+        post(msg, transfer);
     } else {
         post(msg);
     }
@@ -91,6 +124,8 @@ self.onmessage = async (ev) => {
             if (timer) { clearTimeout(timer); timer = null; }
             kernel.init();
             kernel.setParams(msg.params || {});
+            simParams = { alpha: msg.params?.alpha ?? 1, beta: msg.params?.beta ?? 2, gammaTh: msg.params?.gammaTh ?? 1.75 };
+            bodyGamma = [msg.bodies[0].gamma ?? 2, msg.bodies[1].gamma ?? 2];
             kernel.setBody(0, msg.bodies[0]);
             kernel.setBody(1, msg.bodies[1]);
             const n = kernel.build(msg.bodies[0].n | 0, msg.bodies[1].n | 0, msg.seed | 0);
@@ -104,8 +139,11 @@ self.onmessage = async (ev) => {
             stepsAccum = 0; msAccum = 0;
             const diag = kernel.diagnostics();
             const frame = kernel.frame();
+            const ia = interactions();
+            lastAux = performance.now();
             post({ type: 'built', n, nA: kernel.bodyCount(0), nB: kernel.bodyCount(1), relaxMs, frameStride: kernel.frameStride,
-                bodies: [kernel.bodyState(0), kernel.bodyState(1)], diag, frame }, [frame.buffer]);
+                bodies: [kernel.bodyState(0), kernel.bodyState(1)], diag, frame, aux: ia.aux, links: ia.links, interactions: ia.summary },
+                [frame.buffer, ia.aux.buffer, ia.links.buffer]);
             return;
         }
         if (msg.type === 'run') {

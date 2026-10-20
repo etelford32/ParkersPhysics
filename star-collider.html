@@ -132,6 +132,7 @@ body {
 .sc-body-head { display:grid; grid-template-columns:auto 1fr; gap:6px; align-items:center; }
 .sc-body-head h3 { color:var(--sc-accent); }
 .sc-body-block.sc-b .sc-body-head h3 { color:var(--sc-magenta); }
+.sc-hint code { font-family:var(--sc-mono); font-size:.64rem; color:#dfe8ff; }
 .sc-hint { font-size:.68rem; color:var(--sc-text-dim); line-height:1.4; }
 .sc-console > .sc-hint { padding:6px 10px 10px; border-top:1px solid rgba(var(--sc-accent-rgb),.10); }
 kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--sc-accent-rgb),.3); border-radius:3px; padding:0 3px; color:#dfe8ff; }
@@ -230,6 +231,7 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
             <div>E_gw <span data-sc="simEgw">—</span></div>
             <div>energy drift <span data-sc="simDrift">—</span></div>
             <div>PN <span data-sc="simPn">—</span></div>
+            <div>interactions <span data-sc="simContact">—</span></div>
             <div>scale <span data-sc="stageScale">—</span></div>
             <div>camera <span data-sc="stageFrame">—</span></div>
             <div>colour <span data-sc="stageColour">—</span></div>
@@ -278,7 +280,8 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
                         </select></div>
                     <div class="sc-field"><label for="sc-colour">Colour by</label>
                         <select id="sc-colour" data-sc-control="colorMode">
-                            <option value="density">density</option><option value="heat">shock heating</option><option value="body">body A / B</option><option value="bound">bound / ejecta</option>
+                            <optgroup label="State"><option value="density">density</option><option value="heat">accumulated shock heat</option><option value="body">body A / B</option><option value="bound">bound / ejecta</option></optgroup>
+                            <optgroup label="Behaviour"><option value="velocity">velocity · infall / outflow</option><option value="compression">compression ∇·v</option><option value="mixing">A–B mixing</option><option value="shocking">shock heating rate</option></optgroup>
                         </select></div>
                 </div>
                 <div class="sc-field">
@@ -290,6 +293,13 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
                     <label class="sc-check" title="key T"><input type="checkbox" data-sc-control="trails" checked> core trails</label>
                     <label class="sc-check"><input type="checkbox" data-sc-control="autorotate"> auto-rotate</label>
                 </div>
+                <h3>Particle behaviour</h3>
+                <div class="sc-checks">
+                    <label class="sc-check" title="key V — each particle's path over the last 4 % of an orbit (relative to the rotating axes in the corotating frame)"><input type="checkbox" data-sc-control="streaks" checked> flow streaks</label>
+                    <label class="sc-check" title="key P — ~240 tracer particles' last half orbit: diffusion and mixing read as lines crossing into the other star"><input type="checkbox" data-sc-control="pathlines" checked> pathline tracers</label>
+                    <label class="sc-check" title="key X — every A–B pair whose smoothing kernels overlap; gold = approaching (viscosity heating it), violet = overlapping; all are counted, those at the stars' own resolution are drawn"><input type="checkbox" data-sc-control="contacts" checked> A–B contacts</label>
+                </div>
+                <p class="sc-hint">Behaviour layers and colour modes read the kernel's own velocities and smoothing lengths, evaluated with its SPH pair rules (<code>interactions.js</code>) — diagnostics only, they never feed back.</p>
             </div>
         </details>
 
@@ -348,7 +358,7 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
             </div>
         </details>
 
-        <p class="sc-hint">Over the stage: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> views · <kbd>F</kbd> frame · <kbd>S</kbd><kbd>A</kbd><kbd>B</kbd><kbd>0</kbd> follow · <kbd>4</kbd> corotating · <kbd>C</kbd> colour · <kbd>T</kbd> trails · <kbd>R</kbd> reset · <kbd>space</kbd> pause. Follow moves the rig, never your orbit or zoom; any drag or wheel cancels a flight.</p>
+        <p class="sc-hint">Over the stage: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> views · <kbd>F</kbd> frame · <kbd>S</kbd><kbd>A</kbd><kbd>B</kbd><kbd>0</kbd> follow · <kbd>4</kbd> corotating · <kbd>C</kbd> colour · <kbd>T</kbd> trails · <kbd>V</kbd> streaks · <kbd>P</kbd> pathlines · <kbd>X</kbd> contacts · <kbd>R</kbd> reset · <kbd>space</kbd> pause. Follow moves the rig, never your orbit or zoom; any drag or wheel cancels a flight.</p>
     </aside>
 </section>
 
