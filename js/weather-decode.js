@@ -18,6 +18,53 @@
  * lockstep.
  */
 
+// ── Pressure kind ────────────────────────────────────────────────────────────
+// Channel P is MEAN SEA-LEVEL pressure. Until 2026-10-26 the Open-Meteo path
+// wrote `surface_pressure` (true station pressure — 850 hPa clamps over
+// Tibet, so the isobar layer contoured TERRAIN) while the MET Norway
+// fallback wrote MSLP into the SAME key, so P changed meaning with the
+// upstream (PRESSURE_OUTLOOK_ENGINE_PLAN.md P1). Every frame now carries a
+// kind, derived here — the ONE place a location's pressure key is read —
+// so a surface-pressure frame can be recognised and never blended with an
+// MSLP one.
+export const PRESSURE_KIND_MSL     = 'msl';
+export const PRESSURE_KIND_SURFACE = 'surface';
+
+/**
+ * Which pressure a cache/upstream location carries.
+ *   'msl'      — `current.pressure_msl` present, or the MET Norway tag
+ *                (`__pressure_kind` 'msl' / legacy 'mean_sea_level', whose
+ *                `surface_pressure` slot always held MSLP)
+ *   'surface'  — only `current.surface_pressure` (pre-2026-10-26 Open-Meteo rows)
+ *   null       — no pressure at all
+ * @param {object} loc  one payload item ({ current, __pressure_kind? })
+ */
+export function pressureKindOf(loc) {
+    const c = loc?.current;
+    if (!c) return null;
+    if ('pressure_msl' in c) return PRESSURE_KIND_MSL;
+    const tag = loc.__pressure_kind;
+    if (tag === 'msl' || tag === 'mean_sea_level') return PRESSURE_KIND_MSL;
+    if ('surface_pressure' in c) return PRESSURE_KIND_SURFACE;
+    return null;
+}
+
+/**
+ * The location's pressure in hPa under the frame's kind, or NaN. A 'surface'
+ * frame still yields its value (the live path has nothing better to draw);
+ * callers that must not mix kinds check `pressureKindOf` first.
+ * @param {object} loc
+ * @param {string|null} [kind]  pressureKindOf(loc) when omitted
+ */
+export function pressureHpaOf(loc, kind = pressureKindOf(loc)) {
+    const c = loc?.current;
+    if (!c) return NaN;
+    const v = kind === PRESSURE_KIND_MSL && !('pressure_msl' in c)
+        ? c.surface_pressure              // legacy MET Norway slot name, MSLP value
+        : (c.pressure_msl ?? c.surface_pressure);
+    return Number.isFinite(v) ? v : NaN;
+}
+
 export const TEX_W = 360;          // output texture width  (1°/pixel)
 export const TEX_H = 180;          // output texture height (1°/pixel)
 export const MAX_WIND_MS = 60;     // m/s — wind-speed normalisation ceiling

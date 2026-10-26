@@ -8,7 +8,8 @@
  *
  *   weatherBuffer  (RGBA)
  *     R = temperature   — normalised [0,1] spanning -60 … +50 °C
- *     G = pressure      — normalised [0,1] spanning  850 … 1060 hPa
+ *     G = pressure      — MEAN SEA-LEVEL, normalised [0,1] spanning 850 … 1060 hPa
+ *                         (`pressure_msl` since 2026-10-26; see pressureKindOf)
  *     B = humidity      — normalised [0,1] spanning    0 … 100 %
  *     A = wind speed    — normalised [0,1] spanning    0 … MAX_WIND m/s
  *
@@ -62,8 +63,19 @@ const DEFAULT_GRID_H = 36;
 // forecast Web Worker can import them too. Imported locally (weather-feed uses
 // them internally) AND re-exported so every existing
 // `import { TEX_W } from './weather-feed.js'` keeps working unchanged.
-import { decodeCoarse, TEX_W, TEX_H, MAX_WIND_MS } from './weather-decode.js';
+import {
+    decodeCoarse, TEX_W, TEX_H, MAX_WIND_MS,
+    pressureKindOf, pressureHpaOf, PRESSURE_KIND_MSL, PRESSURE_KIND_SURFACE,
+} from './weather-decode.js';
 export { TEX_W, TEX_H, MAX_WIND_MS };
+
+// Cold-start backfill depth. The grid route serves hourly frames for the
+// last 72 h (`RANGE_MAX_LIMIT` in api/weather/grid.js — the Edge body
+// ceiling, and the hourly part of the 30-day decimated retention), and the
+// IDB ring (js/weather-history.js TIER.max_rows) holds the same 72. Until
+// 2026-10-26 the client asked for 24 while the server kept 72, so a scrub to
+// −3 d froze on the oldest of 24 frames (EARTHVIEW_LOD_UX_PLAN.md §1.3).
+export const BACKFILL_HOURS = 72;
 const REFRESH_MS   = 15 * 60 * 1000;   // re-fetch every 15 min (cache is 1 hr w/ SWR)
 // Retry staircase after a failed fetch. On each successive failure we step
 // to the next entry; on success we reset to the steady-state REFRESH_MS.
@@ -143,6 +155,17 @@ export class WeatherFeed {
             gridW:     DEFAULT_GRID_W,
             gridH:     DEFAULT_GRID_H,
             gridDeg:   180 / DEFAULT_GRID_H,
+            // Source honesty, read off /api/weather/grid (2026-10-26). The
+            // route has said `freshness: 'stale'` for a fallback-upstream
+            // frame since 2026-10-06 and NOTHING on the client read it — a
+            // MET Norway 10° frame drew a green pip for a month. The page's
+            // weather-update handler turns 'stale' into an amber pip.
+            //   freshness     'live' | 'stale' | 'expired' | null (unknown)
+            //   freshnessNote the route's reason, when stale
+            //   pressureKind  'msl' | 'surface' | null — what channel P means
+            freshness:     null,
+            freshnessNote: null,
+            pressureKind:  null,
         };
 
         // Prefer the session-cached snapshot on first paint — avoids the
@@ -159,10 +182,15 @@ export class WeatherFeed {
     /**
      * Cold-start backfill — fetches up to `hours` of historical frames
      * from /api/weather/grid?since=… and pushes each one through
-     * _extractCoarse → history.ingest. Lets the 24-h replay slider
-     * have data to scrub through on the very first session, instead
-     * of waiting 24 hours of session lifetime for the live ring to
-     * fill.
+     * _extractCoarse → history.ingest. Lets the replay slider have data
+     * to scrub through on the very first session, instead of waiting
+     * hours of session lifetime for the live ring to fill.
+     *
+     * Frames whose `pressure_kind` is 'surface' (Open-Meteo rows written
+     * before 2026-10-26) are SKIPPED, not converted: channel P is MSLP
+     * now, and lerping station pressure into sea-level pressure at the
+     * seam would draw a terrain step across the scrub. The ring version
+     * bump in weather-history.js drops the same frames from disk.
      *
      * Best-effort: catches every error, returns the count of frames
      * successfully ingested, never throws. Safe to fire-and-forget.
@@ -174,11 +202,11 @@ export class WeatherFeed {
      * idempotent.
      *
      * @param {import('./weather-history.js').WeatherHistory} history
-     * @param {number} [hours=24]   — lookback window in hours (capped
-     *                                server-side at 72)
+     * @param {number} [hours=72]   — lookback window in hours (capped
+     *                                server-side at 72 = BACKFILL_HOURS)
      * @returns {Promise<number>}   — frames ingested
      */
-    async backfill(history, hours = 24) {
+    async backfill(history, hours = BACKFILL_HOURS) {
         if (!history) return 0;
         const sinceMs = Date.now() - hours * 3_600_000;
         const sinceISO = new Date(sinceMs).toISOString();
@@ -197,8 +225,11 @@ export class WeatherFeed {
             if (!Array.isArray(body?.frames)) throw new Error('missing frames array');
 
             let ingested = 0;
+            let skippedSurface = 0;
             for (const frame of body.frames) {
                 if (!Array.isArray(frame?.data) || frame.data.length === 0) continue;
+                const pressureKind = frame.pressure_kind ?? pressureKindOf(frame.data[0]);
+                if (pressureKind === PRESSURE_KIND_SURFACE) { skippedSurface++; continue; }
 
                 // Per-frame grid dims. The endpoint provides explicit
                 // grid metadata when the cron writer attached the WxH
@@ -220,18 +251,21 @@ export class WeatherFeed {
                 // so the on-disk frame is exactly what the live path
                 // would have written. CHW layout matches what
                 // weather-history.js expects.
-                const coarse = this._extractCoarse(frame.data, gridW, gridH);
+                const coarse = this._extractCoarse(frame.data, gridW, gridH, pressureKind);
                 const t = Date.parse(frame.fetched_at);
                 history.ingest({
                     t:         Number.isFinite(t) ? t : Date.now(),
                     fetchedAt: Number.isFinite(t) ? t : Date.now(),
                     source:    frame.source ?? null,
+                    freshness: frame.freshness ?? null,
+                    pressureKind,
                     gridW, gridH,
                     coarse,
                 });
                 ingested++;
             }
-            console.info(`[WeatherFeed] backfilled ${ingested} historical frame(s)`);
+            console.info(`[WeatherFeed] backfilled ${ingested} historical frame(s)`
+                + (skippedSurface ? ` (skipped ${skippedSurface} surface-pressure frame(s) — channel P is MSLP)` : ''));
             return ingested;
         } catch (err) {
             console.warn('[WeatherFeed] backfill failed:', err.message);
@@ -353,6 +387,12 @@ export class WeatherFeed {
 
         this._meta.cacheAgeSeconds = body.age_seconds ?? null;
         this._meta.cacheFetchedAt  = body.fetched_at  ?? null;
+        // Freshness is about the SOURCE (a fallback upstream), not the age.
+        this._meta.freshness     = body.freshness === 'stale' || body.freshness === 'expired'
+            ? body.freshness : 'live';
+        this._meta.freshnessNote = body.note ?? null;
+        this._meta.pressureKind  = body.pressure_kind
+            ?? (Array.isArray(body.data) ? pressureKindOf(body.data[0]) : null);
         // Preserve the upstream model tag ('open-meteo', 'open-meteo-gfs',
         // or whatever new entry is added to the pg_cron fallback array).
         // _fetchAndProcess() reads this into _meta.source on success.
@@ -402,15 +442,18 @@ export class WeatherFeed {
         const gridH = this._gridH;
 
         // 1. Extract — JSONB rows → CHW-packed coarse Float32Array.
-        const coarse = this._extractCoarse(rows, gridW, gridH);
+        const pressureKind = this._meta.pressureKind;
+        const coarse = this._extractCoarse(rows, gridW, gridH, pressureKind);
 
         // 2. Push to history *before* decode so the resolver has a fresh
         //    frame ready the moment the scrubber lands on this hour. Best-
         //    effort: history.ingest() is a no-op if the optional dependency
         //    wasn't injected. Procedural fallback and snapshot-restore paths
         //    deliberately don't reach here — replay should show "no data"
-        //    rather than synthetic.
-        if (this._history) {
+        //    rather than synthetic. A 'surface'-pressure frame (a cache row
+        //    older than the 2026-10-26 MSLP switch) is drawn live but NOT
+        //    ingested: the ring is MSLP-only (backfill() note).
+        if (this._history && pressureKind !== PRESSURE_KIND_SURFACE) {
             try {
                 const cacheMs = this._meta.cacheFetchedAt
                     ? Date.parse(this._meta.cacheFetchedAt)
@@ -420,6 +463,8 @@ export class WeatherFeed {
                     t,
                     fetchedAt: t,
                     source:    this._meta.upstreamSource ?? null,
+                    freshness: this._meta.freshness ?? null,
+                    pressureKind,
                     gridW, gridH,
                     coarse,
                 });
@@ -451,7 +496,12 @@ export class WeatherFeed {
     // NUM_COARSE_CHANNELS at the top of this file and the on-disk format
     // in weather-history.js. NaN gap-fill happens here so on-disk frames
     // are always clean and decode is a pure bilinear path.
-    _extractCoarse(rows, gridW, gridH) {
+    //
+    // `pressureKind` is the frame's (api/weather/grid `pressure_kind`, or
+    // pressureKindOf on the first row): channel P reads `pressure_msl`, or
+    // the legacy MET Norway `surface_pressure` slot that always held MSLP.
+    // The ONE place a pressure key is read is weather-decode.js pressureHpaOf.
+    _extractCoarse(rows, gridW, gridH, pressureKind = null) {
         const N    = gridW * gridH;
         const DEG  = Math.PI / 180;
         const temp = new Float32Array(N).fill(NaN);
@@ -464,12 +514,14 @@ export class WeatherFeed {
         const clHigh = new Float32Array(N).fill(0);
         const precip = new Float32Array(N).fill(0);
 
+        const kind = pressureKind ?? pressureKindOf(rows[0]);
         rows.forEach((loc, idx) => {
             if (idx >= N) return;
             const c = loc.current ?? {};
             temp[idx]   = c.temperature_2m        ?? NaN;
             hum[idx]    = c.relative_humidity_2m  ?? 50;
-            pres[idx]   = c.surface_pressure       ?? 1013;
+            const pHpa  = pressureHpaOf(loc, kind);
+            pres[idx]   = Number.isFinite(pHpa) ? pHpa : 1013;
             wspd[idx]   = c.wind_speed_10m         ?? 0;
             wdir[idx]   = c.wind_direction_10m     ?? 0;
             clLow[idx]  = c.cloud_cover_low        ?? 0;
