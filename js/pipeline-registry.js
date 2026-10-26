@@ -425,6 +425,47 @@ export const PIPELINES = [
       warnAgeS:  24 * 3600, critAgeS: 72 * 3600,
       notes: 'Named open wildfire events (discrete markers) — complements the GIBS Active Fires imagery layer. EONET curates ~2×/day. 200 + freshness:stale + empty list when EONET is down.' },
 
+    // ── Ocean · NOAA CO-OPS / NDBC (earth.html station layers) ─────────────
+    // Registered 2026-10-26 (EARTHVIEW_LOD_UX_PLAN.md Phase 0.8) — the three
+    // routes had been live since 2026-08 and never monitored, the exact gap
+    // this file's header warns about. Each answers 200 + freshness:'stale'
+    // with flagged reference markers when NOAA is unreachable (never a 503),
+    // so status.html scores amber, not red. The bare endpoints 400 by design
+    // (they need ?lat&lon or ?station), hence probePath; the catalogues carry
+    // no top-level timestamp, hence freshnessExempt — `freshness` is the signal.
+    { id: 'ocean-tides',        label: 'Tide gauges (CO-OPS)',
+      endpoint: '/api/ocean/tides',
+      probePath: '/api/ocean/tides?mode=stations',
+      category: 'ocean', upstream: 'NOAA CO-OPS',
+      cadence_s: 360,   prewarm: 'cold', freshnessExempt: true,
+      warnAgeS:  3600, critAgeS: 6 * 3600,
+      notes: 'Station catalogue (daily-cached) + nearest-gauge water level / predictions per point. freshness:stale = NOAA unreachable, reference markers served.' },
+
+    { id: 'ocean-buoys',        label: 'Marine buoys (NDBC)',
+      endpoint: '/api/ocean/buoys',
+      probePath: '/api/ocean/buoys?mode=stations',
+      category: 'ocean', upstream: 'NOAA NDBC latest_obs',
+      cadence_s: 3_600, prewarm: 'cold', freshnessExempt: true,
+      warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
+      notes: 'One ~1 MB latest_obs.txt parsed per request (CDN 5 min). freshness:stale = NDBC unreachable, reference markers served.' },
+
+    { id: 'ocean-dart',         label: 'DART tsunameters (NDBC)',
+      endpoint: '/api/ocean/dart',
+      probePath: '/api/ocean/dart?mode=stations',
+      category: 'ocean', upstream: 'NOAA NDBC DART',
+      cadence_s: 3_600, prewarm: 'cold', freshnessExempt: true,
+      warnAgeS:  2 * 3600, critAgeS: 12 * 3600,
+      notes: 'Active-station catalogue + time-addressable water-column history. Observations only — a DART trigger is not a tsunami warning. freshness:stale = NDBC unreachable.' },
+
+    // Month-ahead drivers for js/month-outlook.js. Both global scalars; a
+    // both-down answer is 200 + freshness:'stale' with null indices.
+    { id: 'enso-mjo',           label: 'ENSO (ONI) + MJO (RMM)',
+      endpoint: '/api/weather/enso-mjo',
+      category: 'atmosphere', upstream: 'NOAA CPC + BoM',
+      cadence_s: 86_400, prewarm: 'cold', freshnessExempt: true,
+      warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
+      notes: 'ENSO monthly, MJO daily; 6 h CDN cache, one global entry. `partial:true` when one source is down; freshness:stale when both are.' },
+
     // ── Planetary · Mars (mars.html) ───────────────────────────────────────
     // All three answer 200 even when their upstream is down, because the page
     // has a working fallback for each and a 5xx would be indistinguishable
@@ -504,6 +545,7 @@ export const CATEGORIES = [
     { id: 'weather',       label: 'Terrestrial Weather'   },
     { id: 'orbital',       label: 'Orbital · TLE / Launches' },
     { id: 'environment',   label: 'Environment · Air & Fire' },
+    { id: 'ocean',         label: 'Ocean · Tides / Buoys / DART' },
     { id: 'planetary',     label: 'Planetary · Mars'      },
     { id: 'small-bodies',  label: 'Small Bodies · NEOs / Comets' },
 ];

@@ -12,8 +12,16 @@
 
 import { jsonError, jsonOk, fetchWithTimeout } from '../_lib/responses.js';
 import { finiteOrNull, validCoordinates } from '../_lib/ocean.js';
+import { referenceStationsPayload, unavailablePayload } from '../../js/ocean-reference-stations.js';
 
 export const config = { runtime: 'edge' };
+
+// Degradation (2026-10-26, EARTHVIEW_LOD_UX_PLAN.md Phase 0.8): an upstream
+// failure is a 200 with `freshness: 'stale'`, never a 503 — see
+// api/ocean/tides.js and js/ocean-reference-stations.js. Client errors stay 400.
+const SOURCE_URL = 'https://www.ndbc.noaa.gov/dart/';
+const STALE_MAX_AGE = 60;
+const DART_DISCLAIMER = 'Observations only. A DART trigger is not an official tsunami warning. Not for navigation.';
 
 const ACTIVE_STATIONS = 'https://www.ndbc.noaa.gov/activestations.xml';
 const DART_DATA = 'https://www.ndbc.noaa.gov/dart_data.php';
@@ -105,15 +113,19 @@ export default async function handler(request) {
     if (url.searchParams.get('mode') === 'stations') {
         try {
             const stations = parseDartStations(await fetchText(ACTIVE_STATIONS, 'application/xml,text/xml'));
+            if (!stations.length) throw new Error('activestations.xml listed no DART stations');
             return jsonOk({
                 source: SOURCE,
-                source_url: 'https://www.ndbc.noaa.gov/dart/',
+                source_url: SOURCE_URL,
+                freshness: 'live',
                 count: stations.length,
                 stations,
-                disclaimer: 'Observations only. A DART trigger is not an official tsunami warning. Not for navigation.',
+                disclaimer: DART_DISCLAIMER,
             }, { maxAge: 3600, swr: 900 });
         } catch (error) {
-            return jsonError('upstream_unavailable', error.message, { source: SOURCE });
+            return jsonOk(referenceStationsPayload('dart', {
+                source: SOURCE, source_url: SOURCE_URL, detail: error.message, disclaimer: DART_DISCLAIMER,
+            }), { maxAge: STALE_MAX_AGE, swr: 0 });
         }
     }
 
@@ -172,6 +184,7 @@ export default async function handler(request) {
         return jsonOk({
             source: SOURCE,
             source_url: `https://www.ndbc.noaa.gov/station_page.php?station=${encodeURIComponent(station.toLowerCase())}`,
+            freshness: 'live',
             available: readings.length > 0,
             reason: readings.length ? null : 'no_samples_in_window',
             station: { id: station },
@@ -181,9 +194,12 @@ export default async function handler(request) {
             range_m: readings.length ? { min: Math.min(...heights), max: Math.max(...heights) } : null,
             readings,
             units: { water_column_height: 'm', time: 'UTC' },
-            disclaimer: 'Observations only. A DART trigger is not an official tsunami warning. Not for navigation.',
+            disclaimer: DART_DISCLAIMER,
         }, { maxAge: Date.now() - atMs > 48 * 3_600_000 ? 86400 : 300, swr: 120 });
     } catch (error) {
-        return jsonError('upstream_unavailable', error.message, { source: SOURCE });
+        return jsonOk(unavailablePayload({
+            source: SOURCE, detail: error.message, disclaimer: DART_DISCLAIMER,
+            extra: { station: { id: station }, requested_at: new Date(atMs).toISOString(), readings: [] },
+        }), { maxAge: STALE_MAX_AGE, swr: 0 });
     }
 }

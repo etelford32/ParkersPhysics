@@ -459,14 +459,18 @@ function _rtProxyHealth(p) {
     if (p.status >= 500)     return { color:'#ff5555', label:`HTTP ${p.status} · ${p.body?.error ?? 'error'}` };
     if (p.status >= 400)     return { color:'#ff5555', label:`HTTP ${p.status}` };
     if (p.body?.error)       return { color:'#ff5555', label: String(p.body.error) };
+    // A route's OWN freshness statement beats every age heuristic below — it
+    // is the one signal a degraded 200 carries (CLAUDE.md §8). Checked before
+    // the freshnessExempt short-circuit, which until 2026-10-26 scored an
+    // exempt route's `freshness: 'stale'` as healthy.
+    if (p.body?.freshness === 'expired') return { color:'#ff5555', label:`freshness=${p.body.freshness}` };
+    if (p.body?.freshness === 'stale')   return { color:'#ffd700', label:`freshness=${p.body.freshness}` };
     // Computed-at-request endpoints (seed-grid lookups, per-location
     // passthroughs) have no meaningful "age" — a 200 is healthy.
     if (p.ageSec == null && p.spec.freshnessExempt) return { color:'#4eff91', label:'healthy' };
     if (p.ageSec == null)    return { color:'#ffd700', label:'no freshness info' };
     if (p.ageSec > p.spec.critAgeS) return { color:'#ff5555', label:'critical (stale)' };
     if (p.ageSec > p.spec.warnAgeS) return { color:'#ffd700', label:'warning (stale)' };
-    if (p.body?.freshness === 'expired') return { color:'#ff5555', label:`freshness=${p.body.freshness}` };
-    if (p.body?.freshness === 'stale')   return { color:'#ffd700', label:`freshness=${p.body.freshness}` };
     return { color:'#4eff91', label:'healthy' };
 }
 

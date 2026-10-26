@@ -386,6 +386,12 @@ export function lookupOceanCurrent(lat, lon) {
 
 /**
  * Return a static dataset descriptor for status pip + panel readouts.
+ *
+ * `status` is 'reference', NOT 'live' (2026-10-26, EARTHVIEW_LOD_UX_PLAN.md
+ * Phase 0.8): nothing here is fetched or observed — 28 hand-placed current
+ * axes + 7 gyres, no time dependence. Reporting it 'live' forced a green
+ * pip for a field that is a climatology, and a feed that is not live must
+ * not look live.
  */
 export function oceanCurrentsMeta() {
     return {
@@ -393,7 +399,7 @@ export function oceanCurrentsMeta() {
         source:  'Talley et al. 2011 + AVISO climatology, parametric model',
         time:    null,
         updated: new Date(),
-        status:  'live',
+        status:  'reference',
         unit:    'm/s',
         description:
             'Major surface currents: Gulf Stream, Kuroshio, Agulhas, ACC, ' +

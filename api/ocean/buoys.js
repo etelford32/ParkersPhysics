@@ -3,10 +3,19 @@
  *
  *   ?mode=stations                         global live marker collection
  *   ?lat=37.8&lon=-122.5&limit=3           nearest marine stations
+ *
+ * Degradation (2026-10-26, EARTHVIEW_LOD_UX_PLAN.md Phase 0.8): an upstream
+ * failure is a 200 with `freshness: 'stale'`, never a 503 — see
+ * api/ocean/tides.js and js/ocean-reference-stations.js (the ONE copy of the
+ * reference markers). Client errors stay 400.
  */
 
 import { jsonError, jsonOk, fetchWithTimeout } from '../_lib/responses.js';
 import { finiteOrNull, haversineKm, roundTo, validCoordinates } from '../_lib/ocean.js';
+import { referenceStationsPayload, unavailablePayload } from '../../js/ocean-reference-stations.js';
+
+const SOURCE_URL = 'https://www.ndbc.noaa.gov/';
+const STALE_MAX_AGE = 60;
 
 export const config = { runtime: 'edge' };
 
@@ -68,6 +77,16 @@ export function nearestNdbcStations(stations, lat, lon, { limit = 3, radiusKm = 
 
 export default async function handler(request) {
     const url = new URL(request.url);
+    const stationsMode = url.searchParams.get('mode') === 'stations';
+    const latRaw = url.searchParams.get('lat');
+    const lonRaw = url.searchParams.get('lon');
+    const lat = latRaw == null || latRaw === '' ? NaN : Number(latRaw);
+    const lon = lonRaw == null || lonRaw === '' ? NaN : Number(lonRaw);
+    if (!stationsMode && !validCoordinates(lat, lon)) {
+        return jsonError('invalid_coordinates', 'lat and lon are required and must be valid degrees', {
+            status: 400, source: SOURCE,
+        });
+    }
     try {
         const response = await fetchWithTimeout(NDBC_LATEST, {
             timeoutMs: 9000,
@@ -75,32 +94,26 @@ export default async function handler(request) {
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const parsed = parseNdbcLatest(await response.text());
+        if (!parsed.length) throw new Error('NDBC latest_obs parsed to no marine stations');
 
-        if (url.searchParams.get('mode') === 'stations') {
+        if (stationsMode) {
             return jsonOk({
                 source: SOURCE,
-                source_url: 'https://www.ndbc.noaa.gov/',
+                source_url: SOURCE_URL,
+                freshness: 'live',
                 count: parsed.length,
                 stations: parsed,
                 disclaimer: 'Not for navigation.',
             }, { maxAge: 300, swr: 120 });
         }
 
-        const latRaw = url.searchParams.get('lat');
-        const lonRaw = url.searchParams.get('lon');
-        const lat = latRaw == null || latRaw === '' ? NaN : Number(latRaw);
-        const lon = lonRaw == null || lonRaw === '' ? NaN : Number(lonRaw);
-        if (!validCoordinates(lat, lon)) {
-            return jsonError('invalid_coordinates', 'lat and lon are required and must be valid degrees', {
-                status: 400, source: SOURCE,
-            });
-        }
         const limit = Math.max(1, Math.min(5, Math.round(Number(url.searchParams.get('limit')) || 3)));
         const radiusKm = Math.max(50, Math.min(3000, Math.round(Number(url.searchParams.get('radius_km')) || 600)));
         const stations = nearestNdbcStations(parsed, lat, lon, { limit, radiusKm });
         return jsonOk({
             source: SOURCE,
-            source_url: 'https://www.ndbc.noaa.gov/',
+            source_url: SOURCE_URL,
+            freshness: 'live',
             available: stations.length > 0,
             radius_km: radiusKm,
             stations,
@@ -111,6 +124,9 @@ export default async function handler(request) {
             disclaimer: 'Not for navigation.',
         }, { maxAge: 300, swr: 120 });
     } catch (error) {
-        return jsonError('upstream_unavailable', error.message, { source: SOURCE });
+        const body = stationsMode
+            ? referenceStationsPayload('buoys', { source: SOURCE, source_url: SOURCE_URL, detail: error.message })
+            : unavailablePayload({ source: SOURCE, detail: error.message, extra: { source_url: SOURCE_URL, stations: [] } });
+        return jsonOk(body, { maxAge: STALE_MAX_AGE, swr: 0 });
     }
 }

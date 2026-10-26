@@ -3,10 +3,23 @@
  *
  *   ?mode=stations                         global marker catalogue
  *   ?lat=37.8&lon=-122.5&hours=72         nearest gauge + live tide data
+ *
+ * Degradation (2026-10-26, EARTHVIEW_LOD_UX_PLAN.md Phase 0.8): an upstream
+ * failure is a 200 with `freshness: 'stale'`, never a 503 — the stations
+ * catalogue becomes the flagged reference markers in
+ * js/ocean-reference-stations.js (the ONE copy, shared with the browser
+ * layer), a point request becomes `available: false` + `reason`. status.html
+ * then scores the row amber instead of red, and the Layers-panel toggle keeps
+ * working. Client errors (bad coordinates) stay 400.
  */
 
 import { jsonError, jsonOk, fetchWithTimeout, isoTag } from '../_lib/responses.js';
 import { finiteOrNull, haversineKm, roundTo, validCoordinates } from '../_lib/ocean.js';
+import { referenceStationsPayload, unavailablePayload } from '../../js/ocean-reference-stations.js';
+
+const SOURCE_URL = 'https://tidesandcurrents.noaa.gov/';
+// A degraded answer is cached briefly so recovery shows within a reload.
+const STALE_MAX_AGE = 60;
 
 export const config = { runtime: 'edge' };
 
@@ -102,28 +115,32 @@ function productUrl(stationId, product, extra = {}) {
 
 export default async function handler(request) {
     const url = new URL(request.url);
+    const stationsMode = url.searchParams.get('mode') === 'stations';
+    // Validate the client's own input BEFORE touching NOAA, so a bad request
+    // is a 400 whether or not the upstream is up.
+    const latRaw = url.searchParams.get('lat');
+    const lonRaw = url.searchParams.get('lon');
+    const lat = latRaw == null || latRaw === '' ? NaN : Number(latRaw);
+    const lon = lonRaw == null || lonRaw === '' ? NaN : Number(lonRaw);
+    if (!stationsMode && !validCoordinates(lat, lon)) {
+        return jsonError('invalid_coordinates', 'lat and lon are required and must be valid degrees', {
+            status: 400, source: SOURCE,
+        });
+    }
     try {
         const stationBody = await fetchJson(COOPS_STATIONS);
         const stations = normalizeStations(stationBody.stations);
+        if (!stations.length) throw new Error('CO-OPS station catalogue was empty');
 
-        if (url.searchParams.get('mode') === 'stations') {
+        if (stationsMode) {
             return jsonOk({
                 source: SOURCE,
-                source_url: 'https://tidesandcurrents.noaa.gov/',
+                source_url: SOURCE_URL,
+                freshness: 'live',
                 count: stations.length,
                 stations,
                 disclaimer: 'Not for navigation.',
             }, { maxAge: 86400, swr: 3600 });
-        }
-
-        const latRaw = url.searchParams.get('lat');
-        const lonRaw = url.searchParams.get('lon');
-        const lat = latRaw == null || latRaw === '' ? NaN : Number(latRaw);
-        const lon = lonRaw == null || lonRaw === '' ? NaN : Number(lonRaw);
-        if (!validCoordinates(lat, lon)) {
-            return jsonError('invalid_coordinates', 'lat and lon are required and must be valid degrees', {
-                status: 400, source: SOURCE,
-            });
         }
 
         const nearest = chooseNearestStation(stations, lat, lon);
@@ -156,7 +173,8 @@ export default async function handler(request) {
 
         return jsonOk({
             source: SOURCE,
-            source_url: 'https://tidesandcurrents.noaa.gov/',
+            source_url: SOURCE_URL,
+            freshness: 'live',
             available: true,
             station: { ...nearest, distance_km: roundTo(nearest.distance_km, 1), datum: DATUM },
             observed: observedHeight === null ? null : {
@@ -173,6 +191,10 @@ export default async function handler(request) {
             disclaimer: 'Not for navigation.',
         }, { maxAge: 300, swr: 120 });
     } catch (error) {
-        return jsonError('upstream_unavailable', error.message, { source: SOURCE });
+        // Degraded, not dead: 200 + freshness: 'stale' (header note).
+        const body = stationsMode
+            ? referenceStationsPayload('tides', { source: SOURCE, source_url: SOURCE_URL, detail: error.message })
+            : unavailablePayload({ source: SOURCE, detail: error.message, extra: { source_url: SOURCE_URL } });
+        return jsonOk(body, { maxAge: STALE_MAX_AGE, swr: 0 });
     }
 }
