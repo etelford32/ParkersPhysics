@@ -192,6 +192,17 @@ tooltips at 90+) so grabbing a buried panel surfaces it. Gate:
   `verdict-card.js`'s header documents the stable-header /
   re-rendered-body split that keeps drag wiring alive across data
   refreshes; don't "simplify" it into a full innerHTML re-render.
+- **The week strip opens a FULL-SCREEN DAY VIEW** (`js/verdict-day-view.js`,
+  model = the PURE `dayForecast` in verdict-engine): tap a weekday → the
+  whole day (hi/lo, precip, wind, UV, humidity, sun, hour-by-hour small
+  multiples on one hour axis, dayparts, that night's sky). It mounts on
+  `<body>` ON PURPOSE — the card's `backdrop-filter` is the containing
+  block for any `position:fixed` child, so an overlay inside the card is
+  trapped in its 400px box (the smoke spec asserts viewport size). Its
+  aurora call exists only where NOAA's ~3-day Kp forecast reaches that
+  night; past it the state is `unknown`, never a quiet-sky default. The
+  extra daily/hourly fields ride the SAME Open-Meteo request in
+  `js/air-quality-feed.js` with units pinned in the URL (°F/mph/inch).
 - **Telemetry:** `telemetry.recordFeature(feature, action, meta)` → kind
   `'feature'`, 100% sampled. The kind exists in the DB via
   `supabase-feature-telemetry-migration.sql` (applied 2026-07-13). The CHECK
