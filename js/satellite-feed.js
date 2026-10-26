@@ -72,7 +72,7 @@
 import * as THREE from 'three';
 import { fetchCloudImagery } from './cloud-imagery.js';
 import { telemetry } from './telemetry.js';
-import { resolveMosaicTime, describeMosaicMode } from './cloud-time.js';
+import { resolveMosaicTime, describeMosaicMode, describeDiscAges } from './cloud-time.js';
 
 // Refresh cadence — GOES, Himawari and Meteosat all publish ~10-min frames,
 // so polling more often wastes bytes; less often risks stale clouds during
@@ -450,6 +450,11 @@ export class SatelliteFeed {
                 modisDate:    hit.polar  || !hit.mosaic ? hit.date : null,
                 mosaic:       hit.mosaic,
                 regions:      hit.regions,
+                // Per-disc frame times (Phase 0.6): `time` above is the NEWEST
+                // disc's; the row tooltip names the oldest from these.
+                regionTimes:  hit.regionTimes ?? null,
+                oldestTimeMs: hit.oldestTimestampMs ?? null,
+                discAges:     describeDiscAges(hit.regionTimes),
                 layers:       hit.layers,
                 diag:         hit.diag ?? this.lastDiag,
                 ...t,

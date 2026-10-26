@@ -26,7 +26,10 @@ const {
     productKind, cloudinessFromPixel, discWeight,
     MosaicAccumulator, widestLowArc, gibsTimeCandidates, toUtcDate,
     cloudTopHeightKm, IR_BT_WARM_K, IR_BT_COLD_K,
+    isBlankFrame, blankFrameStats, BLANK_ALPHA_FLOOR, BLANK_MIN_OPAQUE_FRACTION,
 } = await import('../js/cloud-mosaic-core.js');
+const { encodeAgeCode } = await import('../js/cloud-time.js');
+const { decodePng, SYNTHETIC_IR, SYNTHETIC_COT } = await import('./helpers/cloud-source.mjs');
 
 let pass = 0, fail = 0;
 function check(name, fn) {
@@ -224,6 +227,63 @@ check('cloudTopHeightKm decodes the coldness axis against a 2 m reference', () =
     // Constants sanity — the CLOUD_FRAG ramp (26.85 − b·105 °C) must match.
     assert.ok(Math.abs((IR_BT_WARM_K - 273.15) - 26.85) < 1e-9);
     assert.equal(IR_BT_WARM_K - IR_BT_COLD_K, 105);
+});
+
+// ── 4c. Disc age channel (Phase 0.6) ────────────────────────────────────────
+const greenAt = (out, lon, lat) => out.data[(rowOfLat(lat) * W + colOfLon(lon)) * 4 + 1];
+
+check('G carries each disc\'s age behind the newest; the newest disc and fill-only pixels read 0', () => {
+    const acc = new MosaicAccumulator(W, H);
+    const img = flatImage(235, 235, 235, 255);
+    acc.addRegion(img, 'ir', -75, 'primary', 0);     // the newest disc
+    acc.addRegion(img, 'ir', 140, 'primary', 30);    // 30 min behind
+    acc.addRegion(flatImage(0, 0, 0, 0), 'cot', null, 'fill');
+    const out = acc.finalize();
+    assert.equal(greenAt(out, -75, 0), 0, 'newest disc: age 0');
+    assert.equal(greenAt(out, 140, 0), encodeAgeCode(30), '30 min → code 15');
+    assert.equal(greenAt(out, 30, 0), 0, 'fill-only pixel (no primary disc) carries no age');
+    // R is still cloudiness — G no longer duplicates it.
+    assert.ok(grayAt(out, 140, 0) > 230);
+    assert.notEqual(greenAt(out, 140, 0), grayAt(out, 140, 0));
+    // The B (IR coldness) and A (confidence) channels are untouched by the age.
+    assert.equal(blueAt(out, 140, 0), 255);
+    assert.equal(alphaAt(out, 140, 0), 255);
+});
+
+check('overlapping discs of different ages blend the age by weight; a legacy call without ageMin is age 0', () => {
+    const acc = new MosaicAccumulator(W, H);
+    const img = flatImage(235, 235, 235, 255);
+    acc.addRegion(img, 'ir', -75, 'primary', 0);
+    acc.addRegion(img, 'ir', 0, 'primary', 60);
+    const out = acc.finalize();
+    const mid = greenAt(out, -37, 0);
+    assert.ok(mid > 0 && mid < encodeAgeCode(60), `overlap blends between 0 and ${encodeAgeCode(60)}, got ${mid}`);
+    assert.equal(greenAt(out, 35, 0), encodeAgeCode(60));
+    const legacy = new MosaicAccumulator(W, H);
+    legacy.addRegion(img, 'ir', 0, 'primary');
+    assert.equal(greenAt(legacy.finalize(), 0, 0), 0);
+});
+
+// ── 4d. Blank-200 detector (Phase 0.7) ──────────────────────────────────────
+check('a transparent PNG (GIBS out-of-range 200) is blank; a real IR disc and a sparse COT composite are not', () => {
+    // The synthetic fixtures the browser gates serve: a banded IR frame and
+    // a fully transparent COT frame, decoded from real PNG bytes.
+    const cot = decodePng(SYNTHETIC_COT);
+    assert.equal(isBlankFrame(cot.data), true, 'all-alpha-0 PNG is a blank-200');
+    assert.equal(blankFrameStats(cot.data).opaqueFraction, 0);
+    const ir = decodePng(SYNTHETIC_IR);
+    assert.equal(isBlankFrame(ir.data), false);
+    assert.equal(blankFrameStats(ir.data).opaqueFraction, 1);
+    // A COT composite with retrievals on 2 % of pixels is a REAL frame.
+    const sparse = new Uint8ClampedArray(W * H * 4);
+    for (let i = 0; i < W * H; i += 50) sparse[i * 4 + 3] = 255;
+    assert.equal(isBlankFrame(sparse), false, 'sparse retrievals are not blank');
+    assert.ok(Math.abs(blankFrameStats(sparse).opaqueFraction - Math.ceil(W * H / 50) / (W * H)) < 1e-9);
+    // Alpha just under the floor is transparent; stride sampling agrees.
+    const faint = new Uint8ClampedArray(W * H * 4).fill(BLANK_ALPHA_FLOOR - 1);
+    assert.equal(isBlankFrame(faint), true);
+    assert.equal(isBlankFrame(ir.data, { stride: 7 }), false);
+    assert.equal(BLANK_MIN_OPAQUE_FRACTION, 0.001);
 });
 
 check('widestLowArc handles wrap-around and all-covered/all-gap edges', () => {

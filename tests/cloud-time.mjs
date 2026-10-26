@@ -10,10 +10,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-    MOSAIC, FLOW, R_EARTH_M,
+    MOSAIC, FLOW, R_EARTH_M, AGE_CODE_MAX_MIN, AGE_FULL_SCALE_S,
     resolveMosaicTime, mosaicWeight, latestFrameMs, floorToCadence,
     flowPhase, windGainAt, tangentFrame, advectDirection, clampedLeadSec,
-    describeMosaicMode,
+    describeMosaicMode, encodeAgeCode, decodeAgeMin, discAges, describeDiscAges,
 } from '../js/cloud-time.js';
 
 // cloud-volume.js imports three (browser importmap only), so the shader is
@@ -154,6 +154,49 @@ assert.match(describeMosaicMode(nowcast), /Nowcast.*advected/);
 assert.match(describeMosaicMode(model),   /Model cloud only/);
 assert.match(describeMosaicMode(gone),    /no observed frame/);
 
+// ── Per-disc ages (Phase 0.6) ────────────────────────────────────────────────
+{
+    // Encoding: 2 min per code, clamped at the lead clamp, 0 for unknown.
+    assert.equal(MOSAIC.ageCodeMin, 2);
+    assert.equal(encodeAgeCode(0), 0);
+    assert.equal(encodeAgeCode(30), 15);
+    assert.equal(encodeAgeCode(90), 45);
+    assert.equal(decodeAgeMin(encodeAgeCode(30)), 30);
+    assert.equal(encodeAgeCode(NaN), 0);
+    assert.equal(encodeAgeCode(-5), 0);
+    assert.equal(AGE_CODE_MAX_MIN, MOSAIC.leadClampMs / 60_000, 'age is clamped like the lead');
+    assert.equal(encodeAgeCode(24 * 60), encodeAgeCode(AGE_CODE_MAX_MIN), 'a day-old disc clamps at 4 h');
+    assert.ok(encodeAgeCode(1e9) <= 255);
+    assert.equal(AGE_FULL_SCALE_S, 255 * MOSAIC.ageCodeMin * 60, 'full code → seconds the shaders add');
+    // The identity the shaders rely on: lead(newest) + age(disc) = lead(disc).
+    const tNew = now - 20 * M, tOld = tNew - 30 * M, sim = now + 50 * M;
+    const leadNew = clampedLeadSec(sim, tNew);
+    const ageS = decodeAgeMin(encodeAgeCode((tNew - tOld) / M)) * 60;
+    assert.equal(leadNew + ageS, clampedLeadSec(sim, tOld), 'older disc advected by exactly its own lead');
+
+    // discAges: newest, per-disc minutes, the oldest, unknown hours.
+    const rt = [
+        { name: 'GOES-East', timestampMs: tNew },
+        { name: 'Himawari',  timestampMs: tOld },
+        { name: 'Meteosat',  timestampMs: tNew - 10 * M },
+        { name: 'GOES-West', timestampMs: null },        // date-only fallback
+    ];
+    const a = discAges(rt);
+    assert.equal(a.newestMs, tNew);
+    assert.deepEqual(a.discs.map(d => d.ageMin), [0, 30, 10, null]);
+    assert.equal(a.oldest.name, 'Himawari');
+    assert.equal(a.oldest.ageMin, 30);
+    assert.deepEqual(a.unknown, ['GOES-West']);
+    const text = describeDiscAges(rt);
+    assert.match(text, /Oldest disc: Himawari, 30 min behind the newest/);
+    assert.match(text, /GOES-West: date-only frame, hour unknown/);
+    // All discs at the same time: nothing to disclose.
+    assert.equal(describeDiscAges([{ name: 'A', timestampMs: tNew }, { name: 'B', timestampMs: tNew }]), null);
+    assert.equal(describeDiscAges([]), null);
+    assert.equal(describeDiscAges(null), null);
+    assert.deepEqual(discAges(null).discs, []);
+}
+
 // ── The shader carries THESE constants, not a re-typed copy ──────────────────
 for (const expr of [
     'FLOW.periodSec.toFixed(1)',
@@ -161,9 +204,15 @@ for (const expr of [
     'FLOW.windGainAloft.toFixed(3)',
     'FLOW.windGainTopKm.toFixed(2)',
     'R_EARTH_M.toFixed(1)',
+    'AGE_FULL_SCALE_S.toFixed(1)',
 ]) {
     assert.ok(VOLUME_SRC.includes('${' + expr + '}'), `VOLUME_FRAG interpolates ${expr}`);
 }
 assert.ok(VOLUME_SRC.includes("from './cloud-time.js'"), 'cloud-volume imports the ONE time kernel');
+// Both mosaic taps in the march (current + previous frame) read the per-disc
+// age, and the decal does the same through u_sat_age_k.
+assert.equal((VOLUME_SRC.match(/\.g \* SAT_AGE_S/g) || []).length, 2, 'current and previous frame both add the disc age');
+const SKIN_SRC = readFileSync(new URL('../js/earth-skin.js', import.meta.url), 'utf8');
+assert.ok(SKIN_SRC.includes('sat.g * u_sat_age_k'), 'the decal adds the disc age to the lead');
 
 console.log('cloud-time: all assertions passed');
