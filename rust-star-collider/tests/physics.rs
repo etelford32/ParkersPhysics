@@ -254,3 +254,117 @@ fn neutron_stars_merge() {
     assert!(alive > 400);
     assert!(s.frame[0].is_finite());
 }
+
+/// Σ m u over one body's live particles.
+fn thermal_of(s: &Sim, idx: usize) -> f64 {
+    let b = s.bodies[idx];
+    (b.first..b.first + b.n_particles).filter(|&i| s.alive[i] != 0).map(|i| s.mass[i] * s.u[i]).sum()
+}
+
+/// The ledger closes only with the cold (polytropic) internal energy in it:
+/// the stars do pdV work on the K ρ^Γ part as they are squeezed, and that
+/// energy is not in u. (The virial 3(Γ−1)U_cold + W is PRINTED, not
+/// asserted: with Plummer-softened gravity the theorem holds for Σ x·F, not
+/// for the softened potential energy W — it reads ≈ −0.15 at N = 300.)
+#[test]
+fn cold_energy_closes_the_ledger() {
+    let mut s = Sim::new();
+    s.params.c = 0.0;
+    s.set_body(0, Kind::Star, 1.4, 8.0, 2.0);
+    s.set_body(1, Kind::Star, 1.4, 8.0, 2.0);
+    s.build(300, 300, 7);
+    s.relax(80, 0.5, 0.05);
+    s.update_diagnostics();
+    // Virial on the isolated stars (relax leaves phi from the isolated pass).
+    let w = s.diag[6];
+    let ucold = s.diag[40];
+    let virial = (3.0 * ucold + w) / w.abs();
+    println!("virial (3U+W)/|W| = {:.4} (softened gravity — reported, not gated)", virial);
+    assert!(ucold > 0.0 && virial.is_finite());
+    // A grazing contact (R_A + R_B = 16) without PN: the stars collide, squeeze, shock.
+    s.set_orbit(17.0, 0.0, 0.0, 0.0, false);
+    s.update_diagnostics();
+    let e0 = s.diag[7];
+    let e0_old = s.diag[7] - s.diag[40];
+    let mut worst_new: f64 = 0.0;
+    let mut worst_old: f64 = 0.0;
+    while s.time < 600.0 {
+        s.step(0.5);
+        if s.steps % 20 == 0 {
+            s.update_diagnostics();
+            worst_new = worst_new.max(((s.diag[7] - e0) / e0).abs());
+            worst_old = worst_old.max(((s.diag[7] - s.diag[40] - e0_old) / e0_old).abs());
+        }
+    }
+    println!("ledger drift: with E_cold {:.4}, without {:.4}", worst_new, worst_old);
+    assert!(s.diag[28] > 0.0, "the stars never touched (no shock heating)");
+    assert!(worst_new < 0.03, "ledger with E_cold drifts {}", worst_new);
+    assert!(worst_new < 0.5 * worst_old, "E_cold did not close the ledger: {} vs {}", worst_new, worst_old);
+}
+
+/// Balsara: SHEAR heating (a differentially rotating star, minus the same
+/// star's heating without rotation — spinning it up also flattens it, and
+/// that oscillation is real compression) is cut ≥ 2×, while a SHOCK (a
+/// head-on collision) is heated as before. Measured: shear ratio 0.36 at
+/// N = 300 and 0.41 at N = 800 (the residual is SPH's own ∇·v noise, which
+/// Balsara cannot tell from compression); shock ratio 0.997.
+#[test]
+fn balsara_spares_shear_but_not_shocks() {
+    let shear_heat = |balsara: bool, om0: f64| -> f64 {
+        let mut s = Sim::new();
+        s.params.c = 0.0;
+        s.params.balsara = balsara;
+        s.set_body(0, Kind::Star, 1.4, 8.0, 2.0);
+        s.set_body(1, Kind::Star, 1.4, 8.0, 2.0);
+        s.build(300, 300, 11);
+        s.relax(80, 0.5, 0.05);
+        s.set_orbit(4000.0, 0.0, 0.0, 0.0, false);
+        // Ω(R) = Ω₀/(1 + (R/4)²) about star A's centre: strong shear, below
+        // break-up (Ω_K at the surface ≈ 0.052).
+        let (cm, cmv) = s.star_cm(0);
+        let b = s.bodies[0];
+        for i in b.first..b.first + b.n_particles {
+            let x = s.pos[3 * i] - cm[0];
+            let y = s.pos[3 * i + 1] - cm[1];
+            let om = om0 / (1.0 + (x * x + y * y) / 16.0);
+            s.vel[3 * i] = cmv[0] - om * y;
+            s.vel[3 * i + 1] = cmv[1] + om * x;
+        }
+        while s.time < 150.0 {
+            s.step(0.5);
+        }
+        thermal_of(&s, 0)
+    };
+    let shock_heat = |balsara: bool| -> f64 {
+        let mut s = Sim::new();
+        s.params.c = 0.0;
+        s.params.balsara = balsara;
+        s.set_body(0, Kind::Star, 1.4, 8.0, 2.0);
+        s.set_body(1, Kind::Star, 1.4, 8.0, 2.0);
+        s.build(300, 300, 13);
+        s.relax(80, 0.5, 0.05);
+        s.set_orbit(18.0, 0.0, 0.0, 0.0, false);
+        // head-on: each star moves toward the other along x
+        for idx in 0..2 {
+            let b = s.bodies[idx];
+            let vx = if idx == 0 { 0.12 } else { -0.12 };
+            for i in b.first..b.first + b.n_particles {
+                s.vel[3 * i] = vx;
+                s.vel[3 * i + 1] = 0.0;
+                s.vel[3 * i + 2] = 0.0;
+            }
+        }
+        while s.time < 120.0 {
+            s.step(0.5);
+        }
+        thermal_of(&s, 0) + thermal_of(&s, 1)
+    };
+    let sh_on = shear_heat(true, 0.045) - shear_heat(true, 0.0);
+    let sh_off = shear_heat(false, 0.045) - shear_heat(false, 0.0);
+    let (sk_on, sk_off) = (shock_heat(true), shock_heat(false));
+    println!("shear heating: on {:.3e} off {:.3e} (ratio {:.3}); shock: on {:.3e} off {:.3e} (ratio {:.3})",
+        sh_on, sh_off, sh_on / sh_off, sk_on, sk_off, sk_on / sk_off);
+    assert!(sh_off > 0.0 && sk_off > 0.0);
+    assert!(sh_on < 0.5 * sh_off, "Balsara did not suppress shear heating: {} vs {}", sh_on, sh_off);
+    assert!(sk_on > 0.9 * sk_off, "Balsara suppressed a real shock: {} vs {}", sk_on, sk_off);
+}

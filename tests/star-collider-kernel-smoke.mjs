@@ -20,7 +20,7 @@ function check(label, ok, detail = '') {
 
 const kernel = await loadKernel(await readFile(wasmPath));
 check('max particles ≥ 8192', kernel.maxParticles >= 8192, `${kernel.maxParticles}`);
-check('diag slots = 40', kernel.diagSlots === 40, `${kernel.diagSlots}`);
+check('diag slots = 41 (40 = E_cold)', kernel.diagSlots === 41, `${kernel.diagSlots}`);
 
 // ── Scenario 1: two point black holes, 2.5PN only → Peters decay ────────────
 kernel.init();
@@ -77,6 +77,17 @@ check('NS pair inspirals (separation falls)', dEnd.separation < dStart.separatio
 check('all diagnostics finite', Object.values(dEnd).every(Number.isFinite));
 check('shock heating recorded', dEnd.uMax > 0, `u_max ${dEnd.uMax.toExponential(2)}`);
 check('GW energy > 0', dEnd.eGw > 0, `${dEnd.eGw.toExponential(3)}`);
+{
+    // E_total includes the cold (polytropic) energy, and that energy is the
+    // shipped binary's Σ m K ρ^{Γ−1}/(Γ−1) recomputed from its own views.
+    const rho = kernel.rho(), m = kernel.mass(), st = kernel.star(), al = kernel.alive();
+    const K = [kernel.bodyK(0), kernel.bodyK(1)];
+    let ec = 0; for (let i = 0; i < n; i++) if (al[i]) ec += m[i] * K[st[i]] * rho[i];
+    check('E_cold = Σ m K ρ (Γ = 2) from the kernel views', Math.abs(ec - dEnd.eCold) < 1e-9 * Math.max(1, ec), `${ec.toExponential(4)} vs ${dEnd.eCold.toExponential(4)}`);
+    check('E_total = kin + thermal + cold + pot', Math.abs(dEnd.eTotal - (dEnd.eKin + dEnd.eThermal + dEnd.eCold + dEnd.ePot)) < 1e-12);
+    const drift = (dEnd.eTotal + dEnd.eGw - dStart.eTotal) / Math.abs(dStart.eTotal);
+    check('energy ledger (incl. E_cold + E_gw) closes to 3 % through contact', Math.abs(drift) < 0.03, `${(100 * drift).toFixed(2)} %`);
+}
 check('quadrupole Q̈ nonzero', Math.abs(dEnd.qxx - dEnd.qyy) > 0 || Math.abs(dEnd.qxy) > 0);
 // Momentum conservation (exact by construction).
 const pos = kernel.pos(), vel = kernel.vel(), mass = kernel.mass(), alive = kernel.alive();

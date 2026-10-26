@@ -82,6 +82,22 @@
  * stored un-rotated by the corotating angle at record time so they draw as
  * corotating-frame paths) and A–B CONTACTS (gold = approaching, i.e. being
  * viscously heated; violet = overlapping). None of it feeds back.
+ *
+ * GRAVITATIONAL-WAVE RIPPLES (`pushGW`): the kernel's traceless Q̈_ij (the
+ * same numbers the strain chart plots) is kept on a time ring buffer and
+ * drawn as a polar sheet in the orbital plane whose height at (r, φ) is the
+ * h₊ an in-plane observer in direction φ would see, ½(Q̈_⊥⊥ − Q̈_zz), at the
+ * RETARDED time t − r/c (c = 1 in the kernel's units), falling as 1/r. A
+ * rotating quadrupole therefore draws the two-armed spiral of the real
+ * radiation pattern. COLOUR shows r·h₊ (the 1/r falloff removed, so the
+ * arms read to the rim) and HEIGHT shows h₊ itself. Both are normalised to
+ * the strongest wave ON THE SHEET — not the run's all-time peak: the merger
+ * burst leaves the sheet within one window, and scaled against it the
+ * remnant's waves drew a flat dish (the first capture). A SYMBOL, disclosed:
+ * the true strain at Earth is ~10⁻²². The wave-zone formula is not valid
+ * inside r ≈ λ/2π, so the sheet FADES IN past it (it is absent at the
+ * stars' own scale, where λ_GW ~ 100× the system); the
+ * 'waves' view flies out to see it.
  */
 
 import * as THREE from 'three';
@@ -142,6 +158,7 @@ export function kernelOffsets(K, seed = 97) {
 
 export const VIEW_PRESETS = Object.freeze({
     top:     { polar: 0.04, azimuth: 0.0,  label: 'top (face-on)' },
+    waves:   { polar: 0.38, azimuth: 0.45, label: 'gravitational waves', fit: 'waves' },
     edge:    { polar: 1.545, azimuth: 0.35, label: 'edge-on' },
     oblique: { polar: 0.82, azimuth: 0.45, label: 'oblique' },
 });
@@ -326,6 +343,58 @@ const POINT_FS = /* glsl */`
     }
 `;
 
+/**
+ * The ripple sheet: LineSegments in polar (r/rMax, φ) attributes. Q̈ history
+ * is a 1D float texture over [t − T, t] (T = rMax/c), R = Q̈xx, G = Q̈yy,
+ * B = Q̈zz, A = Q̈xy, newest at u = 1.
+ */
+const RIPPLE_VS = /* glsl */`
+    attribute float aRn;
+    attribute float aPhi;
+    uniform sampler2D uHist;
+    uniform float uRmax;          // code units (= the history window, c = 1)
+    uniform float uCps;           // code units per scene unit
+    uniform float uNear;          // near-zone radius λ/2π, code units
+    uniform float uRef;           // 1/r floor radius, code units
+    uniform float uNorm;          // 1 / peak |h| so far
+    uniform float uHeight;        // scene units at full normalised amplitude
+    varying float vH;
+    varying float vA;
+    varying float vFade;
+    void main() {
+        float r = aRn * uRmax;
+        float c = cos(aPhi), s = sin(aPhi);
+        vec4 q = texture2D(uHist, vec2(clamp(1.0 - aRn, 0.0005, 0.9995), 0.5));
+        // h+ for an in-plane observer along (c, s): 1/2 (Q_perp,perp - Q_zz)
+        float qpp = s * s * q.r - 2.0 * s * c * q.a + c * c * q.g;
+        float hr = 0.5 * (qpp - q.b) * uNorm;       // r·h, the 1/r falloff removed
+        float h = hr * (uRef / max(r, uRef));       // the height keeps 1/r
+        vH = h;
+        vA = hr;
+        vFade = smoothstep(0.7 * uNear, 1.4 * uNear, r) * (1.0 - smoothstep(0.82, 1.0, aRn));
+        vec3 p = vec3(r * c, r * s, h * uHeight * uCps);
+        // kernel (x, y, z) -> scene (x, z, -y)
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p.x / uCps, p.z / uCps, -p.y / uCps, 1.0);
+    }
+`;
+const RIPPLE_FS = /* glsl */`
+    precision highp float;
+    uniform float uLinear;
+    uniform float uOpacity;
+    varying float vH;
+    varying float vA;
+    varying float vFade;
+    void main() {
+        // COLOUR reads r·h (falloff removed, so the arms show to the rim);
+        // HEIGHT is h itself — the two are disclosed as such
+        float a = clamp(abs(vA) * 1.6, 0.0, 1.0);
+        vec3 col = vA > 0.0 ? vec3(1.00, 0.50, 0.36) : vec3(0.34, 0.60, 1.00);
+        col = mix(vec3(0.45, 0.55, 0.85), col, a);
+        if (uLinear > 0.5) col = pow(col, vec3(2.2));
+        gl_FragColor = vec4(col, uOpacity * vFade * (0.10 + 0.90 * a));
+    }
+`;
+
 /** Backdrop stars: magnitude-distributed sizes, blackbody-ish tints. */
 const SKY_VS = /* glsl */`
     attribute float aSize;
@@ -423,7 +492,7 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
     controls.autoRotate = false;
     controls.autoRotateSpeed = 0.6;
     controls.minDistance = 0.3;
-    controls.maxDistance = 600;
+    controls.maxDistance = 3000;          // the 'waves' view stands two GW wavelengths out
     controls.minPolarAngle = 0.02;
     controls.maxPolarAngle = Math.PI - 0.02;
     controls.zoomToCursor = false;
@@ -624,6 +693,42 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
     const ia = { aux: null, links: null, n: 0, summary: null, cm: [0, 0, 0], vcm: [0, 0, 0] };
     const scaleEma = { vel: 0, div: 0, shock: 0 };
 
+    // ── Gravitational-wave ripple sheet ─────────────────────────────────────
+    const HIST_N = 512, RIP_RINGS = 84, RIP_SEGS = 192, RIP_SPOKES = 24;
+    const histData = new Float32Array(HIST_N * 4);
+    const histTex = new THREE.DataTexture(histData, HIST_N, 1, THREE.RGBAFormat, THREE.FloatType);
+    histTex.minFilter = THREE.LinearFilter; histTex.magFilter = THREE.LinearFilter;
+    histTex.needsUpdate = true;
+    const ripple = (() => {
+        const rn = [], ph = [];
+        const seg = (r0, p0, r1, p1) => { rn.push(r0, r1); ph.push(p0, p1); };
+        for (let k = 1; k <= RIP_RINGS; k++) {
+            const r = k / RIP_RINGS;
+            for (let j = 0; j < RIP_SEGS; j++) seg(r, 2 * Math.PI * j / RIP_SEGS, r, 2 * Math.PI * (j + 1) / RIP_SEGS);
+        }
+        for (let j = 0; j < RIP_SPOKES; j++) {
+            const p = 2 * Math.PI * j / RIP_SPOKES;
+            for (let k = 0; k < RIP_RINGS; k++) seg(k / RIP_RINGS, p, (k + 1) / RIP_RINGS, p);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(rn.length * 3), 3));
+        g.setAttribute('aRn', new THREE.BufferAttribute(new Float32Array(rn), 1));
+        g.setAttribute('aPhi', new THREE.BufferAttribute(new Float32Array(ph), 1));
+        const m = new THREE.ShaderMaterial({
+            vertexShader: RIPPLE_VS, fragmentShader: RIPPLE_FS,
+            uniforms: {
+                uHist: { value: histTex }, uRmax: { value: 300 }, uCps: { value: 4 }, uNear: { value: 30 }, uRef: { value: 10 },
+                uNorm: { value: 0 }, uHeight: { value: 4 }, uLinear: linearUniform, uOpacity: { value: 0.55 },
+            },
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        });
+        const l = new THREE.LineSegments(g, m);
+        l.frustumCulled = false; l.visible = false; l.renderOrder = -1;
+        world.add(l);
+        return l;
+    })();
+    const gw = { samples: [], peak: 0, tNow: 0, omega: 0, sep: 0, dirty: false };
+
     // Pre-run preview of the configured pair
     const preview = new THREE.Group();
     world.add(preview);
@@ -662,6 +767,7 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         detail: 'standard', hdr: false, children: DETAIL_LEVELS.standard.children,
         nBudget: 1200, h0: 0.12, gainBase: 0.3,
         streaksOn: true, pathlinesOn: true, contactsOn: true, streakTime: 0, tracerDt: 0,
+        ripplesOn: true,
     };
     function sizeComposer(w, h) {
         if (!composer) return;
@@ -927,6 +1033,55 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         } else contacts.line.visible = false;
     }
 
+    // ── GW ripple sheet ─────────────────────────────────────────────────────
+    /**
+     * Resample the Q̈ history onto the texture's uniform retarded-time axis.
+     * The sheet radius (= history window, c = 1) is fixed per run at TWO
+     * wavelengths of the FIRST orbit, so as the binary chirps the spiral
+     * visibly tightens inside the same sheet instead of the sheet rescaling.
+     */
+    function updateRipple() {
+        gw.dirty = false;
+        const u = ripple.material.uniforms;
+        if (!st.ripplesOn || gw.samples.length < 2 || !(gw.peak > 0) || !(gw.omega > 0)) { ripple.visible = false; return; }
+        if (!gw.rMax) gw.rMax = Math.max(2 * (2 * Math.PI / (2 * gw.omega)) * 1.0, 6 * (gw.sep || 10));
+        const T = gw.rMax;
+        // keep one window (+5 %) of history, sorted by time
+        const t0 = gw.tNow - 1.05 * T;
+        if (gw.samples.length > 64 && gw.samples[0].t < t0) gw.samples = gw.samples.filter(g => g.t >= t0);
+        const S = gw.samples;
+        let j = 0;
+        for (let k = 0; k < HIST_N; k++) {
+            const t = gw.tNow - T + T * k / (HIST_N - 1);
+            const o = 4 * k;
+            if (t < S[0].t) { histData[o] = histData[o + 1] = histData[o + 2] = histData[o + 3] = 0; continue; }
+            while (j < S.length - 2 && S[j + 1].t < t) j++;
+            const a = S[j], b = S[Math.min(j + 1, S.length - 1)];
+            const f = b.t > a.t ? Math.min(1, Math.max(0, (t - a.t) / (b.t - a.t))) : 0;
+            histData[o] = a.qxx + f * (b.qxx - a.qxx);
+            histData[o + 1] = a.qyy + f * (b.qyy - a.qyy);
+            histData[o + 2] = a.qzz + f * (b.qzz - a.qzz);
+            histData[o + 3] = a.qxy + f * (b.qxy - a.qxy);
+        }
+        histTex.needsUpdate = true;
+        // the strongest |h₊|-scale entry on the sheet right now
+        let winPeak = 0;
+        for (let k = 0; k < HIST_N; k++) {
+            const o = 4 * k;
+            const hk = 0.5 * Math.max(Math.abs(histData[o] - histData[o + 2]), Math.abs(histData[o + 1] - histData[o + 2])) + Math.abs(histData[o + 3]);
+            if (hk > winPeak) winPeak = hk;
+        }
+        gw.winPeak = winPeak;
+        const near = 1 / gw.omega;                  // λ/2π, code units
+        u.uRmax.value = T;
+        u.uCps.value = st.codePerScene;
+        u.uNear.value = near;
+        u.uRef.value = near;                        // 1/r normalised at the wave-zone edge
+        u.uNorm.value = winPeak > 0 ? 1 / winPeak : 0;
+        u.uHeight.value = 0.12 * T / st.codePerScene;
+        ripple.visible = true;
+    }
+
     // ── Detail ladder ───────────────────────────────────────────────────────
     function applyDetail() {
         const L = DETAIL_LEVELS[st.detail] || DETAIL_LEVELS.standard;
@@ -967,8 +1122,20 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         stepFollow();
         stepTween(now);
         controls.update();
+        // The sky rides the camera (the waves view stands far outside its
+        // 900-unit shell), and near/far follow the camera's range so a
+        // 3000-unit pull-back does not cost depth precision up close.
+        sky.position.copy(camera.position);
+        {
+            const dist = camera.position.distanceTo(controls.target);
+            const near = Math.min(5, Math.max(0.005, dist * 0.002)), far = Math.max(4000, dist * 4 + 1000);
+            if (Math.abs(near / camera.near - 1) > 0.1 || Math.abs(far / camera.far - 1) > 0.1) {
+                camera.near = near; camera.far = far; camera.updateProjectionMatrix();
+            }
+        }
         if (!st.running || !st.visible) return;
         if (onFrame) onFrame();
+        if (gw.dirty) updateRipple();
         if (st.hdr && composer) composer.render();
         else renderer.render(scene, camera);
     }
@@ -986,6 +1153,8 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             's': () => api.setFollow('system'), 'a': () => api.setFollow('A'), 'b': () => api.setFollow('B'), '0': () => api.setFollow('none'),
             'c': () => { const ids = Object.keys(COLOR_MODES); api.setColorMode(ids[(ids.indexOf(st.colorMode) + 1) % ids.length]); },
             't': () => api.setTrails(!st.trailsOn), 'r': () => api.reset(),
+            'w': () => api.setView('waves'), 'g': () => api.setRipples(!st.ripplesOn),
+            'i': () => onCommand && onCommand('toggleStats'),
             'v': () => api.setStreaks(!st.streaksOn), 'p': () => api.setPathlines(!st.pathlinesOn), 'x': () => api.setContacts(!st.contactsOn),
             ' ': () => onCommand && onCommand('togglePause'),
             '+': () => flyTo({ r: currentSpherical().r * 0.8 }, 0.3), '=': () => flyTo({ r: currentSpherical().r * 0.8 }, 0.3),
@@ -1002,6 +1171,8 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             return { detail: st.detail, hdr: st.hdr, children: st.children, software, view: st.view, follow: st.follow, corotating: st.corotating, colorMode: st.colorMode, trails: st.trailsOn,
                 pointScale: st.pointScale, hasFrame: st.hasFrame, tweening: !!st.tween,
                 streaks: st.streaksOn, pathlines: st.pathlinesOn, contacts: st.contactsOn, hasAux: !!ia.aux,
+                ripples: st.ripplesOn, rippleVisible: ripple.visible, gwSamples: gw.samples.length, gwPeak: gw.peak,
+                gwLambda: gw.omega > 0 ? Math.PI / gw.omega : 0, rippleRmax: ripple.material.uniforms.uRmax.value,
                 streakTime: st.streakTime, tracerWindow: st.tracerDt * (TRACER_LEN - 1), tracers: tracer.ids.length,
                 layerCounts: { streaks: streaks.line.geometry.drawRange.count / 2, pathlines: pathlines.line.geometry.drawRange.count / 2, contacts: contacts.line.geometry.drawRange.count / 2 },
                 lastMeta: st.cmA && st.cmB ? { cmA: st.cmA.slice(), cmB: st.cmB.slice(), sep: st.sep } : null,
@@ -1051,7 +1222,11 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
         setView(preset, { animate = true } = {}) {
             const p = VIEW_PRESETS[preset]; if (!p) return;
             st.view = preset;
-            flyTo({ polar: p.polar, azimuth: p.azimuth }, animate ? TWEEN_S : 0);
+            if (p.fit === 'waves') {
+                // fit the ripple sheet (or, before any waves, two default wavelengths)
+                const rScene = (gw.rMax || ripple.material.uniforms.uRmax.value) / st.codePerScene;
+                flyTo({ r: distanceToFit(0.85 * rScene), polar: p.polar, azimuth: p.azimuth }, animate ? 1.2 : 0);
+            } else flyTo({ polar: p.polar, azimuth: p.azimuth }, animate ? TWEEN_S : 0);
             if (onCommand) onCommand('view-state');
         },
         /** Fit the particle cloud (or the preview) about the followed point. */
@@ -1222,6 +1397,28 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             mat.uniforms.uShockScale.value = scaleEma.shock > 0 ? 1 / scaleEma.shock : 1;
             mat.uniforms.uHasAux.value = 1;
         },
+        /**
+         * GW samples from the worker: [{t, qxx, qyy, qzz, qxy, omega, sep}] in
+         * kernel units. Kept for one sheet radius of retarded time.
+         */
+        pushGW(samples) {
+            if (!samples || !samples.length) return;
+            for (const g of samples) {
+                if (!Number.isFinite(g.qxx)) continue;
+                gw.samples.push(g);
+                gw.tNow = Math.max(gw.tNow, g.t);
+                if (Number.isFinite(g.omega) && Math.abs(g.omega) > 1e-9) gw.omega = Math.abs(g.omega);
+                if (Number.isFinite(g.sep)) gw.sep = g.sep;
+                const hmax = 0.5 * Math.max(Math.abs(g.qxx - g.qzz), Math.abs(g.qyy - g.qzz), Math.abs(g.qxx + g.qyy - 2 * g.qzz) / 2 + Math.abs(g.qxy));
+                if (hmax > gw.peak) gw.peak = hmax;
+            }
+            gw.dirty = true;
+        },
+        clearGW() {
+            gw.samples = []; gw.peak = 0; gw.tNow = 0; gw.omega = 0; gw.dirty = false; gw.rMax = 0;
+            histData.fill(0); histTex.needsUpdate = true; ripple.visible = false;
+        },
+        setRipples(on) { st.ripplesOn = !!on; if (!on) ripple.visible = false; else gw.dirty = true; if (onCommand) onCommand('view-state'); },
         setStreaks(on) { st.streaksOn = !!on; if (!on) streaks.line.visible = false; if (onCommand) onCommand('view-state'); },
         setPathlines(on) { st.pathlinesOn = !!on; if (!on) pathlines.line.visible = false; resetTracers(); if (onCommand) onCommand('view-state'); },
         setContacts(on) { st.contactsOn = !!on; if (!on) contacts.line.visible = false; if (onCommand) onCommand('view-state'); },
@@ -1233,6 +1430,7 @@ export function createColliderScene(container, { onFrame, onCommand, detail = 'a
             coreMarks.forEach(m => { m.visible = false; }); sepLine.visible = false; bary.visible = false;
             api.clearTrails(); st.hasFrame = false; st.cmA = null; st.cmB = null; world.rotation.y = 0; st.rotAngle = 0;
             ia.aux = null; ia.links = null; ia.summary = null; mat.uniforms.uHasAux.value = 0;
+            api.clearGW();
             scaleEma.vel = scaleEma.div = scaleEma.shock = 0;
             [streaks, pathlines, contacts].forEach(L => { L.line.visible = false; L.line.geometry.setDrawRange(0, 0); });
         },

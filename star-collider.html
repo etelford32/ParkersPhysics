@@ -91,7 +91,39 @@ body {
 #sc-stage-fallback[hidden] { display:none; }
 .sc-hud { position:absolute; left:10px; top:10px; right:10px; display:flex; flex-wrap:wrap; gap:6px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.72rem; color:#bcd0ee; text-shadow:0 1px 3px #000; }
 .sc-hud span[data-sc] { color:#fff; }
-.sc-hud-b { position:absolute; left:10px; right:10px; bottom:10px; display:flex; flex-wrap:wrap; gap:4px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.68rem; color:#9fb0cc; text-shadow:0 1px 3px #000; }
+/* Run statistics FOLD: unfolded they were seven lines of mono text over the
+   bottom fifth of the stage, on top of the gas. Folded, the stage shows the
+   gas; the toggle (and the choice, remembered per browser) brings them back. */
+.sc-hud-b { position:absolute; left:10px; right:10px; bottom:64px; display:flex; flex-wrap:wrap; gap:4px 14px; pointer-events:none; font-family:var(--sc-mono); font-size:.68rem; color:#9fb0cc; text-shadow:0 1px 3px #000; background:linear-gradient(to top, rgba(4,5,26,.82), rgba(4,5,26,.55)); border-radius:8px; padding:8px 10px; }
+#sc-stage-wrap:not(.sc-stats-open) .sc-hud-b { display:none; }
+.sc-stage-btn { position:absolute; bottom:10px; z-index:3; background:rgba(9,13,34,.82); color:#dfe8ff; border:1px solid rgba(var(--sc-accent-rgb),.35); border-radius:999px; padding:4px 11px; font-size:.72rem; cursor:pointer; font-family:inherit; }
+.sc-stage-btn:hover { background:rgba(var(--sc-accent-rgb),.2); }
+.sc-stage-btn:focus-visible { outline:2px solid var(--sc-accent); outline-offset:1px; }
+.sc-stats-toggle { left:10px; }
+/* Colour key for the active mode — bottom right, never under the stats. */
+.sc-legend { position:absolute; right:10px; bottom:10px; z-index:2; pointer-events:none; background:rgba(9,13,34,.78); border:1px solid rgba(var(--sc-accent-rgb),.22); border-radius:8px; padding:6px 9px 5px; min-width:180px; max-width:46%; font-size:.66rem; color:#bcd0ee; }
+.sc-legend-name { color:#fff; font-size:.7rem; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sc-legend-bar { height:7px; border-radius:4px; background:linear-gradient(90deg, #1a0f6b, #0f61ff 35%, #4de0ff 65%, #fff2d9); }
+.sc-legend[data-mode="heat"] .sc-legend-bar { background:linear-gradient(90deg, #1a2e8c, #ebf0ff 40%, #ff8c26 75%, #ff1f1a); }
+.sc-legend[data-mode="body"] .sc-legend-bar { background:linear-gradient(90deg, #4dd9ff 0 46%, #e8e8ff 50%, #f273ff 54% 100%); }
+.sc-legend[data-mode="bound"] .sc-legend-bar { background:linear-gradient(90deg, #4a5899 0 48%, #73ff99 52% 100%); }
+.sc-legend[data-mode="velocity"] .sc-legend-bar { background:linear-gradient(90deg, #3380ff, #dbe6ff 50%, #ff852a); }
+.sc-legend[data-mode="compression"] .sc-legend-bar { background:linear-gradient(90deg, #ff5c1f, #8c99bf 50%, #408cff); }
+.sc-legend[data-mode="mixing"] .sc-legend-bar { background:linear-gradient(90deg, #4dd9ff, #f2a3ff 30%, #ffdb73); }
+.sc-legend[data-mode="shocking"] .sc-legend-bar { background:linear-gradient(90deg, #070a1f, #3d4aa0 25%, #ebf0ff 55%, #ff8c26 80%, #ff1f1a); }
+.sc-legend-ends { display:flex; justify-content:space-between; gap:10px; margin-top:3px; color:#9fb0cc; }
+@media (max-width:640px) { .sc-legend { min-width:0; max-width:58%; } .sc-legend-name { white-space:normal; } }
+/* Where the run is, next to the button that starts it. */
+.sc-phase { display:flex; align-items:center; gap:7px; font-size:.74rem; color:#c2cbdc; min-height:18px; }
+.sc-phase::before { content:''; width:8px; height:8px; border-radius:50%; background:#5d6a8c; flex:0 0 auto; }
+.sc-phase[data-phase="building"]::before { background:var(--sc-amber); animation:sc-pulse 1s ease-in-out infinite; }
+.sc-phase[data-phase="inspiral"]::before { background:var(--sc-accent); }
+.sc-phase[data-phase="contact"]::before { background:#ffdb73; }
+.sc-phase[data-phase="merged"]::before { background:var(--sc-magenta); }
+.sc-phase[data-phase="paused"]::before { background:#9fb0cc; }
+.sc-phase[data-phase="error"]::before { background:var(--sc-red); }
+@keyframes sc-pulse { 50% { opacity:.35; } }
+@media (prefers-reduced-motion: reduce) { .sc-phase[data-phase="building"]::before { animation:none; } }
 .sc-hud-b span[data-sc] { color:#dfe8ff; }
 
 .sc-console { border:1px solid var(--sc-border); border-radius:12px; background:var(--sc-panel); display:flex; flex-direction:column; font-size:.82rem; height:var(--sc-stage-h); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
@@ -99,7 +131,10 @@ body {
 .sc-console h3 { font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--sc-text-dim); }
 /* The run bar: Build & run and the run settings, pinned at the top. */
 .sc-runbar { position:sticky; top:0; z-index:2; background:rgba(9,13,34,.97); border-bottom:1px solid var(--sc-border); padding:10px 10px 8px; display:flex; flex-direction:column; gap:7px; border-radius:12px 12px 0 0; }
-.sc-runbtns { display:grid; grid-template-columns:1.7fr 1fr 1fr 1fr; gap:5px; }
+.sc-runbtns { display:grid; grid-template-columns:1.7fr 1fr 1fr; gap:5px; }
+/* Pause and Resume share one slot — only the one that applies is shown. */
+.sc-runbtns button[hidden] { display:none; }
+.sc-console button:disabled { opacity:.45; cursor:default; }
 .sc-console button { background:rgba(var(--sc-accent-rgb),.12); color:#fff; border:1px solid rgba(var(--sc-accent-rgb),.4); border-radius:7px; padding:6px 6px; font-size:.78rem; cursor:pointer; font-family:inherit; white-space:nowrap; }
 .sc-console button:hover { background:rgba(var(--sc-accent-rgb),.24); }
 .sc-console button:focus-visible { outline:2px solid var(--sc-accent); outline-offset:1px; }
@@ -126,7 +161,7 @@ body {
 .sc-sec > summary small { margin-left:auto; text-transform:none; letter-spacing:0; color:var(--sc-text-dim); font-size:.68rem; }
 .sc-sec > summary:hover { background:rgba(var(--sc-accent-rgb),.06); }
 .sc-sec-body { padding:2px 10px 10px; display:flex; flex-direction:column; gap:7px; }
-.sc-views { display:grid; grid-template-columns:repeat(4, 1fr); gap:4px; }
+.sc-views { display:grid; grid-template-columns:repeat(5, 1fr); gap:4px; }
 .sc-body-block { border-left:2px solid rgba(var(--sc-accent-rgb),.55); padding:2px 0 2px 8px; display:flex; flex-direction:column; gap:5px; }
 .sc-body-block.sc-b { border-left-color:rgba(240,140,255,.6); }
 .sc-body-head { display:grid; grid-template-columns:auto 1fr; gap:6px; align-items:center; }
@@ -214,14 +249,15 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
         <div id="sc-stage" aria-label="3D merger stage"></div>
         <div id="sc-stage-fallback">Starting the stage…</div>
         <div class="sc-hud" aria-live="off">
-            <div>engine <span data-sc="simEngine">—</span></div>
             <div>status <span data-sc="simStatus">—</span></div>
             <div>t <span data-sc="simTime">—</span></div>
             <div>separation <span data-sc="simSep">—</span></div>
             <div>f_GW <span data-sc="simFreq">—</span></div>
+            <div>energy drift <span data-sc="simDrift">—</span></div>
             <div>particles <span data-sc="simN">—</span></div>
         </div>
-        <div class="sc-hud-b">
+        <div class="sc-hud-b" id="sc-stats">
+            <div>engine <span data-sc="simEngine">—</span></div>
             <div>steps <span data-sc="simSteps">—</span></div>
             <div>rate <span data-sc="simRate">—</span></div>
             <div>unbound <span data-sc="simUnbound">—</span></div>
@@ -229,13 +265,19 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
             <div>ρ_max <span data-sc="simRhoMax">—</span></div>
             <div>shock heat <span data-sc="simHeat">—</span></div>
             <div>E_gw <span data-sc="simEgw">—</span></div>
-            <div>energy drift <span data-sc="simDrift">—</span></div>
             <div>PN <span data-sc="simPn">—</span></div>
             <div>interactions <span data-sc="simContact">—</span></div>
             <div>scale <span data-sc="stageScale">—</span></div>
             <div>camera <span data-sc="stageFrame">—</span></div>
             <div>colour <span data-sc="stageColour">—</span></div>
             <div>render <span data-sc="stageDetail">—</span></div>
+            <div>waves <span data-sc="stageWaves">—</span></div>
+        </div>
+        <button type="button" class="sc-stage-btn sc-stats-toggle" data-sc-control="statsToggle" aria-controls="sc-stats" aria-expanded="false" title="Show or hide the run statistics (key I)">▸ Run stats</button>
+        <div class="sc-legend" data-mode="density" aria-hidden="true">
+            <div class="sc-legend-name" data-sc="legendName">—</div>
+            <div class="sc-legend-bar"></div>
+            <div class="sc-legend-ends"><span data-sc="legendLo">—</span><span data-sc="legendHi">—</span></div>
         </div>
     </div>
 
@@ -243,10 +285,11 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
         <div class="sc-runbar" role="group" aria-label="Build and run">
             <div class="sc-runbtns">
                 <button type="button" class="sc-primary" data-sc-control="run" title="Build both stars on the EOS, relax them, and start the SPH merger">▶ Build &amp; run</button>
-                <button type="button" data-sc-control="pause" title="Pause (space)">Pause</button>
-                <button type="button" data-sc-control="resume" title="Resume (space)">Resume</button>
-                <button type="button" data-sc-control="reset" title="Stop and clear the run">Reset</button>
+                <button type="button" data-sc-control="pause" title="Pause (space)" disabled>❚❚ Pause</button>
+                <button type="button" data-sc-control="resume" title="Resume (space)" hidden>▶ Resume</button>
+                <button type="button" data-sc-control="reset" title="Stop and clear the run">↺ Reset</button>
             </div>
+            <div class="sc-phase" data-phase="idle" role="status" aria-live="polite"><span data-sc="runPhase">—</span></div>
             <div class="sc-row3">
                 <div class="sc-field"><label for="sc-particles" title="Particles per star — direct-summation gravity is O(N²)">Resolution</label><select id="sc-particles" data-sc-control="particles"></select></div>
                 <div class="sc-field"><label for="sc-warp">Pace</label><select id="sc-warp" data-sc-control="warp"></select></div>
@@ -272,6 +315,7 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
                     <button type="button" data-sc-control="viewEdge" title="key 2 — in the orbital plane">Edge</button>
                     <button type="button" data-sc-control="viewOblique" title="key 3">Oblique</button>
                     <button type="button" data-sc-control="frameSystem" title="key F — fit the particle cloud">Frame</button>
+                    <button type="button" data-sc-control="viewWaves" title="key W — pull back to see the gravitational-wave ripples (they are ~100× longer than the stars)">Waves</button>
                 </div>
                 <div class="sc-row">
                     <div class="sc-field"><label for="sc-follow">Follow</label>
@@ -298,6 +342,7 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
                     <label class="sc-check" title="key V — each particle's path over the last 4 % of an orbit (relative to the rotating axes in the corotating frame)"><input type="checkbox" data-sc-control="streaks" checked> flow streaks</label>
                     <label class="sc-check" title="key P — ~240 tracer particles' last half orbit: diffusion and mixing read as lines crossing into the other star"><input type="checkbox" data-sc-control="pathlines" checked> pathline tracers</label>
                     <label class="sc-check" title="key X — every A–B pair whose smoothing kernels overlap; gold = approaching (viscosity heating it), violet = overlapping; all are counted, those at the stars' own resolution are drawn"><input type="checkbox" data-sc-control="contacts" checked> A–B contacts</label>
+                    <label class="sc-check" title="key G — h₊ at the retarded time t − r/c on the orbital plane, from the kernel's own Q̈; height normalised to the strongest wave on the sheet (a symbol — the real strain at Earth is ~10⁻²²)"><input type="checkbox" data-sc-control="ripples" checked> GW ripples</label>
                 </div>
                 <p class="sc-hint">Behaviour layers and colour modes read the kernel's own velocities and smoothing lengths, evaluated with its SPH pair rules (<code>interactions.js</code>) — diagnostics only, they never feed back.</p>
             </div>
@@ -354,11 +399,12 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
                 </div>
                 <label class="sc-check"><input type="checkbox" data-sc-control="pn25" checked> 2.5PN radiation reaction (the inspiral driver)</label>
                 <label class="sc-check"><input type="checkbox" data-sc-control="pn1"> 1PN conservative term <span class="sc-hint">(experimental — stalls at contact)</span></label>
+                <label class="sc-check" title="Balsara (1995): scales the viscosity by |∇·v|/(|∇·v|+|∇×v|), so a rotating remnant's shear is not heated and spun down by viscosity that is not there. Measured: shear heating cut ~3×, shock heating unchanged."><input type="checkbox" data-sc-control="balsara" checked> Balsara shear limiter on the viscosity</label>
                 <p class="sc-hint">Direct-summation gravity is O(N²): 600 particles per star runs at a few tens of steps per second on a laptop; 2 500 is a coffee break. The relaxation pass before each run is what makes the stars start in equilibrium.</p>
             </div>
         </details>
 
-        <p class="sc-hint">Over the stage: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> views · <kbd>F</kbd> frame · <kbd>S</kbd><kbd>A</kbd><kbd>B</kbd><kbd>0</kbd> follow · <kbd>4</kbd> corotating · <kbd>C</kbd> colour · <kbd>T</kbd> trails · <kbd>V</kbd> streaks · <kbd>P</kbd> pathlines · <kbd>X</kbd> contacts · <kbd>R</kbd> reset · <kbd>space</kbd> pause. Follow moves the rig, never your orbit or zoom; any drag or wheel cancels a flight.</p>
+        <p class="sc-hint">Over the stage: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> views · <kbd>F</kbd> frame · <kbd>S</kbd><kbd>A</kbd><kbd>B</kbd><kbd>0</kbd> follow · <kbd>4</kbd> corotating · <kbd>C</kbd> colour · <kbd>T</kbd> trails · <kbd>V</kbd> streaks · <kbd>P</kbd> pathlines · <kbd>X</kbd> contacts · <kbd>W</kbd> waves view · <kbd>G</kbd> ripples · <kbd>I</kbd> stats · <kbd>R</kbd> reset · <kbd>space</kbd> pause. Follow moves the rig, never your orbit or zoom; any drag or wheel cancels a flight.</p>
     </aside>
 </section>
 
@@ -472,12 +518,12 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
     </section>
 
     <section class="sc-panel" aria-label="Simulation ledger">
-        <h2>Simulation ledger <small>the SPH run's own bookkeeping — kinetic, thermal, potential, total, and what radiation reaction removed</small></h2>
+        <h2>Simulation ledger <small>the SPH run's own bookkeeping — kinetic, shock-thermal, cold (polytropic), potential, total, and what radiation reaction removed</small></h2>
         <canvas data-sc-chart="energy" aria-label="Energy ledger"></canvas>
         <dl class="sc-kv">
             <dt>SPH vs fit</dt><dd data-sc="sphVsFit">—</dd>
         </dl>
-        <p class="sc-note">Momentum is conserved to round-off by construction (antisymmetric pair forces). Energy is conserved to leapfrog accuracy through the inspiral and drifts by a few percent per dynamical time once the remnant forms — adaptive smoothing lengths without the grad-h correction terms. The dashed green line adds back the radiated E_gw; the gap between it and the starting energy is the numerical drift, printed on the stage.</p>
+        <p class="sc-note">Momentum is conserved to round-off by construction (antisymmetric pair forces). The total includes the <em>cold</em> internal energy of the polytropic EOS, K ρ<sup>Γ−1</sup>/(Γ−1) per unit mass — the stars store energy in it as they are squeezed, and a ledger without it is not a conserved quantity (it read ~7 % "drift" through a merger that actually conserves to ~1 %). What remains is adaptive smoothing lengths without the grad-h correction terms. The dashed green line adds back the radiated E_gw; the gap between it and the starting energy is the numerical drift, printed on the stage.</p>
     </section>
 </div>
 
@@ -492,7 +538,7 @@ kbd { font-family:var(--sc-mono); font-size:.64rem; border:1px solid rgba(var(--
     <p>TaylorT4 — the 3.5PN energy-flux balance re-expanded in x = (Mω)^{2/3} (Buonanno et al. 2009) — with the leading spin–orbit coefficient for aligned spins and the leading tidal term, whose coefficient (39/8)Λ̃ was re-derived from the tidal potential rather than copied (the derivation is in the test file). It stops at contact, evaluated with the 1PN harmonic separation, or at the test-particle ISCO, and says which. The wide, eccentric pulsar binaries in the catalogue get Peters' (1964) closed-form merger time instead, pinned to the Hulse–Taylor pulsar's 300 Myr. Spin–spin, precession and higher tidal orders are not modelled.</p>
 
     <h3>The merger engine</h3>
-    <p>Rust compiled to WebAssembly, running in a Web Worker (<code>rust-star-collider/</code>, <code>cargo test</code> is the physics gate). Stars are Lane–Emden polytropes at the radius the TOV builder gave them, placed as a stretched lattice and relaxed with velocity damping. The hydrodynamics is cubic-spline SPH with an adaptive smoothing length, the symmetric pressure force (exact momentum conservation), Monaghan artificial viscosity, and the hybrid cold + thermal equation of state used by the first generation of merger codes (Janka et al. 1993; Bauswein et al. 2010): the polytrope is adiabatic and only shocks heat the gas. Gravity is direct summation with Plummer softening — no tree, hence the particle budget. A black hole is a point mass in a Paczyński–Wiita potential (ISCO at 6M for free) with a sink that absorbs mass and momentum. The inspiral is driven by the 2.5PN radiation-reaction acceleration of Lincoln &amp; Will (1990) applied to the two bodies' cores as a uniform kick and integrated as E_gw; it fades once the bodies overlap. The gravitational-wave strain is the quadrupole formula evaluated from the particle accelerations, so it is exact for the Newtonian dynamics and noise-free. <strong>It is not general relativity:</strong> no GR hydrodynamics, neutrinos or magnetic fields, and the remnant's post-merger oscillation frequencies are Newtonian ones. A pinned test shows two point black holes decaying at Peters' rate to within 5 % and the 1PN orbit conserving energy to 10⁻⁸ per orbit.</p>
+    <p>Rust compiled to WebAssembly, running in a Web Worker (<code>rust-star-collider/</code>, <code>cargo test</code> is the physics gate). Stars are Lane–Emden polytropes at the radius the TOV builder gave them, placed as a stretched lattice and relaxed with velocity damping. The hydrodynamics is cubic-spline SPH with an adaptive smoothing length, the symmetric pressure force (exact momentum conservation), Monaghan artificial viscosity limited by the Balsara (1995) switch so a rotating remnant's shear is not mistaken for a shock, and the hybrid cold + thermal equation of state used by the first generation of merger codes (Janka et al. 1993; Bauswein et al. 2010): the polytrope is adiabatic and only shocks heat the gas. Gravity is direct summation with Plummer softening — no tree, hence the particle budget. A black hole is a point mass in a Paczyński–Wiita potential (ISCO at 6M for free) with a sink that absorbs mass and momentum. The inspiral is driven by the 2.5PN radiation-reaction acceleration of Lincoln &amp; Will (1990) applied to the two bodies' cores as a uniform kick and integrated as E_gw; it fades once the bodies overlap. The gravitational-wave strain is the quadrupole formula evaluated from the particle accelerations, so it is exact for the Newtonian dynamics and noise-free. <strong>It is not general relativity:</strong> no GR hydrodynamics, neutrinos or magnetic fields, and the remnant's post-merger oscillation frequencies are Newtonian ones. A pinned test shows two point black holes decaying at Peters' rate to within 5 % and the 1PN orbit conserving energy to 10⁻⁸ per orbit.</p>
 
     <h3>Aftermath</h3>
     <ul>

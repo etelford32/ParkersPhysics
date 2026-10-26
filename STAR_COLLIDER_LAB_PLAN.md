@@ -122,9 +122,24 @@ jitter only).
 
 Is not: GR hydrodynamics, a nuclear EOS in the hydro (the polytrope is
 fitted to the TOV radius), neutrinos, magnetic fields, a tree code (O(N²):
-~2.5 ms/step at 400 particles in Node, ~25 ms at 1200). Energy drifts a few
-percent per dynamical time once the remnant forms (adaptive h without
-grad-h). Post-merger GW emission is measured but not fed back (the bulk
+~2.5 ms/step at 400 particles in Node, ~25 ms at 1200).
+
+ENERGY LEDGER (2026-10, measured on a 300 + 300 GW170817-like merger):
+E_total now includes the COLD internal energy Σ m Kρ^{Γ−1}/(Γ−1) (diag 40).
+Without it the ledger read ~7 % "drift" through contact that was not drift
+at all — the stars store energy in the polytropic part as they are squeezed
+(tests/physics.rs `cold_energy_closes_the_ledger`: 7.3 % → 1.2 %). What is
+LEFT is a slow remnant-phase drift of ~−0.15 to −0.25 % per 100 code-time
+units that grows with the step (dt 0.5 → 1.34: −3.1 % → −5.3 % over the
+same 2000 units). Two causes were tested: freezing each particle's
+gravitational softening at its post-relaxation h does NOT remove it (the
+slope is unchanged — do not re-try), which leaves the lagged adaptive h
+(relaxed halfway per step, no grad-h Ω terms) — the roadmap's grad-h item.
+
+VISCOSITY: Monaghan Π is limited by the Balsara (1995) switch (on by
+default; `balsara: false` / flag bit 2 for the A/B). Measured: shear heating
+of a differentially rotating star cut to 0.34–0.41× (N = 300 and 800 — the
+residual is SPH's own ∇·v noise), head-on shock heating 0.997×. Post-merger GW emission is measured but not fed back (the bulk
 two-body term fades once the cores overlap).
 
 ## 5. Gates

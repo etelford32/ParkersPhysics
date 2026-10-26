@@ -248,6 +248,37 @@ test.describe('Star Collider Lab', () => {
         }
         await page.locator('[data-sc-control="pathlines"]').uncheck();
         await page.waitForFunction(() => !window.__starCollider.scene.state.pathlines, null, { timeout: 5000 });
+
+        // Run bar: only the applicable one of Pause/Resume, the verb, the phase chip.
+        await expect(page.locator('[data-sc-control="pause"]')).toBeVisible();
+        await expect(page.locator('[data-sc-control="pause"]')).toBeEnabled();
+        await expect(page.locator('[data-sc-control="resume"]')).toBeHidden();
+        await expect(page.locator('[data-sc-control="run"]')).toHaveText(/Rebuild/);
+        expect(['inspiral', 'contact', 'merged']).toContain(await page.locator('.sc-phase').getAttribute('data-phase'));
+
+        // The colour key follows the mode.
+        await page.selectOption('[data-sc-control="colorMode"]', 'mixing');
+        await expect(page.locator('.sc-legend')).toHaveAttribute('data-mode', 'mixing');
+        await expect(page.locator('[data-sc="legendHi"]')).toHaveText(/50 % mixed/);
+
+        // Run stats fold and unfold (they used to cover the bottom of the stage).
+        const statsOpen = () => page.evaluate(() => document.querySelector('#sc-stage-wrap').classList.contains('sc-stats-open'));
+        const before = await statsOpen();
+        await page.locator('[data-sc-control="statsToggle"]').click();
+        expect(await statsOpen()).toBe(!before);
+        await expect(page.locator('[data-sc-control="statsToggle"]')).toHaveAttribute('aria-expanded', String(!before));
+
+        // GW ripples: the sheet is drawn from the kernel's own Q̈ history, and the
+        // Waves view pulls back to frame it (λ_GW is ~100× the stars).
+        await page.waitForFunction(() => { const v = window.__starCollider.scene.state; return v.rippleVisible && v.gwSamples > 1 && v.gwPeak > 0 && v.gwLambda > 0; }, null, { timeout: 60000 });
+        await expect(page.locator('[data-sc="stageWaves"]')).toHaveText(/λ_GW now .* km/);
+        const camDist = () => page.evaluate(() => { const s = window.__starCollider.scene; return s.camera.position.distanceTo(s.controls.target); });
+        const d0 = await camDist();
+        await page.locator('[data-sc-control="viewWaves"]').click();
+        await page.waitForFunction(() => !window.__starCollider.scene.state.tweening, null, { timeout: 10000 });
+        const want = await page.evaluate(() => { const s = window.__starCollider.scene; return 0.85 * s.state.rippleRmax / s.codePerScene; });
+        const d1 = await camDist();
+        expect(d1, `waves view distance ${d1} vs sheet radius ${want}`).toBeGreaterThan(Math.max(1.5 * d0, want));
         // Stage painted: the WebGL canvas has non-background pixels somewhere in the middle.
         const painted = await page.evaluate(() => {
             const c = document.querySelector('#sc-stage canvas');
@@ -269,6 +300,9 @@ test.describe('Star Collider Lab', () => {
         expect(fb.display).toBe('none');
         await page.locator('[data-sc-control="pause"]').click();
         await expect(page.locator('[data-sc="simStatus"]')).toHaveText(/paused/);
+        await expect(page.locator('[data-sc-control="resume"]')).toBeVisible();
+        await expect(page.locator('[data-sc-control="pause"]')).toBeHidden();
+        await expect(page.locator('.sc-phase')).toHaveAttribute('data-phase', 'paused');
         expect(errors, 'errors during the run').toEqual([]);
     });
 });

@@ -98,7 +98,10 @@ function tick() {
         const before = kernel.time();
         steps += kernel.advance(Math.min(target / 4, target), 4, dtMax);
         const d = kernel.diagnostics();
-        gwBuffer.push({ t: d.time, hp: d.qxx - d.qyy, hx: 2 * d.qxy, sep: d.separation });
+        // hp/hx: face-on strain; qxx…qzz: the full traceless Q̈ in the orbital
+        // plane, which the stage's ripple sheet projects onto every in-plane
+        // direction at retarded time.
+        gwBuffer.push({ t: d.time, hp: d.qxx - d.qyy, hx: 2 * d.qxy, sep: d.separation, qxx: d.qxx, qyy: d.qyy, qzz: d.qzz, qxy: d.qxy, omega: d.omega });
         if (kernel.time() - before <= 0) break;
         if (kernel.time() >= before + target) break;
     }

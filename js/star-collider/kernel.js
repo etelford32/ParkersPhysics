@@ -26,6 +26,10 @@ export const DIAG = Object.freeze({
     cmAx: 20, cmAy: 21, cmAz: 22, cmBx: 23, cmBy: 24, cmBz: 25,
     steps: 26, pMax: 27, uMax: 28, omega: 29, pnWeight: 30, rrPower: 31, eGw: 32,
     aliveMassA: 33, aliveMassB: 34, massA: 35, massB: 36, rsA: 37, rsB: 38, nTotal: 39,
+    // eTotal (7) INCLUDES eCold since 2026-10: the hybrid EOS's polytropic
+    // part stores energy as the stars are squeezed, and without it the
+    // ledger read ~7 % 'drift' through a merger that was conserving to ~1 %.
+    eCold: 40,
 });
 
 export async function loadKernel(source) {
@@ -54,8 +58,9 @@ export async function loadKernel(source) {
     const kernel = {
         maxParticles, diagSlots, frameStride,
         init() { x.sc_init(); },
-        setParams({ c = 1, alpha = 1, beta = 2, gammaTh = 1.75, etaH = 1.3, cfl = 0.3, pn1 = false, pn25 = true, sinkFactor = 1.5 } = {}) {
-            x.sc_set_params(c, alpha, beta, gammaTh, etaH, cfl, (pn1 ? 1 : 0) | (pn25 ? 2 : 0), sinkFactor);
+        setParams({ c = 1, alpha = 1, beta = 2, gammaTh = 1.75, etaH = 1.3, cfl = 0.3, pn1 = false, pn25 = true, sinkFactor = 1.5, balsara = true } = {}) {
+            // flag bit 2 switches the Balsara viscosity limiter OFF (on by default)
+            x.sc_set_params(c, alpha, beta, gammaTh, etaH, cfl, (pn1 ? 1 : 0) | (pn25 ? 2 : 0) | (balsara ? 0 : 4), sinkFactor);
         },
         setBody(idx, { kind = 'star', mass, radius, gamma = 2 }) {
             x.sc_set_body(idx, kind === 'bh' ? 1 : 0, mass, radius, gamma);

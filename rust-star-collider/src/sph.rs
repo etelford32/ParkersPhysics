@@ -17,7 +17,14 @@
 //!     smoothing length h = η (m/ρ)^{1/3} relaxed toward its target each
 //!     step, symmetric pressure force with pair-averaged h (exact momentum
 //!     conservation), Monaghan 1992 artificial viscosity (α, β) with the
-//!     standard 0.01h² regulariser.
+//!     standard 0.01h² regulariser, limited by the BALSARA (1995) switch
+//!     f = |∇·v| / (|∇·v| + |∇×v| + 10⁻⁴ c_s/h), Π_ij × ½(f_i + f_j): the
+//!     Monaghan term fires for ANY approaching pair, including pure shear,
+//!     so without the switch a differentially rotating remnant is heated
+//!     and spun down by viscosity that is not there (measured in
+//!     tests/physics.rs: shear heating cut 2.5–2.8×, shock heating kept to
+//!     0.3 %; the residual is SPH's own ∇·v noise, which no switch of this
+//!     kind can tell from compression).
 //!   * Hybrid EOS (Janka+ 1993; Bauswein+ 2010): p = K ρ^Γ + (Γ_th − 1) ρ u.
 //!     The cold part is adiabatic by construction; only the thermal part
 //!     does pdV work on u, and only shocks (the viscosity) heat it. u is the
@@ -37,6 +44,11 @@
 //!   * GW extraction: Q̈_ij from Σ m (2 v_i v_j + x_i a_j + x_j a_i), exact
 //!     given the accelerations — no finite differencing, no noise.
 //!   * Unbound mass: Bernoulli ½v² + Φ + u > 0 over the star particles.
+//!   * ENERGY LEDGER: E_total = E_kin + E_thermal + E_COLD + E_pot. The cold
+//!     part of the hybrid EOS stores K ρ^{Γ−1}/(Γ−1) per unit mass and does
+//!     work as the stars are squeezed; it is not in u, so a ledger without
+//!     it is not a conserved quantity at all (measured on a 300 + 300 merger:
+//!     the 'drift' read 7 % without the term and ~1 % with it).
 //!
 //! WHAT IS NOT. No GR hydrodynamics, no neutrinos, no magnetic fields, no
 //! nuclear EOS in the hydro (the TOV builder in JS supplies the radius the
@@ -48,7 +60,7 @@ use crate::lane_emden::Polytrope;
 use core::f64::consts::PI;
 
 pub const MAX_N: usize = 8192;
-pub const DIAG_SLOTS: usize = 40;
+pub const DIAG_SLOTS: usize = 41;
 /// Render-frame fields per particle: x, y, z, log10 ρ, u, flags (star id + 2·unbound).
 pub const FRAME_STRIDE: usize = 6;
 
@@ -114,6 +126,8 @@ pub struct Params {
     pub pn1: bool,
     pub pn25: bool,
     pub sink_factor: f64,
+    /// Balsara shear limiter on the artificial viscosity (default on).
+    pub balsara: bool,
 }
 
 impl Params {
@@ -124,7 +138,7 @@ impl Params {
         // would add back +0.18) and the truncated force stalls the merger at
         // the contact radius. It stays available as an experimental toggle for
         // the periastron advance on wide orbits, where γ ≲ 0.05 and it is fine.
-        Params { c: 1.0, alpha: 1.0, beta: 2.0, gamma_th: 1.75, eta_h: 1.3, cfl: 0.3, pn1: false, pn25: true, sink_factor: 1.5 }
+        Params { c: 1.0, alpha: 1.0, beta: 2.0, gamma_th: 1.75, eta_h: 1.3, cfl: 0.3, pn1: false, pn25: true, sink_factor: 1.5, balsara: true }
     }
 }
 
@@ -140,6 +154,8 @@ pub struct Sim {
     pub h: Vec<f64>,
     pub p: Vec<f64>,
     pub cs: Vec<f64>,
+    /// Balsara factor f ∈ [0, 1] per particle (1 = pure compression).
+    pub fbal: Vec<f64>,
     pub phi: Vec<f64>,
     pub star: Vec<u8>,
     pub alive: Vec<u8>,
@@ -212,6 +228,7 @@ impl Sim {
             h: vec![0.0; MAX_N],
             p: vec![0.0; MAX_N],
             cs: vec![0.0; MAX_N],
+            fbal: vec![1.0; MAX_N],
             phi: vec![0.0; MAX_N],
             star: vec![0; MAX_N],
             alive: vec![0; MAX_N],
@@ -500,7 +517,14 @@ impl Sim {
             let zi = self.pos[3 * i + 2];
             let r2max = 4.0 * hi * hi;
             let si = self.star[i];
+            let vxi = self.vel[3 * i];
+            let vyi = self.vel[3 * i + 1];
+            let vzi = self.vel[3 * i + 2];
             let mut rho = 0.0;
+            // Σ m_j (v_j − v_i)·∇_i W and Σ m_j (v_j − v_i) × ∇_i W, both with
+            // h_i (the gather kernel); ÷ ρ_i below gives ∇·v and ∇×v.
+            let mut divs = 0.0;
+            let mut curl = [0.0f64; 3];
             for j in 0..n {
                 if self.alive[j] == 0 || (!mutual && self.star[j] != si) {
                     continue;
@@ -510,10 +534,30 @@ impl Sim {
                 let dz = zi - self.pos[3 * j + 2];
                 let r2 = dx * dx + dy * dy + dz * dz;
                 if r2 < r2max {
-                    rho += self.mass[j] * kernel_w(r2.sqrt(), hi);
+                    let r = r2.sqrt();
+                    let mj = self.mass[j];
+                    rho += mj * kernel_w(r, hi);
+                    if r > 1e-12 {
+                        let g = kernel_dw(r, hi) / r; // ∇_i W = g · (x_i − x_j)
+                        let (gx, gy, gz) = (g * dx, g * dy, g * dz);
+                        let ux = self.vel[3 * j] - vxi;
+                        let uy = self.vel[3 * j + 1] - vyi;
+                        let uz = self.vel[3 * j + 2] - vzi;
+                        divs += mj * (ux * gx + uy * gy + uz * gz);
+                        curl[0] += mj * (uy * gz - uz * gy);
+                        curl[1] += mj * (uz * gx - ux * gz);
+                        curl[2] += mj * (ux * gy - uy * gx);
+                    }
                 }
             }
             self.rho[i] = rho.max(1e-12);
+            let inv = 1.0 / self.rho[i];
+            let div = (divs * inv).abs();
+            let rot = (curl[0] * curl[0] + curl[1] * curl[1] + curl[2] * curl[2]).sqrt() * inv;
+            // c_s/h uses last step's values (set below); the 10⁻⁴ term only
+            // keeps a static fluid (div = curl = 0) from dividing by zero.
+            let floor = 1e-4 * self.cs[i] / hi.max(1e-12);
+            self.fbal[i] = if div + rot + floor > 0.0 { div / (div + rot + floor) } else { 1.0 };
         }
         // Relax h toward η (m/ρ)^{1/3}, and set the EOS.
         let gth = self.params.gamma_th;
@@ -547,6 +591,7 @@ impl Sim {
         let beta = self.params.beta;
         let gth = self.params.gamma_th;
         let mutual = self.mutual;
+        let balsara = self.params.balsara;
         for i in 0..n {
             if self.alive[i] == 0 {
                 continue;
@@ -565,6 +610,7 @@ impl Sim {
             let ui = self.u[i].max(0.0);
             let pth_i = (gth - 1.0) * rhoi * ui;
             let si = self.star[i];
+            let fbi = self.fbal[i];
             let (mut axi, mut ayi, mut azi, mut dui, mut phii) = (0.0, 0.0, 0.0, 0.0, 0.0);
             for j in (i + 1)..n {
                 if self.alive[j] == 0 {
@@ -609,6 +655,9 @@ impl Sim {
                         let cij = 0.5 * (csi + self.cs[j]);
                         let rhoij = 0.5 * (rhoi + rhoj);
                         visc = (-alpha * cij * mu + beta * mu * mu) / rhoij;
+                        if balsara {
+                            visc *= 0.5 * (fbi + self.fbal[j]);
+                        }
                     }
                     let fac = pi_ / (rhoi * rhoi) + pj / (rhoj * rhoj) + visc;
                     axi -= mj * fac * dw * dx;
@@ -964,6 +1013,7 @@ impl Sim {
         let n = self.n;
         let mut ekin = 0.0;
         let mut eth = 0.0;
+        let mut ecold = 0.0;
         let mut epot = 0.0;
         let mut lz = 0.0;
         let mut rho_max = 0.0;
@@ -996,6 +1046,11 @@ impl Sim {
             let v2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
             ekin += 0.5 * m * v2;
             eth += m * self.u[i];
+            {
+                // cold specific energy of the polytropic part: K ρ^{Γ−1}/(Γ−1)
+                let b = self.bodies[self.star[i] as usize];
+                ecold += m * b.k_poly * self.rho[i].powf(b.gamma - 1.0) / (b.gamma - 1.0);
+            }
             epot += 0.5 * m * self.phi[i];
             lz += m * (x[0] * v[1] - x[1] * v[0]);
             if self.rho[i] > rho_max {
@@ -1069,7 +1124,7 @@ impl Sim {
         d[4] = ekin;
         d[5] = eth;
         d[6] = epot;
-        d[7] = ekin + eth + epot;
+        d[7] = ekin + eth + ecold + epot;
         d[8] = lz;
         d[9] = rho_max;
         d[10] = m_unbound;
@@ -1102,6 +1157,7 @@ impl Sim {
         d[37] = self.bodies[0].rs;
         d[38] = self.bodies[1].rs;
         d[39] = n as f64;
+        d[40] = ecold;
     }
 
     /// Pack a render frame: [x, y, z, log10 ρ, u, flags] per particle, where

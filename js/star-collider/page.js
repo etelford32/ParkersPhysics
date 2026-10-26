@@ -447,6 +447,7 @@ export function initStarColliderPage(doc = document) {
                 scene.setPointScale(num('pointScale', 1));
                 scene.setCorotating(!!val('frameCorotating'));
                 scene.setStreaks(!!val('streaks')); scene.setPathlines(!!val('pathlines')); scene.setContacts(!!val('contacts'));
+                scene.setRipples(!!val('ripples'));
                 if (fallback) fallback.hidden = true;
                 if (state.sim.frame) pushFrameToScene(state.sim.frame, state.sim.diag, state.sim.bodies);
                 else renderPreview();
@@ -487,11 +488,11 @@ export function initStarColliderPage(doc = document) {
         const dtMax = smallest ? 0.12 * dyn : dyn;
         const corotate = !!val('corotate');
         const omega = Math.sqrt(d.M / sepCode ** 3);
-        state.sim = { ...state.sim, status: 'building', n: 0, frames: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, dtMax, builtAt: performance.now(), frame: null, perf: null };
+        state.sim = { ...state.sim, status: 'building', n: 0, frames: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, tContact: null, dtMax, builtAt: performance.now(), frame: null, perf: null };
         renderHud();
         worker.postMessage({
             type: 'setup', seed: 7,
-            params: { c: 1, alpha: num('viscosity', 1), beta: 2 * num('viscosity', 1), gammaTh: num('gammaTh', 1.75), pn1: !!val('pn1'), pn25: !!val('pn25'), sinkFactor: 1.5 },
+            params: { c: 1, alpha: num('viscosity', 1), beta: 2 * num('viscosity', 1), gammaTh: num('gammaTh', 1.75), pn1: !!val('pn1'), pn25: !!val('pn25'), balsara: !!val('balsara'), sinkFactor: 1.5 },
             bodies, orbit: { sep: sepCode, ecc: state.eccentricity, spinA: corotate && bodies[0].kind === 'star' ? omega : 0, spinB: corotate && bodies[1].kind === 'star' ? omega : 0, pnCirc: !!val('pn1') },
             relax: { steps: 60, dtMax: 0.5 * dtMax, damping: 0.05 },
         });
@@ -507,7 +508,7 @@ export function initStarColliderPage(doc = document) {
     }
     function resetSim() {
         worker?.postMessage({ type: 'pause' });
-        state.sim = { ...state.sim, status: 'idle', n: 0, diag: null, interactions: null, bodies: null, gw: [], energy: [], e0: null, merged: false, frame: null, perf: null };
+        state.sim = { ...state.sim, status: 'idle', n: 0, diag: null, interactions: null, tContact: null, bodies: null, gw: [], energy: [], e0: null, merged: false, frame: null, perf: null };
         scene?.clear();
         renderPreview();
         renderHud(); drawCharts(); set('sphVsFit', sphVsFitText());
@@ -520,6 +521,7 @@ export function initStarColliderPage(doc = document) {
             state.sim.n = msg.n; state.sim.status = 'running'; state.sim.bodies = msg.bodies; state.sim.diag = msg.diag; state.sim.frame = msg.frame;
             state.sim.e0 = msg.diag.eTotal; state.sim.relaxMs = msg.relaxMs; state.sim.frameStride = msg.frameStride || state.sim.frameStride || 6;
             scene?.clearTrails();
+            scene?.clearGW();
             takeInteractions(msg);
             pushFrameToScene(msg.frame, msg.diag, msg.bodies);
             scene?.frameSystem({ animate: false });
@@ -533,9 +535,10 @@ export function initStarColliderPage(doc = document) {
             takeInteractions(msg);
             if (msg.frame) { s.frame = msg.frame; pushFrameToScene(msg.frame, msg.diag, msg.bodies); }
             for (const g of msg.gw) s.gw.push(g);
+            scene?.pushGW(msg.gw);
             if (s.gw.length > 6000) s.gw = s.gw.slice(-6000);
             if (s.frames % 2 === 0) {
-                s.energy.push({ t: msg.diag.time, eKin: msg.diag.eKin, eThermal: msg.diag.eThermal, ePot: msg.diag.ePot, eTotal: msg.diag.eTotal, eGw: msg.diag.eGw });
+                s.energy.push({ t: msg.diag.time, eKin: msg.diag.eKin, eThermal: msg.diag.eThermal, ePot: msg.diag.ePot, eTotal: msg.diag.eTotal, eGw: msg.diag.eGw, eCold: msg.diag.eCold });
                 if (s.energy.length > 1500) s.energy = s.energy.filter((_, i) => i % 2 === 0);
             }
             const [A, B] = state.profiles;
@@ -589,6 +592,22 @@ export function initStarColliderPage(doc = document) {
         if (!state.sim.previewFramed) { scene.frameSystem({ animate: false }); state.sim.previewFramed = true; }
     }
     const FOLLOW_LABEL = { system: 'following the system barycentre', A: 'following core A', B: 'following core B', none: 'fixed on the origin' };
+    // The on-stage colour key: what the two ends of the active palette mean.
+    const LEGEND = {
+        density: { name: 'density (log ρ, top 3 decades)', lo: 'ρ_max / 1000', hi: 'ρ_max' },
+        heat: { name: 'accumulated shock heat u', lo: 'cold', hi: 'shock-heated' },
+        body: { name: 'which star the gas came from', lo: 'star A', hi: 'star B' },
+        bound: { name: 'bound vs unbound (Bernoulli)', lo: 'bound', hi: 'ejecta' },
+        velocity: { name: 'motion vs the barycentre', lo: 'infall', hi: 'outflow' },
+        compression: { name: '∇·v — squeezed or expanding', lo: 'compressing', hi: 'expanding' },
+        mixing: { name: 'A–B interpenetration', lo: 'unmixed', hi: '50 % mixed' },
+        shocking: { name: 'viscous heating rate now', lo: 'none', hi: 'peak (p98)' },
+    };
+    function wavesText(v) {
+        if (!v.ripples) return 'ripples off (G)';
+        if (!v.rippleVisible) return 'GW ripples appear once the run has an orbit of history';
+        return `h₊(t − r/c)/r on the orbital plane from the kernel's Q̈ · λ_GW now ${fmt.km(v.gwLambda * GEOM_KM)} · sheet ${fmt.km(v.rippleRmax * GEOM_KM)} · faded inside λ/2π (near zone) · height = h₊, colour = r·h₊ (falloff removed; red +, blue −), both normalised to the strongest wave on the sheet — a symbol, the true strain at Earth is ~10⁻²² · W pulls back`;
+    }
     const COLOUR_LABEL = {
         density: 'log₁₀ ρ, top 3 decades · shock heat → orange', heat: 'shock heating u · blue → white → red',
         body: 'body A cyan · body B magenta', bound: 'bound dim · unbound ejecta green (Bernoulli, same flag as M_unbound)',
@@ -598,17 +617,37 @@ export function initStarColliderPage(doc = document) {
         shocking: 'viscous heating RATE (Monaghan Π, the kernel\'s own) · where shocks work now',
     };
     function renderViewState() {
-        if (!scene) { set('stageFrame', 'stage unavailable'); set('stageColour', '—'); set('stageDetail', '—'); return; }
+        const mode = scene?.state.colorMode || val('colorMode') || 'density';
+        const L = LEGEND[mode] || LEGEND.density;
+        set('legendName', L.name); set('legendLo', L.lo); set('legendHi', L.hi);
+        const legend = $('.sc-legend'); if (legend) legend.dataset.mode = mode;
+        if (!scene) { set('stageFrame', 'stage unavailable'); set('stageColour', '—'); set('stageDetail', '—'); set('stageWaves', 'stage unavailable'); return; }
         const v = scene.state;
-        set('stageFrame', `${v.corotating ? 'corotating frame (cores held on x)' : 'inertial frame'} · ${FOLLOW_LABEL[v.follow] || v.follow} · ${v.view} view${v.trails ? ' · trails' : ''}${v.streaks ? ' · streaks' : ''}${v.pathlines ? ' · pathlines' : ''}${v.contacts ? ' · contacts' : ''}`);
+        set('stageFrame', `${v.corotating ? 'corotating frame (cores held on x)' : 'inertial frame'} · ${FOLLOW_LABEL[v.follow] || v.follow} · ${v.view} view${v.trails ? ' · trails' : ''}${v.streaks ? ' · streaks' : ''}${v.pathlines ? ' · pathlines' : ''}${v.contacts ? ' · contacts' : ''}${v.ripples ? ' · GW ripples' : ''}`);
         set('stageColour', COLOUR_LABEL[v.colorMode] || v.colorMode);
         set('stageDetail', `${v.detail}${v.hdr ? ' · HDR' : ''} · ${v.children} sub-sprites / particle${v.software ? ' · software GL' : ''}`);
         set('pointScaleOut', `${v.pointScale.toFixed(1)}×`);
         const sync = (key, value) => { const el = ctl(key); if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = !!value; else el.value = String(value); } };
         sync('follow', v.follow); sync('colorMode', v.colorMode); sync('frameCorotating', v.corotating); sync('trails', v.trails); sync('pointScale', v.pointScale);
-        sync('streaks', v.streaks); sync('pathlines', v.pathlines); sync('contacts', v.contacts);
+        sync('streaks', v.streaks); sync('pathlines', v.pathlines); sync('contacts', v.contacts); sync('ripples', v.ripples);
+        set('stageWaves', wavesText(v));
     }
+    // ── Run statistics fold (remembered per browser; storage may be blocked) ──
+    const stageWrap = $('#sc-stage-wrap');
+    function setStatsOpen(open) {
+        stageWrap?.classList.toggle('sc-stats-open', !!open);
+        const b = ctl('statsToggle');
+        if (b) { b.setAttribute('aria-expanded', open ? 'true' : 'false'); b.textContent = open ? '▾ Run stats' : '▸ Run stats'; }
+        try { localStorage.setItem('sc_stats_open', open ? '1' : '0'); } catch { /* private mode */ }
+    }
+    {
+        let open = false;
+        try { open = localStorage.getItem('sc_stats_open') === '1'; } catch { /* ignore */ }
+        setStatsOpen(open);
+    }
+    ctl('statsToggle')?.addEventListener('click', () => setStatsOpen(!stageWrap?.classList.contains('sc-stats-open')));
     function onSceneCommand(cmd) {
+        if (cmd === 'toggleStats') { setStatsOpen(!stageWrap?.classList.contains('sc-stats-open')); return; }
         if (cmd === 'togglePause') {
             if (state.sim.status === 'running') { worker?.postMessage({ type: 'pause' }); state.sim.status = 'paused'; renderHud(); }
             else if (state.sim.status === 'paused') { worker?.postMessage({ type: 'resume' }); state.sim.status = 'running'; renderHud(); }
@@ -626,14 +665,53 @@ export function initStarColliderPage(doc = document) {
     ctl('trails')?.addEventListener('change', () => scene?.setTrails(!!val('trails')));
     ctl('detail')?.addEventListener('change', () => scene?.setDetail(val('detail')));
     ctl('streaks')?.addEventListener('change', () => scene?.setStreaks(!!val('streaks')));
+    ctl('ripples')?.addEventListener('change', () => scene?.setRipples(!!val('ripples')));
+    ctl('viewWaves')?.addEventListener('click', () => scene?.setView('waves'));
     ctl('pathlines')?.addEventListener('change', () => scene?.setPathlines(!!val('pathlines')));
     ctl('contacts')?.addEventListener('change', () => scene?.setContacts(!!val('contacts')));
     ctl('pointScale')?.addEventListener('input', () => { scene?.setPointScale(num('pointScale', 1)); set('pointScaleOut', `${num('pointScale', 1).toFixed(1)}×`); });
 
+    /**
+     * The run bar's own state: ONE of Pause/Resume (the one that applies),
+     * the primary button's verb, and a phase chip that says where the run is
+     * — inspiral, contact (the bulk-PN driver fading as the cores overlap),
+     * merged remnant — next to the button that started it.
+     */
+    function renderRunBar() {
+        const s = state.sim, d = s.diag;
+        const pb = ctl('pause'), rb = ctl('resume'), run = ctl('run');
+        if (pb && rb) {
+            const paused = s.status === 'paused';
+            pb.hidden = paused; rb.hidden = !paused;
+            pb.disabled = s.status !== 'running';
+        }
+        if (run) run.textContent = s.status === 'idle' ? '▶ Build & run' : '↻ Rebuild & run';
+        let phase = 'idle', text;
+        if (s.status === 'error') { phase = 'error'; text = `error — ${s.error || 'the engine stopped'}`; }
+        else if (s.status === 'building') { phase = 'building'; text = `building ${parseInt(val('particles'), 10) || 600} particles per star and relaxing them to equilibrium…`; }
+        else if (s.status === 'idle') {
+            text = s.engine === 'loading' ? 'loading the WASM merger engine…'
+                : s.engine === 'unavailable' ? 'merger engine unavailable here — the analytic results below still update'
+                    : 'ready — pick a pair, then Build & run';
+        } else if (d) {
+            const w = Number.isFinite(d.pnWeight) ? d.pnWeight : 1;
+            if (w < 1 && s.tContact == null) s.tContact = d.time;
+            const sinceContact = s.tContact != null ? (d.time - s.tContact) * GEOM_S * 1e3 : 0;
+            if (s.status === 'merged') { phase = 'merged'; text = 'merged — horizons touching; the aftermath fits are below'; }
+            else if (s.merged || (s.tContact != null && w <= 0)) { phase = 'merged'; text = `merged remnant · ${sinceContact.toFixed(2)} ms after contact`; }
+            else if (w < 1) { phase = 'contact'; text = `contact — the stars are touching (sep ${fmt.km(d.separation * GEOM_KM)})`; }
+            else { phase = 'inspiral'; text = `inspiral · separation ${fmt.km(d.separation * GEOM_KM)} · f_GW ${fmt.hz(Math.abs(d.omega) / Math.PI / GEOM_S)}`; }
+            if (s.status === 'paused') { phase = 'paused'; text = `paused · ${text}`; }
+        } else text = s.status;
+        set('runPhase', text);
+        const chip = $('.sc-phase'); if (chip) chip.dataset.phase = phase;
+    }
     function renderHud() {
         const s = state.sim, d = s.diag;
         set('simEngine', { loading: 'loading kernel…', wasm: 'WASM · Rust SPH kernel', unavailable: 'unavailable — analytic engine only' }[s.engine] || s.engine);
         set('simStatus', { idle: 'idle — Build & run to start', building: `building ${parseInt(val('particles'), 10) || 600} particles per star + relaxing…`, running: s.merged ? 'running · merged' : 'running · inspiral', paused: 'paused', merged: 'merged — horizons touching; see the aftermath fits', error: `error: ${s.error || ''}` }[s.status] || s.status);
+        renderRunBar();
+        if (scene) set('stageWaves', wavesText(scene.state));
         if (!d) { for (const k of ['simTime', 'simSep', 'simFreq', 'simN', 'simSteps', 'simRate', 'simUnbound', 'simAccreted', 'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'simContact']) set(k, '—'); return; }
         {
             const ia = s.interactions, v = scene?.state;

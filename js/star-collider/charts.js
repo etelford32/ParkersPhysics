@@ -214,7 +214,8 @@ export function drawKilonova(canvas, kn, extraLabel = '') {
 export function drawEnergy(canvas, series) {
     if (!series || series.length < 2) { prep(canvas); return; }
     let lo = Infinity, hi = -Infinity;
-    for (const s of series) for (const k of ['eKin', 'eThermal', 'ePot', 'eTotal']) { lo = Math.min(lo, s[k]); hi = Math.max(hi, s[k]); }
+    const keys = ['eKin', 'eThermal', 'ePot', 'eTotal'].concat(series.some(s => Number.isFinite(s.eCold)) ? ['eCold'] : []);
+    for (const s of series) for (const k of keys) if (Number.isFinite(s[k])) { lo = Math.min(lo, s[k]); hi = Math.max(hi, s[k]); }
     if (!(hi > lo)) { hi = lo + 1; }
     const pad = 0.08 * (hi - lo);
     const p = plot(canvas, { min: series[0].t, max: Math.max(series[series.length - 1].t, series[0].t + 1e-6), label: 't  (code units)' },
@@ -222,8 +223,9 @@ export function drawEnergy(canvas, series) {
     p.line(series.map(s => [s.t, s.ePot]), C.blue, 1.2);
     p.line(series.map(s => [s.t, s.eKin]), C.amber, 1.2);
     p.line(series.map(s => [s.t, s.eThermal]), C.red, 1.2);
+    if (keys.includes('eCold')) p.line(series.map(s => [s.t, s.eCold]), C.magenta, 1.2);
     p.line(series.map(s => [s.t, s.eTotal]), C.accent, 2);
     p.line(series.map(s => [s.t, s.eTotal + s.eGw]), 'rgba(125,255,176,0.8)', 1, [3, 3]);
-    p.text(series[0].t, hi + pad * 0.5, 'cyan E_tot · green E_tot + E_gw · amber kinetic · red thermal · blue potential', C.dim);
+    p.text(series[0].t, hi + pad * 0.5, 'cyan E_tot · green E_tot + E_gw · amber kinetic · red thermal · magenta cold (Kρ^Γ) · blue potential', C.dim);
     p.done();
 }

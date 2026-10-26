@@ -17,13 +17,14 @@
 //!
 //! Diagnostic slots (sc_diag_ptr, DIAG_SLOTS f64):
 //!    0 time            1 dt_last        2 n_alive        3 separation (CM–CM)
-//!    4 E_kin           5 E_thermal      6 E_pot          7 E_total
+//!    4 E_kin           5 E_thermal      6 E_pot          7 E_total (incl. E_cold)
 //!    8 L_z             9 ρ_max         10 M_unbound     11 accreted by A
 //!   12 accreted by B  13–18 Q̈ xx yy zz xy xz yz         19 |v_rel|
 //!   20–22 CM of A     23–25 CM of B    26 steps         27 p_max
 //!   28 u_max          29 orbital ω     30 PN weight     31 RR power
 //!   32 E_gw (integrated RR work)       33/34 alive mass A/B
 //!   35/36 body mass A/B (BH grows)     37/38 r_s A/B    39 n_total
+//!   40 E_cold (Σ m K ρ^{Γ−1}/(Γ−1), the hybrid EOS's polytropic part)
 
 pub mod lane_emden;
 pub mod sph;
@@ -66,7 +67,9 @@ pub extern "C" fn sc_frame_stride() -> u32 {
     FRAME_STRIDE as u32
 }
 
-/// pn_flags bit 0 = 1PN conservative, bit 1 = 2.5PN radiation reaction.
+/// pn_flags bit 0 = 1PN conservative, bit 1 = 2.5PN radiation reaction,
+/// bit 2 = switch the Balsara viscosity limiter OFF (it is on by default, so
+/// a caller that predates the bit gets the limiter).
 #[no_mangle]
 pub extern "C" fn sc_set_params(c: f64, alpha: f64, beta: f64, gamma_th: f64, eta_h: f64, cfl: f64, pn_flags: u32, sink_factor: f64) {
     let s = sim();
@@ -78,6 +81,7 @@ pub extern "C" fn sc_set_params(c: f64, alpha: f64, beta: f64, gamma_th: f64, et
     s.params.cfl = cfl.max(0.05).min(0.6);
     s.params.pn1 = pn_flags & 1 != 0;
     s.params.pn25 = pn_flags & 2 != 0;
+    s.params.balsara = pn_flags & 4 == 0;
     s.params.sink_factor = sink_factor.max(1.05);
 }
 
