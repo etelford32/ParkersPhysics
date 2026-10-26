@@ -49,7 +49,7 @@ test.describe('Star Collider Lab', () => {
         // its placeholder until a run is started, so it is excluded here and
         // checked in the run test.
         const hudKeys = new Set(['simTime', 'simSep', 'simFreq', 'simN', 'simSteps', 'simRate', 'simUnbound', 'simAccreted',
-            'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'stageScale']);
+            'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'simContact', 'stageScale']);
         const unfilled = await page.evaluate((hud) => [...document.querySelectorAll('[data-sc]')]
             .filter(el => !hud.includes(el.getAttribute('data-sc')))
             .filter(el => !el.textContent.trim() || el.textContent.trim() === '—')
@@ -133,12 +133,17 @@ test.describe('Star Collider Lab', () => {
         // worker-message timing on a software renderer.
         const afterFrame = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
         await afterFrame();
-        const followErr = await page.evaluate(() => {
+        // Read INSIDE an animation frame, after the stage's own loop callback
+        // (registered earlier, so it runs first): no worker message can land
+        // between the rig's update and the read. Read from a separate task, a
+        // slow software-GL render leaves time for the next core position to
+        // arrive first and the test measures message timing (0.43 measured).
+        const followErr = await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => {
             const s = window.__starCollider.scene; const st = s.state; const cps = s.codePerScene;
             const local = new (s.camera.position.constructor)(st.lastMeta.cmA[0] / cps, st.lastMeta.cmA[2] / cps, -st.lastMeta.cmA[1] / cps);
             const w = s.world.localToWorld(local);
-            return { err: w.distanceTo(s.controls.target), fp: st.followPoint, target: s.controls.target.toArray() };
-        });
+            resolve({ err: w.distanceTo(s.controls.target), fp: st.followPoint, target: s.controls.target.toArray() });
+        })));
         expect(followErr.err, JSON.stringify(followErr)).toBeLessThan(0.15);
         await expect(page.locator('[data-sc="stageFrame"]')).toHaveText(/following core A/);
 
@@ -179,6 +184,37 @@ test.describe('Star Collider Lab', () => {
         expect(errors, 'errors during the camera test').toEqual([]);
     });
 
+    test('graphics ladder: the HDR path engages and its night sky matches the direct path', async ({ page }) => {
+        // AUTO resolves to 'standard' on a software rasteriser, so every other
+        // test here runs the direct path; this one forces the HDR chain. The sky
+        // check is the measured bug: three encodes the clear colour into the
+        // composer's linear target and the OutputPass encodes it again (the sky
+        // read 34,38,90), and an ACES curve then crushed it to 0,0,3.
+        test.setTimeout(90000);
+        const errors = collectErrors(page);
+        await page.goto(PAGE + '?detail=high');
+        await page.waitForFunction(() => window.__starCollider?.scene, null, { timeout: 30000 });
+        const st = await page.evaluate(() => window.__starCollider.scene.state);
+        expect(st.detail).toBe('high');
+        expect(st.hdr).toBe(true);
+        expect(st.children).toBeGreaterThanOrEqual(8);
+        await expect(page.locator('[data-sc="stageDetail"]')).toHaveText(/high · HDR/);
+        const sky = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => {
+            const s = window.__starCollider.scene; const gl = s.renderer.getContext();
+            if (s.state.hdr) s.post.composer.render(); else s.renderer.render(s.scene, s.camera);
+            const w = 160, h = 40; const a = new Uint8Array(w * h * 4);
+            gl.readPixels(8, 8, w, h, gl.RGBA, gl.UNSIGNED_BYTE, a);
+            r([0, 1, 2].map(c => { const v = []; for (let i = c; i < a.length; i += 4) v.push(a[i]); v.sort((x, y) => x - y); return v[v.length >> 1]; }));
+        })));
+        const hdrSky = await sky();
+        await page.selectOption('[data-sc-control="detail"]', 'standard');
+        expect(await page.evaluate(() => window.__starCollider.scene.state.hdr)).toBe(false);
+        const directSky = await sky();
+        for (let c = 0; c < 3; c++) expect(Math.abs(hdrSky[c] - directSky[c]), `sky ${JSON.stringify({ hdrSky, directSky })}`).toBeLessThanOrEqual(3);
+        expect(directSky[2]).toBeGreaterThan(12);   // still night-blue, not crushed to black
+        expect(errors, 'errors on the HDR path').toEqual([]);
+    });
+
     test('the WASM engine builds, runs, inspirals, and paints the stage', async ({ page }) => {
         test.setTimeout(120000);
         const errors = collectErrors(page);
@@ -198,6 +234,20 @@ test.describe('Star Collider Lab', () => {
             .filter(el => !el.textContent.trim() || el.textContent.trim() === '—').map(el => el.getAttribute('data-sc')));
         expect(hud, 'HUD readouts on placeholder while running').toEqual([]);
         await expect(page.locator('[data-sc="simEgw"]')).not.toHaveText(/^0 /);
+        // The interaction channel arrived and the behaviour layers drew from it:
+        // flow streaks for every live particle, pathline tracers once two
+        // samples exist, and the colour modes that read it reach the shader.
+        await page.waitForFunction(() => {
+            const v = window.__starCollider.scene.state;
+            return v.hasAux && v.layerCounts.streaks > 100 && v.layerCounts.pathlines > 50 && v.streakTime > 0;
+        }, null, { timeout: 60000 });
+        await expect(page.locator('[data-sc="simContact"]')).toHaveText(/A–B kernel pairs .* mixed .* shock heating/);
+        for (const mode of ['velocity', 'compression', 'mixing', 'shocking']) {
+            await page.selectOption('[data-sc-control="colorMode"]', mode);
+            expect(await page.evaluate(() => window.__starCollider.scene.state.colorMode)).toBe(mode);
+        }
+        await page.locator('[data-sc-control="pathlines"]').uncheck();
+        await page.waitForFunction(() => !window.__starCollider.scene.state.pathlines, null, { timeout: 5000 });
         // Stage painted: the WebGL canvas has non-background pixels somewhere in the middle.
         const painted = await page.evaluate(() => {
             const c = document.querySelector('#sc-stage canvas');
