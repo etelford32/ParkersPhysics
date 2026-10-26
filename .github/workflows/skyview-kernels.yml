@@ -18,6 +18,10 @@ name: skyview-kernels
 #                         galactic-map.html (drift), every galaxy-map star
 #                         within 0.2° of its Hipparcos position, and the
 #                         ranking's invariants at a fixed instant
+#   orrery-planets.mjs    solar-system.html's planet placement (js/orrery-
+#                         planets.js) against a baked Astronomy Engine fixture
+#                         — it reads the SAME PLANET_FRAMES table and the same
+#                         ephemeris modules, so it rides this workflow
 #
 # galactic-map.html is in the path filter ON PURPOSE: SkyView reads its CATALOG,
 # so an edit there must re-run the drift gate (re-bake with
@@ -40,6 +44,9 @@ on:
       - 'js/outer-planets.js'
       - 'js/earth-orbit.js'
       - 'tests/skyview-*.mjs'
+      - 'js/orrery-planets.js'
+      - 'tests/orrery-planets.mjs'
+      - 'tests/fixtures/orrery-planets-astronomy-engine.json'
       - '.github/workflows/skyview-kernels.yml'
   pull_request:
     paths:
@@ -53,6 +60,9 @@ on:
       - 'js/outer-planets.js'
       - 'js/earth-orbit.js'
       - 'tests/skyview-*.mjs'
+      - 'js/orrery-planets.js'
+      - 'tests/orrery-planets.mjs'
+      - 'tests/fixtures/orrery-planets-astronomy-engine.json'
       - '.github/workflows/skyview-kernels.yml'
   workflow_dispatch:
 
@@ -79,3 +89,5 @@ jobs:
         run: node tests/skyview-predict.mjs
       - name: catalogue (drift vs galactic-map.html, map star positions)
         run: node tests/skyview-catalog.mjs
+      - name: orrery planet placement (vs Astronomy Engine fixture)
+        run: node tests/orrery-planets.mjs
