@@ -42,10 +42,10 @@ import { drawMassRadius, drawWaveform, drawFrequencyTrack, drawKilonova, drawEne
 
 const PARTICLE_CHOICES = [150, 300, 600, 1000, 1500, 2500];
 const WARP_CHOICES = [
-    { id: 'max', label: 'as fast as the hardware allows', warp: 1e12 },
-    { id: 'rt2000', label: '1 ms of merger per 2 s', warp: 1e-3 / GEOM_S / 2 },
-    { id: 'rt10000', label: '1 ms of merger per 10 s', warp: 1e-3 / GEOM_S / 10 },
-    { id: 'rt50000', label: '1 ms of merger per 50 s', warp: 1e-3 / GEOM_S / 50 },
+    { id: 'max', label: 'max speed', title: 'as fast as the hardware allows', warp: 1e12 },
+    { id: 'rt2000', label: '1 ms / 2 s', title: '1 ms of merger per 2 s of wall clock', warp: 1e-3 / GEOM_S / 2 },
+    { id: 'rt10000', label: '1 ms / 10 s', title: '1 ms of merger per 10 s of wall clock', warp: 1e-3 / GEOM_S / 10 },
+    { id: 'rt50000', label: '1 ms / 50 s', title: '1 ms of merger per 50 s of wall clock', warp: 1e-3 / GEOM_S / 50 },
 ];
 const DEFAULT_DISTANCE_MPC = 40;
 
@@ -98,7 +98,7 @@ export function initStarColliderPage(doc = document) {
         el.innerHTML = '';
         for (const it of items) {
             const o = doc.createElement('option');
-            o.value = it.value; o.textContent = it.label;
+            o.value = it.value; o.textContent = it.label; if (it.title) o.title = it.title;
             if (it.value === selected) o.selected = true;
             el.appendChild(o);
         }
@@ -109,8 +109,8 @@ export function initStarColliderPage(doc = document) {
     fillSelect(ctl('bodyB'), objectItems, state.bodies[1].source);
     fillSelect(ctl('eos'), EOS_IDS.map(id => ({ value: id, label: `${id} — M_max ${EOS_TABLE[id].mmax} M☉, R₁.₄ ${EOS_TABLE[id].r14} km` })), state.eos);
     fillSelect(ctl('pair'), [{ value: '', label: 'Pick a real pair…' }].concat(PAIRS.map(p => ({ value: p.id, label: p.name }))), state.pair);
-    fillSelect(ctl('particles'), PARTICLE_CHOICES.map(n => ({ value: String(n), label: `${n} per star` })), '600');
-    fillSelect(ctl('warp'), WARP_CHOICES.map(w => ({ value: w.id, label: w.label })), 'max');
+    fillSelect(ctl('particles'), PARTICLE_CHOICES.map(n => ({ value: String(n), label: `${n} / star` })), '600');
+    fillSelect(ctl('warp'), WARP_CHOICES.map(w => ({ value: w.id, label: w.label, title: w.title })), 'max');
 
     // ── Body resolution ─────────────────────────────────────────────────────
     function bodySpec(i) {
@@ -436,13 +436,17 @@ export function initStarColliderPage(doc = document) {
     try {
         if (stageEl) {
             import('./scene.js').then(({ createColliderScene }) => {
-                scene = createColliderScene(stageEl, { onCommand: onSceneCommand });
+                // ?detail=standard|high|ultra overrides the select (capture/A-B hook).
+                const urlDetail = new URLSearchParams(location.search).get('detail');
+                if (urlDetail && ctl('detail')) ctl('detail').value = urlDetail;
+                scene = createColliderScene(stageEl, { onCommand: onSceneCommand, detail: val('detail') || 'auto' });
                 scene.setAutoRotate(!!val('autorotate'));
                 scene.setColorMode(val('colorMode') || 'density');
                 scene.setFollow(val('follow') || 'system');
                 scene.setTrails(val('trails') !== false && val('trails') !== null ? !!val('trails') : true);
                 scene.setPointScale(num('pointScale', 1));
                 scene.setCorotating(!!val('frameCorotating'));
+                scene.setStreaks(!!val('streaks')); scene.setPathlines(!!val('pathlines')); scene.setContacts(!!val('contacts'));
                 if (fallback) fallback.hidden = true;
                 if (state.sim.frame) pushFrameToScene(state.sim.frame, state.sim.diag, state.sim.bodies);
                 else renderPreview();
@@ -495,13 +499,15 @@ export function initStarColliderPage(doc = document) {
             const extent = sepCode + bodies[0].radius + bodies[1].radius;
             scene.setScale(extent / 8, sepCode / 2);
             const spacing = smallest ? smallest.radius * Math.cbrt(4 * Math.PI / 3 / nPer) : extent / 60;
-            scene.setPointSize(Math.max(1.1 * spacing / (extent / 8), 0.02));
+            // h̄ at the mean density, in scene units; the scene recovers each
+            // particle's own h from its density (h ∝ ρ^{-1/3}).
+            scene.setPointSize(Math.max(1.1 * spacing / (extent / 8), 0.02), bodies.reduce((a, b) => a + b.n, 0));
             set('stageScale', `ring = ${fmt.km(d.sepKm / 2)} · ${fmt.km(extent / 8 * GEOM_KM)} per grid unit`);
         }
     }
     function resetSim() {
         worker?.postMessage({ type: 'pause' });
-        state.sim = { ...state.sim, status: 'idle', n: 0, diag: null, bodies: null, gw: [], energy: [], e0: null, merged: false, frame: null, perf: null };
+        state.sim = { ...state.sim, status: 'idle', n: 0, diag: null, interactions: null, bodies: null, gw: [], energy: [], e0: null, merged: false, frame: null, perf: null };
         scene?.clear();
         renderPreview();
         renderHud(); drawCharts(); set('sphVsFit', sphVsFitText());
@@ -514,6 +520,7 @@ export function initStarColliderPage(doc = document) {
             state.sim.n = msg.n; state.sim.status = 'running'; state.sim.bodies = msg.bodies; state.sim.diag = msg.diag; state.sim.frame = msg.frame;
             state.sim.e0 = msg.diag.eTotal; state.sim.relaxMs = msg.relaxMs; state.sim.frameStride = msg.frameStride || state.sim.frameStride || 6;
             scene?.clearTrails();
+            takeInteractions(msg);
             pushFrameToScene(msg.frame, msg.diag, msg.bodies);
             scene?.frameSystem({ animate: false });
             worker.postMessage({ type: 'run', warp: warpValue(), budgetMs: 28, dtMax: state.sim.dtMax });
@@ -523,6 +530,7 @@ export function initStarColliderPage(doc = document) {
         if (msg.type === 'frame') {
             const s = state.sim;
             s.diag = msg.diag; s.bodies = msg.bodies; s.frames++; s.perf = msg.perf;
+            takeInteractions(msg);
             if (msg.frame) { s.frame = msg.frame; pushFrameToScene(msg.frame, msg.diag, msg.bodies); }
             for (const g of msg.gw) s.gw.push(g);
             if (s.gw.length > 6000) s.gw = s.gw.slice(-6000);
@@ -539,6 +547,12 @@ export function initStarColliderPage(doc = document) {
             renderHud();
             if (s.frames % 6 === 0) { drawWaveformChart(); const ec = charts.get('energy'); if (ec) drawEnergy(ec, s.energy); set('sphVsFit', sphVsFitText()); }
         }
+    }
+    /** The worker's interaction channel (interactions.js on the kernel's raw state), when this message carries one. */
+    function takeInteractions(msg) {
+        if (!msg.aux) return;
+        state.sim.interactions = msg.interactions || null;
+        scene?.setInteractions(msg.aux, msg.links, msg.interactions, msg.aux.length / 7);
     }
     const bodyKinds = (bodies) => bodies.map((b, i) => ({ ...b, kind: state.profiles[i].kind === 'bh' ? 'bh' : 'star' }));
 
@@ -578,15 +592,21 @@ export function initStarColliderPage(doc = document) {
     const COLOUR_LABEL = {
         density: 'log₁₀ ρ, top 3 decades · shock heat → orange', heat: 'shock heating u · blue → white → red',
         body: 'body A cyan · body B magenta', bound: 'bound dim · unbound ejecta green (Bernoulli, same flag as M_unbound)',
+        velocity: 'velocity vs the barycentre · infall blue · orbital white · outflow orange',
+        compression: '∇·v (kernel pair sum) · compressing orange-red · expanding blue',
+        mixing: 'A–B interpenetration (kernel-weighted) · own colour → gold at 50 % mixed',
+        shocking: 'viscous heating RATE (Monaghan Π, the kernel\'s own) · where shocks work now',
     };
     function renderViewState() {
-        if (!scene) { set('stageFrame', 'stage unavailable'); set('stageColour', '—'); return; }
+        if (!scene) { set('stageFrame', 'stage unavailable'); set('stageColour', '—'); set('stageDetail', '—'); return; }
         const v = scene.state;
-        set('stageFrame', `${v.corotating ? 'corotating frame (cores held on x)' : 'inertial frame'} · ${FOLLOW_LABEL[v.follow] || v.follow} · ${v.view} view${v.trails ? ' · trails' : ''}`);
+        set('stageFrame', `${v.corotating ? 'corotating frame (cores held on x)' : 'inertial frame'} · ${FOLLOW_LABEL[v.follow] || v.follow} · ${v.view} view${v.trails ? ' · trails' : ''}${v.streaks ? ' · streaks' : ''}${v.pathlines ? ' · pathlines' : ''}${v.contacts ? ' · contacts' : ''}`);
         set('stageColour', COLOUR_LABEL[v.colorMode] || v.colorMode);
+        set('stageDetail', `${v.detail}${v.hdr ? ' · HDR' : ''} · ${v.children} sub-sprites / particle${v.software ? ' · software GL' : ''}`);
         set('pointScaleOut', `${v.pointScale.toFixed(1)}×`);
         const sync = (key, value) => { const el = ctl(key); if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = !!value; else el.value = String(value); } };
         sync('follow', v.follow); sync('colorMode', v.colorMode); sync('frameCorotating', v.corotating); sync('trails', v.trails); sync('pointScale', v.pointScale);
+        sync('streaks', v.streaks); sync('pathlines', v.pathlines); sync('contacts', v.contacts);
     }
     function onSceneCommand(cmd) {
         if (cmd === 'togglePause') {
@@ -604,13 +624,24 @@ export function initStarColliderPage(doc = document) {
     ctl('colorMode')?.addEventListener('change', () => scene?.setColorMode(val('colorMode')));
     ctl('frameCorotating')?.addEventListener('change', () => scene?.setCorotating(!!val('frameCorotating')));
     ctl('trails')?.addEventListener('change', () => scene?.setTrails(!!val('trails')));
+    ctl('detail')?.addEventListener('change', () => scene?.setDetail(val('detail')));
+    ctl('streaks')?.addEventListener('change', () => scene?.setStreaks(!!val('streaks')));
+    ctl('pathlines')?.addEventListener('change', () => scene?.setPathlines(!!val('pathlines')));
+    ctl('contacts')?.addEventListener('change', () => scene?.setContacts(!!val('contacts')));
     ctl('pointScale')?.addEventListener('input', () => { scene?.setPointScale(num('pointScale', 1)); set('pointScaleOut', `${num('pointScale', 1).toFixed(1)}×`); });
 
     function renderHud() {
         const s = state.sim, d = s.diag;
         set('simEngine', { loading: 'loading kernel…', wasm: 'WASM · Rust SPH kernel', unavailable: 'unavailable — analytic engine only' }[s.engine] || s.engine);
         set('simStatus', { idle: 'idle — Build & run to start', building: `building ${parseInt(val('particles'), 10) || 600} particles per star + relaxing…`, running: s.merged ? 'running · merged' : 'running · inspiral', paused: 'paused', merged: 'merged — horizons touching; see the aftermath fits', error: `error: ${s.error || ''}` }[s.status] || s.status);
-        if (!d) { for (const k of ['simTime', 'simSep', 'simFreq', 'simN', 'simSteps', 'simRate', 'simUnbound', 'simAccreted', 'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn']) set(k, '—'); return; }
+        if (!d) { for (const k of ['simTime', 'simSep', 'simFreq', 'simN', 'simSteps', 'simRate', 'simUnbound', 'simAccreted', 'simRhoMax', 'simHeat', 'simEgw', 'simDrift', 'simPn', 'simContact']) set(k, '—'); return; }
+        {
+            const ia = s.interactions, v = scene?.state;
+            const span = v && v.streakTime > 0 ? ` · streak = ${fmt.num(v.streakTime * GEOM_S * 1e6, 0)} µs of motion` : '';
+            set('simContact', ia
+                ? `${ia.abPairs} A–B kernel pairs · ${fmt.pct(ia.mixedFraction)} of the mass mixed · ${fmt.pct(ia.shockFraction)} carries 90 % of the shock heating${span}`
+                : 'interaction diagnostics pending');
+        }
         set('simTime', `${(d.time * GEOM_S * 1e3).toFixed(3)} ms`);
         set('simSep', fmt.km(d.separation * GEOM_KM));
         set('simFreq', fmt.hz(Math.abs(d.omega) / Math.PI / GEOM_S));
