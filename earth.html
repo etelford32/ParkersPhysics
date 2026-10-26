@@ -3222,7 +3222,7 @@ import './js/telemetry.js';
                 <div class="lyr" title="Real 250 hPa winds (~10.4 km) — the actual polar/subtropical jet stream from Open-Meteo pressure levels, replacing the old &gt;18 m/s surface-wind proxy. Long fast trails on the highest wind shell; the wx-panel 'Jet peak' row reads this level.">
                     <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream (250 hPa)</label>
                 </div>
-                <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show surface pressure (hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
+                <div class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label><label class="lyr-rd" for="rd-pressure" title="Show mean sea-level pressure (MSLP, hPa) on cursor hover"><input type="checkbox" id="rd-pressure"><span class="lyr-rd-badge">#</span></label></div>
                 <div class="lyr" title="Synoptic fronts detected from the temperature gradient and wind. Blue = cold front (cold air advancing into warm), red = warm front (warm air advancing into cold), grey = stationary. Mid-latitudes only (|lat| < 75°)."><input type="checkbox" id="lyr-fronts"><span class="lyr-status" data-layer="fronts" title="waiting"></span><label for="lyr-fronts">Fronts</label></div>
                 <div class="lyr" title="Column probe — click anywhere on the globe to pin a vertical-profile card for that point: wind at 10 m / 850 / 500 / 250 hPa, temperatures, cloud decks + estimated cloud-top height (IR), CAPE, and 850→500 shear. Every value is assembled from buffers already on this page (no new fetches), with per-source data ages in the footer."><input type="checkbox" id="lyr-probe"><label for="lyr-probe">Column Probe (click globe)</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></div>
@@ -4198,7 +4198,7 @@ import {
     listSavedLocations, addSavedLocation, removeSavedLocation,
     clearSavedLocations, formatLocalClock, dayNightBadge,
 } from './js/earth-saved-locations.js';
-import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
+import { WeatherFeed, BACKFILL_HOURS, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
 import { computeUpliftField, UPLIFT_FULL_SCALE,
          computeVorticityField, VORT_FULL_SCALE } from './js/weather-uplift.js';
 import { cloudTopHeightKm } from './js/cloud-mosaic-core.js';
@@ -4207,7 +4207,7 @@ import { cloudTopHeightKm } from './js/cloud-mosaic-core.js';
 import * as AtmoScale from './js/atmo-scale.js';
 import { createVolumeUniforms, createVolumeMesh, marchLadder, writeFlowUniforms,
          VolumeCompositor, SAT_ADVECT_ALT_KM } from './js/cloud-volume.js';
-import { clampedLeadSec, windGainAt, R_EARTH_M as CLOUD_R_EARTH_M } from './js/cloud-time.js';
+import { clampedLeadSec, windGainAt, AGE_FULL_SCALE_S as SAT_AGE_FULL_SCALE_S, R_EARTH_M as CLOUD_R_EARTH_M } from './js/cloud-time.js';
 import { WindColumns } from './js/wind-column.js';
 // Module singleton — already booted by the early telemetry side-effect
 // import in <head>; the named binding just gives this module a handle.
@@ -8634,13 +8634,16 @@ _oceanCurrentsCheckbox?.addEventListener('change', e => {
     oceanCurrentsOverlay.setVisible(e.target.checked);
 });
 
-// Status pip: the model is purely client-side so it's always "loaded".
-// One-shot dispatch on init so the .lyr-status pill paints green
-// immediately rather than sitting amber forever.
+// Status pip: the field is a parametric CLIMATOLOGY — no network call, no
+// time dependence, no observation — so the pip is AMBER ('fallback' is the
+// existing reference-state colour), never the green that "loaded" implies
+// (EARTHVIEW_LOD_UX_PLAN.md Phase 0.8). notify:false — a reference field is
+// not news, so it raises no toast. One-shot dispatch on init so the pill
+// paints immediately rather than sitting idle.
 queueMicrotask(() => {
     const m = oceanCurrentsMeta();
-    _setLayerPipById?.('ocean-currents', 'loaded',
-        `${m.source} · climatology`);
+    _setLayerPipById?.('ocean-currents', m.status === 'reference' ? 'fallback' : 'loaded',
+        `${m.name} — climatology, not a live observation · ${m.source}`, { notify: false });
 });
 
 // ── NOAA ocean station layers + point-detail card ───────────────────
@@ -8671,7 +8674,7 @@ const oceanStationsLayer = new OceanStationsLayer(THREE, earthMesh, {
         _setLayerPipById(id, state,
             state === 'fetching' ? `loading ${label}…`
             : state === 'loaded' ? `${detail.count ?? 0} ${label} loaded`
-            : state === 'fallback' ? `NOAA unavailable — showing ${detail.count ?? 0} default reference markers`
+            : state === 'fallback' ? `NOAA unavailable${detail.server ? ' (route answered freshness: stale)' : ''} — showing ${detail.count ?? 0} reference locations, not observations`
             : `${label} error: ${detail.error ?? 'unknown'}`);
     },
 });
@@ -9149,7 +9152,9 @@ async function _showOceanStationDetail(hit, clientX, clientY) {
             if (!dart.available) {
                 const reason = dart.reason === 'observations_not_forecasts'
                     ? 'DART has no future observations'
-                    : 'No samples in this 24-hour window';
+                    : dart.reason === 'upstream_unavailable'
+                        ? `NOAA NDBC unreachable${dart.detail ? ` (${dart.detail})` : ''}`
+                        : 'No samples in this 24-hour window';
                 _setOceanRows([
                     ['Timeline time', timeLabel],
                     ['Status', reason],
@@ -9203,7 +9208,11 @@ async function _showOceanStationDetail(hit, clientX, clientY) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const tide = await response.json();
         if (_odRequest !== requestId) return;
-        if (!tide.available) throw new Error('No current tide record');
+        if (!tide.available) {
+            throw new Error(tide.reason === 'upstream_unavailable'
+                ? `NOAA CO-OPS unreachable${tide.detail ? ` (${tide.detail})` : ''}`
+                : 'No current tide record');
+        }
         const nextExtreme = tide.extremes?.find(item => Date.parse(item.time) >= Date.now());
         _setOceanRows([
             ['Water level (MLLW)', _oceanFmt(tide.observed?.height_m, 'm', 2)],
@@ -9343,7 +9352,8 @@ function _updateLayerTooltips() {
         : 'Weather data not yet loaded';
     const satTip = sat
         ? `Source: ${sat.source}\n` +
-          (sat.goesTime ? `Frame: ${_timeAgo(sat.goesTime)} (10-min cadence, follows the time scrubber)\n` : '') +
+          (sat.goesTime ? `Frame: ${_timeAgo(sat.goesTime)} (newest disc; 10-min cadence, follows the time scrubber)\n` : '') +
+          (sat.discAges ? `${sat.discAges}\n` : '') +
           (sat.modisDate ? `MODIS: ${sat.modisDate} (daily composite)\n` : '') +
           (_satTiming.describe ? `${_satTiming.describe}\n` : '') +
           `Last fetch: ${_timeAgo(sat.updated)}`
@@ -9352,7 +9362,7 @@ function _updateLayerTooltips() {
         ? `Wind field: ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
         : 'Wind data not yet loaded';
     const isoTip = wx
-        ? `Pressure contours from ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
+        ? `Mean sea-level pressure contours from ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
         : 'Isobar data not yet loaded';
     const stormTip = st
         ? `${st.count} active storm${st.count !== 1 ? 's' : ''}\nUpdated: ${_timeAgo(st.updated)}\nRefreshes every 30 min`
@@ -9416,9 +9426,12 @@ wxFeed = new WeatherFeed({ history: wxGridHistory });
 wxFeed.start();
 wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
 
-// Cold-start backfill. /api/weather/grid?since=… serves up to 24 frames
-// from the same Supabase ring buffer the cron writes to (server-side
-// retention is 72 h; we only ask for 24 to match the slider's range).
+// Cold-start backfill. /api/weather/grid?since=… serves up to 72 hourly
+// frames from the same Supabase ring buffer the cron writes to, and
+// BACKFILL_HOURS (js/weather-feed.js) is that depth — the ring in
+// js/weather-history.js holds the same 72. Until 2026-10-26 this asked for
+// 24 while the server kept 72, so −24 h … −7 d on the scrubber froze on
+// the oldest of 24 frames (EARTHVIEW_LOD_UX_PLAN.md Phase 0.9).
 // Non-blocking: the live feed and resolver are already running, so the
 // page is fully interactive while the ~MB-scale historical payload is
 // in flight. invalidate() forces the next animate tick to re-resolve
@@ -9426,7 +9439,7 @@ wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
 // lands — without it, they'd need to nudge the slider to see the new
 // frames. Also a second invalidate when at least one frame ingested
 // from a fresh disk store (warmed history would already serve replay).
-wxFeed.backfill(wxGridHistory, 24).then(n => {
+wxFeed.backfill(wxGridHistory, BACKFILL_HOURS).then(n => {
     if (n > 0) wxResolver?.invalidate();
 });
 
@@ -10881,7 +10894,13 @@ function _agoStr(ts) {
     return `${Math.round(s / 86400)}d ago`;
 }
 
-function _setLayerPipById(dataLayer, state, title) {
+// `notify` (default true): whether a fallback/error on a CHECKED row also
+// raises the layer-feedback toast. The weather-grid handler below passes
+// false for the states that are not news — an initial "not loaded yet"
+// meta, a 'stale' (fallback-upstream) frame that is still real data — and
+// true only on a transition from loaded to failed (Phase 0.5: the toast
+// used to fire on the first animate() tick of every healthy page).
+function _setLayerPipById(dataLayer, state, title, { notify = true } = {}) {
     // data-layer may match multiple rows (e.g. "swpc" drives every
     // magnetosphere row) so loop instead of querySelector single.
     document.querySelectorAll(`.lyr-status[data-layer="${dataLayer}"]`).forEach(pill => {
@@ -10892,22 +10911,31 @@ function _setLayerPipById(dataLayer, state, title) {
         row?.classList.toggle('is-fallback', state === 'fallback');
         row?.classList.toggle('has-error', state === 'error');
         const checkbox = row?.querySelector(':scope > input[type="checkbox"]');
-        if (checkbox?.checked && (state === 'fallback' || state === 'error')) {
+        if (notify && checkbox?.checked && (state === 'fallback' || state === 'error')) {
             const label = row.querySelector('label[for]')?.textContent?.trim()
                 || row.querySelector('.lyr-featured-name')?.textContent?.trim()
                 || dataLayer;
-            _showLayerFeedback(`${label}: ${title || (state === 'fallback' ? 'showing a default view' : 'data unavailable')}`, state === 'error' ? 'error' : 'warning');
+            _showLayerFeedback(`${label}: ${title || (state === 'fallback' ? 'showing a default view' : 'data unavailable')}`, state === 'error' ? 'error' : 'warning', dataLayer);
         }
     });
 }
 
-function _showLayerFeedback(message, kind = 'warning') {
+// `key` names the layer the toast is about, so a later recovery of THAT
+// layer can clear it (_clearLayerFeedback) without hiding a toast another
+// layer raised in the meantime.
+function _showLayerFeedback(message, kind = 'warning', key = '') {
     const box = document.getElementById('layer-feedback');
     const text = document.getElementById('layer-feedback-text');
     if (!box || !text || !message) return;
     text.textContent = `${kind === 'error' ? '⚠' : '◇'} ${message}`;
     box.dataset.kind = kind;
+    box.dataset.key = key;
     box.classList.add('show');
+}
+function _clearLayerFeedback(keys) {
+    const box = document.getElementById('layer-feedback');
+    if (!box || !box.classList.contains('show')) return;
+    if (keys.includes(box.dataset.key)) box.classList.remove('show');
 }
 document.getElementById('layer-feedback-close')?.addEventListener('click', () => {
     document.getElementById('layer-feedback')?.classList.remove('show');
@@ -10915,27 +10943,58 @@ document.getElementById('layer-feedback-close')?.addEventListener('click', () =>
 
 // Shorthand: set many rows at once (weather feed drives four panels,
 // alerts + storms share one, SWPC drives the whole magnetosphere set).
-function _setLayerPipGroup(ids, state, title) {
-    for (const id of ids) _setLayerPipById(id, state, title);
+function _setLayerPipGroup(ids, state, title, opts) {
+    for (const id of ids) _setLayerPipById(id, state, title, opts);
 }
 
 const _WEATHER_PIPS = ['clouds', 'weather-temp', 'wind', 'jet', 'isobars'];
 
-// Weather feed: fetching → pulsing amber; update → green or red based on
-// whether the real GFS payload actually landed (meta.loaded=false means
-// we're on the procedural fallback, and the user should see amber/red
-// rather than green).
+// Weather feed: fetching → pulsing amber; update → green, amber or red:
+//   loaded + freshness 'live'   → green
+//   loaded + freshness 'stale'  → AMBER: real data from the FALLBACK
+//                                 upstream (MET Norway 10°, upsampled).
+//                                 /api/weather/grid has flagged this since
+//                                 2026-10-06 and nothing here read it, so a
+//                                 month of fallback frames drew green pips
+//                                 (EARTHVIEW_LOD_UX_PLAN.md Phase 0.4).
+//   not loaded, never fetched   → still 'fetching': the resolver's FIRST
+//                                 animate() tick re-dispatches the feed's
+//                                 initial meta (loaded:false, fetchTime
+//                                 null) before any fetch can resolve. That
+//                                 is not a failure, and it used to raise
+//                                 the "Isobars: live weather unavailable —
+//                                 showing synthetic circulation" toast on
+//                                 every healthy page load, permanently
+//                                 (Phase 0.5).
+//   not loaded, fetch failed    → amber/red + banner; the toast ONLY on a
+//                                 transition from loaded to failed, and a
+//                                 later good update clears it.
 document.addEventListener('weather-status', (e) => {
     if (e.detail?.status === 'fetching') {
         _setLayerPipGroup(_WEATHER_PIPS, 'fetching', 'fetching weather grid…');
     }
 });
+let _wxWasLoaded = false;
 document.addEventListener('weather-update', (e) => {
     const meta = e.detail?.meta ?? {};
     if (meta.loaded) {
-        _setLayerPipGroup(_WEATHER_PIPS, 'loaded',
-            `${meta.source ?? 'GFS'} · ${_agoStr(meta.fetchTime)}`);
+        if (meta.freshness === 'stale') {
+            _setLayerPipGroup(_WEATHER_PIPS, 'fallback',
+                `${meta.source ?? 'fallback upstream'} · fallback upstream, not the primary grid`
+                + (meta.freshnessNote ? ` — ${meta.freshnessNote}` : '')
+                + ` · ${_agoStr(meta.fetchTime)}`,
+                { notify: false });
+        } else {
+            _setLayerPipGroup(_WEATHER_PIPS, 'loaded',
+                `${meta.source ?? 'GFS'} · ${_agoStr(meta.fetchTime)}`);
+        }
         _setFeedBanner(null);
+        _clearLayerFeedback(_WEATHER_PIPS);
+        _wxWasLoaded = true;
+    } else if (!meta.fetchTime) {
+        // Initial meta re-dispatched by the resolver before the first
+        // fetch has settled: nothing has failed yet.
+        _setLayerPipGroup(_WEATHER_PIPS, 'fetching', 'fetching weather grid…');
     } else {
         // meta.source is already decorated by WeatherFeed on failure:
         //   "stale · last known (<code> — <detail> (missing env: …))"  or
@@ -10945,7 +11004,10 @@ document.addEventListener('weather-update', (e) => {
         // DevTools.
         const srcStr = meta.source ?? 'procedural';
         _setLayerPipGroup(_WEATHER_PIPS, 'fallback',
-            'live weather unavailable — showing synthetic circulation');
+            meta.demo ? 'live weather unavailable — showing synthetic circulation'
+                      : `live weather unavailable — showing the last good frame (${srcStr})`,
+            { notify: _wxWasLoaded });
+        _wxWasLoaded = false;
         _setFeedBanner(
             `Weather grid feed down — cloud, wind, isobar, and jet layers are showing ${meta.demo ? 'synthetic' : 'stale'} data. Reason: ${srcStr}.`
         );
@@ -11160,6 +11222,10 @@ const SAT_BLEND_MS      = 450;    // frame cross-fade
 // Mosaic advection gain (mid-troposphere; js/cloud-volume.js SAT_ADVECT_ALT_KM)
 // pre-divided by Earth's radius for the mediump decal shader.
 const SAT_LEAD_K_PER_S  = windGainAt(SAT_ADVECT_ALT_KM) / CLOUD_R_EARTH_M;
+// Per-disc age (Phase 0.6): the mosaic's G channel is each disc's age behind
+// the newest disc; a full code adds AGE_FULL_SCALE_S seconds of lead. Set
+// once — the volumetric path interpolates the same constant (SAT_AGE_S).
+cloudU.u_sat_age_k.value = SAT_AGE_FULL_SCALE_S * SAT_LEAD_K_PER_S;
 
 function _applySatelliteTiming(d) {
     if (!d) return;
@@ -11290,6 +11356,7 @@ window.addEventListener('satellite-update', e => {
         source,
         goesTime:  goesTime ?? null,
         modisDate: modisDate ?? null,
+        discAges:  e.detail.discAges ?? null,   // names the oldest disc (Phase 0.6)
         updated:   new Date(),
     };
     _updateLayerTooltips();

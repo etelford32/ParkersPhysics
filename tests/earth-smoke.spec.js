@@ -131,6 +131,87 @@ test.describe('earth.html smoke', () => {
         expect(fps, 'Sustained ≥ 25 fps').toBeGreaterThanOrEqual(25);
     });
 
+    // ── Phase 0.4 / 0.5 (EARTHVIEW_LOD_UX_PLAN.md) ──────────────────────────
+    // /api/weather/grid is mocked so these run egress-free and deterministic:
+    // a 72×36 field with a plausible zonal temperature and a mild gradient,
+    // served as either a healthy primary frame or a MET Norway fallback frame
+    // (freshness: 'stale'). Range requests (the 72 h backfill) answer empty.
+    function gridBody({ freshness = 'live', source = 'open-meteo:72x36' } = {}) {
+        const data = [];
+        for (let j = 0; j < 36; j++) {
+            const lat = -87.5 + j * 5;
+            for (let i = 0; i < 72; i++) {
+                const lon = -177.5 + i * 5;
+                data.push({ current: {
+                    temperature_2m: 28 - 0.45 * Math.abs(lat) + 3 * Math.sin(lon / 30),
+                    relative_humidity_2m: 60, pressure_msl: 1013 + 8 * Math.cos(lat / 20) + 4 * Math.sin(lon / 25),
+                    wind_speed_10m: 6, wind_direction_10m: (lon + 540) % 360,
+                    cloud_cover_low: 20, cloud_cover_mid: 10, cloud_cover_high: 5, precipitation: 0,
+                } });
+            }
+        }
+        return {
+            source, fetched_at: new Date(Date.now() - 120_000).toISOString(), age_seconds: 120,
+            grid: { w: 72, h: 36, deg: 5 }, freshness,
+            ...(freshness === 'stale' ? { note: `fallback-source: ${source} (the primary upstream failed for this frame)` } : {}),
+            pressure_kind: 'msl', data,
+        };
+    }
+    async function mockWeatherGrid(page, opts) {
+        const body = gridBody(opts);
+        await page.route('**/api/weather/grid**', route => {
+            const u = new URL(route.request().url());
+            if (u.searchParams.has('since')) {
+                return route.fulfill({ json: { since: u.searchParams.get('since'), count: 0, frames: [] } });
+            }
+            return route.fulfill({ json: body });
+        });
+    }
+    const pipClass = (page, layer) => page.locator(`.lyr-status[data-layer="${layer}"]`).first().getAttribute('class');
+    const toastShown = (page) => page.evaluate(() => {
+        const box = document.getElementById('layer-feedback');
+        return !!box && box.classList.contains('show')
+            ? (document.getElementById('layer-feedback-text')?.textContent ?? '(shown)') : null;
+    });
+
+    test('healthy weather grid: green pips and NO "synthetic circulation" toast within 10 s (the boot race)', async ({ page }) => {
+        // The toast used to fire on the FIRST animate() tick, from the feed's
+        // initial loaded:false meta re-dispatched by the resolver, on every
+        // healthy page — and nothing ever cleared it.
+        await mockWeatherGrid(page);
+        const t0 = Date.now();
+        await page.goto(EARTH_URL);
+        await waitForSceneReady(page);
+        await expect.poll(() => pipClass(page, 'isobars'), { timeout: 15_000 }).toMatch(/st-loaded/);
+        expect(await pipClass(page, 'isobars')).not.toMatch(/st-fallback|st-error/);
+        // Hold the line for the full 10 s window from navigation.
+        const remaining = 10_000 - (Date.now() - t0);
+        if (remaining > 0) await page.waitForTimeout(remaining);
+        const toast = await toastShown(page);
+        expect(toast === null || !/synthetic circulation|live weather unavailable/.test(toast),
+            `no weather toast on a healthy grid (got: ${toast})`).toBe(true);
+        expect(await pipClass(page, 'isobars')).toMatch(/st-loaded/);
+    });
+
+    test('fallback-upstream weather grid (freshness: stale): AMBER pips, no toast, title says so', async ({ page }) => {
+        // /api/weather/grid has said freshness:'stale' for a MET Norway frame
+        // since 2026-10-06; the client ignored it and drew green for a month.
+        await mockWeatherGrid(page, { freshness: 'stale', source: 'met-norway:72x36' });
+        await page.goto(EARTH_URL);
+        await waitForSceneReady(page);
+        for (const layer of ['isobars', 'wind', 'clouds']) {
+            await expect.poll(() => pipClass(page, layer), { timeout: 15_000 }).toMatch(/st-fallback/);
+            expect(await pipClass(page, layer)).not.toMatch(/st-loaded|st-error/);
+        }
+        const title = await page.locator('.lyr-status[data-layer="isobars"]').first().getAttribute('title');
+        expect(title).toMatch(/met-norway:72x36/);
+        expect(title).toMatch(/fallback upstream/);
+        await page.waitForTimeout(3_000);
+        const toast = await toastShown(page);
+        expect(toast === null || !/synthetic circulation|live weather unavailable/.test(toast),
+            `stale real data is not a failure toast (got: ${toast})`).toBe(true);
+    });
+
     test('no layer-integrity drift on first paint', async ({ page }) => {
         // Catches the class of regression PR A fixed — NASA overlays
         // visible while their checkboxes are off.  The debug overlay

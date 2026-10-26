@@ -1,6 +1,8 @@
 # EarthView — clouds · wind · isobars · ocean temperature: data, LOD and UX plan
 
-Status: **planned, not built** (2026-10-26). Written after a code audit of the
+Status: **Phase 0 shipped 2026-10-26** (§4, one PR; its nine items are each
+node- or browser-gated — see the table). Phases 1–6 remain **planned, not
+built**. Written after a code audit of the
 cloud / wind / isobar / ocean stacks and two production probes (the Supabase
 `weather_grid_cache` + `pipeline_heartbeat` tables and `/api/weather/grid`).
 Every number in §1 was measured; every cause in §2 is cited to a file and line,
@@ -310,8 +312,20 @@ each phase against them.
 
 ## 4. Phase 0 — plug the data back in (small, ship first)
 
-Everything here is mechanical and each item is independently verifiable
-against the heartbeat or a node test. Expected size: one PR, ~1–2 days.
+**Shipped 2026-10-26.** Everything here is mechanical and each item is
+independently verifiable against the heartbeat or a node test. The one
+copy of the Open-Meteo chunk rule is `js/open-meteo-request.js`
+(`tests/open-meteo-request.mjs`); the one copy of the ocean reference
+markers is `js/ocean-reference-stations.js`. Two things the sandbox could
+NOT verify and the deploy must (Open-Meteo, NASA and parkersphysics.com are
+egress-blocked at build time): that `pipeline_heartbeat.last_source` for
+`weather_grid` reads `open-meteo:72x36` within two hours of deploy, and
+that a healthy production load of earth.html shows neither the
+synthetic-circulation toast nor the "forecast unavailable" badge. The MSLP
+switch also tags every frame `pressure_kind` and bumps the IDB ring to v2
+(the v1 store is dropped on upgrade); the status page now reads a route's
+`freshness` before its `freshnessExempt` short-circuit, which the ocean rows
+needed to score amber rather than green.
 
 | # | Change | Where | Gate |
 |---|---|---|---|
