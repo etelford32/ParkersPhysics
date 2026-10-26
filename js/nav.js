@@ -679,12 +679,20 @@ export function initNav(activeId = '') {
             if (!e.target.closest('nav')) _closeAll();
         });
 
-        // Escape closes dropdowns and mobile menu.
+        // Escape closes dropdowns and mobile menu — and moves focus ONLY when
+        // the nav actually had something open. This used to focus the burger
+        // on EVERY Escape anywhere on the page, stealing focus from any page
+        // dialog/panel that closes on Esc (the EarthView day view lost its
+        // focus-return to it). It also looked for the open dropdown AFTER
+        // _closeAll() had closed it, so it could never find one; the snapshot
+        // below is taken first.
         document.addEventListener('keydown', e => {
             if (e.key !== 'Escape') return;
-            _closeAll();
             const openBtn = document.querySelector('nav .nav-drop.open .nav-drop-toggle');
-            if (openBtn) openBtn.focus();
+            const menuOpen = !!_getMenu()?.classList.contains('open');
+            if (!openBtn && !menuOpen) return;
+            _closeAll();
+            if (openBtn && openBtn.offsetParent !== null) openBtn.focus();
             else _getBurger()?.focus();
         });
     }

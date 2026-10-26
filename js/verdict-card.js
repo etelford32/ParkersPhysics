@@ -43,6 +43,12 @@
  * The open chip id lives in this._detailChip, so the panel survives the
  * ≥5 s body re-renders; a metric with no data renders an empty state, not
  * a fabricated line.
+ *
+ * Day view: tapping a weekday in the week strip opens a FULL-SCREEN forecast
+ * for that day (js/verdict-day-view.js, model = verdict-engine's
+ * dayForecast). It mounts on <body>, not in the card — the card's
+ * backdrop-filter would trap a fixed overlay inside its own box — and the
+ * card pushes fresh inputs into it on every refresh.
  */
 
 import { computeVerdict, sunAltitudeDeg, issMagEstimate, fmtClock, factorForecast } from './verdict-engine.js';
@@ -51,6 +57,7 @@ import { compass16 } from './sun-altitude.js';
 import { telemetry } from './telemetry.js';
 import { AQI_STALE_AFTER_MS } from './air-quality-feed.js';
 import { AQI_POLLUTANTS } from './aqi-scale.js';
+import { DayView } from './verdict-day-view.js';
 
 const STYLE_ID = 'ev-verdict-styles';
 const MIN_RENDER_MS = 5_000;          // throttle re-renders
@@ -211,6 +218,7 @@ const CSS = `
 
 /* week */
 .ev-verdict-week{padding:12px 20px 0}
+.ev-verdict-whint{color:#5f7597;letter-spacing:.08em;text-shadow:none}
 .ev-verdict-wgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:8px}
 .ev-verdict-day{background:rgba(1,4,9,.5);border:1px solid rgba(77,219,255,.11);border-radius:11px;
   padding:9px 2px 8px;text-align:center;transition:border-color .2s,transform .15s;color:inherit}
@@ -381,6 +389,7 @@ export class VerdictCard {
         this._listeners = [];
         this._detailChip = null;     // open chip-detail graph id (session-only)
         this._collapsed = false;
+        this._dayView = null;        // full-screen day forecast (lazy)
         try { this._collapsed = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { /* default open */ }
 
         ensureStyles();
@@ -608,6 +617,8 @@ export class VerdictCard {
         this._listeners = [];
         clearTimeout(this._renderTimer);
         clearInterval(this._clockTimer);
+        this._dayView?.destroy();
+        this._dayView = null;
         this._card?.remove();
         this._card = null;
     }
@@ -641,6 +652,7 @@ export class VerdictCard {
         this._model = model;
         this._inputs = inputs;
         this._render(model, inputs);
+        this._dayView?.update(inputs);
         this._emitTelemetry(model, inputs);
     }
 
@@ -853,7 +865,16 @@ export class VerdictCard {
             <span data-ev="prov">${esc(this._provenanceText(inputs))}</span>
         </div>`);
 
+        // Keep keyboard focus across the ≥5 s re-render: innerHTML replaces
+        // every body button, so a focused day/chip would silently drop focus
+        // to <body> (this broke focus-return from the full-screen day view).
+        const active = document.activeElement;
+        const focusSel = active && this._body.contains(active)
+            ? (active.hasAttribute('data-ev-day') ? `[data-ev-day="${active.getAttribute('data-ev-day')}"]`
+                : active.hasAttribute('data-ev-chip') ? `[data-ev-chip="${active.getAttribute('data-ev-chip')}"]` : null)
+            : null;
         this._body.innerHTML = parts.join('');
+        if (focusSel) this._body.querySelector(focusSel)?.focus({ preventScroll: true });
         // After the body exists: the clock tick also fills the stats-strip
         // local/UTC pair, which lives in the freshly rendered body.
         this._tickClock();
@@ -1172,11 +1193,13 @@ export class VerdictCard {
         const range = this._weekRangeLabel(tz);
         return `
         <div class="ev-verdict-week">
-            <div class="ev-verdict-mini">This week${range ? ' · ' + esc(range) : ''}</div>
+            <div class="ev-verdict-mini">This week${range ? ' · ' + esc(range) : ''} <span class="ev-verdict-whint">· tap a day</span></div>
             <div class="ev-verdict-wgrid">
                 ${model.week.map((d, i) => `
                 <button class="ev-verdict-day${i === bestIdx ? ' best' : ''}" data-ev-day="${i}"
-                        title="${esc(d.day)}${d.hi != null ? ` — high ${d.hi}°, low ${d.lo}°` : ''}">
+                        title="${esc(d.day)}${d.hi != null ? ` — high ${d.hi}°, low ${d.lo}°` : ''} · tap for the full forecast"
+                        aria-label="${esc(d.day)}${d.hi != null ? `, high ${d.hi}°, low ${d.lo}°` : ''} — open full forecast"
+                        aria-haspopup="dialog">
                     <div class="ev-verdict-dname">${esc(d.day)}</div>
                     <div class="ev-verdict-dwx">${d.glyph}</div>
                     <div class="ev-verdict-dtemp">${d.hi != null ? d.hi : '--'}<small>/${d.lo != null ? d.lo : '--'}</small></div>
@@ -1350,7 +1373,9 @@ export class VerdictCard {
         }
         const day = e.target.closest('[data-ev-day]');
         if (day) {
-            record('day_tap', { offset: +day.getAttribute('data-ev-day') });
+            const offset = +day.getAttribute('data-ev-day');
+            record('day_tap', { offset });
+            this._openDay(offset);
             return;
         }
         const act = e.target.closest('[data-ev-act]');
@@ -1378,6 +1403,19 @@ export class VerdictCard {
                 break;
             }
         }
+    }
+
+    /** Open the full-screen forecast for week-strip day `offset` (0 = today). */
+    _openDay(offset) {
+        if (!this._inputs) return;
+        if (!this._dayView) {
+            this._dayView = new DayView({
+                record,
+                getLocName: () => this._inputs?.loc?.name || null,
+                focusTarget: (i) => this._body?.querySelector(`[data-ev-day="${i}"]`) || null,
+            });
+        }
+        this._dayView.open(offset, this._inputs, 'week');
     }
 
     /**
