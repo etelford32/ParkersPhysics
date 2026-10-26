@@ -85,8 +85,21 @@ const HOUR_MS = 3_600_000;
 export const AQI_STALE_AFTER_MS = 3 * HOUR_MS;
 export const AQI_MAX_AGE_MS = 12 * HOUR_MS;
 
-const HOURLY_VARS = 'temperature_2m,precipitation_probability,cloud_cover,uv_index';
-const DAILY_VARS = 'temperature_2m_max,temperature_2m_min,weather_code,cloud_cover_mean,precipitation_probability_max';
+// The day-detail view (verdict card → tap a weekday) reads the extra hourly
+// and daily fields below. They ride the SAME request — one more column each,
+// no extra round-trip. Units are pinned in the URL (°F / mph / inch) so the
+// card never has to guess what a number means.
+const HOURLY_VARS = [
+    'temperature_2m', 'precipitation_probability', 'cloud_cover', 'uv_index',
+    'weather_code', 'apparent_temperature', 'relative_humidity_2m',
+    'precipitation', 'wind_speed_10m', 'wind_gusts_10m',
+].join(',');
+const DAILY_VARS = [
+    'temperature_2m_max', 'temperature_2m_min', 'weather_code', 'cloud_cover_mean',
+    'precipitation_probability_max', 'apparent_temperature_max', 'apparent_temperature_min',
+    'precipitation_sum', 'snowfall_sum', 'precipitation_hours', 'wind_speed_10m_max',
+    'wind_gusts_10m_max', 'wind_direction_10m_dominant', 'uv_index_max', 'sunrise', 'sunset',
+].join(',');
 const AIR_HOURLY_VARS = [
     'us_aqi',
     'pm2_5',
@@ -152,8 +165,12 @@ export class AirQualityFeed {
             uvNow: null,
             uvPeak: null,
             uvPeakHour: null,        // ms
-            hourly: [],              // [{time(ms), tempF, precipProb, cloudPct, uv}]
-            daily: [],               // [{date(ms), hiF, loF, code, cloudPct, precipProbMax}]
+            hourly: [],              // [{time(ms), tempF, precipProb, cloudPct, uv, code,
+                                     //   feelsF, rhPct, precipIn, windMph, gustMph}]
+            daily: [],               // [{date(ms), hiF, loF, code, cloudPct, precipProbMax,
+                                     //   feelsHiF, feelsLoF, precipIn, snowIn, precipHours,
+                                     //   windMaxMph, gustMaxMph, windDirDeg, uvMax,
+                                     //   sunrise(ms), sunset(ms)}]
             tz: null,                // IANA tz resolved by Open-Meteo (timezone=auto)
             fetchedAt: null,
         };
@@ -203,7 +220,7 @@ export class AirQualityFeed {
     async _fetch(loc, key) {
         const common = `latitude=${loc.lat.toFixed(4)}&longitude=${loc.lon.toFixed(4)}&timezone=auto&timeformat=unixtime`;
         const wxUrl = `${FORECAST_URL}?${common}&hourly=${HOURLY_VARS}&daily=${DAILY_VARS}`
-            + `&temperature_unit=fahrenheit&forecast_days=8`;
+            + `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&forecast_days=8`;
         // `past_days=1` supplies a small aligned comparison window without a
         // second archive request. These are CAMS model fields, not station
         // observations; airSource preserves that distinction for every
@@ -235,6 +252,12 @@ export class AirQualityFeed {
                 precipProb: numOrNull(h.precipitation_probability?.[i]),
                 cloudPct: numOrNull(h.cloud_cover?.[i]),
                 uv: numOrNull(h.uv_index?.[i]),
+                code: numOrNull(h.weather_code?.[i]),
+                feelsF: numOrNull(h.apparent_temperature?.[i]),
+                rhPct: numOrNull(h.relative_humidity_2m?.[i]),
+                precipIn: numOrNull(h.precipitation?.[i]),
+                windMph: numOrNull(h.wind_speed_10m?.[i]),
+                gustMph: numOrNull(h.wind_gusts_10m?.[i]),
             }));
 
             const d = wx.daily || {};
@@ -245,6 +268,18 @@ export class AirQualityFeed {
                 code: numOrNull(d.weather_code?.[i]),
                 cloudPct: numOrNull(d.cloud_cover_mean?.[i]),
                 precipProbMax: numOrNull(d.precipitation_probability_max?.[i]),
+                feelsHiF: numOrNull(d.apparent_temperature_max?.[i]),
+                feelsLoF: numOrNull(d.apparent_temperature_min?.[i]),
+                precipIn: numOrNull(d.precipitation_sum?.[i]),
+                snowIn: numOrNull(d.snowfall_sum?.[i]),
+                precipHours: numOrNull(d.precipitation_hours?.[i]),
+                windMaxMph: numOrNull(d.wind_speed_10m_max?.[i]),
+                gustMaxMph: numOrNull(d.wind_gusts_10m_max?.[i]),
+                windDirDeg: numOrNull(d.wind_direction_10m_dominant?.[i]),
+                uvMax: numOrNull(d.uv_index_max?.[i]),
+                // unixtime seconds → ms (timeformat=unixtime applies here too)
+                sunrise: numOrNull(d.sunrise?.[i]) != null ? d.sunrise[i] * 1000 : null,
+                sunset: numOrNull(d.sunset?.[i]) != null ? d.sunset[i] * 1000 : null,
             }));
 
             // UV now + today's peak. "Today" = the first daily bucket's local

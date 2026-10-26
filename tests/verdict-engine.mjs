@@ -12,6 +12,7 @@ import {
     computeVerdict, auroraVerdict, magneticLatitude, boundaryForKp,
     aqiCategory, aqiState, uvState, moonPhase, weatherGlyph,
     sunAltitudeDeg, issMagEstimate, stormOutlook, factorForecast, ageWord,
+    dayForecast, weatherDescription,
 } from '../js/verdict-engine.js';
 
 let n = 0;
@@ -474,6 +475,102 @@ function mkInputs(over = {}) {
     assert.equal(factorForecast('nope', mkInputs(), T0), null);
     assert.equal(factorForecast('clouds', {}, T0), null);
     ok('factorForecast unknown id / empty inputs → null');
+}
+
+// ── dayForecast: the full-screen day view behind each weekday ───────────────
+{
+    // 8 local days starting Sat 2026-07-11 00:00 PDT (= 07:00 UTC), hourly
+    // rows for every hour of them, day 3 rainy in the afternoon.
+    const D0 = Date.UTC(2026, 6, 11, 7, 0, 0);
+    const daily = [], hourly = [];
+    for (let i = 0; i < 8; i++) {
+        daily.push({
+            date: D0 + i * DAY, hiF: 90 + i, loF: 60 + i, code: i === 3 ? 63 : 0,
+            cloudPct: i === 3 ? 90 : 10, precipProbMax: i === 3 ? 80 : 0,
+            feelsHiF: 92 + i, feelsLoF: 59 + i, precipIn: i === 3 ? 0.42 : 0,
+            snowIn: 0, precipHours: i === 3 ? 4 : 0, windMaxMph: 12.4, gustMaxMph: 21.6,
+            windDirDeg: 270, uvMax: 9.2,
+            sunrise: D0 + i * DAY + 5.8 * HOUR, sunset: D0 + i * DAY + 20.4 * HOUR,
+        });
+        for (let h = 0; h < 24; h++) {
+            const rainy = i === 3 && h >= 13 && h < 17;
+            hourly.push({
+                time: D0 + i * DAY + h * HOUR, tempF: 70 + 10 * Math.sin((h - 9) / 24 * 2 * Math.PI),
+                precipProb: rainy ? (h === 15 ? 80 : 50) : 0, cloudPct: rainy ? 95 : 10,
+                uv: Math.max(0, 9 * Math.sin((h - 6) / 14 * Math.PI)), code: rainy ? 63 : 0,
+                rhPct: 40 + h, precipIn: rainy ? 0.1 : 0, windMph: 8,
+            });
+        }
+    }
+    const T = Date.UTC(2026, 6, 11, 19, 0, 0); // Sat noon PDT
+    const inputs = mkInputs({
+        forecast: { hourly, daily },
+        swpc: { kp: 2, kpForecast: [{ time: Date.UTC(2026, 6, 13, 9, 0), kp: 8 }] }, // Sun night ~2 AM PDT Mon
+        iss: { passes: [{ rise: D0 + 2 * DAY + 21 * HOUR, peakAlt: 60, magEst: -3.4 }] },
+    });
+
+    const today = dayForecast(inputs, 0, T);
+    assert.equal(today.label, 'Today');
+    assert.equal(today.isToday, true);
+    assert.equal(today.hours.length, 24, 'one row per local hour');
+    assert.equal(today.hi, 90); assert.equal(today.lo, 60);
+    assert.equal(today.wind.dir, 'W'); assert.equal(today.wind.maxMph, 12); assert.equal(today.wind.gustMph, 22);
+    assert.equal(today.uv.max, 9.2); assert.equal(today.uv.word, 'very high');
+    assert.ok(Math.abs(today.sun.dayLengthH - 14.6) < 1e-9);
+    assert.equal(today.humidity.min, 40); assert.equal(today.humidity.max, 63);
+    assert.equal(today.dayparts.length, 4);
+    assert.deepEqual(today.dayparts.map(p => p.id), ['overnight', 'morning', 'afternoon', 'evening']);
+    assert.equal(today.precip.wettest, null, 'no rain → no wettest hour');
+    assert.match(today.summary, /^Clear — high 90°, low 60°, little chance of precipitation, W winds to 12 mph\.$/);
+    ok('dayForecast today: hi/lo, wind, UV, daylight, dayparts, summary');
+
+    const tue = dayForecast(inputs, 3, T);
+    assert.equal(tue.label, 'Tuesday');
+    assert.equal(tue.dateLabel, 'Tuesday, Jul 14');
+    assert.equal(tue.isToday, false);
+    assert.equal(tue.condition, 'Rain');
+    assert.equal(tue.precip.probMax, 80);
+    assert.equal(tue.precip.totalIn, 0.42);
+    assert.equal(tue.precip.wettest.prob, 80);
+    assert.equal(tue.precip.wettest.t, D0 + 3 * DAY + 15 * HOUR, 'peaks at 3 PM local');
+    const aft = tue.dayparts.find(p => p.id === 'afternoon');
+    assert.equal(aft.condition, 'Rain'); assert.equal(aft.precipProb, 80);
+    assert.equal(tue.dayparts.find(p => p.id === 'morning').precipProb, 0);
+    assert.match(tue.summary, /80% chance of precipitation \(peaking 3:00P\)/);
+    ok('dayForecast rainy day: wettest hour, afternoon daypart, summary');
+
+    // Night block: Kp 8 forecast lands in Sunday night → a real call; Monday
+    // night has an ISS pass; day 5 is beyond the Kp forecast → unknown.
+    const sun = dayForecast(inputs, 1, T);
+    assert.equal(sun.label, 'Tomorrow');
+    assert.equal(sun.night.kp, 8);
+    assert.notEqual(sun.night.aurora.state, 'unknown');
+    const mon = dayForecast(inputs, 2, T);
+    assert.equal(mon.night.issPasses.length, 1);
+    const fri = dayForecast(inputs, 6, T);
+    assert.equal(fri.night.aurora.state, 'unknown');
+    assert.match(fri.night.aurora.title, /beyond the Kp forecast/);
+    assert.equal(today.night.kp, 2, 'tonight counts the live Kp');
+    ok('dayForecast night: Kp-forecast aurora, ISS passes, honest unknown past the forecast');
+
+    // Degradation: out-of-range index / empty inputs → null; sparse daily row
+    // (no extras) still renders with nulls rather than throwing.
+    assert.equal(dayForecast(inputs, 7, T), null, 'only 7 days are offered');
+    assert.equal(dayForecast({}, 0, T), null);
+    const sparse = dayForecast({ forecast: { daily: [{ date: D0, hiF: 80, loF: 55, code: 2 }], hourly: [] } }, 0, T);
+    assert.equal(sparse.condition, 'Partly cloudy');
+    assert.equal(sparse.wind.maxMph, null); assert.equal(sparse.uv.max, null);
+    assert.equal(sparse.partial, true);
+    assert.equal(sparse.night.aurora.state, 'unknown');
+    ok('dayForecast degrades: null past range / no data, nulls for missing fields');
+
+    assert.equal(weatherDescription(95), 'Thunderstorms');
+    assert.equal(weatherDescription(null), null);
+    assert.equal(weatherDescription(64), 'Rain', 'unlisted code falls back to its family');
+    // Week entries carry their date so the card can address a day.
+    const v = computeVerdict(inputs, new Date(T));
+    assert.equal(v.week[3].date, D0 + 3 * DAY);
+    ok('weatherDescription bands + week entries carry their date');
 }
 
 console.log(`\nverdict-engine: ${n} checks passed`);

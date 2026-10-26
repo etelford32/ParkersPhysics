@@ -290,6 +290,46 @@ test.describe('nav — desktop widths', () => {
         await first.locator('.nav-drop-btn').click();
         await page.waitForURL(`**${hrefs[0]}`);
     });
+
+    // Escape used to focus the burger on EVERY keypress, anywhere on the
+    // page, so any page dialog that closes on Esc lost its focus-return to
+    // the nav (found via the EarthView day view). It also searched for the
+    // open dropdown AFTER closing it, so an open dropdown's caret never got
+    // focus back either.
+    test('Escape only moves focus when the nav had something open', async ({ page }) => {
+        await page.setViewportSize({ width: 1600, height: 900 });
+        await page.goto(PAGE, { waitUntil: 'domcontentloaded' });
+        await waitForNavStable(page);
+
+        // Nothing open: focus on a page control must stay put.
+        const id = await page.evaluate(() => {
+            const b = document.createElement('button');
+            b.id = 'esc-probe'; b.textContent = 'probe';
+            document.body.appendChild(b);
+            b.focus();
+            return document.activeElement?.id;
+        });
+        expect(id).toBe('esc-probe');
+        await page.keyboard.press('Escape');
+        expect(await page.evaluate(() => document.activeElement?.id)).toBe('esc-probe');
+
+        // A dropdown open: Escape closes it and returns focus to ITS caret.
+        const first = page.locator('nav .nav-drop').first();
+        await first.locator('.nav-drop-toggle').dispatchEvent('click');
+        await expect(first).toHaveClass(/open/);
+        await page.keyboard.press('Escape');
+        await expect(first).not.toHaveClass(/open/);
+        await expect(first.locator('.nav-drop-toggle')).toBeFocused();
+
+        // Same "nothing open" check at a BURGER width — the only width where
+        // the old unconditional burger.focus() could land (at 1600 the burger
+        // is display:none, focus() is a no-op, and the bug hid).
+        await page.setViewportSize({ width: 1000, height: 800 });
+        await page.evaluate(() => document.getElementById('esc-probe').focus());
+        await page.keyboard.press('Escape');
+        expect(await page.evaluate(() => document.activeElement?.id),
+            'Escape with no menu open stole focus').toBe('esc-probe');
+    });
 });
 
 test.describe('nav — touch', () => {
