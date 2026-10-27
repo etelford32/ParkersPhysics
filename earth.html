@@ -3774,20 +3774,26 @@ import './js/telemetry.js';
         <div class="wx-row"><span class="wx-k">P high</span>   <span class="wx-v" id="wx-pmax">—</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">Max wind</span> <span class="wx-v" id="wx-wmax">—</span></div>
-        <!-- Wind-particle colour legend. Canvas is painted once on page
-             load using the same blue→white→magenta ramp WindParticles
-             uses per-vertex, so it's an exact match not an approximation.
-             Anchors at 0 / 30 / 60 m/s (= 0 / ~108 / ~216 km/h); MAX_WIND_MS
-             is the normalisation ceiling from weather-feed.js. -->
-        <div style="margin:0 0 6px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Wind scale</div>
+        <!-- Wind colour key. Canvas is painted once on page load from
+             js/wind-palette.js at the 10 m shade — the SAME function the
+             particle trails and arrows read per vertex, so it's an exact
+             key, not an approximation. One blue family for every level:
+             brighter = faster, deeper = lower (the pressure-level rows
+             below are the same rule at their own altitude). Anchors at
+             0 / 30 / 60 m/s (= 0 / ~108 / ~216 km/h); MAX_WIND_MS is the
+             normalisation ceiling from weather-feed.js. -->
+        <div style="margin:0 0 6px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Wind scale · 10 m</div>
         <canvas id="wx-wind-legend" width="180" height="8"
                 style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
-        <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:2px;">
             <span>0</span><span>30</span><span>60 m/s</span>
         </div>
+        <div id="wind-palette-note"
+             style="font-size:9px;color:#7a7a96;line-height:1.35;margin:0 0 6px;"></div>
         <!-- Per-level wind legends (850 / 500 / 250 hPa). Populated by
-             _mountWindLevelLegends() from the SAME ramp functions the
-             per-level particle trails use, so each swatch is an exact key.
+             _mountWindLevelLegends() from the SAME ramp closures the
+             per-level particle trails use (js/wind-palette.js at each
+             level's altitude), so each swatch is an exact key.
              Each row follows the dead-chrome rule: visible only while its
              layer checkbox is on. -->
         <div id="wx-windlvl-legends"></div>
@@ -4312,6 +4318,9 @@ import {
     loadEarthTextures,
 } from './js/earth-skin.js';
 import { TempVolumeFeed } from './js/temp-volume-feed.js';
+// Wind colour — ONE rule for trails, arrows, columns and legends
+// (js/wind-palette.js): blue family, brighter = faster, deeper = lower.
+import { makeWindRamp, windColorCss, WIND_PALETTE_NOTE } from './js/wind-palette.js';
 import { buildTempLUTPixels, tempToRampFrac } from './js/temp-ramp.js';
 import { StormFeed } from './js/storm-feed.js';
 import { initDebugOverlay } from './js/debug-overlay.js';
@@ -6732,6 +6741,12 @@ const WIND_DT_MAX_S     = 0.05;     // clamp against backgrounded-tab spikes
 const WIND_LOD_NEAR = 1.06;
 const WIND_LOD_FAR  = 2.50;
 
+// The surface (10 m) shade of the ONE wind ramp (js/wind-palette.js). The
+// trails, the arrow field and the wx-panel key all read this closure;
+// pressure-level instances get their own altitude's shade from the same
+// rule via opts.speedColor (WIND_LEVEL_DEFS). There is no second copy.
+const _WIND_RAMP_SFC = makeWindRamp(AtmoScale.LEVEL_ALTITUDE_KM.sfc);
+
 // Reused scratch vector for camera→local-space conversions. Avoids one
 // allocation per frame inside the wind LOD path.
 const _windFocusV = new THREE.Vector3();
@@ -7117,25 +7132,15 @@ class WindParticles {
     }
 
     /**
-     * Map normalised speed [0..1] to a hue ramp:
-     *   slow   → deep blue    (0.35, 0.55, 1.0)
-     *   medium → bright white (1.0,  1.0,  1.0)
-     *   fast   → magenta      (1.0,  0.28, 0.95)
+     * Normalised speed [0..1] → colour, from the ONE wind palette
+     * (js/wind-palette.js): blue, brighter = faster, and the shade is the
+     * level's real altitude (this default is the 10 m surface shade;
+     * pressure-level instances override it through opts.speedColor with
+     * makeWindRamp(theirAltKm)). The old private blue→white→magenta ramp,
+     * and its two inline mirrors, are gone — a ramp with mirrors is a key
+     * that drifts.
      */
-    _speedColor(s, out) {
-        const sc = Math.max(0, Math.min(1, s));
-        if (sc < 0.5) {
-            const t = sc / 0.5;
-            out[0] = 0.35 + 0.65 * t;
-            out[1] = 0.55 + 0.45 * t;
-            out[2] = 1.0;
-        } else {
-            const t = (sc - 0.5) / 0.5;
-            out[0] = 1.0;
-            out[1] = 1.0 - 0.72 * t;
-            out[2] = 1.0 - 0.05 * t;
-        }
-    }
+    _speedColor(s, out) { return _WIND_RAMP_SFC(s, out); }
 
     /**
      * Refresh focus/zoom state from the camera. Called at the top of update().
@@ -7599,22 +7604,10 @@ class WindArrows {
         this.mesh.material.needsUpdate = false;   // opacity alone doesn't need it
     }
 
-    /** Mirror of WindParticles._speedColor(). Kept inline to avoid a method
-     *  pointer chase inside the hot rebuild loop. */
-    _speedColor(s, out) {
-        const sc = Math.max(0, Math.min(1, s));
-        if (sc < 0.5) {
-            const t = sc / 0.5;
-            out[0] = 0.35 + 0.65 * t;
-            out[1] = 0.55 + 0.45 * t;
-            out[2] = 1.0;
-        } else {
-            const t = (sc - 0.5) / 0.5;
-            out[0] = 1.0;
-            out[1] = 1.0 - 0.72 * t;
-            out[2] = 1.0 - 0.05 * t;
-        }
-    }
+    /** The arrows draw the SURFACE field, so they wear the surface shade of
+     *  the one wind ramp (js/wind-palette.js) — the same closure the surface
+     *  trails read, not a mirror of it. */
+    _speedColor(s, out) { return _WIND_RAMP_SFC(s, out); }
 
     /** Dot of (x,y,z) with the focus direction unit vector. > 0 = camera-facing. */
     _dotFocus(x, y, z, fLat, fLon) {
@@ -7797,34 +7790,25 @@ function _sampleUpliftAt(lat, lon) {
 }
 
 // ── Wind-scale legend ──────────────────────────────────────────────────
-// Paint the blue → white → magenta particle ramp into the wx-panel
-// canvas at init so the colours the user sees streaming across the globe
-// are decodable. Painted once; the ramp doesn't change, and MAX_WIND_MS
-// (60 m/s) anchors the top end.
+// Paint the surface wind key into the wx-panel canvas at init so the
+// colours the user sees streaming across the globe are decodable. Painted
+// once from js/wind-palette.js at the 10 m shade — the SAME function the
+// trails and arrows read, so the key cannot drift from the globe (the
+// inline mirror this replaced was a second copy of the ramp). MAX_WIND_MS
+// (60 m/s) anchors the top end. The palette's disclosure line is written
+// under the key because a colour rule that is not beside the key is a
+// guess the reader has to make.
 (function _paintWindLegend() {
     const cv = document.getElementById('wx-wind-legend');
     if (!cv) return;
     const ctx = cv.getContext('2d');
     const W = cv.width, H = cv.height;
-    // Mirror WindParticles._speedColor() exactly — no cross-module import
-    // needed because the function is small and has lived here forever.
     for (let x = 0; x < W; x++) {
-        const sc = x / (W - 1);
-        let r, g, b;
-        if (sc < 0.5) {
-            const t = sc / 0.5;
-            r = 0.35 + 0.65 * t;
-            g = 0.55 + 0.45 * t;
-            b = 1.0;
-        } else {
-            const t = (sc - 0.5) / 0.5;
-            r = 1.0;
-            g = 1.0 - 0.72 * t;
-            b = 1.0 - 0.05 * t;
-        }
-        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillStyle = windColorCss(x / (W - 1), AtmoScale.LEVEL_ALTITUDE_KM.sfc);
         ctx.fillRect(x, 0, 1, H);
     }
+    const note = document.getElementById('wind-palette-note');
+    if (note) note.textContent = WIND_PALETTE_NOTE;
 })();
 
 // ── Convergence / uplift legend ─────────────────────────────────────────
@@ -7998,63 +7982,23 @@ const WIND_LEVEL_DEFS = {
         checkbox: 'lyr-wind-850', pip: 'wind-850', label: '850 hPa wind',
         altKm: AtmoScale.LEVEL_ALTITUDE_KM[850], n: 4000, trailLen: 24, baseSegs: 14,
         maxWind: 60, farFrac: 0.6, renderOrder: 3.05, uKey: 'u850', vKey: 'v850',
-        // Sage → mint → amber: reads "warm boundary-layer flow" against the
-        // surface layer's blue→white→magenta.
-        ramp: (s, out) => {
-            const sc = Math.max(0, Math.min(1, s));
-            if (sc < 0.5) {
-                const t = sc / 0.5;
-                out[0] = 0.20 + 0.62 * t;
-                out[1] = 0.62 + 0.35 * t;
-                out[2] = 0.45 + 0.43 * t;
-            } else {
-                const t = (sc - 0.5) / 0.5;
-                out[0] = 0.82 + 0.18 * t;
-                out[1] = 0.97 - 0.35 * t;
-                out[2] = 0.88 - 0.68 * t;
-            }
-        },
+        // The one wind ramp at this level's REAL altitude: a shade lighter
+        // than the surface, brighter with speed (js/wind-palette.js).
+        ramp: makeWindRamp(AtmoScale.LEVEL_ALTITUDE_KM[850]),
     },
     w500: {
         checkbox: 'lyr-wind-500', pip: 'wind-500', label: '500 hPa wind',
         altKm: AtmoScale.LEVEL_ALTITUDE_KM[500], n: 4000, trailLen: 24, baseSegs: 14,
         maxWind: 80, farFrac: 0.6, renderOrder: 3.15, uKey: 'u500', vKey: 'v500',
-        // Violet → lavender → cyan: the cool mid-troposphere identity.
-        ramp: (s, out) => {
-            const sc = Math.max(0, Math.min(1, s));
-            if (sc < 0.5) {
-                const t = sc / 0.5;
-                out[0] = 0.52 + 0.41 * t;
-                out[1] = 0.38 + 0.52 * t;
-                out[2] = 0.95 + 0.05 * t;
-            } else {
-                const t = (sc - 0.5) / 0.5;
-                out[0] = 0.93 - 0.68 * t;
-                out[1] = 0.90 + 0.02 * t;
-                out[2] = 1.00;
-            }
-        },
+        ramp: makeWindRamp(AtmoScale.LEVEL_ALTITUDE_KM[500]),
     },
     jet: {
         checkbox: 'lyr-jet', pip: 'jet', label: '250 hPa jet',
         altKm: AtmoScale.LEVEL_ALTITUDE_KM[250], n: 3500, trailLen: 34, baseSegs: 22,
         maxWind: 100, farFrac: 0.7, renderOrder: 3.3, uKey: 'u250', vKey: 'v250',
-        // Crimson → gold → white-hot, longest trails + fastest ramp: the
-        // jet should read as the most energetic thing on the globe.
-        ramp: (s, out) => {
-            const sc = Math.max(0, Math.min(1, s));
-            if (sc < 0.5) {
-                const t = sc / 0.5;
-                out[0] = 0.85 + 0.15 * t;
-                out[1] = 0.20 + 0.58 * t;
-                out[2] = 0.25;
-            } else {
-                const t = (sc - 0.5) / 0.5;
-                out[0] = 1.00;
-                out[1] = 0.78 + 0.22 * t;
-                out[2] = 0.25 + 0.70 * t;
-            }
-        },
+        // Palest shade of the stack + the longest trails: the jet still
+        // reads as the most energetic thing on the globe, in the same hue.
+        ramp: makeWindRamp(AtmoScale.LEVEL_ALTITUDE_KM[250]),
     },
 };
 
@@ -8084,20 +8028,33 @@ function _windLayerVisible() {
 // what a screenshot cannot (a level with no upstream data draws nothing, so
 // "I see no fan-out" is ambiguous between a wiring bug and a dead feed —
 // `hasData` disambiguates it).
+// `ramp` is the colour the LIVE instance would write for a slow / mid /
+// fast particle — the browser gate compares it against js/wind-palette.js
+// evaluated at the level's altitude, which is the only way to prove the
+// trails read the one palette rather than a stale private copy (a legend
+// canvas alone proves nothing about the vertex colours).
+const _rampProbe = (fn) => {
+    const o = [0, 0, 0];
+    return { slow: fn(0, o).slice(), mid: fn(0.5, o).slice(), fast: fn(1, o).slice() };
+};
 window.__evWindStack = () => ({
     exag: _atmoExag,
     levels: [
-        { key: 'sfc', radius: windParticles._radius,
-          visible: windParticles.mesh.visible, hasData: windParticles.hasData() },
+        { key: 'sfc', radius: windParticles._radius, altKm: AtmoScale.LEVEL_ALTITUDE_KM.sfc,
+          visible: windParticles.mesh.visible, hasData: windParticles.hasData(),
+          ramp: _rampProbe((s, o) => windParticles._speedColor(s, o)) },
         ...Object.entries(_windLevels).map(([key, st]) => ({
             key,
+            altKm:   st.def.altKm,
             radius:  st.inst?._radius ?? null,
             visible: st.inst?.mesh.visible ?? false,
             hasData: st.inst?.hasData() ?? false,
             created: st.inst != null,
+            ramp:    st.inst ? _rampProbe((s, o) => st.inst._speedColor(s, o)) : _rampProbe(st.def.ramp),
         })),
     ],
     arrowRadius: windArrows?._radius ?? null,
+    arrowRamp:   _rampProbe((s, o) => windArrows._speedColor(s, o)),
 });
 
 // Companion probe for the profile-column layer: whether it is drawing and
@@ -8211,7 +8168,7 @@ function _mountWindLevelLegends() {
         row.id = `wx-windlvl-legend-${key}`;
         row.style.display = 'none';
         row.innerHTML =
-            `<div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">${d.label}</div>` +
+            `<div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">${d.label} · ${d.altKm.toFixed(1)} km</div>` +
             `<canvas width="180" height="8" style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>` +
             `<div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">` +
             `<span>0</span><span>${Math.round(d.maxWind / 2)}</span><span>${d.maxWind} m/s</span></div>`;
