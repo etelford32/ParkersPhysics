@@ -39,9 +39,16 @@
  *   cloudinessFromPixel(r,g,b,a,kind,out) → writes [cloudiness, confidence] into out
  *   discWeight(cosLat, dLonDeg)           → feathered geostationary view weight
  *   MosaicAccumulator                     → two-tier (primary/fill) weighted compositor
+ *   blankFrameStats / isBlankFrame        → the GIBS blank-200 detector (below)
  *   gibsTimeCandidates(nowMs, opts)       → freshest-first TIME values for sub-daily layers
  *   toUtcDate(ms|Date)                    → 'YYYY-MM-DD'
+ *
+ * Output channels (finalize): R cloudiness · G disc AGE (minutes behind the
+ * newest disc, cloud-time.js encodeAgeCode — Phase 0.6; G used to duplicate
+ * R) · B IR top-coldness · A confidence.
  */
+
+import { encodeAgeCode } from './cloud-time.js';
 
 // ── Product classification ───────────────────────────────────────────────────
 // Layer IDs are the only reliable signal for how to decode a snapshot's
@@ -202,6 +209,11 @@ export class MosaicAccumulator {
         // cloud-top-height proxy; see IR_BT_WARM_K / cloudTopHeightKm.
         this._bcw = new Float32Array(n);   // Σ(coldness·w), IR only
         this._bw  = new Float32Array(n);   // Σw, IR only
+        // Disc AGE accumulation (Phase 0.6): Σ(ageMin·w) over PRIMARY discs,
+        // normalised by the primary weight sum at finalize and written to G
+        // so the shaders can advect each disc by its own lead
+        // (js/cloud-time.js, "EVERY DISC HAS ITS OWN TIME").
+        this._acw = new Float32Array(n);
         // Row/col geometry caches shared by every addRegionRows call.
         this._cosLat = new Float32Array(height);
         for (let j = 0; j < height; j++) {
@@ -225,11 +237,19 @@ export class MosaicAccumulator {
      *                                   feathering; null = no feather (polar
      *                                   orbiter composites are already global)
      * @param {'primary'|'fill'} tier
+     * @param {number} rowStart
+     * @param {number} rowEnd
+     * @param {number} [ageMin=0]        minutes this product's frame sits behind
+     *                                   the NEWEST primary disc (Phase 0.6);
+     *                                   accumulated for the primary tier only
      */
-    addRegionRows(rgba, kind, subLonDeg, tier, rowStart, rowEnd) {
+    addRegionRows(rgba, kind, subLonDeg, tier, rowStart, rowEnd, ageMin = 0) {
         const { width } = this;
-        const cw = tier === 'primary' ? this._pcw : this._fcw;
-        const w  = tier === 'primary' ? this._pw  : this._fw;
+        const primary = tier === 'primary';
+        const cw = primary ? this._pcw : this._fcw;
+        const w  = primary ? this._pw  : this._fw;
+        const acw = this._acw;
+        const age = primary && Number.isFinite(ageMin) && ageMin > 0 ? ageMin : 0;
         // IR luminance IS a brightness-temperature axis, so the decoded
         // cloudiness doubles as the top-coldness sample (see the CTH block
         // in the constructor). Other product families carry no BT signal.
@@ -252,6 +272,7 @@ export class MosaicAccumulator {
                 }
                 cw[idx] += px[0] * weight;
                 w[idx]  += weight;
+                if (age > 0) acw[idx] += age * weight;
                 if (isIR) {
                     bcw[idx] += px[0] * weight;
                     bw[idx]  += weight;
@@ -261,14 +282,18 @@ export class MosaicAccumulator {
     }
 
     /** Convenience for tests / single-shot callers. */
-    addRegion(rgba, kind, subLonDeg, tier) {
-        this.addRegionRows(rgba, kind, subLonDeg, tier, 0, this.height);
+    addRegion(rgba, kind, subLonDeg, tier, ageMin = 0) {
+        this.addRegionRows(rgba, kind, subLonDeg, tier, 0, this.height, ageMin);
     }
 
     /**
      * Resolve the two tiers into an RGBA texture buffer:
-     *   R = G = cloudiness·255  (LINEAR — the texture must be sampled
+     *   R = cloudiness·255      (LINEAR — the texture must be sampled
      *                            with no sRGB decode; see makeTexture)
+     *   G = disc age code       (primary-weighted mean minutes behind the
+     *                            newest disc, encodeAgeCode; 0 for the
+     *                            newest disc and for fill-only pixels —
+     *                            the shaders add it to the frame lead)
      *   B = IR top-coldness·255 (cloud-top-height proxy — 0 where no IR
      *                            product saw the pixel OR the top is warm;
      *                            decode via cloudTopHeightKm / the ramp in
@@ -310,7 +335,8 @@ export class MosaicAccumulator {
             const v = Math.round(c * 255);
             const bwSum = this._bw[idx];
             const bt = bwSum > 0 ? this._bcw[idx] / bwSum : 0;
-            data[o] = v; data[o + 1] = v;
+            data[o] = v;
+            data[o + 1] = pw > 0 ? encodeAgeCode(this._acw[idx] / pw) : 0;
             data[o + 2] = Math.round(bt * 255);
             data[o + 3] = Math.round(conf * 255);
 
@@ -345,6 +371,40 @@ export class MosaicAccumulator {
             },
         };
     }
+}
+
+// ── Blank-frame detector (Phase 0.7) ─────────────────────────────────────────
+// GIBS answers a TIME outside a layer's archive with HTTP 200 and a fully
+// transparent PNG. `loadImage` treated any onload as a hit, so a blank disc
+// ended the fallback walk and contributed nothing — the region went
+// procedural while diag said it had loaded. A real frame of ANY product has
+// opaque pixels: IR / GeoColor discs are opaque across the whole disc, and a
+// MODIS Cloud Optical Thickness composite retrieves wherever there is cloud
+// (over half the planet). The floor below is three orders of magnitude under
+// that, so it cannot mistake a quiet day for an empty archive.
+export const BLANK_MIN_OPAQUE_FRACTION = 0.001;
+export const BLANK_ALPHA_FLOOR = 8;   // 8-bit alpha below this is "transparent"
+
+/**
+ * Fraction of pixels whose alpha clears BLANK_ALPHA_FLOOR, over an optional
+ * stride (the browser glue reads a 256×128 thumbnail, so stride 1 there).
+ * @param {Uint8ClampedArray|Uint8Array} rgba
+ * @param {{stride?:number}} [o]
+ * @returns {{ opaqueFraction:number, sampled:number }}
+ */
+export function blankFrameStats(rgba, { stride = 1 } = {}) {
+    const step = Math.max(1, stride | 0) * 4;
+    let sampled = 0, opaque = 0;
+    for (let o = 3; o < rgba.length; o += step) {
+        sampled++;
+        if (rgba[o] >= BLANK_ALPHA_FLOOR) opaque++;
+    }
+    return { opaqueFraction: sampled ? opaque / sampled : 0, sampled };
+}
+
+/** True when the frame is (near-)fully transparent — a blank-200 miss. */
+export function isBlankFrame(rgba, { stride = 1, minOpaqueFraction = BLANK_MIN_OPAQUE_FRACTION } = {}) {
+    return blankFrameStats(rgba, { stride }).opaqueFraction < minOpaqueFraction;
 }
 
 /**

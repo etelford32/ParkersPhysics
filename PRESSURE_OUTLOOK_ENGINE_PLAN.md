@@ -464,7 +464,12 @@ P50 ∓ 1.2816σ. The grid is ours (72×36), not WB2's. The Python regrid is con
 
 ## 6. Order of work (each phase ships on its own)
 
-**Phase 0 — MSLP end to end (a bug fix; no ML).**
+**Phase 0 — MSLP end to end (a bug fix; no ML). SHIPPED 2026-10-26** as part of
+`EARTHVIEW_LOD_UX_PLAN.md` Phase 0: `pressure_msl` in the cron, `RANGE_KEEP_FIELDS`,
+`_extractCoarse`, `HOURLY_VARS`, the patch; `pressure_kind` on every frame
+(`js/weather-decode.js pressureKindOf`, the one reader of the key); IDB ring v2
+(MSLP-only, v1 store dropped). The Tibet before/after screenshot is still owed — the
+sandbox cannot reach Open-Meteo.
 
 - Change `surface_pressure` → `pressure_msl` in the cron, `api/weather/grid.js`
   (`RANGE_KEEP_FIELDS`), `js/weather-feed.js` `_extractCoarse` and

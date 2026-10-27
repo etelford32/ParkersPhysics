@@ -19,6 +19,8 @@
  * Exits 0 on pass, non-zero on failure with a summary line.
  */
 
+import { GRID, chunkRanges, MAX_URL_BYTES, byteLength } from '../js/open-meteo-request.js';
+const N_CHUNKS = chunkRanges(GRID.n).length;   // 7 at ≤400 per request
 import assert from 'node:assert/strict';
 
 // ── Stubs: minimal globals the modules expect when imported in node ────────
@@ -182,7 +184,7 @@ function buildLocation(startMs, hours) {
             time:                  Array.from({ length: hours }, (_, h) => _fakeISO(startMs + h * HOUR_MS)),
             temperature_2m:        Array.from({ length: hours }, (_, h) => 15 + h * 0.1),
             relative_humidity_2m:  Array.from({ length: hours }, () => 60),
-            surface_pressure:      Array.from({ length: hours }, () => 1015),
+            pressure_msl:          Array.from({ length: hours }, () => 1015),
             wind_speed_10m:        Array.from({ length: hours }, () => 10),    // m/s
             wind_direction_10m:    Array.from({ length: hours }, () => 90),    // from East
             cloud_cover_low:       Array.from({ length: hours }, () => 25),
@@ -219,8 +221,8 @@ const feed = new WeatherForecastFeed({ history: history2, batchHours: 24 });
 // First batch: cover up to +24h.
 const ingestedA = await feed.ensureLoadedUntil(Date.now() + 24 * HOUR_MS);
 
-check('first ensureLoadedUntil(+24h) issues 3 chunked requests', () => {
-    assert.equal(fetchCalls, 3, `expected 3 fetches, got ${fetchCalls}`);
+check(`first ensureLoadedUntil(+24h) issues ${N_CHUNKS} chunked requests (one per ≤400-location chunk)`, () => {
+    assert.equal(fetchCalls, N_CHUNKS, `expected ${N_CHUNKS} fetches, got ${fetchCalls}`);
 });
 check('first batch ingested 24 forecast frames', () => {
     assert.equal(ingestedA, 24);
@@ -228,6 +230,11 @@ check('first batch ingested 24 forecast frames', () => {
 });
 check('URLs use start_hour / end_hour and required Open-Meteo params', () => {
     for (const url of seenUrls) {
+        // The 414 guard: every emitted URL stays under the kernel ceiling
+        // and asks for MSLP, never surface pressure (channel P is MSLP).
+        assert.ok(byteLength(url) < MAX_URL_BYTES, `URL ${byteLength(url)} B ≥ ${MAX_URL_BYTES}`);
+        assert.match(url, /hourly=[^&]*pressure_msl/);
+        assert.ok(!/surface_pressure/.test(url));
         assert.match(url, /latitude=/);
         assert.match(url, /longitude=/);
         assert.match(url, /hourly=temperature_2m/);
@@ -257,7 +264,7 @@ seenUrls.length = 0;
 const sizeBefore = history2.forecastSize;
 const ingestedB = await feed.ensureLoadedUntil(Date.now() + 40 * HOUR_MS);
 check('progressive deeper scrub fetches only the uncovered tail', () => {
-    assert.equal(fetchCalls, 3, `expected 3 fetches for second batch, got ${fetchCalls}`);
+    assert.equal(fetchCalls, N_CHUNKS, `expected ${N_CHUNKS} fetches for second batch, got ${fetchCalls}`);
     // start_hour of second batch should be ≥ end of first batch.
     for (const url of seenUrls) {
         const m = url.match(/start_hour=(\d{4}-\d{2}-\d{2}T\d{2}):00/);
@@ -288,7 +295,7 @@ await history4.open();
 const feed4 = new WeatherForecastFeed({ history: history4, batchHours: 24 });
 const ingested9 = await feed4.fetchOnce();
 check('fetchOnce convenience wrapper fetches the +24h batch', () => {
-    assert.equal(fetchCalls, 3);
+    assert.equal(fetchCalls, N_CHUNKS);
     assert.equal(ingested9, 24);
 });
 

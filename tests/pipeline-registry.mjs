@@ -115,6 +115,39 @@ for (const route of ['api/mars/ephemeris.js', 'api/mars/route.js', 'api/mars/wea
     assert.match(source, /freshness: 'stale'/,
         `${route}: must emit freshness:'stale' when degraded, or the status page scores a fallback as healthy`);
 }
+// ── The ocean routes + ENSO/MJO (Phase 0.8) ─────────────────────────────────
+// Live since 2026-08 and never registered. Each answers 200 + freshness:'stale'
+// with flagged reference markers (ocean) or null indices (enso-mjo) when its
+// upstream is down — `freshness: 'stale'` is what keeps a dead NOAA feed from
+// scoring green, exactly as for Mars.
+const oceanIds = ['ocean-tides', 'ocean-buoys', 'ocean-dart'];
+for (const id of oceanIds) {
+    const pipeline = PIPELINES.find(entry => entry.id === id);
+    assert.ok(pipeline, `${id}: registered`);
+    assert.equal(pipeline.category, 'ocean', `${id}: filed under ocean`);
+    assert.match(pipeline.probePath ?? '', /\?mode=stations$/, `${id}: probes the catalogue (the bare endpoint 400s by design)`);
+    assert.ok(pipeline.notes?.includes('freshness:stale'), `${id}: note names the degraded state`);
+}
+const enso = PIPELINES.find(entry => entry.id === 'enso-mjo');
+assert.ok(enso, 'enso-mjo: registered');
+assert.equal(enso.category, 'atmosphere');
+for (const route of ['api/ocean/tides.js', 'api/ocean/buoys.js', 'api/ocean/dart.js', 'api/weather/enso-mjo.js']) {
+    const source = readFileSync(join(ROOT, route), 'utf8');
+    assert.match(source, /freshness: 'stale'|freshness: 'live'|out\.freshness = /,
+        `${route}: must emit a freshness field, or the status page scores a fallback as healthy`);
+    assert.ok(!/jsonError\('upstream_unavailable'/.test(source),
+        `${route}: an upstream failure is a degraded 200, never a 503`);
+}
+// The status page must read that statement BEFORE its freshnessExempt
+// short-circuit, or an exempt route's stale answer scores green.
+{
+    const statusSrc = readFileSync(join(ROOT, 'status.html'), 'utf8');
+    const iStale  = statusSrc.indexOf("p.body?.freshness === 'stale'");
+    const iExempt = statusSrc.indexOf('p.spec.freshnessExempt) return');
+    assert.ok(iStale > 0 && iExempt > 0 && iStale < iExempt,
+        'status.html: freshness=stale is checked before the freshnessExempt healthy short-circuit');
+}
+
 // Local routing is covered by the handler-on-disk check above: dev-server.mjs
 // falls back to Vercel's file-based convention (/api/foo/bar → api/foo/bar.js)
 // for anything not in its explicit alias table, so a handler that exists is a

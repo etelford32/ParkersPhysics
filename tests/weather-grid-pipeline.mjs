@@ -19,9 +19,25 @@
  *   • a 429 rate-limit short-circuits the same-IP gfs retry, like a 200 envelope
  *   • OPEN_METEO_API_KEY switches to the commercial host and never leaks
  *   • /api/weather/grid serves a fallback frame with freshness: 'stale'
+ *
+ * Phase 0 of EARTHVIEW_LOD_UX_PLAN.md (2026-10-26) added:
+ *   • the 414 fixture: Open-Meteo answering "414 Request-URI Too Large" (what
+ *     production saw for 30 days) must fall back AND record that reason
+ *   • every chunk URL the cron emits is < MAX_URL_BYTES and there are 7 of
+ *     them (≤400 locations), through js/open-meteo-request.js — the old
+ *     864-location layout is exactly what drew the 414
+ *   • channel P is `pressure_msl` end to end: the cron requests it, the
+ *     MET Norway path writes it under the same key, /api/weather/grid
+ *     reports `pressure_kind: 'msl'`, and a legacy row is classified
+ *   • the MET Norway upsampler averages wind as a VECTOR (350° and 10° → 0°)
+ *   • the range read serves up to 72 hourly frames (the client ring asks for
+ *     72 now, not 24)
  */
 import assert from 'node:assert/strict';
 import { isFallbackSource, HEARTBEAT_PIPELINES } from '../js/pipeline-registry.js';
+import { GRID, MAX_URL_BYTES, byteLength, chunkRanges } from '../js/open-meteo-request.js';
+import { pressureKindOf, pressureHpaOf } from '../js/weather-decode.js';
+const N_CHUNKS = chunkRanges(GRID.n).length;
 
 let passed = 0;
 async function ok(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -55,7 +71,7 @@ function omItems(url) {
     const lats = new URL(url).searchParams.get('latitude').split(',');
     return lats.map((lat, i) => ({
         latitude: Number(lat), longitude: 0,
-        current: { temperature_2m: 10 + (i % 7), relative_humidity_2m: 50, surface_pressure: 1000,
+        current: { temperature_2m: 10 + (i % 7), relative_humidity_2m: 50, pressure_msl: 1000,
             wind_speed_10m: 3, wind_direction_10m: 180, cloud_cover_low: 10, cloud_cover_mid: 10,
             cloud_cover_high: 10, precipitation: 0 },
     }));
@@ -109,7 +125,7 @@ const cronReq = () => new Request('https://x.test/api/cron/refresh-weather-grid'
 const LIMIT = { error: true, reason: 'Minutely API request limit exceeded. Please try again in one minute.' };
 
 // ── the cron, keyless ───────────────────────────────────────────────────────
-const { default: cronKeyless } = await import('../api/cron/refresh-weather-grid.js?keyless');
+const { default: cronKeyless, vectorMeanWind } = await import('../api/cron/refresh-weather-grid.js?keyless');
 
 await ok('a fallback win KEEPS the primary\'s reason: logged, heartbeat failure-then-success, body says degraded', async () => {
     const log = stub(() => ({ status: 429, body: LIMIT }));
@@ -175,9 +191,69 @@ await ok('a clean primary run writes success only and reports degraded: false', 
         assert.equal(body.degraded, false);
         assert.equal(body.attempt_failures, undefined);
         assert.ok(!log.rpcs.some(r => r.fn === 'record_pipeline_failure'));
-        assert.equal(log.om.length, 3, '3 chunks × 864');
+        assert.equal(log.om.length, N_CHUNKS, `${N_CHUNKS} chunks of ≤400 locations`);
         assert.equal(log.warns.length, 0);
+        // The 414 guard, on the URLs the cron ACTUALLY emitted.
+        for (const u of log.om) {
+            assert.ok(byteLength(u) < MAX_URL_BYTES, `chunk URL ${byteLength(u)} B`);
+            assert.match(u, /current=[^&]*pressure_msl/, 'channel P is requested as MSLP');
+            assert.ok(!u.includes('surface_pressure'));
+        }
+        const locs = log.om.reduce((n, u) => n + new URL(u).searchParams.get('latitude').split(',').length, 0);
+        assert.equal(locs, 2592, 'the chunks cover the whole grid once');
+        assert.equal(log.insert.payload.length, 2592);
+        assert.equal(log.insert.payload[0].current.pressure_msl, 1000);
+        assert.equal(pressureKindOf(log.insert.payload[0]), 'msl');
     } finally { restore(); }
+});
+
+await ok('the 414 fixture: "Request-URI Too Large" falls back to MET Norway AND records that reason', async () => {
+    // What production answered to every 864-location chunk for 30 days.
+    const nginx414 = '<html>\r\n<head><title>414 Request-URI Too Large</title></head>\r\n<body>\r\n<center><h1>414 Request-URI Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>';
+    const log = stub(() => ({ status: 414, body: nginx414 }));
+    try {
+        const res = await cronKeyless(cronReq());
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.source, 'met-norway:72x36');
+        assert.equal(body.degraded, true);
+        assert.match(body.attempt_failures[0].reason, /open-meteo chunk 0 HTTP 414: .*Request-URI Too Large/s);
+        // Not a rate limit → the gfs retry IS attempted (and fails the same way).
+        assert.deepEqual(body.attempt_failures.map(f => f.src), ['open-meteo', 'open-meteo-gfs']);
+        assert.match(body.attempt_failures[1].reason, /open-meteo-gfs chunk \d+ HTTP 414/);
+        const fail = log.rpcs.find(r => r.fn === 'record_pipeline_failure');
+        assert.match(fail.args.p_reason, /^degraded: served met-norway:72x36; .*HTTP 414: .*Request-URI Too Large/s);
+        assert.ok(log.rpcs.findIndex(r => r.fn === 'record_pipeline_failure') < log.rpcs.findIndex(r => r.fn === 'record_pipeline_success'));
+        // The fallback frame: MSLP under the ONE key, tagged, and a vector-mean wind.
+        const loc = log.insert.payload[0];
+        assert.equal(loc.current.pressure_msl, 1012);
+        assert.equal(loc.current.surface_pressure, undefined);
+        assert.equal(loc.__pressure_kind, 'msl');
+        assert.equal(pressureKindOf(loc), 'msl');
+        assert.equal(pressureHpaOf(loc), 1012);
+        assert.ok(Math.abs(loc.current.wind_direction_10m - 200) < 1e-9, `vector round-trip ${loc.current.wind_direction_10m}`);
+        assert.ok(Math.abs(loc.current.wind_speed_10m - 4) < 1e-9);
+    } finally { restore(); }
+});
+
+await ok('MET Norway upsampler: wind is averaged as a VECTOR — 350° and 10° give 0°, not 180°', async () => {
+    const s = (speed, dir) => ({ speed, dir });
+    let r = vectorMeanWind([s(5, 350), s(5, 10)], [1, 1]);
+    assert.ok(Math.abs(r.dir) < 1e-9 || Math.abs(r.dir - 360) < 1e-9, `350/10 → ${r.dir}`);
+    assert.ok(Math.abs(r.speed - 5 * Math.cos(10 * Math.PI / 180)) < 1e-9, 'speed is |mean vector|');
+    // The linear-in-degrees bug this replaces:
+    assert.equal((350 + 10) / 2, 180, 'negative control: the old arithmetic put it at 180°');
+    r = vectorMeanWind([s(3, 90), s(3, 90)], [0.25, 0.75]);
+    assert.ok(Math.abs(r.dir - 90) < 1e-9 && Math.abs(r.speed - 3) < 1e-9);
+    r = vectorMeanWind([s(4, 0), s(4, 180)], [1, 1]);
+    assert.equal(r.speed, 0, 'opposing winds cancel');
+    r = vectorMeanWind([s(NaN, 10), s(2, 270), s(2, null)], [1, 1, 1]);
+    assert.ok(Math.abs(r.dir - 270) < 1e-9 && Math.abs(r.speed - 2) < 1e-9, 'non-finite samples drop out');
+    assert.deepEqual(vectorMeanWind([s(NaN, NaN)], [1]), { speed: null, dir: null });
+    // Weighted: 1 m/s from 0° at weight 3 against 1 m/s from 90° at weight 1.
+    r = vectorMeanWind([s(1, 0), s(1, 90)], [3, 1]);
+    assert.ok(Math.abs(r.dir - (Math.atan2(1, 3) * 180 / Math.PI)) < 1e-9);
+    assert.ok(r.dir >= 0 && r.dir < 360);
 });
 
 await ok('a total failure records EVERY attempt\'s reason, not just the fallback\'s', async () => {
@@ -236,7 +312,8 @@ function stubGridRows(rows) {
         return Response.json(rows);
     };
 }
-const row = (source) => ({ fetched_at: new Date().toISOString(), source, payload: [{ current: { temperature_2m: 1 } }] });
+const row = (source, current = { temperature_2m: 1, pressure_msl: 1008 }, extra = {}) =>
+    ({ fetched_at: new Date().toISOString(), source, payload: [{ current, ...extra }] });
 
 await ok('/api/weather/grid serves a fallback frame as freshness: stale (single + range)', async () => {
     try {
@@ -262,6 +339,54 @@ await ok('/api/weather/grid serves a primary frame (and a legacy untagged one) a
         stubGridRows([row(null)]);
         const b = await (await gridRoute(new Request('https://x.test/api/weather/grid'))).json();
         assert.equal(b.freshness, 'live');
+    } finally { restore(); }
+});
+
+await ok('/api/weather/grid reports pressure_kind: msl for new rows and legacy MET Norway rows, surface for old Open-Meteo rows', async () => {
+    try {
+        stubGridRows([row('open-meteo:72x36')]);
+        assert.equal((await (await gridRoute(new Request('https://x.test/api/weather/grid'))).json()).pressure_kind, 'msl');
+        // Legacy MET Norway row: MSLP under the old key, tagged mean_sea_level.
+        stubGridRows([row('met-norway:72x36', { temperature_2m: 1, surface_pressure: 1012 }, { __pressure_kind: 'mean_sea_level' })]);
+        const metno = await (await gridRoute(new Request('https://x.test/api/weather/grid'))).json();
+        assert.equal(metno.pressure_kind, 'msl');
+        assert.equal(pressureHpaOf(metno.data[0], 'msl'), 1012, 'the legacy slot still decodes as MSLP');
+        // Pre-2026-10-26 Open-Meteo row: true station pressure.
+        stubGridRows([row('open-meteo:72x36', { temperature_2m: 1, surface_pressure: 870 })]);
+        assert.equal((await (await gridRoute(new Request('https://x.test/api/weather/grid'))).json()).pressure_kind, 'surface');
+        // Range mode: the kind survives the trim (which drops the per-location tag).
+        stubGridRows([
+            row('open-meteo:72x36'),
+            row('met-norway:72x36', { temperature_2m: 1, surface_pressure: 1012 }, { __pressure_kind: 'mean_sea_level' }),
+            row('open-meteo:72x36', { temperature_2m: 1, surface_pressure: 870 }),
+        ]);
+        const range = await (await gridRoute(new Request(`https://x.test/api/weather/grid?since=${encodeURIComponent(new Date(Date.now() - 3600e3).toISOString())}`))).json();
+        assert.deepEqual(range.frames.map(f => f.pressure_kind), ['msl', 'msl', 'surface']);
+        assert.equal(range.frames[0].data[0].current.pressure_msl, 1008, 'range trim keeps pressure_msl');
+        assert.equal(range.frames[1].data[0].current.surface_pressure, 1012, 'range trim keeps the legacy slot');
+        assert.equal(range.frames[0].data[0].__pressure_kind, undefined, 'the per-location tag is trimmed — hence the top-level field');
+    } finally { restore(); }
+});
+
+await ok('/api/weather/grid range mode serves up to 72 hourly frames (the ring depth the client asks for)', async () => {
+    try {
+        let seenLimit = null;
+        globalThis.fetch = async (url) => {
+            const u = new URL(String(url));
+            seenLimit = Number(u.searchParams.get('limit'));
+            return Response.json(Array.from({ length: seenLimit }, () => row('open-meteo:72x36')));
+        };
+        const since = encodeURIComponent(new Date(Date.now() - 72 * 3600e3).toISOString());
+        const r72 = await (await gridRoute(new Request(`https://x.test/api/weather/grid?since=${since}&limit=72`))).json();
+        assert.equal(seenLimit, 72);
+        assert.equal(r72.count, 72);
+        const r99 = await (await gridRoute(new Request(`https://x.test/api/weather/grid?since=${since}&limit=99`))).json();
+        assert.equal(seenLimit, 72, 'capped at the route\'s own ceiling, silently');
+        assert.equal(r99.count, 72);
+        const { BACKFILL_HOURS } = await import('../js/weather-feed.js');
+        assert.equal(BACKFILL_HOURS, 72, 'the client asks for exactly the depth the route can serve');
+        const { TIER } = await import('../js/weather-history.js');
+        assert.equal(TIER.max_rows, BACKFILL_HOURS, 'and the IDB ring can hold it');
     } finally { restore(); }
 });
 

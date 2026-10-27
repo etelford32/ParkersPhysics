@@ -13,6 +13,8 @@ import {
     default as dartHandler,
     parseDartStations, parseDartReadings,
 } from '../api/ocean/dart.js';
+import { default as ensoHandler } from '../api/weather/enso-mjo.js';
+import { REFERENCE_STATIONS, OCEAN_KINDS, referenceStationsPayload, unavailablePayload } from '../js/ocean-reference-stations.js';
 
 assert.ok(Math.abs(haversineKm(0, 0, 0, 1) - 111.195) < 0.01);
 
@@ -72,4 +74,68 @@ const invalidDart = await dartHandler(new Request('https://example.test/api/ocea
 assert.equal(invalidDart.status, 400);
 assert.equal((await invalidDart.json()).error, 'invalid_station');
 
-console.log('ocean feed parsers: ok');
+// ── Degraded answers (Phase 0.8): 200 + freshness:'stale', never a 503 ──────
+{
+    const realFetch = globalThis.fetch;
+    const down = async () => { throw new Error('getaddrinfo ENOTFOUND api.tidesandcurrents.noaa.gov'); };
+    const http503 = async () => new Response('busy', { status: 503 });
+    try {
+        for (const [kind, handler, url] of [
+            ['tides', tidesHandler, 'https://example.test/api/ocean/tides?mode=stations'],
+            ['buoys', buoysHandler, 'https://example.test/api/ocean/buoys?mode=stations'],
+            ['dart',  dartHandler,  'https://example.test/api/ocean/dart?mode=stations'],
+        ]) {
+            for (const fetchStub of [down, http503]) {
+                globalThis.fetch = fetchStub;
+                const res = await handler(new Request(url));
+                assert.equal(res.status, 200, `${kind}: a dead upstream is a degraded 200`);
+                const body = await res.json();
+                assert.equal(body.freshness, 'stale');
+                assert.equal(body.reason, 'upstream_unavailable');
+                assert.equal(body.error, undefined, 'not an error envelope — the layer keeps drawing');
+                assert.equal(body.count, REFERENCE_STATIONS[kind].length);
+                assert.deepEqual(body.stations.map(s => s.id), REFERENCE_STATIONS[kind].map(s => s.id), 'the ONE reference catalogue');
+                assert.ok(body.stations.every(s => s.reference === true && s.fallback === true && /reference/i.test(s.name)),
+                    `${kind}: every marker is flagged as a reference location`);
+                assert.ok(body.stations.every(s => s.lat >= -90 && s.lat <= 90 && s.lon >= -180 && s.lon <= 180));
+                assert.match(body.note, /reference locations, not observations/);
+                assert.match(res.headers.get('cache-control'), /s-maxage=60/, 'degraded answers are cached briefly so recovery shows');
+            }
+        }
+        // Point mode: available:false + reason, still 200.
+        globalThis.fetch = down;
+        const tide = await (await tidesHandler(new Request('https://example.test/api/ocean/tides?lat=37.8&lon=-122.5'))).json();
+        assert.equal(tide.available, false); assert.equal(tide.freshness, 'stale'); assert.equal(tide.reason, 'upstream_unavailable');
+        const buoy = await (await buoysHandler(new Request('https://example.test/api/ocean/buoys?lat=37.8&lon=-122.5'))).json();
+        assert.equal(buoy.available, false); assert.equal(buoy.freshness, 'stale'); assert.deepEqual(buoy.stations, []);
+        const dart = await (await dartHandler(new Request('https://example.test/api/ocean/dart?station=46407'))).json();
+        assert.equal(dart.available, false); assert.equal(dart.freshness, 'stale'); assert.deepEqual(dart.readings, []);
+        assert.equal(dart.station.id, '46407');
+        // Client errors are still the client's: 400, even with NOAA down.
+        assert.equal((await tidesHandler(new Request('https://example.test/api/ocean/tides?lat=999&lon=0'))).status, 400);
+        assert.equal((await dartHandler(new Request('https://example.test/api/ocean/dart?station=!!'))).status, 400);
+        // A healthy catalogue says freshness: live.
+        globalThis.fetch = async () => Response.json({ stations: [{ id: '9414290', name: 'SF', lat: 37.8, lng: -122.47, tidal: true }] });
+        const live = await (await tidesHandler(new Request('https://example.test/api/ocean/tides?mode=stations'))).json();
+        assert.equal(live.freshness, 'live'); assert.equal(live.count, 1); assert.equal(live.stations[0].reference, undefined);
+        // ENSO/MJO both down → 200 + stale + null indices (js/month-outlook.js treats null as unavailable).
+        globalThis.fetch = down;
+        const ensoRes = await ensoHandler();
+        assert.equal(ensoRes.status, 200);
+        const ensoBody = await ensoRes.json();
+        assert.equal(ensoBody.freshness, 'stale'); assert.equal(ensoBody.partial, true);
+        assert.equal(ensoBody.enso, null); assert.equal(ensoBody.mjo, null); assert.equal(ensoBody.error, undefined);
+        assert.deepEqual(ensoBody.sources, { enso: 'unavailable', mjo: 'unavailable' });
+    } finally { globalThis.fetch = realFetch; }
+
+    // The pure kernel.
+    assert.deepEqual(OCEAN_KINDS, ['tides', 'buoys', 'dart']);
+    assert.throws(() => referenceStationsPayload('lakes', { source: 'x', source_url: 'y' }), RangeError);
+    const p = referenceStationsPayload('dart', { source: 'S', source_url: 'U', detail: 'x'.repeat(500) });
+    assert.equal(p.detail.length, 300, 'upstream detail is bounded');
+    assert.notEqual(p.stations[0], REFERENCE_STATIONS.dart[0], 'payload copies, never hands out the frozen catalogue');
+    const u = unavailablePayload({ source: 'S', detail: 'd', extra: { station: { id: 'x' } } });
+    assert.equal(u.available, false); assert.equal(u.station.id, 'x'); assert.equal(u.freshness, 'stale');
+}
+
+console.log('ocean feed parsers + degraded answers: ok');

@@ -100,7 +100,7 @@ function mkRows(n, current) {
 check('channel layout + U/V decomposition (wind FROM north → V < 0)', () => {
     const w = 4, h = 3, N = w * h;
     const rows = mkRows(N, () => ({
-        temperature_2m: 10, surface_pressure: 1000, relative_humidity_2m: 50,
+        temperature_2m: 10, pressure_msl: 1000, relative_humidity_2m: 50,
         wind_speed_10m: 8, wind_direction_10m: 0,        // from due north
         cloud_cover_low: 20, cloud_cover_mid: 30, cloud_cover_high: 40,
         precipitation: 1.5,
@@ -122,7 +122,7 @@ check('NaN gaps fill from nearest neighbour without longitude wrap', () => {
         // West edge cell (i=0) missing temperature; the wrap-free fill must
         // borrow from its EAST neighbour (25), not the far row end.
         temperature_2m: i === 0 ? null : (i === 1 ? 25 : 99),
-        surface_pressure: 1000, relative_humidity_2m: 50,
+        pressure_msl: 1000, relative_humidity_2m: 50,
         wind_speed_10m: 0, wind_direction_10m: 0,
     }));
     const c = extractPatchCoarse(rows, w, h);

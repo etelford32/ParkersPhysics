@@ -19,14 +19,17 @@
  * lightweight story: a few numbers a day drive every location's outlook.
  *
  * Degrades gracefully: if one source is down the other still returns, with
- * `partial: true` and a per-source status. Only a both-down case is a 503.
+ * `partial: true` and a per-source status. A both-down case is a 200 with
+ * `freshness: 'stale'` and both indices null (2026-10-26, EARTHVIEW_LOD_UX_PLAN.md
+ * Phase 0.8) — status.html scores it amber, js/month-outlook.js already treats
+ * a null index as 'unavailable', and a 503 told nobody which upstream it was.
  *
  * Parsers (parseONI / parseRMM) are exported for unit testing against captured
  * feed samples; the live fetch is the only untested-here part and is wrapped
  * defensively.
  */
 
-import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { jsonOk, fetchWithTimeout } from '../_lib/responses.js';
 
 export const config = { runtime: 'edge' };
 
@@ -134,11 +137,15 @@ export default async function handler() {
     }
 
     out.partial = out.sources.enso !== 'ok' || out.sources.mjo !== 'ok';
+    // One index down is still a usable outlook (partial); both down is a
+    // degraded 200, never a 5xx (header note). 'stale' is the signal status.html
+    // scores amber — CLAUDE.md §8.
+    out.freshness = (out.sources.enso !== 'ok' && out.sources.mjo !== 'ok') ? 'stale' : 'live';
 
-    if (out.sources.enso !== 'ok' && out.sources.mjo !== 'ok') {
-        return jsonError('upstream_unavailable',
-            'ENSO (CPC) and MJO (BoM) sources both failed or returned no parseable rows',
-            { source: 'NOAA CPC / BoM' });
+    if (out.freshness === 'stale') {
+        out.reason = 'upstream_unavailable';
+        out.detail = 'ENSO (CPC) and MJO (BoM) sources both failed or returned no parseable rows';
+        return jsonOk(out, { maxAge: 60, swr: 0 });
     }
 
     return jsonOk(out, { maxAge: CACHE_TTL, swr: CACHE_SWR });
