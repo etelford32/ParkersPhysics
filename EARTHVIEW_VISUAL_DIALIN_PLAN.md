@@ -104,8 +104,14 @@ and the CDN are egress-blocked, so every gate ran on the synthetic stubs).
   sandbox.** Four parallel workers booting earth.html on SwiftShader killed the
   browser session mid-test (`Protocol error … session closed`, `page.goto`
   timing out at 60 s) — a resource failure that reads like a page bug. Run
-  serially, the two wind gates pass (2.1 min). The cloud gates' serial run is
-  recorded in the commit that follows the wind palette. Also: `npm install`
+  serially, the two wind gates pass (2.1 min) and the three `atmo-stack-smoke`
+  cases + `cloud-timeline` pass (5.0 min). `cloud-shells-smoke` FAILS on the
+  sandbox **before and after this change** (re-run against `origin/main`'s
+  earth.html: same failure, earlier in the boot) — its `?cloud_quality=1`
+  full-quality boot on SwiftShader exhausts the 60 s per-test budget before
+  the first assertion. It is a sandbox-speed limit, not a page bug; it needs
+  a GPU machine or a per-test timeout, and is NOT evidence about how the
+  clouds route (the routing is asserted, and passes, in `atmo-stack-smoke`). Also: `npm install`
   alone pulls a `@playwright/test` whose browser revision is not installed
   here; the runner has to match the pre-installed browser build
   (`npm install --no-save @playwright/test@<preinstalled> playwright@<same>`).
