@@ -95,7 +95,97 @@ export const MOSAIC = Object.freeze({
     retentionMs:   30 * 24 * 3_600_000,      // ASSUMED rolling archive window — see header
     nowcastMaxMs:  3 * 3_600_000,            // persistence-advection horizon
     leadClampMs:   4 * 3_600_000,            // |simTime − frameTime| beyond this is not advected
+    ageCodeMin:    2,                        // minutes per 8-bit code in the mosaic's G channel (below)
 });
+
+/**
+ * EVERY DISC HAS ITS OWN TIME (Phase 0.6, EARTHVIEW_LOD_UX_PLAN.md §1.2)
+ * ───────────────────────────────────────────────────────────────────────
+ * The mosaic is four geostationary discs that each resolved their OWN
+ * freshest frame (a region can be up to 90 min behind the others, or a day
+ * on a date-only fallback), yet it carried ONE timestamp — the newest's — and
+ * the shaders advected every pixel by that one lead. A disc 30 min older
+ * than the newest was therefore drawn 30 min × wind short of where its
+ * clouds had moved to.
+ *
+ * The compositor now writes each pixel's disc AGE — how far its frame sits
+ * behind the newest disc, in minutes — into the mosaic's G channel (the
+ * channel used to duplicate R; nothing read it). The shaders add that age
+ * to the frame lead before sampling, so lead_disc = (simTime − t_newest) +
+ * (t_newest − t_disc) = simTime − t_disc: each disc is advected by its own
+ * lead, with no per-disc uniforms and no second texture. The age is clamped
+ * to leadClampMs like the lead itself, and a disc whose hour is unknown
+ * (date-only frame) encodes 0 and is named in the disclosure instead.
+ */
+
+/** Largest disc age the G channel carries, minutes (the lead clamp). */
+export const AGE_CODE_MAX_MIN = MOSAIC.leadClampMs / 60_000;
+
+/**
+ * Minutes behind the newest disc → 8-bit G code. Non-finite / negative → 0.
+ * @param {number} ageMin
+ */
+export function encodeAgeCode(ageMin) {
+    if (!Number.isFinite(ageMin) || ageMin <= 0) return 0;
+    const clamped = Math.min(ageMin, AGE_CODE_MAX_MIN);
+    return Math.min(255, Math.round(clamped / MOSAIC.ageCodeMin));
+}
+
+/** G code → minutes behind the newest disc. */
+export function decodeAgeMin(code) {
+    return Math.max(0, Math.min(255, code | 0)) * MOSAIC.ageCodeMin;
+}
+
+/**
+ * Seconds the shaders add to the frame lead at full G (code 255): the one
+ * number both GLSL mirrors interpolate (cloud-volume.js SAT_AGE_S; earth.html
+ * folds it into u_sat_age_k with the decal's pre-divided gain).
+ */
+export const AGE_FULL_SCALE_S = 255 * MOSAIC.ageCodeMin * 60;
+
+/**
+ * Per-disc ages against the newest disc.
+ *
+ * @param {Array<{name:string, timestampMs:number|null}>} regionTimes
+ * @returns {{ newestMs:number|null, discs:Array<{name:string, timestampMs:number|null, ageMin:number|null}>,
+ *             oldest:{name:string, timestampMs:number, ageMin:number}|null, unknown:string[] }}
+ *   ageMin is null (and the disc is listed in `unknown`) when its frame has
+ *   no timestamp — a date-only fallback whose hour GIBS does not state.
+ */
+export function discAges(regionTimes) {
+    const list = Array.isArray(regionTimes) ? regionTimes : [];
+    const stamped = list.filter(r => Number.isFinite(r?.timestampMs));
+    const newestMs = stamped.length ? Math.max(...stamped.map(r => r.timestampMs)) : null;
+    const discs = list.map(r => ({
+        name: r?.name ?? '?',
+        timestampMs: Number.isFinite(r?.timestampMs) ? r.timestampMs : null,
+        ageMin: Number.isFinite(r?.timestampMs) && newestMs != null
+            ? Math.max(0, Math.round((newestMs - r.timestampMs) / 60_000)) : null,
+    }));
+    let oldest = null;
+    for (const d of discs) {
+        if (d.ageMin == null) continue;
+        if (!oldest || d.ageMin > oldest.ageMin) oldest = d;
+    }
+    return { newestMs, discs, oldest, unknown: discs.filter(d => d.ageMin == null).map(d => d.name) };
+}
+
+/**
+ * Tooltip line naming the oldest disc, or null when every disc shares the
+ * newest time (nothing to disclose).
+ * @param {Array<{name:string, timestampMs:number|null}>} regionTimes
+ */
+export function describeDiscAges(regionTimes) {
+    const { oldest, unknown, discs } = discAges(regionTimes);
+    const parts = [];
+    if (oldest && oldest.ageMin > 0) {
+        parts.push(`Oldest disc: ${oldest.name}, ${oldest.ageMin} min behind the newest (advected by its own lead)`);
+    }
+    if (unknown.length && discs.length > unknown.length) {
+        parts.push(`${unknown.join(' + ')}: date-only frame, hour unknown — not advected`);
+    }
+    return parts.length ? parts.join('\n') : null;
+}
 
 /** Flow-map constants, mirrored into the shaders. */
 export const FLOW = Object.freeze({

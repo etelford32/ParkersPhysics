@@ -34,7 +34,7 @@
  * Laziness / rate-limit budget
  * ────────────────────────────
  * Nothing is fetched at boot. earth.html calls start() the first time the
- * user enables the volume layer; the three grid chunks are fetched
+ * user enables the volume layer; the grid chunks are fetched
  * SERIALLY with a short gap (the NWP feed's progressive walk already
  * budgets Open-Meteo's rate limit at boot — this feed must not stack a
  * parallel burst on top; see the 429 scar tissue in weather-forecast-feed).
@@ -45,17 +45,22 @@
  *                                                     whatever it had)
  */
 
-const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
+import {
+    GRID, MAX_LOCATIONS_PER_REQUEST, OPEN_METEO_FORECAST_URL,
+    chunkRanges, gridChunkCoords, chunkUrl, mergeChunks,
+} from './open-meteo-request.js';
+
 const HOUR_MS = 3_600_000;
 
-// Lockstep with weather-forecast-feed.js / the cron grid generator.
-const GRID_W     = 72;
-const GRID_H     = 36;
-const GRID_N     = GRID_W * GRID_H;
-const GRID_DEG   = 180 / GRID_H;
-const LAT_ORIGIN = -90  + GRID_DEG / 2;
-const LON_ORIGIN = -180 + GRID_DEG / 2;
-const CHUNK_SIZE = 864;
+// Grid + chunking from js/open-meteo-request.js, the ONE copy shared with
+// the cron, the forecast ring and the patch. (This file's own `864` with
+// `toFixed(2)` built a ~12.3 KB URL — HTTP 414 upstream, a bare
+// NetworkError here, and the 850/500/250 hPa layers never loaded;
+// EARTHVIEW_LOD_UX_PLAN.md §1.1.)
+const GRID_W     = GRID.w;
+const GRID_H     = GRID.h;
+const GRID_N     = GRID.n;
+const CHUNK_SIZE = MAX_LOCATIONS_PER_REQUEST;
 const CHUNK_GAP_MS = 400;      // serial-fetch spacing, rate-limit courtesy
 
 const PAST_HOURS   = 24;       // match the replay ring
@@ -113,27 +118,16 @@ function _isoHour(ms) {
     return `${yyyy}-${mm}-${dd}T${HH}:00`;
 }
 
-function _chunkCoords(start, end) {
-    const lats = [], lons = [];
-    for (let idx = start; idx <= end; idx++) {
-        const j = Math.floor(idx / GRID_W);
-        const i = idx % GRID_W;
-        lats.push((LAT_ORIGIN + j * GRID_DEG).toFixed(2));
-        lons.push((LON_ORIGIN + i * GRID_DEG).toFixed(2));
-    }
-    return { lat: lats.join(','), lon: lons.join(',') };
-}
-
 function _chunkUrl(start, end, startMs, endMs) {
-    const { lat, lon } = _chunkCoords(start, end);
-    return `${OPEN_METEO_FORECAST}`
-        + `?latitude=${lat}`
-        + `&longitude=${lon}`
-        + `&hourly=${HOURLY_VARS}`
-        + `&wind_speed_unit=ms`
-        + `&timezone=UTC`
-        + `&start_hour=${_isoHour(startMs)}`
-        + `&end_hour=${_isoHour(endMs)}`;
+    const { lats, lons } = gridChunkCoords(start, end, GRID);
+    return chunkUrl({
+        base: OPEN_METEO_FORECAST_URL, lats, lons,
+        query: `hourly=${HOURLY_VARS}`
+            + `&wind_speed_unit=ms`
+            + `&timezone=UTC`
+            + `&start_hour=${_isoHour(startMs)}`
+            + `&end_hour=${_isoHour(endMs)}`,
+    });
 }
 
 function _emit(type, detail) {
@@ -408,16 +402,12 @@ export class TempVolumeFeed {
     }
 
     async _fetchRange(startMs, endMs) {
-        const merged = [];
-        for (let start = 0; start < GRID_N; start += CHUNK_SIZE) {
-            const end = Math.min(start + CHUNK_SIZE - 1, GRID_N - 1);
+        const parts = [];
+        for (const { start, end } of chunkRanges(GRID_N, CHUNK_SIZE)) {
             if (start > 0) await new Promise(r => setTimeout(r, CHUNK_GAP_MS));
-            const arr = await this._fetchChunk(start, end, startMs, endMs);
-            merged.push(...arr);
+            parts.push(await this._fetchChunk(start, end, startMs, endMs));
         }
-        if (merged.length !== GRID_N) {
-            throw new Error(`level merge length ${merged.length} != ${GRID_N}`);
-        }
+        const merged = mergeChunks(parts, GRID_N);   // chunk order is grid order
         const frames = pivotLevelResponses(merged);
         if (frames.length === 0) throw new Error('no hourly frames in response');
         this._frames = frames;

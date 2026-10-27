@@ -498,6 +498,10 @@ uniform float u_wind_max;
 uniform float u_sat_lead_k;        // mosaic advection: lead(s) × gain / R_EARTH(m),
                                    // i.e. radians per (m/s) — PRE-DIVIDED on the JS
                                    // side because 6.371e6 overflows mediump.
+uniform float u_sat_age_k;         // the same units for a FULL G code (255): the
+                                   // mosaic's G channel is each disc's age behind
+                                   // the newest disc (cloud-time.js encodeAgeCode),
+                                   // so lead_disc = u_sat_lead_k + g * u_sat_age_k.
 uniform float u_cloud_data_strength; // Open-Meteo imprint intensity.
                                      //   0.0  = pure noise, no data modulation (debug)
                                      //   0.2  = ±10% soft modulation
@@ -1029,6 +1033,13 @@ void main() {
         vec2  wndS     = (texture2D(u_wind, vUv).rg * 2.0 - 1.0) * u_wind_max;
         vec3  nSat     = advectSat(N_sphere, wndS, u_sat_lead_k);
         vec4  sat      = texture2D(u_satellite, normalToUV(nSat));
+        // Per-disc lead (Phase 0.6): an older disc is advected further by
+        // exactly its age behind the newest. The newest disc (g = 0) pays no
+        // second fetch, and the branch is uniform within a disc.
+        if (sat.g > 0.001) {
+            nSat = advectSat(N_sphere, wndS, u_sat_lead_k + sat.g * u_sat_age_k);
+            sat  = texture2D(u_satellite, normalToUV(nSat));
+        }
         float satCloud = sat.r;
         // Confidence × mode weight: 1 where the satellite saw this pixel AND
         // an observation exists for this instant; the deep future is 0 and
@@ -1850,6 +1861,7 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_wind:          { value: _calmWindTex() },
         u_wind_max:      { value: 60 },
         u_sat_lead_k:    { value: 0 },
+        u_sat_age_k:     { value: 0 },            // set once by earth.html (AGE_FULL_SCALE_S × k/s)
         u_cloud_data_strength: { value: 0.5 },    // 0.5 matches original ±25% imprint
         // Adaptive ALU budget — stepped down by earth.html's resolution
         // governor on struggling GPUs. 1 = original full-quality shader.

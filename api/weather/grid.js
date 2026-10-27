@@ -46,8 +46,18 @@
  *     grid:        { w: 72, h: 36, deg: 5 },    // null for legacy rows
  *     freshness:   "live" | "stale",            // "stale" = a FALLBACK upstream
  *     note?:       "fallback-source: …",        // present only when stale
+ *     pressure_kind: "msl" | "surface" | null,  // what channel P means (below)
  *     data:        [ { current: { temperature_2m, … } }, … ]   // 2592 items
  *   }
+ *
+ * `pressure_kind` (2026-10-26): the cron now requests `pressure_msl`; rows
+ * written before that carry `surface_pressure`, which for the MET Norway
+ * fallback was ALREADY mean sea-level pressure under the wrong name and for
+ * Open-Meteo was true station pressure. js/weather-decode.js pressureKindOf
+ * is the ONE reader of that distinction; the client never blends a
+ * 'surface' frame into the MSLP ring (PRESSURE_OUTLOOK_ENGINE_PLAN.md P1).
+ * It is derived from the UNTRIMMED payload, because range mode strips the
+ * per-location `__pressure_kind` tag.
  *
  * `freshness` is about the SOURCE, not the age (age is `age_seconds`). A frame
  * from the MET Norway safety net is 648 points at 10° bilinear-upsampled to
@@ -75,6 +85,7 @@
 
 import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js';
 import { isFallbackSource } from '../../js/pipeline-registry.js';
+import { pressureKindOf } from '../../js/weather-decode.js';
 
 export const config = { runtime: 'edge' };
 
@@ -155,6 +166,11 @@ async function readRange(sinceISO, limit) {
  */
 const RANGE_KEEP_FIELDS = [
     'temperature_2m',
+    // Both pressure keys: `pressure_msl` is what the cron writes since
+    // 2026-10-26; `surface_pressure` is kept so older MET Norway rows (MSLP
+    // under the legacy name) still decode. The top-level `pressure_kind`
+    // says which one a frame means — see projectRow.
+    'pressure_msl',
     'surface_pressure',
     'relative_humidity_2m',
     'wind_speed_10m',
@@ -224,6 +240,8 @@ function projectRow(row, trim = false) {
         grid,
         freshness:   fallback ? 'stale' : 'live',
         ...(fallback ? { note: `fallback-source: ${rawSource} (the primary upstream failed for this frame)` } : {}),
+        // Read off the first location BEFORE trimming (header note).
+        pressure_kind: Array.isArray(row.payload) ? pressureKindOf(row.payload[0]) : null,
         data:        trim ? trimRowForRange(row.payload) : row.payload,
     };
 }

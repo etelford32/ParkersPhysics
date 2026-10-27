@@ -40,10 +40,19 @@
  *     ships it to telemetry (kind 'data_pipeline'). When this pipeline
  *     misbehaves in the field, that event is the evidence — keep it.
  *
- * Public API (unchanged shape, plus `timestampMs` + `diag`):
+ * Public API (unchanged shape, plus `timestampMs`, `regionTimes`,
+ * `oldestTimestampMs` + `diag`):
  *   fetchCloudImagery(THREE, opts?) → Promise<{
- *       texture, mosaic, date, timestampMs, layers, regions, polar, url, diag
+ *       texture, mosaic, date, timestampMs, regionTimes, oldestTimestampMs,
+ *       layers, regions, polar, url, diag
  *   } | null>
+ *   `timestampMs` is the NEWEST disc's frame time (what the lead is measured
+ *   from); `regionTimes` carries every disc's own time, and the compositor
+ *   writes each disc's age behind the newest into the texture's G channel so
+ *   the shaders advect each disc by its own lead (Phase 0.6 —
+ *   js/cloud-time.js "EVERY DISC HAS ITS OWN TIME").
+ *   A GIBS blank-200 (a transparent PNG for an out-of-range TIME) is NOT a
+ *   hit: loadFirstCandidate reads a thumbnail and walks on (Phase 0.7).
  *   fetchLatestCloudImagery — legacy alias, same behaviour.
  *
  * Data source: GIBS (Global Imagery Browse Services) — NASA's public,
@@ -53,8 +62,9 @@
  */
 
 import {
-    productKind, MosaicAccumulator, gibsTimeCandidates, toUtcDate,
+    productKind, MosaicAccumulator, gibsTimeCandidates, toUtcDate, isBlankFrame,
 } from './cloud-mosaic-core.js';
+import { discAges } from './cloud-time.js';
 
 const GIBS_BASE = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
 
@@ -159,24 +169,53 @@ function loadImage(url) {
     });
 }
 
+// Thumbnail readback for the blank-200 check: 256×128 is 32k pixels, cheap
+// enough to run on every candidate and coarse enough that it never holds a
+// full 8 MB frame. Bilinear downsampling cannot turn a real frame's opaque
+// disc into alpha 0, and a fully transparent PNG stays fully transparent.
+const BLANK_PROBE_W = 256, BLANK_PROBE_H = 128;
+let _blankProbe = null;
+function isBlankSnapshot(image) {
+    try {
+        if (!_blankProbe) {
+            _blankProbe = document.createElement('canvas');
+            _blankProbe.width = BLANK_PROBE_W;
+            _blankProbe.height = BLANK_PROBE_H;
+        }
+        const ctx = _blankProbe.getContext('2d', { willReadFrequently: true });
+        ctx.clearRect(0, 0, BLANK_PROBE_W, BLANK_PROBE_H);
+        ctx.drawImage(image, 0, 0, BLANK_PROBE_W, BLANK_PROBE_H);
+        return isBlankFrame(ctx.getImageData(0, 0, BLANK_PROBE_W, BLANK_PROBE_H).data);
+    } catch {
+        // A tainted or unreadable canvas cannot prove blankness — treat the
+        // frame as a hit, exactly the pre-check behaviour.
+        return false;
+    }
+}
+
 /**
  * Walk a candidate list of {layer, time} pairs, recording every attempt
- * into diag.attempts. Resolves the first hit or null.
+ * into diag.attempts. Resolves the first REAL hit or null. A frame that
+ * decodes to a (near-)fully transparent image is GIBS's "200 for a TIME we
+ * do not have" and is recorded as a miss (`blank: true`) so the walk
+ * continues to the next time / layer (Phase 0.7).
  */
 async function loadFirstCandidate(candidates, width, height, diag, regionName) {
     for (const cand of candidates) {
         const url = buildSnapshotUrl(cand.time, cand.layerId, width, height);
         const t0  = performance.now();
         const image = await loadImage(url);
+        const blank = !!image && isBlankSnapshot(image);
         const ms  = Math.round(performance.now() - t0);
         diag.attempts.push({
             region: regionName,
             layer:  shortLayerId(cand.layerId),
             time:   cand.time,
             ms,
-            ok:     !!image,
+            ok:     !!image && !blank,
+            ...(blank ? { blank: true } : {}),
         });
-        if (image) return { image, ...cand, url };
+        if (image && !blank) return { image, ...cand, url };
     }
     return null;
 }
@@ -242,12 +281,16 @@ function readPixels(image, width, height) {
     return ctx.getImageData(0, 0, width, height).data;
 }
 
-/** Fold one loaded region into the accumulator, chunked to keep frames alive. */
-async function accumulateRegion(acc, hit, tier, width, height) {
+/**
+ * Fold one loaded region into the accumulator, chunked to keep frames alive.
+ * `ageMin` = minutes this disc's frame sits behind the newest disc (0 for
+ * the newest, for fill composites, and for a date-only frame of unknown hour).
+ */
+async function accumulateRegion(acc, hit, tier, width, height, ageMin = 0) {
     const kind = productKind(hit.layerId);
     const rgba = readPixels(hit.image, width, height);
     for (let row = 0; row < height; row += CHUNK_ROWS) {
-        acc.addRegionRows(rgba, kind, hit.subLon, tier, row, Math.min(height, row + CHUNK_ROWS));
+        acc.addRegionRows(rgba, kind, hit.subLon, tier, row, Math.min(height, row + CHUNK_ROWS), ageMin);
         // Yield the main thread between chunks.
         await new Promise(r => setTimeout(r, 0));
     }
@@ -322,14 +365,21 @@ async function fetchGeostationaryMosaic(THREE, opts, diag) {
         return null;
     }
 
+    // Every disc's own time, and the newest among them: the lead is measured
+    // from the newest, each disc's age behind it rides the G channel.
+    const regionTimes = successful.map(s => ({ name: s.region.name, time: s.time, timestampMs: s.timestampMs ?? null }));
+    const ages = discAges(regionTimes);
+
     const acc = new MosaicAccumulator(width, height);
     for (const hit of successful) {
-        await accumulateRegion(acc, hit, 'primary', width, height);
+        const disc = ages.discs.find(d => d.name === hit.region.name);
+        await accumulateRegion(acc, hit, 'primary', width, height, disc?.ageMin ?? 0);
         diag.regions.push({
             name:   hit.region.name,
             layer:  shortLayerId(hit.layerId),
             time:   hit.time,
             ageMin: ageMinutes(hit.timestampMs, now),
+            behindNewestMin: disc?.ageMin ?? null,
         });
     }
     if (polarHit) {
@@ -347,16 +397,13 @@ async function fetchGeostationaryMosaic(THREE, opts, diag) {
         finalizeMs:     Math.round(performance.now() - t0),
     };
 
-    const newest = successful
-        .map(s => s.timestampMs)
-        .filter(t => t != null)
-        .sort((a, b) => b - a)[0] ?? null;
-
     return {
         texture:     makeTexture(THREE, data, width, height),
         mosaic:      true,
         date:        successful[0]?.time?.slice(0, 10) ?? toUtcDate(base),
-        timestampMs: newest,
+        timestampMs: ages.newestMs,
+        regionTimes,
+        oldestTimestampMs: ages.oldest?.timestampMs ?? ages.newestMs,
         requestedMs: explicit ? opts.timestampMs : null,
         layers:      successful.map(s => `${s.region.name}=${s.layerId}`)
                         .concat(polarHit ? [`Polar=${polarHit.layerId}`] : []),
@@ -398,6 +445,8 @@ async function fetchSingleLayerFallback(THREE, opts, diag) {
         mosaic:      false,
         date:        hit.time,
         timestampMs: null,
+        regionTimes: [],
+        oldestTimestampMs: null,
         layers:      [`MODIS=${hit.layerId}`],
         regions:     [],
         polar:       false,

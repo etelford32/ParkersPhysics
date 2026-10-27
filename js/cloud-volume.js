@@ -135,7 +135,7 @@ import {
     R_EARTH_KM, DECK_ALTITUDE_KM, VOLUME_TOP_KM, VOLUME_BASE_KM,
     SURFACE_CLEARANCE_R,
 } from './atmo-scale.js';
-import { FLOW, R_EARTH_M, windGainAt, flowPhase } from './cloud-time.js';
+import { FLOW, R_EARTH_M, AGE_FULL_SCALE_S, windGainAt, flowPhase } from './cloud-time.js';
 
 /**
  * Primary / light march step budget per quality tier. Mirrors the tiering of
@@ -176,7 +176,7 @@ ${GEO_GLSL}
 varying vec3 vWorldPos;
 
 uniform sampler2D u_cloud_layers;   // R=low G=mid B=high A=precip  [0-1]
-uniform sampler2D u_satellite;      // R=cover  B=IR top proxy  A=confidence
+uniform sampler2D u_satellite;      // R=cover  G=disc age code  B=IR top proxy  A=confidence
 uniform sampler2D u_sat_prev;       // the frame being cross-faded FROM
 uniform sampler2D u_weather;        // R=temp (t2m, normalised)
 uniform sampler2D u_wind;           // RG = 10 m wind U,V  (x*2-1)*u_wind_max m/s
@@ -219,6 +219,11 @@ const float MORPH_RATE     = ${FLOW.morphRatePerSec.toExponential(6)};
 const float WIND_GAIN_ALOFT = ${FLOW.windGainAloft.toFixed(3)};
 const float WIND_GAIN_TOP_KM = ${FLOW.windGainTopKm.toFixed(2)};
 const float SAT_WIND_GAIN  = ${windGainAt(SAT_ADVECT_ALT_KM).toFixed(4)};
+// Seconds a FULL G code (255) adds to the frame lead: the mosaic's G channel
+// is each disc's age behind the newest disc (cloud-time.js encodeAgeCode,
+// MOSAIC.ageCodeMin minutes per code), so every disc is advected by its own
+// lead — Phase 0.6, "EVERY DISC HAS ITS OWN TIME" in cloud-time.js.
+const float SAT_AGE_S      = ${AGE_FULL_SCALE_S.toFixed(1)};
 
 // ── Noise ────────────────────────────────────────────────────────────────────
 // Same hash/value-noise construction as CLOUD_FRAG so the two paths share a
@@ -371,9 +376,21 @@ Column columnAt(vec3 nObj) {
         // with an hours-long lead is the nowcast (see header).
         vec3 nSat = advectDir(nObj, c.wind, u_sat_lead, SAT_WIND_GAIN);
         vec4 sat  = texture2D(u_satellite, normalToUV(nSat));
+        // Per-disc lead: an older disc is advected further by exactly its
+        // age behind the newest (G). The newest disc (g = 0) pays no second
+        // fetch; the branch is uniform within a disc.
+        if (sat.g > 0.001) {
+            nSat = advectDir(nObj, c.wind, u_sat_lead + sat.g * SAT_AGE_S, SAT_WIND_GAIN);
+            sat  = texture2D(u_satellite, normalToUV(nSat));
+        }
         if (u_sat_blend > 0.001) {
             vec3 nPrev = advectDir(nObj, c.wind, u_sat_prev_lead, SAT_WIND_GAIN);
-            sat = mix(sat, texture2D(u_sat_prev, normalToUV(nPrev)), u_sat_blend);
+            vec4 prev  = texture2D(u_sat_prev, normalToUV(nPrev));
+            if (prev.g > 0.001) {
+                nPrev = advectDir(nObj, c.wind, u_sat_prev_lead + prev.g * SAT_AGE_S, SAT_WIND_GAIN);
+                prev  = texture2D(u_sat_prev, normalToUV(nPrev));
+            }
+            sat = mix(sat, prev, u_sat_blend);
         }
         c.conf   = sat.a * u_sat_weight;
         float satShape = smoothstep(0.14, 0.86, sat.r);

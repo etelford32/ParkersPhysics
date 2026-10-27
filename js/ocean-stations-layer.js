@@ -1,83 +1,38 @@
 /** NOAA tide-gauge, marine buoy, and DART marker layers for EarthView. */
 
+import { REFERENCE_STATIONS } from './ocean-reference-stations.js';
+
 const TIDES_URL = '/api/ocean/tides?mode=stations';
 const BUOYS_URL = '/api/ocean/buoys?mode=stations';
 const DART_URL  = '/api/ocean/dart?mode=stations';
 const KINDS = ['tides', 'buoys', 'dart'];
 
-// Honest, geometry-only defaults used when NOAA cannot be reached. These are
-// reference locations—not observations—and every item is flagged so the
-// detail card can say that plainly. A failed feed should still prove that the
-// toggle and map layer work instead of leaving the user staring at no change.
-const FALLBACK_STATIONS = {
-    tides: [
-        ['Puget Sound', 47.60, -122.34],
-        ['San Francisco Bay', 37.81, -122.47],
-        ['Southern California', 33.72, -118.27],
-        ['Honolulu', 21.31, -157.87],
-        ['Southcentral Alaska', 61.13, -149.90],
-        ['Gulf Coast', 29.31, -94.79],
-        ['Key West', 24.56, -81.81],
-        ['South Florida', 25.77, -80.13],
-        ['Charleston', 32.78, -79.93],
-        ['Chesapeake Bay', 36.97, -76.33],
-        ['New York Harbor', 40.70, -74.01],
-        ['Boston Harbor', 42.36, -71.05],
-        ['San Juan', 18.46, -66.12],
-        ['Guam', 13.44, 144.65],
-    ].map(([name, lat, lon], index) => ({
-        id: `REF-TIDE-${index + 1}`,
-        name: `${name} reference`,
-        lat, lon, fallback: true,
-    })),
-    buoys: [
-        ['Northeast Pacific', 45, -130],
-        ['California offshore', 35, -123],
-        ['Gulf of Alaska', 56, -148],
-        ['North Pacific', 30, -155],
-        ['Hawaiian waters', 20, -158],
-        ['Western tropical Pacific', 12, 150],
-        ['Eastern tropical Pacific', 5, -110],
-        ['Gulf of Mexico', 26, -90],
-        ['Florida Atlantic', 28, -78],
-        ['Caribbean Sea', 17, -67],
-        ['Western North Atlantic', 34, -72],
-        ['New England offshore', 41, -68],
-        ['Central North Atlantic', 40, -45],
-        ['South Atlantic', -20, -25],
-        ['North Sea', 56, 3],
-        ['Mediterranean', 36, 18],
-        ['Arabian Sea', 15, 65],
-        ['Bay of Bengal', 15, 88],
-        ['Coral Sea', -20, 155],
-        ['Southern Ocean', -50, 90],
-    ].map(([name, lat, lon], index) => ({
-        id: `REF-BUOY-${index + 1}`,
-        name: `${name} reference`,
-        lat, lon, fallback: true,
-    })),
-    dart: [
-        ['Alaska/Aleutians', 52.6, -156.4],
-        ['Northeast Pacific', 46.9, -155.1],
-        ['Pacific Northwest', 44.6, -125.8],
-        ['California offshore', 34.8, -120.8],
-        ['Hawaii north', 23.4, -162.3],
-        ['Hawaii south', 17.1, -156.5],
-        ['Caribbean', 19.3, -66.6],
-        ['Western Atlantic', 31.8, -74.8],
-    ].map(([name, lat, lon], index) => ({
-        id: `REF-DART-${index + 1}`,
-        name: `${name} DART reference`,
-        lat, lon, fallback: true,
-    })),
-};
+// Honest, geometry-only defaults used when NOAA cannot be reached — the ONE
+// copy lives in js/ocean-reference-stations.js and the /api/ocean/* routes
+// serve the SAME markers (flagged, `freshness: 'stale'`) when THEY cannot
+// reach NOAA. This local copy is only for the case where our own route is
+// unreachable (network down, 5xx). Every item is flagged so the detail card
+// can say that plainly. A failed feed should still prove that the toggle and
+// map layer work instead of leaving the user staring at no change.
+const FALLBACK_STATIONS = REFERENCE_STATIONS;
 
+/**
+ * @returns {{ stations:object[], freshness:'live'|'stale', reason?:string, detail?:string }}
+ *   A `freshness: 'stale'` body is the route's own degraded answer (reference
+ *   markers) and is reported as 'fallback' by _load below — a down feed must
+ *   look down even when the HTTP status is 200.
+ */
 async function fetchStations(url) {
     const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = await response.json();
     if (body.error) throw new Error(body.detail ?? body.error);
-    return body.stations ?? [];
+    return {
+        stations:  body.stations ?? [],
+        freshness: body.freshness === 'stale' ? 'stale' : 'live',
+        reason:    body.reason ?? null,
+        detail:    body.detail ?? body.note ?? null,
+    };
 }
 
 export class OceanStationsLayer {
@@ -114,12 +69,18 @@ export class OceanStationsLayer {
         try {
             if (this.forceFallback) throw new Error('locally forced fallback verification');
             const endpoint = kind === 'tides' ? TIDES_URL : kind === 'buoys' ? BUOYS_URL : DART_URL;
-            const items = await fetchStations(endpoint);
+            const { stations: items, freshness, detail } = await fetchStations(endpoint);
             if (!items.length) throw new Error('upstream returned no station locations');
             this._items[kind] = items;
             this._meshes[kind] = this._buildMesh(kind, items);
             this._meshes[kind].visible = this._wanted[kind];
-            this.onStatus(kind, 'loaded', { count: items.length });
+            // The route answered 200 but with its reference markers: NOAA
+            // was unreachable from the server. Amber, same as a local miss.
+            if (freshness === 'stale') {
+                this.onStatus(kind, 'fallback', { count: items.length, error: detail ?? 'NOAA unreachable', server: true });
+            } else {
+                this.onStatus(kind, 'loaded', { count: items.length });
+            }
         } catch (error) {
             const items = FALLBACK_STATIONS[kind];
             this._items[kind] = items;

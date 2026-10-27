@@ -10,7 +10,7 @@
  * Why progressive (vs. one big fetch)
  * ───────────────────────────────────
  * A full +14 d hourly fetch for 2592 cells × 9 channels weighs ~30-40 MB
- * of JSON across three chunks — too heavy for one round trip on first
+ * of JSON across the grid chunks — too heavy for one round trip on first
  * future-scrub. Progressive loading buys us:
  *
  *   1. First future-scrub feels fast: only +24 h fetched (~2-3 MB) before
@@ -48,18 +48,23 @@
  * at-newest. We never poison the past-tier or block the renderer.
  */
 
-const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
+import {
+    GRID, MAX_LOCATIONS_PER_REQUEST, OPEN_METEO_FORECAST_URL,
+    chunkRanges, gridChunkCoords, chunkUrl, mergeChunks,
+} from './open-meteo-request.js';
+
 const HOUR_MS = 3_600_000;
 
-// Mirror the cron's grid + chunking. Keep the constants verbatim so a
-// later move from 5° → 2.5° can update both files together.
-const GRID_W      = 72;
-const GRID_H      = 36;
-const GRID_N      = GRID_W * GRID_H;     // 2592
-const GRID_DEG    = 180 / GRID_H;        // 5°
-const LAT_ORIGIN  = -90  + GRID_DEG / 2; // -87.5
-const LON_ORIGIN  = -180 + GRID_DEG / 2; // -177.5
-const CHUNK_SIZE  = 864;                 // 3 chunks × 864 = 2592
+// Grid + chunking come from js/open-meteo-request.js — the ONE copy the
+// cron, this feed, the pressure-level feed and the patch share. This file
+// used to carry its own `CHUNK_SIZE = 864` with `toFixed(2)` coordinates,
+// a ~12.3 KB URL that Open-Meteo answered with HTTP 414 (no CORS headers →
+// a bare NetworkError here → the "forecast unavailable" badge and the WIND
+// SKILL dashes; EARTHVIEW_LOD_UX_PLAN.md §1.1). 7 chunks of ≤400 now.
+const GRID_W      = GRID.w;
+const GRID_H      = GRID.h;
+const GRID_N      = GRID.n;              // 2592
+const CHUNK_SIZE  = MAX_LOCATIONS_PER_REQUEST;
 
 // Default progressive-batch granularity. Each batch covers 24 forecast
 // hours (~2-3 MB JSON across the three chunks) — fast enough for first
@@ -71,7 +76,7 @@ const DEFAULT_BATCH_HOURS    = 24;
 const DEFAULT_MAX_HORIZON_HR = 14 * 24;
 
 // Channel layout matches WeatherHistory NUM_CHANNELS=9 / CHW packing.
-//   0 = T (°C)   1 = P (hPa)   2 = RH (%)
+//   0 = T (°C)   1 = P (hPa, MEAN SEA-LEVEL)   2 = RH (%)
 //   3 = U (m/s)  4 = V (m/s)
 //   5 = cloud_low   6 = cloud_mid   7 = cloud_high   (% each)
 //   8 = precipitation (mm)
@@ -79,26 +84,16 @@ const NUM_CHANNELS = 9;
 const CH_T = 0, CH_P = 1, CH_RH = 2, CH_U = 3, CH_V = 4;
 const CH_CL = 5, CH_CM = 6, CH_CH = 7, CH_PR = 8;
 
+// `pressure_msl`, not `surface_pressure`: channel P is MSLP end to end
+// (PRESSURE_OUTLOOK_ENGINE_PLAN.md Phase 0; the cron requests the same).
 const HOURLY_VARS = [
-    'temperature_2m', 'relative_humidity_2m', 'surface_pressure',
+    'temperature_2m', 'relative_humidity_2m', 'pressure_msl',
     'wind_speed_10m', 'wind_direction_10m',
     'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
     'precipitation',
 ].join(',');
 
 const DEG2RAD = Math.PI / 180;
-
-function _chunkCoords(start, end) {
-    const lats = [];
-    const lons = [];
-    for (let idx = start; idx <= end; idx++) {
-        const j = Math.floor(idx / GRID_W);
-        const i = idx % GRID_W;
-        lats.push((LAT_ORIGIN + j * GRID_DEG).toFixed(2));
-        lons.push((LON_ORIGIN + i * GRID_DEG).toFixed(2));
-    }
-    return { lat: lats.join(','), lon: lons.join(',') };
-}
 
 // Open-Meteo's `start_hour` / `end_hour` accept ISO 8601 datetimes
 // without seconds, e.g. "2026-05-08T03:00". Range is closed-closed —
@@ -121,16 +116,16 @@ function _isoHour(ms) {
 // while the user keeps dragging. 16 is the API's hard ceiling and lines
 // up with the GFS extended range that `best_match` falls through to.
 function _chunkUrl(start, end, startMs, endMs) {
-    const { lat, lon } = _chunkCoords(start, end);
-    return `${OPEN_METEO_FORECAST}`
-        + `?latitude=${lat}`
-        + `&longitude=${lon}`
-        + `&hourly=${HOURLY_VARS}`
-        + `&wind_speed_unit=ms`
-        + `&timezone=UTC`
-        + `&forecast_days=16`
-        + `&start_hour=${_isoHour(startMs)}`
-        + `&end_hour=${_isoHour(endMs)}`;
+    const { lats, lons } = gridChunkCoords(start, end, GRID);
+    return chunkUrl({
+        base: OPEN_METEO_FORECAST_URL, lats, lons,
+        query: `hourly=${HOURLY_VARS}`
+            + `&wind_speed_unit=ms`
+            + `&timezone=UTC`
+            + `&forecast_days=16`
+            + `&start_hour=${_isoHour(startMs)}`
+            + `&end_hour=${_isoHour(endMs)}`,
+    });
 }
 
 function _emit(type, detail) {
@@ -178,7 +173,7 @@ export class WeatherForecastFeed {
     /**
      * Ensure the forecast ring covers at least up to `targetMs`. If the
      * ring is already deep enough (and not stale), resolves with 0
-     * immediately. Otherwise issues exactly one chunked triplet for the
+     * immediately. Otherwise issues exactly one chunked fan-out for the
      * uncovered tail and resolves with the count of frames ingested.
      *
      * Concurrent overlapping calls coalesce: the second caller waits on
@@ -250,29 +245,17 @@ export class WeatherForecastFeed {
     }
 
     async _fetchRange(startMs, endMs) {
-        // Fan three chunks out in parallel. Each chunk asks Open-Meteo
+        // Fan the grid chunks out in parallel. Each chunk asks Open-Meteo
         // for the same hour-window (start_hour / end_hour) but a
         // different slice of the 2592-coord grid.
-        const chunks = [];
-        for (let start = 0; start < GRID_N; start += CHUNK_SIZE) {
-            const end = Math.min(start + CHUNK_SIZE - 1, GRID_N - 1);
-            chunks.push({ start, end });
-        }
+        const chunks = chunkRanges(GRID_N, CHUNK_SIZE);
         const responses = await Promise.all(chunks.map(({ start, end }) =>
             this._fetchChunk(start, end, startMs, endMs)));
 
         // Merge per-chunk arrays into a single 2592-long list, in the
-        // same row-major (lat slow, lon fast) order _chunkCoords laid out.
-        const merged = [];
-        for (const arr of responses) {
-            if (!Array.isArray(arr)) {
-                throw new Error('forecast chunk returned non-array');
-            }
-            merged.push(...arr);
-        }
-        if (merged.length !== GRID_N) {
-            throw new Error(`forecast merge length ${merged.length} != ${GRID_N}`);
-        }
+        // same row-major (lat slow, lon fast) order gridChunkCoords laid
+        // out — chunk order IS grid order.
+        const merged = mergeChunks(responses, GRID_N);
 
         // Pivot per-location-hourly into per-hour-grid CHW Float32Arrays.
         // Time strings come back as "YYYY-MM-DDTHH:MM" — UTC because we
@@ -302,7 +285,7 @@ export class WeatherForecastFeed {
                 const loc = merged[cell]?.hourly;
                 if (!loc) continue;
                 const tempC  = loc.temperature_2m       ?.[h] ?? 0;
-                const presH  = loc.surface_pressure     ?.[h] ?? 1013;
+                const presH  = loc.pressure_msl         ?.[h] ?? 1013;
                 const rhPct  = loc.relative_humidity_2m ?.[h] ?? 0;
                 const sp     = loc.wind_speed_10m       ?.[h] ?? 0;
                 const dirDeg = loc.wind_direction_10m   ?.[h] ?? 0;
@@ -329,6 +312,7 @@ export class WeatherForecastFeed {
                 t,
                 fetchedAt,
                 source: 'open-meteo:72x36 forecast',
+                pressureKind: 'msl',
                 gridW:  GRID_W,
                 gridH:  GRID_H,
                 coarse,

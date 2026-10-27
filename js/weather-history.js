@@ -1,10 +1,14 @@
 /**
- * weather-history.js — 24-hour ring buffer of coarse weather grids
+ * weather-history.js — 72-hour ring buffer of coarse weather grids
  *
- * Sibling to solar-weather-history.js. Single tier (1-hr cadence × 24 rows)
- * because that's the upstream truth: pg_cron writes /api/weather/grid once
- * per hour (CACHE_TTL = 3600 in api/weather/grid.js). Storing finer than
- * that is fiction; storing coarser loses information we already have.
+ * Sibling to solar-weather-history.js. Single tier (1-hr cadence × 72 rows)
+ * because that's the upstream truth: the cron writes /api/weather/grid once
+ * per hour (CACHE_TTL = 3600 in api/weather/grid.js) and the route serves
+ * hourly frames for the last 72 h (RANGE_MAX_LIMIT). Storing finer than
+ * that is fiction; storing coarser loses information we already have. The
+ * ring was 24 rows until 2026-10-26 while the server kept 72, so −24 h …
+ * −7 d on the scrubber showed the oldest of 24 frames frozen
+ * (EARTHVIEW_LOD_UX_PLAN.md §1.3, Phase 0.9).
  *
  * What we store
  * ─────────────
@@ -14,7 +18,7 @@
  * the smallest representation that preserves 100 % of the upstream signal:
  *
  *   channel 0  T          (°C, raw)
- *   channel 1  P          (hPa, raw)
+ *   channel 1  P          (hPa, MEAN SEA-LEVEL — `pressureKind: 'msl'`, below)
  *   channel 2  RH         (%, raw)
  *   channel 3  windU      (m/s, eastward — post-decomposition)
  *   channel 4  windV      (m/s, northward — post-decomposition)
@@ -37,7 +41,7 @@
  * Sizing
  * ──────
  *   2592 cells × 9 channels × 4 bytes ≈ 94 KB / frame
- *   24 frames                          ≈ 2.24 MB total IDB footprint
+ *   72 frames                          ≈ 6.7 MB total IDB footprint
  *
  * Comfortable on every browser including mobile Safari, where 75 MB of
  * full-res Float32 history (the alternative) would risk eviction.
@@ -52,9 +56,19 @@
  *     fetchedAt:  <upstream fetched_at ms — so the UI can show "data as
  *                  of HH:MM UTC" even after a reload>,
  *     source:     'open-meteo:72x36' | 'open-meteo-gfs:72x36' | …,
+ *     freshness:  'live' | 'stale' | null   // the route's SOURCE honesty flag
+ *     pressureKind: 'msl'                   // what channel P means (see below)
  *     gridW, gridH,
  *     coarse:     Float32Array(gridW * gridH * 9)   // CHW packed
  *   }
+ *
+ * DB_VERSION 2 (2026-10-26): channel P changed meaning from Open-Meteo
+ * `surface_pressure` (station pressure) to `pressure_msl`. A v1 store could
+ * hold frames of EITHER kind under one key, and bracket() would lerp a
+ * 1013 hPa sea-level frame into an 850 hPa Tibetan surface frame at the
+ * seam — so the upgrade DROPS the v1 store outright and every record now
+ * carries `pressureKind`. Frames tagged 'surface' are refused at ingest.
+ * (PRESSURE_OUTLOOK_ENGINE_PLAN.md Phase 0.)
  *
  * Float32Array is structured-cloneable, so it goes into IDB without any
  * base64 dance (unlike weather-feed.js's sessionStorage snapshot, which
@@ -71,10 +85,11 @@
 
 const NUM_CHANNELS = 9;
 
-// Default 24h window at 1-hr cadence — matches /api/weather/grid CACHE_TTL.
-// Past tier is durable (IDB-backed). Forecast tier is in-memory only —
-// see _forecastRing notes below for why.
-const TIER          = { name: 'tier_1h', cadence_ms: 3_600_000, max_rows: 24 };
+// 72 h window at 1-hr cadence — the route's RANGE_MAX_LIMIT (api/weather/
+// grid.js) and the depth js/weather-feed.js BACKFILL_HOURS asks for; one
+// number, three readers. Past tier is durable (IDB-backed). Forecast tier
+// is in-memory only — see _forecastRing notes below for why.
+const TIER          = { name: 'tier_1h', cadence_ms: 3_600_000, max_rows: 72 };
 // Forecast horizon: 14 days of hourly U/V/T/P/RH/cloud/precip frames.
 // Sized to match time-bus FUTURE_MS so a user can scrub the whole bus
 // future window without falling off the end of the ring. The forecast
@@ -83,7 +98,10 @@ const TIER          = { name: 'tier_1h', cadence_ms: 3_600_000, max_rows: 24 };
 const FORECAST_CAPACITY = 14 * 24;
 
 const DB_NAME    = 'weather_grid_v1';
-const DB_VERSION = 1;
+// 2: channel P is MSLP; the v1 store (surface_pressure frames) is dropped
+// on upgrade — header note. Bump again whenever a channel changes meaning.
+const DB_VERSION = 2;
+const PRESSURE_KIND_MSL = 'msl';
 
 // Round a timestamp down to the start of its UTC hour. Used as the IDB
 // primary key so two ingests in the same hour collapse to one row — which
@@ -197,6 +215,13 @@ export class WeatherHistory {
                 settle(reject, new Error('IndexedDB open blocked by another connection'));
             req.onupgradeneeded = (e) => {
                 const db = e.target.result;
+                // v1 → v2: the stored P channel changed meaning (header
+                // note). A store that may hold surface-pressure frames is
+                // deleted whole rather than filtered — a v1 record carries
+                // no pressureKind to filter on.
+                if (e.oldVersion > 0 && e.oldVersion < 2 && db.objectStoreNames.contains(TIER.name)) {
+                    db.deleteObjectStore(TIER.name);
+                }
                 if (!db.objectStoreNames.contains(TIER.name)) {
                     db.createObjectStore(TIER.name, { keyPath: 't' });
                 }
@@ -222,7 +247,9 @@ export class WeatherHistory {
             r && Number.isFinite(r.t) &&
             r.coarse instanceof Float32Array &&
             Number.isFinite(r.gridW) && Number.isFinite(r.gridH) &&
-            r.coarse.length === r.gridW * r.gridH * NUM_CHANNELS
+            r.coarse.length === r.gridW * r.gridH * NUM_CHANNELS &&
+            // Belt and braces under the v2 wipe: the ring is MSLP-only.
+            r.pressureKind === PRESSURE_KIND_MSL
         );
         if (compatible.length < rows.length) {
             const drop = rows.length - compatible.length;
@@ -253,6 +280,10 @@ export class WeatherHistory {
      * @param {number} frame.t              — wall-clock ms (rounded to hour for the key)
      * @param {number} [frame.fetchedAt]    — upstream fetched_at ms (defaults to t)
      * @param {string} [frame.source]
+     * @param {string} [frame.freshness]    — 'live' | 'stale' from the grid route
+     * @param {string} [frame.pressureKind] — must be 'msl' (default); a
+     *   'surface' frame is REFUSED — channel P is sea-level pressure and
+     *   the two must never be lerped together (header note)
      * @param {number} frame.gridW
      * @param {number} frame.gridH
      * @param {Float32Array} frame.coarse   — CHW-packed (gridW × gridH × 9)
@@ -261,10 +292,14 @@ export class WeatherHistory {
      * record fails sanity checks we still update the in-memory ring so
      * the resolver has something to work with for this session.
      */
-    ingest({ t, fetchedAt, source, gridW, gridH, coarse } = {}) {
+    ingest({ t, fetchedAt, source, freshness = null, pressureKind = PRESSURE_KIND_MSL, gridW, gridH, coarse } = {}) {
         if (!this._ready) return;     // open() not yet awaited
         if (!Number.isFinite(t) || !Number.isFinite(gridW) || !Number.isFinite(gridH)) return;
         if (!(coarse instanceof Float32Array)) return;
+        if (pressureKind !== PRESSURE_KIND_MSL) {
+            console.warn(`[WeatherHistory] ingest refused — pressureKind '${pressureKind}' (ring is MSLP-only)`);
+            return;
+        }
         if (coarse.length !== gridW * gridH * NUM_CHANNELS) {
             console.warn('[WeatherHistory] ingest skipped — coarse length mismatch',
                 coarse.length, 'vs', gridW * gridH * NUM_CHANNELS);
@@ -276,6 +311,8 @@ export class WeatherHistory {
             t:         key,
             fetchedAt: Number.isFinite(fetchedAt) ? fetchedAt : t,
             source:    source ?? null,
+            freshness: freshness ?? null,
+            pressureKind,
             gridW, gridH,
             // Defensive copy: caller may reuse its working buffer for the
             // next fetch and we don't want a shared reference under our
@@ -326,7 +363,7 @@ export class WeatherHistory {
 
     /**
      * Linear scan of the ring for an existing record at this hour-key.
-     * Cheap (≤24 entries); keeps the data structure simple. If we ever
+     * Cheap (≤72 entries); keeps the data structure simple. If we ever
      * want O(1) we can layer a Map<key, ringIndex> on top.
      */
     _ringIndexOfKey(key) {
@@ -353,10 +390,14 @@ export class WeatherHistory {
      * Replaces existing entries at the same hour-key (the feed re-runs
      * periodically and newer model output supersedes the older one).
      */
-    ingestForecast({ t, fetchedAt, source, gridW, gridH, coarse } = {}) {
+    ingestForecast({ t, fetchedAt, source, pressureKind = PRESSURE_KIND_MSL, gridW, gridH, coarse } = {}) {
         if (!this._ready) return;
         if (!Number.isFinite(t) || !Number.isFinite(gridW) || !Number.isFinite(gridH)) return;
         if (!(coarse instanceof Float32Array)) return;
+        if (pressureKind !== PRESSURE_KIND_MSL) {
+            console.warn(`[WeatherHistory] forecast ingest refused — pressureKind '${pressureKind}'`);
+            return;
+        }
         if (coarse.length !== gridW * gridH * NUM_CHANNELS) {
             console.warn('[WeatherHistory] forecast ingest skipped — coarse length mismatch',
                 coarse.length, 'vs', gridW * gridH * NUM_CHANNELS);
@@ -367,6 +408,7 @@ export class WeatherHistory {
             t:          key,
             fetchedAt:  Number.isFinite(fetchedAt) ? fetchedAt : Date.now(),
             source:     source ?? null,
+            pressureKind,
             gridW, gridH,
             coarse:     new Float32Array(coarse),
             isForecast: true,
@@ -487,7 +529,7 @@ export class WeatherHistory {
      *
      * Bracket merges the past-tier ring with the in-memory forecast ring
      * so the resolver sees one continuous series across now. The merge
-     * is a sort-on-read (cheap: ≤24 + ≤336 entries); we don't materialise
+     * is a sort-on-read (cheap: ≤72 + ≤336 entries); we don't materialise
      * a single buffer because the rings have different lifecycles.
      */
     bracket(tMs) {
@@ -526,4 +568,4 @@ export class WeatherHistory {
 export default WeatherHistory;
 
 // Re-exports for tests / resolver / future consumers.
-export { NUM_CHANNELS };
+export { NUM_CHANNELS, TIER, DB_VERSION, PRESSURE_KIND_MSL };

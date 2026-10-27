@@ -51,14 +51,19 @@
  */
 
 import { MAX_WIND_MS } from './weather-feed.js';
+import {
+    OPEN_METEO_FORECAST_URL, chunkRanges, chunkUrl, formatCoord,
+    locationsPerRequest, maxCoordBytes, byteLength, mergeChunks,
+} from './open-meteo-request.js';
 
-const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1/forecast';
+const OPEN_METEO_BASE = OPEN_METEO_FORECAST_URL;
 
 // Same variable set as api/cron/refresh-weather-grid.js CURRENT_VARS —
 // the patch must carry the exact channels the global grid carries so the
-// shaders can blend the two without unit gymnastics.
+// shaders can blend the two without unit gymnastics. `pressure_msl`: channel
+// P is MSLP everywhere (PRESSURE_OUTLOOK_ENGINE_PLAN.md Phase 0).
 const CURRENT_VARS = [
-    'temperature_2m', 'relative_humidity_2m', 'surface_pressure',
+    'temperature_2m', 'relative_humidity_2m', 'pressure_msl',
     'wind_speed_10m', 'wind_direction_10m',
     'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
     'precipitation',
@@ -77,9 +82,14 @@ const MAX_CELLS    = 64;
 const MIN_STEP_DEG = 0.25;
 const MAX_STEP_DEG = 1.0;
 
-// Fetch discipline. ≤ 640 points per URL keeps it ~10 KB (the cron's
-// proven envelope); 3-wide fan-out matches the cron's concurrency.
-const CHUNK_SIZE          = 640;
+// Fetch discipline. Chunk size is DERIVED per fetch from the bytes the
+// patch's own coordinate strings take (js/open-meteo-request.js
+// locationsPerRequest against MAX_URL_BYTES) — a 0.25° patch spells
+// "-122.375", a 1° one "-122.5", and neither is on the cron's half-degree
+// lattice. The typed `640` this replaced built ~11.5 KB URLs at toFixed(3),
+// which Open-Meteo answered with 414 and the browser reported as a bare
+// NetworkError, so the regional patch never loaded
+// (EARTHVIEW_LOD_UX_PLAN.md §1.1). 3-wide fan-out matches the cron.
 const CHUNK_CONCURRENCY   = 3;
 const FETCH_TIMEOUT_MS    = 12_000;
 const MIN_FETCH_GAP_MS    = 10_000;       // hard floor between upstream hits
@@ -95,6 +105,38 @@ const RING_MATCH_MS = 45 * 60_000;
 function _hourKey(t) { return Math.floor(t / 3_600_000) * 3_600_000; }
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Coordinate strings + chunk plan for one patch grid. Pure; exported for
+ * tests/weather-patch.mjs, which asserts every URL stays under the kernel's
+ * byte ceiling for the worst-case 64×64 patch at 0.25°.
+ *
+ * Cell centres are (latMin + (j + 0.5)·step), lon normalised into
+ * [-180, 180); at the snapped steps (0.25/0.5/1.0) those are exact binary
+ * fractions, so %g formatting is lossless — the old `toFixed(3)` only
+ * padded. Chunk size is sized from the LONGEST coordinate pair this grid
+ * actually produces, so a fine southern-hemisphere patch ("-37.125",
+ * "-122.375") gets fewer locations per request than an equatorial one.
+ *
+ * @param {{w:number,h:number,step:number,latMin:number,lonMin:number}} grid
+ */
+export function planPatchRequests(grid) {
+    const { w, h, step, latMin, lonMin } = grid;
+    const N = w * h;
+    const lats = new Array(N), lons = new Array(N);
+    for (let k = 0; k < N; k++) {
+        const j = Math.floor(k / w), i = k % w;
+        lats[k] = formatCoord(latMin + (j + 0.5) * step);
+        const lon = lonMin + (i + 0.5) * step;
+        lons[k] = formatCoord(((lon + 540) % 360) - 180);
+    }
+    const query = `current=${CURRENT_VARS}&wind_speed_unit=ms&timezone=UTC`;
+    const perRequest = locationsPerRequest({
+        coordBytes: maxCoordBytes(lats, lons),
+        queryBytes: byteLength(`${OPEN_METEO_BASE}?latitude=&longitude=&`) + byteLength(query),
+    });
+    return { lats, lons, query, perRequest, chunks: chunkRanges(N, perRequest) };
+}
 
 /**
  * Open-Meteo per-location rows → CHW Float32Array, channel order in
@@ -114,7 +156,7 @@ export function extractPatchCoarse(rows, w, h) {
         if (idx >= N) return;
         const c = loc?.current ?? {};
         T[idx]    = c.temperature_2m       ?? NaN;
-        P[idx]    = c.surface_pressure     ?? NaN;
+        P[idx]    = c.pressure_msl         ?? NaN;
         RH[idx]   = c.relative_humidity_2m ?? NaN;
         wspd[idx] = c.wind_speed_10m       ?? NaN;
         wdir[idx] = c.wind_direction_10m   ?? NaN;
@@ -338,12 +380,8 @@ export class WeatherPatchFeed {
     }
 
     async _fetchRows(grid, signal) {
-        const { w, h, step, latMin, lonMin } = grid;
-        const N = w * h;
-        const chunks = [];
-        for (let start = 0; start < N; start += CHUNK_SIZE) {
-            chunks.push([start, Math.min(start + CHUNK_SIZE - 1, N - 1)]);
-        }
+        const N = grid.w * grid.h;
+        const { lats, lons, chunks, query } = planPatchRequests(grid);
         const out = new Array(chunks.length).fill(null);
         let cursor = 0;
         let failure = null;
@@ -352,17 +390,11 @@ export class WeatherPatchFeed {
             while (failure === null) {
                 const idx = cursor++;
                 if (idx >= chunks.length) return;
-                const [s, e] = chunks[idx];
-                const lats = [], lons = [];
-                for (let k = s; k <= e; k++) {
-                    const j = Math.floor(k / w), i = k % w;
-                    lats.push((latMin + (j + 0.5) * step).toFixed(3));
-                    // Cell centres normalised into Open-Meteo's [-180, 180).
-                    const lon = lonMin + (i + 0.5) * step;
-                    lons.push((((lon + 540) % 360) - 180).toFixed(3));
-                }
-                const url = `${OPEN_METEO_BASE}?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-                    + `&current=${CURRENT_VARS}&wind_speed_unit=ms&timezone=UTC`;
+                const { start: s, end: e } = chunks[idx];
+                const url = chunkUrl({
+                    base: OPEN_METEO_BASE,
+                    lats: lats.slice(s, e + 1), lons: lons.slice(s, e + 1), query,
+                });
                 const res = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) });
                 if (!res.ok) { failure = `HTTP ${res.status}`; return; }
                 const body = await res.json();
@@ -372,10 +404,7 @@ export class WeatherPatchFeed {
         };
         await Promise.all(Array.from({ length: CHUNK_CONCURRENCY }, worker));
         if (failure) throw new Error(failure);
-
-        const rows = out.flat();
-        if (rows.length !== N) throw new Error(`merged ${rows.length} != ${N}`);
-        return rows;
+        return mergeChunks(out, N);   // chunk order is cell order
     }
 
     // ── Internal: ring + paint ──────────────────────────────────────────────

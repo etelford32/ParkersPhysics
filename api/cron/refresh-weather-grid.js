@@ -11,8 +11,17 @@
  * Behavior:
  *
  *   - 2592-point grid (-87.5…87.5 lat × -177.5…177.5 lon, 5° spacing)
- *   - 3 chunks × 864 locations — collapsed from 16×162 to minimise daily
- *     upstream calls. URL ~10 KB, response ~700 KB; fan out 3-wide.
+ *   - 7 chunks × ≤400 locations (js/open-meteo-request.js, the ONE copy of
+ *     the chunk rule) — URL ≈5.4 KB each, response ~320 KB; fan out 3-wide.
+ *     The 864-location chunks this replaced built ~10.5 KB URLs, and
+ *     Open-Meteo's nginx answers HTTP 414 past ~8 KB: every run for at
+ *     least 30 days to 2026-10-26 fell to the MET Norway fallback that way
+ *     (EARTHVIEW_LOD_UX_PLAN.md §1.1).
+ *   - Channel P is MEAN SEA-LEVEL pressure (`pressure_msl`) — an isobar map
+ *     is MSLP by convention, and `surface_pressure` contoured terrain
+ *     wherever the ground sits above 850 hPa (PRESSURE_OUTLOOK_ENGINE_PLAN.md
+ *     P1). The MET Norway fallback always was MSLP; both paths now write the
+ *     same key and the grid route reports `pressure_kind: 'msl'`.
  *   - Primary attempt on Open-Meteo's default seamless blend; fallback
  *     on &models=gfs_seamless. If the first attempt sees a "Daily API
  *     request limit" envelope, the gfs_seamless retry is skipped (same
@@ -62,6 +71,10 @@
  */
 
 import { fetchWithTimeout } from '../_lib/responses.js';
+import {
+    GRID, MAX_LOCATIONS_PER_REQUEST, OPEN_METEO_FORECAST_URL, OPEN_METEO_CUSTOMER_URL,
+    chunkRanges, gridChunkCoords, chunkUrl as buildChunkUrl, mergeChunks,
+} from '../../js/open-meteo-request.js';
 
 // Node runtime (not Edge). Edge has a hard 25 s per-invocation cap which the
 // MET Norway fallback can't fit inside on a 2592-point grid (sequential point
@@ -85,9 +98,7 @@ const CRON_SECRET  = process.env.CRON_SECRET || '';
 // Keyless free host by default; the commercial host when a key is configured
 // (PLANETARY_TEMPERATURE_LAB_PLAN.md decision D12).
 const OPEN_METEO_API_KEY = process.env.OPEN_METEO_API_KEY || '';
-const OPEN_METEO_BASE = OPEN_METEO_API_KEY
-    ? 'https://customer-api.open-meteo.com/v1/forecast'
-    : 'https://api.open-meteo.com/v1/forecast';
+const OPEN_METEO_BASE = OPEN_METEO_API_KEY ? OPEN_METEO_CUSTOMER_URL : OPEN_METEO_FORECAST_URL;
 
 // MET Norway fallback. Free, JSON, no-key — but point-only (no multi-location
 // URL). We sample the coarse FALLBACK_GRID (648 points, 10° spacing) rather
@@ -111,28 +122,30 @@ const METNO_CONCURRENCY = 16;
 // the cloud / temp / pressure textures four pixels where they used to have
 // one. The downstream consumer (js/weather-feed.js) infers W and H from
 // payload length (sqrt(N/2)·2), so a denser cron row drops in without a
-// coordinated frontend deploy. To go denser later (e.g. 2.5° = 144×72),
-// bump GRID_W/H here and adjust CHUNK_SIZE / CHUNK_CONCURRENCY only.
-const GRID_W           = 72;
-const GRID_H           = 36;
-const GRID_N           = GRID_W * GRID_H;   // 2592
-// Three big chunks of 864 points instead of 16 small chunks of 162. Cuts the
-// daily Open-Meteo call count from 384/day to 72/day, which matters because
-// Open-Meteo's 10 000/day limit is per-IP, and Vercel's edge IP pool is shared
-// with other tenants — the fewer calls we make, the less likely we'll trip a
-// shared-IP "Daily API request limit exceeded" envelope. URL length at
-// CHUNK_SIZE=864 is ~10 KB, well inside Open-Meteo's accepted range and below
-// the 16 KB upper bound common across CDNs / origin servers.
-const CHUNK_SIZE       = 864;                // 3 chunks @ 864 each
-// All three chunks fan out at once. Open-Meteo absorbs ~20 concurrent reqs
+// coordinated frontend deploy. The grid itself is the ONE record in
+// js/open-meteo-request.js (GRID) — the forecast ring and the pressure-level
+// feed read the same object, so the three can no longer drift apart.
+const GRID_W           = GRID.w;            // 72
+const GRID_H           = GRID.h;            // 36
+const GRID_N           = GRID.n;            // 2592
+// Chunk size is the kernel's MAX_LOCATIONS_PER_REQUEST (400): 7 requests of
+// ≈5.4 KB. The previous "3 chunks × 864" (chosen to cut daily call count)
+// built ~10.5 KB URLs; the comment here used to call that "well inside
+// Open-Meteo's accepted range" — it was not. Nginx caps the request line at
+// 8 KB and answered 414 to every chunk, which the heartbeat recorded as
+// "open-meteo chunk 1728 HTTP 414: … Request-URI Too Large". 7 calls × 24 h
+// = 168/day against the 10 000/day free tier. buildChunkUrl() refuses to
+// emit anything over MAX_URL_BYTES, so this cannot silently regress.
+const CHUNK_SIZE       = MAX_LOCATIONS_PER_REQUEST;
+// Three chunks in flight at once. Open-Meteo absorbs ~20 concurrent reqs
 // per source IP before throttling; 3-wide is conservative.
 const CHUNK_CONCURRENCY = 3;
-const GRID_DEG          = 180 / GRID_H;       // 5° latitude step (also longitude)
+const GRID_DEG          = GRID.deg;           // 5° latitude step (also longitude)
 // Centered-cell origin: half a step inside each pole so cells are symmetric
 // about lat 0 (the equator falls on a cell edge, not a centre, which keeps
 // equatorial averages honest).
-const LAT_ORIGIN        = -90 + GRID_DEG / 2;  // -87.5 for 5° grid
-const LON_ORIGIN        = -180 + GRID_DEG / 2; // -177.5 for 5° grid
+const LAT_ORIGIN        = GRID.latOrigin;     // -87.5 for 5° grid
+const LON_ORIGIN        = GRID.lonOrigin;     // -177.5 for 5° grid
 
 // Coarse fallback grid for MET Norway. 36×18 = 648 points, 10° spacing.
 // Sized to fit the 60 s Node budget at 16 concurrent workers and ~1 req/s/
@@ -148,8 +161,9 @@ const FALLBACK_LON_ORIGIN  = -180 + FALLBACK_GRID_DEG / 2;         // -175
 
 // Open-Meteo `current=` variables. `cape` is hourly-only upstream — keeping
 // it here returned an 86-byte error body and masqueraded as a timeout.
+// `pressure_msl`, not `surface_pressure`: channel P is MSLP (header note).
 const CURRENT_VARS = [
-    'temperature_2m', 'relative_humidity_2m', 'surface_pressure',
+    'temperature_2m', 'relative_humidity_2m', 'pressure_msl',
     'wind_speed_10m', 'wind_direction_10m',
     'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
     'precipitation',
@@ -166,8 +180,9 @@ const ATTEMPTS = [
 ];
 
 // Per-chunk upstream timeout. Open-Meteo p99 for 864-location current-only
-// requests is ~6 s; 12 s gives comfortable headroom without pinning the
-// worker on a globally-degraded upstream.
+// requests was ~6 s (400-location chunks are smaller still); 12 s gives
+// comfortable headroom without pinning the worker on a globally-degraded
+// upstream.
 const UPSTREAM_TIMEOUT_MS = 12000;
 
 // Header access is runtime-shaped: on Edge, `request.headers` is a Fetch
@@ -193,29 +208,18 @@ function isAuthorized(request) {
     return false;
 }
 
-// Chunk [start..end] inclusive → CSV lat/lon in row-major order (lat slow).
-function chunkCoords(start, end) {
-    const lats = [];
-    const lons = [];
-    for (let idx = start; idx <= end; idx++) {
-        const j = Math.floor(idx / GRID_W);
-        const i = idx % GRID_W;
-        lats.push(LAT_ORIGIN + j * GRID_DEG);
-        lons.push(LON_ORIGIN + i * GRID_DEG);
-    }
-    return { lat: lats.join(','), lon: lons.join(',') };
-}
-
+// Chunk [start..end] inclusive → one Open-Meteo URL. Coordinates and the
+// byte ceiling come from js/open-meteo-request.js; the query (variables,
+// units, model, apikey) is this route's own. Throws RangeError past
+// MAX_URL_BYTES — fetchOneChunkRaw turns that into a failure reason.
 function chunkUrl(start, end, modelQuery) {
-    const { lat, lon } = chunkCoords(start, end);
-    return `${OPEN_METEO_BASE}`
-        + `?latitude=${lat}`
-        + `&longitude=${lon}`
-        + `&current=${CURRENT_VARS}`
+    const { lats, lons } = gridChunkCoords(start, end, GRID);
+    const query = `current=${CURRENT_VARS}`
         + `&wind_speed_unit=ms`
         + `&timezone=UTC`
         + modelQuery
         + (OPEN_METEO_API_KEY ? `&apikey=${encodeURIComponent(OPEN_METEO_API_KEY)}` : '');
+    return buildChunkUrl({ base: OPEN_METEO_BASE, lats, lons, query });
 }
 
 /**
@@ -239,7 +243,14 @@ async function fetchOneChunk(src, modelQuery, start, end) {
 }
 
 async function fetchOneChunkRaw(src, modelQuery, start, end) {
-    const url = chunkUrl(start, end, modelQuery);
+    let url;
+    try {
+        url = chunkUrl(start, end, modelQuery);
+    } catch (e) {
+        // A URL over the kernel's byte ceiling never leaves the worker —
+        // the 414 it would have drawn is reported here, by name.
+        return { failureReason: `${src} chunk ${start} url: ${e.message}` };
+    }
     let body;
     try {
         const res = await fetchWithTimeout(url, {
@@ -303,12 +314,8 @@ async function fetchOneChunkRaw(src, modelQuery, start, end) {
  * grows — e.g. 16 chunks at 4-wide ≈ 4 batches × ~2-3 s each.
  */
 async function fetchAllChunks(src, modelQuery) {
-    const chunkRanges = [];
-    for (let start = 0; start < GRID_N; start += CHUNK_SIZE) {
-        const end = Math.min(start + CHUNK_SIZE - 1, GRID_N - 1);
-        chunkRanges.push({ start, end });
-    }
-    const results        = new Array(chunkRanges.length).fill(null);
+    const ranges         = chunkRanges(GRID_N, CHUNK_SIZE);
+    const results        = new Array(ranges.length).fill(null);
     let cursor           = 0;
     let earlyFail        = null;
     let dailyLimitHit    = false;
@@ -316,8 +323,8 @@ async function fetchAllChunks(src, modelQuery) {
     async function worker() {
         while (earlyFail === null) {
             const idx = cursor++;
-            if (idx >= chunkRanges.length) return;
-            const { start, end } = chunkRanges[idx];
+            if (idx >= ranges.length) return;
+            const { start, end } = ranges[idx];
             const r = await fetchOneChunk(src, modelQuery, start, end);
             if (r.failureReason) {
                 if (earlyFail === null) earlyFail = r.failureReason;
@@ -332,14 +339,13 @@ async function fetchAllChunks(src, modelQuery) {
     if (earlyFail) {
         return { merged: null, failureReason: earlyFail, dailyLimitHit };
     }
-    const merged = [];
-    for (const items of results) merged.push(...items);
-
-    if (merged.length !== GRID_N) {
-        return {
-            merged: null,
-            failureReason: `${src} merged length ${merged.length} != ${GRID_N}`,
-        };
+    // Chunk order is grid order (js/open-meteo-request.js chunkRanges), so
+    // the concatenation IS the 2592-point row-major layout.
+    let merged;
+    try {
+        merged = mergeChunks(results, GRID_N);
+    } catch (e) {
+        return { merged: null, failureReason: `${src} ${e.message}` };
     }
     return { merged, failureReason: null };
 }
@@ -362,11 +368,15 @@ function fallbackGridLatLon(idx) {
     };
 }
 
-// Numeric fields that participate in bilinear upsample. Anything outside this
+// Scalar fields that participate in bilinear upsample. Anything outside this
 // list is copied from the nearest source cell verbatim (units, time, flags).
-const METNO_NUMERIC_FIELDS = [
-    'temperature_2m', 'relative_humidity_2m', 'surface_pressure',
-    'wind_speed_10m', 'wind_direction_10m',
+// WIND IS NOT HERE ON PURPOSE: `wind_direction_10m` is an angle, and a
+// linear blend of 350° and 10° is 180° — the upsampler used to do exactly
+// that (EARTHVIEW_LOD_UX_PLAN.md §1.1), so every fallback frame carried
+// reversed winds wherever a 10° cell straddled north. Wind goes through
+// vectorMeanWind() below: speed+direction → U/V, blend, → speed+direction.
+const METNO_SCALAR_FIELDS = [
+    'temperature_2m', 'relative_humidity_2m', 'pressure_msl',
     'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
     'precipitation',
 ];
@@ -385,6 +395,42 @@ function _blendField(corners, weights, field) {
         }
     }
     return wsum > 0 ? acc / wsum : null;
+}
+
+/**
+ * Weighted VECTOR mean of wind samples. Each sample is { speed, dir } in the
+ * meteorological "from" convention (m/s, degrees clockwise from north);
+ * non-finite samples drop out of the weighting like _blendField's corners.
+ *
+ * Returns { speed, dir } with dir in [0, 360), or { speed: null, dir: null }
+ * when no sample is usable. Exported for tests/weather-grid-pipeline.mjs:
+ * 350° and 10° at equal weight must come back as 0°, not 180°.
+ *
+ * Note the speed is |mean vector|, not the mean of the speeds — opposing
+ * winds partially cancel, which is the physically right answer for a cell
+ * centred between them (the client's U/V bilinear does the same).
+ *
+ * @param {Array<{speed:number, dir:number}>} samples
+ * @param {number[]} weights  same length as samples
+ */
+export function vectorMeanWind(samples, weights) {
+    const DEG = Math.PI / 180;
+    let u = 0, v = 0, wsum = 0;
+    for (let k = 0; k < samples.length; k++) {
+        const sp = samples[k]?.speed, dir = samples[k]?.dir, w = weights[k];
+        if (!Number.isFinite(sp) || !Number.isFinite(dir) || !(w > 0)) continue;
+        // "From" direction → velocity: u = −s·sin(dir), v = −s·cos(dir).
+        u    += -sp * Math.sin(dir * DEG) * w;
+        v    += -sp * Math.cos(dir * DEG) * w;
+        wsum += w;
+    }
+    if (wsum <= 0) return { speed: null, dir: null };
+    u /= wsum; v /= wsum;
+    const speed = Math.hypot(u, v);
+    if (speed < 1e-9) return { speed: 0, dir: 0 };
+    // Back to "from": atan2(−u, −v), folded into [0, 360).
+    const dir = ((Math.atan2(-u, -v) / DEG) % 360 + 360) % 360;
+    return { speed, dir: dir >= 360 ? 0 : dir };
 }
 
 /**
@@ -427,16 +473,23 @@ function upsampleToGrid(coarse) {
             const anchorIdx = weights.indexOf(Math.max(...weights));
             const anchor    = corners[anchorIdx];
             current.time    = anchor?.current?.time ?? null;
-            for (const f of METNO_NUMERIC_FIELDS) {
+            for (const f of METNO_SCALAR_FIELDS) {
                 current[f] = _blendField(corners, weights, f);
             }
+            // Wind: vector mean (see METNO_SCALAR_FIELDS note).
+            const wind = vectorMeanWind(
+                corners.map(c => ({ speed: c?.current?.wind_speed_10m, dir: c?.current?.wind_direction_10m })),
+                weights,
+            );
+            current.wind_speed_10m     = wind.speed;
+            current.wind_direction_10m = wind.dir;
             out[J * GRID_W + I] = {
                 latitude:        LAT_ORIGIN + J * GRID_DEG,
                 longitude:       LON_ORIGIN + I * GRID_DEG,
                 elevation:       anchor?.elevation ?? null,
                 current_units:   anchor?.current_units ?? null,
                 current,
-                __pressure_kind: 'mean_sea_level',
+                __pressure_kind: 'msl',
                 __upsampled:     true,
             };
         }
@@ -457,7 +510,7 @@ function translateMetnoPoint(metno) {
         current_units: {
             temperature_2m:       '°C',
             relative_humidity_2m: '%',
-            surface_pressure:     'hPa',
+            pressure_msl:         'hPa',
             wind_speed_10m:       'm/s',
             wind_direction_10m:   '°',
             cloud_cover_low:      '%',
@@ -467,12 +520,14 @@ function translateMetnoPoint(metno) {
         },
         current: {
             time:                 first.time,
-            // MET Norway compact gives sea-level pressure, not surface;
-            // close enough for the dashboard heatmap which only renders a
-            // colour ramp. Mark via __pressure_kind for future readers.
+            // MET Norway compact gives sea-level pressure — the same quantity
+            // the Open-Meteo path now requests as `pressure_msl`, so both
+            // sources write ONE key with ONE meaning. (Until 2026-10-26 this
+            // slot was named `surface_pressure` and meant two different
+            // things depending on which upstream had answered.)
             temperature_2m:       Number.isFinite(inst.air_temperature) ? inst.air_temperature : null,
             relative_humidity_2m: Number.isFinite(inst.relative_humidity) ? inst.relative_humidity : null,
-            surface_pressure:     Number.isFinite(inst.air_pressure_at_sea_level) ? inst.air_pressure_at_sea_level : null,
+            pressure_msl:         Number.isFinite(inst.air_pressure_at_sea_level) ? inst.air_pressure_at_sea_level : null,
             wind_speed_10m:       Number.isFinite(inst.wind_speed) ? inst.wind_speed : null,
             wind_direction_10m:   Number.isFinite(inst.wind_from_direction) ? inst.wind_from_direction : null,
             cloud_cover_low:      Number.isFinite(inst.cloud_area_fraction_low)    ? inst.cloud_area_fraction_low    : null,
@@ -480,7 +535,7 @@ function translateMetnoPoint(metno) {
             cloud_cover_high:     Number.isFinite(inst.cloud_area_fraction_high)   ? inst.cloud_area_fraction_high   : null,
             precipitation:        Number.isFinite(next1.precipitation_amount) ? next1.precipitation_amount : null,
         },
-        __pressure_kind: 'mean_sea_level',  // (Open-Meteo gives surface_pressure)
+        __pressure_kind: 'msl',
     };
 }
 
