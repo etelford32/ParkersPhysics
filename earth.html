@@ -4321,6 +4321,9 @@ import { TempVolumeFeed } from './js/temp-volume-feed.js';
 // Wind colour — ONE rule for trails, arrows, columns and legends
 // (js/wind-palette.js): blue family, brighter = faster, deeper = lower.
 import { makeWindRamp, windColorCss, WIND_PALETTE_NOTE } from './js/wind-palette.js';
+// Energy-conserving trail compositing (js/wind-trail-compositor.js): the
+// trails are summed offscreen, kneed once, composited over — never white.
+import { TrailCompositor, sumStats as trailSumStats } from './js/wind-trail-compositor.js';
 import { buildTempLUTPixels, tempToRampFrac } from './js/temp-ramp.js';
 import { StormFeed } from './js/storm-feed.js';
 import { initDebugOverlay } from './js/debug-overlay.js';
@@ -4624,6 +4627,9 @@ if (HDR_ON) {
 // recovery, restore cloud quality before re-sharpening pixels.
 const _CLOUD_Q_TIERS = [1, 0.66, 0.33];
 let   _cloudQIdx     = 0;
+// Trail-compositor MSAA by tier (js/wind-trail-compositor.js setSamples):
+// a 4× resolve of a full-res half-float target is the floor tier's to shed.
+const _TRAIL_SAMPLES_BY_TIER = [4, 2, 0];
 let   _cloudQForced  = false;   // URL/console override pins the tier
 function _setCloudQuality(q) {
     cloudU.u_quality.value = q;
@@ -4645,6 +4651,11 @@ function _setCloudQuality(q) {
     // (hoisted fn, guarded against the init-time call before the meshes
     // exist — see its definition next to the shell construction).
     _updateCloudShellMode();
+    // The wind-trail sum target's MSAA follows the same tier (`trailCompositor`
+    // is a const declared later in the module — undefined on the init call).
+    if (trailCompositor) {
+        trailCompositor.setSamples(_TRAIL_SAMPLES_BY_TIER[Math.min(_cloudQIdx, 2)]);
+    }
 }
 function _governResolution(frameMs) {
     // Arming runs off the same per-frame signal as the governor, so "a
@@ -6746,6 +6757,11 @@ const WIND_LOD_FAR  = 2.50;
 // pressure-level instances get their own altitude's shade from the same
 // rule via opts.speedColor (WIND_LEVEL_DEFS). There is no second copy.
 const _WIND_RAMP_SFC = makeWindRamp(AtmoScale.LEVEL_ALTITUDE_KM.sfc);
+// Per-trail brightness multiplier, 1 in production. A test hook ONLY
+// (window.setWindTrailBoost): the compositing gate drives it up to make
+// the additive clip reproducible on a sparse synthetic field, on both the
+// old path (its negative control) and the compositor.
+let _trailBoostMul = 1;
 
 // Reused scratch vector for camera→local-space conversions. Avoids one
 // allocation per frame inside the wind LOD path.
@@ -7209,7 +7225,7 @@ class WindParticles {
         // So: run it the other way. Dimmer per trail when they are stacked,
         // brighter when they are sparse. The close-zoom end keeps its
         // historical 1.7 so the view the LOD was tuned against is unchanged.
-        const trailBoost = 0.62 + 1.08 * this.zoom01;
+        const trailBoost = (0.62 + 1.08 * this.zoom01) * _trailBoostMul;
 
         const tmp = { u: 0, v: 0, s: 0 };
 
@@ -7626,6 +7642,47 @@ class WindArrows {
 // to grow into. Pressure-level instances live in the WIND LEVELS section
 // below and are created lazily on first enable.
 const windParticles    = new WindParticles(earthMesh, 6000, { trailLen: 28 });
+
+// ── Trail compositing ────────────────────────────────────────────────────
+// Every WindParticles mesh is moved onto the compositor's THREE layer: the
+// main pass no longer draws them, the compositor sums them alone into an
+// offscreen HalfFloat target (planet-occluded via a depth prepass of
+// earthMesh), compresses the SUM once with a hue-preserving knee and
+// composites it OVER the scene at renderOrder 3.31 — above the cloud
+// volume quad (3.0) and the split shells (3.0–3.2), where the pressure
+// levels already drew. See the module header for why a capped sum is the
+// only thing that keeps dense wind blue instead of ACES-white, and why the
+// final composite is 'over' rather than additive. `?trailcomp=0` is the old
+// additive path (the A/B and the gate's negative control).
+// `var` on purpose: _setCloudQuality runs during module init (URL override)
+// before this line and guards on it — a `const` here is in its temporal
+// dead zone there and `typeof` does NOT protect against a TDZ read.
+var trailCompositor = new TrailCompositor(THREE, renderer, {
+    scene, globe: earthMesh, radius: R_EARTH, renderOrder: 3.31, mobile: _isMobileUA,
+});
+// MSAA on the sum target rides the governor tier (set below in
+// _setCloudQuality; applied once here for the tier the page booted at).
+trailCompositor.setSamples(_TRAIL_SAMPLES_BY_TIER[Math.min(_cloudQIdx, 2)]);
+if (new URLSearchParams(location.search).get('trailcomp') === '0') trailCompositor.setEnabled(false);
+trailCompositor.adopt(windParticles.mesh);
+window.setTrailCompositing = (on) => {
+    trailCompositor.setEnabled(!!on);
+    console.info(`[WindDebug] trail compositing ${on ? 'ON' : 'OFF'}`);
+};
+window.setWindTrailBoost = (k) => { _trailBoostMul = Math.max(0, Number(k) || 1); return _trailBoostMul; };
+// Probe: the compositor's state plus a readback of the RAW trail sum (the
+// peak channel per sampled pixel, pre-knee) so a gate can show the clip
+// exists and the knee bounds it. Reads the last rendered frame's target.
+window.__evTrailCompositor = (opts = {}) => {
+    const rb = trailCompositor.active ? trailCompositor.readback(renderer, opts) : { peaks: [], hdr: trailCompositor.hdr };
+    return {
+        enabled: trailCompositor.enabled, active: trailCompositor.active,
+        hdr: trailCompositor.hdr, samples: trailCompositor.samples, knee: trailCompositor.knee,
+        targetSize: trailCompositor.targetSize, boost: _trailBoostMul,
+        quadRenderOrder: trailCompositor.quad.renderOrder,
+        stats: trailSumStats(rb.peaks),
+    };
+};
 const windArrows       = new WindArrows(earthMesh, (lat, lon, out) =>
     windParticles._lookupWind(lat, lon, out));
 const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
@@ -8086,6 +8143,7 @@ function _ensureWindLevel(key) {
     });
     st.inst.setVisible(false);
     st.inst.setUpliftSampler(_windUpliftSample);
+    trailCompositor.adopt(st.inst.mesh);   // same offscreen sum as the surface
     _windLevelAppliedT = null;   // new consumer — bust the frame memo
     _refreshWindLevelData();
     return st.inst;
@@ -14741,6 +14799,9 @@ function animate() {
     if (cloudVolumeMesh?.visible && cloudVolumeCompositor) {
         cloudVolumeCompositor.render(renderer, camera);
     }
+    // Wind trails sum into their own target (planet-occluded), kneed once,
+    // composited by the quad at 3.31 during the main pass.
+    trailCompositor.render(renderer, camera);
     if (composer) composer.render();
     else renderer.render(scene, camera);
 }
@@ -14885,6 +14946,37 @@ window.__evSetCamDir = (x, y, z) => {
     return camera.position.toArray();
 };
 window.__evSunDir = () => earthU.u_sun_dir.value.toArray();
+// Render ONE frame through the page's own path and read the canvas back in
+// the same task (before the browser composites, so preserveDrawingBuffer is
+// not needed). Returns per-pixel statistics of a rectangle (drawing-buffer
+// pixels, origin bottom-left), computed in-page so a gate ships numbers,
+// not megabytes: how many lit pixels, how many of those are achromatic
+// white, how many keep blue dominant. The trail-compositing gate reads the
+// night-side disc with the clouds and lights off, where the only light on
+// the globe is the trails.
+window.__evFrameStats = ({ x = 0, y = 0, w = 0, h = 0, lit = 60, white = 200 } = {}) => {
+    trailCompositor.render(renderer, camera);
+    if (cloudVolumeMesh?.visible && cloudVolumeCompositor) cloudVolumeCompositor.render(renderer, camera);
+    if (composer) composer.render(); else renderer.render(scene, camera);
+    const gl = renderer.getContext();
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const W = w || size.x, H = h || size.y;
+    const px = new Uint8Array(W * H * 4);
+    gl.readPixels(x, y, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let n = 0, nLit = 0, nWhite = 0, nBlue = 0, sumMax = 0;
+    for (let i = 0; i < px.length; i += 4) {
+        const r = px[i], g = px[i + 1], b = px[i + 2];
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        n++;
+        if (mx < lit) continue;
+        nLit++; sumMax += mx;
+        if (mn >= white) nWhite++;
+        if (b >= g && g >= r) nBlue++;
+    }
+    return { width: W, height: H, n, lit: nLit, white: nWhite, blue: nBlue,
+             fracWhite: nLit ? nWhite / nLit : 0, fracBlue: nLit ? nBlue / nLit : 0,
+             meanMax: nLit ? sumMax / nLit : 0 };
+};
 
 // ═══════════════════════════════════════════════════════════════
 //  USER LOCATION BEACON  (must be declared before animate() runs)

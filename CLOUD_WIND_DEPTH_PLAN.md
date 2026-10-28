@@ -197,6 +197,10 @@ Four paths, one live at a time: **volumetric / split / composite / off.**
   the ONE wind ramp — blue, brighter = faster, deeper shade = lower altitude
   from the same altitude table above — read by the trails, arrows, columns
   and legends. See `EARTHVIEW_VISUAL_DIALIN_PLAN.md` §3.1.
+- **Compositing (2026-10-27).** The additive clip the dimming above only
+  postponed is gone: `js/wind-trail-compositor.js` sums the trails
+  offscreen, knees the sum once (hue-preserving) and composites it over the
+  scene. Plan §3.1a.
 
 ### Vertical profile columns (`js/wind-column.js`)
 

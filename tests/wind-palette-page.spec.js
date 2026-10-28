@@ -28,12 +28,16 @@ test.use({
 
 const lum = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
+test.describe.configure({ timeout: 180_000 });
+
 test('live wind layers, arrows and legends all read js/wind-palette.js', async ({ page }) => {
     const pageErrors = [];
     page.on('pageerror', (err) => pageErrors.push(err.message));
 
-    await page.goto('/earth.html', { waitUntil: 'load' });
-    await page.waitForFunction(() => typeof window.__evWindStack === 'function', null, { timeout: 30_000 });
+    // Module-ready, not load-ready (see wind-levels-smoke.spec.js: `load`
+    // waits on egress-blocked CDN textures and blows the budget).
+    await page.goto('/earth.html', { waitUntil: 'domcontentloaded', timeout: 120_000 });
+    await page.waitForFunction(() => typeof window.__evWindStack === 'function', null, { timeout: 120_000 });
 
     // Enable every level so each instance exists and reports its own ramp.
     for (const id of ['lyr-wind-850', 'lyr-wind-500', 'lyr-jet']) {

@@ -182,14 +182,31 @@ never a rainbow; text in text colours, never in a series colour).
 - Still to do in this family (§7): the **compositing** (3.1a) and the
   **constant screen density** (LOD plan Phase 2.3).
 
-**3.1a Energy-conserving trails.** Additive blending is kept (it commutes,
-so the camera may descend through the stack), but the sum must not clip:
-render the four trail layers into the HDR target (they already are, before
-the bloom) and apply a soft-knee on the *trail* contribution before the ACES
-curve — the hero's `heroTone` shoulder — so dense regions saturate to the
-*pale* end of the blue family, not to white. Gate: a solo trail render at
-globe view; the 99th-percentile pixel must stay inside the palette's hue
-band (negative control: the raw additive path, which goes achromatic).
+**3.1a Energy-conserving trails — SHIPPED 2026-10-27**
+(`js/wind-trail-compositor.js`, `tests/wind-trail-compositor.mjs`,
+`tests/wind-trail-compositing.spec.js`). The trail meshes live on their own
+THREE layer and are summed ALONE into an offscreen HalfFloat target (MSAA
+4×, planet-occluded by a depth prepass of `earthMesh`); the sum is compressed
+ONCE by `trailKnee` — `heroTone`'s PBR-Neutral shoulder with desat 0, knee
+0.60 on the peak channel, so ten navy trails saturate to deep blue and ten
+ice trails to pale ice, never white — and composited premultiplied-OVER the
+scene at renderOrder 3.31 with alpha = the kneed peak: light where sparse,
+ink where dense. Measured on the sandbox at ×4 trail gain (the gate's
+knob, `window.setWindTrailBoost`): 25 % of lit trail pixels summed past 1.0
+(p99 3.6, max 12.4) and the old path drew them white; the compositor's
+output peak is bounded at 0.987 and the hue stays the palette's.
+`?trailcomp=0` is the old additive path (the A/B and the negative control).
+The per-trail far-zoom dimming (`0.62 + 1.08·zoom01`) stays — it is a density
+choice now, not a clip workaround. COST, measured on the sandbox (software
+GL, 1280×800): frame rate identical with and without the compositor
+(0.8 fps either way — the page is march-bound there); the planet depth
+prepass uses a level-4 icosphere occluder (5 120 faces, not the globe's
+81 920) and the sum target's MSAA follows the governor tier (4 / 2 / 0),
+so the pass is one sparse line draw plus one fullscreen quad. A GPU number
+is still owed (§5's per-layer probe). Gate note: the page `load` event on
+the sandbox waits 74–97 s for egress-blocked CDN textures to time out, so
+every earth.html gate must wait for the page MODULE
+(`window.__evWindStack`), never for `load`.
 
 ### 3.2 Temperature — ONE family for air and sea
 
@@ -370,13 +387,13 @@ base luminance ratio > 1.8 and a terminator cloud's chroma must be warm
 
 | # | Item | Depends on |
 |---|---|---|
-| 7.1 | **Energy-conserving trails** (§3.1a) | — |
+| 7.1 ✔ | **Energy-conserving trails** (§3.1a) — shipped | — |
 | 7.2 | **Constant screen density**: particles per 1000 px² constant across zoom; GPU advection (§5) | — (JS path first, GPU second) |
 | 7.3 | **Barbs + streamlines at local tier** from the patch field (speed legible on a still frame) | LOD plan Phase 2.2 |
 | 7.4 | **Pressure-level winds on the ring** so all four levels scrub coherently and `windGainAt` retires | LOD plan Phase 2.1 |
 | 7.5 | **Hover readout** on the wind layer by default (10 m + enabled levels, m/s · km/h · kt · bearing) — the `#` opt-in badge goes | LOD plan 10.3 |
 | 7.6 | **Profile columns pickable** → the probe card | CLOUD_WIND_DEPTH_PLAN §7 |
-| 7.7 | The per-level key rows show **altitude** ("850 hPa · 1.5 km") beside the speed ticks — the shade axis needs its number as much as the speed axis does | — (one line) |
+| 7.7 ✔ | The per-level key rows show **altitude** ("850 hPa · 1.5 km") beside the speed ticks — the shade axis needs its number as much as the speed axis does | — (one line) |
 
 ---
 
@@ -415,7 +432,8 @@ a negative control is a guess.** Every gate below carries one.
 |---|---|---|---|
 | `tests/wind-palette.mjs` ✔ shipped | node | monotone luminance in speed and altitude; hue in band; closure ≡ direct | — (pure) |
 | `tests/wind-palette-page.spec.js` ✔ shipped | browser | live instances + arrows + 4 legend canvases read the module | a stale private ramp (would fail the probe compare) |
-| `tests/wind-compositing.spec.js` | browser, solo render | p99 pixel stays in the blue band at globe view | raw additive path |
+| `tests/wind-trail-compositor.mjs` ✔ shipped | node | knee identity/monotone/bounded/hue-preserving; ≡ heroTone desat 0; GLSL mirror | — (pure) |
+| `tests/wind-trail-compositing.spec.js` ✔ shipped | browser, readback + screenshot | at ×4 gain the raw sum clips (fracOver1 > 0) and no trail pixel on the night disc is white | `?trailcomp=0` (goes white) |
 | `tests/earth-image-metrics.spec.js` (LOD plan) | browser, `gl.readPixels` | antimeridian seam contrast; stripe autocorrelation; cloud top/base ratio; terminator chroma | gradient-free shader; current decode; white-sun shader |
 | `tests/earth-layer-order.mjs` + page probe | node + browser | the compositing table matches live `renderOrder` | — |
 | `tests/earth-frame-budget.spec.js` | browser | per-layer cost from `__evFrameBudget()` under each tier; floor tier never > 100 ms on SwiftShader | — (a measurement, reported, not asserted on hardware the sandbox lacks) |
@@ -438,7 +456,7 @@ framework unless it must.
 | Order | Step | Effort | Depends on |
 |---|---|---|---|
 | 1 ✔ | Wind colour system (`js/wind-palette.js`, gates, key disclosure) | done | — |
-| 2 | Wind compositing (7.1) + per-level altitude on the key (7.7) | 1 day | — |
+| 2 ✔ | Wind compositing (7.1) + per-level altitude on the key (7.7) | done | — |
 | 3 | Never-black boot + one status chip (LOD plan 10.1, 10.2) | 1–2 days | — |
 | 4 | Cloud seam + strips + one cloud field (LOD plan 5.1, 5.2, 5.4) | 2–3 days | — |
 | 5 | Cloud lighting pass (§6.1) + shadow at every tier (§4.3) | 2 days | 4 (to judge it on real pixels) |
