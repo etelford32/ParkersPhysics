@@ -21,12 +21,19 @@ test.use({
     ignoreHTTPSErrors: true,
 });
 
+test.describe.configure({ timeout: 180_000 });
+
 test('pressure-level wind layers boot, toggle, and legend without errors', async ({ page }) => {
     const pageErrors = [];
     page.on('pageerror', (err) => pageErrors.push(err.message + '\n' + (err.stack ?? '')));
 
-    await page.goto('/earth.html', { waitUntil: 'load' });
-    await page.waitForTimeout(4000);   // let the module boot + first frames render
+    // Wait for the page MODULE, not the load event: `load` waits on the
+    // egress-blocked CDN texture requests to time out (74–97 s measured on
+    // the sandbox, 2026-10-28), which is longer than the test budget and
+    // says nothing about the layers under test.
+    await page.goto('/earth.html', { waitUntil: 'domcontentloaded', timeout: 120_000 });
+    await page.waitForFunction(() => typeof window.__evWindStack === 'function', null, { timeout: 120_000 });
+    await page.waitForTimeout(2000);   // first frames render
 
     // 1. New layer rows exist; jet row is the real 250 hPa layer now.
     await expect(page.locator('#lyr-wind-850')).toHaveCount(1);
