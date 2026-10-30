@@ -250,6 +250,7 @@ export class EarthTerrainPatch {
         this._mat = new THREE.ShaderMaterial({
             vertexShader:   TERRAIN_VERT,
             fragmentShader,                     // the composed EARTH_FRAG, verbatim
+            extensions:     { derivatives: true },   // the page's text may use normalToUVMip (fwidth)
             uniforms:       this._uniforms,
             side:           THREE.DoubleSide,   // skirt wall + winding-agnostic (blind-safe)
             polygonOffset:  true,               // sit just above the coincident globe

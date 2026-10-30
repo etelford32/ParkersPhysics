@@ -456,6 +456,10 @@ export class SatelliteFeed {
                 oldestTimeMs: hit.oldestTimestampMs ?? null,
                 discAges:     describeDiscAges(hit.regionTimes),
                 layers:       hit.layers,
+                // Per-source identity of this frame (layer + time + age) —
+                // what the regional cloud window re-fetches (js/cloud-regional.js).
+                discs:        hit.discs ?? null,
+                fill:         hit.fill ?? null,
                 diag:         hit.diag ?? this.lastDiag,
                 ...t,
             },

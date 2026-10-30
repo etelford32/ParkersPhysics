@@ -168,7 +168,8 @@ near(coxMunkVariance(7), 0.003 + 0.00512 * 7, 1e-12, 'Cox & Munk 1954: σ² = 0.
     const skin = readFileSync(new URL('../js/earth-skin.js', import.meta.url), 'utf8');
     ok(skin.includes("from './earth-surface-light.js'"), 'earth-skin imports the ONE lighting kernel');
     ok(/#ifdef EARTH_PHYSICAL_LIGHT\n\$\{EARTH_LIGHT_GLSL\}\n#endif/.test(skin), 'the kernel GLSL compiles only on the opt-in path');
-    ok(skin.includes("'#define EARTH_PHYSICAL_LIGHT\\n' + EARTH_FRAG"), 'EARTH_FRAG_PHYSICAL is EARTH_FRAG + the define');
+    ok(skin.includes("'#define EARTH_PHYSICAL_LIGHT\\n#define GEO_SEAMLESS\\n' + EARTH_FRAG"),
+        'EARTH_FRAG_PHYSICAL is EARTH_FRAG + the physical and seam-safe defines');
     const page = readFileSync(new URL('../earth.html', import.meta.url), 'utf8');
     ok(/fragmentShader: EARTH_SURFACE_FRAG,\s*\n/.test(page) && (page.match(/fragmentShader: EARTH_SURFACE_FRAG/g) || []).length === 2,
         'earth.html hands the SAME shader text to the globe and the terrain patch');

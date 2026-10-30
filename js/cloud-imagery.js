@@ -63,6 +63,7 @@
 
 import {
     productKind, MosaicAccumulator, gibsTimeCandidates, toUtcDate, isBlankFrame,
+    discCoversBounds, boundsNeedPolarFill,
 } from './cloud-mosaic-core.js';
 import { discAges } from './cloud-time.js';
 
@@ -138,12 +139,13 @@ const IMG_TIMEOUT_MS = 20000;
 // responsive during the 10-minute refresh instead of freezing a frame.
 const CHUNK_ROWS = 128;
 
-function buildSnapshotUrl(time, layer, width, height) {
+function buildSnapshotUrl(time, layer, width, height, bbox = '-90,-180,90,180') {
     // PNG preserves the alpha channel GIBS uses to flag no-data pixels.
+    // BBOX is EPSG:4326 in the service's lat-first order: minLat,minLon,maxLat,maxLon.
     const p = new URLSearchParams({
         REQUEST: 'GetSnapshot',
         TIME:    time,
-        BBOX:    '-90,-180,90,180',
+        BBOX:    bbox,
         CRS:     'EPSG:4326',
         LAYERS:  layer,
         WRAP:    'day',
@@ -399,6 +401,18 @@ async function fetchGeostationaryMosaic(THREE, opts, diag) {
 
     return {
         texture:     makeTexture(THREE, data, width, height),
+        // What this frame IS, per source — the regional window (Tier B,
+        // fetchRegionalCloudImagery) re-asks for exactly these layers at
+        // exactly these times, so the two can never show different instants.
+        discs:       successful.map(s => ({
+            name:        s.region.name,
+            layerId:     s.layerId,
+            subLon:      s.subLon,
+            time:        s.time,
+            timestampMs: s.timestampMs ?? null,
+            ageMin:      ages.discs.find(d => d.name === s.region.name)?.ageMin ?? 0,
+        })),
+        fill:        polarHit ? { layerId: polarHit.layerId, time: polarHit.time } : null,
         mosaic:      true,
         date:        successful[0]?.time?.slice(0, 10) ?? toUtcDate(base),
         timestampMs: ages.newestMs,
@@ -442,6 +456,8 @@ async function fetchSingleLayerFallback(THREE, opts, diag) {
 
     return {
         texture:     makeTexture(THREE, data, width, height),
+        discs:       [],
+        fill:        { layerId: hit.layerId, time: hit.time },
         mosaic:      false,
         date:        hit.time,
         timestampMs: null,
@@ -453,6 +469,99 @@ async function fetchSingleLayerFallback(THREE, opts, diag) {
         url:         hit.url,
         diag,
     };
+}
+
+// ── Regional window: Tier B of the cloud LOD ladder ─────────────────────────
+
+/**
+ * The same snapshots as the global frame, cropped to a regional box at the
+ * instrument's resolution (plan from cloud-mosaic-core planRegionalDetail).
+ * `discs` / `fill` are the GLOBAL result's own sources: the window re-asks
+ * for those layers at those times and folds them through the same decode and
+ * compositor with the same per-disc ages, so it is a finer sample of the
+ * frame on screen, never a different one. A disc whose feather cannot reach
+ * the box is not fetched; the polar fill only when the box reaches past 55°.
+ * Resolves null when nothing loaded or `isStale()` says the plan was
+ * superseded mid-flight (images cannot be cancelled, results can be dropped).
+ *
+ * @param {object} THREE
+ * @param {{ plan:object, discs:Array, fill:object|null, isStale?:()=>boolean }} o
+ */
+export async function fetchRegionalCloudImagery(THREE, { plan, discs = [], fill = null, isStale = () => false }) {
+    if (!plan) return null;
+    const t0 = performance.now();
+    const { width, height, bounds } = plan;
+    const latMax = bounds.latMin + bounds.latSpan;
+    const diag = { v: 1, mode: 'regional', key: plan.key, attempts: [], used: [], ms: 0 };
+
+    // One image per source, stitched from the plan's segments (two when the
+    // box straddles the antimeridian — a BBOX cannot run past ±180°).
+    const loadSource = async (name, layerId, time) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        for (const seg of plan.segments) {
+            const bbox = `${bounds.latMin},${seg.lonMin},${latMax},${seg.lonMax}`;
+            const url  = buildSnapshotUrl(time, layerId, seg.w, height, bbox);
+            const t1   = performance.now();
+            const img  = await loadImage(url);
+            diag.attempts.push({ region: name, layer: shortLayerId(layerId), time, seg: seg.x0, ms: Math.round(performance.now() - t1), ok: !!img });
+            if (!img) return null;
+            ctx.drawImage(img, seg.x0, 0, seg.w, height);
+        }
+        const rgba = ctx.getImageData(0, 0, width, height).data;
+        return isBlankFrame(rgba, { stride: 16 }) ? null : rgba;
+    };
+
+    const wanted = discs.filter(d => discCoversBounds(bounds, d.subLon));
+    const jobs = wanted.map(d => loadSource(d.name, d.layerId, d.time).then(rgba => rgba && { d, rgba }));
+    const fillJob = fill && (boundsNeedPolarFill(bounds) || !wanted.length)
+        ? loadSource('Polar', fill.layerId, fill.time) : Promise.resolve(null);
+    const [hits, fillRgba] = await Promise.all([Promise.all(jobs), fillJob]);
+    if (isStale()) return null;
+    const got = hits.filter(Boolean);
+    if (!got.length && !fillRgba) { diag.ms = Math.round(performance.now() - t0); return { texture: null, diag }; }
+
+    const acc = new MosaicAccumulator(width, height, bounds);
+    for (const { d, rgba } of got) {
+        const kind = productKind(d.layerId);
+        for (let row = 0; row < height; row += CHUNK_ROWS) {
+            acc.addRegionRows(rgba, kind, d.subLon, 'primary', row, Math.min(height, row + CHUNK_ROWS), d.ageMin ?? 0);
+            await new Promise(r => setTimeout(r, 0));
+            if (isStale()) return null;
+        }
+        diag.used.push(d.name);
+    }
+    if (fillRgba) {
+        const kind = productKind(fill.layerId);
+        for (let row = 0; row < height; row += CHUNK_ROWS) {
+            acc.addRegionRows(fillRgba, kind, null, 'fill', row, Math.min(height, row + CHUNK_ROWS));
+            await new Promise(r => setTimeout(r, 0));
+            if (isStale()) return null;
+        }
+        diag.used.push('Polar');
+    }
+    const { data } = acc.finalize();
+
+    // Only ever MAGNIFIED (it is fetched for the footprint it covers), so no
+    // mipmaps — which also keeps the shader's in-branch tap derivative-free.
+    const tex = new THREE.DataTexture(new Uint8Array(data.buffer), width, height, THREE.RGBAFormat);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    // The accumulator's row 0 is the box's NORTH edge (like every GIBS
+    // frame) while the shared insetUV convention puts v = 0 at latMin —
+    // the SOUTH edge. flipY reverses the rows on upload so v = 1 lands on
+    // the north edge (the u_weather DataTexture and the imagery inset do
+    // the same). Without it the window draws upside down, which a
+    // longitude-only pattern cannot show — tests/cloud-regional.spec.js
+    // carries a latitude-asymmetric stub for exactly that.
+    tex.flipY = true;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.NoColorSpace;   // physical fractions, not colours (see makeTexture)
+    tex.needsUpdate = true;
+    diag.ms = Math.round(performance.now() - t0);
+    return { texture: tex, bounds, plan, used: diag.used, diag };
 }
 
 // ── Public entry point ───────────────────────────────────────────────────────

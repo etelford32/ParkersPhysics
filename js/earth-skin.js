@@ -30,6 +30,7 @@ import { GEO_GLSL } from './geo/coords.glsl.js';
 import { INSET_GLSL_HELPERS } from './geo/inset.glsl.js';
 import { buildTempLUTPixels, TEMP_RAMP_STOPS, TEMP_LUT_SIZE } from './temp-ramp.js';
 import { EARTH_LIGHT_GLSL } from './earth-surface-light.js';
+import { SAT_DETAIL_GLSL } from './cloud-mosaic-core.js';
 
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
 const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
@@ -270,6 +271,7 @@ varying vec3 vWorldPos;
 
 ${INSET_GLSL_HELPERS}
 ${PATCH_GLSL_CORE}
+${SAT_DETAIL_GLSL}
 ${DETAIL_GLSL}
 ${TOPO_GLSL}
 
@@ -335,7 +337,7 @@ float cloudShadowShade(vec3 N_sphere) {
             vec3  NcS = normalize(N_sphere + LtS * (H_SHADOW / max(sunElev, 0.20)));
             vec2  uvS = normalToUV(NcS);
             vec4  clS  = texture2D(u_cloud_layers, uvS);
-            vec4  satS = texture2D(u_satellite, uvS);
+            vec4  satS = sampleSat(NcS);   // global frame + regional window
             // Low decks shade hardest; cirrus barely. The mosaic cloudiness
             // reinforces where it saw cloud the model grid missed.
             float cover = clamp(clS.r * 0.55 + clS.g * 0.35 + clS.b * 0.15, 0.0, 1.0);
@@ -410,8 +412,13 @@ void main() {
 
     // Albedo: the map, deep water pulled off its cartographic bathymetry,
     // then the GIBS detail inset (real imagery) where it is live.
-    vec3 albedo = texture2D(u_day, vUv).rgb;
-    albedo = mix(albedo, EL_DEEP_OCEAN, EL_SEAFLOOR_FADE * oceanMsk);
+    // The global maps are MIP-MAPPED: sampled with the seam-safe UV
+    // (normalToUVMip) or the antimeridian draws one column of the
+    // coarsest mip — a vertical line down the Pacific.
+    vec2  vUvT   = normalToUVMip(N_sphere);
+    float water  = texture2D(u_specular, vUvT).r;
+    vec3 albedo = texture2D(u_day, vUvT).rgb;
+    albedo = mix(albedo, EL_DEEP_OCEAN, EL_SEAFLOOR_FADE * water);
     albedo = detailBlendDay(albedo, vUv);
 
     float block = 1.0 - EL_CLOUD_SHADOW * cloudShadowShade(N_sphere);
@@ -425,13 +432,13 @@ void main() {
     vec3  Hh   = normalize(L + V);
     float wind = sampleWeatherField(vUv).a * EL_MAX_WIND;
     float spec = elGlint(dot(N_base, Hh), muV, max(muS, 0.0), dot(V, Hh), elCoxMunkVariance(wind));
-    base += beam * spec * oceanMsk * block;
-    base += sky * oceanMsk * (elFresnel(muV) - EL_F0);
+    base += beam * spec * water * block;
+    base += sky * water * (elFresnel(muV) - EL_F0);
 
     // Night: starlight + airglow on the ground, and the lamps — EMITTERS,
     // after the lighting, on after civil twilight.
     float dark  = elDarkness(muS);
-    float lamps = pow(elCityLights(texture2D(u_night, vUv).r), EL_LAMP_GAMMA)
+    float lamps = pow(elCityLights(texture2D(u_night, vUvT).r), EL_LAMP_GAMMA)
                 * EL_LAMP_GAIN * dark * u_city_lights;
     base += EL_LAMP * lamps + albedo * EL_NIGHT_FLOOR * dark;
 
@@ -555,9 +562,10 @@ void main() {
 // The physically lit surface (js/earth-surface-light.js): Lambert under a
 // slant-path-reddened beam, a dark night, lamps and space-weather glows as
 // emitters after the lighting, a Cox–Munk + Fresnel ocean and aerial
-// perspective. OPT-IN: earth.html compiles this text (and hands the same text
+// perspective, and every mip-mapped global map + the cloud mosaic read through
+// the seam-safe UV (GEO_SEAMLESS, js/geo/coords.glsl.js). OPT-IN: earth.html compiles this text (and hands the same text
 // to its terrain patch); every other page keeps EARTH_FRAG's legacy path.
-export const EARTH_FRAG_PHYSICAL = '#define EARTH_PHYSICAL_LIGHT\n' + EARTH_FRAG;
+export const EARTH_FRAG_PHYSICAL = '#define EARTH_PHYSICAL_LIGHT\n#define GEO_SEAMLESS\n' + EARTH_FRAG;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CLOUD LAYER SHADERS  (with cyclonic storm swirl)
@@ -666,6 +674,7 @@ varying vec3 vWorldPos;
 ${INSET_GLSL_HELPERS}
 ${PATCH_GLSL_CORE}
 ${PATCH_GLSL_CLOUDS}
+${SAT_DETAIL_GLSL}
 
 // ── Mosaic advection (mirror of js/cloud-time.js advectDirection) ───────────
 // The observed frame stands in for an instant it was not taken at; the cloud
@@ -1135,13 +1144,13 @@ void main() {
         // longer lead. u_sat_lead_k is 0 whenever the frame IS the instant.
         vec2  wndS     = (texture2D(u_wind, vUv).rg * 2.0 - 1.0) * u_wind_max;
         vec3  nSat     = advectSat(N_sphere, wndS, u_sat_lead_k);
-        vec4  sat      = texture2D(u_satellite, normalToUV(nSat));
+        vec4  sat      = sampleSat(nSat);   // seam-safe global + regional window (cloud-mosaic-core SAT_DETAIL_GLSL)
         // Per-disc lead (Phase 0.6): an older disc is advected further by
         // exactly its age behind the newest. The newest disc (g = 0) pays no
         // second fetch, and the branch is uniform within a disc.
         if (sat.g > 0.001) {
             nSat = advectSat(N_sphere, wndS, u_sat_lead_k + sat.g * u_sat_age_k);
-            sat  = texture2D(u_satellite, normalToUV(nSat));
+            sat  = sampleSat(nSat);
         }
         float satCloud = sat.r;
         // Confidence × mode weight: 1 where the satellite saw this pixel AND
@@ -1904,6 +1913,11 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         // cloud texture, object-space sun equal to world sun.
         u_cloud_layers: { value: _blackTex() },
         u_satellite:    { value: _blackTex() },
+        // Tier-B regional cloud window (cloud-mosaic-core SAT_DETAIL_GLSL) —
+        // off until a page feeds it; earth.html shares cloudU's entries here.
+        u_sat_detail:        { value: _blackTex() },
+        u_sat_detail_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_sat_detail_on:     { value: 0 },
         u_satellite_on: { value: 0 },
         u_sat_weight:   { value: 1 },             // cloud-time.js mode confidence
         u_cloud_shadow: { value: 0 },
@@ -1954,6 +1968,9 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_patch_bounds:  { value: new THREE.Vector4(0, 0, 1, 1) },
         u_patch_on:      { value: 0 },
         u_satellite:     { value: _grayTex()  },  // GOES/MODIS satellite imagery
+        u_sat_detail:        { value: _blackTex() },             // Tier-B regional window (SAT_DETAIL_GLSL)
+        u_sat_detail_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_sat_detail_on:     { value: 0 },
         u_sun_dir:       { value: sunDir.clone() },
         u_time:          { value: 0 },
         u_weather_on:    { value: 0 },
