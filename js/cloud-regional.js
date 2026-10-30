@@ -89,7 +89,22 @@ export class RegionalCloudDetail {
             bounds:   p?.bounds ?? null,
             kmPerPx:  p ? p.degPerPx * KM_PER_DEG : null,
             diag:     this._lastDiag,
+            tex:      this._shown ? this._texInfo() : null,
         };
+    }
+
+    /** Test probe: what was uploaded (dims, orientation) and a CPU read of it. */
+    _texInfo() {
+        const t = this.u.u_sat_detail.value;
+        const img = t?.image;
+        if (!img?.data) return null;
+        const rowMean = (row) => {
+            let s = 0;
+            for (let x = 0; x < img.width; x++) s += img.data[(row * img.width + x) * 4];
+            return s / img.width;
+        };
+        return { w: img.width, h: img.height, flipY: t.flipY, bytes: img.data.length,
+                 rowMeans: [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(rowMean(Math.min(img.height - 1, Math.floor(f * img.height))))) };
     }
 
     _replan() {

@@ -510,6 +510,11 @@ export async function fetchRegionalCloudImagery(THREE, { plan, discs = [], fill 
             ctx.drawImage(img, seg.x0, 0, seg.w, height);
         }
         const rgba = ctx.getImageData(0, 0, width, height).data;
+        // Per-source pixel summary for the telemetry/debug diag: a source
+        // that decodes to one value everywhere is the first thing to rule out.
+        let r = 0, a = 0, m = 0;
+        for (let o = 0; o < rgba.length; o += 4 * 101) { r += rgba[o]; a += rgba[o + 3]; m++; }
+        (diag.srcStats ??= {})[name] = { meanR: Math.round(r / m), meanA: Math.round(a / m) };
         return isBlankFrame(rgba, { stride: 16 }) ? null : rgba;
     };
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { encodePng, decodePng } from './helpers/cloud-source.mjs';
 import { regionById, regionView } from '../js/earth-regions.js';
 
@@ -23,14 +23,17 @@ import { regionById, regionView } from '../js/earth-regions.js';
  *      global frame, the right way up, and stitched. The window must have
  *      been fetched at the global frame's OWN times. Control: ?cloud_detail=0.
  *   3. THE ANTIMERIDIAN SEAM. Base map only, the 180° meridian straight down
- *      the screen centre: no column stands out of its neighbours. Control:
+ *      the screen centre: no column stands out of its neighbours in the high-
+ *      latitude band where the coarsest mip is reachable (see the test). Control:
  *      ?uvseam=legacy, which drops the seam-safe UV and brings the coarsest-
  *      mip line back.
  *
  * Hermetic: the three-globe maps are served from assets/earth (the SAME
  * images, resized); GIBS snapshots by the stub; everything else external is
- * aborted. The Sun is put over 180° by scrubbing to the next 00:00 UTC, so
- * the views are sunlit (the surface is physically lit — night is black).
+ * aborted. The Sun is held just off the camera's own direction
+ * (window.__evSetSunDir), so every measured view is sunlit (the surface is
+ * physically lit — night is black — and the frozen globe rotation means
+ * scrubbing the clock cannot bring daylight to a chosen meridian).
  * Run with --workers=1 on the sandbox (parallel SwiftShader workers kill
  * the browser session — EARTHVIEW_VISUAL_DIALIN_PLAN.md §2).
  */
@@ -69,8 +72,10 @@ async function boot(page, query, { clouds = true, gibs = [] } = {}) {
             if (!/Band13|Band_13/.test(layer)) {
                 return route.fulfill({ status: 200, contentType: 'image/png', body: encodePng(4, 4, () => [0, 0, 0, 0]) });
             }
-            const body = encodePng(W, H, (i) => {
-                const x = i % W, y = (i / W) | 0;
+            // encodePng calls back with (column, row) — not a flat index
+            // (treating it as one put every row on the north edge, which is
+            // exactly the bug this gate exists to catch, in the stub).
+            const body = encodePng(W, H, (x, y) => {
                 const lon = lo0 + ((x + 0.5) * (lo1 - lo0)) / W;
                 const lat = la1 - ((y + 0.5) * (la1 - la0)) / H;          // row 0 = north
                 if (lat < NORTH_OF) return [150, 150, 150, 255];
@@ -95,15 +100,27 @@ async function boot(page, query, { clouds = true, gibs = [] } = {}) {
     return errors;
 }
 
-/** Put the Sun over the 180° meridian: scrub to the next 00:00 UTC. */
-async function sunOverDateline(page) {
+/**
+ * Light the view: hold the Sun 30° north of the camera's own direction
+ * (window.__evSetSunDir). The surface is physically lit and the night side
+ * is black, and scrubbing the clock cannot help — the globe's rotation is
+ * frozen at page load, so hours of sim time move the terminator by a
+ * fraction of a degree (this gate measured a black disc that way first).
+ * 30° keeps the ocean glint off the measured centre.
+ */
+async function sunBehindCamera(page) {
     await page.evaluate(() => {
-        const now = Date.now();
-        const next = Math.ceil(now / 86_400_000) * 86_400_000;
-        const el = document.getElementById('tc-scrub');
-        el.value = String(Math.round((next - now) / 60_000));
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        const [x, y, z] = window.__evCamera().pos;
+        const r = Math.hypot(x, y, z);
+        const p = [x / r, y / r, z / r];
+        // North tangent at the sub-camera point (world +Y projected off p).
+        let t = [-p[1] * p[0], 1 - p[1] * p[1], -p[1] * p[2]];
+        const tl = Math.hypot(...t) || 1;
+        t = t.map(v => v / tl);
+        const c = Math.cos(Math.PI / 6), s = Math.sin(Math.PI / 6);
+        window.__evSetSunDir(p[0] * c + t[0] * s, p[1] * c + t[1] * s, p[2] * c + t[2] * s);
     });
+    await page.waitForTimeout(1_500);
 }
 
 async function flyAndSettle(page, lat, lon, dist) {
@@ -113,11 +130,13 @@ async function flyAndSettle(page, lat, lon, dist) {
 }
 
 /** The canvas alone (chrome hidden), decoded. */
-async function canvasPixels(page) {
+async function canvasPixels(page, tag = 'frame') {
     await page.addStyleTag({ content: 'body *{visibility:hidden !important} #c{visibility:visible !important}' });
     await page.waitForTimeout(1_500);
-    const img = decodePng(await page.locator('#c').screenshot());
-    return img;
+    const png = await page.locator('#c').screenshot();
+    // REGIONAL_LOD_PNG=<dir> keeps every measured frame beside its numbers.
+    if (process.env.REGIONAL_LOD_PNG) writeFileSync(`${process.env.REGIONAL_LOD_PNG}/${tag}.png`, png);
+    return decodePng(png);
 }
 const lum = (img, x, y) => {
     const o = (y * img.width + x) * 4;
@@ -194,15 +213,14 @@ test('regional cloud window: finer than the global frame, right way up, stitched
         const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
         const gibs = [];
         const errors = await boot(page, query, { clouds: true, gibs });
-        await sunOverDateline(page);
-        await page.waitForTimeout(6_000);   // the scrubbed frame (explicit time) + the sun
         await flyAndSettle(page, NORTH_OF, 180, 1 + 2800 / 6371);
+        await sunBehindCamera(page);
         if (!query.includes('cloud_detail=0')) {
             await page.waitForFunction(() => window.__evCloudDetail().status === 'live', null, { timeout: 120_000 });
         }
         await page.waitForTimeout(3_000);
         const detail = await page.evaluate(() => window.__evCloudDetail());
-        const img = await canvasPixels(page);
+        const img = await canvasPixels(page, `window${query.replace(/[^a-z0-9]+/gi, '_')}`);
         const out = {
             north: transitions(img, 0.12, 0.40),
             south: transitions(img, 0.60, 0.88),
@@ -239,13 +257,18 @@ test('antimeridian: no coarsest-mip column down the 180° meridian', async ({ br
     const run = async (query) => {
         const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
         const errors = await boot(page, query, { clouds: false });
-        await sunOverDateline(page);
-        await page.waitForTimeout(4_000);
         await flyAndSettle(page, 0, 180, 1 + 9000 / 6371);
-        const img = await canvasPixels(page);
-        // Column means over the central band; the seam is the largest excess
-        // of one column over the median of its ±8 px neighbours.
-        const cx = img.width >> 1, y0 = Math.round(img.height * 0.35), y1 = Math.round(img.height * 0.65);
+        await sunBehindCamera(page);
+        const img = await canvasPixels(page, `seam${query.replace(/[^a-z0-9]+/gi, '_')}`);
+        // Column means over the TOP of the disc (high latitude); the seam is
+        // the largest excess of one column over the median of its ±8 px
+        // neighbours. Why the top band: with anisotropic filtering the GPU
+        // takes its level of detail from the footprint's SHORT axis, so the
+        // seam's 1→0 jump in u alone only reaches the coarsest mip where v
+        // varies fast too — near the pole, where the meridians converge.
+        // Measured on SwiftShader: the line runs from the disc's top edge
+        // down ~45 px and is absent across the equatorial band.
+        const cx = img.width >> 1, y0 = Math.round(img.height * 0.005), y1 = Math.round(img.height * 0.06);
         const col = (x) => { let s = 0; for (let y = y0; y < y1; y++) s += lum(img, x, y); return s / (y1 - y0); };
         let seam = 0;
         for (let x = cx - 40; x <= cx + 40; x++) {

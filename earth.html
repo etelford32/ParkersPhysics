@@ -14165,6 +14165,7 @@ let lastT = 0;
 // Scratch vector for per-frame sun-direction recompute — avoids allocating
 // a fresh THREE.Vector3 every frame on the hot path.
 const _sunDirScratch = new THREE.Vector3();
+var _sunDirOverride = null;   // __evSetSunDir (tests); var: read by the first, synchronous animate()
 const _Y_AXIS = new THREE.Vector3(0, 1, 0);   // GMST spin axis (shared, read-only)
 // Scratch Date for the same reason: julianDay() wants a Date, and `new
 // Date(...)` twice per frame is avoidable GC churn on the hot path.
@@ -14679,6 +14680,7 @@ function animate() {
     _frameDateScratch.setTime(simTimeMs);
     const jd      = julianDay(_frameDateScratch);
     _sunDirScratch.copy(sunDirectionEquatorial(jd));
+    if (_sunDirOverride) _sunDirScratch.copy(_sunDirOverride);   // test hook only (__evSetSunDir)
     earthU.u_sun_dir.value.copy(_sunDirScratch);
     cloudU.u_sun_dir.value.copy(_sunDirScratch);
     auroraU.u_sun_dir.value.copy(_sunDirScratch);
@@ -15040,6 +15042,7 @@ function _updateCameraDepth(dt) {
 // tests/camera-depth-smoke.spec.js.
 window.__evCamera = () => ({
     dist:    camera.position.length(),
+    pos:     camera.position.toArray(),
     near:    camera.near,
     targetR: controls.target.length(),
     tilt:    _tiltBlend,
@@ -15080,6 +15083,15 @@ window.__evSetCamDir = (x, y, z) => {
     return camera.position.toArray();
 };
 window.__evSunDir = () => earthU.u_sun_dir.value.toArray();
+// Test hook: hold the Sun at a WORLD direction (null releases it to the
+// clock). Gates that judge pixels need a sunlit view wherever they look —
+// the surface is physically lit, the night side is black, and scrubbing the
+// clock barely moves the terminator here because the globe's rotation is
+// frozen at page load (planet rotation off). Never used by the page.
+window.__evSetSunDir = (x, y, z) => {
+    _sunDirOverride = (x == null) ? null : new THREE.Vector3(Number(x), Number(y), Number(z)).normalize();
+    return _sunDirOverride?.toArray() ?? null;
+};
 // Render ONE frame through the page's own path and read the canvas back in
 // the same task (before the browser composites, so preserveDrawingBuffer is
 // not needed). Returns per-pixel statistics of a rectangle (drawing-buffer
