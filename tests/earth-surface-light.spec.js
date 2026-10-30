@@ -72,12 +72,29 @@ async function measure(page, query) {
     }, OFF_LAYERS);
     await page.waitForTimeout(1_500);
 
+    // ONE fixed place and a Sun held relative to the camera, so the numbers
+    // do not depend on the time of day the gate runs at: the first version
+    // aimed at whatever the clock's Sun lit, and the night disc's content
+    // (ocean or continents) moved the legacy control from 0.365 to 0.22
+    // between two runs. Europe / North Africa: land and cities in view.
+    await page.evaluate(() => {
+        const r = document.getElementById('lyr-rotate');
+        if (r?.checked) { r.checked = false; r.dispatchEvent(new Event('change', { bubbles: true })); }
+        window.flyToLatLon(35, 15, 3.0);
+    });
+    await page.waitForFunction(() => !window.__evCamera().flying, null, { timeout: 120_000 });
     const views = {};
     for (const [name, sign] of [['day', 1], ['night', -1]]) {
         views[name] = await page.evaluate((sign) => {
-            const s = window.__evSunDir();
-            window.__evSetCamDist(3.0);
-            window.__evSetCamDir(sign * s[0], sign * s[1], sign * s[2]);
+            const [x, y, z] = window.__evCamera().pos;
+            // Day: the Sun 20° north of the camera (overhead light, the
+            // ocean glint off the measured box). Night: straight behind the globe.
+            const r = Math.hypot(x, y, z), p = [x / r, y / r, z / r];
+            let t = [-p[1] * p[0], 1 - p[1] * p[1], -p[1] * p[2]];
+            const tl = Math.hypot(...t) || 1; t = t.map(v => v / tl);
+            const c = Math.cos(Math.PI / 9), s = Math.sin(Math.PI / 9);
+            const d = [p[0] * c + t[0] * s, p[1] * c + t[1] * s, p[2] * c + t[2] * s];
+            window.__evSetSunDir(sign * d[0], sign * d[1], sign * d[2]);
             // The disc: the centre half of the shorter side (globe radius ≈ 0.41 H at 3 R).
             const cv = document.querySelector('#c');
             const W = cv.width, H = cv.height;
