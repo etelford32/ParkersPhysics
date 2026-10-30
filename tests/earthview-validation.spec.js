@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { regionById, regionView } from '../js/earth-regions.js';
-import { horizonDeviation } from './helpers/image-metrics.mjs';
 import {
     boot, frames, setSun, cameraFrame, flyAndSettle, canvasShot, lum,
     transitions, seamColumn, cropPng, NORTH_OF,
@@ -54,7 +53,6 @@ const VIEW = { width: 1280, height: 720 };
 mkdirSync(OUT, { recursive: true });
 
 const save = (name, buf) => { writeFileSync(`${OUT}/${name}`, buf); return name; };
-const asMetricImg = (img) => ({ w: img.width, h: img.height, data: img.data });
 const r3 = (v) => (Number.isFinite(v) ? Math.round(v * 1000) / 1000 : v);
 
 function newCheck(id, title, claim, control) {
@@ -276,6 +274,43 @@ test('glint: the sun on the open ocean', async ({ browser }) => {
 });
 
 // ── 3. LIMB ─────────────────────────────────────────────────────────────────
+/**
+ * The drawn limb against the true one, column by column. The edge is the
+ * strongest dark→bright step (sky above, sunlit ground below) within ±band
+ * px of the predicted row, located to sub-pixel by a parabola through the
+ * peak. A luma THRESHOLD does not work here: from 320 km the sky above the
+ * limb is lit blue (luma ~45) and a threshold edge lands in it. Positive
+ * deviation = drawn BELOW the true limb, which is what a faceted globe does
+ * (chords sag inside the sphere).
+ */
+function limbEdge(img, rows, band) {
+    const devs = [];
+    let sgn = 0;
+    for (let x = 4; x < img.width - 4; x++) {
+        const py = rows[x];
+        if (!Number.isFinite(py) || py < band + 2 || py > img.height - band - 2) continue;
+        let best = -Infinity, by = -1;
+        const g = (y) => lum(img, x, y + 1) - lum(img, x, y - 1);
+        for (let y = Math.round(py - band); y <= Math.round(py + band); y++) {
+            const v = g(y);
+            if (v > best) { best = v; by = y; }
+        }
+        if (best < 20) continue;                                // no edge in this column
+        const a = g(by - 1), c = g(by + 1), den = a - 2 * best + c;
+        // + 0.5: row index y is the pixel whose CENTRE is at y + 0.5 in the
+        // continuous coordinate the prediction is in (otherwise a perfect
+        // limb reads half a pixel high — measured −0.45 px on level 47).
+        const d = by + (den < 0 ? 0.5 * (a - c) / den : 0) + 0.5 - py;
+        devs.push(Math.abs(d)); sgn += d;
+    }
+    // p95, not the max: a handful of columns lock onto a terrain or star edge
+    // at the band's rim (20.6 px on EVERY level, so not the globe's shape).
+    const n = devs.length;
+    devs.sort((u, v) => u - v);
+    return { p95: n ? devs[Math.floor(0.95 * (n - 1))] : NaN, maxDev: n ? devs[n - 1] : NaN,
+             meanDev: n ? devs.reduce((u, v) => u + v, 0) / n : NaN, signedMean: n ? sgn / n : NaN, columns: n };
+}
+
 test('limb: a low camera sees a round horizon', async ({ browser }) => {
     const check = newCheck('limb', 'Round horizon at low altitude',
         'From 320 km up, looking at the horizon, the drawn limb lies on the true sphere\'s limb to within a pixel; the globe swaps in its 46 080-face mesh on its own.',
@@ -289,7 +324,9 @@ test('limb: a low camera sees a round horizon', async ({ browser }) => {
     const P = f.p.map((v) => v * d);
     const look = P.map((v, i) => v + f.east[i] * Math.cos(dip) - f.p[i] * Math.sin(dip));
     const tangent = f.p.map((v, i) => v * Math.cos(dip) + f.east[i] * Math.sin(dip));
-    const pred = await page.evaluate((pose) => window.__evTestPose(pose), { pos: P, look, fov: 40 });
+    // up = the LOCAL vertical: with world +Y as up, looking east at 20° N
+    // the horizon came out nearly vertical (world +Y is mostly local north).
+    const pred = await page.evaluate((pose) => window.__evTestPose(pose), { pos: P, look, up: f.p, fov: 40 });
     await setSun(page, tangent);                                    // noon at the horizon point: a bright limb
     const rows = pred.rows;
     check.metrics.camera = { altitudeKm: Math.round((d - 1) * 6371), dipDeg: r3(dip * 180 / Math.PI) };
@@ -299,19 +336,23 @@ test('limb: a low camera sees a round horizon', async ({ browser }) => {
         await frames(page, 3);
         const detail = await page.evaluate(() => window.__evLod().globeDetail);
         const { png, img } = await canvasShot(page);
-        const dev = horizonDeviation(asMetricImg(img), rows, { threshold: 30, band: 40, margin: 4 });
+        const dev = limbEdge(img, rows, 20);   // level 6 sags ~13 px here; 20 keeps terrain edges out
         const cx = img.width >> 1, cy = Number.isFinite(rows[cx]) ? rows[cx] : img.height / 2;   // JSON turns NaN into null
         check.frames.push({ file: save(`limb-${label}.png`, png), level: label, detail });
         check.frames.push({ file: save(`limb-${label}-crop.png`, cropPng(img, cx - 120, cy - 30, 240, 60, 4)), level: label, crop: true, detail });
-        check.metrics[label] = { detail, maxDevPx: r3(dev.maxDev), meanDevPx: r3(dev.meanDev), columns: dev.columns, missing: dev.missing };
+        check.metrics[label] = { detail, p95DevPx: r3(dev.p95), maxDevPx: r3(dev.maxDev), meanDevPx: r3(dev.meanDev), signedMeanPx: r3(dev.signedMean), columns: dev.columns };
     }
     await page.evaluate(() => { window.__evSetGlobeDetail(null); window.__evTestPose(null); });
     await page.close();
     gate(check, 'no shader / page errors', errors.length, '=', 0);
     gate(check, 'LOD picks the 47 mesh on its own', check.metrics.auto.detail, '=', 47);
     gate(check, 'limb columns measured', check.metrics.auto.columns, '>', 1000);
-    gate(check, 'max limb deviation, shipped (px)', check.metrics.auto.maxDevPx, '<', 1.5);
-    gate(check, 'max limb deviation, level 6 (control, px)', check.metrics['6'].maxDevPx, '>', 5, { control: true });
+    // Closed form for where the limb should sag (centroid sag × focal ÷ the
+    // ~2040 km to the horizon): level 47 ≈ 0.3 px, level 15 ≈ 2.5 px,
+    // level 6 ≈ 13 px — the measured means follow it.
+    gate(check, 'mean limb deviation, shipped (px)', check.metrics.auto.meanDevPx, '<', 1);
+    gate(check, '95th-percentile limb deviation, shipped (px)', check.metrics.auto.p95DevPx, '<', 2);
+    gate(check, 'mean limb deviation, level 6 (control, px)', check.metrics['6'].meanDevPx, '>', 5, { control: true });
     finish(check);
 });
 

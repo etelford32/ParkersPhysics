@@ -14983,7 +14983,7 @@ function animate() {
     // renders; null in normal use.
     if (_testPose) {
         camera.position.fromArray(_testPose.pos);
-        camera.up.set(0, 1, 0);
+        camera.up.fromArray(_testPose.up);
         camera.lookAt(_testPose.look[0], _testPose.look[1], _testPose.look[2]);
         if (_testPose.fov && camera.fov !== _testPose.fov) { camera.fov = _testPose.fov; camera.updateProjectionMatrix(); }
         camera.updateMatrixWorld();
@@ -15147,16 +15147,18 @@ window.__evSunDir = () => earthU.u_sun_dir.value.toArray();
 // the surface is physically lit, the night side is black, and scrubbing the
 // clock barely moves the terminator here because the globe's rotation is
 // frozen at page load (planet rotation off). Never used by the page.
-// Hold the camera at { pos, look, fov } (scene units, Earth radii) until
+// Hold the camera at { pos, look, up?, fov? } (scene units, Earth radii; up
+// defaults to world +Y — a horizon view needs the LOCAL vertical) until
 // called with null; returns, for the CANVAS in CSS pixels, the row of the
 // TRUE sphere's limb in every column (NaN where none) — the horizon the
 // limb gate compares the drawn edge against (tests/helpers/image-metrics.mjs
 // horizonDeviation). Tests only.
 window.__evTestPose = (pose) => {
-    _testPose = pose ? { pos: pose.pos.slice(), look: pose.look.slice(), fov: pose.fov ?? null } : null;
+    if (!pose) camera.up.set(0, 1, 0);
+    _testPose = pose ? { pos: pose.pos.slice(), look: pose.look.slice(), up: (pose.up ?? [0, 1, 0]).slice(), fov: pose.fov ?? null } : null;
     if (!_testPose) return null;
     camera.position.fromArray(_testPose.pos);
-    camera.up.set(0, 1, 0);
+    camera.up.fromArray(_testPose.up);
     camera.lookAt(..._testPose.look);
     if (_testPose.fov) { camera.fov = _testPose.fov; }
     camera.updateProjectionMatrix();

@@ -113,7 +113,7 @@ function body(c) {
     case 'limb': return `
         ${fr((f) => f.level === 'auto' && !f.crop, `The view: ${fmt(M.camera?.altitudeKm)} km up, looking ${fmt(M.camera?.dipDeg)}° below level at the horizon; the Sun overhead at the limb`, { wide: true })}
         <div class="stack">${['auto', '47', '15', '6'].map((l) => fr((f) => f.level === l && f.crop,
-            `${l === 'auto' ? `shipped (LOD chose level ${M.auto?.detail})` : `forced level ${l}${l === '6' ? ' — before this pass (control)' : ''}`} · max ${fmt(M[l]?.maxDevPx)} px, mean ${fmt(M[l]?.meanDevPx)} px from the true limb`, { crop: true })).join('')}</div>`;
+            `${l === 'auto' ? `shipped (LOD chose level ${M.auto?.detail})` : `forced level ${l}${l === '6' ? ' — before this pass (control)' : ''}`} · mean ${fmt(M[l]?.meanDevPx)} px, 95th percentile ${fmt(M[l]?.p95DevPx)} px from the true limb`, { crop: true })).join('')}</div>`;
     case 'seam': return `<div class="grid2">
             ${fr((f) => f.mode === 'fixed' && !f.crop, 'fixed (shipped)')}
             ${fr((f) => f.mode === 'legacy' && !f.crop, 'legacy UV (control)')}
