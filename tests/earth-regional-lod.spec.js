@@ -164,6 +164,10 @@ function transitions(img, y0f, y1f, x0f = 0.2, x1f = 0.8, hyst = 10) {
 test('regions: the picker lands in regional detail, the readout says so, the pick is the true point', async ({ page }) => {
     const errors = await boot(page, '', { clouds: false });
     const r = regionById('us-great-plains-and-midwest');
+    // The globe's own LOD: the opening view draws the coarse mesh (its facets
+    // are sub-pixel there), the regional close-up swaps in level 47.
+    const far = await page.evaluate(() => ({ detail: window.__evLod().globeDetail, dist: window.__evCamera().dist }));
+    expect(far.detail, `the far globe is the coarse mesh (camera at ${far.dist?.toFixed?.(2)} R)`).toBe(15);
     const opts = await page.$$eval('#ev-region option', (os) => os.map((o) => o.value).filter(Boolean));
     expect(opts.length, 'every REGIONS box is offered').toBeGreaterThanOrEqual(45);
     expect(opts).toContain(r.id);
@@ -185,6 +189,7 @@ test('regions: the picker lands in regional detail, the readout says so, the pic
     expect(Math.abs(st.cam.dist - want.dist) / want.dist, 'landed at the framed distance').toBeLessThan(0.01);
     expect(st.lod.footprint.spanLatDeg, 'the footprint is in regional detail').toBeLessThanOrEqual(45);
     expect(st.lod.text).toContain('Regional detail');
+    expect(st.lod.globeDetail, 'up close the globe is the level-47 mesh').toBe(47);
     expect(st.lod.text).toMatch(/over (US Great Plains|Eastern North America|Western North America|Mexico)/);
     expect(st.lod.text).toMatch(/\d+(\.\d)? (km|Mm) up/);
     expect(st.sel, 'the picker returns to its prompt so the same region can be chosen again').toBe('');
@@ -257,9 +262,24 @@ test('antimeridian: no coarsest-mip column down the 180° meridian', async ({ br
     const run = async (query) => {
         const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
         const errors = await boot(page, query, { clouds: false });
-        await flyAndSettle(page, 0, 180, 1 + 9000 / 6371);
-        await sunBehindCamera(page);
-        const img = await canvasPixels(page, `seam${query.replace(/[^a-z0-9]+/gi, '_')}`);
+        // THREE camera longitudes ~½ px apart at the equator, worst one kept.
+        // The coarsest-mip column only appears where the u jump falls INSIDE
+        // a 2×2 derivative quad; where the 180° line lands on a quad boundary
+        // the old UV draws nothing wrong. Which one it is depends on the
+        // line's sub-pixel position — and that moved with the globe mesh: one
+        // pose read the control 14.6, 5.9 and 0.36 across runs once the globe
+        // got its own LOD. Three phases always put one inside a quad.
+        let seam = 0;
+        for (const dLon of [0, 0.04, 0.08]) {
+            await flyAndSettle(page, 0, 180 - dLon, 1 + 9000 / 6371);
+            await sunBehindCamera(page);
+            seam = Math.max(seam, await measureSeam(page, `seam${query.replace(/[^a-z0-9]+/gi, '_')}_${dLon}`));
+        }
+        await page.close();
+        return { seam, errors };
+    };
+    const measureSeam = async (page, tag) => {
+        const img = await canvasPixels(page, tag);
         // Column means over the TOP of the disc (high latitude); the seam is
         // the largest excess of one column over the median of its ±8 px
         // neighbours. Why the top band: with anisotropic filtering the GPU
@@ -277,8 +297,7 @@ test('antimeridian: no coarsest-mip column down the 180° meridian', async ({ br
             nb.sort((a, b) => a - b);
             seam = Math.max(seam, Math.abs(col(x) - nb[nb.length >> 1]));
         }
-        await page.close();
-        return { seam, errors };
+        return seam;
     };
     const fixed = await run('');
     const legacy = await run('?uvseam=legacy');

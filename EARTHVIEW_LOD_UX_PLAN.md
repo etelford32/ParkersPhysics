@@ -21,7 +21,10 @@ Phases 1–6 remain **planned, not built**.
 - **The globe was 980 triangles.** three's icosahedron `detail` is linear
   (20·(d+1)² faces); "level 6 ≈ 82 k triangles" was 980 with faces 26 km
   inside the sphere — a polygon horizon under analytic cloud and wind
-  shells. The globe is now detail 47 (46 080 faces, ≤ 0.56 km), the shells
+  shells. The globe is now an LOD: detail 47 (46 080 faces, ≤ 0.56 km) up
+  close, detail 15 where its limb error is under half a pixel — an always-on
+  47 added ~5.5 s to page load on SwiftShader (43.4 vs 38.0 s, 1280×720). The
+  shells
   detail 15 (clear the round globe by ≥ 8 km), the wind-trail occluder 23
   (its "level 4 = 5 120 faces" was 500 with a ~45 km ring the far-side
   trails showed through), the cloud-volume hull 16.

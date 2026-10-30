@@ -4918,10 +4918,17 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 // whose faces sit up to 26 km INSIDE the sphere — a polygon horizon at zoom
 // under analytic cloud and wind shells that are true spheres (the same scar
 // CLAUDE.md records for upper-atmosphere's EARTH_ICO_DETAIL).
-//   • The GLOBE is ICO_LEVEL_EARTH = 47: 46 080 faces, 1.3° edges, the face
-//     centroid at most 0.56 km under the sphere (≈1 px at the limb from the
-//     camera floor). Picking does not scale with it — globeHits() is an
-//     analytic ray–sphere hit.
+//   • The GLOBE is ICO_LEVEL_EARTH = 47 UP CLOSE: 46 080 faces, 1.3° edges,
+//     the face centroid at most 0.56 km under the sphere (≈1 px at the limb
+//     from the camera floor). Picking does not scale with it — globeHits() is
+//     an analytic ray–sphere hit. It is an LOD, not a constant: 138 k vertices
+//     cost every frame, and on a software rasteriser the always-on level-47
+//     globe added ~5.5 s to page load (43.4 vs 38.0 s at 1280×720, measured
+//     2026-10-30). Far off,
+//     the globe draws at ICO_LEVEL_EARTH_FAR = ICO_LEVEL; `_updateGlobeLod`
+//     swaps on the limb's PIXEL error (sag × focal / √(d² − 1) < 0.5 px), so
+//     the swap is invisible by construction. The near geometry is built on
+//     first need.
 //   • The translucent shells and overlays are ICO_LEVEL = 15 (5 120 faces,
 //     centroid sag 0.0008 R). The lowest of them (the low cloud deck at the
 //     far-view ramp, 1.0019 R; the obs overlay, 1.002 R) still clears the
@@ -4930,7 +4937,28 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 //     vertex buffers for no visible gain.
 const ICO_LEVEL_EARTH = 47;
 const ICO_LEVEL = 15;
-const earthGeo = new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL_EARTH);
+const ICO_LEVEL_EARTH_FAR = ICO_LEVEL;
+const earthGeo = new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL_EARTH_FAR);
+let _earthGeoNear = null;
+// Worst face-centroid sag below the unit sphere for icosphere detail d: the
+// subdivided edge is ~63.43°/(d+1) of arc and the centroid sits edge/√3 from
+// each vertex (0.0008 R at 15, 8.8e-5 R at 47 — the numbers quoted above).
+const _icoSag = (d) => 1 - Math.cos((63.435 * Math.PI / 180) / (d + 1) / Math.sqrt(3));
+const _GLOBE_FAR_SAG = _icoSag(ICO_LEVEL_EARTH_FAR);
+function _updateGlobeLod() {
+    const d = camera.position.length() / R_EARTH;
+    const focalPx = (renderer.domElement.height / 2) / Math.tan((camera.fov * Math.PI / 180) / 2);
+    const limbPx = _GLOBE_FAR_SAG * focalPx / Math.sqrt(Math.max(1e-6, d * d - 1));
+    const near = earthMesh.geometry !== earthGeo;
+    // 0.5 px to go fine, 0.4 px to come back: a hold band so a camera parked
+    // on the threshold does not swap every frame.
+    if (!near && limbPx > 0.5) {
+        _earthGeoNear ??= new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL_EARTH);
+        earthMesh.geometry = _earthGeoNear;
+    } else if (near && limbPx < 0.4) {
+        earthMesh.geometry = earthGeo;
+    }
+}
 // The surface is PHYSICALLY LIT (js/earth-surface-light.js): Lambert under a
 // slant-path-reddened Sun, a dark night side, city lights + space-weather
 // glows as emitters after the lighting, a Cox–Munk + Fresnel ocean whose
@@ -14737,6 +14765,7 @@ function animate() {
     if (altStr !== _hAltLast) { _hAltEl.textContent = altStr; _hAltLast = altStr; }
 
     _tickLodReadout(performance.now());
+    _updateGlobeLod();
 
     // ── Raycaster → coords. Skipped entirely while both the pointer and the
     // view are at rest (see _pointerDirty above). The hit is analytic
@@ -15403,6 +15432,7 @@ window.__evLod = () => ({
     text: ['tier', 'where', 'alt', 'scale', 'sources'].map(k => _lodEls[k]?.textContent ?? '').join(' | '),
     sources: JSON.parse(JSON.stringify(_lodSources)),
     footprint: focusFootprint.getFootprint?.() ?? null,
+    globeDetail: earthMesh.geometry.parameters.detail,
 });
 
 // ═══════════════════════════════════════════════════════════════
