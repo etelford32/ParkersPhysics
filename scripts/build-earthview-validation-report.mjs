@@ -138,6 +138,17 @@ function body(c) {
     }
 }
 
+// Optional <dir>/findings.json: [{ title, text, frame? }] — things SEEN in the
+// frames that no gate measures yet. Kept apart from the gates on purpose: a
+// finding is a judgement by eye, a gate is a number with a control.
+const findings = existsSync(join(DIR, 'findings.json')) ? JSON.parse(readFileSync(join(DIR, 'findings.json'), 'utf8')) : [];
+const findingsHtml = findings.length ? `
+<section id="findings">
+  <header class="sec"><h2>Open findings</h2><span class="verdict open">not gated</span></header>
+  <p class="claim">Seen in these frames by eye. No gate measures them yet, so they are listed here rather than counted above.</p>
+  <ol class="findings">${findings.map((f) => `<li><h3>${esc(f.title)}</h3><p>${esc(f.text)}</p>${f.frame ? figure({ file: f.frame }, esc(f.caption ?? f.title), { wide: true }) : ''}</li>`).join('')}</ol>
+</section>` : '';
+
 const nGates = m.checks.reduce((a, c) => a + c.gates.length, 0);
 const nPass = m.checks.reduce((a, c) => a + c.gates.filter((g) => g.pass).length, 0);
 const nCtl = m.checks.reduce((a, c) => a + c.gates.filter((g) => g.control).length, 0);
@@ -196,6 +207,10 @@ header.sec { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .verdict { font: 500 12px var(--f-mono); text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 999px; }
 .verdict.ok { color: var(--ok); background: var(--ok-bg); }
 .verdict.bad { color: var(--bad); background: var(--bad-bg); }
+.verdict.open { color: var(--amber); background: var(--ctl-bg); }
+ol.findings { margin: 0; padding-left: 1.4em; display: grid; gap: 22px; max-width: 980px; }
+ol.findings h3 { font: 600 17px var(--f-display); margin: 0 0 4px; }
+ol.findings p { margin: 0 0 10px; max-width: 76ch; }
 .chip.ctl { font: 500 11px var(--f-mono); text-transform: uppercase; letter-spacing: .05em; color: var(--amber); background: var(--ctl-bg); padding: 1px 7px; border-radius: 4px; white-space: nowrap; }
 figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
 figure img { width: 100%; height: auto; border-radius: 4px; background: #000; display: block; }
@@ -247,9 +262,10 @@ dl.facts dd { margin: 0; font-family: var(--f-mono); font-variant-numeric: tabul
       <span>${esc(when.toISOString().slice(0, 16).replace('T', ' '))} UTC</span>
       <span>${esc(m.renderer)} · ${m.viewport.width}×${m.viewport.height}</span>
     </div>
-    <nav class="toc" aria-label="Checks">${m.checks.map((c) => `<a href="#${esc(c.id)}"><span class="verdict ${c.pass ? 'ok' : 'bad'}">${c.pass ? 'pass' : 'fail'}</span>${esc(c.title)}</a>`).join('')}</nav>
+    <nav class="toc" aria-label="Checks">${m.checks.map((c) => `<a href="#${esc(c.id)}"><span class="verdict ${c.pass ? 'ok' : 'bad'}">${c.pass ? 'pass' : 'fail'}</span>${esc(c.title)}</a>`).join('')}${findings.length ? `<a href="#findings"><span class="verdict open">${findings.length}</span>Open findings</a>` : ''}</nav>
   </div>
   ${sections}
+  ${findingsHtml}
 </main>
 `;
 writeFileSync(join(OUT, 'index.html'), html);
