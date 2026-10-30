@@ -3093,7 +3093,7 @@ import './js/telemetry.js';
                 <div class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-atm"><label for="lyr-atm">Atmosphere</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-aurora"><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></div>
-                <div class="lyr"><input type="checkbox" id="lyr-lights"><label for="lyr-lights">City Lights</label></div>
+                <div class="lyr" title="City lights as seen from orbit: emitted light, switched on after civil twilight (Sun 6° below the horizon)."><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-grid"><label for="lyr-grid">Lat/Lon Grid</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-tropic"><label for="lyr-tropic">Tropics</label></div>
                 <div class="lyr" title="Debug: marker at the sub-solar point"><input type="checkbox" id="lyr-subsolar"><label for="lyr-subsolar">Subsolar pt</label></div>
@@ -4311,7 +4311,7 @@ import { MAJOR_CITIES } from './js/data/major-cities.js';
 // that need 60 Hz call getState() inline from their own animate loop.
 import { timeBus } from './js/operations/time-bus.js';
 import {
-    EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
+    EARTH_VERT, EARTH_FRAG, EARTH_FRAG_PHYSICAL, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
     AURORA_VERT, AURORA_FRAG, TEMPVOL_VERT, TEMPVOL_FRAG,
     createEarthUniforms, createCloudUniforms, createAuroraUniforms,
     createTempVolumeUniforms,
@@ -4838,8 +4838,17 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 // fresnel-only, don't sample textures, and never produced stripes.
 const ICO_LEVEL = 6;
 const earthGeo = new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL);
+// The surface is PHYSICALLY LIT (js/earth-surface-light.js): Lambert under a
+// slant-path-reddened Sun, a dark night side, city lights + space-weather
+// glows as emitters after the lighting, a Cox–Munk + Fresnel ocean whose
+// roughness follows the live 10 m wind, and aerial perspective. ONE shader
+// text, shared with the terrain patch below so the two cannot disagree.
+// ?earthlight=legacy is the old half-Lambert path (the A/B, and the negative
+// control in tests/earth-surface-light.spec.js).
+const EARTH_SURFACE_FRAG =
+    new URLSearchParams(location.search).get('earthlight') === 'legacy' ? EARTH_FRAG : EARTH_FRAG_PHYSICAL;
 const earthMat = new THREE.ShaderMaterial({
-    vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
+    vertexShader: EARTH_VERT, fragmentShader: EARTH_SURFACE_FRAG,
     uniforms: earthU,
 });
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
@@ -4850,7 +4859,7 @@ scene.add(earthMesh);
 // A high-subdivision grid mesh over the camera footprint whose vertices are
 // displaced radially by the elevation map, so real ridgelines break the limb
 // (bump mapping can shade a slope but never change the silhouette). It parents
-// to earthMesh and SHARES earthU + EARTH_FRAG, so it shades identically to the
+// to earthMesh and SHARES earthU + EARTH_SURFACE_FRAG, so it shades identically to the
 // globe beneath — no seam (see js/earth-terrain-patch.js).
 //
 // Behind a flag until it can be tuned on a real GPU: opt in with ?terrain3d=1
@@ -4866,7 +4875,7 @@ const TERRAIN3D_ON = (() => {
 let terrainPatch = null;
 try {
     terrainPatch = new EarthTerrainPatch({
-        THREE, earthMesh, earthUniforms: earthU, fragmentShader: EARTH_FRAG,
+        THREE, earthMesh, earthUniforms: earthU, fragmentShader: EARTH_SURFACE_FRAG,
     });
     terrainPatch.setEnabled(TERRAIN3D_ON && !_isMobileUA);
 } catch (e) {
