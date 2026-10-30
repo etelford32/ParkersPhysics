@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
  *
  *   1. DARK NIGHT. The share of the night-side disc where any ground shows
  *      at all (max channel ≥ 8): legacy drew the night as the daytime photo
- *      at ~19 %, physical leaves starlight + airglow (black after the tone
+ *      at ~86 % of the night disc, physical leaves starlight + airglow (black after the tone
  *      curve) and the lamps. A coverage, not a mean — the lamps are bright
  *      and a mean would let them carry a lit-up night past the gate.
  *   2. LAMPS ARE EMITTERS. Lamp-core pixels (max channel ≥ 150) on the night
@@ -85,7 +85,7 @@ async function measure(page, query) {
     await page.waitForFunction(() => !window.__evCamera().flying, null, { timeout: 120_000 });
     const views = {};
     for (const [name, sign] of [['day', 1], ['night', -1]]) {
-        views[name] = await page.evaluate((sign) => {
+        views[name] = await page.evaluate(async (sign) => {
             const [x, y, z] = window.__evCamera().pos;
             // Day: the Sun 20° north of the camera (overhead light, the
             // ocean glint off the measured box). Night: straight behind the globe.
@@ -95,7 +95,12 @@ async function measure(page, query) {
             const c = Math.cos(Math.PI / 9), s = Math.sin(Math.PI / 9);
             const d = [p[0] * c + t[0] * s, p[1] * c + t[1] * s, p[2] * c + t[2] * s];
             window.__evSetSunDir(sign * d[0], sign * d[1], sign * d[2]);
-            // The disc: the centre half of the shorter side (globe radius ≈ 0.41 H at 3 R).
+            // The override is applied INSIDE animate() and __evFrameStats renders
+            // without it, so let the loop run before reading: measured in the
+            // same task, the 'night' read showed the day pose's light (night
+            // brighter than day, 116.9 vs 60.1) — the first run of this version.
+            for (let i = 0; i < 3; i++) await new Promise(res => requestAnimationFrame(res));
+            // The disc: the centre half of the shorter side (at 3 R the globe's radius is ~0.97 of the half-height).
             const cv = document.querySelector('#c');
             const W = cv.width, H = cv.height;
             const side = Math.floor(Math.min(W, H) * 0.5);
@@ -120,16 +125,16 @@ test('physical surface: dark night, emitted lamps, the map at noon — and legac
     for (const r of [phys, leg]) expect(r.errors, r.errors.join('\n')).toHaveLength(0);
     for (const r of [phys, leg]) expect(r.views.day.meanMax, 'the day disc rendered at all').toBeGreaterThan(40);
 
-    // 1. dark night (measured 2026-10-30 on SwiftShader: physical 0.048, legacy 0.365)
+    // 1. dark night (measured 2026-10-30 on SwiftShader, fixed place + held Sun: physical 0.091, legacy 0.862)
     expect(phys.views.night.fracSeen, 'physical night side is dark but for the lamps').toBeLessThan(0.12);
     expect(leg.views.night.fracSeen, 'NEGATIVE CONTROL: legacy painted the day photo on the night side').toBeGreaterThan(0.25);
 
-    // 2. lamps are emitters (measured: physical 1348 core pixels, legacy 335)
+    // 2. lamps are emitters (measured: physical 4214 core pixels, legacy 1408)
     expect(phys.views.night.lampCores, 'lamp cores on the physical night side').toBeGreaterThan(200);
     expect(phys.views.night.lampCores, 'NEGATIVE CONTROL: legacy dimmed the lamps by its lighting floor')
         .toBeGreaterThan(2 * leg.views.night.lampCores);
 
-    // 3. the map survives noon (measured: 87.4 vs 85.8)
+    // 3. the map survives noon (measured: 116.9 vs 124.7, ratio 0.94)
     const dayRel = phys.views.day.meanMax / leg.views.day.meanMax;
     expect(dayRel, 'noon brightness is the map, not a re-exposure').toBeGreaterThan(0.85);
     expect(dayRel).toBeLessThan(1.15);
