@@ -169,9 +169,35 @@ uniform vec2  u_topo_detail_texel;        // (1/canvasW, 1/canvasH)
 // was tuned for: change per GLOBAL texel step (0.176° on both axes),
 // x along +u (eastward), y along +v (southward).
 vec2 topoGradient(vec2 uv) {
+#if defined(EARTH_PHYSICAL_LIGHT) && !defined(EARTH_RELIEF_FORWARD)
+    // SOBEL ON A 2-TEXEL GRID, in the same per-texel units: central
+    // differences averaged over three rows (weights 1-2-1, baseline 2·RS
+    // texels, / 8·RS). The height map is 8-bit and FLAT where it matters
+    // most: over the Sahara it holds 85 levels and the median step between
+    // neighbouring texels is under one level, so a one-texel derivative of
+    // any kind reads the quantisation staircase. Measured on the low-Sun
+    // Sahara (texel-scale roughness / 4-px relief, vs forward difference):
+    // RS 1 → 0.49 / 0.86, RS 2 → 0.30 / 0.68 — RS 2 removes the hatching
+    // and keeps the terrain. The one-texel
+    // FORWARD difference below turns every 8-bit step of the height map
+    // (1/255 x the 85 gain = an 18 deg tilt) and every compression-block
+    // edge into a lit ridge; under half-Lambert that hid, under real Lambert
+    // at a low Sun it drew hatching across every desert (measured in
+    // tests/earthview-validation.spec.js, check 'relief', whose control is
+    // ?relief=forward). The hero globe hit the same wall and moved to
+    // central differences (CLAUDE.md, homepage hero row).
+    const float RS = 2.0;
+    const vec2 tx = vec2(RS / 2048.0, 0.0), ty = vec2(0.0, RS / 1024.0);
+    float hNW = texture2D(u_topology, uv - tx - ty).r, hN = texture2D(u_topology, uv - ty).r, hNE = texture2D(u_topology, uv + tx - ty).r;
+    float hW  = texture2D(u_topology, uv - tx).r,                                            hE  = texture2D(u_topology, uv + tx).r;
+    float hSW = texture2D(u_topology, uv - tx + ty).r, hS = texture2D(u_topology, uv + ty).r, hSE = texture2D(u_topology, uv + tx + ty).r;
+    float hDx = ((hNE + 2.0 * hE + hSE) - (hNW + 2.0 * hW + hSW)) * (0.125 / RS);
+    float hDy = ((hSW + 2.0 * hS + hSE) - (hNW + 2.0 * hN + hNE)) * (0.125 / RS);   // +v is southward
+#else
     float hC  = texture2D(u_topology, uv).r;
     float hDx = texture2D(u_topology, uv + vec2(1.0 / 2048.0, 0.0)).r - hC;
     float hDy = texture2D(u_topology, uv + vec2(0.0, 1.0 / 1024.0)).r - hC;
+#endif
     if (u_topo_detail_on > 0.5) {
         vec2 uvT = insetUV(uv, u_topo_detail_bounds);
         float wgt = insetWeight(uvT);

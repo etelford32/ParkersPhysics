@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { encodePng, decodePng } from './helpers/cloud-source.mjs';
+import { writeFileSync } from 'node:fs';
+import { boot, sunBehindCamera, flyAndSettle, canvasShot, transitions, seamColumn, NORTH_OF } from './helpers/earthview-harness.mjs';
 import { regionById, regionView } from '../js/earth-regions.js';
 
 /**
@@ -40,125 +40,13 @@ import { regionById, regionView } from '../js/earth-regions.js';
 
 test.describe.configure({ timeout: 600_000 });
 
-const MAPS = {
-    'earth-blue-marble.jpg': 'assets/earth/day-2k.webp',
-    'earth-night.jpg':       'assets/earth/lights-2k.webp',
-    'earth-water.png':       'assets/earth/water-2k.webp',
-    'earth-topology.png':    'assets/earth/relief-2k.webp',
-};
-const QUIET = ['lyr-obs-sst', 'lyr-isobars', 'lyr-wind', 'lyr-cities', 'lyr-atm', 'lyr-obs-precip',
-               'lyr-obs-fires', 'lyr-obs-snow', 'lyr-rotate', 'lyr-weather', 'lyr-grid', 'lyr-tropic', 'lyr-lights'];
-const STRIPE_DEG = 0.15;   // 12.7 km at 40° N: under the global frame's Nyquist, over the window's
-const NORTH_OF = 40;
-
-async function boot(page, query, { clouds = true, gibs = [] } = {}) {
-    const errors = [];
-    page.on('pageerror', (e) => errors.push(e.message));
-    page.on('console', (m) => {
-        if (m.type() === 'error' && /WebGLProgram|Shader Error|ERROR: \d+:\d+/.test(m.text())) errors.push(m.text().slice(0, 400));
-    });
-    await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (route) => {
-        const url = route.request().url();
-        const map = url.match(/three-globe@[^/]+\/example\/img\/([^?]+)/)?.[1];
-        if (map && MAPS[map]) {
-            return route.fulfill({ status: 200, contentType: 'image/webp', body: readFileSync(new URL(`../${MAPS[map]}`, import.meta.url)) });
-        }
-        if (/wvs\.earthdata\.nasa\.gov\/api\/v1\/snapshot/.test(url)) {
-            const u = new URL(url);
-            const layer = u.searchParams.get('LAYERS') ?? '';
-            const W = Number(u.searchParams.get('WIDTH')), H = Number(u.searchParams.get('HEIGHT'));
-            const [la0, lo0, la1, lo1] = (u.searchParams.get('BBOX') ?? '').split(',').map(Number);
-            gibs.push({ layer, time: u.searchParams.get('TIME'), bbox: [la0, lo0, la1, lo1], W, H });
-            if (!/Band13|Band_13/.test(layer)) {
-                return route.fulfill({ status: 200, contentType: 'image/png', body: encodePng(4, 4, () => [0, 0, 0, 0]) });
-            }
-            // encodePng calls back with (column, row) — not a flat index
-            // (treating it as one put every row on the north edge, which is
-            // exactly the bug this gate exists to catch, in the stub).
-            const body = encodePng(W, H, (x, y) => {
-                const lon = lo0 + ((x + 0.5) * (lo1 - lo0)) / W;
-                const lat = la1 - ((y + 0.5) * (la1 - la0)) / H;          // row 0 = north
-                if (lat < NORTH_OF) return [150, 150, 150, 255];
-                return (Math.floor(lon / (STRIPE_DEG / 2)) & 1) ? [235, 235, 235, 255] : [70, 70, 70, 255];
-            });
-            return route.fulfill({ status: 200, contentType: 'image/png', body, headers: { 'access-control-allow-origin': '*' } });
-        }
-        return route.abort();
-    });
-    await page.goto('/earth.html' + query, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    await page.waitForFunction(() => typeof window.__evLod === 'function' && typeof window.__evPick === 'function'
-        && typeof window.__evCloudDetail === 'function', null, { timeout: 120_000 });
-    await page.waitForTimeout(8_000);   // textures + the first mosaic
-    await page.evaluate(({ quiet, clouds }) => {
-        const set = (id, on) => {
-            const el = document.getElementById(id);
-            if (el && el.checked !== on) { el.checked = on; el.dispatchEvent(new Event('change', { bubbles: true })); }
-        };
-        for (const id of quiet) set(id, false);
-        set('lyr-clouds', clouds);
-    }, { quiet: QUIET, clouds });
-    return errors;
-}
-
-/**
- * Light the view: hold the Sun 30° north of the camera's own direction
- * (window.__evSetSunDir). The surface is physically lit and the night side
- * is black, and scrubbing the clock cannot help — the globe's rotation is
- * frozen at page load, so hours of sim time move the terminator by a
- * fraction of a degree (this gate measured a black disc that way first).
- * 30° keeps the ocean glint off the measured centre.
- */
-async function sunBehindCamera(page) {
-    await page.evaluate(() => {
-        const [x, y, z] = window.__evCamera().pos;
-        const r = Math.hypot(x, y, z);
-        const p = [x / r, y / r, z / r];
-        // North tangent at the sub-camera point (world +Y projected off p).
-        let t = [-p[1] * p[0], 1 - p[1] * p[1], -p[1] * p[2]];
-        const tl = Math.hypot(...t) || 1;
-        t = t.map(v => v / tl);
-        const c = Math.cos(Math.PI / 6), s = Math.sin(Math.PI / 6);
-        window.__evSetSunDir(p[0] * c + t[0] * s, p[1] * c + t[1] * s, p[2] * c + t[2] * s);
-    });
-    await page.waitForTimeout(1_500);
-}
-
-async function flyAndSettle(page, lat, lon, dist) {
-    await page.evaluate(([la, lo, d]) => window.flyToLatLon(la, lo, d), [lat, lon, dist]);
-    await page.waitForFunction(() => !window.__evCamera().flying, null, { timeout: 120_000 });
-    await page.waitForTimeout(2_500);   // footprint throttle (1.5 s) + a frame
-}
-
-/** The canvas alone (chrome hidden), decoded. */
+// The stubs, the quiet layer set and the frame read-back live in ONE place,
+// shared with tests/earthview-validation.spec.js.
 async function canvasPixels(page, tag = 'frame') {
-    await page.addStyleTag({ content: 'body *{visibility:hidden !important} #c{visibility:visible !important}' });
-    await page.waitForTimeout(1_500);
-    const png = await page.locator('#c').screenshot();
+    const { png, img } = await canvasShot(page);
     // REGIONAL_LOD_PNG=<dir> keeps every measured frame beside its numbers.
     if (process.env.REGIONAL_LOD_PNG) writeFileSync(`${process.env.REGIONAL_LOD_PNG}/${tag}.png`, png);
-    return decodePng(png);
-}
-const lum = (img, x, y) => {
-    const o = (y * img.width + x) * 4;
-    return 0.299 * img.data[o] + 0.587 * img.data[o + 1] + 0.114 * img.data[o + 2];
-};
-/** Bright↔dark flips along rows (hysteresis around each row's own mean). */
-function transitions(img, y0f, y1f, x0f = 0.2, x1f = 0.8, hyst = 10) {
-    let flips = 0;
-    const x0 = Math.round(img.width * x0f), x1 = Math.round(img.width * x1f);
-    for (let y = Math.round(img.height * y0f); y < Math.round(img.height * y1f); y += 3) {
-        let m = 0;
-        for (let x = x0; x < x1; x++) m += lum(img, x, y);
-        m /= (x1 - x0);
-        let state = -1;
-        for (let x = x0; x < x1; x++) {
-            const v = lum(img, x, y);
-            const s = v > m + hyst ? 1 : v < m - hyst ? 0 : state;
-            if (state !== -1 && s !== state) flips++;
-            state = s;
-        }
-    }
-    return flips;
+    return img;
 }
 
 test('regions: the picker lands in regional detail, the readout says so, the pick is the true point', async ({ page }) => {
@@ -278,27 +166,7 @@ test('antimeridian: no coarsest-mip column down the 180° meridian', async ({ br
         await page.close();
         return { seam, errors };
     };
-    const measureSeam = async (page, tag) => {
-        const img = await canvasPixels(page, tag);
-        // Column means over the TOP of the disc (high latitude); the seam is
-        // the largest excess of one column over the median of its ±8 px
-        // neighbours. Why the top band: with anisotropic filtering the GPU
-        // takes its level of detail from the footprint's SHORT axis, so the
-        // seam's 1→0 jump in u alone only reaches the coarsest mip where v
-        // varies fast too — near the pole, where the meridians converge.
-        // Measured on SwiftShader: the line runs from the disc's top edge
-        // down ~45 px and is absent across the equatorial band.
-        const cx = img.width >> 1, y0 = Math.round(img.height * 0.005), y1 = Math.round(img.height * 0.06);
-        const col = (x) => { let s = 0; for (let y = y0; y < y1; y++) s += lum(img, x, y); return s / (y1 - y0); };
-        let seam = 0;
-        for (let x = cx - 40; x <= cx + 40; x++) {
-            const nb = [];
-            for (let k = 2; k <= 8; k++) nb.push(col(x - k), col(x + k));
-            nb.sort((a, b) => a - b);
-            seam = Math.max(seam, Math.abs(col(x) - nb[nb.length >> 1]));
-        }
-        return seam;
-    };
+    const measureSeam = async (page, tag) => seamColumn(await canvasPixels(page, tag)).seam;
     const fixed = await run('');
     const legacy = await run('?uvseam=legacy');
     console.log('[regional-lod] seam', JSON.stringify({ fixed: fixed.seam, legacy: legacy.seam }));

@@ -4945,7 +4945,19 @@ let _earthGeoNear = null;
 // each vertex (0.0008 R at 15, 8.8e-5 R at 47 — the numbers quoted above).
 const _icoSag = (d) => 1 - Math.cos((63.435 * Math.PI / 180) / (d + 1) / Math.sqrt(3));
 const _GLOBE_FAR_SAG = _icoSag(ICO_LEVEL_EARTH_FAR);
+const _globeGeoByDetail = new Map();
 function _updateGlobeLod() {
+    if (_globeDetailOverride != null) {
+        // Test hook: the limb gate draws the SAME view at forced levels (the
+        // pre-2026-10-30 level 6 is its negative control).
+        const want = _globeDetailOverride;
+        if (earthMesh.geometry.parameters.detail !== want) {
+            let g = want === ICO_LEVEL_EARTH_FAR ? earthGeo : _globeGeoByDetail.get(want);
+            if (!g) { g = new THREE.IcosahedronGeometry(R_EARTH, want); _globeGeoByDetail.set(want, g); }
+            earthMesh.geometry = g;
+        }
+        return;
+    }
     const d = camera.position.length() / R_EARTH;
     const focalPx = (renderer.domElement.height / 2) / Math.tan((camera.fov * Math.PI / 180) / 2);
     const limbPx = _GLOBE_FAR_SAG * focalPx / Math.sqrt(Math.max(1e-6, d * d - 1));
@@ -4970,8 +4982,12 @@ function _updateGlobeLod() {
 // from the surface and every cloud material: the antimeridian mip line comes
 // back — the negative control in tests/earth-regional-lod.spec.js.
 const GEO_SEAMLESS_ON = new URLSearchParams(location.search).get('uvseam') !== 'legacy';
+// ?relief=forward puts back the one-texel forward-difference relief slope
+// (the negative control of tests/earthview-validation.spec.js 'relief').
 const EARTH_SURFACE_FRAG = (() => {
-    const frag = new URLSearchParams(location.search).get('earthlight') === 'legacy' ? EARTH_FRAG : EARTH_FRAG_PHYSICAL;
+    const q = new URLSearchParams(location.search);
+    let frag = q.get('earthlight') === 'legacy' ? EARTH_FRAG : EARTH_FRAG_PHYSICAL;
+    if (q.get('relief') === 'forward') frag = '#define EARTH_RELIEF_FORWARD\n' + frag;
     return GEO_SEAMLESS_ON ? frag : frag.replace('#define GEO_SEAMLESS\n', '');
 })();
 const SEAMLESS_DEFINES = GEO_SEAMLESS_ON ? { GEO_SEAMLESS: 1 } : {};
@@ -14194,6 +14210,8 @@ let lastT = 0;
 // a fresh THREE.Vector3 every frame on the hot path.
 const _sunDirScratch = new THREE.Vector3();
 var _sunDirOverride = null;   // __evSetSunDir (tests); var: read by the first, synchronous animate()
+var _testPose = null;         // __evTestPose (tests only): a camera held for one measured view
+var _globeDetailOverride = null;   // __evSetGlobeDetail (tests only): force the globe mesh level
 const _Y_AXIS = new THREE.Vector3(0, 1, 0);   // GMST spin axis (shared, read-only)
 // Scratch Date for the same reason: julianDay() wants a Date, and `new
 // Date(...)` twice per frame is avoidable GC churn on the hot path.
@@ -14959,6 +14977,18 @@ function animate() {
         if (camR < CAM_FLOOR) camera.position.multiplyScalar(CAM_FLOOR / camR);
     }
 
+    // Test hook (__evTestPose): a camera the orbit rig cannot reach — e.g. a
+    // low camera looking at the horizon, where the limb gate measures how
+    // round the globe is. Applied after controls.update() so it is what
+    // renders; null in normal use.
+    if (_testPose) {
+        camera.position.fromArray(_testPose.pos);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(_testPose.look[0], _testPose.look[1], _testPose.look[2]);
+        if (_testPose.fov && camera.fov !== _testPose.fov) { camera.fov = _testPose.fov; camera.updateProjectionMatrix(); }
+        camera.updateMatrixWorld();
+    }
+
     // Volumetric clouds march into their half-res target first; the quad in
     // the scene composites the result at renderOrder 3 (see the shell block).
     if (cloudVolumeMesh?.visible && cloudVolumeCompositor) {
@@ -15117,6 +15147,48 @@ window.__evSunDir = () => earthU.u_sun_dir.value.toArray();
 // the surface is physically lit, the night side is black, and scrubbing the
 // clock barely moves the terminator here because the globe's rotation is
 // frozen at page load (planet rotation off). Never used by the page.
+// Hold the camera at { pos, look, fov } (scene units, Earth radii) until
+// called with null; returns, for the CANVAS in CSS pixels, the row of the
+// TRUE sphere's limb in every column (NaN where none) — the horizon the
+// limb gate compares the drawn edge against (tests/helpers/image-metrics.mjs
+// horizonDeviation). Tests only.
+window.__evTestPose = (pose) => {
+    _testPose = pose ? { pos: pose.pos.slice(), look: pose.look.slice(), fov: pose.fov ?? null } : null;
+    if (!_testPose) return null;
+    camera.position.fromArray(_testPose.pos);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(..._testPose.look);
+    if (_testPose.fov) { camera.fov = _testPose.fov; }
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const W = renderer.domElement.clientWidth, H = renderer.domElement.clientHeight;
+    const P = camera.position.clone(), d = P.length();
+    const n = P.clone().normalize();
+    const c = n.clone().multiplyScalar(R_EARTH * R_EARTH / d);           // limb circle centre
+    const rho = R_EARTH * Math.sqrt(1 - (R_EARTH * R_EARTH) / (d * d));  // and radius
+    const a = new THREE.Vector3(0, 1, 0).cross(n);
+    if (a.lengthSq() < 1e-8) a.set(1, 0, 0);
+    a.normalize();
+    const b = n.clone().cross(a).normalize();
+    const rows = new Array(W).fill(NaN);
+    const v = new THREE.Vector3(), fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    for (let i = 0; i < 20000; i++) {
+        const t = (i / 20000) * Math.PI * 2;
+        v.copy(c).addScaledVector(a, rho * Math.cos(t)).addScaledVector(b, rho * Math.sin(t));
+        if (v.clone().sub(P).dot(fwd) <= 0) continue;                     // behind the camera
+        v.project(camera);
+        const x = Math.round((v.x * 0.5 + 0.5) * W), y = (0.5 - v.y * 0.5) * H;
+        if (x < 0 || x >= W || y < 0 || y >= H) continue;
+        if (!(rows[x] <= y)) rows[x] = Number.isNaN(rows[x]) ? y : Math.min(rows[x], y);
+    }
+    return { width: W, height: H, rows };
+};
+window.__evSetGlobeDetail = (d) => {
+    _globeDetailOverride = (d == null) ? null : Number(d);
+    _updateGlobeLod();
+    return earthMesh.geometry.parameters.detail;
+};
 window.__evSetSunDir = (x, y, z) => {
     _sunDirOverride = (x == null) ? null : new THREE.Vector3(Number(x), Number(y), Number(z)).normalize();
     return _sunDirOverride?.toArray() ?? null;
@@ -15425,7 +15497,24 @@ window.__evPick = (ndcX = 0, ndcY = 0) => {
     const a = globeHits(rc)[0];
     const m = rc.intersectObject(earthMesh)[0];
     const ll = (uv) => (uv ? geo.deg.uvToLatLon(uv.x, uv.y) : null);
-    return { analytic: ll(a?.uv), meshUv: ll(m?.uv) };
+    // n: the hit's WORLD-space normal — what u_sun_dir is dotted with, so a
+    // gate can compute each pixel's μ₀ itself.
+    return { analytic: ll(a?.uv), meshUv: ll(m?.uv), n: a ? a.point.clone().normalize().toArray() : null };
+};
+// Batched, analytic only (no mesh raycast — that is __evPick's control and
+// costs a triangle walk per call): [[ndcX, ndcY], …] → [lat, lon, nx, ny, nz]
+// per point (world normal), or null off the globe. For gates that need a
+// per-pixel μ₀ over thousands of pixels.
+window.__evPickMany = (points) => {
+    const rc = new THREE.Raycaster(), v = new THREE.Vector2();
+    return points.map(([x, y]) => {
+        rc.setFromCamera(v.set(x, y), camera);
+        const a = globeHits(rc)[0];
+        if (!a) return null;
+        const ll = geo.deg.uvToLatLon(a.uv.x, a.uv.y);
+        const n = a.point.clone().normalize();
+        return [ll.lat, ll.lon, n.x, n.y, n.z];
+    });
 };
 window.__evLod = () => ({
     tier: _lodEls.tier?.dataset.tier ?? null,
