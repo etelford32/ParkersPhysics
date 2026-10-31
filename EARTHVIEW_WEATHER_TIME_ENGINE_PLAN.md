@@ -46,8 +46,64 @@ Everything else below is planned, not built.
   top-rail overlap gate (`tests/earth-time-controls-position.spec.js`) passes
   at every width when given the time the sandbox needs to load the page
   (`--timeout=240000`; at 60 s the 1440/1920 loads time out, as recorded).
-- Next, per §9: T3 (GPU atlas) then T2 (flow-morph). The strip's next
-  consumer-facing steps are §6.3 event markers and §6.4 playback/range brush.
+### 2026-10-31 (second pass) — smooth scrubbing, event markers, loop playback
+
+**What the scrub actually cost — measured before choosing the fix.** With the
+default layers (wind + isobars) on, one replay repaint was p50 50 ms / p90
+68 ms of MAIN-THREAD JavaScript (V8 runs natively in the sandbox; only the GPU
+is emulated, so these are real CPU numbers): isobar contouring over 360×180
+≈ 58 ms on EVERY repaint (marching squares + chain assembly + blur, CPU
+profile), plus ~40 ms to decode each new hourly frame. The resolver's own
+lerp was 1.5 ms. So the bottleneck was not the GPU, and the §5 atlas would
+not have fixed it. What shipped instead, as T3's first step:
+
+- **`js/isobar-contour.js` (PURE)** — the contouring moved VERBATIM out of
+  `js/isobar-engine.js` (which now only builds the LineSegments + sprites).
+  BIT-IDENTICAL to the pre-move layer: `tests/isobar-contour.mjs` compares
+  SHA-256s of the geometry against a reference baked from commit e063f2f on
+  real three.js r160 (`scripts/bake-isobar-reference.mjs` records how), with
+  a negative control.
+- **`js/weather-scrub-worker.js` + `js/weather-scrub-bridge.js`** — two
+  Worker lanes: `decode` (the ONE decoder, `weather-decode.js`) and
+  `isobars`. `IsobarLayer.requestUpdate` is latest-wins (each result is
+  applied, then the newest pending buffer runs — skipping stale results
+  starved the layer under a continuous scrub). The resolver PREFETCHES the
+  bracket plus 3 hours in the scrub direction (`setDecoder`), its LRU entries
+  now carry the coarse array they were decoded from (an hour replaced in the
+  ring is no longer served stale), and with the workers on its repaint floor
+  drops from 90 ms to a frame (`setMinRepaintMs(16)`).
+- **Measured** (`tests/earth-scrub-perf.spec.js`): p50 3.8 ms / p90 7.4 ms per
+  repaint vs 54 / 79 ms with `?scrubworker=0` (the negative control, required
+  ≥ 3× slower); 3 inline decodes in a 24 h scrub vs 26; worker isobars and a
+  prefetched trio both bit-identical to the inline path.
+- **The GPU atlas (§5) is DEFERRED, not dropped**: it becomes the right move
+  when the per-repaint texture upload (3 × 1 MB float) or the 4 ms
+  lerp+pack is the limit, or for T2's morph in the shader. Re-measure first.
+
+**Event markers (§6.3)** — `js/weather-events.js` (PURE): rain starts / ends
+(hysteresis, gaps break runs), the strongest 10 m wind of each day (labelled
+mean wind — there is no gust channel), freeze onsets, and aurora windows via
+verdict-engine's ONE `auroraVerdict` rule on the SWPC 3-hourly Kp rows
+(`kpLookup`; past their reach Kp is unknown and nothing is marked). Drawn as
+real buttons in a 13 px lane at the strip's top (`placeMarkers`: priority
+wins a contested pixel, 15 px apart — over 21 days that is ~15 h, so dense
+lower-priority onsets drop by design); a click jumps the clock there.
+
+**Loop playback (§6.4)** — `js/time-loop.js` (PURE): ⟲ Loop in the buttons
+row with ±24 h (default — the owner's "past and future 24 h") / next 24 h /
+past 24 h / next 3 days, plus Shift-drag on the strip for a custom window.
+Every loop is one ~12 s pass whatever its span (rate clamped 1–12 h/s),
+plays forward and wraps, and moves the clock ONLY through the slider's own
+events. Any hand on the slider or strip, Now, Play, Space or `L` stops it.
+
+Gates: `node tests/isobar-contour.mjs tests/weather-events.mjs` (CI:
+weather-time-kernels.yml) + `npx playwright test tests/earth-scrub-perf.spec.js
+tests/earth-time-strip.spec.js --workers=1`; the top-rail gate passes at all
+ten layouts with `--timeout=240000`.
+
+- Next: T2 flow-morph (the visible "fronts move instead of cross-fading"
+  win), then the §6.4 remainder (J/K/L speeds, A/B swipe, onion skin) and the
+  §6.5 drawer.
 
 Companion plans this one sits on top of, and does NOT re-plan:
 

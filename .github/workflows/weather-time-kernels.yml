@@ -12,6 +12,11 @@ name: weather-time-kernels
 #                               derived variables, the version cache, speed
 #   time-strip-model.mjs        the time-bar strip's geometry: the slider's
 #                               axis, gap-broken lines, rain bars, bands
+#   weather-events.mjs          the time-bar markers (rain, wind, freeze,
+#                               aurora via verdict-engine) + loop playback
+#   isobar-contour.mjs          the isobar pipeline moved for the scrub worker:
+#                               bit-identical to the pre-move layer (baked
+#                               SHA-256s), with a negative control
 #   weather-forecast-smoke.mjs  the history rings the cube indexes
 #   weather-decode-identity.mjs the decode the resolver parity relies on
 #
@@ -22,6 +27,16 @@ on:
   push:
     paths:
       - 'js/weather-cube.js'
+      - 'js/weather-events.js'
+      - 'js/time-loop.js'
+      - 'js/isobar-contour.js'
+      - 'js/isobar-engine.js'
+      - 'js/weather-scrub-worker.js'
+      - 'js/weather-scrub-bridge.js'
+      - 'js/verdict-engine.js'
+      - 'tests/weather-events.mjs'
+      - 'tests/isobar-contour.mjs'
+      - 'tests/fixtures/isobar-contour-reference.json'
       - 'js/time-strip-model.js'
       - 'js/time-strip.js'
       - 'js/weather-history.js'
@@ -36,6 +51,16 @@ on:
   pull_request:
     paths:
       - 'js/weather-cube.js'
+      - 'js/weather-events.js'
+      - 'js/time-loop.js'
+      - 'js/isobar-contour.js'
+      - 'js/isobar-engine.js'
+      - 'js/weather-scrub-worker.js'
+      - 'js/weather-scrub-bridge.js'
+      - 'js/verdict-engine.js'
+      - 'tests/weather-events.mjs'
+      - 'tests/isobar-contour.mjs'
+      - 'tests/fixtures/isobar-contour-reference.json'
       - 'js/time-strip-model.js'
       - 'js/time-strip.js'
       - 'js/weather-history.js'
@@ -71,6 +96,10 @@ jobs:
         run: node tests/weather-cube.mjs
       - name: time-bar strip geometry
         run: node tests/time-strip-model.mjs
+      - name: time-bar markers + loop playback
+        run: node tests/weather-events.mjs
+      - name: isobar contour (bit-identical to the pre-move layer)
+        run: node tests/isobar-contour.mjs
       - name: history rings
         run: node tests/weather-forecast-smoke.mjs
       - name: decode identity

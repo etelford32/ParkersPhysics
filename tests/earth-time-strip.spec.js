@@ -15,6 +15,10 @@
  *   4. Dragging the strip scrubs the shared clock (through the slider's own
  *      events) and the cube answers for the new instant.
  *   5. The hover readout prints the cube's value with units and its source.
+ *   6. Event markers: rain starts at the seeded onsets, a freeze each night,
+ *      and a marker click moves the clock to its instant.
+ *   7. Loop playback: ⟲ plays ±24 h on repeat inside its window; a hand on
+ *      the strip stops it; Shift-drag picks a custom window and loops it.
  *   NEGATIVE CONTROL: with the history emptied the strip draws no rain and no
  *   temperature — it must not invent weather when there is none.
  *
@@ -38,7 +42,7 @@ async function seed(page) {
         const frame = (k) => {
             const c = new Float32Array(N * 9);
             for (let i = 0; i < N; i++) {
-                c[i] = 10 + 8 * Math.sin((2 * Math.PI * k) / 24);   // T: a diurnal swing
+                c[i] = 1 + 8 * Math.sin((2 * Math.PI * k) / 24);    // T: a diurnal swing through 0 °C
                 c[N + i] = 1013;                                     // MSLP
                 c[2 * N + i] = 60;                                   // RH
                 c[3 * N + i] = 3; c[4 * N + i] = -2;                 // wind
@@ -156,6 +160,68 @@ test('the strip shows the cube\'s weather for the place, on the slider\'s axis, 
     expect(tip).toContain('Boulder');
     expect(tip).toMatch(/Forecast \(NWP\)|Nowcast/);
     expect(want.value).not.toBeNull();
+
+    // 6. Markers: rain onsets at k ≡ 0 (mod 12) wherever the SEEDED frames
+    //    paint (the in-browser nowcast may own the first hours after now with
+    //    its own model — that span is exempt), freezes each night, and a
+    //    click on a marker moves the clock to it.
+    const dbg = await page.evaluate(() => {
+        const d = window.__evTimeStrip.debug();
+        const cov = window.__evCube.coverage().filter((r) => r.provenance === 'nowcast');
+        return { events: d.events, markers: d.markers.length, nowcast: cov[0] ?? null };
+    });
+    const inNowcast = (t) => dbg.nowcast && t > dbg.nowcast.t0 && t <= dbg.nowcast.t1 + HOUR;
+    const starts = dbg.events.filter((e) => e.type === 'rain-start' && !inNowcast(e.t));
+    expect(starts.length).toBeGreaterThanOrEqual(3);
+    for (const e of starts) expect((((Math.round((e.t - now) / HOUR)) % 12) + 12) % 12, `rain start at ${(e.t - now) / HOUR} h`).toBe(0);
+    expect(dbg.events.filter((e) => e.type === 'freeze').length).toBeGreaterThanOrEqual(2);
+    expect(dbg.markers).toBeGreaterThan(0);
+    // Across 21 days the strip is ~1 px/h, so the 15 px separation keeps the
+    // higher-priority markers (freezes) and drops crowded rain onsets — by
+    // design; click whichever marker survived.
+    const mark = page.locator('#tc-strip .tc-strip-mark').first();
+    const markT = Number(await mark.getAttribute('data-t'));
+    await mark.click();
+    expect(Math.abs(Number(await page.locator('#tc-scrub').inputValue()) - Math.round((markT - Date.now()) / 60_000))).toBeLessThanOrEqual(2);
+    expect(await mark.getAttribute('aria-label')).toMatch(/(Rain|Below freezing|Wind|Aurora).* Jump to this time/);
+
+    // 7. Loop ±24 h: the clock moves on its own, stays in the window, stops on a hand.
+    await page.locator('#tc-loop').click();
+    await expect(page.locator('#tc-loop')).toHaveAttribute('aria-pressed', 'true');
+    const seen = new Set();
+    await expect.poll(async () => {
+        const v = Number(await page.locator('#tc-scrub').inputValue());
+        expect(v).toBeGreaterThanOrEqual(-24 * 60 - 2);
+        expect(v).toBeLessThanOrEqual(24 * 60 + 2);
+        seen.add(v);
+        return seen.size;
+    }, { timeout: 60_000, intervals: [300] }).toBeGreaterThanOrEqual(3);
+    await page.mouse.click(s.strip.left + X(now + 30 * HOUR), y);
+    await expect(page.locator('#tc-loop')).toHaveAttribute('aria-pressed', 'false');
+    const parked = Number(await page.locator('#tc-scrub').inputValue());
+    await page.waitForTimeout(1500);
+    expect(Number(await page.locator('#tc-scrub').inputValue())).toBe(parked);
+
+    // Shift-drag: a custom window, looped.
+    await page.keyboard.down('Shift');
+    await page.mouse.move(s.strip.left + X(now + 2 * HOUR), y);
+    await page.mouse.down();
+    await page.mouse.move(s.strip.left + X(now + 10 * HOUR), y, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    const lp = await page.evaluate(() => window.__evTimeStrip.loop);
+    expect(lp.active).toBe(true);
+    expect(lp.id).toBe('custom');
+    expect(Math.abs((lp.window.t1 - lp.window.t0) / HOUR - 8)).toBeLessThan(1.5);
+    await expect(page.locator('#tc-loop-range')).toHaveValue('custom');
+    if (process.env.STRIP_SHOT) {
+        await page.locator('#tc-strip .tc-strip-mark').first().hover();
+        const bar = await page.locator('#time-controls').boundingBox();
+        await page.screenshot({ path: `${process.env.STRIP_SHOT}/time-strip-loop.png`,
+            clip: { x: bar.x - 6, y: bar.y - 6, width: bar.width + 12, height: bar.height + 30 } });
+    }
+    await page.keyboard.press('l');
+    await expect(page.locator('#tc-loop')).toHaveAttribute('aria-pressed', 'false');
 
     expect(errors, errors.join('\n')).toEqual([]);
 

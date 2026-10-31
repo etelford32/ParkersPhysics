@@ -26,11 +26,25 @@
  * element and polls the cube's O(1) version once a second.
  */
 
-import { stripModel, xToTime, timeToX, describeSample } from './time-strip-model.js';
+import { stripModel, xToTime, timeToX, describeSample, placeMarkers } from './time-strip-model.js';
 import { PROVENANCE_LABEL } from './weather-cube.js';
 import { solarPosition } from './sun-altitude.js';
+import { detectEvents, kpLookup } from './weather-events.js';
+import { sunAltitudeDeg, magneticLatitude } from './verdict-engine.js';
+import { loopWindow, loopStep, loopRate, DEFAULT_LOOP } from './time-loop.js';
 
-const SERIES_VARS = ['t2m', 'precip', 'cloudTotal'];
+const SERIES_VARS = ['t2m', 'precip', 'cloudTotal', 'wind'];
+const MARK_LANE = 13;                 // px reserved at the top for event markers
+const MARK_SEP_PX = 15;
+
+// 24×24 currentColor stroke glyphs (the js/glyphs.js convention — no emoji).
+const GLYPH = {
+    'rain-start': '<path d="M12 3c0 0-6 7-6 11a6 6 0 0 0 12 0c0-4-6-11-6-11z"/>',
+    'rain-stop':  '<path d="M12 3c0 0-6 7-6 11a6 6 0 0 0 12 0c0-4-6-11-6-11z"/><path d="M5 20L19 6"/>',
+    'wind-peak':  '<path d="M3 9h11a3 3 0 1 0-3-3"/><path d="M3 15h15a3 3 0 1 1-3 3"/>',
+    'freeze':     '<path d="M12 2v20M3.5 7l17 10M20.5 7l-17 10"/>',
+    'aurora':     '<path d="M3 19c2-9 5-12 9-12s7 3 9 12"/><path d="M7 19c1-5 3-7 5-7s4 2 5 7"/>',
+};
 const TIP_VARS = ['t2m', 'precip', 'cloudTotal', 'wind', 'windDirDeg'];
 const THUMB_PX = 14;                  // #tc-scrub thumb width (earth.html CSS)
 const HOUR_MS = 3_600_000;
@@ -46,7 +60,8 @@ const SUNSET_ALT_DEG = -0.833;        // refraction + semi-diameter
  * @param {() => ({lat:number, lon:number, label:string}|null)} o.getPlace
  * @param {() => number} [o.now]
  */
-export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date.now() }) {
+export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date.now(),
+                                getKpRows = () => null, onLoopChange = () => {} }) {
     if (!host || !scrubEl || !cube) return null;
 
     const canvas = document.createElement('canvas');
@@ -60,14 +75,23 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
     tip.className = 'tc-strip-tip';
     tip.hidden = true;
     tip.setAttribute('role', 'status');
-    host.append(canvas, cursor, place, tip);
+    const marks = document.createElement('div');
+    marks.className = 'tc-strip-marks';
+    const loopBand = document.createElement('div');
+    loopBand.className = 'tc-strip-loop';
+    loopBand.hidden = true;
+    host.append(canvas, loopBand, cursor, place, marks, tip);
     host.setAttribute('role', 'group');
     host.setAttribute('aria-label', 'Weather timeline for the selected place. Drag to move through time.');
 
     const S = {
         model: null, domain: null, placeKey: '', version: -1, nowPx: NaN,
         lastPoll: 0, lastNowRepaint: 0, pending: false, dragging: false, cursorX: NaN,
-        series: null,
+        series: null, events: [], markers: [],
+        // Loop playback (§6.4): `id` is a time-loop.js preset or 'custom'.
+        loop: { active: false, id: DEFAULT_LOOP, custom: null, lastWall: 0, t: NaN },
+        brush: null,          // { t0, t1 } while a Shift-drag is selecting a custom window
+        writing: false,       // true while WE dispatch the slider's events
     };
 
     function domainNow() {
@@ -104,11 +128,19 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
         const model = stripModel({
             series: series ?? { t: new Float64Array(0), values: {} },
             coverage: cube.coverage(),
-            domain, width: w, height: h, trackX0: x0, trackX1: x1,
+            domain, width: w, height: h, trackX0: x0, trackX1: x1, topLane: MARK_LANE,
             isNight: p ? (t) => solarPosition(new Date(t), p.lat, p.lon).altitudeDeg < SUNSET_ALT_DEG : null,
             dayStart: (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); },
         });
         S.model = model; S.domain = domain; S.series = series;
+        S.events = p && series ? detectEvents(series, {
+            dayStart: (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); },
+            sunAltDeg: (t) => sunAltitudeDeg(p.lat, p.lon, t),
+            kpAt: kpLookup(getKpRows() ?? []),
+            magLat: magneticLatitude(p.lat, p.lon),
+        }) : [];
+        renderMarkers(x0, x1);
+        renderLoopBand();
         S.version = cube.version;
         S.placeKey = p ? `${p.lat.toFixed(2)},${p.lon.toFixed(2)}` : '';
         S.nowPx = Math.round(timeToX(now(), domain, x0, x1));
@@ -174,13 +206,14 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
             g.font = '600 8px ui-monospace, monospace';
             g.textBaseline = 'top';
             const label = `${Math.round(m.range.dataMin)}…${Math.round(m.range.dataMax)}°C`;
-            g.fillText(label, m.width - g.measureText(label).width - 3, 1);
+            g.fillText(label, m.width - g.measureText(label).width - 3, m.plotTop);
         }
     }
 
     // ── per-frame: cursor + cheap invalidation checks ────────────────────
     function update(simMs) {
         const n = now();
+        if (S.loop.active) stepLoop(simMs, n);
         if (n - S.lastPoll > VERSION_POLL_MS) {
             S.lastPoll = n;
             const p = getPlace();
@@ -203,39 +236,145 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
         const { hr, x0, x1 } = track();
         return xToTime(clientX - hr.left, domainNow(), x0, x1);
     }
-    function scrubTo(clientX) {
-        const t = timeAtClientX(clientX);
+    /** The ONE way this strip moves the clock: the slider's own value + events. */
+    function writeSlider(t, { change = false } = {}) {
         const minutes = Math.round((t - now()) / 60_000);
         const v = Math.max(Number(scrubEl.min), Math.min(Number(scrubEl.max), minutes));
-        if (String(v) !== scrubEl.value) {
-            scrubEl.value = String(v);
-            scrubEl.dispatchEvent(new Event('input', { bubbles: true }));
-        }
+        S.writing = true;
+        try {
+            if (String(v) !== scrubEl.value) {
+                scrubEl.value = String(v);
+                scrubEl.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            if (change) scrubEl.dispatchEvent(new Event('change', { bubbles: true }));
+        } finally { S.writing = false; }
     }
+    function scrubTo(clientX) { writeSlider(timeAtClientX(clientX)); }
+
     host.addEventListener('pointerdown', (e) => {
         if (e.button !== undefined && e.button !== 0) return;
-        S.dragging = true;
+        if (e.target.closest?.('.tc-strip-mark')) return;     // markers handle their own click
+        stopLoop('user');
         try { host.setPointerCapture(e.pointerId); } catch (_) { /* synthetic pointer */ }
+        e.preventDefault();
+        if (e.shiftKey) {                                     // Shift-drag: choose a loop window
+            const t = timeAtClientX(e.clientX);
+            S.brush = { t0: t, t1: t };
+            host.classList.add('brushing');
+            renderLoopBand();
+            return;
+        }
+        S.dragging = true;
         host.classList.add('dragging');
         scrubTo(e.clientX);
         showTip(e.clientX);
-        e.preventDefault();
     });
     host.addEventListener('pointermove', (e) => {
+        if (S.brush) { S.brush.t1 = timeAtClientX(e.clientX); renderLoopBand(); return; }
         if (S.dragging) scrubTo(e.clientX);
         if (e.pointerType !== 'touch' || S.dragging) showTip(e.clientX);
     });
     const endDrag = (e) => {
+        if (S.brush) {
+            const b = S.brush;
+            S.brush = null;
+            host.classList.remove('brushing');
+            try { host.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+            if (Math.abs(b.t1 - b.t0) >= 30 * 60_000) { S.loop.custom = { t0: b.t0, t1: b.t1 }; startLoop('custom'); }
+            else renderLoopBand();
+            return;
+        }
         if (!S.dragging) return;
         S.dragging = false;
         host.classList.remove('dragging');
         try { host.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
-        scrubEl.dispatchEvent(new Event('change', { bubbles: true }));
+        S.writing = true;
+        try { scrubEl.dispatchEvent(new Event('change', { bubbles: true })); } finally { S.writing = false; }
         if (e.pointerType === 'touch') tip.hidden = true;
     };
     host.addEventListener('pointerup', endDrag);
     host.addEventListener('pointercancel', endDrag);
     host.addEventListener('pointerleave', () => { if (!S.dragging) tip.hidden = true; });
+
+    // ── event markers (§6.3) ─────────────────────────────────────────────
+    function renderMarkers(x0, x1) {
+        S.markers = placeMarkers(S.events, S.domain, x0, x1, MARK_SEP_PX);
+        marks.textContent = '';
+        for (const m of S.markers) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = `tc-strip-mark ev-${m.type}`;
+            b.style.left = `${m.x.toFixed(1)}px`;
+            const when = new Date(m.t).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+            const label = `${m.label} · ${when} · ${m.detail}`;
+            b.title = label;
+            b.setAttribute('aria-label', `${label}. Jump to this time.`);
+            b.dataset.t = String(m.t);
+            b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPH[m.type] ?? ''}</svg>`;
+            b.addEventListener('click', (e) => {
+                e.stopPropagation();
+                stopLoop('user');
+                writeSlider(m.t, { change: true });
+            });
+            marks.append(b);
+        }
+    }
+
+    // ── loop playback (§6.4) ─────────────────────────────────────────────
+    function currentWindow() {
+        return loopWindow(S.loop.id, now(), domainNow(), S.loop.custom);
+    }
+    function startLoop(id = S.loop.id) {
+        S.loop.id = id;
+        const win = currentWindow();
+        if (!win) { stopLoop('empty'); return false; }
+        S.loop.active = true;
+        S.loop.lastWall = 0;
+        S.loop.t = NaN;
+        host.classList.add('looping');
+        renderLoopBand();
+        onLoopChange(loopState());
+        return true;
+    }
+    function stopLoop(reason = 'user') {
+        if (!S.loop.active) return;
+        S.loop.active = false;
+        host.classList.remove('looping');
+        renderLoopBand();
+        onLoopChange({ ...loopState(), reason });
+    }
+    function stepLoop(simMs, n) {
+        const win = currentWindow();
+        if (!win) { stopLoop('empty'); return; }
+        const dt = S.loop.lastWall ? n - S.loop.lastWall : 0;
+        S.loop.lastWall = n;
+        // Integrate on our own sub-minute accumulator, not the slider's
+        // whole-minute value, so slow loops still advance smoothly.
+        const base = Number.isFinite(S.loop.t) ? S.loop.t : simMs;
+        const t = loopStep(base, win, dt);
+        S.loop.t = t;
+        writeSlider(t);
+    }
+    function loopState() {
+        const win = currentWindow();
+        return { active: S.loop.active, id: S.loop.id, custom: S.loop.custom, window: win,
+                 rateSimPerSec: win ? loopRate(win) : null };
+    }
+    function renderLoopBand() {
+        const m = S.model;
+        if (!m || !S.domain) return;
+        const win = S.brush ? { t0: Math.min(S.brush.t0, S.brush.t1), t1: Math.max(S.brush.t0, S.brush.t1) }
+                  : S.loop.active ? currentWindow() : null;
+        if (!win) { loopBand.hidden = true; return; }
+        const a = timeToX(win.t0, S.domain, m.trackX0, m.trackX1);
+        const b = timeToX(win.t1, S.domain, m.trackX0, m.trackX1);
+        loopBand.hidden = false;
+        loopBand.style.left = `${a.toFixed(1)}px`;
+        loopBand.style.width = `${Math.max(2, b - a).toFixed(1)}px`;
+    }
+    // Any hand on the slider itself ends a loop (our own writes excepted).
+    scrubEl.addEventListener('input', () => { if (!S.writing) stopLoop('user'); });
+    scrubEl.addEventListener('pointerdown', () => stopLoop('user'));
 
     // ── hover readout ────────────────────────────────────────────────────
     function showTip(clientX) {
@@ -282,8 +421,13 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
     return {
         update,
         refresh: schedule,
+        startLoop, stopLoop,
+        toggleLoop: () => (S.loop.active ? (stopLoop('user'), false) : startLoop()),
+        setLoopRange: (id) => { S.loop.id = id; if (S.loop.active) startLoop(id); else renderLoopBand(); onLoopChange(loopState()); },
+        get loop() { return loopState(); },
         /** Test / debug hook: the last model and what fed it. */
-        debug: () => ({ model: S.model, domain: S.domain, version: S.version, place: getPlace() }),
+        debug: () => ({ model: S.model, domain: S.domain, version: S.version, place: getPlace(),
+                        events: S.events, markers: S.markers, loop: loopState() }),
     };
 }
 

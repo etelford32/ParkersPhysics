@@ -77,13 +77,15 @@ export function nearestIndex(series, t) {
  * @param {number} p.trackX0    thumb-travel start, strip-local px
  * @param {number} p.trackX1    thumb-travel end, strip-local px
  * @param {number} [p.bandH=4]  provenance band height
+ * @param {number} [p.topLane=0] marker lane height above the plot
  * @param {(t:number)=>boolean} [p.isNight]  Sun below the horizon at the point
  * @param {(t:number)=>number}  [p.dayStart] start of the local day containing t
  */
 export function stripModel({ series, coverage = [], domain, width, height, trackX0, trackX1,
-                             bandH = 4, isNight = null, dayStart = null }) {
+                             bandH = 4, topLane = 0, isNight = null, dayStart = null }) {
     const x0 = trackX0, x1 = trackX1;
-    const plotTop = 1, plotBot = height - bandH - 1;
+    // `topLane` px at the top are reserved for event markers (§6.3).
+    const plotTop = topLane + 1, plotBot = height - bandH - 1;
     const plotH = Math.max(1, plotBot - plotTop);
     const X = (t) => timeToX(t, domain, x0, x1);
     const n = series?.t?.length ?? 0;
@@ -173,7 +175,7 @@ export function stripModel({ series, coverage = [], domain, width, height, track
     const pxPerDay = (x1 - x0) * 86_400_000 / (domain.t1 - domain.t0);
 
     return {
-        width, height, trackX0: x0, trackX1: x1, plotTop, plotBot,
+        width, height, trackX0: x0, trackX1: x1, plotTop, plotBot, topLane,
         bands, tempSegs, precip, cloud, night, days,
         labelDays: pxPerDay >= 14,
         range,
@@ -201,3 +203,24 @@ export function describeSample(s, provenanceLabel) {
 
 const C16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
 function compass16(deg) { return C16[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16]; }
+
+/**
+ * Lay event markers on the strip's axis without overlap: greedy by priority
+ * (then time), a marker is dropped if it would sit within `minSepPx` of one
+ * already placed. Outside the domain → dropped. What is dropped stays in the
+ * hover readout's world; the strip only refuses to stack glyphs.
+ *
+ * @param {{t:number, priority:number}[]} events
+ * @returns {Array<object & {x:number}>}  placed events, sorted by x
+ */
+export function placeMarkers(events, domain, x0, x1, minSepPx = 14) {
+    const cand = events
+        .filter((e) => e.t >= domain.t0 && e.t <= domain.t1)
+        .map((e) => ({ ...e, x: timeToX(e.t, domain, x0, x1) }))
+        .sort((a, b) => (b.priority - a.priority) || (a.t - b.t));
+    const placed = [];
+    for (const e of cand) {
+        if (placed.every((p) => Math.abs(p.x - e.x) >= minSepPx)) placed.push(e);
+    }
+    return placed.sort((a, b) => a.x - b.x);
+}
