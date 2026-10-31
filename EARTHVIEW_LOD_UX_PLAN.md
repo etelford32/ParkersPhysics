@@ -1,8 +1,60 @@
 # EarthView — clouds · wind · isobars · ocean temperature: data, LOD and UX plan
 
 Status: **Phase 0 shipped 2026-10-26** (§4, one PR; its nine items are each
-node- or browser-gated — see the table). Phases 1–6 remain **planned, not
-built**. Written after a code audit of the
+node- or browser-gated — see the table). **2026-10-30, the regional-LOD pass
+shipped** — §1.1 the seam, §5.3 Tier B, a first cut of §10.4, plus three
+things this plan did not know about (see "2026-10-30" below). The rest of
+Phases 1–6 remain **planned, not built**.
+
+### 2026-10-30 — the regional-LOD pass (what shipped, what it found)
+
+- **Every globe pick read the ANTIPODE.** The icosphere's mesh UVs are
+  three's PolyhedronGeometry convention (azimuth atan2(z, −x), v flipped) —
+  the site geo convention turned 180° and mirrored north–south — and the
+  page decoded them with `geo.uvToLatLon`: hovering Kansas printed 37.78° S
+  81.67° E, double-click flew to the far side of the planet, and the column /
+  marine probes and the hover weather readouts sampled the wrong hemisphere.
+  The shader never used those UVs, which is why the picture was right.
+  `globeHits()` in earth.html is now an exact ray–sphere hit (O(1), so the
+  tessellation can rise); `window.__evPick` returns both answers and the
+  gate asserts the mesh one is the antipode (the negative control).
+- **The globe was 980 triangles.** three's icosahedron `detail` is linear
+  (20·(d+1)² faces); "level 6 ≈ 82 k triangles" was 980 with faces 26 km
+  inside the sphere — a polygon horizon under analytic cloud and wind
+  shells. The globe is now an LOD: detail 47 (46 080 faces, ≤ 0.56 km) up
+  close, detail 15 where its limb error is under half a pixel — an always-on
+  47 added ~5.5 s to page load on SwiftShader (43.4 vs 38.0 s, 1280×720). The
+  shells
+  detail 15 (clear the round globe by ≥ 8 km), the wind-trail occluder 23
+  (its "level 4 = 5 120 faces" was 500 with a ~45 km ring the far-side
+  trails showed through), the cloud-volume hull 16.
+- **§2.1 / §5.1 the seam** — `normalToUVMip` (Tarini's two-branch u,
+  js/geo/coords.glsl.js, OPT-IN under `GEO_SEAMLESS` so pages without
+  derivatives compile unchanged) on the physical surface's maps and every
+  cloud-mosaic tap. `?uvseam=legacy` is the control.
+- **§5.3 Tier B, the regional cloud window** — not WMTS tiles: the SAME
+  snapshot service the global mosaic already uses (verified in production),
+  the SAME layers at the SAME frame times, with the BBOX shrunk to the
+  footprint and the instruments' 2 km as the pixel floor
+  (`planRegionalDetail` + `fetchRegionalCloudImagery` + `js/cloud-regional.js`;
+  `SAT_DETAIL_GLSL` is the one shader read, used by the decal, the march and
+  the ground shadow). The window's margin is DERIVED from the footprint's
+  overscan, the inset feather and the snap so the viewport always sits in
+  its full-weight interior; a window straddling ±180° is fetched as two
+  BBOXes; a new global frame hides the old window at once (never two
+  instants). `?cloud_detail=0` is the control. **Unverified in production**
+  (NASA is egress-blocked here): that the snapshot service honours a sub-
+  global BBOX at 2 km — one networked page load settles it
+  (`window.__evCloudDetail()` → `status:'live'`, `diag.attempts`).
+- **§10.4, first cut** — "Go to a region" (js/geo-regions.js REGIONS framed
+  by sphere geometry in `js/earth-regions.js`), `?region=` / `?at=` deep
+  links, and a readout under it: tier (the regional window's own 45°), the
+  region under the camera, altitude, km per screen pixel, and which detail
+  windows are LOADED. Zoom-toward-cursor and an explicit surface mode remain
+  planned (§13.5 is still the author's).
+
+Gates: `node tests/cloud-regional.mjs tests/earth-regions.mjs` +
+`npx playwright test tests/earth-regional-lod.spec.js --workers=1`. Written after a code audit of the
 cloud / wind / isobar / ocean stacks and two production probes (the Supabase
 `weather_grid_cache` + `pipeline_heartbeat` tables and `/api/weather/grid`).
 Every number in §1 was measured; every cause in §2 is cited to a file and line,

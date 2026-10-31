@@ -194,10 +194,26 @@ export function discWeight(cosLat, dLonDeg) {
 // toward yesterday's MODIS by ~30%).
 const PRIMARY_SATURATION = 0.6;   // primary weight at which fill is fully masked
 
+/** The whole-globe grid every mosaic used before regional detail existed. */
+export const GLOBAL_BOUNDS = Object.freeze({ lonMin: -180, latMin: -90, lonSpan: 360, latSpan: 180 });
+
 export class MosaicAccumulator {
-    constructor(width, height) {
+    /**
+     * @param {number} width
+     * @param {number} height
+     * @param {{lonMin:number, latMin:number, lonSpan:number, latSpan:number}} [bounds]
+     *   The equirectangular box the grid covers (row 0 = its NORTH edge).
+     *   Defaults to the whole globe, with the SAME arithmetic the global grid
+     *   always used (−90 + 180 is exactly 90), so the global mosaic is bit-
+     *   identical. A regional box (Tier B, planRegionalDetail) may run past
+     *   +180° in longitude when it straddles the antimeridian; discWeight's
+     *   dLon wrap absorbs that. The finalize() band statistics assume the
+     *   whole globe and are only meaningful there (diagnostics, not pixels).
+     */
+    constructor(width, height, bounds = GLOBAL_BOUNDS) {
         this.width  = width;
         this.height = height;
+        this.bounds = bounds;
         const n = width * height;
         this._pcw = new Float32Array(n);   // primary Σ(cloudiness·w)
         this._pw  = new Float32Array(n);   // primary Σw
@@ -215,14 +231,15 @@ export class MosaicAccumulator {
         // (js/cloud-time.js, "EVERY DISC HAS ITS OWN TIME").
         this._acw = new Float32Array(n);
         // Row/col geometry caches shared by every addRegionRows call.
+        const latMax = bounds.latMin + bounds.latSpan;
         this._cosLat = new Float32Array(height);
         for (let j = 0; j < height; j++) {
-            const lat = 90 - ((j + 0.5) * 180) / height;   // row 0 = north
+            const lat = latMax - ((j + 0.5) * bounds.latSpan) / height;   // row 0 = north
             this._cosLat[j] = Math.cos(lat * Math.PI / 180);
         }
         this._lon = new Float32Array(width);
         for (let i = 0; i < width; i++) {
-            this._lon[i] = -180 + ((i + 0.5) * 360) / width;
+            this._lon[i] = bounds.lonMin + ((i + 0.5) * bounds.lonSpan) / width;
         }
     }
 
@@ -372,6 +389,141 @@ export class MosaicAccumulator {
         };
     }
 }
+
+// ── Regional detail: Tier B of the cloud LOD ladder ──────────────────────────
+// EARTHVIEW_LOD_UX_PLAN.md §5.3. The global mosaic is one 2048×1024 frame,
+// ~20 km per pixel at every zoom: zoomed to a region, one texel spans tens of
+// screen pixels and the weather is a blur. Tier B asks the SAME snapshot
+// service for the SAME layers at the SAME frame times — only the BBOX
+// shrinks to the camera footprint — and runs the result through the SAME
+// decode + compositor, so the window is a finer SAMPLE of the field already
+// on screen (plan §9.4: a layer's Tier-B field is never a re-tuned one). The
+// geostationary IR bands are 2 km at nadir (~0.018°), which is where the
+// pixel budget stops buying detail.
+// The window's MARGIN is derived, not typed: what the camera actually shows
+// (the footprint ÷ focus-footprint's own SPAN_MARGIN overscan) must sit in
+// the window's FULL-WEIGHT interior after the worst centre snap — the shared
+// insetWeight feather fades the outer FEATHER_FRAC of each edge, and the
+// snap moves the centre by up to half a snap cell. Typed at 1.1 it let the
+// view's edge reach the fade (caught by tests/cloud-regional.mjs §2).
+const FOOTPRINT_OVERSCAN = 1.25;   // js/focus-footprint.js SPAN_MARGIN (the test pins the mirror)
+const FEATHER_FRAC       = 0.12;   // js/geo/inset.glsl.js insetWeight smoothstep(0, 0.12, …) (pinned too)
+const SNAP_FRAC          = 0.125;  // centre snapped to ⅛ of the window: small pans reuse it
+
+export const REGIONAL_DETAIL = Object.freeze({
+    activateSpanDeg: 45,     // footprint lat span at/below which Tier B runs (the imagery inset's threshold)
+    nativeDegPerPx:  0.018,  // ABI / AHI / SEVIRI IR band 13 at nadir — finer pixels add nothing
+    minSpanDeg:      3,      // smallest window (the √2 span ladder starts here)
+    footprintOverscan: FOOTPRINT_OVERSCAN,
+    featherFrac:     FEATHER_FRAC,
+    snapFrac:        SNAP_FRAC,
+    // viewport/(1 − 2·feather − snap) ≈ 1.26 × the footprint
+    margin:          (1 / FOOTPRINT_OVERSCAN) / (1 - 2 * FEATHER_FRAC - SNAP_FRAC),
+    maxPx:           2048,   // per axis — one tile-sized upload, ~16 MB of RGBA readback at worst
+    minPx:           64,
+});
+
+const _wrap180 = (lon) => ((((lon + 180) % 360) + 360) % 360) - 180;
+
+/** The √2 ladder of window spans, so a slow zoom refetches at most every √2. */
+export function ladderSpanDeg(spanDeg, minSpanDeg = REGIONAL_DETAIL.minSpanDeg) {
+    const x = Math.max(minSpanDeg, Number.isFinite(spanDeg) ? spanDeg : minSpanDeg);
+    return minSpanDeg * Math.pow(2, Math.ceil(2 * Math.log2(x / minSpanDeg) - 1e-9) / 2);
+}
+
+/**
+ * Camera footprint (js/focus-footprint.js detail) → the regional window to
+ * fetch, or null above the activation span. Returns
+ *   { bounds:{lonMin, latMin, lonSpan, latSpan}, width, height, degPerPx,
+ *     segments:[{lonMin, lonMax, x0, w}], key }
+ * `bounds` is the insetUV convention (lonMin in [−180, 180), spans in
+ * degrees). A window that straddles the antimeridian comes back as TWO
+ * segments the glue draws side by side into one image, because the
+ * snapshot service's BBOX cannot run past ±180°.
+ */
+export function planRegionalDetail(fp, opts = {}) {
+    const o = { ...REGIONAL_DETAIL, ...opts };
+    if (!fp || !Number.isFinite(fp.spanLatDeg) || fp.spanLatDeg > o.activateSpanDeg) return null;
+    const r3 = (x) => Math.round(x * 1000) / 1000;
+    const latSpan = r3(Math.min(180, ladderSpanDeg(fp.spanLatDeg * o.margin, o.minSpanDeg)));
+    const lonSpan = r3(Math.min(360, ladderSpanDeg(Math.max(fp.spanLonDeg ?? 0, fp.spanLatDeg) * o.margin, o.minSpanDeg)));
+    const sLat = latSpan * o.snapFrac, sLon = lonSpan * o.snapFrac;
+    const cLat = Math.round(fp.centerLat / sLat) * sLat;
+    const cLon = Math.round(fp.centerLon / sLon) * sLon;
+    // Rounded ONCE, so the BBOX the glue requests and the bounds the shader
+    // maps through are the same numbers.
+    const r = r3;
+    const latMin = r(Math.max(-90, Math.min(90 - latSpan, cLat - latSpan / 2)));
+    const lonMin = r(lonSpan >= 360 ? -180 : _wrap180(cLon - lonSpan / 2));
+    // One degree-per-pixel for both axes (square texels on the sphere's
+    // chart), never finer than the instrument and never past maxPx.
+    const degPerPx = Math.max(o.nativeDegPerPx, Math.max(lonSpan, latSpan) / o.maxPx);
+    const width  = Math.max(o.minPx, Math.round(lonSpan / degPerPx));
+    const height = Math.max(o.minPx, Math.round(latSpan / degPerPx));
+    const lonMax = lonMin + lonSpan;
+    let segments;
+    if (lonMax <= 180 + 1e-9) {
+        segments = [{ lonMin, lonMax: Math.min(180, lonMax), x0: 0, w: width }];
+    } else {
+        const w1 = Math.max(1, Math.min(width - 1, Math.round(width * (180 - lonMin) / lonSpan)));
+        segments = [
+            { lonMin, lonMax: 180, x0: 0, w: w1 },
+            { lonMin: -180, lonMax: lonMax - 360, x0: w1, w: width - w1 },
+        ];
+    }
+    return {
+        bounds: { lonMin, latMin, lonSpan, latSpan },
+        width, height, degPerPx, segments,
+        key: `${latMin},${lonMin},${r(latSpan)},${r(lonSpan)},${width}x${height}`,
+    };
+}
+
+/**
+ * Does a geostationary disc centred at subLonDeg see any of the box? The
+ * same feather the compositor weights with (discWeight > 0), sampled on a
+ * 9×9 lattice of the box — a disc that cannot contribute a pixel is not
+ * fetched.
+ */
+export function discCoversBounds(bounds, subLonDeg, n = 9) {
+    if (!Number.isFinite(subLonDeg)) return true;
+    for (let a = 0; a < n; a++) {
+        const lat = bounds.latMin + (bounds.latSpan * a) / (n - 1);
+        const cosLat = Math.cos(lat * Math.PI / 180);
+        for (let b = 0; b < n; b++) {
+            const lon = bounds.lonMin + (bounds.lonSpan * b) / (n - 1);
+            const dLon = ((lon - subLonDeg + 540) % 360) - 180;
+            if (discWeight(cosLat, dLon) > 0) return true;
+        }
+    }
+    return false;
+}
+
+/** True when any part of the box lies poleward of the geostationary reach. */
+export function boundsNeedPolarFill(bounds, poleLat = 55) {
+    return bounds.latMin + bounds.latSpan > poleLat || bounds.latMin < -poleLat;
+}
+
+// GLSL: ONE copy of how a shader reads the cloud mosaic — the global frame
+// through the seam-safe UV (normalToUVMip, js/geo/coords.glsl.js) with the
+// regional window blended over it by the shared inset feather. Requires
+// GEO_GLSL + INSET_GLSL_HELPERS before it and `u_satellite` declared. The
+// window has no mipmaps (it is only ever MAGNIFIED: it activates at the
+// footprint size it was fetched for), so the branch's implicit derivatives
+// do not matter. NO BACKTICKS in here.
+export const SAT_DETAIL_GLSL = /* glsl */`
+uniform sampler2D u_sat_detail;           // Tier-B window, same RGBA encoding as u_satellite
+uniform highp vec4 u_sat_detail_bounds;   // lonMin, latMin, lonSpan, latSpan (degrees)
+uniform float u_sat_detail_on;
+vec4 sampleSat(vec3 n) {
+    vec4 s = texture2D(u_satellite, normalToUVMip(n));
+    if (u_sat_detail_on > 0.5) {
+        vec2  uvP = insetUV(normalToUV(n), u_sat_detail_bounds);
+        float w   = insetWeight(uvP);
+        if (w > 0.001) s = mix(s, texture2D(u_sat_detail, uvP), w);
+    }
+    return s;
+}
+`;
 
 // ── Blank-frame detector (Phase 0.7) ─────────────────────────────────────────
 // GIBS answers a TIME outside a layer's archive with HTTP 200 and a fully

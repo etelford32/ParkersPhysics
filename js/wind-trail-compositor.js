@@ -50,13 +50,18 @@
  * ────────────────────────────
  * • The offscreen pass needs the PLANET'S DEPTH or trails on the far side
  *   show through the globe. `render()` first draws an OCCLUDER — a
- *   colour-write-off icosphere at the planet's radius, level 4 (5 120
- *   faces; chord sag 6e-4 R, under a pixel at any zoom) parented to the
- *   globe so it follows its rotation — into the target's depth buffer,
- *   then the trails depth-tested against it. Drawing the real globe mesh
- *   (level 6, 81 920 faces) for its depth alone cost a visible slice of
- *   the frame on software GL (measured 2026-10-28: the page-boot gates
- *   went from passing to timing out). The occluder is selected by a THREE
+ *   colour-write-off icosphere at the planet's radius, detail
+ *   OCCLUDER_DETAIL (three's detail is LINEAR: 20·(d+1)² faces — this said
+ *   "level 4, 5 120 faces, sag 6e-4 R" until 2026-10-30, when level 4 was
+ *   500 faces whose centroids sat ~45 km inside the sphere, so trails just
+ *   behind the limb showed through a ring around the disc), parented to
+ *   the globe so it follows its rotation — into the target's depth buffer,
+ *   then the trails depth-tested against it. Detail 23 is 11 520 faces with
+ *   the centroid ≤ 2.3 km inside the sphere, under the surface trails'
+ *   19 km lift. Drawing the real globe mesh with its own material cost a
+ *   visible slice of the frame on software GL (measured 2026-10-28: the
+ *   page-boot gates went from passing to timing out) — a depth-only
+ *   occluder costs vertices, not fragments. The occluder is selected by a THREE
  *   layer (`globeLayer`), the trails by another (`trailLayer`); the main
  *   pass renders layer 0 only, so the trails are drawn exactly once and
  *   the occluder never. Layers are per-object, not inherited.
@@ -77,6 +82,9 @@
  */
 
 import { heroTone } from './hero-color.js';
+
+/** Occluder icosphere detail — linear in three (20·(d+1)² faces); see the header. */
+export const OCCLUDER_DETAIL = 23;
 
 /** Knee on the summed trails' PEAK channel: identity below, shoulder above. */
 export const TRAIL_TONE = Object.freeze({ knee: 0.60 });
@@ -191,7 +199,7 @@ export class TrailCompositor {
         // The occluder: planet depth only (colour write off, depth write on),
         // on the globe layer so the main pass never draws it.
         this._depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
-        this.occluder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 4), this._depthMat);
+        this.occluder = new THREE.Mesh(new THREE.IcosahedronGeometry(radius, OCCLUDER_DETAIL), this._depthMat);
         this.occluder.layers.set(globeLayer);
         this.occluder.frustumCulled = false;
         globe.add(this.occluder);
