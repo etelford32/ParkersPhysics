@@ -512,7 +512,7 @@ export class ForecastPaintProvider {
         this._trios.clear();
         this._coarse.clear();
         this._targets = [];
-        if (!dense) { this._issuedMs = null; return; }
+        if (!dense) { this._issuedMs = null; this._version = (this._version ?? 0) + 1; return; }
 
         const targets = [];
         for (const h of dense.horizons) {
@@ -537,6 +537,28 @@ export class ForecastPaintProvider {
         this._gridW    = dense.gridW;
         this._gridH    = dense.gridH;
         this._modelId  = dense.model_id ?? this._modelId;
+        this._version  = (this._version ?? 0) + 1;
+    }
+
+    /**
+     * Monotonic data version (bumps on every dense swap, including a swap to
+     * "no forecast"). js/weather-cube.js keys its index on it.
+     */
+    get version() { return this._version ?? 0; }
+
+    /**
+     * The dense forecast's COARSE frames, oldest first, for data consumers
+     * that sample points rather than paint textures (js/weather-cube.js).
+     * References, not copies — callers must not mutate them. No decode.
+     * @returns {{ t: number, coarse: Float32Array, gridW: number, gridH: number, source: string|null }[]}
+     */
+    coarseFrames() {
+        const out = [];
+        for (const t of this._targets) {
+            const coarse = this._coarse.get(t);
+            if (coarse) out.push({ t, coarse, gridW: this._gridW, gridH: this._gridH, source: this._modelId ?? null });
+        }
+        return out;
     }
 
     /**

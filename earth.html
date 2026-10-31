@@ -2191,6 +2191,41 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 #tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 #tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 
+/* Weather strip under the slider (js/time-strip.js). Same flex geometry as
+   #tc-scrub-row so the tracks align; the canvas fills it at device pixels.
+   touch-action:none so a horizontal drag scrubs instead of panning the page. */
+#tc-strip-row { display: flex; align-items: stretch; gap: 8px; padding: 0 4px; }
+#tc-strip {
+    position: relative; flex: 1; min-width: 0; height: 30px;
+    border-radius: 3px; background: rgba(255,255,255,.025);
+    cursor: ew-resize; touch-action: none; user-select: none;
+}
+#tc-strip.dragging { cursor: grabbing; }
+.tc-strip-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tc-strip-cursor {
+    position: absolute; top: -2px; bottom: -2px; left: 0; width: 2px; margin-left: -1px;
+    background: #0ee; box-shadow: 0 0 6px rgba(0,238,238,.6); pointer-events: none;
+    will-change: transform;
+}
+.tc-strip-place {
+    position: absolute; left: 4px; top: 1px; max-width: 45%;
+    font: 600 8px/1.2 ui-monospace, monospace; color: rgba(200,225,235,.75);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+    text-shadow: 0 0 3px #000;
+}
+.tc-strip-place.empty { color: rgba(160,170,190,.6); font-weight: 500; }
+.tc-strip-tip {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 3;
+    min-width: 180px; max-width: 320px; padding: 6px 8px;
+    background: rgba(6,14,24,.94); border: 1px solid rgba(0,200,200,.28); border-radius: 5px;
+    color: #cde; font-size: 11px; line-height: 1.35; pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+.tc-strip-tip[hidden] { display: none; }
+.tc-strip-tip-head { color: #0ee; font: 600 10px ui-monospace, monospace; margin-bottom: 2px; }
+.tc-strip-tip-src  { color: #8aa; font-size: 9.5px; margin-top: 2px; }
+@media (max-width: 768px) { #tc-strip { height: 34px; } }
+
 /* Wind-forecast skill strip. Five cells stacked horizontally below the
    scrubber, each a tiny bar coloured green→amber→red based on Murphy
    skill of our best wind forecaster vs persistence at that horizon.
@@ -4077,6 +4112,18 @@ import './js/telemetry.js';
                    title="Drag left to replay (up to 1 week back) or right to preview (up to 14 days ahead)">
             <span class="tc-scrub-edge right">+2w</span>
         </div>
+        <!-- Weather strip (EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md §6.1–6.2):
+             the selected place's temperature / rain / cloud / night on the
+             SAME axis as the slider above, a provenance band along its foot
+             (observed · nowcast · NWP), and a large drag target that scrubs
+             by writing the slider's own value + events (js/time-strip.js).
+             The edge spacers mirror #tc-scrub-row so the two tracks line up;
+             the strip still MEASURES the slider's thumb travel every paint. -->
+        <div id="tc-strip-row">
+            <span class="tc-scrub-edge" aria-hidden="true"></span>
+            <div id="tc-strip"></div>
+            <span class="tc-scrub-edge right" aria-hidden="true"></span>
+        </div>
         <!-- Wind-forecast skill strip. Five cells aligned roughly under
              the scrubber's forecast half (+1h, +3h, +6h, +12h, +24h).
              Each cell is a tiny vertical bar coloured by Murphy skill of
@@ -4343,6 +4390,8 @@ import { geo } from './js/geo/coords.js';
 import { GEO_GLSL } from './js/geo/coords.glsl.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import { solarPosition, sunTimes, compass16 } from './js/sun-altitude.js';
+import { WeatherCube } from './js/weather-cube.js';
+import { mountTimeStrip } from './js/time-strip.js';
 import { nextPasses } from './js/pass-predictor.js';
 import { VerdictCard } from './js/verdict-card.js';
 import { AirQualityFeed } from './js/air-quality-feed.js';
@@ -10197,6 +10246,14 @@ window._wxPaintProvider  = wxPaintProvider;
 window._wxForecastWorker = wxForecastWorker;
 window._wxForecastRegistry = wxForecastRegistry;
 window._wxGridHistory      = wxGridHistory;
+// ── The shared weather store (EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md §3) ──
+// ONE read-only index over the observed ring, the in-browser nowcast and the
+// NWP forecast ring, answering "what is the weather at (lat, lon, t)?" with
+// provenance. The globe still paints through wxResolver (the T3 GPU atlas
+// replaces that); point/series consumers — the time-bar strip first — read
+// this. `var` + window hook: animate() may run before later blocks.
+var wxCube = new WeatherCube({ history: wxGridHistory, nowcast: wxPaintProvider });
+window.__evCube = wxCube;
 window._tempVolFeed        = tempVolFeed;
 
 // ── Multi-level model → 3-D temperature volume coupling ──────────────────
@@ -14507,6 +14564,37 @@ document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
 _setSimSpeed(1);
 _setSimPaused(false);
 
+// ── Weather strip under the slider (js/time-strip.js) ──────────────────
+// The place is the saved location; with none set, the point at the centre
+// of the view (the focus footprint), so the strip is never empty for a
+// first-time visitor. Errors here must never take the time bar down.
+var _timeStrip = null;
+try {
+    _timeStrip = mountTimeStrip({
+        host: document.getElementById('tc-strip'),
+        scrubEl: _scrubEl,
+        cube: wxCube,
+        getPlace: () => {
+            const loc = loadUserLocation();
+            if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
+                return { lat: loc.lat, lon: loc.lon, label: `📍 ${loc.city || `${loc.lat.toFixed(1)}°, ${loc.lon.toFixed(1)}°`}` };
+            }
+            // View centre snapped to whole degrees: the data is 5° cells, and
+            // an unsnapped centre under auto-rotate would repaint every poll.
+            const fp = focusFootprint.getFootprint();
+            if (fp && Number.isFinite(fp.centerLat)) {
+                const lat = Math.round(fp.centerLat), lon = Math.round(fp.centerLon);
+                return { lat, lon, label: `⌖ view centre ${lat}°, ${lon}°` };
+            }
+            return null;
+        },
+    });
+    window.addEventListener('user-location-changed', () => _timeStrip?.refresh());
+    window.__evTimeStrip = _timeStrip;
+} catch (e) {
+    console.warn('[EarthView] weather strip failed to mount:', e);
+}
+
 // ── 24-h replay slider — release-side wiring ────────────────────────────
 // The `input` listener (drag/keyboard → simTimeMs) is hoisted to right
 // after timeBus.start() so it survives any throw in the heavy init that
@@ -14694,6 +14782,9 @@ function animate() {
             _scrubEl.value = String(clamped.toFixed(0));
         }
     }
+    // Weather-strip cursor (one transform write when it moves ≥ 0.5 px) and
+    // its O(1) data-version poll. Guarded: the strip is optional chrome.
+    if (typeof _timeStrip !== 'undefined' && _timeStrip) _timeStrip.update(simTimeMs);
 
     // ── Earth rotation (decoupled from simTimeMs) ───────────────────────
     // Toggle in the SW panel header. ON: track real wall-clock GMST so

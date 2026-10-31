@@ -1,0 +1,77 @@
+name: weather-time-kernels
+
+# The PURE modules behind EarthView's weather time engine
+# (EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md), gated in node on every change that
+# touches them — seconds, no browser, no npm install (the tests import only
+# node:* and the repo's own ES modules):
+#
+#   weather-cube.mjs            the shared store: stencil geometry, PARITY with
+#                               the real WeatherFrameResolver across observed →
+#                               nowcast → seam → NWP (with a negative control),
+#                               the collision rule, gaps-are-null, coverage,
+#                               derived variables, the version cache, speed
+#   time-strip-model.mjs        the time-bar strip's geometry: the slider's
+#                               axis, gap-broken lines, rain bars, bands
+#   weather-forecast-smoke.mjs  the history rings the cube indexes
+#   weather-decode-identity.mjs the decode the resolver parity relies on
+#
+# The browser gate (tests/earth-time-strip.spec.js) is NOT in this job: it
+# needs Chromium and a dev server. Run it locally per the CLAUDE.md row.
+
+on:
+  push:
+    paths:
+      - 'js/weather-cube.js'
+      - 'js/time-strip-model.js'
+      - 'js/time-strip.js'
+      - 'js/weather-history.js'
+      - 'js/weather-forecast.js'
+      - 'js/weather-frame-resolver.js'
+      - 'js/weather-decode.js'
+      - 'js/composite-indices.js'
+      - 'js/temp-ramp.js'
+      - 'tests/weather-cube.mjs'
+      - 'tests/time-strip-model.mjs'
+      - '.github/workflows/weather-time-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/weather-cube.js'
+      - 'js/time-strip-model.js'
+      - 'js/time-strip.js'
+      - 'js/weather-history.js'
+      - 'js/weather-forecast.js'
+      - 'js/weather-frame-resolver.js'
+      - 'js/weather-decode.js'
+      - 'js/composite-indices.js'
+      - 'js/temp-ramp.js'
+      - 'tests/weather-cube.mjs'
+      - 'tests/time-strip-model.mjs'
+      - '.github/workflows/weather-time-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weather-time-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Weather time kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: shared weather store (resolver parity)
+        run: node tests/weather-cube.mjs
+      - name: time-bar strip geometry
+        run: node tests/time-strip-model.mjs
+      - name: history rings
+        run: node tests/weather-forecast-smoke.mjs
+      - name: decode identity
+        run: node tests/weather-decode-identity.mjs

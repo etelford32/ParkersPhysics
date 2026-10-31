@@ -166,7 +166,15 @@ export class WeatherHistory {
         // hour — the ring buffer dedupes by key, but skipping IDB avoids
         // a redundant txn.
         this._lastHourKey = 0;
+        // Monotonic data version: bumps on every ingest / forecast ingest /
+        // purge, including a same-hour REPLACEMENT that leaves the sizes
+        // unchanged. js/weather-cube.js rebuilds its merged index only when
+        // this moves (EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md §3).
+        this._version = 0;
     }
+
+    /** Monotonic data version — see constructor note. */
+    get version() { return this._version; }
 
     /**
      * Open IndexedDB and warm the ring buffer from any persisted rows.
@@ -259,6 +267,7 @@ export class WeatherHistory {
         // past max_rows (e.g. crash before prune ran).
         const start = Math.max(0, compatible.length - TIER.max_rows);
         for (let i = start; i < compatible.length; i++) this._ring.push(compatible[i]);
+        this._version++;
         if (compatible.length > 0) {
             this._lastHourKey = _hourKey(compatible[compatible.length - 1].t);
         }
@@ -328,6 +337,7 @@ export class WeatherHistory {
         } else {
             this._ring.push(rec);
         }
+        this._version++;
 
         // IDB: only put if we've crossed an hour boundary (or first ingest)
         // — within-hour duplicates collapse on the ring anyway and skipping
@@ -419,6 +429,7 @@ export class WeatherHistory {
         } else {
             this._forecastRing.push(rec);
         }
+        this._version++;
     }
 
     /**
@@ -448,6 +459,7 @@ export class WeatherHistory {
         this._forecastRing._head = 0;
         this._forecastRing._size = 0;
         for (const r of survivors) this._forecastRing.push(r);
+        this._version++;
     }
 
     /** All forecast frames in the ring, oldest first. */

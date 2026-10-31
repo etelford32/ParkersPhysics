@@ -1,7 +1,53 @@
 # EarthView — the weather time engine: one 4-D weather cube, a scrubber that shows the weather, physics between the frames
 
-Status: **written 2026-10-31. Planned, not built.** Nothing in this document
-has shipped.
+Status: **written 2026-10-31. T1 (the shared store) SHIPPED 2026-10-31,
+with the first slice of T4 (the strip under the slider) on top of it.**
+Author's direction for this work: consumer-oriented, UI-first, fast and easy.
+Everything else below is planned, not built.
+
+### 2026-10-31 — what shipped (T1 + the T4.1/T4.2 strip)
+
+- **`js/weather-cube.js` (PURE)** — the facade over `WeatherHistory`
+  (observed + NWP rings) and `ForecastPaintProvider` (the in-browser RK2
+  nowcast). `sample` / `sampleMany` / `series` / `coverage` / `resolve`, every
+  answer with provenance, source, `stale` and `held`. Merged index rebuilt
+  only when a source's new `version` counter moves (both sources gained one,
+  additively, plus `ForecastPaintProvider.coarseFrames()`); a 21-day,
+  five-variable hourly series measures ~1.2 ms in node.
+- **Resolver parity is GATED, not asserted in prose**: `tests/weather-cube.mjs`
+  drives the REAL `WeatherFrameResolver` with the real rings and an identity
+  decode and requires the cube's t2m to equal its scratch buffer across
+  observed → nowcast → seam → NWP (>300 cell×instant comparisons), with a
+  negative control (seam blend off must disagree inside the seam).
+  Two deliberate divergences, both for DATA consumers only (the render path
+  is untouched): a gap wider than `MAX_INTERP_GAP_MS` (3 h) is `held`/null
+  instead of lerped across, and the exact observation hour is labelled
+  `observed` rather than handed to the model (same frame value).
+- **The resolver is NOT yet a cube consumer.** §3.2 planned it; it was
+  deferred because the T3 GPU atlas replaces the resolver's dispatch outright,
+  and porting it twice buys nothing. The parity gate is what keeps the two
+  from drifting until then.
+- **The strip** (`js/time-strip-model.js` PURE + `js/time-strip.js` DOM,
+  `#tc-strip` under `#tc-scrub`): the saved place's (else the view centre's)
+  temperature line in the shared temperature ramp, √-scaled rain bars, a
+  cloud veil, night shading from `sun-altitude.js`, local-day ticks, and the
+  provenance band (observed · nowcast · NWP, stale hatched, nothing where
+  nothing is loaded). It MEASURES the range input's thumb travel each paint,
+  so the two axes match to the pixel (gated). Dragging it scrubs by writing
+  the slider's value and dispatching the slider's own `input`/`change`
+  events — still ONE writer of the time bus. Hover shows exact values with
+  units, local time, and the source. Per frame it costs one transform write
+  and a once-a-second O(1) version poll.
+- Gates: `node tests/weather-cube.mjs tests/time-strip-model.mjs`
+  (CI: `.github/workflows/weather-time-kernels.yml`) +
+  `npx playwright test tests/earth-time-strip.spec.js --workers=1` (hermetic,
+  seeds a known day into the real rings; its negative control empties them
+  and requires no rain, no line, no bands). The bar is ~34 px taller; the
+  top-rail overlap gate (`tests/earth-time-controls-position.spec.js`) passes
+  at every width when given the time the sandbox needs to load the page
+  (`--timeout=240000`; at 60 s the 1440/1920 loads time out, as recorded).
+- Next, per §9: T3 (GPU atlas) then T2 (flow-morph). The strip's next
+  consumer-facing steps are §6.3 event markers and §6.4 playback/range brush.
 
 Companion plans this one sits on top of, and does NOT re-plan:
 
