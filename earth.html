@@ -592,8 +592,37 @@ body.theme-light .layer-tools {
 #layer-search-status {
     color:var(--c-text-muted); font-size:9px; white-space:nowrap;
 }
+/* VIEW block: region picker + LOD readout (js/earth-regions.js). */
+.layer-view { margin-top:6px; }
+.layer-region-wrap {
+    display:flex; align-items:center; gap:6px;
+    height:30px; padding:0 4px 0 8px;
+    background:rgba(255,255,255,.055);
+    border:1px solid var(--c-border-soft); border-radius:6px;
+    color:var(--c-text-muted);
+}
+.layer-region-wrap:focus-within {
+    border-color:var(--c-accent-border-hi);
+    box-shadow:0 0 0 2px rgba(var(--c-accent-rgb), .10);
+}
+#ev-region {
+    flex:1; min-width:0; height:26px; border:0; outline:0; background:transparent;
+    color:var(--c-text-primary); font:inherit; font-size:11px; cursor:pointer;
+}
+#ev-region option, #ev-region optgroup { background:#0b1222; color:#dfe7f5; }
+#ev-lod { margin-top:5px; font-size:9.5px; line-height:1.45; color:var(--c-text-muted); }
+#ev-lod-line { display:flex; gap:6px; align-items:baseline; min-width:0; }
+#ev-lod-tier { color:var(--c-text-primary); font-weight:600; white-space:nowrap; }
+#ev-lod-tier[data-tier="regional"], #ev-lod-tier[data-tier="local"] { color:var(--c-accent); }
+#ev-lod-where { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#ev-lod-sources:empty { display:none; }
+#ev-lod-sources { color:var(--c-text-muted); opacity:.9; }
 #layer-feedback {
-    display:none; position:sticky; top:58px; z-index:3;
+    /* Sticks just under the sticky .layer-tools, whose height is MEASURED
+       (--layer-tools-h, published by a ResizeObserver beside the region
+       picker) — it grew a VIEW block, and the old typed 58px slid this
+       banner under it. */
+    display:none; position:sticky; top:var(--layer-tools-h, 58px); z-index:3;
     margin:0 0 var(--sp-3); padding:7px 24px 7px 9px;
     border:1px solid rgba(255,179,71,.30); border-radius:6px;
     background:#2a1b0c; color:#ffd59a;
@@ -2937,6 +2966,24 @@ import './js/telemetry.js';
                 </div>
                 <span id="layer-search-status" aria-live="polite"></span>
             </div>
+            <!-- VIEW: where the camera is and how much detail the data has
+                 there. The region list is js/geo-regions.js REGIONS (the
+                 site's one table of named boxes), framed by
+                 js/earth-regions.js; the readout's tier is the same
+                 footprint span the regional layers switch on at. -->
+            <div class="layer-view">
+                <label class="layer-region-wrap" for="ev-region" title="Fly to a region framed for regional weather detail">
+                    <span aria-hidden="true">◎</span>
+                    <select id="ev-region" aria-label="Fly to a region">
+                        <option value="">Go to a region…</option>
+                    </select>
+                </label>
+                <div id="ev-lod" aria-live="polite">
+                    <div id="ev-lod-line"><span id="ev-lod-tier">Global view</span><span id="ev-lod-where"></span></div>
+                    <div id="ev-lod-meta"><span id="ev-lod-alt">—</span> · <span id="ev-lod-scale">—</span></div>
+                    <div id="ev-lod-sources"></div>
+                </div>
+            </div>
         </div>
 
         <div id="layer-feedback" role="status" aria-live="polite">
@@ -3093,7 +3140,7 @@ import './js/telemetry.js';
                 <div class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-atm"><label for="lyr-atm">Atmosphere</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-aurora"><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></div>
-                <div class="lyr"><input type="checkbox" id="lyr-lights"><label for="lyr-lights">City Lights</label></div>
+                <div class="lyr" title="City lights as seen from orbit: emitted light, switched on after civil twilight (Sun 6° below the horizon)."><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-grid"><label for="lyr-grid">Lat/Lon Grid</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-tropic"><label for="lyr-tropic">Tropics</label></div>
                 <div class="lyr" title="Debug: marker at the sub-solar point"><input type="checkbox" id="lyr-subsolar"><label for="lyr-subsolar">Subsolar pt</label></div>
@@ -4218,6 +4265,8 @@ import { WindColumns } from './js/wind-column.js';
 // Module singleton — already booted by the early telemetry side-effect
 // import in <head>; the named binding just gives this module a handle.
 import { telemetry } from './js/telemetry.js';
+import { regionList, regionById, regionView, parseAtParam, viewTier, groundKmPerPx, formatAltitude, formatScale } from './js/earth-regions.js';
+import { labelRegion } from './js/geo-regions.js';
 import { WeatherHistory }        from './js/weather-history.js';
 import { WeatherFrameResolver }  from './js/weather-frame-resolver.js';
 import { WeatherForecastFeed }   from './js/weather-forecast-feed.js';
@@ -4277,6 +4326,8 @@ import { AuroraHistory } from './js/aurora-history.js';
 import { forecastAurora as predictAurora, AURORA_HORIZONS_H } from './js/aurora-forecast.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { SatelliteFeed } from './js/satellite-feed.js';
+import { fetchRegionalCloudImagery } from './js/cloud-imagery.js';
+import { RegionalCloudDetail } from './js/cloud-regional.js';
 import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
@@ -4311,7 +4362,7 @@ import { MAJOR_CITIES } from './js/data/major-cities.js';
 // that need 60 Hz call getState() inline from their own animate loop.
 import { timeBus } from './js/operations/time-bus.js';
 import {
-    EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
+    EARTH_VERT, EARTH_FRAG, EARTH_FRAG_PHYSICAL, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
     AURORA_VERT, AURORA_FRAG, TEMPVOL_VERT, TEMPVOL_FRAG,
     createEarthUniforms, createCloudUniforms, createAuroraUniforms,
     createTempVolumeUniforms,
@@ -4455,6 +4506,35 @@ function solarDeclination(jd) {
 // canonical frame (+X = prime meridian, +Y = north pole, -Z = 90°E).
 function geoToXYZ(lat, lon) {
     return geo.deg.latLonToPosition(lat, lon);
+}
+
+// ── Analytic globe pick ─────────────────────────────────────────────────────
+// EVERY "where on Earth is the pointer" question goes through here, never a
+// mesh raycast against earthMesh. The mesh's own UVs are three's
+// PolyhedronGeometry convention — azimuth atan2(z, −x) and v flipped — which
+// is the site geo convention (js/geo/coords.js: lon = atan2(−z, x), v = 0 at
+// 90°N) turned 180° and mirrored north–south: decoded with geo.uvToLatLon a
+// mesh UV names the ANTIPODE. Until 2026-10-30 the hover readout over Kansas
+// said 37.78° S 81.67° E, double-click flew to the far side of the planet,
+// and the column / marine probes sampled the wrong hemisphere. The shader
+// never used those UVs (it rebuilds them from the normal), which is why the
+// picture was right and every pick was wrong.
+// An exact ray–sphere hit is also O(1), so the globe's tessellation can rise
+// without making the per-frame hover raycast cost scale with it.
+// Returns the intersectObject shape ([] or [{ point, uv, distance, object }])
+// so call sites only change their source.
+const _gpInv = new THREE.Matrix4();
+const _gpRay = new THREE.Ray();
+const _gpHit = new THREE.Vector3();
+const _gpSphere = new THREE.Sphere(new THREE.Vector3(), R_EARTH);
+function globeHits(raycaster) {
+    earthMesh.updateMatrixWorld();
+    _gpInv.copy(earthMesh.matrixWorld).invert();
+    _gpRay.copy(raycaster.ray).applyMatrix4(_gpInv);
+    if (!_gpRay.intersectSphere(_gpSphere, _gpHit)) return [];
+    const uv = geo.normalToUV(_gpHit.clone().normalize());
+    const point = _gpHit.clone().applyMatrix4(earthMesh.matrixWorld);
+    return [{ point, uv, distance: raycaster.ray.origin.distanceTo(point), object: earthMesh }];
 }
 
 function fmtLat(d) { return `${Math.abs(d).toFixed(2)}° ${d >= 0 ? 'N' : 'S'}`; }
@@ -4760,6 +4840,12 @@ const SUN_EQ = sunDirectionEquatorial(julianDay(new Date()));
 const earthU = createEarthUniforms(SUN_EQ.clone());
 earthU.u_kp.value = 1;  // set non-zero default so aurora is ready
 const cloudU = createCloudUniforms(SUN_EQ.clone());
+// ONE regional cloud window (Tier B, js/cloud-regional.js) for the decal, the
+// march and the ground shadow: the entries are SHARED objects, set before any
+// material compiles (three caches the uniform objects per program).
+earthU.u_sat_detail        = cloudU.u_sat_detail;
+earthU.u_sat_detail_bounds = cloudU.u_sat_detail_bounds;
+earthU.u_sat_detail_on     = cloudU.u_sat_detail_on;
 // Share weather texture between Earth surface and cloud shaders
 // (set after weather DataTexture is created below)
 const atmU   = { u_sun_dir: { value: SUN_EQ.clone() } };
@@ -4821,25 +4907,93 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
-// Earth, cloud, and aurora shells are IcosahedronGeometry at matching level 6
-// (≈40 k verts / ≈82 k triangles each, ~40 km equator-edge length). Three
-// properties this guarantees that SphereGeometry couldn't:
-//   1. No pole fans — every triangle has the same shape, so the fragment
-//      shader can reconstruct equirectangular UV from the interpolated
-//      surface normal without a wedge-of-longitude artifact at the poles.
-//   2. Earth and cloud topology align exactly, so cloud features sit on top
-//      of their underlying surface pixels at every latitude (no more
-//      "floating" cloud bands at polar latitudes from mismatched segment
-//      counts between the two shells).
-//   3. Uniform triangle size across the globe means procedural noise sampled
-//      against the surface has the same spatial frequency everywhere — no
-//      bias toward east-west stretching from equirectangular UV.
-// Stratosphere + atmosphere rim shells below stay on SphereGeometry: they're
-// fresnel-only, don't sample textures, and never produced stripes.
-const ICO_LEVEL = 6;
-const earthGeo = new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL);
+// Earth, cloud, aurora and overlay shells are IcosahedronGeometry, whose
+// fragment shaders rebuild equirectangular UV from the interpolated normal —
+// so there are no pole fans and no antimeridian seam from mesh UVs, and
+// procedural noise has the same spatial frequency everywhere.
+//
+// THREE'S ICOSAHEDRON `detail` IS LINEAR, NOT A RECURSION DEPTH: detail d
+// gives 20·(d+1)² faces. This block used to say level 6 meant "≈82 k
+// triangles, ~40 km edges"; it meant 980 triangles with 9° (1000 km) edges,
+// whose faces sit up to 26 km INSIDE the sphere — a polygon horizon at zoom
+// under analytic cloud and wind shells that are true spheres (the same scar
+// CLAUDE.md records for upper-atmosphere's EARTH_ICO_DETAIL).
+//   • The GLOBE is ICO_LEVEL_EARTH = 47 UP CLOSE: 46 080 faces, 1.3° edges,
+//     the face centroid at most 0.56 km under the sphere (≈1 px at the limb
+//     from the camera floor). Picking does not scale with it — globeHits() is
+//     an analytic ray–sphere hit. It is an LOD, not a constant: 138 k vertices
+//     cost every frame, and on a software rasteriser the always-on level-47
+//     globe added ~5.5 s to page load (43.4 vs 38.0 s at 1280×720, measured
+//     2026-10-30). Far off,
+//     the globe draws at ICO_LEVEL_EARTH_FAR = ICO_LEVEL; `_updateGlobeLod`
+//     swaps on the limb's PIXEL error (sag × focal / √(d² − 1) < 0.5 px), so
+//     the swap is invisible by construction. The near geometry is built on
+//     first need.
+//   • The translucent shells and overlays are ICO_LEVEL = 15 (5 120 faces,
+//     centroid sag 0.0008 R). The lowest of them (the low cloud deck at the
+//     far-view ramp, 1.0019 R; the obs overlay, 1.002 R) still clears the
+//     round globe everywhere, which is all the old "match the globe's level"
+//     rule protected — and eleven shells at level 47 would cost ~48 MB of
+//     vertex buffers for no visible gain.
+const ICO_LEVEL_EARTH = 47;
+const ICO_LEVEL = 15;
+const ICO_LEVEL_EARTH_FAR = ICO_LEVEL;
+const earthGeo = new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL_EARTH_FAR);
+let _earthGeoNear = null;
+// Worst face-centroid sag below the unit sphere for icosphere detail d: the
+// subdivided edge is ~63.43°/(d+1) of arc and the centroid sits edge/√3 from
+// each vertex (0.0008 R at 15, 8.8e-5 R at 47 — the numbers quoted above).
+const _icoSag = (d) => 1 - Math.cos((63.435 * Math.PI / 180) / (d + 1) / Math.sqrt(3));
+const _GLOBE_FAR_SAG = _icoSag(ICO_LEVEL_EARTH_FAR);
+const _globeGeoByDetail = new Map();
+function _updateGlobeLod() {
+    if (_globeDetailOverride != null) {
+        // Test hook: the limb gate draws the SAME view at forced levels (the
+        // pre-2026-10-30 level 6 is its negative control).
+        const want = _globeDetailOverride;
+        if (earthMesh.geometry.parameters.detail !== want) {
+            let g = want === ICO_LEVEL_EARTH_FAR ? earthGeo : _globeGeoByDetail.get(want);
+            if (!g) { g = new THREE.IcosahedronGeometry(R_EARTH, want); _globeGeoByDetail.set(want, g); }
+            earthMesh.geometry = g;
+        }
+        return;
+    }
+    const d = camera.position.length() / R_EARTH;
+    const focalPx = (renderer.domElement.height / 2) / Math.tan((camera.fov * Math.PI / 180) / 2);
+    const limbPx = _GLOBE_FAR_SAG * focalPx / Math.sqrt(Math.max(1e-6, d * d - 1));
+    const near = earthMesh.geometry !== earthGeo;
+    // 0.5 px to go fine, 0.4 px to come back: a hold band so a camera parked
+    // on the threshold does not swap every frame.
+    if (!near && limbPx > 0.5) {
+        _earthGeoNear ??= new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL_EARTH);
+        earthMesh.geometry = _earthGeoNear;
+    } else if (near && limbPx < 0.4) {
+        earthMesh.geometry = earthGeo;
+    }
+}
+// The surface is PHYSICALLY LIT (js/earth-surface-light.js): Lambert under a
+// slant-path-reddened Sun, a dark night side, city lights + space-weather
+// glows as emitters after the lighting, a Cox–Munk + Fresnel ocean whose
+// roughness follows the live 10 m wind, and aerial perspective. ONE shader
+// text, shared with the terrain patch below so the two cannot disagree.
+// ?earthlight=legacy is the old half-Lambert path (the A/B, and the negative
+// control in tests/earth-surface-light.spec.js).
+// ?uvseam=legacy drops the seam-safe UV (GEO_SEAMLESS, js/geo/coords.glsl.js)
+// from the surface and every cloud material: the antimeridian mip line comes
+// back — the negative control in tests/earth-regional-lod.spec.js.
+const GEO_SEAMLESS_ON = new URLSearchParams(location.search).get('uvseam') !== 'legacy';
+// ?relief=forward puts back the one-texel forward-difference relief slope
+// (the negative control of tests/earthview-validation.spec.js 'relief').
+const EARTH_SURFACE_FRAG = (() => {
+    const q = new URLSearchParams(location.search);
+    let frag = q.get('earthlight') === 'legacy' ? EARTH_FRAG : EARTH_FRAG_PHYSICAL;
+    if (q.get('relief') === 'forward') frag = '#define EARTH_RELIEF_FORWARD\n' + frag;
+    return GEO_SEAMLESS_ON ? frag : frag.replace('#define GEO_SEAMLESS\n', '');
+})();
+const SEAMLESS_DEFINES = GEO_SEAMLESS_ON ? { GEO_SEAMLESS: 1 } : {};
 const earthMat = new THREE.ShaderMaterial({
-    vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
+    vertexShader: EARTH_VERT, fragmentShader: EARTH_SURFACE_FRAG,
+    extensions: { derivatives: true },   // normalToUVMip's fwidth (WebGL1 only; core in WebGL2)
     uniforms: earthU,
 });
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
@@ -4850,7 +5004,7 @@ scene.add(earthMesh);
 // A high-subdivision grid mesh over the camera footprint whose vertices are
 // displaced radially by the elevation map, so real ridgelines break the limb
 // (bump mapping can shade a slope but never change the silhouette). It parents
-// to earthMesh and SHARES earthU + EARTH_FRAG, so it shades identically to the
+// to earthMesh and SHARES earthU + EARTH_SURFACE_FRAG, so it shades identically to the
 // globe beneath — no seam (see js/earth-terrain-patch.js).
 //
 // Behind a flag until it can be tuned on a real GPU: opt in with ?terrain3d=1
@@ -4866,7 +5020,7 @@ const TERRAIN3D_ON = (() => {
 let terrainPatch = null;
 try {
     terrainPatch = new EarthTerrainPatch({
-        THREE, earthMesh, earthUniforms: earthU, fragmentShader: EARTH_FRAG,
+        THREE, earthMesh, earthUniforms: earthU, fragmentShader: EARTH_SURFACE_FRAG,
     });
     terrainPatch.setEnabled(TERRAIN3D_ON && !_isMobileUA);
 } catch (e) {
@@ -4894,6 +5048,8 @@ const cloudGeo = new THREE.IcosahedronGeometry(R_CLOUDS, ICO_LEVEL);
 const cloudMat = new THREE.ShaderMaterial({
     vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
     uniforms: cloudU, transparent: true, depthWrite: false,
+    // Seam-safe mosaic taps — see normalToUVMip in js/geo/coords.glsl.js.
+    defines: { ...SEAMLESS_DEFINES }, extensions: { derivatives: true },
 });
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
 cloudMesh.renderOrder = 3;   // after atmosphere glow, so clouds alpha-blend on top
@@ -4926,7 +5082,8 @@ var cloudShellMeshes = null;
             vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
             uniforms: Object.assign({}, cloudU, { u_shell_lift: { value: lift } }),
             transparent: true, depthWrite: false,
-            defines: { SHELL_SPLIT: 1, SHELL_LAYER: layer },
+            defines: { SHELL_SPLIT: 1, SHELL_LAYER: layer, ...SEAMLESS_DEFINES },
+            extensions: { derivatives: true },
         });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.renderOrder = order;
@@ -4963,6 +5120,9 @@ var cloudVolumeCompositor = null;
     // Share the live data entries — NOT copies.
     cloudVolumeU.u_cloud_layers = cloudU.u_cloud_layers;
     cloudVolumeU.u_satellite    = cloudU.u_satellite;
+    cloudVolumeU.u_sat_detail        = cloudU.u_sat_detail;
+    cloudVolumeU.u_sat_detail_bounds = cloudU.u_sat_detail_bounds;
+    cloudVolumeU.u_sat_detail_on     = cloudU.u_sat_detail_on;
     cloudVolumeU.u_weather      = cloudU.u_weather;
     cloudVolumeU.u_sun_dir      = cloudU.u_sun_dir;
     cloudVolumeU.u_satellite_on = cloudU.u_satellite_on;
@@ -4975,6 +5135,7 @@ var cloudVolumeCompositor = null;
     cloudVolumeU.u_wind_max     = cloudU.u_wind_max;
     cloudVolumeU.u_sat_weight   = cloudU.u_sat_weight;
     cloudVolumeMesh = createVolumeMesh(cloudVolumeU);
+    if (!GEO_SEAMLESS_ON) { delete cloudVolumeMesh.material.defines.GEO_SEAMLESS; cloudVolumeMesh.material.needsUpdate = true; }
     cloudVolumeMesh.visible = false;
     // HALF-RESOLUTION: the mesh renders into the compositor's private scene
     // at a fraction of the drawing buffer, and its screen QUAD stands in the
@@ -9470,6 +9631,24 @@ wxFeed.backfill(wxGridHistory, BACKFILL_HOURS).then(n => {
 const focusFootprint = new FocusFootprint({
     camera, earthObject: earthMesh, radius: R_EARTH,
 });
+
+// ── Regional cloud window (Tier B of the cloud LOD ladder) ──────────────────
+// js/cloud-regional.js: below a 45° footprint the SAME satellite layers at
+// the SAME frame times are fetched over just that box at the instruments'
+// 2 km and feathered over the global 20 km frame in the decal, the march and
+// the ground shadow (SAT_DETAIL_GLSL). Off for a frame it was not fetched
+// for. `?cloud_detail=0` keeps the global frame only (the A/B and the gate's
+// negative control).
+const _regionalCloudsOff = new URLSearchParams(location.search).get('cloud_detail') === '0';
+const regionalClouds = new RegionalCloudDetail({
+    THREE, uniforms: cloudU, fetch: fetchRegionalCloudImagery,
+    isActive: () => !_regionalCloudsOff && (document.getElementById('lyr-clouds')?.checked ?? true),
+});
+document.addEventListener('focus-footprint-change', e => regionalClouds.setFootprint(e.detail));
+window.addEventListener('satellite-update', e => regionalClouds.setSources(e.detail));
+document.getElementById('lyr-clouds').addEventListener('change', () => regionalClouds.refresh());
+regionalClouds.setFootprint(focusFootprint.getFootprint?.() ?? null);
+window.__evCloudDetail = () => regionalClouds.state();
 const wxPatchFeed = new WeatherPatchFeed();
 
 // "+ patch 64×48 · 0.5°" suffix for the wx-panel grid readout. Composed
@@ -10733,16 +10912,13 @@ function _createObsOverlay(layerId) {
     const layerDef = EARTH_OBS_LAYERS.find(l => l.id === layerId);
     const opacity  = layerDef?.opacity ?? 0.55;
 
-    // Match the surface mesh's icosphere EXACTLY so cloud + obs + earth all
-    // share the same tessellation and don't drift relative to each
-    // other when sidereal rotation accumulates floating-point error.
-    //
-    // We previously dropped the obs overlay one subdivision below
-    // ICO_LEVEL "to save fragments", but with multiple overlays
-    // stacked the level mismatch left the obs faces slightly poking
-    // through between Earth-surface triangles — a faint hexagonal
-    // banding the user could clearly see on the AOD layer. Matching
-    // ICO_LEVEL costs <1ms/frame and removes the banding entirely.
+    // The overlay must clear the globe EVERYWHERE. It once dropped a
+    // subdivision below the globe "to save fragments" and its faces dipped
+    // between the Earth's triangles — a faint hexagonal banding the user
+    // could clearly see on the AOD layer. With the globe now finer than the
+    // shells (ICO_LEVEL_EARTH 47 vs ICO_LEVEL 15, see the MESHES block) the
+    // rule is clearance, not matching: at ICO_LEVEL the faces dip ≤ 0.0008 R,
+    // so at 1.002 R they stay ≥ 0.0012 R (~8 km) above the round globe.
     const geom = new THREE.IcosahedronGeometry(R_EARTH * 1.002, ICO_LEVEL);
 
     const mat = new THREE.ShaderMaterial({
@@ -13859,7 +14035,7 @@ function _setWildfireHover(hit, cx, cy) {
         // Marine model point-query mode. It sits below discrete markers
         // but above the atmospheric column probe when both are armed.
         if (document.getElementById('lyr-ocean-model')?.checked) {
-            const hit = ray.intersectObject(earthMesh)[0];
+            const hit = globeHits(ray)[0];
             if (hit?.uv) {
                 const ll = geo.deg.uvToLatLon(hit.uv.x, hit.uv.y);
                 _showMarinePointDetail(ll.lat, ll.lon, clientX, clientY);
@@ -13872,7 +14048,7 @@ function _setWildfireHover(hit, cx, cy) {
         // of falling through to the dismiss branch. Event markers keep
         // priority above so quake/alert pins are never shadowed.
         if (document.getElementById('lyr-probe')?.checked) {
-            const hit = ray.intersectObject(earthMesh)[0];
+            const hit = globeHits(ray)[0];
             if (hit?.uv) {
                 const ll = geo.deg.uvToLatLon(hit.uv.x, hit.uv.y);
                 _showColumnProbe(ll.lat, ll.lon, clientX, clientY);
@@ -13943,7 +14119,7 @@ function _setWildfireHover(hit, cx, cy) {
         const ndcY = -((e.clientY - r.top)  / r.height) * 2 + 1;
         const ray  = new THREE.Raycaster();
         ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
-        const hits = ray.intersectObject(earthMesh);
+        const hits = globeHits(ray);
         if (!hits.length || !hits[0].uv) return;
         const { lat, lon } = geo.deg.uvToLatLon(hits[0].uv.x, hits[0].uv.y);
         flyToLatLon(lat, lon, 1.10);
@@ -14033,6 +14209,9 @@ let lastT = 0;
 // Scratch vector for per-frame sun-direction recompute — avoids allocating
 // a fresh THREE.Vector3 every frame on the hot path.
 const _sunDirScratch = new THREE.Vector3();
+var _sunDirOverride = null;   // __evSetSunDir (tests); var: read by the first, synchronous animate()
+var _testPose = null;         // __evTestPose (tests only): a camera held for one measured view
+var _globeDetailOverride = null;   // __evSetGlobeDetail (tests only): force the globe mesh level
 const _Y_AXIS = new THREE.Vector3(0, 1, 0);   // GMST spin axis (shared, read-only)
 // Scratch Date for the same reason: julianDay() wants a Date, and `new
 // Date(...)` twice per frame is avoidable GC churn on the hot path.
@@ -14547,6 +14726,7 @@ function animate() {
     _frameDateScratch.setTime(simTimeMs);
     const jd      = julianDay(_frameDateScratch);
     _sunDirScratch.copy(sunDirectionEquatorial(jd));
+    if (_sunDirOverride) _sunDirScratch.copy(_sunDirOverride);   // test hook only (__evSetSunDir)
     earthU.u_sun_dir.value.copy(_sunDirScratch);
     cloudU.u_sun_dir.value.copy(_sunDirScratch);
     auroraU.u_sun_dir.value.copy(_sunDirScratch);
@@ -14602,9 +14782,12 @@ function animate() {
         : `${Math.round(altKm)} km`;
     if (altStr !== _hAltLast) { _hAltEl.textContent = altStr; _hAltLast = altStr; }
 
+    _tickLodReadout(performance.now());
+    _updateGlobeLod();
+
     // ── Raycaster → coords. Skipped entirely while both the pointer and the
-    // view are at rest (see _pointerDirty above) — the 82k-tri intersect is
-    // pure waste when neither input to the hit has changed.
+    // view are at rest (see _pointerDirty above). The hit is analytic
+    // (globeHits), so this guard now only saves the DOM writes downstream.
     const _viewMoved = !_rayCamPos.equals(camera.position)
         || !_rayCamQuat.equals(camera.quaternion)
         || _rayEarthRotY !== earthMesh.rotation.y;
@@ -14614,7 +14797,7 @@ function animate() {
         _rayCamQuat.copy(camera.quaternion);
         _rayEarthRotY = earthMesh.rotation.y;
         raycaster.setFromCamera(mouse, camera);
-        const hits = raycaster.intersectObject(earthMesh);
+        const hits = globeHits(raycaster);
         if (hits.length > 0 && hits[0].uv) {
             // UV from intersection — correct for current mesh rotation
             const uv = hits[0].uv.clone();
@@ -14794,6 +14977,18 @@ function animate() {
         if (camR < CAM_FLOOR) camera.position.multiplyScalar(CAM_FLOOR / camR);
     }
 
+    // Test hook (__evTestPose): a camera the orbit rig cannot reach — e.g. a
+    // low camera looking at the horizon, where the limb gate measures how
+    // round the globe is. Applied after controls.update() so it is what
+    // renders; null in normal use.
+    if (_testPose) {
+        camera.position.fromArray(_testPose.pos);
+        camera.up.fromArray(_testPose.up);
+        camera.lookAt(_testPose.look[0], _testPose.look[1], _testPose.look[2]);
+        if (_testPose.fov && camera.fov !== _testPose.fov) { camera.fov = _testPose.fov; camera.updateProjectionMatrix(); }
+        camera.updateMatrixWorld();
+    }
+
     // Volumetric clouds march into their half-res target first; the quad in
     // the scene composites the result at renderOrder 3 (see the shell block).
     if (cloudVolumeMesh?.visible && cloudVolumeCompositor) {
@@ -14906,6 +15101,7 @@ function _updateCameraDepth(dt) {
 // tests/camera-depth-smoke.spec.js.
 window.__evCamera = () => ({
     dist:    camera.position.length(),
+    pos:     camera.position.toArray(),
     near:    camera.near,
     targetR: controls.target.length(),
     tilt:    _tiltBlend,
@@ -14946,6 +15142,59 @@ window.__evSetCamDir = (x, y, z) => {
     return camera.position.toArray();
 };
 window.__evSunDir = () => earthU.u_sun_dir.value.toArray();
+// Test hook: hold the Sun at a WORLD direction (null releases it to the
+// clock). Gates that judge pixels need a sunlit view wherever they look —
+// the surface is physically lit, the night side is black, and scrubbing the
+// clock barely moves the terminator here because the globe's rotation is
+// frozen at page load (planet rotation off). Never used by the page.
+// Hold the camera at { pos, look, up?, fov? } (scene units, Earth radii; up
+// defaults to world +Y — a horizon view needs the LOCAL vertical) until
+// called with null; returns, for the CANVAS in CSS pixels, the row of the
+// TRUE sphere's limb in every column (NaN where none) — the horizon the
+// limb gate compares the drawn edge against (tests/helpers/image-metrics.mjs
+// horizonDeviation). Tests only.
+window.__evTestPose = (pose) => {
+    if (!pose) camera.up.set(0, 1, 0);
+    _testPose = pose ? { pos: pose.pos.slice(), look: pose.look.slice(), up: (pose.up ?? [0, 1, 0]).slice(), fov: pose.fov ?? null } : null;
+    if (!_testPose) return null;
+    camera.position.fromArray(_testPose.pos);
+    camera.up.fromArray(_testPose.up);
+    camera.lookAt(..._testPose.look);
+    if (_testPose.fov) { camera.fov = _testPose.fov; }
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const W = renderer.domElement.clientWidth, H = renderer.domElement.clientHeight;
+    const P = camera.position.clone(), d = P.length();
+    const n = P.clone().normalize();
+    const c = n.clone().multiplyScalar(R_EARTH * R_EARTH / d);           // limb circle centre
+    const rho = R_EARTH * Math.sqrt(1 - (R_EARTH * R_EARTH) / (d * d));  // and radius
+    const a = new THREE.Vector3(0, 1, 0).cross(n);
+    if (a.lengthSq() < 1e-8) a.set(1, 0, 0);
+    a.normalize();
+    const b = n.clone().cross(a).normalize();
+    const rows = new Array(W).fill(NaN);
+    const v = new THREE.Vector3(), fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    for (let i = 0; i < 20000; i++) {
+        const t = (i / 20000) * Math.PI * 2;
+        v.copy(c).addScaledVector(a, rho * Math.cos(t)).addScaledVector(b, rho * Math.sin(t));
+        if (v.clone().sub(P).dot(fwd) <= 0) continue;                     // behind the camera
+        v.project(camera);
+        const x = Math.round((v.x * 0.5 + 0.5) * W), y = (0.5 - v.y * 0.5) * H;
+        if (x < 0 || x >= W || y < 0 || y >= H) continue;
+        if (!(rows[x] <= y)) rows[x] = Number.isNaN(rows[x]) ? y : Math.min(rows[x], y);
+    }
+    return { width: W, height: H, rows };
+};
+window.__evSetGlobeDetail = (d) => {
+    _globeDetailOverride = (d == null) ? null : Number(d);
+    _updateGlobeLod();
+    return earthMesh.geometry.parameters.detail;
+};
+window.__evSetSunDir = (x, y, z) => {
+    _sunDirOverride = (x == null) ? null : new THREE.Vector3(Number(x), Number(y), Number(z)).normalize();
+    return _sunDirOverride?.toArray() ?? null;
+};
 // Render ONE frame through the page's own path and read the canvas back in
 // the same task (before the browser composites, so preserveDrawingBuffer is
 // not needed). Returns per-pixel statistics of a rectangle (drawing-buffer
@@ -15117,6 +15366,165 @@ function flyToLatLon(lat, lon, arriveDist = 4.2) {
 // import the Three.js scene state directly. Single-purpose hook —
 // callers don't get raw access to camera/controls.
 window.flyToLatLon = flyToLatLon;
+
+// ═══════════════════════════════════════════════════════════════
+//  REGIONS + THE LOD READOUT  (js/earth-regions.js)
+// ═══════════════════════════════════════════════════════════════
+// "Go to a region" flies to a js/geo-regions.js box framed by SPHERE
+// geometry for this camera's own fov and aspect — close enough that the
+// regional layers switch on (cloud window + imagery inset ≤ 45° footprint,
+// weather patch ≤ 32°), far enough that the whole box is on screen. Deep
+// links: ?region=<id> (e.g. us-great-plains-and-midwest) or
+// ?at=lat,lon[,altKm]. The readout names the tier the FOOTPRINT is in (the
+// same number the layers read), where the camera is over, how high, how
+// much ground a pixel spans, and which detail windows are actually loaded —
+// so "more detail" is never a claim the data has not delivered.
+function regionCameraView(r) {
+    return regionView(r, {
+        fovDeg: camera.fov, aspect: camera.aspect,
+        minDist: CAM_FLOOR + 0.01, maxDist: controls.maxDistance,
+    });
+}
+function flyToRegion(r) {
+    if (!r) return;
+    const v = regionCameraView(r);
+    flyToLatLon(v.lat, v.lon, v.dist);
+    try { telemetry.recordFeature('earth_region', 'fly', { region: r.id }); } catch { /* fire-and-forget */ }
+}
+window.flyToRegion = (id) => flyToRegion(regionById(id));
+{
+    const sel = document.getElementById('ev-region');
+    if (sel) {
+        const groups = new Map();
+        for (const r of regionList()) {
+            if (!groups.has(r.group)) groups.set(r.group, []);
+            groups.get(r.group).push(r);
+        }
+        for (const [label, rs] of groups) {
+            const og = document.createElement('optgroup');
+            og.label = label;
+            for (const r of rs) {
+                const o = document.createElement('option');
+                o.value = r.id;
+                o.textContent = r.name;
+                og.appendChild(o);
+            }
+            sel.appendChild(og);
+        }
+        // Back to the prompt after each flight, so choosing the same region
+        // again still fires; where the camera IS lives in the readout.
+        sel.addEventListener('change', () => {
+            flyToRegion(regionById(sel.value));
+            sel.value = '';
+            sel.blur();
+        });
+    }
+    // #layer-feedback sticks under the (now taller) sticky tools block.
+    const tools = document.querySelector('#layer-panel .layer-tools');
+    const panel = document.getElementById('layer-panel');
+    if (tools && panel) {
+        new ResizeObserver(() => panel.style.setProperty('--layer-tools-h', `${tools.offsetHeight}px`)).observe(tools);
+    }
+    // Deep links. Deferred one beat so the flight starts from the boot pose
+    // and its arrival turns auto-rotate off like any other fly-to.
+    const qs = new URLSearchParams(location.search);
+    const reg = regionById(qs.get('region') ?? '');
+    const at = reg ? null : parseAtParam(qs.get('at'), { minDist: CAM_FLOOR + 0.01, maxDist: controls.maxDistance });
+    const go = reg ? regionCameraView(reg) : at;
+    if (go) setTimeout(() => flyToLatLon(go.lat, go.lon, go.dist), 600);
+}
+
+// Which detail windows are LOADED (not merely wanted) — fed by the layers'
+// own events, so the readout can only report what reached the shaders.
+const _lodSources = { clouds: null, imagery: null, weather: null };
+document.addEventListener('cloud-detail-change', (e) => { _lodSources.clouds = e.detail; });
+document.addEventListener('earth-detail-inset', (e) => {
+    // GIBS 4326 tiles are 512 px spanning 288/2^z degrees (earth-detail-inset.js).
+    const z = Number(e.detail?.level);
+    _lodSources.imagery = Number.isFinite(z) ? { kmPerPx: (288 / 2 ** z / 512) * 111.195 } : null;
+});
+document.addEventListener('earth-detail-clear', () => { _lodSources.imagery = null; });
+document.addEventListener('weather-patch-update', (e) => {
+    _lodSources.weather = Number.isFinite(e.detail?.stepDeg) ? { stepDeg: e.detail.stepDeg } : null;
+});
+document.addEventListener('weather-patch-clear', () => { _lodSources.weather = null; });
+
+const _lodEls = {
+    tier:    document.getElementById('ev-lod-tier'),
+    where:   document.getElementById('ev-lod-where'),
+    alt:     document.getElementById('ev-lod-alt'),
+    scale:   document.getElementById('ev-lod-scale'),
+    sources: document.getElementById('ev-lod-sources'),
+};
+const _lodLast = {};
+// `var` + the ready flag ON PURPOSE: animate() runs its first frame
+// synchronously at module init (the "First HUD update" block above this
+// one), when a `let` here would still be in its temporal dead zone and the
+// ReferenceError would take the whole page module down (the orrery's TDZ
+// scar in CLAUDE.md). var hoists as undefined; the tick waits for the flag.
+var _lodTickMs = 0;
+var _lodReady = false;
+function _setLod(key, text, attr) {
+    const el = _lodEls[key];
+    if (!el || _lodLast[key] === text + (attr ?? '')) return;   // write-on-change
+    _lodLast[key] = text + (attr ?? '');
+    el.textContent = text;
+    if (attr !== undefined) el.dataset.tier = attr;
+}
+function _tickLodReadout(nowMs) {
+    if (!_lodReady || nowMs - _lodTickMs < 500) return;
+    _lodTickMs = nowMs;
+    const fp = focusFootprint.getFootprint?.() ?? null;
+    const dist = camera.position.length();
+    const tier = viewTier(fp?.spanLatDeg);
+    _setLod('tier', tier.label, tier.id);
+    _setLod('where', fp && tier.id !== 'global' ? `over ${labelRegion(fp.centerLat, fp.centerLon)}` : '');
+    _setLod('alt', `${formatAltitude((dist - R_EARTH) * 6371)} up`);
+    _setLod('scale', `${formatScale(groundKmPerPx(dist, camera.fov, renderer.domElement.clientHeight))} on screen`);
+    const parts = [];
+    const c = _lodSources.clouds;
+    if (c?.status === 'live') parts.push(`Clouds ${formatScale(c.kmPerPx)} (${c.used.join(', ')})`);
+    else if (c?.status === 'loading' || c?.status === 'waiting') parts.push('Clouds: loading regional detail…');
+    if (_lodSources.imagery) parts.push(`Imagery ${formatScale(_lodSources.imagery.kmPerPx)}`);
+    if (_lodSources.weather) parts.push(`Weather ${_lodSources.weather.stepDeg}°`);
+    _setLod('sources', parts.length ? `Detail: ${parts.join(' · ')}` : '');
+}
+_lodReady = true;
+// Test probe: what the pointer at NDC (x, y) is over — the analytic hit the
+// page uses AND what the mesh's own UVs would have said (the negative
+// control: the antipode, see globeHits).
+window.__evPick = (ndcX = 0, ndcY = 0) => {
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    const a = globeHits(rc)[0];
+    const m = rc.intersectObject(earthMesh)[0];
+    const ll = (uv) => (uv ? geo.deg.uvToLatLon(uv.x, uv.y) : null);
+    // n: the hit's WORLD-space normal — what u_sun_dir is dotted with, so a
+    // gate can compute each pixel's μ₀ itself.
+    return { analytic: ll(a?.uv), meshUv: ll(m?.uv), n: a ? a.point.clone().normalize().toArray() : null };
+};
+// Batched, analytic only (no mesh raycast — that is __evPick's control and
+// costs a triangle walk per call): [[ndcX, ndcY], …] → [lat, lon, nx, ny, nz]
+// per point (world normal), or null off the globe. For gates that need a
+// per-pixel μ₀ over thousands of pixels.
+window.__evPickMany = (points) => {
+    const rc = new THREE.Raycaster(), v = new THREE.Vector2();
+    return points.map(([x, y]) => {
+        rc.setFromCamera(v.set(x, y), camera);
+        const a = globeHits(rc)[0];
+        if (!a) return null;
+        const ll = geo.deg.uvToLatLon(a.uv.x, a.uv.y);
+        const n = a.point.clone().normalize();
+        return [ll.lat, ll.lon, n.x, n.y, n.z];
+    });
+};
+window.__evLod = () => ({
+    tier: _lodEls.tier?.dataset.tier ?? null,
+    text: ['tier', 'where', 'alt', 'scale', 'sources'].map(k => _lodEls[k]?.textContent ?? '').join(' | '),
+    sources: JSON.parse(JSON.stringify(_lodSources)),
+    footprint: focusFootprint.getFootprint?.() ?? null,
+    globeDetail: earthMesh.geometry.parameters.detail,
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  AURORA VISIBILITY FOR USER'S LOCATION

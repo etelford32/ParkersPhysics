@@ -55,6 +55,29 @@ export const GEO_GLSL = /* glsl */ `
         );
     }
 
+    // normalToUV for a MIP-MAPPED global texture (wrapS = RepeatWrapping).
+    // Across the antimeridian u jumps 1 → 0 between neighbouring pixels, the
+    // hardware derivative there is ~1, and the GPU picks the COARSEST mip:
+    // one pixel column of globally-averaged colour — the "vertical line"
+    // down EarthView's clouds and base map (EARTHVIEW_LOD_UX_PLAN.md §2.1).
+    // Tarini's two-branch fix: u2 = fract(u + 0.5) − 0.5 is continuous at
+    // the antimeridian (its own jump is at Greenwich), and fwidth is shared
+    // by the 2×2 quad, so every pixel of a quad picks the SAME branch and
+    // the derivative the sampler sees is the continuous one. Repeat wrap
+    // makes u and u − 1 the same texel. The same expression as the hero's
+    // earthUV (js/hero-space-weather.js).
+    // OPT-IN: compiled only under GEO_SEAMLESS, because fwidth needs
+    // derivatives (core in WebGL2, an extension in WebGL1) and every page
+    // includes this file. Without the define it is exactly normalToUV.
+    vec2 normalToUVMip(vec3 n) {
+        vec2 uv = normalToUV(n);
+    #ifdef GEO_SEAMLESS
+        float u2 = fract(uv.x + 0.5) - 0.5;
+        uv.x = (fwidth(uv.x) <= fwidth(u2) + 1e-6) ? uv.x : u2;
+    #endif
+        return uv;
+    }
+
     // Equirectangular UV → unit normal.
     vec3 uvToNormal(vec2 uv) {
         float lon = uv.x * GEO_TAU - GEO_PI;

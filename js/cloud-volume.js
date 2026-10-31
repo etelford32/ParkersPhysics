@@ -131,6 +131,8 @@
 
 import * as THREE from 'three';
 import { GEO_GLSL } from './geo/coords.glsl.js';
+import { INSET_GLSL_HELPERS } from './geo/inset.glsl.js';
+import { SAT_DETAIL_GLSL } from './cloud-mosaic-core.js';
 import {
     R_EARTH_KM, DECK_ALTITUDE_KM, VOLUME_TOP_KM, VOLUME_BASE_KM,
     SURFACE_CLEARANCE_R,
@@ -198,6 +200,8 @@ uniform float u_r_top;              // volume outer radius, world units
 uniform float u_r_surface;          // planet sphere, for shadow + clipping
 uniform float u_satellite_on;
 uniform float u_cloud_data_strength;
+${INSET_GLSL_HELPERS}
+${SAT_DETAIL_GLSL}
 uniform float u_density;            // global optical-depth scale (tuning knob)
 uniform int   u_steps;              // primary march steps
 uniform int   u_light_steps;        // light march steps
@@ -375,20 +379,20 @@ Column columnAt(vec3 nObj) {
         // at, and the cloud that is here now was there then. The same tap
         // with an hours-long lead is the nowcast (see header).
         vec3 nSat = advectDir(nObj, c.wind, u_sat_lead, SAT_WIND_GAIN);
-        vec4 sat  = texture2D(u_satellite, normalToUV(nSat));
+        vec4 sat  = sampleSat(nSat);   // seam-safe global + regional window (SAT_DETAIL_GLSL)
         // Per-disc lead: an older disc is advected further by exactly its
         // age behind the newest (G). The newest disc (g = 0) pays no second
         // fetch; the branch is uniform within a disc.
         if (sat.g > 0.001) {
             nSat = advectDir(nObj, c.wind, u_sat_lead + sat.g * SAT_AGE_S, SAT_WIND_GAIN);
-            sat  = texture2D(u_satellite, normalToUV(nSat));
+            sat  = sampleSat(nSat);
         }
         if (u_sat_blend > 0.001) {
             vec3 nPrev = advectDir(nObj, c.wind, u_sat_prev_lead, SAT_WIND_GAIN);
-            vec4 prev  = texture2D(u_sat_prev, normalToUV(nPrev));
+            vec4 prev  = texture2D(u_sat_prev, normalToUVMip(nPrev));
             if (prev.g > 0.001) {
                 nPrev = advectDir(nObj, c.wind, u_sat_prev_lead + prev.g * SAT_AGE_S, SAT_WIND_GAIN);
-                prev  = texture2D(u_sat_prev, normalToUV(nPrev));
+                prev  = texture2D(u_sat_prev, normalToUVMip(nPrev));
             }
             sat = mix(sat, prev, u_sat_blend);
         }
@@ -785,6 +789,10 @@ export function createVolumeUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_cloud_layers: { value: null },
         u_satellite:    { value: null },
         u_sat_prev:     { value: null },
+        // Tier-B regional window (SAT_DETAIL_GLSL); earth.html shares cloudU's entries.
+        u_sat_detail:        { value: null },
+        u_sat_detail_bounds: { value: new THREE.Vector4(0, 0, 1, 1) },
+        u_sat_detail_on:     { value: 0 },
         u_weather:      { value: null },
         u_wind:         { value: neutralWind },
         u_sun_dir:      { value: sunDir },
@@ -832,11 +840,21 @@ export function writeFlowUniforms(uniforms, simSec) {
  * which is why nothing here bakes a radius into the geometry.
  */
 export function createVolumeMesh(uniforms) {
-    const geo = new THREE.IcosahedronGeometry(1, 4);
+    // Detail 16 (three's detail is LINEAR: 20·(d+1)² = 5 780 faces). The hull
+    // only decides which pixels run the march, and an inscribed polyhedron's
+    // silhouette is SMALLER than the sphere the march integrates: at the old
+    // detail 4 (500 faces) the edge sag was 0.6 % of the radius, so rays
+    // grazing the cloud tops at the limb found no fragment and the stack's
+    // horizon was a polygon. At 16 the sag is 0.05 % (≈3 km).
+    const geo = new THREE.IcosahedronGeometry(1, 16);
     const mat = new THREE.ShaderMaterial({
         vertexShader: VOLUME_VERT,
         fragmentShader: VOLUME_FRAG,
         uniforms,
+        // Seam-safe mosaic taps (normalToUVMip, js/geo/coords.glsl.js):
+        // fwidth is core in WebGL2 and the derivatives extension in WebGL1.
+        defines: { GEO_SEAMLESS: 1 },
+        extensions: { derivatives: true },
         transparent: true,
         depthWrite: false,
         depthTest: false,       // the march owns its own occlusion — see header
