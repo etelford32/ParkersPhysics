@@ -47,6 +47,7 @@ import { createSmokeSim, stepSmoke, clearSmoke, planEmissions,
          createEmissionCarry, SMOKE_PROFILES } from './launch-smoke-sim.js';
 import { createSmokeRenderer } from './launch-smoke.js';
 import { addSurfaceDetail, setSurfaceDetailEnabled } from './launch-surface-detail.js';
+import { pickDefaultView, framingFor } from './launch-camera-layout.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -1335,6 +1336,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
             canvas.removeEventListener('pointercancel', onPointerUp);
             canvas.removeEventListener('wheel',       onWheel);
             canvas.removeEventListener('contextmenu', onContextMenu);
+            canvas.removeEventListener('dblclick',    onDblClick);
             window.removeEventListener('keydown',     onKeyDown);
             window.removeEventListener('keyup',       onKeyUp);
             window.removeEventListener('blur',        onBlur);
@@ -1342,45 +1344,161 @@ export function initVehicleCanvas(canvas, opts = {}) {
     };
 
     // ── Input handlers ─────────────────────────────────────────────────────
+    // Every pointer is tracked by id, so mouse, pen and touch share one path:
+    //   1 pointer, left button      → ORBIT around the target
+    //   1 pointer, right / Shift    → PAN (target + camera move together)
+    //   2 pointers (touch)          → PINCH to dolly + drag the midpoint to pan
+    // A pinch that drops to one finger continues as an orbit from where that
+    // finger is (re-seeded, so the camera does not jump by the pinch's travel).
+    // The canvas carries `touch-action: none` in CSS — without it the browser
+    // scrolls / zooms the page under a one-finger drag and no gesture arrives.
+    const pointers = new Map();          // pointerId → { x, y }
+    let gesture = null;                  // 'orbit' | 'pan' | 'pinch' | null
+    let pinchDist = 0;
+    let pinchMid = { x: 0, y: 0 };
+    const _panRight = new THREE.Vector3();
+    const _panUp    = new THREE.Vector3();
+
+    function pinchState() {
+        const [a, b] = [...pointers.values()];
+        return {
+            dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+            mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        };
+    }
+
+    // Pan the camera AND its orbit target in the view plane by a pixel delta,
+    // scaled so the ground under the cursor tracks the pointer at the target's
+    // depth. The target is then held inside a box around the vehicle (one
+    // stack-height of slack) so a pan can never lose the rocket entirely —
+    // Recenter (⊙ / R / double-click) brings it back exactly.
+    function panBy(dx, dy) {
+        const dist = cam.pos.distanceTo(controls.target);
+        const h = Math.max(1, canvas.clientHeight || 1);
+        const wpp = 2 * dist * Math.tan((camera.fov * Math.PI / 180) / 2) / h;
+        camera.updateMatrixWorld();
+        _panRight.setFromMatrixColumn(camera.matrixWorld, 0);
+        _panUp.setFromMatrixColumn(camera.matrixWorld, 1);
+        const move = _panRight.multiplyScalar(-dx * wpp).add(_panUp.multiplyScalar(dy * wpp));
+        const before = controls.target.clone();
+        controls.target.add(move);
+        clampTarget();
+        cam.pos.add(controls.target.clone().sub(before));
+        setLookAt(controls.target);
+    }
+    function clampTarget() {
+        const h = Math.max(10, current.height || 50);
+        const baseY = (current.root ? current.root.position.y : 0);
+        const t = controls.target;
+        t.x = THREE.MathUtils.clamp(t.x, -h, h);
+        t.z = THREE.MathUtils.clamp(t.z, -h, h);
+        t.y = THREE.MathUtils.clamp(t.y, Math.max(0.5, baseY - h * 0.2), baseY + h * 1.4);
+    }
+
+    // Double-TAP recenters on touch (browsers do not reliably synthesise
+    // dblclick under touch-action:none). Timed on event.timeStamp — when the
+    // browser generated the event — never performance.now() in the handler,
+    // which on a slow frame read a genuine quick double-tap as ~900 ms apart
+    // (the mars.html scar). A tap is ≤ 10 px of travel and ≤ 300 ms down.
+    const TAP_MOVE_PX = 10, TAP_HOLD_MS = 300, DOUBLE_TAP_MS = 500;
+    let tapStart = null;          // { x, y, t } of the current single press
+    let lastTap = null;           // { x, y, t } of the previous completed tap
+
     function onPointerDown(e) {
-        if (e.button !== 0) return;              // left-click only
-        cam.dragging = true;
-        cam.lastX = e.clientX;
-        cam.lastY = e.clientY;
+        if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
+        tapStart = (pointers.size === 0 && e.pointerType !== 'mouse')
+            ? { x: e.clientX, y: e.clientY, t: e.timeStamp } : null;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
         // preventScroll: focusing the canvas otherwise triggers the
         // browser's scroll-into-view, which on a wide page shifts the
         // whole document sideways when you click the canvas.
         canvas.focus({ preventScroll: true });
+        if (pointers.size === 1) {
+            gesture = (e.button === 2 || e.shiftKey) ? 'pan' : 'orbit';
+            cam.lastX = e.clientX; cam.lastY = e.clientY;
+        } else if (pointers.size === 2) {
+            tapStart = null;
+            gesture = 'pinch';
+            const p = pinchState();
+            pinchDist = p.dist; pinchMid = p.mid;
+        }
+        cam.dragging = pointers.size > 0;
     }
     function onPointerMove(e) {
-        if (!cam.dragging) return;
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        p.x = e.clientX; p.y = e.clientY;
+        if (gesture === 'pinch' && pointers.size >= 2) {
+            const now = pinchState();
+            const f = pinchDist / now.dist;
+            if (Math.abs(f - 1) > 1e-4) dollyToTarget(f);
+            panBy(now.mid.x - pinchMid.x, now.mid.y - pinchMid.y);
+            pinchDist = now.dist; pinchMid = now.mid;
+            userControlledCamera = true;
+            return;
+        }
         const dx = e.clientX - cam.lastX;
         const dy = e.clientY - cam.lastY;
         cam.lastX = e.clientX;
         cam.lastY = e.clientY;
         if (!dx && !dy) return;
-        userControlledCamera = true;                 // real orbit-drag
-        orbitAroundTarget(dx, dy);                    // rotate AROUND the rocket
+        userControlledCamera = true;                 // a real drag
+        if (gesture === 'pan') panBy(dx, dy);
+        else if (gesture === 'orbit') orbitAroundTarget(dx, dy);
     }
     function onPointerUp(e) {
-        if (!cam.dragging) return;
-        cam.dragging = false;
+        if (!pointers.has(e.pointerId)) return;
+        pointers.delete(e.pointerId);
+        if (tapStart && pointers.size === 0 && e.type === 'pointerup') {
+            const moved = Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y);
+            const held  = e.timeStamp - tapStart.t;
+            if (moved <= TAP_MOVE_PX && held <= TAP_HOLD_MS) {
+                const tap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+                if (lastTap && tap.t - lastTap.t <= DOUBLE_TAP_MS &&
+                    Math.hypot(tap.x - lastTap.x, tap.y - lastTap.y) <= 40) {
+                    lastTap = null;
+                    recenter();
+                } else {
+                    lastTap = tap;
+                }
+            } else {
+                lastTap = null;
+            }
+        }
+        if (pointers.size > 0) tapStart = null;
         try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (pointers.size === 1) {
+            // Pinch → one finger: continue as an orbit from that finger.
+            const [rest] = pointers.values();
+            gesture = 'orbit';
+            cam.lastX = rest.x; cam.lastY = rest.y;
+        } else if (pointers.size === 0) {
+            gesture = null;
+        }
+        cam.dragging = pointers.size > 0;
     }
     function onContextMenu(e) {
-        // Suppress right-click menu inside canvas so a stray right-click
-        // doesn't break flow. Doesn't affect anywhere else on the page.
+        // Right-drag pans, so the context menu must not open over the canvas.
+        // Doesn't affect anywhere else on the page.
         e.preventDefault();
+    }
+    function onDblClick(e) {
+        e.preventDefault();
+        recenter();
     }
     function onWheel(e) {
         // Zoom toward / away from the rocket. Scroll up (deltaY < 0) zooms in.
         // Radius-based + clamped so you can't tunnel through the vehicle into
         // the tower. preventDefault so the wheel drives the camera, not the
-        // page scroll, while the cursor is on the canvas.
+        // page scroll, while the cursor is on the canvas. A trackpad pinch
+        // arrives as a ctrl+wheel with small deltas — scaled by magnitude so
+        // it is smooth rather than a 12 % step per event.
         e.preventDefault();
         userControlledCamera = true;                 // wheel-dolly
-        dollyToTarget(e.deltaY > 0 ? 1.12 : 1 / 1.12);
+        const mag = Math.min(1, Math.abs(e.deltaY) / (e.ctrlKey ? 25 : 100));
+        const step = 1 + 0.12 * Math.max(0.15, mag);
+        dollyToTarget(e.deltaY > 0 ? step : 1 / step);
     }
     function setKey(key, down) {
         const k = key.length === 1 ? key.toLowerCase() : key;
@@ -1390,12 +1508,28 @@ export function initVehicleCanvas(canvas, opts = {}) {
             if (down) userControlledCamera = true;    // WASD/QE fly
         }
     }
+    // One-shot keys (canvas focused): arrows orbit, +/− zoom, R recenter,
+    // Home = back to this screen's default view.
+    const ORBIT_KEY_DEG = 6;
     function onKeyDown(e) {
-        // Only intercept movement keys when the canvas has focus, so
-        // typing in forms anywhere else on the page is unaffected.
+        // Only intercept keys when the canvas has focus, so typing in forms
+        // anywhere else on the page is unaffected.
         if (document.activeElement !== canvas) return;
-        setKey(e.key, true);
-        if ('wasdqeWASDQE'.includes(e.key) || e.key === 'Shift') e.preventDefault();
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const k = e.key;
+        let handled = true;
+        if (k === 'ArrowLeft')       orbitBy(-ORBIT_KEY_DEG, 0);
+        else if (k === 'ArrowRight') orbitBy(ORBIT_KEY_DEG, 0);
+        else if (k === 'ArrowUp')    orbitBy(0, ORBIT_KEY_DEG);     // camera rises (as a downward drag)
+        else if (k === 'ArrowDown')  orbitBy(0, -ORBIT_KEY_DEG);
+        else if (k === '+' || k === '=') setZoom(0.8);
+        else if (k === '-' || k === '_') setZoom(1.25);
+        else if (k === 'r' || k === 'R') recenter();
+        else if (k === 'Home')       resetView();
+        else handled = false;
+        if (handled) { e.preventDefault(); return; }
+        setKey(k, true);
+        if ((k.length === 1 && 'wasdqeWASDQE'.includes(k)) || k === 'Shift') e.preventDefault();
     }
     function onKeyUp(e) {
         setKey(e.key, false);
@@ -1404,17 +1538,27 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Window lost focus — release all held keys so the camera doesn't
         // glide off forever when the user alt-tabs mid-press.
         for (const k of Object.keys(cam.keys)) cam.keys[k] = false;
+        pointers.clear();
+        gesture = null;
         cam.dragging = false;
     }
 
-    canvas.tabIndex = 0;                          // make focusable
-    canvas.style.outline = 'none';                // no focus ring
+    // Orbit by DEGREES (buttons, arrow keys, auto-rotate) through the same
+    // spherical step the drag uses.
+    function orbitBy(dAzDeg, dElDeg) {
+        userControlledCamera = true;
+        const rad = Math.PI / 180;
+        orbitAroundTarget(dAzDeg * rad / cam.lookSpeed, dElDeg * rad / cam.lookSpeed);
+    }
+
+    canvas.tabIndex = 0;                          // make focusable (focus ring: CSS :focus-visible)
     canvas.addEventListener('pointerdown',   onPointerDown);
     canvas.addEventListener('pointermove',   onPointerMove);
     canvas.addEventListener('pointerup',     onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('wheel',         onWheel, { passive: false });
     canvas.addEventListener('contextmenu',   onContextMenu);
+    canvas.addEventListener('dblclick',      onDblClick);
     window.addEventListener('keydown',       onKeyDown);
     window.addEventListener('keyup',         onKeyUp);
     window.addEventListener('blur',          onBlur);
@@ -1431,6 +1575,60 @@ export function initVehicleCanvas(canvas, opts = {}) {
         trailWidthM: 9,
     };
     let currentViewName = 'threequarter';
+
+    // ── Screen-aware framing (js/launch-camera-layout.js) ─────────────────
+    // viewIsAuto: the preset follows the SCREEN (pickDefaultView) until the
+    //   user picks one; a deliberate pick is never overridden by a resize,
+    //   and Home / resetView() hands control back to the screen.
+    // fovIsAuto: same rule for the lens (cycling the FOV claims it).
+    // safeInsets: px the floating toolbars take off the top / bottom of the
+    //   frame where the vehicle is drawn (measured by the host page). The fit
+    //   uses the safe rectangle's FOV/aspect and the projection's principal
+    //   point is moved to its centre (camera.setViewOffset), so the stack is
+    //   framed in the clear area instead of under the buttons.
+    let viewIsAuto = opts.autoView !== false;
+    let fovIsAuto = opts.autoView !== false;
+    let safeInsetsState = { top: 0, bottom: 0 };
+    let autoRotateOn = !!opts.autoRotate;
+    const AUTO_ROTATE_RAD_S = (2 * Math.PI) / 50;      // one turn in 50 s
+
+    function canvasBox() {
+        return { w: canvas.clientWidth || 0, h: canvas.clientHeight || 0 };
+    }
+    function fitParams() {
+        const { w, h } = canvasBox();
+        if (!w || !h) return { fitFovDeg: cameraFov, fitAspect: camera.aspect || 16 / 10, viewOffsetY: 0 };
+        return framingFor({ width: w, height: h, fovDeg: cameraFov, insets: safeInsetsState });
+    }
+    function applyViewOffset() {
+        const { w, h } = canvasBox();
+        if (!w || !h) return;
+        const f = fitParams();
+        if (Math.abs(f.viewOffsetY) > 0.5) camera.setViewOffset(w, h, 0, f.viewOffsetY, w, h);
+        else camera.clearViewOffset();
+    }
+    function notifyView() {
+        if (typeof opts.onViewChange === 'function') {
+            opts.onViewChange({ view: currentViewName, fov: cameraFov, auto: viewIsAuto });
+        }
+    }
+    // Apply the screen's default preset / lens if they are still automatic.
+    // Returns true when anything changed.
+    function applyAutoPick() {
+        const { w, h } = canvasBox();
+        if (!w || !h) return false;
+        const pick = pickDefaultView({ width: w, height: h });
+        let changed = false;
+        if (viewIsAuto && pick.view !== currentViewName) { currentViewName = pick.view; changed = true; }
+        if (fovIsAuto && Math.abs(pick.fov - cameraFov) > 0.5) {
+            cameraFov = pick.fov;
+            camera.fov = cameraFov;
+            camera.updateProjectionMatrix();
+            changed = true;
+        }
+        if (changed) notifyView();
+        return changed;
+    }
 
     // ── View tween state ───────────────────────────────────────────────────
     // setView fires ONE tween (carrying both cam.pos and controls.target as
@@ -1590,10 +1788,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // A new vehicle starts framed from the canonical 3/4 angle, and
         // re-arms auto-framing so any post-swap resize keeps it centred
         // until the user grabs the camera again.
-        currentViewName = 'threequarter';
+        // The preset survives a vehicle swap if the user chose it (Engines
+        // stays Engines); an automatic one is re-picked for this screen.
+        if (viewIsAuto) { currentViewName = 'threequarter'; applyAutoPick(); }
         userControlledCamera = false;
-        const aspect = camera.aspect || 16/10;
-        const view = frameForView(currentViewName, current, cameraFov, aspect);
+        const fit0 = fitParams();
+        const view = frameForView(currentViewName, current, fit0.fitFovDeg, fit0.fitAspect);
         cam.pos.set(...view.pos);
         controls.target.set(...view.target);
         setLookAt(controls.target);
@@ -1607,6 +1807,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         if (typeof opts.onVehicleChange === 'function') {
             opts.onVehicleChange({ id, variant, info: v.info });
         }
+        notifyView();
     }
 
     // ── Liftoff animation ──────────────────────────────────────────────────
@@ -1783,9 +1984,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
     function reframeCurrentView() {
         if (!current || !current.root) return;
         cancelViewTween();
-        const aspect = camera.aspect || 16 / 10;
+        const fit = fitParams();
         const view   = frameForView(currentViewName || 'threequarter',
-                                    current, cameraFov, aspect);
+                                    current, fit.fitFovDeg, fit.fitAspect);
         const dy = liveOffsetY();
         cam.pos.set(view.pos[0],    view.pos[1]    + dy, view.pos[2]);
         controls.target.set(view.target[0], view.target[1] + dy, view.target[2]);
@@ -1855,6 +2056,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
         post.setSize(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
+        applyViewOffset();
+        applyAutoPick();                       // no-op once the user has chosen
         if (!userControlledCamera) reframeCurrentView();
     }
     // Coalesce a burst of observer callbacks into a single measurement on the
@@ -1896,6 +2099,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const dt = Math.min(clock.getDelta(), 0.5);
         const t = clock.elapsedTime;
         controls._dt = dt;
+        if (autoRotateOn && pointers.size === 0 && !activeTween && dt > 0) {
+            userControlledCamera = true;            // a turned camera is not the preset frame
+            orbitAroundTarget(-AUTO_ROTATE_RAD_S * dt / cam.lookSpeed, 0);
+        }
         controls.update();
         stars.tick(t);
 
@@ -1997,17 +2204,21 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // Single-tween view swap. Pos + target ride a 6-vec so cancellation is
     // one handle. The destination is a function of the live rocket Y so a
     // view-pick mid-flight lands on the moving rocket, not the empty pad.
-    function setView(name) {
+    // opts.auto: true when the call comes from the screen rules / recenter,
+    // false (default) when the USER picked the preset — which claims it.
+    function setView(name, { auto = false } = {}) {
         if (!VIEW_PRESETS[name]) return;
+        if (!auto) viewIsAuto = false;
         currentViewName = name;
+        notifyView();
         // Picking a preset (or recenter) re-arms auto-framing: the user
         // explicitly asked for a canonical shot, so a later resize should
         // keep THAT preset framed rather than freeze the tween's end pose.
         userControlledCamera = false;
         cancelViewTween();
 
-        const aspect = camera.aspect || 16/10;
-        const base   = frameForView(name, current, cameraFov, aspect);
+        const fit    = fitParams();
+        const base   = frameForView(name, current, fit.fitFovDeg, fit.fitAspect);
 
         cameraFollowSuppressed = missionActive;
 
@@ -2048,7 +2259,26 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
 
     function recenter() {
-        setView(currentViewName || 'threequarter');
+        setView(currentViewName || 'threequarter', { auto: viewIsAuto });
+    }
+
+    // Hand the preset and lens back to the screen rules and fly there.
+    function resetView() {
+        viewIsAuto = true;
+        fovIsAuto = true;
+        applyAutoPick();
+        setView(currentViewName, { auto: true });
+        notifyView();
+    }
+
+    // Host page → the toolbars' footprint over the frame (px). Re-fits the
+    // current preset unless the user is flying the camera themselves.
+    function setSafeInsets(ins = {}) {
+        const next = { top: Math.max(0, Math.round(ins.top || 0)), bottom: Math.max(0, Math.round(ins.bottom || 0)) };
+        if (next.top === safeInsetsState.top && next.bottom === safeInsetsState.bottom) return;
+        safeInsetsState = next;
+        applyViewOffset();
+        if (!userControlledCamera && !missionActive) reframeCurrentView();
     }
 
     // FOV swap. No dolly compensation — in god-mode the user owns position
@@ -2061,10 +2291,13 @@ export function initVehicleCanvas(canvas, opts = {}) {
         camera.updateProjectionMatrix();
     }
     function cycleFOV() {
+        fovIsAuto = false;                          // the user claimed the lens
         const cycle = [28, 38, 52];
-        let i = cycle.findIndex(v => Math.abs(v - cameraFov) < 1);
-        if (i < 0) i = cycle.indexOf(38);
-        setFOV(cycle[(i + 1) % cycle.length]);
+        // Next stop strictly above the current lens (the screen rules can set
+        // 34° or 40°, which are not on the cycle), wrapping to the first.
+        const next = cycle.find(v => v > cameraFov + 0.5) ?? cycle[0];
+        setFOV(next);
+        notifyView();
         return cameraFov;
     }
 
@@ -2073,9 +2306,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
     function setPad(on) { if (padState.root) padState.root.visible = !!on; }
 
-    // No-op in god-mode — the Auto button toggles its CSS state but doesn't
-    // do anything to the camera. Left as a stub so the host UI doesn't break.
-    function setAutoRotate(_on) {}
+    // Slow turntable orbit around the current target (one turn in 50 s),
+    // paused while a pointer is down or a preset tween is flying.
+    function setAutoRotate(on) { autoRotateOn = !!on; }
     function setVectors(on) {
         vectorsOn = !!on;
         if (current.thrustOverlay) current.thrustOverlay.visible = vectorsOn;
@@ -2105,6 +2338,14 @@ export function initVehicleCanvas(canvas, opts = {}) {
             });
         },
         setView,
+        resetView,
+        setSafeInsets,
+        // Degrees, the same sense as a drag: +az = drag right, +el = drag
+        // down (the camera rises over the stack).
+        orbit(dAzDeg = 0, dElDeg = 0) { orbitBy(dAzDeg, dElDeg); },
+        pan(dxPx = 0, dyPx = 0) { userControlledCamera = true; panBy(dxPx, dyPx); },
+        get view() { return { name: currentViewName, auto: viewIsAuto, fov: cameraFov, fovAuto: fovIsAuto, insets: { ...safeInsetsState } }; },
+        get autoRotate() { return autoRotateOn; },
         setAutoRotate,
         setPlume,
         setPad,
@@ -2160,6 +2401,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
                 flameIntensity: flameLight.intensity,
                 cameraY: camera.position.y,
                 targetY: controls.target.y,
+                cameraPos: cam.pos.toArray(),
+                target: controls.target.toArray(),
+                distance: cam.pos.distanceTo(controls.target),
+                viewOffsetY: camera.view?.enabled ? camera.view.offsetY : 0,
             };
         },
         // Live thrust + g-force readout for the MET HUD. Returns:
