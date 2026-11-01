@@ -2191,6 +2191,71 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 #tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 #tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 10px rgba(0,200,200,.7); }
 
+/* Weather strip under the slider (js/time-strip.js). Same flex geometry as
+   #tc-scrub-row so the tracks align; the canvas fills it at device pixels.
+   touch-action:none so a horizontal drag scrubs instead of panning the page. */
+#tc-strip-row { display: flex; align-items: stretch; gap: 8px; padding: 0 4px; }
+#tc-strip {
+    position: relative; flex: 1; min-width: 0; height: 40px;
+    border-radius: 3px; background: rgba(255,255,255,.025);
+    cursor: ew-resize; touch-action: none; user-select: none;
+}
+#tc-strip.dragging { cursor: grabbing; }
+.tc-strip-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tc-strip-cursor {
+    position: absolute; top: -2px; bottom: -2px; left: 0; width: 2px; margin-left: -1px;
+    background: #0ee; box-shadow: 0 0 6px rgba(0,238,238,.6); pointer-events: none;
+    will-change: transform;
+}
+.tc-strip-place {
+    position: absolute; left: 4px; top: 14px; max-width: 45%;
+    font: 600 8px/1.2 ui-monospace, monospace; color: rgba(200,225,235,.75);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+    text-shadow: 0 0 3px #000;
+}
+.tc-strip-place.empty { color: rgba(160,170,190,.6); font-weight: 500; }
+.tc-strip-tip {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 3;
+    min-width: 180px; max-width: 320px; padding: 6px 8px;
+    background: rgba(6,14,24,.94); border: 1px solid rgba(0,200,200,.28); border-radius: 5px;
+    color: #cde; font-size: 11px; line-height: 1.35; pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+.tc-strip-tip[hidden] { display: none; }
+.tc-strip-tip-head { color: #0ee; font: 600 10px ui-monospace, monospace; margin-bottom: 2px; }
+.tc-strip-tip-src  { color: #8aa; font-size: 9.5px; margin-top: 2px; }
+@media (max-width: 768px) { #tc-strip { height: 44px; } }
+/* Event markers ride a 13 px lane at the strip's top (js/time-strip.js
+   MARK_LANE). Real buttons: tab-reachable, labelled, click = jump there. */
+.tc-strip-marks { position: absolute; left: 0; right: 0; top: 0; height: 13px; pointer-events: none; }
+.tc-strip-mark {
+    position: absolute; top: 0; width: 13px; height: 13px; margin-left: -6.5px; padding: 1.5px;
+    border-radius: 50%; border: 1px solid currentColor; background: rgba(6,14,24,.92);
+    color: #9cc; cursor: pointer; pointer-events: auto; line-height: 0;
+}
+.tc-strip-mark svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.tc-strip-mark:hover, .tc-strip-mark:focus-visible { transform: scale(1.35); outline: none; z-index: 2; }
+.tc-strip-mark.ev-rain-start { color: #5aa0ff; }
+.tc-strip-mark.ev-rain-stop  { color: #7f9cc4; }
+.tc-strip-mark.ev-wind-peak  { color: #dfe7ef; }
+.tc-strip-mark.ev-freeze     { color: #bfe8ee; }
+.tc-strip-mark.ev-aurora     { color: #5dffa0; }
+/* Loop window (preset, or Shift-drag on the strip for a custom one). */
+.tc-strip-loop {
+    position: absolute; top: 13px; bottom: 0; pointer-events: none;
+    background: rgba(255,255,255,.07); border-left: 1px solid rgba(255,255,255,.45);
+    border-right: 1px solid rgba(255,255,255,.45);
+}
+.tc-strip-loop[hidden] { display: none; }
+#tc-strip.looping .tc-strip-loop { background: rgba(0,238,238,.10); border-color: rgba(0,238,238,.7); }
+#tc-strip.brushing { cursor: col-resize; }
+.tc-btn#tc-loop[aria-pressed="true"] { background: rgba(0,200,200,.30); color: #fff; border-color: #0cc; }
+#tc-loop-range {
+    background: rgba(0,200,200,.08); border: 1px solid rgba(0,200,200,.18); border-radius: 4px;
+    color: #9cc; font-family: inherit; font-size: 10px; font-weight: 600;
+    padding: 3px 2px; max-width: 92px; line-height: 1;
+}
+
 /* Wind-forecast skill strip. Five cells stacked horizontally below the
    scrubber, each a tiny bar coloured green→amber→red based on Murphy
    skill of our best wind forecaster vs persistence at that horizon.
@@ -4077,6 +4142,18 @@ import './js/telemetry.js';
                    title="Drag left to replay (up to 1 week back) or right to preview (up to 14 days ahead)">
             <span class="tc-scrub-edge right">+2w</span>
         </div>
+        <!-- Weather strip (EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md §6.1–6.2):
+             the selected place's temperature / rain / cloud / night on the
+             SAME axis as the slider above, a provenance band along its foot
+             (observed · nowcast · NWP), and a large drag target that scrubs
+             by writing the slider's own value + events (js/time-strip.js).
+             The edge spacers mirror #tc-scrub-row so the two tracks line up;
+             the strip still MEASURES the slider's thumb travel every paint. -->
+        <div id="tc-strip-row">
+            <span class="tc-scrub-edge" aria-hidden="true"></span>
+            <div id="tc-strip"></div>
+            <span class="tc-scrub-edge right" aria-hidden="true"></span>
+        </div>
         <!-- Wind-forecast skill strip. Five cells aligned roughly under
              the scrubber's forecast half (+1h, +3h, +6h, +12h, +24h).
              Each cell is a tiny vertical bar coloured by Murphy skill of
@@ -4103,6 +4180,18 @@ import './js/telemetry.js';
             <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
             <span class="tc-sep"></span>
             <button class="tc-btn" id="tc-now" title="Jump to real time (N)">Now</button>
+            <span class="tc-sep"></span>
+            <!-- Loop playback (js/time-loop.js): plays the chosen window on
+                 repeat in ~12 s; Shift-drag the weather strip for a custom
+                 window. Any hand on the slider or strip stops it. -->
+            <button class="tc-btn" id="tc-loop" aria-pressed="false" title="Loop the selected window (L) — Shift-drag the strip to pick your own">⟲ Loop</button>
+            <select id="tc-loop-range" aria-label="Loop window" title="Which window to loop">
+                <option value="pm24" selected>±24 h</option>
+                <option value="next24">Next 24 h</option>
+                <option value="past24">Past 24 h</option>
+                <option value="next72">Next 3 days</option>
+                <option value="custom" hidden>Custom</option>
+            </select>
             <span class="tc-display">
                 <span class="tc-time"   id="tc-time-utc">—</span>
                 <span class="tc-offset" id="tc-time-offset">now</span>
@@ -4308,6 +4397,7 @@ import { makePanelDraggable, resetPanelPosition, makePanelResizable, resetPanelS
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
+import { WeatherScrubBridge, isobarLane } from './js/weather-scrub-bridge.js';
 import { FrontLayer }                            from './js/front-engine.js';
 import {
     MagnetosphereEngine,
@@ -4343,6 +4433,8 @@ import { geo } from './js/geo/coords.js';
 import { GEO_GLSL } from './js/geo/coords.glsl.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import { solarPosition, sunTimes, compass16 } from './js/sun-altitude.js';
+import { WeatherCube } from './js/weather-cube.js';
+import { mountTimeStrip } from './js/time-strip.js';
 import { nextPasses } from './js/pass-predictor.js';
 import { VerdictCard } from './js/verdict-card.js';
 import { AirQualityFeed } from './js/air-quality-feed.js';
@@ -9601,6 +9693,20 @@ await wxGridHistory.open();
 wxFeed = new WeatherFeed({ history: wxGridHistory });
 wxFeed.start();
 wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
+// Scrub workers (EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md T3): frame decode
+// look-ahead for the resolver and the isobar contour, both off the main
+// thread. Measured on a scrub repaint: ~40 ms decode per hour crossed and
+// ~58 ms of isobar contouring per repaint, all inline before this.
+// `?scrubworker=0` is the A/B (every path falls back inline by itself if a
+// worker cannot start or dies).
+var wxScrubBridge = new URLSearchParams(location.search).get('scrubworker') === '0'
+    ? null : new WeatherScrubBridge();
+if (wxScrubBridge) {
+    wxResolver.setDecoder(wxScrubBridge);
+    // A repaint costs ~4 ms with the workers (was 50–135 ms): repaint every
+    // frame while scrubbing instead of the old ~11 Hz floor.
+    wxResolver.setMinRepaintMs(16);
+}
 
 // Cold-start backfill. /api/weather/grid?since=… serves up to 72 hourly
 // frames from the same Supabase ring buffer the cron writes to, and
@@ -10197,6 +10303,15 @@ window._wxPaintProvider  = wxPaintProvider;
 window._wxForecastWorker = wxForecastWorker;
 window._wxForecastRegistry = wxForecastRegistry;
 window._wxGridHistory      = wxGridHistory;
+window._wxResolver         = wxResolver;
+// ── The shared weather store (EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md §3) ──
+// ONE read-only index over the observed ring, the in-browser nowcast and the
+// NWP forecast ring, answering "what is the weather at (lat, lon, t)?" with
+// provenance. The globe still paints through wxResolver (the T3 GPU atlas
+// replaces that); point/series consumers — the time-bar strip first — read
+// this. `var` + window hook: animate() may run before later blocks.
+var wxCube = new WeatherCube({ history: wxGridHistory, nowcast: wxPaintProvider });
+window.__evCube = wxCube;
 window._tempVolFeed        = tempVolFeed;
 
 // ── Multi-level model → 3-D temperature volume coupling ──────────────────
@@ -11686,8 +11801,11 @@ document.addEventListener('weather-update', e => {
     // the most expensive consumer on this event, and during a scrub the event
     // fires many times a second; when hidden we mark it stale and the
     // lyr-isobars toggle catches up from _lastWeatherBuf on enable.
+    // The contour runs in the scrub Worker when one is wired (requestUpdate,
+    // latest-wins; ~58 ms off the main thread per repaint, measured
+    // 2026-10-31) and the panel refreshes when the result lands.
     if (isobarLayer.visible) {
-        isobarLayer.update(weatherBuffer);
+        isobarLayer.requestUpdate(weatherBuffer).then(() => updateIsobarPanel());
         _isobarStale = false;
     } else {
         _isobarStale = true;
@@ -13129,6 +13247,8 @@ document.addEventListener('click', (e) => {
 //  ISOBAR LAYER — marching-squares pressure contours
 // ═══════════════════════════════════════════════════════════════
 const isobarLayer = new IsobarLayer(earthMesh);
+if (wxScrubBridge) isobarLayer.setWorker(isobarLane(wxScrubBridge));
+window.__evIsobars = isobarLayer;
 // Frontal-line overlay. Sits between the isobar contours and the H/L sprites
 // in the visual stack (renderOrder 3 vs 2 vs sprite-default). Defaults to
 // hidden on first load — the colored polylines are loud relative to the
@@ -14507,6 +14627,58 @@ document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
 _setSimSpeed(1);
 _setSimPaused(false);
 
+// ── Weather strip under the slider (js/time-strip.js) ──────────────────
+// The place is the saved location; with none set, the point at the centre
+// of the view (the focus footprint), so the strip is never empty for a
+// first-time visitor. Errors here must never take the time bar down.
+var _timeStrip = null;
+try {
+    _timeStrip = mountTimeStrip({
+        host: document.getElementById('tc-strip'),
+        scrubEl: _scrubEl,
+        cube: wxCube,
+        getKpRows: () => _lastSwState?.kp_forecast ?? null,
+        onLoopChange: (st) => {
+            const b = document.getElementById('tc-loop');
+            if (b) {
+                b.setAttribute('aria-pressed', String(st.active));
+                b.textContent = st.active ? '⏹ Loop' : '⟲ Loop';
+            }
+            const sel = document.getElementById('tc-loop-range');
+            if (sel) {
+                const custom = sel.querySelector('option[value="custom"]');
+                if (custom) custom.hidden = !st.custom;
+                if (sel.value !== st.id) sel.value = st.id;
+            }
+        },
+        getPlace: () => {
+            const loc = loadUserLocation();
+            if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
+                return { lat: loc.lat, lon: loc.lon, label: `📍 ${loc.city || `${loc.lat.toFixed(1)}°, ${loc.lon.toFixed(1)}°`}` };
+            }
+            // View centre snapped to whole degrees: the data is 5° cells, and
+            // an unsnapped centre under auto-rotate would repaint every poll.
+            const fp = focusFootprint.getFootprint();
+            if (fp && Number.isFinite(fp.centerLat)) {
+                const lat = Math.round(fp.centerLat), lon = Math.round(fp.centerLon);
+                return { lat, lon, label: `⌖ view centre ${lat}°, ${lon}°` };
+            }
+            return null;
+        },
+    });
+    window.addEventListener('user-location-changed', () => _timeStrip?.refresh());
+    // Kp forecast rows feed the aurora markers; repaint when they arrive.
+    window.addEventListener('swpc-update', () => _timeStrip?.refresh());
+    document.getElementById('tc-loop')?.addEventListener('click', () => _timeStrip?.toggleLoop());
+    document.getElementById('tc-loop-range')?.addEventListener('change', (e) => _timeStrip?.setLoopRange(e.target.value));
+    // Now and Play hand the clock back: a running loop stops.
+    document.getElementById('tc-now')?.addEventListener('click', () => _timeStrip?.stopLoop('user'));
+    document.getElementById('tc-play')?.addEventListener('click', () => _timeStrip?.stopLoop('user'));
+    window.__evTimeStrip = _timeStrip;
+} catch (e) {
+    console.warn('[EarthView] weather strip failed to mount:', e);
+}
+
 // ── 24-h replay slider — release-side wiring ────────────────────────────
 // The `input` listener (drag/keyboard → simTimeMs) is hoisted to right
 // after timeBus.start() so it survives any throw in the heavy init that
@@ -14528,9 +14700,15 @@ if (_scrubEl) {
 // natively.)
 window.addEventListener('keydown', (e) => {
     const tag = e.target?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    if (e.code === 'Space')              { _setSimPaused(!simPaused); e.preventDefault(); }
-    else if (e.key === 'n' || e.key === 'N') _jumpToNow();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.code === 'Space') {
+        // While a loop plays, Space stops it (the loop owns the clock then).
+        if (_timeStrip?.loop?.active) _timeStrip.stopLoop('user');
+        else _setSimPaused(!simPaused);
+        e.preventDefault();
+    }
+    else if (e.key === 'n' || e.key === 'N') { _timeStrip?.stopLoop('user'); _jumpToNow(); }
+    else if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !e.altKey) _timeStrip?.toggleLoop();
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -14694,6 +14872,9 @@ function animate() {
             _scrubEl.value = String(clamped.toFixed(0));
         }
     }
+    // Weather-strip cursor (one transform write when it moves ≥ 0.5 px) and
+    // its O(1) data-version poll. Guarded: the strip is optional chrome.
+    if (typeof _timeStrip !== 'undefined' && _timeStrip) _timeStrip.update(simTimeMs);
 
     // ── Earth rotation (decoupled from simTimeMs) ───────────────────────
     // Toggle in the SW panel header. ON: track real wall-clock GMST so

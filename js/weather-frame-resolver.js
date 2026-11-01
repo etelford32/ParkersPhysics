@@ -67,7 +67,16 @@ const TEX_FLOATS  = NTEX * 4;
 // frames, but a fast back-and-forth scrub over a day thrashed it — every
 // re-visited hour paid the 30-50 ms main-thread decode again. 8 holds a
 // full day of one-way scrubbing at hourly frames. Freed on tab-hidden.
-const DEFAULT_LRU_SIZE       = 8;
+const DEFAULT_LRU_SIZE       = 12;
+// Look-ahead (2026-10-31, EARTHVIEW_WEATHER_TIME_ENGINE_PLAN.md T3): with a
+// decode worker wired (setDecoder), the resolver decodes the bracket plus
+// PREFETCH_HOURS further hours in the direction the clock is moving, off the
+// main thread, so crossing an hour boundary finds its frame already decoded
+// instead of paying the ~40 ms decode inline (measured). 12 slots ≈ 37 MB
+// holds the bracket, the look-ahead and a few hours behind for a reversal.
+const PREFETCH_HOURS         = 3;
+const PREFETCH_MAX_INFLIGHT  = 3;
+const PREFETCH_EVERY_MS      = 100;
 const DEFAULT_REDRAW_THRESH  = 60_000;            // 1 min
 // Wall-clock floor between replay dispatches. Each dispatch downstream costs
 // three ~1 MB DataTexture uploads + isobar/jet rebuilds + a panel of DOM
@@ -178,6 +187,14 @@ export class WeatherFrameResolver {
         this._lastRenderT = -Infinity;
         this._lastWasLive = null;
 
+        // Look-ahead decode state (setDecoder).
+        this._decoder        = null;
+        this._inflight       = new Map();   // hour key → coarse ref being decoded
+        this._lastPrefetchAt = -Infinity;
+        this._lastPrefetchT  = null;
+        this._scrubDir       = 1;
+        this._decodeStats    = { inline: 0, prefetched: 0, hits: 0 };
+
         // Subscribe to weather-update events so the resolver knows when
         // the feed has fresh data; that lets us invalidate the
         // "_lastWasLive" memo so the next tick re-dispatches with the
@@ -233,6 +250,8 @@ export class WeatherFrameResolver {
         if (!modeChanged && !isLive
             && wallNow - this._lastDispatchWall < this._minRepaintMs) return;
 
+        if (!isLive) this._prefetch(tEff, wallNow);
+
         if (isLive) {
             // Only flush live on the transition (or first tick). When
             // already parked at live, we leave the renderer alone — the
@@ -263,6 +282,23 @@ export class WeatherFrameResolver {
      * the change-detection memo so the next tick re-dispatches through the
      * provider. Pass null to revert to bracket-the-ring behaviour.
      */
+    /**
+     * Wire an off-thread decoder (js/weather-scrub-bridge.js). Optional: with
+     * none, every miss decodes inline exactly as before.
+     */
+    setDecoder(bridge) { this._decoder = bridge; }
+
+    /**
+     * Wall-clock floor between replay repaints. The 90 ms default exists
+     * because a repaint used to cost ~50–135 ms of main-thread work; with the
+     * decode look-ahead and the isobar contour in workers it measured 4 ms
+     * p50 / 7 ms p90, so the page lowers it to a frame (tests/earth-scrub-perf.spec.js).
+     */
+    setMinRepaintMs(ms) { this._minRepaintMs = Math.max(0, ms); }
+
+    /** Counters for the perf gate: inline decodes vs worker-prefetched hits. */
+    get decodeStats() { return { ...this._decodeStats, lru: this._lru.size }; }
+
     setForecastProvider(provider) {
         this._forecastProvider = provider;
         this.invalidate();
@@ -551,16 +587,64 @@ export class WeatherFrameResolver {
      * hits return the cached trio in O(1).
      */
     _decodeCached(record) {
-        const cached = this._lru.get(record.t);
-        if (cached) return cached;
+        // Entries carry the coarse array they were decoded FROM: the ring can
+        // replace an hour in place (an observation superseding a forecast row,
+        // a re-fetched forecast), and an hour-keyed cache would otherwise keep
+        // painting the superseded frame.
+        const entry = this._lru.get(record.t);
+        if (entry && entry.src === record.coarse) { this._decodeStats.hits++; return entry.trio; }
         // Reuse the feed's _decodeCoarse — single source of truth for
         // the bilinear+blur+normalise+pack pipeline. Underscore here is
         // convention, not enforcement; the resolver and feed are
         // tightly coupled by design (mirrors how solar-weather-history's
         // seedSyntheticHistory writes directly into history._rings[1]).
         const trio = this._feed._decodeCoarse(record.coarse, record.gridW, record.gridH);
-        this._lru.set(record.t, trio);
+        this._lru.set(record.t, { trio, src: record.coarse });
+        this._decodeStats.inline++;
         return trio;
+    }
+
+    /**
+     * Warm the LRU off-thread: the frames bracketing tEff and PREFETCH_HOURS
+     * beyond them in the direction the clock is moving. Cheap when all are
+     * cached (a few bracket() lookups, throttled to PREFETCH_EVERY_MS).
+     */
+    _prefetch(tEff, wallNow) {
+        const dec = this._decoder;
+        if (!dec || !(dec.decodeAvailable ? dec.decodeAvailable() : dec.available())) return;
+        if (wallNow - this._lastPrefetchAt < PREFETCH_EVERY_MS) return;
+        this._lastPrefetchAt = wallNow;
+        if (this._lastPrefetchT != null && tEff !== this._lastPrefetchT) {
+            this._scrubDir = tEff > this._lastPrefetchT ? 1 : -1;
+        }
+        this._lastPrefetchT = tEff;
+        const HOUR = 3_600_000;
+        const want = [];
+        const seen = new Set();
+        for (let k = 0; k <= PREFETCH_HOURS; k++) {
+            const br = this._history.bracket(tEff + this._scrubDir * k * HOUR);
+            if (!br) break;
+            for (const rec of [br.before, br.after]) {
+                if (!rec || seen.has(rec.t)) continue;
+                seen.add(rec.t);
+                want.push(rec);
+            }
+        }
+        for (const rec of want) {
+            if (this._inflight.size >= PREFETCH_MAX_INFLIGHT) break;
+            const entry = this._lru._m.get(rec.t);           // peek: no recency bump
+            if (entry && entry.src === rec.coarse) continue;
+            if (this._inflight.get(rec.t) === rec.coarse) continue;
+            this._inflight.set(rec.t, rec.coarse);
+            dec.decode(rec.coarse, rec.gridW, rec.gridH).then((trio) => {
+                // Only keep it if the ring still holds the frame we decoded.
+                if (this._inflight.get(rec.t) === rec.coarse) {
+                    this._lru.set(rec.t, { trio, src: rec.coarse });
+                    this._decodeStats.prefetched++;
+                }
+            }).catch(() => { /* worker gone: inline decode covers it */ })
+              .finally(() => { if (this._inflight.get(rec.t) === rec.coarse) this._inflight.delete(rec.t); });
+        }
     }
 
     /**
