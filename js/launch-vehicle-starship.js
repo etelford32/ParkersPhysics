@@ -30,6 +30,7 @@ import * as THREE from 'three';
 import { ENGINES } from './launch-engines.js';
 import { buildPlume as buildPlumeShared } from './launch-plume.js';
 import { buildEngineBell, buildClusterManifold } from './launch-engine-bell.js';
+import { addSurfaceDetail } from './launch-surface-detail.js';
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 // Stainless steel is the whole point — high metalness, slight blue tint, and
@@ -325,12 +326,13 @@ function buildShipTiles(R, length, mat) {
     const segCount = 6;
     for (let i = 0; i < segCount; i++) {
         const segLen = length * 0.78 / segCount;
-        const seg = new THREE.Mesh(
-            new THREE.CylinderGeometry(R * 1.012, R * 1.012, segLen, 64, 1, true,
-                                       3 * Math.PI / 2 - arc / 2, arc),
-            mat
-        );
-        seg.position.y = length * 0.05 + segLen * (i + 0.5);
+        // Height baked into the GEOMETRY (not mesh.position) so the
+        // object-space hex tiling (launch-surface-detail.js) runs on across
+        // segment joins instead of restarting a tile row at each one.
+        const segGeo = new THREE.CylinderGeometry(R * 1.012, R * 1.012, segLen, 64, 1, true,
+                                                  3 * Math.PI / 2 - arc / 2, arc);
+        segGeo.translate(0, length * 0.05 + segLen * (i + 0.5), 0);
+        const seg = new THREE.Mesh(segGeo, mat);
         seg.castShadow = true;
         g.add(seg);
     }
@@ -360,7 +362,7 @@ function buildSuperHeavy(P) {
     ];
     const body = new THREE.Mesh(
         new THREE.LatheGeometry(pts, 64),
-        steelMat({ roughness: 0.34 })
+        addSurfaceDetail(steelMat({ roughness: 0.34 }), { kind: 'steel', ringPitch: 1.83 })
     );
     body.castShadow = true;
     body.receiveShadow = true;
@@ -470,7 +472,7 @@ function buildShip(P) {
 
     const body = new THREE.Mesh(
         new THREE.LatheGeometry(pts, 64),
-        steelMat({ roughness: 0.32 })
+        addSurfaceDetail(steelMat({ roughness: 0.32 }), { kind: 'steel', ringPitch: 1.83 })
     );
     body.castShadow = true;
     body.receiveShadow = true;
@@ -478,7 +480,7 @@ function buildShip(P) {
 
     // Heat-shield tiles on the leeward side (-Z by convention, so the tiles
     // face the camera when the booster catch tower is on +Z behind).
-    const tiles = buildShipTiles(R, L, flatMat(COLORS.tile, 0.95));
+    const tiles = buildShipTiles(R, L, addSurfaceDetail(flatMat(COLORS.tile, 0.9), { kind: 'tiles', tileSize: 0.95 }));
     g.add(tiles);
 
     // Tile band stripe at the very base — visual detail, dark ring.
