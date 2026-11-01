@@ -14,7 +14,9 @@
  */
 import assert from 'node:assert/strict';
 
-const ROOT = '/home/user/ParkersPhysics';
+// Resolve against THIS file, never a checkout path: a hard-coded
+// absolute checkout path passed only in the sandbox that wrote it and
+// failed on any other machine (CI runners check out to /home/runner/work/...).
 globalThis.indexedDB = { open() { const r = {}; queueMicrotask(() => r.onerror?.({ target: { error: new Error('no IDB') } })); return r; } };
 globalThis.document = {
     _l: new Map(),
@@ -25,10 +27,10 @@ globalThis.document = {
 };
 globalThis.CustomEvent = class { constructor(type, init = {}) { this.type = type; this.detail = init.detail ?? null; } };
 
-const { WeatherHistory }             = await import(ROOT + '/js/weather-history.js');
-const { WeatherFeed }                = await import(ROOT + '/js/weather-feed.js');
-const { WindAdvectionRK2Forecaster, rk2BuildHorizons } = await import(ROOT + '/js/weather-flow.js');
-const { ForecastPaintProvider }      = await import(ROOT + '/js/weather-forecast.js');
+const { WeatherHistory }             = await import(new URL('../js/weather-history.js', import.meta.url).href);
+const { WeatherFeed }                = await import(new URL('../js/weather-feed.js', import.meta.url).href);
+const { WindAdvectionRK2Forecaster, rk2BuildHorizons } = await import(new URL('../js/weather-flow.js', import.meta.url).href);
+const { ForecastPaintProvider }      = await import(new URL('../js/weather-forecast.js', import.meta.url).href);
 
 const G_W = 72, G_H = 36, N = G_W * G_H, NUM = 9, HOUR = 3_600_000, CH_T = 0, CH_U = 3;
 
@@ -78,7 +80,7 @@ await check('denseInputs ships only the newest two frames', () => {
 // Drive the REAL worker module via a `self` stub.
 let workerReply = null;
 globalThis.self = { postMessage: (m) => { if (m && m.type === 'forecast') workerReply = m; }, onmessage: null };
-await import(ROOT + '/js/weather-forecast-worker.js');   // sets self.onmessage; posts 'ready'
+await import(new URL('../js/weather-forecast-worker.js', import.meta.url).href);   // sets self.onmessage; posts 'ready'
 
 await check('real worker module output == inline forecastDense (byte-identical)', () => {
     const direct = rk2.forecastDense({ history, maxHorizonH: 8 });
@@ -137,7 +139,7 @@ await check('stale worker reply is dropped (newest refresh wins)', async () => {
 
 await check('worker pre-warm: real worker decodes near-term trios, provider seeds cache (no on-thread decode)', async () => {
     // Fake bridge runs the REAL worker kernel AND the prewarm decode path.
-    const { decodeCoarse } = await import(ROOT + '/js/weather-decode.js');
+    const { decodeCoarse } = await import(new URL('../js/weather-decode.js', import.meta.url).href);
     const runWithPrewarm = (inp) => {
         const dense = runWorkerKernel(inp);
         if (inp.prewarmH > 0) {
@@ -175,7 +177,7 @@ await check('no worker available → provider falls back to inline sync refresh'
 // must return exactly those horizons, byte-identical to the inline scored
 // forecast() (same kernel, same gains).
 await check("worker scored 'forecast' (horizonsH) == inline forecast()", async () => {
-    const { FORECAST_HORIZONS_H } = await import(ROOT + '/js/weather-forecast.js');
+    const { FORECAST_HORIZONS_H } = await import(new URL('../js/weather-forecast.js', import.meta.url).href);
     const direct = rk2.forecast({ history });
     const inputs = rk2.denseInputs({ history, maxHorizonH: 24 });
     inputs.horizonsH = FORECAST_HORIZONS_H.slice();
@@ -206,7 +208,7 @@ await check('forecastAsync falls back inline when the worker is gone', async () 
 // The 'mforecast' worker branch: multi-level scored forecast, byte-identical
 // to the inline path (both call multilevelBuildHorizons).
 await check("worker 'mforecast' == inline multilevel forecast()", async () => {
-    const { MultiLevelAdvectionForecaster } = await import(ROOT + '/js/weather-flow.js');
+    const { MultiLevelAdvectionForecaster } = await import(new URL('../js/weather-flow.js', import.meta.url).href);
     const f = (v) => { const a = new Float32Array(N); a.fill(v); return a; };
     const lw = {
         t: nowHour, gridW: G_W, gridH: G_H,
@@ -232,7 +234,7 @@ await check("worker 'mforecast' == inline multilevel forecast()", async () => {
 
 // The 'mlevels' worker branch (multi-level model → 3-D volume level ring).
 await check("worker 'mlevels' output == inline multilevelLevelsDense (byte-identical)", async () => {
-    const { multilevelLevelsDense } = await import(ROOT + '/js/weather-flow.js');
+    const { multilevelLevelsDense } = await import(new URL('../js/weather-flow.js', import.meta.url).href);
     const f = (v) => { const a = new Float32Array(N); a.fill(v); return a; };
     const inputs = {
         issuedMs: nowHour, gridW: G_W, gridH: G_H,

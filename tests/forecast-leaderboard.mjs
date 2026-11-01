@@ -5,12 +5,14 @@
  */
 import assert from 'node:assert/strict';
 
-const ROOT = '/home/user/ParkersPhysics';
+// Resolve against THIS file, never a checkout path: a hard-coded
+// absolute checkout path passed only in the sandbox that wrote it and
+// failed on any other machine (CI runners check out to /home/runner/work/...).
 globalThis.indexedDB = { open() { const r = {}; queueMicrotask(() => r.onerror?.({ target: { error: new Error('no IDB') } })); return r; } };
 globalThis.document = { addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
 globalThis.CustomEvent = class { constructor(t, i = {}) { this.type = t; this.detail = i.detail ?? null; } };
 
-const { rankBySkill } = await import(ROOT + '/js/weather-forecast-validation.js');
+const { rankBySkill } = await import(new URL('../js/weather-forecast-validation.js', import.meta.url).href);
 
 let pass = 0, fail = 0;
 const check = (name, fn) => { try { fn(); pass++; console.log('  ✓', name); } catch (e) { fail++; console.error('  ✗', name, '\n     ', e.message); } };

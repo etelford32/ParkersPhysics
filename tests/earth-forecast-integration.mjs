@@ -29,7 +29,9 @@
 
 import assert from 'node:assert/strict';
 
-const ROOT = '/home/user/ParkersPhysics';
+// Resolve against THIS file, never a checkout path: a hard-coded
+// absolute checkout path passed only in the sandbox that wrote it and
+// failed on any other machine (CI runners check out to /home/runner/work/...).
 
 // ── Stubs: a working event bus + no-IDB so WeatherHistory uses memory ───────
 globalThis.indexedDB = {
@@ -44,11 +46,11 @@ globalThis.document = {
 };
 globalThis.CustomEvent = class { constructor(type, init = {}) { this.type = type; this.detail = init.detail ?? null; } };
 
-const { WeatherHistory }          = await import(ROOT + '/js/weather-history.js');
-const { WeatherFeed }             = await import(ROOT + '/js/weather-feed.js');
-const { WeatherFrameResolver }    = await import(ROOT + '/js/weather-frame-resolver.js');
-const { WindAdvectionRK2Forecaster } = await import(ROOT + '/js/weather-flow.js');
-const { ForecastPaintProvider }   = await import(ROOT + '/js/weather-forecast.js');
+const { WeatherHistory }          = await import(new URL('../js/weather-history.js', import.meta.url).href);
+const { WeatherFeed }             = await import(new URL('../js/weather-feed.js', import.meta.url).href);
+const { WeatherFrameResolver }    = await import(new URL('../js/weather-frame-resolver.js', import.meta.url).href);
+const { WindAdvectionRK2Forecaster } = await import(new URL('../js/weather-flow.js', import.meta.url).href);
+const { ForecastPaintProvider }   = await import(new URL('../js/weather-forecast.js', import.meta.url).href);
 
 const GRID_W = 72, GRID_H = 36, N = GRID_W * GRID_H, NUM_CH = 9, HOUR = 3_600_000;
 const CH_T = 0, CH_U = 3, CH_V = 4;
