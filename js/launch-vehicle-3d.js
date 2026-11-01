@@ -12,12 +12,16 @@
  *   SRB             45.5 m × 3.7 m diameter (×2)
  *   Orbiter         37.2 m × 23.8 m wingspan, 17.3 m tail height
  *
- * Visual features beyond the stack itself:
- *   · 3-point studio lighting + hemisphere fill, soft PCF shadows
- *   · Atmospheric horizon-gradient sky (canvas-generated background)
- *   · Twinkling starfield (custom point shader, time-driven)
- *   · Engine plume — three layered additive cones, animated flicker
- *   · Subtle bloom-like halo via emissive + tone-mapped HDR exposure
+ * Visual features beyond the stack itself (2026-11 overhaul):
+ *   · Floodlit night pad: xenon SPOT key (soft PCF shadows), sodium fill,
+ *     cool rim, sky/ground hemisphere; volumetric floodlight beams
+ *   · Night-sky dome + magnitude-distributed stars + terrain/treeline and a
+ *     floodlight-panel reflection environment (js/launch-scene-fx.js)
+ *   · Engine flame as a point light; shader plumes (js/launch-plume.js)
+ *   · Lit, sorted smoke / ground-cloud / deluge-steam sprites
+ *     (js/launch-smoke.js over the PURE js/launch-smoke-sim.js)
+ *   · Object-space surface detail: Starship weld rings + hex tiles, ET foam
+ *   · HDR post: bloom → ACES OutputPass → vignette + dither
  *   · IntersectionObserver pauses the loop when off-screen
  *   · Camera presets (front · side · top · 3-quarter) with smooth tween
  *
@@ -37,6 +41,12 @@ import { ENGINES } from './launch-engines.js';
 import { buildThrustOverlay, tickThrustOverlay } from './launch-thrust-overlay.js';
 import { buildPlume as buildPlumeShared, tickPlume } from './launch-plume.js';
 import { buildEngineBell, buildTankDomeFittings } from './launch-engine-bell.js';
+import { HORIZON, buildSky, buildStars, buildTerrain, buildEnvironment,
+         createPost, detectQuality, buildLightBeam } from './launch-scene-fx.js';
+import { createSmokeSim, stepSmoke, clearSmoke, planEmissions,
+         createEmissionCarry, SMOKE_PROFILES } from './launch-smoke-sim.js';
+import { createSmokeRenderer } from './launch-smoke.js';
+import { addSurfaceDetail, setSurfaceDetailEnabled } from './launch-surface-detail.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -130,7 +140,7 @@ function buildExternalTank() {
 
     const tank = new THREE.Mesh(
         new THREE.LatheGeometry(pts, 64),
-        mkMat(COLORS.foam, { roughness: 0.92 })
+        addSurfaceDetail(mkMat(COLORS.foam, { roughness: 0.92 }), { kind: 'foam' })
     );
     tank.castShadow = true;
     tank.receiveShadow = true;
@@ -543,109 +553,9 @@ function buildPlume() {
     });
 }
 
-// ── Ascent trail (pad-anchored exhaust column) ───────────────────────────────
-// Vertical additive cylinder with a procedurally-painted vertical gradient.
-// Anchored to the pad in world space so the trail rises straight up regardless
-// of how the rocket pitches and rolls — produces the iconic "smoke pillar
-// while the vehicle arcs over" silhouette real ascents have.
-
-function buildAscentTrail() {
-    const c = document.createElement('canvas');
-    c.width = 16; c.height = 256;
-    const ctx = c.getContext('2d');
-    // Gradient: bright hot top → cooling middle → transparent bottom.
-    const g = ctx.createLinearGradient(0, 0, 0, 256);
-    g.addColorStop(0.00, 'rgba(255,230,170,0.95)');
-    g.addColorStop(0.15, 'rgba(255,170, 80,0.70)');
-    g.addColorStop(0.55, 'rgba(220,150, 90,0.35)');
-    g.addColorStop(1.00, 'rgba(140, 90, 60,0.00)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 16, 256);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.wrapS = THREE.RepeatWrapping;
-
-    // Tapered cylinder — bottom radius 1.6× top so the column reads like a
-    // real exhaust trail: tight under the rocket (recent exhaust), wider
-    // and more diffuse near the pad (older, dispersed). Default cylinder
-    // geometry's top is at +Y.
-    const trail = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.0, 1.6, 1, 28, 1, true),
-        new THREE.MeshBasicMaterial({
-            map: tex,
-            transparent: true,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-            fog: false,
-        })
-    );
-    trail.visible = false;
-    return trail;
-}
-
-// ── Pad steam vents (water deluge) ───────────────────────────────────────────
-// Rocket pads suppress acoustic energy at ignition by dumping millions of
-// gallons of water through deck nozzles; the result is a curtain of white
-// steam clouds boiling off the deck. Modelled as 10 small additive spheres
-// scattered around the deck whose scale + opacity grow and fade on a per-
-// puff phase, gated to the ignition / early-ascent window.
-function buildPadSteam() {
-    const g = new THREE.Group();
-    g.name = 'PadSteam';
-    g.visible = false;
-
-    const N = 10;
-    for (let i = 0; i < N; i++) {
-        const angle  = (i / N) * Math.PI * 2 + Math.random() * 0.4;
-        const radius = 6 + Math.random() * 8;
-        const puff = new THREE.Mesh(
-            new THREE.SphereGeometry(2.4 + Math.random() * 1.2, 12, 10),
-            new THREE.MeshBasicMaterial({
-                color: 0xf0f3f8,
-                transparent: true,
-                opacity: 0.0,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false,
-                fog: false,
-            })
-        );
-        puff.position.set(
-            Math.cos(angle) * radius,
-            0.5 + Math.random() * 0.6,
-            Math.sin(angle) * radius,
-        );
-        puff.userData.phase = Math.random() * Math.PI * 2;
-        puff.userData.baseScale = 0.6 + Math.random() * 0.5;
-        g.add(puff);
-    }
-    return g;
-}
-
-function tickPadSteam(steam, T, throttle) {
-    if (!steam) return;
-    // Active from T-3 (ignition spool-up) through T+8 (rocket clear of pad).
-    const active = T > -3.2 && T < 8;
-    steam.visible = active && throttle > 0.05;
-    if (!steam.visible) return;
-    // Envelope: rises 0 → 1 over T-3..T-0.5 (ignition surge), holds, then
-    // fades 1 → 0 over T+5..T+8 as the rocket climbs out of view of the pad.
-    let env;
-    if (T < -0.5)      env = (T + 3) / 2.5;
-    else if (T < 5)    env = 1;
-    else               env = Math.max(0, 1 - (T - 5) / 3);
-
-    steam.children.forEach((puff, i) => {
-        const phase = puff.userData.phase;
-        const base  = puff.userData.baseScale;
-        // Each puff has its own slow grow-and-fade over ~2 s, plus a small
-        // jitter on position so the cloud volume looks alive.
-        const cycle = 0.5 + 0.5 * Math.sin(T * 1.4 + phase);
-        const s = base * (0.6 + 1.6 * cycle) * (0.6 + 0.4 * env);
-        puff.scale.setScalar(s);
-        puff.material.opacity = 0.65 * cycle * env;
-    });
-}
+// The pad-anchored additive trail cylinder and the ten additive steam
+// spheres that used to live here were replaced (2026-11) by the lit, sorted
+// smoke sprites in js/launch-smoke.js, driven by js/launch-smoke-sim.js.
 
 // ── Stack assembly ───────────────────────────────────────────────────────────
 
@@ -746,139 +656,9 @@ function buildShuttleStack() {
     return stack;
 }
 
-// ── Sky + starfield ──────────────────────────────────────────────────────────
-// Background gradient generated on a 2D canvas → equirectangular texture so
-// it works as scene.background. Goes from deep-space top to faint atmospheric
-// horizon glow at the bottom.
-
-function buildSkyTexture() {
-    const c = document.createElement('canvas');
-    c.width = 4; c.height = 512;
-    const ctx = c.getContext('2d');
-    const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0.0,  '#02010a');
-    grad.addColorStop(0.45, '#0a0820');
-    grad.addColorStop(0.78, '#1a1428');
-    grad.addColorStop(0.92, '#2a1c34');
-    grad.addColorStop(1.0,  '#3a2640');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 4, 512);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.minFilter = THREE.LinearFilter;
-    return tex;
-}
-
-// Procedural equirectangular environment for image-based lighting (IBL).
-//
-// WHY this exists: every vehicle surface is a PBR MeshStandard/Physical
-// material — Starship is near-pure metal (metalness 0.92) and Falcon/Dragon
-// are glossy clearcoat white. A metal with no environment to reflect renders
-// almost black (it has no diffuse term; its colour IS its reflection), and a
-// clearcoat coat with nothing to mirror looks like flat matte plastic. Direct
-// lights alone give a single hard highlight and dead shadow side. Feeding the
-// scene a PMREM-prefiltered environment (set as scene.environment in init)
-// makes the steel read as steel and the white panels pick up a soft sheen —
-// the single biggest realism lever for hard-surface vehicles.
-//
-// It's built procedurally (no HDR fetch — this module must work offline) and
-// keyed to the SAME dusk palette as buildSkyTexture(), plus a warm horizon
-// glint roughly aligned with the key light and a cooler bounce opposite it,
-// so the reflections agree with the three directional lights instead of
-// fighting them. EquirectangularReflectionMapping: v=top → zenith (+Y),
-// v=bottom → ground (−Y); u → azimuth.
-function buildEnvTexture() {
-    const W = 512, H = 256;
-    const c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const ctx = c.getContext('2d');
-    // Sky → horizon → ground vertical gradient.
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0.00, '#02010a');   // zenith
-    grad.addColorStop(0.38, '#0c0a22');
-    grad.addColorStop(0.48, '#231a33');   // horizon band (brightest sky)
-    grad.addColorStop(0.52, '#3a2842');
-    grad.addColorStop(0.60, '#1b1525');
-    grad.addColorStop(1.00, '#0a0712');   // ground bounce / nadir
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-    // Warm key-light glow just above the horizon — gives metals a specular
-    // hot spot so stainless steel reads as polished metal rather than matte.
-    const gx = W * 0.18, gy = H * 0.46, gr = H * 0.6;
-    const warm = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
-    warm.addColorStop(0.0, 'rgba(255,228,184,0.85)');
-    warm.addColorStop(0.4, 'rgba(255,184,120,0.30)');
-    warm.addColorStop(1.0, 'rgba(255,160,100,0.0)');
-    ctx.fillStyle = warm;
-    ctx.fillRect(0, 0, W, H);
-    // Cool blue fill bounce opposite the key — mirrors the rim/fill lights so
-    // the shadow side of the stack still catches a faint reflection.
-    const bx = W * 0.68, by = H * 0.5, br = H * 0.7;
-    const cool = ctx.createRadialGradient(bx, by, 0, bx, by, br);
-    cool.addColorStop(0.0, 'rgba(120,150,225,0.28)');
-    cool.addColorStop(1.0, 'rgba(120,150,225,0.0)');
-    ctx.fillStyle = cool;
-    ctx.fillRect(0, 0, W, H);
-    const tex = new THREE.CanvasTexture(c);
-    tex.mapping = THREE.EquirectangularReflectionMapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-}
-
-// Custom-shader starfield with subtle per-star twinkle.
-function buildStarfield() {
-    const N = 1500;
-    const positions = new Float32Array(N * 3);
-    const sizes     = new Float32Array(N);
-    const phases    = new Float32Array(N);
-    const R = 1500;
-    for (let i = 0; i < N; i++) {
-        // Bias stars toward the upper hemisphere — looks more like deep
-        // space above and an atmospheric glow below.
-        const u = Math.random() * 1.6 - 0.6;     // -0.6..1.0
-        const t = Math.random() * Math.PI * 2;
-        const r = Math.sqrt(Math.max(0, 1 - u * u));
-        positions[i * 3]     = R * r * Math.cos(t);
-        positions[i * 3 + 1] = R * u;
-        positions[i * 3 + 2] = R * r * Math.sin(t);
-        sizes[i]  = Math.random() * 1.6 + 0.6;
-        phases[i] = Math.random() * Math.PI * 2;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('size',     new THREE.BufferAttribute(sizes, 1));
-    geo.setAttribute('phase',    new THREE.BufferAttribute(phases, 1));
-
-    const mat = new THREE.ShaderMaterial({
-        uniforms: { uTime: { value: 0 } },
-        transparent: true,
-        depthWrite: false,
-        vertexShader: `
-            attribute float size;
-            attribute float phase;
-            uniform float uTime;
-            varying float vAlpha;
-            void main() {
-                vec4 mv = modelViewMatrix * vec4(position, 1.0);
-                gl_Position = projectionMatrix * mv;
-                float twinkle = 0.55 + 0.45 * sin(uTime * 1.4 + phase * 3.0);
-                gl_PointSize = size * twinkle * (300.0 / -mv.z);
-                vAlpha = 0.55 + 0.45 * twinkle;
-            }
-        `,
-        fragmentShader: `
-            varying float vAlpha;
-            void main() {
-                vec2 d = gl_PointCoord - vec2(0.5);
-                float r = length(d);
-                if (r > 0.5) discard;
-                float a = smoothstep(0.5, 0.0, r);
-                gl_FragColor = vec4(1.0, 0.97, 0.92, a * vAlpha);
-            }
-        `,
-    });
-    return new THREE.Points(geo, mat);
-}
+// Sky, stars, terrain, reflection environment and post-processing live in
+// js/launch-scene-fx.js (2026-11). The old canvas-gradient background and
+// dusk IBL were replaced by a night-sky dome + a floodlit-pad environment.
 
 // ── Camera presets ───────────────────────────────────────────────────────────
 // Each preset is a unit-length direction vector from the framing target
@@ -938,9 +718,14 @@ function computeVehicleBBox(vehicleRoot) {
         //                   bbox.min.y to ~-16 m, shifting target.y down
         //                   ~13 m and biasing the whole frame toward the
         //                   booster + launch tower.
+        //   …Plume       — the match is a SUFFIX: Starship's cones are named
+        //                   'StarshipPlume', and an exact 'Plume' test let
+        //                   their ~40 m of geometry drag bbox.min.y below
+        //                   the ground, which put the Engines close-up
+        //                   camera UNDER the terrain looking up at the OLM.
         let p = o;
         while (p) {
-            if (p.name === 'Plume' || p.name === 'ThrustOverlay') return;
+            if (/Plume$/.test(p.name) || p.name === 'ThrustOverlay') return;
             p = p.parent;
         }
         bbox.expandByObject(o);
@@ -1248,44 +1033,34 @@ export function initVehicleCanvas(canvas, opts = {}) {
     renderer.setPixelRatio(1);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.0;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+    // Render quality: 'high' (MSAA HDR + bloom, full smoke budget), 'low'
+    // (software rasteriser: bloom kept, no MSAA, ~40 % smoke), 'off' (WebGL1
+    // or ?lpfx=off: direct render, no post). ?lpfx=high|low|off overrides.
+    const quality = detectQuality(renderer, typeof location !== 'undefined' ? location.search : '');
+    setSurfaceDetailEnabled(renderer.capabilities.isWebGL2);
+
     const scene = new THREE.Scene();
-    scene.background = buildSkyTexture();
-    // Atmospheric fog — pulls distant scenery into a soft purple-night haze
-    // and hides the hard edge where the ground plane cuts off.
-    scene.fog = new THREE.FogExp2(0x1a1428, 0.0025);
+    // The sky dome (js/launch-scene-fx.js) is the backdrop; this colour only
+    // shows for a frame if the dome has not drawn yet. HORIZON is shared by
+    // the dome and the fog so distant terrain fogs into the sky behind it.
+    scene.background = HORIZON.clone();
+    scene.fog = new THREE.FogExp2(HORIZON.clone(), 0.0011);
 
-    // Image-based lighting. PMREM-prefilter the procedural dusk environment
-    // (see buildEnvTexture) and hang it on scene.environment so every PBR
-    // material in the scene gets reflections/IBL for free — no per-material
-    // wiring. Background stays the gradient sky; environment only drives
-    // reflections. Generated once at init; the source canvas texture and the
-    // generator are disposed immediately, the prefiltered render target
-    // (envRT) lives for the canvas lifetime and is freed in dispose().
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    const _envSrc = buildEnvTexture();
-    const envRT = pmrem.fromEquirectangular(_envSrc);
-    scene.environment = envRT.texture;
-    _envSrc.dispose();
-    pmrem.dispose();
+    // Reflections: the night sky PLUS the floodlight banks a pad vehicle
+    // actually mirrors (see buildEnvironment). Built once; freed in dispose().
+    const env = buildEnvironment(renderer);
+    scene.environment = env.texture;
 
-    const stars = buildStarfield();
-    scene.add(stars);
-
-    // Ground horizon disc — large, faintly glowing edge to suggest atmosphere.
-    const horizon = new THREE.Mesh(
-        new THREE.RingGeometry(280, 1600, 96, 1),
-        new THREE.MeshBasicMaterial({
-            color: 0x3a2a4c, transparent: true, opacity: 0.45,
-            side: THREE.DoubleSide, depthWrite: false, fog: false,
-        })
-    );
-    horizon.rotation.x = -Math.PI / 2;
-    horizon.position.y = -1;
-    scene.add(horizon);
+    const sky = buildSky({ radius: 3000 });
+    scene.add(sky.mesh);
+    const stars = buildStars({ count: quality === 'high' ? 3600 : 2200, radius: 2600 });
+    scene.add(stars.points);
+    const terrain = buildTerrain();
+    scene.add(terrain.group);
 
     // Default FOV is intentionally a touch wider than a stills lens (38°
     // ≈ 50 mm equivalent) so the rocket has a sense of presence without
@@ -1299,30 +1074,71 @@ export function initVehicleCanvas(canvas, opts = {}) {
     const camera = new THREE.PerspectiveCamera(cameraFov, 16 / 10, 0.5, 8000);
 
     // ── Lighting ────────────────────────────────────────────────────────────
-    scene.add(new THREE.HemisphereLight(0x6688aa, 0x2a1830, 0.55));
-    scene.add(new THREE.AmbientLight(0xffffff, 0.18));
+    // A floodlit night pad: cool xenon key from the camera side (it casts the
+    // shadows), a warm sodium fill from the left, a cool rim from behind that
+    // separates the silhouette from the sky, and a dim sky/ground hemisphere.
+    // Intensities are linear and tuned against the ACES OutputPass.
+    const hemi = new THREE.HemisphereLight(0x5a6c96, 0x2a2018, 0.55);
+    scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xfff2dc, 1.4);
+    // The key is a SPOT, not a directional light: a floodlight bank throws a
+    // POOL — the pad and vehicle bright, the scrub beyond falling off into
+    // the night. A directional key lit the whole landscape to the horizon
+    // at the same level as the pad, which read as an overcast afternoon.
+    // decay 0 so the pool's level is set by `intensity`, its edge by the cone.
+    const key = new THREE.SpotLight(0xeef2ff, 3.0, 0, Math.PI / 6, 0.55, 0);
     key.position.set(60, 90, 50);
     key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
-    key.shadow.bias        = -0.0008;
-    key.shadow.normalBias  = 0.04;
+    key.shadow.mapSize.set(quality === 'high' ? 4096 : 2048, quality === 'high' ? 4096 : 2048);
+    key.shadow.bias        = -0.00015;
+    key.shadow.normalBias  = 0.05;
+    key.shadow.radius      = 2.5;
     scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xffaa66, 0.55);
+    const fill = new THREE.DirectionalLight(0xffb27a, 0.75);
     fill.position.set(-40, 25, 30);
     scene.add(fill);
 
-    const rim = new THREE.DirectionalLight(0x88aaff, 0.4);
-    rim.position.set(0, 30, -80);
+    const rim = new THREE.DirectionalLight(0x9ab4ff, 1.1);
+    rim.position.set(-20, 40, -80);
     scene.add(rim);
 
-    // ── Ascent trail (pad-anchored, world-space) ──────────────────────────
-    const trail = buildAscentTrail();
-    scene.add(trail);
-    const padSteam = buildPadSteam();
-    scene.add(padSteam);
+    // Engine flame light — a point light at the cluster exit whose intensity
+    // follows throttle (with flicker). It is what turns the pad, the tower and
+    // the underside of the ground cloud orange at ignition. No shadows (a
+    // point-light cube shadow per frame is not worth it here).
+    const flameLight = new THREE.PointLight(0xff9a50, 0, 0, 2);
+    flameLight.castShadow = false;
+    scene.add(flameLight);
+
+    // ── Smoke / steam sprites (js/launch-smoke*.js) ───────────────────────
+    const SMOKE_CAP = quality === 'high' ? 2600 : 1000;
+    const smokeSim = createSmokeSim({ capacity: SMOKE_CAP, seed: 20261101 });
+    const smokeView = createSmokeRenderer({ capacity: SMOKE_CAP });
+    scene.add(smokeView.mesh);
+    let smokeCarry = createEmissionCarry();
+    const smokeBudget = quality === 'high' ? 1 : 0.4;
+    const _nozzleWorld = new THREE.Vector3();
+    const _downWorld = new THREE.Vector3();
+    const _keyDir = new THREE.Vector3();
+    const _flameCol = new THREE.Color();
+    const SMOKE_LIGHT = {
+        keyColor:  new THREE.Color(0xeef2ff).multiplyScalar(0.9),
+        ambTop:    new THREE.Color(0.10, 0.12, 0.18),
+        ambBottom: new THREE.Color(0.05, 0.045, 0.04),
+        steam:     new THREE.Color(0.86, 0.88, 0.92),
+    };
+    // Per-propellant colour of what comes OUT: solid-motor Al₂O₃ is bright
+    // white, kerolox exhaust a warm grey, methalox nearly clean (and its ground
+    // cloud is mostly steam + pad dust).
+    const SMOKE_TINTS = {
+        shuttle:  { exhaust: new THREE.Color(0.90, 0.89, 0.86), ground: new THREE.Color(0.86, 0.85, 0.82), flame: 0xffa860 },
+        falcon9:  { exhaust: new THREE.Color(0.62, 0.58, 0.54), ground: new THREE.Color(0.80, 0.79, 0.77), flame: 0xff9440 },
+        starship: { exhaust: new THREE.Color(0.75, 0.78, 0.86), ground: new THREE.Color(0.74, 0.70, 0.64), flame: 0xff8a5a },
+    };
+
+    // Post: RenderPass → bloom → ACES OutputPass → vignette + dither.
+    const post = createPost(renderer, scene, camera, { quality });
 
     // ── Mission clock (drives liftoff animation) ──────────────────────────
     const missionClock = createMissionClock();
@@ -1332,7 +1148,6 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // Save baseline scene parameters so we can restore after a flight.
     const baseFogColor   = scene.fog.color.clone();
     const baseFogDensity = scene.fog.density;
-    const skyEndColor    = new THREE.Color(0x040614);
 
     // ── Pad (replaced per vehicle in setVehicle) ──────────────────────────
     let padState = { root: null, beacons: [] };
@@ -1349,6 +1164,22 @@ export function initVehicleCanvas(canvas, opts = {}) {
             });
         }
         const built = buildPadInfra(padId || 'generic', opts);
+        // Lit beacons sit past the bloom threshold (the pad module's default
+        // gain of 1 is tuned for the un-bloomed Space Ship Designer view).
+        for (const b of built.beacons) b.gain = post.enabled ? 1.6 : 1;
+        // Floodlight beams: every pad lamp throws a faint shaft toward the
+        // vehicle's mid-height. Parented to the pad root so they fade and
+        // dispose with it.
+        if (opts.aimY != null) {
+            built.root.updateMatrixWorld(true);
+            const aim = new THREE.Vector3(0, opts.aimY, 0);
+            const lamps = [];
+            built.root.traverse(o => { if (o.name === 'Floodlight' && o.userData.lampLocal) lamps.push(o); });
+            for (const fl of lamps) {
+                const from = fl.localToWorld(new THREE.Vector3(...fl.userData.lampLocal));
+                built.root.add(buildLightBeam(from, aim, { intensity: 0.045 }));
+            }
+        }
         scene.add(built.root);
         padState = built;
     }
@@ -1629,27 +1460,81 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
 
     function fitShadowCameraToVehicle(vehicle) {
-        // Wrap the directional shadow camera around the current vehicle +
-        // its pad so it actually casts useful shadows from a 56 m shuttle
-        // up to a 150 m+ starship + tower.
+        // Aim the floodlight spot at the vehicle's mid-height from the camera
+        // side, far enough out that its cone covers the whole stack plus the
+        // pad apron (radius ≈ 1.15 h at the vehicle), so a 56 m shuttle and a
+        // 150 m Starship + tower both sit inside the pool with soft edges.
         const h = vehicle.height;
         const baseY = vehicle.root.position.y;
-        const r = h * 1.4;
-        key.shadow.camera.left   = -r;
-        key.shadow.camera.right  =  r;
-        key.shadow.camera.top    =  baseY + h * 1.4;
-        key.shadow.camera.bottom = -10;
-        key.shadow.camera.near   = 30;
-        key.shadow.camera.far    = h * 6;
-        key.shadow.camera.updateProjectionMatrix();
-        // Position the key light proportional to vehicle height so a 200 m
-        // future-Starship is still lit from above instead of from its
-        // mid-section. Aim at the bbox center.
-        const lightY = baseY + h * 1.05;
-        key.position.set(h * 0.85, lightY, h * 0.55);
-        key.target.position.set(0, baseY + h * 0.5, 0);
+        const aim = new THREE.Vector3(0, baseY + h * 0.45, 0);
+        const dir = new THREE.Vector3(0.80, 0.62, 0.52).normalize();
+        const dist = h * 3.2;
+        key.position.copy(aim).addScaledVector(dir, dist);
+        key.target.position.copy(aim);
         key.target.updateMatrixWorld();
-        scene.add(key.target);
+        if (!key.target.parent) scene.add(key.target);
+        const poolR = h * 1.15;
+        key.angle = Math.atan(poolR / dist);
+        key.penumbra = 0.6;
+        key.shadow.camera.near = dist * 0.35;
+        key.shadow.camera.far  = dist * 2.2;
+        key.shadow.camera.updateProjectionMatrix();
+    }
+
+    // Per-vehicle effects set-up: smoke profile + tints, the engine-light
+    // colour, where the exhaust meets the pad, and plume draw order.
+    function configureVehicleFx(v) {
+        const profile = SMOKE_PROFILES[v.id] ? v.id : 'falcon9';
+        const tint = SMOKE_TINTS[profile];
+        const D = parseFloat(v.info?.diameter_m) || 4;
+        // Engine cluster centre + exit height in vehicle-local space, from the
+        // same engineLayout the thrust-vector overlay draws.
+        const eng = v.engineLayout?.boosterEngines?.length ? v.engineLayout.boosterEngines : null;
+        let cx = 0, cz = 0, minY = 0;
+        if (eng) {
+            for (const e of eng) { cx += e.x; cz += e.z; }
+            cx /= eng.length; cz /= eng.length;
+            minY = Math.min(...eng.map(e => e.y));
+        }
+        // Where the plume hits: the deck under the vehicle (flame trench for
+        // the MLP / TEL pads, the deluge plate under the Starship OLM).
+        const onMount = v.padId === 'mechazilla';
+        // Flame-trench outlets: both pads with an MLP / deck vent the cloud
+        // out of the trench along ±Z; the OLM has no trench, so radial.
+        const exits = onMount ? null : [[cx, 30, 0, 1], [cx, -30, 0, -1]];
+        v.fx = {
+            profile, D, exits,
+            nozzleLocal: new THREE.Vector3(cx, minY - D * 0.15, cz),
+            deckY: onMount ? 0.6 : (v.basePadY ?? 4.2),
+            steamR: onMount ? D * 1.6 : D * 2.2,
+        };
+        smokeView.uniforms.uExhaust.value.copy(tint.exhaust);
+        smokeView.uniforms.uGround.value.copy(tint.ground);
+        flameLight.color.setHex(tint.flame);
+        _flameCol.setHex(tint.flame);
+        for (const p of v.plumes || []) p.traverse(o => { o.renderOrder = 2; });
+        clearSmoke(smokeSim);
+        smokeCarry = createEmissionCarry();
+    }
+
+    // World position of the engine cluster exit for the current pose.
+    function nozzleWorld(out) {
+        current.root.updateMatrixWorld(true);
+        return out.copy(current.fx.nozzleLocal).applyMatrix4(current.root.matrixWorld);
+    }
+
+    function emitSmokeFor(s, dt) {
+        const fx = current.fx;
+        if (!fx) return;
+        nozzleWorld(_nozzleWorld);
+        _downWorld.set(0, -1, 0).transformDirection(current.root.matrixWorld);
+        planEmissions(smokeSim, fx.profile, {
+            T: s.T, dt, throttle: s.throttle, altitude: s.altitude, D: fx.D,
+            nozzle: [_nozzleWorld.x, _nozzleWorld.y, _nozzleWorld.z],
+            down: [_downWorld.x, _downWorld.y, _downWorld.z],
+            deckY: fx.deckY, groundY: 0, exits: fx.exits, steamR: fx.steamR,
+            budget: smokeBudget,
+        }, smokeCarry);
     }
 
     function setVehicle(id, variant) {
@@ -1695,8 +1580,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Swap pad infrastructure to whichever site this vehicle flies from.
         // Pass the booster diameter so adaptive pads (Mechazilla) can size
         // their hole + clamp ring to the actual stack.
-        const padOpts = { boosterDiameter: parseFloat(v.info?.diameter_m) || undefined };
+        const padOpts = {
+            boosterDiameter: parseFloat(v.info?.diameter_m) || undefined,
+            aimY: v.root.position.y + v.height * 0.45,
+        };
         swapPad(v.padId, padOpts);
+        configureVehicleFx(current);
 
         // A new vehicle starts framed from the canonical 3/4 angle, and
         // re-arms auto-framing so any post-swap resize keeps it centred
@@ -1766,27 +1655,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
         }
         current.lastAltitude = s.altitude;
 
-        // Trail — pad-anchored cylinder, height = altitude. Hide once the
-        // rocket is back on the pad (T < 0).
-        if (s.trailH > 0.5) {
-            trail.visible = true;
-            const w = current.trailWidthM * 0.5;
-            trail.scale.set(w, s.trailH, w);
-            trail.position.set(0, current.basePadY + s.trailH / 2, 0);
-        } else {
-            trail.visible = false;
-        }
+        // Exhaust trail, ground cloud and deluge steam are smoke SPRITES now,
+        // emitted in tick() from the live nozzle position (see emitSmokeFor).
 
-        // Pad steam vents — visible only in the ignition + early-ascent
-        // window. Anchored to the pad deck (basePadY), independent of the
-        // rocket's altitude.
-        padSteam.position.y = current.basePadY - 4;
-        tickPadSteam(padSteam, T, s.throttle);
-
-        // Sky / fog — tint toward upper-atmosphere black + clear out fog
-        // density as the rocket climbs.
-        scene.fog.color.copy(baseFogColor).lerp(skyEndColor, s.skyMix);
-        scene.fog.density = baseFogDensity * (1 - 0.75 * s.skyMix);
+        // Sky / fog — the haze thins as the rocket climbs (the camera rides
+        // with it). Colour stays HORIZON so terrain never detaches from the sky.
+        scene.fog.density = baseFogDensity * (1 - 0.6 * s.skyMix);
 
         // Pad fade
         applyPadOpacity(s.padOpacity);
@@ -1811,19 +1685,30 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }
 
     // Walks the pad's mesh tree applying an opacity. Idempotent.
+    //
+    // Each material's ORIGINAL transparent/opacity is remembered on first
+    // touch and restored at o = 1. The old version forced `transparent =
+    // false` on restore, which silently turned every deliberately-transparent
+    // pad material opaque after the first launch — the gravel apron's alpha
+    // fade, the additive lamp glows and the floodlight beams.
     function applyPadOpacity(o) {
         if (!padState.root) return;
-        const transparent = (o < 1);
         padState.root.traverse(node => {
             if (!node.isMesh || !node.material) return;
             const mats = Array.isArray(node.material) ? node.material : [node.material];
             for (const m of mats) {
-                if (transparent) {
-                    m.transparent = true;
-                    m.opacity = o;
-                } else if (m.transparent) {
-                    m.transparent = false;
-                    m.opacity = 1;
+                if (!m.userData.__padBase) {
+                    m.userData.__padBase = { transparent: m.transparent, opacity: m.opacity };
+                }
+                const base = m.userData.__padBase;
+                if (o < 1) {
+                    if (!m.transparent) { m.transparent = true; m.needsUpdate = true; }
+                    m.opacity = base.opacity * o;
+                    if (m.uniforms?.uOpacity) m.uniforms.uOpacity.value = o;
+                } else {
+                    if (m.transparent !== base.transparent) { m.transparent = base.transparent; m.needsUpdate = true; }
+                    m.opacity = base.opacity;
+                    if (m.uniforms?.uOpacity) m.uniforms.uOpacity.value = 1;
                 }
             }
         });
@@ -1876,9 +1761,10 @@ export function initVehicleCanvas(canvas, opts = {}) {
         cam.pos.y            = current.baseCamY;
         current.lastAltitude = 0;
 
-        // Restore scene state
-        trail.visible = false;
-        padSteam.visible = false;
+        // Restore scene state — the vehicle is back on the pad, so its smoke
+        // goes too (a cloud hanging over a stack at T-3 would read as a fire).
+        clearSmoke(smokeSim);
+        smokeCarry = createEmissionCarry();
         scene.fog.color.copy(baseFogColor);
         scene.fog.density = baseFogDensity;
         applyPadOpacity(1);
@@ -1966,6 +1852,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // pixelRatio is locked to 1 (see WebGLRenderer init), so the drawing
         // buffer always equals the CSS box and can't overflow the grid track.
         renderer.setSize(w, h, false);
+        post.setSize(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
         if (!userControlledCamera) reframeCurrentView();
@@ -2004,23 +1891,33 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     function tick() {
         if (!running) { rafId = 0; return; }
-        const dt = clock.getDelta();
+        // Clamp: a backgrounded tab returns with a multi-second delta that
+        // would otherwise teleport every smoke puff at once.
+        const dt = Math.min(clock.getDelta(), 0.5);
         const t = clock.elapsedTime;
         controls._dt = dt;
         controls.update();
-        stars.material.uniforms.uTime.value = t;
+        stars.tick(t);
 
-        // Liftoff state — advance clock, apply pose/sky/pad/trail, drive plume throttle.
+        // Liftoff state — advance clock, apply pose/sky/pad, drive plume throttle.
         let throttle = 1;
+        let snap = null;
         if (missionActive) {
+            const T0 = missionClock.T;
             missionClock.update(performance.now());
-            const s = missionClock.snapshot();
-            applyMissionState(s);
-            throttle = s.throttle;
-            if (missionClock.finished()) {
-                // Auto-end + reset; UI listener resets its button.
-                cancelLiftoff();
-            }
+            snap = missionClock.snapshot();
+            applyMissionState(snap);
+            throttle = snap.throttle;
+            // Emit on MISSION time (the clock runs on wall time), so a slow
+            // frame emits the smoke that frame actually covered.
+            emitSmokeFor(snap, Math.max(0, snap.T - T0));
+        }
+        stepSmoke(smokeSim, dt, { groundY: 0, drag: 0.55, wind: [1.6, -0.8], cooling: 0.32, maxDt: 1 / 20 });
+        if (missionActive && missionClock.finished()) {
+            // Auto-end + reset; UI listener resets its button.
+            cancelLiftoff();
+            throttle = 1;
+            snap = null;
         }
 
         // Live altitude (km) feeds the plume shader so it widens / lengthens
@@ -2028,6 +1925,47 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const altKm = liveOffsetY() / 1000;
         for (const p of current.plumes) tickPlume(p, t, throttle, altKm);
         tickBeacons(padState.beacons, t);
+
+        // Engine light: on whenever the plume is drawn (static Plume toggle or
+        // a burn), flickering, scaled by throttle. ~1/r² from the exit.
+        const plumeOn = current.plumes.some(p => p.visible);
+        const burn = plumeOn ? (missionActive ? throttle : 0.85) : 0;
+        const flicker = 0.86 + 0.08 * Math.sin(t * 37.0) + 0.06 * Math.sin(t * 91.0 + 1.3);
+        const D = current.fx?.D || 4;
+        // Sat ~2.5 D below the exit — inside the plume, where the light comes
+        // from — so the hull just above the bells is lit at grazing incidence
+        // and does not blow out, while the deck 20–40 m away is lit at ~1–2×
+        // the floodlight level (inverse-square from there).
+        flameLight.intensity = burn * flicker * 900 * (D / 4) * (D / 4);
+        if (burn > 0 && current.fx) {
+            nozzleWorld(flameLight.position);
+            flameLight.position.y = Math.max(1.5, flameLight.position.y - D * 2.5);
+        }
+
+        // Sky dome + stars ride with the camera (they are "at infinity").
+        sky.follow(camera);
+        stars.follow(camera);
+
+        // Smoke: sort + upload for this camera, lit by the key and the flame.
+        camera.updateMatrixWorld();
+        _keyDir.copy(key.position).sub(key.target.position).normalize();
+        smokeView.update(smokeSim, camera, {
+            keyDir: _keyDir,
+            keyColor: SMOKE_LIGHT.keyColor,
+            ambTop: SMOKE_LIGHT.ambTop,
+            ambBottom: SMOKE_LIGHT.ambBottom,
+            steam: SMOKE_LIGHT.steam,
+            flamePos: flameLight.position,
+            flameColor: _flameCol,
+            flameIntensity: burn * flicker * 3.0,
+            flameRange: D * 3.2,
+            fog: scene.fog,
+        });
+
+        // Bloom swells with the burn — the flame is the brightest thing on
+        // the pad, and the glow should say so.
+        post.setBloom(1 + 0.7 * burn);
+
         // Camera shake — applied just before render and undone right after,
         // so the offset shows in this frame but isn't fed back into
         // OrbitControls' damping next tick.
@@ -2044,7 +1982,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
                 T:        missionActive ? missionClock.T : 0,
             });
         }
-        renderer.render(scene, camera);
+        post.render();
         if (shake) {
             camera.position.x -= shake.x;
             camera.position.y -= shake.y;
@@ -2151,7 +2089,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
             ro.disconnect();
             io.disconnect();
             controls.dispose();
-            envRT.dispose();
+            env.dispose();
+            post.dispose();
+            smokeView.dispose();
+            sky.dispose();
+            stars.dispose();
+            terrain.dispose();
             renderer.dispose();
             scene.traverse(o => {
                 if (o.geometry) o.geometry.dispose();
@@ -2189,6 +2132,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         resize(w, h) {
             if (w > 0 && h > 0) {
                 renderer.setSize(w, h, false);
+                post.setSize(w, h);
                 camera.aspect = w / h;
                 camera.updateProjectionMatrix();
                 reframeCurrentView();
@@ -2203,6 +2147,21 @@ export function initVehicleCanvas(canvas, opts = {}) {
         get isAscending() { return missionActive; },
         get missionT()    { return missionClock.T; },
         get currentInfo() { return current.info; },
+        // Test hook: the live scene (read-only use — the browser gate inspects
+        // pad materials after a launch).
+        get scene() { return scene; },
+        // Render diagnostics for the browser gate (tests/launch-planner-visuals.spec.js).
+        get renderStats() {
+            return {
+                quality,
+                post: post.enabled,
+                smokeAlive: smokeSim.alive,
+                smokeDrawn: smokeView.mesh.geometry.instanceCount,
+                flameIntensity: flameLight.intensity,
+                cameraY: camera.position.y,
+                targetY: controls.target.y,
+            };
+        },
         // Live thrust + g-force readout for the MET HUD. Returns:
         //   { throttle, thrust_mn, twr, g, mass_t }
         // Mass loss approximated as 35% over the clip (T-3 → T+50) so

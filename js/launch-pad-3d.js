@@ -66,6 +66,156 @@ function emissiveMat(color, intensity = 1.0) {
     });
 }
 
+// ── Procedural surface textures (launch planner pads) ───────────────────────
+// Generated once per page and shared by every pad build (swapPad disposes
+// materials, never these textures). Deterministic: a seeded PRNG, so the
+// concrete looks identical on every load.
+//
+//   concrete — mottled slabs with expansion joints, oil stains, and a
+//              radial blast scorch around the centre (where every launch
+//              has scoured the deck).
+//   gravel   — the crushed-stone apron, with an alpha that fades the disc
+//              into the scene's terrain instead of ending on a hard edge.
+//   truss    — an alpha-tested lattice for the big service-structure walls
+//              that used to be solid slabs.
+const _texCache = {};
+function _rng(seed) {
+    let s = seed;
+    return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+}
+function _valueNoise(seed, G = 32) {
+    const r = _rng(seed);
+    const lat = new Float32Array(G * G).map(() => r());
+    const lv = (x, y) => lat[((y % G) + G) % G * G + ((x % G) + G) % G];
+    return (x, y) => {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        let fx = x - xi, fy = y - yi;
+        fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+        const a = lv(xi, yi), b = lv(xi + 1, yi), c = lv(xi, yi + 1), d = lv(xi + 1, yi + 1);
+        return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
+    };
+}
+function _canvasTex(c, color = true) {
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.anisotropy = 4;
+    return t;
+}
+function concreteTexture({ scorch = true } = {}) {
+    const key = scorch ? 'concreteScorch' : 'concrete';
+    if (_texCache[key]) return _texCache[key];
+    const S = 1024;
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(S, S);
+    const d = img.data;
+    const n = _valueNoise(11, 64), r = _rng(5);
+    const slab = S / 8;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+        let v = 0, a = 0.5, f = 1 / 32;
+        for (let o = 0; o < 5; o++) { v += a * n(x * f, y * f); f *= 2; a *= 0.5; }
+        let g = 0.50 + (v - 0.5) * 0.30 + (r() - 0.5) * 0.06;
+        // Per-slab tone so the grid reads.
+        const sx = Math.floor(x / slab), sy = Math.floor(y / slab);
+        g *= 0.93 + 0.10 * ((sx * 7 + sy * 13) % 5) / 4;
+        // Expansion joints.
+        const jx = x % slab, jy = y % slab;
+        if (jx < 2 || jy < 2) g *= 0.55;
+        if (scorch) {
+            const dx = x / S - 0.5, dy = y / S - 0.5;
+            const rr = Math.hypot(dx, dy);
+            const burn = Math.exp(-rr * rr * 26) * (0.65 + 0.5 * v);
+            g *= 1 - 0.72 * Math.min(1, burn);
+        }
+        const k = (y * S + x) * 4;
+        d[k] = g * 255 * 1.00; d[k + 1] = g * 255 * 0.99; d[k + 2] = g * 255 * 0.96; d[k + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    // Oil / water stains.
+    for (let i = 0; i < 26; i++) {
+        const x = r() * S, y = r() * S, rad = 10 + r() * 50;
+        const gr = ctx.createRadialGradient(x, y, 0, x, y, rad);
+        gr.addColorStop(0, 'rgba(20,18,16,0.22)');
+        gr.addColorStop(1, 'rgba(20,18,16,0)');
+        ctx.fillStyle = gr;
+        ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    return (_texCache[key] = _canvasTex(c));
+}
+function gravelTexture() {
+    if (_texCache.gravel) return _texCache.gravel;
+    const S = 512;
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(S, S);
+    const d = img.data;
+    const n = _valueNoise(23, 32), r = _rng(9);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+        const v = 0.6 * n(x / 16, y / 16) + 0.4 * n(x / 5, y / 5);
+        const g = 0.30 + 0.18 * v + (r() - 0.5) * 0.16;
+        const k = (y * S + x) * 4;
+        d[k] = g * 255; d[k + 1] = g * 0.95 * 255; d[k + 2] = g * 0.86 * 255; d[k + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = _canvasTex(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return (_texCache.gravel = t);
+}
+function radialFadeTexture() {
+    if (_texCache.fade) return _texCache.fade;
+    const S = 256;
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const ctx = c.getContext('2d');
+    const gr = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    gr.addColorStop(0.00, '#fff');
+    gr.addColorStop(0.70, '#fff');
+    gr.addColorStop(1.00, '#000');
+    ctx.fillStyle = gr;
+    ctx.fillRect(0, 0, S, S);
+    return (_texCache.fade = _canvasTex(c, false));
+}
+function trussTexture() {
+    if (_texCache.truss) return _texCache.truss;
+    const S = 256;
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, S, S);
+    ctx.strokeStyle = '#fff';
+    ctx.lineCap = 'square';
+    // Chords (heavy) + diagonals (light), one bay per tile.
+    ctx.lineWidth = 18;
+    ctx.strokeRect(9, 9, S - 18, S - 18);
+    ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(S, S); ctx.moveTo(S, 0); ctx.lineTo(0, S); ctx.stroke();
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(0, S / 2); ctx.lineTo(S, S / 2); ctx.stroke();
+    const t = _canvasTex(c, false);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return (_texCache.truss = t);
+}
+function concreteMat(color = PAD_COLORS.concreteLight, { scorch = false, repeat = 1 } = {}) {
+    const map = concreteTexture({ scorch });
+    const m = new THREE.MeshStandardMaterial({ color, map, roughness: 0.92, metalness: 0.02 });
+    if (repeat !== 1) {
+        m.map = map.clone();
+        m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping;
+        m.map.repeat.set(repeat, repeat);
+        m.map.needsUpdate = true;
+    }
+    return m;
+}
+// Lattice "wall" material for large service structures — the alpha-tested
+// truss reads as open steelwork against the sky at any distance.
+function trussMat(color, repeatX, repeatY) {
+    const alphaMap = trussTexture().clone();
+    alphaMap.repeat.set(repeatX, repeatY);
+    alphaMap.needsUpdate = true;
+    return new THREE.MeshStandardMaterial({
+        color, alphaMap, alphaTest: 0.5, side: THREE.DoubleSide,
+        roughness: 0.7, metalness: 0.2,
+    });
+}
+
 // ── Shared sub-builders ──────────────────────────────────────────────────────
 
 // Lattice column made from 4 corner tubes + diagonal cross-bracing every Δ m.
@@ -135,33 +285,41 @@ function buildBeacon({ color = PAD_COLORS.beaconRed, intensity = 2.0 } = {}) {
 function buildGroundPlane({ size = 320, padSize = 60, padColor = PAD_COLORS.concrete }) {
     const g = new THREE.Group();
 
-    // Outer terrain
+    // Gravel apron. Its alpha fades to zero at the rim so the disc melts into
+    // the scene terrain (js/launch-scene-fx.js) instead of ending on an edge.
+    const gravel = gravelTexture().clone();
+    gravel.repeat.set(size / 6, size / 6);
+    gravel.needsUpdate = true;
     const terrain = new THREE.Mesh(
         new THREE.CircleGeometry(size, 64),
-        flatMat(PAD_COLORS.gravel, 0.95)
+        new THREE.MeshStandardMaterial({
+            color: 0xb8ae9c, map: gravel, alphaMap: radialFadeTexture(),
+            transparent: true, depthWrite: false, roughness: 0.97, metalness: 0,
+        })
     );
     terrain.rotation.x = -Math.PI / 2;
     terrain.position.y = -0.25;
     terrain.receiveShadow = true;
+    terrain.renderOrder = -1;
     g.add(terrain);
 
-    // Inner pad
+    // Inner pad — slabbed concrete, scorched at the centre.
     const pad = new THREE.Mesh(
         new THREE.CircleGeometry(padSize, 64),
-        flatMat(padColor, 0.9)
+        concreteMat(padColor === PAD_COLORS.concrete ? 0x9a9aa0 : padColor, { scorch: true })
     );
     pad.rotation.x = -Math.PI / 2;
     pad.position.y = -0.20;
     pad.receiveShadow = true;
     g.add(pad);
 
-    // Concentric apron stripe
+    // Concentric apron stripe (painted safety ring).
     const apron = new THREE.Mesh(
-        new THREE.RingGeometry(padSize, padSize + 4, 64),
-        flatMat(PAD_COLORS.concreteLight, 0.92)
+        new THREE.RingGeometry(padSize, padSize + 1.2, 96),
+        new THREE.MeshStandardMaterial({ color: 0xb89a3a, roughness: 0.8 })
     );
     apron.rotation.x = -Math.PI / 2;
-    apron.position.y = -0.21;
+    apron.position.y = -0.19;
     apron.receiveShadow = true;
     g.add(apron);
 
@@ -189,15 +347,20 @@ function buildFloodlight({ height = 18, color = PAD_COLORS.floodlight } = {}) {
     head.castShadow = true;
     g.add(head);
 
+    // HDR lamp face: linear radiance well above the bloom threshold so the
+    // post chain gives each lamp its glow (the old 0.9-opacity sphere sat
+    // below any threshold and read as a grey ball).
     const halo = new THREE.Mesh(
         new THREE.SphereGeometry(0.55, 12, 8),
         new THREE.MeshBasicMaterial({
-            color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending,
-            depthWrite: false,
+            color: new THREE.Color(color).multiplyScalar(6), transparent: true,
+            opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false,
         })
     );
     halo.position.set(0.5, height - 0.3, 0);
     g.add(halo);
+    g.name = 'Floodlight';
+    g.userData.lampLocal = [0.5, height - 0.3, 0];
 
     return g;
 }
@@ -216,7 +379,7 @@ function buildLC39A() {
     // trench slot. Taller than a generic deck (the real MLP is ~7.5 m).
     const mlpBase = new THREE.Mesh(
         new THREE.BoxGeometry(40, 4.2, 36),
-        flatMat(PAD_COLORS.concreteLight, 0.85)
+        concreteMat(0x8e8e94, { scorch: true })
     );
     mlpBase.position.y = 2.1;
     mlpBase.castShadow = true;
@@ -300,7 +463,15 @@ function buildLC39A() {
     const rssBarn = new THREE.Group();
     const wall = (w, h, d, color = PAD_COLORS.fssOrange) =>
         new THREE.Mesh(new THREE.BoxGeometry(w, h, d), flatMat(color, 0.75));
-    const panel1 = wall(18, rssH, 8);
+    // The RSS is open steelwork, not a slab: an alpha-tested truss on a box
+    // (one 4.5 m bay per texture tile) with a dark solid core behind it.
+    const panel1 = new THREE.Mesh(new THREE.BoxGeometry(18, rssH, 8),
+        trussMat(PAD_COLORS.fssOrange, 4, rssH / 4.5));
+    const core = new THREE.Mesh(new THREE.BoxGeometry(14, rssH - 6, 4),
+        flatMat(0x3a2a24, 0.9));
+    core.position.set(0, rssH / 2, 0);
+    core.castShadow = true;
+    rssBarn.add(core);
     panel1.position.set(0, rssH / 2, 0);
     panel1.castShadow = true;
     panel1.receiveShadow = true;
@@ -336,7 +507,10 @@ function buildLC39A() {
         leg.castShadow = true;
         wtFrame.add(leg);
     }
-    wtFrame.position.set(38, 0, 22);
+    // Placed ~50° off the default 3/4 camera's axis (outside its 29° half
+    // field) — at its old
+    // (38, 22) spot the 16 m sphere filled the lower-right of the opening shot.
+    wtFrame.position.set(-60, 0, 75);
     root.add(wtFrame);
 
     // Perimeter floodlights
@@ -353,7 +527,7 @@ function buildLC39A() {
     beacons.push({ mesh: fssBeacon, phase: 0,    color: PAD_COLORS.beaconRed });
 
     const wtBeacon = buildBeacon({ color: PAD_COLORS.beaconRed });
-    wtBeacon.position.set(38, 30.2, 22);
+    wtBeacon.position.set(-60, 30.2, 75);
     root.add(wtBeacon);
     beacons.push({ mesh: wtBeacon, phase: 1.5, color: PAD_COLORS.beaconRed });
 
@@ -635,7 +809,7 @@ function buildFalconTEL() {
     // y=4.2 to match the rest of the launch-planner's vehicle baseline.
     const deck = new THREE.Mesh(
         new THREE.BoxGeometry(22, 4.2, 22),
-        flatMat(PAD_COLORS.concreteLight, 0.92)
+        concreteMat(0x8e8e94, { scorch: true })
     );
     deck.position.y = 2.1;
     deck.castShadow = true;
@@ -830,7 +1004,9 @@ export function tickBeacons(beacons, t) {
         if (!b.mesh.material) continue;
         const v = (Math.sin(t * Math.PI + b.phase) + 1) * 0.5;     // 0..1
         const lit = v > 0.85 ? 1 : 0.05;                           // crisp blink
-        b.mesh.material.emissiveIntensity = 0.3 + lit * 2.5;
+        // `gain` (optional, default 1) lets an HDR host push the lit state past
+        // its bloom threshold; the Space Ship Designer passes none.
+        b.mesh.material.emissiveIntensity = (0.3 + lit * 2.5) * (b.gain ?? 1);
         b.mesh.scale.setScalar(0.85 + lit * 0.6);
     }
 }
