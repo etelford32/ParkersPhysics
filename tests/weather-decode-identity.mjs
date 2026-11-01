@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 
 // Resolve against THIS file, never a checkout path: a hard-coded
-// '/home/user/ParkersPhysics' passed only in the sandbox that wrote it and
+// absolute checkout path passed only in the sandbox that wrote it and
 // failed on the CI runner (/home/runner/work/...).
 const { WeatherFeed }  = await import(new URL('../js/weather-feed.js', import.meta.url).href);
 const { decodeCoarse, TEX_W, TEX_H } = await import(new URL('../js/weather-decode.js', import.meta.url).href);

@@ -17,10 +17,12 @@
  */
 import assert from 'node:assert/strict';
 
-const ROOT = '/home/user/ParkersPhysics';
+// Resolve against THIS file, never a checkout path: a hard-coded
+// absolute checkout path passed only in the sandbox that wrote it and
+// failed on any other machine (CI runners check out to /home/runner/work/...).
 const { parseForecastJson, parseForecastText, fetch45DayForecast, AP45_JSON } =
-    await import(ROOT + '/api/_lib/ap45.js');
-const { computeOutlook, apToKp } = await import(ROOT + '/api/_lib/aurora-outlook.js');
+    await import(new URL('../api/_lib/ap45.js', import.meta.url).href);
+const { computeOutlook, apToKp } = await import(new URL('../api/_lib/aurora-outlook.js', import.meta.url).href);
 
 let pass = 0, fail = 0;
 const check = (name, fn) => {
