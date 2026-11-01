@@ -9,9 +9,11 @@
  */
 import assert from 'node:assert/strict';
 
-const ROOT = '/home/user/ParkersPhysics';
-const { WeatherFeed }  = await import(ROOT + '/js/weather-feed.js');
-const { decodeCoarse, TEX_W, TEX_H } = await import(ROOT + '/js/weather-decode.js');
+// Resolve against THIS file, never a checkout path: a hard-coded
+// '/home/user/ParkersPhysics' passed only in the sandbox that wrote it and
+// failed on the CI runner (/home/runner/work/...).
+const { WeatherFeed }  = await import(new URL('../js/weather-feed.js', import.meta.url).href);
+const { decodeCoarse, TEX_W, TEX_H } = await import(new URL('../js/weather-decode.js', import.meta.url).href);
 
 const G_W = 72, G_H = 36, N = G_W * G_H, NUM = 9;
 let pass = 0, fail = 0;
