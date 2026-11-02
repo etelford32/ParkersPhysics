@@ -492,22 +492,68 @@ export function roundBloomKernels(bloom, sigmaDiv = 2.5) {
     }
 }
 
+// Is a render target actually drawable? A half-float target on a GPU /
+// browser without EXT_color_buffer_float or _half_float (or one that refuses
+// a MULTISAMPLED float buffer) is an INCOMPLETE framebuffer: every draw into
+// it is silently dropped, so the whole canvas renders black with no error —
+// measured: luminance 0.0 across the frame on such a profile
+// (tests/launch-planner-robustness.spec.js), and the hero-color.js scar
+// before it. Binding the target makes three allocate it; the status read is
+// cheap and happens once at start-up.
+function targetIsComplete(renderer, rt) {
+    const gl = renderer.getContext();
+    const prev = renderer.getRenderTarget();
+    let ok = false;
+    try {
+        renderer.setRenderTarget(rt);
+        ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    } catch (_) {
+        ok = false;
+    } finally {
+        renderer.setRenderTarget(prev);
+    }
+    return ok;
+}
+
+function directPost(renderer, scene, camera, fallback = null) {
+    return {
+        enabled: false,
+        fallback,
+        samples: 0,
+        render() { renderer.render(scene, camera); },
+        setSize() {},
+        setBloom() {},
+        dispose() {},
+    };
+}
+
+// The post chain runs only where it can draw. Ladder, each rung VERIFIED:
+//   half-float + 4× MSAA ('high') → half-float, no MSAA → direct render
+//   (renderer tone-maps itself — the WebGL1 path, which always draws).
+// `fallback` says which rung failed and why, for renderStats and the console.
 export function createPost(renderer, scene, camera, { quality = 'high' } = {}) {
-    if (quality === 'off' || !renderer.capabilities.isWebGL2) {
-        return {
-            enabled: false,
-            render() { renderer.render(scene, camera); },
-            setSize() {},
-            setBloom() {},
-            dispose() {},
-        };
+    if (quality === 'off') return directPost(renderer, scene, camera, null);
+    if (!renderer.capabilities.isWebGL2) return directPost(renderer, scene, camera, 'webgl1');
+    const ext = renderer.extensions;
+    const floatColour = ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float');
+    if (!floatColour) {
+        console.warn('[launch-scene-fx] no float colour buffers — rendering without post-processing');
+        return directPost(renderer, scene, camera, 'no-float-colour-buffer');
     }
     const w = Math.max(1, renderer.domElement.width);
     const h = Math.max(1, renderer.domElement.height);
-    const rt = new THREE.WebGLRenderTarget(w, h, {
-        type: THREE.HalfFloatType,
-        samples: quality === 'high' ? 4 : 0,
-    });
+    let rt = null;
+    let fallback = null;
+    for (const samples of (quality === 'high' ? [4, 0] : [0])) {
+        const cand = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples });
+        if (targetIsComplete(renderer, cand)) { rt = cand; break; }
+        cand.dispose();
+        fallback = samples > 0 ? 'msaa-float-incomplete' : 'float-target-incomplete';
+    }
+    if (!rt) {
+        console.warn(`[launch-scene-fx] ${fallback} — rendering without post-processing`);
+        return directPost(renderer, scene, camera, fallback);
+    }
     const composer = new EffectComposer(renderer, rt);
     composer.setPixelRatio(1);          // the host locks pixelRatio to 1 — see launch-vehicle-3d.js
     composer.addPass(new RenderPass(scene, camera));
@@ -521,6 +567,8 @@ export function createPost(renderer, scene, camera, { quality = 'high' } = {}) {
     const baseStrength = 0.6;
     return {
         enabled: true,
+        fallback,                       // e.g. 'msaa-float-incomplete' when MSAA was dropped
+        samples: rt.samples,
         bloom,
         render() {
             finish.uniforms.uFrame.value = (frame++ % 64);

@@ -26,11 +26,11 @@ import { test, expect } from '@playwright/test';
 
 const URL = '/launch-planner.html';
 
-async function boot(page) {
+async function boot(page, query = '') {
     await page.route('**/api/telemetry/log', (r) =>
         r.fulfill({ status: 202, contentType: 'application/json', body: '{"ok":true}' }));
     await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
-    await page.goto(URL, { waitUntil: 'domcontentloaded' });
+    await page.goto(URL + query, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => window.__lpVehicle3d?.renderStats, null, { timeout: 60_000 });
     await page.evaluate(() => {
         const el = document.querySelector('.lh-vehicle-canvas-host');
@@ -129,10 +129,15 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         await ctx.close();
     });
 
-    test('dock, keys, pinch, pan, Spin and full screen move the camera', async ({ browser }) => {
+    // The two control tests run on the DIRECT render path (?lpfx=off): the
+    // camera logic is independent of the post chain, and on software GL the
+    // bloom chain roughly doubles every frame. As one test on the post path it
+    // took ~2.5 min alone and blew its 240 s budget whenever a second worker
+    // shared the CPU (measured: 2 of 4 repeats on 2 workers timed out).
+    test('dock, keys, pinch and pan move the camera', async ({ browser }) => {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
         const page = await ctx.newPage();
-        await boot(page);
+        await boot(page, '?lpfx=off');
         await page.waitForTimeout(900);                   // initial framing tween
         await frames(page, 2);
         const s0 = await stats(page);
@@ -195,6 +200,16 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         await frames(page, 2);
         const t1 = (await stats(page)).target;
         expect(Math.hypot(t1[0] - t0[0], t1[1] - t0[1], t1[2] - t0[2])).toBeGreaterThan(1);
+
+        await ctx.close();
+    });
+
+    test('Spin, full screen and help', async ({ browser }) => {
+        const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+        const page = await ctx.newPage();
+        await boot(page, '?lpfx=off');
+        await page.waitForTimeout(900);
+        await frames(page, 2);
 
         // Spin turns the camera on its own (it was a no-op).
         await page.click('.lh-toggle[data-toggle="autoRotate"]');

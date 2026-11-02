@@ -2396,6 +2396,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
             return {
                 quality,
                 post: post.enabled,
+                postFallback: post.fallback ?? null,
+                postSamples: post.samples ?? 0,
                 smokeAlive: smokeSim.alive,
                 smokeDrawn: smokeView.mesh.geometry.instanceCount,
                 flameIntensity: flameLight.intensity,
