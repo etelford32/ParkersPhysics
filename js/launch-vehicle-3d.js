@@ -48,6 +48,8 @@ import { createSmokeSim, stepSmoke, clearSmoke, planEmissions,
 import { createSmokeRenderer } from './launch-smoke.js';
 import { addSurfaceDetail, setSurfaceDetailEnabled } from './launch-surface-detail.js';
 import { pickDefaultView, framingFor } from './launch-camera-layout.js';
+import { frameHealth, occlusionVerdict, foregroundVerdict } from './launch-render-health.js';
+import { telemetry } from './telemetry.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -1037,6 +1039,16 @@ export function initVehicleCanvas(canvas, opts = {}) {
     renderer.toneMappingExposure = 1.0;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Shader failures are COUNTED, not just logged: a program that fails to
+    // link on one GPU draws nothing on it and is invisible on every other.
+    // Setting onShaderError replaces three's own console dump, so log here.
+    const shaderErrors = [];
+    renderer.debug.onShaderError = (gl, program) => {
+        const log = (gl.getProgramInfoLog(program) || '').trim().slice(0, 200);
+        shaderErrors.push(log || 'link failed');
+        console.error('[launch-vehicle-3d] shader program failed to link:', log);
+    };
 
     // Render quality: 'high' (MSAA HDR + bloom, full smoke budget), 'low'
     // (software rasteriser: bloom kept, no MSAA, ~40 % smoke), 'off' (WebGL1
@@ -2092,6 +2104,73 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }, { threshold: 0.05 });
     io.observe(canvas);
 
+    // ── Render health: what THIS device actually drew ────────────────────
+    // Once per page view (after HEALTH_FRAME rendered frames, i.e. after the
+    // first vehicle, its pad and the post chain have settled) the canvas reads
+    // its own frame, judges it with frameHealth() and reports it through
+    // telemetry together with the GPU, the quality tier and the post path it
+    // landed on. Real GPUs take a path CI never renders (see the health
+    // module's header) — this is how a bug there reaches us. A later
+    // non-'ok' verdict is reported too, at most MAX_HEALTH_REPORTS in all.
+    const HEALTH_FRAME = 45, MAX_HEALTH_REPORTS = 3;
+    // ≥ 10 frames AND (HEALTH_FRAME frames OR 5 s): a GPU gets there in under
+    // a second; a software rasteriser at ~2 fps would otherwise take ~20 s.
+    let renderedFrames = 0, healthReported = false, healthReports = 0, lastHealth = null, tFirstFrame = 0;
+    const healthWaiters = [];
+    const t0Health = performance.now();
+    function gpuString() {
+        try {
+            const gl = renderer.getContext();
+            const ext = gl.getExtension('WEBGL_debug_renderer_info');
+            const r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+            return String(r || 'unknown').slice(0, 100);
+        } catch { return 'unknown'; }
+    }
+    function engineGuess() {
+        const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+        if (/Firefox\//.test(ua)) return 'gecko';
+        if (/Chrom(e|ium)\//.test(ua)) return 'blink';
+        if (/AppleWebKit\//.test(ua)) return 'webkit';
+        return 'other';
+    }
+    function captureHealth() {
+        let h;
+        try {
+            const gl = renderer.getContext();
+            const w = gl.drawingBufferWidth, hgt = gl.drawingBufferHeight;
+            const buf = new Uint8Array(w * hgt * 4);
+            renderer.setRenderTarget(null);
+            gl.readPixels(0, 0, w, hgt, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+            h = frameHealth({ data: buf, width: w, height: hgt });
+            h.width = w; h.height = hgt;
+        } catch (e) {
+            h = { verdict: 'readback-failed', error: String(e?.message || e).slice(0, 120) };
+        }
+        const secs = (performance.now() - t0Health) / 1000;
+        lastHealth = {
+            ...h,
+            gpu: gpuString(),
+            engine: engineGuess(),
+            webgl2: renderer.capabilities.isWebGL2,
+            quality,
+            post: post.enabled,
+            postFallback: post.fallback ?? null,
+            postSamples: post.samples ?? 0,
+            shaderErrors: shaderErrors.length,
+            firstShaderError: shaderErrors[0] || null,
+            fps: secs > 0 ? Math.round(renderedFrames / secs * 10) / 10 : null,
+            vehicle: current.id ? `${current.id}${current.variant ? '/' + current.variant : ''}` : null,
+            dpr: typeof devicePixelRatio === 'number' ? devicePixelRatio : 1,
+        };
+        while (healthWaiters.length) healthWaiters.shift()(lastHealth);
+        const first = !healthReported;
+        healthReported = true;
+        if ((first || lastHealth.verdict !== 'ok') && healthReports < MAX_HEALTH_REPORTS) {
+            healthReports++;
+            try { telemetry.recordFeature('launch_vehicle_3d', 'render_health', lastHealth); } catch {}
+        }
+    }
+
     function tick() {
         if (!running) { rafId = 0; return; }
         // Clamp: a backgrounded tab returns with a multi-second delta that
@@ -2190,6 +2269,12 @@ export function initVehicleCanvas(canvas, opts = {}) {
             });
         }
         post.render();
+        // Read our own frame back while the drawing buffer still holds it
+        // (it is not preserved past this task). See js/launch-render-health.js.
+        renderedFrames++;
+        if (renderedFrames === 1) tFirstFrame = performance.now();
+        if (healthWaiters.length || (!healthReported && renderedFrames >= 10 &&
+            (renderedFrames >= HEALTH_FRAME || performance.now() - tFirstFrame > 5000))) captureHealth();
         if (shake) {
             camera.position.x -= shake.x;
             camera.position.y -= shake.y;
@@ -2314,6 +2399,137 @@ export function initVehicleCanvas(canvas, opts = {}) {
         if (current.thrustOverlay) current.thrustOverlay.visible = vectorsOn;
     }
 
+    // ── Occlusion: can the camera actually SEE the vehicle? ────────────────
+    // A grid of rays from the live camera through the vehicle's on-screen
+    // box; for each ray that reaches the vehicle, was something else hit
+    // first? Counts → occlusionVerdict (js/launch-render-health.js). Pure
+    // geometry, so it is GPU-independent and the browser gate can sweep every
+    // vehicle × preset × screen. Not counted as occluders: the sky, the smoke,
+    // plumes / thrust arrows, additive light (beams, halos) and anything faded
+    // below 35 % opacity (the pad fades during an ascent).
+    const _occRay = new THREE.Raycaster();
+    const _occNdc = new THREE.Vector2();
+    function isVehicleObject(o) {
+        for (let p = o; p; p = p.parent) if (p === current.root) return true;
+        return false;
+    }
+    function occluderName(o) {
+        let named = null;
+        for (let p = o; p && p !== scene; p = p.parent) {
+            if (p === current.root) return 'vehicle';
+            if (p.name && !named) named = p.name;
+            if (padState && p === padState.root) return `pad:${named || 'unnamed'}`;
+        }
+        return named || o.type;
+    }
+    function occlusionCandidates() {
+        const out = [];
+        scene.traverseVisible(o => {
+            if (!o.isMesh || o === sky.mesh || o === smokeView.mesh) return;
+            for (let p = o; p; p = p.parent) {
+                if (/Plume$/.test(p.name) || p.name === 'ThrustOverlay') return;
+            }
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            if (mats.every(m => !m || !m.visible || m.blending === THREE.AdditiveBlending ||
+                                (m.transparent && m.opacity < 0.35))) return;
+            out.push(o);
+        });
+        return out;
+    }
+    function measureOcclusion({ cols = 14, rows = 28 } = {}) {
+        if (!current.root) return { reached: 0, frac: null, ok: false, reason: 'no-vehicle' };
+        applyCamToThree();
+        scene.updateMatrixWorld(true);
+        camera.updateMatrixWorld();
+        const box = computeVehicleBBox(current.root);
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        const v = new THREE.Vector3();
+        for (const cx of [box.min.x, box.max.x]) for (const cy of [box.min.y, box.max.y]) for (const cz of [box.min.z, box.max.z]) {
+            v.set(cx, cy, cz).project(camera);
+            x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
+        }
+        const ndcBox = { x0, x1, y0, y1 };
+        const cand = occlusionCandidates();
+        const occluders = {}, examples = [];
+        let visible = 0, occluded = 0;
+        const ax0 = Math.max(-1, x0), ax1 = Math.min(1, x1), ay0 = Math.max(-1, y0), ay1 = Math.min(1, y1);
+        for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+            _occNdc.set(ax0 + (ax1 - ax0) * (i + 0.5) / cols, ay0 + (ay1 - ay0) * (j + 0.5) / rows);
+            _occRay.setFromCamera(_occNdc, camera);
+            const hits = _occRay.intersectObjects(cand, false);
+            const vHit = hits.find(h => isVehicleObject(h.object));
+            if (!vHit) continue;
+            // Hardware below the vehicle's own base (bells in the flame
+            // trench, the OLM ring) is hidden by the deck BY DESIGN — that is
+            // the pad, not a framing fault, so such a ray counts neither way.
+            if (vHit.point.y < current.root.position.y - 0.05) continue;
+            if (hits[0] === vHit) { visible++; continue; }
+            occluded++;
+            const n = occluderName(hits[0].object);
+            occluders[n] = (occluders[n] || 0) + 1;
+            if (examples.length < 6) examples.push({ name: n, at: hits[0].point.toArray().map(c => Math.round(c * 10) / 10) });
+        }
+        return { ...occlusionVerdict({ visible, occluded }), visible, occluded, occluders, examples, ndcBox };
+    }
+
+    // ── Foreground clutter: does a structure stand IN FRONT of the shot? ───
+    // The occlusion measure above only sees what covers the vehicle itself.
+    // The Falcon lightning-tower bug never did: the tower stood ~24 m off the
+    // camera→rocket line, in the FOREGROUND, filling a strip of the frame and
+    // cutting through the exhaust cloud. This measures that: each tall pad
+    // structure (a direct child of the pad root, ≥ 8 m tall, not ground-sized)
+    // whose nearest point is closer to the camera than FOREGROUND_RATIO × the
+    // vehicle's distance is projected to the screen, and the frame area its
+    // box covers is summed. Boxes, not pixels, on purpose: a lattice is mostly
+    // air to a ray, but reads to the eye as a wall.
+    const FOREGROUND_RATIO = 0.8;
+    const BAND = 0.4;   // NDC half-width of the central 30–70 % band
+    function measureForeground() {
+        if (!current.root || !padState.root) return { frac: 0, ok: true, items: [] };
+        applyCamToThree();
+        scene.updateMatrixWorld(true);
+        camera.updateMatrixWorld();
+        const dVeh = cam.pos.distanceTo(controls.target);
+        const deckY = current.root.position.y;
+        const items = [];
+        let covered = 0;
+        const box = new THREE.Box3(), v = new THREE.Vector3();
+        for (const child of padState.root.children) {
+            if (child.isMesh) {
+                const m = child.material;
+                if (!m || m.blending === THREE.AdditiveBlending) continue;
+            }
+            box.setFromObject(child);
+            if (box.isEmpty()) continue;
+            const h = box.max.y - Math.max(box.min.y, 0);
+            const span = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+            if (h < 8 || span > 40 || box.max.y < deckY + 6) continue;
+            const near = box.distanceToPoint(cam.pos);
+            if (near > FOREGROUND_RATIO * dVeh) continue;
+            let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, behind = false;
+            for (const cx of [box.min.x, box.max.x]) for (const cy of [box.min.y, box.max.y]) for (const cz of [box.min.z, box.max.z]) {
+                v.set(cx, cy, cz).applyMatrix4(camera.matrixWorldInverse);
+                if (v.z > -camera.near) { behind = true; continue; }
+                v.applyMatrix4(camera.projectionMatrix);
+                x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
+            }
+            if (behind && !(x1 > x0)) continue;
+            // Scored over the CENTRAL BAND (30–70 % of the width — the same
+            // band js/launch-camera-layout.js frames the vehicle in): a tower
+            // at the very edge of a Wide shot is context; one beside the
+            // rocket is clutter.
+            const cw = Math.max(0, Math.min(BAND, x1) - Math.max(-BAND, x0));
+            const ch = Math.max(0, Math.min(1, y1) - Math.max(-1, y0));
+            const area = (cw * ch) / (2 * BAND * 2);
+            if (area <= 0) continue;
+            covered += area;
+            items.push({ name: child.name || child.type, area: Math.round(area * 1000) / 1000,
+                         dist: Math.round(near), at: box.getCenter(v).toArray().map(c => Math.round(c)) });
+        }
+        const frac = Math.min(1, Math.round(covered * 1000) / 1000);
+        return { ...foregroundVerdict(frac), items, vehicleDistance: Math.round(dVeh) };
+    }
+
     return {
         dispose() {
             running = false;
@@ -2386,11 +2602,21 @@ export function initVehicleCanvas(canvas, opts = {}) {
         cancelLiftoff,
         get fov() { return cameraFov; },
         get isAscending() { return missionActive; },
+        // True while a preset / recenter flight is still moving the camera.
+        get isTweening() { return !!activeTween; },
         get missionT()    { return missionClock.T; },
         get currentInfo() { return current.info; },
         // Test hook: the live scene (read-only use — the browser gate inspects
         // pad materials after a launch).
         get scene() { return scene; },
+        get camera() { return camera; },
+        // Test hook + diagnostics: see measureOcclusion above.
+        measureOcclusion,
+        measureForeground,
+        // The last render-health verdict (null until HEALTH_FRAME), and a
+        // fresh one read back on the next rendered frame.
+        get health() { return lastHealth; },
+        checkHealth() { return new Promise(res => healthWaiters.push(res)); },
         // Render diagnostics for the browser gate (tests/launch-planner-visuals.spec.js).
         get renderStats() {
             return {

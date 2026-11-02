@@ -25,6 +25,11 @@ export default defineConfig({
         // flows still get true three-engine coverage. See tests/auth-e2e.spec.js.
         { name: 'firefox-auth', use: { browserName: 'firefox' }, testMatch: /auth-e2e\.spec\.js/ },
         { name: 'webkit-auth',  use: { browserName: 'webkit'  }, testMatch: /auth-e2e\.spec\.js/ },
+        // The launch planner's 3D canvas on the two engines its other gates
+        // never ran (Safari/WebKit, Firefox) — one light spec, see
+        // tests/launch-planner-xbrowser.spec.js + .github/workflows/launch-planner.yml.
+        { name: 'firefox-launch', use: { browserName: 'firefox' }, testMatch: /launch-planner-xbrowser\.spec\.js/ },
+        { name: 'webkit-launch',  use: { browserName: 'webkit'  }, testMatch: /launch-planner-xbrowser\.spec\.js/ },
     ],
     webServer: {
         command: 'PORT=8000 node dev-server.mjs',

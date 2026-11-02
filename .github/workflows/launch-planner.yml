@@ -1,0 +1,81 @@
+name: launch-planner
+
+# The launch planner's 3D vehicle canvas (launch-planner.html, js/launch-*.js).
+# Until 2026-11-02 none of its browser gates ran in CI — they existed only as
+# commands in CLAUDE.md — and all of them were Chromium-only. This runs:
+#   · the PURE kernels under node;
+#   · every Chromium gate (visuals, camera, real-world GPU-profile robustness,
+#     framing: occlusion + foreground clutter with negative controls, the
+#     cross-browser smoke) plus the Space Ship Designer, which shares
+#     js/launch-pad-3d.js;
+#   · the cross-browser smoke on Firefox and WebKit (Safari's engine).
+
+on:
+  pull_request:
+    paths:
+      - 'launch-planner.html'
+      - 'spaceship-designer.html'
+      - 'js/launch-*.js'
+      - 'js/spaceship-designer-*.js'
+      - 'js/telemetry.js'
+      - 'tests/launch-*.mjs'
+      - 'tests/launch-planner-*.spec.js'
+      - 'tests/spaceship-designer-smoke.spec.js'
+      - 'playwright.config.js'
+      - 'dev-server.mjs'
+      - '.github/workflows/launch-planner.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'launch-planner.html'
+      - 'js/launch-*.js'
+      - 'tests/launch-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  launch-planner:
+    # Pinned for the same reason as e2e-auth.yml: Playwright 1.56 cannot
+    # install browsers on ubuntu 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Node kernels
+        run: |
+          node tests/launch-smoke-sim.mjs
+          node tests/launch-camera-layout.mjs
+          node tests/launch-render-health.mjs
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Chromium gates
+        run: >
+          npx playwright test --project=chromium --workers=2
+          tests/launch-planner-visuals.spec.js
+          tests/launch-planner-camera.spec.js
+          tests/launch-planner-robustness.spec.js
+          tests/launch-planner-framing.spec.js
+          tests/launch-planner-xbrowser.spec.js
+          tests/spaceship-designer-smoke.spec.js
+        env:
+          CI: 'true'
+      - name: Firefox + WebKit smoke
+        if: ${{ !cancelled() }}
+        run: npx playwright test --project=firefox-launch --project=webkit-launch tests/launch-planner-xbrowser.spec.js
+        env:
+          CI: 'true'
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-planner-playwright-report
+          path: playwright-report/
+          retention-days: 14

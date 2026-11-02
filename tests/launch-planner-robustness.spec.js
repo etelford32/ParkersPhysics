@@ -18,6 +18,10 @@
  * target without checking it was drawable. The fix verifies each rung
  * (MSAA → no MSAA → direct render) with checkFramebufferStatus.
  *
+ * Each GPU profile also asserts the page's OWN verdict (`api.checkHealth()`,
+ * js/launch-render-health.js) is 'ok' with zero shader link failures — the
+ * same verdict a visitor's browser reports through telemetry.
+ *
  * Every case asserts BOTH "no page errors" AND that the canvas actually
  * shows an image: pixels read back inside the same animation frame the page
  * rendered (the drawing buffer is not preserved, so a read in a later task
@@ -148,6 +152,11 @@ test.describe('launch-planner 3D canvas — real-world robustness', () => {
             await page.waitForTimeout(2500);
             const s = await frameStats(page);
             const stats = await page.evaluate(() => window.__lpVehicle3d.renderStats);
+            // The page's own verdict — the one it reports to telemetry from a
+            // visitor's device (js/launch-render-health.js) — must agree.
+            const health = await page.evaluate(() => window.__lpVehicle3d.checkHealth());
+            expect(health.verdict, `in-page verdict ${JSON.stringify(health)}`).toBe('ok');
+            expect(health.shaderErrors, `shader link failures: ${health.firstShaderError}`).toBe(0);
             console.log(`[${name}]`, JSON.stringify({ quality: stats.quality, post: stats.post,
                 fallback: stats.postFallback, samples: stats.postSamples, frame: s }));
             if (expectQuality) expect(stats.quality).toBe(expectQuality);
@@ -225,6 +234,8 @@ test.describe('launch-planner 3D canvas — real-world robustness', () => {
             await page.waitForTimeout(1200);
             const s = await frameStats(page);
             expect(s.std, `${id}/${variant}`).toBeGreaterThan(SHOWS_IMAGE);
+            const h = await page.evaluate(() => window.__lpVehicle3d.checkHealth());
+            expect(h.verdict, `${id}/${variant} in-page verdict`).toBe('ok');
         }
         expect(realErrors(errors)).toEqual([]);
     });
