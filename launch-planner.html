@@ -1386,7 +1386,7 @@ body.lh-stage-lock { overflow:hidden; }
                     <div class="lh-cam-help-hd">Camera controls <button type="button" class="lh-cam-help-x" aria-label="Close">✕</button></div>
                     <dl>
                         <dt>Mouse</dt>
-                        <dd>Drag — orbit · Right-drag or Shift-drag — pan · Wheel — zoom · Double-click — recenter</dd>
+                        <dd>Drag — orbit · Right-drag or Shift-drag — pan · Wheel — zoom once you have clicked the scene (Ctrl/⌘ + wheel or a trackpad pinch always zooms; a plain wheel otherwise scrolls the page) · Double-click — recenter</dd>
                         <dt>Touch</dt>
                         <dd>One finger — orbit · Pinch — zoom · Two fingers — pan · Double-tap — recenter</dd>
                         <dt>Keys <span>(click the scene first)</span></dt>
@@ -1722,6 +1722,10 @@ body.lh-stage-lock { overflow:hidden; }
                 // Preset + lens follow the screen until the user picks one;
                 // every change (automatic or not) re-syncs the buttons.
                 onViewChange: syncViewButtons,
+                // A plain wheel over the stage scrolls the PAGE until the scene
+                // is clicked (see onWheel in js/launch-vehicle-3d.js); say so,
+                // briefly, so the wheel never feels dead.
+                onWheelPassThrough: () => window.__lpWheelHint?.(),
                 onVehicleChange: ({ id, info }) => {
                     renderMeta(info);
                     showVariantRow(id);
@@ -1803,13 +1807,16 @@ body.lh-stage-lock { overflow:hidden; }
                 const [vehicleId, variantId] = tuple;
                 // Bail if we're already showing this exact configuration —
                 // avoids a needless dispose+rebuild cycle on roster re-clicks.
-                if (api.currentInfo) {
-                    const matchingPickerBtn = document.querySelector(
-                        `.lh-vp-btn--on[data-vehicle="${vehicleId}"]` +
-                        (variantId ? `[data-variant="${variantId}"]` : '')
-                    );
-                    if (matchingPickerBtn) return;
-                }
+                // Ask the CANVAS what it shows. This used to look for a lit
+                // picker button, but every vehicle's variant row keeps its
+                // default variant lit even while another vehicle is on stage
+                // (falcon9/block5, starship/v2 are --on at boot) — so a
+                // Falcon 9 launch "matched", the swap was skipped, and picking
+                // a launch never changed the 3D vehicle (found 2026-11-02 by
+                // tests/launch-planner-boot.spec.js, the first gate to boot
+                // with a launch roster).
+                const shown = api.currentVehicle;
+                if (shown && shown.id === vehicleId && (shown.variant || null) === (variantId || null)) return;
                 // Update vehicle-row highlight (top row picks vehicle)
                 document.querySelectorAll('.lh-vehicle-picker .lh-vp-group').forEach(group => {
                     group.querySelectorAll('.lh-vp-btn').forEach(b => {
@@ -2082,7 +2089,19 @@ body.lh-stage-lock { overflow:hidden; }
             const coarse = window.matchMedia?.('(pointer: coarse)').matches;
             hintEl.textContent = coarse
                 ? 'Drag to orbit · Pinch to zoom · Two fingers to pan'
-                : 'Drag to orbit · Right-drag to pan · Scroll to zoom';
+                : 'Drag to orbit · Right-drag to pan · Click, then scroll to zoom';
+            // "Click the scene to zoom" — shown when a plain wheel scrolled the
+            // page past the stage. Throttled: once per 6 s at most.
+            let _wheelHintAt = 0, _wheelHintTimer = 0;
+            window.__lpWheelHint = () => {
+                const now = performance.now();
+                if (now - _wheelHintAt < 6000) return;
+                _wheelHintAt = now;
+                hintEl.textContent = 'Click the scene, then scroll to zoom · or Ctrl + scroll';
+                hintEl.classList.add('lh-cam-hint--on');
+                clearTimeout(_wheelHintTimer);
+                _wheelHintTimer = setTimeout(() => hintEl.classList.remove('lh-cam-hint--on'), 2200);
+            };
             if (!getPref('camHintSeen', false)) {
                 hintEl.classList.add('lh-cam-hint--on');
                 const dismiss = () => {

@@ -1247,6 +1247,50 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // resumes for the new shot.
     let userControlledCamera = false;
 
+    // ── Camera trace: WHAT moved the camera during load, and why ──────────
+    // The recurring "camera zooms in on the orange tower / scaffolding at
+    // load" bug has been "fixed" twice (see resize()) and kept coming back,
+    // because every gate ran on a software rasteriser at ~1 fps: by its first
+    // frame the page had already settled, so a load-time transient was never
+    // on screen and never measured. This records every camera mutation WITH
+    // ITS REASON (vehicle swap, resize, safe-inset change, preset flight,
+    // auto-pick, the first input that claims the camera) plus one entry per
+    // rendered frame whenever the pose moved — independent of frame rate, so
+    // tests/launch-planner-boot.spec.js can review the whole boot sequence.
+    // Bounded ring; costs a few object allocations per change.
+    const CAM_TRACE_MAX = 600;
+    const camTrace = [];
+    const _traceT0 = performance.now();
+    let _lastTracedPose = null;
+    function traceCam(reason, extra) {
+        const p = cam.pos, t = controls.target;
+        const entry = {
+            t: Math.round(performance.now() - _traceT0),
+            reason,
+            pos: [p.x, p.y, p.z].map(v => Math.round(v * 100) / 100),
+            target: [t.x, t.y, t.z].map(v => Math.round(v * 100) / 100),
+            dist: Math.round(p.distanceTo(t) * 100) / 100,
+            fov: camera.fov,
+            view: currentViewName,
+            auto: viewIsAuto,
+            user: userControlledCamera,
+            box: [canvas.clientWidth || 0, canvas.clientHeight || 0],
+            insets: [safeInsetsState.top, safeInsetsState.bottom],
+            vehicle: current?.id || null,
+            ...(extra || {}),
+        };
+        camTrace.push(entry);
+        if (camTrace.length > CAM_TRACE_MAX) camTrace.shift();
+        _lastTracedPose = entry.pos.concat(entry.target).join(',');
+    }
+    // The ONE way the camera becomes the user's (auto-framing stops until the
+    // next vehicle swap / preset / recenter). Traced so a claim nobody made
+    // on purpose — a page-scroll wheel over the canvas, an auto-rotate — is
+    // visible in the boot record.
+    function claimCamera(reason) {
+        if (!userControlledCamera) { userControlledCamera = true; traceCam(`claim:${reason}`); }
+    }
+
     const _fwd   = new THREE.Vector3();
     const _right = new THREE.Vector3();
     const _move  = new THREE.Vector3();
@@ -1447,7 +1491,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
             if (Math.abs(f - 1) > 1e-4) dollyToTarget(f);
             panBy(now.mid.x - pinchMid.x, now.mid.y - pinchMid.y);
             pinchDist = now.dist; pinchMid = now.mid;
-            userControlledCamera = true;
+            claimCamera('pinch');
             return;
         }
         const dx = e.clientX - cam.lastX;
@@ -1455,7 +1499,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         cam.lastX = e.clientX;
         cam.lastY = e.clientY;
         if (!dx && !dy) return;
-        userControlledCamera = true;                 // a real drag
+        claimCamera(gesture === 'pan' ? 'drag-pan' : 'drag-orbit');   // a real drag
         if (gesture === 'pan') panBy(dx, dy);
         else if (gesture === 'orbit') orbitAroundTarget(dx, dy);
     }
@@ -1499,15 +1543,54 @@ export function initVehicleCanvas(canvas, opts = {}) {
         e.preventDefault();
         recenter();
     }
+    // ── THE WHEEL BELONGS TO THE PAGE until the scene is engaged ──────────
+    // (2026-11-02) The canvas used to preventDefault EVERY wheel event over
+    // it. It covers ~70 % of a 1440×900 screen, so a visitor scrolling down
+    // to it — or back up past it — scrolled the CAMERA instead of the page:
+    // the page did not move, the wheel claimed the camera (which switches off
+    // every later auto-reframe), and scrolling up dollied in from 124 m to
+    // 50 m, a frame full of orange service-structure scaffolding. That is the
+    // long-running "zooms in on the scaffolding at load" report; it never
+    // showed in a test because no test scrolled the page.
+    // The wheel now zooms only when the visitor has asked for the scene:
+    //   · after a press on the canvas (until the pointer leaves it),
+    //   · while the canvas has keyboard focus from that press,
+    //   · with ctrl/⌘ held (a trackpad PINCH arrives as ctrl+wheel),
+    //   · with the stage in full screen.
+    // Otherwise it passes through and the page scrolls; opts.onWheelPassThrough
+    // lets the host say "click the scene to zoom". `?lpwheel=capture` restores
+    // the old always-capture behaviour — the boot gate's negative control.
+    const WHEEL_CAPTURE_ALL = /[?&]lpwheel=capture\b/.test(typeof location !== 'undefined' ? location.search : '');
+    let wheelEngaged = false;
+    let _lastPassTrace = -1e9;
+    function stageIsFullscreen() {
+        const host = canvas.parentElement;
+        if (!host) return false;
+        return document.fullscreenElement === host || document.webkitFullscreenElement === host ||
+               host.classList.contains('lh-stage--max');
+    }
+    function wheelZooms(e) {
+        return WHEEL_CAPTURE_ALL || e.ctrlKey || e.metaKey || wheelEngaged || stageIsFullscreen();
+    }
+    canvas.addEventListener('pointerdown', () => { wheelEngaged = true; });
+    canvas.addEventListener('pointerleave', () => { wheelEngaged = false; });
+    canvas.addEventListener('blur', () => { wheelEngaged = false; });
+
     function onWheel(e) {
+        if (!wheelZooms(e)) {
+            // Let the page scroll. Traced at most once a second.
+            if (e.timeStamp - _lastPassTrace > 1000) { _lastPassTrace = e.timeStamp; traceCam('wheel-pass'); }
+            if (typeof opts.onWheelPassThrough === 'function') opts.onWheelPassThrough();
+            return;
+        }
         // Zoom toward / away from the rocket. Scroll up (deltaY < 0) zooms in.
         // Radius-based + clamped so you can't tunnel through the vehicle into
         // the tower. preventDefault so the wheel drives the camera, not the
-        // page scroll, while the cursor is on the canvas. A trackpad pinch
-        // arrives as a ctrl+wheel with small deltas — scaled by magnitude so
-        // it is smooth rather than a 12 % step per event.
+        // page scroll. A trackpad pinch arrives as a ctrl+wheel with small
+        // deltas — scaled by magnitude so it is smooth rather than a 12 % step
+        // per event.
         e.preventDefault();
-        userControlledCamera = true;                 // wheel-dolly
+        claimCamera('wheel');                        // wheel-dolly
         const mag = Math.min(1, Math.abs(e.deltaY) / (e.ctrlKey ? 25 : 100));
         const step = 1 + 0.12 * Math.max(0.15, mag);
         dollyToTarget(e.deltaY > 0 ? step : 1 / step);
@@ -1517,7 +1600,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         if (k === 'Shift' || k === 'shift') { cam.keys.shift = down; return; }
         if ('wasdqe'.includes(k)) {
             cam.keys[k] = down;
-            if (down) userControlledCamera = true;    // WASD/QE fly
+            if (down) claimCamera(`key-${k}`);        // WASD/QE fly
         }
     }
     // One-shot keys (canvas focused): arrows orbit, +/− zoom, R recenter,
@@ -1558,7 +1641,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // Orbit by DEGREES (buttons, arrow keys, auto-rotate) through the same
     // spherical step the drag uses.
     function orbitBy(dAzDeg, dElDeg) {
-        userControlledCamera = true;
+        claimCamera('orbit-step');
         const rad = Math.PI / 180;
         orbitAroundTarget(dAzDeg * rad / cam.lookSpeed, dElDeg * rad / cam.lookSpeed);
     }
@@ -1816,6 +1899,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         current.baseTargetY = controls.target.y;
         current.baseCamY    = cam.pos.y;
 
+        traceCam('vehicle', { variant: variant || null });
         if (typeof opts.onVehicleChange === 'function') {
             opts.onVehicleChange({ id, variant, info: v.info });
         }
@@ -1993,7 +2077,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // pops straight to the correct frame instead of animating from a stale
     // pose. Sets controls.target + flushes the god-camera so the pose is
     // applied even if the render loop is currently paused (collapsed panel).
-    function reframeCurrentView() {
+    function reframeCurrentView(why = 'reframe') {
         if (!current || !current.root) return;
         cancelViewTween();
         const fit = fitParams();
@@ -2009,6 +2093,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // so a later liftoff Δ-follow stays consistent.
         current.baseTargetY = controls.target.y - dy;
         current.baseCamY    = cam.pos.y - dy;
+        traceCam(`reframe:${why}`);
     }
 
     // ── Resize handling ────────────────────────────────────────────────────
@@ -2069,8 +2154,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
         applyViewOffset();
-        applyAutoPick();                       // no-op once the user has chosen
-        if (!userControlledCamera) reframeCurrentView();
+        const picked = applyAutoPick();        // no-op once the user has chosen
+        traceCam('resize', { picked });
+        if (!userControlledCamera) reframeCurrentView('resize');
     }
     // Coalesce a burst of observer callbacks into a single measurement on the
     // next animation frame, by which point layout for this frame has settled.
@@ -2179,7 +2265,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         const t = clock.elapsedTime;
         controls._dt = dt;
         if (autoRotateOn && pointers.size === 0 && !activeTween && dt > 0) {
-            userControlledCamera = true;            // a turned camera is not the preset frame
+            if (!userControlledCamera) claimCamera('auto-rotate');   // a turned camera is not the preset frame
             orbitAroundTarget(-AUTO_ROTATE_RAD_S * dt / cam.lookSpeed, 0);
         }
         controls.update();
@@ -2272,6 +2358,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Read our own frame back while the drawing buffer still holds it
         // (it is not preserved past this task). See js/launch-render-health.js.
         renderedFrames++;
+        {
+            const p = cam.pos, tg = controls.target;
+            const key = [p.x, p.y, p.z, tg.x, tg.y, tg.z].map(v => Math.round(v * 100) / 100).join(',');
+            if (key !== _lastTracedPose) traceCam('frame', { frame: renderedFrames });
+        }
         if (renderedFrames === 1) tFirstFrame = performance.now();
         if (healthWaiters.length || (!healthReported && renderedFrames >= 10 &&
             (renderedFrames >= HEALTH_FRAME || performance.now() - tFirstFrame > 5000))) captureHealth();
@@ -2301,6 +2392,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // keep THAT preset framed rather than freeze the tween's end pose.
         userControlledCamera = false;
         cancelViewTween();
+        traceCam(`preset:${name}`, { requestedAuto: auto });
 
         const fit    = fitParams();
         const base   = frameForView(name, current, fit.fitFovDeg, fit.fitAspect);
@@ -2331,6 +2423,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
                 }
                 cameraFollowSuppressed = false;
                 activeTween = null;
+                traceCam('preset-landed');
             }
         );
     }
@@ -2339,7 +2432,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
     // out. Radius-based + clamped, same as the wheel — never tunnels through
     // the vehicle. ~25% per click is a comfortable step.
     function setZoom(factor) {
-        userControlledCamera = true;                 // deliberate user dolly
+        claimCamera('zoom-button');                  // deliberate user dolly
         dollyToTarget(factor < 1 ? 0.8 : 1.25);
     }
 
@@ -2363,7 +2456,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
         if (next.top === safeInsetsState.top && next.bottom === safeInsetsState.bottom) return;
         safeInsetsState = next;
         applyViewOffset();
-        if (!userControlledCamera && !missionActive) reframeCurrentView();
+        traceCam('insets');
+        if (!userControlledCamera && !missionActive) reframeCurrentView('insets');
     }
 
     // FOV swap. No dolly compensation — in god-mode the user owns position
@@ -2559,7 +2653,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Degrees, the same sense as a drag: +az = drag right, +el = drag
         // down (the camera rises over the stack).
         orbit(dAzDeg = 0, dElDeg = 0) { orbitBy(dAzDeg, dElDeg); },
-        pan(dxPx = 0, dyPx = 0) { userControlledCamera = true; panBy(dxPx, dyPx); },
+        pan(dxPx = 0, dyPx = 0) { claimCamera('api-pan'); panBy(dxPx, dyPx); },
         get view() { return { name: currentViewName, auto: viewIsAuto, fov: cameraFov, fovAuto: fovIsAuto, insets: { ...safeInsetsState } }; },
         get autoRotate() { return autoRotateOn; },
         setAutoRotate,
@@ -2592,7 +2686,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
                 post.setSize(w, h);
                 camera.aspect = w / h;
                 camera.updateProjectionMatrix();
-                reframeCurrentView();
+                reframeCurrentView('api-resize');
             } else {
                 userControlledCamera = false;
                 resize();
@@ -2606,10 +2700,16 @@ export function initVehicleCanvas(canvas, opts = {}) {
         get isTweening() { return !!activeTween; },
         get missionT()    { return missionClock.T; },
         get currentInfo() { return current.info; },
+        // What is on stage — the host's "already showing?" check reads this.
+        get currentVehicle() { return current.id ? { id: current.id, variant: current.variant ?? null } : null; },
         // Test hook: the live scene (read-only use — the browser gate inspects
         // pad materials after a launch).
         get scene() { return scene; },
         get camera() { return camera; },
+        // Boot / camera record (see traceCam): every camera change with its
+        // reason, and every rendered frame whose pose moved.
+        get cameraTrace() { return camTrace.slice(); },
+        get userControlledCamera() { return userControlledCamera; },
         // Test hook + diagnostics: see measureOcclusion above.
         measureOcclusion,
         measureForeground,

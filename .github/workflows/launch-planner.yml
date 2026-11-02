@@ -6,7 +6,8 @@ name: launch-planner
 #   · the PURE kernels under node;
 #   · every Chromium gate (visuals, camera, real-world GPU-profile robustness,
 #     framing: occlusion + foreground clutter with negative controls, the
-#     cross-browser smoke) plus the Space Ship Designer, which shares
+#     BOOT SEQUENCE review — page scroll over the stage, a launch roster —
+#     the cross-browser smoke) plus the Space Ship Designer, which shares
 #     js/launch-pad-3d.js;
 #   · the cross-browser smoke on Firefox and WebKit (Safari's engine).
 
@@ -63,6 +64,7 @@ jobs:
           tests/launch-planner-camera.spec.js
           tests/launch-planner-robustness.spec.js
           tests/launch-planner-framing.spec.js
+          tests/launch-planner-boot.spec.js
           tests/launch-planner-xbrowser.spec.js
           tests/spaceship-designer-smoke.spec.js
         env:
