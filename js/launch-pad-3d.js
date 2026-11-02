@@ -896,28 +896,52 @@ function buildFalconTEL() {
     // tall lattices each capped with a red aviation beacon. (Real SLC-40 has
     // four such towers; LC-39A inherited similar protection during the
     // Falcon era.)
-    const ltOffset = 70;
-    for (let i = 0; i < 4; i++) {
-        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    //
+    // PLACEMENT IS A FRAMING DECISION (2026-11). They used to stand 70 m out
+    // on the 45° diagonals — and the default 3/4 camera looks down the +x/+z
+    // diagonal, so one 95 m tower stood squarely between the camera and the
+    // rocket (and cut through the exhaust cloud at liftoff) while the other
+    // three framed the stack like a cage. At LT_AZIMUTHS_DEG / LT_RADIUS every
+    // preset sightline (side 0°, 3/4 ≈ 56°, wide ≈ 54°, front 90°) clears the
+    // nearest tower by ≥ 38° of azimuth — outside the frame's horizontal
+    // half-angle (~29° at 38° FOV on a 16:10 stage) — so they read as
+    // perimeter context in Wide and are out of shot in the close views.
+    // They cast NO shadow: from the spot key their 95 m shadows streaked the
+    // whole apron and read as clutter, not structure.
+    const LT_RADIUS = 110;
+    const LT_HEIGHT = 95;
+    const LT_AZIMUTHS_DEG = [20, 110, 200, 290];
+    LT_AZIMUTHS_DEG.forEach((deg, i) => {
+        const a = deg * Math.PI / 180;
+        const x = Math.cos(a) * LT_RADIUS, z = Math.sin(a) * LT_RADIUS;
         const lt = buildLatticeTower({
-            height: 95, footprint: 3.6, color: PAD_COLORS.steelDark, bandStep: 11,
+            height: LT_HEIGHT, footprint: 3.0, color: PAD_COLORS.steelDark, bandStep: 11,
         });
-        lt.position.set(Math.cos(a) * ltOffset, 0, Math.sin(a) * ltOffset);
+        lt.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+        lt.position.set(x, 0, z);
         root.add(lt);
+
+        // Concrete footing so a tower this far out stands on something.
+        const footing = new THREE.Mesh(
+            new THREE.BoxGeometry(5.5, 0.8, 5.5),
+            concreteMat(0x85858a)
+        );
+        footing.position.set(x, 0.15, z);
+        footing.receiveShadow = true;
+        root.add(footing);
 
         const tip = new THREE.Mesh(
             new THREE.CylinderGeometry(0.12, 0.12, 12, 10),
             steelMat(PAD_COLORS.steelDark, 0.4, 0.7)
         );
-        tip.position.set(Math.cos(a) * ltOffset, 95 + 6, Math.sin(a) * ltOffset);
-        tip.castShadow = true;
+        tip.position.set(x, LT_HEIGHT + 6, z);
         root.add(tip);
 
         const beaconM = buildBeacon({ color: PAD_COLORS.beaconRed, intensity: 1.8 });
-        beaconM.position.set(Math.cos(a) * ltOffset, 95 + 13, Math.sin(a) * ltOffset);
+        beaconM.position.set(x, LT_HEIGHT + 13, z);
         root.add(beaconM);
         beacons.push({ mesh: beaconM, phase: i * 0.6, color: PAD_COLORS.beaconRed });
-    }
+    });
 
     // Strongback-top beacon
     const sbBeacon = buildBeacon({ color: PAD_COLORS.beaconRed, intensity: 2.0 });
