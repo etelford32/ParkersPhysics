@@ -19,6 +19,17 @@
  * interpolation chords that by 0.002 AU, Hermite on 1 h samples is < 1e-6 AU.
  *
  * Horizons specifics that bit while writing this:
+ *   • THE FRAME PARAMETER IS `REF_PLANE=ECLIPTIC`, NOT `REF_FRAME`. The API
+ *     answers HTTP 400 "one or more query parameter was not recognized" to
+ *     any unknown name — measured on the first deployed build, where every
+ *     call failed (js/horizons.js carries the same REF_FRAME and has been
+ *     silently on its Meeus fallback). REF_PLANE=ECLIPTIC with the default
+ *     REF_SYSTEM=ICRF is "Ecliptic of J2000.0" in the returned header;
+ *   • spaces in START_TIME/STOP_TIME go on the wire as %20 — `horizonsQueryString`
+ *     serialises with encodeURIComponent, never URLSearchParams.toString(),
+ *     which writes '+' (the proxy's existing health URL uses %20 and works);
+ *   • Horizons answers 503 when busy — the route caps concurrency and retries
+ *     a 503 once; a 400 carries a JSON `message` the route surfaces verbatim;
  *   • a name that matches several bodies returns a LIST, not a table — no
  *     $$SOE — so a candidate is "resolved" only when a table parses;
  *   • the first line of a CSV row is the TDB JD, the second the calendar
@@ -64,12 +75,22 @@ export function horizonsQuery(command, startJd, { hours = WINDOW_HOURS, stepHour
         STOP_TIME:  `'${horizonsTime(startJd + hours / 24)}'`,
         STEP_SIZE:  `'${stepHours}h'`,
         VEC_TABLE:  '2',
-        REF_FRAME:  'ECLIPJ2000',
+        REF_PLANE:  'ECLIPTIC',
         OUT_UNITS:  'AU-D',
         CSV_FORMAT: 'YES',
         VEC_LABELS: 'NO',
         OBJ_DATA:   'NO',
     });
+}
+
+/** Wire form of a query: spaces as %20, quotes as %27 (never '+'). */
+export function horizonsQueryString(params) {
+    const out = [];
+    // encodeURIComponent leaves the apostrophe alone; send it as %27, the form
+    // the proxy's proven health-check URL uses.
+    const enc = s => encodeURIComponent(s).replace(/'/g, '%27');
+    for (const [k, v] of params.entries()) out.push(`${enc(k)}=${enc(v)}`);
+    return out.join('&');
 }
 
 /**

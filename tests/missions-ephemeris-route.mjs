@@ -16,7 +16,7 @@
  *   • ids are capped and unknown ids are reported, not 400'd.
  */
 import assert from 'node:assert/strict';
-import handler, { DEFAULT_IDS, MAX_IDS } from '../api/missions/ephemeris.js';
+import handler, { DEFAULT_IDS, MAX_IDS, HORIZONS_CONCURRENCY } from '../api/missions/ephemeris.js';
 
 let passed = 0;
 const ok = (name, fn) => fn().then(() => { passed++; console.log(`  ✓ ${name}`); });
@@ -31,16 +31,29 @@ function table(cmd) {
 const LIST = 'Multiple major-bodies match string "HERA"\n  ID#  Name\n  103 Hera\n -1176 Hera (spacecraft)\n';
 
 const realFetch = globalThis.fetch;
-/** plan: COMMAND value → { kind: 'table'|'list'|'nomatch'|'http500'|'throw' } */
+/** plan: COMMAND value → 'table'|'list'|'nomatch'|'http500'|'http400'|'busy-once'|'throw' */
 function stub(plan) {
     const seen = [];
+    const busy = new Set();
+    let active = 0; stub.peak = 0;
     globalThis.fetch = async (url) => {
         const u = new URL(String(url));
+        assert.ok(!String(url).includes('+'), 'spaces go on the wire as %20, never +');
+        assert.equal(u.searchParams.get('REF_PLANE'), 'ECLIPTIC');
+        assert.equal(u.searchParams.get('REF_FRAME'), null, 'REF_FRAME is not a Horizons parameter');
         const cmd = (u.searchParams.get('COMMAND') || '').replace(/'/g, '');
         seen.push(cmd);
+        active++; stub.peak = Math.max(stub.peak, active);
+        await new Promise(r => setTimeout(r, 2));
+        active--;
         const k = plan[cmd] || plan['*'] || 'nomatch';
         if (k === 'throw') throw new TypeError('fetch failed');
         if (k === 'http500') return new Response('oops', { status: 500 });
+        if (k === 'http400') return new Response(JSON.stringify({ code: '400', message: 'one or more query parameter was not recognized' }), { status: 400 });
+        if (k === 'busy-once') {
+            if (!busy.has(cmd)) { busy.add(cmd); return new Response('busy', { status: 503 }); }
+            return Response.json({ result: table(cmd) });
+        }
         const result = k === 'table' ? table(cmd) : k === 'list' ? LIST : 'No matches found.';
         return Response.json({ signature: { version: '1.2' }, result });
     };
@@ -78,10 +91,25 @@ await ok('an ambiguous NAME LIST is a miss, and a mission with no winner is ok:f
     const hera = j.spacecraft.find(s => s.id === 'hera');
     assert.equal(hera.ok, false);
     assert.equal(hera.command_used, null);
-    assert.deepEqual(hera.tried.map(t => t.reason), ['ambiguous-name', 'http-500']);
+    assert.deepEqual(hera.tried.map(t => t.reason), ['ambiguous-name', 'http-500 (oops)']);
     assert.equal(hera.samples, null);
     assert.equal(j.resolved, 1);
     assert.equal(j.freshness, 'live');
+    restore();
+});
+
+await ok('a 503 is retried once and a 400 carries Horizons\' own message; concurrency is capped', async () => {
+    const seen = stub({ '-21': 'busy-once', '-92': 'http400', '399': 'table', '-8': 'table', '-78': 'table', '-43': 'table', '-96': 'table', '-144': 'table' });
+    const j = await (await handler(req('ids=soho,ace,wind,dscovr,imap,parker-solar-probe,solar-orbiter'), { now: JD0 })).json();
+    const soho = j.spacecraft.find(s => s.id === 'soho');
+    assert.equal(soho.ok, true, 'resolved on the retry');
+    assert.equal(seen.filter(c => c === '-21').length, 2, 'exactly one retry');
+    const ace = j.spacecraft.find(s => s.id === 'ace');
+    assert.equal(ace.ok, false);
+    assert.equal(ace.tried[0].reason, 'http-400 (one or more query parameter was not recognized)');
+    assert.equal(seen.filter(c => c === '-92').length, 1, 'a 400 is not retried');
+    assert.ok(stub.peak <= HORIZONS_CONCURRENCY, `peak in-flight ${stub.peak} ≤ ${HORIZONS_CONCURRENCY}`);
+    assert.ok(stub.peak >= 2, 'calls still overlap');
     restore();
 });
 

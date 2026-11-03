@@ -28,17 +28,23 @@
  *   curl 'https://parkersphysics.com/api/missions/ephemeris?ids=hera,escapade,roman' | jq '.spacecraft[]|{id,ok,command_used,tried}'
  * — settles the ids; then trim the lists in js/space-missions.js.
  *
- * Budget: Horizons SPK lookups answer in 1–4 s; every call runs in parallel
- * under a per-call timeout (HORIZONS_TIMEOUT_MS) so the route's wall time is
- * the slowest single call, not the sum. The CDN caches a success for an hour
- * (the window is 26 h, so a cached answer always brackets now).
+ * Budget: Horizons SPK lookups answer in 1–4 s; calls run HORIZONS_CONCURRENCY
+ * at a time (Horizons 503s under a burst — measured) under a per-call timeout
+ * (HORIZONS_TIMEOUT_MS), one retry per 503. The CDN caches a success for an
+ * hour (the window is 26 h, so a cached answer always brackets now).
+ *
+ * MEASURED ON THE FIRST DEPLOY (2026-11-03): every call answered HTTP 400
+ * "one or more query parameter was not recognized" — `REF_FRAME` is not a
+ * Horizons API parameter; the frame is `REF_PLANE=ECLIPTIC` (see the kernel
+ * header). A 400's `message` is now carried in the per-candidate `reason`
+ * so the next schema miss is readable from the self-report.
  */
 
 import { jsonOk, fetchWithTimeout } from '../_lib/responses.js';
 import { ALL_MISSIONS } from '../../js/space-missions.js';
 import {
     HOST_COMMANDS, WINDOW_HOURS, STEP_HOURS,
-    windowStartJd, horizonsQuery, parseHorizonsVectors, classifyMiss,
+    windowStartJd, horizonsQuery, horizonsQueryString, parseHorizonsVectors, classifyMiss,
 } from '../../js/mission-ephemeris.js';
 
 export const config = { runtime: 'edge' };
@@ -46,6 +52,11 @@ export const config = { runtime: 'edge' };
 export const HORIZONS_BASE = 'https://ssd.jpl.nasa.gov/api/horizons.api';
 export const HORIZONS_TIMEOUT_MS = 9000;
 export const MAX_IDS = 16;
+/** Horizons answers 503 when busy; ~20 parallel calls from one edge
+ *  invocation provoked it on the first deployed build. Four at a time, one
+ *  retry per 503 after a short pause. */
+export const HORIZONS_CONCURRENCY = 4;
+export const RETRY_503_DELAY_MS = 1200;
 const CACHE_TTL = 3600;
 const CACHE_SWR = 900;
 const STALE_TTL = 120;
@@ -56,14 +67,41 @@ export const DEFAULT_IDS = Object.freeze([
 
 function jdNow() { return Date.now() / 86400000 + 2440587.5; }
 
+// ── A small concurrency gate shared by every call in one invocation ────────
+let _active = 0;
+const _waiters = [];
+async function withSlot(fn) {
+    if (_active >= HORIZONS_CONCURRENCY) await new Promise(r => _waiters.push(r));
+    _active++;
+    try { return await fn(); }
+    finally { _active--; const next = _waiters.shift(); if (next) next(); }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/** Short, log-safe excerpt of an upstream error body (Horizons' JSON `message`). */
+function errorExcerpt(text) {
+    let msg = '';
+    try { msg = JSON.parse(text)?.message || ''; } catch (_) { msg = String(text || ''); }
+    msg = msg.replace(/\s+/g, ' ').trim().slice(0, 80);
+    return msg ? ` (${msg})` : '';
+}
+
 /** One Horizons table → samples, or throw a short reason. Exported for tests. */
 export async function fetchTable(command, startJd) {
-    const url = `${HORIZONS_BASE}?${horizonsQuery(command, startJd)}`;
-    const res = await fetchWithTimeout(url, {
+    const url = `${HORIZONS_BASE}?${horizonsQueryString(horizonsQuery(command, startJd))}`;
+    const once = () => fetchWithTimeout(url, {
         headers: { Accept: 'application/json' },
         timeoutMs: HORIZONS_TIMEOUT_MS,
     }).catch(e => { throw new Error(`fetch:${(e && e.name === 'TimeoutError') ? 'timeout' : 'network'}`); });
-    if (!res.ok) throw new Error(`http-${res.status}`);
+    let res = await withSlot(once);
+    if (res.status === 503) {
+        await sleep(RETRY_503_DELAY_MS);
+        res = await withSlot(once);
+    }
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`http-${res.status}${errorExcerpt(body)}`);
+    }
     let json;
     try { json = await res.json(); }
     catch (_) { throw new Error('not-json'); }

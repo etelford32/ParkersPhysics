@@ -22,7 +22,7 @@
 import assert from 'node:assert/strict';
 import {
     STEP_HOURS, WINDOW_HOURS, EXTRAPOLATE_MAX_HOURS, HOST_COMMANDS,
-    windowStartJd, horizonsTime, horizonsQuery, parseHorizonsVectors, classifyMiss,
+    windowStartJd, horizonsTime, horizonsQuery, horizonsQueryString, parseHorizonsVectors, classifyMiss,
     interpolateState, planBatches, missionsWithHorizons, distanceAU, lightTimeMinutes, speedKms,
     provenanceSummary,
 } from '../js/mission-ephemeris.js';
@@ -45,7 +45,10 @@ ok('query carries the parser\'s contract', () => {
     assert.equal(q.get('COMMAND'), "'-96'");
     assert.equal(q.get('EPHEM_TYPE'), 'VECTORS');
     assert.equal(q.get('CENTER'), "'500@10'");
-    assert.equal(q.get('REF_FRAME'), 'ECLIPJ2000');
+    // REF_FRAME is NOT a Horizons API parameter (HTTP 400 "parameter not
+    // recognized", measured on the first deploy); the frame is REF_PLANE.
+    assert.equal(q.get('REF_PLANE'), 'ECLIPTIC');
+    assert.equal(q.get('REF_FRAME'), null);
     assert.equal(q.get('OUT_UNITS'), 'AU-D');
     assert.equal(q.get('CSV_FORMAT'), 'YES');
     assert.equal(q.get('VEC_TABLE'), '2');
@@ -53,6 +56,12 @@ ok('query carries the parser\'s contract', () => {
     assert.equal(q.get('START_TIME'), "'2026-11-03 00:00'");
     assert.equal(q.get('STOP_TIME'), `'2026-11-04 02:00'`);
     assert.equal(WINDOW_HOURS, 26);
+    // wire form: %20 for the space in the time strings, never '+'
+    const wire = horizonsQueryString(q);
+    assert.ok(wire.includes("START_TIME=%272026-11-03%2000%3A00%27"), wire);
+    assert.ok(!wire.includes('+'), 'no plus-encoded spaces');
+    assert.ok(!/REF_FRAME/.test(wire));
+    assert.equal(new URLSearchParams(wire).get('STOP_TIME'), "'2026-11-04 02:00'");
 });
 
 /** A Horizons CSV result in its real shape (header, SOE block, footer). */
