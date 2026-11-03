@@ -65,35 +65,39 @@ export const NIGHT_K = 100;  // deep lunar night
 // LACE/LADEE via the reviews cited in the header. `sunriseCm3` only for the
 // condensable Ar (the pre-dawn release bulge). `suprathermalK` marks species
 // whose dominant source ejects atoms far hotter than the regolith.
+// `photoionLifetimeHr` is 1/(quiet-Sun photoionization rate at 1 AU), Huebner
+// et al. (1992) class values: the loss clock for everything that does not
+// escape thermally — months for the noble gases, two days for Na, half a day
+// for K (which is why the K exosphere is so much fainter than Na's).
 export const SPECIES = Object.freeze([
     Object.freeze({
         key: 'he', name: 'Helium-4', amu: 4.0026,
-        dayCm3: 2e3, nightCm3: 4e4, condensable: false,
+        dayCm3: 2e3, nightCm3: 4e4, condensable: false, photoionLifetimeHr: 2980,
         source: 'Solar-wind α particles, thermally re-emitted',
     }),
     Object.freeze({
         key: 'ne', name: 'Neon-20', amu: 20.18,
-        dayCm3: 4e3, nightCm3: 4e4, condensable: false,
+        dayCm3: 4e3, nightCm3: 4e4, condensable: false, photoionLifetimeHr: 1980,
         source: 'Solar wind (LACE upper limit; LADEE confirmed)',
     }),
     Object.freeze({
         key: 'h2', name: 'Hydrogen (H₂)', amu: 2.016,
-        dayCm3: 1.2e3, nightCm3: 3.5e4, condensable: false,
+        dayCm3: 1.2e3, nightCm3: 3.5e4, condensable: false, photoionLifetimeHr: 2800,
         source: 'Solar-wind protons recombined in the regolith',
     }),
     Object.freeze({
         key: 'ar', name: 'Argon-40', amu: 39.96,
-        dayCm3: 8e3, nightCm3: 2e3, sunriseCm3: 4e4, condensable: true,
+        dayCm3: 8e3, nightCm3: 2e3, sunriseCm3: 4e4, condensable: true, photoionLifetimeHr: 900,
         source: 'Radiogenic ⁴⁰K decay, vented from the interior',
     }),
     Object.freeze({
         key: 'na', name: 'Sodium', amu: 22.99,
-        dayCm3: 70, nightCm3: 15, condensable: false, suprathermalK: 1200,
+        dayCm3: 70, nightCm3: 15, condensable: false, suprathermalK: 1200, photoionLifetimeHr: 47,
         source: 'Photon-stimulated desorption + sputtering + impact vapor',
     }),
     Object.freeze({
         key: 'k', name: 'Potassium', amu: 39.10,
-        dayCm3: 17, nightCm3: 4, condensable: false, suprathermalK: 1200,
+        dayCm3: 17, nightCm3: 4, condensable: false, suprathermalK: 1200, photoionLifetimeHr: 12,
         source: 'Same desorption trio as Na (fainter)',
     }),
 ]);
@@ -161,6 +165,122 @@ export function totalMassKg() {
         );
     }
     return m;
+}
+
+// ── Where the gas IS: surface temperature → local density per species ───────
+// The exosphere's spatial structure is set by the surface temperature map,
+// because every atom thermalizes with the regolith on each bounce. The map
+// below is the radiative-equilibrium law T ∝ cos^{1/4}(χ) on the dayside
+// (Diviner: ~390 K at the sub-solar point, Vasavada et al. 2012) floored
+// at the deep-night value — a smooth analytic stand-in for the measured
+// map, disclosed; the diurnal wave in the regolith is not modelled.
+/** Surface temperature at solar zenith angle χ (deg). */
+export function surfaceTemperatureK(solarZenithDeg) {
+    const c = Math.cos(Math.min(Math.max(solarZenithDeg, 0), 180) * Math.PI / 180);
+    if (c <= 0) return NIGHT_K;
+    return Math.max(NIGHT_K, DAY_K * Math.pow(c, 0.25));
+}
+
+/**
+ * Hodges (1973) exospheric equilibrium for a non-condensable gas: with the
+ * atoms thermalizing on every bounce, the surface density scales as
+ * n ∝ T^(−5/2) — the gas POOLS on the cold night side. The tabulated
+ * day/night densities imply their own effective exponent, which the test
+ * checks sits near 5/2 (measurements, not a fit).
+ */
+export const HODGES_EXPONENT = 2.5;
+export function effectivePoolingExponent(key) {
+    const s = SPECIES.find(x => x.key === key);
+    if (!s || s.condensable || s.suprathermalK) return NaN;
+    return Math.log(s.nightCm3 / s.dayCm3) / Math.log(DAY_K / NIGHT_K);
+}
+
+/** Hours after sunset for a local solar hour (0 = midnight), or NaN by day. */
+function _hoursSinceSunset(localHours) {
+    const h = ((localHours % 24) + 24) % 24;
+    if (h >= 6 && h < 18) return NaN;
+    return h >= 18 ? h - 18 : h + 6;
+}
+
+/** Centre and width of the condensable (argon) pre-dawn release, local hours. */
+export const SUNRISE_RELEASE_HOUR = 5.6;
+export const SUNRISE_RELEASE_SIGMA_H = 0.9;
+/** Night-side decay time of a condensable's density after sunset (hours) — adsorption onto the cooling regolith. */
+export const CONDENSATION_TAU_H = 2.5;
+
+/**
+ * Near-surface number density (cm⁻³) of one species at a point given by
+ * its solar zenith angle and local solar time. Three shapes, one per
+ * source physics, each anchored on the species table at its endpoints:
+ *   • thermal non-condensables (He, Ne, H₂): T^(−γ) pooling with the
+ *     table's own effective exponent — day value at noon, night value in
+ *     deep night, continuous through the terminator.
+ *   • condensable (⁴⁰Ar): day value by day, decaying to the night floor
+ *     after sunset as atoms stick to the freezing regolith, plus the LACE
+ *     pre-dawn release bulge peaking at `sunriseCm3` just before sunrise.
+ *   • suprathermal (Na, K): photon-stimulated desorption ∝ the photon flux
+ *     ∝ cos χ, over a night floor.
+ */
+export function localDensityCm3(key, solarZenithDeg, localSolarHours) {
+    const s = SPECIES.find(x => x.key === key);
+    if (!s) return NaN;
+    const chi = Math.min(Math.max(solarZenithDeg, 0), 180);
+    const T = surfaceTemperatureK(chi);
+    if (s.suprathermalK) {
+        const c = Math.max(0, Math.cos(chi * Math.PI / 180));
+        return s.nightCm3 + (s.dayCm3 - s.nightCm3) * c;
+    }
+    if (s.condensable) {
+        const since = _hoursSinceSunset(localSolarHours);
+        const h = ((localSolarHours % 24) + 24) % 24;
+        let dh = h - SUNRISE_RELEASE_HOUR;
+        if (dh > 12) dh -= 24;
+        if (dh < -12) dh += 24;
+        const bulge = (s.sunriseCm3 - s.nightCm3) * Math.exp(-(dh * dh) / (2 * SUNRISE_RELEASE_SIGMA_H * SUNRISE_RELEASE_SIGMA_H));
+        if (Number.isNaN(since)) return s.dayCm3 + Math.max(0, bulge);
+        const base = s.nightCm3 + (s.dayCm3 - s.nightCm3) * Math.exp(-since / CONDENSATION_TAU_H);
+        return base + Math.max(0, bulge);
+    }
+    const gamma = effectivePoolingExponent(key);
+    return s.dayCm3 * Math.pow(DAY_K / T, gamma);
+}
+
+// ── Ballistic hops — the kinematics the Monte Carlo layer runs on ────────────
+/** Most-probable thermal speed √(2kT/m), m/s. */
+export function thermalSpeedMS(amu, tK) {
+    return Math.sqrt(2 * K_BOLTZ * tK / (amu * AMU_KG));
+}
+/** Apex height of a vertical launch at v_z (km), flat-moon approximation. */
+export function hopHeightKm(vzMS) { return vzMS * vzMS / (2 * SURFACE_G_MS2) / 1e3; }
+/** Flight time of a vertical launch at v_z (s). */
+export function hopTimeS(vzMS) { return 2 * vzMS / SURFACE_G_MS2; }
+/**
+ * Representative hop for a species at temperature T: launched at the
+ * most-probable speed, the apex height is EXACTLY the scale height (kT/mg)
+ * — the identity the test pins — and the flight time is 2v/g.
+ */
+export function hopProfile(amu, tK) {
+    const v = thermalSpeedMS(amu, tK);
+    return {
+        speedMS: v,
+        heightKm: hopHeightKm(v),
+        timeS: hopTimeS(v),
+        rangeKm: v * v / SURFACE_G_MS2 / 1e3,   // 45° launch, flat-moon
+        escapes: v >= ESCAPE_V_MS,
+    };
+}
+
+/**
+ * Residence time of a condensable atom on regolith at temperature T —
+ * Hodges (1975)-class Arrhenius adsorption, τ = τ₀·exp(Q/RT). Q is an
+ * EFFECTIVE binding energy chosen so the LACE night-side depletion and
+ * pre-dawn release both appear (minutes at 150 K, days below 100 K);
+ * disclosed as a modelling choice, not a measured desorption energy.
+ */
+export const ADSORPTION_TAU0_S = 1e-13;
+export const ADSORPTION_Q_J_MOL = 35e3;
+export function residenceTimeS(tK) {
+    return ADSORPTION_TAU0_S * Math.exp(ADSORPTION_Q_J_MOL / (8.314 * Math.max(tK, 1)));
 }
 
 // ── The live sodium weather ──────────────────────────────────────────────────

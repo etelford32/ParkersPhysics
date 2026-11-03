@@ -22,6 +22,11 @@ const BUMP_FIXTURE = readFileSync(new URL('./fixtures/moon-bump-test.png', impor
  *      don't error.
  *   4. The dynamo scrubber surfaces the kernel's mechanism story: the
  *      precession candidate at 4 Ga, crustal remanence today.
+ *   5. (second test) The live ephemeris reaches the HUD and the camera
+ *      ("Earth's view" aligns with the Earth direction), the crater
+ *      kernel's report follows the selected site (Tycho = saturated
+ *      highland, class from the catalogue while textures are aborted),
+ *      the species chips drive both the shell and the Monte-Carlo atoms.
  */
 
 test.use({
@@ -114,25 +119,32 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
     expect(Math.abs(grid.equatorVertex[1])).toBeLessThan(1e-6);
     expect(Math.abs(grid.equatorVertex[2])).toBeLessThan(1e-6);
 
-    // Hover tooltip: project a camera-facing marker via the __moonLab hook
-    // and move the mouse onto it — deterministic, no blind sweeps.
+    // Hover tooltip: project the MOST camera-facing marker via the __moonLab
+    // hook and move the mouse onto it — deterministic, no blind sweeps. (The
+    // most central one, not the first that qualifies: with the nearside
+    // toward the camera, Tycho sits at the disc's bottom edge under the
+    // consent banner, and a pointer there never reaches the canvas.)
     const pt = await page.evaluate(() => {
         const { camera, renderer, landmarks } = window.__moonLab;
         const rect = renderer.domElement.getBoundingClientRect();
         const camN = camera.position.clone().normalize();
+        let best = null;
         for (const h of landmarks.hitTargets) {
             const lm = h.userData.landmark;
             if (!landmarks.isLandmarkVisible(lm)) continue;
             const wp = h.getWorldPosition(new h.position.constructor());
-            if (wp.clone().normalize().dot(camN) < 0.55) continue;   // near hemisphere only
+            const dot = wp.clone().normalize().dot(camN);
+            if (dot < 0.55) continue;   // near hemisphere only
+            if (best && dot <= best.dot) continue;
             const p = wp.project(camera);
-            return {
+            best = {
+                dot,
                 x: rect.left + (p.x * 0.5 + 0.5) * rect.width,
                 y: rect.top + (-p.y * 0.5 + 0.5) * rect.height,
                 name: lm.name,
             };
         }
-        return null;
+        return best;
     });
     expect(pt, 'a camera-facing landmark hit target exists').not.toBeNull();
     await page.mouse.move(pt.x, pt.y);
@@ -182,6 +194,80 @@ test('moon exosphere, landmarks, and dynamo mechanisms boot and respond', async 
         dataReady: false,
         exaggeration: 4,
     });
+});
+
+test('live ephemeris, crater report, species chips and Monte-Carlo atoms respond', async ({ page }) => {
+    const pageErrors = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+    await page.route('**://upload.wikimedia.org/**', (route) => route.abort());
+    await page.goto('/moon.html');
+    await expect(page.locator('#loading')).toHaveClass(/done/, { timeout: 30_000 });
+    await page.waitForTimeout(800);
+
+    // Select Tycho so the impact record has a site (a highland crater)
+    await page.locator('.lm-row', { hasText: 'Tycho' }).first().click();
+    await expect(page.locator('#synth-site')).toContainText('Tycho');
+
+    // ── Impact record: the crater kernel's report follows the selected site ──
+    // Tycho is a highland crater; with textures aborted the terrain class
+    // comes from the catalogue and the report says so.
+    await expect(page.locator('#ip-cr-site')).toHaveText('Tycho');
+    await expect(page.locator('#ip-cr-terrain')).toContainText('highland');
+    await expect(page.locator('#ip-cr-terrain')).toContainText('catalogue class');
+    await expect(page.locator('#ip-cr-n1')).toContainText('saturated');
+    await expect(page.locator('#ip-cr-sun')).toContainText('°');
+    const craterReport = await page.evaluate(() => window.__moonLab.craterReport());
+    expect(craterReport.site).toBe('Tycho');
+    expect(craterReport.ageGa).toBeCloseTo(4.3, 6);
+    expect(craterReport.saturatedAt1km).toBe(true);
+    expect(craterReport.shadowFraction1km).toBeGreaterThanOrEqual(0);
+    expect(craterReport.shadowFraction1km).toBeLessThanOrEqual(1);
+    // The crater field is on, and a software rasteriser gets the coarse bands
+    const detail = await page.evaluate(() => window.__moonLab.craterDetail());
+    expect(detail).toBeGreaterThanOrEqual(1);
+    await page.locator('#lyr-craters').uncheck();
+    expect(await page.evaluate(() => window.__moonLab.craterDetail())).toBe(0);
+    await page.locator('#lyr-craters').check();
+
+    // ── Live ephemeris: the HUD prints today's geometry, not constants ──
+    await expect(page.locator('#h-illum')).toContainText('%');
+    await expect(page.locator('#h-libr')).toContainText('°');
+    await expect(page.locator('#h-dist')).not.toHaveText('384,400 km');
+    const geo = await page.evaluate(() => {
+        const g = window.__moonLab.geometry();
+        return { dist: g.distanceKm, k: g.illumination, libLon: g.subEarth.lonDeg, libLat: g.subEarth.latDeg };
+    });
+    expect(geo.dist).toBeGreaterThan(355_000);
+    expect(geo.dist).toBeLessThan(407_500);
+    expect(Math.abs(geo.libLon)).toBeLessThan(8.3);
+    expect(Math.abs(geo.libLat)).toBeLessThan(7);
+    // "Earth's view" puts the camera on the Earth direction (nearside, today's phase)
+    await page.click('#vt-earthview');
+    const aligned = await page.evaluate(() => {
+        const { camera, earthDir } = window.__moonLab;
+        const e = earthDir();
+        const c = camera.position.clone().normalize();
+        return c.x * e[0] + c.y * e[1] + c.z * e[2];
+    });
+    expect(aligned).toBeGreaterThan(0.999);
+
+    // ── Species chips + the Monte-Carlo atoms ──
+    await expect(page.locator('#ip-hop-stats')).toContainText('in flight');
+    await expect(page.locator('#ip-hop-stats')).toContainText('clock ×300');
+    expect(await page.evaluate(() => window.__moonLab.hopSpecies())).toBe('na');
+    await page.locator('#ip-exo-chips .exo-chip[data-species="ar"]').click();
+    expect(await page.evaluate(() => window.__moonLab.hopSpecies())).toBe('ar');
+    await expect(page.locator('#ip-exo-chips .exo-chip[data-species="ar"]')).toHaveClass(/active/);
+    const hop = await page.evaluate(() => window.__moonLab.hopStats());
+    expect(hop.flying + hop.resting + hop.escaping).toBe(2000);
+    await page.locator('#ip-exo-chips .exo-chip[data-species=""]').click();
+    expect(await page.evaluate(() => window.__moonLab.hopSpecies())).toBe('na');
+    await page.locator('#lyr-hops').uncheck();
+    await expect(page.locator('#ip-hop-stats')).toHaveText('atoms off');
+    await page.locator('#lyr-hops').check();
+
+
+    expect(pageErrors, `page errors: ${pageErrors.join('\n')}`).toHaveLength(0);
 });
 
 test('displaced relief applies from the height raster and re-anchors every layer', async ({ page }) => {

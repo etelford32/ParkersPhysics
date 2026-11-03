@@ -66,6 +66,36 @@ test('moon interior cutaway boots, toggles, and scrubs the dead dynamo', async (
     // Tidal clock panel is live
     await expect(page.locator('#ip-quake-rate')).toContainText('× quiet');
 
+    // The second integral and the mantle's state, from the kernel
+    await expect(page.locator('#ip-moi')).toContainText('0.393');
+    await expect(page.locator('#ip-regime')).toContainText('stagnant-lid');
+    await expect(page.locator('#ip-lid')).toContainText('km');
+    const conv = await page.evaluate(() => window.__moonLab.convection());
+    expect(conv.rayleigh).toBeGreaterThan(conv.rayleighCritical);
+    expect(conv.lidBaseRadiusKm).toBeGreaterThan(1100);
+
+    // Hover probe: a ray through the cut face reports the kernel profile at
+    // that radius and lights the ring; the panel prints it.
+    const probe = await page.evaluate(() => {
+        // Scan the central column for a face hit (the wedge faces the camera)
+        for (let y = 0.6; y >= -0.6; y -= 0.05) {
+            for (let x = -0.3; x <= 0.3; x += 0.05) {
+                const p = window.__moonLab.interiorProbe(x, y);
+                if (p) return { x, y, depthKm: p.depthKm, layer: p.layer?.key, tK: p.tK, pGPa: p.pGPa };
+            }
+        }
+        return null;
+    });
+    expect(probe, 'the cut faces are hittable').not.toBeNull();
+    expect(probe.depthKm).toBeGreaterThanOrEqual(0);
+    expect(probe.depthKm).toBeLessThanOrEqual(1737.4);
+    expect(probe.tK).toBeGreaterThan(200);
+    // Move the real pointer onto that hit and read the panel
+    const rect = await page.locator('#c').boundingBox();
+    await page.mouse.move(rect.x + (probe.x * 0.5 + 0.5) * rect.width, rect.y + (-probe.y * 0.5 + 0.5) * rect.height);
+    await expect(page.locator('#ip-probe')).toContainText('km deep');
+    await expect(page.locator('#ip-probe')).toContainText('GPa');
+
     // → back to Surface
     await page.click('#vt-surface');
     await expect(page.locator('#info-panel')).not.toHaveClass(/interior-mode/);
