@@ -1,0 +1,411 @@
+{
+  "generated_at": "2026-11-03T22:52:22.045Z",
+  "inputs": {
+    "analysis": "trojans-analysis.csv",
+    "astdys_source": "https://newton.spacedys.com/~astdys2/propsynth/tro.syn",
+    "astdys_header": "Name H da(AU) D(deg) f(deg/y) e g(\"/y) sinI s(\"/y) L My",
+    "astdys_rows": 11867
+  },
+  "matched": 8936,
+  "unmatched_librators": 7366,
+  "excluded_astdys_rows": {
+    "f_below_1_5_deg_yr": 61,
+    "D_nonpositive": 0,
+    "g_locked_to_g5": 133
+  },
+  "agreement": {
+    "D": {
+      "n": 8875,
+      "median_diff": 0.0730000000000004,
+      "median_abs": 0.11400000000000077,
+      "p90_abs": 0.532,
+      "p99_abs": 1.9580000000000002,
+      "correlation": 0.9980831864978079
+    },
+    "da": {
+      "n": 8875,
+      "median_diff": 0.0004000000000000045,
+      "median_abs": 0.0005700000000000011,
+      "p90_abs": 0.0023099999999999996,
+      "p99_abs": 0.007889999999999994,
+      "correlation": 0.9983739724722378
+    },
+    "f": {
+      "n": 8875,
+      "median_diff": 0.0010999999999996568,
+      "median_abs": 0.009399999999999853,
+      "p90_abs": 0.025900000000000034,
+      "p99_abs": 0.0671999999999997,
+      "correlation": 0.8575917358533824
+    }
+  },
+  "agreement_by_quality": {
+    "well-determined": {
+      "D": {
+        "n": 8864,
+        "median_diff": 0.07299999999999951,
+        "median_abs": 0.11400000000000077,
+        "p90_abs": 0.5309999999999988,
+        "p99_abs": 1.9580000000000002,
+        "correlation": 0.9980864681437609
+      },
+      "da": {
+        "n": 8864,
+        "median_diff": 0.0004000000000000045,
+        "median_abs": 0.0005700000000000011,
+        "p90_abs": 0.0023099999999999926,
+        "p99_abs": 0.007889999999999994,
+        "correlation": 0.9983781179969508
+      },
+      "f": {
+        "n": 8864,
+        "median_diff": 0.0010999999999996568,
+        "median_abs": 0.009399999999999853,
+        "p90_abs": 0.025900000000000034,
+        "p99_abs": 0.0671999999999997,
+        "correlation": 0.8575126220463362
+      }
+    },
+    "short-arc": {
+      "D": {
+        "n": 11,
+        "median_diff": 0.0990000000000002,
+        "median_abs": 0.1479999999999997,
+        "p90_abs": 1.1189999999999998,
+        "p99_abs": 1.7139999999999986,
+        "correlation": 0.9942836523886589
+      },
+      "da": {
+        "n": 11,
+        "median_diff": 0.0003500000000000031,
+        "median_abs": 0.0004699999999999982,
+        "p90_abs": 0.006409999999999999,
+        "p99_abs": 0.007669999999999996,
+        "correlation": 0.993885375876831
+      },
+      "f": {
+        "n": 11,
+        "median_diff": 0.006699999999999928,
+        "median_abs": 0.01529999999999987,
+        "p90_abs": 0.026699999999999946,
+        "p99_abs": 0.030899999999999928,
+        "correlation": 0.8463967742242685
+      }
+    }
+  },
+  "agreement_by_astdys_span": {
+    "5 Myr": {
+      "D": {
+        "n": 6507,
+        "median_diff": 0.07399999999999807,
+        "median_abs": 0.09100000000000108,
+        "p90_abs": 0.23199999999999932,
+        "p99_abs": 0.4269999999999996,
+        "correlation": 0.9996537028571414
+      },
+      "da": {
+        "n": 6507,
+        "median_diff": 0.0003999999999999976,
+        "median_abs": 0.0004600000000000021,
+        "p90_abs": 0.0011099999999999999,
+        "p99_abs": 0.0019300000000000012,
+        "correlation": 0.9996560477776504
+      },
+      "f": {
+        "n": 6507,
+        "median_diff": 0.001100000000000101,
+        "median_abs": 0.009399999999999853,
+        "p90_abs": 0.025099999999999678,
+        "p99_abs": 0.0687000000000002,
+        "correlation": 0.8063678663712845
+      }
+    },
+    "50 Myr": {
+      "D": {
+        "n": 2368,
+        "median_diff": 0.06700000000000017,
+        "median_abs": 0.3470000000000013,
+        "p90_abs": 1.149000000000001,
+        "p99_abs": 3.006999999999998,
+        "correlation": 0.9949399236145882
+      },
+      "da": {
+        "n": 2368,
+        "median_diff": 0.0004299999999999998,
+        "median_abs": 0.001570000000000002,
+        "p90_abs": 0.004960000000000006,
+        "p99_abs": 0.012510000000000007,
+        "correlation": 0.9957986824214514
+      },
+      "f": {
+        "n": 2368,
+        "median_diff": 0.0007999999999999119,
+        "median_abs": 0.009200000000000319,
+        "p90_abs": 0.028300000000000214,
+        "p99_abs": 0.0658000000000003,
+        "correlation": 0.920511448065839
+      }
+    }
+  },
+  "halfrange_vs_astdys_D": {
+    "n": 8875,
+    "median_diff": 0.28999999999999915,
+    "median_abs": 0.3000000000000007,
+    "p90_abs": 0.8499999999999996,
+    "p99_abs": 2.049999999999997,
+    "correlation": 0.9979022193047408
+  },
+  "g_vs_D_trend": null,
+  "largest_D_disagreements": [
+    {
+      "des": "2020 TS69",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 14.657,
+      "astdys": 7.19,
+      "diff": 7.467,
+      "halfrange": 14.8,
+      "astdys_span_myr": 5
+    },
+    {
+      "des": "65228",
+      "name": "65228 (2002 EH58)",
+      "quality": "well-determined",
+      "ours": 33.04,
+      "astdys": 40.23,
+      "diff": -7.189999999999998,
+      "halfrange": 33.99,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "370087",
+      "name": "370087 (2001 SG221)",
+      "quality": "well-determined",
+      "ours": 12.12,
+      "astdys": 5.87,
+      "diff": 6.249999999999999,
+      "halfrange": 12.49,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "181278",
+      "name": "181278 (2005 YR53)",
+      "quality": "well-determined",
+      "ours": 26.904,
+      "astdys": 32.52,
+      "diff": -5.616000000000003,
+      "halfrange": 27.74,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2019 OQ17",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 20.333,
+      "astdys": 15.32,
+      "diff": 5.012999999999998,
+      "halfrange": 20.55,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2015 HX159",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 21.248,
+      "astdys": 16.28,
+      "diff": 4.968,
+      "halfrange": 22.03,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2020 RA103",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 31.925,
+      "astdys": 36.54,
+      "diff": -4.614999999999998,
+      "halfrange": 32.79,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "225221",
+      "name": "225221 (2008 SN22)",
+      "quality": "well-determined",
+      "ours": 35.539,
+      "astdys": 30.99,
+      "diff": 4.549000000000003,
+      "halfrange": 37.02,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2021 VB28",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 27.922,
+      "astdys": 23.69,
+      "diff": 4.231999999999999,
+      "halfrange": 28.25,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2021 TT166",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 8.911,
+      "astdys": 5.01,
+      "diff": 3.901,
+      "halfrange": 9.33,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "489083",
+      "name": "489083 (2006 AZ93)",
+      "quality": "well-determined",
+      "ours": 10.688,
+      "astdys": 14.54,
+      "diff": -3.8519999999999985,
+      "halfrange": 10.89,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "503262",
+      "name": "503262 (2015 KE127)",
+      "quality": "well-determined",
+      "ours": 23.598,
+      "astdys": 19.83,
+      "diff": 3.7680000000000007,
+      "halfrange": 24.13,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2022 OQ74",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 25.983,
+      "astdys": 29.59,
+      "diff": -3.6069999999999993,
+      "halfrange": 26.56,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "552177",
+      "name": "552177 (2013 TL143)",
+      "quality": "well-determined",
+      "ours": 29.384,
+      "astdys": 25.78,
+      "diff": 3.603999999999999,
+      "halfrange": 30.16,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "601305",
+      "name": "601305 (2013 BQ1)",
+      "quality": "well-determined",
+      "ours": 18.936,
+      "astdys": 22.52,
+      "diff": -3.5839999999999996,
+      "halfrange": 19.48,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "359969",
+      "name": "359969 (2012 CM17)",
+      "quality": "well-determined",
+      "ours": 24.673,
+      "astdys": 28.17,
+      "diff": -3.4970000000000034,
+      "halfrange": 25.16,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "5144",
+      "name": "5144 Achates (1991 XX)",
+      "quality": "well-determined",
+      "ours": 10.971,
+      "astdys": 7.48,
+      "diff": 3.4909999999999997,
+      "halfrange": 11.74,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "309707",
+      "name": "309707 (2008 GC1)",
+      "quality": "well-determined",
+      "ours": 26.252,
+      "astdys": 29.68,
+      "diff": -3.428000000000001,
+      "halfrange": 26.62,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "356897",
+      "name": "356897 (2011 YQ28)",
+      "quality": "well-determined",
+      "ours": 39.378,
+      "astdys": 36.06,
+      "diff": 3.317999999999998,
+      "halfrange": 40.6,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "591986",
+      "name": "591986 (2014 KR39)",
+      "quality": "well-determined",
+      "ours": 9.255,
+      "astdys": 12.57,
+      "diff": -3.3149999999999995,
+      "halfrange": 9.34,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2019 GS81",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 28.599,
+      "astdys": 31.88,
+      "diff": -3.280999999999999,
+      "halfrange": 29.42,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "588631",
+      "name": "588631 (2008 LM16)",
+      "quality": "well-determined",
+      "ours": 24.345,
+      "astdys": 21.16,
+      "diff": 3.1849999999999987,
+      "halfrange": 24.56,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2018 NX34",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 6.759,
+      "astdys": 9.88,
+      "diff": -3.1210000000000004,
+      "halfrange": 7.03,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "67065",
+      "name": "67065 (1999 XW261)",
+      "quality": "well-determined",
+      "ours": 34.17,
+      "astdys": 31.16,
+      "diff": 3.0100000000000016,
+      "halfrange": 34.9,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2020 QK68",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 30.147,
+      "astdys": 27.14,
+      "diff": 3.006999999999998,
+      "halfrange": 31.25,
+      "astdys_span_myr": 50
+    }
+  ]
+}
