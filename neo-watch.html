@@ -33,10 +33,13 @@ body {
 
 /* ── Layout ─────────────────────────────────────────────── */
 #nw-app {
-    display:grid; grid-template-columns: 1fr 400px;
+    display:grid; grid-template-columns: minmax(0, 1fr) 400px; align-content:start;
     gap:14px; padding:14px; min-height:calc(100vh - 50px);
 }
-@media (max-width: 1150px) { #nw-app { grid-template-columns:1fr; } }
+/* minmax(0, 1fr), never a bare 1fr: a 1fr track's minimum is its content's
+   min-content width, so a wide table or chart pushed every panel 16 px past a
+   390 px phone — invisible in scrollWidth because body clips overflow-x. */
+@media (max-width: 1150px) { #nw-app { grid-template-columns:minmax(0, 1fr); } }
 
 .nw-panel {
     background: rgba(10,14,30,.74); backdrop-filter: blur(14px);
@@ -50,10 +53,10 @@ body {
 .nw-panel h2 small { text-transform:none; letter-spacing:0; color:#7f8aa8; font-weight:500; margin-left:6px; }
 
 /* ── Hero ───────────────────────────────────────────────── */
-#nw-hero { grid-column:1 / -1; padding:13px 18px 12px; }
-#nw-hero-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+#nw-hero { grid-column:1 / -1; padding:8px 14px; }
+#nw-hero-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 #nw-hero h1 {
-    font-size:1.45rem; font-weight:800; margin:0;
+    font-size:1.12rem; font-weight:800; margin:0;
     background: linear-gradient(100deg, #dff 25%, #7fa8ff 85%);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
 }
@@ -66,7 +69,12 @@ body {
 }
 
 /* ── Feed chips ─────────────────────────────────────────── */
-#nw-feeds { display:flex; gap:7px; flex-wrap:wrap; margin-top:9px; }
+#nw-feeds { display:flex; gap:7px; flex-wrap:wrap; margin-left:auto; }
+#nw-live-state[data-state="live"] { color:#6ef0b0; border-color:rgba(110,240,176,.5); background:rgba(110,240,176,.08); }
+#nw-live-state[data-state="paused"] { color:#ffd479; border-color:rgba(255,212,121,.5); background:rgba(255,212,121,.08); }
+#nw-live-state[data-state="reverse"], #nw-live-state[data-state="fast-forward"], #nw-live-state[data-state="offset"] {
+    color:#c7b9ff; border-color:rgba(185,168,255,.5); background:rgba(185,168,255,.08);
+}
 .nw-chip {
     display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px;
     font-size:.63rem; font-weight:600; letter-spacing:.02em;
@@ -79,19 +87,32 @@ body {
 
 /* ── Stage ──────────────────────────────────────────────── */
 #nw-stage-wrap { position:relative; }
+/* The canvas is sized to the VIEWPORT so that the stage AND the time bar
+   under it fit the first screen: 100svh minus the nav (50), the one-line
+   header (~46), panel padding and the time bar (~120). */
 #nw-canvas {
-    display:block; width:100%; height:min(62vh, 640px); min-height:340px;
+    display:block; width:100%;
+    height:clamp(320px, calc(100vh - 250px), 880px);
+    height:clamp(320px, calc(100svh - 250px), 880px);
     border-radius:12px; background:#03040c; border:1px solid rgba(110,150,255,.16);
     touch-action:none; cursor:grab;
 }
 #nw-canvas:active { cursor:grabbing; }
+/* Collapsed by default: open it covered most of a laptop's stage. */
 #nw-stage-legend {
-    position:absolute; left:12px; bottom:12px; max-width:min(420px, 62%);
+    position:absolute; left:10px; bottom:10px; max-width:min(440px, calc(100% - 20px));
     font-size:.62rem; color:#8b97b4; line-height:1.5;
-    background: rgba(4,6,16,.72); border:1px solid rgba(110,150,255,.16);
-    border-radius:8px; padding:7px 9px; pointer-events:none;
+    background: rgba(4,6,16,.8); border:1px solid rgba(110,150,255,.2);
+    border-radius:8px; padding:5px 9px; z-index:3;
 }
+#nw-stage-legend summary { cursor:pointer; color:#bfcbe6; font-weight:700; font-size:.66rem; list-style:revert; padding:2px 0; }
+#nw-stage-legend[open] { padding-bottom:8px; }
+#nw-stage-legend .nw-legend-body { max-height:min(46vh, 340px); overflow-y:auto; margin-top:4px; padding-right:4px; }
 #nw-stage-legend b { color:#bfcbe6; }
+#nw-stage-legend kbd {
+    font-family: ui-monospace, monospace; font-size:.95em; color:#dfe6f6;
+    border:1px solid rgba(255,255,255,.25); border-radius:3px; padding:0 3px;
+}
 
 /* The hover tooltip is DOM, not a sprite: it is text that has to be legible
    at any zoom, and a canvas texture rebuilt on every hover change is a
@@ -138,9 +159,11 @@ body {
 
 /* ── Controls ───────────────────────────────────────────── */
 .nw-ctl-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
-.nw-ctl-row label { font-size:.66rem; color:#8b97b4; display:flex; align-items:center; gap:5px; }
+.nw-ctl-row label, .nw-tb-row label { font-size:.68rem; color:#8b97b4; display:flex; align-items:center; gap:5px; }
+select { min-height:32px; }
 .nw-btn {
     padding:7px 11px; border-radius:8px; font-size:.7rem; font-weight:700; cursor:pointer;
+    min-height:34px; touch-action:manipulation;
     background: rgba(255,255,255,.04); color:#bfcbe6; border:1px solid rgba(255,255,255,.18);
 }
 .nw-btn:hover { background: rgba(255,255,255,.09); }
@@ -150,8 +173,45 @@ select, input[type="number"], input[type="range"] {
     border-radius:7px; padding:5px 7px; font-size:.7rem; font-family:inherit;
 }
 input[type="range"] { padding:0; accent-color:#7fa8ff; }
-#nw-scrub { width:100%; margin-top:6px; }
-#nw-clock { font-family: ui-monospace, monospace; font-size:.76rem; color:#dfe6f6; font-weight:700; }
+/* ── Time bar ───────────────────────────────────────────── */
+#nw-timebar {
+    margin-top:10px; padding:9px 10px 8px; border-radius:10px;
+    background: rgba(255,255,255,.03); border:1px solid rgba(110,150,255,.18);
+}
+.nw-tb-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.nw-tb-clock { display:flex; flex-direction:column; min-width:12.5em; }
+#nw-clock { font-family: ui-monospace, monospace; font-size:.82rem; color:#dfe6f6; font-weight:700; }
+.nw-offset { font-family: ui-monospace, monospace; font-size:.66rem; color:#8b97b4; }
+.nw-tb-buttons { display:flex; gap:4px; flex-wrap:wrap; }
+.nw-btn--step { min-width:44px; font-family: ui-monospace, monospace; }
+.nw-btn--play { min-width:88px; }
+.nw-btn--play[aria-pressed="true"] { color:#ffd479; border-color:rgba(255,212,121,.5); }
+.nw-tb-rate { margin-left:auto; }
+.nw-scrub-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.nw-scrub-end { font-family: ui-monospace, monospace; font-size:.62rem; color:#7f8aa8; min-width:3.6em; }
+.nw-scrub-end:last-child { text-align:right; }
+#nw-scrub { flex:1; width:100%; height:28px; cursor:pointer; touch-action:pan-y; }
+.nw-toggle {
+    padding:5px 9px; border-radius:999px; border:1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.03); cursor:pointer; min-height:32px; user-select:none;
+}
+.nw-toggle:has(input:checked) { border-color:rgba(127,168,255,.5); color:#dfe6f6; }
+.nw-toggle input { accent-color:#7fa8ff; }
+@media (max-width: 640px) {
+    /* One row of feed chips that scrolls inside itself, not three rows that
+       push the stage down. */
+    #nw-feeds { margin-left:0; width:100%; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+    #nw-feeds::-webkit-scrollbar { display:none; }
+    #nw-feeds .nw-chip { flex:0 0 auto; }
+    #nw-hero h1 { font-size:1rem; }
+    .nw-tb-rate { margin-left:0; }
+    .nw-tb-clock { min-width:0; width:100%; flex-direction:row; gap:8px; align-items:baseline; }
+    .nw-tb-buttons { width:100%; display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); }
+    .nw-tb-buttons .nw-btn { min-width:0; padding:7px 2px; }
+    .nw-btn-word { display:none; }
+    #nw-app { padding:8px; gap:10px; }
+    .nw-panel { padding:10px; }
+}
 
 /* ── Tables ─────────────────────────────────────────────── */
 .nw-table { width:100%; border-collapse:collapse; font-size:.68rem; }
@@ -281,22 +341,14 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
 <div id="nw-app">
 
   <!-- ── Hero ───────────────────────────────────────── -->
+  <!-- One-line header: the STAGE is the first thing on the page (the
+       star-collider rule). The introduction lives in the About panel below. -->
   <section id="nw-hero" class="nw-panel">
     <div id="nw-hero-row">
       <h1>Near-Earth Watch</h1>
-      <span class="nw-badge">NEW</span>
-      <span id="nw-live-state" class="nw-badge">LIVE</span>
+      <span id="nw-live-state" class="nw-badge" data-state="live" title="LIVE = real time, now. Press N or “Now” to return.">LIVE</span>
+      <div id="nw-feeds"></div>
     </div>
-    <p>
-      Earth in the middle, and everything catalogued around it &mdash; right now.
-      Orbital elements come from <b>JPL's Small-Body Database</b> and are propagated
-      in your browser to this instant; the close-approach table, the impact-risk
-      monitor and the recent bolides are <b>JPL's own</b>. The globe is locked to
-      sidereal time, so the terminator, your horizon and every fireball pin sit
-      where they really are. For the same population on a heliocentric stage, see
-      the <a href="solar-system.html">solar system orrery</a>.
-    </p>
-    <div id="nw-feeds"></div>
   </section>
 
   <!-- ── Stage + clock ──────────────────────────────── -->
@@ -304,7 +356,9 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
     <section class="nw-panel" id="nw-stage-wrap-panel">
       <div id="nw-stage-wrap">
         <canvas id="nw-canvas"></canvas>
-        <div id="nw-stage-legend">
+        <details id="nw-stage-legend">
+          <summary>Scale &amp; legend</summary>
+          <div class="nw-legend-body">
           <b>Distance is drawn on a logarithmic scale; bodies are not.</b>
           Near-Earth space spans four decades of radius and no linear picture holds
           both the ISS and 0.5&nbsp;AU &mdash; but Earth and the Moon are drawn at
@@ -329,11 +383,63 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
           orbit. The page opens at its widest ring on purpose: the near ones are
           usually empty, and an empty ring says so rather than showing you a
           blank sky.
-        </div>
+          <br><b>Keys</b> (with nothing focused): <kbd>Space</kbd> play/pause ·
+          <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step an hour (<kbd>Shift</kbd> a day) ·
+          <kbd>N</kbd> back to now.
+          </div>
+        </details>
         <div id="nw-tip" role="status" aria-live="off"></div>
         <div id="nw-sparse" role="status"></div>
       </div>
 
+      <!-- ── The time bar: directly under the canvas, so the clock and the
+           thing it drives are on screen together. Every control here is a
+           transition of the ONE clock (js/neo-watch/sim-clock.js). -->
+      <div id="nw-timebar" role="group" aria-label="Simulation time">
+        <div class="nw-tb-row">
+          <div class="nw-tb-clock">
+            <span id="nw-clock">—</span>
+            <span id="nw-offset" class="nw-offset" title="Simulated time minus now">now</span>
+          </div>
+          <div class="nw-tb-buttons">
+            <button class="nw-btn" id="nw-live" type="button" title="Back to real time, now (N)"><span aria-hidden="true">&#9679;</span> Now</button>
+            <button class="nw-btn nw-btn--step" id="nw-step-back-day" type="button" title="Back one day (Shift+&larr;)" aria-label="Back one day">&minus;1 d</button>
+            <button class="nw-btn nw-btn--step" id="nw-step-back-hour" type="button" title="Back one hour (&larr;)" aria-label="Back one hour">&minus;1 h</button>
+            <button class="nw-btn nw-btn--play" id="nw-pause" type="button" aria-pressed="false" title="Play / pause (Space)" aria-label="Pause"><span aria-hidden="true">&#10074;&#10074;</span><span class="nw-btn-word"> Pause</span></button>
+            <button class="nw-btn nw-btn--step" id="nw-step-fwd-hour" type="button" title="Forward one hour (&rarr;)" aria-label="Forward one hour">+1 h</button>
+            <button class="nw-btn nw-btn--step" id="nw-step-fwd-day" type="button" title="Forward one day (Shift+&rarr;)" aria-label="Forward one day">+1 d</button>
+          </div>
+          <label class="nw-tb-rate">Rate <select id="nw-warp"></select></label>
+        </div>
+        <div class="nw-scrub-row">
+          <span id="nw-scrub-min" class="nw-scrub-end">&minus;30 d</span>
+          <input type="range" id="nw-scrub" min="-30" max="30" step="any" value="0"
+                 aria-label="Scrub the clock, in days from now">
+          <span id="nw-scrub-max" class="nw-scrub-end">+30 d</span>
+        </div>
+      </div>
+
+      <div class="nw-ctl-row nw-view-row" role="group" aria-label="View">
+        <label>Horizon <select id="nw-horizon"></select></label>
+        <label>Population
+          <select id="nw-tier">
+            <option value="pha" selected>Hazardous only</option>
+            <option value="bright">&ge;140 m class</option>
+            <option value="all">Everything catalogued</option>
+          </select>
+        </label>
+        <button class="nw-btn" id="nw-frame-all" type="button">Frame all</button>
+        <button class="nw-btn" id="nw-frame-earth" type="button">Frame Earth</button>
+        <button class="nw-btn" id="nw-frame-em" type="button">Frame Earth–Moon</button>
+        <button class="nw-btn" id="nw-frame-sel" type="button">Frame selection</button>
+      </div>
+      <div class="nw-ctl-row nw-toggles" role="group" aria-label="Layers">
+        <label class="nw-toggle"><input type="checkbox" id="nw-true-scale"> True scale</label>
+        <label class="nw-toggle"><input type="checkbox" id="nw-grid" checked> Graticule</label>
+        <label class="nw-toggle"><input type="checkbox" id="nw-fireballs-on" checked> Fireball pins</label>
+        <label class="nw-toggle" title="The five Earth–Moon Lagrange points, Sun–Earth L1/L2, and the Moon's Hill sphere"><input type="checkbox" id="nw-em-layer" checked> Lagrange points</label>
+        <label class="nw-toggle" title="Zero-velocity curves of the Earth–Moon restricted three-body problem, in the Moon's orbital plane"><input type="checkbox" id="nw-zvc"> Zero-velocity curves</label>
+      </div>
       <div id="nw-stats">
         <div class="nw-stat-card">
           <span class="k">In view</span><span class="v" id="nw-count-view">—</span>
@@ -351,36 +457,6 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
           <span class="k">Sidereal time</span><span class="v" id="nw-gmst">—</span>
           <span class="s">Greenwich mean</span>
         </div>
-      </div>
-
-      <div class="nw-ctl-row">
-        <span id="nw-clock">—</span>
-        <button class="nw-btn" id="nw-live" type="button">Now</button>
-        <button class="nw-btn" id="nw-pause" type="button">Pause</button>
-        <label>Rate <select id="nw-warp"></select></label>
-        <label>Horizon <select id="nw-horizon"></select></label>
-        <label>Population
-          <select id="nw-tier">
-            <option value="pha" selected>Hazardous only</option>
-            <option value="bright">&ge;140 m class</option>
-            <option value="all">Everything catalogued</option>
-          </select>
-        </label>
-        <span class="nw-note" style="margin:0">offset <b id="nw-offset">now</b></span>
-      </div>
-      <input type="range" id="nw-scrub" min="-90" max="90" step="0.01" value="0"
-             aria-label="Scrub the clock, in days from now">
-
-      <div class="nw-ctl-row">
-        <label><input type="checkbox" id="nw-true-scale"> True scale</label>
-        <label><input type="checkbox" id="nw-grid" checked> Graticule</label>
-        <label><input type="checkbox" id="nw-fireballs-on" checked> Fireball pins</label>
-        <label title="The five Earth–Moon Lagrange points, Sun–Earth L1/L2, and the Moon's Hill sphere"><input type="checkbox" id="nw-em-layer" checked> Lagrange points</label>
-        <label title="Zero-velocity curves of the Earth–Moon restricted three-body problem, in the Moon's orbital plane"><input type="checkbox" id="nw-zvc"> Zero-velocity curves</label>
-        <button class="nw-btn" id="nw-frame-all" type="button">Frame all</button>
-        <button class="nw-btn" id="nw-frame-earth" type="button">Frame Earth</button>
-        <button class="nw-btn" id="nw-frame-em" type="button">Frame Earth–Moon</button>
-        <button class="nw-btn" id="nw-frame-sel" type="button">Frame selection</button>
       </div>
     </section>
 
@@ -400,7 +476,17 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
     </section>
 
     <section class="nw-panel" style="margin-top:14px">
-      <h2>Method <small>what is measured, modelled and assumed</small></h2>
+      <h2>About this page</h2>
+      <p class="nw-method">
+      Earth in the middle, and everything catalogued around it &mdash; right now.
+      Orbital elements come from <b>JPL's Small-Body Database</b> and are propagated
+      in your browser to this instant; the close-approach table, the impact-risk
+      monitor and the recent bolides are <b>JPL's own</b>. The globe is locked to
+      sidereal time, so the terminator, your horizon and every fireball pin sit
+      where they really are. For the same population on a heliocentric stage, see
+      the <a href="solar-system.html">solar system orrery</a>.
+      </p>
+      <h2 style="margin-top:12px">Method <small>what is measured, modelled and assumed</small></h2>
       <p class="nw-method">
         <b>Frames.</b> Elements are ecliptic J2000; Earth and the Moon come from
         VSOP87D and Meeus ch.&nbsp;47, which are of date, and are rotated back to

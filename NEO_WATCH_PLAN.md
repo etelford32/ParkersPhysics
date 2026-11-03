@@ -7,7 +7,7 @@
 >
 > `js/earth-moon-gravity.js` (the Earth–Moon gravity kernel, §2c)
 >
-> Gates: `node tests/neo-space.mjs tests/neo-orbits.mjs tests/neo-sources.mjs tests/earth-moon-gravity.mjs`
+> Gates: `node tests/neo-space.mjs tests/neo-orbits.mjs tests/neo-sources.mjs tests/earth-moon-gravity.mjs tests/neo-watch-clock.mjs`
 > + `npx playwright test tests/neo-watch-smoke.spec.js`
 
 ## 1. What this page is, and why it is not the orrery
@@ -275,6 +275,37 @@ selected-object card all read:
    orange — reference categorical slots 1–3, dark steps, validated all-pairs
    on the card surface) in both the chart and the share bar. One y-axis, log;
    direct labels at three different x so they cannot collide; hover crosshair.
+
+## 2d. The clock and the first screen (2026-11)
+
+1. **ONE clock, `js/neo-watch/sim-clock.js` (PURE, `tests/neo-watch-clock.mjs`).**
+   The controller's four loose fields (warp, warp anchor, offset, paused JD)
+   had three wrong combinations, each now asserted: a scrub while paused did
+   NOTHING (the paused branch ignored the offset); resuming at ×1 JUMPED AHEAD
+   by the paused duration (×1 read the wall clock and ignored the anchor the
+   resume wrote); and the slider never moved under warp (it wrote an offset
+   but never read one back). The clock is now one affine map
+   jd = anchorJd + rate·(t − anchorMs) with `paused` and `live` flags; every
+   control is a transition that keeps the stage where it is unless moving it
+   is the point. Live reads the wall clock EXACTLY (offset === 0) and only
+   "Now" returns to it. Rates include REVERSE.
+2. **The slider follows the clock** unless a hand is on it (pointer or
+   keyboard), and its half-span widens from a ladder (2 d … 20 yr) to hold the
+   offset — an approach row can be years away — and narrows back on Now.
+   `step="any"` ON PURPOSE: a numeric step snaps to a grid anchored at `min`,
+   and ±30 d is not a whole number of 15-minute steps in floating point, so
+   "now" read back as 9.6e-8 d. The slider's arrow keys step the CLOCK (an
+   hour; Shift/PageUp a day; Home = now). Page keys, with nothing focused:
+   Space play/pause, ←/→ an hour (Shift a day), N now.
+3. **The stage is the first thing on the page.** The header is one row (title,
+   state chip, feed chips); the introduction moved to "About this page". The
+   canvas is sized to the viewport (`100svh − 250px`, 320–880 px) so the
+   canvas AND the whole time bar fit a 1366×768 first screen; the legend is a
+   folded `<details>` (open, it covered most of a laptop's stage). The browser
+   gate pins canvas top, time-bar bottom and horizontal overflow at four
+   viewports — measured on the PANELS, because `body` clips overflow-x and
+   `scrollWidth` could not see a 1fr grid track pushing every panel 16 px past
+   a 390 px phone (fixed with `minmax(0, 1fr)`).
 
 ## 3. Shared code, and what was added to it
 

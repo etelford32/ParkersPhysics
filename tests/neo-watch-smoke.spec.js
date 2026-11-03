@@ -537,6 +537,10 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         await openPage(page);
         await waitForPopulation(page);
         await page.waitForFunction(() => !!window.__neoWatch.screen, null, { timeout: 20_000 });
+        // The card re-renders on the 3 Hz panel tick, not when the screen lands:
+        // wait for the render, or a loaded machine reads the previous one.
+        await page.waitForFunction(() => /orbits that pass within the Hill sphere/.test(
+            document.getElementById('nw-gravity')?.textContent || ''), null, { timeout: 10_000 });
 
         const g = await page.evaluate(() => {
             const w = window.__neoWatch;
@@ -1016,6 +1020,163 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         await page.waitForTimeout(300);
         expect(await page.evaluate(() => window.__neoWatch.isLive)).toBe(true);
         expect(await page.evaluate(() => window.__neoWatch.offsetDays)).toBe(0);
+    });
+
+    test('the stage opens at the top, and the time bar fits the first screen', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        // The site-wide consent banner overlays the bottom of every first visit;
+        // it is not this page's chrome, so measure (and photograph) without it.
+        await page.addInitScript(() => {
+            try {
+                localStorage.setItem('pp_consent_v1', JSON.stringify(
+                    { strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
+            } catch {}
+        });
+        const shots = process.env.NW_SHOTS;
+        for (const vp of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
+            await page.setViewportSize(vp);
+            await openPage(page);
+            await waitForPopulation(page);
+            const g = await page.evaluate(() => {
+                const r = (id) => document.getElementById(id).getBoundingClientRect();
+                const c = r('nw-canvas'), t = r('nw-timebar'), s = r('nw-scrub');
+                return {
+                    canvasTop: c.top, canvasH: c.height, canvasBottom: c.bottom,
+                    timebarBottom: t.bottom, scrubBottom: s.bottom,
+                    innerH: innerHeight, innerW: innerWidth,
+                    // body clips overflow-x, so scrollWidth cannot see a panel
+                    // poking past the edge — measure the panels themselves.
+                    scrollW: Math.max(document.documentElement.scrollWidth,
+                        ...[...document.querySelectorAll('#nw-app > *, .nw-panel, #nw-timebar')]
+                            .map(e => Math.ceil(e.getBoundingClientRect().right))),
+                    legendOpen: document.getElementById('nw-stage-legend').open,
+                    // The canvas's drawing buffer follows its CSS box.
+                    bufW: window.__neoWatch.stage.canvas.width, cssW: c.width,
+                };
+            });
+            const phone = vp.width < 600;
+            // The stage is the first thing on the page: only the nav and one header row above it.
+            expect(g.canvasTop, `${vp.width}: canvas top`).toBeLessThan(phone ? 0.3 * g.innerH : 140);
+            expect(g.canvasH, `${vp.width}: canvas height`).toBeGreaterThanOrEqual(320);
+            // On a desktop the WHOLE time bar — clock, buttons and slider — is on the first screen.
+            if (!phone) expect(g.timebarBottom, `${vp.width}: time bar on screen`).toBeLessThanOrEqual(g.innerH);
+            // Nothing scrolls sideways.
+            expect(g.scrollW, `${vp.width}: no horizontal overflow`).toBeLessThanOrEqual(g.innerW);
+            // The legend starts folded so it does not cover the stage.
+            expect(g.legendOpen).toBe(false);
+            expect(g.bufW).toBeGreaterThan(0.9 * g.cssW);
+            if (shots) {
+                fs.mkdirSync(shots, { recursive: true });
+                await page.screenshot({ path: path.join(shots, `first-screen-${vp.width}x${vp.height}.png`) });
+            }
+        }
+        expect(errors).toEqual([]);
+    });
+
+    test('every time control drives the ONE clock, and the slider follows it', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+        const read = () => page.evaluate(() => {
+            const w = window.__neoWatch;
+            const wallJd = Date.now() / 86400e3 + 2440587.5;
+            const sc = document.getElementById('nw-scrub');
+            return {
+                live: w.isLive, paused: w.paused, off: w.offsetDays,
+                stageJd: w.stage.jd, simJd: w._jdNow(), wallJd,
+                slider: Number(sc.value), min: Number(sc.min), max: Number(sc.max),
+                chip: document.getElementById('nw-live-state').textContent,
+            };
+        });
+        const settle = () => page.waitForTimeout(450);    // > one 3 Hz UI tick
+
+        let s = await read();
+        expect(s.live).toBe(true);
+        expect(s.slider).toBe(0);
+        expect(s.chip).toBe('LIVE');
+
+        // The slider moves the stage.
+        await page.locator('#nw-scrub').fill('5');
+        await settle();
+        s = await read();
+        expect(s.off).toBeCloseTo(5, 1);
+        expect(s.stageJd - s.wallJd).toBeCloseTo(5, 1);
+        expect(s.chip).toBe('OFFSET');
+
+        // Pause holds the stage still.
+        await page.click('#nw-pause');
+        const held = (await read()).simJd;
+        await page.waitForTimeout(1200);
+        s = await read();
+        expect(s.paused).toBe(true);
+        expect(s.simJd).toBe(held);
+        expect(s.chip).toBe('PAUSED');
+
+        // BUG 1: a scrub while paused moves the stage (and it stays paused).
+        await page.locator('#nw-scrub').fill('-3');
+        await settle();
+        s = await read();
+        expect(s.paused).toBe(true);
+        expect(s.simJd - s.wallJd).toBeCloseTo(-3, 1);
+
+        // BUG 2: resuming continues from the paused instant — no jump.
+        const before = (await read()).simJd;
+        await page.click('#nw-pause');
+        await page.waitForTimeout(800);
+        s = await read();
+        expect(s.paused).toBe(false);
+        expect(Math.abs(s.simJd - before) * 86400).toBeLessThan(5);       // seconds
+
+        // BUG 3: under warp the slider FOLLOWS the clock.
+        await page.selectOption('#nw-warp', '86400');                     // 1 day per second
+        await page.waitForTimeout(1600);
+        s = await read();
+        expect(s.off).toBeGreaterThan(-3 + 1);
+        expect(Math.abs(s.slider - Math.max(s.min, Math.min(s.max, s.off)))).toBeLessThan(0.6);
+        expect(s.chip).toBe('FAST-FORWARD');
+
+        // Reverse runs backwards.
+        await page.selectOption('#nw-warp', '-86400');
+        const r0 = (await read()).simJd;
+        await page.waitForTimeout(1000);
+        s = await read();
+        expect(s.simJd).toBeLessThan(r0 - 0.5);
+        expect(s.chip).toBe('REVERSE');
+
+        // Step buttons are exact when paused.
+        await page.click('#nw-pause');
+        const p0 = (await read()).simJd;
+        await page.click('#nw-step-fwd-day');
+        await page.click('#nw-step-back-hour');
+        s = await read();
+        expect(s.simJd - p0).toBeCloseTo(1 - 1 / 24, 6);
+
+        // Keyboard, with nothing focused: Shift+← steps a day, N goes live.
+        await page.evaluate(() => document.activeElement?.blur?.());
+        const k0 = (await read()).simJd;
+        await page.keyboard.press('Shift+ArrowLeft');
+        s = await read();
+        expect(s.simJd - k0).toBeCloseTo(-1, 6);
+        await page.keyboard.press('n');
+        await settle();
+        s = await read();
+        expect(s.live).toBe(true);
+        expect(s.off).toBe(0);
+        expect(s.slider).toBe(0);
+        expect(s.max).toBe(30);                                          // span reset on Now
+        expect(await page.inputValue('#nw-warp')).toBe('1');
+
+        // An approach years away widens the slider so the thumb is not pinned.
+        await page.waitForSelector('#nw-approaches tbody tr');
+        await page.locator('#nw-approaches tbody tr[data-des="99942"]').click();
+        await settle();
+        s = await read();
+        expect(Math.abs(s.off)).toBeGreaterThan(365);
+        expect(s.max).toBeGreaterThanOrEqual(Math.abs(s.off));
+        expect(s.slider).toBeCloseTo(s.off, 0);
+        expect(errors).toEqual([]);
     });
 
     test('an observer position produces an altitude column and a drawn horizon', async ({ page }) => {
