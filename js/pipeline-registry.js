@@ -529,6 +529,13 @@ export const PIPELINES = [
       cadence_s: 3_600, prewarm: 'medium', probeTimeoutMs: 20_000,
       warnAgeS: 3 * 3600, critAgeS: 12 * 3600,
       notes: 'Close approaches 7 d back → 60 d ahead inside 0.05 AU, the Sentry risk list (top 40 by Palermo scale), last 20 fireballs. Only the CAD table decides freshness; `sources.*` says which of the three failed.' },
+
+    { id: 'trojans-catalog',    label: 'Jupiter Trojans (SBDB TJN + Horizons)',
+      endpoint: '/api/trojans/catalog',
+      category: 'small-bodies', upstream: 'JPL SBDB query API · JPL Horizons',
+      cadence_s: 86_400, prewarm: 'cold', probeTimeoutMs: 30_000,
+      warnAgeS: 36 * 3600, critAgeS: 5 * 86_400,
+      notes: 'Every SBDB orbit-class TJN object (~15–20k rows, full-precision elements) plus Jupiter and Saturn state vectors from Horizons at the catalogue epoch — the inputs js/trojan-dynamics.js needs for resonant angles and libration. Amber = population failed OR Jupiter vector missing (`degraded_reason` says which). `precision` reads `default` if JPL refused full-prec; `sources.sbdb.field_map` is the schema self-report. Sequential SBDB → Horizons, hence the long probe timeout.' },
 ];
 
 /**
