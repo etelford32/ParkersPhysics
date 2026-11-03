@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-03T19:40:49.558Z",
+  "generated_at": "2026-11-03T19:44:58.573Z",
   "source": {
     "file": "trojans-catalog.json",
     "catalogue_generated_at": "2026-11-03T17:25:30.784Z",
@@ -12,15 +12,15 @@
   },
   "run": {
     "years": 600,
-    "dtDays": 20,
+    "dtDays": 40,
     "workers": 4,
-    "seconds": 42,
+    "seconds": 21,
     "skipped": 0
   },
   "regimes": {
-    "L4": 10349,
+    "L4": 10347,
     "L5": 5955,
-    "encounter": 107,
+    "encounter": 109,
     "horseshoe": 33,
     "circulating": 1
   },
@@ -33,8 +33,8 @@
     "well-determined:L4": 8805,
     "well-determined:L5": 5507,
     "well-determined:encounter": 19,
-    "short-arc:encounter": 88,
-    "short-arc:L4": 1544,
+    "short-arc:encounter": 90,
+    "short-arc:L4": 1542,
     "short-arc:L5": 448,
     "short-arc:horseshoe": 32,
     "short-arc:circulating": 1,
@@ -44,14 +44,13 @@
     "epoch:L4": 9043,
     "epoch:L5": 5729,
     "epoch:encounter": 27,
-    "two-body-after-encounter:encounter": 6,
-    "n-body:L4": 1306,
+    "two-body-after-encounter:encounter": 7,
+    "n-body:L4": 1304,
     "n-body:L5": 226,
-    "n-body:encounter": 74,
-    "n-body:horseshoe": 30,
+    "n-body:encounter": 75,
+    "n-body:horseshoe": 31,
     "n-body:circulating": 1,
-    "epoch:horseshoe": 2,
-    "two-body-after-encounter:horseshoe": 1
+    "epoch:horseshoe": 2
   },
   "camps_at_epoch": {
     "nL4": 10457,
@@ -61,11 +60,11 @@
     "hi": 1.7748569744125737
   },
   "camps_librating": {
-    "nL4": 10349,
+    "nL4": 10347,
     "nL5": 5955,
-    "ratio": 1.7378673383711167,
-    "lo": 1.7098296797732204,
-    "hi": 1.7663647563877147
+    "ratio": 1.7375314861460958,
+    "lo": 1.709498264507012,
+    "hi": 1.766024410805523
   },
   "camps_librating_by_quality": {
     "well-determined": {
@@ -76,22 +75,22 @@
       "hi": 1.6265800953537062
     },
     "short-arc": {
-      "nL4": 1544,
+      "nL4": 1542,
       "nL5": 448,
-      "ratio": 3.4464285714285716,
-      "lo": 3.266375833427849,
-      "hi": 3.6364063732048044
+      "ratio": 3.4419642857142856,
+      "lo": 3.2621192555198855,
+      "hi": 3.6317244147607304
     }
   },
   "librating": {
-    "median_amplitude_deg": 14.848549181771773,
+    "median_amplitude_deg": 14.847919581790507,
     "median_period_yr": 151.7864476386037,
-    "median_i_mean_deg": 11.979668101039413,
-    "median_e_mean": 0.06822676311174075,
+    "median_i_mean_deg": 11.982557155763212,
+    "median_e_mean": 0.06822601695006447,
     "analytic_vs_integrated_amp": {
-      "n": 16300,
-      "median_diff_deg": 0.21496084946615923,
-      "median_abs_diff_deg": 0.9432581118313124
+      "n": 16298,
+      "median_diff_deg": 0.2147838261727415,
+      "median_abs_diff_deg": 0.9433464959272371
     }
   },
   "sizes": {

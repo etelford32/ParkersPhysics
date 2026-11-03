@@ -212,6 +212,16 @@ if (existsSync(FIX)) {
         assert.equal(near0.method, 'two-body', 'within ALIGN_TWO_BODY_MAX_DAYS stays two-body');
         console.log(`  alignment: N-body ${err.toExponential(1)} AU vs two-body ${errTb.toFixed(3)} AU after 12.3 yr`);
     }
+    // STEP CONVERGENCE on real Trojans: the default step must agree with a
+    // 4× finer one. This is what licenses SWARM_RUN.dtDays (see its header).
+    {
+        const fine = T.integrateSwarm(parts, pert, { years: 320, dtDays: T.SWARM_RUN.dtDays / 4 }).results;
+        const coarse = T.integrateSwarm(parts, pert, { years: 320 }).results;
+        coarse.forEach((r, k) => {
+            assert.equal(r.regime, fine[k].regime, `${sample[k].name}: regime step-independent`);
+            near(r.amplitude, fine[k].amplitude, 0.05, `${sample[k].name}: amplitude converged at ${T.SWARM_RUN.dtDays} d`);
+        });
+    }
     console.log(`  real fixture: ${recs.length} rows @ JD ${epoch}; Standish−Horizons Δλ_J = ${T.wrap180(std.lambda - pert.jupiter.el.lambda).toFixed(3)}°`);
 } else {
     console.log('  (no real-data fixture yet — tests/fixtures/trojans/trojans-sample.json)');

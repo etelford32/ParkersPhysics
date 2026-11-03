@@ -459,8 +459,20 @@ export function planetTrack({ jupiter, saturn }, steps, dtDays, { useSaturn = tr
     return { pos, vel, h, N, m: [m[0], useSaturn ? m[1] : 0], useSaturn };
 }
 
-/** Defaults: 4 small-amplitude libration periods at a 20-day step. */
-export const SWARM_RUN = Object.freeze({ years: 600, dtDays: 20, sampleDays: 365.25, encounterHill: 3 });
+/**
+ * Defaults: 4 small-amplitude libration periods at a 40-day step.
+ * THE STEP IS MEASURED, NOT GUESSED (2026-11-03, 800 well-determined
+ * Trojans, 600 yr, against a 5-day reference): |Δ amplitude| median 0.001°,
+ * max 0.011° at 40 d — the same as at 10 d and 20 d — and zero regime flips.
+ * On the WHOLE population 20 d → 40 d changed 5 regimes, all U9 orbits from
+ * 1–7-day arcs (chaotic: any perturbation flips them, and the quality flag
+ * already says their verdict means little), and halved the run (42 → 21 s).
+ * The libration PERIOD carries a ~0.1–0.4 yr floor from the annual sampling
+ * cadence, not from the step.
+ */
+export const SWARM_RUN = Object.freeze({ years: 600, dtDays: 40, sampleDays: 365.25, encounterHill: 3 });
+/** Epoch alignment keeps the finer step: it is ~0.5 s total and its gate is pinned at 20 d. */
+export const ALIGN_DT_DAYS = 20;
 export const HILL_RADIUS_AU = STANDISH.jupiter.a[0] * Math.cbrt(M_JUPITER / 3);
 
 /**
@@ -650,7 +662,7 @@ export function elementsAtOwnEpoch(rec) {
  * The planets' state at `jd`, integrated (Sun + Jupiter + Saturn) from the
  * join-epoch vectors — the same dynamics the swarm run uses, run backwards.
  */
-export function planetsAt(perturbers, joinEpoch, jd, dtDays = SWARM_RUN.dtDays) {
+export function planetsAt(perturbers, joinEpoch, jd, dtDays = ALIGN_DT_DAYS) {
     const span = jd - joinEpoch;
     if (Math.abs(span) < 1e-9) return perturbers;
     const n = Math.max(1, Math.ceil(Math.abs(span) / dtDays));
@@ -671,7 +683,7 @@ export function planetsAt(perturbers, joinEpoch, jd, dtDays = SWARM_RUN.dtDays) 
  * (a row that met Jupiter on the way in keeps its two-body state, flagged).
  * @returns {Array<{ state:{r,v}|null, method:string, offsetDays:number|null }>}
  */
-export function alignToEpoch(recs, perturbers, joinEpoch, { dtDays = SWARM_RUN.dtDays } = {}) {
+export function alignToEpoch(recs, perturbers, joinEpoch, { dtDays = ALIGN_DT_DAYS } = {}) {
     const out = new Array(recs.length);
     const groups = new Map();
     recs.forEach((rec, k) => {

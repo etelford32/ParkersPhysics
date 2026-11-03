@@ -69,7 +69,7 @@ async function main() {
     const recs = T.recordsFromCatalog(body).slice(0, limit);
 
     const ta = Date.now();
-    const aligned = T.alignToEpoch(recs, pert, epoch, { dtDays });
+    const aligned = T.alignToEpoch(recs, pert, epoch);   // its own finer step (ALIGN_DT_DAYS)
     process.stderr.write(`  aligned ${recs.length} rows to JD ${epoch} in ${((Date.now() - ta) / 1000).toFixed(1)} s\n`);
     const analysed = [];
     const skipped = [];
