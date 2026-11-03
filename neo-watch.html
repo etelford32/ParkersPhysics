@@ -211,6 +211,40 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
     padding:6px 8px; border-radius:0 6px 6px 0; margin-top:7px !important;
 }
 
+/* ── Selected object: Earth–Moon location block ─────────── */
+.nw-loc { margin-top:10px; padding-top:9px; border-top:1px solid rgba(255,255,255,.08); }
+.nw-loc h4, .nw-sub { font-size:.6rem; text-transform:uppercase; letter-spacing:.1em; color:#8fb0ff; margin:10px 0 4px; }
+.nw-loc h4 { margin-top:0; }
+.nw-sub small { text-transform:none; letter-spacing:0; color:#7f8aa8; font-weight:400; }
+.nw-loc-bar { display:flex; gap:2px; height:8px; border-radius:4px; overflow:hidden; margin-top:6px; }
+.nw-loc-seg { display:block; min-width:2px; }
+.nw-loc-terms { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:.66rem; color:#a9b6d0; margin-top:6px; }
+.nw-loc-terms i, .nw-pc-legend i, .nw-pc-tip i {
+    display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; vertical-align:0;
+}
+.nw-loc-terms b { color:#dfe6f6; font-family: ui-monospace, monospace; font-weight:600; }
+.nw-loc-term--dom { color:#dfe6f6; }
+.nw-loc-gate { font-size:.68rem; color:#d7c9ff; line-height:1.55; margin-top:7px; }
+
+/* ── Earth–Moon card + profile chart ────────────────────── */
+.nw-pc-legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.64rem; color:#a9b6d0; margin:4px 0 2px; }
+.nw-pc-wrap { position:relative; }
+.nw-pc { width:100%; height:auto; display:block; max-width:640px; touch-action:pan-y; }
+.nw-pc-grid { stroke: rgba(255,255,255,.07); stroke-width:1; }
+.nw-pc-tick { fill:#7f8aa8; font-size:8px; font-family: ui-monospace, monospace; }
+.nw-pc-mark { stroke: rgba(201,186,255,.35); stroke-width:1; stroke-dasharray:2 3; }
+.nw-pc-marklab { fill:#a9b6d0; font-size:8px; font-family: ui-monospace, monospace; }
+.nw-pc-lab { fill:#cfd6ea; font-size:8.5px; font-weight:600; }
+.nw-pc-cross { stroke: rgba(255,255,255,.45); stroke-width:1; }
+.nw-pc-tip {
+    position:absolute; top:4px; transform:translateX(-50%); pointer-events:none;
+    background: rgba(4,6,16,.92); border:1px solid rgba(110,150,255,.3); border-radius:7px;
+    padding:5px 8px; font-size:.62rem; color:#cfd6ea; display:flex; flex-direction:column; gap:2px;
+    white-space:nowrap; z-index:2;
+}
+.nw-pc-tip[hidden] { display:none; }
+.nw-pc-tip b { color:#dfe6f6; }
+
 /* ── Moon card ──────────────────────────────────────────── */
 .nw-moon-head { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
 .nw-moon-disc { flex:0 0 auto; }
@@ -281,7 +315,16 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
           scattering model drawn to 160&nbsp;km. The two <b>amber</b> rings are
           Earth's gravitational boundaries &mdash; the sphere of influence at
           2.4&nbsp;LD and the Hill sphere at 3.9&nbsp;LD, both smaller than most
-          people expect and both inside the lunar-distance ladder.
+          people expect and both inside the lunar-distance ladder. <b>Violet</b>
+          marks are the Earth&ndash;Moon Lagrange points riding the live Moon, with
+          the Moon's own Hill sphere around it; yellow are Sun&ndash;Earth L1/L2 on
+          the Sun line. <b>Zero-velocity curves</b> draws the restricted
+          three-body barrier in the Moon's orbital plane, through the same
+          logarithmic map: the deeper the violet, the more energy it takes to
+          get there, with the gate contours C<sub>L1</sub> (amber),
+          C<sub>L2</sub> (lilac) and C<sub>L3</sub> (pale blue) drawn on top
+          &mdash; and it tints the selected object's forbidden region red when its
+          energy means anything there.
           <br><b>Hover</b> an object to name it, <b>click</b> to select it, drag to
           orbit. The page opens at its widest ring on purpose: the near ones are
           usually empty, and an empty ring says so rather than showing you a
@@ -332,10 +375,18 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
         <label><input type="checkbox" id="nw-true-scale"> True scale</label>
         <label><input type="checkbox" id="nw-grid" checked> Graticule</label>
         <label><input type="checkbox" id="nw-fireballs-on" checked> Fireball pins</label>
+        <label title="The five Earth–Moon Lagrange points, Sun–Earth L1/L2, and the Moon's Hill sphere"><input type="checkbox" id="nw-em-layer" checked> Lagrange points</label>
+        <label title="Zero-velocity curves of the Earth–Moon restricted three-body problem, in the Moon's orbital plane"><input type="checkbox" id="nw-zvc"> Zero-velocity curves</label>
         <button class="nw-btn" id="nw-frame-all" type="button">Frame all</button>
         <button class="nw-btn" id="nw-frame-earth" type="button">Frame Earth</button>
+        <button class="nw-btn" id="nw-frame-em" type="button">Frame Earth–Moon</button>
         <button class="nw-btn" id="nw-frame-sel" type="button">Frame selection</button>
       </div>
+    </section>
+
+    <section class="nw-panel" style="margin-top:14px">
+      <h2>The Earth&ndash;Moon system <small>whose gravity wins where &mdash; and the doors between them</small></h2>
+      <div id="nw-earthmoon"></div>
     </section>
 
     <section class="nw-panel" style="margin-top:14px">
@@ -373,7 +424,14 @@ input[type="range"] { padding:0; accent-color:#7fa8ff; }
         the sub-solar point are one calculation. Earth's atmosphere is a marched
         Rayleigh model &mdash; the sunset ring is the shadow test, not a painted
         gradient. The Moon uses the Lommel&ndash;Seeliger law rather than Lambert,
-        which is why a full moon reads flat across the disc, as the real one does.
+        which is why a full moon reads flat across the disc, as the real one does.<br>
+        <b>Earth&ndash;Moon gravity.</b> The acceleration budget compares Earth's pull
+        with the Moon's and the Sun's <em>perturbations</em> &mdash; their pull on the
+        object minus their pull on Earth, because Earth falls toward both too. The
+        Lagrange points, Jacobi constants and zero-velocity curves are the circular
+        restricted three-body problem (GM values from JPL DE440, &mu;&nbsp;=&nbsp;0.01215),
+        scaled to the live Earth&ndash;Moon separation and rate; it ignores the Sun,
+        so no gate is read for an object outside Earth's Hill sphere.
       </p>
     </section>
   </main>

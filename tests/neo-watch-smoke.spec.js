@@ -9,6 +9,12 @@ import {
     hillRadiusKm, soiRadiusKm, escapeSpeedKms, encounterAnalysis,
 } from '../js/neo-space.js';
 import { R2D } from '../js/neo-orbits.js';
+import {
+    lagrangeGeometry, lagrangePoints, moonHillRadiusKm, EM_MU,
+} from '../js/earth-moon-gravity.js';
+import { geoToScene, AU_KM } from '../js/neo-space.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 /**
  * Browser gate for neo-watch.html — the Earth-centred near-Earth watch.
@@ -37,6 +43,11 @@ import { R2D } from '../js/neo-orbits.js';
  *   - a JPL approach row moves the clock (LIVE turns off, the offset is the
  *     encounter) and comes back with "Now"
  *   - an observer position produces an altitude column and a drawn horizon
+ *   - the Earth–Moon layer draws js/earth-moon-gravity.js's OWN Lagrange
+ *     geometry at the stage's instant, the zero-velocity disc carries the
+ *     kernel's gate constants, the card + profile chart print them, and a
+ *     selected object inside Earth's Hill sphere gets a Jacobi constant that
+ *     tints the disc (NW_SHOTS=<dir> also writes screenshots for a look)
  *   - Y-UP: camera.up is never moved, so OrbitControls is never rebuilt
  *   - feeds down ⇒ the page SAYS the feed is down, draws nothing, and raises
  *     no page error
@@ -593,6 +604,167 @@ test.describe('neo-watch.html — Near-Earth Watch', () => {
         // The speed column is on the board.
         expect(await page.locator('#nw-nearest thead th').allTextContents()).toContain('Speed');
 
+        expect(errors).toEqual([]);
+    });
+
+    test('the Earth–Moon gravity layer draws the kernel’s own geometry, and the card reads it', async ({ page }) => {
+        const errors = collectPageErrors(page);
+        await mockJpl(page);
+        await openPage(page);
+        await waitForPopulation(page);
+        await page.waitForFunction(() => !!window.__neoWatch.stage.emGeometry
+            && !!document.querySelector('#nw-earthmoon svg.nw-pc'), null, { timeout: 20_000 });
+
+        // ── The stage draws the kernel's Lagrange points at the stage's instant.
+        const drawn = await page.evaluate(() => {
+            const s = window.__neoWatch.stage;
+            return {
+                jd: s.jd,
+                marks: s.lagrangeMarks.map(m => ({ id: m.id, p: Array.from(m.pts.geometry.attributes.position.array), vis: m.pts.visible })),
+                groupVisible: s.emGroup.visible,
+                hill: Array.from(s.moonHillRing.geometry.attributes.position.array),
+                moon: s.moon.position.toArray(),
+                uniforms: Object.fromEntries(Object.entries(s.zvcUniforms).map(([k, u]) =>
+                    [k, typeof u.value === 'number' ? u.value : u.value.toArray()])),
+                disc: s.zvcDisc.visible,
+            };
+        });
+        const geom = lagrangeGeometry(drawn.jd);
+        expect(drawn.groupVisible).toBe(true);
+        expect(drawn.marks.length).toBe(7);
+        for (const m of drawn.marks) {
+            const k = geom.all.find(p => p.id === m.id);
+            const q = geoToScene(k.geoKm[0] / AU_KM, k.geoKm[1] / AU_KM, k.geoKm[2] / AU_KM);
+            expect(m.p[0]).toBeCloseTo(q.x, 3);
+            expect(m.p[1]).toBeCloseTo(q.y, 3);
+            expect(m.p[2]).toBeCloseTo(q.z, 3);
+            expect(m.vis).toBe(true);                          // all inside the 0.5 AU boot horizon
+        }
+        // EM L1 sits between Earth and the drawn Moon on the map; L2 beyond it.
+        const r = (v) => Math.hypot(v[0], v[1], v[2]);
+        const em = Object.fromEntries(drawn.marks.map(m => [m.id, r(m.p)]));
+        expect(em['EM-L1']).toBeLessThan(r(drawn.moon));
+        expect(em['EM-L2']).toBeGreaterThan(r(drawn.moon));
+        // The Moon's Hill ring is ABOUT the Moon: every vertex maps back to a
+        // point the lunar Hill radius from the Moon (the ring is mapped point by
+        // point, so test it in km, not in scene units).
+        const D = geom.frame.D;
+        const rH = moonHillRadiusKm(D);
+        expect(drawn.hill.length / 3).toBe(96);
+        let maxKmErr = 0;
+        for (let i = 0; i < drawn.hill.length; i += 3) {
+            const sr = Math.hypot(drawn.hill[i], drawn.hill[i + 1], drawn.hill[i + 2]);
+            const km = EARTH_RADIUS_KM * Math.exp((sr - 1) / ((MOON_SCENE - 1) / Math.log(LD_KM / EARTH_RADIUS_KM)));
+            // Geocentric distance of a ring vertex lies within [D − rH, D + rH].
+            maxKmErr = Math.max(maxKmErr, Math.max(0, Math.abs(km - D) - rH));
+        }
+        expect(maxKmErr).toBeLessThan(50);
+        // The disc carries the kernel's gate constants and the live separation.
+        const C = Object.fromEntries(lagrangePoints(EM_MU).map(p => [p.id, p.C]));
+        expect(drawn.uniforms.uLevels).toEqual([C.L1, C.L2, C.L3, C.L4].map(v => expect.closeTo(v, 5)));
+        expect(drawn.uniforms.uD).toBeCloseTo(D, 0);
+        expect(drawn.uniforms.uMu).toBeCloseTo(EM_MU, 12);
+        expect(drawn.disc).toBe(false);                         // off by default
+
+        // ── The card prints the same geometry, and the chart has three series.
+        const card = await page.textContent('#nw-earthmoon');
+        // The card is rebuilt every 0.05 d of sim time, so its separation can
+        // trail the stage's by up to ~0.05 d × 0.05 km/s of lunar radial speed.
+        const cardD = Number(card.match(/Earth–Moon now\s*([\d,]+)\s*km/)[1].replace(/,/g, ''));
+        expect(Math.abs(cardD - D)).toBeLessThan(300);
+        expect(card).toMatch(/Moon overtakes Earth/);
+        expect(await page.locator('#nw-earthmoon tbody tr').count()).toBe(7);
+        const l1Row = geom.all.find(p => p.id === 'EM-L1');
+        expect(card).toMatch(new RegExp(l1Row.C.toFixed(4)));
+        const paths = await page.$$eval('#nw-earthmoon svg.nw-pc path', ps => ps.map(p => (p.getAttribute('d') || '').length));
+        expect(paths.length).toBe(3);
+        for (const n of paths) expect(n).toBeGreaterThan(100);
+        // Hover reads all three terms at one distance.
+        const hit = page.locator('#nw-earthmoon .nw-pc-hit');
+        await hit.scrollIntoViewIfNeeded();
+        const box = await hit.boundingBox();
+        await hit.hover({ position: { x: box.width * 0.6, y: box.height * 0.5 } });
+        await expect(page.locator('#nw-earthmoon .nw-pc-tip')).toBeVisible();
+        const tip = await page.textContent('#nw-earthmoon .nw-pc-tip');
+        expect(tip).toMatch(/Earth/); expect(tip).toMatch(/Moon/); expect(tip).toMatch(/Sun tide/);
+
+        // ── Toggles.
+        await page.check('#nw-zvc');
+        await page.uncheck('#nw-em-layer');
+        let vis = await page.evaluate(() => ({ g: window.__neoWatch.stage.emGroup.visible, d: window.__neoWatch.stage.zvcDisc.visible }));
+        expect(vis).toEqual({ g: false, d: true });
+        await page.check('#nw-em-layer');
+        vis = await page.evaluate(() => ({ g: window.__neoWatch.stage.emGroup.visible, d: window.__neoWatch.stage.zvcDisc.visible }));
+        expect(vis).toEqual({ g: true, d: true });
+
+        // The disc actually PAINTS: same camera, disc on vs off, the frame differs.
+        await page.locator('#nw-canvas').scrollIntoViewIfNeeded();
+        await page.click('#nw-frame-em');
+        await waitForCameraStill(page);
+        const canvas = page.locator('#nw-canvas');
+        const on = await canvas.screenshot();
+        await page.uncheck('#nw-zvc');
+        await page.waitForTimeout(250);
+        const off = await canvas.screenshot();
+        expect(Buffer.compare(on, off)).not.toBe(0);
+        await page.check('#nw-zvc');
+
+        // ── A selected object inside Earth's Hill sphere gets a location
+        // analysis with a Jacobi constant, and the disc is told about it.
+        await page.evaluate(() => window.__neoWatch.selectByDes('NEAR-3LD'));
+        await page.waitForFunction(() => /In the Earth–Moon environment/.test(
+            document.querySelector('#nw-selected')?.textContent || ''), null, { timeout: 10_000 });
+        const sel = await page.textContent('#nw-selected');
+        expect(sel).toMatch(/Jacobi constant/);
+        expect(sel).toMatch(/Nearest Lagrange pt/);
+        expect(sel).toMatch(/Dominated by/);
+        const objC = await page.evaluate(() => ({
+            c: window.__neoWatch.stage.emObjectC,
+            has: window.__neoWatch.stage.zvcUniforms.uHasObj.value,
+        }));
+        expect(Number.isFinite(objC.c)).toBe(true);
+        expect(objC.has).toBe(1);
+        // An 11 km/s flyby at 3 LD is far above every gate's energy.
+        expect(objC.c).toBeLessThan(C.L4);
+
+        // ...and one OUTSIDE the Hill sphere is refused a gate state.
+        await page.evaluate(() => window.__neoWatch.selectByDes('FAR-04AU'));
+        await page.waitForFunction(() => /outside Earth’s Hill sphere/.test(
+            document.querySelector('#nw-selected')?.textContent || ''), null, { timeout: 10_000 });
+        expect(await page.evaluate(() => window.__neoWatch.stage.zvcUniforms.uHasObj.value)).toBe(0);
+
+        // TRUE SCALE re-places the layer on the linear map.
+        await page.check('#nw-true-scale');
+        await page.waitForTimeout(400);
+        const l1True = await page.evaluate(() => {
+            const m = window.__neoWatch.stage.lagrangeMarks.find(x => x.id === 'EM-L1');
+            const a = m.pts.geometry.attributes.position.array;
+            return Math.hypot(a[0], a[1], a[2]);
+        });
+        const jdT = await page.evaluate(() => window.__neoWatch.stage.jd);
+        expect(l1True).toBeCloseTo(lagrangeGeometry(jdT).earthMoon[0].distKm / EARTH_RADIUS_KM, 1);
+
+        const shots = process.env.NW_SHOTS;
+        if (shots) {
+            fs.mkdirSync(shots, { recursive: true });
+            await page.setViewportSize({ width: 1500, height: 1100 });
+            await page.evaluate(() => { document.getElementById('nw-stage-legend').style.display = 'none'; window.__neoWatch.stage.resize(); });
+            await page.click('#nw-frame-em');
+            await waitForCameraStill(page);
+            await page.waitForTimeout(400);
+            await canvas.screenshot({ path: path.join(shots, 'stage-earth-moon-true.png') });
+            await page.uncheck('#nw-true-scale');
+            await page.evaluate(() => window.__neoWatch.selectByDes('NEAR-3LD'));
+            await page.click('#nw-frame-em');
+            await waitForCameraStill(page);
+            await page.waitForTimeout(400);
+            await canvas.screenshot({ path: path.join(shots, 'stage-earth-moon.png') });
+            await page.locator('#nw-earthmoon').screenshot({ path: path.join(shots, 'earth-moon-card.png') });
+            await page.locator('#nw-selected').screenshot({ path: path.join(shots, 'selected-card.png') });
+            await page.click('#nw-frame-all');
+            await waitForCameraStill(page);
+            await canvas.screenshot({ path: path.join(shots, 'stage-wide.png') });
+        }
         expect(errors).toEqual([]);
     });
 

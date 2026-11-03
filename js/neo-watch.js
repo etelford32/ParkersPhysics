@@ -39,10 +39,11 @@ import {
 import { rowToRecord, prepareColumns, propagateColumns, deriveGeocentric, propagate } from './neo-orbits.js';
 import { EARTH_TEXTURES } from './earth-skin.js';
 import { MOON_TEXTURES } from './moon-skin.js';
+import { locationAnalysis, gravityProfile } from './earth-moon-gravity.js';
 import { NeoStage } from './neo-watch/stage.js';
 import {
     renderNearest, renderApproaches, renderSentry, renderFireballs,
-    renderSelected, renderFeedChips, renderMoon, renderGravity,
+    renderSelected, renderFeedChips, renderMoon, renderGravity, renderEarthMoon,
 } from './neo-watch/panels.js';
 
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
@@ -414,10 +415,36 @@ export class NeoWatch {
      * read as "stationary relative to Earth".
      */
     _geocentricSpeed(el, jd) {
+        const v = this._geocentricVelocity(el, jd);
+        return v ? Math.hypot(v[0], v[1], v[2]) : null;
+    }
+
+    /** The same difference as a VECTOR, km/s, ecliptic J2000 — the Jacobi constant needs direction. */
+    _geocentricVelocity(el, jd) {
         if (!Number.isFinite(el?.om) || !Number.isFinite(el?.n) || !Number.isFinite(el?.t0)) return null;
         const p = propagate(el, jd, true);
         const ev = earthVelocityJ2000(jd);
-        return Math.hypot(p.vx - ev.x, p.vy - ev.y, p.vz - ev.z) * AU_PER_DAY_TO_KMS;
+        const k = AU_PER_DAY_TO_KMS;
+        return [(p.vx - ev.x) * k, (p.vy - ev.y) * k, (p.vz - ev.z) * k];
+    }
+
+    /**
+     * Where the selected object sits in the Earth–Moon environment — the
+     * kernel's `locationAnalysis` on the stage's OWN Lagrange geometry for this
+     * epoch, so the card and the drawn points are one evaluation. Returns null
+     * for the Moon (it is a primary, not a test particle) and before a frame.
+     */
+    _locationFor(index, jd) {
+        const f = this.frame;
+        const el = this.meta.get(index);
+        const geom = this.stage.emGeometry;
+        if (!f || !el || !geom || !Number.isInteger(index) || index >= f.count) return null;
+        const o = index * 3;
+        const rKm = [f.geo[o] * AU_KM, f.geo[o + 1] * AU_KM, f.geo[o + 2] * AU_KM];
+        return locationAnalysis({
+            rKm, vKms: this._geocentricVelocity(el, jd), jd,
+            frame: geom.frame, geometry: geom,
+        });
     }
 
     _renderLive(jd) {
@@ -438,7 +465,11 @@ export class NeoWatch {
         const cmp = approach && this._approachCheck && this._approachCheck.des === selRow.des
             ? compareApproach(this._approachCheck.ours, approach.dist_au, msToJd(approach.t_ms))
             : null;
-        renderSelected(this.$('nw-selected'), selRow, { approach, comparison: cmp, nowMs: jdToMs(jd) });
+        const location = selRow ? this._locationFor(this.selected, jd) : null;
+        renderSelected(this.$('nw-selected'), selRow, { approach, comparison: cmp, nowMs: jdToMs(jd), location });
+        // The disc tints the selected object's forbidden region only when its
+        // Jacobi constant means something (inside Earth's Hill sphere).
+        this.stage.setObjectJacobi(location?.jacobiMeaningful ? location.jacobi : null);
 
         // Headline counters.
         const inView = this.frame ? this._countInView() : 0;
@@ -469,11 +500,31 @@ export class NeoWatch {
         // it places the Moon, so this prints the same numbers the stage drew
         // rather than evaluating the ephemeris a second time.
         renderMoon(this.$('nw-moon'), this.stage.phase, this.stage.apsides, { jd });
+        this._renderEarthMoon(jd, earth);
 
         const sub = subSolarPoint(jd);
         this._setText('nw-subsolar',
             `${Math.abs(sub.latDeg).toFixed(1)}°${sub.latDeg < 0 ? 'S' : 'N'} ${Math.abs(sub.lonDeg).toFixed(1)}°${sub.lonDeg < 0 ? 'W' : 'E'}`);
         this._setText('nw-gmst', `${(gmstRad(jd) * 12 / Math.PI).toFixed(3)} h`);
+    }
+
+    /**
+     * The Earth–Moon card + profile chart. The geometry changes on the scale
+     * of hours, so the card is rebuilt when the sim clock has moved 0.05 d —
+     * at real time that is every 72 minutes, and the chart's hover state
+     * survives in between.
+     */
+    _renderEarthMoon(jd, earth) {
+        const el = this.$('nw-earthmoon');
+        const geom = this.stage.emGeometry;
+        if (!el || !geom) return;
+        if (this._emJd != null && Math.abs(jd - this._emJd) < 0.05) return;
+        this._emJd = jd;
+        const sunKm = [-earth.x * AU_KM, -earth.y * AU_KM, -earth.z * AU_KM];
+        const profile = gravityProfile({
+            moonKm: geom.frame.moonKm, sunKm, minKm: EARTH_RADIUS_KM, maxKm: 0.05 * AU_KM, n: 220,
+        });
+        renderEarthMoon(el, { geometry: geom, profile, earthRAU: earth.rAU });
     }
 
     _countInView() {
@@ -764,6 +815,9 @@ export class NeoWatch {
         on('nw-true-scale', 'change', (e) => this.stage.setTrueScale(e.target.checked));
         on('nw-grid', 'change', (e) => this.stage.setGrid(e.target.checked));
         on('nw-fireballs-on', 'change', (e) => this.stage.setFireballsVisible(e.target.checked));
+        on('nw-em-layer', 'change', (e) => this.stage.setEarthMoonLayer(e.target.checked));
+        on('nw-zvc', 'change', (e) => this.stage.setZeroVelocityCurves(e.target.checked));
+        on('nw-frame-em', 'click', () => this.stage.frameEarthMoon());
         on('nw-frame-all', 'click', () => this.stage.frameAll());
         on('nw-frame-earth', 'click', () => this.stage.frameEarth());
         on('nw-frame-sel', 'click', () => this.stage.focusSelected());

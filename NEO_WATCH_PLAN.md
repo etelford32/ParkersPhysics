@@ -5,7 +5,9 @@
 > shared with the orrery: `js/neo-orbits.js` · `js/neo-worker.js` ·
 > `js/neo-rocks.js` · `api/neo/catalog.js` · `api/neo/watch.js`
 >
-> Gates: `node tests/neo-space.mjs tests/neo-orbits.mjs tests/neo-sources.mjs`
+> `js/earth-moon-gravity.js` (the Earth–Moon gravity kernel, §2c)
+>
+> Gates: `node tests/neo-space.mjs tests/neo-orbits.mjs tests/neo-sources.mjs tests/earth-moon-gravity.mjs`
 > + `npx playwright test tests/neo-watch-smoke.spec.js`
 
 ## 1. What this page is, and why it is not the orrery
@@ -33,6 +35,10 @@ answers it from the middle of the Earth:
 | Earth's gravitational boundaries, drawn at their live radii | kernel `hillRadiusKm` · `soiRadiusKm` | per frame |
 | Per-object encounter screen: geocentric speed, v∞, bound/unbound, focused impact corridor | kernel `encounterAnalysis` | 3 Hz |
 | Catalogue-wide "which orbits can reach us at all" by Earth MOID | worker `screen` + kernel `reachesGravityDomain` | per catalogue load |
+| Earth–Moon Lagrange points (L1–L5, live Moon) + Sun–Earth L1/L2 + the Moon's Hill sphere | `earth-moon-gravity.js` `lagrangeGeometry` · `moonHillRadiusKm` | per frame |
+| Zero-velocity (energy-barrier) disc in the Moon's orbital plane, + the selected object's forbidden region | stage shader on the kernel's `JACOBI_FIELD_GLSL` | per frame |
+| "Which pull wins, by distance" profile chart + Lagrange table | `gravityProfile` · `lagrangePoints` | every 0.05 d of sim time |
+| Selected object's acceleration budget, lunar domain, nearest Lagrange point, Jacobi constant + gate state | `locationAnalysis` | 3 Hz |
 
 Nothing in the data layer is forked. The elements, the wire format, Kepler, the
 class table and the rock meshes are the orrery's; what is new is a kernel for
@@ -211,6 +217,64 @@ typical 8 km/s is going 7.3 km/s faster than it could be and still be bound, and
 nothing in a two-body encounter can shed that — which is why temporary capture
 needs a third body and why the known minimoons (2006 RH120, 2020 CD3) are a list
 of two rather than a population.
+
+## 2c. The Earth–Moon gravity layer (2026-11)
+
+The §2b analysis is Earth against the SUN. This layer puts the MOON's gravity
+in, from one pure kernel, `js/earth-moon-gravity.js` (gate
+`tests/earth-moon-gravity.mjs`), which the stage, the Earth–Moon card and the
+selected-object card all read:
+
+1. **The acceleration budget compares PERTURBATIONS, not raw pulls.** Earth's
+   term is μ⊕/r²; the Moon's and the Sun's are their pull on the object MINUS
+   their pull on Earth, because Earth falls toward both and only the
+   difference moves an object relative to Earth. A raw μ☉/d² would say the Sun
+   dominates at the ISS — true and useless. The card prints the Moon's raw pull
+   beside its perturbation so the difference is visible, not hidden.
+2. **The Lagrange points and Jacobi constants are the circular restricted
+   three-body problem**, μ = m☾/(m⊕+m☾) DERIVED from the DE440 GMs (0.012151).
+   The gate pins every point as an equilibrium (∇Ω = 0), C_L1…C_L4 against the
+   published table (3.18834 / 3.17216 / 3.01215 / 2.98800) and C_L4 against
+   its closed form 3 − μ(1−μ), and checks Jacobi is CONSERVED along an
+   independently integrated orbit.
+3. **The frame is the LIVE Moon, not a mean circle.** `earthMoonFrame` builds
+   e1 (Earth→Moon), e3 (orbit normal) from the page's one lunar ephemeris and a
+   central-difference velocity, with the instantaneous separation and rate —
+   the "pulsating" frame. The Moon's radial velocity (its eccentricity, ±0.05
+   km/s) is the dropped term, and the Lagrange points drawn from this frame
+   ride the drawn Moon rather than a circle 13 % off at the apsides.
+4. **Jacobi says nothing outside Earth's Hill sphere**, where the Sun's tide
+   wins — `locationAnalysis` returns `jacobiMeaningful: false` there and the
+   card refuses to read a gate. And a large C FAR AWAY means *kept out*, not
+   *held in*: the rotating frame itself moves at ω·r ≈ 12 km/s at 0.03 AU, so
+   a distant object's C is large and positive. `realmOf` (earth / moon /
+   exterior) travels with every gate state for exactly that reason — the first
+   version of the gate printed "sealed" for a far object and was wrong.
+5. **The tide crossing is NOT the Hill radius**, and the card says why: on the
+   Sun line the geocentric tide is 2μ☉r/d³, so it overtakes Earth at
+   (3/2)^⅓ r_H ≈ 1.69 million km; the Hill radius's 3μ☉r/d³ includes the
+   centrifugal term of an orbiting frame. Gated to 2 %.
+6. **The zero-velocity disc is a FILL, not lines.** It is a unit disc in the
+   Moon's orbital plane; each fragment inverts the ACTIVE radial map
+   (`GEO_MAP` constants as uniforms, never typed), converts to the rotating
+   frame and evaluates 2Ω with the kernel's `JACOBI_FIELD_GLSL` (transliterated
+   back to JS and run against `jacobiField` by the gate). Shading runs from
+   unshaded at C_L1 to darkest at C_L4 with thin C_L1/L2/L3 contours on top.
+   Contours alone collapsed into a white smear on the log map — the whole
+   0.84–1.17 D band is ~1.5 scene units there — and in True scale the fill is
+   the textbook Hill-region picture (L1/L2 necks, horseshoe, L4/L5 tadpoles).
+   The selected object's forbidden region (2Ω < C) is tinted red only when its
+   C is meaningful AND above C_L4 — for every catalogued flyby it is far below,
+   so nothing is tinted, which is the answer. Off by default; "Frame
+   Earth–Moon" looks down the orbit normal (never at OrbitControls' pole: the
+   normal is 18–29° from the celestial pole).
+7. **The Moon's Hill ring is mapped POINT BY POINT** through `geoToScene` —
+   a circle about the Moon is not a circle on a map that compresses geocentric
+   radius. The browser gate checks every vertex in km, not scene units.
+8. **Profile chart colours follow the quantity** (Earth blue, Moon aqua, Sun
+   orange — reference categorical slots 1–3, dark steps, validated all-pairs
+   on the card surface) in both the chart and the share bar. One y-axis, log;
+   direct labels at three different x so they cannot collide; hover crosshair.
 
 ## 3. Shared code, and what was added to it
 
