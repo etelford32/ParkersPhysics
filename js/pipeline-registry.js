@@ -536,6 +536,13 @@ export const PIPELINES = [
       cadence_s: 86_400, prewarm: 'cold', probeTimeoutMs: 30_000,
       warnAgeS: 36 * 3600, critAgeS: 5 * 86_400,
       notes: 'Every SBDB orbit-class TJN object (~15–20k rows, full-precision elements) plus Jupiter and Saturn state vectors from Horizons at the catalogue epoch — the inputs js/trojan-dynamics.js needs for resonant angles and libration. Amber = population failed OR Jupiter vector missing (`degraded_reason` says which). `precision` reads `default` if JPL refused full-prec; `sources.sbdb.field_map` is the schema self-report. Sequential SBDB → Horizons, hence the long probe timeout.' },
+
+    { id: 'trojans-proper',     label: 'Jupiter Trojans — AstDyS proper elements',
+      endpoint: '/api/trojans/proper',
+      category: 'small-bodies', upstream: 'AstDyS (newton.spacedys.com / hamilton.dm.unipi.it)',
+      cadence_s: 7 * 86_400, prewarm: 'cold', probeTimeoutMs: 20_000,
+      warnAgeS: 10 * 86_400, critAgeS: 30 * 86_400,
+      notes: 'Synthetic proper elements (libration amplitude, e_p, sin I_p, frequencies) — the external validation set for our frequency-analysed D_p. File path + layout are CANDIDATES (egress-blocked at build time): `?meta=1` probes every candidate; `source_url`, `field_map`, `lib_unit` self-report. Amber = no candidate answered with data.' },
 ];
 
 /**
