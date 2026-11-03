@@ -23,7 +23,7 @@ import { test, expect } from '@playwright/test';
 import { catalogBody, PLANTED } from './fixtures/neo-catalog-synthetic.mjs';
 import { geoSceneRadius, LD_KM } from '../js/neo-space.js';
 
-const URL = '/index.html?exp_home_bg_carousel=control&debug=1&intro=0';
+const PAGE_URL = '/index.html?exp_home_bg_carousel=control&debug=1&intro=0';
 const IGNORED = [/fonts\.googleapis/, /\/api\/telemetry/, /unpkg\.com/, /Failed to load resource/, /net::ERR/, /supabase/i, /WebSocket/, /\/api\//];
 
 function collectErrors(page) {
@@ -51,7 +51,7 @@ async function mockCatalog(page, { down = false } = {}) {
 }
 
 async function openBoard(page) {
-    await page.goto(URL, { waitUntil: 'domcontentloaded' });
+    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => document.getElementById('neo-top10').scrollIntoView());
     await page.waitForFunction(() => !!window.__homeNeo, null, { timeout: 30_000 });
 }
@@ -85,8 +85,9 @@ test.describe('home: ten nearest NEOs', () => {
         // The DOM prints the same numbers.
         const rows = page.locator('#neo-top10 tbody tr.hnw-row');
         await expect(rows).toHaveCount(10);
+        // The cell may carry the inside-Earth's-grip note after the number (the planted 2 LD object is 'captured').
         const firstLd = await rows.nth(0).locator('[data-c="ld"]').textContent();
-        expect(Number(firstLd.replace(/\s*LD/, ''))).toBeCloseTo(st.rows[0].distLD, 1);
+        expect(Number(/^\s*([\d.]+)\s*LD/.exec(firstLd)[1])).toBeCloseTo(st.rows[0].distLD, 1);
         await expect(rows.nth(0).locator('.n')).toContainText(PLANTED[0].des);
         await expect(rows.nth(0).locator('.pha')).toHaveCount(1);                 // planted as a PHA
         await expect(page.locator('#neo-top10 .hnw-chip')).toHaveClass(/live/);
