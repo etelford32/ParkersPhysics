@@ -1,23 +1,45 @@
 /**
  * space-missions.js — Canonical roster of active and historically-important
- * inner-solar-system space missions, grouped by science domain.
+ * space missions, grouped by science domain.
  *
- * Used by sun.html (Heliophysics Fleet panel), solar-system.html (inner-planet
- * overlay), and space-weather.html (live-asset provenance) to surface
- * "who's measuring what" next to the data those missions feed.
+ * Used by missions.html (the fleet roster + 3D map). Roster facts were last
+ * verified against agency pages on 2026-11-03 — every `status` below is a
+ * statement about THAT date, and the `verified` stamp at the bottom says so
+ * on the page. When a status changes, change it here and nowhere else.
  *
  * Status vocabulary:
- *   'operational'   — currently returning data
+ *   'operational'   — currently returning data (prime mission)
  *   'extended'      — past prime mission, still operating
  *   'cruising'      — launched, not yet at destination
- *   'completed'     — mission concluded (data still in archives)
+ *   'completed'     — mission concluded as planned (data in archives)
  *   'retired'       — lost / deorbited / communications ended
  *   'planned'       — approved, not yet launched
  *
- * Confidence flags for data I list here:
+ * Confidence flags for data listed here:
  *   'observed'      — well-documented from primary mission pages
  *   'derived'       — computed from published mission parameters
  *   'preliminary'   — active mission, results still being refined
+ *
+ * ── Live-position hooks (consumed by js/missions-3d.js) ───────────────────
+ *   horizons:     ordered CANDIDATE list of JPL Horizons COMMAND strings for
+ *                 the spacecraft (NAIF ids are negative integers; a bare name
+ *                 is a Horizons name search). The list is tried IN ORDER by
+ *                 /api/missions/ephemeris and the first that returns a vector
+ *                 table wins — ssd.jpl.nasa.gov is egress-blocked at build
+ *                 time; the route self-reports `command_used` per spacecraft.
+ *                 Entries marked `// verified 2026-11-03` returned a vector
+ *                 table on the deployed route that day and are trimmed to the
+ *                 winner; the rest only hit Horizons' busy page and stay as
+ *                 candidates until a probe sees them.
+ *                 A mission with no `horizons` falls back to the analytic
+ *                 placement in js/mission-positions.js, DISCLOSED as 'model'.
+ *   norad:        NORAD catalogue number (Earth orbit → SGP4 through the
+ *                 shared tracker and /api/celestrak/tle?norad=).
+ *   norad_search: CelesTrak NAME search when the catalogue number is not
+ *                 pinned here (constellations, recent launches).
+ *   next:         { label, date } — the next published milestone, drawn as a
+ *                 countdown on the card. Keep it in the past-tense-safe form
+ *                 ("Mercury orbit insertion") so an elapsed date still reads.
  */
 
 // ═══════════════════════════════════════════════════════════════
@@ -32,19 +54,21 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launched:       '2018-08-12',
         launch_vehicle: 'Delta IV Heavy',
         status:         'operational',
-        orbit:          'Heliocentric; 7 Venus gravity assists; 0.046 AU perihelion after GA#7',
-        closest_approach_rsun: 8.86,          // 8.86 solar radii at closest perihelion (~6.16 Mkm)
+        orbit:          'Heliocentric, final 88-day orbit; perihelion 9.86 R☉ (0.046 AU) since Dec 2024; extended to 2029 by the 2026 Heliophysics Senior Review',
+        closest_approach_rsun: 9.86,          // 9.86 solar radii at the final-orbit perihelion (~6.16 Mkm)
         closest_approach_km:   6.16e6,
         instruments:    ['FIELDS (B & E fields)', 'SWEAP (ion/electron analyzers)', 'ISʘIS (energetic particles)', 'WISPR (imagers)'],
         highlights: [
             'First crossing of the Alfvén surface (April 2021, ~18.8 R_sun) — literally inside the Sun\'s corona',
+            'Perihelion 29 on 2026-09-04 matched the 0.046 AU / 690,000 km/h records set on perihelion 22 (Dec 2024)',
             'Discovery of ubiquitous magnetic "switchbacks" — sudden ~180° reversals in the solar-wind magnetic field',
-            'Observed dust-free zone near the Sun, confirming theory from 1929',
             'Characterized sub-Alfvénic solar wind populations and alpha-particle acceleration',
         ],
         summary:        'First spacecraft to "touch the Sun," measuring the corona in situ to answer how the solar wind is accelerated and heated. The defining mission of Parker\'s namesake physics.',
+        next:           { label: 'Perihelion 30 (88-day cadence)', date: '2026-12-01' },
+        horizons:       ['-96'],                  // verified 2026-11-03
         confidence:     'observed',
-        source:         'NASA Parker Solar Probe mission site + Bale et al. (Nature 2019)',
+        source:         'NASA Parker Solar Probe mission blog (2026-09-10) + Bale et al. (Nature 2019)',
     },
     {
         id:             'solar-orbiter',
@@ -53,15 +77,16 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launched:       '2020-02-10',
         launch_vehicle: 'Atlas V 411',
         status:         'operational',
-        orbit:          'Heliocentric inclined; up to 33° solar latitude by 2029 (polar-ecliptic climb via Venus GAs)',
+        orbit:          'Heliocentric, inclination climbing via Venus gravity assists (17° in 2025, up to 33° by 2029)',
         closest_approach_au: 0.28,
         instruments:    ['EUI (Extreme UV imager)', 'PHI (Polarimetric imager)', 'METIS (coronagraph)', 'SPICE (spectrometer)', 'STIX (X-ray)', 'SWA', 'MAG', 'EPD', 'RPW'],
         highlights: [
             'Highest-resolution Sun imagery ever taken (EUI "campfires" — tiny transient brightenings)',
-            'First images of the solar poles (planned 2025+ ecliptic-plane departure)',
+            'First images of the solar poles (2025, from 17° solar latitude)',
             'Joint coordinated observations with PSP — PSP sampling the corona in situ, SO imaging the source region',
         ],
-        summary:        'Companion to Parker Solar Probe: PSP measures what SO images. Will be the first spacecraft to see the Sun\'s polar regions directly.',
+        summary:        'Companion to Parker Solar Probe: PSP measures what SO images. The first spacecraft to see the Sun\'s polar regions directly.',
+        horizons:       ['-144'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'ESA Solar Orbiter + Müller et al. (A&A 2020)',
     },
@@ -73,6 +98,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launch_vehicle: 'Atlas IIAS',
         status:         'extended',
         orbit:          'Sun–Earth L1 halo orbit',
+        host:           'earth',
         instruments:    ['LASCO (coronagraph)', 'EIT (UV imager)', 'MDI (magnetogram)', 'CELIAS', 'ERNE'],
         highlights: [
             '30+ years of continuous solar-wind + CME monitoring',
@@ -80,6 +106,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Foundational CME arrival-time forecasting data',
         ],
         summary:        'The workhorse of space-weather operations. Every CME arrival prediction you\'ve seen since the late 90s was calibrated against SOHO/LASCO.',
+        horizons:       ['-21'],                  // probe: 'no ephemeris in window' — SOHO's SPK stops short; the L1 model draws it
         confidence:     'observed',
         source:         'ESA/NASA SOHO Science Archive',
     },
@@ -91,11 +118,13 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launch_vehicle: 'Atlas V 401',
         status:         'operational',
         orbit:          'Geosynchronous inclined (~28° / 36,000 km)',
+        host:           'earth',
+        norad:          36395,
         instruments:    ['AIA (Atmospheric Imaging Assembly, 10 UV channels)', 'HMI (Helioseismic/Magnetic Imager)', 'EVE (Extreme UV Variability)'],
         highlights: [
             '4096×4096 full-disk solar imagery every 12 seconds across 10 wavelengths',
             'Fundamental helioseismology measurements of subsurface flows',
-            'Drives nearly every operational solar-flare forecast since 2010',
+            'Drives nearly every operational solar-flare forecast since 2010 — and the observed disk on this site\'s Sun page',
         ],
         summary:        'The HD camera of the Sun. If you\'ve ever seen a high-res solar-flare loop, it came from SDO/AIA.',
         confidence:     'observed',
@@ -108,7 +137,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launched:       '2006-10-26',
         launch_vehicle: 'Delta II 7925',
         status:         'operational',
-        orbit:          'Heliocentric, slightly inside Earth\'s orbit, drifting ahead of Earth',
+        orbit:          'Heliocentric, slightly inside Earth\'s orbit; passed Earth in Aug 2023 and is now drifting ahead again',
         instruments:    ['SECCHI (suite of 5 imagers)', 'IMPACT', 'PLASTIC', 'SWAVES'],
         highlights: [
             'First stereoscopic imagery of the Sun (with STEREO-B, until B was lost in 2014)',
@@ -116,6 +145,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Periodic "far-side" views when Earth and STEREO-A are ≈180° apart',
         ],
         summary:        'The second eye on the Sun. Critical for CME 3D reconstruction since STEREO-B\'s loss.',
+        horizons:       ['-234'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA STEREO Science Center',
     },
@@ -127,13 +157,15 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launch_vehicle: 'Delta II 7920',
         status:         'extended',
         orbit:          'Sun–Earth L1',
+        host:           'earth',
         instruments:    ['SWEPAM', 'MAG', 'SWICS', 'SWIMS', 'SIS', 'ULEIS', 'EPAM', 'CRIS', 'SEPICA (end-of-life)'],
         highlights: [
-            '27+ years of solar-wind composition + velocity measurements',
-            'Primary real-time solar-wind source for the NOAA SWPC space-weather operations',
-            'Running low on propellant; being gradually supplemented by IMAP',
+            '29 years of solar-wind composition + velocity measurements',
+            'Real-time solar-wind source for NOAA SWPC alongside DSCOVR; SWFO-L1 now carries the operational baton',
+            'Running low on propellant; supplemented by IMAP + SWFO-L1 at the same L1 station',
         ],
-        summary:        'The L1 solar-wind sentinel. Your current Kp forecast depends on ACE telemetry (via DSCOVR backup).',
+        summary:        'The L1 solar-wind sentinel of the last three decades. Your Kp forecasts were calibrated against ACE telemetry.',
+        horizons:       ['-92'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA/Caltech ACE Science Center',
     },
@@ -145,58 +177,123 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launch_vehicle: 'Delta II 7925',
         status:         'extended',
         orbit:          'Sun–Earth L1 (Lissajous)',
+        host:           'earth',
         instruments:    ['MFI', '3DP', 'SWE', 'EPACT', 'WAVES', 'SMS'],
         highlights: [
-            'Longest-operating solar-wind mission (30+ years)',
+            'Longest-operating solar-wind mission (32 years this month)',
             'Primary reference for solar-wind plasma + interplanetary magnetic field data',
         ],
         summary:        'Older than ACE, still returning clean plasma/B-field data. Calibration reference for every follower.',
+        horizons:       ['-8'],                   // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA WIND Mission',
     },
     {
         id:             'dscovr',
         name:           'DSCOVR (Deep Space Climate Observatory)',
-        agency:         'NOAA / NASA / USAF',
+        agency:         'NOAA / NASA / USSF',
         launched:       '2015-02-11',
         launch_vehicle: 'Falcon 9',
         status:         'operational',
         orbit:          'Sun–Earth L1 Lissajous',
+        host:           'earth',
         instruments:    ['PlasMag (solar wind)', 'EPIC (Earth-facing camera)', 'NISTAR'],
         highlights: [
-            'Operational backup + primary for NOAA\'s real-time solar-wind feed',
+            'NOAA\'s real-time solar-wind monitor since 2016; SWFO-L1 (SOLAR-1) took over as primary in mid-2026',
             'Continuous Earth full-disk imagery from L1 (unique Earth-facing vantage)',
         ],
-        summary:        'NOAA\'s operational solar-wind monitor. The stream that feeds real-time geomagnetic-storm forecasts.',
+        summary:        'The L1 stream that fed every real-time geomagnetic-storm forecast for a decade, now the backup to SOLAR-1.',
+        horizons:       ['-78'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NOAA SWPC / NASA DSCOVR',
     },
     {
         id:             'imap',
         name:           'IMAP (Interstellar Mapping and Acceleration Probe)',
-        agency:         'NASA',
-        launched:       '2025-09',
+        agency:         'NASA / Princeton / APL',
+        launched:       '2025-09-24',
         launch_vehicle: 'Falcon 9',
-        status:         'cruising',
-        orbit:          'Sun–Earth L1 (commissioning)',
+        status:         'operational',
+        orbit:          'Sun–Earth L1 Lissajous (arrived 2026-01-10; science operations since 2026-02-01)',
+        host:           'earth',
         instruments:    ['MAG', 'SWAPI', 'SWE', 'CoDICE', 'HIT', 'IDEX', 'GLOWS', 'ULTRA', 'LO', 'HI'],
         highlights: [
-            'Designed to map the heliosphere boundary with neutral-atom imaging (replaces IBEX)',
+            'Maps the heliosphere boundary with energetic-neutral-atom imaging (the IBEX successor, at 30× the sensitivity)',
             'Characterizes particle acceleration at the termination shock + heliopause',
-            'Real-time space-weather relay supplements ACE + DSCOVR',
+            'I-ALiRT real-time solar-wind relay supplements ACE + DSCOVR',
         ],
         summary:        'Successor to ACE + IBEX. Maps the heliosphere\'s outer boundary while also feeding operational solar-wind data.',
+        horizons:       ['-43'],                  // verified 2026-11-03
         confidence:     'preliminary',
-        source:         'NASA IMAP mission page',
+        source:         'NASA IMAP mission blog (2026-01-12)',
+    },
+    {
+        id:             'carruthers',
+        name:           'Carruthers Geocorona Observatory',
+        agency:         'NASA / UIUC',
+        launched:       '2025-09-24',
+        launch_vehicle: 'Falcon 9 (rideshare with IMAP)',
+        status:         'operational',
+        orbit:          'Sun–Earth L1 halo (arrived Jan 2026)',
+        host:           'earth',
+        instruments:    ['GLIDE narrow-field + wide-field far-UV imagers (Lyman-α)'],
+        highlights: [
+            'First continuous imaging of Earth\'s exosphere — the hydrogen geocorona — from outside it',
+            'Measures how the outermost atmosphere breathes in response to geomagnetic storms',
+        ],
+        summary:        'Images the hydrogen halo around Earth from L1 so atmospheric escape can be watched instead of modelled.',
+        horizons:       ['Carruthers'],           // verified 2026-11-03
+        confidence:     'preliminary',
+        source:         'NASA Carruthers Geocorona Observatory',
+    },
+    {
+        id:             'swfo-l1',
+        name:           'SWFO-L1 (SOLAR-1)',
+        agency:         'NOAA / NASA',
+        launched:       '2025-09-24',
+        launch_vehicle: 'Falcon 9 (rideshare with IMAP)',
+        status:         'operational',
+        orbit:          'Sun–Earth L1 (arrived 2026-01-23; declared fully operational 2026-06-10)',
+        host:           'earth',
+        instruments:    ['CCOR-2 (compact coronagraph)', 'SWiPS (solar-wind plasma)', 'MAG', 'STIS (suprathermal ions)'],
+        highlights: [
+            'NOAA\'s first purpose-built operational space-weather observatory at L1 — the ACE/DSCOVR successor',
+            'Carries the second operational coronagraph (after GOES-19 CCOR-1), closing the LASCO single-point-of-failure gap',
+        ],
+        summary:        'The operational solar-wind monitor every SWPC product now reads first. Renamed SOLAR-1 on reaching L1.',
+        horizons:       ['SWFO-L1'],              // verified 2026-11-03
+        confidence:     'preliminary',
+        source:         'NOAA NESDIS SWFO-L1 / SOLAR-1',
+    },
+    {
+        id:             'aditya-l1',
+        name:           'Aditya-L1',
+        agency:         'ISRO',
+        launched:       '2023-09-02',
+        launch_vehicle: 'PSLV-XL',
+        status:         'operational',
+        orbit:          'Sun–Earth L1 halo (inserted 2024-01-06)',
+        host:           'earth',
+        instruments:    ['VELC (coronagraph)', 'SUIT (UV imager)', 'SoLEXS', 'HEL1OS', 'ASPEX', 'PAPA', 'MAG'],
+        highlights: [
+            'India\'s first solar observatory; VELC images the inner corona from 1.05 R☉',
+            'Caught the 2024-07-16 CME onset in VELC — the first coronagraph to see it',
+        ],
+        summary:        'The fourth agency at L1. A coronagraph plus in-situ wind package on the same line of sight as ACE/DSCOVR/IMAP.',
+        horizons:       ['Aditya-L1'],            // verified 2026-11-03
+        confidence:     'observed',
+        source:         'ISRO Aditya-L1',
     },
     {
         id:             'punch',
         name:           'PUNCH (Polarimeter to Unify Corona and Heliosphere)',
-        agency:         'NASA',
-        launched:       '2025-03',
-        launch_vehicle: 'Falcon 9 (rideshare)',
+        agency:         'NASA / SwRI',
+        launched:       '2025-03-11',
+        launch_vehicle: 'Falcon 9 (rideshare with SPHEREx)',
         status:         'operational',
         orbit:          'Sun-synchronous LEO (constellation of 4 smallsats)',
+        host:           'earth',
+        norad_search:   'PUNCH',
         instruments:    ['NFI (Narrow Field Imager)', '3× WFI (Wide Field Imagers)'],
         highlights: [
             'Continuous polarimetric imagery linking corona to heliosphere — closes the observational gap between LASCO and in-situ',
@@ -207,6 +304,63 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         source:         'NASA / SwRI PUNCH mission',
     },
     {
+        id:             'goes-19',
+        name:           'GOES-19 (GOES-East)',
+        agency:         'NOAA / NASA',
+        launched:       '2024-06-25',
+        launch_vehicle: 'Falcon Heavy',
+        status:         'operational',
+        orbit:          'Geostationary, 75.2° W (operational as GOES-East since 2025-04-07)',
+        host:           'earth',
+        norad_search:   'GOES 19',
+        instruments:    ['SUVI (solar UV imager)', 'EXIS', 'CCOR-1 (first operational coronagraph)', 'SEISS', 'MAG', 'ABI', 'GLM'],
+        highlights: [
+            'CCOR-1 is the first operational (not research) coronagraph — CME images every 15 min for SWPC',
+            'SUVI 195/284/304/131 frames feed this site\'s off-limb ring on the Sun page',
+        ],
+        summary:        'A weather satellite that also watches the Sun. Its coronagraph is what SWPC reads when LASCO is down.',
+        confidence:     'observed',
+        source:         'NOAA NESDIS GOES-R series',
+    },
+    {
+        id:             'smile',
+        name:           'SMILE (Solar wind Magnetosphere Ionosphere Link Explorer)',
+        agency:         'ESA / CAS',
+        launched:       '2026-05',
+        launch_vehicle: 'Vega-C',
+        status:         'operational',
+        orbit:          'Highly elliptical, ~5,000 × 121,000 km, 70° inclination',
+        host:           'earth',
+        norad_search:   'SMILE',
+        instruments:    ['SXI (soft X-ray imager)', 'UVI (auroral imager)', 'LIA (light ion analyser)', 'MAG'],
+        highlights: [
+            'First mission to IMAGE the magnetopause and cusps in soft X-rays (solar-wind charge exchange) while filming the aurora below',
+            'Joint ESA–Chinese Academy of Sciences science mission; commissioning through 2026',
+        ],
+        summary:        'The magnetosphere, seen from outside: a global X-ray picture of where the solar wind meets Earth\'s field.',
+        confidence:     'preliminary',
+        source:         'ESA Smile launch pages (Apr–May 2026)',
+    },
+    {
+        id:             'proba-3',
+        name:           'Proba-3',
+        agency:         'ESA',
+        launched:       '2024-12-05',
+        launch_vehicle: 'PSLV-XL',
+        status:         'operational',
+        orbit:          'Highly elliptical, 600 × 60,530 km; two spacecraft flying 150 m apart in formation',
+        host:           'earth',
+        norad_search:   'PROBA-3',
+        instruments:    ['ASPIICS (formation-flying coronagraph)', 'DARA (total solar irradiance)', '3DEES'],
+        highlights: [
+            'First precision formation-flying mission: the occulter spacecraft casts an artificial eclipse on the coronagraph 150 m behind it',
+            'Images the corona from 1.1 R☉ for up to 6 h per orbit — the region no single-spacecraft coronagraph can reach',
+        ],
+        summary:        'Two spacecraft, one eclipse on demand. The inner corona without the Moon\'s schedule.',
+        confidence:     'observed',
+        source:         'ESA Proba-3',
+    },
+    {
         id:             'hinode',
         name:           'Hinode',
         agency:         'JAXA / NASA / STFC',
@@ -214,6 +368,8 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launch_vehicle: 'M-V-7',
         status:         'extended',
         orbit:          'Sun-synchronous LEO (~680 km)',
+        host:           'earth',
+        norad:          29479,
         instruments:    ['SOT (Solar Optical Telescope)', 'XRT (X-ray Telescope)', 'EIS (EUV Imaging Spectrometer)'],
         highlights: [
             'Highest spatial resolution X-ray imagery of active regions',
@@ -231,6 +387,8 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         launch_vehicle: 'Pegasus XL',
         status:         'extended',
         orbit:          'Sun-synchronous LEO (~670 km)',
+        host:           'earth',
+        norad:          39197,
         instruments:    ['UV imager + spectrograph (chromosphere / transition region)'],
         highlights: [
             'Resolved fine structure in the chromosphere + transition region — the 10,000–1M K layer where the corona is heated',
@@ -255,16 +413,18 @@ export const INNER_PLANET_MISSIONS = Object.freeze([
         launched:       '2018-10-20',
         launch_vehicle: 'Ariane 5 ECA',
         status:         'cruising',
-        orbit:          'Heliocentric cruise; 6 Mercury flybys complete, orbit insertion late 2026',
-        instruments:    ['MMO (JAXA orbiter)', 'MPO (ESA orbiter)', 'MTM (transfer module)'],
+        orbit:          'Final approach: 9 flybys done, transfer module jettisoned 2026-09-03, Mercury orbit insertion 2026-11-21; MPO/Mio separate 9–10 Dec',
+        instruments:    ['MPO (ESA planetary orbiter, 11 instruments)', 'Mio / MMO (JAXA magnetospheric orbiter, 5 instruments)', 'MTM (transfer module, jettisoned)'],
         highlights: [
-            'First dual-orbiter mission at Mercury',
+            'First dual-orbiter mission at Mercury — arrival delayed a year by the 2024 thruster power shortfall, now 18 days out',
             'Will characterize Mercury\'s magnetosphere (weakest in the solar system)',
-            'Carrying 16 scientific instruments across two orbiters',
+            'Six Mercury flybys already returned the closest-ever images of the planet\'s night side',
         ],
-        summary:        'The joint European-Japanese follow-up to MESSENGER. Arrives at Mercury in late 2026.',
+        summary:        'The joint European-Japanese follow-up to MESSENGER. 9.9 billion km flown; orbit insertion this month.',
+        next:           { label: 'Mercury orbit insertion', date: '2026-11-21' },
+        horizons:       ['-121'],                 // verified 2026-11-03 (MPO)
         confidence:     'observed',
-        source:         'ESA BepiColombo',
+        source:         'ESA "Latest updates: BepiColombo\'s arrival at Mercury" (Sep–Oct 2026)',
     },
     {
         id:             'messenger',
@@ -291,17 +451,35 @@ export const INNER_PLANET_MISSIONS = Object.freeze([
         agency:         'JAXA',
         target:         'Venus',
         launched:       '2010-05-20',
-        status:         'extended',
-        orbit:          'Venus orbit (inserted on second attempt, 2015-12-07 after 2010 OIM failure)',
+        retired:        '2025-09-18',
+        status:         'retired',
+        orbit:          'Venus orbit 2015–2024; contact lost April 2024, operations formally ended 2025-09-18',
         instruments:    ['IR1, IR2, UVI, LIR (imagers across UV + IR)', 'LAC (lightning/airglow)', 'USO (radio science)'],
         highlights: [
-            'Characterized Venus\' super-rotating atmosphere in unprecedented detail',
+            'Characterized Venus\' super-rotating atmosphere in unprecedented detail over eight years',
             'Discovered equatorial jet and planetary-scale bow-shaped wave in clouds',
-            'Recovered from 5-year orbital-insertion failure through engine-burn improvisation',
+            'Recovered from the 2010 orbit-insertion failure through thruster-only improvisation',
         ],
-        summary:        'The only operational Venus orbiter. Resurrected via thruster-only orbital insertion after main engine failed in 2010.',
+        summary:        'The last operational Venus orbiter. With its end, no spacecraft is active at Venus until the next wave (EnVision, VERITAS, DAVINCI) flies.',
         confidence:     'observed',
-        source:         'JAXA Akatsuki mission',
+        source:         'JAXA press release 2025-09-18 "Venus Climate Orbiter AKATSUKI Operation Completed"',
+    },
+    {
+        id:             'envision',
+        name:           'EnVision',
+        agency:         'ESA / NASA',
+        target:         'Venus',
+        status:         'planned',
+        launched:       '2031 (planned, Ariane 6)',
+        orbit:          'Planned low circular Venus orbit, aerobraking insertion',
+        instruments:    ['VenSAR (radar)', 'VenSpec suite', 'SRS (subsurface sounder)', 'Radio science'],
+        highlights: [
+            'ESA\'s M5 mission: first Venus geology-and-interior orbiter since Magellan',
+            'Companion to NASA\'s VERITAS + DAVINCI in the 2030s Venus campaign',
+        ],
+        summary:        'Why did Earth\'s twin diverge? EnVision maps Venus from core to cloud-top.',
+        confidence:     'observed',
+        source:         'ESA EnVision',
     },
 ]);
 
@@ -335,69 +513,137 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         launched:       '2024-10-07',
         launch_vehicle: 'Falcon 9',
         status:         'cruising',
-        orbit:          'Heliocentric cruise; arrival at Didymos late 2026',
+        orbit:          'Final approach to Didymos: Mars flyby 2025-03-12, rendezvous burns Oct 2026, arrival November 2026 (a month early)',
         instruments:    ['AFC (framing cams)', 'HyperScout-H', 'TIRI', 'PALT', 'deployable cubesats Milani + Juventas'],
         highlights: [
             'Detailed post-impact survey of Dimorphos crater morphology',
             'Gravity measurements to characterize binary-asteroid internal structure',
             'First interplanetary cubesat deployments (Milani + Juventas)',
         ],
-        summary:        'The forensic follow-up to DART. Will measure exactly what a kinetic impactor does to a rubble-pile target.',
+        summary:        'The forensic follow-up to DART, arriving this month. Will measure exactly what a kinetic impactor does to a rubble-pile target.',
+        next:           { label: 'Didymos arrival (ESA names the day nearer the time)', date: '2026-11-30' },
+        horizons:       ['Hera (spacecraft)'],    // verified 2026-11-03 (bare 'Hera' is the asteroid list)
         confidence:     'observed',
-        source:         'ESA Hera',
+        source:         'ESA "Hera targets early arrival at Didymos asteroids"',
     },
     {
         id:             'osiris-apex',
         name:           'OSIRIS-APEX',
         agency:         'NASA',
         target:         'Apophis (99942)',
-        launched:       '2016-09-08 (as OSIRIS-REx; Bennu sample returned 2023-09-24)',
+        launched:       '2016-09-08',
         status:         'extended',
-        orbit:          'Heliocentric; Apophis rendezvous 2029-04 (after Earth close approach)',
+        orbit:          'Heliocentric; Apophis rendezvous 2029-04 (after Earth close approach); perihelion passes at 0.46 AU in 2026–2027 are the thermal gate',
         highlights: [
-            'OSIRIS-REx successfully returned Bennu samples to Earth on Sept 2023',
+            'OSIRIS-REx returned the Bennu samples to Earth on 2023-09-24',
             'Re-targeted to Apophis to observe Earth-tidal-flyby effects on a ~370 m rubble-pile asteroid',
             'Will arrive shortly after Apophis\'s 2029 close approach (32,000 km from Earth)',
         ],
         summary:        'The rare extended mission to a second target. Will study how Earth tides reshape a small body during close flyby.',
+        next:           { label: 'Apophis Earth close approach', date: '2029-04-13' },
+        horizons:       ['-64'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA / University of Arizona',
     },
     {
         id:             'psyche',
         name:           'Psyche',
-        agency:         'NASA / ASU / SpaceX',
+        agency:         'NASA / ASU',
         target:         '(16) Psyche metallic asteroid',
         launched:       '2023-10-13',
         launch_vehicle: 'Falcon Heavy',
         status:         'cruising',
-        orbit:          'Heliocentric cruise; Mars GA 2026, Psyche arrival 2029',
+        orbit:          'Heliocentric cruise under Hall-thruster propulsion; Mars gravity assist 2026-05-15 (4,609 km); Psyche arrival Aug 2029',
         instruments:    ['Multispectral imager', 'Gamma-ray + neutron spectrometer', 'Magnetometer', 'Gravity science (DSN ranging)'],
         highlights: [
             'First dedicated mission to a metallic (iron-nickel) asteroid',
-            'Using Hall-effect (ion) propulsion for primary thrust — largest deep-space electric-prop mission to date',
-            'Will test whether Psyche is a differentiated planetary core fragment',
+            'Mars flyby on 2026-05-15 added ~1,600 km/h and bent the orbit plane by 1° — imager, magnetometer and spectrometer all exercised on the planet',
+            'Largest deep-space electric-propulsion mission to date; carries the DSOC laser-comm demo',
         ],
         summary:        'First mission to what may be an exposed planetary core. Big for both planetary science and asteroid-mining economics.',
+        next:           { label: 'Arrival at (16) Psyche', date: '2029-08-01' },
+        horizons:       ['-255'],                 // verified 2026-11-03
         confidence:     'observed',
-        source:         'NASA / ASU Psyche mission',
+        source:         'NASA / ASU Psyche mission (Mars flyby release, May 2026)',
     },
     {
         id:             'hayabusa2-extended',
-        name:           'Hayabusa2 (extended SHAEM)',
+        name:           'Hayabusa2# (extended mission)',
         agency:         'JAXA',
-        target:         '2001 CC21 (flyby), 1998 KY26 (rendezvous)',
+        target:         '98943 Torifune (flown by), 1998 KY26 (rendezvous)',
         launched:       '2014-12-03',
         status:         'extended',
-        orbit:          'Heliocentric; 1998 KY26 rendezvous ~2031',
+        orbit:          'Heliocentric; Torifune (2001 CC21) flyby 2026-07-05 at ~1 km; 1998 KY26 rendezvous 2031',
         highlights: [
             'Prime mission: Ryugu sample return (delivered 2020)',
-            'Extended: rendezvous with 1998 KY26, a ~30 m rapidly-rotating asteroid',
-            'Will study rubble-pile vs monolithic structure at the smallest scales',
+            'Torifune flyby on 2026-07-05 passed ~1 km from a 500 m asteroid at 5 km/s — a planetary-defence guidance demonstration (JAXA, 2026-07-30)',
+            'Extended: rendezvous with 1998 KY26, a ~30 m rapidly-rotating asteroid, in 2031',
         ],
         summary:        'Extended mission to characterize the smallest asteroid class, which dominates the near-Earth population.',
+        next:           { label: '1998 KY26 rendezvous', date: '2031-07-01' },
+        horizons:       ['-37'],                  // verified 2026-11-03
         confidence:     'observed',
-        source:         'JAXA Hayabusa2 Extended Mission',
+        source:         'JAXA Hayabusa2 press release 2026-07-30',
+    },
+    {
+        id:             'tianwen-2',
+        name:           'Tianwen-2',
+        agency:         'CNSA',
+        target:         '469219 Kamoʻoalewa (sample return), then comet 311P/PANSTARRS',
+        launched:       '2025-05-28',
+        launch_vehicle: 'Long March 3B',
+        status:         'operational',
+        orbit:          'Station-keeping at quasi-satellite Kamoʻoalewa since 2026-07-04; departs April 2027, sample capsule lands Nov 2027',
+        instruments:    ['Multispectral + narrow-angle cameras', 'VIS–IR spectrometer', 'Thermal emission spectrometer', 'Radar sounder', 'Touch-and-go + anchor-and-attach samplers'],
+        highlights: [
+            'China\'s first asteroid sample return; arrived at Kamoʻoalewa on 2026-07-04 and is mapping it before committing to a sampling site',
+            'Kamoʻoalewa may be a chip of the Moon\'s Giordano Bruno crater — the sample will tell',
+            'After the Earth return the bus continues to main-belt comet 311P (arrival ~2035)',
+        ],
+        summary:        'Mapping a 40 m quasi-moon right now. The second Chinese deep-space sample return, and the first from an asteroid.',
+        next:           { label: 'Departure from Kamoʻoalewa', date: '2027-04-01' },
+        // No `horizons`: Horizons carries no Tianwen-2 ephemeris under any name
+        // (probe 2026-11-03: 'Tianwen-2' and 'Tianwen-2 (spacecraft)' both no-match);
+        // the quasi-satellite Kepler model draws it.
+        confidence:     'preliminary',
+        source:         'SpaceNews / Planetary Society (Jul 2026)',
+    },
+    {
+        id:             'lucy',
+        name:           'Lucy',
+        agency:         'NASA / SwRI',
+        target:         'Jupiter Trojan asteroids (8 bodies over 12 years)',
+        launched:       '2021-10-16',
+        launch_vehicle: 'Atlas V 401',
+        status:         'cruising',
+        orbit:          'Heliocentric, heading out to the L4 Trojan swarm; Donaldjohanson flyby 2025-04-20; Eurybates 2027-08-11',
+        instruments:    ['L\'LORRI (hi-res imager)', 'L\'Ralph (colour + IR spectrometer)', 'L\'TES (thermal)', 'Radio science'],
+        highlights: [
+            'Dinkinesh flyby (2023) found the first contact-binary satellite (Selam); Donaldjohanson (2025) is a 8 km contact binary too',
+            'Eurybates + Queta on 2027-08-11, then Polymele, Leucus, Orus (2027–28) and the Patroclus–Menoetius binary in 2033',
+        ],
+        summary:        'The first mission to the Trojans, the fossils of planet formation parked at Jupiter\'s L4 and L5.',
+        next:           { label: 'Eurybates + Queta flyby', date: '2027-08-11' },
+        horizons:       ['-49'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA Lucy mission',
+    },
+    {
+        id:             'neo-surveyor',
+        name:           'NEO Surveyor',
+        agency:         'NASA / JPL',
+        target:         'Near-Earth asteroid survey from Sun–Earth L1',
+        status:         'planned',
+        launched:       '2027-09 (NET, Falcon 9)',
+        orbit:          'Planned Sun–Earth L1 halo',
+        instruments:    ['NEOCam 50 cm infrared telescope (4–5.2 and 6–10 µm)'],
+        highlights: [
+            'The first space telescope built for planetary defence: finds the dark NEOs ground surveys miss',
+            'Goal: 2/3 of the ≥140 m population within five years, finishing the George E. Brown survey mandate',
+        ],
+        summary:        'Finds the ones that could hit us before they do. Feeds the NEO catalogue this site\'s orrery draws from.',
+        confidence:     'observed',
+        source:         'NASA NEO Surveyor',
     },
 ]);
 
@@ -415,16 +661,39 @@ export const MARS_MISSIONS = Object.freeze([
         launch_vehicle: 'Atlas V 401',
         status:         'extended',
         orbit:          'Sun-synchronous Mars polar, ~250–316 km altitude',
+        host:           'mars',
         instruments:    ['HiRISE (0.3 m/px camera)', 'CRISM (VNIR spectrometer, retired 2023)', 'CTX (context imager)', 'MARCI (weather camera)', 'SHARAD (subsurface radar)', 'MCS (climate sounder)'],
         highlights: [
             'Highest-resolution orbital imagery ever of Mars; imaged every other spacecraft\'s landing site',
             'Mapped extensive subsurface water-ice deposits at mid-latitudes — key to future crewed-mission ISRU',
-            'Serves as primary relay for the surface rovers (Curiosity, Perseverance, Zhurong before its loss)',
+            'Primary relay for Curiosity + Perseverance; carrying more of the relay load since MAVEN\'s loss',
             'Imaged recurring slope lineae (RSL) — initially interpreted as seasonal water flow, now debated as dry granular dust',
         ],
-        summary:        'The eyes of modern Mars science. Nearly 20 years of operation; the workhorse behind every recent surface mission\'s landing-site characterization and comms relay.',
+        summary:        'The eyes of modern Mars science. 21 years of operation; the workhorse behind every recent surface mission\'s landing-site characterization and comms relay.',
+        horizons:       ['-74'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA JPL MRO mission site',
+    },
+    {
+        id:             'mars-odyssey',
+        name:           '2001 Mars Odyssey',
+        agency:         'NASA / JPL',
+        target:         'Mars',
+        launched:       '2001-04-07',
+        launch_vehicle: 'Delta II 7925',
+        status:         'extended',
+        orbit:          'Near-polar ~400 km, drifting local time',
+        host:           'mars',
+        instruments:    ['THEMIS (thermal imager)', 'GRS (retired)', 'MARIE (retired)'],
+        highlights: [
+            'Longest-serving spacecraft at another planet — 25 years in orbit this April',
+            'THEMIS global thermal-infrared map underlies every Mars landing-site study; still relaying rover data',
+            'Propellant for ~2 more years at most; the end is a matter of bookkeeping, not failure',
+        ],
+        summary:        'The grandparent of the Mars fleet. Still the relay of last resort for the rovers.',
+        horizons:       ['-53'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA JPL Mars Odyssey',
     },
     {
         id:             'maven',
@@ -433,17 +702,19 @@ export const MARS_MISSIONS = Object.freeze([
         target:         'Mars',
         launched:       '2013-11-18',
         launch_vehicle: 'Atlas V 401',
-        status:         'extended',
-        orbit:          'Highly elliptical 150–6200 km (atmosphere-sampling periapsis passes)',
+        retired:        '2026-06',
+        status:         'retired',
+        orbit:          'Was 150 × 6,200 km elliptical; last telemetry 2025-12-04, contact lost 2025-12-06, declared unrecoverable June 2026',
+        host:           'mars',
         instruments:    ['NGIMS', 'STATIC', 'SWEA', 'SWIA', 'MAG', 'LPW', 'EUV', 'SEP', 'IUVS'],
         highlights: [
             'Quantified atmospheric escape rate — ~100 g/s of oxygen + other species lost to solar wind',
-            'Demonstrated that solar wind + coronal mass ejections stripped the Noachian-era atmosphere, turning Mars from wet to cold-dry',
-            'Provides real-time relay support for Mars surface missions alongside MRO',
+            'Demonstrated that solar wind + coronal mass ejections stripped the Noachian-era atmosphere',
+            'Lost after an unexpected tumble emerging from behind Mars; recovery attempts through solar conjunction failed and a review board closed the mission',
         ],
-        summary:        'The definitive experiment on why Mars is dry: quantified solar-wind-driven atmospheric loss and extrapolated it across geologic time.',
+        summary:        'The definitive experiment on why Mars is dry — ended after 11 years when the spacecraft went silent in December 2025.',
         confidence:     'observed',
-        source:         'NASA GSFC / LASP MAVEN mission',
+        source:         'NASA MAVEN status releases (Mar–Jun 2026)',
     },
     {
         id:             'mars-express',
@@ -454,16 +725,38 @@ export const MARS_MISSIONS = Object.freeze([
         launch_vehicle: 'Soyuz-Fregat',
         status:         'extended',
         orbit:          'Elliptical ~298 × 10,107 km, highly inclined',
+        host:           'mars',
         instruments:    ['HRSC (stereo camera)', 'OMEGA (VNIR spectrometer)', 'MARSIS (subsurface radar)', 'PFS', 'SPICAM', 'ASPERA-3', 'MaRS'],
         highlights: [
             'MARSIS radar detection of a possible subsurface liquid-water lake beneath the south polar cap (2018) — still debated but landmark',
             'First orbital detection of methane in the Martian atmosphere (2004)',
-            'Carried the Beagle 2 lander (landed 2003-12-25 but failed to fully deploy; imaged intact by MRO in 2015)',
-            'ESA\'s longest-running Mars mission — 20+ years on-orbit',
+            'ESA\'s longest-running Mars mission — 23 years on-orbit, extended to end-2026 with a further extension under review',
         ],
         summary:        'Europe\'s first Mars mission; still flying. The subsurface-lake MARSIS result remains one of the most consequential Mars discoveries of the last two decades.',
+        horizons:       ['-41'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'ESA Mars Express',
+    },
+    {
+        id:             'exomars-tgo',
+        name:           'ExoMars Trace Gas Orbiter',
+        agency:         'ESA / Roscosmos (launch)',
+        target:         'Mars',
+        launched:       '2016-03-14',
+        launch_vehicle: 'Proton-M',
+        status:         'extended',
+        orbit:          'Circular ~400 km, 74° inclination',
+        host:           'mars',
+        instruments:    ['NOMAD + ACS (trace-gas spectrometers)', 'CaSSIS (colour stereo camera)', 'FREND (neutron detector)'],
+        highlights: [
+            'Set the tightest upper limit on atmospheric methane — the Mars Express / Curiosity detections remain unreconciled',
+            'FREND mapped shallow hydrogen (water ice) across Valles Marineris',
+            'Now the primary relay for Perseverance and Curiosity alongside MRO since MAVEN went silent',
+        ],
+        summary:        'The sniffer and the switchboard: trace-gas chemistry by day, rover relay by night.',
+        horizons:       ['-143'],                 // verified 2026-11-03
+        confidence:     'observed',
+        source:         'ESA ExoMars TGO',
     },
     {
         id:             'curiosity',
@@ -474,7 +767,8 @@ export const MARS_MISSIONS = Object.freeze([
         landed:         '2012-08-06',
         launch_vehicle: 'Atlas V 541',
         status:         'extended',
-        orbit:          'Surface traverse — climbing Mt. Sharp (Aeolis Mons) since 2014',
+        orbit:          'Surface traverse — climbing Mt. Sharp (Aeolis Mons) since 2014; in the boxwork terrain of the sulfate unit',
+        host:           'mars',
         instruments:    ['Mastcam', 'ChemCam (laser LIBS)', 'APXS', 'CheMin', 'SAM (gas analysis)', 'RAD (radiation detector)', 'DAN', 'REMS (weather)'],
         highlights: [
             'Confirmed Gale Crater once held a long-lived habitable lake environment',
@@ -482,7 +776,7 @@ export const MARS_MISSIONS = Object.freeze([
             'RAD instrument measured the surface radiation dose at ~0.67 mSv/day — ground-truth for every future crewed mission\'s shielding budget',
             'Debuted the sky-crane landing system, since reused for Perseverance',
         ],
-        summary:        'The rover that proved ancient Mars was habitable. 12+ years into a 2-year prime mission; primary supplier of the surface-radiation dose numbers that inform Artemis-to-Mars planning.',
+        summary:        'The rover that proved ancient Mars was habitable. 14 years into a 2-year prime mission; primary supplier of the surface-radiation dose numbers that inform Artemis-to-Mars planning.',
         confidence:     'observed',
         source:         'NASA JPL MSL mission site',
     },
@@ -495,15 +789,16 @@ export const MARS_MISSIONS = Object.freeze([
         landed:         '2021-02-18',
         launch_vehicle: 'Atlas V 541',
         status:         'operational',
-        orbit:          'Surface traverse — Jezero delta + rim, collecting sample cache',
+        orbit:          'Surface traverse — Jezero crater rim (Witch Hazel Hill / Krokodillen), collecting the sample cache',
+        host:           'mars',
         instruments:    ['Mastcam-Z', 'SuperCam', 'PIXL', 'SHERLOC', 'MEDA (weather)', 'RIMFAX (subsurface radar)', 'MOXIE (retired, ISRU demo)', 'Ingenuity helicopter (retired 2024)'],
         highlights: [
             'MOXIE produced ~12 g of oxygen per hour from atmospheric CO₂ — first ISRU demonstration on another planet',
             'Ingenuity flew 72 sorties before rotor damage ended its mission (Jan 2024) — first powered flight on another world',
-            'Cached ≥30 sealed sample tubes for the planned Mars Sample Return campaign',
+            'Cached 30+ sealed sample tubes; the "Sapphire Canyon" core (2025) carries a potential biosignature',
             'Imaged evidence of a long-lived ancient river delta at Jezero — prime astrobiology terrain',
         ],
-        summary:        'The sample-cacher. Every sealed tube left at its staging depots becomes a candidate return sample — the first material ever to leave Mars, if MSR flies.',
+        summary:        'The sample-cacher. Every sealed tube left at its staging depots becomes a candidate return sample — the first material ever to leave Mars, if a return campaign flies.',
         confidence:     'observed',
         source:         'NASA JPL Mars 2020 mission',
     },
@@ -517,6 +812,7 @@ export const MARS_MISSIONS = Object.freeze([
         launch_vehicle: 'Long March 5',
         status:         'extended',              // orbiter extended; rover lost
         orbit:          'Orbiter: polar ~265 × 12,000 km; Rover: Utopia Planitia surface (lost contact 2022-05)',
+        host:           'mars',
         instruments:    ['Orbiter: MoRIC camera, HiRIC camera, MOSIR subsurface radar, MINPA, MoMAG, MMS, MMO',
                          'Zhurong: NaTeCam, MSCam, RoSPR subsurface radar, MarSCoDe (LIBS), MCS (meteorology), RoMAG'],
         highlights: [
@@ -526,6 +822,7 @@ export const MARS_MISSIONS = Object.freeze([
             'First complete orbit + lander + rover triplet from a single interplanetary launch',
         ],
         summary:        'China\'s inaugural interplanetary success. Rover lost but the orbital-imaging mission continues — returning the first Chinese high-resolution Mars photometry.',
+        horizons:       ['Tianwen-1'],            // probe: 'no ephemeris in window' — the SPK Horizons holds ends before 2026; the Mars-orbit model draws it
         confidence:     'observed',
         source:         'CNSA Tianwen-1 / PLANETARY.ORG Tianwen coverage',
         notes:          'Zhurong declared lost in April 2023; orbiter continues its extended mission.',
@@ -537,17 +834,546 @@ export const MARS_MISSIONS = Object.freeze([
         target:         'Mars',
         launched:       '2020-07-19',
         launch_vehicle: 'H-IIA',
-        status:         'operational',
+        status:         'extended',
         orbit:          'Elliptical equatorial ~20,000 × 43,000 km — full-disk weather-geometry coverage',
+        host:           'mars',
         instruments:    ['EXI (UV + visible imager)', 'EMIRS (thermal-IR spectrometer)', 'EMUS (far-UV spectrometer)'],
         highlights: [
             'First Arab interplanetary mission; first mission from a nation other than US/Russia/Europe/India/China to reach Mars orbit',
             'Unique high-elliptical orbit gives continuous whole-disk views rarely possible from lower orbits',
-            'Characterizes Mars atmospheric dynamics + escape across diurnal + seasonal cycles',
+            'Characterizes Mars atmospheric dynamics + escape across diurnal + seasonal cycles; extended mission since 2023',
         ],
         summary:        'The Mars weather satellite. EXI\'s full-disk imagery has become a standard context layer for interpreting surface-mission weather.',
+        horizons:       ['-62'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'MBRSC Hope / EMM mission',
+    },
+    {
+        id:             'escapade',
+        name:           'ESCAPADE (Blue + Gold)',
+        agency:         'NASA / UC Berkeley SSL / Rocket Lab',
+        target:         'Mars',
+        launched:       '2025-11-13',
+        launch_vehicle: 'New Glenn (NG-2)',
+        status:         'cruising',
+        orbit:          'Loitered near Sun–Earth L2 for a year; powered Earth flybys (trans-Mars injection burns) on 2026-11-07 and 11-09; Mars orbit insertion Sept 2027',
+        host:           'earth',
+        instruments:    ['EMAG (magnetometer)', 'EESA (electrostatic analyser)', 'ELP (Langmuir probe)'],
+        highlights: [
+            'First twin-spacecraft mission to Mars — two vantage points on how the solar wind strips the atmosphere, the question MAVEN opened',
+            'First NASA mission to combine an Earth gravity assist with an engine burn at periapsis (the "loiter and slingshot" trajectory New Glenn\'s late launch forced)',
+            'A missed burn window means the next Mars opportunity is two years away — this week is the mission',
+        ],
+        summary:        'Two $80M smallsats on the cheapest route to Mars ever flown. Science operations begin spring 2028.',
+        next:           { label: 'Trans-Mars injection (Earth flyby burns 7 & 9 Nov)', date: '2026-11-07' },
+        horizons:       ['ESCAPADE-Blue'],        // verified 2026-11-03
+        confidence:     'preliminary',
+        source:         'NASA ESCAPADE blog (2026-11-02) + Rocket Lab',
+    },
+    {
+        id:             'mmx',
+        name:           'MMX (Martian Moons eXploration)',
+        agency:         'JAXA',
+        target:         'Phobos (sample return) + Deimos',
+        launched:       '2026-10-20',
+        launch_vehicle: 'H3-24L (flight 10)',
+        status:         'cruising',
+        orbit:          'Trans-Mars cruise; Mars arrival 2027, quasi-satellite orbits of Phobos 2027–2030, Earth return 2031',
+        instruments:    ['TENGOO + OROCHI cameras', 'MIRS (IR spectrometer)', 'MEGANE (gamma/neutron)', 'LIDAR', 'CMDM (dust)', 'MSA (mass spectrum)', 'IDEX rover (CNES/DLR)'],
+        highlights: [
+            'Launched two weeks ago on H3 flight 10 — first mission to land on a Martian moon and return samples',
+            'Settles whether Phobos is a captured asteroid or a giant-impact fragment of Mars',
+            'Carries a French–German rover for Phobos\'s surface',
+        ],
+        summary:        'Japan\'s third sample return, this time from Phobos. Just left Earth.',
+        next:           { label: 'Mars arrival', date: '2027-08-01' },
+        horizons:       ['MMX'],                  // verified 2026-11-03
+        confidence:     'preliminary',
+        source:         'JAXA press release 2026-10-20',
+    },
+    {
+        id:             'rosalind-franklin',
+        name:           'Rosalind Franklin (ExoMars rover)',
+        agency:         'ESA / NASA',
+        target:         'Mars — Oxia Planum',
+        status:         'planned',
+        launched:       '2028-10 (planned)',
+        orbit:          'Planned surface mission, landing 2030',
+        instruments:    ['2 m drill', 'Pasteur suite (MOMA, RLS, MicrOmega)', 'PanCam', 'WISDOM radar'],
+        highlights: [
+            'The only Mars rover with a 2 m drill — below the radiation-processed surface layer',
+            'Rebuilt without Roscosmos after 2022; NASA supplies the launcher, braking engines and heaters',
+        ],
+        summary:        'Europe\'s astrobiology rover, ten years late and still the only one that can dig.',
+        confidence:     'observed',
+        source:         'ESA ExoMars Rosalind Franklin',
+    },
+]);
+
+// ═══════════════════════════════════════════════════════════════
+//  OUTER SOLAR SYSTEM — Jupiter and beyond
+// ═══════════════════════════════════════════════════════════════
+
+export const OUTER_SYSTEM_MISSIONS = Object.freeze([
+    {
+        id:             'juno',
+        name:           'Juno',
+        agency:         'NASA / SwRI',
+        target:         'Jupiter',
+        launched:       '2011-08-05',
+        launch_vehicle: 'Atlas V 551',
+        status:         'extended',
+        orbit:          'Polar Jupiter orbit, 33-day perijoves grazing the inner radiation belts; second extended mission since Oct 2025',
+        host:           'jupiter',
+        instruments:    ['MWR (microwave radiometer)', 'JIRAM', 'MAG', 'JADE', 'JEDI', 'UVS', 'Waves', 'JunoCam', 'Gravity science'],
+        highlights: [
+            'Measured Jupiter\'s diluted core and the depth of its zonal jets (~3,000 km)',
+            'Io flybys (2023–24) mapped the volcanoes; sub-surface temperature data published 2026',
+            'Flew through the FY2026 cancellation threat intact — Congress funded it; the mission continues until the spacecraft cannot',
+        ],
+        summary:        'Still alive at Jupiter after 10 years in the worst radiation environment in the solar system.',
+        horizons:       ['-61'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA Juno; FY2026 appropriations (Jan 2026)',
+    },
+    {
+        id:             'europa-clipper',
+        name:           'Europa Clipper',
+        agency:         'NASA / JPL / APL',
+        target:         'Europa (Jupiter)',
+        launched:       '2024-10-14',
+        launch_vehicle: 'Falcon Heavy',
+        status:         'cruising',
+        orbit:          'Heliocentric cruise: Mars flyby 2025-03-01, Earth gravity assist 2026-12-03 (~3,200 km), Jupiter orbit insertion 2030-04-11',
+        instruments:    ['EIS cameras', 'E-THEMIS', 'MISE', 'Europa-UVS', 'REASON (ice-penetrating radar)', 'ECM (magnetometer)', 'PIMS', 'MASPEX', 'SUDA'],
+        highlights: [
+            'Largest planetary spacecraft NASA has built (solar arrays 30 m tip to tip)',
+            'The Earth flyby next month is the magnetometer\'s one absolute calibration before Jupiter',
+            '49 Europa flybys from Jupiter orbit will sound the ice shell and sample the plumes',
+        ],
+        summary:        'Is there an ocean under Europa\'s ice, and could it be habitable? Arrives in 2030.',
+        next:           { label: 'Earth gravity assist', date: '2026-12-03' },
+        horizons:       ['-159'],                 // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA Europa Clipper',
+    },
+    {
+        id:             'juice',
+        name:           'JUICE (Jupiter Icy Moons Explorer)',
+        agency:         'ESA',
+        target:         'Ganymede, Callisto, Europa',
+        launched:       '2023-04-14',
+        launch_vehicle: 'Ariane 5 ECA',
+        status:         'cruising',
+        orbit:          'Heliocentric cruise: Earth–Moon flyby 2024-08, Venus 2025-08, Earth 2026-09-28 (8,640 km), Earth 2029-01, Jupiter arrival July 2031',
+        instruments:    ['JANUS camera', 'MAJIS', 'UVS', 'RIME (radar)', 'GALA (laser altimeter)', 'J-MAG', 'PEP', 'RPWI', '3GM radio science'],
+        highlights: [
+            'The second Earth flyby on 2026-09-28 went to plan and imaged Earth and the Moon on the way out',
+            'First spacecraft to orbit a moon other than our own (Ganymede, 2034)',
+            'Shares the Jupiter system with Europa Clipper for a year of joint observations',
+        ],
+        summary:        'Europe\'s flagship to the icy moons. Flew past Earth five weeks ago; Jupiter in 2031.',
+        next:           { label: 'Earth gravity assist (final)', date: '2029-01-29' },
+        horizons:       ['-28'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'ESA "Successful Earth flyby improves Juice\'s course to Jupiter" (Sep 2026)',
+    },
+    {
+        id:             'new-horizons',
+        name:           'New Horizons',
+        agency:         'NASA / APL / SwRI',
+        target:         'Kuiper Belt (Pluto 2015, Arrokoth 2019)',
+        launched:       '2006-01-19',
+        launch_vehicle: 'Atlas V 551',
+        status:         'extended',
+        orbit:          'Hyperbolic escape, ~62 AU from the Sun, ~3 AU/yr; extended mission through Kuiper Belt exit in 2029',
+        instruments:    ['LORRI', 'Ralph', 'Alice', 'SWAP', 'PEPSSI', 'VBSDC (student dust counter)', 'REX'],
+        highlights: [
+            'Only spacecraft to visit Pluto (2015) and a cold classical KBO (Arrokoth, 2019)',
+            'Measures the Kuiper Belt dust and the outer heliosphere in situ — the only probe between Voyager and the planets',
+            'Survived the FY2026 termination proposal; teams are searching for a third flyby target',
+        ],
+        summary:        'The one working spacecraft in the Kuiper Belt. A second heliospheric sentinel while IMAP maps the boundary from inside.',
+        horizons:       ['-98'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA / APL New Horizons',
+    },
+    {
+        id:             'voyager-1',
+        name:           'Voyager 1',
+        agency:         'NASA / JPL',
+        target:         'Interstellar medium',
+        launched:       '1977-09-05',
+        launch_vehicle: 'Titan IIIE-Centaur',
+        status:         'extended',
+        orbit:          'Hyperbolic escape, ~168 AU, 3.6 AU/yr toward the solar apex; crossed the heliopause 2012-08-25',
+        instruments:    ['MAG', 'PLS (dead)', 'LECP', 'CRS', 'PWS'],
+        highlights: [
+            'The most distant human-made object; one light-day out this month',
+            'Measures the interstellar magnetic field and plasma density directly — the only in-situ ground truth for IMAP\'s maps',
+            'Power falls ~4 W/yr; instruments are switched off one by one to stretch operations toward 2030',
+        ],
+        summary:        'Still calling home from interstellar space after 49 years.',
+        horizons:       ['-31'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA JPL Voyager mission status',
+    },
+    {
+        id:             'voyager-2',
+        name:           'Voyager 2',
+        agency:         'NASA / JPL',
+        target:         'Interstellar medium',
+        launched:       '1977-08-20',
+        launch_vehicle: 'Titan IIIE-Centaur',
+        status:         'extended',
+        orbit:          'Hyperbolic escape, ~140 AU, 3.3 AU/yr, 35° south of the ecliptic; crossed the heliopause 2018-11-05',
+        instruments:    ['MAG', 'PLS', 'LECP', 'CRS', 'PWS'],
+        highlights: [
+            'Only spacecraft to visit Uranus and Neptune',
+            'Its plasma instrument still works, so it measured the heliopause crossing that Voyager 1 could not',
+            'Talks only to DSS-43 at Canberra — the one dish on Earth that can hear it',
+        ],
+        summary:        'The grand tour\'s survivor, now sampling the interstellar medium from the southern sky.',
+        horizons:       ['-32'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA JPL Voyager mission status',
+    },
+    {
+        id:             'dragonfly',
+        name:           'Dragonfly',
+        agency:         'NASA / APL',
+        target:         'Titan (Saturn)',
+        status:         'planned',
+        launched:       '2028-07 (planned, Falcon Heavy)',
+        orbit:          'Planned Titan rotorcraft lander, arrival 2034',
+        instruments:    ['DraMS (mass spectrometer)', 'DraGNS (gamma/neutron)', 'DraGMet (meteorology)', 'DragonCam'],
+        highlights: [
+            'A nuclear-powered octocopter that will hop between sites across Titan\'s organic dunes',
+            'Passed its critical design review in 2025; assembly under way at APL',
+        ],
+        summary:        'Prebiotic chemistry on a world with weather, lakes and dunes. The most ambitious lander NASA has approved.',
+        confidence:     'observed',
+        source:         'NASA Dragonfly',
+    },
+]);
+
+// ═══════════════════════════════════════════════════════════════
+//  MOON & CISLUNAR
+// ═══════════════════════════════════════════════════════════════
+
+export const LUNAR_MISSIONS = Object.freeze([
+    {
+        id:             'lro',
+        name:           'Lunar Reconnaissance Orbiter',
+        agency:         'NASA / GSFC',
+        target:         'Moon',
+        launched:       '2009-06-18',
+        launch_vehicle: 'Atlas V 401',
+        status:         'extended',
+        orbit:          'Elliptical polar lunar orbit (~20 × 165 km)',
+        host:           'moon',
+        instruments:    ['LROC (cameras)', 'LOLA (laser altimeter)', 'Diviner', 'LEND', 'LAMP', 'CRaTER', 'Mini-RF'],
+        highlights: [
+            '17 years of mapping: every Artemis and CLPS landing site was picked from LRO data',
+            'Imaged every lander of the 2020s on the surface, upright or not',
+        ],
+        summary:        'The map of the Moon. Nothing lands there without consulting it.',
+        horizons:       ['-85'],                  // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA LRO',
+    },
+    {
+        id:             'danuri',
+        name:           'Danuri (KPLO)',
+        agency:         'KARI',
+        target:         'Moon',
+        launched:       '2022-08-05',
+        launch_vehicle: 'Falcon 9',
+        status:         'extended',
+        orbit:          '~100 km polar lunar orbit; extended through 2027',
+        host:           'moon',
+        instruments:    ['LUTI', 'PolCam', 'KMAG', 'KGRS', 'ShadowCam (NASA)', 'DTNPL'],
+        highlights: [
+            'Korea\'s first deep-space mission; ShadowCam images the permanently shadowed craters at 200× LROC\'s sensitivity',
+        ],
+        summary:        'The lunar orbiter that sees in the dark — the south-pole ice prospector for Artemis.',
+        horizons:       ['-155'],                 // verified 2026-11-03
+        confidence:     'observed',
+        source:         'KARI Danuri',
+    },
+    {
+        id:             'artemis-ii',
+        name:           'Artemis II',
+        agency:         'NASA / CSA',
+        target:         'Lunar free-return flyby (crewed)',
+        launched:       '2026-04-01',
+        launch_vehicle: 'SLS Block 1',
+        status:         'completed',
+        orbit:          'Free-return lunar flyby; splashdown off San Diego 2026-04-10 after 10 days and 1.13 million km',
+        host:           'earth',
+        instruments:    ['Orion crew module (Wiseman, Glover, Koch, Hansen)'],
+        highlights: [
+            'First crewed flight beyond low Earth orbit since Apollo 17 (1972); first non-NASA astronaut on a lunar mission (Jeremy Hansen, CSA)',
+            'Landed within a mile of the recovery ship; crew saw a lunar eclipse from behind the Moon',
+            'Qualified Orion\'s life support and heat shield for the landing missions that follow',
+        ],
+        summary:        'Four people around the Moon and back. The flight that made Artemis real.',
+        confidence:     'observed',
+        source:         'NASA Artemis II mission milestones (Apr 2026)',
+    },
+    {
+        id:             'griffin-1',
+        name:           'Griffin Mission One (Moon Base 2)',
+        agency:         'Astrobotic / NASA CLPS',
+        target:         'Moon — south polar region',
+        status:         'planned',
+        launched:       '2026-11 (NET, Falcon Heavy; may slip to Jan 2027)',
+        orbit:          'Planned direct lunar landing with the Astrolab FLIP rover',
+        highlights: [
+            'Astrobotic\'s second attempt after Peregrine\'s 2024 propellant leak; the only CLPS flight NASA still expected in 2026',
+            'Rebranded Moon Base 2 under NASA\'s 2026 lunar programme',
+        ],
+        summary:        'The biggest commercial lander yet, shipping to the Cape for a late-2026 attempt.',
+        next:           { label: 'Launch (NET)', date: '2026-11-30' },
+        confidence:     'preliminary',
+        source:         'Spaceflight Now (Jun 2026), NASA CLPS (Sep 2026)',
+    },
+    {
+        id:             'change-7',
+        name:           'Chang\'e 7',
+        agency:         'CNSA',
+        target:         'Moon — south pole (Shackleton rim)',
+        status:         'planned',
+        launched:       '2027 (early; the Aug 2026 attempt was scrubbed for a typhoon)',
+        orbit:          'Orbiter + lander + rover + hopping probe for the shadowed craters',
+        highlights: [
+            'A hopping probe will drop into a permanently shadowed crater to look for water ice directly',
+            'Precursor to the International Lunar Research Station',
+        ],
+        summary:        'China\'s south-pole prospector, now an early-2027 launch.',
+        confidence:     'preliminary',
+        source:         'CNSA via launch-schedule reporting (Sep 2026)',
+    },
+    {
+        id:             'blue-ghost-2',
+        name:           'Blue Ghost Mission 2',
+        agency:         'Firefly / NASA CLPS',
+        target:         'Moon — far side (Schrödinger basin) + lunar orbit relay',
+        status:         'planned',
+        launched:       '2027 (NASA statement of 2026-09-15)',
+        orbit:          'Planned far-side landing with the Elytra transfer vehicle as relay',
+        highlights: [
+            'Blue Ghost 1 was the first fully successful commercial lunar landing (2025-03-02)',
+            'Carries LuSEE-Night, the first radio-astronomy experiment on the far side',
+        ],
+        summary:        'Firefly goes to the far side, after the lander that worked the first time.',
+        confidence:     'preliminary',
+        source:         'NASA CLPS statement 2026-09-15',
+    },
+    {
+        id:             'im-3',
+        name:           'IM-3 (Intuitive Machines)',
+        agency:         'Intuitive Machines / NASA CLPS',
+        target:         'Moon — Reiner Gamma swirl',
+        status:         'planned',
+        launched:       '2027 (first half, Falcon 9)',
+        orbit:          'Planned landing at the Reiner Gamma magnetic anomaly',
+        highlights: [
+            'Lands on a lunar swirl to measure the mini-magnetosphere that this site\'s Moon page cross-links',
+            'IM-1 and IM-2 both reached the surface and tipped over; IM-3 carries a redesigned leg geometry',
+        ],
+        summary:        'Third time at the Moon for the lander that keeps falling over.',
+        confidence:     'preliminary',
+        source:         'NASA Moon Base programme (Sep 2026)',
+    },
+]);
+
+// ═══════════════════════════════════════════════════════════════
+//  OBSERVATORIES & STATIONS — Earth orbit and Sun–Earth L2
+// ═══════════════════════════════════════════════════════════════
+
+export const OBSERVATORY_MISSIONS = Object.freeze([
+    {
+        id:             'iss',
+        name:           'International Space Station',
+        agency:         'NASA / Roscosmos / ESA / JAXA / CSA',
+        launched:       '1998-11-20',
+        status:         'operational',
+        orbit:          'LEO ~415 km, 51.6°; crewed continuously since 2000-11-02; deorbit vehicle contracted for ~2030',
+        host:           'earth',
+        norad:          25544,
+        instruments:    ['AMS-02', 'NICER', 'ECOSTRESS', 'EMIT', 'CODEX coronagraph', 'Cold Atom Lab'],
+        highlights: [
+            '26 years of continuous habitation this week',
+            'Hosts a coronagraph (CODEX) and the AMS cosmic-ray spectrometer alongside the biology',
+        ],
+        summary:        'The one address off Earth with a permanent population.',
+        confidence:     'observed',
+        source:         'NASA ISS',
+    },
+    {
+        id:             'tiangong',
+        name:           'Tiangong (CSS)',
+        agency:         'CMSA',
+        launched:       '2021-04-29',
+        status:         'operational',
+        orbit:          'LEO ~390 km, 41.5°; three modules, crewed by Shenzhou rotations',
+        host:           'earth',
+        norad:          48274,
+        instruments:    ['CSST Xuntian telescope (co-orbiting, planned 2027)'],
+        highlights: [
+            'Three-module station complete since 2022; Shenzhou crews rotate every six months',
+            'Xuntian, a Hubble-class survey telescope, will co-orbit and dock for servicing',
+        ],
+        summary:        'The second permanent outpost in orbit.',
+        confidence:     'observed',
+        source:         'CMSA',
+    },
+    {
+        id:             'hubble',
+        name:           'Hubble Space Telescope',
+        agency:         'NASA / ESA',
+        launched:       '1990-04-24',
+        launch_vehicle: 'Space Shuttle Discovery (STS-31)',
+        status:         'extended',
+        orbit:          'LEO ~515 km, decaying; one-gyro mode since 2024',
+        host:           'earth',
+        norad:          20580,
+        instruments:    ['WFC3', 'COS', 'STIS', 'ACS', 'NICMOS (retired)', 'FGS'],
+        highlights: [
+            '36 years, 1.7 million observations; reboost options under study as the orbit decays toward the 2030s',
+            'Runs on one gyroscope to save the last spare',
+        ],
+        summary:        'Still the sharpest UV–optical eye in orbit.',
+        confidence:     'observed',
+        source:         'NASA / STScI Hubble',
+    },
+    {
+        id:             'jwst',
+        name:           'James Webb Space Telescope',
+        agency:         'NASA / ESA / CSA',
+        launched:       '2021-12-25',
+        launch_vehicle: 'Ariane 5 ECA',
+        status:         'operational',
+        orbit:          'Sun–Earth L2 halo (~1.5 million km anti-sunward)',
+        host:           'earth',
+        instruments:    ['NIRCam', 'NIRSpec', 'MIRI', 'NIRISS / FGS'],
+        highlights: [
+            'Fourth cycle of science; propellant for 20+ years of station-keeping',
+            'Imaged the most distant confirmed galaxies and the first exoplanet atmospheres in the mid-IR',
+        ],
+        summary:        'The infrared flagship at L2.',
+        horizons:       ['-170'],                 // verified 2026-11-03
+        confidence:     'observed',
+        source:         'NASA / STScI JWST',
+    },
+    {
+        id:             'roman',
+        name:           'Nancy Grace Roman Space Telescope',
+        agency:         'NASA / GSFC',
+        launched:       '2026-08-30',
+        launch_vehicle: 'Falcon Heavy',
+        status:         'operational',
+        orbit:          'Sun–Earth L2 halo (transfer complete; commissioning through early 2027)',
+        host:           'earth',
+        instruments:    ['WFI (Wide Field Instrument, 300 Mpx)', 'CGI (Coronagraph Instrument)'],
+        highlights: [
+            'Launched 2026-08-30 — Hubble\'s resolution over a field 100× larger; WFI powered on 2026-09-11',
+            'Dark energy, exoplanet microlensing and the coronagraph tech demo; first images expected early 2027',
+        ],
+        summary:        'Hubble\'s wide-angle successor, two months into commissioning at L2.',
+        next:           { label: 'First science images (expected)', date: '2027-02-01' },
+        horizons:       ['Roman Space Telescope'], // verified 2026-11-03
+        confidence:     'preliminary',
+        source:         'NASA Roman blog (Sep–Nov 2026)',
+    },
+    {
+        id:             'euclid',
+        name:           'Euclid',
+        agency:         'ESA',
+        launched:       '2023-07-01',
+        launch_vehicle: 'Falcon 9',
+        status:         'operational',
+        orbit:          'Sun–Earth L2 halo',
+        host:           'earth',
+        instruments:    ['VIS (visible imager)', 'NISP (near-IR spectrometer/photometer)'],
+        highlights: [
+            'Surveying a third of the sky for dark energy; first data release March 2025',
+        ],
+        summary:        'Europe\'s dark-universe survey, sharing L2 with JWST and Roman.',
+        horizons:       ['-680'],                 // verified 2026-11-03
+        confidence:     'observed',
+        source:         'ESA Euclid',
+    },
+    {
+        id:             'gaia',
+        name:           'Gaia',
+        agency:         'ESA',
+        launched:       '2013-12-19',
+        retired:        '2025-03-27',
+        status:         'retired',
+        orbit:          'Passivated 2025-03-27 and pushed into a heliocentric retirement orbit from L2',
+        instruments:    ['Astrometric field', 'BP/RP photometers', 'RVS spectrometer'],
+        highlights: [
+            'Two billion stars with positions and motions; DR4 (2026) and DR5 (2030) still to come from the archive',
+            'This site\'s SkyView and galactic map draw their star identities from Gaia-cross-matched catalogues',
+        ],
+        summary:        'The map of the Milky Way. Switched off, but half its data is still unpublished.',
+        confidence:     'observed',
+        source:         'ESA Gaia end of operations',
+    },
+    {
+        id:             'spherex',
+        name:           'SPHEREx',
+        agency:         'NASA / JPL / Caltech',
+        launched:       '2025-03-11',
+        launch_vehicle: 'Falcon 9 (with PUNCH)',
+        status:         'operational',
+        orbit:          'Sun-synchronous LEO ~650 km',
+        host:           'earth',
+        norad_search:   'SPHEREX',
+        instruments:    ['102-band near-IR spectral imager'],
+        highlights: [
+            'All-sky spectral survey in 102 colours; first full-sky map delivered 2026',
+        ],
+        summary:        'Every point on the sky in 102 infrared colours, twice a year.',
+        confidence:     'observed',
+        source:         'NASA SPHEREx',
+    },
+    {
+        id:             'pandora',
+        name:           'Pandora',
+        agency:         'NASA / LLNL / U. Arizona',
+        launched:       '2026-01-11',
+        launch_vehicle: 'Falcon 9 (Twilight rideshare)',
+        status:         'operational',
+        orbit:          'Sun-synchronous LEO',
+        host:           'earth',
+        norad_search:   'PANDORA',
+        instruments:    ['45 cm telescope with simultaneous visible + NIR channels'],
+        highlights: [
+            'Stares at 20 known transiting exoplanets for 10 h at a time to separate stellar spots from planetary atmospheres',
+            'The calibration JWST\'s transit spectra need, from a $20M smallsat',
+        ],
+        summary:        'NASA\'s newest exoplanet telescope, in orbit since January.',
+        confidence:     'preliminary',
+        source:         'NASA Small Satellite Missions blog (2026-01-11)',
+    },
+    {
+        id:             'plato',
+        name:           'PLATO',
+        agency:         'ESA',
+        status:         'planned',
+        launched:       '2027-01 (NET, Ariane 6; was Dec 2026)',
+        orbit:          'Planned Sun–Earth L2',
+        instruments:    ['26 cameras, 2,100 deg² field'],
+        highlights: [
+            'Earth-sized planets in Earth-like orbits around Sun-like stars, with asteroseismic ages',
+            'Flight-ready after final environmental tests in 2026',
+        ],
+        summary:        'Europe\'s Kepler successor, waiting for its Ariane 6.',
+        confidence:     'preliminary',
+        source:         'ESA PLATO',
     },
 ]);
 
@@ -579,7 +1405,9 @@ export const LEGACY_MISSIONS = Object.freeze([
         agency:      'NASA',
         launched:    '2008-10-19',
         status:      'extended',
-        note:        'Heliosphere-boundary imager; IMAP replaces + supersedes.',
+        host:        'earth',
+        norad:       33401,
+        note:        'Heliosphere-boundary imager, 18 years into a 2-year mission; IMAP has superseded it since Feb 2026. Funding past FY2026 unconfirmed.',
     },
     {
         id:          'mariner-10',
@@ -589,19 +1417,38 @@ export const LEGACY_MISSIONS = Object.freeze([
         status:      'retired',
         note:        'First Mercury + Venus flyby vehicle. First gravity-assist demonstration. The grandparent of BepiColombo.',
     },
+    {
+        id:          'cassini',
+        name:        'Cassini–Huygens',
+        agency:      'NASA / ESA / ASI',
+        launched:    '1997-10-15',
+        retired:     '2017-09-15',
+        status:      'completed',
+        host:        'saturn',
+        note:        '13 years at Saturn; Huygens landed on Titan (2005). Ended in Saturn\'s atmosphere. Dragonfly is the return ticket.',
+    },
 ]);
 
 // ═══════════════════════════════════════════════════════════════
 //  CONVENIENCE DISPATCHERS
 // ═══════════════════════════════════════════════════════════════
 
-export const ALL_MISSIONS = Object.freeze([
-    ...HELIOPHYSICS_MISSIONS,
-    ...INNER_PLANET_MISSIONS,
-    ...MARS_MISSIONS,
-    ...SMALL_BODY_MISSIONS,
-    ...LEGACY_MISSIONS,
+/** The ONE list of families, in display order. missions.html reads this. */
+export const MISSION_FAMILIES = Object.freeze([
+    Object.freeze({ id: 'helio',       label: 'Heliophysics',       missions: HELIOPHYSICS_MISSIONS }),
+    Object.freeze({ id: 'inner',       label: 'Inner Planets',      missions: INNER_PLANET_MISSIONS }),
+    Object.freeze({ id: 'mars',        label: 'Mars',               missions: MARS_MISSIONS }),
+    Object.freeze({ id: 'smallbody',   label: 'Small Bodies',       missions: SMALL_BODY_MISSIONS }),
+    Object.freeze({ id: 'outer',       label: 'Outer Solar System', missions: OUTER_SYSTEM_MISSIONS }),
+    Object.freeze({ id: 'lunar',       label: 'Moon & Cislunar',    missions: LUNAR_MISSIONS }),
+    Object.freeze({ id: 'observatory', label: 'Observatories & Stations', missions: OBSERVATORY_MISSIONS }),
+    Object.freeze({ id: 'legacy',      label: 'Legacy',             missions: LEGACY_MISSIONS }),
 ]);
+
+export const ALL_MISSIONS = Object.freeze(MISSION_FAMILIES.flatMap(f => f.missions));
+
+/** Date the statuses above were last checked against agency pages. */
+export const ROSTER_VERIFIED = '2026-11-03';
 
 export function missionsByStatus(status) {
     return ALL_MISSIONS.filter(m => m.status === status);

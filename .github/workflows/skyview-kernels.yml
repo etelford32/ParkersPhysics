@@ -22,6 +22,11 @@ name: skyview-kernels
 #                         planets.js) against a baked Astronomy Engine fixture
 #                         — it reads the SAME PLANET_FRAMES table and the same
 #                         ephemeris modules, so it rides this workflow
+#   horizons-params.mjs   js/horizons.js's JPL Horizons VECTORS query: the
+#                         frame parameter is REF_PLANE=ECLIPTIC and there is
+#                         no REF_FRAME (the API 400s on any unknown name — the
+#                         live path was dead on that for its whole life and
+#                         nothing noticed because Meeus caught every failure)
 #
 # galactic-map.html is in the path filter ON PURPOSE: SkyView reads its CATALOG,
 # so an edit there must re-run the drift gate (re-bake with
@@ -46,6 +51,8 @@ on:
       - 'tests/skyview-*.mjs'
       - 'js/orrery-planets.js'
       - 'tests/orrery-planets.mjs'
+      - 'tests/horizons-params.mjs'
+      - 'js/mission-ephemeris.js'
       - 'tests/fixtures/orrery-planets-astronomy-engine.json'
       - '.github/workflows/skyview-kernels.yml'
   pull_request:
@@ -62,6 +69,8 @@ on:
       - 'tests/skyview-*.mjs'
       - 'js/orrery-planets.js'
       - 'tests/orrery-planets.mjs'
+      - 'tests/horizons-params.mjs'
+      - 'js/mission-ephemeris.js'
       - 'tests/fixtures/orrery-planets-astronomy-engine.json'
       - '.github/workflows/skyview-kernels.yml'
   workflow_dispatch:
@@ -91,3 +100,5 @@ jobs:
         run: node tests/skyview-catalog.mjs
       - name: orrery planet placement (vs Astronomy Engine fixture)
         run: node tests/orrery-planets.mjs
+      - name: Horizons query parameters (REF_PLANE, never REF_FRAME)
+        run: node tests/horizons-params.mjs
