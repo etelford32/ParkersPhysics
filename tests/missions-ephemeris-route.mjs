@@ -34,7 +34,7 @@ const realFetch = globalThis.fetch;
 /** plan: COMMAND value → 'table'|'list'|'nomatch'|'http500'|'http400'|'busy-once'|'throw' */
 function stub(plan) {
     const seen = [];
-    const busy = new Set();
+    const busy = new Map();
     let active = 0; stub.peak = 0;
     globalThis.fetch = async (url) => {
         const u = new URL(String(url));
@@ -50,10 +50,13 @@ function stub(plan) {
         if (k === 'throw') throw new TypeError('fetch failed');
         if (k === 'http500') return new Response('oops', { status: 500 });
         if (k === 'http400') return new Response(JSON.stringify({ code: '400', message: 'one or more query parameter was not recognized' }), { status: 400 });
-        if (k === 'busy-once') {
-            if (!busy.has(cmd)) { busy.add(cmd); return new Response('busy', { status: 503 }); }
+        if (k === 'busy-once' || k === 'busy-twice') {
+            const n = (busy.get(cmd) || 0) + 1; busy.set(cmd, n);
+            const need = k === 'busy-once' ? 1 : 2;
+            if (n <= need) return new Response('<!DOCTYPE html>\n<html class="no-js"><head></head><body>busy</body></html>', { status: 503 });
             return Response.json({ result: table(cmd) });
         }
+        if (k === 'busy-always') return new Response('<!DOCTYPE html><html></html>', { status: 503 });
         const result = k === 'table' ? table(cmd) : k === 'list' ? LIST : 'No matches found.';
         return Response.json({ signature: { version: '1.2' }, result });
     };
@@ -63,22 +66,22 @@ const restore = () => { globalThis.fetch = realFetch; };
 const req = (qs = '') => new Request(`https://x.test/api/missions/ephemeris${qs ? '?' + qs : ''}`);
 
 await ok('candidates walk in order, stop at the first table, and self-report', async () => {
-    const seen = stub({ '-1176': 'nomatch', 'Hera (spacecraft)': 'table', '399': 'table', '-96': 'table' });
-    const res = await handler(req('ids=hera,parker-solar-probe'), { now: JD0 + 0.5 });
+    const seen = stub({ 'Tianwen-2': 'nomatch', 'Tianwen-2 (spacecraft)': 'table', '399': 'table', '-96': 'table' });
+    const res = await handler(req('ids=tianwen-2,parker-solar-probe'), { now: JD0 + 0.5 });
     assert.equal(res.status, 200);
     const j = await res.json();
     assert.equal(j.freshness, 'live');
     assert.equal(j.requested, 2);
     assert.equal(j.resolved, 2);
-    const hera = j.spacecraft.find(s => s.id === 'hera');
-    assert.equal(hera.ok, true);
-    assert.equal(hera.command_used, 'Hera (spacecraft)');
-    assert.deepEqual(hera.tried, [{ command: '-1176', reason: 'no-match' }]);
-    assert.equal(hera.samples.length, 27);
+    const tw = j.spacecraft.find(s => s.id === 'tianwen-2');
+    assert.equal(tw.ok, true);
+    assert.equal(tw.command_used, 'Tianwen-2 (spacecraft)');
+    assert.deepEqual(tw.tried, [{ command: 'Tianwen-2', reason: 'no-match' }]);
+    assert.equal(tw.samples.length, 27);
     const psp = j.spacecraft.find(s => s.id === 'parker-solar-probe');
     assert.equal(psp.command_used, '-96');
     assert.deepEqual(psp.tried, []);
-    assert.ok(seen.indexOf('-1176') < seen.indexOf('Hera (spacecraft)'), 'in order');
+    assert.ok(seen.indexOf('Tianwen-2') < seen.indexOf('Tianwen-2 (spacecraft)'), 'in order');
     assert.ok(j.hosts.earth && j.hosts.earth.command === '399' && j.hosts.earth.samples.length === 27, 'earth rides along');
     assert.match(res.headers.get('cache-control'), /s-maxage=3600/);
     assert.equal(j.window.hours, 26);
@@ -86,28 +89,34 @@ await ok('candidates walk in order, stop at the first table, and self-report', a
 });
 
 await ok('an ambiguous NAME LIST is a miss, and a mission with no winner is ok:false with every reason', async () => {
-    stub({ '-1176': 'list', 'Hera (spacecraft)': 'http500', '399': 'table', '-96': 'table' });
-    const j = await (await handler(req('ids=hera,parker-solar-probe'), { now: JD0 })).json();
-    const hera = j.spacecraft.find(s => s.id === 'hera');
-    assert.equal(hera.ok, false);
-    assert.equal(hera.command_used, null);
-    assert.deepEqual(hera.tried.map(t => t.reason), ['ambiguous-name', 'http-500 (oops)']);
-    assert.equal(hera.samples, null);
+    stub({ 'Tianwen-2': 'list', 'Tianwen-2 (spacecraft)': 'http500', '399': 'table', '-96': 'table' });
+    const j = await (await handler(req('ids=tianwen-2,parker-solar-probe'), { now: JD0 })).json();
+    const tw = j.spacecraft.find(s => s.id === 'tianwen-2');
+    assert.equal(tw.ok, false);
+    assert.equal(tw.command_used, null);
+    assert.deepEqual(tw.tried.map(t => t.reason), ['ambiguous-name', 'http-500 (oops)']);
+    assert.equal(tw.samples, null);
     assert.equal(j.resolved, 1);
     assert.equal(j.freshness, 'live');
     restore();
 });
 
-await ok('a 503 is retried once and a 400 carries Horizons\' own message; concurrency is capped', async () => {
-    const seen = stub({ '-21': 'busy-once', '-92': 'http400', '399': 'table', '-8': 'table', '-78': 'table', '-43': 'table', '-96': 'table', '-144': 'table' });
+await ok('503 busy page: retried up to twice with backoff, named "busy"; a 400 carries Horizons\' message; hosts go first; concurrency capped', async () => {
+    const seen = stub({ '-21': 'busy-once', '-8': 'busy-twice', '-78': 'busy-always', '-92': 'http400', '399': 'table', '-43': 'table', '-96': 'table', '-144': 'table' });
     const j = await (await handler(req('ids=soho,ace,wind,dscovr,imap,parker-solar-probe,solar-orbiter'), { now: JD0 })).json();
-    const soho = j.spacecraft.find(s => s.id === 'soho');
-    assert.equal(soho.ok, true, 'resolved on the retry');
-    assert.equal(seen.filter(c => c === '-21').length, 2, 'exactly one retry');
+    assert.equal(j.spacecraft.find(s => s.id === 'soho').ok, true, 'resolved on the first retry');
+    assert.equal(seen.filter(c => c === '-21').length, 2);
+    assert.equal(j.spacecraft.find(s => s.id === 'wind').ok, true, 'resolved on the second retry');
+    assert.equal(seen.filter(c => c === '-8').length, 3);
+    const dscovr = j.spacecraft.find(s => s.id === 'dscovr');
+    assert.equal(dscovr.ok, false);
+    assert.equal(dscovr.tried[0].reason, 'http-503 (busy)', 'the HTML page is reported as busy, not dumped');
+    assert.equal(seen.filter(c => c === '-78').length, 3, 'two retries, then give up');
     const ace = j.spacecraft.find(s => s.id === 'ace');
     assert.equal(ace.ok, false);
     assert.equal(ace.tried[0].reason, 'http-400 (one or more query parameter was not recognized)');
     assert.equal(seen.filter(c => c === '-92').length, 1, 'a 400 is not retried');
+    assert.ok(seen.indexOf('399') < Math.min(...['-21', '-8', '-78', '-92', '-43', '-96', '-144'].map(c => seen.indexOf(c))), 'Earth is fetched before any spacecraft');
     assert.ok(stub.peak <= HORIZONS_CONCURRENCY, `peak in-flight ${stub.peak} ≤ ${HORIZONS_CONCURRENCY}`);
     assert.ok(stub.peak >= 2, 'calls still overlap');
     restore();

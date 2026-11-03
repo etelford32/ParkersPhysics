@@ -26,9 +26,11 @@
  *                 is a Horizons name search). The list is tried IN ORDER by
  *                 /api/missions/ephemeris and the first that returns a vector
  *                 table wins — ssd.jpl.nasa.gov is egress-blocked at build
- *                 time so none of these is verified from the sandbox; the
- *                 route self-reports `command_used` per spacecraft, and one
- *                 production request settles the ids (then trim the lists).
+ *                 time; the route self-reports `command_used` per spacecraft.
+ *                 Entries marked `// verified 2026-11-03` returned a vector
+ *                 table on the deployed route that day and are trimmed to the
+ *                 winner; the rest only hit Horizons' busy page and stay as
+ *                 candidates until a probe sees them.
  *                 A mission with no `horizons` falls back to the analytic
  *                 placement in js/mission-positions.js, DISCLOSED as 'model'.
  *   norad:        NORAD catalogue number (Earth orbit → SGP4 through the
@@ -64,7 +66,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         ],
         summary:        'First spacecraft to "touch the Sun," measuring the corona in situ to answer how the solar wind is accelerated and heated. The defining mission of Parker\'s namesake physics.',
         next:           { label: 'Perihelion 30 (88-day cadence)', date: '2026-12-01' },
-        horizons:       ['-96'],
+        horizons:       ['-96'],                  // (503-busy on the probe; NAIF id)
         confidence:     'observed',
         source:         'NASA Parker Solar Probe mission blog (2026-09-10) + Bale et al. (Nature 2019)',
     },
@@ -84,7 +86,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Joint coordinated observations with PSP — PSP sampling the corona in situ, SO imaging the source region',
         ],
         summary:        'Companion to Parker Solar Probe: PSP measures what SO images. The first spacecraft to see the Sun\'s polar regions directly.',
-        horizons:       ['-144'],
+        horizons:       ['-144'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'ESA Solar Orbiter + Müller et al. (A&A 2020)',
     },
@@ -104,7 +106,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Foundational CME arrival-time forecasting data',
         ],
         summary:        'The workhorse of space-weather operations. Every CME arrival prediction you\'ve seen since the late 90s was calibrated against SOHO/LASCO.',
-        horizons:       ['-21'],
+        horizons:       ['-21'],                  // probe: 'no ephemeris in window' — SOHO's SPK stops short; the L1 model draws it
         confidence:     'observed',
         source:         'ESA/NASA SOHO Science Archive',
     },
@@ -163,7 +165,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Running low on propellant; supplemented by IMAP + SWFO-L1 at the same L1 station',
         ],
         summary:        'The L1 solar-wind sentinel of the last three decades. Your Kp forecasts were calibrated against ACE telemetry.',
-        horizons:       ['-92'],
+        horizons:       ['-92'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA/Caltech ACE Science Center',
     },
@@ -182,7 +184,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Primary reference for solar-wind plasma + interplanetary magnetic field data',
         ],
         summary:        'Older than ACE, still returning clean plasma/B-field data. Calibration reference for every follower.',
-        horizons:       ['-8'],
+        horizons:       ['-8'],                   // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA WIND Mission',
     },
@@ -201,7 +203,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Continuous Earth full-disk imagery from L1 (unique Earth-facing vantage)',
         ],
         summary:        'The L1 stream that fed every real-time geomagnetic-storm forecast for a decade, now the backup to SOLAR-1.',
-        horizons:       ['-78'],
+        horizons:       ['-78'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NOAA SWPC / NASA DSCOVR',
     },
@@ -221,7 +223,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'I-ALiRT real-time solar-wind relay supplements ACE + DSCOVR',
         ],
         summary:        'Successor to ACE + IBEX. Maps the heliosphere\'s outer boundary while also feeding operational solar-wind data.',
-        horizons:       ['-43'],
+        horizons:       ['-43'],                  // verified 2026-11-03
         confidence:     'preliminary',
         source:         'NASA IMAP mission blog (2026-01-12)',
     },
@@ -240,7 +242,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Measures how the outermost atmosphere breathes in response to geomagnetic storms',
         ],
         summary:        'Images the hydrogen halo around Earth from L1 so atmospheric escape can be watched instead of modelled.',
-        horizons:       ['Carruthers'],
+        horizons:       ['Carruthers'],           // verified 2026-11-03
         confidence:     'preliminary',
         source:         'NASA Carruthers Geocorona Observatory',
     },
@@ -259,7 +261,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Carries the second operational coronagraph (after GOES-19 CCOR-1), closing the LASCO single-point-of-failure gap',
         ],
         summary:        'The operational solar-wind monitor every SWPC product now reads first. Renamed SOLAR-1 on reaching L1.',
-        horizons:       ['SWFO-L1', 'SOLAR-1'],
+        horizons:       ['SWFO-L1'],              // verified 2026-11-03
         confidence:     'preliminary',
         source:         'NOAA NESDIS SWFO-L1 / SOLAR-1',
     },
@@ -278,7 +280,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Caught the 2024-07-16 CME onset in VELC — the first coronagraph to see it',
         ],
         summary:        'The fourth agency at L1. A coronagraph plus in-situ wind package on the same line of sight as ACE/DSCOVR/IMAP.',
-        horizons:       ['Aditya-L1'],
+        horizons:       ['Aditya-L1'],            // verified 2026-11-03
         confidence:     'observed',
         source:         'ISRO Aditya-L1',
     },
@@ -420,7 +422,7 @@ export const INNER_PLANET_MISSIONS = Object.freeze([
         ],
         summary:        'The joint European-Japanese follow-up to MESSENGER. 9.9 billion km flown; orbit insertion this month.',
         next:           { label: 'Mercury orbit insertion', date: '2026-11-21' },
-        horizons:       ['-121', '-68'],
+        horizons:       ['-121'],                 // verified 2026-11-03 (MPO)
         confidence:     'observed',
         source:         'ESA "Latest updates: BepiColombo\'s arrival at Mercury" (Sep–Oct 2026)',
     },
@@ -520,7 +522,7 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         ],
         summary:        'The forensic follow-up to DART, arriving this month. Will measure exactly what a kinetic impactor does to a rubble-pile target.',
         next:           { label: 'Didymos arrival (ESA names the day nearer the time)', date: '2026-11-30' },
-        horizons:       ['-1176', 'Hera (spacecraft)'],
+        horizons:       ['Hera (spacecraft)'],    // verified 2026-11-03 (bare 'Hera' is the asteroid list)
         confidence:     'observed',
         source:         'ESA "Hera targets early arrival at Didymos asteroids"',
     },
@@ -560,7 +562,7 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         ],
         summary:        'First mission to what may be an exposed planetary core. Big for both planetary science and asteroid-mining economics.',
         next:           { label: 'Arrival at (16) Psyche', date: '2029-08-01' },
-        horizons:       ['-255'],
+        horizons:       ['-255'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA / ASU Psyche mission (Mars flyby release, May 2026)',
     },
@@ -579,7 +581,7 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         ],
         summary:        'Extended mission to characterize the smallest asteroid class, which dominates the near-Earth population.',
         next:           { label: '1998 KY26 rendezvous', date: '2031-07-01' },
-        horizons:       ['-37'],
+        horizons:       ['-37'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'JAXA Hayabusa2 press release 2026-07-30',
     },
@@ -600,7 +602,7 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         ],
         summary:        'Mapping a 40 m quasi-moon right now. The second Chinese deep-space sample return, and the first from an asteroid.',
         next:           { label: 'Departure from Kamoʻoalewa', date: '2027-04-01' },
-        horizons:       ['Tianwen-2'],
+        horizons:       ['Tianwen-2', 'Tianwen-2 (spacecraft)'],   // unverified (busy page on the probe)
         confidence:     'preliminary',
         source:         'SpaceNews / Planetary Society (Jul 2026)',
     },
@@ -620,7 +622,7 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         ],
         summary:        'The first mission to the Trojans, the fossils of planet formation parked at Jupiter\'s L4 and L5.',
         next:           { label: 'Eurybates + Queta flyby', date: '2027-08-11' },
-        horizons:       ['-49'],
+        horizons:       ['-49'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA Lucy mission',
     },
@@ -666,7 +668,7 @@ export const MARS_MISSIONS = Object.freeze([
             'Imaged recurring slope lineae (RSL) — initially interpreted as seasonal water flow, now debated as dry granular dust',
         ],
         summary:        'The eyes of modern Mars science. 21 years of operation; the workhorse behind every recent surface mission\'s landing-site characterization and comms relay.',
-        horizons:       ['-74'],
+        horizons:       ['-74'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA JPL MRO mission site',
     },
@@ -709,7 +711,6 @@ export const MARS_MISSIONS = Object.freeze([
             'Lost after an unexpected tumble emerging from behind Mars; recovery attempts through solar conjunction failed and a review board closed the mission',
         ],
         summary:        'The definitive experiment on why Mars is dry — ended after 11 years when the spacecraft went silent in December 2025.',
-        horizons:       ['-202'],
         confidence:     'observed',
         source:         'NASA MAVEN status releases (Mar–Jun 2026)',
     },
@@ -730,7 +731,7 @@ export const MARS_MISSIONS = Object.freeze([
             'ESA\'s longest-running Mars mission — 23 years on-orbit, extended to end-2026 with a further extension under review',
         ],
         summary:        'Europe\'s first Mars mission; still flying. The subsurface-lake MARSIS result remains one of the most consequential Mars discoveries of the last two decades.',
-        horizons:       ['-41'],
+        horizons:       ['-41'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'ESA Mars Express',
     },
@@ -751,7 +752,7 @@ export const MARS_MISSIONS = Object.freeze([
             'Now the primary relay for Perseverance and Curiosity alongside MRO since MAVEN went silent',
         ],
         summary:        'The sniffer and the switchboard: trace-gas chemistry by day, rover relay by night.',
-        horizons:       ['-143'],
+        horizons:       ['-143'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'ESA ExoMars TGO',
     },
@@ -841,7 +842,7 @@ export const MARS_MISSIONS = Object.freeze([
             'Characterizes Mars atmospheric dynamics + escape across diurnal + seasonal cycles; extended mission since 2023',
         ],
         summary:        'The Mars weather satellite. EXI\'s full-disk imagery has become a standard context layer for interpreting surface-mission weather.',
-        horizons:       ['-62'],
+        horizons:       ['-62'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'MBRSC Hope / EMM mission',
     },
@@ -863,7 +864,7 @@ export const MARS_MISSIONS = Object.freeze([
         ],
         summary:        'Two $80M smallsats on the cheapest route to Mars ever flown. Science operations begin spring 2028.',
         next:           { label: 'Trans-Mars injection (Earth flyby burns 7 & 9 Nov)', date: '2026-11-07' },
-        horizons:       ['ESCAPADE Blue', 'ESCAPADE-Blue', 'ESCAPADE'],
+        horizons:       ['ESCAPADE-Blue'],        // verified 2026-11-03
         confidence:     'preliminary',
         source:         'NASA ESCAPADE blog (2026-11-02) + Rocket Lab',
     },
@@ -884,7 +885,7 @@ export const MARS_MISSIONS = Object.freeze([
         ],
         summary:        'Japan\'s third sample return, this time from Phobos. Just left Earth.',
         next:           { label: 'Mars arrival', date: '2027-08-01' },
-        horizons:       ['MMX', 'Martian Moons eXploration'],
+        horizons:       ['MMX'],                  // verified 2026-11-03
         confidence:     'preliminary',
         source:         'JAXA press release 2026-10-20',
     },
@@ -929,7 +930,7 @@ export const OUTER_SYSTEM_MISSIONS = Object.freeze([
             'Flew through the FY2026 cancellation threat intact — Congress funded it; the mission continues until the spacecraft cannot',
         ],
         summary:        'Still alive at Jupiter after 10 years in the worst radiation environment in the solar system.',
-        horizons:       ['-61'],
+        horizons:       ['-61'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA Juno; FY2026 appropriations (Jan 2026)',
     },
@@ -971,7 +972,7 @@ export const OUTER_SYSTEM_MISSIONS = Object.freeze([
         ],
         summary:        'Europe\'s flagship to the icy moons. Flew past Earth five weeks ago; Jupiter in 2031.',
         next:           { label: 'Earth gravity assist (final)', date: '2029-01-29' },
-        horizons:       ['-28'],
+        horizons:       ['-28'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'ESA "Successful Earth flyby improves Juice\'s course to Jupiter" (Sep 2026)',
     },
@@ -991,7 +992,7 @@ export const OUTER_SYSTEM_MISSIONS = Object.freeze([
             'Survived the FY2026 termination proposal; teams are searching for a third flyby target',
         ],
         summary:        'The one working spacecraft in the Kuiper Belt. A second heliospheric sentinel while IMAP maps the boundary from inside.',
-        horizons:       ['-98'],
+        horizons:       ['-98'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA / APL New Horizons',
     },
@@ -1011,7 +1012,7 @@ export const OUTER_SYSTEM_MISSIONS = Object.freeze([
             'Power falls ~4 W/yr; instruments are switched off one by one to stretch operations toward 2030',
         ],
         summary:        'Still calling home from interstellar space after 49 years.',
-        horizons:       ['-31'],
+        horizons:       ['-31'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA JPL Voyager mission status',
     },
@@ -1031,7 +1032,7 @@ export const OUTER_SYSTEM_MISSIONS = Object.freeze([
             'Talks only to DSS-43 at Canberra — the one dish on Earth that can hear it',
         ],
         summary:        'The grand tour\'s survivor, now sampling the interstellar medium from the southern sky.',
-        horizons:       ['-32'],
+        horizons:       ['-32'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA JPL Voyager mission status',
     },
@@ -1094,7 +1095,7 @@ export const LUNAR_MISSIONS = Object.freeze([
             'Korea\'s first deep-space mission; ShadowCam images the permanently shadowed craters at 200× LROC\'s sensitivity',
         ],
         summary:        'The lunar orbiter that sees in the dark — the south-pole ice prospector for Artemis.',
-        horizons:       ['-155'],
+        horizons:       ['-155'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'KARI Danuri',
     },
@@ -1260,7 +1261,7 @@ export const OBSERVATORY_MISSIONS = Object.freeze([
             'Imaged the most distant confirmed galaxies and the first exoplanet atmospheres in the mid-IR',
         ],
         summary:        'The infrared flagship at L2.',
-        horizons:       ['-170'],
+        horizons:       ['-170'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA / STScI JWST',
     },
@@ -1280,7 +1281,7 @@ export const OBSERVATORY_MISSIONS = Object.freeze([
         ],
         summary:        'Hubble\'s wide-angle successor, two months into commissioning at L2.',
         next:           { label: 'First science images (expected)', date: '2027-02-01' },
-        horizons:       ['Roman Space Telescope', 'Roman'],
+        horizons:       ['Roman Space Telescope'], // verified 2026-11-03
         confidence:     'preliminary',
         source:         'NASA Roman blog (Sep–Nov 2026)',
     },
@@ -1298,7 +1299,7 @@ export const OBSERVATORY_MISSIONS = Object.freeze([
             'Surveying a third of the sky for dark energy; first data release March 2025',
         ],
         summary:        'Europe\'s dark-universe survey, sharing L2 with JWST and Roman.',
-        horizons:       ['-680'],
+        horizons:       ['-680'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'ESA Euclid',
     },

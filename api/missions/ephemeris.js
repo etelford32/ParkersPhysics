@@ -33,6 +33,13 @@
  * (HORIZONS_TIMEOUT_MS), one retry per 503. The CDN caches a success for an
  * hour (the window is 26 h, so a cached answer always brackets now).
  *
+ * VERIFIED ON THE SECOND DEPLOY (2026-11-03, three batches, 28 of 38
+ * spacecraft resolved; every miss was the 503 busy page except SOHO (-21)
+ * and MAVEN (-202), whose SPKs do not cover the window): the name searches
+ * 'Hera (spacecraft)', 'ESCAPADE-Blue', 'Roman Space Telescope', 'SWFO-L1',
+ * 'Carruthers', 'MMX', 'Aditya-L1' and the NAIF ids are recorded as winners
+ * in js/space-missions.js.
+ *
  * MEASURED ON THE FIRST DEPLOY (2026-11-03): every call answered HTTP 400
  * "one or more query parameter was not recognized" — `REF_FRAME` is not a
  * Horizons API parameter; the frame is `REF_PLANE=ECLIPTIC` (see the kernel
@@ -52,11 +59,14 @@ export const config = { runtime: 'edge' };
 export const HORIZONS_BASE = 'https://ssd.jpl.nasa.gov/api/horizons.api';
 export const HORIZONS_TIMEOUT_MS = 9000;
 export const MAX_IDS = 16;
-/** Horizons answers 503 when busy; ~20 parallel calls from one edge
- *  invocation provoked it on the first deployed build. Four at a time, one
- *  retry per 503 after a short pause. */
-export const HORIZONS_CONCURRENCY = 4;
-export const RETRY_503_DELAY_MS = 1200;
+/** Horizons answers 503 (its HTML "busy" page) under a burst; ~20 parallel
+ *  calls from one edge invocation provoked it on the first deployed build and
+ *  4-wide with one retry still lost 5 of 16 on the second. Three at a time,
+ *  up to two retries per 503 with backoff, and the HOST bodies are fetched
+ *  BEFORE the spacecraft — without Earth no local draw can anchor and the
+ *  whole batch is stale, so they get the quiet start of the burst. */
+export const HORIZONS_CONCURRENCY = 3;
+export const RETRY_503_DELAYS_MS = Object.freeze([800, 2000]);
 const CACHE_TTL = 3600;
 const CACHE_SWR = 900;
 const STALE_TTL = 120;
@@ -78,10 +88,12 @@ async function withSlot(fn) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/** Short, log-safe excerpt of an upstream error body (Horizons' JSON `message`). */
+/** Short, log-safe excerpt of an upstream error body (Horizons' JSON `message`;
+ *  its 503 is an HTML page, reported as "busy"). */
 function errorExcerpt(text) {
     let msg = '';
-    try { msg = JSON.parse(text)?.message || ''; } catch (_) { msg = String(text || ''); }
+    try { msg = JSON.parse(text)?.message || ''; }
+    catch (_) { msg = /^\s*<!doctype|^\s*<html/i.test(String(text || '')) ? 'busy' : String(text || ''); }
     msg = msg.replace(/\s+/g, ' ').trim().slice(0, 80);
     return msg ? ` (${msg})` : '';
 }
@@ -94,8 +106,9 @@ export async function fetchTable(command, startJd) {
         timeoutMs: HORIZONS_TIMEOUT_MS,
     }).catch(e => { throw new Error(`fetch:${(e && e.name === 'TimeoutError') ? 'timeout' : 'network'}`); });
     let res = await withSlot(once);
-    if (res.status === 503) {
-        await sleep(RETRY_503_DELAY_MS);
+    for (const delay of RETRY_503_DELAYS_MS) {
+        if (res.status !== 503) break;
+        await sleep(delay);
         res = await withSlot(once);
     }
     if (!res.ok) {
@@ -140,10 +153,9 @@ export default async function handler(request, { now = jdNow() } = {}) {
 
     const startJd = windowStartJd(now);
 
-    const [scSettled, hostSettled] = await Promise.all([
-        Promise.allSettled(missions.map(m => resolveSpacecraft(m, startJd))),
-        Promise.allSettled([...hosts].map(async h => ({ host: h, command: HOST_COMMANDS[h], samples: await fetchTable(HOST_COMMANDS[h], startJd) }))),
-    ]);
+    // Hosts first (they anchor every local draw), then the spacecraft.
+    const hostSettled = await Promise.allSettled([...hosts].map(async h => ({ host: h, command: HOST_COMMANDS[h], samples: await fetchTable(HOST_COMMANDS[h], startJd) })));
+    const scSettled = await Promise.allSettled(missions.map(m => resolveSpacecraft(m, startJd)));
 
     const spacecraft = scSettled.map((r, i) => r.status === 'fulfilled'
         ? r.value
