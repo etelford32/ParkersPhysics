@@ -166,7 +166,7 @@ const NAV_ITEMS = {
         { href: 'uranus-system.html',  label: 'Uranus System',  sub: 'Tipped 98° · ε-ring shepherds · crowded moons',  tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'uranus-system' },
         { href: 'neptune-system.html', label: 'Neptune System', sub: 'Retrograde Triton · rings & arcs · J₂ N-body',   tier: 'public', icon: 'planet-ice', badge: 'NEW', id: 'neptune-system' },
         { section: 'Maps & missions' },
-        { href: 'missions.html',     label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: 'probe', id: 'missions' },
+        { href: 'missions.html',     label: 'Space Missions', sub: 'Live fleet tracker · launches', tier: 'public', icon: 'probe', id: 'missions' },
         { href: 'galactic-map.html', label: 'Galaxy Map',     sub: '3D Milky Way star map',           tier: 'free',   icon: 'galaxy' },
         // 2026-10-05: SkyView took Lunar Colony's slot (colony.html stays on the
         // Local Space hub and in the catalogue) — this menu is at its 10-link cap
