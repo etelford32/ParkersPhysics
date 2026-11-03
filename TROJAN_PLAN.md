@@ -73,7 +73,8 @@ Run workflow; a preview URL is accepted). Locally:
 9. **The browser never integrates the population.** Measured costs: analytic
    pass over all 16 445 rows 152 ms, N-body epoch alignment 550 ms, the full
    600-yr run ~3 CPU-minutes (~1.5 at the 40-day step), one object ~50 ms. A
-   page loads `trojans-dynamics.json` (284 KB brotli, 45 ms parse + decode)
+   page loads `trojans-dynamics.json` (~430 KB brotli with the six proper-element
+   columns — 284 KB without — and ~95 ms parse + decode)
    and may integrate ONE object on demand in a worker.
 10. **The wire is lean** (`trojan-v2`): 2.47 → 1.85 MB raw, 785 → 655 KB brotli
     on the real catalogue; dropped columns were constant or meaningless here
