@@ -191,10 +191,18 @@ import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
         assert.equal(m, 2, 'exactly one retry, never a loop');
     }
 
+    {
+        let n = 0;
+        r = await run(() => (n++ === 0 ? new Response('bad gateway', { status: 502 }) : Response.json(sbdbBody)));
+        assert.equal(r.body.freshness, 'live', 'a 502 gateway answer is retried once');
+        assert.equal(r.body.sources.sbdb.retried, 1);
+    }
     r = await run(() => new Response('down', { status: 503 }));
     assert.equal(r.res.status, 200, 'never 5xx');
     assert.equal(r.body.freshness, 'stale');
-    assert.equal(r.calls.length, 1, 'a 5xx is not a schema refusal — no ladder, no Horizons');
+    assert.equal(r.calls.length, 2, 'a 503 retries once, then stops — no ladder, no Horizons');
+    r = await run(() => new Response('boom', { status: 500 }));
+    assert.equal(r.calls.length, 1, 'a plain 500 is not retried');
     globalThis.fetch = realFetch;
 }
 

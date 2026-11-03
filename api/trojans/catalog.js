@@ -63,10 +63,13 @@ async function fetchJson(url, timeoutMs) {
  * + quality columns → full precision + photometry → default precision +
  * photometry → core only.
  * A step is abandoned only on a 4xx (JPL's "I do not know that parameter").
- * A TIMEOUT / network error retries the SAME step once if the deadline
- * allows (a stuck connection is what a retry fixes; it says nothing about the
- * schema); a 5xx is reported as-is. `retried` counts it in the self-report.
+ * A TRANSIENT failure — timeout / network error, or a 502/503/504 gateway
+ * answer — retries the SAME step once if the deadline allows (it says nothing
+ * about the schema); any other 5xx is reported as-is. `retried` counts it.
+ * Both kinds were measured against SBDB on 2026-11-03 19:48–19:55, when the
+ * production NEO route failed the same way: a JPL-side outage.
  */
+const TRANSIENT = (status) => status === 0 || status === 502 || status === 503 || status === 504;
 const LADDER = [
     { fullPrecision: true,  photometry: true,  quality: true,  precision: 'full',    photometryFields: 'requested', qualityFields: 'requested' },
     { fullPrecision: true,  photometry: true,  quality: false, precision: 'full',    photometryFields: 'requested', qualityFields: 'dropped' },
@@ -82,7 +85,7 @@ async function fetchPopulation(deadline) {
         if (left < 5_000) { refused.push(`${step.precision}/${step.photometryFields}: no time left`); break; }
         let r = await fetchJson(sbdbTrojanUrl(step), Math.min(SBDB_TIMEOUT_MS, left));
         left = deadline - Date.now() - HORIZONS_TIMEOUT_MS;
-        if (!r.ok && r.status === 0 && retried === 0 && left >= 5_000) {
+        if (!r.ok && TRANSIENT(r.status) && retried === 0 && left >= 5_000) {
             retried++;
             r = await fetchJson(sbdbTrojanUrl(step), Math.min(SBDB_TIMEOUT_MS, left));
         }
