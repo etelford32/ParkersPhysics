@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-11-03T17:31:23.513Z",
+  "source": {
+    "file": "/tmp/claude-0/-home-user-ParkersPhysics/840be5c1-327f-59b7-a7a7-2f947c6d4db6/scratchpad/data/trojans-catalog-q.json",
+    "catalogue_generated_at": "2026-11-03T17:25:30.784Z",
+    "freshness": "live",
+    "precision": "full",
+    "epoch_jd": 2461200.5,
+    "rows": 16445,
+    "jupiter": "horizons",
+    "saturn": "horizons"
+  },
+  "run": {
+    "years": 600,
+    "dtDays": 20,
+    "workers": 4,
+    "seconds": 44,
+    "skipped": 0
+  },
+  "regimes": {
+    "L4": 10349,
+    "L5": 5955,
+    "encounter": 107,
+    "horseshoe": 33,
+    "circulating": 1
+  },
+  "alignment": {
+    "epoch": 14801,
+    "two-body-after-encounter": 7,
+    "n-body": 1637
+  },
+  "regimes_by_quality": {
+    "well-determined:L4": 8805,
+    "well-determined:L5": 5507,
+    "well-determined:encounter": 19,
+    "short-arc:encounter": 88,
+    "short-arc:L4": 1544,
+    "short-arc:L5": 448,
+    "short-arc:horseshoe": 32,
+    "short-arc:circulating": 1,
+    "well-determined:horseshoe": 1
+  },
+  "regimes_by_alignment": {
+    "epoch:L4": 9043,
+    "epoch:L5": 5729,
+    "epoch:encounter": 27,
+    "two-body-after-encounter:encounter": 6,
+    "n-body:L4": 1306,
+    "n-body:L5": 226,
+    "n-body:encounter": 74,
+    "n-body:horseshoe": 30,
+    "n-body:circulating": 1,
+    "epoch:horseshoe": 2,
+    "two-body-after-encounter:horseshoe": 1
+  },
+  "camps_at_epoch": {
+    "nL4": 10457,
+    "nL5": 5988,
+    "ratio": 1.7463259853039412,
+    "lo": 1.7182536344694075,
+    "hi": 1.7748569744125737
+  },
+  "camps_librating": {
+    "nL4": 10349,
+    "nL5": 5955,
+    "ratio": 1.7378673383711167,
+    "lo": 1.7098296797732204,
+    "hi": 1.7663647563877147
+  },
+  "camps_librating_by_quality": {
+    "well-determined": {
+      "nL4": 8805,
+      "nL5": 5507,
+      "ratio": 1.5988741601597967,
+      "lo": 1.5716401469125285,
+      "hi": 1.6265800953537062
+    },
+    "short-arc": {
+      "nL4": 1544,
+      "nL5": 448,
+      "ratio": 3.4464285714285716,
+      "lo": 3.266375833427849,
+      "hi": 3.6364063732048044
+    }
+  },
+  "librating": {
+    "median_amplitude_deg": 14.848549181771773,
+    "median_period_yr": 151.7864476386037,
+    "median_i_mean_deg": 11.979668101039413,
+    "median_e_mean": 0.06822676311174075,
+    "analytic_vs_integrated_amp": {
+      "n": 16300,
+      "median_diff_deg": 0.21496084946615923,
+      "median_abs_diff_deg": 0.9432581118313124
+    }
+  },
+  "sizes": {
+    "measured": 1879,
+    "from_measured_albedo": 0,
+    "from_population_albedo": 14566,
+    "population_albedo": 0.07
+  }
+}

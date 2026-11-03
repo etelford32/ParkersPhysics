@@ -54,20 +54,38 @@ Refresh the list: `curl https://parkersphysics.com/api/trojans/catalog > cat.jso
    `dev-server.mjs`. **The four `api/cron/*` handlers on the Node runtime use the
    failing pattern** — see §5.
 
-## 3. What the first run found (catalogue of 2026-11-03, 600 yr)
+## 3. What the first run found (catalogue of 2026-11-03)
 
-- 16 445 TJN objects; **16 304 librate** (10 349 L4, 5 955 L5) — 99.1 %.
-- **L4 : L5 = 1.74** overall, but **1.61 among well-determined orbits and ~3.4
-  among short-arc ones**: a large part of the catalogue's L4 excess is recent
-  discovery history, not dynamics.
+600-yr run (`data/trojans/trojans-summary.json`, 45 s on 4 threads) and a
+3 000-yr check run (`data/trojans/trojans-summary-3000yr.json`, 234 s):
+
+| | 600 yr | 3 000 yr |
+|---|---|---|
+| L4 tadpole | 10 349 | 10 323 |
+| L5 tadpole | 5 955 | 5 952 |
+| meets Jupiter (≤ 3 Hill radii) | 107 | 152 |
+| horseshoe | 33 | 18 |
+| circulating | 1 | 0 |
+
+- **99.1 % of the 16 445 TJN objects librate** about L4 or L5 for 3 000 yr.
+- **L4 : L5 = 1.74 overall — 1.60 (1.57–1.63) among well-determined orbits
+  (8 805 : 5 507) but 3.45 (3.27–3.64) among short-arc ones (1 544 : 448).**
+  A large part of the catalogue's L4 excess is recent discovery history,
+  not dynamics.
 - Median libration amplitude 14.8°, median period 152 yr (theory: 148 yr at
   zero amplitude, lengthening with amplitude — the run shows it).
 - **The impostors.** Among WELL-DETERMINED orbits (U ≤ 5, arc ≥ 1 yr, on the
-  shared epoch) 19 meet Jupiter and one horseshoes; most sit far from ±60°
-  (e.g. 118624 at φ = −125°, 2000 CN152 at −160°) — filed as Trojans by their
-  semimajor axis, not Trojans by motion. The other ~120 non-librators are
-  short-arc orbits whose a is too uncertain for a verdict.
-- The full tables are in `data/trojans/TROJANS_LIST.md`.
+  shared epoch) 19 meet Jupiter within 600 yr (22 within 3 000) and one
+  horseshoes; most sit far from ±60° (118624 at φ = −125°, 2000 CN152 at
+  −160°, 690577 at −152°) — filed as Trojans by their semimajor axis, not
+  Trojans by motion. The one well-determined horseshoe, 2016 TE71 (U0, 17-yr
+  arc), meets Jupiter in the 3 000-yr run: a transient co-orbital. The other
+  non-librators are short-arc orbits (mostly U9, 2–5-day arcs from 2014–2019
+  surveys) whose a is too uncertain for a verdict.
+- 54 objects change regime between 600 and 3 000 yr ("slow escapers"), all but
+  a handful short-arc.
+- The full tables are in `data/trojans/TROJANS_LIST.md`; every object is a row of
+  `data/trojans/trojans-analysis.csv`.
 
 ## 4. Next steps — the big list
 

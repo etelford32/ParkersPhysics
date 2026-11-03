@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-11-03T17:30:29.495Z",
+  "source": {
+    "file": "/tmp/claude-0/-home-user-ParkersPhysics/840be5c1-327f-59b7-a7a7-2f947c6d4db6/scratchpad/data/trojans-catalog-q.json",
+    "catalogue_generated_at": "2026-11-03T17:25:30.784Z",
+    "freshness": "live",
+    "precision": "full",
+    "epoch_jd": 2461200.5,
+    "rows": 16445,
+    "jupiter": "horizons",
+    "saturn": "horizons"
+  },
+  "run": {
+    "years": 3000,
+    "dtDays": 20,
+    "workers": 4,
+    "seconds": 234,
+    "skipped": 0
+  },
+  "regimes": {
+    "L4": 10323,
+    "L5": 5952,
+    "encounter": 152,
+    "horseshoe": 18
+  },
+  "alignment": {
+    "epoch": 14801,
+    "two-body-after-encounter": 7,
+    "n-body": 1637
+  },
+  "regimes_by_quality": {
+    "well-determined:L4": 8841,
+    "well-determined:L5": 5508,
+    "well-determined:encounter": 22,
+    "short-arc:encounter": 130,
+    "short-arc:L4": 1482,
+    "short-arc:L5": 444,
+    "short-arc:horseshoe": 18
+  },
+  "regimes_by_alignment": {
+    "epoch:L4": 9039,
+    "epoch:L5": 5728,
+    "epoch:encounter": 33,
+    "two-body-after-encounter:encounter": 7,
+    "n-body:L4": 1284,
+    "n-body:L5": 224,
+    "n-body:encounter": 112,
+    "n-body:horseshoe": 17,
+    "epoch:horseshoe": 1
+  },
+  "camps_at_epoch": {
+    "nL4": 10457,
+    "nL5": 5988,
+    "ratio": 1.7463259853039412,
+    "lo": 1.7182536344694075,
+    "hi": 1.7748569744125737
+  },
+  "camps_librating": {
+    "nL4": 10323,
+    "nL5": 5952,
+    "ratio": 1.734375,
+    "lo": 1.706376484534663,
+    "hi": 1.762832919867218
+  },
+  "librating": {
+    "median_amplitude_deg": 15.128122144627298,
+    "median_period_yr": 151.78644763860368,
+    "median_i_mean_deg": 12.003470232215987,
+    "median_e_mean": 0.06382141550427436,
+    "analytic_vs_integrated_amp": {
+      "n": 16274,
+      "median_diff_deg": 0.513705741935766,
+      "median_abs_diff_deg": 0.9840603984323337
+    }
+  },
+  "sizes": {
+    "measured": 1879,
+    "from_measured_albedo": 0,
+    "from_population_albedo": 14566,
+    "population_albedo": 0.07
+  }
+}
