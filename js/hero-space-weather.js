@@ -1689,7 +1689,9 @@ export class HeroSpaceWeather {
         // Wall clock (≤0.5 s), not the clamped physics step: the 24 h preview
         // and the transit replay must take the same time on a software
         // rasteriser as on a GPU (the framing ease's rule).
-        this._ropes?.tick(easeDt);
+        // Drawing-buffer half height: the Sun's flow particles size themselves
+        // by their true projection and need the pixel scale.
+        this._ropes?.tick(easeDt, 0.5 * (this._sizeH || this._h()) * (this._renderer?.getPixelRatio?.() ?? 1));
 
         // ── Solar wind ─────────────────────────────────────────────────────
         this._windU.u_cold.value.lerp(this._windColdTarget, Math.min(1, 3 * dt));
