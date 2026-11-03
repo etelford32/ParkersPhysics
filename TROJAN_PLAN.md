@@ -79,15 +79,15 @@ Run workflow; a preview URL is accepted). Locally:
     production deploy. Needs the repo setting "Allow GitHub Actions to create
     and approve pull requests"; a PR opened with `GITHUB_TOKEN` does not trigger
     other workflows' CI.
+13. **ONE orbit-quality rule** (`orbitQuality`): U ≥ 6, OR arc < 1 yr, OR off
+    the shared epoch ⇒ short-arc. The script and report builder used to carry
+    hand-synced copies.
 14. **One same-step retry on a TRANSIENT SBDB failure** (timeout / network
     error / 502 / 503 / 504), never a loop; a 4xx steps down the ladder and a
     plain 500 is reported. Measured 2026-11-03 19:48–19:55: a hung connection
     (the request waited its whole 30 s budget; healthy answers take ~2 s) and
     then HTTP 502 — the production NEO catalogue failed identically, so it was
     JPL. The first attempt is 20 s to leave room for the retry.
-13. **ONE orbit-quality rule** (`orbitQuality`): U ≥ 6, OR arc < 1 yr, OR off
-    the shared epoch ⇒ short-arc. The script and report builder used to carry
-    hand-synced copies.
 
 ## 3. What the first run found (catalogue of 2026-11-03)
 
