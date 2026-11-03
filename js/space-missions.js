@@ -66,7 +66,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
         ],
         summary:        'First spacecraft to "touch the Sun," measuring the corona in situ to answer how the solar wind is accelerated and heated. The defining mission of Parker\'s namesake physics.',
         next:           { label: 'Perihelion 30 (88-day cadence)', date: '2026-12-01' },
-        horizons:       ['-96'],                  // (503-busy on the probe; NAIF id)
+        horizons:       ['-96'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA Parker Solar Probe mission blog (2026-09-10) + Bale et al. (Nature 2019)',
     },
@@ -145,7 +145,7 @@ export const HELIOPHYSICS_MISSIONS = Object.freeze([
             'Periodic "far-side" views when Earth and STEREO-A are ≈180° apart',
         ],
         summary:        'The second eye on the Sun. Critical for CME 3D reconstruction since STEREO-B\'s loss.',
-        horizons:       ['-234'],
+        horizons:       ['-234'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA STEREO Science Center',
     },
@@ -541,7 +541,7 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         ],
         summary:        'The rare extended mission to a second target. Will study how Earth tides reshape a small body during close flyby.',
         next:           { label: 'Apophis Earth close approach', date: '2029-04-13' },
-        horizons:       ['-64'],
+        horizons:       ['-64'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA / University of Arizona',
     },
@@ -602,7 +602,9 @@ export const SMALL_BODY_MISSIONS = Object.freeze([
         ],
         summary:        'Mapping a 40 m quasi-moon right now. The second Chinese deep-space sample return, and the first from an asteroid.',
         next:           { label: 'Departure from Kamoʻoalewa', date: '2027-04-01' },
-        horizons:       ['Tianwen-2', 'Tianwen-2 (spacecraft)'],   // unverified (busy page on the probe)
+        // No `horizons`: Horizons carries no Tianwen-2 ephemeris under any name
+        // (probe 2026-11-03: 'Tianwen-2' and 'Tianwen-2 (spacecraft)' both no-match);
+        // the quasi-satellite Kepler model draws it.
         confidence:     'preliminary',
         source:         'SpaceNews / Planetary Society (Jul 2026)',
     },
@@ -689,7 +691,7 @@ export const MARS_MISSIONS = Object.freeze([
             'Propellant for ~2 more years at most; the end is a matter of bookkeeping, not failure',
         ],
         summary:        'The grandparent of the Mars fleet. Still the relay of last resort for the rovers.',
-        horizons:       ['-53'],
+        horizons:       ['-53'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA JPL Mars Odyssey',
     },
@@ -820,7 +822,7 @@ export const MARS_MISSIONS = Object.freeze([
             'First complete orbit + lander + rover triplet from a single interplanetary launch',
         ],
         summary:        'China\'s inaugural interplanetary success. Rover lost but the orbital-imaging mission continues — returning the first Chinese high-resolution Mars photometry.',
-        horizons:       ['Tianwen-1'],
+        horizons:       ['Tianwen-1'],            // probe: 'no ephemeris in window' — the SPK Horizons holds ends before 2026; the Mars-orbit model draws it
         confidence:     'observed',
         source:         'CNSA Tianwen-1 / PLANETARY.ORG Tianwen coverage',
         notes:          'Zhurong declared lost in April 2023; orbiter continues its extended mission.',
@@ -951,7 +953,7 @@ export const OUTER_SYSTEM_MISSIONS = Object.freeze([
         ],
         summary:        'Is there an ocean under Europa\'s ice, and could it be habitable? Arrives in 2030.',
         next:           { label: 'Earth gravity assist', date: '2026-12-03' },
-        horizons:       ['-159'],
+        horizons:       ['-159'],                 // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA Europa Clipper',
     },
@@ -1076,7 +1078,7 @@ export const LUNAR_MISSIONS = Object.freeze([
             'Imaged every lander of the 2020s on the surface, upright or not',
         ],
         summary:        'The map of the Moon. Nothing lands there without consulting it.',
-        horizons:       ['-85'],
+        horizons:       ['-85'],                  // verified 2026-11-03
         confidence:     'observed',
         source:         'NASA LRO',
     },

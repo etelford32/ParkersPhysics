@@ -33,12 +33,13 @@
  * (HORIZONS_TIMEOUT_MS), one retry per 503. The CDN caches a success for an
  * hour (the window is 26 h, so a cached answer always brackets now).
  *
- * VERIFIED ON THE SECOND DEPLOY (2026-11-03, three batches, 28 of 38
- * spacecraft resolved; every miss was the 503 busy page except SOHO (-21)
- * and MAVEN (-202), whose SPKs do not cover the window): the name searches
- * 'Hera (spacecraft)', 'ESCAPADE-Blue', 'Roman Space Telescope', 'SWFO-L1',
- * 'Carruthers', 'MMX', 'Aditya-L1' and the NAIF ids are recorded as winners
- * in js/space-missions.js.
+ * VERIFIED ON THE THIRD DEPLOY (2026-11-03, hosts-first + backoff): 34 of
+ * 37 spacecraft resolved across three batches with no busy-page miss; the
+ * three left are data gaps, not ids — SOHO (-21) and Tianwen-1 have no
+ * Horizons coverage for the window, Tianwen-2 is not in Horizons at all.
+ * The name searches 'Hera (spacecraft)', 'ESCAPADE-Blue', 'Roman Space
+ * Telescope', 'SWFO-L1', 'Carruthers', 'MMX', 'Aditya-L1' and every NAIF id
+ * are recorded as winners in js/space-missions.js.
  *
  * MEASURED ON THE FIRST DEPLOY (2026-11-03): every call answered HTTP 400
  * "one or more query parameter was not recognized" — `REF_FRAME` is not a

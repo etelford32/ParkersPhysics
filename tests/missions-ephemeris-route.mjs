@@ -16,7 +16,7 @@
  *   • ids are capped and unknown ids are reported, not 400'd.
  */
 import assert from 'node:assert/strict';
-import handler, { DEFAULT_IDS, MAX_IDS, HORIZONS_CONCURRENCY } from '../api/missions/ephemeris.js';
+import handler, { resolveSpacecraft, DEFAULT_IDS, MAX_IDS, HORIZONS_CONCURRENCY } from '../api/missions/ephemeris.js';
 
 let passed = 0;
 const ok = (name, fn) => fn().then(() => { passed++; console.log(`  ✓ ${name}`); });
@@ -66,22 +66,29 @@ const restore = () => { globalThis.fetch = realFetch; };
 const req = (qs = '') => new Request(`https://x.test/api/missions/ephemeris${qs ? '?' + qs : ''}`);
 
 await ok('candidates walk in order, stop at the first table, and self-report', async () => {
-    const seen = stub({ 'Tianwen-2': 'nomatch', 'Tianwen-2 (spacecraft)': 'table', '399': 'table', '-96': 'table' });
-    const res = await handler(req('ids=tianwen-2,parker-solar-probe'), { now: JD0 + 0.5 });
+    // resolveSpacecraft takes a mission record, so the walk is gated on a
+    // synthetic two-candidate mission and cannot drift with the roster
+    // (the roster's own lists are trimmed to one verified winner each).
+    const seen = stub({ '-1176': 'nomatch', 'Hera (spacecraft)': 'table' });
+    const r = await resolveSpacecraft({ id: 'walk', horizons: ['-1176', 'Hera (spacecraft)'] }, JD0);
+    assert.equal(r.ok, true);
+    assert.equal(r.command_used, 'Hera (spacecraft)');
+    assert.deepEqual(r.tried, [{ command: '-1176', reason: 'no-match' }]);
+    assert.equal(r.samples.length, 27);
+    assert.ok(seen.indexOf('-1176') < seen.indexOf('Hera (spacecraft)'), 'in order');
+    restore();
+    // and through the handler: a resolved roster mission, Earth riding along, cached an hour
+    stub({ '399': 'table', '-96': 'table', 'Hera (spacecraft)': 'table' });
+    const res = await handler(req('ids=hera,parker-solar-probe'), { now: JD0 + 0.5 });
     assert.equal(res.status, 200);
     const j = await res.json();
     assert.equal(j.freshness, 'live');
     assert.equal(j.requested, 2);
     assert.equal(j.resolved, 2);
-    const tw = j.spacecraft.find(s => s.id === 'tianwen-2');
-    assert.equal(tw.ok, true);
-    assert.equal(tw.command_used, 'Tianwen-2 (spacecraft)');
-    assert.deepEqual(tw.tried, [{ command: 'Tianwen-2', reason: 'no-match' }]);
-    assert.equal(tw.samples.length, 27);
+    assert.equal(j.spacecraft.find(s => s.id === 'hera').command_used, 'Hera (spacecraft)');
     const psp = j.spacecraft.find(s => s.id === 'parker-solar-probe');
     assert.equal(psp.command_used, '-96');
     assert.deepEqual(psp.tried, []);
-    assert.ok(seen.indexOf('Tianwen-2') < seen.indexOf('Tianwen-2 (spacecraft)'), 'in order');
     assert.ok(j.hosts.earth && j.hosts.earth.command === '399' && j.hosts.earth.samples.length === 27, 'earth rides along');
     assert.match(res.headers.get('cache-control'), /s-maxage=3600/);
     assert.equal(j.window.hours, 26);
@@ -89,13 +96,16 @@ await ok('candidates walk in order, stop at the first table, and self-report', a
 });
 
 await ok('an ambiguous NAME LIST is a miss, and a mission with no winner is ok:false with every reason', async () => {
-    stub({ 'Tianwen-2': 'list', 'Tianwen-2 (spacecraft)': 'http500', '399': 'table', '-96': 'table' });
-    const j = await (await handler(req('ids=tianwen-2,parker-solar-probe'), { now: JD0 })).json();
-    const tw = j.spacecraft.find(s => s.id === 'tianwen-2');
-    assert.equal(tw.ok, false);
-    assert.equal(tw.command_used, null);
-    assert.deepEqual(tw.tried.map(t => t.reason), ['ambiguous-name', 'http-500 (oops)']);
-    assert.equal(tw.samples, null);
+    stub({ 'A': 'list', 'B': 'http500' });
+    const r = await resolveSpacecraft({ id: 'nowin', horizons: ['A', 'B'] }, JD0);
+    assert.equal(r.ok, false);
+    assert.equal(r.command_used, null);
+    assert.deepEqual(r.tried.map(t => t.reason), ['ambiguous-name', 'http-500 (oops)']);
+    assert.equal(r.samples, null);
+    restore();
+    stub({ '399': 'table', '-96': 'table', 'Hera (spacecraft)': 'list' });
+    const j = await (await handler(req('ids=hera,parker-solar-probe'), { now: JD0 })).json();
+    assert.equal(j.spacecraft.find(s => s.id === 'hera').ok, false);
     assert.equal(j.resolved, 1);
     assert.equal(j.freshness, 'live');
     restore();
