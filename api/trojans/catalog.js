@@ -39,7 +39,11 @@ export const config = { runtime: 'nodejs', maxDuration: 60 };
 const CACHE_TTL = 86_400;
 const CACHE_SWR = 86_400;
 const DEADLINE_MS = 50_000;          // whole chain, leaves headroom under maxDuration
-const SBDB_TIMEOUT_MS = 30_000;      // per SBDB attempt (capped by what is left)
+// Per SBDB attempt (capped by what is left). 20 s, not 30: a healthy answer
+// takes ~2 s (measured from the preview logs) and a HUNG one does not finish
+// — the 2026-11-03 19:48 preview request spent the whole 30 s waiting — so a
+// shorter first attempt leaves room for the one retry below.
+const SBDB_TIMEOUT_MS = 20_000;
 const HORIZONS_TIMEOUT_MS = 15_000;
 
 async function fetchJson(url, timeoutMs) {
@@ -58,8 +62,10 @@ async function fetchJson(url, timeoutMs) {
  * Optional query refinements must never take the population down. Ladder:
  * + quality columns → full precision + photometry → default precision +
  * photometry → core only.
- * A step is abandoned only on a 4xx (JPL's "I do not know that parameter");
- * a network error or 5xx is reported as-is.
+ * A step is abandoned only on a 4xx (JPL's "I do not know that parameter").
+ * A TIMEOUT / network error retries the SAME step once if the deadline
+ * allows (a stuck connection is what a retry fixes; it says nothing about the
+ * schema); a 5xx is reported as-is. `retried` counts it in the self-report.
  */
 const LADDER = [
     { fullPrecision: true,  photometry: true,  quality: true,  precision: 'full',    photometryFields: 'requested', qualityFields: 'requested' },
@@ -70,15 +76,21 @@ const LADDER = [
 
 async function fetchPopulation(deadline) {
     const refused = [];
+    let retried = 0;
     for (const step of LADDER) {
-        const left = deadline - Date.now() - HORIZONS_TIMEOUT_MS;
+        let left = deadline - Date.now() - HORIZONS_TIMEOUT_MS;
         if (left < 5_000) { refused.push(`${step.precision}/${step.photometryFields}: no time left`); break; }
-        const r = await fetchJson(sbdbTrojanUrl(step), Math.min(SBDB_TIMEOUT_MS, left));
+        let r = await fetchJson(sbdbTrojanUrl(step), Math.min(SBDB_TIMEOUT_MS, left));
+        left = deadline - Date.now() - HORIZONS_TIMEOUT_MS;
+        if (!r.ok && r.status === 0 && retried === 0 && left >= 5_000) {
+            retried++;
+            r = await fetchJson(sbdbTrojanUrl(step), Math.min(SBDB_TIMEOUT_MS, left));
+        }
         if (r.ok) {
             const parsed = parseTrojanQuery(r.json);
-            return { sbdb: refused.length ? { ...parsed, refused } : parsed, precision: step.precision, photometry: step.photometryFields, quality: step.qualityFields };
+            return { sbdb: { ...parsed, refused, retried }, precision: step.precision, photometry: step.photometryFields, quality: step.qualityFields };
         }
-        if (!(r.status >= 400 && r.status < 500)) return { sbdb: { ok: false, reason: r.reason, records: [] }, precision: step.precision, photometry: step.photometryFields };
+        if (!(r.status >= 400 && r.status < 500)) return { sbdb: { ok: false, reason: r.reason, records: [], refused, retried }, precision: step.precision, photometry: step.photometryFields };
         refused.push(`${step.precision}/${step.photometryFields}/quality-${step.qualityFields}: ${r.reason}`);
     }
     return { sbdb: { ok: false, reason: `refused at every step (${refused.join('; ')})`, records: [] }, precision: null, photometry: null };

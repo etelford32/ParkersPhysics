@@ -232,6 +232,8 @@ export function composeTrojanResponse({ sbdb, precision, photometry, quality, ep
                 // Query refinements JPL refused before the one that answered
                 // (e.g. 'full/requested: HTTP 400' ⇒ full-prec is misspelt).
                 refused: sbdb?.refused ?? [],
+                // Same-step retries after a timeout / network error (0 or 1).
+                retried: sbdb?.retried ?? 0,
                 quality: sbdb?.quality ?? null },
             jupiter: { ok: !!jup?.ok, reason: jup?.ok ? null : (jup?.reason ?? 'not_fetched') },
             saturn:  { ok: !!sat?.ok, reason: sat?.ok ? null : (sat?.reason ?? 'not_fetched') },

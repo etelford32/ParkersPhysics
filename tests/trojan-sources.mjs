@@ -177,6 +177,20 @@ import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
         assert.equal(JSON.parse(sent.body.toString()).freshness, 'live', 'the body is written through res');
     }
 
+    // A HUNG first attempt retries the same step once (2026-11-03 19:48: a
+    // preview request spent its whole SBDB budget waiting).
+    {
+        let n = 0;
+        r = await run(() => { if (n++ === 0) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); return Response.json(sbdbBody); });
+        assert.equal(r.body.freshness, 'live', 'recovered on the retry');
+        assert.equal(r.body.sources.sbdb.retried, 1);
+        assert.equal(r.body.precision, 'full', 'a timeout is not a schema refusal — same step');
+        let m = 0;
+        r = await run(() => { m++; throw new DOMException('timeout', 'TimeoutError'); });
+        assert.equal(r.body.freshness, 'stale');
+        assert.equal(m, 2, 'exactly one retry, never a loop');
+    }
+
     r = await run(() => new Response('down', { status: 503 }));
     assert.equal(r.res.status, 200, 'never 5xx');
     assert.equal(r.body.freshness, 'stale');
