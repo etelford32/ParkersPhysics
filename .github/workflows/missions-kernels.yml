@@ -1,0 +1,71 @@
+name: missions-kernels
+
+# The kernels behind missions.html (the live fleet map), gated in node — a few
+# seconds, no browser, no npm install (the tests import only node:* and the
+# repo's own ES modules):
+#
+#   mission-positions.mjs          the analytic placement + the ONE disclosed
+#                                  log-compression of host-local distance
+#                                  (with the old "L1 inside the Earth sphere"
+#                                  bug as its negative control)
+#   mission-ephemeris.mjs          Horizons query/CSV parser/Hermite
+#                                  interpolation/batch planning
+#   missions-ephemeris-route.mjs   /api/missions/ephemeris against a stubbed
+#                                  Horizons: candidate walk, self-report,
+#                                  200+stale on a dead upstream
+#   missions-manifest.mjs          the launch manifest + just-launched rails
+#   pipeline-registry.mjs          the two new feed rows are registered
+#
+# The browser gate (tests/missions-smoke.spec.js, feeds mocked) runs with the
+# rest of the Playwright suite.
+
+on:
+  push:
+    paths:
+      - 'js/space-missions.js'
+      - 'js/mission-positions.js'
+      - 'js/mission-ephemeris.js'
+      - 'js/missions-manifest.js'
+      - 'api/missions/**'
+      - 'tests/mission-*.mjs'
+      - 'tests/missions-*.mjs'
+      - '.github/workflows/missions-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/space-missions.js'
+      - 'js/mission-positions.js'
+      - 'js/mission-ephemeris.js'
+      - 'js/missions-manifest.js'
+      - 'api/missions/**'
+      - 'tests/mission-*.mjs'
+      - 'tests/missions-*.mjs'
+      - '.github/workflows/missions-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: missions-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Missions kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Placement kernel + local compression
+        run: node tests/mission-positions.mjs
+      - name: Horizons ephemeris kernel
+        run: node tests/mission-ephemeris.mjs
+      - name: Ephemeris route (stubbed Horizons)
+        run: node tests/missions-ephemeris-route.mjs
+      - name: Launch rails model
+        run: node tests/missions-manifest.mjs
+      - name: Pipeline registry
+        run: node tests/pipeline-registry.mjs

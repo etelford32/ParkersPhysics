@@ -344,6 +344,25 @@ export const PIPELINES = [
       cadence_s: 3_600, prewarm: 'medium',
       warnAgeS:  90 * 60, critAgeS: 180 * 60 },
 
+    // CelesTrak objects catalogued in the last 30 days — payloads AND rocket
+    // bodies. missions.html's "just launched" rail propagates them live.
+    { id: 'celestrak-last-30-days', label: 'CelesTrak · launched last 30 days',
+      endpoint: '/api/celestrak/tle?group=last-30-days',
+      category: 'orbital', upstream: 'CelesTrak GP / 18 SDS',
+      cadence_s: 21_600, prewarm: 'cold',
+      warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
+      notes: 'Feeds the recently-launched rail on missions.html.' },
+
+    // JPL Horizons state vectors for the missions roster (fan-out, one call
+    // per spacecraft; default probe = the heliophysics core set). Answers 200
+    // + freshness:'stale' when Horizons is down — never a 5xx.
+    { id: 'missions-ephemeris',  label: 'Mission ephemeris · JPL Horizons',
+      endpoint: '/api/missions/ephemeris',
+      category: 'orbital', upstream: 'JPL Horizons',
+      cadence_s: 3_600, prewarm: 'medium',
+      warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
+      notes: 'Spacecraft ids resolve from candidate lists; command_used self-reports.' },
+
     // ── Tropical / severe weather ─────────────────────────────────────────
     { id: 'storms-cyclones',    label: 'NHC active tropical cyclones',
       endpoint: '/api/storms',

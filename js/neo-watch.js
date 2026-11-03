@@ -9,12 +9,15 @@
  *   the picture     js/neo-watch/stage.js + panels.js
  *
  * ── The clock ─────────────────────────────────────────────────────────────
- * REAL TIME is the default and the resting state: with warp at ×1 and no
- * scrub, the page shows now, and `_jdNow()` reads the wall clock every frame
- * rather than integrating a delta — a page that claims to be live must not be
- * able to drift from the clock it claims to follow. Warp and scrub are an
- * OFFSET on top of that, so returning to ×1 with a zero scrub returns to now
- * exactly, and the "LIVE" chip is on precisely when that offset is zero.
+ * ONE pure clock, js/neo-watch/sim-clock.js (gate `tests/neo-watch-clock.mjs`).
+ * REAL TIME is the default and the resting state: a live clock reads the wall
+ * clock every frame EXACTLY (offset 0) rather than integrating a delta — a
+ * page that claims to be live must not be able to drift from the clock it
+ * claims to follow. Every control (rate, reverse, pause, the slider, the step
+ * buttons, an approach row) is a function of (clock, now) that keeps the
+ * stage where it is unless moving it is the point, and the slider READS the
+ * offset back every UI tick, so it follows warp instead of sitting at "now".
+ * "Now" is the only way back to live.
  *
  * ── Tier ladder ───────────────────────────────────────────────────────────
  * `pha` loads first because it is small and it is the population anyone came
@@ -39,33 +42,33 @@ import {
 import { rowToRecord, prepareColumns, propagateColumns, deriveGeocentric, propagate } from './neo-orbits.js';
 import { EARTH_TEXTURES } from './earth-skin.js';
 import { MOON_TEXTURES } from './moon-skin.js';
+import { locationAnalysis, gravityProfile } from './earth-moon-gravity.js';
 import { NeoStage } from './neo-watch/stage.js';
+import * as Clock from './neo-watch/sim-clock.js';
+
+const { msToJd, jdToMs } = Clock;
 import {
     renderNearest, renderApproaches, renderSentry, renderFireballs,
-    renderSelected, renderFeedChips, renderMoon, renderGravity,
+    renderSelected, renderFeedChips, renderMoon, renderGravity, renderEarthMoon,
 } from './neo-watch/panels.js';
 
 const WORKER_URL = new URL('./neo-worker.js', import.meta.url);
-const JD_UNIX_0 = 2440587.5;
-const msToJd = (ms) => ms / 86400000 + JD_UNIX_0;
-const jdToMs = (jd) => (jd - JD_UNIX_0) * 86400000;
 
 /** How many rows the live board shows. */
 const BOARD_ROWS = 14;
 /** Panel refresh rate. The stage runs at frame rate; the DOM does not need to. */
 const PANEL_HZ = 3;
 /** Warp settings offered, in simulated seconds per real second. */
-const WARPS = [1, 60, 600, 3600, 21600, 86400];
+// Rates live in the clock module (RATES), with the reverse ones.
 
 export class NeoWatch {
     constructor(root = document) {
         this.root = root;
         this.$ = (id) => root.getElementById(id);
 
-        this.warp = 1;
-        this.offsetDays = 0;          // scrub, in days from now
-        this.paused = false;
-        this._warpAnchor = null;      // { realMs, jd } while warp > 1
+        this.clock = Clock.liveClock(Date.now());
+        this._spanDays = Clock.DEFAULT_SPAN_DAYS;
+        this._scrubbing = false;      // a hand is on the slider: do not move its thumb
         this.horizonKm = (HORIZONS.find(h => h.id === DEFAULT_HORIZON) || HORIZONS[0]).km;
         this.tier = 'pha';
         this.observer = null;
@@ -98,49 +101,29 @@ export class NeoWatch {
 
     // ── Clock ───────────────────────────────────────────────────────────────
 
-    /**
-     * The simulated instant, as a Julian Day. At warp 1 with no scrub this is
-     * the wall clock, read fresh — see the header.
-     */
-    _jdNow() {
-        const realMs = Date.now();
-        if (this.paused && this._pausedJd != null) return this._pausedJd;
-        let jd;
-        if (this.warp === 1 || !this._warpAnchor) {
-            jd = msToJd(realMs);
-        } else {
-            const elapsedMs = realMs - this._warpAnchor.realMs;
-            jd = this._warpAnchor.jd + (elapsedMs / 86400000) * this.warp;
-        }
-        return jd + this.offsetDays;
-    }
+    /** The simulated instant, as a Julian Day — the clock read at the wall clock now. */
+    _jdNow() { return Clock.jdAt(this.clock, Date.now()); }
 
     /** True when the page is showing the present moment and nothing else. */
-    get isLive() { return !this.paused && this.warp === 1 && Math.abs(this.offsetDays) < 1e-9; }
+    get isLive() { return Clock.isLive(this.clock); }
+    /** Simulated minus wall clock, days; exactly 0 while live. */
+    get offsetDays() { return Clock.offsetDays(this.clock, Date.now()); }
+    get paused() { return !!this.clock.paused; }
+    get warp() { return this.clock.live ? 1 : this.clock.rate; }
 
-    _setWarp(w) {
-        const jd = this._jdNow();
-        this.warp = w;
-        this._warpAnchor = w === 1 ? null : { realMs: Date.now(), jd: jd - this.offsetDays };
+    /** Apply a clock transition and refresh everything that shows the time. */
+    _setClock(next) {
+        if (next === this.clock) return;
+        this.clock = next;
         this._syncClockUi();
     }
-
-    _setOffsetDays(d) {
-        // Re-anchor so a scrub while warped does not also jump the warp origin.
-        if (this.warp !== 1) this._warpAnchor = { realMs: Date.now(), jd: this._jdNow() - this.offsetDays };
-        this.offsetDays = d;
-        this._syncClockUi();
-    }
-
+    _setWarp(rate) { this._setClock(Clock.setRate(this.clock, rate, Date.now())); }
+    _setOffsetDays(d) { this._setClock(Clock.seekOffset(this.clock, d, Date.now())); }
+    _step(days) { this._setClock(Clock.step(this.clock, days, Date.now())); }
+    _togglePause() { this._setClock(Clock.setPaused(this.clock, !this.clock.paused, Date.now())); }
     _goLive() {
-        this.paused = false;
-        this._pausedJd = null;
-        this.warp = 1;
-        this._warpAnchor = null;
-        this.offsetDays = 0;
-        const scrub = this.$('nw-scrub');
-        if (scrub) scrub.value = '0';
-        this._syncClockUi();
+        this._spanDays = Clock.DEFAULT_SPAN_DAYS;
+        this._setClock(Clock.liveClock(Date.now()));
     }
 
     // ── Feeds ───────────────────────────────────────────────────────────────
@@ -414,10 +397,36 @@ export class NeoWatch {
      * read as "stationary relative to Earth".
      */
     _geocentricSpeed(el, jd) {
+        const v = this._geocentricVelocity(el, jd);
+        return v ? Math.hypot(v[0], v[1], v[2]) : null;
+    }
+
+    /** The same difference as a VECTOR, km/s, ecliptic J2000 — the Jacobi constant needs direction. */
+    _geocentricVelocity(el, jd) {
         if (!Number.isFinite(el?.om) || !Number.isFinite(el?.n) || !Number.isFinite(el?.t0)) return null;
         const p = propagate(el, jd, true);
         const ev = earthVelocityJ2000(jd);
-        return Math.hypot(p.vx - ev.x, p.vy - ev.y, p.vz - ev.z) * AU_PER_DAY_TO_KMS;
+        const k = AU_PER_DAY_TO_KMS;
+        return [(p.vx - ev.x) * k, (p.vy - ev.y) * k, (p.vz - ev.z) * k];
+    }
+
+    /**
+     * Where the selected object sits in the Earth–Moon environment — the
+     * kernel's `locationAnalysis` on the stage's OWN Lagrange geometry for this
+     * epoch, so the card and the drawn points are one evaluation. Returns null
+     * for the Moon (it is a primary, not a test particle) and before a frame.
+     */
+    _locationFor(index, jd) {
+        const f = this.frame;
+        const el = this.meta.get(index);
+        const geom = this.stage.emGeometry;
+        if (!f || !el || !geom || !Number.isInteger(index) || index >= f.count) return null;
+        const o = index * 3;
+        const rKm = [f.geo[o] * AU_KM, f.geo[o + 1] * AU_KM, f.geo[o + 2] * AU_KM];
+        return locationAnalysis({
+            rKm, vKms: this._geocentricVelocity(el, jd), jd,
+            frame: geom.frame, geometry: geom,
+        });
     }
 
     _renderLive(jd) {
@@ -438,7 +447,11 @@ export class NeoWatch {
         const cmp = approach && this._approachCheck && this._approachCheck.des === selRow.des
             ? compareApproach(this._approachCheck.ours, approach.dist_au, msToJd(approach.t_ms))
             : null;
-        renderSelected(this.$('nw-selected'), selRow, { approach, comparison: cmp, nowMs: jdToMs(jd) });
+        const location = selRow ? this._locationFor(this.selected, jd) : null;
+        renderSelected(this.$('nw-selected'), selRow, { approach, comparison: cmp, nowMs: jdToMs(jd), location });
+        // The disc tints the selected object's forbidden region only when its
+        // Jacobi constant means something (inside Earth's Hill sphere).
+        this.stage.setObjectJacobi(location?.jacobiMeaningful ? location.jacobi : null);
 
         // Headline counters.
         const inView = this.frame ? this._countInView() : 0;
@@ -469,11 +482,31 @@ export class NeoWatch {
         // it places the Moon, so this prints the same numbers the stage drew
         // rather than evaluating the ephemeris a second time.
         renderMoon(this.$('nw-moon'), this.stage.phase, this.stage.apsides, { jd });
+        this._renderEarthMoon(jd, earth);
 
         const sub = subSolarPoint(jd);
         this._setText('nw-subsolar',
             `${Math.abs(sub.latDeg).toFixed(1)}°${sub.latDeg < 0 ? 'S' : 'N'} ${Math.abs(sub.lonDeg).toFixed(1)}°${sub.lonDeg < 0 ? 'W' : 'E'}`);
         this._setText('nw-gmst', `${(gmstRad(jd) * 12 / Math.PI).toFixed(3)} h`);
+    }
+
+    /**
+     * The Earth–Moon card + profile chart. The geometry changes on the scale
+     * of hours, so the card is rebuilt when the sim clock has moved 0.05 d —
+     * at real time that is every 72 minutes, and the chart's hover state
+     * survives in between.
+     */
+    _renderEarthMoon(jd, earth) {
+        const el = this.$('nw-earthmoon');
+        const geom = this.stage.emGeometry;
+        if (!el || !geom) return;
+        if (this._emJd != null && Math.abs(jd - this._emJd) < 0.05) return;
+        this._emJd = jd;
+        const sunKm = [-earth.x * AU_KM, -earth.y * AU_KM, -earth.z * AU_KM];
+        const profile = gravityProfile({
+            moonKm: geom.frame.moonKm, sunKm, minKm: EARTH_RADIUS_KM, maxKm: 0.05 * AU_KM, n: 220,
+        });
+        renderEarthMoon(el, { geometry: geom, profile, earthRAU: earth.rAU });
     }
 
     _countInView() {
@@ -747,23 +780,72 @@ export class NeoWatch {
         // Clock.
         const warp = this.$('nw-warp');
         if (warp) {
-            warp.innerHTML = WARPS.map(w =>
-                `<option value="${w}">${w === 1 ? 'real time' : w >= 3600 ? `×${(w / 3600).toFixed(0)} h/s` : `×${w}`}</option>`).join('');
-            warp.addEventListener('change', () => this._setWarp(Number(warp.value) || 1));
+            warp.innerHTML = Clock.RATES.map(r =>
+                `<option value="${r}"${r === 1 ? ' selected' : ''}>${Clock.rateLabel(r)}</option>`).join('');
+            warp.addEventListener('change', () => {
+                const r = Number(warp.value) || 1;
+                // Choosing a rate also un-pauses: picking "×1 h/s" means "play at 1 h/s".
+                let c = Clock.setRate(this.clock, r, Date.now());
+                if (c.paused) c = Clock.setPaused(c, false, Date.now());
+                this._setClock(c);
+            });
         }
-        on('nw-scrub', 'input', (e) => this._setOffsetDays(Number(e.target.value) || 0));
+        const scrub = this.$('nw-scrub');
+        if (scrub) {
+            // The thumb is the user's while a hand is on it; otherwise it follows
+            // the clock (so it tracks warp). Pointer AND keyboard both count.
+            const grab = () => { this._scrubbing = true; };
+            const release = () => { this._scrubbing = false; this._syncClockUi(); };
+            scrub.addEventListener('pointerdown', grab);
+            scrub.addEventListener('pointerup', release);
+            scrub.addEventListener('pointercancel', release);
+            scrub.addEventListener('blur', release);
+            scrub.addEventListener('input', (e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) this._setOffsetDays(v);
+            });
+            scrub.addEventListener('change', release);
+            // Keys on the slider step the CLOCK, not a fraction of the track:
+            // ←/→ an hour, Shift or PageUp/PageDown a day, Home back to now.
+            scrub.addEventListener('keydown', (ev) => {
+                const k = ev.key;
+                let days = null;
+                if (k === 'ArrowRight' || k === 'ArrowUp') days = ev.shiftKey ? 1 : 1 / 24;
+                else if (k === 'ArrowLeft' || k === 'ArrowDown') days = ev.shiftKey ? -1 : -1 / 24;
+                else if (k === 'PageUp') days = 1;
+                else if (k === 'PageDown') days = -1;
+                else if (k === 'Home') { ev.preventDefault(); this._goLive(); return; }
+                if (days == null) return;
+                ev.preventDefault();
+                this._step(days);
+            });
+        }
         on('nw-live', 'click', () => this._goLive());
-        on('nw-pause', 'click', () => {
-            this.paused = !this.paused;
-            this._pausedJd = this.paused ? this._jdNow() : null;
-            if (!this.paused) this._warpAnchor = { realMs: Date.now(), jd: this._pausedJd - this.offsetDays };
-            this._syncClockUi();
-        });
+        on('nw-pause', 'click', () => this._togglePause());
+        for (const [id, days] of [['nw-step-back-day', -1], ['nw-step-back-hour', -1 / 24],
+                                  ['nw-step-fwd-hour', 1 / 24], ['nw-step-fwd-day', 1]]) {
+            on(id, 'click', () => this._step(days));
+        }
+        // Keyboard: only when nothing that takes typing has focus, so the
+        // slider, selects and the observer inputs keep their own keys.
+        this._onKey = (ev) => {
+            const t = ev.target;
+            if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+            if (t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(t.tagName))) return;
+            if (ev.key === ' ' || ev.code === 'Space') { ev.preventDefault(); this._togglePause(); }
+            else if (ev.key === 'ArrowRight') { ev.preventDefault(); this._step(ev.shiftKey ? 1 : 1 / 24); }
+            else if (ev.key === 'ArrowLeft') { ev.preventDefault(); this._step(ev.shiftKey ? -1 : -1 / 24); }
+            else if (ev.key === 'n' || ev.key === 'N' || ev.key === 'Home') { ev.preventDefault(); this._goLive(); }
+        };
+        addEventListener('keydown', this._onKey);
 
         // View.
         on('nw-true-scale', 'change', (e) => this.stage.setTrueScale(e.target.checked));
         on('nw-grid', 'change', (e) => this.stage.setGrid(e.target.checked));
         on('nw-fireballs-on', 'change', (e) => this.stage.setFireballsVisible(e.target.checked));
+        on('nw-em-layer', 'change', (e) => this.stage.setEarthMoonLayer(e.target.checked));
+        on('nw-zvc', 'change', (e) => this.stage.setZeroVelocityCurves(e.target.checked));
+        on('nw-frame-em', 'click', () => this.stage.frameEarthMoon());
         on('nw-frame-all', 'click', () => this.stage.frameAll());
         on('nw-frame-earth', 'click', () => this.stage.frameEarth());
         on('nw-frame-sel', 'click', () => this.stage.focusSelected());
@@ -792,12 +874,7 @@ export class NeoWatch {
             // Move the clock to the approach — the one place a list row drives
             // the simulation, and the reason the scrub exists.
             const t = Number(tr.dataset.t);
-            if (Number.isFinite(t)) {
-                const days = (msToJd(t) - msToJd(Date.now()));
-                this._setOffsetDays(days);
-                const scrub = this.$('nw-scrub');
-                if (scrub) scrub.value = String(Math.max(-90, Math.min(90, days)));
-            }
+            if (Number.isFinite(t)) this._setClock(Clock.seekJd(this.clock, msToJd(t), Date.now()));
         });
     }
 
@@ -832,23 +909,61 @@ export class NeoWatch {
     }
 
     _syncClockUi() {
-        const jd = this._jdNow();
+        const nowMs = Date.now();
+        const jd = Clock.jdAt(this.clock, nowMs);
+        const off = Clock.offsetDays(this.clock, nowMs);
         const d = new Date(jdToMs(jd));
         this._setText('nw-clock', d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC');
         const live = this.$('nw-live');
         if (live) live.classList.toggle('nw-live--on', this.isLive);
-        this._setText('nw-live-state', this.isLive ? 'LIVE' : 'OFFSET');
+        const state = Clock.stateLabel(this.clock);
+        this._setText('nw-live-state', state);
+        const chip = this.$('nw-live-state');
+        if (chip) chip.dataset.state = state.toLowerCase();
         const pause = this.$('nw-pause');
-        if (pause) pause.textContent = this.paused ? 'Resume' : 'Pause';
-        const off = this.$('nw-offset');
-        if (off) {
-            off.textContent = Math.abs(this.offsetDays) < 1e-9 ? 'now'
-                : `${this.offsetDays > 0 ? '+' : '−'}${Math.abs(this.offsetDays).toFixed(2)} d`;
+        if (pause) {
+            // Icon + word; the word drops out on a phone (CSS) so six buttons fit one row.
+            const [ico, word] = this.clock.paused ? ['▶', 'Play'] : ['❚❚', 'Pause'];
+            if (pause.dataset.label !== word) {
+                pause.dataset.label = word;
+                pause.innerHTML = `<span aria-hidden="true">${ico}</span><span class="nw-btn-word"> ${word}</span>`;
+                pause.setAttribute('aria-label', word);
+            }
+            pause.setAttribute('aria-pressed', this.clock.paused ? 'true' : 'false');
+        }
+        this._setText('nw-offset', Clock.formatOffset(off));
+        const warp = this.$('nw-warp');
+        const rate = this.clock.live ? 1 : this.clock.rate;
+        if (warp && document.activeElement !== warp && Number(warp.value) !== rate
+            && Clock.RATES.includes(rate)) warp.value = String(rate);
+
+        // The slider follows the clock unless a hand is on it. Its span widens
+        // to hold the offset (an approach row can be years away) and narrows
+        // back on Now; it never changes under the user's own drag.
+        const scrub = this.$('nw-scrub');
+        if (scrub && !this._scrubbing) {
+            const span = Math.max(Clock.spanFor(off, Clock.DEFAULT_SPAN_DAYS), this.isLive ? 0 : this._spanDays);
+            if (span !== this._spanDays || scrub.max !== String(span)) {
+                this._spanDays = span;
+                // step="any" on purpose: a numeric step snaps the thumb to a grid
+                // anchored at `min`, and ±30 d is not a whole number of 15-minute
+                // steps in floating point — "now" read back as 9.6e-8 d. The
+                // arrow keys are handled below instead.
+                scrub.min = String(-span);
+                scrub.max = String(span);
+                this._setText('nw-scrub-min', `−${Clock.formatOffset(span).slice(1)}`);
+                this._setText('nw-scrub-max', Clock.formatOffset(span));
+            }
+            const v = Math.max(-span, Math.min(span, off));
+            if (Math.abs(Number(scrub.value) - v) > Clock.sliderStepDays(span) / 2 || (v === 0 && Number(scrub.value) !== 0)) {
+                scrub.value = String(v);
+            }
         }
     }
 
     destroy() {
         this._stopped = true;
+        if (this._onKey) removeEventListener('keydown', this._onKey);
         clearInterval(this._watchTimer);
         this.worker?.terminate();
         this.stage?.dispose();

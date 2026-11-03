@@ -449,6 +449,24 @@ export function neptuneHeliocentric(jd = jdNow()) {
 // Falls back to direct JPL if the proxy is unavailable (caught upstream).
 const HORIZONS_URL = '/api/horizons';
 
+/**
+ * Query parameters for one VECTORS table (exported for tests/horizons-params.mjs).
+ *
+ * THE FRAME PARAMETER IS `REF_PLANE=ECLIPTIC`, NOT `REF_FRAME=ECLIPJ2000`.
+ * `REF_FRAME` is not a Horizons API parameter: the API answers HTTP 400
+ * `{"message":"one or more query parameter was not recognized"}` to ANY
+ * unknown name, so with it every call this module made failed and
+ * EphemerisService silently ran on its Meeus fallback for Earth, the Moon
+ * and Jupiter–Neptune (measured 2026-11-03 against the production
+ * /api/horizons proxy: this exact query → 400; the same query with
+ * REF_PLANE=ECLIPTIC → a full vector table whose header reads "Reference
+ * frame: Ecliptic of J2000.0", because REF_SYSTEM defaults to ICRF).
+ * api/health.js's Horizons probe sends no frame parameter at all, which is
+ * why status.html stayed green the whole time. js/mission-ephemeris.js
+ * carries the same note and the same spelling — keep the two in step.
+ * The returned vectors are still ECLIPJ2000 (J2000 ecliptic, NOT of date),
+ * so `_vecToHelioEcliptic` and every consumer are unchanged.
+ */
 function _horizonsParams(command, center, jd = null) {
     // If a JD is provided, compute start/stop dates from it.
     // Otherwise use current time (real-time mode).
@@ -466,10 +484,11 @@ function _horizonsParams(command, center, jd = null) {
         VEC_TABLE:  '2',
         VEC_LABELS: 'YES',
         OBJ_DATA:   'NO',
-        REF_FRAME:  'ECLIPJ2000',
+        REF_PLANE:  'ECLIPTIC',   // NOT REF_FRAME — see the note above
         CAL_FORMAT: 'BOTH',
     });
 }
+export { _horizonsParams as horizonsVectorParams };
 
 function _parseVec(text) {
     const soe = text.indexOf('$$SOE');
