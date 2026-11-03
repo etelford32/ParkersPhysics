@@ -42,7 +42,7 @@ export default async function handler(request) {
             if (!r.ok) return { url: r.url, ok: false, status: r.status, reason: r.reason };
             const p = parseSyn(r.text);
             return { url: r.url, ok: p.ok, status: r.status, bytes: r.text.length, rows: p.count,
-                header_line: p.header_line ?? null, field_map: p.field_map ?? {}, lib_unit: p.lib_unit ?? null,
+                header_line: p.header_line ?? null, field_map: p.field_map ?? {},
                 reason: p.ok ? null : p.reason, first_lines: r.text.split(/\r?\n/).slice(0, 8) };
         });
         return jsonOk({ source: 'astdys', meta: true, generated_at: new Date().toISOString(), candidates }, { maxAge: 300, swr: 600 });

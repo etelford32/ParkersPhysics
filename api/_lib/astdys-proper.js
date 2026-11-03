@@ -15,8 +15,8 @@
  * The AstDyS hosts are egress-blocked from the build sandbox, so the file
  * path and its column layout are CANDIDATES (the api/_lib/noaa-regions.js /
  * SUVI pattern): every candidate URL is tried in order, the columns are mapped
- * from the file's OWN header comment line (never by position), the libration
- * column's UNIT is detected and reported, and `meta=1` on the route probes
+ * from the file's OWN header comment line (never by position), and `meta=1`
+ * on the route probes
  * every candidate in parallel and returns each one's status and first lines —
  * ONE production request settles it; then trim the lists.
  *
@@ -29,22 +29,35 @@ export const ASTDYS_HOSTS = Object.freeze([
     'https://newton.spacedys.com/~astdys2/propsynth/',
     'https://hamilton.dm.unipi.it/~astdys2/propsynth/',
 ]);
-export const ASTDYS_FILES = Object.freeze(['tro.syn', 'trojan.syn', 'trojans.syn']);
+// VERIFIED 2026-11-03 (preview ?meta=1): newton.spacedys.com/…/tro.syn answers
+// ("Synthetic proper elements Knezevic Jun 2024: 11867 numbered & multiopp.
+// Trojans", 925 785 bytes); trojan.syn / trojans.syn 404 there and the Pisa
+// mirror was unreachable from Vercel. The mirror stays as the fallback.
+export const ASTDYS_FILES = Object.freeze(['tro.syn']);
 /** Every candidate URL, primary host first for each file name. */
 export const ASTDYS_CANDIDATES = Object.freeze(
     ASTDYS_FILES.flatMap(f => ASTDYS_HOSTS.map(h => h + f)));
 
-/** Header-token candidates, matched case-insensitively after stripping units/punctuation. */
+/**
+ * Header-token candidates, matched case-insensitively after stripping units
+ * and punctuation. The VERIFIED production header (2026-11-03) is
+ *   %Name  H  da(AU)  D(deg)  f(deg/y)  e  g("/y)  sin I  s("/y)  L  My
+ * — both libration forms, the libration frequency in deg/yr, the secular
+ * frequencies in arcsec/yr, the integration span in Myr (`My`, 5 or 50) and
+ * an integer quality column `L` relayed as published.
+ */
 const COLUMN_CANDIDATES = Object.freeze({
     name:  ['name', 'asteroid', 'number', 'num', 'id', 'desig'],
-    H:     ['mag', 'h', 'absmag', 'hmag'],
-    lib:   ['d', 'dp', 'da', 'dap', 'lib', 'dlib', 'libamp', 'ampl', 'delta'],
+    H:     ['h', 'mag', 'absmag', 'hmag'],
+    da:    ['da', 'dap', 'dau'],
+    D:     ['d', 'dp', 'dlib', 'libamp', 'ampl'],
+    f:     ['f', 'freq', 'flib', 'libfreq', 'fl'],
     e:     ['e', 'ep', 'eprop'],
-    sinI:  ['sini', 'sinip', 'sin', 'sinip'],
-    f:     ['f', 'freq', 'flib', 'libfreq', 'fl', 'n'],
     g:     ['g'],
+    sinI:  ['sini', 'sinip'],
     s:     ['s'],
-    lce:   ['lce', 'lyap', 'lyapunov'],
+    L:     ['l', 'lce', 'lyap'],
+    My:    ['my', 'myr', 'span'],
 });
 
 const norm = (t) => String(t).toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9]/g, '');
@@ -56,7 +69,7 @@ export function normaliseDesignation(d) {
 
 /**
  * Parse a .syn text body.
- * @returns {{ ok, reason?, rows, columns, field_map, header_line, lib_unit, sample_lines, count }}
+ * @returns {{ ok, reason?, rows, field_map, header_line, sample_lines, count }}
  */
 export function parseSyn(text) {
     if (typeof text !== 'string' || !text.trim()) return { ok: false, reason: 'empty_body', rows: [], count: 0, sample_lines: [] };
@@ -68,8 +81,14 @@ export function parseSyn(text) {
     if (!data.length) return { ok: false, reason: 'no_data_rows', rows: [], count: 0, sample_lines: sample };
     const width = data[0].trim().split(/\s+/).length;
     // The header is the last comment line whose token count matches the data.
-    const headers = lines.filter(isComment).map(l => l.replace(/^\s*[%#!;]+/, '').trim().split(/\s+/).filter(Boolean));
-    const header = [...headers].reverse().find(h => h.length === width) ?? null;
+    // "sin I" is ONE column written as two tokens in the real header.
+    const headers = lines.filter(isComment).map(l => l.replace(/^\s*[%#!;]+/, '').replace(/sin\s+I/gi, 'sinI').trim().split(/\s+/).filter(Boolean));
+    // The header is the last comment line that matches the data width AND
+    // names a designation column — the title line of the real file happens
+    // to have exactly as many words as a data row (measured), so width alone
+    // picked it.
+    const namesName = (h) => h.some(t => COLUMN_CANDIDATES.name.includes(norm(t)));
+    const header = [...headers].reverse().find(h => h.length === width && namesName(h)) ?? null;
     if (!header) return { ok: false, reason: `no_header_matching_${width}_columns`, rows: [], count: 0, sample_lines: sample };
     const tokens = header.map(norm);
     const map = {};
@@ -77,8 +96,8 @@ export function parseSyn(text) {
         const i = tokens.findIndex((t, k) => names.includes(t) && !Object.values(map).includes(k));
         if (i >= 0) map[key] = i;
     }
-    if (map.name == null || map.lib == null) {
-        return { ok: false, reason: `missing_columns:${['name', 'lib'].filter(k => map[k] == null).join(',')}`,
+    if (map.name == null || (map.D == null && map.da == null)) {
+        return { ok: false, reason: `missing_columns:${[map.name == null ? 'name' : null, map.D == null && map.da == null ? 'D|da' : null].filter(Boolean).join(',')}`,
             rows: [], count: 0, header_line: header.join(' '), sample_lines: sample, field_map: fieldMap(header, map) };
     }
     const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
@@ -86,40 +105,20 @@ export function parseSyn(text) {
     for (const l of data) {
         const c = l.trim().split(/\s+/);
         if (c.length !== width) continue;
+        const get = (k) => (map[k] != null ? num(c[map[k]]) : null);
         rows.push({
             des: normaliseDesignation(c[map.name]),
-            H: map.H != null ? num(c[map.H]) : null,
-            lib: num(c[map.lib]),
-            e: map.e != null ? num(c[map.e]) : null,
-            sinI: map.sinI != null ? num(c[map.sinI]) : null,
-            f: map.f != null ? num(c[map.f]) : null,
-            g: map.g != null ? num(c[map.g]) : null,
-            s: map.s != null ? num(c[map.s]) : null,
-            lce: map.lce != null ? num(c[map.lce]) : null,
+            H: get('H'), da: get('da'), D: get('D'), f: get('f'),
+            e: get('e'), g: get('g'), sinI: get('sinI'), s: get('s'), L: get('L'), My: get('My'),
         });
     }
     return { ok: rows.length > 0, rows, count: rows.length, header_line: header.join(' '),
-        field_map: fieldMap(header, map), lib_unit: libUnit(header[map.lib], rows), sample_lines: sample,
+        field_map: fieldMap(header, map), sample_lines: sample,
         ...(rows.length ? {} : { reason: 'no_parseable_rows' }) };
 }
 
 function fieldMap(header, map) {
     return Object.fromEntries(Object.entries(map).map(([k, i]) => [k, header[i]]));
-}
-
-/**
- * The libration amplitude is published either as an ANGLE (D, degrees) or as
- * a semimajor-axis amplitude (AU). The header token decides when it can; else
- * the values do (a Trojan's D is degrees to tens of degrees; its δa is
- * ≲ 0.3 AU — the separatrix).
- */
-export function libUnit(token, rows) {
-    const t = String(token ?? '').toLowerCase();
-    if (/deg|°/.test(t)) return 'deg';
-    if (/au|da/.test(t)) return 'au';
-    const v = rows.map(r => r.lib).filter(x => x != null && x > 0).sort((a, b) => a - b);
-    if (!v.length) return null;
-    return v[Math.floor(v.length / 2)] > 0.5 ? 'deg' : 'au';
 }
 
 /** Compose the /api/trojans/proper body. */
@@ -131,12 +130,13 @@ export function composeProperResponse({ parsed, source, attempts, generatedAt = 
         generated_at: generatedAt,
         source_url: source ?? null,
         attempts: attempts ?? [],
-        columns: ['des', 'H', 'lib', 'e', 'sinI', 'f', 'g', 's', 'lce'],
-        lib_unit: parsed?.lib_unit ?? null,
+        // Units as AstDyS publishes them: da AU, D deg, f deg/yr, g and s
+        // arcsec/yr, My = integration span in Myr; L relayed as published.
+        columns: ['des', 'H', 'da', 'D', 'f', 'e', 'g', 'sinI', 's', 'L', 'My'],
         header_line: parsed?.header_line ?? null,
         field_map: parsed?.field_map ?? {},
         count: parsed?.count ?? 0,
-        rows: (parsed?.rows ?? []).map(r => [r.des, r.H, r.lib, r.e, r.sinI, r.f, r.g, r.s, r.lce]),
+        rows: (parsed?.rows ?? []).map(r => [r.des, r.H, r.da, r.D, r.f, r.e, r.g, r.sinI, r.s, r.L, r.My]),
         freshness: ok ? 'live' : 'stale',
         ...(ok ? {} : { degraded_reason: parsed?.reason ?? 'unreachable', sample_lines: parsed?.sample_lines ?? [] }),
     };
