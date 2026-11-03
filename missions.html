@@ -8,23 +8,23 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Space Missions — Inner Solar System Fleet · Parkers Physics</title>
+<title>Space Missions — Live Fleet Tracker · Parkers Physics</title>
 <link rel="canonical" href="https://parkersphysics.com/missions">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Parkers Physics">
 <meta property="og:url" content="https://parkersphysics.com/missions">
 <meta property="og:title" content="Active Space Missions — Parkers Physics">
-<meta property="og:description" content="Live tracker for the inner solar system fleet: Parker Solar Probe, JWST, Mars rovers, lunar landers, and more. Real-time positions and mission telemetry.">
+<meta property="og:description" content="Live tracker for the active space fleet: Parker Solar Probe, BepiColombo, Europa Clipper, JWST, the Mars fleet, Voyager and more — JPL Horizons positions, SGP4 satellite tracks, upcoming launches and just-launched objects.">
 <meta property="og:image" content="https://parkersphysics.com/static/og/missions.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Parkers Physics — real-time astrophysics simulations">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Active Space Missions — Parkers Physics">
-<meta name="twitter:description" content="Live tracker for the inner solar system fleet: Parker Solar Probe, JWST, Mars rovers, lunar landers, and more. Real-time positions and mission telemetry.">
+<meta name="twitter:description" content="Live tracker for the active space fleet: Parker Solar Probe, BepiColombo, Europa Clipper, JWST, the Mars fleet, Voyager and more — JPL Horizons positions, SGP4 satellite tracks, upcoming launches and just-launched objects.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/missions.jpg">
 
-<meta name="description" content="Live tracker for the inner solar system fleet: Parker Solar Probe, JWST, Mars rovers, lunar landers, and more — real-time positions and telemetry.">
+<meta name="description" content="Live tracker for the active space fleet: JPL Horizons positions for 40+ spacecraft, SGP4 tracks for Earth-orbit observatories, the launch manifest and every object catalogued in the last 30 days.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -202,6 +202,69 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     box-shadow:0 0 0 1px rgba(255,184,48,.4), 0 4px 22px rgba(255,184,48,.18);
     transform:translateY(-1px);
 }
+
+/* ─── Card extras (2026-11) ─────────────────────────────── */
+.msn-card-live {
+    font-size:.68rem; font-family:monospace; color:#fc7; line-height:1.45;
+    margin-top:4px; padding:5px 8px; border-radius:6px;
+    background:rgba(255,184,48,.06); border:1px solid rgba(255,184,48,.14);
+}
+.msn-card-live[data-source="sgp4"]  { color:#8df; background:rgba(79,195,247,.06); border-color:rgba(79,195,247,.16); }
+.msn-card-live[data-source="model"] { color:#b9a; background:rgba(255,255,255,.03); border-color:rgba(255,255,255,.08); }
+.msn-card-live[hidden] { display:none; }
+.msn-card-live .msn-src { color:#889; font-size:.6rem; display:block; margin-top:2px; }
+.msn-next {
+    display:inline-flex; gap:6px; align-items:baseline; margin-top:4px;
+    font-size:.66rem; font-family:monospace; color:#dcb;
+}
+.msn-next strong { color:#ffb830; font-weight:800; }
+.msn-next[data-past="1"] strong { color:#8df; }
+
+/* ─── Launch rails ─────────────────────────────────────── */
+#msn-launch-wrap {
+    max-width:1400px; margin:0 auto 10px; padding:0 24px;
+    display:grid; grid-template-columns:1fr 1fr; gap:16px;
+}
+@media (max-width:1000px) { #msn-launch-wrap { grid-template-columns:1fr; padding:0 12px; } }
+.msn-rail { padding:12px 14px 10px; }
+.msn-rail-hd { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
+.msn-rail-hd h2 { font-size:.95rem; font-weight:800; color:#eef; }
+.msn-rail-hd h2 small { font-weight:600; color:#889; font-size:.7rem; margin-left:6px; }
+.msn-rail-src { font-size:.62rem; color:#667; font-family:monospace; }
+.msn-rail-src a { color:#ffb830; text-decoration:none; border-bottom:1px dotted rgba(255,184,48,.5); }
+.msn-rail-list { display:flex; flex-direction:column; gap:6px; max-height:420px; overflow-y:auto; padding-right:4px; }
+.msn-rail-empty { padding:18px; text-align:center; color:#778; font-size:.78rem; border:1px dashed rgba(255,255,255,.08); border-radius:8px; }
+.msn-rail-empty[data-state="down"] { color:#fc7; border-color:rgba(255,184,48,.3); }
+.msn-launch {
+    display:grid; grid-template-columns:96px 1fr auto; gap:10px; align-items:center;
+    padding:8px 10px; border-radius:8px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07);
+}
+.msn-launch-t { font-family:monospace; font-size:.8rem; font-weight:800; color:#ffb830; letter-spacing:.02em; }
+.msn-launch-t[data-past="1"] { color:#8df; }
+.msn-launch-name { font-size:.8rem; font-weight:700; color:#eef; line-height:1.25; }
+.msn-launch-meta { font-size:.66rem; color:#99a; font-family:monospace; margin-top:2px; line-height:1.4; }
+.msn-launch-meta span + span::before { content:" · "; color:#555; }
+.msn-pip { font-size:.58rem; font-weight:800; font-family:monospace; padding:2px 7px; border-radius:4px; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; border:1px solid; }
+.msn-pip--go, .msn-pip--success { color:#5e9; border-color:#4c8; background:rgba(79,201,127,.12); }
+.msn-pip--tbc { color:#fc7; border-color:#fb0; background:rgba(255,184,48,.12); }
+.msn-pip--tbd, .msn-pip--other { color:#aab; border-color:#667; background:rgba(200,200,200,.06); }
+.msn-pip--hold, .msn-pip--failure { color:#f99; border-color:#c66; background:rgba(255,100,100,.12); }
+.msn-pip--inflight { color:#8df; border-color:#4bd; background:rgba(79,195,247,.12); }
+.msn-obj {
+    display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center;
+    padding:7px 10px; border-radius:8px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07);
+}
+.msn-obj-name { font-size:.78rem; font-weight:700; color:#eef; }
+.msn-obj-name .msn-kind { font-size:.56rem; font-weight:800; font-family:monospace; padding:1px 6px; border-radius:3px; margin-left:6px; letter-spacing:.06em; vertical-align:middle; border:1px solid; }
+.msn-kind--payload { color:#5e9; border-color:#4c8; }
+.msn-kind--rocket-body { color:#fc7; border-color:#fb0; }
+.msn-kind--debris { color:#aab; border-color:#667; }
+.msn-obj-meta { font-size:.64rem; color:#99a; font-family:monospace; margin-top:2px; line-height:1.4; }
+.msn-obj-meta span + span::before { content:" · "; color:#555; }
+.msn-obj-pos { font-family:monospace; font-size:.68rem; color:#8df; text-align:right; line-height:1.4; white-space:nowrap; }
+.msn-obj-pos small { color:#667; display:block; font-size:.58rem; }
+.msn-rail-more { font-size:.64rem; color:#778; font-family:monospace; margin-top:8px; }
+.msn-verified { font-size:.64rem; color:#667; font-family:monospace; margin-top:10px; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 <script type="importmap">
@@ -219,8 +282,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "@id": "https://parkersphysics.com/missions#app",
-  "name": "Active Space Missions",
-  "description": "Live tracker for the inner solar system fleet: Parker Solar Probe, JWST, Mars rovers, lunar landers, and more. Real-time positions and mission telemetry.",
+  "name": "Space Missions — Live Fleet Tracker",
+  "description": "Live tracker for the active space fleet: JPL Horizons positions for 40+ spacecraft, SGP4 tracks for Earth-orbit observatories, the launch manifest and every object catalogued in the last 30 days.",
   "url": "https://parkersphysics.com/missions",
   "image": "https://parkersphysics.com/ParkersPhysics_logo2.jpg",
   "applicationCategory": "EducationalApplication",
@@ -241,15 +304,34 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("missions");</script>
 
 <div id="msn-hero">
-    <h1>Space Missions — Inner Solar System Fleet</h1>
-    <p>Every operational, cruising, and historically-important spacecraft measuring the Sun, the inner planets, and near-Earth small bodies. Parker Solar Probe is the namesake of this app and the first vehicle ever to cross the Alfvén surface.</p>
-    <p style="font-size:.78rem; color:#aa9; margin-top:8px;">Beyond the inner system → <a href="jupiter-system.html" style="color:#ffb830; text-decoration:none; border-bottom:1px dotted rgba(255,184,48,.5);">Jupiter system &amp; the Galilean moons</a></p>
+    <h1>Space Missions — Live Fleet Tracker</h1>
+    <p>Every operational, cruising and historically-important spacecraft from the Sun's corona to interstellar space, placed where it is <em>now</em>: JPL Horizons state vectors for the deep-space fleet, SGP4 on CelesTrak elements for Earth orbit, and a disclosed analytic model where neither resolves. Below the map: the launch manifest for the next 30 days and every object catalogued in the last 30 — payloads and rocket bodies — propagated live.</p>
+    <p style="font-size:.78rem; color:#aa9; margin-top:8px;">Deeper dives → <a href="jupiter-system.html" style="color:#ffb830; text-decoration:none; border-bottom:1px dotted rgba(255,184,48,.5);">Jupiter system</a> · <a href="mars.html" style="color:#ffb830; text-decoration:none; border-bottom:1px dotted rgba(255,184,48,.5);">Real-Time Mars</a> · <a href="satellites.html" style="color:#ffb830; text-decoration:none; border-bottom:1px dotted rgba(255,184,48,.5);">Satellite tracker</a> · <a href="launch-planner.html" style="color:#ffb830; text-decoration:none; border-bottom:1px dotted rgba(255,184,48,.5);">Launch planner</a></p>
     <div id="msn-hero-stats"></div>
 </div>
 
 <div id="msn-3d-wrap">
     <div id="msn-3d" aria-label="Real-time 3D solar-system mission map"></div>
-    <p id="msn-3d-help"><strong>Drag</strong> to orbit · <strong>Scroll</strong> to zoom · <strong>Right-drag</strong> to pan · <strong>Click</strong> a marker to focus a mission</p>
+    <p id="msn-3d-help"><strong>Drag</strong> to orbit · <strong>Scroll</strong> to zoom · <strong>Right-drag</strong> to pan · <strong>Click</strong> a marker to focus a mission · <strong>Earth</strong> / <strong>Heliopause</strong> buttons jump to the two ends of the fleet</p>
+</div>
+
+<div id="msn-launch-wrap">
+    <section class="msn-panel msn-rail" id="msn-manifest" aria-label="Launch manifest">
+        <div class="msn-rail-hd">
+            <h2>Launch manifest <small id="msn-manifest-count">next 30 days</small></h2>
+            <span class="msn-rail-src">Launch Library 2 · <a href="launch-planner.html">pad weather →</a></span>
+        </div>
+        <div class="msn-rail-list" id="msn-manifest-list"><div class="msn-rail-empty">Loading launch schedule…</div></div>
+        <div class="msn-rail-more" id="msn-manifest-more"></div>
+    </section>
+    <section class="msn-panel msn-rail" id="msn-recent" aria-label="Recently launched objects">
+        <div class="msn-rail-hd">
+            <h2>Just launched <small id="msn-recent-count">catalogued in the last 30 days</small></h2>
+            <span class="msn-rail-src">CelesTrak GP · SGP4 live · <a href="satellites.html">track →</a></span>
+        </div>
+        <div class="msn-rail-list" id="msn-recent-list"><div class="msn-rail-empty">Loading catalogue…</div></div>
+        <div class="msn-rail-more" id="msn-recent-more"></div>
+    </section>
 </div>
 
 <div id="msn-app">
@@ -262,6 +344,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div class="msn-chip-row" id="msn-status-filters"></div>
 
         <div class="msn-counter" id="msn-counter">—</div>
+        <div class="msn-verified" id="msn-verified"></div>
     </aside>
 
     <main>
@@ -273,32 +356,25 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 </div>
 
 <script type="module">
-import {
-    HELIOPHYSICS_MISSIONS,
-    INNER_PLANET_MISSIONS,
-    MARS_MISSIONS,
-    SMALL_BODY_MISSIONS,
-    LEGACY_MISSIONS,
-} from './js/space-missions.js';
+import { MISSION_FAMILIES, ROSTER_VERIFIED } from './js/space-missions.js';
 import { initMissionsViewer } from './js/missions-3d.js';
+import { manifestRows, recentObjects, fmtCountdown, subPoint, gmstDeg } from './js/missions-manifest.js';
+import { propagate, tleEpochToJd } from './js/satellite-tracker.js';
+import { jdNow } from './js/horizons.js';
 
 // ── Tag each mission with its family for filtering ──────────────
-const FAMILIES = [
-    { id: 'helio',     label: 'Heliophysics',  missions: HELIOPHYSICS_MISSIONS },
-    { id: 'inner',     label: 'Inner Planets', missions: INNER_PLANET_MISSIONS },
-    { id: 'mars',      label: 'Mars',          missions: MARS_MISSIONS },
-    { id: 'smallbody', label: 'Small Bodies',  missions: SMALL_BODY_MISSIONS },
-    { id: 'legacy',    label: 'Legacy',        missions: LEGACY_MISSIONS },
-];
+const FAMILIES = MISSION_FAMILIES;
 const ALL = FAMILIES.flatMap(f => f.missions.map(m => ({ ...m, _family: f.id, _familyLabel: f.label })));
 
 const STATUSES = ['operational', 'extended', 'cruising', 'completed', 'retired', 'planned'];
 const STATUS_RANK = { operational: 0, extended: 1, cruising: 2, planned: 3, completed: 4, retired: 5 };
 
 // ── State ────────────────────────────────────────────────────────
+let viewer = null;
 const state = {
     activeFamilies: new Set(),   // empty = all
     activeStatuses: new Set(),   // empty = all
+    provenance: null,
 };
 
 // ── Renderers ────────────────────────────────────────────────────
@@ -310,22 +386,24 @@ function renderStats() {
     const ops  = ALL.filter(m => m.status === 'operational').length;
     const ext  = ALL.filter(m => m.status === 'extended').length;
     const cru  = ALL.filter(m => m.status === 'cruising').length;
-    const psp  = ALL.find(m => m.id === 'parker-solar-probe');
-    const pspClosest = psp?.closest_approach_km ? (psp.closest_approach_km / 1e6).toFixed(2) : '—';
+    const p = state.provenance;
+    const liveStat = p
+        ? `<span class="msn-stat" id="msn-stat-live"><strong>${p.horizons + p.sgp4}</strong>live positions (${p.horizons} Horizons · ${p.sgp4} SGP4)</span>`
+        : `<span class="msn-stat" id="msn-stat-live"><strong>…</strong>live positions loading</span>`;
     host.innerHTML = `
-        <span class="msn-stat"><strong>${ALL.length}</strong>total missions</span>
+        <span class="msn-stat"><strong>${ALL.length}</strong>missions</span>
         <span class="msn-stat"><strong>${ops}</strong>operational</span>
         <span class="msn-stat"><strong>${ext}</strong>extended</span>
         <span class="msn-stat"><strong>${cru}</strong>cruising</span>
-        <span class="msn-stat"><strong>${pspClosest} Mkm</strong>PSP closest approach</span>
+        ${liveStat}
+        <span class="msn-stat" id="msn-stat-launches"><strong>…</strong>launches next 30 d</span>
     `;
 }
 
 function renderFamilyFilters() {
     document.getElementById('msn-family-filters').innerHTML = FAMILIES.map(f => {
-        const n = f.missions.length;
         const on = state.activeFamilies.has(f.id);
-        return `<button type="button" class="msn-chip ${on ? 'msn-chip--on' : ''}" data-family="${f.id}">${esc(f.label)} · ${n}</button>`;
+        return `<button type="button" class="msn-chip ${on ? 'msn-chip--on' : ''}" data-family="${f.id}">${esc(f.label)} · ${f.missions.length}</button>`;
     }).join('');
     document.querySelectorAll('[data-family]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -355,19 +433,24 @@ function renderStatusFilters() {
     });
 }
 
+function nextChip(m) {
+    if (!m.next || !m.next.date) return '';
+    const t = Date.parse(m.next.date.length <= 10 ? m.next.date + 'T00:00:00Z' : m.next.date);
+    if (!Number.isFinite(t)) return '';
+    const past = t < Date.now();
+    return `<div class="msn-next" data-next-ms="${t}" data-past="${past ? 1 : 0}"><strong>${fmtCountdown(t - Date.now())}</strong><span>${esc(m.next.label)} · ${esc(m.next.date.slice(0, 10))}</span></div>`;
+}
+
 function renderCard(m) {
     const isPSP = m.id === 'parker-solar-probe';
     const pspPin = isPSP ? `<div class="msn-pin-psp">◆ App namesake · first inside the Alfvén surface</div>` : '';
-    const closestApproach = m.closest_approach_km
-        ? `${(m.closest_approach_km / 1e6).toFixed(2)} Mkm closest`
-        : '';
-    const hl = (m.highlights || m.note ? [m.note] : [])
-        ? (m.highlights || []).slice(0, 3).map(h => `<li>${esc(h)}</li>`).join('')
-        : '';
+    const closestApproach = m.closest_approach_km ? `${(m.closest_approach_km / 1e6).toFixed(2)} Mkm closest` : '';
+    const hl = (m.highlights || []).slice(0, 3).map(h => `<li>${esc(h)}</li>`).join('');
     const meta = [
         m.agency,
         m.launched ? `launched ${m.launched}` : null,
-        m.launch_vehicle ? `${esc(m.launch_vehicle)}` : null,
+        m.launch_vehicle ? `${m.launch_vehicle}` : null,
+        m.retired ? `ended ${m.retired}` : null,
         closestApproach,
     ].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('');
     const orbit = m.orbit ? `<div class="msn-card-meta"><span>${esc(m.orbit)}</span></div>` : '';
@@ -386,6 +469,8 @@ function renderCard(m) {
             </div>
             <div class="msn-card-meta">${meta}</div>
             ${orbit}
+            ${nextChip(m)}
+            <div class="msn-card-live" data-live-for="${esc(m.id)}" hidden></div>
             ${m.summary ? `<div class="msn-card-summary">${esc(m.summary)}</div>` : ''}
             ${note}
             ${hl ? `<ul class="msn-card-highlights">${hl}</ul>` : ''}
@@ -412,28 +497,48 @@ function renderGrid() {
         return yb - ya;
     });
 
-    if (!filtered.length) {
-        host.innerHTML = `<div class="msn-empty">No missions match these filters.</div>`;
-    } else {
-        host.innerHTML = filtered.map(renderCard).join('');
-    }
+    host.innerHTML = filtered.length
+        ? filtered.map(renderCard).join('')
+        : `<div class="msn-empty">No missions match these filters.</div>`;
 
-    document.getElementById('msn-counter').textContent =
-        `Showing ${filtered.length} of ${ALL.length} missions`;
+    document.getElementById('msn-counter').textContent = `Showing ${filtered.length} of ${ALL.length} missions`;
+    refreshCardLive();
 }
 
 // ── Bootstrap ────────────────────────────────────────────────────
 renderStats();
 renderFamilyFilters();
 renderStatusFilters();
+document.getElementById('msn-verified').textContent = `Statuses verified ${ROSTER_VERIFIED} against agency pages.`;
 renderGrid();
 
 // ── 3D viewport + bidirectional card↔marker focus ────────────────
-const viewer = initMissionsViewer({
+// `viewer` is a `let` declared ABOVE the first renderGrid() so the per-card
+// live line can be asked for before the viewer exists (the TDZ scar: a
+// `const` here aborted the whole page module on first render).
+viewer = initMissionsViewer({
     container: document.getElementById('msn-3d'),
     missions:  ALL,
     onSelect:  (id) => focusCard(id),
+    onLive:    (prov) => { state.provenance = prov; renderStats(); refreshCardLive(); },
 });
+
+/** Per-card "where is it now" line, from the viewer's own state. */
+function refreshCardLive() {
+    for (const el of document.querySelectorAll('[data-live-for]')) {
+        const d = viewer ? viewer.describe(el.dataset.liveFor) : null;
+        if (!d || !d.line) { el.hidden = true; continue; }
+        el.hidden = false;
+        el.dataset.source = d.source;
+        el.innerHTML = `${esc(d.where)} · ${esc(d.line)}<span class="msn-src">${esc(d.provenance)}</span>`;
+    }
+    for (const el of document.querySelectorAll('.msn-next[data-next-ms]')) {
+        const t = Number(el.dataset.nextMs);
+        el.querySelector('strong').textContent = fmtCountdown(t - Date.now());
+        el.dataset.past = t < Date.now() ? '1' : '0';
+    }
+}
+setInterval(refreshCardLive, 5000);
 
 function focusCard(id) {
     const cards = document.querySelectorAll('.msn-card');
@@ -447,9 +552,102 @@ document.getElementById('msn-grid').addEventListener('click', (ev) => {
     if (!card) return;
     const id = card.dataset.missionId;
     if (!id) return;
-    viewer.focusMission(id);
+    const ok = viewer.focusMission(id);
     focusCard(id);
+    if (ok) document.getElementById('msn-3d').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 });
+
+// ── Launch manifest (LL2 via /api/launches/upcoming) ─────────────
+const manifest = { rows: [], total: 0 };
+async function loadManifest() {
+    const list = document.getElementById('msn-manifest-list');
+    try {
+        const res = await fetch('/api/launches/upcoming?limit=60&window_days=30', { signal: AbortSignal.timeout(20000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        Object.assign(manifest, manifestRows(data.launches, Date.now(), { limit: 14 }));
+        document.getElementById('msn-stat-launches').innerHTML = `<strong>${manifest.total}</strong>launches next 30 d`;
+        renderManifest();
+    } catch (e) {
+        list.innerHTML = `<div class="msn-rail-empty" data-state="down">Launch schedule feed down (${esc(e.message)}). The map above does not depend on it.</div>`;
+        document.getElementById('msn-stat-launches').innerHTML = `<strong>—</strong>launch feed down`;
+    }
+}
+function renderManifest() {
+    const list = document.getElementById('msn-manifest-list');
+    if (!manifest.rows.length) { list.innerHTML = `<div class="msn-rail-empty">No launches scheduled in the next 30 days.</div>`; return; }
+    const now = Date.now();
+    list.innerHTML = manifest.rows.map(r => `
+        <div class="msn-launch" data-launch-id="${esc(r.id)}">
+            <div class="msn-launch-t" data-net-ms="${r.net_ms}" data-past="${r.net_ms < now ? 1 : 0}">${fmtCountdown(r.net_ms - now)}</div>
+            <div>
+                <div class="msn-launch-name">${esc(r.name)}</div>
+                <div class="msn-launch-meta"><span>${esc(r.vehicle)}</span><span>${esc(r.provider)}</span>${r.pad ? `<span>${esc(r.pad)}</span>` : ''}${r.orbit ? `<span>${esc(r.orbit)}</span>` : ''}<span>${new Date(r.net_ms).toUTCString().slice(5, 22)} UTC</span>${r.probability_pct != null ? `<span>${r.probability_pct}% go</span>` : ''}</div>
+            </div>
+            <span class="msn-pip msn-pip--${esc(r.status_class)}">${esc(r.status)}</span>
+        </div>`).join('');
+    document.getElementById('msn-manifest-more').textContent = manifest.total > manifest.rows.length
+        ? `+ ${manifest.total - manifest.rows.length} more in the window — see the launch planner.` : '';
+}
+setInterval(() => {
+    const now = Date.now();
+    for (const el of document.querySelectorAll('.msn-launch-t[data-net-ms]')) {
+        const t = Number(el.dataset.netMs);
+        el.textContent = fmtCountdown(t - now);
+        el.dataset.past = t < now ? '1' : '0';
+    }
+}, 1000);
+
+// ── Just launched (CelesTrak last-30-days, SGP4 live) ────────────
+const recent = { rows: [], total: 0, counts: null };
+async function loadRecent() {
+    const list = document.getElementById('msn-recent-list');
+    try {
+        const res = await fetch('/api/celestrak/tle?group=last-30-days', { signal: AbortSignal.timeout(20000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        Object.assign(recent, recentObjects(data.satellites, Date.now(), { limit: 30 }));
+        document.getElementById('msn-recent-count').textContent =
+            `${recent.counts.launches} launches · ${recent.counts.payload} payloads · ${recent.counts['rocket-body']} rocket bodies · last 30 days`;
+        renderRecent();
+    } catch (e) {
+        list.innerHTML = `<div class="msn-rail-empty" data-state="down">CelesTrak feed down (${esc(e.message)}).</div>`;
+    }
+}
+function renderRecent() {
+    const list = document.getElementById('msn-recent-list');
+    if (!recent.rows.length) { list.innerHTML = `<div class="msn-rail-empty">Nothing catalogued in the last 30 days.</div>`; return; }
+    list.innerHTML = recent.rows.map(r => `
+        <div class="msn-obj" data-norad="${r.norad_id}">
+            <div>
+                <div class="msn-obj-name">${esc(r.name)}<span class="msn-kind msn-kind--${r.kind}">${r.kind === 'rocket-body' ? 'R/B' : r.kind}</span></div>
+                <div class="msn-obj-meta"><span>${esc(r.orbit_class)}</span>${r.perigee_km != null ? `<span>${r.perigee_km} × ${r.apogee_km} km</span>` : ''}${r.inclination != null ? `<span>${r.inclination.toFixed(1)}°</span>` : ''}${r.launch_ms ? `<span>launched ${new Date(r.launch_ms).toISOString().slice(0, 10)}</span>` : ''}<span>${esc(r.object_id || 'NORAD ' + r.norad_id)}</span></div>
+            </div>
+            <div class="msn-obj-pos" data-pos-for="${r.norad_id}">…<small>SGP4</small></div>
+        </div>`).join('');
+    document.getElementById('msn-recent-more').textContent = recent.total > recent.rows.length
+        ? `+ ${recent.total - recent.rows.length} more objects catalogued — full list on the satellite tracker.` : '';
+    tickRecent();
+}
+function tickRecent() {
+    if (!recent.rows.length) return;
+    const jd = jdNow();
+    const g = gmstDeg(jd);
+    for (const r of recent.rows) {
+        const el = document.querySelector(`[data-pos-for="${r.norad_id}"]`);
+        if (!el) continue;
+        const p = propagate(r.tle, (jd - tleEpochToJd(r.tle)) * 1440);
+        if (!p || !Number.isFinite(p.x)) { el.innerHTML = `no fix<small>SGP4</small>`; continue; }
+        const sp = subPoint(p, g);
+        el.innerHTML = `${sp.alt_km.toFixed(0)} km<small>${sp.lat.toFixed(1)}°, ${sp.lon.toFixed(1)}°</small>`;
+    }
+}
+setInterval(tickRecent, 2000);
+
+loadManifest();
+loadRecent();
 </script>
 
 </body>

@@ -221,7 +221,7 @@ export const SIMULATIONS = [
     { id: 'missions', href: 'missions.html', title: 'Space Missions',
       category: 'local-space', group: 'maps-missions',
       tier: 'public', icon: 'probe',
-      blurb: 'The inner-solar-system fleet roster, positioned live.' },
+      blurb: 'The active space fleet placed live from JPL Horizons + SGP4, with the launch manifest.' },
     { id: 'mission-planner', href: 'mission-planner.html', title: 'Mission Planner',
       category: 'local-space', group: 'maps-missions',
       tier: 'public', icon: 'target', badge: 'NEW',
