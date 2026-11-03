@@ -254,6 +254,71 @@ export function smallAmplitudePeriodDays(aJ = STANDISH.jupiter.a[0], mu = MU_JUP
     return P / Math.sqrt(27 * mu / 4);
 }
 
+// ── The wire format (/api/trojans/catalog) ──────────────────────────────────
+
+/**
+ * 'trojan-v2' — the LEAN rows the route ships, measured on the 2026-11-03
+ * catalogue: 2.47 MB → 1.77 MB raw, 785 → 652 KB brotli. Dropped from the
+ * shared NEO row (js/neo-orbits.js NEO_ROW_COLUMNS) because they carry
+ * NOTHING for this population: `cls` (always TJN), `flags` (always 0), `q`
+ * (derivable, always null), `tp` (folded into `ma` below), `moid` (EARTH
+ * MOID — ~4 AU for every Trojan). Two encodings:
+ *   epoch_off   days from the body's join epoch (0 for ~90 % of rows)
+ *   name        the name AFTER the designation ("624 Hektor (A907 CF)" →
+ *               "Hektor (A907 CF)"); null when SBDB's name is only the
+ *               designation. `recordsFromCatalog` re-joins it.
+ * Readers resolve columns BY NAME, so adding a column is additive.
+ */
+export const TROJAN_WIRE_FORMAT = 'trojan-v2';
+export const TROJAN_WIRE_COLUMNS = Object.freeze([
+    'des', 'name', 'H', 'e', 'a', 'i', 'om', 'w', 'ma', 'epoch_off',
+    'diam', 'albedo', 'spec', 'cc', 'arc_d', 'n_obs',
+]);
+
+/** Records (route parser output) → lean rows at `joinEpoch`. */
+export function encodeCatalogRows(records, joinEpoch) {
+    return records.map((r) => {
+        let ma = r.ma;
+        // An elliptic row anchored by perihelion time only: express it as a
+        // mean anomaly at its own epoch so `tp` never has to ship.
+        if (ma == null && r.tp != null && r.a > 0 && r.epoch != null) {
+            const n = Math.sqrt(K2 / (r.a * r.a * r.a)) * R2D;
+            ma = Number(((((n * (r.epoch - r.tp)) % 360) + 360) % 360).toFixed(4));
+        }
+        let name = r.name ?? null;
+        if (name && r.des && name.startsWith(`${r.des} `)) name = name.slice(r.des.length + 1);
+        const off = r.epoch == null || joinEpoch == null ? null : Number((r.epoch - joinEpoch).toFixed(2));
+        const row = { ...r, name, ma, epoch_off: off };
+        return TROJAN_WIRE_COLUMNS.map(c => (row[c] === undefined ? null : row[c]));
+    });
+}
+
+/**
+ * Any /api/trojans/catalog body → records { des, name, H, e, a, i, om, w,
+ * ma, epoch, diam, albedo, spec, cc, arc_d, n_obs }. Reads 'trojan-v2' and
+ * the original NEO-column rows (the committed real-data fixture is that
+ * shape — never hand-edit it to convert).
+ */
+export function recordsFromCatalog(body) {
+    const cols = body?.columns ?? [];
+    const at = Object.fromEntries(cols.map((c, k) => [c, k]));
+    const join = body?.epoch?.epoch ?? null;
+    const lean = body?.format === TROJAN_WIRE_FORMAT;
+    return (body?.rows ?? []).map((row) => {
+        const get = (c) => (at[c] == null ? null : row[at[c]] ?? null);
+        const rec = {};
+        for (const c of ['des', 'name', 'H', 'e', 'a', 'i', 'om', 'w', 'ma', 'tp', 'diam', 'albedo', 'spec', 'cc', 'arc_d', 'n_obs']) rec[c] = get(c);
+        if (lean) {
+            const off = get('epoch_off');
+            rec.epoch = off == null || join == null ? null : join + off;
+            if (rec.name) rec.name = `${rec.des} ${rec.name}`;
+        } else {
+            rec.epoch = get('epoch');
+        }
+        return rec;
+    });
+}
+
 // ── Catalogue rows → analysed records ───────────────────────────────────────
 
 /** Best diameter: measured → H with measured albedo → H with the population mean. */
@@ -638,6 +703,85 @@ export function alignToEpoch(recs, perturbers, joinEpoch, { dtDays = SWARM_RUN.d
         }
     }
     return out;
+}
+
+// ── Orbit quality ───────────────────────────────────────────────────────────
+
+/**
+ * THE ONE RULE for whether an orbit is known well enough for a libration
+ * verdict to mean much. 'short-arc' = JPL condition code U ≥ 6, OR a data
+ * arc under a year, OR a solution off the shared epoch (JPL has not refit it
+ * recently — almost always because it has not been re-observed). 'unknown'
+ * = the route could not supply the quality columns. The analysis script, the
+ * report builder and the dynamics artifact all call this.
+ */
+export function orbitQuality({ cc = null, arc_d = null } = {}, alignMethod = 'epoch') {
+    const U = cc == null || cc === '' ? null : Number(String(cc).replace(/\D/g, ''));
+    const arc = arc_d == null || arc_d === '' ? null : Number(arc_d);
+    if (U == null && arc == null) return 'unknown';
+    return (U != null && U >= 6) || (arc != null && arc < 365) || (alignMethod && alignMethod !== 'epoch')
+        ? 'short-arc' : 'well-determined';
+}
+
+// ── The precomputed dynamics artifact (data/trojans/trojans-dynamics.json) ──
+
+/**
+ * What a PAGE loads instead of integrating: the full-population run costs
+ * ~3 CPU-minutes (measured 2026-11-03: 45 s on 4 threads for 600 yr), far past
+ * a browser frame budget and a Vercel function's 60 s, so it is computed
+ * offline (scripts/analyze-trojans.mjs, refreshed by
+ * .github/workflows/trojans-refresh.yml) and shipped as compact rows.
+ * COLUMNAR (`data: { column: [...] }`), which brotli packs 18 % smaller than
+ * the same rows (284 vs 347 KB, measured on the 2026-11-03 population).
+ * Categorical fields are small integers indexing `codes`; numbers are rounded
+ * to what the integration supports (amplitudes to 0.1°, periods to 1 yr).
+ */
+export const DYNAMICS_FORMAT = 'trojan-dynamics-v1';
+export const DYNAMICS_CODES = Object.freeze({
+    regime: Object.freeze(['L4', 'L5', 'horseshoe', 'circulating', 'encounter']),
+    quality: Object.freeze(['well-determined', 'short-arc', 'unknown']),
+    size: Object.freeze(['measured', 'H+measured-albedo', 'H+population-albedo', 'none']),
+});
+export const DYNAMICS_COLUMNS = Object.freeze([
+    'des', 'regime', 'amp', 'period', 'phi_mean', 'phi_min', 'phi_max',
+    'a_mean', 'e_mean', 'i_mean', 'diam', 'size', 'quality', 'phi0',
+]);
+
+const rnd = (v, dp) => (v == null || !Number.isFinite(v) ? null : Number(v.toFixed(dp)));
+
+/**
+ * @param {object[]} analysed  analyseRecord outputs (with .rec = the source record)
+ * @param {object[]} results   integrateSwarm results, same order
+ * @param {object}   meta      provenance + run + summary, copied verbatim
+ */
+export function encodeDynamics(analysed, results, meta = {}) {
+    const code = (table, v) => { const k = DYNAMICS_CODES[table].indexOf(v); if (k < 0) throw new Error(`encodeDynamics: unknown ${table} '${v}'`); return k; };
+    const rows = analysed.map((a, k) => {
+        const r = results[k];
+        const D = a.diameterKm;
+        return [
+            a.des, code('regime', r.regime), rnd(r.amplitude, 1), rnd(r.periodYears, 0),
+            rnd(r.phiMean, 1), rnd(r.phiMin, 1), rnd(r.phiMax, 1),
+            rnd(r.aMean, 4), rnd(r.eMean, 3), rnd(r.iMean, 1),
+            D == null ? null : rnd(D, D < 10 ? 1 : 0), code('size', a.sizeBasis),
+            code('quality', orbitQuality(a.rec ?? {}, a.alignMethod)), rnd(a.phi, 1),
+        ];
+    });
+    const data = Object.fromEntries(DYNAMICS_COLUMNS.map((c, j) => [c, rows.map(r => r[j])]));
+    return { format: DYNAMICS_FORMAT, ...meta, codes: DYNAMICS_CODES, columns: [...DYNAMICS_COLUMNS], count: rows.length, data };
+}
+
+/** Artifact → objects with the categorical codes expanded. */
+export function decodeDynamics(doc) {
+    if (doc?.format !== DYNAMICS_FORMAT) throw new Error(`decodeDynamics: expected ${DYNAMICS_FORMAT}, got ${doc?.format}`);
+    const codes = doc.codes ?? DYNAMICS_CODES;
+    const n = doc.count ?? doc.data?.[doc.columns[0]]?.length ?? 0;
+    return Array.from({ length: n }, (_, k) => {
+        const o = {};
+        for (const c of doc.columns) o[c] = doc.data[c]?.[k] ?? null;
+        o.regime = codes.regime[o.regime]; o.size = codes.size[o.size]; o.quality = codes.quality[o.quality];
+        return o;
+    });
 }
 
 // ── Population statistics ───────────────────────────────────────────────────

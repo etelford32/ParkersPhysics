@@ -14,7 +14,7 @@ import {
     sbdbTrojanUrl, horizonsVectorUrl, horizonsJd, parseHorizonsVector, modalEpoch,
     composeTrojanResponse, TROJAN_CLASS, EPOCH_WINDOW, SBDB_FIELDS_QUALITY, TROJAN_EXTRA_COLUMNS, parseTrojanQuery,
 } from '../api/_lib/trojan-sources.js';
-import { NEO_ROW_COLUMNS } from '../js/neo-orbits.js';
+import { TROJAN_WIRE_FORMAT, TROJAN_WIRE_COLUMNS, recordsFromCatalog, encodeCatalogRows } from '../js/trojan-dynamics.js';
 import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
 
 // ── URL builders ────────────────────────────────────────────────────────────
@@ -81,9 +81,26 @@ import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
     assert.deepEqual(p.quality, { columns: { cc: 'condition_code', arc_d: 'data_arc', n_obs: 'n_obs_used' }, attached: 2 });
     assert.ok(!p.unmapped.includes('condition_code'), 'matched quality columns are not reported as unmapped');
     const body = composeTrojanResponse({ sbdb: p, quality: 'requested', perturbers: { jupiter: { ok: true, jd: 2461200.5, r: [1, 5, 0], v: [0, 0, 0] } } });
-    assert.deepEqual(body.columns, [...NEO_ROW_COLUMNS, ...TROJAN_EXTRA_COLUMNS], 'shared columns first, extras appended');
+    assert.equal(body.format, TROJAN_WIRE_FORMAT);
+    assert.deepEqual(body.columns, [...TROJAN_WIRE_COLUMNS]);
+    for (const c of TROJAN_EXTRA_COLUMNS) assert.ok(body.columns.includes(c), `quality column ${c} on the wire`);
+    for (const c of ['cls', 'flags', 'q', 'tp', 'moid', 'epoch']) assert.ok(!body.columns.includes(c), `${c} is not shipped`);
     assert.equal(body.rows[0].length, body.columns.length);
-    assert.deepEqual(body.rows[0].slice(-3), ['0', 43000, 5120]);
+    // ROUND TRIP: the decoder gives back exactly what the parser produced.
+    const back = recordsFromCatalog(body);
+    for (const [k, rec] of p.records.entries()) {
+        for (const c of ['des', 'name', 'H', 'e', 'a', 'i', 'om', 'w', 'ma', 'epoch', 'diam', 'albedo', 'cc', 'arc_d', 'n_obs']) {
+            assert.deepEqual(back[k][c], rec[c] ?? null, `round trip ${rec.des}.${c}`);
+        }
+    }
+    assert.equal(back[0].name, '624 Hektor (A907 CF)', 'name re-joined to its designation');
+    assert.equal(body.rows[0][TROJAN_WIRE_COLUMNS.indexOf('name')], 'Hektor (A907 CF)', 'shipped without the designation');
+    assert.equal(back[1].epoch, 2456720.5, 'an off-epoch row keeps its own epoch');
+    assert.equal(body.rows[0][TROJAN_WIRE_COLUMNS.indexOf('epoch_off')], 0);
+    // A perihelion-time-only elliptic row is folded into a mean anomaly.
+    const [tpRow] = encodeCatalogRows([{ des: 'x', a: 5.2, e: 0.1, i: 1, om: 2, w: 3, ma: null, tp: 2461200.5 - 100, epoch: 2461200.5 }], 2461200.5);
+    const n = Math.sqrt(0.01720209895 ** 2 / 5.2 ** 3) * 180 / Math.PI;
+    assert.ok(Math.abs(tpRow[TROJAN_WIRE_COLUMNS.indexOf('ma')] - 100 * n) < 1e-3, 'tp folded into ma');
     // Without the columns the parser still works and attaches nothing.
     const bare = parseTrojanQuery({ fields: json.fields.slice(0, SBDB_FIELDS.length), data: json.data.map(r => r.slice(0, SBDB_FIELDS.length)) });
     assert.equal(bare.quality.attached, 0); assert.equal(bare.records[0].cc, undefined);
@@ -100,7 +117,7 @@ import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
     assert.equal(live.perturbers.saturn, null);
     assert.equal(live.sources.saturn.reason, 'HTTP 503');
     assert.equal(live.count, 1);
-    assert.equal(live.rows[0][0], '624');
+    assert.equal(recordsFromCatalog(live)[0].des, '624');
     const noJup = composeTrojanResponse({ sbdb, perturbers: { jupiter: { ok: false, reason: 'timeout' } } });
     assert.equal(noJup.freshness, 'stale');
     assert.match(noJup.degraded_reason, /^jupiter_vector_unavailable/);

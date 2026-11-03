@@ -38,8 +38,8 @@
  * finite Julian date inside a sane window and formatted by this module.
  */
 
-import { SBDB_QUERY_BASE, SBDB_FIELDS, SBDB_FIELDS_CORE, parseSbdbQuery, compactRows } from './neo-sources.js';
-import { NEO_ROW_COLUMNS } from '../../js/neo-orbits.js';
+import { SBDB_QUERY_BASE, SBDB_FIELDS, SBDB_FIELDS_CORE, parseSbdbQuery } from './neo-sources.js';
+import { TROJAN_WIRE_FORMAT, TROJAN_WIRE_COLUMNS, encodeCatalogRows } from '../../js/trojan-dynamics.js';
 
 export const HORIZONS_BASE = 'https://ssd.jpl.nasa.gov/api/horizons.api';
 export const TROJAN_CLASS = 'TJN';
@@ -60,7 +60,7 @@ export const PERTURBERS = Object.freeze([
  * first-to-drop rung of the ladder (`quality_fields: 'dropped'`).
  */
 export const SBDB_FIELDS_QUALITY = Object.freeze(['condition_code', 'data_arc', 'n_obs_used']);
-/** Extra wire columns the Trojan route appends AFTER the shared NEO columns. */
+/** The quality columns' names on the wire (part of TROJAN_WIRE_COLUMNS). */
 export const TROJAN_EXTRA_COLUMNS = Object.freeze(['cc', 'arc_d', 'n_obs']);
 
 /** Julian dates outside this window are refused rather than sent upstream. */
@@ -203,6 +203,7 @@ export function composeTrojanResponse({ sbdb, precision, photometry, quality, ep
     const jup = perturbers?.jupiter, sat = perturbers?.saturn;
     const ok = !!sbdb?.ok && records.length > 0 && !!jup?.ok;
     const vec = (p) => (p?.ok ? { jd: p.jd, r: p.r, v: p.v } : null);
+    const ep = epochInfo ?? modalEpoch(records);
     const degraded = !sbdb?.ok || !records.length ? (sbdb?.reason ?? 'sbdb_unavailable')
         : !jup?.ok ? `jupiter_vector_unavailable: ${jup?.reason ?? 'not_fetched'}` : null;
     return {
@@ -212,17 +213,18 @@ export function composeTrojanResponse({ sbdb, precision, photometry, quality, ep
         orbit_class: TROJAN_CLASS,
         elements_frame: 'heliocentric ecliptic J2000, osculating at `epoch` (JD TDB)',
         perturber_frame: 'Sun-centred ecliptic J2000 (ICRF), AU and AU/day, TDB',
-        // APPEND-ONLY, like NEO_ROW_COLUMNS: the shared NEO columns first (so
-        // js/neo-orbits.js rowToRecord still reads a row), then the Trojan
-        // extras. Readers resolve the extras BY NAME from this list.
-        columns: [...NEO_ROW_COLUMNS, ...TROJAN_EXTRA_COLUMNS],
+        // LEAN rows (js/trojan-dynamics.js TROJAN_WIRE_COLUMNS — that header
+        // has the measured saving and what was dropped). Read them with
+        // `recordsFromCatalog`, which resolves columns BY NAME.
+        format: TROJAN_WIRE_FORMAT,
+        columns: [...TROJAN_WIRE_COLUMNS],
         count: records.length,
-        epoch: epochInfo ?? modalEpoch(records),
+        epoch: ep,
         precision: precision ?? null,
         photometry_fields: photometry ?? null,
         quality_fields: quality ?? null,
         perturbers: { jupiter: vec(jup), saturn: vec(sat) },
-        rows: compactRows(records).map((row, k) => [...row, ...TROJAN_EXTRA_COLUMNS.map(c => records[k][c] ?? null)]),
+        rows: encodeCatalogRows(records, ep.epoch),
         sources: {
             sbdb: { ok: !!sbdb?.ok, count: records.length, reason: sbdb?.reason ?? null,
                 field_map: sbdb?.field_map ?? {}, unmapped: sbdb?.unmapped ?? [], dropped: sbdb?.dropped ?? {},

@@ -21,7 +21,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import * as T from '../js/trojan-dynamics.js';
-import { rowToRecord } from '../js/neo-orbits.js';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a} vs ${b} (±${tol})`);
 
@@ -119,6 +118,37 @@ const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a}
     near(r.ratio, 1000 / 600, 1e-12, 'ratio'); assert.ok(r.lo < r.ratio && r.ratio < r.hi);
 }
 
+// ── Orbit quality (the ONE rule) and the dynamics artifact codec ────────────
+{
+    assert.equal(T.orbitQuality({ cc: '0', arc_d: 43526 }, 'epoch'), 'well-determined');
+    assert.equal(T.orbitQuality({ cc: '6', arc_d: 43526 }, 'epoch'), 'short-arc', 'U ≥ 6');
+    assert.equal(T.orbitQuality({ cc: '0', arc_d: 200 }, 'epoch'), 'short-arc', 'arc < 1 yr');
+    assert.equal(T.orbitQuality({ cc: '0', arc_d: 9000 }, 'n-body'), 'short-arc', 'off the shared epoch');
+    assert.equal(T.orbitQuality({}, 'epoch'), 'unknown');
+    assert.equal(T.orbitQuality({ cc: 0, arc_d: '400' }, 'epoch'), 'well-determined', 'numeric/string tolerant');
+
+    const analysed = [
+        { des: '624', phi: 72.31, diameterKm: 225, sizeBasis: 'measured', alignMethod: 'epoch', rec: { cc: '0', arc_d: 43526 } },
+        { des: '2014 EL58', phi: 97.28, diameterKm: 6.234, sizeBasis: 'H+population-albedo', alignMethod: 'n-body', rec: { cc: '9', arc_d: 3 } },
+    ];
+    const results = [
+        { regime: 'L4', amplitude: 19.34, periodYears: 155.8, phiMean: 62.7, phiMin: 42.61, phiMax: 81.22, aMean: 5.20712, eMean: 0.01534, iMean: 18.21 },
+        { regime: 'encounter', amplitude: 120.1, periodYears: null, phiMean: 90, phiMin: 30, phiMax: 150, aMean: 4.97, eMean: 0.12, iMean: 9.3 },
+    ];
+    const doc = T.encodeDynamics(analysed, results, { generated_at: 'x' });
+    assert.equal(doc.format, T.DYNAMICS_FORMAT);
+    assert.deepEqual(Object.keys(doc.data), [...T.DYNAMICS_COLUMNS], 'columnar');
+    const back = JSON.parse(JSON.stringify(doc));
+    const o = T.decodeDynamics(back);
+    assert.equal(o.length, 2);
+    assert.deepEqual(o[0], { des: '624', regime: 'L4', amp: 19.3, period: 156, phi_mean: 62.7, phi_min: 42.6, phi_max: 81.2,
+        a_mean: 5.2071, e_mean: 0.015, i_mean: 18.2, diam: 225, size: 'measured', quality: 'well-determined', phi0: 72.3 });
+    assert.equal(o[1].regime, 'encounter'); assert.equal(o[1].period, null); assert.equal(o[1].diam, 6.2, 'small bodies keep a decimal');
+    assert.equal(o[1].quality, 'short-arc');
+    assert.throws(() => T.encodeDynamics([analysed[0]], [{ ...results[0], regime: 'trojan' }]), /unknown regime/);
+    assert.throws(() => T.decodeDynamics({ format: 'nope' }), /expected trojan-dynamics-v1/);
+}
+
 // ── Real data (baked from production; see the fixture's provenance block) ───
 const FIX = new URL('./fixtures/trojans/trojans-sample.json', import.meta.url);
 if (existsSync(FIX)) {
@@ -134,7 +164,13 @@ if (existsSync(FIX)) {
     // Camp memberships that are not in dispute (Lucy mission targets + the
     // two "spies" each named for the other side, and the first Trojan found).
     const KNOWN = { '624': 'L4', '588': 'L4', '3548': 'L4', '15094': 'L4', '11351': 'L4', '21900': 'L4', '617': 'L5', '1172': 'L5' };
-    const recs = fx.rows.map(rowToRecord);
+    const recs = T.recordsFromCatalog(fx);   // the fixture is the ORIGINAL row shape
+    // The lean wire must decode to the same records (round trip on REAL rows).
+    {
+        const lean = { format: T.TROJAN_WIRE_FORMAT, columns: [...T.TROJAN_WIRE_COLUMNS], epoch: fx.epoch,
+            rows: T.encodeCatalogRows(recs, fx.epoch.epoch) };
+        assert.deepEqual(T.recordsFromCatalog(lean).map(r => ({ ...r, tp: null })), recs.map(r => ({ ...r, tp: null })), 'trojan-v2 round trip on real rows');
+    }
     let checked = 0;
     for (const [des, camp] of Object.entries(KNOWN)) {
         const rec = recs.find(r => r.des === des);

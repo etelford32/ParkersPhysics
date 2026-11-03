@@ -11,6 +11,7 @@
  * longer one are listed (slow escapers / marginal librators).
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { orbitQuality } from '../js/trojan-dynamics.js';
 
 const dir = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : 'data/trojans';
 const longIdx = process.argv.indexOf('--long');
@@ -35,7 +36,8 @@ const rows = readCsv(`${dir}/trojans-analysis.csv`);
 const S = JSON.parse(readFileSync(`${dir}/trojans-summary.json`, 'utf8'));
 const label = (r) => (r.name || r.des).replace(/\s+/g, ' ');
 const U = (r) => (r.condition_code === '' ? null : Number(String(r.condition_code).replace(/\D/g, '')));
-const shortArc = (r) => (U(r) != null && U(r) >= 6) || (num(r.data_arc_d) != null && num(r.data_arc_d) < 365) || r.align_method !== 'epoch';
+// The ONE quality rule lives in the kernel (orbitQuality); 'unknown' is not short-arc.
+const shortArc = (r) => orbitQuality({ cc: r.condition_code, arc_d: r.data_arc_d }, r.align_method) === 'short-arc';
 const lib = rows.filter(r => r.regime === 'L4' || r.regime === 'L5');
 const fx = (v, d) => (v == null || !Number.isFinite(v) ? '—' : v.toFixed(d));
 const size = (r) => (num(r.diameter_km) == null ? '—' : `${fx(num(r.diameter_km), num(r.diameter_km) < 10 ? 1 : 0)}${r.size_basis === 'measured' ? '' : '*'}`);

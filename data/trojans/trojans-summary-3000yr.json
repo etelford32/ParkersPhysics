@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-11-03T17:30:29.495Z",
   "source": {
-    "file": "/tmp/claude-0/-home-user-ParkersPhysics/840be5c1-327f-59b7-a7a7-2f947c6d4db6/scratchpad/data/trojans-catalog-q.json",
+    "file": "trojans-catalog.json",
     "catalogue_generated_at": "2026-11-03T17:25:30.784Z",
     "freshness": "live",
     "precision": "full",

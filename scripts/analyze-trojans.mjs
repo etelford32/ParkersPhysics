@@ -3,15 +3,23 @@
  * scripts/analyze-trojans.mjs — run js/trojan-dynamics.js over the WHOLE
  * Jupiter Trojan catalogue and write the population tables.
  *
- *   node scripts/analyze-trojans.mjs <catalog.json> [--years 600] [--dt 20] [--out data/trojans]
+ *   node scripts/analyze-trojans.mjs <catalog.json> [--years 600] [--dt 20] [--out data/trojans] [--require-live]
+ *
+ * --require-live refuses (exit 3) a catalogue that is not `freshness: 'live'`
+ * with Jupiter from Horizons, or that is implausibly small — the scheduled
+ * refresh must never commit tables computed from a degraded body.
  *
  * <catalog.json> is a saved /api/trojans/catalog body (the sandbox cannot
  * reach JPL; fetch it from a deployment: `curl https://<host>/api/trojans/catalog > cat.json`).
  *
  * Writes:
- *   <out>/trojans-analysis.csv   one row per object: instant φ, analytic and
- *                                INTEGRATED libration, regime, period, sizes
- *   <out>/trojans-summary.json   population statistics + provenance
+ *   <out>/trojans-dynamics.json  the COMPACT per-object artifact pages load
+ *                                (js/trojan-dynamics.js DYNAMICS_FORMAT) — committed
+ *   <out>/trojans-summary.json   population statistics + provenance — committed
+ *   <out>/trojans-analysis.csv   the FULL per-object table (instant φ, analytic and
+ *                                integrated libration, orbit quality …) — NOT
+ *                                committed (~3 MB per refresh); the refresh
+ *                                workflow uploads it as a build artifact
  *
  * The integration is split across worker threads (each rebuilds the same
  * deterministic planet track — the planets are integrated identically in
@@ -21,8 +29,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { basename } from 'node:path';
 import * as T from '../js/trojan-dynamics.js';
-import { rowToRecord } from '../js/neo-orbits.js';
 
 if (!isMainThread) {
     const { particles, perturbers, opts } = workerData;
@@ -32,18 +40,6 @@ if (!isMainThread) {
     parentPort.postMessage({ done: run.results });
 } else {
     await main();
-}
-
-/**
- * 'short-arc' = JPL condition code U ≥ 6, OR a data arc under a year, OR a
- * solution off the shared epoch (JPL has not refit it recently — almost
- * always because it has not been re-observed). The SAME rule as
- * scripts/build-trojan-report.mjs `shortArc` — change both together.
- */
-function qualityBucket(r, a) {
-    const U = r.cc == null ? null : Number(String(r.cc).replace(/\D/g, ''));
-    if (U == null && r.arc_d == null) return 'unknown';
-    return (U != null && U >= 6) || (r.arc_d != null && r.arc_d < 365) || a.alignMethod !== 'epoch' ? 'short-arc' : 'well-determined';
 }
 
 function arg(name, def) {
@@ -62,13 +58,15 @@ async function main() {
     const epoch = body.epoch?.epoch;
     if (!Number.isFinite(epoch)) throw new Error('catalogue has no epoch');
     const pert = T.perturberStates(body.perturbers, epoch);
-    // Shared NEO columns by position, the Trojan extras BY NAME (append-only wire).
-    const extra = Object.fromEntries(['cc', 'arc_d', 'n_obs'].map(c => [c, (body.columns ?? []).indexOf(c)]));
-    const recs = body.rows.slice(0, limit).map(row => {
-        const r = rowToRecord(row);
-        for (const [c, i] of Object.entries(extra)) r[c] = i >= 0 ? row[i] ?? null : null;
-        return r;
-    });
+    if (process.argv.includes('--require-live')) {
+        const problems = [];
+        if (body.freshness !== 'live') problems.push(`freshness ${body.freshness} (${body.degraded_reason ?? 'no reason'})`);
+        if (pert.jupiter.source !== 'horizons') problems.push(`Jupiter from ${pert.jupiter.source}, not Horizons`);
+        if (!(body.rows?.length >= 10_000)) problems.push(`only ${body.rows?.length ?? 0} rows (TJN held 16 445 on 2026-11-03)`);
+        if (problems.length) { console.error(`refusing to analyse a degraded catalogue: ${problems.join('; ')}`); process.exit(3); }
+    }
+    // One decoder for every catalogue shape (lean 'trojan-v2' and the original rows).
+    const recs = T.recordsFromCatalog(body).slice(0, limit);
 
     const ta = Date.now();
     const aligned = T.alignToEpoch(recs, pert, epoch, { dtDays });
@@ -77,7 +75,7 @@ async function main() {
     const skipped = [];
     recs.forEach((r, k) => {
         const a = T.analyseRecord(r, pert.jupiter, epoch, aligned[k]);
-        if (a) { a._k = k; analysed.push(a); } else skipped.push(r.des);
+        if (a) { a._k = k; a.rec = r; analysed.push(a); } else skipped.push(r.des);
     });
     const particles = analysed.map(a => a.state ?? T.stateFromElements(a.el));
     const plain = (p) => ({ r: p.r, v: p.v, m: p.m, gm: p.gm, source: p.source });
@@ -132,7 +130,7 @@ async function main() {
     const dAmp = agree.map(x => x.r.amplitude - x.a.analytic.amplitude);
     const summary = {
         generated_at: new Date().toISOString(),
-        source: { file, catalogue_generated_at: body.generated_at, freshness: body.freshness, precision: body.precision,
+        source: { file: basename(file), catalogue_generated_at: body.generated_at, freshness: body.freshness, precision: body.precision,
             epoch_jd: epoch, rows: body.rows.length, jupiter: pert.jupiter.source, saturn: pert.saturn.source },
         run: { years, dtDays, workers: nW, seconds: Math.round((Date.now() - t0) / 1000), skipped: skipped.length },
         regimes,
@@ -141,7 +139,7 @@ async function main() {
         // = U ≥ 6 OR data arc < 1 yr — orbits whose a is too uncertain for a
         // libration verdict to mean much.
         regimes_by_quality: analysed.reduce((m, a, k) => {
-            const key = `${qualityBucket(recs[a._k], a)}:${results[k].regime}`; m[key] = (m[key] || 0) + 1; return m;
+            const key = `${T.orbitQuality(recs[a._k], a.alignMethod)}:${results[k].regime}`; m[key] = (m[key] || 0) + 1; return m;
         }, {}),
         regimes_by_alignment: analysed.reduce((m, a, k) => { const key = `${a.alignMethod}:${results[k].regime}`; m[key] = (m[key] || 0) + 1; return m; }, {}),
         camps_at_epoch: T.campRatio(count((_, a) => a.camp === 'L4'), count((_, a) => a.camp === 'L5')),
@@ -149,8 +147,8 @@ async function main() {
         // The asymmetry split by orbit quality: if the two buckets disagree,
         // part of the catalogue's L4 excess is HOW the swarms were discovered.
         camps_librating_by_quality: Object.fromEntries(['well-determined', 'short-arc'].map(b => [b, T.campRatio(
-            analysed.filter((a, k) => qualityBucket(recs[a._k], a) === b && results[k].regime === 'L4').length,
-            analysed.filter((a, k) => qualityBucket(recs[a._k], a) === b && results[k].regime === 'L5').length)])),
+            analysed.filter((a, k) => T.orbitQuality(recs[a._k], a.alignMethod) === b && results[k].regime === 'L4').length,
+            analysed.filter((a, k) => T.orbitQuality(recs[a._k], a.alignMethod) === b && results[k].regime === 'L5').length)])),
         librating: {
             median_amplitude_deg: median(lib.map(x => x.r.amplitude)),
             median_period_yr: median(lib.map(x => x.r.periodYears)),
@@ -162,5 +160,14 @@ async function main() {
             from_population_albedo: count((_, a) => a.sizeBasis === 'H+population-albedo'), population_albedo: T.TROJAN_MEAN_ALBEDO },
     };
     writeFileSync(`${out}/trojans-summary.json`, JSON.stringify(summary, null, 2) + '\n');
+    // The compact artifact pages load (one row per object, codes expanded by
+    // T.decodeDynamics). Provenance + the summary ride along so a page can
+    // print WHEN and FROM WHAT without a second request.
+    const artifact = T.encodeDynamics(analysed, results, {
+        generated_at: summary.generated_at, source: summary.source, run: summary.run,
+        summary: { regimes: summary.regimes, camps_librating: summary.camps_librating,
+            camps_librating_by_quality: summary.camps_librating_by_quality, librating: summary.librating },
+    });
+    writeFileSync(`${out}/trojans-dynamics.json`, JSON.stringify(artifact) + '\n');
     console.log(JSON.stringify(summary, null, 2));
 }
