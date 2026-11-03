@@ -42,6 +42,15 @@ if (!isMainThread) {
     await main();
 }
 
+function properCells(r, f, q) {
+    const p = r.proper, e = r.properE, i = r.properI;
+    const lib = p && p.ok ? [f(p.D, 3), f(p.da, 5), f(p.f, 4), f(p.cycles, 1), f(p.h2, 3)] : ['', '', '', '', ''];
+    const ee = e && e.ok ? [f(e.amp, 5), f(e.arcsecPerYr, 2)] : ['', ''];
+    const ii = i && i.ok ? [f(i.amp, 5), f(i.arcsecPerYr, 3)] : ['', ''];
+    const note = (x) => (x == null ? '' : x.ok ? 'ok' : q(x.reason));
+    return [...lib, ...ee, ...ii, note(e), note(i)];
+}
+
 function arg(name, def) {
     const k = process.argv.indexOf(`--${name}`);
     return k > 0 ? process.argv[k + 1] : def;
@@ -106,7 +115,7 @@ async function main() {
     mkdirSync(out, { recursive: true });
     const f = (v, d) => (v == null || !Number.isFinite(v) ? '' : v.toFixed(d));
     const q = (s) => (s == null ? '' : /[",]/.test(s) ? `"${String(s).replace(/"/g, '""')}"` : s);
-    const header = 'des,name,H,diameter_km,size_basis,albedo,spec,a_au,e,i_deg,phi_deg,camp_at_epoch,analytic_regime,analytic_amp_deg,regime,phi_min_deg,phi_max_deg,phi_mean_deg,libration_amp_deg,libration_period_yr,a_mean_au,e_mean,i_mean_deg,e_max,epoch_offset_d,align_method,condition_code,data_arc_d,n_obs';
+    const header = 'des,name,H,diameter_km,size_basis,albedo,spec,a_au,e,i_deg,phi_deg,camp_at_epoch,analytic_regime,analytic_amp_deg,regime,phi_min_deg,phi_max_deg,phi_mean_deg,libration_amp_deg,libration_period_yr,a_mean_au,e_mean,i_mean_deg,e_max,epoch_offset_d,align_method,condition_code,data_arc_d,n_obs,D_p_deg,da_p_au,f_lib_deg_yr,lib_cycles,h2,e_p,g_arcsec_yr,sinI_p,s_arcsec_yr,proper_e_note,proper_i_note';
     const lines = [header];
     analysed.forEach((a, k) => {
         const r = results[k];
@@ -116,6 +125,10 @@ async function main() {
             a.analytic.regime, f(a.analytic.amplitude, 2),
             r.regime, f(r.phiMin, 2), f(r.phiMax, 2), f(r.phiMean, 2), f(r.amplitude, 2), f(r.periodYears, 1),
             f(r.aMean, 5), f(r.eMean, 4), f(r.iMean, 3), f(r.eMax, 4), f(a.epochOffsetDays, 0), a.alignMethod, q(recs[a._k]?.cc), recs[a._k]?.arc_d ?? '', recs[a._k]?.n_obs ?? '',
+            // PROPER elements (frequency analysis). D_p/da_p/f are reported when
+            // the run holds ≥ 2 libration cycles; e_p/g need ≳ 18 kyr and
+            // sin I_p/s ≳ 250 kyr — the note says why one is withheld.
+            ...properCells(r, f, q),
         ].join(','));
     });
     writeFileSync(`${out}/trojans-analysis.csv`, lines.join('\n') + '\n');
@@ -154,6 +167,15 @@ async function main() {
             median_period_yr: median(lib.map(x => x.r.periodYears)),
             median_i_mean_deg: median(lib.map(x => x.r.iMean)),
             median_e_mean: median(lib.map(x => x.r.eMean)),
+            proper: {
+                with_D_p: lib.filter(x => x.r.proper?.ok).length,
+                median_D_p_deg: median(lib.map(x => (x.r.proper?.ok ? x.r.proper.D : NaN))),
+                median_f_deg_yr: median(lib.map(x => (x.r.proper?.ok ? x.r.proper.f : NaN))),
+                // The run-length drift the proper amplitude removes: half-range − D_p.
+                median_halfrange_minus_D_p_deg: median(lib.map(x => (x.r.proper?.ok ? x.r.amplitude - x.r.proper.D : NaN))),
+                with_e_p: lib.filter(x => x.r.properE?.ok).length,
+                with_sinI_p: lib.filter(x => x.r.properI?.ok).length,
+            },
             analytic_vs_integrated_amp: { n: dAmp.length, median_diff_deg: median(dAmp), median_abs_diff_deg: median(dAmp.map(Math.abs)) },
         },
         sizes: { measured: count((_, a) => a.sizeBasis === 'measured'), from_measured_albedo: count((_, a) => a.sizeBasis === 'H+measured-albedo'),

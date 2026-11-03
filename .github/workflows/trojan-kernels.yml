@@ -25,6 +25,9 @@ on:
       - 'api/_lib/trojan-sources.js'
       - 'api/_lib/neo-sources.js'
       - 'js/trojan-dynamics.js'
+      - 'js/frequency-analysis.js'
+      - 'api/_lib/astdys-proper.js'
+      - 'scripts/compare-astdys.mjs'
       - 'js/neo-orbits.js'
       - 'js/pipeline-registry.js'
       - 'scripts/analyze-trojans.mjs'
@@ -38,6 +41,9 @@ on:
       - 'api/_lib/trojan-sources.js'
       - 'api/_lib/neo-sources.js'
       - 'js/trojan-dynamics.js'
+      - 'js/frequency-analysis.js'
+      - 'api/_lib/astdys-proper.js'
+      - 'scripts/compare-astdys.mjs'
       - 'js/neo-orbits.js'
       - 'js/pipeline-registry.js'
       - 'scripts/analyze-trojans.mjs'
@@ -66,7 +72,11 @@ jobs:
           node-version: '22'
       - name: route adapters + wire format
         run: node tests/trojan-sources.mjs
-      - name: dynamics kernel (theory + real data)
+      - name: frequency analysis (NAFF)
+        run: node tests/frequency-analysis.mjs
+      - name: AstDyS proper-elements adapter
+        run: node tests/astdys-proper.mjs
+      - name: dynamics kernel (theory + real data + proper elements vs AstDyS)
         run: node tests/trojan-dynamics.mjs
       - name: pipeline registry
         run: node tests/pipeline-registry.mjs

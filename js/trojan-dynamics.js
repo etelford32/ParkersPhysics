@@ -43,6 +43,7 @@
  */
 
 import { GAUSS_K, D2R, R2D, solveKeplerElliptic, perifocalBasis } from './neo-orbits.js';
+import { naff, project, hannWindow, binWidth } from './frequency-analysis.js';
 
 export const K2 = GAUSS_K * GAUSS_K;                 // GM_sun, AU³/day²
 /** Sun / planet-system mass ratios (IAU 2015 Resolution B3 nominal values). */
@@ -489,12 +490,18 @@ export const HILL_RADIUS_AU = STANDISH.jupiter.a[0] * Math.cbrt(M_JUPITER / 3);
  * @returns {{ regime, phiMin, phiMax, phiMean, amplitude, periodYears|null,
  *             aMean, eMean, iMean, eMax, iMax, samples, encounterYear|null, phi?:Float32Array }}
  */
-export function integrateParticle(state0, track, { dtDays, sampleDays, encounterHill = SWARM_RUN.encounterHill, keepSeries = false, returnState = false } = {}) {
+export function integrateParticle(state0, track, { dtDays, sampleDays, encounterHill = SWARM_RUN.encounterHill, keepSeries = false, returnState = false, proper = true } = {}) {
     const { pos, h, N, m } = track;
     const steps = (N - 1) / 2;
     const sampleEvery = Number.isFinite(sampleDays) ? Math.max(1, Math.round(Math.abs(sampleDays / dtDays))) : Infinity;
     const nSamples = Number.isFinite(sampleEvery) ? Math.floor(steps / sampleEvery) + 1 : 1;
     const phiSeries = new Float64Array(nSamples);
+    // Series for the frequency analysis (proper elements): x = a/a_J − 1 and
+    // the two secular complex signals. ~5 doubles per sample.
+    const wantProper = proper && Number.isFinite(sampleEvery);
+    const xS = wantProper ? new Float64Array(nSamples) : null;
+    const eR = wantProper ? new Float64Array(nSamples) : null, eI = wantProper ? new Float64Array(nSamples) : null;
+    const iR = wantProper ? new Float64Array(nSamples) : null, iI = wantProper ? new Float64Array(nSamples) : null;
     const mJ = m[0], mS = m[1];
     const gJ = K2 * mJ, gS = K2 * mS;
     const enc2 = Math.pow(encounterHill * HILL_RADIUS_AU, 2);
@@ -530,6 +537,12 @@ export function integrateParticle(state0, track, { dtDays, sampleDays, encounter
         else unwrapped += wrap180(phi - prevPhi);
         prevPhi = phi;
         phiSeries[ns] = unwrapped;
+        if (wantProper) {
+            xS[ns] = el.a / jel.a - 1;
+            eR[ns] = el.e * Math.cos(el.varpi * D2R); eI[ns] = el.e * Math.sin(el.varpi * D2R);
+            const si = Math.sin(el.i * D2R);
+            iR[ns] = si * Math.cos(el.om * D2R); iI[ns] = si * Math.sin(el.om * D2R);
+        }
         aSum += el.a; eSum += el.e; iSum += el.i;
         if (el.e > eMax) eMax = el.e;
         if (el.i > iMax) iMax = el.i;
@@ -567,7 +580,197 @@ export function integrateParticle(state0, track, { dtDays, sampleDays, encounter
         aMean: aSum / ns, eMean: eSum / ns, iMean: iSum / ns, eMax, iMax, encounterYear, keepSeries,
     });
     if (returnState) summary.state = { r: [x, y, z], v: [vx, vy, vz] };
+    if (wantProper && (summary.regime === 'L4' || summary.regime === 'L5')) {
+        const sy = summary.sampleYears ?? (sampleEvery * Math.abs(dtDays)) / JULIAN_YEAR_D;
+        const aJ = elementsFromState([pos[0], pos[1], pos[2]], [track.vel[0], track.vel[1], track.vel[2]], gmJ).a;
+        summary.proper = properLibration(phiSeries.subarray(0, ns), xS.subarray(0, ns), sy, { aJ });
+        const jl = jupiterSecularLines(track, sampleEvery);
+        const maxNu = summary.proper.f > 0 ? (summary.proper.f * D2R) * PROPER.secularBandOfLibration : Infinity;
+        summary.properE = properSecular(eR.subarray(0, ns), eI.subarray(0, ns), jl.g, sy, { maxNu, minSpanYears: PROPER.secularMinSpanYears.e });
+        summary.properI = properSecular(iR.subarray(0, ns), iI.subarray(0, ns), jl.s, sy, { maxNu, minSpanYears: PROPER.secularMinSpanYears.i });
+    }
     return summary;
+}
+
+// ── PROPER elements by frequency analysis ───────────────────────────────────
+
+/**
+ * WHY: the min/max half-range of φ is a RUN-LENGTH-DEPENDENT statistic —
+ * measured 2026-11-03, 3 000-yr runs read +0.26° (median) wider than 600-yr
+ * runs on the same objects, because secular terms keep modulating the swing.
+ * A proper element is the amplitude of the FUNDAMENTAL libration term found
+ * by frequency analysis (js/frequency-analysis.js, NAFF), which a longer
+ * run refines instead of inflating. Definitions follow Milani (1993) and the
+ * AstDyS synthetic proper elements (Knežević & Milani), so the two compare:
+ *
+ *   z(t) = (φ − φ̄) + i·(x − x̄)/√(3μ),   x = a/a_J − 1,   in degrees
+ *
+ * is a circle of radius D at small amplitude (from φ̇ = −(3/2)n x and the
+ * L4 frequency ω = n√(27μ/4): x = D√(3μ) when φ = D). Its strongest line is
+ * the libration frequency f; D_p is the amplitude of the φ term at f,
+ * da_p = a_J × the amplitude of the x term at f (AstDyS publishes both).
+ */
+export const PROPER = Object.freeze({
+    /** Fewest full cycles of a frequency a record must span to report it. */
+    minCycles: 2,
+    /** A free secular line must sit this many Fourier bins from every forced one. */
+    minBinsFromForced: 2,
+    /** NAFF terms searched for a secular line (the short-period lines come first). */
+    terms: 8,
+    /**
+     * Secular lines live far below the libration frequency (AstDyS: g ≈ 300–
+     * 360″/yr, s ≈ −5…−20″/yr against f ≈ 8 600″/yr). Without this band the
+     * first implementation returned Jupiter's 11.86-yr orbital line
+     * (~109 000″/yr) and the libration coupling (~8 300″/yr) as "free" lines —
+     * measured on the first real run.
+     */
+    secularBandOfLibration: 1 / 3,
+    /**
+     * Shortest record that can RESOLVE each free secular line, derived from
+     * AstDyS's own distribution (Jun 2024, 11 867 Trojans): g's 5th percentile
+     * is 146″/yr ⇒ 2 cycles and 2 bins clear of 0 / g5 need ≈ 18 kyr; the
+     * median |s| is 11.8″/yr ⇒ 2 bins clear of 0 and Jupiter's node line need
+     * ≈ 250 kyr. Below these the free line merges with the forced ones and a
+     * weak residual line can pass every other test — measured: a 3 000-yr run
+     * returned e_p 0.008 at 897″/yr for 588 Achilles (AstDyS 0.104 at 344″/yr),
+     * and a 20 000-yr run returned sin I_p 0.0008 at 698″/yr.
+     */
+    secularMinSpanYears: Object.freeze({ e: 18_000, i: 250_000 }),
+    /**
+     * Withhold when a near-forced line that is NOT explained by a forced
+     * frequency (more than half a bin off every one — the signature of an
+     * unresolved free line fused with a forced one) is this many times
+     * stronger than the candidate. A line sitting ON Jupiter's g5 is forced
+     * and never blocks a cleanly resolved free line (AstDyS e_p goes down to
+     * 0.003 beside a ~0.04 forced term).
+     */
+    ambiguityRatio: 4,
+    explainedBins: 0.5,
+});
+
+const ARCSEC_PER_RAD = R2D * 3600;
+
+/**
+ * @param {ArrayLike<number>} phi  unwrapped resonant angle, degrees, uniform cadence
+ * @param {ArrayLike<number>} x    a/a_J − 1 at the same samples
+ * @param {number} sampleYears     cadence
+ * @returns {{ ok:boolean, reason?:string, D:number, da:number, f:number, period:number, cycles:number, h2:number }}
+ *          D deg, da AU, f deg/yr, period yr, cycles spanned, h2 = 2nd-harmonic / fundamental.
+ */
+export function properLibration(phi, x, sampleYears, { aJ = STANDISH.jupiter.a[0], mu = MU_JUPITER } = {}) {
+    const n = phi.length;
+    if (n < 32 || !(sampleYears > 0)) return { ok: false, reason: 'too_few_samples' };
+    const w = hannWindow(n);
+    let sw = 0, pc = 0, xc = 0;
+    for (let k = 0; k < n; k++) { sw += w[k]; pc += w[k] * phi[k]; xc += w[k] * x[k]; }
+    pc /= sw; xc /= sw;
+    const k3 = R2D / Math.sqrt(3 * mu);
+    const zr = new Float64Array(n), zi = new Float64Array(n), xr = new Float64Array(n), zero = new Float64Array(n);
+    for (let k = 0; k < n; k++) { zr[k] = phi[k] - pc; xr[k] = x[k] - xc; zi[k] = xr[k] * k3; }
+    // 1. The libration FREQUENCY: the strongest line of the complex z INSIDE
+    //    the libration band. Measured 2026-11-03: for objects with D ≲ 0.1°
+    //    (9807, 353364) Jupiter's 11.86-yr orbital line (30.3°/yr) out-powered
+    //    the libration and was reported as f. The band is the small-amplitude
+    //    frequency n√(27μ/4) ≈ 2.43°/yr, slowing toward the separatrix
+    //    (AstDyS's 1st percentile is 1.92°/yr at D ≈ 33°).
+    const f0 = (2 * Math.PI) / (smallAmplitudePeriodDays(aJ, mu) / JULIAN_YEAR_D);
+    const lead = naff(zr, zi, sampleYears, { terms: 4, refine: 0 })
+        .filter(t => Math.abs(t.nu) > LIBRATION_BAND[0] * f0 && Math.abs(t.nu) < LIBRATION_BAND[1] * f0);
+    if (!lead.length) return { ok: false, reason: 'no_line_in_libration_band' };
+    const omega = Math.abs(lead[0].nu);
+    const span = (n - 1) * sampleYears;
+    const cycles = (omega * span) / (2 * Math.PI);
+    // 2. The AMPLITUDE: total power of the libration CLUSTER in the real φ
+    //    (and x) signal. Once a record resolves the secular period (~3 800 yr
+    //    for g), the secular cycle frequency-modulates the libration and the
+    //    line splits into sidebands at f ± g; a single-line amplitude then
+    //    FALLS with run length (measured: 659 Nestor 9.95° at 3 kyr → 9.31° at
+    //    20 kyr, AstDyS 9.87°). For FM, Σ J_n² = 1, so √(Σ A_k²) over the
+    //    cluster is the unmodulated amplitude and does not depend on whether
+    //    the sidebands are resolved.
+    const cluster = (sig) => {
+        const t = naff(sig, zero, sampleYears, { terms: CLUSTER_TERMS, refine: 1 });
+        let p = 0;
+        for (const term of t) {
+            const nu = Math.abs(term.nu);
+            if (nu > omega * (1 - CLUSTER_HALF_WIDTH) && nu < omega * (1 + CLUSTER_HALF_WIDTH)) p += term.amp * term.amp;
+        }
+        // A real cosine of amplitude a appears as ±ν lines of a/2 each, so the
+        // cluster power over both signs is a²/2: a = √(2p).
+        return Math.sqrt(2 * p);
+    };
+    const D = cluster(zr);
+    const ampAt = (re, nu) => { const pr = project(re, zero, w, nu, sampleYears); return 2 * Math.hypot(pr.re, pr.im); };
+    const out = {
+        D, da: aJ * cluster(xr), f: omega * R2D, period: (2 * Math.PI) / omega, cycles,
+        h2: D > 0 ? ampAt(zr, 2 * omega) / D : null, phiCentre: pc,
+    };
+    if (cycles < PROPER.minCycles) return { ...out, ok: false, reason: `span ${span.toFixed(0)} yr holds ${cycles.toFixed(1)} libration cycles (< ${PROPER.minCycles})` };
+    return { ...out, ok: true };
+}
+
+/** Libration frequencies accepted, as multiples of the small-amplitude frequency. */
+const LIBRATION_BAND = Object.freeze([0.4, 1.3]);
+/** Libration cluster: lines within ±30 % of the fundamental (excludes the 2f harmonic), up to 8 terms. */
+const CLUSTER_HALF_WIDTH = 0.3;
+const CLUSTER_TERMS = 8;
+
+/**
+ * The FREE line of a secular signal (e·e^{iϖ} or sin I·e^{iΩ}): the strongest
+ * NAFF term that is resolvable (≥ minCycles over the span) and at least
+ * `minBinsFromForced` bins from every FORCED frequency — Jupiter's own lines,
+ * measured from Jupiter in the SAME run (never typed in), plus zero (the
+ * planets' invariable plane is a constant term in a fixed ecliptic frame).
+ * Withheld, with the span it would need, when nothing qualifies.
+ * @returns {{ ok, amp?, nu?, arcsecPerYr?, reason?, needYears? }}
+ */
+export function properSecular(re, im, forcedNu, sampleYears, { maxNu = Infinity, minSpanYears = 0 } = {}) {
+    const n = re.length;
+    if (n < 32) return { ok: false, reason: 'too_few_samples' };
+    const span = (n - 1) * sampleYears;
+    if (span < minSpanYears) return { ok: false, reason: `span ${Math.round(span)} yr < ${minSpanYears} yr needed to resolve the free line`, needYears: minSpanYears };
+    const bin = binWidth(n, sampleYears);
+    const terms = naff(re, im, sampleYears, { terms: PROPER.terms }).filter(t => Math.abs(t.nu) < maxNu);
+    const forced = [0, ...forcedNu];
+    let nearestNeed = Infinity, strongestNearForced = 0;
+    for (const t of terms) {
+        const cycles = (Math.abs(t.nu) * span) / (2 * Math.PI);
+        const sep = Math.min(...forced.map(f => Math.abs(t.nu - f)));
+        if (cycles >= PROPER.minCycles && sep >= PROPER.minBinsFromForced * bin) {
+            if (strongestNearForced > PROPER.ambiguityRatio * t.amp) {
+                return { ok: false, reason: `ambiguous: an unexplained near-forced line (${strongestNearForced.toFixed(4)}) is > ${PROPER.ambiguityRatio}× the candidate (${t.amp.toFixed(4)}) — the free line may be merged with a forced one`,
+                    needYears: Math.ceil(span * 2) };
+            }
+            return { ok: true, amp: t.amp, nu: t.nu, arcsecPerYr: t.nu * ARCSEC_PER_RAD, cycles };
+        }
+        if (sep < PROPER.minBinsFromForced * bin && sep > PROPER.explainedBins * bin) strongestNearForced = Math.max(strongestNearForced, t.amp);
+        // What span WOULD resolve this line: enough cycles AND enough bins of separation.
+        const needCycles = (PROPER.minCycles * 2 * Math.PI) / Math.max(Math.abs(t.nu), 1e-12);
+        const needSep = sep > 0 ? (PROPER.minBinsFromForced * 2 * Math.PI) / sep : Infinity;
+        nearestNeed = Math.min(nearestNeed, Math.max(needCycles, needSep));
+    }
+    return { ok: false, reason: `no free line resolvable in ${span.toFixed(0)} yr`, needYears: Number.isFinite(nearestNeed) ? Math.ceil(nearestNeed) : null };
+}
+
+/** Jupiter's own secular lines (rad/yr), measured from its track at the particle cadence. */
+function jupiterSecularLines(track, sampleEvery) {
+    const key = `sec:${sampleEvery}`;
+    if (track[key]) return track[key];
+    const gmJ = K2 * (1 + track.m[0]);
+    const S = (track.N - 1) / 2;
+    const nS = Math.floor(S / sampleEvery) + 1;
+    const eR = new Float64Array(nS), eI = new Float64Array(nS), iR = new Float64Array(nS), iI = new Float64Array(nS);
+    for (let j = 0; j < nS; j++) {
+        const o = 6 * (2 * j * sampleEvery);
+        const el = elementsFromState([track.pos[o], track.pos[o + 1], track.pos[o + 2]], [track.vel[o], track.vel[o + 1], track.vel[o + 2]], gmJ);
+        eR[j] = el.e * Math.cos(el.varpi * D2R); eI[j] = el.e * Math.sin(el.varpi * D2R);
+        const si = Math.sin(el.i * D2R);
+        iR[j] = si * Math.cos(el.om * D2R); iI[j] = si * Math.sin(el.om * D2R);
+    }
+    const dtY = (sampleEvery * Math.abs(2 * track.h)) / JULIAN_YEAR_D;
+    const lines = (re, im) => naff(re, im, dtY, { terms: 2 }).map(t => t.nu);
+    track[key] = { g: lines(eR, eI), s: lines(iR, iI) };
+    return track[key];
 }
 
 /**
@@ -626,13 +829,24 @@ export function summarisePhi(series, { sampleYears, aMean = null, eMean = null, 
  * Integrate a whole swarm. `particles` are { r, v } at the join epoch.
  * `onProgress(done, total)` lets a worker report; nothing here touches time.
  */
+/**
+ * Sample cadence for a run: annual up to 4 000 samples, then coarser so the
+ * frequency analysis stays O(4 000) per signal. Never coarser than 5 yr:
+ * Jupiter's 11.86-yr orbital line must stay below Nyquist or it aliases into
+ * the secular band.
+ */
+export function sampleDaysFor(years) {
+    return Math.min(5 * JULIAN_YEAR_D, Math.max(JULIAN_YEAR_D, (years * JULIAN_YEAR_D) / 4000));
+}
+
 export function integrateSwarm(particles, perturbers, opts = {}) {
-    const { years, dtDays, sampleDays } = { ...SWARM_RUN, ...opts };
+    const { years, dtDays } = { ...SWARM_RUN, ...opts };
+    const sampleDays = opts.sampleDays ?? sampleDaysFor(years);
     const steps = Math.ceil((years * JULIAN_YEAR_D) / dtDays);
     const track = planetTrack(perturbers, steps, dtDays, opts);
     const out = new Array(particles.length);
     for (let k = 0; k < particles.length; k++) {
-        out[k] = integrateParticle(particles[k], track, { dtDays, sampleDays, encounterHill: opts.encounterHill, keepSeries: opts.keepSeries });
+        out[k] = integrateParticle(particles[k], track, { dtDays, sampleDays, encounterHill: opts.encounterHill, keepSeries: opts.keepSeries, proper: opts.proper !== false });
         if (opts.onProgress && (k % 250 === 0 || k === particles.length - 1)) opts.onProgress(k + 1, particles.length);
     }
     return { results: out, steps, dtDays, years, perturbers: { jupiter: perturbers.jupiter.source, saturn: opts.useSaturn === false ? 'off' : perturbers.saturn?.source } };
@@ -757,6 +971,10 @@ export const DYNAMICS_CODES = Object.freeze({
 export const DYNAMICS_COLUMNS = Object.freeze([
     'des', 'regime', 'amp', 'period', 'phi_mean', 'phi_min', 'phi_max',
     'a_mean', 'e_mean', 'i_mean', 'diam', 'size', 'quality', 'phi0',
+    // PROPER elements by frequency analysis (APPENDED — readers go by name).
+    // null = withheld (the run cannot resolve it): D_p/f need ≥ 2 libration
+    // cycles, e_p/g ≳ 18 kyr, sin I_p/s ≳ 250 kyr (PROPER.secularMinSpanYears).
+    'D_p', 'f_lib', 'e_p', 'g', 'sinI_p', 's',
 ]);
 
 const rnd = (v, dp) => (v == null || !Number.isFinite(v) ? null : Number(v.toFixed(dp)));
@@ -777,6 +995,9 @@ export function encodeDynamics(analysed, results, meta = {}) {
             rnd(r.aMean, 4), rnd(r.eMean, 3), rnd(r.iMean, 1),
             D == null ? null : rnd(D, D < 10 ? 1 : 0), code('size', a.sizeBasis),
             code('quality', orbitQuality(a.rec ?? {}, a.alignMethod)), rnd(a.phi, 1),
+            r.proper?.ok ? rnd(r.proper.D, 2) : null, r.proper?.ok ? rnd(r.proper.f, 4) : null,
+            r.properE?.ok ? rnd(r.properE.amp, 4) : null, r.properE?.ok ? rnd(r.properE.arcsecPerYr, 2) : null,
+            r.properI?.ok ? rnd(r.properI.amp, 4) : null, r.properI?.ok ? rnd(r.properI.arcsecPerYr, 2) : null,
         ];
     });
     const data = Object.fromEntries(DYNAMICS_COLUMNS.map((c, j) => [c, rows.map(r => r[j])]));

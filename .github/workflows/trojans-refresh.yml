@@ -3,13 +3,21 @@ name: trojans-refresh
 # Weekly recomputation of the Jupiter Trojan population tables.
 #
 # WHY HERE AND NOT IN VERCEL OR THE BROWSER: the full-population integration
-# costs ~3 CPU-minutes (measured 2026-11-03: 45 s on 4 threads for 600 yr,
-# 234 s for the 3 000-yr check run). That is past a Vercel function's 60 s
-# and far past a browser frame budget, so pages load the precomputed
-# data/trojans/trojans-dynamics.json instead. Nothing here touches Supabase.
+# with frequency analysis costs ~3 CPU-minutes for 600 yr (52 s on 4 threads,
+# measured 2026-11-03) and ~1 CPU-hour for the 20-kyr run that resolves the
+# proper eccentricity — past a Vercel function's 60 s and far past a browser
+# frame budget, so pages load the precomputed data/trojans/trojans-dynamics.json
+# instead. Nothing here touches Supabase.
+#
+# THE LONG RUN IS 20 kyr ON PURPOSE: proper e_p and its frequency g need
+# ≳ 18 kyr to resolve (js/trojan-dynamics.js PROPER.secularMinSpanYears —
+# derived from AstDyS's own g distribution). sin I_p needs ≳ 250 kyr and is
+# withheld at this length; that is a sample-scale validation run, not weekly.
+# Both runs are scored against AstDyS (scripts/compare-astdys.mjs).
 #
 # WHAT IT DOES: fetch the live /api/trojans/catalog (refusing a degraded body
-# via --require-live), run the node gates, integrate 600 yr + 3 000 yr,
+# via --require-live) and /api/trojans/proper (AstDyS), run the node gates,
+# integrate 600 yr + 20 kyr, score both against AstDyS,
 # rebuild TROJANS_LIST.md, upload the full CSVs + the catalogue as a build
 # artifact (they are NOT committed — ~3 MB per refresh), and open or update
 # ONE pull request on the branch `data/trojans-refresh` with the small
@@ -31,10 +39,14 @@ on:
         description: 'Catalogue URL (a preview deployment works too)'
         required: false
         default: 'https://www.parkersphysics.com/api/trojans/catalog'
-      long_years:
-        description: 'Years for the long check run (0 to skip)'
+      astdys_url:
+        description: 'AstDyS proper-elements relay URL'
         required: false
-        default: '3000'
+        default: 'https://www.parkersphysics.com/api/trojans/proper'
+      long_years:
+        description: 'Years for the long run (20000 resolves e_p; 0 to skip)'
+        required: false
+        default: '20000'
 
 permissions:
   contents: write        # push the refresh branch
@@ -47,10 +59,11 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     env:
       CATALOG_URL: ${{ inputs.url || 'https://www.parkersphysics.com/api/trojans/catalog' }}
-      LONG_YEARS: ${{ inputs.long_years || '3000' }}
+      ASTDYS_URL: ${{ inputs.astdys_url || 'https://www.parkersphysics.com/api/trojans/proper' }}
+      LONG_YEARS: ${{ inputs.long_years || '20000' }}
       BRANCH: data/trojans-refresh
     steps:
       - uses: actions/checkout@v4
@@ -64,19 +77,33 @@ jobs:
             -H 'Accept: application/json' "$CATALOG_URL" -o "$RUNNER_TEMP/catalog.json"
           node -e "const b=require(process.argv[1]);console.log('rows',b.count,'freshness',b.freshness,'precision',b.precision,'quality',b.quality_fields,'format',b.format,'epoch',b.epoch&&b.epoch.epoch)" "$RUNNER_TEMP/catalog.json"
 
+      - name: Fetch AstDyS proper elements (validation set; optional)
+        run: |
+          if curl -fsS --retry 3 --retry-delay 10 --max-time 120 --compressed "$ASTDYS_URL" -o "$RUNNER_TEMP/astdys.json" \
+             && node -e "const b=require(process.argv[1]); if (b.freshness!=='live'||!(b.count>1000)) process.exit(1); console.log('AstDyS rows',b.count,b.source_url)" "$RUNNER_TEMP/astdys.json"; then
+            echo "ASTDYS_OK=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::AstDyS relay unavailable — keeping the committed comparison"
+          fi
+
       - name: Node gates
         run: |
           node tests/trojan-sources.mjs
+          node tests/frequency-analysis.mjs
+          node tests/astdys-proper.mjs
           node tests/trojan-dynamics.mjs
 
       - name: Integrate 600 yr (the committed tables)
-        run: node scripts/analyze-trojans.mjs "$RUNNER_TEMP/catalog.json" --require-live --out data/trojans
+        run: |
+          node scripts/analyze-trojans.mjs "$RUNNER_TEMP/catalog.json" --require-live --out data/trojans
+          if [ "$ASTDYS_OK" = "1" ]; then node scripts/compare-astdys.mjs data/trojans/trojans-analysis.csv "$RUNNER_TEMP/astdys.json" --out data/trojans/astdys-comparison.json; fi
 
       - name: Integrate the long check run
         if: env.LONG_YEARS != '0'
         run: |
           node scripts/analyze-trojans.mjs "$RUNNER_TEMP/catalog.json" --require-live --years "$LONG_YEARS" --out "$RUNNER_TEMP/long"
-          cp "$RUNNER_TEMP/long/trojans-summary.json" data/trojans/trojans-summary-3000yr.json
+          cp "$RUNNER_TEMP/long/trojans-summary.json" data/trojans/trojans-summary-long.json
+          if [ "$ASTDYS_OK" = "1" ]; then node scripts/compare-astdys.mjs "$RUNNER_TEMP/long/trojans-analysis.csv" "$RUNNER_TEMP/astdys.json" --out data/trojans/astdys-comparison-long.json; fi
 
       - name: Rebuild the population list
         run: |
@@ -103,8 +130,12 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
-          git add data/trojans/trojans-dynamics.json data/trojans/trojans-summary.json \
-                  data/trojans/trojans-summary-3000yr.json data/trojans/TROJANS_LIST.md
+          # One git add per file that exists: a single add with a missing path
+          # fails as a whole and stages NOTHING (the comparisons are optional).
+          for f in trojans-dynamics.json trojans-summary.json trojans-summary-long.json TROJANS_LIST.md \
+                   astdys-comparison.json astdys-comparison-long.json; do
+            [ -f "data/trojans/$f" ] && git add "data/trojans/$f"
+          done
           if git diff --cached --quiet; then echo "No change to the committed tables."; exit 0; fi
           SUMMARY=$(node -e "const s=require('./data/trojans/trojans-summary.json');const r=s.regimes;console.log(s.source.rows+' objects · L4 '+r.L4+' · L5 '+r.L5+' · encounter '+(r.encounter||0)+' · L4:L5 '+s.camps_librating.ratio.toFixed(3))")
           git commit -q -m "data(trojans): weekly refresh — $SUMMARY"

@@ -23,6 +23,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import * as T from '../js/trojan-dynamics.js';
 
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a} vs ${b} (±${tol})`);
+import { naff as naffRaw } from '../js/frequency-analysis.js';
+/** Amplitude of the single strongest real-signal line near ω (the definition the cluster replaces). */
+function naffSingle(sig, dt, omega) {
+    const mean = sig.reduce((a, b) => a + b, 0) / sig.length;
+    const t = naffRaw(Float64Array.from(sig, v => v - mean), null, dt, { terms: 1 });
+    return 2 * t[0].amp;
+}
 
 // ── Elements ↔ state ────────────────────────────────────────────────────────
 {
@@ -118,6 +125,71 @@ const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a}
     near(r.ratio, 1000 / 600, 1e-12, 'ratio'); assert.ok(r.lo < r.ratio && r.ratio < r.hi);
 }
 
+// ── Proper elements by frequency analysis (synthetic, known answers) ────────
+{
+    const mu = T.MU_JUPITER, D = 10, omega = 2 * Math.PI / 150, Os = 2 * Math.PI / 3800, beta = 0.4;
+    const make = (years, dt) => {
+        const n = Math.floor(years / dt) + 1, phi = new Float64Array(n), x = new Float64Array(n);
+        for (let k = 0; k < n; k++) {
+            const t = k * dt, th = omega * t + beta * Math.sin(Os * t);
+            phi[k] = 60 + D * Math.cos(th);
+            x[k] = Math.sqrt(3 * mu) * (D * Math.PI / 180) * Math.sin(th);
+        }
+        return { phi, x, dt };
+    };
+    // The secular cycle frequency-modulates the libration: the cluster
+    // amplitude must not depend on whether the f ± g sidebands are resolved.
+    const short = make(600, 1), long = make(20000, 5);
+    const ps = T.properLibration(short.phi, short.x, 1), pl = T.properLibration(long.phi, long.x, 5);
+    assert.ok(ps.ok && pl.ok);
+    near(ps.D, D, 0.15, 'D_p, sidebands unresolved (600 yr)');
+    near(pl.D, D, 0.05, 'D_p, sidebands resolved (20 kyr)');
+    near(pl.f, omega * 180 / Math.PI, 1e-3, 'libration frequency (deg/yr)');
+    near(pl.da, 5.2029 * Math.sqrt(3 * mu) * D * Math.PI / 180, 2e-4, 'da_p = a_J·√(3μ)·D (the small-amplitude identity)');
+    // NEGATIVE CONTROL: a single-line amplitude in the long record is the
+    // carrier alone, D·J₀(β) — the run-length drift the cluster removes.
+    const J0 = 1 - beta ** 2 / 4 + beta ** 4 / 64;
+    const single = naffSingle(long.phi, 5, omega);
+    near(single, D * J0, 0.05, `single-line amplitude falls to D·J₀(β) = ${(D * J0).toFixed(3)}`);
+    assert.ok(Math.abs(single - D) > 0.3, 'and is visibly short of D');
+    const tooShort = T.properLibration(make(200, 1).phi, make(200, 1).x, 1);
+    assert.equal(tooShort.ok, false); assert.match(tooShort.reason, /libration cycles/);
+}
+{
+    // Secular: forced line at Jupiter's g5, free line at g, plus the two
+    // impostors the first implementation reported (Jupiter's orbital line and
+    // the libration coupling).
+    const ARC = 180 / Math.PI * 3600, g5 = 4.25 / ARC, g = 340 / ARC, fLib = 2.4 * Math.PI / 180;
+    const make = (years, dt, Af = 0.04, Ae = 0.08) => {
+        const n = Math.floor(years / dt) + 1, re = new Float64Array(n), im = new Float64Array(n);
+        for (let k = 0; k < n; k++) {
+            const t = k * dt;
+            for (const [A, nu] of [[Af, g5], [Ae, g], [0.003, 2 * Math.PI / 11.86], [0.002, 8300 / ARC]]) { re[k] += A * Math.cos(nu * t); im[k] += A * Math.sin(nu * t); }
+        }
+        return { re, im };
+    };
+    const opts = { maxNu: fLib * T.PROPER.secularBandOfLibration, minSpanYears: T.PROPER.secularMinSpanYears.e };
+    const ok = make(20000, 5); const r = T.properSecular(ok.re, ok.im, [g5], 5, opts);
+    assert.ok(r.ok, r.reason); near(r.amp, 0.08, 1e-3, 'free e'); near(r.arcsecPerYr, 340, 1, 'free g (arcsec/yr)');
+    const short = make(3000, 1); const rs = T.properSecular(short.re, short.im, [g5], 1, opts);
+    assert.equal(rs.ok, false, 'a 3 000-yr record cannot resolve g ≈ 340″/yr'); assert.equal(rs.needYears, 18000);
+    // NEGATIVE CONTROL: without the band limit and span gate the impostors win.
+    const unguarded = T.properSecular(short.re, short.im, [g5], 1, {});
+    assert.ok(!unguarded.ok || Math.abs(unguarded.arcsecPerYr - 340) > 100, 'unguarded extraction does not find the true line in 3 000 yr');
+    // A STRONG forced line sitting on Jupiter's own frequency is explained and
+    // must not block a small, cleanly resolved free line.
+    const big = make(20000, 5, 0.5, 0.01); const ra = T.properSecular(big.re, big.im, [g5], 5, opts);
+    assert.ok(ra.ok, `a forced line on g5 is skipped, not ambiguous (${ra.reason})`); near(ra.amp, 0.01, 5e-4, 'small free e beside a big forced one');
+    // An UNEXPLAINED near-forced line (a fused blob ~1 bin off every forced
+    // frequency) that dwarfs the candidate → ambiguous, withheld.
+    {
+        const n = 4001, re = new Float64Array(n), im = new Float64Array(n), blob = 1.2 * (2 * Math.PI / 20000);
+        for (let k = 0; k < n; k++) { const t = k * 5; for (const [A, nu] of [[0.3, blob], [0.02, g]]) { re[k] += A * Math.cos(nu * t); im[k] += A * Math.sin(nu * t); } }
+        const rb = T.properSecular(re, im, [g5], 5, opts);
+        assert.equal(rb.ok, false); assert.match(rb.reason, /^ambiguous/);
+    }
+}
+
 // ── Orbit quality (the ONE rule) and the dynamics artifact codec ────────────
 {
     assert.equal(T.orbitQuality({ cc: '0', arc_d: 43526 }, 'epoch'), 'well-determined');
@@ -132,7 +204,8 @@ const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a}
         { des: '2014 EL58', phi: 97.28, diameterKm: 6.234, sizeBasis: 'H+population-albedo', alignMethod: 'n-body', rec: { cc: '9', arc_d: 3 } },
     ];
     const results = [
-        { regime: 'L4', amplitude: 19.34, periodYears: 155.8, phiMean: 62.7, phiMin: 42.61, phiMax: 81.22, aMean: 5.20712, eMean: 0.01534, iMean: 18.21 },
+        { regime: 'L4', amplitude: 19.34, periodYears: 155.8, phiMean: 62.7, phiMin: 42.61, phiMax: 81.22, aMean: 5.20712, eMean: 0.01534, iMean: 18.21,
+          proper: { ok: true, D: 18.9512, f: 2.31744 }, properE: { ok: false }, properI: { ok: false } },
         { regime: 'encounter', amplitude: 120.1, periodYears: null, phiMean: 90, phiMin: 30, phiMax: 150, aMean: 4.97, eMean: 0.12, iMean: 9.3 },
     ];
     const doc = T.encodeDynamics(analysed, results, { generated_at: 'x' });
@@ -142,7 +215,8 @@ const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a}
     const o = T.decodeDynamics(back);
     assert.equal(o.length, 2);
     assert.deepEqual(o[0], { des: '624', regime: 'L4', amp: 19.3, period: 156, phi_mean: 62.7, phi_min: 42.6, phi_max: 81.2,
-        a_mean: 5.2071, e_mean: 0.015, i_mean: 18.2, diam: 225, size: 'measured', quality: 'well-determined', phi0: 72.3 });
+        a_mean: 5.2071, e_mean: 0.015, i_mean: 18.2, diam: 225, size: 'measured', quality: 'well-determined', phi0: 72.3,
+        D_p: 18.95, f_lib: 2.3174, e_p: null, g: null, sinI_p: null, s: null });
     assert.equal(o[1].regime, 'encounter'); assert.equal(o[1].period, null); assert.equal(o[1].diam, 6.2, 'small bodies keep a decimal');
     assert.equal(o[1].quality, 'short-arc');
     assert.throws(() => T.encodeDynamics([analysed[0]], [{ ...results[0], regime: 'trojan' }]), /unknown regime/);
@@ -221,6 +295,41 @@ if (existsSync(FIX)) {
             assert.equal(r.regime, fine[k].regime, `${sample[k].name}: regime step-independent`);
             near(r.amplitude, fine[k].amplitude, 0.05, `${sample[k].name}: amplitude converged at ${T.SWARM_RUN.dtDays} d`);
         });
+    }
+    // PROPER ELEMENTS ON REAL TROJANS vs AstDyS (Jun 2024 synthetic proper
+    // elements; the six rows are REAL, captured from production — see
+    // tests/fixtures/trojans/astdys-tro-head.syn).
+    {
+        const { parseSyn } = await import('../api/_lib/astdys-proper.js');
+        const ast = Object.fromEntries(parseSyn(readFileSync(new URL('./fixtures/trojans/astdys-tro-head.syn', import.meta.url), 'utf8')).rows.map(r => [r.des, r]));
+        const both = recs.filter(r => ast[r.des]);
+        assert.ok(both.length >= 3, `fixture overlaps AstDyS head (${both.length})`);
+        const st = both.map(r => T.stateFromElements(T.elementsAtEpoch(r, epoch).el));
+        const r600 = T.integrateSwarm(st, pert, { years: 600 }).results;
+        const r3k = T.integrateSwarm(st, pert, { years: 3000 }).results;
+        let halfRangeDrift = 0;
+        both.forEach((r, k) => {
+            const a = ast[r.des];
+            near(r600[k].proper.D, a.D, 0.35, `${r.name}: D_p (600 yr) vs AstDyS`);
+            near(r600[k].proper.da, a.da, 0.0015, `${r.name}: da_p vs AstDyS`);
+            near(r600[k].proper.f, a.f, 0.05, `${r.name}: f vs AstDyS`);
+            near(r3k[k].proper.D, r600[k].proper.D, 0.15, `${r.name}: D_p is run-length stable (600 → 3 000 yr)`);
+            halfRangeDrift = Math.max(halfRangeDrift, Math.abs(r3k[k].amplitude - r600[k].amplitude));
+            assert.equal(r600[k].properE.ok, false, 'e_p withheld below its resolvable span');
+        });
+        assert.ok(halfRangeDrift > 0.4, `NEGATIVE CONTROL: the min/max half-range DOES drift with run length (${halfRangeDrift.toFixed(2)}°)`);
+        // e_p and g need ~18 kyr; three objects keep the gate to a few seconds.
+        const pick = both.slice(0, 3);
+        const r20 = T.integrateSwarm(pick.map(r => T.stateFromElements(T.elementsAtEpoch(r, epoch).el)), pert, { years: 20000 }).results;
+        pick.forEach((r, k) => {
+            const a = ast[r.des], e = r20[k].properE;
+            assert.ok(e.ok, `${r.name}: e_p resolved at 20 kyr (${e.reason})`);
+            near(e.amp, a.e, 0.002, `${r.name}: e_p vs AstDyS`);
+            near(e.arcsecPerYr, a.g, 2, `${r.name}: g vs AstDyS (″/yr)`);
+            near(r20[k].proper.D, a.D, 0.35, `${r.name}: D_p (20 kyr) vs AstDyS`);
+            assert.equal(r20[k].properI.ok, false, 'sin I_p withheld below 250 kyr');
+        });
+        console.log(`  proper vs AstDyS: ${both.map((r, k) => `${r.des} D ${r600[k].proper.D.toFixed(2)}/${ast[r.des].D}`).join(' · ')}`);
     }
     console.log(`  real fixture: ${recs.length} rows @ JD ${epoch}; Standish−Horizons Δλ_J = ${T.wrap180(std.lambda - pert.jupiter.el.lambda).toFixed(3)}°`);
 } else {

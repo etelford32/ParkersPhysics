@@ -53,8 +53,12 @@ const C = {
     camp: ['Camp', (r) => r.regime],
     D: ['D (km)', size],
     H: ['H', (r) => fx(num(r.H), 1)],
-    amp: ['Libration amp. (°)', (r) => fx(num(r.libration_amp_deg), 1)],
-    per: ['Period (yr)', (r) => fx(num(r.libration_period_yr), 0)],
+    amp: ['Half-range (°)', (r) => fx(num(r.libration_amp_deg), 1)],
+    // PROPER libration (frequency analysis) — the run-length-stable amplitude.
+    Dp: ['**D_p (°)**', (r) => fx(num(r.D_p_deg), 2)],
+    per: ['Period (yr)', (r) => (num(r.f_lib_deg_yr) ? fx(360 / num(r.f_lib_deg_yr), 0) : fx(num(r.libration_period_yr), 0))],
+    ep: ['e_p', (r) => fx(num(r.e_p), 4)],
+    g: ['g (″/yr)', (r) => fx(num(r.g_arcsec_yr), 1)],
     phi: ['φ now (°)', (r) => fx(num(r.phi_deg), 1)],
     i: ['⟨i⟩ (°)', (r) => fx(num(r.i_mean_deg), 1)],
     e: ['⟨e⟩', (r) => fx(num(r.e_mean), 3)],
@@ -76,15 +80,16 @@ push(`- **Catalogue:** ${S.source.rows.toLocaleString()} objects in JPL SBDB orb
 push(`- **Join epoch:** JD ${S.source.epoch_jd} TDB. Jupiter and Saturn from **${S.source.jupiter} / ${S.source.saturn}** at that instant.`);
 push(`- **Integration:** Sun + Jupiter + Saturn, every Trojan a massless particle, RK4 at ${S.run.dtDays} d for **${S.run.years} yr** (≈${Math.round(S.run.years / 148)} small-amplitude libration periods); ${S.run.seconds} s on ${S.run.workers} threads. Off-epoch rows carried to the join epoch by N-body (${S.alignment?.['n-body'] ?? 0}).`);
 push(`- \`*\` after a diameter = derived from H with the Trojan population mean albedo 0.07 (Grav et al. 2011); no asterisk = measured. ${S.sizes.measured.toLocaleString()} measured, ${S.sizes.from_population_albedo.toLocaleString()} derived.`);
-push(`- "Libration amplitude" is half the peak-to-peak range of the MEASURED resonant angle φ = λ − λ_Jupiter over the run. The "analytic" amplitude is the averaged planar-circular estimate from one epoch; the two agree to a median ${fx(S.librating.analytic_vs_integrated_amp.median_abs_diff_deg, 2)}° across ${S.librating.analytic_vs_integrated_amp.n.toLocaleString()} librators.`, '');
+push(`- **D_p is the PROPER libration amplitude**: the amplitude of the fundamental libration line of φ = λ − λ_Jupiter found by frequency analysis (NAFF), summed in quadrature over its secular sidebands — the definition AstDyS publishes, and one that does NOT grow with run length (§12). "Half-range" is the old statistic, half the peak-to-peak φ over the run (median ${fx(S.librating.proper?.median_halfrange_minus_D_p_deg, 2)}° wider than D_p, and growing with run length). The period is 360°/f from the same analysis. The "analytic" amplitude is the averaged planar-circular estimate from one epoch.`, '');
 
 push(`## 1. The population at a glance`, '');
 push(`| Quantity | Value |`, `|---|---|`);
 for (const [k, v] of Object.entries(S.regimes).sort((a, b) => b[1] - a[1])) push(`| Regime **${k}** | ${v.toLocaleString()} (${(100 * v / S.source.rows).toFixed(2)} %) |`);
 push(`| L4 : L5 (librating) | **${fx(camps.ratio, 3)}** (68 % interval ${fx(camps.lo, 3)}–${fx(camps.hi, 3)}) |`);
 for (const [b, c] of Object.entries(S.camps_librating_by_quality ?? {})) if (c.ratio != null) push(`| L4 : L5, ${b} orbits only | ${fx(c.ratio, 3)} (${fx(c.lo, 3)}–${fx(c.hi, 3)}; ${c.nL4.toLocaleString()} : ${c.nL5.toLocaleString()}) |`);
-push(`| Median libration amplitude | ${fx(S.librating.median_amplitude_deg, 1)}° |`);
-push(`| Median libration period | ${fx(S.librating.median_period_yr, 0)} yr |`);
+push(`| Median PROPER libration amplitude D_p | ${fx(S.librating.proper?.median_D_p_deg, 2)}° (${(S.librating.proper?.with_D_p ?? 0).toLocaleString()} objects) |`);
+push(`| Median libration frequency f | ${fx(S.librating.proper?.median_f_deg_yr, 3)}°/yr (period ${S.librating.proper?.median_f_deg_yr ? fx(360 / S.librating.proper.median_f_deg_yr, 0) : '—'} yr) |`);
+push(`| Median half-range (old statistic) | ${fx(S.librating.median_amplitude_deg, 1)}° |`);
 push(`| Median run-averaged inclination | ${fx(S.librating.median_i_mean_deg, 1)}° |`);
 push(`| Median run-averaged eccentricity | ${fx(S.librating.median_e_mean, 3)} |`);
 if (S.regimes_by_quality) {
@@ -95,31 +100,33 @@ if (S.regimes_by_quality) {
 push('', `The L4 (leading, "Greek") swarm is the larger one, as every survey has found. The split above is the first hint at how much of that is discovery history: the ratio among SHORT-ARC orbits (recent, barely followed-up discoveries) is far larger than among well-determined ones, i.e. recent surveying has favoured L4. A raw catalogue count cannot separate the intrinsic asymmetry from survey bias — that needs a debiased, magnitude-limited sample (plan next steps).`, '');
 
 push(`## 2. The 40 largest Jupiter Trojans`, '');
-push(table(rows.slice().sort(byD).slice(0, 40), [C.name, C.D, C.H, C.camp, C.amp, C.per, C.i, C.e, C.phi]), '');
+push(table(rows.slice().sort(byD).slice(0, 40), [C.name, C.D, C.H, C.camp, C.Dp, C.per, C.i, C.e, C.phi]), '');
 
 const LUCY = [['3548', 'Eurybates (+ Queta)'], ['15094', 'Polymele (+ Shaun)'], ['11351', 'Leucus'], ['21900', 'Orus'], ['617', 'Patroclus–Menoetius']];
 push(`## 3. Lucy mission Trojan targets`, '');
 push(`NASA's Lucy flies past four L4 Trojans in 2027–2028 and the L5 binary Patroclus–Menoetius in 2033.`, '');
 const lucyRows = LUCY.map(([d]) => rows.find(r => r.des === d)).filter(Boolean);
-push(table(lucyRows, [C.name, C.D, C.camp, C.amp, C.per, C.range, C.i, C.e]), '');
+push(table(lucyRows, [C.name, C.D, C.camp, C.Dp, C.amp, C.per, C.range, C.i, C.e]), '');
 
-push(`## 4. The 30 most tightly bound (smallest libration amplitude, well-determined orbits)`, '');
-push(table(good.slice().sort((a, b) => num(a.libration_amp_deg) - num(b.libration_amp_deg)).slice(0, 30), [C.name, C.D, C.camp, C.amp, C.per, C.i, C.e]), '');
+const withDp = good.filter(r => num(r.D_p_deg) != null);
+push(`## 4. The 30 most tightly bound (smallest PROPER libration amplitude, well-determined orbits)`, '');
+push(table(withDp.slice().sort((a, b) => num(a.D_p_deg) - num(b.D_p_deg)).slice(0, 30), [C.name, C.D, C.camp, C.Dp, C.per, C.i, C.e]), '');
 
 push(`## 5. The 30 widest tadpoles (largest amplitude that still librates, well-determined)`, '');
 push(`Closest to the separatrix (the tadpole boundary reaches 23.9° from Jupiter in the planar circular problem). These are the swarm's most fragile members.`, '');
-push(table(good.slice().sort((a, b) => num(b.libration_amp_deg) - num(a.libration_amp_deg)).slice(0, 30), [C.name, C.D, C.camp, C.amp, C.range, C.per, C.i, C.e]), '');
+push(table(withDp.slice().sort((a, b) => num(b.D_p_deg) - num(a.D_p_deg)).slice(0, 30), [C.name, C.D, C.camp, C.Dp, C.range, C.per, C.i, C.e]), '');
 
 push(`## 6. The 30 most inclined librators (run-averaged, well-determined)`, '');
-push(table(good.slice().sort((a, b) => num(b.i_mean_deg) - num(a.i_mean_deg)).slice(0, 30), [C.name, C.D, C.camp, C.i, C.e, C.amp, C.per]), '');
+push(table(good.slice().sort((a, b) => num(b.i_mean_deg) - num(a.i_mean_deg)).slice(0, 30), [C.name, C.D, C.camp, C.i, C.e, C.Dp, C.per]), '');
 
 push(`## 7. The 30 most eccentric librators (run-averaged, well-determined)`, '');
-push(table(good.slice().sort((a, b) => num(b.e_mean) - num(a.e_mean)).slice(0, 30), [C.name, C.D, C.camp, C.e, C.i, C.amp, C.per]), '');
+push(table(good.slice().sort((a, b) => num(b.e_mean) - num(a.e_mean)).slice(0, 30), [C.name, C.D, C.camp, C.e, C.i, C.Dp, C.per]), '');
 
 push(`## 8. Longest and shortest libration periods (well-determined)`, '');
-const withPer = good.filter(r => num(r.libration_period_yr) != null);
-push(`### Longest`, '', table(withPer.slice().sort((a, b) => num(b.libration_period_yr) - num(a.libration_period_yr)).slice(0, 15), [C.name, C.camp, C.per, C.amp, C.i, C.e]), '');
-push(`### Shortest`, '', table(withPer.slice().sort((a, b) => num(a.libration_period_yr) - num(b.libration_period_yr)).slice(0, 15), [C.name, C.camp, C.per, C.amp, C.i, C.e]), '');
+// Periods from the frequency analysis (360°/f) — no crossing-count floor.
+const withPer = withDp.filter(r => num(r.f_lib_deg_yr) != null);
+push(`### Longest`, '', table(withPer.slice().sort((a, b) => num(a.f_lib_deg_yr) - num(b.f_lib_deg_yr)).slice(0, 15), [C.name, C.camp, C.per, C.Dp, C.i, C.e]), '');
+push(`### Shortest`, '', table(withPer.slice().sort((a, b) => num(b.f_lib_deg_yr) - num(a.f_lib_deg_yr)).slice(0, 15), [C.name, C.camp, C.per, C.Dp, C.i, C.e]), '');
 
 const hs = rows.filter(r => r.regime === 'horseshoe');
 push(`## 9. Horseshoe orbits (${hs.length}) — φ crosses 180° (L3) but never 0°`, '');
@@ -147,6 +154,34 @@ if (longDir && existsSync(`${longDir}/trojans-analysis.csv`)) {
     push(`## 12. Slow escapers — regime changes between ${S.run.years} yr and ${LS.run.years} yr (${changed.length})`, '');
     push(`Regimes in the ${LS.run.years}-yr run: ${Object.entries(LS.regimes).map(([k, v]) => `${k} ${v.toLocaleString()}`).join(' · ')}.`, '');
     push(table(changed.slice().sort((a, b) => num(a.H) - num(b.H)).slice(0, 60), [C.name, C.H, ['@' + S.run.years + ' yr', (r) => r.regime], ['@' + LS.run.years + ' yr', (r) => lrows.get(r.des).regime], C.amp, C.i, C.e, C.quality]), '');
+}
+
+// ── Validation against AstDyS (scripts/compare-astdys.mjs) ─────────────────
+const cmpFiles = [['astdys-comparison.json', `${S.run.years}-yr run`], ['astdys-comparison-long.json', 'long run']]
+    .filter(([f]) => existsSync(`${dir}/${f}`)).map(([f, label]) => [JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')), label]);
+if (cmpFiles.length) {
+    const UNITS = { D: '°', da: 'AU', f: '°/yr', e: '', g: '″/yr', sinI: '', s: '″/yr' };
+    const NAMES = { D: 'D_p (libration amplitude)', da: 'da_p (semimajor-axis amplitude)', f: 'f (libration frequency)', e: 'e_p (proper eccentricity)', g: 'g (perihelion frequency)', sinI: 'sin I_p', s: 's (node frequency)' };
+    const nd = (v, k) => (v == null ? '—' : (k === 'da' || k === 'e' || k === 'sinI') ? v.toFixed(4) : v.toFixed(k === 'f' ? 4 : 2));
+    push(`## ${longDir ? 13 : 12}. Validation: our proper elements vs AstDyS`, '');
+    const c0 = cmpFiles[0][0];
+    push(`AstDyS synthetic proper elements (${c0.inputs.astdys_header ? `\`${c0.inputs.astdys_header}\`` : ''}; ${c0.inputs.astdys_rows.toLocaleString()} Trojans, ${c0.inputs.astdys_source}) are computed by frequency analysis of 5- or 50-Myr integrations with the four outer planets. Ours come from the runs above (Sun + Jupiter + Saturn). Matched by designation; AstDyS rows where ITS fit failed are excluded and counted.`, '');
+    for (const [c, label] of cmpFiles) {
+        push(`### ${label} — ${c.matched.toLocaleString()} matched librators (excluded AstDyS rows: ${Object.entries(c.excluded_astdys_rows).map(([k, v]) => `${k} ${v}`).join(', ')})`, '');
+        push(`| Element | n | Median (ours − AstDyS) | Median abs Δ | 90th pct abs Δ | 99th pct abs Δ | Correlation |`, `|---|---|---|---|---|---|---|`);
+        for (const [k, v] of Object.entries(c.agreement)) push(`| ${NAMES[k] ?? k} ${UNITS[k] ? `(${UNITS[k]})` : ''} | ${v.n.toLocaleString()} | ${nd(v.median_diff, k)} | ${nd(v.median_abs, k)} | ${nd(v.p90_abs, k)} | ${nd(v.p99_abs, k)} | ${v.correlation == null ? '—' : v.correlation.toFixed(4)} |`);
+        if (c.halfrange_vs_astdys_D) { const h = c.halfrange_vs_astdys_D; push(`| *Old half-range vs AstDyS D* | ${h.n.toLocaleString()} | ${nd(h.median_diff, 'D')} | ${nd(h.median_abs, 'D')} | ${nd(h.p90_abs, 'D')} | ${nd(h.p99_abs, 'D')} | ${h.correlation.toFixed(4)} |`); }
+        if (c.agreement_by_astdys_span) {
+            push('', 'D_p by AstDyS integration span (AstDyS runs the harder, likelier-chaotic orbits for 50 Myr):', '');
+            push(`| AstDyS span | n | Median abs Δ (°) | 90th pct abs Δ (°) | 99th pct abs Δ (°) |`, `|---|---|---|---|---|`);
+            for (const [sp, m] of Object.entries(c.agreement_by_astdys_span)) if (m.D) push(`| ${sp} | ${m.D.n.toLocaleString()} | ${m.D.median_abs.toFixed(2)} | ${m.D.p90_abs.toFixed(2)} | ${m.D.p99_abs.toFixed(2)} |`);
+        }
+        push('');
+    }
+    push(`### Largest D_p disagreements (${cmpFiles[0][1]})`, '');
+    push(`| # | Object | D_p ours (°) | AstDyS D (°) | Half-range (°) | AstDyS span |`, `|---|---|---|---|---|---|`);
+    c0.largest_D_disagreements.slice(0, 15).forEach((w, k) => push(`| ${k + 1} | ${(w.name || w.des).replace(/\s+/g, ' ')} | ${w.ours.toFixed(2)} | ${w.astdys.toFixed(2)} | ${w.halfrange == null ? '—' : w.halfrange.toFixed(2)} | ${w.astdys_span_myr ?? '—'} Myr |`));
+    push('', `Where ours and AstDyS disagree, our own half-range agrees with our D_p — the measurement is self-consistent; the difference is the input orbit (SBDB 2026 vs AstDyS's June 2024 orbits, which matters most for recent discoveries) or genuinely chaotic motion over AstDyS's 50-Myr span.`, '');
 }
 
 writeFileSync(`${dir}/TROJANS_LIST.md`, L.join('\n') + '\n');
