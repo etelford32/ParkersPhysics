@@ -107,10 +107,22 @@ async function handler() {
         : { maxAge: 300, swr: 600 });
 }
 
-// The Node runtime IGNORES a Response returned from a default export (it
-// wants the `(req, res)` signature) and the request then hangs to the 60 s
-// timeout — measured on the first preview. The Web-handler form is a named
-// HTTP method. The default export stays for dev-server.mjs, which calls
-// `mod.default(request)`, and for the node gate.
-export const GET = handler;
-export default handler;
+/**
+ * DUAL-MODE ENTRY. Vercel's Node runtime calls the DEFAULT export as
+ * `(req, res)` and IGNORES a returned Response — the request then hangs to
+ * the 60 s timeout (measured twice on this route's first previews; adding a
+ * named `GET` export did not help, the default export wins). dev-server.mjs
+ * and the node gate call `default(request)` with one argument and want the
+ * Response back. So: build the Response once; if a Node `res` was passed,
+ * copy it through; otherwise return it.
+ */
+export default async function entry(req, res) {
+    const response = await handler();
+    if (res && typeof res.setHeader === 'function' && typeof res.end === 'function') {
+        res.statusCode = response.status;
+        response.headers.forEach((v, k) => { if (k !== 'content-length') res.setHeader(k, v); });
+        res.end(Buffer.from(await response.arrayBuffer()));
+        return;
+    }
+    return response;
+}

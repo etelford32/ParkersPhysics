@@ -1,0 +1,143 @@
+/**
+ * Gate for api/_lib/trojan-sources.js + api/trojans/catalog.js.
+ *
+ * The SBDB column schema is shared with /api/neo/catalog and VERIFIED in
+ * production (2026-11-03). What is new and must be pinned here:
+ *   - the TJN query is frozen (no client input) and asks for full precision
+ *   - the Horizons request is built only from a validated epoch
+ *   - the Horizons CSV vector block parses, and junk is refused, not guessed
+ *   - the route's ladder drops full-prec, then photometry, ONLY on a 4xx
+ *   - freshness is 'live' only with the population AND Jupiter
+ */
+import assert from 'node:assert/strict';
+import {
+    sbdbTrojanUrl, horizonsVectorUrl, horizonsJd, parseHorizonsVector, modalEpoch,
+    composeTrojanResponse, TROJAN_CLASS, EPOCH_WINDOW,
+} from '../api/_lib/trojan-sources.js';
+import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
+
+// ── URL builders ────────────────────────────────────────────────────────────
+{
+    const u = new URL(sbdbTrojanUrl());
+    assert.equal(u.origin + u.pathname, 'https://ssd-api.jpl.nasa.gov/sbdb_query.api');
+    assert.equal(u.searchParams.get('sb-class'), 'TJN');
+    assert.equal(TROJAN_CLASS, 'TJN');
+    assert.equal(u.searchParams.get('sb-kind'), 'a');
+    assert.equal(u.searchParams.get('full-prec'), 'true');
+    assert.equal(u.searchParams.get('fields'), SBDB_FIELDS.join(','));
+    const plain = new URL(sbdbTrojanUrl({ fullPrecision: false, photometry: false }));
+    assert.equal(plain.searchParams.get('full-prec'), null);
+    assert.equal(plain.searchParams.get('fields'), SBDB_FIELDS_CORE.join(','));
+
+    assert.equal(horizonsJd(2461200.5), 'JD2461200.50000');
+    for (const bad of [NaN, null, undefined, 'x', EPOCH_WINDOW.min - 1, EPOCH_WINDOW.max + 1, "2461200.5'&COMMAND='399"]) {
+        assert.equal(horizonsJd(bad), null, `refuses ${bad}`);
+    }
+    const h = new URL(horizonsVectorUrl('599', 2461200.5));
+    assert.equal(h.origin + h.pathname, 'https://ssd.jpl.nasa.gov/api/horizons.api');
+    assert.equal(h.searchParams.get('COMMAND'), "'599'");
+    assert.equal(h.searchParams.get('CENTER'), "'500@10'", 'Sun body centre: SBDB elements are heliocentric');
+    assert.equal(h.searchParams.get('REF_PLANE'), "'ECLIPTIC'");
+    assert.equal(h.searchParams.get('START_TIME'), "'JD2461200.50000'");
+    assert.equal(h.searchParams.get('STOP_TIME'), "'JD2461201.50000'");
+    assert.equal(horizonsVectorUrl('399', 2461200.5), null, 'only the two perturbers');
+    assert.equal(horizonsVectorUrl('599', 'now'), null);
+}
+
+// ── Horizons CSV vectors ────────────────────────────────────────────────────
+{
+    const body = { result: [
+        '*******************************************************************************',
+        ' Ephemeris / API_USER ...',
+        '$$SOE',
+        '2461200.500000000, A.D. 2026-Jun-11 00:00:00.0000, -1.234567890123456E+00,  5.012345678901234E+00,  6.789012345678901E-03, -7.345678901234567E-03, -1.789012345678901E-03,  1.678901234567890E-04,',
+        '2461201.500000000, A.D. 2026-Jun-12 00:00:00.0000, -1.24E+00,  5.01E+00,  6.7E-03, -7.3E-03, -1.7E-03,  1.6E-04,',
+        '$$EOE',
+    ].join('\n') };
+    const p = parseHorizonsVector(body);
+    assert.equal(p.ok, true);
+    assert.equal(p.jd, 2461200.5, 'the FIRST row is the epoch');
+    assert.deepEqual(p.r, [-1.234567890123456, 5.012345678901234, 0.006789012345678901]);
+    assert.equal(p.v[2], 0.000167890123456789);
+    assert.equal(parseHorizonsVector({ error: 'Cannot interpret date' }).ok, false);
+    assert.match(parseHorizonsVector({ error: 'Cannot interpret date' }).reason, /^horizons_error/);
+    assert.equal(parseHorizonsVector({ result: 'no block here' }).reason, 'no_ephemeris_block');
+    assert.equal(parseHorizonsVector({ result: '$$SOE\n2461200.5, A.D., x, y, z, 1, 2, 3,\n$$EOE' }).reason, 'unparseable_row');
+    assert.equal(parseHorizonsVector({ result: '$$SOE\n2461200.5, A.D., 0.1, 0, 0, 1, 2, 3,\n$$EOE' }).reason, 'implausible_radius');
+}
+
+// ── Epoch and composition ───────────────────────────────────────────────────
+{
+    const recs = [{ epoch: 2461200.5 }, { epoch: 2461200.5 }, { epoch: 2453839.5 }, { epoch: null }];
+    assert.deepEqual(modalEpoch(recs), { epoch: 2461200.5, shared: 2, distinct: 2 });
+    const sbdb = { ok: true, records: [{ des: '624', name: '624 Hektor', e: 0.02, a: 5.26, i: 18, om: 342, w: 184, ma: 10, epoch: 2461200.5 }], field_map: {}, unmapped: [] };
+    const jup = { ok: true, jd: 2461200.5, r: [1, 5, 0], v: [-0.007, 0.001, 0] };
+    const live = composeTrojanResponse({ sbdb, precision: 'full', photometry: 'requested', perturbers: { jupiter: jup, saturn: { ok: false, reason: 'HTTP 503' } } });
+    assert.equal(live.freshness, 'live', 'Saturn alone missing does not make the population stale');
+    assert.equal(live.perturbers.saturn, null);
+    assert.equal(live.sources.saturn.reason, 'HTTP 503');
+    assert.equal(live.count, 1);
+    assert.equal(live.rows[0][0], '624');
+    const noJup = composeTrojanResponse({ sbdb, perturbers: { jupiter: { ok: false, reason: 'timeout' } } });
+    assert.equal(noJup.freshness, 'stale');
+    assert.match(noJup.degraded_reason, /^jupiter_vector_unavailable/);
+    assert.equal(noJup.count, 1, 'the rows still ship — they are real');
+    const none = composeTrojanResponse({ sbdb: { ok: false, reason: 'HTTP 500', records: [] }, perturbers: {} });
+    assert.equal(none.freshness, 'stale');
+    assert.equal(none.degraded_reason, 'HTTP 500');
+}
+
+// ── The route's ladder, with fetch mocked ───────────────────────────────────
+{
+    const realFetch = globalThis.fetch;
+    const sbdbBody = {
+        fields: [...SBDB_FIELDS],
+        data: [['624', '624 Hektor (1907 XM)', '7.2', 'TJN', 'N', 'N', '.0238', '5.264', '5.14', '18.17', '342.8', '183.9', '10.1', '', '2461200.5', '4.2', '225', '.025', 'D', null]],
+    };
+    const vec = { result: '$$SOE\n2461200.5, A.D. 2026, 1.0, 5.0, -0.1, -0.007, 0.0015, 0.0001,\n$$EOE' };
+    async function run(policy) {
+        const calls = [];
+        globalThis.fetch = async (url) => {
+            calls.push(String(url));
+            const u = new URL(url);
+            if (u.hostname === 'ssd-api.jpl.nasa.gov') return policy(u);
+            return Response.json(vec);
+        };
+        const mod = await import('../api/trojans/catalog.js');
+        const res = await mod.default(new Request('https://x/api/trojans/catalog?evil=1'));
+        return { res, body: await res.json(), calls };
+    }
+    let r = await run(() => Response.json(sbdbBody));
+    assert.equal(r.body.freshness, 'live');
+    assert.equal(r.body.precision, 'full');
+    assert.equal(r.calls.length, 3, 'one SBDB + two Horizons');
+    assert.ok(r.calls.every(c => !c.includes('evil')), 'no client parameter reaches an upstream');
+
+    r = await run((u) => (u.searchParams.get('full-prec') ? new Response('nope', { status: 400 }) : Response.json(sbdbBody)));
+    assert.equal(r.body.precision, 'default');
+    assert.deepEqual(r.body.sources.sbdb.refused, ['full/requested: HTTP 400']);
+
+    r = await run((u) => (u.searchParams.get('fields').includes('albedo') ? new Response('nope', { status: 400 }) : Response.json({ ...sbdbBody, fields: [...SBDB_FIELDS_CORE], data: [sbdbBody.data[0].slice(0, SBDB_FIELDS_CORE.length)] })));
+    assert.equal(r.body.photometry_fields, 'dropped');
+    assert.equal(r.body.freshness, 'live');
+
+    // Node-runtime mode: Vercel passes (req, res) and ignores a return value.
+    {
+        const mod = await import('../api/trojans/catalog.js');
+        const sent = { headers: {} };
+        const res = { setHeader: (k, v) => { sent.headers[k] = v; }, end: (b) => { sent.body = b; } };
+        const ret = await mod.default({ url: '/api/trojans/catalog' }, res);
+        assert.equal(ret, undefined);
+        assert.equal(res.statusCode, 200);
+        assert.match(sent.headers['content-type'], /json/);
+        assert.equal(JSON.parse(sent.body.toString()).freshness, 'live', 'the body is written through res');
+    }
+
+    r = await run(() => new Response('down', { status: 503 }));
+    assert.equal(r.res.status, 200, 'never 5xx');
+    assert.equal(r.body.freshness, 'stale');
+    assert.equal(r.calls.length, 1, 'a 5xx is not a schema refusal — no ladder, no Horizons');
+    globalThis.fetch = realFetch;
+}
+
+console.log('trojan-sources: URL builders, Horizons parser, composition and the route ladder passed');
