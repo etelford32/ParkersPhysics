@@ -34,6 +34,18 @@ if (!isMainThread) {
     await main();
 }
 
+/**
+ * 'short-arc' = JPL condition code U ≥ 6, OR a data arc under a year, OR a
+ * solution off the shared epoch (JPL has not refit it recently — almost
+ * always because it has not been re-observed). The SAME rule as
+ * scripts/build-trojan-report.mjs `shortArc` — change both together.
+ */
+function qualityBucket(r, a) {
+    const U = r.cc == null ? null : Number(String(r.cc).replace(/\D/g, ''));
+    if (U == null && r.arc_d == null) return 'unknown';
+    return (U != null && U >= 6) || (r.arc_d != null && r.arc_d < 365) || a.alignMethod !== 'epoch' ? 'short-arc' : 'well-determined';
+}
+
 function arg(name, def) {
     const k = process.argv.indexOf(`--${name}`);
     return k > 0 ? process.argv[k + 1] : def;
@@ -50,7 +62,13 @@ async function main() {
     const epoch = body.epoch?.epoch;
     if (!Number.isFinite(epoch)) throw new Error('catalogue has no epoch');
     const pert = T.perturberStates(body.perturbers, epoch);
-    const recs = body.rows.map(rowToRecord).slice(0, limit);
+    // Shared NEO columns by position, the Trojan extras BY NAME (append-only wire).
+    const extra = Object.fromEntries(['cc', 'arc_d', 'n_obs'].map(c => [c, (body.columns ?? []).indexOf(c)]));
+    const recs = body.rows.slice(0, limit).map(row => {
+        const r = rowToRecord(row);
+        for (const [c, i] of Object.entries(extra)) r[c] = i >= 0 ? row[i] ?? null : null;
+        return r;
+    });
 
     const ta = Date.now();
     const aligned = T.alignToEpoch(recs, pert, epoch, { dtDays });
@@ -59,7 +77,7 @@ async function main() {
     const skipped = [];
     recs.forEach((r, k) => {
         const a = T.analyseRecord(r, pert.jupiter, epoch, aligned[k]);
-        if (a) analysed.push(a); else skipped.push(r.des);
+        if (a) { a._k = k; analysed.push(a); } else skipped.push(r.des);
     });
     const particles = analysed.map(a => a.state ?? T.stateFromElements(a.el));
     const plain = (p) => ({ r: p.r, v: p.v, m: p.m, gm: p.gm, source: p.source });
@@ -90,7 +108,7 @@ async function main() {
     mkdirSync(out, { recursive: true });
     const f = (v, d) => (v == null || !Number.isFinite(v) ? '' : v.toFixed(d));
     const q = (s) => (s == null ? '' : /[",]/.test(s) ? `"${String(s).replace(/"/g, '""')}"` : s);
-    const header = 'des,name,H,diameter_km,size_basis,albedo,spec,a_au,e,i_deg,phi_deg,camp_at_epoch,analytic_regime,analytic_amp_deg,regime,phi_min_deg,phi_max_deg,phi_mean_deg,libration_amp_deg,libration_period_yr,a_mean_au,e_mean,i_mean_deg,e_max,epoch_offset_d,align_method';
+    const header = 'des,name,H,diameter_km,size_basis,albedo,spec,a_au,e,i_deg,phi_deg,camp_at_epoch,analytic_regime,analytic_amp_deg,regime,phi_min_deg,phi_max_deg,phi_mean_deg,libration_amp_deg,libration_period_yr,a_mean_au,e_mean,i_mean_deg,e_max,epoch_offset_d,align_method,condition_code,data_arc_d,n_obs';
     const lines = [header];
     analysed.forEach((a, k) => {
         const r = results[k];
@@ -99,7 +117,7 @@ async function main() {
             f(a.a, 5), f(a.e, 4), f(a.i, 3), f(a.phi, 2), a.camp,
             a.analytic.regime, f(a.analytic.amplitude, 2),
             r.regime, f(r.phiMin, 2), f(r.phiMax, 2), f(r.phiMean, 2), f(r.amplitude, 2), f(r.periodYears, 1),
-            f(r.aMean, 5), f(r.eMean, 4), f(r.iMean, 3), f(r.eMax, 4), f(a.epochOffsetDays, 0), a.alignMethod,
+            f(r.aMean, 5), f(r.eMean, 4), f(r.iMean, 3), f(r.eMax, 4), f(a.epochOffsetDays, 0), a.alignMethod, q(recs[a._k]?.cc), recs[a._k]?.arc_d ?? '', recs[a._k]?.n_obs ?? '',
         ].join(','));
     });
     writeFileSync(`${out}/trojans-analysis.csv`, lines.join('\n') + '\n');
@@ -119,9 +137,20 @@ async function main() {
         run: { years, dtDays, workers: nW, seconds: Math.round((Date.now() - t0) / 1000), skipped: skipped.length },
         regimes,
         alignment: analysed.reduce((m, a) => { m[a.alignMethod] = (m[a.alignMethod] || 0) + 1; return m; }, {}),
+        // Orbit quality: JPL condition code U (0 best … 9 worst). 'short-arc'
+        // = U ≥ 6 OR data arc < 1 yr — orbits whose a is too uncertain for a
+        // libration verdict to mean much.
+        regimes_by_quality: analysed.reduce((m, a, k) => {
+            const key = `${qualityBucket(recs[a._k], a)}:${results[k].regime}`; m[key] = (m[key] || 0) + 1; return m;
+        }, {}),
         regimes_by_alignment: analysed.reduce((m, a, k) => { const key = `${a.alignMethod}:${results[k].regime}`; m[key] = (m[key] || 0) + 1; return m; }, {}),
         camps_at_epoch: T.campRatio(count((_, a) => a.camp === 'L4'), count((_, a) => a.camp === 'L5')),
         camps_librating: T.campRatio(regimes.L4 || 0, regimes.L5 || 0),
+        // The asymmetry split by orbit quality: if the two buckets disagree,
+        // part of the catalogue's L4 excess is HOW the swarms were discovered.
+        camps_librating_by_quality: Object.fromEntries(['well-determined', 'short-arc'].map(b => [b, T.campRatio(
+            analysed.filter((a, k) => qualityBucket(recs[a._k], a) === b && results[k].regime === 'L4').length,
+            analysed.filter((a, k) => qualityBucket(recs[a._k], a) === b && results[k].regime === 'L5').length)])),
         librating: {
             median_amplitude_deg: median(lib.map(x => x.r.amplitude)),
             median_period_yr: median(lib.map(x => x.r.periodYears)),

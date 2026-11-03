@@ -28,9 +28,9 @@
  * By default sbdb_query rounds each element to its "expected" precision (the
  * production NEO body shows e = 0.827, a = 1.078). A resonant angle is
  * λ − λ_J and a libration estimate needs (a − a_J)/a_J to ~1e-4, so this
- * route asks for `full-prec=true`. That parameter's spelling is from JPL's
- * published docs and NOT observed from the sandbox (egress-blocked), so a 4xx
- * retries without it and the body self-reports `precision: 'full'|'default'`.
+ * route asks for `full-prec=true`. VERIFIED in production 2026-11-03 (the
+ * body read `precision: 'full'`, Hektor e = 0.0243449, a = 5.2769861); the
+ * 4xx ladder stays as defence and the body keeps self-reporting.
  *
  * ── SSRF story ─────────────────────────────────────────────────────────────
  * No client parameter reaches an upstream URL. The SBDB query is frozen; the
@@ -55,9 +55,9 @@ export const PERTURBERS = Object.freeze([
  * unstable" and "this object's orbit is not known well enough to say". The
  * first full run (2026-11-03) found most of its non-librating rows were
  * single-opposition 2014 discoveries; without these columns the analysis
- * cannot tell the two apart. Spellings are from JPL's sbdb_query docs and
- * UNVERIFIED from the sandbox, so they ride their own rung of the route's
- * ladder and are dropped first on a 4xx (`quality_fields: 'dropped'`).
+ * cannot tell the two apart. VERIFIED in production 2026-11-03 (all three
+ * matched, attached to 16 445 / 16 445 rows); they still ride their own
+ * first-to-drop rung of the ladder (`quality_fields: 'dropped'`).
  */
 export const SBDB_FIELDS_QUALITY = Object.freeze(['condition_code', 'data_arc', 'n_obs_used']);
 /** Extra wire columns the Trojan route appends AFTER the shared NEO columns. */
