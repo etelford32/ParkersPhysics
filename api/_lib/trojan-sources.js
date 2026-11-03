@@ -50,6 +50,19 @@ export const PERTURBERS = Object.freeze([
     { key: 'saturn',  command: '699' },
 ]);
 
+/**
+ * Orbit-QUALITY columns — the difference between "this object is dynamically
+ * unstable" and "this object's orbit is not known well enough to say". The
+ * first full run (2026-11-03) found most of its non-librating rows were
+ * single-opposition 2014 discoveries; without these columns the analysis
+ * cannot tell the two apart. Spellings are from JPL's sbdb_query docs and
+ * UNVERIFIED from the sandbox, so they ride their own rung of the route's
+ * ladder and are dropped first on a 4xx (`quality_fields: 'dropped'`).
+ */
+export const SBDB_FIELDS_QUALITY = Object.freeze(['condition_code', 'data_arc', 'n_obs_used']);
+/** Extra wire columns the Trojan route appends AFTER the shared NEO columns. */
+export const TROJAN_EXTRA_COLUMNS = Object.freeze(['cc', 'arc_d', 'n_obs']);
+
 /** Julian dates outside this window are refused rather than sent upstream. */
 export const EPOCH_WINDOW = Object.freeze({ min: 2415020.5 /* 1900 */, max: 2488069.5 /* 2100 */ });
 
@@ -57,9 +70,10 @@ export const EPOCH_WINDOW = Object.freeze({ min: 2415020.5 /* 1900 */, max: 2488
  * The SBDB query for the whole TJN population.
  * @param {{ photometry?: boolean, fullPrecision?: boolean }} [opts]
  */
-export function sbdbTrojanUrl({ photometry = true, fullPrecision = true } = {}) {
+export function sbdbTrojanUrl({ photometry = true, fullPrecision = true, quality = false } = {}) {
     const u = new URL(SBDB_QUERY_BASE);
-    u.searchParams.set('fields', (photometry ? SBDB_FIELDS : SBDB_FIELDS_CORE).join(','));
+    const fields = [...(photometry ? SBDB_FIELDS : SBDB_FIELDS_CORE), ...(quality ? SBDB_FIELDS_QUALITY : [])];
+    u.searchParams.set('fields', fields.join(','));
     u.searchParams.set('sb-kind', 'a');
     u.searchParams.set('sb-class', TROJAN_CLASS);
     if (fullPrecision) u.searchParams.set('full-prec', 'true');
@@ -135,9 +149,45 @@ export function modalEpoch(records) {
     return { epoch: best, shared: n, distinct: counts.size };
 }
 
-/** Parse the TJN query with the NEO parser (one parser, one verified schema). */
+const QUALITY_CANDIDATES = Object.freeze({
+    cc:    ['condition_code', 'cc', 'u'],
+    arc_d: ['data_arc', 'arc', 'data_arc_d'],
+    n_obs: ['n_obs_used', 'n_obs', 'nobs'],
+});
+
+/**
+ * Parse the TJN query with the NEO parser (one parser, one verified schema),
+ * then attach the optional quality columns by designation. Reports
+ * `quality.columns` (what matched) so production settles the spellings.
+ */
 export function parseTrojanQuery(json) {
-    return parseSbdbQuery(json, { kind: 'a' });
+    const parsed = parseSbdbQuery(json, { kind: 'a' });
+    const fields = Array.isArray(json?.fields) ? json.fields.map(f => String(f).toLowerCase()) : [];
+    const idx = {};
+    for (const [k, names] of Object.entries(QUALITY_CANDIDATES)) {
+        const i = names.map(n => fields.indexOf(n.toLowerCase())).find(i => i >= 0);
+        if (i != null) idx[k] = i;
+    }
+    const desIdx = fields.indexOf('pdes');
+    const columns = Object.fromEntries(Object.entries(idx).map(([k, i]) => [k, json.fields[i]]));
+    if (!Object.keys(idx).length || desIdx < 0 || !Array.isArray(json?.data)) {
+        return { ...parsed, unmapped: parsed.unmapped, quality: { columns, attached: 0 } };
+    }
+    const byDes = new Map();
+    for (const row of json.data) if (Array.isArray(row)) byDes.set(String(row[desIdx]).trim(), row);
+    let attached = 0;
+    const toNum = (v) => (v === null || v === undefined || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+    for (const rec of parsed.records) {
+        const row = byDes.get(rec.des);
+        if (!row) continue;
+        const ccRaw = idx.cc != null ? row[idx.cc] : null;
+        rec.cc = ccRaw == null || ccRaw === '' ? null : String(ccRaw).trim();
+        rec.arc_d = idx.arc_d != null ? toNum(row[idx.arc_d]) : null;
+        rec.n_obs = idx.n_obs != null ? toNum(row[idx.n_obs]) : null;
+        attached++;
+    }
+    const quality = new Set(Object.values(columns).map(c => c.toLowerCase()));
+    return { ...parsed, unmapped: parsed.unmapped.filter(u => !quality.has(String(u).toLowerCase())), quality: { columns, attached } };
 }
 
 /**
@@ -148,7 +198,7 @@ export function parseTrojanQuery(json) {
  * Jupiter's own frame — the client falls back to mean elements and says so —
  * so the body is 'stale'. Without the population it is 'stale' and empty.
  */
-export function composeTrojanResponse({ sbdb, precision, photometry, epochInfo, perturbers, generatedAt = new Date().toISOString() }) {
+export function composeTrojanResponse({ sbdb, precision, photometry, quality, epochInfo, perturbers, generatedAt = new Date().toISOString() }) {
     const records = sbdb?.records ?? [];
     const jup = perturbers?.jupiter, sat = perturbers?.saturn;
     const ok = !!sbdb?.ok && records.length > 0 && !!jup?.ok;
@@ -162,20 +212,25 @@ export function composeTrojanResponse({ sbdb, precision, photometry, epochInfo, 
         orbit_class: TROJAN_CLASS,
         elements_frame: 'heliocentric ecliptic J2000, osculating at `epoch` (JD TDB)',
         perturber_frame: 'Sun-centred ecliptic J2000 (ICRF), AU and AU/day, TDB',
-        columns: [...NEO_ROW_COLUMNS],
+        // APPEND-ONLY, like NEO_ROW_COLUMNS: the shared NEO columns first (so
+        // js/neo-orbits.js rowToRecord still reads a row), then the Trojan
+        // extras. Readers resolve the extras BY NAME from this list.
+        columns: [...NEO_ROW_COLUMNS, ...TROJAN_EXTRA_COLUMNS],
         count: records.length,
         epoch: epochInfo ?? modalEpoch(records),
         precision: precision ?? null,
         photometry_fields: photometry ?? null,
+        quality_fields: quality ?? null,
         perturbers: { jupiter: vec(jup), saturn: vec(sat) },
-        rows: compactRows(records),
+        rows: compactRows(records).map((row, k) => [...row, ...TROJAN_EXTRA_COLUMNS.map(c => records[k][c] ?? null)]),
         sources: {
             sbdb: { ok: !!sbdb?.ok, count: records.length, reason: sbdb?.reason ?? null,
                 field_map: sbdb?.field_map ?? {}, unmapped: sbdb?.unmapped ?? [], dropped: sbdb?.dropped ?? {},
                 photometry: sbdb?.photometry ?? null,
                 // Query refinements JPL refused before the one that answered
                 // (e.g. 'full/requested: HTTP 400' ⇒ full-prec is misspelt).
-                refused: sbdb?.refused ?? [] },
+                refused: sbdb?.refused ?? [],
+                quality: sbdb?.quality ?? null },
             jupiter: { ok: !!jup?.ok, reason: jup?.ok ? null : (jup?.reason ?? 'not_fetched') },
             saturn:  { ok: !!sat?.ok, reason: sat?.ok ? null : (sat?.reason ?? 'not_fetched') },
         },

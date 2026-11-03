@@ -12,8 +12,9 @@
 import assert from 'node:assert/strict';
 import {
     sbdbTrojanUrl, horizonsVectorUrl, horizonsJd, parseHorizonsVector, modalEpoch,
-    composeTrojanResponse, TROJAN_CLASS, EPOCH_WINDOW,
+    composeTrojanResponse, TROJAN_CLASS, EPOCH_WINDOW, SBDB_FIELDS_QUALITY, TROJAN_EXTRA_COLUMNS, parseTrojanQuery,
 } from '../api/_lib/trojan-sources.js';
+import { NEO_ROW_COLUMNS } from '../js/neo-orbits.js';
 import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
 
 // ── URL builders ────────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
     assert.equal(u.searchParams.get('sb-kind'), 'a');
     assert.equal(u.searchParams.get('full-prec'), 'true');
     assert.equal(u.searchParams.get('fields'), SBDB_FIELDS.join(','));
+    assert.equal(new URL(sbdbTrojanUrl({ quality: true })).searchParams.get('fields'), [...SBDB_FIELDS, ...SBDB_FIELDS_QUALITY].join(','));
     const plain = new URL(sbdbTrojanUrl({ fullPrecision: false, photometry: false }));
     assert.equal(plain.searchParams.get('full-prec'), null);
     assert.equal(plain.searchParams.get('fields'), SBDB_FIELDS_CORE.join(','));
@@ -64,6 +66,27 @@ import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
     assert.equal(parseHorizonsVector({ result: 'no block here' }).reason, 'no_ephemeris_block');
     assert.equal(parseHorizonsVector({ result: '$$SOE\n2461200.5, A.D., x, y, z, 1, 2, 3,\n$$EOE' }).reason, 'unparseable_row');
     assert.equal(parseHorizonsVector({ result: '$$SOE\n2461200.5, A.D., 0.1, 0, 0, 1, 2, 3,\n$$EOE' }).reason, 'implausible_radius');
+}
+
+// ── Quality columns attach by designation, and leave `unmapped` ─────────────
+{
+    const json = { fields: [...SBDB_FIELDS, ...SBDB_FIELDS_QUALITY], data: [
+        ['624', '624 Hektor (A907 CF)', '7.32', 'TJN', 'N', 'N', '.0243', '5.277', null, '18.15', '342.8', '181.3', '24.9', null, '2461200.5', '4.16', '225', '.025', null, null, '0', '43000', '5120'],
+        ['2014 EL58', '(2014 EL58)', '14.48', 'TJN', 'N', 'N', '.1202', '4.969', null, '9.34', '1', '2', '3', null, '2456720.5', '3.9', null, null, null, null, '6', '12', '9'],
+    ] };
+    const p = parseTrojanQuery(json);
+    assert.equal(p.records.length, 2);
+    assert.deepEqual([p.records[0].cc, p.records[0].arc_d, p.records[0].n_obs], ['0', 43000, 5120]);
+    assert.equal(p.records[1].cc, '6');
+    assert.deepEqual(p.quality, { columns: { cc: 'condition_code', arc_d: 'data_arc', n_obs: 'n_obs_used' }, attached: 2 });
+    assert.ok(!p.unmapped.includes('condition_code'), 'matched quality columns are not reported as unmapped');
+    const body = composeTrojanResponse({ sbdb: p, quality: 'requested', perturbers: { jupiter: { ok: true, jd: 2461200.5, r: [1, 5, 0], v: [0, 0, 0] } } });
+    assert.deepEqual(body.columns, [...NEO_ROW_COLUMNS, ...TROJAN_EXTRA_COLUMNS], 'shared columns first, extras appended');
+    assert.equal(body.rows[0].length, body.columns.length);
+    assert.deepEqual(body.rows[0].slice(-3), ['0', 43000, 5120]);
+    // Without the columns the parser still works and attaches nothing.
+    const bare = parseTrojanQuery({ fields: json.fields.slice(0, SBDB_FIELDS.length), data: json.data.map(r => r.slice(0, SBDB_FIELDS.length)) });
+    assert.equal(bare.quality.attached, 0); assert.equal(bare.records[0].cc, undefined);
 }
 
 // ── Epoch and composition ───────────────────────────────────────────────────
@@ -115,7 +138,11 @@ import { SBDB_FIELDS, SBDB_FIELDS_CORE } from '../api/_lib/neo-sources.js';
 
     r = await run((u) => (u.searchParams.get('full-prec') ? new Response('nope', { status: 400 }) : Response.json(sbdbBody)));
     assert.equal(r.body.precision, 'default');
-    assert.deepEqual(r.body.sources.sbdb.refused, ['full/requested: HTTP 400']);
+    assert.deepEqual(r.body.sources.sbdb.refused, ['full/requested/quality-requested: HTTP 400', 'full/requested/quality-dropped: HTTP 400']);
+
+    r = await run((u) => (u.searchParams.get('fields').includes('condition_code') ? new Response('nope', { status: 400 }) : Response.json(sbdbBody)));
+    assert.equal(r.body.precision, 'full', 'a refused quality column costs only the quality column');
+    assert.equal(r.body.quality_fields, 'dropped');
 
     r = await run((u) => (u.searchParams.get('fields').includes('albedo') ? new Response('nope', { status: 400 }) : Response.json({ ...sbdbBody, fields: [...SBDB_FIELDS_CORE], data: [sbdbBody.data[0].slice(0, SBDB_FIELDS_CORE.length)] })));
     assert.equal(r.body.photometry_fields, 'dropped');

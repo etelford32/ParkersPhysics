@@ -56,14 +56,16 @@ async function fetchJson(url, timeoutMs) {
 
 /**
  * Optional query refinements must never take the population down. Ladder:
- * full precision + photometry → default precision + photometry → core only.
+ * + quality columns → full precision + photometry → default precision +
+ * photometry → core only.
  * A step is abandoned only on a 4xx (JPL's "I do not know that parameter");
  * a network error or 5xx is reported as-is.
  */
 const LADDER = [
-    { fullPrecision: true,  photometry: true,  precision: 'full',    photometryFields: 'requested' },
-    { fullPrecision: false, photometry: true,  precision: 'default', photometryFields: 'requested' },
-    { fullPrecision: false, photometry: false, precision: 'default', photometryFields: 'dropped' },
+    { fullPrecision: true,  photometry: true,  quality: true,  precision: 'full',    photometryFields: 'requested', qualityFields: 'requested' },
+    { fullPrecision: true,  photometry: true,  quality: false, precision: 'full',    photometryFields: 'requested', qualityFields: 'dropped' },
+    { fullPrecision: false, photometry: true,  quality: false, precision: 'default', photometryFields: 'requested', qualityFields: 'dropped' },
+    { fullPrecision: false, photometry: false, quality: false, precision: 'default', photometryFields: 'dropped',   qualityFields: 'dropped' },
 ];
 
 async function fetchPopulation(deadline) {
@@ -74,10 +76,10 @@ async function fetchPopulation(deadline) {
         const r = await fetchJson(sbdbTrojanUrl(step), Math.min(SBDB_TIMEOUT_MS, left));
         if (r.ok) {
             const parsed = parseTrojanQuery(r.json);
-            return { sbdb: refused.length ? { ...parsed, refused } : parsed, precision: step.precision, photometry: step.photometryFields };
+            return { sbdb: refused.length ? { ...parsed, refused } : parsed, precision: step.precision, photometry: step.photometryFields, quality: step.qualityFields };
         }
         if (!(r.status >= 400 && r.status < 500)) return { sbdb: { ok: false, reason: r.reason, records: [] }, precision: step.precision, photometry: step.photometryFields };
-        refused.push(`${step.precision}/${step.photometryFields}: ${r.reason}`);
+        refused.push(`${step.precision}/${step.photometryFields}/quality-${step.qualityFields}: ${r.reason}`);
     }
     return { sbdb: { ok: false, reason: `refused at every step (${refused.join('; ')})`, records: [] }, precision: null, photometry: null };
 }
@@ -94,14 +96,14 @@ async function fetchPerturber(command, jd, deadline) {
 
 async function handler() {
     const deadline = Date.now() + DEADLINE_MS;
-    const { sbdb, precision, photometry } = await fetchPopulation(deadline);
+    const { sbdb, precision, photometry, quality } = await fetchPopulation(deadline);
     const epochInfo = modalEpoch(sbdb.records ?? []);
     const perturbers = {};
     if (sbdb.ok && epochInfo.epoch != null) {
         const got = await Promise.all(PERTURBERS.map(p => fetchPerturber(p.command, epochInfo.epoch, deadline)));
         PERTURBERS.forEach((p, k) => { perturbers[p.key] = got[k]; });
     }
-    const body = composeTrojanResponse({ sbdb, precision, photometry, epochInfo, perturbers });
+    const body = composeTrojanResponse({ sbdb, precision, photometry, quality, epochInfo, perturbers });
     return jsonOk(body, body.freshness === 'live'
         ? { maxAge: CACHE_TTL, swr: CACHE_SWR }
         : { maxAge: 300, swr: 600 });
