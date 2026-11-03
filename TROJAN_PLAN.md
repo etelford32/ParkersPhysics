@@ -13,9 +13,14 @@ no page draws them yet (§4).
 | Dynamics kernel (PURE) — resonant angle, L4/L5 camp, analytic tadpole invariant, epoch alignment, Sun+Jupiter+Saturn integrator that MEASURES libration | `js/trojan-dynamics.js` | `node tests/trojan-dynamics.mjs` |
 | Lean wire format `trojan-v2` + its one decoder `recordsFromCatalog` (reads the original row shape too) | `js/trojan-dynamics.js` | both gates (round trip on real rows) |
 | Whole-population analysis (worker threads; `--require-live` refuses a degraded body) | `scripts/analyze-trojans.mjs` | — |
-| **The precomputed artifact pages load** — `trojan-dynamics-v1`, columnar, one row per object (regime, amplitude, period, φ range, run-averaged a/e/i, size, orbit quality) | `data/trojans/trojans-dynamics.json` via `encodeDynamics` / `decodeDynamics` | `node tests/trojan-dynamics.mjs` |
+| **The precomputed artifact pages load** — `trojan-dynamics-v1`, columnar, one row per object (regime, amplitude, period, φ range, run-averaged a/e/i, size, orbit quality, and the PROPER elements D_p, f, e_p, g, sin I_p, s — null where the run cannot resolve them) | `data/trojans/trojans-dynamics.json` via `encodeDynamics` / `decodeDynamics` | `node tests/trojan-dynamics.mjs` |
+| Frequency analysis (NAFF, PURE, reusable) | `js/frequency-analysis.js` | `node tests/frequency-analysis.mjs` |
+| Proper elements (`properLibration`, `properSecular`, `PROPER`) | `js/trojan-dynamics.js` | `node tests/trojan-dynamics.mjs` (theory + REAL objects vs AstDyS) |
+| AstDyS synthetic proper elements relay — the external validation set (VERIFIED Jun 2024 `tro.syn`, 11 867 Trojans) | `api/trojans/proper.js`, `api/_lib/astdys-proper.js` | `node tests/astdys-proper.mjs` |
+| Validation against AstDyS (incl. the g-vs-D trend test) | `scripts/compare-astdys.mjs` → `data/trojans/astdys-comparison*.json` | — |
+| Long-run secular elements merged into the artifact by designation | `scripts/merge-long-proper.mjs` | — |
 | The population list | `scripts/build-trojan-report.mjs` → `data/trojans/TROJANS_LIST.md` | — |
-| Weekly refresh — fetch, gate, integrate 600 + 3 000 yr, rebuild, upload the full CSVs as an artifact, open/update ONE PR | `.github/workflows/trojans-refresh.yml` | — |
+| Weekly refresh — fetch catalogue + AstDyS, gate, integrate 600 yr + 20 kyr, score both against AstDyS, rebuild, upload the full CSVs as an artifact, open/update ONE PR | `.github/workflows/trojans-refresh.yml` | — |
 | CI gate (path-filtered) | `.github/workflows/trojan-kernels.yml` | — |
 | Status-board registration | `js/pipeline-registry.js` id `trojans-catalog` | `node tests/pipeline-registry.mjs` |
 
@@ -88,22 +93,50 @@ Run workflow; a preview URL is accepted). Locally:
     (the request waited its whole 30 s budget; healthy answers take ~2 s) and
     then HTTP 502 — the production NEO catalogue failed identically, so it was
     JPL. The first attempt is 20 s to leave room for the retry.
+15. **Proper elements are frequency-analysed (NAFF), not min/max.** The
+    half-range of φ grows with run length (+0.26° median 600 → 3 000 yr); the
+    amplitude of the fundamental libration line does not. Definitions follow
+    Milani (1993) / AstDyS so the two compare: z = (φ − φ̄) + i(a/a_J − 1)/√(3μ)
+    (a circle of radius D at small amplitude), f = its strongest line inside
+    the libration band, D_p and da_p from the real φ and a signals at f.
+16. **D_p is the CLUSTER amplitude, √ΣA².** The secular cycle frequency-
+    modulates the libration; once a record resolves f ± g the single line's
+    amplitude falls to D·J₀(β) (659 Nestor 9.95° → 9.31° at 20 kyr, AstDyS
+    9.87°). For FM, ΣJₙ² = 1, so the quadrature sum over the cluster is the
+    unmodulated amplitude whether or not the sidebands are resolved.
+17. **Three guards, each a measured failure:** the libration line must sit in
+    the libration band (0.4–1.3 × the small-amplitude 2.43°/yr — Jupiter's
+    11.86-yr line was reported as f = 30.2°/yr for D ≈ 0.05° objects); secular
+    lines must sit below f/3 (the first version returned that same orbital
+    line, ~109 000″/yr, as a "free" e); and e_p / sin I_p are WITHHELD below
+    18 kyr / 250 kyr — spans DERIVED from AstDyS's own g (p5 146″/yr) and s
+    (median 11.8″/yr) — because below them the free line merges with the
+    forced ones and a weak residual passes every other test (3 000 yr gave
+    e_p 0.008 at 897″/yr for 588 Achilles; AstDyS 0.104 at 344″/yr).
+18. **AstDyS's own failures are excluded and counted**, never compared: f below
+    1.5°/yr (values of 0.006–0.26 where the physics says ~2.45; AstDyS's p1 is
+    1.92) and g locked onto Jupiter's g5 (< 20″/yr: the forced line taken as
+    free).
+19. **The weekly long run is 20 kyr**, because that is what resolves e_p and g;
+    sin I_p needs ~250 kyr and stays a sample-scale validation run (§4).
 
 ## 3. What the first run found (catalogue of 2026-11-03)
 
-600-yr run (`data/trojans/trojans-summary.json`, 21 s on 4 threads at the
-40-day step; 45 s at 20 d) and a 3 000-yr check run
-(`data/trojans/trojans-summary-3000yr.json`, 121 s; 234 s at 20 d):
+600-yr run (`data/trojans/trojans-summary.json`; 21 s on 4 threads at the
+40-day step, 52 s with the proper-element frequency analysis), the first
+3 000-yr check run (121 s), and the 20-kyr long run that now replaces it
+(`data/trojans/trojans-summary-long.json`, 993 s with frequency analysis):
 
-| | 600 yr | 3 000 yr |
-|---|---|---|
-| L4 tadpole | 10 347 | 10 326 |
-| L5 tadpole | 5 955 | 5 952 |
-| meets Jupiter (≤ 3 Hill radii) | 109 | 152 |
-| horseshoe | 33 | 15 |
-| circulating | 1 | 0 |
+| | 600 yr | 3 000 yr | 20 kyr |
+|---|---|---|---|
+| L4 tadpole | 10 347 | 10 326 | 10 286 |
+| L5 tadpole | 5 955 | 5 952 | 5 947 |
+| meets Jupiter (≤ 3 Hill radii) | 109 | 152 | 207 |
+| horseshoe | 33 | 15 | 5 |
+| circulating | 1 | 0 | 0 |
 
-- **99.1 % of the 16 445 TJN objects librate** about L4 or L5 for 3 000 yr.
+- **99.0 % of the 16 445 TJN objects librate** about L4 or L5 for 20 000 yr
+  (99.1 % for 3 000 yr); among WELL-DETERMINED orbits only 22 meet Jupiter.
 - **L4 : L5 = 1.74 overall — 1.60 (1.57–1.63) among well-determined orbits
   (8 805 : 5 507) but 3.44 (3.26–3.63) among short-arc ones (1 542 : 448).**
   A large part of the catalogue's L4 excess is recent discovery history,
@@ -138,19 +171,71 @@ Seeded random sample of 800 WELL-DETERMINED Trojans, 600 yr, unless stated:
 | Libration period at small amplitude | amplitude < 5° (n = 59): median 149.2 yr vs planar-circular theory 147.8 yr | +1 %, the expected direction for inclined, eccentric orbits |
 | Period precision | ~0.1–0.4 yr floor from the annual sampling cadence, independent of step | Sample faster if periods ever need to be quoted to < 0.5 yr |
 
+## 3c. Proper elements vs AstDyS (measured 2026-11-03)
+
+AstDyS synthetic proper elements, Knežević, June 2024 (`tro.syn`, 11 867
+Trojans, 5- or 50-Myr integrations with the four outer planets) against ours
+(Sun + Jupiter + Saturn), 8 936 matched librators; AstDyS's own failed fits
+excluded and counted (61 with f < 1.5°/yr, 133 with g locked to g5). Full
+tables: `data/trojans/astdys-comparison*.json` and `TROJANS_LIST.md` §13.
+
+| Element (run) | Median ours − AstDyS | Median abs Δ | 90th pct | 99th pct | r |
+|---|---|---|---|---|---|
+| **D_p** (600 yr) | +0.07° | **0.11°** | 0.53° | 1.96° | 0.998 |
+| D_p, AstDyS 5-Myr rows only | | **0.09°** | 0.23° | 0.43° | 0.9997 |
+| D_p, AstDyS 50-Myr rows only | | 0.35° | 1.15° | 3.0° | 0.995 |
+| *old half-range* (600 yr) | +0.29° | 0.30° | 0.85° | 2.05° | 0.998 |
+| *old half-range* (20 kyr) | +0.72° | 0.72° | 1.31° | 2.43° | 0.997 |
+| da_p (600 yr) | +0.0004 AU | 0.0006 AU | 0.0023 | 0.0079 | 0.998 |
+| f (20 kyr) | +0.004°/yr | 0.0044°/yr | 0.0069 | 0.062 | 0.87 |
+| **e_p** (20 kyr) | −0.0004 | **0.0004** | 0.0070 | 0.0134 | 0.995 |
+| e_p, AstDyS 5-Myr rows only | | **0.0003** | 0.0008 | 0.0020 | 0.9997 |
+| g (20 kyr), AstDyS 5-Myr rows | | **0.29″/yr** | 0.70″/yr | 86″/yr | |
+
+- **The run-length drift is gone.** D_p moves 0.01° between the 600-yr and
+  20-kyr runs against AstDyS; the half-range's bias grows from +0.29° to +0.72°.
+- **sin I_p and s** match too where the record can resolve them (a 300-kyr
+  sample run: 588 Achilles 0.1970/0.197, −10.85/−11.03″/yr; 624 Hektor
+  0.3256/0.3258, −12.97/−12.80; 884 Priamus, 659 Nestor likewise) and are
+  correctly WITHHELD for 617 and 911, whose |s| sits within two bins of zero —
+  even with Jupiter and Saturn only.
+- **Where we disagree.** D_p: almost all of the large misses are AstDyS 50-Myr
+  rows (the harder, likelier-chaotic orbits) or recent discoveries whose SBDB
+  orbit has moved since June 2024; in every case our D_p agrees with our own
+  half-range, so the measurement is self-consistent. g: 1 503 objects disagree
+  by > 20″/yr (1 382 of them 50-Myr rows). **The g-vs-D trend test** decides
+  the large-amplitude ones: on agreed objects g rises smoothly with D_p
+  (342 → 428″/yr); above D_p ≈ 15° our disputed g continues that trend
+  (360–433″/yr) while AstDyS's sits far below it (154–259″/yr, its worst near
+  Saturn's g6 with an identical e ≈ 0.030 across unrelated objects — a forced
+  line taken as free). Below 15° neither side follows the trend: unresolved.
+  This is inference from a trend, not proof (§4 item 1b).
+
 ## 4. Next steps — the big list
 
 Ranked by what each buys per unit of effort; every item names the
 measurement that motivates it.
 
 **A. Make the numbers better (physics)**
-1. **Proper libration amplitude and frequencies** — frequency-analyse φ(t),
+1. ~~**Proper libration amplitude and frequencies**~~ — **DONE 2026-11-03**
+   (§2 decisions 15–19, §3c). D_p / da_p / f from every run, e_p / g from
+   the weekly 20-kyr run, sin I_p / s withheld until a ≥ 250-kyr run exists;
+   all validated against AstDyS. Original item, for the record: frequency-analyse φ(t),
    e·e^{iϖ} and sin I·e^{iΩ} (Laskar's NAFF / FMFT) instead of min/max. Fixes
    the measured run-length drift (+0.26° median 600→3 000 yr), gives the
    libration frequency f, the secular frequencies g and s, and the proper
    (D, e_p, sin I_p) that AstDyS publishes — which becomes our validation set.
    Needs the φ series the integrator already keeps (`keepSeries`) at a finer,
    uniform cadence. *Effort: medium. Highest value.*
+1b. **Settle the g disputes** — a ≥ 250-kyr run WITH Uranus and Neptune on a
+   stratified sample of the 1 503 disputed objects (both sides of D_p = 15°),
+   compared against AstDyS and our 20-kyr values. Decides the trend-test
+   verdicts and whether the < 15° group are secular-resonance neighbours.
+   *Effort: small once item 4 exists (planetTrack already generalises).*
+1c. **sin I_p for the whole population** — needs ≥ 250 kyr per object
+   (~2.5 s each in JS: ~3 CPU-hours for 16 k). Either the WASM integrator of
+   item 5, or a monthly (not weekly) job. The kernel already withholds it
+   honestly until then.
 2. **Chaos indicator per object (MEGNO or a 1e-9 shadow clone)** — the 5 objects
    that flipped regime when only the step changed are, by that fact, chaotic;
    a Lyapunov time separates "unstable" from "unknowable" for every row and
@@ -170,7 +255,8 @@ measurement that motivates it.
    1.9° to 2.7° p95 with inclination; the small-amplitude period runs +1 %
    long), or adopt Érdi's 3D co-orbital theory; gate it on held-out objects.
    *Effort: small.*
-7. **Collisional families** (HCM on the proper elements from item 1;
+7. **Collisional families** — now UNBLOCKED in (D_p, e_p) for all 16 k
+   objects; add sin I_p when item 1c lands. (HCM on the proper elements;
    Eurybates — a Lucy target — is the archetype). *Effort: medium, after 1.*
 8. **Debiased L4:L5 asymmetry** — the measured split (1.60 well-determined vs
    3.44 short-arc) says the raw count is survey history; cut at the magnitude

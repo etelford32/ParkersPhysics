@@ -103,6 +103,8 @@ jobs:
         run: |
           node scripts/analyze-trojans.mjs "$RUNNER_TEMP/catalog.json" --require-live --years "$LONG_YEARS" --out "$RUNNER_TEMP/long"
           cp "$RUNNER_TEMP/long/trojans-summary.json" data/trojans/trojans-summary-long.json
+          # e_p / g need the long run: copy them into the 600-yr artifact by designation.
+          node scripts/merge-long-proper.mjs data/trojans/trojans-dynamics.json "$RUNNER_TEMP/long/trojans-analysis.csv" --years "$LONG_YEARS"
           if [ "$ASTDYS_OK" = "1" ]; then node scripts/compare-astdys.mjs "$RUNNER_TEMP/long/trojans-analysis.csv" "$RUNNER_TEMP/astdys.json" --out data/trojans/astdys-comparison-long.json; fi
 
       - name: Rebuild the population list

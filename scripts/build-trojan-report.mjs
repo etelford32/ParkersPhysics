@@ -57,8 +57,9 @@ const C = {
     // PROPER libration (frequency analysis) — the run-length-stable amplitude.
     Dp: ['**D_p (°)**', (r) => fx(num(r.D_p_deg), 2)],
     per: ['Period (yr)', (r) => (num(r.f_lib_deg_yr) ? fx(360 / num(r.f_lib_deg_yr), 0) : fx(num(r.libration_period_yr), 0))],
-    ep: ['e_p', (r) => fx(num(r.e_p), 4)],
-    g: ['g (″/yr)', (r) => fx(num(r.g_arcsec_yr), 1)],
+    // Secular proper elements come from the LONG run (they need ≳ 18 kyr).
+    ep: ['e_p', (r) => fx(num((longBy?.get(r.des) ?? r).e_p), 4)],
+    g: ['g (″/yr)', (r) => fx(num((longBy?.get(r.des) ?? r).g_arcsec_yr), 1)],
     phi: ['φ now (°)', (r) => fx(num(r.phi_deg), 1)],
     i: ['⟨i⟩ (°)', (r) => fx(num(r.i_mean_deg), 1)],
     e: ['⟨e⟩', (r) => fx(num(r.e_mean), 3)],
@@ -69,6 +70,7 @@ const C = {
     regime: ['Regime', (r) => r.regime],
 };
 const byD = (a, b) => (num(b.diameter_km) ?? -1) - (num(a.diameter_km) ?? -1);
+var longBy = longDir && existsSync(`${longDir}/trojans-analysis.csv`) ? new Map(readCsv(`${longDir}/trojans-analysis.csv`).map(r => [r.des, r])) : null;
 const good = lib.filter(r => !shortArc(r));
 
 const L = [];
@@ -100,13 +102,13 @@ if (S.regimes_by_quality) {
 push('', `The L4 (leading, "Greek") swarm is the larger one, as every survey has found. The split above is the first hint at how much of that is discovery history: the ratio among SHORT-ARC orbits (recent, barely followed-up discoveries) is far larger than among well-determined ones, i.e. recent surveying has favoured L4. A raw catalogue count cannot separate the intrinsic asymmetry from survey bias — that needs a debiased, magnitude-limited sample (plan next steps).`, '');
 
 push(`## 2. The 40 largest Jupiter Trojans`, '');
-push(table(rows.slice().sort(byD).slice(0, 40), [C.name, C.D, C.H, C.camp, C.Dp, C.per, C.i, C.e, C.phi]), '');
+push(table(rows.slice().sort(byD).slice(0, 40), [C.name, C.D, C.H, C.camp, C.Dp, C.per, ...(longBy ? [C.ep, C.g] : []), C.i, C.phi]), '');
 
 const LUCY = [['3548', 'Eurybates (+ Queta)'], ['15094', 'Polymele (+ Shaun)'], ['11351', 'Leucus'], ['21900', 'Orus'], ['617', 'Patroclus–Menoetius']];
 push(`## 3. Lucy mission Trojan targets`, '');
 push(`NASA's Lucy flies past four L4 Trojans in 2027–2028 and the L5 binary Patroclus–Menoetius in 2033.`, '');
 const lucyRows = LUCY.map(([d]) => rows.find(r => r.des === d)).filter(Boolean);
-push(table(lucyRows, [C.name, C.D, C.camp, C.Dp, C.amp, C.per, C.range, C.i, C.e]), '');
+push(table(lucyRows, [C.name, C.D, C.camp, C.Dp, C.amp, C.per, C.range, ...(longBy ? [C.ep, C.g] : []), C.i]), '');
 
 const withDp = good.filter(r => num(r.D_p_deg) != null);
 push(`## 4. The 30 most tightly bound (smallest PROPER libration amplitude, well-determined orbits)`, '');
@@ -157,7 +159,8 @@ if (longDir && existsSync(`${longDir}/trojans-analysis.csv`)) {
 }
 
 // ── Validation against AstDyS (scripts/compare-astdys.mjs) ─────────────────
-const cmpFiles = [['astdys-comparison.json', `${S.run.years}-yr run`], ['astdys-comparison-long.json', 'long run']]
+const longYears = existsSync(`${dir}/trojans-summary-long.json`) ? JSON.parse(readFileSync(`${dir}/trojans-summary-long.json`, 'utf8')).run?.years : null;
+const cmpFiles = [['astdys-comparison.json', `${S.run.years}-yr run`], ['astdys-comparison-long.json', longYears ? `${longYears}-yr run` : 'long run']]
     .filter(([f]) => existsSync(`${dir}/${f}`)).map(([f, label]) => [JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')), label]);
 if (cmpFiles.length) {
     const UNITS = { D: '°', da: 'AU', f: '°/yr', e: '', g: '″/yr', sinI: '', s: '″/yr' };
@@ -177,6 +180,16 @@ if (cmpFiles.length) {
             for (const [sp, m] of Object.entries(c.agreement_by_astdys_span)) if (m.D) push(`| ${sp} | ${m.D.n.toLocaleString()} | ${m.D.median_abs.toFixed(2)} | ${m.D.p90_abs.toFixed(2)} | ${m.D.p99_abs.toFixed(2)} |`);
         }
         push('');
+    }
+    const withTrend = cmpFiles.find(([c]) => c.g_vs_D_trend);
+    if (withTrend) {
+        const t = withTrend[0].g_vs_D_trend;
+        push(`### Who is right where g disagrees? The g-vs-D trend test (${withTrend[1]})`, '');
+        push(`The free g of a Trojan RISES with its libration amplitude, and on the objects where both agree it climbs smoothly with D_p. A disputed value (|Δg| > ${t.dispute_threshold_arcsec_yr}″/yr) that continues that trend is the physical one.`, '');
+        push(`| D_p (°) | Agreed g (n) | Disputed: ours | Disputed: AstDyS | n disputed |`, `|---|---|---|---|---|`);
+        const g1 = (v) => (v == null ? '—' : v.toFixed(0));
+        for (const b of t.bins) push(`| ${b.D_lo}–${b.D_hi} | ${g1(b.g_agreed)} (${b.n_agreed.toLocaleString()}) | ${g1(b.g_disputed_ours)} | ${g1(b.g_disputed_astdys)} | ${b.n_disputed.toLocaleString()} |`);
+        push('', `Above D_p ≈ 15° our disputed g continues the agreed trend while AstDyS's falls far below it (its worst cases sit near Saturn's g6 ≈ 28″/yr with an almost identical e ≈ 0.030 across unrelated objects — the signature of a forced line taken as free). Below 15° neither side follows the trend; those objects stay unresolved (candidates: secular-resonance neighbours). Verdicts here are inference from a trend, not proof — a ≥ 250-kyr run with all four outer planets on a disputed sample would settle them (plan §4).`, '');
     }
     push(`### Largest D_p disagreements (${cmpFiles[0][1]})`, '');
     push(`| # | Object | D_p ours (°) | AstDyS D (°) | Half-range (°) | AstDyS span |`, `|---|---|---|---|---|---|`);

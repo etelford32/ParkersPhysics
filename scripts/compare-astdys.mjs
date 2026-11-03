@@ -100,6 +100,29 @@ function main() {
         const a = ast.get(normaliseDesignation(o.des));
         return a && a.D > 0 && a.f > F_MIN && num(o.libration_amp_deg) != null ? [num(o.libration_amp_deg), a.D] : null;
     }).filter(Boolean);
+    // THE g-vs-D TREND TEST (2026-11-03). Where ours and AstDyS disagree on g
+    // by > 20″/yr, which one is right? The free g of a Trojan RISES with its
+    // libration amplitude; on the objects where both agree it climbs smoothly
+    // with D. A disputed value that continues that trend is the physical one;
+    // one far below it (AstDyS's disputed large-D rows sit near Saturn's g6 ≈
+    // 28″/yr with a near-identical e ≈ 0.030 across unrelated objects) looks
+    // like a forced line taken as free. Per D_p bin: agreed median, then the
+    // disputed medians for each side.
+    const G_DISPUTE = 20;
+    const bins = [[0, 5], [5, 10], [10, 15], [15, 20], [20, 25], [25, 30], [30, 35], [35, 45]];
+    const trend = bins.map(([lo, hi]) => ({ D_lo: lo, D_hi: hi, agreed: [], disputed_ours: [], disputed_astdys: [] }));
+    for (const o of ours) {
+        if (o.regime !== 'L4' && o.regime !== 'L5') continue;
+        const a = ast.get(normaliseDesignation(o.des));
+        const g = num(o.g_arcsec_yr), D = num(o.D_p_deg);
+        if (!a || g == null || D == null || !(a.g > GT5_LOCK) || !(a.f > F_MIN)) continue;
+        const b = trend.find(t => D >= t.D_lo && D < t.D_hi);
+        if (!b) continue;
+        if (Math.abs(g - a.g) <= G_DISPUTE) b.agreed.push(g); else { b.disputed_ours.push(g); b.disputed_astdys.push(a.g); }
+    }
+    const med = (xs) => { const t = xs.slice().sort((x, y) => x - y); return t.length ? t[Math.floor(t.length / 2)] : null; };
+    const gTrend = trend.map(t => ({ D_lo: t.D_lo, D_hi: t.D_hi, n_agreed: t.agreed.length, g_agreed: med(t.agreed),
+        n_disputed: t.disputed_ours.length, g_disputed_ours: med(t.disputed_ours), g_disputed_astdys: med(t.disputed_astdys) }));
     const result = {
         generated_at: new Date().toISOString(),
         inputs: { analysis: csvFile.split('/').pop(), astdys_source: body.source_url, astdys_header: body.header_line, astdys_rows: body.count },
@@ -108,6 +131,7 @@ function main() {
         agreement_by_quality: Object.fromEntries(Object.entries(byQuality).map(([q, m]) => [q, Object.fromEntries(Object.entries(m).filter(([, v]) => v.length > 2).map(([k, v]) => [k, stats(v)]))])),
         agreement_by_astdys_span: Object.fromEntries(Object.entries(bySpan).map(([q, m]) => [q, Object.fromEntries(Object.entries(m).filter(([, v]) => v.length > 2).map(([k, v]) => [k, stats(v)]))])),
         halfrange_vs_astdys_D: halfrange.length ? stats(halfrange) : null,
+        g_vs_D_trend: pairs.g.length ? { dispute_threshold_arcsec_yr: G_DISPUTE, bins: gTrend } : null,
         largest_D_disagreements: worst.sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff)).slice(0, 25),
     };
     mkdirSync(dirname(out), { recursive: true });

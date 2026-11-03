@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-03T19:47:00.633Z",
+  "generated_at": "2026-11-03T22:49:58.270Z",
   "source": {
     "file": "trojans-catalog.json",
     "catalogue_generated_at": "2026-11-03T17:25:30.784Z",
@@ -11,17 +11,17 @@
     "saturn": "horizons"
   },
   "run": {
-    "years": 3000,
+    "years": 20000,
     "dtDays": 40,
     "workers": 4,
-    "seconds": 121,
+    "seconds": 993,
     "skipped": 0
   },
   "regimes": {
-    "L4": 10326,
-    "L5": 5952,
-    "encounter": 152,
-    "horseshoe": 15
+    "L4": 10286,
+    "L5": 5947,
+    "encounter": 207,
+    "horseshoe": 5
   },
   "alignment": {
     "epoch": 14801,
@@ -32,20 +32,20 @@
     "well-determined:L4": 8803,
     "well-determined:L5": 5507,
     "well-determined:encounter": 22,
-    "short-arc:encounter": 130,
-    "short-arc:L4": 1523,
-    "short-arc:L5": 445,
-    "short-arc:horseshoe": 15
+    "short-arc:encounter": 185,
+    "short-arc:L4": 1483,
+    "short-arc:L5": 440,
+    "short-arc:horseshoe": 5
   },
   "regimes_by_alignment": {
-    "epoch:L4": 9039,
+    "epoch:L4": 9038,
     "epoch:L5": 5728,
-    "epoch:encounter": 34,
+    "epoch:encounter": 35,
     "two-body-after-encounter:encounter": 7,
-    "n-body:L4": 1287,
-    "n-body:L5": 224,
-    "n-body:encounter": 111,
-    "n-body:horseshoe": 15
+    "n-body:L4": 1248,
+    "n-body:L5": 219,
+    "n-body:encounter": 165,
+    "n-body:horseshoe": 5
   },
   "camps_at_epoch": {
     "nL4": 10457,
@@ -55,11 +55,11 @@
     "hi": 1.7748569744125737
   },
   "camps_librating": {
-    "nL4": 10326,
-    "nL5": 5952,
-    "ratio": 1.7348790322580645,
-    "lo": 1.7068738558480245,
-    "hi": 1.763343697752825
+    "nL4": 10286,
+    "nL5": 5947,
+    "ratio": 1.7296115688582478,
+    "lo": 1.7016643621210408,
+    "hi": 1.7580177652656852
   },
   "camps_librating_by_quality": {
     "well-determined": {
@@ -70,22 +70,30 @@
       "hi": 1.6262118491182658
     },
     "short-arc": {
-      "nL4": 1523,
-      "nL5": 445,
-      "ratio": 3.4224719101123595,
-      "lo": 3.242947907602541,
-      "hi": 3.61193405174603
+      "nL4": 1483,
+      "nL5": 440,
+      "ratio": 3.3704545454545456,
+      "lo": 3.1923830269384585,
+      "hi": 3.5584589152103017
     }
   },
   "librating": {
-    "median_amplitude_deg": 15.133666501557002,
-    "median_period_yr": 151.78644763860368,
-    "median_i_mean_deg": 12.003418237104654,
-    "median_e_mean": 0.06381398613075982,
+    "median_amplitude_deg": 15.22058335427721,
+    "median_period_yr": 151.6292824636477,
+    "median_i_mean_deg": 12.040869962975535,
+    "median_e_mean": 0.06692332606347749,
+    "proper": {
+      "with_D_p": 16230,
+      "median_D_p_deg": 14.58529279999292,
+      "median_f_deg_yr": 2.3752356172986087,
+      "median_halfrange_minus_D_p_deg": 0.670530206694739,
+      "with_e_p": 16230,
+      "with_sinI_p": 0
+    },
     "analytic_vs_integrated_amp": {
-      "n": 16277,
-      "median_diff_deg": 0.5148681135910138,
-      "median_abs_diff_deg": 0.9848002836709995
+      "n": 16233,
+      "median_diff_deg": 0.6414359216058259,
+      "median_abs_diff_deg": 1.019794181564066
     }
   },
   "sizes": {
