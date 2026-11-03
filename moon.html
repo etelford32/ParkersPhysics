@@ -24,7 +24,7 @@
 <meta name="twitter:description" content="Lunar surface simulator with live galactic-cosmic-ray and solar-particle-event flux. Plan EVA exposure for Artemis-class missions.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/moon.jpg">
 
-<meta name="description" content="Interactive 3D Moon simulation lit by today's real Sun and Earth (phase, libration, distance from the lunar ephemeris), with real-time radiation environment modeling, a Monte-Carlo collisionless exosphere with its live sodium tail, a statistical crater field from the Neukum chronology, the interior cutaway with the stagnant-lid mantle and dead core dynamo, and an IAU landmark map.">
+<meta name="description" content="Interactive 3D Moon simulation lit by today's real Sun and Earth (phase, libration, distance from the lunar ephemeris), with real-time radiation environment modeling, a Monte-Carlo collisionless exosphere with its live sodium tail, a statistical crater field from the Neukum chronology, the interior cutaway with the stagnant-lid mantle and dead core dynamo, an IAU landmark map, the proposed colony sites, and an Earth-launch brief from the mission planner's own transfer kernel.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -167,6 +167,21 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
     background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:6px; padding:6px 8px; margin-top:6px; }
 #ip-profile-chart { width:100%; display:block; border-radius:6px; background:#0a0c12; margin-top:6px; }
 .vt-btn.vt-once { color:#7db8ff; }
+
+/* ─── Colony sites + launch brief ───────────────────────────── */
+.col-row { display:grid; grid-template-columns:14px 1fr auto; gap:0 6px; padding:3px 0; cursor:pointer; font-size:9px; align-items:center;
+    border-bottom:1px solid rgba(255,255,255,.04); }
+.col-row:hover .col-name, .col-row.on .col-name { color:#eef; }
+.col-rank { color:#556; font-family:monospace; }
+.col-name { color:#bcd; font-weight:600; }
+.col-score { font-family:monospace; color:#7dffb0; }
+.col-meta { grid-column:2/-1; color:#667; font-size:8px; }
+.col-links { display:flex; gap:6px; margin:6px 0 2px; }
+.col-link { flex:1; text-align:center; font:600 9px 'Segoe UI',system-ui,sans-serif; color:#0b1120; background:#7dffb0;
+    border-radius:6px; padding:5px 6px; text-decoration:none; }
+.col-link.alt { background:rgba(125,255,176,.12); color:#7dffb0; border:1px solid rgba(125,255,176,.35); }
+.ip-select { width:100%; background:rgba(255,255,255,.05); color:#bcd; border:1px solid rgba(255,255,255,.12); border-radius:6px;
+    font:10px 'Segoe UI',system-ui,sans-serif; padding:4px 6px; margin:3px 0 6px; }
 
 /* ─── Loading ───────────────────────────────────────────────── */
 #loading {
@@ -519,6 +534,60 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             <div id="ip-landing-sites" style="font-size:9px;color:#99a;line-height:1.5;max-height:140px;overflow-y:auto;padding-right:4px"></div>
         </div>
 
+        <!-- Proposed colony sites — the colony game's own survey, ranked -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Proposed Colony Sites</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:6px">
+                The south-pole candidates ranked by the colony sim's survey:
+                illumination (power), distance to shadowed ice (water), and
+                quake exposure. The top three wear green rings on the globe.
+                Click a site to brief a launch to it.
+            </div>
+            <label class="lyr" style="margin-bottom:6px"><input type="checkbox" id="lyr-colony" checked> <span style="color:#7dffb0">◯</span> Colony shortlist rings (top 3)</label>
+            <div id="ip-colony-list" style="max-height:170px;overflow-y:auto;padding-right:4px"></div>
+            <div class="col-links">
+                <a class="col-link" id="ip-colony-play" href="colony.html" target="_blank" rel="noopener">▶ Run this colony</a>
+            </div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:4px">
+                Survey: Mazarico 2011 (illumination), LCROSS (ice), Watters
+                2019 (scarps). Ratings are coarse by design — a strategy
+                layer, not a landing-site product. Gated by tests/colony-engine.mjs.
+            </div>
+        </div>
+
+        <!-- Getting there — the Earth launch brief, from the mission planner's own kernel -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Getting There — Earth Launch</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:4px">
+                The mission planner's own transfer for a departure now, from
+                a real pad to the selected site, with the two Earth-side
+                constraints it has to meet: the Moon's declination against
+                the pad's inclination floor, and the Sun at the site on arrival.
+            </div>
+            <div class="ip-k" style="font-size:9px">Launch pad</div>
+            <select class="ip-select" id="ip-pad"></select>
+            <div class="ip-k" style="font-size:9px">Landing site</div>
+            <select class="ip-select" id="ip-dest-site"></select>
+            <div class="ip-row"><span class="ip-k">Depart · arrive</span><span class="ip-v" id="ip-lb-dates">—</span></div>
+            <div class="ip-row"><span class="ip-k">Transfer time</span><span class="ip-v" id="ip-lb-tof">—</span></div>
+            <div class="ip-row"><span class="ip-k">Δv TLI + LOI</span><span class="ip-v" id="ip-lb-dv">—</span></div>
+            <div class="ip-row"><span class="ip-k">v∞ at the Moon</span><span class="ip-v" id="ip-lb-vinf">—</span></div>
+            <div class="ip-row" title="A parking orbit can only inject toward a target whose declination is within its inclination; a due-east launch's floor is the pad's latitude"><span class="ip-k">Moon dec · pad floor</span><span class="ip-v" id="ip-lb-plane">—</span></div>
+            <div class="ip-row"><span class="ip-k">Plane change</span><span class="ip-v" id="ip-lb-dogleg">—</span></div>
+            <div class="ip-row"><span class="ip-k">Sun at site on arrival</span><span class="ip-v" id="ip-lb-sun">—</span></div>
+            <div class="ip-row"><span class="ip-k">Moon phase on arrival</span><span class="ip-v" id="ip-lb-phase">—</span></div>
+            <div class="col-links">
+                <a class="col-link" id="ip-lb-plan" href="mission-planner.html?origin=earth&target=moon&pad=ksc" target="_blank" rel="noopener">🚀 Fly it in the mission planner</a>
+            </div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:4px">
+                Hohmann from a 300 km parking orbit to the Moon's live distance
+                (js/mission-planner-trajectory.js); the plane change is a
+                single-impulse upper bound the planner's Lambert path can beat.
+                Apollo landed with the Sun 7–20° up; polar sites never see
+                that — their light is topographic. Gated by tests/mission-pads.mjs.
+            </div>
+        </div>
+
         <!-- Data Sources -->
         <div class="ip-section ip-surface-only">
             <div class="ip-title">Data Sources</div>
@@ -581,6 +650,8 @@ import {
 } from './js/moon-exosphere-model.js';
 import { lunarGeometry, solarZenithDeg } from './js/moon-ephemeris.js';
 import { siteCraterReport } from './js/moon-craters.js';
+import { EARTH_LAUNCH_SITES, lunarDepartureBrief, colonyShortlist } from './js/mission-pads.js';
+import { siteProfiles } from './js/colony-engine.js';
 import { MoonLandmarks } from './js/moon-landmarks.js';
 import { LANDMARKS, LANDMARK_CATEGORIES } from './js/moon-landmarks-data.js';
 
@@ -991,6 +1062,10 @@ document.getElementById('lyr-apollo')?.addEventListener('change', e => {
 document.getElementById('lyr-artemis')?.addEventListener('change', e => {
     landingSites.setArtemisVisible(e.target.checked);
 });
+document.getElementById('lyr-colony')?.addEventListener('change', e => {
+    landingSites.setColonyVisible(e.target.checked);
+});
+
 
 // ═══════════════════════════════════════════════════════════════
 //  EXOSPHERE PANEL — species table straight from the kernel
@@ -1169,6 +1244,98 @@ function updateCraterReport(site) {
         rep.shadowFraction1km > 0.5 ? '#ffd75c' : '#aabbcc');
     return _craterReport;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  PROPOSED COLONY SITES + THE EARTH LAUNCH BRIEF
+//  Sites: colony-engine's ranked survey (the colony game's own
+//  start screen, one list). Brief: js/mission-pads.js over the
+//  mission planner's transfer kernel + this page's ephemeris.
+//  (Placed AFTER the crater report and the synth albedo sampler: the
+//  first selectColonySite() runs at module init and reads both — a
+//  `let` above this point would be in its temporal dead zone.)
+// ═══════════════════════════════════════════════════════════════
+const COLONY_SITES = siteProfiles();
+const COLONY_SHORTLIST = colonyShortlist(3);
+let _colonySiteId = COLONY_SITES[0]?.id ?? null;
+let _launchBrief = null;
+
+(function renderColonyPanel() {
+    const list = document.getElementById('ip-colony-list');
+    const padSel = document.getElementById('ip-pad');
+    const siteSel = document.getElementById('ip-dest-site');
+    if (!list || !padSel || !siteSel) return;
+    list.innerHTML = COLONY_SITES.map((s, i) => `
+        <div class="col-row${s.id === _colonySiteId ? ' on' : ''}" data-colony="${s.id}" title="${(s.note || '').replace(/"/g, '&quot;')}">
+            <span class="col-rank">${i + 1}</span>
+            <span class="col-name">${s.name}${i < 3 ? ' <span style="color:#7dffb0">◯</span>' : ''}</span>
+            <span class="col-score">${s.score}</span>
+            <span class="col-meta">lit ${(s.illum * 100).toFixed(0)}% · ice ${s.iceDistM} m · quake ${'▮'.repeat(Math.round(s.quakeRisk * 5)) || '▯'} · ${Math.abs(s.lat).toFixed(1)}°S ${s.lon.toFixed(1)}°E</span>
+        </div>`).join('');
+    list.querySelectorAll('.col-row').forEach(row => {
+        row.addEventListener('click', () => selectColonySite(row.dataset.colony));
+    });
+    padSel.innerHTML = EARTH_LAUNCH_SITES.map(p => `<option value="${p.id}">${p.name} · ${Math.abs(p.lat).toFixed(1)}°${p.lat < 0 ? 'S' : 'N'}</option>`).join('');
+    siteSel.innerHTML = COLONY_SITES.map(s => `<option value="${s.id}">${s.name}</option>`).join('') +
+        `<option value="tranquility">Tranquility Base (Apollo 11)</option>`;
+    padSel.addEventListener('change', updateLaunchBrief);
+    siteSel.addEventListener('change', () => {
+        if (COLONY_SITES.some(s => s.id === siteSel.value)) selectColonySite(siteSel.value);
+        else updateLaunchBrief();
+    });
+    selectColonySite(_colonySiteId);
+})();
+
+function selectColonySite(id) {
+    const s = COLONY_SITES.find(x => x.id === id);
+    if (!s) return;
+    _colonySiteId = id;
+    document.querySelectorAll('#ip-colony-list .col-row').forEach(r => r.classList.toggle('on', r.dataset.colony === id));
+    const siteSel = document.getElementById('ip-dest-site');
+    if (siteSel && siteSel.value !== id) siteSel.value = id;
+    const play = document.getElementById('ip-colony-play');
+    if (play) play.href = `colony.html?site=${encodeURIComponent(id)}`;
+    updateCraterReport({ name: s.name, latDeg: s.lat, lonDeg: s.lon, category: 'crater' });
+    updateLaunchBrief();
+}
+
+function _launchSite() {
+    const siteSel = document.getElementById('ip-dest-site');
+    const id = siteSel?.value ?? _colonySiteId;
+    const c = COLONY_SITES.find(x => x.id === id);
+    if (c) return { id, name: c.name, latDeg: c.lat, lonDeg: c.lon, illum: c.illum };
+    return { id: 'tranquility', name: 'Tranquility Base', latDeg: 0.674, lonDeg: 23.473 };
+}
+
+function updateLaunchBrief() {
+    const padId = document.getElementById('ip-pad')?.value || 'ksc';
+    const site = _launchSite();
+    let b;
+    try { b = lunarDepartureBrief({ when: new Date(), padId, site }); }
+    catch (err) { console.warn('[moon] launch brief failed', err); return; }
+    _launchBrief = b;
+    const set = (id, txt, color) => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = txt; el.style.color = color || ''; }
+    };
+    const date = (jd) => new Date((jd - 2440587.5) * 86400000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    set('ip-lb-dates', `${date(b.departJd)} → ${date(b.arriveJd)}`);
+    set('ip-lb-tof', `${b.tofDays.toFixed(2)} d · Moon at ${Math.round(b.moonDistanceKm).toLocaleString()} km`);
+    set('ip-lb-dv', `${b.dvTliKms.toFixed(3)} + ${b.dvLoiKms.toFixed(3)} = ${b.dvTotalKms.toFixed(2)} km/s`);
+    set('ip-lb-vinf', `${b.vInfMoonKms.toFixed(3)} km/s`);
+    set('ip-lb-plane', `${b.moonDeclinationAtArrivalDeg >= 0 ? '+' : '−'}${Math.abs(b.moonDeclinationAtArrivalDeg).toFixed(1)}° · ${b.pad.minInclinationDeg.toFixed(1)}°`);
+    set('ip-lb-dogleg', b.coplanarReachable ? 'none — coplanar from this pad'
+        : `≤ ${b.planeChangeDvKms.toFixed(2)} km/s (Δi ${b.planeDeficitDeg.toFixed(1)}°)`,
+        b.coplanarReachable ? '#4fc97f' : '#ffd75c');
+    const sun = b.arrival;
+    set('ip-lb-sun', sun.polarSite
+        ? `${sun.sunElevationDeg >= 0 ? '+' : '−'}${Math.abs(sun.sunElevationDeg).toFixed(1)}° (polar · site lit ${Math.round((sun.topographicIllumination ?? 0) * 100)}% of the sol)`
+        : `${sun.sunElevationDeg >= 0 ? '+' : '−'}${Math.abs(sun.sunElevationDeg).toFixed(1)}°${sun.inApolloLightingBand ? ' · Apollo band' : sun.daylight ? ' · day' : ' · night'}`,
+        sun.polarSite ? '#aabbcc' : sun.inApolloLightingBand ? '#4fc97f' : sun.daylight ? '#aabbcc' : '#7db8ff');
+    set('ip-lb-phase', `${sun.phase} · ${(sun.illumination * 100).toFixed(0)}% lit`);
+    const plan = document.getElementById('ip-lb-plan');
+    if (plan) plan.href = `mission-planner.html?origin=earth&target=moon&pad=${encodeURIComponent(padId)}`;
+}
+setInterval(updateLaunchBrief, 60_000);
 
 // ── Landmark hover tooltip (raycast against the invisible hit spheres) ──
 const _lmRaycaster = new THREE.Raycaster();
@@ -2082,6 +2249,10 @@ try {
             return interior.probe(_lmRaycaster);
         },
         convection: () => ({ ...interior.convection }),
+        colonySites: () => COLONY_SITES.map(s => ({ ...s })),
+        colonyShortlist: () => COLONY_SHORTLIST.map(s => ({ ...s })),
+        selectColonySite,
+        launchBrief: () => (_launchBrief ? JSON.parse(JSON.stringify(_launchBrief)) : null),
     });
 } catch {}
 

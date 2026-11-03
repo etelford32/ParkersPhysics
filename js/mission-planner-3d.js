@@ -53,6 +53,7 @@ import {
 import { makeOrreryPlanet, updateOrreryPlanet } from './orrery-skins.js';
 import { PerfProfiler } from './perf-profiler.js';
 import { loadFY1CDebris, createDebrisCloud } from './mission-planner-debris.js';
+import { EARTH_LAUNCH_SITES, colonyShortlist } from './mission-pads.js';
 
 // ── Scene scales ────────────────────────────────────────────────────────────
 // Unified scene: 1 unit = 1 R⊕ (≈ 6378 km). Earth orbits Sun at ~23 456 R⊕
@@ -69,17 +70,10 @@ const MOON_R_SCENE    = R_MOON / GEO_UNIT_KM;
 const SOI_MOON_SCENE  = SOI_MOON / GEO_UNIT_KM;
 
 // ── Launch sites ────────────────────────────────────────────────────────────
-export const LAUNCH_SITES = [
-    { id: 'ksc',         name: 'Kennedy SC (USA)',       lat: 28.573, lon: -80.649 },
-    { id: 'baikonur',    name: 'Baikonur (KAZ)',         lat: 45.965, lon:  63.305 },
-    { id: 'kourou',      name: 'Kourou (FRA)',           lat:  5.236, lon: -52.768 },
-    { id: 'starbase',    name: 'Starbase (USA)',         lat: 25.997, lon: -97.155 },
-    { id: 'wenchang',    name: 'Wenchang (CHN)',         lat: 19.614, lon: 110.951 },
-    { id: 'vandy',       name: 'Vandenberg (USA)',       lat: 34.742, lon:-120.572 },
-    { id: 'tanegashima', name: 'Tanegashima (JPN)',      lat: 30.400, lon: 130.969 },
-    { id: 'sriharikota', name: 'Sriharikota (IND)',      lat: 13.720, lon:  80.230 },
-    { id: 'plesetsk',    name: 'Plesetsk (RUS)',         lat: 62.957, lon:  40.583 },
-];
+// The ONE Earth pad table lives in js/mission-pads.js (PURE) so moon.html
+// can brief an Earth→Moon departure without importing this renderer;
+// re-exported under its historical name.
+export const LAUNCH_SITES = EARTH_LAUNCH_SITES;
 
 // ── Weather statuses — drives the colored ring on each pad marker and the
 //     Launch button gating in the UI. The actual weather data is supplied
@@ -125,6 +119,10 @@ export const MOON_BASES = [
     { id: 'shackleton',  name: 'Shackleton Stn',   lat: -89.660, lon:   0.000 },  // Lunar South Pole / Artemis
     { id: 'imbrium',     name: 'Mare Imbrium',     lat:  32.800, lon: -15.600 },  // Apollo 15 / proposed outpost
     { id: 'schrodinger', name: 'Schrödinger Bsn',  lat: -75.000, lon: 132.400 },  // Far-side proposal
+    // The proposed colony sites: colony-engine's top three by strategy
+    // score (illumination · ice · quake exposure), the SAME ranking the
+    // colony game and moon.html show — one survey, three views.
+    ...colonyShortlist(3),
 ];
 
 // ── Origin → destination route catalogue. The launcher reads this list to

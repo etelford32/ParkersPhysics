@@ -1,5 +1,5 @@
 /**
- * moon-landing-sites.js — Apollo + Artemis III candidate surface markers.
+ * moon-landing-sites.js — Apollo + Artemis III candidate + colony-shortlist markers.
  *
  * Mounted as child meshes of the MoonSkin.moonMesh so markers rotate with
  * the Moon and inherit its world-space transform. Each marker is a small
@@ -13,9 +13,12 @@
 
 import * as THREE from 'three';
 import { APOLLO_SITES, ARTEMIS_III_CANDIDATES, latLonToXYZ } from './artemis-data.js';
+import { colonyShortlist } from './mission-pads.js';
 
 const APOLLO_COLOR          = 0xffae44;  // amber — continuity with Apollo programme aesthetic
 const ARTEMIS_COLOR         = 0x44ccff;  // cyan  — forward-looking
+const COLONY_COLOR          = 0x7dffb0;  // green — the proposed colony shortlist (colony-engine's top 3)
+const COLONY_RING_MULT      = 4.5;       // a ring, not a dot: the shortlist sits ON Artemis candidates
 const MARKER_RADIUS         = 0.008;     // proportional to moon radius 1.0
 // Clearance ABOVE the local ground: without a radiusAt callback the ground is
 // the unit sphere, reproducing the historical fixed 1.006; with displaced
@@ -65,8 +68,10 @@ export class LandingSites {
     constructor(parent, { radiusAt = null } = {}) {
         this._apollo  = new THREE.Group();
         this._artemis = new THREE.Group();
+        this._colony  = new THREE.Group();
         this._apollo.name  = 'landing-sites:apollo';
         this._artemis.name = 'landing-sites:artemis3';
+        this._colony.name  = 'landing-sites:colony';
         this._radiusAt = radiusAt;
         this._markers = [];
 
@@ -80,13 +85,29 @@ export class LandingSites {
                 site: s.id, label: s.name, region: s.note, kind: 'artemis3',
             }));
         }
+        // Colony shortlist: a wide green ring around each of the top three
+        // survey sites (they coincide with Artemis candidates, so a second
+        // dot would hide under the cyan one).
+        this.colonySites = colonyShortlist(3);
+        for (const s of this.colonySites) {
+            const m = _placeMarker(this._colony, s.lat, s.lon, COLONY_COLOR, {
+                site: s.colony.siteId, label: s.name, kind: 'colony', score: s.colony.score,
+            });
+            m.sprite.scale.setScalar(MARKER_RADIUS * COLONY_RING_MULT * 2);
+            m.sprite.material.opacity = 0.75;
+            m.dot.material.transparent = true;
+            m.dot.material.opacity = 0.0;      // the ring carries it
+            this._markers.push(m);
+        }
         this._anchorAll();
 
         parent.add(this._apollo);
         parent.add(this._artemis);
+        parent.add(this._colony);
 
         this._apolloVisible  = true;
         this._artemisVisible = true;
+        this._colonyVisible  = true;
     }
 
     _anchorAll() {
@@ -107,9 +128,10 @@ export class LandingSites {
 
     setApolloVisible(visible)  { this._apollo.visible  = !!visible; this._apolloVisible  = !!visible; }
     setArtemisVisible(visible) { this._artemis.visible = !!visible; this._artemisVisible = !!visible; }
+    setColonyVisible(visible)  { this._colony.visible  = !!visible; this._colonyVisible  = !!visible; }
 
     dispose() {
-        for (const group of [this._apollo, this._artemis]) {
+        for (const group of [this._apollo, this._artemis, this._colony]) {
             group.parent?.remove(group);
             group.traverse(obj => {
                 if (obj.geometry) obj.geometry.dispose?.();

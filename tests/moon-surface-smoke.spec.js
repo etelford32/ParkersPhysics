@@ -266,6 +266,34 @@ test('live ephemeris, crater report, species chips and Monte-Carlo atoms respond
     await expect(page.locator('#ip-hop-stats')).toHaveText('atoms off');
     await page.locator('#lyr-hops').check();
 
+    // ── Proposed colony sites: the colony survey, ranked, with the launch brief ──
+    const survey = await page.evaluate(() => window.__moonLab.colonySites());
+    await expect(page.locator('#ip-colony-list .col-row')).toHaveCount(survey.length);
+    expect(survey.length).toBeGreaterThanOrEqual(13);
+    const shortlist = await page.evaluate(() => window.__moonLab.colonyShortlist());
+    expect(shortlist).toHaveLength(3);
+    expect(shortlist[0].colony.siteId).toBe(survey[0].id);
+    // Clicking a row re-targets the brief and the colony link
+    const second = survey[1];
+    await page.locator(`#ip-colony-list .col-row[data-colony="${second.id}"]`).click();
+    await expect(page.locator('#ip-colony-play')).toHaveAttribute('href', `colony.html?site=${second.id}`);
+    await expect(page.locator('#ip-cr-site')).toHaveText(second.name);
+    const brief = await page.evaluate(() => window.__moonLab.launchBrief());
+    expect(brief.site.name).toBe(second.name);
+    expect(brief.dvTliKms).toBeGreaterThan(3.0);
+    expect(brief.dvTliKms).toBeLessThan(3.2);
+    expect(brief.tofDays).toBeGreaterThan(4.5);
+    expect(brief.tofDays).toBeLessThan(5.5);
+    expect(brief.arrival.polarSite).toBe(true);
+    await expect(page.locator('#ip-lb-dv')).toContainText('km/s');
+    await expect(page.locator('#ip-lb-sun')).toContainText('polar');
+    // Pad change flows into the brief and the planner deep link
+    await page.locator('#ip-pad').selectOption('kourou');
+    const kourou = await page.evaluate(() => window.__moonLab.launchBrief());
+    expect(kourou.pad.id).toBe('kourou');
+    expect(kourou.pad.minInclinationDeg).toBeCloseTo(5.236, 3);
+    await expect(page.locator('#ip-lb-plan')).toHaveAttribute('href', /pad=kourou/);
+
 
     expect(pageErrors, `page errors: ${pageErrors.join('\n')}`).toHaveLength(0);
 });
