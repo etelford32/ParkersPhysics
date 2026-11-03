@@ -79,6 +79,12 @@ Run workflow; a preview URL is accepted). Locally:
     production deploy. Needs the repo setting "Allow GitHub Actions to create
     and approve pull requests"; a PR opened with `GITHUB_TOKEN` does not trigger
     other workflows' CI.
+14. **One same-step retry on a TRANSIENT SBDB failure** (timeout / network
+    error / 502 / 503 / 504), never a loop; a 4xx steps down the ladder and a
+    plain 500 is reported. Measured 2026-11-03 19:48–19:55: a hung connection
+    (the request waited its whole 30 s budget; healthy answers take ~2 s) and
+    then HTTP 502 — the production NEO catalogue failed identically, so it was
+    JPL. The first attempt is 20 s to leave room for the retry.
 13. **ONE orbit-quality rule** (`orbitQuality`): U ≥ 6, OR arc < 1 yr, OR off
     the shared epoch ⇒ short-arc. The script and report builder used to carry
     hand-synced copies.
@@ -177,6 +183,14 @@ measurement that motivates it.
     committed one: new discoveries, regime changes, the L4:L5 ratio. Turns the
     PR into the discovery-rate time series (Rubin/LSST is in operations).
     *Effort: small.*
+10b. **Keep the last good catalogue through a JPL outage.** Observed
+    2026-11-03: during SBDB's outage the degraded body (cached 300 s +
+    stale-while-revalidate 600 s) would REPLACE a good cached catalogue when a
+    revalidation fails, so a page reading the live route sees an empty swarm
+    for up to ~15 min. The committed dynamics artifact is unaffected. Fix:
+    have the route fall back to a last-good copy (e.g. Vercel Blob, written on
+    every live answer) served as `freshness:'stale'` with its age, or have
+    pages fall back to the artifact + its own epoch. *Effort: small–medium.*
 11. **A daily count row in Supabase** (date, rows, L4, L5, epoch) only if the
     time series is wanted on a page — ~365 rows a year. *Effort: small.*
 12. **Sample φ every 30 days, not 365**, if periods must be quoted below the
