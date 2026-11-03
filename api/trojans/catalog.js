@@ -92,7 +92,7 @@ async function fetchPerturber(command, jd, deadline) {
     return parseHorizonsVector(r.json);
 }
 
-export default async function handler() {
+async function handler() {
     const deadline = Date.now() + DEADLINE_MS;
     const { sbdb, precision, photometry } = await fetchPopulation(deadline);
     const epochInfo = modalEpoch(sbdb.records ?? []);
@@ -106,3 +106,11 @@ export default async function handler() {
         ? { maxAge: CACHE_TTL, swr: CACHE_SWR }
         : { maxAge: 300, swr: 600 });
 }
+
+// The Node runtime IGNORES a Response returned from a default export (it
+// wants the `(req, res)` signature) and the request then hangs to the 60 s
+// timeout — measured on the first preview. The Web-handler form is a named
+// HTTP method. The default export stays for dev-server.mjs, which calls
+// `mod.default(request)`, and for the node gate.
+export const GET = handler;
+export default handler;
