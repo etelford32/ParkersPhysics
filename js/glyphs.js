@@ -66,6 +66,14 @@ export const GLYPHS = {
         `<circle cx="8.6" cy="8.4" r="3.6"/>` +
         `<path d="M8.6 2.2v1.4M8.6 13.2v1.4M2.4 8.4h1.4M13.4 8.4h1.4M4.2 4l1 1M12 11.8l1 1M4.2 12.8l1-1M12 5l1-1"/>` +
         `<path d="M10 20.4h9.2M12.4 17.2h7.4"/>`,
+    volcano:
+        // a cone with a crater notch, a plume rising off it as the mark's
+        // ring-and-node: the ring is the ash cloud, the node the vent
+        `<path d="M2.6 20.4h18.8"/>` +
+        `<path d="M4.2 20.4l5.4-9.2h4.8l5.4 9.2"/>` +
+        `<path d="M10.4 11.2l1.6 1.4 1.6-1.4"/>` +
+        RING(13.6, 5.6, 4.2, 2.2, -20) +
+        NODE(12, 9.2, 1.1),
     aurora:
         // wavy curtain over a horizon — the wave is what says aurora rather
         // than 'crown'; straight rays read as a claw at 20px

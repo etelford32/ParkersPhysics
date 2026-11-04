@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Earth Volcanoes · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/volcanoes.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/volcanoes.html">
+<meta property="og:title" content="Earth Volcanoes — every volcano, what it is doing, and what it could do">
+<meta property="og:description" content="All 2,661 volcanoes in the Smithsonian Global Volcanism Program catalogue — erupting, recently active, dormant and inactive — with today's alerts, eruption odds, and a Monte-Carlo of what the next decades of volcanism do to global climate.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Earth Volcanoes — every volcano on Earth">
+<meta name="twitter:description" content="GVP's catalogue, live USGS/EONET activity, empirical-Bayes eruption odds and a physics chain from VEI to stratospheric sulfur to global cooling.">
+<meta name="description" content="Earth Volcanoes maps every volcano in the Smithsonian GVP catalogue by activity status, joins today's USGS and NASA EONET reports, estimates the chance each one starts a new eruption, and simulates the climate forcing of the next decades of global volcanism.">
+
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:clip;
+    background:#03050c; color:#cfd6ea;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+#vx-app {
+    display:grid; grid-template-columns:minmax(0, 1fr) 400px; align-content:start;
+    gap:14px; padding:14px; min-height:calc(100vh - 50px);
+}
+@media (max-width: 1150px) { #vx-app { grid-template-columns:minmax(0, 1fr); } }
+@media (max-width: 768px) { #vx-app { padding:10px; gap:10px; } }
+.vx-panel {
+    background:rgba(10,14,30,.74); border:1px solid rgba(255,150,80,.14);
+    border-radius:12px; padding:13px 15px; min-width:0;
+}
+.vx-panel h2 {
+    font-size:.67rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#ffb37a; font-weight:700; margin-bottom:9px;
+}
+.vx-panel h2 small { text-transform:none; letter-spacing:0; color:#8a93ad; font-weight:500; margin-left:6px; }
+.vx-muted { color:#8a93ad; }
+.vx-fine { font-size:.66rem; color:#8a93ad; line-height:1.5; margin-top:6px; }
+.vx-warn { font-size:.72rem; color:#ffd479; line-height:1.5; margin-bottom:8px; }
+.num { text-align:right; font-variant-numeric:tabular-nums; }
+
+/* hero */
+#vx-hero { grid-column:1 / -1; padding:10px 14px; }
+#vx-hero-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+#vx-hero h1 {
+    font-size:1.15rem; font-weight:800;
+    background:linear-gradient(100deg, #fff1e0 20%, #ff9a2e 90%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+#vx-hero p { font-size:.78rem; color:#aab3cb; line-height:1.55; margin-top:6px; max-width:1180px; }
+#vx-hero p a { color:#ffb37a; }
+#vx-chips { display:flex; gap:7px; flex-wrap:wrap; margin-left:auto; }
+.vx-chip {
+    display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px;
+    font-size:.63rem; font-weight:600; border:1px solid rgba(255,255,255,.18); color:#aab3cb;
+}
+.vx-chip::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.vx-chip[data-state="live"] { color:#6ef0b0; border-color:rgba(110,240,176,.45); }
+.vx-chip[data-state="partial"] { color:#ffd479; border-color:rgba(255,212,121,.5); }
+.vx-chip[data-state="down"] { color:#ff8c7a; border-color:rgba(255,140,122,.5); }
+.vx-chip[data-state="loading"] { color:#8a93ad; }
+#vx-stats { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+.vx-stat { padding:6px 12px; border-radius:8px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.06); }
+.vx-stat b { display:block; font-size:1.05rem; color:#f3f5ff; font-variant-numeric:tabular-nums; }
+.vx-stat span { font-size:.62rem; color:#8a93ad; }
+
+/* filters */
+#vx-filters { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+.vx-fgroup { display:flex; gap:4px; flex-wrap:wrap; align-items:center; padding:4px; border-radius:9px; background:rgba(255,255,255,.025); }
+.vx-fhead, .vx-chip-f {
+    font:inherit; font-size:.66rem; color:#cfd6ea; cursor:pointer;
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.12);
+    border-radius:7px; padding:5px 8px; min-height:32px; display:inline-flex; align-items:center; gap:5px;
+}
+.vx-fhead { font-weight:700; color:#ffd2a8; }
+.vx-fhead[aria-pressed="false"], .vx-chip-f[aria-pressed="false"] { opacity:.42; text-decoration:line-through; }
+.vx-chip-f b { color:#f3f5ff; font-variant-numeric:tabular-nums; font-weight:600; }
+.vx-tri { display:inline-block; width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:9px solid currentColor; margin-right:3px; vertical-align:middle; }
+.vx-tri-lg { border-left-width:9px; border-right-width:9px; border-bottom-width:16px; }
+#vx-maptools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; font-size:.68rem; }
+#vx-maptools select, #vx-maptools button, .vx-ctl select, .vx-ctl input, .vx-ctl button, #vx-search {
+    font:inherit; font-size:.7rem; color:#e6ebff; background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.16); border-radius:6px; padding:5px 8px; min-height:32px;
+}
+#vx-maptools button { min-width:32px; cursor:pointer; }
+#vx-legend { display:flex; gap:6px; align-items:center; flex-wrap:wrap; color:#aab3cb; }
+.vx-ramp { display:inline-flex; height:9px; border-radius:2px; overflow:hidden; }
+.vx-ramp i { display:block; width:16px; }
+
+/* map */
+#vx-map-wrap { position:relative; width:100%; border-radius:9px; overflow:hidden; background:#070b16; }
+#vx-map { display:block; }
+#vx-tip {
+    position:absolute; z-index:5; pointer-events:none; max-width:220px;
+    background:rgba(4,8,18,.92); border:1px solid rgba(255,150,80,.45); border-radius:7px;
+    padding:6px 9px; font-size:.68rem; line-height:1.45;
+}
+#vx-tip b { color:#fff; }
+#vx-map-note { font-size:.62rem; color:#8a93ad; margin-top:6px; line-height:1.5; }
+
+/* card */
+#vx-card h3 { font-size:1.05rem; color:#f3f5ff; }
+.vx-card-sub { font-size:.72rem; line-height:1.4; margin-top:2px; }
+#vx-map-panel { align-self:start; }
+.vx-card-head { display:flex; gap:10px; align-items:center; }
+.vx-status-pill, .vx-live-pill {
+    display:inline-block; margin-top:8px; padding:3px 9px; border-radius:999px; font-size:.66rem; font-weight:700;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); color:#e6ebff;
+}
+.vx-live-pill { display:block; color:#ffb37a; border-color:rgba(255,154,46,.45); background:rgba(255,154,46,.08); }
+#vx-card h4 { font-size:.62rem; text-transform:uppercase; letter-spacing:.12em; color:#ffb37a; margin:14px 0 6px; }
+.vx-dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 10px; font-size:.72rem; margin-top:10px; }
+.vx-dl dt { color:#8a93ad; }
+.vx-dl dd { color:#e6ebff; }
+.vx-dl-tight { margin-top:6px; font-size:.68rem; }
+.vx-odds { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+.vx-odds-tile, .vx-tile { padding:7px 8px; border-radius:8px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.06); }
+.vx-odds-tile b, .vx-tile b { display:block; font-size:.98rem; color:#f3f5ff; font-variant-numeric:tabular-nums; }
+.vx-odds-tile span, .vx-tile span { font-size:.6rem; color:#8a93ad; }
+.vx-whatif label { font-size:.7rem; color:#aab3cb; }
+.vx-whatif input[type=range] { width:100%; accent-color:#ff9a2e; min-height:28px; }
+.vx-whatif output { display:block; font-size:.7rem; color:#ffd2a8; }
+.vx-card-links { margin-top:12px; font-size:.72rem; }
+.vx-card-links a { color:#ffb37a; }
+.vx-hist svg { display:block; }
+
+/* lists + tables */
+.vx-linkbtn { font:inherit; color:#ffd2a8; background:none; border:0; cursor:pointer; padding:2px 0; text-align:left; min-height:24px; }
+.vx-linkbtn:hover { text-decoration:underline; }
+.vx-live-list { list-style:none; font-size:.72rem; display:grid; gap:3px; max-height:260px; overflow:auto; }
+.vx-cc { display:inline-block; margin-left:6px; padding:0 6px; border-radius:4px; font-size:.6rem; font-weight:700; background:rgba(255,255,255,.08); color:#cfd6ea; }
+.vx-cc[data-cc="RED"] { background:rgba(255,59,31,.25); color:#ffb4a6; }
+.vx-cc[data-cc="ORANGE"] { background:rgba(255,154,46,.22); color:#ffd2a8; }
+.vx-cc[data-cc="YELLOW"] { background:rgba(255,224,102,.18); color:#fff0b3; }
+.vx-tablewrap { overflow-x:auto; }
+table.vx-t { width:100%; border-collapse:collapse; font-size:.7rem; }
+table.vx-t th { text-align:left; color:#8a93ad; font-weight:600; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.1); white-space:nowrap; }
+table.vx-t td { padding:3px 6px; border-bottom:1px solid rgba(255,255,255,.04); white-space:nowrap; }
+#vx-search { width:min(320px, 100%); }
+#vx-table-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; font-size:.68rem; color:#8a93ad; }
+#vx-more { margin-top:8px; }
+#vx-more[hidden] { display:none; }
+
+/* simulation */
+.vx-ctl { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:.7rem; color:#aab3cb; margin-bottom:10px; }
+.vx-ctl button { cursor:pointer; color:#1a0d02; background:#ff9a2e; border-color:#ff9a2e; font-weight:700; }
+.vx-ctl button:disabled { opacity:.6; cursor:progress; }
+#vx-sim-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:6px; margin-bottom:10px; }
+.vx-chart { position:relative; margin-top:6px; }
+.vx-ch-title { fill:#cfd6ea; font-size:11px; font-weight:600; }
+.vx-ch-tick { fill:#8a93ad; font-size:10px; }
+.vx-ch-grid { stroke:rgba(255,255,255,.07); stroke-width:1; }
+.vx-ch-zero { stroke:rgba(255,255,255,.28); stroke-width:1; }
+.vx-ch-band { fill:rgba(255,154,46,.20); stroke:none; }
+.vx-ch-line { fill:none; stroke:#ff9a2e; stroke-width:2; stroke-linejoin:round; }
+.vx-ch-cross { stroke:rgba(255,255,255,.4); stroke-width:1; }
+.vx-ch-dot { fill:#ff9a2e; stroke:#03050c; stroke-width:2; }
+.vx-ch-label { fill:#cfd6ea; font-size:10px; }
+.vx-ch-stem { stroke:#ff9a2e; stroke-width:1.5; }
+.vx-ch-dot2 { fill:#ff9a2e; stroke:#0a0e1e; stroke-width:1; }
+.vx-ch-unk { fill:none; stroke:#8a93ad; stroke-width:1; }
+.vx-ch-tip {
+    position:absolute; top:22px; pointer-events:none; font-size:.66rem; color:#e6ebff;
+    background:rgba(4,8,18,.92); border:1px solid rgba(255,255,255,.18); border-radius:6px; padding:4px 7px; white-space:nowrap;
+}
+.vx-ch-tip[hidden] { display:none; }
+#vx-sim-big { list-style:none; font-size:.7rem; display:grid; gap:2px; }
+#vx-sim-big b { color:#ffd2a8; font-variant-numeric:tabular-nums; margin-right:4px; }
+.vx-method { font-size:.68rem; color:#9aa3bc; line-height:1.6; }
+.vx-method b { color:#cfd6ea; }
+.vx-method p + p { margin-top:6px; }
+.vx-span { grid-column:1 / -1; }
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("volcanoes");</script>
+
+<div id="vx-app">
+
+  <section id="vx-hero" class="vx-panel">
+    <div id="vx-hero-row">
+      <h1>Earth Volcanoes</h1>
+      <div id="vx-chips">
+        <span class="vx-chip" id="vx-chip-cat" data-state="loading">Catalogue: loading…</span>
+        <span class="vx-chip" id="vx-chip-live" data-state="loading">Live activity: loading…</span>
+      </div>
+    </div>
+    <p id="vx-status-line">Every volcano in the Smithsonian Global Volcanism Program catalogue — those erupting now, those active in recorded
+      history, the dormant ones of the last 11,700 years and the inactive Pleistocene cones — with today's alerts from USGS and
+      NASA EONET, the modelled chance each one starts a new eruption, and a simulation of what the next decades of volcanism do
+      to global climate. The positions, types and eruption records are <b>observed</b>; the odds and the climate chain are
+      <b>model</b>, and say so. On the 3-D globe: <a href="earth.html">EarthView → Layers → Volcanoes</a>.</p>
+    <div id="vx-stats">
+      <div class="vx-stat"><b id="vx-stat-total">—</b><span>volcanoes catalogued</span></div>
+      <div class="vx-stat"><b id="vx-stat-active">—</b><span>active (erupted in recorded history)</span></div>
+      <div class="vx-stat"><b id="vx-stat-dormant">—</b><span>dormant (Holocene)</span></div>
+      <div class="vx-stat"><b id="vx-stat-inactive">—</b><span>inactive (Pleistocene)</span></div>
+      <div class="vx-stat"><b id="vx-stat-rate">—</b><span>new eruptions a year, 1900–2026</span></div>
+    </div>
+  </section>
+
+  <section class="vx-panel" id="vx-map-panel">
+    <h2>Map <small>tap a volcano · scroll or ± to zoom · drag to pan when zoomed</small></h2>
+    <div id="vx-filters" aria-label="Show volcano status classes"></div>
+    <div id="vx-maptools">
+      <label>Colour by
+        <select id="vx-color">
+          <option value="status">Status</option>
+          <option value="odds">10-year eruption odds</option>
+          <option value="vei">Largest known eruption</option>
+        </select>
+      </label>
+      <button type="button" id="vx-zoom-in" aria-label="Zoom in">+</button>
+      <button type="button" id="vx-zoom-out" aria-label="Zoom out">−</button>
+      <button type="button" id="vx-zoom-reset">World</button>
+      <div id="vx-legend"></div>
+    </div>
+    <div id="vx-map-wrap">
+      <canvas id="vx-map" aria-label="Map of the world's volcanoes"></canvas>
+      <div id="vx-tip" hidden></div>
+    </div>
+    <div id="vx-map-note">Basemap: NASA Blue Marble (archival, cloud-free composite). Volcano positions: GVP summit coordinates.
+      Rings mark volcanoes with an open live report today.</div>
+  </section>
+
+  <aside class="vx-panel" id="vx-card" aria-live="polite"></aside>
+
+  <section class="vx-panel">
+    <h2>Active today <small>USGS HANS (US, aviation colour codes) + NASA EONET (global open events)</small></h2>
+    <div id="vx-live"></div>
+  </section>
+
+  <section class="vx-panel">
+    <h2>Where eruptions and people meet <small>10-yr onset odds × people within 100 km</small></h2>
+    <div class="vx-tablewrap">
+      <table class="vx-t" id="vx-exposure">
+        <thead><tr><th>#</th><th>Volcano</th><th>Country</th><th class="num">10-yr odds</th><th class="num">≤100 km</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="vx-fine">An ordering of where likely eruptions and large populations coincide — not a risk assessment: it has no
+      hazard footprint (ash, flows, lahars), no vulnerability, and GVP's population counts are from 2020.</p>
+  </section>
+
+  <section class="vx-panel vx-span">
+    <h2>Simulate the next decades <small>seeded Monte-Carlo of global volcanism → stratospheric sulfur → climate</small></h2>
+    <div class="vx-ctl">
+      <label>Years <select id="vx-sim-years"><option>10</option><option selected>30</option><option>50</option><option>100</option></select></label>
+      <label>Futures <select id="vx-sim-members"><option>100</option><option selected>200</option><option>500</option></select></label>
+      <label>Seed <input id="vx-sim-seed" type="number" min="1" step="1" value="1" style="width:80px"></label>
+      <button type="button" id="vx-sim-run">Run simulation</button>
+      <span id="vx-sim-status" class="vx-muted"></span>
+    </div>
+    <div id="vx-sim-tiles"></div>
+    <p class="vx-fine" style="margin:-4px 0 6px">Every value is an anomaly against a volcano-free climate. Each future is spun up
+      through 20 drawn years before today, so it starts on the background that ordinary eruptions keep up — not from zero.</p>
+    <div class="vx-chart" id="vx-sim-forcing"></div>
+    <div class="vx-chart" id="vx-sim-temp"></div>
+    <h2 style="margin-top:12px">Largest eruptions in the coolest future</h2>
+    <ul id="vx-sim-big"></ul>
+    <div class="vx-chart" id="vx-replay" style="margin-top:14px"></div>
+    <p class="vx-fine" id="vx-replay-note"></p>
+  </section>
+
+  <section class="vx-panel vx-span">
+    <h2>All volcanoes <small>follows the status filters above</small></h2>
+    <div id="vx-table-row">
+      <input id="vx-search" type="search" placeholder="Search name, country or GVP number…" aria-label="Search volcanoes">
+      <span id="vx-table-count"></span>
+    </div>
+    <div class="vx-tablewrap">
+      <table class="vx-t" id="vx-table">
+        <thead><tr><th>Volcano</th><th>Country</th><th>Status</th><th>Type</th><th class="num">Last eruption</th><th class="num">Summit (m)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <button type="button" id="vx-more" class="vx-fhead">Show more</button>
+  </section>
+
+  <section class="vx-panel vx-span vx-method">
+    <h2>How it works</h2>
+    <p><b>Catalogue (observed).</b> The Smithsonian Global Volcanism Program's Volcanoes of the World 5.3.4 lists, downloaded 22 March
+      2026: 1,222 Holocene volcanoes and 1,439 Pleistocene volcanoes, plus GVP's eruption table (start year, VEI) and population counts
+      as exported in 2020. Baked by <code>scripts/build-volcano-catalog.mjs</code> with every source file's hash pinned.</p>
+    <p><b>Status (a rule on the record).</b> Erupting: last eruption 2025–26 · Recently active: since 1900 · Historical: dated CE
+      before 1900 · Dormant: Holocene, dated BCE or undated but confirmed · Unconfirmed: GVP rates the Holocene evidence uncertain ·
+      Inactive: no known Holocene eruption. "Inactive" is not "extinct".</p>
+    <p><b>Eruption odds (model).</b> Onsets since 1900 per volcano, shrunk toward the whole Holocene population with an empirical-Bayes
+      Gamma–Poisson prior fitted by maximum likelihood; the chance of a new onset in Δt is the closed-form predictive. A
+      decades-long eruption counts once, so persistently active vents (Stromboli, Santa María) read lower than how often they
+      are <i>in</i> eruption.</p>
+    <p><b>Climate chain (model).</b> VEI → erupted volume (Newhall &amp; Self 1982) → column height (Mastin et al. 2009, with a
+      stated climactic duration) → plume top vs a latitude-dependent tropopause → SO₂ (a log-linear fit to named eruptions; real
+      sulfur yields scatter by ~3×) → global aerosol optical depth (Pinatubo-anchored) → forcing (−21 W m⁻² per unit AOD) → a one-box
+      energy balance (C = 8 W yr m⁻² K⁻¹, λ = 1.2 W m⁻² K⁻¹). Pinatubo 1991 through this chain gives −3.1 W m⁻² and −0.34 K
+      (observed ≈ −3 W m⁻², ≈ −0.4 K). It is a consequence calculator, not a climate model.</p>
+  </section>
+
+</div>
+
+<script type="module" src="js/volcanoes-page.js"></script>
+</body>
+</html>

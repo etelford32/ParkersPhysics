@@ -1,0 +1,65 @@
+# volcano-kernels — the Earth Volcanoes engine, catalogue and activity route
+#
+#   volcano-engine.mjs    the baked GVP catalogue (counts, positions, the
+#                         Holocene/Pleistocene column-order trap), the status
+#                         rule, the empirical-Bayes hazard (planted-prior
+#                         recovery + flat-prior negative control), the column
+#                         and sulfur chain, Pinatubo 1991, the spun-up
+#                         simulation (cold-start negative control), the replay
+#   volcano-activity.mjs  /api/volcanoes/activity on stubbed USGS HANS + EONET
+#                         (both egress-blocked at build time): candidate field
+#                         spellings, 200-HTML rejection, partial/total outage
+#                         ⇒ 200 + stale, and the catalogue join
+#
+# Browser gates (tests/earth-volcano-layer.spec.js, tests/volcanoes-page.spec.js)
+# run with the Playwright suite.
+name: volcano-kernels
+
+on:
+  push:
+    paths:
+      - 'js/volcano-engine.js'
+      - 'js/earth-volcano-layer.js'
+      - 'js/volcanoes-page.js'
+      - 'data/volcanoes/**'
+      - 'scripts/build-volcano-catalog.mjs'
+      - 'api/volcanoes/**'
+      - 'api/_lib/volcano-activity.js'
+      - 'tests/volcano-*.mjs'
+      - '.github/workflows/volcano-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/volcano-engine.js'
+      - 'js/earth-volcano-layer.js'
+      - 'js/volcanoes-page.js'
+      - 'data/volcanoes/**'
+      - 'scripts/build-volcano-catalog.mjs'
+      - 'api/volcanoes/**'
+      - 'api/_lib/volcano-activity.js'
+      - 'tests/volcano-*.mjs'
+      - '.github/workflows/volcano-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: volcano-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Volcano engine + catalogue + route (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: engine + catalogue
+        run: node tests/volcano-engine.mjs
+      - name: activity route
+        run: node tests/volcano-activity.mjs
+      - name: pipeline registry
+        run: node tests/pipeline-registry.mjs
