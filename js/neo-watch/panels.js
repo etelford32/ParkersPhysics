@@ -22,9 +22,22 @@
  */
 
 import {
-    formatRelativeTime, impactEnergy, DENSITY, LD_KM, AU_KM,
+    formatRelativeTime, impactEnergy, DENSITY, LD_KM, AU_KM, GEO_RADIUS_KM,
     hillRadiusKm, soiRadiusKm, escapeSpeedKms, REGIME_LABELS, formatGeoDistance,
 } from '../neo-space.js';
+import {
+    EM_MU, formatAcceleration, DOMINANT_LABELS, GATE_LABELS, lagrangePoints,
+    moonHillRadiusKm, moonSoiRadiusKm,
+} from '../earth-moon-gravity.js';
+
+/**
+ * The three gravity terms' colours: the reference categorical slots 1–3, dark
+ * steps, validated all-pairs on this page's #0a0e1e card surface (dataviz
+ * validator: CVD ΔE 9.4, normal-vision 20.9, ≥3:1 contrast). FIXED to the
+ * quantity — Earth is always blue, the Moon always aqua, the Sun's tide always
+ * orange — in the card's share bar and in the profile chart alike.
+ */
+export const GRAVITY_COLORS = Object.freeze({ earth: '#3987e5', moon: '#199e70', sun: '#d95926' });
 
 /** Lunar distance in AU — the unit every miss distance here is printed in. */
 const LD_IN_AU = LD_KM / AU_KM;
@@ -243,7 +256,7 @@ export function renderFireballs(el, events, { state = 'live', nowMs = Date.now()
  * neo-space.js `compareApproach` — the disagreement between the two, printed
  * rather than hidden.
  */
-export function renderSelected(el, row, { approach = null, comparison = null, nowMs = Date.now() } = {}) {
+export function renderSelected(el, row, { approach = null, comparison = null, nowMs = Date.now(), location = null } = {}) {
     if (!row) {
         el.innerHTML = '<p class="nw-empty">Click an object on the stage, or a row in any list.</p>';
         return;
@@ -293,9 +306,75 @@ export function renderSelected(el, row, { approach = null, comparison = null, no
         parts.push('</div>');
     }
 
+    if (location) parts.push(locationBlock(location));
     if (row.elementsNote) parts.push(`<p class="nw-note">${esc(row.elementsNote)}.</p>`);
     if (row.magNote) parts.push(`<p class="nw-note">${esc(row.magNote)}.</p>`);
     el.innerHTML = parts.join('');
+}
+
+/**
+ * The selected object's place in the Earth–Moon environment — a field-by-field
+ * print of earth-moon-gravity.js `locationAnalysis`, nothing derived here.
+ */
+export function locationBlock(loc) {
+    const b = loc.budget;
+    const stat = (k, v, title = '') =>
+        `<div class="nw-stat" ${title ? `title="${esc(title)}"` : ''}>
+            <span class="nw-stat-k">${esc(k)}</span><span class="nw-stat-v">${v}</span></div>`;
+    const out = ['<div class="nw-loc" data-nw-loc>', '<h4>In the Earth–Moon environment</h4>'];
+
+    if (b) {
+        // One stacked share bar, 2px surface gaps between segments; each term
+        // also printed with its own value, so identity is never colour alone.
+        const seg = (k) => `<span class="nw-loc-seg" style="flex:${Math.max(b.share[k], 0.004).toFixed(4)};background:${GRAVITY_COLORS[k]}"></span>`;
+        out.push(`<div class="nw-loc-bar" role="img" aria-label="Share of the three accelerations">${seg('earth')}${seg('moon')}${seg('sun')}</div>`);
+        const term = (k, label, title) => `<span class="nw-loc-term${b.dominant === k ? ' nw-loc-term--dom' : ''}" title="${esc(title)}">
+            <i style="background:${GRAVITY_COLORS[k]}"></i>${esc(label)} <b>${esc(formatAcceleration(b[k]))}</b></span>`;
+        out.push(`<p class="nw-loc-terms">
+            ${term('earth', 'Earth', 'Earth’s own pull, μ⊕/r²')}
+            ${term('moon', 'Moon', 'the Moon’s pull on the object MINUS its pull on Earth — what moves it relative to Earth')}
+            ${term('sun', 'Sun tide', 'the Sun’s pull on the object minus its pull on Earth')}
+        </p>`);
+        out.push(`<p class="nw-note">Dominated by <b>${esc(DOMINANT_LABELS[b.dominant])}</b>. The Moon and Sun terms are
+            what they do to the object <em>relative to Earth</em> — Earth falls toward both as well, so their raw pull
+            (the Moon’s here: ${esc(formatAcceleration(b.moonDirect))}) would overstate them.</p>`);
+    }
+
+    out.push('<div class="nw-stats">');
+    out.push(stat('From the Moon', esc(formatGeoDistance(loc.moonDistKm)),
+        `Moon's Hill sphere ${Math.round(loc.moonHillKm).toLocaleString('en-US')} km, SOI ${Math.round(loc.moonSoiKm).toLocaleString('en-US')} km`));
+    out.push(stat('Lunar domain', loc.insideMoonHill ? '<span class="nw-up">inside Hill sphere</span>'
+        : loc.insideMoonSoi ? '<span class="nw-up">inside SOI</span>' : 'outside',
+        'The Moon’s own gravitational domain against Earth'));
+    if (loc.nearestLagrange) {
+        const nl = loc.nearestLagrange;
+        out.push(stat('Nearest Lagrange pt', `${esc(nl.system === 'sun-earth' ? 'Sun–Earth ' : 'Earth–Moon ')}${esc(nl.short)} · ${esc(formatGeoDistance(nl.distKm))}`,
+            'Distance to the nearest of the seven Lagrange points drawn on the stage'));
+    }
+    if (loc.jacobi != null && loc.jacobiMeaningful) {
+        out.push(stat('Jacobi constant', loc.jacobi.toFixed(3),
+            `C = 2Ω − v² in the Earth–Moon rotating frame (non-dimensional). Gates: ${
+                lagrangePoints(EM_MU).filter(p => p.id !== 'L5').map(p => `${p.id === 'L4' ? 'L4/5' : p.id} ${p.C.toFixed(3)}`).join(', ')}`));
+    }
+    out.push('</div>');
+
+    if (loc.jacobi == null) {
+        out.push('<p class="nw-note">No velocity for this object yet, so no Jacobi constant.</p>');
+    } else if (!loc.jacobiMeaningful) {
+        out.push(`<p class="nw-note">It is outside Earth’s Hill sphere (${(loc.earthHillKm / LD_KM).toFixed(1)} LD), where the Sun’s
+            tide outweighs Earth’s pull — so the Earth–Moon Jacobi constant, which ignores the Sun, says nothing about it
+            and no gate state is given.</p>`);
+    } else if (loc.gates) {
+        const realm = loc.gates.realm === 'exterior' ? 'outside the Earth–Moon pair'
+            : loc.gates.realm === 'moon' ? 'in the Moon’s realm' : 'in Earth’s realm';
+        out.push(`<p class="nw-loc-gate">Now ${esc(realm)}: ${esc(GATE_LABELS[loc.gates.regime])}${
+            loc.gates.regime === 'sealed' && loc.gates.realm === 'exterior' ? ' — it is kept OUT of the Earth–Moon region' : ''}.
+            With <b>Zero-velocity curves</b> on, the stage tints the region its energy forbids.</p>`);
+        out.push(`<p class="nw-note">Restricted three-body idealisation: circular Earth–Moon orbit (here the live
+            separation and rate), no Sun. Good for which doors are open, not for a trajectory.</p>`);
+    }
+    out.push('</div>');
+    return out.join('');
 }
 
 /**
@@ -481,6 +560,186 @@ export function renderGravity(el, { earthRAU = 1, nearest = null, inside = [], s
     }
 
     el.innerHTML = out.join('');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The Earth–Moon card and its profile chart
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Chart geometry, CSS px in the SVG's own viewBox. */
+const PC = Object.freeze({ w: 360, h: 210, l: 46, r: 10, t: 26, b: 30 });
+
+/**
+ * Pure: turn a `gravityProfile` result + reference markers into drawable
+ * paths and ticks. Log-log on both axes — the three terms span ten decades.
+ */
+export function profileChartModel(profile, markers = []) {
+    const S = profile.samples;
+    const xMin = Math.log10(S[0].rKm), xMax = Math.log10(S[S.length - 1].rKm);
+    // y range in m/s², fixed decades so the picture does not rescale between epochs.
+    const yMin = -9, yMax = 1;
+    const X = (rKm) => PC.l + (Math.log10(rKm) - xMin) / (xMax - xMin) * (PC.w - PC.l - PC.r);
+    const Y = (kms2) => {
+        const v = Math.log10(Math.max(kms2 * 1000, 10 ** (yMin - 1)));
+        const c = Math.max(yMin, Math.min(yMax, v));
+        return PC.t + (yMax - c) / (yMax - yMin) * (PC.h - PC.t - PC.b);
+    };
+    const path = (key) => {
+        let d = '', pen = false;
+        for (const s of S) {
+            const v = s[key];
+            if (v == null || !(v > 0) || Math.log10(v * 1000) < yMin) { pen = false; continue; }
+            d += `${pen ? 'L' : 'M'}${X(s.rKm).toFixed(1)},${Y(v).toFixed(1)}`;
+            pen = true;
+        }
+        return d;
+    };
+    const xTicks = [];
+    for (let e = Math.ceil(xMin); e <= Math.floor(xMax); e++) xTicks.push({ x: X(10 ** e), label: `10${superscript(e)} km` });
+    const yTicks = [];
+    for (let e = yMin; e <= yMax; e += 2) yTicks.push({ y: Y(10 ** e / 1000), label: `10${superscript(e)}` });
+    const marks = markers
+        .filter(m => m.km >= S[0].rKm && m.km <= S[S.length - 1].rKm)
+        .map(m => ({ ...m, x: X(m.km) }));
+    return { paths: { earth: path('earth'), moon: path('moon'), sun: path('sun') }, xTicks, yTicks, marks, X, Y, xMin, xMax };
+}
+
+function superscript(n) {
+    const map = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+    return String(n).split('').map(c => map[c] ?? c).join('');
+}
+
+/**
+ * The Earth–Moon card: the Lagrange table, the Moon's own domain, and the
+ * acceleration profile. `geometry` is the stage's `lagrangeGeometry` for this
+ * epoch, `profile` the kernel's `gravityProfile` — this formats and draws.
+ */
+export function renderEarthMoon(el, { geometry, profile, earthRAU = 1 } = {}) {
+    if (!el) return;
+    if (!geometry || !profile) { el.innerHTML = emptyState('loading', ''); return; }
+    const fr = geometry.frame;
+    const hillKm = hillRadiusKm(earthRAU);
+    const stat = (k, v, title = '') =>
+        `<div class="nw-stat" ${title ? `title="${esc(title)}"` : ''}>
+            <span class="nw-stat-k">${esc(k)}</span><span class="nw-stat-v">${v}</span></div>`;
+    const km = (v) => `${Math.round(v).toLocaleString('en-US')} km`;
+
+    const byId = Object.fromEntries(geometry.all.map(p => [p.id, p]));
+    const markers = [
+        { id: 'geo', km: GEO_RADIUS_KM, label: 'GEO' },
+        { id: 'l1', km: byId['EM-L1'].distKm, label: 'L1' },
+        { id: 'moon', km: fr.D, label: 'Moon' },
+        { id: 'l2', km: byId['EM-L2'].distKm, label: 'L2' },
+        { id: 'hill', km: hillKm, label: 'Hill' },
+    ];
+    const m = profileChartModel(profile, markers);
+    const cx = profile.crossings;
+
+    const lines = Object.entries(m.paths).map(([k, d]) =>
+        `<path d="${d}" fill="none" stroke="${GRAVITY_COLORS[k]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join('');
+    // Direct labels (≤ 4 series: legend AND labels), each placed where its
+    // own line is unambiguous: Earth near the start, the Moon at its peak, the
+    // Sun's tide at the far end — three different x, so they cannot collide.
+    const S = profile.samples;
+    const at = (key, i) => { const s = S[Math.max(0, Math.min(S.length - 1, i))]; return s && s[key] > 0 ? s : null; };
+    let peak = null;
+    for (const s of S) if (s.moon > 0 && (!peak || s.moon > peak.moon)) peak = s;
+    const label = (s, key, text, anchor, dx, dy) => (s
+        ? `<text x="${(m.X(s.rKm) + dx).toFixed(1)}" y="${(m.Y(s[key]) + dy).toFixed(1)}" text-anchor="${anchor}" class="nw-pc-lab">${esc(text)}</text>` : '');
+    const endLabel = (key) => key === 'earth' ? label(at('earth', Math.round(S.length * 0.12)), 'earth', 'Earth', 'start', 4, -6)
+        : key === 'moon' ? label(peak, 'moon', 'Moon', 'start', 6, 4)
+        : label(at('sun', S.length - 1), 'sun', 'Sun tide', 'end', -2, -7);
+
+    const svg = `
+    <svg class="nw-pc" viewBox="0 0 ${PC.w} ${PC.h}" role="img"
+         aria-label="Acceleration versus distance from Earth: Earth's pull, the Moon's perturbation and the Sun's tide">
+        ${m.yTicks.map(t => `<line x1="${PC.l}" x2="${PC.w - PC.r}" y1="${t.y.toFixed(1)}" y2="${t.y.toFixed(1)}" class="nw-pc-grid"/>
+            <text x="${PC.l - 4}" y="${(t.y + 3).toFixed(1)}" text-anchor="end" class="nw-pc-tick">${t.label}</text>`).join('')}
+        ${m.xTicks.map(t => `<text x="${t.x.toFixed(1)}" y="${PC.h - PC.b + 13}" text-anchor="middle" class="nw-pc-tick">${t.label}</text>`).join('')}
+        ${m.marks.map((k, i) => `<line x1="${k.x.toFixed(1)}" x2="${k.x.toFixed(1)}" y1="${PC.t - 2}" y2="${PC.h - PC.b}" class="nw-pc-mark"/>
+            <text x="${k.x.toFixed(1)}" y="${PC.t - 6 - (i % 2) * 8}" text-anchor="middle" class="nw-pc-marklab">${esc(k.label)}</text>`).join('')}
+        <text x="${PC.l - 38}" y="${PC.t - 12}" class="nw-pc-tick">m/s²</text>
+        ${lines}
+        ${endLabel('earth')}
+        ${endLabel('sun')}
+        ${endLabel('moon')}
+        <line class="nw-pc-cross" x1="0" x2="0" y1="${PC.t}" y2="${PC.h - PC.b}" visibility="hidden"/>
+        <rect class="nw-pc-hit" x="${PC.l}" y="${PC.t}" width="${PC.w - PC.l - PC.r}" height="${PC.h - PC.t - PC.b}" fill="transparent"/>
+    </svg>`;
+
+    const legend = `<div class="nw-pc-legend">
+        <span><i style="background:${GRAVITY_COLORS.earth}"></i>Earth’s pull</span>
+        <span><i style="background:${GRAVITY_COLORS.moon}"></i>Moon, along the Earth–Moon line</span>
+        <span><i style="background:${GRAVITY_COLORS.sun}"></i>Sun’s tide, along the Sun line</span>
+    </div>`;
+
+    const rows = geometry.all.map(p => `
+        <tr class="nw-row">
+            <td class="nw-name" title="${esc(p.role)}">${esc(p.system === 'sun-earth' ? 'Sun–Earth ' : 'Earth–Moon ')}${esc(p.short)}</td>
+            <td class="nw-num">${km(p.distKm)}</td>
+            <td class="nw-num">${(p.distKm / LD_KM).toFixed(2)} LD</td>
+            <td class="nw-num">${p.C == null ? '—' : p.C.toFixed(4)}</td>
+        </tr>`).join('');
+
+    el.innerHTML = `
+        <div class="nw-stats">
+            ${stat('Earth–Moon now', km(fr.D), `${(fr.D / LD_KM).toFixed(4)} LD — the live separation the frame is scaled to`)}
+            ${stat('Mass parameter', `μ = ${EM_MU.toFixed(5)}`, 'm_Moon / (m_Earth + m_Moon) — the one parameter of the restricted three-body problem')}
+            ${stat('Moon’s Hill sphere', km(moonHillRadiusKm(fr.D)), 'Where the Moon’s pull beats Earth’s tide on it — the edge of anything that can orbit the Moon')}
+            ${stat('Moon’s SOI', km(moonSoiRadiusKm(fr.D)), 'Where an encounter is better modelled about the Moon than about Earth')}
+        </div>
+        <h4 class="nw-sub">Which pull wins, by distance</h4>
+        ${legend}
+        <div class="nw-pc-wrap">${svg}<div class="nw-pc-tip" hidden></div></div>
+        <p class="nw-note">The Moon overtakes Earth at <b>${cx.moonOverEarthKm ? km(cx.moonOverEarthKm) : '—'}</b> along the
+            Earth–Moon line (${cx.moonOverEarthKm ? km(fr.D - cx.moonOverEarthKm) : '—'} short of the Moon). The Sun’s tide overtakes Earth at
+            <b>${cx.sunOverEarthKm ? km(cx.sunOverEarthKm) : '—'}</b> on the Sun line — farther than the Hill sphere’s
+            ${km(hillKm)}, because the Hill radius also counts the centrifugal term of an ORBITING frame
+            (3μ☉r/d³ rather than 2μ☉r/d³; the ratio is exactly (3/2)<sup>⅓</sup>). Hover the chart to read all three.</p>
+        <h4 class="nw-sub">Lagrange points <small>where the pulls and the orbit balance</small></h4>
+        <table class="nw-table">
+            <thead><tr><th>Point</th><th class="nw-num">From Earth</th><th class="nw-num">LD</th><th class="nw-num">Jacobi C</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <p class="nw-note">An object’s Jacobi constant C (in the Earth–Moon rotating frame) decides which of these doors it can
+            pass: below C<sub>L1</sub> it can cross between Earth and the Moon, below C<sub>L2</sub> it can leave behind the
+            Moon, below C<sub>L4</sub> nothing is forbidden. Earth–Moon points ride the live Moon (a circular restricted
+            three-body model scaled to today’s separation); the Sun–Earth pair sit on the Sun line, right at Earth’s Hill
+            sphere — the Hill radius is their leading-order distance.</p>`;
+
+    wireProfileHover(el, profile, m);
+}
+
+/** Crosshair + tooltip for the profile chart (hit target = the whole plot). */
+function wireProfileHover(el, profile, m) {
+    const svg = el.querySelector('svg.nw-pc');
+    const hit = svg?.querySelector('.nw-pc-hit');
+    const cross = svg?.querySelector('.nw-pc-cross');
+    const tip = el.querySelector('.nw-pc-tip');
+    if (!svg || !hit || !cross || !tip) return;
+    const S = profile.samples;
+    const show = (clientX) => {
+        const box = svg.getBoundingClientRect();
+        if (!box.width) return;
+        const vx = (clientX - box.left) * (PC.w / box.width);
+        const lr = m.xMin + (vx - PC.l) / (PC.w - PC.l - PC.r) * (m.xMax - m.xMin);
+        let best = S[0];
+        for (const s of S) if (Math.abs(Math.log10(s.rKm) - lr) < Math.abs(Math.log10(best.rKm) - lr)) best = s;
+        const x = m.X(best.rKm);
+        cross.setAttribute('x1', x.toFixed(1)); cross.setAttribute('x2', x.toFixed(1));
+        cross.setAttribute('visibility', 'visible');
+        const terms = [['earth', 'Earth'], ['moon', 'Moon'], ['sun', 'Sun tide']].filter(([k]) => best[k] != null);
+        const dom = terms.reduce((a, b) => (best[b[0]] > best[a[0]] ? b : a), terms[0]);
+        tip.innerHTML = `<b>${esc(formatGeoDistance(best.rKm))}</b>${terms.map(([k, label]) =>
+            `<span><i style="background:${GRAVITY_COLORS[k]}"></i>${label} ${esc(formatAcceleration(best[k]))}${k === dom[0] ? ' ◂' : ''}</span>`).join('')}`;
+        tip.hidden = false;
+        const px = x / PC.w * box.width;
+        tip.style.left = `${Math.min(Math.max(px, 70), box.width - 70)}px`;
+    };
+    const hide = () => { cross.setAttribute('visibility', 'hidden'); tip.hidden = true; };
+    hit.addEventListener('pointermove', (e) => show(e.clientX));
+    hit.addEventListener('pointerdown', (e) => show(e.clientX));
+    hit.addEventListener('pointerleave', hide);
 }
 
 /** A short line naming what each feed is currently doing. */

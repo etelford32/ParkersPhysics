@@ -1,0 +1,110 @@
+{
+  "generated_at": "2026-11-03T22:33:14.243Z",
+  "source": {
+    "file": "trojans-catalog.json",
+    "catalogue_generated_at": "2026-11-03T17:25:30.784Z",
+    "freshness": "live",
+    "precision": "full",
+    "epoch_jd": 2461200.5,
+    "rows": 16445,
+    "jupiter": "horizons",
+    "saturn": "horizons"
+  },
+  "run": {
+    "years": 600,
+    "dtDays": 40,
+    "workers": 4,
+    "seconds": 51,
+    "skipped": 0
+  },
+  "regimes": {
+    "L4": 10347,
+    "L5": 5955,
+    "encounter": 109,
+    "horseshoe": 33,
+    "circulating": 1
+  },
+  "alignment": {
+    "epoch": 14801,
+    "two-body-after-encounter": 7,
+    "n-body": 1637
+  },
+  "regimes_by_quality": {
+    "well-determined:L4": 8805,
+    "well-determined:L5": 5507,
+    "well-determined:encounter": 19,
+    "short-arc:encounter": 90,
+    "short-arc:L4": 1542,
+    "short-arc:L5": 448,
+    "short-arc:horseshoe": 32,
+    "short-arc:circulating": 1,
+    "well-determined:horseshoe": 1
+  },
+  "regimes_by_alignment": {
+    "epoch:L4": 9043,
+    "epoch:L5": 5729,
+    "epoch:encounter": 27,
+    "two-body-after-encounter:encounter": 7,
+    "n-body:L4": 1304,
+    "n-body:L5": 226,
+    "n-body:encounter": 75,
+    "n-body:horseshoe": 31,
+    "n-body:circulating": 1,
+    "epoch:horseshoe": 2
+  },
+  "camps_at_epoch": {
+    "nL4": 10457,
+    "nL5": 5988,
+    "ratio": 1.7463259853039412,
+    "lo": 1.7182536344694075,
+    "hi": 1.7748569744125737
+  },
+  "camps_librating": {
+    "nL4": 10347,
+    "nL5": 5955,
+    "ratio": 1.7375314861460958,
+    "lo": 1.709498264507012,
+    "hi": 1.766024410805523
+  },
+  "camps_librating_by_quality": {
+    "well-determined": {
+      "nL4": 8805,
+      "nL5": 5507,
+      "ratio": 1.5988741601597967,
+      "lo": 1.5716401469125285,
+      "hi": 1.6265800953537062
+    },
+    "short-arc": {
+      "nL4": 1542,
+      "nL5": 448,
+      "ratio": 3.4419642857142856,
+      "lo": 3.2621192555198855,
+      "hi": 3.6317244147607304
+    }
+  },
+  "librating": {
+    "median_amplitude_deg": 14.847919581790507,
+    "median_period_yr": 151.7864476386037,
+    "median_i_mean_deg": 11.982557155763212,
+    "median_e_mean": 0.06822601695006447,
+    "proper": {
+      "with_D_p": 16299,
+      "median_D_p_deg": 14.642308364359495,
+      "median_f_deg_yr": 2.3705683333421224,
+      "median_halfrange_minus_D_p_deg": 0.22278010983269958,
+      "with_e_p": 0,
+      "with_sinI_p": 0
+    },
+    "analytic_vs_integrated_amp": {
+      "n": 16298,
+      "median_diff_deg": 0.2147838261727415,
+      "median_abs_diff_deg": 0.9433464959272371
+    }
+  },
+  "sizes": {
+    "measured": 1879,
+    "from_measured_albedo": 0,
+    "from_population_albedo": 14566,
+    "population_albedo": 0.07
+  }
+}
