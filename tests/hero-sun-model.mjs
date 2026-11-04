@@ -155,4 +155,60 @@ assert.ok(marks.some((m) => m.kind === 'set' && m.label.includes('4120')), 'limb
 assert.ok(marks.every((m) => m.t >= win.t0 && m.t <= win.t1), 'marks inside the window');
 assert.ok(!marks.some((m) => m.label.startsWith('CME 1')), 'the W80 rope is not Earth-directed — no arrival mark');
 
+
+
+// ── 2026-11: flare waves + prominences ──────────────────────────────────
+{
+    const { flareWave, WAVE_SPEED_KMS, R_SUN_KM, WAVE_LIFE_MIN, prominenceSpine, hekProminences,
+        regionProminences, prominenceAt, prominenceHeightRad, PROM_HEIGHT_SCALE, MAX_FILAMENTS } = await import('../js/hero-sun-model.js');
+    const site = { timeMs: NOW, latDeg: 10, lonDeg: 20, letter: 'M' };
+    assert.equal(flareWave(site, NOW - 1), null, 'no wave before the flare');
+    const w10 = flareWave(site, NOW + 10 * 60e3);
+    near(w10.radiusRad, WAVE_SPEED_KMS * 600 / R_SUN_KM, 1e-12, 'front radius = v·t / R☉');
+    assert.ok(w10.radiusRad > 0.25 && w10.radiusRad < 0.35, '~0.3 rad after 10 min at 350 km/s');
+    const w30 = flareWave(site, NOW + 30 * 60e3);
+    assert.ok(w30.radiusRad > w10.radiusRad && w30.strength < w10.strength, 'expands and fades');
+    assert.equal(flareWave(site, NOW + (WAVE_LIFE_MIN + 1) * 60e3), null, 'gone after its life');
+    assert.ok(flareWave({ ...site, letter: 'X' }, NOW + 60e3).strength > flareWave(site, NOW + 60e3).strength, 'class-weighted');
+
+    // Spine: on the unit sphere, centred, along the tilt direction.
+    const sp = prominenceSpine(15, -30, 0, 10 * Math.PI / 180, 8);
+    assert.equal(sp.length, 9);
+    for (const p of sp) near(Math.hypot(...p), 1, 1e-12, 'spine on the sphere');
+    const c = helioUnit(15, -30);
+    near(dot(sp[4], c), 1, 1e-12, 'middle sample is the centre');
+    near(Math.acos(dot(sp[0], sp[8])), 20 * Math.PI / 180, 1e-9, 'end-to-end length = 2·halfLen');
+    const spW = prominenceSpine(0, 0, 0, 0.1, 2), spN = prominenceSpine(0, 0, 90, 0.1, 2);
+    assert.ok(spW[2][1] > 0.09 && Math.abs(spW[2][2]) < 1e-9, 'tilt 0 runs west (+y)');
+    assert.ok(spN[2][2] > 0.09 && Math.abs(spN[2][1]) < 1e-9, 'tilt 90 runs north (+z)');
+
+    // HEK rows → records; longest first; capped; junk dropped; clamp honoured.
+    const rows = [
+        { event_type: 'FI', lat_deg: -20, lon_deg: 40, length_deg: 30, tilt_deg: 15, time: '2026-09-24T06:00:00Z' },
+        { event_type: 'PG', lat_deg: 45, lon_deg: 88, length_deg: 12, tilt_deg: -40, time: '2026-09-24T05:00:00Z' },
+        { event_type: 'FI', lat_deg: 'x', lon_deg: 1 },
+        { event_type: 'FI', lat_deg: 5, lon_deg: -70, length_deg: 500, time: '2026-09-24T04:00:00Z' },
+    ];
+    const prom = hekProminences(rows);
+    assert.equal(prom.length, 3, 'junk row dropped');
+    assert.equal(prom[0].latDeg, 5, 'longest first (clamped to 80°)');
+    near(prom[0].halfLenRad, 40 * Math.PI / 180, 1e-12, 'length clamp');
+    assert.equal(prom[1].latDeg, -20); assert.equal(prom[2].latDeg, 45);
+    assert.equal(prom[2].anchorMs, Date.parse('2026-09-24T05:00:00Z'));
+    near(prom[1].heightRad, prominenceHeightRad(prom[1].halfLenRad) * PROM_HEIGHT_SCALE, 1e-12, 'height scaled and disclosed');
+    assert.ok(prom.every((p) => p.kind === 'observed'));
+    assert.equal(hekProminences(Array.from({ length: 40 }, (_, i) => ({ lat_deg: i, lon_deg: 0, length_deg: 5, time: '2026-09-24T00:00:00Z' }))).length, MAX_FILAMENTS, 'capped');
+    assert.equal(hekProminences([{ lat_deg: 1, lon_deg: 2 }]).length, 0, 'no time and no fallback anchor → dropped');
+    assert.equal(hekProminences([{ lat_deg: 1, lon_deg: 2 }], { fallbackAnchorMs: NOW })[0].anchorMs, NOW);
+
+    // Region fallback: along the PIL (⊥ the Joy's-law axis).
+    const regs = [{ region: '4233', latDeg: -9, lonDeg: -58, anchorMs: NOW, area: 650 }];
+    const rp = regionProminences(regs);
+    assert.equal(rp.length, 1); assert.equal(rp[0].kind, 'region');
+    const spine = prominenceSpine(rp[0].latDeg, rp[0].lonDeg, rp[0].tiltDeg, rp[0].halfLenRad, 2);
+    const d = [0, 1, 2].map((i) => spine[2][i] - spine[0][i]);
+    near(dot(d, bipoleAxisAt(-9, -58)), 0, 1e-9, 'region filament ⊥ bipole axis (on the PIL)');
+    // Carried by the same differential rotation as the regions.
+    near(prominenceAt(rp[0], NOW + DAY).lonDeg, regionAt(regs[0], NOW + DAY).lonDeg, 1e-12, 'co-rotates with its region');
+}
 console.log('hero-sun-model: all assertions passed');

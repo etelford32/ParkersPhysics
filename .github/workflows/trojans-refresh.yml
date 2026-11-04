@@ -1,0 +1,155 @@
+name: trojans-refresh
+
+# Weekly recomputation of the Jupiter Trojan population tables.
+#
+# WHY HERE AND NOT IN VERCEL OR THE BROWSER: the full-population integration
+# with frequency analysis costs ~3 CPU-minutes for 600 yr (52 s on 4 threads,
+# measured 2026-11-03) and ~1 CPU-hour for the 20-kyr run that resolves the
+# proper eccentricity — past a Vercel function's 60 s and far past a browser
+# frame budget, so pages load the precomputed data/trojans/trojans-dynamics.json
+# instead. Nothing here touches Supabase.
+#
+# THE LONG RUN IS 20 kyr ON PURPOSE: proper e_p and its frequency g need
+# ≳ 18 kyr to resolve (js/trojan-dynamics.js PROPER.secularMinSpanYears —
+# derived from AstDyS's own g distribution). sin I_p needs ≳ 250 kyr and is
+# withheld at this length; that is a sample-scale validation run, not weekly.
+# Both runs are scored against AstDyS (scripts/compare-astdys.mjs).
+#
+# WHAT IT DOES: fetch the live /api/trojans/catalog (refusing a degraded body
+# via --require-live) and /api/trojans/proper (AstDyS), run the node gates,
+# integrate 600 yr + 20 kyr, score both against AstDyS,
+# rebuild TROJANS_LIST.md, upload the full CSVs + the catalogue as a build
+# artifact (they are NOT committed — ~3 MB per refresh), and open or update
+# ONE pull request on the branch `data/trojans-refresh` with the small
+# committed files. It never pushes to main: a push to main is a production
+# deploy, and a human should look at a population change before it ships.
+#
+# REPO SETTING NEEDED for the PR step: Settings → Actions → General →
+# "Allow GitHub Actions to create and approve pull requests". Without it the
+# compute still runs and the artifact still uploads; only the PR step fails.
+# NOTE: a PR opened with GITHUB_TOKEN does not trigger other workflows' CI —
+# run trojan-kernels by hand on it (workflow_dispatch) if you want the gate.
+
+on:
+  schedule:
+    - cron: '41 9 * * 1'   # Mondays 09:41 UTC (off the hour, outside 6–9 AM Pacific)
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Catalogue URL (a preview deployment works too)'
+        required: false
+        default: 'https://www.parkersphysics.com/api/trojans/catalog'
+      astdys_url:
+        description: 'AstDyS proper-elements relay URL'
+        required: false
+        default: 'https://www.parkersphysics.com/api/trojans/proper'
+      long_years:
+        description: 'Years for the long run (20000 resolves e_p; 0 to skip)'
+        required: false
+        default: '20000'
+
+permissions:
+  contents: write        # push the refresh branch
+  pull-requests: write   # open / update its PR
+
+concurrency:
+  group: trojans-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CATALOG_URL: ${{ inputs.url || 'https://www.parkersphysics.com/api/trojans/catalog' }}
+      ASTDYS_URL: ${{ inputs.astdys_url || 'https://www.parkersphysics.com/api/trojans/proper' }}
+      LONG_YEARS: ${{ inputs.long_years || '20000' }}
+      BRANCH: data/trojans-refresh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fetch the live catalogue
+        run: |
+          curl -fsS --retry 3 --retry-delay 10 --max-time 120 --compressed \
+            -H 'Accept: application/json' "$CATALOG_URL" -o "$RUNNER_TEMP/catalog.json"
+          node -e "const b=require(process.argv[1]);console.log('rows',b.count,'freshness',b.freshness,'precision',b.precision,'quality',b.quality_fields,'format',b.format,'epoch',b.epoch&&b.epoch.epoch)" "$RUNNER_TEMP/catalog.json"
+
+      - name: Fetch AstDyS proper elements (validation set; optional)
+        run: |
+          if curl -fsS --retry 3 --retry-delay 10 --max-time 120 --compressed "$ASTDYS_URL" -o "$RUNNER_TEMP/astdys.json" \
+             && node -e "const b=require(process.argv[1]); if (b.freshness!=='live'||!(b.count>1000)) process.exit(1); console.log('AstDyS rows',b.count,b.source_url)" "$RUNNER_TEMP/astdys.json"; then
+            echo "ASTDYS_OK=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::AstDyS relay unavailable — keeping the committed comparison"
+          fi
+
+      - name: Node gates
+        run: |
+          node tests/trojan-sources.mjs
+          node tests/frequency-analysis.mjs
+          node tests/astdys-proper.mjs
+          node tests/trojan-dynamics.mjs
+
+      - name: Integrate 600 yr (the committed tables)
+        run: |
+          node scripts/analyze-trojans.mjs "$RUNNER_TEMP/catalog.json" --require-live --out data/trojans
+          if [ "$ASTDYS_OK" = "1" ]; then node scripts/compare-astdys.mjs data/trojans/trojans-analysis.csv "$RUNNER_TEMP/astdys.json" --out data/trojans/astdys-comparison.json; fi
+
+      - name: Integrate the long check run
+        if: env.LONG_YEARS != '0'
+        run: |
+          node scripts/analyze-trojans.mjs "$RUNNER_TEMP/catalog.json" --require-live --years "$LONG_YEARS" --out "$RUNNER_TEMP/long"
+          cp "$RUNNER_TEMP/long/trojans-summary.json" data/trojans/trojans-summary-long.json
+          # e_p / g need the long run: copy them into the 600-yr artifact by designation.
+          node scripts/merge-long-proper.mjs data/trojans/trojans-dynamics.json "$RUNNER_TEMP/long/trojans-analysis.csv" --years "$LONG_YEARS"
+          if [ "$ASTDYS_OK" = "1" ]; then node scripts/compare-astdys.mjs "$RUNNER_TEMP/long/trojans-analysis.csv" "$RUNNER_TEMP/astdys.json" --out data/trojans/astdys-comparison-long.json; fi
+
+      - name: Rebuild the population list
+        run: |
+          if [ "$LONG_YEARS" != "0" ]; then
+            node scripts/build-trojan-report.mjs data/trojans --long "$RUNNER_TEMP/long"
+          else
+            node scripts/build-trojan-report.mjs data/trojans
+          fi
+
+      - name: Upload the full tables (not committed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: trojans-full-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            data/trojans/trojans-analysis.csv
+            ${{ runner.temp }}/long/trojans-analysis.csv
+            ${{ runner.temp }}/catalog.json
+
+      - name: Open or update the refresh PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          # One git add per file that exists: a single add with a missing path
+          # fails as a whole and stages NOTHING (the comparisons are optional).
+          for f in trojans-dynamics.json trojans-summary.json trojans-summary-long.json TROJANS_LIST.md \
+                   astdys-comparison.json astdys-comparison-long.json; do
+            [ -f "data/trojans/$f" ] && git add "data/trojans/$f"
+          done
+          if git diff --cached --quiet; then echo "No change to the committed tables."; exit 0; fi
+          SUMMARY=$(node -e "const s=require('./data/trojans/trojans-summary.json');const r=s.regimes;console.log(s.source.rows+' objects · L4 '+r.L4+' · L5 '+r.L5+' · encounter '+(r.encounter||0)+' · L4:L5 '+s.camps_librating.ratio.toFixed(3))")
+          git commit -q -m "data(trojans): weekly refresh — $SUMMARY"
+          git push -q --force origin "$BRANCH"
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')" ]; then
+            gh pr create --head "$BRANCH" --base "${{ github.event.repository.default_branch }}" \
+              --title "data(trojans): weekly population refresh" \
+              --body "Automated by \`.github/workflows/trojans-refresh.yml\` (run ${{ github.run_id }}).
+
+          $SUMMARY
+
+          Committed: \`data/trojans/trojans-dynamics.json\`, the two summaries and \`TROJANS_LIST.md\`. The full per-object CSVs and the catalogue are the run's build artifact (30 days). Review the regime counts and the L4:L5 ratio before merging — merging deploys to production."
+          else
+            echo "Updated the open refresh PR."
+          fi

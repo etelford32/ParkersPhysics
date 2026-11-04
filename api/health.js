@@ -71,6 +71,9 @@ const UPSTREAMS = [
     // /api/neo/watch (solar-system.html NEO layer), so this row IS
     // authoritative. The cheapest call on that host: one fireball row.
     { source: 'jpl-ssd-api',  url: 'https://ssd-api.jpl.nasa.gov/fireball.api?limit=1', edge_authoritative: true },
+    // AstDyS proper elements — proxied by /api/trojans/proper (the Trojan
+    // validation set). The site root is the cheapest reachability probe.
+    { source: 'astdys',       url: 'https://newton.spacedys.com/~astdys2/', edge_authoritative: true },
     // Environment upstreams. Both are proxied through the edge
     // (/api/wildfires/events, /api/air-quality/{grid,centers}), so these
     // rows are authoritative for the EarthView pollution/wildfire layers
