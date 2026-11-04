@@ -1,8 +1,10 @@
 # SUPABASE_OFFLOAD_PLAN.md — take compute (and bulk data) out of Supabase
 
-> Status: **PLAN, nothing applied.** Written 2026-11-03 from live measurements
-> of project `aijsboodkivnhzfstvdq`. Every number in §1 is reproducible with
-> the queries in §7. No migration in here has been run against production.
+> Status: **Phase A1 + the in-database half of Phase D APPLIED 2026-11-04**
+> (`supabase-compute-offload-migration.sql`, measured before/after in its
+> APPLY LOG). Everything else is still a plan. Written 2026-11-03 from live
+> measurements of project `aijsboodkivnhzfstvdq`; every number in §1 is
+> reproducible with the queries in §7 and describes the state BEFORE A1.
 
 ## 0. The one-paragraph answer
 
@@ -127,7 +129,8 @@ Rules that keep this honest:
 `compute_weather_extremes` is **the** compute load. Two options; do A1 now,
 A2 when Phase B lands.
 
-- **A1 (in-DB, small):** split it into
+- **A1 (in-DB, small) — DONE 2026-11-04.** Hourly run 31–36 s → 0.043 s;
+  stats bit-identical to the old pass on 2 592/2 592 cells. Split into
   - `compute_weather_cell_stats(30)` — the percentile pass, writes a
     `weather_cell_stats` table (2 592 rows), scheduled **once a day**
     (03:20 UTC). Percentiles over 30 days move by <1/720 of their sample
@@ -184,6 +187,10 @@ A2 when Phase B lands.
 
 ### Phase D — cut the per-minute chatter (~half a day)
 
+- **DONE 2026-11-04 (heartbeat + prune, in the database; no cron or JS
+  change was needed):** `record_pipeline_success` skips the UPDATE while
+  healthy, same-source and < 150 s old; ten prune jobs → `prune_housekeeping()`.
+  The `s-maxage` item below is still open.
 - `refresh-solar-wind` every minute is correct for freshness, but it writes a
   `pipeline_heartbeat` UPDATE every minute (1 440 dead tuples/day on a hot
   row). Change the solar-wind caller to write the success heartbeat **on
