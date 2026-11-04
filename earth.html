@@ -371,7 +371,7 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #coord-tip.show { opacity:1; }
 
 /* ─── City hover tooltip (major-city dots) ───────────────────── */
-#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip {
+#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip, #volcano-tip {
     position:fixed; z-index:56; display:none; pointer-events:none;
     background:rgba(2,10,20,.9); border:1px solid rgba(77,219,255,.45);
     border-radius:8px; padding:7px 11px; white-space:nowrap;
@@ -384,6 +384,20 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #wildfire-tip { border-color:rgba(255,80,30,.6); }
 #station-tip { border-color:rgba(120,255,190,.5); }
 #residual-tip { border-color:rgba(190,160,255,.55); }
+/* Volcano tooltip (js/earth-volcano-layer.js). A TAP pins it and makes it
+   clickable so the "open in Earth Volcanoes" link is reachable on touch. */
+#volcano-tip { border-color:rgba(255,120,40,.6); white-space:normal; max-width:280px; }
+#volcano-tip.pinned { pointer-events:auto; }
+#volcano-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
+#volcano-tip .cty-sub { color:#ffd2a8; font-size:10px; margin-top:1px; }
+#volcano-tip .vt-row { color:#c6d4e8; font-size:10px; margin-top:2px; }
+#volcano-tip .vt-live { color:#ff9a5c; font-size:10px; margin-top:2px; font-weight:600; }
+#volcano-tip .cty-hint { color:#7f93b3; font-size:9px; margin-top:4px; }
+#volcano-tip a { color:#ffb37a; }
+.lyr-vol-swatch { display:inline-block; width:0; height:0; margin:0 4px 0 2px; vertical-align:middle;
+    border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:9px solid currentColor; }
+.lyr-vol-note { font-size:.6rem; color:#7887a3; line-height:1.45; margin-top:6px; }
+.lyr-vol-note a { color:#ffb37a; }
 #city-tip .cty-name, #ocean-tip .cty-name, #air-quality-tip .cty-name, #pollution-tip .cty-name, #wildfire-tip .cty-name, #station-tip .cty-name, #residual-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
 #city-tip .cty-sub,  #ocean-tip .cty-sub,  #air-quality-tip .cty-sub, #pollution-tip .cty-sub, #wildfire-tip .cty-sub  { color:#8ff0ff; font-size:10px; margin-top:1px; }
 #city-tip .cty-hint, #ocean-tip .cty-hint, #air-quality-tip .cty-hint, #pollution-tip .cty-hint, #wildfire-tip .cty-hint, #station-tip .cty-hint, #residual-tip .cty-hint { color:#5f7597; font-size:9px;  margin-top:3px; }
@@ -2993,6 +3007,15 @@ import './js/telemetry.js';
         <div class="cty-hint" id="wildfire-tip-hint">NASA EONET wildfire event</div>
     </div>
 
+    <div id="volcano-tip" role="dialog" aria-label="Volcano">
+        <div class="cty-name" id="volcano-tip-name">—</div>
+        <div class="cty-sub" id="volcano-tip-sub">—</div>
+        <div class="vt-row" id="volcano-tip-last">—</div>
+        <div class="vt-row" id="volcano-tip-hazard">—</div>
+        <div class="vt-live" id="volcano-tip-live" hidden></div>
+        <div class="cty-hint" id="volcano-tip-hint">Smithsonian GVP · tap to pin</div>
+    </div>
+
     <div id="station-tip">
         <div class="cty-name" id="station-tip-name">—</div>
         <div class="cty-sub" id="station-tip-sub">—</div>
@@ -3435,6 +3458,23 @@ import './js/telemetry.js';
                 <div class="lyr"><input type="checkbox" id="lyr-chex"><label for="lyr-chex">Charge Exchange</label></div>
                 <div class="lyr"><input type="checkbox" id="lyr-cme"><label for="lyr-cme">CME Shockfront</label></div>
             </div></div>
+        </div>
+
+        <!-- ── Volcanoes (js/earth-volcano-layer.js over js/volcano-engine.js) ──
+             Every volcano in the Smithsonian GVP catalogue — 1222 Holocene +
+             1439 Pleistocene — coloured by the engine's six status classes,
+             with a pulsing halo on volcanoes the live feed says are elevated
+             or erupting today. The catalogue loads on first enable. -->
+        <div class="lyr-section collapsed" data-lyr-section="volcanoes">
+            <div class="lyr-section-hdr"><span>VOLCANOES</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body"><div class="lyr-grid">
+                <div class="lyr" title="Every volcano on Earth from the Smithsonian Global Volcanism Program (Volcanoes of the World 5.3.4, lists of 22 Mar 2026). Triangles are coloured by how recently each erupted; a pulsing halo marks volcanoes that USGS or NASA EONET report as elevated or erupting today. Hover for details, tap to pin."><input type="checkbox" id="lyr-volcanoes"><span class="lyr-status" data-layer="volcanoes" title="off — enable to load"></span><label for="lyr-volcanoes">Volcanoes (GVP)</label><span class="lyr-count" id="volcanoes-count">off</span></div>
+                <div class="lyr" title="Active: erupted since 1900, or dated CE eruption before 1900 (historical). Includes volcanoes that erupted in 2025–26."><input type="checkbox" id="lyr-volcanoes-active" checked><label for="lyr-volcanoes-active"><span class="lyr-vol-swatch" style="color:#ff9a2e"></span>Active</label></div>
+                <div class="lyr" title="Dormant: Holocene volcanoes (last ~11,700 yr) with no dated eruption in the Common Era, plus Holocene volcanoes whose activity GVP rates uncertain."><input type="checkbox" id="lyr-volcanoes-dormant" checked><label for="lyr-volcanoes-dormant"><span class="lyr-vol-swatch" style="color:#36c9b4"></span>Dormant</label></div>
+                <div class="lyr" title="Inactive: GVP's Pleistocene list — no known eruption in the Holocene. Inactive, not extinct."><input type="checkbox" id="lyr-volcanoes-inactive" checked><label for="lyr-volcanoes-inactive"><span class="lyr-vol-swatch" style="color:#6b7280"></span>Inactive (Pleistocene)</label></div>
+            </div>
+            <div class="lyr-vol-note" id="volcanoes-note">Status from the GVP catalogue · live halo from USGS HANS + NASA EONET. <a href="volcanoes.html">Open the Earth Volcanoes lab →</a></div>
+            </div>
         </div>
 
         <!-- ── NASA Earth Observations ── -->
@@ -4441,6 +4481,7 @@ import { AirQualityFeed } from './js/air-quality-feed.js';
 import { AirQualityLayer } from './js/air-quality-layer.js';
 import { PollutionCentersLayer } from './js/pollution-centers-layer.js';
 import { WildfireLayer } from './js/wildfire-layer.js';
+import { EarthVolcanoLayer } from './js/earth-volcano-layer.js';
 import { AqiHeatmapLayer } from './js/aqi-heatmap-layer.js';
 import { IntlStationsLayer } from './js/intl-stations-layer.js';
 import { ResidualLayer } from './js/residual-layer.js';
@@ -9082,6 +9123,71 @@ document.getElementById('lyr-wildfires')?.addEventListener('change', e => {
     wildfireLayer.setVisible(e.target.checked);
     if (!e.target.checked) _setWildfireHover(null);
 });
+
+// ── Volcanoes (js/earth-volcano-layer.js) ────────────────────────────────
+// GVP catalogue + live activity; status / hazard / the live join all come
+// from js/volcano-engine.js. The catalogue loads on the first enable. A dead
+// live feed keeps the catalogue drawn and turns the pip amber with the reason.
+const _volcanoCount = document.getElementById('volcanoes-count');
+const volcanoLayer = new EarthVolcanoLayer(THREE, {
+    geoToXYZ,
+    onStatus(state, detail = {}) {
+        if (_volcanoCount) {
+            _volcanoCount.classList.remove('live', 'error');
+            _volcanoCount.textContent = state === 'fetching' ? '…'
+                : state === 'loaded' ? `${detail.count.toLocaleString()}${detail.live ? ` · ${detail.live} live` : ''}`
+                : state === 'error' ? 'error' : 'off';
+            _volcanoCount.classList.toggle('live', state === 'loaded');
+            _volcanoCount.classList.toggle('error', state === 'error');
+        }
+        const liveDown = state === 'loaded' && detail.liveFreshness !== 'live';
+        _setLayerPipById('volcanoes',
+            state === 'loaded' ? (liveDown ? 'error' : 'loaded') : state === 'fetching' ? 'fetching'
+                : state === 'error' ? 'error' : 'idle',
+            state === 'loaded'
+                ? `${detail.count} volcanoes (GVP lists ${detail.catalogue ?? ''}) · `
+                  + (liveDown ? `live status unavailable or partial (${(detail.liveReasons ?? []).join(', ') || 'unknown'})`
+                              : `${detail.live} elevated/erupting today`)
+                : state === 'error' ? `catalogue unavailable: ${detail.error ?? 'unknown'}`
+                : state === 'fetching' ? 'loading the volcano catalogue…'
+                : 'off — enable to load', { notify: state === 'error' });
+    },
+});
+earthMesh.add(volcanoLayer.group);
+window.__volcanoLayer = volcanoLayer;
+document.getElementById('lyr-volcanoes')?.addEventListener('change', e => {
+    volcanoLayer.setVisible(e.target.checked);
+    if (!e.target.checked) _setVolcanoHover(null);
+});
+for (const g of ['active', 'dormant', 'inactive']) {
+    document.getElementById(`lyr-volcanoes-${g}`)?.addEventListener('change', e => {
+        volcanoLayer.setGroupVisible(g, e.target.checked);
+        // picking a group is a request to SEE volcanoes — switch the layer on
+        const master = document.getElementById('lyr-volcanoes');
+        if (e.target.checked && master && !master.checked) {
+            master.checked = true; master.dispatchEvent(new Event('change'));
+        }
+    });
+}
+// Test/console probe: the most camera-facing shown volcano and its screen
+// position (globe rotation makes fixed coordinates unstable).
+window.__volcanoAtCenter = (filter = null) => {
+    if (!volcanoLayer.cat) return null;
+    const camDir = camera.position.clone().normalize();
+    let best = null, bestDot = -1;
+    for (const v of volcanoLayer.cat.volcanoes) {
+        if (!volcanoLayer.groupVisible({ erupting: 'active', recent: 'active', historical: 'active', dormant: 'dormant', uncertain: 'dormant', inactive: 'inactive' }[v.status])) continue;
+        if (filter && !filter(v)) continue;
+        const w = volcanoLayer.worldPosition(v.i);
+        const d = w.clone().normalize().dot(camDir);
+        if (d > bestDot) { bestDot = d; best = { v, w }; }
+    }
+    if (!best) return null;
+    const ndc = best.w.clone().project(camera);
+    const r = renderer.domElement.getBoundingClientRect();
+    return { num: best.v.num, name: best.v.name, status: best.v.status,
+             x: r.left + (ndc.x + 1) / 2 * r.width, y: r.top + (1 - ndc.y) / 2 * r.height };
+};
 
 // ── International ground monitors (OpenAQ) ────────────────────────────────
 // Real PM2.5 observations from ~1000 reference stations worldwide — the
@@ -13840,6 +13946,7 @@ renderer.domElement.addEventListener('mousemove', e => {
         _setWildfireHover(null);
         _setPollutionHover(null);
         _setCityHover(null);
+        if (!_volcanoPinned) _setVolcanoHover(null);
         return;
     } else {
         _hideEqPopup();
@@ -13855,6 +13962,7 @@ renderer.domElement.addEventListener('mousemove', e => {
         _setWildfireHover(null);
         _setPollutionHover(null);
         _setCityHover(null);
+    if (!_volcanoPinned) _setVolcanoHover(null);
     } else {
         hideAlertTip();
         const oceanHovered = oceanStationsLayer.getHovered(alertRay);
@@ -13864,6 +13972,7 @@ renderer.domElement.addEventListener('mousemove', e => {
             _setWildfireHover(null);
             _setPollutionHover(null);
             _setCityHover(null);
+        if (!_volcanoPinned) _setVolcanoHover(null);
         } else {
             _setOceanHover(null);
             const airHovered = airQualityLayer.getHovered(alertRay);
@@ -13872,8 +13981,18 @@ renderer.domElement.addEventListener('mousemove', e => {
                 _setWildfireHover(null);
                 _setPollutionHover(null);
                 _setCityHover(null);
+            if (!_volcanoPinned) _setVolcanoHover(null);
             } else {
                 _setAirQualityHover(null);
+                // Volcanoes outrank the environment markers (a summit is a
+                // fixed, named place) but sit below ocean/air samples.
+                const volcanoHovered = volcanoLayer.getHovered(alertRay);
+                if (!_volcanoPinned) _setVolcanoHover(volcanoHovered, e.clientX, e.clientY);
+                if (volcanoHovered) {
+                    _setStationHover(null); _setResidualHover(null);
+                    _setWildfireHover(null); _setPollutionHover(null); _setCityHover(null);
+                    return;
+                }
                 // Ground observations outrank model markers; wildfire events
                 // (rarer, higher stakes) outrank pollution rings; everything
                 // outranks plain city dots.
@@ -13909,7 +14028,58 @@ renderer.domElement.addEventListener('mouseleave', () => {
     _setWildfireHover(null);
     _setPollutionHover(null);
     _setCityHover(null);
+    if (!_volcanoPinned) _setVolcanoHover(null);
 });
+
+// ── Volcano hover: tooltip + glyph highlight ────────────────────────────────
+// hit = layer.describe(i) | null. Every number printed comes from
+// js/volcano-engine.js through the layer. A TAP pins the tip (and makes it
+// clickable, for the deep link); the next tap elsewhere releases it.
+let _volcanoHoverIdx = -1;
+var _volcanoPinned = false;   // var: read by the mousemove handler registered above
+function _fmtYear(y) { return y == null ? 'unknown' : y < 0 ? `${(-y).toLocaleString()} BCE` : `${y} CE`; }
+function _setVolcanoHover(hit, cx, cy, { pin = false } = {}) {
+    const tip = document.getElementById('volcano-tip');
+    if (!hit) {
+        _volcanoPinned = false;
+        tip.classList.remove('pinned');
+        if (_volcanoHoverIdx !== -1) {
+            _volcanoHoverIdx = -1;
+            volcanoLayer.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    const { volcano: v, index, statusLabel, last, p10, live } = hit;
+    if (index !== _volcanoHoverIdx || pin) {
+        _volcanoHoverIdx = index;
+        volcanoLayer.setHighlight(index);
+        document.getElementById('volcano-tip-name').textContent = v.name;
+        document.getElementById('volcano-tip-sub').textContent =
+            `${statusLabel} · ${v.type ?? 'volcano'}${v.elev != null ? ` · ${v.elev.toLocaleString()} m` : ''}${v.country ? ` · ${v.country}` : ''}`;
+        document.getElementById('volcano-tip-last').textContent =
+            `Last known eruption: ${_fmtYear(last?.year ?? null)}${last?.vei != null ? ` (VEI ${last.vei})` : ''}`;
+        document.getElementById('volcano-tip-hazard').textContent = p10 == null ? '' :
+            `Chance a new eruption begins within 10 yr: ${p10 < 0.001 ? '<0.1' : (p10 * 100).toFixed(p10 < 0.1 ? 1 : 0)}% (model)`;
+        const liveEl = document.getElementById('volcano-tip-live');
+        if (live) {
+            const src = live.items.map(i => i.source === 'usgs-hans' ? 'USGS' : 'EONET').filter((x, k, a) => a.indexOf(x) === k).join(' + ');
+            liveEl.textContent = `● Live: ${live.colorCode ? `aviation ${live.colorCode}` : 'active event'}${live.alertLevel ? ` · ${live.alertLevel}` : ''} (${src})`;
+            liveEl.hidden = false;
+        } else liveEl.hidden = true;
+        const hint = document.getElementById('volcano-tip-hint');
+        hint.innerHTML = pin
+            ? `GVP #${v.num} · <a href="volcanoes.html?v=${v.num}">Open in Earth Volcanoes →</a>`
+            : `GVP #${v.num} · tap to pin`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    _volcanoPinned = pin;
+    tip.classList.toggle('pinned', pin);
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 290) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 120) + 'px';
+}
 
 // ── City-dot hover: tooltip + dot highlight + pointer cursor ────────────────
 // hit = { city, index } | null from cityMarkers.getHovered. State is
@@ -14114,6 +14284,16 @@ function _setWildfireHover(hit, cx, cy) {
             _showAirQualityDetail(airSample, clientX, clientY);
             return true;
         }
+
+        // Volcano: tap pins its tooltip (with the deep link to the lab).
+        const volcanoTap = volcanoLayer.getHovered(ray);
+        if (volcanoTap) {
+            _setVolcanoHover(volcanoTap, clientX, clientY, { pin: true });
+            _setStationHover(null); _setResidualHover(null);
+            _setWildfireHover(null); _setPollutionHover(null);
+            return true;
+        }
+        if (_volcanoPinned) _setVolcanoHover(null);
 
         // Station / wildfire / pollution-center markers: tap pins their
         // hover tooltip at the tap point (the touch equivalent of hovering).
@@ -15079,6 +15259,7 @@ function animate() {
             (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
         pollutionCentersLayer.tick(t, _envPixelScale);
         wildfireLayer.tick(t, _envPixelScale);
+        volcanoLayer.tick(t, _envPixelScale);
         intlStationsLayer.tick(t, _envPixelScale);
         residualLayer.tick(t, _envPixelScale);
     }
@@ -16236,6 +16417,7 @@ _backdrop.addEventListener('click', _closeMobilePanel);
     // dispatch keeps their groups aligned with the unchecked boxes on
     // first paint.
     'lyr-pollution-centers', 'lyr-wildfires', 'lyr-aqi-heatmap',
+    'lyr-volcanoes',
     'lyr-intl-stations', 'lyr-aq-residuals',
     // Derived weather overlays (humidity / precip-rate / mist) — share
     // the existing weather DataTextures, so they need the same synthetic
@@ -16748,6 +16930,7 @@ const _layerRegistry = {
     'lyr-air-quality':         () => airQualityLayer.group.visible,
     'lyr-pollution-centers':   () => pollutionCentersLayer.group.visible,
     'lyr-wildfires':           () => wildfireLayer.group.visible,
+    'lyr-volcanoes':           () => volcanoLayer.group.visible,
     'lyr-aqi-heatmap':         () => aqiHeatmapLayer.group.visible,
     'lyr-intl-stations':       () => intlStationsLayer.group.visible,
     'lyr-aq-residuals':        () => residualLayer.group.visible,

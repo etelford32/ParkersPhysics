@@ -80,6 +80,9 @@ const UPSTREAMS = [
     // and the Pollution Lab. The single-point CAMS probe is the cheapest
     // request that exercises the real air-quality API path.
     { source: 'eonet-wildfires', url: 'https://eonet.gsfc.nasa.gov/api/v3/events?category=wildfires&status=open&limit=1', edge_authoritative: true },
+    // Volcano activity (/api/volcanoes/activity). EONET's volcano category
+    // shares the host above; HANS is the USGS Volcano Hazards notice API.
+    { source: 'usgs-hans', url: 'https://volcanoes.usgs.gov/hans-public/api/volcano/getElevatedVolcanoes', edge_authoritative: true, expectJson: true },
     { source: 'open-meteo-cams', url: 'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=28.61&longitude=77.21&current=us_aqi', edge_authoritative: true },
 ];
 
