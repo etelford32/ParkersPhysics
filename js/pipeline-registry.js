@@ -444,6 +444,16 @@ export const PIPELINES = [
       warnAgeS:  24 * 3600, critAgeS: 72 * 3600,
       notes: 'Named open wildfire events (discrete markers) — complements the GIBS Active Fires imagery layer. EONET curates ~2×/day. 200 + freshness:stale + empty list when EONET is down.' },
 
+    // Earth Volcanoes (volcanoes.html + the EarthView volcano layer). The
+    // CATALOGUE is static (data/volcanoes/volcanoes-catalog.json, GVP lists of
+    // 22 Mar 2026); this is the LIVE half — what is erupting / elevated today.
+    { id: 'volcano-activity',   label: 'Volcano activity (USGS HANS + EONET)',
+      endpoint: '/api/volcanoes/activity',
+      category: 'environment', upstream: 'USGS HANS · NASA EONET',
+      cadence_s: 43_200, prewarm: 'medium',
+      warnAgeS:  24 * 3600, critAgeS: 72 * 3600,
+      notes: 'Elevated US volcanoes (USGS HANS, joined to GVP by volcano number) + open global volcano events (EONET, joined by position client-side — js/volcano-engine.js matchActivity). BOTH SCHEMAS UNVERIFIED (egress-blocked at build time): HANS fields resolve from candidate lists and the route self-reports sources.usgs_hans.field_map / unmapped — one production request settles them. Either source down ⇒ 200 + freshness:stale + reasons (partial list).' },
+
     // ── Ocean · NOAA CO-OPS / NDBC (earth.html station layers) ─────────────
     // Registered 2026-10-26 (EARTHVIEW_LOD_UX_PLAN.md Phase 0.8) — the three
     // routes had been live since 2026-08 and never monitored, the exact gap
@@ -577,7 +587,7 @@ export const CATEGORIES = [
     { id: 'events',        label: 'Solar/Geomag Events'   },
     { id: 'weather',       label: 'Terrestrial Weather'   },
     { id: 'orbital',       label: 'Orbital · TLE / Launches' },
-    { id: 'environment',   label: 'Environment · Air & Fire' },
+    { id: 'environment',   label: 'Environment · Air, Fire & Volcanoes' },
     { id: 'ocean',         label: 'Ocean · Tides / Buoys / DART' },
     { id: 'planetary',     label: 'Planetary · Mars'      },
     { id: 'small-bodies',  label: 'Small Bodies · NEOs / Comets' },

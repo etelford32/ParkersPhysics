@@ -145,6 +145,7 @@ const NAV_ITEMS = {
         { href: 'earth.html',            label: 'EarthView',        sub: 'Predictive weather + magnetosphere',      tier: 'public', icon: 'earth' },
         { href: 'pollution.html',        label: 'Pollution Lab',    sub: 'Live AQI · hotspot ML · climate forcing', tier: 'public', icon: 'atmosphere', badge: 'NEW', id: 'pollution' },
         { href: 'upper-atmosphere.html', label: 'Upper Atmosphere', sub: 'Thermosphere + exosphere simulator',      tier: 'public', icon: 'atmosphere', id: 'upper-atmosphere' },
+        { href: 'volcanoes.html',        label: 'Earth Volcanoes',  sub: 'Every volcano · live activity · climate sim', tier: 'public', icon: 'volcano', badge: 'NEW', id: 'volcanoes' },
         { section: 'Orbital operations' },
         { href: 'operations.html',     label: 'Operations',     sub: 'Fleet & debris analysis console',       tier: 'public', icon: 'operations', badge: 'PRO PREVIEW', id: 'operations' },
         { href: 'satellites.html',     label: 'Satellites',     sub: 'Real-time orbital tracking',            tier: 'public', icon: 'satellite' },
