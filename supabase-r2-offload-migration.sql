@@ -266,3 +266,16 @@ revoke execute on function public.trim_sw_geomag_dataset(int) from public, anon,
 -- The index tables and the R2 objects can stay: nothing reads them once the
 -- routes are reverted. Frames / days already trimmed live ONLY in R2 — read
 -- them back through the index before dropping it.
+
+
+-- ── APPLY LOG ──────────────────────────────────────────────────
+-- 2026-11-04, project aijsboodkivnhzfstvdq, migration
+-- r2_offload_index_and_gated_trims (on the author's go). Verified after:
+--   both index tables exist, empty; anon/authenticated can neither read
+--   them nor execute trim_weather_grid_cache(); the 2 592 existing
+--   weather_cell_stats rows defaulted to stats_source 'postgres';
+--   compute_weather_cell_stats(30, 1) still runs the SQL pass (2 592 cells)
+--   because Postgres holds the window and no R2 stats exist.
+-- With the indexes empty every new delete arm is inert: the database
+-- shrinks only once api/cron/archive-sweep.js runs with the R2_* secrets
+-- set (weather frames 287 / sw_geomag_dataset 163 059 rows at apply time).

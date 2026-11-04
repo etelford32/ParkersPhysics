@@ -2,7 +2,12 @@
 
 > Status: **Phase A1 + the in-database half of Phase D APPLIED 2026-11-04**
 > (`supabase-compute-offload-migration.sql`, measured before/after in its
-> APPLY LOG). Everything else is still a plan. Written 2026-11-03 from live
+> APPLY LOG). **Phases B, C and A2 BUILT 2026-11-04** — code on the branch,
+> `supabase-r2-offload-migration.sql` APPLIED (inert until the archive has
+> copies; see §3b). The database shrinks only once the code is deployed
+> with the `R2_*` secrets set on Vercel — unverified: nothing on the site
+> has ever written to R2 (archive-forecasts crashed every night until the
+> same change fixed it). Phases E and F are still a plan. Written 2026-11-03 from live
 > measurements of project `aijsboodkivnhzfstvdq`; every number in §1 is
 > reproducible with the queries in §7 and describes the state BEFORE A1.
 
@@ -184,6 +189,31 @@ A2 when Phase B lands.
   (already a static archive — publish once, keep a 30-day hot slice).
 - The workstation can additionally convert the daily NDJSON to Parquet for
   DuckDB/pandas; that is an *extra* artifact, not the source of truth.
+
+### 3b. What was built for B / C / A2 (2026-11-04)
+
+- `api/cron/archive-sweep.js` (hourly :40) is the ONE R2 writer: it copies
+  each `weather_grid_cache` row (newest first) and each complete UTC day of
+  `sw_geomag_dataset` (oldest first, ≥ 26 h after the day ended) to R2 and
+  writes `weather_grid_archive` / `sw_geomag_archive` index rows ONLY after
+  the PUT succeeded, then runs the trims. Heartbeat `r2_archive`.
+- The trims delete only indexed items: frames older than 24 h once the R2
+  stats pass has also succeeded within 30 h; dataset days older than 14 d.
+  The old retention rules are unchanged underneath.
+- `api/cron/weather-cell-stats.js` (daily 03:05) + `api/_lib/weather-cell-stats.js`
+  replace the SQL percentile pass, reading the frames from R2 and mirroring
+  the SQL exactly (float4 values, `percentile_cont`, the trim's decimated
+  frame set — `tests/r2-offload.mjs` pins it against Postgres's own
+  numbers). Coverage-gated: it writes nothing until R2 holds ≥ 90 % of a
+  30-day window, and until then the pg_cron SQL pass (now the fallback)
+  keeps the stats. Heartbeat `weather_cell_stats`.
+- Readers: `/api/weather/grid` range mode takes archived frames from R2 and
+  only unarchived ones from Postgres (adds an additive `store` field);
+  `api/_lib/sw-geomag-store.js` is the one minute-history reader, used by
+  `/api/ring-current/dataset` and `validation-rerun`. With the R2 secrets
+  unset every reader is the old Postgres read.
+- `/api/weather/extremes` now returns `stats_computed_at` and goes
+  `freshness: 'stale'` when the baseline is > 30 h old.
 
 ### Phase D — cut the per-minute chatter (~half a day)
 
