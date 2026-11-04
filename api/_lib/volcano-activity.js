@@ -29,7 +29,10 @@ export const HANS_URLS = [
     'https://volcanoes.usgs.gov/hans-public/api/volcano/getElevatedVolcanoes',
     'https://volcanoes.usgs.gov/hans2/api/volcano/getElevatedVolcanoes',
 ];
-export const EONET_URL = 'https://eonet.gsfc.nasa.gov/api/v3/events?category=volcanoes&status=open&days=120';
+// No server-side `days=`: on the PR #1068 preview (2026-11-04) the days=120
+// query returned ZERO open volcano events, so the age cut is ours alone
+// (EONET_MAX_AGE_DAYS) and `received` / `dropped_stale` say what it removed.
+export const EONET_URL = 'https://eonet.gsfc.nasa.gov/api/v3/events?category=volcanoes&status=open';
 
 // EONET leaves some events open for months; older than this we stop calling
 // them "current" (the client still fades by age).
