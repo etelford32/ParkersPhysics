@@ -40,8 +40,11 @@ const EONET_BODY = { events: [
                  { type: 'Point', date: new Date(NOW - 3 * day).toISOString(), coordinates: [14.999, 37.748] }] },
     { id: 'EONET_2', title: 'Fuego Volcano, Guatemala',
       geometry: [{ type: 'Point', date: new Date(NOW - 5 * day).toISOString(), coordinates: [-90.88, 14.47] }] },
-    { id: 'EONET_OLD', title: 'Somewhere Volcano, Nowhere',
-      geometry: [{ type: 'Point', date: new Date(NOW - 400 * day).toISOString(), coordinates: [0, 0] }] },
+    // a LONG-OPEN eruption: EONET pins it once at its start and keeps it open
+    // (measured on production). It must be KEPT, and joins by position — GVP
+    // files Sakurajima under the Aira caldera.
+    { id: 'EONET_OLD', title: 'Sakurajima Volcano, Japan',
+      geometry: [{ type: 'Point', date: new Date(NOW - 400 * day).toISOString(), coordinates: [130.657, 31.593] }] },
     { id: 'EONET_SEA', title: 'Unnamed Submarine Volcano, Pacific Ocean',
       geometry: [{ type: 'Point', date: new Date(NOW - 1 * day).toISOString(), coordinates: [-150, -40] }] },
 ] };
@@ -81,10 +84,10 @@ await ok('both sources up ⇒ live, HANS stops at the first candidate that answe
         assert.equal(b.freshness, 'live');
         assert.equal(b.sources.usgs_hans.url, HANS_URLS[0]);
         assert.equal(seen.filter(u => u === HANS_URLS[1]).length, 0);
-        assert.equal(b.sources.eonet.count, 3, 'the 400-day-old event is not "current"');
+        assert.equal(b.sources.eonet.count, 4, 'a long-open eruption is kept — EONET open/closed is the authority');
         assert.equal(b.sources.eonet.received, 4, 'raw EONET event count is self-reported');
-        assert.equal(b.sources.eonet.dropped_stale, 1, 'and how many the age cut removed');
-        assert.equal(b.count, 5);
+        assert.equal(b.sources.eonet.dropped_stale, 0, 'no age cut');
+        assert.equal(b.count, 6);
     } finally { globalThis.fetch = realFetch; }
 });
 
@@ -107,7 +110,7 @@ await ok('one source down ⇒ 200 + stale + reasons (partial); both down ⇒ emp
         assert.equal(b.freshness, 'stale');
         assert.deepEqual(b.reasons, ['usgs-hans-down']);
         assert.match(b.note, /PARTIAL/);
-        assert.equal(b.count, 3);
+        assert.equal(b.count, 4);
     } finally { globalThis.fetch = realFetch; }
     stub(() => { throw new Error('ECONNREFUSED'); });
     try {
@@ -132,7 +135,7 @@ await ok('matchActivity joins by GVP number / name / position and returns the re
     try { b = await (await handler()).json(); } finally { globalThis.fetch = realFetch; }
     const { live, unmatched } = matchActivity(cat, b.items);
     const names = [...live.values()].map(x => x.volcano.name).sort();
-    assert.deepEqual(names, ['Etna', 'Fuego', 'Great Sitkin', 'Kilauea']);
+    assert.deepEqual(names, ['Aira', 'Etna', 'Fuego', 'Great Sitkin', 'Kilauea']);
     const kil = [...live.values()].find(x => x.volcano.name === 'Kilauea');
     assert.equal(kil.colorCode, 'ORANGE');
     assert.equal(unmatched.length, 1);

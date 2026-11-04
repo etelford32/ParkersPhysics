@@ -502,12 +502,18 @@ class VolcanoLab {
         if (!rows.length) { host.append(el('p', { class: 'vx-muted', text: 'No live reports joined to the catalogue.' })); return; }
         const ul = el('ul', { class: 'vx-live-list' });
         for (const r of rows) {
-            const age = Math.min(...r.items.map(i => i.ageDays ?? Infinity));
+            // HANS rows carry the notice time ("N d ago"); EONET pins an event
+            // once at its START and keeps it open, so its date is "open since".
+            const hans = r.items.filter(i => i.source === 'usgs-hans');
+            const age = Math.min(...hans.map(i => i.ageDays ?? Infinity));
+            const since = r.items.filter(i => i.source === 'eonet' && i.startedAt).map(i => i.startedAt).sort()[0];
+            const when = Number.isFinite(age) ? ` ${age < 1 ? 'today' : `${Math.round(age)} d ago`}`
+                : since ? ` open since ${new Date(since).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}` : '';
             ul.append(el('li', {},
                 el('button', { type: 'button', class: 'vx-linkbtn', text: r.volcano.name, onclick: () => this.select(r.volcano, { fly: true }) }),
                 el('span', { class: 'vx-muted', text: ` ${r.volcano.country ?? ''}` }),
                 r.colorCode ? el('span', { class: 'vx-cc', 'data-cc': r.colorCode, text: r.colorCode }) : el('span', { class: 'vx-cc', text: 'event' }),
-                el('span', { class: 'vx-muted', text: Number.isFinite(age) ? ` ${age < 1 ? 'today' : `${Math.round(age)} d ago`}` : '' })));
+                el('span', { class: 'vx-muted', text: when })));
         }
         host.append(ul);
         if (this.unmatched.length) host.append(el('p', { class: 'vx-fine', text: `${this.unmatched.length} report(s) did not match a catalogued summit (e.g. an unnamed submarine vent) and are listed by the feed only.` }));

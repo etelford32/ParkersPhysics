@@ -29,14 +29,16 @@ export const HANS_URLS = [
     'https://volcanoes.usgs.gov/hans-public/api/volcano/getElevatedVolcanoes',
     'https://volcanoes.usgs.gov/hans2/api/volcano/getElevatedVolcanoes',
 ];
-// No server-side `days=`: on the PR #1068 preview (2026-11-04) the days=120
-// query returned ZERO open volcano events, so the age cut is ours alone
-// (EONET_MAX_AGE_DAYS) and `received` / `dropped_stale` say what it removed.
+// MEASURED on the PR #1068 preview (2026-11-04): with `days=120` EONET
+// returned ZERO open volcano events; without it, 32 — and EVERY one had its
+// latest geometry point more than 120 days old. EONET pins a volcano event
+// once, when it opens, and keeps it OPEN while the eruption continues, so
+// "last geometry date" is the eruption's START, not its last activity. An
+// age cut on it threw away every ongoing eruption. EONET's own open/closed
+// status is the authority: no `days=`, and no age cut (null). `received` /
+// `dropped_stale` stay self-reported; the client prints "open since".
 export const EONET_URL = 'https://eonet.gsfc.nasa.gov/api/v3/events?category=volcanoes&status=open';
-
-// EONET leaves some events open for months; older than this we stop calling
-// them "current" (the client still fades by age).
-export const EONET_MAX_AGE_DAYS = 120;
+export const EONET_MAX_AGE_DAYS = null;
 
 export const HANS_FIELDS = {
     num:        ['vnum', 'volcano_number', 'vNum', 'gvp_number', 'volcanoNumber'],
@@ -130,7 +132,7 @@ export function parseEonetVolcanoes(payload, nowMs) {
         if (!pts.length) { noPoint++; continue; }
         const last = pts[pts.length - 1];
         const ageDays = (nowMs - last.t) / 86_400_000;
-        if (ageDays > EONET_MAX_AGE_DAYS) { droppedStale++; continue; }
+        if (EONET_MAX_AGE_DAYS != null && ageDays > EONET_MAX_AGE_DAYS) { droppedStale++; continue; }
         items.push({
             source: 'eonet',
             id: ev.id ?? `eonet-${items.length}`,
