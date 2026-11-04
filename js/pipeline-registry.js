@@ -633,6 +633,15 @@ export const HEARTBEAT_PIPELINES = [
     { key: 'synthetic_auth_daily',    label: 'Synthetic Auth (daily)',  warnMin: 25 * 60, critMin: 49 * 60 },
     // vercel.json: 40 12 * * 1 (weekly, Monday)
     { key: 'synthetic_auth_weekly',   label: 'Synthetic Auth (weekly)', warnMin: 8 * 1440, critMin: 15 * 1440 },
+    // vercel.json: 40 * * * * — copies weather frames + sealed dataset days to
+    // R2 and runs the archive-gated trims (SUPABASE_OFFLOAD_PLAN.md B/C). Red
+    // with 'r2_not_configured' means the R2_* secrets are missing on Vercel —
+    // the site is unaffected, Postgres simply does not shrink.
+    { key: 'r2_archive',              label: 'R2 Archive Sweep',        warnMin: 130,    critMin: 360 },
+    // vercel.json: 5 3 * * * (daily) — the 30-day percentile pass from R2
+    // (Phase A2). 'skipped:coverage n/N' is expected until the archive holds
+    // a full window; the pg_cron SQL pass covers the stats until then.
+    { key: 'weather_cell_stats',      label: 'Weather Cell Stats (R2)', warnMin: 26 * 60, critMin: 50 * 60 },
 ];
 
 /**
