@@ -86,6 +86,7 @@
 import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js';
 import { isFallbackSource } from '../../js/pipeline-registry.js';
 import { pressureKindOf } from '../../js/weather-decode.js';
+import { R2_CONFIGURED, getGzText, mapLimit, planRangeSources } from '../_lib/r2-archive.js';
 
 export const config = { runtime: 'edge' };
 
@@ -153,6 +154,64 @@ async function readRange(sinceISO, limit) {
     if (!res.ok) throw new Error(`Supabase ${res.status}`);
     const rows = await res.json();
     return Array.isArray(rows) ? rows : [];
+}
+
+async function sbJson(path) {
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/${path}`, {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    });
+    if (!res.ok) throw new Error(`Supabase ${res.status}`);
+    return res.json();
+}
+
+/**
+ * Range read across BOTH stores (SUPABASE_OFFLOAD_PLAN.md Phase B). Used
+ * only when R2 is configured; otherwise readRange above is the whole story,
+ * unchanged.
+ *
+ * Postgres keeps ~24 h of frames once the archive is warm; every frame
+ * api/cron/archive-sweep.js has copied is indexed in weather_grid_archive.
+ * So: list the instants each store holds at/after `since` (timestamps only —
+ * a few KB, not payloads), take the first `limit` of their union, read the
+ * indexed ones from R2 and only the not-yet-archived ones (the newest hour,
+ * or the backlog while the backfill drains) from Postgres. An R2 read that
+ * fails falls back to Postgres if the row is still there; a frame neither
+ * store can produce is dropped and counted, never invented.
+ *
+ * Same rows out as readRange: { fetched_at, source, payload }, ascending.
+ */
+async function readRangeHybrid(sinceISO, limit) {
+    const since = encodeURIComponent(sinceISO);
+    const [dbT, idx] = await Promise.all([
+        sbJson(`weather_grid_cache?select=fetched_at&fetched_at=gte.${since}&order=fetched_at.asc&limit=${limit}`),
+        sbJson(`weather_grid_archive?select=fetched_at,r2_key&fetched_at=gte.${since}&order=fetched_at.asc&limit=${limit}`),
+    ]);
+    const keyByMs = new Map(idx.map(r => [Date.parse(r.fetched_at), r.r2_key]));
+    const plan = planRangeSources(dbT.map(r => r.fetched_at), idx.map(r => r.fetched_at), limit);
+
+    const byMs = new Map();
+    await mapLimit(plan.filter(p => p.from === 'r2'), 12, async (p) => {
+        try {
+            const text = await getGzText(keyByMs.get(Date.parse(p.fetched_at)));
+            if (text) byMs.set(Date.parse(p.fetched_at), JSON.parse(text));
+        } catch { /* falls back to Postgres below */ }
+    });
+    const fromDb = plan.filter(p => !byMs.has(Date.parse(p.fetched_at)) && (p.from === 'db' || p.dbAlso));
+    if (fromDb.length) {
+        const list = fromDb.map(p => `"${p.fetched_at}"`).join(',');
+        const rows = await sbJson(`weather_grid_cache?select=fetched_at,source,payload` +
+            `&fetched_at=in.(${encodeURIComponent(list)})&order=fetched_at.asc`);
+        for (const r of rows) byMs.set(Date.parse(r.fetched_at), r);
+    }
+    const rows = [];
+    let r2 = 0, db = 0, missing = 0;
+    for (const p of plan) {
+        const row = byMs.get(Date.parse(p.fetched_at));
+        if (!row) { missing++; continue; }
+        rows.push(row);
+        if (p.from === 'r2' && !fromDb.includes(p)) r2++; else db++;
+    }
+    return { rows, store: { r2, db, missing } };
 }
 
 /**
@@ -288,16 +347,26 @@ export default async function handler(request) {
             ? Math.min(RANGE_MAX_LIMIT, rawLimit)
             : RANGE_DEFAULT_LIMIT;
 
-        let rows;
+        let rows, store;
         try {
-            rows = await readRange(new Date(sinceMs).toISOString(), limit);
+            const sinceIso = new Date(sinceMs).toISOString();
+            if (R2_CONFIGURED) {
+                // The bulk payload egress leaves Supabase (Phase B). A
+                // failure of the hybrid read itself (index table missing in
+                // an environment that never ran the migration) degrades to
+                // the plain Postgres read rather than to an error.
+                try { ({ rows, store } = await readRangeHybrid(sinceIso, limit)); }
+                catch { rows = await readRange(sinceIso, limit); }
+            } else {
+                rows = await readRange(sinceIso, limit);
+            }
         } catch (e) {
             return jsonError('cache_unavailable', e.message,
                 { source: 'supabase/weather_grid_cache' });
         }
 
         const frames = rows.map(r => projectRow(r, /* trim */ true));
-        return jsonOk({ since, count: frames.length, frames },
+        return jsonOk({ since, count: frames.length, frames, ...(store ? { store } : {}) },
             { maxAge: RANGE_MAX_AGE, swr: RANGE_SWR });
     }
 
