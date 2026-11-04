@@ -98,10 +98,10 @@ import { trainAt } from './corridor/corridor-model.js';
 import { ropeSurfaceGrid } from './stage/model.js';
 import { stageRadius, EARTH_S, RSUN_KM, AU_KM } from './stage/scale.js';
 import { integrateDst } from './ring-current-model.js';
-import { createHeroSun, SPOT_SCALE } from './hero-sun.js';
+import { createHeroSun, SPOT_SCALE, HYPERBOLE } from './hero-sun.js';
 import {
     OUTLOOK_HOURS, CME_LOOKBACK_H, outlookWindow, outlookMarks, latestRegions, activityCmes,
-    buildOutlookForecast, regionAt, limbCrossingMs, activityHeat,
+    buildOutlookForecast, regionAt, limbCrossingMs, activityHeat, hekProminences, WAVE_SPEED_KMS,
 } from './hero-sun-model.js';
 // The hero's colour rules: both raw shaders end in heroEmit (js/hero-color.js).
 import { HERO_COLOR_GLSL } from './hero-color.js';
@@ -469,11 +469,14 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
  *     passes its entrance: the camera must not be pulled away while it is still settling onto Earth)
  * @param {object} [opts.busState]  the latest swpc-update state (later ones arrive on the event)
  * @param {string} [opts.regionsUrl] NOAA region list (the existing relay; null disables)
+ * @param {string} [opts.filamentsUrl] HEK filament/prominence detections (the existing relay
+ *     sun.html uses; null disables — the Sun then falls back to per-region PIL filaments)
  * @param {string} [opts.wasmUrl]   the flux-rope kernel for the 24 h preview
  */
 export function createHeroRopeLayer({
     THREE, scene, sunDir, host, onFraming = null, replay = null, autoplayGate = null,
-    busState = null, regionsUrl = '/api/noaa/regions', wasmUrl = './js/flux-rope-wasm/flux_rope_core.wasm',
+    busState = null, regionsUrl = '/api/noaa/regions', filamentsUrl = '/api/hek/filaments',
+    wasmUrl = './js/flux-rope-wasm/flux_rope_core.wasm',
 } = {}) {
     if (!THREE || !scene) throw new Error('createHeroRopeLayer: THREE and scene are required');
 
@@ -589,6 +592,7 @@ export function createHeroRopeLayer({
     // The NEXT 24 H tab: today's Sun + the engine propagating the recent CMEs.
     const outlook = {
         fc: null, regions: [], regionsState: regionsUrl ? 'loading' : 'off',
+        filaments: [], filamentsState: filamentsUrl ? 'loading' : 'off',
         cmeKey: null, bus: null, kernel: null, kernelPromise: null, marks: [], pending: 0,
     };
 
@@ -999,6 +1003,31 @@ export function createHeroRopeLayer({
         if (tab === 'outlook') activate('outlook', { keepTau: true });
     }
 
+    /**
+     * HEK's filament / prominence detections (js/hek-filaments.js shape). A
+     * feed that is down LOOKS down: the Sun falls back to the per-region PIL
+     * filaments and the legend says which source it is drawing.
+     */
+    async function loadFilaments() {
+        if (!filamentsUrl) return;
+        try {
+            const res = await fetch(filamentsUrl, { headers: { accept: 'application/json' } });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const payload = await res.json();
+            if (payload?.freshness === 'stale') throw new Error(payload.note || 'stale');
+            const rows = payload?.data?.filaments ?? payload?.filaments ?? [];
+            outlook.filaments = hekProminences(rows, { fallbackAnchorMs: Date.parse(payload?.data?.updated ?? '') || Date.now() });
+            outlook.filamentsState = 'ok';
+            sun.setProminences(outlook.filaments);
+        } catch (e) {
+            outlook.filaments = [];
+            outlook.filamentsState = 'down';
+            sun.setProminences(null);
+            console.info('[hero-sun] filaments unavailable:', e?.message ?? e);
+        }
+        if (tab === 'outlook') { lastLegendAt = 0; update(true); }
+    }
+
     async function ensureKernel() {
         if (outlook.kernel) return outlook.kernel;
         outlook.kernelPromise ??= import('./flux-rope-kernel.js').then((m) => m.loadFluxRopeKernel(wasmUrl));
@@ -1038,6 +1067,7 @@ export function createHeroRopeLayer({
     if (busState) setBusState(busState);
     else if (!outlook.fc) outlook.fc = buildOutlookForecast(null, [], Date.now());
     loadRegions();
+    loadFilaments();
     const regionsTimer = regionsUrl ? setInterval(loadRegions, 15 * 60e3) : 0;
 
     // The 24 h preview plays itself ONCE after the entrance — unless the
@@ -1061,9 +1091,10 @@ export function createHeroRopeLayer({
      * Advance the clock (when playing) and place the train + the Sun at τ.
      * Called by the hero's animate loop with the real frame dt.
      */
-    function tick(dt) {
+    /** @param {number} dt wall seconds  @param {number} [halfHPx] drawing-buffer half height (point sizes) */
+    function tick(dt, halfHPx = NaN) {
         const tNow = performance.now() / 1000;
-        if (sunGroup.visible) sun.tick(tNow);
+        if (sunGroup.visible) sun.tick(tNow, halfHPx);
         if (!win) return;
         for (const r of ropes) r.mesh.material.uniforms.u_time.value = tNow;
         if (playing) {
@@ -1180,6 +1211,12 @@ export function createHeroRopeLayer({
             parts.push(`<span data-rank="${k}"><b>AR ${esc(reg.region)}</b>${reg.complex ? ' δγ' : ''} · ${where}${odds ? ` · ${odds} / 24 h` : ''}</span>`);
         }
         if (outlook.regionsState === 'ok' && !outlook.regions.length) parts.push('<span><b>No numbered regions</b> on the disc today</span>');
+        // Cool material: observed (HEK) or the per-region fallback — never silent about which.
+        const ss = sun.state;
+        if (ss.promSource === 'hek') parts.push(`<span data-rank="3"><b>Prominences</b> · ${ss.prominences} observed (HEK), ${ss.promEarthFacing} on the disc</span>`);
+        else if (outlook.filamentsState === 'down' && ss.promSource === 'region') parts.push(`<span data-rank="3"><b>Prominences</b> · HEK feed down — ${ss.prominences} schematic PIL filaments</span>`);
+        else if (outlook.filamentsState === 'loading') parts.push('<span data-rank="3"><b>Prominences</b> · loading HEK detections…</span>');
+        if (ss.flow?.drawn) parts.push(`<span data-rank="4"><b>Flare ejecta</b> · ${ss.flow.loop + ss.flow.ejecta} parcels in flight (${ss.flow.ejecta} escaping)</span>`);
         // Newest CMEs first in the list (the fresh eruptions are the story).
         rows.slice().reverse().forEach(({ r, txt }, k) => {
             const hex = '#' + r.color.toString(16).padStart(6, '0');
@@ -1196,7 +1233,7 @@ export function createHeroRopeLayer({
                             : `<span><b>No CMEs</b> in DONKI's catalogue in the last ${CME_LOOKBACK_H} h — nothing in flight to propagate</span>`);
         }
         const probs = outlook.regions.some((r) => Number.isFinite(r.pM));
-        parts.push(noteTag(`Regions sit at NOAA's reported positions, carried forward by differential rotation; spots, loops and corona are a schematic of each region (Joy's-law bipole, size ~ √area, glow ~ ${probs ? "SWPC's 24 h M/X odds" : 'complexity + area'}). CMEs: the last ${CME_LOOKBACK_H} h of DONKI cone fits, every direction, propagated by the flux-rope kernel (DBM, §16 interaction on); skin <i class="hrs-bz"></i> = the kernel's Bz. Sun drawn ×${SUN_EXAGGERATION.toFixed(0)}, spots ×${SPOT_SCALE}, axis along ecliptic north.`));
+        parts.push(noteTag(`Regions sit at NOAA's reported positions, carried forward by differential rotation; spots, loops and corona are a schematic of each region (Joy's-law bipole, size ~ √area, glow ~ ${probs ? "SWPC's 24 h M/X odds" : 'complexity + area'}). Prominences/filaments: ${ss.promSource === 'hek' ? "HEK's filament + prominence detections (observed)" : 'the per-region PIL filament (HEK feed unavailable)'}, dark on the disc, bright at the limb, height ×${HYPERBOLE.prominenceHeight}. Flares: ribbons ×${HYPERBOLE.flareRibbon}, an EUV wave at ${WAVE_SPEED_KMS} km/s, and the release drawn as a flow — evaporation filling the arcade, rain draining it, ejecta escaping on a divergence-free curl-noise field (Bridson 2007) at class-scaled DISPLAY speeds, sprites ×${HYPERBOLE.flowSprite}; loops ×${HYPERBOLE.loopGlow}. A schematic of the eruption's phases, not an MHD run. CMEs: the last ${CME_LOOKBACK_H} h of DONKI cone fits, every direction, propagated by the flux-rope kernel (DBM, §16 interaction on); skin <i class="hrs-bz"></i> = the kernel's Bz. Sun drawn ×${SUN_EXAGGERATION.toFixed(0)}, spots ×${SPOT_SCALE}, axis along ecliptic north.`));
         return parts.join('');
     }
 
@@ -1243,6 +1280,8 @@ export function createHeroRopeLayer({
                 outlook: {
                     regions: outlook.regions.length,
                     regionsState: outlook.regionsState,
+                    filaments: outlook.filaments.length,
+                    filamentsState: outlook.filamentsState,
                     cmes: outlook.fc?.preset?.ropes?.length ?? 0,
                     marks: outlook.marks.length,
                 },
