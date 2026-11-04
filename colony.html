@@ -987,6 +987,12 @@ let chosenSite = null;
             document.getElementById('btn-start').disabled = false;
         });
     });
+    // Deep link from moon.html's colony list: ?site=<id> preselects the card
+    const wanted = new URLSearchParams(location.search).get('site');
+    if (wanted) {
+        const card = grid.querySelector(`.site-card[data-site="${CSS.escape(wanted)}"]`);
+        if (card) { card.click(); card.scrollIntoView?.({ block: 'nearest' }); }
+    }
     document.getElementById('mode-row').querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('on'));
