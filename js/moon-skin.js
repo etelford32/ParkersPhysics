@@ -24,6 +24,38 @@
  */
 
 import * as THREE from 'three';
+import {
+    CRATER_GLSL, craterUniforms, MARE_ALBEDO_MAX, HIGHLAND_ALBEDO_MIN,
+} from './moon-craters.js';
+import { R_MOON_KM } from './moon-interior-model.js';
+
+/*
+ * ── THE CRATER FIELD (2026-11) ──────────────────────────────────────────────
+ * Below the base map's ~7 km/px every crater used to be shader noise. The
+ * surface now carries a STATISTICAL crater population drawn from
+ * js/moon-craters.js: four lattice bands (D ≈ 4–13 km down to 64–220 m)
+ * whose per-cell occupancy IS the Neukum chronology for the terrain class
+ * the base map's albedo names (saturated highlands, sparse maria), bowls
+ * shaped by Pike's depth/diameter, lit by the REAL Sun through the local
+ * wall slope, and floors that fall into the up-Sun rim's cast shadow by
+ * the kernel's own closed form. The GLSL is the kernel's `CRATER_GLSL`,
+ * generated from its constants — never retype a number here.
+ *
+ * Three things are load-bearing:
+ *   • The lattice is THREE-DIMENSIONAL on the body-frame reference sphere
+ *     (P = dir × R km): no tangent chart, so no anchor to move, no seam, no
+ *     polar squash, and a crater is welded to its ground as the mesh spins.
+ *     One shell of cells (|r − R| ≤ cell/2) is admitted so area density is
+ *     uniform; a crater reaches at most 0.45 cell so its 27-cell
+ *     neighbourhood always contains it. Cell indices are wrapped mod 289
+ *     before hashing (the Mars regolith mantissa scar).
+ *   • The Sun is passed in the BODY frame (`u_sun_body`) because the
+ *     lattice lives there; `u_sun_dir` stays world for the Lambert term.
+ *   • It is albedo + shading ONLY, never geometry — the displaced relief is
+ *     the real data and craters must not pretend to be. `u_crater_detail`
+ *     0 branches the whole thing out (software rasterisers, `?craters=0`);
+ *     1 draws the two coarse bands; 2 all four.
+ */
 
 // ── Texture URLs ────────────────────────────────────────────────────────────
 // Using Solar System Scope textures (CC-licensed educational use)
@@ -53,8 +85,10 @@ varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 varying vec3 vWorldTangent;
 varying vec3 vWorldBitangent;
+varying vec3 vLocal;
 void main() {
     vUv          = uv;
+    vLocal       = position;
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
 
@@ -86,12 +120,23 @@ uniform float u_radiation_vis; // radiation visualization overlay toggle
 uniform float u_gcr_flux;      // galactic cosmic ray flux (normalized 0–1)
 uniform float u_sep_flux;      // solar energetic particle flux (normalized 0–1)
 uniform float u_kp;            // geomagnetic index (drives magnetotail particle flux)
+uniform vec3  u_sun_body;      // Sun in the BODY frame — the crater lattice lives there
+uniform float u_crater_detail; // 0 off · 1 coarse bands · 2 all bands
+uniform vec4  u_cr_cell;       // lattice cell per band (km)
+uniform vec4  u_cr_occ_mare;   // chronology occupancy per band, mare terrain
+uniform vec4  u_cr_occ_high;   // …highland terrain
+uniform vec4  u_cr_seed;
+uniform vec4  u_cr_fade_near;  // view distance (km) where a band is fully drawn
+uniform vec4  u_cr_fade_far;   // …and where it has faded out
 
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 varying vec3 vWorldTangent;
 varying vec3 vWorldBitangent;
+varying vec3 vLocal;
+
+${CRATER_GLSL}
 
 // ── Hash-based noise for regolith micro-structure ────────────────────────────
 float hash12(vec2 p) {
@@ -206,6 +251,43 @@ void main() {
 
     vec3 base = surfaceCol * lit;
 
+    // ── Statistical crater field (js/moon-craters.js) ─────────────────────────
+    if (u_crater_detail > 0.5) {
+        vec3 dirB = normalize(vLocal);
+        vec3 P = dirB * ${R_MOON_KM.toFixed(1)};
+        vec3 Lb = normalize(u_sun_body);
+        float viewKm = length(cameraPosition - vWorldPos) * ${R_MOON_KM.toFixed(1)};
+        // Terrain class from the base map's own albedo (sRGB luminance:
+        // maria ≲ ${MARE_ALBEDO_MAX.toFixed(2)}, highlands ≳ ${HIGHLAND_ALBEDO_MIN.toFixed(2)})
+        float lum = pow(max(dot(surfaceCol, vec3(0.2126, 0.7152, 0.0722)), 0.0), 1.0 / 2.2);
+        float cls = clamp((lum - ${MARE_ALBEDO_MAX.toFixed(2)}) / (${HIGHLAND_ALBEDO_MIN.toFixed(2)} - ${MARE_ALBEDO_MAX.toFixed(2)}), 0.0, 1.0);
+        float alb = 0.0;
+        float litMul = 1.0;
+        float fade0 = 1.0 - smoothstep(u_cr_fade_near.x, u_cr_fade_far.x, viewKm);
+        if (fade0 > 0.0) {
+            vec2 ab = crBand(P, dirB, Lb, u_cr_cell.x, mix(u_cr_occ_mare.x, u_cr_occ_high.x, cls), u_cr_seed.x, ${R_MOON_KM.toFixed(1)});
+            alb += ab.x * fade0; litMul *= mix(1.0, ab.y, fade0);
+        }
+        float fade1 = 1.0 - smoothstep(u_cr_fade_near.y, u_cr_fade_far.y, viewKm);
+        if (fade1 > 0.0) {
+            vec2 ab = crBand(P, dirB, Lb, u_cr_cell.y, mix(u_cr_occ_mare.y, u_cr_occ_high.y, cls), u_cr_seed.y, ${R_MOON_KM.toFixed(1)});
+            alb += ab.x * fade1; litMul *= mix(1.0, ab.y, fade1);
+        }
+        if (u_crater_detail > 1.5) {
+            float fade2 = 1.0 - smoothstep(u_cr_fade_near.z, u_cr_fade_far.z, viewKm);
+            if (fade2 > 0.0) {
+                vec2 ab = crBand(P, dirB, Lb, u_cr_cell.z, mix(u_cr_occ_mare.z, u_cr_occ_high.z, cls), u_cr_seed.z, ${R_MOON_KM.toFixed(1)});
+                alb += ab.x * fade2; litMul *= mix(1.0, ab.y, fade2);
+            }
+            float fade3 = 1.0 - smoothstep(u_cr_fade_near.w, u_cr_fade_far.w, viewKm);
+            if (fade3 > 0.0) {
+                vec2 ab = crBand(P, dirB, Lb, u_cr_cell.w, mix(u_cr_occ_mare.w, u_cr_occ_high.w, cls), u_cr_seed.w, ${R_MOON_KM.toFixed(1)});
+                alb += ab.x * fade3; litMul *= mix(1.0, ab.y, fade3);
+            }
+        }
+        base = base * litMul * (1.0 + alb);
+    }
+
     // ── Earthshine — illumination from reflected Earth on nightside ──────────
     if (u_earthshine > 0.01) {
         float NdotE = max(dot(Nflat, normalize(u_earth_dir)), 0.0);
@@ -293,6 +375,23 @@ export function createMoonUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_gcr_flux:       { value: 0.45 },    // baseline GCR (solar min ≈ 0.7, solar max ≈ 0.3)
         u_sep_flux:       { value: 0.0 },      // 0 unless active SEP event
         u_kp:             { value: 0 },
+        ...createCraterUniforms(sunDir),
+    };
+}
+
+/** Crater-field uniforms from the kernel's bands (one place, no retyped numbers). */
+export function createCraterUniforms(sunBodyDir = new THREE.Vector3(1, 0, 0)) {
+    const u = craterUniforms();
+    const v4 = (a) => new THREE.Vector4(a[0], a[1], a[2], a[3]);
+    return {
+        u_sun_body:      { value: sunBodyDir.clone() },
+        u_crater_detail: { value: 2 },
+        u_cr_cell:       { value: v4(u.cellKm) },
+        u_cr_occ_mare:   { value: v4(u.occupancyMare) },
+        u_cr_occ_high:   { value: v4(u.occupancyHighland) },
+        u_cr_seed:       { value: v4(u.seeds) },
+        u_cr_fade_near:  { value: v4(u.fadeNear) },
+        u_cr_fade_far:   { value: v4(u.fadeFar) },
     };
 }
 
@@ -413,6 +512,16 @@ export class MoonSkin {
 
     setEarthDir(v) {
         this.moonU.u_earth_dir.value.copy(v);
+    }
+
+    /** Sun in the Moon's body frame — the crater lattice is body-fixed. */
+    setSunBodyDir(v) {
+        this.moonU.u_sun_body.value.copy(v);
+    }
+
+    /** 0 off · 1 the two coarse crater bands · 2 all four (see header). */
+    setCraterDetail(level) {
+        this.moonU.u_crater_detail.value = Math.max(0, Math.min(2, Number(level) || 0));
     }
 
     setRadiation({ gcrFlux = 0.45, sepFlux = 0, kp = 0 } = {}) {

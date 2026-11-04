@@ -32,6 +32,8 @@ import {
     SODIUM_PHOTOION_LIFETIME_HR,
     SYNODIC_MONTH_DAYS, FULL_MOON_AGE_DAYS, inMagnetotail,
     METEOR_SHOWERS, impactVaporBoost, activeShower,
+    surfaceTemperatureK, effectivePoolingExponent, localDensityCm3, HODGES_EXPONENT,
+    SUNRISE_RELEASE_HOUR, hopProfile, thermalSpeedMS, hopHeightKm, hopTimeS, residenceTimeS,
 } from '../js/moon-exosphere-model.js';
 
 let passed = 0;
@@ -165,6 +167,72 @@ const near = (a, b, tol, msg) =>
     assert.equal(activeShower(Date.UTC(2026, 11, 14)).name, 'Geminids', 'activeShower finds Geminids');
     assert.ok(activeShower(Date.UTC(2026, 2, 20)).contrib < 0.02, 'quiet date: negligible contribution');
     ok('shower calendar: Geminids ×3, Leonids ×2.5, quiet dates ×1');
+}
+
+// ── 9. Surface temperature map and the T^(−5/2) pooling ─────────────────────
+{
+    near(surfaceTemperatureK(0), DAY_K, 1e-9, 'sub-solar temperature');
+    near(surfaceTemperatureK(60), DAY_K * Math.pow(0.5, 0.25), 1e-9, 'radiative cos^{1/4} law at 60°');
+    assert.equal(surfaceTemperatureK(90), NIGHT_K, 'terminator at the night floor');
+    assert.equal(surfaceTemperatureK(150), NIGHT_K, 'deep night');
+    let prev = Infinity;
+    for (let chi = 0; chi <= 180; chi += 1) {
+        const T = surfaceTemperatureK(chi);
+        assert.ok(T <= prev + 1e-9, 'monotone decreasing with zenith angle');
+        prev = T;
+    }
+    // The species table's own day/night ratios imply exponents near Hodges' 5/2
+    for (const k of ['he', 'ne', 'h2']) {
+        const g = effectivePoolingExponent(k);
+        assert.ok(g > 1.5 && g < 3.0, `${k}: effective pooling exponent ${g.toFixed(2)} near ${HODGES_EXPONENT}`);
+    }
+    assert.ok(Number.isNaN(effectivePoolingExponent('ar')), 'no pooling exponent for a condensable');
+    assert.ok(Number.isNaN(effectivePoolingExponent('na')), 'nor for a suprathermal species');
+    ok('surface temperature map; table day/night ratios imply Hodges-class exponents');
+}
+
+// ── 10. Local density per species: anchored on the table at both ends ───────
+{
+    for (const k of ['he', 'ne', 'h2']) {
+        const s = SPECIES.find(x => x.key === k);
+        near(localDensityCm3(k, 0, 12), s.dayCm3, 1e-6, `${k} noon = table day value`);
+        near(localDensityCm3(k, 180, 0), s.nightCm3, 1e-6, `${k} deep night = table night value`);
+        assert.ok(localDensityCm3(k, 60, 12) > s.dayCm3, 'pools as the ground cools toward the terminator');
+    }
+    const ar = SPECIES.find(x => x.key === 'ar');
+    near(localDensityCm3('ar', 30, 12), ar.dayCm3, 1e-6, 'argon by day');
+    assert.ok(localDensityCm3('ar', 120, 0) < ar.dayCm3, 'argon depleted at midnight');
+    assert.ok(localDensityCm3('ar', 120, 0) >= ar.nightCm3, '…but never below the night floor');
+    const peak = localDensityCm3('ar', 95, SUNRISE_RELEASE_HOUR);
+    assert.ok(peak > 0.9 * ar.sunriseCm3 && peak < 1.2 * ar.sunriseCm3, `pre-dawn bulge peaks at the LACE value (${peak.toExponential(2)})`);
+    assert.ok(peak > localDensityCm3('ar', 120, 2), 'the bulge is the night maximum');
+    assert.ok(localDensityCm3('ar', 60, 9) < 0.5 * peak, 'and it has drained by mid-morning');
+    const na = SPECIES.find(x => x.key === 'na');
+    near(localDensityCm3('na', 0, 12), na.dayCm3, 1e-9, 'Na noon');
+    near(localDensityCm3('na', 60, 12), na.nightCm3 + (na.dayCm3 - na.nightCm3) * 0.5, 1e-9, 'Na ∝ cos χ');
+    near(localDensityCm3('na', 120, 0), na.nightCm3, 1e-9, 'Na night floor');
+    assert.ok(Number.isNaN(localDensityCm3('xe', 0, 12)), 'unknown species → NaN');
+    ok('local density: thermal pooling, argon dawn release, dayside sodium — all anchored on the table');
+}
+
+// ── 11. Hop kinematics: the scale-height identity ───────────────────────────
+{
+    for (const [amu, T] of [[4.0026, 100], [22.99, 1200], [2.016, 390], [39.96, 250]]) {
+        const h = hopProfile(amu, T);
+        near(h.heightKm, scaleHeightKm(amu, T), 1e-9, 'apex of a most-probable-speed launch = scale height');
+        near(h.timeS, 2 * thermalSpeedMS(amu, T) / SURFACE_G_MS2, 1e-9, 'flight time 2v/g');
+        near(h.rangeKm, 2 * h.heightKm, 1e-9, '45° range = 2 × apex');
+        assert.equal(h.escapes, thermalSpeedMS(amu, T) >= ESCAPE_V_MS);
+    }
+    near(hopHeightKm(1000), 1e6 / (2 * SURFACE_G_MS2) / 1e3, 1e-9, 'v²/2g');
+    near(hopTimeS(1000), 2000 / SURFACE_G_MS2, 1e-9, '2v/g');
+    assert.ok(hopProfile(22.99, 1200).heightKm > 200, 'suprathermal sodium hops hundreds of km');
+    assert.ok(hopProfile(4.0026, 100).heightKm < 150, 'cold helium stays low');
+    // Adsorption residence: Arrhenius, days below 100 K, sub-second above 150 K
+    assert.ok(residenceTimeS(100) > 86400, 'adsorbed for days at 100 K');
+    assert.ok(residenceTimeS(150) < 1, 'free within a second at 150 K');
+    for (let T = 60; T < 400; T += 5) assert.ok(residenceTimeS(T) > residenceTimeS(T + 5), 'monotone in T');
+    ok('hop kinematics: apex = H identity, 2v/g, Arrhenius residence');
 }
 
 console.log(`\nmoon-exosphere-model: ${passed} groups passed`);
