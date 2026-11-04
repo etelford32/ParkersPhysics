@@ -65,10 +65,22 @@ const CRON_SECRET  = process.env.CRON_SECRET || '';
 const PAGE_SIZE         = 1000;
 const MAX_ARCHIVE_ROWS  = 50_000;
 
+// Header access is runtime-shaped: this file declares runtime 'nodejs', where
+// `request.headers` is a plain object, not a Fetch Headers. Calling .get() on
+// it threw `request.headers.get is not a function` on EVERY nightly run until
+// 2026-11-04 — no forecast_log row was ever archived to R2 (the pointer table
+// was empty). Same helper as refresh-weather-grid.js, which hit this first.
+function readHeader(request, name) {
+    const headers = request?.headers;
+    if (!headers) return '';
+    if (typeof headers.get === 'function') return headers.get(name) ?? '';
+    return headers[name.toLowerCase()] ?? '';
+}
+
 function isAuthorized(request) {
-    const hdr = request.headers.get('authorization') ?? '';
+    const hdr = readHeader(request, 'authorization');
     if (CRON_SECRET && hdr === `Bearer ${CRON_SECRET}`) return true;
-    if (request.headers.get('x-vercel-cron')) return true;
+    if (readHeader(request, 'x-vercel-cron')) return true;
     return false;
 }
 
@@ -418,7 +430,19 @@ async function runArchive(request) {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
-export default async function handler(request) {
+// Node runtime hands (req, res) and expects res.status().json() (the
+// refresh-weather-grid.js envelope); dev-server and tests hand a Request and
+// read the returned Response. Support both.
+export default async function handler(request, res) {
+    const response = await runWithWatchdog(request);
+    if (res && typeof res.status === 'function') {
+        res.status(response.status).json(await response.json());
+        return;
+    }
+    return response;
+}
+
+async function runWithWatchdog(request) {
     let timer;
     const watchdog = new Promise((resolve) => {
         timer = setTimeout(async () => {

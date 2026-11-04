@@ -18,12 +18,18 @@
  *
  * Cache: s-maxage=300 (the writer runs every 10 min), SWR 60.
  *
+ * Storage (SUPABASE_OFFLOAD_PLAN.md Phase C): Postgres holds the last ~14
+ * UTC days; older days are sealed NDJSON files in R2. Rows come through
+ * api/_lib/sw-geomag-store.js, which answers a window from both stores —
+ * the response shape is the same whichever one a minute came from.
+ *
  * ── Env vars ────────────────────────────────────────────────────────────────
  *   SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL
  *   SUPABASE_SERVICE_KEY / SUPABASE_SECRET_KEY   — service_role (bypasses RLS)
  */
 
-import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { jsonOk, jsonError } from '../_lib/responses.js';
+import { readSwGeomag } from '../_lib/sw-geomag-store.js';
 import {
     DATASET_COLUMNS, FRESH_WINDOWS_MIN, HOLD_LIMITS_MIN, SOURCES,
     gapSummary, toCsv,
@@ -35,7 +41,6 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 
 const MAX_SPAN_MS = 7 * 24 * 3.6e6;
-const PAGE_ROWS   = 1000;               // PostgREST response cap per request
 const CACHE = { successMaxAge: 300, successSwr: 60 };
 
 /** Resolve the requested [start, end) range — pure, node-testable. */
@@ -54,18 +59,6 @@ export function resolveRange(params, nowMs) {
     return { start, end };
 }
 
-async function fetchPage(startIso, endIso, offset) {
-    const q = `${SUPABASE_URL}/rest/v1/sw_geomag_dataset` +
-        `?t=gte.${encodeURIComponent(startIso)}&t=lt.${encodeURIComponent(endIso)}` +
-        `&order=t.asc&limit=${PAGE_ROWS}&offset=${offset}`;
-    const res = await fetchWithTimeout(q, {
-        timeoutMs: 10_000,
-        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
-    });
-    if (!res.ok) throw new Error(`dataset query HTTP ${res.status}`);
-    return res.json();
-}
-
 export default async function handler(req) {
     if (!SUPABASE_URL || !SUPABASE_KEY) {
         return jsonError(500, 'dataset endpoint not configured');
@@ -78,11 +71,7 @@ export default async function handler(req) {
 
     let rows = [];
     try {
-        for (let offset = 0; ; offset += PAGE_ROWS) {
-            const page = await fetchPage(startIso, endIso, offset);
-            rows = rows.concat(page);
-            if (page.length < PAGE_ROWS) break;
-        }
+        ({ rows } = await readSwGeomag({ startMs: range.start, endMs: range.end }));
     } catch (e) {
         return jsonError(502, String(e?.message ?? e).slice(0, 200));
     }
