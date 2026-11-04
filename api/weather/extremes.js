@@ -38,6 +38,8 @@ import { clusterCells } from '../../js/geo-regions.js';
 
 export const config = { runtime: 'edge' };
 
+const STATS_STALE_H = 30;
+
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 // Unlike the raw-pipeline readers (grid.js), this table carries derived
 // PUBLIC analysis and has an anon SELECT policy (migration
@@ -100,7 +102,16 @@ export default async function handler() {
     }
 
     const p = row.payload ?? {};
+    // The 30-day baseline is rebuilt once a day (from R2 since
+    // SUPABASE_OFFLOAD_PLAN.md Phase A2). If that stops, the hourly flags
+    // keep being computed against the LAST good baseline — honest only if
+    // its age is visible, so past 30 h the answer is marked stale.
+    const statsAt = p.stats_computed_at ?? null;
+    const statsAgeH = statsAt ? (Date.now() - Date.parse(statsAt)) / 3.6e6 : null;
+    const stale = statsAgeH != null && statsAgeH > STATS_STALE_H;
     return jsonOk({
+        ...(stale ? { freshness: 'stale', note: `percentile baseline is ${Math.round(statsAgeH)} h old (daily rebuild has not run)` } : {}),
+        stats_computed_at: statsAt,
         updated:        row.computed_at,
         frame_time:     row.frame_time,
         window_days:    row.window_days,

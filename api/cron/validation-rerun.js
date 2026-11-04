@@ -81,6 +81,7 @@ import {
 } from '../../js/cme-outlook.js';
 import { RESPONSE_CELLS } from '../../js/cme-outlook-response.js';
 import { normalizeSolarRegions } from '../_lib/noaa-regions.js';
+import { readSwGeomag, countSealedDay } from '../_lib/sw-geomag-store.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 60 };
 
@@ -670,11 +671,14 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             // One-time enrichment from the minute dataset; a coverage gap
             // stays pending and the next run retries.
             try {
-                const t0 = iso(truth.shockMs - 60e3);
-                const t1 = iso(truth.shockMs + 48 * 3.6e6);
-                const ds = await sbGetAll(
-                    `sw_geomag_dataset?t=gte.${encodeURIComponent(t0)}&t=lte.${encodeURIComponent(t1)}` +
-                    '&select=t,sw_bz_nt,sw_v_km_s,sw_flag&order=t.asc');
+                // Through the ONE minute-history reader: an arrival older
+                // than ~14 d lives in a sealed R2 day, not in Postgres
+                // (SUPABASE_OFFLOAD_PLAN.md Phase C). Same rows either way;
+                // it pages past PostgREST's 1000-row cap like sbGetAll did.
+                const { rows: ds } = await readSwGeomag({
+                    startMs: truth.shockMs - 60e3, endMs: truth.shockMs + 48 * 3.6e6,
+                    endInclusive: true, select: 't,sw_bz_nt,sw_v_km_s,sw_flag',
+                });
                 const bt = resolveBzTruth({
                     rows: ds.map(r => ({
                         tMs: Date.parse(r.t),
@@ -700,10 +704,10 @@ async function lockAndScoreFluxRope(catalog, flares, nowMs) {
             // when the two-observable retrieval refuses (it does on real
             // events: downstream plasma speed ≠ shock speed).
             try {
-                const up = await sbGetAll(
-                    `sw_geomag_dataset?t=gte.${encodeURIComponent(iso(truth.shockMs - 6 * 3.6e6))}` +
-                    `&t=lt.${encodeURIComponent(iso(truth.shockMs - 10 * 60e3))}` +
-                    '&sw_flag=eq.ok&select=t,sw_v_km_s&order=t.asc');
+                const { rows: up } = await readSwGeomag({
+                    startMs: truth.shockMs - 6 * 3.6e6, endMs: truth.shockMs - 10 * 60e3,
+                    select: 't,sw_v_km_s', filter: '&sw_flag=eq.ok', where: r => r.sw_flag === 'ok',
+                });
                 const vs = up.map(r => r.sw_v_km_s).filter(Number.isFinite).sort((a, b) => a - b);
                 if (vs.length >= 120) {
                     const m = vs.length >> 1;
@@ -909,8 +913,10 @@ async function lockResolveScoreOutlook(nowMs) {
         await Promise.all(days.map(async (d) => {
             try {
                 const a = `${d}T00:00:00Z`, b = new Date(Date.parse(a) + DAY).toISOString();
-                const n = await sbCount(`sw_geomag_dataset?t=gte.${encodeURIComponent(a)}` +
+                let n = await sbCount(`sw_geomag_dataset?t=gte.${encodeURIComponent(a)}` +
                     `&t=lt.${encodeURIComponent(b)}&sw_flag=eq.ok&select=t`);
+                // A day trimmed out of Postgres is a sealed R2 day (Phase C).
+                if (n === 0) n = (await countSealedDay(d, r => r.sw_flag === 'ok')) ?? n;
                 coverage.set(d, n == null ? null : n / 1440);
             } catch { coverage.set(d, null); }
         }));

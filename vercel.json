@@ -62,6 +62,14 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/cron/archive-sweep",
+      "schedule": "40 * * * *"
+    },
+    {
+      "path": "/api/cron/weather-cell-stats",
+      "schedule": "5 3 * * *"
+    },
+    {
       "path": "/api/cron/aurora-storm-blast",
       "schedule": "*/15 * * * *"
     },
