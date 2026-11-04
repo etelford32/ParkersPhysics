@@ -20,6 +20,11 @@
  * then trim the candidate lists to the winners.
  */
 
+// VERIFIED 2026-11-04 on the PR #1068 Vercel preview: the first URL answered
+// and every HANS field resolved from its FIRST candidate spelling (vnum,
+// volcano_name, color_code, alert_level, sent_utc, obs_abbr, notice_url);
+// unmapped: notice_data, notice_identifier, notice_type_cd, obs_fullname,
+// sent_unixtime. The fallbacks stay as a hedge against a USGS rename.
 export const HANS_URLS = [
     'https://volcanoes.usgs.gov/hans-public/api/volcano/getElevatedVolcanoes',
     'https://volcanoes.usgs.gov/hans2/api/volcano/getElevatedVolcanoes',
@@ -112,16 +117,17 @@ export function parseEonetVolcanoes(payload, nowMs) {
     const events = payload?.events;
     if (!Array.isArray(events)) throw new Error('EONET: no events array');
     const items = [];
+    let droppedStale = 0, noPoint = 0;
     for (const ev of events) {
         const pts = (ev.geometry ?? [])
             .filter(g => g?.type === 'Point' && Array.isArray(g.coordinates))
             .map(g => ({ lon: Number(g.coordinates[0]), lat: Number(g.coordinates[1]), t: Date.parse(g.date) }))
             .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Number.isFinite(p.t))
             .sort((a, b) => a.t - b.t);
-        if (!pts.length) continue;
+        if (!pts.length) { noPoint++; continue; }
         const last = pts[pts.length - 1];
         const ageDays = (nowMs - last.t) / 86_400_000;
-        if (ageDays > EONET_MAX_AGE_DAYS) continue;
+        if (ageDays > EONET_MAX_AGE_DAYS) { droppedStale++; continue; }
         items.push({
             source: 'eonet',
             id: ev.id ?? `eonet-${items.length}`,
@@ -137,7 +143,10 @@ export function parseEonetVolcanoes(payload, nowMs) {
             via: (ev.sources ?? []).map(s => s?.id).filter(Boolean),
         });
     }
-    return { items: items.sort((a, b) => a.ageDays - b.ageDays) };
+    // received / dropped are self-reported so an empty list can say WHICH
+    // empty it is: EONET had nothing open, or our age cut removed it.
+    return { items: items.sort((a, b) => a.ageDays - b.ageDays),
+             received: events.length, droppedStale, noPoint };
 }
 
 /** Fold per-source outcomes into one response body (never a 5xx). */
@@ -158,7 +167,9 @@ export function composeActivity({ hans, eonet, nowMs }) {
             usgs_hans: { ok: hans.ok, count: hans.ok ? hans.items.length : 0, url: hans.url ?? null,
                 tried: hans.tried ?? [], field_map: hans.fieldMap ?? null, unmapped: hans.unmapped ?? null,
                 ...(hans.ok ? {} : { error: hans.error }) },
-            eonet: { ok: eonet.ok, count: eonet.ok ? eonet.items.length : 0, ...(eonet.ok ? {} : { error: eonet.error }) },
+            eonet: { ok: eonet.ok, count: eonet.ok ? eonet.items.length : 0,
+                ...(eonet.ok ? { received: eonet.received, dropped_stale: eonet.droppedStale, no_point: eonet.noPoint,
+                                 max_age_days: EONET_MAX_AGE_DAYS } : { error: eonet.error }) },
         },
     };
 }

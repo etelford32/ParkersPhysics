@@ -82,6 +82,8 @@ await ok('both sources up ⇒ live, HANS stops at the first candidate that answe
         assert.equal(b.sources.usgs_hans.url, HANS_URLS[0]);
         assert.equal(seen.filter(u => u === HANS_URLS[1]).length, 0);
         assert.equal(b.sources.eonet.count, 3, 'the 400-day-old event is not "current"');
+        assert.equal(b.sources.eonet.received, 4, 'raw EONET event count is self-reported');
+        assert.equal(b.sources.eonet.dropped_stale, 1, 'and how many the age cut removed');
         assert.equal(b.count, 5);
     } finally { globalThis.fetch = realFetch; }
 });
