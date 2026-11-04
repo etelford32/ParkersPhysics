@@ -24,7 +24,7 @@
 <meta name="twitter:description" content="Lunar surface simulator with live galactic-cosmic-ray and solar-particle-event flux. Plan EVA exposure for Artemis-class missions.">
 <meta name="twitter:image" content="https://parkersphysics.com/static/og/moon.jpg">
 
-<meta name="description" content="Interactive 3D Moon simulation with real-time radiation environment modeling, the collisionless lunar exosphere with its live sodium tail, the interior cutaway with the dead core dynamo, and an IAU landmark map of craters, maria, and basins.">
+<meta name="description" content="Interactive 3D Moon simulation lit by today's real Sun and Earth (phase, libration, distance from the lunar ephemeris), with real-time radiation environment modeling, a Monte-Carlo collisionless exosphere with its live sodium tail, a statistical crater field from the Neukum chronology, the interior cutaway with the stagnant-lid mantle and dead core dynamo, an IAU landmark map, the proposed colony sites, and an Earth-launch brief from the mission planner's own transfer kernel.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -158,6 +158,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 .exo-n { font-family:monospace; color:#889; font-size:8px; }
 .exo-fate { grid-column:1/-1; font-size:8px; color:#667; padding-left:2px; }
 
+/* ─── Species chips + probe + profile chart ─────────────────── */
+.exo-chips { display:flex; flex-wrap:wrap; gap:4px; margin:4px 0 8px; }
+.exo-chip { border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.04); color:#99a;
+    border-radius:10px; padding:2px 8px; font:600 9px 'Segoe UI',system-ui,sans-serif; cursor:pointer; }
+.exo-chip.active { border-color:var(--chip, #ffd166); color:var(--chip, #ffd166); background:rgba(255,255,255,.08); }
+#ip-probe { font-family:monospace; font-size:9px; color:#bcd; line-height:1.55; min-height:52px;
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:6px; padding:6px 8px; margin-top:6px; }
+#ip-profile-chart { width:100%; display:block; border-radius:6px; background:#0a0c12; margin-top:6px; }
+.vt-btn.vt-once { color:#7db8ff; }
+
+/* ─── Colony sites + launch brief ───────────────────────────── */
+.col-row { display:grid; grid-template-columns:14px 1fr auto; gap:0 6px; padding:3px 0; cursor:pointer; font-size:9px; align-items:center;
+    border-bottom:1px solid rgba(255,255,255,.04); }
+.col-row:hover .col-name, .col-row.on .col-name { color:#eef; }
+.col-rank { color:#556; font-family:monospace; }
+.col-name { color:#bcd; font-weight:600; }
+.col-score { font-family:monospace; color:#7dffb0; }
+.col-meta { grid-column:2/-1; color:#667; font-size:8px; }
+.col-links { display:flex; gap:6px; margin:6px 0 2px; }
+.col-link { flex:1; text-align:center; font:600 9px 'Segoe UI',system-ui,sans-serif; color:#0b1120; background:#7dffb0;
+    border-radius:6px; padding:5px 6px; text-decoration:none; }
+.col-link.alt { background:rgba(125,255,176,.12); color:#7dffb0; border:1px solid rgba(125,255,176,.35); }
+.ip-select { width:100%; background:rgba(255,255,255,.05); color:#bcd; border:1px solid rgba(255,255,255,.12); border-radius:6px;
+    font:10px 'Segoe UI',system-ui,sans-serif; padding:4px 6px; margin:3px 0 6px; }
+
 /* ─── Loading ───────────────────────────────────────────────── */
 #loading {
     position:absolute; inset:0; z-index:100;
@@ -229,6 +254,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
     <div id="view-toggle">
         <button id="vt-surface" class="vt-btn active">Surface</button>
         <button id="vt-interior" class="vt-btn">Interior</button>
+        <button id="vt-earthview" class="vt-btn vt-once" title="Look at the Moon from the Earth's direction — today's phase and libration">⊕ Earth's view</button>
     </div>
 
     <!-- HUD -->
@@ -237,6 +263,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         <span class="hk">Phase&nbsp;&nbsp;</span><span class="hv" id="h-phase">—</span>
         <span class="hk">Age&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-age">—</span>
         <span class="hk">Dist&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-dist">—</span>
+        <span class="hk">Illum&nbsp;&nbsp;</span><span class="hv" id="h-illum">—</span>
+        <span class="hk">Libr&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-libr">—</span>
+        <span class="hk">Sub☉&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-subsol">—</span>
         <span class="hk">GCR&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-gcr">—</span>
         <span class="hk">SEP&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-sep">—</span>
         <span class="hk">Dose&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-dose">—</span>
@@ -269,11 +298,30 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
         <!-- Interior cutaway (visible in Interior view) -->
         <div class="ip-section" id="ip-sec-interior">
             <div class="ip-title">Interior Structure</div>
-            <div id="ip-layer-legend" style="margin-bottom:8px"></div>
+            <div id="ip-layer-legend" style="margin-bottom:4px"></div>
+            <div class="legend-row" title="Not a layer: where the kernel's Arrhenius viscosity crosses 10²⁶ Pa·s — the cold outer mantle that cannot flow. Drawn as the fractured band ending at the dashed ring." style="margin-bottom:8px">
+                <span class="legend-sw" style="background:transparent;border:1px dashed #9fb3d9"></span>
+                <span class="legend-name" style="color:#9fb3d9">Stagnant lid (derived)</span>
+                <span class="legend-r" id="ip-lid-legend">—</span>
+            </div>
             <div class="ip-row"><span class="ip-k">Central pressure</span><span class="ip-v" id="ip-p0">—</span></div>
             <div class="ip-row"><span class="ip-k">Central temperature</span><span class="ip-v" id="ip-t0">—</span></div>
             <div class="ip-row"><span class="ip-k">Surface gravity</span><span class="ip-v" id="ip-g">—</span></div>
             <div class="ip-row"><span class="ip-k">Crust near / far side</span><span class="ip-v" id="ip-crust">—</span></div>
+            <div class="ip-row" title="Normalized polar moment of inertia from the same layers that give the mass — GRAIL + LLR measured 0.3931 (Williams et al. 2014)"><span class="ip-k">C/MR² model · measured</span><span class="ip-v" id="ip-moi">—</span></div>
+
+            <div class="ip-title" style="margin-top:12px">Mantle — Stagnant Lid</div>
+            <div style="font-size:9px;color:#889;line-height:1.5">
+                Viscosity follows the selenotherm (Arrhenius, dry olivine).
+                The cold outer mantle is rigid; only the hot base can creep,
+                and sluggishly — the Moon never recycled its crust.
+            </div>
+            <div class="ip-row"><span class="ip-k">Lid base depth</span><span class="ip-v" id="ip-lid">—</span></div>
+            <div class="ip-row"><span class="ip-k">Rayleigh number</span><span class="ip-v" id="ip-ra">—</span></div>
+            <div class="ip-row"><span class="ip-k">Regime</span><span class="ip-v" id="ip-regime">—</span></div>
+            <div class="ip-row"><span class="ip-k">Creep (order of magnitude)</span><span class="ip-v" id="ip-creep">—</span></div>
+            <canvas id="ip-profile-chart" width="496" height="380"></canvas>
+            <div id="ip-probe">Hover the cut faces to probe depth: ρ, T, P, g, η, V<sub>P</sub>/V<sub>S</sub>.</div>
 
             <div class="ip-title" style="margin-top:12px">Deep Moonquakes</div>
             <div style="font-size:9px;color:#889;line-height:1.5">
@@ -302,8 +350,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
 
             <div style="font-size:8px;color:#556;line-height:1.6;margin-top:10px">
                 Structure: Weber et al. 2011 (Apollo seismics) · GRAIL crust
-                (Wieczorek 2013) · quakes: Nakamura 2005 · paleofield: Weiss &amp;
-                Tikoo 2014, Mighani 2020. Layer model gated by
+                (Wieczorek 2013) · C/MR²: Williams 2014 · rheology: Karato &amp;
+                Wu 1993 class, stagnant lid after Solomatov 1995 · quakes:
+                Nakamura 2005 · paleofield: Weiss &amp; Tikoo 2014, Mighani 2020.
+                The drawn mantle drift is a ~10¹⁰× time compression of the
+                kernel's mm/yr creep. Layer model gated by
                 tests/moon-interior-model.mjs.
             </div>
         </div>
@@ -356,7 +407,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 sodium glows sunward and streams into a tail. Drawing it at
                 all is the exaggeration — to the eye it is invisible.
             </div>
-            <div id="ip-exo-species" style="margin-bottom:10px"></div>
+            <div id="ip-exo-species" style="margin-bottom:6px"></div>
+            <div style="font-size:8px;color:#667;margin-bottom:2px">Draw one species' map on the glow shell + run its atoms:</div>
+            <div class="exo-chips" id="ip-exo-chips"></div>
+            <label class="lyr"><input type="checkbox" id="lyr-hops" checked> Monte-Carlo atoms (ballistic hops)</label>
+            <div id="ip-hop-stats" style="font-size:8px;color:#8ab;line-height:1.5;margin:3px 0 6px">—</div>
 
             <div class="ip-title" style="margin-top:12px">Live Sodium Weather</div>
             <div class="ip-row"><span class="ip-k">UV desorption (PSD)</span><span class="ip-v" id="ip-exo-psd">—</span></div>
@@ -369,8 +424,35 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 (solar-wind proxy); the magnetotail crossing shuts the
                 sputtering channel — watch the glow dim around full moon.
                 The drawn tail compresses a structure observed streaming
-                hundreds of moon-radii anti-sunward. Model gated by
-                tests/moon-exosphere-model.mjs.
+                hundreds of moon-radii anti-sunward. The atoms are a seeded
+                Monte-Carlo exosphere (launch at the local regolith
+                temperature, central gravity, cold-trapping, photoionization,
+                Jeans escape) on a ×300 clock — what pools where is emergent.
+                Models gated by tests/moon-exosphere-model.mjs and
+                tests/moon-exosphere-hops.mjs.
+            </div>
+        </div>
+
+        <!-- Impact record — the statistical crater field -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Impact Record</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:6px">
+                Below the base map's ~7 km/px the surface carries a
+                <em>statistical</em> crater population: counts per km² from
+                the Neukum chronology for the terrain the albedo names,
+                bowls shaped by Pike's depth/diameter, floors in the real
+                Sun's cast shadow. Not a catalogue — the named craters are
+                the landmarks.
+            </div>
+            <div class="ip-row"><span class="ip-k">Site</span><span class="ip-v" id="ip-cr-site">—</span></div>
+            <div class="ip-row"><span class="ip-k">Terrain · model age</span><span class="ip-v" id="ip-cr-terrain">—</span></div>
+            <div class="ip-row"><span class="ip-k">N(≥1 km) per km²</span><span class="ip-v" id="ip-cr-n1">—</span></div>
+            <div class="ip-row"><span class="ip-k">Sun elevation</span><span class="ip-v" id="ip-cr-sun">—</span></div>
+            <div class="ip-row" title="Fraction of a fresh 1 km bowl's floor in its own rim's shadow at this Sun elevation"><span class="ip-k">Fresh 1 km bowl in shadow</span><span class="ip-v" id="ip-cr-shadow">—</span></div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:6px">
+                Neukum, Ivanov &amp; Hartmann 2001 production function + lunar
+                chronology · Hartmann 1984 saturation · Pike 1977 morphometry.
+                Gated by tests/moon-craters.mjs.
             </div>
         </div>
 
@@ -423,6 +505,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <label class="lyr"><input type="checkbox" id="lyr-exo" checked> Exosphere Glow</label>
                 <label class="lyr"><input type="checkbox" id="lyr-natail" checked> Sodium Tail</label>
                 <label class="lyr" title="Real displaced geometry from the LRO-derived height raster, drawn at 4× — plus the shader bump term"><input type="checkbox" id="lyr-bump" checked> Terrain Relief (4×)</label>
+                <label class="lyr" title="Statistical crater field from the Neukum chronology, lit by the real Sun (shading only, never geometry)"><input type="checkbox" id="lyr-craters" checked> Crater Field (statistical)</label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthshine" checked> Earthshine</label>
                 <label class="lyr"><input type="checkbox" id="lyr-grid"> Lat/Lon Grid</label>
                 <label class="lyr"><input type="checkbox" id="lyr-rotate" checked> Auto-Rotate</label>
@@ -451,6 +534,60 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             <div id="ip-landing-sites" style="font-size:9px;color:#99a;line-height:1.5;max-height:140px;overflow-y:auto;padding-right:4px"></div>
         </div>
 
+        <!-- Proposed colony sites — the colony game's own survey, ranked -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Proposed Colony Sites</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:6px">
+                The south-pole candidates ranked by the colony sim's survey:
+                illumination (power), distance to shadowed ice (water), and
+                quake exposure. The top three wear green rings on the globe.
+                Click a site to brief a launch to it.
+            </div>
+            <label class="lyr" style="margin-bottom:6px"><input type="checkbox" id="lyr-colony" checked> <span style="color:#7dffb0">◯</span> Colony shortlist rings (top 3)</label>
+            <div id="ip-colony-list" style="max-height:170px;overflow-y:auto;padding-right:4px"></div>
+            <div class="col-links">
+                <a class="col-link" id="ip-colony-play" href="colony.html" target="_blank" rel="noopener">▶ Run this colony</a>
+            </div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:4px">
+                Survey: Mazarico 2011 (illumination), LCROSS (ice), Watters
+                2019 (scarps). Ratings are coarse by design — a strategy
+                layer, not a landing-site product. Gated by tests/colony-engine.mjs.
+            </div>
+        </div>
+
+        <!-- Getting there — the Earth launch brief, from the mission planner's own kernel -->
+        <div class="ip-section ip-surface-only">
+            <div class="ip-title">Getting There — Earth Launch</div>
+            <div style="font-size:9px;color:#889;line-height:1.5;margin-bottom:4px">
+                The mission planner's own transfer for a departure now, from
+                a real pad to the selected site, with the two Earth-side
+                constraints it has to meet: the Moon's declination against
+                the pad's inclination floor, and the Sun at the site on arrival.
+            </div>
+            <div class="ip-k" style="font-size:9px">Launch pad</div>
+            <select class="ip-select" id="ip-pad"></select>
+            <div class="ip-k" style="font-size:9px">Landing site</div>
+            <select class="ip-select" id="ip-dest-site"></select>
+            <div class="ip-row"><span class="ip-k">Depart · arrive</span><span class="ip-v" id="ip-lb-dates">—</span></div>
+            <div class="ip-row"><span class="ip-k">Transfer time</span><span class="ip-v" id="ip-lb-tof">—</span></div>
+            <div class="ip-row"><span class="ip-k">Δv TLI + LOI</span><span class="ip-v" id="ip-lb-dv">—</span></div>
+            <div class="ip-row"><span class="ip-k">v∞ at the Moon</span><span class="ip-v" id="ip-lb-vinf">—</span></div>
+            <div class="ip-row" title="A parking orbit can only inject toward a target whose declination is within its inclination; a due-east launch's floor is the pad's latitude"><span class="ip-k">Moon dec · pad floor</span><span class="ip-v" id="ip-lb-plane">—</span></div>
+            <div class="ip-row"><span class="ip-k">Plane change</span><span class="ip-v" id="ip-lb-dogleg">—</span></div>
+            <div class="ip-row"><span class="ip-k">Sun at site on arrival</span><span class="ip-v" id="ip-lb-sun">—</span></div>
+            <div class="ip-row"><span class="ip-k">Moon phase on arrival</span><span class="ip-v" id="ip-lb-phase">—</span></div>
+            <div class="col-links">
+                <a class="col-link" id="ip-lb-plan" href="mission-planner.html?origin=earth&target=moon&pad=ksc" target="_blank" rel="noopener">🚀 Fly it in the mission planner</a>
+            </div>
+            <div style="font-size:8px;color:#556;line-height:1.6;margin-top:4px">
+                Hohmann from a 300 km parking orbit to the Moon's live distance
+                (js/mission-planner-trajectory.js); the plane change is a
+                single-impulse upper bound the planner's Lambert path can beat.
+                Apollo landed with the Sun 7–20° up; polar sites never see
+                that — their light is topographic. Gated by tests/mission-pads.mjs.
+            </div>
+        </div>
+
         <!-- Data Sources -->
         <div class="ip-section ip-surface-only">
             <div class="ip-title">Data Sources</div>
@@ -468,6 +605,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <div>Smith et al. (1999) — the Leonid-storm sodium tail spike</div>
                 <div>IAU Gazetteer of Planetary Nomenclature — landmark positions</div>
                 <div>Relief — LRO-derived height raster (Wikimedia); displaced geometry drawn at 4×, gray levels mapped to the nominal ±10 km lunar span</div>
+                <div>Sun, Earth, phase, libration, distance — Meeus ch. 47/53 on the site's lunar ephemeris (js/moon-ephemeris.js), optical libration only</div>
+                <div>Craters — Neukum, Ivanov &amp; Hartmann 2001 · Hartmann 1984 · Pike 1977</div>
+                <div>Exosphere transport — Hodges 1973 / Butler 1997 class Monte-Carlo, toy resolution</div>
             </div>
         </div>
     </div>
@@ -498,15 +638,20 @@ import { LandingSites } from './js/moon-landing-sites.js';
 import { MoonInterior, INTERIOR_PALETTE } from './js/moon-interior.js';
 import {
     LAYERS as INTERIOR_LAYERS, R_MOON_KM,
-    pressureGPa, gravityMS2, selenothermK, crustThicknessKm,
+    pressureGPa, gravityMS2, selenothermK, solidusK, crustThicknessKm,
+    momentOfInertiaFactor, MOI_MEASURED, mantleViscosityPaS, LID_VISCOSITY_PA_S,
     DYNAMO_EPOCHS, ANOMALISTIC_MONTH_DAYS, REF_PERIGEE_MS,
 } from './js/moon-interior-model.js';
-import { MoonExosphere } from './js/moon-exosphere.js';
+import { MoonExosphere, SPECIES_COLORS } from './js/moon-exosphere.js';
 import {
     SPECIES, speciesProfile, totalMassKg,
     sodiumSources, QUIET_SODIUM_FRACTIONS,
     inMagnetotail, impactVaporBoost, activeShower,
 } from './js/moon-exosphere-model.js';
+import { lunarGeometry, solarZenithDeg } from './js/moon-ephemeris.js';
+import { siteCraterReport } from './js/moon-craters.js';
+import { EARTH_LAUNCH_SITES, lunarDepartureBrief, colonyShortlist } from './js/mission-pads.js';
+import { siteProfiles } from './js/colony-engine.js';
 import { MoonLandmarks } from './js/moon-landmarks.js';
 import { LANDMARKS, LANDMARK_CATEGORIES } from './js/moon-landmarks-data.js';
 
@@ -604,10 +749,32 @@ onResize();
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  SUN DIRECTION (fixed for now — updated from lunar ephemeris)
+//  SUN + EARTH DIRECTIONS — LIVE from the lunar ephemeris
+//  (js/moon-ephemeris.js: Meeus ch. 47/53 on the site's one lunar
+//  position). `geo` is refreshed every 10 s; the BODY-frame vectors
+//  are turned into world space by the mesh's display spin every frame
+//  so the terminator stays welded to the right selenographic longitude.
+//  Every light-dependent layer reads sunDir/earthDir from here:
+//  surface, cutaway crust, exosphere shell + tail + hop atoms, the glare
+//  sprite, the distant Earth, the descent HUD's sun elevation.
 // ═══════════════════════════════════════════════════════════════
 const DEG = Math.PI / 180;
-const sunDir = new THREE.Vector3(1, 0.15, 0.3).normalize();
+let geo = lunarGeometry(new Date());
+let _geoAt = Date.now();
+function refreshGeometry(nowMs) {
+    if (nowMs - _geoAt < 10_000) return geo;
+    geo = lunarGeometry(new Date(nowMs));
+    _geoAt = nowMs;
+    return geo;
+}
+const sunBody = new THREE.Vector3(geo.sunDir.x, geo.sunDir.y, geo.sunDir.z);
+const earthBody = new THREE.Vector3(geo.earthDir.x, geo.earthDir.y, geo.earthDir.z);
+// Start with the nearside facing the default camera on +z (rotation.y = −90°
+// takes body +x, lon 0, onto +z) — the familiar face, lit as it is today.
+let moonSpin = -Math.PI / 2;
+const _spinQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), moonSpin);
+const sunDir = sunBody.clone().applyQuaternion(_spinQ);
+const earthDir = earthBody.clone().applyQuaternion(_spinQ);
 
 // ═══════════════════════════════════════════════════════════════
 //  MOON — using MoonSkin module
@@ -617,12 +784,32 @@ const moon = new MoonSkin(scene, sunDir, {
     segments: 160,
     radiation: true,
 });
+moon.moonMesh.rotation.y = moonSpin;   // nearside toward the camera from frame 0
 
 // ═══════════════════════════════════════════════════════════════
 //  INTERIOR CUTAWAY — crust / mantle / partial melt / fluid core
 //  (renderer: js/moon-interior.js; physics: js/moon-interior-model.js)
 // ═══════════════════════════════════════════════════════════════
 const interior = new MoonInterior(scene, sunDir);
+
+// Crater field detail: a software rasteriser gets the two coarse bands only
+// (27 lattice cells per band per fragment is cheap on a GPU, not on
+// SwiftShader); `?craters=0|1|2` overrides; the Layers checkbox toggles.
+const craterDetail = (() => {
+    const q = new URLSearchParams(location.search).get('craters');
+    if (q === '0' || q === '1' || q === '2') return Number(q);
+    let name = '';
+    try {
+        const gl = renderer.getContext();
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    } catch { /* privacy-hardened browsers */ }
+    return /swiftshader|llvmpipe|software|basic render/i.test(name) ? 1 : 2;
+})();
+moon.setCraterDetail(document.getElementById('lyr-craters')?.checked ? craterDetail : 0);
+document.getElementById('lyr-craters')?.addEventListener('change', e => {
+    moon.setCraterDetail(e.target.checked ? craterDetail : 0);
+});
 
 // Sync the overlay uniform to its checkbox (default OFF — the tint buries
 // the photoreal surface; the flux shell alone carries the ambient signal).
@@ -656,10 +843,10 @@ moon.loadTextures(renderer).then(() => {
 //  Earth sits at ~45 R_moon (true distance is ~60 R_moon; nudged in so
 //  it reads at the default zoom — a framing choice, not a measurement).
 // ═══════════════════════════════════════════════════════════════
-// Angled so Earth hangs upper-left in the default framing
-const earthDir = new THREE.Vector3(-0.55, 0.16, 0.82).normalize();
 moon.setEarthDir(earthDir);
 let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in the loop
+let _earthMesh = null;    // the distant Earth, re-aimed by the ephemeris
+let _glare = null;        // the Sun glare sprite, likewise
 
 {
     const EARTH_FRAG = `
@@ -715,6 +902,7 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
     earthMesh.position.copy(earthDir).multiplyScalar(45);
     scene.add(earthMesh);
     _earthTimeU = earthU;   // updated in the loop
+    _earthMesh = earthMesh;
 }
 
 {
@@ -737,7 +925,46 @@ let _earthTimeU = null;   // distant-Earth uniforms, assigned below, ticked in t
     glare.position.copy(sunDir).multiplyScalar(60);
     glare.scale.setScalar(11);
     scene.add(glare);
+    _glare = glare;
 }
+
+/** Turn the body-frame Sun/Earth into world space and hand them to every layer. */
+const _interiorSun = new THREE.Vector3();
+function applyEphemeris() {
+    sunBody.set(geo.sunDir.x, geo.sunDir.y, geo.sunDir.z);
+    earthBody.set(geo.earthDir.x, geo.earthDir.y, geo.earthDir.z);
+    sunDir.copy(sunBody).applyQuaternion(moon.moonMesh.quaternion);
+    earthDir.copy(earthBody).applyQuaternion(moon.moonMesh.quaternion);
+    moon.setSunDir(sunDir);
+    moon.setSunBodyDir(sunBody);
+    moon.setEarthDir(earthDir);
+    // The cutaway has its own body orientation (wedge toward +z)
+    interior.setSunDir(_interiorSun.copy(sunBody).applyQuaternion(interior.group.quaternion));
+    exosphere.setSunDir(sunDir);
+    if (_glare) _glare.position.copy(sunDir).multiplyScalar(60);
+    if (_earthMesh) _earthMesh.position.copy(earthDir).multiplyScalar(45);
+    if (_earthTimeU) _earthTimeU.u_sun_dir.value.copy(sunDir);
+}
+// (first call sits right after the exosphere is built — it is the last
+//  consumer declared, and a `const` in its TDZ would abort the module)
+
+// "Earth's view": the camera takes the Earth's direction, so the disk shows
+// today's phase and libration exactly as the ephemeris has them. The display
+// spin pauses so the view holds; any drag on the canvas releases it.
+let spinPaused = false;
+document.getElementById('vt-earthview')?.addEventListener('click', () => {
+    if (viewMode !== 'surface') setViewMode('surface');
+    exitDescent();
+    const d = Math.max(camera.position.length(), 3.2);
+    camera.position.copy(earthDir).multiplyScalar(d);
+    controls.target.set(0, 0, 0);
+    controls.autoRotate = false;
+    const rot = document.getElementById('lyr-rotate');
+    if (rot) rot.checked = false;
+    spinPaused = true;
+    controls.update();
+});
+renderer.domElement.addEventListener('pointerdown', () => { spinPaused = false; });
 
 // ═══════════════════════════════════════════════════════════════
 //  LANDING SITES — Apollo (6) + Artemis III candidates (13)
@@ -750,6 +977,7 @@ const landingSites = new LandingSites(moon.moonMesh);
 //  envelope is organized by the Sun, not by the rotating surface)
 // ═══════════════════════════════════════════════════════════════
 const exosphere = new MoonExosphere(scene, sunDir);
+applyEphemeris();
 
 // ═══════════════════════════════════════════════════════════════
 //  LANDMARKS — craters / maria / basins / relief / swirls
@@ -834,6 +1062,10 @@ document.getElementById('lyr-apollo')?.addEventListener('change', e => {
 document.getElementById('lyr-artemis')?.addEventListener('change', e => {
     landingSites.setArtemisVisible(e.target.checked);
 });
+document.getElementById('lyr-colony')?.addEventListener('change', e => {
+    landingSites.setColonyVisible(e.target.checked);
+});
+
 
 // ═══════════════════════════════════════════════════════════════
 //  EXOSPHERE PANEL — species table straight from the kernel
@@ -865,6 +1097,50 @@ document.getElementById('lyr-artemis')?.addEventListener('change', e => {
             kernel's gravity.
         </div>`;
 })();
+
+// ── Species chips: ONE species' map on the shell + its Monte-Carlo atoms ──
+//  "All" = the composite shell; the atoms then run the tail species (Na).
+let _exoSpecies = null;
+(function renderSpeciesChips() {
+    const host = document.getElementById('ip-exo-chips');
+    if (!host) return;
+    const hex = (c) => '#' + c.toString(16).padStart(6, '0');
+    host.innerHTML = `<button class="exo-chip active" data-species="">All</button>` +
+        SPECIES.map(s => `<button class="exo-chip" data-species="${s.key}" style="--chip:${hex(SPECIES_COLORS[s.key] ?? 0xffffff)}">${s.name.replace(/-\d+$/, '').replace(' (H₂)', '')}</button>`).join('');
+    host.querySelectorAll('.exo-chip').forEach(btn => {
+        btn.addEventListener('click', () => setExoSpecies(btn.dataset.species || null));
+    });
+})();
+function setExoSpecies(key) {
+    _exoSpecies = key;
+    exosphere.setSpecies(key);
+    document.querySelectorAll('#ip-exo-chips .exo-chip').forEach(b => {
+        b.classList.toggle('active', (b.dataset.species || null) === key);
+    });
+    if (document.getElementById('lyr-hops')?.checked) exosphere.setHopSpecies(key ?? 'na');
+    _updateHopStats();
+}
+document.getElementById('lyr-hops')?.addEventListener('change', e => {
+    exosphere.setHopsVisible(e.target.checked);
+    if (e.target.checked && !exosphere.hopSpecies) exosphere.setHopSpecies(_exoSpecies ?? 'na');
+    _updateHopStats();
+});
+function _updateHopStats() {
+    const el = document.getElementById('ip-hop-stats');
+    if (!el) return;
+    const on = document.getElementById('lyr-hops')?.checked;
+    const st = on ? exosphere.hopStats() : null;
+    if (!st) { el.textContent = 'atoms off'; return; }
+    const sp = SPECIES.find(x => x.key === exosphere.hopSpecies);
+    const fmt = (n) => n.toLocaleString();
+    el.textContent = `${sp?.name ?? exosphere.hopSpecies}: ${fmt(st.flying)} in flight · ${fmt(st.frozen)} cold-trapped · ` +
+        `${fmt(st.escapes)} escaped · ${fmt(st.ionized)} ionized · clock ×${exosphere.hopTimeCompression} · ` +
+        `${(st.surfaceNightFraction * 100).toFixed(0)} % of the surface-bound gas is on the night side`;
+}
+if (document.getElementById('lyr-hops')?.checked) {
+    exosphere.setHopSpecies('na');
+    exosphere.setHopsVisible(true);
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  LANDMARKS PANEL — toggles + list from the data module
@@ -932,8 +1208,134 @@ function synthesizeLandmark(name) {
         cells: synth.result.width,
         extentKm: synth.extentKm,
     };
+    updateCraterReport({ name: lm.name, latDeg: lm.latDeg, lonDeg: lm.lonDeg, category: lm.category });
     return synth;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  IMPACT RECORD — the crater kernel's numbers for a site
+//  Terrain class from the MEASURED albedo when the base map can be
+//  read back, else from the landmark catalogue's category (disclosed).
+// ═══════════════════════════════════════════════════════════════
+let _craterSite = null;
+let _craterReport = null;
+function updateCraterReport(site) {
+    if (site) _craterSite = site;
+    const st = _craterSite;
+    if (!st) return null;
+    const zen = solarZenithDeg(st.latDeg, st.lonDeg, geo.subSolar);
+    const sunElevDeg = 90 - zen;
+    const albedo = _synthAlbedoAt ? _synthAlbedoAt(st.latDeg, st.lonDeg) : null;
+    const rep = albedo != null
+        ? siteCraterReport({ albedo, sunElevDeg })
+        : siteCraterReport({ highlandWeight: st.category === 'mare' ? 0 : 1, sunElevDeg });
+    _craterReport = { site: st.name, sunElevDeg, albedo, source: albedo != null ? 'measured albedo' : 'catalogue class', ...rep };
+    const set = (id, txt, color) => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = txt; if (color) el.style.color = color; }
+    };
+    set('ip-cr-site', st.name);
+    set('ip-cr-terrain', `${rep.terrain} · ${rep.ageGa.toFixed(1)} Ga (${_craterReport.source})`);
+    set('ip-cr-n1', `${rep.n1PerKm2 < 0.01 ? rep.n1PerKm2.toExponential(1) : rep.n1PerKm2.toFixed(3)}${rep.saturatedAt1km ? ' · saturated' : ''}`,
+        rep.saturatedAt1km ? '#ffd75c' : '#aabbcc');
+    set('ip-cr-sun', `${sunElevDeg >= 0 ? '+' : '−'}${Math.abs(sunElevDeg).toFixed(1)}°${sunElevDeg < 0 ? ' (night)' : ''}`,
+        sunElevDeg < 0 ? '#7db8ff' : '#aabbcc');
+    set('ip-cr-shadow', sunElevDeg <= 0 ? '100 % (night)' : `${(rep.shadowFraction1km * 100).toFixed(0)} % · clears at +${rep.shadowFreeElevationDeg.toFixed(0)}°`,
+        rep.shadowFraction1km > 0.5 ? '#ffd75c' : '#aabbcc');
+    return _craterReport;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PROPOSED COLONY SITES + THE EARTH LAUNCH BRIEF
+//  Sites: colony-engine's ranked survey (the colony game's own
+//  start screen, one list). Brief: js/mission-pads.js over the
+//  mission planner's transfer kernel + this page's ephemeris.
+//  (Placed AFTER the crater report and the synth albedo sampler: the
+//  first selectColonySite() runs at module init and reads both — a
+//  `let` above this point would be in its temporal dead zone.)
+// ═══════════════════════════════════════════════════════════════
+const COLONY_SITES = siteProfiles();
+const COLONY_SHORTLIST = colonyShortlist(3);
+let _colonySiteId = COLONY_SITES[0]?.id ?? null;
+let _launchBrief = null;
+
+(function renderColonyPanel() {
+    const list = document.getElementById('ip-colony-list');
+    const padSel = document.getElementById('ip-pad');
+    const siteSel = document.getElementById('ip-dest-site');
+    if (!list || !padSel || !siteSel) return;
+    list.innerHTML = COLONY_SITES.map((s, i) => `
+        <div class="col-row${s.id === _colonySiteId ? ' on' : ''}" data-colony="${s.id}" title="${(s.note || '').replace(/"/g, '&quot;')}">
+            <span class="col-rank">${i + 1}</span>
+            <span class="col-name">${s.name}${i < 3 ? ' <span style="color:#7dffb0">◯</span>' : ''}</span>
+            <span class="col-score">${s.score}</span>
+            <span class="col-meta">lit ${(s.illum * 100).toFixed(0)}% · ice ${s.iceDistM} m · quake ${'▮'.repeat(Math.round(s.quakeRisk * 5)) || '▯'} · ${Math.abs(s.lat).toFixed(1)}°S ${s.lon.toFixed(1)}°E</span>
+        </div>`).join('');
+    list.querySelectorAll('.col-row').forEach(row => {
+        row.addEventListener('click', () => selectColonySite(row.dataset.colony));
+    });
+    padSel.innerHTML = EARTH_LAUNCH_SITES.map(p => `<option value="${p.id}">${p.name} · ${Math.abs(p.lat).toFixed(1)}°${p.lat < 0 ? 'S' : 'N'}</option>`).join('');
+    siteSel.innerHTML = COLONY_SITES.map(s => `<option value="${s.id}">${s.name}</option>`).join('') +
+        `<option value="tranquility">Tranquility Base (Apollo 11)</option>`;
+    padSel.addEventListener('change', updateLaunchBrief);
+    siteSel.addEventListener('change', () => {
+        if (COLONY_SITES.some(s => s.id === siteSel.value)) selectColonySite(siteSel.value);
+        else updateLaunchBrief();
+    });
+    selectColonySite(_colonySiteId);
+})();
+
+function selectColonySite(id) {
+    const s = COLONY_SITES.find(x => x.id === id);
+    if (!s) return;
+    _colonySiteId = id;
+    document.querySelectorAll('#ip-colony-list .col-row').forEach(r => r.classList.toggle('on', r.dataset.colony === id));
+    const siteSel = document.getElementById('ip-dest-site');
+    if (siteSel && siteSel.value !== id) siteSel.value = id;
+    const play = document.getElementById('ip-colony-play');
+    if (play) play.href = `colony.html?site=${encodeURIComponent(id)}`;
+    updateCraterReport({ name: s.name, latDeg: s.lat, lonDeg: s.lon, category: 'crater' });
+    updateLaunchBrief();
+}
+
+function _launchSite() {
+    const siteSel = document.getElementById('ip-dest-site');
+    const id = siteSel?.value ?? _colonySiteId;
+    const c = COLONY_SITES.find(x => x.id === id);
+    if (c) return { id, name: c.name, latDeg: c.lat, lonDeg: c.lon, illum: c.illum };
+    return { id: 'tranquility', name: 'Tranquility Base', latDeg: 0.674, lonDeg: 23.473 };
+}
+
+function updateLaunchBrief() {
+    const padId = document.getElementById('ip-pad')?.value || 'ksc';
+    const site = _launchSite();
+    let b;
+    try { b = lunarDepartureBrief({ when: new Date(), padId, site }); }
+    catch (err) { console.warn('[moon] launch brief failed', err); return; }
+    _launchBrief = b;
+    const set = (id, txt, color) => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = txt; el.style.color = color || ''; }
+    };
+    const date = (jd) => new Date((jd - 2440587.5) * 86400000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    set('ip-lb-dates', `${date(b.departJd)} → ${date(b.arriveJd)}`);
+    set('ip-lb-tof', `${b.tofDays.toFixed(2)} d · Moon at ${Math.round(b.moonDistanceKm).toLocaleString()} km`);
+    set('ip-lb-dv', `${b.dvTliKms.toFixed(3)} + ${b.dvLoiKms.toFixed(3)} = ${b.dvTotalKms.toFixed(2)} km/s`);
+    set('ip-lb-vinf', `${b.vInfMoonKms.toFixed(3)} km/s`);
+    set('ip-lb-plane', `${b.moonDeclinationAtArrivalDeg >= 0 ? '+' : '−'}${Math.abs(b.moonDeclinationAtArrivalDeg).toFixed(1)}° · ${b.pad.minInclinationDeg.toFixed(1)}°`);
+    set('ip-lb-dogleg', b.coplanarReachable ? 'none — coplanar from this pad'
+        : `≤ ${b.planeChangeDvKms.toFixed(2)} km/s (Δi ${b.planeDeficitDeg.toFixed(1)}°)`,
+        b.coplanarReachable ? '#4fc97f' : '#ffd75c');
+    const sun = b.arrival;
+    set('ip-lb-sun', sun.polarSite
+        ? `${sun.sunElevationDeg >= 0 ? '+' : '−'}${Math.abs(sun.sunElevationDeg).toFixed(1)}° (polar · site lit ${Math.round((sun.topographicIllumination ?? 0) * 100)}% of the sol)`
+        : `${sun.sunElevationDeg >= 0 ? '+' : '−'}${Math.abs(sun.sunElevationDeg).toFixed(1)}°${sun.inApolloLightingBand ? ' · Apollo band' : sun.daylight ? ' · day' : ' · night'}`,
+        sun.polarSite ? '#aabbcc' : sun.inApolloLightingBand ? '#4fc97f' : sun.daylight ? '#aabbcc' : '#7db8ff');
+    set('ip-lb-phase', `${sun.phase} · ${(sun.illumination * 100).toFixed(0)}% lit`);
+    const plan = document.getElementById('ip-lb-plan');
+    if (plan) plan.href = `mission-planner.html?origin=earth&target=moon&pad=${encodeURIComponent(padId)}`;
+}
+setInterval(updateLaunchBrief, 60_000);
 
 // ── Landmark hover tooltip (raycast against the invisible hit spheres) ──
 const _lmRaycaster = new THREE.Raycaster();
@@ -973,6 +1375,7 @@ renderer.domElement.addEventListener('click', (ev) => {
 });
 
 renderer.domElement.addEventListener('pointermove', (ev) => {
+    if (viewMode === 'interior') { probeInterior(ev); return; }
     if (viewMode !== 'surface' || !_lmTip) return;
     const lm = _landmarkAtEvent(ev);
     if (lm) {
@@ -996,7 +1399,115 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
 renderer.domElement.addEventListener('pointerleave', () => {
     if (_lmTip) _lmTip.style.display = 'none';
     renderer.domElement.style.cursor = '';
+    interior.setProbe(-1);
+    drawProfileChart(null);
 });
+
+// ── Interior hover probe: raycast the cut faces, print the kernel profile ──
+let _probeProfile = null;
+function probeInterior(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    _lmPointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    _lmPointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    _lmRaycaster.setFromCamera(_lmPointer, camera);
+    const pr = interior.probe(_lmRaycaster);
+    _probeProfile = pr;
+    const host = document.getElementById('ip-probe');
+    if (!host) return;
+    if (!pr) {
+        host.innerHTML = 'Hover the cut faces to probe depth: ρ, T, P, g, η, V<sub>P</sub>/V<sub>S</sub>.';
+        drawProfileChart(null);
+        return;
+    }
+    const eta = Number.isNaN(pr.viscosityPaS) ? 'n/a (iron)' : `10^${Math.log10(pr.viscosityPaS).toFixed(1)} Pa·s`;
+    host.innerHTML =
+        `<b style="color:#ffe9a8">${pr.depthKm.toFixed(0)} km deep</b> · r = ${pr.rKm.toFixed(0)} km · ${pr.layer?.name ?? '—'} (${pr.layer?.state ?? ''})<br>` +
+        `ρ ${pr.rhoKgM3} kg/m³ · T ${pr.tK.toFixed(0)} K${Number.isNaN(pr.tSolidusK) ? '' : ` (solidus ${pr.tSolidusK.toFixed(0)} K)`}` +
+        `${pr.melt > 0 ? ` · melt ${(pr.melt * 100).toFixed(0)} %` : ''}<br>` +
+        `P ${pr.pGPa.toFixed(2)} GPa · g ${pr.gMS2.toFixed(2)} m/s² · V<sub>P</sub> ${pr.vpKmS} · V<sub>S</sub> ${pr.vsKmS} km/s · η ${eta}`;
+    drawProfileChart(pr.depthKm);
+}
+
+// ── Profile chart: T + solidus (melt band), log η (lid line), g — from the kernel ──
+const _chartCanvas = document.getElementById('ip-profile-chart');
+function drawProfileChart(probeDepthKm) {
+    if (!_chartCanvas) return;
+    const ctx = _chartCanvas.getContext('2d');
+    const W = _chartCanvas.width, H = _chartCanvas.height;
+    const padL = 54, padR = 16, padT = 20, padB = 30;
+    const rowH = (H - padT - padB - 16) / 2;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0a0c12'; ctx.fillRect(0, 0, W, H);
+    const xOf = (depthKm) => padL + (depthKm / R_MOON_KM) * (W - padL - padR);
+    const N = 240;
+    const rows = [
+        { y0: padT, label: 'T (K)', min: 200, max: 1800,
+          series: [
+              { color: '#ff9a4a', f: (r) => selenothermK(r) },
+              { color: '#ffd166', dash: [4, 4], f: (r) => (r >= 330 ? solidusK(r) : NaN) },
+          ] },
+        { y0: padT + rowH + 16, label: 'log₁₀ η (Pa·s)', min: 20, max: 32,
+          series: [{ color: '#9ad6ff', f: (r) => { const e = mantleViscosityPaS(r); return Number.isNaN(e) ? NaN : Math.log10(e); } }],
+          hline: { v: Math.log10(LID_VISCOSITY_PA_S), label: 'lid' } },
+    ];
+    ctx.font = '11px "Courier New", monospace';
+    for (const row of rows) {
+        const yOf = (v) => row.y0 + rowH - ((v - row.min) / (row.max - row.min)) * rowH;
+        // melt band (T ≥ solidus) in the T row only — derived, not painted
+        if (row.label.startsWith('T')) {
+            ctx.fillStyle = 'rgba(255,120,40,0.18)';
+            for (let i = 0; i < N; i++) {
+                const r = (i / N) * R_MOON_KM;
+                if (r >= 330 && selenothermK(r) >= solidusK(r)) {
+                    ctx.fillRect(xOf(R_MOON_KM - r), row.y0, (W - padL - padR) / N + 0.5, rowH);
+                }
+            }
+        }
+        // layer boundaries
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+        ctx.lineWidth = 1;
+        for (const L of INTERIOR_LAYERS) {
+            const x = xOf(R_MOON_KM - L.rOuterKm);
+            ctx.beginPath(); ctx.moveTo(x, row.y0); ctx.lineTo(x, row.y0 + rowH); ctx.stroke();
+        }
+        if (row.hline) {
+            const y = yOf(row.hline.v);
+            ctx.strokeStyle = 'rgba(180,200,255,0.45)'; ctx.setLineDash([3, 3]);
+            ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#9ab'; ctx.fillText(row.hline.label, W - padR - 24, y - 3);
+        }
+        for (const sr of row.series) {
+            ctx.strokeStyle = sr.color; ctx.lineWidth = 2;
+            ctx.setLineDash(sr.dash ?? []);
+            ctx.beginPath();
+            let pen = false;
+            for (let i = 0; i <= N; i++) {
+                const depth = (i / N) * R_MOON_KM;
+                const v = sr.f(R_MOON_KM - depth);
+                if (Number.isNaN(v)) { pen = false; continue; }
+                const x = xOf(depth), y = yOf(Math.min(row.max, Math.max(row.min, v)));
+                if (!pen) { ctx.moveTo(x, y); pen = true; } else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        ctx.fillStyle = '#8a9ab0';
+        ctx.fillText(row.label, padL, row.y0 - 6);
+        ctx.fillText(String(row.max), 6, row.y0 + 10);
+        ctx.fillText(String(row.min), 6, row.y0 + rowH);
+    }
+    ctx.fillStyle = '#667';
+    ctx.fillText('surface', padL, H - 10);
+    ctx.fillText('centre', W - padR - 44, H - 10);
+    ctx.fillText('depth →', W / 2 - 26, H - 10);
+    if (probeDepthKm != null) {
+        const x = xOf(probeDepthKm);
+        ctx.strokeStyle = 'rgba(255,233,168,0.9)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, padT - 4); ctx.lineTo(x, H - padB + 4); ctx.stroke();
+    }
+}
+drawProfileChart(null);
 
 // ═══════════════════════════════════════════════════════════════
 //  VIEW MODE — Surface ⇄ Interior cutaway
@@ -1042,6 +1553,16 @@ document.getElementById('vt-interior').addEventListener('click', () => setViewMo
     document.getElementById('ip-g').textContent = `${gravityMS2(R_MOON_KM).toFixed(2)} m/s²`;
     document.getElementById('ip-crust').textContent =
         `${crustThicknessKm(0, 0).toFixed(0)} / ${crustThicknessKm(0, 180).toFixed(0)} km`;
+    document.getElementById('ip-moi').textContent =
+        `${momentOfInertiaFactor().toFixed(4)} · ${MOI_MEASURED.toFixed(4)}`;
+    const c = interior.convection;
+    document.getElementById('ip-lid').textContent = `${(R_MOON_KM - c.lidBaseRadiusKm).toFixed(0)} km (η ≥ 10²⁶ Pa·s)`;
+    document.getElementById('ip-lid-legend').textContent = `${c.lidBaseRadiusKm.toFixed(0)}–${R_MOON_KM.toFixed(0)} km`;
+    document.getElementById('ip-ra').textContent = `${c.rayleigh.toExponential(1)} (critical ~${c.rayleighCritical})`;
+    const regEl = document.getElementById('ip-regime');
+    regEl.textContent = c.regime;
+    regEl.style.color = c.rayleigh > c.rayleighCritical ? '#ffd75c' : '#7db8ff';
+    document.getElementById('ip-creep').textContent = c.velocityMmYr > 0 ? `~${c.velocityMmYr.toFixed(1)} mm/yr` : 'none';
 })();
 
 // ── Tidal clock panel (refreshed ~1 Hz from the loop) ────────────────────
@@ -1096,23 +1617,11 @@ document.getElementById('lyr-anomalies')?.addEventListener('change', e => {
 // ═══════════════════════════════════════════════════════════════
 //  LUNAR PHASE + RADIATION MODEL
 // ═══════════════════════════════════════════════════════════════
-// Lunar phase calculation (simplified — synodic month = 29.53 days)
-function lunarPhase(date) {
-    const SYNODIC = 29.53058867;
-    // Known new moon: Jan 6, 2000 18:14 UTC
-    const ref = new Date('2000-01-06T18:14:00Z').getTime();
-    const diff = (date.getTime() - ref) / 86400000;
-    const age = ((diff % SYNODIC) + SYNODIC) % SYNODIC;
-    const illumination = 0.5 * (1 - Math.cos(2 * Math.PI * age / SYNODIC));
-    const phase = age < 1.85 ? 'New Moon'
-        : age < 7.38  ? 'Waxing Crescent'
-        : age < 9.23  ? 'First Quarter'
-        : age < 13.77 ? 'Waxing Gibbous'
-        : age < 15.77 ? 'Full Moon'
-        : age < 22.15 ? 'Waning Gibbous'
-        : age < 23.99 ? 'Last Quarter'
-        :                'Waning Crescent';
-    return { age, illumination, phase };
+// Lunar phase comes from the ephemeris (geo.ageDays / illumination / phase):
+// the old synodic-age formula is gone — the same geometry that lights the
+// globe names the phase, so the HUD cannot disagree with the terminator.
+function lunarPhase() {
+    return { age: geo.ageDays, illumination: geo.illumination, phase: geo.phase };
 }
 
 // GCR flux varies inversely with solar activity (Schwadron model)
@@ -1166,7 +1675,7 @@ window.addEventListener('swpc-update', e => {
 // ═══════════════════════════════════════════════════════════════
 function _updateExoPanel() {
     const now = Date.now();
-    const lp = lunarPhase(new Date(now));
+    const lp = lunarPhase();
     const inTail = inMagnetotail(lp.age);
     const showerBoost = impactVaporBoost(now);
     const src = sodiumSources({
@@ -1237,7 +1746,7 @@ function _updateRadPanel() {
 
     // Magnetotail (~4 days centred on full moon — window from the
     // exosphere kernel, the SAME one that shuts the Na sputtering channel)
-    const lp = lunarPhase(new Date());
+    const lp = lunarPhase();
     const inTail = inMagnetotail(lp.age);
     document.getElementById('ip-tail').textContent = inTail ? 'Inside (particle sheet)' : 'Outside';
     document.getElementById('ip-tail').style.color = inTail ? '#ffaa20' : '#8899aa';
@@ -1380,7 +1889,8 @@ const DESCENT_MIN_AGL_KM = 1.2;
 const DESCENT_STEP_KM = 8;
 const DESCENT_READOUT_MS = 125;
 
-let moonSpin = 0;   // accumulated body rotation — frozen while descending
+// (moonSpin — the display spin accumulator — is declared with the ephemeris
+//  block above: it starts with the nearside toward the camera.)
 const descentState = {
     active: false, latDeg: 0, lonDeg: 0, site: '—', tween: null,
     hdgDeg: null, aglKm: null, vsMs: 0, gsKms: 0,
@@ -1519,6 +2029,7 @@ function enterDescent(latDeg, lonDeg, site = null) {
     };
     dhElements.site.textContent = descentState.site;
     updateDescentReticle(true);
+    updateCraterReport({ name: descentState.site, latDeg, lonDeg, category: site ? (LANDMARKS.find(l => l.name === site)?.category ?? 'crater') : 'crater' });
 }
 
 function exitDescent() {
@@ -1724,6 +2235,24 @@ try {
         enterDescent,
         exitDescent,
         nudgeDescent,
+        geometry: () => geo,
+        sunDir: () => sunDir.toArray(),
+        earthDir: () => earthDir.toArray(),
+        craterReport: () => (_craterReport ? { ..._craterReport } : null),
+        craterDetail: () => moon.moonU.u_crater_detail.value,
+        hopStats: () => exosphere.hopStats(),
+        hopSpecies: () => exosphere.hopSpecies,
+        setSpecies: setExoSpecies,
+        interiorProbe: (x, y) => {
+            _lmPointer.set(x, y);
+            _lmRaycaster.setFromCamera(_lmPointer, camera);
+            return interior.probe(_lmRaycaster);
+        },
+        convection: () => ({ ...interior.convection }),
+        colonySites: () => COLONY_SITES.map(s => ({ ...s })),
+        colonyShortlist: () => COLONY_SHORTLIST.map(s => ({ ...s })),
+        selectColonySite,
+        launchBrief: () => (_launchBrief ? JSON.parse(JSON.stringify(_launchBrief)) : null),
     });
 } catch {}
 
@@ -1744,8 +2273,15 @@ function animate() {
     // ACCUMULATOR so descent mode can freeze it without a jump: a camera
     // anchored over a lat/lon would otherwise watch the ground slide away.
     // The cutaway does NOT rotate — the wedge stays put and the camera orbits.
-    if (viewMode === 'surface' && !descentState.active) moonSpin += dt * 0.02;
+    // The display spin also pauses while the Monte-Carlo atoms run (their
+    // frame is Sun-fixed and their resting atoms ride the REAL rotation —
+    // a cosmetic spin would drag the ground out from under them) and after
+    // "Earth's view" until the next drag.
+    const hopsOn = document.getElementById('lyr-hops')?.checked;
+    if (viewMode === 'surface' && !descentState.active && !hopsOn && !spinPaused) moonSpin += dt * 0.02;
     moon.moonMesh.rotation.y = moonSpin;
+    refreshGeometry(Date.now());
+    applyEphemeris();
 
     if (descentState.active) {
         updateDescentTween(performance.now());
@@ -1759,22 +2295,28 @@ function animate() {
     // Update shader time
     moon.update(t);
     interior.update(t, Date.now());
-    exosphere.update(t);
+    exosphere.update(t, dt);
     landmarks.update(dt);
     if (_earthTimeU) _earthTimeU.u_time.value = t;
 
     // Panel + HUD refresh (~1 Hz — these touch the DOM)
     if (t - _lastPanelT > 1) {
         _lastPanelT = t;
-        const lp = lunarPhase(new Date());
+        const lp = lunarPhase();
         document.getElementById('h-phase').textContent = lp.phase;
         document.getElementById('h-age').textContent = `${lp.age.toFixed(1)} days`;
-        document.getElementById('h-dist').textContent = '384,400 km';
+        document.getElementById('h-dist').textContent = `${Math.round(geo.distanceKm).toLocaleString()} km`;
+        document.getElementById('h-illum').textContent = `${(geo.illumination * 100).toFixed(0)}%`;
+        const fmtL = (v, p, n) => `${Math.abs(v).toFixed(1)}°${v >= 0 ? p : n}`;
+        document.getElementById('h-libr').textContent = `${fmtL(geo.subEarth.lonDeg, 'E', 'W')} ${fmtL(geo.subEarth.latDeg, 'N', 'S')}`;
+        document.getElementById('h-subsol').textContent = `${fmtL(geo.subSolar.lonDeg, 'E', 'W')} ${fmtL(geo.subSolar.latDeg, 'N', 'S')}`;
         // Earthshine varies with inverse of lunar illumination
         // (full moon = no earthshine, new moon = max earthshine)
-        moon.setEarthshine((1 - lp.illumination) * 0.35);
+        if (document.getElementById('lyr-earthshine')?.checked) moon.setEarthshine((1 - lp.illumination) * 0.35);
         updateTidePanel(Date.now());
         _updateExoPanel();
+        _updateHopStats();
+        updateCraterReport();
     }
 
     // The descent entry tween drives camera + target directly; OrbitControls

@@ -421,3 +421,132 @@ export function outlookMarks(fc, win, regions = [], { dtMin = 15, l1Au = 0.99 } 
     }
     return marks.sort((a, b) => a.t - b.t);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Flare waves (2026-11)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Solar radius, km — the one the wave's speed is scaled by. */
+export const R_SUN_KM = 695_700;
+/** Representative EUV-wave speed, km/s (Thompson & Myers 2009: 200–400 km/s
+ *  for EIT waves; the fast Moreton/EUV fronts run ~1000). One display value. */
+export const WAVE_SPEED_KMS = 350;
+/** The front fades on this e-folding time, and is gone by `WAVE_LIFE_MIN`. */
+export const WAVE_EFOLD_MIN = 25;
+export const WAVE_LIFE_MIN = 60;
+/** Front thickness, rad of arc on the disc. */
+export const WAVE_WIDTH_RAD = 0.07;
+
+/**
+ * The coronal (EUV) wave a flare launches, at τ: a circular front expanding
+ * from the site at `WAVE_SPEED_KMS`, fading with its age. Class-weighted like
+ * the flash. { radiusRad, strength } or null before launch / after it is gone.
+ */
+export function flareWave(site, tMs) {
+    const w = { C: 0.35, M: 0.7, X: 1.0 }[site?.letter] ?? 0;
+    const d = tMs - site?.timeMs;
+    if (!w || !Number.isFinite(d) || d <= 0 || d > WAVE_LIFE_MIN * 60e3) return null;
+    const radiusRad = (WAVE_SPEED_KMS * d / 1000) / R_SUN_KM;
+    const strength = w * Math.exp(-d / (WAVE_EFOLD_MIN * 60e3));
+    return { radiusRad, strength };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Prominences / filaments (2026-11)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ONE cool-material channel, two looks: a filament is DARK on the disc
+// (absorption, as in H-alpha / 171) and the same structure is a BRIGHT
+// prominence off the limb (emission, as in 304) — the sun.html rule. The
+// SOURCE is observations where there are any: HEK's filament / prominence
+// detections (/api/hek/filaments via js/hek-filaments.js, the feed sun.html
+// already uses), because a potential field holds no prominence material at
+// all (zero magnetic dips — see that module's header). Without the feed the
+// fallback is the per-region filament lying along each bipole's PIL — the
+// same analytic fallback sun.html keeps. Nothing invented at high latitude:
+// a quiet-Sun prominence we did not observe is not drawn.
+
+/** Most spines the shaders carry (uniform arrays in js/hero-sun.js). */
+export const MAX_FILAMENTS = 16;
+/** Real prominence heights are ~0.03–0.1 R☉; drawn at ×PROM_HEIGHT_SCALE (disclosed). */
+export const PROM_HEIGHT_SCALE = 2.0;
+/** Height of a spine of angular half-length L (rad), before the scale. */
+export function prominenceHeightRad(halfLenRad) {
+    return Math.min(0.11, 0.03 + 0.28 * halfLenRad);
+}
+
+/**
+ * A filament's spine on the unit Sun: `samples + 1` unit vectors along a
+ * great circle through (lat, lon) in the direction `tiltDeg` measured from
+ * local WEST toward NORTH, spanning ±halfLenRad.
+ */
+export function prominenceSpine(latDeg, lonDeg, tiltDeg, halfLenRad, samples = 12) {
+    const c = helioUnit(latDeg, lonDeg);
+    const { west, north } = tangentAt(latDeg, lonDeg);
+    const g = (tiltDeg || 0) * DEG;
+    const d = [0, 1, 2].map((i) => west[i] * Math.cos(g) + north[i] * Math.sin(g));
+    const pts = [];
+    for (let i = 0; i <= samples; i++) {
+        const a = -halfLenRad + (2 * halfLenRad * i) / samples;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        pts.push([c[0] * ca + d[0] * sa, c[1] * ca + d[1] * sa, c[2] * ca + d[2] * sa]);
+    }
+    return pts;
+}
+
+/**
+ * /api/hek/filaments rows (js/hek-filaments.js normalised shape: lat_deg,
+ * lon_deg (Stonyhurst, west-positive), length_deg, tilt_deg, event_type,
+ * time) → prominence records anchored at `anchorMs` (the detection time, or
+ * the feed's `updated`): { id, latDeg, lonDeg, anchorMs, halfLenRad,
+ * tiltDeg, heightRad, kind:'observed' }. Longest first, capped.
+ */
+export function hekProminences(rows, { fallbackAnchorMs = NaN, max = MAX_FILAMENTS } = {}) {
+    const out = [];
+    for (const r of Array.isArray(rows) ? rows : []) {
+        const lat = Number(r?.lat_deg), lon = Number(r?.lon_deg);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const len = Number(r.length_deg);
+        const halfLenRad = (Number.isFinite(len) && len > 0 ? Math.min(80, Math.max(2, len)) : 8) * DEG / 2;
+        const t = stampMs(r.time);
+        const anchorMs = Number.isFinite(t) ? t : fallbackAnchorMs;
+        if (!Number.isFinite(anchorMs)) continue;
+        out.push({
+            id: String(r.id ?? `${r.event_type ?? 'FI'}-${lat.toFixed(1)}-${lon.toFixed(1)}`),
+            latDeg: lat, lonDeg: lon, anchorMs,
+            halfLenRad, tiltDeg: Number.isFinite(Number(r.tilt_deg)) ? Number(r.tilt_deg) : 0,
+            heightRad: prominenceHeightRad(halfLenRad) * PROM_HEIGHT_SCALE,
+            kind: 'observed', eventType: r.event_type ?? 'FI',
+        });
+    }
+    out.sort((a, b) => b.halfLenRad - a.halfLenRad);
+    return out.slice(0, max);
+}
+
+/**
+ * The analytic fallback: one filament per region, lying along its bipole's
+ * polarity-inversion line (perpendicular to the Joy's-law axis), length ~ the
+ * spot separation. Same record shape as `hekProminences`, kind 'region'.
+ */
+export function regionProminences(regions, { max = MAX_FILAMENTS } = {}) {
+    const out = [];
+    for (const reg of Array.isArray(regions) ? regions : []) {
+        const { halfSepRad } = bipoleSize(reg.area);
+        const g = joyTiltRad(reg.latDeg * DEG);
+        // The PIL runs perpendicular to the bipole axis: tilt + 90°.
+        const tiltDeg = g / DEG + 90;
+        const halfLenRad = halfSepRad * 1.15;
+        out.push({
+            id: `AR${reg.region}`, latDeg: reg.latDeg, lonDeg: reg.lonDeg, anchorMs: reg.anchorMs,
+            halfLenRad, tiltDeg, heightRad: prominenceHeightRad(halfLenRad) * PROM_HEIGHT_SCALE,
+            kind: 'region', eventType: 'FI',
+        });
+    }
+    return out.slice(0, max);
+}
+
+/** A prominence carried by differential rotation from its anchor to τ. */
+export function prominenceAt(p, tMs) {
+    const lonDeg = wrap180(p.lonDeg + stonyhurstDriftDegPerDay(p.latDeg) * ((tMs - p.anchorMs) / DAY));
+    return { latDeg: p.latDeg, lonDeg, earthFacing: Math.abs(lonDeg) < 90 };
+}

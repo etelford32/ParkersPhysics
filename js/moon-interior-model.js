@@ -129,6 +129,34 @@ function _sample(arr, rKm) {
 export function enclosedMassKg(rKm) { return _sample(_massKg, rKm); }
 export function gravityMS2(rKm) { return _sample(_gMS2, rKm); }
 export function pressureGPa(rKm) { return _sample(_pGPa, rKm); }
+export function densityKgM3(rKm) { return layerAt(rKm)?.densityKgM3 ?? 0; }
+/** Layer seismic speeds at r (km/s) — vS = 0 only in the fluid outer core. */
+export function seismicAt(rKm) {
+    const L = layerAt(rKm);
+    return L ? { vpKmS: L.vpKmS, vsKmS: L.vsKmS } : { vpKmS: 0, vsKmS: 0 };
+}
+
+// ── Moment of inertia — the SECOND integral the layers must satisfy ─────────
+// GRAIL + LLR: normalized polar moment C/MR² = 0.3931 (Williams et al. 2014,
+// JGR Planets 119:1546). A uniform sphere is 0.4; the Moon's 0.393 is the
+// signature of a SMALL dense core — far less central condensation than
+// Earth's 0.331. The layer densities were tuned to the mass; that they also
+// land on this number (0.3930, computed below) is a genuine check that the
+// mass is distributed correctly with radius, not just added up.
+export const MOI_MEASURED = 0.3931;
+export function momentOfInertiaFactor() {
+    // I = ∫ (8π/3) ρ r⁴ dr on the same 1 km grid as the mass
+    let I = 0;
+    const dr = _DR_KM * 1e3;
+    for (let i = 1; i < _N; i++) {
+        const rMid = (i - 0.5) * _DR_KM;
+        const rho = layerAt(rMid)?.densityKgM3 ?? 0;
+        const rM = rMid * 1e3;
+        I += (8 / 3) * Math.PI * rho * rM * rM * rM * rM * dr;
+    }
+    const R = R_MOON_KM * 1e3;
+    return I / (MOON_MASS_MODEL_KG * R * R);
+}
 
 // ── Selenotherm + solidus → derived melt fraction ────────────────────────────
 // Piecewise-linear anchors; monotone decreasing outward (the test checks).
@@ -166,6 +194,106 @@ export function meltFraction(rKm) {
     if (rKm < 330 || rKm > R_MOON_KM) return 0;
     const dT = selenothermK(rKm) - solidusK(rKm);
     return Math.max(0, Math.min(1, dT / _LIQUIDUS_MINUS_SOLIDUS_K));
+}
+
+// ── Mantle rheology → the convective state of the lunar mantle ───────────────
+// Viscosity is an Arrhenius law in the kernel's OWN selenotherm (dry olivine
+// diffusion creep, Karato & Wu 1993 class: E* ≈ 300 kJ/mol, with η_REF at
+// T_REF chosen inside the published 10²⁰–10²¹ Pa·s band for the hot deep
+// mantle). It is a MODEL of a quantity nobody has measured in situ; what it
+// is for is the thing the selenotherm implies and the page should say: the
+// outer ~half of the mantle is a STAGNANT LID (η > 10²⁶ Pa·s, effectively
+// rigid on any timescale), and the hot interior beneath it sits at a
+// Rayleigh number of order 10⁵ — above the ~10³ critical value, so it CAN
+// convect, but sluggishly (mm/yr), which is why the Moon never recycled
+// its crust and why its heat loss is conductive at the surface. Nothing in
+// the cutaway is allowed to draw plate-tectonic vigour on this body.
+export const GAS_CONSTANT = 8.314;                 // J/(mol K)
+export const ACTIVATION_ENERGY_J_MOL = 300e3;
+export const VISCOSITY_REF_PA_S = 1e21;
+export const VISCOSITY_REF_T_K = 1600;
+export const VISCOSITY_CAP_PA_S = 1e32;            // "rigid" — the law has no meaning above this
+export const LID_VISCOSITY_PA_S = 1e26;            // stagnant-lid threshold (disclosed convention)
+export const THERMAL_EXPANSIVITY_K = 3e-5;
+export const THERMAL_DIFFUSIVITY_M2_S = 1e-6;
+export const RA_CRITICAL = 1000;                   // order-of-magnitude free-slip spherical-shell value
+
+/** Silicate viscosity at r (Pa·s) from the selenotherm; capped where the law stops meaning anything. */
+export function mantleViscosityPaS(rKm) {
+    if (rKm < 330 || rKm > R_MOON_KM) return NaN;    // iron core — different rheology
+    const T = selenothermK(rKm);
+    const eta = VISCOSITY_REF_PA_S * Math.exp((ACTIVATION_ENERGY_J_MOL / GAS_CONSTANT) * (1 / T - 1 / VISCOSITY_REF_T_K));
+    return Math.min(eta, VISCOSITY_CAP_PA_S);
+}
+
+/**
+ * Convective state of the silicate mantle, derived — never typed in.
+ * Returns the lid base radius (shallowest r with η ≥ LID_VISCOSITY), the
+ * sub-lid layer's thickness and temperature contrast, its log-mean
+ * viscosity, the Rayleigh number, the regime, and the boundary-layer
+ * velocity scaling u ≈ (κ/d)·(Ra/Ra_c)^(2/3) in mm/yr — an ORDER OF
+ * MAGNITUDE, disclosed as such wherever it is printed.
+ */
+export function mantleConvectionState() {
+    const rBottom = 480;                                    // top of the partial-melt layer
+    let rLid = R_MOON_KM;
+    for (let r = rBottom; r <= R_MOON_KM; r += 1) {
+        if (mantleViscosityPaS(r) >= LID_VISCOSITY_PA_S) { rLid = r; break; }
+    }
+    const dKm = rLid - rBottom;
+    const tInterior = selenothermK(rBottom);
+    const dT = tInterior - selenothermK(rLid);
+    // Stagnant-lid convention (Solomatov 1995): the Rayleigh number is
+    // built on the INTERIOR viscosity (the hot base, where the fluid that
+    // actually moves lives) and the full contrast to the lid; the lid is
+    // the consequence, not an input. The rheological temperature scale
+    // ΔT_rh = R T_i²/E* says how much of that contrast the active layer
+    // feels (~2.4 ΔT_rh) — the rest is the rigid lid's conductive drop.
+    const etaInterior = mantleViscosityPaS(rBottom);
+    const rMid = (rBottom + rLid) / 2;
+    const rho = densityKgM3(rMid);
+    const g = gravityMS2(rMid);
+    const d = dKm * 1e3;
+    const ra = rho * g * THERMAL_EXPANSIVITY_K * dT * d * d * d / (THERMAL_DIFFUSIVITY_M2_S * etaInterior);
+    const regime = ra < RA_CRITICAL ? 'conductive — no convection'
+        : ra < 100 * RA_CRITICAL ? 'sluggish stagnant-lid convection'
+        : 'vigorous stagnant-lid convection';
+    const uMS = ra > RA_CRITICAL ? (THERMAL_DIFFUSIVITY_M2_S / d) * Math.pow(ra / RA_CRITICAL, 2 / 3) : 0;
+    const rheologicalScaleK = GAS_CONSTANT * tInterior * tInterior / ACTIVATION_ENERGY_J_MOL;
+    return {
+        lidBaseRadiusKm: rLid,
+        lidThicknessKm: R_MOON_KM - rLid,
+        layerThicknessKm: dKm,
+        interiorTK: tInterior,
+        deltaTK: dT,
+        rheologicalScaleK,
+        activeDeltaTK: 2.4 * rheologicalScaleK,
+        interiorViscosityPaS: etaInterior,
+        rayleigh: ra,
+        rayleighCritical: RA_CRITICAL,
+        regime,
+        velocityMmYr: uMS * 1e3 * 365.25 * 86400,
+    };
+}
+
+/** One readout for a radius — what the cutaway's hover probe prints. */
+export function profileAt(rKm) {
+    const r = Math.min(Math.max(rKm, 0), R_MOON_KM);
+    const L = layerAt(r);
+    const { vpKmS, vsKmS } = seismicAt(r);
+    return {
+        rKm: r,
+        depthKm: R_MOON_KM - r,
+        layer: L,
+        rhoKgM3: L?.densityKgM3 ?? 0,
+        tK: selenothermK(r),
+        tSolidusK: r >= 330 ? solidusK(r) : NaN,
+        melt: meltFraction(r),
+        pGPa: pressureGPa(r),
+        gMS2: gravityMS2(r),
+        vpKmS, vsKmS,
+        viscosityPaS: mantleViscosityPaS(r),
+    };
 }
 
 // ── Crustal thickness — degree-1 approximation of the GRAIL map ──────────────

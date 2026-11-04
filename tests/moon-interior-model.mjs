@@ -24,6 +24,8 @@ import {
     ANOMALISTIC_MONTH_DAYS, REF_PERIGEE_MS, anomalisticPhase, deepMoonquakeRate,
     DEEP_NESTS, SHALLOW_QUAKE_FACTS,
     DYNAMO_EPOCHS, dynamoSurfaceFieldMicroT, coreConvectionVigor, CRUSTAL_ANOMALIES,
+    MOI_MEASURED, momentOfInertiaFactor, densityKgM3, seismicAt, profileAt,
+    mantleViscosityPaS, mantleConvectionState, VISCOSITY_CAP_PA_S, LID_VISCOSITY_PA_S, RA_CRITICAL,
 } from '../js/moon-interior-model.js';
 
 let passed = 0;
@@ -196,6 +198,65 @@ const near = (a, b, tol, msg) =>
         assert.ok(v >= 0 && v <= 1, `vigour in [0,1] at ${a.toFixed(2)} Ga`);
     }
     ok('mechanisms per epoch; vigour 0 today → 1 at the plateau, monotone');
+}
+
+// ── 10. The SECOND integral: moment of inertia ──────────────────────────────
+{
+    const moi = momentOfInertiaFactor();
+    const err = Math.abs(moi - MOI_MEASURED) / MOI_MEASURED;
+    assert.ok(err < 0.003, `C/MR² within 0.3% of GRAIL+LLR 0.3931 (model ${moi.toFixed(4)})`);
+    assert.ok(moi < 0.4, 'less than a uniform sphere — there IS a dense core');
+    assert.ok(moi > 0.38, 'but barely — the core is small (Earth is 0.331)');
+    // A model with the core's density painted onto the mantle must fail
+    // this: same mass, wrong distribution. (Analytic check: a uniform sphere
+    // of the measured mass gives exactly 0.4.)
+    ok('moment of inertia C/MR² = 0.393 from the same layers that give the mass');
+}
+
+// ── 11. Rheology: Arrhenius in the selenotherm, lid emerges, Ra sluggish ──────
+{
+    assert.ok(Number.isNaN(mantleViscosityPaS(100)), 'no silicate viscosity in the iron core');
+    let prev = 0;
+    for (let r = 330; r <= R_MOON_KM; r += 5) {
+        const eta = mantleViscosityPaS(r);
+        assert.ok(eta >= prev - 1e-9, `viscosity non-decreasing outward at ${r} km`);
+        assert.ok(eta <= VISCOSITY_CAP_PA_S, 'capped where the law stops meaning anything');
+        prev = eta;
+    }
+    assert.ok(mantleViscosityPaS(480) >= 9e20 && mantleViscosityPaS(480) <= 1.1e21, 'reference viscosity at the hot base');
+    assert.equal(mantleViscosityPaS(R_MOON_KM), VISCOSITY_CAP_PA_S, 'the crust is rigid');
+    const c = mantleConvectionState();
+    assert.ok(c.lidBaseRadiusKm > 1100 && c.lidBaseRadiusKm < 1400,
+        `stagnant lid base in the mid-mantle (${c.lidBaseRadiusKm} km)`);
+    assert.ok(mantleViscosityPaS(c.lidBaseRadiusKm) >= LID_VISCOSITY_PA_S, 'lid base is where η crosses the threshold');
+    assert.ok(mantleViscosityPaS(c.lidBaseRadiusKm - 1) < LID_VISCOSITY_PA_S, '…and not one km deeper');
+    assert.ok(c.rayleigh > RA_CRITICAL && c.rayleigh < 100 * RA_CRITICAL,
+        `Ra of order 10⁴ — sluggish, never plate-tectonic (${c.rayleigh.toExponential(2)})`);
+    assert.equal(c.regime, 'sluggish stagnant-lid convection');
+    assert.ok(c.velocityMmYr > 0.05 && c.velocityMmYr < 5, `mm/yr-class creep (${c.velocityMmYr.toFixed(2)} mm/yr)`);
+    assert.ok(c.activeDeltaTK < c.deltaTK, 'the active layer feels only part of the contrast');
+    near(c.rheologicalScaleK, 8.314 * 1600 * 1600 / 300e3, 1e-6, 'ΔT_rh = R T_i²/E*');
+    ok('rheology: Arrhenius viscosity, lid at η = 10²⁶, Ra ~ 10⁴ sluggish stagnant lid');
+}
+
+// ── 12. profileAt is one consistent readout ─────────────────────────────────
+{
+    for (const r of [0, 100, 300, 400, 900, 1500, 1700, R_MOON_KM]) {
+        const p = profileAt(r);
+        assert.equal(p.layer, layerAt(r));
+        assert.equal(p.rhoKgM3, densityKgM3(r));
+        near(p.tK, selenothermK(r), 1e-12, 'T');
+        near(p.pGPa, pressureGPa(r), 1e-12, 'P');
+        near(p.gMS2, gravityMS2(r), 1e-12, 'g');
+        near(p.melt, meltFraction(r), 1e-12, 'melt');
+        near(p.depthKm, R_MOON_KM - r, 1e-9, 'depth');
+        assert.deepEqual({ vpKmS: p.vpKmS, vsKmS: p.vsKmS }, seismicAt(r));
+    }
+    assert.equal(profileAt(300).vsKmS, 0, 'fluid outer core: vS = 0');
+    assert.ok(Number.isNaN(profileAt(100).tSolidusK), 'no silicate solidus quoted in the core');
+    assert.equal(profileAt(-5).rKm, 0, 'clamped at the centre');
+    assert.equal(profileAt(9999).rKm, R_MOON_KM, 'clamped at the surface');
+    ok('profileAt: one readout, every field equal to its own kernel function');
 }
 
 console.log(`\nmoon-interior-model: ${passed} groups passed`);

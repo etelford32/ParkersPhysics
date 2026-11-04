@@ -664,6 +664,41 @@ window.addEventListener('message', (e) => {
 })();
 </script>
 
+<!-- ── S4b · NEAREST NEAR-EARTH OBJECTS — the 10 closest, right now ─────────
+     2026-11: the same JPL catalogue, Kepler kernel and worker the Solar
+     System orrery and the Near-Earth Watch run (js/home-neo-watch.js +
+     the PURE js/home-neo-model.js), drawn as a 2D geocentric plan view and
+     a live table — NOT an iframe of the orrery (captures-not-embeds, see
+     js/home-carousel.js). Mounted lazily when it scrolls near. -->
+<section id="neo-top10" class="demo-section" aria-labelledby="neo-top10-heading">
+  <div class="section-label" style="text-align:center">Local space · live</div>
+  <h2 id="neo-top10-heading" style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
+    The ten nearest asteroids and comets, right now</h2>
+  <p style="max-width:660px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
+    Where the closest catalogued near-Earth objects are at this moment — propagated from JPL's own orbital
+    elements by the same kernel that drives the Solar System simulation, with the distance, motion, size and
+    sky position of each. Save a location in the console above and the last column tells you whether it is up.</p>
+  <div id="neo-top10-host" data-neo-top10></div>
+</section>
+<script type="module">
+  // Mount when it comes within 600 px of the viewport (or after 8 s), so the
+  // catalogue fetch + worker never compete with the hero's boot.
+  const host = document.getElementById('neo-top10-host');
+  let mounted = false;
+  const mount = () => {
+    if (mounted || !host) return;
+    mounted = true;
+    import('./js/home-neo-watch.js')
+      .then((m) => m.mountHomeNeoWatch(host))
+      .catch((err) => { console.warn('[home] NEO widget failed to mount:', err); host.innerHTML = '<p style="color:#8b94ad">The near-Earth object board is unavailable right now.</p>'; });
+  };
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { io.disconnect(); mount(); } }, { rootMargin: '600px 0px' });
+    io.observe(host);
+    setTimeout(mount, 8000);
+  } else mount();
+</script>
+
 <!-- ── S5 · AURORACLE CAPTURE — the consumer conversion ───────────────────
      Anonymous, zero-friction email capture. Band styles are injected by
      js/aurora-capture.js; keep the [data-aurora-capture] form contract and

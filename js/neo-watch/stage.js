@@ -61,6 +61,23 @@
  *                the globe IS tied to GMST, so the pins are honest.
  *   observer     your own position, with the local horizon plane, so the
  *                alt/az the panel prints has something to mean on screen.
+ *   earth–moon   the gravity layer (js/earth-moon-gravity.js computes all of
+ *                it): the five Earth–Moon Lagrange points riding the LIVE Moon
+ *                (instantaneous "pulsating" CR3BP frame), Sun–Earth L1/L2 on
+ *                the Sun line, the Moon's Hill sphere as a ring about the Moon,
+ *                and — on its own toggle — a disc in the Moon's orbital plane
+ *                that evaluates 2Ω PER FRAGMENT and draws the zero-velocity
+ *                curves at C_L1…C_L4, plus the SELECTED object's forbidden
+ *                region when its Jacobi constant means anything. The disc's
+ *                fragment → km step is the inverse of the SAME radial map
+ *                (`GEO_MAP` constants interpolated as uniforms, never typed),
+ *                so on the log map the curves are distorted exactly as much as
+ *                every other distance on the stage and no more. Its 2Ω is the
+ *                kernel's `JACOBI_FIELD_GLSL`, which the kernel gate
+ *                transliterates and runs against the JS. The Hill ring is
+ *                mapped POINT BY POINT through `geoToScene` for the same
+ *                reason: a circle about the Moon is not a circle on a map that
+ *                compresses geocentric radius.
  *
  * ── Picking, hover and framing ─────────────────────────────────────────────
  * PICKING IS SCREEN-SPACE. three's `Raycaster` against a `Points` cloud takes
@@ -110,9 +127,13 @@ import {
     gmstRad, earthSceneMatrix,
     sunGeoDirectionJ2000, moonGeoJ2000, moonPhase, moonPath, moonApsides,
     equatorialToScene, eclipticToEquatorial,
-    earthHelioJ2000, hillRadiusKm, soiRadiusKm,
+    earthHelioJ2000, hillRadiusKm, soiRadiusKm, EARTH_RADIUS_KM, GEO_MAP,
 } from '../neo-space.js';
 import { FLAG } from '../neo-orbits.js';
+import {
+    EM_MU, lagrangeGeometry, lagrangePoints, moonHillRadiusKm, rotatingToGeoKm,
+    JACOBI_FIELD_GLSL,
+} from '../earth-moon-gravity.js';
 import { rockGeometry, rockMaterial, shapeFor, spinFor, hash32 } from '../neo-rocks.js';
 
 // This stage's OWN rock size map (Earth = 1 scene unit here, not 0.12). It is
@@ -135,6 +156,8 @@ const ATMO_OUTER = 1 + 160 / 6371.0088;
  * true scale), which is what a body 1 AU away actually does.
  */
 const SUN_LIGHT_R = 1e7;
+/** Vertices in the Moon's Hill ring (mapped point by point onto the radial map). */
+const MOON_HILL_SEGMENTS = 96;
 /** Pool size for real meshes. Small on purpose — each is 1280 faces. */
 const ROCK_POOL = 8;
 /** Longest a press may last and still count as a tap rather than a drag, ms. */
@@ -443,6 +466,72 @@ function dotTexture() {
  * stacked them on top of each other. 0.018 is about 18 px of cap height at
  * 720 p, which is what the canvas font is drawn at anyway.
  */
+// ── The zero-velocity disc ──────────────────────────────────────────────────
+// A unit disc laid in the Moon's orbital plane (its matrix carries the live
+// e1/e2/e3 basis and the drawn radius). Each fragment: plane coordinates →
+// scene radius → TRUE km through the inverse of the active radial map → the
+// non-dimensional rotating frame → 2Ω. Lines are drawn where 2Ω crosses each
+// gate's Jacobi constant, one screen-space pixel wide (fwidth), and the
+// selected object's forbidden region (2Ω < C) is tinted when it has one.
+const ZVC_VS = /* glsl */ `
+uniform float uR;
+varying vec2 vPlane;
+void main() {
+    vPlane = position.xy * uR;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const ZVC_FS = /* glsl */ `
+uniform float uR;
+uniform float uD;
+uniform float uMu;
+uniform float uGain;
+uniform float uRe;
+uniform float uEarthS;
+uniform float uTrue;
+uniform vec4 uLevels;
+uniform float uObjC;
+uniform float uHasObj;
+varying vec2 vPlane;
+${JACOBI_FIELD_GLSL}
+float contour(float f, float level, float w) {
+    float d = abs(f - level) / max(fwidth(f), 1e-6);
+    return 1.0 - smoothstep(0.0, w, d);
+}
+void main() {
+    float s = length(vPlane);
+    if (s <= uEarthS) discard;
+    float km = uTrue > 0.5 ? s * uRe : uRe * exp((s - uEarthS) / uGain);
+    float X = (vPlane.x / s) * km / uD - uMu;
+    float Y = (vPlane.y / s) * km / uD;
+    float f = emJacobiField(X, Y, uMu);
+    float edge = 1.0 - smoothstep(0.86, 1.0, s / uR);
+    // THE BARRIER, as a fill. A point is reachable by a particle of Jacobi
+    // constant C only where 2Omega >= C, so the LOWER 2Omega is, the more energy
+    // it takes to get there. Shade by that energy between the first gate (C_L1,
+    // unshaded) and the last (C_L4, darkest): the ring of barrier round the
+    // Moon's orbit, its openings at L1/L2/L3, and the L4/L5 lobes, read as one
+    // picture. Lines alone collapse to a smear on the log map, where the whole
+    // 0.84-1.17 D band is 1.5 scene units wide.
+    float t = clamp((uLevels.x - f) / (uLevels.x - uLevels.w), 0.0, 1.0);
+    vec3 col = mix(vec3(0.62, 0.55, 0.95), vec3(0.36, 0.30, 0.78), t);
+    float a = f < uLevels.x ? 0.10 + 0.32 * t : 0.0;
+    // Thin gate contours on top (screen-space width), so each level is legible.
+    float l1 = contour(f, uLevels.x, 0.9);
+    float l2 = contour(f, uLevels.y, 0.9);
+    float l3 = contour(f, uLevels.z, 0.9);
+    col = mix(col, vec3(1.00, 0.82, 0.48), l1);
+    col = mix(col, vec3(0.86, 0.78, 1.00), l2 * (1.0 - l1));
+    col = mix(col, vec3(0.70, 0.74, 0.98), l3 * (1.0 - l1) * (1.0 - l2));
+    a = max(a, 0.75 * max(l1, max(l2, l3)));
+    // The selected object's own forbidden region (2Omega < C), when it has one.
+    if (uHasObj > 0.5 && f < uObjC) {
+        col = mix(col, vec3(0.92, 0.36, 0.30), 0.55);
+        a = max(a, 0.30);
+    }
+    if (a <= 0.003) discard;
+    gl_FragColor = vec4(col, a * edge);
+}`;
+
 function labelSprite(text, color = '#9fc6ff', scale = 1) {
     const pad = 10, font = '600 30px ui-monospace, SFMono-Regular, Menlo, monospace';
     const meas = document.createElement('canvas').getContext('2d');
@@ -534,6 +623,7 @@ export class NeoStage {
         this._buildPopulation();
         this._buildRockPool();
         this._buildOverlays();
+        this._buildEarthMoonLayer();
 
         // Pointer events, not click: one path for mouse, pen and touch, and a
         // press/release pair we can measure to tell a tap from a camera drag.
@@ -846,6 +936,175 @@ export class NeoStage {
         for (let i = 0; i < NEAR_LABELS; i++) this.nearLabels.push({ sprite: null, name: null });
     }
 
+    /**
+     * The Earth–Moon gravity layer. Geometry only — every number is the
+     * kernel's, re-placed in `_placeEarthMoon` each `setEpoch`.
+     */
+    _buildEarthMoonLayer() {
+        this.emGroup = new THREE.Group();
+        this.emGroup.name = 'earth-moon-gravity';
+        this.scene.add(this.emGroup);
+        this.emVisible = true;
+        this.zvcVisible = false;
+        this.emObjectC = null;
+
+        // Lagrange markers: screen-sized dots (the population's own sprite
+        // rule), Earth–Moon in violet, Sun–Earth in the Sun marker's yellow.
+        this.lagrangeMarks = [];
+        const dot = dotTexture();
+        const mk = (id, short, color, labelColor) => {
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+            const pts = new THREE.Points(g, new THREE.PointsMaterial({
+                size: 10, sizeAttenuation: false, color, map: dot, transparent: true,
+                depthWrite: false, depthTest: true,
+            }));
+            pts.frustumCulled = false;
+            pts.renderOrder = 6;
+            const label = labelSprite(short, labelColor, 0.7);
+            this.emGroup.add(pts, label);
+            const m = { id, short, pts, label, geoKm: null };
+            this.lagrangeMarks.push(m);
+            return m;
+        };
+        for (const p of ['L1', 'L2', 'L3', 'L4', 'L5']) mk(`EM-${p}`, `EM ${p}`, 0xb9a8ff, '#c7b9ff');
+        mk('SE-L1', 'Sun–Earth L1', 0xffdf8a, '#ffdf8a');
+        mk('SE-L2', 'Sun–Earth L2', 0xffdf8a, '#ffdf8a');
+
+        // The Moon's Hill sphere, as a ring in its orbital plane, mapped point
+        // by point onto the active radial map.
+        this.moonHillRing = new THREE.LineLoop(
+            new THREE.BufferGeometry().setAttribute('position',
+                new THREE.BufferAttribute(new Float32Array(3 * MOON_HILL_SEGMENTS), 3)),
+            new THREE.LineBasicMaterial({ color: 0xb9a8ff, transparent: true, opacity: 0.55 }),
+        );
+        this.moonHillRing.frustumCulled = false;
+        this.moonHillLabel = labelSprite('Moon’s Hill sphere', '#c7b9ff', 0.7);
+        this.emGroup.add(this.moonHillRing, this.moonHillLabel);
+
+        // The zero-velocity disc.
+        const levels = lagrangePoints(EM_MU);
+        const byId = Object.fromEntries(levels.map(p => [p.id, p.C]));
+        this.zvcUniforms = {
+            uR:      { value: 1 },
+            uD:      { value: 384_400 },
+            uMu:     { value: EM_MU },
+            uGain:   { value: GEO_MAP.gain },
+            uRe:     { value: EARTH_RADIUS_KM },
+            uEarthS: { value: GEO_MAP.earthSceneRadius },
+            uTrue:   { value: 0 },
+            uLevels: { value: new THREE.Vector4(byId.L1, byId.L2, byId.L3, byId.L4) },
+            uObjC:   { value: 0 },
+            uHasObj: { value: 0 },
+        };
+        this.zvcDisc = new THREE.Mesh(
+            new THREE.CircleGeometry(1, 192),
+            new THREE.ShaderMaterial({
+                vertexShader: ZVC_VS, fragmentShader: ZVC_FS, uniforms: this.zvcUniforms,
+                transparent: true, depthWrite: false, side: THREE.DoubleSide,
+            }),
+        );
+        this.zvcDisc.matrixAutoUpdate = false;
+        this.zvcDisc.frustumCulled = false;
+        this.zvcDisc.renderOrder = 2;
+        this.zvcDisc.visible = false;
+        this.scene.add(this.zvcDisc);
+    }
+
+    /** Re-place the Earth–Moon layer at the current epoch and radial map. */
+    _placeEarthMoon(jd) {
+        const geom = lagrangeGeometry(jd);
+        this.emGeometry = geom;
+        const toScene = (v) => geoToScene(v[0] / AU_KM, v[1] / AU_KM, v[2] / AU_KM, { trueScale: this.trueScale });
+        const byId = Object.fromEntries(geom.all.map(p => [p.id, p]));
+        for (const m of this.lagrangeMarks) {
+            const p = byId[m.id];
+            m.geoKm = p.geoKm;
+            const q = toScene(p.geoKm);
+            const a = m.pts.geometry.attributes.position;
+            a.setXYZ(0, q.x, q.y, q.z);
+            a.needsUpdate = true;
+            m.label.position.set(q.x, q.y, q.z);
+            m.scenePos = new THREE.Vector3(q.x, q.y, q.z);
+            m.inView = p.distKm <= this.horizonKm * 1.35;
+            m.pts.visible = m.label.visible = m.inView;
+        }
+
+        // Hill ring about the Moon, in the orbital plane.
+        const fr = geom.frame;
+        const rH = moonHillRadiusKm(fr.D);
+        const pos = this.moonHillRing.geometry.attributes.position;
+        for (let k = 0; k < MOON_HILL_SEGMENTS; k++) {
+            const t = (k / MOON_HILL_SEGMENTS) * Math.PI * 2;
+            const ox = rH * Math.cos(t), oy = rH * Math.sin(t);
+            const v = [
+                fr.moonKm[0] + fr.e1[0] * ox + fr.e2[0] * oy,
+                fr.moonKm[1] + fr.e1[1] * ox + fr.e2[1] * oy,
+                fr.moonKm[2] + fr.e1[2] * ox + fr.e2[2] * oy,
+            ];
+            const q = toScene(v);
+            pos.setXYZ(k, q.x, q.y, q.z);
+        }
+        pos.needsUpdate = true;
+        {
+            const v = rotatingToGeoKm(fr, 1 - EM_MU, -rH / fr.D * 1.05, 0);
+            const q = toScene(v);
+            this.moonHillLabel.position.set(q.x, q.y, q.z);
+        }
+
+        // The disc: basis = (e1, e2, e3) in scene axes, radius = 1.6 D drawn.
+        const sv = (e) => {
+            const q = eclipticToEquatorial(e[0], e[1], e[2]);
+            const t = equatorialToScene(q.x, q.y, q.z);
+            return new THREE.Vector3(t.x, t.y, t.z);
+        };
+        const b1 = sv(fr.e1), b2 = sv(fr.e2), b3 = sv(fr.e3);
+        const R = this.trueScale ? trueSceneRadius(1.6 * fr.D) : geoSceneRadius(1.6 * fr.D);
+        const M = new THREE.Matrix4().makeBasis(b1, b2, b3).multiply(new THREE.Matrix4().makeScale(R, R, R));
+        this.zvcDisc.matrix.copy(M);
+        this.zvcDisc.matrixWorldNeedsUpdate = true;
+        this.zvcUniforms.uR.value = R;
+        this.zvcUniforms.uD.value = fr.D;
+        this.zvcUniforms.uTrue.value = this.trueScale ? 1 : 0;
+        this.emFrameScene = { b1, b2, b3, R };
+        this._syncEarthMoonVisibility();
+    }
+
+    _syncEarthMoonVisibility() {
+        this.emGroup.visible = this.emVisible;
+        this.zvcDisc.visible = this.zvcVisible;
+        const c = this.emObjectC;
+        this.zvcUniforms.uHasObj.value = Number.isFinite(c) ? 1 : 0;
+        this.zvcUniforms.uObjC.value = Number.isFinite(c) ? c : 0;
+    }
+
+    /** Lagrange points + the Moon's Hill sphere. */
+    setEarthMoonLayer(on) { this.emVisible = !!on; this._syncEarthMoonVisibility(); }
+    /** The zero-velocity-curve disc in the Moon's orbital plane. */
+    setZeroVelocityCurves(on) { this.zvcVisible = !!on; this._syncEarthMoonVisibility(); }
+    /**
+     * Tint the selected object's forbidden region (2Ω < C). Pass null when it
+     * has no meaningful Jacobi constant (outside Earth's Hill sphere, or no
+     * velocity) — the disc then shows the gate contours only.
+     */
+    setObjectJacobi(C) { this.emObjectC = Number.isFinite(C) ? C : null; this._syncEarthMoonVisibility(); }
+
+    /**
+     * Look down on the Earth–Moon system: from above the Moon's orbital plane,
+     * framing out past L2. Camera.up is untouched (the orbit normal is ~20–30°
+     * from the celestial pole, so the view never reaches OrbitControls' pole).
+     */
+    frameEarthMoon() {
+        const fr = this.emFrameScene;
+        if (!fr) return;
+        const r = this.trueScale ? trueSceneRadius(1.25 * this.emGeometry.frame.D)
+            : geoSceneRadius(1.25 * this.emGeometry.frame.D);
+        const dir = fr.b3.clone().multiplyScalar(0.92).addScaledVector(fr.b1, -0.22).addScaledVector(fr.b2, -0.3).normalize();
+        this.controls.target.set(0, 0, 0);
+        this.camera.position.copy(dir).multiplyScalar(Math.min(this._distanceToFit(r, 1.0), this.controls.maxDistance));
+        this.controls.update();
+    }
+
     // ── Public API ──────────────────────────────────────────────────────────
 
     /** Set the simulation instant. Everything Earth-fixed re-derives from this. */
@@ -895,6 +1154,7 @@ export class NeoStage {
 
         this._placeMoon(jd);
         this._placeShells();
+        this._placeEarthMoon(jd);
     }
 
     _placeMoon(jd) {
@@ -1553,6 +1813,18 @@ export class NeoStage {
             sh.label.visible = f > 0.08 && f < 2.6 && (sh.spec.alwaysOn || f > 0.22);
         }
         this.moonLabel.visible = this.moon.position.length() / camDist > 0.05;
+        // Lagrange labels: Earth–Moon points crowd the Moon at the wide view,
+        // so their labels show only once the Moon's orbit spans enough of the
+        // frame to separate them (the shell-label rule).
+        if (this.lagrangeMarks) {
+            const moonF = this.moon.position.length() / camDist;
+            for (const m of this.lagrangeMarks) {
+                if (!m.inView) { m.label.visible = false; continue; }
+                m.label.visible = m.id.startsWith('EM') ? moonF > 0.22
+                    : (m.scenePos ? m.scenePos.length() / camDist > 0.08 : false);
+            }
+            this.moonHillLabel.visible = moonF > 0.5;
+        }
         // The selection ring is a screen-space annotation, so it faces the
         // camera and keeps a constant pixel size.
         if (this.selRing.visible) {

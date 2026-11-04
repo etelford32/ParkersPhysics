@@ -21,6 +21,19 @@
  *       dynamoSurfaceFieldMicroT(age)/50; at age 0 the lines are GONE and
  *       only the crustal-anomaly markers remain. The Moon's field is dead;
  *       the scrubber is a memorial, and the page says so.
+ *     • THE MANTLE (2026-11): the profile texture's B channel carries the
+ *       kernel's Arrhenius viscosity, so the STAGNANT LID (η ≥ 10²⁶ Pa·s,
+ *       `mantleConvectionState().lidBaseRadiusKm`) is drawn as a cooler,
+ *       finely fractured band ending at a dashed ring exactly where the
+ *       kernel puts it; beneath it the convecting mantle carries a slow
+ *       cellular drift whose EXISTENCE follows the kernel's regime (zero
+ *       when Ra < Ra_c) — its on-screen speed is a time compression of
+ *       order 10¹⁰ over the kernel's mm/yr creep, disclosed in the panel.
+ *       The deep-moonquake nest zone (700–1200 km depth) is a faint cyan
+ *       band so the cyan markers have a home.
+ *     • The hover PROBE: `setProbe(rNorm)` draws a highlight ring at one
+ *       radius on both cut faces; the page prints `profileAt` there — the
+ *       numbers come from the kernel, the ring only says where.
  *   DECORATION (disclosed):
  *     • The convective swirl on the fluid outer core. The FLUID STATE is the
  *       physics (vS = 0, Weber 2011); the swirl vigour is schematic.
@@ -36,7 +49,8 @@
 import * as THREE from 'three';
 import {
     R_MOON_KM, LAYERS,
-    selenothermK, meltFraction,
+    selenothermK, meltFraction, profileAt,
+    mantleViscosityPaS, mantleConvectionState,
     anomalisticPhase, deepMoonquakeRate, DEEP_NESTS,
     dynamoSurfaceFieldMicroT, coreConvectionVigor, CRUSTAL_ANOMALIES,
 } from './moon-interior-model.js';
@@ -82,10 +96,14 @@ void main() {
 
 const FACE_FRAG = /* glsl */`
 precision highp float;
-uniform sampler2D u_profile;   // r → (T_norm, melt, -, -)
+uniform sampler2D u_profile;   // r → (T_norm, melt, log-viscosity norm, -)
 uniform float u_time;
 uniform vec4  u_bounds;        // normalized layer boundary radii
 uniform vec3  u_tint_ic, u_tint_oc, u_tint_lvz, u_tint_mantle, u_tint_crust;
+uniform float u_lid_r;         // stagnant-lid base radius (normalized) — kernel
+uniform vec2  u_nest_zone;     // deep-moonquake nest band (normalized radii)
+uniform float u_flow;          // 1 when the kernel says the sub-lid mantle convects, else 0
+uniform float u_probe_r;       // hover probe radius (normalized), < 0 = none
 varying vec3 vLocal;
 
 float hash12(vec2 p) {
@@ -114,9 +132,11 @@ vec3 blackbody(float tK) {
 
 void main() {
     float r = length(vLocal);                 // moon radii, 0..1
-    vec2 prof = texture2D(u_profile, vec2(clamp(r, 0.0, 1.0), 0.5)).rg;
+    vec3 prof = texture2D(u_profile, vec2(clamp(r, 0.0, 1.0), 0.5)).rgb;
     float tK = 250.0 + prof.r * 1450.0;
     float melt = prof.g;
+    float etaN = prof.b;                      // (log10 η − 20) / 12, 0 hot … 1 rigid
+    float ang = atan(vLocal.y, length(vLocal.xz));
 
     // Layer tint — analytic from boundaries, so rings don't blur with the texture
     vec3 tint = (r < u_bounds.x) ? u_tint_ic
@@ -130,9 +150,29 @@ void main() {
     vec3 glow = blackbody(tK);
     vec3 col = rock + glow * 0.7;
 
+    // The mantle's two halves, from the kernel's viscosity profile:
+    //   • above the lid base — a rigid, cold, finely fractured lid (a
+    //     brittle hatch that stops exactly where η drops below 10²⁶)
+    //   • below it — sluggish convection cells that drift only if the
+    //     kernel's Rayleigh number clears critical (u_flow)
+    bool inMantle = (r >= u_bounds.z) && (r < u_bounds.w);
+    if (inMantle) {
+        float lid = smoothstep(u_lid_r - 0.004, u_lid_r + 0.004, r);
+        float hatch = vnoise(vec2(ang * 90.0, r * 420.0));
+        hatch = smoothstep(0.55, 0.75, hatch);
+        col = mix(col, col * (0.80 + 0.16 * hatch) + vec3(0.03, 0.035, 0.05), lid * 0.9);
+        float t = u_time * 0.02 * u_flow;
+        float cells = vnoise(vec2(ang * 9.0 + t, r * 26.0 - t * 0.7));
+        cells = 0.6 * cells + 0.4 * vnoise(vec2(ang * 19.0 - t * 1.3, r * 55.0 + t * 0.5));
+        col = mix(col, col * (0.86 + 0.28 * cells), (1.0 - lid) * 0.9);
+        // Deep-moonquake nest zone — a faint cyan home for the cyan markers
+        float nest = smoothstep(u_nest_zone.x - 0.01, u_nest_zone.x + 0.01, r)
+                   * (1.0 - smoothstep(u_nest_zone.y - 0.01, u_nest_zone.y + 0.01, r));
+        col += vec3(0.05, 0.14, 0.18) * nest;
+    }
+
     // Melt shimmer — amplitude IS the kernel melt fraction
     if (melt > 0.001) {
-        float ang = atan(vLocal.y, length(vLocal.xz));
         float n = vnoise(vec2(ang * 24.0 + u_time * 0.35, r * 160.0));
         col += vec3(1.0, 0.5, 0.15) * melt * (0.6 + 0.8 * n);
     }
@@ -145,6 +185,15 @@ void main() {
     ring = max(ring, 1.0 - smoothstep(0.0, aa * 2.0, abs(r - u_bounds.z)));
     ring = max(ring, 1.0 - smoothstep(0.0, aa * 2.0, abs(r - u_bounds.w)));
     col = mix(col, vec3(0.92, 0.96, 1.0), ring * 0.65);
+    // Stagnant-lid base — dashed, so it reads as a derived boundary, not a layer
+    float lidRing = 1.0 - smoothstep(0.0, aa * 2.0, abs(r - u_lid_r));
+    float dash = step(0.5, fract(ang * 28.0));
+    col = mix(col, vec3(0.75, 0.85, 1.0), lidRing * dash * 0.7);
+    // Hover probe ring
+    if (u_probe_r >= 0.0) {
+        float pr = 1.0 - smoothstep(0.0, aa * 3.0, abs(r - u_probe_r));
+        col = mix(col, vec3(1.0, 0.95, 0.6), pr * 0.9);
+    }
 
     // Faint isotherms every 250 K — the conductive gradient made visible
     float iso = abs(fract(tK / 250.0) - 0.5) * 2.0;
@@ -291,7 +340,10 @@ function _profileTexture() {
         const tNorm = (selenothermK(rKm) - 250) / 1450;
         data[i * 4] = Math.round(Math.max(0, Math.min(1, tNorm)) * 255);
         data[i * 4 + 1] = Math.round(Math.max(0, Math.min(1, meltFraction(rKm))) * 255);
-        data[i * 4 + 2] = 0;
+        // B: Arrhenius viscosity, (log10 η − 20)/12 → 0 at the hot base, 1 rigid
+        const eta = mantleViscosityPaS(rKm);
+        const etaN = Number.isNaN(eta) ? 0 : (Math.log10(eta) - 20) / 12;
+        data[i * 4 + 2] = Math.round(Math.max(0, Math.min(1, etaN)) * 255);
         data[i * 4 + 3] = 255;
     }
     const tex = new THREE.DataTexture(data, N, 1, THREE.RGBAFormat);
@@ -369,10 +421,17 @@ export class MoonInterior {
         this.group.add(this._crustMesh);
 
         // Cross-section faces — half-annuli from the core surface to the crust
+        this.convection = mantleConvectionState();
+        const nestDepths = DEEP_NESTS.map(n => n.depthKm);
         this._faceU = {
             u_profile: { value: track(_profileTexture()) },
             u_time: { value: 0 },
             u_bounds: { value: new THREE.Vector4(NB[0], NB[1], NB[2], NB[3]) },
+            u_lid_r: { value: this.convection.lidBaseRadiusKm / R },
+            u_nest_zone: { value: new THREE.Vector2(
+                (R - Math.max(...nestDepths) - 60) / R, (R - Math.min(...nestDepths) + 60) / R) },
+            u_flow: { value: this.convection.rayleigh > this.convection.rayleighCritical ? 1 : 0 },
+            u_probe_r: { value: -1 },
             u_tint_ic: { value: new THREE.Color(INTERIOR_PALETTE['inner-core'].color) },
             u_tint_oc: { value: new THREE.Color(INTERIOR_PALETTE['outer-core'].color) },
             u_tint_lvz: { value: new THREE.Color(INTERIOR_PALETTE['lvz'].color) },
@@ -383,8 +442,12 @@ export class MoonInterior {
             vertexShader: FACE_VERT, fragmentShader: FACE_FRAG,
             uniforms: this._faceU, side: THREE.DoubleSide,
         }));
+        this.faceMeshes = [];
         for (const phi of [WEDGE_START, WEDGE_END]) {
-            this.group.add(new THREE.Mesh(track(_faceGeometry(phi, NB[1], 1)), faceMat));
+            const face = new THREE.Mesh(track(_faceGeometry(phi, NB[1], 1)), faceMat);
+            face.name = 'moon-interior-face';
+            this.group.add(face);
+            this.faceMeshes.push(face);
         }
 
         // The core — full spheres exactly plugging the faces' annulus hole
@@ -476,6 +539,20 @@ export class MoonInterior {
         this._dynamoAgeGa = 0;
         this._dynamoVigor = 0;
     }
+
+    /**
+     * Hover probe: raycast the two cut faces; returns the kernel readout at
+     * the hit radius (and lights the ring there), or null (ring cleared).
+     */
+    probe(raycaster) {
+        const hit = raycaster.intersectObjects(this.faceMeshes, false)[0];
+        if (!hit) { this.setProbe(-1); return null; }
+        const local = this.group.worldToLocal(hit.point.clone());
+        const rNorm = Math.min(1, local.length());
+        this.setProbe(rNorm);
+        return { rNorm, ...profileAt(rNorm * R_MOON_KM) };
+    }
+    setProbe(rNorm) { this._faceU.u_probe_r.value = rNorm; }
 
     /** Share the already-loaded MoonSkin surface texture (no second fetch). */
     setSurfaceTexture(tex) { this._crustU.u_surface.value = tex; }

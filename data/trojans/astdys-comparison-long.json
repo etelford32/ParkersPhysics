@@ -1,0 +1,567 @@
+{
+  "generated_at": "2026-11-03T22:52:22.504Z",
+  "inputs": {
+    "analysis": "trojans-analysis.csv",
+    "astdys_source": "https://newton.spacedys.com/~astdys2/propsynth/tro.syn",
+    "astdys_header": "Name H da(AU) D(deg) f(deg/y) e g(\"/y) sinI s(\"/y) L My",
+    "astdys_rows": 11867
+  },
+  "matched": 8936,
+  "unmatched_librators": 7297,
+  "excluded_astdys_rows": {
+    "f_below_1_5_deg_yr": 61,
+    "D_nonpositive": 0,
+    "g_locked_to_g5": 133
+  },
+  "agreement": {
+    "D": {
+      "n": 8875,
+      "median_diff": 0.06300000000000239,
+      "median_abs": 0.10599999999999987,
+      "p90_abs": 0.5240000000000009,
+      "p99_abs": 1.9229999999999983,
+      "correlation": 0.9980996957478072
+    },
+    "da": {
+      "n": 8875,
+      "median_diff": 0.00043999999999999595,
+      "median_abs": 0.0005899999999999933,
+      "p90_abs": 0.0023299999999999987,
+      "p99_abs": 0.007940000000000003,
+      "correlation": 0.9983878004713431
+    },
+    "f": {
+      "n": 8875,
+      "median_diff": 0.0043000000000001926,
+      "median_abs": 0.0043999999999999595,
+      "p90_abs": 0.006899999999999906,
+      "p99_abs": 0.062100000000000044,
+      "correlation": 0.8736041766594126
+    },
+    "e": {
+      "n": 8801,
+      "median_diff": -0.0004000000000000045,
+      "median_abs": 0.0004299999999999998,
+      "p90_abs": 0.007020000000000005,
+      "p99_abs": 0.013399999999999995,
+      "correlation": 0.9946207402228292
+    },
+    "g": {
+      "n": 8801,
+      "median_diff": -0.13999999999998636,
+      "median_abs": 0.37999999999999545,
+      "p90_abs": 85.88,
+      "p99_abs": 324.60999999999996,
+      "correlation": 0.3786628905724881
+    }
+  },
+  "agreement_by_quality": {
+    "well-determined": {
+      "D": {
+        "n": 8864,
+        "median_diff": 0.06300000000000239,
+        "median_abs": 0.10599999999999987,
+        "p90_abs": 0.5239999999999974,
+        "p99_abs": 1.9229999999999983,
+        "correlation": 0.9981034362081934
+      },
+      "da": {
+        "n": 8864,
+        "median_diff": 0.00043999999999999595,
+        "median_abs": 0.0005899999999999933,
+        "p90_abs": 0.0023299999999999987,
+        "p99_abs": 0.007940000000000003,
+        "correlation": 0.99839179019293
+      },
+      "f": {
+        "n": 8864,
+        "median_diff": 0.0043000000000001926,
+        "median_abs": 0.0043999999999999595,
+        "p90_abs": 0.006899999999999906,
+        "p99_abs": 0.062100000000000044,
+        "correlation": 0.8735158717060139
+      },
+      "e": {
+        "n": 8790,
+        "median_diff": -0.0004000000000000045,
+        "median_abs": 0.0004299999999999998,
+        "p90_abs": 0.007020000000000012,
+        "p99_abs": 0.01346,
+        "correlation": 0.9946242146515117
+      },
+      "g": {
+        "n": 8790,
+        "median_diff": -0.13999999999998636,
+        "median_abs": 0.37999999999999545,
+        "p90_abs": 86.10999999999996,
+        "p99_abs": 326.06,
+        "correlation": 0.378352543806858
+      }
+    },
+    "short-arc": {
+      "D": {
+        "n": 11,
+        "median_diff": 0.05600000000000094,
+        "median_abs": 0.14300000000000068,
+        "p90_abs": 1.3350000000000009,
+        "p99_abs": 1.706999999999999,
+        "correlation": 0.993976018168452
+      },
+      "da": {
+        "n": 11,
+        "median_diff": 0.00034,
+        "median_abs": 0.0005399999999999988,
+        "p90_abs": 0.005759999999999987,
+        "p99_abs": 0.007919999999999996,
+        "correlation": 0.9939000120880521
+      },
+      "f": {
+        "n": 11,
+        "median_diff": 0.0041999999999999815,
+        "median_abs": 0.0043000000000001926,
+        "p90_abs": 0.011200000000000099,
+        "p99_abs": 0.01639999999999997,
+        "correlation": 0.9942655910369774
+      },
+      "e": {
+        "n": 11,
+        "median_diff": -0.00045999999999999514,
+        "median_abs": 0.0008900000000000019,
+        "p90_abs": 0.006500000000000006,
+        "p99_abs": 0.011090000000000003,
+        "correlation": 0.9919274976860252
+      },
+      "g": {
+        "n": 11,
+        "median_diff": -0.4200000000000159,
+        "median_abs": 0.5399999999999636,
+        "p90_abs": 2.1999999999999886,
+        "p99_abs": 4.839999999999975,
+        "correlation": 0.994580225981514
+      }
+    }
+  },
+  "agreement_by_astdys_span": {
+    "5 Myr": {
+      "D": {
+        "n": 6507,
+        "median_diff": 0.06400000000000006,
+        "median_abs": 0.08500000000000085,
+        "p90_abs": 0.21000000000000085,
+        "p99_abs": 0.40500000000000114,
+        "correlation": 0.9996699782705466
+      },
+      "da": {
+        "n": 6507,
+        "median_diff": 0.00043999999999999595,
+        "median_abs": 0.00048000000000000126,
+        "p90_abs": 0.0011000000000000038,
+        "p99_abs": 0.0018700000000000105,
+        "correlation": 0.9996744552363185
+      },
+      "f": {
+        "n": 6507,
+        "median_diff": 0.0043000000000001926,
+        "median_abs": 0.0043000000000001926,
+        "p90_abs": 0.0054000000000002935,
+        "p99_abs": 0.0806,
+        "correlation": 0.8249155588308826
+      },
+      "e": {
+        "n": 6549,
+        "median_diff": -0.00029000000000000206,
+        "median_abs": 0.00032000000000000084,
+        "p90_abs": 0.0007500000000000007,
+        "p99_abs": 0.0019700000000000065,
+        "correlation": 0.9996600179164163
+      },
+      "g": {
+        "n": 6549,
+        "median_diff": -0.22000000000002728,
+        "median_abs": 0.2899999999999636,
+        "p90_abs": 0.6999999999999886,
+        "p99_abs": 85.60000000000002,
+        "correlation": 0.83649708073195
+      }
+    },
+    "50 Myr": {
+      "D": {
+        "n": 2368,
+        "median_diff": 0.06199999999999939,
+        "median_abs": 0.35100000000000087,
+        "p90_abs": 1.1429999999999971,
+        "p99_abs": 3.0479999999999983,
+        "correlation": 0.994966177511939
+      },
+      "da": {
+        "n": 2368,
+        "median_diff": 0.0004299999999999998,
+        "median_abs": 0.0015499999999999958,
+        "p90_abs": 0.004980000000000012,
+        "p99_abs": 0.012770000000000004,
+        "correlation": 0.9958118076733973
+      },
+      "f": {
+        "n": 2368,
+        "median_diff": 0.0040000000000000036,
+        "median_abs": 0.004699999999999704,
+        "p90_abs": 0.011800000000000033,
+        "p99_abs": 0.05779999999999985,
+        "correlation": 0.9363033278152724
+      },
+      "e": {
+        "n": 2252,
+        "median_diff": -0.005809999999999996,
+        "median_abs": 0.005920000000000002,
+        "p90_abs": 0.011290000000000001,
+        "p99_abs": 0.016579999999999998,
+        "correlation": 0.9939370203193942
+      },
+      "g": {
+        "n": 2252,
+        "median_diff": 51.309999999999974,
+        "median_abs": 51.430000000000035,
+        "p90_abs": 226.73,
+        "p99_abs": 369.45000000000005,
+        "correlation": 0.2265978418017019
+      }
+    }
+  },
+  "halfrange_vs_astdys_D": {
+    "n": 8875,
+    "median_diff": 0.7199999999999989,
+    "median_abs": 0.7200000000000006,
+    "p90_abs": 1.3100000000000005,
+    "p99_abs": 2.4299999999999997,
+    "correlation": 0.9972535186989582
+  },
+  "g_vs_D_trend": {
+    "dispute_threshold_arcsec_yr": 20,
+    "bins": [
+      {
+        "D_lo": 0,
+        "D_hi": 5,
+        "n_agreed": 531,
+        "g_agreed": 342.36,
+        "n_disputed": 69,
+        "g_disputed_ours": 282.39,
+        "g_disputed_astdys": 210.44
+      },
+      {
+        "D_lo": 5,
+        "D_hi": 10,
+        "n_agreed": 1749,
+        "g_agreed": 349.11,
+        "n_disputed": 155,
+        "g_disputed_ours": 279.6,
+        "g_disputed_astdys": 208.39
+      },
+      {
+        "D_lo": 10,
+        "D_hi": 15,
+        "n_agreed": 2043,
+        "g_agreed": 354.03,
+        "n_disputed": 159,
+        "g_disputed_ours": 283.29,
+        "g_disputed_astdys": 199.49
+      },
+      {
+        "D_lo": 15,
+        "D_hi": 20,
+        "n_agreed": 1810,
+        "g_agreed": 363.91,
+        "n_disputed": 239,
+        "g_disputed_ours": 360.01,
+        "g_disputed_astdys": 255.3
+      },
+      {
+        "D_lo": 20,
+        "D_hi": 25,
+        "n_agreed": 835,
+        "g_agreed": 360.24,
+        "n_disputed": 412,
+        "g_disputed_ours": 382.19,
+        "g_disputed_astdys": 258.79
+      },
+      {
+        "D_lo": 25,
+        "D_hi": 30,
+        "n_agreed": 200,
+        "g_agreed": 363.78,
+        "n_disputed": 286,
+        "g_disputed_ours": 390.93,
+        "g_disputed_astdys": 224.4
+      },
+      {
+        "D_lo": 30,
+        "D_hi": 35,
+        "n_agreed": 71,
+        "g_agreed": 418.54,
+        "n_disputed": 159,
+        "g_disputed_ours": 416.57,
+        "g_disputed_astdys": 244.72
+      },
+      {
+        "D_lo": 35,
+        "D_hi": 45,
+        "n_agreed": 4,
+        "g_agreed": 427.55,
+        "n_disputed": 19,
+        "g_disputed_ours": 433.19,
+        "g_disputed_astdys": 154.01
+      }
+    ]
+  },
+  "largest_D_disagreements": [
+    {
+      "des": "2020 TS69",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 14.652,
+      "astdys": 7.19,
+      "diff": 7.461999999999999,
+      "halfrange": 14.86,
+      "astdys_span_myr": 5
+    },
+    {
+      "des": "65228",
+      "name": "65228 (2002 EH58)",
+      "quality": "well-determined",
+      "ours": 33.098,
+      "astdys": 40.23,
+      "diff": -7.131999999999998,
+      "halfrange": 34.32,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "370087",
+      "name": "370087 (2001 SG221)",
+      "quality": "well-determined",
+      "ours": 11.813,
+      "astdys": 5.87,
+      "diff": 5.9430000000000005,
+      "halfrange": 13.78,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "181278",
+      "name": "181278 (2005 YR53)",
+      "quality": "well-determined",
+      "ours": 27.07,
+      "astdys": 32.52,
+      "diff": -5.450000000000003,
+      "halfrange": 28.29,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2019 OQ17",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 20.197,
+      "astdys": 15.32,
+      "diff": 4.876999999999999,
+      "halfrange": 20.78,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2015 HX159",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 20.875,
+      "astdys": 16.28,
+      "diff": 4.594999999999999,
+      "halfrange": 23.25,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2020 RA103",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 31.972,
+      "astdys": 36.54,
+      "diff": -4.567999999999998,
+      "halfrange": 33.13,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "225221",
+      "name": "225221 (2008 SN22)",
+      "quality": "well-determined",
+      "ours": 35.22,
+      "astdys": 30.99,
+      "diff": 4.23,
+      "halfrange": 37.46,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2021 VB28",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 27.878,
+      "astdys": 23.69,
+      "diff": 4.187999999999999,
+      "halfrange": 28.77,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "489083",
+      "name": "489083 (2006 AZ93)",
+      "quality": "well-determined",
+      "ours": 10.626,
+      "astdys": 14.54,
+      "diff": -3.9139999999999997,
+      "halfrange": 11.25,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2021 TT166",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 8.883,
+      "astdys": 5.01,
+      "diff": 3.8729999999999993,
+      "halfrange": 11.11,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2022 OQ74",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 25.842,
+      "astdys": 29.59,
+      "diff": -3.748000000000001,
+      "halfrange": 26.85,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "263096",
+      "name": "263096 (2007 TO161)",
+      "quality": "well-determined",
+      "ours": 31.846,
+      "astdys": 28.15,
+      "diff": 3.6960000000000015,
+      "halfrange": 34.38,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "309707",
+      "name": "309707 (2008 GC1)",
+      "quality": "well-determined",
+      "ours": 26.074,
+      "astdys": 29.68,
+      "diff": -3.605999999999998,
+      "halfrange": 26.8,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "552177",
+      "name": "552177 (2013 TL143)",
+      "quality": "well-determined",
+      "ours": 29.378,
+      "astdys": 25.78,
+      "diff": 3.597999999999999,
+      "halfrange": 30.69,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "601305",
+      "name": "601305 (2013 BQ1)",
+      "quality": "well-determined",
+      "ours": 18.926,
+      "astdys": 22.52,
+      "diff": -3.594000000000001,
+      "halfrange": 20.62,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "359969",
+      "name": "359969 (2012 CM17)",
+      "quality": "well-determined",
+      "ours": 24.622,
+      "astdys": 28.17,
+      "diff": -3.548000000000002,
+      "halfrange": 25.48,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2019 GS81",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 28.346,
+      "astdys": 31.88,
+      "diff": -3.533999999999999,
+      "halfrange": 29.66,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "503262",
+      "name": "503262 (2015 KE127)",
+      "quality": "well-determined",
+      "ours": 23.278,
+      "astdys": 19.83,
+      "diff": 3.4480000000000004,
+      "halfrange": 24.95,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "356897",
+      "name": "356897 (2011 YQ28)",
+      "quality": "well-determined",
+      "ours": 39.422,
+      "astdys": 36.06,
+      "diff": 3.3619999999999948,
+      "halfrange": 40.98,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "591986",
+      "name": "591986 (2014 KR39)",
+      "quality": "well-determined",
+      "ours": 9.227,
+      "astdys": 12.57,
+      "diff": -3.343,
+      "halfrange": 9.51,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "2018 NX34",
+      "name": null,
+      "quality": "well-determined",
+      "ours": 6.591,
+      "astdys": 9.88,
+      "diff": -3.2890000000000006,
+      "halfrange": 8.62,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "5144",
+      "name": "5144 Achates (1991 XX)",
+      "quality": "well-determined",
+      "ours": 10.755,
+      "astdys": 7.48,
+      "diff": 3.2750000000000004,
+      "halfrange": 12.99,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "588631",
+      "name": "588631 (2008 LM16)",
+      "quality": "well-determined",
+      "ours": 24.388,
+      "astdys": 21.16,
+      "diff": 3.2280000000000015,
+      "halfrange": 25.04,
+      "astdys_span_myr": 50
+    },
+    {
+      "des": "341922",
+      "name": "341922 (2008 KH35)",
+      "quality": "well-determined",
+      "ours": 25.972,
+      "astdys": 29.02,
+      "diff": -3.0479999999999983,
+      "halfrange": 26.87,
+      "astdys_span_myr": 50
+    }
+  ]
+}

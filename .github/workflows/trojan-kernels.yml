@@ -1,0 +1,84 @@
+name: trojan-kernels
+
+# The Jupiter Trojan pipeline's node gates — ~1 s, no browser, no npm install
+# (the tests import only node:* and the repo's own ES modules):
+#
+#   trojan-sources.mjs   the /api/trojans/catalog adapters: frozen SBDB + Horizons
+#                        URLs (no client input reaches an upstream), the Horizons
+#                        vector parser, the 4xx ladder (quality → full-prec →
+#                        photometry), the lean 'trojan-v2' wire + round trip,
+#                        never-5xx degradation, the dual-mode Node entry
+#   trojan-dynamics.mjs  the kernel against THEORY (23.9° separatrix, 148-yr
+#                        libration period, integrator vs the co-orbital invariant,
+#                        a horseshoe from L3), epoch alignment with a two-body
+#                        negative control, the dynamics-artifact codec, and REAL
+#                        production rows (known camps of Hektor, Achilles,
+#                        Patroclus, Äneas and the Lucy targets)
+#   pipeline-registry    the route is registered on the status board
+#
+# The weekly data refresh is a separate workflow (trojans-refresh.yml).
+
+on:
+  push:
+    paths:
+      - 'api/trojans/**'
+      - 'api/_lib/trojan-sources.js'
+      - 'api/_lib/neo-sources.js'
+      - 'js/trojan-dynamics.js'
+      - 'js/frequency-analysis.js'
+      - 'api/_lib/astdys-proper.js'
+      - 'scripts/compare-astdys.mjs'
+      - 'js/neo-orbits.js'
+      - 'js/pipeline-registry.js'
+      - 'scripts/analyze-trojans.mjs'
+      - 'scripts/build-trojan-report.mjs'
+      - 'tests/trojan-*.mjs'
+      - 'tests/fixtures/trojans/**'
+      - '.github/workflows/trojan-kernels.yml'
+  pull_request:
+    paths:
+      - 'api/trojans/**'
+      - 'api/_lib/trojan-sources.js'
+      - 'api/_lib/neo-sources.js'
+      - 'js/trojan-dynamics.js'
+      - 'js/frequency-analysis.js'
+      - 'api/_lib/astdys-proper.js'
+      - 'scripts/compare-astdys.mjs'
+      - 'js/neo-orbits.js'
+      - 'js/pipeline-registry.js'
+      - 'scripts/analyze-trojans.mjs'
+      - 'scripts/build-trojan-report.mjs'
+      - 'tests/trojan-*.mjs'
+      - 'tests/fixtures/trojans/**'
+      - '.github/workflows/trojan-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trojan-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Trojan route + dynamics kernel (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: route adapters + wire format
+        run: node tests/trojan-sources.mjs
+      - name: frequency analysis (NAFF)
+        run: node tests/frequency-analysis.mjs
+      - name: AstDyS proper-elements adapter
+        run: node tests/astdys-proper.mjs
+      - name: dynamics kernel (theory + real data + proper elements vs AstDyS)
+        run: node tests/trojan-dynamics.mjs
+      - name: pipeline registry
+        run: node tests/pipeline-registry.mjs
+      - name: neo-sources (shared SBDB parser)
+        run: node tests/neo-sources.mjs

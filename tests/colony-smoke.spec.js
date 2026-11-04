@@ -30,6 +30,10 @@ test('colony RTS boots, lands crew, selects and orders units, saves', async ({ p
 
     // Quiet mode (deterministic, offline-safe), top-scored site, land
     await page.click('.mode-btn[data-mode="quiet"]');
+    // The cookie-consent banner covers the bottom of the start overlay and
+    // intercepts the Start click (this is what made the test time out on
+    // the sandbox); it is page chrome, not the game — remove it.
+    await page.evaluate(() => document.querySelector('.pp-consent-banner')?.remove());
     await page.locator('.site-card').first().click();
     await expect(page.locator('#btn-start')).toBeEnabled();
     await page.click('#btn-start');
@@ -80,9 +84,16 @@ test('colony RTS boots, lands crew, selects and orders units, saves', async ({ p
     await page.reload();
     await expect(page.locator('#start-overlay')).toBeVisible();
     await expect(page.locator('#btn-continue')).toBeVisible();
+    await page.evaluate(() => document.querySelector('.pp-consent-banner')?.remove());
     await page.click('#btn-continue');
     await expect(page.locator('#start-overlay')).toBeHidden();
     await expect(page.locator('#ev-log')).toContainText('Touchdown');
 
     expect(pageErrors, `page errors: ${pageErrors.join('\n')}`).toHaveLength(0);
+});
+
+test('?site= deep link from moon.html preselects the site card', async ({ page }) => {
+    await page.goto('/colony.html?site=connecting-ridge');
+    await expect(page.locator('.site-card[data-site="connecting-ridge"]')).toHaveClass(/on/);
+    await expect(page.locator('#btn-start')).toBeEnabled();
 });

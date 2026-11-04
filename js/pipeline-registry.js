@@ -344,6 +344,25 @@ export const PIPELINES = [
       cadence_s: 3_600, prewarm: 'medium',
       warnAgeS:  90 * 60, critAgeS: 180 * 60 },
 
+    // CelesTrak objects catalogued in the last 30 days — payloads AND rocket
+    // bodies. missions.html's "just launched" rail propagates them live.
+    { id: 'celestrak-last-30-days', label: 'CelesTrak · launched last 30 days',
+      endpoint: '/api/celestrak/tle?group=last-30-days',
+      category: 'orbital', upstream: 'CelesTrak GP / 18 SDS',
+      cadence_s: 21_600, prewarm: 'cold',
+      warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
+      notes: 'Feeds the recently-launched rail on missions.html.' },
+
+    // JPL Horizons state vectors for the missions roster (fan-out, one call
+    // per spacecraft; default probe = the heliophysics core set). Answers 200
+    // + freshness:'stale' when Horizons is down — never a 5xx.
+    { id: 'missions-ephemeris',  label: 'Mission ephemeris · JPL Horizons',
+      endpoint: '/api/missions/ephemeris',
+      category: 'orbital', upstream: 'JPL Horizons',
+      cadence_s: 3_600, prewarm: 'medium',
+      warnAgeS:  2 * 3600, critAgeS: 6 * 3600,
+      notes: 'Spacecraft ids resolve from candidate lists; command_used self-reports.' },
+
     // ── Tropical / severe weather ─────────────────────────────────────────
     { id: 'storms-cyclones',    label: 'NHC active tropical cyclones',
       endpoint: '/api/storms',
@@ -529,6 +548,20 @@ export const PIPELINES = [
       cadence_s: 3_600, prewarm: 'medium', probeTimeoutMs: 20_000,
       warnAgeS: 3 * 3600, critAgeS: 12 * 3600,
       notes: 'Close approaches 7 d back → 60 d ahead inside 0.05 AU, the Sentry risk list (top 40 by Palermo scale), last 20 fireballs. Only the CAD table decides freshness; `sources.*` says which of the three failed.' },
+
+    { id: 'trojans-catalog',    label: 'Jupiter Trojans (SBDB TJN + Horizons)',
+      endpoint: '/api/trojans/catalog',
+      category: 'small-bodies', upstream: 'JPL SBDB query API · JPL Horizons',
+      cadence_s: 86_400, prewarm: 'cold', probeTimeoutMs: 30_000,
+      warnAgeS: 36 * 3600, critAgeS: 5 * 86_400,
+      notes: 'Every SBDB orbit-class TJN object (~15–20k rows, full-precision elements) plus Jupiter and Saturn state vectors from Horizons at the catalogue epoch — the inputs js/trojan-dynamics.js needs for resonant angles and libration. Amber = population failed OR Jupiter vector missing (`degraded_reason` says which). `precision` reads `default` if JPL refused full-prec; `sources.sbdb.field_map` is the schema self-report. Sequential SBDB → Horizons, hence the long probe timeout.' },
+
+    { id: 'trojans-proper',     label: 'Jupiter Trojans — AstDyS proper elements',
+      endpoint: '/api/trojans/proper',
+      category: 'small-bodies', upstream: 'AstDyS (newton.spacedys.com / hamilton.dm.unipi.it)',
+      cadence_s: 7 * 86_400, prewarm: 'cold', probeTimeoutMs: 20_000,
+      warnAgeS: 10 * 86_400, critAgeS: 30 * 86_400,
+      notes: 'Synthetic proper elements (libration amplitude, e_p, sin I_p, frequencies) — the external validation set for our frequency-analysed D_p. File path + layout are CANDIDATES (egress-blocked at build time): `?meta=1` probes every candidate; `source_url`, `field_map`, `lib_unit` self-report. Amber = no candidate answered with data.' },
 ];
 
 /**
