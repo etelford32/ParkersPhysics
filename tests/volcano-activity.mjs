@@ -142,4 +142,30 @@ await ok('matchActivity joins by GVP number / name / position and returns the re
     assert.match(unmatched[0].title, /Submarine/);
 });
 
+await ok('REAL production body (PR #1068 preview, 2026-11-04) joins completely', async () => {
+    // tests/fixtures/volcano-activity-2026-11-04.json is a VERBATIM route body
+    // from the deployed preview — never hand-edit it; re-capture from the route.
+    const cat = decodeCatalog(JSON.parse(fs.readFileSync(path.join(HERE, '../data/volcanoes/volcanoes-catalog.json'), 'utf8')));
+    const body = JSON.parse(fs.readFileSync(path.join(HERE, 'fixtures/volcano-activity-2026-11-04.json'), 'utf8'));
+    assert.equal(body.sources.usgs_hans.field_map.num, 'vnum', 'HANS schema as verified');
+    assert.equal(body.sources.eonet.received, 32);
+    assert.equal(body.sources.eonet.dropped_stale, 0, 'no long-open eruption dropped');
+    const { live, unmatched } = matchActivity(cat, body.items);
+    assert.equal(unmatched.length, 0, `unmatched: ${unmatched.map(u => u.name).join(', ')}`);
+    assert.equal(live.size, 34, '35 reports → 34 volcanoes (Kilauea is reported by both sources)');
+    const kil = [...live.values()].find(x => x.volcano.num === 332010);
+    assert.deepEqual(kil.items.map(i => i.source).sort(), ['eonet', 'usgs-hans']);
+    assert.equal(kil.colorCode, 'ORANGE');
+    const near = (it, v) => {
+        const r = Math.PI / 180, dLat = (v.lat - it.lat) * r, dLon = (v.lon - it.lon) * r;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(it.lat * r) * Math.cos(v.lat * r) * Math.sin(dLon / 2) ** 2;
+        return 2 * 6371 * Math.asin(Math.sqrt(a));
+    };
+    for (const x of live.values()) for (const it of x.items) {
+        if (it.lat != null) assert.ok(near(it, x.volcano) < 2, `${it.name} joined ${x.volcano.name} ${near(it, x.volcano).toFixed(1)} km away`);
+    }
+    // GVP files Sakurajima under Aira and Titan Ridge under the Central Bismarck Sea group
+    assert.ok([...live.values()].some(x => x.volcano.name === 'Aira'));
+});
+
 console.log(`${passed} passed`);
