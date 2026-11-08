@@ -60,6 +60,15 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 .rt-card .rt-refresh{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#aab;font-size:.68rem;padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit}
 .rt-card .rt-refresh:hover{background:rgba(255,255,255,.12);color:#fff}
 .rt-card table{width:100%;border-collapse:collapse;font-size:.78rem}
+/* Phones: the health tables are wider than a 390px screen (they pushed the
+   page to 709px). Each card scrolls its own table sideways instead, and scan
+   rows wrap their file / status columns under the name. */
+@media (max-width:640px){
+  main{padding:18px 12px 40px}
+  .rt-card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .row{flex-wrap:wrap;row-gap:2px}
+  .row-detail{min-width:0;overflow-wrap:anywhere}
+}
 .rt-card th{text-align:left;color:#556;font-size:.66rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
 .rt-card td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.03);vertical-align:top}
 .rt-card td:first-child{color:#cde}

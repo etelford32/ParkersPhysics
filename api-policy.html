@@ -102,10 +102,26 @@
         .legal-meta { color: #666; font-size: .85rem; }
         .legal-meta strong { color: #888; }
 
-        .legal-body { max-width: 800px; margin: 0 auto; padding: 2.5rem 2rem 4rem; flex: 1; }
+        /* min-width:0 + width:100% — as a flex child of the column body,
+           .legal-body otherwise takes the API table's min-content width and
+           pushed the page to 462px on a 390px phone. The table scrolls instead. */
+        .legal-body { max-width: 800px; margin: 0 auto; padding: 2.5rem 2rem 4rem; flex: 1; min-width: 0; width: 100%; }
+        @media (max-width: 640px) {
+            .legal-body { padding: 2rem 1.1rem 3rem; }
+            .api-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        }
         .toc {
             background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
             border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 2.5rem;
+        }
+        /* The page-level `nav {…}` rule above is the legacy top bar, but a bare
+           `nav` selector also claims <nav class="toc"> and squashed the contents
+           into a 54px sticky strip of overlapping text (eula.html had the same
+           bug). Undo the bar geometry for the TOC, in both themes. */
+        nav.toc {
+            position: static; z-index: auto; display: block;
+            height: auto; min-height: 0; gap: normal;
+            -webkit-backdrop-filter: none; backdrop-filter: none;
         }
         .toc h3 { font-size: .85rem; color: #ffd700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: .75rem; }
         .toc ol { padding-left: 1.2rem; }
@@ -213,15 +229,6 @@
             background: color-mix(in srgb, var(--pl-warn) 7%, var(--pl-bg));
             border-color: color-mix(in srgb, var(--pl-warn) 32%, var(--pl-bg));
             color: var(--pl-text-1);
-        }
-
-        /* The page-level `nav {…}` bar rule also reaches the <nav class="toc"> and
-           squashes it into a 54px sticky strip (eula.html's note describes the same
-           bug). Dark is left exactly as it was; light lays the contents out as the
-           block panel it is meant to be. */
-        html.theme-light nav.toc {
-            position: static; display: block; height: auto; min-height: 0;
-            z-index: auto; -webkit-backdrop-filter: none; backdrop-filter: none;
         }
 
         html.theme-light .api-table th {
