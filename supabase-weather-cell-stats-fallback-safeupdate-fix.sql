@@ -1,7 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════
 -- supabase-weather-cell-stats-fallback-safeupdate-fix.sql
 -- Companion to supabase-weather-cell-stats-safeupdate-fix.sql. Written
--- 2026-11-08. NOT APPLIED — apply on the author's go.
+-- 2026-11-08. APPLIED 2026-11-08 on the author's go (migration
+-- weather_cell_stats_fallback_safeupdate_fix).
 --
 -- Qualifies the full-table delete in compute_weather_cell_stats() (the SQL
 -- fallback pass, last defined in supabase-r2-offload-migration.sql §3) for
