@@ -230,7 +230,16 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         expect(Math.abs(azimuth(await stats(page)) - a0)).toBeGreaterThan(0.02);
         await page.click('.lh-toggle[data-toggle="autoRotate"]');
 
+        // Help opens and closes.
+        await page.click('.lh-cam[data-cam="help"]');
+        await expect(page.locator('#lh-cam-help')).toBeVisible();
+        await page.click('.lh-cam-help-x');
+        await expect(page.locator('#lh-cam-help')).toBeHidden();
+
         // Full screen (API or the CSS fallback): the stage covers the window.
+        // LAST on purpose: after full screen, CI's headless shell keeps
+        // starving animation frames, so any page.click that follows waits
+        // forever on its "stable" check (the Help close hung there, 2026-11-08).
         // Poll the LAYOUT on a timer, never on requestAnimationFrame: these are
         // DOM facts, and on CI's chromium-headless-shell the frames(3) that
         // used to sit here never resolved once the stage went full screen
@@ -250,11 +259,6 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         await page.locator('.lh-cam[data-cam="fullscreen"]').dispatchEvent('click');
         await expect(page.locator('#lh-cam-full')).toHaveAttribute('aria-pressed', 'false', { timeout: 20_000 });
 
-        // Help opens and closes.
-        await page.click('.lh-cam[data-cam="help"]');
-        await expect(page.locator('#lh-cam-help')).toBeVisible();
-        await page.click('.lh-cam-help-x');
-        await expect(page.locator('#lh-cam-help')).toBeHidden();
         await ctx.close();
     });
 });
