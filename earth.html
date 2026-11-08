@@ -168,6 +168,34 @@ body.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range]::-webkit-sl
     border-color: rgba(217, 106, 26, .65);
     box-shadow: 0 0 4px rgba(217, 106, 26, .45), inset 0 1px 0 rgba(255, 255, 255, .80);
 }
+/* Storm-watch scrubber text + D1–D5 chips. js/storm-watch-panel.js
+   hard-codes peach/tan inks tuned for the dark panel (#caac8d chips,
+   #ffd9b8 "now" label, #7a6757 ticks) — on the light panel they read as
+   disabled. Deep amber on a pale amber chip; the selected day is the
+   solid storm colour with white text. */
+html.theme-light #storm-watch-panel .sw-scrub {
+    background: linear-gradient(180deg, rgba(217,106,26,.08) 0%, rgba(217,106,26,.02) 100%);
+    border-color: rgba(217,106,26,.28);
+}
+html.theme-light #storm-watch-panel .sw-scrub-row1 { color: #8f4c00; }
+html.theme-light #storm-watch-panel .sw-scrub-h { color: #7a3f00; }
+html.theme-light #storm-watch-panel .sw-scrub-time { color: #5a6a7a; }
+html.theme-light #storm-watch-panel .sw-scrub-row2 { color: #6b5a4c; }
+html.theme-light #storm-watch-panel .sw-scrub-reset {
+    background: rgba(217,106,26,.10); color: #8f4c00; border-color: rgba(217,106,26,.40);
+}
+html.theme-light #storm-watch-panel .sw-scrub-reset:hover { background: rgba(217,106,26,.20); color: #6a3500; }
+html.theme-light #storm-watch-panel .sw-scrub-chip {
+    background: #fff7ef; color: #8f4c00; border-color: rgba(217,106,26,.38);
+}
+html.theme-light #storm-watch-panel .sw-scrub-chip:hover {
+    background: #ffe9d4; color: #6a3500; border-color: rgba(217,106,26,.6);
+}
+html.theme-light #storm-watch-panel .sw-scrub-chip.active {
+    background: #a9520f; color: #fff; border-color: #a9520f;
+    box-shadow: 0 1px 3px rgba(169,82,15,.35);
+}
+html.theme-light #storm-watch-panel .sw-card .sw-scrub-line { color: #8f4c00; }
 
 /* AurOracle cross-sell chip in the SW HUD — teal to match the AurOracle
    brand and stand out from the blue HUD as a "go deeper" affordance. */
@@ -189,12 +217,14 @@ html.theme-light .ip-aur-txt b{color:#0a4a3a}
 /* Aurora-power "fc-chip" intensity backgrounds inside the SW HUD
    are tuned for a dark surface (low-alpha rgba over near-black).
    On light, increase saturation so the chip still reads. */
-html.theme-light .ip-aurora-forecast-chip,
-body.theme-light .ip-aurora-forecast-chip {
-    /* Selectors apply if/when chip rules ever pull a class. The
-       current implementation uses inline styles, so this is a
-       placeholder for the next refactor — annotated rather than
-       silently absent. */
+/* The chips are inline-styled spans built by _paintAuroraForecast()
+   (pastel text on a low-alpha tint). On light the TINT still encodes the
+   intensity bucket and reads well; the pastel TEXT does not, so it goes
+   navy with a hairline edge. */
+html.theme-light #ip-aurora-forecast > span,
+body.theme-light #ip-aurora-forecast > span {
+    color: #12395c !important;
+    box-shadow: inset 0 0 0 1px rgba(10,30,50,.10);
 }
 
 /* Marketing gradient near the dashboard CTAs uses two hard-coded
@@ -323,47 +353,6 @@ html.theme-light #tc-forecast-status { color: #8f4c00 !important; border-top-col
 html.theme-light #tc-forecast-status[style*="255, 119, 102"] { color: #b8152d !important; }
 html.theme-light .tc-fc-spinner { border-color: rgba(154,82,0,.22); border-top-color: rgba(154,82,0,.9); }
 
-/* Live status strip under the nav (js/live-status-bar.js — shared; its
-   injected sheet is dark-only, so EarthView re-inks it here). The value
-   classes carry !important upstream, hence here too. */
-html.theme-light #lsb-bar {
-    background: linear-gradient(90deg, rgba(248,250,254,.97) 0%, rgba(236,242,250,.97) 100%);
-    border-bottom-color: rgba(0,133,176,.20);
-    box-shadow: 0 2px 10px rgba(20,40,80,.08);
-}
-html.theme-light #lsb-bar.lsb-storm {
-    background: linear-gradient(90deg, rgba(255,246,247,.97) 0%, rgba(250,238,244,.97) 100%);
-    border-bottom-color: rgba(192,23,47,.45);
-}
-html.theme-light #lsb-bar .lsb-brand   { color: #7d5800; }
-html.theme-light #lsb-bar .lsb-sep     { background: rgba(10,30,50,.14); }
-html.theme-light #lsb-bar .lsb-chip    { color: #4f5f75; }
-html.theme-light #lsb-bar .lsb-chip .lsb-lbl { color: #5a6a7a; }
-html.theme-light #lsb-bar .lsb-chip .lsb-val { color: #1a2735; }
-html.theme-light #lsb-bar .lsb-g   { color: #00704a !important; }
-html.theme-light #lsb-bar .lsb-w   { color: #7d5800 !important; }
-html.theme-light #lsb-bar .lsb-a   { color: #a04d00 !important; }
-html.theme-light #lsb-bar .lsb-x   { color: #b8152d !important; text-shadow: none; }
-html.theme-light #lsb-bar .lsb-bzs { color: #c0262f !important; }
-html.theme-light #lsb-bar .lsb-bzn { color: #1f5fc0 !important; }
-html.theme-light #lsb-bar .lsb-cme-chip { color: #b4520f; }
-html.theme-light #lsb-bar .lsb-summary {
-    --lsb-summary-color: #00739e;
-    background: color-mix(in srgb, var(--lsb-summary-color) 9%, #ffffff);
-    box-shadow: none;
-}
-html.theme-light #lsb-bar .lsb-summary[data-tone="quiet"]      { --lsb-summary-color: #00704a; }
-html.theme-light #lsb-bar .lsb-summary[data-tone="active"]     { --lsb-summary-color: #7d5800; }
-html.theme-light #lsb-bar .lsb-summary[data-tone="warning"]    { --lsb-summary-color: #a04d00; }
-html.theme-light #lsb-bar .lsb-summary[data-tone="severe"]     { --lsb-summary-color: #b8152d; }
-html.theme-light #lsb-bar .lsb-summary[data-tone="offline"]    { --lsb-summary-color: #b8152d; }
-html.theme-light #lsb-bar .lsb-summary[data-tone="connecting"] { --lsb-summary-color: #00739e; }
-html.theme-light #lsb-bar .lsb-summary-mark   { box-shadow: none; }
-html.theme-light #lsb-bar .lsb-summary-kicker { color: rgba(26,39,53,.62); }
-html.theme-light #lsb-bar .lsb-updated { color: #5a6a7a; }
-html.theme-light #lsb-bar .lsb-sw-link { color: #00739e; border-color: rgba(0,133,176,.32); }
-html.theme-light #lsb-bar .lsb-sw-link:hover { color: #004e6b; border-color: rgba(0,133,176,.6); }
-
 /* Bottom space-weather bar + the ⚡ Weather button */
 html.theme-light #sw-bar {
     background: var(--c-surface-1);
@@ -404,7 +393,46 @@ html.theme-light .aq-heat-row output { color: #2c4a63; }
 html.theme-light .lyr label { color: #2c3a4a; }
 /* The G-scale badge's colour is written INLINE from the Kp palette (a
    neon pick for a dark panel). Keep the hue, darken the rendering. */
-html.theme-light #ip-g-badge { filter: brightness(.55) saturate(1.4); }
+/* LIGHT: info-panel tones. updateSpaceWeather() writes neon colours
+   INLINE and tags each value with a data-* tone; dark keeps the inline
+   colour, light re-inks by tone (!important beats the inline style).
+   Same meaning, shades that pass 4.5:1 on the light panel. */
+html.theme-light #ip-g-badge { background: #e8f6ee !important; border-color: #8fd0aa !important; color: #00704a !important; }
+html.theme-light #ip-g-badge:is([data-kp="3"], [data-kp="4"]) { background: #fff4dc !important; border-color: #e2b65a !important; color: #7d5800 !important; }
+html.theme-light #ip-g-badge:is([data-kp="5"], [data-kp="6"]) { background: #fff0e3 !important; border-color: #eba06a !important; color: #a04d00 !important; }
+html.theme-light #ip-g-badge:is([data-kp="7"]) { background: #fdecee !important; border-color: #e98a96 !important; color: #b8152d !important; }
+html.theme-light #ip-g-badge:is([data-kp="8"], [data-kp="9"]) { background: #f6eafb !important; border-color: #c48ad8 !important; color: #7a1c99 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="south3"] { color: #b8152d !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="south2"] { color: #a04d00 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="south1"] { color: #7d5800 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="north"]  { color: #006a91 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="flat"]   { color: #3d5872 !important; }
+html.theme-light #ip-xray[data-cls="A"] { color: #00704a !important; background: #e8f6ee !important; border-color: #8fd0aa !important; }
+html.theme-light #ip-xray[data-cls="B"] { color: #006a91 !important; background: #e5f3fa !important; border-color: #8cc8e2 !important; }
+html.theme-light #ip-xray[data-cls="C"] { color: #7d5800 !important; background: #fff4dc !important; border-color: #e2b65a !important; }
+html.theme-light #ip-xray[data-cls="M"] { color: #a04d00 !important; background: #fff0e3 !important; border-color: #eba06a !important; }
+html.theme-light #ip-xray[data-cls="X"] { color: #b8152d !important; background: #fdecee !important; border-color: #e98a96 !important; }
+html.theme-light #ip-hf[data-tone="normal"]   { color: #4a5f75 !important; }
+html.theme-light #ip-hf[data-tone="blackout"] { color: #b8152d !important; }
+/* The rest of the panel's values. `.iv` defaults to pale cyan (#a0d8f0,
+   ~1.6:1 on the light panel); the model code then colours many of them
+   INLINE by severity (FAC, Dst, substorm, plasma β …) with on-black
+   pastels. Rather than tag each one, light mode darkens WHATEVER inline
+   colour arrives — hue (= meaning) kept, lightness dropped to ~4.5:1 —
+   so a new or retuned severity colour stays readable with no edit here.
+   #ip-bz carries its own tone rule above and is excluded. */
+html.theme-light #info-panel .iv { color: #12395c; }
+html.theme-light #info-panel .iv.warn  { color: #8f4c00; }
+html.theme-light #info-panel .iv.alert { color: #b8152d; }
+html.theme-light #info-panel .ik { color: #3d5872; }
+html.theme-light #info-panel .iv[style*="color"]:not(#ip-bz) { filter: brightness(.5) saturate(1.6); }
+/* Ionospheric rows (js/magnetosphere-engine.js renderIonoHTML, shared,
+   literal inline colours — matched by value here, bars keep their hue). */
+html.theme-light #ip-iono-layers span[style*="background:#111"] { background: #dfe7f1 !important; }
+html.theme-light #ip-iono-layers [style*="color:#aac"] { color: #12395c !important; }
+html.theme-light #ip-iono-layers [style*="color:#778"] { color: #3d5872 !important; }
+html.theme-light #ip-iono-layers [style*="color:#556"] { color: #50698b !important; }
+html.theme-light #info-panel [style*="color:#2a4a5a"] { color: #50698b !important; }
 /* Storm Watch feed-health disclosure text (injected sheet, dark-tuned). */
 html.theme-light #storm-watch-panel .sw-health.partial { color: #6b5300; }
 html.theme-light #storm-watch-panel .sw-health.down    { color: #9a2a1a; }
@@ -6471,11 +6499,18 @@ window.addEventListener('swpc-update', e => {
     // ── G-scale badge
     const gBadge = document.getElementById('ip-g-badge');
     const gColor = KP_CELL_COLORS[kpIdx];
-    gBadge.textContent = kpIdx >= 4 ? `G${Math.min(5, kpIdx - 3)} ${KP_QUIET_LABELS[kpIdx].split(' ')[1] ?? ''}`.trim()
-                                     : KP_QUIET_LABELS[kpIdx];
+    // NOAA G-scale: Kp 5 = G1 … Kp 9 = G5, which KP_QUIET_LABELS already
+    // spells out. The old `G${kpIdx - 3}` read Kp 6.3 as "G3 Moderate"
+    // (the status strip, correctly, said G2) and Kp 4 as "G0".
+    gBadge.textContent = KP_QUIET_LABELS[kpIdx];
     gBadge.style.color       = gColor;
     gBadge.style.background  = gColor + '18';
     gBadge.style.borderColor = gColor + '88';
+    // data-* tones beside the inline neon: dark mode keeps the inline
+    // colours exactly; the light theme re-inks by tone (rules near
+    // "LIGHT: info-panel tones") because a neon picked for black is
+    // unreadable on white and CSS cannot read an inline colour's meaning.
+    gBadge.dataset.kp = String(kpIdx);
 
     // ── IMF Bz — direction arrow + coloring
     const bzArrow = document.getElementById('ip-bz-arrow');
@@ -6492,6 +6527,8 @@ window.addEventListener('swpc-update', e => {
     } else {
         bzArrow.textContent = '→';  bzArrow.style.color = '#88aacc'; bzEl.style.color = '#a0d8f0';
     }
+    bzArrow.dataset.tone = bzEl.dataset.tone =
+        bz < -10 ? 'south3' : bz < -5 ? 'south2' : bz < -2 ? 'south1' : bz > 2 ? 'north' : 'flat';
 
     // ── Solar wind speed + bar
     document.getElementById('ip-wind').textContent = `${Math.round(spd)} km/s`;
@@ -6510,12 +6547,14 @@ window.addEventListener('swpc-update', e => {
     xrayBadge.style.color   = xc;
     xrayBadge.style.background  = xc + '18';
     xrayBadge.style.borderColor = xc + '88';
+    xrayBadge.dataset.cls = xrayColors[xrayLetter] ? xrayLetter : '';
 
     // ── HF radio status
     const xInt = d.xray_intensity ?? 0;
     const hfEl = document.getElementById('ip-hf');
     hfEl.textContent = xInt > 0.3 ? '⚠ Blackout' : 'Normal';
     hfEl.style.color = xInt > 0.3 ? '#ff4444' : '#4a6a80';
+    hfEl.dataset.tone = xInt > 0.3 ? 'blackout' : 'normal';
 
     // ── Aurora power (from feed, not derived)
     const aurNorth = sw.aurora_power_north ?? sw.aurora?.north_gw ?? null;
