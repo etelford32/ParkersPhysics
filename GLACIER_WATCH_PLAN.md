@@ -1,9 +1,21 @@
 # GLACIER_WATCH_PLAN.md — Glacier Watch: glacier motion + snowpack, observed and simulated
 
-*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH + WGMS through 2025 + 48 GLACIERS BUILT; next: the global catalogue (all glaciers). §0 is the build log;
+*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH + WGMS through 2025 + 48 GLACIERS + the GLOBAL CATALOGUE (RGI 7.0) BUILT. §0 is the build log;
 §2 holds numbers MEASURED in the planning session; "to verify" items are unchecked.*
 
 ## 0. Built (2026-11-08)
+
+**The global catalogue — every glacier on Earth (2026-11-08).** RGI 7.0 (274 531 glaciers, 706 744 km²)
+from an unofficial GeoParquet mirror reachable on public S3, accepted only because it reproduces the RGI
+Consortium's own region tables exactly (19 + 90 regions, zero mismatches). `data/glaciers/catalog/` (9.1 MB:
+a 1.7 MB points file for all glaciers + per-region detail shards + names + meta), the PURE kernel
+`js/glacier-catalog.js`, a searchable world map + record card + size story + region table on
+glacier-watch.html (lazy), and EarthView's "All glaciers (RGI 7.0)" layer. 41 of the 48 tracked glaciers
+are joined to their RGI outline by point-in-polygon; the 7 ice-sheet outlets have none (RGI excludes the
+ice sheets). Findings printed on the page: 84 % of glaciers are under 1 km², the 994 over 100 km² hold
+55 % of the ice. Next: per-glacier context for untracked glaciers on demand (ITS_LIVE composite speed at a
+clicked centroid via a small route; geodetic mass change from Hugonnet et al. 2021 if a mirror is
+reachable) — never an invented series.
 
 **Batch 3 — 48 glaciers (2026-11-08).** +17 WGMS field-programme glaciers (Claridenfirn 1915→, Silvretta
 1919→, Gries, Taku, Storbreen, Engabreen, Midtre Lovénbreen, Kongsvegen, White, Urumqi No. 1, Tuyuksu,

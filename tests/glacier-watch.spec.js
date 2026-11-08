@@ -214,4 +214,54 @@ test.describe('Glacier Watch', () => {
         expect(h).toBeGreaterThan(100);
         expect(errors).toEqual([]);
     });
+
+    test('the global catalogue: lazy, deep link, search, the official region table', async ({ page }) => {
+        const hits = [];
+        page.on('request', q => { if (q.url().includes('/data/glaciers/catalog/')) hits.push(q.url()); });
+        const { errors } = await boot(page);
+        await page.waitForTimeout(1200);
+        expect(hits.length, 'the 274 531-glacier catalogue is not fetched before the reader scrolls to it').toBe(0);
+        await page.locator('#gw-catalog').scrollIntoViewIfNeeded();
+        await page.waitForFunction(() => document.getElementById('gw-catalog')?.dataset.state === 'ready', null, { timeout: 60_000 });
+        const t = await page.evaluate(() => ({ n: window.__glacierCatalog.pts.n, sub: document.getElementById('gw-cat-sub').textContent,
+            regions: document.querySelectorAll('.gw-cat-reg tbody tr').length, first: document.querySelector('.gw-cat-reg tbody tr td')?.textContent }));
+        expect(t.n).toBe(274531);
+        expect(t.sub).toContain('274,531 glaciers · 706,744 km²');
+        expect(t.regions, 'the 19 regions that hold inventory glaciers').toBe(19);
+        expect(t.first).toContain('Subantarctic and Antarctic Islands');
+        await expect(page.locator('#gw-cat-sizes')).toContainText('84 %');
+        expect(await canvasInk(page, '#gw-cat-map')).toBeGreaterThan(0.01);
+        // search by name, then open
+        await page.waitForFunction(() => !!window.__glacierCatalog.names, null, { timeout: 30_000 });
+        await page.fill('#gw-cat-search', 'hubbard');
+        await expect(page.locator('#gw-cat-results button').first()).toContainText('Hubbard Glacier');
+        await page.press('#gw-cat-search', 'Enter');
+        await expect(page.locator('#gw-cat-card h3')).toHaveText('Hubbard Glacier', { timeout: 15_000 });
+        await expect(page.locator('#gw-cat-card')).toContainText('marine-terminating');
+        await expect(page.locator('.gw-cat-tracked')).toBeVisible();        // one of the 48 tracked
+        expect(new URL(page.url()).searchParams.get('rgi')).toMatch(/^RGI2000-v7\.0-G-01-\d{5}$/);
+        await page.locator('.gw-cat-tracked').click();
+        await page.waitForFunction(() => window.__glacierWatch.sel?.id === 'hubbard', null, { timeout: 15_000 });
+        expect(errors).toEqual([]);
+    });
+
+    test('?rgi= deep link opens the record (an untracked glacier says so)', async ({ page }) => {
+        const { errors } = await boot(page, { url: '/glacier-watch.html?g=aletsch&rgi=RGI2000-v7.0-G-11-01515' });
+        await page.waitForFunction(() => document.getElementById('gw-catalog')?.dataset.state === 'ready', null, { timeout: 60_000 });
+        await expect(page.locator('#gw-cat-card .gw-cat-id')).toContainText('RGI2000-v7.0-G-11-01515', { timeout: 15_000 });
+        await expect(page.locator('.gw-cat-tracked')).toHaveCount(0);
+        await expect(page.locator('#gw-cat-card')).toContainText('not assigned');
+        const hyp = await page.$$eval('.gw-hyp-row i', els => els.length);
+        expect(hyp).toBeGreaterThan(1);
+        await shot(page, 'catalog-record.png', { clip: await page.locator('#gw-catalog').boundingBox() });
+        expect(errors).toEqual([]);
+    });
+
+    test('NEGATIVE CONTROL: a missing inventory says so instead of a partial map', async ({ page }) => {
+        await page.route('**/data/glaciers/catalog/rgi7-points.bin.gz', r => r.fulfill({ status: 404, body: 'gone' }));
+        const { errors } = await boot(page, { url: '/glacier-watch.html?g=columbia&rgi=RGI2000-v7.0-G-01-00001' });
+        await page.waitForFunction(() => document.getElementById('gw-catalog')?.dataset.state === 'error', null, { timeout: 60_000 });
+        await expect(page.locator('#gw-cat-sub')).toContainText('unavailable');
+        expect(errors).toEqual([]);
+    });
 });

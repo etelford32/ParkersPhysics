@@ -69,6 +69,26 @@ async function boot() {
     renderPicker();
     const want = new URLSearchParams(location.search).get('g');
     select(S.glaciers.find(g => g.id === want) ? want : 'columbia', { push: false });
+    setupCatalog();
+}
+
+// ── the global catalogue (RGI 7.0) — loaded only as the reader reaches it, or for ?rgi= ──
+function setupCatalog() {
+    const host = $('gw-catalog');
+    if (!host) return;
+    const rgi = new URLSearchParams(location.search).get('rgi');
+    let started = false;
+    const start = () => {
+        if (started) return; started = true;
+        import('./glacier-catalog-view.js').then(m => m.mountCatalog(host, {
+            initialRgi: rgi,
+            onOpenTracked: (id) => { select(id); $('gw-stage-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+        })).catch(e => { host.querySelector('small').textContent = `the catalogue could not load (${e.message})`; });
+    };
+    if (rgi) { start(); host.scrollIntoView({ block: 'start' }); return; }
+    if (!('IntersectionObserver' in window)) { start(); return; }
+    const io = new IntersectionObserver((es) => { if (es.some(e => e.isIntersecting)) { io.disconnect(); start(); } }, { rootMargin: '600px 0px' });
+    io.observe(host);
 }
 
 // ── the stage ────────────────────────────────────────────────────────────────

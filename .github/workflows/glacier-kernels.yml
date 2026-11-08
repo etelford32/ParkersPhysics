@@ -15,7 +15,12 @@
 #   summary --check      data/glaciers/summary.json (EarthView's Glaciers layer) is exactly the
 #                        engine on the committed archive — re-run the summary after every bake
 #
-# Browser gates (tests/glacier-watch.spec.js, every feed mocked; tests/earth-glacier-layer.spec.js)
+#   glacier-catalog.mjs  the RGI 7.0 catalogue (data/glaciers/catalog): file hashes, the official region
+#                        tables reproduced from the quantised points, ids, picking ≡ brute force, detail
+#                        offsets, search, the ice-sheet rule, EarthView's pick geometry
+#
+# Browser gates (tests/glacier-watch.spec.js, every feed mocked; tests/earth-glacier-layer.spec.js;
+# tests/earth-glacier-catalog.spec.js)
 # run with the Playwright suite.
 name: glacier-kernels
 
@@ -24,24 +29,28 @@ on:
     paths:
       - 'js/glacier-*.js'
       - 'js/earth-glacier-layer.js'
+      - 'js/earth-glacier-catalog-layer.js'
       - 'js/vendor/jsfive-0.4.0.mjs'
       - 'data/glaciers/**'
       - 'scripts/build-glacier-*'
       - 'scripts/check-glacier-refresh.mjs'
       - 'api/glaciers/**'
       - 'tests/glacier-engine.mjs'
+      - 'tests/glacier-catalog.mjs'
       - 'tests/fixtures/glaciers/**'
       - '.github/workflows/glacier-kernels.yml'
   pull_request:
     paths:
       - 'js/glacier-*.js'
       - 'js/earth-glacier-layer.js'
+      - 'js/earth-glacier-catalog-layer.js'
       - 'js/vendor/jsfive-0.4.0.mjs'
       - 'data/glaciers/**'
       - 'scripts/build-glacier-*'
       - 'scripts/check-glacier-refresh.mjs'
       - 'api/glaciers/**'
       - 'tests/glacier-engine.mjs'
+      - 'tests/glacier-catalog.mjs'
       - 'tests/fixtures/glaciers/**'
       - '.github/workflows/glacier-kernels.yml'
   workflow_dispatch:
@@ -65,6 +74,8 @@ jobs:
           node-version: '22'
       - name: engine, pairs, route reader, bake physics
         run: node tests/glacier-engine.mjs
+      - name: global catalogue (RGI 7.0) reproduces the Consortium's tables; kernel + picking
+        run: node tests/glacier-catalog.mjs
       - name: WGMS mass balance matches its pinned sources
         run: node scripts/build-glacier-massbalance.mjs --check
       - name: EarthView summary matches the archive

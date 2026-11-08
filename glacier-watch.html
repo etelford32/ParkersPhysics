@@ -128,6 +128,53 @@ h2 small { font-weight:400; color:var(--gw-ink-3); font-size:.72rem; }
 .gw-legend i { display:inline-block; width:10px; height:10px; margin-right:5px; vertical-align:-1px; }
 .gw-note { font-size:.68rem; color:var(--gw-ink-3); line-height:1.5; margin-top:6px; }
 .gw-empty { font-size:.78rem; color:var(--gw-ink-3); padding:18px 6px; }
+/* ── the global catalogue (js/glacier-catalog-view.js) ── */
+#gw-catalog { min-height:240px; }
+.gw-cat-head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+.gw-cat-head h2 { margin:0; } .gw-cat-head small { color:var(--gw-ink-3); font-size:.74rem; }
+.gw-cat-grid { display:grid; grid-template-columns:minmax(0, 1fr) 320px; gap:12px; }
+.gw-cat-grid2 { display:grid; grid-template-columns:minmax(0, 5fr) minmax(0, 7fr); gap:16px; margin-top:14px; }
+.gw-cat-grid2 h3, #gw-cat-card h3 { margin:0 0 6px; font-size:.9rem; }
+@media (max-width: 1100px) { .gw-cat-grid, .gw-cat-grid2 { grid-template-columns:minmax(0, 1fr); } }
+.gw-cat-mapwrap { position:relative; min-width:0; }
+.gw-cat-tools { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
+.gw-cat-tools > button { font:inherit; font-size:.8rem; color:var(--gw-ink); background:rgba(10,18,34,.85); border:1px solid var(--gw-line); border-radius:6px; min-width:36px; min-height:34px; cursor:pointer; }
+#gw-cat-search { flex:1 1 200px; max-width:320px; min-height:34px; font:inherit; font-size:.8rem; color:var(--gw-ink); background:rgba(10,16,30,.7); border:1px solid var(--gw-line); border-radius:8px; padding:6px 10px; }
+#gw-cat-search:focus-visible { outline:none; border-color:var(--gw-accent); }
+#gw-cat-results { position:absolute; top:42px; left:0; z-index:4; width:min(420px, 100%); background:rgba(6,10,20,.97); border:1px solid var(--gw-line); border-radius:8px; padding:4px; max-height:300px; overflow:auto; }
+#gw-cat-results[hidden] { display:none; }
+#gw-cat-results button { display:block; width:100%; text-align:left; font:inherit; font-size:.78rem; color:var(--gw-ink); background:none; border:0; border-radius:6px; padding:7px 8px; min-height:36px; cursor:pointer; }
+#gw-cat-results button:hover, #gw-cat-results button:focus-visible { background:rgba(60,100,160,.25); outline:none; }
+#gw-cat-results small { color:var(--gw-ink-3); }
+#gw-cat-map { display:block; width:100%; height:clamp(320px, 52vh, 620px); border-radius:8px; border:1px solid var(--gw-line); cursor:grab; touch-action:none; background:#060a14; }
+#gw-cat-tip { position:absolute; pointer-events:none; z-index:3; background:rgba(4,8,16,.95); border:1px solid var(--gw-line); border-radius:6px; padding:6px 9px; font-size:.74rem; color:var(--gw-ink); max-width:280px; }
+#gw-cat-tip[hidden] { display:none; }
+#gw-cat-tip small { color:var(--gw-ink-3); }
+#gw-cat-legend { margin-top:6px; font-size:.72rem; color:var(--gw-ink-2); }
+#gw-cat-legend small { color:var(--gw-ink-3); }
+.gw-cat-keys { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:3px; }
+.gw-cat-keys i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+#gw-cat-card { background:rgba(8,13,26,.7); border:1px solid var(--gw-line); border-radius:10px; padding:12px; min-width:0; font-size:.8rem; }
+.gw-cat-id { font-size:.7rem; color:var(--gw-ink-3); margin-bottom:8px; word-break:break-all; }
+#gw-cat-card dl { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; margin:8px 0; }
+#gw-cat-card dt { color:var(--gw-ink-3); } #gw-cat-card dd { margin:0; } #gw-cat-card small { color:var(--gw-ink-3); }
+.gw-cat-tracked { font:inherit; font-size:.76rem; color:#ffd166; background:rgba(255,209,102,.08); border:1px solid rgba(255,209,102,.45); border-radius:6px; padding:6px 9px; min-height:34px; cursor:pointer; width:100%; text-align:left; }
+.gw-hyp { margin-top:8px; } .gw-hyp-title { font-size:.7rem; color:var(--gw-ink-3); margin-bottom:4px; }
+.gw-hyp-row { display:grid; grid-template-columns:48px 1fr; align-items:center; gap:6px; height:6px; margin-bottom:1px; overflow:visible; }
+.gw-hyp-row span { font-size:.6rem; color:var(--gw-ink-3); text-align:right; line-height:1; }
+.gw-hyp-row i { display:block; height:calc(100% - 1px); background:#6da7ec; border-radius:0 3px 3px 0; min-width:1px; }
+.gw-cat-links { margin-top:10px; font-size:.78rem; } .gw-cat-links a { color:var(--gw-accent); }
+.gw-cat-lede { font-size:.82rem; margin:0 0 8px; }
+.gw-cat-size, .gw-cat-reg { width:100%; border-collapse:collapse; font-size:.74rem; }
+.gw-cat-size th, .gw-cat-reg th { text-align:left; font-weight:600; color:var(--gw-ink-3); padding:4px 6px; border-bottom:1px solid var(--gw-line); }
+.gw-cat-size td, .gw-cat-reg td { padding:5px 6px; border-bottom:1px solid rgba(140,190,255,.06); vertical-align:middle; }
+.gw-cat-size td small, .gw-cat-reg small { color:var(--gw-ink-3); }
+.gw-cat-reg .n { text-align:right; font-variant-numeric:tabular-nums; }
+.gw-cat-tablewrap { overflow-x:auto; }
+.gw-bar { height:8px; background:rgba(140,190,255,.07); border-radius:3px; overflow:hidden; margin-bottom:2px; }
+.gw-bar.thin { height:4px; margin-top:3px; } .gw-bar i { display:block; height:100%; background:#3987e5; border-radius:0 3px 3px 0; }
+.gw-linkish { font:inherit; color:var(--gw-accent); background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+.gw-cat-note { font-size:.72rem; color:var(--gw-ink-3); margin:12px 0 0; line-height:1.5; }
 .gw-grid2 { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
 @media (max-width: 900px) { .gw-grid2 { grid-template-columns:minmax(0, 1fr); } }
 .gw-method { font-size:.7rem; color:var(--gw-ink-2); line-height:1.6; }
@@ -158,7 +205,8 @@ details.gw-table td, details.gw-table th { text-align:left; padding:2px 6px; bor
     <p><span id="gw-count-word">Forty-eight</span> glaciers on every continent, measured from orbit. Every few days a Landsat or Sentinel satellite photographs each one again, and NASA's
       ITS_LIVE matches features between two images to measure how far the ice moved. Each new measurement is compared with
       that glacier's own seasonal rhythm and its four-decade record. Field mass balance, river gauges, snow stations and the
-      weather at the glacier's own altitude sit alongside.</p>
+      weather at the glacier's own altitude sit alongside. Further down, <a href="#gw-catalog">every glacier on Earth</a> —
+      all 274,531 in the Randolph Glacier Inventory — on one map you can search.</p>
   </section>
 
   <section class="gw-panel gw-span" id="gw-stage-panel">
@@ -246,6 +294,10 @@ details.gw-table td, details.gw-table th { text-align:left; padding:2px 6px; bor
     <h2>Rivers &amp; snow stations <small id="gw-stations-sub"></small></h2>
     <div class="gw-chart" id="gw-stations-chart"></div>
     <div class="gw-note" id="gw-stations-note"></div>
+  </section>
+
+  <section class="gw-panel gw-span" id="gw-catalog" aria-label="Every glacier on Earth (RGI 7.0)">
+    <div class="gw-cat-head"><h2>Every glacier on Earth</h2><small>the Randolph Glacier Inventory loads as you reach it</small></div>
   </section>
 
   <section class="gw-panel gw-span gw-method" id="gw-method">

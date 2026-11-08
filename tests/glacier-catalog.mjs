@@ -15,6 +15,8 @@
  *  5. DETAIL: offsets undone — zmin ≤ zmean/zmed ≤ zmax, hypsometry sums to 1000 ‰ inside
  *     [zmin, zmax], the terminus lies within the glacier's own max length of its centroid.
  *  6. NAMES / SEARCH: diacritic-folded, prefix first, then larger; RGI ids resolve directly.
+ *  8. EARTHVIEW PICKING: xyzToLatLon inverts js/geo/coords.js's canonical frame (its source text is
+ *     pinned), and the pick radius converts pixels to kilometres at the hit distance.
  *  7. THE ICE-SHEET RULE: the seven ice-sheet outlets have no RGI outline and say why.
  */
 import fs from 'node:fs';
@@ -23,6 +25,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as C from '../js/glacier-catalog.js';
+import { xyzToLatLon, pickKm } from '../js/earth-glacier-catalog-layer.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(HERE, '../data/glaciers/catalog');
@@ -89,8 +92,9 @@ for (const i of [0, 1, 27508, 27509, 150000, pts.n - 1]) {
 ok(C.rgiId(meta, 0) === 'RGI2000-v7.0-G-01-00001' && C.rgiId(meta, 27509) === 'RGI2000-v7.0-G-02-00001', 'region boundaries (Alaska has 27 509)');
 ok(C.indexOfRgiId(meta, 'RGI2000-v7.0-G-01-27510') === null && C.indexOfRgiId(meta, 'RGI60-01.00570') === null && C.indexOfRgiId(meta, 'RGI2000-v7.0-G-20-00001') === null, 'ids past a region, RGI 6 ids and the empty region 20 resolve to null');
 const links = Object.entries(meta.watch_links);
-ok(links.length === 48 && links.filter(([, L]) => L.index !== null).every(([, L]) => C.rgiId(meta, L.index) === L.rgi_id && Math.abs(pts.area[L.index] - L.area_km2) < 1e-3 * L.area_km2 + 1e-3),
-    'every watch link names the row the baker found by point-in-polygon');
+const indexIds = JSON.parse(fs.readFileSync(path.join(HERE, '../data/glaciers/glaciers.json'), 'utf8')).glaciers.map(g => g.id).sort();
+ok(JSON.stringify(links.map(([id]) => id).sort()) === JSON.stringify(indexIds) && links.filter(([, L]) => L.index !== null).every(([, L]) => C.rgiId(meta, L.index) === L.rgi_id && Math.abs(pts.area[L.index] - L.area_km2) < 1e-3 * L.area_km2 + 1e-3),
+    `a watch link for EVERY Glacier Watch glacier (${indexIds.length}; re-run the catalogue bake when the list changes), each naming the row the baker found by point-in-polygon`);
 ok(links.filter(([, L]) => L.index !== null).every(([, L]) => C.greatCircleKm(L.at[0], L.at[1], pts.lat[L.index], pts.lon[L.index]) < Math.max(5, 2 * Math.sqrt(pts.area[L.index]))),
     "each tracked glacier's gauge lies within its outline's scale of that outline's centroid");
 
@@ -143,6 +147,24 @@ ok(meta.official.o1region['20'].count === 0 && meta.derived.o1['20'].n === 0, 'r
 const rows = C.regionRows(meta);
 ok(rows.length === 20 && Math.abs(rows.reduce((s, r) => s + r.share, 0) - 1) < 1e-3 && rows.find(r => r.o1 === '19').largest.area_km2 > 1000, 'region table: 20 rows, shares sum to 1, the largest glacier per region');
 ok(/marine-terminating/.test(meta.term_type_note) && /not land-terminating/.test(meta.term_type_note), 'RGI 7.0 assigns only the marine class — the rest is "not assigned", and the meta says so');
+
+section('8. EarthView picking geometry');
+{
+    const src = fs.readFileSync(path.join(HERE, '../js/geo/coords.js'), 'utf8');
+    ok(/cl \* Math\.cos\(lon\),\s*Math\.sin\(lat\),\s*-cl \* Math\.sin\(lon\)/.test(src), 'coords.js still maps (lat, lon) → (cos φ cos λ, sin φ, −cos φ sin λ) — the frame transliterated below');
+    const toXYZ = (lat, lon) => { const p = lat * Math.PI / 180, l = lon * Math.PI / 180; return [Math.cos(p) * Math.cos(l), Math.sin(p), -Math.cos(p) * Math.sin(l)]; };
+    let worst = 0;
+    for (const [lat, lon] of [[46.48, 8.03], [-72.5, 68.5], [61.17, -147.08], [0, 179.99], [0, -179.99], [89.9, 10], [-33.58, -70.13]]) {
+        const [a, b] = xyzToLatLon(...toXYZ(lat, lon).map(v => v * 1.0032));
+        worst = Math.max(worst, Math.abs(a - lat), Math.abs(((b - lon + 540) % 360) - 180));
+    }
+    ok(worst < 1e-9, `xyzToLatLon inverts the canonical frame (worst ${worst.toExponential(1)}°), radius-independent`);
+    // NEGATIVE CONTROL: the three.js-sphere convention (lon = atan2(z, −x)) names the antipodal meridian
+    const [, wrong] = (([x, y, z]) => [0, Math.atan2(z, -x) * 180 / Math.PI])(toXYZ(46.48, 8.03));
+    ok(Math.abs(Math.abs(wrong - 8.03) - 180) < 1e-6, 'negative control: the mesh-UV convention lands 180° away (the earth.html antipode scar)');
+    // 10 CSS px at dpr 2, 1200 device px per radian, 1.5 Earth radii away → 10·2/1200·1.5·6371 km
+    ok(Math.abs(pickKm(10, 2, 1200, 1.5) - 159.275) < 0.01 && pickKm(10, 1, 1200, 0.01) < 1, 'pick radius: pixels → km at the hit distance (159 km from orbit, < 1 km close in)');
+}
 
 console.log(`\n${checks - failed}/${checks} checks passed`);
 if (failed) process.exit(1);

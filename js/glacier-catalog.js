@@ -38,6 +38,29 @@ export const CATALOG_BASE = '/data/glaciers/catalog/';
 export const R_EARTH_KM = 6371.0088;
 export const SURGE_LABELS = Object.freeze(['no evidence', 'possible', 'probable', 'observed']);
 
+// THE ONE PALETTE for the catalogue, shared by glacier-watch.html's map and EarthView's layer so
+// the key and the globe carry the same bytes. Two jobs, never mixed: median elevation is ONE
+// sequential hue (reference blue 600 → 100, dark = low, validated on the #0b1120 surface);
+// terminus & surge is categorical (slot 1 / slot 2) over a neutral that means NOT ASSIGNED.
+export const ELEV_BANDS = Object.freeze([
+    { lo: -Infinity, label: '< 1 000 m', color: '#184f95' },
+    { lo: 1000, label: '1–2 km', color: '#256abf' },
+    { lo: 2000, label: '2–3 km', color: '#3987e5' },
+    { lo: 3000, label: '3–4 km', color: '#6da7ec' },
+    { lo: 4000, label: '4–5 km', color: '#9ec5f4' },
+    { lo: 5000, label: '≥ 5 km', color: '#cde2fb' },
+]);
+export const CLASS_COLORS = Object.freeze({ marine: '#3987e5', surge: '#d95926', none: '#6b7486' });
+export function elevColor(zmed) {
+    let c = ELEV_BANDS[0].color;
+    for (const b of ELEV_BANDS) if (zmed >= b.lo) c = b.color;
+    return c;
+}
+export function classColor(flags) {
+    const f = flagsOf(flags);
+    return f.marine ? CLASS_COLORS.marine : f.surge ? CLASS_COLORS.surge : CLASS_COLORS.none;
+}
+
 // ── points ───────────────────────────────────────────────────────────────────
 const MAGIC = 'RGI7PTS\u0002';   // v2: area column is uint16 (log10 a + 4)·8000 — v1's int16 overflowed above ~1 900 km²
 
@@ -261,6 +284,10 @@ export function trackedFor(meta, i) {
 
 // ── loaders (fetch injected; DecompressionStream is in every current browser and Node ≥ 18) ──
 export async function gunzip(buf) {
+    // A host that labels a .gz with Content-Encoding: gzip has ALREADY decompressed it in transit;
+    // decompressing again would throw. The gzip magic (1f 8b) decides, never the URL.
+    const head = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset || 0, 2);
+    if (!(head[0] === 0x1f && head[1] === 0x8b)) return new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
     const ds = new DecompressionStream('gzip');
     const stream = new Blob([buf]).stream().pipeThrough(ds);
     return new Uint8Array(await new Response(stream).arrayBuffer());
