@@ -496,9 +496,9 @@ export function formatDate(iso, { year = true } = {}) {
     return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${year ? `, ${d.getUTCFullYear()}` : ''}`;
 }
 
-/** 'Nov 3 – in progress' / 'Oct 26 – Nov 2, 2026'. */
+/** 'Since Nov 3, 2026' (open — the page adds an "In progress" badge) / 'Oct 26 – Nov 2, 2026'. */
 export function sprintRange(sprint) {
-    if (sprint.end == null) return `${formatDate(sprint.start)} – in progress`;
+    if (sprint.end == null) return `Since ${formatDate(sprint.start)}`;
     return `${formatDate(sprint.start, { year: false })} – ${formatDate(sprint.end)}`;
 }
 

@@ -161,7 +161,7 @@ test('helpers: freshness, latest, formatting', () => {
     assert.equal(formatDate('2026-11-04', { year: false }), 'Nov 4');
     assert.ok(Number.isNaN(dateMs('2026-02-30')), 'impossible dates are rejected');
     assert.equal(sprintRange({ start: '2026-10-26', end: '2026-11-02' }), 'Oct 26 – Nov 2, 2026');
-    assert.equal(sprintRange({ start: '2026-11-03', end: null }), 'Nov 3, 2026 – in progress');
+    assert.equal(sprintRange({ start: '2026-11-03', end: null }), 'Since Nov 3, 2026');
 });
 
 test('pre-rendered page and RSS feed are in sync with the log', () => {
