@@ -278,6 +278,17 @@ export const PIPELINES = [
       warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
       notes: 'Per-site, 12 h edge cache. BOOTSTRAP source (non-commercial free tier) until the CLIMALYTIX_PLAN.md §17 data engine serves sites. Upstream failure is 200 + freshness:expired + reasons, never a 5xx.' },
 
+    { id: 'climalytix-nwp', label: 'Climalytix GFS archive (our data engine)',
+      endpoint: '/api/climalytix/nwp',
+      // Requires ?lat&lon. Two R2 range reads per site; the body's
+      // age_seconds is now − RUN time, so this row IS the ingest-lag probe.
+      probePath: '/api/climalytix/nwp?lat=40.00&lon=-105.25',
+      probeTimeoutMs: 15_000,
+      category: 'weather', upstream: 'NOAA GFS 0.25° (AWS Open Data) → our R2 point tiles',
+      cadence_s: 86_400, prewarm: null,
+      warnAgeS: 30 * 3600, critAgeS: 54 * 3600,
+      notes: 'Written daily by .github/workflows/climalytix-ingest.yml (scripts/climalytix_ingest/gfs.py). R2 unset / no run / unreadable tile is 200 + freshness:expired + reasons, never a 5xx; the route grades an old run stale (>30 h) / expired (>54 h) itself.' },
+
     { id: 'polar-vortex',       label: 'Polar vortex',
       endpoint: '/api/weather/polar-vortex',
       category: 'atmosphere', upstream: 'Open-Meteo GFS @ 60°N',

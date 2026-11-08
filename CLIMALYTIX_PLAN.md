@@ -1,6 +1,6 @@
 # Climalytix — location-first multi-dataset climate & weather analytics
 
-Status: **P0 BUILT** (2026-11-08) — `climalytix.html` under Research → Analysis, the SiteSeries store, the Explore timeline over four public datasets, `/api/climalytix/archive`; see §13 for what P0 shipped and what comes next. Everything else here is planned. This is the design brief for
+Status: **P0 BUILT** (2026-11-08) — `climalytix.html` under Research → Analysis, the SiteSeries store, the Explore timeline over four public datasets, `/api/climalytix/archive`; see §13 for what P0 shipped and what comes next. **P-1 FIRST SLICE BUILT** (2026-11-08, §17.6): the GFS 0.25° ingest worker on GitHub Actions → R2 point tiles → `/api/climalytix/nwp`; it publishes once the four R2 secrets are set for Actions. Everything else here is planned. This is the design brief for
 `climalytix.html`, the flagship analysis workspace. It sits ON TOP of the
 weather / climate machinery the site already ships and must not fork any of it
 (§3 lists what it reuses, by file).
@@ -738,6 +738,51 @@ api/climalytix/* (Vercel) ── reads ONE tile, slices ONE point ──► Site
   antimeridian handled (the EarthView seam lesson).
 
 ---
+
+### 17.6 First slice — BUILT 2026-11-08 (GFS → R2 → one site)
+
+What exists, and the files that are its one copy:
+
+- **Worker** `scripts/climalytix_ingest/` (Python, eccodes): `idx.py` (PURE `.idx`
+  parser + range planner + precipitation de-accumulation plan), `grid.py`
+  (canonical north→south / east-going orientation from the scan-mode flags),
+  `tiles.py` (the point-tile FORMAT's normative description + the GFS variable
+  table), `store.py` (R2 or a local dry run; tiles → manifest → `latest` →
+  prune), `gfs.py` (the CLI). Schedule: `.github/workflows/climalytix-ingest.yml`,
+  daily 05:23 UTC for the 00z run, 0–240 h 3-hourly, keeps 2 runs. It never
+  commits and never touches Supabase.
+- **Format** (`climalytix.point-tiles.v1`): int16 little-endian, per-variable
+  scale/offset (stated precision scale/2, 0.005 in every unit today), NODATA
+  −32768 is a gap, clipped values COUNTED in the manifest; 20×20-cell tiles +
+  a one-cell halo whose columns WRAP, laid out cell-major with the time series
+  innermost, so a site is TWO byte-range reads on ONE tile, at the grid seam
+  too. The run manifest (gzip JSON) carries the grid, vars, times and every
+  missing var-lead; the `latest` pointer is written after it.
+- **Reader + route** `js/climalytix/point-tile.js` (PURE) and
+  `/api/climalytix/nwp?lat&lon` — bilinear between the four nodes (disclosed;
+  M1 downscaling replaces it), wind speed/direction from the interpolated
+  u/v (never interpolated speed), precipitation as 3 h amounts stamped at the
+  interval START. Registry row `climalytix-nwp` is the ingest-lag probe
+  (`age_seconds` = now − run time; stale > 30 h, expired > 54 h).
+
+Measured on the real 2026-11-07 00z run: 17 leads fetch + decode + tile in
+19 s at 861 MB RSS; a full run is ~1.65 GB of tiles (~2 runs ≈ 3.3 GB of R2).
+
+Two traps found on the REAL files and pinned by `tests/climalytix_ingest_test.py`:
+(1) a field can appear twice with different meanings (TCDC instantaneous vs
+bucket average; APCP "6-9 h" beside "0-9 h") — select by the full time
+descriptor; (2) APCP resets in 6 h buckets (3 h files past f120 still carry
+6 h buckets, f240 adds "0-10 day") — the 3 h amount is the window with the
+latest start, minus the previous file's when the start is earlier. Scan-mode
+orientation is checked against eccodes' OWN per-point coordinates on the real
+message and on clones re-stored south-first / west-going / column-major, with
+the flag-ignoring reader as the negative control (GFS is north-first, so a
+reader that ignores the flags passes every GFS-only test).
+
+Next in P-1: wire `/api/climalytix/nwp` into the page as a dataset (our
+archive first, the bootstrap second, flagged); GEFS members; ECMWF open data
+(IFS/AIFS, needs its own `.index` JSON sidecar planner); the ERA5 history
+backfill into the same format (time axis = decades, chunked across runs).
 
 ## 18. Our models: how we "rival Open-Meteo"
 

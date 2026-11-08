@@ -1,0 +1,85 @@
+name: climalytix-ingest
+
+# The Climalytix data engine's first ingest (CLIMALYTIX_PLAN.md §17, P-1):
+# one NOAA GFS 0.25° run a day → time-major point tiles in Cloudflare R2,
+# served per site by /api/climalytix/nwp.
+#
+# WHY ACTIONS (plan §0 D8, D9): zero GPU, no always-on worker, nothing on
+# Vercel's 60 s budget and nothing on the author's workstation. Measured
+# 2026-11-08: 5 leads of 0.25° GFS fetch + decode + tile in 7 s here, so a
+# full 0–240 h run (81 leads × 9 fields, ~1.65 GB of tiles) fits well inside
+# the 60-minute timeout.
+#
+# WHAT IT READS: noaa-gfs-bdp-pds on AWS (NOAA Open Data Dissemination —
+# public domain, no key) by HTTP Range against each file's .idx sidecar.
+# WHAT IT WRITES: R2 only, under climalytix/nwp/gfs/<grid>/<run>/, in the
+# order tiles → manifest → latest pointer → prune (scripts/climalytix_ingest/
+# store.py). It never commits, never pushes, never touches Supabase or main.
+#
+# SECRETS (Settings → Secrets and variables → Actions), the same four the
+# Vercel project already uses: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+# R2_SECRET_ACCESS_KEY, R2_BUCKET. Without them the job still runs the gate
+# and a full ingest into the runner's temp dir, then WARNS that nothing was
+# published — /api/climalytix/nwp keeps answering freshness:'expired'.
+
+on:
+  schedule:
+    # GFS 00z is complete on AWS ~04:30–05:00 UTC; off the hour on purpose.
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+    inputs:
+      run:
+        description: 'GFS run YYYYMMDDHH (blank = newest complete)'
+        required: false
+        default: ''
+      max_lead:
+        description: 'Last lead hour (3-hourly from 0)'
+        required: false
+        default: '240'
+      grid:
+        description: '0p25 | 0p50 | 1p00'
+        required: false
+        default: '0p25'
+      keep:
+        description: 'Published runs to keep in R2'
+        required: false
+        default: '2'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: climalytix-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    name: GFS → R2 point tiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install (eccodes ships its own binary library)
+        run: pip install 'eccodes==2.50.0' 'numpy>=2' boto3
+      - name: Gate first (real GFS fixtures, every scan mode, tile round trip)
+        run: python3 tests/climalytix_ingest_test.py
+      - name: Ingest
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -o pipefail
+          python3 scripts/climalytix_ingest/gfs.py \
+            --grid "${{ inputs.grid || '0p25' }}" \
+            --max-lead "${{ inputs.max_lead || '240' }}" \
+            --keep "${{ inputs.keep || '2' }}" \
+            ${{ inputs.run && format('--run {0}', inputs.run) || '' }} \
+            --out "$RUNNER_TEMP/climalytix" | tee "$RUNNER_TEMP/ingest.log"
+          if grep -q 'r2_not_configured' "$RUNNER_TEMP/ingest.log"; then
+            echo "::warning title=Climalytix ingest not published::R2 secrets are not set for Actions; the run was decoded and tiled into the runner temp dir only. /api/climalytix/nwp will keep answering freshness:expired."
+          fi
