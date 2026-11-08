@@ -9,6 +9,10 @@
  *     map's LOWER-RIGHT corner
  *   · the Temperature toggle draws the heat field (canvas pixels at the site
  *     change) — NEGATIVE CONTROL: toggled off, the pixel is the basemap's
+ *   · isotherms are drawn in the READER'S unit and re-chosen on a unit
+ *     switch; the freezing line is flagged exactly when the window spans
+ *     0 °C; warmest/coldest are marked; each sub-toggle turns only itself off
+ *     and both disable with Temperature
  *   · zoom ± / D-pad / recentre / keyboard / wheel-at-cursor / drag all move
  *     the view the right way, and the wheel does not scroll the page
  *   · our archive unpublished ⇒ no heat, the rail says why, the basemap
@@ -104,6 +108,37 @@ test('Temperature draws the heat field; NEGATIVE CONTROL: toggled off the site p
     await page.locator('#cx-layer-temp').check();
     await nextFrame(page);
     expect((await mapState(page)).drawn.heat).toBe(true);
+    expect(errors).toEqual([]);
+});
+
+test('isotherms in the reader’s unit, the freezing line, warmest/coldest, and their toggles', async ({ page }) => {
+    const errors = await boot(page);
+    let s = await mapState(page);
+    expect(s.drawn.isotherms).toBeGreaterThan(2);
+    expect(s.drawn.extremes).toBe(true);
+    const r = s.frame.range;
+    expect(s.drawn.freezing).toBe(r.min < 0 && r.max > 0);
+    const fLabels = s.drawn.isoLevels;
+    // en-US default is °F; switch to metric and the levels are re-chosen in °C.
+    await page.locator('#cx-units').selectOption('metric');
+    await nextFrame(page);
+    s = await mapState(page);
+    expect(s.drawn.isoLevels).not.toEqual(fLabels);
+    expect(s.drawn.isoLevels.every((l) => Number.isFinite(parseFloat(l)))).toBe(true);
+    // Sub-toggles turn off only themselves.
+    await page.locator('#cx-layer-iso').uncheck();
+    await nextFrame(page);
+    s = await mapState(page);
+    expect(s.drawn.isotherms).toBe(0);
+    expect(s.drawn.heat).toBe(true);
+    expect(s.drawn.extremes).toBe(true);
+    await page.locator('#cx-layer-ext').uncheck();
+    await nextFrame(page);
+    expect((await mapState(page)).drawn.extremes).toBe(false);
+    // Temperature off disables both.
+    await page.locator('#cx-layer-temp').uncheck();
+    await expect(page.locator('#cx-layer-iso')).toBeDisabled();
+    await expect(page.locator('#cx-layer-ext')).toBeDisabled();
     expect(errors).toEqual([]);
 });
 

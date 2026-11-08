@@ -22,6 +22,9 @@
 #                            exact, a clamped zoom never pans, GIBS' real 288/2^z
 #                            tile grid across the dateline, heat = the site-wide
 #                            temperature LUT bytes, gaps transparent
+#   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
+#                            saddles never cross, gaps cut the line, levels round
+#                            in the reader's unit, the freezing line flagged
 #   climalytix-nwp-route.mjs /api/climalytix/nwp on a fake R2 bucket: two range
 #                            reads per site, every degraded path 200 + freshness
 #   climalytix_ingest_test.py  the ingest worker (python): real .idx parsing,
@@ -97,6 +100,8 @@ jobs:
         run: node tests/climalytix-point-tile.mjs
       - name: location map geometry
         run: node tests/climalytix-map-view.mjs
+      - name: isotherms
+        run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)
         run: node tests/climalytix-nwp-route.mjs
       - name: Climate Lab (unchanged by the lift)

@@ -14,11 +14,13 @@
 import assert from 'node:assert/strict';
 import {
     makeView, clampView, scales, geoToPx, pxToGeo, viewBounds, zoomAt, panBy, panStep,
-    tilePlan, scaleBar, fieldTimeIndex, fieldSample, fieldRange, heatPixels, heatGeoRect,
+    tilePlan, scaleBar, fieldTimeIndex, fieldSample, fieldRange,
+    heatImage, heatColor, fieldExtremes,
     wrap180, SPAN_MIN_DEG, SPAN_MAX_DEG, ZOOM_STEP,
 } from '../js/climalytix/map-view.js';
 import { tileSpanDeg, tilesAcross } from '../js/earth-detail-inset.js';
-import { buildTempLUTPixels, TEMP_LUT_SIZE, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../js/temp-ramp.js';
+import { buildTempLUTPixels, TEMP_LUT_SIZE, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C, FREEZE_SEAM, freezingSeam } from '../js/temp-ramp.js';
+import { readFileSync } from 'node:fs';
 
 let passed = 0;
 const ok = (name, fn) => { fn(); passed++; console.log(`  ✓ ${name}`); };
@@ -140,15 +142,67 @@ ok('field sampling: nodes exact, bilinear between, gaps and the outside null', (
     assert.equal(fieldTimeIndex(F.times, 10 * 3_600_000), null, 'past the run: no frame, never the last one held');
 });
 
-ok('heat pixels are the site-wide temperature LUT bytes; a gap is transparent', () => {
+ok('heat colours are the site-wide temperature LUT bytes; a gap corner is transparent', () => {
     const lut = buildTempLUTPixels();
-    const px = heatPixels(F, 1, lut);
     const idx = Math.round(((20 - TEMP_ENCODE_MIN_C) / TEMP_ENCODE_SPAN_C) * (TEMP_LUT_SIZE - 1));
-    assert.deepEqual([...px.slice(5 * 4, 5 * 4 + 3)], [...lut.slice(idx * 4, idx * 4 + 3)], '20 °C = the LUT byte for 20 °C');
-    assert.equal(px[3 * 4 + 3], 0, 'gap alpha 0');
-    assert.equal(px[3], 255);
-    const r = heatGeoRect(F);
-    assert.deepEqual(r, { west: -106.25, east: -104.25, north: 41.25, south: 39.75 }, 'pixel centres on the nodes');
+    assert.deepEqual([...heatColor(20, lut).slice(0, 3)], [...lut.slice(idx * 4, idx * 4 + 3)], '20 °C = the LUT byte (no seam far from 0 °C)');
+    // F at t1 has a gap at its NE node: the cell next to it draws nothing.
+    const v = makeView(40.5, -105, 2);
+    const img = heatImage(F, 1, v, 400, 400, lut, { step: 1 });
+    const p = geoToPx(v, 400, 400, 40.85, -104.65);         // inside the NE cell
+    assert.equal(img.data[(Math.floor(p.y) * img.cw + Math.floor(p.x)) * 4 + 3], 0, 'gap cell transparent');
+    const q = geoToPx(v, 400, 400, 40.25, -105.75);         // a complete cell
+    assert.equal(img.data[(Math.floor(q.y) * img.cw + Math.floor(q.x)) * 4 + 3], 255);
+});
+
+ok('the freezing seam is EarthView’s own: constants pinned to the globe shader’s source', () => {
+    const src = readFileSync(new URL('../js/earth-skin.js', import.meta.url), 'utf8');
+    const m = /float frz = 1\.0 - smoothstep\(([\d.]+), ([\d.]+), abs\(tC\)\);\s*return c \+ vec3\(([\d.]+)\) \* frz;/.exec(src);
+    assert.ok(m, 'weatherOverlay still has the seam expression');
+    assert.deepEqual([+m[1], +m[2], +m[3]], [FREEZE_SEAM.innerC, FREEZE_SEAM.outerC, FREEZE_SEAM.gain]);
+    assert.equal(freezingSeam(0), 1);
+    assert.equal(freezingSeam(0.35), 1);
+    assert.equal(freezingSeam(1.1), 0);
+    assert.equal(freezingSeam(-0.7), freezingSeam(0.7), 'symmetric about 0 °C');
+});
+
+ok('heat is interpolated as a VALUE then coloured; NEGATIVE CONTROL: blending colours paints a hue the ramp never has', () => {
+    const lut = buildTempLUTPixels();
+    // Two columns of nodes, −10 °C west and +10 °C east: halfway is 0 °C.
+    const f = { latN: 1, lonW: 0, dlat: 1, dlon: 1, nRows: 2, nCols: 2, times: [0], values: [-10, 10, -10, 10] };
+    const v = makeView(0.5, 0.5, 1);
+    const img = heatImage(f, 0, v, 200, 200, lut, { step: 1 });
+    const mid = (100 * img.cw + 100) * 4;                  // the pixel at the window centre
+    const want = heatColor(fieldSample(f, 0, 0.5, 0.5), lut);
+    assert.deepEqual([...img.data.slice(mid, mid + 4)], [...want], 'value-space: LUT(0 °C) + the seam');
+    near(fieldSample(f, 0, 0.5, 0.5), 0, 0.06, 'the midpoint is ~0 °C');
+    const a = heatColor(-10, lut), b = heatColor(10, lut);
+    const blend = [0, 1, 2].map((k) => (a[k] + b[k]) / 2);
+    const dist = Math.hypot(...[0, 1, 2].map((k) => blend[k] - want[k]));
+    assert.ok(dist > 40, `colour-blending would paint ${blend.map(Math.round)} instead of ${[...want.slice(0, 3)]} (Δ ${dist.toFixed(0)})`);
+    assert.ok(want[0] > lut[Math.round(((0 - TEMP_ENCODE_MIN_C) / TEMP_ENCODE_SPAN_C) * (TEMP_LUT_SIZE - 1)) * 4], 'the seam brightens the freezing line');
+});
+
+ok('outside the data window the heat image is transparent — nothing is extrapolated', () => {
+    const lut = buildTempLUTPixels();
+    const img = heatImage(F, 0, makeView(40, -105, 6), 300, 200, lut, { step: 2 });
+    let inside = 0, outside = 0;
+    for (let j = 0; j < img.ch; j++) for (let i = 0; i < img.cw; i++) {
+        const a = img.data[(j * img.cw + i) * 4 + 3];
+        const g = pxToGeo(makeView(40, -105, 6), 300, 200, (i + 0.5) * 2, (j + 0.5) * 2);
+        const inF = g.lat <= F.latN && g.lat >= F.latN - (F.nRows - 1) * F.dlat && g.lon >= F.lonW && g.lon <= F.lonW + (F.nCols - 1) * F.dlon;
+        if (inF) inside += a > 0; else outside += a > 0;
+    }
+    assert.equal(outside, 0);
+    assert.ok(inside > 0);
+    assert.equal(heatImage(null, 0, makeView(0, 0), 10, 10, lut).data.every((x) => x === 0), true);
+});
+
+ok('extremes are the warmest and coldest NODES, gaps skipped', () => {
+    const e = fieldExtremes(F, 1);
+    assert.deepEqual(e.max, { v: 22, lat: 41, lon: -105 }, 'two 22s: the first in row order wins');
+    assert.deepEqual(e.min, { v: 18, lat: 40, lon: -106 });
+    assert.equal(fieldExtremes(F, null), null);
 });
 
 console.log(`\n${passed} passed`);

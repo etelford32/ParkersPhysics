@@ -809,6 +809,25 @@ THE CURSOR (exact, `zoomAt`), pinch, double-click, keyboard. Geometry is the
 PURE `js/climalytix/map-view.js` (equirectangular, true scale at the view
 centre); gates `tests/climalytix-map-view.mjs` + `tests/climalytix-map.spec.js`.
 
+**The Temperature layer, EarthView-grade (2026-11-08):** the map draws
+temperature the way the globe does (js/earth-skin.js `weatherOverlay`):
+the VALUE is interpolated between grid nodes, then coloured by the one LUT,
+then the freezing seam is added — `heatImage` in map-view.js, per 2×2 px
+block, cached per view + time. The first version let the canvas smooth a
+node-per-pixel image, which blends COLOURS (a −5 °C blue and a +5 °C yellow
+averaged to a grey-green the ramp never contains, right where the freezing
+line belongs); the gate keeps that as its negative control. The seam's
+constants live once in js/temp-ramp.js `FREEZE_SEAM` and are pinned to the
+shader's literals by source text. Under the toggle: labelled ISOTHERMS
+(js/climalytix/contours.js, marching squares on the window's nodes — not
+EarthView's isobar module, which is 360×180-only and SHA-pinned), levels
+round in the reader's unit and re-chosen on a unit switch, the freezing line
+its own emphasised level whenever the window spans 0 °C; ▲ ▼ the window's
+warmest and coldest nodes. The data box is the NODE extent (nothing is drawn
+past the outer nodes). The other layers (base + terrain, day/night + lights,
+satellite imagery by date, pressure + wind) are queued and will be designed
+one at a time.
+
 Next in P-1: GEFS members; ECMWF open data
 (IFS/AIFS, needs its own `.index` JSON sidecar planner); the ERA5 history
 backfill into the same format (time axis = decades, chunked across runs).

@@ -18,6 +18,15 @@
  * the NEW centre's cos φ — solving in that order makes it exact, which the
  * gate asserts to 1e-9 px.
  *
+ * TEMPERATURE IS INTERPOLATED AS A VALUE, THEN COLOURED (EarthView's rule:
+ * js/earth-skin.js samples the field, then taps the LUT, then adds the
+ * freezing seam). Letting the canvas smooth a node-per-pixel image blends
+ * COLOURS instead — halfway between a −5 °C blue and a +5 °C yellow it paints
+ * a grey-green the ramp never contains, exactly where the freezing line
+ * should be. `heatImage` evaluates the field per output pixel (bilinear in
+ * DATA), maps it through the one LUT and adds FREEZE_SEAM; the gate's
+ * negative control is the colour-blend it replaced.
+ *
  * TILES. GIBS 4326 matrices are 288/2^z° tiles with PADDED right/bottom edges
  * (js/earth-detail-inset.js tileSpanDeg — the ONE copy of that grid; a
  * power-of-two pyramid requests tiles that do not exist). A window across the
@@ -28,7 +37,7 @@
  */
 
 import { tileSpanDeg, tilesAcross, tilesDown } from '../earth-detail-inset.js';
-import { TEMP_LUT_SIZE, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
+import { TEMP_LUT_SIZE, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C, FREEZE_SEAM, freezingSeam } from '../temp-ramp.js';
 
 export const SPAN_MIN_DEG = 0.35;
 export const SPAN_MAX_DEG = 70;
@@ -210,34 +219,59 @@ export function fieldRange(f, t) {
     return lo <= hi ? { min: lo, max: hi } : null;
 }
 
-/**
- * RGBA pixels (one per grid NODE) for time t through the site-wide
- * temperature LUT (js/temp-ramp.js — the same bytes as EarthView's key).
- * A gap is alpha 0, never a colour.
- */
-export function heatPixels(f, t, lut) {
-    const n = f.nRows * f.nCols;
-    const out = new Uint8ClampedArray(n * 4);
-    const base = t * n;
-    for (let k = 0; k < n; k++) {
-        const v = f.values[base + k];
-        if (v == null || !Number.isFinite(v)) continue;
-        const idx = Math.max(0, Math.min(TEMP_LUT_SIZE - 1,
-            Math.round(((v - TEMP_ENCODE_MIN_C) / TEMP_ENCODE_SPAN_C) * (TEMP_LUT_SIZE - 1))));
-        out.set(lut.subarray(idx * 4, idx * 4 + 3), k * 4);
-        out[k * 4 + 3] = 255;
-    }
+/** LUT colour for tC (+ the freezing seam) into out[o..o+3]; alpha 255. */
+function lutColor(tC, lut, out, o) {
+    const idx = Math.max(0, Math.min(TEMP_LUT_SIZE - 1,
+        Math.round(((tC - TEMP_ENCODE_MIN_C) / TEMP_ENCODE_SPAN_C) * (TEMP_LUT_SIZE - 1))));
+    const seam = FREEZE_SEAM.gain * 255 * freezingSeam(tC);
+    out[o] = lut[idx * 4] + seam;
+    out[o + 1] = lut[idx * 4 + 1] + seam;
+    out[o + 2] = lut[idx * 4 + 2] + seam;
+    out[o + 3] = 255;
+}
+
+/** Colour of one temperature exactly as the map draws it (for keys and tests). */
+export function heatColor(tC, lut) {
+    const out = new Uint8ClampedArray(4);
+    lutColor(tC, lut, out, 0);
     return out;
 }
 
 /**
- * Where the node raster goes on the map: pixel CENTRES on the nodes, so the
- * image extends half a cell past the outer nodes (canvas smoothing then
- * interpolates between nodes — display only, the readout samples the data).
+ * The heat layer in SCREEN space: one RGBA sample per `step`×`step` block of
+ * the view, value interpolated in the data then coloured. Outside the data
+ * window, and on any gap corner, alpha is 0 — nothing is extrapolated.
+ * Returns { data, cw, ch, step }.
  */
-export function heatGeoRect(f) {
-    return {
-        west: f.lonW - f.dlon / 2, east: f.lonW + (f.nCols - 0.5) * f.dlon,
-        north: f.latN + f.dlat / 2, south: f.latN - (f.nRows - 0.5) * f.dlat,
-    };
+export function heatImage(f, t, v, w, h, lut, { step = 2 } = {}) {
+    const cw = Math.max(1, Math.ceil(w / step)), ch = Math.max(1, Math.ceil(h / step));
+    const data = new Uint8ClampedArray(cw * ch * 4);
+    if (!f?.values || t == null) return { data, cw, ch, step };
+    const { kx, ky } = scales(v, h);
+    for (let j = 0; j < ch; j++) {
+        const lat = v.lat - (((j + 0.5) * step) - h / 2) / ky;
+        for (let i = 0; i < cw; i++) {
+            const lon = v.lon + (((i + 0.5) * step) - w / 2) / kx;
+            const val = fieldSample(f, t, lat, lon);
+            if (val != null) lutColor(val, lut, data, (j * cw + i) * 4);
+        }
+    }
+    return { data, cw, ch, step };
+}
+
+/** Warmest and coldest NODE of one time's plane (first wins a tie). */
+export function fieldExtremes(f, t) {
+    if (!f?.values || t == null) return null;
+    let hi = null, lo = null;
+    const base = t * f.nRows * f.nCols;
+    for (let i = 0; i < f.nRows; i++) {
+        for (let j = 0; j < f.nCols; j++) {
+            const v = f.values[base + i * f.nCols + j];
+            if (v == null || !Number.isFinite(v)) continue;
+            const node = { v, lat: f.latN - i * f.dlat, lon: f.lonW + j * f.dlon };
+            if (!hi || v > hi.v) hi = node;
+            if (!lo || v < lo.v) lo = node;
+        }
+    }
+    return hi ? { max: hi, min: lo } : null;
 }

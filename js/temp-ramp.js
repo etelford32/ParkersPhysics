@@ -64,3 +64,20 @@ export function tempToRampFrac(tC) {
 }
 
 export default buildTempLUTPixels;
+
+/**
+ * The freezing-line seam EarthView paints on top of the ramp
+ * (js/earth-skin.js weatherOverlay: `frz = 1 − smoothstep(0.35, 1.10, |T|)`,
+ * colour += 0.22·frz). The 2D consumers (Climalytix's map) read THESE numbers;
+ * the GLSL keeps its literals and tests/climalytix-map-view.mjs pins the two
+ * against each other by source text, so the seam cannot drift between the
+ * globe and the map.
+ */
+export const FREEZE_SEAM = Object.freeze({ innerC: 0.35, outerC: 1.10, gain: 0.22 });
+
+/** Seam weight 0..1 at tC (1 on the freezing line). */
+export function freezingSeam(tC) {
+    const x = Math.abs(tC);
+    const t = Math.max(0, Math.min(1, (x - FREEZE_SEAM.innerC) / (FREEZE_SEAM.outerC - FREEZE_SEAM.innerC)));
+    return 1 - t * t * (3 - 2 * t);
+}

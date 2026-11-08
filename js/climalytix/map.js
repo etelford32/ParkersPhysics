@@ -14,7 +14,12 @@
  *   layers    the rail LEFT of the map; Temperature is the first toggle and
  *             draws the heat field from OUR OWN GFS archive
  *             (/api/climalytix/nwp-field). Nothing stands in for it: archive
- *             down ⇒ no heat and the rail says why.
+ *             down ⇒ no heat and the rail says why. It is drawn the way
+ *             EarthView draws temperature on the globe: the VALUE is
+ *             interpolated, then coloured by the one LUT, then the freezing
+ *             seam is added (map-view heatImage) — plus, under it, labelled
+ *             isotherms in the reader's unit with the freezing line
+ *             emphasised (contours.js) and the window's warmest/coldest nodes.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -26,8 +31,9 @@
 
 import {
     makeView, zoomAt, panBy, panStep, geoToPx, pxToGeo, tilePlan, scaleBar, scales, wrapNear,
-    fieldTimeIndex, fieldSample, fieldRange, heatPixels, heatGeoRect, ZOOM_STEP,
+    fieldTimeIndex, fieldSample, fieldRange, fieldExtremes, heatImage, ZOOM_STEP,
 } from './map-view.js';
+import { contourLines, isothermLevels, labelAnchor } from './contours.js';
 import { GIBS_LAYERS, buildTileUrl } from '../earth-detail-inset.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 
@@ -40,6 +46,7 @@ const OVERLAYS = [
 const TILE_CACHE_MAX = 240;
 const OCEAN = '#0a1a2e';
 const HEAT_ALPHA_DEFAULT = 0.62;
+const HEAT_STEP_PX = 2;          // one data sample per 2×2 CSS px block
 
 const LUT = buildTempLUTPixels();
 
@@ -51,10 +58,9 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true }, heatAlpha: HEAT_ALPHA_DEFAULT,
-        tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null, drawn: { heat: false, tiles: 0, t: null },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true }, heatAlpha: HEAT_ALPHA_DEFAULT,
+        tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null, drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false },
     };
-    const heatCanvas = document.createElement('canvas');
 
     // ── Tiles ──────────────────────────────────────────────────────────────
     function tile(url) {
@@ -101,26 +107,41 @@ export function mountMap(root, deps) {
         return fieldTimeIndex(f.times, want) ?? (M.timeMs == null ? null : fieldTimeIndex(f.times, Date.now()));
     }
 
+    // The heat image is evaluated per screen block in DATA space (map-view
+    // heatImage — EarthView's sample → LUT → freezing-seam order) and cached
+    // for the view + time it was made for; hover moves do not recompute it.
+    let heatCache = { key: '', canvas: null };
+    function heatCanvasFor(t) {
+        const f = M.field, v = M.view;
+        const key = `${f.run}|${t}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}`;
+        if (heatCache.key !== key) {
+            const img = heatImage(f, t, v, M.w, M.h, LUT, { step: HEAT_STEP_PX });
+            const c = heatCache.canvas || document.createElement('canvas');
+            c.width = img.cw; c.height = img.ch;
+            c.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+            heatCache = { key, canvas: c };
+        }
+        return heatCache.canvas;
+    }
+
     function drawHeat() {
-        M.drawn.heat = false;
+        Object.assign(M.drawn, { heat: false, isotherms: 0, isoLevels: [], freezing: false, extremes: false });
         if (!M.layers.temperature || !M.field?.values) return;
         const t = currentTimeIndex();
         if (t == null) return;
         const f = M.field;
-        heatCanvas.width = f.nCols; heatCanvas.height = f.nRows;
-        const hctx = heatCanvas.getContext('2d');
-        hctx.putImageData(new ImageData(heatPixels(f, t, LUT), f.nCols, f.nRows), 0, 0);
-        const r = heatGeoRect(f);
-        // One shift for the whole rectangle into the view's turn, then linear.
-        const shift = wrapNear((r.west + r.east) / 2, M.view.lon) - (r.west + r.east) / 2;
-        const a = lin(r.north, r.west + shift), b = lin(r.south, r.east + shift);
         ctx.save();
         ctx.globalAlpha = M.heatAlpha;
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(heatCanvas, a.x, a.y, b.x - a.x, b.y - a.y);
+        ctx.drawImage(heatCanvasFor(t), 0, 0, M.w, M.h);
         ctx.restore();
-        // The data window: where the field ends is drawn, not implied.
+        // The data window: where the field ends is drawn, not implied. The
+        // heat is evaluated between nodes only, so the box IS the node extent.
+        const r = { west: f.lonW, east: f.lonW + (f.nCols - 1) * f.dlon,
+                    north: f.latN, south: f.latN - (f.nRows - 1) * f.dlat };
+        const shift = wrapNear((r.west + r.east) / 2, M.view.lon) - (r.west + r.east) / 2;
+        const a = lin(r.north, r.west + shift), b = lin(r.south, r.east + shift);
         ctx.save();
         ctx.setLineDash([5, 4]);
         ctx.strokeStyle = 'rgba(232,241,248,.55)';
@@ -129,6 +150,82 @@ export function mountMap(root, deps) {
         ctx.restore();
         M.drawn.heat = true;
         M.drawn.t = t;
+        if (M.layers.isotherms) drawIsotherms(t, shift);
+        if (M.layers.extremes) drawExtremes(t, shift);
+    }
+
+    // Isotherms depend on the field, the time and the reader's unit — never on
+    // the view — so they are contoured once per (run, t, unit) and re-projected.
+    let isoCache = { key: '', levels: [] };
+    function isothermsFor(t) {
+        const u = deps.tempUnits();
+        const key = `${M.field.run}|${t}|${u.sym}`;
+        if (isoCache.key !== key) {
+            const range = fieldRange(M.field, t);
+            const levels = range ? isothermLevels(range.min, range.max, u) : [];
+            isoCache = { key, levels: levels.map((l) => ({ ...l, chains: contourLines(M.field, t, l.c) })) };
+        }
+        return isoCache.levels;
+    }
+
+    function halo(text, x, y, fill) {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(4,10,20,.85)';
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = fill;
+        ctx.fillText(text, x, y);
+    }
+
+    function drawIsotherms(t, shift) {
+        const levels = isothermsFor(t);
+        ctx.save();
+        ctx.lineJoin = 'round';
+        for (const l of levels) {
+            if (!l.chains.length) continue;
+            const w = l.freezing ? 2.4 : l.major ? 1.3 : 0.8;
+            for (const pass of l.freezing ? ['halo', 'line'] : ['line']) {
+                ctx.lineWidth = pass === 'halo' ? w + 2.5 : w;
+                ctx.strokeStyle = pass === 'halo' ? 'rgba(4,10,20,.55)'
+                    : l.freezing ? 'rgba(225,248,255,.95)' : `rgba(255,255,255,${l.major ? 0.62 : 0.38})`;
+                ctx.beginPath();
+                for (const ch of l.chains) {
+                    ch.pts.forEach((p, k) => {
+                        const q = lin(p.lat, p.lon + shift);
+                        if (k) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y);
+                    });
+                }
+                ctx.stroke();
+            }
+            M.drawn.isotherms++;
+            M.drawn.isoLevels.push(l.label);
+            if (l.freezing) M.drawn.freezing = true;
+            const at = labelAnchor(l.chains);
+            if (at && (l.major || l.freezing)) {
+                const q = lin(at.lat, at.lon + shift);
+                ctx.font = `${l.freezing ? 700 : 600} 11px system-ui, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                halo(l.freezing ? `${l.label} freezing` : l.label, q.x, q.y, l.freezing ? '#e1f8ff' : '#f4f8fb');
+            }
+        }
+        ctx.restore();
+    }
+
+    function drawExtremes(t, shift) {
+        const e = fieldExtremes(M.field, t);
+        if (!e || e.max.v === e.min.v) return;
+        ctx.save();
+        ctx.font = '700 11px system-ui, sans-serif';
+        ctx.textBaseline = 'middle';
+        for (const [n, glyph, fill] of [[e.max, '▲', '#ffb48c'], [e.min, '▼', '#9fd8ff']]) {
+            const q = lin(n.lat, n.lon + shift);
+            ctx.textAlign = 'center';
+            halo(glyph, q.x, q.y, fill);
+            ctx.textAlign = 'left';
+            halo(deps.formatTemp(n.v), q.x + 8, q.y, fill);
+        }
+        ctx.restore();
+        M.drawn.extremes = true;
     }
 
     function drawSite() {
@@ -293,6 +390,8 @@ export function mountMap(root, deps) {
         },
         setTime(ms) { M.timeMs = Number.isFinite(ms) ? ms : null; requestDraw(); },
         setLayer(name, on) { M.layers[name] = !!on; requestDraw(); },
+        /** The reader's unit changed: isotherm levels are chosen in it. */
+        unitsChanged() { isoCache = { key: '', levels: [] }; requestDraw(); },
         setHeatAlpha(a) { M.heatAlpha = Math.max(0, Math.min(1, a)); requestDraw(); },
         act,
         get state() {

@@ -209,11 +209,22 @@ function renderHeatRail(info) {
 function mountLocationMap() {
     S.map = mountMap($('#cx-map'), {
         formatTemp: (c) => fmtText('temp', c, S.units),
+        // Isotherm levels are chosen in the reader's unit (round °F for a °F reader).
+        tempUnits: () => ({
+            toDisplay: (c) => fmt('temp', c, S.units).value,
+            fromDisplay: (d) => fromDisplay('temp', d, S.units),
+            sym: fmt('temp', 0, S.units).sym,
+        }),
         onFrame: renderHeatRail,
     });
     paintHeatKey();
     renderHeatTicks();
-    $('#cx-layer-temp').addEventListener('change', (ev) => S.map.setLayer('temperature', ev.target.checked));
+    $('#cx-layer-temp').addEventListener('change', (ev) => {
+        S.map.setLayer('temperature', ev.target.checked);
+        for (const id of ['#cx-layer-iso', '#cx-layer-ext']) $(id).disabled = !ev.target.checked;
+    });
+    $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
+    $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
 }
 
@@ -426,7 +437,7 @@ function wireControls() {
         saveWorkspace({ ...S.ws, units: { preset: e.target.value } });
         renderPanels();
         renderHeatTicks();
-        S.map?.setLayer('temperature', $('#cx-layer-temp').checked);   // redraw: tip + rail re-format
+        S.map?.unitsChanged();            // isotherm levels + tip + rail re-format in the new unit
     });
     $('#cx-from').addEventListener('change', (e) => {
         saveWorkspace({ ...S.ws, historyFrom: Number(e.target.value) });
