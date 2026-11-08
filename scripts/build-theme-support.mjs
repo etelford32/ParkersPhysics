@@ -46,6 +46,8 @@ export const LIGHT_PAGES = Object.freeze([
     'account.html', 'settings.html', 'feedback.html', 'status.html',
     // Marketing
     'pricing.html', 'for-operators.html', 'for-educators.html', 'contact-enterprise.html',
+    // Real-Time Mars: the panels / docks / HUDs go light, the planet and sky stay dark
+    'mars.html',
     // EarthView: its chrome has carried a full light theme since before this
     // existed (js/design-tokens.css + earth.html's rule overrides) — it takes
     // the boot script only, never js/theme-light.css (see OWN_LIGHT_THEME).
