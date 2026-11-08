@@ -77,6 +77,39 @@ test.describe('recent development', () => {
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
 
+    test('every entry is in the HTML itself, with JavaScript off', async ({ browser }) => {
+        // Link previews and most crawlers run no JS — this is why the page is pre-rendered.
+        const ctx = await browser.newContext({ javaScriptEnabled: false });
+        const page = await ctx.newPage();
+        await page.goto('/recent-development.html', { waitUntil: 'load' });
+        await expect(page.locator('.rd-entry')).toHaveCount(DEV_LOG.length);
+        await expect(page.locator('.rd-spot')).toHaveCount(3);
+        await expect(page.locator('#rd-stats')).toContainText(`${DEV_LOG.length} updates logged`);
+        await expect(page.locator('#rd-toolbar')).toBeHidden();   // filters need JS
+        await expect(page.locator(`#${DEV_LOG[0].id} .rd-open`).first()).toHaveAttribute('href', DEV_LOG[0].links[0].href);
+        await ctx.close();
+    });
+
+    test('the RSS feed is served, parses, and lists the newest entry first', async ({ page, request }) => {
+        const res = await request.get('/recent-development.xml');
+        expect(res.ok()).toBe(true);
+        const xml = await res.text();
+        await page.goto('/recent-development.html', { waitUntil: 'load' });
+        await expect(page.locator('#rd-toolbar')).toBeVisible();
+        await expect(page.locator('link[rel="alternate"][type="application/rss+xml"]')).toHaveAttribute('href', '/recent-development.xml');
+        const parsed = await page.evaluate(text => {
+            const doc = new DOMParser().parseFromString(text, 'application/xml');
+            if (doc.querySelector('parsererror')) return { error: doc.querySelector('parsererror').textContent };
+            const items = [...doc.querySelectorAll('item')];
+            return { count: items.length, first: items[0].querySelector('title').textContent,
+                     guid: items[0].querySelector('guid').textContent };
+        }, xml);
+        expect(parsed.error).toBeUndefined();
+        expect(parsed.count).toBe(Math.min(50, DEV_LOG.length));
+        expect(parsed.first).toBe(DEV_LOG[0].title);
+        expect(parsed.guid).toBe(`https://parkersphysics.com/recent-development.html#${DEV_LOG[0].id}`);
+    });
+
     test('reachable from the Research menu, and feedback.html shows the newest entries', async ({ page }) => {
         await page.goto('/research.html', { waitUntil: 'load' });
         await expect(page.locator('nav a[href="recent-development.html"]').first()).toBeAttached();

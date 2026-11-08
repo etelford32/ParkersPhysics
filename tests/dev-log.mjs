@@ -16,6 +16,9 @@
  *   - the page is registered as a non-simulation page and is linked from
  *     the nav (an orphaned log is how the last one went stale)
  *   - the helpers: filter, grouping, freshness, date formatting
+ *   - the PRE-RENDERED page and the RSS feed are in sync with the log
+ *     (scripts/build-recent-development.mjs), the feed carries one item per
+ *     entry with a stable permalink guid, and nothing in it is unescaped
  */
 
 import assert from 'node:assert/strict';
@@ -29,6 +32,7 @@ import {
 } from '../js/dev-log.js';
 import { GLYPH_IDS } from '../js/glyphs.js';
 import { NON_SIMULATION_PAGES } from '../js/simulations-catalog.js';
+import { buildOutputs, feedXml, rfc822, FEED_LIMIT } from '../scripts/build-recent-development.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -158,6 +162,39 @@ test('helpers: freshness, latest, formatting', () => {
     assert.ok(Number.isNaN(dateMs('2026-02-30')), 'impossible dates are rejected');
     assert.equal(sprintRange({ start: '2026-10-26', end: '2026-11-02' }), 'Oct 26 – Nov 2, 2026');
     assert.equal(sprintRange({ start: '2026-11-03', end: null }), 'Nov 3, 2026 – in progress');
+});
+
+test('pre-rendered page and RSS feed are in sync with the log', () => {
+    const out = buildOutputs();
+    assert.equal(readFileSync(join(ROOT, 'recent-development.html'), 'utf8'), out.page,
+        'recent-development.html is stale — run: node scripts/build-recent-development.mjs');
+    assert.ok(existsSync(join(ROOT, 'recent-development.xml')), 'recent-development.xml is missing — run the builder');
+    assert.equal(readFileSync(join(ROOT, 'recent-development.xml'), 'utf8'), out.feed,
+        'recent-development.xml is stale — run: node scripts/build-recent-development.mjs');
+    // Every entry is baked into the page, and the toolbar ships hidden (it needs JS).
+    for (const e of DEV_LOG) assert.ok(out.page.includes(`id="${e.id}"`), `entry "${e.id}" is not baked into the page`);
+    assert.match(out.page, /<div class="rd-toolbar" id="rd-toolbar" role="search" hidden>/);
+    assert.match(out.page, /<link rel="alternate" type="application\/rss\+xml"[^>]*href="\/recent-development\.xml">/);
+});
+
+test('RSS feed: one item per entry, permalink guids, RFC 822 dates, escaped text', () => {
+    const xml = feedXml();
+    const items = xml.split('<item>').slice(1);
+    assert.equal(items.length, Math.min(FEED_LIMIT, DEV_LOG.length));
+    const guids = items.map(i => i.match(/<guid isPermaLink="true">([^<]+)<\/guid>/)[1]);
+    assert.equal(new Set(guids).size, guids.length, 'duplicate guid');
+    assert.equal(guids[0], `https://parkersphysics.com/recent-development.html#${latest(1)[0].id}`);
+    assert.equal(rfc822('2026-11-04'), 'Wed, 04 Nov 2026 00:00:00 GMT');
+    // Outside the comment and markup, no raw '&' (must be an entity) and no raw '<' in text.
+    const body = xml.replace(/<!--[\s\S]*?-->/, '');
+    assert.ok(!/&(?!(amp|lt|gt|quot|#39);)/.test(body), 'unescaped & in the feed');
+    for (const i of items) {
+        const desc = i.match(/<description>([\s\S]*?)<\/description>/)[1];
+        assert.ok(!desc.includes('<'), 'raw < inside an item description');
+    }
+    // The deploy workflow copies root assets by explicit list — the feed must be on it.
+    assert.match(readFileSync(join(ROOT, '.github/workflows/deploy.yml'), 'utf8'), /\brecent-development\.xml\b/,
+        'recent-development.xml is not in deploy.yml\'s root-asset copy list — it would 404 in production');
 });
 
 console.log(`${passed} passed`);

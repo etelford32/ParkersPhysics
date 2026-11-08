@@ -64,7 +64,9 @@ const HUB_PAGES = new Set(['space-weather-hub.html', 'earth-orbit.html', 'local-
 
 console.log(`⚠  ${rows.length} merged PR(s) since ${since} are not in js/dev-log.js.\n`
     + `   Rewrite each stub for a visitor, paste at the top of DEV_LOG (newest first),\n`
-    + `   or add the PR to UNLOGGED_PRS with a reason. Then: node tests/dev-log.mjs\n`);
+    + `   or add the PR to UNLOGGED_PRS with a reason. Then:\n`
+    + `     node scripts/build-recent-development.mjs   (re-bake the page + RSS feed)\n`
+    + `     node tests/dev-log.mjs\n`);
 
 for (const r of rows) {
     const pages = git('show', '--name-only', '--format=', r.hash).split('\n')

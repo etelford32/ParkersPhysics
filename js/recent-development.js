@@ -5,6 +5,14 @@
  * This module only lays it out: a "just shipped" spotlight, a filter bar
  * (search · kind · section), and the timeline grouped by sprint.
  *
+ * THE PAGE IS PRE-RENDERED. scripts/build-recent-development.mjs calls the
+ * same statsHtml / spotlightHtml / timelineHtml below and bakes their output
+ * into recent-development.html (so crawlers, link previews and no-JS readers
+ * see every entry) and writes recent-development.xml (the RSS feed). The
+ * baked "NEW" badges are relative to the newest entry, not the build day, so
+ * the output is deterministic and `--check` cannot go stale overnight; on
+ * load this module re-renders the same markup against the real clock.
+ *
  * Filter state lives in the URL (?kind=&section=&q=) so a filtered view is
  * shareable, and every entry has an anchor (#<id>) that scrolls to and
  * flashes it. The markup builders are exported so feedback.html can render
@@ -76,7 +84,7 @@ export function compactEntryHtml(entry) {
 </div>`;
 }
 
-function spotlightHtml(entry, nowMs) {
+function spotlightHtml1(entry, nowMs) {
     const first = entry.links[0];
     const sprint = sprintFor(entry.date);
     return `<article class="rd-spot">
@@ -102,6 +110,38 @@ function sprintHeadHtml(sprint, entries) {
   <p class="rd-sprint-goal">${esc(sprint.goal)}</p>
   <div class="rd-sprint-counts">${chips}</div>
 </header>`;
+}
+
+/** The "now" the baked page is rendered at: the newest entry's date. */
+export function bakeNowMs(entries = DEV_LOG) {
+    const newest = latest(1, entries)[0];
+    return newest ? Date.parse(newest.date + 'T00:00:00Z') : 0;
+}
+
+/** Hero stats line. */
+export function statsHtml() {
+    const newest = latest(1)[0];
+    const openSprint = SPRINTS.find(s => s.end == null);
+    return [
+        `<span><b>${DEV_LOG.length}</b> updates logged</span>`,
+        `<span><b>${SPRINTS.length}</b> sprints</span>`,
+        newest ? `<span>Last update <b>${esc(formatDate(newest.date))}</b></span>` : '',
+        openSprint ? `<span>Now: <a href="#sprint-${esc(openSprint.id)}">${esc(openSprint.label)}</a></span>` : '',
+        `<span><a href="recent-development.xml" class="rd-rss">RSS feed</a></span>`,
+    ].filter(Boolean).join('<span class="rd-sep" aria-hidden="true">·</span>');
+}
+
+/** The three spotlight cards — newest simulations / layers, else anything. */
+export function spotlightHtml(nowMs) {
+    const showcase = DEV_LOG.filter(e => e.kind === 'simulation' || e.kind === 'layer');
+    return latest(3, showcase.length >= 3 ? showcase : DEV_LOG).map(e => spotlightHtml1(e, nowMs)).join('');
+}
+
+/** The sprint-grouped timeline for a filter. */
+export function timelineHtml(filter = {}, nowMs) {
+    return groupBySprint(DEV_LOG, filter).map(({ sprint, entries }) =>
+        `<section class="rd-sprint" aria-labelledby="sprint-${esc(sprint.id)}">${sprintHeadHtml(sprint, entries)}`
+        + `<div class="rd-entries">${entries.map(e => entryHtml(e, { nowMs })).join('')}</div></section>`).join('');
 }
 
 // ── Page wiring ─────────────────────────────────────────────────────────────
@@ -134,20 +174,9 @@ export function mountRecentDevelopment(root = document, { nowMs = Date.now() } =
     const $ = id => root.getElementById(id);
     const state = readState();
 
-    // Hero numbers
-    const newest = latest(1)[0];
-    const openSprint = SPRINTS.find(s => s.end == null);
-    $('rd-stats').innerHTML = [
-        `<span><b>${DEV_LOG.length}</b> updates logged</span>`,
-        `<span><b>${SPRINTS.length}</b> sprints</span>`,
-        newest ? `<span>Last update <b>${esc(formatDate(newest.date))}</b></span>` : '',
-        openSprint ? `<span>Now: <a href="#sprint-${esc(openSprint.id)}">${esc(openSprint.label)}</a></span>` : '',
-    ].filter(Boolean).join('<span class="rd-sep" aria-hidden="true">·</span>');
-
-    // Spotlight — newest simulations / layers first, then anything.
-    const showcase = DEV_LOG.filter(e => e.kind === 'simulation' || e.kind === 'layer');
-    $('rd-spotlight').innerHTML = latest(3, showcase.length >= 3 ? showcase : DEV_LOG)
-        .map(e => spotlightHtml(e, nowMs)).join('');
+    $('rd-stats').innerHTML = statsHtml();
+    $('rd-spotlight').innerHTML = spotlightHtml(nowMs);
+    $('rd-toolbar').hidden = false;      // baked hidden: it does nothing without JS
 
     const search = $('rd-search');
     search.value = state.q;
@@ -178,9 +207,7 @@ export function mountRecentDevelopment(root = document, { nowMs = Date.now() } =
             ? `Showing ${shown} of ${DEV_LOG.length} updates`
             : `All ${DEV_LOG.length} updates, newest first`;
         $('rd-empty').hidden = shown > 0;
-        $('rd-timeline').innerHTML = groups.map(({ sprint, entries }) =>
-            `<section class="rd-sprint" aria-labelledby="sprint-${esc(sprint.id)}">${sprintHeadHtml(sprint, entries)}`
-            + `<div class="rd-entries">${entries.map(e => entryHtml(e, { nowMs })).join('')}</div></section>`).join('');
+        $('rd-timeline').innerHTML = timelineHtml(state, nowMs);
         writeState(state);
     }
 

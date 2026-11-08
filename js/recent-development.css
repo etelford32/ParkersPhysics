@@ -36,6 +36,10 @@
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 .rd-toolbar{max-width:1160px;margin:0 auto;padding:34px 24px 0;display:flex;flex-direction:column;gap:12px;align-items:center}
+/* Baked `hidden` (the filters do nothing without JS) and un-hidden by the module.
+   The author display:flex above beats the UA sheet's [hidden]{display:none}, so it
+   must be restated — the mars.html / launch-planner scar. */
+.rd-toolbar[hidden]{display:none}
 .rd-chip-row-label{font-family:var(--font-mono);font-size:.62rem;color:var(--fg-5);letter-spacing:.12em;text-transform:uppercase}
 .rd-chip-n{opacity:.7;font-family:var(--font-mono);font-weight:400;margin-left:2px}
 .rd-result{font-family:var(--font-mono);font-size:.7rem;color:var(--fg-4);letter-spacing:.05em;margin-top:2px}

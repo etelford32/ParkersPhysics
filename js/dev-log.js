@@ -4,8 +4,11 @@
  * PURE data + helpers. No DOM, no fetch, no ambient time (every function that
  * needs "now" takes it as an argument). Consumed by:
  *
- *   - recent-development.html     the public "Recent Development" page
- *                                 (js/recent-development.js renders it)
+ *   - recent-development.html     the public "Recent Development" page —
+ *                                 PRE-RENDERED by scripts/build-recent-
+ *                                 development.mjs, re-rendered + filtered on
+ *                                 load by js/recent-development.js
+ *   - recent-development.xml      the RSS feed, written by the same builder
  *   - feedback.html               its "Recent changes" panel shows the newest
  *                                 few entries from here
  *   - scripts/dev-log-draft.mjs   lists merged PRs that are NOT logged yet and
@@ -35,7 +38,10 @@
  *      reporting it.
  *   4. If the date falls after the open sprint's window, close that sprint
  *      (give it an `end`) and open the next one in SPRINTS.
- *   5. `node tests/dev-log.mjs`.
+ *   5. `node scripts/build-recent-development.mjs` — re-bakes the page (it is
+ *      pre-rendered so crawlers and link previews see every entry) and writes
+ *      the RSS feed, recent-development.xml. CI fails if you skip this.
+ *   6. `node tests/dev-log.mjs`.
  *
  * Field reference — DEV_LOG entries
  *   id         stable kebab-case anchor (recent-development.html#<id>)
@@ -124,6 +130,24 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'weather-feed-paced', date: '2026-11-08', pr: 1070,
+      title: 'EarthView\'s primary weather feed, back within its rate limit', kind: 'fix', section: 'earth-orbit',
+      icon: 'earth',
+      summary: 'Every hourly weather update had been rejected for sending requests too fast, so EarthView fell back '
+             + 'to a coarse 10° field. Requests are now paced across a few minutes and the full-resolution grid '
+             + 'returns.',
+      links: [{ href: 'earth.html' }, { href: 'status.html', label: 'System status' }] },
+    { id: 'launch-planner-black-stage', date: '2026-11-08', pr: 1069,
+      title: 'Launch Planner: the 3D stage no longer goes black', kind: 'fix', section: 'earth-orbit', icon: 'rocket',
+      summary: 'On some graphics cards a single invalid pixel spread through the glow effect and blacked out the '
+             + 'whole vehicle view. Those pixels are now filtered out, and the stage watches its own output and steps '
+             + 'down its effects if a frame ever comes out black.',
+      highlights: [
+          'Links straight to a Falcon 9 or Starship launch now show that vehicle, not the Shuttle.',
+          'The "Next launches" strip fills in even when the launch feed arrives before the 3D view.',
+          'Now tested in Firefox and Safari\'s engine as well as Chrome.',
+      ],
+      links: [{ href: 'launch-planner.html' }] },
     { id: 'earth-volcanoes', date: '2026-11-04', pr: 1068,
       title: 'Earth Volcanoes lab', kind: 'simulation', section: 'earth-orbit', icon: 'volcano',
       summary: 'All 2,661 Smithsonian GVP volcanoes on one page and as an EarthView layer, with live eruption status '

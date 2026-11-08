@@ -69,3 +69,10 @@ jobs:
       # sends visitors to a 404 is worse than no log.
       - name: build log gate
         run: node tests/dev-log.mjs
+
+      # recent-development.html is PRE-RENDERED from js/dev-log.js (crawlers and
+      # link previews do not run JS) and recent-development.xml is its RSS feed.
+      # A log entry merged without re-baking would ship a page and feed that
+      # silently lag the log.
+      - name: build log page + feed are in sync
+        run: node scripts/build-recent-development.mjs --check
