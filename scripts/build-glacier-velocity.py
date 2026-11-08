@@ -298,9 +298,10 @@ def scene_key(name):
     return m.group(1) if (m and name.startswith('S2')) else None
 
 def discover_scenes(cube, lon, lat, folders_hint):
-    """Scenes that SEE the glacier: from the cube's newest 3000 granule URLs, footprint-tested once per scene."""
+    """Scenes that SEE the glacier: from the cube's newest 12 000 granule URLs, footprint-tested once per scene."""
     n = cube.meta['granule_url/.zarray']['shape'][0]
-    urls = [str(u) for u in cube.read('granule_url', [slice(max(0, n - 3000), n)])]
+    # the newest 12 000 granule URLs: 3 000 missed scenes on a tile shared by many glaciers (Hubbard found 2 scenes, kept 3 pairs)
+    urls = [str(u) for u in cube.read('granule_url', [slice(max(0, n - 12000), n)])]
     by_scene = {}
     for u in urls:
         parts = u.split('/'); sensor, folder, name = parts[4], parts[6], parts[7]
