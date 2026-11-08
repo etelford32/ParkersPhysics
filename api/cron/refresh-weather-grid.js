@@ -11,12 +11,31 @@
  * Behavior:
  *
  *   - 2592-point grid (-87.5…87.5 lat × -177.5…177.5 lon, 5° spacing)
- *   - 7 chunks × ≤400 locations (js/open-meteo-request.js, the ONE copy of
- *     the chunk rule) — URL ≈5.4 KB each, response ~320 KB; fan out 3-wide.
- *     The 864-location chunks this replaced built ~10.5 KB URLs, and
- *     Open-Meteo's nginx answers HTTP 414 past ~8 KB: every run for at
- *     least 30 days to 2026-10-26 fell to the MET Norway fallback that way
- *     (EARTHVIEW_LOD_UX_PLAN.md §1.1).
+ *   - PACED: 10 chunks of ~260 locations, two at a time, one pair per 62 s
+ *     window — 5 windows, ~4 minutes (js/open-meteo-request.js
+ *     `pacedChunkPlan`, the ONE copy of the chunk AND pacing rules). Two
+ *     scars, in order:
+ *       (1) the 864-location chunks built ~10.5 KB URLs and Open-Meteo's
+ *           nginx answers HTTP 414 past ~8 KB: every run for at least 30
+ *           days to 2026-10-26 fell to the MET Norway fallback that way
+ *           (EARTHVIEW_LOD_UX_PLAN.md §1.1);
+ *       (2) the 7 × 400 fan-out that fixed it sent all 2592 locations in
+ *           ~3 s, and Open-Meteo counts EACH LOCATION as an API call against
+ *           a free tier of 600/minute. Every run from then to 2026-11-08 drew
+ *           `chunk 1200|1600 HTTP 429: Minutely API request limit exceeded`
+ *           and fell back again (Vercel runtime logs; every row of
+ *           weather_grid_cache and weather_grid_archive is met-norway).
+ *     The pacer keeps every trailing 62 s window at ≤ 520 weighted calls,
+ *     which is why maxDuration is 300 s, not 60. STOPGAP: CLIMALYTIX_PLAN.md
+ *     replaces this upstream with our own ingestion of public NWP data.
+ *   - THE DAILY CAP IS NOT SOLVED BY PACING. One 5° grid an hour is
+ *     24 × 2592 = 62 208 weighted calls a day against a free 10 000 per IP.
+ *     Production has only ever reported the MINUTELY limit, never the daily
+ *     one, which fits Vercel egressing from a pool of IPs — but that is not
+ *     a guarantee. When the daily (or hourly) envelope comes back it
+ *     short-circuits exactly like the minutely one: MET Norway, degraded,
+ *     reason recorded. The hourly cap (5000) IS guarded: an attempt whose
+ *     plan would take the run past it is skipped and says so.
  *   - Channel P is MEAN SEA-LEVEL pressure (`pressure_msl`) — an isobar map
  *     is MSLP by convention, and `surface_pressure` contoured terrain
  *     wherever the ground sits above 850 hPa (PRESSURE_OUTLOOK_ENGINE_PLAN.md
@@ -73,23 +92,39 @@
 import { fetchWithTimeout } from '../_lib/responses.js';
 import {
     GRID, MAX_LOCATIONS_PER_REQUEST, OPEN_METEO_FORECAST_URL, OPEN_METEO_CUSTOMER_URL,
-    chunkRanges, gridChunkCoords, chunkUrl as buildChunkUrl, mergeChunks,
+    FREE_TIER, DEFAULT_PACE, gridChunkCoords, chunkUrl as buildChunkUrl, mergeChunks,
+    pacedChunkPlan, requestWeight,
 } from '../../js/open-meteo-request.js';
 
 // Node runtime (not Edge). Edge has a hard 25 s per-invocation cap which the
 // MET Norway fallback can't fit inside on a 2592-point grid (sequential point
-// fetches at the 20 rps ToS cap). Node serverless on Pro can run up to 300 s;
-// 60 s is enough headroom for the metno fallback to complete (~30-40 s) and
-// the watchdog to fire a structured failure-write on the few-percent of runs
-// that still go long.
-export const config = { runtime: 'nodejs', maxDuration: 60 };
+// fetches at the 20 rps ToS cap). 300 s (the Pro ceiling) because the PACED
+// Open-Meteo attempt alone is ~4 minutes (header): 4 × 62 s of windows + one
+// request's latency, with METNO_RESERVE_MS left for the fallback.
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 // Watchdog deadline. A few seconds shorter than maxDuration so the failure-
 // write to pipeline_heartbeat finishes before Vercel kills the invocation.
 // Without this, a timed-out worker leaves the heartbeat frozen at the last
 // failure it recorded — which is exactly how this pipeline went 4 days stale
 // without anyone noticing.
-const WATCHDOG_MS = 57_000;
+const WATCHDOG_MS = 295_000;
+
+// Time kept back for the MET Norway fallback when deciding whether a paced
+// Open-Meteo attempt still fits. Measured in production 2026-11-08: the whole
+// fallback (648 points, 16-wide) finished ~10 s after the 429.
+const METNO_RESERVE_MS = 30_000;
+
+// The pacing clock. Real time in production; tests swap in a fake one
+// (setPacingClockForTests) so a ~4-minute paced run executes instantly while
+// still recording the offsets it WOULD have waited for.
+const REAL_CLOCK = Object.freeze({
+    now:   () => Date.now(),
+    sleep: (ms) => new Promise(r => setTimeout(r, Math.max(0, ms))),
+});
+let clock = REAL_CLOCK;
+/** Test hook: `{ now, sleep }`, or nothing to restore the real clock. */
+export function setPacingClockForTests(c) { clock = c ? { ...REAL_CLOCK, ...c } : REAL_CLOCK; }
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
@@ -128,17 +163,19 @@ const METNO_CONCURRENCY = 16;
 const GRID_W           = GRID.w;            // 72
 const GRID_H           = GRID.h;            // 36
 const GRID_N           = GRID.n;            // 2592
-// Chunk size is the kernel's MAX_LOCATIONS_PER_REQUEST (400): 7 requests of
-// ≈5.4 KB. The previous "3 chunks × 864" (chosen to cut daily call count)
-// built ~10.5 KB URLs; the comment here used to call that "well inside
-// Open-Meteo's accepted range" — it was not. Nginx caps the request line at
-// 8 KB and answered 414 to every chunk, which the heartbeat recorded as
-// "open-meteo chunk 1728 HTTP 414: … Request-URI Too Large". 7 calls × 24 h
-// = 168/day against the 10 000/day free tier. buildChunkUrl() refuses to
-// emit anything over MAX_URL_BYTES, so this cannot silently regress.
+// Chunking AND pacing are the kernel's (`pacedChunkPlan`): never more than
+// MAX_LOCATIONS_PER_REQUEST per URL (the 414 rule — buildChunkUrl() refuses
+// anything over MAX_URL_BYTES) and never more than PACE.budget weighted
+// calls per PACE.windowMs (the 429 rule). The old comment here counted
+// "7 calls × 24 h = 168/day against the 10 000/day free tier" — Open-Meteo
+// counts LOCATIONS, so it was 2592 per run, and the minute limit is what
+// broke. With a commercial key the budget is unbounded and the plan
+// collapses to one window (the old fan-out).
 const CHUNK_SIZE       = MAX_LOCATIONS_PER_REQUEST;
-// Three chunks in flight at once. Open-Meteo absorbs ~20 concurrent reqs
-// per source IP before throttling; 3-wide is conservative.
+const PACE             = OPEN_METEO_API_KEY
+    ? { budget: Infinity, windowMs: DEFAULT_PACE.windowMs }
+    : DEFAULT_PACE;
+// Requests in flight at once WITHIN a window (a paced window holds two).
 const CHUNK_CONCURRENCY = 3;
 const GRID_DEG          = GRID.deg;           // 5° latitude step (also longitude)
 // Centered-cell origin: half a step inside each pole so cells are symmetric
@@ -162,12 +199,17 @@ const FALLBACK_LON_ORIGIN  = -180 + FALLBACK_GRID_DEG / 2;         // -175
 // Open-Meteo `current=` variables. `cape` is hourly-only upstream — keeping
 // it here returned an 86-byte error body and masqueraded as a timeout.
 // `pressure_msl`, not `surface_pressure`: channel P is MSLP (header note).
-const CURRENT_VARS = [
+const CURRENT_VAR_LIST = [
     'temperature_2m', 'relative_humidity_2m', 'pressure_msl',
     'wind_speed_10m', 'wind_direction_10m',
     'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
     'precipitation',
-].join(',');
+];
+const CURRENT_VARS = CURRENT_VAR_LIST.join(',');
+// Weighted calls one location costs in this query: 9 variables (≤ 10),
+// `current` only (≤ 14 days) ⇒ exactly 1. Adding a 10th+ variable raises it,
+// and the pacer slows down by itself.
+const WEIGHT_PER_LOCATION = requestWeight(1, { variables: CURRENT_VAR_LIST.length });
 
 // Source attempts in order. First one that returns a complete 648-item set
 // wins; on any failure we move to the next. MET Norway is the cross-provider
@@ -262,9 +304,13 @@ async function fetchOneChunkRaw(src, modelQuery, start, end) {
             // A rate limit can arrive as a non-2xx (429) carrying the same
             // {"error":true,"reason":"… API request limit exceeded"} envelope,
             // and it short-circuits the same way (see the 200-envelope branch).
+            // `billed: false` — a rejected request (429, 414, 5xx) is assumed
+            // not to have been served, so it does not hold the next attempt
+            // back a window. A timeout, a network error or a 200 IS counted.
             return {
                 failureReason: `${src} chunk ${start} HTTP ${res.status}: ${body.slice(0, 300)}`,
                 dailyLimitHit: RATE_LIMIT_RE.test(body),
+                billed: false,
             };
         }
     } catch (e) {
@@ -306,41 +352,85 @@ async function fetchOneChunkRaw(src, modelQuery, start, end) {
 }
 
 /**
- * One attempt: fetch all chunks with bounded concurrency, slot results back
- * into row-major order. Bails on the first failure (returns null) so the
- * caller can move down the ATTEMPTS list to the next source.
+ * One attempt: run the kernel's PACED plan (js/open-meteo-request.js
+ * `pacedChunkPlan`) — each window's chunks start together at their offset,
+ * at most CHUNK_CONCURRENCY in flight — and slot results back into
+ * row-major order. Bails on the first failure so the caller can move down
+ * the ATTEMPTS list.
  *
- * Concurrency keeps wallclock close to single-chunk latency even as GRID_N
- * grows — e.g. 16 chunks at 4-wide ≈ 4 batches × ~2-3 s each.
+ * `run` is the per-invocation ledger shared by every Open-Meteo attempt:
+ *   run.t0       invocation start (clock.now())
+ *   run.charges  [{ atMs, weight }] — weighted calls already sent this run
+ * so a gfs retry cannot start inside a window the primary already spent, and
+ * the hourly cap counts both. An attempt that cannot FINISH before
+ * WATCHDOG_MS − METNO_RESERVE_MS, or would take the run past the hourly cap,
+ * is not started at all: it returns a `skipped (…)` reason instead.
  */
-async function fetchAllChunks(src, modelQuery) {
-    const ranges         = chunkRanges(GRID_N, CHUNK_SIZE);
-    const results        = new Array(ranges.length).fill(null);
-    let cursor           = 0;
-    let earlyFail        = null;
-    let dailyLimitHit    = false;
+async function fetchAllChunks(src, modelQuery, run) {
+    const plan = pacedChunkPlan({
+        n: GRID_N, budget: PACE.budget, windowMs: PACE.windowMs,
+        maxPerRequest: CHUNK_SIZE, weightPerLocation: WEIGHT_PER_LOCATION,
+    });
 
-    async function worker() {
-        while (earlyFail === null) {
-            const idx = cursor++;
-            if (idx >= ranges.length) return;
-            const { start, end } = ranges[idx];
-            const r = await fetchOneChunk(src, modelQuery, start, end);
-            if (r.failureReason) {
-                if (earlyFail === null) earlyFail = r.failureReason;
-                if (r.dailyLimitHit) dailyLimitHit = true;
-                return;
+    const charged = run.charges.reduce((a, c) => a + c.weight, 0);
+    if (Number.isFinite(PACE.budget) && charged + plan.weight > FREE_TIER.perHour) {
+        return {
+            merged: null,
+            failureReason: `${src} skipped (hourly budget: ${charged} + ${plan.weight} weighted calls > ${FREE_TIER.perHour})`,
+        };
+    }
+    // Earliest start: a whole window after the last charge, if this run has
+    // already spent part of the current one.
+    const now = clock.now();
+    const last = run.charges.length ? Math.max(...run.charges.map(c => c.atMs)) : -Infinity;
+    const begin = Number.isFinite(PACE.budget) ? Math.max(now, last + PACE.windowMs) : now;
+    const mustEndBy = run.t0 + WATCHDOG_MS - METNO_RESERVE_MS;
+    const projectedEnd = begin + plan.durationMs + UPSTREAM_TIMEOUT_MS;
+    if (projectedEnd > mustEndBy) {
+        return {
+            merged: null,
+            failureReason: `${src} skipped (time budget: paced plan needs ${Math.round((projectedEnd - now) / 1000)} s, `
+                + `${Math.max(0, Math.round((mustEndBy - now) / 1000))} s left before the fallback reserve)`,
+        };
+    }
+
+    const results = new Array(plan.chunks.length).fill(null);
+    // Windows in order; chunk indices kept so results land in grid order.
+    const windows = new Map();
+    plan.chunks.forEach((c, idx) => {
+        if (!windows.has(c.offsetMs)) windows.set(c.offsetMs, []);
+        windows.get(c.offsetMs).push(idx);
+    });
+
+    let earlyFail = null;
+    let dailyLimitHit = false;
+    for (const [offsetMs, idxs] of windows) {
+        const wait = begin + offsetMs - clock.now();
+        if (wait > 0) await clock.sleep(wait);
+        let cursor = 0;
+        async function worker() {
+            while (earlyFail === null) {
+                const k = cursor++;
+                if (k >= idxs.length) return;
+                const idx = idxs[k];
+                const { start, end, weight } = plan.chunks[idx];
+                const sentAt = clock.now();
+                const r = await fetchOneChunk(src, modelQuery, start, end);
+                if (r.billed !== false) run.charges.push({ atMs: sentAt, weight, src, offsetMs: sentAt - run.t0 });
+                if (r.failureReason) {
+                    if (earlyFail === null) earlyFail = r.failureReason;
+                    if (r.dailyLimitHit) dailyLimitHit = true;
+                    return;
+                }
+                results[idx] = r.items;
             }
-            results[idx] = r.items;
         }
+        await Promise.all(Array.from({ length: Math.min(CHUNK_CONCURRENCY, idxs.length) }, worker));
+        if (earlyFail) return { merged: null, failureReason: earlyFail, dailyLimitHit };
     }
-    await Promise.all(Array.from({ length: CHUNK_CONCURRENCY }, worker));
 
-    if (earlyFail) {
-        return { merged: null, failureReason: earlyFail, dailyLimitHit };
-    }
-    // Chunk order is grid order (js/open-meteo-request.js chunkRanges), so
-    // the concatenation IS the 2592-point row-major layout.
+    // Chunk order is grid order (pacedChunkPlan partitions [0, n) in order),
+    // so the concatenation IS the 2592-point row-major layout.
     let merged;
     try {
         merged = mergeChunks(results, GRID_N);
@@ -348,6 +438,19 @@ async function fetchAllChunks(src, modelQuery) {
         return { merged: null, failureReason: `${src} ${e.message}` };
     }
     return { merged, failureReason: null };
+}
+
+/** The response's measurement block: what this run actually sent, and when. */
+function pacingReport(run) {
+    const weights = run.charges.map(c => c.weight);
+    return {
+        budget_per_window: Number.isFinite(PACE.budget) ? PACE.budget : null,
+        window_ms:         PACE.windowMs,
+        requests:          run.charges.length,
+        weighted_calls:    weights.reduce((a, b) => a + b, 0),
+        offsets_s:         run.charges.map(c => Math.round(c.offsetMs / 100) / 10),
+        elapsed_ms:        clock.now() - run.t0,
+    };
 }
 
 // ── MET Norway fetcher (fallback, point-only) ─────────────────────────────
@@ -697,6 +800,7 @@ async function runRefresh(request) {
         };
     }
 
+    const run = { t0: clock.now(), charges: [] };
     let winSource    = null;
     let merged       = null;
     let lastErr      = null;
@@ -716,7 +820,7 @@ async function runRefresh(request) {
         }
         const attempt = fetcher === 'metno'
             ? await fetchAllMetno(src)
-            : await fetchAllChunks(src, modelQuery);
+            : await fetchAllChunks(src, modelQuery, run);
         if (attempt.merged) {
             winSource = src;
             merged    = attempt.merged;
@@ -738,7 +842,7 @@ async function runRefresh(request) {
             p_name:   'weather_grid',
             p_reason: reason,
         });
-        return { status: 502, body: { ok: false, reason } };
+        return { status: 502, body: { ok: false, reason, pacing: pacingReport(run) } };
     }
 
     // Tag the source with the grid dimensions so the frontend (and the
@@ -788,6 +892,7 @@ async function runRefresh(request) {
             grid:      { w: GRID_W, h: GRID_H, deg: GRID_DEG },
             degraded,
             ...(degraded ? { attempt_failures: attemptFailures } : {}),
+            pacing:    pacingReport(run),
         },
     };
 }
