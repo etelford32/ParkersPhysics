@@ -243,6 +243,16 @@ test.describe('Glacier Watch', () => {
         await expect(page.locator('#gw-cat-card')).toContainText('fastest ice 533 m/yr', { timeout: 20_000 });
         await expect(page.locator('#gw-cat-card')).toContainText('most of the glacier is below what ITS_LIVE resolves');
         await expect(page.locator('#gw-cat-card')).toContainText('above 72 m/yr, twice the typical single-pair error measured on 7 tracked glaciers in this region');
+        // its speed year by year: a PARTLY-resolved glacier draws only its fastest ice, 1984–2025 with the part-year withheld
+        await expect(page.locator('#gw-cat-ann svg')).toBeVisible({ timeout: 20_000 });
+        await expect(page.locator('#gw-cat-ann')).toHaveAttribute('data-years', '1984-2025');
+        await expect(page.locator('.gw-ann-keys')).toContainText('fastest ice (98th percentile)');
+        await expect(page.locator('.gw-ann-keys')).not.toContainText('typical');
+        await expect(page.locator('#gw-cat-ann')).toContainText('2025 is withheld');
+        const svg = page.locator('#gw-cat-ann svg'); await svg.scrollIntoViewIfNeeded();
+        const bb = await svg.boundingBox();
+        await page.mouse.move(bb.x + (34 + (2002 - 1984) / (2025 - 1984) * 254) / 296 * bb.width, bb.y + bb.height / 2);
+        await expect(page.locator('.gw-ann-read')).toContainText('2002 · fastest ice 805 m/yr');     // the year Hubbard dammed Russell Fjord
         await page.click('[data-mode="speed"]');
         await page.waitForFunction(() => !!window.__glacierCatalog.S.speed?.colors, null, { timeout: 20_000 });
         await expect(page.locator('#gw-cat-legend')).toContainText('≥ 1 km/yr');
@@ -264,6 +274,35 @@ test.describe('Glacier Watch', () => {
         const hyp = await page.$$eval('.gw-hyp-row i', els => els.length);
         expect(hyp).toBeGreaterThan(1);
         await shot(page, 'catalog-record.png', { clip: await page.locator('#gw-catalog').boundingBox() });
+        expect(errors).toEqual([]);
+    });
+
+    test('a fully resolved glacier draws both lines; only its own region file is fetched; below detection draws none', async ({ page }) => {
+        const ann = [];
+        page.on('request', q => { if (/rgi7-annual/.test(q.url())) ann.push(q.url().split('/').pop()); });
+        const { errors } = await boot(page, { url: '/glacier-watch.html?g=perito-moreno&rgi=RGI2000-v7.0-G-17-14719' });
+        await page.waitForFunction(() => document.getElementById('gw-catalog')?.dataset.state === 'ready', null, { timeout: 60_000 });
+        await expect(page.locator('#gw-cat-ann svg')).toBeVisible({ timeout: 20_000 });
+        await expect(page.locator('.gw-ann-keys')).toContainText('typical (median) ± ITS_LIVE error');
+        const lines = await page.$$eval('#gw-cat-ann svg path[fill="none"]', ps => ps.map(p => p.getAttribute('stroke')));
+        expect(lines).toContain('#d95926'); expect(lines).toContain('#3987e5');
+        await expect(page.locator('#gw-cat-ann')).toContainText('with less than 50 % of the glacier imaged');
+        expect(ann.sort()).toEqual(['rgi7-annual-17.bin.gz', 'rgi7-annual-meta.json']);
+        await shot(page, 'catalog-annual.png', { clip: await page.locator('#gw-cat-card').boundingBox() });
+        // a below-detection glacier gets no chart at all
+        await page.evaluate(() => window.__glacierCatalog.openGlacier(window.__glacierCatalog.meta.watch_links.storglaciaren.index));
+        await expect(page.locator('#gw-cat-card h3')).toContainText('Storglaciaeren', { timeout: 15_000 })   // the inventory's own spelling;
+        await expect(page.locator('#gw-cat-card')).toContainText('below what ITS_LIVE resolves', { timeout: 15_000 });
+        await expect(page.locator('#gw-cat-ann')).toHaveCount(0);
+        expect(errors).toEqual([]);
+    });
+
+    test('NEGATIVE CONTROL: a missing history file says so on the card', async ({ page }) => {
+        await page.route('**/data/glaciers/catalog/rgi7-annual-17.bin.gz', r => r.fulfill({ status: 404, body: 'gone' }));
+        const { errors } = await boot(page, { url: '/glacier-watch.html?g=perito-moreno&rgi=RGI2000-v7.0-G-17-14719' });
+        await page.waitForFunction(() => document.getElementById('gw-catalog')?.dataset.state === 'ready', null, { timeout: 60_000 });
+        await expect(page.locator('#gw-cat-ann')).toContainText('the history is unavailable (annual 17: HTTP 404)', { timeout: 20_000 });
+        await expect(page.locator('#gw-cat-ann svg')).toHaveCount(0);
         expect(errors).toEqual([]);
     });
 

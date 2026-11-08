@@ -28,7 +28,10 @@ glacier), for every year of its tile:
               stored but the page draws it as a gap, never as a value: a half-imaged glacier's
               median is the median of whichever half was imaged (the early-Landsat years especially)
 
-The last year is PARTIAL (the release was built in September 2025) and the meta says so. Nothing is
+The last year is PARTIAL (the release was built in September 2025) and the meta says so. Everything is
+stored as measured; the PAGE decides what to draw (js/glacier-catalog.js `annualSeries`): a coverage gap, a
+year whose speed is not above twice its own error (a thinning tile record — NE Greenland 2023 — reads as a
+false speed-up), and the part-year (measured to read high across the catalogue) are not drawn. Nothing is
 interpolated, smoothed or extrapolated.
 
 Usage: python scripts/build-glacier-catalog-annual.py --parquet <mirror> [--workers 8] [--limit-tiles N] [--check]

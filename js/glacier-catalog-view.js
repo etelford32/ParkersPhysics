@@ -18,7 +18,7 @@
  *     shard and prints everything RGI records about it, and says when it is one of the 48 tracked.
  *   • A RESOLVED glacier's card adds its YEAR-BY-YEAR speed (the kernel's `annualSeries` /
  *     `annualChartModel`, one region file fetched on demand): fastest ice always, typical speed only
- *     when that too is resolved, gaps where under half the glacier was imaged, crosshair + readout.
+ *     when that too is resolved, gaps where under half the glacier was imaged or the year is noise, the part-year withheld, crosshair + readout.
  */
 import * as C from './glacier-catalog.js';
 
@@ -334,7 +334,7 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
     function renderAnnual(el, rows, sp, ameta) {
         const title = '<div class="gw-hyp-title">Speed year by year <small>(NASA ITS_LIVE annual composites)</small></div>';
         if (!rows || !rows.some(r => r.drawn)) {
-            el.innerHTML = title + `<small>${rows ? `no year has ${ameta.cover_min} % of the glacier imaged` : 'no annual history for this glacier in the bake'}</small>`;
+            el.innerHTML = title + `<small>${rows ? `no year has both ${ameta.cover_min} % of the glacier imaged and a speed above twice that year's ITS_LIVE error` : 'no annual history for this glacier in the bake'}</small>`;
             return;
         }
         const both = sp.state === 'moving';              // a partly-resolved glacier's TYPICAL speed is noise — not drawn
@@ -344,7 +344,7 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
         const path = (run, k) => run.map((r, j) => `${j ? 'L' : 'M'}${f(x(r.year))},${f(y(r[k]))}`).join('');
         const band = (run) => run.length < 2 || !run.every(r => Number.isFinite(r.err)) ? ''
             : `<path d="${run.map((r, j) => `${j ? 'L' : 'M'}${f(x(r.year))},${f(y(r.med + r.err))}`).join('')}${run.slice().reverse().map(r => `L${f(x(r.year))},${f(y(Math.max(0, r.med - r.err)))}`).join('')}Z" fill="${col.typical}" opacity=".18"/>`;
-        const dots = (k, c) => rows.filter(r => r.drawn).map(r => `<circle cx="${f(x(r.year))}" cy="${f(y(r[k]))}" r="${r.partial ? 3.2 : 2.4}" fill="${r.partial ? '#0a101e' : c}" stroke="${c}" stroke-width="${r.partial ? 1.5 : 0}"/>`).join('');
+        const dots = (k, c) => rows.filter(r => (k === 'med' ? r.drawnTyp : r.drawn)).map(r => `<circle cx="${f(x(r.year))}" cy="${f(y(r[k]))}" r="2.4" fill="${c}"/>`).join('');
         const last = rows.filter(r => r.drawn).at(-1);
         const gapTicks = rows.filter(r => !r.drawn).map(r => `<line x1="${f(x(r.year))}" x2="${f(x(r.year))}" y1="${M.height - pad.b}" y2="${M.height - pad.b + 4}" stroke="#7d869c"/>`).join('');
         el.innerHTML = title + `
@@ -353,7 +353,7 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
             ${M.yearTicks.map(yr => `<text x="${f(x(yr))}" y="${M.height - 5}" text-anchor="middle">${yr}</text>`).join('')}
             ${gapTicks}
             <line x1="${pad.l}" x2="${M.width - pad.r}" y1="${f(y(sp.threshold))}" y2="${f(y(sp.threshold))}" stroke="#7d869c" stroke-dasharray="3 3" stroke-width="1"/>
-            ${both ? M.runs.map(band).join('') + M.runs.map(run => `<path d="${path(run, 'med')}" fill="none" stroke="${col.typical}" stroke-width="2" stroke-linejoin="round"/>`).join('') + dots('med', col.typical) : ''}
+            ${both ? M.runsTyp.map(band).join('') + M.runsTyp.map(run => `<path d="${path(run, 'med')}" fill="none" stroke="${col.typical}" stroke-width="2" stroke-linejoin="round"/>`).join('') + dots('med', col.typical) : ''}
             ${M.runs.map(run => `<path d="${path(run, 'p98')}" fill="none" stroke="${col.fastest}" stroke-width="2" stroke-linejoin="round"/>`).join('')}
             ${dots('p98', col.fastest)}
             <line class="gw-ann-x" x1="0" x2="0" y1="${pad.t}" y2="${M.height - pad.b}" stroke="#c3c2b7" stroke-width="1" visibility="hidden"/>
@@ -361,13 +361,14 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
           </svg>
           <div class="gw-ann-keys"><span><i style="background:${col.fastest}"></i>fastest ice (98th percentile)</span>${both ? `<span><i style="background:${col.typical}"></i>typical (median) ± ITS_LIVE error</span>` : ''}<span><i class="dash"></i>resolved above ${spd(sp.threshold)}</span></div>
           <div class="gw-ann-read" aria-live="polite"></div>
-          <small>${both ? '' : 'Most of this glacier moves slower than ITS_LIVE resolves, so only its fastest ice is drawn. '}Each year is that calendar year's ITS_LIVE fit with the seasonal cycle removed, over the same pixels as the speed above. ${M.gaps ? `${M.gaps} year${M.gaps > 1 ? 's' : ''} with less than ${ameta.cover_min} % of the glacier imaged ${M.gaps > 1 ? 'are' : 'is'} left as gaps (ticks on the axis), never drawn. ` : ''}${last.partial ? `${last.year} (hollow) is a partial year. ` : ''}</small>`;
+          <small>${both ? '' : 'Most of this glacier moves slower than ITS_LIVE resolves, so only its fastest ice is drawn. '}Each year is that calendar year's ITS_LIVE fit with the seasonal cycle removed, over the same pixels as the speed above. A year is drawn only where its speed is above twice that year's own ITS_LIVE error. ${M.gaps ? `Gaps (ticks on the axis): ${[M.gapsCoverage ? `${M.gapsCoverage} with less than ${ameta.cover_min} % of the glacier imaged` : '', M.gapsNoise ? `${M.gapsNoise} too noisy to read` : ''].filter(Boolean).join(', ')} — never drawn. ` : ''}${M.partial ? `${M.partial.year} is withheld: the release was built in September ${M.partial.year}, and across the catalogue its part-year reads high (median +7 %, one glacier in ten +73 % against ${M.partial.year - 1}) — a thin sample, not a speed-up. ` : ''}</small>`;
         const read = el.querySelector('.gw-ann-read'), cross = el.querySelector('.gw-ann-x'), svg = el.querySelector('svg');
         const say = (r) => {
-            if (!r.drawn) { read.innerHTML = `<b>${r.year}</b> · only ${r.cov} % of the glacier imaged — not drawn`; return; }
-            read.innerHTML = `<b>${r.year}${r.partial ? ' (partial)' : ''}</b> · fastest ice <b>${spd(r.p98)}</b>${both ? ` · typical ${spd(r.med)}${Number.isFinite(r.err) ? ` ± ${spd(r.err)}` : ''}` : ''} · ${r.cov} % imaged`;
+            if (r.why === 'partial') { read.innerHTML = `<b>${r.year}</b> · part-year (${spd(r.p98)} fastest ice) — withheld, it reads high across the catalogue`; return; }
+            if (!r.drawn) { read.innerHTML = r.why === 'coverage' ? `<b>${r.year}</b> · only ${r.cov} % of the glacier imaged — not drawn` : `<b>${r.year}</b> · too noisy: ITS_LIVE's error that year (${spd(r.err)}) is more than half the speed — not drawn`; return; }
+            read.innerHTML = `<b>${r.year}${r.partial ? ' (partial)' : ''}</b> · fastest ice <b>${spd(r.p98)}</b>${both ? (r.drawnTyp ? ` · typical ${spd(r.med)} ± ${spd(r.err)}` : ' · typical too noisy that year') : ''} · ${r.cov} % imaged`;
         };
-        const rest = () => { cross.setAttribute('visibility', 'hidden'); say(rows.filter(r => r.drawn && !r.partial).at(-1) || last); };
+        const rest = () => { cross.setAttribute('visibility', 'hidden'); say(last); };
         const at = (e) => {
             const b = svg.getBoundingClientRect(), sx = (e.clientX - b.left) * M.width / b.width;
             let best = rows[0]; for (const r of rows) if (Math.abs(x(r.year) - sx) < Math.abs(x(best.year) - sx)) best = r;

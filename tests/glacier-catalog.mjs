@@ -230,9 +230,88 @@ section('10. year-by-year speed (resolved glaciers only)');
     ok(dec.size === 2 && a.years.join() === '2015,2016,2017' && g.years.join() === '2020,2021' && Math.abs(g.p98[1] - 910) < 0.5 && Number.isNaN(a.med[2]) && g.cov[1] === 60,
         'decodeAnnual reads the baker\'s layout (index, first year, run length, quantised columns, coverage)');
     const rows = C.annualSeries(dec, { cover_min: 50, partial_year: 2021 }, 4242);
-    ok(rows[1].drawn && rows[1].partial && !C.annualSeries(dec, { cover_min: 50 }, 7)[2].drawn && C.annualSeries(dec, { cover_min: 50 }, 99) === null,
-        'annualSeries: partial year flagged, an empty year not drawn, a glacier without a series → null');
-    //@@DATA@@
+    const a7 = C.annualSeries(dec, { cover_min: 50 }, 7);
+    ok(!rows[1].drawn && rows[1].why === 'partial' && a7.length === 2 && a7.at(-1).year === 2016 && C.annualSeries(dec, { cover_min: 50 }, 99) === null,
+        'annualSeries: the part-year withheld, an empty TRAILING year trimmed, a glacier without a series → null');
+    const noisy = C.annualSeries(C.decodeAnnual(file), { cover_min: 50 }, 4242);
+    ok(noisy[0].drawn && noisy[0].p98 > 2 * noisy[0].err, 'a year above twice its own error is drawn');
+    // (c) the BAKED history (scripts/build-glacier-catalog-annual.py)
+    const ameta = JSON.parse(read('rgi7-annual-meta.json'));
+    const smeta = JSON.parse(read('rgi7-speed-meta.json'));
+    const spd = C.decodeSpeed(zlib.gunzipSync(read('rgi7-speed.bin.gz')));
+    const all = new Map();
+    let shaOk = true;
+    for (const [o1, sh] of Object.entries(ameta.shards)) {
+        const buf = read(sh.file);
+        if (crypto.createHash('sha256').update(buf).digest('hex') !== sh.sha256) shaOk = false;
+        const dec = C.decodeAnnual(zlib.gunzipSync(buf));
+        if (dec.size !== sh.series) shaOk = false;
+        for (const [k, v] of dec) all.set(k, v);
+    }
+    ok(shaOk && ameta.source.speed_table_sha256 === smeta.files['rgi7-speed.bin.gz'].sha256 && ameta.source.mirror_sha256 === meta.source.mirror.sha256,
+        `${Object.keys(ameta.shards).length} region files match their sha256 and were baked from THIS speed table`);
+    const o1At = (i) => meta.o2[pts.o2[i]].slice(0, 2);
+    let resolved = 0, missing = 0, extra = 0;
+    for (let i = 0; i < spd.n; i++) {
+        const st = C.speedOf(spd, smeta, i, o1At(i)).state, r = st === 'moving' || st === 'partly';
+        if (r) { resolved++; if (!all.has(i)) missing++; } else if (all.has(i)) extra++;
+    }
+    ok(resolved === all.size && missing === 0 && extra === 0 && ameta.summary.series === resolved,
+        `a series for exactly the kernel's ${resolved} resolved glaciers (missing ${missing}, below-detection with a series ${extra})`);
+    // year alignment: the catalogue's year-to-year CHANGE in fastest ice vs the tracked tier's flowline
+    // (same composites, independent sampling and code) — and the same comparison shifted a year must fail
+    const idx = E.decodeIndex(JSON.parse(fs.readFileSync(path.join(HERE, '../data/glaciers/glaciers.json'), 'utf8')));
+    const corr = (a, b) => { const n = a.length, ma = a.reduce((x, y) => x + y) / n, mb = b.reduce((x, y) => x + y) / n; let s = 0, sa = 0, sb = 0; for (let k = 0; k < n; k++) { s += (a[k] - ma) * (b[k] - mb); sa += (a[k] - ma) ** 2; sb += (b[k] - mb) ** 2; } return s / Math.sqrt(sa * sb); };
+    const pool = { 0: [[], []], 1: [[], []], [-1]: [[], []] };
+    for (const g of idx) {
+        const L = meta.watch_links[g.id]; if (L?.index == null || !all.has(L.index)) continue;
+        const det = E.decodeDetail(JSON.parse(fs.readFileSync(path.join(HERE, `../data/glaciers/${g.id}.json`), 'utf8'))).annual;
+        const by = new Map(C.annualSeries(all, ameta, L.index).filter(r => r.drawn && !r.partial).map(r => [r.year, r.p98]));
+        const tr = new Map(det.years.map((y, k) => { const v = Array.from(det.v[k]).filter(Number.isFinite); return [y, v.length >= det.v[k].length / 2 ? Math.max(...v) : NaN]; }));
+        for (const sh of [0, 1, -1]) for (const [y, v] of tr) {
+            const v2 = tr.get(y + 1), c = by.get(y + sh), c2 = by.get(y + 1 + sh);
+            if ([v, v2, c, c2].every(Number.isFinite)) { pool[sh][0].push(Math.log(v2 / v)); pool[sh][1].push(Math.log(c2 / c)); }
+        }
+    }
+    const r0 = corr(...pool[0]), rp = corr(...pool[1]), rm = corr(...pool[-1]);
+    ok(pool[0][0].length > 300 && r0 > 0.3 && Math.abs(rp) < 0.15 && Math.abs(rm) < 0.15,
+        `years aligned: year-to-year change correlates with the tracked flowlines at r = ${r0.toFixed(2)} (${pool[0][0].length} glacier-years); NEGATIVE CONTROL shifted ±1 yr: ${rp.toFixed(2)} / ${rm.toFixed(2)}`);
+    // consistency with the speed table: the mean of the drawn 2014–2024 years ≈ ITS_LIVE's own fitted mean v0
+    const ratios = { med: [], p98: [] }; let tAg = 0, tN = 0, sAg = 0;
+    let seed = 12345; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (const [i] of all) {
+        const rows = C.annualSeries(all, ameta, i); if (!rows) continue;
+        const sp = C.speedOf(spd, smeta, i, o1At(i));
+        const w = rows.filter(r => r.drawn && r.year >= 2014 && r.year <= 2024); if (w.length < 6) continue;
+        ratios.p98.push(w.reduce((a, r) => a + r.p98, 0) / w.length / sp.p98);
+        if (sp.state === 'moving') ratios.med.push(w.reduce((a, r) => a + r.med, 0) / w.length / sp.med);
+        if (Math.abs(sp.dvdt) >= Math.max(1, 0.05 * sp.med)) {
+            const ys = w.map(r => r.year), vs = w.map(r => r.p98), ym = ys.reduce((a, b) => a + b) / ys.length, vm = vs.reduce((a, b) => a + b) / vs.length;
+            const slope = (yy) => yy.reduce((a, y, k) => a + (y - ym) * (vs[k] - vm), 0);
+            const sh = ys.slice(); for (let k = sh.length - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [sh[k], sh[j]] = [sh[j], sh[k]]; }
+            tN++; if (Math.sign(slope(ys)) === Math.sign(sp.dvdt)) tAg++; if (Math.sign(slope(sh)) === Math.sign(sp.dvdt)) sAg++;
+        }
+    }
+    const qq = (a, p) => { a = a.slice().sort((x, y) => x - y); return a[Math.floor(p * (a.length - 1))]; };
+    const mm = qq(ratios.med, 0.5), mp = qq(ratios.p98, 0.5);
+    ok(ratios.p98.length > 3500 && mm > 0.95 && mm < 1.08 && mp > 0.95 && mp < 1.08,
+        `the 2014–2024 years average back to ITS_LIVE's own decade mean: median ratio ${mm.toFixed(3)} (typical, ${ratios.med.length}) / ${mp.toFixed(3)} (fastest, ${ratios.p98.length})`);
+    ok(tN > 100 && tAg / tN > 0.75 && tAg - sAg > 0.15 * tN,
+        `trend direction agrees with ITS_LIVE's fitted dv/dt on ${tAg}/${tN}; NEGATIVE CONTROL with the years shuffled: ${sAg}/${tN}`);
+    // the per-year NOISE rule: NE Greenland's thin 2023 (error ~1 km/yr) is a gap, not a speed-up; without the rule it would draw
+    const ne = C.annualSeries(all, ameta, 80611), ne23 = ne.find(r => r.year === 2023);
+    ok(ne23.why === 'noise' && ne23.cov >= ameta.cover_min && ne23.p98 > 2 * ne.find(r => r.year === 2022).p98,
+        `NE Greenland 2023 is not drawn (error ${Math.round(ne23.err)} m/yr) — NEGATIVE CONTROL: coverage alone would have drawn a ${Math.round(ne23.p98)} m/yr "speed-up"`);
+    const ant = C.annualSeries(all, ameta, 273552);
+    ok(ant.at(-1).year === 2025 && all.get(273552).years.at(-1) === 2026, "an empty trailing year in a tile's axis (2026) is trimmed, not drawn as a gap");
+    const hub = C.annualSeries(all, ameta, meta.watch_links.hubbard.index), stg = C.annualSeries(all, ameta, meta.watch_links.storglaciaren.index);
+    ok(hub && hub[0].year === 1984 && hub.at(-1).year === 2025 && hub.at(-1).why === 'partial' && !hub.at(-1).drawn && stg === null,
+        `Hubbard has 1984–2025 with the part-year 2025 withheld; Storglaciären, below detection, has no series`);
+    // the part-year bias that justifies withholding it, measured: 2025/2024 vs a full-year pair 2024/2023
+    const yrRatio = (ya, yb) => { const r = []; for (const [i, s] of all) { const k = s.years.indexOf(ya), j = s.years.indexOf(yb); if (k < 0 || j < 0 || s.cov[k] < ameta.cover_min || s.cov[j] < ameta.cover_min) continue; if (s.p98[k] > 2 * s.err[k] && s.p98[j] > 2 * s.err[j]) r.push(s.p98[k] / s.p98[j]); } return { q50: qq(r, 0.5), q90: qq(r, 0.9), n: r.length }; };
+    const pr = yrRatio(2025, 2024), fr = yrRatio(2024, 2023);
+    ok(pr.n > 3000 && pr.q90 > 1.5 && fr.q90 < 1.3 && Math.abs(fr.q50 - 1) < 0.05,
+        `the part-year reads high (2025/2024: median ×${pr.q50.toFixed(2)}, 1 in 10 ×${pr.q90.toFixed(2)}) where a full year does not (2024/2023: ×${fr.q50.toFixed(2)}, ×${fr.q90.toFixed(2)}) — so it is withheld`);
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

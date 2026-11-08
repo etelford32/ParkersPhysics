@@ -380,7 +380,7 @@ export function speedColor(s) {
 // speed table's moving / partly glaciers have a series — a below-detection glacier's yearly line is
 // noise, and `annualSeries` returns null for it on purpose. A year below `cover_min` is a GAP (a
 // half-imaged glacier's median is the median of whichever half was imaged), never a value; the meta's
-// `partial_year` is drawn as partial (the release was built in September of that year).
+// `partial_year` is withheld (see annualSeries — measured to read high).
 export const ANNUAL_COLORS = Object.freeze({ fastest: '#d95926', typical: '#3987e5' });   // validated pair on #0a101e (dark band, CVD ΔE 26.8)
 const ANN_MAGIC = 'RGI7ANN\u0001';
 /** The DECOMPRESSED annual file → Map(row index → { years, med, p98, err, cov }). */
@@ -410,24 +410,39 @@ export function decodeAnnual(u8) {
 }
 
 /**
- * Glacier i's rows for the chart: { year, med, p98, err, cov, drawn, partial }, or null when the glacier
- * has no series (not resolved, or outside the bake). `drawn` = the coverage reaches `cover_min`.
+ * Glacier i's rows for the chart: { year, med, p98, err, cov, drawn, drawnTyp, why, partial }, or null when
+ * the glacier has no series. A year is DRAWN only when (1) at least `cover_min` % of the glacier was imaged
+ * and (2) its fastest ice exceeds TWICE that year's own error (median v_error) — the speed tier's
+ * "resolved" rule applied with ITS_LIVE's per-year error. (2) is load-bearing: where a tile's record
+ * thins out, the error jumps 15–25× (NE Greenland 2023: ~40 → 645–1035 m/yr) and the p98 of pure noise
+ * reads as a sudden speed-up (86 → 210 m/yr, measured). `drawnTyp` applies the same rule to the median.
+ * (3) The PARTIAL final year is WITHHELD (`why: 'partial'`), as the tracked tier's `annualAt` does by
+ * default: against 2024 it reads high across the catalogue — median ×1.07, one glacier in ten ×1.73
+ * (p98, 3 869 glaciers; a full-year pair 2024/2023 reads ×0.99 and ×1.18) — while its own error is ~37×
+ * larger yet still passes (2); a thin early-season sample, not a speed-up (Hubbard 513 → 1 286 m/yr).
+ * Empty years at either end of a tile's axis (an Antarctic tile carries a 2026 slot with nothing in it)
+ * are trimmed; empty years inside the record stay, as gaps. `why` says why a year is not drawn.
  */
 export function annualSeries(dec, ameta, i) {
     const s = dec?.get(i);
     if (!s) return null;
-    return s.years.map((year, j) => ({
-        year, med: s.med[j], p98: s.p98[j], err: s.err[j], cov: s.cov[j],
-        drawn: s.cov[j] >= ameta.cover_min && Number.isFinite(s.p98[j]),
-        partial: year === ameta.partial_year,
-    }));
+    const rows = s.years.map((year, j) => {
+        const med = s.med[j], p98 = s.p98[j], err = s.err[j], cov = s.cov[j];
+        const partial = year === ameta.partial_year;
+        const why = cov < ameta.cover_min || !Number.isFinite(p98) ? 'coverage' : !(Number.isFinite(err) && p98 > 2 * err) ? 'noise' : partial ? 'partial' : null;
+        return { year, med, p98, err, cov, drawn: why === null, drawnTyp: why === null && med > 2 * err, why, partial };
+    });
+    let a = 0, b = rows.length;
+    while (a < b && rows[a].cov === 0) a++;
+    while (b > a && rows[b - 1].cov === 0) b--;
+    return a < b ? rows.slice(a, b) : null;
 }
 
 /** Pixel geometry of the chart (PURE, so the gate can check where a year lands): years → x, m/yr → y from 0. */
 export function annualChartModel(rows, { width = 296, height = 150, pad = { l: 34, r: 8, t: 10, b: 20 }, threshold = null } = {}) {
     const shown = rows.filter(r => r.drawn);
     const y0 = rows[0].year, y1 = rows.at(-1).year;
-    const vmax = Math.max(threshold ?? 0, ...shown.map(r => r.p98), ...shown.map(r => r.med + (Number.isFinite(r.err) ? r.err : 0)), 1e-6);
+    const vmax = Math.max(threshold ?? 0, ...shown.map(r => r.p98), ...shown.filter(r => r.drawnTyp).map(r => r.med + r.err), 1e-6);
     const step = niceStep(vmax / 4), top = Math.ceil(vmax / step) * step;
     const W = width - pad.l - pad.r, H = height - pad.t - pad.b;
     const x = (yr) => pad.l + (y1 === y0 ? W / 2 : (yr - y0) / (y1 - y0) * W);
@@ -439,7 +454,11 @@ export function annualChartModel(rows, { width = 296, height = 150, pad = { l: 3
     const runs = []; let cur = null;
     for (const r of rows) { if (r.drawn) { (cur ||= []).push(r); } else if (cur) { runs.push(cur); cur = null; } }
     if (cur) runs.push(cur);
-    return { x, y, top, ticks, yearTicks, runs, y0, y1, width, height, pad, gaps: rows.filter(r => !r.drawn).length };
+    const runsTyp = []; cur = null;
+    for (const r of rows) { if (r.drawnTyp) { (cur ||= []).push(r); } else if (cur) { runsTyp.push(cur); cur = null; } }
+    if (cur) runsTyp.push(cur);
+    return { x, y, top, ticks, yearTicks, runs, runsTyp, y0, y1, width, height, pad, gaps: rows.filter(r => !r.drawn && r.why !== 'partial').length,
+        gapsCoverage: rows.filter(r => r.why === 'coverage').length, gapsNoise: rows.filter(r => r.why === 'noise').length, partial: rows.find(r => r.why === 'partial') || null };
 }
 function niceStep(raw) {
     const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-9)))), f = raw / p;

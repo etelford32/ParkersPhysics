@@ -17,13 +17,22 @@ a speed row on every record card, a speed line in EarthView's tooltip.
 year by year — each calendar year of the same ITS_LIVE annual composites (`v` per year, seasonal cycle
 fitted out; 1982–2025 where Landsat 4/5 reach, ~2013/2015→2025 elsewhere) over the same outline pixels
 as the speed table: fastest ice (p98) always, the typical (median) ± ITS_LIVE's own error only when the
-median is itself resolved, a year with < 50 % of the glacier imaged left as a GAP, 2025 drawn as partial.
+median is itself resolved. A year is a GAP when < 50 % of the glacier was imaged OR its speed is not above twice that
+year's own ITS_LIVE error (where a tile's record thins out the error jumps 15–25× and the p98 of noise read as a
+speed-up: NE Greenland 2023, 86 → 210 m/yr); the part-year 2025 is WITHHELD, as the tracked tier's `annualAt` does.
 DECISION: a BAKE, not a server route and not Supabase — the composites are republished about once a year,
 a live route would have to blosc-decode ~2.2 MB per year (~90 MB for a 42-year tile) per click and hold
 the outlines the site does not ship, and Postgres is the wrong home for static bulk data
-(`SUPABASE_OFFLOAD_PLAN.md`). `scripts/build-glacier-catalog-annual.py` (525 tiles, @@BAKE@@) writes one
-small file per RGI region (@@SIZE@@ in all), fetched when a card opens. Below-detection glaciers get NO
-series on purpose. Measured (gated in `tests/glacier-catalog.mjs` §10): @@MEASURED@@
+(`SUPABASE_OFFLOAD_PLAN.md`). `scripts/build-glacier-catalog-annual.py` (525 tiles, 8.5 min) writes one
+small file per RGI region (692 KB in all), fetched when a card opens. Below-detection glaciers get NO
+series on purpose. Measured (gated in `tests/glacier-catalog.mjs` §10): a series for exactly the 4 434 resolved glaciers; the
+2014–2024 years average back to ITS_LIVE's own decade mean (median ratio 1.015 typical / 1.019 fastest); the
+year-to-year CHANGE matches the tracked flowlines at r = 0.40 over 428 glacier-years and falls to ≈ 0 shifted
+±1 year (the negative control — correlating LEVELS did not discriminate: a trend survives a shift); trend
+direction agrees with ITS_LIVE's dv/dt on 126 of 148 clear-trend glaciers; the part-year reads high across
+the catalogue (2025/2024 median ×1.07, one in ten ×1.73, vs 2024/2023 ×0.99 / ×1.18) — why it is withheld.
+113 957 of 143 495 glacier-years are drawn (26 267 coverage gaps, 3 271 noise gaps); 141 glaciers have no
+drawable year and the card says so.
 Next: geodetic mass change (Hugonnet et al. 2021) if a mirror is reachable.
 
 **The global catalogue — every glacier on Earth (2026-11-08).** RGI 7.0 (274 531 glaciers, 706 744 km²)
