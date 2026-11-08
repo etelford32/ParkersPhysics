@@ -12,7 +12,8 @@
  *   3. The pad's deliberately-transparent materials (gravel fade, lamp
  *      glows, floodlight beams) are STILL transparent after a launch — the
  *      old pad fade forced them opaque on restore.
- *   4. The post chain (bloom + ACES OutputPass) is active on WebGL2.
+ *   4. The post chain (bloom + the final ACES/sanitize pass) is active on
+ *      WebGL2. Its pixel-level health is tests/launch-planner-render-health.spec.js.
  *
  * NEGATIVE CONTROLS (run 2026-11-01 by putting each old line back): the
  * exact-'Plume' bbox skip fails test 1 (Falcon 9 close-up camera at
@@ -118,5 +119,10 @@ test.describe('launch-planner 3D canvas visuals', () => {
         });
         expect(after.smokeAlive).toBe(0);
         expect(after.transparent).toBe(transparentBefore);
+        // A dark sky mid-flight is not a fault: the render-health monitor
+        // (js/launch-vehicle-3d.js HEALTH) must not have stepped anything down.
+        const health = await page.evaluate(() => window.__lpVehicle3d.renderHealth);
+        expect(health.steps).toEqual([]);
+        expect(health.errors).toBe(0);
     });
 });

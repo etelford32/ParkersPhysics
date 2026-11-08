@@ -44,6 +44,9 @@
  *     string that round-trips, capped at six decimals. `toFixed(2)` on an
  *     exact half-degree grid was pure padding ("12.50"); the patch's
  *     `toFixed(3)` on 0.125-multiples was also padding ("37.125" already).
+ *   • The cron is PACED, not just chunked (`pacedChunkPlan`, bottom of this
+ *     file): Open-Meteo counts every LOCATION as an API call, so 2592 at
+ *     once broke the 600/minute free tier on every run (2026-11-08).
  *   • Chunks partition [0, n) in order and `mergeChunks` concatenates them in
  *     order, so the merged 2592-point array is bit-for-bit the old layout —
  *     the cache rows, the CHW packer and the shaders never see a change.
@@ -221,6 +224,137 @@ export function mergeChunks(chunks, n) {
     }
     if (merged.length !== n) throw new Error(`mergeChunks: merged length ${merged.length} != ${n}`);
     return merged;
+}
+
+// ── PACING (2026-11-08) ────────────────────────────────────────────────────
+//
+// WHY (measured on production 2026-11-08, Vercel runtime logs + the
+// pipeline_heartbeat row): once the 414 was gone, every hourly run of the
+// cron drew `open-meteo chunk 1200|1600 HTTP 429: "Minutely API request limit
+// exceeded"` a few seconds in, and every frame for 30 days was still the MET
+// Norway fallback. Open-Meteo WEIGHTS a multi-location request: each location
+// counts as one API call (more for >10 variables or >14 days). One run of
+// the 5° grid is therefore 2592 calls, and the old fan-out (7 chunks of 400,
+// 3 in flight) issued all of them in ~3 s against a free tier of 600/minute.
+// The logs fit "requests already in flight are admitted, then the minute is
+// spent": chunks 0/400/800 went through together and the next wave failed.
+//
+// Splitting into SMALLER requests does not help (the weight is the location
+// count, not the request count). What helps is TIME: `pacedChunkPlan` lays
+// the grid out in windows of at most `budget` weighted calls, one window per
+// `windowMs`, so no trailing window ever holds more than the budget. That
+// alone takes ⌈2592 / 520⌉ = 5 windows ≈ 4 minutes: the cron's maxDuration had
+// to grow with it.
+
+/**
+ * Open-Meteo's published free (non-commercial, keyless) limits, PER SOURCE
+ * IP. The daily cap is NOT enforced by the pacer: one 5° grid an hour is
+ * 62 208 weighted calls a day, six times this number, so the pacer cannot
+ * make that fit — see the cron header for why it has not bitten yet.
+ */
+export const FREE_TIER = Object.freeze({ perMinute: 600, perHour: 5000, perDay: 10000 });
+
+/**
+ * The pacer's default: 520 weighted calls per 62 s window. 520 is ~13 % under
+ * the 600/min limit and costs NOTHING in run time — ⌈2592/520⌉ = 5 windows is
+ * the same count ⌈2592/600⌉ gives — so the margin is free; it absorbs other
+ * traffic from a shared egress IP. 62 s rather than 60 absorbs network
+ * jitter in when a request reaches their limiter (a schedule that is safe
+ * for every sliding 62 s window is also safe for every calendar minute).
+ */
+export const DEFAULT_PACE = Object.freeze({ budget: 520, windowMs: 62_000 });
+
+/**
+ * Weighted cost of one request, modelled on Open-Meteo's published rule:
+ * every location counts, and a request asking for more than 10 variables or
+ * more than 14 days counts proportionally more per location.
+ *
+ * @param {number} locations
+ * @param {{variables?:number, days?:number}} [o]
+ */
+export function requestWeight(locations, { variables = 1, days = 1 } = {}) {
+    if (!Number.isInteger(locations) || locations < 0) {
+        throw new RangeError(`requestWeight: locations must be a non-negative integer, got ${locations}`);
+    }
+    return locations * Math.max(1, variables / 10) * Math.max(1, days / 14);
+}
+
+/**
+ * Lay [0, n) out as chunks that start on a schedule keeping every trailing
+ * `windowMs` at or under `budget` weighted calls.
+ *
+ * The locations are spread EVENLY over the minimum number of windows
+ * ⌈n·w / budget⌉, and each window's share is split evenly into
+ * ⌈share / maxPerRequest⌉ requests that all start at that window's offset.
+ * Chunks stay in grid order, so `mergeChunks` is unchanged. With an infinite
+ * budget (a commercial key) the plan is one window: the old fan-out.
+ *
+ * @param {object} o
+ * @param {number} o.n                    total locations
+ * @param {number} [o.budget]             weighted calls per window
+ * @param {number} [o.windowMs]
+ * @param {number} [o.maxPerRequest]      URL ceiling (MAX_LOCATIONS_PER_REQUEST)
+ * @param {number} [o.weightPerLocation]  requestWeight(1, …) for this query
+ * @returns {{ chunks: {start:number,end:number,offsetMs:number,weight:number}[],
+ *             windows:number, durationMs:number, weight:number }}
+ *          durationMs is the offset of the LAST chunk (add one request's
+ *          latency for the wall time).
+ */
+export function pacedChunkPlan({
+    n,
+    budget = DEFAULT_PACE.budget,
+    windowMs = DEFAULT_PACE.windowMs,
+    maxPerRequest = MAX_LOCATIONS_PER_REQUEST,
+    weightPerLocation = 1,
+} = {}) {
+    if (!Number.isInteger(n) || n < 1) throw new RangeError(`pacedChunkPlan: n must be a positive integer, got ${n}`);
+    if (!(weightPerLocation > 0)) throw new RangeError(`pacedChunkPlan: weightPerLocation must be positive, got ${weightPerLocation}`);
+    if (!(budget > 0)) throw new RangeError(`pacedChunkPlan: budget must be positive, got ${budget}`);
+    if (!Number.isInteger(maxPerRequest) || maxPerRequest < 1) {
+        throw new RangeError(`pacedChunkPlan: maxPerRequest must be a positive integer, got ${maxPerRequest}`);
+    }
+    const perWindow = Number.isFinite(budget) ? Math.floor(budget / weightPerLocation) : n;
+    if (perWindow < 1) {
+        throw new RangeError(`pacedChunkPlan: budget ${budget} cannot carry one location of weight ${weightPerLocation}`);
+    }
+    const windows = Math.ceil(n / perWindow);
+    const chunks = [];
+    let start = 0;
+    for (let k = 0; k < windows; k++) {
+        // Even split: the first (n mod windows) windows take one extra.
+        const share = Math.floor(n / windows) + (k < n % windows ? 1 : 0);
+        const parts = Math.ceil(share / maxPerRequest);
+        for (let p = 0; p < parts; p++) {
+            const size = Math.floor(share / parts) + (p < share % parts ? 1 : 0);
+            chunks.push({ start, end: start + size - 1, offsetMs: k * windowMs, weight: size * weightPerLocation });
+            start += size;
+        }
+    }
+    return {
+        chunks,
+        windows,
+        durationMs: (windows - 1) * windowMs,
+        weight: n * weightPerLocation,
+    };
+}
+
+/**
+ * The largest weighted load any trailing `windowMs` of a plan carries: the
+ * sum over chunks whose offset lies in (t − windowMs, t], maximised over t.
+ * The node gate checks `peak ≤ budget` on the plan the cron actually runs.
+ * @param {{offsetMs:number, weight:number}[]} chunks
+ * @param {number} windowMs
+ */
+export function peakWindowWeight(chunks, windowMs) {
+    let peak = 0;
+    for (const c of chunks) {
+        let sum = 0;
+        for (const d of chunks) {
+            if (d.offsetMs <= c.offsetMs && d.offsetMs > c.offsetMs - windowMs) sum += d.weight;
+        }
+        peak = Math.max(peak, sum);
+    }
+    return peak;
 }
 
 export default chunkUrl;

@@ -1795,20 +1795,23 @@ body.lh-stage-lock { overflow:hidden; }
                 return null;     // unknown — leave the canvas alone
             }
 
-            document.addEventListener('lp:launch-selected', (e) => {
+            function onLaunchSelected(e) {
                 const l = e.detail?.launch;
                 if (!l) return;
                 const tuple = vehicleForLaunch(l);
                 if (!tuple) return;
                 const [vehicleId, variantId] = tuple;
-                // Bail if we're already showing this exact configuration —
+                // Bail if the CANVAS already shows this exact configuration —
                 // avoids a needless dispose+rebuild cycle on roster re-clicks.
-                if (api.currentInfo) {
-                    const matchingPickerBtn = document.querySelector(
-                        `.lh-vp-btn--on[data-vehicle="${vehicleId}"]` +
-                        (variantId ? `[data-variant="${variantId}"]` : '')
-                    );
-                    if (matchingPickerBtn) return;
+                // Compared against api.vehicle, NOT picker-button state: the
+                // variant rows ship with Block 5 / V2 pre-lit, so the old
+                // button test matched before anything was loaded and every
+                // Falcon 9 Block 5 and Starship V2 launch (most of SpaceX's
+                // manifest) left the canvas on the Shuttle.
+                const cur = api.vehicle;
+                if (cur.id === vehicleId && (cur.variant || null) === (variantId || null)) {
+                    window.__lpSelectedId = l.id;
+                    return;
                 }
                 // Update vehicle-row highlight (top row picks vehicle)
                 document.querySelectorAll('.lh-vehicle-picker .lh-vp-group').forEach(group => {
@@ -1832,7 +1835,14 @@ body.lh-stage-lock { overflow:hidden; }
                 const stripCards = document.querySelectorAll('.lp-strip-card');
                 stripCards.forEach(c => c.classList.toggle('lp-strip-card--active',
                     String(c.dataset.id) === String(l.id)));
-            });
+            }
+            document.addEventListener('lp:launch-selected', onLaunchSelected);
+            // js/launch-planner.js can finish BEFORE this module (three.js is
+            // a large import; a CDN-cached feed is not) and its events then
+            // fire into the void — the strip stayed empty and a ?launch= deep
+            // link never reached the canvas. It stashes the last of each on
+            // window; replay them once here.
+            if (window.__lpLastSelected) onLaunchSelected({ detail: window.__lpLastSelected });
 
             // ── Next Launches strip ───────────────────────────────────────
             // Renders a horizontally-scrollable card per upcoming launch,
@@ -1931,6 +1941,9 @@ body.lh-stage-lock { overflow:hidden; }
             document.addEventListener('lp:launches-loaded', (e) => {
                 renderStrip(e.detail?.launches || []);
             });
+            // Replay a roster that loaded before this module did (see the
+            // window.__lpLast* note in js/launch-planner.js).
+            if (window.__lpLastLaunches) renderStrip(window.__lpLastLaunches.launches || []);
 
             // Tick the strip's countdowns once a second.
             setInterval(() => {

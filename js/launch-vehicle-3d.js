@@ -1053,7 +1053,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     // Reflections: the night sky PLUS the floodlight banks a pad vehicle
     // actually mirrors (see buildEnvironment). Built once; freed in dispose().
-    const env = buildEnvironment(renderer);
+    let env = buildEnvironment(renderer);
     scene.environment = env.texture;
 
     const sky = buildSky({ radius: 3000 });
@@ -1138,8 +1138,151 @@ export function initVehicleCanvas(canvas, opts = {}) {
         starship: { exhaust: new THREE.Color(0.75, 0.78, 0.86), ground: new THREE.Color(0.74, 0.70, 0.64), flame: 0xff8a5a },
     };
 
-    // Post: RenderPass → bloom → ACES OutputPass → vignette + dither.
-    const post = createPost(renderer, scene, camera, { quality });
+    // Post: RenderPass → bloom → ONE final pass (sanitize → ACES → sRGB →
+    // vignette + dither). `let`, because the render-health monitor below can
+    // step it down (high → low → off) at runtime.
+    let post = createPost(renderer, scene, camera, { quality });
+    let postSanitize = true;
+
+    // ── Render health (THE "BLACK CANVAS" BACKSTOP, 2026-11-08) ──────────────
+    // The page shipped a canvas that was solid black on real GPUs while every
+    // headless gate passed (one NaN through the bloom — see SANITIZE_GLSL in
+    // js/launch-scene-fx.js). The sanitize fixes that cause; this catches the
+    // ones nobody has seen yet (an incomplete MSAA half-float framebuffer, a
+    // driver that refuses a program, a lost context). Every CHECK_MS it reads
+    // three rows of the frame it just drew — right after post.render(), so it
+    // needs no preserveDrawingBuffer — and if ≥ DEAD_FRACTION of the samples
+    // are black for DEAD_STREAK checks in a row, it steps the post chain down
+    // one rung (high → low → off). The night scene is never that black: the
+    // sky's horizon band alone keeps the dead fraction well under the bar for
+    // every vehicle and view (measured by the render-health gate). If even the
+    // direct render is black, the stage SAYS SO instead of showing a void.
+    const HEALTH = {
+        CHECK_MS: 1500,         // while unproven / recovering
+        SETTLED_MS: 10000,      // after SETTLE_AFTER healthy checks in a row
+        SETTLE_AFTER: 4,
+        DEAD_FRACTION: 0.97,    // ≥ this share of samples black ⇒ a dead frame
+        DEAD_STREAK: 2,         // dead frames in a row before stepping down
+        WARMUP_MS: 1200,        // shaders compile + first upload — not a fault
+        ROWS: [0.25, 0.5, 0.75],
+    };
+    const health = {
+        state: 'ok',            // 'ok' | 'degraded' | 'failed' | 'context-lost'
+        checks: 0, dead: 0, okStreak: 0, deadFraction: 0,
+        lastCheck: 0, startedAt: 0, steps: [], errors: 0, errStreak: 0, lastError: null,
+    };
+    let _healthRow = null;
+    function sampleDeadFraction() {
+        const gl = renderer.getContext();
+        const w = renderer.domElement.width, h = renderer.domElement.height;
+        if (!w || !h || gl.isContextLost()) return null;
+        if (!_healthRow || _healthRow.length < w * 4) _healthRow = new Uint8Array(w * 4);
+        // Read the DEFAULT framebuffer the composer just presented to.
+        renderer.setRenderTarget(null);
+        let dead = 0, n = 0;
+        const step = Math.max(1, Math.floor(w / 160));   // ~160 samples a row
+        for (const fy of HEALTH.ROWS) {
+            gl.readPixels(0, Math.floor(h * fy), w, 1, gl.RGBA, gl.UNSIGNED_BYTE, _healthRow);
+            for (let x = 0; x < w; x += step) {
+                const k = x * 4;
+                if (Math.max(_healthRow[k], _healthRow[k + 1], _healthRow[k + 2]) <= 3) dead++;
+                n++;
+            }
+        }
+        return n ? dead / n : null;
+    }
+    function setRenderQuality(q, reason) {
+        const next = q === 'high' || q === 'low' ? q : 'off';
+        if (next === post.quality) return;
+        try { post.dispose(); } catch (_) { /* a lost context cannot free */ }
+        post = createPost(renderer, scene, camera, { quality: next });
+        post.setSanitize(postSanitize);
+        const w = renderer.domElement.width, h = renderer.domElement.height;
+        if (w && h) post.setSize(w, h);
+        health.steps.push({ to: post.quality, reason: reason || 'manual' });
+        health.dead = 0; health.okStreak = 0;
+        health.startedAt = performance.now();
+    }
+    function stepDown(reason) {
+        if (post.quality === 'high') setRenderQuality('low', reason);
+        else if (post.quality === 'low') setRenderQuality('off', reason);
+        else return false;
+        health.state = 'degraded';
+        console.warn(`[launch-vehicle-3d] render ${reason}; post chain stepped down to '${post.quality}'`);
+        return true;
+    }
+    function setStageNotice(text) {
+        const host = canvas.parentElement;
+        if (!host) return;
+        let el = host.querySelector('.lh-render-notice');
+        if (!text) { el?.remove(); return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'lh-render-notice';
+            el.setAttribute('role', 'status');
+            el.style.cssText = 'position:absolute;inset:auto 12px 50% 12px;transform:translateY(50%);'
+                + 'margin:auto;max-width:440px;padding:12px 14px;border-radius:8px;text-align:center;'
+                + 'background:rgba(10,14,26,.92);border:1px solid rgba(255,170,0,.45);color:#ffd27a;'
+                + 'font:500 .82rem/1.45 system-ui,sans-serif;pointer-events:none;z-index:3';
+            host.appendChild(el);
+        }
+        el.textContent = text;
+    }
+    function checkHealth(now) {
+        if (health.state === 'context-lost' || health.state === 'failed') return;
+        // Mid-flight the camera follows the vehicle into a near-black sky —
+        // a legitimately dark frame. Judge only standby frames; re-arm the
+        // warm-up after a flight so the pad re-lighting is not judged either.
+        if (missionActive) { health.startedAt = now; return; }
+        if (now - health.startedAt < HEALTH.WARMUP_MS) return;
+        const every = health.okStreak >= HEALTH.SETTLE_AFTER ? HEALTH.SETTLED_MS : HEALTH.CHECK_MS;
+        if (now - health.lastCheck < every) return;
+        health.lastCheck = now;
+        const f = sampleDeadFraction();
+        if (f == null) return;
+        health.checks++;
+        health.deadFraction = f;
+        if (f < HEALTH.DEAD_FRACTION) {
+            health.dead = 0; health.okStreak++;
+            return;
+        }
+        health.okStreak = 0;
+        if (++health.dead < HEALTH.DEAD_STREAK) return;
+        if (!stepDown('produced a black frame')) {
+            health.state = 'failed';
+            setStageNotice('The 3D view could not draw on this device\'s graphics driver. '
+                + 'Try reloading, or another browser — the launch data below is unaffected.');
+            console.error('[launch-vehicle-3d] direct render is black too — 3D view marked failed');
+        }
+    }
+
+    // A lost WebGL context (GPU reset, too many contexts, a sleeping laptop)
+    // used to leave a black stage until reload. three re-initialises its own
+    // state on restore; what it cannot recreate is CONTENT that lived only on
+    // the GPU — the PMREM environment — so rebuild that, and re-arm health.
+    canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        health.state = 'context-lost';
+        setStageNotice('Graphics context lost — restoring the 3D view…');
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+        try {
+            env.dispose();
+        } catch (_) { /* the old context's resources are already gone */ }
+        env = buildEnvironment(renderer);
+        scene.environment = env.texture;
+        // Rebuild the chain on the new context (its targets and programs died
+        // with the old one) at the rung it was on.
+        post = createPost(renderer, scene, camera, { quality: post.quality });
+        post.setSanitize(postSanitize);
+        const w = renderer.domElement.width, h = renderer.domElement.height;
+        if (w && h) post.setSize(w, h);
+        health.state = health.steps.length ? 'degraded' : 'ok';
+        health.dead = 0; health.okStreak = 0; health.startedAt = performance.now();
+        health.steps.push({ to: post.quality, reason: 'context restored' });
+        setStageNotice(null);
+        if (running && !rafId) tick();
+    });
 
     // ── Mission clock (drives liftoff animation) ──────────────────────────
     const missionClock = createMissionClock();
@@ -2092,8 +2235,33 @@ export function initVehicleCanvas(canvas, opts = {}) {
     }, { threshold: 0.05 });
     io.observe(canvas);
 
+    // The loop is SCHEDULED BEFORE the frame runs, so an exception inside a
+    // frame (a driver refusing a program, a vehicle builder edge case) can no
+    // longer stop it dead and freeze a black stage. Repeated failures step
+    // the post chain down like a black frame does.
     function tick() {
         if (!running) { rafId = 0; return; }
+        rafId = requestAnimationFrame(tick);
+        if (health.state === 'context-lost') return;
+        try {
+            frame();
+            health.errStreak = 0;
+        } catch (err) {
+            health.errors++;
+            health.lastError = String(err && err.message || err);
+            if (health.errors <= 3) console.error('[launch-vehicle-3d] frame failed:', err);
+            if (++health.errStreak >= 3) {
+                health.errStreak = 0;
+                if (!stepDown('threw while rendering') && health.state !== 'failed') {
+                    health.state = 'failed';
+                    setStageNotice('The 3D view hit an error on this device and stopped. '
+                        + 'Try reloading — the launch data below is unaffected.');
+                }
+            }
+        }
+    }
+
+    function frame() {
         // Clamp: a backgrounded tab returns with a multi-second delta that
         // would otherwise teleport every smoke puff at once.
         const dt = Math.min(clock.getDelta(), 0.5);
@@ -2189,14 +2357,18 @@ export function initVehicleCanvas(canvas, opts = {}) {
                 T:        missionActive ? missionClock.T : 0,
             });
         }
-        post.render();
-        if (shake) {
-            camera.position.x -= shake.x;
-            camera.position.y -= shake.y;
-            camera.position.z -= shake.z;
+        try {
+            post.render();
+        } finally {
+            if (shake) {
+                camera.position.x -= shake.x;
+                camera.position.y -= shake.y;
+                camera.position.z -= shake.z;
+            }
         }
-        rafId = requestAnimationFrame(tick);
+        checkHealth(performance.now());
     }
+    health.startedAt = performance.now();
     tick();
 
     // ── Public camera API ──────────────────────────────────────────────────
@@ -2391,10 +2563,63 @@ export function initVehicleCanvas(canvas, opts = {}) {
         // Test hook: the live scene (read-only use — the browser gate inspects
         // pad materials after a launch).
         get scene() { return scene; },
+        // Test hooks (read-only use): the browser gates render the scene
+        // into their own float target to measure its HDR range.
+        get renderer() { return renderer; },
+        get camera() { return camera; },
+        // The configuration actually on screen — the page's launch→vehicle
+        // bridge compares against THIS, never against picker-button state.
+        get vehicle() { return { id: current.id, variant: current.variant ?? null }; },
+        // Render-health monitor state (see HEALTH above): state, the post
+        // rung in use, the last measured dead fraction, every step taken.
+        get renderHealth() {
+            return { ...health, steps: health.steps.slice(), quality: post.quality,
+                     post: post.enabled, sanitize: postSanitize };
+        },
+        // Force a post rung ('high' | 'low' | 'off'); also re-arms the monitor.
+        setRenderQuality(q) { setRenderQuality(q, 'requested'); health.state = 'ok'; },
+        // Test hook ONLY — the render-health gate's negative control.
+        _setPostSanitize(on) { postSanitize = !!on; post.setSanitize(postSanitize); },
+        // Test hook: draw one frame NOW and measure it from the drawing
+        // buffer (same task, so no preserveDrawingBuffer needed). dead = share
+        // of pixels whose brightest channel is ≤ 3/255; mean = mean of the
+        // brightest channel, 0..255. Browser-agnostic — no screenshot decode.
+        _sampleFrame() {
+            frame();
+            const gl = renderer.getContext();
+            const w = renderer.domElement.width, h = renderer.domElement.height;
+            if (!w || !h || gl.isContextLost()) return null;
+            renderer.setRenderTarget(null);
+            const px = new Uint8Array(w * h * 4);
+            gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+            let dead = 0, sum = 0;
+            for (let i = 0; i < w * h; i++) {
+                const m = Math.max(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]);
+                if (m <= 3) dead++;
+                sum += m;
+            }
+            // Coarse luminance grid (8×5) so a gate can see WHERE it went dark.
+            const grid = [];
+            for (let gy = 0; gy < 5; gy++) {
+                const row = [];
+                for (let gx = 0; gx < 8; gx++) {
+                    let s = 0, n = 0;
+                    const x0 = Math.floor(gx * w / 8), x1 = Math.floor((gx + 1) * w / 8);
+                    const y0 = Math.floor(gy * h / 5), y1 = Math.floor((gy + 1) * h / 5);
+                    for (let y = y0; y < y1; y += 4) for (let x = x0; x < x1; x += 4) {
+                        const k = (y * w + x) * 4;
+                        s += Math.max(px[k], px[k + 1], px[k + 2]); n++;
+                    }
+                    row.push(n ? Math.round(s / n) : 0);
+                }
+                grid.unshift(row);           // readPixels is bottom-up
+            }
+            return { w, h, dead: dead / (w * h), mean: sum / (w * h), grid };
+        },
         // Render diagnostics for the browser gate (tests/launch-planner-visuals.spec.js).
         get renderStats() {
             return {
-                quality,
+                quality: post.quality,
                 post: post.enabled,
                 smokeAlive: smokeSim.alive,
                 smokeDrawn: smokeView.mesh.geometry.instanceCount,
