@@ -112,7 +112,16 @@ button{color:inherit}
    the bottom fifth of the map), which frees the column below the side panels.
    Overlay layout only: ≤820 px the panels flow below the canvas. */
 @media(min-width:821px){
-  .mars-app:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - 170px)}
+  /* The site's light/dark switch (js/theme-switch.js) hangs under the logo,
+     ~25px into this app's top-left corner. The top-left column (camera dock,
+     surface HUD, mission panel) moves down 14px as ONE unit so their spacing
+     is unchanged, and the mission panel's max-heights give the 14px back so
+     its bottom edge does not move. js/mars-view.js measures these boxes live
+     for the safe frame, so nothing else needs to know. */
+  .camera-dock{top:32px}
+  .surface-explorer{top:98px}
+  .mission-panel{top:106px;max-height:calc(100% - 292px)}
+  .mars-app:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - 184px)}
   .mars-app:has(.data-dock.collapsed) .landmark-card{bottom:84px}
   .mars-app.is-surface-mode:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - var(--surface-hud-bottom,300px) - 90px)}
 }
@@ -350,7 +359,7 @@ button{color:inherit}
   .mars-header{left:304px;right:290px}.mars-header h1{font-size:.92rem}.mars-header p{display:none}
   .mission-panel{width:270px}.layers-panel{width:258px}.map-controls{width:258px}.mesh-badge{display:none}
   .weather-grid{grid-template-columns:repeat(3,1fr)}.weather-cell{min-height:67px;padding:8px 10px}
-  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 329px)}.camera-dock{width:272px}.surface-explorer{width:304px}.camera-readout{display:none}.landmark-card{bottom:238px}
+  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 343px)}.camera-dock{width:272px}.surface-explorer{width:304px}.camera-readout{display:none}.landmark-card{bottom:238px}
   .is-surface-mode .mission-panel{max-height:calc(100% - var(--surface-hud-bottom,300px) - 250px)}
 }
 @media(max-width:820px){
