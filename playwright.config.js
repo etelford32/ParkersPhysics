@@ -25,6 +25,12 @@ export default defineConfig({
         // flows still get true three-engine coverage. See tests/auth-e2e.spec.js.
         { name: 'firefox-auth', use: { browserName: 'firefox' }, testMatch: /auth-e2e\.spec\.js/ },
         { name: 'webkit-auth',  use: { browserName: 'webkit'  }, testMatch: /auth-e2e\.spec\.js/ },
+        // The launch planner's render-health gate is engine-sensitive (it is
+        // a WebGL + post-processing failure that reached users while the
+        // Chromium suite was green), so it alone also runs on Firefox and
+        // WebKit. See .github/workflows/launch-planner-visuals.yml.
+        { name: 'firefox-visual', use: { browserName: 'firefox' }, testMatch: /launch-planner-render-health\.spec\.js/ },
+        { name: 'webkit-visual',  use: { browserName: 'webkit'  }, testMatch: /launch-planner-render-health\.spec\.js/ },
     ],
     webServer: {
         command: 'PORT=8000 node dev-server.mjs',

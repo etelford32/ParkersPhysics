@@ -127,7 +127,9 @@ const PLUME_FRAG = /* glsl */`
         // region (~50 % of plume length) where the flow has gone
         // turbulent / subsonic.
         float cellFreq = mix(36.0, 14.0, uExpansion);
-        float diamonds = pow(0.5 + 0.5 * cos(vAxial * cellFreq), 8.0);
+        // max(): cos() can return −1 − ε, and pow() of a negative base is NaN
+        // on real GPUs (one NaN pixel blacks the frame through the bloom).
+        float diamonds = pow(max(0.5 + 0.5 * cos(vAxial * cellFreq), 0.0), 8.0);
         diamonds *= smoothstep(0.02, 0.08, vAxial)
                   * smoothstep(0.55, 0.30, vAxial)
                   * uThrottle;
