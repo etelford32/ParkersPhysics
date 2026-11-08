@@ -135,3 +135,24 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 .hub-next-name{font-family:var(--font-display);font-size:.84rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-1)}
 .hub-next-note{font-size:.8rem;color:var(--fg-4);line-height:1.5}
 @media(max-width:640px){.hub-switch{padding:10px 16px 0}.hub-next{padding:0 16px}}
+
+/* ── LIGHT THEME (white + blue) ──────────────────────────────────────────── */
+/* Every page using this sheet is light-capable (scripts/build-theme-support.mjs).
+   The tokens above are re-pointed by js/theme-light.css; these are the rules
+   whose dark values are hard-coded rgba() rather than tokens. */
+html.theme-light .sim-hero{background:var(--pl-grad-hero)}
+html.theme-light .sim-hero-label{text-shadow:none}
+html.theme-light .sim-hero-sub a,html.theme-light .hub-count a{border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .sim-hero-sub a:hover,html.theme-light .hub-count a:hover{color:var(--pl-blue-deep);border-bottom-color:rgba(11,74,168,.5)}
+html.theme-light .sim-search input{background:#fff;border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow)}
+html.theme-light .sim-search input:focus{border-color:var(--pl-blue-bright);box-shadow:0 0 0 3px rgba(47,134,246,.18)}
+html.theme-light :is(.sim-chip,.hub-switch a){background:#fff;border-color:var(--pl-border);color:var(--pl-text-3)}
+html.theme-light :is(.sim-chip,.hub-switch a):hover{color:var(--pl-blue-deep);border-color:#9cc0f2;background:var(--pl-blue-soft)}
+html.theme-light :is(.sim-chip.is-on,.hub-switch a[aria-current="page"]){background:var(--pl-btn);border-color:var(--pl-btn);color:#fff;box-shadow:none}
+html.theme-light :is(.sim-card,.hub-next-card){background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light :is(.sim-card,.hub-next-card):hover{border-color:#8fb6ef;box-shadow:var(--pl-shadow-hover)}
+html.theme-light .sim-card-icon{color:var(--pl-blue)}
+html.theme-light .sim-badge-new{background:#e7f0fe;color:var(--pl-blue-deep);border-color:#9cc0f2}
+html.theme-light .sim-badge-note{background:#e3f4fc;color:#075d91;border-color:#9fd2ef}
+html.theme-light .sim-tier.public{background:#e5f6ed;color:var(--pl-ok);border-color:#9fd8b8}
+html.theme-light .sim-tier.free{background:#e3f4fc;color:#075d91;border-color:#9fd2ef}

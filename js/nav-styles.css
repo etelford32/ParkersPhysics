@@ -66,6 +66,25 @@ nav {
 .nav-spacer { flex: 1; }
 .nav-auth-sep { width: 1px; height: 22px; background: rgba(255,255,255,.15); margin: 0 3px; flex-shrink: 0; }
 
+/* ── Theme toggle (js/theme.js; only on light-capable pages) ───────────────
+ * It takes the place of .nav-auth-sep on those pages, so its width is the
+ * separator's 7px plus ~20px. The compact tier below shrinks it to fit the
+ * ladder's admin budget; tests/nav-responsive.spec.js measures simulations.html,
+ * which IS light-capable, so the toggle is inside the measured row. */
+.nav-theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    flex-shrink: 0; width: 28px; height: 28px; margin: 0 2px; padding: 0;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 999px; color: #c9d4e6; cursor: pointer; font-family: inherit;
+    transition: background .2s, border-color .2s, color .2s;
+}
+.nav-theme-toggle .pp-glyph { display: block; flex-shrink: 0; }
+.nav-theme-toggle:focus-visible { outline: 2px solid #4da3ff; outline-offset: 2px; }
+.nav-theme-label { display: none; }
+@media (hover: hover) and (pointer: fine) {
+    .nav-theme-toggle:hover { background: rgba(255,255,255,.16); border-color: rgba(120,180,255,.5); color: #fff; }
+}
+
 /* ── Utility text-links + PRO promo ─────────────────────────────────────── */
 .nav-utility-links {
     display: flex; align-items: center; gap: 10px;
@@ -400,6 +419,8 @@ nav {
     .nav-utility-links { gap: 7px; }
     .nav-util-link { font-size: .67rem; }
     .nav-pro-promo { display: none; }
+    .nav-theme-toggle { width: 24px; height: 24px; margin: 0 1px; }
+    .nav-theme-toggle .pp-glyph { width: 15px; height: 15px; }
 }
 
 /* ── Mobile / Tablet / small laptop (<=1280px) ──────────────────────────────
@@ -434,6 +455,14 @@ nav {
     }
     .nav-pro-text { display: inline; }
     .nav-pro-promo::after { content: none; }
+
+    /* The theme toggle becomes a labelled 44px row in the panel. */
+    .nav-theme-toggle {
+        width: 100%; height: auto; min-height: 44px; margin: 6px 0 2px;
+        border-radius: 6px; justify-content: flex-start; padding: 0 14px;
+        font-size: .86rem;
+    }
+    .nav-theme-label { display: inline; }
 
     .nav-menu {
         display: none; flex-direction: column; align-items: stretch;
@@ -565,7 +594,7 @@ nav {
    is instantaneous and cannot be mid-animation when a test or a user reads it. */
 @media (prefers-reduced-motion: reduce) {
     .nav-drop-menu, .nav-drop-inner, .nav-caret, .burger-line, .nav-item,
-    .nav-drop-btn, .nav-drop-toggle, .nav-drop-link, .nav-pro-promo {
+    .nav-drop-btn, .nav-drop-toggle, .nav-drop-link, .nav-pro-promo, .nav-theme-toggle {
         transition: none !important;
     }
 }
@@ -628,3 +657,87 @@ nav {
 }
 .nav-bell-footer:hover { color: #fff; background: rgba(255,255,255,.04); }
 @media (max-width: 480px) { .nav-bell-dropdown { width: calc(100vw - 24px); right: -8px; } }
+
+
+/* ══ LIGHT THEME (white + blue) ═════════════════════════════════════════════
+ * `html.theme-light` only exists on light-capable pages (js/theme-boot.js /
+ * js/theme.js; the list is scripts/build-theme-support.mjs), and those pages
+ * load js/theme-light.css, which defines the --pl-* palette used here. On
+ * every other page none of this matches. The bar's GEOMETRY is untouched —
+ * colours only — so the width ladder above holds in both themes.
+ * ─────────────────────────────────────────────────────────────────────────── */
+html.theme-light body > nav {
+    background: rgba(255,255,255,.92);
+    border-bottom-color: var(--pl-border, #d6e3f3);
+    box-shadow: 0 1px 0 rgba(11,31,58,.03), 0 4px 16px rgba(21,96,212,.06);
+}
+html.theme-light .nav-brand { background: var(--pl-grad-headline, linear-gradient(135deg,#0b2f6b,#1560d4)); -webkit-background-clip: text; background-clip: text; }
+html.theme-light :is(.nav-item, .nav-drop-btn, .nav-drop-toggle, .nav-theme-toggle) {
+    background: #f3f7fd; border-color: #d6e3f3; color: var(--pl-text-2, #1d3557);
+}
+html.theme-light .nav-drop-toggle { border-left-color: #e2ebf7; }
+html.theme-light :is(.nav-item.active, .nav-drop-btn.active, .nav-drop-btn.active + .nav-drop-toggle) {
+    background: var(--pl-btn, #1666dc); border-color: var(--pl-btn, #1666dc); color: #fff;
+}
+html.theme-light .nav-drop-btn.active + .nav-drop-toggle { border-left-color: rgba(255,255,255,.35); }
+html.theme-light .nav-auth-sep { background: #d6e3f3; }
+html.theme-light .nav-util-link { color: var(--pl-text-3, #3a5679); }
+html.theme-light .nav-util-link:hover { color: var(--pl-blue, #1560d4); }
+html.theme-light .nav-pro-promo { background: #e7f0fe; border-color: #b9d2f6; color: var(--pl-blue-deep, #0b4aa8); }
+html.theme-light .nav-pro-promo:hover { background: #d9e8fd; filter: none; }
+html.theme-light .nav-login { border-color: #b9cde8 !important; color: var(--pl-text-2, #1d3557) !important; }
+html.theme-light .nav-signup { background: var(--pl-btn, #1666dc) !important; border-color: var(--pl-btn, #1666dc) !important; color: #fff !important; }
+html.theme-light .nav-signout { border-color: rgba(192,38,45,.25) !important; color: #8f3a3f !important; }
+html.theme-light .nav-admin-link { background: rgba(192,38,45,.08) !important; border-color: rgba(192,38,45,.3) !important; color: #b0222a !important; }
+html.theme-light .nav-badge-pro { background: #fff4e0; color: #8a5a00; border-color: #f0cf8f; }
+html.theme-light .nav-badge-new { background: #e7f0fe; color: #0b4aa8; border-color: #9cc0f2; text-shadow: none; }
+html.theme-light .nav-theme-toggle { color: var(--pl-blue, #1560d4); }
+html.theme-light .nav-theme-toggle:focus-visible { outline-color: var(--pl-blue-bright, #2f86f6); }
+@media (hover: hover) and (pointer: fine) {
+    html.theme-light :is(.nav-item, .nav-theme-toggle):hover,
+    html.theme-light .nav-drop:hover .nav-drop-btn:not(.active),
+    html.theme-light .nav-drop:hover .nav-drop-btn:not(.active) + .nav-drop-toggle {
+        background: #e7f0fe; border-color: #9cc0f2; color: var(--pl-blue-deep, #0b4aa8);
+    }
+    html.theme-light .nav-login:hover { background: #e7f0fe !important; color: var(--pl-blue-deep, #0b4aa8) !important; }
+    html.theme-light .nav-signup:hover { background: var(--pl-btn-hover, #0f56c0) !important; filter: none !important; }
+    html.theme-light .nav-signout:hover { background: rgba(192,38,45,.06) !important; color: #b0222a !important; }
+    html.theme-light .nav-drop-link:hover { background: #eef4fd; }
+    html.theme-light .nav-drop-link:hover .ndl-title { color: var(--pl-blue-deep, #0b4aa8); }
+    html.theme-light .nav-drop-link:hover .ndl-sub { color: var(--pl-text-3, #3a5679); }
+}
+html.theme-light .nav-drop.open .nav-drop-btn:not(.active),
+html.theme-light .nav-drop.open .nav-drop-btn:not(.active) + .nav-drop-toggle {
+    background: #e7f0fe; border-color: #9cc0f2; color: var(--pl-blue-deep, #0b4aa8);
+}
+html.theme-light .nav-drop-menu {
+    background: rgba(255,255,255,.98); border-color: #d6e3f3;
+    box-shadow: 0 14px 40px rgba(11,31,58,.14), 0 2px 6px rgba(11,31,58,.06);
+}
+html.theme-light .nav-drop-link.active { background: #e7f0fe; }
+html.theme-light .nav-drop-link.active .ndl-title { color: var(--pl-blue-deep, #0b4aa8) !important; }
+html.theme-light .ndl-icon { color: var(--pl-blue, #1560d4); opacity: .85; }
+html.theme-light .nav-drop-link:hover .ndl-icon { color: var(--pl-blue-deep, #0b4aa8); opacity: 1; }
+html.theme-light .ndl-title { color: var(--pl-text-1, #0b1f3a); }
+html.theme-light .ndl-sub { color: var(--pl-text-4, #50698b); }
+html.theme-light .nav-drop-link:active { background: #e7f0fe; }
+html.theme-light .nav-drop-section { color: var(--pl-text-4, #50698b); border-top-color: #e2ebf7; }
+html.theme-light .nav-burger { background: #f3f7fd; border-color: #d6e3f3; }
+html.theme-light .burger-line { background: var(--pl-text-1, #0b1f3a); }
+html.theme-light .nav-menu::-webkit-scrollbar-thumb { background: #c4d5ec; }
+html.theme-light .nav-bell { background: #f3f7fd; border-color: #d6e3f3; color: var(--pl-text-2, #1d3557); }
+html.theme-light .nav-bell:hover { background: #e7f0fe; color: var(--pl-blue-deep, #0b4aa8); }
+html.theme-light .nav-bell-dropdown { background: #fff; border-color: #d6e3f3; box-shadow: 0 14px 40px rgba(11,31,58,.16); }
+html.theme-light :is(.nav-bell-header, .nav-bell-item, .nav-bell-footer) { border-color: #e2ebf7; }
+html.theme-light .nav-bell-item:hover { background: #f3f7fd; }
+html.theme-light .nav-bell-title { color: var(--pl-text-1, #0b1f3a); }
+html.theme-light .nav-bell-body { color: var(--pl-text-3, #3a5679); }
+html.theme-light .nav-bell-time { color: var(--pl-text-4, #50698b); }
+html.theme-light .nav-bell-footer { color: var(--pl-blue, #1560d4); }
+html.theme-light .nav-bell-footer:hover { color: var(--pl-blue-deep, #0b4aa8); background: #f3f7fd; }
+@media (max-width: 1280px) {
+    html.theme-light .nav-menu { background: rgba(255,255,255,.99); border-bottom-color: #d6e3f3; box-shadow: 0 14px 30px rgba(11,31,58,.12); }
+    html.theme-light .nav-utility-links { border-top-color: #e2ebf7; }
+    html.theme-light .nav-util-link { color: var(--pl-text-2, #1d3557); }
+    html.theme-light .nav-drop.open .nav-drop-btn:not(.active) { background: #e7f0fe; border-color: #9cc0f2; }
+}

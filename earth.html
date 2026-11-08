@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <script src="js/preview-mode.js"></script>
@@ -1667,46 +1667,10 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
     border-color: var(--c-accent);
 }
 
-/* ─── Theme toggle ──────────────────────────────────────────────────
-   Tiny floating button at top-right (just below nav, clear of the
-   layer-panel which sits at top:10px right:10px). Single-icon
-   button — moon/sun glyph swaps based on which theme is active.
-   Cycles through the same setEarthTheme() hook the URL param + dev
-   console use, so it persists via localStorage automatically. */
-#theme-toggle {
-    position: fixed;
-    top: 60px; right: 12px;
-    z-index: 70;
-    width: 32px; height: 32px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--c-surface-1);
-    border: 1px solid var(--c-accent-border);
-    border-radius: 50%;
-    color: var(--c-text-secondary);
-    cursor: pointer; font-size: 16px; line-height: 1;
-    backdrop-filter: var(--blur-glass);
-    -webkit-backdrop-filter: var(--blur-glass);
-    box-shadow: var(--shadow-panel);
-    transition: background .15s, color .15s, border-color .15s, transform .12s;
-    touch-action: manipulation;
-    /* Respect any reduced-motion preference: skip the rotate-on-hover
-       animation when the OS has flagged motion-sensitivity. */
-}
-#theme-toggle:hover {
-    color: var(--c-accent);
-    border-color: var(--c-accent);
-    transform: rotate(15deg);
-}
-#theme-toggle:active { transform: scale(.92) rotate(15deg); }
-@media (prefers-reduced-motion: reduce) {
-    #theme-toggle, #theme-toggle:hover, #theme-toggle:active { transform: none; }
-}
-@media (max-width: 640px) {
-    /* On phones the layer-panel turns into a slide-up sheet via the
-       bottom toolbar, so the top-right corner is free. Move the
-       theme button up to where the layer-panel button sat. */
-    #theme-toggle { top: 56px; right: 10px; width: 30px; height: 30px; font-size: 14px; }
-}
+/* ─── Theme ─────────────────────────────────────────────────────────
+   The light/dark switch is the SITE toggle in the nav (js/theme.js):
+   'auto' follows sunrise/sunset at the saved location. EarthView's own
+   floating 🌗 button and OS-following hook were folded into it. */
 
 /* ─── Panel minimize / drag chrome ──────────────────────────────── */
 .panel-header {
@@ -2741,6 +2705,9 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
   "inLanguage": "en-US"
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body data-clickmap>
 <h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">Earth — Magnetosphere &amp; Atmosphere Simulator</h1>
@@ -2756,84 +2723,18 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
-<!-- perf-hints:end --><!-- ═══ Theme activation hook ═══════════════════════════════════════════
-     Runs before any panel paints so `body.theme-light` is in place when
-     the first frame renders — otherwise the user briefly sees the dark
-     theme flash before light styles kick in.
-
-     Resolution order (highest priority first):
-       1. `?theme=light` or `?theme=dark` URL param — designer override
-          for one-off previews. Takes effect on this load only; doesn't
-          persist unless the user also passes `&persist=1`.
-       2. localStorage `pp.theme` — the user's saved preference.
-       3. `prefers-color-scheme: light` — respects the OS-level toggle
-          when neither URL nor stored preference is set. Defaults to
-          dark on systems with no preference declared.
-
-     Exposes `window.setEarthTheme('light' | 'dark' | 'auto')` for
-     runtime toggling from the dev console (or a future UI button).
-     'auto' clears the preference and reverts to the OS default. ─────── */
+<!-- perf-hints:end --><!-- ═══ Theme ════════════════════════════════════════════════════════
+     The theme is the SITE theme now: js/theme-boot.js (in <head>, wired by
+     scripts/build-theme-support.mjs) puts `theme-light` on <html> before
+     first paint, and js/theme.js (imported by nav.js) keeps it on daylight
+     at the saved location — the same `pp.theme` key this page used, so a
+     pinned 'light' / 'dark' carries over. EarthView keeps its own light
+     palette (js/design-tokens.css + the rule overrides above); it does NOT
+     load js/theme-light.css. `setEarthTheme` stays as a console alias. -->
 <script>
-(function() {
-    const STORAGE_KEY = 'pp.theme';
-    const url = new URLSearchParams(window.location.search);
-    const urlTheme = url.get('theme');
-    const stored   = (function() {
-        try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null; }
-    })();
-
-    function resolve() {
-        // Honour the URL param first — it's the strongest signal a
-        // designer / user can send.
-        if (urlTheme === 'light' || urlTheme === 'dark') return urlTheme;
-        if (stored === 'light' || stored === 'dark')     return stored;
-        // OS preference. matchMedia is supported on every browser the
-        // app targets.
-        if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light';
-        return 'dark';
-    }
-
-    function apply(theme) {
-        document.documentElement.classList.toggle('theme-light', theme === 'light');
-        document.body?.classList.toggle('theme-light', theme === 'light');
-    }
-
-    // First-paint application — runs on inline script execution so the
-    // class is on <html> by the time any chrome paints.
-    const initial = resolve();
-    apply(initial);
-
-    // If the URL param asked for a one-shot preview AND requested
-    // persistence, write it through. Otherwise the preview stays
-    // session-only and the next visit reverts to whatever was
-    // stored / OS-preferred.
-    if ((urlTheme === 'light' || urlTheme === 'dark') && url.get('persist') === '1') {
-        try { localStorage.setItem(STORAGE_KEY, urlTheme); } catch (_) {}
-    }
-
-    // Dev-console / future-UI hook. 'auto' clears the stored
-    // preference and re-resolves (so a user who set 'light' then
-    // wants to follow OS again can call setEarthTheme('auto')).
-    window.setEarthTheme = function(mode) {
-        if (mode === 'auto') {
-            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            const next = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-            apply(next);
-            return next;
-        }
-        if (mode !== 'light' && mode !== 'dark') return null;
-        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
-        apply(mode);
-        return mode;
-    };
-
-    // Live-react to OS-level theme changes when the user hasn't pinned
-    // a preference. Most browsers fire this on system theme toggle.
-    if (!stored && (urlTheme !== 'light' && urlTheme !== 'dark')) {
-        const mq = window.matchMedia?.('(prefers-color-scheme: light)');
-        mq?.addEventListener?.('change', (e) => apply(e.matches ? 'light' : 'dark'));
-    }
-})();
+window.setEarthTheme = function (mode) {
+    return window.ppTheme ? window.ppTheme.set(mode).theme : null;
+};
 </script>
 
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
@@ -2842,80 +2743,6 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 <script type="module">import { initNav } from "./js/nav.js?v=20260508"; initNav("earth");</script>
 <script type="module">
 import './js/telemetry.js';
-</script>
-
-<!-- ── Theme toggle button ─────────────────────────────────────────
-     The 🌗 glyph swaps to ☀ / 🌙 in the inline script below based on
-     resolved theme. Click cycles dark ↔ light via setEarthTheme().
-     A second click after the user has explicitly chosen sticks to
-     the manual choice; calling setEarthTheme('auto') from the dev
-     console reverts to OS preference. -->
-<button id="theme-toggle" type="button"
-        title="Toggle theme (long-press to follow OS)"
-        aria-label="Toggle light/dark theme">🌗</button>
-<script>
-(function() {
-    const btn = document.getElementById('theme-toggle');
-    if (!btn) return;
-    // Update the glyph to reflect *what clicking does next*: when
-    // dark, show 🌞 (clicking goes to light); when light, show 🌙
-    // (clicking goes to dark). The 🌗 default is a neutral fallback
-    // for the brief window before the activation hook resolves.
-    function syncGlyph() {
-        const isLight = document.documentElement.classList.contains('theme-light')
-                     || document.body?.classList.contains('theme-light');
-        btn.textContent = isLight ? '🌙' : '🌞';
-        btn.setAttribute('aria-pressed', String(isLight));
-    }
-    syncGlyph();
-
-    btn.addEventListener('click', () => {
-        const isLight = document.documentElement.classList.contains('theme-light')
-                     || document.body?.classList.contains('theme-light');
-        // Tap toggles between dark and light. The "auto" mode is
-        // available via long-press OR via window.setEarthTheme('auto')
-        // — exposed below for users who want to revert to OS-following
-        // without rebinding. Avoiding a 3-state cycle in the click
-        // handler keeps the affordance simple: tap = swap.
-        if (typeof window.setEarthTheme === 'function') {
-            window.setEarthTheme(isLight ? 'dark' : 'light');
-        }
-        syncGlyph();
-    });
-
-    // Long-press → 'auto' (revert to OS preference). 600 ms is the
-    // standard mobile long-press threshold; works on touch + mouse.
-    let pressTimer = null;
-    function startPress() {
-        clearTimeout(pressTimer);
-        pressTimer = setTimeout(() => {
-            if (typeof window.setEarthTheme === 'function') {
-                window.setEarthTheme('auto');
-                syncGlyph();
-                // Subtle confirmation flash so the user knows the
-                // long-press registered; the rotate animation
-                // doubles as feedback.
-                btn.style.transition = 'transform .25s ease';
-                btn.style.transform = 'rotate(360deg)';
-                setTimeout(() => { btn.style.transform = ''; }, 250);
-            }
-            pressTimer = null;
-        }, 600);
-    }
-    function cancelPress() {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-    }
-    btn.addEventListener('pointerdown', startPress);
-    btn.addEventListener('pointerup',   cancelPress);
-    btn.addEventListener('pointerleave', cancelPress);
-    btn.addEventListener('pointercancel', cancelPress);
-
-    // Stay in sync if setEarthTheme() is called from dev console.
-    // Poll on visibility change is enough — the user only inspects
-    // the button when looking at the page.
-    document.addEventListener('visibilitychange', syncGlyph);
-})();
 </script>
 
 <!-- ─── App ──────────────────────────────────────────────────── -->
