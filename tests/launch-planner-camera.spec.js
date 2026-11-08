@@ -242,7 +242,12 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         };
         await page.click('.lh-cam[data-cam="fullscreen"]');
         await page.waitForFunction(coversWindow, null, { polling: 100, timeout: 20_000 });
-        await page.click('.lh-cam[data-cam="fullscreen"]');
+        // Leave with a DISPATCHED click: page.click's actionability check
+        // waits for the button to be "stable" across animation frames, and
+        // those frames are exactly what a full-window software render starves
+        // (CI burned the rest of the 240 s budget waiting here, 2026-11-08).
+        // The button's own handler is what is under test, not hit-testing.
+        await page.locator('.lh-cam[data-cam="fullscreen"]').dispatchEvent('click');
         await expect(page.locator('#lh-cam-full')).toHaveAttribute('aria-pressed', 'false', { timeout: 20_000 });
 
         // Help opens and closes.
