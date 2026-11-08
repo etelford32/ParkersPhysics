@@ -289,6 +289,16 @@ export const PIPELINES = [
       warnAgeS: 30 * 3600, critAgeS: 54 * 3600,
       notes: 'Written daily by .github/workflows/climalytix-ingest.yml (scripts/climalytix_ingest/gfs.py). R2 unset / no run / unreadable tile is 200 + freshness:expired + reasons, never a 5xx; the route grades an old run stale (>30 h) / expired (>54 h) itself.' },
 
+    { id: 'climalytix-nwp-field', label: 'Climalytix GFS field (heat-map window)',
+      endpoint: '/api/climalytix/nwp-field',
+      // Requires ?lat&lon. One R2 range per (row, tile) segment of the window.
+      probePath: '/api/climalytix/nwp-field?lat=40.00&lon=-105.25&half=1',
+      probeTimeoutMs: 20_000,
+      category: 'weather', upstream: 'NOAA GFS 0.25° (AWS Open Data) → our R2 point tiles',
+      cadence_s: 86_400, prewarm: null,
+      warnAgeS: 30 * 3600, critAgeS: 54 * 3600,
+      notes: 'Same archive and degradation rules as climalytix-nwp; our archive only — no third-party grid stands in for it.' },
+
     { id: 'polar-vortex',       label: 'Polar vortex',
       endpoint: '/api/weather/polar-vortex',
       category: 'atmosphere', upstream: 'Open-Meteo GFS @ 60°N',

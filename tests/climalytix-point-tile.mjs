@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
     locate, tileShape, tileKey, stencilRanges, readStencil, siteBody, toSiteSeries,
-    runFreshness, RUN_FRESH_S, RUN_STALE_S,
+    runFreshness, RUN_FRESH_S, RUN_STALE_S, fieldPlan, readField, fieldBody, fieldPath,
 } from '../js/climalytix/point-tile.js';
 import { HOUR_MS } from '../js/climalytix/series.js';
 
@@ -134,6 +134,71 @@ ok('run freshness bands', () => {
     assert.equal(runFreshness(0, RUN_STALE_S * 1000).freshness, 'stale');
     assert.equal(runFreshness(0, RUN_STALE_S * 1000 + 1000).freshness, 'expired');
     assert.throws(() => locate(man, 91, 0), RangeError);
+});
+
+function readWindow(lat, lon, halfDeg) {
+    const plan = fieldPlan(man, { lat, lon, halfDeg });
+    const bodies = plan.segments.map((seg) => {
+        const p = (v) => String(v).padStart(2, '0');
+        const bytes = new Uint8Array(readFileSync(new URL(`r${p(seg.tr)}-c${p(seg.tc)}.i16`, DIR)));
+        return bytes.subarray(seg.range[0], seg.range[1]);
+    });
+    return { plan, bodies };
+}
+
+ok('a field window reads every node from the right row and column (row/col index vars are exact)', () => {
+    const { plan, bodies } = readWindow(40.015, -105.27, 3);
+    assert.deepEqual(plan.rows, [47, 48, 49, 50, 51, 52], '43°N … 38°N: the window is the site ±3°');
+    assert.deepEqual(plan.cols, [252, 253, 254, 255, 256, 257]);
+    assert.equal(plan.latN, 43);
+    assert.equal(plan.lonW, -108, 'west edge continuous with the site, not 252');
+    assert.equal(plan.segments.length, plan.nRows, 'one contiguous range per row inside one tile');
+    const row = readField(man, plan, 'row', bodies), col = readField(man, plan, 'col', bodies);
+    const plane = plan.nRows * plan.nCols;
+    for (let t = 0; t < man.times.length; t++) {
+        plan.rows.forEach((r, i) => plan.cols.forEach((c, j) => {
+            assert.equal(row[t * plane + i * plan.nCols + j], r + t / 4, `row @${i},${j} t${t}`);
+            assert.equal(col[t * plane + i * plan.nCols + j], c, `col @${i},${j}`);
+        }));
+    }
+});
+
+ok('the field reproduces the point reader: bilinear on its nodes = Python’s value at the site', () => {
+    const p = points.find((x) => x.name === 'Boulder');
+    const { plan, bodies } = readWindow(p.lat, p.lon, 3);
+    const temp = readField(man, plan, 'tempC', bodies);
+    const y = (plan.latN - p.lat) / man.dlat, x = (p.lon - plan.lonW) / man.dlon;
+    const i = Math.floor(y), j = Math.floor(x), fy = y - i, fx = x - j;
+    const at = (a, b) => temp[a * plan.nCols + b];
+    const v = (1 - fy) * ((1 - fx) * at(i, j) + fx * at(i, j + 1)) + fy * ((1 - fx) * at(i + 1, j) + fx * at(i + 1, j + 1));
+    close(v, p.values[0][0], 1e-4, 'Boulder t0 through the field');
+});
+
+ok('a window across the grid seam is two segments per row and one continuous field', () => {
+    const { plan, bodies } = readWindow(55, 0, 2);
+    assert.deepEqual(plan.cols, [358, 359, 0, 1, 2]);
+    assert.equal(plan.lonW, -2);
+    assert.equal(plan.segments.length, 2 * plan.nRows);
+    assert.deepEqual([...new Set(plan.segments.map((s) => s.tc))].sort((a, b) => a - b), [0, 17]);
+    const col = readField(man, plan, 'col', bodies);
+    assert.deepEqual([...col.slice(0, plan.nCols)], [358, 359, 0, 1, 2]);
+    const temp = readField(man, plan, 'tempC', bodies);
+    for (let j = 1; j < plan.nCols; j++) assert.ok(Math.abs(temp[j] - temp[j - 1]) < 8, 'no jump at the seam');
+});
+
+ok('gaps stay NaN in the field and null on the wire; the path snaps to 0.25°', () => {
+    const p = { lat: 29, lon: 101 };               // window = rows 60–62, cols 100–102: tile r03-c05
+    const { plan, bodies } = readWindow(p.lat, p.lon, 1);
+    const temp = readField(man, plan, 'tempC', bodies);
+    const plane = plan.nRows * plan.nCols;
+    const i = plan.rows.indexOf(60), j = plan.cols.indexOf(100);
+    assert.ok(Number.isNaN(temp[3 * plane + i * plan.nCols + j]), 'planted gap at t3');
+    assert.ok(Number.isFinite(temp[2 * plane + i * plan.nCols + j]));
+    const body = fieldBody(man, plan, 'tempC', temp, { nowMs: man.runMs, site: { lat: p.lat, lon: p.lon } });
+    assert.equal(body.values[3 * plane + i * plan.nCols + j], null);
+    assert.equal(body.values.length, man.times.length * plane);
+    assert.equal(fieldPath({ lat: 40.015, lon: -105.271 }), '/api/climalytix/nwp-field?lat=40.00&lon=-105.25&half=3');
+    assert.throws(() => readField(man, plan, 'nope', bodies), RangeError);
 });
 
 console.log(`\n${passed} passed`);

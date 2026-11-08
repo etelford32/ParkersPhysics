@@ -201,3 +201,120 @@ export function degradedNwp(site, grid, reason, nowMs) {
         note: 'Our own GFS archive is unavailable for this request; nothing is substituted.',
     };
 }
+
+// ── Area reads: the heat-map field around a site ───────────────────────────
+//
+// The same tiles, read for a WINDOW of grid nodes instead of a 2×2 stencil.
+// A window row inside one tile is ONE contiguous byte range (cells of a row
+// are adjacent, each cell carrying every var and time), so a field costs one
+// range per (row, tile) segment. Columns run in UNWRAPPED order from the
+// window's west edge — continuous with the site's longitude — and map to
+// canonical columns modulo ni, so a window across the grid's seam (Greenwich,
+// for a 0..360 grid) splits into two segments and draws as one field.
+
+export const FIELD_HALF_DEG_DEFAULT = 3;
+export const FIELD_HALF_DEG_MAX = 4;
+const FIELD_SNAP_DEG = 0.25;
+
+/** The ONE path builder for /api/climalytix/nwp-field. The centre snaps to
+ *  0.25° so everyone looking at the same place shares one CDN key. */
+export function fieldPath({ lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT, grid = '0p25' }) {
+    const q = parseSite({ lat, lon });
+    if (q.error) throw new RangeError(q.error);
+    const snap = (x) => Math.round(x / FIELD_SNAP_DEG) * FIELD_SNAP_DEG + 0;
+    const h = Math.min(FIELD_HALF_DEG_MAX, Math.max(1, Number(halfDeg) || FIELD_HALF_DEG_DEFAULT));
+    return `/api/climalytix/nwp-field?lat=${snap(q.lat).toFixed(2)}&lon=${snap(q.lon).toFixed(2)}&half=${h}`
+        + (grid === '0p25' ? '' : `&grid=${grid}`);
+}
+
+/**
+ * Which nodes and byte ranges a window needs.
+ * Returns { rows: [r…], cols: [canonical c…], latN, lonW, nRows, nCols,
+ *           segments: [{ tr, tc, key, range: [start, end), outRow, outCol0, n }] }
+ */
+export function fieldPlan(man, { lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT }) {
+    const h = Math.min(FIELD_HALF_DEG_MAX, Math.max(0.25, halfDeg));
+    const rTop = Math.max(0, Math.ceil((man.lat0 - (lat + h)) / man.dlat - 1e-9));
+    const rBot = Math.min(man.nj - 1, Math.floor((man.lat0 - (lat - h)) / man.dlat + 1e-9));
+    const lonRel = (x) => x - man.lon0;                       // unwrapped, may be negative
+    const cW = Math.ceil(lonRel(lon - h) / man.dlon - 1e-9);
+    const cE = Math.floor(lonRel(lon + h) / man.dlon + 1e-9);
+    const rows = []; for (let r = rTop; r <= rBot; r++) rows.push(r);
+    const unwrapped = []; for (let c = cW; c <= cE; c++) unwrapped.push(c);
+    const cols = unwrapped.map((c) => ((c % man.ni) + man.ni) % man.ni);
+    if (cols.length > man.ni) throw new RangeError('window wider than the grid');
+    const n = man.tileN;
+    const cell = 2 * man.vars.length * man.times.length;
+    const segments = [];
+    rows.forEach((r, i) => {
+        const tr = Math.min(Math.floor(r / n), man.tileRows - 1);
+        const lr = r - tr * n;
+        const { cols: tileCols } = tileShape(man, tr);
+        let j = 0;
+        while (j < cols.length) {
+            const tc = Math.floor(cols[j] / n);
+            let k = j;
+            while (k + 1 < cols.length && cols[k + 1] === cols[k] + 1 && Math.floor(cols[k + 1] / n) === tc) k++;
+            const lc0 = cols[j] - tc * n;
+            const start = (lr * tileCols + lc0) * cell;
+            segments.push({ tr, tc, key: tileKey(man, tr, tc), range: [start, start + (k - j + 1) * cell],
+                            outRow: i, outCol0: j, n: k - j + 1 });
+            j = k + 1;
+        }
+    });
+    return {
+        rows, cols, nRows: rows.length, nCols: cols.length, segments,
+        latN: man.lat0 - rTop * man.dlat,
+        lonW: lonWrapNear(man.lon0 + cW * man.dlon, lon),
+    };
+}
+
+/** A longitude expressed in the turn nearest `ref` (continuous with the site). */
+function lonWrapNear(x, ref) {
+    let v = x;
+    while (v - ref > 180) v -= 360;
+    while (v - ref < -180) v += 360;
+    return Math.round(v * 1e6) / 1e6 + 0;
+}
+
+/**
+ * One variable's field from the segment bodies (same order as plan.segments).
+ * Returns Float32Array laid out [time][row][col], NaN for gaps.
+ */
+export function readField(man, plan, varId, bodies) {
+    const k = man.vars.findIndex((v) => v.id === varId);
+    if (k < 0) throw new RangeError(`no variable ${varId} in this run`);
+    const { scale, offset } = man.vars[k];
+    const nv = man.vars.length, nt = man.times.length;
+    const plane = plan.nRows * plan.nCols;
+    const out = new Float32Array(nt * plane).fill(NaN);
+    plan.segments.forEach((seg, s) => {
+        const dv = view(bodies[s]);
+        if (dv.byteLength !== seg.range[1] - seg.range[0]) {
+            throw new RangeError(`segment ${s} is ${dv.byteLength} bytes, expected ${seg.range[1] - seg.range[0]}`);
+        }
+        for (let c = 0; c < seg.n; c++) {
+            const base = seg.outRow * plan.nCols + seg.outCol0 + c;
+            for (let t = 0; t < nt; t++) {
+                const q = dv.getInt16(2 * ((c * nv + k) * nt + t), true);
+                out[t * plane + base] = q === man.nodata ? NaN : q * scale + offset;
+            }
+        }
+    });
+    return out;
+}
+
+/** The field route's wire body. Values are rounded to 0.1 and gaps are null. */
+export function fieldBody(man, plan, varId, values, { nowMs, site }) {
+    const v = man.vars.find((x) => x.id === varId);
+    return {
+        source: `climalytix-${man.source}`, role: 'archive', schema: man.schema,
+        run: man.run, runMs: man.runMs, grid: man.grid, ...runFreshness(man.runMs, nowMs),
+        site, var: varId, unit: v?.unit ?? null,
+        latN: plan.latN, lonW: plan.lonW, dlat: man.dlat, dlon: man.dlon,
+        nRows: plan.nRows, nCols: plan.nCols, times: man.times, leadsH: man.leadsH,
+        layout: 'time,row,col',
+        values: Array.from(values, (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null)),
+        note: 'Grid-node values of one GFS run; the map smooths between nodes for display only.',
+    };
+}

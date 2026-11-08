@@ -25,8 +25,10 @@ import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
-import { loadDataset } from './loaders.js';
-import { resolveUnits, fmt, QUANTITIES } from '../climate-lab/lab-units.js';
+import { loadDataset, loadField } from './loaders.js';
+import { mountMap } from './map.js';
+import { tempToRampFrac } from '../temp-ramp.js';
+import { resolveUnits, fmt, fmtText, fromDisplay, QUANTITIES } from '../climate-lab/lab-units.js';
 import { homeState, visit, sameLocation, cleanLoc } from '../climate-lab/lab-home.js';
 import { geocodeQuery } from '../user-location.js';
 
@@ -48,6 +50,8 @@ const S = {
     models: [],
     abort: null,
     sync: null,
+    map: null,           // the location map (map.js)
+    field: null,         // { state, body, note } from loadField
 };
 
 // ── Workspace (local-first) ─────────────────────────────────────────────────
@@ -129,6 +133,7 @@ function loadAll({ only = null } = {}) {
     renderCatalog();
     renderPanels();
     const site = S.site;
+    if (!only) loadMapField(site, signal);
     for (const id of ids) {
         loadDataset(id, site, S.ws, { signal }).then((r) => {
             if (signal.aborted || S.site !== site) return;
@@ -139,6 +144,77 @@ function loadAll({ only = null } = {}) {
             renderPanels();
         });
     }
+}
+
+// ── Location map + its layers ───────────────────────────────────────────────
+
+function loadMapField(site, signal) {
+    S.map?.setSite(site);
+    S.field = { state: 'loading', body: null, note: 'Loading the temperature field…' };
+    S.map?.setField('loading', null, S.field.note);
+    loadField(site, { signal }).then((r) => {
+        if (signal.aborted || S.site !== site) return;
+        S.field = r;
+        S.map?.setField(r.state, r.body, r.note);
+    });
+}
+
+/** Paint the colour key ONCE from the site-wide temperature LUT bytes. */
+function paintHeatKey() {
+    const c = $('#cx-heat-key canvas');
+    const img = c.getContext('2d').createImageData(256, 1);
+    img.data.set(S.map.lut);
+    c.getContext('2d').putImageData(img, 0, 0);
+}
+
+/** Ticks at round values IN THE READER'S UNIT, placed on the °C ramp. */
+function renderHeatTicks() {
+    const unit = S.units?.temp === 'F' ? 'F' : 'C';
+    const ticks = unit === 'F' ? [-40, 0, 40, 80, 120] : [-40, -20, 0, 20, 40];
+    $('#cx-heat-key .cx-key-ticks').innerHTML = ticks.map((d) => {
+        const c = fromDisplay('temp', d, S.units);
+        const f = tempToRampFrac(c);
+        return f > 0.02 && f < 0.98 ? `<span style="left:${(f * 100).toFixed(1)}%">${d}°</span>` : '';
+    }).join('');
+}
+
+/** The rail under the toggle: status, valid time, the window's range on the key. */
+function renderHeatRail(info) {
+    const st = $('#cx-heat-status');
+    const on = $('#cx-layer-temp').checked;
+    const win = $('#cx-heat-key .cx-key-win i');
+    if (!on) { st.textContent = 'Temperature layer off.'; st.dataset.state = 'off'; win.hidden = true; return; }
+    if (info.state === 'loading' || info.state === 'down' || info.t == null) {
+        st.dataset.state = info.state === 'loading' ? 'loading' : 'down';
+        st.textContent = info.state === 'loading' ? 'Loading the temperature field…'
+            : info.state === 'down' ? info.note
+            : 'The run does not cover this time — no frame is held past its end.';
+        win.hidden = true;
+        return;
+    }
+    st.dataset.state = info.state;
+    const local = new Date(info.timeMs + S.utcOffsetS * 1000);
+    const when = `${local.toUTCString().slice(0, 3)} ${local.toISOString().slice(11, 16)} local`;
+    const lead = Math.round((info.timeMs - S.field.body.runMs) / 3_600_000);
+    const range = info.range ? ` · window ${fmtText('temp', info.range.min, S.units)} – ${fmtText('temp', info.range.max, S.units)}` : '';
+    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}`;
+    if (info.range) {
+        const a = tempToRampFrac(info.range.min), b = tempToRampFrac(info.range.max);
+        win.hidden = false;
+        win.style.left = `${(a * 100).toFixed(1)}%`;
+        win.style.width = `${Math.max(1, (b - a) * 100).toFixed(1)}%`;
+    } else win.hidden = true;
+}
+
+function mountLocationMap() {
+    S.map = mountMap($('#cx-map'), {
+        formatTemp: (c) => fmtText('temp', c, S.units),
+        onFrame: renderHeatRail,
+    });
+    paintHeatKey();
+    renderHeatTicks();
+    $('#cx-layer-temp').addEventListener('change', (ev) => S.map.setLayer('temperature', ev.target.checked));
+    $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
 }
 
 // ── Catalogue (left rail) ───────────────────────────────────────────────────
@@ -301,6 +377,7 @@ function onPointerMove(ev) {
     const rect = svg.getBoundingClientRect();
     const x = ((ev.clientX - rect.left) / rect.width) * m0.width;
     const ms = msAtX(m0, x);
+    S.map?.setTime(ms);
     const rows = readoutAt(S.models, ms);
     const cross = $('#cx-cross');
     const host = $('#cx-panels');
@@ -320,6 +397,7 @@ function onPointerMove(ev) {
 
 function onPointerLeave() {
     $('#cx-cross').hidden = true;
+    S.map?.setTime(null);
 }
 
 // ── Controls ────────────────────────────────────────────────────────────────
@@ -347,6 +425,8 @@ function wireControls() {
     $('#cx-units').addEventListener('change', (e) => {
         saveWorkspace({ ...S.ws, units: { preset: e.target.value } });
         renderPanels();
+        renderHeatTicks();
+        S.map?.setLayer('temperature', $('#cx-layer-temp').checked);   // redraw: tip + rail re-format
     });
     $('#cx-from').addEventListener('change', (e) => {
         saveWorkspace({ ...S.ws, historyFrom: Number(e.target.value) });
@@ -400,6 +480,7 @@ export function boot() {
     wireControls();
     renderControls();
     renderSiteBar();
+    mountLocationMap();
     loadAll();
     startSync();
     // Test + console hook (inert unless read).
@@ -411,6 +492,8 @@ export function boot() {
                 datasets: Object.fromEntries([...S.results].map(([k, v]) => [k, { state: v.state, series: v.series.map((s) => s.id) }])),
                 loading: [...S.loading],
                 panels: S.models.map((m) => ({ id: m.panelId, lines: m.lines.map((l) => l.id), hasData: m.hasData })),
+                map: S.map?.state ?? null,
+                field: S.field && { state: S.field.state, note: S.field.note },
             };
         },
     };

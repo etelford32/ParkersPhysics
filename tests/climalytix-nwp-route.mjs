@@ -56,10 +56,11 @@ globalThis.fetch = async (input, init = {}) => {
     return new Response(body, { status: 200 });
 };
 
-async function call(qs) {
-    const { default: handler, _resetCache } = await import('../api/climalytix/nwp.js');
+async function call(qs, route = 'nwp') {
+    const { default: handler } = await import(`../api/climalytix/${route}.js`);
+    const { _resetCache } = await import('../api/_lib/climalytix-r2.js');
     _resetCache();
-    const res = await handler(new Request(`https://x.test/api/climalytix/nwp?${qs}`));
+    const res = await handler(new Request(`https://x.test/api/climalytix/${route}?${qs}`));
     return { status: res.status, body: await res.json() };
 }
 
@@ -144,6 +145,43 @@ await ok('bad input is a 400', async () => {
     assert.equal((await call('lat=x&lon=0')).status, 400);
     assert.equal((await call('lat=0&lon=200')).status, 400);
     assert.equal((await call('lat=0&lon=0&grid=9p99')).status, 400);
+});
+
+await ok('the field route returns every node in the window, one range per row, matching the point route', async () => {
+    resetBucket();
+    const { status, body } = await call('lat=40.00&lon=-105.25&half=3&grid=1p00', 'nwp-field');
+    assert.equal(status, 200);
+    assert.equal(body.freshness, 'fresh');
+    assert.equal(body.var, 'tempC');
+    assert.equal(body.layout, 'time,row,col');
+    assert.equal(body.values.length, body.times.length * body.nRows * body.nCols);
+    assert.equal(body.latN, 43);
+    assert.equal(body.lonW, -108);
+    const tileReads = requests.filter((r) => r.key.endsWith('.i16'));
+    assert.equal(tileReads.length, body.nRows, 'one range per row inside one tile');
+    assert.ok(tileReads.every((r) => r.range));
+    // Bilinear on the field's nodes at the point route's own site = the point route's value.
+    const pt = (await call('lat=40.00&lon=-105.25&grid=1p00')).body.series.tempC[0];
+    const y = (body.latN - 40) / body.dlat, x = (-105.25 - body.lonW) / body.dlon;
+    const i = Math.floor(y), j = Math.floor(x), fy = y - i, fx = x - j;
+    const at = (a, b) => body.values[a * body.nCols + b];
+    const v = (1 - fy) * ((1 - fx) * at(i, j) + fx * at(i, j + 1)) + fy * ((1 - fx) * at(i + 1, j) + fx * at(i + 1, j + 1));
+    assert.ok(Math.abs(v - pt) < 0.06, `field ${v} vs point ${pt} (0.1-rounded on the wire)`);
+});
+
+await ok('the field route degrades like the point route, and refuses a bad window', async () => {
+    resetBucket({ publish: false });
+    const a = await call('lat=40&lon=-105&grid=1p00', 'nwp-field');
+    assert.equal(a.status, 200);
+    assert.deepEqual(a.body.reasons, ['no_run_published']);
+    assert.equal(a.body.values, null);
+    resetBucket();
+    objects.delete('fixture/t/r02-c12.i16');
+    const b = await call('lat=40&lon=-105.25&grid=1p00', 'nwp-field');
+    assert.match(b.body.reasons[0], /^tile_read_failed/);
+    assert.equal(b.body.values, null, 'never a partial field');
+    assert.equal((await call('lat=40&lon=-105&half=9', 'nwp-field')).status, 400);
+    assert.equal((await call('lat=x&lon=0', 'nwp-field')).status, 400);
 });
 
 console.log(`\n${passed} passed`);

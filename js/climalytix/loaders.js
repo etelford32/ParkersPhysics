@@ -19,7 +19,7 @@ import {
     adaptArchive, adaptStation, adaptTeleconnections, adaptApHistory, adaptNwp,
 } from './catalog.js';
 import { archivePath } from './archive-request.js';
-import { nwpPath } from './point-tile.js';
+import { nwpPath, fieldPath } from './point-tile.js';
 import { fetchLabStation } from '../climate-lab/lab-feed.js';
 
 const TIMEOUT_MS = 25_000;
@@ -114,6 +114,24 @@ export const LOADERS = Object.freeze({
     drivers: loadDrivers,
     geomag: loadGeomag,
 });
+
+/**
+ * The heat-map field around the site, from our archive ONLY. Resolves to
+ * { state: 'live'|'stale'|'down', body, note } and never rejects.
+ */
+export async function loadField(site, { signal } = {}) {
+    try {
+        const j = await getJson(fieldPath(site), signal);
+        if (!j?.values) {
+            const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
+            return { state: 'down', body: null, note: `No heat map: ${why}. Nothing is substituted for our archive.` };
+        }
+        const state = j.freshness === 'fresh' ? 'live' : 'stale';
+        return { state, body: j, note: `GFS run ${j.run} (${ageText(j.age_seconds)})${state === 'stale' ? ' · older than the daily cadence' : ''}` };
+    } catch (e) {
+        return { state: 'down', body: null, note: `No heat map: ${e?.message || 'unreachable'}.` };
+    }
+}
 
 /** Run one loader; never rejects. */
 export async function loadDataset(id, site, ws, { signal } = {}) {

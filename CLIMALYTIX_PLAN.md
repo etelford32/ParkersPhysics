@@ -793,6 +793,22 @@ that is respected (`normalizeWorkspace`, gated). The renderer clamped colour
 slots to 0–3 — a fifth series silently wore the fourth's colour — and
 `SLOT_COUNT` is now one number shared by the clamp and the catalog gate.
 
+**The location map (2026-11-08):** the top of the page is a map centred on
+the site — NASA GIBS Blue Marble (archival composite, browser-direct; tile
+grid = js/earth-detail-inset.js) with reference overlays where they load —
+with a LAYER RAIL on its left whose first toggle is Temperature: the 2 m
+field at the GFS grid nodes in a ±3° window, read from our own archive by
+`/api/climalytix/nwp-field` (one R2 range per row segment, `fieldPlan` /
+`readField` in point-tile.js, gated against the Python-written fixture), drawn
+through the site-wide temperature LUT (js/temp-ramp.js, the same bytes as
+EarthView's key) with the window's extent dashed. It follows the timeline's
+crosshair and holds no frame past the run's end. Archive down ⇒ no heat and
+the rail says why; nothing stands in for it. Controls: zoom ± and a D-pad
+with recentre in the map's lower-right corner, drag, wheel/trackpad zoom AT
+THE CURSOR (exact, `zoomAt`), pinch, double-click, keyboard. Geometry is the
+PURE `js/climalytix/map-view.js` (equirectangular, true scale at the view
+centre); gates `tests/climalytix-map-view.mjs` + `tests/climalytix-map.spec.js`.
+
 Next in P-1: GEFS members; ECMWF open data
 (IFS/AIFS, needs its own `.index` JSON sidecar planner); the ERA5 history
 backfill into the same format (time axis = decades, chunked across runs).

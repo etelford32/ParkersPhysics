@@ -11,17 +11,23 @@
  *     (js/climalytix/archive-request.js normalizeArchive) from a synthetic
  *     upstream, so the mock cannot drift from the route's contract
  *   · our GFS archive's body is built by the REAL point-tile.js siteBody /
- *     degradedNwp from a synthetic manifest (the route's own two functions)
+ *     degradedNwp from a synthetic manifest (the route's own two functions),
+ *     and the heat FIELD by the route's own fieldPlan + fieldBody
+ *   · NASA GIBS tiles are real 512×512 PNGs (a flat colour per tile, so the
+ *     tiling is visible) with Access-Control-Allow-Origin, as GIBS serves
+ *     them — the map loads them crossOrigin, so the canvas stays readable
  *
  * Options:
  *   down: 'all' | Set<'gfs'|'era5'|'station'|'drivers'|'geomag'>   answer 503
  *   archiveExpired: true    archive answers its degraded 200 (freshness:'expired')
  *   nwp: 'unpublished'      our archive answers 200 + expired + r2_not_configured
  *        'old'              our archive serves a 40-hour-old run (freshness:'stale')
+ *   gibs: 'down'            every GIBS tile 404s (the map still draws the heat + site)
  */
 import { labFixture } from './climate-lab-fixtures.mjs';
 import { normalizeArchive, degradedArchive, parseArchiveQuery } from '../../js/climalytix/archive-request.js';
-import { siteBody, degradedNwp, parseSite, SCHEMA } from '../../js/climalytix/point-tile.js';
+import { siteBody, degradedNwp, parseSite, fieldPlan, fieldBody, SCHEMA } from '../../js/climalytix/point-tile.js';
+import { deflateSync } from 'node:zlib';
 
 const DAY = 86_400_000;
 
@@ -72,6 +78,60 @@ export function apHistoryFixture(nowMs) {
     return { source: 'NOAA SWPC (fixture)', freshness: 'live', stale: false, data: { rows } };
 }
 
+// ── A real PNG, no dependencies ────────────────────────────────────────────
+const CRC = new Int32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c; });
+function crc32(buf) { let c = -1; for (const b of buf) c = CRC[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; }
+function chunk(type, data) {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0); out.write(type, 4, 'ascii'); data.copy(out, 8);
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+}
+/** A solid RGBA PNG of w×h. */
+export function solidPng(w, h, [r, g, b, a = 255]) {
+    const row = Buffer.alloc(1 + w * 4);
+    for (let x = 0; x < w; x++) row.set([r, g, b, a], 1 + x * 4);
+    const raw = Buffer.concat(Array.from({ length: h }, () => row));
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
+    return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+/** The base tiles' colour: dark earth tones that vary by tile so seams show. */
+export function baseTileColor(z, row, col) { return [40 + ((row * 7 + col * 3) % 5) * 9, 70 + (z * 5) % 30, 52]; }
+const pngCache = new Map();
+function tilePng(key, rgba) {
+    if (!pngCache.has(key)) pngCache.set(key, solidPng(512, 512, rgba));
+    return pngCache.get(key);
+}
+
+/** Our archive's heat FIELD around a site, built by the route's own code. */
+export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3 } = {}) {
+    const H = 3_600_000;
+    const runMs = Math.floor((nowMs - ageH * H) / (6 * H)) * 6 * H;
+    const leadsH = Array.from({ length: 81 }, (_, i) => i * 3);
+    const man = {
+        schema: SCHEMA, source: 'gfs', grid: '0p25', run: new Date(runMs).toISOString().slice(0, 16) + 'Z', runMs,
+        lat0: 90, dlat: 0.25, lon0: 0, dlon: 0.25, ni: 1440, nj: 721, tileN: 20, tileRows: 36, tileCols: 72,
+        vars: [{ id: 'tempC', unit: 'degC', scale: 0.01, offset: 0 }], times: leadsH.map((h) => runMs + h * H), leadsH,
+        nodata: -32768, prefix: 'mock',
+    };
+    const plan = fieldPlan(man, { lat: site.lat, lon: site.lon, halfDeg: half });
+    const plane = plan.nRows * plan.nCols;
+    const values = new Float32Array(man.times.length * plane);
+    for (let t = 0; t < man.times.length; t++) {
+        const diurnal = 6 * Math.sin(2 * Math.PI * (man.times[t] / 86_400_000 - 0.4));
+        for (let i = 0; i < plan.nRows; i++) {
+            for (let j = 0; j < plan.nCols; j++) {
+                const lat = plan.latN - i * man.dlat, lon = plan.lonW + j * man.dlon;
+                // A clear north–south gradient plus a warm east: the layer must SHOW structure.
+                values[t * plane + i * plan.nCols + j] = 10 - 2.2 * (lat - site.lat) + 1.5 * (lon - site.lon) + diurnal;
+            }
+        }
+    }
+    return fieldBody(man, plan, 'tempC', values, { nowMs, site });
+}
+
 const GFS_VARS = ['tempC', 'dewC', 'rhPct', 'uMs', 'vMs', 'gustMs', 'mslHpa', 'precipMm', 'cloudPct'];
 
 /** Our archive's body for one site: a 00z run `ageH` hours old, 0–240 h every
@@ -97,7 +157,7 @@ export function nwpFixture(nowMs, site, { ageH = 7 } = {}) {
     return siteBody(man, { nodeLat: Math.ceil(site.lat * 4) / 4, nodeLon: Math.floor(site.lon * 4) / 4 + 360 }, v, { ...site, nowMs });
 }
 
-export async function installClimalytixMocks(page, { down = null, archiveExpired = false, nwp = 'fresh', onRequest } = {}) {
+export async function installClimalytixMocks(page, { down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', onTile, onRequest } = {}) {
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
@@ -105,6 +165,12 @@ export async function installClimalytixMocks(page, { down = null, archiveExpired
         onRequest?.(url);
         if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
             const p = url.pathname;
+            if (p === '/api/climalytix/nwp-field') {
+                if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });
+                const q = parseSite(Object.fromEntries(url.searchParams));
+                if (nwp === 'unpublished') return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'r2_not_configured', now), var: 'tempC', values: null } });
+                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3 }) });
+            }
             if (p === '/api/climalytix/nwp') {
                 if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });
                 const q = parseSite(Object.fromEntries(url.searchParams));
@@ -131,6 +197,15 @@ export async function installClimalytixMocks(page, { down = null, archiveExpired
             }
             if (p.startsWith('/api/')) return route.abort();
             return route.continue();
+        }
+        if (url.hostname === 'gibs.earthdata.nasa.gov') {
+            const m = /\/(\d+)\/(\d+)\/(\d+)\.(jpg|png)$/.exec(url.pathname);
+            if (!m || gibs === 'down') return route.fulfill({ status: 404, body: 'not found' });
+            const [z, row, col] = m.slice(1, 4).map(Number);
+            const overlay = /Reference_/.test(url.pathname);
+            const body = overlay ? tilePng('overlay', [0, 0, 0, 0]) : tilePng(`${z}/${row}/${col}`, baseTileColor(z, row, col));
+            onTile?.(url);
+            return route.fulfill({ status: 200, body, headers: { 'Content-Type': 'image/png', 'Access-Control-Allow-Origin': '*' } });
         }
         if (url.hostname === 'nominatim.openstreetmap.org' && url.pathname.startsWith('/search')) {
             return route.fulfill({ json: [{ lat: '35.6762', lon: '139.6503', display_name: 'Tokyo, Japan', address: { city: 'Tokyo' } }] });
