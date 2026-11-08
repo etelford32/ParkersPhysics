@@ -1,6 +1,6 @@
 # Climalytix — location-first multi-dataset climate & weather analytics
 
-Status: **PLANNED, nothing built** (2026-11-08). This is the design brief for
+Status: **P0 BUILT** (2026-11-08) — `climalytix.html` under Research → Analysis, the SiteSeries store, the Explore timeline over four public datasets, `/api/climalytix/archive`; see §13 for what P0 shipped and what comes next. Everything else here is planned. This is the design brief for
 `climalytix.html`, the flagship analysis workspace. It sits ON TOP of the
 weather / climate machinery the site already ships and must not fork any of it
 (§3 lists what it reuses, by file).
@@ -16,6 +16,8 @@ weather / climate machinery the site already ships and must not fork any of it
 | D5 | **Built from the Home Station** | The Climate Lab's Home, instrument bench, watches, units and prefs patterns become Climalytix's foundation. They are generalised, not copied, and the dashboard card set keeps working on the same modules (§15) |
 | D6 | **Paid event delivery = email + webhook** | Resend (already wired) plus signed webhooks in P2. SMS and Slack later |
 | D7 | **The dashboard Home Station stays free, for now** | It is the funnel; revisit once Climalytix has paying users |
+| D8 | **The ingest worker runs on GitHub Actions, for now** (2026-11-08) | Scheduled workflows write to R2 (the `trojans-refresh.yml` precedent: a data job that never pushes to main). The one-off ERA5 backfill is chunked across runs to fit the per-job time limit; a VM is the escape hatch if the realtime NWP cadence outgrows Actions (§17.3) |
+| D9 | **Zero GPU** (2026-11-08) | §18 M4 is ingest-only: ECMWF's published AIFS output as another public source. No open-weight model is run by us until there is budget and the cheaper rungs are exhausted |
 
 ---
 
@@ -479,7 +481,8 @@ P-1 is live.
 | Phase | Ships | Gate |
 |---|---|---|
 | **P-1 Data engine (D2, §17)** | the ingest worker (public NWP GRIB2 by byte-range, ERA5 history, stations, indices) → R2 point archive → `/api/climalytix/*` serving `SiteSeries`; a source switch so Climalytix reads our archive first and the bootstrap source second, flagged stale; registry entries with an ingest-lag probe per source | a point read reproduces the source's own value at a grid point to its packing precision (GRIB decode gate against a stored real message); archive round-trip is lossless at the stated quantisation; lag visible on status.html |
-| **P0 Foundation = the lab, generalised (D5)** | the `SiteSeries` store + resampler; the Climate Lab's Home/units/prefs/instrument contracts lifted into shared modules (§15.2) with the dashboard still green; `climalytix.html` shell under Research → Analysis; site bar = Home by default; Explore timeline built from the meteogram's small multiples; data-health chips; the workspace doc (local-first + `dashboards` sync) | `node tests/climate-lab.mjs` UNCHANGED + `npx playwright test tests/dashboard-climate-lab.spec.js` UNCHANGED (the lift is a no-op for the dashboard); new `climalytix-site-store.mjs`, `climalytix-resample.mjs`, `climalytix-smoke.spec.js` (feeds mocked; negative control: every feed 503 ⇒ "feeds down", never a quiet chart); nav gates |
+| **P0 Foundation — BUILT 2026-11-08** | `climalytix.html` (Research → Analysis); `js/climalytix/series.js` (SiteSeries + agg-aware resampler), `catalog.js` (4 datasets: ERA5 daily via the new `/api/climalytix/archive`, the Home Station feed, AO/NAO, Ap observed + 45-day), `timeline-model.js` (small multiples, past solid / future dashed, aggregation never thinning, one bucket per summed panel, "too short for this zoom"), `loaders.js`, `page.js`; site = the one location store (Home by default, a search is a visit); workspace local-first + `dashboards` sync (page `climalytix`) | `node tests/climalytix-{series,catalog,timeline,archive}.mjs` (35 checks) + `tests/climate-lab.mjs` UNCHANGED; `npx playwright test tests/climalytix-smoke.spec.js` (7, incl. the all-feeds-down negative control) + `tests/dashboard-climate-lab.spec.js` UNCHANGED + `tests/nav-responsive.spec.js`; CI `climalytix-kernels.yml` |
+| **P0 remainder** | air quality (CAMS) and NWS alerts loaders; ONI/MJO driver chips; the climatology overlay is P1 | — |
 | **P1 Climate context** | 85-yr climatology, percentiles, trend, change-point, spells, EVA, Extremes tab, Overview briefing. The dashboard's Climate Context card gains an "85-year baseline" mode from the same kernel (§15.3) | kernel gates with the published fixtures in §6 |
 | **P2 Events, the paid hook** | event DSL; lab watches migrated as one-condition events (§15.4); **server-side event evaluation + delivery (email, webhook)**, the thing the lab console currently has to tell users it cannot do; short-range EMOS calibration; Predict + Verify tabs; ledger v1; tier gating of all of it | calibration recovers a planted bias/spread; a watch round-trips to an event and evaluates identically (`assert.deepEqual` on `evaluateWatch` vs the event evaluator over the lab fixture); delivery cron idempotent (one send per event-window) |
 | **P3 Team authoring v1 (D4)** | user instruments (formula DSL), save / share-to-team / fork; reports (PDF). Uploads deferred (public data only) | formula DSL fuzz gate (no `eval`, no prototype access, bounded cost); team RLS tests (a non-member reads nothing) |
@@ -502,12 +505,7 @@ data, not a self-hosted Open-Meteo (D2); Research (D3); private + team authoring
 only, no uploads for now (D4); built from the Home Station (D5); email + webhook
 delivery (D6); Home Station free for now (D7). Open:
 
-1. **Where the ingest worker runs** (§17.3): a small always-on VM (simplest), or
-   scheduled GitHub Actions (free to start, but per-job time limits make the ERA5
-   backfill awkward). The backfill needs one-off compute either way.
-2. **GPU budget for the AI members (§18 M4):** zero to start (ingest ECMWF's
-   published AIFS output, no GPU needed), or rent GPU time to run open-weight models
-   ourselves?
+None open. Decided 2026-11-08: GitHub Actions for the ingest worker (D8), zero GPU (D9).
 
 ---
 
@@ -542,10 +540,13 @@ this revision. They are not committed (binary bloat). Re-capture with the recipe
 
 ### 15.2 The lift (P0), with one rule: the dashboard must not notice
 
-- **Move contracts, not features.** `INSTRUMENTS` / `WATCH_KINDS` / the reading shape /
-  `normalizePrefs`'s cleaning helpers move into `js/site-analysis/` modules
-  (`instruments.js`, `watch-kinds.js`, `units.js`, which re-exports `lab-units`).
-  `js/climate-lab/*` then imports from them. No behaviour change.
+- **As built (P0): IMPORT IN PLACE, do not move.** Climalytix imports
+  `js/climate-lab/lab-units.js`, `lab-feed.js` (`fetchLabStation`, `normalizeLabResponse`)
+  and `lab-home.js` (`homeState`, `visit`) directly — ONE copy, and the dashboard
+  is byte-identical. Moving files into a shared folder was churn with zero behaviour
+  change (the CLAUDE.md §5 reversion risk); a module moves only when a second
+  consumer needs its CONTRACT to change, and then with the gates below. The
+  instrument catalogue and `WATCH_KINDS` are next (P2, when watches become events).
 - **The gate is the existing gate.** `node tests/climate-lab.mjs` and
   `tests/dashboard-climate-lab.spec.js` pass UNCHANGED, with no fixture or assertion
   edits. If one has to change, the lift was not a lift.

@@ -267,6 +267,17 @@ export const PIPELINES = [
       warnAgeS:  60 * 60, critAgeS: 240 * 60,
       notes: 'Per-location query; not pre-warmable — each call is unique.' },
 
+    { id: 'climalytix-archive', label: 'Climalytix ERA5 daily archive',
+      endpoint: '/api/climalytix/archive',
+      // Requires ?lat&lon — a bare probe 400s by design. A short `from`
+      // keeps the probe cheap; the site snaps to the 0.05° grid.
+      probePath: '/api/climalytix/archive?lat=40.00&lon=-105.25&from=2024',
+      probeTimeoutMs: 25_000,
+      category: 'weather', upstream: 'Open-Meteo historical (ERA5) — bootstrap',
+      cadence_s: 86_400, prewarm: null,
+      warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
+      notes: 'Per-site, 12 h edge cache. BOOTSTRAP source (non-commercial free tier) until the CLIMALYTIX_PLAN.md §17 data engine serves sites. Upstream failure is 200 + freshness:expired + reasons, never a 5xx.' },
+
     { id: 'polar-vortex',       label: 'Polar vortex',
       endpoint: '/api/weather/polar-vortex',
       category: 'atmosphere', upstream: 'Open-Meteo GFS @ 60°N',

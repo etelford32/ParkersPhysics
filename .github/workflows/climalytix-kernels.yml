@@ -1,0 +1,74 @@
+# climalytix-kernels — the Climalytix SiteSeries store, catalogue, timeline
+# model and archive route (CLIMALYTIX_PLAN.md §13 P0).
+#
+#   climalytix-series.mjs    the SiteSeries contract + agg-aware resampler: gaps
+#                            stay gaps, agg is required, never upsample, sparse
+#                            buckets are gaps, station-local day buckets,
+#                            alignment by instant
+#   climalytix-catalog.mjs   the dataset table and the four pure adapters (the
+#                            station adapter is fed the Climate Lab's OWN fixture
+#                            through the lab's OWN normaliser), the workspace
+#                            normaliser
+#   climalytix-timeline.mjs  past solid / future dashed, gaps break lines, long
+#                            windows aggregate (a max stays a max), one bucket
+#                            for every sum in a panel, "too short for this zoom"
+#   climalytix-archive.mjs   /api/climalytix/archive on stubbed fetch: snapped
+#                            cache key, SI units pinned, every degraded upstream
+#                            is 200 + expired (never a 5xx), bad input 400
+#   climate-lab.mjs          Climalytix imports the lab's units / feed / home
+#                            modules — the lab's gate must keep passing UNCHANGED
+#
+# Browser gate (tests/climalytix-smoke.spec.js, with its all-feeds-down
+# negative control) runs with the Playwright suite.
+name: climalytix-kernels
+
+on:
+  push:
+    paths:
+      - 'js/climalytix/**'
+      - 'js/climate-lab/**'
+      - 'api/climalytix/**'
+      - 'climalytix.html'
+      - 'tests/climalytix-*.mjs'
+      - 'tests/fixtures/climalytix-mocks.mjs'
+      - '.github/workflows/climalytix-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/climalytix/**'
+      - 'js/climate-lab/**'
+      - 'api/climalytix/**'
+      - 'climalytix.html'
+      - 'tests/climalytix-*.mjs'
+      - 'tests/fixtures/climalytix-mocks.mjs'
+      - '.github/workflows/climalytix-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: climalytix-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Climalytix kernels + archive route (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: SiteSeries store + resampler
+        run: node tests/climalytix-series.mjs
+      - name: catalogue + adapters + workspace
+        run: node tests/climalytix-catalog.mjs
+      - name: timeline model
+        run: node tests/climalytix-timeline.mjs
+      - name: archive route
+        run: node tests/climalytix-archive.mjs
+      - name: Climate Lab (unchanged by the lift)
+        run: node tests/climate-lab.mjs
+      - name: pipeline registry
+        run: node tests/pipeline-registry.mjs

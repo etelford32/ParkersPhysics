@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Climalytix · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/climalytix.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/climalytix.html">
+<meta property="og:title" content="Climalytix — one site, every dataset, on one clock">
+<meta property="og:description" content="Decades of reanalysis, the live forecast, the climate drivers and space weather for one place, aligned on one time axis — the start of a scored, physics-first climate analysis workspace.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Climalytix — one site, every dataset">
+<meta name="twitter:description" content="Reanalysis back to 1940, the forecast, AO/NAO and geomagnetic activity for one place, on one time axis.">
+<meta name="description" content="Climalytix aligns decades of ERA5 reanalysis, the live forecast, the AO and NAO climate drivers and geomagnetic activity for one site on a single time axis, with honest provenance on every series.">
+
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+:root {
+    --cx-bg: #060b15;
+    --cx-panel: #0b1322;          /* the palette below is validated on this */
+    --cx-line: rgba(150, 190, 240, .12);
+    --cx-ink: #e8f1f8;
+    --cx-muted: #8da2b5;
+    --cx-faint: #5d7084;
+    --cx-accent: var(--c-accent, #00c6ff);
+    --cx-home: var(--c-loc, #5fffd0);
+    /* Series slots — the Climate Lab meteogram's validated categorical
+       colours (js/climate-lab/climate-lab.css), bound to the series by
+       js/climalytix/catalog.js, never to on-screen position. */
+    --cx-s0: #d95926;
+    --cx-s1: #3987e5;
+    --cx-s2: #199e70;
+    --cx-s3: #c98500;
+    --cx-good: #0ca30c;
+    --cx-caution: #fab219;
+    --cx-critical: #d03b3b;
+}
+body {
+    width:100%; min-height:100vh; overflow-x:clip;
+    background:var(--cx-bg); color:var(--cx-ink);
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+#cx-app {
+    display:grid; grid-template-columns:320px minmax(0, 1fr); align-content:start;
+    gap:14px; padding:14px; min-height:calc(100vh - 50px);
+}
+@media (max-width: 1000px) { #cx-app { grid-template-columns:minmax(0, 1fr); } }
+@media (max-width: 768px) { #cx-app { padding:10px; gap:10px; } }
+.cx-card {
+    background:var(--cx-panel); border:1px solid var(--cx-line);
+    border-radius:12px; padding:12px 14px; min-width:0;
+}
+.cx-card h2 {
+    font-size:.66rem; text-transform:uppercase; letter-spacing:.14em;
+    color:var(--cx-accent); font-weight:700; margin-bottom:8px;
+}
+
+/* site bar */
+#cx-site { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; }
+#cx-brand { display:flex; flex-direction:column; gap:2px; min-width:160px; }
+#cx-brand b { font-size:1.05rem; letter-spacing:.02em;
+    background:linear-gradient(100deg, #e8f1f8 20%, var(--cx-accent) 95%);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+#cx-brand span { font-size:.66rem; color:var(--cx-muted); }
+#cx-where { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+#cx-site-name { font-size:1.15rem; font-weight:700; }
+#cx-site-coords { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:.78rem; color:var(--cx-muted); }
+#cx-site-badge { font-size:.6rem; font-weight:800; letter-spacing:.12em; padding:2px 8px; border-radius:6px; }
+#cx-site-badge[data-kind="home"] { background:var(--cx-home); color:#04211a; }
+#cx-site-badge[data-kind="visit"] { border:1px solid var(--cx-caution); color:var(--cx-caution); }
+#cx-search-form { display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; align-items:center; }
+#cx-search { background:#050a14; border:1px solid var(--cx-line); color:var(--cx-ink);
+    border-radius:8px; padding:7px 10px; min-width:min(260px, 70vw); font-size:.82rem; }
+.cx-btn { background:rgba(0,198,255,.08); border:1px solid rgba(0,198,255,.35); color:var(--cx-ink);
+    border-radius:8px; padding:6px 11px; font-size:.78rem; cursor:pointer; min-height:34px; }
+.cx-btn:hover { background:rgba(0,198,255,.16); }
+.cx-btn[aria-pressed="true"] { background:rgba(0,198,255,.28); border-color:var(--cx-accent); }
+#cx-search-msg { font-size:.72rem; color:var(--cx-caution); width:100%; text-align:right; }
+#cx-search-msg:empty { display:none; }
+
+/* catalogue */
+#cx-catalog { align-self:start; }
+.cx-ds { border-top:1px solid var(--cx-line); padding:9px 0 6px; }
+.cx-ds:first-child { border-top:none; padding-top:0; }
+.cx-ds-head { display:flex; align-items:center; gap:8px; }
+.cx-ds-name { font-size:.82rem; font-weight:700; }
+.cx-chip { margin-left:auto; display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px;
+    font-size:.6rem; font-weight:700; border:1px solid rgba(255,255,255,.18); color:var(--cx-muted); }
+.cx-chip::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.cx-chip[data-state="live"] { color:#6ef0b0; border-color:rgba(110,240,176,.45); }
+.cx-chip[data-state="stale"] { color:#ffd479; border-color:rgba(255,212,121,.5); }
+.cx-chip[data-state="down"] { color:#ff8c7a; border-color:rgba(255,140,122,.5); }
+.cx-ds-meta, .cx-ds-note { font-size:.66rem; color:var(--cx-muted); line-height:1.45; margin-top:3px; }
+.cx-kind { text-transform:uppercase; letter-spacing:.08em; color:var(--cx-ink); font-weight:600; }
+.cx-vars { display:grid; gap:3px; margin-top:6px; }
+.cx-var { display:flex; align-items:center; gap:7px; font-size:.74rem; cursor:pointer; min-height:26px; }
+.cx-var.is-missing { opacity:.5; }
+.cx-var-agg { margin-left:auto; font-size:.6rem; color:var(--cx-faint); text-transform:uppercase; letter-spacing:.06em; }
+.cx-swatch { display:inline-block; width:12px; height:3px; border-radius:2px; flex:none; }
+.cx-bg-s0 { background:var(--cx-s0); } .cx-bg-s1 { background:var(--cx-s1); }
+.cx-bg-s2 { background:var(--cx-s2); } .cx-bg-s3 { background:var(--cx-s3); }
+
+/* explore */
+#cx-explore { min-width:0; }
+#cx-toolbar { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin-bottom:8px; }
+.cx-seg { display:flex; gap:4px; flex-wrap:wrap; }
+.cx-field { display:flex; align-items:center; gap:6px; font-size:.72rem; color:var(--cx-muted); }
+.cx-field select { background:#050a14; color:var(--cx-ink); border:1px solid var(--cx-line); border-radius:7px; padding:5px 7px; min-height:32px; }
+#cx-step { font-size:.66rem; color:var(--cx-muted); margin-bottom:6px; }
+#cx-banner { border-radius:9px; padding:10px 12px; font-size:.8rem; line-height:1.5; margin-bottom:8px; }
+#cx-banner[data-kind="info"] { background:rgba(0,198,255,.08); border:1px solid rgba(0,198,255,.3); }
+#cx-banner[data-kind="down"] { background:rgba(208,59,59,.12); border:1px solid rgba(255,140,122,.5); color:#ffd2c9; }
+#cx-banner[hidden] { display:none; }
+#cx-stage { position:relative; }
+#cx-panels { position:relative; display:grid; gap:6px; touch-action:pan-y; }
+.cx-panel { margin:0; }
+.cx-panel figcaption { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; font-size:.72rem; margin:2px 0 1px; }
+.cx-unit { color:var(--cx-muted); }
+.cx-legend { display:flex; flex-wrap:wrap; gap:4px 10px; margin-left:auto; }
+.cx-key { display:inline-flex; align-items:center; gap:5px; color:var(--cx-muted); font-size:.68rem; }
+.cx-agg-note { color:var(--cx-faint); font-size:.62rem; }
+.cx-agg-note.cx-short { color:var(--cx-caution); }
+.cx-panel-svg { display:block; width:100%; height:auto; overflow:visible; }
+.cx-grid { stroke:var(--cx-line); stroke-width:1; }
+.cx-tick { fill:var(--cx-faint); font-size:10px; font-family:ui-monospace, Menlo, Consolas, monospace; }
+.cx-future { fill:rgba(0,198,255,.045); }
+.cx-now { stroke:var(--cx-accent); stroke-width:1; stroke-dasharray:2 3; }
+.cx-line { fill:none; stroke-width:1.6; stroke-linejoin:round; stroke-linecap:round; }
+.cx-line.cx-proj { stroke-dasharray:5 4; }
+.cx-line.cx-s0, .cx-dot.cx-s0 { stroke:var(--cx-s0); } .cx-dot.cx-s0 { fill:var(--cx-s0); }
+.cx-line.cx-s1, .cx-dot.cx-s1 { stroke:var(--cx-s1); } .cx-dot.cx-s1 { fill:var(--cx-s1); }
+.cx-line.cx-s2, .cx-dot.cx-s2 { stroke:var(--cx-s2); } .cx-dot.cx-s2 { fill:var(--cx-s2); }
+.cx-line.cx-s3, .cx-dot.cx-s3 { stroke:var(--cx-s3); } .cx-dot.cx-s3 { fill:var(--cx-s3); }
+.cx-empty { fill:var(--cx-faint); font-size:12px; }
+.cx-empty-msg { font-size:.8rem; color:var(--cx-muted); padding:20px 0; }
+#cx-axis svg { display:block; width:100%; height:auto; overflow:visible; }
+#cx-cross { position:absolute; top:0; bottom:0; width:0; border-left:1px solid rgba(232,241,248,.45); pointer-events:none; }
+#cx-cross[hidden] { display:none; }
+#cx-readout { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.72rem; color:var(--cx-muted); min-height:22px; margin-top:6px; }
+#cx-readout b { color:var(--cx-ink); font-weight:600; }
+.cx-ro { display:inline-flex; align-items:center; gap:5px; }
+
+/* about */
+#cx-about { grid-column:1 / -1; }
+#cx-about p { font-size:.74rem; color:var(--cx-muted); line-height:1.6; margin-top:6px; max-width:1100px; }
+#cx-about b { color:var(--cx-ink); }
+#cx-sync { font-size:.66rem; color:var(--cx-faint); margin-top:8px; }
+</style>
+</head>
+<body>
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("climalytix");</script>
+
+<div id="cx-app">
+
+  <section id="cx-site" class="cx-card" aria-label="Site">
+    <div id="cx-brand"><b>CLIMALYTIX</b><span>One site · every dataset · one clock</span></div>
+    <div id="cx-where">
+      <span id="cx-site-badge" hidden></span>
+      <span id="cx-site-name">Locating…</span>
+      <span id="cx-site-coords"></span>
+      <button type="button" id="cx-home-btn" class="cx-btn" hidden>Return home</button>
+    </div>
+    <form id="cx-search-form" role="search">
+      <input id="cx-search" type="search" placeholder="City, zip code or address…" aria-label="Analyse another site" autocomplete="off">
+      <button type="submit" class="cx-btn">Analyse</button>
+      <span id="cx-search-msg" role="status"></span>
+    </form>
+  </section>
+
+  <aside id="cx-catalog" class="cx-card" aria-label="Datasets">
+    <h2>Datasets</h2>
+    <div id="cx-catalog-list"></div>
+  </aside>
+
+  <section id="cx-explore" class="cx-card" aria-label="Explore">
+    <h2>Explore</h2>
+    <div id="cx-toolbar">
+      <div class="cx-seg" role="group" aria-label="Time range">
+        <button type="button" class="cx-btn" data-range="7d">7 days</button>
+        <button type="button" class="cx-btn" data-range="30d">30 days</button>
+        <button type="button" class="cx-btn" data-range="1y">1 year</button>
+        <button type="button" class="cx-btn" data-range="10y">10 years</button>
+        <button type="button" class="cx-btn" data-range="all">All</button>
+      </div>
+      <label class="cx-field">History from
+        <select id="cx-from">
+          <option value="1940">1940</option>
+          <option value="1961">1961</option>
+          <option value="1991">1991</option>
+          <option value="2011">2011</option>
+        </select>
+      </label>
+      <label class="cx-field">Units
+        <select id="cx-units">
+          <option value="auto">Auto</option>
+          <option value="metric">Metric</option>
+          <option value="imperial">Imperial</option>
+          <option value="si">Scientific</option>
+          <option value="aviation">Aviation</option>
+        </select>
+      </label>
+    </div>
+    <div id="cx-banner" role="status" hidden></div>
+    <p id="cx-step"></p>
+    <div id="cx-stage">
+      <div id="cx-panels"></div>
+      <div id="cx-cross" hidden></div>
+    </div>
+    <div id="cx-axis"></div>
+    <div id="cx-readout" aria-live="polite"></div>
+  </section>
+
+  <section id="cx-about" class="cx-card" aria-label="About this page">
+    <h2>What you are looking at</h2>
+    <p><b>Reanalysis, not a station.</b> The long record is ERA5 / ERA5-Land: a physics model fitted to every observation
+      available, on a ~9–25 km grid. It is the best continuous record that exists for most places on Earth, but it is a grid
+      cell, not your thermometer — the catalogue prints how far away the grid point is.</p>
+    <p><b>Forecast, labelled as one.</b> The hourly series are the Home Station's numerical-weather-prediction feed. Everything
+      to the right of "now" is drawn dashed and shaded: a projection, not an observation. The hours just before now are the
+      model's own analysis, not a measurement.</p>
+    <p><b>Long windows are aggregated, never thinned.</b> On a decade or more each series is reduced into fixed-length
+      buckets by its own rule — a daily high keeps the bucket's maximum, rain is summed, a temperature is averaged — and the
+      legend names the bucket, so a 30-day maximum is never read as a daily line. A bucket with too few samples is drawn as a
+      gap, not a zero.</p>
+    <p><b>Where the data comes from today.</b> Every source is public. The long archive currently comes through a public
+      reanalysis API used as a bootstrap; Climalytix's own ingest of the underlying public archives replaces it. The forecast
+      ladder, the event builder and scored predictions come next — every probability Climalytix issues will carry its own
+      verification record at your site.</p>
+    <p id="cx-sync"></p>
+  </section>
+
+</div>
+
+<script type="module" src="js/climalytix/page.js"></script>
+</body>
+</html>
