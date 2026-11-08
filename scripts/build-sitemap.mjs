@@ -43,9 +43,23 @@
  * change that touched the pages — including after scripts/build-og-cards.mjs,
  * which rewrites meta tags across every page.
  *
+ * SHALLOW CLONES LIE ABOUT <lastmod>: in a shallow checkout `git log -1`
+ * returns the shallow-boundary commit for every file older than it (a 50-
+ * commit clone dated 46 pages 2026-09-23 that were last touched in July).
+ * Writing and --check therefore REFUSE to run in a shallow repo — run
+ * `git fetch --unshallow` first. --check-urls does not read dates and runs
+ * anywhere.
+ *
  * Usage:
- *   node scripts/build-sitemap.mjs           # rewrite sitemap.xml
- *   node scripts/build-sitemap.mjs --check   # CI: exit 1 if stale
+ *   node scripts/build-sitemap.mjs              # rewrite sitemap.xml (full history)
+ *   node scripts/build-sitemap.mjs --check      # exit 1 if sitemap.xml differs at all
+ *   node scripts/build-sitemap.mjs --check-urls # CI: guards + the <loc> set only
+ *
+ * CI runs --check-urls, NOT --check: <lastmod> is a git date, so a squash
+ * merge re-dates every page it touches and a depth-1 checkout dates every
+ * page at HEAD — a byte-exact check would go red on main after most merges.
+ * --check-urls still fails on every guard above and on a page missing from
+ * (or stale in) the committed sitemap, which is the drift that matters.
  */
 
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -271,6 +285,35 @@ if (errors.length) {
   console.error(`\n❌ build-sitemap FAILED — ${errors.length} page(s) cannot be listed:`);
   for (const e of errors) console.error(`  ✗ ${e}`);
   console.error('');
+  process.exit(1);
+}
+
+const locsOf = (text) => [...text.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]).sort();
+
+if (process.argv.includes('--check-urls')) {
+  const current = existsSync(OUT) ? readFileSync(OUT, 'utf8') : '';
+  const have = new Set(locsOf(current));
+  const want = new Set(locsOf(xml));
+  const missing = [...want].filter((u) => !have.has(u));
+  const extra = [...have].filter((u) => !want.has(u));
+  if (missing.length || extra.length) {
+    console.error('\n❌ sitemap.xml URL set is stale — run: node scripts/build-sitemap.mjs (full git history)');
+    for (const u of missing) console.error(`  + ${u}  (page not in sitemap.xml)`);
+    for (const u of extra) console.error(`  - ${u}  (in sitemap.xml, no longer a listed page)`);
+    process.exit(1);
+  }
+  console.log(`✅ sitemap.xml URL set up to date — ${want.size} URLs (lastmod not checked)`);
+  process.exit(0);
+}
+
+let shallow = false;
+try {
+  shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'],
+    { cwd: ROOT, encoding: 'utf8' }).trim() === 'true';
+} catch { /* not a git checkout — dates come from mtime anyway */ }
+if (shallow) {
+  console.error('\n❌ shallow git clone — <lastmod> would be the shallow boundary\'s date for most pages.');
+  console.error('   Run: git fetch --unshallow   (or use --check-urls, which ignores dates)');
   process.exit(1);
 }
 
