@@ -169,7 +169,8 @@ function stageReadout() {
     el.innerHTML = `<b>Ice in this window — density analysis</b><br>` +
         `<span class="big">${st.volumeKm3 >= 10 ? st.volumeKm3.toFixed(0) : st.volumeKm3.toFixed(2)} km³</span> · ${st.massGt >= 10 ? st.massGt.toFixed(0) : st.massGt.toFixed(2)} Gt of ice<br>` +
         `area ${st.iceAreaKm2.toFixed(st.iceAreaKm2 > 100 ? 0 : 1)} km² · mean thickness ${st.meanH.toFixed(0)} m · max ${st.maxH.toFixed(0)} m<br>` +
-        `<span style="color:${INK3}">model: shallow-ice inversion of the observed speed; plastic cap binding on ${(100 * st.cappedFraction).toFixed(0)} % of cells (sliding ice)</span>`;
+        `<span style="color:${INK3}">model: shallow-ice inversion of the observed speed (slope over ${(st.assumptions.slopeSigmaM / 1000).toFixed(0)} km, floor ${st.assumptions.minSlopeDeg}°); ` +
+        `where the plastic cap binds (${(100 * st.cappedFraction).toFixed(0)} % of cells — sliding ice) thickness is the plastic estimate, not an inversion</span>`;
 }
 
 function stageNote() {
@@ -211,7 +212,7 @@ function renderPicker() {
             `<div class="r"><span>Flowline</span><span>${(g.flowline.length_m / 1000).toFixed(1)} km</span></div>` +
             `<div class="r"><span>Pairs in 12 months</span><span>${g.pairs_count} kept of ${g.pairs_listed ?? '—'}</span></div>` +
             `<div class="r"><span>Field mass balance</span><span>${mb ? `${mb.starts}–${mb.ends} (WGMS)` : 'none'}</span></div>` +
-            `<div class="r"><span>Velocity record</span><span>${g.annual.years[0]}–2025</span></div>`;
+            `<div class="r"><span>Velocity record</span><span>${g.annual.years[0]}–${g.annual.years.at(-1)}</span></div>`;
         tip.style.display = 'block';
         const r = b.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
         tip.style.left = Math.max(12, Math.min(innerWidth - tw - 12, r.left)) + 'px';
@@ -350,7 +351,7 @@ function renderProfile() {
     const [vlo, vhi] = extent([...v0, ...recent], { zero: true });
     // the ice body in cross-section: modelled thickness (engine iceModel) under the observed surface
     const det = S.detail[g.id], f = det?.field;
-    if (f?.z && !S.models[g.id]) S.models[g.id] = E.iceModel(f);
+    if (f?.z && !S.models[g.id]) S.models[g.id] = E.iceModel(f, E.iceModelOptions(g.kind));
     const mdl = S.models[g.id];
     const Hk = fl.x.map((x, k) => {
         if (!mdl) return null;
@@ -387,14 +388,14 @@ function renderDecades() {
     const [ylo, yhi] = extent(ann.map(a => a.v), { zero: true });
     const layers = [
         { type: 'line', pts: full.map(a => [a.year, a.v]), color: '#62b6ec', width: 2, endLabel: (v) => speed(v) },
-        { type: 'points', size: 8, pts: ann.map(a => ({ x: a.year, y: a.v, color: '#62b6ec', hollow: a.partial, shape: 'circle', tip: () => `<b>${a.year}</b>: ${speed(a.v)}${a.partial ? ' (partial year — the archive ends May 2025)' : ''}` })) },
+        { type: 'points', size: 8, pts: ann.map(a => ({ x: a.year, y: a.v, color: '#62b6ec', hollow: a.partial, shape: 'circle', tip: () => `<b>${a.year}</b>: ${speed(a.v)}${a.partial ? ' (partial year — the composites stop mid-year)' : ''}` })) },
     ];
     if (tr) layers.push({ type: 'line', pts: [[tr.from, tr.intercept + tr.slope * tr.from], [tr.to, tr.intercept + tr.slope * tr.to]], color: ACCENT, width: 2, dash: [4, 3] });
-    const y0 = (ann[0]?.year ?? g.annual.years[0]) - 0.5;
-    S.charts.decades.render({ x: { min: y0, max: 2025.5, type: 'linear', fmt: (v) => String(Math.round(v)) }, panels: [{ y: { min: ylo, max: yhi, label: `annual mean speed at the ${q.label.toLowerCase()}, m/yr` }, layers }], height: 320 });
-    $('gw-decades-sub').textContent = `${ann.length ? ann[0].year : '—'}–2025 · ${q.label}`;
+    const y0 = (ann[0]?.year ?? g.annual.years[0]) - 0.5, yN = g.annual.years.at(-1) + 0.5;
+    S.charts.decades.render({ x: { min: y0, max: yN, type: 'linear', fmt: (v) => String(Math.round(v)) }, panels: [{ y: { min: ylo, max: yhi, label: `annual mean speed at the ${q.label.toLowerCase()}, m/yr` }, layers }], height: 320 });
+    $('gw-decades-sub').textContent = `${ann.length ? ann[0].year : '—'}–${g.annual.years.at(-1)} · ${q.label}`;
     $('gw-decades-note').innerHTML = (tr ? `2014–2024 trend: <b>${tr.slope >= 0 ? '+' : ''}${fmtNum(tr.slope)} m/yr per year</b> (± ${fmtNum(2 * tr.seSlope)}, 2σ). ` : '') +
-        `Early years are Landsat 4/5 only and sparse — a missing year is a gap in the archive, not a stopped glacier. 2025 (hollow) is partial.`;
+        `Early years are Landsat 4/5 only and sparse — a missing year is a gap in the archive, not a stopped glacier. ${g.annual.years.at(-1)} (hollow) is partial.`;
 }
 
 // ── mass balance ─────────────────────────────────────────────────────────────

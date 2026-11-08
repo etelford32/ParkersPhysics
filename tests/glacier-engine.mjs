@@ -189,7 +189,7 @@ section('4. the bake (data/glaciers)');
         const v0 = Array.from(g.climatology.v0).filter(Number.isFinite);
         ok(v0.length >= 0.8 * n, `${g.id}: climatology finite at ${v0.length}/${n} points`);
         const yrs = g.annual.years, consecutive = yrs.every((y, k) => !k || y === yrs[k - 1] + 1);
-        ok(consecutive && yrs[0] <= 2013 && yrs.at(-1) === 2025 && g.annual.partialLast, `${g.id}: annual ${yrs[0]}–2025 consecutive (tile-dependent start), last year flagged partial`);
+        ok(consecutive && yrs[0] <= 2013 && yrs.at(-1) >= 2025 && g.annual.partialLast, `${g.id}: annual ${yrs[0]}–${yrs.at(-1)} consecutive (tile-dependent span — Antarctic composites are labelled to 2026), last year flagged partial`);
         ok(g.scenes.length > 0 && g.scenes.every(s => ['landsatOLI', 'sentinel2', 'sentinel1'].includes(s.sensor)), `${g.id}: ${g.scenes.length} scenes`);
         const z = elev[g.id]?.z_m || [];
         const zh = z.slice(0, 3).filter(v => v !== null), zt = z.slice(-3).filter(v => v !== null);
@@ -200,7 +200,7 @@ section('4. the bake (data/glaciers)');
         ok(sorted && inWin && det.pairs.length === g.pairs_count, `${g.id}: ${det.pairs.length} pairs (of ${g.pairs_listed} listed), all short-baseline inside the last year`);
         ok(det.field.vx.length === det.field.nx * det.field.ny && det.field.nx <= 160 && det.field.ny <= 160 && det.field.z?.length === det.field.vx.length, `${g.id}: field ${det.field.nx}×${det.field.ny} with a terrain grid`);
         ok(typeof f.traced === 'string' && f.traced.length === n && /^[vt]+$/.test(f.traced), `${g.id}: flowline method recorded (${(f.traced.match(/v/g) || []).length} velocity / ${(f.traced.match(/t/g) || []).length} topography points)`);
-        const ice = E.iceModel(det.field);
+        const ice = E.iceModel(det.field, E.iceModelOptions(g.kind));
         const plausible = g.kind === 'land-terminating' ? ice.meanH > 10 && ice.meanH < 400 : ice.meanH > 30 && ice.meanH < 2500;
         ok(ice.volumeKm3 > 0 && plausible && ice.maxH < 4000, `${g.id}: ice body ${ice.volumeKm3.toFixed(2)} km³, mean ${ice.meanH.toFixed(0)} m, max ${ice.maxH.toFixed(0)} m (plastic cap on ${(100 * ice.cappedFraction).toFixed(0)} %)`);
     }
@@ -208,6 +208,9 @@ section('4. the bake (data/glaciers)');
     ok(fastest('jakobshavn') > 5000 && fastest('columbia') > 5000, `outlets are fast: Jakobshavn ${fastest('jakobshavn').toFixed(0)}, Columbia ${fastest('columbia').toFixed(0)} m/yr`);
     for (const id of ['gulkana', 'south-cascade', 'storglaciaren', 'zongo', 'brewster', 'lemon-creek']) ok(fastest(id) < 400, `${id} is a slow mountain glacier (${fastest(id).toFixed(0)} m/yr)`);
     for (const id of ['helheim', 'pine-island', 'thwaites']) ok(fastest(id) > 1500, `${id} is a fast ice-sheet outlet (${fastest(id).toFixed(0)} m/yr)`);
+    const jak = G.find(g => g.id === 'jakobshavn'), jakIce = E.iceModel(E.decodeDetail(readJson('../data/glaciers/jakobshavn.json')).field, E.iceModelOptions(jak.kind));
+    const colIce = E.iceModel(E.decodeDetail(readJson('../data/glaciers/columbia.json')).field, E.iceModelOptions('tidewater'));
+    ok(jakIce.maxH > 1200 && Math.abs(jakIce.maxH - colIce.maxH) > 100, `ice-sheet outlet is not pinned at the mountain cap (Jakobshavn max ${jakIce.maxH.toFixed(0)} m vs Columbia ${colIce.maxH.toFixed(0)} m)`);
 }
 
 section('5. WGMS mass balance');

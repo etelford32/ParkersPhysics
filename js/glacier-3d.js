@@ -21,7 +21,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { fieldSampler, advect, northInGrid, iceModel } from './glacier-engine.js';
+import { fieldSampler, advect, northInGrid, iceModel, iceModelOptions } from './glacier-engine.js';
 
 export const LAYERS = {
     speed:     { label: 'Surface speed', unit: 'm/yr', log: true,  ramp: ['#0b1f3a', '#123a68', '#1d5f9a', '#2f8bd0', '#62b6ec', '#a9dcfa', '#eef9ff'], source: 'observed (ITS_LIVE 2014–2024 mean)' },
@@ -78,7 +78,7 @@ export class Glacier3D {
         this.g = glacier; this.det = detail;
         const f = detail.field;
         if (!f.z) throw new Error('this glacier has no terrain grid in its archive');
-        this.model = iceModel(f);
+        this.model = iceModel(f, iceModelOptions(glacier.kind));
         this.sample = fieldSampler(f);
         this.north = northInGrid(glacier.flowline);
         // scene units: km; origin at the grid centre; north → −Z
@@ -276,13 +276,12 @@ export class Glacier3D {
             }
             const v = this.sample(p.x, p.y) || [0, 0];
             const tail = 6 * this.dtYears;                                     // streak = 6 frames of travel
-            const pts = [[p.x, p.y], [p.x - v[0] * tail, p.y - v[1] * tail]];
-            pts.forEach(([x, y], e) => {
+            const pts = [[p.x, p.y], [p.x - v[0] * tail, p.y - v[1] * tail]].map(([x, y]) => {
                 const [fi, fj] = this._gridIJ(x, y), zs = this._bil(f.z, fi, fj);
-                P[n * 6 + e * 3] = ((fj - (f.nx - 1) / 2) * f.dx) / 1000;
-                P[n * 6 + e * 3 + 1] = Number.isFinite(zs) ? this._h(zs) + 0.012 : -1e3;
-                P[n * 6 + e * 3 + 2] = -((fi - (f.ny - 1) / 2) * f.dy) / 1000;
+                return Number.isFinite(zs) ? [((fj - (f.nx - 1) / 2) * f.dx) / 1000, this._h(zs) + 0.012, -((fi - (f.ny - 1) / 2) * f.dy) / 1000] : null;
             });
+            if (!pts[0] || !pts[1]) { pts[0] = pts[1] = pts[0] || pts[1] || [0, -1e3, 0]; }   // never a streak to nowhere: collapse both ends together
+            P.set(pts[0], n * 6); P.set(pts[1], n * 6 + 3);
         }
         this.streaks.geometry.attributes.position.needsUpdate = true;
     }
@@ -294,12 +293,23 @@ export class Glacier3D {
 
     /** One-shot camera presets; any drag afterwards is the user's. */
     frame(kind = 'oblique') {
-        const f = this.det.field, w = Math.abs(f.nx * f.dx) / 1000, h = Math.abs(f.ny * f.dy) / 1000, r = Math.max(w, h);
-        const mid = this._h((this.zmin + this.zmax) / 2);
-        this.controls.target.set(0, mid * 0.6, 0);
-        if (kind === 'top') this.camera.position.set(0.001, r * 1.25, 0.001 + r * 0.02);
-        else if (kind === 'side') this.camera.position.set(r * 1.05, r * 0.25 + mid, 0);
-        else this.camera.position.set(r * 0.15, r * 0.62, r * 0.85);
+        // Frame the ICE, not the window: an outlet often fills only a corner of its ITS_LIVE window,
+        // and centring the window put Columbia at the back behind empty foreground (seen on review).
+        const f = this.det.field, W = Math.abs(f.nx * f.dx) / 1000, Hh = Math.abs(f.ny * f.dy) / 1000;
+        const box = new THREE.Box3();
+        const tmp = new THREE.Vector3();
+        const pos = this.iceMesh?.geometry?.attributes?.position;
+        if (pos && pos.count) {
+            this.root.updateMatrixWorld(true);
+            for (let k = 0; k < pos.count; k += Math.max(1, Math.floor(pos.count / 4000))) box.expandByPoint(tmp.fromBufferAttribute(pos, k).applyMatrix4(this.root.matrixWorld));
+        }
+        const c = box.isEmpty() ? new THREE.Vector3(0, this._h((this.zmin + this.zmax) / 2), 0) : box.getCenter(new THREE.Vector3());
+        const sz = box.isEmpty() ? Math.max(W, Hh) : Math.max(box.max.x - box.min.x, box.max.z - box.min.z, 0.25 * Math.max(W, Hh));
+        const r = Math.max(W, Hh), d = sz * 0.9;
+        this.controls.target.copy(c);
+        if (kind === 'top') this.camera.position.set(c.x + 0.001, c.y + d * 1.3, c.z + 0.001 + d * 0.02);
+        else if (kind === 'side') this.camera.position.set(c.x + d * 1.1, c.y + d * 0.25, c.z);
+        else this.camera.position.set(c.x + d * 0.1, c.y + d * 0.78, c.z + d * 0.62);
         this.controls.minDistance = r * 0.08; this.controls.maxDistance = r * 4;
         this.camera.near = r * 0.002; this.camera.far = r * 12; this.camera.updateProjectionMatrix();
         this.scene.fog.near = r * 1.5; this.scene.fog.far = r * 6;

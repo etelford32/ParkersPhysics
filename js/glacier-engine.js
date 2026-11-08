@@ -418,6 +418,19 @@ export function iceModel(field, { slopeSigmaM = 1000, minSlopeDeg = 1.5, tauYiel
     };
 }
 
+/**
+ * iceModel options by glacier type — the slope must be averaged over a few ICE THICKNESSES
+ * (Paterson), so the length scale grows with the ice. With one mountain-glacier setting
+ * (1 km, floor 1.5°) every ice-sheet outlet hit the plastic cap at the slope floor — max
+ * H = 637 m at Columbia AND Jakobshavn (2026-11-08 review), where Jakobshavn's trough is
+ * ~2 km deep. The floor is a guard against a flat-surface blow-up, not a physical slope.
+ */
+export function iceModelOptions(kind) {
+    if (kind === 'ice-sheet outlet') return { slopeSigmaM: 4000, minSlopeDeg: 0.35 };
+    if (kind === 'tidewater' || kind === 'lake-calving') return { slopeSigmaM: 2000, minSlopeDeg: 0.8 };
+    return { slopeSigmaM: 1000, minSlopeDeg: 1.5 };
+}
+
 // ── mass balance (WGMS glaciological series) ─────────────────────────────────
 
 /** Rows { year, winter, summer, annual } in m w.e. → cumulative annual balance from the first year. */
