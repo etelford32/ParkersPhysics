@@ -540,6 +540,79 @@ details.sc-tbl th{color:var(--sc-ink4);font-weight:600}
 .sc-tip{position:absolute;z-index:6;pointer-events:none;display:none;background:#1b1140;border:1px solid var(--sc-border);border-radius:9px;
   padding:7px 10px;font-size:.72rem;line-height:1.45;color:var(--sc-ink2);white-space:pre-line;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:250px}
 .sc-tip b{color:var(--sc-ink)}
+/* ── LIGHT THEME (html.theme-light — js/theme-light.css holds the --pl-* palette).
+   The hero around the console stays DARK; the console itself becomes a set of
+   white panels floating on it. Tokens first, then the hard-coded dark colours.
+   The SVG charts are built with presentation attributes (fill="#6f6695"…), which
+   any CSS rule outranks, so they are re-coloured by attribute here — the orb is
+   excluded: it is a little night-sky picture and stays one. Values the console
+   colours inline from the neon status ramps (AQI category, Kp, aurora state)
+   are darkened with brightness() so the ramp survives and reads on white. */
+html.theme-light .sky-console{--sc-s1:var(--pl-card);--sc-s2:var(--pl-bg-sunk);--sc-ink:var(--pl-text-1);--sc-ink2:var(--pl-text-2);
+  --sc-ink3:var(--pl-text-3);--sc-ink4:var(--pl-text-4);--sc-grid:var(--pl-border);--sc-border:var(--pl-border);--sc-accent:var(--pl-blue);
+  --sc-good:var(--pl-ok);--sc-warn:var(--pl-warn);--sc-serious:#b4501c;--sc-crit:var(--pl-danger);color-scheme:light}
+html.theme-light .sc-tab:not(.sc-orb){box-shadow:var(--pl-shadow)}
+html.theme-light .sc-tab:not(.sc-orb):hover{border-color:var(--pl-border-strong)}
+html.theme-light .sc-tab.active:not(.sc-orb){box-shadow:0 0 0 1px var(--tc),var(--pl-shadow-hover);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--tc) 9%,#fff),#fff)}
+html.theme-light .sc-tab .ti{filter:brightness(.62) saturate(1.3)}
+html.theme-light .sc-topbar{box-shadow:var(--pl-shadow)}
+html.theme-light .sc-loc input{background:#fff;box-shadow:inset 0 1px 2px rgba(11,31,58,.08)}
+html.theme-light .sc-loc input:focus{border-color:var(--pl-blue);box-shadow:inset 0 1px 2px rgba(11,31,58,.08),0 0 0 3px rgba(21,96,212,.16)}
+html.theme-light .sc-loc.unset input{border-color:var(--pl-blue-bright);
+  box-shadow:inset 0 1px 2px rgba(11,31,58,.08),0 0 0 3px rgba(47,134,246,.16),0 0 16px rgba(47,134,246,.22)}
+@media (prefers-reduced-motion:no-preference){
+  html.theme-light .sc-loc.unset input{animation-name:sc-loc-pulse-l}
+  @keyframes sc-loc-pulse-l{0%,100%{box-shadow:inset 0 1px 2px rgba(11,31,58,.08),0 0 0 3px rgba(47,134,246,.14),0 0 12px rgba(47,134,246,.18)}
+    50%{box-shadow:inset 0 1px 2px rgba(11,31,58,.08),0 0 0 4px rgba(47,134,246,.24),0 0 22px rgba(47,134,246,.34)}}}
+html.theme-light .sc-loc button{color:#fff;background:linear-gradient(180deg,#5aa2ff 0%,#2a7cf0 45%,#1560d4 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -2px 0 rgba(8,52,128,.6) inset,0 4px 0 #0b3f8f,0 8px 16px rgba(21,96,212,.28)}
+html.theme-light .sc-loc button:active{box-shadow:0 1px 0 rgba(255,255,255,.3) inset,0 -1px 0 rgba(8,52,128,.6) inset,0 1px 0 #0b3f8f,0 3px 8px rgba(21,96,212,.24)}
+html.theme-light .sc-auth.in{border-color:rgba(13,122,69,.35)}
+html.theme-light .sc-galert{box-shadow:var(--pl-shadow)}
+html.theme-light .sc-galert svg{filter:brightness(.6) saturate(1.3)}
+html.theme-light .sc-card{box-shadow:var(--pl-shadow-hover)}
+html.theme-light .sc-band .tick{background:rgba(11,31,58,.14)}
+html.theme-light .sc-band .mark{box-shadow:0 0 0 1px #fff}
+html.theme-light :is(.sc-hero-verdict .n,.sc-hero-verdict .cat b){filter:brightness(.55) saturate(1.35)}
+html.theme-light .sky-console :is(span,b)[style*="color:#"]{filter:brightness(.62) saturate(1.3)}
+html.theme-light .sc-aqi-track{filter:brightness(.88) saturate(1.1)}
+html.theme-light .sc-fbar .mid{background:var(--pl-border-strong)}
+html.theme-light .sc-cal .d[data-tier="blend"]{border-color:rgba(21,96,212,.32)}
+html.theme-light .sc-cal .d:not(.pad):hover,html.theme-light .sc-cal .d:not(.pad):focus{border-color:var(--pl-border-strong)}
+html.theme-light .sc-wk rect.hit:hover,html.theme-light .sc-wk rect.hit:focus{fill:rgba(21,96,212,.06)}
+html.theme-light .sc-tip{background:#fff;color:var(--pl-text-2);border-color:var(--pl-border-strong);box-shadow:0 10px 28px rgba(11,31,58,.16)}
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.5)"],
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.4)"],
+html.theme-light .sky-console .sc-view svg [fill="#6f6695"],
+html.theme-light .sky-console .sc-view svg [fill="#48426e"]{fill:var(--pl-text-4)}
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.75)"],
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.8)"],
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.9)"],
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.92)"],
+html.theme-light .sky-console .sc-view svg [fill="#cdc4f0"]{fill:var(--pl-text-2)}
+html.theme-light .sky-console .sc-view svg [fill="#9d92c8"]{fill:var(--pl-text-3)}
+html.theme-light .sky-console .sc-view svg [fill="#f5f0ff"],
+html.theme-light .sky-console .sc-view svg [fill="#fff"]{fill:var(--pl-text-1)}
+html.theme-light .sky-console .sc-view svg [stroke="#f5f0ff"],
+html.theme-light .sky-console .sc-view svg [stroke="rgba(255,255,255,.85)"]{stroke:var(--pl-text-1)}
+html.theme-light .sky-console .sc-view svg [stroke="#cdc4f0"]{stroke:var(--pl-text-3)}
+html.theme-light .sky-console .sc-view svg [stroke="rgba(255,255,255,.6)"]{stroke:rgba(11,31,58,.5)}
+html.theme-light .sky-console .sc-view svg [stroke="#221743"]{stroke:var(--pl-border)}
+html.theme-light .sky-console .sc-view svg [stroke="#38335a"],
+html.theme-light .sky-console .sc-view svg [stroke="#2a3450"]{stroke:var(--pl-border-strong)}
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.07)"]{fill:rgba(21,96,212,.08)}
+html.theme-light .sky-console .sc-view svg [fill="rgba(255,255,255,.035)"]{fill:rgba(11,31,58,.035)}
+html.theme-light .sky-console .sc-view svg [fill="#2eff9e"]{fill:var(--pl-ok)}
+html.theme-light .sky-console .sc-view svg [stroke="#2eff9e"]{stroke:var(--pl-ok)}
+html.theme-light .sky-console .sc-view svg [fill="#ffb830"]{fill:#c27c00}
+html.theme-light .sky-console .sc-view svg [stroke="#ffb830"]{stroke:#c27c00}
+html.theme-light .sky-console .sc-view svg [fill="#ff8c5a"]{fill:#e0662e}
+html.theme-light .sky-console .sc-view svg [stroke="#ff8c5a"]{stroke:#e0662e}
+html.theme-light .sky-console .sc-view svg [fill="#6ea8ff"]{fill:var(--pl-blue-bright)}
+html.theme-light .sky-console .sc-view svg [stroke="#6ea8ff"]{stroke:var(--pl-blue-bright)}
+html.theme-light .sky-console .sc-view svg [stroke="#4ddbff"]{stroke:var(--pl-sky)}
+html.theme-light .sky-console .sc-view svg [fill="#4ddbff"]{fill:var(--pl-sky)}
 `;
 
 function ensureStyles() {

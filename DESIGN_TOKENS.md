@@ -236,13 +236,22 @@ after the main `:root` block in `earth.html`.
 
 ### `:root.theme-light, body.theme-light`
 Applies the **light** column shown in the colour tables above.
-Activated by:
+Activated by the **site theme** (2026-11 — EarthView's private hook and
+floating 🌞/🌙 button were folded into it):
 
-- `?theme=light` URL param (one-shot designer preview)
-- `localStorage.setItem('pp.theme', 'light')` (saved preference)
-- `prefers-color-scheme: light` OS-level toggle (when no user pref)
-- Runtime: `window.setEarthTheme('light' | 'dark' | 'auto')`
-- **UI: tap the 🌞/🌙 button at top-right** (long-press → 'auto')
+- **auto (default): light from sunrise to sunset** at the saved location
+  (`ppx_user_location`), else 07:00–19:00 on the local clock —
+  `js/theme-schedule.js` (pure, `node tests/theme-schedule.mjs`)
+- First paint: `js/theme-boot.js` in `<head>`; runtime + re-flip at the
+  next sunrise/sunset: `js/theme.js` (imported by `js/nav.js`)
+- **UI: the nav toggle** cycles Auto → Light → Dark (stored in
+  `localStorage['pp.theme']`, the same key EarthView always used)
+- `?theme=light|dark` URL param (one-load preview);
+  `window.ppTheme.set('auto'|'light'|'dark')` (`setEarthTheme` is an alias)
+
+The OTHER reading pages (hubs, blog, account, …) use the separate
+white + blue palette in `js/theme-light.css`; which pages can go light at
+all is `scripts/build-theme-support.mjs`.
 
 Some rules can't be expressed by re-declaring a single token —
 multi-stop gradients, layered shadows, decorative effects.  Those
@@ -315,7 +324,6 @@ All tokens live in `earth.html`:
 | `@media (max-width: 640px) { :root { ... } }` (mobile overrides) | 138 – 164 |
 | `:root.theme-light, body.theme-light { ... }` (light theme) | 193 – 248 |
 | Rule-level light-theme overrides | 263 onward |
-| Theme activation hook (inline `<script>`) | ~1747 |
-| 🌞/🌙 toggle button HTML + wiring | ~2026 |
+| Theme: `setEarthTheme` alias (the site theme does the work) | ~2725 |
 
 Keep the doc in sync when those blocks move.

@@ -63,6 +63,16 @@ jobs:
       - name: import map ordering gate
         run: node tests/importmap-order.mjs
 
+      # sitemap.xml is generated from each page's <link rel="canonical">, and
+      # the generator refuses to write while any page fails its guards — so a
+      # single bad canonical (sample-fleet-assessment, 2026-11) silently froze
+      # the sitemap and new pages never reached it. --check-urls runs every
+      # guard and compares the <loc> set only: <lastmod> is a git date that a
+      # squash merge re-dates and a depth-1 checkout gets wrong, so a
+      # byte-exact --check would be red on main after most merges.
+      - name: sitemap guards + URL set
+        run: node scripts/build-sitemap.mjs --check-urls
+
       # The build log (js/dev-log.js → recent-development.html + feedback.html)
       # is linked from the Research menu. Every entry must point at a page that
       # exists, sit in exactly one sprint, and stay newest-first — a log that

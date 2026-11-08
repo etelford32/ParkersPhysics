@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <script src="js/preview-mode.js"></script>
@@ -114,7 +114,37 @@ em { color:#cfc6f2; }
     .bp-wrap { padding:76px 16px 60px; }
     .fn-head h1 { font-size:1.7rem; }
 }
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+/* Hub header + post cards: violet glass cards → white cards on a hairline
+   blue border with the palette shadow; the purple glow under the gradient
+   h1 reads as a smudge on white, so it goes. */
+html.theme-light h1 { text-shadow: none; }
+html.theme-light .bp-kicker { color: var(--pl-sky); }
+html.theme-light .bp-wrap :is(strong, em) { color: var(--pl-text-1); }
+html.theme-light .fn-head p { color: var(--pl-text-3); }
+html.theme-light .fn-section { color: var(--pl-text-4); }
+
+html.theme-light .fn-card {
+    background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--pl-shadow);
+}
+html.theme-light .fn-card:hover {
+    background: var(--pl-card); border-color: var(--border-uv); box-shadow: var(--pl-shadow-hover);
+}
+html.theme-light .fn-kicker { color: var(--pl-blue); }
+html.theme-light .fn-card h2 { color: var(--pl-text-1); }
+html.theme-light .fn-card:hover h2 { color: var(--pl-blue-deep); }
+html.theme-light .fn-dek { color: var(--pl-text-3); }
+html.theme-light .fn-meta { color: var(--pl-text-4); }
+
+html.theme-light .bp-foot { color: var(--pl-text-4); }
+html.theme-light .bp-foot a { color: var(--pl-blue); }
+html.theme-light .bp-foot a:hover { color: var(--pl-blue-deep); }
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 
 <body>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
     <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -287,6 +287,94 @@
         .pricing-grid { animation-delay: .1s; }
         .compare-section { animation-delay: .15s; }
         .faq-section { animation-delay: .2s; }
+
+        /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+        html.theme-light .pricing-hero { background: var(--pl-grad-hero); }
+        html.theme-light .pricing-hero h1 { background: var(--pl-grad-headline); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        html.theme-light .pricing-hero p { color: var(--pl-text-3); }
+        html.theme-light .billing-toggle { background: var(--pl-card); border-color: var(--pl-border); color: var(--pl-text-3); }
+        html.theme-light .billing-toggle strong { color: var(--pl-blue-deep); }
+
+        /* Public-test banner: the amber band becomes a soft blue one. */
+        html.theme-light .test-banner {
+            border-color: rgba(21, 96, 212, .28);
+            background: linear-gradient(90deg, var(--pl-blue-soft), var(--pl-bg-soft));
+            box-shadow: var(--pl-shadow);
+        }
+        html.theme-light .test-banner .tb-tag { color: var(--pl-blue-deep); }
+        html.theme-light .test-banner h2 { color: var(--pl-text-1); }
+        html.theme-light .test-banner p { color: var(--pl-text-3); }
+        html.theme-light .test-banner .tb-note { color: var(--pl-text-4); }
+        html.theme-light .btn-test { background: var(--pl-btn); color: #fff; box-shadow: var(--pl-shadow); }
+        html.theme-light .btn-test:hover { background: var(--pl-btn-hover); color: #fff; opacity: 1; }
+        html.theme-light :is(.btn-test, .btn-plan):focus-visible { outline-color: var(--pl-blue-bright); }
+
+        /* The live preview stays a dark simulation, framed on the light page. */
+        html.theme-light .pricing-hero > div[style*="aspect-ratio"] {
+            border-color: var(--pl-border-strong) !important;
+            box-shadow: var(--pl-shadow-hover);
+        }
+
+        /* Plan cards: white, Advanced is the highlighted (blue) tier. */
+        html.theme-light .plans-head h2 { color: var(--pl-text-1); }
+        html.theme-light .plans-head p { color: var(--pl-text-4); }
+        html.theme-light .price-card { background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--pl-shadow); }
+        html.theme-light .price-card.adv {
+            border-color: var(--pl-blue);
+            background: linear-gradient(180deg, var(--pl-blue-soft) 0, var(--pl-card) 180px);
+            box-shadow: 0 0 0 1px var(--pl-blue), var(--pl-shadow-hover);
+        }
+        html.theme-light .tier-who { color: var(--pl-sky); }
+        html.theme-light .price-card.adv .tier-who { color: var(--pl-blue-deep); }
+        html.theme-light .tier-name { color: var(--pl-text-1); }
+        html.theme-light .tier-personas span { color: var(--pl-text-3); border-color: var(--pl-border); background: var(--pl-bg-soft); }
+        html.theme-light .tier-price .now { color: var(--pl-ok); }
+        html.theme-light .tier-price .later { color: var(--pl-text-4); }
+        html.theme-light .tier-price .later s { color: var(--pl-text-4); }
+        html.theme-light .feature-list li { color: var(--pl-text-2); }
+        html.theme-light .feature-list li::before { background: var(--pl-sky); }
+        html.theme-light .price-card.adv .feature-list li::before { background: var(--pl-blue); }
+        html.theme-light .tier-cta small { color: var(--pl-text-4); }
+        html.theme-light .btn-plan.primary { background: var(--pl-btn); color: #fff; box-shadow: var(--pl-shadow); }
+        html.theme-light .btn-plan.primary:hover { background: var(--pl-btn-hover); color: #fff; opacity: 1; }
+        html.theme-light .btn-plan.ghost { background: var(--pl-card); color: var(--pl-blue-deep); border-color: var(--pl-border-strong); }
+        html.theme-light .btn-plan.ghost:hover { background: var(--pl-blue-soft); color: var(--pl-blue-deep); opacity: 1; }
+        html.theme-light .seats-line { color: var(--pl-text-4); }
+        html.theme-light .seats-line a { color: var(--pl-blue); }
+
+        /* Reward ladder */
+        html.theme-light .reward-section h2 { color: var(--pl-text-1); }
+        html.theme-light .reward-section > p { color: var(--pl-text-4); }
+        html.theme-light .reward-steps div { background: var(--pl-bg-soft); border-color: var(--pl-border); color: var(--pl-text-3); }
+        html.theme-light .reward-steps b { color: var(--pl-text-1); }
+
+        /* Comparison table */
+        html.theme-light .compare-section h2,
+        html.theme-light .faq-section h2 { color: var(--pl-text-1); }
+        html.theme-light .compare-table thead th { color: var(--pl-text-1); background: var(--pl-bg-soft); border-bottom-color: var(--pl-border); }
+        html.theme-light .compare-table th.col-intro { color: var(--pl-sky); }
+        html.theme-light .compare-table th.col-advanced { color: var(--pl-blue-deep); }
+        html.theme-light .compare-table tbody tr { border-bottom-color: var(--pl-border); }
+        html.theme-light .compare-table tbody tr:hover { background: var(--pl-bg-soft); }
+        html.theme-light .compare-table td:first-child { color: var(--pl-text-2); }
+        html.theme-light .compare-table td { color: var(--pl-text-1); }
+        html.theme-light .compare-table td .yes { color: var(--pl-ok); }
+        html.theme-light .compare-table td .no { color: var(--pl-text-5); }
+        html.theme-light .compare-table td .partial { color: var(--pl-warn); }
+        html.theme-light .compare-table .section-header td { background: var(--pl-bg-sunk); color: var(--pl-text-4); }
+
+        /* FAQ */
+        html.theme-light .faq-item { background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--pl-shadow); }
+        html.theme-light .faq-q { color: var(--pl-text-1); }
+        html.theme-light .faq-q:hover { color: var(--pl-blue); }
+        html.theme-light .faq-q .arrow { color: var(--pl-text-5); }
+        html.theme-light .faq-item.open .faq-q .arrow { color: var(--pl-blue); }
+        html.theme-light .faq-a { color: var(--pl-text-3); }
+        html.theme-light .faq-a a { color: var(--pl-blue) !important; }
+
+        /* Footer (this page's own footer markup) */
+        html.theme-light footer a { color: var(--pl-text-3); }
+        html.theme-light footer a:hover { color: var(--pl-blue); }
     </style>
 <script type="application/ld+json">
 {
@@ -353,6 +441,10 @@
   ]
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

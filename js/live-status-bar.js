@@ -234,6 +234,52 @@ const CSS = `
     .lsb-summary { min-width: auto; padding: 3px 9px; margin-right: 10px; }
     .lsb-summary-kicker { display: none; }
 }
+
+/* ── LIGHT THEME ──────────────────────────────────────────────────────────
+   Only pages that can go light ever carry html.theme-light (the list is
+   scripts/build-theme-support.mjs); today EarthView is the one such page
+   that mounts this strip, and on every dark page none of this matches.
+   It lives HERE, not in earth.html, so the next light page that mounts
+   the strip gets it for free. Literal colours on purpose:
+   EarthView does not load js/theme-light.css, so --pl-* is not defined
+   there. The value classes carry !important above, hence here too. */
+html.theme-light #lsb-bar {
+    background: linear-gradient(90deg, rgba(248,250,254,.97) 0%, rgba(236,242,250,.97) 100%);
+    border-bottom-color: rgba(0,133,176,.20);
+    box-shadow: 0 2px 10px rgba(20,40,80,.08);
+}
+html.theme-light #lsb-bar.lsb-storm {
+    background: linear-gradient(90deg, rgba(255,246,247,.97) 0%, rgba(250,238,244,.97) 100%);
+    border-bottom-color: rgba(192,23,47,.45);
+}
+html.theme-light #lsb-bar .lsb-brand   { color: #7d5800; }
+html.theme-light #lsb-bar .lsb-sep     { background: rgba(10,30,50,.14); }
+html.theme-light #lsb-bar .lsb-chip    { color: #4f5f75; }
+html.theme-light #lsb-bar .lsb-chip .lsb-lbl { color: #5a6a7a; }
+html.theme-light #lsb-bar .lsb-chip .lsb-val { color: #1a2735; }
+html.theme-light #lsb-bar .lsb-g   { color: #00704a !important; }
+html.theme-light #lsb-bar .lsb-w   { color: #7d5800 !important; }
+html.theme-light #lsb-bar .lsb-a   { color: #a04d00 !important; }
+html.theme-light #lsb-bar .lsb-x   { color: #b8152d !important; text-shadow: none; }
+html.theme-light #lsb-bar .lsb-bzs { color: #c0262f !important; }
+html.theme-light #lsb-bar .lsb-bzn { color: #1f5fc0 !important; }
+html.theme-light #lsb-bar .lsb-cme-chip { color: #b4520f; }
+html.theme-light #lsb-bar .lsb-summary {
+    --lsb-summary-color: #00739e;
+    background: color-mix(in srgb, var(--lsb-summary-color) 9%, #ffffff);
+    box-shadow: none;
+}
+html.theme-light #lsb-bar .lsb-summary[data-tone="quiet"]      { --lsb-summary-color: #00704a; }
+html.theme-light #lsb-bar .lsb-summary[data-tone="active"]     { --lsb-summary-color: #7d5800; }
+html.theme-light #lsb-bar .lsb-summary[data-tone="warning"]    { --lsb-summary-color: #a04d00; }
+html.theme-light #lsb-bar .lsb-summary[data-tone="severe"]     { --lsb-summary-color: #b8152d; }
+html.theme-light #lsb-bar .lsb-summary[data-tone="offline"]    { --lsb-summary-color: #b8152d; }
+html.theme-light #lsb-bar .lsb-summary[data-tone="connecting"] { --lsb-summary-color: #00739e; }
+html.theme-light #lsb-bar .lsb-summary-mark   { box-shadow: none; }
+html.theme-light #lsb-bar .lsb-summary-kicker { color: rgba(26,39,53,.62); }
+html.theme-light #lsb-bar .lsb-updated { color: #5a6a7a; }
+html.theme-light #lsb-bar .lsb-sw-link { color: #00739e; border-color: rgba(0,133,176,.32); }
+html.theme-light #lsb-bar .lsb-sw-link:hover { color: #004e6b; border-color: rgba(0,133,176,.6); }
 `;
 
 // ── HTML template ─────────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ import { dirname, join } from 'node:path';
 import { SITE_SECTIONS } from '../js/site-sections.js';
 import { SIM_COUNT, sectionPage } from '../js/simulations-catalog.js';
 import { esc, renderCard } from './catalog-render.mjs';
+import { THEME_HEAD, HTML_ATTR as THEME_HTML_ATTR } from './build-theme-support.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ORIGIN = 'https://parkersphysics.com';
@@ -198,7 +199,7 @@ export function renderSectionPage(sectionId) {
     const short = `${section.headline} — ${plural(count, 'simulation')}, free to open.`;
 
     return `<!DOCTYPE html>
-<html lang="en">
+<html ${THEME_HTML_ATTR} lang="en">
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -238,6 +239,7 @@ export function renderSectionPage(sectionId) {
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="js/nav-styles.css">
 <link rel="stylesheet" href="js/catalog-styles.css">
+${THEME_HEAD}
 </head>
 <body>
 

@@ -71,6 +71,30 @@ const CSS = `
     background-size:220% 100%;animation:hsu-sheen 6s ease-in-out infinite;mix-blend-mode:screen}
   @keyframes hsu-sheen{0%,60%{background-position:120% 0}100%{background-position:-120% 0}}}
 @media (max-width:640px){.hsu{padding:12px 14px}.hsu-btn{flex:1 1 100%}}
+/* LIGHT THEME (html.theme-light — js/theme-light.css holds the --pl-* palette):
+   a white card on the (still dark) hero, matching the sky console above it;
+   the button becomes the blue key. index.html re-pins the DARK --fg-* tokens
+   on #hero, so this card names its light colours explicitly. */
+html.theme-light .hsu{background:var(--pl-card);border-color:var(--pl-border);color:var(--pl-text-2);
+  box-shadow:var(--pl-shadow-hover);backdrop-filter:none}
+html.theme-light .hsu::before{display:none}
+html.theme-light .hsu-k{color:var(--pl-blue-deep)}
+html.theme-light .hsu-t{color:var(--pl-text-1)}
+html.theme-light .hsu-d{color:var(--pl-text-3)}
+html.theme-light .hsu-form input{background:#fff;color:var(--pl-text-1);border-color:var(--pl-border-strong);box-shadow:inset 0 1px 2px rgba(11,31,58,.08)}
+html.theme-light .hsu-form input::placeholder{color:var(--pl-text-5)}
+html.theme-light .hsu-form input:focus{border-color:var(--pl-blue);box-shadow:inset 0 1px 2px rgba(11,31,58,.08),0 0 0 3px rgba(21,96,212,.16)}
+html.theme-light .hsu-btn{background:linear-gradient(180deg,#5aa2ff 0%,#2a7cf0 45%,#1560d4 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 -3px 0 rgba(8,52,128,.75) inset,0 6px 0 #0b3f8f,0 10px 22px rgba(21,96,212,.3)}
+html.theme-light .hsu-btn:hover{box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -3px 0 rgba(8,52,128,.75) inset,0 7px 0 #0b3f8f,0 14px 28px rgba(21,96,212,.36)}
+html.theme-light .hsu-btn:active{box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 -1px 0 rgba(8,52,128,.75) inset,0 2px 0 #0b3f8f,0 4px 12px rgba(21,96,212,.28)}
+html.theme-light .hsu-btn:focus-visible{outline-color:var(--pl-blue-bright)}
+html.theme-light .hsu-note{color:var(--pl-text-4)}
+html.theme-light .hsu-note b{color:var(--pl-text-2)}
+html.theme-light .hsu[data-state="sent"] .hsu-msg{color:var(--pl-ok)}
+html.theme-light .hsu[data-state="error"] .hsu-msg{color:var(--pl-danger)}
+html.theme-light .hsu-resend{color:var(--pl-blue)}
+html.theme-light .hsu-resend[disabled]{color:var(--pl-text-4)}
 `;
 
 /** Loose, client-side only — the server is the judge. */
