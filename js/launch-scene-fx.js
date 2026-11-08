@@ -26,10 +26,16 @@
  *      pad actually mirrors.
  *   4. POST RUNS IN LINEAR HDR. RenderPass → UnrealBloomPass on the linear
  *      image (only things brighter than the threshold — flame, beacons,
- *      floodlight lamps — bloom) → OutputPass (ACES + sRGB) → a display-space
- *      finish pass (vignette + TPDF dither; the dark sky gradient bands
- *      visibly in 8 bits without the dither). Without WebGL2 the chain is
- *      skipped and the renderer tone-maps directly.
+ *      floodlight lamps — bloom) → ONE final pass (sanitize → ACES → sRGB →
+ *      vignette + TPDF dither; the dark sky gradient bands visibly in 8 bits
+ *      without the dither). Without WebGL2 the chain is skipped and the
+ *      renderer tone-maps directly.
+ *   5. EVERY PASS THAT READS THE LINEAR SCENE SANITIZES IT (SANITIZE_GLSL).
+ *      One NaN/Inf pixel through the bloom blacked out the whole stage on
+ *      real GPUs (2026-11-08) — never remove the guard, and never add a
+ *      shader with pow() of a possibly-negative base, normalize() of a
+ *      possibly-zero vector or atan(0, 0): SwiftShader tolerates them, a
+ *      GPU driver does not, so CI cannot see it.
  *
  * Public API:
  *   HORIZON                               THREE.Color shared by dome + fog
@@ -46,7 +52,6 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 // Linear-light colours (the scene is rendered linear and tone-mapped once).
@@ -114,7 +119,11 @@ const SKY_FRAG = /* glsl */`
         col = mix(col, uZenith, smoothstep(0.35, 1.0, t));
 
         // Twilight glow low on one azimuth (forward-scattering halo).
-        float az = max(dot(normalize(vec3(d.x, 0.0, d.z)), uGlowDir), 0.0);
+        // Azimuth term. normalize(vec3(d.x, 0, d.z)) is normalize(0) at the
+        // zenith — NaN on real GPUs, and one NaN pixel used to black out the
+        // frame through the bloom (see SANITIZE_GLSL). Guarded on the length.
+        float hl = length(d.xz);
+        float az = hl > 1e-5 ? max(dot(d.xz / hl, uGlowDir.xz), 0.0) : 0.0;
         // Lifted a few degrees off the horizon: terrain fogs into plain
         // HORIZON, so a glow peaking AT h = 0 drew a hard line along it.
         float lowBand = exp(-h * 9.0) * smoothstep(0.0, 0.07, h);
@@ -437,12 +446,48 @@ export function detectQuality(renderer, search = '') {
 
 // ── Post-processing ─────────────────────────────────────────────────────────
 
-const FinishShader = {
+// ── HDR sanitizing (THE BLACK-SCREEN FIX, 2026-11-08) ───────────────────────
+// ONE non-finite pixel blacked out the whole stage. A NaN (pow of a negative
+// base, normalize(0), atan(0,0) — tame on SwiftShader, undefined on real GPU
+// drivers) or an Inf (any HDR value past half-float's 65504) entered the
+// bloom's mip chain, the separable blur smeared it into a RECTANGLE most of
+// the frame wide, and ACES(NaN) is black. Measured: a 0.4 m speck emitting
+// 0/0 turns the entire canvas black on the pre-fix chain; the user's report
+// showed exactly that rectangle with the finish pass's dither still on it.
+//
+// So every pass that READS the linear scene sanitizes it first: the bloom's
+// bright pass (so the blur can never carry a bad value) and the final pass
+// (so a bad pixel stays ONE pixel). The test is on the BITS
+// (floatBitsToUint — GLSL ES 3.00, i.e. WebGL2, which is the only path that
+// runs post), because `x != x` and isnan() are legally folded to false by
+// fast-math compilers. +Inf maps to the ceiling (a blown highlight stays
+// white), NaN and −Inf to 0, then a firefly ceiling far above anything the
+// scene emits (standby peak ≈ 14 linear across every vehicle and view).
+export const HDR_CEILING = 256.0;
+export const SANITIZE_GLSL = /* glsl */`
+    float lpFinite(float x) {
+        highp uint b = floatBitsToUint(x);     // highp: mediump ints may be 16-bit
+        if ((b & 0x7f800000u) == 0x7f800000u) {
+            return ((b & 0x007fffffu) != 0u || (b & 0x80000000u) != 0u) ? 0.0 : ${HDR_CEILING.toFixed(1)};
+        }
+        return clamp(x, 0.0, ${HDR_CEILING.toFixed(1)});
+    }
+    vec3 lpSanitize(vec3 c) { return vec3(lpFinite(c.r), lpFinite(c.g), lpFinite(c.b)); }
+`;
+
+// The final pass: sanitize → exposure + ACES → sRGB → vignette → TPDF dither.
+// It replaces OutputPass + a separate finish pass (one full-screen pass
+// fewer per frame) and reproduces their arithmetic exactly — OutputPass is
+// ACESFilmicToneMapping() then sRGBTransferOETF(), and the vignette/dither
+// ran on that display-space result. uSanitize exists for the browser gate's
+// NEGATIVE CONTROL (tests/launch-planner-render-health.spec.js), nothing else.
+const FinalShader = {
     uniforms: {
         tDiffuse:   { value: null },
         uVignette:  { value: 0.32 },
         uFrame:     { value: 0 },
         uRes:       { value: new THREE.Vector2(1, 1) },
+        uSanitize:  { value: 1 },
     },
     vertexShader: /* glsl */`
         varying vec2 vUv;
@@ -453,7 +498,15 @@ const FinishShader = {
         uniform float uVignette;
         uniform float uFrame;
         uniform vec2 uRes;
+        uniform float uSanitize;
         varying vec2 vUv;
+        // three prepends colorspace_pars_fragment (sRGBTransferOETF) to every
+        // non-raw ShaderMaterial — including it again is a redefinition that
+        // fails to compile (the render-health monitor caught exactly that).
+        // tonemapping_pars_fragment is only prepended when the material is
+        // tone-mapped, and this one is not (toneMapped: false), so it IS needed.
+        #include <tonemapping_pars_fragment>
+        ${SANITIZE_GLSL}
         float hash12(vec2 p) {
             vec3 p3 = fract(vec3(p.xyx) * 0.1031);
             p3 += dot(p3, p3.yzx + 33.33);
@@ -461,6 +514,9 @@ const FinishShader = {
         }
         void main() {
             vec4 c = texture2D(tDiffuse, vUv);
+            if (uSanitize > 0.5) c.rgb = lpSanitize(c.rgb);
+            c.rgb = ACESFilmicToneMapping(c.rgb);       // applies toneMappingExposure
+            c = sRGBTransferOETF(c);
             // Vignette (display space, gentle, aspect-aware).
             vec2 q = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
             float v = 1.0 - uVignette * smoothstep(0.35, 1.05, length(q));
@@ -469,10 +525,27 @@ const FinishShader = {
             vec2 px = vUv * uRes + uFrame * vec2(17.0, 11.0);
             float n = hash12(px) + hash12(px + 0.37) - 1.0;
             c.rgb += n / 255.0;
-            gl_FragColor = c;
+            gl_FragColor = vec4(c.rgb, 1.0);
         }
     `,
 };
+
+// Sanitize the bloom's BRIGHT PASS — the first thing the blur chain reads.
+// Patched by string so the vendored UnrealBloomPass stays untouched; THROWS if
+// the anchor is gone (a three upgrade must not silently drop the guard).
+export function sanitizeBloomInput(bloom) {
+    const m = bloom.materialHighPassFilter;
+    const anchor = 'vec4 texel = texture2D( tDiffuse, vUv );';
+    if (!m || !m.fragmentShader.includes(anchor)) {
+        throw new Error('sanitizeBloomInput: UnrealBloomPass high-pass shader changed — re-anchor the HDR sanitize');
+    }
+    m.uniforms.uSanitize = { value: 1 };
+    m.fragmentShader = m.fragmentShader
+        .replace('void main() {', `uniform float uSanitize;\n${SANITIZE_GLSL}\nvoid main() {`)
+        .replace(anchor, `${anchor}\n\t\t\tif ( uSanitize > 0.5 ) texel.rgb = lpSanitize( texel.rgb );`);
+    m.needsUpdate = true;
+    return m;
+}
 
 // three r160's UnrealBloomPass builds each separable blur with σ = the
 // kernel RADIUS, i.e. truncated at 1σ where the weight is still e^(−½) = 0.61.
@@ -496,9 +569,11 @@ export function createPost(renderer, scene, camera, { quality = 'high' } = {}) {
     if (quality === 'off' || !renderer.capabilities.isWebGL2) {
         return {
             enabled: false,
+            quality: 'off',
             render() { renderer.render(scene, camera); },
             setSize() {},
             setBloom() {},
+            setSanitize() {},
             dispose() {},
         };
     }
@@ -513,26 +588,37 @@ export function createPost(renderer, scene, camera, { quality = 'high' } = {}) {
     composer.addPass(new RenderPass(scene, camera));
     const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.6, 0.55, 1.6);
     roundBloomKernels(bloom);
+    sanitizeBloomInput(bloom);
     composer.addPass(bloom);
-    composer.addPass(new OutputPass());
-    const finish = new ShaderPass(FinishShader);
-    composer.addPass(finish);
+    const final = new ShaderPass(FinalShader);
+    final.material.toneMapped = false;  // the pass applies the curve itself
+    composer.addPass(final);
+    composer.setSize(w, h);
+    final.uniforms.uRes.value.set(w, h);
     let frame = 0;
     const baseStrength = 0.6;
     return {
         enabled: true,
+        quality,
         bloom,
         render() {
-            finish.uniforms.uFrame.value = (frame++ % 64);
+            final.uniforms.uFrame.value = (frame++ % 64);
             composer.render();
         },
         setSize(width, height) {
             composer.setSize(width, height);
-            finish.uniforms.uRes.value.set(width, height);
+            final.uniforms.uRes.value.set(width, height);
         },
         // k ≥ 0 multiplies the resting strength (the host raises it with throttle).
         setBloom(k) { bloom.strength = baseStrength * k; },
-        dispose() { composer.dispose(); rt.dispose(); bloom.dispose(); },
+        // Test hook ONLY: the render-health gate's negative control turns the
+        // guard off to prove a non-finite pixel still blacks the frame without it.
+        setSanitize(on) {
+            const v = on ? 1 : 0;
+            final.uniforms.uSanitize.value = v;
+            bloom.materialHighPassFilter.uniforms.uSanitize.value = v;
+        },
+        dispose() { composer.dispose(); rt.dispose(); bloom.dispose(); final.material.dispose(); },
     };
 }
 
@@ -565,8 +651,10 @@ const BEAM_FRAG = /* glsl */`
     varying vec3 vV;
     void main() {
         float facing = abs(dot(normalize(vN), normalize(vV)));
-        float core = pow(facing, 2.2);
-        float along = pow(1.0 - vAxial, 1.6) * smoothstep(0.0, 0.04, vAxial);
+        float core = pow(clamp(facing, 0.0, 1.0), 2.2);
+        // max(): vAxial interpolates to 1 + ε at the far rim, and pow() of a
+        // negative base is undefined (NaN on real GPUs — see SANITIZE_GLSL).
+        float along = pow(max(1.0 - vAxial, 0.0), 1.6) * smoothstep(0.0, 0.04, vAxial);
         float a = core * along * uIntensity * uOpacity;
         gl_FragColor = vec4(uColor * a, 1.0);
     }

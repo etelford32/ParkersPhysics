@@ -48,6 +48,13 @@ const COMMON = /* glsl */`
         return mix(mix(sd_h12(i), sd_h12(i + vec2(1, 0)), f.x),
                    mix(sd_h12(i + vec2(0, 1)), sd_h12(i + vec2(1, 1)), f.x), f.y);
     }
+    // Azimuth about the vehicle axis. atan(0, 0) is UNDEFINED in GLSL (NaN on
+    // real GPU drivers) and a cap / nose-tip fragment can sit exactly on the
+    // axis; one NaN pixel used to black out the whole stage through the bloom
+    // (js/launch-scene-fx.js SANITIZE_GLSL). On the axis the angle is moot.
+    float sd_ang(vec3 p) {
+        return (abs(p.x) + abs(p.z) < 1e-6) ? 0.0 : atan(p.z, p.x);
+    }
     // 0 on a line at integer x, 1 away from it; width w in units of x, AA'd.
     float sd_line(float x, float w) {
         float d = abs(fract(x + 0.5) - 0.5);
@@ -59,7 +66,7 @@ const COMMON = /* glsl */`
 const KIND_GLSL = {
     steel: /* glsl */`
         void sd_apply(inout vec3 col, inout float rough) {
-            float ang = atan(vObjPos.z, vObjPos.x) / 6.28318530718 + 0.5;
+            float ang = sd_ang(vObjPos) / 6.28318530718 + 0.5;
             float yr  = vObjPos.y / SD_RING;
             float ring = floor(yr);
             float panel = floor(ang * SD_PANELS);
@@ -75,7 +82,7 @@ const KIND_GLSL = {
     tiles: /* glsl */`
         void sd_apply(inout vec3 col, inout float rough) {
             float R = max(length(vObjPos.xz), 0.1);
-            float s = atan(vObjPos.z, vObjPos.x) * R;            // arc length, m
+            float s = sd_ang(vObjPos) * R;            // arc length, m
             vec2 p = vec2(s, vObjPos.y) / SD_TILE;
             // Hex grid: two offset rectangular lattices, nearest centre wins.
             vec2 r = vec2(1.0, 1.7320508);
@@ -97,7 +104,7 @@ const KIND_GLSL = {
     `,
     foam: /* glsl */`
         void sd_apply(inout vec3 col, inout float rough) {
-            float ang = atan(vObjPos.z, vObjPos.x);
+            float ang = sd_ang(vObjPos);
             float R = max(length(vObjPos.xz), 0.1);
             vec2 p = vec2(ang * R, vObjPos.y);
             float m1 = sd_n2(p * 0.9);
