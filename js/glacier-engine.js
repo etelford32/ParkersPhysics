@@ -9,10 +9,11 @@
  * THE DATA (scripts/build-glacier-velocity.py, NASA ITS_LIVE v2):
  *   index  — per glacier: a FLOWLINE (a streamline of the observed 2014–2024 mean
  *            field), the climatology along it (v0, seasonal amplitude + day of peak,
- *            trend), the 1984–2025 annual means (2025 PARTIAL), the scenes that see
- *            the glacier, and the bake date.
- *   detail — the block-averaged mean field (for the particle view) and the last
- *            year of short-baseline pairs, each a velocity at every flowline point.
+ *            trend), the scenes that see the glacier, and the bake date.
+ *   detail — the annual means (tile-dependent start, last year PARTIAL; moved out of
+ *            the index when 25 glaciers passed its 200 KB budget — `attachDetail`),
+ *            the block-averaged mean field + terrain, and the last year of
+ *            short-baseline pairs, each a velocity at every flowline point.
  *   live   — /api/glaciers/velocity: pairs published since the bake, same points,
  *            same 3×3-median rule (js/glacier-pairs.js). `mergePairs` joins them.
  *
@@ -68,8 +69,17 @@ export function decodeIndex(json) {
             trend: decodeI16(g.climatology.trend, 0.1),
             pairErr: decodeI16(g.climatology.pair_err),
         },
-        annual: { years: g.annual.years.slice(), partialLast: !!g.annual.partial_last, v: g.annual.v.map(s => decodeI16(s)) },
+        annual: g.annual ? decodeAnnual(g.annual) : null,            // since 2026-11-08 it lives in the detail file;
+        annualSpan: g.annual_span || (g.annual ? [g.annual.years[0], g.annual.years.at(-1)] : null),   // attachDetail() fills it in
     }));
+}
+
+function decodeAnnual(a) { return { years: a.years.slice(), partialLast: !!a.partial_last, v: a.v.map(s => decodeI16(s)) }; }
+
+/** Give a decoded glacier the detail-file data the index no longer carries (the annual series). */
+export function attachDetail(glacier, detail) {
+    if (detail?.annual) glacier.annual = detail.annual;
+    return glacier;
 }
 
 export function decodePair(p) {
@@ -81,6 +91,7 @@ export function decodeDetail(json) {
     const f = json.field;
     return {
         id: json.id, epsg: json.epsg, bakedMs: Date.parse(json.baked), dtMaxDays: json.dt_max_days, skipped: json.skipped || {},
+        annual: json.annual ? decodeAnnual(json.annual) : null,
         field: { nx: f.nx, ny: f.ny, x0: f.x0, y0: f.y0, dx: f.dx, dy: f.dy, vx: decodeI16(f.vx), vy: decodeI16(f.vy), ice: decodeI16(f.ice, 0.01), z: f.z ? decodeI16(f.z) : null },
         pairs: json.pairs.map(decodePair),
     };

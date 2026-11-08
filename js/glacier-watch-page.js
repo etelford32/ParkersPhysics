@@ -212,7 +212,7 @@ function renderPicker() {
             `<div class="r"><span>Flowline</span><span>${(g.flowline.length_m / 1000).toFixed(1)} km</span></div>` +
             `<div class="r"><span>Pairs in 12 months</span><span>${g.pairs_count} kept of ${g.pairs_listed ?? '—'}</span></div>` +
             `<div class="r"><span>Field mass balance</span><span>${mb ? `${mb.starts}–${mb.ends} (WGMS)` : 'none'}</span></div>` +
-            `<div class="r"><span>Velocity record</span><span>${g.annual.years[0]}–${g.annual.years.at(-1)}</span></div>`;
+            `<div class="r"><span>Velocity record</span><span>${g.annualSpan ? `${g.annualSpan[0]}–${g.annualSpan[1]}` : '—'}</span></div>`;
         tip.style.display = 'block';
         const r = b.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
         tip.style.left = Math.max(12, Math.min(innerWidth - tw - 12, r.left)) + 'px';
@@ -246,6 +246,7 @@ async function select(id, { push = true } = {}) {
         catch (e) { $('gw-now-body').innerHTML = `<div class="gw-empty">This glacier's archive file failed to load (${esc(e.message)}).</div>`; return; }
     }
     if (S.sel !== g) return;
+    E.attachDetail(g, S.detail[id]);
     mark('detail');
     S.flow.setGlacier(g, S.detail[id], S.gauges.map(q => ({ ...q, selected: q.id === S.gaugeId })));
     if (S.g3d && S.detail[id].field.z) { try { S.g3d.setGlacier(g, S.detail[id]); } catch (e) { console.warn(e.message); setView('2d'); } }

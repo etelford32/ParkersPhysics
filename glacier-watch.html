@@ -84,7 +84,8 @@ h2 small { font-weight:400; color:var(--gw-ink-3); font-size:.72rem; }
 #gw-stage-readout .big { font-size:1.05rem; color:var(--gw-ink); font-weight:700; }
 #gw-stage-tip { position:absolute; pointer-events:none; display:none; background:rgba(4,8,16,.94); border:1px solid var(--gw-line); border-radius:6px; padding:6px 9px; font-size:.72rem; color:var(--gw-ink); white-space:nowrap; z-index:3; }
 #gw-stage-note { font-size:.7rem; color:var(--gw-ink-3); margin-top:8px; line-height:1.55; }
-@media (max-width: 700px) { #gw-stage-layers { max-width:100%; right:10px; } #gw-stage-tools { top:auto; bottom:64px; } #gw-stage-readout { display:none; } #gw-stage-legend { max-width:calc(100% - 20px); } }
+@media (max-width: 700px) { #gw-stage-layers { max-width:calc(100% - 20px); right:10px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  #gw-stage-layers button { flex:0 0 auto; padding:6px 8px; font-size:.7rem; } #gw-stage-tools { top:auto; bottom:64px; } #gw-stage-readout { display:none; } #gw-stage-legend { max-width:calc(100% - 20px); } }
 /* ── glacier selector: name-only cells, details in a tooltip ── */
 #gw-picker { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px; }
 .gw-name { font:inherit; font-size:.8rem; font-weight:600; text-align:left; color:var(--gw-ink); background:rgba(20,30,52,.6); border:1px solid var(--gw-line);
@@ -204,16 +205,19 @@ details.gw-table td, details.gw-table th { text-align:left; padding:2px 6px; bor
     <div class="gw-note" id="gw-year-note"></div>
   </section>
 
-  <section class="gw-panel" id="gw-profile-panel">
-    <h2>Along the glacier <small>head → terminus</small></h2>
-    <div class="gw-chart" id="gw-profile-chart"></div>
-    <div class="gw-note" id="gw-profile-note"></div>
-  </section>
-
-  <section class="gw-panel" id="gw-decades-panel">
-    <h2>Four decades <small id="gw-decades-sub"></small></h2>
-    <div class="gw-chart" id="gw-decades-chart"></div>
-    <div class="gw-note" id="gw-decades-note"></div>
+  <section class="gw-panel gw-span">
+    <div class="gw-grid2">
+      <div id="gw-profile-panel">
+        <h2>Along the glacier <small>head → terminus</small></h2>
+        <div class="gw-chart" id="gw-profile-chart"></div>
+        <div class="gw-note" id="gw-profile-note"></div>
+      </div>
+      <div id="gw-decades-panel">
+        <h2>Four decades <small id="gw-decades-sub"></small></h2>
+        <div class="gw-chart" id="gw-decades-chart"></div>
+        <div class="gw-note" id="gw-decades-note"></div>
+      </div>
+    </div>
   </section>
 
   <section class="gw-panel gw-span">

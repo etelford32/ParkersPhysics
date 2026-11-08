@@ -34,8 +34,9 @@ WHAT IT BAKES, per glacier (the GLACIERS table is the ONE list):
   5. FIELD — vx0/vy0 + the ice mask, block-averaged to ≤ FIELD_MAX cells per side, int16 m/yr,
      for the page's particle advection (the motion drawn IS the observed mean field).
 
-Outputs (`--out`): glaciers.json (index + flowlines + history — what EarthView loads) and
-<id>.json per glacier (field + last-year pairs — loaded when that glacier is opened).
+Outputs (`--out`): glaciers.json (index + flowlines + climatology — what EarthView loads; the
+annual series moved out 2026-11-08 when 25 glaciers put the index past its 200 KB budget) and
+<id>.json per glacier (annual series + field + last-year pairs — loaded when it is opened).
 Arrays are base64 little-endian int16; −32768 = no data. js/glacier-engine.js is the ONE reader.
 
 THE LIVE TAIL: pairs newer than this bake come from /api/glaciers/velocity (daily), which lists
@@ -54,6 +55,7 @@ BUCKET = 'https://its-live-data.s3.amazonaws.com'
 CATALOG = BUCKET + '/datacubes/catalog_v02.json'
 DT_MAX_DAYS = 64          # short-baseline pairs only: a 400-day pair is not a "daily" measurement
 V_STOP = 3.0              # m/yr — below this a streamline has reached a divide / stagnant ice
+SEED_MIN_Z = 30.0         # m a.s.l. — seeds sit on grounded ice, never in a calving lagoon or fjord mélange
 V_TRACE_MIN = 15.0        # m/yr — a seed slower than this is inside ITS_LIVE's noise (measured: South Cascade's
                           # 2014–2024 v0 median is 0.6 m/yr, Storglaciären 0.5) — the line comes from the surface instead
 N_FLOW = 60               # flowline points kept (resampled uniformly in arc length)
@@ -138,7 +140,7 @@ GLACIERS = [
          lat=35.74, lon=76.40, win_km=25, seek_km=15, kind='debris-covered',
          note='About 63 km long below K2: one of the longest glaciers outside the polar regions.'),
     dict(id='breidamerkurjokull', name='Breiðamerkurjökull', region='Vatnajökull', country='Iceland',
-         lat=64.10, lon=-16.30, win_km=15, seek_km=10, kind='lake-calving',
+         lat=64.17, lon=-16.33, win_km=15, seek_km=7, kind='lake-calving',
          note='Vatnajökull outlet calving into the Jökulsárlón lagoon.'),
 ]
 
@@ -429,14 +431,17 @@ def bake(g, catalog, days, max_pairs, workers, log, dem_cache='scripts/.cache/gl
     sm = gauss_smooth(v0, 1.5)
     ii, jj = np.mgrid[0:len(Y), 0:len(X)]
     rr = np.hypot((X[jj] - cx), (Y[ii] - cy))
-    inner = (ii >= 4) & (jj >= 4) & (ii < len(Y) - 4) & (jj < len(X) - 4)    # never seed on the window edge: a glacier near
-    cand = np.where(ice & inner & np.isfinite(sm) & (rr <= g['seek_km'] * 1000), sm, -np.inf)   # its ITS_LIVE tile edge (Perito Moreno) clips
-    si, sj = np.unravel_index(np.argmax(cand), cand.shape)                           # the window, and an edge seed traced 0 steps
-    # the SURFACE, for where the velocity runs out (GLO-30 on this grid, smoothed 2 px)
+    # the SURFACE, for where the velocity runs out (GLO-30 on this grid, smoothed 2 px) — computed BEFORE
+    # the seed, because a seed must also be GROUNDED ice: > SEED_MIN_Z above sea level. The fastest pixel of
+    # a lake- or sea-calving glacier is otherwise its calving front / mélange (Breiðamerkurjökull seeded in
+    # the Jökulsárlón lagoon: a 3.7 km line at 0–20 m and 0 usable pairs).
     LON, LAT = inv.transform(*np.meshgrid(X, Y))
     zraw = ELEV.dem_grid(LAT, LON, dem_cache)
     zs = gauss_smooth(zraw, 2.0)
     gzi, gzj = np.gradient(zs)
+    inner = (ii >= 4) & (jj >= 4) & (ii < len(Y) - 4) & (jj < len(X) - 4) & (np.nan_to_num(zraw, nan=-1) > SEED_MIN_Z)   # never seed on the window edge: a glacier near
+    cand = np.where(ice & inner & np.isfinite(sm) & (rr <= g['seek_km'] * 1000), sm, -np.inf)   # its ITS_LIVE tile edge (Perito Moreno) clips
+    si, sj = np.unravel_index(np.argmax(cand), cand.shape)                           # the window, and an edge seed traced 0 steps
     vel_ok = float(sm[si, sj]) >= V_TRACE_MIN
     if not vel_ok:      # motion below detection everywhere: seed at the on-ice pixel nearest the stated centre
         si, sj = np.unravel_index(np.argmin(np.where(ice & inner, rr, np.inf)), rr.shape)
@@ -514,11 +519,11 @@ def bake(g, catalog, days, max_pairs, workers, log, dem_cache='scripts/.cache/gl
                          amp=b64(near(amp)), phase_doy=b64(near(ph)),
                          pair_err=b64(np.nanmedian(np.array(errs), axis=0) if errs else np.full(n, np.nan)),   # median ITS_LIVE error of the kept pairs
                          trend=b64(samp(trend) * 10)),           # trend stored ×10 (0.1 m/yr²)
-        annual=dict(years=years, partial_last=True, v=[b64(a) for a in annual]),
+        annual_span=[years[0], years[-1]],      # the series itself lives in <id>.json (the index stays small as glaciers are added)
         scenes=scenes, pairs_cutoff=cutoff.isoformat(), baked=today.isoformat(), pairs_count=len(pairs),
         pairs_listed=len(found), pairs_sampled=len(order),
     )
-    detail = dict(id=g['id'], epsg=epsg,
+    detail = dict(id=g['id'], epsg=epsg, annual=dict(years=years, partial_last=True, v=[b64(a) for a in annual]),
                   field=dict(nx=len(fX), ny=len(fY), x0=float(fX[0]), y0=float(fY[0]), dx=float(fX[1] - fX[0]), dy=float(fY[1] - fY[0]),
                              vx=b64(fvx), vy=b64(fvy), ice=b64(fice * 100), z=b64(fz)),   # z: GLO-30 surface, m (block mean)
                   pairs=pairs, dt_max_days=DT_MAX_DAYS, baked=today.isoformat(), skipped=skipped)

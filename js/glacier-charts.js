@@ -94,7 +94,7 @@ export function mountChart(container, { height = 240, ariaLabel = '' } = {}) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
         const hasEnd = spec.panels.some(p => p.layers.some(l => l.endLabel));
-        const L = 54, R = hasEnd ? 92 : 16, T = 4, B = 26, GAP = 14, HEAD = 20;      // HEAD: each panel's title row ABOVE its plot
+        const L = 54, R = hasEnd ? 92 : 16, T = 4, B = spec.x.label ? 42 : 26, GAP = 14, HEAD = 20;   // an x title gets its OWN row under the ticks      // HEAD: each panel's title row ABOVE its plot
         const total = spec.panels.reduce((a, p) => a + (p.weight ?? 1), 0);
         const innerH = h - T - B - GAP * (spec.panels.length - 1) - HEAD * spec.panels.length;
         const X = spec.x;
@@ -149,7 +149,7 @@ export function mountChart(container, { height = 240, ariaLabel = '' } = {}) {
         const last = panels[panels.length - 1];
         ctx.fillStyle = INK2; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
         for (const tk of xt) ctx.fillText(tk.label, sx(tk.t), last.bottom + 7);
-        if (X.label) { ctx.textAlign = 'right'; ctx.fillText(X.label, w - R, last.bottom + 6); }
+        if (X.label) { ctx.textAlign = 'right'; ctx.fillStyle = INK3; ctx.fillText(X.label, w - R, last.bottom + 23); }
     }
 
     function drawLayer(ctx, ly, sx, sy, g) {
