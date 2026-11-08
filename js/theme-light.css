@@ -232,3 +232,12 @@ html.theme-switching *::after {
     transition: background-color .6s ease, color .6s ease, border-color .6s ease,
                 fill .6s ease, stroke .6s ease, box-shadow .6s ease !important;
 }
+
+/* Glows tuned for a black page read as smudges on white (colors_and_type.css
+   pages give the gradient h1 and the eyebrow a purple text-shadow). */
+html.theme-light :is(h1, .h1, .eyebrow) { text-shadow: none; }
+
+/* Footers that hard-code `footer a { color: #666 }` outrank the :where() link
+   base; the footer is shared chrome, so it gets an explicit rule. */
+html.theme-light footer a { color: var(--pl-text-3); }
+html.theme-light footer a:hover { color: var(--pl-blue); }

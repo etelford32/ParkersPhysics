@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <script src="js/preview-mode.js"></script>
@@ -131,7 +131,60 @@ em { color:#c6f2da; }
     .bp-wrap { padding:76px 16px 60px; }
     .bp-stats { grid-template-columns:1fr; }
 }
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+/* The post shell: lavender / mint copy → navy, cyan / violet / mint
+   accents → the palette's blues. Gradient type keeps its gradient (now
+   navy → blue) but loses the purple glow, which reads as a smudge on white. */
+html.theme-light h1 { text-shadow: none; }
+html.theme-light .bp-kicker { color: var(--pl-sky); }
+html.theme-light .bp-standfirst { color: var(--pl-text-3); }
+html.theme-light .bp-meta { color: var(--pl-text-4); }
+html.theme-light .bp-wrap h2 { color: var(--pl-text-1); }
+html.theme-light .bp-wrap :is(strong, em) { color: var(--pl-text-1); }
+
+html.theme-light .bp-stat {
+    background: var(--pl-bg-soft); border-color: var(--pl-border);
+    box-shadow: var(--pl-shadow);
+}
+html.theme-light .bp-stat .n {
+    background: var(--pl-grad-headline);
+    -webkit-background-clip: text; background-clip: text;
+}
+html.theme-light .bp-stat .l { color: var(--pl-text-4); }
+
+html.theme-light .bp-pull { border-left-color: var(--pl-blue-bright); color: var(--pl-text-2); }
+
+html.theme-light .bp-cta {
+    background: linear-gradient(120deg, var(--pl-blue-soft), var(--pl-bg-soft));
+    border-color: var(--border-3); box-shadow: var(--pl-shadow);
+}
+html.theme-light .bp-cta:hover { border-color: var(--border-uv); box-shadow: var(--pl-shadow-hover); }
+html.theme-light .bp-cta .t { color: var(--pl-text-1); }
+html.theme-light .bp-cta .s { color: var(--pl-text-4); }
+
+html.theme-light .bp-foot { color: var(--pl-text-4); }
+html.theme-light .bp-foot a { color: var(--pl-blue); }
+html.theme-light .bp-foot a:hover { color: var(--pl-blue-deep); }
+
+/* language dropdown */
+html.theme-light .bp-langdd summary {
+    background: var(--pl-bg-soft); border-color: var(--pl-border); color: var(--pl-text-2);
+}
+html.theme-light .bp-langdd summary:hover { background: var(--pl-blue-soft); border-color: var(--border-3); }
+html.theme-light .bp-langdd summary .chev { color: var(--pl-text-4); }
+html.theme-light .bp-langdd .menu {
+    background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--shadow-dropdown);
+}
+html.theme-light .bp-langdd .menu button { color: var(--pl-text-2); }
+html.theme-light .bp-langdd .menu button:hover { background: var(--pl-blue-soft); }
+html.theme-light .bp-langdd .menu button[aria-pressed="true"] { color: var(--pl-blue-deep); background: var(--pl-blue-soft); }
+html.theme-light .bp-langdd .menu .check { color: var(--pl-blue); }
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

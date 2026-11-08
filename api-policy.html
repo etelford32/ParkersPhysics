@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
     <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -172,6 +172,101 @@
             .legal-body { padding: 1.5rem 1rem 3rem; }
             .api-table th, .api-table td { padding: 8px 8px; font-size: .8rem; }
         }
+
+        /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+        /* Legal shell: gold headings / violet links on near-black → navy copy, blue
+           links and headings, soft-blue panels. */
+        html.theme-light .legal-hero { background: var(--pl-grad-hero); border-bottom-color: var(--pl-border); }
+        html.theme-light .legal-hero h1 {
+            background: var(--pl-grad-headline);
+            -webkit-background-clip: text; background-clip: text;
+        }
+        html.theme-light .legal-meta { color: var(--pl-text-4); }
+        html.theme-light .legal-meta strong { color: var(--pl-text-2); }
+
+        html.theme-light .toc { background: var(--pl-bg-soft); border-color: var(--pl-border); }
+        html.theme-light .toc :is(h2, h3) { color: var(--pl-blue-deep); }
+        html.theme-light .toc li { color: var(--pl-text-4); }
+        html.theme-light .toc a { color: var(--pl-blue); }
+        html.theme-light .toc a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light .legal-section h2 { color: var(--pl-blue-deep); border-bottom-color: var(--pl-border); }
+        html.theme-light .legal-section h3 { color: var(--pl-text-1); }
+        html.theme-light .legal-section :is(p, li) { color: var(--pl-text-2); }
+        html.theme-light .legal-section strong { color: var(--pl-text-1); }
+        html.theme-light .legal-section a { color: var(--pl-blue); }
+        html.theme-light .legal-section a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light .highlight-box {
+            background: var(--pl-blue-soft); border-color: var(--border-3); color: var(--pl-text-2);
+        }
+        html.theme-light .highlight-box strong { color: var(--pl-text-1); }
+        html.theme-light .highlight-box a { color: var(--pl-blue); }
+        html.theme-light .highlight-box a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light footer a { color: var(--pl-text-3); }
+        html.theme-light footer a:hover { color: var(--pl-blue); }
+
+        /* Caution boxes keep a warm signal — the palette's warn amber as a tint and
+           a rule — with navy copy for body-text contrast. */
+        html.theme-light .warning-box {
+            background: color-mix(in srgb, var(--pl-warn) 7%, var(--pl-bg));
+            border-color: color-mix(in srgb, var(--pl-warn) 32%, var(--pl-bg));
+            color: var(--pl-text-1);
+        }
+
+        /* The page-level `nav {…}` bar rule also reaches the <nav class="toc"> and
+           squashes it into a 54px sticky strip (eula.html's note describes the same
+           bug). Dark is left exactly as it was; light lays the contents out as the
+           block panel it is meant to be. */
+        html.theme-light nav.toc {
+            position: static; display: block; height: auto; min-height: 0;
+            z-index: auto; -webkit-backdrop-filter: none; backdrop-filter: none;
+        }
+
+        html.theme-light .api-table th {
+            background: var(--pl-blue-soft); color: var(--pl-blue-deep); border-bottom-color: var(--border-3);
+        }
+        html.theme-light .api-table td { color: var(--pl-text-2); border-bottom-color: var(--pl-border); }
+        html.theme-light .api-table strong { color: var(--pl-text-1); }
+        html.theme-light .api-table a { color: var(--pl-blue); }
+        html.theme-light .badge-free {
+            background: color-mix(in srgb, var(--pl-ok) 10%, var(--pl-bg)); color: var(--pl-ok);
+            border-color: color-mix(in srgb, var(--pl-ok) 35%, var(--pl-bg));
+        }
+        html.theme-light .badge-key {
+            background: color-mix(in srgb, var(--pl-warn) 10%, var(--pl-bg)); color: var(--pl-warn);
+            border-color: color-mix(in srgb, var(--pl-warn) 35%, var(--pl-bg));
+        }
+        html.theme-light .badge-open { background: var(--pl-blue-soft); color: var(--pl-blue-deep); border-color: var(--border-3); }
+
+        /* This page still carries its own legacy top bar (nav-lint baseline:
+           ghostCss) — dark glass → white glass, gold → blue. */
+        html.theme-light body > nav {
+            background: rgba(255, 255, 255, .94);
+            border-bottom-color: var(--pl-border);
+            box-shadow: 0 4px 14px rgba(21, 96, 212, .06);
+        }
+        html.theme-light .nav-brand {
+            background: var(--pl-grad-headline);
+            -webkit-background-clip: text; background-clip: text;
+        }
+        html.theme-light .nav-logo-img { filter: drop-shadow(0 0 4px rgba(21, 96, 212, .25)); }
+        html.theme-light .nav-logo-wrap::before { border-top-color: var(--pl-blue-bright); border-right-color: var(--border-3); }
+        html.theme-light .nav-logo-wrap::after  { border-bottom-color: var(--border-arc); border-left-color: var(--border-2); }
+        html.theme-light .nav-item { background: var(--pl-bg-soft); border-color: var(--pl-border); color: var(--pl-text-2); }
+        html.theme-light .nav-item:hover { background: var(--pl-blue-soft); border-color: var(--border-uv); color: var(--pl-blue-deep); }
+        html.theme-light .nav-item.cta,
+        html.theme-light .nav-item.cta:hover { background: var(--pl-btn); border-color: var(--pl-btn); color: #fff; }
+        html.theme-light .nav-item.cta:hover { background: var(--pl-btn-hover); border-color: var(--pl-btn-hover); }
+        html.theme-light .nav-burger { background: var(--pl-bg-soft); border-color: var(--pl-border); color: var(--pl-text-1); }
+        html.theme-light .nav-burger:hover { background: var(--pl-blue-soft); }
+        @media (max-width: 768px) {
+            html.theme-light .nav-menu {
+                background: rgba(255, 255, 255, .98);
+                border-bottom-color: var(--pl-border); box-shadow: var(--shadow-dropdown);
+            }
+        }
     </style>
 <script type="application/ld+json">
 {
@@ -189,6 +284,10 @@
   "inLanguage": "en-US"
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 
