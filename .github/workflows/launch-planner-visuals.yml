@@ -1,0 +1,90 @@
+name: launch-planner-visuals
+
+# Browser gates for the launch planner's 3D stage (launch-planner.html +
+# js/launch-*.js). Added 2026-11-08 after the stage shipped as a black
+# rectangle on real GPUs while the specs — which no workflow ran — were green.
+#
+#   chromium      the full launch-planner suite + the pure kernel tests
+#   cross-browser the render-health gate on Firefox and WebKit (it plants the
+#                 NaN/Inf that a GPU driver produced, so it does not need a GPU)
+
+on:
+  pull_request:
+    paths:
+      - 'launch-planner.html'
+      - 'js/launch-*.js'
+      - 'js/spaceship-designer-3d.js'
+      - 'tests/launch-*.mjs'
+      - 'tests/launch-planner-*.spec.js'
+      - 'playwright.config.js'
+      - 'dev-server.mjs'
+      - '.github/workflows/launch-planner-visuals.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'launch-planner.html'
+      - 'js/launch-*.js'
+      - 'tests/launch-planner-*.spec.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium:
+    # Pinned for the same reason as e2e-auth.yml: Playwright 1.56 cannot
+    # install browsers on ubuntu 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Kernel tests
+        run: node tests/launch-smoke-sim.mjs && node tests/launch-camera-layout.mjs
+      - run: npx playwright install --with-deps chromium
+      - name: Launch planner browser gates (Chromium)
+        run: >
+          npx playwright test --project=chromium --trace off
+          tests/launch-planner-render-health.spec.js
+          tests/launch-planner-visuals.spec.js
+          tests/launch-planner-camera.spec.js
+        env:
+          CI: 'true'
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-planner-chromium-report
+          path: playwright-report/
+          retention-days: 7
+
+  cross-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [firefox-visual, webkit-visual]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.project == 'firefox-visual' && 'firefox' || 'webkit' }}
+      - name: Render-health gate (${{ matrix.project }})
+        run: npx playwright test --project=${{ matrix.project }} --trace off tests/launch-planner-render-health.spec.js
+        env:
+          CI: 'true'
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-planner-${{ matrix.project }}-report
+          path: playwright-report/
+          retention-days: 7

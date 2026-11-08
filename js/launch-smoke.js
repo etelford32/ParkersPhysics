@@ -210,7 +210,8 @@ const SMOKE_FRAG = /* glsl */`
         vec3 L = uFlameView - p;
         float d2 = dot(L, L);
         float fall = uFlameIntensity / (1.0 + d2 / (uFlameRange * uFlameRange));
-        float facing = clamp(dot(n, normalize(L)) * 0.6 + 0.4, 0.0, 1.0);
+        // L / |L| guarded: normalize(0) is NaN on real GPUs (puff AT the flame).
+        float facing = clamp(dot(n, L * inversesqrt(max(d2, 1e-8))) * 0.6 + 0.4, 0.0, 1.0);
         col += base * uFlameColor * fall * facing * detail;
 
         // Born in the flame: glows while it cools.
