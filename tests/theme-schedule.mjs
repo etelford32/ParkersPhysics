@@ -132,9 +132,14 @@ const BOULDER = { lat: 40.015, lon: -105.27, city: 'Boulder' };
     assert.match(boot, new RegExp(`CLOCK_END_H\\s*=\\s*${CLOCK_DAY.endH}\\b`), 'boot clock end drifted');
     assert.ok(boot.includes(`'${STORAGE_KEY}'`), 'boot does not read STORAGE_KEY');
     assert.ok(boot.includes(`'${CACHE_KEY}'`), 'boot does not read CACHE_KEY');
-    assert.ok(!/\bimport\b|\bexport\b/.test(boot.replace(/\/\*[\s\S]*?\*\//g, '')),
+    const code = boot.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    assert.ok(!/\bimport\b|\bexport\b/.test(code),
         'theme-boot.js must stay a CLASSIC script (it runs in <head> before modules)');
-    ok('theme-boot.js mirrors the clock window and storage keys');
+    // The switch module is appended after parse, never as a head <script
+    // type=module> (that would precede some pages' import maps).
+    assert.match(code, /DOMContentLoaded[\s\S]*type = 'module'[\s\S]*\/js\/theme-switch\.js/,
+        'theme-boot.js must append js/theme-switch.js after DOMContentLoaded');
+    ok('theme-boot.js mirrors the clock window and storage keys, and loads the switch after parse');
 }
 
 // ── 7. Page wiring ───────────────────────────────────────────────────────

@@ -66,25 +66,6 @@ nav {
 .nav-spacer { flex: 1; }
 .nav-auth-sep { width: 1px; height: 22px; background: rgba(255,255,255,.15); margin: 0 3px; flex-shrink: 0; }
 
-/* ── Theme toggle (js/theme.js; only on light-capable pages) ───────────────
- * It takes the place of .nav-auth-sep on those pages, so its width is the
- * separator's 7px plus ~20px. The compact tier below shrinks it to fit the
- * ladder's admin budget; tests/nav-responsive.spec.js measures simulations.html,
- * which IS light-capable, so the toggle is inside the measured row. */
-.nav-theme-toggle {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    flex-shrink: 0; width: 28px; height: 28px; margin: 0 2px; padding: 0;
-    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
-    border-radius: 999px; color: #c9d4e6; cursor: pointer; font-family: inherit;
-    transition: background .2s, border-color .2s, color .2s;
-}
-.nav-theme-toggle .pp-glyph { display: block; flex-shrink: 0; }
-.nav-theme-toggle:focus-visible { outline: 2px solid #4da3ff; outline-offset: 2px; }
-.nav-theme-label { display: none; }
-@media (hover: hover) and (pointer: fine) {
-    .nav-theme-toggle:hover { background: rgba(255,255,255,.16); border-color: rgba(120,180,255,.5); color: #fff; }
-}
-
 /* ── Utility text-links + PRO promo ─────────────────────────────────────── */
 .nav-utility-links {
     display: flex; align-items: center; gap: 10px;
@@ -419,8 +400,6 @@ nav {
     .nav-utility-links { gap: 7px; }
     .nav-util-link { font-size: .67rem; }
     .nav-pro-promo { display: none; }
-    .nav-theme-toggle { width: 24px; height: 24px; margin: 0 1px; }
-    .nav-theme-toggle .pp-glyph { width: 15px; height: 15px; }
 }
 
 /* ── Mobile / Tablet / small laptop (<=1280px) ──────────────────────────────
@@ -455,14 +434,6 @@ nav {
     }
     .nav-pro-text { display: inline; }
     .nav-pro-promo::after { content: none; }
-
-    /* The theme toggle becomes a labelled 44px row in the panel. */
-    .nav-theme-toggle {
-        width: 100%; height: auto; min-height: 44px; margin: 6px 0 2px;
-        border-radius: 6px; justify-content: flex-start; padding: 0 14px;
-        font-size: .86rem;
-    }
-    .nav-theme-label { display: inline; }
 
     .nav-menu {
         display: none; flex-direction: column; align-items: stretch;
@@ -594,7 +565,7 @@ nav {
    is instantaneous and cannot be mid-animation when a test or a user reads it. */
 @media (prefers-reduced-motion: reduce) {
     .nav-drop-menu, .nav-drop-inner, .nav-caret, .burger-line, .nav-item,
-    .nav-drop-btn, .nav-drop-toggle, .nav-drop-link, .nav-pro-promo, .nav-theme-toggle {
+    .nav-drop-btn, .nav-drop-toggle, .nav-drop-link, .nav-pro-promo {
         transition: none !important;
     }
 }
@@ -672,7 +643,7 @@ html.theme-light body > nav {
     box-shadow: 0 1px 0 rgba(11,31,58,.03), 0 4px 16px rgba(21,96,212,.06);
 }
 html.theme-light .nav-brand { background: var(--pl-grad-headline, linear-gradient(135deg,#0b2f6b,#1560d4)); -webkit-background-clip: text; background-clip: text; }
-html.theme-light :is(.nav-item, .nav-drop-btn, .nav-drop-toggle, .nav-theme-toggle) {
+html.theme-light :is(.nav-item, .nav-drop-btn, .nav-drop-toggle) {
     background: #f3f7fd; border-color: #d6e3f3; color: var(--pl-text-2, #1d3557);
 }
 html.theme-light .nav-drop-toggle { border-left-color: #e2ebf7; }
@@ -691,10 +662,8 @@ html.theme-light .nav-signout { border-color: rgba(192,38,45,.25) !important; co
 html.theme-light .nav-admin-link { background: rgba(192,38,45,.08) !important; border-color: rgba(192,38,45,.3) !important; color: #b0222a !important; }
 html.theme-light .nav-badge-pro { background: #fff4e0; color: #8a5a00; border-color: #f0cf8f; }
 html.theme-light .nav-badge-new { background: #e7f0fe; color: #0b4aa8; border-color: #9cc0f2; text-shadow: none; }
-html.theme-light .nav-theme-toggle { color: var(--pl-blue, #1560d4); }
-html.theme-light .nav-theme-toggle:focus-visible { outline-color: var(--pl-blue-bright, #2f86f6); }
 @media (hover: hover) and (pointer: fine) {
-    html.theme-light :is(.nav-item, .nav-theme-toggle):hover,
+    html.theme-light .nav-item:hover,
     html.theme-light .nav-drop:hover .nav-drop-btn:not(.active),
     html.theme-light .nav-drop:hover .nav-drop-btn:not(.active) + .nav-drop-toggle {
         background: #e7f0fe; border-color: #9cc0f2; color: var(--pl-blue-deep, #0b4aa8);

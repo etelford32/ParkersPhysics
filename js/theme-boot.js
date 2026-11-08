@@ -52,4 +52,17 @@
         if (!m.hasAttribute('data-dark')) m.setAttribute('data-dark', m.getAttribute('content') || '');
         if (theme === 'light') m.setAttribute('content', '#ffffff');
     }
+    // The light/dark switch under the logo (js/theme-switch.js, which also
+    // starts js/theme.js). nav.js imports it on most pages; this is what
+    // reaches the light pages that do not load nav.js. Appended AFTER the
+    // document is parsed, never as a <script type=module> here in <head>:
+    // a module that starts before a page's import map makes Firefox ignore
+    // the map (tests/importmap-order.mjs — status.html's map is in <body>).
+    // Same URL as nav.js's import, so the module still runs once.
+    document.addEventListener('DOMContentLoaded', function () {
+        var s = document.createElement('script');
+        s.type = 'module';
+        s.src = '/js/theme-switch.js';
+        document.head.appendChild(s);
+    });
 })();

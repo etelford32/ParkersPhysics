@@ -62,7 +62,10 @@ import { glyph } from './glyphs.js';
 // Site theme: light (white + blue) by daylight on the reading pages, dark
 // elsewhere. Imported here because nav.js is the one module on every page;
 // theme.js starts itself and is a no-op on pages without data-theme-support.
-import { themeSupported, getTheme, cycleThemeMode, describeCurrent } from './theme.js';
+import './theme.js';
+// The light / dark switch under the logo (owns its markup, styles and
+// behaviour; mounts itself into this nav and survives its re-renders).
+import './theme-switch.js';
 // The top-level structure — id, label and hub href per section. This module is
 // the single source shared with js/simulations-catalog.js and the hub-page
 // builder, so the bar, the catalog page and the hubs cannot disagree about
@@ -345,44 +348,6 @@ function _closeAll() {
     });
 }
 
-// ── Theme toggle ─────────────────────────────────────────────────────────────
-//
-// Cycles auto → light → dark. The glyph shows the MODE (horizon = auto, which
-// follows sunrise/sunset at the saved location; sun = pinned light; moon =
-// pinned dark) and the tooltip says what auto is doing right now.
-const THEME_GLYPH = { auto: 'horizon', light: 'sun', dark: 'moon' };
-const THEME_LABEL = { auto: 'Auto', light: 'Light', dark: 'Dark' };
-
-function _themeToggleParts() {
-    const st = getTheme() || { mode: 'auto', theme: 'dark' };
-    const label = st.mode === 'auto'
-        ? `Theme: Auto (${st.theme} now)`
-        : `Theme: ${THEME_LABEL[st.mode]}`;
-    return { st, label, title: describeCurrent() || label };
-}
-
-function _themeToggleHtml() {
-    const { st, label, title } = _themeToggleParts();
-    return `<button type="button" class="nav-theme-toggle" id="nav-theme-toggle"`
-        + ` data-mode="${st.mode}" aria-label="${_escAttr(label)}. Change theme" title="${_escAttr(title)}">`
-        + `${glyph(THEME_GLYPH[st.mode], { size: 17 })}`
-        + `<span class="nav-theme-label">${_escAttr(label)}</span></button>`;
-}
-
-function _syncThemeToggle() {
-    const btn = document.getElementById('nav-theme-toggle');
-    if (!btn) return;
-    const { st, label, title } = _themeToggleParts();
-    btn.dataset.mode = st.mode;
-    btn.setAttribute('aria-label', `${label}. Change theme`);
-    btn.title = title;
-    btn.innerHTML = `${glyph(THEME_GLYPH[st.mode], { size: 17 })}<span class="nav-theme-label">${_escAttr(label)}</span>`;
-}
-
-function _escAttr(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-}
-
 // ── Nav Builder ──────────────────────────────────────────────────────────────
 
 export function initNav(activeId = '') {
@@ -580,15 +545,7 @@ export function initNav(activeId = '') {
     }
     html += `</div>`;
 
-    // Theme toggle — only where the page can actually go light. It REPLACES
-    // the separator on those pages rather than sitting beside it: the bar has
-    // ~16px of headroom at 1281px as admin (see nav-styles.css compact tier),
-    // and the toggle is itself the divider between the links and auth.
-    if (themeSupported()) {
-        html += _themeToggleHtml();
-    } else {
-        html += '<span class="nav-auth-sep"></span>';
-    }
+    html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
         // Notification bell (any paid tier or admin). PAID_PLAN_IDS is the
@@ -662,19 +619,6 @@ export function initNav(activeId = '') {
             drop.classList.add('open');
             drop.querySelector('.nav-drop-toggle')?.setAttribute('aria-expanded', 'true');
         }
-    }
-
-    // ── Theme toggle ──────────────────────────────────────────────────────
-    // Bound per render (the button is fresh DOM); the pp-theme-change
-    // listener is global and bound once, and looks the button up by id.
-    document.getElementById('nav-theme-toggle')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        cycleThemeMode();
-        _syncThemeToggle();
-    });
-    if (!window._ppThemeNavBound) {
-        window._ppThemeNavBound = true;
-        window.addEventListener('pp-theme-change', _syncThemeToggle);
     }
 
     // ── Event handlers ────────────────────────────────────────────────────
