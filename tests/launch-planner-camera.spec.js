@@ -35,8 +35,35 @@ async function boot(page) {
     await page.evaluate(() => {
         const el = document.querySelector('.lh-vehicle-canvas-host');
         window.scrollTo(0, el.getBoundingClientRect().top + scrollY - 56);
+        // The cookie-consent banner covers the bottom of the page and
+        // intercepts clicks on the dock — it took the full-screen click on
+        // main (2026-11-08). It is chrome, not stage; the render-health spec
+        // removes it the same way.
+        document.querySelector('.pp-consent-banner')?.remove();
     });
     await frames(page, 3);
+}
+// Wait for the stage's FINAL framing. The camera first frames with no safe
+// insets, then RE-FITS when the page reports the toolbars' footprint
+// (setSafeInsets → reframeCurrentView, by design). That report lands only once
+// the toolbars have their final size — and with every external request
+// aborted the web fonts never arrive, so the toolbar text lays out after the
+// font-block timeout, ~3 s in. A fixed 900 ms sleep read the PRE-insets frame
+// on CI (s0 = 122.2) and the re-fit then landed between s0 and the orbit
+// click (164.7) — identical on retry, because both framings are deterministic.
+// Measured locally: 104.95 with insets {0,0}, then 127.08 once insets arrive.
+async function settledFrame(page, { stillFrames = 10, timeout = 30_000 } = {}) {
+    await page.waitForFunction((need) => {
+        const a = window.__lpVehicle3d;
+        const ins = a?.view?.insets;
+        if (!ins || (ins.top + ins.bottom) === 0) return false;     // insets not applied yet
+        const key = `${a.renderStats.distance.toFixed(4)}|${ins.top}|${ins.bottom}`;
+        const w = (window.__lpSettle ||= { key: '', still: 0 });
+        w.still = key === w.key ? w.still + 1 : 0;
+        w.key = key;
+        return w.still >= need;
+    }, stillFrames, { timeout, polling: 'raf' });
+    await page.evaluate(() => { delete window.__lpSettle; });
 }
 async function frames(page, n = 3) {
     await page.evaluate((n) => new Promise((res) => {
@@ -133,8 +160,7 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
         const page = await ctx.newPage();
         await boot(page);
-        await page.waitForTimeout(900);                   // initial framing tween
-        await frames(page, 2);
+        await settledFrame(page);                         // final framing (see settledFrame)
         const s0 = await stats(page);
 
         // Orbit button → azimuth changes, distance kept.
