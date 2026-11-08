@@ -1,0 +1,63 @@
+# glacier-kernels — Glacier Watch's engine, pair rules, live-route reader and bakes
+#
+#   glacier-engine.mjs   ITS_LIVE granule names / short-baseline rule / 3×3 median
+#                        sampler; THE JOIN (the daily route's jsfive reader on a crop of a
+#                        real 2026-11-06 Columbia pair ≡ the Python baker, gaps included, with
+#                        a wrong-projection negative control); seasonal expectation vs
+#                        quadrature; outliers; daily series; "faster / slower / normal /
+#                        below detection"; advection; the shallow-ice ice body (exact slab
+#                        recovery, plastic cap, H ∝ u^{1/4}); the committed bake's structure
+#                        and physics (every flowline runs downhill, outlets fast, small
+#                        glaciers slow, plausible ice bodies); WGMS series; Open-Meteo / USGS /
+#                        SNOTEL parsers on synthetic payloads (hosts egress-blocked).
+#   massbalance --check  data/glaciers/massbalance.json still matches its sha256-pinned sources
+#
+# Browser gate (tests/glacier-watch.spec.js, every feed mocked) runs with the Playwright suite.
+name: glacier-kernels
+
+on:
+  push:
+    paths:
+      - 'js/glacier-*.js'
+      - 'js/vendor/jsfive-0.4.0.mjs'
+      - 'data/glaciers/**'
+      - 'scripts/build-glacier-*'
+      - 'api/glaciers/**'
+      - 'tests/glacier-engine.mjs'
+      - 'tests/fixtures/glaciers/**'
+      - '.github/workflows/glacier-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/glacier-*.js'
+      - 'js/vendor/jsfive-0.4.0.mjs'
+      - 'data/glaciers/**'
+      - 'scripts/build-glacier-*'
+      - 'api/glaciers/**'
+      - 'tests/glacier-engine.mjs'
+      - 'tests/fixtures/glaciers/**'
+      - '.github/workflows/glacier-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: glacier-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Glacier engine + pairs + route reader + bakes (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: engine, pairs, route reader, bake physics
+        run: node tests/glacier-engine.mjs
+      - name: WGMS mass balance matches its pinned sources
+        run: node scripts/build-glacier-massbalance.mjs --check
+      - name: pipeline registry
+        run: node tests/pipeline-registry.mjs

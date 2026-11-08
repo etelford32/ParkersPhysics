@@ -1,8 +1,37 @@
 # GLACIER_WATCH_PLAN.md — Glacier Watch: glacier motion + snowpack, observed and simulated
 
-*Status: PLAN ONLY (2026-11-08). Nothing is built. §2 holds numbers MEASURED in
-this session; everything else marked "to verify" has not been checked against
-the live source yet.*
+*Status (2026-11-08): P0 + P1 BUILT, P2 (EarthView layer) next. §0 is the build log;
+§2 holds numbers MEASURED in the planning session; "to verify" items are unchecked.*
+
+## 0. Built (2026-11-08)
+
+- **25 glaciers** (the ten of §4 + Hintereisferner, Rhône, Mer de Glace, Nigardsbreen,
+  Wolverine, Lemon Creek, Chhota Shigri, Brewster, Pasterze, Helheim, Thwaites, Pine Island,
+  Hubbard, Baltoro, Breiðamerkurjökull). Decisions taken: daily tracking from MULTIPLE sources
+  (owner, 2026-11-08); calving/ice-sheet glaciers are motion-only; hydrological years; the page
+  lives on the Earth & Orbit HUB (the menu is at its 10-link cap) — a menu slot is still open.
+- **Bakes** — `scripts/build-glacier-velocity.py` (ITS_LIVE: composites 1982/84/2013–2025,
+  ≤ 240 short-baseline pairs over the last year, block-averaged field + GLO-30 terrain grid,
+  hybrid velocity/topography flowline), `scripts/build-glacier-elevation.py` (GLO-30 profile),
+  `scripts/build-glacier-massbalance.mjs` (15 WGMS series via OGGM's mirror, sha256-pinned).
+- **Daily sources** — `/api/glaciers/velocity` (new ITS_LIVE pairs since the bake, jsfive in
+  Node; measured locally: 35 new Columbia pairs, newest 2026-11-06), `/api/glaciers/stations`
+  (USGS + SNOTEL, UNVERIFIED), Open-Meteo archive + forecast at gauge elevations (browser).
+- **Engine** — `js/glacier-engine.js` (seasonal expectation, outliers, daily series,
+  faster/slower/normal/below-detection, trends, advection, north, the SIA ice body);
+  `js/glacier-pairs.js` (the shared pair rules); `js/glacier-weather.js` (degree-days, season rank).
+- **Page** — `glacier-watch.html`: a resizable / full-screen 3D stage at the top (terrain,
+  estimated bed, translucent ice body with margins, flowline thickness section, flowing parcels;
+  layers speed / thickness / flux / driving stress; density readout of volume and mass), name-only
+  selector with rich tooltips, then Right-now, 12-month, profile, decades, mass balance,
+  weather and gauges panels.
+- **Scars found while building** (each recorded where it lives): datacubes end May 2025; h5py's
+  global lock froze threaded range reads; jsfive hides scalar-dataset attributes; small glaciers
+  are below ITS_LIVE detection (v0 ~0.5 m/yr); composite year spans are tile-dependent; a comment
+  once swallowed the seasonal amplitude/phase in the baker.
+- **Next** — P2 EarthView layer; the WGMS 2021–2025 refresh in CI; verify the stations route in
+  production; a weekly `glacier-refresh.yml` (trojans-refresh pattern) to fold the daily tail
+  into the archive; geodetic mass change for the calving glaciers; then the planet (§8 P5).
 
 Glacier Watch is a new Earth & Orbit simulation: ten glaciers to start, their
 **motion** (surface velocity), their **mass balance** (are they gaining or losing

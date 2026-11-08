@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glacier Watch · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/glacier-watch.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/glacier-watch.html">
+<meta property="og:title" content="Glacier Watch — ten glaciers, tracked from orbit every few days">
+<meta property="og:description" content="How fast ten of the world's best-studied glaciers are moving right now, measured from Landsat and Sentinel image pairs by NASA ITS_LIVE, against their own seasonal rhythm, four decades of history, field mass balance and the weather driving the melt.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Glacier Watch — glacier motion, observed daily">
+<meta name="twitter:description" content="NASA ITS_LIVE image pairs, WGMS mass balance, Copernicus DEM and daily weather at the ice — for Jakobshavn, Columbia, Aletsch, Khumbu and six more.">
+<meta name="description" content="Glacier Watch tracks the surface velocity of ten glaciers from NASA ITS_LIVE satellite image pairs, compares each new measurement with the glacier's own seasonal cycle and four decades of record, and adds field mass balance, river gauges, snow stations and the daily weather at glacier altitude.">
+
+<script type="importmap">
+{"imports":{"three":"./js/vendor/three-0.160.0/three.module.js","three/addons/":"./js/vendor/three-0.160.0/jsm/"}}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+:root {
+    --gw-surface: #0b1120; --gw-panel: rgba(11,17,32,.86); --gw-line: rgba(140,190,255,.14);
+    --gw-ink: #e3eaf6; --gw-ink-2: #aab6cc; --gw-ink-3: #7e8ba3; --gw-accent: #8fd3ff;
+    --gw-s1: #3987e5; --gw-s2: #d95926; --gw-s3: #199e70;          /* dataviz reference dark slots 1–3, validated on #0b1120 */
+    --gw-faster: #d95926; --gw-slower: #3987e5; --gw-normal: #8a94a6;
+}
+body { width:100%; min-height:100vh; overflow-x:clip; background:#04070f; color:var(--gw-ink); font-family:'Segoe UI', system-ui, sans-serif; }
+#gw-app { display:grid; grid-template-columns:360px minmax(0, 1fr); gap:14px; padding:14px; align-content:start; min-height:calc(100vh - 50px); }
+@media (max-width: 1180px) { #gw-app { grid-template-columns:minmax(0, 1fr); } }
+@media (max-width: 768px) { #gw-app { padding:10px; gap:10px; } }
+.gw-panel { background:var(--gw-panel); border:1px solid var(--gw-line); border-radius:12px; padding:14px; min-width:0; }
+.gw-span { grid-column:1 / -1; }
+h1 { font-size:1.45rem; font-weight:700; letter-spacing:.01em; }
+h2 { font-size:.92rem; font-weight:650; color:var(--gw-ink); margin-bottom:8px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+h2 small { font-weight:400; color:var(--gw-ink-3); font-size:.72rem; }
+#gw-hero-row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+#gw-hero p { color:var(--gw-ink-2); font-size:.82rem; margin-top:6px; max-width:980px; line-height:1.5; }
+.gw-chip { display:inline-flex; align-items:center; gap:6px; font-size:.72rem; color:var(--gw-ink-2); border:1px solid var(--gw-line); border-radius:999px; padding:3px 10px; white-space:nowrap; }
+.gw-chip::before { content:''; width:7px; height:7px; border-radius:50%; background:#5d6a82; }
+.gw-chip[data-state="live"]::before { background:#3fbf7f; }
+.gw-chip[data-state="stale"]::before { background:#e0a43a; }
+.gw-chip[data-state="down"]::before { background:#e05a5a; }
+#gw-picker { display:grid; grid-template-columns:repeat(auto-fill, minmax(178px, 1fr)); gap:8px; }
+.gw-card { text-align:left; background:rgba(20,30,52,.6); border:1px solid var(--gw-line); color:var(--gw-ink); border-radius:10px; padding:9px 11px; cursor:pointer; min-height:64px; font:inherit; }
+.gw-card:hover { border-color:rgba(143,211,255,.45); }
+.gw-card[aria-pressed="true"] { border-color:var(--gw-accent); background:rgba(40,70,110,.55); }
+.gw-card b { display:block; font-size:.84rem; }
+.gw-card span { display:block; font-size:.7rem; color:var(--gw-ink-3); margin-top:2px; }
+.gw-card .gw-state { margin-top:4px; color:var(--gw-ink-2); }
+.gw-card .gw-tag, .gw-card .gw-state-pill { display:inline-flex; }
+.gw-tag { font-size:.66rem; padding:1px 6px; border-radius:4px; border:1px solid var(--gw-line); color:var(--gw-ink-2); }
+/* ── the stage (top of page): resizable, size presets, fullscreen ── */
+#gw-stage-head { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+#gw-stage-head h2 { margin:0; flex:1 1 260px; }
+#gw-stage { position:relative; width:100%; height:var(--gw-stage-h, 72vh); min-height:340px; max-height:94vh; resize:vertical; overflow:hidden;
+    background:#050a14; border-radius:10px; border:1px solid var(--gw-line); }
+#gw-stage[data-size="S"] { --gw-stage-h: 46vh; } #gw-stage[data-size="M"] { --gw-stage-h: 60vh; }
+#gw-stage[data-size="L"] { --gw-stage-h: 74vh; } #gw-stage[data-size="XL"] { --gw-stage-h: 88vh; }
+#gw-stage.gw-fs, #gw-stage:fullscreen { position:fixed; inset:0; width:100vw; height:100vh !important; max-height:none; border-radius:0; resize:none; z-index:2000; }
+#gw-stage-host { position:absolute; inset:0; }
+#gw-stage-host canvas { touch-action:none; }
+.gw-ov { position:absolute; background:rgba(4,8,16,.82); border:1px solid var(--gw-line); border-radius:8px; color:var(--gw-ink-2); font-size:.72rem; }
+#gw-stage-tools { top:10px; right:10px; display:flex; gap:6px; flex-wrap:wrap; padding:5px; max-width:calc(100% - 20px); justify-content:flex-end; }
+#gw-stage-layers { top:10px; left:10px; display:flex; gap:4px; flex-wrap:wrap; padding:5px; max-width:60%; }
+.gw-ov button, .gw-ov label { font:inherit; font-size:.74rem; color:var(--gw-ink); background:rgba(14,24,44,.9); border:1px solid var(--gw-line); border-radius:6px; padding:6px 10px; min-height:34px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+.gw-ov button[aria-pressed="true"] { border-color:var(--gw-accent); color:var(--gw-accent); }
+.gw-ov input[type=range] { width:90px; accent-color:#8fd3ff; }
+#gw-stage-legend { left:10px; bottom:10px; padding:8px 10px; max-width:min(420px, 60%); pointer-events:none; }
+#gw-stage-legend b { color:var(--gw-ink); }
+#gw-stage-legend canvas { display:block; width:220px; max-width:100%; height:10px; margin:5px 0 3px; border-radius:2px; }
+#gw-stage-readout { right:10px; bottom:10px; padding:8px 10px; min-width:220px; max-width:min(340px, 46%); line-height:1.5; }
+#gw-stage-readout b { color:var(--gw-ink); font-size:.8rem; }
+#gw-stage-readout .big { font-size:1.05rem; color:var(--gw-ink); font-weight:700; }
+#gw-stage-tip { position:absolute; pointer-events:none; display:none; background:rgba(4,8,16,.94); border:1px solid var(--gw-line); border-radius:6px; padding:6px 9px; font-size:.72rem; color:var(--gw-ink); white-space:nowrap; z-index:3; }
+#gw-stage-note { font-size:.7rem; color:var(--gw-ink-3); margin-top:8px; line-height:1.55; }
+@media (max-width: 700px) { #gw-stage-layers { max-width:100%; right:10px; } #gw-stage-tools { top:auto; bottom:64px; } #gw-stage-readout { display:none; } #gw-stage-legend { max-width:calc(100% - 20px); } }
+/* ── glacier selector: name-only cells, details in a tooltip ── */
+#gw-picker { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px; }
+.gw-name { font:inherit; font-size:.8rem; font-weight:600; text-align:left; color:var(--gw-ink); background:rgba(20,30,52,.6); border:1px solid var(--gw-line);
+    border-radius:8px; padding:10px 11px; min-height:44px; cursor:pointer; display:flex; align-items:center; gap:8px; }
+.gw-name:hover, .gw-name:focus-visible { border-color:rgba(143,211,255,.5); outline:none; }
+.gw-name[aria-pressed="true"] { border-color:var(--gw-accent); background:rgba(40,70,110,.6); }
+.gw-name i { flex:0 0 auto; width:8px; height:8px; border-radius:50%; background:#5d6a82; }
+.gw-name i[data-state="faster"] { background:#f08a5d; } .gw-name i[data-state="slower"] { background:#6ea8f0; } .gw-name i[data-state="normal"] { background:#8a94a6; }
+#gw-picker-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
+#gw-picker-head small { color:var(--gw-ink-3); font-size:.7rem; }
+#gw-name-tip { position:fixed; z-index:2100; display:none; pointer-events:none; width:min(320px, calc(100vw - 24px)); background:rgba(6,11,22,.97); border:1px solid rgba(143,211,255,.3);
+    border-radius:10px; padding:10px 12px; font-size:.74rem; color:var(--gw-ink-2); line-height:1.5; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+#gw-name-tip b { color:var(--gw-ink); font-size:.86rem; } #gw-name-tip .r { display:flex; justify-content:space-between; gap:8px; border-top:1px solid rgba(140,190,255,.08); padding-top:3px; margin-top:3px; }
+#gw-map-wrap { position:relative; width:100%; aspect-ratio: 4 / 3; max-height:72vh; background:#050a14; border-radius:10px; overflow:hidden; }
+#gw-map { width:100%; height:100%; display:block; touch-action:none; }
+#gw-map-legend { position:absolute; left:10px; bottom:10px; background:rgba(4,8,16,.78); border:1px solid var(--gw-line); border-radius:8px; padding:6px 8px; font-size:.68rem; color:var(--gw-ink-2); pointer-events:none; }
+#gw-map-legend canvas { display:block; width:160px; height:8px; margin:4px 0 2px; }
+#gw-map-tip { position:absolute; pointer-events:none; background:rgba(4,8,16,.9); border:1px solid var(--gw-line); border-radius:6px; padding:4px 7px; font-size:.7rem; color:var(--gw-ink); display:none; white-space:nowrap; }
+#gw-map-controls { position:absolute; right:10px; top:10px; display:flex; gap:6px; }
+#gw-map-controls button, .gw-seg button { font:inherit; font-size:.72rem; color:var(--gw-ink); background:rgba(10,18,34,.85); border:1px solid var(--gw-line); border-radius:6px; padding:5px 9px; min-height:32px; cursor:pointer; }
+#gw-map-controls button[aria-pressed="true"], .gw-seg button[aria-pressed="true"] { border-color:var(--gw-accent); color:var(--gw-accent); }
+#gw-map-note { font-size:.68rem; color:var(--gw-ink-3); margin-top:6px; line-height:1.5; }
+#gw-now h3 { font-size:.8rem; color:var(--gw-ink-2); font-weight:600; margin:10px 0 4px; }
+#gw-now .gw-big { font-size:1.6rem; font-weight:700; }
+#gw-now .gw-row { display:flex; justify-content:space-between; gap:8px; font-size:.76rem; padding:4px 0; border-bottom:1px solid rgba(140,190,255,.07); }
+#gw-now .gw-row > :first-child { color:var(--gw-ink-2); }
+.gw-state-pill { display:inline-flex; align-items:center; gap:5px; font-size:.74rem; font-weight:600; }
+.gw-state-pill[data-state="faster"] { color:#f08a5d; } .gw-state-pill[data-state="slower"] { color:#6ea8f0; }
+.gw-state-pill[data-state="normal"], .gw-state-pill[data-state="unknown"], .gw-state-pill[data-state="undetectable"] { color:var(--gw-ink-2); }
+.gw-seg { display:inline-flex; gap:4px; flex-wrap:wrap; }
+.gw-chart { position:relative; width:100%; }
+.gw-chart canvas { width:100%; display:block; }
+.gw-chart .gw-tip { position:absolute; pointer-events:none; background:rgba(4,8,16,.94); border:1px solid var(--gw-line); border-radius:6px; padding:5px 8px; font-size:.7rem; color:var(--gw-ink); display:none; white-space:nowrap; z-index:2; }
+.gw-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:.7rem; color:var(--gw-ink-2); margin:2px 0 6px; }
+.gw-legend i { display:inline-block; width:10px; height:10px; margin-right:5px; vertical-align:-1px; }
+.gw-note { font-size:.68rem; color:var(--gw-ink-3); line-height:1.5; margin-top:6px; }
+.gw-empty { font-size:.78rem; color:var(--gw-ink-3); padding:18px 6px; }
+.gw-grid2 { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+@media (max-width: 900px) { .gw-grid2 { grid-template-columns:minmax(0, 1fr); } }
+.gw-method { font-size:.7rem; color:var(--gw-ink-2); line-height:1.6; }
+.gw-method p + p { margin-top:6px; }
+.gw-method b { color:var(--gw-ink); }
+.gw-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+details.gw-table summary { cursor:pointer; font-size:.7rem; color:var(--gw-ink-3); margin-top:6px; }
+details.gw-table table { width:100%; border-collapse:collapse; font-size:.68rem; margin-top:4px; }
+details.gw-table td, details.gw-table th { text-align:left; padding:2px 6px; border-bottom:1px solid rgba(140,190,255,.07); color:var(--gw-ink-2); }
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("glacier-watch");</script>
+
+<div id="gw-app">
+
+  <section id="gw-hero" class="gw-panel gw-span">
+    <div id="gw-hero-row">
+      <h1>Glacier Watch</h1>
+      <span class="gw-chip" id="gw-chip-bake" data-state="loading">Archive: loading…</span>
+      <span class="gw-chip" id="gw-chip-live" data-state="loading">Daily pairs: —</span>
+      <span class="gw-chip" id="gw-chip-weather" data-state="loading">Weather at the ice: —</span>
+      <span class="gw-chip" id="gw-chip-stations" data-state="loading">Gauges &amp; snow: —</span>
+    </div>
+    <p>Ten glaciers, measured from orbit. Every few days a Landsat or Sentinel satellite photographs each one again, and NASA's
+      ITS_LIVE matches features between two images to measure how far the ice moved. Each new measurement is compared with
+      that glacier's own seasonal rhythm and its four-decade record. Field mass balance, river gauges, snow stations and the
+      weather at the glacier's own altitude sit alongside.</p>
+  </section>
+
+  <section class="gw-panel gw-span" id="gw-stage-panel">
+    <div id="gw-stage-head">
+      <h2><span id="gw-map-title">Glacier</span> <small id="gw-map-sub"></small></h2>
+    </div>
+    <div id="gw-stage" data-size="L">
+      <div id="gw-stage-host"></div>
+      <div class="gw-ov" id="gw-stage-layers" role="group" aria-label="What the ice is coloured by"></div>
+      <div class="gw-ov" id="gw-stage-tools">
+        <button id="gw-view-3d" aria-pressed="true" title="3D volumetric view">3D</button>
+        <button id="gw-view-2d" aria-pressed="false" title="Flat flow map">2D</button>
+        <button id="gw-flow-toggle" aria-pressed="true" title="Animate ice parcels (Space)">Flow ▶</button>
+        <button id="gw-section-toggle" aria-pressed="true" title="Thickness cross-section along the flowline">Section</button>
+        <label title="Vertical exaggeration">↕ <input id="gw-exag" type="range" min="1" max="6" step="0.5" value="2" aria-label="Vertical exaggeration"><span id="gw-exag-val">2×</span></label>
+        <button data-cam="oblique" title="Oblique view">⟲</button>
+        <button data-cam="top" title="Look straight down">⊤</button>
+        <span id="gw-size-seg" style="display:inline-flex;gap:4px">
+          <button data-size="S" aria-pressed="false">S</button><button data-size="M" aria-pressed="false">M</button><button data-size="L" aria-pressed="true">L</button><button data-size="XL" aria-pressed="false">XL</button>
+        </span>
+        <button id="gw-fullscreen" title="Full screen (F)">⛶ Full screen</button>
+      </div>
+      <div class="gw-ov" id="gw-stage-legend"></div>
+      <div class="gw-ov" id="gw-stage-readout" aria-live="polite"></div>
+      <div id="gw-stage-tip"></div>
+      <div id="gw-map-legend" hidden><canvas id="gw-map-ramp" width="160" height="8"></canvas><span id="gw-ramp-lo"></span><span id="gw-ramp-hi"></span></div>
+      <div id="gw-map-tip" class="gw-ov" style="display:none;pointer-events:none;padding:4px 7px"></div>
+    </div>
+    <div id="gw-stage-note"></div>
+    <div id="gw-map-note" hidden></div>
+  </section>
+
+  <section class="gw-panel gw-span" aria-label="Choose a glacier">
+    <div id="gw-picker-head"><h2 style="margin:0">Glaciers</h2><small id="gw-picker-count"></small></div>
+    <div id="gw-picker" role="group" aria-label="Glaciers"></div>
+    <div id="gw-name-tip" role="tooltip"></div>
+  </section>
+
+  <aside class="gw-panel" id="gw-now" aria-live="polite">
+    <h2>Right now <small id="gw-now-sub"></small></h2>
+    <div id="gw-now-body"><div class="gw-empty">Loading…</div></div>
+  </aside>
+
+  <section class="gw-panel" id="gw-year-panel">
+    <h2>The last 12 months <small id="gw-year-sub"></small></h2>
+    <div class="gw-seg" id="gw-gauge-seg" role="group" aria-label="Where on the glacier"></div>
+    <div class="gw-legend" id="gw-year-legend"></div>
+    <div class="gw-chart" id="gw-year-chart"></div>
+    <div class="gw-note" id="gw-year-note"></div>
+  </section>
+
+  <section class="gw-panel" id="gw-profile-panel">
+    <h2>Along the glacier <small>head → terminus</small></h2>
+    <div class="gw-chart" id="gw-profile-chart"></div>
+    <div class="gw-note" id="gw-profile-note"></div>
+  </section>
+
+  <section class="gw-panel" id="gw-decades-panel">
+    <h2>Four decades <small id="gw-decades-sub"></small></h2>
+    <div class="gw-chart" id="gw-decades-chart"></div>
+    <div class="gw-note" id="gw-decades-note"></div>
+  </section>
+
+  <section class="gw-panel gw-span">
+    <div class="gw-grid2">
+      <div id="gw-mb-panel">
+        <h2>Mass balance <small id="gw-mb-sub">WGMS field measurements</small></h2>
+        <div class="gw-chart" id="gw-mb-chart"></div>
+        <div class="gw-note" id="gw-mb-note"></div>
+      </div>
+      <div id="gw-weather-panel">
+        <h2>Weather at the ice <small id="gw-weather-sub"></small></h2>
+        <div class="gw-chart" id="gw-weather-chart"></div>
+        <div class="gw-note" id="gw-weather-note"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="gw-panel gw-span" id="gw-stations-panel">
+    <h2>Rivers &amp; snow stations <small id="gw-stations-sub"></small></h2>
+    <div class="gw-chart" id="gw-stations-chart"></div>
+    <div class="gw-note" id="gw-stations-note"></div>
+  </section>
+
+  <section class="gw-panel gw-span gw-method" id="gw-method">
+    <h2>Where every number comes from</h2>
+    <p><b>Motion: observed.</b> NASA ITS_LIVE v2 (Gardner et al., <i>The Cryosphere</i> 2025; doi:10.5067/JQ6337239C96) measures surface velocity by
+      feature-tracking between two images from Landsat 8/9, Sentinel-2 or Sentinel-1. A pair measures the <i>average</i> speed over its
+      separation, so it is plotted at its midpoint with its own error. Only pairs 1–64 days apart are used. Each value is the median of the 3×3
+      pixels (120 m) around a point. The archive here was baked on <span id="gw-baked">—</span>; pairs published since then are read daily by
+      this site and are marked <i>new</i>.</p>
+    <p><b>The flowline</b> is a streamline of the observed 2014–2024 mean field, traced from the fastest point both up- and downstream: the path ice
+      actually takes in the data, not a hand-drawn centreline. "Upper / mid / lower glacier" are fixed fractions of it.</p>
+    <p><b>"Faster than usual"</b> compares the last 45 days of pairs with ITS_LIVE's own 2014–2024 seasonal sinusoid for the same dates
+      (v₀ + A·cos 2π(day − peak)/365.25, averaged over each pair's span). It is only claimed when the difference exceeds twice its standard error
+      <i>and</i> 5 %. A spring speed-up is the glacier's normal rhythm, not news.</p>
+    <p><b>Mass balance: observed.</b> World Glacier Monitoring Service glaciological series (doi:10.5904/wgms-fog), via the extract OGGM mirrors.
+      It ends in 2018–2020 (Great Aletsch 1999); WGMS has published through 2025 and that gap is shown, not filled. Calving and ice-sheet
+      glaciers have no field series.</p>
+    <p><b>Weather: reanalysis + forecast, not a measurement on the ice.</b> ERA5 (Open-Meteo archive) and Open-Meteo forecasts, lapse-corrected to
+      each gauge's elevation on the Copernicus GLO-30 DEM. Positive degree-days are the standard melt <i>driver</i>; turning them into metres of
+      ice needs a calibrated melt model (planned), so none is claimed here.</p>
+    <p><b>The ice body: a model.</b> Thickness H is a shallow-ice inversion of the observed surface speed u and the GLO-30 surface slope α
+      (Glen's law, n = 3, A = 2.4×10⁻²⁴ Pa⁻³ s⁻¹ for temperate ice; u = 2A/(n+1)·(ρ g sin α)ⁿ·Hⁿ⁺¹ with ALL motion taken as ice deformation), capped by the
+      perfectly-plastic bound H = τ<sub>y</sub>/(ρ g sin α), τ<sub>y</sub> = 150 kPa, slope smoothed over ~1 km and floored at 1.5°. Where a glacier slides the inversion over-estimates
+      and the cap takes over; calving fronts, floating tongues and ice-sheet beds are outside what it can represent. Bed = surface − H. Driving stress = ρ g H sin α.
+      Ice flux per unit width = 0.8·u·H. Volume and mass (ρ = 917 kg m⁻³) are for the ice inside the map window only. Vertical exaggeration and the parcels' time compression are printed on the stage.</p>
+    <p><b>Gauges &amp; snow.</b> USGS stream discharge on glacier outlet streams and NRCS SNOTEL snow-water equivalent, US glaciers only.</p>
+  </section>
+
+</div>
+
+<script type="module" src="js/glacier-watch-page.js"></script>
+</body>
+</html>
