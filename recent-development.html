@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Recent Development — Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/recent-development.html">
+<!--
+  Content comes from js/dev-log.js — edit the log there, never this markup.
+  After a PR merges:  node scripts/dev-log-draft.mjs   (stubs for unlogged PRs)
+                      node tests/dev-log.mjs            (structural gate)
+-->
+<meta name="description" content="Every simulation, data set, layer and fix shipped on Parkers Physics, logged sprint by sprint with a link to open each one.">
+<meta name="theme-color" content="#03010e">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/recent-development.html">
+<meta property="og:title" content="Recent Development — Parkers Physics">
+<meta property="og:description" content="What we shipped, sprint by sprint — new simulations, data sets, layers and fixes.">
+<meta property="og:image" content="https://parkersphysics.com/static/og/research.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="js/nav-styles.css">
+<link rel="stylesheet" href="js/catalog-styles.css">
+<link rel="stylesheet" href="js/recent-development.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("recent-development");</script>
+
+<main id="main-content">
+
+<header class="sim-hero">
+  <p class="sim-hero-label">Build log</p>
+  <h1>Recent Development</h1>
+  <p class="sim-hero-sub">Everything we have shipped, sprint by sprint: new simulations, data sets, layers inside existing labs, and the fixes &mdash; including what was wrong. Every entry links straight to where you can see it.</p>
+  <p class="rd-stats" id="rd-stats"></p>
+</header>
+
+<noscript>
+  <p class="rd-empty">This log is rendered with JavaScript. The full history is also on
+  <a href="https://github.com/etelford32/ParkersPhysics/pulls?q=is%3Apr+is%3Amerged" style="color:#d29aff">GitHub</a>.</p>
+</noscript>
+
+<section class="rd-block" aria-labelledby="rd-spot-title">
+  <h2 class="rd-block-title" id="rd-spot-title">Just shipped</h2>
+  <div class="rd-spotlight" id="rd-spotlight"></div>
+</section>
+
+<div class="rd-toolbar" role="search">
+  <label class="sim-search">
+    <span class="sim-search-label">Search updates</span>
+    <input type="search" id="rd-search" placeholder="Search updates — e.g. Moon, aurora, drag…" autocomplete="off" spellcheck="false">
+  </label>
+  <span class="rd-chip-row-label">Kind</span>
+  <div class="sim-chips" id="rd-kind-chips"></div>
+  <span class="rd-chip-row-label">Section</span>
+  <div class="sim-chips" id="rd-section-chips"></div>
+  <p class="rd-result" id="rd-result" aria-live="polite"></p>
+</div>
+
+<p class="rd-empty" id="rd-empty" hidden>No updates match. <button type="button" id="rd-clear">Clear filters</button></p>
+
+<div class="rd-timeline" id="rd-timeline"></div>
+
+<aside class="rd-howto">
+  <div class="rd-howto-inner">
+    <strong>How this log works.</strong> Each entry is written when a pull request reaches production, and grouped
+    into the sprint it shipped in. <em>Correctness fixes</em> say what was wrong, not just that something changed.
+    The code-level history is on <a href="https://github.com/etelford32/ParkersPhysics/pulls?q=is%3Apr+is%3Amerged" target="_blank" rel="noopener">GitHub</a>;
+    to tell us what to build next, use <a href="feedback.html">Feedback</a>. Browse everything by topic in
+    <a href="simulations.html">the full catalog</a>.
+  </div>
+</aside>
+
+<script type="module">
+import { mountRecentDevelopment } from './js/recent-development.js';
+mountRecentDevelopment();
+</script>
+
+</main>
+
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────────── -->
+<footer id="site-footer" role="contentinfo">
+  <div class="footer-inner">
+    <div class="footer-grid">
+
+      <div class="footer-brand">
+        <img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics logo" class="footer-brand-logo">
+        <p class="footer-brand-name">Parkers Physics</p>
+        <p class="footer-tagline">Watch space weather happen. Live.</p>
+        <p class="footer-attribution">&copy; 2026 Parkers Physics.<br>All rights reserved.</p>
+      </div>
+
+      <nav aria-label="Sections">
+        <p class="footer-col-title">Sections</p>
+        <div class="footer-links">
+          <a href="space-weather-hub.html">Space Weather</a>
+          <a href="earth-orbit.html">Earth &amp; Orbit</a>
+          <a href="local-space.html">Local Space</a>
+          <a href="deep-space.html">Deep Space</a>
+          <a href="research.html">Research</a>
+          <a href="simulations.html">All 60 Simulations</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Product">
+        <p class="footer-col-title">Product</p>
+        <div class="footer-links">
+          <a href="pricing.html">Pricing</a>
+          <a href="dashboard.html">Dashboard</a>
+          <a href="for-operators.html">For Agencies &amp; Operators</a>
+          <a href="signin.html">Sign In</a>
+          <a href="signup.html">Create Account</a>
+          <a href="recent-development.html">Recent Development</a>
+          <a href="feedback.html">Feedback</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Legal &amp; Sources">
+        <p class="footer-col-title">Legal</p>
+        <div class="footer-links">
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="eula.html">Terms of Service</a>
+        </div>
+        <p class="footer-col-title" style="margin-top:1.4rem">Data Sources</p>
+        <div class="footer-links">
+          <a href="https://www.swpc.noaa.gov/" target="_blank" rel="noopener">NOAA SWPC</a>
+          <a href="https://ssd.jpl.nasa.gov/horizons/" target="_blank" rel="noopener">NASA JPL Horizons</a>
+          <a href="https://api.nasa.gov/" target="_blank" rel="noopener">NASA DONKI</a>
+        </div>
+      </nav>
+
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

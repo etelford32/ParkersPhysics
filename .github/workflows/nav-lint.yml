@@ -62,3 +62,10 @@ jobs:
       # static, whole-site check under the existing required status.
       - name: import map ordering gate
         run: node tests/importmap-order.mjs
+
+      # The build log (js/dev-log.js → recent-development.html + feedback.html)
+      # is linked from the Research menu. Every entry must point at a page that
+      # exists, sit in exactly one sprint, and stay newest-first — a log that
+      # sends visitors to a 404 is worse than no log.
+      - name: build log gate
+        run: node tests/dev-log.mjs

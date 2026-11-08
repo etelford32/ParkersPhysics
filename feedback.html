@@ -151,6 +151,7 @@
         footer a { color: #666; text-decoration: none; }
         footer a:hover { color: #ffd700; }
     </style>
+    <link rel="stylesheet" href="js/recent-development.css">
 </head>
 <body>
 
@@ -257,73 +258,18 @@
         </div>
 
         <!-- ── Devlog ──────────────────────────────────────────────── -->
+        <!-- Rendered from js/dev-log.js — the ONE build log. The hand-written
+             list that used to live here stopped at 2026-05-06 without anyone
+             noticing; recent-development.html is the full page. -->
         <div class="panel">
             <h2>Recent changes</h2>
-            <p class="panel-sub">A curated digest of the most recent shipped fixes, features, and performance work. Newest first.</p>
+            <p class="panel-sub">The newest entries from our build log. Newest first.</p>
 
-            <div class="devlog">
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-05-06</span>
-                        <span class="release-title">Galactic Map polish</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="fix"><span class="kind">fix</span>Aspect-aware camera FOV — wide-view stretching is gone on ultrawide monitors.</li>
-                        <li class="feat"><span class="kind">feat</span>Galactic Map HUD and Sun-orbit panels are now minimizable and draggable.</li>
-                        <li class="feat"><span class="kind">feat</span>Unified <code>gp-panel</code> chrome across the sidebar, zoom bar, and coordinate display.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-05-04</span>
-                        <span class="release-title">Mission Planner overhaul</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="fix"><span class="kind">fix</span>Repaired broken camera that froze on first load.</li>
-                        <li class="feat"><span class="kind">feat</span>Intuitive solar-system navigation — click any body to focus and frame it.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-05-02</span>
-                        <span class="release-title">Sun simulator — Phase 4.6 / 4.7</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="fix"><span class="kind">fix</span>Active-region feed wipe regression — flares now persist across data refreshes.</li>
-                        <li class="perf"><span class="kind">perf</span>Sun mesh LOD — coarser geometry when zoomed out, no visible quality loss.</li>
-                        <li class="perf"><span class="kind">perf</span>Baked fBm noise to a 256² atlas — fewer per-frame shader ops on low-end GPUs.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-04-30</span>
-                        <span class="release-title">Home page refresh</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="feat"><span class="kind">feat</span>New Upper Atmosphere card, refocused Earth card, refreshed live stats.</li>
-                        <li class="feat"><span class="kind">feat</span>Operations page: re-entry refinement plus published sprint status doc.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-04-28</span>
-                        <span class="release-title">Earth + Solar System</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="feat"><span class="kind">feat</span>Earth LOD pipeline now wired to live NASA precipitation data.</li>
-                        <li class="feat"><span class="kind">feat</span>Solar System orrery: full time-controls (play / pause / scrub).</li>
-                        <li class="feat"><span class="kind">feat</span>Galilean moons merged into the main scene as a Yoshida-4 N-body solve.</li>
-                    </ul>
-                </div>
-            </div>
+            <div class="devlog" id="devlog-latest"></div>
 
             <div class="devlog-foot">
-                Looking for the full commit history? Browse the source on
-                <a href="https://github.com/etelford32/parkersphysics" target="_blank" rel="noopener">GitHub</a>.
+                See every simulation, data set, layer and fix, sprint by sprint, on
+                <a href="recent-development.html">Recent Development &rarr;</a>
             </div>
         </div>
     </div>
@@ -395,6 +341,12 @@
             btn.textContent = 'Send feedback →';
         }
     });
+</script>
+<script type="module">
+import { latest } from './js/dev-log.js';
+import { compactEntryHtml } from './js/recent-development.js';
+const host = document.getElementById('devlog-latest');
+if (host) host.innerHTML = latest(5).map(compactEntryHtml).join('');
 </script>
 </body>
 </html>
