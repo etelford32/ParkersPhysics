@@ -209,5 +209,31 @@ section('9. surface speed (ITS_LIVE)');
         `Storglaciären below detection (neutral), Columbia resolved at ${Math.round(co.p98)} m/yr (the lightest band)`);
 }
 
+section('10. year-by-year speed (resolved glaciers only)');
+{
+    // (a) the chart geometry, on a synthetic series — years land on the x extent, 0 on the baseline, a gap breaks the line
+    const syn = [2015, 2016, 2017, 2018, 2019].map((year, k) => ({ year, med: 50 + k, p98: 200 + 10 * k, err: 5, cov: k === 2 ? 30 : 90, drawn: k !== 2, partial: false }));
+    const M = C.annualChartModel(syn, { width: 296, height: 156, threshold: 40 });
+    ok(Math.abs(M.x(2015) - M.pad.l) < 1e-9 && Math.abs(M.x(2019) - (296 - M.pad.r)) < 1e-9 && Math.abs(M.y(0) - (156 - M.pad.b)) < 1e-9 && M.top >= 240,
+        `chart model: years span the plot, 0 m/yr on the baseline, top ${M.top} ≥ the largest value`);
+    ok(M.runs.length === 2 && M.runs[0].length === 2 && M.runs[1].length === 2 && M.gaps === 1, 'a year under the coverage floor breaks the line into two runs (a gap, never a value)');
+    // (b) the decoder ≡ the baker's layout, on a hand-built file (u32 [n, m, year0, 0], shuffled cols)
+    const shuffle = (ta) => { const b = new Uint8Array(ta.buffer), size = ta.BYTES_PER_ELEMENT, n = ta.length, o = new Uint8Array(b.length); for (let i = 0; i < n; i++) for (let k = 0; k < size; k++) o[k * n + i] = b[i * size + k]; return o; };
+    const q = (v) => Math.round((Math.log10(v + 0.01) + 2.5) * 8000);
+    const parts = [new TextEncoder().encode('RGI7ANN\u0001'), new Uint8Array(new Uint32Array([2, 5, 1980, 0]).buffer),
+        shuffle(new Uint32Array([7, 4242])), new Uint8Array([35, 40]), new Uint8Array([3, 2]),
+        shuffle(new Uint16Array([q(10), q(11), 0, q(500), q(510)])), shuffle(new Uint16Array([q(30), q(31), 0, q(900), q(910)])),
+        shuffle(new Uint16Array([q(2), q(2), 0, q(20), q(21)])), new Uint8Array([90, 80, 0, 100, 60])];
+    const file = new Uint8Array(parts.reduce((s, p) => s + p.length, 0)); let o = 0; for (const p of parts) { file.set(p, o); o += p.length; }
+    const dec = C.decodeAnnual(file);
+    const g = dec.get(4242), a = dec.get(7);
+    ok(dec.size === 2 && a.years.join() === '2015,2016,2017' && g.years.join() === '2020,2021' && Math.abs(g.p98[1] - 910) < 0.5 && Number.isNaN(a.med[2]) && g.cov[1] === 60,
+        'decodeAnnual reads the baker\'s layout (index, first year, run length, quantised columns, coverage)');
+    const rows = C.annualSeries(dec, { cover_min: 50, partial_year: 2021 }, 4242);
+    ok(rows[1].drawn && rows[1].partial && !C.annualSeries(dec, { cover_min: 50 }, 7)[2].drawn && C.annualSeries(dec, { cover_min: 50 }, 99) === null,
+        'annualSeries: partial year flagged, an empty year not drawn, a glacier without a series → null');
+    //@@DATA@@
+}
+
 console.log(`\n${checks - failed}/${checks} checks passed`);
 if (failed) process.exit(1);

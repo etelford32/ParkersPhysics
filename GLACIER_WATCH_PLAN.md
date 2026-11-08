@@ -11,9 +11,20 @@ inside every RGI outline (median / p90 / p98, trend, coverage) by `scripts/build
 region's tracked glaciers), agreeing with the tracked tier on 38 of 41 linked glaciers; the ice-free-ground
 floor and p90 were each measured and rejected (header of the baker). 4 434 glaciers resolved — 44 % of the
 ice area — and ~268 000 honestly below what a 120 m composite resolves. Map colour mode "Surface speed",
-a speed row on every record card, a speed line in EarthView's tooltip. Next: the annual series for a
-clicked glacier (the composite's `v` per year) via a small route, and geodetic mass change if a mirror is
-reachable.
+a speed row on every record card, a speed line in EarthView's tooltip.
+
+**A speed history for the glacier you click (2026-11-08).** Every RESOLVED glacier's card draws its speed
+year by year — each calendar year of the same ITS_LIVE annual composites (`v` per year, seasonal cycle
+fitted out; 1982–2025 where Landsat 4/5 reach, ~2013/2015→2025 elsewhere) over the same outline pixels
+as the speed table: fastest ice (p98) always, the typical (median) ± ITS_LIVE's own error only when the
+median is itself resolved, a year with < 50 % of the glacier imaged left as a GAP, 2025 drawn as partial.
+DECISION: a BAKE, not a server route and not Supabase — the composites are republished about once a year,
+a live route would have to blosc-decode ~2.2 MB per year (~90 MB for a 42-year tile) per click and hold
+the outlines the site does not ship, and Postgres is the wrong home for static bulk data
+(`SUPABASE_OFFLOAD_PLAN.md`). `scripts/build-glacier-catalog-annual.py` (525 tiles, @@BAKE@@) writes one
+small file per RGI region (@@SIZE@@ in all), fetched when a card opens. Below-detection glaciers get NO
+series on purpose. Measured (gated in `tests/glacier-catalog.mjs` §10): @@MEASURED@@
+Next: geodetic mass change (Hugonnet et al. 2021) if a mirror is reachable.
 
 **The global catalogue — every glacier on Earth (2026-11-08).** RGI 7.0 (274 531 glaciers, 706 744 km²)
 from an unofficial GeoParquet mirror reachable on public S3, accepted only because it reproduces the RGI

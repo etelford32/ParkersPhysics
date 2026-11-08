@@ -373,6 +373,79 @@ export function speedColor(s) {
     return c;
 }
 
+// ── the year-by-year speed of a RESOLVED glacier (scripts/build-glacier-catalog-annual.py) ──
+// One file per RGI o1 region, fetched when a record card opens. Each CALENDAR year of the glacier's
+// ITS_LIVE annual composite (seasonal cycle already fitted out), over the speed table's own pixels:
+// median, p98, median v_error and coverage (valid pixels that year ÷ pixels with a valid v0). Only the
+// speed table's moving / partly glaciers have a series — a below-detection glacier's yearly line is
+// noise, and `annualSeries` returns null for it on purpose. A year below `cover_min` is a GAP (a
+// half-imaged glacier's median is the median of whichever half was imaged), never a value; the meta's
+// `partial_year` is drawn as partial (the release was built in September of that year).
+export const ANNUAL_COLORS = Object.freeze({ fastest: '#d95926', typical: '#3987e5' });   // validated pair on #0a101e (dark band, CVD ΔE 26.8)
+const ANN_MAGIC = 'RGI7ANN\u0001';
+/** The DECOMPRESSED annual file → Map(row index → { years, med, p98, err, cov }). */
+export function decodeAnnual(u8) {
+    const bytes = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8);
+    if (String.fromCharCode(...bytes.subarray(0, 8)) !== ANN_MAGIC) throw new Error('not an RGI7 annual-speed file');
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const n = dv.getUint32(8, true), m = dv.getUint32(12, true), year0 = dv.getUint32(16, true);
+    let off = 24;
+    const idx = new Uint32Array(unshuffle(bytes, off, n, 4).buffer); off += 4 * n;
+    const y0 = bytes.slice(off, off + n); off += n;
+    const ny = bytes.slice(off, off + n); off += n;
+    const col = () => { const u = new Uint16Array(unshuffle(bytes, off, m, 2).buffer); off += 2 * m; return u; };
+    const qm = col(), qx = col(), qe = col();
+    const cov = bytes.slice(off, off + m); off += m;
+    if (off !== bytes.length) throw new Error(`annual file length ${bytes.length} ≠ ${off}`);
+    const out = new Map();
+    for (let s = 0, r = 0; s < n; s++) {
+        const k = ny[s], years = new Array(k), med = new Float32Array(k), p98 = new Float32Array(k), err = new Float32Array(k), c = new Uint8Array(k);
+        for (let j = 0; j < k; j++, r++) {
+            years[j] = year0 + y0[s] + j; med[j] = dequantSpeed(qm[r]); p98[j] = dequantSpeed(qx[r]); err[j] = dequantSpeed(qe[r]); c[j] = cov[r];
+        }
+        if (r > m) throw new Error('annual file: year rows overrun');
+        out.set(idx[s], { years, med, p98, err, cov: c });
+    }
+    return out;
+}
+
+/**
+ * Glacier i's rows for the chart: { year, med, p98, err, cov, drawn, partial }, or null when the glacier
+ * has no series (not resolved, or outside the bake). `drawn` = the coverage reaches `cover_min`.
+ */
+export function annualSeries(dec, ameta, i) {
+    const s = dec?.get(i);
+    if (!s) return null;
+    return s.years.map((year, j) => ({
+        year, med: s.med[j], p98: s.p98[j], err: s.err[j], cov: s.cov[j],
+        drawn: s.cov[j] >= ameta.cover_min && Number.isFinite(s.p98[j]),
+        partial: year === ameta.partial_year,
+    }));
+}
+
+/** Pixel geometry of the chart (PURE, so the gate can check where a year lands): years → x, m/yr → y from 0. */
+export function annualChartModel(rows, { width = 296, height = 150, pad = { l: 34, r: 8, t: 10, b: 20 }, threshold = null } = {}) {
+    const shown = rows.filter(r => r.drawn);
+    const y0 = rows[0].year, y1 = rows.at(-1).year;
+    const vmax = Math.max(threshold ?? 0, ...shown.map(r => r.p98), ...shown.map(r => r.med + (Number.isFinite(r.err) ? r.err : 0)), 1e-6);
+    const step = niceStep(vmax / 4), top = Math.ceil(vmax / step) * step;
+    const W = width - pad.l - pad.r, H = height - pad.t - pad.b;
+    const x = (yr) => pad.l + (y1 === y0 ? W / 2 : (yr - y0) / (y1 - y0) * W);
+    const y = (v) => pad.t + H - v / top * H;
+    const ticks = []; for (let v = 0; v <= top + step / 2; v += step) ticks.push(v);
+    const span = y1 - y0, yStep = span > 24 ? 10 : span > 10 ? 5 : span > 5 ? 2 : 1;
+    const yearTicks = []; for (let yr = Math.ceil(y0 / yStep) * yStep; yr <= y1; yr += yStep) yearTicks.push(yr);
+    // one polyline segment per unbroken run of drawn years (a gap year breaks the line)
+    const runs = []; let cur = null;
+    for (const r of rows) { if (r.drawn) { (cur ||= []).push(r); } else if (cur) { runs.push(cur); cur = null; } }
+    if (cur) runs.push(cur);
+    return { x, y, top, ticks, yearTicks, runs, y0, y1, width, height, pad, gaps: rows.filter(r => !r.drawn).length };
+}
+function niceStep(raw) {
+    const p = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-9)))), f = raw / p;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+
 // ── loaders (fetch injected; DecompressionStream is in every current browser and Node ≥ 18) ──
 export async function gunzip(buf) {
     // A host that labels a .gz with Content-Encoding: gzip has ALREADY decompressed it in transit;
@@ -407,6 +480,22 @@ export async function loadSpeed(fetchFn = fetch, base = CATALOG_BASE) {
     const spd = decodeSpeed(await gunzip(await r.arrayBuffer()));
     if (spd.n !== smeta.n) throw new Error(`speed rows ${spd.n} ≠ meta ${smeta.n}`);
     return { smeta, spd };
+}
+
+/** The annual meta (once) and region o1's annual file → { ameta, dec } (dec is null if the region has no resolved glacier). */
+export async function loadAnnualMeta(fetchFn = fetch, base = CATALOG_BASE) {
+    const m = await fetchFn(base + 'rgi7-annual-meta.json');
+    if (!m.ok) throw new Error(`annual meta: HTTP ${m.status}`);
+    return m.json();
+}
+export async function loadAnnual(ameta, o1, fetchFn = fetch, base = CATALOG_BASE) {
+    const sh = ameta.shards[o1];
+    if (!sh) return null;
+    const r = await fetchFn(base + sh.file);
+    if (!r.ok) throw new Error(`annual ${o1}: HTTP ${r.status}`);
+    const dec = decodeAnnual(await gunzip(await r.arrayBuffer()));
+    if (dec.size !== sh.series) throw new Error(`annual ${o1}: ${dec.size} series ≠ meta ${sh.series}`);
+    return dec;
 }
 
 export async function loadShard(o1, fetchFn = fetch, base = CATALOG_BASE) {

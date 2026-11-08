@@ -14326,7 +14326,7 @@ function _setRgiHover(hit, cx, cy, { pin = false } = {}) {
         document.getElementById('rgi-tip-flags').textContent =
             `${hit.marine ? 'Marine-terminating' : 'Terminus not assigned'} · surge evidence: ${hit.surgeLabel}${hit.tracked ? ' · TRACKED in Glacier Watch' : ''}`;
         document.getElementById('rgi-tip-hint').innerHTML = pin
-            ? `${hit.rgi_id} · <a href="glacier-watch.html?rgi=${encodeURIComponent(hit.rgi_id)}${hit.tracked ? `&g=${encodeURIComponent(hit.tracked)}` : ''}">Open the full record →</a>`
+            ? `${hit.rgi_id} · <a href="glacier-watch.html?rgi=${encodeURIComponent(hit.rgi_id)}${hit.tracked ? `&g=${encodeURIComponent(hit.tracked)}` : ''}">${hit.speed && (hit.speed.state === 'moving' || hit.speed.state === 'partly') ? 'Its speed year by year, and the full record →' : 'Open the full record →'}</a>`
             : `${hit.rgi_id} · RGI 7.0 inventory · tap to pin`;
         tip.style.display = 'block';
         renderer.domElement.style.cursor = 'pointer';
