@@ -11,14 +11,18 @@
 #                        glaciers slow, plausible ice bodies); WGMS series; Open-Meteo / USGS /
 #                        SNOTEL parsers on synthetic payloads (hosts egress-blocked).
 #   massbalance --check  data/glaciers/massbalance.json still matches its sha256-pinned sources
+#   summary --check      data/glaciers/summary.json (EarthView's Glaciers layer) is exactly the
+#                        engine on the committed archive — re-run the summary after every bake
 #
-# Browser gate (tests/glacier-watch.spec.js, every feed mocked) runs with the Playwright suite.
+# Browser gates (tests/glacier-watch.spec.js, every feed mocked; tests/earth-glacier-layer.spec.js)
+# run with the Playwright suite.
 name: glacier-kernels
 
 on:
   push:
     paths:
       - 'js/glacier-*.js'
+      - 'js/earth-glacier-layer.js'
       - 'js/vendor/jsfive-0.4.0.mjs'
       - 'data/glaciers/**'
       - 'scripts/build-glacier-*'
@@ -29,6 +33,7 @@ on:
   pull_request:
     paths:
       - 'js/glacier-*.js'
+      - 'js/earth-glacier-layer.js'
       - 'js/vendor/jsfive-0.4.0.mjs'
       - 'data/glaciers/**'
       - 'scripts/build-glacier-*'
@@ -59,5 +64,7 @@ jobs:
         run: node tests/glacier-engine.mjs
       - name: WGMS mass balance matches its pinned sources
         run: node scripts/build-glacier-massbalance.mjs --check
+      - name: EarthView summary matches the archive
+        run: node scripts/build-glacier-summary.mjs --check
       - name: pipeline registry
         run: node tests/pipeline-registry.mjs

@@ -25,7 +25,11 @@
  *      (js/glacier-weather.js) and the USGS + SNOTEL parsers (api/glaciers/stations.js)
  *      on SYNTHETIC payloads shaped like the documented schemas — both hosts are
  *      egress-blocked at build time, so these pin our parsing, not the live schema
- *      (the route self-reports field_map / unmapped for that).
+ *      (the route self-reports field_map / unmapped for that);
+ *   7. the chart kit's pure helpers;
+ *   8. the EarthView layer's inputs: data/glaciers/summary.json is EXACTLY what the engine
+ *      computes from the committed archive (stale summary = failure), every state the
+ *      engine can emit has a style, pixel picking geometry, the log-compressed flow rate.
  */
 
 import fs from 'node:fs';
@@ -37,6 +41,8 @@ import { samplePairBuffer } from '../api/glaciers/velocity.js';
 import { parseCsv, parseSeries } from '../scripts/build-glacier-massbalance.mjs';
 import * as W from '../js/glacier-weather.js';
 import { niceTicks, timeTicks, extent } from '../js/glacier-charts.js';
+import { buildSummary } from '../scripts/build-glacier-summary.mjs';
+import { flowRate, rayAngle, STATE_STYLE } from '../js/earth-glacier-layer.js';
 import { parseUsgs, nearestSnotel, parseAwdbData, STATIONS } from '../api/glaciers/stations.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -277,6 +283,22 @@ section('7. chart kit helpers (js/glacier-charts.js)');
     const yt = timeTicks(D('1984-01-01'), D('2026-01-01'));
     ok(yt.every(t => /^\d{4}$/.test(t.label)) && yt.length <= 10, 'decade-span ticks are years, ≤ 10 of them');
     ok(JSON.stringify(extent([1, NaN, 3], { pad: 0 })) === JSON.stringify([1, 3]) && extent([5, 9], { zero: true })[0] === 0 && JSON.stringify(extent([])) === JSON.stringify([0, 1]), 'extent: NaN skipped, zero anchoring, empty fallback');
+}
+
+section('8. EarthView Glaciers layer (summary + pure helpers)');
+{
+    const idx = readJson('../data/glaciers/glaciers.json');
+    const details = Object.fromEntries(idx.glaciers.map(g => [g.id, readJson(`../data/glaciers/${g.id}.json`)]));
+    const fresh = buildSummary(idx, details, readJson('../data/glaciers/massbalance.json'));
+    const onDisk = readJson('../data/glaciers/summary.json');
+    ok(JSON.stringify(fresh) === JSON.stringify(onDisk), 'summary.json is exactly the engine on the committed archive (re-run scripts/build-glacier-summary.mjs after a bake)');
+    ok(onDisk.glaciers.length === idx.glaciers.length && onDisk.as_of === idx.glaciers[0].baked, `summary covers all ${onDisk.glaciers.length} glaciers, stamped as of ${onDisk.as_of}`);
+    const states = new Set(onDisk.glaciers.flatMap(g => g.gauges.map(q => q.state)));
+    ok([...states].every(s => STATE_STYLE[s]) && ['faster', 'slower', 'normal', 'undetectable', 'unknown'].every(s => STATE_STYLE[s]), `every engine state has a marker style (${[...states].join(', ')})`);
+    ok(STATE_STYLE.undetectable.fill === 0 && STATE_STYLE.unknown.fill === 0 && STATE_STYLE.faster.fill === 1, 'below detection / unknown are HOLLOW — never drawn as a state');
+    ok(onDisk.glaciers.every(g => Math.abs(g.lat) <= 90 && Math.abs(g.lon) <= 180 && g.gauges.length === 3), 'markers sit on the flowline; three gauges each');
+    ok(near(rayAngle({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, { x: 0.01, y: 0, z: 1 }), Math.atan(0.01), 1e-12) && rayAngle({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 }) === Infinity, 'pixel-pick angle exact; behind-the-camera never picks');
+    ok(flowRate(10000, 60) < flowRate(10000, 10) && flowRate(10, 10) < flowRate(1000, 10) && flowRate(1e6, 10) === flowRate(1e4, 10), 'flow rate: faster ice faster dots, longer lines slower per length, capped at 10 km/yr');
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

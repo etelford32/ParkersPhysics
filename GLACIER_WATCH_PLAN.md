@@ -1,6 +1,6 @@
 # GLACIER_WATCH_PLAN.md — Glacier Watch: glacier motion + snowpack, observed and simulated
 
-*Status (2026-11-08): P0 + P1 BUILT, P2 (EarthView layer) next. §0 is the build log;
+*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) BUILT; next: the weekly refresh + WGMS 2021–2025. §0 is the build log;
 §2 holds numbers MEASURED in the planning session; "to verify" items are unchecked.*
 
 ## 0. Built (2026-11-08)
@@ -29,7 +29,15 @@
   global lock froze threaded range reads; jsfive hides scalar-dataset attributes; small glaciers
   are below ITS_LIVE detection (v0 ~0.5 m/yr); composite year spans are tile-dependent; a comment
   once swallowed the seasonal amplitude/phase in the baker.
-- **Next** — P2 EarthView layer; the WGMS 2021–2025 refresh in CI; verify the stations route in
+- **P2 EarthView layer (2026-11-08)** — `js/earth-glacier-layer.js`: a diamond per glacier
+  coloured by the engine's mid-glacier state (from `data/glaciers/summary.json`, 20.7 KB,
+  derived by `scripts/build-glacier-summary.mjs`, AS OF the archive date), the observed
+  flowlines with log-compressed moving dots, pixel picking, hover + tap-pinned deep link.
+  Off at boot, ~130 KB on first enable. Gates: node gate §8, `tests/earth-glacier-layer.spec.js` (4).
+  At the archive date 9 of the 12 detectable mid-glacier gauges read "faster than usual":
+  check that against the next bake before reading it as a signal — short-baseline autumn
+  optical pairs may carry a seasonal bias the 2014–2024 sinusoid does not.
+- **Next** — the WGMS 2021–2025 refresh in CI; verify the stations route in
   production; a weekly `glacier-refresh.yml` (trojans-refresh pattern) to fold the daily tail
   into the archive; geodetic mass change for the calving glaciers; then the planet (§8 P5).
 
