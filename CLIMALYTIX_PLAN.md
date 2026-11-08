@@ -10,10 +10,12 @@ weather / climate machinery the site already ships and must not fork any of it
 | # | Decision | Consequence in this plan |
 |---|---|---|
 | D1 | **Commercial viability first** | The workspace, the account gate, server-delivered event alerts and the API move forward. They are the paid surface, so they ship in P0–P2 rather than P6 (§13) |
-| D2 | **Self-host Open-Meteo** | New infra phase P-1 (§12.1). This also unblocks EarthView, the Temperature Lab and every other page that hits Open-Meteo's free-tier limits |
+| D2 | **Our own data engine and our own models, on public data only** (revised 2026-11-08; supersedes "self-host Open-Meteo") | We ingest the public sources Open-Meteo itself redistributes (NOAA, ECMWF open data, DWD, Copernicus, station networks), build our own point archive, and compete on **post-processing and verification**, not on running a global NWP model (§17, §18). Phase P-1 becomes the data engine. Open-Meteo's public API is a bootstrap source and a benchmark only |
 | D3 | **Lives under Research** | A new "Analysis" group in the Research section (`js/site-sections.js`). Research is "show your working", and the scored ledger is exactly that (§10) |
-| D4 | **User-generated** | Users author the analysis objects (instruments, events, datasets, workspaces, studies), share them and fork them. Published objects carry their **own scored track record**, so the gallery ranks by verified skill, not popularity (§16) |
+| D4 | **User-generated = private and team authoring** (scoped 2026-11-08) | Users author instruments, events, workspaces and studies and share them inside their team. **No public gallery.** **No user uploads for now** ("public data only"); a team's data is its own objects built on the public catalogue (§16) |
 | D5 | **Built from the Home Station** | The Climate Lab's Home, instrument bench, watches, units and prefs patterns become Climalytix's foundation. They are generalised, not copied, and the dashboard card set keeps working on the same modules (§15) |
+| D6 | **Paid event delivery = email + webhook** | Resend (already wired) plus signed webhooks in P2. SMS and Slack later |
+| D7 | **The dashboard Home Station stays free, for now** | It is the funnel; revisit once Climalytix has paying users |
 
 ---
 
@@ -199,14 +201,17 @@ Every new route registers in `js/pipeline-registry.js` in the same commit, or it
 is unmonitored (the `/api/mars/weather` scar).
 
 **Licensing check per source before it ships** (the TIGA rule: INTERMAGNET was
-excluded for CC BY-NC). Open-Meteo's *hosted free tier* is non-commercial. **Decided
-(D2): we self-host it** (§12.1). The licence then follows the *underlying data*,
-not the hosted API:
+excluded for CC BY-NC). Open-Meteo's *hosted free tier* is non-commercial, so it is
+a **bootstrap source and a benchmark only**: no paid answer may be built on it.
+**Decided (D2): public data only, ingested ourselves** (§17). The licence then follows
+the *underlying data*:
 - NOAA GFS / GEFS: US public domain.
 - ECMWF open data (IFS / ENS): CC BY 4.0.
 - DWD ICON: open, with attribution.
 - Copernicus ERA5 / CMIP6 / GloFAS: commercial use allowed with attribution.
 - CAMS: Copernicus licence.
+- NOAA GHCN-Daily / ISD stations, CPC indices, NASA IMERG: US public domain.
+- **AI model weights are licensed separately from their output.** GraphCast/GenCast weights are CC BY-NC-SA (excluded from paid use); ECMWF AIFS output is published as open data. Check every model's weight licence before it becomes a member (§18).
 
 Every source's attribution string goes into `provenance` and into the report
 appendix. Sources with a non-commercial licence are allowed only on the free
@@ -405,8 +410,9 @@ with their reliability grade, and a probability without a scored history says
 
 Navigation (D3): **Research → a new third group `analysis` ("Analysis", note:
 "Your site, every dataset, every prediction scored")**. It holds `climalytix.html`
-and, once §16 ships, `climalytix-gallery.html` (published studies). Research
-currently has 2 groups and 4 catalogue entries, so a third header and two links
+and, once §18's scorecard exists, `climalytix-skill.html` (our models vs raw NWP and
+the benchmark, the Research section's natural home). Research currently has 2 groups
+and 4 catalogue entries, so a third header and two links
 stay inside the ≤3-header / ≤10-link cap. Because the menu, the catalogue and the
 hub are all derived from `js/site-sections.js`, the change is one group entry plus
 `js/simulations-catalog.js` rows plus re-running `scripts/build-section-pages.mjs`
@@ -425,7 +431,7 @@ an "Analyse in Climalytix ›" link. The page must pass `scripts/lint-nav.mjs`,
 |---|---|---|---|---|
 | Sites | 1 (Home) | saved-location quota | quota | quota + API batch |
 | History depth | 10 yr | full 1940 → | full | full |
-| Datasets | core 6 | + drivers, AQ, ocean | everything | everything + custom upload (CSV / their station) |
+| Datasets | core 6 | + drivers, AQ, ocean | everything | everything (uploads deferred, D4) |
 | Event builder | templates | custom | custom + compound | custom + shared team library |
 | Horizons | to 7 d | to 6 wk | + seasonal, scenarios, generator | + 2050 projections |
 | Ledger / Verify | view | issue + score | auto-issue nightly | + exportable audit trail |
@@ -434,10 +440,7 @@ an "Analyse in Climalytix ›" link. The page must pass `scripts/lint-nav.mjs`,
 - Gating goes through `js/tier-config.js` only (add `climalytix*` capability flags
   there and in the SQL, in the same commit). Workspaces sync through the existing
   `public.dashboards` table (page `'climalytix'`) with `dashboard-sync.js`, local-first.
-- **Bring-your-own data** (Enterprise): upload a station CSV and it becomes a
-  `SiteSeries` (`kind:'observed'`, `provenance.source:'user'`). It can then
-  calibrate the forecasts, which is the single strongest commercial hook. Stored
-  per-org in R2, never shared.
+- **Bring-your-own data**: DEFERRED (D2/D4, public data only for now). Uploads were the strongest commercial hook in the first draft, so revisit them first once the public-data product has paying users.
 - **Enterprise API** `/api/climalytix/v1/{site,events,predict,scores}`: the same
   kernels server-side, keyed, rate-limited, and auditable. Multi-site is the API's
   job, so the UI stays one site at a time.
@@ -448,30 +451,11 @@ an "Analyse in Climalytix ›" link. The page must pass `scripts/lint-nav.mjs`,
 
 ## 12. Risks and blockers
 
-1. **Self-hosted Open-Meteo (D2): the infra plan, phase P-1.**
-   - **What runs:** the open-source Open-Meteo server. It is **AGPL-3.0**: calling it
-     over HTTP from our app is fine, but any change we make to the *server* must be
-     published. Keep our changes upstreamable or keep them outside it, as a proxy
-     layer in `api/climalytix/*`.
-   - **Where:** a dedicated VM with object storage, **not** Vercel (the server is
-     long-running and stateful) and **not** the workstation (CLAUDE.md: the workstation
-     never sits on a live path).
-   - **Data:** sync Open-Meteo's published open-data mirror (their AWS open-data bucket)
-     for the forecast models we use, plus the ERA5 / ERA5-Land archive for the
-     reanalysis history. Start with a small model set (GFS, ECMWF IFS + ENS, ICON) and
-     add regional models on demand. **Storage and VM size are not estimated here.**
-     Measure them on a trial sync before committing to hardware; the ERA5 archive is
-     the large item.
-   - **Access:** `OPEN_METEO_BASE_URL` (env) replaces the hard-coded host in
-     `js/open-meteo-request.js`, the ONE copy of how Open-Meteo requests are built
-     (the 414 rule still applies: chunked, `MAX_URL_BYTES`). The public host stays as
-     the fallback, and a fallback answer says `freshness:'stale'` + `reasons:['public-fallback']`
-     so status.html shows it, and the paid tier refuses to serve it.
-   - **Health:** registered in `js/pipeline-registry.js` with a sync-lag probe (the
-     newest model run on our box versus the upstream's).
-   - **Side benefit:** the EarthView 414/rate-limit history and the Temperature Lab's
-     MET Norway fallback both trace back to the public endpoint's limits.
-     Moving those pages onto our box is a separate PR each, with their own gates.
+1. **Our own data engine (D2): phase P-1.** Specified in §17. The risks are cost
+   and operations, not licensing: GRIB decoding and a terabyte-scale archive need a
+   worker outside Vercel, and the ingest must be monitored like any other pipeline.
+   Until it serves, every paid answer is blocked (the Open-Meteo free tier is
+   non-commercial), but P0 and P1 can be built on the bootstrap source.
 2. **Reanalysis ≠ station.** ERA5 is a ~25 km (ERA5-Land ~9 km) cell. Mountain and
    coastal sites are biased. Mitigations: show `spatial.distanceKm/resKm`, offer
    the nearest GHCN station, and let users bias-correct against uploaded obs.
@@ -494,38 +478,36 @@ P-1 is live.
 
 | Phase | Ships | Gate |
 |---|---|---|
-| **P-1 Infra (D2)** | self-hosted Open-Meteo VM + open-data sync + `OPEN_METEO_BASE_URL` in `js/open-meteo-request.js` + public fallback flagged stale + registry sync-lag probe | `node tests/open-meteo-request.mjs` (base-URL switch, the 414 ceiling unchanged); sync-lag visible on status.html |
+| **P-1 Data engine (D2, §17)** | the ingest worker (public NWP GRIB2 by byte-range, ERA5 history, stations, indices) → R2 point archive → `/api/climalytix/*` serving `SiteSeries`; a source switch so Climalytix reads our archive first and the bootstrap source second, flagged stale; registry entries with an ingest-lag probe per source | a point read reproduces the source's own value at a grid point to its packing precision (GRIB decode gate against a stored real message); archive round-trip is lossless at the stated quantisation; lag visible on status.html |
 | **P0 Foundation = the lab, generalised (D5)** | the `SiteSeries` store + resampler; the Climate Lab's Home/units/prefs/instrument contracts lifted into shared modules (§15.2) with the dashboard still green; `climalytix.html` shell under Research → Analysis; site bar = Home by default; Explore timeline built from the meteogram's small multiples; data-health chips; the workspace doc (local-first + `dashboards` sync) | `node tests/climate-lab.mjs` UNCHANGED + `npx playwright test tests/dashboard-climate-lab.spec.js` UNCHANGED (the lift is a no-op for the dashboard); new `climalytix-site-store.mjs`, `climalytix-resample.mjs`, `climalytix-smoke.spec.js` (feeds mocked; negative control: every feed 503 ⇒ "feeds down", never a quiet chart); nav gates |
 | **P1 Climate context** | 85-yr climatology, percentiles, trend, change-point, spells, EVA, Extremes tab, Overview briefing. The dashboard's Climate Context card gains an "85-year baseline" mode from the same kernel (§15.3) | kernel gates with the published fixtures in §6 |
 | **P2 Events, the paid hook** | event DSL; lab watches migrated as one-condition events (§15.4); **server-side event evaluation + delivery (email, webhook)**, the thing the lab console currently has to tell users it cannot do; short-range EMOS calibration; Predict + Verify tabs; ledger v1; tier gating of all of it | calibration recovers a planted bias/spread; a watch round-trips to an event and evaluates identically (`assert.deepEqual` on `evaluateWatch` vs the event evaluator over the lab fixture); delivery cron idempotent (one send per event-window) |
-| **P3 User-generated v1 (D4)** | user instruments (formula DSL), user datasets (CSV upload), save / share-to-team / fork; reports (PDF) | formula DSL fuzz gate (no `eval`, no prototype access, bounded cost); CSV importer gaps-not-zeros + unit gate |
+| **P3 Team authoring v1 (D4)** | user instruments (formula DSL), save / share-to-team / fork; reports (PDF). Uploads deferred (public data only) | formula DSL fuzz gate (no `eval`, no prototype access, bounded cost); team RLS tests (a non-member reads nothing) |
 | **P4 Drivers & S2S** | Relationships tab (lag/composites/FDR), analog member, S2S + seasonal rungs, extra indices | red-noise false-positive gate; analog skill ≥ climatology on hindcast |
 | **P5 Physics column** | ET₀, soil water, snow, FWI, WBGT, GDD; Physics tab; hydrology loaders (the lab's Soil probe and Degree days instruments re-point to it) | FAO-56 + Van Wagner fixtures; column vs ERA5-Land soil moisture residual reported |
-| **P6 Public gallery + API** | publish studies to the Research gallery ranked by verified skill (§16.3); Enterprise API; auto-issue ledger in R2 | moderation + visibility RLS tests; API contract tests; ranking refuses unscored items |
+| **P6 Our models, scored (§18) + API** | the model ladder M1–M4 as ledger members; the public scorecard against raw NWP and the Open-Meteo benchmark; Enterprise API; auto-issue ledger in R2 | each member beats its parent on the held-out years or is not shipped; API contract tests |
 | **P7 Generator + scenarios + climate** | weather generator, Scenario studio, CMIP6 projections with QDM, 2050 rung | generator reproduces observed GEV / spells inside CIs; gamma-only negative control fails |
 | **P8 Performance + members** | `rust-climalytix` WASM (EVA MLE, generator, column) with JS as oracle + smoke pin; ML members logged & scored like any other | WASM ↔ JS equality gate |
 
 Suggested first PR: **P0**. It is the lift of the lab's contracts into shared
 modules (the dashboard must not change a pixel) plus the page shell.
-**P-1 is a separate infra track that needs your VM/hosting choice** (§14).
+**P-1 is a separate track that runs alongside it** and needs a worker host (§14).
 
 ---
 
 ## 14. Questions for the author
 
-Answered 2026-11-08: commercial first (D1), self-host (D2), Research (D3),
-user-generated (D4), built from the Home Station (D5). Open:
+Answered 2026-11-08: commercial first (D1); our own data engine and models on public
+data, not a self-hosted Open-Meteo (D2); Research (D3); private + team authoring
+only, no uploads for now (D4); built from the Home Station (D5); email + webhook
+delivery (D6); Home Station free for now (D7). Open:
 
-1. **Hosting for P-1**: which provider and budget for the Open-Meteo VM + storage?
-   Size it after a trial sync (§12.1).
-2. **"User-generated" scope** (§16): is the public gallery (anyone can publish a
-   study, ranked by its scored record) what you meant, or private/team authoring only?
-   The plan builds private → team → public in that order, so the answer only changes
-   whether P6 happens.
-3. **Delivery channels for paid event alerts** (P2): email (Resend, already wired)
-   plus webhook to start. Do you want SMS or Slack in the first paid release?
-4. **Does the dashboard Home Station stay free forever?** The plan assumes yes:
-   it is the funnel, and Climalytix is where the paid depth lives.
+1. **Where the ingest worker runs** (§17.3): a small always-on VM (simplest), or
+   scheduled GitHub Actions (free to start, but per-job time limits make the ERA5
+   backfill awkward). The backfill needs one-off compute either way.
+2. **GPU budget for the AI members (§18 M4):** zero to start (ingest ECMWF's
+   published AIFS output, no GPU needed), or rent GPU time to run open-weight models
+   ourselves?
 
 ---
 
@@ -610,8 +592,7 @@ user.
   webhook) and quiet hours.
 - **Horizons:** which ladder rungs to show, and an "only show verified" switch that hides
   any probability without n ≥ 30 scored cases here.
-- **Data:** which datasets are on, the nearest-station choice, and their own uploads
-  and bias corrections.
+- **Data:** which datasets are on and the nearest-station choice (uploads deferred, D4).
 - **Presets:** saved as named workspaces, for example "Frost season", "Fire season",
   "Launch window".
 
@@ -634,44 +615,155 @@ before screenshotting `#location-card`, `#cl-bench-card`, `#cl-meteogram-card`,
 |---|---|---|
 | **Instrument** | a formula over `SiteSeries` + the physics library, e.g. `chillHours = count(hours(t2m between 0 and 7.2))` or `sprayWindow = wind10 < 4.5 and rainProb < 20 and deltaT between 2 and 8`, returning the standard reading shape | a small **expression language** (parsed to an AST, whitelisted functions and operators, no `eval` / `Function`, no property access, cost-bounded by evaluated nodes). Units are type-checked (adding °C to mm is a parse error); validity ranges propagate from the library |
 | **Event** | §7's DSL | same evaluator; thresholds clamped to physical ranges per quantity |
-| **Dataset** | an upload (CSV of a station, a sensor, yields, sales) that becomes `SiteSeries` with `kind:'observed'`, `provenance.source:'user'` | importer: declared units and time zone, gaps stay gaps, size caps per tier; stored per owner/org in **R2** (not Postgres); never public unless the owner publishes it **and** declares a licence |
+| **Dataset** (DEFERRED, D2/D4: public data only for now) | later: an upload that becomes `SiteSeries` with `kind:'observed'`, `provenance.source:'user'` | when it lands: declared units and time zone, gaps stay gaps, size caps per tier, stored per owner/org in R2, never shared outside the team |
 | **Workspace** | a saved arrangement (§15.5) | the `normalizePrefs` pattern: unknown fields dropped, future versions degrade field by field |
-| **Study** | a frozen, citable bundle: site + datasets + instruments + events + the ledger slice, with text | a publish-time snapshot with provenance hashes; re-runnable bit for bit |
+| **Study** | a frozen bundle shared inside the team: site + datasets + instruments + events + the ledger slice, with text | a snapshot with provenance hashes; re-runnable bit for bit |
 
-### 16.2 Sharing ladder
+### 16.2 Sharing (D4: private and team only)
 
 `private` → `team/org` (Institution/Enterprise seats, the existing classroom/org seat
-model) → `public` (Research gallery). **Fork** copies any visible object into the
-forker's space with an `origin` pointer, so remix lineage is visible.
+model). **Fork** copies any object the user can see into their own space with an
+`origin` pointer, so lineage is visible inside the team. **There is no public
+visibility level**, so there is no moderation queue and no anonymous read policy.
 
-### 16.3 The gallery ranks by skill, not likes
+### 16.3 A team's objects carry their own track record
 
-This is what makes user-generated content fit a "show your working" section instead
-of becoming a recipe dump:
-- A published **event** is auto-issued nightly for its site, and the ledger scores it
-  (§8.6). The gallery shows its Brier skill vs climatology, n, and the reliability
-  diagram. **An item with fewer than 30 scored cases is listed as "unverified" and is
-  never ranked** (the TIGA rule: no widening the bars to look calibrated).
-- A published **instrument** shows where it is used and the validity ranges it inherits.
-- Studies are cited on the Research hub beside the hindcast papers, with the same
-  standard: evidence first.
+A team **event** can be auto-issued nightly for its site, and the ledger scores it
+(§8.6). The team sees its Brier skill vs climatology, n, and the reliability diagram.
+**An event with fewer than 30 scored cases is labelled "unverified"** (the TIGA rule:
+no widening the bars to look calibrated). This is what a team shows its manager.
 
 ### 16.4 Storage and schema (written as a migration, applied only on the author's go)
 
-- `climalytix_items` (id, owner, org, kind ∈ instrument|event|dataset|workspace|study,
-  visibility, version, doc jsonb ≤ 64 KB, origin_id, created/updated): owner-RLS for
-  private, org membership for team, an anon SELECT policy only for `visibility='public'`
-  (the `temperature_lab_cache` precedent: an intentional, documented advisor flag).
+- `climalytix_items` (id, owner, org, kind ∈ instrument|event|workspace|study,
+  visibility ∈ private|team, version, doc jsonb ≤ 64 KB, origin_id, created/updated):
+  owner-RLS for private, org membership for team, **no anon policy**.
 - `climalytix_predictions` / `climalytix_scores`: the ledger. Auto-issue volume goes to
   **R2 with a Postgres index** (`SUPABASE_OFFLOAD_PLAN.md` pattern), never bulk rows.
-- Dataset bytes: R2 only, keyed by owner. Postgres holds the index row.
-- Moderation: a report button + an admin queue on the existing admin surface. Public
-  text is plain text only (no HTML), rendered through `textContent`.
+- All user text is plain text (no HTML), rendered through `textContent`.
 
 ### 16.5 Tiers (`js/tier-config.js` flags, added in the same commit as the SQL)
 
-- **Free:** Home only, templates, view public studies, 1 private user instrument.
+- **Free:** Home only, templates, 1 private user instrument.
 - **Basic:** saved sites, unlimited private instruments and events, in-browser delivery, fork.
-- **Advanced:** email/webhook delivery, uploads, scenarios / generator, PDF reports, publish.
+- **Advanced:** email/webhook delivery, scenarios / generator, PDF reports.
 - **Institution / Enterprise:** team spaces, org libraries, API, white-label reports,
   audit export.
+
+---
+
+## 17. The data engine (D2): public data, ingested ourselves
+
+### 17.1 What we already have (measured on production, 2026-11-08)
+
+"We should have a lot of data already" is true for space weather and **not yet true
+for ground weather**. This is the inventory, read from project `aijsboodkivnhzfstvdq`:
+
+| Data | Span | Resolution | Usable for training? |
+|---|---|---|---|
+| Solar wind + Kp/ap/Dst/e⁻ flux (`sw_geomag_dataset` + R2 sealed days) | 2026-07-12 → now (~4 months) | 1 minute, ~167 k rows in R2 + 21 k in Postgres | **Yes**, for space weather: our differentiator, already on one clock |
+| `geomag_indices` (Kp, Dst, >2 MeV electrons) | 2026-08-10 → now | native cadence | Yes (space weather) |
+| Forecast ledger (`forecast_log` + R2 `forecast_archive_pointer`) | 2026-07-11 → now, ~9.1 k archived rows | per issue | Yes, as a **scoring** record (aurora members) |
+| Global weather grid (`weather_grid_cache` + R2 `weather_grid_archive`) | 2026-10-05 → now (~5 weeks) | **every frame is the MET Norway 10° fallback** (`met-norway:72x36`, upsampled) | **No.** Too short and too coarse. Today's cause is Open-Meteo **HTTP 429** (per-minute limit): the heartbeat's last reason is "open-meteo chunk 1600 HTTP 429 … Minutely API request limit exceeded". A stopgap fix is filed separately |
+| 1991–2020 temperature normals (`assets/temperature/*.bin`) | climatology | 1.5° box means | Yes, as a baseline |
+
+So the ground-weather training set has to come from the **public archives**. That is
+where "a lot of data" really is (85 years of ERA5 alone), and it is exactly what D2
+asks for. Our own five weeks become a validation slice, and the ledger is the teacher
+(the `PRESSURE_OUTLOOK_ENGINE_PLAN.md` finding: history-only ML was 3.89 hPa at
+day 1 against NWP's 0.53, so **our history scores models, it does not replace NWP
+input**).
+
+### 17.2 Sources (all public; every host is UNVERIFIED from the sandbox, so use candidate lists)
+
+| Role | Source | Licence | How we read it |
+|---|---|---|---|
+| History (training, climatology, extremes) | **ERA5** + ERA5-Land reanalysis (1940 →) | Copernicus, commercial with attribution | the analysis-ready Zarr mirrors on the public clouds, or CDS requests for the backfill; rechunked into our point tiles once |
+| Real-time global NWP | **NOAA GFS** 0.25° + **GEFS** (31 members) | US public domain | GRIB2 on NOAA's open-data buckets, **byte-range reads via the `.idx` sidecar**, so we fetch only the fields and levels we use, never whole files |
+| Real-time global NWP | **ECMWF open data** (IFS HRES + ENS, plus the **AIFS** data-driven model's output) | CC BY 4.0 | same `.index` byte-range pattern |
+| Real-time regional | DWD **ICON** (global + EU), NOAA **HRRR** (US, 3 km) | open / public domain | GRIB2 byte-range |
+| Calibration training | **GEFSv12 reforecast** (2000–2019) | public domain | one-off backfill of the fields we calibrate |
+| Ground truth | **GHCN-Daily**, **ISD** hourly stations; METAR | public domain | nightly delta |
+| Drivers | CPC ONI / RMM / AO / NAO / PDO, NASA **IMERG** precip | public domain | already partly wired |
+| Air / hydro / climate | CAMS, GloFAS, CMIP6 | Copernicus | existing routes or the CDS |
+
+Every source gets a `js/pipeline-registry.js` entry with an **ingest-lag** probe (the
+newest run we hold vs the newest the source has published), and a missed run is
+`freshness:'stale'`, never a silent gap.
+
+### 17.3 Shape
+
+```
+ingest worker (Python: cfgrib/xarray → our tiles)      NOT Vercel, NOT the workstation
+  ├─ realtime: per NWP cycle, byte-range the needed GRIB messages, decode,
+  │            write  r2://clx/nwp/{model}/{run}/{tile}.bin   (+ index row)
+  ├─ history:  ERA5 backfill once, then a nightly tail
+  │            write  r2://clx/era5/{var}/{tile}.bin          (time-major)
+  └─ stations: nightly GHCN/ISD delta → r2://clx/obs/{station}.bin
+                     │
+api/climalytix/* (Vercel) ── reads ONE tile, slices ONE point ──► SiteSeries (§4.1)
+```
+
+- **Time-major point tiles** are the key design choice. One site at a time over 85
+  years is a *time series at a point*. Global time-slices (how the sources publish)
+  would mean reading 31 000 files for one answer; tiles chunked by **space** with the
+  **whole time axis** inside make it one read. A tile is ~2°×2° of 0.25° cells
+  (64 cells) for all time.
+- **Size, as arithmetic to verify on a trial backfill, not a quote:** daily ERA5
+  aggregates (Tmax, Tmin, mean T, precip sum, max gust, …): 31 340 days × 1.04 M
+  cells × 4 B ≈ 130 GB per variable, ~65 GB at int16 with a per-variable
+  scale/offset. Ten daily variables ≈ 0.65–1.3 TB. Hourly ERA5 for every cell is
+  ~25× that, so **hourly history is fetched per site on first use and cached**, not
+  bulk-mirrored. R2 has no egress fees, which is why it is the store (the
+  `SUPABASE_OFFLOAD_PLAN.md` precedent).
+- **Where it runs:** a small always-on VM, or scheduled GitHub Actions (the repo
+  already runs data jobs that way, e.g. `trojans-refresh.yml`, which opens a PR rather
+  than pushing). That choice is §14 Q1. The ERA5 backfill is a one-off batch either way.
+- **Global grid side benefit:** the same realtime ingest can produce the hourly global
+  grid that EarthView, the Temperature Lab and the extremes table read today from the
+  rate-limited public API, at full 0.25° instead of the 10° fallback. Moving those
+  consumers is a separate PR each, with their own gates.
+
+### 17.4 Gates for the engine
+
+- **Decode truth:** a stored real GRIB2 message (GFS and ECMWF, one each, committed as
+  fixtures and never hand-edited) decodes to the published values at the published
+  packing precision. A negative control flips the scan-mode flag and must fail
+  (a mirrored grid is the classic silent GRIB bug).
+- **Tile round-trip:** encode → decode is exact at the stated int16 quantisation, and
+  NaN gaps survive as gaps.
+- **Point extraction:** the value served at a grid-point site equals the source's own
+  value there. Interpolation between points is bilinear in lat/lon with the
+  antimeridian handled (the EarthView seam lesson).
+
+---
+
+## 18. Our models: how we "rival Open-Meteo"
+
+**Be precise about the target.** Open-Meteo does not run a weather model; it
+redistributes the national models (GFS, ECMWF, ICON, …) with downscaling, and so
+does nearly every weather API. Nobody small rivals ECMWF at running global physics.
+**Where we can be better, and prove it, is everything after the model run.**
+Every rung below is a ledger member (§8.6), scored per site, per lead and per variable
+against stations and ERA5. **A rung ships only if it beats the rung beneath it on
+held-out years**, and the scorecard is public on the Research section (D3). Open-Meteo's
+public answer is logged alongside as the **benchmark to beat**, for internal scoring
+only (its free tier is non-commercial; we never serve it on a paid path).
+
+| Rung | What | Why it can win | Status of the pieces |
+|---|---|---|---|
+| **M0 Raw public NWP** | GFS / GEFS / ECMWF IFS+ENS / ICON / HRRR at the nearest points | parity with what Open-Meteo serves; the floor | P-1 ingest |
+| **M1 Physical downscaling** | lapse-rate height correction to the site's real elevation, land/sea mask, coastal blending, solar geometry from our exact ephemeris | mountain and coastal sites are where raw 25 km grids miss most; physics, not fitting | uses `js/sun-altitude.js` and the DEM we already ship |
+| **M2 Statistical post-processing** | per-site EMOS / NGR and quantile mapping, trained on the **GEFSv12 reforecast** + ERA5/stations, rolling-window updated | calibration is where operational centres gain most; a calibrated ensemble beats a raw one on CRPS almost everywhere | §8.2 already planned; `js/forecast-verification.js` scores it |
+| **M3 Skill-weighted blender** | generalises `rust-forecast`'s 5-member blender: members weighted by THIS site's recent CRPS at THIS lead | the best model varies by place and season; a fixed choice cannot follow it | `rust-forecast/` exists (24 h); extend the horizon and membership |
+| **M4 Data-driven members** | (a) ECMWF's published **AIFS** output, which needs no GPU; (b) open-weight models with a **commercial-compatible** weight licence run on rented GPU (licence checked per model; GraphCast/GenCast weights are non-commercial and excluded); (c) our own small site models trained on ERA5 for targets NWP handles badly (fog, frost, convective initiation) | AI members are now competitive at medium range; as **logged, scored members** they fit the physics-first rule (CLAUDE.md §7: never a black-box headline) | (a) is just another ingest source; (b)/(c) are §14 Q2 |
+| **Beyond 10 days** | §8.3–8.5 unchanged: S2S terciles, ENSO-conditioned seasonal, CMIP6 scenarios | | |
+
+**Where we start:** M0 + M1 + M3 at P-1/P0 (cheap and immediately comparable), M2
+at P2 once the reforecast backfill lands, M4(a) whenever the ECMWF ingest exists, and
+M4(b)/(c) only after the scorecard says the cheaper rungs have been exhausted.
+
+**The differentiator we already own:** space weather on the same clock. The minute
+archive (§17.1) and the scored aurora members are real data today, and no weather
+API combines a site's weather with geomagnetic risk, satellite passes and launch
+conditions. That is the operator wedge (§2's last row) and it needs no new model.
