@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -129,7 +129,42 @@ footer.ra-footer a:hover{color:var(--uv-300)}
   .ra-body{grid-template-columns:1fr;gap:28px}
   .ra-row{grid-template-columns:1fr}
 }
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+html.theme-light .ra-eyebrow{text-shadow:none}
+html.theme-light .ra-hero{background:var(--pl-grad-hero);border-bottom-color:var(--pl-border)}
+html.theme-light .ra-hero::after{background:repeating-linear-gradient(transparent 0 38px,rgba(21,96,212,.035) 38px 39px)}
+html.theme-light .ra-h1{filter:none}
+html.theme-light .ra-lede{color:var(--pl-text-3)}
+html.theme-light .ra-offer{background:var(--pl-card);border-color:var(--pl-border);box-shadow:0 2px 6px rgba(11,31,58,.06),0 20px 48px rgba(21,96,212,.12)}
+html.theme-light .ra-offer-list li{border-top-color:var(--pl-border)}
+html.theme-light .ra-offer-list li::before{border-color:var(--pl-blue);color:var(--pl-blue-deep);background:var(--pl-blue-soft)}
+html.theme-light .ra-offer-side{background:linear-gradient(160deg,#e3eefd 0%,var(--pl-bg-soft) 70%);border-left-color:var(--pl-border)}
+html.theme-light .ra-offer-facts li{border-bottom-color:var(--pl-border)}
+html.theme-light .ra-offer-cta{background:var(--pl-grad-btn);color:#fff;box-shadow:0 4px 14px rgba(21,96,212,.22)}
+html.theme-light .ra-offer-cta:hover{filter:none;background:var(--pl-btn-hover)}
+html.theme-light .ra-offer-sample{color:var(--pl-blue)}
+html.theme-light .ra-offer-fine{border-top-color:var(--pl-border);background:var(--pl-bg-soft)}
+html.theme-light .ra-form-card{background:var(--pl-bg-soft);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .ra-field input:focus,html.theme-light .ra-field textarea:focus{border-color:var(--pl-blue);box-shadow:0 0 0 3px rgba(21,96,212,.14)}
+html.theme-light .ra-field .req{color:var(--pl-danger)}
+html.theme-light .ra-check{background:var(--pl-card);border-color:var(--pl-border-strong)}
+html.theme-light .ra-check:hover{border-color:var(--pl-blue)}
+html.theme-light .ra-check:has(input:checked){background:var(--pl-blue-soft);border-color:var(--pl-blue)}
+html.theme-light .ra-submit{background:var(--pl-grad-btn);color:#fff;box-shadow:0 4px 14px rgba(21,96,212,.22)}
+html.theme-light .ra-submit:hover:not(:disabled){filter:none;background:var(--pl-btn-hover)}
+html.theme-light .ra-fineprint{color:var(--pl-text-4)}
+html.theme-light .ra-fineprint a{color:var(--pl-blue)}
+html.theme-light .ra-points li{border-bottom-color:var(--pl-border)}
+html.theme-light .ra-callout{background:var(--pl-blue-soft);border-left-color:var(--pl-blue);color:var(--pl-text-3)}
+html.theme-light .ra-alt a{color:var(--pl-blue)}
+html.theme-light footer.ra-footer{border-top-color:var(--pl-border)}
+html.theme-light footer.ra-footer a:hover{color:var(--pl-blue)}
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

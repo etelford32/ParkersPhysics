@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -186,6 +186,50 @@
         footer { text-align: center; padding: 2rem; color: #444; font-size: .8rem; border-top: 1px solid rgba(255,255,255,.06); margin-top: 3rem; }
         footer a { color: #666; text-decoration: none; }
         footer a:hover { color: #ffd700; }
+
+        /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+        /* :root lifts this over theme-light.css's own `html.theme-light body` (loaded later) */
+        html.theme-light:root body { background: var(--pl-grad-hero) no-repeat top center / 100% 520px, var(--pl-bg); }
+        html.theme-light .eyebrow { color: var(--pl-blue-deep); }
+        html.theme-light .hero h1,
+        html.theme-light .section-title { background: var(--pl-grad-headline); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        html.theme-light .hero p { color: var(--pl-text-3); }
+        html.theme-light .section-sub { color: var(--pl-text-4); }
+
+        html.theme-light .btn-primary { background: var(--pl-btn); color: #fff; box-shadow: var(--pl-shadow); }
+        html.theme-light .btn-primary:hover { background: var(--pl-btn-hover); color: #fff; filter: none; box-shadow: var(--pl-shadow-hover); }
+        html.theme-light .btn-secondary { background: var(--pl-card); color: var(--pl-blue-deep); border-color: var(--pl-border-strong); }
+        html.theme-light .btn-secondary:hover { background: var(--pl-blue-soft); color: var(--pl-blue-deep); border-color: var(--pl-blue); }
+
+        html.theme-light .price-badge { background: var(--pl-blue-soft); border-color: rgba(21, 96, 212, .30); color: var(--pl-blue-deep); }
+        html.theme-light .price-badge strong { color: var(--pl-text-1); }
+
+        html.theme-light .panel { background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--pl-shadow); }
+        html.theme-light .panel:hover { border-color: var(--pl-border-strong); box-shadow: var(--pl-shadow-hover); }
+        html.theme-light .panel h3 { color: var(--pl-text-1); }
+        html.theme-light .panel p { color: var(--pl-text-3); }
+
+        html.theme-light section.flow { background: var(--pl-bg-soft); border-color: var(--pl-border); }
+        html.theme-light .flow-step .step-num { background: var(--pl-btn); border-color: var(--pl-btn); color: #fff; }
+        html.theme-light .flow-step h4 { color: var(--pl-text-1); }
+        html.theme-light .flow-step p { color: var(--pl-text-3); }
+
+        html.theme-light section.pitch {
+            background: linear-gradient(135deg, var(--pl-blue-soft), var(--pl-bg-soft));
+            border-color: rgba(21, 96, 212, .28);
+            box-shadow: var(--pl-shadow);
+        }
+        html.theme-light section.pitch h2 { color: var(--pl-text-1); }
+        html.theme-light section.pitch p { color: var(--pl-text-3); }
+
+        html.theme-light details { background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--pl-shadow); }
+        html.theme-light details summary { color: var(--pl-text-1); }
+        html.theme-light details[open] summary { color: var(--pl-blue); }
+        html.theme-light details p { color: var(--pl-text-3); }
+        html.theme-light details p a { color: var(--pl-blue) !important; }
+
+        html.theme-light footer a { color: var(--pl-text-3); }
+        html.theme-light footer a:hover { color: var(--pl-blue); }
     </style>
 <script type="application/ld+json">
 {
@@ -260,6 +304,10 @@
   ]
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 
