@@ -20,7 +20,7 @@
  *   · UNITS CONVERT ONCE, at display, through lab-units `fmt`.
  */
 
-import { DATASETS, PANELS, variableSpec, normalizeWorkspace, RANGE_IDS } from './catalog.js';
+import { DATASETS, PANELS, ROLES, variableSpec, normalizeWorkspace, RANGE_IDS } from './catalog.js';
 import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
@@ -164,6 +164,7 @@ function renderCatalog() {
         return `<section class="cx-ds" data-dataset="${esc(d.id)}">
             <header class="cx-ds-head">
                 <span class="cx-ds-name">${esc(d.label)}</span>
+                ${ROLES[d.role] ? `<span class="cx-role" data-role="${esc(d.role)}" title="${esc(ROLES[d.role].title)}">${esc(ROLES[d.role].label)}</span>` : ''}
                 <span class="cx-chip" data-state="${state}">${STATE_LABEL[state]}</span>
             </header>
             <p class="cx-ds-meta"><span class="cx-kind">${esc(d.kind)}</span> · ${esc(d.source)}</p>
@@ -257,7 +258,7 @@ function renderPanels() {
                 ? ` <span class="cx-agg-note cx-short" title="Has data in this window, but less than one ${esc(bucketLabel(ln.drawnMs))} bucket">only ${esc(spanLabel(ln.tooShort.spanMs))} — zoom in</span>`
                 : ln.drawnMs > ln.nativeMs
                 ? ` <span class="cx-agg-note" title="Aggregated by ${esc(ln.agg)} into ${esc(bucketLabel(ln.drawnMs))} buckets">${esc(ln.agg)} per ${esc(bucketLabel(ln.drawnMs))}</span>` : '';
-            return `<span class="cx-key"><i class="cx-swatch cx-bg-s${spec?.slot ?? 0}"></i>${esc(ln.label)}${coarse}</span>`;
+            return `<span class="cx-key" data-series="${esc(ln.id)}"><i class="cx-swatch cx-bg-s${spec?.slot ?? 0}"></i>${esc(ln.label)}${coarse}</span>`;
         }).join('');
         const sym = unitSym(p.quantity);
         blocks.push(`<figure class="cx-panel" data-panel="${esc(p.id)}">

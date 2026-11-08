@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import {
     PANELS, DATASETS, SERIES_IDS, variableSpec, adaptArchive, adaptStation,
     adaptTeleconnections, adaptApHistory, utcDateMs, normalizeWorkspace,
-    DEFAULT_WORKSPACE, RANGE_IDS,
+    DEFAULT_WORKSPACE, RANGE_IDS, adaptNwp, SLOT_COUNT, ROLES,
 } from '../js/climalytix/catalog.js';
 import { QUANTITIES } from '../js/climate-lab/lab-units.js';
 import { normalizeLabResponse } from '../js/climate-lab/lab-feed.js';
@@ -37,7 +37,7 @@ ok('every variable names a real panel, a lab-units quantity and a free colour sl
             assert.ok(QUANTITIES[v.quantity], `${d.id}.${v.key}: quantity ${v.quantity} is a lab-units quantity`);
             const panel = PANELS.find((p) => p.id === v.panel);
             assert.equal(v.quantity, panel.quantity, `${d.id}.${v.key}: one panel = one quantity = one y axis`);
-            assert.ok(v.slot >= 0 && v.slot <= 3, `${d.id}.${v.key}: slot 0–3`);
+            assert.ok(Number.isInteger(v.slot) && v.slot >= 0 && v.slot < SLOT_COUNT, `${d.id}.${v.key}: slot 0–${SLOT_COUNT - 1}`);
             const key = `${v.panel}:${v.slot}`;
             assert.ok(!slots.has(key), `${d.id}.${v.key}: slot ${key} already used by ${slots.get(key)}`);
             slots.set(key, `${d.id}.${v.key}`);
@@ -126,8 +126,8 @@ ok('adaptApHistory: observed and predicted are SEPARATE series of different kind
 });
 
 ok('normalizeWorkspace degrades field by field and never throws', () => {
-    assert.deepEqual(normalizeWorkspace(null), { ...DEFAULT_WORKSPACE, on: [...DEFAULT_WORKSPACE.on], units: { preset: 'auto' } });
-    const w = normalizeWorkspace({ v: 99, range: 'forever', on: ['era5.tmax', 'era5.tmax', 'evil.x'], units: { preset: 'klingon' }, historyFrom: 1800 });
+    assert.deepEqual(normalizeWorkspace(null), { ...DEFAULT_WORKSPACE, on: [...DEFAULT_WORKSPACE.on], known: [...DEFAULT_WORKSPACE.known], units: { preset: 'auto' } });
+    const w = normalizeWorkspace({ v: 99, range: 'forever', on: ['era5.tmax', 'era5.tmax', 'evil.x'], known: SERIES_IDS, units: { preset: 'klingon' }, historyFrom: 1800 });
     assert.equal(w.range, '30d');
     assert.deepEqual(w.on, ['era5.tmax'], 'unknown ids dropped, duplicates collapsed');
     assert.equal(w.units.preset, 'auto');
@@ -136,6 +136,49 @@ ok('normalizeWorkspace degrades field by field and never throws', () => {
     assert.equal(normalizeWorkspace({ range: '10y' }).range, '10y');
     assert.ok(RANGE_IDS.includes(DEFAULT_WORKSPACE.range));
     for (const id of DEFAULT_WORKSPACE.on) assert.ok(variableSpec(id).defaultOn);
+});
+
+ok('a workspace saved before a dataset existed gets its defaults ONCE; an uncheck sticks', () => {
+    // A P0 (v1) doc: no `known`, an explicit `on` without any gfs series.
+    const v1 = { v: 1, range: '30d', on: ['era5.tmax', 'station.tempC'], units: { preset: 'auto' }, historyFrom: 1991 };
+    const w = normalizeWorkspace(v1);
+    assert.equal(w.v, 2);
+    for (const id of ['gfs.tempC', 'gfs.precipMm', 'gfs.windMs', 'gfs.mslHpa']) assert.ok(w.on.includes(id), `${id} switched on`);
+    assert.ok(!w.on.includes('gfs.rhPct'), 'a default-OFF new series stays off');
+    assert.ok(!w.on.includes('era5.tmin'), 'a v1 series the user had off stays off');
+    // The user then unchecks gfs.tempC: it is KNOWN now and must not come back.
+    const after = normalizeWorkspace({ ...w, on: w.on.filter((id) => id !== 'gfs.tempC') });
+    assert.ok(!after.on.includes('gfs.tempC'), 'an uncheck is respected');
+    assert.deepEqual(normalizeWorkspace(after), after, 'normalising is idempotent');
+});
+
+ok('every dataset has a role the page can badge; ours is listed first', () => {
+    for (const d of DATASETS) assert.ok(ROLES[d.role], `${d.id}: role`);
+    assert.equal(DATASETS[0].id, 'gfs');
+    assert.equal(DATASETS[0].role, 'archive');
+    assert.ok(DATASETS.filter((d) => d.role === 'archive').every((d) => d.route.startsWith('/api/climalytix/')));
+});
+
+ok('adaptNwp: our archive’s wire body → SiteSeries, issued at the run, precip at interval start', () => {
+    const run = Date.UTC(2026, 10, 8, 0);
+    const H = 3_600_000;
+    const body = {
+        source: 'climalytix-gfs', run: '2026-11-08T00:00Z', runMs: run, grid: '0p25', freshness: 'fresh', age_seconds: 7 * 3600,
+        times: [run, run + 3 * H, run + 6 * H], intervalH: { precipMm: 3 },
+        series: { tempC: [1, 2, null], precipMm: [null, 0.4, 1.2], windMs: [3, 4, 5], mslHpa: [1010, 1011, 1012] },
+    };
+    const { series, run: r } = adaptNwp(body, run + 8 * H);
+    assert.equal(r, '2026-11-08T00:00Z');
+    const by = Object.fromEntries(series.map((s) => [s.id, s]));
+    assert.deepEqual(Object.keys(by).sort(), ['gfs.mslHpa', 'gfs.precipMm', 'gfs.tempC', 'gfs.windMs']);
+    assert.equal(by['gfs.tempC'].issuedAt, run);
+    assert.equal(by['gfs.tempC'].provenance.fetchedAt, run + 8 * H, 'fetched ≠ issued');
+    assert.equal(by['gfs.tempC'].provenance.freshness, 'live', "the route's 'fresh' is the page's 'live'");
+    assert.ok(Number.isNaN(by['gfs.tempC'].v[2]), 'a gap is NaN, never 0');
+    assert.deepEqual([...by['gfs.precipMm'].t], [run - 3 * H, run, run + 3 * H], 'amounts stamped at interval start');
+    assert.equal(by['gfs.precipMm'].agg, 'sum');
+    assert.equal(adaptNwp({ freshness: 'expired', series: null }, run).series.length, 0, 'a degraded body yields no series');
+    assert.equal(adaptNwp({ ...body, freshness: 'stale' }, run).series[0].provenance.freshness, 'stale');
 });
 
 console.log(`\n${passed} passed`);

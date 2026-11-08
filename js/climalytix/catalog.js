@@ -15,6 +15,19 @@
  *   drivers   /api/weather/teleconnections     AO + NAO, 60 daily values
  *   geomag    /api/noaa/ap-history     Ap, observed 3-hourly + SWPC 45-day
  *
+ * P-1 (2026-11-08, plan §17.6): `gfs` — /api/climalytix/nwp, OUR OWN archive
+ * (NOAA GFS 0.25° ingested to R2 point tiles by GitHub Actions). It is listed
+ * FIRST and every dataset carries a `role`: 'archive' (ours) or 'bootstrap'
+ * (a third-party API we use until the data engine replaces it — never a paid
+ * path, D2). The bootstrap NWP stays on as the BENCHMARK our archive is
+ * compared against, not as a fallback that silently stands in for it: when
+ * our archive is down its chip says so and nothing is substituted.
+ *
+ * Slots: five validated colours (the Climate Lab meteogram's palette, worst
+ * CVD ΔE 8.4 on #0b1322), unique per panel — the catalog gate enforces it. GFS
+ * dew point and gusts are in the archive but not in this table yet: the temp
+ * and wind panels are at five series.
+ *
  * PANELS. Variables that measure the same quantity share a panel (and so one
  * y axis), so the 85-year record and the 3-day forecast of the same thing sit
  * on one ruler. Within a panel a series' colour is its SLOT, bound to the
@@ -23,6 +36,17 @@
  */
 
 import { makeSeries, num, HOUR_MS, DAY_MS } from './series.js';
+import { toSiteSeries } from './point-tile.js';
+
+/** Dataset roles, as the page badges them. */
+export const ROLES = Object.freeze({
+    archive: { label: 'Our archive', title: 'Ingested and served by Climalytix’s own data engine' },
+    bootstrap: { label: 'Bootstrap', title: 'Third-party API used until our data engine covers it — a benchmark, never a paid path' },
+    reference: { label: 'Reference', title: 'Published index or observation relayed as-is' },
+});
+
+/** Colour slots per panel — ONE number, owned by the renderer's clamp. */
+export { SLOT_COUNT } from './timeline-model.js';
 
 /** Panels in display order: id, title, the lab-units quantity they plot. */
 export const PANELS = Object.freeze([
@@ -42,7 +66,24 @@ export const PANELS = Object.freeze([
  */
 export const DATASETS = Object.freeze([
     {
-        id: 'era5', label: 'ERA5 reanalysis (daily)', kind: 'reanalysis',
+        // `since`: the workspace version that introduced the dataset (see
+        // normalizeWorkspace — a saved workspace that predates it gets its
+        // default series switched on once, never against the user's choice).
+        id: 'gfs', label: 'GFS 0.25° (our archive)', kind: 'forecast', role: 'archive', since: 2,
+        route: '/api/climalytix/nwp',
+        source: 'NOAA GFS 0.25°, ingested daily into Climalytix point tiles',
+        resKm: 28,
+        variables: [
+            { key: 'tempC',    label: 'Temperature (GFS)',   panel: 'temp',     quantity: 'temp',     agg: 'mean', slot: 4, defaultOn: true },
+            { key: 'precipMm', label: '3-hourly (GFS)',      panel: 'precip',   quantity: 'precip',   agg: 'sum',  slot: 2, defaultOn: true },
+            { key: 'windMs',   label: 'Wind (GFS)',          panel: 'wind',     quantity: 'wind',     agg: 'mean', slot: 4, defaultOn: true },
+            { key: 'mslHpa',   label: 'MSL pressure (GFS)',  panel: 'pressure', quantity: 'pressure', agg: 'mean', slot: 1, defaultOn: true },
+            { key: 'rhPct',    label: 'Relative humidity (GFS)', panel: 'humidity', quantity: 'pct', agg: 'mean', slot: 2, defaultOn: false },
+            { key: 'cloudPct', label: 'Cloud cover (GFS)',   panel: 'humidity', quantity: 'pct',      agg: 'mean', slot: 3, defaultOn: false },
+        ],
+    },
+    {
+        id: 'era5', label: 'ERA5 reanalysis (daily)', kind: 'reanalysis', role: 'bootstrap',
         route: '/api/climalytix/archive',
         source: 'Open-Meteo historical API (ERA5 / ERA5-Land) — bootstrap source',
         resKm: 25,
@@ -57,7 +98,7 @@ export const DATASETS = Object.freeze([
         ],
     },
     {
-        id: 'station', label: 'Home Station feed (hourly)', kind: 'forecast',
+        id: 'station', label: 'Home Station feed (hourly)', kind: 'forecast', role: 'bootstrap',
         route: '/api/weather/forecast?type=lab',
         source: 'Open-Meteo forecast API (best-match NWP) via the Climate Lab feed',
         resKm: 11,
@@ -72,7 +113,7 @@ export const DATASETS = Object.freeze([
         ],
     },
     {
-        id: 'drivers', label: 'Climate drivers', kind: 'index',
+        id: 'drivers', label: 'Climate drivers', kind: 'index', role: 'reference',
         route: '/api/weather/teleconnections',
         source: 'NOAA CPC daily AO + NAO (normalised)',
         resKm: null,
@@ -82,7 +123,7 @@ export const DATASETS = Object.freeze([
         ],
     },
     {
-        id: 'geomag', label: 'Space weather', kind: 'observed',
+        id: 'geomag', label: 'Space weather', kind: 'observed', role: 'reference',
         route: '/api/noaa/ap-history',
         source: 'NOAA SWPC planetary K → Ap; SWPC 45-day Ap forecast',
         resKm: null,
@@ -161,6 +202,21 @@ export function adaptStation(obs, fetchedAt) {
     return { series, utcOffsetS: num(obs?.station?.utcOffsetS) ?? 0, station: obs.station };
 }
 
+/**
+ * /api/climalytix/nwp → GFS series from our own archive. The stamping rule
+ * (precip amounts at their interval START, issuedAt = run time) lives ONCE in
+ * point-tile.js toSiteSeries; this only names the series and maps the route's
+ * freshness ('fresh' | 'stale' | 'expired') onto the page's ('live' | …).
+ */
+export function adaptNwp(j, fetchedAt) {
+    if (!j || !Array.isArray(j.times) || !j.series) return { series: [] };
+    const d = DATASET_BY_ID.get('gfs');
+    const specs = d.variables.map((v) => ({ id: `gfs.${v.key}`, key: v.key, label: v.label, quantity: v.quantity, agg: v.agg }));
+    const freshness = j.freshness === 'fresh' ? 'live' : (j.freshness || 'live');
+    const series = toSiteSeries(j, specs, { fetchedAt, freshness, spatial: { kind: 'cell', resKm: d.resKm, distanceKm: null } });
+    return { series, run: j.run ?? null, runMs: num(j.runMs), ageS: num(j.age_seconds) };
+}
+
 /** 'YYYY-MM-DD' → UTC midnight ms (driver indices are global, UTC-dated). */
 export function utcDateMs(s) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ''));
@@ -221,13 +277,19 @@ export function adaptApHistory(j, fetchedAt) {
 
 // ── Workspace document (local-first; synced through public.dashboards) ────
 
-export const WORKSPACE_VERSION = 1;
+export const WORKSPACE_VERSION = 2;
 export const RANGE_IDS = Object.freeze(['7d', '30d', '1y', '10y', 'all']);
+
+/** Series that existed in a workspace of version `v` (datasets carry `since`). */
+function seriesKnownAt(v) {
+    return DATASETS.filter((d) => (d.since ?? 1) <= v).flatMap((d) => d.variables.map((x) => `${d.id}.${x.key}`));
+}
 
 export const DEFAULT_WORKSPACE = Object.freeze({
     v: WORKSPACE_VERSION,
     range: '30d',
     on: Object.freeze(SERIES_IDS.filter((id) => variableSpec(id).defaultOn)),
+    known: Object.freeze([...SERIES_IDS]),
     units: Object.freeze({ preset: 'auto' }),
     historyFrom: 1991,
 });
@@ -235,16 +297,29 @@ export const DEFAULT_WORKSPACE = Object.freeze({
 /**
  * The ONLY reader of a workspace doc (the lab-prefs normalizePrefs rule): a
  * corrupt or future-versioned doc degrades field by field to defaults.
+ *
+ * NEW SERIES. `on` is an explicit list, so a dataset added after a workspace
+ * was saved would never appear for that user. `known` records every series id
+ * the user has been SHOWN; a default-on series missing from `known` is
+ * switched on once and becomes known. A series the user unchecked is known
+ * and stays off. A doc without `known` (v1) knew exactly the series that
+ * existed at its version.
  */
 export function normalizeWorkspace(raw) {
     const r = raw && typeof raw === 'object' ? raw : {};
-    const on = Array.isArray(r.on) ? [...new Set(r.on.filter((id) => SERIES_IDS.includes(id)))] : [...DEFAULT_WORKSPACE.on];
+    const v = Number.isInteger(r.v) && r.v > 0 ? Math.min(r.v, WORKSPACE_VERSION) : WORKSPACE_VERSION;
+    const known = new Set(Array.isArray(r.known) ? r.known.filter((id) => SERIES_IDS.includes(id)) : seriesKnownAt(v));
+    let on = Array.isArray(r.on) ? [...new Set(r.on.filter((id) => SERIES_IDS.includes(id)))] : [...DEFAULT_WORKSPACE.on];
+    if (Array.isArray(r.on)) {
+        for (const id of DEFAULT_WORKSPACE.on) if (!known.has(id) && !on.includes(id)) on.push(id);
+    }
     const presets = ['auto', 'metric', 'imperial', 'si', 'aviation'];
     const yr = Number.parseInt(r.historyFrom, 10);
     return {
         v: WORKSPACE_VERSION,
         range: RANGE_IDS.includes(r.range) ? r.range : DEFAULT_WORKSPACE.range,
         on,
+        known: [...SERIES_IDS],
         units: { preset: presets.includes(r.units?.preset) ? r.units.preset : 'auto' },
         historyFrom: Number.isInteger(yr) ? Math.min(2020, Math.max(1940, yr)) : DEFAULT_WORKSPACE.historyFrom,
     };

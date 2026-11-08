@@ -779,8 +779,21 @@ message and on clones re-stored south-first / west-going / column-major, with
 the flag-ignoring reader as the negative control (GFS is north-first, so a
 reader that ignores the flags passes every GFS-only test).
 
-Next in P-1: wire `/api/climalytix/nwp` into the page as a dataset (our
-archive first, the bootstrap second, flagged); GEFS members; ECMWF open data
+**On the page (2026-11-08):** `gfs` is the FIRST dataset in the catalogue,
+badged "Our archive"; ERA5 and the Home Station feed are badged "Bootstrap" and
+the indices "Reference" (`ROLES` in catalog.js). The bootstrap NWP stays on as
+the BENCHMARK, never as a stand-in: when our archive is down or unpublished its
+chip is red, its note says why ("not published yet" while the R2 secrets are
+unset) and nothing is substituted. GFS temperature, 3-hourly precipitation,
+wind and MSL pressure are on by default; RH and cloud are in the table but off;
+dew point and gusts are archived but not listed (the temp and wind panels are
+at the five validated colours). A workspace saved before the archive existed
+(v1, no `known` list) gets the new defaults switched on ONCE; an uncheck after
+that is respected (`normalizeWorkspace`, gated). The renderer clamped colour
+slots to 0–3 — a fifth series silently wore the fourth's colour — and
+`SLOT_COUNT` is now one number shared by the clamp and the catalog gate.
+
+Next in P-1: GEFS members; ECMWF open data
 (IFS/AIFS, needs its own `.index` JSON sidecar planner); the ERA5 history
 backfill into the same format (time axis = decades, chunked across runs).
 

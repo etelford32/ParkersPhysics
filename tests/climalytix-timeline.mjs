@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import {
     RANGES, BUCKET_LADDER, MAX_BUCKETS, chooseStep, windowFor, niceTicks,
-    panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
+    panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals, SLOT_COUNT,
 } from '../js/climalytix/timeline-model.js';
 import { makeSeries, HOUR_MS, DAY_MS } from '../js/climalytix/series.js';
 
@@ -169,6 +169,14 @@ ok('tick decimals come from the tick spacing', () => {
     assert.equal(tickDecimals([5]), 0);
     const labels = niceTicks(-1.2, 1.4, 4).map((v) => v.toFixed(tickDecimals(niceTicks(-1.2, 1.4, 4))));
     assert.equal(new Set(labels).size, labels.length, 'no duplicate labels');
+});
+
+ok('every slot the catalog can hand out reaches the SVG unclamped', () => {
+    const m = panelModel([hourly(from, 96, (i) => i)], base);
+    for (let k = 0; k < SLOT_COUNT; k++) {
+        assert.match(panelSvg(m, { slotOf: () => k }), new RegExp(`class="cx-line cx-s${k}"`), `slot ${k}`);
+    }
+    assert.match(panelSvg(m, { slotOf: () => SLOT_COUNT + 3 }), new RegExp(`cx-s${SLOT_COUNT - 1}"`), 'out of range clamps to the last');
 });
 
 console.log(`\n${passed} passed`);

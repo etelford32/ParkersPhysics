@@ -5,7 +5,11 @@
  * outbound network. What it pins:
  *   · boot with no uncaught exception; the site is the CURRENT VIEW
  *     (ppx_user_location), the one location store
- *   · all four datasets load and say so; the expected panels render
+ *   · all five datasets load and say so; the expected panels render; OUR
+ *     archive (GFS) is listed first and badged, the bootstrap ones badged too
+ *   · our archive down/unpublished is ONE red chip that says why, and the
+ *     bootstrap NWP is NOT substituted for it (its series stay their own)
+ *   · a workspace saved before the archive existed gets its series once
  *   · the future is dashed (a projection), never solid
  *   · long windows are AGGREGATED and the legend names the bucket
  *   · the workspace persists across a reload; a series toggle removes a panel
@@ -36,25 +40,35 @@ async function boot(page, { mocks = {}, device = BOULDER, account = null, ws = n
     }, { device, account, ws });
     await page.goto(path, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => window.__climalytix && window.__climalytix.state.loading.length === 0
-        && Object.keys(window.__climalytix.state.datasets).length === 4, null, { timeout: 60_000 });
+        && Object.keys(window.__climalytix.state.datasets).length === 5, null, { timeout: 60_000 });
     return errors;
 }
 
 const state = (page) => page.evaluate(() => window.__climalytix.state);
 
-test('boots at the current view, loads all four datasets and draws the panels', async ({ page }) => {
+test('boots at the current view, loads all five datasets and draws the panels', async ({ page }) => {
     const errors = await boot(page);
     await expect(page.locator('#cx-site-name')).toHaveText('Boulder, CO');
     const s = await state(page);
-    for (const id of ['era5', 'station', 'drivers', 'geomag']) {
+    for (const id of ['gfs', 'era5', 'station', 'drivers', 'geomag']) {
         expect(s.datasets[id].state, `${id} loads`).toBe('live');
     }
     expect(s.datasets.geomag.series).toEqual(['geomag.apObs', 'geomag.apPred']);
     expect(s.panels.map((p) => p.id)).toEqual(['temp', 'precip', 'wind', 'pressure', 'drivers', 'geomag']);
     expect(s.panels.every((p) => p.hasData)).toBe(true);
-    await expect(page.locator('.cx-chip[data-state="live"]')).toHaveCount(4);
-    // The temperature panel overlays the 35-year record AND the 3-day forecast on one ruler.
-    expect(s.panels[0].lines).toEqual(expect.arrayContaining(['era5.tmax', 'era5.tmin', 'station.tempC']));
+    await expect(page.locator('.cx-chip[data-state="live"]')).toHaveCount(5);
+    // Our archive is listed first and says whose it is; the bootstrap feeds say so too.
+    await expect(page.locator('.cx-ds').first()).toHaveAttribute('data-dataset', 'gfs');
+    await expect(page.locator('[data-dataset="gfs"] .cx-role')).toHaveText('Our archive');
+    await expect(page.locator('[data-dataset="station"] .cx-role')).toHaveText('Bootstrap');
+    await expect(page.locator('[data-dataset="gfs"] .cx-ds-note').first()).toContainText('bilinear from 4 grid nodes');
+    // The temperature panel overlays the 35-year record, our 10-day GFS run and the bootstrap forecast on one ruler.
+    expect(s.panels[0].lines).toEqual(expect.arrayContaining(['era5.tmax', 'era5.tmin', 'gfs.tempC', 'station.tempC']));
+    expect(s.datasets.gfs.series).toEqual(expect.arrayContaining(['gfs.tempC', 'gfs.precipMm', 'gfs.windMs', 'gfs.mslHpa']));
+    await expect(page.locator('[data-panel="temp"] path.cx-proj[data-series="gfs.tempC"]')).toHaveCount(1);
+    // Our archive and the bootstrap draw in DIFFERENT colours (slots are per series, never shared).
+    const cls = await page.locator('[data-panel="temp"] path[data-series="gfs.tempC"]').first().getAttribute('class');
+    expect(cls).toContain('cx-s4');
     // Past solid, future dashed.
     await expect(page.locator('[data-panel="temp"] path.cx-proj[data-series="station.tempC"]')).toHaveCount(1);
     await expect(page.locator('[data-panel="temp"] .cx-now')).toHaveCount(1);
@@ -66,11 +80,13 @@ test('long windows aggregate by each series’ rule and say so; the workspace pe
     await boot(page);
     await page.locator('[data-range="all"]').click();
     await expect(page.locator('#cx-step')).toContainText('30-day');
-    await expect(page.locator('[data-panel="temp"] .cx-agg-note').first()).toContainText(/max per 30-day/);
-    await expect(page.locator('[data-panel="precip"] .cx-agg-note').first()).toContainText(/sum per 30-day/);
+    await expect(page.locator('[data-panel="temp"] .cx-key[data-series="era5.tmax"] .cx-agg-note')).toContainText(/max per 30-day/);
+    await expect(page.locator('[data-panel="precip"] .cx-key[data-series="era5.precip"] .cx-agg-note')).toContainText(/sum per 30-day/);
+    // A 10-day forecast in a 30-day bucket is honest about it, not "No data".
+    await expect(page.locator('[data-panel="temp"] .cx-key[data-series="gfs.tempC"] .cx-agg-note')).toContainText(/only \d+ days — zoom in/);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => window.__climalytix?.state.loading.length === 0
-        && Object.keys(window.__climalytix.state.datasets).length === 4);
+        && Object.keys(window.__climalytix.state.datasets).length === 5);
     await expect(page.locator('[data-range="all"]')).toHaveAttribute('aria-pressed', 'true');
     expect((await state(page)).workspace.range).toBe('all');
 });
@@ -103,6 +119,43 @@ test('one dead feed is one red chip; the rest still draw', async ({ page }) => {
     expect(errors).toEqual([]);
 });
 
+test('our archive unpublished is one red chip that says why; the bootstrap is NOT substituted', async ({ page }) => {
+    const errors = await boot(page, { mocks: { nwp: 'unpublished' } });
+    const s = await state(page);
+    expect(s.datasets.gfs.state).toBe('down');
+    expect(s.datasets.gfs.series).toEqual([]);
+    await expect(page.locator('[data-dataset="gfs"] .cx-chip')).toHaveAttribute('data-state', 'down');
+    await expect(page.locator('[data-dataset="gfs"] .cx-ds-note').first()).toContainText('not published yet');
+    await expect(page.locator('[data-dataset="gfs"] .cx-ds-note').first()).toContainText('Nothing is substituted');
+    // The bootstrap forecast still draws AS ITSELF — never relabelled as ours.
+    expect(s.datasets.station.state).toBe('live');
+    const temp = s.panels.find((p) => p.id === 'temp');
+    expect(temp.lines).toContain('station.tempC');
+    expect(temp.lines).not.toContain('gfs.tempC');
+    await expect(page.locator('#cx-banner')).toBeHidden();
+    expect(errors).toEqual([]);
+});
+
+test('an old run is served but degraded, and the chip says so', async ({ page }) => {
+    const errors = await boot(page, { mocks: { nwp: 'old' } });
+    const s = await state(page);
+    expect(s.datasets.gfs.state).toBe('stale');
+    await expect(page.locator('[data-dataset="gfs"] .cx-chip')).toHaveAttribute('data-state', 'stale');
+    await expect(page.locator('[data-dataset="gfs"] .cx-ds-note').first()).toContainText('older than the daily cadence');
+    expect(s.panels.find((p) => p.id === 'temp').lines).toContain('gfs.tempC');
+    expect(errors).toEqual([]);
+});
+
+test('a workspace saved before our archive existed gets its series once', async ({ page }) => {
+    const v1 = { v: 1, range: '30d', on: ['era5.tmax', 'station.tempC', 'drivers.ao'], units: { preset: 'auto' }, historyFrom: 1991 };
+    const errors = await boot(page, { ws: v1 });
+    const s = await state(page);
+    expect(s.workspace.on).toEqual(expect.arrayContaining(['era5.tmax', 'station.tempC', 'gfs.tempC', 'gfs.precipMm']));
+    expect(s.workspace.on).not.toContain('era5.tmin');   // the user's own choice stands
+    expect(s.panels.find((p) => p.id === 'temp').lines).toContain('gfs.tempC');
+    expect(errors).toEqual([]);
+});
+
 test('NEGATIVE CONTROL: every feed down is an outage, and nothing is drawn', async ({ page }) => {
     const errors = await boot(page, { mocks: { down: 'all' } });
     const s = await state(page);
@@ -110,7 +163,7 @@ test('NEGATIVE CONTROL: every feed down is an outage, and nothing is drawn', asy
     await expect(page.locator('#cx-banner')).toBeVisible();
     await expect(page.locator('#cx-banner')).toContainText('outage, not a quiet day');
     await expect(page.locator('.cx-panel')).toHaveCount(0);
-    await expect(page.locator('.cx-chip[data-state="down"]')).toHaveCount(4);
+    await expect(page.locator('.cx-chip[data-state="down"]')).toHaveCount(5);
     expect(errors).toEqual([]);
 });
 

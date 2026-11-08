@@ -175,9 +175,15 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const f1 = (x) => (Math.round(x * 10) / 10).toString();
 
 /**
- * SVG markup for a panel model. `slotOf(seriesId)` → 0–3 colour slot;
+ * SVG markup for a panel model. `slotOf(seriesId)` → 0…SLOT_COUNT−1 colour slot;
  * `fmtTick(v)` formats a y tick (already in display units).
  */
+/** Colour slots a panel can draw (climalytix.html --cx-s0…s4, the Climate
+ *  Lab meteogram's five validated colours). The catalog's slot table and this
+ *  clamp read the SAME number — a private 3 here drew a fifth series in the
+ *  fourth one's colour. */
+export const SLOT_COUNT = 5;
+
 export function panelSvg(m, { slotOf = () => 0, fmtTick = (v) => String(v), title = '' } = {}) {
     const { width, height, pad } = m;
     const parts = [];
@@ -190,7 +196,7 @@ export function panelSvg(m, { slotOf = () => 0, fmtTick = (v) => String(v), titl
         parts.push(`<text class="cx-tick" x="${pad.l - 6}" y="${f1(tk.y + 3)}" text-anchor="end">${esc(fmtTick(tk.v))}</text>`);
     }
     for (const ln of m.lines) {
-        const slot = `cx-s${Math.max(0, Math.min(3, slotOf(ln.id) | 0))}`;
+        const slot = `cx-s${Math.max(0, Math.min(SLOT_COUNT - 1, slotOf(ln.id) | 0))}`;
         for (const run of ln.runs) {
             if (run.pts.length === 1) {
                 const [x, y] = run.pts[0];

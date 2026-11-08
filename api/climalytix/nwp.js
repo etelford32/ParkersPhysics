@@ -20,7 +20,7 @@
 import { jsonOk, jsonError } from '../_lib/responses.js';
 import { R2_CONFIGURED, getGzText } from '../_lib/r2-archive.js';
 import { getSignedUrl } from '../_lib/r2-client.js';
-import { locate, tileKey, stencilRanges, readStencil, siteBody, parseSite, SCHEMA } from '../../js/climalytix/point-tile.js';
+import { locate, tileKey, stencilRanges, readStencil, siteBody, parseSite, degradedNwp, SCHEMA } from '../../js/climalytix/point-tile.js';
 
 export const config = { runtime: 'edge' };
 
@@ -56,13 +56,7 @@ async function getRange(key, [start, end]) {
     return res.status === 200 ? buf.subarray(start, end) : buf;
 }
 
-function degraded(q, grid, reason, now) {
-    return {
-        source: 'climalytix-gfs', role: 'archive', grid, freshness: 'expired', reasons: [reason],
-        generated_at: new Date(now).toISOString(), site: q, series: null,
-        note: 'Our own GFS archive is unavailable for this request; nothing is substituted.',
-    };
-}
+const degraded = degradedNwp;
 
 export default async function handler(req) {
     const url = new URL(req.url);

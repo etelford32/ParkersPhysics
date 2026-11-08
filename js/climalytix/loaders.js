@@ -16,9 +16,10 @@
  */
 
 import {
-    adaptArchive, adaptStation, adaptTeleconnections, adaptApHistory,
+    adaptArchive, adaptStation, adaptTeleconnections, adaptApHistory, adaptNwp,
 } from './catalog.js';
 import { archivePath } from './archive-request.js';
+import { nwpPath } from './point-tile.js';
 import { fetchLabStation } from '../climate-lab/lab-feed.js';
 
 const TIMEOUT_MS = 25_000;
@@ -55,6 +56,35 @@ async function loadEra5(site, ws, signal) {
     return { ...out, state, note };
 }
 
+/** Plain-language reasons for our archive's degraded answers. */
+const NWP_REASONS = {
+    r2_not_configured: 'our archive is not published yet',
+    no_run_published: 'no GFS run has been ingested yet',
+};
+const reasonText = (r) => NWP_REASONS[r] || String(r).replace(/:.*$/, '').replace(/_/g, ' ');
+
+function ageText(s) {
+    if (!Number.isFinite(s)) return '';
+    const h = s / 3600;
+    return h < 48 ? `${Math.round(h)} h old` : `${(h / 24).toFixed(1)} days old`;
+}
+
+async function loadGfs(site, _ws, signal) {
+    const j = await getJson(nwpPath(site), signal);
+    const out = adaptNwp(j, Date.now());
+    if (j?.freshness === 'expired' && !out.series.length) {
+        const why = (j.reasons || []).map(reasonText).join(', ') || 'unavailable';
+        return { ...out, state: 'down', note: `Our archive: ${why}. Nothing is substituted for it.` };
+    }
+    const state = !out.series.length ? 'down' : j.freshness === 'fresh' ? 'live' : 'stale';
+    const leads = j.leadsH?.length ? `0–${j.leadsH[j.leadsH.length - 1]} h` : '';
+    const gaps = j.missing ? ` · ${j.missing} missing field-leads` : '';
+    const note = `Run ${j.run} (${ageText(j.age_seconds)}) · ${leads} 3-hourly · bilinear from 4 grid nodes${gaps}`
+        + (state === 'stale' ? ' · older than the daily cadence' : '')
+        + (j.freshness === 'expired' ? ' · run is past its useful age' : '');
+    return { ...out, state, note };
+}
+
 async function loadStation(site, _ws, signal) {
     const { obs, fetchedAt } = await fetchLabStation(site.lat, site.lon, { signal });
     const out = adaptStation(obs, fetchedAt);
@@ -78,6 +108,7 @@ async function loadGeomag(_site, _ws, signal) {
 }
 
 export const LOADERS = Object.freeze({
+    gfs: loadGfs,
     era5: loadEra5,
     station: loadStation,
     drivers: loadDrivers,

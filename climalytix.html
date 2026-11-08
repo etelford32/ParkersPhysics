@@ -41,6 +41,7 @@ html { height:auto; overflow-y:auto; }
     --cx-s1: #3987e5;
     --cx-s2: #199e70;
     --cx-s3: #c98500;
+    --cx-s4: #d55181;             /* the meteogram's 5th (pressure) colour */
     --cx-good: #0ca30c;
     --cx-caution: #fab219;
     --cx-critical: #d03b3b;
@@ -92,7 +93,13 @@ body {
 #cx-catalog { align-self:start; }
 .cx-ds { border-top:1px solid var(--cx-line); padding:9px 0 6px; }
 .cx-ds:first-child { border-top:none; padding-top:0; }
-.cx-ds-head { display:flex; align-items:center; gap:8px; }
+.cx-ds-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+/* Who serves a dataset: ours, a bootstrap third party, or a relayed index.
+   Text + border, never colour alone. */
+.cx-role { font-size:10px; text-transform:uppercase; letter-spacing:.08em; padding:1px 6px;
+    border-radius:4px; border:1px solid var(--cx-line); color:var(--cx-muted); }
+.cx-role[data-role="archive"] { color:var(--cx-accent); border-color:currentColor; font-weight:700; }
+.cx-role[data-role="bootstrap"] { border-style:dashed; }
 .cx-ds-name { font-size:.82rem; font-weight:700; }
 .cx-chip { margin-left:auto; display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px;
     font-size:.6rem; font-weight:700; border:1px solid rgba(255,255,255,.18); color:var(--cx-muted); }
@@ -109,6 +116,7 @@ body {
 .cx-swatch { display:inline-block; width:12px; height:3px; border-radius:2px; flex:none; }
 .cx-bg-s0 { background:var(--cx-s0); } .cx-bg-s1 { background:var(--cx-s1); }
 .cx-bg-s2 { background:var(--cx-s2); } .cx-bg-s3 { background:var(--cx-s3); }
+.cx-bg-s4 { background:var(--cx-s4); }
 
 /* explore */
 #cx-explore { min-width:0; }
@@ -141,6 +149,7 @@ body {
 .cx-line.cx-s1, .cx-dot.cx-s1 { stroke:var(--cx-s1); } .cx-dot.cx-s1 { fill:var(--cx-s1); }
 .cx-line.cx-s2, .cx-dot.cx-s2 { stroke:var(--cx-s2); } .cx-dot.cx-s2 { fill:var(--cx-s2); }
 .cx-line.cx-s3, .cx-dot.cx-s3 { stroke:var(--cx-s3); } .cx-dot.cx-s3 { fill:var(--cx-s3); }
+.cx-line.cx-s4, .cx-dot.cx-s4 { stroke:var(--cx-s4); } .cx-dot.cx-s4 { fill:var(--cx-s4); }
 .cx-empty { fill:var(--cx-faint); font-size:12px; }
 .cx-empty-msg { font-size:.8rem; color:var(--cx-muted); padding:20px 0; }
 #cx-axis svg { display:block; width:100%; height:auto; overflow:visible; }

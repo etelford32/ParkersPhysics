@@ -146,8 +146,13 @@ export function siteBody(man, loc, values, { lat, lon, nowMs }) {
 
 const wrap180 = (x) => { const v = ((x % 360) + 360) % 360; return Math.round((v > 180 ? v - 360 : v) * 1e6) / 1e6 + 0; };
 
-/** Wire body → SiteSeries[] (only the ids asked for, in that order). */
-export function toSiteSeries(body, specs) {
+/**
+ * Wire body → SiteSeries[] (only the specs asked for, in that order).
+ * `issuedAt` is the RUN time; `fetchedAt` is when the browser got it (they
+ * differ by the ingest lag plus the CDN age). `freshness` defaults to the
+ * route's own word; the catalog maps it onto the page's vocabulary.
+ */
+export function toSiteSeries(body, specs, { fetchedAt = body?.runMs, freshness = body?.freshness, spatial = null } = {}) {
     const out = [];
     for (const spec of specs) {
         const v = body?.series?.[spec.key];
@@ -160,8 +165,9 @@ export function toSiteSeries(body, specs) {
             cadenceMs: intervalH ? intervalH * HOUR_MS : 3 * HOUR_MS,
             t: body.times.map((t) => t - shift), v,
             issuedAt: body.runMs,
-            provenance: { source: body.source, version: body.run, fetchedAt: body.runMs,
-                          freshness: body.freshness, note: `${body.grid} GFS run ${body.run}, bilinear to the site` },
+            provenance: { source: body.source, version: body.run, fetchedAt, freshness,
+                          note: `${body.grid} GFS run ${body.run}, bilinear to the site from four grid nodes` },
+            spatial,
         }));
     }
     return out;
@@ -176,4 +182,22 @@ export function parseSite({ lat, lon }) {
     if (!Number.isFinite(lo) || lo < -180 || lo > 180) return { error: 'lon must be a number in [-180, 180]' };
     const r = (x) => Math.round(x * 100) / 100 + 0;
     return { lat: r(la), lon: r(lo) };
+}
+
+/** The ONE path builder for /api/climalytix/nwp: the same 0.01° rounding as
+ *  parseSite, so the page and the route share one CDN cache key. */
+export function nwpPath({ lat, lon, grid = '0p25' }) {
+    const q = parseSite({ lat, lon });
+    if (q.error) throw new RangeError(q.error);
+    return `/api/climalytix/nwp?lat=${q.lat.toFixed(2)}&lon=${q.lon.toFixed(2)}${grid === '0p25' ? '' : `&grid=${grid}`}`;
+}
+
+/** The route's degraded answer (200 + expired + reasons, series null). One
+ *  copy, so the browser mocks and the route cannot disagree on its shape. */
+export function degradedNwp(site, grid, reason, nowMs) {
+    return {
+        source: 'climalytix-gfs', role: 'archive', grid, freshness: 'expired', reasons: [reason],
+        generated_at: new Date(nowMs).toISOString(), site, series: null,
+        note: 'Our own GFS archive is unavailable for this request; nothing is substituted.',
+    };
 }
