@@ -181,12 +181,18 @@ html.theme-light ::selection { background: #cfe1fd; color: var(--pl-text-1); }
 :where(html.theme-light) a { color: var(--pl-blue); }
 :where(html.theme-light) a:hover { color: var(--pl-blue-deep); }
 
-/* Forms */
+/* Forms. Fill + text are deliberately STRONG (0,2,2): a dark-page input
+   (`.card input { background: rgba(13,6,38,.65) }`) must not survive into
+   light mode. That strength also beats a page's own error / focus border
+   (`.form-group input.error`), so those states are restated here — without
+   this block a bad field silently lost its red border in light mode. */
 html.theme-light :is(input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=submit], [type=button]), select, textarea) {
     background-color: #ffffff;
     color: var(--pl-text-1);
     border-color: var(--pl-border-strong);
 }
+html.theme-light :is(input, select, textarea):is(:focus, :focus-visible) { border-color: var(--pl-blue-bright); }
+html.theme-light :is(input, select, textarea):is(.error, .invalid, .is-invalid, [aria-invalid="true"]) { border-color: var(--pl-danger); }
 html.theme-light :is(input, select, textarea)::placeholder { color: var(--pl-text-5); }
 html.theme-light :is(input, select, textarea):focus-visible {
     outline: 2px solid var(--pl-blue-bright);
@@ -241,3 +247,11 @@ html.theme-light :is(h1, .h1, .eyebrow) { text-shadow: none; }
    base; the footer is shared chrome, so it gets an explicit rule. */
 html.theme-light footer a { color: var(--pl-text-3); }
 html.theme-light footer a:hover { color: var(--pl-blue); }
+
+/* "Sign in with Google" follows Google's LIGHT button spec on a light page
+   (white fill, #747775 outline, #1f1f1f text). js/oauth-buttons.js renders it
+   on signin/signup and inside js/gate-modal.js on any page; its dark styles
+   are !important, hence these. Apple keeps its black button (an allowed style). */
+html.theme-light .pp-oauth-btn[data-provider="google"] { background: #fff !important; color: #1f1f1f !important; border-color: #747775 !important; }
+html.theme-light .pp-oauth-btn[data-provider="google"]:hover { background: #f2f5f9 !important; }
+html.theme-light .pp-oauth-err { color: var(--pl-danger); }

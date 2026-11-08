@@ -471,11 +471,14 @@ export function initNav(activeId = '') {
         // and a page basename, and a prefix match would light the section up
         // from unrelated ids that happen to share a stem.
         const sectionActive = activeId === dd.id;
-        const anyActive = sectionActive || dd.items.some(i => {
+        // An EMPTY activeId (pages that call initNav("")) matches nothing:
+        // ''.startsWith test below is true for every id, and lit all five
+        // sections as active on signin/dpa/… until 2026-11.
+        const anyActive = sectionActive || (!!activeId && dd.items.some(i => {
             if (i.section) return false;
             const itemId = i.id || i.href.replace('.html', '');
             return itemId === activeId || itemId.startsWith(activeId) || activeId.startsWith(itemId);
-        });
+        }));
 
         html += `<div class="nav-drop" data-drop="${dd.id}">`;
         // Two controls, one chip. See the SPLIT TOP-LEVEL CONTROLS note in the
@@ -520,7 +523,7 @@ export function initNav(activeId = '') {
                 </a>`;
             } else {
                 const _hid = item.id || item.href.replace('.html','');
-                const _isAct = _hid === activeId || _hid.startsWith(activeId) || activeId.startsWith(_hid);
+                const _isAct = !!activeId && (_hid === activeId || _hid.startsWith(activeId) || activeId.startsWith(_hid));
                 html += `<a href="/${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}" role="menuitem">
                     <span class="ndl-icon">${navIcon(item.icon)}</span>
                     <span class="ndl-body">
