@@ -226,6 +226,8 @@ function mountLocationMap() {
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
+    $('#cx-layer-terrain').addEventListener('change', (ev) => S.map.setLayer('terrain', ev.target.checked));
+    $('#cx-layer-labels').addEventListener('change', (ev) => S.map.setLayer('labels', ev.target.checked));
 }
 
 // ── Catalogue (left rail) ───────────────────────────────────────────────────

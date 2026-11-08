@@ -4,13 +4,17 @@
  * DRAWS and WIRES only. Every number comes from map-view.js (PURE, gated by
  * tests/climalytix-map-view.mjs) and the field route's own body.
  *
- *   basemap   NASA GIBS EPSG:4326 tiles, browser-direct (GIBS serves CORS
- *             for every origin — the Worldview pattern; js/earth-detail-inset.js
- *             owns the tile grid and the URL). Blue Marble NG is ARCHIVAL
- *             imagery (a monthly composite) and the attribution says so; the
- *             features + labels overlays are drawn when they load and simply
- *             absent when they do not (their layer ids are unverified from
- *             the sandbox, which cannot reach GIBS).
+ *   basemap   THREE STACKED SOURCES, each optional (basemap.js has the rules):
+ *             the self-hosted Blue Marble underlay (assets/earth — same
+ *             origin, so it paints at once and survives GIBS being down), the
+ *             NASA GIBS EPSG:4326 500 m tiles over it wherever they load
+ *             (browser-direct, CORS for every origin; js/earth-detail-inset.js
+ *             owns the tile grid and the URL), and the TERRAIN hillshade of
+ *             assets/earth/relief-2k composited with 'overlay' (flat ground =
+ *             neutral grey = no change). Both images are ARCHIVAL composites
+ *             and the attribution says so. PLACE LABELS are EarthView's own
+ *             city list, decluttered (the unverified GIBS reference overlays
+ *             they replace were never confirmed to exist).
  *   layers    the rail LEFT of the map; Temperature is the first toggle and
  *             draws the heat field from OUR OWN GFS archive
  *             (/api/climalytix/nwp-field). Nothing stands in for it: archive
@@ -35,14 +39,13 @@ import {
 } from './map-view.js';
 import { contourLines, isothermLevels, labelAnchor } from './contours.js';
 import { GIBS_LAYERS, buildTileUrl } from '../earth-detail-inset.js';
+import { UNDERLAY_TIERS, RELIEF_SRC, underlayTier, underlayRects, hillshade, cityLabels } from './basemap.js';
+import { MAJOR_CITIES } from '../data/major-cities.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
-// Reference overlays (transparent PNG). UNVERIFIED layer ids — absent if 404.
-const OVERLAYS = [
-    { id: 'Reference_Features_15m', matrixSet: '15.625m', ext: 'png', time: 'default', maxLevel: 7 },
-    { id: 'Reference_Labels_15m', matrixSet: '15.625m', ext: 'png', time: 'default', maxLevel: 7 },
-];
+const TERRAIN_ALPHA = 0.7;
+const ASSET_ROOT = new URL('../../', import.meta.url);
 const TILE_CACHE_MAX = 240;
 const OCEAN = '#0a1a2e';
 const HEAT_ALPHA_DEFAULT = 0.62;
@@ -58,8 +61,10 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true }, heatAlpha: HEAT_ALPHA_DEFAULT,
-        tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null, drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true }, heatAlpha: HEAT_ALPHA_DEFAULT,
+        tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null,
+        underlay: new Map(), relief: { state: 'idle', canvas: null, ms: null },
+        drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [] },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -91,6 +96,114 @@ export function mountMap(root, deps) {
             n++;
         }
         return n;
+    }
+
+    // ── Underlay (self-hosted Blue Marble) ─────────────────────────────────
+    function underlayImage(tier) {
+        let e = M.underlay.get(tier.id);
+        if (e) return e;
+        const img = new Image();
+        e = { img, state: 'loading', tier };
+        img.onload = () => { e.state = 'ok'; requestDraw(); };
+        img.onerror = () => { e.state = 'err'; requestDraw(); };
+        img.src = new URL(tier.src, ASSET_ROOT).href;
+        M.underlay.set(tier.id, e);
+        return e;
+    }
+
+    /** The wanted tier if it has loaded, else the largest that has. */
+    function drawUnderlay() {
+        const want = underlayTier(M.view, M.w, M.h, M.dpr);
+        underlayImage(want);
+        const ready = UNDERLAY_TIERS.map((t) => M.underlay.get(t.id)).filter((e) => e?.state === 'ok');
+        const e = M.underlay.get(want.id)?.state === 'ok' ? M.underlay.get(want.id) : ready[ready.length - 1];
+        if (!e) return null;
+        drawWorldImage(e.img, e.img.naturalWidth, e.img.naturalHeight);
+        return e.tier.id;
+    }
+
+    function drawWorldImage(img, W, H) {
+        for (const r of underlayRects(M.view, M.w, M.h, W, H)) {
+            const a = lin(r.geo.north, r.geo.west), b = lin(r.geo.south, r.geo.east);
+            ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, a.x, a.y, b.x - a.x, b.y - a.y);
+        }
+    }
+
+    // ── Terrain (hillshade of the self-hosted relief map, computed once) ────
+    function loadRelief() {
+        if (M.relief.state !== 'idle') return;
+        M.relief.state = 'loading';
+        const img = new Image();
+        img.onerror = () => { M.relief.state = 'err'; requestDraw(); };
+        img.onload = () => setTimeout(() => {
+            try {
+                const t0 = performance.now();
+                const W = img.naturalWidth, H = img.naturalHeight;
+                const c = document.createElement('canvas');
+                c.width = W; c.height = H;
+                const cx = c.getContext('2d', { willReadFrequently: true });
+                cx.drawImage(img, 0, 0);
+                const rgba = cx.getImageData(0, 0, W, H);
+                const lv = new Uint8Array(W * H);
+                for (let k = 0; k < lv.length; k++) lv[k] = rgba.data[k * 4];     // grey map: R = level
+                const shade = hillshade(lv, W, H);
+                for (let k = 0; k < lv.length; k++) {
+                    const o = k * 4;
+                    rgba.data[o] = rgba.data[o + 1] = rgba.data[o + 2] = shade[k];
+                    rgba.data[o + 3] = 255;
+                }
+                cx.putImageData(rgba, 0, 0);
+                M.relief = { state: 'ok', canvas: c, ms: Math.round(performance.now() - t0) };
+            } catch {
+                M.relief.state = 'err';
+            }
+            requestDraw();
+        }, 0);
+        img.src = new URL(RELIEF_SRC, ASSET_ROOT).href;
+    }
+
+    function drawTerrain() {
+        if (!M.layers.terrain) return false;
+        loadRelief();
+        if (M.relief.state !== 'ok') return false;
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = TERRAIN_ALPHA;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        drawWorldImage(M.relief.canvas, M.relief.canvas.width, M.relief.canvas.height);
+        ctx.restore();
+        return true;
+    }
+
+    // ── Place labels (EarthView's city list) ───────────────────────────────
+    /** Boxes of the DOM drawn over the canvas, in canvas CSS px. */
+    function furniture() {
+        const c = canvas.getBoundingClientRect();
+        return ['#cx-map-ctl', '#cx-map-attr', '#cx-map-scale'].map((sel) => root.querySelector(sel))
+            .filter((el) => el && el.offsetParent)
+            .map((el) => { const r = el.getBoundingClientRect(); return { x0: r.left - c.left, y0: r.top - c.top, x1: r.right - c.left, y1: r.bottom - c.top }; });
+    }
+
+    const LABEL_FONT = '600 11px system-ui, sans-serif';
+    function drawLabels() {
+        if (!M.layers.labels) return [];
+        ctx.save();
+        ctx.font = LABEL_FONT;
+        const labels = cityLabels(M.view, M.w, M.h, MAJOR_CITIES, {
+            site: M.site, measure: (t) => ctx.measureText(t).width, avoid: furniture(),
+        });
+        ctx.textBaseline = 'middle';
+        for (const l of labels) {
+            ctx.fillStyle = 'rgba(4,10,20,.85)';
+            ctx.beginPath(); ctx.arc(l.x, l.y, 3.2, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#f4f8fb';
+            ctx.beginPath(); ctx.arc(l.x, l.y, 2.1, 0, Math.PI * 2); ctx.fill();
+            ctx.textAlign = l.text.align;
+            halo(l.name, l.text.x, l.text.y, '#f4f8fb');
+        }
+        ctx.restore();
+        return labels.map((l) => l.name);
     }
 
     /** View-linear projection (no wrap) — for geometry already in the view's turn. */
@@ -250,10 +363,12 @@ export function mountMap(root, deps) {
         ctx.setTransform(M.dpr, 0, 0, M.dpr, 0, 0);
         ctx.fillStyle = OCEAN;
         ctx.fillRect(0, 0, M.w, M.h);
+        M.drawn.underlay = drawUnderlay();
         const plan = tilePlan(M.view, M.w, M.h, { dpr: M.dpr, maxLevel: BASE.maxLevel });
         M.drawn.tiles = drawTileLayer(BASE, plan);
+        M.drawn.terrain = drawTerrain();
         drawHeat();
-        for (const o of OVERLAYS) drawTileLayer(o, plan);
+        M.drawn.labels = drawLabels();
         drawSite();
         const sb = scaleBar(M.view, M.h, 110);
         scaleEl.querySelector('i').style.width = `${sb.px.toFixed(1)}px`;
@@ -399,6 +514,7 @@ export function mountMap(root, deps) {
                 view: M.view && { ...M.view }, size: { w: M.w, h: M.h }, layers: { ...M.layers },
                 field: M.field ? { nRows: M.field.nRows, nCols: M.field.nCols, run: M.field.run } : null,
                 fieldState: M.fieldState, drawn: { ...M.drawn }, frame: frameInfo(),
+                relief: { state: M.relief.state, ms: M.relief.ms },
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

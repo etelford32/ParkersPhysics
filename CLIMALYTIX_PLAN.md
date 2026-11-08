@@ -824,9 +824,37 @@ EarthView's isobar module, which is 360×180-only and SHA-pinned), levels
 round in the reader's unit and re-chosen on a unit switch, the freezing line
 its own emphasised level whenever the window spans 0 °C; ▲ ▼ the window's
 warmest and coldest nodes. The data box is the NODE extent (nothing is drawn
-past the outer nodes). The other layers (base + terrain, day/night + lights,
-satellite imagery by date, pressure + wind) are queued and will be designed
-one at a time.
+past the outer nodes).
+
+**Base map + terrain + labels (2026-11-08, `js/climalytix/basemap.js`, PURE,
+`tests/climalytix-basemap.mjs`):** the ground is three stacked, independently
+optional sources. (1) EarthView's SELF-HOSTED Blue Marble (`assets/earth/
+day-{1k,2k,4k}.webp`, the hero's files) as an underlay: same-origin, so it
+paints at once and survives GIBS being down — the browser gate blocks GIBS
+and reads Colorado's ground, and its negative control blocks the underlay
+too and reads the bare ocean fill. Tier = the smallest with ≥ 1 texel per
+device px; the largest loaded tier draws until the wanted one arrives.
+(2) GIBS 500 m tiles over it where they load (unchanged). (3) TERRAIN: a
+hillshade of `assets/earth/relief-2k.webp` computed once in the page
+(~250 ms on SwiftShader), Sobel on a 2-texel baseline (EarthView's
+`topoGradient` rule — the gate's negative control is the one-texel forward
+difference, which draws the 8-bit staircase as ridges), cos φ east–west
+spacing, NEUTRAL 128 on flat ground and composited 'overlay', so sea and
+plains are untouched. Light from the north-west at 45° (cartographic
+convention, not today's Sun) and ×10 vertical — both printed in the rail,
+the exaggeration pinned to the rail's text by the node gate. The relief is
+~20 km/texel; nothing finer is shaded, and the rail says so (×20 drew the
+Front Range as black blobs at the default zoom — measured on screenshots).
+PLACE LABELS replace the unverified GIBS `Reference_*` overlays: EarthView's
+city list (js/data/major-cities.js), biggest metro first, each label tried
+right/left/below/above its dot and placed only where it clears every placed
+label, the site ring and the DOM drawn over the canvas (controls, scale,
+attribution — measured: Kansas City sat under the zoom buttons). Next step
+for terrain detail at close zoom: GIBS `ASTER_GDEM_Greyscale_Shaded_Relief`
+(31 m, already in earth-detail-inset) — it is a rendered shade, not
+elevation, so its flat level must be neutralised before it can be overlaid.
+Queued layers, one at a time: day/night + city lights, satellite imagery by
+date, pressure + wind from our archive.
 
 Next in P-1: GEFS members; ECMWF open data
 (IFS/AIFS, needs its own `.index` JSON sidecar planner); the ERA5 history

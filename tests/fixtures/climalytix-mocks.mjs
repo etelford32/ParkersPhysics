@@ -23,6 +23,7 @@
  *   nwp: 'unpublished'      our archive answers 200 + expired + r2_not_configured
  *        'old'              our archive serves a 40-hour-old run (freshness:'stale')
  *   gibs: 'down'            every GIBS tile 404s (the map still draws the heat + site)
+ *   earth: 'blocked'        the self-hosted Blue Marble underlay (assets/earth/day-*) 404s
  */
 import { labFixture } from './climate-lab-fixtures.mjs';
 import { normalizeArchive, degradedArchive, parseArchiveQuery } from '../../js/climalytix/archive-request.js';
@@ -157,7 +158,7 @@ export function nwpFixture(nowMs, site, { ageH = 7 } = {}) {
     return siteBody(man, { nodeLat: Math.ceil(site.lat * 4) / 4, nodeLon: Math.floor(site.lon * 4) / 4 + 360 }, v, { ...site, nowMs });
 }
 
-export async function installClimalytixMocks(page, { down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', onTile, onRequest } = {}) {
+export async function installClimalytixMocks(page, { down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', onTile, onRequest } = {}) {
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
@@ -196,6 +197,7 @@ export async function installClimalytixMocks(page, { down = null, archiveExpired
                 return route.fulfill({ json: apHistoryFixture(now) });
             }
             if (p.startsWith('/api/')) return route.abort();
+            if (earth === 'blocked' && p.startsWith('/assets/earth/day-')) return route.fulfill({ status: 404, body: 'not found' });
             return route.continue();
         }
         if (url.hostname === 'gibs.earthdata.nasa.gov') {

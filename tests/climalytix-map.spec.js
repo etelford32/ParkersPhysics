@@ -18,7 +18,13 @@
  *   · our archive unpublished ⇒ no heat, the rail says why, the basemap
  *     still draws (nothing substituted for the archive)
  *   · the heat follows the timeline's crosshair
- *   · GIBS down ⇒ the heat and site still draw, no page error
+ *   · GIBS down ⇒ the heat and site still draw, no page error, and the
+ *     SELF-HOSTED underlay still paints the ground — NEGATIVE CONTROL: block
+ *     the underlay too and the ground is the bare ocean fill
+ *   · Terrain shades the mountains west of Boulder — NEGATIVE CONTROL: off,
+ *     those pixels are the basemap's again
+ *   · Place labels name Denver beside the site without covering the ring;
+ *     off, none are drawn
  *   · phone width: no horizontal scroll, controls inside the map
  */
 import { test, expect } from '@playwright/test';
@@ -93,6 +99,10 @@ test('Temperature draws the heat field; NEGATIVE CONTROL: toggled off the site p
     await expect(page.locator('#cx-heat-status')).toContainText('Valid');
     // A point inside the field, away from the site marker.
     const probe = { x: s.size.w / 2 - 60, y: s.size.h / 2 + 40 };
+    // Base-map layers off so the bare tile colour is what is left.
+    await page.locator('#cx-layer-terrain').uncheck();
+    await page.locator('#cx-layer-labels').uncheck();
+    await nextFrame(page);
     const on = await pixelAt(page, probe.x, probe.y);
     await page.locator('#cx-layer-temp').uncheck();
     await nextFrame(page);
@@ -228,11 +238,68 @@ test('the heat follows the timeline crosshair, and returns to now when it leaves
     expect(errors).toEqual([]);
 });
 
-test('GIBS down: the heat and the site still draw, no page error', async ({ page }) => {
+test('GIBS down: the heat and the site still draw and the self-hosted underlay paints the ground', async ({ page }) => {
     const errors = await boot(page, { mocks: { gibs: 'down' } });
+    await page.waitForFunction(() => window.__climalytix.state.map.drawn.underlay);
     const s = await mapState(page);
     expect(s.drawn.tiles).toBe(0);
     expect(s.drawn.heat).toBe(true);
+    expect(s.drawn.underlay).toBe('4k');                          // zoomed in: the largest tier
+    for (const id of ['#cx-layer-temp', '#cx-layer-terrain', '#cx-layer-labels']) await page.locator(id).uncheck();
+    await nextFrame(page);
+    const px = await pixelAt(page, s.size.w / 2 - 60, s.size.h / 2 + 40);
+    // Not the ocean fill: Blue Marble's Colorado ground.
+    expect(Math.hypot(px[0] - 0x0a, px[1] - 0x1a, px[2] - 0x2e), `${px}`).toBeGreaterThan(30);
+    expect(errors).toEqual([]);
+});
+
+test('NEGATIVE CONTROL: GIBS down AND the underlay blocked ⇒ the bare ocean fill', async ({ page }) => {
+    const errors = await boot(page, { mocks: { gibs: 'down', earth: 'blocked' } });
+    for (const id of ['#cx-layer-temp', '#cx-layer-terrain', '#cx-layer-labels']) await page.locator(id).uncheck();
+    await nextFrame(page);
+    const s = await mapState(page);
+    expect(s.drawn.underlay).toBe(null);
+    const px = await pixelAt(page, s.size.w / 2 - 60, s.size.h / 2 + 40);
+    expect(Math.hypot(px[0] - 0x0a, px[1] - 0x1a, px[2] - 0x2e), `${px}`).toBeLessThan(4);
+    expect(errors).toEqual([]);
+});
+
+test('Terrain shades the mountains; NEGATIVE CONTROL: off, those pixels are the basemap again', async ({ page }) => {
+    const errors = await boot(page);
+    await page.locator('#cx-layer-temp').uncheck();
+    await page.locator('#cx-layer-labels').uncheck();
+    await page.waitForFunction(() => window.__climalytix.state.map.drawn.terrain);
+    const s = await mapState(page);
+    expect(s.relief.state).toBe('ok');
+    // A strip across the Front Range, west of the site.
+    const strip = (page) => page.evaluate(([w, h]) => {
+        const c = document.querySelector('#cx-map-canvas');
+        const k = c.width / c.clientWidth;
+        return [...c.getContext('2d').getImageData(Math.round((w / 2 - 160) * k), Math.round((h / 2 - 20) * k), Math.round(140 * k), Math.round(40 * k)).data];
+    }, [s.size.w, s.size.h]);
+    const on = await strip(page);
+    await page.locator('#cx-layer-terrain').uncheck();
+    await nextFrame(page);
+    expect((await mapState(page)).drawn.terrain).toBe(false);
+    const off = await strip(page);
+    let changed = 0, n = 0;
+    for (let i = 0; i < on.length; i += 4, n++) if (Math.abs(on[i] - off[i]) + Math.abs(on[i + 1] - off[i + 1]) + Math.abs(on[i + 2] - off[i + 2]) > 12) changed++;
+    expect(changed / n, `${changed}/${n} pixels shaded`).toBeGreaterThan(0.25);
+    // Off, every pixel is a mock tile colour (the overlay is gone, not dimmed).
+    const base = new Set();
+    for (let z = 0; z <= 7; z++) for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) base.add(baseTileColor(z, r, c).join(','));
+    expect(base.has(off.slice(0, 3).join(',')) || [...base].some((b) => b.split(',').map(Number).every((v, i) => Math.abs(v - off[i]) <= 2))).toBe(true);
+    expect(errors).toEqual([]);
+});
+
+test('Place labels name Denver beside the site without covering it; off, none', async ({ page }) => {
+    const errors = await boot(page);
+    let s = await mapState(page);
+    expect(s.drawn.labels).toContain('Denver');
+    await page.locator('#cx-layer-labels').uncheck();
+    await nextFrame(page);
+    s = await mapState(page);
+    expect(s.drawn.labels).toEqual([]);
     expect(errors).toEqual([]);
 });
 
