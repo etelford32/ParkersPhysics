@@ -118,8 +118,10 @@ button{color:inherit}
      is unchanged, and the mission panel's max-heights give the 14px back so
      its bottom edge does not move. js/mars-view.js measures these boxes live
      for the safe frame, so nothing else needs to know. */
-  .camera-dock{top:32px}
-  .surface-explorer{top:98px}
+  /* .mars-app prefix: this block sits ABOVE the base rules in the file, so a
+     same-specificity selector here loses to them (it did — measured). */
+  .mars-app .camera-dock{top:32px}
+  .mars-app .surface-explorer{top:98px}
   .mission-panel{top:106px;max-height:calc(100% - 292px)}
   .mars-app:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - 184px)}
   .mars-app:has(.data-dock.collapsed) .landmark-card{bottom:84px}
