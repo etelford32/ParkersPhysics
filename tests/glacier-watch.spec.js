@@ -239,6 +239,16 @@ test.describe('Glacier Watch', () => {
         await expect(page.locator('#gw-cat-card h3')).toHaveText('Hubbard Glacier', { timeout: 15_000 });
         await expect(page.locator('#gw-cat-card')).toContainText('marine-terminating');
         await expect(page.locator('.gw-cat-tracked')).toBeVisible();        // one of the 48 tracked
+        // ITS_LIVE speed inside the outline, judged by the tracked tier's own rule
+        await expect(page.locator('#gw-cat-card')).toContainText('fastest ice 533 m/yr', { timeout: 20_000 });
+        await expect(page.locator('#gw-cat-card')).toContainText('most of the glacier is below what ITS_LIVE resolves');
+        await expect(page.locator('#gw-cat-card')).toContainText('above 72 m/yr, twice the typical single-pair error measured on 7 tracked glaciers in this region');
+        await page.click('[data-mode="speed"]');
+        await page.waitForFunction(() => !!window.__glacierCatalog.S.speed?.colors, null, { timeout: 20_000 });
+        await expect(page.locator('#gw-cat-legend')).toContainText('≥ 1 km/yr');
+        await expect(page.locator('#gw-cat-legend')).toContainText('below what ITS_LIVE resolves');
+        const neutralShare = await page.evaluate(() => { const c = window.__glacierCatalog.S.speed.colors; return c.filter(x => x === '#4b5263').length / c.length; });
+        expect(neutralShare, 'most glaciers are drawn neutral: below what ITS_LIVE resolves').toBeGreaterThan(0.9);
         expect(new URL(page.url()).searchParams.get('rgi')).toMatch(/^RGI2000-v7\.0-G-01-\d{5}$/);
         await page.locator('.gw-cat-tracked').click();
         await page.waitForFunction(() => window.__glacierWatch.sel?.id === 'hubbard', null, { timeout: 15_000 });
@@ -262,6 +272,16 @@ test.describe('Glacier Watch', () => {
         const { errors } = await boot(page, { url: '/glacier-watch.html?g=columbia&rgi=RGI2000-v7.0-G-01-00001' });
         await page.waitForFunction(() => document.getElementById('gw-catalog')?.dataset.state === 'error', null, { timeout: 60_000 });
         await expect(page.locator('#gw-cat-sub')).toContainText('unavailable');
+        expect(errors).toEqual([]);
+    });
+
+    test('NEGATIVE CONTROL: a missing speed table says so on the card and in the legend', async ({ page }) => {
+        await page.route('**/data/glaciers/catalog/rgi7-speed.bin.gz', r => r.fulfill({ status: 404, body: 'gone' }));
+        const { errors } = await boot(page, { url: '/glacier-watch.html?g=aletsch&rgi=RGI2000-v7.0-G-11-02596' });
+        await page.waitForFunction(() => document.getElementById('gw-catalog')?.dataset.state === 'ready', null, { timeout: 60_000 });
+        await expect(page.locator('#gw-cat-card')).toContainText('speed table unavailable (speed: HTTP 404)', { timeout: 20_000 });
+        await page.click('[data-mode="speed"]');
+        await expect(page.locator('#gw-cat-legend')).toContainText('speed table unavailable');
         expect(errors).toEqual([]);
     });
 });

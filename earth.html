@@ -3048,6 +3048,7 @@ import './js/telemetry.js';
         <div class="cty-sub" id="rgi-tip-sub">—</div>
         <div class="vt-row" id="rgi-tip-size">—</div>
         <div class="vt-row" id="rgi-tip-flags">—</div>
+        <div class="vt-row" id="rgi-tip-speed">—</div>
         <div class="cty-hint" id="rgi-tip-hint">RGI 7.0 inventory · tap to pin</div>
     </div>
 
@@ -14315,6 +14316,13 @@ function _setRgiHover(hit, cx, cy, { pin = false } = {}) {
         document.getElementById('rgi-tip-sub').textContent = `${hit.subregion ?? ''} · ${hit.region ?? ''}`;
         document.getElementById('rgi-tip-size').textContent =
             `${a >= 100 ? Math.round(a).toLocaleString('en-US') : a >= 1 ? a.toFixed(1) : a.toFixed(2)} km² · median elevation ${hit.zmed.toLocaleString('en-US')} m`;
+        const sp = hit.speed, mps = (v) => v >= 1000 ? `${(v / 1000).toFixed(2)} km/yr` : v >= 10 ? `${Math.round(v)} m/yr` : `${v.toFixed(1)} m/yr`;
+        document.getElementById('rgi-tip-speed').textContent = hit.speedErr ? 'Surface speed unavailable'
+            : !sp ? 'Surface speed: loading ITS_LIVE…'
+            : sp.state === 'moving' ? `Fastest ice ~${mps(sp.p98)}, typical ${mps(sp.med)} (ITS_LIVE 2014–24 mean)`
+            : sp.state === 'partly' ? `Fastest ice ~${mps(sp.p98)}; the rest below what ITS_LIVE resolves (2014–24)`
+            : sp.state === 'below' ? 'Motion below what ITS_LIVE resolves (2014–24)'
+            : `Surface speed: ${sp.label}`;
         document.getElementById('rgi-tip-flags').textContent =
             `${hit.marine ? 'Marine-terminating' : 'Terminus not assigned'} · surge evidence: ${hit.surgeLabel}${hit.tracked ? ' · TRACKED in Glacier Watch' : ''}`;
         document.getElementById('rgi-tip-hint').innerHTML = pin

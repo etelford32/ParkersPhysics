@@ -38,6 +38,7 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
             <div class="gw-seg" role="group" aria-label="Colour by">
               <button type="button" data-mode="elev" aria-pressed="true">Median elevation</button>
               <button type="button" data-mode="class" aria-pressed="false">Terminus &amp; surges</button>
+              <button type="button" data-mode="speed" aria-pressed="false">Surface speed</button>
             </div>
             <input id="gw-cat-search" type="search" placeholder="Search by name or RGI id" aria-label="Search the catalogue" autocomplete="off">
             <button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><button type="button" data-zoom="0">World</button>
@@ -68,15 +69,26 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
     grid = C.buildGrid(pts);
     C.loadNames().then(n => { names = n; if (S.sel !== null) openGlacier(S.sel); }).catch(() => { /* search says so */ });
 
-    const S = { mode: 'elev', cx: 0, cy: 20, scale: 0, sel: null, hover: null, shards: {}, dpr: 1, w: 0, h: 0 };
+    const S = { mode: 'elev', cx: 0, cy: 20, scale: 0, sel: null, hover: null, shards: {}, dpr: 1, w: 0, h: 0, speed: null, speedErr: null };
+    // the speed table (~1–2 MB) loads only when the speed view or a record card first asks for it
+    let speedLoading = null;
+    const o1At = (i) => meta.o2[pts.o2[i]].slice(0, 2);
+    const ensureSpeed = () => (speedLoading ||= C.loadSpeed().then(r => {
+        // one verdict per glacier, ONCE — never 274 k speedOf() calls per frame
+        r.colors = Array.from({ length: pts.n }, (_, i) => C.speedColor(C.speedOf(r.spd, r.smeta, i, o1At(i))));
+        S.speed = r; draw(); if (S.sel !== null) openGlacier(S.sel); return r; })
+        // the card must leave "loading…" on failure too, or a dead table reads as a slow one
+        .catch(e => { S.speedErr = e.message; draw(); if (S.sel !== null) openGlacier(S.sel); return null; }));
     const tracked = new Map(Object.entries(meta.watch_links).filter(([, L]) => L.index !== null).map(([id, L]) => [L.index, id]));
     // smallest first, so a large glacier is never buried under the dots of its neighbours
     const order = Uint32Array.from({ length: pts.n }, (_, i) => i).sort((a, b) => pts.area[a] - pts.area[b]);
-    const colorOf = (i) => (S.mode === 'class' ? C.classColor(pts.flags[i]) : C.elevColor(pts.zmed[i]));
+    const colorOf = (i) => (S.mode === 'class' ? C.classColor(pts.flags[i])
+        : S.mode === 'speed' ? (S.speed ? S.speed.colors[i] : C.SPEED_NEUTRAL)
+        : C.elevColor(pts.zmed[i]));
 
     $('gw-cat-sub').textContent = `RGI 7.0 · ${fmtN(meta.n)} glaciers · ${fmtN(meta.official.o1region.Global.area_km2)} km² of ice outside the two ice sheets`;
     $('gw-cat-note').innerHTML =
-        `An INVENTORY, not a measurement of today: each outline is dated by the image it was drawn from (median year 2002). It says where every glacier is and how big — not how fast it moves; that is what the 48 tracked glaciers above measure from satellite pairs. ` +
+        `An INVENTORY, not a measurement of today: each outline is dated by the image it was drawn from (median year 2002). It says where every glacier is and how big. "Surface speed" adds NASA ITS_LIVE's 2014–2024 MEAN speed inside each outline, judged against the same satellite tile's ice-free ground — a decade's average, not today; today's motion, pair by pair, is what the 48 tracked glaciers above measure. ` +
         `The Greenland and Antarctic ice sheets are not glaciers in this inventory, so their outlets (Jakobshavn, Helheim, Thwaites…) have no outline here. ` +
         `RGI 7.0 marks only <b>marine-terminating</b> fronts; every other terminus is "not assigned", not "on land". Names are the inventory's, cleaned by the data mirror (most glaciers have none). ` +
         `Source: ${esc(meta.citation)} Read from an unofficial mirror that reproduces the Consortium's own region tables exactly (checked at every build).`;
@@ -154,9 +166,14 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
     function renderLegend(kmPerPx) {
         const items = S.mode === 'elev'
             ? ELEV_BANDS.map(b => `<span><i style="background:${b.color}"></i>${b.label}</span>`).join('')
+            : S.mode === 'speed'
+            ? C.SPEED_BANDS.map(b => `<span><i style="background:${b.color}"></i>${b.label}</span>`).join('') + `<span><i style="background:${C.SPEED_NEUTRAL}"></i>below what ITS_LIVE resolves / no data</span>`
             : `<span><i style="background:${CLASS_COLORS.marine}"></i>marine-terminating</span><span><i style="background:${CLASS_COLORS.surge}"></i>surge evidence</span><span><i style="background:${CLASS_COLORS.none}"></i>not assigned</span>`;
         const floorKm2 = Math.PI * (0.55 * kmPerPx) ** 2;
-        $('gw-cat-legend').innerHTML = `<div class="gw-cat-keys">${items}</div><small>${S.mode === 'elev' ? 'median glacier elevation' : 'RGI 7.0 assigns only the marine class'} · dots true size above ~${fmtA(floorKm2)} km², a pixel below · ${fmtN(S.lastDrawn || 0)} in view</small>`;
+        const what = S.mode === 'elev' ? 'median glacier elevation'
+            : S.mode === 'speed' ? (S.speedErr ? `speed table unavailable (${esc(S.speedErr)})` : S.speed ? 'fastest ice of each glacier (98th percentile inside its outline), NASA ITS_LIVE 2014–2024 mean; grey = below what ITS_LIVE resolves (2× the typical pair error) or no data' : 'loading ITS_LIVE speeds…')
+            : 'RGI 7.0 assigns only the marine class';
+        $('gw-cat-legend').innerHTML = `<div class="gw-cat-keys">${items}</div><small>${what} · dots true size above ~${fmtA(floorKm2)} km², a pixel below · ${fmtN(S.lastDrawn || 0)} in view</small>`;
     }
 
     // ── interaction ───────────────────────────────────────────────────────
@@ -216,6 +233,7 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
     root.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
         S.mode = b.dataset.mode;
         root.querySelectorAll('[data-mode]').forEach(q => q.setAttribute('aria-pressed', String(q === b)));
+        if (S.mode === 'speed') ensureSpeed();
         draw();
     }));
 
@@ -253,7 +271,17 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
         try { shard = S.shards[o1] ||= await C.loadShard(o1); }
         catch (e) { card.innerHTML = `<div class="gw-empty">the details for this region are unavailable (${esc(e.message)})</div>`; return; }
         if (S.sel !== i) return;
+        ensureSpeed();
         const d = C.detailFor(meta, pts, shard, i, names);
+        const sp = S.speed ? C.speedOf(S.speed.spd, S.speed.smeta, i, o1At(i)) : null;
+        const spd = (v) => !Number.isFinite(v) ? '—' : v >= 1000 ? `${(v / 1000).toFixed(2)} km/yr` : v >= 10 ? `${Math.round(v)} m/yr` : `${v.toFixed(1)} m/yr`;
+        const speedRow = S.speedErr ? `<dt>Surface speed</dt><dd><small>speed table unavailable (${esc(S.speedErr)})</small></dd>`
+            : !sp ? `<dt>Surface speed</dt><dd><small>loading ITS_LIVE…</small></dd>`
+            : sp.state === 'no-tile' || sp.state === 'no-data' ? `<dt>Surface speed</dt><dd>— <small>(${esc(sp.label)})</small></dd>`
+            : `<dt>Surface speed</dt><dd>${sp.state === 'below' ? '<b>below what ITS_LIVE resolves</b>' : sp.state === 'partly' ? `fastest ice ${spd(sp.p98)} <small>(most of the glacier is below what ITS_LIVE resolves)</small>` : `typical ${spd(sp.med)} · fastest ice ${spd(sp.p98)}`}
+                 <small><br>resolved = above ${spd(sp.threshold)}, twice the typical single-pair error measured on ${sp.pairError.scope === 'region' ? `${sp.pairError.n} tracked glacier${sp.pairError.n > 1 ? 's' : ''} in this region` : `the ${sp.pairError.n} tracked glaciers (none in this region)`}${sp.state === 'below' && Number.isFinite(sp.p98) ? ` — its fastest ice reads ${spd(sp.p98)} in the composite, which a 120 m grid cannot separate from zero` : ''}
+                 ${Number.isFinite(sp.dvdt) && Math.abs(sp.dvdt) >= 0.1 && sp.state !== 'below' ? ` · trend ${sp.dvdt >= 0 ? '+' : ''}${sp.dvdt.toFixed(1)} m/yr per year` : ''}
+                 <br>NASA ITS_LIVE 2014–2024 mean over ${sp.subpixel ? 'the nearest 120 m pixel (the glacier is smaller than one)' : `${sp.npix >= 65535 ? 'more than 65,000' : fmtN(sp.npix)} pixels inside the outline${sp.coverage != null && sp.coverage < 80 ? ` — only ${sp.coverage} % of it (it runs off the satellite tile)` : ''}`}</small></dd>`;
         const tr = tracked.get(i);
         const hmax = Math.max(...d.hypsometry.map(h => h.frac), 1e-9);
         const rowH = Math.max(2, Math.min(7, Math.floor(220 / Math.max(1, d.hypsometry.length))));   // the chart stays ≤ ~240 px for a 3 km-tall glacier
@@ -272,6 +300,7 @@ export async function mountCatalog(root, { onOpenTracked = null, initialRgi = nu
             <dt>Terminus</dt><dd>${d.marine ? 'marine-terminating' : 'not assigned <small>(RGI 7.0 marks only marine fronts)</small>'}</dd>
             <dt>Surging</dt><dd>${esc(d.surgeLabel)}${d.surge ? ' evidence' : ''}</dd>
             <dt>Outline</dt><dd>${d.year ?? '—'} imagery · ${esc(d.dem)} elevations</dd>
+            ${speedRow}
           </dl>
           <div class="gw-hyp" aria-label="Area by elevation"><div class="gw-hyp-title">Area by elevation (50 m bands)</div>${bars}</div>
           <div class="gw-cat-links"><a href="earth.html?at=${d.lat.toFixed(3)},${d.lon.toFixed(3)},${Math.round(Math.max(300, 25 * Math.sqrt(d.area_km2)))}">Fly to it on EarthView ▸</a></div>`;

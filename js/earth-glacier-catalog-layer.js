@@ -15,7 +15,9 @@
  *     (+X Greenwich, +Y north, −Z 90°E), the pick radius in CSS pixels becomes kilometres at that
  *     distance, and the kernel's great-circle grid answers. Projecting 274 k points per mouse
  *     move is what this avoids.
- *   • OFF at boot, NOTHING fetched before the first enable (the Volcanoes rule): ~1.8 MB.
+ *   • OFF at boot, NOTHING fetched before the first enable (the Volcanoes rule): ~1.8 MB, then the
+ *     names and the ITS_LIVE speed table in the background for the tooltip (`speedOf`: the 2014–2024
+ *     mean inside the outline, resolved only above twice the typical pair error — the tracked tier's rule).
  *
  * Interaction contract (the glacier layer's): getHovered(raycaster) → describe(i) | null,
  * setHighlight(i), setVisible(on), tick(t, pixelScale). pixelScale = drawing-buffer pixels per
@@ -74,6 +76,8 @@ export class EarthGlacierCatalogLayer {
                 this._build();
                 this._onStatus('loaded', { count: cat.pts.n, area: cat.meta.official.o1region.Global.area_km2 });
                 C.loadNames().then(n => { this.names = n; }).catch(() => { /* tips fall back to "unnamed" */ });
+                // ITS_LIVE speeds for the tooltip (the dots stay coloured by elevation — one colour job per layer)
+                C.loadSpeed().then(r => { this.speed = r; }).catch((e) => { this.speedErr = e?.message ?? String(e); });
             } catch (e) {
                 this._onStatus('error', { error: e?.message ?? String(e) });
             } finally { this._loading = null; }
@@ -170,6 +174,7 @@ export class EarthGlacierCatalogLayer {
             area_km2: pts.area[i], zmed: pts.zmed[i], lat: pts.lat[i], lon: pts.lon[i],
             region: meta.official.o1region[o2.slice(0, 2)]?.name ?? null, subregion: meta.official.o2region[o2]?.name ?? null,
             marine: f.marine, surge: f.surge, surgeLabel: C.SURGE_LABELS[f.surge], tracked,
+            speed: this.speed ? C.speedOf(this.speed.spd, this.speed.smeta, i, o2.slice(0, 2)) : null, speedErr: this.speedErr ?? null,
         };
     }
 

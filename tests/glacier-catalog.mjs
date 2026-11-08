@@ -15,6 +15,10 @@
  *  5. DETAIL: offsets undone — zmin ≤ zmean/zmed ≤ zmax, hypsometry sums to 1000 ‰ inside
  *     [zmin, zmax], the terminus lies within the glacier's own max length of its centroid.
  *  6. NAMES / SEARCH: diacritic-folded, prefix first, then larger; RGI ids resolve directly.
+ *  9. SPEED (ITS_LIVE composites inside each outline): file hashed, quantisation exact, the verdict is
+ *     the tracked tier's rule (2 × the measured pair error) and AGREES with the tracked tier on ≥ 36 of
+ *     the 41 linked glaciers; NEGATIVE CONTROL — the ice-free-ground floor it replaced calls
+ *     Storglaciären / South Cascade 'moving' and agrees far less.
  *  8. EARTHVIEW PICKING: xyzToLatLon inverts js/geo/coords.js's canonical frame (its source text is
  *     pinned), and the pick radius converts pixels to kilometres at the hit distance.
  *  7. THE ICE-SHEET RULE: the seven ice-sheet outlets have no RGI outline and say why.
@@ -26,6 +30,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as C from '../js/glacier-catalog.js';
 import { xyzToLatLon, pickKm } from '../js/earth-glacier-catalog-layer.js';
+import * as E from '../js/glacier-engine.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(HERE, '../data/glaciers/catalog');
@@ -164,6 +169,44 @@ section('8. EarthView picking geometry');
     ok(Math.abs(Math.abs(wrong - 8.03) - 180) < 1e-6, 'negative control: the mesh-UV convention lands 180° away (the earth.html antipode scar)');
     // 10 CSS px at dpr 2, 1200 device px per radian, 1.5 Earth radii away → 10·2/1200·1.5·6371 km
     ok(Math.abs(pickKm(10, 2, 1200, 1.5) - 159.275) < 0.01 && pickKm(10, 1, 1200, 0.01) < 1, 'pick radius: pixels → km at the hit distance (159 km from orbit, < 1 km close in)');
+}
+
+section('9. surface speed (ITS_LIVE)');
+{
+    const smeta = JSON.parse(read('rgi7-speed-meta.json'));
+    const sb = read('rgi7-speed.bin.gz');
+    ok(sb.length === smeta.files['rgi7-speed.bin.gz'].bytes && crypto.createHash('sha256').update(sb).digest('hex') === smeta.files['rgi7-speed.bin.gz'].sha256 && smeta.source.mirror_sha256 === meta.source.mirror.sha256,
+        'rgi7-speed.bin.gz is the file its meta hashes, built from the same pinned mirror');
+    const spd = C.decodeSpeed(zlib.gunzipSync(sb));
+    ok(spd.n === pts.n && smeta.summary.no_tile === 333, `${spd.n} rows (the catalogue's), ${smeta.summary.no_tile} outside every ITS_LIVE tile`);
+    let qmax = 0;
+    for (const v of [0, 0.37, 1.8, 47, 1180, 13120]) { const q = Math.round((Math.log10(v + 0.01) + 2.5) * 8000); qmax = Math.max(qmax, Math.abs(C.dequantSpeed(q) - v) / Math.max(v, 0.01)); }
+    ok(qmax < 4e-4 && Number.isNaN(C.dequantSpeed(0)), `speed quantisation within ${(100 * qmax).toFixed(3)} % (0 = none, never 0 m/yr)`);
+    const o1At = (i) => meta.o2[pts.o2[i]].slice(0, 2);
+    ok(Object.keys(smeta.pair_error.by_o1).length >= 12 && Object.values(smeta.pair_error.by_o1).every(v => v > 10 && v < 60) && smeta.pair_error.global_ > 15 && smeta.pair_error.global_ < 40,
+        `pair errors measured per region (${Object.keys(smeta.pair_error.by_o1).length} regions, 10–60 m/yr; global ${smeta.pair_error.global_})`);
+    const counts = {};
+    for (let i = 0; i < spd.n; i++) { const st = C.speedOf(spd, smeta, i, o1At(i)).state; counts[st] = (counts[st] || 0) + 1; }
+    ok(counts.below > 0.9 * spd.n && counts.moving + counts.partly > 2000 && !counts['no-floor'], `most of the inventory is below what ITS_LIVE resolves (${counts.below} below, ${counts.moving} moving, ${counts.partly} partly)`);
+    // the two tiers must agree: a tracked glacier with ANY resolved flowline point ⇔ catalogue moving/partly
+    const idx = E.decodeIndex(JSON.parse(fs.readFileSync(path.join(HERE, '../data/glaciers/glaciers.json'), 'utf8')));
+    const tierAgree = (verdict) => {
+        let agree = 0, n = 0;
+        for (const g of idx) {
+            const L = meta.watch_links[g.id]; if (L.index === null) continue; n++;
+            const tracked = Array.from(g.climatology.v0).some((v, k) => Number.isFinite(v) && E.detectable(g, k).ok);
+            if (tracked === verdict(L.index)) agree++;
+        }
+        return { agree, n };
+    };
+    const cat = tierAgree((i) => ['moving', 'partly'].includes(C.speedOf(spd, smeta, i, o1At(i)).state));
+    ok(cat.agree >= 36 && cat.n === 41, `catalogue and tracked tier agree on ${cat.agree}/${cat.n} linked glaciers (the rest are < 2 % tongues and one-glacier regions)`);
+    // NEGATIVE CONTROL: the rejected ice-free-ground floor
+    const flo = tierAgree((i) => { const t = smeta.tiles[spd.tile[i]]; return t && t.p90 != null && spd.p98[i] > t.p90; });
+    ok(flo.agree <= cat.agree - 15, `negative control: the ice-free-ground floor agrees on only ${flo.agree}/${flo.n} (it calls the slowest glaciers 'moving')`);
+    const sg = C.speedOf(spd, smeta, meta.watch_links.storglaciaren.index, '08'), co = C.speedOf(spd, smeta, meta.watch_links.columbia.index, '01');
+    ok(sg.state === 'below' && co.state !== 'below' && co.p98 > 1000 && C.speedColor(sg) === C.SPEED_NEUTRAL && C.speedColor(co) === C.SPEED_BANDS.at(-1).color,
+        `Storglaciären below detection (neutral), Columbia resolved at ${Math.round(co.p98)} m/yr (the lightest band)`);
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

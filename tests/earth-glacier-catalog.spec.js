@@ -79,8 +79,8 @@ test.describe('EarthView all-glaciers layer (RGI 7.0)', () => {
         };
         let t = await settle();
         expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName, t), 'Aletsch is not under page chrome').toBe('CANVAS');
-        // names arrive a moment after the points
-        await page.waitForFunction(() => !!window.__glacierCatalogLayer.names, null, { timeout: 30_000 });
+        // names and the ITS_LIVE speed table arrive a moment after the points
+        await page.waitForFunction(() => !!window.__glacierCatalogLayer.names && !!window.__glacierCatalogLayer.speed, null, { timeout: 30_000 });
         // the globe TURNS with sidereal time (~0.35 px/s here) and a software frame can land a second
         // after the measurement, so re-aim from a fresh projection until the cursor is on Aletsch's
         // centroid (a tributary sits a pixel away) — at most a few attempts, then assert
@@ -98,6 +98,7 @@ test.describe('EarthView all-glaciers layer (RGI 7.0)', () => {
         await expect(page.locator('#rgi-tip-name')).toHaveText('Grosser Aletsch Gletscher');
         await expect(page.locator('#rgi-tip-size')).toContainText('81.8 km² · median elevation 3,152 m');
         await expect(page.locator('#rgi-tip-flags')).toContainText('TRACKED in Glacier Watch');
+        await expect(page.locator('#rgi-tip-speed')).toHaveText('Fastest ice ~150 m/yr; the rest below what ITS_LIVE resolves (2014–24)');
         t = await settle();
         await aim(async (p) => { await page.waitForTimeout(450); await page.mouse.click(p.x, p.y); });
         await expect(tip).toHaveClass(/pinned/);

@@ -14,10 +14,14 @@
  *   rgi7-meta.json           provenance, the RGI Consortium's OWN region tables, derived stats,
  *                            the size classes, and the links from the 48 Glacier Watch glaciers
  *
+ *   rgi7-speed.bin.gz        ITS_LIVE surface speed for every glacier (+ rgi7-speed-meta.json: per-tile
+ *                            noise floors) — loaded only when a speed view is asked for
+ *
  * WHAT THIS IS AND IS NOT. An INVENTORY: outlines dated by their source imagery (median 2002,
- * 1943–2021), not a measurement of today. It says where every glacier is and how big; it does
- * not say how fast any of them moves (that is the 48-glacier tier, from ITS_LIVE pairs) and it
- * never invents motion or mass balance for the other 274 000. The page and the layer say so.
+ * 1943–2021), not a measurement of today. It says where every glacier is and how big. Its speed
+ * table is ITS_LIVE's 2014–2024 MEAN (`speedOf`), judged against each tile's measured noise floor —
+ * a decade's average, never today's motion (that is the 48-glacier tier, pair by pair), and no
+ * mass balance is ever invented for the other 274 000. The page and the layer say so.
  *
  * Load-bearing facts:
  *   • ROW i IS RGI2000-v7.0-G-<o1>-<seq>: ids follow row order inside each o1 region (the baker
@@ -282,6 +286,93 @@ export function trackedFor(meta, i) {
     return null;
 }
 
+// ── surface speed (NASA ITS_LIVE composites; scripts/build-glacier-catalog-speed.py) ──────────
+// For every glacier: v0 (the composite's fitted mean speed, 2014–2024 where the tile has it)
+// summarised over the pixels INSIDE its RGI outline — median and fastest tenth — plus the trend
+// dv_dt and the tile it came from. THE VERDICT IS THE TRACKED TIER'S RULE (glacier-engine
+// `detectable`): resolved only above TWICE the typical single-pair error, measured from the tracked
+// archive per RGI region (`smeta.pair_error`). The ice-free-ground floor was tried first and is
+// WORTHLESS both ways (≈0 by ITS_LIVE's own stable-ground correction, which called Storglaciären
+// "moving" at 1.8 m/yr; 24–149 m/yr where sea ice passes for ground) — see the baker's header.
+// ORANGE ordinal ramp (the second sequential context takes the next categorical hue; validated on
+// #060a14: monotone, one hue, light end ≥ 2:1), dark = slow, light = fast; NEUTRAL = not measurably
+// moving or no data — never a speed colour for noise.
+export const SPEED_BANDS = Object.freeze([
+    { lo: -Infinity, label: '< 10 m/yr', color: '#8a3512' },
+    { lo: 10, label: '10–30', color: '#ad4419' },
+    { lo: 30, label: '30–100', color: '#cf5822' },
+    { lo: 100, label: '100–300', color: '#ea7438' },
+    { lo: 300, label: '300–1000', color: '#f39a66' },
+    { lo: 1000, label: '≥ 1 km/yr', color: '#f9c4a0' },
+]);
+export const SPEED_NEUTRAL = '#4b5263';
+export const SPEED_STATES = Object.freeze({
+    moving: 'resolved by ITS_LIVE', partly: 'only its fastest ice is resolved by ITS_LIVE', below: 'below what ITS_LIVE resolves',
+    'no-data': 'no valid ITS_LIVE pixels', 'no-tile': 'outside ITS_LIVE coverage',
+});
+
+/** uint16 log-quantised speed → m/yr (0 = none). Inverse of the baker's qspeed. */
+export function dequantSpeed(q) { return q === 0 ? NaN : Math.pow(10, q / 8000 - 2.5) - 0.01; }
+
+const SPD_MAGIC = 'RGI7SPD\u0002';   // v2 adds p98 (the fastest ice: p90 missed narrow tongues and icefalls)
+/** The DECOMPRESSED speed file → columns (NaN where there is no value). */
+export function decodeSpeed(u8) {
+    const bytes = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8);
+    if (String.fromCharCode(...bytes.subarray(0, 8)) !== SPD_MAGIC) throw new Error('not an RGI7 speed file');
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const n = dv.getUint32(8, true);
+    let off = 16;
+    const col = (Ctor, size) => { const u = unshuffle(bytes, off, n, size); off += size * n; return new Ctor(u.buffer); };
+    const tile = col(Uint16Array, 2), qm = col(Uint16Array, 2), qp = col(Uint16Array, 2), qx = col(Uint16Array, 2), qe = col(Uint16Array, 2);
+    const dvq = col(Int16Array, 2), npix = col(Uint16Array, 2);
+    const cov = bytes.slice(off, off + n); off += n;
+    const flags = bytes.slice(off, off + n); off += n;
+    if (off !== bytes.length) throw new Error(`speed file length ${bytes.length} ≠ ${off}`);
+    const med = new Float32Array(n), p90 = new Float32Array(n), p98 = new Float32Array(n), err = new Float32Array(n), dvdt = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        med[i] = dequantSpeed(qm[i]); p90[i] = dequantSpeed(qp[i]); p98[i] = dequantSpeed(qx[i]); err[i] = dequantSpeed(qe[i]);
+        dvdt[i] = dvq[i] === -32768 ? NaN : dvq[i] / 10;
+    }
+    return { n, tile, med, p90, p98, err, dvdt, npix, cov, flags };
+}
+
+/** The typical single-pair error (m/yr) for an RGI o1 region: measured per region, else the global median. */
+export function pairErrorFor(smeta, o1) {
+    const pe = smeta.pair_error, v = pe.by_o1[o1];
+    return v != null ? { sigma: v, n: pe.n_by_o1[o1], scope: 'region' } : { sigma: pe.global_, n: pe.n, scope: 'global' };
+}
+
+/**
+ * Everything the speed table says about glacier i (in o1 region `o1`), with the verdict: RESOLVED when
+ * a speed exceeds 2 × the region's typical pair error — `moving` if the median does, `partly` if only
+ * the fastest ice (p98) does, `below` otherwise.
+ */
+export function speedOf(spd, smeta, i, o1) {
+    if (spd.tile[i] === 65535) return { state: 'no-tile', label: SPEED_STATES['no-tile'] };
+    const t = smeta.tiles[spd.tile[i]];
+    const pe = pairErrorFor(smeta, o1);
+    const base = {
+        // npix is a uint16 column: 65535 means "at least that many" (Hubbard has ~197 000)
+        med: spd.med[i], p90: spd.p90[i], p98: spd.p98[i], dvdt: spd.dvdt[i], npix: spd.npix[i],
+        coverage: spd.cov[i] === 255 ? null : spd.cov[i], subpixel: !!(spd.flags[i] & 1),
+        threshold: 2 * pe.sigma, pairError: pe, tileUrl: t.url,
+    };
+    let state;
+    if (spd.flags[i] & 2 || !Number.isFinite(base.p98)) state = 'no-data';
+    else if (base.med > base.threshold) state = 'moving';
+    else if (base.p98 > base.threshold) state = 'partly';
+    else state = 'below';
+    return { ...base, state, label: SPEED_STATES[state] };
+}
+
+/** The map / globe colour for a speedOf() result: orange by the fastest ice (p98), neutral unless resolved. */
+export function speedColor(s) {
+    if (!s || (s.state !== 'moving' && s.state !== 'partly')) return SPEED_NEUTRAL;
+    let c = SPEED_BANDS[0].color;
+    for (const b of SPEED_BANDS) if (s.p98 >= b.lo) c = b.color;
+    return c;
+}
+
 // ── loaders (fetch injected; DecompressionStream is in every current browser and Node ≥ 18) ──
 export async function gunzip(buf) {
     // A host that labels a .gz with Content-Encoding: gzip has ALREADY decompressed it in transit;
@@ -305,6 +396,17 @@ export async function loadNames(fetchFn = fetch, base = CATALOG_BASE) {
     const r = await fetchFn(base + 'rgi7-names.json.gz');
     if (!r.ok) throw new Error(`names: HTTP ${r.status}`);
     return decodeNames(JSON.parse(new TextDecoder().decode(await gunzip(await r.arrayBuffer()))));
+}
+
+export async function loadSpeed(fetchFn = fetch, base = CATALOG_BASE) {
+    const m = await fetchFn(base + 'rgi7-speed-meta.json');
+    if (!m.ok) throw new Error(`speed meta: HTTP ${m.status}`);
+    const smeta = await m.json();
+    const r = await fetchFn(base + 'rgi7-speed.bin.gz');
+    if (!r.ok) throw new Error(`speed: HTTP ${r.status}`);
+    const spd = decodeSpeed(await gunzip(await r.arrayBuffer()));
+    if (spd.n !== smeta.n) throw new Error(`speed rows ${spd.n} ≠ meta ${smeta.n}`);
+    return { smeta, spd };
 }
 
 export async function loadShard(o1, fetchFn = fetch, base = CATALOG_BASE) {

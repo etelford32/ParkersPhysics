@@ -1,9 +1,19 @@
 # GLACIER_WATCH_PLAN.md — Glacier Watch: glacier motion + snowpack, observed and simulated
 
-*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH + WGMS through 2025 + 48 GLACIERS + the GLOBAL CATALOGUE (RGI 7.0) BUILT. §0 is the build log;
+*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH + WGMS through 2025 + 48 GLACIERS + the GLOBAL CATALOGUE (RGI 7.0) + ITS_LIVE SPEED FOR EVERY GLACIER BUILT. §0 is the build log;
 §2 holds numbers MEASURED in the planning session; "to verify" items are unchecked.*
 
 ## 0. Built (2026-11-08)
+
+**Speed for every glacier (2026-11-08).** ITS_LIVE annual-composite v0 (2014–2024 mean) summarised
+inside every RGI outline (median / p90 / p98, trend, coverage) by `scripts/build-glacier-catalog-speed.py`
+(1 354 tiles). Verdict = the tracked tier's own rule (resolved above 2 × the measured pair error of the
+region's tracked glaciers), agreeing with the tracked tier on 38 of 41 linked glaciers; the ice-free-ground
+floor and p90 were each measured and rejected (header of the baker). 4 434 glaciers resolved — 44 % of the
+ice area — and ~268 000 honestly below what a 120 m composite resolves. Map colour mode "Surface speed",
+a speed row on every record card, a speed line in EarthView's tooltip. Next: the annual series for a
+clicked glacier (the composite's `v` per year) via a small route, and geodetic mass change if a mirror is
+reachable.
 
 **The global catalogue — every glacier on Earth (2026-11-08).** RGI 7.0 (274 531 glaciers, 706 744 km²)
 from an unofficial GeoParquet mirror reachable on public S3, accepted only because it reproduces the RGI
