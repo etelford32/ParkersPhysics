@@ -5,6 +5,16 @@ Status: **PLANNED, nothing built** (2026-11-08). This is the design brief for
 weather / climate machinery the site already ships and must not fork any of it
 (§3 lists what it reuses, by file).
 
+## 0. Decisions (author, 2026-11-08)
+
+| # | Decision | Consequence in this plan |
+|---|---|---|
+| D1 | **Commercial viability first** | The workspace, the account gate, server-delivered event alerts and the API move forward. They are the paid surface, so they ship in P0–P2 rather than P6 (§13) |
+| D2 | **Self-host Open-Meteo** | New infra phase P-1 (§12.1). This also unblocks EarthView, the Temperature Lab and every other page that hits Open-Meteo's free-tier limits |
+| D3 | **Lives under Research** | A new "Analysis" group in the Research section (`js/site-sections.js`). Research is "show your working", and the scored ledger is exactly that (§10) |
+| D4 | **User-generated** | Users author the analysis objects (instruments, events, datasets, workspaces, studies), share them and fork them. Published objects carry their **own scored track record**, so the gallery ranks by verified skill, not popularity (§16) |
+| D5 | **Built from the Home Station** | The Climate Lab's Home, instrument bench, watches, units and prefs patterns become Climalytix's foundation. They are generalised, not copied, and the dashboard card set keeps working on the same modules (§15) |
+
 ---
 
 ## 1. The product in one paragraph
@@ -52,11 +62,10 @@ Any statistical or ML component is a *logged, scored member* (the
 The last row is our wedge. Nobody else puts tropospheric weather and space
 weather on one verified clock for a single site.
 
-**Open decision for the author (CLAUDE.md §7):** do we build it for B2G and
-operators first (API + reports + audit trail up front) or for consumers and
-prosumers first (the UI and tiers)? The phasing below assumes **operator-first
-UI with consumer-friendly defaults**. It is the one product decision this plan
-can't make by itself.
+**Decided (D1): commercial viability first.** The first paying customers are the
+first five rows: one site that matters to a business, events that cost money
+when they happen, and a track record they can show a manager. Consumers get the
+free tier (their Home, templates, 7 days), which is also the funnel.
 
 ---
 
@@ -190,10 +199,18 @@ Every new route registers in `js/pipeline-registry.js` in the same commit, or it
 is unmonitored (the `/api/mars/weather` scar).
 
 **Licensing check per source before it ships** (the TIGA rule: INTERMAGNET was
-excluded for CC BY-NC). Open-Meteo's free tier is non-commercial. **A commercial
-Climalytix needs an Open-Meteo commercial API key (or a self-hosted
-Open-Meteo instance on our own Copernicus/NOAA download).** This is a hard
-blocker for a paid launch and is called out again in §12.
+excluded for CC BY-NC). Open-Meteo's *hosted free tier* is non-commercial. **Decided
+(D2): we self-host it** (§12.1). The licence then follows the *underlying data*,
+not the hosted API:
+- NOAA GFS / GEFS: US public domain.
+- ECMWF open data (IFS / ENS): CC BY 4.0.
+- DWD ICON: open, with attribution.
+- Copernicus ERA5 / CMIP6 / GloFAS: commercial use allowed with attribution.
+- CAMS: Copernicus licence.
+
+Every source's attribution string goes into `provenance` and into the report
+appendix. Sources with a non-commercial licence are allowed only on the free
+tier and are flagged in the catalogue (`commercial: false`).
 
 ---
 
@@ -386,14 +403,23 @@ quantity, never its position. Status uses icon + label chips. Probabilities prin
 with their reliability grade, and a probability without a scored history says
 "unverified here".
 
-Navigation: Earth & Orbit → Earth systems (check the ≤10-link cap in
-`js/site-sections.js` first, since overflow goes to the hub page), plus a
-hero card on `earth-orbit.html` via the builder. The page must pass
-`scripts/lint-nav.mjs` and `tests/importmap-order.mjs`.
+Navigation (D3): **Research → a new third group `analysis` ("Analysis", note:
+"Your site, every dataset, every prediction scored")**. It holds `climalytix.html`
+and, once §16 ships, `climalytix-gallery.html` (published studies). Research
+currently has 2 groups and 4 catalogue entries, so a third header and two links
+stay inside the ≤3-header / ≤10-link cap. Because the menu, the catalogue and the
+hub are all derived from `js/site-sections.js`, the change is one group entry plus
+`js/simulations-catalog.js` rows plus re-running `scripts/build-section-pages.mjs`
+(never hand-edit `research.html`). The section's intro sentence gains the clause
+"…and your own site, scored the same way". The dashboard's Home Station card gets
+an "Analyse in Climalytix ›" link. The page must pass `scripts/lint-nav.mjs`,
+`tests/importmap-order.mjs`, `tests/site-sections.mjs` and `tests/nav-responsive.spec.js`.
 
 ---
 
 ## 11. Commercial layer
+
+> Superseded in detail by §16.5 (tiers with user-generated objects) and §13 (commercial-first order). The table below is the original capability sketch.
 
 | Capability | Free | Basic | Advanced | Institution / Enterprise |
 |---|---|---|---|---|
@@ -422,10 +448,30 @@ hero card on `earth-orbit.html` via the builder. The page must pass
 
 ## 12. Risks and blockers
 
-1. **Licensing (hard blocker for paid tiers):** Open-Meteo free tier is non-commercial.
-   We need a commercial key or a self-hosted instance. CMIP6 / GloFAS / ERA5 are
-   Copernicus-licensed (commercial use allowed with attribution). Check each new
-   source before shipping it behind a paywall.
+1. **Self-hosted Open-Meteo (D2): the infra plan, phase P-1.**
+   - **What runs:** the open-source Open-Meteo server. It is **AGPL-3.0**: calling it
+     over HTTP from our app is fine, but any change we make to the *server* must be
+     published. Keep our changes upstreamable or keep them outside it, as a proxy
+     layer in `api/climalytix/*`.
+   - **Where:** a dedicated VM with object storage, **not** Vercel (the server is
+     long-running and stateful) and **not** the workstation (CLAUDE.md: the workstation
+     never sits on a live path).
+   - **Data:** sync Open-Meteo's published open-data mirror (their AWS open-data bucket)
+     for the forecast models we use, plus the ERA5 / ERA5-Land archive for the
+     reanalysis history. Start with a small model set (GFS, ECMWF IFS + ENS, ICON) and
+     add regional models on demand. **Storage and VM size are not estimated here.**
+     Measure them on a trial sync before committing to hardware; the ERA5 archive is
+     the large item.
+   - **Access:** `OPEN_METEO_BASE_URL` (env) replaces the hard-coded host in
+     `js/open-meteo-request.js`, the ONE copy of how Open-Meteo requests are built
+     (the 414 rule still applies: chunked, `MAX_URL_BYTES`). The public host stays as
+     the fallback, and a fallback answer says `freshness:'stale'` + `reasons:['public-fallback']`
+     so status.html shows it, and the paid tier refuses to serve it.
+   - **Health:** registered in `js/pipeline-registry.js` with a sync-lag probe (the
+     newest model run on our box versus the upstream's).
+   - **Side benefit:** the EarthView 414/rate-limit history and the Temperature Lab's
+     MET Norway fallback both trace back to the public endpoint's limits.
+     Moving those pages onto our box is a separate PR each, with their own gates.
 2. **Reanalysis ≠ station.** ERA5 is a ~25 km (ERA5-Land ~9 km) cell. Mountain and
    coastal sites are biased. Mitigations: show `spatial.distanceKm/resKm`, offer
    the nearest GHCN station, and let users bias-correct against uploaded obs.
@@ -442,30 +488,190 @@ hero card on `earth-orbit.html` via the builder. The page must pass
 
 ## 13. Phasing
 
+Re-ordered for D1 (commercial first). P-1 runs in parallel with P0; P0 and P1
+can be built against the public Open-Meteo endpoint, but nothing paid ships until
+P-1 is live.
+
 | Phase | Ships | Gate |
 |---|---|---|
-| **P0 Foundation** | page shell + site bar + `SiteSeries` store + resampler + 6 existing loaders (ERA5 archive, NWP multi-model, drivers, AQ, NWS alerts, Kp) + aligned Explore timeline + data-health chips | `climalytix-site-store.mjs`, `climalytix-resample.mjs`, `tests/climalytix-smoke.spec.js` (all feeds mocked; negative control: every feed 503 ⇒ page says feeds down, never a quiet chart) |
-| **P1 Climate context** | climatology, percentiles, trend, change-point, spells, EVA, Extremes tab, Overview briefing | kernel gates with the published fixtures in §6 |
-| **P2 Events + short range** | event DSL + templates, `/api/climalytix/ensemble` + `hindcasts`, per-site EMOS calibration, Predict tab, ledger v1 (issue + score), Verify tab | calibration recovers a planted bias/spread; reliability of a calibrated synthetic ensemble ±0.05 |
-| **P3 Drivers & S2S** | Relationships tab (lag/composites/FDR), analog member, S2S + seasonal rungs, extra indices (PDO/AMO/IOD/QBO) | red-noise false-positive gate; analog skill ≥ climatology on hindcast |
-| **P4 Physics column** | ET₀, soil water, snow, FWI, WBGT, GDD; Physics tab; hydrology loaders | FAO-56 + Van Wagner fixtures; column vs ERA5-Land soil moisture residual reported |
-| **P5 Generator + scenarios + climate** | weather generator, Scenario studio, CMIP6 projections with QDM, 2050 rung | generator reproduces observed GEV / spells inside CIs; gamma-only negative control fails |
-| **P6 Commercial** | tier flags, workspaces sync, reports (PDF), BYO data, Enterprise API, auto-issue ledger in R2 | `tests/climalytix-tiers.mjs`; API contract tests |
-| **P7 Performance + members** | `rust-climalytix` WASM (EVA MLE, generator, column) with JS as oracle + smoke pin; ML members logged & scored like any other | WASM ↔ JS equality gate |
+| **P-1 Infra (D2)** | self-hosted Open-Meteo VM + open-data sync + `OPEN_METEO_BASE_URL` in `js/open-meteo-request.js` + public fallback flagged stale + registry sync-lag probe | `node tests/open-meteo-request.mjs` (base-URL switch, the 414 ceiling unchanged); sync-lag visible on status.html |
+| **P0 Foundation = the lab, generalised (D5)** | the `SiteSeries` store + resampler; the Climate Lab's Home/units/prefs/instrument contracts lifted into shared modules (§15.2) with the dashboard still green; `climalytix.html` shell under Research → Analysis; site bar = Home by default; Explore timeline built from the meteogram's small multiples; data-health chips; the workspace doc (local-first + `dashboards` sync) | `node tests/climate-lab.mjs` UNCHANGED + `npx playwright test tests/dashboard-climate-lab.spec.js` UNCHANGED (the lift is a no-op for the dashboard); new `climalytix-site-store.mjs`, `climalytix-resample.mjs`, `climalytix-smoke.spec.js` (feeds mocked; negative control: every feed 503 ⇒ "feeds down", never a quiet chart); nav gates |
+| **P1 Climate context** | 85-yr climatology, percentiles, trend, change-point, spells, EVA, Extremes tab, Overview briefing. The dashboard's Climate Context card gains an "85-year baseline" mode from the same kernel (§15.3) | kernel gates with the published fixtures in §6 |
+| **P2 Events, the paid hook** | event DSL; lab watches migrated as one-condition events (§15.4); **server-side event evaluation + delivery (email, webhook)**, the thing the lab console currently has to tell users it cannot do; short-range EMOS calibration; Predict + Verify tabs; ledger v1; tier gating of all of it | calibration recovers a planted bias/spread; a watch round-trips to an event and evaluates identically (`assert.deepEqual` on `evaluateWatch` vs the event evaluator over the lab fixture); delivery cron idempotent (one send per event-window) |
+| **P3 User-generated v1 (D4)** | user instruments (formula DSL), user datasets (CSV upload), save / share-to-team / fork; reports (PDF) | formula DSL fuzz gate (no `eval`, no prototype access, bounded cost); CSV importer gaps-not-zeros + unit gate |
+| **P4 Drivers & S2S** | Relationships tab (lag/composites/FDR), analog member, S2S + seasonal rungs, extra indices | red-noise false-positive gate; analog skill ≥ climatology on hindcast |
+| **P5 Physics column** | ET₀, soil water, snow, FWI, WBGT, GDD; Physics tab; hydrology loaders (the lab's Soil probe and Degree days instruments re-point to it) | FAO-56 + Van Wagner fixtures; column vs ERA5-Land soil moisture residual reported |
+| **P6 Public gallery + API** | publish studies to the Research gallery ranked by verified skill (§16.3); Enterprise API; auto-issue ledger in R2 | moderation + visibility RLS tests; API contract tests; ranking refuses unscored items |
+| **P7 Generator + scenarios + climate** | weather generator, Scenario studio, CMIP6 projections with QDM, 2050 rung | generator reproduces observed GEV / spells inside CIs; gamma-only negative control fails |
+| **P8 Performance + members** | `rust-climalytix` WASM (EVA MLE, generator, column) with JS as oracle + smoke pin; ML members logged & scored like any other | WASM ↔ JS equality gate |
 
-Suggested first PR: **P0 only**. It is useful on its own (the 1940→+16 d aligned
-multi-dataset view of one site already exists nowhere else on the site) and it
-fixes the contract every later phase depends on.
+Suggested first PR: **P0**. It is the lift of the lab's contracts into shared
+modules (the dashboard must not change a pixel) plus the page shell.
+**P-1 is a separate infra track that needs your VM/hosting choice** (§14).
 
 ---
 
-## 14. Questions for the author before P0
+## 14. Questions for the author
 
-1. **B2G/operator-first or consumer-first** (§2)? This decides whether P6 pulls forward.
-2. **Open-Meteo commercial key vs self-hosting** (§12.1). This must be settled before
-   any paid tier ships, though P0–P1 can be built on the free endpoint.
-3. **Name and placement**: `climalytix.html` under Earth & Orbit → Earth systems, or its
-   own top-level section? A sixth section changes the nav width budget (CLAUDE.md §4.5).
-4. **Relationship to the Climate Lab (dashboard.html)**: the lab stays the account's
-   "my home station" card set. Climalytix is the deep workspace, and the lab gets an
-   "Analyse in Climalytix ›" link. Is that the boundary you want?
+Answered 2026-11-08: commercial first (D1), self-host (D2), Research (D3),
+user-generated (D4), built from the Home Station (D5). Open:
+
+1. **Hosting for P-1**: which provider and budget for the Open-Meteo VM + storage?
+   Size it after a trial sync (§12.1).
+2. **"User-generated" scope** (§16): is the public gallery (anyone can publish a
+   study, ranked by its scored record) what you meant, or private/team authoring only?
+   The plan builds private → team → public in that order, so the answer only changes
+   whether P6 happens.
+3. **Delivery channels for paid event alerts** (P2): email (Resend, already wired)
+   plus webhook to start. Do you want SMS or Slack in the first paid release?
+4. **Does the dashboard Home Station stay free forever?** The plan assumes yes:
+   it is the funnel, and Climalytix is where the paid depth lives.
+
+---
+
+## 15. The Home Station is the foundation (D5)
+
+The dashboard's Climate Lab (`js/climate-lab/*`, 16 modules, ~4.4k lines, node-
+and browser-gated) already solved half of Climalytix for **one place, 48 hours, 13
+fixed instruments**. Climalytix is the same object with the limits removed:
+**any place, 1940 → 2050, any number of user-defined instruments and events.** So
+we lift its contracts into shared modules rather than writing parallel ones, and
+the dashboard keeps rendering from the same code.
+
+Screenshots of today's Home Station (demo mode, synthetic fixture) were sent with
+this revision. They are not committed (binary bloat). Re-capture with the recipe in
+§15.6.
+
+### 15.1 What exists, and what each piece becomes
+
+| Lab piece (file) | What it does today | In Climalytix |
+|---|---|---|
+| **Home** (`lab-home.js` `resolveHome`, `anchorAtHome`) | one home per account (`user_profiles.location_*`); a search is a *visit*; one location store (`ppx_user_location`) | the **default site**. Climalytix opens at Home, any other site is a visit through the SAME store and event. Paid tiers add a site library (the existing `user_locations` quota), but there is still one *current* site |
+| **Feed** (`lab-feed.js`, `/api/weather/forecast?type=lab`) | one SI request, gaps stay null, station-day from `utc_offset_seconds` | becomes the first **loader** emitting `SiteSeries` (§4.1). Its rules (gap ≠ 0, epoch ms, station calendar) are exactly the store's rules |
+| **Instrument bench** (`lab-readings.js`, `INSTRUMENTS` in `lab-prefs.js`) | 13 instruments, each returning ONE shape `{primary, rows, status, spark, meter, visual, method}`; hide/reorder | becomes the **Instrument contract**. The 13 built-ins become the first entries in a catalogue that also holds **user instruments** (§16.1). The `method` line (provenance and formula) is mandatory for user instruments too |
+| **Physics** (`lab-physics.js` + `composite-indices.js`) | wet-bulb, VPD, density altitude, cloud base, Beaufort, degree days, percentile; validity *reported* | becomes the function library the formula DSL may call (§16.1), so users compose OUR validated physics, not their own copy of it. Its "validity is reported, not hidden" rule extends to every user formula |
+| **Units** (`lab-units.js` `fmt`, `tempDelta`) | SI inside, convert once at display; presets including aviation and custom | used unchanged across Climalytix. User datasets declare a unit on import and are converted to SI once at the door |
+| **Meteogram** (`lab-charts.js`) | small multiples on one time axis, probe reads every series at one hour, past solid / forecast dashed | the **Explore timeline's** primitive, extended to: many years, `kind`-shaded segments (observed / forecast / outlook / scenario), and user-chosen panels |
+| **Climate context** (`lab-climate.js`) | today vs a **3-year** ERA5 window (±7 d, ~45 samples), and it says so | the P1 kernel gives it the **85-year** baseline; the card gains a "1991–2020 normal" mode and keeps printing its sample size |
+| **Lab watches** (`lab-watches.js`, 8 `WATCH_KINDS`, ≤12, horizons 6–48 h) | in-browser threshold checks, explicitly *not* emailed because no server sender exists | the simplest **event template**: a watch = one condition, absolute threshold, `max` over a 6–48 h window. Migrated losslessly (§15.4). Climalytix adds the server sender, which is the paid hook |
+| **Alert console** (`lab-alerts.js`, `lab-account.js` whitelist) | account `notify_*` alerts vs lab watches, never blurred; writes only whitelisted columns | keeps the same two-column honesty. A third column, **"Delivered events"** (paid), shows events whose delivery is server-side, with a delivery log |
+| **Prefs + sync** (`lab-prefs.js` `normalizePrefs`, `lab-sync.js`) | one versioned doc, local-first, `public.dashboards` (page `climate-lab`), `tierAllowsSync`, `pickNewer` | the **workspace doc** uses the identical pattern (page `climalytix`, one row per workspace name), so no new sync code. Multiple named workspaces per site are a paid capability |
+| **Satellites** (`lab-satellites.js`) | passes over Home on the one SGP4 path | stays on the dashboard. For the ground-station segment, a pass becomes a time series (elevation, visible) that events can condition on: "pass above 30° AND rain rate < 2 mm/h" (rain fade) |
+
+### 15.2 The lift (P0), with one rule: the dashboard must not notice
+
+- **Move contracts, not features.** `INSTRUMENTS` / `WATCH_KINDS` / the reading shape /
+  `normalizePrefs`'s cleaning helpers move into `js/site-analysis/` modules
+  (`instruments.js`, `watch-kinds.js`, `units.js`, which re-exports `lab-units`).
+  `js/climate-lab/*` then imports from them. No behaviour change.
+- **The gate is the existing gate.** `node tests/climate-lab.mjs` and
+  `tests/dashboard-climate-lab.spec.js` pass UNCHANGED, with no fixture or assertion
+  edits. If one has to change, the lift was not a lift.
+- `pp_climate_lab_v1` stays the dashboard's key and version. Climalytix gets its own doc
+  (`pp_climalytix_v1`), so neither can corrupt the other. Shared content (watches,
+  units) is *imported* into Climalytix on first open, never synced both ways.
+
+### 15.3 What flows back to the dashboard
+
+The integration should make the free product better too, because that is the funnel:
+- **Climate Context** gets the 85-year baseline (P1).
+- **Lab watches** gain "promote to delivered event" (paid) beside the existing
+  in-browser toggle.
+- Every dashboard card gets an **"Analyse in Climalytix ›"** deep link that opens the
+  same site with that card's quantities pre-selected (`climalytix.html?site=home&series=…`).
+
+### 15.4 Watch → event migration (lossless, gated)
+
+```
+watch { kind, threshold (SI), horizonH, on }
+  ⇒ event { when: { series: WATCH_KINDS[kind].metric-source, op: cmp,
+                    threshold: { kind:'absolute', value: threshold, units: SI },
+                    window: { reduce: metricReduce(kind), span: `PT${horizonH}H` } },
+            delivery: on ? 'in-browser' : 'off', origin: { from:'lab-watch', id } }
+```
+
+The gate evaluates both representations over the lab's closed-form fixture and asserts
+identical state / value / firstAt for all 8 kinds × 4 horizons. A watch the user later
+edits in Climalytix becomes a full event and stops being mirrored. The dashboard
+shows it as "managed in Climalytix", never two diverging copies.
+
+### 15.5 Deep customisation, the knobs a user gets
+
+Everything below is a field in the workspace doc (versioned, normalised on read, synced
+by tier) or a user-authored object (§16). Nothing is a code path special-cased per
+user.
+
+- **Bench and panels:** which instruments (built-in or user-made), their order, and which
+  series appear as timeline panels, at what resample (`agg`-aware) and in what units.
+- **Baselines:** base period per workspace (1991–2020 default, or any ≥ 10-year span),
+  the percentile window (±7 d default), and calendar-local vs station-local day.
+- **Events:** the user's own library (§7), with thresholds absolute, percentile or
+  return-period; compound conditions; per-event delivery (in-browser / email /
+  webhook) and quiet hours.
+- **Horizons:** which ladder rungs to show, and an "only show verified" switch that hides
+  any probability without n ≥ 30 scored cases here.
+- **Data:** which datasets are on, the nearest-station choice, and their own uploads
+  and bias corrections.
+- **Presets:** saved as named workspaces, for example "Frost season", "Fire season",
+  "Launch window".
+
+### 15.6 Re-capturing the Home Station screenshots
+
+The dashboard runs in demo mode with the gate's own mocks. Install
+`installLabMocks` from `tests/fixtures/climate-lab-mocks.mjs`, set `pp_demo_mode`,
+`ppx_tour_completed`, a `ppx_user_location`, open `/dashboard.html`, wait for
+`#location-card .cl-hero-value`, and remove `.pp-consent-banner` and `.tour-*`
+before screenshotting `#location-card`, `#cl-bench-card`, `#cl-meteogram-card`,
+`#cl-climate-card`, `#cl-sat-card` and `#alert-console-card`.
+
+---
+
+## 16. User-generated analysis (D4)
+
+### 16.1 What users author
+
+| Object | What it is | Safety rule |
+|---|---|---|
+| **Instrument** | a formula over `SiteSeries` + the physics library, e.g. `chillHours = count(hours(t2m between 0 and 7.2))` or `sprayWindow = wind10 < 4.5 and rainProb < 20 and deltaT between 2 and 8`, returning the standard reading shape | a small **expression language** (parsed to an AST, whitelisted functions and operators, no `eval` / `Function`, no property access, cost-bounded by evaluated nodes). Units are type-checked (adding °C to mm is a parse error); validity ranges propagate from the library |
+| **Event** | §7's DSL | same evaluator; thresholds clamped to physical ranges per quantity |
+| **Dataset** | an upload (CSV of a station, a sensor, yields, sales) that becomes `SiteSeries` with `kind:'observed'`, `provenance.source:'user'` | importer: declared units and time zone, gaps stay gaps, size caps per tier; stored per owner/org in **R2** (not Postgres); never public unless the owner publishes it **and** declares a licence |
+| **Workspace** | a saved arrangement (§15.5) | the `normalizePrefs` pattern: unknown fields dropped, future versions degrade field by field |
+| **Study** | a frozen, citable bundle: site + datasets + instruments + events + the ledger slice, with text | a publish-time snapshot with provenance hashes; re-runnable bit for bit |
+
+### 16.2 Sharing ladder
+
+`private` → `team/org` (Institution/Enterprise seats, the existing classroom/org seat
+model) → `public` (Research gallery). **Fork** copies any visible object into the
+forker's space with an `origin` pointer, so remix lineage is visible.
+
+### 16.3 The gallery ranks by skill, not likes
+
+This is what makes user-generated content fit a "show your working" section instead
+of becoming a recipe dump:
+- A published **event** is auto-issued nightly for its site, and the ledger scores it
+  (§8.6). The gallery shows its Brier skill vs climatology, n, and the reliability
+  diagram. **An item with fewer than 30 scored cases is listed as "unverified" and is
+  never ranked** (the TIGA rule: no widening the bars to look calibrated).
+- A published **instrument** shows where it is used and the validity ranges it inherits.
+- Studies are cited on the Research hub beside the hindcast papers, with the same
+  standard: evidence first.
+
+### 16.4 Storage and schema (written as a migration, applied only on the author's go)
+
+- `climalytix_items` (id, owner, org, kind ∈ instrument|event|dataset|workspace|study,
+  visibility, version, doc jsonb ≤ 64 KB, origin_id, created/updated): owner-RLS for
+  private, org membership for team, an anon SELECT policy only for `visibility='public'`
+  (the `temperature_lab_cache` precedent: an intentional, documented advisor flag).
+- `climalytix_predictions` / `climalytix_scores`: the ledger. Auto-issue volume goes to
+  **R2 with a Postgres index** (`SUPABASE_OFFLOAD_PLAN.md` pattern), never bulk rows.
+- Dataset bytes: R2 only, keyed by owner. Postgres holds the index row.
+- Moderation: a report button + an admin queue on the existing admin surface. Public
+  text is plain text only (no HTML), rendered through `textContent`.
+
+### 16.5 Tiers (`js/tier-config.js` flags, added in the same commit as the SQL)
+
+- **Free:** Home only, templates, view public studies, 1 private user instrument.
+- **Basic:** saved sites, unlimited private instruments and events, in-browser delivery, fork.
+- **Advanced:** email/webhook delivery, uploads, scenarios / generator, PDF reports, publish.
+- **Institution / Enterprise:** team spaces, org libraries, API, white-label reports,
+  audit export.
