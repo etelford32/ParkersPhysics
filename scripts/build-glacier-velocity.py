@@ -156,9 +156,11 @@ GLACIERS = [
     dict(id='claridenfirn', name='Claridenfirn', region='Glarus Alps', country='Switzerland',
          lat=46.84, lon=8.89, win_km=3.5, seek_km=2, kind='land-terminating',
          note='The longest glaciological series on Earth: stakes read every year since 1914.'),
-    dict(id='allalin', name='Allalin Glacier', region='Saas valley, Valais', country='Switzerland',
-         lat=46.05, lon=7.93, win_km=4, seek_km=2, kind='land-terminating',
-         note='Its 1965 tongue collapse killed 88 workers at the Mattmark dam site.'),
+    # (Allalin was tried here and DROPPED: it straddles an ITS_LIVE tile edge, the one-tile window
+    #  clipped to 35 of 67 rows and the trace stopped at 0.2 km — a glacier needs its whole length in one tile)
+    dict(id='gries', name='Gries Glacier', region='Lepontine Alps, Valais', country='Switzerland',
+         lat=46.44, lon=8.33, win_km=4, seek_km=2, kind='land-terminating',
+         note='Measured since 1962; it ends in a hydropower reservoir on the Italian border.'),
     dict(id='taku', name='Taku Glacier', region='Juneau Icefield, Alaska', country='USA',
          lat=58.62, lon=-134.17, win_km=25, seek_km=12, kind='land-terminating',
          note='Advanced for a century while its neighbours retreated; turned to retreat around 2018.'),
@@ -210,15 +212,20 @@ GLACIERS = [
     dict(id='kangerlussuaq', name='Kangerlussuaq Glacier', region='Kangerlussuaq Fjord, East Greenland', country='Greenland',
          lat=68.65, lon=-33.10, win_km=40, seek_km=22, kind='ice-sheet outlet',
          note="One of East Greenland's three largest outlets; it sped up sharply around 2005."),
-    dict(id='lambert', name='Lambert Glacier', region='Amery Ice Shelf, East Antarctica', country='Antarctica',
-         lat=-72.50, lon=68.50, win_km=70, seek_km=40, kind='ice-sheet outlet',
+    # centred at 72.5°S the whole line lay on the FLOATING Amery Ice Shelf (surface 145–220 m — above the
+    # 30 m seed floor, which cannot tell floating ice from grounded) where the shallow-ice body does not apply:
+    # the window now sits upstream of the grounding line and the seed is on the grounded trunk
+    dict(id='lambert', name='Lambert Glacier', region='Prince Charles Mountains, East Antarctica', country='Antarctica',
+         lat=-73.60, lon=67.40, win_km=50, seek_km=30, kind='ice-sheet outlet', seed=(-73.42, 67.30),   # seed: the composite's fastest ice above 300 m (690 m/yr)
          note='Often called the largest glacier on Earth: it drains ~8% of the Antarctic Ice Sheet.'),
     dict(id='malaspina', name='Malaspina Glacier', region='Saint Elias Mountains, Alaska', country='USA',
-         lat=59.95, lon=-140.45, win_km=30, seek_km=15, kind='land-terminating',
+         lat=59.95, lon=-140.45, win_km=30, seek_km=15, kind='piedmont',
          note='The largest piedmont glacier on Earth, a lobe of ice spread onto the coastal plain.'),
+    # an ITS_LIVE tile edge crosses it at 38.83°N: centred there, the window was clipped to half its rows and the
+    # line stopped at 14.9 km; centred on the trunk inside the southern tile, the lowest ~15 km of tongue is in the next tile
     dict(id='fedchenko', name='Fedchenko Glacier', region='Pamir', country='Tajikistan',
-         lat=38.80, lon=72.25, win_km=40, seek_km=20, kind='land-terminating',
-         note='About 77 km long: the longest glacier outside the polar regions.'),
+         lat=38.55, lon=72.25, win_km=30, seek_km=18, kind='land-terminating', seed=(38.70, 72.24),
+         note='About 77 km long, the longest glacier outside the polar regions; the line drawn covers its middle trunk (the tongue lies in the next satellite tile).'),
 ]
 
 # ── HTTP ──────────────────────────────────────────────────────────────────────────────────────
@@ -539,6 +546,10 @@ def bake(g, catalog, days, max_pairs, workers, log, dem_cache='scripts/.cache/gl
     inner = (ii >= 4) & (jj >= 4) & (ii < len(Y) - 4) & (jj < len(X) - 4) & (np.nan_to_num(zraw, nan=-1) > SEED_MIN_Z)   # never seed on the window edge: a glacier near
     cand = np.where(ice & inner & np.isfinite(sm) & (rr <= g['seek_km'] * 1000), sm, -np.inf)   # its ITS_LIVE tile edge (Perito Moreno) clips
     si, sj = np.unravel_index(np.argmax(cand), cand.shape)                           # the window, and an edge seed traced 0 steps
+    if 'seed' in g:     # a NAMED trunk point for a branched glacier: "fastest pixel nearby" picked Fedchenko's western
+        kx, ky = fwd.transform(g['seed'][1], g['seed'][0])                           # tributary (a 12 km line on a 77 km glacier)
+        rs = np.hypot(X[jj] - kx, Y[ii] - ky)
+        si, sj = np.unravel_index(np.argmin(np.where(ice & inner & np.isfinite(sm), rs, np.inf)), rs.shape)
     vel_ok = float(sm[si, sj]) >= V_TRACE_MIN
     if not vel_ok:      # motion below detection everywhere: seed at the on-ice pixel nearest the stated centre
         si, sj = np.unravel_index(np.argmin(np.where(ice & inner, rr, np.inf)), rr.shape)

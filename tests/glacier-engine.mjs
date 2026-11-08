@@ -204,7 +204,8 @@ section('4. the bake (data/glaciers)');
         const lens = [f.lat, f.lon, f.x, f.y, f.s_m].every(a => a.length === n) && g.climatology.v0.length === n && g.annual.v.every(a => a.length === n);
         ok(lens && n >= 8, `${g.id}: ${n} flowline points, every array length n`);
         ok(f.lat.every(Number.isFinite) && f.lon.every(Number.isFinite) && Math.abs(f.lat[0] - g.lat) < 1 && Math.abs(f.lon[0] - g.lon) < 1.5, `${g.id}: flowline near the glacier`);
-        ok(f.length_m > 1000 && f.s_m[n - 1] === f.length_m, `${g.id}: flowline ${(f.length_m / 1000).toFixed(1)} km`);
+        // 0.4 km: Echaurren Norte (~0.2 km²) really is ~0.5 km long; a broken trace (Allalin on a tile edge) was 0.2
+        ok(f.length_m > 400 && f.s_m[n - 1] === f.length_m, `${g.id}: flowline ${(f.length_m / 1000).toFixed(1)} km`);
         const v0 = Array.from(g.climatology.v0).filter(Number.isFinite);
         ok(v0.length >= 0.8 * n, `${g.id}: climatology finite at ${v0.length}/${n} points`);
         ok(g.annualSpan?.[0] === g.annual.years[0] && g.annualSpan[1] === g.annual.years.at(-1), `${g.id}: index span matches the detail series`);

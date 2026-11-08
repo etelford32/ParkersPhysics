@@ -203,6 +203,7 @@ function flowStats({ daysPerSecond }) { S.daysPerSecond = daysPerSecond; if (S.v
 function renderPicker() {
     $('gw-picker').innerHTML = S.glaciers.map(g => `<button class="gw-name" data-id="${g.id}" aria-pressed="false" aria-describedby="gw-name-tip"><i id="gw-dot-${g.id}"></i>${esc(g.name.replace(/ \(.*\)/, ''))}</button>`).join('');
     $('gw-picker-count').textContent = `${S.glaciers.length} glaciers · hover or focus a name for details`;
+    if ($('gw-count-word')) $('gw-count-word').textContent = String(S.glaciers.length);   // the intro never states a stale count
     // the list is built ONCE and filtered by `hidden` (never rebuilt: the selected state and
     // the tooltip wiring live on these buttons)
     const filter = $('gw-filter');

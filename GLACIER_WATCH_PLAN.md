@@ -1,9 +1,16 @@
 # GLACIER_WATCH_PLAN.md — Glacier Watch: glacier motion + snowpack, observed and simulated
 
-*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH + WGMS through 2025 BUILT; next: more glaciers, then the global catalogue. §0 is the build log;
+*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH + WGMS through 2025 + 48 GLACIERS BUILT; next: the global catalogue (all glaciers). §0 is the build log;
 §2 holds numbers MEASURED in the planning session; "to verify" items are unchecked.*
 
 ## 0. Built (2026-11-08)
+
+**Batch 3 — 48 glaciers (2026-11-08).** +17 WGMS field-programme glaciers (Claridenfirn 1915→, Silvretta
+1919→, Gries, Taku, Storbreen, Engabreen, Midtre Lovénbreen, Kongsvegen, White, Urumqi No. 1, Tuyuksu,
+Abramov, Echaurren Norte, Djankuat, Yala, Bahía del Diablo, Athabasca — every series through 2025) and 6
+great outlets (Petermann 81 km, Kangerlussuaq 64 km, Lambert 78 km on GROUNDED ice, Malaspina, Fedchenko's
+middle trunk, Franz Josef). Allalin dropped (ITS_LIVE tile edge). States as of 2026-11-08: 11 faster,
+3 slower, 4 usual, 28 below detection (the small field glaciers), 2 unknown. Picker gains a filter box.
 
 **WGMS through 2025 (2026-11-08).** `massbalance.json` v2: annual balances from WGMS FoG 2026-02-10
 (14 of 15 series now end 2025; Zongo is not in the copy and stays at 2018), split kept from the 2022

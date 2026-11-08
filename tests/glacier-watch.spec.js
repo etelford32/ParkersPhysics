@@ -131,7 +131,9 @@ test.describe('Glacier Watch', () => {
         });
         console.log('GLACIER-WATCH PERF', JSON.stringify(perf));
         expect(perf.marks['first-render'] - perf.marks.boot, 'boot → first render').toBeLessThan(8000);
-        expect(perf.indexBytes, 'index payload').toBeLessThan(200_000);
+        // per glacier, like tests/glacier-engine.mjs: the list grows; series/pairs/field stay in <id>.json
+        const nGlaciers = await page.evaluate(() => window.__glacierWatch.glaciers.length);
+        expect(perf.indexBytes / nGlaciers, 'index payload per glacier').toBeLessThan(5000);
         expect(perf.detailBytes, 'per-glacier payload').toBeLessThan(400_000);
         expect(perf.frames, 'flow animation ran').toBeGreaterThan(5);
         expect(perf.frameMs, 'median 3D frame (software GL)').toBeLessThan(250);

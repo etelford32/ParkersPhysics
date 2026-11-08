@@ -150,7 +150,7 @@ export const SIMULATIONS = [
     { id: 'glacier-watch', href: 'glacier-watch.html', title: 'Glacier Watch',
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'glacier', badge: 'NEW',
-      blurb: '25 glaciers tracked from orbit every few days, in 3D with an estimated ice body and mass balance.' },
+      blurb: '48 glaciers on every continent, tracked from orbit every few days: 3D ice bodies and mass balance.' },
     { id: 'upper-atmosphere', href: 'upper-atmosphere.html', title: 'Upper Atmosphere',
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'atmosphere',

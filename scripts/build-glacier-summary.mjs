@@ -4,7 +4,7 @@
  * layer loads (data/glaciers/summary.json).
  *
  * WHY A SUMMARY: the layer marks every glacier with its motion state, and that state needs
- * the glacier's PAIRS — ~190 KB of detail file each, ~4.8 MB for 25 glaciers, which an
+ * the glacier's PAIRS — ~190 KB of detail file each, ~9 MB for 48 glaciers, which an
  * EarthView layer must not cost. Calling /api/glaciers/velocity 25 times would make the
  * server download dozens of granules per visitor. So the state is computed HERE, by the
  * same engine the page uses (js/glacier-engine.js: gauges, gaugeRecord, currentState,

@@ -438,7 +438,8 @@ export function iceModel(field, { slopeSigmaM = 1000, minSlopeDeg = 1.5, tauYiel
  */
 export function iceModelOptions(kind) {
     if (kind === 'ice-sheet outlet') return { slopeSigmaM: 4000, minSlopeDeg: 0.35 };
-    if (kind === 'tidewater' || kind === 'lake-calving') return { slopeSigmaM: 2000, minSlopeDeg: 0.8 };
+    // a PIEDMONT lobe (Malaspina) spreads on a nearly flat plain: the mountain 1.5° floor capped a fifth of it
+    if (kind === 'tidewater' || kind === 'lake-calving' || kind === 'piedmont') return { slopeSigmaM: 2000, minSlopeDeg: 0.8 };
     return { slopeSigmaM: 1000, minSlopeDeg: 1.5 };
 }
 

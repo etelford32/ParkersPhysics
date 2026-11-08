@@ -62,7 +62,7 @@ const SERIES = {
     // ── batch 3 (2026-11-08) ── `sha256: null` = not in OGGM's 2022 extract: annual-only, from the 2026 release
     silvretta:            { wgms: 408,  sha256: '551df5315cb2f8a5b7ea205cc2de6b234fb19ceadbe904802f9e5d7e59b4285a' },
     claridenfirn:         { wgms: 2660, sha256: '7a8185f1220738bc54644623fbd157bdc8575334da0365aed69ea52322a0781a' },
-    allalin:              { wgms: 394,  sha256: '41c1f7592bede0da1690e164542c62bd704072e5183fa70b28ad75ed1fbf7f99' },
+    gries:                { wgms: 359,  sha256: '613f0ed220c7fbc9883c04cb0dc5b1e16eef34e459b76f048ecd90fa23ec1d88' },
     taku:                 { wgms: 124,  sha256: 'd18bf0fc75304038d885faead72a0e7d608defd71ad0b301cbf249248ae3fa6c' },
     storbreen:            { wgms: 302,  sha256: 'a1309545758e154d2e86cd517523a72b10156f80c914e9ccfb92a5cac2481c8e' },
     engabreen:            { wgms: 298,  sha256: '2c41456ebd76011eb86c243a48e68bd0ff7dfdd2bfdec31e6216de442864a6ee' },
