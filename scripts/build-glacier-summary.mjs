@@ -46,7 +46,7 @@ export function buildSummary(indexJson, detailsById, mbJson) {
         const newest = det.pairs.reduce((a, p) => (!a || p.d2 > a.d2 ? p : a), null);
         const mb = mbJson?.glaciers?.[g.id] || null;
         const mbRows = mb ? mb.rows.filter(r => r.annual !== null) : [];
-        const cum = E.cumulativeBalance(mbRows);
+        const cum = E.latestRun(E.cumulativeBalance(mbRows));   // never a sum across a gap
         out.push({
             id: g.id, name: g.name, region: g.region, country: g.country, kind: g.kind,
             as_of: day(g.bakedMs),                            // this glacier's own bake: a refresh that failed for it keeps its older date
@@ -57,7 +57,7 @@ export function buildSummary(indexJson, detailsById, mbJson) {
             pairs_year: det.pairs.length, pairs_30d: det.pairs.filter(p => p.mid >= asOfMs - 30 * 864e5).length,
             newest_pair_end: day(newest?.d2),
             gauges: gaugeRows,
-            mass_balance: mb ? { starts: mb.starts, ends: mb.ends, last: mbRows.at(-1)?.annual ?? null, cumulative: r1(cum.at(-1)?.cumulative) } : null,
+            mass_balance: mb ? { starts: mb.starts, ends: mb.ends, last: mbRows.at(-1)?.annual ?? null, cumulative: r1(cum.at(-1)?.cumulative), cumulative_since: cum[0]?.since ?? null } : null,
         });
     }
     const dates = out.map(g => g.as_of).filter(Boolean).sort();

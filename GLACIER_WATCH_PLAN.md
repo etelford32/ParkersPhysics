@@ -1,9 +1,17 @@
 # GLACIER_WATCH_PLAN.md — Glacier Watch: glacier motion + snowpack, observed and simulated
 
-*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH BUILT; next: WGMS 2021–2025, then more glaciers. §0 is the build log;
+*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH + WGMS through 2025 BUILT; next: more glaciers, then the global catalogue. §0 is the build log;
 §2 holds numbers MEASURED in the planning session; "to verify" items are unchecked.*
 
 ## 0. Built (2026-11-08)
+
+**WGMS through 2025 (2026-11-08).** `massbalance.json` v2: annual balances from WGMS FoG 2026-02-10
+(14 of 15 series now end 2025; Zongo is not in the copy and stays at 2018), split kept from the 2022
+extract only where the annual is unchanged — the USGS benchmark glaciers were recalibrated (Gulkana 54,
+Wolverine 55, South Cascade 62, Lemon Creek 68 revised years), Nigardsbreen 7, Pasterze 2, Storglaciären 1.
+Fixed on the way: the cumulative balance summed straight across gaps; it now restarts after each one
+(Aletsch −8.6 m w.e. since 2020, not a total that booked 2000–2019 as zero). Winter/summer for 2021–2025
+need the full release (wgms.ch zip) — a networked CI step could add them.
 
 **Weekly refresh (2026-11-08).** `.github/workflows/glacier-refresh.yml` re-bakes every glacier on
 Wednesdays (GLO-30 tiles in the Actions cache), rebuilds elevation + summary, runs the gates and opens
@@ -47,7 +55,7 @@ create and approve pull requests" for the PR step.
   At the archive date 9 of the 12 detectable mid-glacier gauges read "faster than usual":
   check that against the next bake before reading it as a signal — short-baseline autumn
   optical pairs may carry a seasonal bias the 2014–2024 sinusoid does not.
-- **Next** — the WGMS 2021–2025 refresh in CI; verify the stations route in
+- **Next** — (WGMS 2021–2025: DONE 2026-11-08, annual only); verify the stations route in
   production; a weekly `glacier-refresh.yml` (trojans-refresh pattern) to fold the daily tail
   into the archive; geodetic mass change for the calving glaciers; then the planet (§8 P5).
 

@@ -1,402 +1,608 @@
 {
- "format": "glacier-watch-mb-v1",
- "source": "World Glacier Monitoring Service, Fluctuations of Glaciers (glaciological series), via OGGM oggm-sample-data wgms/mbdata (2022 extract)",
- "citation": "WGMS (2021, updated): Fluctuations of Glaciers Database. World Glacier Monitoring Service, Zurich, Switzerland. doi:10.5904/wgms-fog",
+ "format": "glacier-watch-mb-v2",
+ "source": "World Glacier Monitoring Service, Fluctuations of Glaciers (glaciological series): annual balance from WGMS FoG 2026-02-10 (doi:10.5904/wgms-fog-2026-02-10; data/mass_balance.csv column subset via github.com/ledpup/ClimateExplorer), winter/summer split from the 2022 release via OGGM oggm-sample-data wgms/mbdata",
+ "citation": "WGMS (2026): Fluctuations of Glaciers Database. World Glacier Monitoring Service, Zurich, Switzerland. doi:10.5904/wgms-fog-2026-02-10",
  "units": "m w.e. (metres of water equivalent over the glacier area)",
- "note": "Series end 2018–2020 in this extract (Great Aletsch 1999). WGMS has published through the 2025 hydrological year; that gap is not filled here.",
+ "note": "Annual balances are the 2026 release, which revised some earlier years (USGS benchmark glaciers recalibrated over their whole record). The winter/summer split is shown only for years whose annual balance is unchanged since the 2022 release; `revised` rows carry the earlier value in annual_prev. Gaps are WGMS's and are not filled.",
  "glaciers": {
   "gulkana": {
    "wgms_id": 90,
    "wgms_name": "GULKANA",
    "rgi_id": "RGI60-01.00570",
    "starts": 1966,
-   "ends": 2020,
-   "n_years": 55,
+   "ends": 2025,
+   "n_years": 60,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 54,
+   "added": 5,
    "rows": [
     {
      "year": 1966,
-     "winter": 0.55,
-     "summer": -1.29,
-     "annual": -0.74,
-     "area_km2": 18.69
+     "winter": null,
+     "summer": null,
+     "annual": -0.69,
+     "area_km2": 18.69,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.74
     },
     {
      "year": 1967,
-     "winter": 0.78,
-     "summer": -0.6,
-     "annual": 0.18,
-     "area_km2": 18.65
+     "winter": null,
+     "summer": null,
+     "annual": 0.23,
+     "area_km2": 18.65,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.18
     },
     {
      "year": 1968,
-     "winter": 1.79,
-     "summer": -2.28,
-     "annual": -0.49,
-     "area_km2": 18.61
+     "winter": null,
+     "summer": null,
+     "annual": -0.44,
+     "area_km2": 18.61,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.49
     },
     {
      "year": 1969,
-     "winter": 0.39,
-     "summer": -1.57,
-     "annual": -1.18,
-     "area_km2": 18.57
+     "winter": null,
+     "summer": null,
+     "annual": -1.14,
+     "area_km2": 18.57,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.18
     },
     {
      "year": 1970,
-     "winter": 0.59,
-     "summer": -0.66,
-     "annual": -0.07,
-     "area_km2": 18.54
+     "winter": null,
+     "summer": null,
+     "annual": -0.03,
+     "area_km2": 18.54,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.07
     },
     {
      "year": 1971,
-     "winter": 1.15,
-     "summer": -1.63,
-     "annual": -0.48,
-     "area_km2": 18.5
+     "winter": null,
+     "summer": null,
+     "annual": -0.43,
+     "area_km2": 18.5,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.48
     },
     {
      "year": 1972,
-     "winter": 0.76,
-     "summer": -1.57,
-     "annual": -0.81,
-     "area_km2": 18.46
+     "winter": null,
+     "summer": null,
+     "annual": -0.76,
+     "area_km2": 18.46,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.81
     },
     {
      "year": 1973,
-     "winter": 1.14,
-     "summer": -1.14,
-     "annual": 0,
-     "area_km2": 18.42
+     "winter": null,
+     "summer": null,
+     "annual": 0.05,
+     "area_km2": 18.42,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0
     },
     {
      "year": 1974,
-     "winter": 0.46,
-     "summer": -2.37,
-     "annual": -1.91,
-     "area_km2": 18.38
+     "winter": null,
+     "summer": null,
+     "annual": -1.86,
+     "area_km2": 18.38,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.91
     },
     {
      "year": 1975,
-     "winter": 0.91,
-     "summer": -1.72,
-     "annual": -0.81,
-     "area_km2": 18.33
+     "winter": null,
+     "summer": null,
+     "annual": -0.76,
+     "area_km2": 18.33,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.81
     },
     {
      "year": 1976,
-     "winter": 0.75,
-     "summer": -0.8,
-     "annual": -0.05,
-     "area_km2": 18.28
+     "winter": null,
+     "summer": null,
+     "annual": 0,
+     "area_km2": 18.28,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.05
     },
     {
      "year": 1977,
-     "winter": 2.08,
-     "summer": -1.76,
-     "annual": 0.32,
-     "area_km2": 18.23
+     "winter": null,
+     "summer": null,
+     "annual": 0.38,
+     "area_km2": 18.23,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.32
     },
     {
      "year": 1978,
-     "winter": 1.01,
-     "summer": -1.09,
-     "annual": -0.08,
-     "area_km2": 18.18
+     "winter": null,
+     "summer": null,
+     "annual": -0.02,
+     "area_km2": 18.18,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.08
     },
     {
      "year": 1979,
-     "winter": 1.18,
-     "summer": -1.46,
-     "annual": -0.28,
-     "area_km2": 18.13
+     "winter": null,
+     "summer": null,
+     "annual": -0.22,
+     "area_km2": 18.13,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.28
     },
     {
      "year": 1980,
-     "winter": 0.94,
-     "summer": -0.32,
-     "annual": 0.62,
-     "area_km2": 18.12
+     "winter": null,
+     "summer": null,
+     "annual": 0.56,
+     "area_km2": 18.12,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.62
     },
     {
      "year": 1981,
-     "winter": 0.32,
-     "summer": -0.43,
-     "annual": -0.11,
-     "area_km2": 18.1
+     "winter": null,
+     "summer": null,
+     "annual": -0.18,
+     "area_km2": 18.1,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.11
     },
     {
      "year": 1982,
-     "winter": 1.25,
-     "summer": -1.76,
-     "annual": -0.51,
-     "area_km2": 18.09
+     "winter": null,
+     "summer": null,
+     "annual": -0.57,
+     "area_km2": 18.09,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.51
     },
     {
      "year": 1983,
-     "winter": 0.95,
-     "summer": -0.57,
-     "annual": 0.38,
-     "area_km2": 18.08
+     "winter": null,
+     "summer": null,
+     "annual": 0.32,
+     "area_km2": 18.08,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.38
     },
     {
      "year": 1984,
-     "winter": 0.95,
-     "summer": -1.44,
-     "annual": -0.49,
-     "area_km2": 18.07
+     "winter": null,
+     "summer": null,
+     "annual": -0.56,
+     "area_km2": 18.07,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.49
     },
     {
      "year": 1985,
-     "winter": 0.76,
-     "summer": -1.03,
-     "annual": -0.27,
-     "area_km2": 18.06
+     "winter": null,
+     "summer": null,
+     "annual": -0.34,
+     "area_km2": 18.06,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.27
     },
     {
      "year": 1986,
-     "winter": 0.64,
-     "summer": -0.61,
-     "annual": 0.03,
-     "area_km2": 18.05
+     "winter": null,
+     "summer": null,
+     "annual": -0.04,
+     "area_km2": 18.05,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.03
     },
     {
      "year": 1987,
-     "winter": 0.9,
-     "summer": -1.53,
-     "annual": -0.63,
-     "area_km2": 18.03
+     "winter": null,
+     "summer": null,
+     "annual": -0.69,
+     "area_km2": 18.03,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.63
     },
     {
      "year": 1988,
-     "winter": 1.01,
-     "summer": -0.96,
-     "annual": 0.05,
-     "area_km2": 18.02
+     "winter": null,
+     "summer": null,
+     "annual": -0.02,
+     "area_km2": 18.02,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.05
     },
     {
      "year": 1989,
-     "winter": 0.99,
-     "summer": -1.42,
-     "annual": -0.43,
-     "area_km2": 18.01
+     "winter": null,
+     "summer": null,
+     "annual": -0.49,
+     "area_km2": 18.01,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.43
     },
     {
      "year": 1990,
-     "winter": 0.96,
-     "summer": -1.63,
-     "annual": -0.67,
-     "area_km2": 18
+     "winter": null,
+     "summer": null,
+     "annual": -0.74,
+     "area_km2": 18,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.67
     },
     {
      "year": 1991,
-     "winter": 0.74,
-     "summer": -1.16,
-     "annual": -0.42,
-     "area_km2": 17.99
+     "winter": null,
+     "summer": null,
+     "annual": -0.49,
+     "area_km2": 17.99,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.42
     },
     {
      "year": 1992,
-     "winter": 0.59,
-     "summer": -1.3,
-     "annual": -0.71,
-     "area_km2": 17.98
+     "winter": null,
+     "summer": null,
+     "annual": -0.78,
+     "area_km2": 17.98,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.71
     },
     {
      "year": 1993,
-     "winter": 0.24,
-     "summer": -1.75,
-     "annual": -1.51,
-     "area_km2": 17.96
+     "winter": null,
+     "summer": null,
+     "annual": -1.58,
+     "area_km2": 17.96,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.51
     },
     {
      "year": 1994,
-     "winter": 1.05,
-     "summer": -1.44,
-     "annual": -0.39,
-     "area_km2": 17.87
+     "winter": null,
+     "summer": null,
+     "annual": -0.46,
+     "area_km2": 17.87,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.39
     },
     {
      "year": 1995,
-     "winter": 0.58,
-     "summer": -1.59,
-     "annual": -1.01,
-     "area_km2": 17.78
+     "winter": null,
+     "summer": null,
+     "annual": -1.08,
+     "area_km2": 17.78,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.01
     },
     {
      "year": 1996,
-     "winter": 0.8,
-     "summer": -1.26,
-     "annual": -0.46,
-     "area_km2": 17.69
+     "winter": null,
+     "summer": null,
+     "annual": -0.54,
+     "area_km2": 17.69,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.46
     },
     {
      "year": 1997,
-     "winter": 0.74,
-     "summer": -2.66,
-     "annual": -1.92,
-     "area_km2": 17.6
+     "winter": null,
+     "summer": null,
+     "annual": -2.01,
+     "area_km2": 17.6,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.92
     },
     {
      "year": 1998,
-     "winter": 0.59,
-     "summer": -1.04,
-     "annual": -0.45,
-     "area_km2": 17.51
+     "winter": null,
+     "summer": null,
+     "annual": -0.52,
+     "area_km2": 17.51,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.45
     },
     {
      "year": 1999,
-     "winter": 0.71,
-     "summer": -2.12,
-     "annual": -1.41,
-     "area_km2": 17.42
+     "winter": null,
+     "summer": null,
+     "annual": -1.48,
+     "area_km2": 17.42,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.41
     },
     {
      "year": 2000,
-     "winter": 1.2,
-     "summer": -1.15,
-     "annual": 0.05,
-     "area_km2": 17.33
+     "winter": null,
+     "summer": null,
+     "annual": -0.02,
+     "area_km2": 17.33,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.05
     },
     {
      "year": 2001,
-     "winter": 1.22,
-     "summer": -2.17,
-     "annual": -0.95,
-     "area_km2": 17.24
+     "winter": null,
+     "summer": null,
+     "annual": -1.02,
+     "area_km2": 17.24,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.95
     },
     {
      "year": 2002,
-     "winter": 0.45,
-     "summer": -0.98,
-     "annual": -0.53,
-     "area_km2": 17.15
+     "winter": null,
+     "summer": null,
+     "annual": -0.6,
+     "area_km2": 17.15,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.53
     },
     {
      "year": 2003,
-     "winter": 1.64,
-     "summer": -1.06,
-     "annual": 0.58,
-     "area_km2": 17.06
+     "winter": null,
+     "summer": null,
+     "annual": 0.51,
+     "area_km2": 17.06,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.58
     },
     {
      "year": 2004,
-     "winter": 0.54,
-     "summer": -2.95,
-     "annual": -2.41,
-     "area_km2": 16.97
+     "winter": null,
+     "summer": null,
+     "annual": -2.48,
+     "area_km2": 16.97,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.41
     },
     {
      "year": 2005,
-     "winter": 1.41,
-     "summer": -1.9,
-     "annual": -0.49,
-     "area_km2": 16.88
+     "winter": null,
+     "summer": null,
+     "annual": -0.55,
+     "area_km2": 16.88,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.49
     },
     {
      "year": 2006,
-     "winter": 1.53,
-     "summer": -1.05,
-     "annual": 0.48,
-     "area_km2": 16.88
+     "winter": null,
+     "summer": null,
+     "annual": 0.52,
+     "area_km2": 16.88,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.48
     },
     {
      "year": 2007,
-     "winter": 1.62,
-     "summer": -1.79,
-     "annual": -0.17,
-     "area_km2": 16.88
+     "winter": null,
+     "summer": null,
+     "annual": -0.13,
+     "area_km2": 16.88,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.17
     },
     {
      "year": 2008,
-     "winter": 0.98,
-     "summer": 0.38,
-     "annual": 1.36,
-     "area_km2": 16.81
+     "winter": null,
+     "summer": null,
+     "annual": 1.4,
+     "area_km2": 16.81,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.36
     },
     {
      "year": 2009,
-     "winter": 1.08,
-     "summer": -1.64,
-     "annual": -0.56,
-     "area_km2": 16.74
+     "winter": null,
+     "summer": null,
+     "annual": -0.51,
+     "area_km2": 16.74,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.56
     },
     {
      "year": 2010,
-     "winter": 0.51,
-     "summer": -2.14,
-     "annual": -1.63,
-     "area_km2": 16.68
+     "winter": null,
+     "summer": null,
+     "annual": -1.57,
+     "area_km2": 16.68,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.63
     },
     {
      "year": 2011,
-     "winter": 0.4,
-     "summer": -2.03,
-     "annual": -1.63,
-     "area_km2": 16.61
+     "winter": null,
+     "summer": null,
+     "annual": -1.58,
+     "area_km2": 16.61,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.63
     },
     {
      "year": 2012,
-     "winter": 0.69,
-     "summer": -1.07,
-     "annual": -0.38,
-     "area_km2": 16.55
+     "winter": null,
+     "summer": null,
+     "annual": -0.31,
+     "area_km2": 16.55,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.38
     },
     {
      "year": 2013,
-     "winter": 1.42,
-     "summer": -2.62,
-     "annual": -1.2,
-     "area_km2": 16.48
+     "winter": null,
+     "summer": null,
+     "annual": -1.13,
+     "area_km2": 16.48,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.2
     },
     {
      "year": 2014,
-     "winter": 1.11,
-     "summer": -1.17,
-     "annual": -0.06,
-     "area_km2": 16.42
+     "winter": null,
+     "summer": null,
+     "annual": 0.01,
+     "area_km2": 16.42,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.06
     },
     {
      "year": 2015,
-     "winter": 0.7,
-     "summer": -2.02,
-     "annual": -1.32,
-     "area_km2": 16.2
+     "winter": null,
+     "summer": null,
+     "annual": -1.23,
+     "area_km2": 16.2,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.32
     },
     {
      "year": 2016,
-     "winter": 1.09,
-     "summer": -2.39,
-     "annual": -1.3,
-     "area_km2": 15.99
+     "winter": null,
+     "summer": null,
+     "annual": -1.26,
+     "area_km2": 15.99,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.3
     },
     {
      "year": 2017,
-     "winter": 0.45,
-     "summer": -2.25,
-     "annual": -1.8,
-     "area_km2": 15.78
+     "winter": null,
+     "summer": null,
+     "annual": -1.84,
+     "area_km2": 15.78,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.8
     },
     {
      "year": 2018,
-     "winter": 0.94,
-     "summer": -1.32,
-     "annual": -0.38,
-     "area_km2": 15.57
+     "winter": null,
+     "summer": null,
+     "annual": -0.36,
+     "area_km2": 15.57,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.38
     },
     {
      "year": 2019,
      "winter": 0.86,
      "summer": -2.32,
      "annual": -1.46,
-     "area_km2": 15.35
+     "area_km2": 15.35,
+     "src": "fog-2026"
     },
     {
      "year": 2020,
-     "winter": 1.49,
-     "summer": -1.77,
-     "annual": -0.28,
-     "area_km2": 15.14
+     "winter": null,
+     "summer": null,
+     "annual": -0.21,
+     "area_km2": 15.14,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.28
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.71,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -1.05,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -0.4,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -0.4,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -0.71,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -405,477 +611,711 @@
    "wgms_name": "SOUTH CASCADE",
    "rgi_id": "RGI60-02.18778",
    "starts": 1953,
-   "ends": 2020,
-   "n_years": 67,
+   "ends": 2025,
+   "n_years": 72,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 62,
+   "added": 5,
    "rows": [
     {
      "year": 1953,
      "winter": null,
      "summer": null,
      "annual": -0.6,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1955,
      "winter": null,
      "summer": null,
      "annual": 0.3,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1956,
      "winter": null,
      "summer": null,
      "annual": 0.2,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1957,
      "winter": null,
      "summer": null,
      "annual": -0.2,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1958,
      "winter": null,
      "summer": null,
      "annual": -3.3,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1959,
-     "winter": 3.29,
-     "summer": -2.56,
-     "annual": 0.73,
-     "area_km2": 3.1
+     "winter": null,
+     "summer": null,
+     "annual": 0.54,
+     "area_km2": 3.1,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.73
     },
     {
      "year": 1960,
-     "winter": 2.22,
-     "summer": -2.69,
-     "annual": -0.47,
-     "area_km2": 3.09
+     "winter": null,
+     "summer": null,
+     "annual": -0.66,
+     "area_km2": 3.09,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.47
     },
     {
      "year": 1961,
-     "winter": 2.41,
-     "summer": -3.48,
-     "annual": -1.07,
-     "area_km2": 3.08
+     "winter": null,
+     "summer": null,
+     "annual": -1.26,
+     "area_km2": 3.08,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.07
     },
     {
      "year": 1962,
-     "winter": 2.51,
-     "summer": -2.28,
-     "annual": 0.23,
-     "area_km2": 3.07
+     "winter": null,
+     "summer": null,
+     "annual": 0.04,
+     "area_km2": 3.07,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.23
     },
     {
      "year": 1963,
-     "winter": 2.24,
-     "summer": -3.51,
-     "annual": -1.27,
-     "area_km2": 3.06
+     "winter": null,
+     "summer": null,
+     "annual": -1.46,
+     "area_km2": 3.06,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.27
     },
     {
      "year": 1964,
-     "winter": 3.26,
-     "summer": -2.03,
-     "annual": 1.23,
-     "area_km2": 3.05
+     "winter": null,
+     "summer": null,
+     "annual": 1.04,
+     "area_km2": 3.05,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.23
     },
     {
      "year": 1965,
-     "winter": 3.49,
-     "summer": -3.63,
-     "annual": -0.14,
-     "area_km2": 3.04
+     "winter": null,
+     "summer": null,
+     "annual": -0.33,
+     "area_km2": 3.04,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.14
     },
     {
      "year": 1966,
-     "winter": 2.48,
-     "summer": -3.48,
-     "annual": -1,
-     "area_km2": 3.03
+     "winter": null,
+     "summer": null,
+     "annual": -1.19,
+     "area_km2": 3.03,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1
     },
     {
      "year": 1967,
-     "winter": 3.3,
-     "summer": -3.9,
-     "annual": -0.6,
-     "area_km2": 3.02
+     "winter": null,
+     "summer": null,
+     "annual": -0.79,
+     "area_km2": 3.02,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.6
     },
     {
      "year": 1968,
-     "winter": 3.01,
-     "summer": -2.97,
-     "annual": 0.04,
-     "area_km2": 3.01
+     "winter": null,
+     "summer": null,
+     "annual": -0.15,
+     "area_km2": 3.01,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.04
     },
     {
      "year": 1969,
-     "winter": 3.18,
-     "summer": -3.88,
-     "annual": -0.7,
-     "area_km2": 3
+     "winter": null,
+     "summer": null,
+     "annual": -0.89,
+     "area_km2": 3,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.7
     },
     {
      "year": 1970,
-     "winter": 2.42,
-     "summer": -3.59,
-     "annual": -1.17,
-     "area_km2": 2.99
+     "winter": null,
+     "summer": null,
+     "annual": -1.36,
+     "area_km2": 2.99,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.17
     },
     {
      "year": 1971,
-     "winter": 3.52,
-     "summer": -2.89,
-     "annual": 0.63,
-     "area_km2": 2.98
+     "winter": null,
+     "summer": null,
+     "annual": 0.44,
+     "area_km2": 2.98,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.63
     },
     {
      "year": 1972,
-     "winter": 4.28,
-     "summer": -2.82,
-     "annual": 1.46,
-     "area_km2": 2.97
+     "winter": null,
+     "summer": null,
+     "annual": 1.27,
+     "area_km2": 2.97,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.46
     },
     {
      "year": 1973,
-     "winter": 2.22,
-     "summer": -3.23,
-     "annual": -1.01,
-     "area_km2": 2.96
+     "winter": null,
+     "summer": null,
+     "annual": -1.2,
+     "area_km2": 2.96,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.01
     },
     {
      "year": 1974,
-     "winter": 3.66,
-     "summer": -2.61,
-     "annual": 1.05,
-     "area_km2": 2.95
+     "winter": null,
+     "summer": null,
+     "annual": 0.86,
+     "area_km2": 2.95,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.05
     },
     {
      "year": 1975,
-     "winter": 3.07,
-     "summer": -3.09,
-     "annual": -0.02,
-     "area_km2": 2.94
+     "winter": null,
+     "summer": null,
+     "annual": -0.21,
+     "area_km2": 2.94,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.02
     },
     {
      "year": 1976,
-     "winter": 3.54,
-     "summer": -2.56,
-     "annual": 0.98,
-     "area_km2": 2.93
+     "winter": null,
+     "summer": null,
+     "annual": 0.79,
+     "area_km2": 2.93,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.98
     },
     {
      "year": 1977,
-     "winter": 1.58,
-     "summer": -2.85,
-     "annual": -1.27,
-     "area_km2": 2.92
+     "winter": null,
+     "summer": null,
+     "annual": -1.46,
+     "area_km2": 2.92,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.27
     },
     {
      "year": 1978,
-     "winter": 2.5,
-     "summer": -2.85,
-     "annual": -0.35,
-     "area_km2": 2.91
+     "winter": null,
+     "summer": null,
+     "annual": -0.54,
+     "area_km2": 2.91,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.35
     },
     {
      "year": 1979,
-     "winter": 2.19,
-     "summer": -3.72,
-     "annual": -1.53,
-     "area_km2": 2.9
+     "winter": null,
+     "summer": null,
+     "annual": -1.72,
+     "area_km2": 2.9,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.53
     },
     {
      "year": 1980,
-     "winter": 1.84,
-     "summer": -2.83,
-     "annual": -0.99,
-     "area_km2": 2.89
+     "winter": null,
+     "summer": null,
+     "annual": -1.18,
+     "area_km2": 2.89,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.99
     },
     {
      "year": 1981,
-     "winter": 2.29,
-     "summer": -3.1,
-     "annual": -0.81,
-     "area_km2": 2.89
+     "winter": null,
+     "summer": null,
+     "annual": -1,
+     "area_km2": 2.89,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.81
     },
     {
      "year": 1982,
-     "winter": 3.12,
-     "summer": -3.01,
-     "annual": 0.11,
-     "area_km2": 2.88
+     "winter": null,
+     "summer": null,
+     "annual": -0.08,
+     "area_km2": 2.88,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.11
     },
     {
      "year": 1983,
-     "winter": 1.92,
-     "summer": -2.66,
-     "annual": -0.74,
-     "area_km2": 2.87
+     "winter": null,
+     "summer": null,
+     "annual": -0.93,
+     "area_km2": 2.87,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.74
     },
     {
      "year": 1984,
-     "winter": 2.39,
-     "summer": -2.24,
-     "annual": 0.15,
-     "area_km2": 2.86
+     "winter": null,
+     "summer": null,
+     "annual": -0.04,
+     "area_km2": 2.86,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.15
     },
     {
      "year": 1985,
-     "winter": 2.19,
-     "summer": -3.36,
-     "annual": -1.17,
-     "area_km2": 2.85
+     "winter": null,
+     "summer": null,
+     "annual": -1.36,
+     "area_km2": 2.85,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.17
     },
     {
      "year": 1986,
-     "winter": 2.48,
-     "summer": -3.34,
-     "annual": -0.86,
-     "area_km2": 2.84
+     "winter": null,
+     "summer": null,
+     "annual": -0.92,
+     "area_km2": 2.84,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.86
     },
     {
      "year": 1987,
-     "winter": 1.96,
-     "summer": -4.05,
-     "annual": -2.09,
-     "area_km2": 2.78
+     "winter": null,
+     "summer": null,
+     "annual": -2.22,
+     "area_km2": 2.78,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.09
     },
     {
      "year": 1988,
-     "winter": 2.21,
-     "summer": -3.4,
-     "annual": -1.19,
-     "area_km2": 2.73
+     "winter": null,
+     "summer": null,
+     "annual": -1.28,
+     "area_km2": 2.73,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.19
     },
     {
      "year": 1989,
-     "winter": 2.4,
-     "summer": -3.59,
-     "annual": -1.19,
-     "area_km2": 2.67
+     "winter": null,
+     "summer": null,
+     "annual": -1.34,
+     "area_km2": 2.67,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.19
     },
     {
      "year": 1990,
-     "winter": 2.53,
-     "summer": -2.88,
-     "annual": -0.35,
-     "area_km2": 2.62
+     "winter": null,
+     "summer": null,
+     "annual": -0.4,
+     "area_km2": 2.62,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.35
     },
     {
      "year": 1991,
-     "winter": 3.65,
-     "summer": -4.02,
-     "annual": -0.37,
-     "area_km2": 2.56
+     "winter": null,
+     "summer": null,
+     "annual": -0.44,
+     "area_km2": 2.56,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.37
     },
     {
      "year": 1992,
-     "winter": 1.85,
-     "summer": -4.05,
-     "annual": -2.2,
-     "area_km2": 2.5
+     "winter": null,
+     "summer": null,
+     "annual": -2.43,
+     "area_km2": 2.5,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.2
     },
     {
      "year": 1993,
-     "winter": 1.88,
-     "summer": -2.92,
-     "annual": -1.04,
-     "area_km2": 2.49
+     "winter": null,
+     "summer": null,
+     "annual": -1.1,
+     "area_km2": 2.49,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.04
     },
     {
      "year": 1994,
-     "winter": 2.35,
-     "summer": -4.12,
-     "annual": -1.77,
-     "area_km2": 2.48
+     "winter": null,
+     "summer": null,
+     "annual": -1.83,
+     "area_km2": 2.48,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.77
     },
     {
      "year": 1995,
-     "winter": 2.98,
-     "summer": -4,
-     "annual": -1.02,
-     "area_km2": 2.47
+     "winter": null,
+     "summer": null,
+     "annual": -1.12,
+     "area_km2": 2.47,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.02
     },
     {
      "year": 1996,
-     "winter": 2.86,
-     "summer": -2.97,
-     "annual": -0.11,
-     "area_km2": 2.45
+     "winter": null,
+     "summer": null,
+     "annual": -0.22,
+     "area_km2": 2.45,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.11
     },
     {
      "year": 1997,
-     "winter": 3.47,
-     "summer": -3.14,
-     "annual": 0.33,
-     "area_km2": 2.44
+     "winter": null,
+     "summer": null,
+     "annual": 0.19,
+     "area_km2": 2.44,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.33
     },
     {
      "year": 1998,
-     "winter": 3.07,
-     "summer": -4.95,
-     "annual": -1.88,
-     "area_km2": 2.43
+     "winter": null,
+     "summer": null,
+     "annual": -1.99,
+     "area_km2": 2.43,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.88
     },
     {
      "year": 1999,
-     "winter": 4.04,
-     "summer": -2.48,
-     "annual": 1.56,
-     "area_km2": 2.41
+     "winter": null,
+     "summer": null,
+     "annual": 1.2,
+     "area_km2": 2.41,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.56
     },
     {
      "year": 2000,
-     "winter": 3.11,
-     "summer": -2.58,
-     "annual": 0.53,
-     "area_km2": 2.4
+     "winter": null,
+     "summer": null,
+     "annual": 0.43,
+     "area_km2": 2.4,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.53
     },
     {
      "year": 2001,
-     "winter": 1.76,
-     "summer": -2.55,
-     "annual": -0.79,
-     "area_km2": 2.39
+     "winter": null,
+     "summer": null,
+     "annual": -0.9,
+     "area_km2": 2.39,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.79
     },
     {
      "year": 2002,
-     "winter": 3.99,
-     "summer": -3.4,
-     "annual": 0.59,
-     "area_km2": 2.38
+     "winter": null,
+     "summer": null,
+     "annual": 0.38,
+     "area_km2": 2.38,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.59
     },
     {
      "year": 2003,
-     "winter": 2.46,
-     "summer": -4.69,
-     "annual": -2.23,
-     "area_km2": 2.36
+     "winter": null,
+     "summer": null,
+     "annual": -2.42,
+     "area_km2": 2.36,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.23
     },
     {
      "year": 2004,
-     "winter": 2.06,
-     "summer": -3.66,
-     "annual": -1.6,
-     "area_km2": 2.35
+     "winter": null,
+     "summer": null,
+     "annual": -1.73,
+     "area_km2": 2.35,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.6
     },
     {
      "year": 2005,
-     "winter": 2.09,
-     "summer": -4.47,
-     "annual": -2.38,
-     "area_km2": 2.33
+     "winter": null,
+     "summer": null,
+     "annual": -2.52,
+     "area_km2": 2.33,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.38
     },
     {
      "year": 2006,
-     "winter": 2.6,
-     "summer": -3.83,
-     "annual": -1.23,
-     "area_km2": 2.31
+     "winter": null,
+     "summer": null,
+     "annual": -1.29,
+     "area_km2": 2.31,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.23
     },
     {
      "year": 2007,
-     "winter": 3.49,
-     "summer": -3.47,
-     "annual": 0.02,
-     "area_km2": 2.29
+     "winter": null,
+     "summer": null,
+     "annual": -0.07,
+     "area_km2": 2.29,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.02
     },
     {
      "year": 2008,
-     "winter": 3.28,
-     "summer": -3.12,
-     "annual": 0.16,
-     "area_km2": 2.27
+     "winter": null,
+     "summer": null,
+     "annual": 0.1,
+     "area_km2": 2.27,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.16
     },
     {
      "year": 2009,
-     "winter": 2.73,
-     "summer": -4.38,
-     "annual": -1.65,
-     "area_km2": 2.23
+     "winter": null,
+     "summer": null,
+     "annual": -1.73,
+     "area_km2": 2.23,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.65
     },
     {
      "year": 2010,
-     "winter": 2.7,
-     "summer": -2.93,
-     "annual": -0.23,
-     "area_km2": 2.19
+     "winter": null,
+     "summer": null,
+     "annual": -0.33,
+     "area_km2": 2.19,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.23
     },
     {
      "year": 2011,
-     "winter": 3.55,
-     "summer": -2.15,
-     "annual": 1.4,
-     "area_km2": 2.16
+     "winter": null,
+     "summer": null,
+     "annual": 1.33,
+     "area_km2": 2.16,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.4
     },
     {
      "year": 2012,
-     "winter": 3.53,
-     "summer": -3.43,
-     "annual": 0.1,
-     "area_km2": 2.12
+     "winter": null,
+     "summer": null,
+     "annual": 0.01,
+     "area_km2": 2.12,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.1
     },
     {
      "year": 2013,
-     "winter": 3.28,
-     "summer": -3.94,
-     "annual": -0.66,
-     "area_km2": 2.09
+     "winter": null,
+     "summer": null,
+     "annual": -0.76,
+     "area_km2": 2.09,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.66
     },
     {
      "year": 2014,
-     "winter": 3.71,
-     "summer": -3.84,
-     "annual": -0.13,
-     "area_km2": 2.05
+     "winter": null,
+     "summer": null,
+     "annual": -0.28,
+     "area_km2": 2.05,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.13
     },
     {
      "year": 2015,
-     "winter": 2.73,
-     "summer": -5.95,
-     "annual": -3.22,
-     "area_km2": 2.02
+     "winter": null,
+     "summer": null,
+     "annual": -3.52,
+     "area_km2": 2.02,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -3.22
     },
     {
      "year": 2016,
-     "winter": 3.41,
-     "summer": -4.17,
-     "annual": -0.76,
-     "area_km2": 1.98
+     "winter": null,
+     "summer": null,
+     "annual": -0.9,
+     "area_km2": 1.98,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.76
     },
     {
      "year": 2017,
-     "winter": 3.96,
-     "summer": -4.57,
-     "annual": -0.61,
-     "area_km2": 1.94
+     "winter": null,
+     "summer": null,
+     "annual": -0.71,
+     "area_km2": 1.94,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.61
     },
     {
      "year": 2018,
-     "winter": 3.8,
-     "summer": -4.48,
-     "annual": -0.68,
-     "area_km2": 1.91
+     "winter": null,
+     "summer": null,
+     "annual": -0.75,
+     "area_km2": 1.91,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.68
     },
     {
      "year": 2019,
-     "winter": 2.44,
-     "summer": -4.49,
-     "annual": -2.05,
-     "area_km2": 1.87
+     "winter": null,
+     "summer": null,
+     "annual": -2.07,
+     "area_km2": 1.87,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.05
     },
     {
      "year": 2020,
-     "winter": 3.21,
-     "summer": -3.27,
-     "annual": -0.06,
-     "area_km2": 1.84
+     "winter": null,
+     "summer": null,
+     "annual": -0.16,
+     "area_km2": 1.84,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.06
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -1.32,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -1.35,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -2.62,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.75,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -3.55,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -884,379 +1324,491 @@
    "wgms_name": "PEYTO",
    "rgi_id": "RGI60-02.05098",
    "starts": 1966,
-   "ends": 2018,
-   "n_years": 53,
+   "ends": 2025,
+   "n_years": 60,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 0,
+   "added": 7,
    "rows": [
     {
      "year": 1966,
      "winter": 1.24,
      "summer": -1.09,
      "annual": 0.15,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1967,
      "winter": 2.06,
      "summer": -2.05,
      "annual": 0.01,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1968,
      "winter": 1.63,
      "summer": -1.28,
      "annual": 0.35,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1969,
      "winter": 1.43,
      "summer": -1.83,
      "annual": -0.4,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1970,
      "winter": 1.07,
      "summer": -2.77,
      "annual": -1.7,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1971,
      "winter": 1.31,
      "summer": -1.72,
      "annual": -0.41,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1972,
      "winter": 1.67,
      "summer": -1.92,
      "annual": -0.25,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1973,
      "winter": 1.72,
      "summer": -1.29,
      "annual": 0.43,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1974,
      "winter": 1.62,
      "summer": -1.38,
      "annual": 0.24,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1975,
      "winter": 1.15,
      "summer": -1.72,
      "annual": -0.57,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1976,
      "winter": 1.66,
      "summer": -1.02,
      "annual": 0.64,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1977,
      "winter": 0.89,
      "summer": -1.1,
      "annual": -0.21,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1978,
      "winter": 1.11,
      "summer": -2.16,
      "annual": -1.05,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1979,
      "winter": 1.25,
      "summer": -2.06,
      "annual": -0.81,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1980,
      "winter": 0.79,
      "summer": -1.37,
      "annual": -0.58,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1981,
      "winter": 1.03,
      "summer": -2.16,
      "annual": -1.13,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1982,
      "winter": 1.24,
      "summer": -1.8,
      "annual": -0.56,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1983,
      "winter": 0.87,
      "summer": -1.26,
      "annual": -0.39,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1984,
      "winter": 1.21,
      "summer": -1.79,
      "annual": -0.58,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1985,
      "winter": 0.54,
      "summer": -1.35,
      "annual": -0.81,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1986,
      "winter": 1.2,
      "summer": -1.67,
      "annual": -0.47,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1987,
      "winter": 0.82,
      "summer": -1.44,
      "annual": -0.62,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1988,
      "winter": 0.89,
      "summer": -1.88,
      "annual": -0.99,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1989,
      "winter": 1.13,
      "summer": -1.72,
      "annual": -0.59,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1990,
      "winter": 1.14,
      "summer": -1.88,
      "annual": -0.74,
-     "area_km2": 12.9
+     "area_km2": 12.9,
+     "src": "fog-2026"
     },
     {
      "year": 1991,
      "winter": null,
      "summer": null,
      "annual": -1.215,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1992,
      "winter": 1.14,
      "summer": -1.88,
      "annual": -0.74,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1993,
      "winter": 0.705,
      "summer": -1.92,
      "annual": -1.215,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1994,
      "winter": 0.94,
      "summer": -2.235,
      "annual": -1.295,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1995,
      "winter": 1.105,
      "summer": -1.405,
      "annual": -0.3,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1996,
      "winter": null,
      "summer": null,
      "annual": 0.129,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1997,
      "winter": null,
      "summer": null,
      "annual": -0.818,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1998,
      "winter": null,
      "summer": null,
      "annual": -2.21,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1999,
      "winter": null,
      "summer": null,
      "annual": -0.32,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2000,
      "winter": null,
      "summer": null,
      "annual": 0.81,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2001,
      "winter": null,
      "summer": null,
      "annual": -0.92,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2002,
      "winter": null,
      "summer": null,
      "annual": -0.5,
-     "area_km2": 11.45
+     "area_km2": 11.45,
+     "src": "fog-2026"
     },
     {
      "year": 2003,
      "winter": null,
      "summer": null,
      "annual": -1.37,
-     "area_km2": 11.45
+     "area_km2": 11.45,
+     "src": "fog-2026"
     },
     {
      "year": 2004,
      "winter": null,
      "summer": null,
      "annual": -0.55,
-     "area_km2": 11.45
+     "area_km2": 11.45,
+     "src": "fog-2026"
     },
     {
      "year": 2005,
      "winter": null,
      "summer": null,
      "annual": -0.81,
-     "area_km2": 11.45
+     "area_km2": 11.45,
+     "src": "fog-2026"
     },
     {
      "year": 2006,
      "winter": null,
      "summer": null,
      "annual": -1.65,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": null,
      "summer": null,
      "annual": -1.85,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": null,
      "summer": null,
      "annual": -0.23,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": null,
      "summer": null,
      "annual": -1.02,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": null,
      "summer": null,
      "annual": -0.34,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": null,
      "summer": null,
      "annual": -0.95,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": null,
      "summer": null,
      "annual": -0.36,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": null,
      "summer": null,
      "annual": -0.91,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
      "winter": null,
      "summer": null,
      "annual": -1.63,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2015,
      "winter": null,
      "summer": null,
      "annual": -1.538,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2016,
      "winter": null,
      "summer": null,
      "annual": -1.844,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2017,
      "winter": 1.228,
      "summer": -2.833,
      "annual": -1.605,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2018,
      "winter": 0.92,
      "summer": -1.94,
      "annual": -1.02,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2019,
+     "winter": null,
+     "summer": null,
+     "annual": -1.67,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2020,
+     "winter": null,
+     "summer": null,
+     "annual": -0.474,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -1.925,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -0.848,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -2.76,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.63,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -1.91,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -1265,428 +1817,539 @@
    "wgms_name": "GROSSER ALETSCH",
    "rgi_id": "RGI50-11.01450",
    "starts": 1940,
-   "ends": 1999,
-   "n_years": 60,
+   "ends": 2025,
+   "n_years": 66,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 0,
+   "added": 6,
    "rows": [
     {
      "year": 1940,
      "winter": 0.51,
      "summer": 0.387,
      "annual": 0.897,
-     "area_km2": 89.1525
+     "area_km2": 89.1525,
+     "src": "fog-2026"
     },
     {
      "year": 1941,
      "winter": 0.274,
      "summer": -1.193,
      "annual": -0.919,
-     "area_km2": 89.1475
+     "area_km2": 89.1475,
+     "src": "fog-2026"
     },
     {
      "year": 1942,
      "winter": -0.116,
      "summer": -1.207,
      "annual": -1.323,
-     "area_km2": 89.135
+     "area_km2": 89.135,
+     "src": "fog-2026"
     },
     {
      "year": 1943,
      "winter": 0.403,
      "summer": -1.606,
      "annual": -1.203,
-     "area_km2": 89.1025
+     "area_km2": 89.1025,
+     "src": "fog-2026"
     },
     {
      "year": 1944,
      "winter": 0.456,
      "summer": -1.772,
      "annual": -1.316,
-     "area_km2": 89.095
+     "area_km2": 89.095,
+     "src": "fog-2026"
     },
     {
      "year": 1945,
      "winter": 0.244,
      "summer": -0.856,
      "annual": -0.612,
-     "area_km2": 89.0875
+     "area_km2": 89.0875,
+     "src": "fog-2026"
     },
     {
      "year": 1946,
      "winter": 1.153,
      "summer": -1.474,
      "annual": -0.321,
-     "area_km2": 89.065
+     "area_km2": 89.065,
+     "src": "fog-2026"
     },
     {
      "year": 1947,
      "winter": 0.625,
      "summer": -2.463,
      "annual": -1.838,
-     "area_km2": 89.035
+     "area_km2": 89.035,
+     "src": "fog-2026"
     },
     {
      "year": 1948,
      "winter": 1.036,
      "summer": -0.599,
      "annual": 0.437,
-     "area_km2": 89.01
+     "area_km2": 89.01,
+     "src": "fog-2026"
     },
     {
      "year": 1949,
      "winter": 0.559,
      "summer": -1.598,
      "annual": -1.039,
-     "area_km2": 88.99
+     "area_km2": 88.99,
+     "src": "fog-2026"
     },
     {
      "year": 1950,
      "winter": 0.741,
      "summer": -2.784,
      "annual": -2.043,
-     "area_km2": 88.96
+     "area_km2": 88.96,
+     "src": "fog-2026"
     },
     {
      "year": 1951,
      "winter": 1.199,
      "summer": -1.406,
      "annual": -0.207,
-     "area_km2": 88.9375
+     "area_km2": 88.9375,
+     "src": "fog-2026"
     },
     {
      "year": 1952,
      "winter": 0.982,
      "summer": -1.863,
      "annual": -0.881,
-     "area_km2": 88.9075
+     "area_km2": 88.9075,
+     "src": "fog-2026"
     },
     {
      "year": 1953,
      "winter": 1.079,
      "summer": -1.475,
      "annual": -0.396,
-     "area_km2": 88.8625
+     "area_km2": 88.8625,
+     "src": "fog-2026"
     },
     {
      "year": 1954,
      "winter": 0.805,
      "summer": -1.347,
      "annual": -0.542,
-     "area_km2": 88.825
+     "area_km2": 88.825,
+     "src": "fog-2026"
     },
     {
      "year": 1955,
      "winter": 0.99,
      "summer": -1.002,
      "annual": -0.012,
-     "area_km2": 88.7875
+     "area_km2": 88.7875,
+     "src": "fog-2026"
     },
     {
      "year": 1956,
      "winter": 0.977,
      "summer": -1.259,
      "annual": -0.282,
-     "area_km2": 88.74
+     "area_km2": 88.74,
+     "src": "fog-2026"
     },
     {
      "year": 1957,
      "winter": 0.732,
      "summer": -1.21,
      "annual": -0.478,
-     "area_km2": 87.4725
+     "area_km2": 87.4725,
+     "src": "fog-2026"
     },
     {
      "year": 1958,
      "winter": 0.923,
      "summer": -1.538,
      "annual": -0.615,
-     "area_km2": 87.715
+     "area_km2": 87.715,
+     "src": "fog-2026"
     },
     {
      "year": 1959,
      "winter": 0.549,
      "summer": -1.505,
      "annual": -0.956,
-     "area_km2": 86.785
+     "area_km2": 86.785,
+     "src": "fog-2026"
     },
     {
      "year": 1960,
      "winter": 0.644,
      "summer": -0.798,
      "annual": -0.154,
-     "area_km2": 86.77
+     "area_km2": 86.77,
+     "src": "fog-2026"
     },
     {
      "year": 1961,
      "winter": 1.101,
      "summer": -1.157,
      "annual": -0.056,
-     "area_km2": 86.7575
+     "area_km2": 86.7575,
+     "src": "fog-2026"
     },
     {
      "year": 1962,
      "winter": 1.23,
      "summer": -1.788,
      "annual": -0.558,
-     "area_km2": 86.7475
+     "area_km2": 86.7475,
+     "src": "fog-2026"
     },
     {
      "year": 1963,
      "winter": 0.953,
      "summer": -1.615,
      "annual": -0.662,
-     "area_km2": 86.7325
+     "area_km2": 86.7325,
+     "src": "fog-2026"
     },
     {
      "year": 1964,
      "winter": 0.646,
      "summer": -1.841,
      "annual": -1.195,
-     "area_km2": 86.7225
+     "area_km2": 86.7225,
+     "src": "fog-2026"
     },
     {
      "year": 1965,
      "winter": 1.116,
      "summer": -0.615,
      "annual": 0.501,
-     "area_km2": 86.7175
+     "area_km2": 86.7175,
+     "src": "fog-2026"
     },
     {
      "year": 1966,
      "winter": 1.173,
      "summer": -0.915,
      "annual": 0.258,
-     "area_km2": 86.71
+     "area_km2": 86.71,
+     "src": "fog-2026"
     },
     {
      "year": 1967,
      "winter": 1.084,
      "summer": -1.573,
      "annual": -0.489,
-     "area_km2": 86.705
+     "area_km2": 86.705,
+     "src": "fog-2026"
     },
     {
      "year": 1968,
      "winter": 0.668,
      "summer": -0.677,
      "annual": -0.009,
-     "area_km2": 86.69
+     "area_km2": 86.69,
+     "src": "fog-2026"
     },
     {
      "year": 1969,
      "winter": 0.939,
      "summer": -0.944,
      "annual": -0.005,
-     "area_km2": 86.6825
+     "area_km2": 86.6825,
+     "src": "fog-2026"
     },
     {
      "year": 1970,
      "winter": 1.077,
      "summer": -1.448,
      "annual": -0.371,
-     "area_km2": 86.68
+     "area_km2": 86.68,
+     "src": "fog-2026"
     },
     {
      "year": 1971,
      "winter": 0.585,
      "summer": -1.623,
      "annual": -1.038,
-     "area_km2": 86.6725
+     "area_km2": 86.6725,
+     "src": "fog-2026"
     },
     {
      "year": 1972,
      "winter": 0.909,
      "summer": -1.222,
      "annual": -0.313,
-     "area_km2": 86.6525
+     "area_km2": 86.6525,
+     "src": "fog-2026"
     },
     {
      "year": 1973,
      "winter": 0.644,
      "summer": -1.443,
      "annual": -0.799,
-     "area_km2": 86.625
+     "area_km2": 86.625,
+     "src": "fog-2026"
     },
     {
      "year": 1974,
      "winter": 0.914,
      "summer": -1.163,
      "annual": -0.249,
-     "area_km2": 86.5925
+     "area_km2": 86.5925,
+     "src": "fog-2026"
     },
     {
      "year": 1975,
      "winter": 1.193,
      "summer": -0.797,
      "annual": 0.396,
-     "area_km2": 86.555
+     "area_km2": 86.555,
+     "src": "fog-2026"
     },
     {
      "year": 1976,
      "winter": 0.257,
      "summer": -1.188,
      "annual": -0.931,
-     "area_km2": 86.49
+     "area_km2": 86.49,
+     "src": "fog-2026"
     },
     {
      "year": 1977,
      "winter": 1.154,
      "summer": -0.604,
      "annual": 0.55,
-     "area_km2": 86.45
+     "area_km2": 86.45,
+     "src": "fog-2026"
     },
     {
      "year": 1978,
      "winter": 1.365,
      "summer": -0.479,
      "annual": 0.886,
-     "area_km2": 86.415
+     "area_km2": 86.415,
+     "src": "fog-2026"
     },
     {
      "year": 1979,
      "winter": 1.007,
      "summer": -1.515,
      "annual": -0.508,
-     "area_km2": 86.38
+     "area_km2": 86.38,
+     "src": "fog-2026"
     },
     {
      "year": 1980,
      "winter": 1.34,
      "summer": -0.716,
      "annual": 0.624,
-     "area_km2": 86.555
+     "area_km2": 86.555,
+     "src": "fog-2026"
     },
     {
      "year": 1981,
      "winter": 1.004,
      "summer": -1.027,
      "annual": -0.023,
-     "area_km2": 84.28
+     "area_km2": 84.28,
+     "src": "fog-2026"
     },
     {
      "year": 1982,
      "winter": 0.89,
      "summer": -1.252,
      "annual": -0.362,
-     "area_km2": 83.8325
+     "area_km2": 83.8325,
+     "src": "fog-2026"
     },
     {
      "year": 1983,
      "winter": 1.269,
      "summer": -1.586,
      "annual": -0.317,
-     "area_km2": 83.785
+     "area_km2": 83.785,
+     "src": "fog-2026"
     },
     {
      "year": 1984,
      "winter": 0.989,
      "summer": -0.809,
      "annual": 0.18,
-     "area_km2": 83.7425
+     "area_km2": 83.7425,
+     "src": "fog-2026"
     },
     {
      "year": 1985,
      "winter": 0.861,
      "summer": -1.179,
      "annual": -0.318,
-     "area_km2": 83.6925
+     "area_km2": 83.6925,
+     "src": "fog-2026"
     },
     {
      "year": 1986,
      "winter": 0.95,
      "summer": -1.764,
      "annual": -0.814,
-     "area_km2": 83.6725
+     "area_km2": 83.6725,
+     "src": "fog-2026"
     },
     {
      "year": 1987,
      "winter": 1.263,
      "summer": -1.457,
      "annual": -0.194,
-     "area_km2": 83.62
+     "area_km2": 83.62,
+     "src": "fog-2026"
     },
     {
      "year": 1988,
      "winter": 0.779,
      "summer": -1.57,
      "annual": -0.791,
-     "area_km2": 83.58
+     "area_km2": 83.58,
+     "src": "fog-2026"
     },
     {
      "year": 1989,
      "winter": 0.737,
      "summer": -1.417,
      "annual": -0.68,
-     "area_km2": 83.56
+     "area_km2": 83.56,
+     "src": "fog-2026"
     },
     {
      "year": 1990,
      "winter": 0.587,
      "summer": -1.528,
      "annual": -0.941,
-     "area_km2": 83.5625
+     "area_km2": 83.5625,
+     "src": "fog-2026"
     },
     {
      "year": 1991,
      "winter": 0.751,
      "summer": -1.857,
      "annual": -1.106,
-     "area_km2": 83.545
+     "area_km2": 83.545,
+     "src": "fog-2026"
     },
     {
      "year": 1992,
      "winter": 0.337,
      "summer": -1.848,
      "annual": -1.511,
-     "area_km2": 83.53
+     "area_km2": 83.53,
+     "src": "fog-2026"
     },
     {
      "year": 1993,
      "winter": 0.932,
      "summer": -1.025,
      "annual": -0.093,
-     "area_km2": 83.5175
+     "area_km2": 83.5175,
+     "src": "fog-2026"
     },
     {
      "year": 1994,
      "winter": 1.18,
      "summer": -1.451,
      "annual": -0.271,
-     "area_km2": 83.49
+     "area_km2": 83.49,
+     "src": "fog-2026"
     },
     {
      "year": 1995,
      "winter": 1.318,
      "summer": -1.342,
      "annual": -0.024,
-     "area_km2": 83.47
+     "area_km2": 83.47,
+     "src": "fog-2026"
     },
     {
      "year": 1996,
      "winter": 0.507,
      "summer": -0.955,
      "annual": -0.448,
-     "area_km2": 83.4525
+     "area_km2": 83.4525,
+     "src": "fog-2026"
     },
     {
      "year": 1997,
      "winter": 0.863,
      "summer": -1.383,
      "annual": -0.52,
-     "area_km2": 83.42
+     "area_km2": 83.42,
+     "src": "fog-2026"
     },
     {
      "year": 1998,
      "winter": 0.63,
      "summer": -1.856,
      "annual": -1.226,
-     "area_km2": 83.3925
+     "area_km2": 83.3925,
+     "src": "fog-2026"
     },
     {
      "year": 1999,
      "winter": 0.929,
      "summer": -1.431,
      "annual": -0.502,
-     "area_km2": 83.02
+     "area_km2": 83.02,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2020,
+     "winter": null,
+     "summer": null,
+     "annual": -1.165,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.115,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -2.982,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -1.576,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.311,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -1.475,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -1695,533 +2358,653 @@
    "wgms_name": "STORGLACIAEREN",
    "rgi_id": "RGI60-08.00213",
    "starts": 1946,
-   "ends": 2020,
-   "n_years": 75,
+   "ends": 2025,
+   "n_years": 80,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 1,
+   "added": 5,
    "rows": [
     {
      "year": 1946,
      "winter": 0.99,
      "summer": -1.53,
      "annual": -0.54,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1947,
      "winter": 1.02,
      "summer": -2.9,
      "annual": -1.88,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1948,
      "winter": 1.02,
      "summer": -1.31,
      "annual": -0.29,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1949,
      "winter": 1.92,
      "summer": -1.33,
      "annual": 0.59,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1950,
      "winter": 1.53,
      "summer": -2.28,
      "annual": -0.75,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1951,
      "winter": 0.88,
      "summer": -1.65,
      "annual": -0.77,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1952,
      "winter": 1.16,
      "summer": -1.12,
      "annual": 0.04,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1953,
      "winter": 1.8,
      "summer": -2.32,
      "annual": -0.52,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1954,
      "winter": 0.93,
      "summer": -1.86,
      "annual": -0.93,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1955,
      "winter": 1.26,
      "summer": -1.62,
      "annual": -0.36,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1956,
      "winter": 1.26,
      "summer": -1.56,
      "annual": -0.3,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1957,
      "winter": 1.37,
      "summer": -1.71,
      "annual": -0.34,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1958,
      "winter": 1.44,
      "summer": -1.82,
      "annual": -0.38,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1959,
      "winter": 1.03,
      "summer": -1.8,
      "annual": -0.77,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1960,
      "winter": 0.68,
      "summer": -2.29,
      "annual": -1.61,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1961,
      "winter": 0.84,
      "summer": -1.63,
      "annual": -0.79,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1962,
      "winter": 1.1,
      "summer": -0.67,
      "annual": 0.43,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1963,
      "winter": 1.45,
      "summer": -1.65,
      "annual": -0.2,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1964,
      "winter": 1.59,
      "summer": -1.16,
      "annual": 0.43,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1965,
      "winter": 1.49,
      "summer": -0.99,
      "annual": 0.5,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1966,
      "winter": 1.18,
      "summer": -1.73,
      "annual": -0.55,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1967,
      "winter": 1.37,
      "summer": -1.55,
      "annual": -0.18,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1968,
      "winter": 1.34,
      "summer": -1.58,
      "annual": -0.24,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1969,
      "winter": 1.03,
      "summer": -1.93,
      "annual": -0.9,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1970,
      "winter": 1.04,
      "summer": -2.41,
      "annual": -1.37,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1971,
      "winter": 1.34,
      "summer": -1.54,
      "annual": -0.19,
-     "area_km2": 3.07
+     "area_km2": 3.07,
+     "src": "fog-2026"
     },
     {
      "year": 1972,
      "winter": 1.39,
      "summer": -2.43,
      "annual": -1.05,
-     "area_km2": 3.07
+     "area_km2": 3.07,
+     "src": "fog-2026"
     },
     {
      "year": 1973,
      "winter": 1.67,
      "summer": -1.63,
      "annual": 0.05,
-     "area_km2": 3.07
+     "area_km2": 3.07,
+     "src": "fog-2026"
     },
     {
      "year": 1974,
      "winter": 1.31,
      "summer": -1.65,
      "annual": -0.34,
-     "area_km2": 3.07
+     "area_km2": 3.07,
+     "src": "fog-2026"
     },
     {
      "year": 1975,
      "winter": 1.98,
      "summer": -0.81,
      "annual": 1.17,
-     "area_km2": 3.07
+     "area_km2": 3.07,
+     "src": "fog-2026"
     },
     {
      "year": 1976,
      "winter": 1.93,
      "summer": -1.66,
      "annual": 0.27,
-     "area_km2": 3.1
+     "area_km2": 3.1,
+     "src": "fog-2026"
     },
     {
      "year": 1977,
      "winter": 1.23,
      "summer": -1.03,
      "annual": 0.2,
-     "area_km2": 3.1
+     "area_km2": 3.1,
+     "src": "fog-2026"
     },
     {
      "year": 1978,
      "winter": 1.46,
      "summer": -1.54,
      "annual": -0.08,
-     "area_km2": 3.1
+     "area_km2": 3.1,
+     "src": "fog-2026"
     },
     {
      "year": 1979,
      "winter": 1.54,
      "summer": -1.76,
      "annual": -0.21,
-     "area_km2": 3.1
+     "area_km2": 3.1,
+     "src": "fog-2026"
     },
     {
      "year": 1980,
      "winter": 0.98,
      "summer": -2.25,
      "annual": -1.27,
-     "area_km2": 3.1
+     "area_km2": 3.1,
+     "src": "fog-2026"
     },
     {
      "year": 1981,
      "winter": 1.163,
      "summer": -1.356,
      "annual": -0.19,
-     "area_km2": 3.03
+     "area_km2": 3.03,
+     "src": "fog-2026"
     },
     {
      "year": 1982,
      "winter": 1.496,
      "summer": -1.233,
      "annual": 0.26,
-     "area_km2": 3.03
+     "area_km2": 3.03,
+     "src": "fog-2026"
     },
     {
      "year": 1983,
      "winter": 1.472,
      "summer": -1.19,
      "annual": 0.28,
-     "area_km2": 3.03
+     "area_km2": 3.03,
+     "src": "fog-2026"
     },
     {
      "year": 1984,
      "winter": 1.828,
      "summer": -1.708,
      "annual": 0.12,
-     "area_km2": 3.03
+     "area_km2": 3.03,
+     "src": "fog-2026"
     },
     {
      "year": 1985,
      "winter": 0.99,
      "summer": -1.71,
      "annual": -0.72,
-     "area_km2": 3.03
+     "area_km2": 3.03,
+     "src": "fog-2026"
     },
     {
      "year": 1986,
      "winter": 1.609,
      "summer": -1.685,
      "annual": -0.06,
-     "area_km2": 3.04
+     "area_km2": 3.04,
+     "src": "fog-2026"
     },
     {
      "year": 1987,
      "winter": 1.694,
      "summer": -1.219,
      "annual": 0.48,
-     "area_km2": 3.03
+     "area_km2": 3.03,
+     "src": "fog-2026"
     },
     {
      "year": 1988,
      "winter": 1.424,
      "summer": -2.263,
      "annual": -0.84,
-     "area_km2": 3.06
+     "area_km2": 3.06,
+     "src": "fog-2026"
     },
     {
      "year": 1989,
      "winter": 2.58,
      "summer": -1.34,
      "annual": 1.24,
-     "area_km2": 2.99
+     "area_km2": 2.99,
+     "src": "fog-2026"
     },
     {
      "year": 1990,
      "winter": 2.259,
      "summer": -1.666,
      "annual": 0.59,
-     "area_km2": 3.03
+     "area_km2": 3.03,
+     "src": "fog-2026"
     },
     {
      "year": 1991,
      "winter": 1.68,
      "summer": -1.51,
      "annual": 0.17,
-     "area_km2": 3.01
+     "area_km2": 3.01,
+     "src": "fog-2026"
     },
     {
      "year": 1992,
      "winter": 2.235,
      "summer": -1.356,
      "annual": 0.88,
-     "area_km2": 3.01
+     "area_km2": 3.01,
+     "src": "fog-2026"
     },
     {
      "year": 1993,
      "winter": 2.25,
      "summer": -1.25,
      "annual": 1,
-     "area_km2": 3.12
+     "area_km2": 3.12,
+     "src": "fog-2026"
     },
     {
      "year": 1994,
      "winter": 1.06,
      "summer": -1.43,
      "annual": -0.37,
-     "area_km2": 3.1
+     "area_km2": 3.1,
+     "src": "fog-2026"
     },
     {
      "year": 1995,
      "winter": 1.93,
      "summer": -1.23,
      "annual": 0.7,
-     "area_km2": 3.1
+     "area_km2": 3.1,
+     "src": "fog-2026"
     },
     {
      "year": 1996,
      "winter": 1.26,
      "summer": -1.65,
      "annual": -0.39,
-     "area_km2": 3.2124
+     "area_km2": 3.2124,
+     "src": "fog-2026"
     },
     {
      "year": 1997,
      "winter": 1.87,
      "summer": -2.5,
      "annual": -0.63,
-     "area_km2": 3.24
+     "area_km2": 3.24,
+     "src": "fog-2026"
     },
     {
      "year": 1998,
      "winter": 1.35,
      "summer": -1.87,
      "annual": -0.52,
-     "area_km2": 3.24
+     "area_km2": 3.24,
+     "src": "fog-2026"
     },
     {
      "year": 1999,
      "winter": 1.33,
      "summer": -1.51,
      "annual": -0.18,
-     "area_km2": 3.24
+     "area_km2": 3.24,
+     "src": "fog-2026"
     },
     {
      "year": 2000,
      "winter": 1.62,
      "summer": -1.04,
      "annual": 0.58,
-     "area_km2": 3.128
+     "area_km2": 3.128,
+     "src": "fog-2026"
     },
     {
      "year": 2001,
      "winter": 1.14,
      "summer": -1.84,
      "annual": -0.7,
-     "area_km2": 3.242
+     "area_km2": 3.242,
+     "src": "fog-2026"
     },
     {
      "year": 2002,
      "winter": 1.75,
      "summer": -2.58,
      "annual": -0.83,
-     "area_km2": 3.212
+     "area_km2": 3.212,
+     "src": "fog-2026"
     },
     {
      "year": 2003,
      "winter": 1.38,
      "summer": -2.48,
      "annual": -1.04,
-     "area_km2": 3.212
+     "area_km2": 3.212,
+     "src": "fog-2026"
     },
     {
      "year": 2004,
      "winter": 1.55,
      "summer": -1.67,
      "annual": -0.12,
-     "area_km2": 3.2112
+     "area_km2": 3.2112,
+     "src": "fog-2026"
     },
     {
      "year": 2005,
      "winter": 1.64,
      "summer": -1.72,
      "annual": -0.07,
-     "area_km2": 3.211
+     "area_km2": 3.211,
+     "src": "fog-2026"
     },
     {
      "year": 2006,
      "winter": 1.1,
      "summer": -2.82,
      "annual": -1.72,
-     "area_km2": 3.2112
+     "area_km2": 3.2112,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": 1.53,
      "summer": -1.12,
      "annual": 0.41,
-     "area_km2": 3.2112
+     "area_km2": 3.2112,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": 1.93,
      "summer": -1.35,
      "annual": 0.58,
-     "area_km2": 3.2112
+     "area_km2": 3.2112,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": 1.3,
      "summer": -1.83,
      "annual": -0.53,
-     "area_km2": 3.2112
+     "area_km2": 3.2112,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": 0.96,
      "summer": -1.65,
      "annual": -0.69,
-     "area_km2": 3.2112
+     "area_km2": 3.2112,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": 1.32,
      "summer": -2.37,
      "annual": -1.06,
-     "area_km2": 3.2112
+     "area_km2": 3.2112,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": 1.25,
      "summer": -0.57,
      "annual": 0.68,
-     "area_km2": 2.9034
+     "area_km2": 2.9034,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": 0.95,
      "summer": -2.36,
      "annual": -1.41,
-     "area_km2": 2.9034
+     "area_km2": 2.9034,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
      "winter": 1.51,
      "summer": -2.4,
      "annual": -0.89,
-     "area_km2": 2.9034
+     "area_km2": 2.9034,
+     "src": "fog-2026"
     },
     {
      "year": 2015,
      "winter": 1.46,
      "summer": -0.82,
      "annual": 0.64,
-     "area_km2": 2.9033999
+     "area_km2": 2.9033999,
+     "src": "fog-2026"
     },
     {
      "year": 2016,
      "winter": 1.51,
      "summer": -1.74,
      "annual": -0.24,
-     "area_km2": 2.9033999
+     "area_km2": 2.9033999,
+     "src": "fog-2026"
     },
     {
      "year": 2017,
      "winter": 1.54,
      "summer": -1.07,
      "annual": 0.47,
-     "area_km2": 2.8891
+     "area_km2": 2.8891,
+     "src": "fog-2026"
     },
     {
      "year": 2018,
      "winter": 1.09,
      "summer": -2.69,
      "annual": -1.6,
-     "area_km2": 2.8891
+     "area_km2": 2.8891,
+     "src": "fog-2026"
     },
     {
      "year": 2019,
      "winter": 1.59,
      "summer": -1.9,
      "annual": -0.31,
-     "area_km2": 2.8891
+     "area_km2": 2.8891,
+     "src": "fog-2026"
     },
     {
      "year": 2020,
-     "winter": 1.7,
-     "summer": -1.83,
-     "annual": -0.14,
-     "area_km2": 2.8891
+     "winter": null,
+     "summer": null,
+     "annual": 0.136,
+     "area_km2": 2.8891,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.14
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.823,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -0.212,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -0.812,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -2.846,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": 0.066,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -2232,195 +3015,225 @@
    "starts": 1992,
    "ends": 2018,
    "n_years": 27,
+   "release": "WGMS FoG 2022 (OGGM extract)",
+   "revised": 0,
+   "added": 0,
    "rows": [
     {
      "year": 1992,
      "winter": null,
      "summer": null,
      "annual": -0.9,
-     "area_km2": 2.18
+     "area_km2": 2.18,
+     "src": "fog-2022"
     },
     {
      "year": 1993,
      "winter": null,
      "summer": null,
      "annual": 0.516,
-     "area_km2": 2.18
+     "area_km2": 2.18,
+     "src": "fog-2022"
     },
     {
      "year": 1994,
      "winter": null,
      "summer": null,
      "annual": -0.088,
-     "area_km2": 2.18
+     "area_km2": 2.18,
+     "src": "fog-2022"
     },
     {
      "year": 1995,
      "winter": null,
      "summer": null,
      "annual": -0.703,
-     "area_km2": 2.18
+     "area_km2": 2.18,
+     "src": "fog-2022"
     },
     {
      "year": 1996,
      "winter": null,
      "summer": null,
      "annual": -0.675,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2022"
     },
     {
      "year": 1997,
      "winter": null,
      "summer": null,
      "annual": 0.797,
-     "area_km2": 2.1
+     "area_km2": 2.1,
+     "src": "fog-2022"
     },
     {
      "year": 1998,
      "winter": null,
      "summer": null,
      "annual": -1.962,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2022"
     },
     {
      "year": 1999,
      "winter": null,
      "summer": null,
      "annual": -0.333,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2022"
     },
     {
      "year": 2000,
      "winter": null,
      "summer": null,
      "annual": 0.077,
-     "area_km2": 1.9667
+     "area_km2": 1.9667,
+     "src": "fog-2022"
     },
     {
      "year": 2001,
      "winter": null,
      "summer": null,
      "annual": 0.557,
-     "area_km2": 1.9517
+     "area_km2": 1.9517,
+     "src": "fog-2022"
     },
     {
      "year": 2002,
      "winter": null,
      "summer": null,
      "annual": -0.058,
-     "area_km2": 1.9477
+     "area_km2": 1.9477,
+     "src": "fog-2022"
     },
     {
      "year": 2003,
      "winter": null,
      "summer": null,
      "annual": -0.086,
-     "area_km2": 1.9301
+     "area_km2": 1.9301,
+     "src": "fog-2022"
     },
     {
      "year": 2004,
      "winter": null,
      "summer": null,
      "annual": -0.521,
-     "area_km2": 1.9192
+     "area_km2": 1.9192,
+     "src": "fog-2022"
     },
     {
      "year": 2005,
      "winter": null,
      "summer": null,
      "annual": -1.559,
-     "area_km2": 1.8857
+     "area_km2": 1.8857,
+     "src": "fog-2022"
     },
     {
      "year": 2006,
      "winter": null,
      "summer": null,
      "annual": -0.196,
-     "area_km2": 1.8809044
+     "area_km2": 1.8809044,
+     "src": "fog-2022"
     },
     {
      "year": 2007,
      "winter": null,
      "summer": null,
      "annual": -0.173,
-     "area_km2": 1.8707383
+     "area_km2": 1.8707383,
+     "src": "fog-2022"
     },
     {
      "year": 2008,
      "winter": null,
      "summer": null,
      "annual": 0.257,
-     "area_km2": 1.8708
+     "area_km2": 1.8708,
+     "src": "fog-2022"
     },
     {
      "year": 2009,
      "winter": null,
      "summer": null,
      "annual": -0.545,
-     "area_km2": 1.9261291
+     "area_km2": 1.9261291,
+     "src": "fog-2022"
     },
     {
      "year": 2010,
      "winter": null,
      "summer": null,
      "annual": -0.671,
-     "area_km2": 1.91
+     "area_km2": 1.91,
+     "src": "fog-2022"
     },
     {
      "year": 2011,
      "winter": null,
      "summer": null,
      "annual": -0.221,
-     "area_km2": 1.904
+     "area_km2": 1.904,
+     "src": "fog-2022"
     },
     {
      "year": 2012,
      "winter": null,
      "summer": null,
      "annual": -0.823,
-     "area_km2": 1.897634
+     "area_km2": 1.897634,
+     "src": "fog-2022"
     },
     {
      "year": 2013,
      "winter": null,
      "summer": null,
      "annual": 0.058,
-     "area_km2": 1.8953748
+     "area_km2": 1.8953748,
+     "src": "fog-2022"
     },
     {
      "year": 2014,
      "winter": null,
      "summer": null,
      "annual": -0.097,
-     "area_km2": 1.89312
+     "area_km2": 1.89312,
+     "src": "fog-2022"
     },
     {
      "year": 2015,
      "winter": null,
      "summer": null,
      "annual": 0.368,
-     "area_km2": 1.8891299
+     "area_km2": 1.8891299,
+     "src": "fog-2022"
     },
     {
      "year": 2016,
      "winter": null,
      "summer": null,
      "annual": -1.024,
-     "area_km2": 1.8331
+     "area_km2": 1.8331,
+     "src": "fog-2022"
     },
     {
      "year": 2017,
      "winter": null,
      "summer": null,
      "annual": -0.337,
-     "area_km2": 1.8261
+     "area_km2": 1.8261,
+     "src": "fog-2022"
     },
     {
      "year": 2018,
      "winter": null,
      "summer": null,
      "annual": 0.284,
-     "area_km2": 1.822
+     "area_km2": 1.822,
+     "src": "fog-2022"
     }
    ]
   },
@@ -2429,484 +3242,595 @@
    "wgms_name": "HINTEREIS F.",
    "rgi_id": "RGI60-11.00897",
    "starts": 1953,
-   "ends": 2020,
-   "n_years": 68,
+   "ends": 2025,
+   "n_years": 73,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 0,
+   "added": 5,
    "rows": [
     {
      "year": 1953,
      "winter": null,
      "summer": null,
      "annual": -0.54,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1954,
      "winter": null,
      "summer": null,
      "annual": -0.286,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1955,
      "winter": null,
      "summer": null,
      "annual": 0.076,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1956,
      "winter": null,
      "summer": null,
      "annual": -0.275,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1957,
      "winter": null,
      "summer": null,
      "annual": -0.189,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1958,
      "winter": null,
      "summer": null,
      "annual": -0.981,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1959,
      "winter": null,
      "summer": null,
      "annual": -0.763,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1960,
      "winter": null,
      "summer": null,
      "annual": -0.062,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1961,
      "winter": null,
      "summer": null,
      "annual": -0.205,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1962,
      "winter": null,
      "summer": null,
      "annual": -0.696,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1963,
      "winter": null,
      "summer": null,
      "annual": -0.603,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1964,
      "winter": null,
      "summer": null,
      "annual": -1.244,
-     "area_km2": 9.05
+     "area_km2": 9.05,
+     "src": "fog-2026"
     },
     {
      "year": 1965,
      "winter": null,
      "summer": null,
      "annual": 0.925,
-     "area_km2": 8.95
+     "area_km2": 8.95,
+     "src": "fog-2026"
     },
     {
      "year": 1966,
      "winter": null,
      "summer": null,
      "annual": 0.344,
-     "area_km2": 8.9
+     "area_km2": 8.9,
+     "src": "fog-2026"
     },
     {
      "year": 1967,
      "winter": null,
      "summer": null,
      "annual": 0.02,
-     "area_km2": 9.032
+     "area_km2": 9.032,
+     "src": "fog-2026"
     },
     {
      "year": 1968,
      "winter": null,
      "summer": null,
      "annual": 0.338,
-     "area_km2": 9.032
+     "area_km2": 9.032,
+     "src": "fog-2026"
     },
     {
      "year": 1969,
      "winter": null,
      "summer": null,
      "annual": -0.431,
-     "area_km2": 9.032
+     "area_km2": 9.032,
+     "src": "fog-2026"
     },
     {
      "year": 1970,
      "winter": null,
      "summer": null,
      "annual": -0.552,
-     "area_km2": 9.032
+     "area_km2": 9.032,
+     "src": "fog-2026"
     },
     {
      "year": 1971,
      "winter": null,
      "summer": null,
      "annual": -0.6,
-     "area_km2": 9
+     "area_km2": 9,
+     "src": "fog-2026"
     },
     {
      "year": 1972,
      "winter": null,
      "summer": null,
      "annual": -0.074,
-     "area_km2": 8.995
+     "area_km2": 8.995,
+     "src": "fog-2026"
     },
     {
      "year": 1973,
      "winter": null,
      "summer": null,
      "annual": -1.229,
-     "area_km2": 8.994
+     "area_km2": 8.994,
+     "src": "fog-2026"
     },
     {
      "year": 1974,
      "winter": null,
      "summer": null,
      "annual": 0.055,
-     "area_km2": 8.993
+     "area_km2": 8.993,
+     "src": "fog-2026"
     },
     {
      "year": 1975,
      "winter": null,
      "summer": null,
      "annual": 0.065,
-     "area_km2": 8.976
+     "area_km2": 8.976,
+     "src": "fog-2026"
     },
     {
      "year": 1976,
      "winter": null,
      "summer": null,
      "annual": -0.314,
-     "area_km2": 8.96
+     "area_km2": 8.96,
+     "src": "fog-2026"
     },
     {
      "year": 1977,
      "winter": null,
      "summer": null,
      "annual": 0.76,
-     "area_km2": 8.88
+     "area_km2": 8.88,
+     "src": "fog-2026"
     },
     {
      "year": 1978,
      "winter": null,
      "summer": null,
      "annual": 0.411,
-     "area_km2": 8.88
+     "area_km2": 8.88,
+     "src": "fog-2026"
     },
     {
      "year": 1979,
      "winter": null,
      "summer": null,
      "annual": -0.219,
-     "area_km2": 9.08
+     "area_km2": 9.08,
+     "src": "fog-2026"
     },
     {
      "year": 1980,
      "winter": null,
      "summer": null,
      "annual": -0.05,
-     "area_km2": 9.08
+     "area_km2": 9.08,
+     "src": "fog-2026"
     },
     {
      "year": 1981,
      "winter": null,
      "summer": null,
      "annual": -0.173,
-     "area_km2": 9.08
+     "area_km2": 9.08,
+     "src": "fog-2026"
     },
     {
      "year": 1982,
      "winter": null,
      "summer": null,
      "annual": -1.24,
-     "area_km2": 9.07
+     "area_km2": 9.07,
+     "src": "fog-2026"
     },
     {
      "year": 1983,
      "winter": null,
      "summer": null,
      "annual": -0.58,
-     "area_km2": 9.07
+     "area_km2": 9.07,
+     "src": "fog-2026"
     },
     {
      "year": 1984,
      "winter": null,
      "summer": null,
      "annual": 0.032,
-     "area_km2": 9.07
+     "area_km2": 9.07,
+     "src": "fog-2026"
     },
     {
      "year": 1985,
      "winter": null,
      "summer": null,
      "annual": -0.574,
-     "area_km2": 9.07
+     "area_km2": 9.07,
+     "src": "fog-2026"
     },
     {
      "year": 1986,
      "winter": null,
      "summer": null,
      "annual": -0.732,
-     "area_km2": 9.06
+     "area_km2": 9.06,
+     "src": "fog-2026"
     },
     {
      "year": 1987,
      "winter": null,
      "summer": null,
      "annual": -0.717,
-     "area_km2": 9.05
+     "area_km2": 9.05,
+     "src": "fog-2026"
     },
     {
      "year": 1988,
      "winter": null,
      "summer": null,
      "annual": -0.945,
-     "area_km2": 9.03
+     "area_km2": 9.03,
+     "src": "fog-2026"
     },
     {
      "year": 1989,
      "winter": null,
      "summer": null,
      "annual": -0.637,
-     "area_km2": 8.99
+     "area_km2": 8.99,
+     "src": "fog-2026"
     },
     {
      "year": 1990,
      "winter": null,
      "summer": null,
      "annual": -0.995,
-     "area_km2": 8.98
+     "area_km2": 8.98,
+     "src": "fog-2026"
     },
     {
      "year": 1991,
      "winter": null,
      "summer": null,
      "annual": -1.325,
-     "area_km2": 8.884
+     "area_km2": 8.884,
+     "src": "fog-2026"
     },
     {
      "year": 1992,
      "winter": null,
      "summer": null,
      "annual": -1.12,
-     "area_km2": 8.878
+     "area_km2": 8.878,
+     "src": "fog-2026"
     },
     {
      "year": 1993,
      "winter": null,
      "summer": null,
      "annual": -0.57,
-     "area_km2": 8.754
+     "area_km2": 8.754,
+     "src": "fog-2026"
     },
     {
      "year": 1994,
      "winter": null,
      "summer": null,
      "annual": -1.11,
-     "area_km2": 8.737
+     "area_km2": 8.737,
+     "src": "fog-2026"
     },
     {
      "year": 1995,
      "winter": null,
      "summer": null,
      "annual": -0.46,
-     "area_km2": 8.725
+     "area_km2": 8.725,
+     "src": "fog-2026"
     },
     {
      "year": 1996,
      "winter": null,
      "summer": null,
      "annual": -0.827,
-     "area_km2": 8.716
+     "area_km2": 8.716,
+     "src": "fog-2026"
     },
     {
      "year": 1997,
      "winter": null,
      "summer": null,
      "annual": -0.591,
-     "area_km2": 8.703
+     "area_km2": 8.703,
+     "src": "fog-2026"
     },
     {
      "year": 1998,
      "winter": null,
      "summer": null,
      "annual": -1.232,
-     "area_km2": 8.297
+     "area_km2": 8.297,
+     "src": "fog-2026"
     },
     {
      "year": 1999,
      "winter": null,
      "summer": null,
      "annual": -0.861,
-     "area_km2": 8.221
+     "area_km2": 8.221,
+     "src": "fog-2026"
     },
     {
      "year": 2000,
      "winter": null,
      "summer": null,
      "annual": -0.633,
-     "area_km2": 8.11
+     "area_km2": 8.11,
+     "src": "fog-2026"
     },
     {
      "year": 2001,
      "winter": null,
      "summer": null,
      "annual": -0.173,
-     "area_km2": 7.963
+     "area_km2": 7.963,
+     "src": "fog-2026"
     },
     {
      "year": 2002,
      "winter": null,
      "summer": null,
      "annual": -0.624,
-     "area_km2": 8.022418
+     "area_km2": 8.022418,
+     "src": "fog-2026"
     },
     {
      "year": 2003,
      "winter": null,
      "summer": null,
      "annual": -1.796,
-     "area_km2": 7.861354
+     "area_km2": 7.861354,
+     "src": "fog-2026"
     },
     {
      "year": 2004,
      "winter": null,
      "summer": null,
      "annual": -0.651,
-     "area_km2": 7.663986
+     "area_km2": 7.663986,
+     "src": "fog-2026"
     },
     {
      "year": 2005,
      "winter": null,
      "summer": null,
      "annual": -1.022,
-     "area_km2": 7.60546
+     "area_km2": 7.60546,
+     "src": "fog-2026"
     },
     {
      "year": 2006,
      "winter": null,
      "summer": null,
      "annual": -1.493,
-     "area_km2": 7.510351
+     "area_km2": 7.510351,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": null,
      "summer": null,
      "annual": -1.813,
-     "area_km2": 7.383123
+     "area_km2": 7.383123,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": null,
      "summer": null,
      "annual": -1.246,
-     "area_km2": 7.276113
+     "area_km2": 7.276113,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": null,
      "summer": null,
      "annual": -1.182,
-     "area_km2": 7.147819
+     "area_km2": 7.147819,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": null,
      "summer": null,
      "annual": -0.792,
-     "area_km2": 7.048214
+     "area_km2": 7.048214,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": null,
      "summer": null,
      "annual": -1.423,
-     "area_km2": 6.879002
+     "area_km2": 6.879002,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": null,
      "summer": null,
      "annual": -1.561,
-     "area_km2": 6.879
+     "area_km2": 6.879,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": 1.331,
      "summer": -1.841,
      "annual": -0.51,
-     "area_km2": 6.879
+     "area_km2": 6.879,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
      "winter": 1.372,
      "summer": -1.494,
      "annual": -0.122,
-     "area_km2": 6.659
+     "area_km2": 6.659,
+     "src": "fog-2026"
     },
     {
      "year": 2015,
      "winter": 1.367,
      "summer": -3.049,
      "annual": -1.682,
-     "area_km2": 6.6589999
+     "area_km2": 6.6589999,
+     "src": "fog-2026"
     },
     {
      "year": 2016,
      "winter": 0.948,
      "summer": -2.21,
      "annual": -1.263,
-     "area_km2": 6.659
+     "area_km2": 6.659,
+     "src": "fog-2026"
     },
     {
      "year": 2017,
      "winter": 0.892,
      "summer": -2.718,
      "annual": -1.826,
-     "area_km2": 6.659
+     "area_km2": 6.659,
+     "src": "fog-2026"
     },
     {
      "year": 2018,
      "winter": 1.207,
      "summer": -3.17,
      "annual": -1.963,
-     "area_km2": 6.389
+     "area_km2": 6.389,
+     "src": "fog-2026"
     },
     {
      "year": 2019,
      "winter": 1.65,
      "summer": -2.33,
      "annual": -0.68,
-     "area_km2": 6.224
+     "area_km2": 6.224,
+     "src": "fog-2026"
     },
     {
      "year": 2020,
      "winter": 1.396,
      "summer": -2.366,
      "annual": -0.97,
-     "area_km2": 6.142
+     "area_km2": 6.142,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.668,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -3.319,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -2.189,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.109,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -1.793,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -2915,302 +3839,395 @@
    "wgms_name": "RHONE",
    "rgi_id": "RGI50-11.01238",
    "starts": 1885,
-   "ends": 2019,
-   "n_years": 42,
+   "ends": 2025,
+   "n_years": 48,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 0,
+   "added": 6,
    "rows": [
     {
      "year": 1885,
      "winter": 0.612,
      "summer": -1.295,
      "annual": -0.683,
-     "area_km2": 19.1025
+     "area_km2": 19.1025,
+     "src": "fog-2026"
     },
     {
      "year": 1886,
      "winter": 1.268,
      "summer": -1.483,
      "annual": -0.215,
-     "area_km2": 19.07813
+     "area_km2": 19.07813,
+     "src": "fog-2026"
     },
     {
      "year": 1887,
      "winter": 0.854,
      "summer": -1.345,
      "annual": -0.491,
-     "area_km2": 19.055
+     "area_km2": 19.055,
+     "src": "fog-2026"
     },
     {
      "year": 1888,
      "winter": 1.366,
      "summer": -1.59,
      "annual": -0.224,
-     "area_km2": 19.03375
+     "area_km2": 19.03375,
+     "src": "fog-2026"
     },
     {
      "year": 1889,
      "winter": 0.661,
      "summer": -1.215,
      "annual": -0.554,
-     "area_km2": 19.01375
+     "area_km2": 19.01375,
+     "src": "fog-2026"
     },
     {
      "year": 1890,
      "winter": 1.058,
      "summer": -1.116,
      "annual": -0.058,
-     "area_km2": 18.99188
+     "area_km2": 18.99188,
+     "src": "fog-2026"
     },
     {
      "year": 1891,
      "winter": 0.999,
      "summer": -0.946,
      "annual": 0.053,
-     "area_km2": 18.97437
+     "area_km2": 18.97437,
+     "src": "fog-2026"
     },
     {
      "year": 1892,
      "winter": 1.416,
      "summer": -1.964,
      "annual": -0.548,
-     "area_km2": 18.95
+     "area_km2": 18.95,
+     "src": "fog-2026"
     },
     {
      "year": 1893,
      "winter": 0.949,
      "summer": -1.566,
      "annual": -0.617,
-     "area_km2": 18.93125
+     "area_km2": 18.93125,
+     "src": "fog-2026"
     },
     {
      "year": 1894,
      "winter": 0.739,
      "summer": -1.823,
      "annual": -1.084,
-     "area_km2": 18.90875
+     "area_km2": 18.90875,
+     "src": "fog-2026"
     },
     {
      "year": 1895,
      "winter": 1.476,
      "summer": -2.301,
      "annual": -0.825,
-     "area_km2": 18.88625
+     "area_km2": 18.88625,
+     "src": "fog-2026"
     },
     {
      "year": 1896,
      "winter": 2.017,
      "summer": -1.721,
      "annual": 0.296,
-     "area_km2": 18.86625
+     "area_km2": 18.86625,
+     "src": "fog-2026"
     },
     {
      "year": 1897,
      "winter": 2.325,
      "summer": -1.863,
      "annual": 0.462,
-     "area_km2": 18.84
+     "area_km2": 18.84,
+     "src": "fog-2026"
     },
     {
      "year": 1898,
      "winter": 0.794,
      "summer": -1.219,
      "annual": -0.425,
-     "area_km2": 18.81063
+     "area_km2": 18.81063,
+     "src": "fog-2026"
     },
     {
      "year": 1899,
      "winter": 1.514,
      "summer": -2.155,
      "annual": -0.641,
-     "area_km2": 18.78875
+     "area_km2": 18.78875,
+     "src": "fog-2026"
     },
     {
      "year": 1900,
      "winter": 1.432,
      "summer": -2.29,
      "annual": -0.858,
-     "area_km2": 18.77062
+     "area_km2": 18.77062,
+     "src": "fog-2026"
     },
     {
      "year": 1901,
      "winter": 1.743,
      "summer": -2.452,
      "annual": -0.709,
-     "area_km2": 18.74687
+     "area_km2": 18.74687,
+     "src": "fog-2026"
     },
     {
      "year": 1902,
      "winter": 1.463,
      "summer": -1.644,
      "annual": -0.181,
-     "area_km2": 18.72812
+     "area_km2": 18.72812,
+     "src": "fog-2026"
     },
     {
      "year": 1903,
      "winter": 0.784,
      "summer": -1.129,
      "annual": -0.345,
-     "area_km2": 18.70938
+     "area_km2": 18.70938,
+     "src": "fog-2026"
     },
     {
      "year": 1904,
      "winter": 1.61,
      "summer": -2.246,
      "annual": -0.636,
-     "area_km2": 18.69625
+     "area_km2": 18.69625,
+     "src": "fog-2026"
     },
     {
      "year": 1905,
      "winter": 0.926,
      "summer": -2.209,
      "annual": -1.283,
-     "area_km2": 18.67375
+     "area_km2": 18.67375,
+     "src": "fog-2026"
     },
     {
      "year": 1906,
      "winter": 1.277,
      "summer": -2.29,
      "annual": -1.013,
-     "area_km2": 18.6625
+     "area_km2": 18.6625,
+     "src": "fog-2026"
     },
     {
      "year": 1907,
      "winter": 1.207,
      "summer": -1.095,
      "annual": 0.112,
-     "area_km2": 18.65375
+     "area_km2": 18.65375,
+     "src": "fog-2026"
     },
     {
      "year": 1908,
      "winter": 1.089,
      "summer": -0.934,
      "annual": 0.155,
-     "area_km2": 18.65
+     "area_km2": 18.65,
+     "src": "fog-2026"
     },
     {
      "year": 1909,
      "winter": 0.753,
      "summer": -0.985,
      "annual": -0.232,
-     "area_km2": 18.64937
+     "area_km2": 18.64937,
+     "src": "fog-2026"
     },
     {
      "year": 1980,
      "winter": 2.305,
      "summer": -1.416,
      "annual": 0.889,
-     "area_km2": 17.38
+     "area_km2": 17.38,
+     "src": "fog-2026"
     },
     {
      "year": 1981,
      "winter": 2.041,
      "summer": -1.954,
      "annual": 0.087,
-     "area_km2": 17.38
+     "area_km2": 17.38,
+     "src": "fog-2026"
     },
     {
      "year": 1982,
      "winter": 2.753,
      "summer": -3.128,
      "annual": -0.375,
-     "area_km2": 17.38
+     "area_km2": 17.38,
+     "src": "fog-2026"
     },
     {
      "year": 1983,
      "winter": null,
      "summer": null,
      "annual": -0.16,
-     "area_km2": 17.38
+     "area_km2": 17.38,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": 1.181,
      "summer": -1.258,
      "annual": -0.077,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": 1.416,
      "summer": -2.555,
      "annual": -1.139,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": 1.56,
      "summer": -2.082,
      "annual": -0.522,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": 1.287,
      "summer": -1.678,
      "annual": -0.391,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": 1.135,
      "summer": -2.68,
      "annual": -1.545,
-     "area_km2": 15.81
+     "area_km2": 15.81,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": 1.529,
      "summer": -2.537,
      "annual": -1.008,
-     "area_km2": 15.81
+     "area_km2": 15.81,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": 1.721,
      "summer": -1.881,
      "annual": -0.16,
-     "area_km2": 15.81
+     "area_km2": 15.81,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
      "winter": 1.195,
      "summer": -1.578,
      "annual": -0.383,
-     "area_km2": 15.80813
+     "area_km2": 15.80813,
+     "src": "fog-2026"
     },
     {
      "year": 2015,
      "winter": 1.723,
      "summer": -2.806,
      "annual": -1.083,
-     "area_km2": 15.5712499
+     "area_km2": 15.5712499,
+     "src": "fog-2026"
     },
     {
      "year": 2016,
      "winter": 1.402,
      "summer": -1.856,
      "annual": -0.454,
-     "area_km2": 15.57125
+     "area_km2": 15.57125,
+     "src": "fog-2026"
     },
     {
      "year": 2017,
      "winter": 1.418,
      "summer": -2.666,
      "annual": -1.248,
-     "area_km2": 15.52313
+     "area_km2": 15.52313,
+     "src": "fog-2026"
     },
     {
      "year": 2018,
      "winter": 2.171,
      "summer": -3.171,
      "annual": -1,
-     "area_km2": 15.19375
+     "area_km2": 15.19375,
+     "src": "fog-2026"
     },
     {
      "year": 2019,
      "winter": 1.941,
      "summer": -2.714,
      "annual": -0.773,
-     "area_km2": 15.30625
+     "area_km2": 15.30625,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2020,
+     "winter": null,
+     "summer": null,
+     "annual": -0.686,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.102,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -2.653,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -2.129,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -0.547,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -1.115,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -3219,64 +4236,99 @@
    "wgms_name": "MER DE GLACE",
    "rgi_id": "RGI50-11.02923",
    "starts": 1968,
-   "ends": 1975,
-   "n_years": 8,
+   "ends": 2025,
+   "n_years": 11,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 0,
+   "added": 3,
    "rows": [
     {
      "year": 1968,
      "winter": null,
      "summer": null,
      "annual": -0.4,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1969,
      "winter": null,
      "summer": null,
      "annual": 0.43,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1970,
      "winter": null,
      "summer": null,
      "annual": 0.53,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1971,
      "winter": null,
      "summer": null,
      "annual": -0.41,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1972,
      "winter": null,
      "summer": null,
      "annual": 0.3,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1973,
      "winter": null,
      "summer": null,
      "annual": -0.65,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1974,
      "winter": null,
      "summer": null,
      "annual": -0.35,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1975,
      "winter": null,
      "summer": null,
      "annual": 0.36,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -2.46,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.96,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -2.94,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -3285,421 +4337,537 @@
    "wgms_name": "NIGARDSBREEN",
    "rgi_id": "RGI60-08.01126",
    "starts": 1962,
-   "ends": 2020,
-   "n_years": 59,
+   "ends": 2025,
+   "n_years": 64,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 7,
+   "added": 5,
    "rows": [
     {
      "year": 1962,
      "winter": 2.115,
      "summer": 0.181,
      "annual": 2.296,
-     "area_km2": 48.118
+     "area_km2": 48.118,
+     "src": "fog-2026"
     },
     {
      "year": 1963,
      "winter": 1.783,
      "summer": -1.957,
      "annual": -0.173,
-     "area_km2": 48.118
+     "area_km2": 48.118,
+     "src": "fog-2026"
     },
     {
      "year": 1964,
      "winter": 1.97,
      "summer": -1.184,
      "annual": 0.786,
-     "area_km2": 48.118
+     "area_km2": 48.118,
+     "src": "fog-2026"
     },
     {
      "year": 1965,
      "winter": 1.932,
      "summer": -1.155,
      "annual": 0.776,
-     "area_km2": 48.118
+     "area_km2": 48.118,
+     "src": "fog-2026"
     },
     {
      "year": 1966,
      "winter": 1.751,
      "summer": -2.671,
      "annual": -0.92,
-     "area_km2": 48.118
+     "area_km2": 48.118,
+     "src": "fog-2026"
     },
     {
      "year": 1967,
      "winter": 2.997,
      "summer": -1.173,
      "annual": 1.823,
-     "area_km2": 48.118
+     "area_km2": 48.118,
+     "src": "fog-2026"
     },
     {
      "year": 1968,
      "winter": 2.506,
      "summer": -2.388,
      "annual": 0.117,
-     "area_km2": 48.118
+     "area_km2": 48.118,
+     "src": "fog-2026"
     },
     {
      "year": 1969,
      "winter": 1.686,
      "summer": -3.135,
      "annual": -1.449,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1970,
      "winter": 1.665,
      "summer": -2.297,
      "annual": -0.631,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1971,
      "winter": 2.166,
      "summer": -1.312,
      "annual": 0.853,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1972,
      "winter": 1.79,
      "summer": -2.017,
      "annual": -0.226,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1973,
      "winter": 2.469,
      "summer": -1.407,
      "annual": 1.061,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1974,
      "winter": 1.929,
      "summer": -1.721,
      "annual": 0.208,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1975,
      "winter": 2.432,
      "summer": -2.412,
      "annual": 0.02,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1976,
      "winter": 2.872,
      "summer": -2.435,
      "annual": 0.436,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1977,
      "winter": 1.49,
      "summer": -2.325,
      "annual": -0.834,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1978,
      "winter": 2,
      "summer": -2.238,
      "annual": -0.238,
-     "area_km2": 48.0999984
+     "area_km2": 48.0999984,
+     "src": "fog-2026"
     },
     {
      "year": 1979,
      "winter": 2.434,
      "summer": -2.097,
      "annual": 0.337,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1980,
      "winter": 1.757,
      "summer": -3.033,
      "annual": -1.276,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1981,
      "winter": 2.19,
      "summer": -1.978,
      "annual": 0.211,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1982,
      "winter": 1.877,
      "summer": -2.297,
      "annual": -0.419,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1983,
      "winter": 2.94,
      "summer": -2.028,
      "annual": 0.911,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1984,
      "winter": 2.489,
      "summer": -2.297,
      "annual": 0.191,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1985,
      "winter": 1.601,
      "summer": -2.393,
      "annual": -0.791,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1986,
      "winter": 1.338,
      "summer": -1.954,
      "annual": -0.616,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1987,
      "winter": 2.482,
      "summer": -1.572,
      "annual": 0.91,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1988,
      "winter": 2.074,
      "summer": -3.371,
      "annual": -1.297,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1989,
      "winter": 3.357,
      "summer": -0.935,
      "annual": 2.422,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1990,
      "winter": 3.342,
      "summer": -2.22,
      "annual": 1.121,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1991,
      "winter": 1.785,
      "summer": -2.028,
      "annual": -0.243,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1992,
      "winter": 2.665,
      "summer": -1.532,
      "annual": 1.132,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1993,
      "winter": 2.525,
      "summer": -1.402,
      "annual": 1.123,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1994,
      "winter": 2.007,
      "summer": -1.855,
      "annual": 0.152,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1995,
      "winter": 2.849,
      "summer": -2.032,
      "annual": 0.817,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1996,
      "winter": 1.248,
      "summer": -1.99,
      "annual": -0.741,
-     "area_km2": 48.8600006
+     "area_km2": 48.8600006,
+     "src": "fog-2026"
     },
     {
      "year": 1997,
      "winter": 2.449,
      "summer": -2.979,
      "annual": -0.53,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 1998,
      "winter": 2.287,
      "summer": -1.829,
      "annual": 0.458,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 1999,
      "winter": 2.208,
      "summer": -2.388,
      "annual": -0.18,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2000,
      "winter": 3.127,
      "summer": -1.856,
      "annual": 1.271,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2001,
      "winter": 1.686,
      "summer": -2.085,
      "annual": -0.398,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2002,
      "winter": 2.244,
      "summer": -3.47,
      "annual": -1.225,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2003,
      "winter": 1.486,
      "summer": -3.006,
      "annual": -1.52,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2004,
      "winter": 1.831,
      "summer": -2.23,
      "annual": -0.398,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2005,
      "winter": 2.717,
      "summer": -1.828,
      "annual": 0.888,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2006,
      "winter": 1.627,
      "summer": -3.355,
      "annual": -1.727,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": 2.859,
      "summer": -2.199,
      "annual": 0.66,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": 2.822,
      "summer": -2.041,
      "annual": 0.781,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": 2.037,
      "summer": -2.097,
      "annual": -0.06,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": 1.356,
      "summer": -2.457,
      "annual": -1.1,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": 1.726,
      "summer": -2.859,
      "annual": -1.133,
-     "area_km2": 47.9269981
+     "area_km2": 47.9269981,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": 2.711,
      "summer": -1.728,
      "annual": 0.983,
-     "area_km2": 46.611
+     "area_km2": 46.611,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": 2.303,
      "summer": -2.958,
      "annual": -0.654,
-     "area_km2": 46.611
+     "area_km2": 46.611,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
-     "winter": 2.726,
-     "summer": -3.07,
-     "annual": -0.343,
-     "area_km2": 46.611
+     "winter": null,
+     "summer": null,
+     "annual": -0.751,
+     "area_km2": 46.611,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.343
     },
     {
      "year": 2015,
-     "winter": 3.065,
-     "summer": -1.353,
-     "annual": 1.712,
-     "area_km2": 46.611
+     "winter": null,
+     "summer": null,
+     "annual": 1.305,
+     "area_km2": 46.611,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.712
     },
     {
      "year": 2016,
-     "winter": 2.813,
-     "summer": -2.327,
-     "annual": 0.486,
-     "area_km2": 46.61
+     "winter": null,
+     "summer": null,
+     "annual": 0.079,
+     "area_km2": 46.61,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.486
     },
     {
      "year": 2017,
-     "winter": 2.167,
-     "summer": -1.58,
-     "annual": 0.587,
-     "area_km2": 46.611
+     "winter": null,
+     "summer": null,
+     "annual": 0.227,
+     "area_km2": 46.611,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.587
     },
     {
      "year": 2018,
-     "winter": 2.367,
-     "summer": -3.219,
-     "annual": -0.852,
-     "area_km2": 46.611
+     "winter": null,
+     "summer": null,
+     "annual": -1.203,
+     "area_km2": 46.611,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.852
     },
     {
      "year": 2019,
-     "winter": 2.042,
-     "summer": -2.308,
-     "annual": -0.266,
-     "area_km2": 46.611
+     "winter": null,
+     "summer": null,
+     "annual": -0.622,
+     "area_km2": 46.611,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.266
     },
     {
      "year": 2020,
      "winter": null,
      "summer": null,
-     "annual": 1.608,
-     "area_km2": 46.611
+     "annual": 1.247,
+     "area_km2": 46.611,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.608
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.566,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": 0.736,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -0.44,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -0.58,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": 0.1,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -3708,393 +4876,601 @@
    "wgms_name": "WOLVERINE",
    "rgi_id": "RGI60-01.09162",
    "starts": 1966,
-   "ends": 2020,
-   "n_years": 55,
+   "ends": 2025,
+   "n_years": 60,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 55,
+   "added": 5,
    "rows": [
     {
      "year": 1966,
-     "winter": 1.61,
-     "summer": -2.25,
-     "annual": -0.64,
-     "area_km2": 17.17
+     "winter": null,
+     "summer": null,
+     "annual": -0.48,
+     "area_km2": 17.17,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.64
     },
     {
      "year": 1967,
-     "winter": 1.69,
-     "summer": -2.58,
-     "annual": -0.89,
-     "area_km2": 17.15
+     "winter": null,
+     "summer": null,
+     "annual": -1.2,
+     "area_km2": 17.15,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.89
     },
     {
      "year": 1968,
-     "winter": 1.89,
-     "summer": -2.79,
-     "annual": -0.9,
-     "area_km2": 17.13
+     "winter": null,
+     "summer": null,
+     "annual": -0.8,
+     "area_km2": 17.13,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.9
     },
     {
      "year": 1969,
-     "winter": 2.25,
-     "summer": -2.06,
-     "annual": 0.19,
-     "area_km2": 17.11
+     "winter": null,
+     "summer": null,
+     "annual": 0.29,
+     "area_km2": 17.11,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.19
     },
     {
      "year": 1970,
-     "winter": 3.47,
-     "summer": -1.74,
-     "annual": 1.73,
-     "area_km2": 17.09
+     "winter": null,
+     "summer": null,
+     "annual": 1.83,
+     "area_km2": 17.09,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.73
     },
     {
      "year": 1971,
-     "winter": 2.9,
-     "summer": -2.59,
-     "annual": 0.31,
-     "area_km2": 17.07
+     "winter": null,
+     "summer": null,
+     "annual": 0.39,
+     "area_km2": 17.07,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.31
     },
     {
      "year": 1972,
-     "winter": 1.04,
-     "summer": -2.11,
-     "annual": -1.07,
-     "area_km2": 17.05
+     "winter": null,
+     "summer": null,
+     "annual": -0.96,
+     "area_km2": 17.05,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.07
     },
     {
      "year": 1973,
-     "winter": 2.38,
-     "summer": -1.93,
-     "annual": 0.45,
-     "area_km2": 17.04
+     "winter": null,
+     "summer": null,
+     "annual": 0.54,
+     "area_km2": 17.04,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.45
     },
     {
      "year": 1974,
-     "winter": 1.57,
-     "summer": -2.82,
-     "annual": -1.25,
-     "area_km2": 17.03
+     "winter": null,
+     "summer": null,
+     "annual": -1.14,
+     "area_km2": 17.03,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.25
     },
     {
      "year": 1975,
-     "winter": 2.21,
-     "summer": -2.33,
-     "annual": -0.12,
-     "area_km2": 17.03
+     "winter": null,
+     "summer": null,
+     "annual": -0.02,
+     "area_km2": 17.03,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.12
     },
     {
      "year": 1976,
-     "winter": 1.46,
-     "summer": -2.25,
-     "annual": -0.79,
-     "area_km2": 17.02
+     "winter": null,
+     "summer": null,
+     "annual": -0.68,
+     "area_km2": 17.02,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.79
     },
     {
      "year": 1977,
-     "winter": 3.62,
-     "summer": -1.65,
-     "annual": 1.97,
-     "area_km2": 17.02
+     "winter": null,
+     "summer": null,
+     "annual": 2.08,
+     "area_km2": 17.02,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.97
     },
     {
      "year": 1978,
-     "winter": 2.65,
-     "summer": -1.83,
-     "annual": 0.82,
-     "area_km2": 17.01
+     "winter": null,
+     "summer": null,
+     "annual": 0.9,
+     "area_km2": 17.01,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.82
     },
     {
      "year": 1979,
-     "winter": 1.8,
-     "summer": -3.15,
-     "annual": -1.35,
-     "area_km2": 17
+     "winter": null,
+     "summer": null,
+     "annual": -1.22,
+     "area_km2": 17,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.35
     },
     {
      "year": 1980,
-     "winter": 4.6,
-     "summer": -2.52,
-     "annual": 2.08,
-     "area_km2": 16.99
+     "winter": null,
+     "summer": null,
+     "annual": 2.01,
+     "area_km2": 16.99,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 2.08
     },
     {
      "year": 1981,
-     "winter": 6.68,
-     "summer": -3.12,
-     "annual": 3.56,
-     "area_km2": 16.98
+     "winter": null,
+     "summer": null,
+     "annual": 3.49,
+     "area_km2": 16.98,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 3.56
     },
     {
      "year": 1982,
-     "winter": 2.17,
-     "summer": -2.59,
-     "annual": -0.42,
-     "area_km2": 16.96
+     "winter": null,
+     "summer": null,
+     "annual": -0.5,
+     "area_km2": 16.96,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.42
     },
     {
      "year": 1983,
-     "winter": 2.1,
-     "summer": -2.66,
-     "annual": -0.56,
-     "area_km2": 16.95
+     "winter": null,
+     "summer": null,
+     "annual": -0.67,
+     "area_km2": 16.95,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.56
     },
     {
      "year": 1984,
-     "winter": 1.76,
-     "summer": -2.22,
-     "annual": -0.46,
-     "area_km2": 16.94
+     "winter": null,
+     "summer": null,
+     "annual": -0.55,
+     "area_km2": 16.94,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.46
     },
     {
      "year": 1985,
-     "winter": 2.12,
-     "summer": -1.95,
-     "annual": 0.17,
-     "area_km2": 16.92
+     "winter": null,
+     "summer": null,
+     "annual": 0.07,
+     "area_km2": 16.92,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.17
     },
     {
      "year": 1986,
-     "winter": 2.4,
-     "summer": -2.91,
-     "annual": -0.51,
-     "area_km2": 16.91
+     "winter": null,
+     "summer": null,
+     "annual": -0.6,
+     "area_km2": 16.91,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.51
     },
     {
      "year": 1987,
-     "winter": 3.43,
-     "summer": -2.12,
-     "annual": 1.31,
-     "area_km2": 16.9
+     "winter": null,
+     "summer": null,
+     "annual": 1.22,
+     "area_km2": 16.9,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.31
     },
     {
      "year": 1988,
-     "winter": 2.82,
-     "summer": -1.89,
-     "annual": 0.93,
-     "area_km2": 16.88
+     "winter": null,
+     "summer": null,
+     "annual": 0.83,
+     "area_km2": 16.88,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.93
     },
     {
      "year": 1989,
-     "winter": 1.46,
-     "summer": -3.18,
-     "annual": -1.72,
-     "area_km2": 16.87
+     "winter": null,
+     "summer": null,
+     "annual": -1.8,
+     "area_km2": 16.87,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.72
     },
     {
      "year": 1990,
-     "winter": 1.19,
-     "summer": -3.68,
-     "annual": -2.49,
-     "area_km2": 16.86
+     "winter": null,
+     "summer": null,
+     "annual": -2.6,
+     "area_km2": 16.86,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.49
     },
     {
      "year": 1991,
-     "winter": 2.02,
-     "summer": -2.57,
-     "annual": -0.55,
-     "area_km2": 16.85
+     "winter": null,
+     "summer": null,
+     "annual": -0.65,
+     "area_km2": 16.85,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.55
     },
     {
      "year": 1992,
-     "winter": 1.99,
-     "summer": -2.32,
-     "annual": -0.33,
-     "area_km2": 16.83
+     "winter": null,
+     "summer": null,
+     "annual": -0.42,
+     "area_km2": 16.83,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.33
     },
     {
      "year": 1993,
-     "winter": 2.57,
-     "summer": -3.41,
-     "annual": -0.84,
-     "area_km2": 16.82
+     "winter": null,
+     "summer": null,
+     "annual": -0.94,
+     "area_km2": 16.82,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.84
     },
     {
      "year": 1994,
-     "winter": 2.14,
-     "summer": -2.67,
-     "annual": -0.53,
-     "area_km2": 16.81
+     "winter": null,
+     "summer": null,
+     "annual": -0.62,
+     "area_km2": 16.81,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.53
     },
     {
      "year": 1995,
-     "winter": 2.44,
-     "summer": -3.09,
-     "annual": -0.65,
-     "area_km2": 16.79
+     "winter": null,
+     "summer": null,
+     "annual": -0.75,
+     "area_km2": 16.79,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.65
     },
     {
      "year": 1996,
-     "winter": 1.23,
-     "summer": -2.98,
-     "annual": -1.75,
-     "area_km2": 16.75
+     "winter": null,
+     "summer": null,
+     "annual": -1.85,
+     "area_km2": 16.75,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.75
     },
     {
      "year": 1997,
-     "winter": 1.91,
-     "summer": -3.96,
-     "annual": -2.05,
-     "area_km2": 16.71
+     "winter": null,
+     "summer": null,
+     "annual": -2.15,
+     "area_km2": 16.71,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.05
     },
     {
      "year": 1998,
-     "winter": 2.88,
-     "summer": -2.16,
-     "annual": 0.72,
-     "area_km2": 16.67
+     "winter": null,
+     "summer": null,
+     "annual": 0.63,
+     "area_km2": 16.67,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.72
     },
     {
      "year": 1999,
-     "winter": 1.87,
-     "summer": -2.83,
-     "annual": -0.96,
-     "area_km2": 16.63
+     "winter": null,
+     "summer": null,
+     "annual": -1.06,
+     "area_km2": 16.63,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.96
     },
     {
      "year": 2000,
-     "winter": 2.14,
-     "summer": -1.62,
-     "annual": 0.52,
-     "area_km2": 16.59
+     "winter": null,
+     "summer": null,
+     "annual": 0.43,
+     "area_km2": 16.59,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.52
     },
     {
      "year": 2001,
-     "winter": 3.39,
-     "summer": -3.04,
-     "annual": 0.35,
-     "area_km2": 16.55
+     "winter": null,
+     "summer": null,
+     "annual": 0.25,
+     "area_km2": 16.55,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.35
     },
     {
      "year": 2002,
-     "winter": 2.47,
-     "summer": -3,
-     "annual": -0.53,
-     "area_km2": 16.51
+     "winter": null,
+     "summer": null,
+     "annual": -0.61,
+     "area_km2": 16.51,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.53
     },
     {
      "year": 2003,
-     "winter": 1.99,
-     "summer": -2.16,
-     "annual": -0.17,
-     "area_km2": 16.47
+     "winter": null,
+     "summer": null,
+     "annual": -0.26,
+     "area_km2": 16.47,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.17
     },
     {
      "year": 2004,
-     "winter": 2.06,
-     "summer": -4.49,
-     "annual": -2.43,
-     "area_km2": 16.43
+     "winter": null,
+     "summer": null,
+     "annual": -2.51,
+     "area_km2": 16.43,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.43
     },
     {
      "year": 2005,
-     "winter": 1.99,
-     "summer": -3.73,
-     "annual": -1.74,
-     "area_km2": 16.39
+     "winter": null,
+     "summer": null,
+     "annual": -1.82,
+     "area_km2": 16.39,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.74
     },
     {
      "year": 2006,
-     "winter": 2.77,
-     "summer": -3.63,
-     "annual": -0.86,
-     "area_km2": 16.35
+     "winter": null,
+     "summer": null,
+     "annual": -0.95,
+     "area_km2": 16.35,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.86
     },
     {
      "year": 2007,
-     "winter": 1.99,
-     "summer": -2.61,
-     "annual": -0.62,
-     "area_km2": 16.34
+     "winter": null,
+     "summer": null,
+     "annual": -0.52,
+     "area_km2": 16.34,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.62
     },
     {
      "year": 2008,
-     "winter": 3.94,
-     "summer": -2.71,
-     "annual": 1.23,
-     "area_km2": 16.33
+     "winter": null,
+     "summer": null,
+     "annual": 1.34,
+     "area_km2": 16.33,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.23
     },
     {
      "year": 2009,
-     "winter": 1.68,
-     "summer": -3.32,
-     "annual": -1.64,
-     "area_km2": 16.26
+     "winter": null,
+     "summer": null,
+     "annual": -1.52,
+     "area_km2": 16.26,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.64
     },
     {
      "year": 2010,
-     "winter": 2.5,
-     "summer": -2.18,
-     "annual": 0.32,
-     "area_km2": 16.2
+     "winter": null,
+     "summer": null,
+     "annual": 0.42,
+     "area_km2": 16.2,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.32
     },
     {
      "year": 2011,
-     "winter": 2.04,
-     "summer": -3.19,
-     "annual": -1.15,
-     "area_km2": 16.15
+     "winter": null,
+     "summer": null,
+     "annual": -1.04,
+     "area_km2": 16.15,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.15
     },
     {
      "year": 2012,
-     "winter": 2.86,
-     "summer": -1.54,
-     "annual": 1.32,
-     "area_km2": 16.09
+     "winter": null,
+     "summer": null,
+     "annual": 1.43,
+     "area_km2": 16.09,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.32
     },
     {
      "year": 2013,
-     "winter": 1.99,
-     "summer": -3.78,
-     "annual": -1.79,
-     "area_km2": 16.03
+     "winter": null,
+     "summer": null,
+     "annual": -1.67,
+     "area_km2": 16.03,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.79
     },
     {
      "year": 2014,
-     "winter": 1.44,
-     "summer": -3.21,
-     "annual": -1.77,
-     "area_km2": 15.97
+     "winter": null,
+     "summer": null,
+     "annual": -1.66,
+     "area_km2": 15.97,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.77
     },
     {
      "year": 2015,
-     "winter": 2.19,
-     "summer": -3.04,
-     "annual": -0.85,
-     "area_km2": 15.92
+     "winter": null,
+     "summer": null,
+     "annual": -0.74,
+     "area_km2": 15.92,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.85
     },
     {
      "year": 2016,
-     "winter": 3.73,
-     "summer": -3.88,
-     "annual": -0.15,
-     "area_km2": 15.86
+     "winter": null,
+     "summer": null,
+     "annual": -0.03,
+     "area_km2": 15.86,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.15
     },
     {
      "year": 2017,
-     "winter": 1.63,
-     "summer": -2.71,
-     "annual": -1.08,
-     "area_km2": 15.74
+     "winter": null,
+     "summer": null,
+     "annual": -0.97,
+     "area_km2": 15.74,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.08
     },
     {
      "year": 2018,
-     "winter": 1.62,
-     "summer": -3.48,
-     "annual": -1.86,
-     "area_km2": 15.63
+     "winter": null,
+     "summer": null,
+     "annual": -1.77,
+     "area_km2": 15.63,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.86
     },
     {
      "year": 2019,
-     "winter": 2.57,
-     "summer": -4.1,
-     "annual": -1.53,
-     "area_km2": 15.51
+     "winter": null,
+     "summer": null,
+     "annual": -1.36,
+     "area_km2": 15.51,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.53
     },
     {
      "year": 2020,
-     "winter": 1.58,
-     "summer": -3.44,
-     "annual": -1.86,
-     "area_km2": 15.4
+     "winter": null,
+     "summer": null,
+     "annual": -1.72,
+     "area_km2": 15.4,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.86
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.82,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -1.11,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -1.09,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -0.65,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": 0.64,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -4103,484 +5479,731 @@
    "wgms_name": "LEMON CREEK",
    "rgi_id": "RGI60-01.01104",
    "starts": 1953,
-   "ends": 2020,
-   "n_years": 68,
+   "ends": 2025,
+   "n_years": 73,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 68,
+   "added": 5,
    "rows": [
     {
      "year": 1953,
      "winter": null,
      "summer": null,
-     "annual": -0.47,
-     "area_km2": 12.47
+     "annual": -0.49,
+     "area_km2": 12.47,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.47
     },
     {
      "year": 1954,
      "winter": null,
      "summer": null,
-     "annual": -0.09,
-     "area_km2": 12.45
+     "annual": -0.11,
+     "area_km2": 12.45,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.09
     },
     {
      "year": 1955,
      "winter": null,
      "summer": null,
-     "annual": 1.21,
-     "area_km2": 12.44
+     "annual": 1.19,
+     "area_km2": 12.44,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.21
     },
     {
      "year": 1956,
      "winter": null,
      "summer": null,
-     "annual": -0.55,
-     "area_km2": 12.42
+     "annual": -0.57,
+     "area_km2": 12.42,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.55
     },
     {
      "year": 1957,
      "winter": null,
      "summer": null,
-     "annual": 0.09,
-     "area_km2": 12.41
+     "annual": 0.07,
+     "area_km2": 12.41,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.09
     },
     {
      "year": 1958,
      "winter": null,
      "summer": null,
-     "annual": -0.49,
-     "area_km2": 12.4
+     "annual": -0.51,
+     "area_km2": 12.4,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.49
     },
     {
      "year": 1959,
      "winter": null,
      "summer": null,
-     "annual": -0.81,
-     "area_km2": 12.38
+     "annual": -0.83,
+     "area_km2": 12.38,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.81
     },
     {
      "year": 1960,
      "winter": null,
      "summer": null,
-     "annual": -0.73,
-     "area_km2": 12.37
+     "annual": -0.75,
+     "area_km2": 12.37,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.73
     },
     {
      "year": 1961,
      "winter": null,
      "summer": null,
-     "annual": -0.15,
-     "area_km2": 12.35
+     "annual": -0.17,
+     "area_km2": 12.35,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.15
     },
     {
      "year": 1962,
      "winter": null,
      "summer": null,
-     "annual": -0.6,
-     "area_km2": 12.34
+     "annual": -0.62,
+     "area_km2": 12.34,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.6
     },
     {
      "year": 1963,
      "winter": null,
      "summer": null,
-     "annual": 0.26,
-     "area_km2": 12.33
+     "annual": 0.24,
+     "area_km2": 12.33,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.26
     },
     {
      "year": 1964,
      "winter": null,
      "summer": null,
-     "annual": 1.13,
-     "area_km2": 12.31
+     "annual": 1.11,
+     "area_km2": 12.31,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 1.13
     },
     {
      "year": 1965,
      "winter": null,
      "summer": null,
-     "annual": 0.17,
-     "area_km2": 12.3
+     "annual": 0.15,
+     "area_km2": 12.3,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.17
     },
     {
      "year": 1966,
      "winter": null,
      "summer": null,
-     "annual": -0.4,
-     "area_km2": 12.28
+     "annual": -0.42,
+     "area_km2": 12.28,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.4
     },
     {
      "year": 1967,
      "winter": null,
      "summer": null,
-     "annual": -0.51,
-     "area_km2": 12.27
+     "annual": -0.53,
+     "area_km2": 12.27,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.51
     },
     {
      "year": 1968,
      "winter": null,
      "summer": null,
-     "annual": -0.13,
-     "area_km2": 12.26
+     "annual": -0.15,
+     "area_km2": 12.26,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.13
     },
     {
      "year": 1969,
      "winter": null,
      "summer": null,
-     "annual": 0.3,
-     "area_km2": 12.24
+     "annual": 0.28,
+     "area_km2": 12.24,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.3
     },
     {
      "year": 1970,
      "winter": null,
      "summer": null,
-     "annual": 0,
-     "area_km2": 12.23
+     "annual": -0.02,
+     "area_km2": 12.23,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0
     },
     {
      "year": 1971,
      "winter": null,
      "summer": null,
-     "annual": -0.31,
-     "area_km2": 12.21
+     "annual": -0.33,
+     "area_km2": 12.21,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.31
     },
     {
      "year": 1972,
      "winter": null,
      "summer": null,
-     "annual": -0.56,
-     "area_km2": 12.2
+     "annual": -0.58,
+     "area_km2": 12.2,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.56
     },
     {
      "year": 1973,
      "winter": null,
      "summer": null,
-     "annual": -0.43,
-     "area_km2": 12.19
+     "annual": -0.45,
+     "area_km2": 12.19,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.43
     },
     {
      "year": 1974,
      "winter": null,
      "summer": null,
-     "annual": -0.28,
-     "area_km2": 12.17
+     "annual": -0.3,
+     "area_km2": 12.17,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.28
     },
     {
      "year": 1975,
      "winter": null,
      "summer": null,
-     "annual": 0.38,
-     "area_km2": 12.16
+     "annual": 0.36,
+     "area_km2": 12.16,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.38
     },
     {
      "year": 1976,
      "winter": null,
      "summer": null,
-     "annual": -0.16,
-     "area_km2": 12.14
+     "annual": -0.18,
+     "area_km2": 12.14,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.16
     },
     {
      "year": 1977,
      "winter": null,
      "summer": null,
-     "annual": -0.39,
-     "area_km2": 12.13
+     "annual": -0.41,
+     "area_km2": 12.13,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.39
     },
     {
      "year": 1978,
      "winter": null,
      "summer": null,
-     "annual": -0.71,
-     "area_km2": 12.12
+     "annual": -0.73,
+     "area_km2": 12.12,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.71
     },
     {
      "year": 1979,
      "winter": null,
      "summer": null,
-     "annual": -0.54,
-     "area_km2": 12.1
+     "annual": -0.56,
+     "area_km2": 12.1,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.54
     },
     {
      "year": 1980,
      "winter": null,
      "summer": null,
-     "annual": -0.18,
-     "area_km2": 12.06
+     "annual": -0.2,
+     "area_km2": 12.06,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.18
     },
     {
      "year": 1981,
      "winter": null,
      "summer": null,
-     "annual": -0.72,
-     "area_km2": 12.02
+     "annual": -0.74,
+     "area_km2": 12.02,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.72
     },
     {
      "year": 1982,
      "winter": null,
      "summer": null,
-     "annual": -0.34,
-     "area_km2": 11.97
+     "annual": -0.36,
+     "area_km2": 11.97,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.34
     },
     {
      "year": 1983,
      "winter": null,
      "summer": null,
-     "annual": -1.53,
-     "area_km2": 11.93
+     "annual": -1.55,
+     "area_km2": 11.93,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.53
     },
     {
      "year": 1984,
      "winter": null,
      "summer": null,
-     "annual": -0.16,
-     "area_km2": 11.89
+     "annual": -0.18,
+     "area_km2": 11.89,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.16
     },
     {
      "year": 1985,
      "winter": null,
      "summer": null,
-     "annual": 0.42,
-     "area_km2": 11.84
+     "annual": 0.4,
+     "area_km2": 11.84,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.42
     },
     {
      "year": 1986,
      "winter": null,
      "summer": null,
-     "annual": -0.42,
-     "area_km2": 11.8
+     "annual": -0.44,
+     "area_km2": 11.8,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.42
     },
     {
      "year": 1987,
      "winter": null,
      "summer": null,
-     "annual": -0.75,
-     "area_km2": 11.76
+     "annual": -0.77,
+     "area_km2": 11.76,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.75
     },
     {
      "year": 1988,
      "winter": null,
      "summer": null,
-     "annual": 0.2,
-     "area_km2": 11.71
+     "annual": 0.18,
+     "area_km2": 11.71,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.2
     },
     {
      "year": 1989,
      "winter": null,
      "summer": null,
-     "annual": -1.15,
-     "area_km2": 11.67
+     "annual": -1.17,
+     "area_km2": 11.67,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.15
     },
     {
      "year": 1990,
      "winter": null,
      "summer": null,
-     "annual": -1.02,
-     "area_km2": 11.61
+     "annual": -1.04,
+     "area_km2": 11.61,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.02
     },
     {
      "year": 1991,
      "winter": null,
      "summer": null,
-     "annual": -0.29,
-     "area_km2": 11.56
+     "annual": -0.31,
+     "area_km2": 11.56,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.29
     },
     {
      "year": 1992,
      "winter": null,
      "summer": null,
-     "annual": -0.57,
-     "area_km2": 11.5
+     "annual": -0.59,
+     "area_km2": 11.5,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.57
     },
     {
      "year": 1993,
      "winter": null,
      "summer": null,
-     "annual": -0.89,
-     "area_km2": 11.44
+     "annual": -0.91,
+     "area_km2": 11.44,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.89
     },
     {
      "year": 1994,
      "winter": null,
      "summer": null,
-     "annual": -0.67,
-     "area_km2": 11.39
+     "annual": -0.69,
+     "area_km2": 11.39,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.67
     },
     {
      "year": 1995,
      "winter": null,
      "summer": null,
-     "annual": -1.22,
-     "area_km2": 11.33
+     "annual": -1.24,
+     "area_km2": 11.33,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.22
     },
     {
      "year": 1996,
      "winter": null,
      "summer": null,
-     "annual": -1.49,
-     "area_km2": 11.28
+     "annual": -1.51,
+     "area_km2": 11.28,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.49
     },
     {
      "year": 1997,
      "winter": null,
      "summer": null,
-     "annual": -1.72,
-     "area_km2": 11.22
+     "annual": -1.74,
+     "area_km2": 11.22,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.72
     },
     {
      "year": 1998,
-     "winter": 2.87,
-     "summer": -3.79,
-     "annual": -0.92,
-     "area_km2": 11.16
+     "winter": null,
+     "summer": null,
+     "annual": -0.93,
+     "area_km2": 11.16,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.92
     },
     {
      "year": 1999,
-     "winter": 2.88,
-     "summer": -3.29,
-     "annual": -0.41,
-     "area_km2": 11.11
+     "winter": null,
+     "summer": null,
+     "annual": -0.4,
+     "area_km2": 11.11,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.41
     },
     {
      "year": 2000,
-     "winter": 2.66,
-     "summer": -2.95,
-     "annual": -0.29,
-     "area_km2": 11.05
+     "winter": null,
+     "summer": null,
+     "annual": -0.44,
+     "area_km2": 11.05,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.29
     },
     {
      "year": 2001,
-     "winter": 3.26,
-     "summer": -3.61,
-     "annual": -0.35,
-     "area_km2": 11
+     "winter": null,
+     "summer": null,
+     "annual": -0.51,
+     "area_km2": 11,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.35
     },
     {
      "year": 2002,
-     "winter": 2.9,
-     "summer": -3.64,
-     "annual": -0.74,
-     "area_km2": 10.94
+     "winter": null,
+     "summer": null,
+     "annual": -0.89,
+     "area_km2": 10.94,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.74
     },
     {
      "year": 2003,
-     "winter": 1.85,
-     "summer": -3.87,
-     "annual": -2.02,
-     "area_km2": 10.88
+     "winter": null,
+     "summer": null,
+     "annual": -2.16,
+     "area_km2": 10.88,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.02
     },
     {
      "year": 2004,
-     "winter": 3.19,
-     "summer": -4.81,
-     "annual": -1.62,
-     "area_km2": 10.83
+     "winter": null,
+     "summer": null,
+     "annual": -1.76,
+     "area_km2": 10.83,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.62
     },
     {
      "year": 2005,
-     "winter": 3.16,
-     "summer": -4.69,
-     "annual": -1.53,
-     "area_km2": 10.77
+     "winter": null,
+     "summer": null,
+     "annual": -1.66,
+     "area_km2": 10.77,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.53
     },
     {
      "year": 2006,
-     "winter": 2.97,
-     "summer": -3.62,
-     "annual": -0.65,
-     "area_km2": 10.72
+     "winter": null,
+     "summer": null,
+     "annual": -0.78,
+     "area_km2": 10.72,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.65
     },
     {
      "year": 2007,
-     "winter": 3.33,
-     "summer": -3.63,
-     "annual": -0.3,
-     "area_km2": 10.66
+     "winter": null,
+     "summer": null,
+     "annual": -0.43,
+     "area_km2": 10.66,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.3
     },
     {
      "year": 2008,
-     "winter": 3.4,
-     "summer": -2.86,
-     "annual": 0.54,
-     "area_km2": 10.6
+     "winter": null,
+     "summer": null,
+     "annual": 0.42,
+     "area_km2": 10.6,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.54
     },
     {
      "year": 2009,
-     "winter": 3.01,
-     "summer": -4.04,
-     "annual": -1.03,
-     "area_km2": 10.55
+     "winter": null,
+     "summer": null,
+     "annual": -1.14,
+     "area_km2": 10.55,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.03
     },
     {
      "year": 2010,
-     "winter": 2.94,
-     "summer": -4.06,
-     "annual": -1.12,
-     "area_km2": 10.49
+     "winter": null,
+     "summer": null,
+     "annual": -1.22,
+     "area_km2": 10.49,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.12
     },
     {
      "year": 2011,
-     "winter": 2.51,
-     "summer": -3.47,
-     "annual": -0.96,
-     "area_km2": 10.43
+     "winter": null,
+     "summer": null,
+     "annual": -1.07,
+     "area_km2": 10.43,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -0.96
     },
     {
      "year": 2012,
-     "winter": 3.77,
-     "summer": -3.18,
-     "annual": 0.59,
-     "area_km2": 10.38
+     "winter": null,
+     "summer": null,
+     "annual": 0.48,
+     "area_km2": 10.38,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": 0.59
     },
     {
      "year": 2013,
-     "winter": 2.85,
-     "summer": -4.49,
-     "annual": -1.64,
-     "area_km2": 10.32
+     "winter": null,
+     "summer": null,
+     "annual": -1.73,
+     "area_km2": 10.32,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.64
     },
     {
      "year": 2014,
-     "winter": 2.37,
-     "summer": -4.02,
-     "annual": -1.65,
-     "area_km2": 10.27
+     "winter": null,
+     "summer": null,
+     "annual": -1.76,
+     "area_km2": 10.27,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.65
     },
     {
      "year": 2015,
-     "winter": 2.45,
-     "summer": -4.36,
-     "annual": -1.91,
-     "area_km2": 10.21
+     "winter": null,
+     "summer": null,
+     "annual": -2.01,
+     "area_km2": 10.21,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.91
     },
     {
      "year": 2016,
-     "winter": 2.59,
-     "summer": -4.45,
-     "annual": -1.86,
-     "area_km2": 10.15
+     "winter": null,
+     "summer": null,
+     "annual": -1.98,
+     "area_km2": 10.15,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.86
     },
     {
      "year": 2017,
-     "winter": 2.48,
-     "summer": -4.1,
-     "annual": -1.62,
-     "area_km2": 10.1
+     "winter": null,
+     "summer": null,
+     "annual": -1.77,
+     "area_km2": 10.1,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.62
     },
     {
      "year": 2018,
-     "winter": 1.99,
-     "summer": -4.51,
-     "annual": -2.52,
-     "area_km2": 10.04
+     "winter": null,
+     "summer": null,
+     "annual": -2.68,
+     "area_km2": 10.04,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -2.52
     },
     {
      "year": 2019,
-     "winter": 1.96,
-     "summer": -5.12,
-     "annual": -3.16,
-     "area_km2": 9.99
+     "winter": null,
+     "summer": null,
+     "annual": -3.34,
+     "area_km2": 9.99,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -3.16
     },
     {
      "year": 2020,
-     "winter": 3.63,
-     "summer": -4.65,
-     "annual": -1.02,
-     "area_km2": 9.94
+     "winter": null,
+     "summer": null,
+     "annual": -1.1,
+     "area_km2": 9.94,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.02
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.66,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -1.44,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -2.36,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.07,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -0.8,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -4589,141 +6212,195 @@
    "wgms_name": "CHHOTA SHIGRI",
    "rgi_id": "RGI50-14.15990",
    "starts": 1987,
-   "ends": 2019,
-   "n_years": 19,
+   "ends": 2025,
+   "n_years": 23,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 0,
+   "added": 4,
    "rows": [
     {
      "year": 1987,
      "winter": null,
      "summer": null,
      "annual": -0.115,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1988,
      "winter": null,
      "summer": null,
      "annual": -0.195,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2003,
      "winter": null,
      "summer": null,
      "annual": -1.43,
-     "area_km2": 15.72
+     "area_km2": 15.72,
+     "src": "fog-2026"
     },
     {
      "year": 2004,
      "winter": null,
      "summer": null,
      "annual": -1.24,
-     "area_km2": 15.72
+     "area_km2": 15.72,
+     "src": "fog-2026"
     },
     {
      "year": 2005,
      "winter": null,
      "summer": null,
      "annual": 0.13,
-     "area_km2": 15.72
+     "area_km2": 15.72,
+     "src": "fog-2026"
     },
     {
      "year": 2006,
      "winter": null,
      "summer": null,
      "annual": -1.43,
-     "area_km2": 15.72
+     "area_km2": 15.72,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": null,
      "summer": null,
      "annual": -1,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": null,
      "summer": null,
      "annual": -0.95,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": null,
      "summer": null,
      "annual": 0.12,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": 1.19,
      "summer": -0.87,
      "annual": 0.32,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": 0.97,
      "summer": -0.91,
      "annual": 0.06,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": 1.18,
      "summer": -1.64,
      "annual": -0.46,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": 0.76,
      "summer": -1.53,
      "annual": -0.77,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
      "winter": 1.15,
      "summer": -1.23,
      "annual": -0.08,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2015,
      "winter": 1.18,
      "summer": -1.34,
      "annual": -0.16,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2016,
      "winter": 0.94,
      "summer": -1.78,
      "annual": -0.84,
-     "area_km2": 15.61
+     "area_km2": 15.61,
+     "src": "fog-2026"
     },
     {
      "year": 2017,
      "winter": 1.21,
      "summer": -1.49,
      "annual": -0.28,
-     "area_km2": 15.61
+     "area_km2": 15.61,
+     "src": "fog-2026"
     },
     {
      "year": 2018,
      "winter": 1.06,
      "summer": -1.62,
      "annual": -0.4,
-     "area_km2": 15.61
+     "area_km2": 15.61,
+     "src": "fog-2026"
     },
     {
      "year": 2019,
      "winter": 1.82,
      "summer": -1.28,
      "annual": 0.537,
-     "area_km2": 15.61
+     "area_km2": 15.61,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -1.67,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": 0.11,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.14,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -1.529,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -4732,113 +6409,179 @@
    "wgms_name": "BREWSTER",
    "rgi_id": "RGI60-18.01130",
    "starts": 2005,
-   "ends": 2019,
-   "n_years": 15,
+   "ends": 2025,
+   "n_years": 21,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 0,
+   "added": 6,
    "rows": [
     {
      "year": 2005,
      "winter": 2.875,
      "summer": -1.499,
      "annual": 1.376,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2006,
      "winter": 2.248,
      "summer": -1.557,
      "annual": 0.691,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": 3.039,
      "summer": -2.347,
      "annual": 0.692,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": 2.392,
      "summer": -4.09,
      "annual": -1.698,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": 1.975,
      "summer": -2.677,
      "annual": -0.702,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": 2.838,
      "summer": -2.911,
      "annual": -0.074,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": 2.154,
      "summer": -3.882,
      "annual": -1.728,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": 1.945,
      "summer": -2.51,
      "annual": -0.565,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": 2.684,
      "summer": -2.483,
      "annual": 0.201,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
      "winter": 2.682,
      "summer": -2.212,
      "annual": 0.47,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2015,
      "winter": 2.492,
      "summer": -2.277,
      "annual": 0.215,
-     "area_km2": 2.0299999
+     "area_km2": 2.0299999,
+     "src": "fog-2026"
     },
     {
      "year": 2016,
      "winter": 2.647,
      "summer": -3.84,
      "annual": -1.193,
-     "area_km2": 2.03
+     "area_km2": 2.03,
+     "src": "fog-2026"
     },
     {
      "year": 2017,
      "winter": 2.241,
      "summer": -1.688,
      "annual": 0.553,
-     "area_km2": 2.03
+     "area_km2": 2.03,
+     "src": "fog-2026"
     },
     {
      "year": 2018,
      "winter": 2.323,
      "summer": -4.52,
      "annual": -2.217,
-     "area_km2": 2.03
+     "area_km2": 2.03,
+     "src": "fog-2026"
     },
     {
      "year": 2019,
      "winter": 2.657,
      "summer": -3.99,
      "annual": -1.333,
-     "area_km2": 2.03
+     "area_km2": 2.03,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2020,
+     "winter": null,
+     "summer": null,
+     "annual": -1.454,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": 0.178,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -1.125,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -0.937,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.006,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -0.318,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },
@@ -4847,246 +6590,327 @@
    "wgms_name": "PASTERZE",
    "rgi_id": "RGI50-11.00106",
    "starts": 1980,
-   "ends": 2020,
-   "n_years": 34,
+   "ends": 2025,
+   "n_years": 39,
+   "release": "WGMS FoG 2026-02-10",
+   "revised": 2,
+   "added": 5,
    "rows": [
     {
      "year": 1980,
      "winter": null,
      "summer": null,
      "annual": 0.326,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1981,
      "winter": null,
      "summer": null,
      "annual": -0.247,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1982,
      "winter": null,
      "summer": null,
      "annual": -0.868,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1983,
      "winter": null,
      "summer": null,
      "annual": -1.1,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1984,
      "winter": null,
      "summer": null,
      "annual": -0.395,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1985,
      "winter": null,
      "summer": null,
      "annual": -0.826,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1986,
      "winter": null,
      "summer": null,
      "annual": -1.42,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1987,
      "winter": null,
      "summer": null,
      "annual": -1.347,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1988,
      "winter": null,
      "summer": null,
      "annual": -0.857,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1989,
      "winter": null,
      "summer": null,
      "annual": 0.134,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1990,
      "winter": null,
      "summer": null,
      "annual": -0.8,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1991,
      "winter": null,
      "summer": null,
      "annual": -0.49,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1992,
      "winter": null,
      "summer": null,
      "annual": -1.32,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1993,
      "winter": null,
      "summer": null,
      "annual": -0.61,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1994,
      "winter": null,
      "summer": null,
      "annual": -0.96,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1995,
      "winter": null,
      "summer": null,
      "annual": -0.136,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1996,
      "winter": null,
      "summer": null,
      "annual": -0.46,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 1997,
      "winter": null,
      "summer": null,
      "annual": -0.1,
-     "area_km2": null
+     "area_km2": null,
+     "src": "fog-2026"
     },
     {
      "year": 2005,
      "winter": null,
      "summer": null,
      "annual": -0.9,
-     "area_km2": 17.71
+     "area_km2": 17.71,
+     "src": "fog-2026"
     },
     {
      "year": 2006,
      "winter": null,
      "summer": null,
      "annual": -1.232,
-     "area_km2": 17.7105
+     "area_km2": 17.7105,
+     "src": "fog-2026"
     },
     {
      "year": 2007,
      "winter": null,
      "summer": null,
      "annual": -1.355,
-     "area_km2": 17.7105
+     "area_km2": 17.7105,
+     "src": "fog-2026"
     },
     {
      "year": 2008,
      "winter": null,
      "summer": null,
      "annual": -1.412,
-     "area_km2": 17.7105
+     "area_km2": 17.7105,
+     "src": "fog-2026"
     },
     {
      "year": 2009,
      "winter": null,
      "summer": null,
      "annual": -1.12,
-     "area_km2": 17.7105
+     "area_km2": 17.7105,
+     "src": "fog-2026"
     },
     {
      "year": 2010,
      "winter": null,
      "summer": null,
      "annual": -1.067,
-     "area_km2": 17.7
+     "area_km2": 17.7,
+     "src": "fog-2026"
     },
     {
      "year": 2011,
      "winter": null,
      "summer": null,
      "annual": -1.268,
-     "area_km2": 17.7
+     "area_km2": 17.7,
+     "src": "fog-2026"
     },
     {
      "year": 2012,
      "winter": null,
      "summer": null,
      "annual": -1.298,
-     "area_km2": 17.711
+     "area_km2": 17.711,
+     "src": "fog-2026"
     },
     {
      "year": 2013,
      "winter": null,
      "summer": null,
      "annual": -0.6,
-     "area_km2": 16.284259
+     "area_km2": 16.284259,
+     "src": "fog-2026"
     },
     {
      "year": 2014,
      "winter": null,
      "summer": null,
      "annual": -0.509,
-     "area_km2": 16.2843
+     "area_km2": 16.2843,
+     "src": "fog-2026"
     },
     {
      "year": 2015,
      "winter": null,
      "summer": null,
      "annual": -1.434,
-     "area_km2": 16.2840003
+     "area_km2": 16.2840003,
+     "src": "fog-2026"
     },
     {
      "year": 2016,
      "winter": null,
      "summer": null,
      "annual": -1.163,
-     "area_km2": 16.284
+     "area_km2": 16.284,
+     "src": "fog-2026"
     },
     {
      "year": 2017,
      "winter": null,
      "summer": null,
      "annual": -1.593,
-     "area_km2": 16.284
+     "area_km2": 16.284,
+     "src": "fog-2026"
     },
     {
      "year": 2018,
      "winter": null,
      "summer": null,
      "annual": -1.42,
-     "area_km2": 15.336
+     "area_km2": 15.336,
+     "src": "fog-2026"
     },
     {
      "year": 2019,
      "winter": null,
      "summer": null,
-     "annual": -1.1,
-     "area_km2": null
+     "annual": -1.222,
+     "area_km2": null,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.1
     },
     {
      "year": 2020,
      "winter": null,
      "summer": null,
-     "annual": -1.2,
-     "area_km2": null
+     "annual": -1.011,
+     "area_km2": null,
+     "src": "fog-2026",
+     "revised": true,
+     "annual_prev": -1.2
+    },
+    {
+     "year": 2021,
+     "winter": null,
+     "summer": null,
+     "annual": -0.74,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2022,
+     "winter": null,
+     "summer": null,
+     "annual": -2.128,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2023,
+     "winter": null,
+     "summer": null,
+     "annual": -1.65,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2024,
+     "winter": null,
+     "summer": null,
+     "annual": -1.8,
+     "area_km2": null,
+     "src": "fog-2026"
+    },
+    {
+     "year": 2025,
+     "winter": null,
+     "summer": null,
+     "annual": -1.45,
+     "area_km2": null,
+     "src": "fog-2026"
     }
    ]
   },

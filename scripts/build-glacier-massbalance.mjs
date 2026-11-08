@@ -11,11 +11,23 @@
  * build sandbox, which is why the mirror — the same reason the Volcanoes baker
  * uses GitHub copies of GVP's exports.
  *
- * THE GAP IS PRINTED, NEVER FILLED: OGGM's extract is the 2022 FoG release, so
- * the series end 2018–2020 (Great Aletsch's glaciological series ends in 1999).
- * WGMS has since published through the 2025 hydrological year; until a CI step
- * pulls the current FoG release, each record carries `ends` and the page says
- * "2021–2025 not yet in our copy". Khumbu, Columbia, Perito Moreno and Sermeq
+ * TWO RELEASES, ONE CALIBRATION PER GLACIER (2026-11-08). OGGM's extract is the
+ * 2022 FoG release (series end 2018–2020, winter + summer + annual). The CURRENT
+ * release, WGMS FoG 2026-02-10 (doi:10.5904/wgms-fog-2026-02-10, years to 2025),
+ * reaches us as the first five columns of its data/mass_balance.csv (country,
+ * glacier_name, glacier_id, year, annual_balance — m w.e.), copied whole into
+ * github.com/ledpup/ClimateExplorer's test fixtures (8 944 rows, the release's own
+ * count, per that repo's design note), commit- and sha256-pinned below. WGMS
+ * REVISES old years between releases — the four USGS benchmark glaciers were
+ * recalibrated over their whole record (Gulkana 54 of 55 years moved, up to
+ * 0.36 m w.e.) — so 2021–2025 are NOT appended to the 2022 values: `mergeRelease`
+ * takes the ANNUAL balance from the newer release wherever it has the year, keeps
+ * the 2022 winter/summer split ONLY for years whose annual is unchanged
+ * (≤ 0.005 m w.e.), and WITHHOLDS the split for revised years (it would no
+ * longer add up to the annual). Years only in the older copy keep it (`src`).
+ * A glacier the newer copy lacks (Zongo) keeps the 2022 series and its printed
+ * gap. Great Aletsch's glaciological series is 1940–1999 + 2020–2025: the gap
+ * between is WGMS's, and is printed, never filled. Khumbu, Columbia, Perito Moreno and Sermeq
  * Kujalleq — and Helheim, Thwaites, Pine Island, Hubbard, Baltoro, Breiðamerkurjökull — have NO
  * glaciological series (calving / debris / ice-sheet) and get
  * `null` — geodetic estimates come later (GLACIER_WATCH_PLAN.md §3.2).
@@ -48,6 +60,16 @@ const SERIES = {
     brewster:        { wgms: 1597, sha256: '69e055a7f437b2337bb49b58eac94204f879815dda158a8b758466075b252acc' },
     pasterze:        { wgms: 566,  sha256: '4b136b4fc91cb6bf60860acca825c4327c68df35fcb490f5a68f7fd1320f0e95' },
 };
+// The current release (see header). The column subset lacks winter/summer, which is why the
+// 2022 split is kept where it is still consistent.
+const FOG = {
+    release: 'WGMS FoG 2026-02-10',
+    doi: '10.5904/wgms-fog-2026-02-10',
+    url: 'https://raw.githubusercontent.com/ledpup/ClimateExplorer/1b4b428c656add148dced220d43835dda7eaceb2/ClimateExplorer.WebApi.UnitTests/GlacierFixtures/mass_balance_all_glaciers.csv',
+    sha256: 'd493a48f73726f8b8169a8f0c071253db6f7cae7661be25e2dcf97e1e724560d',
+};
+const SAME = 0.005;   // m w.e.: the two releases agree on a year (both are given to 0.01 or finer)
+
 const NONE = ['jakobshavn', 'columbia', 'khumbu', 'perito-moreno', 'helheim', 'thwaites', 'pine-island', 'hubbard', 'baltoro', 'breidamerkurjokull'];
 
 export function parseCsv(text) {
@@ -84,9 +106,50 @@ export function parseSeries(text) {
     return { name: rows[0]?.[iN] ?? null, rgi: rows[0]?.[iR] ?? null, rows: out };
 }
 
+/** The current release's column subset → Map(glacier_id → Map(year → annual m w.e.)). */
+export function parseFog(text) {
+    const [head, ...rows] = parseCsv(text);
+    const col = (name) => { const i = head.indexOf(name); if (i < 0) throw new Error(`missing column ${name}`); return i; };
+    const ii = col('glacier_id'), iy = col('year'), ia = col('annual_balance');
+    const out = new Map();
+    for (const r of rows) {
+        const a = num(r[ia]), y = Number(r[iy]), id = Number(r[ii]);
+        if (a === null || !Number.isFinite(a) || !Number.isFinite(y) || !Number.isFinite(id)) continue;
+        if (!out.has(id)) out.set(id, new Map());
+        out.get(id).set(y, a);
+    }
+    return out;
+}
+
+/**
+ * PURE. Older-release rows (winter/summer/annual/area) + the newer release's annual by year
+ * → one series on the NEWER calibration. Each row says where its annual came from (`src`),
+ * and `revised` years carry the older value (`annual_prev`) with the seasonal split withheld.
+ */
+export function mergeRelease(oldRows, newAnnual, { same = SAME } = {}) {
+    const byYear = new Map(oldRows.map(r => [r.year, r]));
+    const years = [...new Set([...byYear.keys(), ...(newAnnual ? newAnnual.keys() : [])])].sort((a, b) => a - b);
+    let revised = 0, added = 0;
+    const rows = years.map(y => {
+        const o = byYear.get(y), n = newAnnual?.get(y);
+        if (n === undefined) return o.annual === null ? { ...o } : { ...o, src: 'fog-2022' };
+        if (!o || o.annual === null) { added++; return { year: y, winter: null, summer: null, annual: n, area_km2: o?.area_km2 ?? null, src: 'fog-2026' }; }
+        if (Math.abs(o.annual - n) <= same) return { ...o, annual: n, src: 'fog-2026' };
+        revised++;
+        return { year: y, winter: null, summer: null, annual: n, area_km2: o.area_km2, src: 'fog-2026', revised: true, annual_prev: o.annual };
+    });
+    return { rows, revised, added };
+}
+
 async function main() {
     const check = process.argv.includes('--check');
     const glaciers = {};
+    const fr = await fetch(FOG.url);
+    if (!fr.ok) throw new Error(`${FOG.release} copy: HTTP ${fr.status}`);
+    const fogText = await fr.text();
+    const fh = createHash('sha256').update(fogText).digest('hex');
+    if (fh !== FOG.sha256) throw new Error(`${FOG.release} copy: sha256 ${fh} ≠ pinned ${FOG.sha256} — review before re-pinning`);
+    const fog = parseFog(fogText);
     for (const [id, s] of Object.entries(SERIES)) {
         const file = `mbdata_WGMS-${String(s.wgms).padStart(5, '0')}.csv`;
         const r = await fetch(`${BASE}/mbdata/${file}`);
@@ -95,16 +158,18 @@ async function main() {
         const h = createHash('sha256').update(text).digest('hex');
         if (h !== s.sha256) throw new Error(`${file}: sha256 ${h} ≠ pinned ${s.sha256} — the mirror changed; review before re-pinning`);
         const p = parseSeries(text);
-        const years = p.rows.filter(q => q.annual !== null).map(q => q.year);
-        glaciers[id] = { wgms_id: s.wgms, wgms_name: p.name, rgi_id: p.rgi, starts: years[0], ends: years[years.length - 1], n_years: years.length, rows: p.rows };
+        const m = mergeRelease(p.rows, fog.get(s.wgms) ?? null);
+        const years = m.rows.filter(q => q.annual !== null).map(q => q.year);
+        glaciers[id] = { wgms_id: s.wgms, wgms_name: p.name, rgi_id: p.rgi, starts: years[0], ends: years[years.length - 1], n_years: years.length,
+                         release: fog.has(s.wgms) ? FOG.release : 'WGMS FoG 2022 (OGGM extract)', revised: m.revised, added: m.added, rows: m.rows };
     }
     for (const id of NONE) glaciers[id] = null;
     const body = {
-        format: 'glacier-watch-mb-v1',
-        source: 'World Glacier Monitoring Service, Fluctuations of Glaciers (glaciological series), via OGGM oggm-sample-data wgms/mbdata (2022 extract)',
-        citation: 'WGMS (2021, updated): Fluctuations of Glaciers Database. World Glacier Monitoring Service, Zurich, Switzerland. doi:10.5904/wgms-fog',
+        format: 'glacier-watch-mb-v2',
+        source: `World Glacier Monitoring Service, Fluctuations of Glaciers (glaciological series): annual balance from ${FOG.release} (doi:${FOG.doi}; data/mass_balance.csv column subset via github.com/ledpup/ClimateExplorer), winter/summer split from the 2022 release via OGGM oggm-sample-data wgms/mbdata`,
+        citation: `WGMS (2026): Fluctuations of Glaciers Database. World Glacier Monitoring Service, Zurich, Switzerland. doi:${FOG.doi}`,
         units: 'm w.e. (metres of water equivalent over the glacier area)',
-        note: 'Series end 2018–2020 in this extract (Great Aletsch 1999). WGMS has published through the 2025 hydrological year; that gap is not filled here.',
+        note: 'Annual balances are the 2026 release, which revised some earlier years (USGS benchmark glaciers recalibrated over their whole record). The winter/summer split is shown only for years whose annual balance is unchanged since the 2022 release; `revised` rows carry the earlier value in annual_prev. Gaps are WGMS\'s and are not filled.',
         glaciers,
     };
     const json = JSON.stringify(body, null, 1) + '\n';
@@ -115,7 +180,7 @@ async function main() {
         return;
     }
     writeFileSync(OUT, json);
-    for (const [id, g] of Object.entries(glaciers)) console.log(id.padEnd(15), g ? `${g.starts}–${g.ends} (${g.n_years} yrs)` : 'no glaciological series');
+    for (const [id, g] of Object.entries(glaciers)) console.log(id.padEnd(15), g ? `${g.starts}–${g.ends} (${g.n_years} yrs, ${g.release}; ${g.added} added, ${g.revised} revised)` : 'no glaciological series');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main().catch(e => { console.error(e.message); process.exit(1); });

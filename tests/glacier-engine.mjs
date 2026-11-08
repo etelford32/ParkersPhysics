@@ -180,7 +180,11 @@ section('3. engine (js/glacier-engine.js)');
         ok(rel(fast.H[k], H0 * 2), '16× the speed → 2× the thickness (H ∝ u^{1/(n+1)})');
     }
     const cb = E.cumulativeBalance([{ year: 1, annual: -0.5 }, { year: 2, annual: null }, { year: 3, annual: 0.2 }]);
-    ok(cb.length === 2 && near(cb[1].cumulative, -0.3, 1e-12), 'cumulative balance skips missing years');
+    ok(cb.length === 2 && cb[1].cumulative === 0.2 && cb[1].run === 1 && cb[1].since === 3, 'cumulative balance RESTARTS after a gap (a missing year is not zero balance)');
+    const cr = E.cumulativeBalance([{ year: 3, annual: 0.1 }, { year: 1, annual: -0.5 }, { year: 2, annual: -0.2 }, { year: 5, annual: -1 }, { year: 6, annual: -1 }]);
+    ok(near(cr[2].cumulative, -0.6, 1e-12) && E.latestRun(cr).length === 2 && E.latestRun(cr)[1].cumulative === -2 && E.latestRun(cr)[0].since === 5, 'runs are year-sorted and unbroken; latestRun quotes only the last one');
+    // NEGATIVE CONTROL: the old gap-blind sum would have quoted −2.6 for that record
+    ok(E.latestRun(cr).at(-1).cumulative !== cr.reduce((a, r) => a + r.annual, 0), 'never the sum across a gap');
 }
 
 section('4. the bake (data/glaciers)');
@@ -231,7 +235,17 @@ section('5. WGMS mass balance');
     const s = parseSeries('YEAR,WGMS_ID,POLITICAL_UNIT,NAME,AREA,WINTER_BALANCE,SUMMER_BALANCE,ANNUAL_BALANCE,REMARKS,RGI_ID\n2020,90,US,GULKANA,15.14,1490.0,-1770.0,-280.0,"a, b",RGI60-01.00570\n');
     ok(s.rows[0].annual === -0.28 && s.rows[0].winter === 1.49 && s.rgi === 'RGI60-01.00570', 'mm w.e. → m w.e., REMARKS with commas');
     const mb = readJson('../data/glaciers/massbalance.json').glaciers;
-    ok(mb.storglaciaren.starts === 1946 && mb['south-cascade'].starts === 1953 && mb.aletsch.ends === 1999, 'record lengths (Storglaciären from 1946)');
+    ok(mb.storglaciaren.starts === 1946 && mb['south-cascade'].starts === 1953, 'record lengths (Storglaciären from 1946)');
+    ok(['gulkana', 'aletsch', 'hintereisferner', 'nigardsbreen', 'peyto', 'rhone', 'pasterze'].every(id => mb[id].ends === 2025 && mb[id].release === 'WGMS FoG 2026-02-10'), 'the 2026 release carries the series through the 2025 hydrological year');
+    ok(mb.zongo.ends === 2018 && /2022/.test(mb.zongo.release), 'a glacier the newer copy lacks keeps its 2022 series (and its printed gap)');
+    const al = mb.aletsch.rows.filter(r => r.annual !== null).map(r => r.year);
+    ok(al.includes(1999) && !al.includes(2000) && !al.includes(2019) && al.includes(2020), "Great Aletsch's 2000–2019 gap is WGMS's and is NOT filled");
+    const gk = mb.gulkana.rows;
+    ok(mb.gulkana.revised > 40 && gk.filter(r => r.revised).every(r => r.winter === null && r.summer === null && Number.isFinite(r.annual_prev)), 'USGS recalibration: revised years keep the earlier value and WITHHOLD the seasonal split (it would no longer add up)');
+    const kept = Object.values(mb).filter(Boolean).flatMap(g => g.rows).filter(r => r.winter !== null && r.summer !== null && r.annual !== null);
+    const off = kept.filter(r => Math.abs(r.winter + r.summer - r.annual) >= 0.06);
+    // two years (Storglaciären 2003, Chhota Shigri 2018) are published that way by WGMS and are UNCHANGED between releases
+    ok(kept.length > 250 && off.length <= 0.01 * kept.length && off.every(r => r.src === 'fog-2026' && !r.revised), `kept winter + summer sums to the annual in ${kept.length - off.length}/${kept.length} years; the rest are as published, not merge artefacts`);
     ok(mb.columbia === null && mb.khumbu === null && mb.jakobshavn === null && mb['perito-moreno'] === null, 'no invented series for calving / debris / ice-sheet glaciers');
     const all = Object.values(mb).filter(Boolean).flatMap(g => g.rows).filter(r => r.annual !== null);
     ok(all.every(r => r.annual > -6 && r.annual < 4), 'every annual balance in the physical range (−6 … +4 m w.e.)');

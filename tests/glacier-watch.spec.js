@@ -179,8 +179,14 @@ test.describe('Glacier Watch', () => {
         });
         if (det.ok) test.info().annotations.push({ type: 'note', description: `south-cascade mid gauge is detectable (v0 ${det.v0}, err ${det.err})` });
         else await expect(page.locator('#gw-year-note')).toContainText('Below detection');
-        await expect(page.locator('#gw-mb-note')).toContainText('not in this copy yet');
+        // WGMS FoG 2026: South Cascade runs to 2025, recalibrated by USGS, with a 1954 gap
+        await expect(page.locator('#gw-mb-note')).toContainText('WGMS revised 62 earlier years');
+        await expect(page.locator('#gw-mb-note')).toContainText('latest run since 1955');
+        await expect(page.locator('#gw-mb-sub')).toContainText('1953–2025');
         await shot(page, 'south-cascade-year.png', { clip: await page.locator('#gw-year-panel').boundingBox() });
+        // a glacier the 2026 copy lacks still says its years are missing — never a quiet end
+        await page.goto('/glacier-watch.html?g=zongo');
+        await expect(page.locator('#gw-mb-note')).toContainText('2019–2025 are not in our copy');
     });
 
     test('phone width: no horizontal overflow, touch targets ≥ 44 px', async ({ page }) => {

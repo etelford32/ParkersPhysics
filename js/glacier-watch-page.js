@@ -409,23 +409,37 @@ function renderMassBalance() {
         return;
     }
     const rows = mb.rows.filter(r => r.annual !== null), cum = E.cumulativeBalance(rows);
+    // a missing year is not a zero balance: the running total restarts after each gap and each
+    // unbroken run is its own line (E.cumulativeBalance)
+    const runs = [];
+    for (const c of cum) (runs[c.run] ||= []).push(c);
+    const last = runs.at(-1) ?? [];
+    const CURRENT = 2025;                 // the newest hydrological year WGMS has published
     const [alo, ahi] = extent(rows.map(r => r.annual), { zero: true });
     const [clo, chi] = extent(cum.map(c => c.cumulative), { zero: true });
+    const tipFor = (r) => () => `<b>${r.year}</b>: ${r.annual >= 0 ? '+' : ''}${r.annual.toFixed(2)} m w.e.` +
+        (r.winter !== null ? `<br>winter +${r.winter.toFixed(2)} · summer ${r.summer?.toFixed(2)}` : '') +
+        (r.revised ? `<br>revised by WGMS (was ${r.annual_prev.toFixed(2)} in the 2022 release; seasonal split withheld)` : '');
     S.charts.mb.render({
-        x: { min: mb.starts - 1, max: 2026, type: 'linear', fmt: (v) => String(Math.round(v)) }, height: 290,
+        x: { min: mb.starts - 1, max: CURRENT + 1, type: 'linear', fmt: (v) => String(Math.round(v)) }, height: 290,
         panels: [
             { y: { min: alo, max: ahi, label: 'annual balance, m w.e.', fmt: (v) => v.toFixed(1) }, layers: [
-                { type: 'bars', width: 1, pts: rows.map(r => ({ x: r.year, y: r.annual, color: r.annual >= 0 ? POS : NEG, tip: () => `<b>${r.year}</b>: ${r.annual >= 0 ? '+' : ''}${r.annual.toFixed(2)} m w.e.${r.winter !== null ? `<br>winter +${r.winter.toFixed(2)} · summer ${r.summer?.toFixed(2)}` : ''}` })) },
-                { type: 'vline', x: mb.ends + 0.5, label: `copy ends ${mb.ends}` },
+                { type: 'bars', width: 1, pts: rows.map(r => ({ x: r.year, y: r.annual, color: r.annual >= 0 ? POS : NEG, tip: tipFor(r) })) },
+                ...(mb.ends < CURRENT ? [{ type: 'vline', x: mb.ends + 0.5, label: `copy ends ${mb.ends}` }] : []),
             ] },
-            { weight: 0.8, y: { min: clo, max: chi, label: `cumulative since ${mb.starts}, m w.e.`, fmt: (v) => v.toFixed(0) }, layers: [
-                { type: 'line', pts: cum.map(c => [c.year, c.cumulative]), color: INK, width: 2.5, tip: (x, y) => `${x}: ${y.toFixed(1)} m w.e. since ${mb.starts}`, endLabel: (y) => `${y.toFixed(1)} m w.e.` },
-            ] },
+            { weight: 0.8, y: { min: clo, max: chi, label: runs.length > 1 ? 'cumulative within each unbroken run, m w.e.' : `cumulative since ${mb.starts}, m w.e.`, fmt: (v) => v.toFixed(0) }, layers:
+                runs.map((run, k) => ({ type: 'line', pts: run.map(c => [c.year, c.cumulative]), color: INK, width: k === runs.length - 1 ? 2.5 : 1.5,
+                    tip: (x, y) => `${x}: ${y.toFixed(1)} m w.e. since ${run[0].since}`,
+                    ...(k === runs.length - 1 ? { endLabel: (y) => `${y.toFixed(1)} m w.e.` } : {}) })),
+            },
         ],
     });
+    const revised = rows.filter(r => r.revised).length;
     $('gw-mb-sub').textContent = `WGMS ${mb.starts}–${mb.ends} · ${mb.n_years} years`;
-    $('gw-mb-note').innerHTML = `Metres of water equivalent averaged over the glacier: −1 m w.e. ≈ 1.1 m of ice thickness lost everywhere. ` +
-        `<b>${mb.ends + 1}–2025 are not in this copy yet</b>: WGMS has published them, and they will be added when the archive refresh pulls the current release.`;
+    $('gw-mb-note').innerHTML = `Metres of water equivalent averaged over the glacier: −1 m w.e. ≈ 1.1 m of ice thickness lost everywhere. Source: ${esc(mb.release)}. ` +
+        (runs.length > 1 ? `The record has gaps; a missing year cannot be summed across, so the running total restarts after each one (latest run since ${last[0].since}). ` : '') +
+        (revised ? `WGMS revised ${revised} earlier years in its 2026 release (this programme was recalibrated); those bars use the new values and their winter/summer split is withheld. ` : '') +
+        (mb.ends < CURRENT ? `<b>${mb.ends + 1}–${CURRENT} are not in our copy</b> of this glacier's series.` : '');
 }
 
 // ── weather ──────────────────────────────────────────────────────────────────

@@ -446,6 +446,22 @@ export function iceModelOptions(kind) {
 
 /** Rows { year, winter, summer, annual } in m w.e. → cumulative annual balance from the first year. */
 export function cumulativeBalance(rows) {
-    let c = 0;
-    return rows.filter(r => Number.isFinite(r.annual)).map(r => ({ year: r.year, annual: r.annual, cumulative: (c += r.annual) }));
+    // A MISSING YEAR IS NOT A ZERO BALANCE: summing across a gap books every unmeasured year as
+    // "no change" (Rhône's 1910–2006 gap is 93 such years; Great Aletsch's 2000–2019 the most
+    // negative two decades of its record). The running total therefore RESTARTS after any gap:
+    // each row carries its unbroken `run` and the year that run starts (`since`).
+    const out = [];
+    let c = 0, prev = null, run = -1, since = null;
+    for (const r of rows.filter(q => Number.isFinite(q.annual)).sort((a, b) => a.year - b.year)) {
+        if (prev === null || r.year !== prev + 1) { run++; c = 0; since = r.year; }
+        c += r.annual; prev = r.year;
+        out.push({ year: r.year, annual: r.annual, cumulative: c, run, since });
+    }
+    return out;
+}
+
+/** The most recent unbroken run of a cumulativeBalance() result (what a single number may quote). */
+export function latestRun(cum) {
+    const k = cum.at(-1)?.run;
+    return k === undefined ? [] : cum.filter(c => c.run === k);
 }

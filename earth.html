@@ -14214,7 +14214,7 @@ function _setGlacierHover(hit, cx, cy, { pin = false } = {}) {
         document.getElementById('glacier-tip-pairs').textContent =
             `${g.pairs_year} satellite pairs in 12 months · ${g.pairs_30d} in the last 30 days · newest ends ${g.newest_pair_end ?? '—'}`;
         document.getElementById('glacier-tip-mb').textContent = g.mass_balance
-            ? `Field mass balance ${g.mass_balance.starts}–${g.mass_balance.ends} (WGMS): ${g.mass_balance.cumulative} m w.e. cumulative`
+            ? `Field mass balance ${g.mass_balance.starts}–${g.mass_balance.ends} (WGMS): ${g.mass_balance.cumulative} m w.e. since ${g.mass_balance.cumulative_since}`
             : 'No field mass-balance series (calving, debris-covered or ice-sheet glacier)';
         document.getElementById('glacier-tip-hint').innerHTML = pin
             ? `As of ${asOf} · <a href="glacier-watch.html?g=${encodeURIComponent(g.id)}">Open in Glacier Watch (today's pairs) →</a>`
