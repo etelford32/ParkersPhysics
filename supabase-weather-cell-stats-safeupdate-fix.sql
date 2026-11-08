@@ -1,8 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════
 -- supabase-weather-cell-stats-safeupdate-fix.sql
 -- Fixes replace_weather_cell_stats() (supabase-r2-offload-migration.sql §2)
--- under Supabase's pg_safeupdate. Written 2026-11-08. NOT APPLIED — apply on
--- the author's go.
+-- under Supabase's pg_safeupdate. Written 2026-11-08. APPLIED 2026-11-08 on the
+-- author's go (migration weather_cell_stats_safeupdate_fix).
 --
 -- THE FAILURE (heartbeat 'weather_cell_stats', 2026-11-08 03:05 UTC):
 --   rpc replace_weather_cell_stats 400: {"code":"21000",
