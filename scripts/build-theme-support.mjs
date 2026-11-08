@@ -39,6 +39,8 @@ export const LIGHT_PAGES = Object.freeze([
     'index.html',
     // Blog + legal
     'blog.html', 'blog-gannon-hindcast.html', 'blog-stpatrick-hindcast.html', 'blog-why-aurora-forecasts-miss.html',
+    // Build log (js/dev-log.js) — a reading page; its own light rules live in js/recent-development.css
+    'recent-development.html',
     'privacy.html', 'eula.html', 'dpa.html', 'api-policy.html',
     // Sign-in / onboarding
     'signin.html', 'signup.html', 'reset-password.html', 'welcome.html', 'request-access.html', '404.html',

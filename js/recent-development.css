@@ -101,3 +101,59 @@
 .rd-compact-title{display:block;font-weight:700;color:#e8e2ff;font-size:.92rem;margin-bottom:4px;text-decoration:none}
 .rd-compact-title:hover{color:#c0a8ff}
 .rd-compact p{font-size:.84rem;color:#a9a2cc;line-height:1.55;margin:0}
+
+/* ── LIGHT THEME (white + blue) ──────────────────────────────────────────────
+   The page is in scripts/build-theme-support.mjs LIGHT_PAGES, so it gets
+   js/theme-light.css (palette + token remaps) and js/catalog-styles.css's own
+   light rules for the hero / search / chips. These are the leftovers that
+   sheet cannot know about: the dark-tuned card gradient, the pastel kind
+   badges (written for #03010e, unreadable on white) and hard-coded rgba()
+   borders. Dark rules above are untouched. feedback.html's compact rows share
+   this sheet and are covered here too. */
+html.theme-light .rd-kind-simulation{color:#b0156e;background:rgba(176,21,110,.07);border-color:rgba(176,21,110,.32)}
+html.theme-light .rd-kind-layer{color:#6d28d9;background:rgba(109,40,217,.07);border-color:rgba(109,40,217,.32)}
+html.theme-light .rd-kind-dataset{color:#0b6e8a;background:rgba(11,110,138,.07);border-color:rgba(11,110,138,.32)}
+html.theme-light .rd-kind-improvement{color:#8a5a00;background:rgba(194,106,0,.08);border-color:rgba(194,106,0,.34)}
+html.theme-light .rd-kind-fix{color:var(--pl-ok);background:rgba(13,122,69,.07);border-color:rgba(13,122,69,.32)}
+html.theme-light .rd-kind-platform{color:var(--pl-text-3);background:var(--pl-bg-soft);border-color:var(--pl-border-strong)}
+html.theme-light .rd-section,html.theme-light .rd-pr,html.theme-light .rd-entry-date,html.theme-light .rd-spot-date{color:var(--pl-text-4)}
+html.theme-light .rd-stats{color:var(--pl-text-4)}
+html.theme-light .rd-stats b{color:var(--pl-text-1)}
+html.theme-light .rd-stats a,html.theme-light .rd-howto-inner a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .rd-block-title{color:var(--pl-blue)}
+
+html.theme-light .rd-spot{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .rd-spot-icon,html.theme-light .rd-entry-icon{color:var(--pl-blue)}
+html.theme-light .rd-spot-title{color:var(--pl-text-1)}
+html.theme-light .rd-spot-title a:hover,html.theme-light .rd-anchor:hover{color:var(--pl-blue-deep)}
+html.theme-light .rd-spot-summary,html.theme-light .rd-entry-summary,html.theme-light .rd-sprint-goal,html.theme-light .rd-details li{color:var(--pl-text-2)}
+
+html.theme-light .rd-sprint-head{border-bottom-color:var(--pl-border)}
+html.theme-light .rd-sprint-title,html.theme-light .rd-entry-title{color:var(--pl-text-1)}
+html.theme-light .rd-sprint-range{color:var(--pl-text-4)}
+html.theme-light .rd-live{color:var(--pl-ok);background:rgba(13,122,69,.07);border-color:rgba(13,122,69,.3)}
+html.theme-light .rd-live::before{background:var(--pl-ok);box-shadow:none}
+html.theme-light .rd-count b{color:var(--pl-text-2)}
+html.theme-light .rd-entry{border-bottom-color:var(--pl-border)}
+html.theme-light .rd-flash{background:var(--pl-blue-soft)}
+html.theme-light .rd-details summary{color:var(--pl-blue)}
+html.theme-light .rd-details summary:hover{color:var(--pl-blue-deep)}
+html.theme-light .rd-dim{color:var(--pl-text-4)}
+
+html.theme-light .rd-open{color:var(--pl-blue-deep);background:#fff;border-color:var(--pl-border-strong)}
+html.theme-light .rd-open:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .rd-open-primary{color:#fff;background:var(--pl-grad-btn);border-color:transparent}
+html.theme-light .rd-open-primary:hover{color:#fff;background:var(--pl-btn-hover)}
+html.theme-light .rd-pr{border-bottom-color:var(--pl-border-strong)}
+html.theme-light .rd-pr:hover{color:var(--pl-text-2)}
+
+html.theme-light .rd-howto-inner{border-color:var(--pl-border-strong);color:var(--pl-text-3)}
+html.theme-light .rd-howto-inner strong{color:var(--pl-text-1)}
+html.theme-light .rd-empty{color:var(--pl-text-3)}
+html.theme-light .rd-empty button{color:var(--pl-blue)}
+
+html.theme-light .rd-compact{border-bottom-color:var(--pl-border)}
+html.theme-light .rd-compact-head{color:var(--pl-text-4)}
+html.theme-light .rd-compact-title{color:var(--pl-text-1)}
+html.theme-light .rd-compact-title:hover{color:var(--pl-blue)}
+html.theme-light .rd-compact p{color:var(--pl-text-3)}
