@@ -59,6 +59,24 @@ const SERIES = {
     'chhota-shigri': { wgms: 2921, sha256: 'db7ad353daa99959f686bf96a1025e3fb884e6ca7c40522268d57febf93084c3' },
     brewster:        { wgms: 1597, sha256: '69e055a7f437b2337bb49b58eac94204f879815dda158a8b758466075b252acc' },
     pasterze:        { wgms: 566,  sha256: '4b136b4fc91cb6bf60860acca825c4327c68df35fcb490f5a68f7fd1320f0e95' },
+    // ── batch 3 (2026-11-08) ── `sha256: null` = not in OGGM's 2022 extract: annual-only, from the 2026 release
+    silvretta:            { wgms: 408,  sha256: '551df5315cb2f8a5b7ea205cc2de6b234fb19ceadbe904802f9e5d7e59b4285a' },
+    claridenfirn:         { wgms: 2660, sha256: '7a8185f1220738bc54644623fbd157bdc8575334da0365aed69ea52322a0781a' },
+    allalin:              { wgms: 394,  sha256: '41c1f7592bede0da1690e164542c62bd704072e5183fa70b28ad75ed1fbf7f99' },
+    taku:                 { wgms: 124,  sha256: 'd18bf0fc75304038d885faead72a0e7d608defd71ad0b301cbf249248ae3fa6c' },
+    storbreen:            { wgms: 302,  sha256: 'a1309545758e154d2e86cd517523a72b10156f80c914e9ccfb92a5cac2481c8e' },
+    engabreen:            { wgms: 298,  sha256: '2c41456ebd76011eb86c243a48e68bd0ff7dfdd2bfdec31e6216de442864a6ee' },
+    'midtre-lovenbreen':  { wgms: 291,  sha256: '7428d1ee3b368849fb2ab10d38926eb28d544ea94c46b587f5b22f6a5dea280a' },
+    kongsvegen:           { wgms: 1456, sha256: 'a458ec9546db3ca66d24a385755b2682e4b81b518110c816c3a7b7eff1af72c9' },
+    white:                { wgms: 0,    sha256: '13195d4db982427da0375d3d81d7422df0486a6d17e54d7fefbb8d5aa3e43f0c' },
+    'urumqi-no1':         { wgms: 853,  sha256: null },
+    tuyuksu:              { wgms: 817,  sha256: '89e036d50701f5ffcf29a6a2a5e50f6d5b1213d05544a7bb306d99d564ef41de' },
+    abramov:              { wgms: 732,  sha256: 'f3f7b54f76259909b8641b1fc64a3d7f2e62d1f6f8485ce13b08d841ff2609e0' },
+    'echaurren-norte':    { wgms: 1344, sha256: 'a97011b1a4023491a323a9cba24b22e282abe4cc3e9a04a89ebc269a027f6491' },
+    djankuat:             { wgms: 726,  sha256: '9f8f318c0896de5b6da81ccdbf901177e8231b8ba1cd3703f17377f8555d9d1e' },
+    yala:                 { wgms: 912,  sha256: '7cf3a83b4e87a9950950cf71bd1af175ea9fe8134934ec2b620bb596f84005aa' },
+    'bahia-del-diablo':   { wgms: 2665, sha256: 'fdcda3f9c6b4e3740745be2f451f95f178985d7d023a135cbea9b285ece25bd0' },
+    athabasca:            { wgms: 7,    sha256: null },
 };
 // The current release (see header). The column subset lacks winter/summer, which is why the
 // 2022 split is kept where it is still consistent.
@@ -70,7 +88,8 @@ const FOG = {
 };
 const SAME = 0.005;   // m w.e.: the two releases agree on a year (both are given to 0.01 or finer)
 
-const NONE = ['jakobshavn', 'columbia', 'khumbu', 'perito-moreno', 'helheim', 'thwaites', 'pine-island', 'hubbard', 'baltoro', 'breidamerkurjokull'];
+const NONE = ['jakobshavn', 'columbia', 'khumbu', 'perito-moreno', 'helheim', 'thwaites', 'pine-island', 'hubbard', 'baltoro', 'breidamerkurjokull',
+              'franz-josef', 'petermann', 'kangerlussuaq', 'lambert', 'malaspina', 'fedchenko'];
 
 export function parseCsv(text) {
     const rows = [];
@@ -110,9 +129,11 @@ export function parseSeries(text) {
 export function parseFog(text) {
     const [head, ...rows] = parseCsv(text);
     const col = (name) => { const i = head.indexOf(name); if (i < 0) throw new Error(`missing column ${name}`); return i; };
-    const ii = col('glacier_id'), iy = col('year'), ia = col('annual_balance');
+    const ii = col('glacier_id'), iy = col('year'), ia = col('annual_balance'), iN = col('glacier_name');
     const out = new Map();
+    out.names = new Map();
     for (const r of rows) {
+        if (Number.isFinite(Number(r[ii])) && !out.names.has(Number(r[ii]))) out.names.set(Number(r[ii]), r[iN]);
         const a = num(r[ia]), y = Number(r[iy]), id = Number(r[ii]);
         if (a === null || !Number.isFinite(a) || !Number.isFinite(y) || !Number.isFinite(id)) continue;
         if (!out.has(id)) out.set(id, new Map());
@@ -151,13 +172,16 @@ async function main() {
     if (fh !== FOG.sha256) throw new Error(`${FOG.release} copy: sha256 ${fh} ≠ pinned ${FOG.sha256} — review before re-pinning`);
     const fog = parseFog(fogText);
     for (const [id, s] of Object.entries(SERIES)) {
-        const file = `mbdata_WGMS-${String(s.wgms).padStart(5, '0')}.csv`;
-        const r = await fetch(`${BASE}/mbdata/${file}`);
-        if (!r.ok) throw new Error(`${file}: HTTP ${r.status}`);
-        const text = await r.text();
-        const h = createHash('sha256').update(text).digest('hex');
-        if (h !== s.sha256) throw new Error(`${file}: sha256 ${h} ≠ pinned ${s.sha256} — the mirror changed; review before re-pinning`);
-        const p = parseSeries(text);
+        let p = { name: fog.names.get(s.wgms) ?? null, rgi: null, rows: [] };
+        if (s.sha256) {
+            const file = `mbdata_WGMS-${String(s.wgms).padStart(5, '0')}.csv`;
+            const r = await fetch(`${BASE}/mbdata/${file}`);
+            if (!r.ok) throw new Error(`${file}: HTTP ${r.status}`);
+            const text = await r.text();
+            const h = createHash('sha256').update(text).digest('hex');
+            if (h !== s.sha256) throw new Error(`${file}: sha256 ${h} ≠ pinned ${s.sha256} — the mirror changed; review before re-pinning`);
+            p = parseSeries(text);
+        } else if (!fog.has(s.wgms)) throw new Error(`${id}: WGMS ${s.wgms} is in neither release`);
         const m = mergeRelease(p.rows, fog.get(s.wgms) ?? null);
         const years = m.rows.filter(q => q.annual !== null).map(q => q.year);
         glaciers[id] = { wgms_id: s.wgms, wgms_name: p.name, rgi_id: p.rgi, starts: years[0], ends: years[years.length - 1], n_years: years.length,

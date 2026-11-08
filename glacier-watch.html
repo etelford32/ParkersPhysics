@@ -96,6 +96,11 @@ h2 small { font-weight:400; color:var(--gw-ink-3); font-size:.72rem; }
 .gw-name i[data-state="faster"] { background:#f08a5d; } .gw-name i[data-state="slower"] { background:#6ea8f0; } .gw-name i[data-state="normal"] { background:#8a94a6; }
 #gw-picker-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
 #gw-picker-head small { color:var(--gw-ink-3); font-size:.7rem; }
+#gw-filter { flex:1 1 220px; max-width:340px; min-height:36px; font:inherit; font-size:.82rem; color:var(--gw-ink); background:rgba(10,16,30,.7);
+  border:1px solid var(--gw-line); border-radius:8px; padding:6px 10px; }
+#gw-filter:focus-visible { outline:none; border-color:var(--gw-accent); }
+.gw-name[hidden] { display:none; }   /* the author display beats the UA [hidden] rule (the mars.html scar) */
+@media (max-width: 640px) { #gw-picker { max-height:46vh; overflow-y:auto; overscroll-behavior:contain; } }
 #gw-name-tip { position:fixed; z-index:2100; display:none; pointer-events:none; width:min(320px, calc(100vw - 24px)); background:rgba(6,11,22,.97); border:1px solid rgba(143,211,255,.3);
     border-radius:10px; padding:10px 12px; font-size:.74rem; color:var(--gw-ink-2); line-height:1.5; box-shadow:0 8px 30px rgba(0,0,0,.5); }
 #gw-name-tip b { color:var(--gw-ink); font-size:.86rem; } #gw-name-tip .r { display:flex; justify-content:space-between; gap:8px; border-top:1px solid rgba(140,190,255,.08); padding-top:3px; margin-top:3px; }
@@ -187,7 +192,9 @@ details.gw-table td, details.gw-table th { text-align:left; padding:2px 6px; bor
   </section>
 
   <section class="gw-panel gw-span" aria-label="Choose a glacier">
-    <div id="gw-picker-head"><h2 style="margin:0">Glaciers</h2><small id="gw-picker-count"></small></div>
+    <div id="gw-picker-head"><h2 style="margin:0">Glaciers</h2>
+      <input id="gw-filter" type="search" placeholder="Filter by name, region or country" aria-label="Filter glaciers" autocomplete="off">
+      <small id="gw-picker-count"></small></div>
     <div id="gw-picker" role="group" aria-label="Glaciers"></div>
     <div id="gw-name-tip" role="tooltip"></div>
   </section>

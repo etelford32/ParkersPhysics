@@ -193,7 +193,10 @@ section('4. the bake (data/glaciers)');
     const G = E.decodeIndex(idx);
     const elev = readJson('../data/glaciers/elevation.json').glaciers;
     ok(G.length >= 25, `${G.length} glaciers (${G.map(g => g.id).join(', ')})`);
-    ok(fs.statSync(path.join(HERE, '../data/glaciers/glaciers.json')).size < 200_000, 'index under its 200 KB budget (EarthView loads it)');
+    // the index is what glacier-watch.html loads at boot (EarthView reads the ~20 KB summary instead); the
+    // budget is PER GLACIER so the list can grow, and the annual series / pairs / field stay in <id>.json
+    const idxBytes = fs.statSync(path.join(HERE, '../data/glaciers/glaciers.json')).size;
+    ok(idxBytes / G.length < 5000, `index ${(idxBytes / 1024).toFixed(0)} KB = ${(idxBytes / G.length / 1024).toFixed(1)} KB per glacier (budget 4.9 KB each; details stay in <id>.json)`);
     for (const g of G) {
         const f = g.flowline, n = f.n;
         const det = E.decodeDetail(readJson(`../data/glaciers/${g.id}.json`));
@@ -247,6 +250,8 @@ section('5. WGMS mass balance');
     // two years (Storglaciären 2003, Chhota Shigri 2018) are published that way by WGMS and are UNCHANGED between releases
     ok(kept.length > 250 && off.length <= 0.01 * kept.length && off.every(r => r.src === 'fog-2026' && !r.revised), `kept winter + summer sums to the annual in ${kept.length - off.length}/${kept.length} years; the rest are as published, not merge artefacts`);
     ok(mb.columbia === null && mb.khumbu === null && mb.jakobshavn === null && mb['perito-moreno'] === null, 'no invented series for calving / debris / ice-sheet glaciers');
+    const ids = readJson('../data/glaciers/glaciers.json').glaciers.map(g => g.id);
+    ok(ids.every(id => id in mb), `every glacier in the index has an EXPLICIT mass-balance entry — a series or a deliberate null (${ids.filter(id => !(id in mb)).join(', ') || 'none missing'})`);
     const all = Object.values(mb).filter(Boolean).flatMap(g => g.rows).filter(r => r.annual !== null);
     ok(all.every(r => r.annual > -6 && r.annual < 4), 'every annual balance in the physical range (−6 … +4 m w.e.)');
 }

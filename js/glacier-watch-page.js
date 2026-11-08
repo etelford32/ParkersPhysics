@@ -203,6 +203,22 @@ function flowStats({ daysPerSecond }) { S.daysPerSecond = daysPerSecond; if (S.v
 function renderPicker() {
     $('gw-picker').innerHTML = S.glaciers.map(g => `<button class="gw-name" data-id="${g.id}" aria-pressed="false" aria-describedby="gw-name-tip"><i id="gw-dot-${g.id}"></i>${esc(g.name.replace(/ \(.*\)/, ''))}</button>`).join('');
     $('gw-picker-count').textContent = `${S.glaciers.length} glaciers · hover or focus a name for details`;
+    // the list is built ONCE and filtered by `hidden` (never rebuilt: the selected state and
+    // the tooltip wiring live on these buttons)
+    const filter = $('gw-filter');
+    const fold = (t) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const hay = new Map(S.glaciers.map(g => [g.id, fold(`${g.name} ${g.region} ${g.country} ${g.kind}`)]));
+    const apply = () => {
+        const q = fold(filter.value.trim());
+        let n = 0;
+        for (const b of $('gw-picker').querySelectorAll('.gw-name')) { const hit = !q || hay.get(b.dataset.id).includes(q); b.hidden = !hit; n += hit; }
+        $('gw-picker-count').textContent = q ? `${n} of ${S.glaciers.length} glaciers` : `${S.glaciers.length} glaciers · hover or focus a name for details`;
+    };
+    filter.addEventListener('input', apply);
+    filter.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { const b = $('gw-picker').querySelector('.gw-name:not([hidden])'); if (b) select(b.dataset.id); }
+        if (e.key === 'Escape') { filter.value = ''; apply(); }
+    });
     const tip = $('gw-name-tip');
     const show = (b) => {
         const g = S.glaciers.find(q => q.id === b.dataset.id); if (!g) return;
@@ -404,7 +420,10 @@ function renderMassBalance() {
     const g = S.sel, mb = S.mb?.glaciers?.[g.id];
     if (!mb) {
         S.charts.mb.render(null);
-        $('gw-mb-note').innerHTML = `<div class="gw-empty">${esc(g.name)} has no glaciological mass-balance series: ${g.kind === 'debris-covered' ? 'its debris-covered tongue cannot be staked like a clean glacier' : 'a calving glacier loses most of its ice at the front, which stakes on the surface cannot measure'}. Satellite (geodetic) estimates are planned.</div>`;
+        const why = g.kind === 'debris-covered' ? 'its debris-covered tongue cannot be staked like a clean glacier'
+            : (g.kind === 'tidewater' || g.kind === 'lake-calving' || g.kind === 'ice-sheet outlet') ? 'a calving glacier loses much of its ice at the front, which stakes on the surface cannot measure'
+            : 'no field programme stakes it — glaciological series exist for only a few hundred of the world\'s glaciers, mostly small ones';
+        $('gw-mb-note').innerHTML = `<div class="gw-empty">${esc(g.name)} has no glaciological mass-balance series: ${why}. Satellite (geodetic) estimates are planned.</div>`;
         $('gw-mb-sub').textContent = 'none for this glacier';
         return;
     }
