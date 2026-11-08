@@ -231,18 +231,19 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         await page.click('.lh-toggle[data-toggle="autoRotate"]');
 
         // Full screen (API or the CSS fallback): the stage covers the window.
-        await page.click('.lh-cam[data-cam="fullscreen"]');
-        await frames(page, 3);
-        const full = await page.evaluate(() => {
+        // Poll the LAYOUT on a timer, never on requestAnimationFrame: these are
+        // DOM facts, and on CI's chromium-headless-shell the frames(3) that
+        // used to sit here never resolved once the stage went full screen
+        // (the test burned its whole 240 s budget at this line, 2026-11-08).
+        const coversWindow = () => {
             const r = document.querySelector('.lh-vehicle-canvas-host').getBoundingClientRect();
-            return { w: r.width, h: r.height, vw: innerWidth, vh: innerHeight };
-        });
-        expect(full.w).toBeGreaterThanOrEqual(full.vw - 2);
-        expect(full.h).toBeGreaterThanOrEqual(full.vh - 2);
-        expect(await page.getAttribute('#lh-cam-full', 'aria-pressed')).toBe('true');
+            return r.width >= innerWidth - 2 && r.height >= innerHeight - 2
+                && document.getElementById('lh-cam-full').getAttribute('aria-pressed') === 'true';
+        };
         await page.click('.lh-cam[data-cam="fullscreen"]');
-        await frames(page, 3);
-        expect(await page.getAttribute('#lh-cam-full', 'aria-pressed')).toBe('false');
+        await page.waitForFunction(coversWindow, null, { polling: 100, timeout: 20_000 });
+        await page.click('.lh-cam[data-cam="fullscreen"]');
+        await expect(page.locator('#lh-cam-full')).toHaveAttribute('aria-pressed', 'false', { timeout: 20_000 });
 
         // Help opens and closes.
         await page.click('.lh-cam[data-cam="help"]');
