@@ -11,6 +11,7 @@
 #                        glaciers slow, plausible ice bodies); WGMS series; Open-Meteo / USGS /
 #                        SNOTEL parsers on synthetic payloads (hosts egress-blocked).
 #   massbalance --check  data/glaciers/massbalance.json still matches its sha256-pinned sources
+#   (section 9 also gates scripts/check-glacier-refresh.mjs — the weekly glacier-refresh job's refusal rules)
 #   summary --check      data/glaciers/summary.json (EarthView's Glaciers layer) is exactly the
 #                        engine on the committed archive — re-run the summary after every bake
 #
@@ -26,6 +27,7 @@ on:
       - 'js/vendor/jsfive-0.4.0.mjs'
       - 'data/glaciers/**'
       - 'scripts/build-glacier-*'
+      - 'scripts/check-glacier-refresh.mjs'
       - 'api/glaciers/**'
       - 'tests/glacier-engine.mjs'
       - 'tests/fixtures/glaciers/**'
@@ -37,6 +39,7 @@ on:
       - 'js/vendor/jsfive-0.4.0.mjs'
       - 'data/glaciers/**'
       - 'scripts/build-glacier-*'
+      - 'scripts/check-glacier-refresh.mjs'
       - 'api/glaciers/**'
       - 'tests/glacier-engine.mjs'
       - 'tests/fixtures/glaciers/**'

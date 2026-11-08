@@ -29,7 +29,9 @@
  *   7. the chart kit's pure helpers;
  *   8. the EarthView layer's inputs: data/glaciers/summary.json is EXACTLY what the engine
  *      computes from the committed archive (stale summary = failure), every state the
- *      engine can emit has a style, pixel picking geometry, the log-compressed flow rate.
+ *      engine can emit has a style, pixel picking geometry, the log-compressed flow rate;
+ *   9. the weekly refresh gate (scripts/check-glacier-refresh.mjs): every refusal rule with a
+ *      planted case, a tolerated single failure LISTED with its older date, same-day re-runs.
  */
 
 import fs from 'node:fs';
@@ -42,6 +44,7 @@ import { parseCsv, parseSeries } from '../scripts/build-glacier-massbalance.mjs'
 import * as W from '../js/glacier-weather.js';
 import { niceTicks, timeTicks, extent } from '../js/glacier-charts.js';
 import { buildSummary } from '../scripts/build-glacier-summary.mjs';
+import { compareArchives, markdown as refreshMarkdown } from '../scripts/check-glacier-refresh.mjs';
 import { flowRate, rayAngle, STATE_STYLE } from '../js/earth-glacier-layer.js';
 import { parseUsgs, nearestSnotel, parseAwdbData, STATIONS } from '../api/glaciers/stations.js';
 
@@ -292,13 +295,38 @@ section('8. EarthView Glaciers layer (summary + pure helpers)');
     const fresh = buildSummary(idx, details, readJson('../data/glaciers/massbalance.json'));
     const onDisk = readJson('../data/glaciers/summary.json');
     ok(JSON.stringify(fresh) === JSON.stringify(onDisk), 'summary.json is exactly the engine on the committed archive (re-run scripts/build-glacier-summary.mjs after a bake)');
-    ok(onDisk.glaciers.length === idx.glaciers.length && onDisk.as_of === idx.glaciers[0].baked, `summary covers all ${onDisk.glaciers.length} glaciers, stamped as of ${onDisk.as_of}`);
+    const bakes = idx.glaciers.map(g => g.baked).sort();
+    ok(onDisk.glaciers.length === idx.glaciers.length && onDisk.as_of === bakes.at(-1) && onDisk.as_of_oldest === bakes[0], `summary covers all ${onDisk.glaciers.length} glaciers, stamped as of ${onDisk.as_of} (oldest ${onDisk.as_of_oldest})`);
+    ok(onDisk.glaciers.every(g => g.as_of === idx.glaciers.find(q => q.id === g.id).baked), "each glacier carries its OWN bake date (a failed refresh must not wear the new one)");
     const states = new Set(onDisk.glaciers.flatMap(g => g.gauges.map(q => q.state)));
     ok([...states].every(s => STATE_STYLE[s]) && ['faster', 'slower', 'normal', 'undetectable', 'unknown'].every(s => STATE_STYLE[s]), `every engine state has a marker style (${[...states].join(', ')})`);
     ok(STATE_STYLE.undetectable.fill === 0 && STATE_STYLE.unknown.fill === 0 && STATE_STYLE.faster.fill === 1, 'below detection / unknown are HOLLOW — never drawn as a state');
     ok(onDisk.glaciers.every(g => Math.abs(g.lat) <= 90 && Math.abs(g.lon) <= 180 && g.gauges.length === 3), 'markers sit on the flowline; three gauges each');
     ok(near(rayAngle({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, { x: 0.01, y: 0, z: 1 }), Math.atan(0.01), 1e-12) && rayAngle({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 }) === Infinity, 'pixel-pick angle exact; behind-the-camera never picks');
     ok(flowRate(10000, 60) < flowRate(10000, 10) && flowRate(10, 10) < flowRate(1000, 10) && flowRate(1e6, 10) === flowRate(1e4, 10), 'flow rate: faster ice faster dots, longer lines slower per length, capped at 10 km/yr');
+}
+
+section('9. the weekly refresh gate (scripts/check-glacier-refresh.mjs)');
+{
+    const G = (id, baked, pairs, km) => ({ id, baked, pairs_count: pairs, flowline: { length_m: km * 1000 } });
+    const prev = { glaciers: [G('a', '2026-11-01', 100, 10), G('b', '2026-11-01', 80, 5), G('c', '2026-11-01', 5, 2)] };
+    const okRun = { glaciers: { a: { ok: true }, b: { ok: true }, c: { ok: true } }, failed: [] };
+    const good = compareArchives(prev, { glaciers: [G('a', '2026-11-08', 104, 10.2), G('b', '2026-11-08', 77, 5), G('c', '2026-11-08', 1, 2)] }, okRun);
+    ok(good.ok && good.refreshed === 3 && good.asOf === '2026-11-08', 'a healthy weekly refresh passes (a 5-pair glacier falling to 1 is below the collapse floor)');
+    const r1 = compareArchives(prev, { glaciers: [G('a', '2026-11-08', 30, 10), G('b', '2026-11-08', 80, 5), G('c', '2026-11-08', 5, 2)] }, okRun);
+    ok(!r1.ok && /a: kept pairs collapsed 100 → 30/.test(r1.problems.join()), 'REFUSED: pairs collapsed to < half');
+    const r2 = compareArchives(prev, { glaciers: [G('a', '2026-11-08', 100, 14), G('b', '2026-11-08', 80, 5), G('c', '2026-11-08', 5, 2)] }, okRun);
+    ok(!r2.ok && /a: flowline length moved/.test(r2.problems.join()), 'REFUSED: a flowline jump > 25 % (re-traced on new inputs)');
+    const r3 = compareArchives(prev, { glaciers: [G('a', '2026-11-08', 100, 10), G('b', '2026-11-08', 80, 5)] }, { ...okRun, glaciers: { a: { ok: true }, b: { ok: true } } });
+    ok(!r3.ok && /c: missing/.test(r3.problems.join()), 'REFUSED: a glacier vanished from the index');
+    const r4 = compareArchives(prev, prev, { glaciers: { a: { ok: false, error: 'TimeoutError' }, b: { ok: false }, c: { ok: false } }, failed: ['a', 'b', 'c'] });
+    ok(!r4.ok && /nothing was refreshed/.test(r4.problems.join()) && /3 glaciers failed/.test(r4.problems.join()), 'REFUSED: every bake failed (upstream down) — never a PR of stale entries');
+    const w = compareArchives(prev, { glaciers: [G('a', '2026-11-01', 100, 10), G('b', '2026-11-08', 80, 5), G('c', '2026-11-08', 5, 2)] },
+        { glaciers: { a: { ok: false, error: 'TimeoutError: listing' }, b: { ok: true }, c: { ok: true } }, failed: ['a'] });
+    ok(w.ok && w.warnings.length === 1 && /kept the entry from 2026-11-01/.test(w.warnings[0]) && w.asOfOldest === '2026-11-01', 'one failure under the cap is allowed, LISTED with the date its entry is from');
+    ok(/oldest entry 2026-11-01/.test(refreshMarkdown(w)) && /\| a \| failed \|/.test(refreshMarkdown(w)), 'the PR body names the failed glacier and the oldest date');
+    const same = compareArchives(prev, prev, okRun);
+    ok(same.ok && same.refreshed === 3, 'a same-day re-run counts as refreshed (the report decides, not the date)');
 }
 
 console.log(`\n${checks - failed}/${checks} checks passed`);

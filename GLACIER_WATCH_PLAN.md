@@ -1,9 +1,19 @@
 # GLACIER_WATCH_PLAN.md — Glacier Watch: glacier motion + snowpack, observed and simulated
 
-*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) BUILT; next: the weekly refresh + WGMS 2021–2025. §0 is the build log;
+*Status (2026-11-08): P0 + P1 + P2 (EarthView layer) + the WEEKLY REFRESH BUILT; next: WGMS 2021–2025, then more glaciers. §0 is the build log;
 §2 holds numbers MEASURED in the planning session; "to verify" items are unchecked.*
 
 ## 0. Built (2026-11-08)
+
+**Weekly refresh (2026-11-08).** `.github/workflows/glacier-refresh.yml` re-bakes every glacier on
+Wednesdays (GLO-30 tiles in the Actions cache), rebuilds elevation + summary, runs the gates and opens
+or updates ONE PR on `data/glaciers-refresh`. The bake is incremental (a stored pair or remembered
+rejection is reused only at an identical flowline — South Cascade's re-run fetched 0 MB, Columbia's
+first incremental run 540 MB → only its rejected picks), fault tolerant (`--keep-going`, `--report`)
+and refused when degraded (`scripts/check-glacier-refresh.mjs`). Each summary row carries its own
+`as_of`; the EarthView pip discloses older entries. Needs the repo setting "Allow GitHub Actions to
+create and approve pull requests" for the PR step.
+
 
 - **25 glaciers** (the ten of §4 + Hintereisferner, Rhône, Mer de Glace, Nigardsbreen,
   Wolverine, Lemon Creek, Chhota Shigri, Brewster, Pasterze, Helheim, Thwaites, Pine Island,

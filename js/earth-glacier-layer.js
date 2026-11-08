@@ -156,7 +156,9 @@ export class EarthGlacierLayer {
                 this._build();
                 const counts = {};
                 for (const g of summary.glaciers) { const s = this.stateOf(g); counts[s] = (counts[s] || 0) + 1; }
-                this._onStatus('loaded', { count: summary.glaciers.length, asOf: summary.as_of, counts });
+                this._onStatus('loaded', { count: summary.glaciers.length, asOf: summary.as_of, counts,
+                    // a refresh that failed for some glacier leaves it on an older date — say so, never blur it
+                    stale: summary.glaciers.filter(g => g.as_of && g.as_of !== summary.as_of).length });
             } catch (e) {
                 this._onStatus('error', { error: e?.message ?? String(e) });
             } finally { this._loading = null; }
@@ -239,7 +241,7 @@ export class EarthGlacierLayer {
         const g = this.summary?.glaciers[i];
         if (!g) return null;
         const s = this.stateOf(g);
-        return { index: i, glacier: g, state: s, stateLabel: STATE_STYLE[s]?.label ?? s, mid: g.gauges.find(q => q.id === 'middle'), asOf: this.summary.as_of };
+        return { index: i, glacier: g, state: s, stateLabel: STATE_STYLE[s]?.label ?? s, mid: g.gauges.find(q => q.id === 'middle'), asOf: g.as_of ?? this.summary.as_of };
     }
 
     getHovered(raycaster) {

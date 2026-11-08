@@ -49,6 +49,7 @@ export function buildSummary(indexJson, detailsById, mbJson) {
         const cum = E.cumulativeBalance(mbRows);
         out.push({
             id: g.id, name: g.name, region: g.region, country: g.country, kind: g.kind,
+            as_of: day(g.bakedMs),                            // this glacier's own bake: a refresh that failed for it keeps its older date
             // the marker sits ON the ice: the mid-glacier gauge's flowline point
             lat: g.flowline.lat[mid.idx], lon: g.flowline.lon[mid.idx],
             flowline_km: r1(g.flowline.length_m / 1000),
@@ -59,11 +60,13 @@ export function buildSummary(indexJson, detailsById, mbJson) {
             mass_balance: mb ? { starts: mb.starts, ends: mb.ends, last: mbRows.at(-1)?.annual ?? null, cumulative: r1(cum.at(-1)?.cumulative) } : null,
         });
     }
+    const dates = out.map(g => g.as_of).filter(Boolean).sort();
     return {
         format: 'glacier-watch-summary-v1',
-        as_of: indexJson.glaciers[0]?.baked ?? null,
+        as_of: dates.at(-1) ?? null,                          // the newest bake; the weekly refresh moves it
+        as_of_oldest: dates[0] ?? null,                       // ≠ as_of only when some glacier's last refresh failed
         source: 'derived from data/glaciers/* by js/glacier-engine.js (NASA ITS_LIVE v2 pairs; WGMS mass balance)',
-        note: 'Motion states are as of the archive date. glacier-watch.html adds the pairs published since.',
+        note: "Motion states are as of each glacier's archive date. glacier-watch.html adds the pairs published since.",
         glaciers: out,
     };
 }

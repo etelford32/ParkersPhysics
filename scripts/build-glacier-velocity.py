@@ -7,6 +7,13 @@ is reachable (public bucket, no credentials — reachable from the build sandbox
 Usage:
     python scripts/build-glacier-velocity.py [--out data/glaciers] [--only columbia,gulkana]
                                              [--days 365] [--max-pairs 360] [--workers 12]
+                                             [--no-reuse] [--keep-going] [--report run.json]
+
+INCREMENTAL by default: a pair already in <id>.json is not downloaded again when the freshly
+traced flowline is IDENTICAL to the committed one (`reusable_pairs`); a moved line re-reads
+everything. The weekly job (.github/workflows/glacier-refresh.yml) adds --keep-going (a glacier
+whose upstream fails keeps its previous entry and is LISTED in --report) and then refuses to
+publish a degraded refresh (scripts/check-glacier-refresh.mjs).
 
 Dependencies: numpy, numcodecs, h5py (`pip install numpy numcodecs h5py`). NO zarr: its 2.x
 releases break against current numcodecs (cbuffer_sizes import), and the store is plain Zarr v2,
@@ -411,7 +418,27 @@ def sample_pair(url, xs, ys, epsg_expected):
     return (out_v, out_e), None, len(raw)
 
 # ── per glacier ──────────────────────────────────────────────────────────────────────────────
-def bake(g, catalog, days, max_pairs, workers, log, dem_cache='scripts/.cache/glo30'):
+def unb64(s_):
+    q = np.frombuffer(base64.b64decode(s_), dtype='<i2').astype(float)
+    q[q == NODATA] = np.nan
+    return q
+
+def reusable_pairs(prev_index, prev_detail, fx, fy):
+    """THE INCREMENTAL REFRESH: a pair already sampled at EXACTLY these flowline points is not
+    downloaded again (a weekly refresh otherwise re-reads ~6 000 granules to add ~150 new ones).
+    Reuse is all-or-nothing per glacier and keyed on the flowline itself: the line is re-traced
+    every bake from the composite + DEM, and if a single point moved (a new composite release,
+    a changed seed rule) every stored sample is at the wrong place and ALL pairs are re-read.
+    The x/y are compared at the precision the index stores them (0.1 m)."""
+    if not prev_index or not prev_detail: return {}
+    fl = prev_index.get('flowline') or {}
+    px, py = fl.get('x') or [], fl.get('y') or []
+    if len(px) != len(fx) or len(py) != len(fy): return {}
+    if any(round(float(a), 1) != b for a, b in zip(fx, px)) or any(round(float(a), 1) != b for a, b in zip(fy, py)): return {}
+    return {**{k: dict(rejected=w) for k, w in (prev_detail.get('rejected') or {}).items()},
+            **{q['id']: q for q in prev_detail.get('pairs', [])}}
+
+def bake(g, catalog, days, max_pairs, workers, log, dem_cache='scripts/.cache/glo30', prev=None):
     feats = [f for f in catalog['features'] if f['properties'].get('datacube_exist') and inside((g['lon'], g['lat']), f['geometry']['coordinates'][0])]
     if not feats: raise RuntimeError('no ITS_LIVE cube covers ' + g['id'])
     p = max(feats, key=lambda f: f['properties']['granule_count'])['properties']
@@ -489,24 +516,43 @@ def bake(g, catalog, days, max_pairs, workers, log, dem_cache='scripts/.cache/gl
     order = select_pairs(found, cutoff, today, max_pairs)
     log(f"  scenes {len(scenes)}  pairs listed {len(found)}  sampling {len(order)}")
     pairs, fetched, skipped, errs = [], [0], {}, []
+    reuse = reusable_pairs(*(prev or (None, None)), fx, fy)
+    reused, rejected = [0], {}
     lock = threading.Lock()
     def work(item):
         name, (url, sensor, d1, d2, _pct) = item
+        old = reuse.get(name[:-3])
+        if old is not None and 'rejected' in old:   # read before and found sparse / outside: the granule has not changed
+            with lock:
+                reused[0] += 1; rejected[name[:-3]] = old['rejected']
+                skipped[old['rejected']] = skipped.get(old['rejected'], 0) + 1
+            return
+        if old is not None:          # same granule, same points: the stored int16 samples ARE the result
+            with lock:
+                reused[0] += 1
+                errs.append(unb64(old['e']))
+                pairs.append(dict(id=old['id'], sensor=old['sensor'], d1=old['d1'], d2=old['d2'], v=old['v'], e=old['e']))
+            return
         try:
             r, why, nbytes = sample_pair(url, fx, fy, epsg)
         except Exception as e:
             r, why, nbytes = None, type(e).__name__, 0
         with lock:
             fetched[0] += nbytes
-            if r is None: skipped[why] = skipped.get(why, 0) + 1; return
+            # only a DETERMINISTIC rejection is remembered — a network error is retried next run
+            if r is None:
+                skipped[why] = skipped.get(why, 0) + 1
+                if why == 'outside' or why.startswith('epsg'): rejected[name[:-3]] = why
+                return
             v, e = r
-            if np.isfinite(v).sum() < max(3, 0.1 * len(v)): skipped['sparse'] = skipped.get('sparse', 0) + 1; return
+            if np.isfinite(v).sum() < max(3, 0.1 * len(v)):
+                skipped['sparse'] = skipped.get('sparse', 0) + 1; rejected[name[:-3]] = 'sparse'; return
             errs.append(e)
             pairs.append(dict(id=name[:-3], sensor=sensor, d1=d1.isoformat(), d2=d2.isoformat(),
                               v=b64(v), e=b64(e)))
     with cf.ThreadPoolExecutor(workers) as ex: list(ex.map(work, order))
     pairs.sort(key=lambda q: (q['d1'], q['d2'], q['id']))
-    log(f"  kept {len(pairs)} pairs, skipped {skipped}, fetched {fetched[0] / 1e6:.0f} MB")
+    log(f"  kept {len(pairs)} pairs ({reused[0]} reused), skipped {skipped}, fetched {fetched[0] / 1e6:.0f} MB")
     index = dict(
         id=g['id'], name=g['name'], region=g['region'], country=g['country'], kind=g['kind'], note=g['note'],
         lat=g['lat'], lon=g['lon'], epsg=epsg, cube=p['zarr_url'], composite=p['composite_zarr_url'],
@@ -521,12 +567,13 @@ def bake(g, catalog, days, max_pairs, workers, log, dem_cache='scripts/.cache/gl
                          trend=b64(samp(trend) * 10)),           # trend stored ×10 (0.1 m/yr²)
         annual_span=[years[0], years[-1]],      # the series itself lives in <id>.json (the index stays small as glaciers are added)
         scenes=scenes, pairs_cutoff=cutoff.isoformat(), baked=today.isoformat(), pairs_count=len(pairs),
-        pairs_listed=len(found), pairs_sampled=len(order),
+        pairs_listed=len(found), pairs_sampled=len(order), pairs_reused=reused[0],
     )
     detail = dict(id=g['id'], epsg=epsg, annual=dict(years=years, partial_last=True, v=[b64(a) for a in annual]),
                   field=dict(nx=len(fX), ny=len(fY), x0=float(fX[0]), y0=float(fY[0]), dx=float(fX[1] - fX[0]), dy=float(fY[1] - fY[0]),
                              vx=b64(fvx), vy=b64(fvy), ice=b64(fice * 100), z=b64(fz)),   # z: GLO-30 surface, m (block mean)
-                  pairs=pairs, dt_max_days=DT_MAX_DAYS, baked=today.isoformat(), skipped=skipped)
+                  pairs=pairs, dt_max_days=DT_MAX_DAYS, baked=today.isoformat(), skipped=skipped,
+                  rejected=dict(sorted(rejected.items())))   # granules read and found unusable: not re-read while the flowline holds
     return index, detail
 
 def main():
@@ -534,22 +581,47 @@ def main():
     ap.add_argument('--out', default='data/glaciers'); ap.add_argument('--only', default='')
     ap.add_argument('--days', type=int, default=365); ap.add_argument('--max-pairs', type=int, default=360)
     ap.add_argument('--workers', type=int, default=12); ap.add_argument('--dem-cache', default='scripts/.cache/glo30')
+    ap.add_argument('--no-reuse', action='store_true', help='re-read every pair (default: reuse samples at an unchanged flowline)')
+    ap.add_argument('--keep-going', action='store_true',
+                    help='a glacier that fails keeps its previous archive entry and is listed in --report (the weekly job)')
+    ap.add_argument('--report', default='', help='write a JSON run report here (per-glacier outcome, pairs, reuse, failures)')
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     catalog = json.loads(http(CATALOG))
     only = set(filter(None, a.only.split(',')))
     idx_path = os.path.join(a.out, 'glaciers.json')
     prev = {g['id']: g for g in json.load(open(idx_path))['glaciers']} if os.path.exists(idx_path) else {}
+    report = dict(started=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), glaciers={}, failed=[])
     for g in GLACIERS:
         if only and g['id'] not in only: continue
         t0 = time.time(); print(g['id'], flush=True)
-        index, detail = bake(g, catalog, a.days, a.max_pairs, a.workers, lambda m: print(m, flush=True), a.dem_cache)
+        det_path = os.path.join(a.out, g['id'] + '.json')
+        prev_detail = None
+        if not a.no_reuse and g['id'] in prev and os.path.exists(det_path):
+            try: prev_detail = json.load(open(det_path))
+            except ValueError: prev_detail = None
+        try:
+            index, detail = bake(g, catalog, a.days, a.max_pairs, a.workers, lambda m: print(m, flush=True), a.dem_cache,
+                                 prev=(prev.get(g['id']), prev_detail))
+        except Exception as e:  # noqa: BLE001 — any upstream failure; the entry is kept and REPORTED, never silently aged
+            if not a.keep_going: raise
+            msg = f'{type(e).__name__}: {e}'[:300]
+            print(f'  FAILED ({msg}) — keeping the previous entry', flush=True)
+            report['failed'].append(g['id'])
+            report['glaciers'][g['id']] = dict(ok=False, error=msg, kept_baked=(prev.get(g['id']) or {}).get('baked'))
+            continue
         prev[g['id']] = index
-        json.dump(detail, open(os.path.join(a.out, g['id'] + '.json'), 'w'), separators=(',', ':'))
+        json.dump(detail, open(det_path, 'w'), separators=(',', ':'))
+        report['glaciers'][g['id']] = dict(ok=True, baked=index['baked'], pairs=index['pairs_count'], listed=index['pairs_listed'],
+                                           reused=index['pairs_reused'], flowline_km=round(index['flowline']['length_m'] / 1000, 1),
+                                           seconds=round(time.time() - t0))
         print(f"  flowline {index['flowline']['n']} pts / {index['flowline']['length_m'] / 1000:.1f} km   {time.time() - t0:.0f} s", flush=True)
     out = dict(format='glacier-watch-v1', source='NASA ITS_LIVE v2 (doi:10.5067/JQ6337239C96)',
                nodata=NODATA, glaciers=[prev[g['id']] for g in GLACIERS if g['id'] in prev])
     json.dump(out, open(idx_path, 'w'), separators=(',', ':'))
+    if a.report:
+        report['finished'] = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        json.dump(report, open(a.report, 'w'), indent=1)
 
 if __name__ == '__main__':
     main()

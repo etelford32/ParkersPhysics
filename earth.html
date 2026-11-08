@@ -9229,7 +9229,7 @@ const glacierLayer = new EarthGlacierLayer(THREE, {
         _setLayerPipById('glaciers',
             state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching' : state === 'error' ? 'error' : 'idle',
             state === 'loaded'
-                ? `${detail.count} glaciers, states as of ${detail.asOf}: ${c.faster || 0} faster, ${c.slower || 0} slower, ${c.normal || 0} usual, ${c.undetectable || 0} below detection`
+                ? `${detail.count} glaciers, states as of ${detail.asOf}${detail.stale ? ` (${detail.stale} older)` : ''}: ${c.faster || 0} faster, ${c.slower || 0} slower, ${c.normal || 0} usual, ${c.undetectable || 0} below detection`
                 : state === 'error' ? `glacier archive unavailable: ${detail.error ?? 'unknown'}`
                 : state === 'fetching' ? 'loading the glacier archive…' : 'off — enable to load', { notify: state === 'error' });
     },
