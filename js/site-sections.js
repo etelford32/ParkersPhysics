@@ -239,6 +239,20 @@ export const SITE_SECTIONS = [
                       blurb: "March 2015 — the community benchmark, and the second step models miss." },
                 ],
             },
+            // The build log (js/dev-log.js) is not a simulation either, and not
+            // a field note — it is the record of what shipped, so it gets its
+            // own heading rather than inflating the Field Notes count.
+            {
+                id: 'build-log',
+                label: 'Build log',
+                note: 'What shipped, sprint by sprint — new simulations, data sets, layers and fixes.',
+                countNoun: 'log',
+                links: [
+                    { href: 'recent-development.html', title: 'Recent Development', icon: 'hourglass',
+                      badge: 'NEW',
+                      blurb: 'Every simulation, data set, layer and fix, grouped by sprint, with a link to open each one.' },
+                ],
+            },
         ],
     },
 ];

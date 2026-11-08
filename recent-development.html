@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html data-theme-support="light" lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Recent Development — Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/recent-development.html">
+<!--
+  The blocks between the RD:* sentinels are GENERATED from js/dev-log.js.
+  Edit the log there, never this markup. After a PR merges:
+
+    node scripts/dev-log-draft.mjs                 # stubs for unlogged PRs
+    node scripts/build-recent-development.mjs      # re-bake this page + recent-development.xml
+    node tests/dev-log.mjs                         # structural gate (also fails if this page is stale)
+
+  Everything outside the sentinels (styles, nav mount, footer) is hand-maintained.
+-->
+<!-- RD:HEAD:BEGIN -->
+<meta name="description" content="Every simulation, data set, layer and fix shipped on Parkers Physics — 45 updates, logged sprint by sprint, last updated Nov 8, 2026, each with a link to open it.">
+<meta property="og:description" content="What we shipped, sprint by sprint. Latest: EarthView&#39;s primary weather feed, back within its rate limit.">
+<meta name="twitter:description" content="What we shipped, sprint by sprint. Latest: EarthView&#39;s primary weather feed, back within its rate limit.">
+<!-- RD:HEAD:END -->
+<link rel="alternate" type="application/rss+xml" title="Parkers Physics — Recent Development" href="/recent-development.xml">
+<meta name="theme-color" content="#03010e">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/recent-development.html">
+<meta property="og:title" content="Recent Development — Parkers Physics">
+<meta property="og:image" content="https://parkersphysics.com/static/og/research.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="js/nav-styles.css">
+<link rel="stylesheet" href="js/catalog-styles.css">
+<link rel="stylesheet" href="js/recent-development.css">
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
+</head>
+<body>
+
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("recent-development");</script>
+
+<main id="main-content">
+
+<header class="sim-hero">
+  <p class="sim-hero-label">Build log</p>
+  <h1>Recent Development</h1>
+  <p class="sim-hero-sub">Everything we have shipped, sprint by sprint: new simulations, data sets, layers inside existing labs, and the fixes &mdash; including what was wrong. Every entry links straight to where you can see it.</p>
+  <p class="rd-stats" id="rd-stats">
+<!-- RD:STATS:BEGIN -->
+<span><b>45</b> updates logged</span><span class="rd-sep" aria-hidden="true">·</span><span><b>5</b> sprints</span><span class="rd-sep" aria-hidden="true">·</span><span>Last update <b>Nov 8, 2026</b></span><span class="rd-sep" aria-hidden="true">·</span><span>Now: <a href="#sprint-2026-11-solar-system">Solar system, the Moon, and Earth hazards</a></span><span class="rd-sep" aria-hidden="true">·</span><span><a href="recent-development.xml" class="rd-rss">RSS feed</a></span>
+<!-- RD:STATS:END -->
+</p>
+</header>
+
+<section class="rd-block" aria-labelledby="rd-spot-title">
+  <h2 class="rd-block-title" id="rd-spot-title">Just shipped</h2>
+  <div class="rd-spotlight" id="rd-spotlight">
+<!-- RD:SPOTLIGHT:BEGIN -->
+<article class="rd-spot">
+  <div class="rd-spot-top">
+    <span class="rd-spot-icon" aria-hidden="true"><svg class="pp-glyph" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.6 20.4h18.8"/><path d="M4.2 20.4l5.4-9.2h4.8l5.4 9.2"/><path d="M10.4 11.2l1.6 1.4 1.6-1.4"/><ellipse cx="13.6" cy="5.6" rx="4.2" ry="2.2" transform="rotate(-20 13.6 5.6)"/><circle cx="12" cy="9.2" r="1.1" fill="currentColor" stroke="none"/></svg></span>
+    <span class="rd-spot-meta"><span class="rd-kind rd-kind-simulation">Simulation</span><span class="sim-badge sim-badge-new">NEW</span></span>
+  </div>
+  <time class="rd-spot-date" datetime="2026-11-04">Nov 4, 2026 · Solar system, the Moon, and Earth hazards</time>
+  <h3 class="rd-spot-title"><a href="#earth-volcanoes">Earth Volcanoes lab</a></h3>
+  <p class="rd-spot-summary">All 2,661 Smithsonian GVP volcanoes on one page and as an EarthView layer, with live eruption status from USGS and NASA EONET, eruption odds, and a Monte-Carlo of volcanic climate forcing.</p>
+  <a class="rd-open rd-open-primary" href="volcanoes.html">Open Earth Volcanoes <span aria-hidden="true">&rarr;</span></a>
+</article><article class="rd-spot">
+  <div class="rd-spot-top">
+    <span class="rd-spot-icon" aria-hidden="true"><svg class="pp-glyph" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15.6 3.6a8.4 8.4 0 1 0 4.8 9.6 6.6 6.6 0 0 1-4.8-9.6z"/></svg></span>
+    <span class="rd-spot-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="sim-badge sim-badge-new">NEW</span></span>
+  </div>
+  <time class="rd-spot-date" datetime="2026-11-03">Nov 3, 2026 · Solar system, the Moon, and Earth hazards</time>
+  <h3 class="rd-spot-title"><a href="#moon-live">The Moon, lit by today&#39;s Sun</a></h3>
+  <p class="rd-spot-summary">The Moon page now runs on a live lunar ephemeris — phase, libration and terminator are today&#39;s — and gains a stagnant-lid mantle, a Monte-Carlo exosphere, and a Neukum crater field.</p>
+  <a class="rd-open rd-open-primary" href="moon.html">Open The Moon <span aria-hidden="true">&rarr;</span></a>
+</article><article class="rd-spot">
+  <div class="rd-spot-top">
+    <span class="rd-spot-icon" aria-hidden="true"><svg class="pp-glyph" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><ellipse cx="12" cy="6.6" rx="9" ry="3.2"/><path d="M3 6.6c0 5.2 3.8 11 9 11s9-5.8 9-11"/><circle cx="12" cy="15.8" r="1.9" fill="currentColor" stroke="none"/></svg></span>
+    <span class="rd-spot-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="sim-badge sim-badge-new">NEW</span></span>
+  </div>
+  <time class="rd-spot-date" datetime="2026-11-03">Nov 3, 2026 · Solar system, the Moon, and Earth hazards</time>
+  <h3 class="rd-spot-title"><a href="#neo-watch-gravity">Earth–Moon gravity layer on Near-Earth Watch</a></h3>
+  <p class="rd-spot-summary">Lagrange points, Jacobi constants and a zero-velocity map in the live Earth–Moon frame, plus an acceleration budget for every tracked object.</p>
+  <a class="rd-open rd-open-primary" href="neo-watch.html">Open Near-Earth Watch <span aria-hidden="true">&rarr;</span></a>
+</article>
+<!-- RD:SPOTLIGHT:END -->
+</div>
+</section>
+
+<div class="rd-toolbar" id="rd-toolbar" role="search" hidden>
+  <label class="sim-search">
+    <span class="sim-search-label">Search updates</span>
+    <input type="search" id="rd-search" placeholder="Search updates — e.g. Moon, aurora, drag…" autocomplete="off" spellcheck="false">
+  </label>
+  <span class="rd-chip-row-label">Kind</span>
+  <div class="sim-chips" id="rd-kind-chips"></div>
+  <span class="rd-chip-row-label">Section</span>
+  <div class="sim-chips" id="rd-section-chips"></div>
+  <p class="rd-result" id="rd-result" aria-live="polite"></p>
+</div>
+
+<p class="rd-empty" id="rd-empty" hidden>No updates match. <button type="button" id="rd-clear">Clear filters</button></p>
+
+<div class="rd-timeline" id="rd-timeline">
+<!-- RD:TIMELINE:BEGIN -->
+<section class="rd-sprint" aria-labelledby="sprint-2026-11-solar-system"><header class="rd-sprint-head">
+  <p class="rd-sprint-range">Since Nov 3, 2026<span class="rd-live">In progress</span></p>
+  <h2 class="rd-sprint-title" id="sprint-2026-11-solar-system">Solar system, the Moon, and Earth hazards</h2>
+  <p class="rd-sprint-goal">Put real ephemerides under every body on the site, give the Moon a measured interior and exosphere, and open an Earth-hazards lab — while moving bulk data out of the database.</p>
+  <div class="rd-sprint-counts"><span class="rd-count"><span class="rd-kind rd-kind-simulation">Simulation</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-layer">Layer</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-dataset">Data</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-improvement">Improvement</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-fix">Fix</span><b>3</b></span><span class="rd-count"><span class="rd-kind rd-kind-platform">Platform</span><b>1</b></span></div>
+</header><div class="rd-entries"><article class="rd-entry" id="weather-feed-paced" data-kind="fix" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-11-08">Nov 8</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.4 2.3 3.6 5.1 3.6 8.2s-1.2 5.9-3.6 8.2c-2.4-2.3-3.6-5.1-3.6-8.2S9.6 6.1 12 3.8z"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#weather-feed-paced" class="rd-anchor" title="Link to this update">EarthView&#39;s primary weather feed, back within its rate limit</a></h3>
+    <p class="rd-entry-summary">Every hourly weather update had been rejected for sending requests too fast, so EarthView fell back to a coarse 10° field. Requests are now paced across a few minutes and the full-resolution grid returns.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="earth.html">Open EarthView <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="status.html">Open System status <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1070" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1070</a></div>
+  </div>
+</article><article class="rd-entry" id="launch-planner-black-stage" data-kind="fix" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-11-08">Nov 8</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 2.4c3.2 2.6 4.8 6.2 4.8 10.2l-2.4 3.4H9.6l-2.4-3.4C7.2 8.6 8.8 5 12 2.4z"/><circle cx="12" cy="9.4" r="1.8"/><path d="M9.6 16v3.4l-2.6 2M14.4 16v3.4l2.6 2"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#launch-planner-black-stage" class="rd-anchor" title="Link to this update">Launch Planner: the 3D stage no longer goes black</a></h3>
+    <p class="rd-entry-summary">On some graphics cards a single invalid pixel spread through the glow effect and blacked out the whole vehicle view. Those pixels are now filtered out, and the stage watches its own output and steps down its effects if a frame ever comes out black.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(3)</span></summary><ul><li>Links straight to a Falcon 9 or Starship launch now show that vehicle, not the Shuttle.</li><li>The &quot;Next launches&quot; strip fills in even when the launch feed arrives before the 3D view.</li><li>Now tested in Firefox and Safari&#39;s engine as well as Chrome.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="launch-planner.html">Open Launch Planner <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1069" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1069</a></div>
+  </div>
+</article><article class="rd-entry" id="earth-volcanoes" data-kind="simulation" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-11-04">Nov 4</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.6 20.4h18.8"/><path d="M4.2 20.4l5.4-9.2h4.8l5.4 9.2"/><path d="M10.4 11.2l1.6 1.4 1.6-1.4"/><ellipse cx="13.6" cy="5.6" rx="4.2" ry="2.2" transform="rotate(-20 13.6 5.6)"/><circle cx="12" cy="9.2" r="1.1" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-simulation">Simulation</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#earth-volcanoes" class="rd-anchor" title="Link to this update">Earth Volcanoes lab</a></h3>
+    <p class="rd-entry-summary">All 2,661 Smithsonian GVP volcanoes on one page and as an EarthView layer, with live eruption status from USGS and NASA EONET, eruption odds, and a Monte-Carlo of volcanic climate forcing.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(4)</span></summary><ul><li>Status is a rule on the record — erupting, recent, historical, dormant, unconfirmed, inactive — never a guess.</li><li>Eruption odds are an empirical-Bayes onset rate fitted over every Holocene volcano, including the quiet ones.</li><li>A VEI-to-climate consequence calculator: Pinatubo through it gives −3.05 W m⁻² and −0.34 K.</li><li>If a live feed is down the page says &quot;live status unavailable&quot; — never a quiet planet.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="volcanoes.html">Open Earth Volcanoes <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="earth.html">Open EarthView · Volcanoes layer <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1068" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1068</a></div>
+  </div>
+</article><article class="rd-entry" id="supabase-r2-offload" data-kind="platform" data-section="platform">
+  <div class="rd-entry-date"><time datetime="2026-11-03">Nov 3</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="1.4"/><rect x="10.3" y="10.3" width="3.4" height="3.4"/><path d="M10 7V4M14 7V4M10 20v-3M14 20v-3M7 10H4M7 14H4M20 10h-3M20 14h-3"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-platform">Platform</span><span class="rd-section">Platform</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#supabase-r2-offload" class="rd-anchor" title="Link to this update">Bulk weather and geomagnetic history moved to object storage</a></h3>
+    <p class="rd-entry-summary">Weather frames and sealed days of geomagnetic minute data are archived to R2, and the hourly temperature-extremes pass now runs in 0.04 s instead of 31–36 s.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="status.html">Open System status <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1067" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1067</a></div>
+  </div>
+</article><article class="rd-entry" id="moon-live" data-kind="layer" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-11-03">Nov 3</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15.6 3.6a8.4 8.4 0 1 0 4.8 9.6 6.6 6.6 0 0 1-4.8-9.6z"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Local Space</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#moon-live" class="rd-anchor" title="Link to this update">The Moon, lit by today&#39;s Sun</a></h3>
+    <p class="rd-entry-summary">The Moon page now runs on a live lunar ephemeris — phase, libration and terminator are today&#39;s — and gains a stagnant-lid mantle, a Monte-Carlo exosphere, and a Neukum crater field.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(5)</span></summary><ul><li>Phase, synodic age and distance in the HUD come from the same geometry that draws the terminator.</li><li>&quot;Earth&#39;s view&quot; puts the camera where you are standing tonight.</li><li>The interior reproduces the measured moment of inertia (0.3930 vs 0.3931).</li><li>Exosphere atoms hop, escape, photoionise and cold-trap — argon piles up before dawn, as observed.</li><li>Proposed colony sites and Earth-launch windows link straight into the Mission Planner.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="moon.html">Open The Moon <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="colony.html">Open Lunar Colony <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="mission-planner.html">Open Mission Planner <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1066" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1066</a></div>
+  </div>
+</article><article class="rd-entry" id="hero-sun-neo-board" data-kind="improvement" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-11-03">Nov 3</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.8"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6M4.8 4.8l1.9 1.9M17.3 17.3l1.9 1.9M4.8 19.2l1.9-1.9M17.3 6.7l1.9-1.9"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Space Weather</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#hero-sun-neo-board" class="rd-anchor" title="Link to this update">Homepage Sun: flares, prominences, EUV waves — and the ten nearest NEOs</a></h3>
+    <p class="rd-entry-summary">Flares on the homepage Sun now release a field-aligned flow and launch EUV waves, prominences come from observed filament detections, and a new board lists the ten nearest near-Earth objects right now.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(2)</span></summary><ul><li>Every visual exaggeration on the Sun is printed in its legend.</li><li>The NEO board uses the same catalogue and propagator as the orrery and Near-Earth Watch.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="index.html">Open Homepage <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1065" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1065</a></div>
+  </div>
+</article><article class="rd-entry" id="jupiter-trojans" data-kind="dataset" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-11-03">Nov 3</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="2.4"/><ellipse cx="12" cy="12" rx="5.6" ry="5.6" transform="rotate(0 12 12)"/><ellipse cx="12" cy="12" rx="9.6" ry="9.6" transform="rotate(0 12 12)"/><circle cx="12" cy="2.4" r="1.4" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-dataset">Data</span><span class="rd-section">Local Space</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#jupiter-trojans" class="rd-anchor" title="Link to this update">Jupiter Trojan population and proper elements</a></h3>
+    <p class="rd-entry-summary">A catalogue of Jupiter&#39;s Trojan asteroids integrated under the Sun, Jupiter and Saturn, with frequency-analysed proper elements validated against AstDyS.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="solar-system.html">Open Solar System <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1064" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1064</a></div>
+  </div>
+</article><article class="rd-entry" id="neo-watch-gravity" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-11-03">Nov 3</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><ellipse cx="12" cy="6.6" rx="9" ry="3.2"/><path d="M3 6.6c0 5.2 3.8 11 9 11s9-5.8 9-11"/><circle cx="12" cy="15.8" r="1.9" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#neo-watch-gravity" class="rd-anchor" title="Link to this update">Earth–Moon gravity layer on Near-Earth Watch</a></h3>
+    <p class="rd-entry-summary">Lagrange points, Jacobi constants and a zero-velocity map in the live Earth–Moon frame, plus an acceleration budget for every tracked object.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="neo-watch.html">Open Near-Earth Watch <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1063" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1063</a></div>
+  </div>
+</article><article class="rd-entry" id="horizons-frame-fix" data-kind="fix" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-11-03">Nov 3</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="11.4" r="5.6"/><ellipse cx="12" cy="11.4" rx="10" ry="3.6" transform="rotate(-20 12 11.4)"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Local Space</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#horizons-frame-fix" class="rd-anchor" title="Link to this update">Live JPL Horizons positions actually load now</a></h3>
+    <p class="rd-entry-summary">Every Horizons query had used a parameter the API rejects, so the orrery and space-weather pages had always fallen back to analytic positions. They now get the real ephemeris.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="solar-system.html">Open Solar System <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="space-weather.html">Open Space Weather <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1062" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1062</a></div>
+  </div>
+</article><article class="rd-entry" id="space-missions" data-kind="simulation" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-11-03">Nov 3</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V4.2M12 15.2v4.6M8.8 12H4.2M15.2 12h4.6"/><ellipse cx="12" cy="12" rx="9.4" ry="9.4" transform="rotate(0 12 12)"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-simulation">Simulation</span><span class="rd-section">Local Space</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#space-missions" class="rd-anchor" title="Link to this update">Space Missions: the live fleet map</a></h3>
+    <p class="rd-entry-summary">Every active mission drawn from the best source available — JPL Horizons state vectors, then SGP4, then a labelled model — with upcoming launches and recent rocket bodies alongside.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(2)</span></summary><ul><li>Each marker says which source placed it.</li><li>L1 sentinels are visible for the first time — they used to sit inside the drawn Earth.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="missions.html">Open Space Missions <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1061" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1061</a></div>
+  </div>
+</article></div></section><section class="rd-sprint" aria-labelledby="sprint-2026-10-earthview"><header class="rd-sprint-head">
+  <p class="rd-sprint-range">Oct 26 – Nov 2, 2026</p>
+  <h2 class="rd-sprint-title" id="sprint-2026-10-earthview">EarthView dial-in</h2>
+  <p class="rd-sprint-goal">Restore the live weather data EarthView had silently lost, light the globe physically, and make the time scrubber fast enough to drag.</p>
+  <div class="rd-sprint-counts"><span class="rd-count"><span class="rd-kind rd-kind-layer">Layer</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-improvement">Improvement</span><b>3</b></span><span class="rd-count"><span class="rd-kind rd-kind-fix">Fix</span><b>1</b></span></div>
+</header><div class="rd-entries"><article class="rd-entry" id="launch-planner-night-pad" data-kind="improvement" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-11-01">Nov 1</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 2.4c3.2 2.6 4.8 6.2 4.8 10.2l-2.4 3.4H9.6l-2.4-3.4C7.2 8.6 8.8 5 12 2.4z"/><circle cx="12" cy="9.4" r="1.8"/><path d="M9.6 16v3.4l-2.6 2M14.4 16v3.4l2.6 2"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#launch-planner-night-pad" class="rd-anchor" title="Link to this update">Launch Planner: a floodlit night pad</a></h3>
+    <p class="rd-entry-summary">The 3D vehicle view is now a floodlit night launch pad with simulated exhaust and deluge steam, bloom, and a camera that adapts to your screen shape.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="launch-planner.html">Open Launch Planner <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1059" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1059</a></div>
+  </div>
+</article><article class="rd-entry" id="weather-time-engine" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-11-01">Nov 1</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.6 2.8h10.8M6.6 21.2h10.8"/><path d="M8 2.8v3.6l4 5.6 4-5.6V2.8M8 21.2v-3.6l4-5.6 4 5.6v3.6"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#weather-time-engine" class="rd-anchor" title="Link to this update">EarthView time scrubber: meteogram strip and smooth scrubbing</a></h3>
+    <p class="rd-entry-summary">A meteogram strip under the time slider with event markers, loop playback, and isobar contouring moved off the main thread — a scrub repaint went from 68 ms to 7 ms.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="earth.html">Open EarthView <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1057" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1057</a></div>
+  </div>
+</article><article class="rd-entry" id="earthview-physical-light" data-kind="improvement" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-30">Oct 30</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.4 2.3 3.6 5.1 3.6 8.2s-1.2 5.9-3.6 8.2c-2.4-2.3-3.6-5.1-3.6-8.2S9.6 6.1 12 3.8z"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#earthview-physical-light" class="rd-anchor" title="Link to this update">EarthView: a physically lit globe and regional detail</a></h3>
+    <p class="rd-entry-summary">Sunlight now reddens through the real atmospheric path, the night side is dark, oceans glint with the live wind, and zooming into a region streams 2 km satellite cloud imagery.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(2)</span></summary><ul><li>Fixed: hovering or double-clicking the globe used to pick the point on the opposite side of the Earth.</li><li>&quot;Go to a region&quot; and shareable ?region= links.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="earth.html">Open EarthView <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1056" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1056</a></div>
+  </div>
+</article><article class="rd-entry" id="wind-palette" data-kind="improvement" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-27">Oct 27</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.6 8h11a3 3 0 1 0-3-3"/><path d="M2.6 12.6h14.2a2.8 2.8 0 1 1-2.8 2.8"/><path d="M2.6 17.2h7.8"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#wind-palette" class="rd-anchor" title="Link to this update">Wind colour: one palette across every altitude</a></h3>
+    <p class="rd-entry-summary">Brighter means faster and deeper means lower, on the globe and in every legend alike; dense wind no longer washes out to white.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="earth.html">Open EarthView <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1055" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1055</a></div>
+  </div>
+</article><article class="rd-entry" id="earthview-data-restored" data-kind="fix" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-27">Oct 27</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.4 2.3 3.6 5.1 3.6 8.2s-1.2 5.9-3.6 8.2c-2.4-2.3-3.6-5.1-3.6-8.2S9.6 6.1 12 3.8z"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#earthview-data-restored" class="rd-anchor" title="Link to this update">EarthView&#39;s live weather data is back</a></h3>
+    <p class="rd-entry-summary">The primary weather feed had been rejecting our requests for a month and every frame was a coarse fallback. Requests are now sized correctly, pressure is sea-level throughout, and stale data shows an amber marker.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="earth.html">Open EarthView <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="status.html">Open System status <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1054" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1054</a></div>
+  </div>
+</article></div></section><section class="rd-sprint" aria-labelledby="sprint-2026-10-forecast-loops"><header class="rd-sprint-head">
+  <p class="rd-sprint-range">Oct 14 – Oct 25, 2026</p>
+  <h2 class="rd-sprint-title" id="sprint-2026-10-forecast-loops">Forecast loops and deep space</h2>
+  <p class="rd-sprint-goal">Close the loop on CME forecasting with an eruption outlook, and deepen the deep-space labs (Boötes Void dynamics, Star Collider rendering).</p>
+  <div class="rd-sprint-counts"><span class="rd-count"><span class="rd-kind rd-kind-simulation">Simulation</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-layer">Layer</span><b>4</b></span><span class="rd-count"><span class="rd-kind rd-kind-improvement">Improvement</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-fix">Fix</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-platform">Platform</span><b>1</b></span></div>
+</header><div class="rd-entries"><article class="rd-entry" id="star-collider-hd" data-kind="improvement" data-section="deep-space">
+  <div class="rd-entry-date"><time datetime="2026-10-25">Oct 25</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="8.6" cy="12" r="5.2"/><circle cx="15.4" cy="12" r="5.2"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Deep Space</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#star-collider-hd" class="rd-anchor" title="Link to this update">Star Collider: gas drawn as kernels, HDR bloom</a></h3>
+    <p class="rd-entry-summary">Merger gas is now rendered as the SPH kernels themselves, with HDR bloom and new velocity, compression, mixing and shock views read straight from the engine.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="star-collider.html">Open Star Collider Lab <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1052" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1052</a></div>
+  </div>
+</article><article class="rd-entry" id="verdict-day-view" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-25">Oct 25</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.6 4v16.4h16.8"/><path d="M7.4 16.6V11M11.6 16.6V7.4M15.8 16.6v-4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#verdict-day-view" class="rd-anchor" title="Link to this update">EarthView: tap a weekday for the whole day</a></h3>
+    <p class="rd-entry-summary">The verdict card&#39;s week strip opens a full-screen day view: hour-by-hour conditions, dayparts, and that night&#39;s sky and aurora odds.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="earth.html">Open EarthView <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1051" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1051</a></div>
+  </div>
+</article><article class="rd-entry" id="orrery-ephemeris" data-kind="fix" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-10-20">Oct 20</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="2.4"/><ellipse cx="12" cy="12" rx="5.6" ry="5.6" transform="rotate(0 12 12)"/><ellipse cx="12" cy="12" rx="9.6" ry="9.6" transform="rotate(0 12 12)"/><circle cx="12" cy="2.4" r="1.4" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Local Space</span></div>
+    <h3 class="rd-entry-title"><a href="#orrery-ephemeris" class="rd-anchor" title="Link to this update">Orrery planets placed from the ephemeris</a></h3>
+    <p class="rd-entry-summary">Planets were placed on circles that were only right at page load — Mercury drifted 41° in a month. They now sit on their real ellipses at the simulation date.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="solar-system.html">Open Solar System <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1050" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1050</a></div>
+  </div>
+</article><article class="rd-entry" id="public-test-signup" data-kind="platform" data-section="platform">
+  <div class="rd-entry-date"><time datetime="2026-10-15">Oct 15</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-platform">Platform</span><span class="rd-section">Platform</span></div>
+    <h3 class="rd-entry-title"><a href="#public-test-signup" class="rd-anchor" title="Link to this update">Public test sign-up and two-plan pricing</a></h3>
+    <p class="rd-entry-summary">Sign-up is open for testers, with simplified pricing and routing by what you came to do.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="pricing.html">Open Pricing <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="signup.html">Open Sign up <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1049" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1049</a></div>
+  </div>
+</article><article class="rd-entry" id="decay-time-varying" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-15">Oct 15</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.8 17.8a8.8 8.8 0 0 1 16.4 0"/><path d="M5 13.4l1.5.9M12 9.2v1.7M19 13.4l-1.5.9"/><path d="M12 17.8l4.6-3.9"/><circle cx="12" cy="17.8" r="1.6" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#decay-time-varying" class="rd-anchor" title="Link to this update">Orbital decay with time-varying solar drivers</a></h3>
+    <p class="rd-entry-summary">Decay forecasts now step through a day-by-day F10.7 and Ap schedule instead of holding today&#39;s values constant for the whole lifetime.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="operations.html">Open Operations <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1048" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1048</a></div>
+  </div>
+</article><article class="rd-entry" id="fleet-assessment" data-kind="simulation" data-section="platform">
+  <div class="rd-entry-date"><time datetime="2026-10-15">Oct 15</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9.4" y="9.4" width="5.2" height="5.2" rx="1"/><path d="M9.4 12H4.2M14.6 12h5.2"/><path d="M2.6 9.4h3.2v5.2H2.6zM18.2 9.4h3.2v5.2h-3.2z"/><path d="M12 9.4V6.2"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-simulation">Simulation</span><span class="rd-section">Platform</span></div>
+    <h3 class="rd-entry-title"><a href="#fleet-assessment" class="rd-anchor" title="Link to this update">Storm-Season Fleet Assessment</a></h3>
+    <p class="rd-entry-summary">A sample assessment for satellite operators, with an interactive simulator of drag exposure across a storm season.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="sample-fleet-assessment.html">Open Sample Fleet Assessment <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1047" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1047</a></div>
+  </div>
+</article><article class="rd-entry" id="cme-outlook" data-kind="layer" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-10-15">Oct 15</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 2.8c0 4.6 10 5.6 10 9.2s-10 4.6-10 9.2"/><path d="M17 2.8c0 4.6-10 5.6-10 9.2s10 4.6 10 9.2"/><path d="M8.8 8h6.4M8.8 16h6.4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Space Weather</span></div>
+    <h3 class="rd-entry-title"><a href="#cme-outlook" class="rd-anchor" title="Link to this update">CME Outlook: seven-day eruption probability</a></h3>
+    <p class="rd-entry-summary">The chance of an Earth-arriving CME on each of the next seven days, from eruptions that have not happened yet — each visible region&#39;s flare odds flown through the flux-rope engine.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(2)</span></summary><ul><li>Days three and beyond are lower bounds, and say so.</li><li>Scored daily against what actually arrives.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="cme-forecast.html">Open CME Forecast <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1046" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1046</a></div>
+  </div>
+</article><article class="rd-entry" id="tiga-geospace" data-kind="layer" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-10-14">Oct 14</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="3.7"/><path d="M9.4 2.6l.9 3.1M13.7 18.3l.9 3.1"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Space Weather</span></div>
+    <h3 class="rd-entry-title"><a href="#tiga-geospace" class="rd-anchor" title="Link to this update">TIGA: Sun and Moon geospace layer</a></h3>
+    <p class="rd-entry-summary">The magnetopause and bow shock drawn on the live L1 solar wind, with the Moon&#39;s monthly passage through Earth&#39;s magnetotail.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="tiga.html">Open TIGA · Geomagnetic <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1045" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1045</a></div>
+  </div>
+</article></div></section><section class="rd-sprint" aria-labelledby="sprint-2026-10-builders"><header class="rd-sprint-head">
+  <p class="rd-sprint-range">Oct 5 – Oct 13, 2026</p>
+  <h2 class="rd-sprint-title" id="sprint-2026-10-builders">Builders, the sky, and the data plumbing</h2>
+  <p class="rd-sprint-goal">Ship the design-and-fly tools and a live sky chart, and repair the DONKI feed after NASA moved it.</p>
+  <div class="rd-sprint-counts"><span class="rd-count"><span class="rd-kind rd-kind-simulation">Simulation</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-layer">Layer</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-dataset">Data</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-improvement">Improvement</span><b>4</b></span><span class="rd-count"><span class="rd-kind rd-kind-fix">Fix</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-platform">Platform</span><b>1</b></span></div>
+</header><div class="rd-entries"><article class="rd-entry" id="bootes-dynamics" data-kind="layer" data-section="deep-space">
+  <div class="rd-entry-date"><time datetime="2026-10-12">Oct 12</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="7.4" stroke-dasharray="2.6 2.4"/><circle cx="12" cy="3.4" r="1.5" fill="currentColor" stroke="none"/><circle cx="20.6" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="20.6" r="1.5" fill="currentColor" stroke="none"/><circle cx="3.4" cy="12" r="1.5" fill="currentColor" stroke="none"/><path d="M12 8.2v-2.6M15.8 12h2.6M12 15.8v2.6M8.2 12H5.6"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Deep Space</span></div>
+    <h3 class="rd-entry-title"><a href="#bootes-dynamics" class="rd-anchor" title="Link to this update">Boötes Void: galaxy tracker, N-body forecast, force probe</a></h3>
+    <p class="rd-entry-summary">Probe the void&#39;s gravity at any point, follow its galaxies through cosmic time, and run a 35,000-particle N-body forecast and reconstruction in your browser.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="bootes-void.html">Open Boötes Void <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1044" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1044</a></div>
+  </div>
+</article><article class="rd-entry" id="flux-rope-ledger" data-kind="dataset" data-section="research">
+  <div class="rd-entry-date"><time datetime="2026-10-11">Oct 11</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.6 4v16.4h16.8"/><path d="M7.4 16.6V11M11.6 16.6V7.4M15.8 16.6v-4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-dataset">Data</span><span class="rd-section">Research</span></div>
+    <h3 class="rd-entry-title"><a href="#flux-rope-ledger" class="rd-anchor" title="Link to this update">Flux-rope forecasts scored on real arrivals</a></h3>
+    <p class="rd-entry-summary">The daily CME forecast ledger is scored only on forecasts locked before each shock arrived, against real L1 data — the published skill numbers are now an honest record.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="cme-forecast.html">Open CME Forecast <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="flux-rope-live.html">Open Compounding Watch <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1043" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1043</a></div>
+  </div>
+</article><article class="rd-entry" id="stage-rebuild" data-kind="improvement" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-11">Oct 11</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.6 19a9.4 9.4 0 0 1 18.8 0"/><path d="M5.6 19a6.4 6.4 0 0 1 12.8 0"/><path d="M8.8 19a3.2 3.2 0 0 1 6.4 0"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#stage-rebuild" class="rd-anchor" title="Link to this update">Upper Atmosphere: a stage you can arrange</a></h3>
+    <p class="rd-entry-summary">Every panel over the 3D view is a movable, resizable window, and operational altitude bands (VLEO, station, constellation, SSO) are drawn as a ruler you can click.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="upper-atmosphere.html">Open Upper Atmosphere <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1040" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1040</a></div>
+  </div>
+</article><article class="rd-entry" id="donki-host-move" data-kind="fix" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-10-11">Oct 11</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 2.8c0 4.6 10 5.6 10 9.2s-10 4.6-10 9.2"/><path d="M17 2.8c0 4.6-10 5.6-10 9.2s10 4.6 10 9.2"/><path d="M8.8 8h6.4M8.8 16h6.4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Space Weather</span></div>
+    <h3 class="rd-entry-title"><a href="#donki-host-move" class="rd-anchor" title="Link to this update">CME data restored after NASA moved DONKI</a></h3>
+    <p class="rd-entry-summary">NASA moved its DONKI service and the old addresses began returning a web page instead of data. All CME, flare and notification feeds now use the new host with a fallback.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="flux-rope-live.html">Open Compounding Watch <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="space-weather.html">Open Space Weather <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1039" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1039</a></div>
+  </div>
+</article><article class="rd-entry" id="neo-sizing" data-kind="improvement" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-10-11">Oct 11</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="2.4"/><ellipse cx="12" cy="12" rx="5.6" ry="5.6" transform="rotate(0 12 12)"/><ellipse cx="12" cy="12" rx="9.6" ry="9.6" transform="rotate(0 12 12)"/><circle cx="12" cy="2.4" r="1.4" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Local Space</span></div>
+    <h3 class="rd-entry-title"><a href="#neo-sizing" class="rd-anchor" title="Link to this update">Near-Earth objects drawn at their real size</a></h3>
+    <p class="rd-entry-summary">Asteroids are lit and sized from published photometry, become 3D rocks when they resolve on screen, and meteor showers are drawn as parallel streaks.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="solar-system.html">Open Solar System <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1038" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1038</a></div>
+  </div>
+</article><article class="rd-entry" id="donki-notification-text" data-kind="fix" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-10-11">Oct 11</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="8.6" cy="8.4" r="3.6"/><path d="M8.6 2.2v1.4M8.6 13.2v1.4M2.4 8.4h1.4M13.4 8.4h1.4M4.2 4l1 1M12 11.8l1 1M4.2 12.8l1-1M12 5l1-1"/><path d="M10 20.4h9.2M12.4 17.2h7.4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Space Weather</span></div>
+    <h3 class="rd-entry-title"><a href="#donki-notification-text" class="rd-anchor" title="Link to this update">Space-weather notifications show NASA&#39;s real text</a></h3>
+    <p class="rd-entry-summary">DONKI notifications were sometimes rendered as a bare &quot;##&quot; heading. They now show the message NASA actually published, or nothing at all.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="space-weather.html">Open Space Weather <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1041" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1041</a></div>
+  </div>
+</article><article class="rd-entry" id="legal-refresh" data-kind="platform" data-section="platform">
+  <div class="rd-entry-date"><time datetime="2026-10-11">Oct 11</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5.6 3.4h8.2l4.6 4.6v12.6H5.6z"/><path d="M13.6 3.4V8h4.6"/><path d="M8.6 12.4h6.8M8.6 16h4.8"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-platform">Platform</span><span class="rd-section">Platform</span></div>
+    <h3 class="rd-entry-title"><a href="#legal-refresh" class="rd-anchor" title="Link to this update">Privacy Policy v3.0, Terms v1.3, and a DPA</a></h3>
+    <p class="rd-entry-summary">Updated privacy and terms pages covering location, analytics and retention, plus a Data Processing Agreement for organisations.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="privacy.html">Open Privacy Policy <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="eula.html">Open Terms of Service <span aria-hidden="true">&rarr;</span></a><a class="rd-open" href="dpa.html">Open Data Processing Agreement <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1037" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1037</a></div>
+  </div>
+</article><article class="rd-entry" id="orrery-deselect" data-kind="improvement" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-10-11">Oct 11</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="2.4"/><ellipse cx="12" cy="12" rx="5.6" ry="5.6" transform="rotate(0 12 12)"/><ellipse cx="12" cy="12" rx="9.6" ry="9.6" transform="rotate(0 12 12)"/><circle cx="12" cy="2.4" r="1.4" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Local Space</span></div>
+    <h3 class="rd-entry-title"><a href="#orrery-deselect" class="rd-anchor" title="Link to this update">Orrery: let go of a locked body</a></h3>
+    <p class="rd-entry-summary">A clear way to deselect a planet, moon or asteroid and return to the free camera, with panels that no longer misjudge their own size.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="solar-system.html">Open Solar System <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1036" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1036</a></div>
+  </div>
+</article><article class="rd-entry" id="spaceship-true-scale" data-kind="improvement" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-06">Oct 6</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 2.4c3.2 2.6 4.8 6.2 4.8 10.2l-2.4 3.4H9.6l-2.4-3.4C7.2 8.6 8.8 5 12 2.4z"/><circle cx="12" cy="9.4" r="1.8"/><path d="M9.6 16v3.4l-2.6 2M14.4 16v3.4l2.6 2"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#spaceship-true-scale" class="rd-anchor" title="Link to this update">Space Ship Designer: real-size engines and a guided ascent</a></h3>
+    <p class="rd-entry-summary">Engines are built at their published sizes, each design flies its own optimised two-burn ascent at true scale with winds aloft, and the result card charts the climb.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="spaceship-designer.html">Open Space Ship Designer <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1033" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1033</a></div>
+  </div>
+</article><article class="rd-entry" id="temperature-lab-normals" data-kind="dataset" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-05">Oct 5</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.6 4v16.4h16.8"/><path d="M7.4 16.6V11M11.6 16.6V7.4M15.8 16.6v-4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-dataset">Data</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#temperature-lab-normals" class="rd-anchor" title="Link to this update">Planetary Temperature Lab: 1991–2020 normals</a></h3>
+    <p class="rd-entry-summary">Climate normals for every grid cell, so &quot;unusually hot&quot; can be measured against the calendar rather than against last month.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="status.html">Open System status <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1032" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1032</a></div>
+  </div>
+</article><article class="rd-entry" id="skyview" data-kind="simulation" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-10-05">Oct 5</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.8 18.2h18.4"/><path d="M4.4 18.2a7.6 7.6 0 0 1 15.2 0"/><circle cx="12.4" cy="12.8" r="1.6" fill="currentColor" stroke="none"/><circle cx="8.4" cy="15.2" r="1.1" fill="currentColor" stroke="none"/><circle cx="15.8" cy="15" r="1" fill="currentColor" stroke="none"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-simulation">Simulation</span><span class="rd-section">Local Space</span></div>
+    <h3 class="rd-entry-title"><a href="#skyview" class="rd-anchor" title="Link to this update">SkyView: your sky, right now</a></h3>
+    <p class="rd-entry-summary">A real-time sky chart for your location that ranks the ten things you can actually see tonight, with a 30-night forecast of the best nights.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="skyview.html">Open SkyView <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1031" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1031</a></div>
+  </div>
+</article><article class="rd-entry" id="satellite-designer" data-kind="simulation" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-05">Oct 5</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9.4" y="9.4" width="5.2" height="5.2" rx="1"/><path d="M9.4 12H4.2M14.6 12h5.2"/><path d="M2.6 9.4h3.2v5.2H2.6zM18.2 9.4h3.2v5.2h-3.2z"/><path d="M12 9.4V6.2"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-simulation">Simulation</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#satellite-designer" class="rd-anchor" title="Link to this update">Satellite Designer: build a spacecraft that closes</a></h3>
+    <p class="rd-entry-summary">Pick a bus and subsystems from a component library, see them placed in 3D, and get an engineering review of mass, power, thermal and drag budgets.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="satellite-designer.html">Open Satellite Designer <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1029" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1029</a></div>
+  </div>
+</article><article class="rd-entry" id="satellite-suites" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-10-05">Oct 5</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="9.4" y="9.4" width="5.2" height="5.2" rx="1"/><path d="M9.4 12H4.2M14.6 12h5.2"/><path d="M2.6 9.4h3.2v5.2H2.6zM18.2 9.4h3.2v5.2h-3.2z"/><path d="M12 9.4V6.2"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#satellite-suites" class="rd-anchor" title="Link to this update">Upper Atmosphere: satellite suites and orbit rings</a></h3>
+    <p class="rd-entry-summary">Toggle families of real satellites with their orbit rings and an altitude ladder, on the same clock as the atmosphere.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="upper-atmosphere.html">Open Upper Atmosphere <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1028" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1028</a></div>
+  </div>
+</article></div></section><section class="rd-sprint" aria-labelledby="sprint-2026-09-hero-earth"><header class="rd-sprint-head">
+  <p class="rd-sprint-range">Sep 20 – Oct 4, 2026</p>
+  <h2 class="rd-sprint-title" id="sprint-2026-09-hero-earth">The real Earth on the homepage</h2>
+  <p class="rd-sprint-goal">Replace the illustrative homepage globe with today&#39;s Earth and aurora, make Mars explorable, and give the upper atmosphere a flight model.</p>
+  <div class="rd-sprint-counts"><span class="rd-count"><span class="rd-kind rd-kind-simulation">Simulation</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-layer">Layer</span><b>5</b></span><span class="rd-count"><span class="rd-kind rd-kind-improvement">Improvement</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-fix">Fix</span><b>1</b></span></div>
+</header><div class="rd-entries"><article class="rd-entry" id="upper-atmosphere-camera-cme" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-09-30">Sep 30</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.6 19a9.4 9.4 0 0 1 18.8 0"/><path d="M5.6 19a6.4 6.4 0 0 1 12.8 0"/><path d="M8.8 19a3.2 3.2 0 0 1 6.4 0"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#upper-atmosphere-camera-cme" class="rd-anchor" title="Link to this update">Upper Atmosphere: camera rig and incoming CMEs</a></h3>
+    <p class="rd-entry-summary">Pan, swivel, change lens and frame any layer edge-on from the limb — and watch an incoming CME&#39;s flux rope approach Earth.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="upper-atmosphere.html">Open Upper Atmosphere <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1027" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1027</a></div>
+  </div>
+</article><article class="rd-entry" id="upper-atmosphere-flight" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-09-29">Sep 29</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.6 19a9.4 9.4 0 0 1 18.8 0"/><path d="M5.6 19a6.4 6.4 0 0 1 12.8 0"/><path d="M8.8 19a3.2 3.2 0 0 1 6.4 0"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#upper-atmosphere-flight" class="rd-anchor" title="Link to this update">Upper Atmosphere: fly through the thermosphere</a></h3>
+    <p class="rd-entry-summary">A flight-dynamics layer with gravity, J2 and drag against the rotating air, and one consistent Earth-fixed frame for the Sun, bulge and satellites.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="upper-atmosphere.html">Open Upper Atmosphere <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1026" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1026</a></div>
+  </div>
+</article><article class="rd-entry" id="mars-firefox" data-kind="fix" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-09-27">Sep 27</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="11.4" r="5.6"/><ellipse cx="12" cy="11.4" rx="10" ry="3.6" transform="rotate(-20 12 11.4)"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Local Space</span></div>
+    <h3 class="rd-entry-title"><a href="#mars-firefox" class="rd-anchor" title="Link to this update">Mars 3D now runs in Firefox</a></h3>
+    <p class="rd-entry-summary">A script-ordering bug had stopped the Mars 3D engine starting in Firefox for seven weeks.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="mars.html">Open Real-Time Mars <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1025" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1025</a></div>
+  </div>
+</article><article class="rd-entry" id="mars-explorable" data-kind="improvement" data-section="local-space">
+  <div class="rd-entry-date"><time datetime="2026-09-26">Sep 26</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="11.4" r="5.6"/><ellipse cx="12" cy="11.4" rx="10" ry="3.6" transform="rotate(-20 12 11.4)"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Local Space</span></div>
+    <h3 class="rd-entry-title"><a href="#mars-explorable" class="rd-anchor" title="Link to this update">Mars: an explorable map, and the right season</a></h3>
+    <p class="rd-entry-summary">A searchable feature index, a top-down map view, zoom-through to the surface, and a season computed correctly from JPL.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="mars.html">Open Real-Time Mars <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1024" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1024</a></div>
+  </div>
+</article><article class="rd-entry" id="climate-lab" data-kind="simulation" data-section="platform">
+  <div class="rd-entry-date"><time datetime="2026-09-25">Sep 25</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.6 4v16.4h16.8"/><path d="M7.4 16.6V11M11.6 16.6V7.4M15.8 16.6v-4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-simulation">Simulation</span><span class="rd-section">Platform</span></div>
+    <h3 class="rd-entry-title"><a href="#climate-lab" class="rd-anchor" title="Link to this update">Climate Lab dashboard</a></h3>
+    <p class="rd-entry-summary">Your account dashboard is now an instrument bench: a home weather station, meteogram, alert console and satellite pass tracker.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="dashboard.html">Open Dashboard <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1023" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1023</a></div>
+  </div>
+</article><article class="rd-entry" id="hero-next-24h" data-kind="layer" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-09-24">Sep 24</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4.8"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6M4.8 4.8l1.9 1.9M17.3 17.3l1.9 1.9M4.8 19.2l1.9-1.9M17.3 6.7l1.9-1.9"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Space Weather</span></div>
+    <h3 class="rd-entry-title"><a href="#hero-next-24h" class="rd-anchor" title="Link to this update">Homepage: the Sun&#39;s next 24 hours</a></h3>
+    <p class="rd-entry-summary">The homepage opens on today&#39;s Sun — real NOAA active regions — and plays the next 24 hours of CMEs through the flux-rope engine.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="index.html">Open Homepage <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1022" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1022</a></div>
+  </div>
+</article><article class="rd-entry" id="hero-real-earth" data-kind="improvement" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-09-23">Sep 23</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5.4 19.6c-1.1-4.2-.2-8 2.4-11.4"/><path d="M10 20.2c-1.3-4.6-.5-8.8 1.8-12.8"/><path d="M14.6 19.6c-.9-4.2-.3-7.8 1.8-11.2"/><path d="M18.8 19c-.7-3.6-.2-6.6 1.2-9.2"/><path d="M2.8 21.6h18.4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-improvement">Improvement</span><span class="rd-section">Space Weather</span></div>
+    <h3 class="rd-entry-title"><a href="#hero-real-earth" class="rd-anchor" title="Link to this update">Homepage: today&#39;s Earth and NOAA&#39;s aurora</a></h3>
+    <p class="rd-entry-summary">The homepage globe is NASA imagery turned to today&#39;s sunlight and season, with the live OVATION aurora oval on the real magnetic dipole.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="index.html">Open Homepage <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1020" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1020</a></div>
+  </div>
+</article><article class="rd-entry" id="cloud-time-aware" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-09-23">Sep 23</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4"/><path d="M12 3.8c2.4 2.3 3.6 5.1 3.6 8.2s-1.2 5.9-3.6 8.2c-2.4-2.3-3.6-5.1-3.6-8.2S9.6 6.1 12 3.8z"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#cloud-time-aware" class="rd-anchor" title="Link to this update">EarthView clouds follow the clock</a></h3>
+    <p class="rd-entry-summary">Scrubbing time now shows archived satellite cloud frames for that moment, a wind-advected nowcast just ahead, and model-only clouds further out.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="earth.html">Open EarthView <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1019" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1019</a></div>
+  </div>
+</article><article class="rd-entry" id="temp-outlook" data-kind="layer" data-section="earth-orbit">
+  <div class="rd-entry-date"><time datetime="2026-09-21">Sep 21</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.6 4v16.4h16.8"/><path d="M7.4 16.6V11M11.6 16.6V7.4M15.8 16.6v-4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-layer">Layer</span><span class="rd-section">Earth &amp; Orbit</span></div>
+    <h3 class="rd-entry-title"><a href="#temp-outlook" class="rd-anchor" title="Link to this update">Homepage 30-day temperature outlook</a></h3>
+    <p class="rd-entry-summary">A daily-candle temperature chart and a 30-day calendar for your location, relaxing from the forecast toward the local normal.</p>
+    
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="index.html">Open Homepage <span aria-hidden="true">&rarr;</span></a><a class="rd-pr" href="https://github.com/etelford32/ParkersPhysics/pull/1018" target="_blank" rel="noopener" title="The pull request that shipped this">PR #1018</a></div>
+  </div>
+</article></div></section>
+<!-- RD:TIMELINE:END -->
+</div>
+
+<aside class="rd-howto">
+  <div class="rd-howto-inner">
+    <strong>How this log works.</strong> Each entry is written when a pull request reaches production, and grouped
+    into the sprint it shipped in. <em>Correctness fixes</em> say what was wrong, not just that something changed.
+    The code-level history is on <a href="https://github.com/etelford32/ParkersPhysics/pulls?q=is%3Apr+is%3Amerged" target="_blank" rel="noopener">GitHub</a>;
+    to tell us what to build next, use <a href="feedback.html">Feedback</a>. To get each new entry as it ships, subscribe to the
+    <a href="recent-development.xml">RSS feed</a>. Browse everything by topic in
+    <a href="simulations.html">the full catalog</a>.
+  </div>
+</aside>
+
+<script type="module">
+import { mountRecentDevelopment } from './js/recent-development.js';
+mountRecentDevelopment();
+</script>
+
+</main>
+
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────────── -->
+<footer id="site-footer" role="contentinfo">
+  <div class="footer-inner">
+    <div class="footer-grid">
+
+      <div class="footer-brand">
+        <img src="ParkersPhysics_logo2.jpg" alt="Parkers Physics logo" class="footer-brand-logo">
+        <p class="footer-brand-name">Parkers Physics</p>
+        <p class="footer-tagline">Watch space weather happen. Live.</p>
+        <p class="footer-attribution">&copy; 2026 Parkers Physics.<br>All rights reserved.</p>
+      </div>
+
+      <nav aria-label="Sections">
+        <p class="footer-col-title">Sections</p>
+        <div class="footer-links">
+          <a href="space-weather-hub.html">Space Weather</a>
+          <a href="earth-orbit.html">Earth &amp; Orbit</a>
+          <a href="local-space.html">Local Space</a>
+          <a href="deep-space.html">Deep Space</a>
+          <a href="research.html">Research</a>
+          <a href="simulations.html">All 60 Simulations</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Product">
+        <p class="footer-col-title">Product</p>
+        <div class="footer-links">
+          <a href="pricing.html">Pricing</a>
+          <a href="dashboard.html">Dashboard</a>
+          <a href="for-operators.html">For Agencies &amp; Operators</a>
+          <a href="signin.html">Sign In</a>
+          <a href="signup.html">Create Account</a>
+          <a href="recent-development.html">Recent Development</a>
+          <a href="feedback.html">Feedback</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Legal &amp; Sources">
+        <p class="footer-col-title">Legal</p>
+        <div class="footer-links">
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="eula.html">Terms of Service</a>
+        </div>
+        <p class="footer-col-title" style="margin-top:1.4rem">Data Sources</p>
+        <div class="footer-links">
+          <a href="https://www.swpc.noaa.gov/" target="_blank" rel="noopener">NOAA SWPC</a>
+          <a href="https://ssd.jpl.nasa.gov/horizons/" target="_blank" rel="noopener">NASA JPL Horizons</a>
+          <a href="https://api.nasa.gov/" target="_blank" rel="noopener">NASA DONKI</a>
+        </div>
+      </nav>
+
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
