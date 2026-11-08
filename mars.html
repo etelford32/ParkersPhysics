@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -112,7 +112,18 @@ button{color:inherit}
    the bottom fifth of the map), which frees the column below the side panels.
    Overlay layout only: ≤820 px the panels flow below the canvas. */
 @media(min-width:821px){
-  .mars-app:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - 170px)}
+  /* The site's light/dark switch (js/theme-switch.js) hangs under the logo,
+     ~25px into this app's top-left corner. The top-left column (camera dock,
+     surface HUD, mission panel) moves down 14px as ONE unit so their spacing
+     is unchanged, and the mission panel's max-heights give the 14px back so
+     its bottom edge does not move. js/mars-view.js measures these boxes live
+     for the safe frame, so nothing else needs to know. */
+  /* .mars-app prefix: this block sits ABOVE the base rules in the file, so a
+     same-specificity selector here loses to them (it did — measured). */
+  .mars-app .camera-dock{top:32px}
+  .mars-app .surface-explorer{top:98px}
+  .mission-panel{top:106px;max-height:calc(100% - 292px)}
+  .mars-app:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - 184px)}
   .mars-app:has(.data-dock.collapsed) .landmark-card{bottom:84px}
   .mars-app.is-surface-mode:has(.data-dock.collapsed) .mission-panel{max-height:calc(100% - var(--surface-hud-bottom,300px) - 90px)}
 }
@@ -350,7 +361,7 @@ button{color:inherit}
   .mars-header{left:304px;right:290px}.mars-header h1{font-size:.92rem}.mars-header p{display:none}
   .mission-panel{width:270px}.layers-panel{width:258px}.map-controls{width:258px}.mesh-badge{display:none}
   .weather-grid{grid-template-columns:repeat(3,1fr)}.weather-cell{min-height:67px;padding:8px 10px}
-  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 329px)}.camera-dock{width:272px}.surface-explorer{width:304px}.camera-readout{display:none}.landmark-card{bottom:238px}
+  .data-dock{min-height:210px}.mission-panel{max-height:calc(100% - 343px)}.camera-dock{width:272px}.surface-explorer{width:304px}.camera-readout{display:none}.landmark-card{bottom:238px}
   .is-surface-mode .mission-panel{max-height:calc(100% - var(--surface-hud-bottom,300px) - 250px)}
 }
 @media(max-width:820px){
@@ -385,7 +396,129 @@ button{color:inherit}
 }
 @media(max-width:360px){.camera-readout{display:none}.camera-actions{justify-content:center}.camera-btn{flex-basis:25px;width:25px;min-width:25px}.surface-telemetry output{font-size:.47rem}}
 @media(prefers-reduced-motion:reduce){.live-dot,.loader-orbit::after{animation:none}}
+/* ══ LIGHT THEME (white + blue) ═══════════════════════════════════════════
+   js/theme-light.css holds the palette; this is mars.html's own chrome.
+   The PLANET and the sky behind it stay dark — the viewport is space, the
+   EarthView rule. What goes light is every floating instrument over it:
+   the panels, docks, HUDs, cards and map controls (EarthView's light chrome
+   over a dark globe). Text that sits DIRECTLY on the sky (the header, the
+   camera hint, the loading screen, the no-WebGL fallback) keeps its dark
+   values: the page's variables are re-pointed at the light palette on
+   .mars-app and RE-SCOPED back to the dark ones on those elements. The data
+   colours (landmark categories, the climate ramp, the pilot cluster's
+   ok / warn / alert) keep their meaning; only text built on them is darkened. */
+html.theme-light .mars-app{
+  --mars:var(--pl-blue-bright);--mars-bright:var(--pl-blue);--mars-dim:var(--pl-text-4);
+  --cyan:var(--pl-blue-bright);--green:var(--pl-ok);--amber:var(--pl-warn);--red:var(--pl-danger);
+  --ink:var(--pl-text-1);--muted:var(--pl-text-3);--faint:var(--pl-text-4);
+  --panel:rgba(255,255,255,.90);--panel-strong:rgba(255,255,255,.96);
+  --line:var(--pl-border);--line-strong:var(--pl-border-strong);
+  color:var(--pl-text-1);
+}
+html.theme-light :is(.mars-header,.camera-help,.loading-screen,.mars-render-fallback){
+  --mars:#ff7a3d;--mars-bright:#ffad72;--cyan:#69e4ff;--green:#73f5a8;--amber:#ffd166;
+  --ink:#fff7f2;--muted:#baa79d;--faint:#716058;--line:rgba(255,186,145,.16);
+  color:#fff7f2;
+}
+/* The shared sheet colours h1–h6 navy on the ELEMENT, which beats the
+   inherited sky colour above; the title sits on space, so restate it. */
+html.theme-light .mars-header h1{color:#fff7f2}
+/* Panels */
+html.theme-light .panel{background:var(--panel);border-color:var(--pl-border);box-shadow:0 18px 50px rgba(11,31,58,.18),0 2px 6px rgba(11,31,58,.06)}
+html.theme-light .panel-head{background:var(--pl-bg-soft)}
+html.theme-light :is(.panel-icon,.layer-glyph){background:var(--pl-blue-soft);border-color:#c3d8f6;color:var(--pl-blue)}
+html.theme-light :is(.panel-toggle,.action-btn,.landmark-card-focus,.climate-select,.map-imagery select){background:#fff;border-color:var(--pl-border-strong);color:var(--pl-text-2)}
+html.theme-light :is(.panel-toggle,.action-btn,.landmark-card-focus):hover{background:var(--pl-blue-soft);border-color:var(--pl-blue-bright);color:var(--pl-blue-deep)}
+html.theme-light .panel-toggle[aria-expanded="false"]{background:var(--pl-blue-soft);color:var(--pl-blue)}
+html.theme-light :is(.panel-body,.feature-list){scrollbar-color:#b7cbe6 transparent}
+html.theme-light .panel-body::-webkit-scrollbar-thumb{background:#b7cbe6;background-clip:padding-box}
+html.theme-light .status-pill{background:#e5f6ed;border-color:#9fd8b8}
+html.theme-light .metric{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light .metric strong{color:var(--pl-text-1)}
+html.theme-light .metric small{color:var(--pl-text-4)}
+html.theme-light .provenance-note{background:#fff7e6;color:var(--pl-text-3)}
+html.theme-light .history-control{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light :is(.history-head label,.history-foot){color:var(--pl-text-4)}
+/* Layers + feature index */
+html.theme-light :is(.layer-row,.climate-controls){border-top-color:var(--pl-border)}
+html.theme-light .layer-name{color:var(--pl-text-1)}
+html.theme-light :is(.layer-desc,.climate-legend-note,.climate-extremes,.climate-readout em,.source-mini){color:var(--pl-text-4)}
+html.theme-light .sky-focus:hover{color:var(--pl-blue-deep)}
+html.theme-light .feature-filter{background:#fff;border-color:var(--pl-border-strong);color:var(--pl-text-1)}
+/* js/mars-view.js colours each row with its category's on-dark colour; the
+   dot keeps it (currentColor), the NAME gets navy so a yellow/cyan category
+   stays readable on white. */
+html.theme-light .feature-name{color:var(--pl-text-1)}
+html.theme-light .feature-dot{box-shadow:0 0 0 1px rgba(11,31,58,.25)}
+html.theme-light :is(.feature-item:hover,.feature-item:focus-visible){background:var(--pl-blue-soft)}
+html.theme-light .feature-item[aria-current="true"]{background:#d9e8fd}
+html.theme-light :is(.climate-legend-ticks small,.climate-scrub-head output){color:var(--pl-text-3)}
+html.theme-light .climate-readout{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light .climate-readout span{color:var(--pl-text-1)}
+html.theme-light .climate-frost{color:#0a6aa8}
+html.theme-light .switch-track{background:#d3dfef;border-color:#b7cbe6}
+html.theme-light .switch-track::after{background:#fff;box-shadow:0 1px 3px rgba(11,31,58,.3)}
+html.theme-light .switch input:checked+.switch-track{background:var(--pl-btn);border-color:var(--pl-btn)}
+html.theme-light .switch input:checked+.switch-track::after{background:#fff;box-shadow:0 1px 3px rgba(11,31,58,.3)}
+html.theme-light :is(.source-mini a,.dock-foot a,.landmark-card-meta a){color:var(--pl-blue)}
+/* MEDA dock */
+html.theme-light .data-dock{background:var(--panel-strong);border-color:var(--pl-border);box-shadow:0 -8px 40px rgba(11,31,58,.14)}
+html.theme-light .weather-grid{background:var(--pl-border)}
+html.theme-light .weather-cell{background:#fff}
+html.theme-light .weather-value{color:var(--pl-text-1)}
+html.theme-light :is(.weather-detail,.dock-foot,.dock-warning){color:var(--pl-text-4)}
+html.theme-light .weather-cell[data-quality="missing"] .weather-value{color:var(--pl-text-5)}
+html.theme-light .feed-state::before{box-shadow:none}
+/* Camera dock, surface HUD, pilot cluster */
+html.theme-light :is(.camera-dock,.map-controls){background:var(--panel-strong);border-color:var(--pl-border);box-shadow:0 12px 30px rgba(11,31,58,.18)}
+html.theme-light .camera-readout strong{color:var(--pl-text-1)}
+html.theme-light .camera-readout output{color:var(--pl-text-4)}
+html.theme-light :is(.camera-btn,.map-btn){background:var(--pl-bg-soft);border-color:var(--pl-border);color:var(--pl-text-2)}
+html.theme-light :is(.camera-btn,.map-btn):hover{background:var(--pl-blue-soft);border-color:#9cc0f2;color:var(--pl-blue-deep)}
+html.theme-light .camera-btn[aria-pressed="true"]{background:var(--pl-btn);border-color:var(--pl-btn);color:#fff;box-shadow:none}
+html.theme-light #camera-light[aria-pressed="true"]{background:#fff4dc;border-color:#e2b65a;color:var(--pl-warn)}
+html.theme-light .ui-panels-toggle{color:var(--pl-blue)}
+html.theme-light .ui-panels-toggle[aria-pressed="true"]{background:var(--pl-btn);border-color:var(--pl-btn);color:#fff}
+html.theme-light .surface-explorer{background:var(--panel-strong);border-color:var(--pl-border);box-shadow:0 14px 34px rgba(11,31,58,.2)}
+html.theme-light .surface-move{background:var(--pl-bg-soft);border-color:var(--pl-border);color:var(--pl-blue)}
+html.theme-light .surface-move:hover{background:var(--pl-blue-soft);border-color:#9cc0f2;color:var(--pl-blue-deep)}
+html.theme-light .surface-telemetry strong{color:var(--pl-text-1)}
+html.theme-light :is(.surface-telemetry output,.surface-detail){color:var(--pl-text-4)}
+html.theme-light .pilot-cluster{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light .pi-k{color:var(--pl-text-4)}
+html.theme-light .pi-v{color:var(--pl-text-1)}
+html.theme-light .pi-v.ok{color:var(--pl-ok)}
+html.theme-light .pi-v.warn{color:var(--pl-warn)}
+html.theme-light .pi-v.alert{color:var(--pl-danger)}
+/* Landmark card, mesh badge */
+html.theme-light .landmark-card{background:rgba(255,255,255,.97);border-color:var(--pl-border);box-shadow:0 18px 50px rgba(11,31,58,.22)}
+html.theme-light .landmark-card p{color:var(--pl-text-2)}
+html.theme-light .landmark-card-meta{color:var(--pl-text-4)}
+html.theme-light .landmark-card-close{background:var(--pl-bg-soft);color:var(--pl-text-3)}
+html.theme-light .mesh-badge{background:rgba(255,255,255,.88);border-color:var(--pl-border);color:var(--pl-text-4)}
+html.theme-light .mesh-badge strong{color:var(--pl-text-2)}
+html.theme-light .mission-strip{background:rgba(255,255,255,.9);border-color:var(--pl-border);color:var(--pl-text-3)}
+html.theme-light .mission-strip strong{color:var(--pl-text-1)}
+html.theme-light .mission-strip span+span{border-left-color:var(--pl-border)}
+/* Map controls */
+html.theme-light .map-view-switch{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light .map-view-btn{color:var(--pl-text-3)}
+html.theme-light .map-view-btn:hover{color:var(--pl-blue-deep);background:var(--pl-blue-soft)}
+html.theme-light .map-view-btn[aria-checked="true"]{background:var(--pl-btn);color:#fff;box-shadow:none}
+html.theme-light .map-imagery option:disabled{color:var(--pl-text-5)}
+html.theme-light :is(.map-source,.map-altitude){color:var(--pl-text-4)}
+html.theme-light .map-scale{color:var(--pl-text-2)}
+html.theme-light .map-scale-bar{border-color:var(--pl-text-2);box-shadow:none}
+html.theme-light .map-compass-needle::after{background:linear-gradient(var(--pl-danger) 50%,var(--pl-text-5) 50%)}
+/* ≤820 px the panels flow below the canvas: the page around them is white. */
+@media(max-width:820px){
+  html.theme-light .mars-app{background:var(--pl-bg-soft)}
+}
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body data-clickmap>
 <a class="skip-link" href="#mars-main">Skip to Mars simulation</a>

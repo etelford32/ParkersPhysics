@@ -311,7 +311,157 @@ const CSS = `
 }
 @media(prefers-reduced-motion:reduce){
   .ev-verdict-card *{animation:none!important;transition:none!important}
-}`;
+}
+
+/* ── Light theme (html.theme-light — the site's daylight theme) ──────────
+   EarthView's light chrome is the --c-* palette in design-tokens.css plus
+   earth.html's light rule overrides (frosted near-white panels, navy text,
+   deep-cyan accents — the Layers and Storm Watch panels are the reference).
+   COLOURS / BORDERS / SHADOWS ONLY: no geometry moves, so the drag wiring,
+   the top-clearance (--ev-timebar-h) and the dark card are untouched.
+   Every state variant is restated because the html.theme-light prefix
+   (0,2,1) outranks the dark variants' (0,2,0). The neon brights of the dark
+   card (#2eff9e / #ffd23f / #ff3050 / #4ddbff / #8ff0ff) are under 2:1 on
+   white, so each keeps its HUE but drops to a ≥4.5:1 shade; the glows that
+   made them read on navy become hairline shadows. */
+html.theme-light .ev-verdict-card{
+  background:linear-gradient(180deg,rgba(252,254,255,.96),rgba(234,241,250,.97));
+  border-color:rgba(0,110,170,.24);color:#1f3047;
+  box-shadow:0 10px 32px rgba(20,40,80,.16),inset 0 1px 0 rgba(255,255,255,.7)}
+html.theme-light .ev-verdict-logo{border-color:rgba(0,110,170,.28);box-shadow:0 2px 8px rgba(20,40,80,.18)}
+html.theme-light .ev-verdict-loc{color:#0d1b2e}
+html.theme-light .ev-verdict-loc small,
+html.theme-light .ev-verdict-time{color:#4d627e}
+html.theme-light .ev-verdict-min,
+html.theme-light .ev-verdict-dclose{border-color:rgba(0,110,170,.28);background:rgba(255,255,255,.85);color:#3e5573}
+html.theme-light .ev-verdict-min:hover,
+html.theme-light .ev-verdict-dclose:hover{border-color:rgba(0,110,170,.6);color:#0d1b2e}
+
+html.theme-light .ev-verdict-locinput{border-color:rgba(0,110,170,.3);background:#fff;color:#0d1b2e}
+html.theme-light .ev-verdict-locinput::placeholder{color:#5b6d85}
+html.theme-light .ev-verdict-locinput:focus{border-color:rgba(0,110,170,.7);box-shadow:0 0 0 3px rgba(0,133,176,.14)}
+html.theme-light .ev-verdict-locgo{border-color:rgba(0,110,170,.35);background:rgba(0,133,176,.10);color:#006a91}
+html.theme-light .ev-verdict-locgo:hover{border-color:rgba(0,110,170,.7);color:#0d1b2e}
+html.theme-light .ev-verdict-locbtn{border-color:rgba(0,128,84,.38);background:rgba(0,146,106,.08);color:#00704a}
+html.theme-light .ev-verdict-locbtn:hover{filter:none;background:rgba(0,146,106,.15)}
+html.theme-light .ev-verdict-locbtn.danger{border-color:rgba(192,23,47,.35);background:rgba(192,23,47,.06);color:#b4233c}
+html.theme-light .ev-verdict-locbtn.danger:hover{background:rgba(192,23,47,.12)}
+html.theme-light .ev-verdict-locerr{color:#a81d33;background:rgba(192,23,47,.07);border-color:rgba(192,23,47,.3)}
+
+html.theme-light .ev-verdict-statcard,
+html.theme-light .ev-verdict-factor,
+html.theme-light .ev-verdict-day,
+html.theme-light .ev-verdict-skyrow{background:rgba(255,255,255,.8);border-color:rgba(0,90,150,.14)}
+html.theme-light .ev-verdict-stathdr,
+html.theme-light .ev-verdict-skytitle,
+html.theme-light .ev-verdict-fval,
+html.theme-light .ev-verdict-pollutant b,
+html.theme-light .ev-verdict-trange b{color:#0d1b2e}
+html.theme-light .ev-verdict-stathdr small,
+html.theme-light .ev-verdict-statrow .k,
+html.theme-light .ev-verdict-fname,
+html.theme-light .ev-verdict-fcat,
+html.theme-light .ev-verdict-trange,
+html.theme-light .ev-verdict-dname,
+html.theme-light .ev-verdict-whint,
+html.theme-light .ev-verdict-skydesc,
+html.theme-light .ev-verdict-dempty,
+html.theme-light .ev-verdict-pollutant span{color:#4d627e}
+html.theme-light .ev-verdict-statrow .v,
+html.theme-light .ev-verdict-dtemp,
+html.theme-light .ev-verdict-best{color:#1f3047}
+html.theme-light .ev-verdict-dtemp small,
+html.theme-light .ev-verdict-mday,
+html.theme-light .ev-verdict-prov{color:#51657f}
+html.theme-light .ev-verdict-statclocks{background:rgba(255,255,255,.7);border-color:rgba(0,90,150,.12);color:#3e5573}
+html.theme-light .ev-verdict-statclocks b{color:#0d1b2e}
+
+html.theme-light .ev-verdict-lamp{border-color:rgba(0,128,84,.5);background:rgba(0,146,106,.10);
+  box-shadow:0 0 0 4px rgba(0,146,106,.07),0 4px 14px rgba(0,128,84,.18)}
+html.theme-light .ev-verdict-lamp.warn{border-color:rgba(160,112,0,.55);background:rgba(220,160,0,.12);
+  box-shadow:0 0 0 4px rgba(220,160,0,.08),0 4px 14px rgba(160,112,0,.18)}
+html.theme-light .ev-verdict-lamp.danger{border-color:rgba(192,23,47,.5);background:rgba(192,23,47,.08);
+  box-shadow:0 0 0 4px rgba(192,23,47,.06),0 4px 14px rgba(192,23,47,.18)}
+html.theme-light .ev-verdict-word{color:#00704a;text-shadow:none}
+html.theme-light .ev-verdict-word.warn{color:#7d5800;text-shadow:none}
+html.theme-light .ev-verdict-word.danger{color:#b8152d;text-shadow:none}
+html.theme-light .ev-verdict-sub{color:#3e5573}
+html.theme-light .ev-verdict-sentence{color:#0d1b2e}
+html.theme-light .ev-verdict-sentence strong{color:#006a91;text-shadow:none}
+
+html.theme-light .ev-verdict-factor.help{border-color:rgba(0,128,84,.42)}
+html.theme-light .ev-verdict-factor.watch{border-color:rgba(176,100,0,.45)}
+html.theme-light .ev-verdict-factor.block{border-color:rgba(192,23,47,.45)}
+html.theme-light .ev-verdict-factor.help .ev-verdict-fval{color:#00704a}
+html.theme-light .ev-verdict-factor.watch .ev-verdict-fval{color:#8f4c00}
+html.theme-light .ev-verdict-factor.block .ev-verdict-fval{color:#b8152d}
+html.theme-light .ev-verdict-factor.sel{border-color:rgba(0,110,170,.65);background:rgba(0,133,176,.10);
+  box-shadow:0 0 0 3px rgba(0,133,176,.10)}
+
+html.theme-light .ev-verdict-detail{border-color:rgba(0,110,170,.22);background:rgba(255,255,255,.75)}
+html.theme-light .ev-verdict-dsum{color:#3e5573}
+html.theme-light .ev-verdict-pollution{border-top-color:rgba(0,90,150,.14)}
+html.theme-light .ev-verdict-pollutant{background:rgba(0,133,176,.06);border-color:rgba(0,90,150,.12)}
+html.theme-light .ev-verdict-pollution-note{color:#8f4c00}
+
+html.theme-light .ev-verdict-mini{color:#006a91;text-shadow:none}
+html.theme-light .ev-verdict-whint{text-shadow:none}
+html.theme-light .ev-verdict-tgaxis{fill:#51657f}
+html.theme-light .ev-verdict-tglab{fill:#1f3047}
+html.theme-light .ev-verdict-divider{border-top-color:rgba(0,90,150,.15)}
+/* The charts' SVG carries presentation attributes (fill=/stroke=/stop-color=),
+   which any CSS rule outranks — re-ink the dark-tuned ones by value. */
+html.theme-light .ev-verdict-card svg rect[fill^="rgba(3,10,26"]{fill:rgba(40,70,120,.08)}
+html.theme-light .ev-verdict-card svg line[stroke^="rgba(77,219,255"]{stroke:rgba(0,90,150,.14)}
+html.theme-light .ev-verdict-card svg line[stroke^="rgba(143,240,255"]{stroke:rgba(0,106,145,.45)}
+html.theme-light .ev-verdict-card svg circle[fill="#8ff0ff"]{fill:#0088b8;filter:none}
+html.theme-light .ev-verdict-card svg circle[fill="#2eff9e"]{fill:#009a63}
+html.theme-light #ev-verdict-tline stop:nth-of-type(1),
+html.theme-light #ev-verdict-dline stop:nth-of-type(1){stop-color:#0088b8}
+html.theme-light #ev-verdict-tline stop:nth-of-type(2),
+html.theme-light #ev-verdict-dline stop:nth-of-type(2){stop-color:#1f6fd0}
+html.theme-light #ev-verdict-tline stop:nth-of-type(3),
+html.theme-light #ev-verdict-dline stop:nth-of-type(3){stop-color:#009a63}
+html.theme-light #ev-verdict-tfill stop:nth-of-type(2),
+html.theme-light #ev-verdict-dfill stop:nth-of-type(2){stop-color:#009a63}
+
+html.theme-light .ev-verdict-day:hover{border-color:rgba(0,110,170,.5)}
+html.theme-light .ev-verdict-day.best{border-color:rgba(0,128,84,.5);box-shadow:0 0 0 3px rgba(0,146,106,.10)}
+html.theme-light .ev-verdict-pip.on{background:#1f6fd0;box-shadow:none}
+html.theme-light .ev-verdict-pip.hot{background:#009a63;box-shadow:none}
+html.theme-light .ev-verdict-pip.off{background:#8898a8}
+html.theme-light .ev-verdict-best{background:rgba(0,146,106,.07);border-color:rgba(0,128,84,.3)}
+html.theme-light .ev-verdict-best strong{color:#00704a}
+
+html.theme-light .ev-verdict-moonseq{opacity:1}
+html.theme-light .ev-verdict-mglyph{filter:grayscale(.2) drop-shadow(0 0 1px rgba(20,40,80,.35))}
+html.theme-light .ev-verdict-moon.today .ev-verdict-mglyph{filter:drop-shadow(0 0 3px rgba(0,106,145,.6))}
+html.theme-light .ev-verdict-moon.today .ev-verdict-mday{color:#006a91}
+html.theme-light .ev-verdict-moon.mark .ev-verdict-mday{color:#3e5573}
+
+html.theme-light .ev-verdict-dot{background:#8898a8}
+html.theme-light .ev-verdict-dot.go{background:#00a36a;box-shadow:0 0 0 3px rgba(0,163,106,.18)}
+html.theme-light .ev-verdict-dot.maybe{background:#d9a300;box-shadow:0 0 0 3px rgba(217,163,0,.2)}
+html.theme-light .ev-verdict-skywhen{color:#006a91}
+
+html.theme-light .ev-verdict-cta{box-shadow:0 4px 14px rgba(31,111,208,.28)}
+html.theme-light .ev-verdict-explore{background:#fff;border-color:rgba(10,40,80,.2);color:#1f3047}
+html.theme-light .ev-verdict-explore:hover{background:rgba(0,133,176,.08)}
+html.theme-light .ev-verdict-live{background:#00a36a;box-shadow:none}
+html.theme-light .ev-verdict-live.stale{background:#d98a00;box-shadow:none}
+
+html.theme-light .ev-verdict-setloc{border-color:rgba(0,110,170,.4);background:rgba(0,133,176,.06);color:#1f3047}
+html.theme-light .ev-verdict-setloc button{border-color:rgba(0,110,170,.45);background:#fff;color:#006a91}
+
+html.theme-light .ev-verdict-pill{border-color:rgba(0,110,170,.32);
+  background:linear-gradient(180deg,rgba(252,254,255,.97),rgba(234,241,250,.98));color:#1f3047;
+  box-shadow:0 6px 20px rgba(20,40,80,.18)}
+html.theme-light .ev-verdict-pill-logo{border-color:rgba(0,110,170,.32);box-shadow:0 2px 6px rgba(20,40,80,.2)}
+html.theme-light .ev-verdict-pill b{
+  background:linear-gradient(100deg,#0078a8 0%,#1f5fc0 40%,#007a8a 65%,#00704a 100%);
+  -webkit-background-clip:text;background-clip:text}
+/* Collapsed: the container goes chrome-less exactly as in dark mode. */
+html.theme-light .ev-verdict-card.ev-collapsed{background:none;border:none;box-shadow:none}`;
 
 function ensureStyles() {
     if (document.getElementById(STYLE_ID)) return;

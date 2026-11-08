@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -109,7 +109,39 @@ main {
 .sug-grid a .ico { font-size: 14px; opacity:.85; }
 .sug-grid a .lbl { font-weight:600; }
 .sug-grid a .sub { font-size: 10px; color:#666; margin-left: auto; }
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+html.theme-light #stars-bg {
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(47,134,246,.10) 0%, transparent 55%),
+        radial-gradient(ellipse at 75% 75%, rgba(9,118,186,.08) 0%, transparent 55%),
+        var(--pl-grad-hero);
+}
+/* the twinkle canvas draws pale stars (made for black); inverted they read
+   as a faint navy starfield on white */
+html.theme-light #stars-bg canvas { filter: invert(1) hue-rotate(180deg); opacity: .35; }
+html.theme-light .code {
+    background: var(--pl-grad-headline);
+    -webkit-background-clip: text; background-clip: text;
+    filter: drop-shadow(0 6px 18px rgba(21,96,212,.14));
+}
+html.theme-light .tagline { color: var(--pl-blue-deep); }
+html.theme-light .message { color: var(--pl-text-3); }
+html.theme-light .message code { background: var(--pl-bg-sunk); border-color: var(--pl-border); color: var(--pl-text-1); }
+html.theme-light .btn { background: var(--pl-card); border-color: var(--pl-border-strong); color: var(--pl-text-2); }
+html.theme-light .btn:hover { background: var(--pl-blue-soft); border-color: var(--pl-blue); color: var(--pl-text-1); }
+html.theme-light .btn.primary { background: var(--pl-grad-btn); border-color: var(--pl-btn); color: #fff; }
+html.theme-light .btn.primary:hover { filter: none; background: var(--pl-btn-hover); color: #fff; }
+html.theme-light .suggestions { border-top-color: var(--pl-border); }
+html.theme-light .suggestions h3 { color: var(--pl-text-4); }
+html.theme-light .sug-grid a { background: var(--pl-card); border-color: var(--pl-border); color: var(--pl-text-2); box-shadow: var(--pl-shadow); }
+html.theme-light .sug-grid a:hover { background: var(--pl-blue-soft); border-color: rgba(21,96,212,.40); color: var(--pl-text-1); }
+html.theme-light .sug-grid a .sub { color: var(--pl-text-4); }
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

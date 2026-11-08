@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -159,7 +159,88 @@ footer.fo-footer a:hover{color:var(--uv-300)}
   .fo-hero{padding:64px 0 56px}
 }
 @media (max-width:520px){.fo-steps{grid-template-columns:1fr}}
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+/* The --fg, --uv, --pink and --grad tokens above are already remapped by
+   js/theme-light.css; this block covers the hard-coded section backgrounds,
+   rgba borders, glows and the proof chart's SVG colours. */
+html.theme-light{
+  /* proof-chart series, re-picked for contrast on white */
+  --c-observed:var(--pl-sky);--c-empirical:var(--pl-danger);--c-parkers:var(--pl-ok);
+}
+html.theme-light .fo-eyebrow{text-shadow:none;color:var(--pl-blue)}
+html.theme-light .fo-section-sub{color:var(--pl-text-3)}
+
+/* Hero */
+html.theme-light .fo-hero{background:var(--pl-grad-hero);border-bottom-color:var(--pl-border)}
+html.theme-light .fo-hero::after{background:repeating-linear-gradient(transparent 0 38px,rgba(21,96,212,.035) 38px 39px)}
+html.theme-light .fo-badge{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.30);color:var(--pl-blue-deep);box-shadow:none}
+html.theme-light .fo-badge::before{box-shadow:none}
+html.theme-light .fo-h1{filter:none}
+html.theme-light .fo-lede{color:var(--pl-text-2)}
+html.theme-light .fo-btn-primary{background:var(--pl-btn);color:#fff;box-shadow:var(--pl-shadow)}
+html.theme-light .fo-btn-primary:hover{background:var(--pl-btn-hover);color:#fff;filter:none;box-shadow:var(--pl-shadow-hover)}
+html.theme-light .fo-btn-ghost{background:var(--pl-card);color:var(--pl-blue-deep);border-color:var(--pl-border-strong)}
+html.theme-light .fo-btn-ghost:hover{background:var(--pl-blue-soft);color:var(--pl-blue-deep)}
+html.theme-light .fo-cta-note a{color:var(--pl-blue)}
+
+/* Proof strip: the chart is recoloured for white rather than left dark */
+html.theme-light .fo-proof{background:var(--pl-bg-soft)}
+html.theme-light .fo-chart-card{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .fo-chart line[stroke="#2a2150"]{stroke:var(--pl-border-strong)}
+html.theme-light .fo-chart line[stroke="#1a1535"]{stroke:var(--pl-border)}
+html.theme-light .fo-chart line[stroke="#ff3050"]{stroke:var(--pl-danger)}
+html.theme-light .fo-chart text[fill="#ff7a7a"]{fill:var(--pl-danger)}
+html.theme-light .fo-chart text[fill="#6f6695"]{fill:var(--pl-text-4)}
+html.theme-light .fo-chart line[stroke="#ffd23f"]{stroke:var(--pl-warn)}
+html.theme-light .fo-chart text[fill="#ffd23f"]{fill:var(--pl-warn)}
+html.theme-light .fo-legend{border-top-color:var(--pl-border);color:var(--pl-text-3)}
+html.theme-light .fo-chart-caption{color:var(--pl-text-4)}
+
+/* Evidence cards (sections alternate soft / white in light mode) */
+html.theme-light .fo-gap{background:var(--pl-bg-soft)}
+html.theme-light .fo-card{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .fo-card:hover{border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .fo-card p{color:var(--pl-text-3)}
+
+/* Honest comparison */
+html.theme-light .fo-compare{background:var(--pl-bg)}
+html.theme-light .fo-cmp-col.empirical{background:var(--pl-card);border-color:rgba(192,38,45,.28)}
+html.theme-light .fo-cmp-col.mhd{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.32)}
+html.theme-light .fo-cmp-col.mhd h3{color:var(--pl-blue-deep)}
+html.theme-light .fo-cmp-col li{color:var(--pl-text-2);border-bottom-color:var(--pl-border)}
+html.theme-light .fo-candor{border-left-color:var(--pl-blue);background:var(--pl-blue-soft);color:var(--pl-text-3)}
+
+/* Console features */
+html.theme-light .fo-console{background:var(--pl-bg-soft)}
+html.theme-light .fo-feat-item{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .fo-feat-item p{color:var(--pl-text-4)}
+
+/* Workflow */
+html.theme-light .fo-workflow{background:var(--pl-bg);border-top:1px solid var(--pl-border)}
+html.theme-light .fo-step{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .fo-step-num{background:var(--pl-btn);color:#fff;box-shadow:none}
+html.theme-light .fo-step p{color:var(--pl-text-4)}
+html.theme-light .fo-workflow-caveat{border-color:rgba(138,90,0,.30);background:var(--pl-card);color:var(--pl-text-3)}
+
+/* Founding pilot */
+html.theme-light .fo-pilot{background:radial-gradient(ellipse at 78% 45%,rgba(21,96,212,.08),transparent 55%),var(--pl-bg)}
+html.theme-light .fo-pilot-card{background:var(--pl-card);border-color:rgba(21,96,212,.32);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .fo-pilot-side{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.22)}
+html.theme-light .fo-pilot-side p{color:var(--pl-text-3)}
+
+/* Final CTA */
+html.theme-light .fo-final{background:var(--pl-grad-hero);border-top-color:var(--pl-border)}
+html.theme-light .fo-final p{color:var(--pl-text-3)}
+
+html.theme-light footer.fo-footer{border-top-color:var(--pl-border);color:var(--pl-text-4)}
+html.theme-light footer.fo-footer a{color:var(--pl-text-3)}
+html.theme-light footer.fo-footer a:hover{color:var(--pl-blue)}
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
     <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -102,10 +102,26 @@
         .legal-meta { color: #666; font-size: .85rem; }
         .legal-meta strong { color: #888; }
 
-        .legal-body { max-width: 800px; margin: 0 auto; padding: 2.5rem 2rem 4rem; flex: 1; }
+        /* min-width:0 + width:100% — as a flex child of the column body,
+           .legal-body otherwise takes the API table's min-content width and
+           pushed the page to 462px on a 390px phone. The table scrolls instead. */
+        .legal-body { max-width: 800px; margin: 0 auto; padding: 2.5rem 2rem 4rem; flex: 1; min-width: 0; width: 100%; }
+        @media (max-width: 640px) {
+            .legal-body { padding: 2rem 1.1rem 3rem; }
+            .api-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        }
         .toc {
             background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
             border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 2.5rem;
+        }
+        /* The page-level `nav {…}` rule above is the legacy top bar, but a bare
+           `nav` selector also claims <nav class="toc"> and squashed the contents
+           into a 54px sticky strip of overlapping text (eula.html had the same
+           bug). Undo the bar geometry for the TOC, in both themes. */
+        nav.toc {
+            position: static; z-index: auto; display: block;
+            height: auto; min-height: 0; gap: normal;
+            -webkit-backdrop-filter: none; backdrop-filter: none;
         }
         .toc h3 { font-size: .85rem; color: #ffd700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: .75rem; }
         .toc ol { padding-left: 1.2rem; }
@@ -172,6 +188,92 @@
             .legal-body { padding: 1.5rem 1rem 3rem; }
             .api-table th, .api-table td { padding: 8px 8px; font-size: .8rem; }
         }
+
+        /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+        /* Legal shell: gold headings / violet links on near-black → navy copy, blue
+           links and headings, soft-blue panels. */
+        html.theme-light .legal-hero { background: var(--pl-grad-hero); border-bottom-color: var(--pl-border); }
+        html.theme-light .legal-hero h1 {
+            background: var(--pl-grad-headline);
+            -webkit-background-clip: text; background-clip: text;
+        }
+        html.theme-light .legal-meta { color: var(--pl-text-4); }
+        html.theme-light .legal-meta strong { color: var(--pl-text-2); }
+
+        html.theme-light .toc { background: var(--pl-bg-soft); border-color: var(--pl-border); }
+        html.theme-light .toc :is(h2, h3) { color: var(--pl-blue-deep); }
+        html.theme-light .toc li { color: var(--pl-text-4); }
+        html.theme-light .toc a { color: var(--pl-blue); }
+        html.theme-light .toc a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light .legal-section h2 { color: var(--pl-blue-deep); border-bottom-color: var(--pl-border); }
+        html.theme-light .legal-section h3 { color: var(--pl-text-1); }
+        html.theme-light .legal-section :is(p, li) { color: var(--pl-text-2); }
+        html.theme-light .legal-section strong { color: var(--pl-text-1); }
+        html.theme-light .legal-section a { color: var(--pl-blue); }
+        html.theme-light .legal-section a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light .highlight-box {
+            background: var(--pl-blue-soft); border-color: var(--border-3); color: var(--pl-text-2);
+        }
+        html.theme-light .highlight-box strong { color: var(--pl-text-1); }
+        html.theme-light .highlight-box a { color: var(--pl-blue); }
+        html.theme-light .highlight-box a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light footer a { color: var(--pl-text-3); }
+        html.theme-light footer a:hover { color: var(--pl-blue); }
+
+        /* Caution boxes keep a warm signal — the palette's warn amber as a tint and
+           a rule — with navy copy for body-text contrast. */
+        html.theme-light .warning-box {
+            background: color-mix(in srgb, var(--pl-warn) 7%, var(--pl-bg));
+            border-color: color-mix(in srgb, var(--pl-warn) 32%, var(--pl-bg));
+            color: var(--pl-text-1);
+        }
+
+        html.theme-light .api-table th {
+            background: var(--pl-blue-soft); color: var(--pl-blue-deep); border-bottom-color: var(--border-3);
+        }
+        html.theme-light .api-table td { color: var(--pl-text-2); border-bottom-color: var(--pl-border); }
+        html.theme-light .api-table strong { color: var(--pl-text-1); }
+        html.theme-light .api-table a { color: var(--pl-blue); }
+        html.theme-light .badge-free {
+            background: color-mix(in srgb, var(--pl-ok) 10%, var(--pl-bg)); color: var(--pl-ok);
+            border-color: color-mix(in srgb, var(--pl-ok) 35%, var(--pl-bg));
+        }
+        html.theme-light .badge-key {
+            background: color-mix(in srgb, var(--pl-warn) 10%, var(--pl-bg)); color: var(--pl-warn);
+            border-color: color-mix(in srgb, var(--pl-warn) 35%, var(--pl-bg));
+        }
+        html.theme-light .badge-open { background: var(--pl-blue-soft); color: var(--pl-blue-deep); border-color: var(--border-3); }
+
+        /* This page still carries its own legacy top bar (nav-lint baseline:
+           ghostCss) — dark glass → white glass, gold → blue. */
+        html.theme-light body > nav {
+            background: rgba(255, 255, 255, .94);
+            border-bottom-color: var(--pl-border);
+            box-shadow: 0 4px 14px rgba(21, 96, 212, .06);
+        }
+        html.theme-light .nav-brand {
+            background: var(--pl-grad-headline);
+            -webkit-background-clip: text; background-clip: text;
+        }
+        html.theme-light .nav-logo-img { filter: drop-shadow(0 0 4px rgba(21, 96, 212, .25)); }
+        html.theme-light .nav-logo-wrap::before { border-top-color: var(--pl-blue-bright); border-right-color: var(--border-3); }
+        html.theme-light .nav-logo-wrap::after  { border-bottom-color: var(--border-arc); border-left-color: var(--border-2); }
+        html.theme-light .nav-item { background: var(--pl-bg-soft); border-color: var(--pl-border); color: var(--pl-text-2); }
+        html.theme-light .nav-item:hover { background: var(--pl-blue-soft); border-color: var(--border-uv); color: var(--pl-blue-deep); }
+        html.theme-light .nav-item.cta,
+        html.theme-light .nav-item.cta:hover { background: var(--pl-btn); border-color: var(--pl-btn); color: #fff; }
+        html.theme-light .nav-item.cta:hover { background: var(--pl-btn-hover); border-color: var(--pl-btn-hover); }
+        html.theme-light .nav-burger { background: var(--pl-bg-soft); border-color: var(--pl-border); color: var(--pl-text-1); }
+        html.theme-light .nav-burger:hover { background: var(--pl-blue-soft); }
+        @media (max-width: 768px) {
+            html.theme-light .nav-menu {
+                background: rgba(255, 255, 255, .98);
+                border-bottom-color: var(--pl-border); box-shadow: var(--shadow-dropdown);
+            }
+        }
     </style>
 <script type="application/ld+json">
 {
@@ -189,6 +291,10 @@
   "inLanguage": "en-US"
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

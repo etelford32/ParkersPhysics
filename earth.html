@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <script src="js/preview-mode.js"></script>
@@ -168,6 +168,34 @@ body.theme-light #storm-watch-panel .sw-scrub-row2 input[type=range]::-webkit-sl
     border-color: rgba(217, 106, 26, .65);
     box-shadow: 0 0 4px rgba(217, 106, 26, .45), inset 0 1px 0 rgba(255, 255, 255, .80);
 }
+/* Storm-watch scrubber text + D1–D5 chips. js/storm-watch-panel.js
+   hard-codes peach/tan inks tuned for the dark panel (#caac8d chips,
+   #ffd9b8 "now" label, #7a6757 ticks) — on the light panel they read as
+   disabled. Deep amber on a pale amber chip; the selected day is the
+   solid storm colour with white text. */
+html.theme-light #storm-watch-panel .sw-scrub {
+    background: linear-gradient(180deg, rgba(217,106,26,.08) 0%, rgba(217,106,26,.02) 100%);
+    border-color: rgba(217,106,26,.28);
+}
+html.theme-light #storm-watch-panel .sw-scrub-row1 { color: #8f4c00; }
+html.theme-light #storm-watch-panel .sw-scrub-h { color: #7a3f00; }
+html.theme-light #storm-watch-panel .sw-scrub-time { color: #5a6a7a; }
+html.theme-light #storm-watch-panel .sw-scrub-row2 { color: #6b5a4c; }
+html.theme-light #storm-watch-panel .sw-scrub-reset {
+    background: rgba(217,106,26,.10); color: #8f4c00; border-color: rgba(217,106,26,.40);
+}
+html.theme-light #storm-watch-panel .sw-scrub-reset:hover { background: rgba(217,106,26,.20); color: #6a3500; }
+html.theme-light #storm-watch-panel .sw-scrub-chip {
+    background: #fff7ef; color: #8f4c00; border-color: rgba(217,106,26,.38);
+}
+html.theme-light #storm-watch-panel .sw-scrub-chip:hover {
+    background: #ffe9d4; color: #6a3500; border-color: rgba(217,106,26,.6);
+}
+html.theme-light #storm-watch-panel .sw-scrub-chip.active {
+    background: #a9520f; color: #fff; border-color: #a9520f;
+    box-shadow: 0 1px 3px rgba(169,82,15,.35);
+}
+html.theme-light #storm-watch-panel .sw-card .sw-scrub-line { color: #8f4c00; }
 
 /* AurOracle cross-sell chip in the SW HUD — teal to match the AurOracle
    brand and stand out from the blue HUD as a "go deeper" affordance. */
@@ -189,12 +217,14 @@ html.theme-light .ip-aur-txt b{color:#0a4a3a}
 /* Aurora-power "fc-chip" intensity backgrounds inside the SW HUD
    are tuned for a dark surface (low-alpha rgba over near-black).
    On light, increase saturation so the chip still reads. */
-html.theme-light .ip-aurora-forecast-chip,
-body.theme-light .ip-aurora-forecast-chip {
-    /* Selectors apply if/when chip rules ever pull a class. The
-       current implementation uses inline styles, so this is a
-       placeholder for the next refactor — annotated rather than
-       silently absent. */
+/* The chips are inline-styled spans built by _paintAuroraForecast()
+   (pastel text on a low-alpha tint). On light the TINT still encodes the
+   intensity bucket and reads well; the pastel TEXT does not, so it goes
+   navy with a hairline edge. */
+html.theme-light #ip-aurora-forecast > span,
+body.theme-light #ip-aurora-forecast > span {
+    color: #12395c !important;
+    box-shadow: inset 0 0 0 1px rgba(10,30,50,.10);
 }
 
 /* Marketing gradient near the dashboard CTAs uses two hard-coded
@@ -206,6 +236,319 @@ body.theme-light .sim-card-title-gradient {
     -webkit-background-clip: text;
     background-clip: text;
 }
+
+/* ── Light-theme chrome pass (2026-11) ─────────────────────────────────
+   The daylight theme left the top rail, the status strips, the layer
+   panel's selects/OFF pills and the hover tips fully dark beside the
+   light Layers + Storm Watch panels. Same recipe as those: frosted
+   near-white surface (--c-surface-1), navy text, deep-cyan accent, and
+   every dark-tuned bright text colour dropped to a ≥4.5:1 shade of the
+   SAME hue. COLOURS / BORDERS / SHADOWS ONLY — border widths and every
+   box dimension are untouched, because #time-controls' height is
+   measured into --ev-timebar-h (tests/earth-time-controls-position.spec.js).
+   The globe, the space behind it, data ramps and status pips stay as
+   they are. These rules sit ABOVE the dark ones in source order, so
+   each wins on specificity (html.theme-light prefix) and every state
+   variant (:hover / .active / [data-*]) is restated below it. The
+   verdict card / day view carry their own light blocks (js/verdict-
+   card.js, js/verdict-day-view.js). */
+
+/* Top rail — the time bar */
+html.theme-light #time-controls {
+    background: linear-gradient(180deg, rgba(252,254,255,.97), rgba(236,242,250,.97));
+    border-color: var(--c-accent-border);
+    box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(255,255,255,.6);
+}
+html.theme-light .tc-btn,
+html.theme-light #tc-loop-range {
+    background: rgba(0,133,176,.07); border-color: rgba(0,133,176,.28); color: #0b5f80;
+}
+html.theme-light .tc-btn:hover { background: rgba(0,133,176,.15); color: #073f57; }
+html.theme-light .tc-btn.active,
+html.theme-light .tc-btn#tc-loop[aria-pressed="true"] {
+    background: #0085b0; color: #fff; border-color: #006a8e;
+}
+html.theme-light .tc-sep { background: rgba(10,30,50,.14); }
+html.theme-light .tc-display { border-left-color: rgba(10,30,50,.14); }
+html.theme-light .tc-time { color: #006a91; }
+html.theme-light .tc-offset,
+html.theme-light .tc-offset[data-tc-mode="live"]          { color: #5a6a7a; }
+html.theme-light .tc-offset[data-tc-mode="replay"]        { color: #00739e; }
+html.theme-light .tc-offset[data-tc-mode="forecast-near"] { color: #94500a; }
+html.theme-light .tc-offset[data-tc-mode="forecast-mid"]  { color: #9a4a00; }
+html.theme-light .tc-offset[data-tc-mode="forecast-far"]  { color: #b23a10; }
+html.theme-light .tc-scrub-edge { color: #4f5f75; }
+html.theme-light .tc-scrub-edge.right { color: #006a91; }
+/* Same three layers as the dark track (now tick · day ticks · past/future
+   tint), re-inked: white ticks vanish on a light bar. */
+html.theme-light #tc-scrub {
+    background:
+        linear-gradient(rgba(10,30,60,.75), rgba(10,30,60,.75))
+            no-repeat var(--tc-now-pct) center / 1.5px 12px,
+        repeating-linear-gradient(to right,
+            transparent 0, transparent calc(4.7619% - 1px),
+            rgba(10,30,60,.16) calc(4.7619% - 1px),
+            rgba(10,30,60,.16) 4.7619%) no-repeat 0 center / 100% 6px,
+        linear-gradient(to right,
+            rgba(0,133,176,.16) 0%,
+            rgba(0,133,176,.38) var(--tc-now-pct),
+            rgba(217,106,26,.16) calc(var(--tc-now-pct) + 0.01%),
+            rgba(217,106,26,.42) 100%);
+}
+html.theme-light #tc-scrub::-webkit-slider-thumb {
+    background: #0085b0; border-color: #005f80;
+    box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,60,100,.4);
+}
+html.theme-light #tc-scrub::-moz-range-thumb {
+    background: #0085b0; border-color: #005f80;
+    box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,60,100,.4);
+}
+html.theme-light #tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0,133,176,.45); }
+html.theme-light #tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(0,133,176,.45); }
+/* The weather strip (js/time-strip.js). Its canvas reads the --tc-strip-*
+   ink below at paint time and falls back to the dark literals without it. */
+html.theme-light #tc-strip {
+    background: rgba(20,50,90,.05);
+    box-shadow: inset 0 0 0 1px rgba(10,40,80,.10);
+    --tc-strip-night: rgba(20,40,90,0.09);
+    --tc-strip-cloud-rgb: 120,135,160;
+    --tc-strip-grid: rgba(10,30,60,0.14);
+    --tc-strip-label: rgba(40,60,85,0.80);
+    --tc-strip-hatch: rgba(255,255,255,0.55);
+    --tc-strip-now: rgba(10,30,60,0.60);
+    --tc-strip-range: rgba(26,39,53,0.85);
+}
+html.theme-light .tc-strip-cursor { background: #0085b0; box-shadow: 0 0 0 1px rgba(255,255,255,.7); }
+html.theme-light .tc-strip-place { color: #2c3a4a; text-shadow: 0 0 3px #fff, 0 0 2px #fff; }
+html.theme-light .tc-strip-place.empty { color: #5a6a7a; }
+html.theme-light .tc-strip-tip {
+    background: rgba(255,255,255,.97); border-color: rgba(0,133,176,.32);
+    color: #1f3047; box-shadow: 0 4px 14px rgba(20,40,80,.18);
+}
+html.theme-light .tc-strip-tip-head { color: #006a91; }
+html.theme-light .tc-strip-tip-src  { color: #5a6a7a; }
+html.theme-light .tc-strip-mark { background: rgba(255,255,255,.95); color: #3d6a7a; }
+html.theme-light .tc-strip-mark.ev-rain-start { color: #1f6fd0; }
+html.theme-light .tc-strip-mark.ev-rain-stop  { color: #4f6a90; }
+html.theme-light .tc-strip-mark.ev-wind-peak  { color: #3d4f63; }
+html.theme-light .tc-strip-mark.ev-freeze     { color: #1f7f99; }
+html.theme-light .tc-strip-mark.ev-aurora     { color: #00915c; }
+html.theme-light .tc-strip-loop {
+    background: rgba(10,40,80,.06); border-left-color: rgba(10,40,80,.4); border-right-color: rgba(10,40,80,.4);
+}
+html.theme-light #tc-strip.looping .tc-strip-loop { background: rgba(0,133,176,.10); border-color: rgba(0,133,176,.7); }
+html.theme-light #tc-skill-strip,
+html.theme-light .tc-skill-label { color: #4f5f75; }
+html.theme-light .tc-skill-bar { background-color: rgba(0,133,176,.08); border-color: rgba(10,30,50,.14); }
+html.theme-light .tc-skill-tag { color: #5a6a7a; }
+html.theme-light .tc-skill-cell[data-state="warm"] .tc-skill-tag { color: #4f5f75; }
+html.theme-light .tc-skill-cell[data-state="cold"] .tc-skill-tag { color: #5f6f80; }
+html.theme-light .tc-skill-cell[data-state="poor"] .tc-skill-tag { color: #7a6a00; }
+html.theme-light .tc-skill-cell[data-state="good"] .tc-skill-tag { color: #13784a; }
+html.theme-light .tc-skill-cell[data-state="best"] .tc-skill-tag { color: #006a91; }
+/* The fetch wiring writes the badge colour INLINE (#ffb366 in flight,
+   #ff7766 on error — serialised as rgb()), so the light shades need
+   !important; the error state is matched on that inline value. */
+html.theme-light #tc-forecast-status { color: #8f4c00 !important; border-top-color: rgba(154,82,0,.3); }
+html.theme-light #tc-forecast-status[style*="255, 119, 102"] { color: #b8152d !important; }
+html.theme-light .tc-fc-spinner { border-color: rgba(154,82,0,.22); border-top-color: rgba(154,82,0,.9); }
+
+/* Bottom space-weather bar + the ⚡ Weather button */
+html.theme-light #sw-bar {
+    background: var(--c-surface-1);
+    border-top-color: var(--c-border-soft);
+    box-shadow: 0 -2px 12px rgba(20,40,80,.10);
+}
+html.theme-light .sw-lbl { color: #5a6a7a; }
+html.theme-light .sw-val { color: #0b5f80; }
+html.theme-light .cv-btn {
+    background: var(--c-surface-1);
+    box-shadow: 0 2px 10px rgba(20,40,80,.12);
+}
+html.theme-light .cv-btn:hover { background: #e6f2f8; }
+
+/* Feed-error banner: the dark theme's saturated orange carries white text
+   at ~2:1. In daylight it becomes the warm alert surface Storm Watch uses. */
+html.theme-light #feed-error-banner {
+    background: linear-gradient(90deg, #fff1e6, #fff6ea);
+    color: #7a2e06;
+    border-color: rgba(217,106,26,.55);
+    box-shadow: 0 3px 12px rgba(217,106,26,.18);
+}
+html.theme-light #feed-error-banner a { color: #8a3300; opacity: 1; }
+html.theme-light #feed-error-banner .feb-close { color: rgba(122,46,6,.7); }
+html.theme-light #feed-error-banner .feb-close:hover { color: #7a2e06; }
+
+/* Layer panel: the AQ / monitors selects and the OFF pill-toggle track */
+html.theme-light .aq-layer-controls select {
+    background: #fff; color: #1a2735; border-color: var(--c-border-medium);
+}
+html.theme-light .aq-layer-note,
+html.theme-light .aq-layer-legend,
+html.theme-light .aq-heat-row { color: #4f6274; }
+html.theme-light .aq-heat-row input[type=range] { accent-color: #0085b0; }
+html.theme-light .aq-heat-row output { color: #2c4a63; }
+/* Layer-row labels were a hard-coded dark-theme #b0c8d8 (≈1.6:1 on the
+   light panel — the AQ rows read as disabled). */
+html.theme-light .lyr label { color: #2c3a4a; }
+/* The G-scale badge's colour is written INLINE from the Kp palette (a
+   neon pick for a dark panel). Keep the hue, darken the rendering. */
+/* LIGHT: info-panel tones. updateSpaceWeather() writes neon colours
+   INLINE and tags each value with a data-* tone; dark keeps the inline
+   colour, light re-inks by tone (!important beats the inline style).
+   Same meaning, shades that pass 4.5:1 on the light panel. */
+html.theme-light #ip-g-badge { background: #e8f6ee !important; border-color: #8fd0aa !important; color: #00704a !important; }
+html.theme-light #ip-g-badge:is([data-kp="3"], [data-kp="4"]) { background: #fff4dc !important; border-color: #e2b65a !important; color: #7d5800 !important; }
+html.theme-light #ip-g-badge:is([data-kp="5"], [data-kp="6"]) { background: #fff0e3 !important; border-color: #eba06a !important; color: #a04d00 !important; }
+html.theme-light #ip-g-badge:is([data-kp="7"]) { background: #fdecee !important; border-color: #e98a96 !important; color: #b8152d !important; }
+html.theme-light #ip-g-badge:is([data-kp="8"], [data-kp="9"]) { background: #f6eafb !important; border-color: #c48ad8 !important; color: #7a1c99 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="south3"] { color: #b8152d !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="south2"] { color: #a04d00 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="south1"] { color: #7d5800 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="north"]  { color: #006a91 !important; }
+html.theme-light :is(#ip-bz, #ip-bz-arrow)[data-tone="flat"]   { color: #3d5872 !important; }
+html.theme-light #ip-xray[data-cls="A"] { color: #00704a !important; background: #e8f6ee !important; border-color: #8fd0aa !important; }
+html.theme-light #ip-xray[data-cls="B"] { color: #006a91 !important; background: #e5f3fa !important; border-color: #8cc8e2 !important; }
+html.theme-light #ip-xray[data-cls="C"] { color: #7d5800 !important; background: #fff4dc !important; border-color: #e2b65a !important; }
+html.theme-light #ip-xray[data-cls="M"] { color: #a04d00 !important; background: #fff0e3 !important; border-color: #eba06a !important; }
+html.theme-light #ip-xray[data-cls="X"] { color: #b8152d !important; background: #fdecee !important; border-color: #e98a96 !important; }
+html.theme-light #ip-hf[data-tone="normal"]   { color: #4a5f75 !important; }
+html.theme-light #ip-hf[data-tone="blackout"] { color: #b8152d !important; }
+/* The rest of the panel's values. `.iv` defaults to pale cyan (#a0d8f0,
+   ~1.6:1 on the light panel); the model code then colours many of them
+   INLINE by severity (FAC, Dst, substorm, plasma β …) with on-black
+   pastels. Rather than tag each one, light mode darkens WHATEVER inline
+   colour arrives — hue (= meaning) kept, lightness dropped to ~4.5:1 —
+   so a new or retuned severity colour stays readable with no edit here.
+   #ip-bz carries its own tone rule above and is excluded. */
+html.theme-light #info-panel .iv { color: #12395c; }
+html.theme-light #info-panel .iv.warn  { color: #8f4c00; }
+html.theme-light #info-panel .iv.alert { color: #b8152d; }
+html.theme-light #info-panel .ik { color: #3d5872; }
+html.theme-light #info-panel .iv[style*="color"]:not(#ip-bz) { filter: brightness(.5) saturate(1.6); }
+/* Ionospheric rows (js/magnetosphere-engine.js renderIonoHTML, shared,
+   literal inline colours — matched by value here, bars keep their hue). */
+html.theme-light #ip-iono-layers span[style*="background:#111"] { background: #dfe7f1 !important; }
+html.theme-light #ip-iono-layers [style*="color:#aac"] { color: #12395c !important; }
+html.theme-light #ip-iono-layers [style*="color:#778"] { color: #3d5872 !important; }
+html.theme-light #ip-iono-layers [style*="color:#556"] { color: #50698b !important; }
+html.theme-light #info-panel [style*="color:#2a4a5a"] { color: #50698b !important; }
+/* Storm Watch feed-health disclosure text (injected sheet, dark-tuned). */
+html.theme-light #storm-watch-panel .sw-health.partial { color: #6b5300; }
+html.theme-light #storm-watch-panel .sw-health.down    { color: #9a2a1a; }
+html.theme-light .lyr input[type=checkbox]:not(:checked),
+html.theme-light .lyr-featured-row input[type=checkbox]:not(:checked) {
+    background: linear-gradient(180deg, rgba(20,40,70,.20) 0%, rgba(20,40,70,.08) 100%);
+    border-color: rgba(10,30,50,.20);
+    box-shadow: inset 0 1px 2px rgba(10,30,60,.22), inset 0 -1px 0 rgba(255,255,255,.5);
+}
+
+/* Hover tips over the globe */
+html.theme-light #coord-tip,
+html.theme-light :is(#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip, #volcano-tip),
+html.theme-light #alert-tip {
+    background: rgba(255,255,255,.96);
+    color: #1f3047;
+    box-shadow: 0 4px 18px rgba(20,40,80,.18);
+}
+html.theme-light #coord-tip { border-color: var(--c-accent-border-hi); }
+html.theme-light #coord-tip .ct-val { color: #0b5f80; }
+html.theme-light #coord-tip #ct-readouts { border-top-color: rgba(10,30,50,.10); }
+html.theme-light #coord-tip .ct-readout { color: #1f3047; }
+html.theme-light #coord-tip .ct-readout .ct-rd-val { color: #8f4c00; }
+html.theme-light #coord-tip .ct-rd-prov { border-bottom-color: rgba(10,30,50,.08); }
+html.theme-light #coord-tip .ct-rd-prov[data-prov="replay"]        .ct-rd-val { color: #00739e; }
+html.theme-light #coord-tip .ct-rd-prov[data-prov="forecast-near"] .ct-rd-val { color: #94500a; }
+html.theme-light #coord-tip .ct-rd-prov[data-prov="forecast-mid"]  .ct-rd-val { color: #9a4a00; }
+html.theme-light #coord-tip .ct-rd-prov[data-prov="forecast-far"]  .ct-rd-val { color: #b23a10; }
+html.theme-light #coord-tip .ct-rd-adv .ct-rd-adv-label { color: #4f5f75; }
+html.theme-light #coord-tip .ct-rd-adv[data-sev="caution"] .ct-rd-val { color: #7d5800; }
+html.theme-light #coord-tip .ct-rd-adv[data-sev="warning"] .ct-rd-val { color: #9a4a00; }
+html.theme-light #coord-tip .ct-rd-adv[data-sev="danger"]  .ct-rd-val { color: #b8152d; }
+html.theme-light :is(#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip, #volcano-tip) .cty-name { color: #0d1b2e; }
+html.theme-light :is(#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip) .cty-sub { color: #006a91; }
+html.theme-light :is(#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip, #volcano-tip) .cty-hint { color: #4d627e; }
+html.theme-light #volcano-tip .cty-sub { color: #8f4c00; }
+html.theme-light #volcano-tip .vt-row  { color: #1f3047; }
+html.theme-light #volcano-tip .vt-live { color: #a84d00; }
+html.theme-light #volcano-tip a        { color: #a04d00; }
+html.theme-light #alert-tip .at-area { color: #3e5573; }
+html.theme-light #alert-tip .at-exp  { color: #5a6a7a; }
+
+/* Phone chrome: bottom toolbar + the sheet backdrop */
+html.theme-light #mobile-toolbar {
+    background: rgba(248,250,254,.96);
+    border-top-color: var(--c-border-soft);
+    box-shadow: 0 -2px 12px rgba(20,40,80,.10);
+}
+html.theme-light .mtb-btn { color: #3e5573; }
+html.theme-light .mtb-btn.active,
+html.theme-light .mtb-btn:hover { color: var(--c-accent); background: rgba(var(--c-accent-rgb), .10); }
+html.theme-light #panel-backdrop { background: rgba(15,30,55,.30); }
+
+/* Legacy #hud — only drawn on the ?verdict=0 / card-boot-failure path. */
+html.theme-light #hud { background: var(--c-surface-1); box-shadow: var(--shadow-panel); }
+html.theme-light #hud .hud-title {
+    background: linear-gradient(100deg, #0078a8 0%, #1f5fc0 40%, #007a8a 65%, #00704a 100%);
+    -webkit-background-clip: text; background-clip: text;
+}
+html.theme-light #hud .hv { color: #0b5f80; }
+html.theme-light #hud .hk { color: #4f5f75; }
+html.theme-light #h-user-loc-name { color: #00704a !important; }   /* inline colour */
+/* The vorticity-level select is styled inline (dark), hence !important. */
+html.theme-light #vort-level {
+    background: #fff !important; color: #1a2735 !important; border-color: var(--c-border-medium) !important;
+}
+
+/* Below the globe: the saved-locations summary + the "about" section.
+   They are page content, not the stage, so they follow the light page. */
+html.theme-light #saved-loc-summary,
+html.theme-light .sim-info {
+    background: #eef4fa;
+    border-top-color: var(--c-border-soft);
+}
+html.theme-light #saved-loc-summary .sls-card {
+    background:
+        radial-gradient(120% 80% at 8% -10%, var(--c-loc-soft), transparent 60%),
+        linear-gradient(180deg, rgba(252,254,255,.98), rgba(236,243,250,.98));
+    border-color: var(--c-loc-border);
+    box-shadow: 0 10px 28px rgba(20,40,80,.10), inset 0 1px 0 rgba(255,255,255,.6);
+    color: #1f3047;
+}
+html.theme-light #saved-loc-summary .sls-card::before { opacity: 0; }
+html.theme-light #saved-loc-summary .sls-title { background: linear-gradient(135deg, #00704a 0%, #3a4fc0 90%);
+    -webkit-background-clip: text; background-clip: text; }
+html.theme-light #saved-loc-summary .sls-meta,
+html.theme-light #saved-loc-summary .sls-hint { color: #4d627e; }
+html.theme-light .sls-item { background: rgba(255,255,255,.8); border-color: rgba(var(--c-loc-rgb),.25); }
+html.theme-light .sls-item:hover { background: rgba(var(--c-loc-rgb),.07); border-color: rgba(var(--c-loc-rgb),.5); }
+html.theme-light .sls-item .sls-i-name   { color: #0d1b2e; }
+html.theme-light .sls-item .sls-i-clock  { color: #0b5f80; }
+html.theme-light .sls-item .sls-i-coords { color: #4d627e; }
+/* The badge's --bdg is a bright day/dusk/night pick tuned for a dark chip:
+   keep its hue, pull it toward navy for text, tint it for the fill. */
+html.theme-light .sls-item .sls-i-badge {
+    background: color-mix(in srgb, var(--bdg, #9bd) 16%, #ffffff);
+    color: color-mix(in srgb, var(--bdg, #9bd) 42%, #101c2c);
+}
+html.theme-light .sls-item .sls-i-btn { background: rgba(0,133,176,.07); color: #0b5f80; border-color: rgba(var(--c-loc-rgb),.3); }
+html.theme-light .sls-item .sls-i-btn:hover { background: rgba(var(--c-loc-rgb),.14); color: #073f57; }
+html.theme-light .sls-item .sls-i-btn.danger { color: #b4233c; border-color: rgba(192,23,47,.3); }
+html.theme-light .sls-item .sls-i-btn.danger:hover { background: rgba(192,23,47,.08); }
+html.theme-light .sim-info { color: #2c3a4a; }
+html.theme-light .sim-info-title { background: linear-gradient(135deg, #0085b0, #5a1fbb);
+    -webkit-background-clip: text; background-clip: text; }
+html.theme-light .sim-info-lead,
+html.theme-light .sim-ctrl-desc { color: #3e5573; }
+html.theme-light .sim-card { background: rgba(255,255,255,.75); }
+html.theme-light .sim-card-title,
+html.theme-light .sim-ctrl-key { color: #006a91; }
+html.theme-light .sim-card-body { color: #2c3a4a; }
+html.theme-light .sim-card-body strong { color: #0b5f80; }
+html.theme-light .sim-controls-grid { background: rgba(255,255,255,.7); border-color: var(--c-border-soft); }
+html.theme-light .sim-ctrl-row { border-bottom-color: var(--c-border-faint); }
+html.theme-light .sim-link { color: #00668c; }
+html.theme-light .sim-link:hover { color: #004e6b; }
 
 body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
@@ -1667,46 +2010,10 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
     border-color: var(--c-accent);
 }
 
-/* ─── Theme toggle ──────────────────────────────────────────────────
-   Tiny floating button at top-right (just below nav, clear of the
-   layer-panel which sits at top:10px right:10px). Single-icon
-   button — moon/sun glyph swaps based on which theme is active.
-   Cycles through the same setEarthTheme() hook the URL param + dev
-   console use, so it persists via localStorage automatically. */
-#theme-toggle {
-    position: fixed;
-    top: 60px; right: 12px;
-    z-index: 70;
-    width: 32px; height: 32px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--c-surface-1);
-    border: 1px solid var(--c-accent-border);
-    border-radius: 50%;
-    color: var(--c-text-secondary);
-    cursor: pointer; font-size: 16px; line-height: 1;
-    backdrop-filter: var(--blur-glass);
-    -webkit-backdrop-filter: var(--blur-glass);
-    box-shadow: var(--shadow-panel);
-    transition: background .15s, color .15s, border-color .15s, transform .12s;
-    touch-action: manipulation;
-    /* Respect any reduced-motion preference: skip the rotate-on-hover
-       animation when the OS has flagged motion-sensitivity. */
-}
-#theme-toggle:hover {
-    color: var(--c-accent);
-    border-color: var(--c-accent);
-    transform: rotate(15deg);
-}
-#theme-toggle:active { transform: scale(.92) rotate(15deg); }
-@media (prefers-reduced-motion: reduce) {
-    #theme-toggle, #theme-toggle:hover, #theme-toggle:active { transform: none; }
-}
-@media (max-width: 640px) {
-    /* On phones the layer-panel turns into a slide-up sheet via the
-       bottom toolbar, so the top-right corner is free. Move the
-       theme button up to where the layer-panel button sat. */
-    #theme-toggle { top: 56px; right: 10px; width: 30px; height: 30px; font-size: 14px; }
-}
+/* ─── Theme ─────────────────────────────────────────────────────────
+   The light/dark switch is the SITE toggle in the nav (js/theme.js):
+   'auto' follows sunrise/sunset at the saved location. EarthView's own
+   floating 🌗 button and OS-following hook were folded into it. */
 
 /* ─── Panel minimize / drag chrome ──────────────────────────────── */
 .panel-header {
@@ -2741,6 +3048,9 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
   "inLanguage": "en-US"
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body data-clickmap>
 <h1 data-seo-h1 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">Earth — Magnetosphere &amp; Atmosphere Simulator</h1>
@@ -2756,84 +3066,18 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
-<!-- perf-hints:end --><!-- ═══ Theme activation hook ═══════════════════════════════════════════
-     Runs before any panel paints so `body.theme-light` is in place when
-     the first frame renders — otherwise the user briefly sees the dark
-     theme flash before light styles kick in.
-
-     Resolution order (highest priority first):
-       1. `?theme=light` or `?theme=dark` URL param — designer override
-          for one-off previews. Takes effect on this load only; doesn't
-          persist unless the user also passes `&persist=1`.
-       2. localStorage `pp.theme` — the user's saved preference.
-       3. `prefers-color-scheme: light` — respects the OS-level toggle
-          when neither URL nor stored preference is set. Defaults to
-          dark on systems with no preference declared.
-
-     Exposes `window.setEarthTheme('light' | 'dark' | 'auto')` for
-     runtime toggling from the dev console (or a future UI button).
-     'auto' clears the preference and reverts to the OS default. ─────── */
+<!-- perf-hints:end --><!-- ═══ Theme ════════════════════════════════════════════════════════
+     The theme is the SITE theme now: js/theme-boot.js (in <head>, wired by
+     scripts/build-theme-support.mjs) puts `theme-light` on <html> before
+     first paint, and js/theme.js (imported by nav.js) keeps it on daylight
+     at the saved location — the same `pp.theme` key this page used, so a
+     pinned 'light' / 'dark' carries over. EarthView keeps its own light
+     palette (js/design-tokens.css + the rule overrides above); it does NOT
+     load js/theme-light.css. `setEarthTheme` stays as a console alias. -->
 <script>
-(function() {
-    const STORAGE_KEY = 'pp.theme';
-    const url = new URLSearchParams(window.location.search);
-    const urlTheme = url.get('theme');
-    const stored   = (function() {
-        try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null; }
-    })();
-
-    function resolve() {
-        // Honour the URL param first — it's the strongest signal a
-        // designer / user can send.
-        if (urlTheme === 'light' || urlTheme === 'dark') return urlTheme;
-        if (stored === 'light' || stored === 'dark')     return stored;
-        // OS preference. matchMedia is supported on every browser the
-        // app targets.
-        if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light';
-        return 'dark';
-    }
-
-    function apply(theme) {
-        document.documentElement.classList.toggle('theme-light', theme === 'light');
-        document.body?.classList.toggle('theme-light', theme === 'light');
-    }
-
-    // First-paint application — runs on inline script execution so the
-    // class is on <html> by the time any chrome paints.
-    const initial = resolve();
-    apply(initial);
-
-    // If the URL param asked for a one-shot preview AND requested
-    // persistence, write it through. Otherwise the preview stays
-    // session-only and the next visit reverts to whatever was
-    // stored / OS-preferred.
-    if ((urlTheme === 'light' || urlTheme === 'dark') && url.get('persist') === '1') {
-        try { localStorage.setItem(STORAGE_KEY, urlTheme); } catch (_) {}
-    }
-
-    // Dev-console / future-UI hook. 'auto' clears the stored
-    // preference and re-resolves (so a user who set 'light' then
-    // wants to follow OS again can call setEarthTheme('auto')).
-    window.setEarthTheme = function(mode) {
-        if (mode === 'auto') {
-            try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-            const next = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-            apply(next);
-            return next;
-        }
-        if (mode !== 'light' && mode !== 'dark') return null;
-        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
-        apply(mode);
-        return mode;
-    };
-
-    // Live-react to OS-level theme changes when the user hasn't pinned
-    // a preference. Most browsers fire this on system theme toggle.
-    if (!stored && (urlTheme !== 'light' && urlTheme !== 'dark')) {
-        const mq = window.matchMedia?.('(prefers-color-scheme: light)');
-        mq?.addEventListener?.('change', (e) => apply(e.matches ? 'light' : 'dark'));
-    }
-})();
+window.setEarthTheme = function (mode) {
+    return window.ppTheme ? window.ppTheme.set(mode).theme : null;
+};
 </script>
 
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
@@ -2842,80 +3086,6 @@ body.theme-light #layer-feedback[data-kind="error"] { background:#fff0f1; color:
 <script type="module">import { initNav } from "./js/nav.js?v=20260508"; initNav("earth");</script>
 <script type="module">
 import './js/telemetry.js';
-</script>
-
-<!-- ── Theme toggle button ─────────────────────────────────────────
-     The 🌗 glyph swaps to ☀ / 🌙 in the inline script below based on
-     resolved theme. Click cycles dark ↔ light via setEarthTheme().
-     A second click after the user has explicitly chosen sticks to
-     the manual choice; calling setEarthTheme('auto') from the dev
-     console reverts to OS preference. -->
-<button id="theme-toggle" type="button"
-        title="Toggle theme (long-press to follow OS)"
-        aria-label="Toggle light/dark theme">🌗</button>
-<script>
-(function() {
-    const btn = document.getElementById('theme-toggle');
-    if (!btn) return;
-    // Update the glyph to reflect *what clicking does next*: when
-    // dark, show 🌞 (clicking goes to light); when light, show 🌙
-    // (clicking goes to dark). The 🌗 default is a neutral fallback
-    // for the brief window before the activation hook resolves.
-    function syncGlyph() {
-        const isLight = document.documentElement.classList.contains('theme-light')
-                     || document.body?.classList.contains('theme-light');
-        btn.textContent = isLight ? '🌙' : '🌞';
-        btn.setAttribute('aria-pressed', String(isLight));
-    }
-    syncGlyph();
-
-    btn.addEventListener('click', () => {
-        const isLight = document.documentElement.classList.contains('theme-light')
-                     || document.body?.classList.contains('theme-light');
-        // Tap toggles between dark and light. The "auto" mode is
-        // available via long-press OR via window.setEarthTheme('auto')
-        // — exposed below for users who want to revert to OS-following
-        // without rebinding. Avoiding a 3-state cycle in the click
-        // handler keeps the affordance simple: tap = swap.
-        if (typeof window.setEarthTheme === 'function') {
-            window.setEarthTheme(isLight ? 'dark' : 'light');
-        }
-        syncGlyph();
-    });
-
-    // Long-press → 'auto' (revert to OS preference). 600 ms is the
-    // standard mobile long-press threshold; works on touch + mouse.
-    let pressTimer = null;
-    function startPress() {
-        clearTimeout(pressTimer);
-        pressTimer = setTimeout(() => {
-            if (typeof window.setEarthTheme === 'function') {
-                window.setEarthTheme('auto');
-                syncGlyph();
-                // Subtle confirmation flash so the user knows the
-                // long-press registered; the rotate animation
-                // doubles as feedback.
-                btn.style.transition = 'transform .25s ease';
-                btn.style.transform = 'rotate(360deg)';
-                setTimeout(() => { btn.style.transform = ''; }, 250);
-            }
-            pressTimer = null;
-        }, 600);
-    }
-    function cancelPress() {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-    }
-    btn.addEventListener('pointerdown', startPress);
-    btn.addEventListener('pointerup',   cancelPress);
-    btn.addEventListener('pointerleave', cancelPress);
-    btn.addEventListener('pointercancel', cancelPress);
-
-    // Stay in sync if setEarthTheme() is called from dev console.
-    // Poll on visibility change is enough — the user only inspects
-    // the button when looking at the page.
-    document.addEventListener('visibilitychange', syncGlyph);
-})();
 </script>
 
 <!-- ─── App ──────────────────────────────────────────────────── -->
@@ -6329,11 +6499,18 @@ window.addEventListener('swpc-update', e => {
     // ── G-scale badge
     const gBadge = document.getElementById('ip-g-badge');
     const gColor = KP_CELL_COLORS[kpIdx];
-    gBadge.textContent = kpIdx >= 4 ? `G${Math.min(5, kpIdx - 3)} ${KP_QUIET_LABELS[kpIdx].split(' ')[1] ?? ''}`.trim()
-                                     : KP_QUIET_LABELS[kpIdx];
+    // NOAA G-scale: Kp 5 = G1 … Kp 9 = G5, which KP_QUIET_LABELS already
+    // spells out. The old `G${kpIdx - 3}` read Kp 6.3 as "G3 Moderate"
+    // (the status strip, correctly, said G2) and Kp 4 as "G0".
+    gBadge.textContent = KP_QUIET_LABELS[kpIdx];
     gBadge.style.color       = gColor;
     gBadge.style.background  = gColor + '18';
     gBadge.style.borderColor = gColor + '88';
+    // data-* tones beside the inline neon: dark mode keeps the inline
+    // colours exactly; the light theme re-inks by tone (rules near
+    // "LIGHT: info-panel tones") because a neon picked for black is
+    // unreadable on white and CSS cannot read an inline colour's meaning.
+    gBadge.dataset.kp = String(kpIdx);
 
     // ── IMF Bz — direction arrow + coloring
     const bzArrow = document.getElementById('ip-bz-arrow');
@@ -6350,6 +6527,8 @@ window.addEventListener('swpc-update', e => {
     } else {
         bzArrow.textContent = '→';  bzArrow.style.color = '#88aacc'; bzEl.style.color = '#a0d8f0';
     }
+    bzArrow.dataset.tone = bzEl.dataset.tone =
+        bz < -10 ? 'south3' : bz < -5 ? 'south2' : bz < -2 ? 'south1' : bz > 2 ? 'north' : 'flat';
 
     // ── Solar wind speed + bar
     document.getElementById('ip-wind').textContent = `${Math.round(spd)} km/s`;
@@ -6368,12 +6547,14 @@ window.addEventListener('swpc-update', e => {
     xrayBadge.style.color   = xc;
     xrayBadge.style.background  = xc + '18';
     xrayBadge.style.borderColor = xc + '88';
+    xrayBadge.dataset.cls = xrayColors[xrayLetter] ? xrayLetter : '';
 
     // ── HF radio status
     const xInt = d.xray_intensity ?? 0;
     const hfEl = document.getElementById('ip-hf');
     hfEl.textContent = xInt > 0.3 ? '⚠ Blackout' : 'Normal';
     hfEl.style.color = xInt > 0.3 ? '#ff4444' : '#4a6a80';
+    hfEl.dataset.tone = xInt > 0.3 ? 'blackout' : 'normal';
 
     // ── Aurora power (from feed, not derived)
     const aurNorth = sw.aurora_power_north ?? sw.aurora?.north_gw ?? null;

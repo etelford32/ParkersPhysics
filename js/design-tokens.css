@@ -138,9 +138,12 @@
 }
 
 /* ═══ Light theme token overrides ═══════════════════════════════════════
-   Activated by adding `theme-light` to <html> or <body>. See the
-   activation hook in earth.html (resolved via URL ?theme=, localStorage
-   pp.theme, or prefers-color-scheme) and the 🌞/🌙 toggle button.
+   Activated by `theme-light` on <html> (or <body>). Since 2026-11 that is
+   the SITE theme: js/theme-boot.js at first paint, js/theme.js at runtime —
+   'auto' is light from sunrise to sunset at the saved location
+   (js/theme-schedule.js), pinned via the nav toggle or ?theme=light|dark.
+   The site-wide white + blue palette for the reading pages is
+   js/theme-light.css; EarthView keeps THIS palette for its chrome.
 
    Calibration philosophy:
      - Surface / text / borders FLIP — light backgrounds need dark text

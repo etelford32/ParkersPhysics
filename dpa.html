@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -109,6 +109,46 @@ body {
     .legal-table th, .legal-table td { display: block; width: 100%; padding: .35rem 0; }
     .legal-table th { border-bottom: none; padding-top: .7rem; }
 }
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+/* Legal shell: gold headings / violet links on near-black → navy copy, blue
+   links and headings, soft-blue panels. */
+html.theme-light .legal-hero { background: var(--pl-grad-hero); border-bottom-color: var(--pl-border); }
+html.theme-light .legal-hero h1 {
+    background: var(--pl-grad-headline);
+    -webkit-background-clip: text; background-clip: text;
+}
+html.theme-light .legal-meta { color: var(--pl-text-4); }
+html.theme-light .legal-meta strong { color: var(--pl-text-2); }
+
+html.theme-light .toc { background: var(--pl-bg-soft); border-color: var(--pl-border); }
+html.theme-light .toc :is(h2, h3) { color: var(--pl-blue-deep); }
+html.theme-light .toc li { color: var(--pl-text-4); }
+html.theme-light .toc a { color: var(--pl-blue); }
+html.theme-light .toc a:hover { color: var(--pl-blue-deep); }
+
+html.theme-light .legal-section h2 { color: var(--pl-blue-deep); border-bottom-color: var(--pl-border); }
+html.theme-light .legal-section h3 { color: var(--pl-text-1); }
+html.theme-light .legal-section :is(p, li) { color: var(--pl-text-2); }
+html.theme-light .legal-section strong { color: var(--pl-text-1); }
+html.theme-light .legal-section a { color: var(--pl-blue); }
+html.theme-light .legal-section a:hover { color: var(--pl-blue-deep); }
+
+html.theme-light .highlight-box {
+    background: var(--pl-blue-soft); border-color: var(--border-3); color: var(--pl-text-2);
+}
+html.theme-light .highlight-box strong { color: var(--pl-text-1); }
+html.theme-light .highlight-box a { color: var(--pl-blue); }
+html.theme-light .highlight-box a:hover { color: var(--pl-blue-deep); }
+
+html.theme-light footer a { color: var(--pl-text-3); }
+html.theme-light footer a:hover { color: var(--pl-blue); }
+
+html.theme-light .legal-section :is(td, th) { color: var(--pl-text-2); }
+html.theme-light .legal-table :is(th, td) { border-bottom-color: var(--pl-border); }
+html.theme-light .legal-table th { color: var(--pl-text-1); }
+html.theme-light .legal-footer a { color: var(--pl-text-3); }
+html.theme-light .legal-footer a:hover { color: var(--pl-blue); }
 </style>
 
 <script type="application/ld+json">
@@ -124,6 +164,10 @@ body {
   "inLanguage": "en-US"
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

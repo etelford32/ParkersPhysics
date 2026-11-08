@@ -43,7 +43,20 @@ function ensureStyles() {
 [data-sw-ticker].swt-alert{background:rgba(60,4,20,.92);
   border-top-color:rgba(255,48,80,.5);border-bottom-color:rgba(255,48,80,.5)}
 @keyframes swt-pulse{0%,100%{opacity:1}50%{opacity:.3}}
-@media(max-width:640px){[data-sw-ticker]{gap:8px 16px;font-size:.72rem;padding:10px 12px}}`;
+@media(max-width:640px){[data-sw-ticker]{gap:8px 16px;font-size:.72rem;padding:10px 12px}}
+/* LIGHT THEME (html.theme-light — js/theme-light.css holds the palette): the
+   band sits right under the DARK hero, so it is the hero's clean bottom edge —
+   soft blue, a blue rule, and the shadow the hero casts onto it. The Kp value
+   is coloured inline from the neon KP ramp; brightness() darkens whatever
+   colour it carries to a readable shade on white without losing the ramp. */
+html.theme-light [data-sw-ticker]{background:var(--pl-bg-soft);color:var(--pl-text-3);
+  border-top-color:var(--pl-blue-bright);border-bottom-color:var(--pl-border);
+  box-shadow:inset 0 12px 16px -14px rgba(3,1,14,.45)}
+html.theme-light [data-sw-ticker] .swt-cell b{color:var(--pl-text-1)}
+html.theme-light [data-sw-ticker] [data-swt="kp"]{filter:brightness(.55) saturate(1.4)}
+html.theme-light [data-sw-ticker] .swt-cell i,html.theme-light [data-sw-ticker] .swt-age{color:var(--pl-text-4)}
+html.theme-light [data-sw-ticker] .swt-storm::before{box-shadow:none}
+html.theme-light [data-sw-ticker].swt-alert{background:#fdecee;border-top-color:var(--pl-danger);border-bottom-color:rgba(192,38,45,.35)}`;
     const el = document.createElement('style');
     el.id = STYLE_ID;
     el.textContent = css;

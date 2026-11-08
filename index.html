@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <script type="importmap">
@@ -424,6 +424,135 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
   .btn-primary,.btn-secondary{width:100%;max-width:320px;text-align:center}
   .section{padding:44px 16px}
 }
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+/* THE HERO STAYS DARK. It is a live view of space with its own tuned colour
+   pipeline (js/hero-color.js), so its copy, stage, scrubber and carousel keep
+   the dark tokens: theme-light.css re-points --fg-* / --uv-* / --grad-* at
+   navy-on-white values on <html>, and these re-pin the DARK values on #hero
+   (custom properties inherit, so everything inside reads them again). The
+   two light ISLANDS inside it — the sky console and the sign-up card — set
+   their own colours in their modules' injected CSS. */
+html.theme-light #hero{color-scheme:dark;
+  --indigo-500:#3b1eff;--indigo-400:#6a48ff;--indigo-300:#9a85ff;
+  --uv-700:#5500b3;--uv-600:#7b00ee;--uv-500:#9d3aff;--uv-400:#b765ff;--uv-300:#d29aff;
+  --pink-600:#e60088;--pink-500:#ff1f9c;--pink-400:#ff5cb8;
+  --lightning-pure:#ffffff;--lightning-bolt:#f5f8ff;
+  --lightning-arc:#8ff0ff;--lightning-spark:#4ddbff;--lightning-deep:#1f8fff;
+  --status-ok:#2eff9e;--status-warn:#ffd23f;--status-danger:#ff3050;--status-alert:#ff1f9c;
+  --fg-1:#f5f0ff;--fg-2:#cdc4f0;--fg-3:#9d92c8;--fg-4:#6f6695;--fg-5:#48426e;--fg-6:#38335a;
+  --grad-uv:linear-gradient(135deg,#3b1eff,#9d3aff);
+  --grad-uv-pink:linear-gradient(135deg,#9d3aff,#ff1f9c);
+  --grad-spectrum:linear-gradient(135deg,#3b1eff,#9d3aff,#ff1f9c);
+  --grad-headline:linear-gradient(135deg,#f5f8ff,#c5b8ff 45%,#ff1f9c);
+  --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
+  --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
+  --glow-uv-lg:0 0 36px rgba(157,58,255,.7),0 0 90px rgba(91,30,255,.5)}
+/* The dark hero ends on a clean edge: the live ticker directly under it is
+   the first LIGHT surface — a soft-blue band with a blue rule on top and the
+   shadow the hero casts onto it (js/home-ticker.js carries those rules). */
+
+/* Buttons: the purple→pink key becomes a blue key (same plate + travel). */
+html.theme-light .btn-primary{background:linear-gradient(180deg,#5aa2ff 0%,#2a7cf0 40%,#1560d4 100%);
+  box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -3px 0 rgba(8,52,128,.75) inset,0 6px 0 #0b3f8f,0 10px 0 rgba(11,31,58,.18),0 16px 34px rgba(21,96,212,.32)}
+html.theme-light .btn-primary:hover{box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 -3px 0 rgba(8,52,128,.75) inset,0 7px 0 #0b3f8f,0 11px 0 rgba(11,31,58,.18),0 20px 40px rgba(21,96,212,.4)}
+html.theme-light .btn-primary:active{box-shadow:0 1px 0 rgba(255,255,255,.25) inset,0 -1px 0 rgba(8,52,128,.75) inset,0 2px 0 #0b3f8f,0 4px 0 rgba(11,31,58,.18),0 8px 18px rgba(21,96,212,.3)}
+html.theme-light .btn-primary:focus-visible{outline-color:var(--pl-blue-bright)}
+html.theme-light .btn-secondary{color:var(--pl-blue-deep);background:linear-gradient(180deg,#ffffff 0%,#f3f7fd 100%);
+  box-shadow:0 0 0 1px var(--pl-border-strong) inset,0 -3px 0 rgba(21,96,212,.10) inset,0 6px 0 #c3d5ee,0 10px 22px rgba(21,96,212,.14)}
+html.theme-light .btn-secondary:hover{color:var(--pl-blue);box-shadow:0 0 0 1px var(--pl-blue) inset,0 -3px 0 rgba(21,96,212,.10) inset,0 7px 0 #c3d5ee,0 14px 28px rgba(21,96,212,.2)}
+html.theme-light .btn-secondary:active{box-shadow:0 0 0 1px var(--pl-blue) inset,0 -1px 0 rgba(21,96,212,.10) inset,0 2px 0 #c3d5ee,0 4px 10px rgba(21,96,212,.14)}
+/* Section rhythm: white / soft-blue alternation, navy type, blue accents. */
+html.theme-light .sw-attract-section,html.theme-light .demo-section{background:var(--pl-bg)}
+html.theme-light #neo-top10{background:var(--pl-bg-soft);border-top:1px solid var(--pl-border);border-bottom:1px solid var(--pl-border)}
+html.theme-light :is(.demo-section,.sw-attract-section) > h2{color:var(--pl-text-1)!important}   /* inline #e8f4ff */
+html.theme-light :is(.demo-section,.sw-attract-section) > p{color:var(--pl-text-3)!important}    /* inline #8b94ad */
+html.theme-light :is(.demo-section,.sw-attract-section) > p b{color:var(--pl-text-1)!important}  /* inline #cdd8f0 */
+html.theme-light #neo-top10-host > p{color:var(--pl-text-3)!important}                           /* mount-failure note */
+html.theme-light .section-label{text-shadow:none;color:var(--pl-blue)}
+/* The demo embeds are live dark scenes: keep the window dark, frame it. */
+html.theme-light .demo-frame{border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+
+/* AurOracle capture band (styles injected by the shared js/aurora-capture.js —
+   overridden HERE, scoped to #aurora, so its other pages are untouched). */
+html.theme-light #aurora .aurora-capture-band{background:linear-gradient(135deg,var(--pl-blue-soft) 0%,var(--pl-bg-soft) 60%,#ffffff 100%);
+  border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light #aurora .aurora-kicker{color:var(--pl-blue-deep);font-weight:600}
+html.theme-light #aurora .aurora-capture-band h2{color:var(--pl-text-1)}
+html.theme-light #aurora .aurora-capture-band p{color:var(--pl-text-3)}
+html.theme-light #aurora .aurora-capture-band input[type=email]:focus{border-color:var(--pl-blue);box-shadow:0 0 0 3px rgba(21,96,212,.16)}
+html.theme-light #aurora .aurora-capture-band button{background:var(--pl-btn);color:#fff}
+html.theme-light #aurora .aurora-capture-band button:hover{background:var(--pl-btn-hover);filter:none}
+html.theme-light #aurora .aurora-status{color:var(--pl-text-4)}
+html.theme-light #aurora .aurora-upsell a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+
+/* Depth ladder: white step cards on soft blue. Each step's neon accent
+   (inline --step-accent / --accent) is mapped to a readable-on-white shade. */
+html.theme-light #depth{background:var(--pl-bg-soft)}
+html.theme-light .depth-step{--lt-acc:var(--pl-blue);background:var(--pl-card);border-color:var(--pl-border);
+  border-left-color:var(--lt-acc);box-shadow:var(--pl-shadow)}
+html.theme-light .depth-step[style*="--step-accent:#2eff9e"]{--lt-acc:var(--pl-ok)}
+html.theme-light .depth-step[style*="--step-accent:#ffd23f"]{--lt-acc:#b07800}
+html.theme-light .depth-step[style*="--step-accent:#4ddc99"]{--lt-acc:#0f8a63}
+html.theme-light .depth-step[style*="--step-accent:#9d3aff"]{--lt-acc:var(--pl-blue)}
+html.theme-light .depth-step[style*="--step-accent:#ff1f9c"]{--lt-acc:var(--pl-sky)}
+html.theme-light .depth-step:hover{border-color:var(--pl-border-strong);border-left-color:var(--lt-acc);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .depth-num{color:var(--pl-text-4)}
+html.theme-light .sim-link{color:var(--lt-acc,var(--pl-blue))}
+html.theme-light .sim-link[style*="--accent:#ff5cb8"]{color:var(--pl-blue-deep)}
+html.theme-light .sim-link:hover{text-shadow:none;filter:brightness(.85)}
+html.theme-light .sim-tier.free{background:rgba(13,122,69,.08);color:var(--pl-ok);border-color:rgba(13,122,69,.32)}
+html.theme-light .sim-tier.advanced{background:var(--pl-blue-soft);color:var(--pl-blue-deep);border-color:rgba(21,96,212,.32)}
+html.theme-light .sim-tier.ops{background:#e3f4ff;color:#075d91;border-color:rgba(9,118,186,.32)}
+html.theme-light .sim-tier.gold{background:#fff6dc;color:var(--pl-warn);border-color:rgba(138,90,0,.3)}
+html.theme-light .catalog-strip a{color:var(--pl-text-3)}
+html.theme-light .catalog-strip a:hover{color:var(--pl-blue)}
+html.theme-light .catalog-strip .all{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+
+/* Validation band */
+html.theme-light #validation{background:var(--pl-bg);border-top-color:var(--pl-border);border-bottom-color:var(--pl-border)}
+html.theme-light .stat-num{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text}
+html.theme-light .stat-desc{color:var(--pl-text-4)}
+html.theme-light .validation-line{color:var(--pl-text-2)}
+html.theme-light .validation-line a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .validation-line a:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue-deep)}
+html.theme-light .validation-lineage{color:var(--pl-text-4)}
+html.theme-light .source-chip{background:var(--pl-card);border-color:var(--pl-border);box-shadow:0 1px 2px rgba(11,31,58,.05)}
+html.theme-light .source-chip:hover{border-color:var(--pl-border-strong)}
+html.theme-light .source-chip span{color:var(--pl-text-4)}
+html.theme-light .source-chip strong{color:var(--pl-text-1)}
+html.theme-light .source-freq{color:var(--pl-text-4)}
+
+/* Pricing strip */
+html.theme-light #pricing{background:var(--pl-bg-soft)}
+html.theme-light .price-card{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .price-card:hover{box-shadow:var(--pl-shadow-hover)}
+html.theme-light .price-card.popular{background:var(--pl-card);border-color:var(--pl-blue);box-shadow:0 0 0 1px var(--pl-blue),var(--pl-shadow-hover)}
+html.theme-light .price-popular-badge{background:var(--pl-grad-btn);color:#fff}
+html.theme-light .price-name{color:var(--pl-text-1)}
+html.theme-light .price-alias{color:var(--pl-text-4)}
+html.theme-light .price-amount{color:var(--pl-text-1)}
+html.theme-light .price-amount span{color:var(--pl-text-4)}
+html.theme-light .price-tagline{color:var(--pl-text-3)}
+html.theme-light .price-btn.free-btn{background:var(--pl-card);border-color:var(--pl-border-strong);color:var(--pl-blue-deep)}
+html.theme-light .price-btn.basic-btn{background:var(--pl-grad-btn);color:#fff}
+html.theme-light .price-btn.adv-btn{background:linear-gradient(135deg,#0b4aa8,#0976ba);color:#fff}
+html.theme-light .price-btn:hover{filter:brightness(1.06)}
+html.theme-light .pricing-compare-link{color:var(--pl-text-4)}
+html.theme-light .pricing-compare-link a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .pricing-compare-link a:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue-deep)}
+
+/* Agencies door + footer (the footer classes are themed by theme-light.css) */
+html.theme-light #agencies{background:var(--pl-bg);border-top-color:var(--pl-border)}
+html.theme-light .footer-bottom{border-top-color:var(--pl-border)}
+
+/* CTA rail: a white pill instead of the dark one. */
+html.theme-light #cta-rail{background:rgba(255,255,255,.96);border-color:var(--pl-border);box-shadow:0 12px 34px rgba(11,31,58,.16)}
+html.theme-light #cta-rail .rail-copy{color:var(--pl-text-2)}
+html.theme-light #cta-rail .rail-copy b{color:var(--pl-text-1)}
+html.theme-light #cta-rail .rail-link{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light #cta-rail .rail-x{color:var(--pl-text-4)}
+html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
 </style>
 <script type="application/ld+json">
 {
@@ -454,6 +583,10 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
   ]
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 
