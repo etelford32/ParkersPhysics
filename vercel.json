@@ -408,6 +408,10 @@
       "destination": "/request-access.html"
     },
     {
+      "source": "/sample-fleet-assessment",
+      "destination": "/sample-fleet-assessment.html"
+    },
+    {
       "source": "/satellite-designer",
       "destination": "/satellite-designer.html"
     },
