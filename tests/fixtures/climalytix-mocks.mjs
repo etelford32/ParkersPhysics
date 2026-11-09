@@ -150,12 +150,25 @@ export function mockUpdraft(lat, lon, stampMs, site) {
         wMs500: -0.03 + 0.02 * (lon - site.lon),
     };
 }
+/**
+ * Convection ingredients (plan §19 T6) — LINEAR in lat/lon, constant in time,
+ * so bilinear sampling and the stamp interpolation are both exact. The lid
+ * thickens to the NORTH while the energy GROWS to the north: 2° north of the
+ * site has MORE CAPE under a lid ordinary thermals cannot break — the
+ * capped-bomb case a CAPE-only reading gets backwards. CIN stays ≤ 0 over the
+ * whole ±4° window (−0.4 … −48 J/kg); the site itself has a weak lid.
+ */
+export function mockConvection(lat, lon, stampMs, site) {
+    const dLat = lat - site.lat, dLon = lon - site.lon;
+    const capeJkg = 1500 + 150 * dLon + 150 * dLat;
+    return { capeJkg, cinJkg: -(1 + 6 * (dLat + 3.9)), liK: 2 - capeJkg / 400 };
+}
 export function mockTempC(lat, lon, tMs, site) {
     const diurnal = 6 * Math.sin(2 * Math.PI * (tMs / 86_400_000 - 0.4));
     return 10 - 2.2 * (lat - site.lat) + 1.5 * (lon - site.lon) + diurnal;
 }
 
-export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['tempC'], windFn = null, cloudFn = () => 0, thermal = true, updraft = true } = {}) {
+export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['tempC'], windFn = null, cloudFn = () => 0, thermal = true, updraft = true, convection = true } = {}) {
     const H = 3_600_000;
     const runMs = Math.floor((nowMs - ageH * H) / (6 * H)) * 6 * H;
     const leadsH = Array.from({ length: 81 }, (_, i) => i * 3);
@@ -182,6 +195,7 @@ export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['temp
     const wind = { uMs: new Float32Array(values.length), vMs: new Float32Array(values.length), cloudPct: new Float32Array(values.length) };
     const th = Object.fromEntries(['dewC', 'shflxWm2', 'hpblM', 'psfcHpa'].map((k) => [k, new Float32Array(values.length)]));
     const up = Object.fromEntries(['wMs850', 'wMs700', 'wMs500'].map((k) => [k, new Float32Array(values.length)]));
+    const cv = Object.fromEntries(['capeJkg', 'cinJkg', 'liK'].map((k) => [k, new Float32Array(values.length)]));
     for (let t = 0; t < man.times.length; t++) {
         for (let i = 0; i < plan.nRows; i++) for (let j = 0; j < plan.nCols; j++) {
             const lat = plan.latN - i * man.dlat, lon = plan.lonW + j * man.dlon;
@@ -195,18 +209,20 @@ export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['temp
             th.dewC[k] = values[k] - m.spreadK;
             const u = mockUpdraft(lat, lon, man.times[t], site);
             up.wMs850[k] = u.wMs850; up.wMs700[k] = u.wMs700; up.wMs500[k] = u.wMs500;
+            const c = mockConvection(lat, lon, man.times[t], site);
+            cv.capeJkg[k] = c.capeJkg; cv.cinJkg[k] = c.cinJkg; cv.liK[k] = c.liK;
         }
     }
-    const all = { tempC: values, ...wind, ...th, ...up };
-    const missing = vars.filter((id) => !all[id] || (!thermal && id in th && id !== 'psfcHpa') || (!updraft && id in up));
+    const all = { tempC: values, ...wind, ...th, ...up, ...cv };
+    const missing = vars.filter((id) => !all[id] || (!thermal && id in th && id !== 'psfcHpa') || (!updraft && id in up) || (!convection && id in cv));
     if (missing.length) return { ...degradedNwp(site, '0p25', `no variable ${missing[0]} in this run`, nowMs), vars, fields: null, values: null };
     man.intervalH = { precipMm: 3, shflxWm2: 3 };
     const [first, ...rest] = vars;
-    man.vars = vars.map((id) => ({ id, unit: id === 'tempC' || id === 'dewC' ? 'degC' : 'm/s', scale: id.startsWith('wMs') ? 0.001 : 0.01, offset: 0 }));   // the real GFS_VARS scales
+    man.vars = vars.map((id) => ({ id, unit: id === 'tempC' || id === 'dewC' ? 'degC' : 'm/s', scale: id.startsWith('wMs') ? 0.001 : id === 'capeJkg' ? 1 : id === 'cinJkg' ? 0.1 : 0.01, offset: 0 }));   // the real GFS_VARS scales
     return fieldBody(man, plan, first, all[first], { nowMs, site, extra: Object.fromEntries(rest.map((id) => [id, all[id]])) });
 }
 
-const GFS_VARS = ['tempC', 'dewC', 'rhPct', 'uMs', 'vMs', 'gustMs', 'mslHpa', 'precipMm', 'cloudPct'];
+const GFS_VARS = ['tempC', 'dewC', 'rhPct', 'uMs', 'vMs', 'gustMs', 'mslHpa', 'precipMm', 'cloudPct', 'capeJkg', 'cinJkg', 'liK'];
 
 /** Our archive's body for one site: a 00z run `ageH` hours old, 0–240 h every
  *  3 h, closed-form values (diurnal temperature, a rain burst, a trough). */
@@ -228,6 +244,10 @@ export function nwpFixture(nowMs, site, { ageH = 7 } = {}) {
         mslHpa: leadsH.map((h) => 1016 - 9 * Math.exp(-(((h - 96) / 30) ** 2))),
         precipMm: leadsH.map((h) => (h === 0 ? null : h >= 90 && h <= 102 ? 2.4 : 0)),
         cloudPct: times.map(() => 40),
+        // §19 T6: an afternoon CAPE cycle under a lid that thins as the day heats.
+        capeJkg: times.map((t) => Math.max(0, 1200 * Math.sin(2 * Math.PI * (t / 86_400_000 - 0.55)))),
+        cinJkg: times.map((t) => -60 + 50 * Math.max(0, Math.sin(2 * Math.PI * (t / 86_400_000 - 0.55)))),
+        liK: times.map((t) => 2 - 5 * Math.max(0, Math.sin(2 * Math.PI * (t / 86_400_000 - 0.55)))),
     };
     return siteBody(man, { nodeLat: Math.ceil(site.lat * 4) / 4, nodeLon: Math.floor(site.lon * 4) / 4 + 360 }, v, { ...site, nowMs });
 }
@@ -307,7 +327,7 @@ function demTilePng(z, x, y, heightAt = mockDem) {
     return cache.get(key);
 }
 
-export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
+export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', convection = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
@@ -322,7 +342,7 @@ export async function installClimalytixMocks(page, { dem = 'up', demHeight, wind
                 const vars = (url.searchParams.get('vars') || 'tempC').split(',');
                 if (cloud === 'missing' && vars.includes('cloudPct')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable cloudPct in this run', now), vars, fields: null, values: null } });
                 if (nwp === 'nowind' && vars.includes('uMs')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable uMs in this run', now), vars, fields: null, values: null } });
-                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, vars, windFn, thermal: thermal !== 'missing', updraft: updraft !== 'missing', ...(cloudFn ? { cloudFn } : {}) }) });
+                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, vars, windFn, thermal: thermal !== 'missing', updraft: updraft !== 'missing', convection: convection !== 'missing', ...(cloudFn ? { cloudFn } : {}) }) });
             }
             if (p === '/api/climalytix/nwp') {
                 if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });

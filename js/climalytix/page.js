@@ -25,7 +25,8 @@ import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
-import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField, loadUpdraftField } from './loaders.js';
+import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField, loadUpdraftField, loadConvectionField } from './loaders.js';
+import { capePaint, CAPE_MIN_JKG, CAPE_FULL_JKG, OUTLOOK_COLORS, TRIGGER_MIN_MS, CIN_WEAK_JKG } from './convection.js';
 import { updraftPaint, W_FULL_MS } from './updraft.js';
 import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
 import { windRose, prevailing, pollutionRose, ROSE_SPEED_EDGES, FLOW_SPEED_TOP_MS } from './airflow.js';
@@ -189,6 +190,8 @@ function loadMapField(site, signal) {
     requestThermals();
     S.updraftSite = null;
     requestUpdraft();
+    S.convectionSite = null;
+    requestConvection();
     renderRose();
     loadWindField(site, { signal }).then((r) => {
         if (signal.aborted || S.site !== site) return;
@@ -233,6 +236,59 @@ function requestUpdraft() {
         if (S.site !== site) return;
         S.map.setUpdraft(r.state, r.body, r.note);
     });
+}
+
+/** The convection ingredients are fetched on FIRST enable of the layer, once per site. */
+function requestConvection() {
+    if (!$('#cx-layer-cv')?.checked || !S.site || !S.map || S.convectionSite === S.site) return;
+    const site = S.site;
+    S.convectionSite = site;
+    S.map.setConvection('loading', null, '');
+    loadConvectionField(site).then((r) => {
+        if (S.site !== site) return;
+        S.map.setConvection(r.state, r.body, r.note);
+    });
+}
+
+function paintConvectionKey() {
+    const px = new Uint8ClampedArray(4), stops = [];
+    for (let k = 0; k <= 20; k++) {
+        px.fill(0); capePaint(CAPE_MIN_JKG + (CAPE_FULL_JKG - CAPE_MIN_JKG) * k / 20 + 1e-9, px, 0);
+        stops.push(`rgba(${px[0]},${px[1]},${px[2]},${(px[3] / 255).toFixed(3)}) ${k * 5}%`);
+    }
+    $('#cx-cv-key .cx-cv-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')}), #2a3446`;
+    const t = $('#cx-cv-key .cx-exp-ticks').children;
+    t[0].textContent = `${CAPE_MIN_JKG} J/kg`; t[2].textContent = `${CAPE_FULL_JKG}+`;
+    for (const sw of document.querySelectorAll('#cx-cv-cats [data-cat]')) {
+        const spec = OUTLOOK_COLORS[sw.dataset.cat];
+        sw.querySelector('i').style.background = spec ? `rgba(${spec[0].map((x) => Math.round(x * 255)).join(',')},${spec[1]})` : 'transparent';
+    }
+}
+
+const CV_WORDS = { none: 'no instability', capped: 'capped', possible: 'possible', likely: 'likely' };
+/** Rail status for convection: the ingredients at the site, the next 48 h strip, what is not counted. */
+function renderConvectionRail(info) {
+    const st = $('#cx-cv-status');
+    if (!info || info.state === 'off') { st.textContent = ''; return; }
+    st.dataset.state = info.state;
+    if (info.state === 'loading') { st.textContent = info.note || 'Loading…'; return; }
+    if (info.state === 'down' || info.state === 'notime') { st.textContent = info.note; return; }
+    const hhmm = (ms) => new Date(ms + S.utcOffsetS * 1000).toISOString().slice(11, 16);
+    const wd = (ms) => new Date(ms + S.utcOffsetS * 1000).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+    const r = info.site;
+    let site = 'No convection estimate at the site.';
+    if (r) {
+        const lift = r.best ? `thermals w* ${r.best.w.toFixed(1)} m/s` : 'no thermals';
+        const lid = Math.abs(r.cinJkg) <= CIN_WEAK_JKG ? 'a weak lid'
+            : `a lid that needs ${r.lid.toFixed(0)} m/s of lift to push through`;
+        site = `<b>${esc(hhmm(info.timeMs))} local at the site: storms ${esc(CV_WORDS[r.category])}.</b> `
+            + `CAPE ${Math.round(r.capeJkg)} J/kg (${esc(r.capeBand)}), CIN ${Math.round(r.cinJkg)} J/kg — ${esc(lid)}; `
+            + (Number.isFinite(r.liK) ? `lifted index ${r.liK.toFixed(1)} K (${esc(r.liBand)}); ` : '')
+            + `${esc(lift)}. Parcel ceiling √(2·CAPE) = ${r.wmax.toFixed(0)} m/s — an upper bound; real storm cores reach about half.`;
+    }
+    const cells = (info.strip || []).map((x) => `<span class="cx-cv-cell" data-cat="${esc(x.category || 'none')}" title="${esc(wd(x.t))} ${esc(hhmm(x.t))}: ${esc(x.category ? CV_WORDS[x.category] : 'no data')}"><b>${esc(hhmm(x.t).slice(0, 2))}</b></span>`).join('');
+    st.innerHTML = `${site}<br>Next 48 h at the site (local hour, GFS steps):<div class="cx-cv-strip">${cells}</div>`
+        + `An ingredients check (energy · lid · lift), not a probability. Lift counted: thermals (≥ ${TRIGGER_MIN_MS} m/s) only — forced lift over terrain and fronts is not counted yet. ${esc(info.note || '')}`;
 }
 
 function paintUpdraftKey() {
@@ -622,6 +678,7 @@ function mountLocationMap() {
         onSlope: renderSlopeRail,
         onThermals: renderThermalRail,
         onUpdraft: renderUpdraftRail,
+        onConvection: renderConvectionRail,
         utcOffsetS: () => S.utcOffsetS,
         // Elevation levels are chosen in the reader's height unit (round feet for a ft reader).
         heightUnits: () => ({
@@ -639,9 +696,13 @@ function mountLocationMap() {
     const showField = (which, on) => {
         const pick = (id, key) => (which === key ? on : (on ? false : $(id).checked));
         const temp = pick('#cx-layer-temp', 'temp'), aq = pick('#cx-layer-aq', 'aq'), exp = pick('#cx-layer-exp', 'exp'), oro = pick('#cx-layer-oro', 'oro');
-        const th = pick('#cx-layer-th', 'th'), up = pick('#cx-layer-up', 'up');
+        const th = pick('#cx-layer-th', 'th'), up = pick('#cx-layer-up', 'up'), cv = pick('#cx-layer-cv', 'cv');
         $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq; $('#cx-layer-exp').checked = exp; $('#cx-layer-oro').checked = oro;
-        $('#cx-layer-th').checked = th; $('#cx-layer-up').checked = up;
+        $('#cx-layer-th').checked = th; $('#cx-layer-up').checked = up; $('#cx-layer-cv').checked = cv;
+        S.map.setLayer('convection', cv);
+        $('#cx-cv-key').hidden = !cv; $('#cx-cv-status').hidden = !cv; $('#cx-cv-mode').hidden = !cv;
+        if (cv) requestConvection();
+        renderConvectionRail(S.map.state.convection);
         S.map.setLayer('updraft', up);
         $('#cx-up-key').hidden = !up; $('#cx-up-status').hidden = !up; $('#cx-up-level').hidden = !up;
         if (up) requestUpdraft();
@@ -666,6 +727,14 @@ function mountLocationMap() {
     $('#cx-layer-oro').addEventListener('change', (ev) => showField('oro', ev.target.checked));
     $('#cx-layer-th').addEventListener('change', (ev) => showField('th', ev.target.checked));
     $('#cx-layer-up').addEventListener('change', (ev) => showField('up', ev.target.checked));
+    $('#cx-layer-cv').addEventListener('change', (ev) => showField('cv', ev.target.checked));
+    $('#cx-cv-mode').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-cv]');
+        if (!b) return;
+        for (const x of $('#cx-cv-mode').querySelectorAll('[data-cv]')) x.setAttribute('aria-pressed', String(x === b));
+        $('#cx-cv-key .cx-cv-bar').parentElement.dataset.mode = b.dataset.cv;
+        S.map.setConvectionMode(b.dataset.cv);
+    });
     $('#cx-up-level').addEventListener('click', (ev) => {
         const b = ev.target.closest('[data-level]');
         if (!b) return;
@@ -702,6 +771,7 @@ function mountLocationMap() {
     paintOroKey();
     paintThermalKey();
     paintUpdraftKey();
+    paintConvectionKey();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));

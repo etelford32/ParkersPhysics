@@ -69,6 +69,11 @@
  *             node where that level is BELOW THE GROUND left blank; the rail
  *             and hover LIST the vertical motions the other layers computed
  *             (surface, slope jet, thermal scale, grid mean) — never a sum.
+ *   convection §19 T6 (convection.js, PURE): GFS's own CAPE / CIN / lifted
+ *             index + the T4 thermals as the trigger → an INGREDIENTS check
+ *             (none / capped / possible / likely), classified PER PIXEL from
+ *             interpolated ingredients (never interpolated category numbers),
+ *             or the CAPE fill; a short outlook strip for the site.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -97,6 +102,7 @@ import {
 import { orographicGrid, orographicExtremes, orographicPaint, windSide, formatW } from './orographic.js';
 import { thermalAt, thermalPaint, windowAt } from './thermals.js';
 import { LEVELS, levelHeightAgl, levelUsable, bracket, verticalMotion, updraftPaint } from './updraft.js';
+import { convectionOutlook, capePaint, outlookPaint, CATEGORIES } from './convection.js';
 import { slopeWind, slopeWindGrid, slopeWindExtremes, ANABATIC_RGB, KATABATIC_RGB, ARROW_MIN_MS, THETA0_DEFAULT_K } from './slope-wind.js';
 import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
@@ -128,7 +134,7 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
@@ -139,7 +145,7 @@ export function mountMap(root, deps) {
         drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
                  airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 },
                  aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null },
-                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false, slopewind: { arrows: 0, up: 0, down: 0 }, thermals: false, updraft: { drawn: false, masked: 0, nodes: 0 } },
+                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false, slopewind: { arrows: 0, up: 0, down: 0 }, thermals: false, updraft: { drawn: false, masked: 0, nodes: 0 }, convection: { drawn: false, mode: null } },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -824,6 +830,129 @@ export function mountMap(root, deps) {
         return `GFS ${r.hPa} hPa (≈${h} above the ground): ${dir} ${Math.abs(r.w * 100).toFixed(1)} cm/s, 25 km mean`;
     }
 
+    // ── Convection (T6) ──────────────────────────────────────────────────
+    const CV = { field: null, state: 'idle', note: '', mode: 'outlook', key: '', grid: null, canvasKey: '', sig: '' };
+    const CV_VARS = ['capeJkg', 'cinJkg', 'liK', ...TH_VARS];
+    const CV_STRIP_H = 48;
+    /** Ingredients at instant ms from a per-time sampler: CAPE/CIN/LI interpolated between stamps,
+     *  thermals from the flux window ending at the NEXT stamp (T4's convention). */
+    function cvInputs(f, ms, sample) {
+        const b = bracket(f.times, ms);
+        if (!b) return null;
+        const lerp = (v) => {
+            const a = sample(v, b.i0), c = sample(v, b.i1);
+            return a == null || c == null ? NaN : a + (c - a) * b.f;
+        };
+        const w = windowAt(f.times, ms);
+        return { capeJkg: lerp('capeJkg'), cinJkg: lerp('cinJkg'), liK: lerp('liK'),
+                 thermal: w ? thermalAt(thermalInputs(f, w, sample)) : null };
+    }
+    /** The lift the outlook counts: thermals (T4). Forced lift over terrain is not counted yet — the rail says so. */
+    const cvTriggers = (th) => (th && th.regime !== 'none' && Number.isFinite(th.wstar)
+        ? [{ key: 'thermal', label: 'Thermals (w*)', w: th.wstar }] : []);
+    function cvOutlook(r) {
+        if (!r) return null;
+        const o = convectionOutlook({ capeJkg: r.capeJkg, cinJkg: r.cinJkg, liK: r.liK, triggers: cvTriggers(r.thermal) });
+        return o && { ...o, thermal: r.thermal };
+    }
+    function convectionFor() {
+        const f = CV.field, ms = M.timeMs ?? Date.now();
+        if (!f || !bracket(f.times, ms)) return null;
+        const key = `${f.run}|${Math.floor(ms / 600_000)}`;
+        if (CV.key !== key) {
+            const plane = f.nRows * f.nCols;
+            const cape = new Float32Array(plane).fill(NaN), cin = new Float32Array(plane).fill(NaN), wstar = new Float32Array(plane).fill(NaN);
+            const counts = Object.fromEntries(CATEGORIES.map((c) => [c, 0]));
+            for (let k = 0; k < plane; k++) {
+                const r = cvInputs(f, ms, (v, t) => {
+                    const x = f.fields[v][t * plane + k];
+                    return x == null || !Number.isFinite(x) ? null : x;
+                });
+                if (!r) continue;
+                cape[k] = r.capeJkg; cin[k] = r.cinJkg;
+                const th = cvTriggers(r.thermal)[0];
+                wstar[k] = th ? th.w : 0;
+                const o = cvOutlook(r);
+                if (o) counts[o.category]++;
+            }
+            const geo = { nRows: f.nRows, nCols: f.nCols, latN: f.latN, lonW: f.lonW, dlat: f.dlat, dlon: f.dlon };
+            CV.grid = { cape, cin, wstar, counts, geo, ms };
+            CV.key = key; CV.canvasKey = '';
+        }
+        return CV.grid;
+    }
+    /** The outlook category index at a point, from INTERPOLATED ingredients. */
+    function outlookSampler(g) {
+        const fc = { ...g.geo, values: g.cape }, fn = { ...g.geo, values: g.cin }, fw = { ...g.geo, values: g.wstar };
+        return (lat, lon) => {
+            const c = fieldSample(fc, 0, lat, lon), n = fieldSample(fn, 0, lat, lon);
+            if (c == null || n == null) return null;
+            const w = fieldSample(fw, 0, lat, lon);
+            const o = convectionOutlook({ capeJkg: c, cinJkg: n, triggers: w == null || !(w > 0) ? [] : [{ key: 'thermal', w }] });
+            return o ? CATEGORIES.indexOf(o.category) : null;
+        };
+    }
+    function convectionHere(lat, lon, ms = M.timeMs ?? Date.now()) {
+        const f = CV.field;
+        if (!f) return null;
+        return cvOutlook(cvInputs(f, ms, (v, t) => fieldSample({ ...f, values: f.fields[v] }, t, lat, lon)));
+    }
+    /** The site's outlook at each run stamp from the instant to +CV_STRIP_H hours. */
+    function convectionStrip(site) {
+        const f = CV.field;
+        if (!f || !site) return [];
+        const ms = M.timeMs ?? Date.now();
+        return f.times.filter((t) => t >= ms - 3 * 3_600_000 && t <= ms + CV_STRIP_H * 3_600_000)
+            .map((t) => ({ t, ...(convectionHere(site.lat, site.lon, t) || { category: null }) }));
+    }
+
+    let cvCanvas = null;
+    function drawConvection() {
+        M.drawn.convection = { drawn: false, mode: null };
+        if (M.layers.convection && convectionFor()) {
+            const f = CV.field, g = CV.grid;
+            const key = `${CV.key}|${CV.mode}|${M.view.lat}|${M.view.lon}|${M.view.span}|${M.w}|${M.h}`;
+            if (CV.canvasKey !== key) {
+                const img = CV.mode === 'cape'
+                    ? heatImage({ ...g.geo, values: g.cape }, 0, M.view, M.w, M.h, null, { step: HEAT_STEP_PX, paint: capePaint })
+                    : heatImage(g.geo, 0, M.view, M.w, M.h, null, { step: HEAT_STEP_PX, paint: outlookPaint, sample: outlookSampler(g) });
+                cvCanvas = cvCanvas || document.createElement('canvas');
+                cvCanvas.width = img.cw; cvCanvas.height = img.ch;
+                cvCanvas.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+                CV.canvasKey = key;
+            }
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, M.heatAlpha + 0.2);
+            // Outlook categories are FLAT bands: smoothing would blend two categories into a colour neither has.
+            ctx.imageSmoothingEnabled = CV.mode === 'cape';
+            ctx.drawImage(cvCanvas, 0, 0, M.w, M.h);
+            ctx.restore();
+            dashedBox(fieldBox(f));
+            M.drawn.convection = { drawn: true, mode: CV.mode };
+        }
+        const info = convectionInfo();
+        const sig = JSON.stringify([info.state, info.mode, info.timeMs, info.site?.category, info.site?.capeJkg, info.strip?.map((r) => r.category)]);
+        if (CV.sig !== sig) { CV.sig = sig; deps.onConvection?.(info); }
+    }
+
+    function convectionInfo() {
+        if (!M.layers.convection) return { state: 'off' };
+        if (CV.state === 'loading' || CV.state === 'idle') return { state: 'loading', note: 'Loading the convection fields…' };
+        if (!CV.field) return { state: 'down', note: CV.note };
+        const ms = M.timeMs ?? Date.now();
+        if (!bracket(CV.field.times, ms)) return { state: 'notime', note: 'The GFS run does not cover this time.' };
+        const g = convectionFor();
+        return { state: CV.state, note: CV.note, mode: CV.mode, timeMs: ms, counts: g ? { ...g.counts } : null,
+                 site: M.site ? convectionHere(M.site.lat, M.site.lon) : null, strip: convectionStrip(M.site) };
+    }
+
+    const CATEGORY_WORDS = { none: 'no instability to release', capped: 'capped (the lid holds)', possible: 'storms possible', likely: 'storms likely' };
+    function convectionText(r) {
+        if (!r) return null;
+        const li = Number.isFinite(r.liK) ? ` · LI ${r.liK.toFixed(1)} K (${r.liBand})` : '';
+        return `CAPE ${Math.round(r.capeJkg)} J/kg (${r.capeBand}) · CIN ${Math.round(r.cinJkg)} J/kg (${r.cinBand})${li} · ${CATEGORY_WORDS[r.category]}`;
+    }
+
     function drawElevation() {
         M.drawn.elevation = { lines: 0, step: null, labels: [] };
         if (!M.layers.elevation || !D.grid) return;
@@ -1237,6 +1366,7 @@ export function mountMap(root, deps) {
         drawOrographic();
         drawThermals();
         drawUpdraft();
+        drawConvection();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
         drawElevation();
         drawSlopeWind();
@@ -1321,10 +1451,11 @@ export function mountMap(root, deps) {
             : null;
         const thTxt = M.layers.thermals ? thermalText(thermalHere(g.lat, g.lon)) : null;
         const upTxt = M.layers.updraft ? updraftText(updraftHere(g.lat, g.lon)) : null;
+        const cvTxt = M.layers.convection ? convectionText(convectionHere(g.lat, g.lon)) : null;
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        tip.textContent = [terrTxt, thTxt, upTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
+        tip.textContent = [terrTxt, thTxt, upTxt, cvTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -1451,6 +1582,15 @@ export function mountMap(root, deps) {
             UP.note = note || ''; UP.key = ''; UP.sig = '';
             requestDraw();
         },
+        /** The convection ingredients field (GFS CAPE/CIN/LI + thermal inputs). */
+        setConvection(state, body, note) {
+            CV.state = state; CV.field = body?.fields && CV_VARS.every((v) => body.fields[v]) ? body : null;
+            CV.note = note || ''; CV.key = ''; CV.sig = '';
+            requestDraw();
+        },
+        setConvectionMode(mode) { if (mode === 'cape' || mode === 'outlook') { CV.mode = mode; CV.canvasKey = ''; requestDraw(); } },
+        /** The ingredients check at a point and instant (test + console hook). */
+        convectionAt: (lat, lon, ms) => convectionHere(lat, lon, ms),
         setUpdraftLevel(hPa) { if (levelSpec(hPa)) { UP.level = hPa; UP.key = ''; requestDraw(); } },
         /** One level at a point (test + console hook), and the full vertical-motion list. */
         updraftAt: (lat, lon, hPa) => updraftHere(lat, lon, hPa),
@@ -1508,6 +1648,7 @@ export function mountMap(root, deps) {
                 slopewind: slopeInfo(),
                 thermals: thermalInfo(),
                 updraft: updraftInfo(),
+                convection: convectionInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

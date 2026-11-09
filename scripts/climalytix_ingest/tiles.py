@@ -64,6 +64,14 @@ GFS_VARS = [
     {'id': 'wMs850',   'grib': ('DZDT', '850 mb'),              'kind': 'inst', 'unit': 'm/s',  'quantity': 'vvel',     'agg': 'mean', 'scale': 0.001, 'offset': 0.0,   'convert': None},
     {'id': 'wMs700',   'grib': ('DZDT', '700 mb'),              'kind': 'inst', 'unit': 'm/s',  'quantity': 'vvel',     'agg': 'mean', 'scale': 0.001, 'offset': 0.0,   'convert': None},
     {'id': 'wMs500',   'grib': ('DZDT', '500 mb'),              'kind': 'inst', 'unit': 'm/s',  'quantity': 'vvel',     'agg': 'mean', 'scale': 0.001, 'offset': 0.0,   'convert': None},
+    # §19 T6 (convection). GFS's OWN parcel diagnostics, ingested — never recomputed
+    # from a 3-level column we do not have: surface-based CAPE (J/kg, ≥ 0, to
+    # 32 767), CIN (J/kg, ≤ 0 in GFS; ±3 276 at 0.1) and the surface lifted index
+    # (K, negative = unstable; ±327 at 0.01). Level 'surface' only — the 90/180/255
+    # mb-above-ground mixed-layer variants share the names and are NOT selected.
+    {'id': 'capeJkg',  'grib': ('CAPE', 'surface'),             'kind': 'inst', 'unit': 'J/kg', 'quantity': 'energy',   'agg': 'mean', 'scale': 1.0,   'offset': 0.0,   'convert': None},
+    {'id': 'cinJkg',   'grib': ('CIN', 'surface'),              'kind': 'inst', 'unit': 'J/kg', 'quantity': 'energy',   'agg': 'mean', 'scale': 0.1,   'offset': 0.0,   'convert': None},
+    {'id': 'liK',      'grib': ('LFTX', 'surface'),             'kind': 'inst', 'unit': 'K',    'quantity': 'tempDelta', 'agg': 'mean', 'scale': 0.01, 'offset': 0.0,   'convert': None},
 ]
 
 

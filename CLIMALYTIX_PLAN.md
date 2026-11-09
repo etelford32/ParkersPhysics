@@ -969,7 +969,7 @@ lift at a given spot, and the rail says so.
 | **T3** | **Anabatic / katabatic slope winds** | Prandtl (1942): θ′ = Δθ·e^(−n/λ)cos(n/λ), u = Δθ·μ·e^(−n/λ)sin(n/λ), λ = (4K·K_h/(N²sin²α))^¼, **μ = g/(θ₀·N·√Pr)** (corrected 2026-11-09: the first draft's √(gK/(θ₀N²Pr)) is not a speed and is now the gate's negative control); peak u = 0.3224·μ·Δθ at n = πλ/4, independent of the slope angle. Forcing Δθ = Q/h from each slope's OWN budget (Meinel beam × T1 incidence × Kasten–Czeplak cloud − net longwave). Gate: both ODEs by finite differences, the peak, sign follows Δθ, flat ground has none, gentle slopes left blank. | T1 + GFS total cloud + 2 m T (`nwp-field?vars=cloudPct,tempC`) | **BUILT 2026-11-09** (below) |
 | **T4** | **Thermals** | Deardorff convective velocity `w* = (g/θ_v · H/(ρ·c_p) · z_i)^⅓`; thermal tops at the boundary-layer depth z_i; cumulus base at the EXACT LCL (Romps 2017, Lambert W; Espy's 125 m/K is only the cross-check) — "blue" thermals when the LCL sits above z_i. Gate: the LCL's defining saturation identity, w* scales as H^⅓ and z_i^⅓ exactly, H ≤ floor gives none, the flux window convention. | Our GFS archive + SHTFL (3 h mean), HPBL, PRES surface — ingested from 2026-11-09 (DSWRF not needed) | **BUILT 2026-11-09** (below) |
 | **T5** | **Updraft (general)** | The vertical air motion available, LISTED never summed: orographic (T2, surface) · the slope jet's vertical part u·sin α (T3) · thermal w* (T4, a SCALE, not a mean) · GFS w at 850/700/500 hPa (a 25 km GRID MEAN). GFS publishes DZDT (geometric w, m/s) beside VVEL, so the ω → w = −ω/(ρg) conversion first proposed here is unnecessary. Gate: level heights (hypsometric, standard-lapse mean T) reproduce the ICAO atmosphere to < 0.2 % (an isothermal column is the negative control); a level within 25 hPa of the surface pressure is BELOW THE GROUND and masked; the list carries no total. | T2–T4 + GFS DZDT 850/700/500 (ingest) | **BUILT 2026-11-09** (below) |
-| **T6** | **Convection** | Parcel theory on the GFS column: CAPE, CIN, lifted index (ingested, not recomputed — GFS's own), the convective temperature, and a "convection outlook" timeline panel (CAPE, CIN, LCL, z_i, w*) in Explore. Gate: a dry-adiabatic sounding has CAPE 0; the LI sign convention (negative = unstable) pinned both ways. | GFS CAPE/CIN/LFTX (ingest) | planned |
+| **T6** | **Convection** | An INGREDIENTS check (Doswell et al. 1996): energy (GFS surface-based CAPE), the lid (CIN), lift (T4 thermals) → none / capped / possible / likely — never a probability. CAPE/CIN/LI are ingested, not recomputed (we hold three pressure levels, not a sounding, so the plan's "dry-adiabatic sounding has CAPE 0" check has nothing to run on). Gate: ½·w_max² = CAPE and ½·w_lid² = \|CIN\| exactly; the LI sign both ways; a lift breaks the lid exactly at ½w² = \|CIN\|; a CAPE-only ranking (capped column first) is the negative control. | GFS CAPE/CIN/LFTX surface (ingest) + T4 | **BUILT 2026-11-09** (below) |
 
 **T1 as built (2026-11-09).** `js/climalytix/terrain.js` (PURE,
 `tests/climalytix-terrain.mjs`) + `/api/climalytix/dem` + the map's "Elevation"
@@ -1094,7 +1094,33 @@ mock surface pressure under 850 hPa everywhere, so a page without the mask
 WOULD draw ordinary 850 hPa numbers — removing the mask fails 2 of 4 tests
 (checked). An archive ingested before DZDT says so and draws nothing.
 
-**VISUALS ARE DELIBERATELY PLAIN UNTIL T6 (owner, 2026-11-09).** T1–T5 were
+**T6 as built (2026-11-09).** The ingest gained `capeJkg` (CAPE surface,
+scale 1), `cinJkg` (CIN surface, scale 0.1) and `liK` (LFTX surface, scale
+0.01) — append-only, level `surface` ONLY (the 90/180/255 mb-above-ground
+mixed-layer variants share the names; the Python gate asserts the planner
+picks the surface rows on f000 and f006, and the end-to-end run lands all
+three unclipped). The kernel is `js/climalytix/convection.js` (PURE,
+`tests/climalytix-convection.mjs`): `parcelCeiling` √(2·CAPE) (an upper bound,
+said so), `lidSpeed` √(2·|CIN|) (either sign convention), the bands, and
+`convectionOutlook` — none (CAPE < 100) / capped (|CIN| > 25 and ½w² < |CIN|)
+/ possible (weak lid, no trigger ≥ 1 m/s) / likely (weak lid + trigger). GFS's
+CIN is itself a forecast that erodes through the afternoon, so the lid
+"breaking" is the model's own heating. The map's "Storm ingredients" layer
+(one-at-a-time; Outlook | CAPE) CLASSIFIES EACH PIXEL from INTERPOLATED
+ingredients through `heatImage`'s new `sample` option — interpolating category
+numbers would invent a 'capped' fringe between 'none' and 'possible' — and
+draws the categories as flat bands (smoothing off). The rail gives the site's
+ingredients and a 48 h strip of the outlook at each GFS step. Lift counted:
+thermals only — forced lift over terrain and fronts is NOT counted yet, and
+the rail says so. Explore gains CAPE + CIN (one J/kg panel; `jkg` joins
+lab-units' single-unit quantities, additive) and the lifted index (its own
+temperature-difference panel), all default-off. The browser gate
+(`tests/climalytix-convection.spec.js`, mock lid thickening north under GROWING
+CAPE) fails when the page ignores CIN (checked). Deferred: the LCL / z_i / w*
+series in Explore (derived series need a derived-series loader) and a counted
+orographic trigger.
+
+**VISUALS ARE DELIBERATELY PLAIN THROUGH T6 (owner, 2026-11-09).** T1–T6 are now all built, so the polish pass is NEXT. T1–T5 were
 built for correctness on closed-form mocks; the screenshots look basic because
 the mocks are smooth planes and no styling pass has been done. A VISUAL POLISH
 PASS across all six layers (palettes, legends, rail typography, the budget

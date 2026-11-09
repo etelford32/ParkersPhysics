@@ -384,12 +384,19 @@ def _():
         assert I.find_instant(e6, 'DZDT', lvl, 6)['var'] == 'DZDT'
         assert I.find_instant(e0, 'DZDT', lvl, 0), f'DZDT {lvl} is in the analysis too'
     assert [v['grib'][0] for v in T.GFS_VARS if v['id'].startswith('wMs')] == ['DZDT'] * 3
+    # T6: SURFACE-based CAPE/CIN/LFTX — the 90/180/255 mb-above-ground variants share the names.
+    for name in ('CAPE', 'CIN', 'LFTX'):
+        for e, L in ((e0, 0), (e6, 6)):
+            hit = I.find_instant(e, name, 'surface', L)
+            assert hit and hit['var'] == name and hit['level'] == 'surface', (name, L)
+    assert [v['grib'] for v in T.GFS_VARS[-3:]] == [('CAPE', 'surface'), ('CIN', 'surface'), ('LFTX', 'surface')]
     ids = [v['id'] for v in T.GFS_VARS]
     assert ids[:9] == ['tempC', 'dewC', 'rhPct', 'uMs', 'vMs', 'gustMs', 'mslHpa', 'precipMm', 'cloudPct'], \
         'APPEND ONLY: the on-disk var index of existing archives must not move'
     by = {v['id']: v for v in T.GFS_VARS}
     for vid, lo, hi in (('psfcHpa', 480.0, 1085.0), ('shflxWm2', -800.0, 1500.0), ('hpblM', 0.0, 6500.0),
-                        ('wMs700', -30.0, 30.0)):
+                        ('wMs700', -30.0, 30.0), ('capeJkg', 0.0, 9000.0), ('cinJkg', -2000.0, 0.0),
+                        ('liK', -20.0, 40.0)):
         q, c = T.quantise(np.array([lo, hi]), by[vid]['scale'], by[vid]['offset'])
         assert c == 0, f'{vid} clips inside its physical range'
         back = T.dequantise(q, by[vid]['scale'], by[vid]['offset'])
@@ -437,6 +444,8 @@ def _():
         if kind[0] in ('anl', 'inst'):
             if var == 'DZDT':                                 # m/s: realistic, signed, level-dependent
                 return 0.01 * L - 0.05 if e['level'] == '700 mb' else 0.02
+            if e['level'] == 'surface' and var in ('CAPE', 'CIN', 'LFTX'):
+                return {'CAPE': 1000.0 + 100 * L, 'CIN': -5.0 * L, 'LFTX': 3.0 - 0.5 * L}[var]
             return 90000.0 + 10 * L if var in ('PRMSL', 'PRES') else 200.0 + L
         _, a, b = kind
         if var == 'APCP':
@@ -481,6 +490,10 @@ def _():
             assert np.allclose(series('tempC'), [200 + L - 273.15 for L in leads], atol=0.005)
             assert np.allclose(series('wMs700'), [0.01 * L - 0.05 for L in leads], atol=0.0005), series('wMs700')
             assert man['clipped']['wMs700'] == 0 and man['clipped']['wMs850'] == 0
+            assert np.allclose(series('capeJkg'), [1000 + 100 * L for L in leads], atol=0.5), series('capeJkg')
+            assert np.allclose(series('cinJkg'), [-5.0 * L for L in leads], atol=0.05), series('cinJkg')
+            assert np.allclose(series('liK'), [3.0 - 0.5 * L for L in leads], atol=0.005), series('liK')
+            assert all(man['clipped'][k] == 0 for k in ('capeJkg', 'cinJkg', 'liK'))
     finally:
         W.http_get, W.decode = saved[0], saved[1]
         os.environ.update(saved[2])

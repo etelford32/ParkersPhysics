@@ -58,6 +58,10 @@ export const PANELS = Object.freeze([
     { id: 'et0',      title: 'Reference evapotranspiration', quantity: 'precip' },
     { id: 'drivers',  title: 'Climate drivers (AO · NAO)',   quantity: 'index' },
     { id: 'geomag',   title: 'Geomagnetic activity (Ap)',    quantity: 'index' },
+    // §19 T6: GFS's own parcel diagnostics. CAPE and CIN share J/kg (one ruler);
+    // the lifted index is a temperature DIFFERENCE and gets its own.
+    { id: 'convection', title: 'Convective energy (CAPE · CIN)', quantity: 'jkg' },
+    { id: 'stability',  title: 'Lifted index (negative = unstable)', quantity: 'tempDelta' },
 ]);
 
 /**
@@ -80,6 +84,9 @@ export const DATASETS = Object.freeze([
             { key: 'mslHpa',   label: 'MSL pressure (GFS)',  panel: 'pressure', quantity: 'pressure', agg: 'mean', slot: 1, defaultOn: true },
             { key: 'rhPct',    label: 'Relative humidity (GFS)', panel: 'humidity', quantity: 'pct', agg: 'mean', slot: 2, defaultOn: false },
             { key: 'cloudPct', label: 'Cloud cover (GFS)',   panel: 'humidity', quantity: 'pct',      agg: 'mean', slot: 3, defaultOn: false },
+            { key: 'capeJkg',  label: 'CAPE, surface-based (GFS)', panel: 'convection', quantity: 'jkg', agg: 'max', slot: 0, defaultOn: false },
+            { key: 'cinJkg',   label: 'CIN, surface-based (GFS)',  panel: 'convection', quantity: 'jkg', agg: 'mean', slot: 1, defaultOn: false },
+            { key: 'liK',      label: 'Lifted index (GFS)',        panel: 'stability',  quantity: 'tempDelta', agg: 'min', slot: 0, defaultOn: false },
         ],
     },
     {

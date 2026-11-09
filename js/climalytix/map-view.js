@@ -244,17 +244,21 @@ export function heatColor(tC, lut) {
  * Returns { data, cw, ch, step }. `paint(value, data, offset)` replaces the
  * temperature LUT for another quantity (the air-quality layer colours by EPA
  * category) — the VALUE is still interpolated first, then coloured.
+ * `sample(lat, lon)` replaces the field read for a value DERIVED from several
+ * interpolated inputs (the convection outlook classifies each pixel from its
+ * own CAPE, CIN and lift — interpolating category numbers would invent a
+ * 'capped' fringe between 'none' and 'possible').
  */
-export function heatImage(f, t, v, w, h, lut, { step = 2, paint = null } = {}) {
+export function heatImage(f, t, v, w, h, lut, { step = 2, paint = null, sample = null } = {}) {
     const cw = Math.max(1, Math.ceil(w / step)), ch = Math.max(1, Math.ceil(h / step));
     const data = new Uint8ClampedArray(cw * ch * 4);
-    if (!f?.values || t == null) return { data, cw, ch, step };
+    if ((!f?.values && !sample) || t == null) return { data, cw, ch, step };
     const { kx, ky } = scales(v, h);
     for (let j = 0; j < ch; j++) {
         const lat = v.lat - (((j + 0.5) * step) - h / 2) / ky;
         for (let i = 0; i < cw; i++) {
             const lon = v.lon + (((i + 0.5) * step) - w / 2) / kx;
-            const val = fieldSample(f, t, lat, lon);
+            const val = sample ? sample(lat, lon) : fieldSample(f, t, lat, lon);
             if (val == null) continue;
             if (paint) paint(val, data, (j * cw + i) * 4);
             else lutColor(val, lut, data, (j * cw + i) * 4);

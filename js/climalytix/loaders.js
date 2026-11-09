@@ -235,6 +235,30 @@ export async function loadUpdraftField(site, { signal } = {}) {
 }
 
 /**
+ * The CONVECTION ingredients (plan §19 T6): GFS's own surface-based CAPE, CIN
+ * and lifted index, plus the thermal inputs (T4) so the outlook can ask
+ * whether thermals reach the lid — one fetch, on FIRST enable only.
+ */
+export const CONVECTION_VARS = Object.freeze(['capeJkg', 'cinJkg', 'liK', 'shflxWm2', 'hpblM', 'psfcHpa', 'tempC', 'dewC']);
+export async function loadConvectionField(site, { signal } = {}) {
+    const vars = CONVECTION_VARS;
+    try {
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars }), signal);
+        if (!vars.every((v) => j?.fields?.[v])) {
+            const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
+            const old = (j?.reasons || []).some((r) => /no variable/.test(String(r)));
+            return { state: 'down', body: null,
+                note: old ? 'Our GFS archive was ingested before the convection fields (CAPE, CIN, lifted index) existed; they arrive with the next run. Nothing stands in for them.'
+                          : `No convection fields: ${why}. Nothing stands in for them.` };
+        }
+        return { state: j.freshness === 'fresh' ? 'live' : 'stale', body: j,
+                 note: `GFS surface-based CAPE, CIN and lifted index, run ${j.run} (${ageText(j.age_seconds)})` };
+    } catch (e) {
+        return { state: 'down', body: null, note: `No convection fields: ${e?.message || 'unreachable'}. Nothing stands in for them.` };
+    }
+}
+
+/**
  * The CAMS air-quality field around the site (BOOTSTRAP source — Open-Meteo's
  * free tier; the page badges it). Resolves { state, body | null, note }.
  */
