@@ -169,6 +169,8 @@ jobs:
         run: node tests/climalytix-terrain-temp.mjs
       - name: cast shadows, terrain horizon, the day's Sun path
         run: node tests/climalytix-sun-terrain.mjs
+      - name: sun and shade feed back into the temperature
+        run: node tests/climalytix-sun-temp.mjs
       - name: nwp route (fake R2)
         run: node tests/climalytix-nwp-route.mjs
       - name: Climate Lab (unchanged by the lift)

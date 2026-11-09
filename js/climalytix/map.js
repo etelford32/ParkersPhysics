@@ -109,6 +109,7 @@ import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../te
 import { heatScale, runRange, scaleColor, SCALE_MODES } from './heat-scale.js';
 import { modelElevationM, fitLapse, downscaleGrid } from './terrain-temp.js';
 import { shadowGrid, horizonProfile, sunPath, sunDay } from './sun-terrain.js';
+import { memorySamples, sunTempGrid, effectPaint } from './sun-temp.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
 const TERRAIN_ALPHA = 0.7;
@@ -158,10 +159,10 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, tempdetail: true, shadow: false, sunpath: false, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
+        timeMs: null, layers: { temperature: true, tempdetail: true, tempsun: true, shadow: false, sunpath: false, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
-        aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT, heatScaleMode: storedScaleMode(), windows: [],
+        aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT, heatScaleMode: storedScaleMode(), heatView: 'temp', windows: [],
         tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null,
         underlay: new Map(), relief: { state: 'idle', canvas: null, ms: null },
         wind: null, windState: 'loading', windNote: '',
@@ -351,11 +352,13 @@ export function mountMap(root, deps) {
     }
 
     // ── Terrain detail (terrain-temp.js): GFS 2 m T at the DEM's real height ──
-    let DT = { key: '', field: null, fit: null, dz: null, dzKey: '', corr0: null };
+    let DT = { key: '', field: null, fit: null, dz: null, dzKey: '', corr0: null, cKey: '', sun: null };
     function detailActive() { return !!(M.layers.temperature && M.layers.tempdetail && D.grid && detailPossible()); }
     function detailFor(t) {
         if (!detailActive() || t == null) return null;
-        const F = M.field, key = `${D.key}|${F.run}|${t}`;
+        const F = M.field;
+        const sunOn = !!M.layers.tempsun, tw = sunOn ? windTimeIndex() : null;
+        const key = `${D.key}|${F.run}|${t}|${sunOn ? `sun|${tw}|${M.wind?.run ?? ''}` : ''}`;
         if (DT.key !== key) {
             const plane = F.nRows * F.nCols, base = t * plane;
             const msl = F.fields.mslHpa, ps = F.fields.psfcHpa;
@@ -384,11 +387,60 @@ export function mountMap(root, deps) {
                 }
                 dz = lo <= hi ? { min: Math.round(lo / 100) * 100, max: Math.round(hi / 100) * 100 } : null;
             }
-            const corr0 = DT.dzKey === dzKey && DT.corr0 ? DT.corr0 : field.correction;
-            DT = { key, field, fit, zField, dz, dzKey, corr0 };
+            // Sun and shade (sun-temp.js): each point's own direct-beam ANOMALY from flat
+            // unshaded ground, with cast shadows and a thermal memory, added on top of the
+            // height correction. `height` keeps the height-only grid so the tooltip can
+            // say how much of a value is each.
+            let sun = null;
+            if (sunOn && field.correction) {
+                const st = sunTempFor(F.times[t], F, t, tw);
+                sun = { range: st.range, daylight: st.daylight, cloud: st.cloud, wind: st.wind, values: st.values };
+                const height = field.values;
+                field.values = Float32Array.from(height, (v, k) => (Number.isFinite(v) && Number.isFinite(st.values[k]) ? v + st.values[k] : v));
+                field.height = height;
+                let lo = Infinity, hi = -Infinity;
+                for (let k = 0; k < height.length; k++) {
+                    if (!Number.isFinite(field.values[k])) continue;
+                    const base = fieldSample(F, t, D.grid.latN - Math.floor(k / D.grid.nCols) * D.grid.dlat, D.grid.lonW + (k % D.grid.nCols) * D.grid.dlon);
+                    if (base == null) continue;
+                    const d = field.values[k] - base;
+                    if (d < lo) lo = d;
+                    if (d > hi) hi = d;
+                }
+                if (lo <= hi) field.correction = { min: lo, max: hi };
+            }
+            // The scale's widening is fixed per DEM grid + run + sun toggle (first frame drawn).
+            const cKey = `${dzKey}|${sunOn}`;
+            const corr0 = DT.cKey === cKey && DT.corr0 ? DT.corr0 : field.correction;
+            DT = { key, field, fit, zField, dz, dzKey, corr0, cKey, sun };
         }
         return DT;
     }
+    // Shadow masks for the memory samples, cached per DEM grid + sample instant
+    // (whole-step samples sit on absolute marks, so a scrub reuses them).
+    const sunSampleCache = new Map();
+    function sunTempFor(timeMs, F, t, tw) {
+        const samples = memorySamples(timeMs).map((smp) => {
+            const key = `${D.key}|${smp.at}`;
+            let hit = sunSampleCache.get(key);
+            if (!hit) {
+                const sun = solarPosition(new Date(smp.at), M.view.lat, M.view.lon);
+                hit = { sun, mask: sun.altitudeDeg > 0 ? shadowGrid(D.grid, sun).mask : null };
+                if (sunSampleCache.size > 48) sunSampleCache.delete(sunSampleCache.keys().next().value);
+                sunSampleCache.set(key, hit);
+            }
+            return { ...smp, ...hit };
+        });
+        const cloud = F.fields?.cloudPct ? { ...F, values: F.fields.cloudPct } : null;
+        const wind = tw != null && M.wind ? M.wind : null;
+        const out = sunTempGrid(D.grid, D.sa, {
+            samples,
+            cloudAt: cloud ? (lat, lon) => { const c = fieldSample(cloud, t, lat, lon); return c == null ? null : c / 100; } : null,
+            windAt: wind ? (lat, lon) => { const w = windAt(wind, tw, lat, lon); return w ? Math.hypot(w.u, w.v) : null; } : null,
+        });
+        return { ...out, cloud: !!cloud, wind: !!wind };
+    }
+
     /** What the heat, the isotherms, the markers and the tooltip all read: the detail grid, or the model's own nodes. */
     function heatSource(t) {
         const det = detailFor(t);
@@ -411,6 +463,19 @@ export function mountMap(root, deps) {
         return heatCache.canvas;
     }
 
+    let effectCache = { key: '', canvas: null };
+    function effectCanvasFor(src, effect) {
+        const v = M.view, key = `${src.tag}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}`;
+        if (effectCache.key !== key) {
+            const img = heatImage({ ...D.grid, values: effect.values }, 0, v, M.w, M.h, null, { step: HEAT_STEP_PX, paint: effectPaint });
+            const c = effectCache.canvas || document.createElement('canvas');
+            c.width = img.cw; c.height = img.ch;
+            c.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+            effectCache = { key, canvas: c };
+        }
+        return effectCache.canvas;
+    }
+
     function drawHeat() {
         Object.assign(M.drawn, { heat: false, isotherms: 0, isoLevels: [], freezing: false, extremes: false });
         if (!M.layers.temperature || !M.field?.values) return;
@@ -418,13 +483,16 @@ export function mountMap(root, deps) {
         if (t == null) return;
         const f = M.field;
         const src = heatSource(t);
+        // "Sun & shade effect": the modelled ΔT alone, when there is one to show.
+        const effect = M.heatView === 'sun' && src.det?.sun ? src.det.sun : null;
         ctx.save();
         ctx.globalAlpha = M.heatAlpha;
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(heatCanvasFor(src), 0, 0, M.w, M.h);
+        ctx.drawImage(effect ? effectCanvasFor(src, effect) : heatCanvasFor(src), 0, 0, M.w, M.h);
         ctx.restore();
         M.drawn.detail = !!src.det;
+        M.drawn.heatView = effect ? 'sun' : 'temp';
         // The data window: where the field ends is drawn, not implied. The
         // heat is evaluated between nodes only, so the box IS the node extent.
         const shift = dashedBox({ west: f.lonW, east: f.lonW + (f.nCols - 1) * f.dlon,
@@ -441,6 +509,7 @@ export function mountMap(root, deps) {
         M.drawn.heat = true;
         M.drawn.t = t;
         // With terrain detail the lines and markers are of the DETAIL grid (already in the view's turn).
+        if (effect) return;                      // isotherms and ▲▼ belong to the temperature, not to its adjustment
         if (M.layers.isotherms) drawIsotherms(src, src.det ? 0 : shift);
         if (M.layers.extremes) drawExtremes(src, src.det ? 0 : shift);
     }
@@ -1664,11 +1733,15 @@ export function mountMap(root, deps) {
             t, timeMs: t == null ? null : M.field.times[t],
             range: src ? fieldRange(src.f, src.t) : null,
             detail: !M.layers.tempdetail ? { state: 'off' }
-                : src?.det ? { state: 'on', lapse: src.det.fit, correction: src.det.field.correction, dz: src.det.dz, resM: D.resM ?? null }
+                : src?.det ? { state: 'on', lapse: src.det.fit, correction: src.det.field.correction, dz: src.det.dz, resM: D.resM ?? null,
+                    sun: !M.layers.tempsun ? { state: 'off' }
+                        : !src.det.sun ? { state: 'off' }
+                        : { state: src.det.sun.daylight ? 'on' : 'night', range: src.det.sun.range, cloud: src.det.sun.cloud, wind: src.det.sun.wind } }
                 : !detailPossible() ? { state: 'nofields' }
                 : D.state === 'down' ? { state: 'nodem' } : { state: 'loading' },
             state: M.fieldState, note: M.fieldNote, heat: M.drawn.heat,
             scale: (({ mode, lo, hi }) => ({ mode, lo, hi }))(currentScale()),
+            view: M.drawn.heatView ?? 'temp', viewWanted: M.heatView,
         };
     }
 
@@ -1697,13 +1770,17 @@ export function mountMap(root, deps) {
         const g = pxToGeo(M.view, M.w, M.h, M.hover.x, M.hover.y);
         const t = currentTimeIndex();
         const src = M.layers.temperature && t != null ? heatSource(t) : null;
-        const v = src ? fieldSample(src.f, src.t, g.lat, g.lon) : null;
+        const v = src && M.drawn.heatView !== 'sun' ? fieldSample(src.f, src.t, g.lat, g.lon) : null;
+        const effK = src?.det?.sun && M.drawn.heatView === 'sun' ? fieldSample({ ...D.grid, values: src.det.sun.values }, 0, g.lat, g.lon) : null;
         // With terrain detail on, say what was corrected: the model's own value and the two heights.
         let detTxt = null;
         if (v != null && src.det) {
             const raw = fieldSample(M.field, t, g.lat, g.lon), zm = fieldSample(src.det.zField, 0, g.lat, g.lon), zd = fieldSample(D.grid, 0, g.lat, g.lon);
             const hh = (m) => (deps.formatHeight ? deps.formatHeight(m) : `${Math.round(m)} m`);
-            if (raw != null && zm != null && zd != null) detTxt = `at ${hh(zd)} (GFS: ${deps.formatTemp(raw)} at its ${hh(zm)} surface)`;
+            const sunK = src.det.sun ? fieldSample({ ...D.grid, values: src.det.sun.values }, 0, g.lat, g.lon) : null;
+            const dK = (k) => (deps.formatTempDelta ? deps.formatTempDelta(k) : `${k >= 0 ? '+' : '−'}${Math.abs(k).toFixed(1)} K`);
+            const sunTxt = sunK != null && Math.abs(sunK) >= 0.05 ? `, sun & shade ${dK(sunK)}` : '';
+            if (raw != null && zm != null && zd != null) detTxt = `at ${hh(zd)} (GFS: ${deps.formatTemp(raw)} at its ${hh(zm)} surface${sunTxt})`;
         }
         const tw = windTimeIndex();
         const w = M.layers.airflow && tw != null ? windAt(M.wind, tw, g.lat, g.lon) : null;
@@ -1733,7 +1810,8 @@ export function mountMap(root, deps) {
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        tip.textContent = [terrTxt, thTxt, upTxt, cvTxt, aqTxt, v == null ? null : [deps.formatTemp(v), detTxt].filter(Boolean).join(' '), wind, ll].filter(Boolean).join(' · ');
+        const effTxt = effK == null ? null : `sun & shade ${deps.formatTempDelta ? deps.formatTempDelta(effK) : effK.toFixed(1) + ' K'} vs flat open ground`;
+        tip.textContent = [terrTxt, thTxt, upTxt, cvTxt, aqTxt, effTxt, v == null ? null : [deps.formatTemp(v), detTxt].filter(Boolean).join(' '), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -1844,7 +1922,7 @@ export function mountMap(root, deps) {
         setLayer(name, on) {
             M.layers[name] = !!on; requestDraw();
             if (name === 'airflow') updateFlow();
-            if (['elevation', 'exposure', 'orographic', 'slopewind', 'shadow', 'sunpath', 'tempdetail', 'temperature'].includes(name) && on) scheduleDem();
+            if (['elevation', 'exposure', 'orographic', 'slopewind', 'shadow', 'sunpath', 'tempdetail', 'tempsun', 'temperature'].includes(name) && on) scheduleDem();
         },
         /** The slope-wind forcing (GFS cloud + 2 m T); state 'loading' | 'live' | 'stale' | 'partial'. */
         setSlopeForcing(state, body, note, cloud) {
@@ -1923,6 +2001,8 @@ export function mountMap(root, deps) {
             requestDraw();
         },
         get heatScale() { return currentScale(); },
+        /** 'temp' (the temperature) | 'sun' (the sun & shade adjustment alone, where there is one). */
+        setHeatView(view) { if (view === 'temp' || view === 'sun') { M.heatView = view; requestDraw(); } },
         get sun() { return sunInfo(); },
         act,
         get state() {

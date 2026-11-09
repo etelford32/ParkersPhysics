@@ -30,6 +30,7 @@ import { fieldWindow } from './point-tile.js';
 import { tempControlState, overlayBadge } from './layer-state.js';
 import { keyPixels, keyFrac, keyTicks } from './heat-scale.js';
 import { lapseText } from './terrain-temp.js';
+import { effectPaint, EFFECT_FULL_K } from './sun-temp.js';
 import { horizonAt } from './sun-terrain.js';
 import { capePaint, CAPE_MIN_JKG, CAPE_FULL_JKG, OUTLOOK_COLORS, TRIGGER_MIN_MS, CIN_WEAK_JKG } from './convection.js';
 import { updraftPaint, W_FULL_MS } from './updraft.js';
@@ -279,7 +280,8 @@ const MAP_KEYS = [
     // `ok`: a key is on the map only while its field is DRAWN (layer-state.js) —
     // a colour key over a map with no temperature on it reads as a broken layer.
     { box: '#cx-layer-temp', key: '#cx-heat-key', ok: () => S.tempCtl?.keyOnMap === true,
-      title: () => `Temperature · 2 m · ${unitSym('temp')}${S.map?.heatScale.mode === 'fit' ? ' · fit to view' : ''}` },
+      title: () => (S.map?.state.frame?.view === 'sun' ? `Sun & shade effect · ${unitSym('temp')} · modelled`
+          : `Temperature · 2 m · ${unitSym('temp')}${S.map?.heatScale.mode === 'fit' ? ' · fit to view' : ''}`) },
     { box: '#cx-layer-aq', key: '#cx-aq-key', title: () => 'PM2.5 · US AQI category' },
     { box: '#cx-layer-exp', key: '#cx-exp-key', title: () => 'Sun exposure · vs flat ground' },
     { box: '#cx-layer-oro', key: '#cx-oro-key', title: () => 'Orographic lift · surface' },
@@ -524,11 +526,24 @@ function renderRose() {
 let keySig = '';
 function paintHeatKey() {
     const sc = S.map.heatScale;
-    const sig = `${sc.mode}|${sc.lo}|${sc.hi}`;
+    const view = S.map.state.frame?.view ?? 'temp';
+    const sig = `${view}|${sc.mode}|${sc.lo}|${sc.hi}`;
     if (sig === keySig) return false;
     keySig = sig;
     const c = $('#cx-heat-key canvas');
     const img = c.getContext('2d').createImageData(256, 1);
+    if (view === 'sun') {
+        // The effect's own key: the map's painter from −FULL to +FULL over the dimmed ground's tone.
+        for (let k = 0; k < 256; k++) {
+            const px = new Uint8ClampedArray(4);
+            effectPaint((k / 255 * 2 - 1) * EFFECT_FULL_K, px, 0);
+            const a = px[3] / 255, bg = [42, 52, 70];
+            img.data.set([px[0] * a + bg[0] * (1 - a), px[1] * a + bg[1] * (1 - a), px[2] * a + bg[2] * (1 - a), 255], k * 4);
+        }
+        c.getContext('2d').putImageData(img, 0, 0);
+        $('#cx-heat-key').dataset.scale = 'effect';
+        return true;
+    }
     img.data.set(keyPixels(sc, S.map.lut, 256));
     c.getContext('2d').putImageData(img, 0, 0);
     $('#cx-heat-key').dataset.scale = sc.mode;
@@ -540,7 +555,10 @@ function renderHeatTicks() {
     const sc = S.map.heatScale;
     const conv = { toDisplay: (c) => fmt('temp', c, S.units).value, fromDisplay: (d) => fromDisplay('temp', d, S.units) };
     let ticks;
-    if (sc.mode === 'fit') ticks = keyTicks(sc, conv);
+    if ($('#cx-heat-key').dataset.scale === 'effect') {
+        const full = conv.toDisplay(EFFECT_FULL_K) - conv.toDisplay(0);
+        ticks = [[`−${full.toFixed(1)}°`, 0.1], ['cooler · 0 · warmer', 0.5], [`+${full.toFixed(1)}°`, 0.9]].map(([label, frac]) => ({ label, frac }));
+    } else if (sc.mode === 'fit') ticks = keyTicks(sc, conv);
     else {
         const unit = S.units?.temp === 'F' ? 'F' : 'C';
         ticks = (unit === 'F' ? [-40, 0, 40, 80, 120] : [-40, -20, 0, 20, 40])
@@ -580,6 +598,13 @@ function applyTempControl(info) {
     const changed = S.tempCtl?.mode !== ctl.mode;
     S.tempCtl = ctl;
     for (const id of ['#cx-layer-iso', '#cx-layer-ext', '#cx-layer-tdetail', '#cx-heat-alpha']) $(id).disabled = !ctl.subEnabled;
+    // Sun & shade rides on terrain detail: without the real ground there is no slope to light.
+    $('#cx-layer-tsun').disabled = !ctl.subEnabled || !$('#cx-layer-tdetail').checked;
+    const hasEffect = ctl.subEnabled && info?.detail?.state === 'on' && info.detail.sun?.state === 'on';
+    for (const b of document.querySelectorAll('#cx-heat-view [data-view]')) {
+        b.disabled = !ctl.subEnabled || (b.dataset.view === 'sun' && !hasEffect);
+        b.setAttribute('aria-pressed', String(b.dataset.view === (info?.view ?? 'temp')));
+    }
     for (const b of document.querySelectorAll('#cx-heat-scale [data-scale]')) b.disabled = !ctl.subEnabled;
     $('#cx-layer-temp').closest('.cx-layer').dataset.avail = ctl.mode;
     setRowBadge('#cx-layer-temp', ctl.badge);
@@ -643,7 +668,7 @@ function renderHeatRail(info) {
         ? `Colours fit to this run’s range here, ${fmtText('temp', sc.lo, S.units)} – ${fmtText('temp', sc.hi, S.units)} — compare places with Absolute.`
         : 'Colours on the absolute scale EarthView uses.';
     // A temperature DIFFERENCE in the reader's unit (a 1 K step is 1.8 °F).
-    const dT = (k) => { const v = fmt('temp', k, S.units).value - fmt('temp', 0, S.units).value; return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}`; };
+    const dT = (k, dp = 0) => { const v = fmt('temp', k, S.units).value - fmt('temp', 0, S.units).value; return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(dp)}`; };
     const d = info.detail;
     const detailNote = !d || d.state === 'off' ? 'Terrain detail off: GFS’s own 25 km field, interpolated.'
         : d.state === 'on' ? `Terrain detail: brought to the real ground with ${lapseText(d.lapse)}`
@@ -651,8 +676,15 @@ function renderHeatRail(info) {
         : d.state === 'nofields' ? 'Terrain detail unavailable: this run carries no surface pressure. GFS’s own field is shown.'
         : d.state === 'nodem' ? 'Terrain detail unavailable: elevation tiles did not load. GFS’s own field is shown.'
         : 'Terrain detail: loading elevation…';
-    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}<br><span id="cx-heat-detail" data-state="${esc(d?.state ?? 'off')}">${esc(detailNote)}</span>`;
-    if (info.range) {
+    const sn = d?.state === 'on' ? d.sun : null;
+    const bounds = sn ? [!sn.cloud && 'no cloud field — clear sky assumed', !sn.wind && 'no wind field — no mixing'].filter(Boolean) : [];
+    const sunNote = !sn || sn.state === 'off' ? ''
+        : sn.state === 'night' ? 'Sun & shade: the Sun has been down for hours here — no adjustment (night-time cold pooling is not modelled).'
+        : `Sun & shade (modelled): ${dT(sn.range.min, 1)} to ${dT(sn.range.max, 1)} ${unitSym('temp')} in view — sun-facing slopes warmer, shaded ground cooler, with a ~1.5 h lag`
+            + (bounds.length ? `; ${bounds.join(', ')}, so an upper bound.` : '.');
+    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}<br><span id="cx-heat-detail" data-state="${esc(d?.state ?? 'off')}">${esc(detailNote)}</span>`
+        + (sunNote ? `<br><span id="cx-heat-sun" data-state="${esc(sn.state)}">${esc(sunNote)}</span>` : '');
+    if (info.range && info.view !== 'sun') {
         const a = keyFrac(sc, info.range.min), b = keyFrac(sc, info.range.max);
         win.hidden = false;
         win.style.left = `${(a * 100).toFixed(1)}%`;
@@ -920,6 +952,8 @@ function requestMonitors(shownMs) {
 function mountLocationMap() {
     S.map = mountMap($('#cx-map'), {
         formatTemp: (c) => fmtText('temp', c, S.units),
+        // A temperature DIFFERENCE in the reader's unit (1 K is 1.8 °F), one decimal.
+        formatTempDelta: (k) => { const v = fmt('temp', k, S.units).value - fmt('temp', 0, S.units).value; return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} ${unitSym('temp')}`; },
         // Isotherm levels are chosen in the reader's unit (round °F for a °F reader).
         tempUnits: () => ({
             toDisplay: (c) => fmt('temp', c, S.units).value,
@@ -1038,6 +1072,12 @@ function mountLocationMap() {
     rememberGroups();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-tdetail').addEventListener('change', (ev) => S.map.setLayer('tempdetail', ev.target.checked));
+    $('#cx-layer-tsun').addEventListener('change', (ev) => S.map.setLayer('tempsun', ev.target.checked));
+    $('#cx-heat-view').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-view]');
+        if (!b || b.disabled) return;
+        S.map.setHeatView(b.dataset.view);
+    });
     $('#cx-layer-shadow').addEventListener('change', (ev) => { S.map.setLayer('shadow', ev.target.checked); renderDemRail(S.map.state.dem); });
     $('#cx-layer-sun').addEventListener('change', (ev) => { S.map.setLayer('sunpath', ev.target.checked); renderDemRail(S.map.state.dem); });
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
