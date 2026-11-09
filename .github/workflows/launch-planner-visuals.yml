@@ -47,8 +47,10 @@ jobs:
         run: node tests/launch-smoke-sim.mjs && node tests/launch-camera-layout.mjs
       - run: npx playwright install --with-deps chromium
       - name: Launch planner browser gates (Chromium)
+        # list reporter: one line per test as it finishes, with its duration
+        # (the default dot reporter prints nothing until a line ends).
         run: >
-          npx playwright test --project=chromium --trace off
+          npx playwright test --project=chromium --trace off --reporter=list
           tests/launch-planner-render-health.spec.js
           tests/launch-planner-visuals.spec.js
           tests/launch-planner-camera.spec.js
@@ -59,7 +61,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: launch-planner-chromium-report
-          path: playwright-report/
+          # The list reporter writes no playwright-report/; the failure
+          # screenshots and error-context snapshots live in test-results/.
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7
 
   cross-browser:
@@ -67,8 +73,20 @@ jobs:
     timeout-minutes: 40
     strategy:
       fail-fast: false
+      # Firefox is SHARDED: its software WebGL is the slowest of the three, and
+      # the ten render-health tests run serially in one job outlasted the
+      # 40-minute cap on every run since the workflow was added — cancelled
+      # before a single result printed. Each shard gets its own budget and a
+      # third of the same tests (the spec runs in parallel mode, so the shard
+      # splits by test). One worker per shard: two software rasterisers on a
+      # 4-vCPU runner only fight over the cores.
       matrix:
-        project: [firefox-visual, webkit-visual]
+        include:
+          - { project: firefox-visual, shard: 1, of: 3 }
+          - { project: firefox-visual, shard: 2, of: 3 }
+          - { project: firefox-visual, shard: 3, of: 3 }
+          - { project: webkit-visual,  shard: 1, of: 1 }
+    name: cross-browser (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.of }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -77,14 +95,33 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.project == 'firefox-visual' && 'firefox' || 'webkit' }}
-      - name: Render-health gate (${{ matrix.project }})
-        run: npx playwright test --project=${{ matrix.project }} --trace off tests/launch-planner-render-health.spec.js
+      # HEADLESS Firefox has no display to open a native GL context on, so it
+      # had no WebGL at all here ("tryNativeGL", "Exhausted GL driver
+      # options"). It runs HEADED under Xvfb instead (PW_FIREFOX_XVFB below),
+      # drawing through GLX on Mesa's llvmpipe; these are the X server and
+      # the GL drivers that needs. playwright.config.js forces WebGL past
+      # Firefox's blocklist.
+      - if: matrix.project == 'firefox-visual'
+        run: sudo apt-get install -y --no-install-recommends xvfb xauth libegl1 libgl1-mesa-dri libgles2 libglx-mesa0
+      - name: Render-health gate (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.of }})
+        # Firefox: headed inside Xvfb at 24-bit depth (xvfb-run's default
+        # 8-bit screen has no GLX visual a GL context can use).
+        run: >
+          ${{ matrix.project == 'firefox-visual' && 'xvfb-run -a -s "-screen 0 1920x1080x24"' || '' }}
+          npx playwright test --project=${{ matrix.project }} --trace off --reporter=list
+          --workers=1 --shard=${{ matrix.shard }}/${{ matrix.of }}
+          tests/launch-planner-render-health.spec.js
         env:
           CI: 'true'
+          PW_FIREFOX_XVFB: ${{ matrix.project == 'firefox-visual' && '1' || '0' }}
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: launch-planner-${{ matrix.project }}-report
-          path: playwright-report/
+          name: launch-planner-${{ matrix.project }}-${{ matrix.shard }}-of-${{ matrix.of }}-report
+          # The list reporter writes no playwright-report/; the failure
+          # screenshots and error-context snapshots live in test-results/.
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7

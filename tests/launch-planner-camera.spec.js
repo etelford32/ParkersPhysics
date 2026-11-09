@@ -157,6 +157,12 @@ test.describe('launch-planner camera controls + responsive stage', () => {
     });
 
     test('dock, keys, pinch, pan, Spin and full screen move the camera', async ({ browser }) => {
+        // ~25 interactions, each waiting a few SOFTWARE-rendered frames: 2.7 min
+        // locally with two workers, ~2.4x that on a CI runner. The describe's
+        // 240 s ran out on CI with nothing stuck — main's run at the Help close,
+        // this branch's at the full-screen step 230 s in (2026-11-09). A budget
+        // sized to the measured cost, not a wait for anything new.
+        test.setTimeout(480_000);
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
         const page = await ctx.newPage();
         await boot(page);
@@ -230,10 +236,15 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         expect(Math.abs(azimuth(await stats(page)) - a0)).toBeGreaterThan(0.02);
         await page.click('.lh-toggle[data-toggle="autoRotate"]');
 
-        // Help opens and closes.
-        await page.click('.lh-cam[data-cam="help"]');
+        // Help opens and closes — DISPATCHED clicks, for the reason given at the
+        // full-screen exit below: page.click waits for the button to be "stable"
+        // across animation frames, and a software render on CI starves them. On
+        // main's 2026-11-08 run the Help close burned the test's whole 240 s
+        // budget at page.click('.lh-cam-help-x') BEFORE full screen was entered.
+        // The buttons' handlers are what is under test, not hit-testing.
+        await page.locator('.lh-cam[data-cam="help"]').dispatchEvent('click');
         await expect(page.locator('#lh-cam-help')).toBeVisible();
-        await page.click('.lh-cam-help-x');
+        await page.locator('.lh-cam-help-x').dispatchEvent('click');
         await expect(page.locator('#lh-cam-help')).toBeHidden();
 
         // Full screen (API or the CSS fallback): the stage covers the window.

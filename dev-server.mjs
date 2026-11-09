@@ -111,6 +111,8 @@ const API_ROUTES = {
     '/api/noaa/dst':               'api/noaa/dst.js',
     '/api/noaa/flares':            'api/noaa/flares.js',
     '/api/noaa/regions':           'api/noaa/regions.js',
+    '/api/glaciers/velocity':      'api/glaciers/velocity.js',
+    '/api/glaciers/stations':      'api/glaciers/stations.js',
     '/api/noaa/radio-flux':        'api/noaa/radio-flux.js',
     '/api/noaa/forecast-3day':     'api/noaa/forecast-3day.js',
     '/api/donki/cme':              'api/donki/cme.js',

@@ -68,13 +68,72 @@ async function hermetic(page, { feed = null, feedDelayMs = 0, threeDelayMs = 0 }
     }
 }
 
+// Boot NARRATES. On Firefox CI every test once hung at the first locator for
+// the whole 5-minute budget while the canvas is static markup — a query that
+// cannot resolve means the page's main thread is not answering, and a bare
+// timeout says nothing about why. So the page's own console, uncaught errors,
+// crashes and navigations go to the test log, and until the stage is up a
+// probe asks the page every few seconds (raced against a timer) whether it
+// answers at all and how far the boot got.
+function narrate(page) {
+    const t0 = Date.now();
+    const log = (s) => console.log(`[render-health +${((Date.now() - t0) / 1000).toFixed(1)}s] ${s}`);
+    page.on('console', (m) => { if (m.type() !== 'debug') log(`console.${m.type()}: ${m.text().slice(0, 300)}`); });
+    page.on('pageerror', (e) => log(`pageerror: ${String(e?.stack || e).slice(0, 600)}`));
+    page.on('crash', () => log('page crashed'));
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) log(`navigated: ${f.url()}`); });
+    return log;
+}
+
+async function waitForStage(page, log, budgetMs = 150_000) {
+    const end = Date.now() + budgetMs;
+    let last = '';
+    while (Date.now() < end) {
+        const r = await Promise.race([
+            page.evaluate(() => ({
+                ready: document.readyState,
+                canvas: !!document.getElementById('lh-vehicle-canvas'),
+                api: !!window.__lpVehicle3d,
+                health: window.__lpVehicle3d?.renderHealth?.state ?? null,
+                // Can this engine make ANY WebGL context here? Without one the
+                // page drops its canvas and the stage can never come up.
+                webgl: (() => { try { const c = document.createElement('canvas');
+                    return c.getContext('webgl2') ? 2 : c.getContext('webgl') ? 1 : 0; } catch (_) { return 0; } })(),
+            })).catch((e) => ({ error: String(e).slice(0, 200) })),
+            new Promise((z) => setTimeout(() => z({ unresponsive: true }), 8_000)),
+        ]);
+        const s = JSON.stringify(r);
+        if (s !== last) { log(`probe ${s}`); last = s; }
+        if (r.health) return;
+        if (r.webgl === 0) {
+            throw new Error('this browser has NO WebGL context here, so the page has no stage to test '
+                + '(fix the browser launch configuration, not the page); probe ' + s);
+        }
+        await new Promise((z) => setTimeout(z, 2_000));
+    }
+    throw new Error(`stage never came up in ${budgetMs / 1000} s; last probe ${last}`);
+}
+
 async function boot(page, query = '', opts = {}) {
+    const log = narrate(page);
     await hermetic(page, opts);
     await page.goto(PAGE + query, { waitUntil: 'domcontentloaded' });
+    log('domcontentloaded');
+    await waitForStage(page, log);
     await page.locator('#lh-vehicle-canvas').scrollIntoViewIfNeeded();
     await page.waitForFunction(() => window.__lpVehicle3d?.renderHealth, null, { timeout: 90_000 });
     // The consent banner covers the bottom of the page; it is chrome, not stage.
     await page.evaluate(() => document.querySelector('.pp-consent-banner')?.remove());
+    // Say which renderer this engine gave us and which rung detectQuality chose
+    // from it: a software renderer that hides its name (Firefox sanitizes the
+    // string) would get the full 'high' post chain on a CPU rasteriser.
+    const gpu = await page.evaluate(() => {
+        const a = window.__lpVehicle3d, gl = a.renderer.getContext();
+        let name = '';
+        try { const e = gl.getExtension('WEBGL_debug_renderer_info'); name = e ? String(gl.getParameter(e.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER)); } catch (_) { /* hardened */ }
+        return { name, quality: a.renderHealth.quality, webgl2: a.renderer.capabilities.isWebGL2 };
+    });
+    console.log(`[render-health] renderer "${gpu.name}" · quality ${gpu.quality} · webgl2 ${gpu.webgl2}`);
 }
 
 async function frames(page, n = 3) {
@@ -89,8 +148,8 @@ const sample = (page) => page.evaluate(() => window.__lpVehicle3d._sampleFrame()
 // Plant a small sphere whose fragments are NaN (0/0 through a uniform, so no
 // compiler can fold it) or +Inf (1e30², past every float format), in front of
 // the vehicle. This is the reported failure's input, made deterministic.
-async function plant(page, mode) {
-    await page.evaluate(async (mode) => {
+async function plant(page, mode, { sampleNow = false } = {}) {
+    return page.evaluate(async ({ mode, sampleNow }) => {
         const THREE = await import('three');
         const a = window.__lpVehicle3d;
         const mat = new THREE.ShaderMaterial({
@@ -115,7 +174,18 @@ async function plant(page, mode) {
         const t = new THREE.Vector3(...a.renderStats.target);
         m.position.copy(a.camera.position).lerp(t, 0.3);
         a.scene.add(m);
-    }, mode);
+        if (!sampleNow) return null;
+        // Plant, draw, measure and remove in ONE task: the page's health
+        // monitor runs inside every frame and steps a black post chain down
+        // after two dead checks 1.5 s apart. Waiting on rAF frames between
+        // planting and sampling gave it that window on a slow CI runner —
+        // it stepped to the direct render and the "black" control measured
+        // a lit frame (0.0008 dead, the speck alone). One synchronous frame
+        // allows at most one check.
+        const s = a._sampleFrame();
+        m.removeFromParent();
+        return s;
+    }, { mode, sampleNow });
 }
 const unplant = (page) => page.evaluate(() => {
     const s = window.__lpVehicle3d.scene;
@@ -124,6 +194,13 @@ const unplant = (page) => page.evaluate(() => {
 
 test.describe('launch-planner 3D stage — render health', () => {
     test.setTimeout(300_000);
+    // Every test boots its own page and restores nothing it shares, so they run
+    // in PARALLEL and SHARD: on software GL the boot alone is ~18 s locally and
+    // ~2.4× that on a CI runner, and Firefox's software WebGL is slower again.
+    // Run serially in one job, the ten boots plus a retry outlasted the job's
+    // 40-minute cap and Firefox was cancelled before printing a single result
+    // (every run since 2026-11-08). The workflow shards the Firefox job.
+    test.describe.configure({ mode: 'parallel' });
 
     test('a planted NaN or Inf pixel cannot black out the stage (negative control: sanitize off)', async ({ page }) => {
         await boot(page);
@@ -154,11 +231,12 @@ test.describe('launch-planner 3D stage — render health', () => {
         // black rectangle. If this ever stops going black, the plant no
         // longer reproduces the failure and the checks above prove nothing.
         await page.evaluate(() => window.__lpVehicle3d._setPostSanitize(false));
-        await plant(page, 'nan');
-        await frames(page, 2);
-        const bad = await sample(page);
-        await unplant(page);
+        const bad = await plant(page, 'nan', { sampleNow: true });
         await page.evaluate(() => window.__lpVehicle3d._setPostSanitize(true));
+        // Still on the rung it booted with, or the control measured the
+        // direct render and proves nothing.
+        const h2 = await page.evaluate(() => window.__lpVehicle3d.renderHealth);
+        expect(h2.quality, `steps ${JSON.stringify(h2.steps)}`).toBe(h0.quality);
         expect(bad.dead, `negative control grid ${JSON.stringify(bad.grid)}`).toBeGreaterThan(BLACK_MIN_DEAD);
     });
 
