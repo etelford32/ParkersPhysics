@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
     locate, tileShape, tileKey, stencilRanges, readStencil, siteBody, toSiteSeries,
-    runFreshness, RUN_FRESH_S, RUN_STALE_S, fieldPlan, readField, fieldBody, fieldPath,
+    runFreshness, RUN_FRESH_S, RUN_STALE_S, fieldPlan, readField, fieldBody, fieldPath, fieldWindow, FIELD_HALF_LON_MAX,
 } from '../js/climalytix/point-tile.js';
 import { HOUR_MS } from '../js/climalytix/series.js';
 
@@ -199,6 +199,25 @@ ok('gaps stay NaN in the field and null on the wire; the path snaps to 0.25°', 
     assert.equal(body.values.length, man.times.length * plane);
     assert.equal(fieldPath({ lat: 40.015, lon: -105.271 }), '/api/climalytix/nwp-field?lat=40.00&lon=-105.25&half=3');
     assert.throws(() => readField(man, plan, 'nope', bodies), RangeError);
+});
+
+ok('V2: the window is fitted to the map — ±4° of latitude and the longitude the view shows for it', () => {
+    // A 1094 × 720 stage at Boulder: aspect 1.52 / cos 40° ⇒ ~1.98 × as much longitude ⇒ ±8°, snapped.
+    assert.deepEqual(fieldWindow({ aspect: 1094 / 720, lat: 40 }), { halfDeg: 4, halfLon: 8 });
+    assert.deepEqual(fieldWindow({ aspect: 1094 / 720, lat: 0 }), { halfDeg: 4, halfLon: 6 }, 'no cos φ stretch at the equator');
+    assert.deepEqual(fieldWindow({ aspect: 0.6, lat: 10 }), { halfDeg: 4, halfLon: 2.5 }, 'a phone held upright: narrower than tall');
+    assert.equal(fieldWindow({ aspect: 3, lat: 70 }).halfLon, FIELD_HALF_LON_MAX, 'clamped at the largest served window');
+    assert.deepEqual(fieldWindow({}), { halfDeg: 4, halfLon: 4 }, 'no size yet ⇒ square');
+    // The plan honours a separate longitude half-width; rows are the latitude window's.
+    const sq = fieldPlan(man, { lat: 40, lon: -105, halfDeg: 3 });
+    const wide = fieldPlan(man, { lat: 40, lon: -105, halfDeg: 3, halfLon: 6 });
+    assert.deepEqual(wide.rows, sq.rows);
+    assert.ok(wide.nCols > sq.nCols && wide.lonW < sq.lonW);
+    assert.equal(wide.lonW, -111);
+    // A square window's URL is unchanged (CDN keys and old callers); a wide one says so.
+    assert.equal(fieldPath({ lat: 40.015, lon: -105.271, halfDeg: 4, halfLon: 4 }), '/api/climalytix/nwp-field?lat=40.00&lon=-105.25&half=4');
+    assert.equal(fieldPath({ lat: 40.015, lon: -105.271, halfDeg: 4, halfLon: 8 }), '/api/climalytix/nwp-field?lat=40.00&lon=-105.25&half=4&halfLon=8');
+    assert.equal(fieldPath({ lat: 40, lon: -105, halfDeg: 4, halfLon: 99 }).endsWith('&halfLon=8'), true, 'clamped');
 });
 
 ok('the wire keeps each var at its own precision: vertical velocity in mm/s, the rest at 0.1', () => {

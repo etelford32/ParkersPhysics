@@ -230,18 +230,46 @@ export function parseFieldVars(raw) {
     return list;
 }
 export const FIELD_HALF_DEG_MAX = 4;
+/** The longitude half-width may run to twice the latitude one (visual pass V2):
+ *  the map is ~2× wider in degrees of longitude than of latitude at mid-latitudes,
+ *  and a square window drew every fill as a narrow column. ±4° × ±8° = 33 × 65
+ *  nodes at 0.25° is the largest window served. */
+export const FIELD_HALF_LON_MAX = 8;
 const FIELD_SNAP_DEG = 0.25;
+/** Window half-widths snap to this (one CDN key per shape, not per pixel). */
+export const FIELD_WINDOW_SNAP_DEG = 0.5;
+
+/**
+ * The window to request for a map of `aspect` = width / height (CSS px)
+ * centred near latitude `lat`: the full ±FIELD_HALF_DEG_MAX in latitude and
+ * as much longitude as the map shows for it — the map is equirectangular
+ * true-scale at its centre, so a degree of longitude is cos φ of a degree of
+ * latitude on screen and the view spans aspect / cos φ more longitude than
+ * latitude. Snapped to FIELD_WINDOW_SNAP_DEG and clamped to [1, FIELD_HALF_LON_MAX].
+ * Returns { halfDeg, halfLon }.
+ */
+export function fieldWindow({ aspect, lat = 0 } = {}) {
+    const halfDeg = FIELD_HALF_DEG_MAX;
+    const c = Math.cos(Math.min(80, Math.abs(Number(lat) || 0)) * Math.PI / 180);
+    const r = Number.isFinite(aspect) && aspect > 0 ? aspect / c : 1;
+    const snapped = Math.round(r * halfDeg / FIELD_WINDOW_SNAP_DEG) * FIELD_WINDOW_SNAP_DEG;
+    return { halfDeg, halfLon: Math.min(FIELD_HALF_LON_MAX, Math.max(1, snapped)) };
+}
 
 /** The ONE path builder for /api/climalytix/nwp-field. The centre snaps to
- *  0.25° so everyone looking at the same place shares one CDN key. */
-export function fieldPath({ lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT, grid = '0p25', vars = null }) {
+ *  0.25° so everyone looking at the same place shares one CDN key. `halfLon`
+ *  (default: the same as `halfDeg`) is sent only when it differs, so a square
+ *  window's URL is unchanged. */
+export function fieldPath({ lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT, halfLon = null, grid = '0p25', vars = null }) {
     const q = parseSite({ lat, lon });
     if (q.error) throw new RangeError(q.error);
     const snap = (x) => Math.round(x / FIELD_SNAP_DEG) * FIELD_SNAP_DEG + 0;
     const h = Math.min(FIELD_HALF_DEG_MAX, Math.max(1, Number(halfDeg) || FIELD_HALF_DEG_DEFAULT));
+    const hl = halfLon == null ? h : Math.min(FIELD_HALF_LON_MAX, Math.max(1, Number(halfLon) || h));
     const v = vars == null ? null : parseFieldVars(Array.isArray(vars) ? vars.join(',') : vars);
     if (v?.error) throw new RangeError(v.error);
     return `/api/climalytix/nwp-field?lat=${snap(q.lat).toFixed(2)}&lon=${snap(q.lon).toFixed(2)}&half=${h}`
+        + (hl === h ? '' : `&halfLon=${hl}`)
         + (grid === '0p25' ? '' : `&grid=${grid}`)
         + (v && !(v.length === 1 && v[0] === 'tempC') ? `&vars=${v.join(',')}` : '');
 }
@@ -251,13 +279,14 @@ export function fieldPath({ lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT, grid = '
  * Returns { rows: [r…], cols: [canonical c…], latN, lonW, nRows, nCols,
  *           segments: [{ tr, tc, key, range: [start, end), outRow, outCol0, n }] }
  */
-export function fieldPlan(man, { lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT }) {
+export function fieldPlan(man, { lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT, halfLon = null }) {
     const h = Math.min(FIELD_HALF_DEG_MAX, Math.max(0.25, halfDeg));
+    const hl = halfLon == null ? h : Math.min(FIELD_HALF_LON_MAX, Math.max(0.25, halfLon));
     const rTop = Math.max(0, Math.ceil((man.lat0 - (lat + h)) / man.dlat - 1e-9));
     const rBot = Math.min(man.nj - 1, Math.floor((man.lat0 - (lat - h)) / man.dlat + 1e-9));
     const lonRel = (x) => x - man.lon0;                       // unwrapped, may be negative
-    const cW = Math.ceil(lonRel(lon - h) / man.dlon - 1e-9);
-    const cE = Math.floor(lonRel(lon + h) / man.dlon + 1e-9);
+    const cW = Math.ceil(lonRel(lon - hl) / man.dlon - 1e-9);
+    const cE = Math.floor(lonRel(lon + hl) / man.dlon + 1e-9);
     const rows = []; for (let r = rTop; r <= rBot; r++) rows.push(r);
     const unwrapped = []; for (let c = cW; c <= cE; c++) unwrapped.push(c);
     const cols = unwrapped.map((c) => ((c % man.ni) + man.ni) % man.ni);

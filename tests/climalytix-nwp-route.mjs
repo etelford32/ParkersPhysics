@@ -198,6 +198,9 @@ await ok('vars=uMs,vMs: both components from the SAME byte ranges, each landing 
     const missing = await call('lat=40.00&lon=-105.25&grid=1p00&vars=uMs,vMs', 'nwp-field');
     assert.equal(missing.body.fields, null, 'a run without the variable: no field, never a partial one');
     assert.match(missing.body.reasons[0], /no variable [uv]Ms/);
+    const wide = await call('lat=40.00&lon=-105.25&half=2&halfLon=3&grid=1p00', 'nwp-field');
+    assert.equal(wide.status, 200);
+    assert.ok(wide.body.nCols > wide.body.nRows, `a wide window is wider than tall: ${wide.body.nRows}×${wide.body.nCols} ${wide.body.reasons}`);
     const plain = await call('lat=40.00&lon=-105.25&half=3&grid=1p00', 'nwp-field');
     assert.equal(plain.body.fields, undefined, 'the default request keeps the original body');
 });
@@ -214,6 +217,8 @@ await ok('the field route degrades like the point route, and refuses a bad windo
     assert.match(b.body.reasons[0], /^tile_read_failed/);
     assert.equal(b.body.values, null, 'never a partial field');
     assert.equal((await call('lat=40&lon=-105&half=9', 'nwp-field')).status, 400);
+    assert.equal((await call('lat=40&lon=-105&half=4&halfLon=9', 'nwp-field')).status, 400, 'halfLon is bounded too');
+    assert.equal((await call('lat=40&lon=-105&half=4&halfLon=x', 'nwp-field')).status, 400);
     assert.equal((await call('lat=x&lon=0', 'nwp-field')).status, 400);
 });
 

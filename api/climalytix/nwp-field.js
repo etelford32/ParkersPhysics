@@ -24,7 +24,7 @@ import { jsonOk, jsonError } from '../_lib/responses.js';
 import { R2_CONFIGURED, mapLimit } from '../_lib/r2-archive.js';
 import { GRIDS, CACHE_TTL, CACHE_SWR, manifestFor, getRange } from '../_lib/climalytix-r2.js';
 import {
-    parseSite, parseFieldVars, fieldPlan, readField, fieldBody, degradedNwp, FIELD_HALF_DEG_DEFAULT, FIELD_HALF_DEG_MAX,
+    parseSite, parseFieldVars, fieldPlan, readField, fieldBody, degradedNwp, FIELD_HALF_DEG_DEFAULT, FIELD_HALF_DEG_MAX, FIELD_HALF_LON_MAX,
 } from '../../js/climalytix/point-tile.js';
 
 export const config = { runtime: 'edge' };
@@ -47,6 +47,11 @@ export default async function handler(req) {
     if (!Number.isFinite(half) || half < 0.5 || half > FIELD_HALF_DEG_MAX) {
         return jsonError('bad_request', `half must be 0.5–${FIELD_HALF_DEG_MAX} degrees`, { status: 400 });
     }
+    const halfLonRaw = url.searchParams.get('halfLon');
+    const halfLon = halfLonRaw == null ? half : Number(halfLonRaw);
+    if (!Number.isFinite(halfLon) || halfLon < 0.5 || halfLon > FIELD_HALF_LON_MAX) {
+        return jsonError('bad_request', `halfLon must be 0.5–${FIELD_HALF_LON_MAX} degrees`, { status: 400 });
+    }
     const vars = parseFieldVars(url.searchParams.get('vars'));
     if (vars.error) return jsonError('bad_request', vars.error, { status: 400 });
     const now = Date.now();
@@ -63,7 +68,7 @@ export default async function handler(req) {
     if (!man) return down('no_run_published');
 
     try {
-        const plan = fieldPlan(man, { lat: q.lat, lon: q.lon, halfDeg: half });
+        const plan = fieldPlan(man, { lat: q.lat, lon: q.lon, halfDeg: half, halfLon });
         const bodies = await mapLimit(plan.segments, FIELD_CONCURRENCY, (seg) => getRange(seg.key, seg.range));
         const [first, ...rest] = vars;
         const extra = vars.length > 1 || first !== 'tempC'

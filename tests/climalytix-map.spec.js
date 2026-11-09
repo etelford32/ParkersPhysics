@@ -28,6 +28,7 @@
  *   · phone width: no horizontal scroll, controls inside the map
  */
 import { test, expect } from '@playwright/test';
+import { fieldWindow } from '../js/climalytix/point-tile.js';
 import { installClimalytixMocks, baseTileColor } from './fixtures/climalytix-mocks.mjs';
 
 const BOULDER = { lat: 40.015, lon: -105.271, city: 'Boulder, CO' };
@@ -94,7 +95,10 @@ test('the map is at the top, the layer rail is left of it, the controls are in i
 test('Temperature draws the heat field; NEGATIVE CONTROL: toggled off the site pixel is the basemap', async ({ page }) => {
     const errors = await boot(page);
     const s = await mapState(page);
-    expect(s.field).toMatchObject({ nRows: 25, nCols: 25 });
+    // V2: the window is fitted to the stage — ±4° of latitude and the longitude the view shows.
+    const win = fieldWindow({ aspect: s.size.w / s.size.h, lat: BOULDER.lat });
+    expect(win.halfLon).toBeGreaterThan(win.halfDeg);
+    expect(s.field).toMatchObject({ nRows: 8 * win.halfDeg + 1, nCols: 8 * win.halfLon + 1 });
     expect(s.frame.range.max).toBeGreaterThan(s.frame.range.min);
     await expect(page.locator('#cx-heat-status')).toContainText('Valid');
     // A point inside the field, away from the site marker.

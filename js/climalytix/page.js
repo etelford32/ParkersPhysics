@@ -26,6 +26,7 @@ import {
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
 import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField, loadUpdraftField, loadConvectionField } from './loaders.js';
+import { fieldWindow } from './point-tile.js';
 import { capePaint, CAPE_MIN_JKG, CAPE_FULL_JKG, OUTLOOK_COLORS, TRIGGER_MIN_MS, CIN_WEAK_JKG } from './convection.js';
 import { updraftPaint, W_FULL_MS } from './updraft.js';
 import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
@@ -166,7 +167,7 @@ function loadMapField(site, signal) {
     S.map?.setSite(site);
     S.field = { state: 'loading', body: null, note: 'Loading the temperature field…' };
     S.map?.setField('loading', null, S.field.note);
-    loadField(site, { signal }).then((r) => {
+    loadField(site, { signal, win: fieldWin(site) }).then((r) => {
         if (signal.aborted || S.site !== site) return;
         S.field = r;
         S.map?.setField(r.state, r.body, r.note);
@@ -193,10 +194,21 @@ function loadMapField(site, signal) {
     S.convectionSite = null;
     requestConvection();
     renderRose();
-    loadWindField(site, { signal }).then((r) => {
+    loadWindField(site, { signal, win: fieldWin(site) }).then((r) => {
         if (signal.aborted || S.site !== site) return;
         S.map?.setWind(r.state, r.body, r.note);
     });
+}
+
+/**
+ * The GFS field window for this map (visual pass V2): the full latitude
+ * half-width and as much longitude as the stage shows for it, so a fill
+ * covers the map instead of a narrow column (point-tile.js fieldWindow).
+ * Before the stage has a size, the old square ±4° window.
+ */
+function fieldWin(site) {
+    const sz = S.map?.state?.size;
+    return sz?.w > 0 && sz?.h > 0 ? fieldWindow({ aspect: sz.w / sz.h, lat: site.lat }) : null;
 }
 
 /**
@@ -208,7 +220,7 @@ function requestSlopeForcing() {
     const site = S.site;
     S.slopeSite = site;
     S.map.setSlopeForcing('loading', null, 'Loading the cloud field…', false);
-    loadSlopeForcing(site).then((r) => {
+    loadSlopeForcing(site, { win: fieldWin(site) }).then((r) => {
         if (S.site !== site) return;
         S.map.setSlopeForcing(r.state, r.body, r.note, r.cloud);
     });
@@ -220,7 +232,7 @@ function requestThermals() {
     const site = S.site;
     S.thermalSite = site;
     S.map.setThermals('loading', null, '');
-    loadThermalField(site).then((r) => {
+    loadThermalField(site, { win: fieldWin(site) }).then((r) => {
         if (S.site !== site) return;
         S.map.setThermals(r.state, r.body, r.note);
     });
@@ -232,7 +244,7 @@ function requestUpdraft() {
     const site = S.site;
     S.updraftSite = site;
     S.map.setUpdraft('loading', null, '');
-    loadUpdraftField(site).then((r) => {
+    loadUpdraftField(site, { win: fieldWin(site) }).then((r) => {
         if (S.site !== site) return;
         S.map.setUpdraft(r.state, r.body, r.note);
     });
@@ -244,7 +256,7 @@ function requestConvection() {
     const site = S.site;
     S.convectionSite = site;
     S.map.setConvection('loading', null, '');
-    loadConvectionField(site).then((r) => {
+    loadConvectionField(site, { win: fieldWin(site) }).then((r) => {
         if (S.site !== site) return;
         S.map.setConvection(r.state, r.body, r.note);
     });

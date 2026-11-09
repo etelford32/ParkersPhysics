@@ -123,9 +123,9 @@ export const LOADERS = Object.freeze({
  * The heat-map field around the site, from our archive ONLY. Resolves to
  * { state: 'live'|'stale'|'down', body, note } and never rejects.
  */
-export async function loadField(site, { signal } = {}) {
+export async function loadField(site, { signal, win = null } = {}) {
     try {
-        const j = await getJson(fieldPath(site), signal);
+        const j = await getJson(fieldPath({ ...site, ...(win || {}) }), signal);
         if (!j?.values) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             return { state: 'down', body: null, note: `No heat map: ${why}. Nothing is substituted for our archive.` };
@@ -142,10 +142,10 @@ export async function loadField(site, { signal } = {}) {
  * Same window and route as the heat field, `vars=uMs,vMs`; nothing stands in
  * for it. Resolves { state, body: { …grid, u, v } | null, note }.
  */
-export async function loadWindField(site, { signal } = {}) {
+export async function loadWindField(site, { signal, win = null } = {}) {
     try {
         // The widest window the route serves: the flow needs room to move.
-        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars: ['uMs', 'vMs'] }), signal);
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, ...(win || {}), vars: ['uMs', 'vMs'] }), signal);
         if (!j?.fields?.uMs || !j?.fields?.vMs) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             return { state: 'down', body: null, note: `No airflow: ${why}. Nothing is substituted for our archive.` };
@@ -167,9 +167,9 @@ export async function loadWindField(site, { signal } = {}) {
  * is the UPPER bound on both upslope and downslope flow, and the note says so.
  * Resolves { state, body | null, cloud: bool, note }.
  */
-export async function loadSlopeForcing(site, { signal } = {}) {
+export async function loadSlopeForcing(site, { signal, win = null } = {}) {
     try {
-        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars: ['cloudPct', 'tempC'] }), signal);
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, ...(win || {}), vars: ['cloudPct', 'tempC'] }), signal);
         if (!j?.fields?.cloudPct) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             return { state: 'partial', body: null, cloud: false,
@@ -193,10 +193,10 @@ export async function loadSlopeForcing(site, { signal } = {}) {
  * only. A run ingested before these fields existed answers "no variable …";
  * the note says so and nothing is drawn (there is no stand-in for a flux).
  */
-export async function loadThermalField(site, { signal } = {}) {
+export async function loadThermalField(site, { signal, win = null } = {}) {
     const vars = ['shflxWm2', 'hpblM', 'psfcHpa', 'tempC', 'dewC'];
     try {
-        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars }), signal);
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, ...(win || {}), vars }), signal);
         if (!vars.every((v) => j?.fields?.[v])) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             const old = (j?.reasons || []).some((r) => /no variable/.test(String(r)));
@@ -216,10 +216,10 @@ export async function loadThermalField(site, { signal } = {}) {
  * plus the station pressure (the below-ground mask) and 2 m temperature (each
  * level's height above the ground) — fetched on FIRST enable only.
  */
-export async function loadUpdraftField(site, { signal } = {}) {
+export async function loadUpdraftField(site, { signal, win = null } = {}) {
     const vars = ['wMs850', 'wMs700', 'wMs500', 'psfcHpa', 'tempC'];
     try {
-        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars }), signal);
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, ...(win || {}), vars }), signal);
         if (!vars.every((v) => j?.fields?.[v])) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             const old = (j?.reasons || []).some((r) => /no variable/.test(String(r)));
@@ -240,10 +240,10 @@ export async function loadUpdraftField(site, { signal } = {}) {
  * whether thermals reach the lid — one fetch, on FIRST enable only.
  */
 export const CONVECTION_VARS = Object.freeze(['capeJkg', 'cinJkg', 'liK', 'shflxWm2', 'hpblM', 'psfcHpa', 'tempC', 'dewC']);
-export async function loadConvectionField(site, { signal } = {}) {
+export async function loadConvectionField(site, { signal, win = null } = {}) {
     const vars = CONVECTION_VARS;
     try {
-        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars }), signal);
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, ...(win || {}), vars }), signal);
         if (!vars.every((v) => j?.fields?.[v])) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             const old = (j?.reasons || []).some((r) => /no variable/.test(String(r)));
