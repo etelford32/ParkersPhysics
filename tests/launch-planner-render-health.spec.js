@@ -95,12 +95,20 @@ async function waitForStage(page, log, budgetMs = 150_000) {
                 canvas: !!document.getElementById('lh-vehicle-canvas'),
                 api: !!window.__lpVehicle3d,
                 health: window.__lpVehicle3d?.renderHealth?.state ?? null,
+                // Can this engine make ANY WebGL context here? Without one the
+                // page drops its canvas and the stage can never come up.
+                webgl: (() => { try { const c = document.createElement('canvas');
+                    return c.getContext('webgl2') ? 2 : c.getContext('webgl') ? 1 : 0; } catch (_) { return 0; } })(),
             })).catch((e) => ({ error: String(e).slice(0, 200) })),
             new Promise((z) => setTimeout(() => z({ unresponsive: true }), 8_000)),
         ]);
         const s = JSON.stringify(r);
         if (s !== last) { log(`probe ${s}`); last = s; }
         if (r.health) return;
+        if (r.webgl === 0) {
+            throw new Error('this browser has NO WebGL context here, so the page has no stage to test '
+                + '(fix the browser launch configuration, not the page); probe ' + s);
+        }
         await new Promise((z) => setTimeout(z, 2_000));
     }
     throw new Error(`stage never came up in ${budgetMs / 1000} s; last probe ${last}`);

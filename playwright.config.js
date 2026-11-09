@@ -29,7 +29,15 @@ export default defineConfig({
         // a WebGL + post-processing failure that reached users while the
         // Chromium suite was green), so it alone also runs on Firefox and
         // WebKit. See .github/workflows/launch-planner-visuals.yml.
-        { name: 'firefox-visual', use: { browserName: 'firefox' }, testMatch: /launch-planner-render-health\.spec\.js/ },
+        // Firefox's GPU blocklist refuses a CI runner's software GL ("Exhausted
+        // GL driver options", "AllowWebgl2:false"): with no WebGL the page drops
+        // its canvas and every test here waited out its budget. Force WebGL on
+        // so Firefox uses the runner's Mesa software rasteriser, the way
+        // Chromium uses SwiftShader.
+        { name: 'firefox-visual', testMatch: /launch-planner-render-health\.spec\.js/,
+          use: { browserName: 'firefox', launchOptions: { firefoxUserPrefs: {
+              'webgl.force-enabled': true, 'webgl.disabled': false, 'webgl.enable-webgl2': true,
+          } } } },
         { name: 'webkit-visual',  use: { browserName: 'webkit'  }, testMatch: /launch-planner-render-health\.spec\.js/ },
     ],
     webServer: {

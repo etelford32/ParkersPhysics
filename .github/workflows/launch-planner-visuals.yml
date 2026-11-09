@@ -95,6 +95,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.project == 'firefox-visual' && 'firefox' || 'webkit' }}
+      # Firefox draws WebGL through the system's EGL/Mesa (llvmpipe on a
+      # GPU-less runner); playwright.config.js forces WebGL past Firefox's
+      # blocklist, and these are the drivers it then needs.
+      - if: matrix.project == 'firefox-visual'
+        run: sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri libgles2
       - name: Render-health gate (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.of }})
         run: >
           npx playwright test --project=${{ matrix.project }} --trace off --reporter=list
