@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-09T17:39:48.473Z",
+  "generatedAt": "2026-11-09T17:44:44.876Z",
   "slides": [
     {
       "id": "earth",
@@ -45,17 +45,31 @@
       }
     },
     {
+      "id": "upper-atmosphere",
+      "poster": "assets/home/showcase/upper-atmosphere.jpg",
+      "clip": "assets/home/showcase/upper-atmosphere.webm",
+      "width": 1222,
+      "height": 1020,
+      "source": "/upper-atmosphere.html",
+      "capturedAt": "2026-11-09T17:41:45.900Z",
+      "renderer": "swiftshader",
+      "bytes": {
+        "poster": 183653,
+        "clip": 349532
+      }
+    },
+    {
       "id": "ring-current",
       "poster": "assets/home/showcase/ring-current.jpg",
       "clip": "assets/home/showcase/ring-current.webm",
-      "width": 1212,
-      "height": 666,
+      "width": 1532,
+      "height": 888,
       "source": "/ring-current.html",
-      "capturedAt": "2026-09-06T20:27:23.960Z",
+      "capturedAt": "2026-11-09T17:42:45.497Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 52167,
-        "clip": 528739
+        "poster": 68644,
+        "clip": 306750
       }
     },
     {
@@ -65,11 +79,11 @@
       "width": 1284,
       "height": 560,
       "source": "/tiga.html",
-      "capturedAt": "2026-11-09T17:30:54.269Z",
+      "capturedAt": "2026-11-09T17:43:23.760Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 40344,
-        "clip": 477
+        "poster": 30917,
+        "clip": 200801
       }
     },
     {
@@ -79,11 +93,11 @@
       "width": 1042,
       "height": 650,
       "source": "/launch-planner.html?lpfx=low",
-      "capturedAt": "2026-11-09T17:32:34.630Z",
+      "capturedAt": "2026-11-09T17:44:43.992Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 79735,
-        "clip": 467
+        "poster": 79802,
+        "clip": 431551
       }
     },
     {
