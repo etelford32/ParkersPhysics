@@ -95,18 +95,25 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.project == 'firefox-visual' && 'firefox' || 'webkit' }}
-      # Firefox draws WebGL through the system's EGL/Mesa (llvmpipe on a
-      # GPU-less runner); playwright.config.js forces WebGL past Firefox's
-      # blocklist, and these are the drivers it then needs.
+      # HEADLESS Firefox has no display to open a native GL context on, so it
+      # had no WebGL at all here ("tryNativeGL", "Exhausted GL driver
+      # options"). It runs HEADED under Xvfb instead (PW_FIREFOX_XVFB below),
+      # drawing through GLX on Mesa's llvmpipe; these are the X server and
+      # the GL drivers that needs. playwright.config.js forces WebGL past
+      # Firefox's blocklist.
       - if: matrix.project == 'firefox-visual'
-        run: sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri libgles2
+        run: sudo apt-get install -y --no-install-recommends xvfb xauth libegl1 libgl1-mesa-dri libgles2 libglx-mesa0
       - name: Render-health gate (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.of }})
+        # Firefox: headed inside Xvfb at 24-bit depth (xvfb-run's default
+        # 8-bit screen has no GLX visual a GL context can use).
         run: >
+          ${{ matrix.project == 'firefox-visual' && 'xvfb-run -a -s "-screen 0 1920x1080x24"' || '' }}
           npx playwright test --project=${{ matrix.project }} --trace off --reporter=list
           --workers=1 --shard=${{ matrix.shard }}/${{ matrix.of }}
           tests/launch-planner-render-health.spec.js
         env:
           CI: 'true'
+          PW_FIREFOX_XVFB: ${{ matrix.project == 'firefox-visual' && '1' || '0' }}
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
