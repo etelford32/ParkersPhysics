@@ -24,10 +24,13 @@
  *        'old'              our archive serves a 40-hour-old run (freshness:'stale')
  *   gibs: 'down'            every GIBS tile 404s (the map still draws the heat + site)
  *   nwp: 'nowind'           the field route has temperature but no wind (airflow says why)
+ *   aq: 'down'              the air-quality field route answers 200 + expired (no field)
+ *   monitors: 'down'        the AirNow stations route answers 503
  *   earth: 'blocked'        the self-hosted Blue Marble underlay (assets/earth/day-*) 404s
  */
 import { labFixture } from './climate-lab-fixtures.mjs';
 import { normalizeArchive, degradedArchive, parseArchiveQuery } from '../../js/climalytix/archive-request.js';
+import { aqGrid, aqFieldBody, degradedAq, AQ_VARS } from '../../js/climalytix/aq-field.js';
 import { siteBody, degradedNwp, parseSite, fieldPlan, fieldBody, SCHEMA } from '../../js/climalytix/point-tile.js';
 import { deflateSync } from 'node:zlib';
 
@@ -181,7 +184,59 @@ export function nwpFixture(nowMs, site, { ageH = 7 } = {}) {
     return siteBody(man, { nodeLat: Math.ceil(site.lat * 4) / 4, nodeLon: Math.floor(site.lon * 4) / 4 + 360 }, v, { ...site, nowMs });
 }
 
-export async function installClimalytixMocks(page, { down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', onTile, onRequest } = {}) {
+/**
+ * Closed-form PM2.5 for the mock air-quality field: a background that is
+ * DIRTY when the mock site wind (nwpFixture) blows from the north (v < 0) and
+ * clean from the south, plus a LINEAR spatial gradient — bilinear on the
+ * 0.5° nodes reproduces a linear field exactly, so the model at any monitor
+ * is known in closed form.
+ */
+export function mockPm25(lat, lon, ms, site) {
+    const H = 3_600_000;
+    const v = 4 * Math.cos(2 * Math.PI * ms / (50 * H));
+    // The gradient is anchored at a FIXED point (40°N 105°W), not the site:
+    // the field route sees the snapped centre and the stations route the
+    // page's site, and both must describe the same air.
+    void site;
+    return 8 + 12 * Math.max(0, -v / 4) + 0.6 * (lat - 40) - 0.4 * (lon + 105);
+}
+/** Mock monitors read this much ABOVE the model (so model − measured = −2). */
+export const MOCK_MONITOR_EXCESS = 2;
+
+export function aqFieldFixture(nowMs, site) {
+    const H = 3_600_000;
+    const grid = aqGrid(site.lat, site.lon);
+    const t0 = Math.floor(nowMs / 86_400_000) * 86_400_000 - 86_400_000;
+    const hours = Array.from({ length: 24 * 6 }, (_, k) => t0 + k * H);
+    const locs = grid.lats.map((lat, p) => {
+        const lonC = grid.lonW + (p % grid.nCols) * grid.dlon;          // continuous with the site
+        const hourly = { time: hours.map((ms) => ms / 1000) };
+        for (const v of AQ_VARS) hourly[v.om] = hours.map((ms) => (v.id === 'pm25' ? +mockPm25(lat, lonC, ms, site).toFixed(3) : 1));
+        return { latitude: lat, longitude: grid.lons[p], hourly };
+    });
+    return aqFieldBody(grid, locs, { nowMs, site });
+}
+
+/** AirNow-shaped stations answer: six monitors around the site at the requested hour. */
+export function stationsFixture(nowMs, site, atMs) {
+    const H = 3_600_000;
+    const hour = Math.floor(atMs / H) * H;
+    if (hour > nowMs) return { available: false, reason: 'observations_not_forecasts' };
+    const offsets = [[0.3, 0.4], [-0.6, 0.2], [1.1, -0.9], [-1.4, -1.2], [0.8, 1.6], [-0.2, -2.1]];
+    return {
+        available: true, count: offsets.length,
+        frame: {
+            validAt: new Date(hour).toISOString(),
+            points: offsets.map(([dLat, dLon], k) => {
+                const lat = site.lat + dLat, lon = site.lon + dLon;
+                return { id: `M${k}`, name: `Monitor ${k}`, lat, lon,
+                         pm25: +(mockPm25(lat, lon, hour, site) + MOCK_MONITOR_EXCESS).toFixed(3), units: { pm25: 'UG/M3' } };
+            }),
+        },
+    };
+}
+
+export async function installClimalytixMocks(page, { down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
@@ -220,6 +275,16 @@ export async function installClimalytixMocks(page, { down = null, archiveExpired
             if (p === '/api/noaa/ap-history') {
                 if (isDown('geomag')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });
                 return route.fulfill({ json: apHistoryFixture(now) });
+            }
+            if (p === '/api/climalytix/aq-field') {
+                const q = parseSite(Object.fromEntries(url.searchParams));
+                if (aq === 'down') return route.fulfill({ json: degradedAq(q, 'upstream_failed: upstream HTTP 503', now) });
+                return route.fulfill({ json: aqFieldFixture(now, q) });
+            }
+            if (p === '/api/air-quality/stations') {
+                if (monitors === 'down') return route.fulfill({ status: 503, json: { error: 'upstream_unavailable', message: 'AirNow HTTP 503' } });
+                const site = { lat: Number(url.searchParams.get('lat')), lon: Number(url.searchParams.get('lon')) };
+                return route.fulfill({ json: stationsFixture(now, site, Date.parse(url.searchParams.get('at'))) });
             }
             if (p.startsWith('/api/')) return route.abort();
             if (earth === 'blocked' && p.startsWith('/assets/earth/day-')) return route.fulfill({ status: 404, body: 'not found' });

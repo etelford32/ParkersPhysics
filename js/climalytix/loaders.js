@@ -20,6 +20,7 @@ import {
 } from './catalog.js';
 import { archivePath } from './archive-request.js';
 import { nwpPath, fieldPath } from './point-tile.js';
+import { aqPath } from './aq-field.js';
 import { fetchLabStation } from '../climate-lab/lab-feed.js';
 
 const TIMEOUT_MS = 25_000;
@@ -156,6 +157,50 @@ export async function loadWindField(site, { signal } = {}) {
         };
     } catch (e) {
         return { state: 'down', body: null, note: `No airflow: ${e?.message || 'unreachable'}.` };
+    }
+}
+
+/**
+ * The CAMS air-quality field around the site (BOOTSTRAP source — Open-Meteo's
+ * free tier; the page badges it). Resolves { state, body | null, note }.
+ */
+export async function loadAqField(site, { signal } = {}) {
+    try {
+        const j = await getJson(aqPath(site), signal);
+        if (!j?.fields?.pm25) {
+            const why = (j?.reasons || []).join(', ') || 'unavailable';
+            return { state: 'down', body: null, note: `No air-quality field: ${why}.` };
+        }
+        return { state: 'live', body: j, note: 'CAMS global model via Open-Meteo (bootstrap source), 3-hourly, 0.5° window' };
+    } catch (e) {
+        return { state: 'down', body: null, note: `No air-quality field: ${e?.message || 'unreachable'}.` };
+    }
+}
+
+/**
+ * EPA AirNow monitors for one hour around the site (the site's existing
+ * /api/air-quality/stations route). Observations exist only for past hours.
+ * Resolves { state, monitors: [{ id, name, lat, lon, pm25, validMs }], note }.
+ */
+export async function loadMonitors(site, atMs, { signal } = {}) {
+    try {
+        const url = `/api/air-quality/stations?at=${new Date(atMs).toISOString()}&lat=${site.lat.toFixed(2)}&lon=${site.lon.toFixed(2)}&span=10`;
+        const r = await fetch(url, { signal });
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j) return { state: 'down', monitors: [], note: `Monitors unavailable (${j?.message || `HTTP ${r.status}`}).` };
+        if (j.available === false) {
+            return { state: 'none', monitors: [], note: j.reason === 'observations_not_forecasts'
+                ? 'Monitors report the past only — none for a forecast hour.' : 'No monitor hour this far back.' };
+        }
+        const validMs = Date.parse(j.frame?.validAt);
+        const monitors = (j.frame?.points || [])
+            .filter((p) => Number.isFinite(p.pm25) && /UG\/M3/i.test(p.units?.pm25 || 'UG/M3'))
+            .map((p) => ({ id: p.id, name: p.name, lat: p.lat, lon: p.lon, pm25: p.pm25, validMs }));
+        return { state: monitors.length ? 'live' : 'none', monitors,
+                 note: monitors.length ? `EPA AirNow, ${new Date(validMs).toISOString().slice(11, 16)} UTC (preliminary)`
+                                       : 'No AirNow PM2.5 monitors in this window (AirNow covers North America).' };
+    } catch (e) {
+        return { state: 'down', monitors: [], note: `Monitors unavailable (${e?.message || 'unreachable'}).` };
     }
 }
 

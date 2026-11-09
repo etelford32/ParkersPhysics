@@ -34,6 +34,13 @@
  *             flow and the rail says why. The animation runs only while the
  *             layer is on, the field covers the shown time and the stage is
  *             on screen (IntersectionObserver).
+ *   air       the CAMS PM2.5 field (aq-field.js, PURE; a BOOTSTRAP source and
+ *             badged so) drawn like temperature — the concentration is
+ *             interpolated, THEN coloured by its EPA category — and EPA
+ *             AirNow MONITORS on top, each compared with the model at its
+ *             own place and the nearest field instant (model − monitor).
+ *             The page makes Temperature and Air quality one-at-a-time: two
+ *             full-window fields on one map read as neither.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -53,6 +60,8 @@ import { UNDERLAY_TIERS, RELIEF_SRC, underlayTier, underlayRects, hillshade, cit
 import { MAJOR_CITIES } from '../data/major-cities.js';
 import { createFlow, streamlines, windAt, fieldBox, fromDirection, compressionFor, compressionLabel, SECTOR_NAMES_16 } from './airflow.js';
 import { windColor } from '../wind-palette.js';
+import { pm25Paint, pm25Aqi, residuals, residualSummary } from './aq-field.js';
+import { categoryForAqi } from '../aqi-scale.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
@@ -80,13 +89,15 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true }, heatAlpha: HEAT_ALPHA_DEFAULT,
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true },
+        aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
         tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null,
         underlay: new Map(), relief: { state: 'idle', canvas: null, ms: null },
         wind: null, windState: 'loading', windNote: '',
         flow: null, flowKey: '', flowRaf: 0, flowLast: 0, flowDirty: true, flowFrames: 0, onScreen: true,
         drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
-                 airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 } },
+                 airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 },
+                 aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null } },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -279,6 +290,94 @@ export function mountMap(root, deps) {
         M.drawn.t = t;
         if (M.layers.isotherms) drawIsotherms(t, shift);
         if (M.layers.extremes) drawExtremes(t, shift);
+    }
+
+    // ── Air quality (CAMS PM2.5 field + AirNow monitors) ───────────────────
+    function aqTimeIndex() {
+        const f = M.aq;
+        if (!f?.values) return null;
+        const want = M.timeMs ?? Date.now();
+        return fieldTimeIndex(f.times, want) ?? (M.timeMs == null ? null : fieldTimeIndex(f.times, Date.now()));
+    }
+
+    let aqCache = { key: '', canvas: null };
+    function aqCanvasFor(t) {
+        const f = M.aq, v = M.view;
+        const key = `${f.fetchedMs}|${t}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}`;
+        if (aqCache.key !== key) {
+            const img = heatImage(f, t, v, M.w, M.h, null, { step: HEAT_STEP_PX, paint: pm25Paint });
+            const c = aqCache.canvas || document.createElement('canvas');
+            c.width = img.cw; c.height = img.ch;
+            c.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+            aqCache = { key, canvas: c };
+        }
+        return aqCache.canvas;
+    }
+
+    function drawAq() {
+        M.drawn.aq = false; M.drawn.aqT = null;
+        if (!M.layers.airquality || !M.aq?.values) return;
+        const t = aqTimeIndex();
+        if (t == null) return;
+        const f = M.aq;
+        ctx.save();
+        ctx.globalAlpha = M.heatAlpha;
+        // Category colours are FLAT bands: smoothing the half-res image would
+        // blend two categories into a colour neither has.
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(aqCanvasFor(t), 0, 0, M.w, M.h);
+        ctx.restore();
+        dashedBox({ west: f.lonW, east: f.lonW + (f.nCols - 1) * f.dlon, north: f.latN, south: f.latN - (f.nRows - 1) * f.dlat });
+        M.drawn.aq = true; M.drawn.aqT = t;
+    }
+
+    function monitorRows() {
+        return residuals(M.monitors, M.aq?.times || [], (t, lat, lon) => fieldSample(M.aq, t, lat, lon));
+    }
+
+    function drawMonitors() {
+        M.drawn.monitors = { n: 0, compared: 0, bias: null, mae: null };
+        if (!M.layers.airquality || !M.layers.monitors || !M.monitors.length) return;
+        const rows = monitorRows();
+        ctx.save();
+        let n = 0;
+        for (const r of rows) {
+            if (!Number.isFinite(r.pm25)) continue;
+            const p = geoToPx(M.view, M.w, M.h, r.lat, r.lon);
+            if (p.x < -6 || p.y < -6 || p.x > M.w + 6 || p.y > M.h + 6) continue;
+            const cat = categoryForAqi(pm25Aqi(r.pm25));
+            ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+            ctx.fillStyle = cat ? `rgb(${cat.rgb.map((c) => Math.round(c * 255)).join(',')})` : '#888';
+            ctx.fill();
+            ctx.lineWidth = 2; ctx.strokeStyle = '#04111f'; ctx.stroke();
+            ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+            ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(244,248,251,.9)'; ctx.stroke();
+            n++;
+        }
+        ctx.restore();
+        const sum = residualSummary(rows);
+        M.drawn.monitors = { n, compared: sum.n, bias: sum.bias, mae: sum.mae };
+    }
+
+    function monitorNear(x, y) {
+        if (!M.layers.airquality || !M.layers.monitors) return null;
+        let best = null, bd = 12;
+        for (const r of monitorRows()) {
+            if (!Number.isFinite(r.pm25)) continue;
+            const p = geoToPx(M.view, M.w, M.h, r.lat, r.lon);
+            const d = Math.hypot(p.x - x, p.y - y);
+            if (d < bd) { bd = d; best = r; }
+        }
+        return best;
+    }
+
+    function aqInfo() {
+        const t = aqTimeIndex();
+        const sum = M.monitors.length ? residualSummary(monitorRows()) : { n: 0, bias: null, mae: null };
+        return { state: M.aqState, note: M.aqNote, t, timeMs: t == null ? null : M.aq.times[t],
+                 range: t == null ? null : fieldRange(M.aq, t), monState: M.monState, monNote: M.monNote,
+                 monitors: M.monitors.length, compared: sum.n, bias: sum.bias, mae: sum.mae,
+                 monitorsAt: M.monitors[0]?.validMs ?? null };
     }
 
     /** The data window: where a field ends is drawn, not implied. Returns its 360° shift. */
@@ -536,14 +635,17 @@ export function mountMap(root, deps) {
         M.drawn.tiles = drawTileLayer(BASE, plan);
         M.drawn.terrain = drawTerrain();
         drawHeat();
-        if (!M.drawn.heat && flowWanted()) dashedBox(fieldBox(M.wind));
+        drawAq();
+        if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
         M.drawn.labels = drawLabels();
+        drawMonitors();
         drawSite();
         const sb = scaleBar(M.view, M.h, 110);
         scaleEl.querySelector('i').style.width = `${sb.px.toFixed(1)}px`;
         scaleEl.querySelector('span').textContent = sb.label;
         updateTip();
         deps.onFrame?.(frameInfo());
+        deps.onAq?.(aqInfo());
     }
 
     function requestDraw() {
@@ -594,9 +696,21 @@ export function mountMap(root, deps) {
         const tw = windTimeIndex();
         const w = M.layers.airflow && tw != null ? windAt(M.wind, tw, g.lat, g.lon) : null;
         const ll = `${Math.abs(g.lat).toFixed(2)}°${g.lat >= 0 ? 'N' : 'S'} ${Math.abs(((g.lon + 540) % 360) - 180).toFixed(2)}°${((g.lon + 540) % 360) - 180 >= 0 ? 'E' : 'W'}`;
+        const ta = M.layers.airquality ? aqTimeIndex() : null;
+        const pm = ta == null ? null : fieldSample(M.aq, ta, g.lat, g.lon);
+        const mon = monitorNear(M.hover.x, M.hover.y);
+        if (mon) {
+            const model = mon.model == null ? 'no model hour within 1.5 h' : `model ${mon.model.toFixed(1)} (${mon.diff >= 0 ? '+' : ''}${mon.diff})`;
+            tip.textContent = `${mon.name}: PM2.5 ${mon.pm25.toFixed(1)} µg/m³ measured · ${model}`;
+            tip.hidden = false;
+            const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
+            tip.style.transform = `translate(${Math.max(4, x)}px, ${M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14}px)`;
+            return;
+        }
+        const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        tip.textContent = [v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
+        tip.textContent = [aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -708,6 +822,17 @@ export function mountMap(root, deps) {
             for (let k = 3; k < d.length; k += 4) if (d[k] > 8) n++;
             return n / (d.length / 4);
         },
+        setAq(state, body, note) {
+            M.aqState = state; M.aq = body?.values ? body : null; M.aqNote = note || '';
+            aqCache = { key: '', canvas: null };
+            requestDraw();
+        },
+        setMonitors(state, list, note) {
+            M.monState = state; M.monitors = Array.isArray(list) ? list : []; M.monNote = note || '';
+            requestDraw();
+        },
+        /** The AQ field's instant on show (the page fetches monitors for it). */
+        aqTimeMs() { const t = aqTimeIndex(); return t == null ? null : M.aq.times[t]; },
         setWind(state, body, note) {
             M.windState = state; M.wind = body?.u ? body : null; M.windNote = note || '';
             M.flowKey = '';
@@ -730,6 +855,7 @@ export function mountMap(root, deps) {
                 fieldState: M.fieldState, drawn: { ...M.drawn }, frame: frameInfo(),
                 relief: { state: M.relief.state, ms: M.relief.ms },
                 wind: windInfo(),
+                aq: aqInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

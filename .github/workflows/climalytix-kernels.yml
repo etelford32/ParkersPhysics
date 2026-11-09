@@ -29,6 +29,10 @@
 #   climalytix-airflow.mjs   the airflow layer: FROM-direction sign trap, metres
 #                            with cos φ (NEGATIVE CONTROL without), particles stay
 #                            in the data box, streamlines on a vortex, the rose
+#   climalytix-aq-field.mjs  the air-quality field: grid + one URL under the 414
+#                            ceiling, hours matched BY INSTANT (reversed-hours
+#                            NEGATIVE CONTROL), gaps null, EPA category colours,
+#                            monitor residuals, the route's 200+expired paths
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
@@ -111,6 +115,8 @@ jobs:
         run: node tests/climalytix-basemap.mjs
       - name: airflow (particles, streamlines, wind rose)
         run: node tests/climalytix-airflow.mjs
+      - name: air-quality field + route (upstream stubbed)
+        run: node tests/climalytix-aq-field.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)

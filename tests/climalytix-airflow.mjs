@@ -21,7 +21,7 @@
 import assert from 'node:assert/strict';
 import {
     windAt, displace, fromDirection, createFlow, streamlines, windRose, prevailing, fieldBox,
-    speed01, compressionFor, compressionLabel, FLOW_COMPRESSION, FLOW_COMPRESSIONS, FLOW_TARGET_PX_S, CALM_MS,
+    speed01, pollutionRose, compressionFor, compressionLabel, FLOW_COMPRESSION, FLOW_COMPRESSIONS, FLOW_TARGET_PX_S, CALM_MS,
 } from '../js/climalytix/airflow.js';
 
 let passed = 0;
@@ -179,6 +179,20 @@ ok('a flow REGION keeps every particle inside both the region and the data box',
         }
     }
     assert.equal(createFlow(f, { region: { north: 10, south: 0, west: 0, east: 10 } }).particles.length, 0, 'no overlap: no particles');
+});
+
+ok('pollution rose: only hours with wind AND value; dirtiest/cleanest need ≥ 2 hours', () => {
+    // 3 NW hours dirty (30), 3 S hours clean (5), 1 E hour very dirty but alone, 2 hours with no PM.
+    const u = [3, 3, 3, 0, 0, 0, -4, 3, 0];
+    const v = [-3, -3, -3, 4, 4, 4, 0, -3, 4];
+    const pm = [30, 30, 30, 5, 5, 5, 90, null, null];
+    const r = pollutionRose(u, v, pm);
+    assert.equal(r.hours, 7);
+    assert.equal(r.n, 7, 'hours without a value are not counted at all');
+    assert.deepEqual(r.dirtiest, { name: 'NW', sector: 14, mean: 30, hours: 3 }, 'the lone 90 from the E is an anecdote');
+    assert.deepEqual(r.cleanest, { name: 'S', sector: 8, mean: 5, hours: 3 });
+    assert.equal(r.mean[4], 90, 'but its mean is still reported');
+    assert.equal(pollutionRose([1], [1], [null]), null);
 });
 
 console.log(`\n${passed} passed`);

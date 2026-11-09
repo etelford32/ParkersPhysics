@@ -299,6 +299,16 @@ export const PIPELINES = [
       warnAgeS: 30 * 3600, critAgeS: 54 * 3600,
       notes: 'Same archive and degradation rules as climalytix-nwp; our archive only — no third-party grid stands in for it.' },
 
+    { id: 'climalytix-aq-field', label: 'Climalytix air-quality field (CAMS, bootstrap)',
+      endpoint: '/api/climalytix/aq-field',
+      // Requires ?lat&lon. One Open-Meteo request of 289 locations through js/open-meteo-request.js.
+      probePath: '/api/climalytix/aq-field?lat=40.00&lon=-105.50',
+      probeTimeoutMs: 20_000,
+      category: 'weather', upstream: 'Copernicus CAMS global via Open-Meteo air-quality API (free tier — bootstrap)',
+      cadence_s: 3600, prewarm: null,
+      warnAgeS: 6 * 3600, critAgeS: 24 * 3600,
+      notes: 'BOOTSTRAP source for Climalytix (non-commercial free tier) until our own CAMS ingest replaces it. Upstream failure / short chunk / no values is 200 + freshness:expired + reasons with fields:null — never a partial field, never a 5xx.' },
+
     { id: 'polar-vortex',       label: 'Polar vortex',
       endpoint: '/api/weather/polar-vortex',
       category: 'atmosphere', upstream: 'Open-Meteo GFS @ 60°N',

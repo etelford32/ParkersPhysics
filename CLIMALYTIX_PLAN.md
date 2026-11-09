@@ -893,6 +893,32 @@ it prints. Known limit: the window is ±4°, so at the default zoom the flow is
 a band around the site with its dashed edge drawn — a wider window needs a
 strided field read (next).
 
+**Air quality (2026-11-09, step 2; `js/climalytix/aq-field.js` PURE +
+`/api/climalytix/aq-field`, `tests/climalytix-aq-field.mjs` +
+`tests/climalytix-aq.spec.js`):** surface PM2.5 / O₃ / NO₂ / dust / AOD from
+Copernicus CAMS global through Open-Meteo's FREE air-quality API — role
+`bootstrap`, badged on the page; the owner had not chosen between this and our
+own CAMS ingest, and this is the reversible path (the layer's contract does
+not change when our ingest replaces it). A 0.5° window (±4°, 289 locations,
+one request through the ONE chunker `js/open-meteo-request.js`), one day back
+and five ahead, on 3-hourly UTC instants (the GFS run's, so wind and PM2.5
+join BY INSTANT); hours matched per location by instant, gaps null, a short or
+failed fan-out is 200 + expired with no field. Drawn like temperature —
+interpolate the concentration, then colour by its EPA category
+(`js/aqi-scale.js`, the one palette) — with canvas smoothing OFF because
+category colours are flat bands. Colouring one model hour by the 24-hour AQI
+is an "AQI-equivalent" and the rail says so. Temperature and Air quality are
+one-at-a-time (two full fields read as neither). MONITORS are EPA AirNow via
+the site's existing `/api/air-quality/stations`, read at the latest hour no
+later than now (at "now" the nearest 3-hourly instant can be 90 min AHEAD —
+the first version asked for the future and got nothing), compared with the
+field at a field instant ≤ 1.5 h away: the rail prints n, bias and mean miss
+(model − measured); the hover names the monitor and both values. The
+POLLUTION ROSE (`pollutionRose`, airflow.js) joins the site's sampled PM2.5
+to the GFS wind by instant and names the dirtiest and cleanest FROM
+directions holding ≥ 2 hours. The route is registered
+(`climalytix-aq-field`). Rail explanations now fold into "About this layer".
+
 Next in P-1: GEFS members; ECMWF open data
 (IFS/AIFS, needs its own `.index` JSON sidecar planner); the ERA5 history
 backfill into the same format (time axis = decades, chunked across runs).

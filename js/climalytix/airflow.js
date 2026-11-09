@@ -275,3 +275,30 @@ export function prevailing(rose) {
     const deg = best * 360 / rose.sectors;
     return { name: rose.sectors === 16 ? SECTOR_NAMES_16[best] : `${deg}°`, deg, freq: rose.freq[best] };
 }
+
+/**
+ * The POLLUTION ROSE: only the hours where wind AND the value exist (aligned
+ * by instant beforehand), binned by FROM direction, with the mean value per
+ * sector. `dirtiest`/`cleanest` are the sectors with the highest/lowest mean
+ * among those holding at least `minHours` hours (a single hour is an
+ * anecdote, not a direction). Returns the windRose shape plus
+ * { hours, dirtiest, cleanest } or null when no hour has both.
+ */
+export function pollutionRose(u, v, value, { minHours = 2, sectors = ROSE_SECTORS } = {}) {
+    const keep = [];
+    for (let k = 0; k < u.length; k++) {
+        const ok = [u[k], v[k], value[k]].every((x) => x != null && Number.isFinite(x));
+        if (ok) keep.push(k);
+    }
+    if (!keep.length) return null;
+    const rose = windRose(keep.map((k) => u[k]), keep.map((k) => v[k]), { sectors, value: keep.map((k) => value[k]) });
+    const counts = rose.counts.map((row) => row.reduce((s, c) => s + c, 0));
+    const name = (i) => (sectors === 16 ? SECTOR_NAMES_16[i] : `${i * 360 / sectors}°`);
+    let hi = null, lo = null;
+    rose.mean.forEach((m, i) => {
+        if (m == null || counts[i] < minHours) return;
+        if (!hi || m > hi.mean) hi = { name: name(i), sector: i, mean: m, hours: counts[i] };
+        if (!lo || m < lo.mean) lo = { name: name(i), sector: i, mean: m, hours: counts[i] };
+    });
+    return { ...rose, hours: keep.length, dirtiest: hi, cleanest: lo };
+}

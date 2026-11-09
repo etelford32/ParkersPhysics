@@ -241,9 +241,11 @@ export function heatColor(tC, lut) {
  * The heat layer in SCREEN space: one RGBA sample per `step`×`step` block of
  * the view, value interpolated in the data then coloured. Outside the data
  * window, and on any gap corner, alpha is 0 — nothing is extrapolated.
- * Returns { data, cw, ch, step }.
+ * Returns { data, cw, ch, step }. `paint(value, data, offset)` replaces the
+ * temperature LUT for another quantity (the air-quality layer colours by EPA
+ * category) — the VALUE is still interpolated first, then coloured.
  */
-export function heatImage(f, t, v, w, h, lut, { step = 2 } = {}) {
+export function heatImage(f, t, v, w, h, lut, { step = 2, paint = null } = {}) {
     const cw = Math.max(1, Math.ceil(w / step)), ch = Math.max(1, Math.ceil(h / step));
     const data = new Uint8ClampedArray(cw * ch * 4);
     if (!f?.values || t == null) return { data, cw, ch, step };
@@ -253,7 +255,9 @@ export function heatImage(f, t, v, w, h, lut, { step = 2 } = {}) {
         for (let i = 0; i < cw; i++) {
             const lon = v.lon + (((i + 0.5) * step) - w / 2) / kx;
             const val = fieldSample(f, t, lat, lon);
-            if (val != null) lutColor(val, lut, data, (j * cw + i) * 4);
+            if (val == null) continue;
+            if (paint) paint(val, data, (j * cw + i) * 4);
+            else lutColor(val, lut, data, (j * cw + i) * 4);
         }
     }
     return { data, cw, ch, step };

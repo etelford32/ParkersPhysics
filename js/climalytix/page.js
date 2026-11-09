@@ -25,8 +25,11 @@ import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
-import { loadDataset, loadField, loadWindField } from './loaders.js';
-import { windRose, prevailing, ROSE_SPEED_EDGES, FLOW_SPEED_TOP_MS } from './airflow.js';
+import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors } from './loaders.js';
+import { windRose, prevailing, pollutionRose, ROSE_SPEED_EDGES, FLOW_SPEED_TOP_MS } from './airflow.js';
+import { pm25Aqi, alignByInstant } from './aq-field.js';
+import { fieldSample } from './map-view.js';
+import { AQI_CATEGORIES, AQI_POLLUTANTS, categoryForAqi } from '../aqi-scale.js';
 import { windColor } from '../wind-palette.js';
 import { mountMap } from './map.js';
 import { tempToRampFrac } from '../temp-ramp.js';
@@ -54,6 +57,9 @@ const S = {
     sync: null,
     map: null,           // the location map (map.js)
     field: null,         // { state, body, note } from loadField
+    aq: null,            // { state, body, note } from loadAqField
+    roseMode: 'wind',    // 'wind' | 'pm25'
+    monKey: '',          // the hour the monitors were fetched for
 };
 
 // ── Workspace (local-first) ─────────────────────────────────────────────────
@@ -160,6 +166,18 @@ function loadMapField(site, signal) {
         S.field = r;
         S.map?.setField(r.state, r.body, r.note);
     });
+    S.aq = { state: 'loading', body: null, note: 'Loading the air-quality field…' };
+    S.map?.setAq('loading', null, S.aq.note);
+    S.monKey = '';
+    S.map?.setMonitors('idle', [], '');
+    loadAqField(site, { signal }).then((r) => {
+        if (signal.aborted || S.site !== site) return;
+        S.aq = r;
+        S.map?.setAq(r.state, r.body, r.note);
+        $('#cx-rose-mode [data-rose="pm25"]').disabled = !r.body;
+        if (!r.body && S.roseMode === 'pm25') setRoseMode('wind');
+        renderRose();
+    });
     S.map?.setWind('loading', null, 'Loading the wind field…');
     renderRose();
     loadWindField(site, { signal }).then((r) => {
@@ -192,6 +210,7 @@ function renderRose() {
     const ctx = c.getContext('2d');
     ctx.clearRect(0, 0, c.width, c.height);
     if (!w) { cap.textContent = S.results.has('gfs') ? 'No wind rose: our archive has no wind for this site.' : 'Wind rose: loading…'; S.rose = null; return; }
+    if (S.roseMode === 'pm25' && S.aq?.body) return renderPollutionRose(w, ctx, c, cap);
     const rose = windRose(w.u, w.v);
     S.rose = rose;
     const cx = c.width / 2, cy = c.height / 2, R = c.width / 2 - 16;
@@ -285,6 +304,105 @@ function renderHeatRail(info) {
     } else win.hidden = true;
 }
 
+/**
+ * The POLLUTION ROSE: the site's PM2.5 (CAMS, sampled at the site) joined to
+ * the GFS wind BY INSTANT, binned by the direction the wind blows FROM.
+ * Petal length = share of the joined hours; colour = the EPA category of the
+ * sector's mean PM2.5. It answers "which direction brings the dirtiest air"
+ * over the forecast window both feeds cover.
+ */
+function renderPollutionRose(w, ctx, c, cap) {
+    const aq = S.aq.body;
+    const pmAt = aq.times.map((_, t) => fieldSample(aq, t, S.site.lat, S.site.lon));
+    const pm = alignByInstant(aq.times, pmAt, w.times);
+    const rose = pollutionRose(w.u, w.v, pm);
+    S.rose = rose;
+    if (!rose) { cap.textContent = 'No hours where the wind run and the air-quality field overlap.'; return; }
+    const cx = c.width / 2, cy = c.height / 2, R = c.width / 2 - 16;
+    const maxF = Math.max(...rose.freq, 1e-9);
+    ctx.strokeStyle = 'rgba(232,241,248,.18)';
+    for (const f of [0.25, 0.5, 0.75, 1]) { ctx.beginPath(); ctx.arc(cx, cy, R * f, 0, Math.PI * 2); ctx.stroke(); }
+    const width = 2 * Math.PI / rose.sectors;
+    rose.freq.forEach((f, k) => {
+        if (!f) return;
+        const cat = categoryForAqi(pm25Aqi(rose.mean[k]));
+        const ang = k * width - Math.PI / 2;
+        ctx.fillStyle = cat ? `rgb(${cat.rgb.map((x) => Math.round(x * 255)).join(',')})` : '#888';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, R * f / maxF, ang - width * 0.42, ang + width * 0.42);
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(4,10,20,.7)'; ctx.stroke();
+    });
+    ctx.fillStyle = '#e8f1f8';
+    ctx.font = '600 13px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [lab, a] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]]) {
+        const r = a * Math.PI / 180;
+        ctx.fillText(lab, cx + (R + 9) * Math.sin(r), cy - (R + 9) * Math.cos(r));
+    }
+    const d = rose.dirtiest, k = rose.cleanest;
+    const txt = (x) => `${x.mean.toFixed(1)} µg/m³ (AQI ${pm25Aqi(x.mean)})`;
+    cap.textContent = d
+        ? `Over ${rose.hours} forecast hours with both wind and PM2.5: the dirtiest air arrives from the ${d.name} (mean ${txt(d)}, ${d.hours} h)`
+          + (k && k.sector !== d.sector ? `, the cleanest from the ${k.name} (${txt(k)}, ${k.hours} h).` : '.')
+        : `Over ${rose.hours} hours no direction holds two or more hours.`;
+}
+
+function setRoseMode(mode) {
+    S.roseMode = mode;
+    for (const b of document.querySelectorAll('#cx-rose-mode [data-rose]')) b.setAttribute('aria-pressed', String(b.dataset.rose === mode));
+    renderRose();
+}
+
+/** The EPA category bar, labelled with the PM2.5 breakpoints (µg/m³). */
+function paintAqKey() {
+    const bp = AQI_POLLUTANTS.pm25.breakpoints;
+    $('#cx-aq-key .cx-aq-bands').innerHTML = AQI_CATEGORIES.map((c) =>
+        `<i style="background:rgb(${c.rgb.map((x) => Math.round(x * 255)).join(',')})" title="${esc(c.name)}"></i>`).join('');
+    $('#cx-aq-key .cx-aq-ticks').innerHTML = bp.map((b) => `<span>${b[0] === 0 ? '0' : b[0]}</span>`).join('');
+}
+
+/** Rail status for air quality; also asks for monitors for the hour on show. */
+function renderAqRail(info) {
+    const st = $('#cx-aq-status');
+    if (!$('#cx-layer-aq').checked) { st.textContent = 'Air quality off.'; st.dataset.state = 'off'; return; }
+    st.dataset.state = info.state;
+    if (info.state === 'loading') { st.textContent = 'Loading the air-quality field…'; return; }
+    if (info.state === 'down') { st.textContent = `${info.note} Nothing stands in for it.`; return; }
+    if (info.t == null) { st.textContent = 'The air-quality field does not cover this time.'; st.dataset.state = 'down'; return; }
+    const local = new Date(info.timeMs + S.utcOffsetS * 1000);
+    const r = info.range;
+    const mon = !$('#cx-layer-mon').checked ? 'Monitors off.'
+        : info.monState === 'loading' ? 'Loading monitors…'
+        : info.compared ? `${info.compared} monitors vs the model: bias ${info.bias >= 0 ? '+' : ''}${info.bias} µg/m³, mean miss ${info.mae} µg/m³ (model − measured). ${info.monNote}`
+        : info.monNote || '';
+    st.innerHTML = `<b>PM2.5 at ${esc(local.toUTCString().slice(0, 3))} ${esc(local.toISOString().slice(11, 16))} local</b>`
+        + (r ? ` · window ${r.min.toFixed(1)}–${r.max.toFixed(1)} µg/m³` : '') + `<br>${esc(info.note)}<br>${esc(mon)}`;
+    requestMonitors(info.timeMs);
+}
+
+/**
+ * Fetch monitors once per hour on show. Observations exist only for the
+ * past, and at "now" the nearest 3-hourly field instant can be up to 90 min
+ * AHEAD of the clock — so the monitors are read at the latest hour no later
+ * than now; the comparison still pairs them with a field instant ≤ 1.5 h away.
+ */
+function requestMonitors(shownMs) {
+    if (!$('#cx-layer-aq').checked || !$('#cx-layer-mon').checked || !Number.isFinite(shownMs) || !S.site) return;
+    const timeMs = Math.min(shownMs, Date.now());
+    const key = `${S.site.lat},${S.site.lon},${Math.floor(timeMs / 3_600_000)}`;
+    if (S.monKey === key) return;
+    S.monKey = key;
+    const site = S.site;
+    S.map.setMonitors('loading', [], '');
+    loadMonitors(site, timeMs).then((r) => {
+        if (S.monKey !== key || S.site !== site) return;
+        S.map.setMonitors(r.state, r.monitors, r.note);
+    });
+}
+
 function mountLocationMap() {
     S.map = mountMap($('#cx-map'), {
         formatTemp: (c) => fmtText('temp', c, S.units),
@@ -297,13 +415,34 @@ function mountLocationMap() {
         onFrame: renderHeatRail,
         formatWind: (ms) => fmtText('wind', ms, S.units),
         onWind: renderFlowRail,
+        onAq: renderAqRail,
     });
     paintHeatKey();
     renderHeatTicks();
-    $('#cx-layer-temp').addEventListener('change', (ev) => {
-        S.map.setLayer('temperature', ev.target.checked);
-        for (const id of ['#cx-layer-iso', '#cx-layer-ext']) $(id).disabled = !ev.target.checked;
+    // Temperature and Air quality are one-at-a-time: two full-window fields
+    // on one map read as neither.
+    const showField = (which, on) => {
+        const temp = which === 'temp' ? on : (on ? false : $('#cx-layer-temp').checked);
+        const aq = which === 'aq' ? on : (on ? false : $('#cx-layer-aq').checked);
+        $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq;
+        S.map.setLayer('temperature', temp); S.map.setLayer('airquality', aq);
+        for (const id of ['#cx-layer-iso', '#cx-layer-ext']) $(id).disabled = !temp;
+        $('#cx-layer-mon').disabled = !aq;
+        $('#cx-aq-key').hidden = !aq;
+        renderAqRail(S.map.state.aq);
+    };
+    $('#cx-layer-temp').addEventListener('change', (ev) => showField('temp', ev.target.checked));
+    $('#cx-layer-aq').addEventListener('change', (ev) => showField('aq', ev.target.checked));
+    $('#cx-layer-mon').addEventListener('change', (ev) => {
+        S.map.setLayer('monitors', ev.target.checked);
+        S.monKey = '';
+        renderAqRail(S.map.state.aq);
     });
+    $('#cx-rose-mode').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-rose]');
+        if (b && !b.disabled) setRoseMode(b.dataset.rose);
+    });
+    paintAqKey();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
@@ -593,7 +732,9 @@ export function boot() {
                 panels: S.models.map((m) => ({ id: m.panelId, lines: m.lines.map((l) => l.id), hasData: m.hasData })),
                 map: S.map?.state ?? null,
                 field: S.field && { state: S.field.state, note: S.field.note },
-                rose: S.rose && { n: S.rose.n, calm: S.rose.calm, freq: S.rose.freq, prevailing: prevailing(S.rose) },
+                rose: S.rose && { mode: S.roseMode, n: S.rose.n, calm: S.rose.calm, freq: S.rose.freq, mean: S.rose.mean,
+                                  prevailing: prevailing(S.rose), dirtiest: S.rose.dirtiest ?? null, cleanest: S.rose.cleanest ?? null },
+                aq: S.aq && { state: S.aq.state, note: S.aq.note },
             };
         },
     };
