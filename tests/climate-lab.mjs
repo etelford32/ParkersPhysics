@@ -33,6 +33,7 @@ import { normalizeAirQuality } from '../js/air-quality-feed.js';
 import { computeAdvisories } from '../js/composite-indices.js';
 import { normalizeClimate } from '../js/home-conditions.js';
 import { labFixture, airFixture, archiveFixture, STATION } from './fixtures/climate-lab-fixtures.mjs';
+import { labAnchor, LAB_ANCHOR_MINUTE } from './fixtures/climate-lab-mocks.mjs';
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log(`  ✓ ${name}`); };
@@ -215,6 +216,24 @@ test('barometer: −0.8 hPa/h over 3 h is −2.4 hPa → “Falling”', () => {
     near(b.rows[0].v, -2.4, 1e-6);
     assert.match(b.status.label, /Falling$/);
     assert.equal(b.rows[1].v, 835, 'station pressure is the model surface_pressure');
+});
+test('the fixture holds only for :00–:45 of its hour, and the browser gate is pinned inside it', () => {
+    // The pressure gap sits at hourNow − 2 h and the tendency accepts a sample
+    // only within 45 min of now − 3 h, so from :46 the 3-hour change is "—".
+    // The browser gate used to build the fixture at whatever minute it ran and
+    // failed in exactly that window (2026-11-09); it now pins both the fixture
+    // and the page to labAnchor(). This is the negative control for that pin.
+    const at = (min) => {
+        const ms = Date.UTC(2026, 10, 9, 2, min);
+        return buildReadings(normalizeLabResponse(labFixture(ms)), { nowMs: ms }).readings.baro.status?.label ?? null;
+    };
+    const valid = [];
+    for (let m = 0; m < 60; m++) if (/Falling$/.test(at(m) || '')) valid.push(m);
+    assert.deepEqual(valid, Array.from({ length: 46 }, (_, m) => m));
+    assert.equal(at(50), null, 'negative control: :50 has no tendency');
+    const anchorMin = new Date(labAnchor(Date.UTC(2026, 10, 9, 2, 58, 59))).getUTCMinutes();
+    assert.equal(anchorMin, LAB_ANCHOR_MINUTE);
+    assert.ok(valid.includes(anchorMin) && valid.includes(anchorMin + 5), 'anchor (+5 min of run) inside the valid window');
 });
 test('anemometer: Beaufort 3 and a 55° veer over the next 12 h', () => {
     const a = R.readings.anemo;
