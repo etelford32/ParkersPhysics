@@ -119,6 +119,20 @@ body {
 #cx-rose-mode .cx-btn { padding:3px 8px; font-size:.7rem; min-height:28px; }
 #cx-rose-mode .cx-btn:disabled { opacity:.45; cursor:not-allowed; }
 .cx-src-boot { color:var(--cx-caution); }
+/* A ticked layer with nothing to draw (js/climalytix/layer-state.js): the row
+   keeps the reader's tick but drops the "active" look, its badge says why, and
+   the map carries the notice where the colour key would be. */
+.cx-src-down { color:#ff8c7a; }
+.cx-layer[data-avail="down"]:has(input:checked), .cx-layer[data-avail="notime"]:has(input:checked) {
+    border-color:rgba(255,140,122,.5); background:rgba(255,140,122,.07); box-shadow:inset 3px 0 0 #ff8c7a; }
+.cx-retry { align-self:flex-start; font-size:.72rem; padding:4px 10px; }
+.cx-retry[hidden] { display:none; }
+#cx-heat-alpha:disabled { opacity:.4; }
+label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
+#cx-map-notice { position:absolute; left:10px; top:10px; max-width:min(340px, calc(100% - 20px)); padding:8px 10px;
+    display:flex; flex-direction:column; gap:6px; border-radius:10px; font-size:.74rem; line-height:1.4; color:#ffd9d2;
+    background:rgba(24,10,12,.9); border:1px solid rgba(255,140,122,.55); }
+#cx-map-notice[hidden] { display:none; }
 .cx-about { font-size:.72rem; color:var(--cx-muted); }
 .cx-about summary { cursor:pointer; color:var(--cx-ink); font-size:.72rem; list-style:none; min-height:24px; display:flex; align-items:center; gap:6px; }
 .cx-about summary::before { content:'ⓘ'; color:var(--cx-accent); }
@@ -352,8 +366,9 @@ body {
         <div class="cx-key-win"><i hidden></i></div>
         <div class="cx-key-ticks"></div>
       </div>
-      <label class="cx-map-note" for="cx-heat-alpha">Opacity <input type="range" id="cx-heat-alpha" min="0.2" max="0.95" step="0.05" value="0.62"></label>
+      <label class="cx-map-note" for="cx-heat-alpha">Opacity <input type="range" id="cx-heat-alpha" min="0.2" max="0.95" step="0.01" value="0.62"></label>
       <p id="cx-heat-status" class="cx-map-note" role="status">Loading…</p>
+      <button type="button" id="cx-heat-retry" class="cx-btn cx-retry" hidden>Retry our archive</button>
       <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note">2 m air temperature on the GFS grid (0.25°, ≈28 km). Drawn as EarthView draws it: the temperature is interpolated between grid nodes and then coloured, with a bright seam on the freezing line. Isotherms are in your units; ▲ ▼ mark the warmest and coldest grid node. The dashed box is the extent of the data; hover for the value. The map follows the timeline’s crosshair.</p></details>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-aq">Air quality · PM2.5<span class="cx-layer-src cx-src-boot" title="Copernicus CAMS model via Open-Meteo’s free API — a bootstrap source until our own CAMS ingest">Bootstrap</span></label>
       <div class="cx-sublayers" role="group" aria-label="Air quality details">
@@ -454,6 +469,7 @@ body {
     <div id="cx-map-stage">
       <canvas id="cx-map-canvas" tabindex="0" aria-label="Location map. Drag to pan, scroll or pinch to zoom; arrow keys pan, plus and minus zoom, 0 recentres."></canvas>
       <canvas id="cx-map-flow" aria-hidden="true"></canvas>
+      <div id="cx-map-notice" role="status" hidden><span></span><button type="button" class="cx-btn cx-retry" hidden>Retry</button></div>
       <div id="cx-map-key" hidden><div class="cx-mk-title"></div><div class="cx-mk-body"></div></div>
       <div id="cx-map-tip" hidden></div>
       <div id="cx-map-scale"><i></i><span></span></div>

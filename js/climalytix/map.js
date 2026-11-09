@@ -130,7 +130,7 @@ const OCEAN = '#0a1a2e';
  * negative controls run with every fill off).
  */
 const DATA_GROUND = Object.freeze({ desaturate: 0.55, dim: 0.34, veil: 0.42 });
-const HEAT_ALPHA_DEFAULT = 0.62;
+export const HEAT_ALPHA_DEFAULT = 0.62;
 const HEAT_STEP_PX = 2;          // one data sample per 2×2 CSS px block
 
 const LUT = buildTempLUTPixels();

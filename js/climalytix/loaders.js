@@ -25,13 +25,15 @@ import { fetchLabStation } from '../climate-lab/lab-feed.js';
 
 const TIMEOUT_MS = 25_000;
 
-async function getJson(url, signal) {
+/** `fresh` bypasses the BROWSER cache (a Retry must not be answered by the
+ *  degraded reply it is retrying; the route's own ≤120 s CDN TTL still applies). */
+async function getJson(url, signal, { fresh = false } = {}) {
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
     signal?.addEventListener?.('abort', onAbort, { once: true });
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
-        const res = await fetch(url, { signal: ctrl.signal });
+        const res = await fetch(url, { signal: ctrl.signal, ...(fresh ? { cache: 'reload' } : {}) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
     } catch (e) {
@@ -123,9 +125,9 @@ export const LOADERS = Object.freeze({
  * The heat-map field around the site, from our archive ONLY. Resolves to
  * { state: 'live'|'stale'|'down', body, note } and never rejects.
  */
-export async function loadField(site, { signal, win = null } = {}) {
+export async function loadField(site, { signal, win = null, fresh = false } = {}) {
     try {
-        const j = await getJson(fieldPath({ ...site, ...(win || {}) }), signal);
+        const j = await getJson(fieldPath({ ...site, ...(win || {}) }), signal, { fresh });
         if (!j?.values) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             return { state: 'down', body: null, note: `No heat map: ${why}. Nothing is substituted for our archive.` };
@@ -142,10 +144,10 @@ export async function loadField(site, { signal, win = null } = {}) {
  * Same window and route as the heat field, `vars=uMs,vMs`; nothing stands in
  * for it. Resolves { state, body: { …grid, u, v } | null, note }.
  */
-export async function loadWindField(site, { signal, win = null } = {}) {
+export async function loadWindField(site, { signal, win = null, fresh = false } = {}) {
     try {
         // The widest window the route serves: the flow needs room to move.
-        const j = await getJson(fieldPath({ ...site, halfDeg: 4, ...(win || {}), vars: ['uMs', 'vMs'] }), signal);
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, ...(win || {}), vars: ['uMs', 'vMs'] }), signal, { fresh });
         if (!j?.fields?.uMs || !j?.fields?.vMs) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             return { state: 'down', body: null, note: `No airflow: ${why}. Nothing is substituted for our archive.` };

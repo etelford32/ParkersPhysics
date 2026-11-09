@@ -27,6 +27,7 @@ import {
 import { DAY_MS } from './series.js';
 import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField, loadUpdraftField, loadConvectionField } from './loaders.js';
 import { fieldWindow } from './point-tile.js';
+import { tempControlState, overlayBadge } from './layer-state.js';
 import { capePaint, CAPE_MIN_JKG, CAPE_FULL_JKG, OUTLOOK_COLORS, TRIGGER_MIN_MS, CIN_WEAK_JKG } from './convection.js';
 import { updraftPaint, W_FULL_MS } from './updraft.js';
 import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
@@ -35,7 +36,7 @@ import { pm25Aqi, alignByInstant } from './aq-field.js';
 import { fieldSample } from './map-view.js';
 import { AQI_CATEGORIES, AQI_POLLUTANTS, categoryForAqi } from '../aqi-scale.js';
 import { windColor } from '../wind-palette.js';
-import { mountMap } from './map.js';
+import { mountMap, HEAT_ALPHA_DEFAULT } from './map.js';
 import { tempToRampFrac } from '../temp-ramp.js';
 import { exposurePaint, EXPOSURE_FULL_LOG2 } from './terrain.js';
 import { orographicPaint, formatW, OROGRAPHIC_FULL_MS } from './orographic.js';
@@ -272,7 +273,9 @@ function rememberGroups() {
  * it is not. Fills are one-at-a-time, so at most one key is on the map.
  */
 const MAP_KEYS = [
-    { box: '#cx-layer-temp', key: '#cx-heat-key', title: () => `Temperature · 2 m · ${unitSym('temp')}` },
+    // `ok`: a key is on the map only while its field is DRAWN (layer-state.js) —
+    // a colour key over a map with no temperature on it reads as a broken layer.
+    { box: '#cx-layer-temp', key: '#cx-heat-key', title: () => `Temperature · 2 m · ${unitSym('temp')}`, ok: () => S.tempCtl?.keyOnMap === true },
     { box: '#cx-layer-aq', key: '#cx-aq-key', title: () => 'PM2.5 · US AQI category' },
     { box: '#cx-layer-exp', key: '#cx-exp-key', title: () => 'Sun exposure · vs flat ground' },
     { box: '#cx-layer-oro', key: '#cx-oro-key', title: () => 'Orographic lift · surface' },
@@ -284,7 +287,7 @@ const keyHomes = new Map();
 function syncMapKey() {
     const host = $('#cx-map-key'), body = host?.querySelector('.cx-mk-body');
     if (!body) return;
-    const active = MAP_KEYS.find((k) => $(k.box)?.checked && $(k.key));
+    const active = MAP_KEYS.find((k) => $(k.box)?.checked && $(k.key) && (k.ok?.() ?? true));
     for (const k of MAP_KEYS) {
         const el = $(k.key);
         if (!el) continue;
@@ -443,6 +446,7 @@ function renderSlopeRail(info) {
 /** Rail status for the airflow layer. */
 function renderFlowRail(info) {
     const st = $('#cx-flow-status');
+    setRowBadge('#cx-layer-airflow', overlayBadge({ checked: $('#cx-layer-airflow').checked, state: info.state, t: info.t }));
     if (!$('#cx-layer-airflow').checked) { st.textContent = 'Airflow layer off.'; st.dataset.state = 'off'; return; }
     st.dataset.state = info.state;
     if (info.state === 'loading') { st.textContent = 'Loading the wind field…'; return; }
@@ -527,19 +531,77 @@ function renderHeatTicks() {
     }).join('');
 }
 
+/**
+ * A layer row's badge: its source ("Ours") while it can draw, or a plain
+ * statement that there is nothing to draw. The source label is remembered on
+ * the element, so the badge always returns to exactly what the markup said.
+ */
+function setRowBadge(boxSel, badge) {
+    const src = $(boxSel)?.closest('.cx-layer')?.querySelector('.cx-layer-src');
+    if (!src) return;
+    src.dataset.source ??= src.textContent;
+    src.textContent = badge ?? src.dataset.source;
+    src.classList.toggle('cx-src-down', badge != null && badge !== 'Loading');
+}
+
+/**
+ * THE TEMPERATURE CONTROLS FOLLOW THE DATA (layer-state.js): the checkbox
+ * keeps the reader's intent, while the sub-toggles, the opacity slider, the
+ * on-map key and the Retry button are live only while there is a field for
+ * them to change. Called from every frame and from every fill switch.
+ */
+function applyTempControl(info) {
+    const ctl = tempControlState({ checked: $('#cx-layer-temp').checked, fieldState: info?.state, frameT: info?.t, note: info?.note });
+    const changed = S.tempCtl?.mode !== ctl.mode;
+    S.tempCtl = ctl;
+    for (const id of ['#cx-layer-iso', '#cx-layer-ext', '#cx-heat-alpha']) $(id).disabled = !ctl.subEnabled;
+    $('#cx-layer-temp').closest('.cx-layer').dataset.avail = ctl.mode;
+    setRowBadge('#cx-layer-temp', ctl.badge);
+    $('#cx-heat-retry').hidden = !ctl.canRetry;
+    const notice = $('#cx-map-notice');
+    notice.hidden = !ctl.notice;
+    notice.querySelector('span').textContent = ctl.notice;
+    notice.querySelector('button').hidden = !ctl.canRetry;
+    if (changed) syncMapKey();
+    return ctl;
+}
+
+/**
+ * Ask our archive again (the Retry buttons): the temperature field, the wind
+ * field and the site's GFS series come from the same run, so all three are
+ * re-read — and only those; no other feed is re-fetched.
+ */
+function retryArchive() {
+    if (!S.site || !S.map || S.field?.state === 'loading') return;
+    const site = S.site, signal = S.abort.signal;
+    S.field = { state: 'loading', body: null, note: 'Loading the temperature field…' };
+    S.map.setField('loading', null, S.field.note);
+    S.map.setWind('loading', null, 'Loading the wind field…');
+    loadField(site, { signal, win: fieldWin(site), fresh: true }).then((r) => {
+        if (signal.aborted || S.site !== site) return;
+        S.field = r;
+        S.map.setField(r.state, r.body, r.note);
+    });
+    loadWindField(site, { signal, win: fieldWin(site), fresh: true }).then((r) => {
+        if (signal.aborted || S.site !== site) return;
+        S.map.setWind(r.state, r.body, r.note);
+    });
+    loadAll({ only: 'gfs' });
+}
+
 /** The rail under the toggle: status, valid time, the window's range on the key. */
 function renderHeatRail(info) {
     // The wind line shares the heat line's clock (local time is known only
     // once a site feed reports its offset — re-render it with every frame).
     if (S.map) renderFlowRail(S.map.state.wind);
     const st = $('#cx-heat-status');
-    const on = $('#cx-layer-temp').checked;
     const win = $('#cx-heat-key .cx-key-win i');
-    if (!on) { st.textContent = 'Temperature layer off.'; st.dataset.state = 'off'; win.hidden = true; return; }
-    if (info.state === 'loading' || info.state === 'down' || info.t == null) {
-        st.dataset.state = info.state === 'loading' ? 'loading' : 'down';
-        st.textContent = info.state === 'loading' ? 'Loading the temperature field…'
-            : info.state === 'down' ? info.note
+    const ctl = applyTempControl(info);
+    if (ctl.mode === 'off') { st.textContent = 'Temperature layer off.'; st.dataset.state = 'off'; win.hidden = true; return; }
+    if (ctl.mode !== 'on') {
+        st.dataset.state = ctl.mode === 'loading' ? 'loading' : 'down';
+        st.textContent = ctl.mode === 'loading' ? 'Loading the temperature field…'
+            : ctl.mode === 'down' ? info.note
             : 'The run does not cover this time — no frame is held past its end.';
         win.hidden = true;
         return;
@@ -748,6 +810,9 @@ function mountLocationMap() {
     });
     paintHeatKey();
     renderHeatTicks();
+    // ONE opacity: the slider starts where the map draws (it used to sit on a
+    // 0.05 step grid that 0.62 is not on, so the thumb read 0.60 over a 0.62 map).
+    $('#cx-heat-alpha').value = String(HEAT_ALPHA_DEFAULT);
     // Temperature and Air quality are one-at-a-time: two full-window fields
     // on one map read as neither.
     // Sun exposure is a full-window fill too, so it joins the same group.
@@ -774,7 +839,7 @@ function mountLocationMap() {
         renderOroRail(S.map.state.orographic);
         $('#cx-exp-mode').hidden = !exp; $('#cx-exp-key').hidden = !exp;
         renderDemRail(S.map.state.dem);
-        for (const id of ['#cx-layer-iso', '#cx-layer-ext']) $(id).disabled = !temp;
+        renderHeatRail(S.map.state.frame);      // the Temperature controls follow the data (layer-state.js)
         $('#cx-layer-mon').disabled = !aq;
         $('#cx-aq-key').hidden = !aq;
         renderAqRail(S.map.state.aq);
@@ -836,6 +901,8 @@ function mountLocationMap() {
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
+    $('#cx-heat-retry').addEventListener('click', retryArchive);
+    $('#cx-map-notice button').addEventListener('click', retryArchive);
     $('#cx-layer-terrain').addEventListener('change', (ev) => S.map.setLayer('terrain', ev.target.checked));
     $('#cx-layer-labels').addEventListener('change', (ev) => S.map.setLayer('labels', ev.target.checked));
     $('#cx-layer-airflow').addEventListener('change', (ev) => {
@@ -1054,6 +1121,7 @@ function wireControls() {
         saveWorkspace({ ...S.ws, units: { preset: e.target.value } });
         renderPanels();
         renderHeatTicks();
+        syncMapKey();                     // the on-map key's title carries the unit (it kept the old one)
         S.map?.unitsChanged();            // isotherm levels + tip + rail re-format in the new unit
     });
     $('#cx-from').addEventListener('change', (e) => {
@@ -1124,6 +1192,7 @@ export function boot() {
                 panels: S.models.map((m) => ({ id: m.panelId, lines: m.lines.map((l) => l.id), hasData: m.hasData })),
                 map: S.map?.state ?? null,
                 field: S.field && { state: S.field.state, note: S.field.note },
+                tempControl: S.tempCtl ?? null,
                 rose: S.rose && { mode: S.roseMode, n: S.rose.n, calm: S.rose.calm, freq: S.rose.freq, mean: S.rose.mean,
                                   prevailing: prevailing(S.rose), dirtiest: S.rose.dirtiest ?? null, cleanest: S.rose.cleanest ?? null },
                 aq: S.aq && { state: S.aq.state, note: S.aq.note },

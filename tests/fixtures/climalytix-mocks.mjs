@@ -22,6 +22,7 @@
  *   archiveExpired: true    archive answers its degraded 200 (freshness:'expired')
  *   nwp: 'unpublished'      our archive answers 200 + expired + r2_not_configured
  *        'old'              our archive serves a 40-hour-old run (freshness:'stale')
+ *        () => mode         read per request — lets a gate bring the archive up mid-session
  *   gibs: 'down'            every GIBS tile 404s (the map still draws the heat + site)
  *   nwp: 'nowind'           the field route has temperature but no wind (airflow says why)
  *   aq: 'down'              the air-quality field route answers 200 + expired (no field)
@@ -328,10 +329,12 @@ function demTilePng(z, x, y, heightAt = mockDem) {
 }
 
 export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', convection = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
+    const nwpOpt = nwp;   // a string, or a function read per request (an archive that comes up mid-session)
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
         const now = Date.now();
+        const nwp = typeof nwpOpt === 'function' ? nwpOpt() : nwpOpt;
         onRequest?.(url);
         if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
             const p = url.pathname;
