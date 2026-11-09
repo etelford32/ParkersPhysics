@@ -173,6 +173,8 @@ jobs:
         run: node tests/climalytix-sun-temp.mjs
       - name: night cold-air pooling
         run: node tests/climalytix-cold-pool.mjs
+      - name: the Sun to arcseconds (Meeus 25.b, NREL SPA)
+        run: node tests/sun-precise.mjs
       - name: nwp route (fake R2)
         run: node tests/climalytix-nwp-route.mjs
       - name: Climate Lab (unchanged by the lift)

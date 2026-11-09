@@ -104,7 +104,11 @@ import { thermalAt, thermalPaint, windowAt } from './thermals.js';
 import { LEVELS, levelHeightAgl, levelUsable, bracket, verticalMotion, updraftPaint } from './updraft.js';
 import { convectionOutlook, capePaint, outlookPaint, CATEGORIES } from './convection.js';
 import { slopeWind, slopeWindGrid, slopeWindExtremes, ANABATIC_RGB, KATABATIC_RGB, ARROW_MIN_MS, THETA0_DEFAULT_K } from './slope-wind.js';
-import { solarPosition } from '../sun-altitude.js';
+// The Sun to arcseconds (js/sun-precise.js): the site's VSOP87 Earth, nutation, aberration,
+// parallax and atmospheric refraction — `altitudeDeg` is the APPARENT altitude, the direction
+// light actually arrives from, which is what a shadow is cast along. Same call shape as the
+// everyday sun-altitude.js routine (good to ~1′, no refraction), which it replaces here only.
+import { solarPositionPrecise as solarPosition } from '../sun-precise.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 import { heatScale, runRange, scaleColor, SCALE_MODES } from './heat-scale.js';
 import { modelElevationM, fitLapse, downscaleGrid } from './terrain-temp.js';
@@ -487,7 +491,8 @@ export function mountMap(root, deps) {
             return { ...smp, ...hit };
         });
         const cloud = F.fields?.cloudPct ? { ...F, values: F.fields.cloudPct } : null;
-        const wind = tw != null && M.wind ? M.wind : null;
+        const wind = instantWind();
+        tw = wind ? 0 : null;
         const out = sunTempGrid(D.grid, D.sa, {
             samples,
             cloudAt: cloud ? (lat, lon) => { const c = fieldSample(cloud, t, lat, lon); return c == null ? null : c / 100; } : null,
@@ -495,13 +500,30 @@ export function mountMap(root, deps) {
         });
         return { ...out, cloud: !!cloud, wind: !!wind };
     }
+    // The 10 m wind AT the clock's instant (u and v interpolated in time as components —
+    // never the speed), for the two modelled terms' mixing. The airflow particles and the
+    // orographic fill keep the nearest frame, the one they draw.
+    let instWindCache = { key: '', f: null };
+    function instantWind() {
+        const W = M.wind;
+        if (!W?.u || !W.times) return null;
+        const ms = clockMs(), b = timeBlend(W.times, ms);
+        if (!b) return null;
+        const key = `${W.run}|${W.nRows}x${W.nCols}|${ms}`;
+        if (instWindCache.key !== key || instWindCache.src !== W) {
+            const plane = W.nRows * W.nCols;
+            instWindCache = { key, src: W, f: { ...W, times: [ms], u: blendPlane(W.u, plane, b), v: blendPlane(W.v, plane, b) } };
+        }
+        return instWindCache.f;
+    }
     // Relative height is a property of the DEM grid alone: once per grid.
     let poolRel = { key: '', hRel: null };
     function coldPoolFor(timeMs, F, t, tw) {
         if (poolRel.key !== D.key) poolRel = { key: D.key, hRel: relativeHeight(D.grid) };
         const nightFrac = nightFraction(nightSamples(timeMs).map((smp) => ({ ...smp, sun: solarPosition(new Date(smp.at), M.view.lat, M.view.lon) })));
         const cloud = F.fields?.cloudPct ? { ...F, values: F.fields.cloudPct } : null;
-        const wind = tw != null && M.wind ? M.wind : null;
+        const wind = instantWind();
+        tw = wind ? 0 : null;
         const out = coldPoolGrid(D.grid, poolRel.hRel, {
             nightFrac,
             cloudAt: cloud ? (lat, lon) => { const c = fieldSample(cloud, t, lat, lon); return c == null ? null : c / 100; } : null,
