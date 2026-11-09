@@ -18,6 +18,10 @@
 //     row instead, because painting them identically would read as many
 //     more forecast arrivals than were ever issued.
 
+import {
+    BASELINE_LABELS, dayRunState, ledgerFreshness, screenedEvent,
+} from './cme-ledger-status.js';
+
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const REFRESH_MS = 5 * 60 * 1000;
@@ -30,6 +34,16 @@ const RANGE_CONFIG = Object.freeze({
 
 const state = {
     events: [],
+    // Earth-relevant CMEs the flux-rope engine did not forecast (glancing
+    // passes) but the baselines did — drawn hollow, never as our forecast.
+    screened: [],
+    // The cron's daily-run record + the locked daily eruption odds
+    // (/api/cme/skill `ledger` / `outlook`) — what lets a quiet day say
+    // "checked, nothing coming" instead of being blank.
+    ledger: null,
+    outlookDays: new Map(),   // UTC day start ms → locked outlook entry
+    runDays: new Set(),       // ISO days with a run on record
+    freshness: null,
     models: [],
     range: '7d',
     selectedId: null,
@@ -116,10 +130,27 @@ export function normalizeCmePayload(payload) {
         }];
     }).sort((a, b) => a.predictedMs - b.predictedMs);
 
+    const screened = (Array.isArray(root.events) ? root.events : [])
+        .map((event) => screenedEvent(event))
+        .filter(Boolean)
+        .sort((a, b) => a.predictedMs - b.predictedMs);
+    const outlookDays = new Map();
+    for (const d of Array.isArray(root.outlook?.days) ? root.outlook.days : []) {
+        const ms = time(`${d.day}T00:00:00Z`);
+        if (ms !== null) outlookDays.set(ms, d);
+    }
+    const ledger = root.ledger && typeof root.ledger === 'object' ? root.ledger : null;
+
     return {
         events,
+        screened,
+        ledger,
+        outlookDays,
+        runDays: new Set(Array.isArray(root.outlook?.run_days) ? root.outlook.run_days : []),
+        freshness: typeof payload?.freshness === 'string' ? payload.freshness : null,
         models: Array.isArray(root.models) ? root.models : [],
-        updatedAt: time(root.updated),
+        // The last time the daily cron RAN — never the request time.
+        updatedAt: time(ledger?.last_run ?? root.updated),
     };
 }
 
@@ -206,6 +237,19 @@ function formatMonthLabel(monthStartMs) {
     return new Date(monthStartMs).toLocaleDateString('en-US', {
         month: 'long', year: 'numeric', timeZone: 'UTC',
     });
+}
+
+/** Screened (baseline-only) events whose baseline ETA lands on one UTC day. */
+export function screenedForUtcDay(screened, dayStartMs) {
+    return screened.filter((s) => utcDayStart(s.predictedMs) === dayStartMs);
+}
+
+/** "8%", "<1%", "0%" — and "≥" when the outlook marks the day a lower bound. */
+export function formatOdds(entry) {
+    const p = entry?.p_arrival;
+    if (!Number.isFinite(p)) return null;
+    const body = p <= 0 ? '0%' : p < 0.005 ? '<1%' : `${Math.round(p * 100)}%`;
+    return `${entry.lower_bound && p > 0 ? '\u2265' : ''}${body}`;
 }
 
 /** Forecast windows that touch one UTC calendar day. */
@@ -539,7 +583,12 @@ function renderEvents() {
     const ordered = [...state.events].sort((a, b) => {
         const aResolved = a.truth ? 1 : 0;
         const bResolved = b.truth ? 1 : 0;
-        return aResolved - bResolved || a.predictedMs - b.predictedMs;
+        // Open forecasts first, soonest arrival first; then the RESOLVED
+        // record newest-first. Resolved rows used to sort oldest-first too,
+        // so the 14-card tape filled up with the ledger's first weeks and
+        // stayed there (it read "stuck in August" for three months).
+        return aResolved - bResolved
+            || (aResolved ? b.predictedMs - a.predictedMs : a.predictedMs - b.predictedMs);
     }).slice(0, 14);
     if (!ordered.length) {
         list.innerHTML = `<div class="cmef-tape-empty">
@@ -629,11 +678,15 @@ function renderCalendarDetail(dayStartMs, events) {
     }
 
     dayLabel.textContent = formatDayShort(dayStartMs);
+    const glancing = screenedCards(dayStartMs);
+    const note = dayLedgerNote(dayStartMs);
     if (!events.length) {
-        count.textContent = 'Quiet';
+        const nGlance = screenedForUtcDay(state.screened, dayStartMs).length;
+        count.textContent = nGlance ? `${nGlance} glancing` : 'Quiet';
         count.className = 'cmef-detail-count quiet';
-        detail.innerHTML = `<div class="cmef-day-quiet">
+        detail.innerHTML = `${glancing}<div class="cmef-day-quiet">
             <strong>No issue-locked CME arrival window intersects ${esc(formatDayHeading(dayStartMs))}.</strong>
+            ${note}
             <p>That is a quiet Parkers Physics forecast, not a guarantee of quiet space weather. Solar eruptions and upstream conditions can still change after this ledger update.</p>
         </div>`;
         return;
@@ -672,7 +725,7 @@ function renderCalendarDetail(dayStartMs, events) {
                 <button type="button" data-calendar-event="${esc(event.id)}">Locate in chart</button>
             </div>
         </article>`;
-    }).join('');
+    }).join('') + glancing + (note ? `<div class="cmef-day-quiet is-note">${note}</div>` : '');
 
     detail.querySelectorAll('[data-calendar-event]').forEach((button) => {
         button.addEventListener('click', () => selectForecastEvent(button.dataset.calendarEvent, { scrollToChart: true }));
@@ -700,6 +753,9 @@ function renderCalendar() {
         const events = cmeEventsForUtcDay(state.events, dayStartMs);
         const medians = events.filter((event) => utcDayStart(event.predictedMs) === dayStartMs);
         const edges = events.length - medians.length;
+        const screened = screenedForUtcDay(state.screened, dayStartMs);
+        const odds = state.outlookDays.get(dayStartMs) ?? null;
+        const run = state.ledger ? dayRunState(dayStartMs, runContext()) : null;
         const outside = new Date(dayStartMs).getUTCMonth() !== shownMonth;
         const selected = state.selectedDayMs === dayStartMs;
         const date = new Date(dayStartMs);
@@ -708,22 +764,46 @@ function renderCalendar() {
             const probability = Number.isFinite(event.pHit) ? `${Math.round(event.pHit * 100)}%` : '';
             return `<span class="cmef-chip" style="--cmef-chip:${esc(chartColors(event).strong)}"><i></i><span class="cmef-chip-time">${esc(formatClockUtc(event.predictedMs))}</span><b>${probability}</b></span>`;
         });
+        // A glancing CME the baselines timed but our engine did not forecast:
+        // hollow marker, no probability, because we issued none.
+        if (medians.length < 2 && screened.length) {
+            const first = screened[0];
+            chips.push(`<span class="cmef-chip is-screened" title="Glancing CME \u2014 baseline ETA, not a Parkers Physics forecast"><i></i><span class="cmef-chip-time">${esc(formatClockUtc(first.predictedMs))}</span><b>${screened.length > 1 ? `+${screened.length - 1}` : 'glance'}</b></span>`);
+        }
         if (medians.length > 2) {
             chips.push(`<span class="cmef-chip-more">+${medians.length - 2} more</span>`);
-        } else if (edges > 0) {
+        } else if (edges > 0 && chips.length < 2) {
             // "edge", not "window edge": a phone day cell is ~52 px wide and
             // the longer wording was being clipped mid-word. The calendar
             // legend is what carries the full term.
             chips.push(`<span class="cmef-chip is-edge"><i></i><span class="cmef-chip-time">${edges}<em> ${edges === 1 ? 'edge' : 'edges'}</em></span></span>`);
         }
 
-        const summary = medians.length
-            ? `${medians.length} arrival${medians.length === 1 ? '' : 's'}`
-            : edges > 0 ? `${edges} window edge${edges === 1 ? '' : 's'}` : 'quiet';
-        return `<button class="cmef-day ${events.length ? 'has-window' : ''} ${outside ? 'is-outside' : ''} ${dayStartMs === today ? 'is-today' : ''} ${selected ? 'is-selected' : ''}"
+        // Daily layer: the locked eruption odds for the day, and whether the
+        // ledger was actually checked that day. Past days keep their odds
+        // only when there was something to say (>= 1 % or an observed hit).
+        const oddsText = formatOdds(odds);
+        const showOdds = oddsText !== null
+            && (dayStartMs >= today || odds.p_arrival >= 0.01 || odds.obs_arrival === true);
+        const meta = [
+            showOdds ? `<span class="cmef-odds${odds.obs_arrival === true ? ' is-hit' : ''}">${esc(oddsText)}</span>` : '',
+            run === 'missed' ? '<span class="cmef-run is-missed" title="No ledger run on record for this day">!</span>'
+                : run === 'checked' ? '<span class="cmef-run is-checked" title="Ledger checked this day"></span>' : '',
+        ].join('');
+        const runWords = { checked: 'ledger checked', missed: 'no ledger run on record', pending: 'run pending' }[run];
+
+        const summary = [
+            medians.length
+                ? `${medians.length} arrival${medians.length === 1 ? '' : 's'}`
+                : edges > 0 ? `${edges} window edge${edges === 1 ? '' : 's'}` : 'no forecast arrival',
+            screened.length ? `${screened.length} glancing CME${screened.length === 1 ? '' : 's'} (baseline)` : '',
+            showOdds ? `eruption outlook ${oddsText}` : '',
+            runWords ?? '',
+        ].filter(Boolean).join(' \u00b7 ');
+        return `<button class="cmef-day ${events.length ? 'has-window' : ''} ${screened.length ? 'has-screened' : ''} ${run === 'missed' ? 'is-missed' : ''} ${outside ? 'is-outside' : ''} ${dayStartMs === today ? 'is-today' : ''} ${selected ? 'is-selected' : ''}"
                 type="button" data-calendar-day="${dayStartMs}" aria-expanded="${selected}" aria-controls="cmef-calendar-detail"
                 aria-label="${esc(formatDayHeading(dayStartMs))} \u00b7 ${esc(summary)}">
-            <span class="cmef-day-num">${date.getUTCDate()}${dayStartMs === today ? '<small>NOW</small>' : ''}</span>
+            <span class="cmef-day-num">${date.getUTCDate()}${dayStartMs === today ? '<small>NOW</small>' : ''}<span class="cmef-day-meta">${meta}</span></span>
             <span class="cmef-chips">${chips.join('')}</span>
         </button>`;
     }).join('');
@@ -748,6 +828,69 @@ function renderCalendar() {
         ? []
         : cmeEventsForUtcDay(state.events, state.selectedDayMs);
     renderCalendarDetail(state.selectedDayMs, detailEvents);
+}
+
+function runContext(nowMs = Date.now()) {
+    return { runDays: state.runDays, lastRunMs: time(state.ledger?.last_run) ?? NaN, nowMs };
+}
+
+/**
+ * What the ledger can say about a day that has no arrival window. This is
+ * the difference between "quiet" and "nobody looked": the run record and
+ * the locked eruption odds are quoted, and a gap is called a gap.
+ */
+function dayLedgerNote(dayStartMs) {
+    const lines = [];
+    const odds = state.outlookDays.get(dayStartMs) ?? null;
+    const oddsText = formatOdds(odds);
+    if (oddsText !== null) {
+        const lead = odds.lead_days === 0 ? 'issued that morning' : `issued ${odds.lead_days} day${odds.lead_days === 1 ? '' : 's'} ahead`;
+        const outcome = odds.resolved
+            ? odds.obs_arrival === true ? ' Outcome: a CME launched after the issue did arrive.' : odds.obs_arrival === false ? ' Outcome: none arrived.' : ''
+            : '';
+        lines.push(`Eruption outlook: <b>${esc(oddsText)}</b> chance that a CME not yet launched arrives this day (${esc(lead)}, locked ${esc(formatDayShort(time(`${odds.issue_day}T00:00:00Z`)))}).${esc(outcome)}`);
+    }
+    if (state.ledger) {
+        const run = dayRunState(dayStartMs, runContext());
+        if (run === 'checked') {
+            const isLast = utcDayStart(time(state.ledger.last_run) ?? NaN) === dayStartMs;
+            lines.push(isLast && state.ledger.summary
+                ? `Ledger run ${esc(formatTimeOnlyUtc(time(state.ledger.last_run)))}: ${esc(state.ledger.summary)}.`
+                : 'The daily ledger run is on record for this day.');
+        } else if (run === 'missed') {
+            lines.push('<b>No ledger run is on record for this day.</b> Nothing was screened, so the absence of a forecast here is a gap, not a quiet Sun.');
+        } else if (run === 'pending') {
+            lines.push('Today\u2019s ledger run is due at 06:30 UT.');
+        } else if (run === 'future') {
+            lines.push('Nothing launched yet can be screened for this day; the outlook above is all that can be said.');
+        }
+    }
+    return lines.map((line) => `<p>${line}</p>`).join('');
+}
+
+function screenedCards(dayStartMs) {
+    return screenedForUtcDay(state.screened, dayStartMs).map((s) => {
+        const why = Number.isFinite(s.offAxisDeg) && Number.isFinite(s.halfDeg)
+            ? `Aimed ${s.offAxisDeg.toFixed(0)}\u00b0 off the Sun\u2013Earth line with a ${s.halfDeg.toFixed(0)}\u00b0 half-width \u2014 a glancing pass, outside the cone our flux-rope engine forecasts.`
+            : 'Outside the cone our flux-rope engine forecasts.';
+        const etas = s.etas.map((e) => `${esc(BASELINE_LABELS[e.model] ?? e.model)} ${esc(formatCompactUtc(e.ms))}`).join(' \u00b7 ');
+        const truth = s.truth
+            ? s.truth.arrived === false ? 'Resolved \u00b7 no L1 arrival' : `L1 shock ${esc(formatUtc(time(s.truth.shock)))}`
+            : 'Outcome pending';
+        return `<article class="cmef-day-event is-screened">
+            <div class="cmef-day-event-top">
+                <strong><span aria-hidden="true">\u25cc</span> Glancing CME${Number.isFinite(s.speedKms) ? ` \u00b7 ${s.speedKms.toFixed(0)} km/s` : ''}</strong>
+                <span class="cmef-state screened">Baseline only</span>
+            </div>
+            <span class="cmef-day-event-time">${esc(BASELINE_LABELS[s.model] ?? s.model)} ${esc(formatTimeOnlyUtc(s.predictedMs))}</span>
+            <span class="cmef-day-event-band">${why}</span>
+            <div class="cmef-day-event-foot">
+                <span class="cmef-truth">${truth}</span>
+                <span>${etas}</span>
+                <span>Launched ${esc(formatUtc(s.launchMs))} \u00b7 not a Parkers Physics forecast</span>
+            </div>
+        </article>`;
+    }).join('');
 }
 
 function modelMetric(row, names) {
@@ -803,7 +946,29 @@ function renderFreshness(mode = 'live') {
         label.textContent = 'Forecast ledger unavailable';
         return;
     }
-    label.textContent = `Issue-time ledger · updated ${formatUtc(updated)}`;
+    // The label states when the daily cron last RAN and what it found —
+    // and goes amber when that is more than a day ago. `updated` is the
+    // run time; it was the request time until 2026-11-09, which is how a
+    // four-week-quiet calendar still read "updated just now".
+    const ledger = state.ledger;
+    if (!ledger) {
+        label.textContent = `Issue-time ledger \u00b7 updated ${formatUtc(updated)}`;
+        return;
+    }
+    const fresh = ledgerFreshness(time(ledger.last_run) ?? NaN, Date.now());
+    if (ledger.consecutive_fail > 0) {
+        dot.dataset.mode = 'stale';
+        label.textContent = `Ledger run failing since ${formatUtc(time(ledger.last_failure_at))} \u00b7 forecasts shown are the last good record`;
+    } else if (fresh.state === 'fresh') {
+        label.textContent = `Ledger ran ${formatUtc(time(ledger.last_run))}${ledger.summary ? ` \u00b7 ${ledger.summary}` : ''}`;
+    } else if (fresh.state === 'unknown') {
+        dot.dataset.mode = 'stale';
+        label.textContent = 'No ledger run on record \u00b7 daily run due 06:30 UT';
+    } else {
+        dot.dataset.mode = 'stale';
+        label.textContent = `Ledger is ${Math.round(fresh.ageH)} h old \u00b7 last ran ${formatUtc(time(ledger.last_run))} \u00b7 daily run overdue`;
+    }
+    label.title = label.textContent;
 }
 
 function renderAll() {
@@ -840,6 +1005,11 @@ async function loadForecasts({ manual = false } = {}) {
         if (!response.ok) throw new Error(`Forecast endpoint returned ${response.status}`);
         const normalized = normalizeCmePayload(await response.json());
         state.events = normalized.events;
+        state.screened = normalized.screened;
+        state.ledger = normalized.ledger;
+        state.outlookDays = normalized.outlookDays;
+        state.runDays = normalized.runDays;
+        state.freshness = normalized.freshness;
         state.models = normalized.models;
         state.updatedAt = normalized.updatedAt;
         renderFreshness('live');

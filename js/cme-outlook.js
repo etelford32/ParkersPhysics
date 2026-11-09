@@ -221,6 +221,59 @@ export function bandRates(reg) {
     return { M: Math.max(0, rM - rX), X: rX };
 }
 
+const PROB_KEYS = ['c_flare_probability', 'm_flare_probability', 'x_flare_probability'];
+const hasProbability = (r) => PROB_KEYS.some((k) => Number(r?.[k]) > 0);
+const reportDay = (r) => String(r?.observed_date ?? '').trim().slice(0, 10);
+
+/**
+ * SWPC publishes a new report day's region rows HOURS before it fills in
+ * their flare probabilities: the rows arrive with positions and areas and
+ * 0 / 0 / 0. Measured on production 2026-11-09 — at the 06:30 UT lock AR4566
+ * read 0 % M / 0 % X, and the same file at 21:53 UT read 60 % / 15 %; the
+ * daily lock had printed an all-zero outlook on 9 of its first 13 days,
+ * including four days SWPC ended at 15–35 % M.
+ *
+ * When EVERY row of the newest report day is zero-filled, each region
+ * takes the probabilities of its own most recent earlier row that carried
+ * any (≤ maxAgeDays back). Position, area and the report day stay the
+ * newest row's. Nothing is invented: a region with no earlier non-zero row
+ * stays at zero, and a day on which even one region carries a probability
+ * is left exactly as published (a spotless plage reading 0 beside numbered
+ * spots is SWPC's real answer).
+ *
+ * @returns {{ rows: Array, carried: number, fromDay: string|null }}
+ */
+export function carryForwardProbabilities(rows, { maxAgeDays = 3 } = {}) {
+    const list = Array.isArray(rows) ? rows : [];
+    let newest = '';
+    for (const r of list) { const d = reportDay(r); if (d > newest) newest = d; }
+    const same = { rows: list, carried: 0, fromDay: null };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newest)) return same;
+    const today = list.filter((r) => reportDay(r) === newest);
+    if (today.some(hasProbability)) return same;
+    const floor = new Date(Date.parse(newest + 'T00:00:00Z') - maxAgeDays * DAY).toISOString().slice(0, 10);
+    const prior = new Map();          // region → most recent earlier row with a probability
+    for (const r of list) {
+        const d = reportDay(r);
+        if (!(d < newest) || d < floor || !hasProbability(r)) continue;
+        const key = String(r.region).trim();
+        const prev = prior.get(key);
+        if (!prev || reportDay(prev) < d) prior.set(key, r);
+    }
+    let carried = 0, fromDay = null;
+    const out = list.map((r) => {
+        if (reportDay(r) !== newest) return r;
+        const src = prior.get(String(r.region).trim());
+        if (!src) return r;
+        carried++;
+        if (!fromDay || reportDay(src) > fromDay) fromDay = reportDay(src);
+        const copy = { ...r };
+        for (const k of PROB_KEYS) copy[k] = src[k] ?? null;
+        return copy;
+    });
+    return carried ? { rows: out, carried, fromDay } : same;
+}
+
 /**
  * Issue an outlook.
  *
@@ -238,7 +291,8 @@ export function issueOutlook({ regionRows, cells, nowMs, days = OUTLOOK_DAYS } =
         || cells.length !== G.latDeg.length * G.lonDeg.length * G.v0Kms.length) {
         return { ok: false, reason: 'response-table-mismatch' };
     }
-    const regions = latestRegions(regionRows ?? [], { fallbackAnchorMs: nowMs });
+    const carried = carryForwardProbabilities(regionRows ?? []);
+    const regions = latestRegions(carried.rows, { fallbackAnchorMs: nowMs });
     if (!regions.length) return { ok: false, reason: 'no-regions' };
     const usable = regions.map((r) => ({ r, rates: bandRates(r) })).filter((x) => x.rates);
     if (!usable.length) return { ok: false, reason: 'no-probabilities' };
@@ -314,6 +368,10 @@ export function issueOutlook({ regionRows, cells, nowMs, days = OUTLOOK_DAYS } =
         coverage: {
             regionsSeen: regions.length,
             regionsUsable: usable.length,
+            // SWPC's newest report day was still zero-filled at issue time,
+            // so these regions carry their previous day's probabilities.
+            ...(carried.carried ? { probabilitiesCarried: carried.carried,
+                                    probabilitiesFromDay: carried.fromDay } : {}),
             note: 'Visible regions only — regions that emerge or rotate onto the disc '
                 + 'are not included, so later days are lower bounds.',
         },

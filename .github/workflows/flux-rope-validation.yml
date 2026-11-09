@@ -22,6 +22,10 @@ name: flux-rope-validation
 #                             drift vs the WASM (CME_OUTLOOK_PLAN.md)
 #   cme-outlook-cron          the cron's shadow lock + outlook lock/resolve/
 #                             score, incl. the migration-not-applied path
+#   cme-ledger-status         the daily-run record: /api/cme/skill against a
+#                             fake PostgREST (fresh / stale / failing / first
+#                             deploy), the calendar's per-day run states, and
+#                             the check cme-ledger-daily.yml runs on production
 #
 # Until this workflow no CI job ran any of these: the ledger was dead for
 # 11 days and its scored runs were rejected for two months with every
@@ -45,6 +49,13 @@ on:
       - 'tests/fixtures/flux-rope-ledger-*.json'
       - 'js/cme-source-prior.js'
       - 'js/cme-outlook*.js'
+      - 'js/cme-ledger-status.js'
+      - 'js/cme-forecast-page.js'
+      - 'js/pipeline-registry.js'
+      - 'scripts/check-cme-ledger.mjs'
+      - 'tests/cme-ledger-status.mjs'
+      - '.github/workflows/cme-ledger-daily.yml'
+      - 'vercel.json'
       - 'js/hero-sun-model.js'
       - 'api/_lib/noaa-regions.js'
       - 'tests/cme-source-prior.mjs'
@@ -67,6 +78,13 @@ on:
       - 'tests/fixtures/flux-rope-ledger-*.json'
       - 'js/cme-source-prior.js'
       - 'js/cme-outlook*.js'
+      - 'js/cme-ledger-status.js'
+      - 'js/cme-forecast-page.js'
+      - 'js/pipeline-registry.js'
+      - 'scripts/check-cme-ledger.mjs'
+      - 'tests/cme-ledger-status.mjs'
+      - '.github/workflows/cme-ledger-daily.yml'
+      - 'vercel.json'
       - 'js/hero-sun-model.js'
       - 'api/_lib/noaa-regions.js'
       - 'tests/cme-source-prior.mjs'
@@ -116,3 +134,5 @@ jobs:
           node tests/cme-outlook.mjs
           node tests/cme-outlook-strip.mjs
           node tests/cme-outlook-cron.mjs
+      - name: daily-run record (route + freshness rules + the production probe's check)
+        run: node tests/cme-ledger-status.mjs
