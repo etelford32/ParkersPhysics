@@ -220,7 +220,9 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             url: '/glacier-watch.html',
             crop: '#gw-stage-host',
             ready: '!!window.__glacierWatch && !!document.querySelector("#gw-stage-host canvas")',
-            hide: ['nav'],
+            // The in-stage overlays (legend, layer chips, tools) are absolute
+            // children of the stage host, which the stripper keeps for its canvas.
+            hide: ['nav', '#gw-stage .gw-ov'],
             settleMs: 10000,
             clipMs: 7000,
         },
@@ -349,7 +351,8 @@ export const SHOWCASE_ENTRIES = Object.freeze([
             url: '/galactic-map.html',
             crop: '#canvas-wrap',
             ready: '!!document.querySelector("#canvas-wrap canvas")',
-            hide: ['nav'],
+            // The toggle row and camera buttons sit inside the canvas wrap.
+            hide: ['nav', '.tog-row', '#cam-controls'],
             settleMs: 9000,
             clipMs: 7000,
         },
