@@ -966,7 +966,7 @@ lift at a given spot, and the rail says so.
 |---|---|---|---|---|
 | **T1** | **Elevation levels + sun exposure** | Terrarium decode `h = R·256 + G + B/256 − 32768`; Web-Mercator tile maths (round trip exact); slope/aspect by Sobel on a 2-node baseline in METRES with cos φ spacing (a tilted plane comes back exact at 0° and 60°; the aspect sign trap is the negative control); incidence `cos θ = cos s·sin α + sin s·cos α·cos(A☉ − aspect)` (flat ground = sin α exactly; a face square to the Sun = 1); the day's direct-beam ratio slope/flat (flat = 1 exactly; an equator-facing slope in winter > 1, pole-facing < 1). Self-shading only — no cast shadows, disclosed. | AWS Terrain Tiles (Terrarium PNG, public, attribution) through `/api/climalytix/dem` (SSRF-safe: z/x/y only, the upstream URL is rebuilt from a frozen candidate list; the no-coordinate form is a capability probe); the Sun is `js/sun-altitude.js` `solarPosition` (the site's one Sun) | **BUILT 2026-11-09** (below) |
 | **T2** | **Orographic updraft** | The exact kinematic lower boundary condition `w = u·∂h/∂x + v·∂h/∂y` (flow forced up a slope); windward/leeward from the same dot product. Gate: a uniform wind over a tilted plane gives the closed-form w; wind along the contours gives 0; reversing the wind flips the sign. | T1's DEM + our GFS 10 m u/v (airflow's field) | **BUILT 2026-11-09** (below) |
-| **T3** | **Anabatic / katabatic slope winds** | The Prandtl (1942) steady slope flow: amplitude `u₀ = Δθ·√(g·K/(θ₀·N²·Pr))` with height scale `l = (4·K·Pr/(N²·sin²α))^¼`, the forcing Δθ from T1's slope insolation by day and radiative cooling by night (upslope by day, downslope by night). Gate: the profile satisfies its ODE, flat ground gives 0, the sign follows the sign of Δθ. | T1 + GFS 2 m T, cloud (clear-sky fraction) | planned |
+| **T3** | **Anabatic / katabatic slope winds** | Prandtl (1942): θ′ = Δθ·e^(−n/λ)cos(n/λ), u = Δθ·μ·e^(−n/λ)sin(n/λ), λ = (4K·K_h/(N²sin²α))^¼, **μ = g/(θ₀·N·√Pr)** (corrected 2026-11-09: the first draft's √(gK/(θ₀N²Pr)) is not a speed and is now the gate's negative control); peak u = 0.3224·μ·Δθ at n = πλ/4, independent of the slope angle. Forcing Δθ = Q/h from each slope's OWN budget (Meinel beam × T1 incidence × Kasten–Czeplak cloud − net longwave). Gate: both ODEs by finite differences, the peak, sign follows Δθ, flat ground has none, gentle slopes left blank. | T1 + GFS total cloud + 2 m T (`nwp-field?vars=cloudPct,tempC`) | **BUILT 2026-11-09** (below) |
 | **T4** | **Thermals** | Deardorff convective velocity `w* = (g/θ · H/(ρ·c_p) · z_i)^⅓`; thermal tops at the boundary-layer depth z_i; cumulus base at the LCL (`z = 125 m · (T − T_d)`, Espy) — "blue" thermals when the LCL sits above z_i. Gate: w* scales as H^⅓ and z_i^⅓ exactly; H ≤ 0 gives no thermals; the LCL identity. | GFS sensible heat flux (SHTFL), boundary-layer height (HPBL), DSWRF — **added to `GFS_VARS` in the ingest** (format change → re-write the Python fixture on purpose) | planned |
 | **T5** | **Updraft (general)** | The vertical air motion available: orographic (T2) + thermal (T4) + slope (T3), each kept SEPARATE in the readout (never one invented total), plus GFS vertical velocity at 850/700 hPa (ω → w = −ω/(ρg)) where ingested. Gate: ω→w conversion exact at standard density; components add without double counting. | T2–T4 + GFS VVEL | planned |
 | **T6** | **Convection** | Parcel theory on the GFS column: CAPE, CIN, lifted index (ingested, not recomputed — GFS's own), the convective temperature, and a "convection outlook" timeline panel (CAPE, CIN, LCL, z_i, w*) in Explore. Gate: a dry-adiabatic sounding has CAPE 0; the LI sign convention (negative = unstable) pinned both ways. | GFS CAPE/CIN/LFTX (ingest) | planned |
@@ -1018,3 +1018,29 @@ closed-form ridge under a UNIFORM mocked wind (`windFn`) — a south wind gives
 wind along the contours gives none (negative control), and no wind field
 draws nothing; swapping u and v in the kernel fails 3 of the 4 browser tests
 and the node gate (checked).
+
+**T3 as built (2026-11-09).** `js/climalytix/slope-wind.js` (PURE,
+`tests/climalytix-slope-wind.mjs`) + the map's "Slope winds" overlay
+(`tests/climalytix-slope-wind.spec.js`). Prandtl's steady jet on every slope
+with u > 0 upslope, drawn as ARROWS along the fall line (amber up, blue down)
+— an overlay, so it can sit on Sun exposure. The forcing is each slope's own
+energy budget at the timeline's instant: (1 − albedo 0.2) × Meinel clear-sky
+beam × the slope's incidence × Kasten–Czeplak cloud damping, minus an 80 W/m²
+clear-sky net longwave loss damped 90 % under overcast; Δθ = Q/h with
+h = 150 (day) / 20 (night) W m⁻² K⁻¹, N = 0.010 / 0.020 s⁻¹, K = 5 / 0.5 m²/s,
+Pr = 1 — fixed typical constants, chosen so typical cases land in Whiteman's
+observed ranges (gated as RANGES: a sunlit 15° slope 1–6 m/s, a clear night
+1–4 m/s; measured 3.8 and 2.2 m/s). Direction, timing (an east face turns
+upslope first) and relative strength are the claims; speed is an order of
+magnitude, and the rail and notes say so. Slopes whose spin-up period
+2π/(N·sin α) exceeds 3 h are BLANK (below 3.3° by day, 1.7° at night) — the
+flow cannot reach the steady state the model draws. The cloud + 2 m T field
+is fetched on FIRST enable only; no cloud field ⇒ clear sky, labelled as an
+UPPER bound. The browser gate puts the map at local solar noon and midnight
+on the closed-form ridge and RECOMPUTES every reported value with the kernel
+and an independent Sun; sabotaging the map to ignore the cloud field fails
+the overcast test, and to ignore the timeline (wall clock) fails the noon
+test (both checked). Not modelled, and said: cast shadows, the valley and
+synoptic wind on top, and afternoon convective turbulence. One bug found by
+the gate: with the DEM down the rail sat on "Loading…" — the rail is now told
+on every draw.

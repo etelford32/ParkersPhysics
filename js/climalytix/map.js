@@ -53,6 +53,12 @@
  *             terrain grid and the SAME 10 m wind frame the airflow layer
  *             draws (its time index, not a second one). A fill in the
  *             one-at-a-time group; no wind or no DEM ⇒ nothing drawn.
+ *   slope     §19 T3 (slope-wind.js, PURE): Prandtl's anabatic / katabatic
+ *   winds     jet on every slope, forced by THAT slope's energy budget (the
+ *             Sun at the timeline's instant + GFS cloud + 2 m temperature),
+ *             drawn as ARROWS along the fall line — an overlay, not a fill,
+ *             so it can sit on Sun exposure. Gentle slopes are blank (the
+ *             flow cannot spin up); no cloud field ⇒ clear sky, disclosed.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -79,6 +85,7 @@ import {
     demPath, compass16, DEM_MIN_Z,
 } from './terrain.js';
 import { orographicGrid, orographicExtremes, orographicPaint, windSide, formatW } from './orographic.js';
+import { slopeWind, slopeWindGrid, slopeWindExtremes, ANABATIC_RGB, KATABATIC_RGB, ARROW_MIN_MS, THETA0_DEFAULT_K } from './slope-wind.js';
 import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 
@@ -109,7 +116,7 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
@@ -120,7 +127,7 @@ export function mountMap(root, deps) {
         drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
                  airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 },
                  aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null },
-                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false },
+                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false, slopewind: { arrows: 0, up: 0, down: 0 } },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -317,7 +324,7 @@ export function mountMap(root, deps) {
 
     // ── Terrain: elevation contours + sun exposure (terrain.js) ─────────────
     const D = M.dem;
-    function demWanted() { return (M.layers.elevation || M.layers.exposure || M.layers.orographic) && M.view && M.w; }
+    function demWanted() { return (M.layers.elevation || M.layers.exposure || M.layers.orographic || M.layers.slopewind) && M.view && M.w; }
 
     function demTile(z, x, y) {
         const key = `${z}/${x}/${y}`;
@@ -479,6 +486,100 @@ export function mountMap(root, deps) {
                  n: D.oroExt?.n ?? 0, resM: D.resM ?? null };
     }
 
+    // ── Slope winds (T3) ─────────────────────────────────────────────────
+    const SW = { forcing: null, state: 'idle', note: '', cloud: false, key: '', grid: null, ext: null, sig: '' };
+    function slopeTimeMs() { return M.timeMs ?? Date.now(); }
+    /** The forcing's own time index (its run's times) for the instant on show, or null. */
+    function forcingIndex() {
+        const f = SW.forcing;
+        return f?.times ? fieldTimeIndex(f.times, slopeTimeMs()) : null;
+    }
+    function forcingAt(tf) {
+        const f = SW.forcing;
+        if (!f || tf == null) return { cloudAt: () => null, theta0At: () => null };
+        const cloud = { ...f, values: f.cloud }, temp = f.temp ? { ...f, values: f.temp } : null;
+        return {
+            cloudAt: (lat, lon) => { const c = fieldSample(cloud, tf, lat, lon); return c == null ? null : c / 100; },
+            theta0At: (lat, lon) => { const t = temp ? fieldSample(temp, tf, lat, lon) : null; return t == null ? null : t + 273.15; },
+        };
+    }
+    function slopeFor() {
+        if (!D.grid) return null;
+        const timeMs = slopeTimeMs(), tf = forcingIndex();
+        const key = `${D.key}|${Math.floor(timeMs / 600_000)}|${tf}|${SW.forcing?.run ?? 'none'}`;
+        if (SW.key !== key) {
+            const when = new Date(timeMs);
+            SW.grid = slopeWindGrid(D.grid, D.sa, { sunAt: (lat, lon) => solarPosition(when, lat, lon), ...forcingAt(tf) });
+            SW.key = key; SW.extKey = '';
+        }
+        return SW.grid;
+    }
+
+    function arrow(x, y, bearing, len, rgb) {
+        const dx = Math.sin(bearing * Math.PI / 180), dy = -Math.cos(bearing * Math.PI / 180);
+        const x0 = x - dx * len / 2, y0 = y - dy * len / 2, x1 = x + dx * len / 2, y1 = y + dy * len / 2;
+        const hx = -dy, hy = dx, hl = Math.min(6, len * 0.4);
+        const path = () => {
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+            ctx.moveTo(x1 - dx * hl + hx * hl * 0.55, y1 - dy * hl + hy * hl * 0.55); ctx.lineTo(x1, y1);
+            ctx.lineTo(x1 - dx * hl - hx * hl * 0.55, y1 - dy * hl - hy * hl * 0.55);
+        };
+        ctx.lineWidth = 3.4; ctx.strokeStyle = 'rgba(6,10,18,.75)'; path(); ctx.stroke();
+        ctx.lineWidth = 1.6; ctx.strokeStyle = `rgb(${rgb.map((c) => Math.round(c * 255)).join(',')})`; path(); ctx.stroke();
+    }
+
+    function drawSlopeWind() {
+        M.drawn.slopewind = { arrows: 0, up: 0, down: 0 };
+        if (M.layers.slopewind && D.grid) drawSlopeArrows();
+        // Always tell the rail — a dead DEM must say so, not sit on "loading".
+        const info = slopeInfo();
+        const sig = JSON.stringify([info.state, info.timeMs, info.up?.u, info.down?.u, info.counts, info.cloud]);
+        if (SW.sig !== sig) { SW.sig = sig; deps.onSlope?.(info); }
+    }
+
+    function drawSlopeArrows() {
+        const sw = slopeFor();
+        if (!sw) return;
+        const g = D.grid, STEP = 30;
+        ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        for (let y = STEP / 2; y < M.h; y += STEP) {
+            for (let x = STEP / 2; x < M.w; x += STEP) {
+                const p = pxToGeo(M.view, M.w, M.h, x, y);
+                const i = Math.round((g.latN - p.lat) / g.dlat), j = Math.round((wrapNear(p.lon, g.lonW + 180) - g.lonW) / g.dlon);
+                if (i < 0 || j < 0 || i >= g.nRows || j >= g.nCols) continue;
+                const k = i * g.nCols + j, u = sw.u[k];
+                if (!Number.isFinite(u) || Math.abs(u) < ARROW_MIN_MS) continue;
+                arrow(x, y, sw.toward[k], Math.min(26, 8 + 5 * Math.abs(u)), u > 0 ? ANABATIC_RGB : KATABATIC_RGB);
+                M.drawn.slopewind.arrows++;
+                if (u > 0) M.drawn.slopewind.up++; else M.drawn.slopewind.down++;
+            }
+        }
+        ctx.restore();
+        if (SW.extKey !== `${SW.key}|${M.view.lat}|${M.view.lon}|${M.view.span}`) {
+            SW.extKey = `${SW.key}|${M.view.lat}|${M.view.lon}|${M.view.span}`;
+            SW.ext = slopeWindExtremes(g, sw.u, demBox());
+        }
+    }
+
+    function slopeInfo() {
+        if (!M.layers.slopewind) return { state: 'off' };
+        if (D.state === 'down') return { state: 'nodem', note: D.note };
+        if (SW.state === 'loading' || SW.state === 'idle') return { state: 'loading', note: 'Loading the cloud field…' };
+        if (!D.grid) return { state: 'loading', note: D.note || 'Loading elevation…' };
+        return { state: 'ok', timeMs: slopeTimeMs(), forcingIndex: forcingIndex(), cloud: SW.cloud && forcingIndex() != null,
+                 forcingNote: SW.note, counts: SW.grid?.counts ?? null,
+                 up: SW.ext?.up ?? null, down: SW.ext?.down ?? null, resM: D.resM ?? null };
+    }
+
+    /** The slope wind at one point, from the SAME inputs as the grid (hover + test hook). */
+    function slopeAt(lat, lon, slopeDeg, aspectDeg) {
+        if (!M.layers.slopewind || slopeDeg == null) return null;
+        const f = forcingAt(forcingIndex());
+        const c = f.cloudAt(lat, lon), t = f.theta0At(lat, lon);
+        return slopeWind({ slopeDeg, aspectDeg: aspectDeg ?? NaN, sun: solarPosition(new Date(slopeTimeMs()), lat, lon),
+            cloudFrac: c ?? 0, theta0K: t ?? THETA0_DEFAULT_K });
+    }
+
     function drawElevation() {
         M.drawn.elevation = { lines: 0, step: null, labels: [] };
         if (!M.layers.elevation || !D.grid) return;
@@ -524,8 +625,19 @@ export function mountMap(root, deps) {
         const sl = inside ? D.sa.slope[k] : NaN, as = inside ? D.sa.aspect[k] : NaN;
         const exp = M.layers.exposure && inside ? exposureFor()?.[k] : NaN;
         const oro = M.layers.orographic && inside ? orographicFor()?.[k] : NaN;
-        return { h, slope: Number.isFinite(sl) ? sl : null, aspect: Number.isFinite(as) ? as : null,
-                 ratio: Number.isFinite(exp) ? exp : null, w: Number.isFinite(oro) ? oro : null };
+        const slope = Number.isFinite(sl) ? sl : null, aspect = Number.isFinite(as) ? as : null;
+        return { h, slope, aspect, ratio: Number.isFinite(exp) ? exp : null, w: Number.isFinite(oro) ? oro : null,
+                 slopeWind: inside ? slopeAt(D.grid.latN - i * D.grid.dlat, D.grid.lonW + j * D.grid.dlon, slope, aspect) : null };
+    }
+
+    function slopeWindText(r) {
+        if (!r) return null;
+        if (r.regime === 'flat') return 'flat: no slope wind';
+        if (r.regime === 'gentle') return 'too gentle for a slope wind to spin up';
+        if (r.regime === 'neutral' || r.u == null) return 'no slope wind (heating balanced)';
+        const speed = deps.formatWind ? deps.formatWind(Math.abs(r.u)) : `${Math.abs(r.u).toFixed(1)} m/s`;
+        const jet = deps.formatHeight ? deps.formatHeight(r.zJet) : `${Math.round(r.zJet)} m`;
+        return `${r.u > 0 ? 'upslope' : 'downslope'} ${speed} toward ${compass16(r.toward)} (${r.regime}, jet ~${jet} up)`;
     }
 
     function demInfo() {
@@ -881,6 +993,7 @@ export function mountMap(root, deps) {
         drawOrographic();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
         drawElevation();
+        drawSlopeWind();
         M.drawn.labels = drawLabels();
         drawMonitors();
         drawSite();
@@ -952,12 +1065,13 @@ export function mountMap(root, deps) {
             tip.style.transform = `translate(${Math.max(4, x)}px, ${M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14}px)`;
             return;
         }
-        const tr = (M.layers.elevation || M.layers.exposure || M.layers.orographic) ? terrainAt(g.lat, g.lon) : null;
+        const tr = (M.layers.elevation || M.layers.exposure || M.layers.orographic || M.layers.slopewind) ? terrainAt(g.lat, g.lon) : null;
         const terrTxt = tr && tr.h != null
             ? [deps.formatHeight ? deps.formatHeight(tr.h) : `${Math.round(tr.h)} m`,
                tr.slope != null ? `${tr.slope.toFixed(0)}° slope${tr.slope >= 1 && tr.aspect != null ? ` facing ${compass16(tr.aspect)}` : ''}` : null,
                tr.ratio != null ? `${tr.ratio.toFixed(2)}× flat-ground sun ${M.exposureMode === 'now' ? 'now' : 'today'}` : null,
-               tr.w != null ? `${formatW(tr.w, { feet: deps.heightUnits?.().sym === 'ft' })} ${windSide(tr.w, tr.slope)}` : null].filter(Boolean).join(' · ')
+               tr.w != null ? `${formatW(tr.w, { feet: deps.heightUnits?.().sym === 'ft' })} ${windSide(tr.w, tr.slope)}` : null,
+               slopeWindText(tr.slopeWind)].filter(Boolean).join(' · ')
             : null;
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
@@ -1070,7 +1184,12 @@ export function mountMap(root, deps) {
         setLayer(name, on) {
             M.layers[name] = !!on; requestDraw();
             if (name === 'airflow') updateFlow();
-            if ((name === 'elevation' || name === 'exposure' || name === 'orographic') && on) scheduleDem();
+            if ((name === 'elevation' || name === 'exposure' || name === 'orographic' || name === 'slopewind') && on) scheduleDem();
+        },
+        /** The slope-wind forcing (GFS cloud + 2 m T); state 'loading' | 'live' | 'stale' | 'partial'. */
+        setSlopeForcing(state, body, note, cloud) {
+            SW.state = state; SW.forcing = body || null; SW.note = note || ''; SW.cloud = !!cloud; SW.key = '';
+            requestDraw();
         },
         setExposureMode(mode) { M.exposureMode = mode === 'now' ? 'now' : 'today'; D.expKey = ''; requestDraw(); deps.onDem?.(demInfo()); },
         /** Terrain at a point (test + console hook). */
@@ -1120,6 +1239,7 @@ export function mountMap(root, deps) {
                 aq: aqInfo(),
                 dem: demInfo(),
                 orographic: oroInfo(),
+                slopewind: slopeInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

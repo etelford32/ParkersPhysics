@@ -161,6 +161,32 @@ export async function loadWindField(site, { signal } = {}) {
 }
 
 /**
+ * The slope-wind FORCING (plan §19 T3): GFS total cloud and 2 m temperature
+ * on the airflow window, fetched on FIRST enable of the layer only. Missing
+ * cloud is not substituted with a guess — the kernel assumes CLEAR SKY, which
+ * is the UPPER bound on both upslope and downslope flow, and the note says so.
+ * Resolves { state, body | null, cloud: bool, note }.
+ */
+export async function loadSlopeForcing(site, { signal } = {}) {
+    try {
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars: ['cloudPct', 'tempC'] }), signal);
+        if (!j?.fields?.cloudPct) {
+            const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
+            return { state: 'partial', body: null, cloud: false,
+                note: `No GFS cloud field (${why}): clear sky assumed, so these are UPPER bounds; base temperature 15 °C.` };
+        }
+        return {
+            state: j.freshness === 'fresh' ? 'live' : 'stale', cloud: true,
+            body: { ...j, cloud: j.fields.cloudPct, temp: j.fields.tempC ?? null },
+            note: `GFS total cloud + 2 m temperature, run ${j.run} (${ageText(j.age_seconds)})`,
+        };
+    } catch (e) {
+        return { state: 'partial', body: null, cloud: false,
+            note: `No GFS cloud field (${e?.message || 'unreachable'}): clear sky assumed, so these are UPPER bounds.` };
+    }
+}
+
+/**
  * The CAMS air-quality field around the site (BOOTSTRAP source — Open-Meteo's
  * free tier; the page badges it). Resolves { state, body | null, note }.
  */

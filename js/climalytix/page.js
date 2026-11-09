@@ -25,7 +25,7 @@ import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
-import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors } from './loaders.js';
+import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing } from './loaders.js';
 import { windRose, prevailing, pollutionRose, ROSE_SPEED_EDGES, FLOW_SPEED_TOP_MS } from './airflow.js';
 import { pm25Aqi, alignByInstant } from './aq-field.js';
 import { fieldSample } from './map-view.js';
@@ -181,11 +181,48 @@ function loadMapField(site, signal) {
         renderRose();
     });
     S.map?.setWind('loading', null, 'Loading the wind field…');
+    S.slopeSite = null;
+    requestSlopeForcing();
     renderRose();
     loadWindField(site, { signal }).then((r) => {
         if (signal.aborted || S.site !== site) return;
         S.map?.setWind(r.state, r.body, r.note);
     });
+}
+
+/**
+ * The slope-wind forcing (GFS cloud + 2 m T) is fetched on FIRST enable of
+ * the layer, once per site — every other visitor pays nothing for it.
+ */
+function requestSlopeForcing() {
+    if (!$('#cx-layer-slope')?.checked || !S.site || !S.map || S.slopeSite === S.site) return;
+    const site = S.site;
+    S.slopeSite = site;
+    S.map.setSlopeForcing('loading', null, 'Loading the cloud field…', false);
+    loadSlopeForcing(site).then((r) => {
+        if (S.site !== site) return;
+        S.map.setSlopeForcing(r.state, r.body, r.note, r.cloud);
+    });
+}
+
+/** Rail status for slope winds: the regime in view, the strongest flow, the forcing's source. */
+function renderSlopeRail(info) {
+    const st = $('#cx-slope-status');
+    if (!info || info.state === 'off') { st.textContent = ''; return; }
+    st.dataset.state = info.state;
+    if (info.state === 'loading') { st.textContent = info.note || 'Loading…'; return; }
+    if (info.state === 'nodem') { st.textContent = 'Elevation tiles unavailable — no slopes, so no slope winds.'; return; }
+    const local = new Date(info.timeMs + S.utcOffsetS * 1000);
+    const c = info.counts || {};
+    const regime = (c.anabatic || 0) > (c.katabatic || 0) ? 'Daytime heating: air is sliding UP the sunlit slopes.'
+        : (c.katabatic || 0) > 0 ? 'Cooling: air is draining DOWN the slopes.' : 'No slope wind: heating and cooling balance.';
+    const where = (p) => `${Math.abs(p.lat).toFixed(2)}°${p.lat >= 0 ? 'N' : 'S'} ${Math.abs(p.lon).toFixed(2)}°${p.lon >= 0 ? 'E' : 'W'}`;
+    const sp = (u) => fmtText('wind', Math.abs(u), S.units);
+    st.innerHTML = `<b>${esc(local.toUTCString().slice(0, 3))} ${esc(local.toISOString().slice(11, 16))} local.</b> ${esc(regime)}`
+        + (info.up ? `<br>Strongest upslope: ${esc(sp(info.up.u))} at ${where(info.up)}.` : '')
+        + (info.down ? `<br>Strongest downslope: ${esc(sp(info.down.u))} at ${where(info.down)}.` : '')
+        + `<br>${esc(info.forcingNote || '')}`
+        + (!info.cloud && !(info.forcingNote || '').includes('UPPER') ? ' The cloud field does not cover this time: clear sky assumed, so these are UPPER bounds.' : '');
 }
 
 /** Rail status for the airflow layer. */
@@ -415,7 +452,7 @@ function renderOroRail(info) {
 function renderDemRail(info) {
     const st = $('#cx-dem-status');
     const elev = $('#cx-layer-elev').checked, exp = $('#cx-layer-exp').checked, oro = $('#cx-layer-oro').checked;
-    if (!elev && !exp && !oro) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
+    if (!elev && !exp && !oro && !$('#cx-layer-slope').checked) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
     st.dataset.state = info?.state || 'loading';
     if (!info || info.state === 'idle' || info.state === 'loading') { st.textContent = info?.note || 'Loading elevation…'; return; }
     if (info.state === 'down') { st.textContent = info.note; return; }
@@ -481,6 +518,7 @@ function mountLocationMap() {
         onAq: renderAqRail,
         onDem: renderDemRail,
         onOro: renderOroRail,
+        onSlope: renderSlopeRail,
         // Elevation levels are chosen in the reader's height unit (round feet for a ft reader).
         heightUnits: () => ({
             toDisplay: (m) => fmt('height', m, S.units).value,
@@ -512,6 +550,12 @@ function mountLocationMap() {
     $('#cx-layer-aq').addEventListener('change', (ev) => showField('aq', ev.target.checked));
     $('#cx-layer-exp').addEventListener('change', (ev) => showField('exp', ev.target.checked));
     $('#cx-layer-oro').addEventListener('change', (ev) => showField('oro', ev.target.checked));
+    $('#cx-layer-slope').addEventListener('change', (ev) => {
+        S.map.setLayer('slopewind', ev.target.checked);
+        $('#cx-slope-key').hidden = !ev.target.checked; $('#cx-slope-status').hidden = !ev.target.checked;
+        requestSlopeForcing();
+        renderSlopeRail(S.map.state.slopewind);
+    });
     $('#cx-layer-elev').addEventListener('change', (ev) => {
         S.map.setLayer('elevation', ev.target.checked);
         renderDemRail(S.map.state.dem);

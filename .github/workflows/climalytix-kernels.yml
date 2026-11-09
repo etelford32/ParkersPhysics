@@ -42,6 +42,11 @@
 #                            plane at 0°/60°, zero along the contours, sign
 #                            flips with the wind, gaps stay NaN; swapped u/v
 #                            is the NEGATIVE CONTROL
+#   climalytix-slope-wind.mjs §19 T3 Prandtl slope winds: both ODEs by finite
+#                            differences, the πλ/4 peak, slope-independent
+#                            speed, sign, flat/gentle blank, the budget, ranges;
+#                            the plan's first (non-speed) amplitude is the
+#                            NEGATIVE CONTROL
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
@@ -132,6 +137,8 @@ jobs:
         run: node tests/climalytix-terrain.mjs
       - name: orographic lift
         run: node tests/climalytix-orographic.mjs
+      - name: slope winds (Prandtl)
+        run: node tests/climalytix-slope-wind.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)
