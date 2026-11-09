@@ -1256,6 +1256,20 @@ async function ensureWeather(l) {
     return fc;
 }
 
+// Page events for the inline 3D module in launch-planner.html. That module
+// imports three.js and can finish loading AFTER this one has already fetched
+// the (CDN-cached) feed, so each event's last payload is ALSO stashed on
+// window and the module replays it on mount — otherwise the Next-Launches
+// strip stayed empty and a ?launch= deep link never reached the canvas.
+const PAGE_EVENT_STASH = {
+    'lp:launches-loaded': '__lpLastLaunches',
+    'lp:launch-selected': '__lpLastSelected',
+};
+function emitPageEvent(name, detail) {
+    if (PAGE_EVENT_STASH[name]) window[PAGE_EVENT_STASH[name]] = detail;
+    document.dispatchEvent(new CustomEvent(name, { detail }));
+}
+
 async function selectLaunch(id) {
     state.selectedId = id;
     renderRoster();
@@ -1273,9 +1287,7 @@ async function selectLaunch(id) {
     // vehicle name string for launches without a ruleset match. The 3D
     // canvas's inline-script listener decodes this into a (vehicle, variant)
     // tuple and calls api.setVehicle(...).
-    document.dispatchEvent(new CustomEvent('lp:launch-selected', {
-        detail: { launch: l },
-    }));
+    emitPageEvent('lp:launch-selected', { launch: l });
 }
 
 function updateUrl() {
@@ -1304,9 +1316,7 @@ async function init() {
 
     // Broadcast the loaded roster so the top-of-page Next-Launches strip
     // can render alongside the 3D canvas.
-    document.dispatchEvent(new CustomEvent('lp:launches-loaded', {
-        detail: { launches: state.launches, fetched_at: data.fetched_at },
-    }));
+    emitPageEvent('lp:launches-loaded', { launches: state.launches, fetched_at: data.fetched_at });
 
     // Kick off weather prefetch for the first 8 launches so initial sort reflects verdicts.
     const soon = state.launches.slice(0, 8);
@@ -1369,9 +1379,7 @@ function wireControls() {
             state.weatherCache.clear();
             state.scoreCache.clear();
             state.selectedId = null;
-            document.dispatchEvent(new CustomEvent('lp:launches-loaded', {
-                detail: { launches: state.launches, fetched_at: data.fetched_at },
-            }));
+            emitPageEvent('lp:launches-loaded', { launches: state.launches, fetched_at: data.fetched_at });
             applyFilters();
             renderProviderFilters();
             renderRoster();

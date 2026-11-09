@@ -22,10 +22,16 @@
  *     WASM (js/climate-lab/lab-satellites.js header); this judges that path
  *   · a lab watch triggers on the fixture's gusts
  *   · phone width: no horizontal scroll
+ *
+ * Every test boots with the fixtures AND the page's Date pinned to one
+ * instant, :20 past the current hour (`labAnchor`). Unpinned, the gate read
+ * the fixture at whatever minute it ran, and from :46 to :59 the barometer
+ * has no 3-hour tendency (the fixture's pressure gap) — it failed twice on
+ * 2026-11-09 a few minutes before 03:00 UTC.
  */
 
 import { test, expect } from '@playwright/test';
-import { installLabMocks } from './fixtures/climate-lab-mocks.mjs';
+import { installLabMocks, pinPageClock, labAnchor } from './fixtures/climate-lab-mocks.mjs';
 
 const BOULDER = { lat: 40.015, lon: -105.271, city: 'Boulder, CO' };
 const TOKYO = { lat: 35.6762, lon: 139.6503, city: 'Tokyo' };
@@ -36,7 +42,12 @@ test.use({ locale: 'en-US', timezoneId: 'America/Denver', reducedMotion: 'reduce
 async function boot(page, { device = BOULDER, account = null, prefs = null } = {}) {
     const errors = [];
     page.on('pageerror', (e) => errors.push(`${e.name}: ${e.message}`));
-    await installLabMocks(page);
+    // ONE instant for the fixtures and the page (climate-lab-mocks.mjs
+    // header): the fixture is valid only for :00–:45 of its hour, and an
+    // unpinned run between :46 and :59 lost the barometer's "Falling" chip.
+    const nowMs = labAnchor();
+    await installLabMocks(page, { nowMs });
+    await pinPageClock(page, nowMs);
     await page.addInitScript(({ device, account, prefs }) => {
         sessionStorage.setItem('pp_demo_mode', '1');
         localStorage.setItem('pp_consent_v1', JSON.stringify({ strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));

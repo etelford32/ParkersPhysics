@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -90,7 +90,62 @@ footer a:hover{color:var(--text)}
   .page-header h1{font-size:1.5rem}
   .choice-card{padding:18px 16px}
 }
+
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+:root.theme-light body{background:var(--pl-grad-hero);background-attachment:fixed}
+html.theme-light #auth-gate{background:var(--pl-grad-hero)}
+html.theme-light #auth-gate img{box-shadow:var(--pl-shadow)}
+html.theme-light .gate-signin{border-color:var(--pl-blue);color:var(--pl-blue-deep);background:var(--pl-card)}
+html.theme-light .gate-signup{background:var(--pl-btn);color:#fff}
+html.theme-light .gate-signup:hover{background:var(--pl-btn-hover);color:#fff}
+
+html.theme-light .page-header h1{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text}
+html.theme-light .page-header p{color:var(--pl-text-3)}
+html.theme-light .welcome-eyebrow{color:var(--pl-blue-deep);background:var(--pl-blue-soft);border-color:rgba(21,96,212,.30)}
+
+html.theme-light .choice-card{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .choice-card:hover{border-color:rgba(21,96,212,.45);background:var(--pl-card);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .choice-card:focus-visible{outline-color:var(--pl-blue-bright)}
+html.theme-light .choice-title{color:var(--pl-text-1)}
+html.theme-light .choice-desc{color:var(--pl-text-3)}
+html.theme-light .choice-cta{color:var(--pl-blue)}
+
+html.theme-light .tutorial-section h2{color:var(--pl-text-1)}
+html.theme-light .tutorial-section .sub{color:var(--pl-text-3)}
+html.theme-light .tutorial-card{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light .tutorial-card:hover{background:var(--pl-card);border-color:rgba(21,96,212,.40);box-shadow:var(--pl-shadow)}
+html.theme-light .tutorial-title{color:var(--pl-text-1)}
+html.theme-light .tutorial-desc{color:var(--pl-text-4)}
+html.theme-light .tutorial-tag{color:var(--pl-blue-deep);background:var(--pl-blue-soft);border-color:rgba(21,96,212,.28)}
+
+html.theme-light #location-form{background:var(--pl-bg-soft);border-color:rgba(21,96,212,.30)}
+html.theme-light #location-form h3{color:var(--pl-text-1)}
+html.theme-light #location-form p{color:var(--pl-text-3)}
+html.theme-light .loc-row input:focus{border-color:var(--pl-blue)}
+html.theme-light .loc-row button{background:var(--pl-card);border-color:var(--pl-border-strong);color:var(--pl-text-2)}
+html.theme-light .loc-row button:hover{background:var(--pl-blue-soft);color:var(--pl-text-1)}
+html.theme-light .loc-row button.primary{background:var(--pl-btn);border-color:transparent;color:#fff}
+html.theme-light .loc-row button.primary:hover{background:var(--pl-btn-hover);color:#fff}
+html.theme-light .loc-status.ok{background:rgba(13,122,69,.07);border-color:rgba(13,122,69,.30);color:var(--pl-ok)}
+html.theme-light .loc-status.err{background:rgba(192,38,45,.06);border-color:rgba(192,38,45,.30);color:var(--pl-danger)}
+
+html.theme-light .upgrade-pill{background:linear-gradient(90deg,var(--pl-blue-soft),#e3f4ff);border-color:rgba(21,96,212,.26)}
+html.theme-light .upgrade-pill strong{color:var(--pl-text-1)}
+html.theme-light .upgrade-pill span{color:var(--pl-text-3) !important}
+html.theme-light .upgrade-pill a{color:var(--pl-blue-deep)}
+
+/* Aurora-alert confirmation banner — self-contained inline styles */
+html.theme-light #aurora-banner{background:#fff6e8 !important;border-color:rgba(138,90,0,.30) !important;color:var(--pl-text-2) !important}
+html.theme-light #aurora-banner-title{color:var(--pl-warn) !important}
+html.theme-light #aurora-banner-msg{color:var(--pl-text-2) !important}
+
+html.theme-light footer a{color:var(--pl-text-3)}
+html.theme-light footer a:hover{color:var(--pl-blue)}
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
     <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -150,7 +150,51 @@
         footer { text-align: center; padding: 2rem; color: #444; font-size: .8rem; border-top: 1px solid rgba(255,255,255,.06); }
         footer a { color: #666; text-decoration: none; }
         footer a:hover { color: #ffd700; }
+        /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+        html.theme-light .hero h1 { background: var(--pl-grad-headline); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        html.theme-light .hero p { color: var(--pl-text-3); }
+        html.theme-light .panel { background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--pl-shadow); }
+        html.theme-light .panel h2 { color: var(--pl-text-1); }
+        html.theme-light .panel .panel-sub { color: var(--pl-text-4); }
+        html.theme-light .type-opt { background: var(--pl-bg-soft); border-color: var(--pl-border); }
+        html.theme-light .type-opt:hover { border-color: var(--pl-border-strong); }
+        html.theme-light .type-opt .t-label { color: var(--pl-text-1); }
+        html.theme-light .type-opt .t-sub { color: var(--pl-text-4); }
+        html.theme-light .type-opt:has(input:checked) { border-color: var(--pl-blue); background: var(--pl-blue-soft); box-shadow: inset 0 0 0 1px var(--pl-blue); }
+        html.theme-light .type-opt:has(input:checked) .t-label { color: var(--pl-blue-deep); }
+        html.theme-light .form-group label { color: var(--pl-text-3); }
+        html.theme-light .form-group .hint { color: var(--pl-text-4); }
+        html.theme-light .submit-btn { background: var(--pl-grad-btn); color: #fff; }
+        html.theme-light .submit-btn:hover { background: var(--pl-btn-hover); opacity: 1; }
+        html.theme-light .status-msg.ok  { background: rgba(13,122,69,.07); border-color: rgba(13,122,69,.3); color: var(--pl-ok); }
+        html.theme-light .status-msg.err { background: rgba(192,38,45,.06); border-color: rgba(192,38,45,.3); color: var(--pl-danger); }
+        html.theme-light .release { border-left-color: rgba(21,96,212,.35); }
+        html.theme-light .release-tag { color: var(--pl-blue-deep); background: var(--pl-blue-soft); border-color: rgba(21,96,212,.28); }
+        html.theme-light .release-date { color: var(--pl-text-4); }
+        html.theme-light .release-title { color: var(--pl-text-1); }
+        html.theme-light .change-list li { color: var(--pl-text-2); }
+        html.theme-light .change-list li.feat::before { background: var(--pl-ok); }
+        html.theme-light .change-list li.fix::before  { background: #c26a00; }
+        html.theme-light .change-list li.perf::before { background: var(--pl-blue-bright); }
+        html.theme-light .change-list li .kind { opacity: 1; }
+        html.theme-light .change-list li.feat .kind { color: var(--pl-ok); }
+        html.theme-light .change-list li.fix  .kind { color: var(--pl-warn); }
+        html.theme-light .change-list li.perf .kind { color: var(--pl-blue); }
+        html.theme-light .devlog-foot { color: var(--pl-text-4); border-top-color: var(--pl-border); }
+        html.theme-light .devlog-foot a { color: var(--pl-blue); }
+        html.theme-light .devlog-foot a:hover { color: var(--pl-blue-deep); }
+        html.theme-light footer a { color: var(--pl-text-3); }
+        html.theme-light footer a:hover { color: var(--pl-blue); }
+        /* inline-styled labels in the form markup */
+        html.theme-light .panel label[style*="color:#888"] { color: var(--pl-text-3) !important; }
+        html.theme-light .panel label span[style*="color:#778"] { color: var(--pl-text-4) !important; }
     </style>
+    <link rel="stylesheet" href="js/recent-development.css">
+    <link rel="alternate" type="application/rss+xml" title="Parkers Physics — Recent Development" href="/recent-development.xml">
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 
@@ -257,73 +301,18 @@
         </div>
 
         <!-- ── Devlog ──────────────────────────────────────────────── -->
+        <!-- Rendered from js/dev-log.js — the ONE build log. The hand-written
+             list that used to live here stopped at 2026-05-06 without anyone
+             noticing; recent-development.html is the full page. -->
         <div class="panel">
             <h2>Recent changes</h2>
-            <p class="panel-sub">A curated digest of the most recent shipped fixes, features, and performance work. Newest first.</p>
+            <p class="panel-sub">The newest entries from our build log. Newest first.</p>
 
-            <div class="devlog">
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-05-06</span>
-                        <span class="release-title">Galactic Map polish</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="fix"><span class="kind">fix</span>Aspect-aware camera FOV — wide-view stretching is gone on ultrawide monitors.</li>
-                        <li class="feat"><span class="kind">feat</span>Galactic Map HUD and Sun-orbit panels are now minimizable and draggable.</li>
-                        <li class="feat"><span class="kind">feat</span>Unified <code>gp-panel</code> chrome across the sidebar, zoom bar, and coordinate display.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-05-04</span>
-                        <span class="release-title">Mission Planner overhaul</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="fix"><span class="kind">fix</span>Repaired broken camera that froze on first load.</li>
-                        <li class="feat"><span class="kind">feat</span>Intuitive solar-system navigation — click any body to focus and frame it.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-05-02</span>
-                        <span class="release-title">Sun simulator — Phase 4.6 / 4.7</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="fix"><span class="kind">fix</span>Active-region feed wipe regression — flares now persist across data refreshes.</li>
-                        <li class="perf"><span class="kind">perf</span>Sun mesh LOD — coarser geometry when zoomed out, no visible quality loss.</li>
-                        <li class="perf"><span class="kind">perf</span>Baked fBm noise to a 256² atlas — fewer per-frame shader ops on low-end GPUs.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-04-30</span>
-                        <span class="release-title">Home page refresh</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="feat"><span class="kind">feat</span>New Upper Atmosphere card, refocused Earth card, refreshed live stats.</li>
-                        <li class="feat"><span class="kind">feat</span>Operations page: re-entry refinement plus published sprint status doc.</li>
-                    </ul>
-                </div>
-
-                <div class="release">
-                    <div class="release-head">
-                        <span class="release-tag">2026-04-28</span>
-                        <span class="release-title">Earth + Solar System</span>
-                    </div>
-                    <ul class="change-list">
-                        <li class="feat"><span class="kind">feat</span>Earth LOD pipeline now wired to live NASA precipitation data.</li>
-                        <li class="feat"><span class="kind">feat</span>Solar System orrery: full time-controls (play / pause / scrub).</li>
-                        <li class="feat"><span class="kind">feat</span>Galilean moons merged into the main scene as a Yoshida-4 N-body solve.</li>
-                    </ul>
-                </div>
-            </div>
+            <div class="devlog" id="devlog-latest"></div>
 
             <div class="devlog-foot">
-                Looking for the full commit history? Browse the source on
-                <a href="https://github.com/etelford32/parkersphysics" target="_blank" rel="noopener">GitHub</a>.
+                See every simulation, data set, layer and fix, sprint by sprint, on
+                <a href="recent-development.html">Recent Development &rarr;</a>
             </div>
         </div>
     </div>
@@ -395,6 +384,12 @@
             btn.textContent = 'Send feedback →';
         }
     });
+</script>
+<script type="module">
+import { latest } from './js/dev-log.js';
+import { compactEntryHtml } from './js/recent-development.js';
+const host = document.getElementById('devlog-latest');
+if (host) host.innerHTML = latest(5).map(compactEntryHtml).join('');
 </script>
 </body>
 </html>

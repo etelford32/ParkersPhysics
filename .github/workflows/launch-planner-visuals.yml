@@ -1,0 +1,127 @@
+name: launch-planner-visuals
+
+# Browser gates for the launch planner's 3D stage (launch-planner.html +
+# js/launch-*.js). Added 2026-11-08 after the stage shipped as a black
+# rectangle on real GPUs while the specs — which no workflow ran — were green.
+#
+#   chromium      the full launch-planner suite + the pure kernel tests
+#   cross-browser the render-health gate on Firefox and WebKit (it plants the
+#                 NaN/Inf that a GPU driver produced, so it does not need a GPU)
+
+on:
+  pull_request:
+    paths:
+      - 'launch-planner.html'
+      - 'js/launch-*.js'
+      - 'js/spaceship-designer-3d.js'
+      - 'tests/launch-*.mjs'
+      - 'tests/launch-planner-*.spec.js'
+      - 'playwright.config.js'
+      - 'dev-server.mjs'
+      - '.github/workflows/launch-planner-visuals.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'launch-planner.html'
+      - 'js/launch-*.js'
+      - 'tests/launch-planner-*.spec.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium:
+    # Pinned for the same reason as e2e-auth.yml: Playwright 1.56 cannot
+    # install browsers on ubuntu 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Kernel tests
+        run: node tests/launch-smoke-sim.mjs && node tests/launch-camera-layout.mjs
+      - run: npx playwright install --with-deps chromium
+      - name: Launch planner browser gates (Chromium)
+        # list reporter: one line per test as it finishes, with its duration
+        # (the default dot reporter prints nothing until a line ends).
+        run: >
+          npx playwright test --project=chromium --trace off --reporter=list
+          tests/launch-planner-render-health.spec.js
+          tests/launch-planner-visuals.spec.js
+          tests/launch-planner-camera.spec.js
+        env:
+          CI: 'true'
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-planner-chromium-report
+          # The list reporter writes no playwright-report/; the failure
+          # screenshots and error-context snapshots live in test-results/.
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  cross-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      # Firefox is SHARDED: its software WebGL is the slowest of the three, and
+      # the ten render-health tests run serially in one job outlasted the
+      # 40-minute cap on every run since the workflow was added — cancelled
+      # before a single result printed. Each shard gets its own budget and a
+      # third of the same tests (the spec runs in parallel mode, so the shard
+      # splits by test). One worker per shard: two software rasterisers on a
+      # 4-vCPU runner only fight over the cores.
+      matrix:
+        include:
+          - { project: firefox-visual, shard: 1, of: 3 }
+          - { project: firefox-visual, shard: 2, of: 3 }
+          - { project: firefox-visual, shard: 3, of: 3 }
+          - { project: webkit-visual,  shard: 1, of: 1 }
+    name: cross-browser (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.of }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.project == 'firefox-visual' && 'firefox' || 'webkit' }}
+      # HEADLESS Firefox has no display to open a native GL context on, so it
+      # had no WebGL at all here ("tryNativeGL", "Exhausted GL driver
+      # options"). It runs HEADED under Xvfb instead (PW_FIREFOX_XVFB below),
+      # drawing through GLX on Mesa's llvmpipe; these are the X server and
+      # the GL drivers that needs. playwright.config.js forces WebGL past
+      # Firefox's blocklist.
+      - if: matrix.project == 'firefox-visual'
+        run: sudo apt-get install -y --no-install-recommends xvfb xauth libegl1 libgl1-mesa-dri libgles2 libglx-mesa0
+      - name: Render-health gate (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.of }})
+        # Firefox: headed inside Xvfb at 24-bit depth (xvfb-run's default
+        # 8-bit screen has no GLX visual a GL context can use).
+        run: >
+          ${{ matrix.project == 'firefox-visual' && 'xvfb-run -a -s "-screen 0 1920x1080x24"' || '' }}
+          npx playwright test --project=${{ matrix.project }} --trace off --reporter=list
+          --workers=1 --shard=${{ matrix.shard }}/${{ matrix.of }}
+          tests/launch-planner-render-health.spec.js
+        env:
+          CI: 'true'
+          PW_FIREFOX_XVFB: ${{ matrix.project == 'firefox-visual' && '1' || '0' }}
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-planner-${{ matrix.project }}-${{ matrix.shard }}-of-${{ matrix.of }}-report
+          # The list reporter writes no playwright-report/; the failure
+          # screenshots and error-context snapshots live in test-results/.
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

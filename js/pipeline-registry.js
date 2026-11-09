@@ -503,6 +503,24 @@ export const PIPELINES = [
       warnAgeS:  24 * 3600, critAgeS: 72 * 3600,
       notes: 'Elevated US volcanoes (USGS HANS, joined to GVP by volcano number) + open global volcano events (EONET, joined by position client-side — js/volcano-engine.js matchActivity). BOTH SCHEMAS UNVERIFIED (egress-blocked at build time): HANS fields resolve from candidate lists and the route self-reports sources.usgs_hans.field_map / unmapped — one production request settles them. Either source down ⇒ 200 + freshness:stale + reasons (partial list).' },
 
+    // Glacier Watch (glacier-watch.html). The ARCHIVE is static (data/glaciers/*, the
+    // ITS_LIVE + WGMS + GLO-30 bakes); these are the DAILY halves. Both need ?g=, hence
+    // probePath; both answer 200 + freshness:'stale' + reasons on upstream trouble.
+    { id: 'glacier-velocity',   label: 'Glacier velocity — daily pairs (NASA ITS_LIVE)',
+      endpoint: '/api/glaciers/velocity?g=columbia',
+      probePath: '/api/glaciers/velocity?g=columbia&max=1',
+      category: 'cryosphere', upstream: 'NASA ITS_LIVE (its-live-data S3)',
+      cadence_s: 86_400, prewarm: 'cold', probeTimeoutMs: 30_000, freshnessExempt: true,
+      warnAgeS: 2 * 86_400, critAgeS: 7 * 86_400,
+      notes: 'Image pairs published since the committed bake, read whole with the vendored jsfive and sampled at the bake\'s flowline points (js/glacier-pairs.js). Node runtime, dual-mode export. Listing failure ⇒ 200 + freshness:stale. Pairs land every few days per glacier; source latency is the pair span + processing (weeks).' },
+    { id: 'glacier-stations',   label: 'Glacier outlet gauges + SNOTEL',
+      endpoint: '/api/glaciers/stations?g=gulkana',
+      probePath: '/api/glaciers/stations?g=gulkana',
+      category: 'cryosphere', upstream: 'USGS NWIS · NRCS AWDB',
+      cadence_s: 3600, prewarm: 'cold', freshnessExempt: true,
+      warnAgeS: 6 * 3600, critAgeS: 48 * 3600,
+      notes: 'USGS discharge on glacier outlet streams + nearest SNOTEL SWE. BOTH SCHEMAS UNVERIFIED (egress-blocked at build time): gauge numbers are candidate lists and fields resolve from candidate lists; the route self-reports gauge_used / tried / field_map / unmapped. One production request settles them.' },
+
     // ── Ocean · NOAA CO-OPS / NDBC (earth.html station layers) ─────────────
     // Registered 2026-10-26 (EARTHVIEW_LOD_UX_PLAN.md Phase 0.8) — the three
     // routes had been live since 2026-08 and never monitored, the exact gap
@@ -638,6 +656,7 @@ export const CATEGORIES = [
     { id: 'orbital',       label: 'Orbital · TLE / Launches' },
     { id: 'environment',   label: 'Environment · Air, Fire & Volcanoes' },
     { id: 'ocean',         label: 'Ocean · Tides / Buoys / DART' },
+    { id: 'cryosphere',    label: 'Cryosphere · Glaciers & snow' },
     { id: 'planetary',     label: 'Planetary · Mars'      },
     { id: 'small-bodies',  label: 'Small Bodies · NEOs / Comets' },
 ];

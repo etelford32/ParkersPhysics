@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -131,7 +131,59 @@ footer a:hover{color:var(--text)}
   .card-body{padding:14px}
   .page-header h1{font-size:1.35rem}
 }
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+html.theme-light .page-header h1{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+html.theme-light .plan-free{background:#e3f5eb;color:var(--pl-ok)}
+html.theme-light .plan-tester{background:#fbf0d9;color:var(--pl-warn)}
+html.theme-light .plan-basic{background:var(--pl-blue-soft);color:var(--pl-blue-deep)}
+html.theme-light .plan-educator{background:#e3f5eb;color:var(--pl-ok)}
+html.theme-light .plan-advanced{background:var(--indigo-900);color:var(--indigo-100)}
+html.theme-light .plan-institution{background:var(--pink-900);color:var(--pink-200)}
+html.theme-light .plan-enterprise{background:var(--pl-text-1);color:#fff}
+html.theme-light .section-nav{box-shadow:var(--pl-shadow)}
+html.theme-light .sec-link:hover{color:var(--pl-text-1);background:var(--pl-bg-soft)}
+html.theme-light .sec-link.active{background:var(--pl-blue-soft);color:var(--pl-blue-deep)}
+html.theme-light .card{box-shadow:var(--pl-shadow)}
+html.theme-light .card-head{background:var(--pl-bg-soft)}
+html.theme-light :is(.card-title,.toggle-name,.sub-status){color:var(--pl-text-1)}
+html.theme-light :is(.card-sub,.toggle-desc,.sub-detail,.sl-counter,.sl-city){color:var(--pl-text-4)}
+html.theme-light .toggle-pro-tag{color:var(--pl-blue-deep);background:var(--pl-blue-soft);border-color:rgba(21,96,212,.3)}
+html.theme-light .switch .slider{background:#c5d4e8}
+html.theme-light .switch .slider::before{background:#fff;box-shadow:0 1px 3px rgba(11,31,58,.25)}
+html.theme-light .switch input:checked+.slider{background:rgba(13,122,69,.3)}
+html.theme-light .switch input:checked+.slider::before{background:var(--pl-ok)}
+html.theme-light .switch input:disabled+.slider{opacity:.7;background:#dde6f2}
+html.theme-light .btn{background:var(--pl-card);color:var(--pl-text-1);border-color:var(--pl-border-strong)}
+html.theme-light .btn:hover{background:var(--pl-blue-soft);border-color:var(--pl-blue);color:var(--pl-blue-deep)}
+html.theme-light .btn-primary{background:var(--pl-grad-btn);color:#fff;border-color:transparent}
+html.theme-light .btn-primary:hover{background:var(--pl-btn-hover);color:#fff;filter:none}
+html.theme-light .btn-danger{background:rgba(192,38,45,.05);border-color:rgba(192,38,45,.4);color:var(--pl-danger)}
+html.theme-light .btn-danger:hover{background:rgba(192,38,45,.11);border-color:var(--pl-danger);color:var(--pl-danger)}
+html.theme-light .status.ok{background:rgba(13,122,69,.07);border-color:rgba(13,122,69,.3);color:var(--pl-ok)}
+html.theme-light .status.err{background:rgba(192,38,45,.06);border-color:rgba(192,38,45,.3);color:var(--pl-danger)}
+/* Saved locations */
+html.theme-light .sl-counter strong{color:var(--pl-text-1)}
+html.theme-light .sl-empty{background:var(--pl-bg-soft);border-color:var(--pl-border-strong)}
+html.theme-light .sl-item{background:var(--pl-bg-soft)}
+html.theme-light .sl-item.is-primary{border-color:rgba(21,96,212,.45);background:var(--pl-blue-soft)}
+html.theme-light .sl-star{color:var(--pl-text-5)}
+html.theme-light .sl-star.on{color:var(--pl-blue-bright)}
+html.theme-light .sl-star:hover{color:var(--pl-blue)}
+/* the label is an inline-edit input: keep it borderless until hover/focus
+   (the shared sheet would otherwise draw it as a full form field) */
+html.theme-light .sl-item input.sl-label{color:var(--pl-text-1);background:transparent;border-color:transparent}
+html.theme-light .sl-item input.sl-label:is(:hover,:focus){background:#fff;border-color:var(--pl-border-strong)}
+html.theme-light .sl-remove{color:var(--pl-danger)}
+html.theme-light .sl-err{color:var(--pl-danger)}
+html.theme-light .gate-signup{background:var(--pl-btn);color:#fff}
+html.theme-light .gate-signin{color:var(--pl-blue-deep);border-color:var(--pl-blue)}
+html.theme-light footer a{color:var(--pl-text-3)}
+html.theme-light footer a:hover{color:var(--pl-blue)}
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

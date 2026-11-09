@@ -66,6 +66,14 @@ export const GLYPHS = {
         `<circle cx="8.6" cy="8.4" r="3.6"/>` +
         `<path d="M8.6 2.2v1.4M8.6 13.2v1.4M2.4 8.4h1.4M13.4 8.4h1.4M4.2 4l1 1M12 11.8l1 1M4.2 12.8l1-1M12 5l1-1"/>` +
         `<path d="M10 20.4h9.2M12.4 17.2h7.4"/>`,
+    glacier:
+        // a peak with an ice tongue flowing out of its cirque, banded by two
+        // flow lines, and the mark's node where the ice meets the valley floor
+        `<path d="M2.6 20.4h18.8"/>` +
+        `<path d="M3.4 20.4l6-11.6 2.6 3.4 2.4-4.6 6.2 12.8"/>` +
+        `<path d="M9.4 8.8c.6 3.6 2.4 6.8 5.2 9.2"/>` +
+        `<path d="M12 12.2c.8 2.4 2 4.4 3.6 6"/>` +
+        NODE(15.6, 18.2, 1.1),
     volcano:
         // a cone with a crater notch, a plume rising off it as the mark's
         // ring-and-node: the ring is the ash cloud, the node the vent
@@ -123,6 +131,13 @@ export const GLYPHS = {
     sun:
         `<circle cx="12" cy="12" r="4.8"/>` +
         `<path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6M4.8 4.8l1.9 1.9M17.3 17.3l1.9 1.9M4.8 19.2l1.9-1.9M17.3 6.7l1.9-1.9"/>`,
+    horizon:
+        // the theme toggle's AUTO mode: the Sun on the horizon line — the
+        // site goes light at sunrise and dark at sunset (js/theme-schedule.js)
+        `<path d="M2.6 17.4h18.8"/>` +
+        `<path d="M7.2 17.4a4.8 4.8 0 0 1 9.6 0"/>` +
+        `<path d="M12 6.4v2.4M5.1 10.1l1.7 1.7M18.9 10.1l-1.7 1.7M2.8 14.4h1.9M19.3 14.4h1.9"/>` +
+        `<path d="M8.4 20.6h7.2"/>`,
     'star-bright':
         `<path d="M12 2.2l2.5 6.6 6.9.4-5.3 4.4 1.7 6.7-5.8-3.8-5.8 3.8 1.7-6.7-5.3-4.4 6.9-.4z"/>`,
     'star-binary':

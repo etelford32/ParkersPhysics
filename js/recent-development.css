@@ -1,0 +1,159 @@
+/* recent-development.css — the Recent Development page (and the compact rows
+   feedback.html borrows). Sits on top of js/catalog-styles.css, whose tokens,
+   hero, search box and chips it reuses. Never select `nav` or `.nav-*` here:
+   scripts/lint-nav.mjs fails a page that styles the shared nav. */
+
+/* ── Kind badges — colour is a second signal, the label is the first ─────── */
+.rd-kind{font-family:var(--font-display);font-size:.54rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase;padding:3px 8px;border-radius:999px;white-space:nowrap;border:1px solid;display:inline-block}
+.rd-kind-simulation{color:#ff7cc7;background:rgba(255,31,156,.12);border-color:rgba(255,92,184,.38)}
+.rd-kind-layer{color:#c99bff;background:rgba(157,58,255,.13);border-color:rgba(183,101,255,.4)}
+.rd-kind-dataset{color:#6fe2ff;background:rgba(77,219,255,.10);border-color:rgba(77,219,255,.34)}
+.rd-kind-improvement{color:#ffd86b;background:rgba(255,210,63,.09);border-color:rgba(255,210,63,.32)}
+.rd-kind-fix{color:#5cffb4;background:rgba(46,255,158,.08);border-color:rgba(46,255,158,.30)}
+.rd-kind-platform{color:var(--fg-3);background:rgba(157,146,200,.08);border-color:rgba(157,146,200,.28)}
+.rd-section{font-family:var(--font-mono);font-size:.66rem;color:var(--fg-4);letter-spacing:.04em}
+
+/* ── Hero stats ──────────────────────────────────────────────────────────── */
+.rd-stats{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 10px;margin-top:20px;font-family:var(--font-mono);font-size:.74rem;color:var(--fg-4);letter-spacing:.03em}
+.rd-stats b{color:var(--fg-1);font-weight:600}
+.rd-stats a{color:var(--uv-300);border-bottom:1px solid rgba(210,154,255,.35)}
+.rd-sep{color:var(--fg-5)}
+
+/* ── Spotlight ───────────────────────────────────────────────────────────── */
+.rd-block{max-width:1160px;margin:0 auto;padding:30px 24px 0}
+.rd-block-title{font-family:var(--font-display);font-size:.78rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--uv-400);margin-bottom:14px}
+.rd-spotlight{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
+@media(max-width:1000px){.rd-spotlight{grid-template-columns:1fr}}
+.rd-spot{display:flex;flex-direction:column;gap:9px;padding:18px 20px 20px;border-radius:14px;background:radial-gradient(ellipse at 0% 0%,rgba(157,58,255,.16),transparent 60%),linear-gradient(180deg,rgba(13,6,38,.6),rgba(7,2,26,.85));border:1px solid rgba(183,101,255,.26)}
+.rd-spot-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rd-spot-icon{display:flex;color:var(--uv-300)}
+.rd-spot-meta{display:flex;align-items:center;gap:4px}
+.rd-spot-date{font-family:var(--font-mono);font-size:.66rem;color:var(--fg-4);letter-spacing:.04em}
+.rd-spot-title{font-family:var(--font-display);font-size:.92rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-1);line-height:1.35}
+.rd-spot-title a:hover{color:var(--pink-400)}
+.rd-spot-summary{font-size:.86rem;color:var(--fg-3);line-height:1.6;flex:1}
+.rd-spot .rd-open{align-self:flex-start}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+.rd-toolbar{max-width:1160px;margin:0 auto;padding:34px 24px 0;display:flex;flex-direction:column;gap:12px;align-items:center}
+/* Baked `hidden` (the filters do nothing without JS) and un-hidden by the module.
+   The author display:flex above beats the UA sheet's [hidden]{display:none}, so it
+   must be restated — the mars.html / launch-planner scar. */
+.rd-toolbar[hidden]{display:none}
+.rd-chip-row-label{font-family:var(--font-mono);font-size:.62rem;color:var(--fg-5);letter-spacing:.12em;text-transform:uppercase}
+.rd-chip-n{opacity:.7;font-family:var(--font-mono);font-weight:400;margin-left:2px}
+.rd-result{font-family:var(--font-mono);font-size:.7rem;color:var(--fg-4);letter-spacing:.05em;margin-top:2px}
+.rd-empty{text-align:center;color:var(--fg-3);font-size:.9rem;padding:30px 24px}
+.rd-empty button{background:none;border:none;color:var(--uv-300);font:inherit;cursor:pointer;text-decoration:underline}
+.rd-empty[hidden]{display:none}
+
+/* ── Timeline ────────────────────────────────────────────────────────────── */
+.rd-timeline{max-width:1160px;margin:0 auto;padding:6px 24px 0}
+.rd-sprint{margin-top:38px}
+.rd-sprint-head{padding:0 0 16px;border-bottom:1px solid rgba(154,133,255,.14);margin-bottom:6px}
+.rd-sprint-range{font-family:var(--font-mono);font-size:.68rem;color:var(--fg-4);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rd-live{font-family:var(--font-display);font-size:.52rem;font-weight:700;letter-spacing:.14em;padding:3px 8px;border-radius:999px;color:var(--status-ok);background:rgba(46,255,158,.08);border:1px solid rgba(46,255,158,.3)}
+.rd-live::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--status-ok);margin-right:6px;vertical-align:1px;box-shadow:0 0 6px var(--status-ok)}
+.rd-sprint-title{font-family:var(--font-display);font-size:1.05rem;font-weight:800;letter-spacing:.07em;color:var(--fg-1);text-transform:uppercase;margin:6px 0 7px;scroll-margin-top:70px}
+.rd-sprint-goal{font-size:.88rem;color:var(--fg-3);line-height:1.6;max-width:760px}
+.rd-sprint-counts{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:12px}
+.rd-count{display:inline-flex;align-items:center;gap:5px}
+.rd-count b{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-2);font-weight:600}
+
+.rd-entry{display:grid;grid-template-columns:62px 34px minmax(0,1fr);gap:0 12px;padding:18px 0;border-bottom:1px solid rgba(154,133,255,.08);scroll-margin-top:80px;border-radius:10px;transition:background .6s}
+.rd-entry-date{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-4);padding-top:5px;white-space:nowrap}
+.rd-entry-icon{color:var(--uv-300);opacity:.85;padding-top:2px}
+.rd-entry-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px}
+.rd-entry-title{font-family:var(--font-display);font-size:.88rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-1);line-height:1.4;margin-bottom:6px}
+.rd-anchor:hover{color:var(--pink-400)}
+.rd-entry-summary{font-size:.88rem;color:var(--fg-3);line-height:1.65;max-width:780px}
+.rd-details{margin-top:8px;max-width:780px}
+.rd-details summary{cursor:pointer;font-size:.78rem;color:var(--uv-300);font-weight:600;width:max-content}
+.rd-details summary:hover{color:var(--pink-400)}
+.rd-details ul{margin:8px 0 0 18px;display:flex;flex-direction:column;gap:5px}
+.rd-details li{font-size:.84rem;color:var(--fg-3);line-height:1.55}
+.rd-dim{color:var(--fg-5);font-weight:400}
+.rd-links{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px;align-items:center}
+.rd-open{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;font-weight:600;padding:7px 12px;border-radius:8px;color:var(--fg-2);background:rgba(13,6,38,.6);border:1px solid rgba(154,133,255,.22);transition:border-color .2s,color .2s,box-shadow .2s;min-height:34px}
+.rd-open:hover{color:var(--fg-1);border-color:rgba(183,101,255,.55);box-shadow:var(--glow-uv-sm)}
+.rd-open-primary{color:#fff;background:linear-gradient(135deg,rgba(157,58,255,.5),rgba(255,31,156,.38));border-color:rgba(183,101,255,.5)}
+.rd-pr{font-family:var(--font-mono);font-size:.7rem;color:var(--fg-4);padding:6px 4px;border-bottom:1px dotted rgba(157,146,200,.4)}
+.rd-pr:hover{color:var(--fg-2)}
+.rd-flash{background:rgba(157,58,255,.12)}
+
+.rd-howto{max-width:1160px;margin:46px auto 0;padding:0 24px}
+.rd-howto-inner{padding:18px 20px;border-radius:12px;border:1px dashed rgba(154,133,255,.22);font-size:.84rem;color:var(--fg-4);line-height:1.65}
+.rd-howto-inner a{color:var(--uv-300);border-bottom:1px solid rgba(210,154,255,.35)}
+.rd-howto-inner strong{color:var(--fg-2)}
+
+@media(max-width:640px){
+  .rd-block,.rd-toolbar,.rd-timeline,.rd-howto{padding-left:16px;padding-right:16px}
+  .rd-entry{grid-template-columns:minmax(0,1fr)}
+  .rd-entry-icon{display:none}
+  .rd-entry-date{padding:0 0 4px}
+}
+@media(prefers-reduced-motion:reduce){.rd-entry{transition:none}}
+
+/* ── Compact rows (feedback.html) ────────────────────────────────────────── */
+.rd-compact{padding:12px 0;border-bottom:1px solid rgba(154,133,255,.1)}
+.rd-compact:last-child{border-bottom:none}
+.rd-compact-head{display:flex;align-items:center;gap:10px;font-family:var(--font-mono,monospace);font-size:.7rem;color:#8a83b0;margin-bottom:5px}
+.rd-compact-title{display:block;font-weight:700;color:#e8e2ff;font-size:.92rem;margin-bottom:4px;text-decoration:none}
+.rd-compact-title:hover{color:#c0a8ff}
+.rd-compact p{font-size:.84rem;color:#a9a2cc;line-height:1.55;margin:0}
+
+/* ── LIGHT THEME (white + blue) ──────────────────────────────────────────────
+   The page is in scripts/build-theme-support.mjs LIGHT_PAGES, so it gets
+   js/theme-light.css (palette + token remaps) and js/catalog-styles.css's own
+   light rules for the hero / search / chips. These are the leftovers that
+   sheet cannot know about: the dark-tuned card gradient, the pastel kind
+   badges (written for #03010e, unreadable on white) and hard-coded rgba()
+   borders. Dark rules above are untouched. feedback.html's compact rows share
+   this sheet and are covered here too. */
+html.theme-light .rd-kind-simulation{color:#b0156e;background:rgba(176,21,110,.07);border-color:rgba(176,21,110,.32)}
+html.theme-light .rd-kind-layer{color:#6d28d9;background:rgba(109,40,217,.07);border-color:rgba(109,40,217,.32)}
+html.theme-light .rd-kind-dataset{color:#0b6e8a;background:rgba(11,110,138,.07);border-color:rgba(11,110,138,.32)}
+html.theme-light .rd-kind-improvement{color:#8a5a00;background:rgba(194,106,0,.08);border-color:rgba(194,106,0,.34)}
+html.theme-light .rd-kind-fix{color:var(--pl-ok);background:rgba(13,122,69,.07);border-color:rgba(13,122,69,.32)}
+html.theme-light .rd-kind-platform{color:var(--pl-text-3);background:var(--pl-bg-soft);border-color:var(--pl-border-strong)}
+html.theme-light .rd-section,html.theme-light .rd-pr,html.theme-light .rd-entry-date,html.theme-light .rd-spot-date{color:var(--pl-text-4)}
+html.theme-light .rd-stats{color:var(--pl-text-4)}
+html.theme-light .rd-stats b{color:var(--pl-text-1)}
+html.theme-light .rd-stats a,html.theme-light .rd-howto-inner a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .rd-block-title{color:var(--pl-blue)}
+
+html.theme-light .rd-spot{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .rd-spot-icon,html.theme-light .rd-entry-icon{color:var(--pl-blue)}
+html.theme-light .rd-spot-title{color:var(--pl-text-1)}
+html.theme-light .rd-spot-title a:hover,html.theme-light .rd-anchor:hover{color:var(--pl-blue-deep)}
+html.theme-light .rd-spot-summary,html.theme-light .rd-entry-summary,html.theme-light .rd-sprint-goal,html.theme-light .rd-details li{color:var(--pl-text-2)}
+
+html.theme-light .rd-sprint-head{border-bottom-color:var(--pl-border)}
+html.theme-light .rd-sprint-title,html.theme-light .rd-entry-title{color:var(--pl-text-1)}
+html.theme-light .rd-sprint-range{color:var(--pl-text-4)}
+html.theme-light .rd-live{color:var(--pl-ok);background:rgba(13,122,69,.07);border-color:rgba(13,122,69,.3)}
+html.theme-light .rd-live::before{background:var(--pl-ok);box-shadow:none}
+html.theme-light .rd-count b{color:var(--pl-text-2)}
+html.theme-light .rd-entry{border-bottom-color:var(--pl-border)}
+html.theme-light .rd-flash{background:var(--pl-blue-soft)}
+html.theme-light .rd-details summary{color:var(--pl-blue)}
+html.theme-light .rd-details summary:hover{color:var(--pl-blue-deep)}
+html.theme-light .rd-dim{color:var(--pl-text-4)}
+
+html.theme-light .rd-open{color:var(--pl-blue-deep);background:#fff;border-color:var(--pl-border-strong)}
+html.theme-light .rd-open:hover{color:var(--pl-blue-deep);border-color:var(--pl-blue);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .rd-open-primary{color:#fff;background:var(--pl-grad-btn);border-color:transparent}
+html.theme-light .rd-open-primary:hover{color:#fff;background:var(--pl-btn-hover)}
+html.theme-light .rd-pr{border-bottom-color:var(--pl-border-strong)}
+html.theme-light .rd-pr:hover{color:var(--pl-text-2)}
+
+html.theme-light .rd-howto-inner{border-color:var(--pl-border-strong);color:var(--pl-text-3)}
+html.theme-light .rd-howto-inner strong{color:var(--pl-text-1)}
+html.theme-light .rd-empty{color:var(--pl-text-3)}
+html.theme-light .rd-empty button{color:var(--pl-blue)}
+
+html.theme-light .rd-compact{border-bottom-color:var(--pl-border)}
+html.theme-light .rd-compact-head{color:var(--pl-text-4)}
+html.theme-light .rd-compact-title{color:var(--pl-text-1)}
+html.theme-light .rd-compact-title:hover{color:var(--pl-blue)}
+html.theme-light .rd-compact p{color:var(--pl-text-3)}

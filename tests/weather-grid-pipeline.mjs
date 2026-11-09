@@ -32,12 +32,22 @@
  *   • the MET Norway upsampler averages wind as a VECTOR (350° and 10° → 0°)
  *   • the range read serves up to 72 hourly frames (the client ring asks for
  *     72 now, not 24)
+ *
+ * Pacing (2026-11-08 — every run drew "Minutely API request limit exceeded"
+ * at chunk 1200/1600 because Open-Meteo counts each LOCATION as a call):
+ *   • the cron sends the plan js/open-meteo-request.js `pacedChunkPlan`
+ *     makes, at its offsets: on a fake clock, no trailing 62 s window holds
+ *     more than 520 weighted calls, and the run reports what it sent
+ *   • a gfs retry after a BILLED primary failure cannot fit another paced
+ *     run before the fallback reserve, so it is skipped and says so
+ *   • a commercial key collapses the plan to one window (no waiting)
  */
 import assert from 'node:assert/strict';
 import { isFallbackSource, HEARTBEAT_PIPELINES } from '../js/pipeline-registry.js';
-import { GRID, MAX_URL_BYTES, byteLength, chunkRanges } from '../js/open-meteo-request.js';
+import { GRID, MAX_URL_BYTES, DEFAULT_PACE, FREE_TIER, byteLength, chunkRanges, pacedChunkPlan, peakWindowWeight }
+    from '../js/open-meteo-request.js';
 import { pressureKindOf, pressureHpaOf } from '../js/weather-decode.js';
-const N_CHUNKS = chunkRanges(GRID.n).length;
+const N_CHUNKS = pacedChunkPlan({ n: GRID.n }).chunks.length;   // the keyless (paced) plan: 10
 
 let passed = 0;
 async function ok(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -93,12 +103,13 @@ function metnoPoint(url) {
  * Records every request, every RPC in order, and the inserted row.
  */
 function stub(openMeteo) {
-    const log = { om: [], metno: 0, rpcs: [], insert: null, warns: [] };
+    const log = { om: [], omAt: [], metno: 0, rpcs: [], insert: null, warns: [] };
     console.warn = (...a) => { log.warns.push(a.join(' ')); };
     globalThis.fetch = async (url, init = {}) => {
         const u = String(url);
         if (u.includes('open-meteo.com')) {
             log.om.push(u);
+            log.omAt.push(fake.t);
             const r = openMeteo(u);
             return new Response(typeof r.body === 'string' ? r.body : JSON.stringify(r.body),
                 { status: r.status, headers: { 'content-type': 'application/json' } });
@@ -124,8 +135,16 @@ const cronReq = () => new Request('https://x.test/api/cron/refresh-weather-grid'
     { headers: { authorization: 'Bearer cron-secret' } });
 const LIMIT = { error: true, reason: 'Minutely API request limit exceeded. Please try again in one minute.' };
 
+// The pacing clock: sleeps advance fake time instantly, so a ~4-minute paced
+// run executes in milliseconds while every request is stamped with the
+// instant it WOULD have been sent.
+const fake = { t: 1_800_000_000_000, slept: [] };
+const fakeClock = { now: () => fake.t, sleep: async (ms) => { fake.slept.push(ms); fake.t += ms; } };
+
 // ── the cron, keyless ───────────────────────────────────────────────────────
-const { default: cronKeyless, vectorMeanWind } = await import('../api/cron/refresh-weather-grid.js?keyless');
+const { default: cronKeyless, vectorMeanWind, setPacingClockForTests: setClockKeyless }
+    = await import('../api/cron/refresh-weather-grid.js?keyless');
+setClockKeyless(fakeClock);
 
 await ok('a fallback win KEEPS the primary\'s reason: logged, heartbeat failure-then-success, body says degraded', async () => {
     const log = stub(() => ({ status: 429, body: LIMIT }));
@@ -191,7 +210,21 @@ await ok('a clean primary run writes success only and reports degraded: false', 
         assert.equal(body.degraded, false);
         assert.equal(body.attempt_failures, undefined);
         assert.ok(!log.rpcs.some(r => r.fn === 'record_pipeline_failure'));
-        assert.equal(log.om.length, N_CHUNKS, `${N_CHUNKS} chunks of ≤400 locations`);
+        assert.equal(log.om.length, N_CHUNKS, `${N_CHUNKS} paced chunks of ≤400 locations`);
+        // THE PACING GATE, on the requests the cron ACTUALLY sent and when.
+        const sent = log.om.map((u, i) => ({
+            offsetMs: log.omAt[i] - log.omAt[0],
+            weight: new URL(u).searchParams.get('latitude').split(',').length,
+        }));
+        const peak = peakWindowWeight(sent, DEFAULT_PACE.windowMs);
+        assert.ok(peak <= DEFAULT_PACE.budget, `peak ${peak} weighted calls in a ${DEFAULT_PACE.windowMs} ms window`);
+        assert.ok(peakWindowWeight(sent, 60_000) < FREE_TIER.perMinute);
+        assert.deepEqual(sent.map(c => c.offsetMs / 1000), [0, 0, 62, 62, 124, 124, 186, 186, 248, 248]);
+        assert.deepEqual(body.pacing.offsets_s, [0, 0, 62, 62, 124, 124, 186, 186, 248, 248]);
+        assert.equal(body.pacing.requests, 10);
+        assert.equal(body.pacing.weighted_calls, 2592);
+        assert.equal(body.pacing.budget_per_window, DEFAULT_PACE.budget);
+        assert.ok(body.pacing.elapsed_ms < 295_000, 'inside the watchdog');
         assert.equal(log.warns.length, 0);
         // The 414 guard, on the URLs the cron ACTUALLY emitted.
         for (const u of log.om) {
@@ -204,6 +237,36 @@ await ok('a clean primary run writes success only and reports degraded: false', 
         assert.equal(log.insert.payload.length, 2592);
         assert.equal(log.insert.payload[0].current.pressure_msl, 1000);
         assert.equal(pressureKindOf(log.insert.payload[0]), 'msl');
+    } finally { restore(); }
+});
+
+await ok('a BILLED primary failure (timeout) leaves no time for a paced gfs retry: skipped, said so, MET Norway', async () => {
+    // A network error on chunk 0 counts as sent (we cannot know it was not
+    // served), so gfs would have to start a window later and run ~4 minutes —
+    // past the watchdog minus the fallback reserve.
+    const log = stub(() => { throw new TypeError('fetch failed'); });
+    try {
+        const body = await (await cronKeyless(cronReq())).json();
+        assert.equal(body.source, 'met-norway:72x36');
+        assert.deepEqual(body.attempt_failures.map(f => f.src), ['open-meteo', 'open-meteo-gfs']);
+        assert.match(body.attempt_failures[0].reason, /open-meteo chunk 0 fetch: /);
+        assert.match(body.attempt_failures[1].reason, /^open-meteo-gfs skipped \(time budget: paced plan needs \d+ s, \d+ s left/);
+        assert.ok(!log.om.some(u => u.includes('gfs_seamless')), 'no gfs request was sent');
+        assert.equal(log.metno, 648);
+        assert.equal(body.pacing.requests, 2, 'the first window\'s two chunks were sent');
+    } finally { restore(); }
+});
+
+await ok('a rejected (unbilled) primary does not hold gfs back a window', async () => {
+    const log = stub((u) => u.includes('gfs_seamless')
+        ? { status: 200, body: omItems(u) }
+        : { status: 503, body: 'busy' });
+    try {
+        const body = await (await cronKeyless(cronReq())).json();
+        assert.equal(body.source, 'open-meteo-gfs:72x36');
+        const gfsAt = log.omAt.filter((_, i) => log.om[i].includes('gfs_seamless'));
+        assert.equal(gfsAt.length, N_CHUNKS);
+        assert.equal(gfsAt[0], log.omAt[0], 'gfs started at once: a 503 is not a charge');
     } finally { restore(); }
 });
 
@@ -276,7 +339,8 @@ await ok('a total failure records EVERY attempt\'s reason, not just the fallback
 
 // ── the cron, with a commercial key ─────────────────────────────────────────
 process.env.OPEN_METEO_API_KEY = 'sekret-KEY-123';
-const { default: cronKeyed } = await import('../api/cron/refresh-weather-grid.js?keyed');
+const { default: cronKeyed, setPacingClockForTests: setClockKeyed } = await import('../api/cron/refresh-weather-grid.js?keyed');
+setClockKeyed(fakeClock);
 delete process.env.OPEN_METEO_API_KEY;
 
 await ok('OPEN_METEO_API_KEY routes both Open-Meteo attempts to customer-api with &apikey=', async () => {
@@ -285,6 +349,11 @@ await ok('OPEN_METEO_API_KEY routes both Open-Meteo attempts to customer-api wit
         const body = await (await cronKeyed(cronReq())).json();
         assert.equal(body.source, 'open-meteo:72x36');
         assert.ok(log.om.length > 0);
+        // A commercial key is not on the free per-minute budget: one window.
+        assert.equal(log.om.length, chunkRanges(GRID.n).length);
+        assert.ok(log.omAt.every(t => t === log.omAt[0]), 'no paced waits with a key');
+        assert.equal(body.pacing.budget_per_window, null);
+        assert.ok(!JSON.stringify(body.pacing).includes('sekret-KEY-123'));
         for (const u of log.om) {
             assert.ok(u.startsWith('https://customer-api.open-meteo.com/v1/forecast?'), u.slice(0, 60));
             assert.equal(new URL(u).searchParams.get('apikey'), 'sekret-KEY-123');

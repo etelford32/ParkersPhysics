@@ -1,0 +1,145 @@
+name: glacier-refresh
+
+# Weekly refresh of Glacier Watch's committed archive (data/glaciers/*) and of the summary
+# EarthView's Glaciers layer reads — so the layer's "as of" date moves forward.
+#
+# WHY A JOB AND NOT THE DAILY ROUTE: /api/glaciers/velocity already adds every pair published
+# since the bake, but only on glacier-watch.html and only for the glacier being viewed. The
+# EarthView layer reads data/glaciers/summary.json (states for ALL glaciers, derived by the
+# engine from the archive — scripts/build-glacier-summary.mjs), and the archive's "last year"
+# window also has to slide. Both need the bake (ITS_LIVE S3 + Copernicus GLO-30), which runs
+# ~1–3 min per glacier — past a Vercel function and nothing a visitor should pay for.
+#
+# INCREMENTAL: the baker reuses every pair sample (and every remembered rejection) whose
+# granule it read before AT THE SAME FLOWLINE POINTS, so a week costs the ~150 new granules,
+# not ~6 000 (measured 2026-11-08: a re-run fetched 0 MB). A re-traced flowline (new composite
+# release) re-reads everything for that glacier, and check-glacier-refresh flags the jump.
+#
+# FAULT TOLERANT, NOT FAULT BLIND: --keep-going keeps a failed glacier's previous entry and
+# LISTS it; scripts/check-glacier-refresh.mjs then REFUSES the refresh (red run, no PR) when
+# a glacier vanished, nothing refreshed, > max(2, 20 %) failed, a glacier's kept pairs
+# collapsed, or a flowline moved > 25 %. A stale glacier keeps its OWN date in the summary
+# (`as_of` per glacier) and the EarthView pip says "(N older)".
+#
+# It opens or updates ONE pull request on `data/glaciers-refresh` and NEVER pushes to main:
+# a push to main is a production deploy (the trojans-refresh rule).
+#
+# REPO SETTING NEEDED for the PR step: Settings → Actions → General → "Allow GitHub Actions
+# to create and approve pull requests". Without it the bake still runs and uploads the run
+# report as an artifact; only the PR step fails. A PR opened with GITHUB_TOKEN does not
+# trigger other workflows' CI — the gates below run here, before the PR is opened.
+
+on:
+  schedule:
+    - cron: '17 11 * * 3'   # Wednesdays 11:17 UTC (off the hour, outside 6–9 AM Pacific)
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Comma-separated glacier ids (blank = all)'
+        required: false
+        default: ''
+      no_reuse:
+        description: 'Re-read every pair (ignore the stored samples)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write        # push the refresh branch
+  pull-requests: write   # open / update its PR
+
+concurrency:
+  group: glacier-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BRANCH: data/glaciers-refresh
+      DEM_CACHE: scripts/.cache/glo30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Python dependencies (the versions the archive was baked with)
+        run: pip install numpy==2.5.4 numcodecs==0.17.1 h5py==3.16.0 pyproj==3.8.0 tifffile==2026.10.15 imagecodecs==2026.10.10
+
+      # Copernicus GLO-30 tiles are static (one release); ~1.1 GB for 25 glaciers. A new
+      # glacier on a new tile is fetched once and saved under the next key.
+      - name: DEM tile cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DEM_CACHE }}
+          key: glo30-v1-${{ hashFiles('scripts/build-glacier-velocity.py') }}
+          restore-keys: glo30-v1-
+
+      - name: Bake (ITS_LIVE pairs, incremental)
+        env:
+          ONLY: ${{ inputs.only }}
+          NO_REUSE: ${{ inputs.no_reuse }}
+        run: |
+          cp data/glaciers/glaciers.json "$RUNNER_TEMP/prev-glaciers.json"
+          ARGS=(--out data/glaciers --max-pairs 240 --workers 24 --dem-cache "$DEM_CACHE" --keep-going --report "$RUNNER_TEMP/run.json")
+          if [ -n "$ONLY" ]; then ARGS+=(--only "$ONLY"); fi
+          if [ "$NO_REUSE" = "true" ]; then ARGS+=(--no-reuse); fi
+          python -W ignore scripts/build-glacier-velocity.py "${ARGS[@]}"
+
+      - name: Elevation profiles + EarthView summary
+        run: |
+          python -W ignore scripts/build-glacier-elevation.py --cache "$DEM_CACHE"
+          node scripts/build-glacier-summary.mjs
+
+      - name: Refuse a degraded refresh
+        run: node scripts/check-glacier-refresh.mjs "$RUNNER_TEMP/prev-glaciers.json" data/glaciers/glaciers.json "$RUNNER_TEMP/run.json" --md "$RUNNER_TEMP/refresh.md"
+
+      - name: Node gates
+        run: |
+          node tests/glacier-engine.mjs
+          node scripts/build-glacier-massbalance.mjs --check
+          node scripts/build-glacier-summary.mjs --check
+
+      - name: Upload the run report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glacier-refresh-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/run.json
+            ${{ runner.temp }}/refresh.md
+
+      - name: Open or update the refresh PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add data/glaciers/
+          if git diff --cached --quiet; then echo "No change to the archive."; exit 0; fi
+          AS_OF=$(node -e "console.log(require('./data/glaciers/summary.json').as_of)")
+          git commit -q -m "data(glaciers): weekly refresh — archive as of $AS_OF"
+          git push -q --force origin "$BRANCH"
+          {
+            echo "Automated by \`.github/workflows/glacier-refresh.yml\` (run ${{ github.run_id }})."
+            echo
+            cat "$RUNNER_TEMP/refresh.md"
+            echo
+            echo "Committed: \`data/glaciers/\` (index, per-glacier detail, elevation, summary). The gates in the run (refresh check, \`tests/glacier-engine.mjs\`, \`--check\`s) passed before this PR was opened. Merging deploys to production — glance at the 'was' columns first."
+          } > "$RUNNER_TEMP/body.md"
+          N=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -z "$N" ]; then
+            gh pr create --head "$BRANCH" --base "${{ github.event.repository.default_branch }}" \
+              --title "data(glaciers): weekly archive refresh" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr edit "$N" --body-file "$RUNNER_TEMP/body.md"
+            echo "Updated refresh PR #$N."
+          fi

@@ -147,6 +147,10 @@ export const SIMULATIONS = [
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'volcano', badge: 'NEW',
       blurb: 'All 2,661 GVP volcanoes, live eruption status, eruption odds, and a Monte-Carlo of volcanic climate forcing.' },
+    { id: 'glacier-watch', href: 'glacier-watch.html', title: 'Glacier Watch',
+      category: 'earth-orbit', group: 'earth-systems',
+      tier: 'public', icon: 'glacier', badge: 'NEW',
+      blurb: '48 glaciers tracked from orbit every few days, plus every one of Earth’s 274,531 in the RGI 7.0 inventory.' },
     { id: 'upper-atmosphere', href: 'upper-atmosphere.html', title: 'Upper Atmosphere',
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'atmosphere',
@@ -388,6 +392,7 @@ export const NON_SIMULATION_PAGES = new Set([
     'local-space.html',         // section hub
     'pricing.html',
     'privacy.html',
+    'recent-development.html',  // build log — js/dev-log.js
     'request-access.html',
     'research.html',            // section hub
     'sample-fleet-assessment.html', // operator marketing page (Storm-Season Fleet Assessment proof + simulator)
