@@ -130,7 +130,7 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
-    { id: 'cme-calendar-daily-ledger', date: '2026-11-09', pr: null,
+    { id: 'cme-calendar-daily-ledger', date: '2026-11-09', pr: 1080,
       title: 'CME forecast calendar: every day now says what was checked', kind: 'fix',
       section: 'space-weather', icon: 'flux-rope',
       summary: 'The calendar had shown nothing newer than mid-October and could not say whether that was a quiet Sun '
