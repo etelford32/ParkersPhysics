@@ -366,10 +366,14 @@ label[for="cx-heat-alpha"]:has(input:disabled) { opacity:.55; }
         <div class="cx-key-win"><i hidden></i></div>
         <div class="cx-key-ticks"></div>
       </div>
-      <label class="cx-map-note" for="cx-heat-alpha">Opacity <input type="range" id="cx-heat-alpha" min="0.2" max="0.95" step="0.01" value="0.62"></label>
+      <div class="cx-seg cx-rose-seg" id="cx-heat-scale" role="group" aria-label="Temperature colour scale">
+        <button type="button" class="cx-btn" data-scale="fit" aria-pressed="true" title="Stretch this run’s temperature range in view along the colour ramp, so local structure shows">Fit to view</button>
+        <button type="button" class="cx-btn" data-scale="absolute" aria-pressed="false" title="The same colour for the same temperature everywhere — EarthView’s scale">Absolute</button>
+      </div>
+      <label class="cx-map-note" for="cx-heat-alpha">Opacity <input type="range" id="cx-heat-alpha" min="0.2" max="1" step="0.01" value="0.85"></label>
       <p id="cx-heat-status" class="cx-map-note" role="status">Loading…</p>
       <button type="button" id="cx-heat-retry" class="cx-btn cx-retry" hidden>Retry our archive</button>
-      <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note">2 m air temperature on the GFS grid (0.25°, ≈28 km). Drawn as EarthView draws it: the temperature is interpolated between grid nodes and then coloured, with a bright seam on the freezing line. Isotherms are in your units; ▲ ▼ mark the warmest and coldest grid node. The dashed box is the extent of the data; hover for the value. The map follows the timeline’s crosshair.</p></details>
+      <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note">2 m air temperature on the GFS grid (0.25°, ≈28 km). The temperature is interpolated between grid nodes and then coloured, with a bright seam on the freezing line. <b>Fit to view</b> stretches this run’s range in the window along the colour ramp so local structure shows: warm colours are always above freezing and cool colours below, but a given colour is a different temperature at another site — the key shows the range. <b>Absolute</b> is EarthView’s scale, the same colour for the same temperature everywhere. Relief is shaded over the colours. Isotherms are in your units; ▲ ▼ mark the warmest and coldest grid node. The dashed box is the extent of the data; hover for the value. The map follows the timeline’s crosshair.</p></details>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-aq">Air quality · PM2.5<span class="cx-layer-src cx-src-boot" title="Copernicus CAMS model via Open-Meteo’s free API — a bootstrap source until our own CAMS ingest">Bootstrap</span></label>
       <div class="cx-sublayers" role="group" aria-label="Air quality details">
         <label><input type="checkbox" id="cx-layer-mon" checked disabled>Monitors (EPA AirNow)</label>

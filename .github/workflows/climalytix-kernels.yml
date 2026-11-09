@@ -163,6 +163,8 @@ jobs:
         run: node tests/climalytix-contours.mjs
       - name: layer control state (Temperature toggles follow the data)
         run: node tests/climalytix-layer-state.mjs
+      - name: heat colour scale (fit to view vs the shared absolute ramp)
+        run: node tests/climalytix-heat-scale.mjs
       - name: nwp route (fake R2)
         run: node tests/climalytix-nwp-route.mjs
       - name: Climate Lab (unchanged by the lift)

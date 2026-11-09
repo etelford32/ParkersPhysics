@@ -106,6 +106,7 @@ import { convectionOutlook, capePaint, outlookPaint, CATEGORIES } from './convec
 import { slopeWind, slopeWindGrid, slopeWindExtremes, ANABATIC_RGB, KATABATIC_RGB, ARROW_MIN_MS, THETA0_DEFAULT_K } from './slope-wind.js';
 import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
+import { heatScale, runRange, scaleColor, SCALE_MODES } from './heat-scale.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
 const TERRAIN_ALPHA = 0.7;
@@ -130,10 +131,19 @@ const OCEAN = '#0a1a2e';
  * negative controls run with every fill off).
  */
 const DATA_GROUND = Object.freeze({ desaturate: 0.55, dim: 0.34, veil: 0.42 });
-export const HEAT_ALPHA_DEFAULT = 0.62;
+// 0.85, not the old 0.62: at 62 % the ramp's colours mixed with the ground into
+// an olive-brown wash on the first real run. The heat is drawn nearly opaque
+// and the RELIEF is shaded over it (drawHeat), so terrain reads as light and
+// shade on true ramp colours instead of as a second colour underneath.
+export const HEAT_ALPHA_DEFAULT = 0.85;
 const HEAT_STEP_PX = 2;          // one data sample per 2×2 CSS px block
 
 const LUT = buildTempLUTPixels();
+const HEAT_SCALE_KEY = 'pp_climalytix_heat_scale';
+
+function storedScaleMode() {
+    try { const m = localStorage.getItem(HEAT_SCALE_KEY); return SCALE_MODES.includes(m) ? m : 'fit'; } catch { return 'fit'; }
+}
 
 export function mountMap(root, deps) {
     const stage = root.querySelector('#cx-map-stage');
@@ -149,7 +159,7 @@ export function mountMap(root, deps) {
         timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
-        aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT, windows: [],
+        aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT, heatScaleMode: storedScaleMode(), windows: [],
         tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null,
         underlay: new Map(), relief: { state: 'idle', canvas: null, ms: null },
         wind: null, windState: 'loading', windNote: '',
@@ -317,11 +327,23 @@ export function mountMap(root, deps) {
     // heatImage — EarthView's sample → LUT → freezing-seam order) and cached
     // for the view + time it was made for; hover moves do not recompute it.
     let heatCache = { key: '', canvas: null };
+    // The colour scale (heat-scale.js): 'fit' stretches THIS RUN's range in
+    // the window along the one ramp; the range is taken over every lead, once
+    // per field, so scrubbing the timeline never re-colours the map.
+    let scaleCache = { field: null, mode: '', scale: heatScale('absolute', null) };
+    function currentScale() {
+        if (scaleCache.field !== M.field || scaleCache.mode !== M.heatScaleMode) {
+            scaleCache = { field: M.field, mode: M.heatScaleMode, scale: heatScale(M.heatScaleMode, runRange(M.field)) };
+        }
+        return scaleCache.scale;
+    }
     function heatCanvasFor(t) {
         const f = M.field, v = M.view;
-        const key = `${f.run}|${t}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}`;
+        const sc = currentScale();
+        const key = `${f.run}|${t}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}|${sc.mode}|${sc.lo}|${sc.hi}`;
         if (heatCache.key !== key) {
-            const img = heatImage(f, t, v, M.w, M.h, LUT, { step: HEAT_STEP_PX });
+            const img = heatImage(f, t, v, M.w, M.h, LUT, { step: HEAT_STEP_PX,
+                paint: (val, data, o) => scaleColor(sc, val, LUT, data, o) });
             const c = heatCache.canvas || document.createElement('canvas');
             c.width = img.cw; c.height = img.ch;
             c.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
@@ -346,6 +368,15 @@ export function mountMap(root, deps) {
         // heat is evaluated between nodes only, so the box IS the node extent.
         const shift = dashedBox({ west: f.lonW, east: f.lonW + (f.nCols - 1) * f.dlon,
                                   north: f.latN, south: f.latN - (f.nRows - 1) * f.dlat });
+        // Relief OVER the heat, inside the data window: the same hillshade the
+        // ground wears (neutral on flat ground, so it moves no colour there).
+        const win = M.windows.at(-1);
+        if (win && M.layers.terrain && M.relief.state === 'ok') {
+            ctx.save();
+            ctx.beginPath(); ctx.rect(win.x, win.y, win.w, win.h); ctx.clip();
+            drawTerrain();
+            ctx.restore();
+        }
         M.drawn.heat = true;
         M.drawn.t = t;
         if (M.layers.isotherms) drawIsotherms(t, shift);
@@ -1489,6 +1520,7 @@ export function mountMap(root, deps) {
             t, timeMs: t == null ? null : M.field.times[t],
             range: t == null ? null : fieldRange(M.field, t),
             state: M.fieldState, note: M.fieldNote, heat: M.drawn.heat,
+            scale: (({ mode, lo, hi }) => ({ mode, lo, hi }))(currentScale()),
         };
     }
 
@@ -1726,12 +1758,20 @@ export function mountMap(root, deps) {
         /** The reader's unit changed: isotherm levels are chosen in it. */
         unitsChanged() { isoCache = { key: '', levels: [] }; D.isoKey = ''; requestDraw(); },
         setHeatAlpha(a) { M.heatAlpha = Math.max(0, Math.min(1, a)); requestDraw(); },
+        /** 'fit' | 'absolute' (heat-scale.js); remembered per browser. */
+        setHeatScale(mode) {
+            if (!SCALE_MODES.includes(mode)) return;
+            M.heatScaleMode = mode;
+            try { localStorage.setItem(HEAT_SCALE_KEY, mode); } catch { /* session only */ }
+            requestDraw();
+        },
+        get heatScale() { return currentScale(); },
         act,
         get state() {
             return {
                 view: M.view && { ...M.view }, size: { w: M.w, h: M.h }, layers: { ...M.layers },
                 field: M.field ? { nRows: M.field.nRows, nCols: M.field.nCols, run: M.field.run } : null,
-                fieldState: M.fieldState, drawn: { ...M.drawn }, frame: frameInfo(),
+                fieldState: M.fieldState, heatScaleMode: M.heatScaleMode, heatAlpha: M.heatAlpha, drawn: { ...M.drawn }, frame: frameInfo(),
                 relief: { state: M.relief.state, ms: M.relief.ms },
                 wind: windInfo(),
                 aq: aqInfo(),

@@ -28,6 +28,7 @@ import { DAY_MS } from './series.js';
 import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField, loadUpdraftField, loadConvectionField } from './loaders.js';
 import { fieldWindow } from './point-tile.js';
 import { tempControlState, overlayBadge } from './layer-state.js';
+import { keyPixels, keyFrac, keyTicks } from './heat-scale.js';
 import { capePaint, CAPE_MIN_JKG, CAPE_FULL_JKG, OUTLOOK_COLORS, TRIGGER_MIN_MS, CIN_WEAK_JKG } from './convection.js';
 import { updraftPaint, W_FULL_MS } from './updraft.js';
 import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
@@ -275,7 +276,8 @@ function rememberGroups() {
 const MAP_KEYS = [
     // `ok`: a key is on the map only while its field is DRAWN (layer-state.js) —
     // a colour key over a map with no temperature on it reads as a broken layer.
-    { box: '#cx-layer-temp', key: '#cx-heat-key', title: () => `Temperature · 2 m · ${unitSym('temp')}`, ok: () => S.tempCtl?.keyOnMap === true },
+    { box: '#cx-layer-temp', key: '#cx-heat-key', ok: () => S.tempCtl?.keyOnMap === true,
+      title: () => `Temperature · 2 m · ${unitSym('temp')}${S.map?.heatScale.mode === 'fit' ? ' · fit to view' : ''}` },
     { box: '#cx-layer-aq', key: '#cx-aq-key', title: () => 'PM2.5 · US AQI category' },
     { box: '#cx-layer-exp', key: '#cx-exp-key', title: () => 'Sun exposure · vs flat ground' },
     { box: '#cx-layer-oro', key: '#cx-oro-key', title: () => 'Orographic lift · surface' },
@@ -512,23 +514,44 @@ function renderRose() {
         : 'Calm through the run.';
 }
 
-/** Paint the colour key ONCE from the site-wide temperature LUT bytes. */
+/**
+ * Paint the colour key from the scale the map is drawing with (heat-scale.js):
+ * the whole ramp for 'absolute', this run's range stretched along it for
+ * 'fit'. Same function, same LUT bytes as the pixels on the map.
+ */
+let keySig = '';
 function paintHeatKey() {
+    const sc = S.map.heatScale;
+    const sig = `${sc.mode}|${sc.lo}|${sc.hi}`;
+    if (sig === keySig) return false;
+    keySig = sig;
     const c = $('#cx-heat-key canvas');
     const img = c.getContext('2d').createImageData(256, 1);
-    img.data.set(S.map.lut);
+    img.data.set(keyPixels(sc, S.map.lut, 256));
     c.getContext('2d').putImageData(img, 0, 0);
+    $('#cx-heat-key').dataset.scale = sc.mode;
+    return true;
 }
 
-/** Ticks at round values IN THE READER'S UNIT, placed on the °C ramp. */
+/** Ticks at round values IN THE READER'S UNIT, placed on the key's own scale. */
 function renderHeatTicks() {
-    const unit = S.units?.temp === 'F' ? 'F' : 'C';
-    const ticks = unit === 'F' ? [-40, 0, 40, 80, 120] : [-40, -20, 0, 20, 40];
-    $('#cx-heat-key .cx-key-ticks').innerHTML = ticks.map((d) => {
-        const c = fromDisplay('temp', d, S.units);
-        const f = tempToRampFrac(c);
-        return f > 0.02 && f < 0.98 ? `<span style="left:${(f * 100).toFixed(1)}%">${d}°</span>` : '';
-    }).join('');
+    const sc = S.map.heatScale;
+    const conv = { toDisplay: (c) => fmt('temp', c, S.units).value, fromDisplay: (d) => fromDisplay('temp', d, S.units) };
+    let ticks;
+    if (sc.mode === 'fit') ticks = keyTicks(sc, conv);
+    else {
+        const unit = S.units?.temp === 'F' ? 'F' : 'C';
+        ticks = (unit === 'F' ? [-40, 0, 40, 80, 120] : [-40, -20, 0, 20, 40])
+            .map((d) => ({ label: `${d}°`, frac: tempToRampFrac(conv.fromDisplay(d)) }))
+            .filter((t) => t.frac > 0.02 && t.frac < 0.98);
+    }
+    $('#cx-heat-key .cx-key-ticks').innerHTML = ticks.map((t) => `<span style="left:${(t.frac * 100).toFixed(1)}%">${esc(t.label)}</span>`).join('');
+}
+
+/** The Fit / Absolute control follows the map's mode (and a fit that had no range to fit). */
+function syncScaleControl() {
+    const want = S.map.state.heatScaleMode;
+    for (const b of document.querySelectorAll('#cx-heat-scale [data-scale]')) b.setAttribute('aria-pressed', String(b.dataset.scale === want));
 }
 
 /**
@@ -555,6 +578,7 @@ function applyTempControl(info) {
     const changed = S.tempCtl?.mode !== ctl.mode;
     S.tempCtl = ctl;
     for (const id of ['#cx-layer-iso', '#cx-layer-ext', '#cx-heat-alpha']) $(id).disabled = !ctl.subEnabled;
+    for (const b of document.querySelectorAll('#cx-heat-scale [data-scale]')) b.disabled = !ctl.subEnabled;
     $('#cx-layer-temp').closest('.cx-layer').dataset.avail = ctl.mode;
     setRowBadge('#cx-layer-temp', ctl.badge);
     $('#cx-heat-retry').hidden = !ctl.canRetry;
@@ -597,6 +621,7 @@ function renderHeatRail(info) {
     const st = $('#cx-heat-status');
     const win = $('#cx-heat-key .cx-key-win i');
     const ctl = applyTempControl(info);
+    if (S.map && paintHeatKey()) { renderHeatTicks(); syncMapKey(); }
     if (ctl.mode === 'off') { st.textContent = 'Temperature layer off.'; st.dataset.state = 'off'; win.hidden = true; return; }
     if (ctl.mode !== 'on') {
         st.dataset.state = ctl.mode === 'loading' ? 'loading' : 'down';
@@ -611,9 +636,13 @@ function renderHeatRail(info) {
     const when = `${local.toUTCString().slice(0, 3)} ${local.toISOString().slice(11, 16)} local`;
     const lead = Math.round((info.timeMs - S.field.body.runMs) / 3_600_000);
     const range = info.range ? ` · window ${fmtText('temp', info.range.min, S.units)} – ${fmtText('temp', info.range.max, S.units)}` : '';
-    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}`;
+    const sc = S.map.heatScale;
+    const scaleNote = sc.mode === 'fit'
+        ? `Colours fit to this run’s range here, ${fmtText('temp', sc.lo, S.units)} – ${fmtText('temp', sc.hi, S.units)} — compare places with Absolute.`
+        : 'Colours on the absolute scale EarthView uses.';
+    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}`;
     if (info.range) {
-        const a = tempToRampFrac(info.range.min), b = tempToRampFrac(info.range.max);
+        const a = keyFrac(sc, info.range.min), b = keyFrac(sc, info.range.max);
         win.hidden = false;
         win.style.left = `${(a * 100).toFixed(1)}%`;
         win.style.width = `${Math.max(1, (b - a) * 100).toFixed(1)}%`;
@@ -901,6 +930,13 @@ function mountLocationMap() {
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
+    $('#cx-heat-scale').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-scale]');
+        if (!b || b.disabled) return;
+        S.map.setHeatScale(b.dataset.scale);
+        syncScaleControl();
+    });
+    syncScaleControl();
     $('#cx-heat-retry').addEventListener('click', retryArchive);
     $('#cx-map-notice button').addEventListener('click', retryArchive);
     $('#cx-layer-terrain').addEventListener('change', (ev) => S.map.setLayer('terrain', ev.target.checked));

@@ -21,6 +21,8 @@
  *     opacity (pixels at the site) — and off → on restores the same frame
  *   · switching to another fill and back restores the Temperature controls
  *   · the units control re-labels the key, the ticks and the isotherms
+ *   · the colour scale: Fit to view (default) vs Absolute — the key, its title
+ *     and the rail say which; the choice is remembered; isotherms do not move
  *   · Airflow, fed by the same archive, wears the same badge
  */
 import { test, expect } from '@playwright/test';
@@ -143,7 +145,7 @@ test('NEGATIVE CONTROL: archive up — every control is live and changes exactly
     await nextFrame(page);
     const faintPx = await sample(page);
     expect(dist(faintPx, heatPx)).toBeGreaterThan(8);
-    await page.locator('#cx-heat-alpha').fill('0.62');
+    await page.locator('#cx-heat-alpha').fill('0.85');      // the map's default (HEAT_ALPHA_DEFAULT)
     await nextFrame(page);
     expect(dist(await sample(page), heatPx)).toBeLessThan(3);
 
@@ -203,6 +205,61 @@ test('units: the key, its ticks and the isotherms follow the reader\'s unit', as
     await expect(page.locator('#cx-heat-status')).toContainText('°F');
     // The field itself did not change — only its labels.
     expect(f.map.drawn.heat).toBe(true);
+    expect(errors).toEqual([]);
+});
+
+test('colour scale: Fit to view stretches this run\'s range, Absolute is the shared ramp, and the key says which', async ({ page }) => {
+    const errors = await boot(page);
+    await page.selectOption('#cx-units', 'imperial');
+    await nextFrame(page);
+    // Default: fit — the key spans the run's range in the window, and says so.
+    let s = await state(page);
+    expect(s.map.heatScaleMode).toBe('fit');
+    expect(s.map.frame.scale.mode).toBe('fit');
+    expect(s.map.frame.scale.lo).toBeLessThanOrEqual(s.map.frame.range.min);
+    expect(s.map.frame.scale.hi).toBeGreaterThanOrEqual(s.map.frame.range.max);
+    await expect(page.locator('#cx-heat-scale [data-scale="fit"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#cx-map-key .cx-mk-title')).toContainText('fit to view');
+    await expect(page.locator('#cx-heat-status')).toContainText('Colours fit to this run');
+    await expect(page.locator('#cx-heat-key')).toHaveAttribute('data-scale', 'fit');
+    const fitTicks = await page.locator('#cx-heat-key .cx-key-ticks').textContent();
+    expect(fitTicks).not.toContain('-40°');
+    const keyEnds = () => page.evaluate(() => {
+        const d = document.querySelector('#cx-heat-key canvas').getContext('2d').getImageData(0, 0, 256, 1).data;
+        return [[d[0], d[1], d[2]], [d[1020], d[1021], d[1022]]];
+    });
+    const fitKey = await keyEnds();
+    const fitPx = await sample(page);
+
+    // Absolute: the whole shared ramp on the key, the map re-coloured, the same field underneath.
+    await page.locator('#cx-heat-scale [data-scale="absolute"]').click();
+    await nextFrame(page);
+    s = await state(page);
+    expect(s.map.frame.scale.mode).toBe('absolute');
+    expect(s.map.drawn.heat).toBe(true);
+    await expect(page.locator('#cx-map-key .cx-mk-title')).not.toContainText('fit to view');
+    await expect(page.locator('#cx-heat-key .cx-key-ticks')).toContainText('-40°');
+    await expect(page.locator('#cx-heat-status')).toContainText('absolute scale');
+    const absKey = await keyEnds();
+    expect(absKey[0]).toEqual([0x2a, 0x0c, 0x5e]);              // the ramp's own first stop (js/temp-ramp.js)
+    expect(absKey[1]).toEqual([0x8c, 0x15, 0x26]);              // …and its last
+    expect(dist(fitKey[1], absKey[1])).toBeGreaterThan(20);     // fit stops short of "extreme heat" red
+    expect(dist(await sample(page), fitPx)).toBeGreaterThan(8);
+    // Isotherms are values, not colours: the scale does not move them.
+    const isoAbs = s.map.drawn.isoLevels;
+
+    // The choice survives a reload; back to fit restores the same pixels.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await settled(page);
+    await expect(page.locator('#cx-heat-scale [data-scale="absolute"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#cx-heat-scale [data-scale="fit"]').click();
+    await nextFrame(page);
+    s = await state(page);
+    expect(s.map.frame.scale.mode).toBe('fit');
+    expect(s.map.drawn.isoLevels).toEqual(isoAbs);
+    // With Temperature off the scale buttons cannot change anything, so they are off too.
+    await page.locator('#cx-layer-temp').uncheck();
+    await expect(page.locator('#cx-heat-scale [data-scale="absolute"]')).toBeDisabled();
     expect(errors).toEqual([]);
 });
 
