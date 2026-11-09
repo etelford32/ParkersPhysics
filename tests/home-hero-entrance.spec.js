@@ -48,13 +48,15 @@ test.describe('home hero entrance', () => {
         });
         await page.goto(URL, { waitUntil: 'domcontentloaded' });
 
-        // (1) + (4, at load): reticle up, no embed has a src yet.
+        // (1) + (4, at load): reticle up, no embed has a src yet. ONE deferred
+        // embed remains (the flux-rope attract frame) — the EarthView iframe
+        // became the Simulation Showcase on 2026-11-09.
         const early = await page.evaluate(() => ({
             booting: document.getElementById('hero').classList.contains('hero-booting'),
             srcs: [...document.querySelectorAll('iframe[data-src]')].map((f) => f.getAttribute('src')),
         }));
         expect(early.booting).toBe(true);
-        expect(early.srcs.length).toBe(2);
+        expect(early.srcs.length).toBe(1);
         expect(early.srcs.every((s) => s === null)).toBe(true);
 
         await page.waitForFunction(() => {
