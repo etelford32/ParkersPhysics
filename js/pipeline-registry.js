@@ -190,9 +190,11 @@ export const PIPELINES = [
       endpoint: '/api/cme/skill',
       category: 'events', upstream: 'Supabase (CME validation ledger)',
       cadence_s: 86_400, prewarm: 'cold',
-      freshnessExempt: true,   // data.updated is now() per request — DB read
-      warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
-      notes: 'Issue-time-locked forecasts + L1 truth for cme-forecast.html. Tables fill at validation-rerun cadence (06:30 UT). Shipped unmonitored until the 2026-08 ledger postmortem.' },
+      // data.updated is the LAST CRON RUN (pipeline_heartbeat 'cme_ledger'),
+      // not the request time — it was now() until 2026-11-09, which made
+      // this row green by construction. Do not re-add freshnessExempt.
+      warnAgeS:  26 * 3600, critAgeS: 50 * 3600,
+      notes: 'Issue-time-locked forecasts + L1 truth + the locked daily outlook for cme-forecast.html. Tables fill at validation-rerun cadence (06:30 UT); `ledger.last_run` and top-level `freshness` say whether that run happened. Shipped unmonitored until the 2026-08 ledger postmortem; its age was unmeasurable until 2026-11-09.' },
 
     { id: 'donki-flares',       label: 'DONKI flares',
       endpoint: '/api/donki/flares',
@@ -710,6 +712,11 @@ export const HEARTBEAT_PIPELINES = [
     // (Phase A2). 'skipped:coverage n/N' is expected until the archive holds
     // a full window; the pg_cron SQL pass covers the stats until then.
     { key: 'weather_cell_stats',      label: 'Weather Cell Stats (R2)', warnMin: 26 * 60, critMin: 50 * 60 },
+    // vercel.json: 30 6 * * * (daily) — api/cron/validation-rerun.js writes it
+    // on EVERY run, quiet or not (js/cme-ledger-status.js; same 26 h / 50 h
+    // as LEDGER_FRESH_H / LEDGER_EXPIRED_H, pinned by tests/cme-ledger-status.mjs).
+    // last_source is the run's own line: "44 CMEs screened · 2 Earth-relevant · …".
+    { key: 'cme_ledger',              label: 'CME Forecast Ledger',     warnMin: 26 * 60, critMin: 50 * 60 },
 ];
 
 /**

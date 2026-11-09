@@ -21,6 +21,10 @@
 
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
 import { selectScorableLock } from '../../js/flux-rope-validation.js';
+import { LEDGER_PIPELINE, ledgerFreshness, outlookByDay } from '../../js/cme-ledger-status.js';
+
+const OUTLOOK_MODEL = 'cme-outlook-v0';
+const OUTLOOK_LOOKBACK_DAYS = 62;      // two calendar months of locked daily odds
 
 export const config = { runtime: 'edge' };
 
@@ -46,18 +50,30 @@ export default async function handler(request) {
         return res.json();
     };
 
-    let skill, events;
+    // Optional reads: a failure here must degrade the calendar's daily
+    // layer, never take the forecast ledger down with it.
+    const soft = (path) => get(path).catch(() => null);
+    const sinceDay = new Date(Date.now() - OUTLOOK_LOOKBACK_DAYS * 86400e3).toISOString().slice(0, 10);
+
+    let skill, events, heartbeat, outlookRows;
     try {
         // PostgREST embeds forecasts + truth through the FKs in one call.
-        [skill, events] = await Promise.all([
+        [skill, events, heartbeat, outlookRows] = await Promise.all([
             get('cme_model_skill?select=*'),
             get('cme_events?is_hindcast=eq.false' +
                 '&select=event_id,donki_id,launch_time_utc,speed_kms_3d,' +
+                'half_width_deg,direction_lat_deg,direction_lon_deg,' +
                 'cme_arrival_forecasts(model_id,issued_at,predicted_arrival_utc,' +
                 'arrival_window_early,arrival_window_late,predicted_kp_max,' +
                 'predicted_speed_at_l1,inputs),' +
                 'cme_l1_observations(arrived,shock_arrival_utc,observed_bz_min_nt,observed_speed_kms)' +
                 `&order=launch_time_utc.desc&limit=${nEvents}`),
+            soft(`pipeline_heartbeat?pipeline_name=eq.${LEDGER_PIPELINE}` +
+                '&select=last_success_at,last_failure_at,last_failure_reason,last_source,consecutive_fail'),
+            // 62 d × 7 leads = 434 rows — under PostgREST's 1000-row cap.
+            soft(`cme_outlook_issues?model_id=eq.${OUTLOOK_MODEL}&valid_day=gte.${sinceDay}` +
+                '&select=issue_day,valid_day,lead_days,p_arrival,p_geo,lower_bound,' +
+                'obs_arrival,obs_geo,resolved_at,issued_at&order=issued_at.desc&limit=1000'),
         ]);
     } catch (e) {
         return jsonError('upstream_unavailable', e.message, { source: 'supabase' });
@@ -92,6 +108,11 @@ export default async function handler(request) {
             donki_id: ev.donki_id,
             launch: ev.launch_time_utc,
             speed_kms: ev.speed_kms_3d,
+            // Direction lets the page say WHY an event has baseline rows but
+            // no flux-rope forecast (it sits outside its own cone).
+            half_deg: ev.half_width_deg ?? null,
+            lat_deg: ev.direction_lat_deg ?? null,
+            lon_deg: ev.direction_lon_deg ?? null,
             forecasts: Object.fromEntries(Object.entries(byModel).map(([m, f]) => [m, {
                 issued_at: f.issued_at,
                 predicted: f.predicted_arrival_utc,
@@ -132,10 +153,46 @@ export default async function handler(request) {
         };
     });
 
+    // ── The daily-run record. `updated` used to be the REQUEST time, which
+    //    made this route (and the page's "updated …" label, and status.html)
+    //    fresh by construction: four quiet weeks and a dead cron looked the
+    //    same. It is now the last time the cron actually ran. The heartbeat
+    //    row is authoritative; before the first heartbeat lands (the deploy
+    //    that introduced it) the newest locked outlook issue stands in.
+    const outlook = outlookByDay(outlookRows ?? []);
+    const hb = Array.isArray(heartbeat) ? heartbeat[0] ?? null : null;
+    const newestIssueAt = (outlookRows ?? [])[0]?.issued_at ?? null;
+    // "Ran" = the cron executed and recorded an outcome, success or not.
+    const ranAt = [hb?.last_success_at, hb?.last_failure_at, newestIssueAt]
+        .map((t) => Date.parse(t ?? '')).filter(Number.isFinite);
+    const lastRunMs = ranAt.length ? Math.max(...ranAt) : NaN;
+    const nowMs = Date.now();
+    const failing = Number(hb?.consecutive_fail) > 0;
+    const fresh = ledgerFreshness(lastRunMs, nowMs);
+    const freshness = fresh.state === 'fresh' ? (failing ? 'stale' : 'fresh')
+        : fresh.state === 'stale' ? 'stale' : 'expired';
+    const ledger = {
+        last_run: Number.isFinite(lastRunMs) ? new Date(lastRunMs).toISOString() : null,
+        age_h: fresh.ageH === null ? null : Math.round(fresh.ageH * 10) / 10,
+        state: fresh.state,
+        // The run's own one-line account ("44 CMEs screened · 2 Earth-
+        // relevant · 0 new locks · flux-rope idle (…) · outlook issued").
+        summary: failing ? null : hb?.last_source ?? null,
+        consecutive_fail: Number(hb?.consecutive_fail) || 0,
+        last_failure_at: hb?.last_failure_at ?? null,
+        last_failure_reason: failing ? hb?.last_failure_reason ?? null : null,
+        basis: hb ? 'heartbeat' : newestIssueAt ? 'outlook-issue' : 'none',
+        schedule: 'daily 06:30 UT',
+    };
+
     return jsonOk({
         source: 'cme_model_skill + cme_events (issue-time-locked forecasts)',
+        freshness,
         data: {
-            updated: new Date().toISOString(),
+            updated: ledger.last_run,
+            served: new Date(nowMs).toISOString(),
+            ledger,
+            outlook: { model: OUTLOOK_MODEL, ...outlook },
             models: skill ?? [],
             events: trimmed,
         },
