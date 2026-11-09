@@ -714,7 +714,7 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #coord-tip.show { opacity:1; }
 
 /* ─── City hover tooltip (major-city dots) ───────────────────── */
-#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip, #volcano-tip {
+#city-tip, #ocean-tip, #air-quality-tip, #pollution-tip, #wildfire-tip, #station-tip, #residual-tip, #volcano-tip, #glacier-tip, #rgi-tip {
     position:fixed; z-index:56; display:none; pointer-events:none;
     background:rgba(2,10,20,.9); border:1px solid rgba(77,219,255,.45);
     border-radius:8px; padding:7px 11px; white-space:nowrap;
@@ -737,6 +737,25 @@ body.ev-verdict-solo #mobile-toolbar .mtb-btn[data-panel="loc-panel"] { display:
 #volcano-tip .vt-live { color:#ff9a5c; font-size:10px; margin-top:2px; font-weight:600; }
 #volcano-tip .cty-hint { color:#7f93b3; font-size:9px; margin-top:4px; }
 #volcano-tip a { color:#ffb37a; }
+/* Glacier tooltip (js/earth-glacier-layer.js). Same hover / tap-to-pin contract as the
+   volcano tip; the state is AS OF THE ARCHIVE and the tip says so. */
+#glacier-tip { border-color:rgba(143,211,255,.55); white-space:normal; max-width:290px; }
+#glacier-tip.pinned { pointer-events:auto; }
+#glacier-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; letter-spacing:.03em; }
+#glacier-tip .cty-sub { color:#bfe3ff; font-size:10px; margin-top:1px; }
+#glacier-tip .vt-row { color:#c6d4e8; font-size:10px; margin-top:2px; }
+#glacier-tip .gt-state { font-size:10px; margin-top:3px; font-weight:700; }
+#glacier-tip .cty-hint { color:#7f93b3; font-size:9px; margin-top:4px; }
+#glacier-tip a { color:#8fd3ff; }
+#rgi-tip { border-color:rgba(109,167,236,.5); white-space:normal; max-width:280px; }
+#rgi-tip.pinned { pointer-events:auto; }
+#rgi-tip .cty-name { color:#f0f6ff; font-size:12px; font-weight:700; }
+#rgi-tip .cty-sub { color:#bfe3ff; font-size:10px; margin-top:1px; }
+#rgi-tip .vt-row { color:#c6d4e8; font-size:10px; margin-top:2px; }
+#rgi-tip .cty-hint { color:#7f93b3; font-size:9px; margin-top:4px; }
+#rgi-tip a { color:#8fd3ff; }
+.lyr-gl-swatch { display:inline-block; width:8px; height:8px; margin:0 5px 0 2px; vertical-align:middle; transform:rotate(45deg); }
+.lyr-gl-swatch.hollow { background:none !important; border:1.5px solid currentColor; width:7px; height:7px; }
 .lyr-vol-swatch { display:inline-block; width:0; height:0; margin:0 4px 0 2px; vertical-align:middle;
     border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:9px solid currentColor; }
 .lyr-vol-note { font-size:.6rem; color:#7887a3; line-height:1.45; margin-top:6px; }
@@ -3185,6 +3204,23 @@ import './js/telemetry.js';
         <div class="vt-live" id="volcano-tip-live" hidden></div>
         <div class="cty-hint" id="volcano-tip-hint">Smithsonian GVP · tap to pin</div>
     </div>
+    <div id="glacier-tip" role="dialog" aria-label="Glacier">
+        <div class="cty-name" id="glacier-tip-name">—</div>
+        <div class="cty-sub" id="glacier-tip-sub">—</div>
+        <div class="gt-state" id="glacier-tip-state">—</div>
+        <div class="vt-row" id="glacier-tip-speed">—</div>
+        <div class="vt-row" id="glacier-tip-pairs">—</div>
+        <div class="vt-row" id="glacier-tip-mb">—</div>
+        <div class="cty-hint" id="glacier-tip-hint">NASA ITS_LIVE · tap to pin</div>
+    </div>
+    <div id="rgi-tip" role="dialog" aria-label="Glacier (RGI 7.0)">
+        <div class="cty-name" id="rgi-tip-name">—</div>
+        <div class="cty-sub" id="rgi-tip-sub">—</div>
+        <div class="vt-row" id="rgi-tip-size">—</div>
+        <div class="vt-row" id="rgi-tip-flags">—</div>
+        <div class="vt-row" id="rgi-tip-speed">—</div>
+        <div class="cty-hint" id="rgi-tip-hint">RGI 7.0 inventory · tap to pin</div>
+    </div>
 
     <div id="station-tip">
         <div class="cty-name" id="station-tip-name">—</div>
@@ -3644,6 +3680,25 @@ import './js/telemetry.js';
                 <div class="lyr" title="Inactive: GVP's Pleistocene list — no known eruption in the Holocene. Inactive, not extinct."><input type="checkbox" id="lyr-volcanoes-inactive" checked><label for="lyr-volcanoes-inactive"><span class="lyr-vol-swatch" style="color:#6b7280"></span>Inactive (Pleistocene)</label></div>
             </div>
             <div class="lyr-vol-note" id="volcanoes-note">Status from the GVP catalogue · live halo from USGS HANS + NASA EONET. <a href="volcanoes.html">Open the Earth Volcanoes lab →</a></div>
+            </div>
+        </div>
+
+        <!-- ── Glaciers (js/earth-glacier-layer.js over the Glacier Watch archive) ──
+             48 glaciers tracked by NASA ITS_LIVE: a diamond per glacier coloured by
+             its motion against its own seasonal rhythm (engine-computed, AS OF the
+             archive date), and its observed flowline with dots sliding along it.
+             Loads on first enable (~42 KB summary). -->
+        <div class="lyr-section collapsed" data-lyr-section="glaciers">
+            <div class="lyr-section-hdr"><span>GLACIERS</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body"><div class="lyr-grid">
+                <div class="lyr" title="Twenty-five glaciers tracked from orbit by NASA ITS_LIVE (Landsat 8/9, Sentinel-1/2 image pairs). The diamond's colour is the glacier's surface speed at mid-glacier against its own 2014–2024 seasonal rhythm, as of the archive date; hollow means the motion there is below what the satellites resolve. Hover for details, tap to pin."><input type="checkbox" id="lyr-glaciers"><span class="lyr-status" data-layer="glaciers" title="off — enable to load"></span><label for="lyr-glaciers">Glaciers (ITS_LIVE)</label><span class="lyr-count" id="glaciers-count">off</span></div>
+                <div class="lyr" title="Every glacier in the Randolph Glacier Inventory 7.0 (274,531 outside the Greenland and Antarctic ice sheets), at its centroid, coloured by median elevation and drawn at its true area where that is larger than a dot. An INVENTORY, not a measurement of today: outlines are dated by their source imagery (median 2002), and nothing here says how fast these glaciers move — that is the tracked layer above. ~1.8 MB, loaded on first enable."><input type="checkbox" id="lyr-glacier-catalog"><span class="lyr-status" data-layer="glacier-catalog" title="off — enable to load"></span><label for="lyr-glacier-catalog">All glaciers (RGI 7.0)</label><span class="lyr-count" id="glacier-catalog-count">off</span></div>
+                <div class="lyr" title="Each glacier's flowline — a streamline of the OBSERVED 2014–2024 mean velocity field — coloured by speed, with dots sliding along it. The dots' rate is LOG-compressed so slow and fast glaciers both visibly move: order is kept, ratios are not. Zoom in to see them."><input type="checkbox" id="lyr-glacier-flow" checked><label for="lyr-glacier-flow">Flowlines (moving ice)</label></div>
+            </div>
+            <div class="lyr-vol-note" id="glaciers-note">
+                <span class="lyr-gl-swatch" style="background:#f08a5d;color:#f08a5d"></span>Faster than usual · <span class="lyr-gl-swatch" style="background:#6ea8f0;color:#6ea8f0"></span>slower · <span class="lyr-gl-swatch" style="background:#c9d3e3;color:#c9d3e3"></span>usual range · <span class="lyr-gl-swatch hollow" style="background:#8a94a6;color:#8a94a6"></span>below detection.
+                States are as of the archive date; dot speeds along the flowlines are log-compressed. Pair with <i>Snow cover</i> under Earth observations.
+                <a href="glacier-watch.html" style="color:#8fd3ff">Open Glacier Watch for today's pairs →</a></div>
             </div>
         </div>
 
@@ -4652,6 +4707,8 @@ import { AirQualityLayer } from './js/air-quality-layer.js';
 import { PollutionCentersLayer } from './js/pollution-centers-layer.js';
 import { WildfireLayer } from './js/wildfire-layer.js';
 import { EarthVolcanoLayer } from './js/earth-volcano-layer.js';
+import { EarthGlacierLayer, STATE_STYLE as GLACIER_STATE_STYLE } from './js/earth-glacier-layer.js';
+import { EarthGlacierCatalogLayer } from './js/earth-glacier-catalog-layer.js';
 import { AqiHeatmapLayer } from './js/aqi-heatmap-layer.js';
 import { IntlStationsLayer } from './js/intl-stations-layer.js';
 import { ResidualLayer } from './js/residual-layer.js';
@@ -9352,6 +9409,87 @@ for (const g of ['active', 'dormant', 'inactive']) {
 }
 // Test/console probe: the most camera-facing shown volcano and its screen
 // position (globe rotation makes fixed coordinates unstable).
+// ── Glaciers (js/earth-glacier-layer.js) ─────────────────────────────────
+// The Glacier Watch archive: markers carry the engine's motion state AS OF the
+// archive date (data/glaciers/summary.json); flowlines are the observed streamlines.
+// Off at boot; nothing is fetched until the first enable.
+const _glacierCount = document.getElementById('glaciers-count');
+const glacierLayer = new EarthGlacierLayer(THREE, {
+    geoToXYZ,
+    onStatus(state, detail = {}) {
+        if (_glacierCount) {
+            _glacierCount.classList.remove('live', 'error');
+            _glacierCount.textContent = state === 'fetching' ? '…' : state === 'loaded' ? `${detail.count} · ${detail.asOf}` : state === 'error' ? 'error' : 'off';
+            _glacierCount.classList.toggle('live', state === 'loaded');
+            _glacierCount.classList.toggle('error', state === 'error');
+        }
+        const c = detail.counts || {};
+        _setLayerPipById('glaciers',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching' : state === 'error' ? 'error' : 'idle',
+            state === 'loaded'
+                ? `${detail.count} glaciers, states as of ${detail.asOf}${detail.stale ? ` (${detail.stale} older)` : ''}: ${c.faster || 0} faster, ${c.slower || 0} slower, ${c.normal || 0} usual, ${c.undetectable || 0} below detection`
+                : state === 'error' ? `glacier archive unavailable: ${detail.error ?? 'unknown'}`
+                : state === 'fetching' ? 'loading the glacier archive…' : 'off — enable to load', { notify: state === 'error' });
+    },
+});
+earthMesh.add(glacierLayer.group);
+window.__glacierLayer = glacierLayer;
+document.getElementById('lyr-glaciers')?.addEventListener('change', e => {
+    glacierLayer.setVisible(e.target.checked);
+    if (!e.target.checked) _setGlacierHover(null);
+});
+document.getElementById('lyr-glacier-flow')?.addEventListener('change', e => {
+    glacierLayer.setFlowVisible(e.target.checked);
+    const master = document.getElementById('lyr-glaciers');      // asking for flowlines is asking for glaciers
+    if (e.target.checked && master && !master.checked) { master.checked = true; master.dispatchEvent(new Event('change')); }
+});
+// ── Every glacier (js/earth-glacier-catalog-layer.js over RGI 7.0) ──────────────
+// The inventory under the tracked layer: 274 531 centroids, coloured by median elevation,
+// true area where larger than a dot. Off at boot; nothing fetched before the first enable.
+const _glacierCatCount = document.getElementById('glacier-catalog-count');
+const glacierCatalogLayer = new EarthGlacierCatalogLayer(THREE, {
+    geoToXYZ,
+    onStatus(state, detail = {}) {
+        if (_glacierCatCount) {
+            _glacierCatCount.classList.remove('live', 'error');
+            _glacierCatCount.textContent = state === 'fetching' ? '…' : state === 'loaded' ? `${Math.round(detail.count / 1000)}k` : state === 'error' ? 'error' : 'off';
+            _glacierCatCount.classList.toggle('live', state === 'loaded');
+            _glacierCatCount.classList.toggle('error', state === 'error');
+        }
+        _setLayerPipById('glacier-catalog',
+            state === 'loaded' ? 'loaded' : state === 'fetching' ? 'fetching' : state === 'error' ? 'error' : 'idle',
+            state === 'loaded' ? `${detail.count.toLocaleString('en-US')} glaciers, ${detail.area.toLocaleString('en-US')} km² (RGI 7.0 inventory — outlines dated by their imagery, median 2002)`
+                : state === 'error' ? `glacier inventory unavailable: ${detail.error ?? 'unknown'}`
+                : state === 'fetching' ? 'loading the glacier inventory (~1.8 MB)…' : 'off — enable to load', { notify: state === 'error' });
+    },
+});
+earthMesh.add(glacierCatalogLayer.group);
+window.__glacierCatalogLayer = glacierCatalogLayer;
+document.getElementById('lyr-glacier-catalog')?.addEventListener('change', e => {
+    glacierCatalogLayer.setVisible(e.target.checked);
+    if (!e.target.checked) _setRgiHover(null);
+});
+// Test/console probe: screen position of an RGI glacier by row index.
+window.__rgiAtIndex = (i) => {
+    if (!glacierCatalogLayer.cat) return null;
+    const w = glacierCatalogLayer.worldPosition(i), ndc = w.clone().project(camera), r = renderer.domElement.getBoundingClientRect();
+    return { facing: w.clone().normalize().dot(camera.position.clone().normalize()), x: r.left + (ndc.x + 1) / 2 * r.width, y: r.top + (1 - ndc.y) / 2 * r.height };
+};
+// Test/console probe: screen position of a glacier marker, by id or the most camera-facing one.
+window.__glacierAtCenter = (id = null) => {
+    if (!glacierLayer.summary) return null;
+    const camDir = camera.position.clone().normalize();
+    let best = null, bestDot = -1;
+    glacierLayer.summary.glaciers.forEach((g, i) => {
+        if (id && g.id !== id) return;
+        const w = glacierLayer.worldPosition(i), d = w.clone().normalize().dot(camDir);
+        if (d > bestDot) { bestDot = d; best = { g, w, i }; }
+    });
+    if (!best) return null;
+    const ndc = best.w.clone().project(camera), r = renderer.domElement.getBoundingClientRect();
+    return { id: best.g.id, facing: bestDot, x: r.left + (ndc.x + 1) / 2 * r.width, y: r.top + (1 - ndc.y) / 2 * r.height };
+};
+
 window.__volcanoAtCenter = (filter = null) => {
     if (!volcanoLayer.cat) return null;
     const camDir = camera.position.clone().normalize();
@@ -14127,7 +14265,7 @@ renderer.domElement.addEventListener('mousemove', e => {
         _setWildfireHover(null);
         _setPollutionHover(null);
         _setCityHover(null);
-        if (!_volcanoPinned) _setVolcanoHover(null);
+        if (!_volcanoPinned) _setVolcanoHover(null); if (!_glacierPinned) _setGlacierHover(null); if (!_rgiPinned) _setRgiHover(null);
         return;
     } else {
         _hideEqPopup();
@@ -14143,7 +14281,7 @@ renderer.domElement.addEventListener('mousemove', e => {
         _setWildfireHover(null);
         _setPollutionHover(null);
         _setCityHover(null);
-    if (!_volcanoPinned) _setVolcanoHover(null);
+    if (!_volcanoPinned) _setVolcanoHover(null); if (!_glacierPinned) _setGlacierHover(null); if (!_rgiPinned) _setRgiHover(null);
     } else {
         hideAlertTip();
         const oceanHovered = oceanStationsLayer.getHovered(alertRay);
@@ -14153,7 +14291,7 @@ renderer.domElement.addEventListener('mousemove', e => {
             _setWildfireHover(null);
             _setPollutionHover(null);
             _setCityHover(null);
-        if (!_volcanoPinned) _setVolcanoHover(null);
+        if (!_volcanoPinned) _setVolcanoHover(null); if (!_glacierPinned) _setGlacierHover(null); if (!_rgiPinned) _setRgiHover(null);
         } else {
             _setOceanHover(null);
             const airHovered = airQualityLayer.getHovered(alertRay);
@@ -14162,14 +14300,34 @@ renderer.domElement.addEventListener('mousemove', e => {
                 _setWildfireHover(null);
                 _setPollutionHover(null);
                 _setCityHover(null);
-            if (!_volcanoPinned) _setVolcanoHover(null);
+            if (!_volcanoPinned) _setVolcanoHover(null); if (!_glacierPinned) _setGlacierHover(null); if (!_rgiPinned) _setRgiHover(null);
             } else {
                 _setAirQualityHover(null);
                 // Volcanoes outrank the environment markers (a summit is a
                 // fixed, named place) but sit below ocean/air samples.
+                // Glaciers sit just above volcanoes: 25 fixed, named places.
+                const glacierHovered = glacierLayer.getHovered(alertRay);
+                if (!_glacierPinned) _setGlacierHover(glacierHovered, e.clientX, e.clientY);
+                if (glacierHovered) {
+                    if (!_volcanoPinned) _setVolcanoHover(null);
+                    if (!_rgiPinned) _setRgiHover(null);
+                    _setStationHover(null); _setResidualHover(null);
+                    _setWildfireHover(null); _setPollutionHover(null); _setCityHover(null);
+                    return;
+                }
                 const volcanoHovered = volcanoLayer.getHovered(alertRay);
                 if (!_volcanoPinned) _setVolcanoHover(volcanoHovered, e.clientX, e.clientY);
                 if (volcanoHovered) {
+                    if (!_rgiPinned) _setRgiHover(null);
+                    _setStationHover(null); _setResidualHover(null);
+                    _setWildfireHover(null); _setPollutionHover(null); _setCityHover(null);
+                    return;
+                }
+                // Every glacier (RGI 7.0): below the tracked glaciers and volcanoes (named,
+                // measured places), above stations and city dots.
+                const rgiHovered = glacierCatalogLayer.getHovered(alertRay);
+                if (!_rgiPinned) _setRgiHover(rgiHovered, e.clientX, e.clientY);
+                if (rgiHovered) {
                     _setStationHover(null); _setResidualHover(null);
                     _setWildfireHover(null); _setPollutionHover(null); _setCityHover(null);
                     return;
@@ -14209,7 +14367,7 @@ renderer.domElement.addEventListener('mouseleave', () => {
     _setWildfireHover(null);
     _setPollutionHover(null);
     _setCityHover(null);
-    if (!_volcanoPinned) _setVolcanoHover(null);
+    if (!_volcanoPinned) _setVolcanoHover(null); if (!_glacierPinned) _setGlacierHover(null); if (!_rgiPinned) _setRgiHover(null);
 });
 
 // ── Volcano hover: tooltip + glyph highlight ────────────────────────────────
@@ -14260,6 +14418,104 @@ function _setVolcanoHover(hit, cx, cy, { pin = false } = {}) {
     tip.classList.toggle('pinned', pin);
     tip.style.left = Math.min(cx + 14, window.innerWidth - 290) + 'px';
     tip.style.top  = Math.min(cy + 12, window.innerHeight - 120) + 'px';
+}
+
+// ── Glacier hover: tooltip + marker highlight ───────────────────────────────
+// hit = glacierLayer.describe(i) | null — every number is the engine's, through the
+// summary. The state is AS OF the archive date and the tip says so; a TAP pins it and
+// makes the deep link into glacier-watch.html clickable.
+let _glacierHoverIdx = -1;
+var _glacierPinned = false;   // var: read by the mousemove handler registered above
+function _setGlacierHover(hit, cx, cy, { pin = false } = {}) {
+    const tip = document.getElementById('glacier-tip');
+    if (!tip) return;
+    if (!hit) {
+        _glacierPinned = false;
+        tip.classList.remove('pinned');
+        if (_glacierHoverIdx !== -1) {
+            _glacierHoverIdx = -1;
+            glacierLayer.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    const { glacier: g, index, state, stateLabel, mid, asOf } = hit;
+    if (index !== _glacierHoverIdx || pin) {
+        _glacierHoverIdx = index;
+        glacierLayer.setHighlight(index);
+        const spd = (v) => v == null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(2)} km/yr` : `${v} m/yr`;
+        document.getElementById('glacier-tip-name').textContent = g.name;
+        document.getElementById('glacier-tip-sub').textContent = `${g.region} · ${g.country} · ${g.kind} · flowline ${g.flowline_km} km`;
+        const st = document.getElementById('glacier-tip-state');
+        st.textContent = `${{ faster: '▲', slower: '▼', normal: '●', undetectable: '○', unknown: '○' }[state] ?? '●'} Mid glacier: ${mid?.text ?? stateLabel}${mid?.n ? ` (${mid.n} pairs)` : ''}`;
+        st.style.color = GLACIER_STATE_STYLE[state]?.color ?? '#c6d4e8';
+        document.getElementById('glacier-tip-speed').textContent =
+            `Fastest ice ${spd(g.v0_max)} (2014–24 mean)${mid?.v_latest != null ? ` · latest mid-glacier pair ${spd(mid.v_latest)}` : ''}`;
+        document.getElementById('glacier-tip-pairs').textContent =
+            `${g.pairs_year} satellite pairs in 12 months · ${g.pairs_30d} in the last 30 days · newest ends ${g.newest_pair_end ?? '—'}`;
+        document.getElementById('glacier-tip-mb').textContent = g.mass_balance
+            ? `Field mass balance ${g.mass_balance.starts}–${g.mass_balance.ends} (WGMS): ${g.mass_balance.cumulative} m w.e. since ${g.mass_balance.cumulative_since}`
+            : 'No field mass-balance series (calving, debris-covered or ice-sheet glacier)';
+        document.getElementById('glacier-tip-hint').innerHTML = pin
+            ? `As of ${asOf} · <a href="glacier-watch.html?g=${encodeURIComponent(g.id)}">Open in Glacier Watch (today's pairs) →</a>`
+            : `NASA ITS_LIVE · as of ${asOf} · tap to pin`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    _glacierPinned = pin;
+    tip.classList.toggle('pinned', pin);
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 300) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 140) + 'px';
+}
+
+// ── RGI 7.0 hover: tooltip + dot highlight ─────────────────────────────────────
+// hit = glacierCatalogLayer.describe(i) | null — inventory facts only (area, median
+// elevation, region, marine front, surge evidence); a TAP pins it with the deep link
+// into glacier-watch.html's catalogue, which opens the full record.
+let _rgiHoverIdx = -1;
+var _rgiPinned = false;   // var: read by the mousemove handler registered above
+function _setRgiHover(hit, cx, cy, { pin = false } = {}) {
+    const tip = document.getElementById('rgi-tip');
+    if (!tip) return;
+    if (!hit) {
+        _rgiPinned = false;
+        tip.classList.remove('pinned');
+        if (_rgiHoverIdx !== -1) {
+            _rgiHoverIdx = -1;
+            glacierCatalogLayer.setHighlight(-1);
+            tip.style.display = 'none';
+            renderer.domElement.style.cursor = '';
+        }
+        return;
+    }
+    if (hit.index !== _rgiHoverIdx || pin) {
+        _rgiHoverIdx = hit.index;
+        glacierCatalogLayer.setHighlight(hit.index);
+        const a = hit.area_km2;
+        document.getElementById('rgi-tip-name').textContent = hit.name || (hit.tracked ? 'Tracked glacier' : 'Unnamed glacier');
+        document.getElementById('rgi-tip-sub').textContent = `${hit.subregion ?? ''} · ${hit.region ?? ''}`;
+        document.getElementById('rgi-tip-size').textContent =
+            `${a >= 100 ? Math.round(a).toLocaleString('en-US') : a >= 1 ? a.toFixed(1) : a.toFixed(2)} km² · median elevation ${hit.zmed.toLocaleString('en-US')} m`;
+        const sp = hit.speed, mps = (v) => v >= 1000 ? `${(v / 1000).toFixed(2)} km/yr` : v >= 10 ? `${Math.round(v)} m/yr` : `${v.toFixed(1)} m/yr`;
+        document.getElementById('rgi-tip-speed').textContent = hit.speedErr ? 'Surface speed unavailable'
+            : !sp ? 'Surface speed: loading ITS_LIVE…'
+            : sp.state === 'moving' ? `Fastest ice ~${mps(sp.p98)}, typical ${mps(sp.med)} (ITS_LIVE 2014–24 mean)`
+            : sp.state === 'partly' ? `Fastest ice ~${mps(sp.p98)}; the rest below what ITS_LIVE resolves (2014–24)`
+            : sp.state === 'below' ? 'Motion below what ITS_LIVE resolves (2014–24)'
+            : `Surface speed: ${sp.label}`;
+        document.getElementById('rgi-tip-flags').textContent =
+            `${hit.marine ? 'Marine-terminating' : 'Terminus not assigned'} · surge evidence: ${hit.surgeLabel}${hit.tracked ? ' · TRACKED in Glacier Watch' : ''}`;
+        document.getElementById('rgi-tip-hint').innerHTML = pin
+            ? `${hit.rgi_id} · <a href="glacier-watch.html?rgi=${encodeURIComponent(hit.rgi_id)}${hit.tracked ? `&g=${encodeURIComponent(hit.tracked)}` : ''}">${hit.speed && (hit.speed.state === 'moving' || hit.speed.state === 'partly') ? 'Its speed year by year, and the full record →' : 'Open the full record →'}</a>`
+            : `${hit.rgi_id} · RGI 7.0 inventory · tap to pin`;
+        tip.style.display = 'block';
+        renderer.domElement.style.cursor = 'pointer';
+    }
+    _rgiPinned = pin;
+    tip.classList.toggle('pinned', pin);
+    tip.style.left = Math.min(cx + 14, window.innerWidth - 290) + 'px';
+    tip.style.top  = Math.min(cy + 12, window.innerHeight - 110) + 'px';
 }
 
 // ── City-dot hover: tooltip + dot highlight + pointer cursor ────────────────
@@ -14446,6 +14702,11 @@ function _setWildfireHover(hit, cx, cy) {
         const ray  = new THREE.Raycaster();
         ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
 
+        // A pinned glacier tip is released by ANY tap that is not on a glacier, including
+        // one an earlier branch below handles (a quake, an alert…) — otherwise it lingers.
+        if (_glacierPinned && !glacierLayer.getHovered(ray)) _setGlacierHover(null);
+        if (_rgiPinned && !glacierCatalogLayer.getHovered(ray)) _setRgiHover(null);
+
         // Earthquake first (higher priority to match hover)
         const q = eqMarkers.getHovered(ray);
         if (q) { _pinEvent('quake', q, clientX, clientY); return true; }
@@ -14466,6 +14727,17 @@ function _setWildfireHover(hit, cx, cy) {
             return true;
         }
 
+        // Glacier: tap pins its tooltip (with the deep link into Glacier Watch).
+        const glacierTap = glacierLayer.getHovered(ray);
+        if (glacierTap) {
+            _setGlacierHover(glacierTap, clientX, clientY, { pin: true });
+            if (_volcanoPinned) _setVolcanoHover(null);
+            _setStationHover(null); _setResidualHover(null);
+            _setWildfireHover(null); _setPollutionHover(null);
+            return true;
+        }
+        if (_glacierPinned) _setGlacierHover(null);
+
         // Volcano: tap pins its tooltip (with the deep link to the lab).
         const volcanoTap = volcanoLayer.getHovered(ray);
         if (volcanoTap) {
@@ -14475,6 +14747,16 @@ function _setWildfireHover(hit, cx, cy) {
             return true;
         }
         if (_volcanoPinned) _setVolcanoHover(null);
+
+        // Every glacier (RGI 7.0): tap pins the inventory tip with its deep link.
+        const rgiTap = glacierCatalogLayer.getHovered(ray);
+        if (rgiTap) {
+            _setRgiHover(rgiTap, clientX, clientY, { pin: true });
+            _setStationHover(null); _setResidualHover(null);
+            _setWildfireHover(null); _setPollutionHover(null);
+            return true;
+        }
+        if (_rgiPinned) _setRgiHover(null);
 
         // Station / wildfire / pollution-center markers: tap pins their
         // hover tooltip at the tap point (the touch equivalent of hovering).
@@ -15441,6 +15723,8 @@ function animate() {
         pollutionCentersLayer.tick(t, _envPixelScale);
         wildfireLayer.tick(t, _envPixelScale);
         volcanoLayer.tick(t, _envPixelScale);
+        glacierLayer.tick(performance.now() / 1000, _envPixelScale);
+        glacierCatalogLayer.tick(t, _envPixelScale);
         intlStationsLayer.tick(t, _envPixelScale);
         residualLayer.tick(t, _envPixelScale);
     }
@@ -17112,6 +17396,8 @@ const _layerRegistry = {
     'lyr-pollution-centers':   () => pollutionCentersLayer.group.visible,
     'lyr-wildfires':           () => wildfireLayer.group.visible,
     'lyr-volcanoes':           () => volcanoLayer.group.visible,
+    'lyr-glaciers':            () => glacierLayer.group.visible,
+    'lyr-glacier-catalog':     () => glacierCatalogLayer.group.visible,
     'lyr-aqi-heatmap':         () => aqiHeatmapLayer.group.visible,
     'lyr-intl-stations':       () => intlStationsLayer.group.visible,
     'lyr-aq-residuals':        () => residualLayer.group.visible,

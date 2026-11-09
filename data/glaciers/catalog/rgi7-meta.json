@@ -1,0 +1,3369 @@
+{
+ "area_km2": 706744.0,
+ "aspect_note": "degrees clockwise from north",
+ "citation": "RGI 7.0 Consortium (2023). Randolph Glacier Inventory: A dataset of global glacier outlines, Version 7.0. NSIDC: National Snow and Ice Data Center. doi:10.5067/F6JMOVY5NAVZ",
+ "derived": {
+  "o1": {
+   "01": {
+    "area_km2": 86707.6,
+    "largest": {
+     "area_km2": 3362.66,
+     "index": 15260,
+     "name": "Seward Glacier",
+     "rgi_id": "RGI2000-v7.0-G-01-15261"
+    },
+    "marine": 56,
+    "n": 27509,
+    "named": 652,
+    "surge": [
+     26852,
+     128,
+     244,
+     285
+    ],
+    "zmed_median": 1559
+   },
+   "02": {
+    "area_km2": 14521.5,
+    "largest": {
+     "area_km2": 469.77,
+     "index": 36046,
+     "name": "Klinaklini Glacier",
+     "rgi_id": "RGI2000-v7.0-G-02-08538"
+    },
+    "marine": 0,
+    "n": 18730,
+    "named": 976,
+    "surge": [
+     18730,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 2150
+   },
+   "03": {
+    "area_km2": 105370.3,
+    "largest": {
+     "area_km2": 3085.62,
+     "index": 50448,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-03-04210"
+    },
+    "marine": 238,
+    "n": 5216,
+    "named": 102,
+    "surge": [
+     5145,
+     34,
+     16,
+     21
+    ],
+    "zmed_median": 845
+   },
+   "04": {
+    "area_km2": 40538.1,
+    "largest": {
+     "area_km2": 1234.91,
+     "index": 59702,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-08248"
+    },
+    "marine": 85,
+    "n": 11009,
+    "named": 9,
+    "surge": [
+     11002,
+     0,
+     6,
+     1
+    ],
+    "zmed_median": 863
+   },
+   "05": {
+    "area_km2": 90481.6,
+    "largest": {
+     "area_km2": 1240.25,
+     "index": 80000,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-05-17537"
+    },
+    "marine": 507,
+    "n": 19994,
+    "named": 0,
+    "surge": [
+     19901,
+     1,
+     71,
+     21
+    ],
+    "zmed_median": 938
+   },
+   "06": {
+    "area_km2": 11059.7,
+    "largest": {
+     "area_km2": 1561.22,
+     "index": 82684,
+     "name": "Skeidararjoekull",
+     "rgi_id": "RGI2000-v7.0-G-06-00227"
+    },
+    "marine": 1,
+    "n": 568,
+    "named": 30,
+    "surge": [
+     544,
+     0,
+     0,
+     24
+    ],
+    "zmed_median": 1076
+   },
+   "07": {
+    "area_km2": 33958.8,
+    "largest": {
+     "area_km2": 1226.39,
+     "index": 84408,
+     "name": "Austfonna",
+     "rgi_id": "RGI2000-v7.0-G-07-01383"
+    },
+    "marine": 196,
+    "n": 1666,
+    "named": 948,
+    "surge": [
+     1403,
+     103,
+     35,
+     125
+    ],
+    "zmed_median": 449
+   },
+   "08": {
+    "area_km2": 2947.8,
+    "largest": {
+     "area_km2": 55.45,
+     "index": 84886,
+     "name": "Austerdalsisen",
+     "rgi_id": "RGI2000-v7.0-G-08-00195"
+    },
+    "marine": 0,
+    "n": 3410,
+    "named": 505,
+    "surge": [
+     3410,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1339
+   },
+   "09": {
+    "area_km2": 51595.0,
+    "largest": {
+     "area_km2": 1412.73,
+     "index": 88744,
+     "name": "Vylki + Shury",
+     "rgi_id": "RGI2000-v7.0-G-09-00643"
+    },
+    "marine": 415,
+    "n": 1069,
+    "named": 527,
+    "surge": [
+     1033,
+     15,
+     14,
+     7
+    ],
+    "zmed_median": 393
+   },
+   "10": {
+    "area_km2": 2642.5,
+    "largest": {
+     "area_km2": 42.28,
+     "index": 95362,
+     "name": "Bogdanovicha",
+     "rgi_id": "RGI2000-v7.0-G-10-06192"
+    },
+    "marine": 1,
+    "n": 7155,
+    "named": 371,
+    "surge": [
+     7151,
+     0,
+     0,
+     4
+    ],
+    "zmed_median": 2059
+   },
+   "11": {
+    "area_km2": 2124.2,
+    "largest": {
+     "area_km2": 81.78,
+     "index": 98921,
+     "name": "Grosser Aletsch Gletscher",
+     "rgi_id": "RGI2000-v7.0-G-11-02596"
+    },
+    "marine": 0,
+    "n": 4079,
+    "named": 2666,
+    "surge": [
+     4075,
+     2,
+     0,
+     2
+    ],
+    "zmed_median": 2943
+   },
+   "12": {
+    "area_km2": 1406.7,
+    "largest": {
+     "area_km2": 39.41,
+     "index": 101315,
+     "name": "Bezengi",
+     "rgi_id": "RGI2000-v7.0-G-12-00911"
+    },
+    "marine": 0,
+    "n": 2275,
+    "named": 903,
+    "surge": [
+     2264,
+     0,
+     5,
+     6
+    ],
+    "zmed_median": 3326
+   },
+   "13": {
+    "area_km2": 50344.0,
+    "largest": {
+     "area_km2": 677.65,
+     "index": 119415,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-16736"
+    },
+    "marine": 0,
+    "n": 75613,
+    "named": 250,
+    "surge": [
+     74535,
+     338,
+     324,
+     416
+    ],
+    "zmed_median": 4979
+   },
+   "14": {
+    "area_km2": 33075.1,
+    "largest": {
+     "area_km2": 1087.96,
+     "index": 198332,
+     "name": "Siachen Glacier",
+     "rgi_id": "RGI2000-v7.0-G-14-20040"
+    },
+    "marine": 0,
+    "n": 37562,
+    "named": 170,
+    "surge": [
+     37223,
+     6,
+     103,
+     230
+    ],
+    "zmed_median": 5252
+   },
+   "15": {
+    "area_km2": 16049.4,
+    "largest": {
+     "area_km2": 165.45,
+     "index": 230472,
+     "name": "Yanong Glacier",
+     "rgi_id": "RGI2000-v7.0-G-15-14618"
+    },
+    "marine": 0,
+    "n": 18587,
+    "named": 296,
+    "surge": [
+     18575,
+     1,
+     6,
+     5
+    ],
+    "zmed_median": 5318
+   },
+   "16": {
+    "area_km2": 1928.6,
+    "largest": {
+     "area_km2": 12.76,
+     "index": 234657,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-16-00216"
+    },
+    "marine": 0,
+    "n": 3695,
+    "named": 63,
+    "surge": [
+     3695,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 5131
+   },
+   "17": {
+    "area_km2": 27674.4,
+    "largest": {
+     "area_km2": 1233.08,
+     "index": 250170,
+     "name": "Pio XI",
+     "rgi_id": "RGI2000-v7.0-G-17-12034"
+    },
+    "marine": 62,
+    "n": 30634,
+    "named": 786,
+    "surge": [
+     30603,
+     2,
+     1,
+     28
+    ],
+    "zmed_median": 1543
+   },
+   "18": {
+    "area_km2": 886.4,
+    "largest": {
+     "area_km2": 85.66,
+     "index": 270641,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-18-01871"
+    },
+    "marine": 0,
+    "n": 3018,
+    "named": 2,
+    "surge": [
+     3018,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1942
+   },
+   "19": {
+    "area_km2": 133432.4,
+    "largest": {
+     "area_km2": 5260.71,
+     "index": 273570,
+     "name": "Thurston I 001",
+     "rgi_id": "RGI2000-v7.0-G-19-01782"
+    },
+    "marine": 0,
+    "n": 2742,
+    "named": 201,
+    "surge": [
+     2742,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 324
+   },
+   "20": {
+    "n": 0
+   }
+  },
+  "o2": {
+   "01-01": {
+    "area_km2": 364.4,
+    "largest": {
+     "area_km2": 13.25,
+     "index": 350,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-01-00351"
+    },
+    "marine": 0,
+    "n": 706,
+    "named": 19,
+    "surge": [
+     706,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1940
+   },
+   "01-02": {
+    "area_km2": 16283.8,
+    "largest": {
+     "area_km2": 1028.8,
+     "index": 6337,
+     "name": "Nabesna Glacier",
+     "rgi_id": "RGI2000-v7.0-G-01-06338"
+    },
+    "marine": 0,
+    "n": 5812,
+    "named": 115,
+    "surge": [
+     5542,
+     1,
+     74,
+     195
+    ],
+    "zmed_median": 1659
+   },
+   "01-03": {
+    "area_km2": 1912.4,
+    "largest": {
+     "area_km2": 79.5,
+     "index": 7247,
+     "name": "Fourpeaked Glacier",
+     "rgi_id": "RGI2000-v7.0-G-01-07248"
+    },
+    "marine": 0,
+    "n": 872,
+    "named": 16,
+    "surge": [
+     867,
+     0,
+     5,
+     0
+    ],
+    "zmed_median": 992
+   },
+   "01-04": {
+    "area_km2": 12005.4,
+    "largest": {
+     "area_km2": 773.87,
+     "index": 10397,
+     "name": "Columbia Glacier",
+     "rgi_id": "RGI2000-v7.0-G-01-10398"
+    },
+    "marine": 33,
+    "n": 4529,
+    "named": 260,
+    "surge": [
+     4497,
+     0,
+     20,
+     12
+    ],
+    "zmed_median": 1198
+   },
+   "01-05": {
+    "area_km2": 33177.8,
+    "largest": {
+     "area_km2": 3362.66,
+     "index": 15260,
+     "name": "Seward Glacier",
+     "rgi_id": "RGI2000-v7.0-G-01-15261"
+    },
+    "marine": 10,
+    "n": 5039,
+    "named": 96,
+    "surge": [
+     4795,
+     105,
+     93,
+     46
+    ],
+    "zmed_median": 1711
+   },
+   "01-06": {
+    "area_km2": 22963.7,
+    "largest": {
+     "area_km2": 612.71,
+     "index": 20701,
+     "name": "South Sawyer Glacier",
+     "rgi_id": "RGI2000-v7.0-G-01-20702"
+    },
+    "marine": 13,
+    "n": 10551,
+    "named": 146,
+    "surge": [
+     10445,
+     22,
+     52,
+     32
+    ],
+    "zmed_median": 1566
+   },
+   "02-01": {
+    "area_km2": 656.5,
+    "largest": {
+     "area_km2": 22.02,
+     "index": 28070,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-02-00562"
+    },
+    "marine": 0,
+    "n": 1235,
+    "named": 0,
+    "surge": [
+     1235,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1997
+   },
+   "02-02": {
+    "area_km2": 8806.0,
+    "largest": {
+     "area_km2": 469.77,
+     "index": 36046,
+     "name": "Klinaklini Glacier",
+     "rgi_id": "RGI2000-v7.0-G-02-08538"
+    },
+    "marine": 0,
+    "n": 7390,
+    "named": 289,
+    "surge": [
+     7390,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1868
+   },
+   "02-03": {
+    "area_km2": 4385.9,
+    "largest": {
+     "area_km2": 43.95,
+     "index": 37839,
+     "name": "Shackleton Glacier",
+     "rgi_id": "RGI2000-v7.0-G-02-10331"
+    },
+    "marine": 0,
+    "n": 5063,
+    "named": 288,
+    "surge": [
+     5063,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 2397
+   },
+   "02-04": {
+    "area_km2": 528.7,
+    "largest": {
+     "area_km2": 10.59,
+     "index": 42883,
+     "name": "Emmons Glacier",
+     "rgi_id": "RGI2000-v7.0-G-02-15375"
+    },
+    "marine": 0,
+    "n": 3127,
+    "named": 268,
+    "surge": [
+     3127,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 2152
+   },
+   "02-05": {
+    "area_km2": 144.4,
+    "largest": {
+     "area_km2": 3.32,
+     "index": 44918,
+     "name": "Gannett Glacier",
+     "rgi_id": "RGI2000-v7.0-G-02-17410"
+    },
+    "marine": 0,
+    "n": 1915,
+    "named": 131,
+    "surge": [
+     1915,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 3225
+   },
+   "03-01": {
+    "area_km2": 27690.4,
+    "largest": {
+     "area_km2": 1473.64,
+     "index": 47834,
+     "name": "M'Clintock Glacier",
+     "rgi_id": "RGI2000-v7.0-G-03-01596"
+    },
+    "marine": 56,
+    "n": 2573,
+    "named": 51,
+    "surge": [
+     2551,
+     13,
+     6,
+     3
+    ],
+    "zmed_median": 908
+   },
+   "03-02": {
+    "area_km2": 11852.1,
+    "largest": {
+     "area_km2": 1019.83,
+     "index": 49087,
+     "name": "Iceberg",
+     "rgi_id": "RGI2000-v7.0-G-03-02849"
+    },
+    "marine": 2,
+    "n": 624,
+    "named": 34,
+    "surge": [
+     606,
+     9,
+     5,
+     4
+    ],
+    "zmed_median": 800
+   },
+   "03-03": {
+    "area_km2": 21335.8,
+    "largest": {
+     "area_km2": 1551.31,
+     "index": 50215,
+     "name": "D'Iberville",
+     "rgi_id": "RGI2000-v7.0-G-03-03977"
+    },
+    "marine": 18,
+    "n": 902,
+    "named": 14,
+    "surge": [
+     892,
+     8,
+     2,
+     0
+    ],
+    "zmed_median": 940
+   },
+   "03-04": {
+    "area_km2": 19322.3,
+    "largest": {
+     "area_km2": 3085.62,
+     "index": 50448,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-03-04210"
+    },
+    "marine": 60,
+    "n": 261,
+    "named": 0,
+    "surge": [
+     254,
+     2,
+     0,
+     5
+    ],
+    "zmed_median": 780
+   },
+   "03-05": {
+    "area_km2": 10041.5,
+    "largest": {
+     "area_km2": 1741.31,
+     "index": 51148,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-03-04910"
+    },
+    "marine": 68,
+    "n": 633,
+    "named": 1,
+    "surge": [
+     621,
+     2,
+     2,
+     8
+    ],
+    "zmed_median": 644
+   },
+   "03-06": {
+    "area_km2": 15000.0,
+    "largest": {
+     "area_km2": 2622.81,
+     "index": 51410,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-03-05172"
+    },
+    "marine": 34,
+    "n": 216,
+    "named": 1,
+    "surge": [
+     214,
+     0,
+     1,
+     1
+    ],
+    "zmed_median": 527
+   },
+   "03-07": {
+    "area_km2": 128.2,
+    "largest": {
+     "area_km2": 58.48,
+     "index": 51454,
+     "name": "Melville South Ice Cap",
+     "rgi_id": "RGI2000-v7.0-G-03-05216"
+    },
+    "marine": 0,
+    "n": 7,
+    "named": 1,
+    "surge": [
+     7,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 548
+   },
+   "04-01": {
+    "area_km2": 4883.5,
+    "largest": {
+     "area_km2": 568.03,
+     "index": 51680,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-00226"
+    },
+    "marine": 2,
+    "n": 616,
+    "named": 0,
+    "surge": [
+     616,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 811
+   },
+   "04-02": {
+    "area_km2": 3766.9,
+    "largest": {
+     "area_km2": 1025.48,
+     "index": 52124,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-00670"
+    },
+    "marine": 0,
+    "n": 96,
+    "named": 0,
+    "surge": [
+     94,
+     0,
+     2,
+     0
+    ],
+    "zmed_median": 749
+   },
+   "04-03": {
+    "area_km2": 496.6,
+    "largest": {
+     "area_km2": 46.11,
+     "index": 52498,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-01044"
+    },
+    "marine": 0,
+    "n": 597,
+    "named": 0,
+    "surge": [
+     597,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 638
+   },
+   "04-04": {
+    "area_km2": 8195.1,
+    "largest": {
+     "area_km2": 401.08,
+     "index": 54493,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-03039"
+    },
+    "marine": 48,
+    "n": 1953,
+    "named": 0,
+    "surge": [
+     1952,
+     0,
+     0,
+     1
+    ],
+    "zmed_median": 851
+   },
+   "04-05": {
+    "area_km2": 9431.0,
+    "largest": {
+     "area_km2": 939.95,
+     "index": 54718,
+     "name": "Barnes Ice Cap South Dome N Slope",
+     "rgi_id": "RGI2000-v7.0-G-04-03264"
+    },
+    "marine": 26,
+    "n": 1905,
+    "named": 1,
+    "surge": [
+     1901,
+     0,
+     4,
+     0
+    ],
+    "zmed_median": 974
+   },
+   "04-06": {
+    "area_km2": 7602.8,
+    "largest": {
+     "area_km2": 655.01,
+     "index": 57946,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-06492"
+    },
+    "marine": 7,
+    "n": 3036,
+    "named": 0,
+    "surge": [
+     3036,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 984
+   },
+   "04-07": {
+    "area_km2": 5907.1,
+    "largest": {
+     "area_km2": 1234.91,
+     "index": 59702,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-08248"
+    },
+    "marine": 0,
+    "n": 2620,
+    "named": 0,
+    "surge": [
+     2620,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 719
+   },
+   "04-08": {
+    "area_km2": 235.3,
+    "largest": {
+     "area_km2": 23.67,
+     "index": 62298,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-04-10844"
+    },
+    "marine": 2,
+    "n": 83,
+    "named": 0,
+    "surge": [
+     83,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 624
+   },
+   "04-09": {
+    "area_km2": 19.8,
+    "largest": {
+     "area_km2": 1.26,
+     "index": 62383,
+     "name": "Superguksoak Glacier",
+     "rgi_id": "RGI2000-v7.0-G-04-10929"
+    },
+    "marine": 0,
+    "n": 103,
+    "named": 8,
+    "surge": [
+     103,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 795
+   },
+   "05-01": {
+    "area_km2": 90481.6,
+    "largest": {
+     "area_km2": 1240.25,
+     "index": 80000,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-05-17537"
+    },
+    "marine": 507,
+    "n": 19994,
+    "named": 0,
+    "surge": [
+     19901,
+     1,
+     71,
+     21
+    ],
+    "zmed_median": 938
+   },
+   "06-01": {
+    "area_km2": 11059.7,
+    "largest": {
+     "area_km2": 1561.22,
+     "index": 82684,
+     "name": "Skeidararjoekull",
+     "rgi_id": "RGI2000-v7.0-G-06-00227"
+    },
+    "marine": 1,
+    "n": 568,
+    "named": 30,
+    "surge": [
+     544,
+     0,
+     0,
+     24
+    ],
+    "zmed_median": 1076
+   },
+   "07-01": {
+    "area_km2": 33841.4,
+    "largest": {
+     "area_km2": 1226.39,
+     "index": 84408,
+     "name": "Austfonna",
+     "rgi_id": "RGI2000-v7.0-G-07-01383"
+    },
+    "marine": 190,
+    "n": 1583,
+    "named": 938,
+    "surge": [
+     1320,
+     103,
+     35,
+     125
+    ],
+    "zmed_median": 441
+   },
+   "07-02": {
+    "area_km2": 117.5,
+    "largest": {
+     "area_km2": 17.78,
+     "index": 84656,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-07-01631"
+    },
+    "marine": 6,
+    "n": 83,
+    "named": 10,
+    "surge": [
+     83,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 518
+   },
+   "08-01": {
+    "area_km2": 1430.1,
+    "largest": {
+     "area_km2": 55.45,
+     "index": 84886,
+     "name": "Austerdalsisen",
+     "rgi_id": "RGI2000-v7.0-G-08-00195"
+    },
+    "marine": 0,
+    "n": 1832,
+    "named": 187,
+    "surge": [
+     1832,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1137
+   },
+   "08-02": {
+    "area_km2": 1215.7,
+    "largest": {
+     "area_km2": 47.47,
+     "index": 86659,
+     "name": "Tunsbergdalsbreen",
+     "rgi_id": "RGI2000-v7.0-G-08-01968"
+    },
+    "marine": 0,
+    "n": 1216,
+    "named": 204,
+    "surge": [
+     1216,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1494
+   },
+   "08-03": {
+    "area_km2": 302.0,
+    "largest": {
+     "area_km2": 9.64,
+     "index": 87936,
+     "name": "Sekkebreen",
+     "rgi_id": "RGI2000-v7.0-G-08-03245"
+    },
+    "marine": 0,
+    "n": 362,
+    "named": 114,
+    "surge": [
+     362,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1750
+   },
+   "09-01": {
+    "area_km2": 12762.2,
+    "largest": {
+     "area_km2": 512.01,
+     "index": 88179,
+     "name": "Brousilov Ice Cap (Prince George Land)",
+     "rgi_id": "RGI2000-v7.0-G-09-00078"
+    },
+    "marine": 324,
+    "n": 412,
+    "named": 209,
+    "surge": [
+     411,
+     0,
+     0,
+     1
+    ],
+    "zmed_median": 202
+   },
+   "09-02": {
+    "area_km2": 22131.7,
+    "largest": {
+     "area_km2": 1412.73,
+     "index": 88744,
+     "name": "Vylki + Shury",
+     "rgi_id": "RGI2000-v7.0-G-09-00643"
+    },
+    "marine": 46,
+    "n": 480,
+    "named": 161,
+    "surge": [
+     448,
+     13,
+     14,
+     5
+    ],
+    "zmed_median": 537
+   },
+   "09-03": {
+    "area_km2": 16701.1,
+    "largest": {
+     "area_km2": 1243.5,
+     "index": 88997,
+     "name": "Academy Of Sciences Ice Cap",
+     "rgi_id": "RGI2000-v7.0-G-09-00896"
+    },
+    "marine": 45,
+    "n": 177,
+    "named": 157,
+    "surge": [
+     174,
+     2,
+     0,
+     1
+    ],
+    "zmed_median": 419
+   },
+   "10-01": {
+    "area_km2": 14.9,
+    "largest": {
+     "area_km2": 0.55,
+     "index": 89292,
+     "name": "Igan",
+     "rgi_id": "RGI2000-v7.0-G-10-00122"
+    },
+    "marine": 0,
+    "n": 161,
+    "named": 45,
+    "surge": [
+     161,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 905
+   },
+   "10-02": {
+    "area_km2": 64.5,
+    "largest": {
+     "area_km2": 3.47,
+     "index": 89432,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-10-00262"
+    },
+    "marine": 0,
+    "n": 394,
+    "named": 19,
+    "surge": [
+     394,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 879
+   },
+   "10-03": {
+    "area_km2": 270.8,
+    "largest": {
+     "area_km2": 19.57,
+     "index": 90150,
+     "name": "Tollya",
+     "rgi_id": "RGI2000-v7.0-G-10-00980"
+    },
+    "marine": 1,
+    "n": 427,
+    "named": 58,
+    "surge": [
+     427,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 2308
+   },
+   "10-04": {
+    "area_km2": 1246.8,
+    "largest": {
+     "area_km2": 38.33,
+     "index": 91260,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-10-02090"
+    },
+    "marine": 0,
+    "n": 3033,
+    "named": 105,
+    "surge": [
+     3033,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 3171
+   },
+   "10-05": {
+    "area_km2": 1041.5,
+    "largest": {
+     "area_km2": 42.28,
+     "index": 95362,
+     "name": "Bogdanovicha",
+     "rgi_id": "RGI2000-v7.0-G-10-06192"
+    },
+    "marine": 0,
+    "n": 3091,
+    "named": 136,
+    "surge": [
+     3087,
+     0,
+     0,
+     4
+    ],
+    "zmed_median": 1259
+   },
+   "10-06": {
+    "area_km2": 3.6,
+    "largest": {
+     "area_km2": 0.24,
+     "index": 96301,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-10-07131"
+    },
+    "marine": 0,
+    "n": 44,
+    "named": 3,
+    "surge": [
+     44,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 620
+   },
+   "10-07": {
+    "area_km2": 0.5,
+    "largest": {
+     "area_km2": 0.11,
+     "index": 96323,
+     "name": "Komado Glacier",
+     "rgi_id": "RGI2000-v7.0-G-10-07153"
+    },
+    "marine": 0,
+    "n": 5,
+    "named": 5,
+    "surge": [
+     5,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 2136
+   },
+   "11-01": {
+    "area_km2": 2120.1,
+    "largest": {
+     "area_km2": 81.78,
+     "index": 98921,
+     "name": "Grosser Aletsch Gletscher",
+     "rgi_id": "RGI2000-v7.0-G-11-02596"
+    },
+    "marine": 0,
+    "n": 4034,
+    "named": 2621,
+    "surge": [
+     4030,
+     2,
+     0,
+     2
+    ],
+    "zmed_median": 2943
+   },
+   "11-02": {
+    "area_km2": 4.2,
+    "largest": {
+     "area_km2": 0.77,
+     "index": 100399,
+     "name": "Aneto",
+     "rgi_id": "RGI2000-v7.0-G-11-04074"
+    },
+    "marine": 0,
+    "n": 45,
+    "named": 45,
+    "surge": [
+     45,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 2837
+   },
+   "12-01": {
+    "area_km2": 1381.3,
+    "largest": {
+     "area_km2": 39.41,
+     "index": 101315,
+     "name": "Bezengi",
+     "rgi_id": "RGI2000-v7.0-G-12-00911"
+    },
+    "marine": 0,
+    "n": 2181,
+    "named": 883,
+    "surge": [
+     2170,
+     0,
+     5,
+     6
+    ],
+    "zmed_median": 3314
+   },
+   "12-02": {
+    "area_km2": 25.4,
+    "largest": {
+     "area_km2": 6.11,
+     "index": 102608,
+     "name": "Ararat (Buyuk Agri)",
+     "rgi_id": "RGI2000-v7.0-G-12-02204"
+    },
+    "marine": 0,
+    "n": 94,
+    "named": 20,
+    "surge": [
+     94,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 3723
+   },
+   "13-01": {
+    "area_km2": 1953.6,
+    "largest": {
+     "area_km2": 93.23,
+     "index": 104784,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-02105"
+    },
+    "marine": 0,
+    "n": 5340,
+    "named": 1,
+    "surge": [
+     5336,
+     0,
+     2,
+     2
+    ],
+    "zmed_median": 4089
+   },
+   "13-02": {
+    "area_km2": 10465.3,
+    "largest": {
+     "area_km2": 677.65,
+     "index": 119415,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-16736"
+    },
+    "marine": 0,
+    "n": 15744,
+    "named": 16,
+    "surge": [
+     14951,
+     328,
+     209,
+     256
+    ],
+    "zmed_median": 4953
+   },
+   "13-03": {
+    "area_km2": 9299.2,
+    "largest": {
+     "area_km2": 474.31,
+     "index": 131113,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-28434"
+    },
+    "marine": 0,
+    "n": 14682,
+    "named": 76,
+    "surge": [
+     14588,
+     4,
+     43,
+     47
+    ],
+    "zmed_median": 4066
+   },
+   "13-04": {
+    "area_km2": 3082.9,
+    "largest": {
+     "area_km2": 36.43,
+     "index": 142117,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-39438"
+    },
+    "marine": 0,
+    "n": 6255,
+    "named": 4,
+    "surge": [
+     6254,
+     0,
+     1,
+     0
+    ],
+    "zmed_median": 3880
+   },
+   "13-05": {
+    "area_km2": 8086.0,
+    "largest": {
+     "area_km2": 237.59,
+     "index": 151665,
+     "name": "Zhongfeng Glacier",
+     "rgi_id": "RGI2000-v7.0-G-13-48986"
+    },
+    "marine": 0,
+    "n": 7906,
+    "named": 23,
+    "surge": [
+     7818,
+     4,
+     32,
+     52
+    ],
+    "zmed_median": 5710
+   },
+   "13-06": {
+    "area_km2": 3211.7,
+    "largest": {
+     "area_km2": 110.72,
+     "index": 154824,
+     "name": "West Monuomaha Glacier",
+     "rgi_id": "RGI2000-v7.0-G-13-52145"
+    },
+    "marine": 0,
+    "n": 3854,
+    "named": 21,
+    "surge": [
+     3833,
+     1,
+     11,
+     9
+    ],
+    "zmed_median": 5352
+   },
+   "13-07": {
+    "area_km2": 1666.3,
+    "largest": {
+     "area_km2": 20.29,
+     "index": 159235,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-56556"
+    },
+    "marine": 0,
+    "n": 3256,
+    "named": 16,
+    "surge": [
+     3245,
+     0,
+     4,
+     7
+    ],
+    "zmed_median": 4833
+   },
+   "13-08": {
+    "area_km2": 8221.5,
+    "largest": {
+     "area_km2": 81.4,
+     "index": 164962,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-62283"
+    },
+    "marine": 0,
+    "n": 11185,
+    "named": 77,
+    "surge": [
+     11133,
+     1,
+     15,
+     36
+    ],
+    "zmed_median": 5853
+   },
+   "13-09": {
+    "area_km2": 4357.5,
+    "largest": {
+     "area_km2": 143.82,
+     "index": 176449,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-13-73770"
+    },
+    "marine": 0,
+    "n": 7391,
+    "named": 16,
+    "surge": [
+     7377,
+     0,
+     7,
+     7
+    ],
+    "zmed_median": 5399
+   },
+   "14-01": {
+    "area_km2": 3049.5,
+    "largest": {
+     "area_km2": 94.12,
+     "index": 179779,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-14-01487"
+    },
+    "marine": 0,
+    "n": 6857,
+    "named": 5,
+    "surge": [
+     6848,
+     0,
+     7,
+     2
+    ],
+    "zmed_median": 4828
+   },
+   "14-02": {
+    "area_km2": 21675.1,
+    "largest": {
+     "area_km2": 1087.96,
+     "index": 198332,
+     "name": "Siachen Glacier",
+     "rgi_id": "RGI2000-v7.0-G-14-20040"
+    },
+    "marine": 0,
+    "n": 17559,
+    "named": 124,
+    "surge": [
+     17236,
+     6,
+     92,
+     225
+    ],
+    "zmed_median": 5454
+   },
+   "14-03": {
+    "area_km2": 8350.5,
+    "largest": {
+     "area_km2": 112.36,
+     "index": 210787,
+     "name": "Bara Shigri Glacier",
+     "rgi_id": "RGI2000-v7.0-G-14-32495"
+    },
+    "marine": 0,
+    "n": 13146,
+    "named": 41,
+    "surge": [
+     13139,
+     0,
+     4,
+     3
+    ],
+    "zmed_median": 5208
+   },
+   "15-01": {
+    "area_km2": 6493.5,
+    "largest": {
+     "area_km2": 136.87,
+     "index": 216321,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-15-00467"
+    },
+    "marine": 0,
+    "n": 6127,
+    "named": 75,
+    "surge": [
+     6120,
+     0,
+     6,
+     1
+    ],
+    "zmed_median": 5435
+   },
+   "15-02": {
+    "area_km2": 5453.7,
+    "largest": {
+     "area_km2": 90.65,
+     "index": 223732,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-15-07878"
+    },
+    "marine": 0,
+    "n": 5503,
+    "named": 178,
+    "surge": [
+     5501,
+     0,
+     0,
+     2
+    ],
+    "zmed_median": 5513
+   },
+   "15-03": {
+    "area_km2": 4102.2,
+    "largest": {
+     "area_km2": 165.45,
+     "index": 230472,
+     "name": "Yanong Glacier",
+     "rgi_id": "RGI2000-v7.0-G-15-14618"
+    },
+    "marine": 0,
+    "n": 6957,
+    "named": 43,
+    "surge": [
+     6954,
+     1,
+     0,
+     2
+    ],
+    "zmed_median": 5124
+   },
+   "16-01": {
+    "area_km2": 1920.4,
+    "largest": {
+     "area_km2": 12.76,
+     "index": 234657,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-16-00216"
+    },
+    "marine": 0,
+    "n": 3647,
+    "named": 15,
+    "surge": [
+     3647,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 5132
+   },
+   "16-02": {
+    "area_km2": 1.6,
+    "largest": {
+     "area_km2": 0.63,
+     "index": 238094,
+     "name": "Citlaltepetl 1",
+     "rgi_id": "RGI2000-v7.0-G-16-03653"
+    },
+    "marine": 0,
+    "n": 7,
+    "named": 7,
+    "surge": [
+     7,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 5178
+   },
+   "16-03": {
+    "area_km2": 4.4,
+    "largest": {
+     "area_km2": 0.62,
+     "index": 238117,
+     "name": "Northern Ice",
+     "rgi_id": "RGI2000-v7.0-G-16-03676"
+    },
+    "marine": 0,
+    "n": 36,
+    "named": 36,
+    "surge": [
+     36,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 4806
+   },
+   "16-04": {
+    "area_km2": 2.1,
+    "largest": {
+     "area_km2": 1.17,
+     "index": 238135,
+     "name": "E Northwall Firn",
+     "rgi_id": "RGI2000-v7.0-G-16-03694"
+    },
+    "marine": 0,
+    "n": 5,
+    "named": 5,
+    "surge": [
+     5,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 4624
+   },
+   "17-01": {
+    "area_km2": 24040.3,
+    "largest": {
+     "area_km2": 1233.08,
+     "index": 250170,
+     "name": "Pio XI",
+     "rgi_id": "RGI2000-v7.0-G-17-12034"
+    },
+    "marine": 62,
+    "n": 17454,
+    "named": 276,
+    "surge": [
+     17453,
+     0,
+     0,
+     1
+    ],
+    "zmed_median": 1227
+   },
+   "17-02": {
+    "area_km2": 3634.1,
+    "largest": {
+     "area_km2": 57.28,
+     "index": 263962,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-17-25826"
+    },
+    "marine": 0,
+    "n": 13180,
+    "named": 510,
+    "surge": [
+     13150,
+     2,
+     1,
+     27
+    ],
+    "zmed_median": 2077
+   },
+   "18-01": {
+    "area_km2": 886.4,
+    "largest": {
+     "area_km2": 85.66,
+     "index": 270641,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-18-01871"
+    },
+    "marine": 0,
+    "n": 3018,
+    "named": 2,
+    "surge": [
+     3018,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 1942
+   },
+   "19-01": {
+    "area_km2": 133.9,
+    "largest": {
+     "area_km2": 29.65,
+     "index": 271793,
+     "name": "Storfallet C",
+     "rgi_id": "RGI2000-v7.0-G-19-00005"
+    },
+    "marine": 0,
+    "n": 15,
+    "named": 11,
+    "surge": [
+     15,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 282
+   },
+   "19-02": {
+    "area_km2": 3715.1,
+    "largest": {
+     "area_km2": 131.24,
+     "index": 271830,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-00042"
+    },
+    "marine": 0,
+    "n": 401,
+    "named": 0,
+    "surge": [
+     401,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 212
+   },
+   "19-03": {
+    "area_km2": 2474.8,
+    "largest": {
+     "area_km2": 175.46,
+     "index": 272405,
+     "name": "Glaciar Br?gger",
+     "rgi_id": "RGI2000-v7.0-G-19-00617"
+    },
+    "marine": 0,
+    "n": 550,
+    "named": 57,
+    "surge": [
+     550,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 418
+   },
+   "19-04": {
+    "area_km2": 796.4,
+    "largest": {
+     "area_km2": 79.59,
+     "index": 273094,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01306"
+    },
+    "marine": 0,
+    "n": 489,
+    "named": 1,
+    "surge": [
+     489,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 683
+   },
+   "19-05": {
+    "area_km2": 693.8,
+    "largest": {
+     "area_km2": 81.98,
+     "index": 273292,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01504"
+    },
+    "marine": 0,
+    "n": 50,
+    "named": 0,
+    "surge": [
+     50,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 514
+   },
+   "19-11": {
+    "area_km2": 2681.0,
+    "largest": {
+     "area_km2": 1085.43,
+     "index": 273298,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01510"
+    },
+    "marine": 0,
+    "n": 22,
+    "named": 0,
+    "surge": [
+     22,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 83
+   },
+   "19-12": {
+    "area_km2": 304.6,
+    "largest": {
+     "area_km2": 304.64,
+     "index": 273316,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01528"
+    },
+    "marine": 0,
+    "n": 1,
+    "named": 0,
+    "surge": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 360
+   },
+   "19-13": {
+    "area_km2": 2684.6,
+    "largest": {
+     "area_km2": 1273.68,
+     "index": 273322,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01534"
+    },
+    "marine": 0,
+    "n": 7,
+    "named": 0,
+    "surge": [
+     7,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 149
+   },
+   "19-14": {
+    "area_km2": 651.9,
+    "largest": {
+     "area_km2": 267.7,
+     "index": 273368,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01580"
+    },
+    "marine": 0,
+    "n": 54,
+    "named": 0,
+    "surge": [
+     54,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 11
+   },
+   "19-15": {
+    "area_km2": 2618.8,
+    "largest": {
+     "area_km2": 428.58,
+     "index": 273451,
+     "name": "Ross Island",
+     "rgi_id": "RGI2000-v7.0-G-19-01663"
+    },
+    "marine": 0,
+    "n": 111,
+    "named": 25,
+    "surge": [
+     111,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 394
+   },
+   "19-16": {
+    "area_km2": 17949.5,
+    "largest": {
+     "area_km2": 1687.94,
+     "index": 273534,
+     "name": "Carney Island IC",
+     "rgi_id": "RGI2000-v7.0-G-19-01746"
+    },
+    "marine": 0,
+    "n": 63,
+    "named": 20,
+    "surge": [
+     63,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 153
+   },
+   "19-17": {
+    "area_km2": 375.9,
+    "largest": {
+     "area_km2": 342.68,
+     "index": 273568,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01780"
+    },
+    "marine": 0,
+    "n": 17,
+    "named": 1,
+    "surge": [
+     17,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 52
+   },
+   "19-18": {
+    "area_km2": 14860.9,
+    "largest": {
+     "area_km2": 5260.71,
+     "index": 273570,
+     "name": "Thurston I 001",
+     "rgi_id": "RGI2000-v7.0-G-19-01782"
+    },
+    "marine": 0,
+    "n": 20,
+    "named": 18,
+    "surge": [
+     20,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 291
+   },
+   "19-19": {
+    "area_km2": 61169.9,
+    "largest": {
+     "area_km2": 4766.14,
+     "index": 273594,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-01806"
+    },
+    "marine": 0,
+    "n": 119,
+    "named": 41,
+    "surge": [
+     119,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 319
+   },
+   "19-20": {
+    "area_km2": 9287.0,
+    "largest": {
+     "area_km2": 2549.89,
+     "index": 273882,
+     "name": "Fuchs Ice Piedmont",
+     "rgi_id": "RGI2000-v7.0-G-19-02094"
+    },
+    "marine": 0,
+    "n": 637,
+    "named": 23,
+    "surge": [
+     637,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 125
+   },
+   "19-21": {
+    "area_km2": 5376.6,
+    "largest": {
+     "area_km2": 1932.01,
+     "index": 274509,
+     "name": "Coley Glacier",
+     "rgi_id": "RGI2000-v7.0-G-19-02721"
+    },
+    "marine": 0,
+    "n": 166,
+    "named": 3,
+    "surge": [
+     166,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 169
+   },
+   "19-22": {
+    "area_km2": 1779.9,
+    "largest": {
+     "area_km2": 1009.65,
+     "index": 274511,
+     "name": "Hearst Island IC",
+     "rgi_id": "RGI2000-v7.0-G-19-02723"
+    },
+    "marine": 0,
+    "n": 6,
+    "named": 1,
+    "surge": [
+     6,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 167
+   },
+   "19-23": {
+    "n": 0
+   },
+   "19-24": {
+    "area_km2": 5877.8,
+    "largest": {
+     "area_km2": 1494.71,
+     "index": 274517,
+     "name": null,
+     "rgi_id": "RGI2000-v7.0-G-19-02729"
+    },
+    "marine": 0,
+    "n": 14,
+    "named": 0,
+    "surge": [
+     14,
+     0,
+     0,
+     0
+    ],
+    "zmed_median": 133
+   },
+   "20-01": {
+    "n": 0
+   }
+  }
+ },
+ "files": {
+  "rgi7-detail-01.json.gz": {
+   "bytes": 780104,
+   "sha256": "89d2006a19e4644b9f856c7fad0d7b805fa71d1ec387cdae89d931cbb43bb440"
+  },
+  "rgi7-detail-02.json.gz": {
+   "bytes": 487122,
+   "sha256": "5ee3489512a88aec030e59cba5e8d8cd3e7966014c830c811c6239a29ff2c2d4"
+  },
+  "rgi7-detail-03.json.gz": {
+   "bytes": 161998,
+   "sha256": "2d66c46d60d2b8575796f4ba68fc1a81c498a71863bf2538d7a8759a91d6a914"
+  },
+  "rgi7-detail-04.json.gz": {
+   "bytes": 278036,
+   "sha256": "596101d800773453d2ed776557befe02ca00781144c3e065785156abadeaaaa9"
+  },
+  "rgi7-detail-05.json.gz": {
+   "bytes": 570100,
+   "sha256": "992b8618f86d5f510a84da01d7ec4957dc3c105078b8774798506f29c3389d5b"
+  },
+  "rgi7-detail-06.json.gz": {
+   "bytes": 17884,
+   "sha256": "15d326d5565221ea27458064de3778157e6ee996d5d71e8e89ff40c820f43c17"
+  },
+  "rgi7-detail-07.json.gz": {
+   "bytes": 54784,
+   "sha256": "81b913f67c39987cc1359068ed7cce12f448d95d445bcb81958b0e5c52cd83ba"
+  },
+  "rgi7-detail-08.json.gz": {
+   "bytes": 86304,
+   "sha256": "769f6ef3665ff21fb16ae5a11b9ea15aa41bf53e78ff7ad8466e8ea582b350d6"
+  },
+  "rgi7-detail-09.json.gz": {
+   "bytes": 34611,
+   "sha256": "8724c296704febd46fdc44c425f4261a6544767bd999c06bfa1c5d97f64e851f"
+  },
+  "rgi7-detail-10.json.gz": {
+   "bytes": 166855,
+   "sha256": "b228a27bf73f8d0c2ef71264f48720f74b3294a36762a9951014146b7e184f6a"
+  },
+  "rgi7-detail-11.json.gz": {
+   "bytes": 106592,
+   "sha256": "e5c60eadb8cbd2378749195ba17ec6006d1ef4c6c04a10362f6ff5644b3782e8"
+  },
+  "rgi7-detail-12.json.gz": {
+   "bytes": 64088,
+   "sha256": "ba0ff572adb406ce7878164d6a63bf7f703eef11d4706663227f50d03d7635c1"
+  },
+  "rgi7-detail-13.json.gz": {
+   "bytes": 1954572,
+   "sha256": "0dcd02d6fd7c3c3d18c6f245d950bfe9375ac85ccd7254fa58fb8df300500e72"
+  },
+  "rgi7-detail-14.json.gz": {
+   "bytes": 1002530,
+   "sha256": "0968de8e3b267bdbfb33534d89344524e50739a92dfa9d3b3eb03874aa699b3a"
+  },
+  "rgi7-detail-15.json.gz": {
+   "bytes": 538570,
+   "sha256": "fd32fcd1f33cde1b0917b498cc750dda26d9e9a7433211ec761de861eb9deec9"
+  },
+  "rgi7-detail-16.json.gz": {
+   "bytes": 100028,
+   "sha256": "06388f38d25456b1e36045da7d4ed0588d9dd13d4305301d40b57cbe2518735d"
+  },
+  "rgi7-detail-17.json.gz": {
+   "bytes": 679979,
+   "sha256": "0fb952adb740387dccedba1f554116962d5375923f679e19ba1b91b1e31d93d0"
+  },
+  "rgi7-detail-18.json.gz": {
+   "bytes": 74988,
+   "sha256": "8bfcb6bcffde4f17eb1b848eefc7fd53eab12e00d38e9971c73be8f1a9fd52f1"
+  },
+  "rgi7-detail-19.json.gz": {
+   "bytes": 81207,
+   "sha256": "61ae14cd33d5c8bbe4fa5dd8b20188bf72a05110e9dccf02fa67cf1ae7f98833"
+  },
+  "rgi7-names.json.gz": {
+   "bytes": 71141,
+   "sha256": "d8d5721c785c6ee6eab23c28f54e4c3850027592fb7332baeefc645470ff970f"
+  },
+  "rgi7-points.bin.gz": {
+   "bytes": 1721588,
+   "sha256": "f1c3577b115a33f54e9c3f12769be0ab01f65aefe6fb1d01bac7be74b5b894c4"
+  }
+ },
+ "format": "glacier-catalog-rgi7-v1",
+ "hypsometry_band_m": 50,
+ "n": 274531,
+ "o1": [
+  "01",
+  "02",
+  "03",
+  "04",
+  "05",
+  "06",
+  "07",
+  "08",
+  "09",
+  "10",
+  "11",
+  "12",
+  "13",
+  "14",
+  "15",
+  "16",
+  "17",
+  "18",
+  "19",
+  "20"
+ ],
+ "o2": [
+  "01-01",
+  "01-02",
+  "01-03",
+  "01-04",
+  "01-05",
+  "01-06",
+  "02-01",
+  "02-02",
+  "02-03",
+  "02-04",
+  "02-05",
+  "03-01",
+  "03-02",
+  "03-03",
+  "03-04",
+  "03-05",
+  "03-06",
+  "03-07",
+  "04-01",
+  "04-02",
+  "04-03",
+  "04-04",
+  "04-05",
+  "04-06",
+  "04-07",
+  "04-08",
+  "04-09",
+  "05-01",
+  "06-01",
+  "07-01",
+  "07-02",
+  "08-01",
+  "08-02",
+  "08-03",
+  "09-01",
+  "09-02",
+  "09-03",
+  "10-01",
+  "10-02",
+  "10-03",
+  "10-04",
+  "10-05",
+  "10-06",
+  "10-07",
+  "11-01",
+  "11-02",
+  "12-01",
+  "12-02",
+  "13-01",
+  "13-02",
+  "13-03",
+  "13-04",
+  "13-05",
+  "13-06",
+  "13-07",
+  "13-08",
+  "13-09",
+  "14-01",
+  "14-02",
+  "14-03",
+  "15-01",
+  "15-02",
+  "15-03",
+  "16-01",
+  "16-02",
+  "16-03",
+  "16-04",
+  "17-01",
+  "17-02",
+  "18-01",
+  "19-01",
+  "19-02",
+  "19-03",
+  "19-04",
+  "19-05",
+  "19-11",
+  "19-12",
+  "19-13",
+  "19-14",
+  "19-15",
+  "19-16",
+  "19-17",
+  "19-18",
+  "19-19",
+  "19-20",
+  "19-21",
+  "19-22",
+  "19-23",
+  "19-24",
+  "20-01"
+ ],
+ "official": {
+  "o1region": {
+   "01": {
+    "area_km2": 86708,
+    "count": 27509,
+    "name": "Alaska"
+   },
+   "02": {
+    "area_km2": 14521,
+    "count": 18730,
+    "name": "Western Canada and USA"
+   },
+   "03": {
+    "area_km2": 105370,
+    "count": 5216,
+    "name": "Arctic Canada North"
+   },
+   "04": {
+    "area_km2": 40538,
+    "count": 11009,
+    "name": "Arctic Canada South"
+   },
+   "05": {
+    "area_km2": 90482,
+    "count": 19994,
+    "name": "Greenland Periphery"
+   },
+   "06": {
+    "area_km2": 11060,
+    "count": 568,
+    "name": "Iceland"
+   },
+   "07": {
+    "area_km2": 33959,
+    "count": 1666,
+    "name": "Svalbard and Jan Mayen"
+   },
+   "08": {
+    "area_km2": 2948,
+    "count": 3410,
+    "name": "Scandinavia"
+   },
+   "09": {
+    "area_km2": 51595,
+    "count": 1069,
+    "name": "Russian Arctic"
+   },
+   "10": {
+    "area_km2": 2643,
+    "count": 7155,
+    "name": "North Asia"
+   },
+   "11": {
+    "area_km2": 2124,
+    "count": 4079,
+    "name": "Central Europe"
+   },
+   "12": {
+    "area_km2": 1407,
+    "count": 2275,
+    "name": "Caucasus and Middle East"
+   },
+   "13": {
+    "area_km2": 50344,
+    "count": 75613,
+    "name": "Central Asia"
+   },
+   "14": {
+    "area_km2": 33075,
+    "count": 37562,
+    "name": "South Asia West"
+   },
+   "15": {
+    "area_km2": 16049,
+    "count": 18587,
+    "name": "South Asia East"
+   },
+   "16": {
+    "area_km2": 1929,
+    "count": 3695,
+    "name": "Low Latitudes"
+   },
+   "17": {
+    "area_km2": 27674,
+    "count": 30634,
+    "name": "Southern Andes"
+   },
+   "18": {
+    "area_km2": 886,
+    "count": 3018,
+    "name": "New Zealand"
+   },
+   "19": {
+    "area_km2": 133432,
+    "count": 2742,
+    "name": "Subantarctic and Antarctic Islands"
+   },
+   "20": {
+    "area_km2": 0,
+    "count": 0,
+    "name": "Antarctic Mainland"
+   },
+   "Global": {
+    "area_km2": 706744,
+    "count": 274531,
+    "name": ""
+   }
+  },
+  "o2region": {
+   "01-01": {
+    "area_km2": 364,
+    "count": 706,
+    "name": "North Alaska"
+   },
+   "01-02": {
+    "area_km2": 16284,
+    "count": 5812,
+    "name": "Alaska Range (Wrangell/Kilbuck)"
+   },
+   "01-03": {
+    "area_km2": 1912,
+    "count": 872,
+    "name": "Alaska Peninsula (Aleutians)"
+   },
+   "01-04": {
+    "area_km2": 12005,
+    "count": 4529,
+    "name": "West Chugach Mountains (Talkeetna)"
+   },
+   "01-05": {
+    "area_km2": 33178,
+    "count": 5039,
+    "name": "Saint Elias Mountains"
+   },
+   "01-06": {
+    "area_km2": 22964,
+    "count": 10551,
+    "name": "North Coast Ranges"
+   },
+   "02-01": {
+    "area_km2": 657,
+    "count": 1235,
+    "name": "Mackenzie and Selwyn Mountains"
+   },
+   "02-02": {
+    "area_km2": 8806,
+    "count": 7390,
+    "name": "South Coast Ranges"
+   },
+   "02-03": {
+    "area_km2": 4386,
+    "count": 5063,
+    "name": "North Rocky Mountains"
+   },
+   "02-04": {
+    "area_km2": 529,
+    "count": 3127,
+    "name": "Cascade Range and Sierra Nevada"
+   },
+   "02-05": {
+    "area_km2": 144,
+    "count": 1915,
+    "name": "South Rocky Mountains"
+   },
+   "03-01": {
+    "area_km2": 27690,
+    "count": 2573,
+    "name": "North Ellesmere Island"
+   },
+   "03-02": {
+    "area_km2": 11852,
+    "count": 624,
+    "name": "Axel Heiberg and Meighen Is"
+   },
+   "03-03": {
+    "area_km2": 21336,
+    "count": 902,
+    "name": "North Central Ellesmere Island"
+   },
+   "03-04": {
+    "area_km2": 19322,
+    "count": 261,
+    "name": "South Central Ellesmere Island"
+   },
+   "03-05": {
+    "area_km2": 10042,
+    "count": 633,
+    "name": "South Ellesmere Island (Northwest Devon)"
+   },
+   "03-06": {
+    "area_km2": 15000,
+    "count": 216,
+    "name": "Devon Island"
+   },
+   "03-07": {
+    "area_km2": 128,
+    "count": 7,
+    "name": "Melville Island"
+   },
+   "04-01": {
+    "area_km2": 4883,
+    "count": 616,
+    "name": "Bylot Island"
+   },
+   "04-02": {
+    "area_km2": 3767,
+    "count": 96,
+    "name": "West Baffin Island"
+   },
+   "04-03": {
+    "area_km2": 497,
+    "count": 597,
+    "name": "North Baffin Island"
+   },
+   "04-04": {
+    "area_km2": 8195,
+    "count": 1953,
+    "name": "Northeast Baffin Island"
+   },
+   "04-05": {
+    "area_km2": 9431,
+    "count": 1905,
+    "name": "East Central Baffin Island"
+   },
+   "04-06": {
+    "area_km2": 7603,
+    "count": 3036,
+    "name": "South East Baffin Island"
+   },
+   "04-07": {
+    "area_km2": 5907,
+    "count": 2620,
+    "name": "Cumberland Sound"
+   },
+   "04-08": {
+    "area_km2": 235,
+    "count": 83,
+    "name": "Frobisher Bay"
+   },
+   "04-09": {
+    "area_km2": 20,
+    "count": 103,
+    "name": "Labrador"
+   },
+   "05-01": {
+    "area_km2": 90482,
+    "count": 19994,
+    "name": "Greenland Periphery"
+   },
+   "06-01": {
+    "area_km2": 11060,
+    "count": 568,
+    "name": "Iceland"
+   },
+   "07-01": {
+    "area_km2": 33841,
+    "count": 1583,
+    "name": "Svalbard"
+   },
+   "07-02": {
+    "area_km2": 117,
+    "count": 83,
+    "name": "Jan Mayen"
+   },
+   "08-01": {
+    "area_km2": 1430,
+    "count": 1832,
+    "name": "North Scandinavia"
+   },
+   "08-02": {
+    "area_km2": 1216,
+    "count": 1216,
+    "name": "Southwest Scandinavia"
+   },
+   "08-03": {
+    "area_km2": 302,
+    "count": 362,
+    "name": "Southeast Scandinavia"
+   },
+   "09-01": {
+    "area_km2": 12762,
+    "count": 412,
+    "name": "Franz Josef Land"
+   },
+   "09-02": {
+    "area_km2": 22132,
+    "count": 480,
+    "name": "Novaya Zemlya"
+   },
+   "09-03": {
+    "area_km2": 16701,
+    "count": 177,
+    "name": "Severnaya Zemlya"
+   },
+   "10-01": {
+    "area_km2": 15,
+    "count": 161,
+    "name": "Ural Mountains"
+   },
+   "10-02": {
+    "area_km2": 64,
+    "count": 394,
+    "name": "Central Siberia"
+   },
+   "10-03": {
+    "area_km2": 271,
+    "count": 427,
+    "name": "Cherskiy/Suntar Khayata Ranges"
+   },
+   "10-04": {
+    "area_km2": 1247,
+    "count": 3033,
+    "name": "Altay and Sayan"
+   },
+   "10-05": {
+    "area_km2": 1041,
+    "count": 3091,
+    "name": "Northeast Russia"
+   },
+   "10-06": {
+    "area_km2": 4,
+    "count": 44,
+    "name": "East Chukotka"
+   },
+   "10-07": {
+    "area_km2": 0,
+    "count": 5,
+    "name": "Japan"
+   },
+   "11-01": {
+    "area_km2": 2120,
+    "count": 4034,
+    "name": "Alps"
+   },
+   "11-02": {
+    "area_km2": 4,
+    "count": 45,
+    "name": "Southeast Europe"
+   },
+   "12-01": {
+    "area_km2": 1381,
+    "count": 2181,
+    "name": "Caucasus and Middle East"
+   },
+   "12-02": {
+    "area_km2": 25,
+    "count": 94,
+    "name": "Middle East"
+   },
+   "13-01": {
+    "area_km2": 1954,
+    "count": 5340,
+    "name": "Hissar Alay"
+   },
+   "13-02": {
+    "area_km2": 10465,
+    "count": 15744,
+    "name": "Pamir (Safed Khirs / West Tarim)"
+   },
+   "13-03": {
+    "area_km2": 9299,
+    "count": 14682,
+    "name": "West Tien Shan"
+   },
+   "13-04": {
+    "area_km2": 3083,
+    "count": 6255,
+    "name": "East Tien Shan (Dzhungaria)"
+   },
+   "13-05": {
+    "area_km2": 8086,
+    "count": 7906,
+    "name": "West Kun Lun"
+   },
+   "13-06": {
+    "area_km2": 3212,
+    "count": 3854,
+    "name": "East Kun Lun (Altyn Tagh)"
+   },
+   "13-07": {
+    "area_km2": 1666,
+    "count": 3256,
+    "name": "Qilian Shan"
+   },
+   "13-08": {
+    "area_km2": 8221,
+    "count": 11185,
+    "name": "Inner Tibet"
+   },
+   "13-09": {
+    "area_km2": 4357,
+    "count": 7391,
+    "name": "Southeast Tibet"
+   },
+   "14-01": {
+    "area_km2": 3049,
+    "count": 6857,
+    "name": "Hindu Kush"
+   },
+   "14-02": {
+    "area_km2": 21675,
+    "count": 17559,
+    "name": "Karakoram"
+   },
+   "14-03": {
+    "area_km2": 8350,
+    "count": 13146,
+    "name": "West Himalaya"
+   },
+   "15-01": {
+    "area_km2": 6494,
+    "count": 6127,
+    "name": "Central Himalaya"
+   },
+   "15-02": {
+    "area_km2": 5454,
+    "count": 5503,
+    "name": "East Himalaya"
+   },
+   "15-03": {
+    "area_km2": 4102,
+    "count": 6957,
+    "name": "Hengduan Shan"
+   },
+   "16-01": {
+    "area_km2": 1920,
+    "count": 3647,
+    "name": "Low-latitude Andes"
+   },
+   "16-02": {
+    "area_km2": 2,
+    "count": 7,
+    "name": "Mexico"
+   },
+   "16-03": {
+    "area_km2": 4,
+    "count": 36,
+    "name": "East Africa"
+   },
+   "16-04": {
+    "area_km2": 2,
+    "count": 5,
+    "name": "New Guinea"
+   },
+   "17-01": {
+    "area_km2": 24040,
+    "count": 17454,
+    "name": "Patagonia"
+   },
+   "17-02": {
+    "area_km2": 3634,
+    "count": 13180,
+    "name": "Central Andes"
+   },
+   "18-01": {
+    "area_km2": 886,
+    "count": 3018,
+    "name": "New Zealand"
+   },
+   "19-01": {
+    "area_km2": 134,
+    "count": 15,
+    "name": "Subantarctic (Pacific)"
+   },
+   "19-02": {
+    "area_km2": 3715,
+    "count": 401,
+    "name": "South Shetlands and South Orkney"
+   },
+   "19-03": {
+    "area_km2": 2475,
+    "count": 550,
+    "name": "Subantarctic (Atlantic)"
+   },
+   "19-04": {
+    "area_km2": 796,
+    "count": 489,
+    "name": "Subantarctic (Indian)"
+   },
+   "19-05": {
+    "area_km2": 694,
+    "count": 50,
+    "name": "Balleny Islands"
+   },
+   "19-11": {
+    "area_km2": 2681,
+    "count": 22,
+    "name": "East Queen Maud Land 7A"
+   },
+   "19-12": {
+    "area_km2": 305,
+    "count": 1,
+    "name": "Amery Ice Shelf 7B"
+   },
+   "19-13": {
+    "area_km2": 2685,
+    "count": 7,
+    "name": "Wilkes Land 7C"
+   },
+   "19-14": {
+    "area_km2": 652,
+    "count": 54,
+    "name": "Victoria Land 7D"
+   },
+   "19-15": {
+    "area_km2": 2619,
+    "count": 111,
+    "name": "Ross Ice Shelf 7E"
+   },
+   "19-16": {
+    "area_km2": 17950,
+    "count": 63,
+    "name": "Marie Byrd Land 7F"
+   },
+   "19-17": {
+    "area_km2": 376,
+    "count": 17,
+    "name": "Pine Island Bay 7G"
+   },
+   "19-18": {
+    "area_km2": 14861,
+    "count": 20,
+    "name": "Bellingshausen Sea 7H1"
+   },
+   "19-19": {
+    "area_km2": 61170,
+    "count": 119,
+    "name": "Alexander Island 7H2"
+   },
+   "19-20": {
+    "area_km2": 9287,
+    "count": 637,
+    "name": "West Antarctic Peninsula 7I1"
+   },
+   "19-21": {
+    "area_km2": 5377,
+    "count": 166,
+    "name": "Northeast Antarctic Peninsula 7I2"
+   },
+   "19-22": {
+    "area_km2": 1780,
+    "count": 6,
+    "name": "Southeast Antarctic Peninsula 7I3"
+   },
+   "19-23": {
+    "area_km2": 0,
+    "count": 0,
+    "name": "Ronne-Filchner Ice Shelf 7J"
+   },
+   "19-24": {
+    "area_km2": 5878,
+    "count": 14,
+    "name": "West Queen Maud Land 7K"
+   },
+   "20-01": {
+    "area_km2": 0,
+    "count": 0,
+    "name": "Antarctic Mainland"
+   },
+   "Global": {
+    "area_km2": 706744,
+    "count": 274531,
+    "name": ""
+   }
+  }
+ },
+ "points": {
+  "columns": [
+   "lon_e4_delta:i32",
+   "lat_e4_delta:i32",
+   "log10area_plus4_x8000:u16",
+   "zmed_m:i16",
+   "flags:u8",
+   "o2:u8"
+  ],
+  "file": "rgi7-points.bin.gz",
+  "flags": "bit0 marine-terminating · bits1-2 surge evidence 0-3 · bit3 same outline as RGI 6.0 · bit4 has a name",
+  "quantisation": "centroid 1e-4° (≤ 11 m), area (log10 a + 4)·8000 (0.0144 %), zmed 1 m"
+ },
+ "size_classes": [
+  {
+   "area_km2": 0.0,
+   "hi": 0.01,
+   "lo": 0,
+   "n": 0
+  },
+  {
+   "area_km2": 4775.5,
+   "hi": 0.1,
+   "lo": 0.01,
+   "n": 104019
+  },
+  {
+   "area_km2": 43602.9,
+   "hi": 1,
+   "lo": 0.1,
+   "n": 125607
+  },
+  {
+   "area_km2": 107298.1,
+   "hi": 10,
+   "lo": 1,
+   "n": 38081
+  },
+  {
+   "area_km2": 164185.0,
+   "hi": 100,
+   "lo": 10,
+   "n": 5830
+  },
+  {
+   "area_km2": 253188.8,
+   "hi": 1000,
+   "lo": 100,
+   "n": 917
+  },
+  {
+   "area_km2": 133693.8,
+   "hi": 10000,
+   "lo": 1000,
+   "n": 77
+  },
+  {
+   "area_km2": 0.0,
+   "hi": null,
+   "lo": 10000,
+   "n": 0
+  }
+ ],
+ "slope_note": "slope10 = slope in tenths of a degree",
+ "source": {
+  "mirror": {
+   "repo": "https://github.com/lqgentner/rgi-catalog",
+   "revision": "7.0-r2",
+   "sha256": "f16a6c2d08c87d41dc315540ead570e0bab11b2fd4a70b42a4980d290ca0d016",
+   "url": "https://s3.us-west-2.amazonaws.com/us-west-2.opendata.source.coop/lqgentner/rgi/v7.0/glaciers/rgi7.0-glaciers.parquet"
+  },
+  "mirror_footer": {
+   "rgi:catalog": "https://data.source.coop/lqgentner/rgi/catalog.json",
+   "rgi:citation": "RGI 7.0 Consortium. (2023). *Randolph Glacier Inventory: A dataset of global glacier outlines* (Version 7.0) [Data set]. NSIDC: National Snow and Ice Data Center. https://doi.org/10.5067/F6JMOVY5NAVZ",
+   "rgi:mirror_revision": "7.0-r2",
+   "rgi:sources": "{\"RGI2000-v7.0-C-global.zip\": \"2c312585097ec1c11350f4abaa050d8574b36acd5bbcbd1d1fe5024abdb0d026\", \"RGI2000-v7.0-G-global-rgi6_links.csv\": \"755728420f8666e43fea8b7c92049bdc4d3da30965c7cb5998d5e02f2400cf90\", \"RGI2000-v7.0-G-global.zip\": \"33573533f17de6f1b39bafc807002cdda44a150bb8ed94329387de11751b8a85\"}",
+   "rgi:version": "7.0"
+  },
+  "names": "display_name as cleaned by the mirror from RGI glac_name (which holds inventory codes and \"S/N\")",
+  "official_tables": {
+   "o1region": "https://raw.githubusercontent.com/GLIMS-RGI/rgi_user_guide/be067b1c1112999fd043045a8f82495ef75f1551/v7.0/docs/appendix/RGI2000-v7.0-G-o1region-summary.csv",
+   "o2region": "https://raw.githubusercontent.com/GLIMS-RGI/rgi_user_guide/be067b1c1112999fd043045a8f82495ef75f1551/v7.0/docs/appendix/RGI2000-v7.0-G-o2region-summary.csv"
+  },
+  "validated": "count and rounded area reproduce the RGI Consortium tables for every o1 and o2 region"
+ },
+ "starts": {
+  "01": 0,
+  "02": 27509,
+  "03": 46239,
+  "04": 51455,
+  "05": 62464,
+  "06": 82458,
+  "07": 83026,
+  "08": 84692,
+  "09": 88102,
+  "10": 89171,
+  "11": 96326,
+  "12": 100405,
+  "13": 102680,
+  "14": 178293,
+  "15": 215855,
+  "16": 234442,
+  "17": 238137,
+  "18": 268771,
+  "19": 271789
+ },
+ "surge_classes": [
+  "no evidence",
+  "possible",
+  "probable",
+  "observed"
+ ],
+ "term_type_note": "RGI 7.0 assigns only the marine-terminating class; every other glacier is \"not assigned\", not land-terminating",
+ "watch_links": {
+  "abramov": {
+   "area_km2": 21.345,
+   "at": [
+    39.62617,
+    71.55477
+   ],
+   "index": 105299,
+   "rgi_id": "RGI2000-v7.0-G-13-02620"
+  },
+  "aletsch": {
+   "area_km2": 81.781,
+   "at": [
+    46.47961,
+    8.06825
+   ],
+   "index": 98921,
+   "rgi_id": "RGI2000-v7.0-G-11-02596"
+  },
+  "athabasca": {
+   "area_km2": 16.154,
+   "at": [
+    52.16839,
+    -117.28476
+   ],
+   "index": 40490,
+   "rgi_id": "RGI2000-v7.0-G-02-12982"
+  },
+  "bahia-del-diablo": {
+   "area_km2": 190.37,
+   "at": [
+    -63.81708,
+    -57.46565
+   ],
+   "index": 274476,
+   "rgi_id": "RGI2000-v7.0-G-19-02688"
+  },
+  "baltoro": {
+   "area_km2": 790.204,
+   "at": [
+    35.7135,
+    76.44937
+   ],
+   "index": 189904,
+   "rgi_id": "RGI2000-v7.0-G-14-11612"
+  },
+  "breidamerkurjokull": {
+   "area_km2": 1067.744,
+   "at": [
+    64.20754,
+    -16.30669
+   ],
+   "index": 82833,
+   "rgi_id": "RGI2000-v7.0-G-06-00376"
+  },
+  "brewster": {
+   "area_km2": 2.168,
+   "at": [
+    -44.07287,
+    169.43597
+   ],
+   "index": 269691,
+   "rgi_id": "RGI2000-v7.0-G-18-00921"
+  },
+  "chhota-shigri": {
+   "area_km2": 16.764,
+   "at": [
+    32.2293,
+    77.51372
+   ],
+   "index": 208871,
+   "rgi_id": "RGI2000-v7.0-G-14-30579"
+  },
+  "claridenfirn": {
+   "area_km2": 2.387,
+   "at": [
+    46.8401,
+    8.88527
+   ],
+   "index": 98163,
+   "rgi_id": "RGI2000-v7.0-G-11-01838"
+  },
+  "columbia": {
+   "area_km2": 773.873,
+   "at": [
+    61.26988,
+    -146.92045
+   ],
+   "index": 10397,
+   "rgi_id": "RGI2000-v7.0-G-01-10398"
+  },
+  "djankuat": {
+   "area_km2": 32.767,
+   "at": [
+    43.18136,
+    42.76198
+   ],
+   "index": 101422,
+   "rgi_id": "RGI2000-v7.0-G-12-01018"
+  },
+  "echaurren-norte": {
+   "area_km2": 0.077,
+   "at": [
+    -33.57739,
+    -70.13209
+   ],
+   "index": 263999,
+   "rgi_id": "RGI2000-v7.0-G-17-25863"
+  },
+  "engabreen": {
+   "area_km2": 36.049,
+   "at": [
+    66.66588,
+    13.85729
+   ],
+   "index": 85080,
+   "rgi_id": "RGI2000-v7.0-G-08-00389"
+  },
+  "fedchenko": {
+   "area_km2": 677.653,
+   "at": [
+    38.73941,
+    72.3016
+   ],
+   "index": 119415,
+   "rgi_id": "RGI2000-v7.0-G-13-16736"
+  },
+  "franz-josef": {
+   "area_km2": 33.436,
+   "at": [
+    -43.48121,
+    170.2024
+   ],
+   "index": 270700,
+   "rgi_id": "RGI2000-v7.0-G-18-01930"
+  },
+  "gries": {
+   "area_km2": 5.434,
+   "at": [
+    46.43599,
+    8.32615
+   ],
+   "index": 98763,
+   "rgi_id": "RGI2000-v7.0-G-11-02438"
+  },
+  "gulkana": {
+   "area_km2": 17.567,
+   "at": [
+    63.28211,
+    -145.41401
+   ],
+   "index": 5298,
+   "rgi_id": "RGI2000-v7.0-G-01-05299"
+  },
+  "helheim": {
+   "at": [
+    66.53177,
+    -38.60556
+   ],
+   "index": null,
+   "reason": "part of an ice sheet: RGI 7.0 inventories glaciers outside the Greenland and Antarctic ice sheets",
+   "rgi_id": null
+  },
+  "hintereisferner": {
+   "area_km2": 8.036,
+   "at": [
+    46.80766,
+    10.77829
+   ],
+   "index": 99441,
+   "rgi_id": "RGI2000-v7.0-G-11-03116"
+  },
+  "hubbard": {
+   "area_km2": 2834.493,
+   "at": [
+    60.04762,
+    -139.36972
+   ],
+   "index": 15350,
+   "rgi_id": "RGI2000-v7.0-G-01-15351"
+  },
+  "jakobshavn": {
+   "at": [
+    69.13364,
+    -49.25007
+   ],
+   "index": null,
+   "reason": "part of an ice sheet: RGI 7.0 inventories glaciers outside the Greenland and Antarctic ice sheets",
+   "rgi_id": null
+  },
+  "kangerlussuaq": {
+   "at": [
+    68.80304,
+    -33.2502
+   ],
+   "index": null,
+   "reason": "part of an ice sheet: RGI 7.0 inventories glaciers outside the Greenland and Antarctic ice sheets",
+   "rgi_id": null
+  },
+  "khumbu": {
+   "area_km2": 26.35,
+   "at": [
+    27.994,
+    86.84733
+   ],
+   "index": 224185,
+   "rgi_id": "RGI2000-v7.0-G-15-08331"
+  },
+  "kongsvegen": {
+   "area_km2": 77.959,
+   "at": [
+    78.88376,
+    13.12679
+   ],
+   "index": 83278,
+   "rgi_id": "RGI2000-v7.0-G-07-00253"
+  },
+  "lambert": {
+   "at": [
+    -73.72792,
+    67.80609
+   ],
+   "index": null,
+   "reason": "part of an ice sheet: RGI 7.0 inventories glaciers outside the Greenland and Antarctic ice sheets",
+   "rgi_id": null
+  },
+  "lemon-creek": {
+   "area_km2": 9.528,
+   "at": [
+    58.39047,
+    -134.34945
+   ],
+   "index": 19405,
+   "rgi_id": "RGI2000-v7.0-G-01-19406"
+  },
+  "malaspina": {
+   "area_km2": 3362.657,
+   "at": [
+    59.89665,
+    -140.53716
+   ],
+   "index": 15260,
+   "rgi_id": "RGI2000-v7.0-G-01-15261"
+  },
+  "mer-de-glace": {
+   "area_km2": 30.664,
+   "at": [
+    45.89248,
+    6.9377
+   ],
+   "index": 97082,
+   "rgi_id": "RGI2000-v7.0-G-11-00757"
+  },
+  "midtre-lovenbreen": {
+   "area_km2": 5.205,
+   "at": [
+    78.88607,
+    12.05248
+   ],
+   "index": 83291,
+   "rgi_id": "RGI2000-v7.0-G-07-00266"
+  },
+  "nigardsbreen": {
+   "area_km2": 41.872,
+   "at": [
+    61.70897,
+    7.15577
+   ],
+   "index": 86680,
+   "rgi_id": "RGI2000-v7.0-G-08-01989"
+  },
+  "pasterze": {
+   "area_km2": 17.706,
+   "at": [
+    47.0973,
+    12.70128
+   ],
+   "index": 99989,
+   "rgi_id": "RGI2000-v7.0-G-11-03664"
+  },
+  "perito-moreno": {
+   "area_km2": 255.688,
+   "at": [
+    -50.49757,
+    -73.12139
+   ],
+   "index": 252855,
+   "rgi_id": "RGI2000-v7.0-G-17-14719"
+  },
+  "petermann": {
+   "at": [
+    80.77677,
+    -60.57254
+   ],
+   "index": null,
+   "reason": "part of an ice sheet: RGI 7.0 inventories glaciers outside the Greenland and Antarctic ice sheets",
+   "rgi_id": null
+  },
+  "peyto": {
+   "area_km2": 3.953,
+   "at": [
+    51.64567,
+    -116.53414
+   ],
+   "index": 40909,
+   "rgi_id": "RGI2000-v7.0-G-02-13401"
+  },
+  "pine-island": {
+   "at": [
+    -75.0922,
+    -100.44388
+   ],
+   "index": null,
+   "reason": "part of an ice sheet: RGI 7.0 inventories glaciers outside the Greenland and Antarctic ice sheets",
+   "rgi_id": null
+  },
+  "rhone": {
+   "area_km2": 15.897,
+   "at": [
+    46.61793,
+    8.39852
+   ],
+   "index": 98031,
+   "rgi_id": "RGI2000-v7.0-G-11-01706"
+  },
+  "silvretta": {
+   "area_km2": 2.88,
+   "at": [
+    46.85302,
+    10.07545
+   ],
+   "index": 98274,
+   "rgi_id": "RGI2000-v7.0-G-11-01949"
+  },
+  "south-cascade": {
+   "area_km2": 2.924,
+   "at": [
+    48.36156,
+    -121.05935
+   ],
+   "index": 41651,
+   "rgi_id": "RGI2000-v7.0-G-02-14143"
+  },
+  "storbreen": {
+   "area_km2": 5.21,
+   "at": [
+    61.57358,
+    8.1487
+   ],
+   "index": 87838,
+   "rgi_id": "RGI2000-v7.0-G-08-03147"
+  },
+  "storglaciaren": {
+   "area_km2": 3.41,
+   "at": [
+    67.90236,
+    18.58784
+   ],
+   "index": 85452,
+   "rgi_id": "RGI2000-v7.0-G-08-00761"
+  },
+  "taku": {
+   "area_km2": 91.099,
+   "at": [
+    58.63092,
+    -133.9964
+   ],
+   "index": 19370,
+   "rgi_id": "RGI2000-v7.0-G-01-19371"
+  },
+  "thwaites": {
+   "at": [
+    -75.19912,
+    -106.90145
+   ],
+   "index": null,
+   "reason": "part of an ice sheet: RGI 7.0 inventories glaciers outside the Greenland and Antarctic ice sheets",
+   "rgi_id": null
+  },
+  "tuyuksu": {
+   "area_km2": 2.838,
+   "at": [
+    43.05271,
+    77.08098
+   ],
+   "index": 136522,
+   "rgi_id": "RGI2000-v7.0-G-13-33843"
+  },
+  "urumqi-no1": {
+   "area_km2": 1.079,
+   "at": [
+    43.11155,
+    86.80991
+   ],
+   "index": 142920,
+   "rgi_id": "RGI2000-v7.0-G-13-40241"
+  },
+  "white": {
+   "area_km2": 369.279,
+   "at": [
+    79.45113,
+    -90.54199
+   ],
+   "index": 49067,
+   "rgi_id": "RGI2000-v7.0-G-03-02829"
+  },
+  "wolverine": {
+   "area_km2": 16.544,
+   "at": [
+    60.41087,
+    -148.9154
+   ],
+   "index": 11349,
+   "rgi_id": "RGI2000-v7.0-G-01-11350"
+  },
+  "yala": {
+   "area_km2": 2.055,
+   "at": [
+    28.23567,
+    85.62311
+   ],
+   "index": 221771,
+   "rgi_id": "RGI2000-v7.0-G-15-05917"
+  },
+  "zongo": {
+   "area_km2": 2.4,
+   "at": [
+    -16.26808,
+    -68.14537
+   ],
+   "index": 237811,
+   "rgi_id": "RGI2000-v7.0-G-16-03370"
+  }
+ }
+}
