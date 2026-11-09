@@ -11,7 +11,7 @@
  *
  * NOT an iframe of solar-system.html: the 2026-09 funnel work measured the
  * two live WebGL iframes below the hero as the reason only ~7 % of visitors
- * reached the capture band (js/home-carousel.js header). This is a 2D canvas
+ * reached the capture band (js/home-showcase-slides.js header). This is a 2D canvas
  * and a table — the orrery's own numbers, at a fraction of the cost — with
  * links into the Near-Earth Watch (3D, geocentric) and the orrery (3D,
  * heliocentric) for the full picture.

@@ -11,12 +11,22 @@
     <description>New simulations, data sets, layers and fixes on Parkers Physics, as they ship — each with a link to open it.</description>
     <language>en-us</language>
     <copyright>Telford Projects LLC</copyright>
-    <lastBuildDate>Sun, 08 Nov 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Mon, 09 Nov 2026 00:00:00 GMT</lastBuildDate>
     <image>
       <url>https://parkersphysics.com/ParkersPhysics_logo2.jpg</url>
       <title>Parkers Physics — Recent Development</title>
       <link>https://parkersphysics.com/recent-development.html</link>
     </image>
+
+    <item>
+      <title>Homepage: a daylight theme that works, and a showcase of the simulations</title>
+      <link>https://parkersphysics.com/recent-development.html#home-showcase-light-hero</link>
+      <guid isPermaLink="true">https://parkersphysics.com/recent-development.html#home-showcase-light-hero</guid>
+      <pubDate>Mon, 09 Nov 2026 00:00:00 GMT</pubDate>
+      <category>Improvement</category>
+      <category>Platform</category>
+      <description>&lt;p&gt;In daylight the homepage is now white and blue end to end, with the live magnetosphere framed in a dark instrument window instead of a black block; below it, a new Simulation Showcase replaces the background slideshow and the embedded EarthView with one card per simulation.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Each card names the physics the page runs, the data behind it and what you can do there; hover plays a short captured loop, click opens the simulation.&lt;/li&gt;&lt;li&gt;Filter the showcase by the site&amp;#39;s own sections — Space Weather, Earth &amp;amp; Orbit, Local Space, Deep Space.&lt;/li&gt;&lt;li&gt;A new &amp;quot;Built like an instrument&amp;quot; band for researchers and operators: named published models, hindcast receipts, the locked-then-scored forecast ledger, provenance rules, and where to start by who you are.&lt;/li&gt;&lt;li&gt;Captures are dated on every card and say when they were rendered in software; the pages themselves run live.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;a href=&quot;https://parkersphysics.com/index.html&quot;&gt;Open Home&lt;/a&gt; · &lt;a href=&quot;https://parkersphysics.com/simulations.html&quot;&gt;Open All simulations&lt;/a&gt;&lt;/p&gt;</description>
+    </item>
 
     <item>
       <title>EarthView&#39;s primary weather feed, back within its rate limit</title>
