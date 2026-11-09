@@ -41,9 +41,8 @@
  * believe.
  *
  * WHAT IT DOES NOT DO: night. With the Sun down ΔQ is 0 and the term decays
- * away; nocturnal cold-air drainage and pooling — the larger night-time
- * effect in real valleys — is a FLOW problem this does not model (the fitted
- * lapse rate in terrain-temp.js carries the part of it GFS itself resolves).
+ * away; nocturnal cold-air pooling — the larger night-time effect in real
+ * valleys — is cold-pool.js, a separate term the map adds beside this one.
  * No snow albedo, no vegetation, no diffuse-sky or reflected light; one cloud
  * fraction (the instant on show) for the whole memory window; one Sun
  * position per sample for the whole grid.

@@ -20,6 +20,8 @@
  *   · sun & shade: at midday the ridge's south flank is warmer and its north
  *     flank cooler than flat ground, the plain is untouched, the effect view
  *     draws it alone; NEGATIVE CONTROLS: the toggle off, and night, are nothing
+ *   · cold-air pooling: at night the ridge's foot is colder and its crest
+ *     milder, the plain untouched; NEGATIVE CONTROLS: the toggle off, and day
  *   · terrain shadows: a low Sun to the south shades the ridge's north flank;
  *     NEGATIVE CONTROL: at night nothing is drawn (night is not a shadow)
  *   · the Sun path chart draws with or without a horizon, and says which
@@ -74,7 +76,8 @@ const latFrac = async (page, lat) => {
 test('terrain detail draws the ridge into the temperature; off, it is GFS\'s smooth field again', async ({ page }) => {
     const errors = await boot(page, { modelZ: MODEL_Z });
     await detailIs(page, 'on');
-    await page.locator('#cx-layer-tsun').uncheck();          // the HEIGHT correction alone (sun & shade has its own test)
+    await page.locator('#cx-layer-tsun').uncheck();          // the HEIGHT correction alone (sun & shade and
+    await page.locator('#cx-layer-tpool').uncheck();         // cold-air pooling have their own tests)
     await nextFrame(page);
     let s = await state(page);
     const d = s.map.frame.detail;
@@ -136,6 +139,7 @@ test('sun & shade: the sunlit flank is warmer, the far flank cooler, flat ground
     expect(noon).not.toBeNull();
     expect(night).not.toBeNull();
 
+    await page.locator('#cx-layer-tpool').uncheck();         // the sun term alone
     await page.evaluate((t) => window.__climalytix.map.setTime(t), noon);
     await page.waitForFunction(() => window.__climalytix.state.map.frame.detail?.sun?.state === 'on', null, { timeout: 30_000 });
     let s = await state(page);
@@ -156,7 +160,7 @@ test('sun & shade: the sunlit flank is warmer, the far flank cooler, flat ground
     await page.waitForFunction(() => window.__climalytix.state.map.frame.view === 'sun', null, { timeout: 10_000 });
     await nextFrame(page);
     await expect(page.locator('#cx-heat-view [data-view="sun"]')).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('#cx-map-key .cx-mk-title')).toContainText('Sun & shade effect');
+    await expect(page.locator('#cx-map-key .cx-mk-title')).toContainText('Sun, shade & cold-air effect');
     await expect(page.locator('#cx-heat-key')).toHaveAttribute('data-scale', 'effect');
     const south = await sampleAt(page, 0.7, ySouth), north = await sampleAt(page, 0.7, yNorth), plain = await sampleAt(page, 0.7, yPlain);
     // The mock ridge's effect is a few tenths of a kelvin, so the tint is faint: judge each flank AGAINST the plain.
@@ -169,9 +173,9 @@ test('sun & shade: the sunlit flank is warmer, the far flank cooler, flat ground
     // The tooltip says how much, with its sign, on each flank.
     const box = await page.locator('#cx-map-canvas').boundingBox();
     await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * ySouth);
-    await expect(page.locator('#cx-map-tip')).toContainText(/sun & shade \+\d/);
+    await expect(page.locator('#cx-map-tip')).toContainText(/effect \+\d/);
     await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * yNorth);
-    await expect(page.locator('#cx-map-tip')).toContainText(/sun & shade −\d/);
+    await expect(page.locator('#cx-map-tip')).toContainText(/effect −\d/);
     await page.mouse.move(5, 5);
 
     // NEGATIVE CONTROL: the toggle off ⇒ no adjustment, the effect view has nothing to show and says so by leaving.
@@ -195,8 +199,81 @@ test('sun & shade: the sunlit flank is warmer, the far flank cooler, flat ground
     await page.waitForFunction(() => window.__climalytix.state.map.frame.detail?.sun?.state === 'night', null, { timeout: 30_000 });
     s = await state(page);
     expect([s.map.frame.detail.sun.range.min, s.map.frame.detail.sun.range.max]).toEqual([0, 0]);
-    await expect(page.locator('#cx-heat-sun')).toContainText('cold pooling is not modelled');
+    await expect(page.locator('#cx-heat-sun')).toContainText('no sunlight adjustment');
+    await expect(page.locator('#cx-heat-pool')).toContainText('switched off');      // and says the night half is off
     await expect(page.locator('#cx-heat-view [data-view="sun"]')).toBeDisabled();
+    expect(errors).toEqual([]);
+});
+
+test('cold-air pooling: at night the foot of the ridge is colder and its crest milder, the plain untouched; by day and off it is nothing', async ({ page }) => {
+    const errors = await boot(page, { modelZ: MODEL_Z });
+    await detailIs(page, 'on');
+    await page.locator('#cx-layer-tsun').uncheck();          // the night term alone
+    const start = Math.floor(Date.now() / 600_000) * 600_000;
+    const sun = (ms) => solarPosition(new Date(ms), BOULDER.lat, BOULDER.lon);
+    let night = null, noon = null;
+    for (let m = 0; m < 30 * 60 && !(night && noon); m += 10) {
+        const t = start + m * 60_000, p = sun(t);
+        // Deep night: the Sun down now and for the six hours before.
+        if (!night && p.altitudeDeg < -8 && [1, 2, 3, 4, 5, 6].every((h) => sun(t - h * 3_600_000).altitudeDeg < 0)) night = t;
+        // Early afternoon: the Sun has been up six hours or more, long enough to have burnt the pool off.
+        if (!noon && p.altitudeDeg > 15 && p.azimuthDeg > 200 && p.azimuthDeg < 230) noon = t;
+    }
+    expect(night).not.toBeNull();
+    expect(noon).not.toBeNull();
+
+    await page.evaluate((t) => window.__climalytix.map.setTime(t), night);
+    await page.waitForFunction(() => window.__climalytix.state.map.frame.detail?.pool?.state === 'on', null, { timeout: 30_000 });
+    let s = await state(page);
+    const pl = s.map.frame.detail.pool;
+    expect(pl.nightFrac).toBeGreaterThan(0.8);                        // six hours in: 1 − e^(−6/3) = 0.86 and rising
+    expect(pl.range.min).toBeLessThan(-0.15);                         // the concave foot sits below its surroundings
+    expect(pl.range.max).toBeGreaterThan(0.3);                        // the crest stands above them
+    expect(pl.range.max).toBeLessThanOrEqual(3.01);                   // gain × the 4 K clear-calm inversion
+    expect(s.map.frame.detail.sun.state).toBe('off');
+    await expect(page.locator('#cx-heat-pool')).toContainText('Cold-air pooling (modelled)');
+    await expect(page.locator('#cx-heat-pool')).toContainText('low ground colder');
+
+    // The effect view at night: gold on the crest, indigo at the foot, nothing on the plain or the even flank.
+    // sampleAt reads an 8 px block downward: the crest block straddles the crest, the foot block the foot line.
+    const yCrest = await latFrac(page, MOCK_RIDGE.lat + 0.035), yFoot = await latFrac(page, MOCK_RIDGE.lat + MOCK_RIDGE.halfDeg + 0.035),
+        yPlain = await latFrac(page, MOCK_RIDGE.lat + 0.5);
+    const view = page.locator('#cx-heat-view [data-view="sun"]');
+    await expect(view).toBeEnabled();                                 // the night has an effect to show now
+    await view.click();
+    await page.waitForFunction(() => window.__climalytix.state.map.frame.view === 'sun', null, { timeout: 10_000 });
+    await nextFrame(page);
+    await expect(page.locator('#cx-map-key .cx-mk-title')).toContainText('Sun, shade & cold-air effect');
+    const warm = (c) => c[0] - c[2];
+    const crest = await sampleAt(page, 0.7, yCrest), foot = await sampleAt(page, 0.7, yFoot), plain = await sampleAt(page, 0.7, yPlain);
+    expect(warm(crest)).toBeGreaterThan(warm(plain) + 15);            // milder: gold
+    expect(warm(foot)).toBeLessThan(warm(plain) - 6);                 // colder: indigo
+    const box = await page.locator('#cx-map-canvas').boundingBox();
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * (await latFrac(page, MOCK_RIDGE.lat)));
+    await expect(page.locator('#cx-map-tip')).toContainText(/effect \+\d/);
+    await page.mouse.move(5, 5);
+    await page.locator('#cx-heat-view [data-view="temp"]').click();
+    await nextFrame(page);
+    const corrOn = (await state(page)).map.frame.detail.correction;
+
+    // NEGATIVE CONTROL: off ⇒ the crest's temperature goes back and the effect view has nothing to show.
+    await page.locator('#cx-layer-tpool').uncheck();
+    await page.waitForFunction(() => window.__climalytix.state.map.frame.detail?.pool?.state === 'off', null, { timeout: 10_000 });
+    await nextFrame(page);
+    const corrOff = (await state(page)).map.frame.detail.correction;       // the crest is the coldest correction in view:
+    expect(corrOn.min - corrOff.min).toBeGreaterThan(0.1);                  // pooling had made it milder (a ±3 K term is too faint to judge by fit-scale pixels)
+    await expect(page.locator('#cx-heat-view [data-view="sun"]')).toBeDisabled();
+    await page.locator('#cx-layer-tpool').check();
+
+    // By day the Sun has eroded it: nothing, and the rail says when it comes back.
+    await page.evaluate((t) => window.__climalytix.map.setTime(t), noon);
+    await page.waitForFunction(() => window.__climalytix.state.map.frame.detail?.pool?.state === 'day', null, { timeout: 30_000 });
+    s = await state(page);
+    expect(Math.max(Math.abs(s.map.frame.detail.pool.range.min), Math.abs(s.map.frame.detail.pool.range.max))).toBeLessThan(0.02);
+    await expect(page.locator('#cx-heat-pool')).toContainText('builds after sunset');
+    // Without terrain detail there is no ground to compare: the toggle goes with it.
+    await page.locator('#cx-layer-tdetail').uncheck();
+    await expect(page.locator('#cx-layer-tpool')).toBeDisabled();
     expect(errors).toEqual([]);
 });
 

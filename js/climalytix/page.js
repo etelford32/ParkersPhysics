@@ -280,7 +280,7 @@ const MAP_KEYS = [
     // `ok`: a key is on the map only while its field is DRAWN (layer-state.js) —
     // a colour key over a map with no temperature on it reads as a broken layer.
     { box: '#cx-layer-temp', key: '#cx-heat-key', ok: () => S.tempCtl?.keyOnMap === true,
-      title: () => (S.map?.state.frame?.view === 'sun' ? `Sun & shade effect · ${unitSym('temp')} · modelled`
+      title: () => (S.map?.state.frame?.view === 'sun' ? `Sun, shade & cold-air effect · ${unitSym('temp')} · modelled`
           : `Temperature · 2 m · ${unitSym('temp')}${S.map?.heatScale.mode === 'fit' ? ' · fit to view' : ''}`) },
     { box: '#cx-layer-aq', key: '#cx-aq-key', title: () => 'PM2.5 · US AQI category' },
     { box: '#cx-layer-exp', key: '#cx-exp-key', title: () => 'Sun exposure · vs flat ground' },
@@ -557,7 +557,7 @@ function renderHeatTicks() {
     let ticks;
     if ($('#cx-heat-key').dataset.scale === 'effect') {
         const full = conv.toDisplay(EFFECT_FULL_K) - conv.toDisplay(0);
-        ticks = [[`−${full.toFixed(1)}°`, 0.1], ['cooler · 0 · warmer', 0.5], [`+${full.toFixed(1)}°`, 0.9]].map(([label, frac]) => ({ label, frac }));
+        ticks = [[`−${full.toFixed(1)}° cooler`, 0.2], [`+${full.toFixed(1)}° warmer`, 0.8]].map(([label, frac]) => ({ label, frac }));
     } else if (sc.mode === 'fit') ticks = keyTicks(sc, conv);
     else {
         const unit = S.units?.temp === 'F' ? 'F' : 'C';
@@ -600,7 +600,8 @@ function applyTempControl(info) {
     for (const id of ['#cx-layer-iso', '#cx-layer-ext', '#cx-layer-tdetail', '#cx-heat-alpha']) $(id).disabled = !ctl.subEnabled;
     // Sun & shade rides on terrain detail: without the real ground there is no slope to light.
     $('#cx-layer-tsun').disabled = !ctl.subEnabled || !$('#cx-layer-tdetail').checked;
-    const hasEffect = ctl.subEnabled && info?.detail?.state === 'on' && info.detail.sun?.state === 'on';
+    $('#cx-layer-tpool').disabled = $('#cx-layer-tsun').disabled;      // cold-air pooling needs the real ground too
+    const hasEffect = ctl.subEnabled && info?.detail?.state === 'on' && info.detail.effect?.live === true;
     for (const b of document.querySelectorAll('#cx-heat-view [data-view]')) {
         b.disabled = !ctl.subEnabled || (b.dataset.view === 'sun' && !hasEffect);
         b.setAttribute('aria-pressed', String(b.dataset.view === (info?.view ?? 'temp')));
@@ -679,11 +680,19 @@ function renderHeatRail(info) {
     const sn = d?.state === 'on' ? d.sun : null;
     const bounds = sn ? [!sn.cloud && 'no cloud field — clear sky assumed', !sn.wind && 'no wind field — no mixing'].filter(Boolean) : [];
     const sunNote = !sn || sn.state === 'off' ? ''
-        : sn.state === 'night' ? 'Sun & shade: the Sun has been down for hours here — no adjustment (night-time cold pooling is not modelled).'
+        : sn.state === 'night' ? 'Sun & shade: the Sun has been down for hours here — no sunlight adjustment.'
         : `Sun & shade (modelled): ${dT(sn.range.min, 1)} to ${dT(sn.range.max, 1)} ${unitSym('temp')} in view — sun-facing slopes warmer, shaded ground cooler, with a ~1.5 h lag`
             + (bounds.length ? `; ${bounds.join(', ')}, so an upper bound.` : '.');
+    // Night cold-air pooling (cold-pool.js): the night half of the same idea.
+    const pl = d?.state === 'on' ? d.pool : null;
+    const pBounds = pl ? [!pl.cloud && 'no cloud field — clear sky assumed', !pl.wind && 'no wind field — calm assumed'].filter(Boolean) : [];
+    const poolNote = !pl || pl.state === 'off' ? (d?.state === 'on' && sn?.state === 'night' ? 'Cold-air pooling is switched off: valleys are not cooled at night.' : '')
+        : pl.state === 'day' ? 'Cold-air pooling: none now — it builds after sunset and drains through the morning.'
+        : `Cold-air pooling (modelled): ${dT(pl.range.min, 1)} to ${dT(pl.range.max, 1)} ${unitSym('temp')} in view — low ground colder, crests and upper slopes milder; ${Math.round(100 * pl.nightFrac)} % of a full night’s build-up`
+            + (pBounds.length ? `; ${pBounds.join(', ')}, so an upper bound.` : '.');
     st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}<br><span id="cx-heat-detail" data-state="${esc(d?.state ?? 'off')}">${esc(detailNote)}</span>`
-        + (sunNote ? `<br><span id="cx-heat-sun" data-state="${esc(sn.state)}">${esc(sunNote)}</span>` : '');
+        + (sunNote ? `<br><span id="cx-heat-sun" data-state="${esc(sn.state)}">${esc(sunNote)}</span>` : '')
+        + (poolNote ? `<br><span id="cx-heat-pool" data-state="${esc(pl.state)}">${esc(poolNote)}</span>` : '');
     if (info.range && info.view !== 'sun') {
         const a = keyFrac(sc, info.range.min), b = keyFrac(sc, info.range.max);
         win.hidden = false;
@@ -1073,6 +1082,7 @@ function mountLocationMap() {
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-tdetail').addEventListener('change', (ev) => S.map.setLayer('tempdetail', ev.target.checked));
     $('#cx-layer-tsun').addEventListener('change', (ev) => S.map.setLayer('tempsun', ev.target.checked));
+    $('#cx-layer-tpool').addEventListener('change', (ev) => S.map.setLayer('temppool', ev.target.checked));
     $('#cx-heat-view').addEventListener('click', (ev) => {
         const b = ev.target.closest('[data-view]');
         if (!b || b.disabled) return;

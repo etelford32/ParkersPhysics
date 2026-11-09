@@ -110,6 +110,7 @@ import { heatScale, runRange, scaleColor, SCALE_MODES } from './heat-scale.js';
 import { modelElevationM, fitLapse, downscaleGrid } from './terrain-temp.js';
 import { shadowGrid, horizonProfile, sunPath, sunDay } from './sun-terrain.js';
 import { memorySamples, sunTempGrid, effectPaint } from './sun-temp.js';
+import { nightSamples, nightFraction, relativeHeight, coldPoolGrid } from './cold-pool.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
 const TERRAIN_ALPHA = 0.7;
@@ -159,7 +160,7 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, tempdetail: true, tempsun: true, shadow: false, sunpath: false, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
+        timeMs: null, layers: { temperature: true, tempdetail: true, tempsun: true, temppool: true, shadow: false, sunpath: false, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT, heatScaleMode: storedScaleMode(), heatView: 'temp', windows: [],
@@ -357,8 +358,8 @@ export function mountMap(root, deps) {
     function detailFor(t) {
         if (!detailActive() || t == null) return null;
         const F = M.field;
-        const sunOn = !!M.layers.tempsun, tw = sunOn ? windTimeIndex() : null;
-        const key = `${D.key}|${F.run}|${t}|${sunOn ? `sun|${tw}|${M.wind?.run ?? ''}` : ''}`;
+        const sunOn = !!M.layers.tempsun, poolOn = !!M.layers.temppool, tw = sunOn || poolOn ? windTimeIndex() : null;
+        const key = `${D.key}|${F.run}|${t}|${sunOn ? 'sun' : ''}|${poolOn ? 'pool' : ''}|${sunOn || poolOn ? `${tw}|${M.wind?.run ?? ''}` : ''}`;
         if (DT.key !== key) {
             const plane = F.nRows * F.nCols, base = t * plane;
             const msl = F.fields.mslHpa, ps = F.fields.psfcHpa;
@@ -391,12 +392,31 @@ export function mountMap(root, deps) {
             // unshaded ground, with cast shadows and a thermal memory, added on top of the
             // height correction. `height` keeps the height-only grid so the tooltip can
             // say how much of a value is each.
-            let sun = null;
-            if (sunOn && field.correction) {
-                const st = sunTempFor(F.times[t], F, t, tw);
-                sun = { range: st.range, daylight: st.daylight, cloud: st.cloud, wind: st.wind, values: st.values };
-                const height = field.values;
-                field.values = Float32Array.from(height, (v, k) => (Number.isFinite(v) && Number.isFinite(st.values[k]) ? v + st.values[k] : v));
+            // Night cold-air pooling (cold-pool.js) is the other half: valley floors colder,
+            // crests milder, by the inversion the night has built. `effect` is the two
+            // modelled terms together — what the effect view draws and the tooltip splits.
+            let sun = null, pool = null, effect = null;
+            if ((sunOn || poolOn) && field.correction) {
+                if (sunOn) {
+                    const st = sunTempFor(F.times[t], F, t, tw);
+                    sun = { range: st.range, daylight: st.daylight, cloud: st.cloud, wind: st.wind, values: st.values };
+                }
+                if (poolOn) {
+                    const pl = coldPoolFor(F.times[t], F, t, tw);
+                    pool = { range: pl.range, active: pl.active, nightFrac: pl.nightFrac, cloud: pl.cloud, wind: pl.wind, values: pl.values };
+                }
+                const height = field.values, ev = new Float32Array(height.length).fill(NaN);
+                let elo = Infinity, ehi = -Infinity;
+                for (let k = 0; k < height.length; k++) {
+                    const a = sun ? sun.values[k] : NaN, b = pool ? pool.values[k] : NaN;
+                    if (!Number.isFinite(a) && !Number.isFinite(b)) continue;
+                    const e = (Number.isFinite(a) ? a : 0) + (Number.isFinite(b) ? b : 0);
+                    ev[k] = e;
+                    if (e < elo) elo = e;
+                    if (e > ehi) ehi = e;
+                }
+                effect = { values: ev, range: elo <= ehi ? { min: elo, max: ehi } : null, live: !!(sun?.daylight || pool?.active) };
+                field.values = Float32Array.from(height, (v, k) => (Number.isFinite(v) && Number.isFinite(ev[k]) ? v + ev[k] : v));
                 field.height = height;
                 let lo = Infinity, hi = -Infinity;
                 for (let k = 0; k < height.length; k++) {
@@ -410,9 +430,9 @@ export function mountMap(root, deps) {
                 if (lo <= hi) field.correction = { min: lo, max: hi };
             }
             // The scale's widening is fixed per DEM grid + run + sun toggle (first frame drawn).
-            const cKey = `${dzKey}|${sunOn}`;
+            const cKey = `${dzKey}|${sunOn}|${poolOn}`;
             const corr0 = DT.cKey === cKey && DT.corr0 ? DT.corr0 : field.correction;
-            DT = { key, field, fit, zField, dz, dzKey, corr0, cKey, sun };
+            DT = { key, field, fit, zField, dz, dzKey, corr0, cKey, sun, pool, effect };
         }
         return DT;
     }
@@ -435,6 +455,20 @@ export function mountMap(root, deps) {
         const wind = tw != null && M.wind ? M.wind : null;
         const out = sunTempGrid(D.grid, D.sa, {
             samples,
+            cloudAt: cloud ? (lat, lon) => { const c = fieldSample(cloud, t, lat, lon); return c == null ? null : c / 100; } : null,
+            windAt: wind ? (lat, lon) => { const w = windAt(wind, tw, lat, lon); return w ? Math.hypot(w.u, w.v) : null; } : null,
+        });
+        return { ...out, cloud: !!cloud, wind: !!wind };
+    }
+    // Relative height is a property of the DEM grid alone: once per grid.
+    let poolRel = { key: '', hRel: null };
+    function coldPoolFor(timeMs, F, t, tw) {
+        if (poolRel.key !== D.key) poolRel = { key: D.key, hRel: relativeHeight(D.grid) };
+        const nightFrac = nightFraction(nightSamples(timeMs).map((smp) => ({ ...smp, sun: solarPosition(new Date(smp.at), M.view.lat, M.view.lon) })));
+        const cloud = F.fields?.cloudPct ? { ...F, values: F.fields.cloudPct } : null;
+        const wind = tw != null && M.wind ? M.wind : null;
+        const out = coldPoolGrid(D.grid, poolRel.hRel, {
+            nightFrac,
             cloudAt: cloud ? (lat, lon) => { const c = fieldSample(cloud, t, lat, lon); return c == null ? null : c / 100; } : null,
             windAt: wind ? (lat, lon) => { const w = windAt(wind, tw, lat, lon); return w ? Math.hypot(w.u, w.v) : null; } : null,
         });
@@ -484,7 +518,7 @@ export function mountMap(root, deps) {
         const f = M.field;
         const src = heatSource(t);
         // "Sun & shade effect": the modelled ΔT alone, when there is one to show.
-        const effect = M.heatView === 'sun' && src.det?.sun ? src.det.sun : null;
+        const effect = M.heatView === 'sun' && src.det?.effect ? src.det.effect : null;
         ctx.save();
         ctx.globalAlpha = M.heatAlpha;
         ctx.imageSmoothingEnabled = true;
@@ -1736,7 +1770,10 @@ export function mountMap(root, deps) {
                 : src?.det ? { state: 'on', lapse: src.det.fit, correction: src.det.field.correction, dz: src.det.dz, resM: D.resM ?? null,
                     sun: !M.layers.tempsun ? { state: 'off' }
                         : !src.det.sun ? { state: 'off' }
-                        : { state: src.det.sun.daylight ? 'on' : 'night', range: src.det.sun.range, cloud: src.det.sun.cloud, wind: src.det.sun.wind } }
+                        : { state: src.det.sun.daylight ? 'on' : 'night', range: src.det.sun.range, cloud: src.det.sun.cloud, wind: src.det.sun.wind },
+                    pool: !M.layers.temppool || !src.det.pool ? { state: 'off' }
+                        : { state: src.det.pool.active ? 'on' : 'day', range: src.det.pool.range, nightFrac: src.det.pool.nightFrac, cloud: src.det.pool.cloud, wind: src.det.pool.wind },
+                    effect: src.det.effect ? { live: src.det.effect.live, range: src.det.effect.range } : null }
                 : !detailPossible() ? { state: 'nofields' }
                 : D.state === 'down' ? { state: 'nodem' } : { state: 'loading' },
             state: M.fieldState, note: M.fieldNote, heat: M.drawn.heat,
@@ -1771,7 +1808,7 @@ export function mountMap(root, deps) {
         const t = currentTimeIndex();
         const src = M.layers.temperature && t != null ? heatSource(t) : null;
         const v = src && M.drawn.heatView !== 'sun' ? fieldSample(src.f, src.t, g.lat, g.lon) : null;
-        const effK = src?.det?.sun && M.drawn.heatView === 'sun' ? fieldSample({ ...D.grid, values: src.det.sun.values }, 0, g.lat, g.lon) : null;
+        const effK = src?.det?.effect && M.drawn.heatView === 'sun' ? fieldSample({ ...D.grid, values: src.det.effect.values }, 0, g.lat, g.lon) : null;
         // With terrain detail on, say what was corrected: the model's own value and the two heights.
         let detTxt = null;
         if (v != null && src.det) {
@@ -1779,7 +1816,9 @@ export function mountMap(root, deps) {
             const hh = (m) => (deps.formatHeight ? deps.formatHeight(m) : `${Math.round(m)} m`);
             const sunK = src.det.sun ? fieldSample({ ...D.grid, values: src.det.sun.values }, 0, g.lat, g.lon) : null;
             const dK = (k) => (deps.formatTempDelta ? deps.formatTempDelta(k) : `${k >= 0 ? '+' : '−'}${Math.abs(k).toFixed(1)} K`);
-            const sunTxt = sunK != null && Math.abs(sunK) >= 0.05 ? `, sun & shade ${dK(sunK)}` : '';
+            const poolK = src.det.pool ? fieldSample({ ...D.grid, values: src.det.pool.values }, 0, g.lat, g.lon) : null;
+            const sunTxt = (sunK != null && Math.abs(sunK) >= 0.05 ? `, sun & shade ${dK(sunK)}` : '')
+                + (poolK != null && Math.abs(poolK) >= 0.05 ? `, cold-air pooling ${dK(poolK)}` : '');
             if (raw != null && zm != null && zd != null) detTxt = `at ${hh(zd)} (GFS: ${deps.formatTemp(raw)} at its ${hh(zm)} surface${sunTxt})`;
         }
         const tw = windTimeIndex();
@@ -1810,7 +1849,7 @@ export function mountMap(root, deps) {
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        const effTxt = effK == null ? null : `sun & shade ${deps.formatTempDelta ? deps.formatTempDelta(effK) : effK.toFixed(1) + ' K'} vs flat open ground`;
+        const effTxt = effK == null ? null : `sun, shade & cold-air effect ${deps.formatTempDelta ? deps.formatTempDelta(effK) : effK.toFixed(1) + ' K'} vs flat open ground`;
         tip.textContent = [terrTxt, thTxt, upTxt, cvTxt, aqTxt, effTxt, v == null ? null : [deps.formatTemp(v), detTxt].filter(Boolean).join(' '), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
@@ -1922,7 +1961,7 @@ export function mountMap(root, deps) {
         setLayer(name, on) {
             M.layers[name] = !!on; requestDraw();
             if (name === 'airflow') updateFlow();
-            if (['elevation', 'exposure', 'orographic', 'slopewind', 'shadow', 'sunpath', 'tempdetail', 'tempsun', 'temperature'].includes(name) && on) scheduleDem();
+            if (['elevation', 'exposure', 'orographic', 'slopewind', 'shadow', 'sunpath', 'tempdetail', 'tempsun', 'temppool', 'temperature'].includes(name) && on) scheduleDem();
         },
         /** The slope-wind forcing (GFS cloud + 2 m T); state 'loading' | 'live' | 'stale' | 'partial'. */
         setSlopeForcing(state, body, note, cloud) {
