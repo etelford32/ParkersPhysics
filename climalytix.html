@@ -105,6 +105,10 @@ body {
 .cx-about summary::before { content:'ⓘ'; color:var(--cx-accent); }
 .cx-about[open] summary { margin-bottom:4px; }
 #cx-aq-key[hidden] { display:none; }
+#cx-exp-key[hidden], #cx-exp-mode[hidden] { display:none; }
+#cx-exp-key .cx-exp-bar { height:12px; border-radius:3px; background:#888; }
+#cx-exp-key .cx-exp-ticks { display:flex; justify-content:space-between; font-size:.62rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
+#cx-exp-mode { margin:.3rem 0; }
 #cx-aq-key .cx-aq-bands { display:flex; height:12px; border-radius:3px; overflow:hidden; }
 #cx-aq-key .cx-aq-bands i { flex:1; }
 #cx-aq-key .cx-aq-ticks { display:flex; font-size:.62rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
@@ -305,10 +309,24 @@ body {
       <p id="cx-flow-status" class="cx-map-note" role="status">Loading…</p>
       <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note">10 m wind from the GFS run. Streaks move with the real wind, sped up by the factor printed above (it follows the zoom); brighter = faster. They show the wind pattern at the time on the timeline, frozen there: the airflow, not the path one parcel of air takes over hours. The rose counts the forecast hours at the site by the direction the wind blows <b>from</b>. Once an air-quality series is added it can also show which directions bring the dirtiest air.</p></details>
 
+      <h3 class="cx-rail-h">Terrain</h3>
+      <label class="cx-layer"><input type="checkbox" id="cx-layer-elev">Elevation contours<span class="cx-layer-src" title="AWS Terrain Tiles (SRTM / 3DEP / GMTED blend), sampled onto the map’s own grid">DEM</span></label>
+      <label class="cx-layer"><input type="checkbox" id="cx-layer-exp">Sun exposure<span class="cx-layer-src" title="Computed here from the DEM slope and the real Sun">Ours</span></label>
+      <div id="cx-exp-mode" class="cx-seg" role="group" aria-label="Sun exposure over" hidden>
+        <button type="button" class="cx-btn" data-exp="today" aria-pressed="true">Over today</button>
+        <button type="button" class="cx-btn" data-exp="now" aria-pressed="false">At this time</button>
+      </div>
+      <div id="cx-exp-key" hidden aria-label="Sun exposure key">
+        <div class="cx-exp-bar"></div>
+        <div class="cx-exp-ticks"><span>0.71× shade</span><span>flat ground</span><span>1.41× sun</span></div>
+      </div>
+      <p id="cx-dem-status" class="cx-map-note" role="status">Terrain layers off.</p>
+      <details class="cx-about"><summary>About these layers</summary><p class="cx-map-note">Elevation: AWS Terrain Tiles (a public blend of SRTM, USGS 3DEP and GMTED), fetched at the zoom that matches the map and resampled onto the map’s own latitude/longitude grid — never a stretched web-Mercator image. Contours are round numbers in your height unit; every fifth is heavier and labelled. <b>Sun exposure</b> is the direct sunlight a slope receives divided by what flat ground at the same place receives: gold = more sun than flat ground (a south-facing slope in the northern winter), indigo = less; the colour is full strength at 1.41× and 0.71× (half a stop), which spans most real slopes. “Over today” sums the whole day’s Sun track at the map centre; “At this time” uses the Sun at each point at the time on the timeline (night is blank). It is clear-sky geometry only: no clouds, no haze, and no shadows cast by neighbouring ridges — a slope only shades itself.</p></details>
+
       <h3 class="cx-rail-h">Base map</h3>
-      <label class="cx-layer"><input type="checkbox" id="cx-layer-terrain" checked>Terrain<span class="cx-layer-src" title="Shaded from EarthView’s self-hosted relief map">Relief</span></label>
+      <label class="cx-layer"><input type="checkbox" id="cx-layer-terrain" checked>Relief shading<span class="cx-layer-src" title="Shaded from EarthView’s self-hosted relief map">Relief</span></label>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-labels" checked>Place labels</label>
-      <details class="cx-about"><summary>About this layer</summary><p id="cx-base-note" class="cx-map-note">Ground: NASA Blue Marble (self-hosted, so it never goes blank) with NASA GIBS 500 m imagery over it where it loads — both <b>archival</b> cloud-free composites, not today’s surface. Terrain is shaded from a ~20 km relief map, lit from the north-west by cartographic convention (not today’s Sun) and exaggerated ×10 vertically; nothing finer than ~20 km is shaded. Labels are EarthView’s city list, as many as fit.</p></details>
+      <details class="cx-about"><summary>About this layer</summary><p id="cx-base-note" class="cx-map-note">Ground: NASA Blue Marble (self-hosted, so it never goes blank) with NASA GIBS 500 m imagery over it where it loads — both <b>archival</b> cloud-free composites, not today’s surface. Relief shading uses a ~20 km relief map, lit from the north-west by cartographic convention (not today’s Sun) and exaggerated ×10 vertically; nothing finer than ~20 km is shaded. Labels are EarthView’s city list, as many as fit.</p></details>
     </div>
     <div id="cx-map-stage">
       <canvas id="cx-map-canvas" tabindex="0" aria-label="Location map. Drag to pan, scroll or pinch to zoom; arrow keys pan, plus and minus zoom, 0 recentres."></canvas>
@@ -328,7 +346,7 @@ body {
           <button type="button" data-map-act="pan-down" aria-label="Pan south" title="Pan south (↓)">▼</button>
         </div>
       </div>
-      <div id="cx-map-attr">Imagery: NASA Blue Marble (self-hosted) + NASA GIBS Blue Marble NG — archival composites · relief: EarthView relief map · heat + airflow: Climalytix GFS archive · air quality: Copernicus CAMS (via Open-Meteo) + EPA AirNow</div>
+      <div id="cx-map-attr">Imagery: NASA Blue Marble (self-hosted) + NASA GIBS Blue Marble NG — archival composites · relief: EarthView relief map · heat + airflow: Climalytix GFS archive · air quality: Copernicus CAMS (via Open-Meteo) + EPA AirNow · elevation: AWS Terrain Tiles (Mapzen terrarium; SRTM, 3DEP, GMTED and others)</div>
     </div>
   </section>
 

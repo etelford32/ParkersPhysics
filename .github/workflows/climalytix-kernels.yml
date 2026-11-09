@@ -33,6 +33,11 @@
 #                            ceiling, hours matched BY INSTANT (reversed-hours
 #                            NEGATIVE CONTROL), gaps null, EPA category colours,
 #                            monitor residuals, the route's 200+expired paths
+#   climalytix-terrain.mjs   §19 T1 terrain: Terrarium decode, Mercator → lat/lon
+#                            sampling, Sobel slope/aspect on planes (forward-
+#                            difference NEGATIVE CONTROL), exposure exactly 1 on
+#                            flat ground, the DEM route's host ladder (non-PNG
+#                            200 refused, no passthrough URL)
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
@@ -56,6 +61,7 @@ on:
       - 'js/climate-lab/**'
       - 'js/earth-detail-inset.js'
       - 'js/temp-ramp.js'
+      - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
       - 'scripts/climalytix_ingest/**'
@@ -71,6 +77,7 @@ on:
       - 'js/climate-lab/**'
       - 'js/earth-detail-inset.js'
       - 'js/temp-ramp.js'
+      - 'js/sun-altitude.js'
       - 'api/_lib/climalytix-r2.js'
       - 'api/climalytix/**'
       - 'scripts/climalytix_ingest/**'
@@ -117,6 +124,8 @@ jobs:
         run: node tests/climalytix-airflow.mjs
       - name: air-quality field + route (upstream stubbed)
         run: node tests/climalytix-aq-field.mjs
+      - name: terrain (elevation, slope, sun exposure, DEM route stubbed)
+        run: node tests/climalytix-terrain.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)

@@ -952,3 +952,47 @@ M4(b)/(c) only after the scorecard says the cheaper rungs have been exhausted.
 archive (§17.1) and the scored aurora members are real data today, and no weather
 API combines a site's weather with geomagnetic risk, satellite passes and launch
 conditions. That is the operator wedge (§2's last row) and it needs no new model.
+
+## 19. Terrain and convection layers (owner request 2026-11-09; built one at a time)
+
+The air near the ground is shaped by the ground. These layers model it in the
+order the physics stacks up — each one reuses the one before, and each ships
+only with its own node kernel gate (closed forms + a negative control) and a
+browser gate on closed-form mock data. Every layer is a DIAGNOSTIC of
+conditions from public data, never a claim that a bird or a glider will find
+lift at a given spot, and the rail says so.
+
+| Step | Layer | Physics (the closed form the gate pins) | Data | Status |
+|---|---|---|---|---|
+| **T1** | **Elevation levels + sun exposure** | Terrarium decode `h = R·256 + G + B/256 − 32768`; Web-Mercator tile maths (round trip exact); slope/aspect by Sobel on a 2-node baseline in METRES with cos φ spacing (a tilted plane comes back exact at 0° and 60°; the aspect sign trap is the negative control); incidence `cos θ = cos s·sin α + sin s·cos α·cos(A☉ − aspect)` (flat ground = sin α exactly; a face square to the Sun = 1); the day's direct-beam ratio slope/flat (flat = 1 exactly; an equator-facing slope in winter > 1, pole-facing < 1). Self-shading only — no cast shadows, disclosed. | AWS Terrain Tiles (Terrarium PNG, public, attribution) through `/api/climalytix/dem` (SSRF-safe: z/x/y only, the upstream URL is rebuilt from a frozen candidate list; the no-coordinate form is a capability probe); the Sun is `js/sun-altitude.js` `solarPosition` (the site's one Sun) | **BUILT 2026-11-09** (below) |
+| **T2** | **Orographic updraft** | The exact kinematic lower boundary condition `w = u·∂h/∂x + v·∂h/∂y` (flow forced up a slope); windward/leeward from the same dot product. Gate: a uniform wind over a tilted plane gives the closed-form w; wind along the contours gives 0; reversing the wind flips the sign. | T1's DEM + our GFS 10 m u/v (airflow's field) | planned |
+| **T3** | **Anabatic / katabatic slope winds** | The Prandtl (1942) steady slope flow: amplitude `u₀ = Δθ·√(g·K/(θ₀·N²·Pr))` with height scale `l = (4·K·Pr/(N²·sin²α))^¼`, the forcing Δθ from T1's slope insolation by day and radiative cooling by night (upslope by day, downslope by night). Gate: the profile satisfies its ODE, flat ground gives 0, the sign follows the sign of Δθ. | T1 + GFS 2 m T, cloud (clear-sky fraction) | planned |
+| **T4** | **Thermals** | Deardorff convective velocity `w* = (g/θ · H/(ρ·c_p) · z_i)^⅓`; thermal tops at the boundary-layer depth z_i; cumulus base at the LCL (`z = 125 m · (T − T_d)`, Espy) — "blue" thermals when the LCL sits above z_i. Gate: w* scales as H^⅓ and z_i^⅓ exactly; H ≤ 0 gives no thermals; the LCL identity. | GFS sensible heat flux (SHTFL), boundary-layer height (HPBL), DSWRF — **added to `GFS_VARS` in the ingest** (format change → re-write the Python fixture on purpose) | planned |
+| **T5** | **Updraft (general)** | The vertical air motion available: orographic (T2) + thermal (T4) + slope (T3), each kept SEPARATE in the readout (never one invented total), plus GFS vertical velocity at 850/700 hPa (ω → w = −ω/(ρg)) where ingested. Gate: ω→w conversion exact at standard density; components add without double counting. | T2–T4 + GFS VVEL | planned |
+| **T6** | **Convection** | Parcel theory on the GFS column: CAPE, CIN, lifted index (ingested, not recomputed — GFS's own), the convective temperature, and a "convection outlook" timeline panel (CAPE, CIN, LCL, z_i, w*) in Explore. Gate: a dry-adiabatic sounding has CAPE 0; the LI sign convention (negative = unstable) pinned both ways. | GFS CAPE/CIN/LFTX (ingest) | planned |
+
+**T1 as built (2026-11-09).** `js/climalytix/terrain.js` (PURE,
+`tests/climalytix-terrain.mjs`) + `/api/climalytix/dem` + the map's "Elevation"
+and "Sun exposure" toggles (`tests/climalytix-terrain.spec.js`). The DEM is
+sampled onto a lat/lon grid matched to the view (the map is equirectangular,
+the tiles are Mercator — sampling through the exact inverse, never stretching
+a tile image), at a tile zoom chosen so a DEM pixel is about one screen pixel
+(z ≤ 12). Elevation levels are contour lines at a round interval in the
+READER's unit (feet or metres, `contours.js`, the isotherm machinery), every
+fifth one labelled. Sun exposure is a fill — "now" (the incidence at the
+timeline's instant; night is BLANK, never painted as shade) or "today" (the
+slope's direct-beam total over one Sun track at the map centre ÷ flat
+ground's; the track is disclosed in the rail) — and is one-at-a-time with
+Temperature and Air quality. A tile that will not load leaves a hole;
+nothing is invented under it. Two measured adjustments: (1) the colour
+saturates at HALF A STOP (0.71× / 1.41×, `EXPOSURE_FULL_LOG2`) — at one stop a
+10° slope at 40° N painted ~20 % opaque and the layer read as empty; (2) the
+rail quotes the slope RESOLUTION as the coarser of the DEM pixel and the
+grid node (the default 7.5° view samples every ~8 km and honestly smooths a
+22 km ridge to 3° — the browser gate zooms in before checking slopes). The
+browser gate's DEM is a closed-form east–west ridge served as real Terrarium
+tiles (`MOCK_RIDGE` in the mocks), so height, slope, aspect and the exposure
+sign are checked against numbers, and "over today" against the kernel's own
+`dailyRatio`; DEM down is the negative control. Unverified against the live
+AWS bucket (egress-blocked here): one production `GET /api/climalytix/dem`
+settles which host answers.

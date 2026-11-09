@@ -33,6 +33,8 @@ import { normalizeArchive, degradedArchive, parseArchiveQuery } from '../../js/c
 import { aqGrid, aqFieldBody, degradedAq, AQ_VARS } from '../../js/climalytix/aq-field.js';
 import { siteBody, degradedNwp, parseSite, fieldPlan, fieldBody, SCHEMA } from '../../js/climalytix/point-tile.js';
 import { deflateSync } from 'node:zlib';
+import { encodePng } from '../helpers/cloud-source.mjs';
+import { terrariumEncode, tileLatLon, TILE_PX } from '../../js/climalytix/terrain.js';
 
 const DAY = 86_400_000;
 
@@ -236,7 +238,30 @@ export function stationsFixture(nowMs, site, atMs) {
     };
 }
 
-export async function installClimalytixMocks(page, { down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
+// ── Terrain: a closed-form ridge ────────────────────────────────────────────
+// An east–west ridge along MOCK_RIDGE.lat: flat at `base` m, rising linearly
+// to base + rise at the crest over `halfDeg` of latitude either side. Its
+// south flank FACES SOUTH and its north flank FACES NORTH at
+// atan(rise / (halfDeg·111 195 m)) ≈ 10.2°, so sun exposure has a known sign.
+export const MOCK_RIDGE = Object.freeze({ lat: 40.0, halfDeg: 0.1, base: 1500, rise: 2000 });
+export const MOCK_RIDGE_SLOPE_DEG = Math.atan(MOCK_RIDGE.rise / (MOCK_RIDGE.halfDeg * 6_371_008.8 * Math.PI / 180)) * 180 / Math.PI;
+export function mockDem(lat) {
+    return MOCK_RIDGE.base + MOCK_RIDGE.rise * Math.max(0, 1 - Math.abs(lat - MOCK_RIDGE.lat) / MOCK_RIDGE.halfDeg);
+}
+const demCache = new WeakMap();
+/** One Terrarium tile of `heightAt(lat, lon)` (default: the ridge), pixel centres in Web-Mercator. */
+function demTilePng(z, x, y, heightAt = mockDem) {
+    if (!demCache.has(heightAt)) demCache.set(heightAt, new Map());
+    const cache = demCache.get(heightAt), key = `${z}/${x}/${y}`;
+    if (!cache.has(key)) {
+        const rowLat = Array.from({ length: TILE_PX }, (_, j) => tileLatLon(x, y + (j + 0.5) / TILE_PX, z).lat);
+        const colLon = Array.from({ length: TILE_PX }, (_, i) => tileLatLon(x + (i + 0.5) / TILE_PX, y, z).lon);
+        cache.set(key, encodePng(TILE_PX, TILE_PX, (i, j) => [...terrariumEncode(heightAt(rowLat[j], colLon[i])), 255]));
+    }
+    return cache.get(key);
+}
+
+export async function installClimalytixMocks(page, { dem = 'up', demHeight, onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
@@ -280,6 +305,12 @@ export async function installClimalytixMocks(page, { down = null, archiveExpired
                 const q = parseSite(Object.fromEntries(url.searchParams));
                 if (aq === 'down') return route.fulfill({ json: degradedAq(q, 'upstream_failed: upstream HTTP 503', now) });
                 return route.fulfill({ json: aqFieldFixture(now, q) });
+            }
+            if (p === '/api/climalytix/dem') {
+                const [z, x, y] = ['z', 'x', 'y'].map((k) => Number(url.searchParams.get(k)));
+                onDem?.({ z, x, y });
+                if (dem === 'down') return route.fulfill({ status: 502, json: { error: 'upstream_unavailable' } });
+                return route.fulfill({ status: 200, body: demTilePng(z, x, y, demHeight), headers: { 'Content-Type': 'image/png' } });
             }
             if (p === '/api/air-quality/stations') {
                 if (monitors === 'down') return route.fulfill({ status: 503, json: { error: 'upstream_unavailable', message: 'AirNow HTTP 503' } });

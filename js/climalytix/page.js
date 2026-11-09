@@ -33,6 +33,7 @@ import { AQI_CATEGORIES, AQI_POLLUTANTS, categoryForAqi } from '../aqi-scale.js'
 import { windColor } from '../wind-palette.js';
 import { mountMap } from './map.js';
 import { tempToRampFrac } from '../temp-ramp.js';
+import { exposurePaint, EXPOSURE_FULL_LOG2 } from './terrain.js';
 import { resolveUnits, fmt, fmtText, fromDisplay, QUANTITIES } from '../climate-lab/lab-units.js';
 import { homeState, visit, sameLocation, cleanLoc } from '../climate-lab/lab-home.js';
 import { geocodeQuery } from '../user-location.js';
@@ -364,6 +365,36 @@ function paintAqKey() {
     $('#cx-aq-key .cx-aq-ticks').innerHTML = bp.map((b) => `<span>${b[0] === 0 ? '0' : b[0]}</span>`).join('');
 }
 
+/** The exposure key: the map's own painter across ±EXPOSURE_FULL_LOG2 stops (log axis). */
+function paintExposureKey() {
+    const px = new Uint8ClampedArray(4);
+    const stops = [];
+    for (let k = 0; k <= 20; k++) {
+        const r = 2 ** ((k / 10 - 1) * EXPOSURE_FULL_LOG2);
+        px.fill(0); exposurePaint(r, px, 0);
+        stops.push(`rgba(${px[0]},${px[1]},${px[2]},${(px[3] / 255).toFixed(3)}) ${k * 5}%`);
+    }
+    const lo = (2 ** -EXPOSURE_FULL_LOG2).toFixed(2), hi = (2 ** EXPOSURE_FULL_LOG2).toFixed(2);
+    $('#cx-exp-key .cx-exp-ticks').innerHTML = `<span>${lo}× shade</span><span>flat ground</span><span>${hi}× sun</span>`;
+    $('#cx-exp-key .cx-exp-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')}), #2a3446`;
+}
+
+/** Rail status for the terrain layers (elevation contours, sun exposure). */
+function renderDemRail(info) {
+    const st = $('#cx-dem-status');
+    const elev = $('#cx-layer-elev').checked, exp = $('#cx-layer-exp').checked;
+    if (!elev && !exp) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
+    st.dataset.state = info?.state || 'loading';
+    if (!info || info.state === 'idle' || info.state === 'loading') { st.textContent = info?.note || 'Loading elevation…'; return; }
+    if (info.state === 'down') { st.textContent = info.note; return; }
+    const parts = [info.note];
+    if (elev && info.step != null) parts.push(`Contours every ${info.step.toLocaleString('en-US')} ${fmt('height', 0, S.units).sym}.`);
+    if (exp) parts.push(info.mode === 'now'
+        ? 'Exposure: the Sun at each point at the time on the timeline; night is blank.'
+        : 'Exposure: today’s whole Sun track at the map centre, ÷ flat ground.');
+    st.textContent = parts.join(' ');
+}
+
 /** Rail status for air quality; also asks for monitors for the hour on show. */
 function renderAqRail(info) {
     const st = $('#cx-aq-status');
@@ -416,16 +447,27 @@ function mountLocationMap() {
         formatWind: (ms) => fmtText('wind', ms, S.units),
         onWind: renderFlowRail,
         onAq: renderAqRail,
+        onDem: renderDemRail,
+        // Elevation levels are chosen in the reader's height unit (round feet for a ft reader).
+        heightUnits: () => ({
+            toDisplay: (m) => fmt('height', m, S.units).value,
+            fromDisplay: (d) => fromDisplay('height', d, S.units),
+            sym: fmt('height', 0, S.units).sym,
+        }),
+        formatHeight: (m) => fmtText('height', m, S.units),
     });
     paintHeatKey();
     renderHeatTicks();
     // Temperature and Air quality are one-at-a-time: two full-window fields
     // on one map read as neither.
+    // Sun exposure is a full-window fill too, so it joins the same group.
     const showField = (which, on) => {
-        const temp = which === 'temp' ? on : (on ? false : $('#cx-layer-temp').checked);
-        const aq = which === 'aq' ? on : (on ? false : $('#cx-layer-aq').checked);
-        $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq;
-        S.map.setLayer('temperature', temp); S.map.setLayer('airquality', aq);
+        const pick = (id, key) => (which === key ? on : (on ? false : $(id).checked));
+        const temp = pick('#cx-layer-temp', 'temp'), aq = pick('#cx-layer-aq', 'aq'), exp = pick('#cx-layer-exp', 'exp');
+        $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq; $('#cx-layer-exp').checked = exp;
+        S.map.setLayer('temperature', temp); S.map.setLayer('airquality', aq); S.map.setLayer('exposure', exp);
+        $('#cx-exp-mode').hidden = !exp; $('#cx-exp-key').hidden = !exp;
+        renderDemRail(S.map.state.dem);
         for (const id of ['#cx-layer-iso', '#cx-layer-ext']) $(id).disabled = !temp;
         $('#cx-layer-mon').disabled = !aq;
         $('#cx-aq-key').hidden = !aq;
@@ -433,6 +475,17 @@ function mountLocationMap() {
     };
     $('#cx-layer-temp').addEventListener('change', (ev) => showField('temp', ev.target.checked));
     $('#cx-layer-aq').addEventListener('change', (ev) => showField('aq', ev.target.checked));
+    $('#cx-layer-exp').addEventListener('change', (ev) => showField('exp', ev.target.checked));
+    $('#cx-layer-elev').addEventListener('change', (ev) => {
+        S.map.setLayer('elevation', ev.target.checked);
+        renderDemRail(S.map.state.dem);
+    });
+    $('#cx-exp-mode').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-exp]');
+        if (!b) return;
+        for (const x of $('#cx-exp-mode').querySelectorAll('[data-exp]')) x.setAttribute('aria-pressed', String(x === b));
+        S.map.setExposureMode(b.dataset.exp);
+    });
     $('#cx-layer-mon').addEventListener('change', (ev) => {
         S.map.setLayer('monitors', ev.target.checked);
         S.monKey = '';
@@ -443,6 +496,7 @@ function mountLocationMap() {
         if (b && !b.disabled) setRoseMode(b.dataset.rose);
     });
     paintAqKey();
+    paintExposureKey();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));

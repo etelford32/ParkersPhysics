@@ -299,6 +299,13 @@ export const PIPELINES = [
       warnAgeS: 30 * 3600, critAgeS: 54 * 3600,
       notes: 'Same archive and degradation rules as climalytix-nwp; our archive only — no third-party grid stands in for it.' },
 
+    { id: 'climalytix-dem', label: 'Climalytix elevation tiles (Terrain Tiles)',
+      endpoint: '/api/climalytix/dem',
+      category: 'weather', upstream: 'AWS Terrain Tiles (Terrarium PNG, Mapzen / AWS Open Data)',
+      cadence_s: 86_400, prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS: 24 * 3600, critAgeS: 72 * 3600,
+      notes: 'Capability probe, not a data feed: the no-coordinate form reports which candidate host answered (hosts UNVERIFIED from the build sandbox — record the winner in js/climalytix/terrain.js DEM_CANDIDATES). Amber = no host answered and the Elevation / Sun-exposure layers draw nothing. Tiles are archival, cached immutable for a year.' },
+
     { id: 'climalytix-aq-field', label: 'Climalytix air-quality field (CAMS, bootstrap)',
       endpoint: '/api/climalytix/aq-field',
       // Requires ?lat&lon. One Open-Meteo request of 289 locations through js/open-meteo-request.js.

@@ -41,6 +41,13 @@
  *             own place and the nearest field instant (model − monitor).
  *             The page makes Temperature and Air quality one-at-a-time: two
  *             full-window fields on one map read as neither.
+ *   terrain   §19 T1 (terrain.js, PURE): AWS Terrain Tiles through
+ *             /api/climalytix/dem, sampled onto a lat/lon grid for the view
+ *             (never a stretched Mercator image), ELEVATION contours at a round
+ *             interval in the reader's unit, and SUN EXPOSURE — the slope's
+ *             direct beam ÷ flat ground's, now or over today — as a diverging
+ *             fill (one-at-a-time with Temperature / Air quality). A tile that
+ *             will not load is a hole; nothing is invented under it.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -62,10 +69,17 @@ import { createFlow, streamlines, windAt, fieldBox, fromDirection, compressionFo
 import { windColor } from '../wind-palette.js';
 import { pm25Paint, pm25Aqi, residuals, residualSummary } from './aq-field.js';
 import { categoryForAqi } from '../aqi-scale.js';
+import {
+    demZoomFor, tilesFor, tileSampler, sampleGrid, slopeAspect, exposureGrid, exposurePaint, elevationLevels,
+    demPath, compass16, DEM_MIN_Z,
+} from './terrain.js';
+import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
 const TERRAIN_ALPHA = 0.7;
+const DEM_MAX_TILES = 48;
+const DEM_GRID_PX = 4;               // one DEM grid node per 4×4 CSS px of the view
 const FLOW_ALT_KM = 0.01;            // the wind palette's shade for a 10 m field
 const FLOW_FADE = 0.965;             // trail persistence per frame at 60 fps (half-life ≈ 0.33 s)
 const FLOW_PX_PER_PARTICLE = 420;    // one particle per this many CSS px² of data box
@@ -89,7 +103,9 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false },
+        exposureMode: 'today',
+        dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
         tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null,
         underlay: new Map(), relief: { state: 'idle', canvas: null, ms: null },
@@ -97,7 +113,8 @@ export function mountMap(root, deps) {
         flow: null, flowKey: '', flowRaf: 0, flowLast: 0, flowDirty: true, flowFrames: 0, onScreen: true,
         drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
                  airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 },
-                 aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null } },
+                 aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null },
+                 elevation: { lines: 0, step: null, labels: [] }, exposure: false },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -290,6 +307,173 @@ export function mountMap(root, deps) {
         M.drawn.t = t;
         if (M.layers.isotherms) drawIsotherms(t, shift);
         if (M.layers.extremes) drawExtremes(t, shift);
+    }
+
+    // ── Terrain: elevation contours + sun exposure (terrain.js) ─────────────
+    const D = M.dem;
+    function demWanted() { return (M.layers.elevation || M.layers.exposure) && M.view && M.w; }
+
+    function demTile(z, x, y) {
+        const key = `${z}/${x}/${y}`;
+        let e = D.tiles.get(key);
+        if (e) return e;
+        e = { state: 'loading', data: null };
+        D.tiles.set(key, e);
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth; c.height = img.naturalHeight;
+                const cx = c.getContext('2d', { willReadFrequently: true });
+                cx.drawImage(img, 0, 0);
+                e.data = cx.getImageData(0, 0, c.width, c.height).data;
+                e.state = c.width === 256 && c.height === 256 ? 'ok' : 'err';
+            } catch { e.state = 'err'; }
+            scheduleDem();
+        };
+        img.onerror = () => { e.state = 'err'; scheduleDem(); };
+        img.src = demPath({ z, x, y });
+        if (D.tiles.size > 400) D.tiles.delete(D.tiles.keys().next().value);
+        return e;
+    }
+
+    function demBox() {
+        const b = viewBounds(M.view, M.w, M.h);
+        return { north: Math.min(84.5, b.north), south: Math.max(-84.5, b.south), west: b.west, east: b.east };
+    }
+
+    function scheduleDem() {
+        clearTimeout(D.timer);
+        D.timer = setTimeout(rebuildDem, 120);
+    }
+
+    /** Plan the tiles for this view, and once they have settled, sample the grid. */
+    function rebuildDem() {
+        if (!demWanted()) return;
+        const box = demBox();
+        let z = demZoomFor(scales(M.view, M.h).kx * M.dpr);
+        let tiles = tilesFor(box, z);
+        while (tiles.length > DEM_MAX_TILES && z > DEM_MIN_Z) tiles = tilesFor(box, --z);
+        const entries = tiles.map((t) => demTile(t.z, t.x, t.y));
+        const settled = entries.filter((e) => e.state !== 'loading').length;
+        const ok = entries.filter((e) => e.state === 'ok').length;
+        D.z = z;
+        if (settled < entries.length) { D.state = 'loading'; D.note = `Loading elevation (${settled}/${entries.length} tiles)…`; deps.onDem?.(demInfo()); return; }
+        if (!ok) { D.state = 'down'; D.note = 'Elevation tiles unavailable — nothing is drawn in their place.'; D.grid = null; requestDraw(); deps.onDem?.(demInfo()); return; }
+        const key = `${z}|${box.north.toFixed(4)}|${box.west.toFixed(4)}|${M.view.span}|${M.w}|${M.h}|${ok}`;
+        if (D.key !== key) {
+            const sampler = tileSampler(z, (zz, x, y) => { const e = D.tiles.get(`${zz}/${x}/${y}`); return e?.state === 'ok' ? e.data : null; });
+            const nCols = Math.max(3, Math.ceil(M.w / DEM_GRID_PX)), nRows = Math.max(3, Math.ceil(M.h / DEM_GRID_PX));
+            D.grid = sampleGrid(box, nCols, nRows, sampler);
+            D.sa = slopeAspect(D.grid);
+            D.key = key; D.expKey = ''; D.isoKey = '';
+        }
+        D.state = 'ok';
+        // Slopes are only as fine as the COARSER of the tile pixel and the grid node.
+        const pixM = 40_075_000 / (256 * 2 ** z) * Math.cos(M.view.lat * Math.PI / 180);
+        const nodeM = D.grid.dlat * 111_195;
+        const resM = Math.max(pixM, nodeM);
+        D.resM = resM;
+        D.note = `Terrain Tiles z${z}; slopes resolved every ~${resM >= 1000 ? `${(resM / 1000).toFixed(1)} km` : `${Math.round(resM)} m`} (zoom in for finer).`
+            + (ok < entries.length ? ` · ${entries.length - ok} tile(s) missing, left blank` : '');
+        requestDraw();
+        deps.onDem?.(demInfo());
+    }
+
+    function exposureFor() {
+        if (!D.grid) return null;
+        const timeMs = M.timeMs ?? Date.now();
+        const mode = M.exposureMode;
+        const lonC = M.view.lon;
+        // "today" = the site's local solar day containing the instant on show.
+        const dayStart = Math.floor((timeMs + lonC / 15 * 3_600_000) / 86_400_000) * 86_400_000 - lonC / 15 * 3_600_000;
+        const key = `${D.key}|${mode}|${mode === 'now' ? Math.floor(timeMs / 600_000) : dayStart}`;
+        if (D.expKey !== key) {
+            const latC = M.view.lat;
+            const track = mode === 'today'
+                ? Array.from({ length: 96 }, (_, k) => solarPosition(new Date(dayStart + (k + 0.5) * 900_000), latC, lonC)) : null;
+            const t = new Date(timeMs);
+            D.exp = exposureGrid(D.grid, D.sa, { mode, track, sunAt: (lat, lon) => solarPosition(t, lat, lon) });
+            D.expKey = key; D.expCanvasKey = '';
+            D.track = mode === 'today' ? { dayStartMs: dayStart, lat: latC, lon: lonC } : null;
+        }
+        return D.exp;
+    }
+
+    let expCanvas = null;
+    function drawExposure() {
+        M.drawn.exposure = false;
+        if (!M.layers.exposure || !D.grid) return;
+        const exp = exposureFor();
+        if (!exp) return;
+        const f = { ...D.grid, values: exp };
+        const key = `${D.expKey}|${M.view.lat}|${M.view.lon}|${M.view.span}|${M.w}|${M.h}`;
+        if (D.expCanvasKey !== key) {
+            const img = heatImage(f, 0, M.view, M.w, M.h, null, { step: HEAT_STEP_PX, paint: exposurePaint });
+            expCanvas = expCanvas || document.createElement('canvas');
+            expCanvas.width = img.cw; expCanvas.height = img.ch;
+            expCanvas.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+            D.expCanvasKey = key;
+        }
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, M.heatAlpha + 0.2);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(expCanvas, 0, 0, M.w, M.h);
+        ctx.restore();
+        M.drawn.exposure = true;
+    }
+
+    function drawElevation() {
+        M.drawn.elevation = { lines: 0, step: null, labels: [] };
+        if (!M.layers.elevation || !D.grid) return;
+        const u = deps.heightUnits?.() ?? { toDisplay: (m) => m, fromDisplay: (d) => d, sym: 'm' };
+        const isoKey = `${D.key}|${u.sym}`;
+        if (D.isoKey !== isoKey) {
+            const r = fieldRange(D.grid, 0);
+            const lv = r ? elevationLevels(r.min, r.max, u) : { step: null, levels: [] };
+            D.iso = { step: lv.step, levels: lv.levels.map((l) => ({ ...l, chains: contourLines(D.grid, 0, l.m) })) };
+            D.isoKey = isoKey;
+        }
+        ctx.save();
+        ctx.lineJoin = 'round';
+        for (const l of D.iso.levels) {
+            if (!l.chains.length) continue;
+            ctx.lineWidth = l.major ? 1.4 : 0.7;
+            ctx.strokeStyle = l.major ? 'rgba(255,244,220,.82)' : 'rgba(255,244,220,.45)';
+            ctx.beginPath();
+            for (const ch of l.chains) ch.pts.forEach((p, k) => { const q = lin(p.lat, p.lon); if (k) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
+            ctx.stroke();
+            M.drawn.elevation.lines++;
+            const at = l.major ? labelAnchor(l.chains) : null;
+            if (at) {
+                const q = lin(at.lat, at.lon);
+                ctx.font = '600 10px system-ui, sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                halo(l.label, q.x, q.y, '#fff4dc');
+                M.drawn.elevation.labels.push(l.label);
+            }
+        }
+        ctx.restore();
+        M.drawn.elevation.step = D.iso.step;
+        if (D.railStep !== D.iso.step) { D.railStep = D.iso.step; deps.onDem?.(demInfo()); }   // the rail quotes the interval
+    }
+
+    /** Terrain at a point from the sampled grid: { h, slope, aspect, ratio } (nulls where unknown). */
+    function terrainAt(lat, lon) {
+        if (!D.grid) return null;
+        const h = fieldSample(D.grid, 0, lat, lon);
+        const i = Math.round((D.grid.latN - lat) / D.grid.dlat), j = Math.round((wrapNear(lon, D.grid.lonW + 180) - D.grid.lonW) / D.grid.dlon);
+        const k = i * D.grid.nCols + j;
+        const inside = i >= 0 && j >= 0 && i < D.grid.nRows && j < D.grid.nCols;
+        const sl = inside ? D.sa.slope[k] : NaN, as = inside ? D.sa.aspect[k] : NaN;
+        const exp = M.layers.exposure && inside ? exposureFor()?.[k] : NaN;
+        return { h, slope: Number.isFinite(sl) ? sl : null, aspect: Number.isFinite(as) ? as : null,
+                 ratio: Number.isFinite(exp) ? exp : null };
+    }
+
+    function demInfo() {
+        return { state: D.state, note: D.note, z: D.z, mode: M.exposureMode, step: D.iso?.step ?? null, resM: D.resM ?? null,
+                 track: M.layers.exposure ? D.track ?? null : null };
     }
 
     // ── Air quality (CAMS PM2.5 field + AirNow monitors) ───────────────────
@@ -636,7 +820,9 @@ export function mountMap(root, deps) {
         M.drawn.terrain = drawTerrain();
         drawHeat();
         drawAq();
+        drawExposure();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
+        drawElevation();
         M.drawn.labels = drawLabels();
         drawMonitors();
         drawSite();
@@ -684,6 +870,7 @@ export function mountMap(root, deps) {
         fctx.setTransform(M.dpr, 0, 0, M.dpr, 0, 0);
         requestDraw();
         updateFlow();
+        if (demWanted()) scheduleDem();
     }
     new ResizeObserver(resize).observe(stage);
 
@@ -707,10 +894,16 @@ export function mountMap(root, deps) {
             tip.style.transform = `translate(${Math.max(4, x)}px, ${M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14}px)`;
             return;
         }
+        const tr = (M.layers.elevation || M.layers.exposure) ? terrainAt(g.lat, g.lon) : null;
+        const terrTxt = tr && tr.h != null
+            ? [deps.formatHeight ? deps.formatHeight(tr.h) : `${Math.round(tr.h)} m`,
+               tr.slope != null ? `${tr.slope.toFixed(0)}° slope${tr.slope >= 1 && tr.aspect != null ? ` facing ${compass16(tr.aspect)}` : ''}` : null,
+               tr.ratio != null ? `${tr.ratio.toFixed(2)}× flat-ground sun ${M.exposureMode === 'now' ? 'now' : 'today'}` : null].filter(Boolean).join(' · ')
+            : null;
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        tip.textContent = [aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
+        tip.textContent = [terrTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -791,6 +984,7 @@ export function mountMap(root, deps) {
     function setView(v) {
         const c0 = M.view && M.h ? flowCompression() : null;
         M.view = v; requestDraw(); updateFlow();
+        if (demWanted()) scheduleDem();
         if (flowCompression() !== c0) deps.onWind?.(windInfo());
     }
 
@@ -814,7 +1008,16 @@ export function mountMap(root, deps) {
             requestDraw();
             if (windTimeIndex() !== before) { updateFlow(); deps.onWind?.(windInfo()); }
         },
-        setLayer(name, on) { M.layers[name] = !!on; requestDraw(); if (name === 'airflow') updateFlow(); },
+        setLayer(name, on) {
+            M.layers[name] = !!on; requestDraw();
+            if (name === 'airflow') updateFlow();
+            if ((name === 'elevation' || name === 'exposure') && on) scheduleDem();
+        },
+        setExposureMode(mode) { M.exposureMode = mode === 'now' ? 'now' : 'today'; D.expKey = ''; requestDraw(); deps.onDem?.(demInfo()); },
+        /** Terrain at a point (test + console hook). */
+        terrainAt,
+        /** The reader's unit changed: elevation levels are chosen in it. */
+        heightUnitsChanged() { D.isoKey = ''; requestDraw(); },
         /** The flow canvas's painted share (0‥1 of pixels with alpha) — the gate's on/off control. */
         flowCoverage() {
             const d = fctx.getImageData(0, 0, flowCanvas.width, flowCanvas.height).data;
@@ -845,7 +1048,7 @@ export function mountMap(root, deps) {
             return M.flow ? M.flow.particles.map((p) => ({ lat: p.lat, lon: p.lon, born: p.born })) : [];
         },
         /** The reader's unit changed: isotherm levels are chosen in it. */
-        unitsChanged() { isoCache = { key: '', levels: [] }; requestDraw(); },
+        unitsChanged() { isoCache = { key: '', levels: [] }; D.isoKey = ''; requestDraw(); },
         setHeatAlpha(a) { M.heatAlpha = Math.max(0, Math.min(1, a)); requestDraw(); },
         act,
         get state() {
@@ -856,6 +1059,7 @@ export function mountMap(root, deps) {
                 relief: { state: M.relief.state, ms: M.relief.ms },
                 wind: windInfo(),
                 aq: aqInfo(),
+                dem: demInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },
