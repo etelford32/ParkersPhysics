@@ -27,6 +27,8 @@
  *   nwp: 'nowind'           the field route has temperature but no wind (airflow says why)
  *   aq: 'down'              the air-quality field route answers 200 + expired (no field)
  *   monitors: 'down'        the AirNow stations route answers 503
+ *   modelZ: 2000            the GFS field also carries MSLP for a model surface at this height (m) —
+ *                           turns Temperature’s terrain detail on (default: no MSLP ⇒ detail unavailable)
  *   earth: 'blocked'        the self-hosted Blue Marble underlay (assets/earth/day-*) 404s
  */
 import { labFixture } from './climate-lab-fixtures.mjs';
@@ -169,7 +171,7 @@ export function mockTempC(lat, lon, tMs, site) {
     return 10 - 2.2 * (lat - site.lat) + 1.5 * (lon - site.lon) + diurnal;
 }
 
-export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, halfLon = null, vars = ['tempC'], windFn = null, cloudFn = () => 0, thermal = true, updraft = true, convection = true } = {}) {
+export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, halfLon = null, vars = ['tempC'], windFn = null, cloudFn = () => 0, thermal = true, updraft = true, convection = true, modelZ = null } = {}) {
     const H = 3_600_000;
     const runMs = Math.floor((nowMs - ageH * H) / (6 * H)) * 6 * H;
     const leadsH = Array.from({ length: 81 }, (_, i) => i * 3);
@@ -215,6 +217,14 @@ export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, halfLon = nul
         }
     }
     const all = { tempC: values, ...wind, ...th, ...up, ...cv };
+    // modelZ (m): the model's surface height, written into MSLP by the hypsometric equation
+    // terrain-temp.js inverts — so the page recovers exactly this height. null = a run with no MSLP field.
+    if (modelZ != null) {
+        all.mslHpa = Float32Array.from(values, (tC, k) => {
+            const tm = tC + 273.15 + 0.5 * 0.0065 * modelZ;
+            return th.psfcHpa[k] * Math.exp(9.80665 * modelZ / (287.05 * tm));
+        });
+    }
     const missing = vars.filter((id) => !all[id] || (!thermal && id in th && id !== 'psfcHpa') || (!updraft && id in up) || (!convection && id in cv));
     if (missing.length) return { ...degradedNwp(site, '0p25', `no variable ${missing[0]} in this run`, nowMs), vars, fields: null, values: null };
     man.intervalH = { precipMm: 3, shflxWm2: 3 };
@@ -328,7 +338,7 @@ function demTilePng(z, x, y, heightAt = mockDem) {
     return cache.get(key);
 }
 
-export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', convection = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
+export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', convection = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', modelZ = null, onTile, onRequest } = {}) {
     const nwpOpt = nwp;   // a string, or a function read per request (an archive that comes up mid-session)
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
@@ -345,7 +355,7 @@ export async function installClimalytixMocks(page, { dem = 'up', demHeight, wind
                 const vars = (url.searchParams.get('vars') || 'tempC').split(',');
                 if (cloud === 'missing' && vars.includes('cloudPct')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable cloudPct in this run', now), vars, fields: null, values: null } });
                 if (nwp === 'nowind' && vars.includes('uMs')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable uMs in this run', now), vars, fields: null, values: null } });
-                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, halfLon: Number(url.searchParams.get('halfLon')) || null, vars, windFn, thermal: thermal !== 'missing', updraft: updraft !== 'missing', convection: convection !== 'missing', ...(cloudFn ? { cloudFn } : {}) }) });
+                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, halfLon: Number(url.searchParams.get('halfLon')) || null, vars, windFn, thermal: thermal !== 'missing', updraft: updraft !== 'missing', convection: convection !== 'missing', modelZ, ...(cloudFn ? { cloudFn } : {}) }) });
             }
             if (p === '/api/climalytix/nwp') {
                 if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });

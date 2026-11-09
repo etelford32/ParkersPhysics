@@ -165,6 +165,10 @@ jobs:
         run: node tests/climalytix-layer-state.mjs
       - name: heat colour scale (fit to view vs the shared absolute ramp)
         run: node tests/climalytix-heat-scale.mjs
+      - name: temperature on the real ground (model height, fitted lapse rate)
+        run: node tests/climalytix-terrain-temp.mjs
+      - name: cast shadows, terrain horizon, the day's Sun path
+        run: node tests/climalytix-sun-terrain.mjs
       - name: nwp route (fake R2)
         run: node tests/climalytix-nwp-route.mjs
       - name: Climate Lab (unchanged by the lift)

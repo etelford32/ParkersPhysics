@@ -107,6 +107,8 @@ import { slopeWind, slopeWindGrid, slopeWindExtremes, ANABATIC_RGB, KATABATIC_RG
 import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 import { heatScale, runRange, scaleColor, SCALE_MODES } from './heat-scale.js';
+import { modelElevationM, fitLapse, downscaleGrid } from './terrain-temp.js';
+import { shadowGrid, horizonProfile, sunPath, sunDay } from './sun-terrain.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
 const TERRAIN_ALPHA = 0.7;
@@ -156,7 +158,7 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
+        timeMs: null, layers: { temperature: true, tempdetail: true, shadow: false, sunpath: false, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT, heatScaleMode: storedScaleMode(), windows: [],
@@ -332,17 +334,74 @@ export function mountMap(root, deps) {
     // per field, so scrubbing the timeline never re-colours the map.
     let scaleCache = { field: null, mode: '', scale: heatScale('absolute', null) };
     function currentScale() {
-        if (scaleCache.field !== M.field || scaleCache.mode !== M.heatScaleMode) {
-            scaleCache = { field: M.field, mode: M.heatScaleMode, scale: heatScale(M.heatScaleMode, runRange(M.field)) };
+        const dz = detailActive() ? DT.corr0 : null;
+        if (scaleCache.field !== M.field || scaleCache.mode !== M.heatScaleMode || scaleCache.dz !== dz) {
+            let r = runRange(M.field);
+            if (r && dz) {
+                // Terrain detail reaches past the model's own range (summits colder, valleys
+                // warmer). Widen by the correction the FIRST frame drawn on this DEM grid
+                // needed — its own fitted lapse, not the standard one, which doubled the range
+                // on the first real run and gave the contrast back — rounded OUT to 1 °C. Later
+                // frames reuse it, so scrubbing does not re-colour; a value past it clamps.
+                r = { min: Math.floor(r.min + Math.min(0, dz.min)), max: Math.ceil(r.max + Math.max(0, dz.max)) };
+            }
+            scaleCache = { field: M.field, mode: M.heatScaleMode, dz, scale: heatScale(M.heatScaleMode, r) };
         }
         return scaleCache.scale;
     }
-    function heatCanvasFor(t) {
-        const f = M.field, v = M.view;
+
+    // ── Terrain detail (terrain-temp.js): GFS 2 m T at the DEM's real height ──
+    let DT = { key: '', field: null, fit: null, dz: null, dzKey: '', corr0: null };
+    function detailActive() { return !!(M.layers.temperature && M.layers.tempdetail && D.grid && detailPossible()); }
+    function detailFor(t) {
+        if (!detailActive() || t == null) return null;
+        const F = M.field, key = `${D.key}|${F.run}|${t}`;
+        if (DT.key !== key) {
+            const plane = F.nRows * F.nCols, base = t * plane;
+            const msl = F.fields.mslHpa, ps = F.fields.psfcHpa;
+            const zVals = new Float32Array(plane), nodes = [];
+            for (let k = 0; k < plane; k++) {
+                const tc = F.values[base + k];
+                const z = modelElevationM(msl[base + k], ps[base + k], tc);
+                zVals[k] = z;
+                nodes.push({ x: F.lonW + (k % F.nCols) * F.dlon, y: F.latN - Math.floor(k / F.nCols) * F.dlat, z, t: tc ?? NaN });
+            }
+            const zField = { latN: F.latN, lonW: F.lonW, dlat: F.dlat, dlon: F.dlon, nRows: F.nRows, nCols: F.nCols, values: zVals };
+            const fit = fitLapse(nodes);
+            const field = downscaleGrid(D.grid, {
+                tAt: (lat, lon) => fieldSample(F, t, lat, lon), zModelAt: (lat, lon) => fieldSample(zField, 0, lat, lon), gamma: fit.gamma });
+            // Height difference DEM − model over the grid: once per DEM grid + run (the model surface does not move).
+            let dz = DT.dz;
+            const dzKey = `${D.key}|${F.run}`;
+            if (DT.dzKey !== dzKey) {
+                let lo = Infinity, hi = -Infinity;
+                for (let i = 0; i < D.grid.nRows; i += 2) for (let j = 0; j < D.grid.nCols; j += 2) {
+                    const zd = D.grid.values[i * D.grid.nCols + j];
+                    const zm = fieldSample(zField, 0, D.grid.latN - i * D.grid.dlat, D.grid.lonW + j * D.grid.dlon);
+                    if (!Number.isFinite(zd) || zm == null) continue;
+                    if (zd - zm < lo) lo = zd - zm;
+                    if (zd - zm > hi) hi = zd - zm;
+                }
+                dz = lo <= hi ? { min: Math.round(lo / 100) * 100, max: Math.round(hi / 100) * 100 } : null;
+            }
+            const corr0 = DT.dzKey === dzKey && DT.corr0 ? DT.corr0 : field.correction;
+            DT = { key, field, fit, zField, dz, dzKey, corr0 };
+        }
+        return DT;
+    }
+    /** What the heat, the isotherms, the markers and the tooltip all read: the detail grid, or the model's own nodes. */
+    function heatSource(t) {
+        const det = detailFor(t);
+        return det?.field?.correction ? { f: det.field, t: 0, tag: det.key, det: { ...det, t } } : { f: M.field, t, tag: `${M.field?.run}|${t}`, det: null };
+    }
+    function heatCanvasFor(src) {
+        const { f, t } = src, v = M.view;
         const sc = currentScale();
-        const key = `${f.run}|${t}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}|${sc.mode}|${sc.lo}|${sc.hi}`;
+        const key = `${src.tag}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}|${sc.mode}|${sc.lo}|${sc.hi}`;
         if (heatCache.key !== key) {
-            const img = heatImage(f, t, v, M.w, M.h, LUT, { step: HEAT_STEP_PX,
+            // Past the DEM grid's edge (mid-pan, before it is rebuilt) the model's own value shows.
+            const sample = src.det ? (lat, lon) => fieldSample(f, t, lat, lon) ?? fieldSample(M.field, src.det.t, lat, lon) : null;
+            const img = heatImage(f, t, v, M.w, M.h, LUT, { step: HEAT_STEP_PX, ...(sample ? { sample } : {}),
                 paint: (val, data, o) => scaleColor(sc, val, LUT, data, o) });
             const c = heatCache.canvas || document.createElement('canvas');
             c.width = img.cw; c.height = img.ch;
@@ -358,12 +417,14 @@ export function mountMap(root, deps) {
         const t = currentTimeIndex();
         if (t == null) return;
         const f = M.field;
+        const src = heatSource(t);
         ctx.save();
         ctx.globalAlpha = M.heatAlpha;
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(heatCanvasFor(t), 0, 0, M.w, M.h);
+        ctx.drawImage(heatCanvasFor(src), 0, 0, M.w, M.h);
         ctx.restore();
+        M.drawn.detail = !!src.det;
         // The data window: where the field ends is drawn, not implied. The
         // heat is evaluated between nodes only, so the box IS the node extent.
         const shift = dashedBox({ west: f.lonW, east: f.lonW + (f.nCols - 1) * f.dlon,
@@ -379,13 +440,20 @@ export function mountMap(root, deps) {
         }
         M.drawn.heat = true;
         M.drawn.t = t;
-        if (M.layers.isotherms) drawIsotherms(t, shift);
-        if (M.layers.extremes) drawExtremes(t, shift);
+        // With terrain detail the lines and markers are of the DETAIL grid (already in the view's turn).
+        if (M.layers.isotherms) drawIsotherms(src, src.det ? 0 : shift);
+        if (M.layers.extremes) drawExtremes(src, src.det ? 0 : shift);
     }
 
     // ── Terrain: elevation contours + sun exposure (terrain.js) ─────────────
     const D = M.dem;
-    function demWanted() { return (M.layers.elevation || M.layers.exposure || M.layers.orographic || M.layers.slopewind) && M.view && M.w; }
+    /** Terrain detail needs the model's two surface pressures (terrain-temp.js); an older body has none. */
+    function detailPossible() { return !!(M.field?.values && M.field.fields?.mslHpa && M.field.fields?.psfcHpa); }
+    function demWanted() {
+        const L = M.layers;
+        return (L.elevation || L.exposure || L.orographic || L.slopewind || L.shadow || L.sunpath
+            || (L.temperature && L.tempdetail && detailPossible())) && M.view && M.w;
+    }
 
     function demTile(z, x, y) {
         const key = `${z}/${x}/${y}`;
@@ -440,7 +508,7 @@ export function mountMap(root, deps) {
             const nCols = Math.max(3, Math.ceil(M.w / DEM_GRID_PX)), nRows = Math.max(3, Math.ceil(M.h / DEM_GRID_PX));
             D.grid = sampleGrid(box, nCols, nRows, sampler);
             D.sa = slopeAspect(D.grid);
-            D.key = key; D.expKey = ''; D.isoKey = '';
+            D.key = key; D.expKey = ''; D.isoKey = ''; scaleCache.field = null;
         }
         D.state = 'ok';
         // Slopes are only as fine as the COARSER of the tile pixel and the grid node.
@@ -468,6 +536,11 @@ export function mountMap(root, deps) {
                 ? Array.from({ length: 96 }, (_, k) => solarPosition(new Date(dayStart + (k + 0.5) * 900_000), latC, lonC)) : null;
             const t = new Date(timeMs);
             D.exp = exposureGrid(D.grid, D.sa, { mode, track, sunAt: (lat, lon) => solarPosition(t, lat, lon) });
+            // "At this time": a slope a ridge is shading gets NO direct beam, however well it faces the Sun.
+            if (mode === 'now') {
+                const sh = shadowFor();
+                if (sh && !sh.night) for (let k = 0; k < D.exp.length; k++) if (sh.mask[k] === 1 && Number.isFinite(D.exp[k])) D.exp[k] = 0;
+            }
             D.expKey = key; D.expCanvasKey = '';
             D.track = mode === 'today' ? { dayStartMs: dayStart, lat: latC, lon: lonC } : null;
         }
@@ -1061,6 +1134,74 @@ export function mountMap(root, deps) {
                  track: M.layers.exposure ? D.track ?? null : null };
     }
 
+    // ── Cast shadows + the site's Sun path (sun-terrain.js) ─────────────────
+    const SH = { key: '', out: null, canvasKey: '', canvas: null, sunKey: '', sun: null };
+    /** Shadows at the instant on show, one Sun position (the view centre) for the grid; cached per 10 min. */
+    function shadowFor() {
+        if (!D.grid) return null;
+        const timeMs = M.timeMs ?? Date.now();
+        const key = `${D.key}|${Math.floor(timeMs / 600_000)}`;
+        if (SH.key !== key) {
+            const sun = solarPosition(new Date(timeMs), M.view.lat, M.view.lon);
+            SH.out = { ...shadowGrid(D.grid, sun), sun, timeMs };
+            SH.key = key;
+        }
+        return SH.out;
+    }
+    const SHADOW_RGBA = [8, 12, 34, 140];
+    function drawShadow() {
+        M.drawn.shadow = { drawn: false, shaded: 0, lit: 0, night: false };
+        if (!M.layers.shadow || !D.grid) return;
+        const sh = shadowFor();
+        M.drawn.shadow = { drawn: false, shaded: sh.shaded, lit: sh.lit, night: sh.night };
+        if (sh.night || !sh.shaded) return;
+        const key = `${SH.key}|${M.view.lat}|${M.view.lon}|${M.view.span}|${M.w}|${M.h}`;
+        if (SH.canvasKey !== key) {
+            // Bilinear over the 0/1 mask with a soft edge: the shadow boundary between nodes, not a node-sized staircase.
+            const soft = { ...D.grid, values: Float32Array.from(sh.mask, (m) => (m === 255 ? NaN : m)) };
+            const img = heatImage(soft, 0, M.view, M.w, M.h, null, { step: HEAT_STEP_PX,
+                paint: (val, data, o) => {
+                    const e = Math.max(0, Math.min(1, (val - 0.3) / 0.4)), a = e * e * (3 - 2 * e);      // a soft edge across one node
+                    if (a > 0) { data[o] = SHADOW_RGBA[0]; data[o + 1] = SHADOW_RGBA[1]; data[o + 2] = SHADOW_RGBA[2]; data[o + 3] = SHADOW_RGBA[3] * a; }
+                } });
+            SH.canvas ||= document.createElement('canvas');
+            SH.canvas.width = img.cw; SH.canvas.height = img.ch;
+            SH.canvas.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+            SH.canvasKey = key;
+        }
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(SH.canvas, 0, 0, M.w, M.h);
+        ctx.restore();
+        M.drawn.shadow.drawn = true;
+    }
+    /** The site's local day containing the instant on show. */
+    function siteDayStart(timeMs) {
+        const off = (deps.utcOffsetS?.() ?? Math.round((M.site?.lon ?? 0) / 15) * 3600) * 1000;
+        return Math.floor((timeMs + off) / 86_400_000) * 86_400_000 - off;
+    }
+    /** Today's Sun at the site against its terrain horizon; cached per site + day + DEM grid. */
+    function sunInfo() {
+        if (!M.layers.sunpath && !M.layers.shadow) return { state: 'off' };
+        if (!M.site) return { state: 'loading' };
+        const timeMs = M.timeMs ?? Date.now(), dayStartMs = siteDayStart(timeMs);
+        const key = `${M.site.lat}|${M.site.lon}|${dayStartMs}|${D.grid ? D.key : D.state}`;
+        if (SH.sunKey !== key) {
+            const path = sunPath(M.site.lat, M.site.lon, dayStartMs, solarPosition);
+            const horizon = D.grid ? horizonProfile(D.grid, M.site.lat, M.site.lon) : null;
+            SH.sun = { path, horizon, day: sunDay(path, horizon), open: sunDay(path, null), dayStartMs };
+            SH.sunKey = key;
+        }
+        const now = solarPosition(new Date(timeMs), M.site.lat, M.site.lon);
+        const sh = M.layers.shadow && D.grid ? shadowFor() : null;
+        return {
+            state: D.grid ? 'ok' : D.state === 'down' ? 'nodem' : 'loading', timeMs, ...SH.sun,
+            now: { az: now.azimuthDeg, alt: now.altitudeDeg },
+            reachKm: SH.sun.horizon ? Math.min(...SH.sun.horizon.reachKm) : null, resM: D.resM ?? null,
+            shadow: sh ? { shaded: sh.shaded, lit: sh.lit, night: sh.night, sun: { az: sh.sun.azimuthDeg, alt: sh.sun.altitudeDeg } } : null,
+        };
+    }
+
     // ── Air quality (CAMS PM2.5 field + AirNow monitors) ───────────────────
     function aqTimeIndex() {
         const f = M.aq;
@@ -1205,13 +1346,13 @@ export function mountMap(root, deps) {
     // Isotherms depend on the field, the time and the reader's unit — never on
     // the view — so they are contoured once per (run, t, unit) and re-projected.
     let isoCache = { key: '', levels: [] };
-    function isothermsFor(t) {
+    function isothermsFor(src) {
         const u = deps.tempUnits();
-        const key = `${M.field.run}|${t}|${u.sym}`;
+        const key = `${src.tag}|${u.sym}`;
         if (isoCache.key !== key) {
-            const range = fieldRange(M.field, t);
+            const range = fieldRange(src.f, src.t);
             const levels = range ? isothermLevels(range.min, range.max, u) : [];
-            isoCache = { key, levels: levels.map((l) => ({ ...l, chains: contourLines(M.field, t, l.c) })) };
+            isoCache = { key, levels: levels.map((l) => ({ ...l, chains: contourLines(src.f, src.t, l.c) })) };
         }
         return isoCache.levels;
     }
@@ -1224,8 +1365,8 @@ export function mountMap(root, deps) {
         ctx.fillText(text, x, y);
     }
 
-    function drawIsotherms(t, shift) {
-        const levels = isothermsFor(t);
+    function drawIsotherms(src, shift) {
+        const levels = isothermsFor(src);
         ctx.save();
         ctx.lineJoin = 'round';
         for (const l of levels) {
@@ -1259,8 +1400,8 @@ export function mountMap(root, deps) {
         ctx.restore();
     }
 
-    function drawExtremes(t, shift) {
-        const e = fieldExtremes(M.field, t);
+    function drawExtremes(src, shift) {
+        const e = fieldExtremes(src.f, src.t);
         if (!e || e.max.v === e.min.v) return;
         ctx.save();
         ctx.font = '700 11px system-ui, sans-serif';
@@ -1453,6 +1594,7 @@ export function mountMap(root, deps) {
         drawThermals();
         drawUpdraft();
         drawConvection();
+        drawShadow();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
         drawWindows();
         drawElevation();
@@ -1466,6 +1608,7 @@ export function mountMap(root, deps) {
         drawTimeFade();
         updateTip();
         deps.onFrame?.(frameInfo());
+        deps.onSun?.(sunInfo());
         deps.onAq?.(aqInfo());
     }
 
@@ -1516,9 +1659,14 @@ export function mountMap(root, deps) {
 
     function frameInfo() {
         const t = currentTimeIndex();
+        const src = t == null ? null : heatSource(t);
         return {
             t, timeMs: t == null ? null : M.field.times[t],
-            range: t == null ? null : fieldRange(M.field, t),
+            range: src ? fieldRange(src.f, src.t) : null,
+            detail: !M.layers.tempdetail ? { state: 'off' }
+                : src?.det ? { state: 'on', lapse: src.det.fit, correction: src.det.field.correction, dz: src.det.dz, resM: D.resM ?? null }
+                : !detailPossible() ? { state: 'nofields' }
+                : D.state === 'down' ? { state: 'nodem' } : { state: 'loading' },
             state: M.fieldState, note: M.fieldNote, heat: M.drawn.heat,
             scale: (({ mode, lo, hi }) => ({ mode, lo, hi }))(currentScale()),
         };
@@ -1548,7 +1696,15 @@ export function mountMap(root, deps) {
         if (!M.hover || !M.view) { tip.hidden = true; return; }
         const g = pxToGeo(M.view, M.w, M.h, M.hover.x, M.hover.y);
         const t = currentTimeIndex();
-        const v = M.layers.temperature ? fieldSample(M.field, t, g.lat, g.lon) : null;
+        const src = M.layers.temperature && t != null ? heatSource(t) : null;
+        const v = src ? fieldSample(src.f, src.t, g.lat, g.lon) : null;
+        // With terrain detail on, say what was corrected: the model's own value and the two heights.
+        let detTxt = null;
+        if (v != null && src.det) {
+            const raw = fieldSample(M.field, t, g.lat, g.lon), zm = fieldSample(src.det.zField, 0, g.lat, g.lon), zd = fieldSample(D.grid, 0, g.lat, g.lon);
+            const hh = (m) => (deps.formatHeight ? deps.formatHeight(m) : `${Math.round(m)} m`);
+            if (raw != null && zm != null && zd != null) detTxt = `at ${hh(zd)} (GFS: ${deps.formatTemp(raw)} at its ${hh(zm)} surface)`;
+        }
         const tw = windTimeIndex();
         const w = M.layers.airflow && tw != null ? windAt(M.wind, tw, g.lat, g.lon) : null;
         const ll = `${Math.abs(g.lat).toFixed(2)}°${g.lat >= 0 ? 'N' : 'S'} ${Math.abs(((g.lon + 540) % 360) - 180).toFixed(2)}°${((g.lon + 540) % 360) - 180 >= 0 ? 'E' : 'W'}`;
@@ -1577,7 +1733,7 @@ export function mountMap(root, deps) {
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        tip.textContent = [terrTxt, thTxt, upTxt, cvTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
+        tip.textContent = [terrTxt, thTxt, upTxt, cvTxt, aqTxt, v == null ? null : [deps.formatTemp(v), detTxt].filter(Boolean).join(' '), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -1674,6 +1830,7 @@ export function mountMap(root, deps) {
         },
         setField(state, body, note) {
             M.fieldState = state; M.field = body?.values ? body : null; M.fieldNote = note || '';
+            if (demWanted()) scheduleDem();          // terrain detail needs the DEM as soon as there is a field
             requestDraw();
         },
         setTime(ms) {
@@ -1687,7 +1844,7 @@ export function mountMap(root, deps) {
         setLayer(name, on) {
             M.layers[name] = !!on; requestDraw();
             if (name === 'airflow') updateFlow();
-            if ((name === 'elevation' || name === 'exposure' || name === 'orographic' || name === 'slopewind') && on) scheduleDem();
+            if (['elevation', 'exposure', 'orographic', 'slopewind', 'shadow', 'sunpath', 'tempdetail', 'temperature'].includes(name) && on) scheduleDem();
         },
         /** The slope-wind forcing (GFS cloud + 2 m T); state 'loading' | 'live' | 'stale' | 'partial'. */
         setSlopeForcing(state, body, note, cloud) {
@@ -1766,6 +1923,7 @@ export function mountMap(root, deps) {
             requestDraw();
         },
         get heatScale() { return currentScale(); },
+        get sun() { return sunInfo(); },
         act,
         get state() {
             return {

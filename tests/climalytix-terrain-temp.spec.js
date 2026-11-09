@@ -1,0 +1,217 @@
+/**
+ * climalytix-terrain-temp.spec.js — temperature on the REAL ground, cast
+ * shadows, and the site's Sun path.
+ *
+ * Feeds are mocked (tests/fixtures/climalytix-mocks.mjs). The GFS field
+ * carries MSLP for a FLAT model surface at 2 000 m (`modelZ`), and the DEM is
+ * the closed-form east–west ridge MOCK_RIDGE (1 500 m plain, 3 500 m crest at
+ * 40.0° N) — so every correction is a number:
+ *   · the model height is flat ⇒ no relief to fit ⇒ the standard −6.5 K/km,
+ *     and the rail says so
+ *   · the plain is 500 m BELOW the model surface ⇒ +3.25 K; the crest 1 500 m
+ *     ABOVE it ⇒ −9.75 K
+ * What it pins:
+ *   · terrain detail is ON by default and draws the ridge into the heat —
+ *     NEGATIVE CONTROL: toggled off, the crest and the plain are the same
+ *     smooth field again
+ *   · a run with no MSLP, or elevation tiles down, falls back to GFS's own
+ *     field and says which — the heat still draws
+ *   · the tooltip names both heights
+ *   · terrain shadows: a low Sun to the south shades the ridge's north flank;
+ *     NEGATIVE CONTROL: at night nothing is drawn (night is not a shadow)
+ *   · the Sun path chart draws with or without a horizon, and says which
+ */
+import { test, expect } from '@playwright/test';
+import { installClimalytixMocks, MOCK_RIDGE } from './fixtures/climalytix-mocks.mjs';
+import { solarPosition } from '../js/sun-altitude.js';
+
+const BOULDER = { lat: 40.015, lon: -105.271, city: 'Boulder, CO' };
+const MODEL_Z = 2000;
+
+test.describe.configure({ timeout: 90_000 });
+test.use({ locale: 'en-US', timezoneId: 'America/Denver', reducedMotion: 'reduce', viewport: { width: 1366, height: 900 } });
+
+async function boot(page, mocks = {}) {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(`${e.name}: ${e.message}`));
+    await installClimalytixMocks(page, mocks);
+    await page.addInitScript((device) => {
+        localStorage.setItem('pp_consent_v1', JSON.stringify({ strict: true, functional: true, analytics: false, ts: Date.now(), version: 1 }));
+        localStorage.setItem('ppx_user_location', JSON.stringify(device));
+        localStorage.setItem('ppx_tour_completed', '1');
+    }, BOULDER);
+    await page.goto('/climalytix.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+        const s = window.__climalytix?.state;
+        return s && s.loading.length === 0 && s.map && s.field?.state !== 'loading' && s.map.drawn.heat;
+    }, null, { timeout: 60_000 });
+    await page.evaluate(() => document.querySelectorAll('.pp-consent-banner,.tour-overlay,.tour-tooltip').forEach((e) => e.remove()));
+    await page.selectOption('#cx-units', 'metric');
+    await page.locator('#cx-layer-airflow').uncheck();
+    return errors;
+}
+const state = (page) => page.evaluate(() => window.__climalytix.state);
+const detailIs = (page, want) => page.waitForFunction((w) => window.__climalytix.state.map.frame.detail?.state === w, want, { timeout: 30_000 });
+const nextFrame = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+/** Mean colour of an 8×8 block at a canvas point given as fractions of the stage. */
+const sampleAt = (page, fx, fy) => page.evaluate(([x, y]) => {
+    const c = document.getElementById('cx-map-canvas');
+    const d = c.getContext('2d').getImageData(Math.round(c.width * x), Math.round(c.height * y), 8, 8).data;
+    const sum = [0, 0, 0];
+    for (let i = 0; i < d.length; i += 4) { sum[0] += d[i]; sum[1] += d[i + 1]; sum[2] += d[i + 2]; }
+    return sum.map((v) => Math.round(v / 64));
+}, [fx, fy]);
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+/** Stage fraction (y) of a latitude, from the map's own view (equirectangular: linear in latitude). */
+const latFrac = async (page, lat) => {
+    const { view } = (await state(page)).map;                 // map-view.js scales(): ky = h / span
+    return 0.5 - (lat - view.lat) / view.span;
+};
+
+test('terrain detail draws the ridge into the temperature; off, it is GFS\'s smooth field again', async ({ page }) => {
+    const errors = await boot(page, { modelZ: MODEL_Z });
+    await detailIs(page, 'on');
+    await nextFrame(page);
+    let s = await state(page);
+    const d = s.map.frame.detail;
+    // A flat model surface has no relief to fit a lapse rate from.
+    expect(d.lapse.source).toBe('standard');
+    expect(d.lapse.gamma).toBe(-6.5);
+    // The plain is 500 m below the model surface, the crest 1 500 m above it.
+    expect(d.correction.max).toBeCloseTo(-6.5 * (MOCK_RIDGE.base - MODEL_Z) / 1000, 1);            // +3.25 K
+    const crestK = -6.5 * (MOCK_RIDGE.base + MOCK_RIDGE.rise - MODEL_Z) / 1000;                     // −9.75 K
+    expect(d.correction.min).toBeLessThan(crestK * 0.8);
+    expect(d.correction.min).toBeGreaterThanOrEqual(crestK - 0.05);
+    expect(s.map.drawn.detail).toBe(true);
+    await expect(page.locator('#cx-layer-tdetail')).toBeChecked();
+    await expect(page.locator('#cx-heat-detail')).toHaveAttribute('data-state', 'on');
+    await expect(page.locator('#cx-heat-detail')).toContainText('standard −6.5 K/km (too little relief in view)');
+    await expect(page.locator('#cx-heat-detail')).toContainText('corrections −');
+
+    // The ridge is IN the picture: the crest (40.0° N) against the plain 0.5° north of it.
+    const yCrest = await latFrac(page, MOCK_RIDGE.lat), yPlain = await latFrac(page, MOCK_RIDGE.lat + 0.5);
+    const onCrest = await sampleAt(page, 0.7, yCrest), onPlain = await sampleAt(page, 0.7, yPlain);
+    expect(dist(onCrest, onPlain)).toBeGreaterThan(40);
+
+    // The tooltip names both heights.
+    const box = await page.locator('#cx-map-canvas').boundingBox();
+    await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * yPlain);
+    await expect(page.locator('#cx-map-tip')).toContainText('GFS:');
+    await expect(page.locator('#cx-map-tip')).toContainText('surface');
+    await page.mouse.move(5, 5);
+
+    // NEGATIVE CONTROL: detail off ⇒ no ridge in the temperature.
+    await page.locator('#cx-layer-tdetail').uncheck();
+    await nextFrame(page);
+    s = await state(page);
+    expect(s.map.frame.detail.state).toBe('off');
+    expect(s.map.drawn.detail).toBe(false);
+    await expect(page.locator('#cx-heat-detail')).toContainText('Terrain detail off');
+    const offCrest = await sampleAt(page, 0.7, yCrest), offPlain = await sampleAt(page, 0.7, yPlain);
+    expect(dist(offCrest, offPlain)).toBeLessThan(dist(onCrest, onPlain) / 2);
+    // …and back on.
+    await page.locator('#cx-layer-tdetail').check();
+    await detailIs(page, 'on');
+    await nextFrame(page);
+    expect(dist(await sampleAt(page, 0.7, yCrest), onCrest)).toBeLessThan(4);
+    expect(errors).toEqual([]);
+});
+
+test('no MSLP in the run, or elevation down: GFS\'s own field is shown and the rail says which', async ({ page }) => {
+    let errors = await boot(page);                                   // the default mock run carries no MSLP
+    let s = await state(page);
+    expect(s.map.frame.detail.state).toBe('nofields');
+    expect(s.map.drawn.heat).toBe(true);
+    expect(s.map.drawn.detail).toBe(false);
+    await expect(page.locator('#cx-heat-detail')).toContainText('this run carries no surface pressure');
+    expect(errors).toEqual([]);
+
+    errors = await boot(page, { modelZ: MODEL_Z, dem: 'down' });
+    await detailIs(page, 'nodem');
+    s = await state(page);
+    expect(s.map.drawn.heat).toBe(true);
+    expect(s.map.drawn.detail).toBe(false);
+    await expect(page.locator('#cx-heat-detail')).toContainText('elevation tiles did not load');
+    expect(errors).toEqual([]);
+});
+
+test('terrain shadows: a low southern Sun shades the ridge\'s north flank; night draws nothing', async ({ page }) => {
+    const errors = await boot(page, { modelZ: MODEL_Z });
+    // Temperature stays ON: a dark veil only shows on a bright field (the fixture's ground is dark).
+    // An instant today with the Sun low in the south-east/south-west, and one at night.
+    const day0 = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+    let low = null, night = null;
+    for (let m = 0; m < 1440; m += 5) {
+        const p = solarPosition(new Date(day0 + m * 60_000), BOULDER.lat, BOULDER.lon);
+        if (!low && p.altitudeDeg > 3 && p.altitudeDeg < 7 && p.azimuthDeg > 100 && p.azimuthDeg < 260) low = day0 + m * 60_000;
+        if (!night && p.altitudeDeg < -10) night = day0 + m * 60_000;
+    }
+    expect(low).not.toBeNull();
+    expect(night).not.toBeNull();
+
+    await page.evaluate((t) => window.__climalytix.map.setTime(t), low);
+    const yNorth = await latFrac(page, MOCK_RIDGE.lat + 0.07);        // on the north flank
+    const before = await sampleAt(page, 0.7, yNorth);
+    await page.locator('#cx-layer-shadow').check();
+    await page.waitForFunction(() => window.__climalytix.state.map.drawn.shadow?.drawn, null, { timeout: 30_000 });
+    await nextFrame(page);
+    let s = await state(page);
+    expect(s.map.drawn.shadow.night).toBe(false);
+    expect(s.map.drawn.shadow.shaded).toBeGreaterThan(50);
+    expect(s.map.drawn.shadow.lit).toBeGreaterThan(s.map.drawn.shadow.shaded);       // the plain is lit
+    const shaded = await sampleAt(page, 0.7, yNorth);
+    expect(dist(shaded, before)).toBeGreaterThan(12);                                // the north flank went dark
+    const ySouth = await latFrac(page, MOCK_RIDGE.lat - 0.07);
+    await page.locator('#cx-layer-shadow').uncheck();
+    await nextFrame(page);
+    const southOff = await sampleAt(page, 0.7, ySouth);
+    await page.locator('#cx-layer-shadow').check();
+    await nextFrame(page);
+    expect(dist(await sampleAt(page, 0.7, ySouth), southOff)).toBeLessThan(4);       // the Sun-facing flank did not
+    await expect(page.locator('#cx-sun-status')).toContainText('terrain shades');
+
+    // NEGATIVE CONTROL: night is not a shadow.
+    await page.evaluate((t) => window.__climalytix.map.setTime(t), night);
+    await page.waitForFunction(() => window.__climalytix.state.map.drawn.shadow?.night === true, null, { timeout: 30_000 });
+    s = await state(page);
+    expect(s.map.drawn.shadow.drawn).toBe(false);
+    expect(s.map.drawn.shadow.shaded).toBe(0);
+    await expect(page.locator('#cx-sun-status')).toContainText('Night is not a shadow');
+    expect(errors).toEqual([]);
+});
+
+test('Sun path: today\'s arc against the terrain horizon; without elevation it says the horizon is missing', async ({ page }) => {
+    let errors = await boot(page, { modelZ: MODEL_Z });
+    await expect(page.locator('#cx-sun')).toBeHidden();
+    await page.locator('#cx-layer-sun').check();
+    await page.waitForFunction(() => window.__climalytix.state.sun?.horizon, null, { timeout: 30_000 });
+    await expect(page.locator('#cx-sun')).toBeVisible();
+    let s = await state(page);
+    expect(s.sun.state).toBe('ok');
+    expect(s.sun.open.sunMin).toBeGreaterThan(8 * 60);                // Boulder has 9–15 h of daylight all year
+    expect(s.sun.open.sunMin).toBeLessThan(15.5 * 60);
+    expect(s.sun.day.directMin).toBeLessThanOrEqual(s.sun.open.sunMin);
+    expect(s.sun.open.noon.az).toBeGreaterThan(170);                  // the Sun culminates due south
+    expect(s.sun.open.noon.az).toBeLessThan(190);
+    expect(Object.keys(s.sun.horizon.angles).length).toBe(180);
+    await expect(page.locator('#cx-sun-status')).toContainText('Sunrise');
+    await expect(page.locator('#cx-sun-status')).toContainText('Horizon from the map’s elevation grid');
+    const inked = await page.evaluate(() => {
+        const c = document.querySelector('#cx-sun canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let amber = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] > 220 && d[i + 1] > 150 && d[i + 2] < 120 && d[i + 3] > 200) amber++;
+        return amber;
+    });
+    expect(inked).toBeGreaterThan(300);                               // the Sun's arc is drawn
+    expect(errors).toEqual([]);
+
+    errors = await boot(page, { modelZ: MODEL_Z, dem: 'down' });
+    await page.locator('#cx-layer-sun').check();
+    await page.waitForFunction(() => window.__climalytix.state.sun?.state === 'nodem', null, { timeout: 30_000 });
+    s = await state(page);
+    expect(s.sun.horizon).toBeNull();
+    expect(s.sun.day.lostMin).toBe(0);                                // an unknown horizon takes nothing
+    await expect(page.locator('#cx-sun')).toBeVisible();
+    await expect(page.locator('#cx-sun-status')).toContainText('the terrain horizon is not drawn');
+    expect(errors).toEqual([]);
+});

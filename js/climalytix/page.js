@@ -29,6 +29,8 @@ import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadS
 import { fieldWindow } from './point-tile.js';
 import { tempControlState, overlayBadge } from './layer-state.js';
 import { keyPixels, keyFrac, keyTicks } from './heat-scale.js';
+import { lapseText } from './terrain-temp.js';
+import { horizonAt } from './sun-terrain.js';
 import { capePaint, CAPE_MIN_JKG, CAPE_FULL_JKG, OUTLOOK_COLORS, TRIGGER_MIN_MS, CIN_WEAK_JKG } from './convection.js';
 import { updraftPaint, W_FULL_MS } from './updraft.js';
 import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
@@ -577,7 +579,7 @@ function applyTempControl(info) {
     const ctl = tempControlState({ checked: $('#cx-layer-temp').checked, fieldState: info?.state, frameT: info?.t, note: info?.note });
     const changed = S.tempCtl?.mode !== ctl.mode;
     S.tempCtl = ctl;
-    for (const id of ['#cx-layer-iso', '#cx-layer-ext', '#cx-heat-alpha']) $(id).disabled = !ctl.subEnabled;
+    for (const id of ['#cx-layer-iso', '#cx-layer-ext', '#cx-layer-tdetail', '#cx-heat-alpha']) $(id).disabled = !ctl.subEnabled;
     for (const b of document.querySelectorAll('#cx-heat-scale [data-scale]')) b.disabled = !ctl.subEnabled;
     $('#cx-layer-temp').closest('.cx-layer').dataset.avail = ctl.mode;
     setRowBadge('#cx-layer-temp', ctl.badge);
@@ -640,7 +642,16 @@ function renderHeatRail(info) {
     const scaleNote = sc.mode === 'fit'
         ? `Colours fit to this run’s range here, ${fmtText('temp', sc.lo, S.units)} – ${fmtText('temp', sc.hi, S.units)} — compare places with Absolute.`
         : 'Colours on the absolute scale EarthView uses.';
-    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}`;
+    // A temperature DIFFERENCE in the reader's unit (a 1 K step is 1.8 °F).
+    const dT = (k) => { const v = fmt('temp', k, S.units).value - fmt('temp', 0, S.units).value; return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(0)}`; };
+    const d = info.detail;
+    const detailNote = !d || d.state === 'off' ? 'Terrain detail off: GFS’s own 25 km field, interpolated.'
+        : d.state === 'on' ? `Terrain detail: brought to the real ground with ${lapseText(d.lapse)}`
+            + (d.correction ? `; corrections ${dT(d.correction.min)} to ${dT(d.correction.max)} ${unitSym('temp')} in view.` : '.')
+        : d.state === 'nofields' ? 'Terrain detail unavailable: this run carries no surface pressure. GFS’s own field is shown.'
+        : d.state === 'nodem' ? 'Terrain detail unavailable: elevation tiles did not load. GFS’s own field is shown.'
+        : 'Terrain detail: loading elevation…';
+    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}<br><span id="cx-heat-detail" data-state="${esc(d?.state ?? 'off')}">${esc(detailNote)}</span>`;
     if (info.range) {
         const a = keyFrac(sc, info.range.min), b = keyFrac(sc, info.range.max);
         win.hidden = false;
@@ -754,11 +765,108 @@ function renderOroRail(info) {
         + `<br>Strongest forced descent: ${info.down ? `${esc(formatW(info.down.w, { feet }))} at ${where(info.down)}` : 'none'}.`;
 }
 
+/**
+ * The Sun at the site today (sun-terrain.js): its path against the terrain
+ * horizon on an azimuth × altitude chart, and the shadow count on the map.
+ * The chart is centred on the Sun's culmination (south in the northern
+ * hemisphere, north in the southern) so the path is one arc.
+ */
+function renderSunRail(info) {
+    const st = $('#cx-sun-status'), box = $('#cx-sun');
+    const wantPath = $('#cx-layer-sun').checked, wantShadow = $('#cx-layer-shadow').checked;
+    box.hidden = !wantPath || !info?.path;
+    st.hidden = !(wantPath || wantShadow);
+    if (st.hidden || !info || info.state === 'off') return;
+    st.dataset.state = info.state === 'ok' ? 'live' : info.state === 'nodem' ? 'down' : 'loading';
+    const hhmm = (ms) => (ms == null ? '—' : new Date(ms + S.utcOffsetS * 1000).toISOString().slice(11, 16));
+    const dur = (min) => `${Math.floor(min / 60)} h ${String(Math.round(min % 60)).padStart(2, '0')} min`;
+    const parts = [];
+    if (wantShadow) {
+        const sh = info.shadow;
+        parts.push(!sh ? (info.state === 'nodem' ? 'Elevation tiles unavailable — no shadows are drawn.' : 'Loading elevation for the shadows…')
+            : sh.night ? `<b>${esc(hhmm(info.timeMs))} local: the Sun is down.</b> Night is not a shadow — nothing is drawn.`
+            : `<b>${esc(hhmm(info.timeMs))} local, Sun ${sh.sun.alt.toFixed(0)}° up in the ${esc(compassWord(sh.sun.az))}:</b> terrain shades ${Math.round(100 * sh.shaded / Math.max(1, sh.shaded + sh.lit))} % of the view.`);
+    }
+    if (wantPath && info.path) {
+        const d = info.day, o = info.open;
+        if (o.polar === 'night') parts.push('The Sun does not rise at the site today.');
+        else {
+            parts.push(`Sunrise ${esc(hhmm(o.rise))}, sunset ${esc(hhmm(o.set))} local (flat horizon, ${esc(dur(o.sunMin))}); highest ${o.noon.alt.toFixed(0)}° at ${esc(hhmm(o.noon.t))}.`);
+            parts.push(!info.horizon ? (info.state === 'nodem' ? 'Elevation tiles unavailable — the terrain horizon is not drawn.' : 'Loading elevation for the terrain horizon…')
+                : d.directMin === 0 ? 'The terrain in view blocks the Sun all day at the site.'
+                : d.lostMin < 2 * d.stepMin ? 'The terrain in view does not block the Sun at the site today.'
+                : `Over the terrain the Sun is on the site from <b>${esc(hhmm(d.clearRise))}</b> to <b>${esc(hhmm(d.clearSet))}</b>: ${esc(dur(d.directMin))} of direct sun, ${esc(dur(d.lostMin))} taken by the terrain.`);
+            if (info.horizon) parts.push(`Horizon from the map’s elevation grid (~${info.resM >= 1000 ? `${(info.resM / 1000).toFixed(1)} km` : `${Math.round(info.resM)} m`} nodes), seen out to at least ${Math.round(info.reachKm)} km — a ridge beyond the view is not counted; zoom out to include it. Times ± ${d.stepMin} min.`);
+        }
+        drawSunChart(info, hhmm);
+    }
+    st.innerHTML = parts.join('<br>');
+}
+
+const compassWord = (az) => ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][Math.round((((az % 360) + 360) % 360) / 45) % 8];
+
+function drawSunChart(info, hhmm) {
+    const c = $('#cx-sun canvas'), g = c.getContext('2d');
+    const W = c.width, H = c.height, L = 34, R = 8, T = 10, B = 28;
+    const centre = info.open.noon.az > 90 && info.open.noon.az < 270 ? 180 : 0;      // where the Sun culminates
+    const rel = (az) => ((az - centre + 540) % 360) - 180;                           // −180…180 about the centre
+    const span = 150;
+    const hMax = info.horizon ? Math.max(...info.horizon.angles) : 0;
+    const top = Math.max(20, Math.ceil((Math.max(info.open.noon.alt, hMax) + 6) / 10) * 10);
+    const X = (az) => L + ((rel(az) + span) / (2 * span)) * (W - L - R), Y = (alt) => H - B - (Math.max(0, alt) / top) * (H - T - B);
+    g.clearRect(0, 0, W, H);
+    g.font = '11px system-ui, sans-serif';
+    g.strokeStyle = 'rgba(232,241,248,.14)'; g.fillStyle = 'rgba(232,241,248,.6)'; g.lineWidth = 1; g.textAlign = 'right'; g.textBaseline = 'middle';
+    for (let a = 0; a <= top; a += top > 50 ? 20 : 10) { g.beginPath(); g.moveTo(L, Y(a)); g.lineTo(W - R, Y(a)); g.stroke(); g.fillText(`${a}°`, L - 5, Y(a)); }
+    g.textAlign = 'center'; g.textBaseline = 'top';
+    for (const [lab, off] of centre === 180 ? [['E', -90], ['SE', -45], ['S', 0], ['SW', 45], ['W', 90]] : [['W', -90], ['NW', -45], ['N', 0], ['NE', 45], ['E', 90]]) {
+        g.fillText(lab, L + ((off + span) / (2 * span)) * (W - L - R), H - B + 14);
+    }
+    // The terrain horizon, as a silhouette.
+    if (info.horizon) {
+        g.beginPath(); g.moveTo(L, Y(0));
+        for (let r = -span; r <= span; r += 1) g.lineTo(L + ((r + span) / (2 * span)) * (W - L - R), Y(horizonAt(info.horizon, centre + r)));
+        g.lineTo(W - R, Y(0)); g.closePath();
+        g.fillStyle = 'rgba(96,118,140,.55)'; g.fill();
+        g.strokeStyle = 'rgba(190,210,228,.8)'; g.lineWidth = 1.2; g.stroke();
+    }
+    // The Sun's path: solid where it clears the terrain, faint where a ridge is in the way.
+    const up = info.path.filter((p) => p.alt > 0 && Math.abs(rel(p.az)) <= span);
+    for (const clear of [false, true]) {
+        g.beginPath();
+        let pen = false;
+        for (const p of up) {
+            const isClear = p.alt > horizonAt(info.horizon, p.az);
+            if (isClear !== clear) { pen = false; continue; }
+            if (pen) g.lineTo(X(p.az), Y(p.alt)); else g.moveTo(X(p.az), Y(p.alt));
+            pen = true;
+        }
+        g.strokeStyle = clear ? '#ffc23d' : 'rgba(255,194,61,.35)'; g.lineWidth = clear ? 2.4 : 1.6; g.setLineDash(clear ? [] : [3, 3]); g.stroke();
+    }
+    g.setLineDash([]);
+    // Local hours along the path.
+    g.fillStyle = 'rgba(232,241,248,.75)'; g.textBaseline = 'bottom';
+    for (const p of up) {
+        const local = new Date(p.t + S.utcOffsetS * 1000);
+        if (local.getUTCMinutes() !== 0 || local.getUTCHours() % 2) continue;
+        g.beginPath(); g.arc(X(p.az), Y(p.alt), 2, 0, Math.PI * 2); g.fill();
+        g.fillText(String(local.getUTCHours()), X(p.az), Y(p.alt) - 4);
+    }
+    // The Sun at the instant on the timeline.
+    if (info.now.alt > 0 && Math.abs(rel(info.now.az)) <= span) {
+        const blocked = info.now.alt <= horizonAt(info.horizon, info.now.az);
+        g.beginPath(); g.arc(X(info.now.az), Y(info.now.alt), 6, 0, Math.PI * 2);
+        g.fillStyle = blocked ? 'rgba(255,194,61,.35)' : '#ffd66b'; g.fill();
+        g.strokeStyle = '#04101e'; g.lineWidth = 1.5; g.stroke();
+    }
+    $('#cx-sun-caption').textContent = `Today’s Sun at the site, by compass direction and height above the horizon; numbers are local hours. Grey: the terrain horizon. Dot: ${hhmm(info.timeMs)} local${info.now.alt > 0 ? '' : ' (the Sun is down)'}.`;
+}
+
 /** Rail status for the terrain layers (elevation contours, sun exposure). */
 function renderDemRail(info) {
     const st = $('#cx-dem-status');
     const elev = $('#cx-layer-elev').checked, exp = $('#cx-layer-exp').checked, oro = $('#cx-layer-oro').checked;
-    if (!elev && !exp && !oro && !$('#cx-layer-slope').checked) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
+    if (!elev && !exp && !oro && !$('#cx-layer-slope').checked && !$('#cx-layer-shadow').checked && !$('#cx-layer-sun').checked) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
     st.dataset.state = info?.state || 'loading';
     if (!info || info.state === 'idle' || info.state === 'loading') { st.textContent = info?.note || 'Loading elevation…'; return; }
     if (info.state === 'down') { st.textContent = info.note; return; }
@@ -823,6 +931,7 @@ function mountLocationMap() {
         onWind: renderFlowRail,
         onAq: renderAqRail,
         onDem: renderDemRail,
+        onSun: renderSunRail,
         onOro: renderOroRail,
         onSlope: renderSlopeRail,
         onThermals: renderThermalRail,
@@ -928,6 +1037,9 @@ function mountLocationMap() {
     syncMapKey();
     rememberGroups();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
+    $('#cx-layer-tdetail').addEventListener('change', (ev) => S.map.setLayer('tempdetail', ev.target.checked));
+    $('#cx-layer-shadow').addEventListener('change', (ev) => { S.map.setLayer('shadow', ev.target.checked); renderDemRail(S.map.state.dem); });
+    $('#cx-layer-sun').addEventListener('change', (ev) => { S.map.setLayer('sunpath', ev.target.checked); renderDemRail(S.map.state.dem); });
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
     $('#cx-heat-scale').addEventListener('click', (ev) => {
@@ -1229,6 +1341,7 @@ export function boot() {
                 map: S.map?.state ?? null,
                 field: S.field && { state: S.field.state, note: S.field.note },
                 tempControl: S.tempCtl ?? null,
+                sun: S.map?.sun ?? null,
                 rose: S.rose && { mode: S.roseMode, n: S.rose.n, calm: S.rose.calm, freq: S.rose.freq, mean: S.rose.mean,
                                   prevailing: prevailing(S.rose), dirtiest: S.rose.dirtiest ?? null, cleanest: S.rose.cleanest ?? null },
                 aq: S.aq && { state: S.aq.state, note: S.aq.note },

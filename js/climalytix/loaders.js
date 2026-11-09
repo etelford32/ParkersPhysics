@@ -127,7 +127,15 @@ export const LOADERS = Object.freeze({
  */
 export async function loadField(site, { signal, win = null, fresh = false } = {}) {
     try {
-        const j = await getJson(fieldPath({ ...site, ...(win || {}) }), signal, { fresh });
+        // The two surface pressures ride with the temperature (same byte ranges — a cell
+        // carries every variable): terrain-temp.js derives the model's surface height from them.
+        let j = null;
+        try { j = await getJson(fieldPath({ ...site, ...(win || {}), vars: ['tempC', 'mslHpa', 'psfcHpa'] }), signal, { fresh }); } catch { j = null; }
+        // A run ingested before psfcHpa answers "no variable …" (and a route that does not know the
+        // variable refuses the request): the temperature alone still draws, without terrain detail.
+        if (!j || (!j.values && (j.reasons || []).some((r) => /no variable/.test(String(r))))) {
+            j = await getJson(fieldPath({ ...site, ...(win || {}) }), signal, { fresh });
+        }
         if (!j?.values) {
             const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
             return { state: 'down', body: null, note: `No heat map: ${why}. Nothing is substituted for our archive.` };
