@@ -140,8 +140,8 @@ const sample = (page) => page.evaluate(() => window.__lpVehicle3d._sampleFrame()
 // Plant a small sphere whose fragments are NaN (0/0 through a uniform, so no
 // compiler can fold it) or +Inf (1e30², past every float format), in front of
 // the vehicle. This is the reported failure's input, made deterministic.
-async function plant(page, mode) {
-    await page.evaluate(async (mode) => {
+async function plant(page, mode, { sampleNow = false } = {}) {
+    return page.evaluate(async ({ mode, sampleNow }) => {
         const THREE = await import('three');
         const a = window.__lpVehicle3d;
         const mat = new THREE.ShaderMaterial({
@@ -166,7 +166,18 @@ async function plant(page, mode) {
         const t = new THREE.Vector3(...a.renderStats.target);
         m.position.copy(a.camera.position).lerp(t, 0.3);
         a.scene.add(m);
-    }, mode);
+        if (!sampleNow) return null;
+        // Plant, draw, measure and remove in ONE task: the page's health
+        // monitor runs inside every frame and steps a black post chain down
+        // after two dead checks 1.5 s apart. Waiting on rAF frames between
+        // planting and sampling gave it that window on a slow CI runner —
+        // it stepped to the direct render and the "black" control measured
+        // a lit frame (0.0008 dead, the speck alone). One synchronous frame
+        // allows at most one check.
+        const s = a._sampleFrame();
+        m.removeFromParent();
+        return s;
+    }, { mode, sampleNow });
 }
 const unplant = (page) => page.evaluate(() => {
     const s = window.__lpVehicle3d.scene;
@@ -212,11 +223,12 @@ test.describe('launch-planner 3D stage — render health', () => {
         // black rectangle. If this ever stops going black, the plant no
         // longer reproduces the failure and the checks above prove nothing.
         await page.evaluate(() => window.__lpVehicle3d._setPostSanitize(false));
-        await plant(page, 'nan');
-        await frames(page, 2);
-        const bad = await sample(page);
-        await unplant(page);
+        const bad = await plant(page, 'nan', { sampleNow: true });
         await page.evaluate(() => window.__lpVehicle3d._setPostSanitize(true));
+        // Still on the rung it booted with, or the control measured the
+        // direct render and proves nothing.
+        const h2 = await page.evaluate(() => window.__lpVehicle3d.renderHealth);
+        expect(h2.quality, `steps ${JSON.stringify(h2.steps)}`).toBe(h0.quality);
         expect(bad.dead, `negative control grid ${JSON.stringify(bad.grid)}`).toBeGreaterThan(BLACK_MIN_DEAD);
     });
 
