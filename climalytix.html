@@ -128,9 +128,9 @@ body {
 .cx-cv-strip { display:flex; gap:2px; margin:.3rem 0; }
 .cx-cv-cell { flex:1 1 0; min-width:0; overflow:hidden; text-align:center; font-size:.6rem; padding:.15rem 0; border-radius:2px; background:#1c2433; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
 .cx-cv-cell b { font-weight:500; }
-.cx-cv-cell[data-cat="capped"] { background:rgba(133,148,173,.45); color:#e8edf5; }
-.cx-cv-cell[data-cat="possible"] { background:rgba(250,189,56,.6); color:#1a1405; }
-.cx-cv-cell[data-cat="likely"] { background:rgba(235,56,61,.7); color:#fff; }
+.cx-cv-cell[data-cat="capped"] { background:#7088c8; color:#0b1220; }
+.cx-cv-cell[data-cat="possible"] { background:#c4860a; color:#140c00; }
+.cx-cv-cell[data-cat="likely"] { background:#d63a8a; color:#fff; }
 #cx-up-key .cx-up-bar { height:12px; border-radius:3px; background:#888; }
 #cx-up-key .cx-exp-ticks { display:flex; justify-content:space-between; font-size:.62rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
 .cx-vm { width:100%; border-collapse:collapse; font-size:.72rem; margin:.25rem 0; }
@@ -174,6 +174,13 @@ body {
 #cx-map-scale { position:absolute; left:12px; bottom:34px; font-size:.68rem; color:var(--cx-ink);
     text-shadow:0 1px 2px #000; pointer-events:none; }
 #cx-map-scale i { display:block; height:6px; border:2px solid var(--cx-ink); border-top:0; margin-bottom:2px; }
+/* The active fill's key, on the map (V3) — the rail's own key element, moved here. */
+#cx-map-key { position:absolute; left:10px; top:10px; width:min(250px, calc(100% - 20px)); padding:8px 10px 6px;
+    border-radius:10px; background:rgba(6,12,22,.78); border:1px solid rgba(255,255,255,.08); backdrop-filter:blur(8px);
+    box-shadow:0 6px 18px rgba(0,0,0,.35); }
+#cx-map-key[hidden] { display:none; }
+#cx-map-key .cx-mk-title { font-size:.66rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--cx-ink); margin-bottom:5px; }
+#cx-map-key .cx-mk-body > * { margin:0; }
 /* Sources: one quiet line on the map; the full credits open on demand. */
 #cx-map-attr { position:absolute; left:8px; bottom:6px; max-width:calc(100% - 16px); font-size:.62rem; color:var(--cx-muted); }
 #cx-map-attr summary { cursor:pointer; list-style:none; display:inline-block; padding:2px 8px; border-radius:999px;
@@ -413,6 +420,7 @@ body {
     <div id="cx-map-stage">
       <canvas id="cx-map-canvas" tabindex="0" aria-label="Location map. Drag to pan, scroll or pinch to zoom; arrow keys pan, plus and minus zoom, 0 recentres."></canvas>
       <canvas id="cx-map-flow" aria-hidden="true"></canvas>
+      <div id="cx-map-key" hidden><div class="cx-mk-title"></div><div class="cx-mk-body"></div></div>
       <div id="cx-map-tip" hidden></div>
       <div id="cx-map-scale"><i></i><span></span></div>
       <div id="cx-map-ctl" aria-label="Map controls">

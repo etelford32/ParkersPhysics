@@ -273,7 +273,7 @@ export function mountMap(root, deps) {
     /** Boxes of the DOM drawn over the canvas, in canvas CSS px. */
     function furniture() {
         const c = canvas.getBoundingClientRect();
-        return ['#cx-map-ctl', '#cx-map-attr', '#cx-map-scale'].map((sel) => root.querySelector(sel))
+        return ['#cx-map-ctl', '#cx-map-attr', '#cx-map-scale', '#cx-map-key'].map((sel) => root.querySelector(sel))
             .filter((el) => el && el.offsetParent)
             .map((el) => { const r = el.getBoundingClientRect(); return { x0: r.left - c.left, y0: r.top - c.top, x1: r.right - c.left, y1: r.bottom - c.top }; });
     }

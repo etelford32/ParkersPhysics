@@ -109,11 +109,17 @@ export function capePaint(cape, data, o) {
     data[o + 3] = Math.round(255 * (0.2 + 0.45 * f));
 }
 /** Outlook colours (category index → rgb 0‥1, alpha 0‥1). 'none' is transparent. */
+// Validated with the dataviz skill's palette checker on the dimmed map ground
+// (#1e242c, dark band, ALL pairs — on a map any two categories can touch):
+// steel blue #7088c8 · amber #c4860a · magenta #d63a8a, worst CVD ΔE 10.0
+// (deutan, blue↔magenta), normal-vision 22.3. The first version (slate grey,
+// light amber, red) FAILED: grey read as no colour, the amber was too light
+// for a dark ground, and amber↔red collapsed under deuteranopia once darkened.
 export const OUTLOOK_COLORS = Object.freeze({
     none: null,
-    capped: [[0.52, 0.58, 0.68], 0.42],
-    possible: [[0.98, 0.74, 0.22], 0.55],
-    likely: [[0.92, 0.22, 0.24], 0.62],
+    capped: [[0.4392, 0.5333, 0.7843], 0.5],
+    possible: [[0.7686, 0.5255, 0.0392], 0.6],
+    likely: [[0.8392, 0.2275, 0.5412], 0.66],
 });
 /** Categorical painter: `v` is the CATEGORIES index (a flat band — never interpolated). */
 export function outlookPaint(v, data, o) {

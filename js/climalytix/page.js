@@ -250,6 +250,38 @@ function requestUpdraft() {
     });
 }
 
+/**
+ * ONE KEY PER FILL, ON THE MAP (visual pass V3). The active fill's key is
+ * the SAME element the rail built — moved, not copied, so the map shows
+ * exactly the bytes the rail used to — into #cx-map-key while its layer is on,
+ * and put back where it came from (a comment placeholder marks the spot) when
+ * it is not. Fills are one-at-a-time, so at most one key is on the map.
+ */
+const MAP_KEYS = [
+    { box: '#cx-layer-temp', key: '#cx-heat-key', title: () => `Temperature · 2 m · ${unitSym('temp')}` },
+    { box: '#cx-layer-aq', key: '#cx-aq-key', title: () => 'PM2.5 · US AQI category' },
+    { box: '#cx-layer-exp', key: '#cx-exp-key', title: () => 'Sun exposure · vs flat ground' },
+    { box: '#cx-layer-oro', key: '#cx-oro-key', title: () => 'Orographic lift · surface' },
+    { box: '#cx-layer-th', key: '#cx-th-key', title: () => 'Thermal strength · w*' },
+    { box: '#cx-layer-up', key: '#cx-up-key', title: () => 'Vertical motion · GFS 25 km mean' },
+    { box: '#cx-layer-cv', key: '#cx-cv-key', title: () => 'Storm ingredients' },
+];
+const keyHomes = new Map();
+function syncMapKey() {
+    const host = $('#cx-map-key'), body = host?.querySelector('.cx-mk-body');
+    if (!body) return;
+    const active = MAP_KEYS.find((k) => $(k.box)?.checked && $(k.key));
+    for (const k of MAP_KEYS) {
+        const el = $(k.key);
+        if (!el) continue;
+        if (!keyHomes.has(k.key)) { const mark = document.createComment(`key ${k.key}`); el.before(mark); keyHomes.set(k.key, mark); }
+        if (k === active) { if (el.parentElement !== body) body.append(el); }
+        else if (el.parentElement === body) keyHomes.get(k.key).after(el);
+    }
+    host.hidden = !active;
+    if (active) host.querySelector('.cx-mk-title').textContent = active.title();
+}
+
 /** The convection ingredients are fetched on FIRST enable of the layer, once per site. */
 function requestConvection() {
     if (!$('#cx-layer-cv')?.checked || !S.site || !S.map || S.convectionSite === S.site) return;
@@ -732,6 +764,7 @@ function mountLocationMap() {
         $('#cx-layer-mon').disabled = !aq;
         $('#cx-aq-key').hidden = !aq;
         renderAqRail(S.map.state.aq);
+        syncMapKey();
     };
     $('#cx-layer-temp').addEventListener('change', (ev) => showField('temp', ev.target.checked));
     $('#cx-layer-aq').addEventListener('change', (ev) => showField('aq', ev.target.checked));
@@ -784,6 +817,7 @@ function mountLocationMap() {
     paintThermalKey();
     paintUpdraftKey();
     paintConvectionKey();
+    syncMapKey();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));

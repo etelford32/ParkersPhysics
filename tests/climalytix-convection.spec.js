@@ -103,8 +103,8 @@ test('midday: likely at the site, CAPPED 2° north under more CAPE — NEGATIVE 
         for (let i = 0; i < d.length; i += 16) {
             for (const [k, rgb] of Object.entries(cols)) {
                 // A fill composited over the (dimmed, desaturated) data ground keeps its HUE, not its
-                // brightness — test the red signature relative to the other channels.
-                if (k === 'likely' && d[i] > 100 && d[i] > 1.8 * d[i + 1] && d[i] > 1.6 * d[i + 2]) hit[k]++;
+                // brightness — test the magenta signature relative to the other channels.
+                if (k === 'likely' && d[i] > 100 && d[i] > 1.8 * d[i + 1] && d[i + 2] > 1.4 * d[i + 1]) hit[k]++;   // magenta: R and B well above G
             }
         }
         return hit;
