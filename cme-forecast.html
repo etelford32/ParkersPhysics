@@ -196,6 +196,29 @@ body {
 .cmef-chip.is-edge { background:transparent; color:var(--cmef-faint); }
 .cmef-chip.is-edge em { font-style:normal; }
 .cmef-chip.is-edge i { width:5px; height:2px; border-radius:1px; box-shadow:none; opacity:.75; }
+.cmef-chip.is-screened { background:transparent; color:var(--cmef-muted); outline:1px dashed rgba(144,164,200,.28); outline-offset:-1px; }
+.cmef-chip.is-screened i { background:transparent; box-shadow:none; border:1px solid var(--cmef-muted); }
+.cmef-chip.is-screened b { color:var(--cmef-faint); font-weight:600; }
+/* Daily layer in the day-number row: locked eruption odds (violet — the
+   outlook strip's own colour, never a chip colour) and the run record. */
+.cmef-day-num { display:flex; align-items:center; gap:3px; }
+.cmef-day-meta { display:flex; align-items:center; gap:3px; margin-left:auto; min-width:0; }
+.cmef-odds { font:600 .54rem/1 var(--cmef-mono); letter-spacing:0; color:#c792ea; opacity:.9; white-space:nowrap; }
+.cmef-odds.is-hit { color:var(--cmef-mint); }
+.cmef-run { flex:0 0 auto; width:4px; height:4px; border-radius:50%; }
+.cmef-run.is-checked { background:var(--cmef-mint); opacity:.55; }
+.cmef-run.is-missed { width:auto; height:auto; border-radius:0; font:800 .58rem/1 var(--cmef-mono); color:var(--cmef-amber); }
+.cmef-day.is-missed { background:repeating-linear-gradient(135deg,rgba(255,180,84,.07) 0 4px,transparent 4px 8px); }
+.cmef-day-event.is-screened { border-style:dashed; }
+.cmef-day-event.is-screened .cmef-day-event-top strong { color:var(--cmef-muted); }
+.cmef-state.screened { color:var(--cmef-muted); border-color:var(--cmef-line-hi); }
+.cmef-day-quiet b { color:var(--cmef-text); font-weight:700; }
+.cmef-day-quiet.is-note { margin-top:6px; padding:6px 9px; }
+.cmef-day-quiet.is-note p:first-child { margin-top:0; }
+.cmef-feed-dot[data-mode="stale"] { background:var(--cmef-amber); box-shadow:0 0 8px var(--cmef-amber); }
+.cmef-cal-legend i.screened { background:transparent; border:1px solid var(--cmef-muted); }
+.cmef-cal-legend i.odds { width:auto; height:auto; border-radius:0; font:600 .56rem/1 var(--cmef-mono); font-style:normal; color:#c792ea; }
+.cmef-cal-legend i.checked { width:4px; height:4px; background:var(--cmef-mint); opacity:.55; }
 .cmef-chip-more { font:700 .56rem/1.3 var(--cmef-mono); color:var(--cmef-faint); padding-left:3px; }
 /* Eruption outlook strip. Violet = the outlook's own hue (amber / blue /
    mint are ledger statuses above it); shade ∝ √P, set per cell as --ol-shade. */
@@ -454,6 +477,9 @@ body {
                     <span><i class="window"></i>Window open</span>
                     <span><i class="verified"></i>Verified at L1</span>
                     <span><i class="edge"></i>Window edge</span>
+                    <span><i class="screened"></i>Glancing (baseline ETA)</span>
+                    <span><i class="odds">8%</i>Eruption odds, locked</span>
+                    <span><i class="checked"></i>Ledger checked</span>
                     <span class="cmef-lock-note">Every window here comes from the immutable issue-time ledger.</span>
                 </div>
             </div>

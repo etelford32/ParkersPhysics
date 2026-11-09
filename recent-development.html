@@ -21,9 +21,9 @@
   Everything outside the sentinels (styles, nav mount, footer) is hand-maintained.
 -->
 <!-- RD:HEAD:BEGIN -->
-<meta name="description" content="Every simulation, data set, layer and fix shipped on Parkers Physics — 46 updates, logged sprint by sprint, last updated Nov 9, 2026, each with a link to open it.">
-<meta property="og:description" content="What we shipped, sprint by sprint. Latest: Homepage: a daylight theme that works, and a showcase of the simulations.">
-<meta name="twitter:description" content="What we shipped, sprint by sprint. Latest: Homepage: a daylight theme that works, and a showcase of the simulations.">
+<meta name="description" content="Every simulation, data set, layer and fix shipped on Parkers Physics — 47 updates, logged sprint by sprint, last updated Nov 9, 2026, each with a link to open it.">
+<meta property="og:description" content="What we shipped, sprint by sprint. Latest: CME forecast calendar: every day now says what was checked.">
+<meta name="twitter:description" content="What we shipped, sprint by sprint. Latest: CME forecast calendar: every day now says what was checked.">
 <!-- RD:HEAD:END -->
 <link rel="alternate" type="application/rss+xml" title="Parkers Physics — Recent Development" href="/recent-development.xml">
 <meta name="theme-color" content="#03010e">
@@ -59,7 +59,7 @@
   <p class="sim-hero-sub">Everything we have shipped, sprint by sprint: new simulations, data sets, layers inside existing labs, and the fixes &mdash; including what was wrong. Every entry links straight to where you can see it.</p>
   <p class="rd-stats" id="rd-stats">
 <!-- RD:STATS:BEGIN -->
-<span><b>46</b> updates logged</span><span class="rd-sep" aria-hidden="true">·</span><span><b>5</b> sprints</span><span class="rd-sep" aria-hidden="true">·</span><span>Last update <b>Nov 9, 2026</b></span><span class="rd-sep" aria-hidden="true">·</span><span>Now: <a href="#sprint-2026-11-solar-system">Solar system, the Moon, and Earth hazards</a></span><span class="rd-sep" aria-hidden="true">·</span><span><a href="recent-development.xml" class="rd-rss">RSS feed</a></span>
+<span><b>47</b> updates logged</span><span class="rd-sep" aria-hidden="true">·</span><span><b>5</b> sprints</span><span class="rd-sep" aria-hidden="true">·</span><span>Last update <b>Nov 9, 2026</b></span><span class="rd-sep" aria-hidden="true">·</span><span>Now: <a href="#sprint-2026-11-solar-system">Solar system, the Moon, and Earth hazards</a></span><span class="rd-sep" aria-hidden="true">·</span><span><a href="recent-development.xml" class="rd-rss">RSS feed</a></span>
 <!-- RD:STATS:END -->
 </p>
 </header>
@@ -120,8 +120,18 @@
   <p class="rd-sprint-range">Since Nov 3, 2026<span class="rd-live">In progress</span></p>
   <h2 class="rd-sprint-title" id="sprint-2026-11-solar-system">Solar system, the Moon, and Earth hazards</h2>
   <p class="rd-sprint-goal">Put real ephemerides under every body on the site, give the Moon a measured interior and exosphere, and open an Earth-hazards lab — while moving bulk data out of the database.</p>
-  <div class="rd-sprint-counts"><span class="rd-count"><span class="rd-kind rd-kind-simulation">Simulation</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-layer">Layer</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-dataset">Data</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-improvement">Improvement</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-fix">Fix</span><b>3</b></span><span class="rd-count"><span class="rd-kind rd-kind-platform">Platform</span><b>1</b></span></div>
-</header><div class="rd-entries"><article class="rd-entry" id="home-showcase-light-hero" data-kind="improvement" data-section="platform">
+  <div class="rd-sprint-counts"><span class="rd-count"><span class="rd-kind rd-kind-simulation">Simulation</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-layer">Layer</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-dataset">Data</span><b>1</b></span><span class="rd-count"><span class="rd-kind rd-kind-improvement">Improvement</span><b>2</b></span><span class="rd-count"><span class="rd-kind rd-kind-fix">Fix</span><b>4</b></span><span class="rd-count"><span class="rd-kind rd-kind-platform">Platform</span><b>1</b></span></div>
+</header><div class="rd-entries"><article class="rd-entry" id="cme-calendar-daily-ledger" data-kind="fix" data-section="space-weather">
+  <div class="rd-entry-date"><time datetime="2026-11-09">Nov 9</time></div>
+  <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 2.8c0 4.6 10 5.6 10 9.2s-10 4.6-10 9.2"/><path d="M17 2.8c0 4.6-10 5.6-10 9.2s10 4.6 10 9.2"/><path d="M8.8 8h6.4M8.8 16h6.4"/></svg></div>
+  <div class="rd-entry-body">
+    <div class="rd-entry-meta"><span class="rd-kind rd-kind-fix">Fix</span><span class="rd-section">Space Weather</span><span class="sim-badge sim-badge-new">NEW</span></div>
+    <h3 class="rd-entry-title"><a href="#cme-calendar-daily-ledger" class="rd-anchor" title="Link to this update">CME forecast calendar: every day now says what was checked</a></h3>
+    <p class="rd-entry-summary">The calendar had shown nothing newer than mid-October and could not say whether that was a quiet Sun or a stalled pipeline. It was a quiet Sun — and each day now carries the record that proves it, alongside eruption odds that had been locking at 0 % by mistake.</p>
+    <details class="rd-details"><summary>What changed <span class="rd-dim">(6)</span></summary><ul><li>The header states when the daily forecast run last happened and what it found (&quot;44 CMEs screened, 2 Earth-relevant, none Earth-directed&quot;), and turns amber if a run is more than a day late. It used to show the time you loaded the page.</li><li>Each day cell shows the locked eruption odds for that day and a mark for whether the run happened; a day with no run on record is hatched as a gap rather than left looking quiet.</li><li>Glancing CMEs — aimed just outside the cone our flux-rope engine forecasts — now appear as hollow markers with the drag-model or WSA-ENLIL arrival time, labelled as a baseline and never as our forecast. Three since mid-October had been invisible.</li><li>Correction: NOAA publishes a new day&#39;s sunspot regions hours before it fills in their flare probabilities, so the 06:30 UT outlook read 0 % for every region on 9 of its first 13 days — including a region NOAA rated 60 % for M-class flares. The outlook now carries the previous day&#39;s odds until the new ones are published, and says so. Past issues stay as they were locked.</li><li>The ledger tape lists the newest resolved forecasts first; it had been pinned to the oldest ones, from August.</li><li>A daily automated check of the production ledger now fails if the run did not happen.</li></ul></details>
+    <div class="rd-links"><a class="rd-open rd-open-primary" href="cme-forecast.html">Open CME Forecast <span aria-hidden="true">&rarr;</span></a></div>
+  </div>
+</article><article class="rd-entry" id="home-showcase-light-hero" data-kind="improvement" data-section="platform">
   <div class="rd-entry-date"><time datetime="2026-11-09">Nov 9</time></div>
   <div class="rd-entry-icon" aria-hidden="true"><svg class="pp-glyph" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg></div>
   <div class="rd-entry-body">

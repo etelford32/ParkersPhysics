@@ -1,0 +1,43 @@
+name: cme-ledger-daily
+
+# Is the CME forecast calendar being fed? Once a day, after the 06:30 UT
+# validation-rerun cron, read production's /api/cme/skill and fail unless:
+#   · the cron ran within 26 h (pipeline_heartbeat 'cme_ledger'),
+#   · it is not failing,
+#   · today's eruption outlook is locked and covers the days ahead.
+# A quiet Sun passes — no CMEs is a healthy answer; no RUN is not.
+#
+# Why this exists (2026-11-09): the calendar showed nothing newer than
+# mid-October for four weeks. The cron was healthy and the Sun was quiet, but
+# nothing could say so — the route stamped `updated` with the request time and
+# a run that locked nothing left no trace. The rules live in
+# js/cme-ledger-status.js (node-gated: tests/cme-ledger-status.mjs, which also
+# pins this schedule against vercel.json).
+
+on:
+  schedule:
+    - cron: '40 7 * * *'     # 70 min after the 06:30 UT cron
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Deployment to probe'
+        required: false
+        default: 'https://www.parkersphysics.com'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Production ledger is current
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: rules gate (hermetic)
+        run: node tests/cme-ledger-status.mjs
+      - name: probe production
+        run: node scripts/check-cme-ledger.mjs --base "${{ github.event.inputs.base || 'https://www.parkersphysics.com' }}"

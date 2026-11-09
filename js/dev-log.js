@@ -130,6 +130,21 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'cme-calendar-daily-ledger', date: '2026-11-09', pr: null,
+      title: 'CME forecast calendar: every day now says what was checked', kind: 'fix',
+      section: 'space-weather', icon: 'flux-rope',
+      summary: 'The calendar had shown nothing newer than mid-October and could not say whether that was a quiet Sun '
+             + 'or a stalled pipeline. It was a quiet Sun — and each day now carries the record that proves it, '
+             + 'alongside eruption odds that had been locking at 0 % by mistake.',
+      highlights: [
+          'The header states when the daily forecast run last happened and what it found ("44 CMEs screened, 2 Earth-relevant, none Earth-directed"), and turns amber if a run is more than a day late. It used to show the time you loaded the page.',
+          'Each day cell shows the locked eruption odds for that day and a mark for whether the run happened; a day with no run on record is hatched as a gap rather than left looking quiet.',
+          'Glancing CMEs — aimed just outside the cone our flux-rope engine forecasts — now appear as hollow markers with the drag-model or WSA-ENLIL arrival time, labelled as a baseline and never as our forecast. Three since mid-October had been invisible.',
+          'Correction: NOAA publishes a new day\'s sunspot regions hours before it fills in their flare probabilities, so the 06:30 UT outlook read 0 % for every region on 9 of its first 13 days — including a region NOAA rated 60 % for M-class flares. The outlook now carries the previous day\'s odds until the new ones are published, and says so. Past issues stay as they were locked.',
+          'The ledger tape lists the newest resolved forecasts first; it had been pinned to the oldest ones, from August.',
+          'A daily automated check of the production ledger now fails if the run did not happen.',
+      ],
+      links: [{ href: 'cme-forecast.html' }] },
     { id: 'home-showcase-light-hero', date: '2026-11-09', pr: null,
       title: 'Homepage: a daylight theme that works, and a showcase of the simulations', kind: 'improvement',
       section: 'platform', icon: 'target',

@@ -222,5 +222,49 @@ check('top region attributed', centre.days[2].topRegions[0].region === '14321');
         real.days.map((d) => d.pArrival.toFixed(3)).join(' '));
 }
 
+// ── SWPC's zero-filled newest day (production, 2026-11-09) ───────────────────
+{
+    const { carryForwardProbabilities } = await import('../js/cme-outlook.js');
+    const { readFileSync } = await import('node:fs');
+    const fx = JSON.parse(readFileSync(new URL('./fixtures/noaa-regions-2026-11-09.json', import.meta.url), 'utf8'));
+    const nowMs = Date.parse('2026-11-09T06:30:00Z');
+    // The 06:30 UT view: 11-09 rows present, probabilities not yet filled in.
+    const morning = fx.regions.map((r) => r.observed_date === '2026-11-09'
+        ? { ...r, c_flare_probability: 0, m_flare_probability: 0, x_flare_probability: 0 } : r);
+
+    const cf = carryForwardProbabilities(morning);
+    const ar = cf.rows.find((r) => r.observed_date === '2026-11-09' && r.region === 4566);
+    check('zero-filled newest day: AR4566 takes 11-08\'s 60 % M / 15 % X',
+        ar.m_flare_probability === 60 && ar.x_flare_probability === 15 && cf.fromDay === '2026-11-08',
+        `carried ${cf.carried} from ${cf.fromDay}`);
+    check('…position stays the newest row\'s', ar.location === fx.regions.find(
+        (r) => r.observed_date === '2026-11-09' && r.region === 4566).location);
+    const newRegion = cf.rows.find((r) => r.observed_date === '2026-11-09' && r.region === 4572);
+    check('…a region with no earlier row is NOT given invented odds', newRegion.m_flare_probability === 0);
+
+    const fixed = issueOutlook({ regionRows: morning, cells: RESPONSE_CELLS, nowMs });
+    check('outlook from the morning file is non-zero and discloses the carry',
+        fixed.ok && Math.max(...fixed.days.map((d) => d.pArrival)) > 0.05
+        && fixed.coverage.probabilitiesFromDay === '2026-11-08',
+        fixed.days.map((d) => d.pArrival.toFixed(3)).join(' '));
+
+    // NEGATIVE CONTROL — the pre-fix behaviour: newest day read as published.
+    const { latestRegions } = await import('../js/hero-sun-model.js');
+    const raw = latestRegions(morning, { fallbackAnchorMs: nowMs });
+    check('control: without the carry every region reads 0 % (what production locked)',
+        raw.length > 0 && raw.every((r) => !(r.pM > 0) && !(r.pX > 0)));
+
+    // A day SWPC has filled in is left exactly as published — including its
+    // genuine zeros (spotless plage beside numbered spots).
+    const evening = carryForwardProbabilities(fx.regions);
+    check('filled-in day is untouched (same array, nothing carried)',
+        evening.rows === fx.regions && evening.carried === 0);
+    const same = issueOutlook({ regionRows: fx.regions, cells: RESPONSE_CELLS, nowMs });
+    check('…and its outlook carries no carry disclosure', same.ok && !('probabilitiesCarried' in same.coverage));
+    // Stale history is not reached for: nothing within 3 days ⇒ stays zero.
+    const old = morning.filter((r) => r.observed_date === '2026-11-09' || r.observed_date <= '2026-11-05');
+    check('rows older than 3 days are not carried', carryForwardProbabilities(old).carried === 0);
+}
+
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
 console.log('\ncme-outlook: all checks passed');
