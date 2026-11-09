@@ -85,7 +85,7 @@
 
 import {
     makeView, zoomAt, panBy, panStep, geoToPx, pxToGeo, tilePlan, scaleBar, scales, wrapNear, viewBounds,
-    fieldTimeIndex, fieldSample, fieldRange, fieldExtremes, heatImage, ZOOM_STEP,
+    fieldTimeIndex, timeBlend, blendPlane, fieldSample, fieldRange, fieldExtremes, heatImage, ZOOM_STEP,
 } from './map-view.js';
 import { contourLines, isothermLevels, labelAnchor } from './contours.js';
 import { GIBS_LAYERS, buildTileUrl } from '../earth-detail-inset.js';
@@ -320,11 +320,43 @@ export function mountMap(root, deps) {
     }
 
     // ── Heat ───────────────────────────────────────────────────────────────
+    // ── THE CLOCK ─────────────────────────────────────────────────────────
+    // One instant for everything on the map: the timeline's crosshair, or — live —
+    // the wall clock at THIS MINUTE. The temperature field is interpolated to it
+    // between GFS's 3-hourly frames (instantField), and the Sun, the cast shadows
+    // and the sun/night memories are evaluated at it exactly, so a shadow sweeps
+    // across a valley instead of jumping every three hours. A minute is the grain
+    // on purpose: the Sun moves 0.25° in one, and a finer clock would rebuild the
+    // terrain grid every frame for nothing.
+    const MINUTE_MS = 60_000;
+    function clockMs() { return M.timeMs ?? Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS; }
     function currentTimeIndex() {
         const f = M.field;
         if (!f?.values) return null;
-        const want = M.timeMs ?? Date.now();
+        const want = clockMs();
         return fieldTimeIndex(f.times, want) ?? (M.timeMs == null ? null : fieldTimeIndex(f.times, Date.now()));
+    }
+    /**
+     * The temperature field AT the clock's instant: a one-frame field (times = [instant])
+     * whose planes — temperature and every companion (pressures, cloud) — are linear in time
+     * between the two GFS frames that bracket it. `blend` says which and how far. Null where
+     * currentTimeIndex is null (no run, or the instant is outside it: nothing is held).
+     */
+    let instCache = { key: '', f: null };
+    function instantField() {
+        const F = M.field;
+        if (currentTimeIndex() == null) return null;
+        let ms = clockMs(), b = timeBlend(F.times, ms);
+        if (!b) { ms = Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS; b = timeBlend(F.times, ms); }
+        if (!b) return null;
+        const key = `${F.run}|${F.nRows}x${F.nCols}|${F.latN}|${F.lonW}|${ms}`;
+        if (instCache.key !== key || instCache.src !== F) {
+            const plane = F.nRows * F.nCols, fields = {};
+            for (const [id, arr] of Object.entries(F.fields || {})) if (arr) fields[id] = blendPlane(arr, plane, b);
+            instCache = { key, src: F, f: { ...F, times: [ms], values: blendPlane(F.values, plane, b), fields,
+                blend: { ...b, ms, t0Ms: F.times[b.i0], t1Ms: F.times[b.i1] } } };
+        }
+        return instCache.f;
     }
 
     // The heat image is evaluated per screen block in DATA space (map-view
@@ -357,9 +389,12 @@ export function mountMap(root, deps) {
     function detailActive() { return !!(M.layers.temperature && M.layers.tempdetail && D.grid && detailPossible()); }
     function detailFor(t) {
         if (!detailActive() || t == null) return null;
-        const F = M.field;
+        const F = instantField();
+        if (!F) return null;
+        t = 0;                                   // F is the one-frame field at the clock's instant
+        const nowMsKey = F.times[0];
         const sunOn = !!M.layers.tempsun, poolOn = !!M.layers.temppool, tw = sunOn || poolOn ? windTimeIndex() : null;
-        const key = `${D.key}|${F.run}|${t}|${sunOn ? 'sun' : ''}|${poolOn ? 'pool' : ''}|${sunOn || poolOn ? `${tw}|${M.wind?.run ?? ''}` : ''}`;
+        const key = `${D.key}|${F.run}|${nowMsKey}|${sunOn ? 'sun' : ''}|${poolOn ? 'pool' : ''}|${sunOn || poolOn ? `${tw}|${M.wind?.run ?? ''}` : ''}`;
         if (DT.key !== key) {
             const plane = F.nRows * F.nCols, base = t * plane;
             const msl = F.fields.mslHpa, ps = F.fields.psfcHpa;
@@ -478,7 +513,9 @@ export function mountMap(root, deps) {
     /** What the heat, the isotherms, the markers and the tooltip all read: the detail grid, or the model's own nodes. */
     function heatSource(t) {
         const det = detailFor(t);
-        return det?.field?.correction ? { f: det.field, t: 0, tag: det.key, det: { ...det, t } } : { f: M.field, t, tag: `${M.field?.run}|${t}`, det: null };
+        const I = instantField();
+        return det?.field?.correction ? { f: det.field, t: 0, tag: det.key, det: { ...det, t: 0 }, inst: I }
+            : { f: I ?? M.field, t: I ? 0 : t, tag: `${M.field?.run}|${I ? I.times[0] : t}`, det: null, inst: I };
     }
     function heatCanvasFor(src) {
         const { f, t } = src, v = M.view;
@@ -486,7 +523,7 @@ export function mountMap(root, deps) {
         const key = `${src.tag}|${v.lat}|${v.lon}|${v.span}|${M.w}|${M.h}|${sc.mode}|${sc.lo}|${sc.hi}`;
         if (heatCache.key !== key) {
             // Past the DEM grid's edge (mid-pan, before it is rebuilt) the model's own value shows.
-            const sample = src.det ? (lat, lon) => fieldSample(f, t, lat, lon) ?? fieldSample(M.field, src.det.t, lat, lon) : null;
+            const sample = src.det ? (lat, lon) => fieldSample(f, t, lat, lon) ?? fieldSample(src.inst, 0, lat, lon) : null;
             const img = heatImage(f, t, v, M.w, M.h, LUT, { step: HEAT_STEP_PX, ...(sample ? { sample } : {}),
                 paint: (val, data, o) => scaleColor(sc, val, LUT, data, o) });
             const c = heatCache.canvas || document.createElement('canvas');
@@ -627,7 +664,7 @@ export function mountMap(root, deps) {
 
     function exposureFor() {
         if (!D.grid) return null;
-        const timeMs = M.timeMs ?? Date.now();
+        const timeMs = clockMs();
         const mode = M.exposureMode;
         const lonC = M.view.lon;
         // "today" = the site's local solar day containing the instant on show.
@@ -725,7 +762,7 @@ export function mountMap(root, deps) {
 
     // ── Slope winds (T3) ─────────────────────────────────────────────────
     const SW = { forcing: null, state: 'idle', note: '', cloud: false, key: '', grid: null, ext: null, sig: '' };
-    function slopeTimeMs() { return M.timeMs ?? Date.now(); }
+    function slopeTimeMs() { return clockMs(); }
     /** The forcing's own time index (its run's times) for the instant on show, or null. */
     function forcingIndex() {
         const f = SW.forcing;
@@ -820,7 +857,7 @@ export function mountMap(root, deps) {
     // ── Thermals (T4) ────────────────────────────────────────────────────
     const TH = { field: null, state: 'idle', note: '', key: '', grid: null, canvasKey: '', sig: '' };
     const TH_VARS = ['shflxWm2', 'hpblM', 'psfcHpa', 'tempC', 'dewC'];
-    function thermalTimeMs() { return M.timeMs ?? Date.now(); }
+    function thermalTimeMs() { return clockMs(); }
     /** The inputs at node k for window w = { i, f } (flux of window i; the rest lerped i−1 → i). */
     function thermalInputs(f, w, sample) {
         const lerp = (v) => {
@@ -956,7 +993,7 @@ export function mountMap(root, deps) {
         return { hPa, w: usable ? lerp(levelSpec(hPa).id) : NaN, zAgl: levelHeightAgl(psfc, hPa, lerp('tempC')), usable, psfc };
     }
     function updraftFor() {
-        const f = UP.field, ms = M.timeMs ?? Date.now();
+        const f = UP.field, ms = clockMs();
         if (!f || !bracket(f.times, ms)) return null;
         const key = `${f.run}|${UP.level}|${Math.floor(ms / 600_000)}`;
         if (UP.key !== key) {
@@ -979,7 +1016,7 @@ export function mountMap(root, deps) {
     function updraftHere(lat, lon, hPa = UP.level) {
         const f = UP.field;
         if (!f) return null;
-        return levelAt(hPa, M.timeMs ?? Date.now(), (v, t) => fieldSample({ ...f, values: f.fields[v] }, t, lat, lon));
+        return levelAt(hPa, clockMs(), (v, t) => fieldSample({ ...f, values: f.fields[v] }, t, lat, lon));
     }
 
     let upCanvas = null;
@@ -1033,7 +1070,7 @@ export function mountMap(root, deps) {
         if (!M.layers.updraft) return { state: 'off' };
         if (UP.state === 'loading' || UP.state === 'idle') return { state: 'loading', note: 'Loading the vertical-motion field…' };
         if (!UP.field) return { state: 'down', note: UP.note };
-        const ms = M.timeMs ?? Date.now();
+        const ms = clockMs();
         if (!bracket(UP.field.times, ms)) return { state: 'notime', note: 'The GFS run does not cover this time.' };
         const g = updraftFor();
         return { state: UP.state, note: UP.note, level: UP.level, timeMs: ms, masked: g.masked, nodes: g.nodes,
@@ -1075,7 +1112,7 @@ export function mountMap(root, deps) {
         return o && { ...o, thermal: r.thermal };
     }
     function convectionFor() {
-        const f = CV.field, ms = M.timeMs ?? Date.now();
+        const f = CV.field, ms = clockMs();
         if (!f || !bracket(f.times, ms)) return null;
         const key = `${f.run}|${Math.floor(ms / 600_000)}`;
         if (CV.key !== key) {
@@ -1111,7 +1148,7 @@ export function mountMap(root, deps) {
             return o ? CATEGORIES.indexOf(o.category) : null;
         };
     }
-    function convectionHere(lat, lon, ms = M.timeMs ?? Date.now()) {
+    function convectionHere(lat, lon, ms = clockMs()) {
         const f = CV.field;
         if (!f) return null;
         return cvOutlook(cvInputs(f, ms, (v, t) => fieldSample({ ...f, values: f.fields[v] }, t, lat, lon)));
@@ -1120,7 +1157,7 @@ export function mountMap(root, deps) {
     function convectionStrip(site) {
         const f = CV.field;
         if (!f || !site) return [];
-        const ms = M.timeMs ?? Date.now();
+        const ms = clockMs();
         return f.times.filter((t) => t >= ms - 3 * 3_600_000 && t <= ms + CV_STRIP_H * 3_600_000)
             .map((t) => ({ t, ...(convectionHere(site.lat, site.lon, t) || { category: null }) }));
     }
@@ -1158,7 +1195,7 @@ export function mountMap(root, deps) {
         if (!M.layers.convection) return { state: 'off' };
         if (CV.state === 'loading' || CV.state === 'idle') return { state: 'loading', note: 'Loading the convection fields…' };
         if (!CV.field) return { state: 'down', note: CV.note };
-        const ms = M.timeMs ?? Date.now();
+        const ms = clockMs();
         if (!bracket(CV.field.times, ms)) return { state: 'notime', note: 'The GFS run does not cover this time.' };
         const g = convectionFor();
         return { state: CV.state, note: CV.note, mode: CV.mode, timeMs: ms, counts: g ? { ...g.counts } : null,
@@ -1242,7 +1279,7 @@ export function mountMap(root, deps) {
     /** Shadows at the instant on show, one Sun position (the view centre) for the grid; cached per 10 min. */
     function shadowFor() {
         if (!D.grid) return null;
-        const timeMs = M.timeMs ?? Date.now();
+        const timeMs = clockMs();
         const key = `${D.key}|${Math.floor(timeMs / 600_000)}`;
         if (SH.key !== key) {
             const sun = solarPosition(new Date(timeMs), M.view.lat, M.view.lon);
@@ -1287,7 +1324,7 @@ export function mountMap(root, deps) {
     function sunInfo() {
         if (!M.layers.sunpath && !M.layers.shadow) return { state: 'off' };
         if (!M.site) return { state: 'loading' };
-        const timeMs = M.timeMs ?? Date.now(), dayStartMs = siteDayStart(timeMs);
+        const timeMs = clockMs(), dayStartMs = siteDayStart(timeMs);
         const key = `${M.site.lat}|${M.site.lon}|${dayStartMs}|${D.grid ? D.key : D.state}`;
         if (SH.sunKey !== key) {
             const path = sunPath(M.site.lat, M.site.lon, dayStartMs, solarPosition);
@@ -1309,7 +1346,7 @@ export function mountMap(root, deps) {
     function aqTimeIndex() {
         const f = M.aq;
         if (!f?.values) return null;
-        const want = M.timeMs ?? Date.now();
+        const want = clockMs();
         return fieldTimeIndex(f.times, want) ?? (M.timeMs == null ? null : fieldTimeIndex(f.times, Date.now()));
     }
 
@@ -1539,7 +1576,7 @@ export function mountMap(root, deps) {
     function windTimeIndex() {
         const f = M.wind;
         if (!f?.u) return null;
-        const want = M.timeMs ?? Date.now();
+        const want = clockMs();
         return fieldTimeIndex(f.times, want) ?? (M.timeMs == null ? null : fieldTimeIndex(f.times, Date.now()));
     }
 
@@ -1764,7 +1801,8 @@ export function mountMap(root, deps) {
         const t = currentTimeIndex();
         const src = t == null ? null : heatSource(t);
         return {
-            t, timeMs: t == null ? null : M.field.times[t],
+            t, timeMs: t == null ? null : (src?.inst ? src.inst.times[0] : M.field.times[t]),
+            blend: src?.inst?.blend ?? null,
             range: src ? fieldRange(src.f, src.t) : null,
             detail: !M.layers.tempdetail ? { state: 'off' }
                 : src?.det ? { state: 'on', lapse: src.det.fit, correction: src.det.field.correction, dz: src.det.dz, resM: D.resM ?? null,
@@ -1801,6 +1839,20 @@ export function mountMap(root, deps) {
     }
     new ResizeObserver(resize).observe(stage);
 
+    // Live, the map is the current minute: redraw as each one begins (and when a
+    // hidden tab comes back). A set time — the timeline's crosshair — is left alone.
+    let liveWind = null;
+    function liveTick() {
+        if (M.timeMs != null || document.hidden) return;
+        requestDraw();
+        const tw = windTimeIndex();
+        if (tw !== liveWind) { liveWind = tw; updateFlow(); deps.onWind?.(windInfo()); }
+    }
+    (function armLiveTick() {
+        setTimeout(() => { liveTick(); armLiveTick(); }, MINUTE_MS - (Date.now() % MINUTE_MS) + 50);
+    })();
+    document.addEventListener('visibilitychange', liveTick);
+
     // ── Hover readout ──────────────────────────────────────────────────────
     function updateTip() {
         if (!M.hover || !M.view) { tip.hidden = true; return; }
@@ -1812,7 +1864,7 @@ export function mountMap(root, deps) {
         // With terrain detail on, say what was corrected: the model's own value and the two heights.
         let detTxt = null;
         if (v != null && src.det) {
-            const raw = fieldSample(M.field, t, g.lat, g.lon), zm = fieldSample(src.det.zField, 0, g.lat, g.lon), zd = fieldSample(D.grid, 0, g.lat, g.lon);
+            const raw = fieldSample(src.inst, 0, g.lat, g.lon), zm = fieldSample(src.det.zField, 0, g.lat, g.lon), zd = fieldSample(D.grid, 0, g.lat, g.lon);
             const hh = (m) => (deps.formatHeight ? deps.formatHeight(m) : `${Math.round(m)} m`);
             const sunK = src.det.sun ? fieldSample({ ...D.grid, values: src.det.sun.values }, 0, g.lat, g.lon) : null;
             const dK = (k) => (deps.formatTempDelta ? deps.formatTempDelta(k) : `${k >= 0 ? '+' : '−'}${Math.abs(k).toFixed(1)} K`);
@@ -1952,7 +2004,7 @@ export function mountMap(root, deps) {
         },
         setTime(ms) {
             const before = windTimeIndex();
-            const next = Number.isFinite(ms) ? ms : null;
+            const next = Number.isFinite(ms) ? Math.floor(ms / MINUTE_MS) * MINUTE_MS : null;   // the clock's grain is a minute
             if (next !== M.timeMs) beginTimeFade();
             M.timeMs = next;
             requestDraw();
@@ -2048,6 +2100,7 @@ export function mountMap(root, deps) {
             return {
                 view: M.view && { ...M.view }, size: { w: M.w, h: M.h }, layers: { ...M.layers },
                 field: M.field ? { nRows: M.field.nRows, nCols: M.field.nCols, run: M.field.run } : null,
+                timeMs: M.timeMs, clockMs: clockMs(),
                 fieldState: M.fieldState, heatScaleMode: M.heatScaleMode, heatAlpha: M.heatAlpha, drawn: { ...M.drawn }, frame: frameInfo(),
                 relief: { state: M.relief.state, ms: M.relief.ms },
                 wind: windInfo(),

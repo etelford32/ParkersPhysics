@@ -662,7 +662,11 @@ function renderHeatRail(info) {
     st.dataset.state = info.state;
     const local = new Date(info.timeMs + S.utcOffsetS * 1000);
     const when = `${local.toUTCString().slice(0, 3)} ${local.toISOString().slice(11, 16)} local`;
-    const lead = Math.round((info.timeMs - S.field.body.runMs) / 3_600_000);
+    // The field is interpolated to this minute between two GFS frames; say which.
+    const leadH = (ms) => Math.round((ms - S.field.body.runMs) / 3_600_000);
+    const bl = info.blend;
+    const lead = bl && bl.i0 !== bl.i1 ? `${leadH(bl.t0Ms)} h → +${leadH(bl.t1Ms)} h, interpolated to the minute` : `${leadH(info.timeMs)} h`;
+    const live = S.map?.state.timeMs == null;
     const range = info.range ? ` · window ${fmtText('temp', info.range.min, S.units)} – ${fmtText('temp', info.range.max, S.units)}` : '';
     const sc = S.map.heatScale;
     const scaleNote = sc.mode === 'fit'
@@ -690,7 +694,7 @@ function renderHeatRail(info) {
         : pl.state === 'day' ? 'Cold-air pooling: none now — it builds after sunset and drains through the morning.'
         : `Cold-air pooling (modelled): ${dT(pl.range.min, 1)} to ${dT(pl.range.max, 1)} ${unitSym('temp')} in view — low ground colder, crests and upper slopes milder; ${Math.round(100 * pl.nightFrac)} % of a full night’s build-up`
             + (pBounds.length ? `; ${pBounds.join(', ')}, so an upper bound.` : '.');
-    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}<br><span id="cx-heat-detail" data-state="${esc(d?.state ?? 'off')}">${esc(detailNote)}</span>`
+    st.innerHTML = `<b>${live ? 'Now · ' : 'Valid '}${esc(when)}</b> (GFS +${lead})${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}<br><span id="cx-heat-detail" data-state="${esc(d?.state ?? 'off')}">${esc(detailNote)}</span>`
         + (sunNote ? `<br><span id="cx-heat-sun" data-state="${esc(sn.state)}">${esc(sunNote)}</span>` : '')
         + (poolNote ? `<br><span id="cx-heat-pool" data-state="${esc(pl.state)}">${esc(poolNote)}</span>` : '');
     if (info.range && info.view !== 'sun') {

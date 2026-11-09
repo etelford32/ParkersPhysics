@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import {
     makeView, clampView, scales, geoToPx, pxToGeo, viewBounds, zoomAt, panBy, panStep,
-    tilePlan, scaleBar, fieldTimeIndex, fieldSample, fieldRange,
+    tilePlan, scaleBar, fieldTimeIndex, timeBlend, blendPlane, fieldSample, fieldRange,
     heatImage, heatColor, fieldExtremes,
     wrap180, SPAN_MIN_DEG, SPAN_MAX_DEG, ZOOM_STEP,
 } from '../js/climalytix/map-view.js';
@@ -140,6 +140,35 @@ ok('field sampling: nodes exact, bilinear between, gaps and the outside null', (
     assert.deepEqual(fieldRange(F, 0), { min: 8, max: 13 });
     assert.equal(fieldTimeIndex(F.times, 2.9 * 3_600_000), 1);
     assert.equal(fieldTimeIndex(F.times, 10 * 3_600_000), null, 'past the run: no frame, never the last one held');
+    // The clock is a minute, the frames are three hours apart: the field is interpolated between them.
+    {
+        const H = 3_600_000, times = [0, 3 * H, 6 * H];
+        assert.deepEqual(timeBlend(times, 3 * H), { i0: 1, i1: 1, w: 0 }, 'on a frame: that frame');
+        const b = timeBlend(times, 4 * H + 12 * 60_000);
+        assert.deepEqual([b.i0, b.i1], [1, 2]);
+        assert.ok(Math.abs(b.w - 1.2 / 3) < 1e-12, 'w is the exact fraction of the step');
+        assert.deepEqual(timeBlend(times, -H), { i0: 0, i1: 0, w: 0 }, 'within half a step before the run: its first frame');
+        assert.deepEqual(timeBlend(times, 7 * H), { i0: 2, i1: 2, w: 0 }, 'within half a step after: its last');
+        assert.equal(timeBlend(times, 8 * H), null, 'further out: nothing — never held, never extrapolated');
+        assert.equal(timeBlend(times, -2 * H), null);
+        for (const ms of [0, 1, 3 * H - 1, 3 * H, 5.9 * H, 6 * H]) {
+            const k = timeBlend(times, ms), n = fieldTimeIndex(times, ms);
+            assert.ok(n === k.i0 || n === k.i1, 'the nearest frame is always one of the two blended');
+        }
+        // Linear in time, exactly; a gap in either frame is a gap, not the other frame's value.
+        const vals = [10, 20, null, 16, 26, 5, 22, NaN, 9];           // 3 frames × 3 cells
+        const mid = blendPlane(vals, 3, timeBlend(times, 4.5 * H));
+        assert.ok(Math.abs(mid[0] - 19) < 1e-6 && Number.isNaN(mid[1]) && Math.abs(mid[2] - 7) < 1e-6, `frame 1→2 at half: ${[...mid]}`);
+        const early = blendPlane(vals, 3, timeBlend(times, 1.5 * H));
+        assert.ok(Math.abs(early[0] - 13) < 1e-6 && Math.abs(early[1] - 23) < 1e-6 && Number.isNaN(early[2]), 'a gap in the FIRST frame is a gap too');
+        const on = blendPlane(vals, 3, timeBlend(times, 3 * H));
+        assert.deepEqual([...on], [16, 26, 5], 'on a frame the plane is that frame, bit for bit');
+        // Monotone between the frames: never outside the two values (no overshoot).
+        for (let f = 0; f <= 1; f += 0.125) {
+            const v = blendPlane(vals, 3, timeBlend(times, (3 + 3 * f) * H))[0];
+            assert.ok(v >= 16 - 1e-6 && v <= 22 + 1e-6);
+        }
+    }
 });
 
 ok('heat colours are the site-wide temperature LUT bytes; a gap corner is transparent', () => {

@@ -22,6 +22,8 @@
  *     draws it alone; NEGATIVE CONTROLS: the toggle off, and night, are nothing
  *   · cold-air pooling: at night the ridge's foot is colder and its crest
  *     milder, the plain untouched; NEGATIVE CONTROLS: the toggle off, and day
+ *   · the clock is the current MINUTE: the field is interpolated between GFS
+ *     frames (NEGATIVE CONTROL: the nearest frame) and the Sun is at the instant
  *   · terrain shadows: a low Sun to the south shades the ridge's north flank;
  *     NEGATIVE CONTROL: at night nothing is drawn (night is not a shadow)
  *   · the Sun path chart draws with or without a horizon, and says which
@@ -274,6 +276,76 @@ test('cold-air pooling: at night the foot of the ridge is colder and its crest m
     // Without terrain detail there is no ground to compare: the toggle goes with it.
     await page.locator('#cx-layer-tdetail').uncheck();
     await expect(page.locator('#cx-layer-tpool')).toBeDisabled();
+    expect(errors).toEqual([]);
+});
+
+test('the map is the current MINUTE: the field is interpolated between GFS frames and the Sun is taken at that instant', async ({ page }) => {
+    const errors = await boot(page, { modelZ: MODEL_Z });
+    await detailIs(page, 'on');
+    // Live: the clock is the wall clock floored to the minute, and the frame is AT it — not at a 3-hourly stamp.
+    let s = await state(page);
+    expect(s.map.timeMs).toBeNull();
+    expect(s.map.clockMs % 60_000).toBe(0);
+    expect(Math.abs(Date.now() - s.map.clockMs)).toBeLessThan(120_000);
+    expect(s.map.frame.timeMs).toBe(s.map.clockMs);
+    await expect(page.locator('#cx-heat-status')).toContainText('Now ·');
+    const live = s.map.frame.blend;
+    expect(live.t0Ms).toBeLessThanOrEqual(s.map.clockMs);
+    expect(live.t1Ms).toBeGreaterThanOrEqual(s.map.clockMs);
+    if (live.i0 !== live.i1) await expect(page.locator('#cx-heat-status')).toContainText('interpolated to the minute');
+
+    // GFS's own field (terrain detail off), on a frame, on the next, and 47 minutes into the three hours between.
+    await page.locator('#cx-layer-tdetail').uncheck();
+    const at = async (ms) => {
+        await page.evaluate((t) => window.__climalytix.map.setTime(t), ms);
+        await page.waitForFunction((t) => window.__climalytix.state.map.frame.timeMs === t, ms, { timeout: 15_000 });
+        return (await state(page)).map.frame;
+    };
+    const step = live.i0 !== live.i1 ? live.t1Ms - live.t0Ms : 3 * 3_600_000;
+    const t0 = live.t0Ms, t1 = t0 + step, w = 47 / 180;
+    const f0 = await at(t0), f1 = await at(t1), fm = await at(t0 + 47 * 60_000);
+    expect(fm.timeMs).toBe(t0 + 47 * 60_000);
+    expect(fm.blend.w).toBeCloseTo(w, 9);
+    expect(f0.blend.w).toBe(0);
+    // The mock's field is a fixed pattern plus a diurnal term, so its minimum is linear in time between frames.
+    expect(Math.abs(f1.range.min - f0.range.min)).toBeGreaterThan(0.2);          // the frames do differ…
+    expect(fm.range.min).toBeCloseTo(f0.range.min + w * (f1.range.min - f0.range.min), 2);
+    // NEGATIVE CONTROL: the old rule showed the NEAREST frame — at 47 min that is frame 0, unchanged.
+    expect(Math.abs(fm.range.min - f0.range.min)).toBeGreaterThan(0.05);
+    // A second off the minute is that minute: the clock's grain.
+    await page.evaluate((t) => window.__climalytix.map.setTime(t), t0 + 47 * 60_000 + 31_000);
+    expect((await state(page)).map.clockMs).toBe(t0 + 47 * 60_000);
+
+    // The Sun is taken at the instant: two times inside ONE pair of frames light the ridge differently.
+    await page.locator('#cx-layer-tdetail').check();
+    await page.locator('#cx-layer-tpool').uncheck();
+    const start = Math.floor(Date.now() / 600_000) * 600_000;
+    const sun = (ms) => solarPosition(new Date(ms), BOULDER.lat, BOULDER.lon);
+    let a = null;
+    for (let m = 0; m < 30 * 60 && a == null; m += 10) {
+        const t = start + m * 60_000;
+        if (sun(t).altitudeDeg > 12 && sun(t + 100 * 60_000).altitudeDeg > 12 && sun(t).azimuthDeg < 170) a = t;
+    }
+    expect(a).not.toBeNull();
+    const sunAt = async (ms) => {
+        await page.evaluate((t) => window.__climalytix.map.setTime(t), ms);
+        await page.waitForFunction((t) => { const f = window.__climalytix.state.map.frame; return f.timeMs === t && f.detail?.sun?.state === 'on'; }, ms, { timeout: 30_000 });
+        return (await state(page)).map.frame;
+    };
+    const fa = await sunAt(a + 7 * 60_000);                             // off every frame and every 10-minute mark
+    const pair = [fa.blend.t0Ms, fa.blend.t1Ms];
+    let b = a + 97 * 60_000;
+    if (b >= pair[1]) b = a + 7 * 60_000 - 90 * 60_000 > pair[0] ? a + 7 * 60_000 - 90 * 60_000 : pair[1] - 60_000;
+    const fb = await sunAt(b);
+    expect([fb.blend.t0Ms, fb.blend.t1Ms]).toEqual(pair);              // same two frames…
+    expect(Math.abs(fb.detail.sun.range.max - fa.detail.sun.range.max) + Math.abs(fb.detail.sun.range.min - fa.detail.sun.range.min))
+        .toBeGreaterThan(0.01);                                         // …a different Sun, a different slope budget
+
+    // Back to live: the minute tick redraws without a hand on the page.
+    await page.evaluate(() => window.__climalytix.map.setTime(null));
+    s = await state(page);
+    expect(s.map.timeMs).toBeNull();
+    expect(Math.abs(Date.now() - s.map.frame.timeMs)).toBeLessThan(120_000);
     expect(errors).toEqual([]);
 });
 
