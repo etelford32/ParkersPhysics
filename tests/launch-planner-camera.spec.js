@@ -157,6 +157,12 @@ test.describe('launch-planner camera controls + responsive stage', () => {
     });
 
     test('dock, keys, pinch, pan, Spin and full screen move the camera', async ({ browser }) => {
+        // ~25 interactions, each waiting a few SOFTWARE-rendered frames: 2.7 min
+        // locally with two workers, ~2.4x that on a CI runner. The describe's
+        // 240 s ran out on CI with nothing stuck — main's run at the Help close,
+        // this branch's at the full-screen step 230 s in (2026-11-09). A budget
+        // sized to the measured cost, not a wait for anything new.
+        test.setTimeout(480_000);
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
         const page = await ctx.newPage();
         await boot(page);
