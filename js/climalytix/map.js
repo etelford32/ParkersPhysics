@@ -48,6 +48,11 @@
  *             direct beam ÷ flat ground's, now or over today — as a diverging
  *             fill (one-at-a-time with Temperature / Air quality). A tile that
  *             will not load is a hole; nothing is invented under it.
+ *   lift      §19 T2 (orographic.js, PURE): the wind forced up / down by the
+ *             slope at the surface, w = u·∂h/∂x + v·∂h/∂y, from the SAME
+ *             terrain grid and the SAME 10 m wind frame the airflow layer
+ *             draws (its time index, not a second one). A fill in the
+ *             one-at-a-time group; no wind or no DEM ⇒ nothing drawn.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -73,6 +78,7 @@ import {
     demZoomFor, tilesFor, tileSampler, sampleGrid, slopeAspect, exposureGrid, exposurePaint, elevationLevels,
     demPath, compass16, DEM_MIN_Z,
 } from './terrain.js';
+import { orographicGrid, orographicExtremes, orographicPaint, windSide, formatW } from './orographic.js';
 import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 
@@ -103,7 +109,7 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
@@ -114,7 +120,7 @@ export function mountMap(root, deps) {
         drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
                  airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 },
                  aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null },
-                 elevation: { lines: 0, step: null, labels: [] }, exposure: false },
+                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -311,7 +317,7 @@ export function mountMap(root, deps) {
 
     // ── Terrain: elevation contours + sun exposure (terrain.js) ─────────────
     const D = M.dem;
-    function demWanted() { return (M.layers.elevation || M.layers.exposure) && M.view && M.w; }
+    function demWanted() { return (M.layers.elevation || M.layers.exposure || M.layers.orographic) && M.view && M.w; }
 
     function demTile(z, x, y) {
         const key = `${z}/${x}/${y}`;
@@ -423,6 +429,56 @@ export function mountMap(root, deps) {
         M.drawn.exposure = true;
     }
 
+    // ── Orographic lift (T2) ─────────────────────────────────────────────
+    /** w on the terrain grid for the wind frame the airflow layer shows, or null. */
+    function orographicFor() {
+        const tw = windTimeIndex();
+        if (!D.grid || tw == null || !M.wind) return null;
+        const key = `${D.key}|${tw}|${M.wind.run ?? ''}|${M.wind.times?.[0] ?? ''}`;
+        if (D.oroKey !== key) {
+            D.oro = orographicGrid(D.grid, D.sa, (lat, lon) => windAt(M.wind, tw, lat, lon));
+            D.oroKey = key; D.oroCanvasKey = '';
+        }
+        return D.oro;
+    }
+
+    let oroCanvas = null;
+    function drawOrographic() {
+        M.drawn.orographic = false;
+        if (!M.layers.orographic) return;
+        const w = D.grid ? orographicFor() : null;
+        if (w) {
+            const key = `${D.oroKey}|${M.view.lat}|${M.view.lon}|${M.view.span}|${M.w}|${M.h}`;
+            if (D.oroCanvasKey !== key) {
+                const img = heatImage({ ...D.grid, values: w }, 0, M.view, M.w, M.h, null, { step: HEAT_STEP_PX, paint: orographicPaint });
+                oroCanvas = oroCanvas || document.createElement('canvas');
+                oroCanvas.width = img.cw; oroCanvas.height = img.ch;
+                oroCanvas.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+                D.oroCanvasKey = key;
+                D.oroExt = orographicExtremes(D.grid, w, demBox());
+            }
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, M.heatAlpha + 0.2);
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(oroCanvas, 0, 0, M.w, M.h);
+            ctx.restore();
+            M.drawn.orographic = true;
+        }
+        const info = oroInfo();
+        const sig = JSON.stringify([info.state, info.timeMs, info.up?.w, info.down?.w]);
+        if (D.oroSig !== sig) { D.oroSig = sig; deps.onOro?.(info); }
+    }
+
+    function oroInfo() {
+        if (!M.layers.orographic) return { state: 'off' };
+        if (!M.wind) return { state: M.windState === 'loading' ? 'loading' : 'nowind', note: M.windNote };
+        const tw = windTimeIndex();
+        if (tw == null) return { state: 'notime', note: 'The wind field does not cover this time.' };
+        if (!D.grid) return { state: D.state === 'down' ? 'nodem' : 'loading', note: D.note };
+        return { state: 'ok', timeMs: M.wind.times[tw], up: D.oroExt?.up ?? null, down: D.oroExt?.down ?? null,
+                 n: D.oroExt?.n ?? 0, resM: D.resM ?? null };
+    }
+
     function drawElevation() {
         M.drawn.elevation = { lines: 0, step: null, labels: [] };
         if (!M.layers.elevation || !D.grid) return;
@@ -467,8 +523,9 @@ export function mountMap(root, deps) {
         const inside = i >= 0 && j >= 0 && i < D.grid.nRows && j < D.grid.nCols;
         const sl = inside ? D.sa.slope[k] : NaN, as = inside ? D.sa.aspect[k] : NaN;
         const exp = M.layers.exposure && inside ? exposureFor()?.[k] : NaN;
+        const oro = M.layers.orographic && inside ? orographicFor()?.[k] : NaN;
         return { h, slope: Number.isFinite(sl) ? sl : null, aspect: Number.isFinite(as) ? as : null,
-                 ratio: Number.isFinite(exp) ? exp : null };
+                 ratio: Number.isFinite(exp) ? exp : null, w: Number.isFinite(oro) ? oro : null };
     }
 
     function demInfo() {
@@ -821,6 +878,7 @@ export function mountMap(root, deps) {
         drawHeat();
         drawAq();
         drawExposure();
+        drawOrographic();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
         drawElevation();
         M.drawn.labels = drawLabels();
@@ -894,11 +952,12 @@ export function mountMap(root, deps) {
             tip.style.transform = `translate(${Math.max(4, x)}px, ${M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14}px)`;
             return;
         }
-        const tr = (M.layers.elevation || M.layers.exposure) ? terrainAt(g.lat, g.lon) : null;
+        const tr = (M.layers.elevation || M.layers.exposure || M.layers.orographic) ? terrainAt(g.lat, g.lon) : null;
         const terrTxt = tr && tr.h != null
             ? [deps.formatHeight ? deps.formatHeight(tr.h) : `${Math.round(tr.h)} m`,
                tr.slope != null ? `${tr.slope.toFixed(0)}° slope${tr.slope >= 1 && tr.aspect != null ? ` facing ${compass16(tr.aspect)}` : ''}` : null,
-               tr.ratio != null ? `${tr.ratio.toFixed(2)}× flat-ground sun ${M.exposureMode === 'now' ? 'now' : 'today'}` : null].filter(Boolean).join(' · ')
+               tr.ratio != null ? `${tr.ratio.toFixed(2)}× flat-ground sun ${M.exposureMode === 'now' ? 'now' : 'today'}` : null,
+               tr.w != null ? `${formatW(tr.w, { feet: deps.heightUnits?.().sym === 'ft' })} ${windSide(tr.w, tr.slope)}` : null].filter(Boolean).join(' · ')
             : null;
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
@@ -1011,7 +1070,7 @@ export function mountMap(root, deps) {
         setLayer(name, on) {
             M.layers[name] = !!on; requestDraw();
             if (name === 'airflow') updateFlow();
-            if ((name === 'elevation' || name === 'exposure') && on) scheduleDem();
+            if ((name === 'elevation' || name === 'exposure' || name === 'orographic') && on) scheduleDem();
         },
         setExposureMode(mode) { M.exposureMode = mode === 'now' ? 'now' : 'today'; D.expKey = ''; requestDraw(); deps.onDem?.(demInfo()); },
         /** Terrain at a point (test + console hook). */
@@ -1060,6 +1119,7 @@ export function mountMap(root, deps) {
                 wind: windInfo(),
                 aq: aqInfo(),
                 dem: demInfo(),
+                orographic: oroInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

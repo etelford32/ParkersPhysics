@@ -105,7 +105,9 @@ body {
 .cx-about summary::before { content:'ⓘ'; color:var(--cx-accent); }
 .cx-about[open] summary { margin-bottom:4px; }
 #cx-aq-key[hidden] { display:none; }
-#cx-exp-key[hidden], #cx-exp-mode[hidden] { display:none; }
+#cx-exp-key[hidden], #cx-exp-mode[hidden], #cx-oro-key[hidden], #cx-oro-status[hidden] { display:none; }
+#cx-oro-key .cx-oro-bar { height:12px; border-radius:3px; background:#888; }
+#cx-oro-key .cx-exp-ticks { display:flex; justify-content:space-between; font-size:.62rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
 #cx-exp-key .cx-exp-bar { height:12px; border-radius:3px; background:#888; }
 #cx-exp-key .cx-exp-ticks { display:flex; justify-content:space-between; font-size:.62rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
 #cx-exp-mode { margin:.3rem 0; }
@@ -320,8 +322,14 @@ body {
         <div class="cx-exp-bar"></div>
         <div class="cx-exp-ticks"><span>0.71× shade</span><span>flat ground</span><span>1.41× sun</span></div>
       </div>
+      <label class="cx-layer"><input type="checkbox" id="cx-layer-oro">Orographic lift<span class="cx-layer-src" title="Computed here from the DEM slope and our GFS 10 m wind">Ours</span></label>
+      <div id="cx-oro-key" hidden aria-label="Orographic lift key">
+        <div class="cx-oro-bar"></div>
+        <div class="cx-exp-ticks"><span>−2 m/s down</span><span>0</span><span>+2 m/s up</span></div>
+      </div>
+      <p id="cx-oro-status" class="cx-map-note" role="status" hidden></p>
       <p id="cx-dem-status" class="cx-map-note" role="status">Terrain layers off.</p>
-      <details class="cx-about"><summary>About these layers</summary><p class="cx-map-note">Elevation: AWS Terrain Tiles (a public blend of SRTM, USGS 3DEP and GMTED), fetched at the zoom that matches the map and resampled onto the map’s own latitude/longitude grid — never a stretched web-Mercator image. Contours are round numbers in your height unit; every fifth is heavier and labelled. <b>Sun exposure</b> is the direct sunlight a slope receives divided by what flat ground at the same place receives: gold = more sun than flat ground (a south-facing slope in the northern winter), indigo = less; the colour is full strength at 1.41× and 0.71× (half a stop), which spans most real slopes. “Over today” sums the whole day’s Sun track at the map centre; “At this time” uses the Sun at each point at the time on the timeline (night is blank). It is clear-sky geometry only: no clouds, no haze, and no shadows cast by neighbouring ridges — a slope only shades itself.</p></details>
+      <details class="cx-about"><summary>About these layers</summary><p class="cx-map-note">Elevation: AWS Terrain Tiles (a public blend of SRTM, USGS 3DEP and GMTED), fetched at the zoom that matches the map and resampled onto the map’s own latitude/longitude grid — never a stretched web-Mercator image. Contours are round numbers in your height unit; every fifth is heavier and labelled. <b>Sun exposure</b> is the direct sunlight a slope receives divided by what flat ground at the same place receives: gold = more sun than flat ground (a south-facing slope in the northern winter), indigo = less; the colour is full strength at 1.41× and 0.71× (half a stop), which spans most real slopes. “Over today” sums the whole day’s Sun track at the map centre; “At this time” uses the Sun at each point at the time on the timeline (night is blank). It is clear-sky geometry only: no clouds, no haze, and no shadows cast by neighbouring ridges — a slope only shades itself. <b>Orographic lift</b> is the vertical wind the slope forces on the 10 m wind at the surface, w = u·∂h/∂x + v·∂h/∂y: red where the wind blows up the slope (forced ascent), blue where it blows down it. It is the surface value only — above the ground it fades over a height about the size of the hill, and a stable atmosphere turns it into lee waves this does not model. The wind is GFS’s, on GFS’s own ~25 km terrain, so a slope can feel a different wind; and w is only as fine as the slope grid. A diagnostic of where the flow is pushed, not a promise of lift at a spot.</p></details>
 
       <h3 class="cx-rail-h">Base map</h3>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-terrain" checked>Relief shading<span class="cx-layer-src" title="Shaded from EarthView’s self-hosted relief map">Relief</span></label>

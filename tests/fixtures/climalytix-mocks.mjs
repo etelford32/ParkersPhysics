@@ -122,7 +122,7 @@ export function mockWind(lat, lon, site) {
     return { u: 6 - k * dy, v: k * dx };
 }
 
-export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['tempC'] } = {}) {
+export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['tempC'], windFn = null } = {}) {
     const H = 3_600_000;
     const runMs = Math.floor((nowMs - ageH * H) / (6 * H)) * 6 * H;
     const leadsH = Array.from({ length: 81 }, (_, i) => i * 3);
@@ -149,7 +149,8 @@ export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['temp
     const wind = { uMs: new Float32Array(values.length), vMs: new Float32Array(values.length) };
     for (let t = 0; t < man.times.length; t++) {
         for (let i = 0; i < plan.nRows; i++) for (let j = 0; j < plan.nCols; j++) {
-            const w = mockWind(plan.latN - i * man.dlat, plan.lonW + j * man.dlon, site);
+            const lat = plan.latN - i * man.dlat, lon = plan.lonW + j * man.dlon;
+            const w = windFn ? windFn(lat, lon) : mockWind(lat, lon, site);
             wind.uMs[t * plane + i * plan.nCols + j] = w.u;
             wind.vMs[t * plane + i * plan.nCols + j] = w.v;
         }
@@ -261,7 +262,7 @@ function demTilePng(z, x, y, heightAt = mockDem) {
     return cache.get(key);
 }
 
-export async function installClimalytixMocks(page, { dem = 'up', demHeight, onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
+export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
@@ -275,7 +276,7 @@ export async function installClimalytixMocks(page, { dem = 'up', demHeight, onDe
                 if (nwp === 'unpublished') return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'r2_not_configured', now), var: 'tempC', values: null } });
                 const vars = (url.searchParams.get('vars') || 'tempC').split(',');
                 if (nwp === 'nowind' && vars.includes('uMs')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable uMs in this run', now), vars, fields: null, values: null } });
-                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, vars }) });
+                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, vars, windFn }) });
             }
             if (p === '/api/climalytix/nwp') {
                 if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });

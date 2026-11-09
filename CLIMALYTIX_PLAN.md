@@ -965,7 +965,7 @@ lift at a given spot, and the rail says so.
 | Step | Layer | Physics (the closed form the gate pins) | Data | Status |
 |---|---|---|---|---|
 | **T1** | **Elevation levels + sun exposure** | Terrarium decode `h = R·256 + G + B/256 − 32768`; Web-Mercator tile maths (round trip exact); slope/aspect by Sobel on a 2-node baseline in METRES with cos φ spacing (a tilted plane comes back exact at 0° and 60°; the aspect sign trap is the negative control); incidence `cos θ = cos s·sin α + sin s·cos α·cos(A☉ − aspect)` (flat ground = sin α exactly; a face square to the Sun = 1); the day's direct-beam ratio slope/flat (flat = 1 exactly; an equator-facing slope in winter > 1, pole-facing < 1). Self-shading only — no cast shadows, disclosed. | AWS Terrain Tiles (Terrarium PNG, public, attribution) through `/api/climalytix/dem` (SSRF-safe: z/x/y only, the upstream URL is rebuilt from a frozen candidate list; the no-coordinate form is a capability probe); the Sun is `js/sun-altitude.js` `solarPosition` (the site's one Sun) | **BUILT 2026-11-09** (below) |
-| **T2** | **Orographic updraft** | The exact kinematic lower boundary condition `w = u·∂h/∂x + v·∂h/∂y` (flow forced up a slope); windward/leeward from the same dot product. Gate: a uniform wind over a tilted plane gives the closed-form w; wind along the contours gives 0; reversing the wind flips the sign. | T1's DEM + our GFS 10 m u/v (airflow's field) | planned |
+| **T2** | **Orographic updraft** | The exact kinematic lower boundary condition `w = u·∂h/∂x + v·∂h/∂y` (flow forced up a slope); windward/leeward from the same dot product. Gate: a uniform wind over a tilted plane gives the closed-form w; wind along the contours gives 0; reversing the wind flips the sign. | T1's DEM + our GFS 10 m u/v (airflow's field) | **BUILT 2026-11-09** (below) |
 | **T3** | **Anabatic / katabatic slope winds** | The Prandtl (1942) steady slope flow: amplitude `u₀ = Δθ·√(g·K/(θ₀·N²·Pr))` with height scale `l = (4·K·Pr/(N²·sin²α))^¼`, the forcing Δθ from T1's slope insolation by day and radiative cooling by night (upslope by day, downslope by night). Gate: the profile satisfies its ODE, flat ground gives 0, the sign follows the sign of Δθ. | T1 + GFS 2 m T, cloud (clear-sky fraction) | planned |
 | **T4** | **Thermals** | Deardorff convective velocity `w* = (g/θ · H/(ρ·c_p) · z_i)^⅓`; thermal tops at the boundary-layer depth z_i; cumulus base at the LCL (`z = 125 m · (T − T_d)`, Espy) — "blue" thermals when the LCL sits above z_i. Gate: w* scales as H^⅓ and z_i^⅓ exactly; H ≤ 0 gives no thermals; the LCL identity. | GFS sensible heat flux (SHTFL), boundary-layer height (HPBL), DSWRF — **added to `GFS_VARS` in the ingest** (format change → re-write the Python fixture on purpose) | planned |
 | **T5** | **Updraft (general)** | The vertical air motion available: orographic (T2) + thermal (T4) + slope (T3), each kept SEPARATE in the readout (never one invented total), plus GFS vertical velocity at 850/700 hPa (ω → w = −ω/(ρg)) where ingested. Gate: ω→w conversion exact at standard density; components add without double counting. | T2–T4 + GFS VVEL | planned |
@@ -996,3 +996,25 @@ sign are checked against numbers, and "over today" against the kernel's own
 `dailyRatio`; DEM down is the negative control. Unverified against the live
 AWS bucket (egress-blocked here): one production `GET /api/climalytix/dem`
 settles which host answers.
+
+**T2 as built (2026-11-09).** `js/climalytix/orographic.js` (PURE,
+`tests/climalytix-orographic.mjs`) + the map's "Orographic lift" toggle
+(`tests/climalytix-orographic.spec.js`). w = u·∂h/∂x + v·∂h/∂y on T1's own
+grid (`slopeAspect`'s dzdx/dzdy, metres with cos φ) under the SAME GFS 10 m
+wind frame the airflow layer draws (its time index — not a second one);
+`slopeWind` is the same quantity in slope/aspect form and the gate pins the
+two equal. Red = forced ascent, blue = forced descent, √ ramp to full at
+2 m/s; the hover gives m/s (and ft/min for a feet reader) and names the
+windward / lee side; the rail names the strongest ascent and descent in view
+and the wind frame's local time. It joins the one-at-a-time fills. One
+measured adjustment: the paint FLOOR is 0.1 m/s and the ramp starts there —
+at 0.02 m/s from zero, 50 m of roughness under a 9 m/s wind striped every
+plain at ~30 % opacity, and real terrain is rough everywhere. Disclosed in
+the rail's notes: it is the SURFACE value (it decays aloft over about the
+hill's width; lee waves are not modelled), the wind is GFS's on GFS's own
+~25 km terrain, and w is only as fine as the slope grid. Browser gate: the
+closed-form ridge under a UNIFORM mocked wind (`windFn`) — a south wind gives
+±8·tan s on the flanks and 0 on flat ground, reversing flips the sign, a west
+wind along the contours gives none (negative control), and no wind field
+draws nothing; swapping u and v in the kernel fails 3 of the 4 browser tests
+and the node gate (checked).

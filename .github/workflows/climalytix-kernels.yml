@@ -38,6 +38,10 @@
 #                            difference NEGATIVE CONTROL), exposure exactly 1 on
 #                            flat ground, the DEM route's host ladder (non-PNG
 #                            200 refused, no passthrough URL)
+#   climalytix-orographic.mjs §19 T2 lift: w = u·∂h/∂x + v·∂h/∂y on a tilted
+#                            plane at 0°/60°, zero along the contours, sign
+#                            flips with the wind, gaps stay NaN; swapped u/v
+#                            is the NEGATIVE CONTROL
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
@@ -126,6 +130,8 @@ jobs:
         run: node tests/climalytix-aq-field.mjs
       - name: terrain (elevation, slope, sun exposure, DEM route stubbed)
         run: node tests/climalytix-terrain.mjs
+      - name: orographic lift
+        run: node tests/climalytix-orographic.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)

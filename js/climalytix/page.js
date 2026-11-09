@@ -34,6 +34,7 @@ import { windColor } from '../wind-palette.js';
 import { mountMap } from './map.js';
 import { tempToRampFrac } from '../temp-ramp.js';
 import { exposurePaint, EXPOSURE_FULL_LOG2 } from './terrain.js';
+import { orographicPaint, formatW, OROGRAPHIC_FULL_MS } from './orographic.js';
 import { resolveUnits, fmt, fmtText, fromDisplay, QUANTITIES } from '../climate-lab/lab-units.js';
 import { homeState, visit, sameLocation, cleanLoc } from '../climate-lab/lab-home.js';
 import { geocodeQuery } from '../user-location.js';
@@ -379,11 +380,42 @@ function paintExposureKey() {
     $('#cx-exp-key .cx-exp-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')}), #2a3446`;
 }
 
+/** The orographic key: the map's own painter from −FULL to +FULL m/s. */
+function paintOroKey() {
+    const px = new Uint8ClampedArray(4);
+    const stops = [];
+    for (let k = 0; k <= 20; k++) {
+        const w = (k / 10 - 1) * OROGRAPHIC_FULL_MS;
+        px.fill(0); orographicPaint(w, px, 0);
+        stops.push(`rgba(${px[0]},${px[1]},${px[2]},${(px[3] / 255).toFixed(3)}) ${k * 5}%`);
+    }
+    $('#cx-oro-key .cx-oro-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')}), #2a3446`;
+    const ticks = $('#cx-oro-key .cx-exp-ticks').children;
+    ticks[0].textContent = `−${OROGRAPHIC_FULL_MS} m/s down`; ticks[2].textContent = `+${OROGRAPHIC_FULL_MS} m/s up`;
+}
+
+/** Rail status for orographic lift: which wind frame, and the extremes in view. */
+function renderOroRail(info) {
+    const st = $('#cx-oro-status');
+    if (!info || info.state === 'off') { st.textContent = ''; return; }
+    st.dataset.state = info.state;
+    if (info.state === 'loading') { st.textContent = 'Waiting for the wind field and the elevation tiles…'; return; }
+    if (info.state === 'nowind') { st.textContent = `No wind field (${info.note || 'our GFS archive did not answer'}). Nothing stands in for it.`; return; }
+    if (info.state === 'notime') { st.textContent = info.note; return; }
+    if (info.state === 'nodem') { st.textContent = 'Elevation tiles unavailable — no slope, so no lift is drawn.'; return; }
+    const feet = fmt('height', 0, S.units).sym === 'ft';
+    const local = new Date(info.timeMs + S.utcOffsetS * 1000);
+    const where = (p) => `${Math.abs(p.lat).toFixed(2)}°${p.lat >= 0 ? 'N' : 'S'} ${Math.abs(p.lon).toFixed(2)}°${p.lon >= 0 ? 'E' : 'W'}`;
+    st.innerHTML = `<b>10 m wind of ${esc(local.toUTCString().slice(0, 3))} ${esc(local.toISOString().slice(11, 16))} local</b> (the airflow frame).`
+        + `<br>Strongest forced ascent in view: ${info.up ? `${esc(formatW(info.up.w, { feet }))} at ${where(info.up)}` : 'none'}.`
+        + `<br>Strongest forced descent: ${info.down ? `${esc(formatW(info.down.w, { feet }))} at ${where(info.down)}` : 'none'}.`;
+}
+
 /** Rail status for the terrain layers (elevation contours, sun exposure). */
 function renderDemRail(info) {
     const st = $('#cx-dem-status');
-    const elev = $('#cx-layer-elev').checked, exp = $('#cx-layer-exp').checked;
-    if (!elev && !exp) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
+    const elev = $('#cx-layer-elev').checked, exp = $('#cx-layer-exp').checked, oro = $('#cx-layer-oro').checked;
+    if (!elev && !exp && !oro) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
     st.dataset.state = info?.state || 'loading';
     if (!info || info.state === 'idle' || info.state === 'loading') { st.textContent = info?.note || 'Loading elevation…'; return; }
     if (info.state === 'down') { st.textContent = info.note; return; }
@@ -448,6 +480,7 @@ function mountLocationMap() {
         onWind: renderFlowRail,
         onAq: renderAqRail,
         onDem: renderDemRail,
+        onOro: renderOroRail,
         // Elevation levels are chosen in the reader's height unit (round feet for a ft reader).
         heightUnits: () => ({
             toDisplay: (m) => fmt('height', m, S.units).value,
@@ -463,9 +496,11 @@ function mountLocationMap() {
     // Sun exposure is a full-window fill too, so it joins the same group.
     const showField = (which, on) => {
         const pick = (id, key) => (which === key ? on : (on ? false : $(id).checked));
-        const temp = pick('#cx-layer-temp', 'temp'), aq = pick('#cx-layer-aq', 'aq'), exp = pick('#cx-layer-exp', 'exp');
-        $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq; $('#cx-layer-exp').checked = exp;
-        S.map.setLayer('temperature', temp); S.map.setLayer('airquality', aq); S.map.setLayer('exposure', exp);
+        const temp = pick('#cx-layer-temp', 'temp'), aq = pick('#cx-layer-aq', 'aq'), exp = pick('#cx-layer-exp', 'exp'), oro = pick('#cx-layer-oro', 'oro');
+        $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq; $('#cx-layer-exp').checked = exp; $('#cx-layer-oro').checked = oro;
+        S.map.setLayer('temperature', temp); S.map.setLayer('airquality', aq); S.map.setLayer('exposure', exp); S.map.setLayer('orographic', oro);
+        $('#cx-oro-key').hidden = !oro; $('#cx-oro-status').hidden = !oro;
+        renderOroRail(S.map.state.orographic);
         $('#cx-exp-mode').hidden = !exp; $('#cx-exp-key').hidden = !exp;
         renderDemRail(S.map.state.dem);
         for (const id of ['#cx-layer-iso', '#cx-layer-ext']) $(id).disabled = !temp;
@@ -476,6 +511,7 @@ function mountLocationMap() {
     $('#cx-layer-temp').addEventListener('change', (ev) => showField('temp', ev.target.checked));
     $('#cx-layer-aq').addEventListener('change', (ev) => showField('aq', ev.target.checked));
     $('#cx-layer-exp').addEventListener('change', (ev) => showField('exp', ev.target.checked));
+    $('#cx-layer-oro').addEventListener('change', (ev) => showField('oro', ev.target.checked));
     $('#cx-layer-elev').addEventListener('change', (ev) => {
         S.map.setLayer('elevation', ev.target.checked);
         renderDemRail(S.map.state.dem);
@@ -497,6 +533,7 @@ function mountLocationMap() {
     });
     paintAqKey();
     paintExposureKey();
+    paintOroKey();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
