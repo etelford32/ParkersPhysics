@@ -230,10 +230,15 @@ test.describe('launch-planner camera controls + responsive stage', () => {
         expect(Math.abs(azimuth(await stats(page)) - a0)).toBeGreaterThan(0.02);
         await page.click('.lh-toggle[data-toggle="autoRotate"]');
 
-        // Help opens and closes.
-        await page.click('.lh-cam[data-cam="help"]');
+        // Help opens and closes — DISPATCHED clicks, for the reason given at the
+        // full-screen exit below: page.click waits for the button to be "stable"
+        // across animation frames, and a software render on CI starves them. On
+        // main's 2026-11-08 run the Help close burned the test's whole 240 s
+        // budget at page.click('.lh-cam-help-x') BEFORE full screen was entered.
+        // The buttons' handlers are what is under test, not hit-testing.
+        await page.locator('.lh-cam[data-cam="help"]').dispatchEvent('click');
         await expect(page.locator('#lh-cam-help')).toBeVisible();
-        await page.click('.lh-cam-help-x');
+        await page.locator('.lh-cam-help-x').dispatchEvent('click');
         await expect(page.locator('#lh-cam-help')).toBeHidden();
 
         // Full screen (API or the CSS fallback): the stage covers the window.

@@ -75,6 +75,16 @@ async function boot(page, query = '', opts = {}) {
     await page.waitForFunction(() => window.__lpVehicle3d?.renderHealth, null, { timeout: 90_000 });
     // The consent banner covers the bottom of the page; it is chrome, not stage.
     await page.evaluate(() => document.querySelector('.pp-consent-banner')?.remove());
+    // Say which renderer this engine gave us and which rung detectQuality chose
+    // from it: a software renderer that hides its name (Firefox sanitizes the
+    // string) would get the full 'high' post chain on a CPU rasteriser.
+    const gpu = await page.evaluate(() => {
+        const a = window.__lpVehicle3d, gl = a.renderer.getContext();
+        let name = '';
+        try { const e = gl.getExtension('WEBGL_debug_renderer_info'); name = e ? String(gl.getParameter(e.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER)); } catch (_) { /* hardened */ }
+        return { name, quality: a.renderHealth.quality, webgl2: a.renderer.capabilities.isWebGL2 };
+    });
+    console.log(`[render-health] renderer "${gpu.name}" · quality ${gpu.quality} · webgl2 ${gpu.webgl2}`);
 }
 
 async function frames(page, n = 3) {
@@ -124,6 +134,13 @@ const unplant = (page) => page.evaluate(() => {
 
 test.describe('launch-planner 3D stage — render health', () => {
     test.setTimeout(300_000);
+    // Every test boots its own page and restores nothing it shares, so they run
+    // in PARALLEL and SHARD: on software GL the boot alone is ~18 s locally and
+    // ~2.4× that on a CI runner, and Firefox's software WebGL is slower again.
+    // Run serially in one job, the ten boots plus a retry outlasted the job's
+    // 40-minute cap and Firefox was cancelled before printing a single result
+    // (every run since 2026-11-08). The workflow shards the Firefox job.
+    test.describe.configure({ mode: 'parallel' });
 
     test('a planted NaN or Inf pixel cannot black out the stage (negative control: sanitize off)', async ({ page }) => {
         await boot(page);
