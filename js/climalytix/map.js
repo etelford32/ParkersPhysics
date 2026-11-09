@@ -64,6 +64,11 @@
  *             group) — the heat flux is the mean over the 3 h window that
  *             contains the instant, the other fields are interpolated across
  *             it. A run without the fields draws nothing and says why.
+ *   updraft   §19 T5 (updraft.js, PURE): GFS's own geometric vertical
+ *             velocity at the chosen pressure level as a fill, with every
+ *             node where that level is BELOW THE GROUND left blank; the rail
+ *             and hover LIST the vertical motions the other layers computed
+ *             (surface, slope jet, thermal scale, grid mean) — never a sum.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -91,6 +96,7 @@ import {
 } from './terrain.js';
 import { orographicGrid, orographicExtremes, orographicPaint, windSide, formatW } from './orographic.js';
 import { thermalAt, thermalPaint, windowAt } from './thermals.js';
+import { LEVELS, levelHeightAgl, levelUsable, bracket, verticalMotion, updraftPaint } from './updraft.js';
 import { slopeWind, slopeWindGrid, slopeWindExtremes, ANABATIC_RGB, KATABATIC_RGB, ARROW_MIN_MS, THETA0_DEFAULT_K } from './slope-wind.js';
 import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
@@ -122,7 +128,7 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
@@ -133,7 +139,7 @@ export function mountMap(root, deps) {
         drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
                  airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 },
                  aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null },
-                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false, slopewind: { arrows: 0, up: 0, down: 0 }, thermals: false },
+                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false, slopewind: { arrows: 0, up: 0, down: 0 }, thermals: false, updraft: { drawn: false, masked: 0, nodes: 0 } },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -708,6 +714,116 @@ export function mountMap(root, deps) {
             + (r.regime === 'cu' ? `cumulus base ${h(r.baseM)} AGL` : `blue (no cumulus) to ${h(r.topM)} AGL`);
     }
 
+    // ── Updraft (T5) ─────────────────────────────────────────────────────
+    const UP = { field: null, state: 'idle', note: '', level: 700, key: '', grid: null, canvasKey: '', sig: '' };
+    const UP_VARS = ['wMs850', 'wMs700', 'wMs500', 'psfcHpa', 'tempC'];
+    const levelSpec = (hPa) => LEVELS.find((l) => l.hPa === hPa);
+    /** Level `hPa` at a point from per-time samplers: { w, zAgl, usable } or null outside the run. */
+    function levelAt(hPa, ms, sample) {
+        const f = UP.field, b = f ? bracket(f.times, ms) : null;
+        if (!b) return null;
+        const lerp = (v) => {
+            const a = sample(v, b.i0), c = sample(v, b.i1);
+            return a == null || c == null ? NaN : a + (c - a) * b.f;
+        };
+        const psfc = lerp('psfcHpa');
+        const usable = levelUsable(psfc, hPa);
+        return { hPa, w: usable ? lerp(levelSpec(hPa).id) : NaN, zAgl: levelHeightAgl(psfc, hPa, lerp('tempC')), usable, psfc };
+    }
+    function updraftFor() {
+        const f = UP.field, ms = M.timeMs ?? Date.now();
+        if (!f || !bracket(f.times, ms)) return null;
+        const key = `${f.run}|${UP.level}|${Math.floor(ms / 600_000)}`;
+        if (UP.key !== key) {
+            const plane = f.nRows * f.nCols, w = new Float32Array(plane).fill(NaN);
+            let masked = 0;
+            for (let k = 0; k < plane; k++) {
+                const r = levelAt(UP.level, ms, (v, t) => {
+                    const x = f.fields[v][t * plane + k];
+                    return x == null || !Number.isFinite(x) ? null : x;
+                });
+                if (!r) continue;
+                if (!r.usable) masked++;
+                else w[k] = r.w;
+            }
+            UP.grid = { w, masked, nodes: plane };
+            UP.key = key; UP.canvasKey = '';
+        }
+        return UP.grid;
+    }
+    function updraftHere(lat, lon, hPa = UP.level) {
+        const f = UP.field;
+        if (!f) return null;
+        return levelAt(hPa, M.timeMs ?? Date.now(), (v, t) => fieldSample({ ...f, values: f.fields[v] }, t, lat, lon));
+    }
+
+    let upCanvas = null;
+    function drawUpdraft() {
+        M.drawn.updraft = { drawn: false, masked: 0, nodes: 0 };
+        if (M.layers.updraft && updraftFor()) {
+            const f = UP.field, g = UP.grid;
+            const key = `${UP.key}|${M.view.lat}|${M.view.lon}|${M.view.span}|${M.w}|${M.h}`;
+            if (UP.canvasKey !== key) {
+                const img = heatImage({ ...f, values: g.w }, 0, M.view, M.w, M.h, null, { step: HEAT_STEP_PX, paint: updraftPaint });
+                upCanvas = upCanvas || document.createElement('canvas');
+                upCanvas.width = img.cw; upCanvas.height = img.ch;
+                upCanvas.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+                UP.canvasKey = key;
+            }
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, M.heatAlpha + 0.2);
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(upCanvas, 0, 0, M.w, M.h);
+            ctx.restore();
+            dashedBox(fieldBox(f));
+            M.drawn.updraft = { drawn: true, masked: g.masked, nodes: g.nodes };
+        }
+        const info = updraftInfo();
+        const sig = JSON.stringify([info.state, info.level, info.timeMs, info.masked, info.budget?.map((r) => [r.key, r.w])]);
+        if (UP.sig !== sig) { UP.sig = sig; deps.onUpdraft?.(info); }
+    }
+
+    /** The vertical-motion LIST at a point from whatever the layers have computed. */
+    function budgetAt(lat, lon) {
+        const tr = D.grid ? terrainAt(lat, lon) : null;
+        const sw = tr?.slopeWind;
+        // Orographic w comes from the field itself, not from whether its FILL is showing
+        // (it and this layer are one-at-a-time) — whenever terrain + wind are loaded.
+        let oroW = null;
+        const oro = D.grid ? orographicFor() : null;
+        if (oro) {
+            const i = Math.round((D.grid.latN - lat) / D.grid.dlat), j = Math.round((wrapNear(lon, D.grid.lonW + 180) - D.grid.lonW) / D.grid.dlon);
+            const v = i >= 0 && j >= 0 && i < D.grid.nRows && j < D.grid.nCols ? oro[i * D.grid.nCols + j] : NaN;
+            oroW = Number.isFinite(v) ? v : null;
+        }
+        return verticalMotion({
+            orographicW: oroW,
+            slope: sw && sw.u != null ? { u: sw.u, slopeDeg: tr.slope, zJet: sw.zJet } : null,
+            thermal: TH.field ? thermalHere(lat, lon) : null,
+            levels: UP.field ? LEVELS.map((l) => updraftHere(lat, lon, l.hPa)).filter(Boolean) : [],
+        });
+    }
+
+    function updraftInfo() {
+        if (!M.layers.updraft) return { state: 'off' };
+        if (UP.state === 'loading' || UP.state === 'idle') return { state: 'loading', note: 'Loading the vertical-motion field…' };
+        if (!UP.field) return { state: 'down', note: UP.note };
+        const ms = M.timeMs ?? Date.now();
+        if (!bracket(UP.field.times, ms)) return { state: 'notime', note: 'The GFS run does not cover this time.' };
+        const g = updraftFor();
+        return { state: UP.state, note: UP.note, level: UP.level, timeMs: ms, masked: g.masked, nodes: g.nodes,
+                 site: M.site ? updraftHere(M.site.lat, M.site.lon) : null,
+                 budget: M.site ? budgetAt(M.site.lat, M.site.lon) : null };
+    }
+
+    function updraftText(r) {
+        if (!r) return null;
+        if (!r.usable) return `${r.hPa} hPa is below the ground here`;
+        const h = deps.formatHeight ? deps.formatHeight(r.zAgl) : `${Math.round(r.zAgl)} m`;
+        const dir = Math.abs(r.w) < 0.005 ? 'level' : r.w > 0 ? 'rising' : 'sinking';
+        return `GFS ${r.hPa} hPa (≈${h} above the ground): ${dir} ${Math.abs(r.w * 100).toFixed(1)} cm/s, 25 km mean`;
+    }
+
     function drawElevation() {
         M.drawn.elevation = { lines: 0, step: null, labels: [] };
         if (!M.layers.elevation || !D.grid) return;
@@ -1120,6 +1236,7 @@ export function mountMap(root, deps) {
         drawExposure();
         drawOrographic();
         drawThermals();
+        drawUpdraft();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
         drawElevation();
         drawSlopeWind();
@@ -1203,10 +1320,11 @@ export function mountMap(root, deps) {
                slopeWindText(tr.slopeWind)].filter(Boolean).join(' · ')
             : null;
         const thTxt = M.layers.thermals ? thermalText(thermalHere(g.lat, g.lon)) : null;
+        const upTxt = M.layers.updraft ? updraftText(updraftHere(g.lat, g.lon)) : null;
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        tip.textContent = [terrTxt, thTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
+        tip.textContent = [terrTxt, thTxt, upTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -1327,6 +1445,16 @@ export function mountMap(root, deps) {
             TH.note = note || ''; TH.key = ''; TH.sig = '';
             requestDraw();
         },
+        /** The vertical-motion field (GFS DZDT); state 'loading' | 'live' | 'stale' | 'down'. */
+        setUpdraft(state, body, note) {
+            UP.state = state; UP.field = body?.fields && UP_VARS.every((v) => body.fields[v]) ? body : null;
+            UP.note = note || ''; UP.key = ''; UP.sig = '';
+            requestDraw();
+        },
+        setUpdraftLevel(hPa) { if (levelSpec(hPa)) { UP.level = hPa; UP.key = ''; requestDraw(); } },
+        /** One level at a point (test + console hook), and the full vertical-motion list. */
+        updraftAt: (lat, lon, hPa) => updraftHere(lat, lon, hPa),
+        verticalMotionAt: (lat, lon) => budgetAt(lat, lon),
         /** Thermals at a point and instant (test + console hook). */
         thermalAt: (lat, lon, ms) => thermalHere(lat, lon, ms),
         setExposureMode(mode) { M.exposureMode = mode === 'now' ? 'now' : 'today'; D.expKey = ''; requestDraw(); deps.onDem?.(demInfo()); },
@@ -1379,6 +1507,7 @@ export function mountMap(root, deps) {
                 orographic: oroInfo(),
                 slopewind: slopeInfo(),
                 thermals: thermalInfo(),
+                updraft: updraftInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

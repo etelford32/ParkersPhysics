@@ -25,7 +25,8 @@ import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
-import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField } from './loaders.js';
+import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField, loadUpdraftField } from './loaders.js';
+import { updraftPaint, W_FULL_MS } from './updraft.js';
 import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
 import { windRose, prevailing, pollutionRose, ROSE_SPEED_EDGES, FLOW_SPEED_TOP_MS } from './airflow.js';
 import { pm25Aqi, alignByInstant } from './aq-field.js';
@@ -186,6 +187,8 @@ function loadMapField(site, signal) {
     requestSlopeForcing();
     S.thermalSite = null;
     requestThermals();
+    S.updraftSite = null;
+    requestUpdraft();
     renderRose();
     loadWindField(site, { signal }).then((r) => {
         if (signal.aborted || S.site !== site) return;
@@ -218,6 +221,51 @@ function requestThermals() {
         if (S.site !== site) return;
         S.map.setThermals(r.state, r.body, r.note);
     });
+}
+
+/** The vertical-motion field is fetched on FIRST enable of the layer, once per site. */
+function requestUpdraft() {
+    if (!$('#cx-layer-up')?.checked || !S.site || !S.map || S.updraftSite === S.site) return;
+    const site = S.site;
+    S.updraftSite = site;
+    S.map.setUpdraft('loading', null, '');
+    loadUpdraftField(site).then((r) => {
+        if (S.site !== site) return;
+        S.map.setUpdraft(r.state, r.body, r.note);
+    });
+}
+
+function paintUpdraftKey() {
+    const px = new Uint8ClampedArray(4), stops = [];
+    for (let k = 0; k <= 20; k++) {
+        const w = (k / 10 - 1) * W_FULL_MS;
+        px.fill(0); updraftPaint(w, px, 0);
+        stops.push(`rgba(${px[0]},${px[1]},${px[2]},${(px[3] / 255).toFixed(3)}) ${k * 5}%`);
+    }
+    $('#cx-up-key .cx-up-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')}), #2a3446`;
+    const t = $('#cx-up-key .cx-exp-ticks').children;
+    t[0].textContent = `−${W_FULL_MS * 100} cm/s sinking`; t[2].textContent = `+${W_FULL_MS * 100} cm/s rising`;
+}
+
+/** Rail status for the updraft layer: the level, the mask, and the vertical-motion LIST at the site. */
+function renderUpdraftRail(info) {
+    const st = $('#cx-up-status');
+    if (!info || info.state === 'off') { st.textContent = ''; return; }
+    st.dataset.state = info.state;
+    if (info.state === 'loading') { st.textContent = info.note || 'Loading…'; return; }
+    if (info.state === 'down' || info.state === 'notime') { st.textContent = info.note; return; }
+    const hhmm = new Date(info.timeMs + S.utcOffsetS * 1000).toISOString().slice(11, 16);
+    const h = (m) => (m == null || !Number.isFinite(m) ? '' : fmtText('height', m, S.units));
+    const mask = info.masked === info.nodes ? `${info.level} hPa is below the ground across this whole view — choose a higher level.`
+        : info.masked ? `${info.level} hPa is below the ground at ${Math.round(100 * info.masked / info.nodes)} % of the window (left blank).` : '';
+    const rows = (info.budget || []).map((r) => {
+        const val = r.w == null ? '—' : `${r.w >= 0 ? '+' : '−'}${Math.abs(r.w) >= 1 ? Math.abs(r.w).toFixed(1) + ' m/s' : (Math.abs(r.w) * 100).toFixed(1) + ' cm/s'}`;
+        const at = r.heightM == null ? '' : r.kind === 'surface' ? 'at the ground' : `~${h(r.heightM)} up`;
+        return `<tr><td>${esc(r.label)}</td><td class="num">${esc(val)}</td><td>${esc(at)}</td></tr>`;
+    }).join('');
+    st.innerHTML = `<b>${esc(hhmm)} local, ${info.level} hPa.</b> ${esc(mask)}`
+        + `<br>Vertical motion at the site — different things at different heights, <b>not added</b>:`
+        + `<table class="cx-vm">${rows}</table>${esc(info.note || '')}`;
 }
 
 /** The w* key: the map's own painter from 0 to WSTAR_FULL + a margin. */
@@ -573,6 +621,7 @@ function mountLocationMap() {
         onOro: renderOroRail,
         onSlope: renderSlopeRail,
         onThermals: renderThermalRail,
+        onUpdraft: renderUpdraftRail,
         utcOffsetS: () => S.utcOffsetS,
         // Elevation levels are chosen in the reader's height unit (round feet for a ft reader).
         heightUnits: () => ({
@@ -590,9 +639,13 @@ function mountLocationMap() {
     const showField = (which, on) => {
         const pick = (id, key) => (which === key ? on : (on ? false : $(id).checked));
         const temp = pick('#cx-layer-temp', 'temp'), aq = pick('#cx-layer-aq', 'aq'), exp = pick('#cx-layer-exp', 'exp'), oro = pick('#cx-layer-oro', 'oro');
-        const th = pick('#cx-layer-th', 'th');
+        const th = pick('#cx-layer-th', 'th'), up = pick('#cx-layer-up', 'up');
         $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq; $('#cx-layer-exp').checked = exp; $('#cx-layer-oro').checked = oro;
-        $('#cx-layer-th').checked = th;
+        $('#cx-layer-th').checked = th; $('#cx-layer-up').checked = up;
+        S.map.setLayer('updraft', up);
+        $('#cx-up-key').hidden = !up; $('#cx-up-status').hidden = !up; $('#cx-up-level').hidden = !up;
+        if (up) requestUpdraft();
+        renderUpdraftRail(S.map.state.updraft);
         S.map.setLayer('temperature', temp); S.map.setLayer('airquality', aq); S.map.setLayer('exposure', exp); S.map.setLayer('orographic', oro);
         S.map.setLayer('thermals', th);
         $('#cx-th-key').hidden = !th; $('#cx-th-status').hidden = !th;
@@ -612,6 +665,13 @@ function mountLocationMap() {
     $('#cx-layer-exp').addEventListener('change', (ev) => showField('exp', ev.target.checked));
     $('#cx-layer-oro').addEventListener('change', (ev) => showField('oro', ev.target.checked));
     $('#cx-layer-th').addEventListener('change', (ev) => showField('th', ev.target.checked));
+    $('#cx-layer-up').addEventListener('change', (ev) => showField('up', ev.target.checked));
+    $('#cx-up-level').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-level]');
+        if (!b) return;
+        for (const x of $('#cx-up-level').querySelectorAll('[data-level]')) x.setAttribute('aria-pressed', String(x === b));
+        S.map.setUpdraftLevel(Number(b.dataset.level));
+    });
     $('#cx-layer-slope').addEventListener('change', (ev) => {
         S.map.setLayer('slopewind', ev.target.checked);
         $('#cx-slope-key').hidden = !ev.target.checked; $('#cx-slope-status').hidden = !ev.target.checked;
@@ -641,6 +701,7 @@ function mountLocationMap() {
     paintExposureKey();
     paintOroKey();
     paintThermalKey();
+    paintUpdraftKey();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));

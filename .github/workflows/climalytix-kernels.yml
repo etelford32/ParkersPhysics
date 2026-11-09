@@ -51,6 +51,9 @@
 #                            saturation identity (truncated exponent = NEGATIVE
 #                            CONTROL), Deardorff scaling, regimes, the flux
 #                            window convention
+#   climalytix-updraft.mjs   §19 T5 updraft: level heights vs ICAO (isothermal
+#                            = NEGATIVE CONTROL), the below-ground mask, the
+#                            instantaneous bracket, a list never summed
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
@@ -145,6 +148,8 @@ jobs:
         run: node tests/climalytix-slope-wind.mjs
       - name: thermals (Deardorff + Romps LCL)
         run: node tests/climalytix-thermals.mjs
+      - name: updraft (GFS DZDT levels + the vertical-motion list)
+        run: node tests/climalytix-updraft.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)

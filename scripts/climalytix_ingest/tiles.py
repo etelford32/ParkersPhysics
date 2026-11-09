@@ -57,6 +57,13 @@ GFS_VARS = [
     {'id': 'shflxWm2', 'grib': ('SHTFL', 'surface'),            'kind': 'ave',  'unit': 'W/m2', 'quantity': 'flux',     'agg': 'mean', 'scale': 0.1,  'offset': 0.0,    'convert': None},
     {'id': 'hpblM',    'grib': ('HPBL', 'surface'),             'kind': 'inst', 'unit': 'm',    'quantity': 'height',   'agg': 'mean', 'scale': 1.0,  'offset': 0.0,    'convert': None},
     {'id': 'psfcHpa',  'grib': ('PRES', 'surface'),             'kind': 'inst', 'unit': 'hPa',  'quantity': 'pressure', 'agg': 'mean', 'scale': 0.02, 'offset': 750.0,  'convert': 'Pa_to_hPa'},
+    # §19 T5 (updraft). DZDT is the model's own GEOMETRIC vertical velocity (m/s,
+    # + up) — not VVEL's ω, so no ω → w density assumption is needed. A pressure
+    # level BELOW the ground is extrapolated fiction; readers mask it with psfcHpa.
+    # ±32.7 m/s at 1 mm/s covers resolved convective cores.
+    {'id': 'wMs850',   'grib': ('DZDT', '850 mb'),              'kind': 'inst', 'unit': 'm/s',  'quantity': 'vvel',     'agg': 'mean', 'scale': 0.001, 'offset': 0.0,   'convert': None},
+    {'id': 'wMs700',   'grib': ('DZDT', '700 mb'),              'kind': 'inst', 'unit': 'm/s',  'quantity': 'vvel',     'agg': 'mean', 'scale': 0.001, 'offset': 0.0,   'convert': None},
+    {'id': 'wMs500',   'grib': ('DZDT', '500 mb'),              'kind': 'inst', 'unit': 'm/s',  'quantity': 'vvel',     'agg': 'mean', 'scale': 0.001, 'offset': 0.0,   'convert': None},
 ]
 
 

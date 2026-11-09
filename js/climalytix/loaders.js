@@ -212,6 +212,29 @@ export async function loadThermalField(site, { signal } = {}) {
 }
 
 /**
+ * The GFS vertical-motion field (plan §19 T5): DZDT at 850 / 700 / 500 hPa
+ * plus the station pressure (the below-ground mask) and 2 m temperature (each
+ * level's height above the ground) — fetched on FIRST enable only.
+ */
+export async function loadUpdraftField(site, { signal } = {}) {
+    const vars = ['wMs850', 'wMs700', 'wMs500', 'psfcHpa', 'tempC'];
+    try {
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars }), signal);
+        if (!vars.every((v) => j?.fields?.[v])) {
+            const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
+            const old = (j?.reasons || []).some((r) => /no variable/.test(String(r)));
+            return { state: 'down', body: null,
+                note: old ? 'Our GFS archive was ingested before the vertical-motion fields existed; they arrive with the next run. Nothing stands in for them.'
+                          : `No vertical-motion field: ${why}. Nothing stands in for it.` };
+        }
+        return { state: j.freshness === 'fresh' ? 'live' : 'stale', body: j,
+                 note: `GFS vertical velocity (DZDT) at 850/700/500 hPa, run ${j.run} (${ageText(j.age_seconds)})` };
+    } catch (e) {
+        return { state: 'down', body: null, note: `No vertical-motion field: ${e?.message || 'unreachable'}. Nothing stands in for it.` };
+    }
+}
+
+/**
  * The CAMS air-quality field around the site (BOOTSTRAP source — Open-Meteo's
  * free tier; the page badges it). Resolves { state, body | null, note }.
  */

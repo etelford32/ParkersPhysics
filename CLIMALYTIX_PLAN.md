@@ -968,7 +968,7 @@ lift at a given spot, and the rail says so.
 | **T2** | **Orographic updraft** | The exact kinematic lower boundary condition `w = u·∂h/∂x + v·∂h/∂y` (flow forced up a slope); windward/leeward from the same dot product. Gate: a uniform wind over a tilted plane gives the closed-form w; wind along the contours gives 0; reversing the wind flips the sign. | T1's DEM + our GFS 10 m u/v (airflow's field) | **BUILT 2026-11-09** (below) |
 | **T3** | **Anabatic / katabatic slope winds** | Prandtl (1942): θ′ = Δθ·e^(−n/λ)cos(n/λ), u = Δθ·μ·e^(−n/λ)sin(n/λ), λ = (4K·K_h/(N²sin²α))^¼, **μ = g/(θ₀·N·√Pr)** (corrected 2026-11-09: the first draft's √(gK/(θ₀N²Pr)) is not a speed and is now the gate's negative control); peak u = 0.3224·μ·Δθ at n = πλ/4, independent of the slope angle. Forcing Δθ = Q/h from each slope's OWN budget (Meinel beam × T1 incidence × Kasten–Czeplak cloud − net longwave). Gate: both ODEs by finite differences, the peak, sign follows Δθ, flat ground has none, gentle slopes left blank. | T1 + GFS total cloud + 2 m T (`nwp-field?vars=cloudPct,tempC`) | **BUILT 2026-11-09** (below) |
 | **T4** | **Thermals** | Deardorff convective velocity `w* = (g/θ_v · H/(ρ·c_p) · z_i)^⅓`; thermal tops at the boundary-layer depth z_i; cumulus base at the EXACT LCL (Romps 2017, Lambert W; Espy's 125 m/K is only the cross-check) — "blue" thermals when the LCL sits above z_i. Gate: the LCL's defining saturation identity, w* scales as H^⅓ and z_i^⅓ exactly, H ≤ floor gives none, the flux window convention. | Our GFS archive + SHTFL (3 h mean), HPBL, PRES surface — ingested from 2026-11-09 (DSWRF not needed) | **BUILT 2026-11-09** (below) |
-| **T5** | **Updraft (general)** | The vertical air motion available: orographic (T2) + thermal (T4) + slope (T3), each kept SEPARATE in the readout (never one invented total), plus GFS vertical velocity at 850/700 hPa (ω → w = −ω/(ρg)) where ingested. Gate: ω→w conversion exact at standard density; components add without double counting. | T2–T4 + GFS VVEL | planned |
+| **T5** | **Updraft (general)** | The vertical air motion available, LISTED never summed: orographic (T2, surface) · the slope jet's vertical part u·sin α (T3) · thermal w* (T4, a SCALE, not a mean) · GFS w at 850/700/500 hPa (a 25 km GRID MEAN). GFS publishes DZDT (geometric w, m/s) beside VVEL, so the ω → w = −ω/(ρg) conversion first proposed here is unnecessary. Gate: level heights (hypsometric, standard-lapse mean T) reproduce the ICAO atmosphere to < 0.2 % (an isothermal column is the negative control); a level within 25 hPa of the surface pressure is BELOW THE GROUND and masked; the list carries no total. | T2–T4 + GFS DZDT 850/700/500 (ingest) | **BUILT 2026-11-09** (below) |
 | **T6** | **Convection** | Parcel theory on the GFS column: CAPE, CIN, lifted index (ingested, not recomputed — GFS's own), the convective temperature, and a "convection outlook" timeline panel (CAPE, CIN, LCL, z_i, w*) in Explore. Gate: a dry-adiabatic sounding has CAPE 0; the LI sign convention (negative = unstable) pinned both ways. | GFS CAPE/CIN/LFTX (ingest) | planned |
 
 **T1 as built (2026-11-09).** `js/climalytix/terrain.js` (PURE,
@@ -1074,3 +1074,29 @@ w* ≥ 1 m/s span in the rail. One measured adjustment: full paint at 3.5 m/s
 with alpha ≤ 0.65 — at 2.5 / 0.8 an ordinary midday field was an opaque slab.
 NOTE: nothing appears in production until the ingest workflow has run once
 with the new GFS_VARS.
+
+**T5 as built (2026-11-09).** The ingest gained `wMs850`, `wMs700`, `wMs500`
+(GFS DZDT, instantaneous, scale 0.001 m/s — append-only). THE WIRE BUG IT
+FOUND: `fieldBody` rounded every value to 0.1, which turned every w (cm/s)
+into 0 or ±0.1 — it now keeps each variable's own precision (`ceil(−log10
+scale)` decimals below 0.01, 0.1 otherwise; the point-tile gate's negative
+control is the old rounding). The kernel is `js/climalytix/updraft.js` (PURE,
+`tests/climalytix-updraft.mjs`): `levelHeightAgl` (hypsometric, standard-lapse
+mean T), `levelUsable` (THE MASK: a pressure level is used only where the
+surface pressure exceeds it by 25 hPa — at Boulder 850 hPa is underground and
+is a hole, never extrapolated fiction), `bracket` (instantaneous fields
+interpolated between stamps, the analysis included — unlike a flux window),
+and `verticalMotion`, a LIST sorted by height with kinds surface / slope /
+scale / mean and no total anywhere. The map's "Updraft" fill (one-at-a-time,
+level picker 850/700/500, red up / blue down on T2's palette) and the rail's
+"not added" table; the browser gate (`tests/climalytix-updraft.spec.js`) uses a
+mock surface pressure under 850 hPa everywhere, so a page without the mask
+WOULD draw ordinary 850 hPa numbers — removing the mask fails 2 of 4 tests
+(checked). An archive ingested before DZDT says so and draws nothing.
+
+**VISUALS ARE DELIBERATELY PLAIN UNTIL T6 (owner, 2026-11-09).** T1–T5 were
+built for correctness on closed-form mocks; the screenshots look basic because
+the mocks are smooth planes and no styling pass has been done. A VISUAL POLISH
+PASS across all six layers (palettes, legends, rail typography, the budget
+table, how fills and overlays stack) is scheduled AFTER T6, gated by the same
+browser specs — the polish must not move a single gated number.

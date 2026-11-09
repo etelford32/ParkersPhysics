@@ -201,4 +201,16 @@ ok('gaps stay NaN in the field and null on the wire; the path snaps to 0.25°', 
     assert.throws(() => readField(man, plan, 'nope', bodies), RangeError);
 });
 
+ok('the wire keeps each var at its own precision: vertical velocity in mm/s, the rest at 0.1', () => {
+    // A synthetic 2-var manifest: tempC at scale 0.01 and DZDT-like w at scale 0.001 (tiles.py GFS_VARS).
+    const m2 = { ...man, vars: [{ id: 'tempC', unit: 'degC', scale: 0.01, offset: 0 }, { id: 'wMs700', unit: 'm/s', scale: 0.001, offset: 0 }] };
+    const plan = { latN: 40, lonW: -105, nRows: 1, nCols: 2 };
+    const t = Float32Array.from([12.3456, -3.21]), w = Float32Array.from([0.0347, -0.0123]);
+    const body = fieldBody(m2, plan, 'tempC', t, { nowMs: man.runMs, site: { lat: 40, lon: -105 }, extra: { wMs700: w } });
+    assert.deepEqual(body.fields.tempC, [12.3, -3.2], 'temperature still rounds to 0.1');
+    assert.deepEqual(body.fields.wMs700, [0.035, -0.012], 'w keeps its 1 mm/s');
+    // NEGATIVE CONTROL: at the old 0.1 rounding these would both be 0 (−0 for the second).
+    assert.ok(Math.round(0.0347 * 10) / 10 === 0 && Object.is(Math.round(-0.0123 * 10) / 10, -0));
+});
+
 console.log(`\n${passed} passed`);

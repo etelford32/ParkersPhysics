@@ -219,7 +219,7 @@ export const FIELD_HALF_DEG_DEFAULT = 3;
 // §19 T4 adds the thermal inputs: dew point (cloud base), the 3 h mean surface
 // sensible heat flux, the model's boundary-layer height and station pressure.
 // A run ingested before them answers "no variable … in this run" — never a guess.
-export const FIELD_VARS = Object.freeze(['tempC', 'uMs', 'vMs', 'cloudPct', 'rhPct', 'precipMm', 'dewC', 'shflxWm2', 'hpblM', 'psfcHpa']);
+export const FIELD_VARS = Object.freeze(['tempC', 'uMs', 'vMs', 'cloudPct', 'rhPct', 'precipMm', 'dewC', 'shflxWm2', 'hpblM', 'psfcHpa', 'wMs850', 'wMs700', 'wMs500']);
 
 /** `vars` query value → a validated, de-duplicated list (default tempC), or { error }. */
 export function parseFieldVars(raw) {
@@ -331,9 +331,19 @@ export function readField(man, plan, varId, bodies) {
  */
 export function fieldBody(man, plan, varId, values, { nowMs, site, extra = null }) {
     const v = man.vars.find((x) => x.id === varId);
-    const wire = (arr) => Array.from(arr, (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null));
-    const first = wire(values);
-    const fields = extra ? { [varId]: first, ...Object.fromEntries(Object.entries(extra).map(([k, a]) => [k, wire(a)])) } : null;
+    // The wire rounds to 0.1 — right for °C, m/s wind, %, hPa — EXCEPT for a var stored
+    // finer than 0.01, which keeps its own precision. Vertical velocity (scale 0.001,
+    // §19 T5) is a few cm/s: at 0.1 every value collapsed to 0.0 or ±0.1 (the gate caught it).
+    const decimals = (id) => {
+        const sc = man.vars.find((x) => x.id === id)?.scale;
+        return sc > 0 && sc < 0.01 ? Math.ceil(-Math.log10(sc) - 1e-9) : 1;
+    };
+    const wire = (arr, id) => {
+        const m = 10 ** decimals(id);
+        return Array.from(arr, (x) => (Number.isFinite(x) ? Math.round(x * m) / m : null));
+    };
+    const first = wire(values, varId);
+    const fields = extra ? { [varId]: first, ...Object.fromEntries(Object.entries(extra).map(([k, a]) => [k, wire(a, k)])) } : null;
     return {
         ...(fields ? { vars: Object.keys(fields), fields } : {}),
         source: `climalytix-${man.source}`, role: 'archive', schema: man.schema,

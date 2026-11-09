@@ -363,7 +363,7 @@ def _():
         pass
 
 
-@ok('§19 T4 vars: every GFS_VARS entry resolves on f003/f006 the way the worker asks; f000 lacks only the windows')
+@ok('§19 T4/T5 vars: every GFS_VARS entry resolves on f003/f006 the way the worker asks; f000 lacks only the windows')
 def _():
     for lead in (3, 6):
         e = I.parse_idx(idx_text(lead))
@@ -378,11 +378,18 @@ def _():
     assert absent == ['gustMs'] or absent == [], f'analysis lacks {absent}'
     wins = [v['id'] for v in T.GFS_VARS if v['kind'] != 'inst']
     assert wins == ['precipMm', 'shflxWm2'], wins
+    # T5: DZDT (geometric w) is selected, never VVEL (ω, Pa/s) — they share the levels.
+    e6 = I.parse_idx(idx_text(6))
+    for lvl in ('850 mb', '700 mb', '500 mb'):
+        assert I.find_instant(e6, 'DZDT', lvl, 6)['var'] == 'DZDT'
+        assert I.find_instant(e0, 'DZDT', lvl, 0), f'DZDT {lvl} is in the analysis too'
+    assert [v['grib'][0] for v in T.GFS_VARS if v['id'].startswith('wMs')] == ['DZDT'] * 3
     ids = [v['id'] for v in T.GFS_VARS]
     assert ids[:9] == ['tempC', 'dewC', 'rhPct', 'uMs', 'vMs', 'gustMs', 'mslHpa', 'precipMm', 'cloudPct'], \
         'APPEND ONLY: the on-disk var index of existing archives must not move'
     by = {v['id']: v for v in T.GFS_VARS}
-    for vid, lo, hi in (('psfcHpa', 480.0, 1085.0), ('shflxWm2', -800.0, 1500.0), ('hpblM', 0.0, 6500.0)):
+    for vid, lo, hi in (('psfcHpa', 480.0, 1085.0), ('shflxWm2', -800.0, 1500.0), ('hpblM', 0.0, 6500.0),
+                        ('wMs700', -30.0, 30.0)):
         q, c = T.quantise(np.array([lo, hi]), by[vid]['scale'], by[vid]['offset'])
         assert c == 0, f'{vid} clips inside its physical range'
         back = T.dequantise(q, by[vid]['scale'], by[vid]['offset'])
@@ -428,6 +435,8 @@ def _():
     def true_value(e, L):
         var, kind = e['var'], I.describe(e['fcst'])
         if kind[0] in ('anl', 'inst'):
+            if var == 'DZDT':                                 # m/s: realistic, signed, level-dependent
+                return 0.01 * L - 0.05 if e['level'] == '700 mb' else 0.02
             return 90000.0 + 10 * L if var in ('PRMSL', 'PRES') else 200.0 + L
         _, a, b = kind
         if var == 'APCP':
@@ -470,6 +479,8 @@ def _():
             assert np.allclose(series('hpblM'), [200 + L for L in leads], atol=0.5)
             assert np.allclose(series('psfcHpa'), [900 + 0.1 * L for L in leads], atol=0.01)
             assert np.allclose(series('tempC'), [200 + L - 273.15 for L in leads], atol=0.005)
+            assert np.allclose(series('wMs700'), [0.01 * L - 0.05 for L in leads], atol=0.0005), series('wMs700')
+            assert man['clipped']['wMs700'] == 0 and man['clipped']['wMs850'] == 0
     finally:
         W.http_get, W.decode = saved[0], saved[1]
         os.environ.update(saved[2])

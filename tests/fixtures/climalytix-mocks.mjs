@@ -140,12 +140,22 @@ export function mockThermal(lat, lon, stampMs, site) {
         spreadK: Math.max(1, 9 + 2.5 * dLon),          // dew-point depression: moist west, dry east
     };
 }
+/** Vertical motion (m/s) per level — linear in lat, lon AND time, so interpolation is exact. */
+const W_EPOCH = Date.UTC(2026, 10, 1);
+export function mockUpdraft(lat, lon, stampMs, site) {
+    const hrs = (stampMs - W_EPOCH) / 3_600_000;
+    return {
+        wMs850: 0.05 + 0.04 * (lon - site.lon),
+        wMs700: 0.10 + 0.05 * (lat - site.lat) + 1e-4 * hrs,
+        wMs500: -0.03 + 0.02 * (lon - site.lon),
+    };
+}
 export function mockTempC(lat, lon, tMs, site) {
     const diurnal = 6 * Math.sin(2 * Math.PI * (tMs / 86_400_000 - 0.4));
     return 10 - 2.2 * (lat - site.lat) + 1.5 * (lon - site.lon) + diurnal;
 }
 
-export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['tempC'], windFn = null, cloudFn = () => 0, thermal = true } = {}) {
+export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['tempC'], windFn = null, cloudFn = () => 0, thermal = true, updraft = true } = {}) {
     const H = 3_600_000;
     const runMs = Math.floor((nowMs - ageH * H) / (6 * H)) * 6 * H;
     const leadsH = Array.from({ length: 81 }, (_, i) => i * 3);
@@ -171,6 +181,7 @@ export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['temp
     if (vars.length === 1 && vars[0] === 'tempC') return fieldBody(man, plan, 'tempC', values, { nowMs, site });
     const wind = { uMs: new Float32Array(values.length), vMs: new Float32Array(values.length), cloudPct: new Float32Array(values.length) };
     const th = Object.fromEntries(['dewC', 'shflxWm2', 'hpblM', 'psfcHpa'].map((k) => [k, new Float32Array(values.length)]));
+    const up = Object.fromEntries(['wMs850', 'wMs700', 'wMs500'].map((k) => [k, new Float32Array(values.length)]));
     for (let t = 0; t < man.times.length; t++) {
         for (let i = 0; i < plan.nRows; i++) for (let j = 0; j < plan.nCols; j++) {
             const lat = plan.latN - i * man.dlat, lon = plan.lonW + j * man.dlon;
@@ -182,14 +193,16 @@ export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['temp
             th.shflxWm2[k] = t === 0 ? NaN : m.shflxWm2;           // the analysis has no flux window
             th.hpblM[k] = m.hpblM; th.psfcHpa[k] = m.psfcHpa;
             th.dewC[k] = values[k] - m.spreadK;
+            const u = mockUpdraft(lat, lon, man.times[t], site);
+            up.wMs850[k] = u.wMs850; up.wMs700[k] = u.wMs700; up.wMs500[k] = u.wMs500;
         }
     }
-    const all = { tempC: values, ...wind, ...th };
-    const missing = vars.filter((id) => !all[id] || (!thermal && id in th));
+    const all = { tempC: values, ...wind, ...th, ...up };
+    const missing = vars.filter((id) => !all[id] || (!thermal && id in th && id !== 'psfcHpa') || (!updraft && id in up));
     if (missing.length) return { ...degradedNwp(site, '0p25', `no variable ${missing[0]} in this run`, nowMs), vars, fields: null, values: null };
     man.intervalH = { precipMm: 3, shflxWm2: 3 };
     const [first, ...rest] = vars;
-    man.vars = vars.map((id) => ({ id, unit: id === 'tempC' || id === 'dewC' ? 'degC' : 'm/s', scale: 0.01, offset: 0 }));
+    man.vars = vars.map((id) => ({ id, unit: id === 'tempC' || id === 'dewC' ? 'degC' : 'm/s', scale: id.startsWith('wMs') ? 0.001 : 0.01, offset: 0 }));   // the real GFS_VARS scales
     return fieldBody(man, plan, first, all[first], { nowMs, site, extra: Object.fromEntries(rest.map((id) => [id, all[id]])) });
 }
 
@@ -294,7 +307,7 @@ function demTilePng(z, x, y, heightAt = mockDem) {
     return cache.get(key);
 }
 
-export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
+export async function installClimalytixMocks(page, { dem = 'up', demHeight, windFn = null, cloudFn, cloud = 'up', thermal = 'up', updraft = 'up', onDem, down = null, archiveExpired = false, nwp = 'fresh', gibs = 'up', earth = 'up', aq = 'up', monitors = 'up', onTile, onRequest } = {}) {
     const isDown = (id) => down === 'all' || (down instanceof Set && down.has(id));
     await page.route('**/*', async (route) => {
         const url = new URL(route.request().url());
@@ -309,7 +322,7 @@ export async function installClimalytixMocks(page, { dem = 'up', demHeight, wind
                 const vars = (url.searchParams.get('vars') || 'tempC').split(',');
                 if (cloud === 'missing' && vars.includes('cloudPct')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable cloudPct in this run', now), vars, fields: null, values: null } });
                 if (nwp === 'nowind' && vars.includes('uMs')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable uMs in this run', now), vars, fields: null, values: null } });
-                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, vars, windFn, thermal: thermal !== 'missing', ...(cloudFn ? { cloudFn } : {}) }) });
+                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, vars, windFn, thermal: thermal !== 'missing', updraft: updraft !== 'missing', ...(cloudFn ? { cloudFn } : {}) }) });
             }
             if (p === '/api/climalytix/nwp') {
                 if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });

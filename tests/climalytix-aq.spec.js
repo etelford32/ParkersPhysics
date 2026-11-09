@@ -82,17 +82,20 @@ test('monitors vs the model: the bias is the closed form’s', async ({ page }) 
     const { aq, drawn } = await mapState(page);
     expect(drawn.monitors.n).toBe(6);
     // The same six offsets the fixture plants, measured at the monitor hour;
-    // the model is the field at its own instant.
+    // the model is the field at the 3-hourly instant NEAREST THAT READING
+    // (aq-field.js residuals) — not the instant the map displays, which can sit
+    // 2 h away from the monitor hour (the test used to fail at e.g. 10:51 UTC).
+    const modelMs = Math.round(aq.monitorsAt / (3 * H)) * 3 * H;
     const offsets = [[0.3, 0.4], [-0.6, 0.2], [1.1, -0.9], [-1.4, -1.2], [0.8, 1.6], [-0.2, -2.1]];
     const site = { lat: 40.02, lon: -105.27 };                        // the page's 0.01° site
     const diffs = offsets.map(([a, b]) => {
         const lat = site.lat + a, lon = site.lon + b;
         const obs = +(mockPm25(lat, lon, aq.monitorsAt, site) + MOCK_MONITOR_EXCESS).toFixed(3);
-        return mockPm25(lat, lon, aq.timeMs, site) - obs;
+        return mockPm25(lat, lon, modelMs, site) - obs;
     });
     const bias = Math.round(diffs.reduce((x, y) => x + y, 0) / 6 * 10) / 10;
     expect(Math.abs(aq.bias - bias), `page ${aq.bias} vs closed form ${bias}`).toBeLessThanOrEqual(0.1);
-    expect(Math.abs(aq.timeMs - aq.monitorsAt)).toBeLessThanOrEqual(1.5 * H);
+    expect(Math.abs(modelMs - aq.monitorsAt)).toBeLessThanOrEqual(1.5 * H);
     expect(aq.monitorsAt).toBeLessThanOrEqual(Date.now());
     await expect(page.locator('#cx-aq-status')).toContainText('6 monitors vs the model');
     expect(errors).toEqual([]);

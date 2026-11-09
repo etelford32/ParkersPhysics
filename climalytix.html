@@ -114,6 +114,12 @@ body {
 .cx-arr-up { background:rgb(255,184,77); color:rgb(255,184,77); }
 .cx-arr-down { background:rgb(122,214,255); color:rgb(122,214,255); }
 #cx-th-key[hidden], #cx-th-status[hidden] { display:none; }
+#cx-up-key[hidden], #cx-up-status[hidden], #cx-up-level[hidden] { display:none; }
+#cx-up-key .cx-up-bar { height:12px; border-radius:3px; background:#888; }
+#cx-up-key .cx-exp-ticks { display:flex; justify-content:space-between; font-size:.62rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
+.cx-vm { width:100%; border-collapse:collapse; font-size:.72rem; margin:.25rem 0; }
+.cx-vm td { padding:.1rem .25rem; border-top:1px solid rgba(255,255,255,.06); vertical-align:top; }
+.cx-vm td.num { text-align:right; font-family:ui-monospace, Menlo, Consolas, monospace; white-space:nowrap; }
 #cx-th-key .cx-th-bar { height:12px; border-radius:3px; background:#888; }
 #cx-th-key .cx-exp-ticks { display:flex; justify-content:space-between; font-size:.62rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
 #cx-oro-key .cx-oro-bar { height:12px; border-radius:3px; background:#888; }
@@ -353,7 +359,18 @@ body {
         <div class="cx-exp-ticks"><span>0.4 m/s</span><span>w* · weak &lt; 1 &lt; moderate &lt; 2 &lt; strong</span><span>2.5+</span></div>
       </div>
       <p id="cx-th-status" class="cx-map-note" role="status" hidden></p>
-      <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note"><b>Thermals</b> are columns of air warmed by the ground that rise through the daytime boundary layer. Their strength is the convective velocity w* (Deardorff 1970) from our GFS archive’s surface heat flux and boundary-layer height; they stop at the top of that layer, or lower at the cloud base, where the rising air saturates and builds cumulus — computed exactly (Romps 2017) from the 2 m temperature and dew point. Without cumulus they are “blue” thermals, unmarked in the sky. The heat flux is GFS’s mean over the 3-hour window containing the time on the timeline. This is a 25 km field: the sunny slope or dry field that actually releases a thermal is not resolved, and w* is the size of the updraughts, not a climb rate — a glider climbs at roughly w* minus its own sink. Weak / moderate / strong follow the soaring-forecast convention (under 1, 1–2, over 2 m/s). Heights are above the ground.</p></details>
+      <label class="cx-layer"><input type="checkbox" id="cx-layer-up">Updraft<span class="cx-layer-src" title="GFS's own vertical velocity (DZDT), from our archive">Ours</span></label>
+      <div id="cx-up-level" class="cx-seg" role="group" aria-label="Updraft level" hidden>
+        <button type="button" class="cx-btn" data-level="850" aria-pressed="false">850 hPa</button>
+        <button type="button" class="cx-btn" data-level="700" aria-pressed="true">700 hPa</button>
+        <button type="button" class="cx-btn" data-level="500" aria-pressed="false">500 hPa</button>
+      </div>
+      <div id="cx-up-key" hidden aria-label="Vertical motion key">
+        <div class="cx-up-bar"></div>
+        <div class="cx-exp-ticks"><span>−50 cm/s sinking</span><span>0</span><span>+50 cm/s rising</span></div>
+      </div>
+      <p id="cx-up-status" class="cx-map-note" role="status" hidden></p>
+      <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note"><b>Thermals</b> are columns of air warmed by the ground that rise through the daytime boundary layer. Their strength is the convective velocity w* (Deardorff 1970) from our GFS archive’s surface heat flux and boundary-layer height; they stop at the top of that layer, or lower at the cloud base, where the rising air saturates and builds cumulus — computed exactly (Romps 2017) from the 2 m temperature and dew point. Without cumulus they are “blue” thermals, unmarked in the sky. The heat flux is GFS’s mean over the 3-hour window containing the time on the timeline. This is a 25 km field: the sunny slope or dry field that actually releases a thermal is not resolved, and w* is the size of the updraughts, not a climb rate — a glider climbs at roughly w* minus its own sink. Weak / moderate / strong follow the soaring-forecast convention (under 1, 1–2, over 2 m/s). Heights are above the ground.</p><p class="cx-map-note"><b>Updraft</b> is GFS’s own vertical velocity at a pressure level — 850 hPa (~1.5 km up at sea level), 700 hPa (~3 km), 500 hPa (~5.5 km) — averaged over its 25 km grid cell: the rising and sinking of fronts, troughs, mountain waves and big storms. Where a level is below the ground (850 hPa over the Rockies) it is left blank — the model’s value there is extrapolated, not air. Each level’s height above the ground is estimated from the surface pressure and temperature. The side panel lists every vertical motion the map knows at the site — the slope’s push at the ground, the slope wind, the thermals’ strength, and these grid means — side by side and never added: they are different things at different heights.</p></details>
 
       <h3 class="cx-rail-h">Base map</h3>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-terrain" checked>Relief shading<span class="cx-layer-src" title="Shaded from EarthView’s self-hosted relief map">Relief</span></label>
