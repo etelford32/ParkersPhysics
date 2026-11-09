@@ -68,9 +68,50 @@ async function hermetic(page, { feed = null, feedDelayMs = 0, threeDelayMs = 0 }
     }
 }
 
+// Boot NARRATES. On Firefox CI every test once hung at the first locator for
+// the whole 5-minute budget while the canvas is static markup — a query that
+// cannot resolve means the page's main thread is not answering, and a bare
+// timeout says nothing about why. So the page's own console, uncaught errors,
+// crashes and navigations go to the test log, and until the stage is up a
+// probe asks the page every few seconds (raced against a timer) whether it
+// answers at all and how far the boot got.
+function narrate(page) {
+    const t0 = Date.now();
+    const log = (s) => console.log(`[render-health +${((Date.now() - t0) / 1000).toFixed(1)}s] ${s}`);
+    page.on('console', (m) => { if (m.type() !== 'debug') log(`console.${m.type()}: ${m.text().slice(0, 300)}`); });
+    page.on('pageerror', (e) => log(`pageerror: ${String(e?.stack || e).slice(0, 600)}`));
+    page.on('crash', () => log('page crashed'));
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) log(`navigated: ${f.url()}`); });
+    return log;
+}
+
+async function waitForStage(page, log, budgetMs = 150_000) {
+    const end = Date.now() + budgetMs;
+    let last = '';
+    while (Date.now() < end) {
+        const r = await Promise.race([
+            page.evaluate(() => ({
+                ready: document.readyState,
+                canvas: !!document.getElementById('lh-vehicle-canvas'),
+                api: !!window.__lpVehicle3d,
+                health: window.__lpVehicle3d?.renderHealth?.state ?? null,
+            })).catch((e) => ({ error: String(e).slice(0, 200) })),
+            new Promise((z) => setTimeout(() => z({ unresponsive: true }), 8_000)),
+        ]);
+        const s = JSON.stringify(r);
+        if (s !== last) { log(`probe ${s}`); last = s; }
+        if (r.health) return;
+        await new Promise((z) => setTimeout(z, 2_000));
+    }
+    throw new Error(`stage never came up in ${budgetMs / 1000} s; last probe ${last}`);
+}
+
 async function boot(page, query = '', opts = {}) {
+    const log = narrate(page);
     await hermetic(page, opts);
     await page.goto(PAGE + query, { waitUntil: 'domcontentloaded' });
+    log('domcontentloaded');
+    await waitForStage(page, log);
     await page.locator('#lh-vehicle-canvas').scrollIntoViewIfNeeded();
     await page.waitForFunction(() => window.__lpVehicle3d?.renderHealth, null, { timeout: 90_000 });
     // The consent banner covers the bottom of the page; it is chrome, not stage.

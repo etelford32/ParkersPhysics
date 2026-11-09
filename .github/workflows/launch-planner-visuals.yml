@@ -61,7 +61,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: launch-planner-chromium-report
-          path: playwright-report/
+          # The list reporter writes no playwright-report/; the failure
+          # screenshots and error-context snapshots live in test-results/.
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7
 
   cross-browser:
@@ -103,5 +107,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: launch-planner-${{ matrix.project }}-${{ matrix.shard }}-of-${{ matrix.of }}-report
-          path: playwright-report/
+          # The list reporter writes no playwright-report/; the failure
+          # screenshots and error-context snapshots live in test-results/.
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7
