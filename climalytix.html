@@ -67,17 +67,34 @@ body {
 }
 
 /* ── location map (top) ─────────────────────────────────────────────────── */
-#cx-map { grid-column:1 / -1; display:grid; grid-template-columns:210px minmax(0, 1fr); gap:12px; padding:10px; }
+#cx-map { grid-column:1 / -1; display:grid; grid-template-columns:270px minmax(0, 1fr); gap:12px; padding:10px; }
 #cx-map-layers { display:flex; flex-direction:column; gap:10px; min-width:0; }
-.cx-layer { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--cx-line);
-    border-radius:9px; cursor:pointer; font-size:.86rem; font-weight:600; min-height:40px; }
-.cx-layer:has(input:checked) { border-color:var(--cx-accent); background:rgba(0,198,255,.08); }
+.cx-layer { display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid transparent;
+    border-radius:8px; cursor:pointer; font-size:.84rem; font-weight:600; min-height:36px; background:rgba(255,255,255,.025); transition:background .12s, border-color .12s; }
+.cx-layer:hover { background:rgba(255,255,255,.05); }
+.cx-layer:has(input:checked) { border-color:rgba(0,198,255,.55); background:rgba(0,198,255,.09); box-shadow:inset 3px 0 0 var(--cx-accent); }
 .cx-layer input { width:16px; height:16px; accent-color:var(--cx-accent); }
 .cx-sublayers { display:flex; flex-direction:column; gap:4px; padding:0 0 0 14px; margin-top:-4px; font-size:.78rem; color:var(--cx-ink); }
 .cx-sublayers label { display:flex; align-items:center; gap:7px; cursor:pointer; min-height:26px; }
 .cx-sublayers input { accent-color:var(--cx-accent); }
 .cx-sublayers:has(input:disabled) { opacity:.45; }
 .cx-rail-h { margin:8px 0 -2px; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--cx-muted); }
+/* V4: the rail is grouped (Weather · Terrain · Convection · Base map), each group
+   collapsible and remembered per browser; every group starts open. */
+.cx-group { border-top:1px solid var(--cx-line); padding-top:6px; }
+.cx-group > summary.cx-rail-h { margin:0; cursor:pointer; list-style:none; display:flex; align-items:center; gap:6px; min-height:28px; }
+.cx-group > summary::-webkit-details-marker { display:none; }
+.cx-group > summary::before { content:'▸'; font-size:.7rem; transition:transform .15s; color:var(--cx-accent); }
+.cx-group[open] > summary::before { transform:rotate(90deg); }
+.cx-group-body { display:flex; flex-direction:column; gap:8px; padding:6px 0 4px; }
+/* One status style for every layer's readout: a state dot + a headline. */
+.cx-map-note[role="status"][data-state]::before { content:''; display:inline-block; width:7px; height:7px; border-radius:50%;
+    margin-right:6px; vertical-align:1px; background:var(--cx-muted); }
+.cx-map-note[role="status"][data-state="live"]::before { background:#6ef0b0; }
+.cx-map-note[role="status"][data-state="stale"]::before, .cx-map-note[role="status"][data-state="partial"]::before { background:#ffd479; }
+.cx-map-note[role="status"][data-state="down"]::before, .cx-map-note[role="status"][data-state="notime"]::before { background:#ff8c7a; }
+.cx-map-note[role="status"][data-state="off"]::before { display:none; }
+.cx-map-note[role="status"] > b:first-child { font-size:.8rem; }
 .cx-layer-src { margin-left:auto; font-size:.6rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--cx-accent); }
 #cx-heat-key canvas { width:100%; height:12px; display:block; border-radius:3px; }
 #cx-heat-key .cx-key-ticks { position:relative; height:14px; font-size:.64rem; color:var(--cx-muted); font-family:ui-monospace, Menlo, Consolas, monospace; }
@@ -319,6 +336,9 @@ body {
   <section id="cx-map" class="cx-card" aria-label="Location map">
     <div id="cx-map-layers" role="group" aria-label="Map layers">
       <h2>Layers</h2>
+      <details class="cx-group" id="cx-grp-weather" open>
+        <summary class="cx-rail-h">Weather</summary>
+        <div class="cx-group-body">
       <label class="cx-layer"><input type="checkbox" id="cx-layer-temp" checked>Temperature<span class="cx-layer-src" title="From Climalytix’s own GFS archive">Ours</span></label>
       <div class="cx-sublayers" role="group" aria-label="Temperature details">
         <label><input type="checkbox" id="cx-layer-iso" checked>Isotherms</label>
@@ -355,8 +375,11 @@ body {
       </div>
       <p id="cx-flow-status" class="cx-map-note" role="status">Loading…</p>
       <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note">10 m wind from the GFS run. Streaks move with the real wind, sped up by the factor printed above (it follows the zoom); brighter = faster. They show the wind pattern at the time on the timeline, frozen there: the airflow, not the path one parcel of air takes over hours. The rose counts the forecast hours at the site by the direction the wind blows <b>from</b>. Once an air-quality series is added it can also show which directions bring the dirtiest air.</p></details>
-
-      <h3 class="cx-rail-h">Terrain</h3>
+        </div>
+      </details>
+      <details class="cx-group" id="cx-grp-terrain" open>
+        <summary class="cx-rail-h">Terrain</summary>
+        <div class="cx-group-body">
       <label class="cx-layer"><input type="checkbox" id="cx-layer-elev">Elevation contours<span class="cx-layer-src" title="AWS Terrain Tiles (SRTM / 3DEP / GMTED blend), sampled onto the map’s own grid">DEM</span></label>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-exp">Sun exposure<span class="cx-layer-src" title="Computed here from the DEM slope and the real Sun">Ours</span></label>
       <div id="cx-exp-mode" class="cx-seg" role="group" aria-label="Sun exposure over" hidden>
@@ -380,8 +403,11 @@ body {
       <p id="cx-slope-status" class="cx-map-note" role="status" hidden></p>
       <p id="cx-dem-status" class="cx-map-note" role="status">Terrain layers off.</p>
       <details class="cx-about"><summary>About these layers</summary><p class="cx-map-note">Elevation: AWS Terrain Tiles (a public blend of SRTM, USGS 3DEP and GMTED), fetched at the zoom that matches the map and resampled onto the map’s own latitude/longitude grid — never a stretched web-Mercator image. Contours are round numbers in your height unit; every fifth is heavier and labelled. <b>Sun exposure</b> is the direct sunlight a slope receives divided by what flat ground at the same place receives: gold = more sun than flat ground (a south-facing slope in the northern winter), indigo = less; the colour is full strength at 1.41× and 0.71× (half a stop), which spans most real slopes. “Over today” sums the whole day’s Sun track at the map centre; “At this time” uses the Sun at each point at the time on the timeline (night is blank). It is clear-sky geometry only: no clouds, no haze, and no shadows cast by neighbouring ridges — a slope only shades itself. <b>Orographic lift</b> is the vertical wind the slope forces on the 10 m wind at the surface, w = u·∂h/∂x + v·∂h/∂y: red where the wind blows up the slope (forced ascent), blue where it blows down it. It is the surface value only — above the ground it fades over a height about the size of the hill, and a stable atmosphere turns it into lee waves this does not model. The wind is GFS’s, on GFS’s own ~25 km terrain, so a slope can feel a different wind; and w is only as fine as the slope grid. A diagnostic of where the flow is pushed, not a promise of lift at a spot. <b>Slope winds</b> are Prandtl’s (1942) steady flow along each slope’s fall line: air warmed by a sunlit slope slides up it (anabatic, amber), air chilled by a slope losing heat at night drains down it (katabatic, blue). Each slope’s heating is its own: the Sun at the time on the timeline on that slope’s face, minus the night-sky heat loss, both reduced by GFS cloud cover. The speed is an order of magnitude — the heat-transfer coefficient, background stability and mixing are fixed typical values, not measured here — while the direction and the timing (an east face turns upslope first) are the layer’s real claims. Gentle slopes are left blank: the flow takes longer to set up than the heating lasts. Not modelled: shadows cast by other ridges, the valley wind and the large-scale wind on top, and the turbulence of a hot afternoon.</p></details>
-
-      <h3 class="cx-rail-h">Convection</h3>
+        </div>
+      </details>
+      <details class="cx-group" id="cx-grp-convection" open>
+        <summary class="cx-rail-h">Convection</summary>
+        <div class="cx-group-body">
       <label class="cx-layer"><input type="checkbox" id="cx-layer-th">Thermals<span class="cx-layer-src" title="Computed here from our own GFS archive (heat flux, boundary layer, pressure, temperature, dew point)">Ours</span></label>
       <div id="cx-th-key" hidden aria-label="Thermal strength key">
         <div class="cx-th-bar"></div>
@@ -411,11 +437,16 @@ body {
       </div>
       <p id="cx-cv-status" class="cx-map-note" role="status" hidden></p>
       <details class="cx-about"><summary>About this layer</summary><p class="cx-map-note"><b>Thermals</b> are columns of air warmed by the ground that rise through the daytime boundary layer. Their strength is the convective velocity w* (Deardorff 1970) from our GFS archive’s surface heat flux and boundary-layer height; they stop at the top of that layer, or lower at the cloud base, where the rising air saturates and builds cumulus — computed exactly (Romps 2017) from the 2 m temperature and dew point. Without cumulus they are “blue” thermals, unmarked in the sky. The heat flux is GFS’s mean over the 3-hour window containing the time on the timeline. This is a 25 km field: the sunny slope or dry field that actually releases a thermal is not resolved, and w* is the size of the updraughts, not a climb rate — a glider climbs at roughly w* minus its own sink. Weak / moderate / strong follow the soaring-forecast convention (under 1, 1–2, over 2 m/s). Heights are above the ground.</p><p class="cx-map-note"><b>Updraft</b> is GFS’s own vertical velocity at a pressure level — 850 hPa (~1.5 km up at sea level), 700 hPa (~3 km), 500 hPa (~5.5 km) — averaged over its 25 km grid cell: the rising and sinking of fronts, troughs, mountain waves and big storms. Where a level is below the ground (850 hPa over the Rockies) it is left blank — the model’s value there is extrapolated, not air. Each level’s height above the ground is estimated from the surface pressure and temperature. The side panel lists every vertical motion the map knows at the site — the slope’s push at the ground, the slope wind, the thermals’ strength, and these grid means — side by side and never added: they are different things at different heights.</p><p class="cx-map-note"><b>Storm ingredients</b> checks the three things a thunderstorm needs. <b>Energy</b>: CAPE, the energy a rising surface parcel would gain from being warmer than the air around it (GFS’s own surface-based value; under 100 J/kg there is nothing to release). <b>The lid</b>: CIN, the energy needed to push the parcel up to where it starts to rise on its own — a warm layer aloft that holds storms down. <b>Lift</b>: the thermals from the layer above. “Capped” means energy under a lid the lift cannot push through (½·w² < |CIN|); “possible”, a weak lid (|CIN| ≤ 25 J/kg) but no strong thermals; “likely”, a weak lid with thermals of at least 1 m/s. The lifted index is the parcel’s temperature excess at 500 hPa, with the sign flipped: negative is unstable. GFS’s CIN is itself a forecast that weakens through the afternoon as the ground warms the air, so a lid “breaking” here is the model’s own heating. This is an ingredients check on a 25 km grid, not a probability or a warning: forced lift over terrain, fronts and storm outflows are not counted, and moisture is only what is inside CAPE. √(2·CAPE) is the speed a parcel would reach with no mixing — real updraughts reach about half. The same CAPE, CIN and lifted index can be charted for the site under Explore.</p></details>
-
-      <h3 class="cx-rail-h">Base map</h3>
+        </div>
+      </details>
+      <details class="cx-group" id="cx-grp-base-map" open>
+        <summary class="cx-rail-h">Base map</summary>
+        <div class="cx-group-body">
       <label class="cx-layer"><input type="checkbox" id="cx-layer-terrain" checked>Relief shading<span class="cx-layer-src" title="Shaded from EarthView’s self-hosted relief map">Relief</span></label>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-labels" checked>Place labels</label>
       <details class="cx-about"><summary>About this layer</summary><p id="cx-base-note" class="cx-map-note">Ground: NASA Blue Marble (self-hosted, so it never goes blank) with NASA GIBS 500 m imagery over it where it loads — both <b>archival</b> cloud-free composites, not today’s surface. Relief shading uses a ~20 km relief map, lit from the north-west by cartographic convention (not today’s Sun) and exaggerated ×10 vertically; nothing finer than ~20 km is shaded. Labels are EarthView’s city list, as many as fit.</p></details>
+        </div>
+      </details>
     </div>
     <div id="cx-map-stage">
       <canvas id="cx-map-canvas" tabindex="0" aria-label="Location map. Drag to pan, scroll or pinch to zoom; arrow keys pan, plus and minus zoom, 0 recentres."></canvas>

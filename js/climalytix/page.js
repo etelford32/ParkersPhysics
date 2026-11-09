@@ -250,6 +250,20 @@ function requestUpdraft() {
     });
 }
 
+/** V4: which rail groups the reader collapsed, per browser (a convenience; never required). */
+const GROUPS_KEY = 'cx_rail_groups_v1';
+function rememberGroups() {
+    let shut = [];
+    try { shut = JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]'); } catch { shut = []; }
+    for (const g of document.querySelectorAll('#cx-map-layers .cx-group')) {
+        if (Array.isArray(shut) && shut.includes(g.id)) g.open = false;
+        g.addEventListener('toggle', () => {
+            const now = [...document.querySelectorAll('#cx-map-layers .cx-group')].filter((x) => !x.open).map((x) => x.id);
+            try { localStorage.setItem(GROUPS_KEY, JSON.stringify(now)); } catch { /* storage unavailable: session only */ }
+        });
+    }
+}
+
 /**
  * ONE KEY PER FILL, ON THE MAP (visual pass V3). The active fill's key is
  * the SAME element the rail built — moved, not copied, so the map shows
@@ -818,6 +832,7 @@ function mountLocationMap() {
     paintUpdraftKey();
     paintConvectionKey();
     syncMapKey();
+    rememberGroups();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
