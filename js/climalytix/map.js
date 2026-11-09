@@ -24,6 +24,16 @@
  *             seam is added (map-view heatImage) — plus, under it, labelled
  *             isotherms in the reader's unit with the freezing line
  *             emphasised (contours.js) and the window's warmest/coldest nodes.
+ *   airflow   our own GFS 10 m wind (airflow.js, PURE) on a SECOND canvas
+ *             over the map (#cx-map-flow, pointer-events none) so the
+ *             animation never repaints the base map: seeded particles move
+ *             with the real wind, time-compressed (FLOW_COMPRESSION, printed
+ *             in the rail), coloured by the site's ONE wind palette
+ *             (js/wind-palette.js windColor at 10 m). Reduced motion gets
+ *             static STREAMLINES from the same integrator. Wind down ⇒ no
+ *             flow and the rail says why. The animation runs only while the
+ *             layer is on, the field covers the shown time and the stage is
+ *             on screen (IntersectionObserver).
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -34,17 +44,23 @@
  */
 
 import {
-    makeView, zoomAt, panBy, panStep, geoToPx, pxToGeo, tilePlan, scaleBar, scales, wrapNear,
+    makeView, zoomAt, panBy, panStep, geoToPx, pxToGeo, tilePlan, scaleBar, scales, wrapNear, viewBounds,
     fieldTimeIndex, fieldSample, fieldRange, fieldExtremes, heatImage, ZOOM_STEP,
 } from './map-view.js';
 import { contourLines, isothermLevels, labelAnchor } from './contours.js';
 import { GIBS_LAYERS, buildTileUrl } from '../earth-detail-inset.js';
 import { UNDERLAY_TIERS, RELIEF_SRC, underlayTier, underlayRects, hillshade, cityLabels } from './basemap.js';
 import { MAJOR_CITIES } from '../data/major-cities.js';
+import { createFlow, streamlines, windAt, fieldBox, fromDirection, compressionFor, compressionLabel, SECTOR_NAMES_16 } from './airflow.js';
+import { windColor } from '../wind-palette.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
 
 const BASE = GIBS_LAYERS.blueMarble;
 const TERRAIN_ALPHA = 0.7;
+const FLOW_ALT_KM = 0.01;            // the wind palette's shade for a 10 m field
+const FLOW_FADE = 0.965;             // trail persistence per frame at 60 fps (half-life ≈ 0.33 s)
+const FLOW_PX_PER_PARTICLE = 420;    // one particle per this many CSS px² of data box
+const FLOW_MIN = 150, FLOW_MAX = 1600;
 const ASSET_ROOT = new URL('../../', import.meta.url);
 const TILE_CACHE_MAX = 240;
 const OCEAN = '#0a1a2e';
@@ -57,14 +73,20 @@ export function mountMap(root, deps) {
     const stage = root.querySelector('#cx-map-stage');
     const canvas = root.querySelector('#cx-map-canvas');
     const ctx = canvas.getContext('2d');
+    const flowCanvas = root.querySelector('#cx-map-flow');
+    const fctx = flowCanvas.getContext('2d');
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const tip = root.querySelector('#cx-map-tip');
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true }, heatAlpha: HEAT_ALPHA_DEFAULT,
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true }, heatAlpha: HEAT_ALPHA_DEFAULT,
         tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null,
         underlay: new Map(), relief: { state: 'idle', canvas: null, ms: null },
-        drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [] },
+        wind: null, windState: 'loading', windNote: '',
+        flow: null, flowKey: '', flowRaf: 0, flowLast: 0, flowDirty: true, flowFrames: 0, onScreen: true,
+        drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
+                 airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 } },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -251,8 +273,16 @@ export function mountMap(root, deps) {
         ctx.restore();
         // The data window: where the field ends is drawn, not implied. The
         // heat is evaluated between nodes only, so the box IS the node extent.
-        const r = { west: f.lonW, east: f.lonW + (f.nCols - 1) * f.dlon,
-                    north: f.latN, south: f.latN - (f.nRows - 1) * f.dlat };
+        const shift = dashedBox({ west: f.lonW, east: f.lonW + (f.nCols - 1) * f.dlon,
+                                  north: f.latN, south: f.latN - (f.nRows - 1) * f.dlat });
+        M.drawn.heat = true;
+        M.drawn.t = t;
+        if (M.layers.isotherms) drawIsotherms(t, shift);
+        if (M.layers.extremes) drawExtremes(t, shift);
+    }
+
+    /** The data window: where a field ends is drawn, not implied. Returns its 360° shift. */
+    function dashedBox(r) {
         const shift = wrapNear((r.west + r.east) / 2, M.view.lon) - (r.west + r.east) / 2;
         const a = lin(r.north, r.west + shift), b = lin(r.south, r.east + shift);
         ctx.save();
@@ -261,10 +291,7 @@ export function mountMap(root, deps) {
         ctx.lineWidth = 1;
         ctx.strokeRect(a.x + 0.5, a.y + 0.5, b.x - a.x, b.y - a.y);
         ctx.restore();
-        M.drawn.heat = true;
-        M.drawn.t = t;
-        if (M.layers.isotherms) drawIsotherms(t, shift);
-        if (M.layers.extremes) drawExtremes(t, shift);
+        return shift;
     }
 
     // Isotherms depend on the field, the time and the reader's unit — never on
@@ -356,6 +383,147 @@ export function mountMap(root, deps) {
         ctx.restore();
     }
 
+    // ── Airflow (second canvas) ────────────────────────────────────────────
+    function windTimeIndex() {
+        const f = M.wind;
+        if (!f?.u) return null;
+        const want = M.timeMs ?? Date.now();
+        return fieldTimeIndex(f.times, want) ?? (M.timeMs == null ? null : fieldTimeIndex(f.times, Date.now()));
+    }
+
+    /** The data box on screen (CSS px), in the view's turn. */
+    function windBoxPx() {
+        const b = fieldBox(M.wind);
+        const shift = wrapNear((b.west + b.east) / 2, M.view.lon) - (b.west + b.east) / 2;
+        const a = lin(b.north, b.west + shift), c = lin(b.south, b.east + shift);
+        return { x0: a.x, y0: a.y, x1: c.x, y1: c.y, shift };
+    }
+
+    /** Compression for this zoom (airflow.js compressionFor): CSS px per metre at the centre. */
+    function flowCompression() {
+        return compressionFor(scales(M.view, M.h).ky / 111_320);
+    }
+
+    function flowWanted() {
+        return M.layers.airflow && M.wind?.u && M.view && M.w && windTimeIndex() != null;
+    }
+
+    const flowColor = (s) => {
+        const c = windColor(s, FLOW_ALT_KM);
+        return `rgb(${(c[0] * 255) | 0},${(c[1] * 255) | 0},${(c[2] * 255) | 0})`;
+    };
+    // Ten colour buckets: one stroke per bucket per frame instead of one per particle.
+    const FLOW_BUCKETS = Array.from({ length: 10 }, (_, k) => flowColor((k + 0.5) / 10));
+
+    function clearFlow() {
+        fctx.setTransform(1, 0, 0, 1, 0, 0);
+        fctx.clearRect(0, 0, flowCanvas.width, flowCanvas.height);
+        fctx.setTransform(M.dpr, 0, 0, M.dpr, 0, 0);
+    }
+
+    function ensureFlow() {
+        // Spawn only where the data box is on screen: constant density at any zoom.
+        const { shift } = windBoxPx();
+        const vb = viewBounds(M.view, M.w, M.h);
+        const region = { north: vb.north, south: vb.south, west: vb.west - shift, east: vb.east - shift };
+        const bx = windBoxPx();
+        const vis = Math.max(0, Math.min(bx.x1, M.w) - Math.max(bx.x0, 0)) * Math.max(0, Math.min(bx.y1, M.h) - Math.max(bx.y0, 0));
+        const count = Math.round(Math.min(FLOW_MAX, Math.max(FLOW_MIN, vis / FLOW_PX_PER_PARTICLE)));
+        const compression = flowCompression();
+        const key = `${M.wind.run}|${count}|${region.north.toFixed(3)}|${region.west.toFixed(3)}|${M.view.span}|${compression}`;
+        if (M.flowKey !== key) {
+            M.flow = createFlow(M.wind, { count, seed: 20261109, region, compression });
+            M.flowKey = key;
+        }
+    }
+
+    function drawStreamlines(t) {
+        clearFlow();
+        const { shift } = windBoxPx();
+        const lines = streamlines(M.wind, t);
+        fctx.lineWidth = 1.4;
+        fctx.lineCap = 'round';
+        for (const l of lines) {
+            const s = l.pts.reduce((a, p) => a + p.s, 0) / l.pts.length;
+            fctx.strokeStyle = flowColor(s);
+            fctx.globalAlpha = 0.85;
+            fctx.beginPath();
+            l.pts.forEach((p, k) => { const q = lin(p.lat, p.lon + shift); if (k) fctx.lineTo(q.x, q.y); else fctx.moveTo(q.x, q.y); });
+            fctx.stroke();
+            // Arrowhead at the downwind end.
+            const a = lin(l.pts.at(-2).lat, l.pts.at(-2).lon + shift), b = lin(l.pts.at(-1).lat, l.pts.at(-1).lon + shift);
+            const ang = Math.atan2(b.y - a.y, b.x - a.x);
+            fctx.beginPath();
+            fctx.moveTo(b.x, b.y);
+            fctx.lineTo(b.x - 6 * Math.cos(ang - 0.45), b.y - 6 * Math.sin(ang - 0.45));
+            fctx.moveTo(b.x, b.y);
+            fctx.lineTo(b.x - 6 * Math.cos(ang + 0.45), b.y - 6 * Math.sin(ang + 0.45));
+            fctx.stroke();
+        }
+        fctx.globalAlpha = 1;
+        Object.assign(M.drawn.airflow, { mode: 'streamlines', t, lines: lines.length, particles: 0 });
+    }
+
+    function flowFrame(ts) {
+        M.flowRaf = 0;
+        if (!flowWanted() || !M.onScreen) { M.drawn.airflow.mode = null; clearFlow(); return; }
+        const t = windTimeIndex();
+        const dt = M.flowLast ? Math.min(0.05, Math.max(0, (ts - M.flowLast) / 1000)) : 1 / 60;
+        M.flowLast = ts;
+        ensureFlow();
+        const { shift } = windBoxPx();
+        if (M.flowDirty) { clearFlow(); M.flowDirty = false; }
+        // Fade the trails (frame-rate independent).
+        fctx.save();
+        fctx.setTransform(1, 0, 0, 1, 0, 0);
+        fctx.globalCompositeOperation = 'destination-in';
+        fctx.fillStyle = `rgba(0,0,0,${Math.pow(FLOW_FADE, dt * 60)})`;
+        fctx.fillRect(0, 0, flowCanvas.width, flowCanvas.height);
+        fctx.restore();
+        M.flow.step(dt, t);
+        const paths = FLOW_BUCKETS.map(() => []);
+        for (const p of M.flow.particles) {
+            if (p.born) continue;
+            paths[Math.min(9, Math.floor(p.s * 10))].push(p);
+        }
+        fctx.lineCap = 'round';
+        fctx.lineWidth = 1.6;
+        paths.forEach((ps, k) => {
+            if (!ps.length) return;
+            fctx.strokeStyle = FLOW_BUCKETS[k];
+            fctx.beginPath();
+            for (const p of ps) {
+                const a = lin(p.prevLat, p.prevLon + shift), b = lin(p.lat, p.lon + shift);
+                fctx.moveTo(a.x, a.y); fctx.lineTo(b.x, b.y);
+            }
+            fctx.stroke();
+        });
+        M.flowFrames++;
+        Object.assign(M.drawn.airflow, { mode: 'particles', t, particles: M.flow.particles.length, frames: M.flowFrames, lines: 0 });
+        M.flowRaf = requestAnimationFrame(flowFrame);
+    }
+
+    /** (Re)start whatever the airflow layer should be doing now. */
+    function updateFlow() {
+        M.flowDirty = true;
+        if (!flowWanted() || !M.onScreen) {
+            if (M.flowRaf) cancelAnimationFrame(M.flowRaf);
+            M.flowRaf = 0;
+            clearFlow();
+            M.drawn.airflow.mode = null;
+            return;
+        }
+        if (reduceMotion?.matches) {
+            if (M.flowRaf) cancelAnimationFrame(M.flowRaf);
+            M.flowRaf = 0;
+            drawStreamlines(windTimeIndex());
+            return;
+        }
+        if (!M.flowRaf) { M.flowLast = 0; M.flowRaf = requestAnimationFrame(flowFrame); }
+    }
+    reduceMotion?.addEventListener?.('change', updateFlow);
+    new IntersectionObserver(([e]) => { M.onScreen = e.isIntersecting; updateFlow(); }).observe(stage);
+
     // ── Frame ──────────────────────────────────────────────────────────────
     function draw() {
         M.raf = 0;
@@ -368,6 +536,7 @@ export function mountMap(root, deps) {
         M.drawn.tiles = drawTileLayer(BASE, plan);
         M.drawn.terrain = drawTerrain();
         drawHeat();
+        if (!M.drawn.heat && flowWanted()) dashedBox(fieldBox(M.wind));
         M.drawn.labels = drawLabels();
         drawSite();
         const sb = scaleBar(M.view, M.h, 110);
@@ -379,6 +548,14 @@ export function mountMap(root, deps) {
 
     function requestDraw() {
         if (!M.raf) M.raf = requestAnimationFrame(draw);
+    }
+
+    function windInfo() {
+        const t = windTimeIndex();
+        return { state: M.windState, note: M.windNote, t, timeMs: t == null ? null : M.wind.times[t],
+                 compression: M.view && M.h ? flowCompression() : null,
+                 compressionLabel: M.view && M.h ? compressionLabel(flowCompression()) : null,
+                 run: M.wind?.run ?? null, nRows: M.wind?.nRows ?? 0, nCols: M.wind?.nCols ?? 0 };
     }
 
     function frameInfo() {
@@ -399,7 +576,12 @@ export function mountMap(root, deps) {
         canvas.height = Math.round(M.h * M.dpr);
         canvas.style.width = `${M.w}px`;
         canvas.style.height = `${M.h}px`;
+        flowCanvas.width = canvas.width; flowCanvas.height = canvas.height;
+        flowCanvas.style.width = `${M.w}px`;
+        flowCanvas.style.height = `${M.h}px`;
+        fctx.setTransform(M.dpr, 0, 0, M.dpr, 0, 0);
         requestDraw();
+        updateFlow();
     }
     new ResizeObserver(resize).observe(stage);
 
@@ -409,8 +591,12 @@ export function mountMap(root, deps) {
         const g = pxToGeo(M.view, M.w, M.h, M.hover.x, M.hover.y);
         const t = currentTimeIndex();
         const v = M.layers.temperature ? fieldSample(M.field, t, g.lat, g.lon) : null;
+        const tw = windTimeIndex();
+        const w = M.layers.airflow && tw != null ? windAt(M.wind, tw, g.lat, g.lon) : null;
         const ll = `${Math.abs(g.lat).toFixed(2)}°${g.lat >= 0 ? 'N' : 'S'} ${Math.abs(((g.lon + 540) % 360) - 180).toFixed(2)}°${((g.lon + 540) % 360) - 180 >= 0 ? 'E' : 'W'}`;
-        tip.textContent = v == null ? ll : `${deps.formatTemp(v)} · ${ll}`;
+        const wind = w && deps.formatWind
+            ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
+        tip.textContent = [v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -488,7 +674,11 @@ export function mountMap(root, deps) {
         else if (a.startsWith('pan-')) setView(panStep(M.view, a.slice(4), M.w, M.h));
     }
 
-    function setView(v) { M.view = v; requestDraw(); }
+    function setView(v) {
+        const c0 = M.view && M.h ? flowCompression() : null;
+        M.view = v; requestDraw(); updateFlow();
+        if (flowCompression() !== c0) deps.onWind?.(windInfo());
+    }
 
     // ── API ────────────────────────────────────────────────────────────────
     const api = {
@@ -498,13 +688,37 @@ export function mountMap(root, deps) {
             M.site = site;
             if (moved) { M.view = makeView(site.lat, site.lon); M.home = { span: M.view.span }; }
             requestDraw();
+            updateFlow();
         },
         setField(state, body, note) {
             M.fieldState = state; M.field = body?.values ? body : null; M.fieldNote = note || '';
             requestDraw();
         },
-        setTime(ms) { M.timeMs = Number.isFinite(ms) ? ms : null; requestDraw(); },
-        setLayer(name, on) { M.layers[name] = !!on; requestDraw(); },
+        setTime(ms) {
+            const before = windTimeIndex();
+            M.timeMs = Number.isFinite(ms) ? ms : null;
+            requestDraw();
+            if (windTimeIndex() !== before) { updateFlow(); deps.onWind?.(windInfo()); }
+        },
+        setLayer(name, on) { M.layers[name] = !!on; requestDraw(); if (name === 'airflow') updateFlow(); },
+        /** The flow canvas's painted share (0‥1 of pixels with alpha) — the gate's on/off control. */
+        flowCoverage() {
+            const d = fctx.getImageData(0, 0, flowCanvas.width, flowCanvas.height).data;
+            let n = 0;
+            for (let k = 3; k < d.length; k += 4) if (d[k] > 8) n++;
+            return n / (d.length / 4);
+        },
+        setWind(state, body, note) {
+            M.windState = state; M.wind = body?.u ? body : null; M.windNote = note || '';
+            M.flowKey = '';
+            updateFlow();
+            requestDraw();
+            deps.onWind?.(windInfo());
+        },
+        /** Particle positions now (copies) — the browser gate's direction check. */
+        flowSnapshot() {
+            return M.flow ? M.flow.particles.map((p) => ({ lat: p.lat, lon: p.lon, born: p.born })) : [];
+        },
         /** The reader's unit changed: isotherm levels are chosen in it. */
         unitsChanged() { isoCache = { key: '', levels: [] }; requestDraw(); },
         setHeatAlpha(a) { M.heatAlpha = Math.max(0, Math.min(1, a)); requestDraw(); },
@@ -515,6 +729,7 @@ export function mountMap(root, deps) {
                 field: M.field ? { nRows: M.field.nRows, nCols: M.field.nCols, run: M.field.run } : null,
                 fieldState: M.fieldState, drawn: { ...M.drawn }, frame: frameInfo(),
                 relief: { state: M.relief.state, ms: M.relief.ms },
+                wind: windInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

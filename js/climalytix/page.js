@@ -25,7 +25,9 @@ import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
-import { loadDataset, loadField } from './loaders.js';
+import { loadDataset, loadField, loadWindField } from './loaders.js';
+import { windRose, prevailing, ROSE_SPEED_EDGES, FLOW_SPEED_TOP_MS } from './airflow.js';
+import { windColor } from '../wind-palette.js';
 import { mountMap } from './map.js';
 import { tempToRampFrac } from '../temp-ramp.js';
 import { resolveUnits, fmt, fmtText, fromDisplay, QUANTITIES } from '../climate-lab/lab-units.js';
@@ -140,6 +142,7 @@ function loadAll({ only = null } = {}) {
             S.loading.delete(id);
             S.results.set(id, r);
             if ((id === 'era5' || id === 'station') && Number.isFinite(r.utcOffsetS)) S.utcOffsetS = r.utcOffsetS;
+            if (id === 'gfs') renderRose();
             renderCatalog();
             renderPanels();
         });
@@ -157,6 +160,79 @@ function loadMapField(site, signal) {
         S.field = r;
         S.map?.setField(r.state, r.body, r.note);
     });
+    S.map?.setWind('loading', null, 'Loading the wind field…');
+    renderRose();
+    loadWindField(site, { signal }).then((r) => {
+        if (signal.aborted || S.site !== site) return;
+        S.map?.setWind(r.state, r.body, r.note);
+    });
+}
+
+/** Rail status for the airflow layer. */
+function renderFlowRail(info) {
+    const st = $('#cx-flow-status');
+    if (!$('#cx-layer-airflow').checked) { st.textContent = 'Airflow layer off.'; st.dataset.state = 'off'; return; }
+    st.dataset.state = info.state;
+    if (info.state === 'loading') { st.textContent = 'Loading the wind field…'; return; }
+    if (info.state === 'down') { st.textContent = info.note; return; }
+    if (info.t == null) { st.textContent = 'The run does not cover this time — no wind is held past its end.'; st.dataset.state = 'down'; return; }
+    const local = new Date(info.timeMs + S.utcOffsetS * 1000);
+    st.innerHTML = `<b>Wind at ${esc(local.toUTCString().slice(0, 3))} ${esc(local.toISOString().slice(11, 16))} local</b>`
+        + ` · streaks ${esc(info.compressionLabel || '')} of travel<br>${esc(info.note)}`;
+}
+
+/**
+ * The wind rose of the site's GFS hours (airflow.js windRose): petals point
+ * to where the wind comes FROM, stacked by speed class in the ONE wind
+ * palette. Drawn on a canvas; the caption says the prevailing direction.
+ */
+function renderRose() {
+    const host = $('#cx-rose'), c = host.querySelector('canvas'), cap = $('#cx-rose-caption');
+    const w = S.results.get('gfs')?.wind;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (!w) { cap.textContent = S.results.has('gfs') ? 'No wind rose: our archive has no wind for this site.' : 'Wind rose: loading…'; S.rose = null; return; }
+    const rose = windRose(w.u, w.v);
+    S.rose = rose;
+    const cx = c.width / 2, cy = c.height / 2, R = c.width / 2 - 16;
+    const maxF = Math.max(...rose.freq, 1e-9);
+    // Rings at round shares of the hours.
+    ctx.strokeStyle = 'rgba(232,241,248,.18)';
+    ctx.lineWidth = 1;
+    const ringStep = maxF > 0.3 ? 0.1 : maxF > 0.12 ? 0.05 : 0.02;
+    for (let f = ringStep; f <= maxF + 1e-9; f += ringStep) {
+        ctx.beginPath(); ctx.arc(cx, cy, R * f / maxF, 0, Math.PI * 2); ctx.stroke();
+    }
+    const width = 2 * Math.PI / rose.sectors;
+    rose.counts.forEach((row, k) => {
+        const ang = k * width - Math.PI / 2;          // sector k centred on k·22.5° clockwise from north
+        let inner = 0;
+        row.forEach((cnt, cls) => {
+            if (!cnt) return;
+            const outer = inner + cnt / rose.n;
+            const lo = cls ? ROSE_SPEED_EDGES[cls - 1] : 0, hi = Number.isFinite(ROSE_SPEED_EDGES[cls]) ? ROSE_SPEED_EDGES[cls] : lo + 4;
+            const col = windColor(Math.min(1, ((lo + hi) / 2) / FLOW_SPEED_TOP_MS), 0.01);
+            ctx.fillStyle = `rgb(${(col[0] * 255) | 0},${(col[1] * 255) | 0},${(col[2] * 255) | 0})`;
+            ctx.beginPath();
+            ctx.arc(cx, cy, R * outer / maxF, ang - width * 0.42, ang + width * 0.42);
+            ctx.arc(cx, cy, R * inner / maxF, ang + width * 0.42, ang - width * 0.42, true);
+            ctx.closePath();
+            ctx.fill();
+            inner = outer;
+        });
+    });
+    ctx.fillStyle = '#e8f1f8';
+    ctx.font = '600 13px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [lab, a] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]]) {
+        const r = a * Math.PI / 180;
+        ctx.fillText(lab, cx + (R + 9) * Math.sin(r), cy - (R + 9) * Math.cos(r));
+    }
+    const p = prevailing(rose);
+    const calm = rose.n ? Math.round(100 * rose.calm / rose.n) : 0;
+    cap.textContent = p
+        ? `Next ${Math.round((w.times.at(-1) - w.times[0]) / 86_400_000)} days (${rose.n} forecast hours): mostly from the ${p.name} (${Math.round(p.freq * 100)} % of hours)${calm ? `, calm ${calm} %` : ''}.`
+        : 'Calm through the run.';
 }
 
 /** Paint the colour key ONCE from the site-wide temperature LUT bytes. */
@@ -180,6 +256,9 @@ function renderHeatTicks() {
 
 /** The rail under the toggle: status, valid time, the window's range on the key. */
 function renderHeatRail(info) {
+    // The wind line shares the heat line's clock (local time is known only
+    // once a site feed reports its offset — re-render it with every frame).
+    if (S.map) renderFlowRail(S.map.state.wind);
     const st = $('#cx-heat-status');
     const on = $('#cx-layer-temp').checked;
     const win = $('#cx-heat-key .cx-key-win i');
@@ -216,6 +295,8 @@ function mountLocationMap() {
             sym: fmt('temp', 0, S.units).sym,
         }),
         onFrame: renderHeatRail,
+        formatWind: (ms) => fmtText('wind', ms, S.units),
+        onWind: renderFlowRail,
     });
     paintHeatKey();
     renderHeatTicks();
@@ -228,6 +309,10 @@ function mountLocationMap() {
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
     $('#cx-layer-terrain').addEventListener('change', (ev) => S.map.setLayer('terrain', ev.target.checked));
     $('#cx-layer-labels').addEventListener('change', (ev) => S.map.setLayer('labels', ev.target.checked));
+    $('#cx-layer-airflow').addEventListener('change', (ev) => {
+        S.map.setLayer('airflow', ev.target.checked);
+        renderFlowRail(S.map.state.wind);
+    });
 }
 
 // ── Catalogue (left rail) ───────────────────────────────────────────────────
@@ -498,6 +583,7 @@ export function boot() {
     startSync();
     // Test + console hook (inert unless read).
     window.__climalytix = {
+        get map() { return S.map; },
         get state() {
             return {
                 site: S.site,
@@ -507,6 +593,7 @@ export function boot() {
                 panels: S.models.map((m) => ({ id: m.panelId, lines: m.lines.map((l) => l.id), hasData: m.hasData })),
                 map: S.map?.state ?? null,
                 field: S.field && { state: S.field.state, note: S.field.note },
+                rose: S.rose && { n: S.rose.n, calm: S.rose.calm, freq: S.rose.freq, prevailing: prevailing(S.rose) },
             };
         },
     };

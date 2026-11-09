@@ -28,10 +28,11 @@ const ok = async (name, fn) => { await fn(); passed++; console.log(`  ✓ ${name
 const BUCKET = 'pp-test';
 let objects = new Map();
 let requests = [];
-function resetBucket({ runMs = Date.now() - 6 * 3600_000, publish = true } = {}) {
+function resetBucket({ runMs = Date.now() - 6 * 3600_000, publish = true, rename = null } = {}) {
     objects = new Map();
     requests = [];
     const m = { ...man, runMs };
+    if (rename) m.vars = m.vars.map((v) => ({ ...v, id: rename[v.id] ?? v.id }));
     for (const f of readdirSync(DIR)) {
         if (f.endsWith('.i16')) objects.set(`fixture/t/${f}`, new Uint8Array(readFileSync(new URL(f, DIR))));
     }
@@ -167,6 +168,38 @@ await ok('the field route returns every node in the window, one range per row, m
     const at = (a, b) => body.values[a * body.nCols + b];
     const v = (1 - fy) * ((1 - fx) * at(i, j) + fx * at(i, j + 1)) + fy * ((1 - fx) * at(i + 1, j) + fx * at(i + 1, j + 1));
     assert.ok(Math.abs(v - pt) < 0.06, `field ${v} vs point ${pt} (0.1-rounded on the wire)`);
+});
+
+await ok('vars=uMs,vMs: both components from the SAME byte ranges, each landing on its own node', async () => {
+    // The fixture (written by the Python gate) carries tempC plus two
+    // IDENTITY variables, `row` and `col` = each node's global index. Renamed
+    // to uMs/vMs here, every value must equal its own node's index — a read
+    // from the wrong variable slot or the wrong node cannot pass.
+    resetBucket({ rename: { row: 'uMs', col: 'vMs' } });
+    const n0 = requests.length;
+    const { status, body } = await call('lat=40.00&lon=-105.25&half=3&grid=1p00&vars=uMs,vMs', 'nwp-field');
+    assert.equal(status, 200);
+    assert.deepEqual(body.vars, ['uMs', 'vMs'], JSON.stringify(body.reasons));
+    assert.equal(body.var, 'uMs');
+    assert.deepEqual(body.values, body.fields.uMs, 'values is the first variable');
+    const reads = requests.slice(n0).filter((r) => r.key.endsWith('.i16'));
+    assert.equal(reads.length, body.nRows, 'a second variable costs no extra read');
+    const plane = body.nRows * body.nCols;
+    for (let t = 0; t < body.times.length; t += 20) {
+        for (let i = 0; i < body.nRows; i++) for (let j = 0; j < body.nCols; j++) {
+            const row = (90 - (body.latN - i * body.dlat)) / body.dlat;
+            const col = ((((body.lonW + j * body.dlon) % 360) + 360) % 360) / body.dlon;
+            assert.equal(body.fields.uMs[t * plane + i * body.nCols + j], row, `row at ${i},${j}`);
+            assert.equal(body.fields.vMs[t * plane + i * body.nCols + j], col, `col at ${i},${j}`);
+        }
+    }
+    assert.equal((await call('lat=40&lon=-105&vars=uMs,secretVar', 'nwp-field')).status, 400, 'unknown variable');
+    resetBucket();
+    const missing = await call('lat=40.00&lon=-105.25&grid=1p00&vars=uMs,vMs', 'nwp-field');
+    assert.equal(missing.body.fields, null, 'a run without the variable: no field, never a partial one');
+    assert.match(missing.body.reasons[0], /no variable [uv]Ms/);
+    const plain = await call('lat=40.00&lon=-105.25&half=3&grid=1p00', 'nwp-field');
+    assert.equal(plain.body.fields, undefined, 'the default request keeps the original body');
 });
 
 await ok('the field route degrades like the point route, and refuses a bad window', async () => {

@@ -856,6 +856,43 @@ elevation, so its flat level must be neutralised before it can be overlaid.
 Queued layers, one at a time: day/night + city lights, satellite imagery by
 date, pressure + wind from our archive.
 
+**Air-quality layer programme (2026-11-09, owner-approved order):** (1)
+airflow particles + the pollution rose — BUILT, below; (2) AQI field + AirNow
+monitors with model-minus-monitor residuals (CAMS: bootstrap via the existing
+route, badged, OR our own CAMS ingest first — the owner's call, open); (3)
+smoke source back-trajectory + forward fire cones (`windAt` already takes a
+fractional time index for integrating THROUGH the run); (4) the "smog cooker"
+— trapped (low mixing height × light wind) × sunlit (clear, warm), a
+conditions diagnostic, not a concentration forecast — needs GFS `HPBL` (and
+ideally 850 hPa wind) added to `GFS_VARS`; (5) cloud cover + rain washout +
+satellite AOD blind spots under cloud.
+
+**Airflow (2026-11-09, `js/climalytix/airflow.js`, PURE,
+`tests/climalytix-airflow.mjs` + `tests/climalytix-airflow.spec.js`):** our
+GFS 10 m u/v from `/api/climalytix/nwp-field?vars=uMs,vMs&half=4` (the route
+now takes `vars` from `FIELD_VARS`; every variable rides in the same byte
+ranges, so a second one costs no R2 read — the route gate proves it on the
+Python fixture's identity variables), at the SAME time index as the heat.
+Seeded particles on a second canvas (`#cx-map-flow`, `mix-blend-mode:
+screen`, because the ONE wind palette is built to add as light — a dark casing
+was tried and left grey smudges, measured on screenshots), moving u·Δt / v·Δt
+in METRES with the particle's own cos φ, spawned only in the visible part of
+the data box (constant density at any zoom). Time compression FOLLOWS THE ZOOM
+from a fixed list (10 m/s ≈ 45 px/s; `compressionFor`) and the rail prints the
+one in use — at a fixed 1 h a 10 m/s wind moved 0.3 px a frame and read as
+dots. It is the FROZEN field at one instant (streaklines, not trajectories),
+and the rail says so. Reduced motion draws static streamlines (midpoint rule)
+instead. The animation runs only while on, covered and on screen. The WIND
+ROSE counts the site's GFS hours by FROM direction (u > 0 is a westerly —
+pinned) and its per-sector mean of a co-located series is the POLLUTION ROSE,
+waiting for step 2's PM2.5. Browser gate: particle motion checked against the
+mock's CLOSED-FORM wind (cos > 0.99) with the u↔v-swapped field as the
+negative control; off ⇒ canvas clear and frames stop; off-screen ⇒ frames
+stop; the hover tip's direction/speed match the closed form at the coordinates
+it prints. Known limit: the window is ±4°, so at the default zoom the flow is
+a band around the site with its dashed edge drawn — a wider window needs a
+strided field read (next).
+
 Next in P-1: GEFS members; ECMWF open data
 (IFS/AIFS, needs its own `.index` JSON sidecar planner); the ERA5 history
 backfill into the same format (time axis = decades, chunked across runs).

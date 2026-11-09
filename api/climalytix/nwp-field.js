@@ -1,5 +1,9 @@
 /**
- * Vercel Edge Function: /api/climalytix/nwp-field?lat=&lon=[&half=3][&grid=0p25]
+ * Vercel Edge Function: /api/climalytix/nwp-field?lat=&lon=[&half=3][&grid=0p25][&vars=uMs,vMs]
+ *
+ * `vars` (default tempC) picks which variables come back; every requested
+ * one is in `fields`, the first is also `values` (the original contract).
+ * The ranges are the same whatever is asked — a cell carries all variables.
  *
  * The temperature FIELD around a site — every grid node within ±half° — from
  * our own GFS archive (the same R2 point tiles /api/climalytix/nwp reads), for
@@ -20,17 +24,16 @@ import { jsonOk, jsonError } from '../_lib/responses.js';
 import { R2_CONFIGURED, mapLimit } from '../_lib/r2-archive.js';
 import { GRIDS, CACHE_TTL, CACHE_SWR, manifestFor, getRange } from '../_lib/climalytix-r2.js';
 import {
-    parseSite, fieldPlan, readField, fieldBody, degradedNwp, FIELD_HALF_DEG_DEFAULT, FIELD_HALF_DEG_MAX,
+    parseSite, parseFieldVars, fieldPlan, readField, fieldBody, degradedNwp, FIELD_HALF_DEG_DEFAULT, FIELD_HALF_DEG_MAX,
 } from '../../js/climalytix/point-tile.js';
 
 export const config = { runtime: 'edge' };
 
-const FIELD_VAR = 'tempC';
 const FIELD_CONCURRENCY = 12;
 
-function degraded(q, grid, reason, now) {
+function degraded(q, grid, reason, now, vars = ['tempC']) {
     const b = degradedNwp(q, grid, reason, now);
-    return { ...b, var: FIELD_VAR, values: null };
+    return { ...b, var: vars[0], vars, fields: null, values: null };
 }
 
 export default async function handler(req) {
@@ -44,24 +47,30 @@ export default async function handler(req) {
     if (!Number.isFinite(half) || half < 0.5 || half > FIELD_HALF_DEG_MAX) {
         return jsonError('bad_request', `half must be 0.5–${FIELD_HALF_DEG_MAX} degrees`, { status: 400 });
     }
+    const vars = parseFieldVars(url.searchParams.get('vars'));
+    if (vars.error) return jsonError('bad_request', vars.error, { status: 400 });
     const now = Date.now();
     const short = { maxAge: 120, swr: 0 };
-    if (!R2_CONFIGURED) return jsonOk(degraded(q, grid, 'r2_not_configured', now), short);
+    const down = (reason) => jsonOk(degraded(q, grid, reason, now, vars), short);
+    if (!R2_CONFIGURED) return down('r2_not_configured');
 
     let man;
     try {
         man = await manifestFor(grid, now);
     } catch (e) {
-        return jsonOk(degraded(q, grid, `manifest_read_failed: ${String(e?.message || e).slice(0, 120)}`, now), short);
+        return down(`manifest_read_failed: ${String(e?.message || e).slice(0, 120)}`);
     }
-    if (!man) return jsonOk(degraded(q, grid, 'no_run_published', now), short);
+    if (!man) return down('no_run_published');
 
     try {
         const plan = fieldPlan(man, { lat: q.lat, lon: q.lon, halfDeg: half });
         const bodies = await mapLimit(plan.segments, FIELD_CONCURRENCY, (seg) => getRange(seg.key, seg.range));
-        const body = fieldBody(man, plan, FIELD_VAR, readField(man, plan, FIELD_VAR, bodies), { nowMs: now, site: q });
+        const [first, ...rest] = vars;
+        const extra = vars.length > 1 || first !== 'tempC'
+            ? Object.fromEntries(rest.map((id) => [id, readField(man, plan, id, bodies)])) : null;
+        const body = fieldBody(man, plan, first, readField(man, plan, first, bodies), { nowMs: now, site: q, extra });
         return jsonOk(body, body.freshness === 'fresh' ? { maxAge: CACHE_TTL, swr: CACHE_SWR } : short);
     } catch (e) {
-        return jsonOk(degraded(q, grid, `tile_read_failed: ${String(e?.message || e).slice(0, 120)}`, now), short);
+        return down(`tile_read_failed: ${String(e?.message || e).slice(0, 120)}`);
     }
 }

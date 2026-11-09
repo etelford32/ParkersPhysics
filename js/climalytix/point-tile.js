@@ -213,18 +213,34 @@ export function degradedNwp(site, grid, reason, nowMs) {
 // for a 0..360 grid) splits into two segments and draws as one field.
 
 export const FIELD_HALF_DEG_DEFAULT = 3;
+/** Variables a field request may ask for (the map's layers). The bytes of
+ *  every variable come back in each range anyway (a cell holds all of them),
+ *  so a second variable costs wire size, never another R2 read. */
+export const FIELD_VARS = Object.freeze(['tempC', 'uMs', 'vMs', 'cloudPct', 'rhPct', 'precipMm']);
+
+/** `vars` query value → a validated, de-duplicated list (default tempC), or { error }. */
+export function parseFieldVars(raw) {
+    if (raw == null || raw === '') return ['tempC'];
+    const list = [...new Set(String(raw).split(',').map((x) => x.trim()).filter(Boolean))];
+    const bad = list.filter((x) => !FIELD_VARS.includes(x));
+    if (!list.length || bad.length) return { error: `vars must be from ${FIELD_VARS.join(', ')}` };
+    return list;
+}
 export const FIELD_HALF_DEG_MAX = 4;
 const FIELD_SNAP_DEG = 0.25;
 
 /** The ONE path builder for /api/climalytix/nwp-field. The centre snaps to
  *  0.25° so everyone looking at the same place shares one CDN key. */
-export function fieldPath({ lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT, grid = '0p25' }) {
+export function fieldPath({ lat, lon, halfDeg = FIELD_HALF_DEG_DEFAULT, grid = '0p25', vars = null }) {
     const q = parseSite({ lat, lon });
     if (q.error) throw new RangeError(q.error);
     const snap = (x) => Math.round(x / FIELD_SNAP_DEG) * FIELD_SNAP_DEG + 0;
     const h = Math.min(FIELD_HALF_DEG_MAX, Math.max(1, Number(halfDeg) || FIELD_HALF_DEG_DEFAULT));
+    const v = vars == null ? null : parseFieldVars(Array.isArray(vars) ? vars.join(',') : vars);
+    if (v?.error) throw new RangeError(v.error);
     return `/api/climalytix/nwp-field?lat=${snap(q.lat).toFixed(2)}&lon=${snap(q.lon).toFixed(2)}&half=${h}`
-        + (grid === '0p25' ? '' : `&grid=${grid}`);
+        + (grid === '0p25' ? '' : `&grid=${grid}`)
+        + (v && !(v.length === 1 && v[0] === 'tempC') ? `&vars=${v.join(',')}` : '');
 }
 
 /**
@@ -304,17 +320,26 @@ export function readField(man, plan, varId, bodies) {
     return out;
 }
 
-/** The field route's wire body. Values are rounded to 0.1 and gaps are null. */
-export function fieldBody(man, plan, varId, values, { nowMs, site }) {
+/**
+ * The field route's wire body. Values are rounded to 0.1 and gaps are null.
+ * `values` is the FIRST variable (the original single-variable contract);
+ * `extra` ({ id: Float32Array }) adds a `fields` map holding every requested
+ * variable, the first included, and a `vars` list.
+ */
+export function fieldBody(man, plan, varId, values, { nowMs, site, extra = null }) {
     const v = man.vars.find((x) => x.id === varId);
+    const wire = (arr) => Array.from(arr, (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null));
+    const first = wire(values);
+    const fields = extra ? { [varId]: first, ...Object.fromEntries(Object.entries(extra).map(([k, a]) => [k, wire(a)])) } : null;
     return {
+        ...(fields ? { vars: Object.keys(fields), fields } : {}),
         source: `climalytix-${man.source}`, role: 'archive', schema: man.schema,
         run: man.run, runMs: man.runMs, grid: man.grid, ...runFreshness(man.runMs, nowMs),
         site, var: varId, unit: v?.unit ?? null,
         latN: plan.latN, lonW: plan.lonW, dlat: man.dlat, dlon: man.dlon,
         nRows: plan.nRows, nCols: plan.nCols, times: man.times, leadsH: man.leadsH,
         layout: 'time,row,col',
-        values: Array.from(values, (x) => (Number.isFinite(x) ? Math.round(x * 10) / 10 : null)),
+        values: first,
         note: 'Grid-node values of one GFS run; the map smooths between nodes for display only.',
     };
 }

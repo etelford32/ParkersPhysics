@@ -26,6 +26,9 @@
 #                            split), Sobel-2 hillshade neutral on flat ground
 #                            (forward-difference NEGATIVE CONTROL), cos φ, labels
 #                            decluttered and clear of the site + the controls
+#   climalytix-airflow.mjs   the airflow layer: FROM-direction sign trap, metres
+#                            with cos φ (NEGATIVE CONTROL without), particles stay
+#                            in the data box, streamlines on a vortex, the rose
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
@@ -106,6 +109,8 @@ jobs:
         run: node tests/climalytix-map-view.mjs
       - name: base map + terrain + labels
         run: node tests/climalytix-basemap.mjs
+      - name: airflow (particles, streamlines, wind rose)
+        run: node tests/climalytix-airflow.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)

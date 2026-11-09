@@ -92,6 +92,14 @@ body {
 #cx-map-stage { position:relative; height:clamp(300px, 46vh, 480px); border-radius:10px; overflow:hidden;
     background:#0a1a2e; border:1px solid var(--cx-line); }
 #cx-map-canvas { display:block; touch-action:none; cursor:grab; outline:none; }
+/* The wind palette is built to ADD as light (EarthView's trails blend
+   additively: a slow, deep colour is also a dim one), so the flow layer
+   screens onto the map instead of painting over it. */
+#cx-map-flow { position:absolute; left:0; top:0; pointer-events:none; mix-blend-mode:screen; }
+#cx-rose canvas { width:150px; height:150px; display:block; margin:0 auto; }
+#cx-rose[hidden] { display:none; }
+#cx-flow-status[data-state="down"] { color:#ff8c7a; }
+#cx-flow-status[data-state="stale"] { color:#ffd479; }
 #cx-map-canvas:focus-visible { box-shadow:inset 0 0 0 2px var(--cx-accent); }
 #cx-map-stage.is-dragging #cx-map-canvas { cursor:grabbing; }
 #cx-map-tip { position:absolute; left:0; top:0; pointer-events:none; padding:3px 8px; border-radius:6px;
@@ -259,6 +267,14 @@ body {
       <label class="cx-map-note" for="cx-heat-alpha">Opacity <input type="range" id="cx-heat-alpha" min="0.2" max="0.95" step="0.05" value="0.62"></label>
       <p id="cx-heat-status" class="cx-map-note" role="status">Loading…</p>
       <p class="cx-map-note">2 m air temperature on the GFS grid (0.25°, ≈28 km). Drawn as EarthView draws it: the temperature is interpolated between grid nodes and then coloured, with a bright seam on the freezing line. Isotherms are in your units; ▲ ▼ mark the warmest and coldest grid node. The dashed box is the extent of the data; hover for the value. The map follows the timeline’s crosshair.</p>
+      <label class="cx-layer"><input type="checkbox" id="cx-layer-airflow" checked>Airflow<span class="cx-layer-src" title="From Climalytix’s own GFS archive">Ours</span></label>
+      <div id="cx-rose" aria-label="Wind rose for the site">
+        <canvas width="200" height="200"></canvas>
+        <p id="cx-rose-caption" class="cx-map-note"></p>
+      </div>
+      <p id="cx-flow-status" class="cx-map-note" role="status">Loading…</p>
+      <p class="cx-map-note">10 m wind from the GFS run. Streaks move with the real wind, sped up by the factor printed above (it follows the zoom); brighter = faster. They show the wind pattern at the time on the timeline, frozen there: the airflow, not the path one parcel of air takes over hours. The rose counts the forecast hours at the site by the direction the wind blows <b>from</b>. Once an air-quality series is added it can also show which directions bring the dirtiest air.</p>
+
       <h3 class="cx-rail-h">Base map</h3>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-terrain" checked>Terrain<span class="cx-layer-src" title="Shaded from EarthView’s self-hosted relief map">Relief</span></label>
       <label class="cx-layer"><input type="checkbox" id="cx-layer-labels" checked>Place labels</label>
@@ -266,6 +282,7 @@ body {
     </div>
     <div id="cx-map-stage">
       <canvas id="cx-map-canvas" tabindex="0" aria-label="Location map. Drag to pan, scroll or pinch to zoom; arrow keys pan, plus and minus zoom, 0 recentres."></canvas>
+      <canvas id="cx-map-flow" aria-hidden="true"></canvas>
       <div id="cx-map-tip" hidden></div>
       <div id="cx-map-scale"><i></i><span></span></div>
       <div id="cx-map-ctl" aria-label="Map controls">
@@ -281,7 +298,7 @@ body {
           <button type="button" data-map-act="pan-down" aria-label="Pan south" title="Pan south (↓)">▼</button>
         </div>
       </div>
-      <div id="cx-map-attr">Imagery: NASA Blue Marble (self-hosted) + NASA GIBS Blue Marble NG — archival composites · relief: EarthView relief map · heat: Climalytix GFS archive</div>
+      <div id="cx-map-attr">Imagery: NASA Blue Marble (self-hosted) + NASA GIBS Blue Marble NG — archival composites · relief: EarthView relief map · heat + airflow: Climalytix GFS archive</div>
     </div>
   </section>
 

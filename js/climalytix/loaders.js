@@ -77,6 +77,9 @@ async function loadGfs(site, _ws, signal) {
         return { ...out, state: 'down', note: `Our archive: ${why}. Nothing is substituted for it.` };
     }
     const state = !out.series.length ? 'down' : j.freshness === 'fresh' ? 'live' : 'stale';
+    // The raw u/v hours feed the map's wind rose (airflow.js windRose).
+    out.wind = Array.isArray(j?.series?.uMs) && Array.isArray(j?.series?.vMs)
+        ? { times: j.times, u: j.series.uMs, v: j.series.vMs } : null;
     const leads = j.leadsH?.length ? `0–${j.leadsH[j.leadsH.length - 1]} h` : '';
     const gaps = j.missing ? ` · ${j.missing} missing field-leads` : '';
     const note = `Run ${j.run} (${ageText(j.age_seconds)}) · ${leads} 3-hourly · bilinear from 4 grid nodes${gaps}`
@@ -130,6 +133,29 @@ export async function loadField(site, { signal } = {}) {
         return { state, body: j, note: `GFS run ${j.run} (${ageText(j.age_seconds)})${state === 'stale' ? ' · older than the daily cadence' : ''}` };
     } catch (e) {
         return { state: 'down', body: null, note: `No heat map: ${e?.message || 'unreachable'}.` };
+    }
+}
+
+/**
+ * The 10 m wind FIELD around the site from our archive (the airflow layer).
+ * Same window and route as the heat field, `vars=uMs,vMs`; nothing stands in
+ * for it. Resolves { state, body: { …grid, u, v } | null, note }.
+ */
+export async function loadWindField(site, { signal } = {}) {
+    try {
+        // The widest window the route serves: the flow needs room to move.
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars: ['uMs', 'vMs'] }), signal);
+        if (!j?.fields?.uMs || !j?.fields?.vMs) {
+            const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
+            return { state: 'down', body: null, note: `No airflow: ${why}. Nothing is substituted for our archive.` };
+        }
+        const state = j.freshness === 'fresh' ? 'live' : 'stale';
+        return {
+            state, body: { ...j, u: j.fields.uMs, v: j.fields.vMs },
+            note: `GFS 10 m wind, run ${j.run} (${ageText(j.age_seconds)})${state === 'stale' ? ' · older than the daily cadence' : ''}`,
+        };
+    } catch (e) {
+        return { state: 'down', body: null, note: `No airflow: ${e?.message || 'unreachable'}.` };
     }
 }
 

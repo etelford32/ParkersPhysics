@@ -23,6 +23,7 @@
  *   nwp: 'unpublished'      our archive answers 200 + expired + r2_not_configured
  *        'old'              our archive serves a 40-hour-old run (freshness:'stale')
  *   gibs: 'down'            every GIBS tile 404s (the map still draws the heat + site)
+ *   nwp: 'nowind'           the field route has temperature but no wind (airflow says why)
  *   earth: 'blocked'        the self-hosted Blue Marble underlay (assets/earth/day-*) 404s
  */
 import { labFixture } from './climate-lab-fixtures.mjs';
@@ -107,7 +108,16 @@ function tilePng(key, rgba) {
 }
 
 /** Our archive's heat FIELD around a site, built by the route's own code. */
-export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3 } = {}) {
+/** Closed-form 10 m wind for the mock field: a 6 m/s westerly plus a
+ *  counter-clockwise (cyclonic, NH) swirl centred 1° north and 1.5° west of
+ *  the site — so the drawn flow has structure whose direction is KNOWN. */
+export function mockWind(lat, lon, site) {
+    const dy = (lat - (site.lat + 1)) * 111_320, dx = (lon - (site.lon - 1.5)) * 111_320 * Math.cos(lat * Math.PI / 180);
+    const r = Math.hypot(dx, dy), k = 9 * Math.exp(-((r / 150_000) ** 2)) / Math.max(r, 1);
+    return { u: 6 - k * dy, v: k * dx };
+}
+
+export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3, vars = ['tempC'] } = {}) {
     const H = 3_600_000;
     const runMs = Math.floor((nowMs - ageH * H) / (6 * H)) * 6 * H;
     const leadsH = Array.from({ length: 81 }, (_, i) => i * 3);
@@ -130,7 +140,19 @@ export function nwpFieldFixture(nowMs, site, { ageH = 7, half = 3 } = {}) {
             }
         }
     }
-    return fieldBody(man, plan, 'tempC', values, { nowMs, site });
+    if (vars.length === 1 && vars[0] === 'tempC') return fieldBody(man, plan, 'tempC', values, { nowMs, site });
+    const wind = { uMs: new Float32Array(values.length), vMs: new Float32Array(values.length) };
+    for (let t = 0; t < man.times.length; t++) {
+        for (let i = 0; i < plan.nRows; i++) for (let j = 0; j < plan.nCols; j++) {
+            const w = mockWind(plan.latN - i * man.dlat, plan.lonW + j * man.dlon, site);
+            wind.uMs[t * plane + i * plan.nCols + j] = w.u;
+            wind.vMs[t * plane + i * plan.nCols + j] = w.v;
+        }
+    }
+    const all = { tempC: values, ...wind };
+    const [first, ...rest] = vars;
+    man.vars = vars.map((id) => ({ id, unit: id === 'tempC' ? 'degC' : 'm/s', scale: 0.01, offset: 0 }));
+    return fieldBody(man, plan, first, all[first], { nowMs, site, extra: Object.fromEntries(rest.map((id) => [id, all[id]])) });
 }
 
 const GFS_VARS = ['tempC', 'dewC', 'rhPct', 'uMs', 'vMs', 'gustMs', 'mslHpa', 'precipMm', 'cloudPct'];
@@ -150,7 +172,8 @@ export function nwpFixture(nowMs, site, { ageH = 7 } = {}) {
     const v = {
         tempC: times.map((t) => 9 + 7 * Math.sin(2 * Math.PI * (t / 86_400_000 - 0.4))),
         dewC: times.map(() => 1.5), rhPct: times.map(() => 55), gustMs: times.map(() => 9),
-        uMs: times.map(() => 3), vMs: times.map(() => -4),
+        // A wind that veers through the run (mostly westerly) so the rose has shape.
+        uMs: times.map((t) => 5 + 3 * Math.sin(2 * Math.PI * t / (36 * H))), vMs: times.map((t) => 4 * Math.cos(2 * Math.PI * t / (50 * H))),
         mslHpa: leadsH.map((h) => 1016 - 9 * Math.exp(-(((h - 96) / 30) ** 2))),
         precipMm: leadsH.map((h) => (h === 0 ? null : h >= 90 && h <= 102 ? 2.4 : 0)),
         cloudPct: times.map(() => 40),
@@ -170,7 +193,9 @@ export async function installClimalytixMocks(page, { down = null, archiveExpired
                 if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });
                 const q = parseSite(Object.fromEntries(url.searchParams));
                 if (nwp === 'unpublished') return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'r2_not_configured', now), var: 'tempC', values: null } });
-                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3 }) });
+                const vars = (url.searchParams.get('vars') || 'tempC').split(',');
+                if (nwp === 'nowind' && vars.includes('uMs')) return route.fulfill({ json: { ...degradedNwp(q, '0p25', 'no variable uMs in this run', now), vars, fields: null, values: null } });
+                return route.fulfill({ json: nwpFieldFixture(now, q, { ageH: nwp === 'old' ? 40 : 7, half: Number(url.searchParams.get('half')) || 3, vars }) });
             }
             if (p === '/api/climalytix/nwp') {
                 if (isDown('gfs')) return route.fulfill({ status: 503, json: { error: 'upstream_unavailable' } });
