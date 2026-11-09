@@ -208,6 +208,8 @@ export const SITE_SECTIONS = [
         groups: [
             { id: 'hindcast', label: 'Hindcast Lab',
               note: 'Real storms, replayed hour by hour against the models that missed them.' },
+            { id: 'analysis', label: 'Analysis',
+              note: 'Your own site, every dataset on one clock — and every prediction scored the same way.' },
             { id: 'engine', label: 'Engine & methods',
               note: 'The compute layer: Rust compiled to WebAssembly, benchmarkable in the browser.' },
         ],

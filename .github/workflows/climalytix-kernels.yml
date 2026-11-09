@@ -1,0 +1,177 @@
+# climalytix-kernels — the Climalytix SiteSeries store, catalogue, timeline
+# model and archive route (CLIMALYTIX_PLAN.md §13 P0).
+#
+#   climalytix-series.mjs    the SiteSeries contract + agg-aware resampler: gaps
+#                            stay gaps, agg is required, never upsample, sparse
+#                            buckets are gaps, station-local day buckets,
+#                            alignment by instant
+#   climalytix-catalog.mjs   the dataset table and the four pure adapters (the
+#                            station adapter is fed the Climate Lab's OWN fixture
+#                            through the lab's OWN normaliser), the workspace
+#                            normaliser
+#   climalytix-timeline.mjs  past solid / future dashed, gaps break lines, long
+#                            windows aggregate (a max stays a max), one bucket
+#                            for every sum in a panel, "too short for this zoom"
+#   climalytix-archive.mjs   /api/climalytix/archive on stubbed fetch: snapped
+#                            cache key, SI units pinned, every degraded upstream
+#                            is 200 + expired (never a 5xx), bad input 400
+#   climalytix-point-tile.mjs  the tile READER against the fixture the Python
+#                            WRITER produced from a real GFS message — same bytes,
+#                            same bilinear values, the seam halo, gap corners
+#   climalytix-map-view.mjs  the location map's geometry: zoom at the cursor is
+#                            exact, a clamped zoom never pans, GIBS' real 288/2^z
+#                            tile grid across the dateline, heat = the site-wide
+#                            temperature LUT bytes, gaps transparent
+#   climalytix-basemap.mjs   the base map: self-hosted underlay rects (dateline
+#                            split), Sobel-2 hillshade neutral on flat ground
+#                            (forward-difference NEGATIVE CONTROL), cos φ, labels
+#                            decluttered and clear of the site + the controls
+#   climalytix-airflow.mjs   the airflow layer: FROM-direction sign trap, metres
+#                            with cos φ (NEGATIVE CONTROL without), particles stay
+#                            in the data box, streamlines on a vortex, the rose
+#   climalytix-aq-field.mjs  the air-quality field: grid + one URL under the 414
+#                            ceiling, hours matched BY INSTANT (reversed-hours
+#                            NEGATIVE CONTROL), gaps null, EPA category colours,
+#                            monitor residuals, the route's 200+expired paths
+#   climalytix-terrain.mjs   §19 T1 terrain: Terrarium decode, Mercator → lat/lon
+#                            sampling, Sobel slope/aspect on planes (forward-
+#                            difference NEGATIVE CONTROL), exposure exactly 1 on
+#                            flat ground, the DEM route's host ladder (non-PNG
+#                            200 refused, no passthrough URL)
+#   climalytix-orographic.mjs §19 T2 lift: w = u·∂h/∂x + v·∂h/∂y on a tilted
+#                            plane at 0°/60°, zero along the contours, sign
+#                            flips with the wind, gaps stay NaN; swapped u/v
+#                            is the NEGATIVE CONTROL
+#   climalytix-slope-wind.mjs §19 T3 Prandtl slope winds: both ODEs by finite
+#                            differences, the πλ/4 peak, slope-independent
+#                            speed, sign, flat/gentle blank, the budget, ranges;
+#                            the plan's first (non-speed) amplitude is the
+#                            NEGATIVE CONTROL
+#   climalytix-thermals.mjs  §19 T4 thermals: Lambert W₋₁, the Romps LCL's
+#                            saturation identity (truncated exponent = NEGATIVE
+#                            CONTROL), Deardorff scaling, regimes, the flux
+#                            window convention
+#   climalytix-updraft.mjs   §19 T5 updraft: level heights vs ICAO (isothermal
+#                            = NEGATIVE CONTROL), the below-ground mask, the
+#                            instantaneous bracket, a list never summed
+#   climalytix-convection.mjs §19 T6 storm ingredients: ½w² = CAPE / |CIN|, the
+#                            LI sign both ways, the outlook rules; CAPE-only
+#                            ranking is the NEGATIVE CONTROL
+#   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
+#                            saddles never cross, gaps cut the line, levels round
+#                            in the reader's unit, the freezing line flagged
+#   climalytix-nwp-route.mjs /api/climalytix/nwp on a fake R2 bucket: two range
+#                            reads per site, every degraded path 200 + freshness
+#   climalytix_ingest_test.py  the ingest worker (python): real .idx parsing,
+#                            precip de-accumulation across reset buckets, every
+#                            GRIB scan mode against eccodes' own coordinates
+#   climate-lab.mjs          Climalytix imports the lab's units / feed / home
+#                            modules — the lab's gate must keep passing UNCHANGED
+#
+# Browser gates (tests/climalytix-smoke.spec.js with its all-feeds-down
+# negative control; tests/climalytix-map.spec.js with its heat-off control)
+# run with the Playwright suite.
+name: climalytix-kernels
+
+on:
+  push:
+    paths:
+      - 'js/climalytix/**'
+      - 'js/climate-lab/**'
+      - 'js/earth-detail-inset.js'
+      - 'js/temp-ramp.js'
+      - 'js/sun-altitude.js'
+      - 'api/_lib/climalytix-r2.js'
+      - 'api/climalytix/**'
+      - 'scripts/climalytix_ingest/**'
+      - 'tests/climalytix_ingest_test.py'
+      - 'tests/fixtures/climalytix/**'
+      - 'climalytix.html'
+      - 'tests/climalytix-*.mjs'
+      - 'tests/fixtures/climalytix-mocks.mjs'
+      - '.github/workflows/climalytix-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/climalytix/**'
+      - 'js/climate-lab/**'
+      - 'js/earth-detail-inset.js'
+      - 'js/temp-ramp.js'
+      - 'js/sun-altitude.js'
+      - 'api/_lib/climalytix-r2.js'
+      - 'api/climalytix/**'
+      - 'scripts/climalytix_ingest/**'
+      - 'tests/climalytix_ingest_test.py'
+      - 'tests/fixtures/climalytix/**'
+      - 'climalytix.html'
+      - 'tests/climalytix-*.mjs'
+      - 'tests/fixtures/climalytix-mocks.mjs'
+      - '.github/workflows/climalytix-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: climalytix-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Climalytix kernels + archive route (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: SiteSeries store + resampler
+        run: node tests/climalytix-series.mjs
+      - name: catalogue + adapters + workspace
+        run: node tests/climalytix-catalog.mjs
+      - name: timeline model
+        run: node tests/climalytix-timeline.mjs
+      - name: archive route
+        run: node tests/climalytix-archive.mjs
+      - name: point-tile reader (JS ↔ Python fixture)
+        run: node tests/climalytix-point-tile.mjs
+      - name: location map geometry
+        run: node tests/climalytix-map-view.mjs
+      - name: base map + terrain + labels
+        run: node tests/climalytix-basemap.mjs
+      - name: airflow (particles, streamlines, wind rose)
+        run: node tests/climalytix-airflow.mjs
+      - name: air-quality field + route (upstream stubbed)
+        run: node tests/climalytix-aq-field.mjs
+      - name: terrain (elevation, slope, sun exposure, DEM route stubbed)
+        run: node tests/climalytix-terrain.mjs
+      - name: orographic lift
+        run: node tests/climalytix-orographic.mjs
+      - name: slope winds (Prandtl)
+        run: node tests/climalytix-slope-wind.mjs
+      - name: thermals (Deardorff + Romps LCL)
+        run: node tests/climalytix-thermals.mjs
+      - name: updraft (GFS DZDT levels + the vertical-motion list)
+        run: node tests/climalytix-updraft.mjs
+      - name: storm ingredients (CAPE / CIN / lifted index outlook)
+        run: node tests/climalytix-convection.mjs
+      - name: isotherms
+        run: node tests/climalytix-contours.mjs
+      - name: nwp route (fake R2)
+        run: node tests/climalytix-nwp-route.mjs
+      - name: Climate Lab (unchanged by the lift)
+        run: node tests/climate-lab.mjs
+      - name: pipeline registry
+        run: node tests/pipeline-registry.mjs
+
+  ingest:
+    name: Ingest worker (python, real GFS fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'eccodes==2.50.0' 'numpy>=2'
+      - run: python3 tests/climalytix_ingest_test.py

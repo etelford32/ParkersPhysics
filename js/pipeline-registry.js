@@ -267,6 +267,55 @@ export const PIPELINES = [
       warnAgeS:  60 * 60, critAgeS: 240 * 60,
       notes: 'Per-location query; not pre-warmable — each call is unique.' },
 
+    { id: 'climalytix-archive', label: 'Climalytix ERA5 daily archive',
+      endpoint: '/api/climalytix/archive',
+      // Requires ?lat&lon — a bare probe 400s by design. A short `from`
+      // keeps the probe cheap; the site snaps to the 0.05° grid.
+      probePath: '/api/climalytix/archive?lat=40.00&lon=-105.25&from=2024',
+      probeTimeoutMs: 25_000,
+      category: 'weather', upstream: 'Open-Meteo historical (ERA5) — bootstrap',
+      cadence_s: 86_400, prewarm: null,
+      warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
+      notes: 'Per-site, 12 h edge cache. BOOTSTRAP source (non-commercial free tier) until the CLIMALYTIX_PLAN.md §17 data engine serves sites. Upstream failure is 200 + freshness:expired + reasons, never a 5xx.' },
+
+    { id: 'climalytix-nwp', label: 'Climalytix GFS archive (our data engine)',
+      endpoint: '/api/climalytix/nwp',
+      // Requires ?lat&lon. Two R2 range reads per site; the body's
+      // age_seconds is now − RUN time, so this row IS the ingest-lag probe.
+      probePath: '/api/climalytix/nwp?lat=40.00&lon=-105.25',
+      probeTimeoutMs: 15_000,
+      category: 'weather', upstream: 'NOAA GFS 0.25° (AWS Open Data) → our R2 point tiles',
+      cadence_s: 86_400, prewarm: null,
+      warnAgeS: 30 * 3600, critAgeS: 54 * 3600,
+      notes: 'Written daily by .github/workflows/climalytix-ingest.yml (scripts/climalytix_ingest/gfs.py). R2 unset / no run / unreadable tile is 200 + freshness:expired + reasons, never a 5xx; the route grades an old run stale (>30 h) / expired (>54 h) itself.' },
+
+    { id: 'climalytix-nwp-field', label: 'Climalytix GFS field (heat-map window)',
+      endpoint: '/api/climalytix/nwp-field',
+      // Requires ?lat&lon. One R2 range per (row, tile) segment of the window.
+      probePath: '/api/climalytix/nwp-field?lat=40.00&lon=-105.25&half=1',
+      probeTimeoutMs: 20_000,
+      category: 'weather', upstream: 'NOAA GFS 0.25° (AWS Open Data) → our R2 point tiles',
+      cadence_s: 86_400, prewarm: null,
+      warnAgeS: 30 * 3600, critAgeS: 54 * 3600,
+      notes: 'Same archive and degradation rules as climalytix-nwp; our archive only — no third-party grid stands in for it.' },
+
+    { id: 'climalytix-dem', label: 'Climalytix elevation tiles (Terrain Tiles)',
+      endpoint: '/api/climalytix/dem',
+      category: 'weather', upstream: 'AWS Terrain Tiles (Terrarium PNG, Mapzen / AWS Open Data)',
+      cadence_s: 86_400, prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS: 24 * 3600, critAgeS: 72 * 3600,
+      notes: 'Capability probe, not a data feed: the no-coordinate form reports which candidate host answered (hosts UNVERIFIED from the build sandbox — record the winner in js/climalytix/terrain.js DEM_CANDIDATES). Amber = no host answered and the Elevation / Sun-exposure layers draw nothing. Tiles are archival, cached immutable for a year.' },
+
+    { id: 'climalytix-aq-field', label: 'Climalytix air-quality field (CAMS, bootstrap)',
+      endpoint: '/api/climalytix/aq-field',
+      // Requires ?lat&lon. One Open-Meteo request of 289 locations through js/open-meteo-request.js.
+      probePath: '/api/climalytix/aq-field?lat=40.00&lon=-105.50',
+      probeTimeoutMs: 20_000,
+      category: 'weather', upstream: 'Copernicus CAMS global via Open-Meteo air-quality API (free tier — bootstrap)',
+      cadence_s: 3600, prewarm: null,
+      warnAgeS: 6 * 3600, critAgeS: 24 * 3600,
+      notes: 'BOOTSTRAP source for Climalytix (non-commercial free tier) until our own CAMS ingest replaces it. Upstream failure / short chunk / no values is 200 + freshness:expired + reasons with fields:null — never a partial field, never a 5xx.' },
+
     { id: 'polar-vortex',       label: 'Polar vortex',
       endpoint: '/api/weather/polar-vortex',
       category: 'atmosphere', upstream: 'Open-Meteo GFS @ 60°N',
