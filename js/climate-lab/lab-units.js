@@ -100,6 +100,7 @@ export const QUANTITIES = Object.freeze({
     deg:    { label: 'Angle',              units: { deg:  { sym: '°',     dp: 0, to: (v) => v } } },
     volpct: { label: 'Soil moisture',      units: { vol:  { sym: '% vol', dp: 0, to: (f) => f * 100 } } },
     ugm3:   { label: 'Concentration',      units: { ugm3: { sym: 'µg/m³', dp: 0, to: (v) => v } } },
+    jkg:    { label: 'Convective energy',  units: { jkg:  { sym: 'J/kg',  dp: 0, to: (v) => v } } },
 });
 
 /** Named unit systems. `auto` resolves per locale in `resolveUnits`. */

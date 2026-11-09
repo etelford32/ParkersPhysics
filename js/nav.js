@@ -223,7 +223,8 @@ const NAV_ITEMS = {
         { href: 'blog-gannon-hindcast.html',           label: 'The Index That Lied',        sub: 'Gannon G5 · EN/ES/FR',           tier: 'public', icon: 'paper', id: 'blog-gannon-hindcast' },
         { href: 'blog-stpatrick-hindcast.html',        label: 'The Storm Every Model Takes', sub: "St. Patrick's 2015 · EN/ES/FR", tier: 'public', icon: 'paper', id: 'blog-stpatrick-hindcast' },
         { href: 'recent-development.html',             label: 'Recent Development',        sub: 'What shipped, sprint by sprint', tier: 'public', icon: 'hourglass', badge: 'NEW', id: 'recent-development' },
-        { section: 'Engine & methods' },
+        { section: 'Analysis & engine' },
+        { href: 'climalytix.html', label: 'Climalytix', sub: 'One site · every dataset · one clock', tier: 'public', icon: 'chart', badge: 'NEW', id: 'climalytix' },
         { href: 'rust.html', label: 'Rust/WASM Engine', sub: 'WebAssembly compute module', tier: 'free', icon: 'engine' },
     ],
 };

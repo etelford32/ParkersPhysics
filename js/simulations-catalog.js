@@ -340,6 +340,11 @@ export const SIMULATIONS = [
       category: 'research', group: 'hindcast',
       tier: 'public', icon: 'storm-two-step', badge: 'NEW',
       blurb: 'March 2015 G4 — the two-step main phase every model takes, and misses.' },
+    // ── Analysis ──────────────────────────────────────────────────────────
+    { id: 'climalytix', href: 'climalytix.html', title: 'Climalytix',
+      category: 'research', group: 'analysis',
+      tier: 'public', icon: 'chart', badge: 'NEW',
+      blurb: 'One site, every dataset on one clock: ERA5 since 1940, the forecast, AO/NAO and geomagnetic activity.' },
     // ── Engine & methods ──────────────────────────────────────────────────
     { id: 'hydro-demo', href: 'hydro-demo.html', title: 'FARGO Hydro',
       category: 'research', group: 'engine',
