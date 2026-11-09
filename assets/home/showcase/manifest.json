@@ -3,23 +3,9 @@
   "generatedAt": "2026-09-06T20:32:25.729Z",
   "slides": [
     {
-      "id": "flux-rope",
-      "poster": "assets/home/carousel/flux-rope.jpg",
-      "clip": "assets/home/carousel/flux-rope.webm",
-      "width": 1600,
-      "height": 540,
-      "source": "/space-weather.html?preview=1",
-      "capturedAt": "2026-09-06T20:26:47.063Z",
-      "renderer": "swiftshader",
-      "bytes": {
-        "poster": 69813,
-        "clip": 339124
-      }
-    },
-    {
       "id": "ring-current",
-      "poster": "assets/home/carousel/ring-current.jpg",
-      "clip": "assets/home/carousel/ring-current.webm",
+      "poster": "assets/home/showcase/ring-current.jpg",
+      "clip": "assets/home/showcase/ring-current.webm",
       "width": 1212,
       "height": 666,
       "source": "/ring-current.html",
@@ -32,8 +18,8 @@
     },
     {
       "id": "mars",
-      "poster": "assets/home/carousel/mars.jpg",
-      "clip": "assets/home/carousel/mars.webm",
+      "poster": "assets/home/showcase/mars.jpg",
+      "clip": "assets/home/showcase/mars.webm",
       "width": 1600,
       "height": 850,
       "source": "/mars.html",
@@ -46,8 +32,8 @@
     },
     {
       "id": "moon",
-      "poster": "assets/home/carousel/moon.jpg",
-      "clip": "assets/home/carousel/moon.webm",
+      "poster": "assets/home/showcase/moon.jpg",
+      "clip": "assets/home/showcase/moon.webm",
       "width": 1600,
       "height": 850,
       "source": "/moon.html",
@@ -60,8 +46,8 @@
     },
     {
       "id": "earth",
-      "poster": "assets/home/carousel/earth.jpg",
-      "clip": "assets/home/carousel/earth.webm",
+      "poster": "assets/home/showcase/earth.jpg",
+      "clip": "assets/home/showcase/earth.webm",
       "width": 1600,
       "height": 850,
       "source": "/earth.html?verdict=0",
@@ -74,8 +60,8 @@
     },
     {
       "id": "tiga",
-      "poster": "assets/home/carousel/tiga.jpg",
-      "clip": "assets/home/carousel/tiga.webm",
+      "poster": "assets/home/showcase/tiga.jpg",
+      "clip": "assets/home/showcase/tiga.webm",
       "width": 1284,
       "height": 560,
       "source": "/tiga.html",
@@ -88,8 +74,8 @@
     },
     {
       "id": "pollution",
-      "poster": "assets/home/carousel/pollution.jpg",
-      "clip": "assets/home/carousel/pollution.webm",
+      "poster": "assets/home/showcase/pollution.jpg",
+      "clip": "assets/home/showcase/pollution.webm",
       "width": 950,
       "height": 474,
       "source": "/pollution.html",

@@ -131,10 +131,6 @@ img{display:block}
 #hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;
   opacity:0;transition:opacity 1.6s cubic-bezier(.25,.6,.25,1)}
 #hero.hero-live #hero-canvas{opacity:1}
-/* Background carousel (js/home-carousel.js, experiment home_bg_carousel):
-   the .hc-layer is inserted right after the canvas so #hero::after — the
-   legibility scrim below — still paints ABOVE the media. Its own styles are
-   injected by the module; only the stacking contract lives here. */
 #hero::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 40%,rgba(2,0,10,.5),rgba(2,0,10,.15) 75%)}
 .hero-inner{position:relative;z-index:1;max-width:1000px;margin:0 auto}
 /* ── THE STAGE (2026-09-20) ───────────────────────────────────────────────
@@ -355,6 +351,41 @@ img{display:block}
 .catalog-strip .all{color:var(--uv-300);font-weight:600;border-bottom:1px solid rgba(183,101,255,.35);padding-bottom:1px}
 .catalog-strip .all::before{display:none}
 
+/* ── SIMULATION SHOWCASE (cards + filters injected by js/home-showcase.js) ── */
+#showcase{background:linear-gradient(180deg,#03010e 0%,#050216 100%);border-top:1px solid rgba(154,133,255,.10)}
+.showcase-inner{max-width:1180px}
+#showcase .section-sub{max-width:720px}
+#showcase-host{min-height:420px}
+.showcase-foot{margin-top:22px;font-size:.84rem;color:var(--fg-4)}
+.showcase-foot a{color:var(--uv-300);font-weight:600;border-bottom:1px solid rgba(183,101,255,.35);padding-bottom:1px}
+.showcase-fallback{color:var(--fg-3)}
+
+/* ── BUILT LIKE AN INSTRUMENT — methods, validation, provenance ───────────── */
+#methods{background:#03010e;border-top:1px solid rgba(154,133,255,.12)}
+.methods-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:6px}
+.method{position:relative;display:flex;flex-direction:column;gap:8px;padding:18px 18px 16px;border-radius:14px;
+  background:linear-gradient(180deg,rgba(13,6,38,.55),rgba(7,2,26,.85));border:1px solid rgba(154,133,255,.14);
+  transition:border-color .2s,transform .2s}
+.method:hover{border-color:rgba(154,133,255,.4);transform:translateY(-2px)}
+.method-ico{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;color:var(--m-acc,#9d3aff);
+  background:color-mix(in srgb,var(--m-acc,#9d3aff) 14%,transparent);border:1px solid color-mix(in srgb,var(--m-acc,#9d3aff) 35%,transparent)}
+.method-ico svg{width:20px;height:20px}
+.method h3{font-family:var(--font-display);font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-1);line-height:1.3}
+.method p{font-size:.84rem;color:var(--fg-3);line-height:1.55}
+.method .receipt{font-family:var(--font-mono);font-size:.68rem;color:var(--fg-2);line-height:1.5;padding:8px 10px;border-radius:8px;
+  background:rgba(2,0,10,.5);border:1px solid rgba(154,133,255,.12)}
+.method .receipt b{color:var(--m-acc,#9d3aff);font-weight:600}
+.method a.method-link{margin-top:auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-size:.66rem;font-weight:700;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--m-acc,#9d3aff);transition:gap .15s}
+.method a.method-link:hover{gap:12px}
+.audience-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.audience{flex:1 1 220px;display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-radius:12px;text-decoration:none;
+  background:rgba(13,6,38,.45);border:1px solid rgba(154,133,255,.14);transition:border-color .2s,background .2s}
+.audience:hover{border-color:rgba(154,133,255,.45);background:rgba(13,6,38,.7)}
+.audience b{font-family:var(--font-display);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-1)}
+.audience span{font-size:.8rem;color:var(--fg-3);line-height:1.45}
+.audience em{font-style:normal;font-size:.7rem;color:var(--uv-300);letter-spacing:.08em;text-transform:uppercase;margin-top:4px}
+
 /* ── ATTRACT EMBED + DEMO SECTIONS ────────────────────────────────────────── */
 .sw-attract-section,.demo-section{padding:56px 20px 64px;text-align:center;background:#03010e}
 
@@ -426,14 +457,47 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:52p
 }
 
 /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
-/* THE HERO STAYS DARK. It is a live view of space with its own tuned colour
-   pipeline (js/hero-color.js), so its copy, stage, scrubber and carousel keep
-   the dark tokens: theme-light.css re-points --fg-* / --uv-* / --grad-* at
-   navy-on-white values on <html>, and these re-pin the DARK values on #hero
-   (custom properties inherit, so everything inside reads them again). The
-   two light ISLANDS inside it — the sky console and the sign-up card — set
-   their own colours in their modules' injected CSS. */
-html.theme-light #hero{color-scheme:dark;
+/* THE LIVE SCENE STAYS DARK; THE HERO AROUND IT GOES LIGHT (2026-11-09).
+   Until this pass the whole #hero was re-pinned to the dark tokens, so a
+   daytime visitor got a 900px black block on top of a white page — the
+   owner's "very janky". The canvas is a live view of space with its own
+   tuned colour pipeline (js/hero-color.js) and cannot be lit, so instead it
+   is framed: #hero-window (a dark, bordered, rounded plate that sits UNDER
+   the canvas) and a clip-path on the canvas both follow the stage column's
+   rect, published as --hero-win-* by the ResizeObserver after the hero
+   markup. The copy, badge and values take the light palette; the dark
+   tokens are re-pinned ONLY on #hero-stage-col, so the scrubber and the
+   sound layer that live inside the window keep their dark styling. The sky
+   console and the sign-up card set their own light colours in their
+   modules' injected CSS. In dark mode #hero-window is display:none and the
+   clip-path is absent — the dark page is pixel-identical to before. */
+#hero-window{display:none}
+html.theme-light #hero{background:
+  radial-gradient(ellipse 70% 55% at 76% 38%,rgba(21,96,212,.14),transparent 70%),
+  radial-gradient(ellipse 55% 45% at 12% 85%,rgba(9,118,186,.10),transparent 70%),
+  linear-gradient(180deg,#f6f9fe 0%,#ffffff 100%)}
+/* A faint graph-paper grid: the hero reads as an instrument panel, not a poster. */
+html.theme-light #hero::before{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.55;
+  background-image:linear-gradient(rgba(21,96,212,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(21,96,212,.07) 1px,transparent 1px);
+  background-size:48px 48px;
+  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 40%,#000 30%,transparent 100%);
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 40%,#000 30%,transparent 100%)}
+html.theme-light #hero::after{background:none}
+html.theme-light #hero-window{display:block;position:absolute;z-index:0;pointer-events:none;
+  top:var(--hero-win-t,0px);left:var(--hero-win-l,0px);width:var(--hero-win-w,0px);height:var(--hero-win-h,0px);
+  border-radius:22px;background:radial-gradient(ellipse at 50% 30%,#0a1430 0%,#040914 70%);
+  box-shadow:0 0 0 1px var(--pl-border-strong),0 1px 0 rgba(255,255,255,.6),0 18px 48px rgba(11,31,58,.22),0 2px 6px rgba(11,31,58,.12)}
+html.theme-light #hero-canvas{clip-path:inset(var(--hero-win-t,0px) calc(100% - var(--hero-win-l,0px) - var(--hero-win-w,0px)) calc(100% - var(--hero-win-t,0px) - var(--hero-win-h,0px)) var(--hero-win-l,0px) round 22px)}
+html.theme-light #hero #hero-stage-col{padding:12px 14px 14px}
+html.theme-light #hero .hero-h1{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text;filter:none}
+html.theme-light #hero .hero-sub{color:var(--pl-text-3)}
+html.theme-light #hero .hero-sub em{color:var(--pl-text-1)}
+html.theme-light #hero .hero-badge{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.32);color:var(--pl-blue-deep);box-shadow:none}
+html.theme-light #hero .hero-values{color:var(--pl-text-3)}
+html.theme-light #hero .hero-values span::before{box-shadow:none;filter:brightness(.72) saturate(1.3)}
+html.theme-light #hero .hero-cta-note{color:var(--pl-text-4)}
+/* The boot reticle on the dark window keeps its cyan; nothing to restate. */
+html.theme-light #hero #hero-stage-col{color-scheme:dark;
   --indigo-500:#3b1eff;--indigo-400:#6a48ff;--indigo-300:#9a85ff;
   --uv-700:#5500b3;--uv-600:#7b00ee;--uv-500:#9d3aff;--uv-400:#b765ff;--uv-300:#d29aff;
   --pink-600:#e60088;--pink-500:#ff1f9c;--pink-400:#ff5cb8;
@@ -448,9 +512,8 @@ html.theme-light #hero{color-scheme:dark;
   --glow-uv-sm:0 0 10px rgba(157,58,255,.4);
   --glow-uv-md:0 0 22px rgba(157,58,255,.55),0 0 50px rgba(91,30,255,.35);
   --glow-uv-lg:0 0 36px rgba(157,58,255,.7),0 0 90px rgba(91,30,255,.5)}
-/* The dark hero ends on a clean edge: the live ticker directly under it is
-   the first LIGHT surface — a soft-blue band with a blue rule on top and the
-   shadow the hero casts onto it (js/home-ticker.js carries those rules). */
+/* The live ticker directly under the hero is a soft-blue band with a blue
+   rule on top (js/home-ticker.js carries those rules). */
 
 /* Buttons: the purple→pink key becomes a blue key (same plate + travel). */
 html.theme-light .btn-primary{background:linear-gradient(180deg,#5aa2ff 0%,#2a7cf0 40%,#1560d4 100%);
@@ -508,6 +571,25 @@ html.theme-light .sim-tier.gold{background:#fff6dc;color:var(--pl-warn);border-c
 html.theme-light .catalog-strip a{color:var(--pl-text-3)}
 html.theme-light .catalog-strip a:hover{color:var(--pl-blue)}
 html.theme-light .catalog-strip .all{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+
+/* Simulation showcase + methods: white cards on soft blue (card internals
+   are themed in js/home-showcase.js). */
+html.theme-light #showcase{background:var(--pl-bg-soft);border-top-color:var(--pl-border)}
+html.theme-light .showcase-foot{color:var(--pl-text-4)}
+html.theme-light .showcase-foot a{color:var(--pl-blue);border-bottom-color:rgba(21,96,212,.35)}
+html.theme-light .showcase-fallback{color:var(--pl-text-3)}
+html.theme-light #methods{background:var(--pl-bg);border-top-color:var(--pl-border)}
+html.theme-light .method{background:var(--pl-card);border-color:var(--pl-border);box-shadow:var(--pl-shadow)}
+html.theme-light .method:hover{border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .method h3{color:var(--pl-text-1)}
+html.theme-light .method p{color:var(--pl-text-3)}
+html.theme-light .method .receipt{background:var(--pl-bg-sunk);border-color:var(--pl-border);color:var(--pl-text-2)}
+html.theme-light .method .receipt b,html.theme-light .method a.method-link,html.theme-light .method-ico{filter:brightness(.62) saturate(1.35)}
+html.theme-light .audience{background:var(--pl-bg-soft);border-color:var(--pl-border)}
+html.theme-light .audience:hover{background:var(--pl-blue-soft);border-color:var(--pl-border-strong)}
+html.theme-light .audience b{color:var(--pl-text-1)}
+html.theme-light .audience span{color:var(--pl-text-3)}
+html.theme-light .audience em{color:var(--pl-blue)}
 
 /* Validation band */
 html.theme-light #validation{background:var(--pl-bg);border-top-color:var(--pl-border);border-bottom-color:var(--pl-border)}
@@ -634,14 +716,18 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
      events / Temperature / Space weather / Aurora (secondary by design) —
      over the cinematic live-magnetosphere canvas (js/hero-space-weather.js,
      kept from the 2026-07 hero as the backdrop; 2026-09 added its deep-field
-     nebula and, for the home_bg_carousel variant, js/home-carousel.js
-     cycling captured simulations behind the copy — see that module). Space data comes from the
+     nebula. The 2026-09 background carousel of captured sims was retired
+     2026-11-09 — those captures are now the Simulation Showcase, S3). Space data comes from the
      page's single SpaceWeatherFeed; Earth data from js/home-conditions.js
      (per-location Open-Meteo). See the wiring module at the bottom of
      <body>. The H1 is the 2026-07 home_headline experiment WINNER — do not
      reword it without a new experiment. ONE ask below the console (the
      dashboard) — see the "ONE ASK" CSS note for the funnel numbers. -->
 <section id="hero" aria-label="Your sky, live: air, temperature, major events">
+  <!-- The dark plate the live canvas is framed on in LIGHT mode (see the
+       LIGHT THEME CSS note). display:none in dark mode. Before the canvas in
+       DOM order so the canvas paints over it. -->
+  <div id="hero-window" aria-hidden="true"></div>
   <canvas id="hero-canvas" aria-hidden="true"></canvas>
   <script>
   /* Boot reticle on — only where the hero will actually boot (the page
@@ -698,6 +784,29 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
          touching either the copy or the decision. Hidden when signed in. -->
     <div id="hero-signup-host"></div>
   </div>
+  <script>
+  /* Publish the stage column's rect (relative to #hero) as --hero-win-t/l/w/h.
+     Light mode frames the live canvas into it (#hero-window + the canvas
+     clip-path); dark mode reads nothing. Runs in both so a theme flip at
+     sunset needs no layout work. Observed, not polled: the column's height
+     follows the viewport cap and the scrubber's wrap. */
+  (function () {
+    var hero = document.getElementById('hero');
+    var col = document.getElementById('hero-stage-col');
+    if (!hero || !col || !window.ResizeObserver) return;
+    var publish = function () {
+      var h = hero.getBoundingClientRect(), c = col.getBoundingClientRect();
+      if (!(c.width > 0 && c.height > 0)) return;
+      hero.style.setProperty('--hero-win-t', (c.top - h.top).toFixed(1) + 'px');
+      hero.style.setProperty('--hero-win-l', (c.left - h.left).toFixed(1) + 'px');
+      hero.style.setProperty('--hero-win-w', c.width.toFixed(1) + 'px');
+      hero.style.setProperty('--hero-win-h', c.height.toFixed(1) + 'px');
+    };
+    var ro = new ResizeObserver(publish);
+    ro.observe(hero); ro.observe(col);
+    publish();
+  })();
+  </script>
 </section>
 
 <!-- ── S2 · LIVE TICKER — the proof strip ─────────────────────────────────
@@ -706,24 +815,47 @@ html.theme-light #cta-rail .rail-x:hover{color:var(--pl-text-1)}
      "real pipelines, real cadence." No CTA. -->
 <div class="sw-ticker" data-sw-ticker></div>
 
-<!-- ── S3 · EARTHVIEW DEMO — see the storms as they happen ────────────────
-     The real earth.html in a lazy, cropped, non-interactive iframe (52px
-     top crop hides the embedded nav; earth.html requests geolocation only
-     on user action, so embedding never triggers a permission prompt). Not
-     a video, not a poster — the live page on live data. -->
-<section id="earth-demo" class="demo-section" aria-label="EarthView live demo">
-  <h2 style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
-    See the storms as they happen</h2>
-  <p style="max-width:620px;margin:0 auto 26px;color:#8b94ad;font-size:.95rem;line-height:1.7">
-    This is <b style="color:#cdd8f0">EarthView</b> — live radar, hurricane tracks, NWS severe alerts and tonight's
-    aurora on one 3D globe. It's not a video. It's the actual page, running on live data, right now.</p>
-  <div class="demo-frame">
-    <span class="demo-live-tag">Live · earth.html</span>
-    <iframe data-src="/earth.html" loading="lazy" title="EarthView live globe" tabindex="-1"
-        style="top:-52px;height:calc(100% + 52px)" onload="if(this.getAttribute('src'))this.style.opacity=1"></iframe>
-    <a class="demo-open" href="earth.html" data-funnel-cta="earth_demo_open">Fly to your sky <span aria-hidden="true">→</span></a>
+<!-- ── S3 · SIMULATION SHOWCASE — pick a world, run the physics ──────────
+     2026-11-09: replaces the live EarthView iframe that stood here (a
+     second WebGL app booting under the hero — the 2026-09 funnel read
+     measured the two live embeds as the reason only ~7% of visitors reached
+     the capture band) AND the retired background carousel. One card per
+     entry in js/home-showcase-slides.js (ids are js/simulations-catalog.js
+     ids — title, tier and section come from the catalogue), each a poster
+     that plays its captured loop on hover and a funnel CTA (showcase_<id>).
+     Filters are the site's own sections. Mounted when it scrolls near. -->
+<section id="showcase" class="section" aria-labelledby="showcase-heading">
+  <div class="section-inner showcase-inner">
+    <div class="section-label fade-in">Pick a world · run the physics</div>
+    <h2 class="section-h2 fade-in" id="showcase-heading">Forty simulations. Real data under every one.</h2>
+    <p class="section-sub fade-in">Each card is a door into a running model — the Sun, the magnetosphere, the thermosphere, the Moon, a neutron-star merger. The physics is named on the card, the data it runs on is named next to it, and nothing here is a video of someone else’s result.</p>
+    <div id="showcase-host" data-showcase aria-busy="true">
+      <noscript><p>The showcase needs JavaScript. <a href="simulations.html">Browse the catalogue instead →</a></p></noscript>
+    </div>
+    <p class="showcase-foot fade-in">Posters are captures of the pages, dated on each card; the pages themselves run live. <a href="simulations.html" data-funnel-cta="showcase_browse_all">Browse all 40+ simulations →</a></p>
   </div>
 </section>
+<script type="module">
+  // Mount when it comes within 700 px of the viewport (or after 6 s), so the
+  // manifest + posters never compete with the hero's boot.
+  const host = document.getElementById('showcase-host');
+  let mounted = false;
+  const mount = () => {
+    if (mounted || !host) return;
+    mounted = true;
+    import('./js/home-showcase.js')
+      .then((m) => m.mountHomeShowcase(host, {
+        onFilter: (id) => { try { window.dispatchEvent(new CustomEvent('showcase-filter', { detail: { id } })); } catch {} },
+      }))
+      .catch((err) => { console.warn('[home] showcase failed to mount:', err); host.innerHTML = '<p class="showcase-fallback">The showcase is unavailable right now. <a href="simulations.html">Browse the catalogue →</a></p>'; })
+      .finally(() => host.removeAttribute('aria-busy'));
+  };
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { io.disconnect(); mount(); } }, { rootMargin: '700px 0px' });
+    io.observe(host);
+    setTimeout(mount, 6000);
+  } else mount();
+</script>
 
 <!-- ── S4 · FLUX-ROPE BRAG (attract loop, S3/D4 plan decision #6) ─────────
      The Stage's cinematic — live CME trains from the validated flux-rope
@@ -802,7 +934,7 @@ window.addEventListener('message', (e) => {
      System orrery and the Near-Earth Watch run (js/home-neo-watch.js +
      the PURE js/home-neo-model.js), drawn as a 2D geocentric plan view and
      a live table — NOT an iframe of the orrery (captures-not-embeds, see
-     js/home-carousel.js). Mounted lazily when it scrolls near. -->
+     js/home-showcase-slides.js). Mounted lazily when it scrolls near. -->
 <section id="neo-top10" class="demo-section" aria-labelledby="neo-top10-heading">
   <div class="section-label" style="text-align:center">Local space · live</div>
   <h2 id="neo-top10-heading" style="font-size:clamp(1.3rem,3.4vw,2rem);color:#e8f4ff;margin-bottom:10px">
@@ -954,6 +1086,83 @@ window.addEventListener('message', (e) => {
     </div>
   </div>
 </section>
+
+<!-- ── S7b · BUILT LIKE AN INSTRUMENT — for the scientific reader ──────────
+     2026-11-09. The validation band above gives the numbers; this gives the
+     METHOD: named published models, kernels gated by tests, forecasts that
+     are locked before the event and scored after it, provenance on every
+     number, and where a researcher or operator goes next. Every receipt
+     here is a measured value recorded in the repo (CLAUDE.md / the kernels'
+     own gates) — do not round them up for effect. Glyphs are js/glyphs.js
+     ids, rendered by the module script below. -->
+<section id="methods" class="section" aria-labelledby="methods-heading">
+  <div class="section-inner">
+    <div class="section-label fade-in">For researchers &amp; operators</div>
+    <h2 class="section-h2 fade-in" id="methods-heading">Built like an instrument, not a demo</h2>
+    <p class="section-sub fade-in">Every simulation here names the model it runs, carries the data it runs on, and is pinned by a test you can read. Forecasts are locked before the event and scored against what actually arrived.</p>
+    <div class="methods-grid">
+
+      <article class="method fade-in" style="--m-acc:#8ff0ff">
+        <span class="method-ico" data-glyph="engine" aria-hidden="true"></span>
+        <h3>Published models, named on the page</h3>
+        <p>NRLMSISE-00 for the thermosphere, IGRF-14 for the core field, Vallado's SGP4 for every orbit, Shue 1998 for the magnetopause, VSOP87 and Meeus for the planets, PFSS for the corona, TOV + SPH for the mergers. No model is a black box.</p>
+        <div class="receipt">SGP4 kernel vs Vallado 2006 verification set — <b>33 cases · 666 rows · worst 0.2 mm</b></div>
+        <a class="method-link" href="rust.html" data-funnel-cta="methods_kernels">The Rust → WASM kernels <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="method fade-in" style="--m-acc:#ff5cb8">
+        <span class="method-ico" data-glyph="target" aria-hidden="true"></span>
+        <h3>Hindcast-validated on named storms</h3>
+        <p>The May 2024 Gannon G5 superstorm and the March 2015 St. Patrick's Day storm are reconstructed end to end — flux-rope transit, Bz, Dst — and the fits are published with the misses.</p>
+        <div class="receipt">Gannon 2-rope compounding hindcast — <b>min Bz −44.3 nT vs −44.17 observed</b></div>
+        <a class="method-link" href="gannon-superstorm.html" data-funnel-cta="methods_gannon">Read the Gannon hindcast <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="method fade-in" style="--m-acc:#ffd23f">
+        <span class="method-ico" data-glyph="chart" aria-hidden="true"></span>
+        <h3>Forecasts locked, then scored</h3>
+        <p>Each CME arrival forecast is locked at issue time and scored against the L1 shock when it comes. The skill ledger is public, and a forecast issued after the shock is never counted as a hit.</p>
+        <div class="receipt">Arrival ledger on real events — <b>issued-before-shock rule, scored daily</b></div>
+        <a class="method-link" href="cme-forecast.html" data-funnel-cta="methods_ledger">Open the arrival calendar <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="method fade-in" style="--m-acc:#2eff9e">
+        <span class="method-ico" data-glyph="probe" aria-hidden="true"></span>
+        <h3>Provenance on every number</h3>
+        <p>Archival imagery is labelled archival, live feeds carry their freshness, and a dead feed says it is dead rather than drawing a quiet planet. Model output is marked model wherever it sits next to a measurement.</p>
+        <div class="receipt">Live pipelines monitored on the status page — <b>freshness per feed, fallback sources flagged amber</b></div>
+        <a class="method-link" href="status.html" data-funnel-cta="methods_status">System status <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="method fade-in" style="--m-acc:#b765ff">
+        <span class="method-ico" data-glyph="microscope" aria-hidden="true"></span>
+        <h3>Kernels you can test</h3>
+        <p>The physics lives in pure modules with no DOM and no network, each pinned by its own gate — identities, closed forms and negative controls that must fail. The Moon's interior reproduces the measured moment of inertia; Pinatubo through the volcanic climate chain gives the observed forcing.</p>
+        <div class="receipt">Moon C/MR² <b>0.3930 vs 0.3931 measured</b> · Pinatubo <b>−3.05 W m⁻², −0.34 K</b></div>
+        <a class="method-link" href="recent-development.html" data-funnel-cta="methods_devlog">What shipped, and when <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="method fade-in" style="--m-acc:#ff8c5a">
+        <span class="method-ico" data-glyph="shield" aria-hidden="true"></span>
+        <h3>For the people who fly things</h3>
+        <p>Thermosphere density and orbit decay under live drivers, conjunction screening on SGP4, and custom hindcasts of your anomaly on the same engine. SBIR-ready, with validation you can inspect.</p>
+        <div class="receipt">Drag suite — <b>80–2,000 km, NRLMSISE-00 + King–Hele decay</b></div>
+        <a class="method-link" href="for-operators.html" data-funnel-cta="methods_operators">Capabilities for operators <span aria-hidden="true">→</span></a>
+      </article>
+
+    </div>
+    <div class="audience-row fade-in" aria-label="Start here, by who you are">
+      <a class="audience" href="auroracle.html" data-funnel-cta="audience_skywatcher"><b>Sky-watchers</b><span>Aurora odds for your exact spot, tonight and 30 nights out.</span><em>Start with AurOracle →</em></a>
+      <a class="audience" href="operations.html" data-funnel-cta="audience_operator"><b>Satellite operators</b><span>Decay watch, drag under storm drivers, conjunction screening.</span><em>Open Operations →</em></a>
+      <a class="audience" href="research.html" data-funnel-cta="audience_researcher"><b>Researchers</b><span>Hindcasts, the skill ledger, geomagnetic estimation, deep-space labs.</span><em>Browse Research →</em></a>
+      <a class="audience" href="for-educators.html" data-funnel-cta="audience_educator"><b>Educators</b><span>Classroom seats, guided simulations, physics you can argue with.</span><em>For educators →</em></a>
+    </div>
+  </div>
+</section>
+<script type="module">
+  import { glyph } from './js/glyphs.js';
+  for (const el of document.querySelectorAll('#methods .method-ico[data-glyph]')) el.innerHTML = glyph(el.dataset.glyph, { size: 20 });
+</script>
 
 <!-- ── S7 · PRICING — aperture-named tiers, compact ───────────────────────
      Display names only: Observer/Forecaster/Researcher map onto the real
@@ -1244,19 +1453,6 @@ if (heroCanvas && heroCanvas.style.display !== 'none') {
     .catch(err => console.info('[home] flux-rope provider unavailable:', err?.message ?? err));
   if ('requestIdleCallback' in window) requestIdleCallback(startProvider, { timeout: 6000 });
   else setTimeout(startProvider, 2500);
-}
-
-/* Background carousel — experiment home_bg_carousel (js/experiments.js).
-   Control keeps the live magnetosphere alone; the carousel variant keeps
-   it as slide 0 and cycles captured loops of seven simulations behind the
-   copy (js/home-carousel.js, media + manifest from
-   scripts/capture-home-carousel.mjs). Mounted AFTER the hero import so its
-   poster fetch never races the canvas for first paint, and never awaited —
-   a missing manifest simply leaves the live hero. */
-if (experiments.assign('home_bg_carousel') === 'carousel') {
-  import('./js/home-carousel.js')
-    .then(m => m.mountHomeCarousel(document.getElementById('hero'), { hero3d: heroReady }))
-    .catch(err => console.warn('[home] carousel failed to mount:', err));
 }
 
 /* ONE feed for the whole page — started after all listeners are attached. */
