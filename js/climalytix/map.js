@@ -118,6 +118,18 @@ const FLOW_MIN = 150, FLOW_MAX = 1600;
 const ASSET_ROOT = new URL('../../', import.meta.url);
 const TILE_CACHE_MAX = 240;
 const OCEAN = '#0a1a2e';
+/**
+ * THE DATA GROUND (visual polish, plan §19): while a data FILL is on, the
+ * imagery under it is desaturated and dimmed so the fill's colour reads as the
+ * data — a translucent ramp over a bright, busy satellite mosaic otherwise
+ * mixes with the ground into a muddy wash (the 2026-11-09 gallery). Outside
+ * the fill's data window the ground is VEILED further, so the window reads as
+ * the area of analysis; its dashed edge is still drawn on top ("where a field
+ * ends is drawn, not implied"). Display only: no layer's number moves, and with
+ * no fill on the ground is drawn exactly as before (the map gate's basemap
+ * negative controls run with every fill off).
+ */
+const DATA_GROUND = Object.freeze({ desaturate: 0.55, dim: 0.34, veil: 0.42 });
 const HEAT_ALPHA_DEFAULT = 0.62;
 const HEAT_STEP_PX = 2;          // one data sample per 2×2 CSS px block
 
@@ -137,7 +149,7 @@ export function mountMap(root, deps) {
         timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false, updraft: false, convection: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
-        aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
+        aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT, windows: [],
         tiles: new Map(), w: 0, h: 0, dpr: 1, raf: 0, hover: null,
         underlay: new Map(), relief: { state: 'idle', canvas: null, ms: null },
         wind: null, windState: 'loading', windNote: '',
@@ -1106,17 +1118,57 @@ export function mountMap(root, deps) {
                  monitorsAt: M.monitors[0]?.validMs ?? null };
     }
 
-    /** The data window: where a field ends is drawn, not implied. Returns its 360° shift. */
+    /**
+     * The data window: where a field ends is drawn, not implied. Recorded here
+     * and drawn by drawWindows() once every fill is down (so the veil outside
+     * it cannot cover a fill and no edge is stroked twice). Returns its 360° shift.
+     */
     function dashedBox(r) {
         const shift = wrapNear((r.west + r.east) / 2, M.view.lon) - (r.west + r.east) / 2;
         const a = lin(r.north, r.west + shift), b = lin(r.south, r.east + shift);
+        const box = { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
+        if (!M.windows.some((o) => Math.abs(o.x - box.x) < 0.5 && Math.abs(o.y - box.y) < 0.5 && Math.abs(o.w - box.w) < 0.5 && Math.abs(o.h - box.h) < 0.5)) M.windows.push(box);
+        return shift;
+    }
+
+    /** Is a data FILL on with its data loaded? (The airflow particles are not a fill.) */
+    function fillWanted() {
+        const L = M.layers;
+        return !!((L.temperature && M.field?.values) || (L.airquality && M.aq?.values)
+            || ((L.exposure || L.orographic) && D.grid) || (L.thermals && TH.field)
+            || (L.updraft && UP.field) || (L.convection && CV.field));
+    }
+
+    /** Desaturate and dim the ground under a fill (DATA_GROUND). */
+    function dataGround() {
         ctx.save();
+        ctx.globalCompositeOperation = 'saturation';
+        ctx.globalAlpha = DATA_GROUND.desaturate;
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(0, 0, M.w, M.h);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = DATA_GROUND.dim;
+        ctx.fillStyle = '#060c16';
+        ctx.fillRect(0, 0, M.w, M.h);
+        ctx.restore();
+    }
+
+    /** Veil outside the data windows (only under a fill), then their dashed edges. */
+    function drawWindows() {
+        if (!M.windows.length) return;
+        ctx.save();
+        if (M.drawn.ground) {
+            ctx.beginPath();
+            ctx.rect(0, 0, M.w, M.h);
+            for (const b of M.windows) ctx.rect(b.x, b.y, b.w, b.h);
+            ctx.fillStyle = `rgba(4,8,16,${DATA_GROUND.veil})`;
+            ctx.fill('evenodd');
+        }
         ctx.setLineDash([5, 4]);
         ctx.strokeStyle = 'rgba(232,241,248,.55)';
         ctx.lineWidth = 1;
-        ctx.strokeRect(a.x + 0.5, a.y + 0.5, b.x - a.x, b.y - a.y);
+        for (const b of M.windows) ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w, b.h);
         ctx.restore();
-        return shift;
     }
 
     // Isotherms depend on the field, the time and the reader's unit — never on
@@ -1360,6 +1412,9 @@ export function mountMap(root, deps) {
         const plan = tilePlan(M.view, M.w, M.h, { dpr: M.dpr, maxLevel: BASE.maxLevel });
         M.drawn.tiles = drawTileLayer(BASE, plan);
         M.drawn.terrain = drawTerrain();
+        M.windows = [];
+        M.drawn.ground = fillWanted();
+        if (M.drawn.ground) dataGround();
         drawHeat();
         drawAq();
         drawExposure();
@@ -1368,6 +1423,7 @@ export function mountMap(root, deps) {
         drawUpdraft();
         drawConvection();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
+        drawWindows();
         drawElevation();
         drawSlopeWind();
         M.drawn.labels = drawLabels();

@@ -102,8 +102,9 @@ test('midday: likely at the site, CAPPED 2° north under more CAPE — NEGATIVE 
         const hit = Object.fromEntries(Object.keys(cols).map((k) => [k, 0]));
         for (let i = 0; i < d.length; i += 16) {
             for (const [k, rgb] of Object.entries(cols)) {
-                // A fill composited over the basemap moves toward its own colour; test the hue's signature.
-                if (k === 'likely' && d[i] > 150 && d[i + 1] < 90 && d[i + 2] < 100) hit[k]++;
+                // A fill composited over the (dimmed, desaturated) data ground keeps its HUE, not its
+                // brightness — test the red signature relative to the other channels.
+                if (k === 'likely' && d[i] > 100 && d[i] > 1.8 * d[i + 1] && d[i] > 1.6 * d[i + 2]) hit[k]++;
             }
         }
         return hit;

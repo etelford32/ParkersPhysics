@@ -89,8 +89,10 @@ body {
 #cx-heat-status[data-state="down"] { color:#ff8c7a; }
 #cx-heat-status[data-state="stale"] { color:#ffd479; }
 #cx-heat-alpha { width:100%; accent-color:var(--cx-accent); }
-#cx-map-stage { position:relative; height:clamp(300px, 46vh, 480px); border-radius:10px; overflow:hidden;
-    background:#0a1a2e; border:1px solid var(--cx-line); }
+/* The stage is TALL and STICKY: the layer rail beside it is far longer than
+   the map, and a reader working down it should keep the map in view. */
+#cx-map-stage { position:sticky; top:62px; align-self:start; height:clamp(360px, calc(100vh - 140px), 720px); border-radius:10px; overflow:hidden;
+    background:#0a1a2e; border:1px solid var(--cx-line); box-shadow:0 10px 30px rgba(0,0,0,.35); }
 #cx-map-canvas { display:block; touch-action:none; cursor:grab; outline:none; }
 /* The wind palette is built to ADD as light (EarthView's trails blend
    additively: a slow, deep colour is also a dim one), so the flow layer
@@ -155,28 +157,34 @@ body {
 #cx-map-tip { position:absolute; left:0; top:0; pointer-events:none; padding:3px 8px; border-radius:6px;
     background:rgba(6,12,22,.86); border:1px solid var(--cx-line); font-size:.74rem; white-space:nowrap; }
 /* Lower-right controls: zoom ± over a D-pad with recentre in the middle. */
-#cx-map-ctl { position:absolute; right:10px; bottom:26px; display:grid; gap:6px; justify-items:center; }
-#cx-map-ctl .cx-zoom, #cx-map-ctl .cx-pad { display:grid; gap:3px; background:rgba(6,12,22,.78);
-    border:1px solid var(--cx-line); border-radius:10px; padding:4px; backdrop-filter:blur(4px); }
-#cx-map-ctl .cx-zoom { grid-template-columns:repeat(2, 38px); }
-#cx-map-ctl .cx-pad { grid-template-columns:repeat(3, 34px); grid-template-rows:repeat(3, 34px); }
-#cx-map-ctl button { border:0; border-radius:7px; background:rgba(0,198,255,.10); color:var(--cx-ink);
-    font:600 16px/1 system-ui, sans-serif; cursor:pointer; min-height:34px; }
-#cx-map-ctl .cx-zoom button { height:38px; font-size:20px; }
-#cx-map-ctl button:hover { background:rgba(0,198,255,.26); }
+#cx-map-ctl { position:absolute; right:10px; bottom:30px; display:grid; gap:6px; justify-items:center; }
+#cx-map-ctl .cx-zoom, #cx-map-ctl .cx-pad { display:grid; gap:2px; background:rgba(6,12,22,.72);
+    border:1px solid rgba(255,255,255,.08); border-radius:9px; padding:3px; backdrop-filter:blur(6px); }
+#cx-map-ctl .cx-zoom { grid-template-columns:repeat(2, 32px); }
+#cx-map-ctl .cx-pad { grid-template-columns:repeat(3, 28px); grid-template-rows:repeat(3, 28px); opacity:.72; transition:opacity .15s; }
+#cx-map-ctl .cx-pad:hover, #cx-map-ctl .cx-pad:focus-within { opacity:1; }
+#cx-map-ctl button { border:0; border-radius:6px; background:transparent; color:var(--cx-ink);
+    font:600 13px/1 system-ui, sans-serif; cursor:pointer; min-height:28px; }
+#cx-map-ctl .cx-zoom button { height:32px; font-size:18px; }
+#cx-map-ctl button:hover { background:rgba(0,198,255,.22); }
 #cx-map-ctl button:focus-visible { outline:2px solid var(--cx-accent); outline-offset:1px; }
 #cx-map-ctl [data-map-act="pan-up"] { grid-area:1 / 2; } #cx-map-ctl [data-map-act="pan-left"] { grid-area:2 / 1; }
 #cx-map-ctl [data-map-act="recenter"] { grid-area:2 / 2; } #cx-map-ctl [data-map-act="pan-right"] { grid-area:2 / 3; }
 #cx-map-ctl [data-map-act="pan-down"] { grid-area:3 / 2; }
-#cx-map-scale { position:absolute; left:10px; bottom:26px; font-size:.68rem; color:var(--cx-ink);
+#cx-map-scale { position:absolute; left:12px; bottom:34px; font-size:.68rem; color:var(--cx-ink);
     text-shadow:0 1px 2px #000; pointer-events:none; }
 #cx-map-scale i { display:block; height:6px; border:2px solid var(--cx-ink); border-top:0; margin-bottom:2px; }
-#cx-map-attr { position:absolute; left:0; right:0; bottom:0; padding:3px 10px; font-size:.62rem; color:var(--cx-muted);
-    background:linear-gradient(transparent, rgba(6,12,22,.85)); pointer-events:none; }
+/* Sources: one quiet line on the map; the full credits open on demand. */
+#cx-map-attr { position:absolute; left:8px; bottom:6px; max-width:calc(100% - 16px); font-size:.62rem; color:var(--cx-muted); }
+#cx-map-attr summary { cursor:pointer; list-style:none; display:inline-block; padding:2px 8px; border-radius:999px;
+    background:rgba(6,12,22,.72); border:1px solid rgba(255,255,255,.08); backdrop-filter:blur(6px); }
+#cx-map-attr summary::-webkit-details-marker { display:none; }
+#cx-map-attr[open] summary { margin-bottom:4px; }
+#cx-map-attr p { padding:6px 9px; border-radius:8px; background:rgba(6,12,22,.9); border:1px solid var(--cx-line); line-height:1.45; max-width:640px; }
 @media (max-width: 768px) {
     #cx-map { grid-template-columns:minmax(0, 1fr); }
     #cx-map-layers { order:2; }
-    #cx-map-stage { height:clamp(260px, 52vh, 420px); }
+    #cx-map-stage { position:relative; top:auto; height:clamp(280px, 56vh, 460px); }
 }
 
 /* site bar */
@@ -420,7 +428,7 @@ body {
           <button type="button" data-map-act="pan-down" aria-label="Pan south" title="Pan south (↓)">▼</button>
         </div>
       </div>
-      <div id="cx-map-attr">Imagery: NASA Blue Marble (self-hosted) + NASA GIBS Blue Marble NG — archival composites · relief: EarthView relief map · heat + airflow: Climalytix GFS archive · air quality: Copernicus CAMS (via Open-Meteo) + EPA AirNow · elevation: AWS Terrain Tiles (Mapzen terrarium; SRTM, 3DEP, GMTED and others)</div>
+      <details id="cx-map-attr"><summary>ⓘ Sources</summary><p>Imagery: NASA Blue Marble (self-hosted) + NASA GIBS Blue Marble NG — archival composites · relief: EarthView relief map · heat + airflow: Climalytix GFS archive · air quality: Copernicus CAMS (via Open-Meteo) + EPA AirNow · elevation: AWS Terrain Tiles (Mapzen terrarium; SRTM, 3DEP, GMTED and others)</p></details>
     </div>
   </section>
 
