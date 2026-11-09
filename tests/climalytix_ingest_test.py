@@ -331,4 +331,148 @@ def _():
         pass
 
 
+
+@ok('§19 T4 fluxes: SHTFL is planned as a bucket MEAN on the real files, the reset and the 120 h change included')
+def _():
+    want = {3: ((0, 3), None), 6: ((0, 6), (0, 3)), 9: ((6, 9), None), 12: ((6, 12), (6, 9)),
+            237: ((234, 237), None), 240: ((234, 240), (234, 237))}
+    for lead, (take, minus) in want.items():
+        e = I.parse_idx(idx_text(lead))
+        p = I.plan_accumulation(e, 'SHTFL', 'surface', lead, 3, kind='ave')
+        assert p and p['take'] == take and p['minus'] == minus, (lead, p)
+        assert p['entry']['fcst'] == f'{take[0]}-{take[1]} hour ave fcst'
+        # NEGATIVE CONTROL: planned as an amount, SHTFL has no window at all.
+        assert I.plan_accumulation(e, 'SHTFL', 'surface', lead, 3, kind='acc') is None
+    assert I.plan_accumulation(I.parse_idx(idx_text(0)), 'SHTFL', 'surface', 0, 3, kind='ave') is None
+
+
+@ok('§19 T4 fluxes: an average is de-averaged through its integral, never by subtraction')
+def _():
+    m1, m2 = 120.0, 340.0                 # true 3 h means over (0,3] and (3,6]
+    avg06, avg03 = (m1 + m2) / 2, m1      # what the f006 and f003 files carry
+    assert I.step_value(avg06, (0, 6), avg03, (0, 3), 'ave', 3) == m2
+    assert I.step_value(m1, (6, 9), None, None, 'ave', 3) == m1
+    # NEGATIVE CONTROL: the amount rule on means gives (m2 - m1)/2, not m2.
+    assert I.step_value(avg06, (0, 6), avg03, (0, 3), 'acc', 3) != m2
+    arr = I.step_value(np.array([avg06, 0.0]), (0, 6), np.array([avg03, 0.0]), (0, 3), 'ave', 3)
+    assert arr.tolist() == [m2, 0.0], 'works on arrays (the worker passes whole fields)'
+    try:
+        I.step_value(1.0, (0, 6), 1.0, (0, 2), 'ave', 3)
+        raise AssertionError('mismatched windows must raise')
+    except ValueError:
+        pass
+
+
+@ok('§19 T4 vars: every GFS_VARS entry resolves on f003/f006 the way the worker asks; f000 lacks only the windows')
+def _():
+    for lead in (3, 6):
+        e = I.parse_idx(idx_text(lead))
+        for v in T.GFS_VARS:
+            var, level = v['grib']
+            found = (I.find_instant(e, var, level, lead) if v['kind'] == 'inst'
+                     else I.plan_accumulation(e, var, level, lead, 3, kind=v['kind']))
+            assert found, (lead, v['id'])
+    e0 = I.parse_idx(idx_text(0))
+    absent = [v['id'] for v in T.GFS_VARS if v['kind'] == 'inst'
+              and not I.find_instant(e0, *v['grib'], 0)]
+    assert absent == ['gustMs'] or absent == [], f'analysis lacks {absent}'
+    wins = [v['id'] for v in T.GFS_VARS if v['kind'] != 'inst']
+    assert wins == ['precipMm', 'shflxWm2'], wins
+    ids = [v['id'] for v in T.GFS_VARS]
+    assert ids[:9] == ['tempC', 'dewC', 'rhPct', 'uMs', 'vMs', 'gustMs', 'mslHpa', 'precipMm', 'cloudPct'], \
+        'APPEND ONLY: the on-disk var index of existing archives must not move'
+    by = {v['id']: v for v in T.GFS_VARS}
+    for vid, lo, hi in (('psfcHpa', 480.0, 1085.0), ('shflxWm2', -800.0, 1500.0), ('hpblM', 0.0, 6500.0)):
+        q, c = T.quantise(np.array([lo, hi]), by[vid]['scale'], by[vid]['offset'])
+        assert c == 0, f'{vid} clips inside its physical range'
+        back = T.dequantise(q, by[vid]['scale'], by[vid]['offset'])
+        assert np.allclose(back, [lo, hi], atol=by[vid]['scale'] / 2)
+
+
+
+@ok('§19 T4 worker end to end: real idx files f000–f012, stubbed bytes — every var lands, windows de-windowed per var')
+def _():
+    """Runs gfs.run_ingest itself (planning on the REAL .idx sidecars, the
+    per-variable window bookkeeping, quantisation, tiling, the manifest) with
+    only HTTP and the GRIB decoder stubbed: each message's bytes carry its
+    own offset, and the stub decodes it to a CLOSED-FORM field. The windowed
+    vars must come back as the true 3 h values — precip 6 mm per step, the
+    flux 10·L W/m² — which only holds if each var keeps its OWN previous
+    window (the old single-slot bookkeeping is what this guards)."""
+    import os
+    import tempfile
+    import types
+    import gfs as W
+    leads = (0, 3, 6, 9, 12)
+    entries = {L: I.parse_idx(idx_text(L)) for L in leads}
+    NI, NJ = 8, 5
+    meta = {'ni': NI, 'nj': NJ, 'lat0': 90.0, 'dlat': 45.0, 'lon0': 0.0, 'dlon': 45.0}
+
+    def lead_of(url):
+        return int(url.split('.f')[-1][:3])
+
+    def http_get(url, rng=None, retries=4, timeout=60):
+        L = lead_of(url.replace('.idx', ''))
+        if rng is None:
+            return idx_text(L).encode()
+        s0, _, e0 = rng[len('bytes='):].partition('-')
+        s0 = int(s0)
+        n = (int(e0) + 1 - s0) if e0 else 4096
+        blob = bytearray(n)
+        for e in entries[L]:
+            if s0 <= e['offset'] < s0 + n:
+                o = e['offset'] - s0
+                blob[o:o + 10] = e['offset'].to_bytes(8, 'little') + L.to_bytes(2, 'little')
+        return bytes(blob)
+
+    def true_value(e, L):
+        var, kind = e['var'], I.describe(e['fcst'])
+        if kind[0] in ('anl', 'inst'):
+            return 90000.0 + 10 * L if var in ('PRMSL', 'PRES') else 200.0 + L
+        _, a, b = kind
+        if var == 'APCP':
+            return 2.0 * (b - a)                              # 2 mm/h
+        if var == 'SHTFL':                                    # true 3 h mean over (h-3, h] is 10·h
+            return float(np.mean([10.0 * h for h in range(a + 3, b + 1, 3)]))
+        raise AssertionError(f'unexpected window var {var}')
+
+    def decode(msg, ec):
+        off, L = int.from_bytes(msg[:8], 'little'), int.from_bytes(msg[8:10], 'little')
+        e = next(x for x in entries[L] if x['offset'] == off)
+        return np.full((NJ, NI), true_value(e, L), dtype=np.float32), dict(meta)
+
+    saved = (W.http_get, W.decode, {k: os.environ.pop(k) for k in list(os.environ) if k.startswith('R2_')})
+    W.http_get, W.decode = http_get, decode
+    try:
+        with tempfile.TemporaryDirectory() as out:
+            args = types.SimpleNamespace(run='2026110700', grid='0p25', max_lead=12, step=3, tile=4, keep=2,
+                                         workers=2, upload_workers=2, max_missing_frac=0.05, out=out)
+            assert W.run_ingest(args) == 0
+            root = pathlib.Path(out) / W.ARCHIVE_ROOT / '0p25' / '20261107T00Z'
+            man = json.loads(gzip.decompress((root / 'manifest.json.gz').read_bytes()))
+            ids = [v['id'] for v in man['vars']]
+            assert ids == [v['id'] for v in T.GFS_VARS]
+            assert man['intervalH'] == {'precipMm': 3, 'shflxWm2': 3}, man['intervalH']
+            miss = {(m['var'], m['leadH']) for m in man['missing']}
+            assert miss == {('precipMm', 0), ('shflxWm2', 0), ('gustMs', 0)} or \
+                miss == {('precipMm', 0), ('shflxWm2', 0)}, miss
+            raw = np.frombuffer((root / 't' / 'r00-c00.i16').read_bytes(), dtype='<i2')
+            nv, nt = len(ids), len(leads)
+            cell = raw[:nv * nt].reshape(nv, nt)              # local row 0, col 0
+            by = {v['id']: (k, v) for k, v in enumerate(T.GFS_VARS)}
+
+            def series(vid):
+                k, v = by[vid]
+                return T.dequantise(cell[k], v['scale'], v['offset'])
+            assert np.isnan(series('shflxWm2')[0]) and np.isnan(series('precipMm')[0])
+            assert np.allclose(series('shflxWm2')[1:], [30, 60, 90, 120], atol=0.05), series('shflxWm2')
+            assert np.allclose(series('precipMm')[1:], [6, 6, 6, 6], atol=0.005), series('precipMm')
+            assert np.allclose(series('hpblM'), [200 + L for L in leads], atol=0.5)
+            assert np.allclose(series('psfcHpa'), [900 + 0.1 * L for L in leads], atol=0.01)
+            assert np.allclose(series('tempC'), [200 + L - 273.15 for L in leads], atol=0.005)
+    finally:
+        W.http_get, W.decode = saved[0], saved[1]
+        os.environ.update(saved[2])
+
+
 print(f'\n{passed} passed')

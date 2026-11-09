@@ -90,9 +90,12 @@ def newest_complete_run(grid_id, max_lead, now=None, lookback_h=48):
 
 def fetch_lead(run, grid_id, lead, step):
     """Download one lead: its idx and every message this run needs from it.
-    Returns {'lead', 'inst': {var_id: bytes}, 'acc': {(a,b): bytes}, 'plan', 'err'}."""
+    Returns {'lead', 'inst': {var_id: bytes}, 'win': {(var_id, (a,b)): bytes},
+    'plans': {var_id: plan | None}, 'err'}. Windowed vars ('acc' amounts and
+    'ave' means, idx.py §2–3) each carry their OWN plan — there used to be one
+    slot, which was right only while precipitation was the sole windowed var."""
     url = file_url(run, grid_id, lead)
-    out = {'lead': lead, 'inst': {}, 'acc': {}, 'plan': None, 'err': None}
+    out = {'lead': lead, 'inst': {}, 'win': {}, 'plans': {}, 'err': None}
     text = http_get(url + '.idx')
     if text is None:
         out['err'] = 'idx-missing'
@@ -106,10 +109,10 @@ def fetch_lead(run, grid_id, lead, step):
             if e:
                 wanted.append(('inst', v['id'], e))
         else:
-            plan = I.plan_accumulation(entries, var, level, lead, step)
-            out['plan'] = plan
+            plan = I.plan_accumulation(entries, var, level, lead, step, kind=v['kind'])
+            out['plans'][v['id']] = plan
             if plan:
-                wanted.append(('acc', plan['take'], plan['entry']))
+                wanted.append(('win', (v['id'], plan['take']), plan['entry']))
     for start, end, members in I.merge_ranges([w[2] for w in wanted]):
         blob = http_get(url, I.range_header(start, end))
         if blob is None:
@@ -118,7 +121,7 @@ def fetch_lead(run, grid_id, lead, step):
             if e in members:
                 lo = e['offset'] - start
                 hi = None if e['end'] is None else e['end'] - start
-                (out['inst'] if kind == 'inst' else out['acc'])[key] = blob[lo:hi]
+                (out['inst'] if kind == 'inst' else out['win'])[key] = blob[lo:hi]
     return out
 
 
@@ -149,9 +152,9 @@ def run_ingest(args):
     nvar, ntime = len(T.GFS_VARS), len(leads)
     cube = meta = None
     missing, clipped, notes = [], {v['id']: 0 for v in T.GFS_VARS}, []
-    prev_take = {}
+    prev_take = {}      # var_id → {window: decoded field} from the PREVIOUS lead
     var_index = {v['id']: k for k, v in enumerate(T.GFS_VARS)}
-    acc_var = next(v for v in T.GFS_VARS if v['kind'] == 'acc')
+    win_vars = [v for v in T.GFS_VARS if v['kind'] != 'inst']
     t0 = time.time()
 
     with cf.ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -173,24 +176,27 @@ def run_ingest(args):
                         continue
                     field, m = decode(raw, ec)
                 else:
-                    plan = got['plan']
-                    if not plan or plan['take'] not in got['acc']:
+                    plan = got['plans'].get(v['id'])
+                    raw = got['win'].get((v['id'], plan['take'])) if plan else None
+                    if raw is None:
                         missing.append({'var': v['id'], 'leadH': L,
-                                        'reason': 'no-window' if L == 0 else 'acc-window-missing'})
-                        prev_take = {}
+                                        'reason': 'no-window' if L == 0 else 'window-missing'})
+                        prev_take.pop(v['id'], None)
                         continue
-                    cum, m = decode(got['acc'][plan['take']], ec)
-                    if plan['minus'] is None:
-                        field = cum
-                    elif plan['minus'] in prev_take:
-                        field = cum - prev_take[plan['minus']]
-                        neg = int(np.count_nonzero(field < -0.05))
-                        if neg:
-                            notes.append(f'precip lead {L}h: {neg} cells < -0.05 mm after de-accumulation (clamped to 0)')
-                        field = np.maximum(field, 0.0)
+                    cum, m = decode(raw, ec)
+                    before = prev_take.get(v['id'], {})
+                    if plan['minus'] is None or plan['minus'] in before:
+                        field = I.step_value(cum, plan['take'], before.get(plan['minus']), plan['minus'],
+                                             v['kind'], args.step)
+                        if v.get('floor') is not None:
+                            neg = int(np.count_nonzero(field < v['floor'] - v['scale'] * 5))
+                            if neg:
+                                notes.append(f"{v['id']} lead {L}h: {neg} cells below {v['floor']} after "
+                                             f"de-{'accumulation' if v['kind'] == 'acc' else 'averaging'} (clamped)")
+                            field = np.maximum(field, v['floor'])
                     else:
-                        missing.append({'var': v['id'], 'leadH': L, 'reason': 'deaccumulation-window-unavailable'})
-                    prev_take = {plan['take']: cum}
+                        missing.append({'var': v['id'], 'leadH': L, 'reason': 'window-unavailable'})
+                    prev_take[v['id']] = {plan['take']: cum}
                     if field is None:
                         continue
                 if meta is None:
@@ -208,7 +214,7 @@ def run_ingest(args):
         print('nothing decoded — refusing to publish', file=sys.stderr)
         return 2
     frac = len(missing) / (nvar * ntime)
-    expected_missing = 1   # precip has no window at f000, by definition
+    expected_missing = len(win_vars)   # no windowed var has a window at f000, by definition
     if len(missing) > expected_missing and frac > args.max_missing_frac:
         print(f'{len(missing)} var-leads missing ({frac:.1%}) > {args.max_missing_frac:.0%} — refusing to publish',
               file=sys.stderr)
@@ -231,15 +237,17 @@ def run_ingest(args):
     print(f'  {len(jobs)} tiles, {total / 1e6:.0f} MB written ({time.time() - t0:.0f}s)')
 
     times = [run_ms + L * 3_600_000 for L in leads]
-    notes.insert(0, f"precipMm at lead L is the {args.step} h amount over (L-{args.step}, L]; "
-                    'readers stamp it at the interval START so day sums land in the right day')
+    for v in win_vars:
+        what = 'amount' if v['kind'] == 'acc' else 'mean'
+        notes.insert(0, f"{v['id']} at lead L is the {args.step} h {what} over (L-{args.step}, L]; "
+                        'readers stamp it at the interval START so day sums land in the right day')
     man = T.manifest(
         source='gfs', grid_id=args.grid, run_iso=run_iso, run_ms=run_ms, meta=meta, n=n,
         vars_=T.GFS_VARS, times_ms=times, leads_h=leads, prefix=prefix, missing=missing,
         clipped=clipped, generator=GENERATOR,
         created_iso=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), notes=notes,
     )
-    man['intervalH'] = {acc_var['id']: args.step}
+    man['intervalH'] = {v['id']: args.step for v in win_vars}
     man['upstream'] = f'{BUCKET_URL}/gfs.{run.strftime("%Y%m%d")}/{run.strftime("%H")}/atmos (NOAA ODP, public domain)'
     store.put(f'{prefix}/manifest.json.gz', S.gz(T.dumps(man)), 'application/gzip')
     pointer = {'schema': 'climalytix.latest.v1', 'run': run_iso, 'runMs': run_ms,

@@ -967,7 +967,7 @@ lift at a given spot, and the rail says so.
 | **T1** | **Elevation levels + sun exposure** | Terrarium decode `h = R·256 + G + B/256 − 32768`; Web-Mercator tile maths (round trip exact); slope/aspect by Sobel on a 2-node baseline in METRES with cos φ spacing (a tilted plane comes back exact at 0° and 60°; the aspect sign trap is the negative control); incidence `cos θ = cos s·sin α + sin s·cos α·cos(A☉ − aspect)` (flat ground = sin α exactly; a face square to the Sun = 1); the day's direct-beam ratio slope/flat (flat = 1 exactly; an equator-facing slope in winter > 1, pole-facing < 1). Self-shading only — no cast shadows, disclosed. | AWS Terrain Tiles (Terrarium PNG, public, attribution) through `/api/climalytix/dem` (SSRF-safe: z/x/y only, the upstream URL is rebuilt from a frozen candidate list; the no-coordinate form is a capability probe); the Sun is `js/sun-altitude.js` `solarPosition` (the site's one Sun) | **BUILT 2026-11-09** (below) |
 | **T2** | **Orographic updraft** | The exact kinematic lower boundary condition `w = u·∂h/∂x + v·∂h/∂y` (flow forced up a slope); windward/leeward from the same dot product. Gate: a uniform wind over a tilted plane gives the closed-form w; wind along the contours gives 0; reversing the wind flips the sign. | T1's DEM + our GFS 10 m u/v (airflow's field) | **BUILT 2026-11-09** (below) |
 | **T3** | **Anabatic / katabatic slope winds** | Prandtl (1942): θ′ = Δθ·e^(−n/λ)cos(n/λ), u = Δθ·μ·e^(−n/λ)sin(n/λ), λ = (4K·K_h/(N²sin²α))^¼, **μ = g/(θ₀·N·√Pr)** (corrected 2026-11-09: the first draft's √(gK/(θ₀N²Pr)) is not a speed and is now the gate's negative control); peak u = 0.3224·μ·Δθ at n = πλ/4, independent of the slope angle. Forcing Δθ = Q/h from each slope's OWN budget (Meinel beam × T1 incidence × Kasten–Czeplak cloud − net longwave). Gate: both ODEs by finite differences, the peak, sign follows Δθ, flat ground has none, gentle slopes left blank. | T1 + GFS total cloud + 2 m T (`nwp-field?vars=cloudPct,tempC`) | **BUILT 2026-11-09** (below) |
-| **T4** | **Thermals** | Deardorff convective velocity `w* = (g/θ · H/(ρ·c_p) · z_i)^⅓`; thermal tops at the boundary-layer depth z_i; cumulus base at the LCL (`z = 125 m · (T − T_d)`, Espy) — "blue" thermals when the LCL sits above z_i. Gate: w* scales as H^⅓ and z_i^⅓ exactly; H ≤ 0 gives no thermals; the LCL identity. | GFS sensible heat flux (SHTFL), boundary-layer height (HPBL), DSWRF — **added to `GFS_VARS` in the ingest** (format change → re-write the Python fixture on purpose) | planned |
+| **T4** | **Thermals** | Deardorff convective velocity `w* = (g/θ_v · H/(ρ·c_p) · z_i)^⅓`; thermal tops at the boundary-layer depth z_i; cumulus base at the EXACT LCL (Romps 2017, Lambert W; Espy's 125 m/K is only the cross-check) — "blue" thermals when the LCL sits above z_i. Gate: the LCL's defining saturation identity, w* scales as H^⅓ and z_i^⅓ exactly, H ≤ floor gives none, the flux window convention. | Our GFS archive + SHTFL (3 h mean), HPBL, PRES surface — ingested from 2026-11-09 (DSWRF not needed) | **BUILT 2026-11-09** (below) |
 | **T5** | **Updraft (general)** | The vertical air motion available: orographic (T2) + thermal (T4) + slope (T3), each kept SEPARATE in the readout (never one invented total), plus GFS vertical velocity at 850/700 hPa (ω → w = −ω/(ρg)) where ingested. Gate: ω→w conversion exact at standard density; components add without double counting. | T2–T4 + GFS VVEL | planned |
 | **T6** | **Convection** | Parcel theory on the GFS column: CAPE, CIN, lifted index (ingested, not recomputed — GFS's own), the convective temperature, and a "convection outlook" timeline panel (CAPE, CIN, LCL, z_i, w*) in Explore. Gate: a dry-adiabatic sounding has CAPE 0; the LI sign convention (negative = unstable) pinned both ways. | GFS CAPE/CIN/LFTX (ingest) | planned |
 
@@ -1044,3 +1044,33 @@ test (both checked). Not modelled, and said: cast shadows, the valley and
 synoptic wind on top, and afternoon convective turbulence. One bug found by
 the gate: with the DEM down the rail sat on "Loading…" — the rail is now told
 on every draw.
+
+**T4 as built (2026-11-09).** THE INGEST GREW (append-only, so existing
+archives keep their var indices): `shflxWm2` (SHTFL, a bucket MEAN), `hpblM`
+(HPBL) and `psfcHpa` (PRES surface, offset 750 so the Tibetan plateau does
+not clip). Averages are de-windowed through their INTEGRAL — the 3 h mean
+over (3, 6] is (6·avg₀₋₆ − 3·avg₀₋₃)/3, never the plain difference (idx.py
+`step_value`, the difference is the gate's negative control) — and the worker
+now keeps a plan and a previous window PER windowed var (its single slot was
+right only while precipitation was the only one). `tests/climalytix_ingest_test.py`
+runs `run_ingest` END TO END over the real f000–f012 .idx files with HTTP and
+GRIB decoding stubbed to closed forms, and fails if the per-var bookkeeping is
+shared (checked). The tile fixture is unchanged (it is its own 3-var cube).
+`FIELD_VARS` gains dewC + the three; a run ingested before them answers "no
+variable … in this run" and the rail says the fields arrive with the next run.
+The kernel is `js/climalytix/thermals.js` (PURE, `tests/climalytix-thermals.mjs`):
+Deardorff w*, ρ = p/(R_d·T_v), Romps' exact LCL (its saturation identity holds
+to 1e-16; the truncated exponent misses by 14–23 % and puts cloud base ~300 m
+low; Espy agrees within 2–10 %), top = min(z_i, LCL), cu vs blue, strength
+words = the RASP convention. THE FLUX CONVENTION: a GFS mean ENDS at its
+stamp, so the instant uses the window ending at the NEXT stamp and the
+instantaneous fields are interpolated across it (`windowAt`); the browser
+gate (`tests/climalytix-thermals.spec.js`, closed-form mocks linear in
+lat/lon) recomputes every number and fails 3 of 4 tests if the map reads the
+previous window (checked). It is a fill in the one-at-a-time group on GFS's
+own 25 km grid (disclosed: triggers are not resolved; w* is not a climb
+rate), with the dashed window outline, a site summary and the day's
+w* ≥ 1 m/s span in the rail. One measured adjustment: full paint at 3.5 m/s
+with alpha ≤ 0.65 — at 2.5 / 0.8 an ordinary midday field was an opaque slab.
+NOTE: nothing appears in production until the ingest workflow has run once
+with the new GFS_VARS.

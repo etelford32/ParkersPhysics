@@ -23,6 +23,13 @@ sub-message numbers parses the same way; both GFS grids use `n:offset:d=…`.)
      is the window (a, L) with the LATEST start a ≤ L − step, minus the
      previous file's (a, L − step) when a < L − step. `plan_accumulation`
      returns that subtraction explicitly so the caller cannot forget it.
+
+  3. FLUXES ARE AVERAGED IN THE SAME RESETTING BUCKETS (SHTFL, DSWRF: f003
+     "0-3 hour ave", f006 "0-6 hour ave", f009 "6-9 hour ave"…). An AVERAGE
+     is not an amount: the 3-hour mean over (3, 6] is (6·avg(0-6) −
+     3·avg(0-3)) / 3, NOT avg(0-6) − avg(0-3) — the plain difference is the
+     gate's negative control. `plan_accumulation(kind='ave')` plans the same
+     windows and `step_value` does the arithmetic for either kind.
 """
 
 from __future__ import annotations
@@ -109,8 +116,8 @@ def windows(entries, var, level, kind='acc'):
     return out
 
 
-def plan_accumulation(entries, var, level, lead_h, step_h):
-    """How to get the `step_h` amount ending at lead_h.
+def plan_accumulation(entries, var, level, lead_h, step_h, kind='acc'):
+    """How to get the `step_h` amount (kind 'acc') or mean ('ave') ending at lead_h.
 
     Returns {'take': (a, L), 'minus': (a, L - step) | None, 'entry': e} or
     None when the file carries no usable window (f000 has no APCP at all).
@@ -118,13 +125,34 @@ def plan_accumulation(entries, var, level, lead_h, step_h):
     """
     if lead_h - step_h < 0:
         return None
-    wins = windows(entries, var, level, 'acc')
+    wins = windows(entries, var, level, kind)
     start = lead_h - step_h
     cands = [(a, b) for (a, b) in wins if b == lead_h and a <= start]
     if not cands:
         return None
     a, b = max(cands)   # the LATEST start: the bucket that resets most recently
     return {'take': (a, b), 'minus': None if a == start else (a, start), 'entry': wins[(a, b)]}
+
+
+def step_value(take_val, take, minus_val, minus, kind, step_h):
+    """The `step_h` value ending at the take window's end, from a plan.
+
+    'acc': take − minus (amounts subtract).  'ave': averages are turned back
+    into integrals first — (take·len(take) − minus·len(minus)) / step_h.
+    Works on scalars or numpy arrays. `minus` None ⇒ the take window IS the
+    step and its value is returned as is.
+    """
+    if minus is None:
+        return take_val
+    a, b = take
+    a2, b2 = minus
+    if a2 != a or (b - a) - (b2 - a2) != step_h:
+        raise ValueError(f'windows {take} and {minus} do not differ by one {step_h} h step')
+    if kind == 'acc':
+        return take_val - minus_val
+    if kind == 'ave':
+        return (take_val * (b - a) - minus_val * (b2 - a2)) / step_h
+    raise ValueError(f'unknown window kind {kind!r}')
 
 
 def merge_ranges(entries, gap=0):

@@ -25,7 +25,8 @@ import {
     RANGES, chooseStep, windowFor, panelModel, panelSvg, timeTicks, readoutAt, msAtX, tickDecimals,
 } from './timeline-model.js';
 import { DAY_MS } from './series.js';
-import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing } from './loaders.js';
+import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField } from './loaders.js';
+import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
 import { windRose, prevailing, pollutionRose, ROSE_SPEED_EDGES, FLOW_SPEED_TOP_MS } from './airflow.js';
 import { pm25Aqi, alignByInstant } from './aq-field.js';
 import { fieldSample } from './map-view.js';
@@ -183,6 +184,8 @@ function loadMapField(site, signal) {
     S.map?.setWind('loading', null, 'Loading the wind field…');
     S.slopeSite = null;
     requestSlopeForcing();
+    S.thermalSite = null;
+    requestThermals();
     renderRose();
     loadWindField(site, { signal }).then((r) => {
         if (signal.aborted || S.site !== site) return;
@@ -203,6 +206,56 @@ function requestSlopeForcing() {
         if (S.site !== site) return;
         S.map.setSlopeForcing(r.state, r.body, r.note, r.cloud);
     });
+}
+
+/** Thermal fields are fetched on FIRST enable of the layer, once per site. */
+function requestThermals() {
+    if (!$('#cx-layer-th')?.checked || !S.site || !S.map || S.thermalSite === S.site) return;
+    const site = S.site;
+    S.thermalSite = site;
+    S.map.setThermals('loading', null, '');
+    loadThermalField(site).then((r) => {
+        if (S.site !== site) return;
+        S.map.setThermals(r.state, r.body, r.note);
+    });
+}
+
+/** The w* key: the map's own painter from 0 to WSTAR_FULL + a margin. */
+function paintThermalKey() {
+    const px = new Uint8ClampedArray(4), stops = [];
+    const top = WSTAR_FULL;
+    for (let k = 0; k <= 20; k++) {
+        const w = WSTAR_FLOOR + (top - WSTAR_FLOOR) * k / 20;
+        px.fill(0); thermalPaint(w + 1e-9, px, 0);
+        stops.push(`rgba(${px[0]},${px[1]},${px[2]},${(px[3] / 255).toFixed(3)}) ${k * 5}%`);
+    }
+    $('#cx-th-key .cx-th-bar').style.background = `linear-gradient(90deg, ${stops.join(', ')}), #2a3446`;
+    const ticks = $('#cx-th-key .cx-exp-ticks').children;
+    ticks[0].textContent = `${WSTAR_FLOOR} m/s`; ticks[2].textContent = `${WSTAR_FULL}+`;
+}
+
+/** Rail status for thermals: the site now, the day's window, the strongest in view. */
+function renderThermalRail(info) {
+    const st = $('#cx-th-status');
+    if (!info || info.state === 'off') { st.textContent = ''; return; }
+    st.dataset.state = info.state;
+    if (info.state === 'loading') { st.textContent = info.note || 'Loading…'; return; }
+    if (info.state === 'down' || info.state === 'notime') { st.textContent = info.note; return; }
+    const hhmm = (ms) => new Date(ms + S.utcOffsetS * 1000).toISOString().slice(11, 16);
+    const h = (m) => fmtText('height', m, S.units);
+    const r = info.site;
+    const now = !r ? 'No thermal estimate at the site.'
+        : r.regime === 'none' ? 'At the site: no thermals — the ground is not heating the air.'
+        : `At the site: w* ${r.wstar.toFixed(1)} m/s (${r.strength}), `
+          + (r.regime === 'cu' ? `cumulus base ${h(r.baseM)} above the ground (boundary layer to ${h(r.ziM)}).`
+                               : `blue thermals to ${h(r.topM)} above the ground (cloud base would be ${h(r.lclM)}).`);
+    const day = info.fromMs != null
+        ? `Today: w* ≥ 1 m/s from ${hhmm(info.fromMs)} to ${hhmm(info.toMs)} local${info.peak ? `, peak ${info.peak.wstar.toFixed(1)} m/s in the window ending ${hhmm(info.peak.endMs)}` : ''}.`
+        : info.peak ? `Today: weak only — peak ${info.peak.wstar.toFixed(1)} m/s in the window ending ${hhmm(info.peak.endMs)} local.`
+        : 'Today: no thermals at the site.';
+    const m = info.maxInView;
+    const where = m ? ` Strongest in view: ${m.wstar.toFixed(1)} m/s at ${Math.abs(m.lat).toFixed(2)}°${m.lat >= 0 ? 'N' : 'S'} ${Math.abs(m.lon).toFixed(2)}°${m.lon >= 0 ? 'E' : 'W'}.` : '';
+    st.innerHTML = `<b>${esc(hhmm(info.timeMs))} local.</b> ${esc(now)}<br>${esc(day)}${esc(where)}<br>${esc(info.note || '')}`;
 }
 
 /** Rail status for slope winds: the regime in view, the strongest flow, the forcing's source. */
@@ -519,6 +572,8 @@ function mountLocationMap() {
         onDem: renderDemRail,
         onOro: renderOroRail,
         onSlope: renderSlopeRail,
+        onThermals: renderThermalRail,
+        utcOffsetS: () => S.utcOffsetS,
         // Elevation levels are chosen in the reader's height unit (round feet for a ft reader).
         heightUnits: () => ({
             toDisplay: (m) => fmt('height', m, S.units).value,
@@ -535,8 +590,14 @@ function mountLocationMap() {
     const showField = (which, on) => {
         const pick = (id, key) => (which === key ? on : (on ? false : $(id).checked));
         const temp = pick('#cx-layer-temp', 'temp'), aq = pick('#cx-layer-aq', 'aq'), exp = pick('#cx-layer-exp', 'exp'), oro = pick('#cx-layer-oro', 'oro');
+        const th = pick('#cx-layer-th', 'th');
         $('#cx-layer-temp').checked = temp; $('#cx-layer-aq').checked = aq; $('#cx-layer-exp').checked = exp; $('#cx-layer-oro').checked = oro;
+        $('#cx-layer-th').checked = th;
         S.map.setLayer('temperature', temp); S.map.setLayer('airquality', aq); S.map.setLayer('exposure', exp); S.map.setLayer('orographic', oro);
+        S.map.setLayer('thermals', th);
+        $('#cx-th-key').hidden = !th; $('#cx-th-status').hidden = !th;
+        if (th) requestThermals();
+        renderThermalRail(S.map.state.thermals);
         $('#cx-oro-key').hidden = !oro; $('#cx-oro-status').hidden = !oro;
         renderOroRail(S.map.state.orographic);
         $('#cx-exp-mode').hidden = !exp; $('#cx-exp-key').hidden = !exp;
@@ -550,6 +611,7 @@ function mountLocationMap() {
     $('#cx-layer-aq').addEventListener('change', (ev) => showField('aq', ev.target.checked));
     $('#cx-layer-exp').addEventListener('change', (ev) => showField('exp', ev.target.checked));
     $('#cx-layer-oro').addEventListener('change', (ev) => showField('oro', ev.target.checked));
+    $('#cx-layer-th').addEventListener('change', (ev) => showField('th', ev.target.checked));
     $('#cx-layer-slope').addEventListener('change', (ev) => {
         S.map.setLayer('slopewind', ev.target.checked);
         $('#cx-slope-key').hidden = !ev.target.checked; $('#cx-slope-status').hidden = !ev.target.checked;
@@ -578,6 +640,7 @@ function mountLocationMap() {
     paintAqKey();
     paintExposureKey();
     paintOroKey();
+    paintThermalKey();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
@@ -861,6 +924,7 @@ export function boot() {
         get state() {
             return {
                 site: S.site,
+                utcOffsetS: S.utcOffsetS,
                 workspace: S.ws,
                 datasets: Object.fromEntries([...S.results].map(([k, v]) => [k, { state: v.state, series: v.series.map((s) => s.id) }])),
                 loading: [...S.loading],

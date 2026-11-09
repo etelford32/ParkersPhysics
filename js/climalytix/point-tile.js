@@ -216,7 +216,10 @@ export const FIELD_HALF_DEG_DEFAULT = 3;
 /** Variables a field request may ask for (the map's layers). The bytes of
  *  every variable come back in each range anyway (a cell holds all of them),
  *  so a second variable costs wire size, never another R2 read. */
-export const FIELD_VARS = Object.freeze(['tempC', 'uMs', 'vMs', 'cloudPct', 'rhPct', 'precipMm']);
+// §19 T4 adds the thermal inputs: dew point (cloud base), the 3 h mean surface
+// sensible heat flux, the model's boundary-layer height and station pressure.
+// A run ingested before them answers "no variable … in this run" — never a guess.
+export const FIELD_VARS = Object.freeze(['tempC', 'uMs', 'vMs', 'cloudPct', 'rhPct', 'precipMm', 'dewC', 'shflxWm2', 'hpblM', 'psfcHpa']);
 
 /** `vars` query value → a validated, de-duplicated list (default tempC), or { error }. */
 export function parseFieldVars(raw) {
@@ -338,6 +341,7 @@ export function fieldBody(man, plan, varId, values, { nowMs, site, extra = null 
         site, var: varId, unit: v?.unit ?? null,
         latN: plan.latN, lonW: plan.lonW, dlat: man.dlat, dlon: man.dlon,
         nRows: plan.nRows, nCols: plan.nCols, times: man.times, leadsH: man.leadsH,
+        ...(man.intervalH ? { intervalH: man.intervalH } : {}),
         layout: 'time,row,col',
         values: first,
         note: 'Grid-node values of one GFS run; the map smooths between nodes for display only.',

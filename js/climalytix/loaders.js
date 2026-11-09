@@ -187,6 +187,31 @@ export async function loadSlopeForcing(site, { signal } = {}) {
 }
 
 /**
+ * The THERMAL inputs (plan §19 T4) from OUR GFS archive on the airflow
+ * window: surface sensible heat flux (3 h mean), boundary-layer height,
+ * station pressure, 2 m temperature and dew point — fetched on FIRST enable
+ * only. A run ingested before these fields existed answers "no variable …";
+ * the note says so and nothing is drawn (there is no stand-in for a flux).
+ */
+export async function loadThermalField(site, { signal } = {}) {
+    const vars = ['shflxWm2', 'hpblM', 'psfcHpa', 'tempC', 'dewC'];
+    try {
+        const j = await getJson(fieldPath({ ...site, halfDeg: 4, vars }), signal);
+        if (!vars.every((v) => j?.fields?.[v])) {
+            const why = (j?.reasons || []).map(reasonText).join(', ') || 'unavailable';
+            const old = (j?.reasons || []).some((r) => /no variable/.test(String(r)));
+            return { state: 'down', body: null,
+                note: old ? 'Our GFS archive was ingested before the thermal fields existed; they arrive with the next run. Nothing stands in for them.'
+                          : `No thermal fields: ${why}. Nothing stands in for them.` };
+        }
+        const state = j.freshness === 'fresh' ? 'live' : 'stale';
+        return { state, body: j, note: `GFS heat flux, boundary layer, pressure, temperature + dew point, run ${j.run} (${ageText(j.age_seconds)})` };
+    } catch (e) {
+        return { state: 'down', body: null, note: `No thermal fields: ${e?.message || 'unreachable'}. Nothing stands in for them.` };
+    }
+}
+
+/**
  * The CAMS air-quality field around the site (BOOTSTRAP source — Open-Meteo's
  * free tier; the page badges it). Resolves { state, body | null, note }.
  */

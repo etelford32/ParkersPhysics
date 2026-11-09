@@ -59,6 +59,11 @@
  *             drawn as ARROWS along the fall line — an overlay, not a fill,
  *             so it can sit on Sun exposure. Gentle slopes are blank (the
  *             flow cannot spin up); no cloud field ⇒ clear sky, disclosed.
+ *   thermals  §19 T4 (thermals.js, PURE): Deardorff w* and the Romps cloud
+ *             base on GFS's OWN 0.25° nodes (a fill in the one-at-a-time
+ *             group) — the heat flux is the mean over the 3 h window that
+ *             contains the instant, the other fields are interpolated across
+ *             it. A run without the fields draws nothing and says why.
  *   controls  lower-right: zoom ± and a D-pad with recentre. Also: drag,
  *             wheel/trackpad zoom AT THE CURSOR, two-finger pinch, double-
  *             click zoom, and the keyboard (arrows, + −, 0) once the map has
@@ -85,6 +90,7 @@ import {
     demPath, compass16, DEM_MIN_Z,
 } from './terrain.js';
 import { orographicGrid, orographicExtremes, orographicPaint, windSide, formatW } from './orographic.js';
+import { thermalAt, thermalPaint, windowAt } from './thermals.js';
 import { slopeWind, slopeWindGrid, slopeWindExtremes, ANABATIC_RGB, KATABATIC_RGB, ARROW_MIN_MS, THETA0_DEFAULT_K } from './slope-wind.js';
 import { solarPosition } from '../sun-altitude.js';
 import { buildTempLUTPixels, TEMP_ENCODE_MIN_C, TEMP_ENCODE_SPAN_C } from '../temp-ramp.js';
@@ -116,7 +122,7 @@ export function mountMap(root, deps) {
     const scaleEl = root.querySelector('#cx-map-scale');
     const M = {
         view: null, site: null, field: null, fieldState: 'loading', fieldNote: '',
-        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false },
+        timeMs: null, layers: { temperature: true, isotherms: true, extremes: true, terrain: true, labels: true, airflow: true, airquality: false, monitors: true, elevation: false, exposure: false, orographic: false, slopewind: false, thermals: false },
         exposureMode: 'today',
         dem: { tiles: new Map(), z: null, grid: null, sa: null, key: '', state: 'idle', note: '', exp: null, expKey: '', iso: null, isoKey: '', timer: 0 },
         aq: null, aqState: 'loading', aqNote: '', monitors: [], monState: 'idle', monNote: '', heatAlpha: HEAT_ALPHA_DEFAULT,
@@ -127,7 +133,7 @@ export function mountMap(root, deps) {
         drawn: { heat: false, tiles: 0, t: null, isotherms: 0, isoLevels: [], freezing: false, extremes: false, underlay: null, terrain: false, labels: [],
                  airflow: { mode: null, t: null, particles: 0, lines: 0, frames: 0 },
                  aq: false, aqT: null, monitors: { n: 0, compared: 0, bias: null, mae: null },
-                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false, slopewind: { arrows: 0, up: 0, down: 0 } },
+                 elevation: { lines: 0, step: null, labels: [] }, exposure: false, orographic: false, slopewind: { arrows: 0, up: 0, down: 0 }, thermals: false },
     };
 
     // ── Tiles ──────────────────────────────────────────────────────────────
@@ -580,6 +586,128 @@ export function mountMap(root, deps) {
             cloudFrac: c ?? 0, theta0K: t ?? THETA0_DEFAULT_K });
     }
 
+    // ── Thermals (T4) ────────────────────────────────────────────────────
+    const TH = { field: null, state: 'idle', note: '', key: '', grid: null, canvasKey: '', sig: '' };
+    const TH_VARS = ['shflxWm2', 'hpblM', 'psfcHpa', 'tempC', 'dewC'];
+    function thermalTimeMs() { return M.timeMs ?? Date.now(); }
+    /** The inputs at node k for window w = { i, f } (flux of window i; the rest lerped i−1 → i). */
+    function thermalInputs(f, w, sample) {
+        const lerp = (v) => {
+            const a = sample(v, w.i - 1), b = sample(v, w.i);
+            return a == null || b == null ? NaN : a + (b - a) * w.f;
+        };
+        const flux = sample('shflxWm2', w.i);
+        return { fluxWm2: flux == null ? NaN : flux, ziM: lerp('hpblM'), psfcHpa: lerp('psfcHpa'),
+                 tempC: lerp('tempC'), dewC: lerp('dewC') };
+    }
+    function thermalsFor() {
+        const f = TH.field;
+        if (!f) return null;
+        const w = windowAt(f.times, thermalTimeMs());
+        if (!w) return null;
+        const key = `${f.run}|${w.i}|${Math.round(w.f * 36)}`;
+        if (TH.key !== key) {
+            const plane = f.nRows * f.nCols;
+            const wstar = new Float32Array(plane).fill(NaN);
+            for (let k = 0; k < plane; k++) {
+                const r = thermalAt(thermalInputs(f, w, (v, t) => {
+                    const x = f.fields[v][t * plane + k];
+                    return x == null || !Number.isFinite(x) ? null : x;
+                }));
+                if (r) wstar[k] = r.wstar;
+            }
+            TH.grid = { w, wstar };
+            TH.key = key; TH.canvasKey = '';
+        }
+        return TH.grid;
+    }
+    /** Thermals at a point: inputs interpolated to it, then the kernel (hover, rail, test hook). */
+    function thermalHere(lat, lon, ms = thermalTimeMs()) {
+        const f = TH.field;
+        const w = f ? windowAt(f.times, ms) : null;
+        if (!w) return null;
+        return thermalAt(thermalInputs(f, w, (v, t) => fieldSample({ ...f, values: f.fields[v] }, t, lat, lon)));
+    }
+
+    let thCanvas = null;
+    function drawThermals() {
+        M.drawn.thermals = false;
+        if (M.layers.thermals && thermalsFor()) {
+            const f = TH.field;
+            const key = `${TH.key}|${M.view.lat}|${M.view.lon}|${M.view.span}|${M.w}|${M.h}`;
+            if (TH.canvasKey !== key) {
+                const img = heatImage({ ...f, values: TH.grid.wstar }, 0, M.view, M.w, M.h, null, { step: HEAT_STEP_PX, paint: thermalPaint });
+                thCanvas = thCanvas || document.createElement('canvas');
+                thCanvas.width = img.cw; thCanvas.height = img.ch;
+                thCanvas.getContext('2d').putImageData(new ImageData(img.data, img.cw, img.ch), 0, 0);
+                TH.canvasKey = key;
+            }
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, M.heatAlpha + 0.2);
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(thCanvas, 0, 0, M.w, M.h);
+            ctx.restore();
+            dashedBox(fieldBox(f));                 // where our GFS window ends — not a weather edge
+            M.drawn.thermals = true;
+        }
+        const info = thermalInfo();
+        const sig = JSON.stringify([info.state, info.timeMs, info.site?.wstar, info.peak?.wstar, info.maxInView]);
+        if (TH.sig !== sig) { TH.sig = sig; deps.onThermals?.(info); }
+    }
+
+    /** The day at the site: w* at each window end of the local day containing the instant. */
+    function thermalDay(site) {
+        const f = TH.field;
+        if (!f || !site) return null;
+        const ms = thermalTimeMs(), off = (deps.utcOffsetS?.() ?? Math.round(site.lon / 15) * 3600) * 1000;
+        const d0 = Math.floor((ms + off) / 86_400_000) * 86_400_000 - off;
+        const rows = [];
+        f.times.forEach((t, i) => {
+            if (i === 0 || t <= d0 || t > d0 + 86_400_000) return;
+            const r = thermalHere(site.lat, site.lon, t);
+            if (r) rows.push({ endMs: t, startMs: f.times[i - 1], ...r });
+        });
+        const good = rows.filter((r) => r.wstar >= 1);
+        const peak = rows.reduce((a, r) => (!a || r.wstar > a.wstar ? r : a), null);
+        return { rows, peak: peak && peak.wstar > 0 ? peak : null,
+                 fromMs: good.length ? good[0].startMs : null, toMs: good.length ? good[good.length - 1].endMs : null };
+    }
+
+    function thermalInfo() {
+        if (!M.layers.thermals) return { state: 'off' };
+        if (TH.state === 'loading' || TH.state === 'idle') return { state: 'loading', note: 'Loading the thermal fields…' };
+        if (!TH.field) return { state: 'down', note: TH.note };
+        const timeMs = thermalTimeMs();
+        if (!windowAt(TH.field.times, timeMs)) return { state: 'notime', note: 'The GFS run does not cover this time (the analysis hour has no heat-flux window).' };
+        const g = thermalsFor();
+        let maxInView = null;
+        if (g) {
+            const b = viewBounds(M.view, M.w, M.h), f = TH.field;
+            for (let i = 0; i < f.nRows; i++) {
+                const lat = f.latN - i * f.dlat;
+                if (lat > b.north || lat < b.south) continue;
+                for (let j = 0; j < f.nCols; j++) {
+                    const lon = f.lonW + j * f.dlon, v = g.wstar[i * f.nCols + j];
+                    if (lon < b.west || lon > b.east || !Number.isFinite(v)) continue;
+                    if (!maxInView || v > maxInView.wstar) maxInView = { wstar: v, lat, lon };
+                }
+            }
+        }
+        const day = thermalDay(M.site);
+        const win = windowAt(TH.field.times, timeMs);
+        return { state: TH.state, note: TH.note, timeMs,
+                 window: { startMs: TH.field.times[win.i - 1], endMs: TH.field.times[win.i], f: win.f }, site: M.site ? thermalHere(M.site.lat, M.site.lon) : null,
+                 peak: day?.peak ?? null, fromMs: day?.fromMs ?? null, toMs: day?.toMs ?? null, maxInView };
+    }
+
+    function thermalText(r) {
+        if (!r) return null;
+        if (r.regime === 'none') return 'no thermals (the ground is not heating the air)';
+        const h = (m) => (deps.formatHeight ? deps.formatHeight(m) : `${Math.round(m)} m`);
+        return `thermals w* ${r.wstar.toFixed(1)} m/s (${r.strength}) · `
+            + (r.regime === 'cu' ? `cumulus base ${h(r.baseM)} AGL` : `blue (no cumulus) to ${h(r.topM)} AGL`);
+    }
+
     function drawElevation() {
         M.drawn.elevation = { lines: 0, step: null, labels: [] };
         if (!M.layers.elevation || !D.grid) return;
@@ -991,6 +1119,7 @@ export function mountMap(root, deps) {
         drawAq();
         drawExposure();
         drawOrographic();
+        drawThermals();
         if (!M.drawn.heat && !M.drawn.aq && flowWanted()) dashedBox(fieldBox(M.wind));
         drawElevation();
         drawSlopeWind();
@@ -1073,10 +1202,11 @@ export function mountMap(root, deps) {
                tr.w != null ? `${formatW(tr.w, { feet: deps.heightUnits?.().sym === 'ft' })} ${windSide(tr.w, tr.slope)}` : null,
                slopeWindText(tr.slopeWind)].filter(Boolean).join(' · ')
             : null;
+        const thTxt = M.layers.thermals ? thermalText(thermalHere(g.lat, g.lon)) : null;
         const aqTxt = pm == null ? null : `PM2.5 ${pm.toFixed(1)} µg/m³ (AQI ${pm25Aqi(pm)}, ${categoryForAqi(pm25Aqi(pm))?.name})`;
         const wind = w && deps.formatWind
             ? `${SECTOR_NAMES_16[Math.round(fromDirection(w.u, w.v) / 22.5) % 16]} ${deps.formatWind(Math.hypot(w.u, w.v))}` : null;
-        tip.textContent = [terrTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
+        tip.textContent = [terrTxt, thTxt, aqTxt, v == null ? null : deps.formatTemp(v), wind, ll].filter(Boolean).join(' · ');
         tip.hidden = false;
         const x = Math.min(M.hover.x + 12, M.w - tip.offsetWidth - 6);
         const y = M.hover.y > 40 ? M.hover.y - 30 : M.hover.y + 14;
@@ -1191,6 +1321,14 @@ export function mountMap(root, deps) {
             SW.state = state; SW.forcing = body || null; SW.note = note || ''; SW.cloud = !!cloud; SW.key = '';
             requestDraw();
         },
+        /** The thermal inputs field (GFS); state 'loading' | 'live' | 'stale' | 'down'. */
+        setThermals(state, body, note) {
+            TH.state = state; TH.field = body?.fields && TH_VARS.every((v) => body.fields[v]) ? body : null;
+            TH.note = note || ''; TH.key = ''; TH.sig = '';
+            requestDraw();
+        },
+        /** Thermals at a point and instant (test + console hook). */
+        thermalAt: (lat, lon, ms) => thermalHere(lat, lon, ms),
         setExposureMode(mode) { M.exposureMode = mode === 'now' ? 'now' : 'today'; D.expKey = ''; requestDraw(); deps.onDem?.(demInfo()); },
         /** Terrain at a point (test + console hook). */
         terrainAt,
@@ -1240,6 +1378,7 @@ export function mountMap(root, deps) {
                 dem: demInfo(),
                 orographic: oroInfo(),
                 slopewind: slopeInfo(),
+                thermals: thermalInfo(),
             };
         },
         rampDomain: { min: TEMP_ENCODE_MIN_C, span: TEMP_ENCODE_SPAN_C },

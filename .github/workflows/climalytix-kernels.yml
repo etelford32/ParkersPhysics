@@ -47,6 +47,10 @@
 #                            speed, sign, flat/gentle blank, the budget, ranges;
 #                            the plan's first (non-speed) amplitude is the
 #                            NEGATIVE CONTROL
+#   climalytix-thermals.mjs  §19 T4 thermals: Lambert W₋₁, the Romps LCL's
+#                            saturation identity (truncated exponent = NEGATIVE
+#                            CONTROL), Deardorff scaling, regimes, the flux
+#                            window convention
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
@@ -139,6 +143,8 @@ jobs:
         run: node tests/climalytix-orographic.mjs
       - name: slope winds (Prandtl)
         run: node tests/climalytix-slope-wind.mjs
+      - name: thermals (Deardorff + Romps LCL)
+        run: node tests/climalytix-thermals.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
       - name: nwp route (fake R2)

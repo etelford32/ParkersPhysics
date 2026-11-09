@@ -48,8 +48,15 @@ GFS_VARS = [
     {'id': 'vMs',      'grib': ('VGRD', '10 m above ground'),   'kind': 'inst', 'unit': 'm/s',  'quantity': 'wind',     'agg': 'mean', 'scale': 0.01, 'offset': 0.0,    'convert': None},
     {'id': 'gustMs',   'grib': ('GUST', 'surface'),             'kind': 'inst', 'unit': 'm/s',  'quantity': 'wind',     'agg': 'max',  'scale': 0.01, 'offset': 0.0,    'convert': None},
     {'id': 'mslHpa',   'grib': ('PRMSL', 'mean sea level'),     'kind': 'inst', 'unit': 'hPa',  'quantity': 'pressure', 'agg': 'mean', 'scale': 0.01, 'offset': 1000.0, 'convert': 'Pa_to_hPa'},
-    {'id': 'precipMm', 'grib': ('APCP', 'surface'),             'kind': 'acc',  'unit': 'mm',   'quantity': 'precip',   'agg': 'sum',  'scale': 0.01, 'offset': 0.0,    'convert': None},
+    {'id': 'precipMm', 'grib': ('APCP', 'surface'),             'kind': 'acc',  'unit': 'mm',   'quantity': 'precip',   'agg': 'sum',  'scale': 0.01, 'offset': 0.0,    'convert': None, 'floor': 0.0},
     {'id': 'cloudPct', 'grib': ('TCDC', 'entire atmosphere'),   'kind': 'inst', 'unit': '%',    'quantity': 'pct',      'agg': 'mean', 'scale': 0.01, 'offset': 0.0,    'convert': None},
+    # §19 T4 (thermals). SHTFL is a bucket MEAN (idx.py §3): stored as the 3 h mean
+    # over (L-3, L], positive = surface heating the air. HPBL is the model's own
+    # boundary-layer height above ground; PRES is surface (station) pressure —
+    # air density needs it, and ±655 hPa about 750 reaches the Tibetan plateau.
+    {'id': 'shflxWm2', 'grib': ('SHTFL', 'surface'),            'kind': 'ave',  'unit': 'W/m2', 'quantity': 'flux',     'agg': 'mean', 'scale': 0.1,  'offset': 0.0,    'convert': None},
+    {'id': 'hpblM',    'grib': ('HPBL', 'surface'),             'kind': 'inst', 'unit': 'm',    'quantity': 'height',   'agg': 'mean', 'scale': 1.0,  'offset': 0.0,    'convert': None},
+    {'id': 'psfcHpa',  'grib': ('PRES', 'surface'),             'kind': 'inst', 'unit': 'hPa',  'quantity': 'pressure', 'agg': 'mean', 'scale': 0.02, 'offset': 750.0,  'convert': 'Pa_to_hPa'},
 ]
 
 
