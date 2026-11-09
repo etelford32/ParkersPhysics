@@ -1126,3 +1126,18 @@ the mocks are smooth planes and no styling pass has been done. A VISUAL POLISH
 PASS across all six layers (palettes, legends, rail typography, the budget
 table, how fills and overlays stack) is scheduled AFTER T6, gated by the same
 browser specs — the polish must not move a single gated number.
+
+**THE VISUAL POLISH PASS (started 2026-11-09).** The rule: the polish may not
+move a single gated number, and every step is judged on a BEFORE/AFTER
+gallery — `tests/climalytix-gallery.spec.js` (not a gate; runs only with
+`CX_GALLERY=<dir>`) writes one frame per layer from the same view on the
+self-hosted Blue Marble ground (GIBS mocked down, so the mocked checkerboard
+tiles never stand in for imagery) plus each layer's rail panel.
+
+| Step | What | Status |
+|---|---|---|
+| V1 | **The map frame.** A DATA GROUND under any fill (imagery desaturated 55 % and dimmed — a translucent ramp over a bright mosaic read as a muddy wash), the ground outside a fill's data window VEILED so the window reads as the area of analysis (its dashed edge still drawn, last), the two-line attribution folded into a "ⓘ Sources" chip (it overlapped the scale bar), a TALL STICKY stage (`calc(100vh − 140px)`, max 720 — the rail is far longer than the map), compact controls. With no fill on, the ground is drawn exactly as before, so the map gate's basemap negative controls are unchanged; the storm-ingredients pixel check now tests the fill's HUE, not its brightness. | **done** |
+| V2 | **Data windows that fit the view**: the ±3–4° field windows are a narrow column in a wide map; size the requested window from the view (bounded, bytes measured) so a fill covers what the reader is looking at. | planned |
+| V3 | **One key per fill, on the map**: a floating legend for the active fill (gradient or bands, ticks in the reader's unit) instead of rail-only keys; palettes checked for CVD separation and against the dimmed ground. | planned |
+| V4 | **The rail**: layers grouped into collapsible sections, each layer's site readout as a compact card (value large, context small), one status-chip style for live / stale / down. | planned |
+| V5 | **Explore charts + motion**: chart styling to match, and eased transitions when the timeline scrubs. | planned |
