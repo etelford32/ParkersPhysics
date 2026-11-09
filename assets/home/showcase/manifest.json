@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-09T17:44:44.876Z",
+  "generatedAt": "2026-11-09T17:49:58.774Z",
   "slides": [
     {
       "id": "earth",
@@ -9,11 +9,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/earth.html?verdict=0",
-      "capturedAt": "2026-11-09T17:11:26.655Z",
+      "capturedAt": "2026-11-09T17:46:43.378Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 281443,
-        "clip": 182825
+        "poster": 286295,
+        "clip": 194085
       }
     },
     {
@@ -21,13 +21,13 @@
       "poster": "assets/home/showcase/sun.jpg",
       "clip": "assets/home/showcase/sun.webm",
       "width": 1920,
-      "height": 1200,
+      "height": 1150,
       "source": "/sun.html",
-      "capturedAt": "2026-11-09T17:13:40.384Z",
+      "capturedAt": "2026-11-09T17:48:38.122Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 128006,
-        "clip": 167561
+        "poster": 152561,
+        "clip": 170835
       }
     },
     {
@@ -107,11 +107,11 @@
       "width": 1860,
       "height": 886,
       "source": "/glacier-watch.html",
-      "capturedAt": "2026-11-09T17:33:23.453Z",
+      "capturedAt": "2026-11-09T17:49:15.454Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 106833,
-        "clip": 187192
+        "poster": 100001,
+        "clip": 154396
       }
     },
     {
@@ -205,11 +205,11 @@
       "width": 1920,
       "height": 1150,
       "source": "/galactic-map.html",
-      "capturedAt": "2026-11-09T17:38:14.991Z",
+      "capturedAt": "2026-11-09T17:49:58.701Z",
       "renderer": "swiftshader",
       "bytes": {
-        "poster": 170522,
-        "clip": 190422
+        "poster": 173140,
+        "clip": 193043
       }
     },
     {
