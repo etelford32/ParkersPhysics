@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -140,7 +140,65 @@ footer a:hover{color:var(--text)}
   .card-foot{padding:11px 14px}
   .page-header h1{font-size:1.35rem}
 }
+/* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+html.theme-light .page-header h1{background:var(--pl-grad-headline);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+html.theme-light .plan-free{background:#e3f5eb;color:var(--pl-ok)}
+html.theme-light .plan-tester{background:#fbf0d9;color:var(--pl-warn)}
+html.theme-light .plan-basic{background:var(--pl-blue-soft);color:var(--pl-blue-deep)}
+html.theme-light .plan-educator{background:#e3f5eb;color:var(--pl-ok)}
+html.theme-light .plan-advanced{background:var(--indigo-900);color:var(--indigo-100)}
+html.theme-light .plan-institution{background:var(--pink-900);color:var(--pink-200)}
+html.theme-light .plan-enterprise{background:var(--pl-text-1);color:#fff}
+html.theme-light .section-nav{box-shadow:var(--pl-shadow)}
+html.theme-light .sec-link:hover{color:var(--pl-text-1);background:var(--pl-bg-soft)}
+html.theme-light .sec-link.active{background:var(--pl-blue-soft);color:var(--pl-blue-deep)}
+html.theme-light .card{box-shadow:var(--pl-shadow)}
+html.theme-light .card-head{background:var(--pl-bg-soft)}
+html.theme-light .card-foot{background:var(--pl-bg-soft)}
+html.theme-light :is(.card-title,.toggle-name,.meter-label,.key-label-text){color:var(--pl-text-1)}
+html.theme-light :is(.card-sub,.field-label,.field-hint,.toggle-desc,.meter-val,.key-meta,.empty-row){color:var(--pl-text-4)}
+html.theme-light .toggle-pro-tag{color:var(--pl-blue-deep);background:var(--pl-blue-soft);border-color:rgba(21,96,212,.3)}
+html.theme-light .switch .slider{background:#c5d4e8}
+html.theme-light .switch .slider::before{background:#fff;box-shadow:0 1px 3px rgba(11,31,58,.25)}
+html.theme-light .switch input:checked+.slider{background:rgba(13,122,69,.3)}
+html.theme-light .switch input:checked+.slider::before{background:var(--pl-ok)}
+html.theme-light .switch input:disabled+.slider{opacity:.7;background:#dde6f2}
+html.theme-light .btn{background:var(--pl-card);color:var(--pl-text-1);border-color:var(--pl-border-strong)}
+html.theme-light .btn:hover{background:var(--pl-blue-soft);border-color:var(--pl-blue);color:var(--pl-blue-deep)}
+html.theme-light .btn-ghost{background:transparent}
+html.theme-light .btn-primary{background:var(--pl-grad-btn);color:#fff;border-color:transparent}
+html.theme-light .btn-primary:hover{background:var(--pl-btn-hover);color:#fff;filter:none}
+html.theme-light .btn-danger{background:rgba(192,38,45,.05);border-color:rgba(192,38,45,.4);color:var(--pl-danger)}
+html.theme-light .btn-danger:hover{background:rgba(192,38,45,.11);border-color:var(--pl-danger);color:var(--pl-danger)}
+html.theme-light .status.ok{background:rgba(13,122,69,.07);border-color:rgba(13,122,69,.3);color:var(--pl-ok)}
+html.theme-light .status.err{background:rgba(192,38,45,.06);border-color:rgba(192,38,45,.3);color:var(--pl-danger)}
+html.theme-light .meter-bar{background:var(--pl-bg-sunk)}
+html.theme-light .meter-fill{background:linear-gradient(90deg,var(--pl-blue-bright),var(--pl-blue))}
+html.theme-light .meter-fill.warn{background:linear-gradient(90deg,#d99a1e,var(--pl-warn))}
+html.theme-light .meter-fill.danger{background:linear-gradient(90deg,#e0565c,var(--pl-danger))}
+html.theme-light .key-row{background:var(--pl-bg-soft)}
+html.theme-light .key-secret{background:var(--pl-bg-sunk);border-color:var(--pl-border-strong);color:var(--pl-text-1)}
+html.theme-light .key-warning{color:var(--pl-danger)}
+html.theme-light .coming-soon{background:var(--pl-blue-soft);border-color:rgba(21,96,212,.3);color:var(--pl-blue-deep)}
+html.theme-light .gate-signup{background:var(--pl-btn);color:#fff}
+html.theme-light .gate-signin{color:var(--pl-blue-deep);border-color:var(--pl-blue)}
+html.theme-light footer a{color:var(--pl-text-3)}
+html.theme-light footer a:hover{color:var(--pl-blue)}
+/* Inline-styled upgrade notices + the Danger Zone card (dark values live in the markup) */
+html.theme-light :is(#notif-gate-msg,#keys-gate-msg){background:var(--pl-blue-soft) !important;border-color:rgba(21,96,212,.28) !important;color:var(--pl-blue-deep) !important}
+html.theme-light :is(#notif-gate-msg,#keys-gate-msg) a{color:var(--pl-blue-deep) !important}
+html.theme-light #danger{border-color:rgba(192,38,45,.35) !important}
+html.theme-light #danger .card-head{background:rgba(192,38,45,.04);border-color:rgba(192,38,45,.2) !important}
+html.theme-light #danger .card-title{color:var(--pl-danger) !important}
+/* js/account.js writes these with inline dark colours */
+html.theme-light .key-label-text span[style*="#ff8b8b"]{color:var(--pl-danger) !important}
+html.theme-light #key-secret-out > div{background:var(--pl-blue-soft) !important;border-color:rgba(21,96,212,.35) !important}
+html.theme-light #key-secret-out > div > div[style*="#ffd700"]{color:var(--pl-blue-deep) !important}
 </style>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

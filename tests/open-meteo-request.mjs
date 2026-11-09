@@ -19,12 +19,23 @@
  *     at 0.25° in the south-western quadrant, and with an apikey
  *   • chunkUrl REFUSES a URL over the ceiling (the old 864 layout must fail)
  *   • formatCoord is %g: no toFixed padding, exact half-degrees round-trip
+ *
+ * Pacing (2026-11-08 — production drew "Minutely API request limit exceeded"
+ * on every run once the 414 was gone; Open-Meteo counts EACH LOCATION):
+ *   • requestWeight follows the published weighting (locations × the >10
+ *     variable / >14 day factors)
+ *   • pacedChunkPlan covers the grid in order, never puts more than the
+ *     budget in any trailing window, and needs the minimum window count
+ *   • NEGATIVE CONTROL: the old 7 × 400 fan-out (all at t = 0) puts 2592
+ *     weighted calls in one window — 4.3× the free tier's 600/min
+ *   • an infinite budget (commercial key) collapses to one window
  */
 import assert from 'node:assert/strict';
 import {
     GRID, MAX_URL_BYTES, MAX_LOCATIONS_PER_REQUEST, OPEN_METEO_FORECAST_URL, OPEN_METEO_CUSTOMER_URL,
     chunkRanges, gridLatLon, gridChunkCoords, chunkUrl, mergeChunks,
     formatCoord, byteLength, locationsPerRequest, maxCoordBytes,
+    FREE_TIER, DEFAULT_PACE, requestWeight, pacedChunkPlan, peakWindowWeight,
 } from '../js/open-meteo-request.js';
 import { planPatchRequests } from '../js/weather-patch.js';
 
@@ -183,6 +194,71 @@ ok('the worst-case regional patch (64×64 at 0.25°, SW quadrant) emits only URL
     // Lossless at the snapped steps: no toFixed padding, no float noise.
     const { lats } = planPatchRequests({ w: 2, h: 2, step: 0.25, latMin: 37, lonMin: -122.5 });
     assert.deepEqual(lats, ['37.125', '37.125', '37.375', '37.375']);
+});
+
+// ── Pacing ───────────────────────────────────────────────────────────────────
+ok('requestWeight: every location counts; >10 variables or >14 days count more', () => {
+    assert.equal(requestWeight(400), 400);
+    assert.equal(requestWeight(400, { variables: 9 }), 400, '≤10 variables is weight 1 per location');
+    assert.equal(requestWeight(400, { variables: 20 }), 800);
+    assert.ok(Math.abs(requestWeight(10, { variables: 10, days: 16 }) - 10 * 16 / 14) < 1e-12);
+    assert.equal(requestWeight(0), 0);
+    assert.throws(() => requestWeight(-1), RangeError);
+});
+
+ok('pacedChunkPlan (cron default): 5 windows of ≤520, 10 chunks ≤400, grid order, ≤248 s', () => {
+    assert.ok(DEFAULT_PACE.budget < FREE_TIER.perMinute);
+    assert.ok(DEFAULT_PACE.windowMs >= 60_000, 'a window at least a minute long');
+    const plan = pacedChunkPlan({ n: GRID.n });
+    assert.equal(plan.windows, Math.ceil(GRID.n / DEFAULT_PACE.budget));
+    assert.equal(plan.windows, Math.ceil(GRID.n / FREE_TIER.perMinute), 'the 13 % margin costs no extra window');
+    assert.equal(plan.chunks.length, 10);
+    assert.equal(plan.weight, GRID.n);
+    assert.equal(plan.durationMs, 4 * DEFAULT_PACE.windowMs);
+    let next = 0;
+    for (const c of plan.chunks) {
+        assert.equal(c.start, next); next = c.end + 1;
+        assert.ok(c.end - c.start + 1 <= MAX_LOCATIONS_PER_REQUEST);
+        const { lats, lons } = gridChunkCoords(c.start, c.end);
+        assert.ok(byteLength(chunkUrl({ lats, lons, query: 'current=a' })) < MAX_URL_BYTES);
+    }
+    assert.equal(next, GRID.n, 'chunks cover the grid once, in order');
+    const peak = peakWindowWeight(plan.chunks, DEFAULT_PACE.windowMs);
+    assert.ok(peak <= DEFAULT_PACE.budget, `peak ${peak}`);
+    // Calendar-minute safety too: any 60 s window is inside some 62 s one.
+    assert.ok(peakWindowWeight(plan.chunks, 60_000) <= FREE_TIER.perMinute);
+});
+
+ok('NEGATIVE CONTROL: the old 7 × 400 fan-out puts the whole grid in one minute', () => {
+    const old = chunkRanges(GRID.n).map(r => ({ offsetMs: 0, weight: r.end - r.start + 1 }));
+    assert.equal(old.length, 7);
+    const peak = peakWindowWeight(old, 60_000);
+    assert.equal(peak, 2592);
+    assert.ok(peak > FREE_TIER.perMinute, 'this is what drew the minutely 429');
+    // Even its first concurrent wave (3 × 400) was already over the limit.
+    assert.ok(3 * 400 > FREE_TIER.perMinute);
+});
+
+ok('pacedChunkPlan: budget, weight and edge cases', () => {
+    const one = pacedChunkPlan({ n: GRID.n, budget: Infinity });
+    assert.equal(one.windows, 1);
+    assert.equal(one.durationMs, 0);
+    assert.equal(one.chunks.length, Math.ceil(GRID.n / MAX_LOCATIONS_PER_REQUEST));
+    assert.ok(one.chunks.every(c => c.offsetMs === 0));
+    // Weight 2 per location (e.g. 20 variables) halves the locations per window.
+    const heavy = pacedChunkPlan({ n: 1000, budget: 500, windowMs: 60_000, weightPerLocation: 2 });
+    assert.equal(heavy.windows, 4);
+    assert.ok(peakWindowWeight(heavy.chunks, 60_000) <= 500);
+    const tiny = pacedChunkPlan({ n: 3, budget: 520 });
+    assert.deepEqual(tiny.chunks.map(c => [c.start, c.end, c.offsetMs]), [[0, 2, 0]]);
+    assert.throws(() => pacedChunkPlan({ n: 0 }), RangeError);
+    assert.throws(() => pacedChunkPlan({ n: 10, budget: 1, weightPerLocation: 2 }), RangeError);
+    // Uneven n spreads evenly: no window more than one location heavier.
+    const odd = pacedChunkPlan({ n: 1043, budget: 520, windowMs: 60_000 });
+    const perWin = new Map();
+    for (const c of odd.chunks) perWin.set(c.offsetMs, (perWin.get(c.offsetMs) || 0) + c.weight);
+    const v = [...perWin.values()];
+    assert.ok(Math.max(...v) - Math.min(...v) <= 1, v.join(','));
 });
 
 console.log(`\n${passed} passed`);

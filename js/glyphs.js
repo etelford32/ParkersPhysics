@@ -131,6 +131,13 @@ export const GLYPHS = {
     sun:
         `<circle cx="12" cy="12" r="4.8"/>` +
         `<path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6M4.8 4.8l1.9 1.9M17.3 17.3l1.9 1.9M4.8 19.2l1.9-1.9M17.3 6.7l1.9-1.9"/>`,
+    horizon:
+        // the theme toggle's AUTO mode: the Sun on the horizon line — the
+        // site goes light at sunrise and dark at sunset (js/theme-schedule.js)
+        `<path d="M2.6 17.4h18.8"/>` +
+        `<path d="M7.2 17.4a4.8 4.8 0 0 1 9.6 0"/>` +
+        `<path d="M12 6.4v2.4M5.1 10.1l1.7 1.7M18.9 10.1l-1.7 1.7M2.8 14.4h1.9M19.3 14.4h1.9"/>` +
+        `<path d="M8.4 20.6h7.2"/>`,
     'star-bright':
         `<path d="M12 2.2l2.5 6.6 6.9.4-5.3 4.4 1.7 6.7-5.8-3.8-5.8 3.8 1.7-6.7-5.3-4.4 6.9-.4z"/>`,
     'star-binary':

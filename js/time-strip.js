@@ -150,24 +150,43 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
         place.classList.toggle('empty', !p);
     }
 
+    // Theme ink. The light theme (earth.html, html.theme-light #tc-strip)
+    // sets these custom properties; unset — the dark page — every one falls
+    // back to the exact literal it replaced, so the dark strip is unchanged.
+    // Data colours (temperature ramp, precip, provenance bands) never theme.
+    function ink() {
+        const cs = getComputedStyle(host);
+        const v = (name, dflt) => cs.getPropertyValue(name).trim() || dflt;
+        return {
+            night: v('--tc-strip-night', 'rgba(0,0,20,0.32)'),
+            cloudRgb: v('--tc-strip-cloud-rgb', '200,210,225'),
+            grid: v('--tc-strip-grid', 'rgba(255,255,255,0.10)'),
+            label: v('--tc-strip-label', 'rgba(180,200,215,0.55)'),
+            hatch: v('--tc-strip-hatch', 'rgba(0,0,0,0.45)'),
+            now: v('--tc-strip-now', 'rgba(255,255,255,0.55)'),
+            range: v('--tc-strip-range', 'rgba(220,230,240,0.7)'),
+        };
+    }
+
     function draw(m, dpr, p) {
         const g = canvas.getContext('2d');
+        const k = ink();
         g.setTransform(dpr, 0, 0, dpr, 0, 0);
         g.clearRect(0, 0, m.width, m.height);
         // night
-        g.fillStyle = 'rgba(0,0,20,0.32)';
+        g.fillStyle = k.night;
         for (const n of m.night) g.fillRect(n.x0, 0, Math.max(1, n.x1 - n.x0), m.plotBot);
         // cloud veil from the top (a third of the plot at 100 %)
         const veilH = (m.plotBot - m.plotTop) * 0.34;
         for (const c of m.cloud) {
-            g.fillStyle = `rgba(200,210,225,${(0.10 + 0.32 * c.a).toFixed(3)})`;
+            g.fillStyle = `rgba(${k.cloudRgb},${(0.10 + 0.32 * c.a).toFixed(3)})`;
             g.fillRect(c.x, m.plotTop, c.w + 0.5, veilH * c.a);
         }
         // day boundaries + labels
-        g.strokeStyle = 'rgba(255,255,255,0.10)';
+        g.strokeStyle = k.grid;
         g.lineWidth = 1;
         g.font = '600 8px ui-monospace, monospace';
-        g.fillStyle = 'rgba(180,200,215,0.55)';
+        g.fillStyle = k.label;
         g.textBaseline = 'top';
         for (const d of m.days) {
             const x = Math.round(d.x) + 0.5;
@@ -192,17 +211,17 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
             g.fillStyle = b.color;
             g.fillRect(b.x0, b.y, Math.max(1, b.x1 - b.x0), b.h);
             if (b.stale) {
-                g.fillStyle = 'rgba(0,0,0,0.45)';
+                g.fillStyle = k.hatch;
                 for (let x = Math.floor(b.x0); x < b.x1; x += 4) g.fillRect(x, b.y, 2, b.h);
             }
         }
         // now tick
         const nx = Math.round(timeToX(now(), S.domain, m.trackX0, m.trackX1)) + 0.5;
-        g.strokeStyle = 'rgba(255,255,255,0.55)';
+        g.strokeStyle = k.now;
         g.beginPath(); g.moveTo(nx, 0); g.lineTo(nx, m.height); g.stroke();
         // temperature extremes, so the line has a scale
         if (m.range && p) {
-            g.fillStyle = 'rgba(220,230,240,0.7)';
+            g.fillStyle = k.range;
             g.font = '600 8px ui-monospace, monospace';
             g.textBaseline = 'top';
             const label = `${Math.round(m.range.dataMin)}…${Math.round(m.range.dataMax)}°C`;
@@ -413,6 +432,9 @@ export function mountTimeStrip({ host, scrubEl, cube, getPlace, now = () => Date
         tip.style.left = `${x}px`;
     }
 
+    // The site theme flips at sunrise/sunset (js/theme.js) — repaint so the
+    // canvas ink follows the chrome around it.
+    window.addEventListener('pp-theme-change', schedule);
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
     ro?.observe(host);
     ro?.observe(scrubEl);

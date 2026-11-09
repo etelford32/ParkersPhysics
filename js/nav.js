@@ -59,6 +59,13 @@ import './telemetry.js';
 // only ever sees the ~2% of visitors who accept the cookie banner.
 import './page-flow.js';
 import { glyph } from './glyphs.js';
+// Site theme: light (white + blue) by daylight on the reading pages, dark
+// elsewhere. Imported here because nav.js is the one module on every page;
+// theme.js starts itself and is a no-op on pages without data-theme-support.
+import './theme.js';
+// The light / dark switch under the logo (owns its markup, styles and
+// behaviour; mounts itself into this nav and survives its re-renders).
+import './theme-switch.js';
 // The top-level structure — id, label and hub href per section. This module is
 // the single source shared with js/simulations-catalog.js and the hub-page
 // builder, so the bar, the catalog page and the hubs cannot disagree about
@@ -215,6 +222,7 @@ const NAV_ITEMS = {
         { href: 'blog-why-aurora-forecasts-miss.html', label: 'NOAA said G1. Earth got G3.', sub: 'July 4 2026 · the Bz gap',      tier: 'public', icon: 'chart-down', badge: 'NEW', id: 'blog-why-aurora-forecasts-miss' },
         { href: 'blog-gannon-hindcast.html',           label: 'The Index That Lied',        sub: 'Gannon G5 · EN/ES/FR',           tier: 'public', icon: 'paper', id: 'blog-gannon-hindcast' },
         { href: 'blog-stpatrick-hindcast.html',        label: 'The Storm Every Model Takes', sub: "St. Patrick's 2015 · EN/ES/FR", tier: 'public', icon: 'paper', id: 'blog-stpatrick-hindcast' },
+        { href: 'recent-development.html',             label: 'Recent Development',        sub: 'What shipped, sprint by sprint', tier: 'public', icon: 'hourglass', badge: 'NEW', id: 'recent-development' },
         { section: 'Engine & methods' },
         { href: 'rust.html', label: 'Rust/WASM Engine', sub: 'WebAssembly compute module', tier: 'free', icon: 'engine' },
     ],
@@ -429,11 +437,14 @@ export function initNav(activeId = '') {
         // and a page basename, and a prefix match would light the section up
         // from unrelated ids that happen to share a stem.
         const sectionActive = activeId === dd.id;
-        const anyActive = sectionActive || dd.items.some(i => {
+        // An EMPTY activeId (pages that call initNav("")) matches nothing:
+        // ''.startsWith test below is true for every id, and lit all five
+        // sections as active on signin/dpa/… until 2026-11.
+        const anyActive = sectionActive || (!!activeId && dd.items.some(i => {
             if (i.section) return false;
             const itemId = i.id || i.href.replace('.html', '');
             return itemId === activeId || itemId.startsWith(activeId) || activeId.startsWith(itemId);
-        });
+        }));
 
         html += `<div class="nav-drop" data-drop="${dd.id}">`;
         // Two controls, one chip. See the SPLIT TOP-LEVEL CONTROLS note in the
@@ -478,7 +489,7 @@ export function initNav(activeId = '') {
                 </a>`;
             } else {
                 const _hid = item.id || item.href.replace('.html','');
-                const _isAct = _hid === activeId || _hid.startsWith(activeId) || activeId.startsWith(_hid);
+                const _isAct = !!activeId && (_hid === activeId || _hid.startsWith(activeId) || activeId.startsWith(_hid));
                 html += `<a href="/${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}" role="menuitem">
                     <span class="ndl-icon">${navIcon(item.icon)}</span>
                     <span class="ndl-body">

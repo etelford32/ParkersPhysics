@@ -1,0 +1,257 @@
+/* ═══ Parkers Physics — LIGHT theme (white + blue) ═══════════════════════════
+ *
+ * Loaded ONLY by pages that declare <html data-theme-support="light"> — the
+ * reading pages (hubs, catalogue, blog, legal, account, marketing). Every
+ * rule is scoped under `html.theme-light`, which js/theme-boot.js (first
+ * paint) and js/theme.js (runtime: sunrise / sunset at the saved location)
+ * put on <html>. With the class absent this sheet matches nothing, so a
+ * light-capable page at night is pixel-identical to before.
+ *
+ * Which pages, and the wiring, live in scripts/build-theme-support.mjs —
+ * never hand-add the boot script to a page.
+ *
+ * THREE LAYERS, in this order:
+ *   1. THE PALETTE (--pl-*): one white/blue set. Text and accents were
+ *      chosen for contrast on white — tests/theme-palette.mjs computes every
+ *      pair (WCAG): body text ≥ 7:1, muted text ≥ 4.5:1, the link blue
+ *      ≥ 4.5:1 on both the page and the soft panels, white-on-button ≥ 4.5:1.
+ *   2. TOKEN REMAPS: the site's dark token systems are re-pointed at the
+ *      palette — colors_and_type.css / catalog-styles.css (--black-*, --fg-*,
+ *      --uv-*, --indigo-*, --pink-*, --lightning-*, --grad-*, --glow-*), and
+ *      the generic page-local names (--bg, --surface, --card-bg, --text,
+ *      --muted, --border, --accent). `html.theme-light` (0,1,1) outranks the
+ *      pages' own `:root` (0,1,0) whatever the source order. The UV / pink
+ *      brand accents become BLUES: "white and blue", not a white purple site.
+ *      The dark scales run light-on-dark (a "300" is a pale text colour);
+ *      here they are INVERTED so the same token stays readable as text.
+ *   3. ELEMENT BASE: page, headings, links, forms, tables, code, the shared
+ *      footer markup. Page-specific leftovers (hard-coded rgba cards) are
+ *      fixed in each page's OWN <style> as `html.theme-light …` rules — the
+ *      earth.html convention (design-tokens.css holds tokens, pages hold
+ *      their selectors).
+ *
+ * STATUS COLOURS keep their meaning (green = ok, amber = warn, red = danger)
+ * and are only DARKENED to read on white.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+html.theme-light {
+    color-scheme: light;
+
+    /* ── 1. Palette ─────────────────────────────────────────────────────── */
+    --pl-bg:            #ffffff;
+    --pl-bg-soft:       #f3f7fd;   /* alternating sections, panels          */
+    --pl-bg-sunk:       #e8f0fb;   /* wells, code, input fill on soft        */
+    --pl-card:          #ffffff;
+    --pl-border:        #d6e3f3;
+    --pl-border-strong: #7092c0;
+
+    --pl-text-1:        #0b1f3a;   /* headings — navy                        */
+    --pl-text-2:        #1d3557;   /* body                                   */
+    --pl-text-3:        #3a5679;   /* secondary body                         */
+    --pl-text-4:        #50698b;   /* captions (≥ 4.5:1 on white AND soft)   */
+    --pl-text-5:        #6b819f;   /* meta, decorative — large/aux text only */
+
+    --pl-blue:          #1560d4;   /* links, primary accent                  */
+    --pl-blue-deep:     #0b4aa8;   /* hover / pressed, small bold text       */
+    --pl-blue-bright:   #2f86f6;   /* fills, focus rings, icons              */
+    --pl-blue-soft:     #e7f0fe;   /* chip / badge fill                      */
+    --pl-sky:           #0976ba;   /* the second accent (was neon pink)      */
+    --pl-btn:           #1666dc;   /* button fill — white text ≥ 4.5:1       */
+    --pl-btn-hover:     #0f56c0;
+
+    --pl-ok:            #0d7a45;
+    --pl-warn:          #8a5a00;
+    --pl-danger:        #c0262d;
+
+    --pl-shadow:        0 1px 2px rgba(11, 31, 58, .06), 0 6px 18px rgba(21, 96, 212, .07);
+    --pl-shadow-hover:  0 2px 4px rgba(11, 31, 58, .07), 0 14px 32px rgba(21, 96, 212, .16);
+    --pl-grad-headline: linear-gradient(135deg, #0b2f6b 0%, #1560d4 55%, #1f8ff0 100%);
+    --pl-grad-btn:      linear-gradient(135deg, #1560d4 0%, #1a72e6 100%);
+    --pl-grad-hero:     radial-gradient(ellipse at 50% 0%, #dcebff 0%, #f3f7fd 45%, #ffffff 80%);
+
+    /* ── 2a. colors_and_type.css / catalog-styles.css ──────────────────── */
+    --black-void:       var(--pl-bg);
+    --black-deeper:     var(--pl-bg-soft);
+    --black-panel:      var(--pl-bg-soft);
+    --black-elevated-1: var(--pl-card);
+    --black-elevated-2: var(--pl-bg-soft);
+    --black-elev-1:     var(--pl-card);
+    --black-elev-2:     var(--pl-bg-soft);
+    --black-overlay:    rgba(255, 255, 255, .88);
+
+    --ghost-1: rgba(11, 31, 58, .03);
+    --ghost-2: rgba(11, 31, 58, .05);
+    --ghost-3: rgba(11, 31, 58, .08);
+    --ghost-4: rgba(11, 31, 58, .14);
+
+    --indigo-900: #e6efff; --indigo-800: #c9dcfb; --indigo-700: #8fb6f2;
+    --indigo-600: #2f75e0; --indigo-500: #1560d4; --indigo-400: #1356c2;
+    --indigo-300: #0f4cad; --indigo-200: #0c3f91; --indigo-100: #0a2f6b;
+
+    --uv-900: #e7f0fe; --uv-800: #cfe0fb; --uv-700: #8eb7f3;
+    --uv-600: #2f80ee; --uv-500: #1560d4; --uv-400: #1357c4;
+    --uv-300: #0f4fb2; --uv-200: #0c4195; --uv-100: #0a3070;
+
+    --pink-900: #e3f4ff; --pink-700: #5fb8ea; --pink-600: #0d8bd2;
+    --pink-500: #0976ba; --pink-400: #086da9; --pink-300: #075d91; --pink-200: #064c77;
+
+    --lightning-pure:  var(--pl-text-1);
+    --lightning-bolt:  var(--pl-text-1);
+    --lightning-glow:  var(--pl-text-2);
+    --lightning-arc:   #0976ba;
+    --lightning-spark: #0a74b8;
+    --lightning-deep:  #1560d4;
+
+    --status-ok:     var(--pl-ok);
+    --status-info:   #0a74b8;
+    --status-pro:    var(--pl-blue);
+    --status-warn:   var(--pl-warn);
+    --status-alert:  var(--pl-danger);
+    --status-danger: var(--pl-danger);
+
+    --fg-1: var(--pl-text-1);
+    --fg-2: var(--pl-text-2);
+    --fg-3: var(--pl-text-3);
+    --fg-4: var(--pl-text-4);
+    --fg-5: var(--pl-text-5);
+    --fg-6: var(--pl-text-5);
+    --fg-on-bright: #ffffff;
+
+    --border-1:    rgba(21, 96, 212, .10);
+    --border-2:    rgba(21, 96, 212, .16);
+    --border-3:    rgba(21, 96, 212, .28);
+    --border-uv:   rgba(21, 96, 212, .45);
+    --border-pink: rgba(10, 124, 194, .45);
+    --border-arc:  rgba(10, 124, 194, .40);
+
+    --grad-uv:          var(--pl-grad-btn);
+    --grad-uv-pink:     var(--pl-grad-btn);
+    --grad-spectrum:    linear-gradient(135deg, #0b4aa8 0%, #1560d4 50%, #0a7cc2 100%);
+    --grad-headline:    var(--pl-grad-headline);
+    --grad-headline-uv: var(--pl-grad-headline);
+    --grad-arc:         linear-gradient(135deg, #0a7cc2 0%, #1560d4 100%);
+    --grad-cosmic-bg:   var(--pl-grad-hero);
+    --grad-uv-bg:       var(--pl-grad-hero);
+    --grad-pink-bg:     radial-gradient(ellipse at 50% 100%, #e3f4ff 0%, #ffffff 70%);
+
+    --shadow-card:       var(--pl-shadow);
+    --shadow-card-hover: var(--pl-shadow-hover);
+    --shadow-dropdown:   0 14px 40px rgba(11, 31, 58, .16);
+    --glow-uv-sm:     0 0 0 3px rgba(21, 96, 212, .12);
+    --glow-uv-md:     var(--pl-shadow-hover);
+    --glow-uv-lg:     var(--pl-shadow-hover);
+    --glow-pink-sm:   0 0 0 3px rgba(10, 124, 194, .12);
+    --glow-pink-md:   var(--pl-shadow-hover);
+    --glow-pink-lg:   var(--pl-shadow-hover);
+    --glow-arc-sm:    0 0 0 3px rgba(10, 124, 194, .12);
+    --glow-arc-md:    var(--pl-shadow-hover);
+    --glow-indigo-sm: 0 0 0 3px rgba(21, 96, 212, .12);
+    --glow-indigo-md: var(--pl-shadow-hover);
+    --inner-glow-uv:   inset 0 0 0 1px rgba(21, 96, 212, .10);
+    --inner-glow-pink: inset 0 0 0 1px rgba(10, 124, 194, .10);
+
+    /* ── 2b. Generic page-local names (account/settings/welcome/…) ─────── */
+    --bg:       var(--pl-bg-soft);
+    --surface:  var(--pl-card);
+    --card-bg:  var(--pl-card);
+    --card:     var(--pl-card);
+    --panel:    var(--pl-card);
+    --text:     var(--pl-text-2);
+    --muted:    var(--pl-text-4);
+    --border:   var(--pl-border);
+    --accent:   var(--pl-blue);
+    --accent2:  var(--pl-sky);
+    --purple:   var(--pl-blue-deep);
+    --green:    var(--pl-ok);
+    --danger:   var(--pl-danger);
+}
+
+/* ── 3. Element base ──────────────────────────────────────────────────── */
+html.theme-light,
+html.theme-light body {
+    background: var(--pl-bg);
+    color: var(--pl-text-2);
+}
+/* :where() keeps the element rules at ELEMENT specificity, so any class rule
+   a page already has (a white-on-blue .btn link, a gradient h1) still wins. */
+:where(html.theme-light) :is(h1, h2, h3, h4, h5, h6) { color: var(--pl-text-1); }
+html.theme-light ::selection { background: #cfe1fd; color: var(--pl-text-1); }
+
+/* Links: blue, deeper on hover — element specificity (see above). */
+:where(html.theme-light) a { color: var(--pl-blue); }
+:where(html.theme-light) a:hover { color: var(--pl-blue-deep); }
+
+/* Forms. Fill + text are deliberately STRONG (0,2,2): a dark-page input
+   (`.card input { background: rgba(13,6,38,.65) }`) must not survive into
+   light mode. That strength also beats a page's own error / focus border
+   (`.form-group input.error`), so those states are restated here — without
+   this block a bad field silently lost its red border in light mode. */
+html.theme-light :is(input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=submit], [type=button]), select, textarea) {
+    background-color: #ffffff;
+    color: var(--pl-text-1);
+    border-color: var(--pl-border-strong);
+}
+html.theme-light :is(input, select, textarea):is(:focus, :focus-visible) { border-color: var(--pl-blue-bright); }
+html.theme-light :is(input, select, textarea):is(.error, .invalid, .is-invalid, [aria-invalid="true"]) { border-color: var(--pl-danger); }
+html.theme-light :is(input, select, textarea)::placeholder { color: var(--pl-text-5); }
+html.theme-light :is(input, select, textarea):focus-visible {
+    outline: 2px solid var(--pl-blue-bright);
+    outline-offset: 1px;
+}
+html.theme-light :is(input[type=checkbox], input[type=radio], input[type=range], progress) { accent-color: var(--pl-blue); }
+
+/* Code, tables, rules */
+:where(html.theme-light) :is(code, kbd, samp, pre) { background-color: var(--pl-bg-sunk); color: var(--pl-text-1); }
+:where(html.theme-light) :is(th, td) { border-color: var(--pl-border); }
+:where(html.theme-light) th { color: var(--pl-text-1); }
+:where(html.theme-light) hr { border-color: var(--pl-border); }
+
+/* Shared footer markup (the same block is copied into most pages). */
+html.theme-light footer {
+    background: var(--pl-bg-soft);
+    border-top-color: var(--pl-border);
+    color: var(--pl-text-3);
+}
+html.theme-light :is(.footer-brand-name, .footer-logo) {
+    background: var(--pl-grad-headline);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+html.theme-light :is(.footer-tagline, .footer-attribution, .footer-copy, .footer-bottom, .footer-legal) { color: var(--pl-text-4); }
+html.theme-light .footer-col-title { color: var(--pl-text-1); }
+html.theme-light :is(.footer-links a, .footer-bottom a, .footer-legal a) { color: var(--pl-text-3); }
+html.theme-light :is(.footer-links a, .footer-bottom a, .footer-legal a):hover { color: var(--pl-blue); }
+
+/* Scrollbars */
+html.theme-light { scrollbar-color: #b7cbe6 #f3f7fd; }
+
+/* The skip link keeps its high-visibility treatment, in blue. */
+html.theme-light .skip-link { background: var(--pl-btn); color: #fff; }
+
+/* Runtime flip (sunrise / sunset / a click on the toggle): a short colour
+   cross-fade. Added for ~700 ms by js/theme.js, never at first paint, and
+   never under prefers-reduced-motion. */
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+    transition: background-color .6s ease, color .6s ease, border-color .6s ease,
+                fill .6s ease, stroke .6s ease, box-shadow .6s ease !important;
+}
+
+/* Glows tuned for a black page read as smudges on white (colors_and_type.css
+   pages give the gradient h1 and the eyebrow a purple text-shadow). */
+html.theme-light :is(h1, .h1, .eyebrow) { text-shadow: none; }
+
+/* Footers that hard-code `footer a { color: #666 }` outrank the :where() link
+   base; the footer is shared chrome, so it gets an explicit rule. */
+html.theme-light footer a { color: var(--pl-text-3); }
+html.theme-light footer a:hover { color: var(--pl-blue); }
+
+/* "Sign in with Google" follows Google's LIGHT button spec on a light page
+   (white fill, #747775 outline, #1f1f1f text). js/oauth-buttons.js renders it
+   on signin/signup and inside js/gate-modal.js on any page; its dark styles
+   are !important, hence these. Apple keeps its black button (an allowed style). */
+html.theme-light .pp-oauth-btn[data-provider="google"] { background: #fff !important; color: #1f1f1f !important; border-color: #747775 !important; }
+html.theme-light .pp-oauth-btn[data-provider="google"]:hover { background: #f2f5f9 !important; }
+html.theme-light .pp-oauth-err { color: var(--pl-danger); }

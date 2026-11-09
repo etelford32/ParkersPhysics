@@ -92,6 +92,20 @@ const CSS = `
 .hnw-foot .hnw-links{margin-left:auto;display:inline-flex;gap:16px}
 @media (max-width:860px){.hnw-grid{grid-template-columns:1fr}.hnw-map{max-width:420px;margin:0 auto}.hnw-table th:nth-child(5),.hnw-table td:nth-child(5){display:none}}
 @media (max-width:560px){.hnw-table th:nth-child(4),.hnw-table td:nth-child(4){display:none}.hnw-foot .hnw-links{margin-left:0}}
+/* LIGHT THEME (html.theme-light — js/theme-light.css holds the --pl-* palette):
+   the board's chrome and table go navy-on-white; the 2D plan view is a dark
+   space plot by nature and stays dark inside its frame (its overlay note keeps
+   the dark-ink values it is drawn against). */
+html.theme-light .hnw{--hnw-ink:var(--pl-text-1);--hnw-dim:var(--pl-text-4);--hnw-line:var(--pl-border);
+  --hnw-amber:var(--pl-warn);--hnw-red:var(--pl-danger);--hnw-ok:var(--pl-ok)}
+html.theme-light .hnw-chip{background:var(--pl-card);box-shadow:0 1px 2px rgba(11,31,58,.05)}
+html.theme-light .hnw-chip::before{box-shadow:none!important}
+html.theme-light .hnw-map{--hnw-ink:#e9e4ff;--hnw-dim:#9d92c8;border-color:var(--pl-border-strong);box-shadow:var(--pl-shadow-hover)}
+html.theme-light .hnw-table tr.hnw-row:hover,html.theme-light .hnw-table tr.hnw-row.sel{background:var(--pl-blue-soft)}
+html.theme-light .hnw-table .n i{box-shadow:0 0 0 1px rgba(11,31,58,.18)}
+html.theme-light .hnw-table .n a:hover{color:var(--pl-blue)}
+html.theme-light .hnw-table .d{color:var(--pl-blue-deep)}
+html.theme-light .hnw-foot a{color:var(--pl-blue)}
 `;
 
 /**

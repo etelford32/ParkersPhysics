@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
     <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -147,6 +147,65 @@
             .intro, .summary, .toc, .warning-box { background: none; border-color: #999; }
             .back-top, footer { display: none; }
         }
+
+        /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+        /* Legal shell: gold headings / violet links on near-black → navy copy, blue
+           links and headings, soft-blue panels. */
+        html.theme-light .legal-hero { background: var(--pl-grad-hero); border-bottom-color: var(--pl-border); }
+        html.theme-light .legal-hero h1 {
+            background: var(--pl-grad-headline);
+            -webkit-background-clip: text; background-clip: text;
+        }
+        html.theme-light .legal-meta { color: var(--pl-text-4); }
+        html.theme-light .legal-meta strong { color: var(--pl-text-2); }
+
+        html.theme-light .toc { background: var(--pl-bg-soft); border-color: var(--pl-border); }
+        html.theme-light .toc :is(h2, h3) { color: var(--pl-blue-deep); }
+        html.theme-light .toc li { color: var(--pl-text-4); }
+        html.theme-light .toc a { color: var(--pl-blue); }
+        html.theme-light .toc a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light .legal-section h2 { color: var(--pl-blue-deep); border-bottom-color: var(--pl-border); }
+        html.theme-light .legal-section h3 { color: var(--pl-text-1); }
+        html.theme-light .legal-section :is(p, li) { color: var(--pl-text-2); }
+        html.theme-light .legal-section strong { color: var(--pl-text-1); }
+        html.theme-light .legal-section a { color: var(--pl-blue); }
+        html.theme-light .legal-section a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light .highlight-box {
+            background: var(--pl-blue-soft); border-color: var(--border-3); color: var(--pl-text-2);
+        }
+        html.theme-light .highlight-box strong { color: var(--pl-text-1); }
+        html.theme-light .highlight-box a { color: var(--pl-blue); }
+        html.theme-light .highlight-box a:hover { color: var(--pl-blue-deep); }
+
+        html.theme-light footer a { color: var(--pl-text-3); }
+        html.theme-light footer a:hover { color: var(--pl-blue); }
+        html.theme-light .legal-section code { background: var(--pl-bg-sunk); color: var(--pl-text-1); }
+
+        /* Caution boxes keep a warm signal — the palette's warn amber as a tint and
+           a rule — with navy copy for body-text contrast. */
+        html.theme-light .warning-box {
+            background: color-mix(in srgb, var(--pl-warn) 7%, var(--pl-bg));
+            border-color: color-mix(in srgb, var(--pl-warn) 32%, var(--pl-bg));
+            color: var(--pl-text-1);
+        }
+        html.theme-light .warning-box { color: var(--pl-text-1) !important; }   /* the dark rule is !important */
+        html.theme-light .legal-meta-note { color: var(--pl-text-4); }
+
+        html.theme-light .intro {
+            background: var(--pl-blue-soft); border-color: var(--border-3); color: var(--pl-text-2);
+        }
+        html.theme-light .summary { background: var(--pl-bg-soft); border-color: var(--pl-border); }
+        html.theme-light .summary h2 { color: var(--pl-blue-deep); }
+        html.theme-light .summary .summary-note { color: var(--pl-text-4); }
+        html.theme-light .summary li { color: var(--pl-text-2); }
+        html.theme-light :is(.summary, .intro) strong { color: var(--pl-text-1); }
+        html.theme-light :is(.summary, .intro) a { color: var(--pl-blue); }
+        html.theme-light :is(.summary, .intro) a:hover { color: var(--pl-blue-deep); }
+        html.theme-light .legal-section li::marker { color: var(--pl-text-4); }
+        html.theme-light .back-top { color: var(--pl-text-4) !important; }          /* dark rule is !important */
+        html.theme-light .back-top:hover { color: var(--pl-blue) !important; }
     </style>
 <script type="application/ld+json">
 {
@@ -166,6 +225,10 @@
   "inLanguage": "en-US"
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

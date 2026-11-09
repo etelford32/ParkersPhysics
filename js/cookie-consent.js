@@ -246,6 +246,29 @@ function _injectStyles() {
             .pp-consent-modal-foot { flex-direction: column-reverse; }
             .pp-consent-modal-foot .pp-consent-btn { width: 100%; text-align: center; }
         }
+
+        /* Light theme (white + blue) — only on light-capable pages, which
+           carry the --pl-* palette from js/theme-light.css. */
+        html.theme-light .pp-consent-banner {
+            background: rgba(255,255,255,.98); color: var(--pl-text-2);
+            border-top-color: var(--pl-border); box-shadow: 0 -8px 30px rgba(11,31,58,.10);
+        }
+        html.theme-light .pp-consent-banner .pp-consent-text strong { color: var(--pl-text-1); }
+        html.theme-light :is(.pp-consent-banner .pp-consent-text a, .pp-consent-modal-body a) { color: var(--pl-blue); }
+        html.theme-light .pp-consent-btn { background: var(--pl-btn); border-color: var(--pl-btn); color: #fff; }
+        html.theme-light .pp-consent-btn:hover { background: var(--pl-btn-hover); border-color: var(--pl-btn-hover); }
+        html.theme-light .pp-consent-btn.pp-consent-ghost { background: #fff; color: var(--pl-text-2); border-color: var(--pl-border-strong); }
+        html.theme-light .pp-consent-btn.pp-consent-ghost:hover { background: var(--pl-blue-soft); color: var(--pl-blue-deep); }
+        html.theme-light .pp-consent-modal-backdrop { background: rgba(11,31,58,.35); }
+        html.theme-light .pp-consent-modal { background: #fff; border-color: var(--pl-border); color: var(--pl-text-2); }
+        html.theme-light .pp-consent-modal h2 { background: none; -webkit-text-fill-color: currentColor; color: var(--pl-text-1); border-bottom-color: var(--pl-border); }
+        html.theme-light .pp-consent-modal-body p { color: var(--pl-text-3); }
+        html.theme-light .pp-consent-cat { border-color: var(--pl-border); background: var(--pl-bg-soft); }
+        html.theme-light .pp-consent-cat-name { color: var(--pl-text-1); }
+        html.theme-light .pp-consent-cat-desc { color: var(--pl-text-4); }
+        html.theme-light .pp-consent-switch { background: #c9d6e8; }
+        html.theme-light .pp-consent-switch.on { background: var(--pl-btn); }
+        html.theme-light .pp-consent-modal-foot { background: var(--pl-bg-soft); border-top-color: var(--pl-border); }
     `;
     document.head.appendChild(style);
 }

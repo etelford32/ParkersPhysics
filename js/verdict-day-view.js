@@ -143,7 +143,71 @@ html.ev-day-open,html.ev-day-open body{overflow:hidden}
   .ev-day-temps{grid-column:1/-1;text-align:left;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .ev-day-hi{font-size:2.4rem}
 }
-@media(prefers-reduced-motion:reduce){.ev-day *{transition:none!important;animation:none!important}}`;
+@media(prefers-reduced-motion:reduce){.ev-day *{transition:none!important;animation:none!important}}
+
+/* ── Light theme (html.theme-light) — mirrors the verdict card's light
+   block: frosted near-white sheet, navy text, deep-cyan accents, and each
+   neon bright kept in hue at a >=4.5:1 shade. Colours only; the overlay's
+   geometry (and its <body> mount, see the class header) is untouched. */
+html.theme-light .ev-day{
+  background:radial-gradient(120% 80% at 50% 0%,rgba(244,249,255,.985),rgba(226,235,247,.99) 70%);color:#1f3047}
+html.theme-light .ev-day-bar{border-bottom-color:rgba(0,90,150,.16)}
+html.theme-light .ev-day-nav,
+html.theme-light .ev-day-close{border-color:rgba(0,110,170,.3);background:#fff;color:#1f3047}
+html.theme-light .ev-day-nav:hover:not(:disabled),
+html.theme-light .ev-day-close:hover{border-color:rgba(0,110,170,.65);color:#0d1b2e}
+html.theme-light .ev-day-tab,
+html.theme-light .ev-day-stat,
+html.theme-light .ev-day-charts,
+html.theme-light .ev-day-hour,
+html.theme-light .ev-day-part,
+html.theme-light .ev-day-nrow{background:rgba(255,255,255,.82);border-color:rgba(0,90,150,.14)}
+html.theme-light .ev-day-tab:hover{border-color:rgba(0,110,170,.5)}
+html.theme-light .ev-day-tab[aria-selected="true"]{border-color:rgba(0,110,170,.7);background:rgba(0,133,176,.12);
+  box-shadow:0 0 0 3px rgba(0,133,176,.10)}
+html.theme-light .ev-day-tab .n,
+html.theme-light .ev-day-tab .t,
+html.theme-light .ev-day-lo,
+html.theme-light .ev-day-stat .s,
+html.theme-light .ev-day-ctitle,
+html.theme-light .ev-day-hour .p,
+html.theme-light .ev-day-part .p,
+html.theme-light .ev-day-nrow .d{color:#3e5573}
+html.theme-light .ev-day-tab[aria-selected="true"] .n,
+html.theme-light .ev-day-label,
+html.theme-light .ev-day-cond,
+html.theme-light .ev-day-hi,
+html.theme-light .ev-day-stat .v,
+html.theme-light .ev-day-tip b,
+html.theme-light .ev-day-hour .t,
+html.theme-light .ev-day-part .t,
+html.theme-light .ev-day-nrow .tt{color:#0d1b2e}
+html.theme-light .ev-day-mini{color:#006a91}
+html.theme-light .ev-day-glyph{filter:drop-shadow(0 2px 6px rgba(20,40,80,.22))}
+html.theme-light .ev-day-date,
+html.theme-light .ev-day-feels,
+html.theme-light .ev-day-stat .k,
+html.theme-light .ev-day-empty,
+html.theme-light .ev-day-hour .h,
+html.theme-light .ev-day-part .n{color:#4d627e}
+html.theme-light .ev-day-sum,
+html.theme-light .ev-day-part .c{color:#1f3047}
+html.theme-light .ev-day-hour.now{border-color:rgba(0,128,84,.5)}
+html.theme-light .ev-day-ax{fill:#4d627e}
+html.theme-light .ev-day-lab{fill:#1f3047}
+html.theme-light .ev-day-tip{background:rgba(255,255,255,.97);border-color:rgba(0,110,170,.32);color:#1f3047;
+  box-shadow:0 6px 20px rgba(20,40,80,.18)}
+html.theme-light .ev-day-state{border-color:rgba(62,85,115,.35);color:#3e5573}
+html.theme-light .ev-day-state.go{border-color:rgba(0,128,84,.5);color:#00704a}
+html.theme-light .ev-day-state.maybe{border-color:rgba(160,112,0,.5);color:#7d5800}
+html.theme-light .ev-day-prov{color:#51657f}
+/* SVG presentation attributes (and the one inline 'now' fill) re-inked by value. */
+html.theme-light .ev-day svg line[stroke^="rgba(139,163,199"]{stroke:rgba(40,70,110,.16)}
+html.theme-light .ev-day svg path[stroke="#4ddbff"]{stroke:#0088b8}
+html.theme-light .ev-day svg circle[fill="#4ddbff"]{fill:#0088b8;stroke:#fff}
+html.theme-light .ev-day svg line[stroke="#2eff9e"]{stroke:#009a63}
+html.theme-light .ev-day svg text[style*="#2eff9e"]{fill:#00704a!important}
+html.theme-light .ev-day svg line[stroke="#c2d4ee"]{stroke:#3e5573}`;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

@@ -78,6 +78,7 @@ const MIME = {
     '.jpeg': 'image/jpeg',
     '.gif':  'image/gif',
     '.svg':  'image/svg+xml',
+    '.xml':  'application/xml; charset=utf-8',
     '.webp': 'image/webp',
     '.webm': 'video/webm',
     '.mp4':  'video/mp4',

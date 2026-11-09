@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html data-theme-support="light" lang="en">
 <head>
     <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -245,9 +245,92 @@
         .back-link { background: none; border: none; color: #a080ff; font-family: inherit; font-size: .85rem; cursor: pointer; padding: 0; margin-bottom: 24px; }
         .back-link:hover { text-decoration: underline; }
 
-        footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
-        footer a { color: #555; text-decoration: none; }
+        /* position + z-index: the fixed Stage backdrop (#sw-attract-backdrop,
+           z-index 0) is a positioned layer and painted OVER this unpositioned
+           footer, hiding its links in both themes. #333/#555 were also near
+           invisible on the dark sky; lifted to readable greys. */
+        footer { position: relative; z-index: 1; text-align: center; padding: 2rem; color: #7a7f96; font-size: .78rem; }
+        footer a { color: #a3a8c0; text-decoration: none; }
         footer a:hover { color: #ffd700; }
+
+        /* ── LIGHT THEME (white + blue) — js/theme-light.css holds the palette; these are this page's hard-coded colours ── */
+        /* The Stage attract loop is a dark sim: in light it shows through a
+           white veil (inline style → !important) as a faint ghost. */
+        html.theme-light #sw-attract-backdrop > div {
+            background: radial-gradient(ellipse at 50% 45%, rgba(236,243,253,.84) 0%, rgba(246,249,254,.97) 72%) !important;
+        }
+        html.theme-light .auth-container {
+            background: var(--pl-card);
+            border-color: var(--pl-border);
+            box-shadow: 0 2px 6px rgba(11,31,58,.06), 0 24px 64px rgba(21,96,212,.14);
+        }
+        html.theme-light .auth-side {
+            background: linear-gradient(160deg, #e3eefd 0%, var(--pl-bg-soft) 60%, #eaf5fd 100%);
+            border-right-color: var(--pl-border);
+        }
+        html.theme-light .auth-side-logo {
+            border-radius: 18px;
+            animation-name: logoPulseLight;
+        }
+        @keyframes logoPulseLight {
+            0%,100% { filter: drop-shadow(0 6px 14px rgba(21,96,212,.22)); }
+            50%      { filter: drop-shadow(0 8px 22px rgba(21,96,212,.34)); }
+        }        html.theme-light .auth-side h1,
+        html.theme-light .auth-side h2 { background: var(--pl-grad-headline); -webkit-background-clip: text; background-clip: text; }
+        html.theme-light .auth-side p { color: var(--pl-text-3); }
+        html.theme-light .side-stat { background: var(--pl-card); border-color: var(--pl-border); box-shadow: var(--pl-shadow); }
+        html.theme-light .side-stat .num { color: var(--pl-blue); }
+        html.theme-light .side-stat .label { color: var(--pl-text-4); }
+
+        html.theme-light .form-title { color: var(--pl-text-1); }
+        html.theme-light .form-sub { color: var(--pl-text-4); }
+        html.theme-light .form-sub a { color: var(--pl-blue); }
+        html.theme-light .auth-context { background: var(--pl-blue-soft); border-color: rgba(21,96,212,.24); color: var(--pl-text-2); }
+        html.theme-light .auth-context b { color: var(--pl-text-1); }
+        html.theme-light .auth-context a { color: var(--pl-blue-deep); }
+        html.theme-light .btn-create { background: var(--pl-card); border-color: rgba(21,96,212,.40); color: var(--pl-blue-deep); }
+        html.theme-light .btn-create:hover { background: var(--pl-blue-soft); border-color: var(--pl-blue); }
+
+        html.theme-light .form-group label { color: var(--pl-text-3); }
+        html.theme-light .form-group input:focus { border-color: var(--pl-blue); }
+        html.theme-light .form-group input.error { border-color: var(--pl-danger); }
+        html.theme-light .form-error { color: var(--pl-danger); }
+        html.theme-light .form-check-remember { color: var(--pl-text-3); }
+        html.theme-light .form-check-remember input { accent-color: var(--pl-blue); }
+        html.theme-light .forgot-link { background: transparent; border-color: transparent; color: var(--pl-blue); }
+        html.theme-light .auth-alert { background: rgba(192,38,45,.06); border-color: rgba(192,38,45,.32); color: var(--pl-danger); }
+
+        html.theme-light .btn-submit { background: var(--pl-grad-btn); color: #fff; box-shadow: 0 4px 14px rgba(21,96,212,.22); }
+        html.theme-light .divider { color: var(--pl-text-5); }
+        html.theme-light .divider::before,
+        html.theme-light .divider::after { border-top-color: var(--pl-border); }
+        html.theme-light .btn-social { background: var(--pl-card); border-color: var(--pl-border-strong); color: var(--pl-text-2); }
+        html.theme-light .btn-social:hover { background: var(--pl-bg-soft); border-color: var(--pl-blue); color: var(--pl-text-1); }
+        html.theme-light .back-link { color: var(--pl-blue); }
+
+        /* OAuth buttons (js/oauth-buttons.js writes dark inline colours):
+           Google's LIGHT button — white fill, #747775 stroke, #1f1f1f text.
+           Apple keeps its black style (one of its three permitted styles). */
+        html.theme-light .pp-oauth-btn[data-provider="google"] {
+            background: #ffffff !important; color: #1f1f1f !important; border-color: #747775 !important;
+        }
+        html.theme-light .pp-oauth-btn[data-provider="google"]:hover { background: #f2f5f9 !important; }
+        html.theme-light .pp-oauth-err { color: var(--pl-danger); }
+
+        /* Inline-styled states (success / already signed in / magic link / reset). */
+        html.theme-light :is(#login-success, #already-signed-in, #reset-success) h3 { color: var(--pl-ok) !important; }
+        html.theme-light #magic-sent h3 { color: var(--pl-blue) !important; }
+        html.theme-light :is(#login-success, #already-signed-in, #magic-sent, #reset-success) p { color: var(--pl-text-3) !important; }
+        html.theme-light :is(#already-signed-in, #magic-sent) p:last-of-type:not(:first-of-type) { color: var(--pl-text-4) !important; }
+        html.theme-light :is(#asi-email, #magic-sent-email) { color: var(--pl-text-1) !important; }
+        html.theme-light :is(#asi-signout, #magic-back) {
+            background: var(--pl-card) !important; color: var(--pl-text-2) !important; border-color: var(--pl-border-strong) !important; box-shadow: none;
+        }
+        html.theme-light #asi-plan-wrap .plan-badge { background: var(--pl-blue-soft) !important; color: var(--pl-blue-deep) !important; }
+        html.theme-light #magic-toggle { color: var(--pl-blue) !important; }
+
+        html.theme-light footer a { color: var(--pl-text-3); }
+        html.theme-light footer a:hover { color: var(--pl-blue); }
     </style>
 <script type="application/ld+json">
 {
@@ -265,6 +348,10 @@
   "inLanguage": "en-US"
 }
 </script>
+<!-- theme-support:start — scripts/build-theme-support.mjs -->
+<link rel="stylesheet" href="/js/theme-light.css">
+<script src="/js/theme-boot.js"></script>
+<!-- theme-support:end -->
 </head>
 <body>
 

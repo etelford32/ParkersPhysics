@@ -387,6 +387,7 @@ export const NON_SIMULATION_PAGES = new Set([
     'local-space.html',         // section hub
     'pricing.html',
     'privacy.html',
+    'recent-development.html',  // build log — js/dev-log.js
     'request-access.html',
     'research.html',            // section hub
     'sample-fleet-assessment.html', // operator marketing page (Storm-Season Fleet Assessment proof + simulator)
