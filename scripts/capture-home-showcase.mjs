@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /**
- * capture-home-carousel.mjs — record the homepage background carousel media
+ * capture-home-showcase.mjs — record the homepage Simulation Showcase media
  * ═══════════════════════════════════════════════════════════════════════════
- * For every entry in js/home-carousel-slides.js CAPTURED_SLIDES: open the
+ * For every entry in js/home-showcase-slides.js SHOWCASE_SLIDES: open the
  * real page, hide its chrome, let the scene settle, shoot a poster (JPEG)
  * and record a short muted loop (WebM), crop both to the sim's canvas, and
- * write assets/home/carousel/manifest.json — the join table
- * js/home-carousel.js reads at runtime.
+ * write assets/home/showcase/manifest.json — the join table
+ * js/home-showcase.js reads at runtime.
  *
- *   node scripts/capture-home-carousel.mjs                # all seven, against
+ *   node scripts/capture-home-showcase.mjs                # every slide, against
  *                                                         # a dev server it starts
- *   node scripts/capture-home-carousel.mjs --only mars,moon
- *   node scripts/capture-home-carousel.mjs --base http://localhost:3000
- *   node scripts/capture-home-carousel.mjs --gpu           # real GPU (see below)
- *   node scripts/capture-home-carousel.mjs --no-clip       # posters only
+ *   node scripts/capture-home-showcase.mjs --only mars,moon
+ *   node scripts/capture-home-showcase.mjs --base http://localhost:3000
+ *   node scripts/capture-home-showcase.mjs --gpu           # real GPU (see below)
+ *   node scripts/capture-home-showcase.mjs --no-clip       # posters only
  *
  * WHERE TO RUN IT
  * ───────────────
@@ -33,9 +33,9 @@
  *
  * MEDIA BUDGET
  * ────────────
- * Posters 1600×900 JPEG q80 (~150–300 kB), clips 1280×720 VP8 ~900 kbps ×
- * 6–7 s (~700–800 kB). Only the current slide's clip is ever fetched, so
- * the page cost is one poster + one clip at a time, not the whole set.
+ * Posters 1920×1200 JPEG q80 (~150–350 kB), clips 1280-wide VP8 ~900 kbps ×
+ * 6–7 s (~700–800 kB). Posters load lazily and a clip is fetched only while
+ * its card is hovered, so the page cost is a few posters, not the whole set.
  */
 import { chromium } from 'playwright';
 import { spawn, spawnSync } from 'node:child_process';
@@ -47,7 +47,7 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { CAPTURED_SLIDES, MEDIA_DIR } = await import(pathToFileURL(path.join(ROOT, 'js/home-carousel-slides.js')).href);
+const { SHOWCASE_SLIDES: CAPTURED_SLIDES, MEDIA_DIR } = await import(pathToFileURL(path.join(ROOT, 'js/home-showcase-slides.js')).href);
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -58,7 +58,9 @@ const GPU    = flag('--gpu');
 const NOCLIP = flag('--no-clip');
 const PORT   = Number(opt('--port', '8765'));
 let   BASE   = opt('--base', '');
-const VIEW   = { width: 1600, height: 900 };
+// 16:10 at 1920 — the card's aspect (js/home-showcase.js .hs-media) so a
+// poster is never cropped twice; wide enough for a 2× card at 640 px.
+const VIEW   = { width: 1920, height: 1200 };
 const CLIP_W = 1280;
 
 // ── ffmpeg ─────────────────────────────────────────────────────────────────
@@ -174,7 +176,9 @@ async function captureSlide(browser, slide, ffmpeg, enc, outDir, tmpDir) {
     const h = Math.min(VIEW.height - y, Math.floor(box.height / 2) * 2);
 
     const poster = `${slide.id}.jpg`;
-    await page.screenshot({ path: path.join(outDir, poster), type: 'jpeg', quality: 80, clip: { x, y, width: w, height: h } });
+    // A software rasteriser can take well over Playwright's 30 s default to
+    // present a frame of a heavy page (upper-atmosphere.html timed out there).
+    await page.screenshot({ path: path.join(outDir, poster), type: 'jpeg', quality: 80, clip: { x, y, width: w, height: h }, timeout: 150_000 });
     const tPoster = Date.now() - tCtx;
 
     let clip = null;
@@ -238,7 +242,12 @@ try {
             console.log(`   ✓ ${entry.width}×${entry.height}  poster ${(entry.bytes.poster / 1024).toFixed(0)} kB` +
                         (entry.clip ? `  clip ${(entry.bytes.clip / 1024).toFixed(0)} kB` : '  (no clip)'));
         } catch (err) {
-            console.warn(`   ✗ ${slide.id}: ${err.message}`);
+            console.warn(`   ✗ ${slide.id}: ${err.message.split('\n')[0]}`);
+        } finally {
+            // A slide that threw (screenshot timeout on a software rasteriser)
+            // used to leave its context — and its WebGL page — running behind
+            // every later capture; measured: two leaked renderers at 16 min.
+            for (const c of browser.contexts()) await c.close().catch(() => {});
         }
     }
 } finally {

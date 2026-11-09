@@ -97,12 +97,18 @@ export const EXPERIMENTS = Object.freeze({
             { id: 'constellation', w: 50 },
         ],
     },
-    // Homepage background carousel (js/home-carousel.js). RUNNING since
-    // 2026-09-06: control = the live magnetosphere alone, carousel = the
-    // same canvas as slide 0 plus captured loops of seven simulations
-    // cycling behind the hero copy. QA-force: ?exp_home_bg_carousel=carousel.
+    // Homepage background carousel. RAN 2026-09-06 → 2026-11-09: control =
+    // the live magnetosphere alone, carousel = the same canvas as slide 0
+    // plus captured loops of seven simulations cycling BEHIND the hero copy.
+    // CONCLUDED 2026-11-09 by owner decision, not by the numbers: the
+    // variant's software-rendered captures stretched behind the copy read
+    // as "very janky", and a background can only ever be glanced at. The
+    // same captures became the SUBJECT of a foreground section — the
+    // Simulation Showcase (js/home-showcase.js), every card a funnel CTA
+    // (`showcase_<id>`) — and index.html no longer calls assign() for this.
+    // Entry kept (paused) so admin.html keeps charting the historical rows.
     home_bg_carousel: {
-        status: 'running',
+        status: 'paused',
         variants: [
             { id: 'control',  w: 50 },
             { id: 'carousel', w: 50 },

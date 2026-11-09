@@ -130,6 +130,19 @@ export const UNLOGGED_PRS = {
 // ── The log — newest first ──────────────────────────────────────────────────
 export const DEV_LOG = [
     // ══ Sprint: Solar system, the Moon, and Earth hazards ═══════════════════
+    { id: 'home-showcase-light-hero', date: '2026-11-09', pr: null,
+      title: 'Homepage: a daylight theme that works, and a showcase of the simulations', kind: 'improvement',
+      section: 'platform', icon: 'target',
+      summary: 'In daylight the homepage is now white and blue end to end, with the live magnetosphere framed in a '
+             + 'dark instrument window instead of a black block; below it, a new Simulation Showcase replaces the '
+             + 'background slideshow and the embedded EarthView with one card per simulation.',
+      highlights: [
+          'Each card names the physics the page runs, the data behind it and what you can do there; hover plays a short captured loop, click opens the simulation.',
+          'Filter the showcase by the site\'s own sections — Space Weather, Earth & Orbit, Local Space, Deep Space.',
+          'A new "Built like an instrument" band for researchers and operators: named published models, hindcast receipts, the locked-then-scored forecast ledger, provenance rules, and where to start by who you are.',
+          'Captures are dated on every card and say when they were rendered in software; the pages themselves run live.',
+      ],
+      links: [{ href: 'index.html', label: 'Home' }, { href: 'simulations.html', label: 'All simulations' }] },
     { id: 'weather-feed-paced', date: '2026-11-08', pr: 1070,
       title: 'EarthView\'s primary weather feed, back within its rate limit', kind: 'fix', section: 'earth-orbit',
       icon: 'earth',
