@@ -264,7 +264,7 @@ body {
 .cx-bg-s4 { background:var(--cx-s4); }
 
 /* explore */
-#cx-explore { min-width:0; }
+#cx-explore { min-width:0; align-self:start; }
 #cx-toolbar { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin-bottom:8px; }
 .cx-seg { display:flex; gap:4px; flex-wrap:wrap; }
 .cx-field { display:flex; align-items:center; gap:6px; font-size:.72rem; color:var(--cx-muted); }
@@ -276,7 +276,7 @@ body {
 #cx-banner[hidden] { display:none; }
 #cx-stage { position:relative; }
 #cx-panels { position:relative; display:grid; gap:6px; touch-action:pan-y; }
-.cx-panel { margin:0; }
+.cx-panel { margin:0; padding:6px 8px 4px; border-radius:9px; background:rgba(255,255,255,.018); border:1px solid rgba(255,255,255,.04); }
 .cx-panel figcaption { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; font-size:.72rem; margin:2px 0 1px; }
 .cx-unit { color:var(--cx-muted); }
 .cx-legend { display:flex; flex-wrap:wrap; gap:4px 10px; margin-left:auto; }
@@ -286,9 +286,12 @@ body {
 .cx-panel-svg { display:block; width:100%; height:auto; overflow:visible; }
 .cx-grid { stroke:var(--cx-line); stroke-width:1; }
 .cx-tick { fill:var(--cx-faint); font-size:10px; font-family:ui-monospace, Menlo, Consolas, monospace; }
-.cx-future { fill:rgba(0,198,255,.045); }
+.cx-future { fill:rgba(0,198,255,.055); }
 .cx-now { stroke:var(--cx-accent); stroke-width:1; stroke-dasharray:2 3; }
-.cx-line { fill:none; stroke-width:1.6; stroke-linejoin:round; stroke-linecap:round; }
+.cx-line { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.cx-now-label, .cx-future-label { font-size:9.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; font-family:system-ui, sans-serif; }
+.cx-now-label { fill:var(--cx-accent); }
+.cx-future-label { fill:var(--cx-muted); }
 .cx-line.cx-proj { stroke-dasharray:5 4; }
 .cx-line.cx-s0, .cx-dot.cx-s0 { stroke:var(--cx-s0); } .cx-dot.cx-s0 { fill:var(--cx-s0); }
 .cx-line.cx-s1, .cx-dot.cx-s1 { stroke:var(--cx-s1); } .cx-dot.cx-s1 { fill:var(--cx-s1); }

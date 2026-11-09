@@ -954,6 +954,7 @@ function renderPanels() {
             slotOf: (id) => variableSpec(id)?.slot ?? 0,
             fmtTick: fmtTickFor(m),
             title: p.title,
+            labelNow: models.length === 1,
         });
         const legend = m.lines.map((ln) => {
             const spec = variableSpec(ln.id);

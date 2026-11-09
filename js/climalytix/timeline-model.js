@@ -184,7 +184,7 @@ const f1 = (x) => (Math.round(x * 10) / 10).toString();
  *  fourth one's colour. */
 export const SLOT_COUNT = 5;
 
-export function panelSvg(m, { slotOf = () => 0, fmtTick = (v) => String(v), title = '' } = {}) {
+export function panelSvg(m, { slotOf = () => 0, fmtTick = (v) => String(v), title = '', labelNow = false } = {}) {
     const { width, height, pad } = m;
     const parts = [];
     parts.push(`<svg class="cx-panel-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${esc(title)}">`);
@@ -209,6 +209,14 @@ export function panelSvg(m, { slotOf = () => 0, fmtTick = (v) => String(v), titl
     }
     if (m.nowX != null) {
         parts.push(`<line class="cx-now" x1="${f1(m.nowX)}" x2="${f1(m.nowX)}" y1="${pad.t}" y2="${height - pad.b}"/>`);
+        // The first panel names the split once (visual pass V5): "now" by the line, "forecast" under
+        // the shade — in the bottom pad, which is empty (the shared time axis is drawn once, below
+        // every panel), so the labels can never sit on a series.
+        if (labelNow) {
+            const y = f1(height - pad.b + 12);
+            parts.push(`<text class="cx-now-label" x="${f1(m.nowX - 4)}" y="${y}" text-anchor="end">now</text>`);
+            if (width - pad.r - m.nowX > 60) parts.push(`<text class="cx-future-label" x="${f1(m.nowX + 5)}" y="${y}">forecast →</text>`);
+        }
     }
     if (!m.hasData) {
         const msg = m.tooShort ? 'Too short to show at this zoom — choose a shorter range' : 'No data in this window';

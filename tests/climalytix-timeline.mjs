@@ -73,6 +73,10 @@ ok('past solid, future dashed: the run breaks exactly at now', () => {
     assert.match(svg, /class="cx-line cx-s2"/);
     assert.doesNotMatch(svg, /stroke=|fill="#/, 'no colour in attributes — classes only');
     assert.match(svg, /class="cx-now"/);
+    assert.doesNotMatch(svg, /cx-now-label/, 'only the panel asked to names the split');
+    const first = panelSvg(m, { title: 'Temp', labelNow: true });
+    assert.match(first, />now</);
+    assert.match(first, /class="cx-future-label"[^>]*>forecast →</);
 });
 
 ok('a gap breaks the line instead of bridging it', () => {

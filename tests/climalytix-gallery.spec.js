@@ -86,4 +86,14 @@ test('00-page-overview', async ({ page }) => {
     await page.waitForTimeout(2500);
     await page.screenshot({ path: `${OUT}/00-page-top.png` });
     await page.screenshot({ path: `${OUT}/00-page-full.png`, fullPage: true });
+    await page.addStyleTag({ content: 'nav, .pp-nav, #site-nav { visibility:hidden !important; }' });
+    const ex = page.locator('#cx-explore');
+    await ex.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+    await ex.screenshot({ path: `${OUT}/11-explore.png` });
+    // Hover a chart so the crosshair + tooltip are in the frame.
+    const svg = page.locator('#cx-explore svg').first();
+    const b = await svg.boundingBox();
+    if (b) { await page.mouse.move(b.x + b.width * 0.62, b.y + b.height * 0.5); await page.waitForTimeout(300); }
+    await page.locator('#cx-explore').screenshot({ path: `${OUT}/12-explore-hover.png` });
 });

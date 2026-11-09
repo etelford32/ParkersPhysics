@@ -1432,9 +1432,43 @@ export function mountMap(root, deps) {
         const sb = scaleBar(M.view, M.h, 110);
         scaleEl.querySelector('i').style.width = `${sb.px.toFixed(1)}px`;
         scaleEl.querySelector('span').textContent = sb.label;
+        drawTimeFade();
         updateTip();
         deps.onFrame?.(frameInfo());
         deps.onAq?.(aqInfo());
+    }
+
+    // ── Time crossfade (visual pass V5) ─────────────────────────────────────
+    // When the timeline moves, the frame that was on screen fades out over the
+    // new one for TIME_FADE_MS instead of the fill jumping. Display only — the
+    // new frame is fully drawn underneath from the first paint, every state
+    // the gates read is the new instant's — and OFF under prefers-reduced-motion
+    // (every pixel-reading gate runs with it) and while no fill is drawn.
+    const TIME_FADE_MS = 180;
+    const reducedMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+    let fade = null, fadeCanvas = null;
+    function beginTimeFade() {
+        if (reducedMotion?.matches || !M.drawn.ground || !M.w) { fade = null; return; }
+        fadeCanvas = fadeCanvas || document.createElement('canvas');
+        if (fadeCanvas.width !== canvas.width || fadeCanvas.height !== canvas.height) {
+            fadeCanvas.width = canvas.width; fadeCanvas.height = canvas.height;
+        }
+        const fc = fadeCanvas.getContext('2d');
+        fc.setTransform(1, 0, 0, 1, 0, 0);
+        fc.clearRect(0, 0, fadeCanvas.width, fadeCanvas.height);
+        fc.drawImage(canvas, 0, 0);
+        fade = { t0: performance.now() };
+    }
+    function drawTimeFade() {
+        if (!fade) return;
+        const a = 1 - (performance.now() - fade.t0) / TIME_FADE_MS;
+        if (a <= 0) { fade = null; return; }
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = a * a;                         // ease-out
+        ctx.drawImage(fadeCanvas, 0, 0);
+        ctx.restore();
+        requestDraw();
     }
 
     function requestDraw() {
@@ -1612,7 +1646,9 @@ export function mountMap(root, deps) {
         },
         setTime(ms) {
             const before = windTimeIndex();
-            M.timeMs = Number.isFinite(ms) ? ms : null;
+            const next = Number.isFinite(ms) ? ms : null;
+            if (next !== M.timeMs) beginTimeFade();
+            M.timeMs = next;
             requestDraw();
             if (windTimeIndex() !== before) { updateFlow(); deps.onWind?.(windInfo()); }
         },
