@@ -90,6 +90,8 @@ const json = (body, status = 200, headers = {}) => ({
     json: async () => body, text: async () => JSON.stringify(body),
 });
 
+const rpcs = [];          // every PostgREST rpc call (the daily-run heartbeat)
+let rpcDown = false;
 globalThis.fetch = async (url, init = {}) => {
     const u = new URL(url);
     if (u.host === 'ccmc.gsfc.nasa.gov') {
@@ -106,7 +108,11 @@ globalThis.fetch = async (url, init = {}) => {
     if (u.host === 'www.lmsal.com') throw new Error('hek blocked (test)');
     if (u.host !== 'db.test') throw new Error(`unexpected fetch ${url}`);
     const table = u.pathname.replace('/rest/v1/', '');
-    if (table.startsWith('rpc/')) return json([]);
+    if (table.startsWith('rpc/')) {
+        rpcs.push({ fn: table.slice(4), body: JSON.parse(init.body ?? '{}') });
+        if (rpcDown && table.includes('record_pipeline')) return json({ message: 'down' }, 500);
+        return json([]);
+    }
     const method = init.method ?? 'GET';
     if (table === 'cme_outlook_issues' && tableMissing) {
         return json({ code: 'PGRST205', message: "Could not find the table 'public.cme_outlook_issues'" }, 404);
@@ -221,6 +227,43 @@ out = await run();
 check('table missing ⇒ reason table_missing', out.outlook?.reason === 'table_missing', JSON.stringify(out.outlook));
 check('…and the arrival ledger still locked', sent.some((s) => s.table === 'cme_arrival_forecasts'
     && s.rows.some((r) => r.model_id === 'flux-rope-v1')));
+
+// ── The daily-run record (js/cme-ledger-status.js) ───────────────────────────
+{
+    const beats = rpcs.filter((r) => r.body.p_name === 'cme_ledger');
+    if (process.env.DEBUG_BEATS) for (const b of beats) console.log('   beat', b.fn, b.body.p_source ?? b.body.p_reason);
+    check('every run wrote the cme_ledger heartbeat (4 runs so far)', beats.length === 4, `${beats.length} beat(s)`);
+    check('a healthy run is record_pipeline_success with a readable line',
+        beats[0].fn === 'record_pipeline_success'
+        && /^1 CME screened · 1 Earth-relevant · \d+ new locks?/.test(beats[0].body.p_source)
+        && /outlook issued$/.test(beats[0].body.p_source), beats[0].body.p_source);
+    check('migration-not-applied run still succeeds, and says the outlook did not issue',
+        beats.at(-1).fn === 'record_pipeline_success' && /outlook not issued \(table_missing\)/.test(beats.at(-1).body.p_source),
+        beats.at(-1).body.p_source);
+
+    // DONKI answers HTML (the 2026-09-30 host move): the run FAILED, and says so.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+        if (new URL(url).host === 'ccmc.gsfc.nasa.gov') {
+            return { ok: true, status: 200, headers: { get: () => 'text/html' },
+                json: async () => { throw new SyntaxError('Unexpected token <'); }, text: async () => '<html>moved</html>' };
+        }
+        return realFetch(url, init);
+    };
+    db = makeDb(); tableMissing = false; rpcs.length = 0;
+    out = await run();
+    const fail = rpcs.find((r) => r.body.p_name === 'cme_ledger');
+    check('DONKI down ⇒ record_pipeline_failure with the reason',
+        fail?.fn === 'record_pipeline_failure' && /lock_resolve_failed/.test(fail.body.p_reason), fail?.body.p_reason);
+    globalThis.fetch = realFetch;
+
+    // The heartbeat itself failing must never fail the run.
+    db = makeDb(); rpcs.length = 0; rpcDown = true;
+    out = await run();
+    check('heartbeat write down ⇒ run still returns its ledger, heartbeat.ok false',
+        out.heartbeat?.ok === false && out.fluxRope && !out.fluxRope.reason, JSON.stringify(out.heartbeat));
+    rpcDown = false;
+}
 
 Date.now = realNow;
 console.log(failures ? `\n${failures} failure(s)` : '\ncme-outlook-cron: all checks passed');

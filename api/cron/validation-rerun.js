@@ -80,6 +80,7 @@ import {
     issueOutlook, outlookIssueRows, resolveOutlookRow, brierByLead, OUTLOOK_MODEL_ID,
 } from '../../js/cme-outlook.js';
 import { RESPONSE_CELLS } from '../../js/cme-outlook-response.js';
+import { LEDGER_PIPELINE, ledgerRunLine } from '../../js/cme-ledger-status.js';
 import { normalizeSolarRegions } from '../_lib/noaa-regions.js';
 import { readSwGeomag, countSealedDay } from '../_lib/sw-geomag-store.js';
 
@@ -861,7 +862,10 @@ async function lockResolveScoreOutlook(nowMs) {
         const { regions } = normalizeSolarRegions(await r.json());
         const outlook = issueOutlook({ regionRows: regions, cells: RESPONSE_CELLS, nowMs });
         summary.issued = outlook.ok
-            ? { regions: outlook.coverage.regionsUsable, p: outlook.days.map(d => d.pArrival) }
+            ? { regions: outlook.coverage.regionsUsable, p: outlook.days.map(d => d.pArrival),
+                // SWPC's newest report day still zero-filled → previous day's odds
+                ...(outlook.coverage.probabilitiesCarried
+                    ? { carriedFrom: outlook.coverage.probabilitiesFromDay } : {}) }
             : { reason: outlook.reason };
         rows = outlookIssueRows(outlook);
     } catch (e) {
@@ -973,6 +977,26 @@ async function insertRun(row) {
     }
 }
 
+/** pipeline_heartbeat row 'cme_ledger' — never throws (the ledger already landed). */
+async function recordLedgerHeartbeat({ failed, text }) {
+    try {
+        const res = await fetchWithTimeout(
+            `${SUPABASE_URL}/rest/v1/rpc/${failed ? 'record_pipeline_failure' : 'record_pipeline_success'}`, {
+                method: 'POST', timeoutMs: 6_000,
+                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+                           'Content-Type': 'application/json' },
+                body: JSON.stringify(failed
+                    ? { p_name: LEDGER_PIPELINE, p_reason: text }
+                    : { p_name: LEDGER_PIPELINE, p_source: text }),
+            });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return { ok: true, failed, text };
+    } catch (e) {
+        console.error('validation-rerun: ledger heartbeat not recorded —', String(e?.message || e));
+        return { ok: false, failed, text, reason: String(e?.message || e).slice(0, 120) };
+    }
+}
+
 async function runValidation(req) {
     const started = Date.now();
     if (!isAuthorized(req)) {
@@ -1033,6 +1057,13 @@ async function runValidation(req) {
     console.log('validation-rerun ledger ' + JSON.stringify({
         catalog: catalog.length, donki: donkiSources, cme: cmeProgram, fluxRope, outlook,
     }));
+    // The DAILY-RUN RECORD (js/cme-ledger-status.js). Until 2026-11-09 a run
+    // that locked nothing left no trace at all, so a quiet Sun and a dead
+    // cron looked identical on cme-forecast.html and on status.html.
+    // /api/cme/skill serves this row as `ledger`, and the daily production
+    // probe fails when it is more than a day old.
+    const runLine = ledgerRunLine({ catalog: catalog.length, cmeProgram, fluxRope, outlook });
+    ledger.heartbeat = await recordLedgerHeartbeat(runLine);
 
     // ── Studies 1–3 (wind-bucket + HEK dependent). Early-outs carry the
     //    ledger results — partial success is success.
