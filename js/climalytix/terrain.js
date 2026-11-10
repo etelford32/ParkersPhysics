@@ -18,8 +18,8 @@
  * 0 = N, clockwise): a hill rising to the north faces SOUTH. That sign is the
  * classic trap and the gate pins both ways.
  *
- * SUN EXPOSURE is direct-beam geometry on the slope, from the site's ONE Sun
- * (js/sun-altitude.js solarPosition):
+ * SUN EXPOSURE is direct-beam geometry on the slope, from the accurate Sun
+ * (js/sun-precise.js — arcseconds, refraction included; apparent altitude):
  *     cos θ = cos s · sin α + sin s · cos α · cos(A☉ − aspect)
  * clamped at 0 (the slope faces away) and 0 with the Sun down. Flat ground is
  * sin α exactly. "Today" is the day's integral of that over flat ground's —
@@ -29,7 +29,7 @@
  * which is the honest first rung; cloud enters at T3.
  */
 
-import { solarPosition } from '../sun-altitude.js';
+import { solarPositionPrecise as solarPosition } from '../sun-precise.js';
 
 export const TILE_PX = 256;
 export const DEM_MAX_Z = 12;

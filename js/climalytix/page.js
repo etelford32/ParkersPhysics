@@ -27,6 +27,11 @@ import {
 import { DAY_MS } from './series.js';
 import { loadDataset, loadField, loadWindField, loadAqField, loadMonitors, loadSlopeForcing, loadThermalField, loadUpdraftField, loadConvectionField } from './loaders.js';
 import { fieldWindow } from './point-tile.js';
+import { tempControlState, overlayBadge } from './layer-state.js';
+import { keyPixels, keyFrac, keyTicks } from './heat-scale.js';
+import { lapseText } from './terrain-temp.js';
+import { effectPaint, EFFECT_FULL_K } from './sun-temp.js';
+import { horizonAt } from './sun-terrain.js';
 import { capePaint, CAPE_MIN_JKG, CAPE_FULL_JKG, OUTLOOK_COLORS, TRIGGER_MIN_MS, CIN_WEAK_JKG } from './convection.js';
 import { updraftPaint, W_FULL_MS } from './updraft.js';
 import { thermalPaint, WSTAR_FLOOR, WSTAR_FULL } from './thermals.js';
@@ -35,7 +40,7 @@ import { pm25Aqi, alignByInstant } from './aq-field.js';
 import { fieldSample } from './map-view.js';
 import { AQI_CATEGORIES, AQI_POLLUTANTS, categoryForAqi } from '../aqi-scale.js';
 import { windColor } from '../wind-palette.js';
-import { mountMap } from './map.js';
+import { mountMap, HEAT_ALPHA_DEFAULT } from './map.js';
 import { tempToRampFrac } from '../temp-ramp.js';
 import { exposurePaint, EXPOSURE_FULL_LOG2 } from './terrain.js';
 import { orographicPaint, formatW, OROGRAPHIC_FULL_MS } from './orographic.js';
@@ -272,7 +277,11 @@ function rememberGroups() {
  * it is not. Fills are one-at-a-time, so at most one key is on the map.
  */
 const MAP_KEYS = [
-    { box: '#cx-layer-temp', key: '#cx-heat-key', title: () => `Temperature · 2 m · ${unitSym('temp')}` },
+    // `ok`: a key is on the map only while its field is DRAWN (layer-state.js) —
+    // a colour key over a map with no temperature on it reads as a broken layer.
+    { box: '#cx-layer-temp', key: '#cx-heat-key', ok: () => S.tempCtl?.keyOnMap === true,
+      title: () => (S.map?.state.frame?.view === 'sun' ? `Sun, shade & cold-air effect · ${unitSym('temp')} · modelled`
+          : `Temperature · 2 m · ${unitSym('temp')}${S.map?.heatScale.mode === 'fit' ? ' · fit to view' : ''}`) },
     { box: '#cx-layer-aq', key: '#cx-aq-key', title: () => 'PM2.5 · US AQI category' },
     { box: '#cx-layer-exp', key: '#cx-exp-key', title: () => 'Sun exposure · vs flat ground' },
     { box: '#cx-layer-oro', key: '#cx-oro-key', title: () => 'Orographic lift · surface' },
@@ -284,7 +293,7 @@ const keyHomes = new Map();
 function syncMapKey() {
     const host = $('#cx-map-key'), body = host?.querySelector('.cx-mk-body');
     if (!body) return;
-    const active = MAP_KEYS.find((k) => $(k.box)?.checked && $(k.key));
+    const active = MAP_KEYS.find((k) => $(k.box)?.checked && $(k.key) && (k.ok?.() ?? true));
     for (const k of MAP_KEYS) {
         const el = $(k.key);
         if (!el) continue;
@@ -443,6 +452,7 @@ function renderSlopeRail(info) {
 /** Rail status for the airflow layer. */
 function renderFlowRail(info) {
     const st = $('#cx-flow-status');
+    setRowBadge('#cx-layer-airflow', overlayBadge({ checked: $('#cx-layer-airflow').checked, state: info.state, t: info.t }));
     if (!$('#cx-layer-airflow').checked) { st.textContent = 'Airflow layer off.'; st.dataset.state = 'off'; return; }
     st.dataset.state = info.state;
     if (info.state === 'loading') { st.textContent = 'Loading the wind field…'; return; }
@@ -508,23 +518,127 @@ function renderRose() {
         : 'Calm through the run.';
 }
 
-/** Paint the colour key ONCE from the site-wide temperature LUT bytes. */
+/**
+ * Paint the colour key from the scale the map is drawing with (heat-scale.js):
+ * the whole ramp for 'absolute', this run's range stretched along it for
+ * 'fit'. Same function, same LUT bytes as the pixels on the map.
+ */
+let keySig = '';
 function paintHeatKey() {
+    const sc = S.map.heatScale;
+    const view = S.map.state.frame?.view ?? 'temp';
+    const sig = `${view}|${sc.mode}|${sc.lo}|${sc.hi}`;
+    if (sig === keySig) return false;
+    keySig = sig;
     const c = $('#cx-heat-key canvas');
     const img = c.getContext('2d').createImageData(256, 1);
-    img.data.set(S.map.lut);
+    if (view === 'sun') {
+        // The effect's own key: the map's painter from −FULL to +FULL over the dimmed ground's tone.
+        for (let k = 0; k < 256; k++) {
+            const px = new Uint8ClampedArray(4);
+            effectPaint((k / 255 * 2 - 1) * EFFECT_FULL_K, px, 0);
+            const a = px[3] / 255, bg = [42, 52, 70];
+            img.data.set([px[0] * a + bg[0] * (1 - a), px[1] * a + bg[1] * (1 - a), px[2] * a + bg[2] * (1 - a), 255], k * 4);
+        }
+        c.getContext('2d').putImageData(img, 0, 0);
+        $('#cx-heat-key').dataset.scale = 'effect';
+        return true;
+    }
+    img.data.set(keyPixels(sc, S.map.lut, 256));
     c.getContext('2d').putImageData(img, 0, 0);
+    $('#cx-heat-key').dataset.scale = sc.mode;
+    return true;
 }
 
-/** Ticks at round values IN THE READER'S UNIT, placed on the °C ramp. */
+/** Ticks at round values IN THE READER'S UNIT, placed on the key's own scale. */
 function renderHeatTicks() {
-    const unit = S.units?.temp === 'F' ? 'F' : 'C';
-    const ticks = unit === 'F' ? [-40, 0, 40, 80, 120] : [-40, -20, 0, 20, 40];
-    $('#cx-heat-key .cx-key-ticks').innerHTML = ticks.map((d) => {
-        const c = fromDisplay('temp', d, S.units);
-        const f = tempToRampFrac(c);
-        return f > 0.02 && f < 0.98 ? `<span style="left:${(f * 100).toFixed(1)}%">${d}°</span>` : '';
-    }).join('');
+    const sc = S.map.heatScale;
+    const conv = { toDisplay: (c) => fmt('temp', c, S.units).value, fromDisplay: (d) => fromDisplay('temp', d, S.units) };
+    let ticks;
+    if ($('#cx-heat-key').dataset.scale === 'effect') {
+        const full = conv.toDisplay(EFFECT_FULL_K) - conv.toDisplay(0);
+        ticks = [[`−${full.toFixed(1)}° cooler`, 0.2], [`+${full.toFixed(1)}° warmer`, 0.8]].map(([label, frac]) => ({ label, frac }));
+    } else if (sc.mode === 'fit') ticks = keyTicks(sc, conv);
+    else {
+        const unit = S.units?.temp === 'F' ? 'F' : 'C';
+        ticks = (unit === 'F' ? [-40, 0, 40, 80, 120] : [-40, -20, 0, 20, 40])
+            .map((d) => ({ label: `${d}°`, frac: tempToRampFrac(conv.fromDisplay(d)) }))
+            .filter((t) => t.frac > 0.02 && t.frac < 0.98);
+    }
+    $('#cx-heat-key .cx-key-ticks').innerHTML = ticks.map((t) => `<span style="left:${(t.frac * 100).toFixed(1)}%">${esc(t.label)}</span>`).join('');
+}
+
+/** The Fit / Absolute control follows the map's mode (and a fit that had no range to fit). */
+function syncScaleControl() {
+    const want = S.map.state.heatScaleMode;
+    for (const b of document.querySelectorAll('#cx-heat-scale [data-scale]')) b.setAttribute('aria-pressed', String(b.dataset.scale === want));
+}
+
+/**
+ * A layer row's badge: its source ("Ours") while it can draw, or a plain
+ * statement that there is nothing to draw. The source label is remembered on
+ * the element, so the badge always returns to exactly what the markup said.
+ */
+function setRowBadge(boxSel, badge) {
+    const src = $(boxSel)?.closest('.cx-layer')?.querySelector('.cx-layer-src');
+    if (!src) return;
+    src.dataset.source ??= src.textContent;
+    src.textContent = badge ?? src.dataset.source;
+    src.classList.toggle('cx-src-down', badge != null && badge !== 'Loading');
+}
+
+/**
+ * THE TEMPERATURE CONTROLS FOLLOW THE DATA (layer-state.js): the checkbox
+ * keeps the reader's intent, while the sub-toggles, the opacity slider, the
+ * on-map key and the Retry button are live only while there is a field for
+ * them to change. Called from every frame and from every fill switch.
+ */
+function applyTempControl(info) {
+    const ctl = tempControlState({ checked: $('#cx-layer-temp').checked, fieldState: info?.state, frameT: info?.t, note: info?.note });
+    const changed = S.tempCtl?.mode !== ctl.mode;
+    S.tempCtl = ctl;
+    for (const id of ['#cx-layer-iso', '#cx-layer-ext', '#cx-layer-tdetail', '#cx-heat-alpha']) $(id).disabled = !ctl.subEnabled;
+    // Sun & shade rides on terrain detail: without the real ground there is no slope to light.
+    $('#cx-layer-tsun').disabled = !ctl.subEnabled || !$('#cx-layer-tdetail').checked;
+    $('#cx-layer-tpool').disabled = $('#cx-layer-tsun').disabled;      // cold-air pooling needs the real ground too
+    const hasEffect = ctl.subEnabled && info?.detail?.state === 'on' && info.detail.effect?.live === true;
+    for (const b of document.querySelectorAll('#cx-heat-view [data-view]')) {
+        b.disabled = !ctl.subEnabled || (b.dataset.view === 'sun' && !hasEffect);
+        b.setAttribute('aria-pressed', String(b.dataset.view === (info?.view ?? 'temp')));
+    }
+    for (const b of document.querySelectorAll('#cx-heat-scale [data-scale]')) b.disabled = !ctl.subEnabled;
+    $('#cx-layer-temp').closest('.cx-layer').dataset.avail = ctl.mode;
+    setRowBadge('#cx-layer-temp', ctl.badge);
+    $('#cx-heat-retry').hidden = !ctl.canRetry;
+    const notice = $('#cx-map-notice');
+    notice.hidden = !ctl.notice;
+    notice.querySelector('span').textContent = ctl.notice;
+    notice.querySelector('button').hidden = !ctl.canRetry;
+    if (changed) syncMapKey();
+    return ctl;
+}
+
+/**
+ * Ask our archive again (the Retry buttons): the temperature field, the wind
+ * field and the site's GFS series come from the same run, so all three are
+ * re-read — and only those; no other feed is re-fetched.
+ */
+function retryArchive() {
+    if (!S.site || !S.map || S.field?.state === 'loading') return;
+    const site = S.site, signal = S.abort.signal;
+    S.field = { state: 'loading', body: null, note: 'Loading the temperature field…' };
+    S.map.setField('loading', null, S.field.note);
+    S.map.setWind('loading', null, 'Loading the wind field…');
+    loadField(site, { signal, win: fieldWin(site), fresh: true }).then((r) => {
+        if (signal.aborted || S.site !== site) return;
+        S.field = r;
+        S.map.setField(r.state, r.body, r.note);
+    });
+    loadWindField(site, { signal, win: fieldWin(site), fresh: true }).then((r) => {
+        if (signal.aborted || S.site !== site) return;
+        S.map.setWind(r.state, r.body, r.note);
+    });
+    loadAll({ only: 'gfs' });
 }
 
 /** The rail under the toggle: status, valid time, the window's range on the key. */
@@ -533,13 +647,14 @@ function renderHeatRail(info) {
     // once a site feed reports its offset — re-render it with every frame).
     if (S.map) renderFlowRail(S.map.state.wind);
     const st = $('#cx-heat-status');
-    const on = $('#cx-layer-temp').checked;
     const win = $('#cx-heat-key .cx-key-win i');
-    if (!on) { st.textContent = 'Temperature layer off.'; st.dataset.state = 'off'; win.hidden = true; return; }
-    if (info.state === 'loading' || info.state === 'down' || info.t == null) {
-        st.dataset.state = info.state === 'loading' ? 'loading' : 'down';
-        st.textContent = info.state === 'loading' ? 'Loading the temperature field…'
-            : info.state === 'down' ? info.note
+    const ctl = applyTempControl(info);
+    if (S.map && paintHeatKey()) { renderHeatTicks(); syncMapKey(); }
+    if (ctl.mode === 'off') { st.textContent = 'Temperature layer off.'; st.dataset.state = 'off'; win.hidden = true; return; }
+    if (ctl.mode !== 'on') {
+        st.dataset.state = ctl.mode === 'loading' ? 'loading' : 'down';
+        st.textContent = ctl.mode === 'loading' ? 'Loading the temperature field…'
+            : ctl.mode === 'down' ? info.note
             : 'The run does not cover this time — no frame is held past its end.';
         win.hidden = true;
         return;
@@ -547,11 +662,43 @@ function renderHeatRail(info) {
     st.dataset.state = info.state;
     const local = new Date(info.timeMs + S.utcOffsetS * 1000);
     const when = `${local.toUTCString().slice(0, 3)} ${local.toISOString().slice(11, 16)} local`;
-    const lead = Math.round((info.timeMs - S.field.body.runMs) / 3_600_000);
+    // The field is interpolated to this minute between two GFS frames; say which.
+    const leadH = (ms) => Math.round((ms - S.field.body.runMs) / 3_600_000);
+    const bl = info.blend;
+    const lead = bl && bl.i0 !== bl.i1 ? `${leadH(bl.t0Ms)} h → +${leadH(bl.t1Ms)} h, interpolated to the minute` : `${leadH(info.timeMs)} h`;
+    const live = S.map?.state.timeMs == null;
     const range = info.range ? ` · window ${fmtText('temp', info.range.min, S.units)} – ${fmtText('temp', info.range.max, S.units)}` : '';
-    st.innerHTML = `<b>Valid ${esc(when)}</b> (GFS +${lead} h)${esc(range)}<br>${esc(info.note)}`;
-    if (info.range) {
-        const a = tempToRampFrac(info.range.min), b = tempToRampFrac(info.range.max);
+    const sc = S.map.heatScale;
+    const scaleNote = sc.mode === 'fit'
+        ? `Colours fit to this run’s range here, ${fmtText('temp', sc.lo, S.units)} – ${fmtText('temp', sc.hi, S.units)} — compare places with Absolute.`
+        : 'Colours on the absolute scale EarthView uses.';
+    // A temperature DIFFERENCE in the reader's unit (a 1 K step is 1.8 °F).
+    const dT = (k, dp = 0) => { const v = fmt('temp', k, S.units).value - fmt('temp', 0, S.units).value; return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(dp)}`; };
+    const d = info.detail;
+    const detailNote = !d || d.state === 'off' ? 'Terrain detail off: GFS’s own 25 km field, interpolated.'
+        : d.state === 'on' ? `Terrain detail: brought to the real ground with ${lapseText(d.lapse)}`
+            + (d.correction ? `; corrections ${dT(d.correction.min)} to ${dT(d.correction.max)} ${unitSym('temp')} in view.` : '.')
+        : d.state === 'nofields' ? 'Terrain detail unavailable: this run carries no surface pressure. GFS’s own field is shown.'
+        : d.state === 'nodem' ? 'Terrain detail unavailable: elevation tiles did not load. GFS’s own field is shown.'
+        : 'Terrain detail: loading elevation…';
+    const sn = d?.state === 'on' ? d.sun : null;
+    const bounds = sn ? [!sn.cloud && 'no cloud field — clear sky assumed', !sn.wind && 'no wind field — no mixing'].filter(Boolean) : [];
+    const sunNote = !sn || sn.state === 'off' ? ''
+        : sn.state === 'night' ? 'Sun & shade: the Sun has been down for hours here — no sunlight adjustment.'
+        : `Sun & shade (modelled): ${dT(sn.range.min, 1)} to ${dT(sn.range.max, 1)} ${unitSym('temp')} in view — sun-facing slopes warmer, shaded ground cooler, with a ~1.5 h lag`
+            + (bounds.length ? `; ${bounds.join(', ')}, so an upper bound.` : '.');
+    // Night cold-air pooling (cold-pool.js): the night half of the same idea.
+    const pl = d?.state === 'on' ? d.pool : null;
+    const pBounds = pl ? [!pl.cloud && 'no cloud field — clear sky assumed', !pl.wind && 'no wind field — calm assumed'].filter(Boolean) : [];
+    const poolNote = !pl || pl.state === 'off' ? (d?.state === 'on' && sn?.state === 'night' ? 'Cold-air pooling is switched off: valleys are not cooled at night.' : '')
+        : pl.state === 'day' ? 'Cold-air pooling: none now — it builds after sunset and drains through the morning.'
+        : `Cold-air pooling (modelled): ${dT(pl.range.min, 1)} to ${dT(pl.range.max, 1)} ${unitSym('temp')} in view — low ground colder, crests and upper slopes milder; ${Math.round(100 * pl.nightFrac)} % of a full night’s build-up`
+            + (pBounds.length ? `; ${pBounds.join(', ')}, so an upper bound.` : '.');
+    st.innerHTML = `<b>${live ? 'Now · ' : 'Valid '}${esc(when)}</b> (GFS +${lead})${esc(range)}<br>${esc(info.note)}<br>${esc(scaleNote)}<br><span id="cx-heat-detail" data-state="${esc(d?.state ?? 'off')}">${esc(detailNote)}</span>`
+        + (sunNote ? `<br><span id="cx-heat-sun" data-state="${esc(sn.state)}">${esc(sunNote)}</span>` : '')
+        + (poolNote ? `<br><span id="cx-heat-pool" data-state="${esc(pl.state)}">${esc(poolNote)}</span>` : '');
+    if (info.range && info.view !== 'sun') {
+        const a = keyFrac(sc, info.range.min), b = keyFrac(sc, info.range.max);
         win.hidden = false;
         win.style.left = `${(a * 100).toFixed(1)}%`;
         win.style.width = `${Math.max(1, (b - a) * 100).toFixed(1)}%`;
@@ -663,11 +810,108 @@ function renderOroRail(info) {
         + `<br>Strongest forced descent: ${info.down ? `${esc(formatW(info.down.w, { feet }))} at ${where(info.down)}` : 'none'}.`;
 }
 
+/**
+ * The Sun at the site today (sun-terrain.js): its path against the terrain
+ * horizon on an azimuth × altitude chart, and the shadow count on the map.
+ * The chart is centred on the Sun's culmination (south in the northern
+ * hemisphere, north in the southern) so the path is one arc.
+ */
+function renderSunRail(info) {
+    const st = $('#cx-sun-status'), box = $('#cx-sun');
+    const wantPath = $('#cx-layer-sun').checked, wantShadow = $('#cx-layer-shadow').checked;
+    box.hidden = !wantPath || !info?.path;
+    st.hidden = !(wantPath || wantShadow);
+    if (st.hidden || !info || info.state === 'off') return;
+    st.dataset.state = info.state === 'ok' ? 'live' : info.state === 'nodem' ? 'down' : 'loading';
+    const hhmm = (ms) => (ms == null ? '—' : new Date(ms + S.utcOffsetS * 1000).toISOString().slice(11, 16));
+    const dur = (min) => `${Math.floor(min / 60)} h ${String(Math.round(min % 60)).padStart(2, '0')} min`;
+    const parts = [];
+    if (wantShadow) {
+        const sh = info.shadow;
+        parts.push(!sh ? (info.state === 'nodem' ? 'Elevation tiles unavailable — no shadows are drawn.' : 'Loading elevation for the shadows…')
+            : sh.night ? `<b>${esc(hhmm(info.timeMs))} local: the Sun is down.</b> Night is not a shadow — nothing is drawn.`
+            : `<b>${esc(hhmm(info.timeMs))} local, Sun ${sh.sun.alt.toFixed(0)}° up in the ${esc(compassWord(sh.sun.az))}:</b> terrain shades ${Math.round(100 * sh.shaded / Math.max(1, sh.shaded + sh.lit))} % of the view.`);
+    }
+    if (wantPath && info.path) {
+        const d = info.day, o = info.open;
+        if (o.polar === 'night') parts.push('The Sun does not rise at the site today.');
+        else {
+            parts.push(`Sunrise ${esc(hhmm(o.rise))}, sunset ${esc(hhmm(o.set))} local (flat horizon, ${esc(dur(o.sunMin))}); highest ${o.noon.alt.toFixed(0)}° at ${esc(hhmm(o.noon.t))}.`);
+            parts.push(!info.horizon ? (info.state === 'nodem' ? 'Elevation tiles unavailable — the terrain horizon is not drawn.' : 'Loading elevation for the terrain horizon…')
+                : d.directMin === 0 ? 'The terrain in view blocks the Sun all day at the site.'
+                : d.lostMin < 2 * d.stepMin ? 'The terrain in view does not block the Sun at the site today.'
+                : `Over the terrain the Sun is on the site from <b>${esc(hhmm(d.clearRise))}</b> to <b>${esc(hhmm(d.clearSet))}</b>: ${esc(dur(d.directMin))} of direct sun, ${esc(dur(d.lostMin))} taken by the terrain.`);
+            if (info.horizon) parts.push(`Horizon from the map’s elevation grid (~${info.resM >= 1000 ? `${(info.resM / 1000).toFixed(1)} km` : `${Math.round(info.resM)} m`} nodes), seen out to at least ${Math.round(info.reachKm)} km — a ridge beyond the view is not counted; zoom out to include it. Times ± ${d.stepMin} min.`);
+        }
+        drawSunChart(info, hhmm);
+    }
+    st.innerHTML = parts.join('<br>');
+}
+
+const compassWord = (az) => ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][Math.round((((az % 360) + 360) % 360) / 45) % 8];
+
+function drawSunChart(info, hhmm) {
+    const c = $('#cx-sun canvas'), g = c.getContext('2d');
+    const W = c.width, H = c.height, L = 34, R = 8, T = 10, B = 28;
+    const centre = info.open.noon.az > 90 && info.open.noon.az < 270 ? 180 : 0;      // where the Sun culminates
+    const rel = (az) => ((az - centre + 540) % 360) - 180;                           // −180…180 about the centre
+    const span = 150;
+    const hMax = info.horizon ? Math.max(...info.horizon.angles) : 0;
+    const top = Math.max(20, Math.ceil((Math.max(info.open.noon.alt, hMax) + 6) / 10) * 10);
+    const X = (az) => L + ((rel(az) + span) / (2 * span)) * (W - L - R), Y = (alt) => H - B - (Math.max(0, alt) / top) * (H - T - B);
+    g.clearRect(0, 0, W, H);
+    g.font = '11px system-ui, sans-serif';
+    g.strokeStyle = 'rgba(232,241,248,.14)'; g.fillStyle = 'rgba(232,241,248,.6)'; g.lineWidth = 1; g.textAlign = 'right'; g.textBaseline = 'middle';
+    for (let a = 0; a <= top; a += top > 50 ? 20 : 10) { g.beginPath(); g.moveTo(L, Y(a)); g.lineTo(W - R, Y(a)); g.stroke(); g.fillText(`${a}°`, L - 5, Y(a)); }
+    g.textAlign = 'center'; g.textBaseline = 'top';
+    for (const [lab, off] of centre === 180 ? [['E', -90], ['SE', -45], ['S', 0], ['SW', 45], ['W', 90]] : [['W', -90], ['NW', -45], ['N', 0], ['NE', 45], ['E', 90]]) {
+        g.fillText(lab, L + ((off + span) / (2 * span)) * (W - L - R), H - B + 14);
+    }
+    // The terrain horizon, as a silhouette.
+    if (info.horizon) {
+        g.beginPath(); g.moveTo(L, Y(0));
+        for (let r = -span; r <= span; r += 1) g.lineTo(L + ((r + span) / (2 * span)) * (W - L - R), Y(horizonAt(info.horizon, centre + r)));
+        g.lineTo(W - R, Y(0)); g.closePath();
+        g.fillStyle = 'rgba(96,118,140,.55)'; g.fill();
+        g.strokeStyle = 'rgba(190,210,228,.8)'; g.lineWidth = 1.2; g.stroke();
+    }
+    // The Sun's path: solid where it clears the terrain, faint where a ridge is in the way.
+    const up = info.path.filter((p) => p.alt > 0 && Math.abs(rel(p.az)) <= span);
+    for (const clear of [false, true]) {
+        g.beginPath();
+        let pen = false;
+        for (const p of up) {
+            const isClear = p.alt > horizonAt(info.horizon, p.az);
+            if (isClear !== clear) { pen = false; continue; }
+            if (pen) g.lineTo(X(p.az), Y(p.alt)); else g.moveTo(X(p.az), Y(p.alt));
+            pen = true;
+        }
+        g.strokeStyle = clear ? '#ffc23d' : 'rgba(255,194,61,.35)'; g.lineWidth = clear ? 2.4 : 1.6; g.setLineDash(clear ? [] : [3, 3]); g.stroke();
+    }
+    g.setLineDash([]);
+    // Local hours along the path.
+    g.fillStyle = 'rgba(232,241,248,.75)'; g.textBaseline = 'bottom';
+    for (const p of up) {
+        const local = new Date(p.t + S.utcOffsetS * 1000);
+        if (local.getUTCMinutes() !== 0 || local.getUTCHours() % 2) continue;
+        g.beginPath(); g.arc(X(p.az), Y(p.alt), 2, 0, Math.PI * 2); g.fill();
+        g.fillText(String(local.getUTCHours()), X(p.az), Y(p.alt) - 4);
+    }
+    // The Sun at the instant on the timeline.
+    if (info.now.alt > 0 && Math.abs(rel(info.now.az)) <= span) {
+        const blocked = info.now.alt <= horizonAt(info.horizon, info.now.az);
+        g.beginPath(); g.arc(X(info.now.az), Y(info.now.alt), 6, 0, Math.PI * 2);
+        g.fillStyle = blocked ? 'rgba(255,194,61,.35)' : '#ffd66b'; g.fill();
+        g.strokeStyle = '#04101e'; g.lineWidth = 1.5; g.stroke();
+    }
+    $('#cx-sun-caption').textContent = `Today’s Sun at the site, by compass direction and height above the horizon; numbers are local hours. Grey: the terrain horizon. Dot: ${hhmm(info.timeMs)} local${info.now.alt > 0 ? '' : ' (the Sun is down)'}.`;
+}
+
 /** Rail status for the terrain layers (elevation contours, sun exposure). */
 function renderDemRail(info) {
     const st = $('#cx-dem-status');
     const elev = $('#cx-layer-elev').checked, exp = $('#cx-layer-exp').checked, oro = $('#cx-layer-oro').checked;
-    if (!elev && !exp && !oro && !$('#cx-layer-slope').checked) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
+    if (!elev && !exp && !oro && !$('#cx-layer-slope').checked && !$('#cx-layer-shadow').checked && !$('#cx-layer-sun').checked) { st.textContent = 'Terrain layers off.'; st.dataset.state = 'off'; return; }
     st.dataset.state = info?.state || 'loading';
     if (!info || info.state === 'idle' || info.state === 'loading') { st.textContent = info?.note || 'Loading elevation…'; return; }
     if (info.state === 'down') { st.textContent = info.note; return; }
@@ -721,6 +965,8 @@ function requestMonitors(shownMs) {
 function mountLocationMap() {
     S.map = mountMap($('#cx-map'), {
         formatTemp: (c) => fmtText('temp', c, S.units),
+        // A temperature DIFFERENCE in the reader's unit (1 K is 1.8 °F), one decimal.
+        formatTempDelta: (k) => { const v = fmt('temp', k, S.units).value - fmt('temp', 0, S.units).value; return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} ${unitSym('temp')}`; },
         // Isotherm levels are chosen in the reader's unit (round °F for a °F reader).
         tempUnits: () => ({
             toDisplay: (c) => fmt('temp', c, S.units).value,
@@ -732,6 +978,7 @@ function mountLocationMap() {
         onWind: renderFlowRail,
         onAq: renderAqRail,
         onDem: renderDemRail,
+        onSun: renderSunRail,
         onOro: renderOroRail,
         onSlope: renderSlopeRail,
         onThermals: renderThermalRail,
@@ -748,6 +995,9 @@ function mountLocationMap() {
     });
     paintHeatKey();
     renderHeatTicks();
+    // ONE opacity: the slider starts where the map draws (it used to sit on a
+    // 0.05 step grid that 0.62 is not on, so the thumb read 0.60 over a 0.62 map).
+    $('#cx-heat-alpha').value = String(HEAT_ALPHA_DEFAULT);
     // Temperature and Air quality are one-at-a-time: two full-window fields
     // on one map read as neither.
     // Sun exposure is a full-window fill too, so it joins the same group.
@@ -774,7 +1024,7 @@ function mountLocationMap() {
         renderOroRail(S.map.state.orographic);
         $('#cx-exp-mode').hidden = !exp; $('#cx-exp-key').hidden = !exp;
         renderDemRail(S.map.state.dem);
-        for (const id of ['#cx-layer-iso', '#cx-layer-ext']) $(id).disabled = !temp;
+        renderHeatRail(S.map.state.frame);      // the Temperature controls follow the data (layer-state.js)
         $('#cx-layer-mon').disabled = !aq;
         $('#cx-aq-key').hidden = !aq;
         renderAqRail(S.map.state.aq);
@@ -834,8 +1084,27 @@ function mountLocationMap() {
     syncMapKey();
     rememberGroups();
     $('#cx-layer-iso').addEventListener('change', (ev) => S.map.setLayer('isotherms', ev.target.checked));
+    $('#cx-layer-tdetail').addEventListener('change', (ev) => S.map.setLayer('tempdetail', ev.target.checked));
+    $('#cx-layer-tsun').addEventListener('change', (ev) => S.map.setLayer('tempsun', ev.target.checked));
+    $('#cx-layer-tpool').addEventListener('change', (ev) => S.map.setLayer('temppool', ev.target.checked));
+    $('#cx-heat-view').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-view]');
+        if (!b || b.disabled) return;
+        S.map.setHeatView(b.dataset.view);
+    });
+    $('#cx-layer-shadow').addEventListener('change', (ev) => { S.map.setLayer('shadow', ev.target.checked); renderDemRail(S.map.state.dem); });
+    $('#cx-layer-sun').addEventListener('change', (ev) => { S.map.setLayer('sunpath', ev.target.checked); renderDemRail(S.map.state.dem); });
     $('#cx-layer-ext').addEventListener('change', (ev) => S.map.setLayer('extremes', ev.target.checked));
     $('#cx-heat-alpha').addEventListener('input', (ev) => S.map.setHeatAlpha(Number(ev.target.value)));
+    $('#cx-heat-scale').addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-scale]');
+        if (!b || b.disabled) return;
+        S.map.setHeatScale(b.dataset.scale);
+        syncScaleControl();
+    });
+    syncScaleControl();
+    $('#cx-heat-retry').addEventListener('click', retryArchive);
+    $('#cx-map-notice button').addEventListener('click', retryArchive);
     $('#cx-layer-terrain').addEventListener('change', (ev) => S.map.setLayer('terrain', ev.target.checked));
     $('#cx-layer-labels').addEventListener('change', (ev) => S.map.setLayer('labels', ev.target.checked));
     $('#cx-layer-airflow').addEventListener('change', (ev) => {
@@ -1054,6 +1323,7 @@ function wireControls() {
         saveWorkspace({ ...S.ws, units: { preset: e.target.value } });
         renderPanels();
         renderHeatTicks();
+        syncMapKey();                     // the on-map key's title carries the unit (it kept the old one)
         S.map?.unitsChanged();            // isotherm levels + tip + rail re-format in the new unit
     });
     $('#cx-from').addEventListener('change', (e) => {
@@ -1124,6 +1394,8 @@ export function boot() {
                 panels: S.models.map((m) => ({ id: m.panelId, lines: m.lines.map((l) => l.id), hasData: m.hasData })),
                 map: S.map?.state ?? null,
                 field: S.field && { state: S.field.state, note: S.field.note },
+                tempControl: S.tempCtl ?? null,
+                sun: S.map?.sun ?? null,
                 rose: S.rose && { mode: S.roseMode, n: S.rose.n, calm: S.rose.calm, freq: S.rose.freq, mean: S.rose.mean,
                                   prevailing: prevailing(S.rose), dirtiest: S.rose.dirtiest ?? null, cleanest: S.rose.cleanest ?? null },
                 aq: S.aq && { state: S.aq.state, note: S.aq.note },

@@ -86,6 +86,17 @@ const UPSTREAMS = [
     { source: 'open-meteo-cams', url: 'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=28.61&longitude=77.21&current=us_aqi', edge_authoritative: true },
 ];
 
+/**
+ * Feeds the pages fetch BROWSER-direct (edge_authoritative: false) carry
+ * their public URL as `browser_url`, so status.html can run the check that
+ * actually speaks for users — its own fetch — instead of reporting an edge
+ * 403 that means nothing. Only these keyless public NOAA URLs are exposed;
+ * an edge-proxied upstream's URL never leaves the server.
+ */
+function browserUrl(url, edgeAuthoritative) {
+    return edgeAuthoritative ? {} : { browser_url: url };
+}
+
 async function ping({ source, url, edge_authoritative, expectJson = false }) {
     const t0 = Date.now();
     try {
@@ -100,6 +111,7 @@ async function ping({ source, url, edge_authoritative, expectJson = false }) {
             http_status: res.status,
             latency_ms: Date.now() - t0,
             edge_authoritative,
+            ...browserUrl(url, edge_authoritative),
         };
     } catch (e) {
         return {
@@ -109,6 +121,7 @@ async function ping({ source, url, edge_authoritative, expectJson = false }) {
             latency_ms: Date.now() - t0,
             error: e?.name === 'TimeoutError' ? 'timeout' : (e?.message ?? 'fetch_failed'),
             edge_authoritative,
+            ...browserUrl(url, edge_authoritative),
         };
     }
 }

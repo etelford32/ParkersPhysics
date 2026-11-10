@@ -219,7 +219,7 @@ export const FIELD_HALF_DEG_DEFAULT = 3;
 // §19 T4 adds the thermal inputs: dew point (cloud base), the 3 h mean surface
 // sensible heat flux, the model's boundary-layer height and station pressure.
 // A run ingested before them answers "no variable … in this run" — never a guess.
-export const FIELD_VARS = Object.freeze(['tempC', 'uMs', 'vMs', 'cloudPct', 'rhPct', 'precipMm', 'dewC', 'shflxWm2', 'hpblM', 'psfcHpa', 'wMs850', 'wMs700', 'wMs500', 'capeJkg', 'cinJkg', 'liK']);
+export const FIELD_VARS = Object.freeze(['tempC', 'uMs', 'vMs', 'cloudPct', 'rhPct', 'precipMm', 'dewC', 'shflxWm2', 'hpblM', 'psfcHpa', 'wMs850', 'wMs700', 'wMs500', 'capeJkg', 'cinJkg', 'liK', 'mslHpa']);   // mslHpa: with psfcHpa, the model's surface height (terrain-temp.js)
 
 /** `vars` query value → a validated, de-duplicated list (default tempC), or { error }. */
 export function parseFieldVars(raw) {
