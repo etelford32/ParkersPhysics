@@ -139,13 +139,17 @@ for (const route of ['api/ocean/tides.js', 'api/ocean/buoys.js', 'api/ocean/dart
         `${route}: an upstream failure is a degraded 200, never a 503`);
 }
 // The status page must read that statement BEFORE its freshnessExempt
-// short-circuit, or an exempt route's stale answer scores green.
+// short-circuit, or an exempt route's stale answer scores green. The rule
+// lives in js/status-health.js (status.html imports it; tests/status-health.mjs
+// gates the behaviour — this pins the ORDER in the source).
 {
-    const statusSrc = readFileSync(join(ROOT, 'status.html'), 'utf8');
+    assert.match(readFileSync(join(ROOT, 'status.html'), 'utf8'), /from '\.\/js\/status-health\.js'/,
+        'status.html scores feeds with js/status-health.js');
+    const statusSrc = readFileSync(join(ROOT, 'js/status-health.js'), 'utf8');
     const iStale  = statusSrc.indexOf("p.body?.freshness === 'stale'");
     const iExempt = statusSrc.indexOf('p.spec.freshnessExempt) return');
     assert.ok(iStale > 0 && iExempt > 0 && iStale < iExempt,
-        'status.html: freshness=stale is checked before the freshnessExempt healthy short-circuit');
+        'status-health.js: freshness=stale is checked before the freshnessExempt healthy short-circuit');
 }
 
 // Local routing is covered by the handler-on-disk check above: dev-server.mjs

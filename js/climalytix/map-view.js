@@ -190,6 +190,39 @@ export function fieldTimeIndex(times, ms) {
     return best;
 }
 
+/**
+ * Where instant `ms` falls between two field times: { i0, i1, w } with the value there
+ * (1 − w)·frame[i0] + w·frame[i1]. Inside the run it is exact to the millisecond; within
+ * half a step before the first / after the last time it is that end frame (w = 0), the
+ * same reach fieldTimeIndex has; further out it is null — no frame is held or extrapolated.
+ */
+export function timeBlend(times, ms) {
+    if (!times?.length || !Number.isFinite(ms)) return null;
+    const n = times.length, step = n > 1 ? times[1] - times[0] : 3 * 3_600_000;
+    if (ms < times[0] - step / 2 || ms > times[n - 1] + step / 2) return null;
+    if (ms <= times[0]) return { i0: 0, i1: 0, w: 0 };
+    if (ms >= times[n - 1]) return { i0: n - 1, i1: n - 1, w: 0 };
+    let i = 0;
+    while (i < n - 2 && times[i + 1] <= ms) i++;
+    const w = (ms - times[i]) / (times[i + 1] - times[i]);
+    return w === 0 ? { i0: i, i1: i, w: 0 } : { i0: i, i1: i + 1, w };
+}
+
+/**
+ * One time plane of a time-major array, linearly interpolated between frames i0 and i1.
+ * A gap in EITHER frame is a gap in the result (NaN) — never the other frame's value.
+ */
+export function blendPlane(values, plane, { i0, i1, w }) {
+    const out = new Float32Array(plane), a = i0 * plane, b = i1 * plane;
+    for (let k = 0; k < plane; k++) {
+        const x = values[a + k];
+        if (i0 === i1 || w === 0) { out[k] = x == null ? NaN : x; continue; }
+        const y = values[b + k];
+        out[k] = x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y) ? NaN : x + (y - x) * w;
+    }
+    return out;
+}
+
 /** Bilinear value at (lat, lon) for time index t; null outside or on a gap corner. */
 export function fieldSample(f, t, lat, lon) {
     if (!f?.values || t == null) return null;

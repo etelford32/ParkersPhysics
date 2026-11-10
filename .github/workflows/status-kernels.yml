@@ -1,0 +1,58 @@
+# Node gates for the superadmin System Status page (status.html).
+#
+#   status-health.mjs      js/status-health.js — how a feed is scored and WHY:
+#                          a route's own freshness beats the age heuristics and
+#                          the freshnessExempt short-circuit, reasons are printed
+#                          with a hint, a fallback source is degraded, an edge 403
+#                          on a browser-direct feed is not a failure, mapLimit
+#                          paces the probes
+#   pipeline-registry.mjs  the registry the page probes (structure, handlers on
+#                          disk, prewarm tiers) + the rule order in the source
+#
+# Browser gate (tests/status-page.spec.js: every feed has a row, each unhealthy
+# one says why, all-healthy negative control, non-superadmin never sees it)
+# runs with the Playwright suite.
+name: status-kernels
+
+on:
+  push:
+    paths:
+      - 'js/status-health.js'
+      - 'js/pipeline-registry.js'
+      - 'status.html'
+      - 'api/health.js'
+      - 'tests/status-health.mjs'
+      - 'tests/pipeline-registry.mjs'
+      - '.github/workflows/status-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/status-health.js'
+      - 'js/pipeline-registry.js'
+      - 'status.html'
+      - 'api/health.js'
+      - 'tests/status-health.mjs'
+      - 'tests/pipeline-registry.mjs'
+      - '.github/workflows/status-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: status-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Status page scoring rules (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: feed scoring rules
+        run: node tests/status-health.mjs
+      - name: pipeline registry
+        run: node tests/pipeline-registry.mjs

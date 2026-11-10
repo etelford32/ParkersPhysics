@@ -100,7 +100,7 @@ test('Temperature draws the heat field; NEGATIVE CONTROL: toggled off the site p
     expect(win.halfLon).toBeGreaterThan(win.halfDeg);
     expect(s.field).toMatchObject({ nRows: 8 * win.halfDeg + 1, nCols: 8 * win.halfLon + 1 });
     expect(s.frame.range.max).toBeGreaterThan(s.frame.range.min);
-    await expect(page.locator('#cx-heat-status')).toContainText('Valid');
+    await expect(page.locator('#cx-heat-status')).toContainText('Now ·')            // live: the current minute, not a 3-hourly stamp;
     // A point inside the field, away from the site marker.
     const probe = { x: s.size.w / 2 - 60, y: s.size.h / 2 + 40 };
     // Base-map layers off so the bare tile colour is what is left.

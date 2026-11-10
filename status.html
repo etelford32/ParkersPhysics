@@ -73,6 +73,25 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 .rt-card td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.03);vertical-align:top}
 .rt-card td:first-child{color:#cde}
 .rt-empty{color:#666;font-size:.74rem;padding:6px 2px}
+/* Feed overview + the "why" line under every status (js/status-health.js). */
+.rt-tools{display:flex;gap:6px}
+.rt-card .rt-refresh[aria-pressed="true"]{background:rgba(255,140,0,.18);border-color:rgba(255,140,0,.5);color:#ffb866}
+.feed-counts{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center}
+.feed-chip{display:inline-flex;align-items:baseline;gap:6px;padding:5px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);font-size:.74rem;color:#aab}
+.feed-chip b{font-size:1rem;font-weight:800}
+.feed-pending{font-size:.7rem;color:#778;font-style:italic}
+.rt-why{color:#99a;font-size:.68rem;font-weight:400;line-height:1.35;margin-top:2px;max-width:46ch;overflow-wrap:anywhere}
+.rt-kind{color:#778;font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+.rt-path{color:#556;font-size:.65rem;font-family:ui-monospace,monospace;text-decoration:none;overflow-wrap:anywhere}
+a.rt-path:hover{color:#9ad;text-decoration:underline}
+.rt-cat-head{margin-top:14px;display:flex;align-items:baseline;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding-bottom:4px}
+.rt-cat-head h4{font-size:.78rem;color:#bcd;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin:0}
+.rt-cat-head span{color:#556;font-size:.66rem}
+.rt-cat table{margin-top:6px}
+.rt-issues-only tr[data-level="ok"],.rt-issues-only tr[data-level="info"],.rt-issues-only .rt-cat[data-issues="0"]{display:none}
+html.theme-light .feed-chip{background:var(--pl-card);border-color:var(--pl-border);color:var(--pl-text-2)}
+html.theme-light .rt-why{color:var(--pl-text-3)}
+html.theme-light .rt-cat-head h4{color:var(--pl-text-1)}
 .rt-error{color:#ff8888;font-size:.74rem;padding:6px 2px}
 .rt-caveat{color:#777;font-size:.68rem;font-style:italic;margin:0 0 10px;padding-left:2px}
 
@@ -187,28 +206,51 @@ html.theme-light #status-main [style*="color:#5cd9ff"]{color:var(--pink-300) !im
 </div>
 
 <!-- ── RUNTIME HEALTH (superadmin) ────────────────────────────────────────────
-     These two cards are the real health signal. The KPI/section scan below
-     only verifies that static files serve 2xx — a page can return 200 while
-     its sim is crashing. These cards probe the pipelines + proxies the sims
-     actually depend on, so "all green" here matches "the product works." -->
+     These cards are the real health signal. The KPI/section scan below only
+     verifies that static files serve 2xx — a page can return 200 while its
+     sim is crashing. These cards score every feed the sims depend on, with
+     the rules in js/status-health.js (PURE, node-tested), so "all green"
+     here matches "the product works" — and a row that is not green says WHY.
+     The overview card rolls all four groups into one list of what needs
+     attention. -->
+<div class="rt-card" id="feeds-overview">
+  <h3>Incoming Data Feeds · overview
+    <span class="rt-tools">
+      <button class="rt-refresh" id="rt-filter" aria-pressed="false">Show: all feeds</button>
+      <button class="rt-refresh" id="rt-refresh-all">Refresh all</button>
+    </span>
+  </h3>
+  <p class="rt-caveat">Every feed the site ingests, scored once: cron pipelines (Supabase heartbeat), the /api/* routes the pages read, third-party upstream hosts, and NASA GIBS imagery layers. Anything not healthy is listed here with the reason its own route gives.</p>
+  <div id="feed-counts" class="feed-counts" aria-live="polite"><span class="rt-empty">Checking…</span></div>
+  <div id="feed-issues"></div>
+</div>
+
 <div class="rt-card">
   <h3>Pipeline Health · Supabase heartbeat
     <button class="rt-refresh" id="rt-refresh-heartbeat">Refresh</button>
   </h3>
-  <p class="rt-caveat">One row per pg_cron-fed pipeline. Reads pipeline_heartbeat directly — shows last success, failure streak, and the actual upstream error reason.</p>
+  <p class="rt-caveat">One row per cron-fed pipeline. Reads pipeline_heartbeat directly — last success, failure streak, and the actual upstream error reason.</p>
   <div id="rt-heartbeat"><div class="rt-empty">Loading…</div></div>
 </div>
 
 <div class="rt-card">
-  <h3>Proxy Freshness · CDN endpoints
+  <h3>Proxy Freshness · /api endpoints
     <button class="rt-refresh" id="rt-refresh-proxies">Refresh</button>
   </h3>
-  <p class="rt-caveat">Pings the public /api/* endpoints the sims consume. Surfaces structured error codes (cache_empty, supabase_not_configured, …) inline so production breakage is diagnosable without DevTools.</p>
+  <p class="rt-caveat">Probes every route in js/pipeline-registry.js (a few at a time, so one slow upstream cannot time out its neighbours). A degraded 200 is scored by the route's own <code>freshness</code>, and its <code>reasons</code> are printed under the status. Hover a name for the registry's notes; the path opens the probe itself.</p>
   <div id="rt-proxies"><div class="rt-empty">Loading…</div></div>
 </div>
 
 <div class="rt-card">
-  <h3>Credentials &amp; Upstreams · /api/health
+  <h3>Upstream Hosts · third-party sources
+    <button class="rt-refresh" id="rt-refresh-upstreams">Refresh</button>
+  </h3>
+  <p class="rt-caveat">Every third-party host behind the feeds, from /api/health. Hosts the pages reach through our edge are scored by the edge's ping. NOAA SWPC is fetched by the browser itself (its WAF refuses the Vercel edge), so those rows are checked from <strong>this browser</strong> — the edge result is shown only as context.</p>
+  <div id="rt-upstreams"><div class="rt-empty">Loading…</div></div>
+</div>
+
+<div class="rt-card">
+  <h3>Credentials · /api/health
     <button class="rt-refresh" id="rt-refresh-creds">Refresh</button>
   </h3>
   <p class="rt-caveat">Presence-only credential report from the edge (never values). The row that matters most: <strong>NASA key</strong> — "demo" means every DONKI feed (CME, flares, SEP, GST) shares api.nasa.gov's 30 req/hr DEMO_KEY quota and will throttle intermittently. Earthdata token is informational: nothing consumes it yet (GIBS imagery is keyless).</p>
@@ -241,7 +283,13 @@ html.theme-light #status-main [style*="color:#5cd9ff"]{color:var(--pink-300) !im
 <script type="module">
 // ── Auth gate: superadmin only ──────────────────────────────────────────────
 import { auth } from './js/auth.js';
-import { PIPELINES, CATEGORIES, pipelinesByCategory, HEARTBEAT_PIPELINES, isFallbackSource } from './js/pipeline-registry.js';
+import { PIPELINES, CATEGORIES, pipelinesByCategory, HEARTBEAT_PIPELINES } from './js/pipeline-registry.js';
+// Every scoring rule on this page (what is healthy, what is degraded, and WHY)
+// is the PURE js/status-health.js — node-gated by tests/status-health.mjs.
+import {
+    LEVEL_COLORS, endpointHealth, heartbeatHealth, upstreamHealth, gibsHealth,
+    probeAgeSeconds, summarize, fmtAgeSec, fmtRel, mapLimit,
+} from './js/status-health.js';
 // EARTH_OBS_LAYERS is the single source of truth for which NASA GIBS
 // products earth.html renders. Status page imports it directly so adding
 // a layer there auto-registers a probe row here.
@@ -295,6 +343,7 @@ const PAGES = [
     { file: 'wr102.html',            label: 'WR-102',                   tag: 'sim',  deps: ['js/nav.js'] },
     { file: 'sirius-planetary.html',           label: 'Sirius Planetary',         tag: 'sim',  deps: ['js/nav.js'] },
     { file: 'satellites.html',       label: 'Satellites',               tag: 'sim',  deps: ['js/nav.js','js/satellite-tracker.js','js/orbital-analytics.js','js/user-location.js'] },
+    { file: 'climalytix.html',       label: 'Climalytix',               tag: 'sim',  deps: ['js/nav.js','js/climalytix/page.js','js/climalytix/map.js','js/climalytix/loaders.js','js/climalytix/point-tile.js'] },
     // Tools
     { file: 'solar-fluid.html',      label: 'Solar Fluid',              tag: 'tool', deps: ['js/nav.js'] },
     { file: 'stellar-wind.html',     label: 'Stellar Wind',             tag: 'tool', deps: ['js/nav.js'] },
@@ -333,7 +382,7 @@ const JS_MODULES = [
     'js/mars-view.js','js/mars-ui-shell.js','js/mars-mission-state.js',
     'js/mars-landmarks.js','js/mars-landmarks-data.js','js/mars-sky.js',
     'js/mars-ephemeris.js','js/mars-route-normalize.js',
-    'js/pipeline-registry.js',
+    'js/pipeline-registry.js','js/status-health.js',
     'js/horizons.js','js/horizons-extended.js','js/outer-planets.js',
     'js/orbit-trails.js','js/orbital-analytics.js',
     'js/jupiter-shader.js','js/jupiter-skin.js','js/planet-moons.js','js/jovian-system.js',
@@ -367,51 +416,84 @@ async function check(url) {
     }
 }
 
-// ── Runtime probes (pipelines + proxies) ─────────────────────────────────────
-// Intentionally inline rather than importing admin-analytics.js so status.html
-// keeps a narrow dependency surface. fetchPipelineHeartbeat() on admin.html
-// runs through the shared supabase-config client; here we do the same thing
-// directly so a bug in admin-analytics can't take the status page down too.
+// ── Runtime probes (pipelines + proxies + upstreams + imagery) ──────────────
+// This page fetches and draws; js/status-health.js decides. Each loader
+// scores its group, draws its own table, and hands its rows to the overview
+// (setGroup), which lists everything that is not healthy with its reason.
 
-// Cadence-aware staleness thresholds — shared with admin.html via
-// pipeline-registry.js so both UIs agree on what "healthy" means. Every
-// heartbeat pipeline is listed there with thresholds derived from its
-// actual cron cadence; unlisted rows fall back to 15 m/60 m below.
 const PIPELINE_SPECS = HEARTBEAT_PIPELINES;
-
-function _rtFmtRel(iso) {
-    if (!iso) return 'never';
-    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
-    if (m < 1)     return 'just now';
-    if (m < 60)    return `${m}m ago`;
-    if (m < 1440)  return `${Math.round(m / 60)}h ago`;
-    return `${Math.round(m / 1440)}d ago`;
-}
-
-function _rtHealth(row, spec) {
-    if (!row || !row.last_success_at) return { color:'#ff5555', label:'never succeeded' };
-    const ageMin = Math.round((Date.now() - new Date(row.last_success_at).getTime()) / 60_000);
-    const streak = Number(row.consecutive_fail || 0);
-    if (streak >= 3 || ageMin > spec.critMin) return { color:'#ff5555', label:'critical' };
-    // Succeeding on a fallback upstream is not healthy (isFallbackSource header).
-    if (isFallbackSource(spec.key, row.last_source)) return { color:'#ffd700', label:'degraded · fallback source' };
-    if (streak >= 1 || ageMin > spec.warnMin) return { color:'#ffd700', label:'stale' };
-    return { color:'#4eff91', label:'healthy' };
-}
+const PROBE_CONCURRENCY = 8;
 
 function _rtEsc(s) {
     return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+/** The status cell every table shares: the verdict, and under it the WHY. */
+function _statusCell(h) {
+    return `<td class="rt-status"><span style="color:${LEVEL_COLORS[h.level]};font-weight:600">● ${_rtEsc(h.label)}</span>`
+         + (h.detail ? `<div class="rt-why">${_rtEsc(h.detail)}</div>` : '') + `</td>`;
+}
+
+// ── Overview: every feed, one list ──────────────────────────────────────────
+const GROUPS = [
+    { id: 'heartbeat', kind: 'cron pipeline', anchor: 'rt-heartbeat' },
+    { id: 'endpoint',  kind: 'api route',     anchor: 'rt-proxies'   },
+    { id: 'upstream',  kind: 'upstream host', anchor: 'rt-upstreams' },
+    { id: 'gibs',      kind: 'gibs layer',    anchor: 'rt-gibs'      },
+];
+const FEEDS = Object.fromEntries(GROUPS.map(g => [g.id, null]));   // null = still checking
+
+function setGroup(id, items) {
+    FEEDS[id] = items;
+    renderOverview();
+}
+
+function renderOverview() {
+    const all = GROUPS.flatMap(g => (FEEDS[g.id] ?? []).map(it => ({ ...it, group: g.id, kind: g.kind, anchor: g.anchor })));
+    const pending = GROUPS.filter(g => FEEDS[g.id] === null).map(g => g.kind + 's');
+    const sum = summarize(all);
+    const chip = (level, n, word) =>
+        `<span class="feed-chip" data-level="${level}"><b style="color:${LEVEL_COLORS[level]}">${n}</b>${word}</span>`;
+    document.getElementById('feed-counts').innerHTML =
+          chip('crit', sum.crit, 'down')
+        + chip('warn', sum.warn, 'degraded')
+        + chip('ok',   sum.ok,   'healthy')
+        + chip('info', sum.info, 'not scored')
+        + `<span class="feed-chip" data-level="total"><b>${sum.total}</b>feeds</span>`
+        + (pending.length ? `<span class="feed-pending">still checking: ${_rtEsc(pending.join(', '))}…</span>` : '');
+
+    const el = document.getElementById('feed-issues');
+    if (!sum.issues.length) {
+        el.innerHTML = pending.length ? ''
+            : `<div class="rt-empty" id="feed-all-clear" style="color:${LEVEL_COLORS.ok}">All ${sum.scored} scored feeds are healthy.</div>`;
+        return;
+    }
+    let html = '<table id="feed-issue-table"><thead><tr><th>Needs attention</th><th>Kind</th><th>Status &amp; reason</th></tr></thead><tbody>';
+    for (const it of sum.issues) {
+        html += `<tr data-level="${it.health.level}" data-feed="${_rtEsc(it.group)}:${_rtEsc(it.id)}">`
+             +  `<td><a href="#${it.anchor}" style="color:inherit;text-decoration:none"><strong>${_rtEsc(it.label)}</strong></a>`
+             +      (it.path ? `<div class="rt-path">${_rtEsc(it.path)}</div>` : '') + `</td>`
+             +  `<td class="rt-kind">${_rtEsc(it.kind)}</td>`
+             +  _statusCell(it.health)
+             +  `</tr>`;
+    }
+    el.innerHTML = html + '</tbody></table>';
+}
+
+// ── Cron pipelines · Supabase heartbeat ─────────────────────────────────────
 async function loadPipelineHeartbeatCard() {
     const el = document.getElementById('rt-heartbeat');
     el.innerHTML = `<div class="rt-empty">Querying pipeline_heartbeat…</div>`;
-
-    if (!isConfigured()) {
-        el.innerHTML = `<div class="rt-error">Supabase not configured on this environment — pipeline_heartbeat unreachable.</div>`;
+    FEEDS.heartbeat = null; renderOverview();
+    const tableDown = (msg) => {
+        el.innerHTML = `<div class="rt-error">${_rtEsc(msg)}</div>`;
         document.getElementById('k-pipes').textContent = '—';
+        setGroup('heartbeat', [{ id: 'pipeline_heartbeat', label: 'pipeline_heartbeat table',
+            health: { level: 'crit', label: 'unreachable', detail: msg } }]);
         return { healthy: 0, total: 0 };
-    }
+    };
+
+    if (!isConfigured()) return tableDown('Supabase not configured on this environment — pipeline_heartbeat unreachable.');
 
     let rows = [];
     try {
@@ -423,13 +505,14 @@ async function loadPipelineHeartbeatCard() {
         if (error) throw error;
         rows = data || [];
     } catch (err) {
-        el.innerHTML = `<div class="rt-error">pipeline_heartbeat query failed: ${_rtEsc(err.message || err)}. Apply supabase-pipeline-heartbeat-migration.sql.</div>`;
-        document.getElementById('k-pipes').textContent = '—';
-        return { healthy: 0, total: 0 };
+        return tableDown(`pipeline_heartbeat query failed: ${err.message || err}. Apply supabase-pipeline-heartbeat-migration.sql.`);
     }
 
+    const now = Date.now();
     const byKey = Object.fromEntries(rows.map(r => [r.pipeline_name, r]));
     const known = new Set(PIPELINE_SPECS.map(s => s.key));
+    // A row nobody registered still renders, on a conservative default — amber
+    // until someone gives it a cadence in pipeline-registry.js.
     const extras = rows.filter(r => !known.has(r.pipeline_name))
                        .map(r => ({ key: r.pipeline_name, label: r.pipeline_name, warnMin: 15, critMin: 60 }));
     const specs = [...PIPELINE_SPECS, ...extras];
@@ -439,38 +522,41 @@ async function loadPipelineHeartbeatCard() {
              + '<th>Streak</th><th>Last failure</th><th>Status</th>'
              + '</tr></thead><tbody>';
 
-    let healthy = 0;
+    const items = [];
     for (const spec of specs) {
         const row = byKey[spec.key];
-        const h = _rtHealth(row, spec);
-        if (h.label === 'healthy') healthy++;
+        const h = heartbeatHealth(row, spec, now);
+        items.push({ id: spec.key, label: spec.label, path: spec.key, health: h });
         const streak = Number(row?.consecutive_fail || 0);
         const streakColor = streak >= 3 ? '#ff5555' : streak >= 1 ? '#ffd700' : '#667';
         const tooltip = row?.last_failure_reason ? ` title="${_rtEsc(row.last_failure_reason)}"` : '';
         const failCell = row?.last_failure_at
-            ? `<span${tooltip}>${_rtFmtRel(row.last_failure_at)}</span>`
+            ? `<span${tooltip}>${fmtRel(row.last_failure_at, now)}</span>`
             : '<span style="color:#445">—</span>';
 
-        html += `<tr>`
+        html += `<tr data-level="${h.level}" data-feed="heartbeat:${_rtEsc(spec.key)}">`
              +  `<td><strong>${_rtEsc(spec.label)}</strong>`
-             +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(spec.key)}</div></td>`
-             +  `<td style="color:#aab">${_rtFmtRel(row?.last_success_at)}</td>`
+             +      `<div class="rt-path">${_rtEsc(spec.key)}</div></td>`
+             +  `<td style="color:#aab">${fmtRel(row?.last_success_at, now)}</td>`
              +  `<td style="color:#9ad;font-family:ui-monospace,monospace;font-size:.7rem">${_rtEsc(row?.last_source ?? '—')}</td>`
              +  `<td style="color:${streakColor};font-weight:${streak>0?700:400}">${streak}</td>`
              +  `<td style="color:#aab">${failCell}</td>`
-             +  `<td style="color:${h.color};font-weight:600">● ${h.label}</td>`
+             +  _statusCell(h)
              +  `</tr>`;
     }
     html += '</tbody></table>';
     el.innerHTML = html;
+    const healthy = items.filter(it => it.health.level === 'ok').length;
     document.getElementById('k-pipes').textContent = `${healthy}/${specs.length}`;
     document.getElementById('k-pipes').className = 'kpi-val ' + (healthy === specs.length ? 'green' : 'red');
+    setGroup('heartbeat', items);
     return { healthy, total: specs.length };
 }
 
-// Proxy probes — sourced from js/pipeline-registry.js so this list and
-// the cron pre-warm jobs share one definition. Adding a new endpoint
-// requires only a registry append; this card picks it up automatically.
+// ── /api routes ─────────────────────────────────────────────────────────────
+// Sourced from js/pipeline-registry.js so this list and the cron pre-warm
+// jobs share one definition. Adding a new endpoint requires only a registry
+// append; this card picks it up automatically.
 const PROXY_PROBES = PIPELINES.map(p => ({
     key:       p.id,
     label:     p.label,
@@ -484,11 +570,14 @@ const PROXY_PROBES = PIPELINES.map(p => ({
     warnAgeS:  p.warnAgeS,
     critAgeS:  p.critAgeS,
     prewarm:   p.prewarm,
+    notes:     p.notes ?? '',
     probeTimeoutMs:  p.probeTimeoutMs ?? 8000,
     freshnessExempt: p.freshnessExempt === true,
 }));
 
 async function _probeProxy(spec) {
+    // The clock and the timeout both start HERE — when the probe is actually
+    // sent (mapLimit holds it until a slot is free), not when it was queued.
     const t0 = performance.now();
     let status = null, body = null, netErr = null;
     try {
@@ -496,65 +585,10 @@ async function _probeProxy(spec) {
         status = res.status;
         try { body = await res.json(); } catch { /* non-JSON */ }
     } catch (e) {
-        netErr = e?.message || String(e);
+        netErr = e?.name === 'TimeoutError' ? `timed out after ${Math.round(spec.probeTimeoutMs / 1000)} s` : (e?.message || String(e));
     }
     const latencyMs = Math.round(performance.now() - t0);
-
-    let ageSec = null;
-    if (Number.isFinite(body?.age_seconds)) ageSec = body.age_seconds;
-    // Most first-party endpoints report age_min (minutes) — accept it so
-    // forecast-3day / polar-vortex / teleconnections rows aren't stuck on
-    // "no freshness info" despite declaring their age.
-    else if (Number.isFinite(body?.age_min)) ageSec = Math.max(0, Math.round(body.age_min * 60));
-    else if (body?.fetched_at)       { const t = Date.parse(body.fetched_at);       if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
-    // CelesTrak proxies (TLE + Aristotle/SOCRATES) and many SWPC feeds
-    // emit a top-level `fetched` ISO-8601 instead of `fetched_at`. NHC
-    // storm feed uses `updated`. Accept all three so the status card
-    // doesn't show "no freshness info" for endpoints that are healthy.
-    else if (body?.fetched)          { const t = Date.parse(body.fetched);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
-    // Aggregator/compute endpoints (mars/*, aurora/outlook, density/tudelft,
-    // hindcast/gannon-model) stamp `generated_at` at response time rather than
-    // a single upstream fetch time — for a cached edge response that IS the
-    // cache-fill age, which is exactly what this column means.
-    else if (body?.generated_at)     { const t = Date.parse(body.generated_at);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
-    else if (body?.updated)          { const t = Date.parse(body.updated);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
-    else if (body?.data?.updated)    { const t = Date.parse(body.data.updated);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
-    else if (Array.isArray(body)) {
-        // NOAA JSON feeds are arrays of samples; recency = most recent timestamp.
-        const last = body[body.length - 1];
-        const t = Date.parse(last?.time_tag ?? last?.timestamp ?? last?.observed ?? '');
-        if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
-    }
-    return { spec, status, body, netErr, latencyMs, ageSec };
-}
-
-function _rtProxyHealth(p) {
-    if (p.netErr)            return { color:'#ff5555', label:`network error` };
-    if (p.status == null)    return { color:'#ff5555', label:'no response' };
-    if (p.status >= 500)     return { color:'#ff5555', label:`HTTP ${p.status} · ${p.body?.error ?? 'error'}` };
-    if (p.status >= 400)     return { color:'#ff5555', label:`HTTP ${p.status}` };
-    if (p.body?.error)       return { color:'#ff5555', label: String(p.body.error) };
-    // A route's OWN freshness statement beats every age heuristic below — it
-    // is the one signal a degraded 200 carries (CLAUDE.md §8). Checked before
-    // the freshnessExempt short-circuit, which until 2026-10-26 scored an
-    // exempt route's `freshness: 'stale'` as healthy.
-    if (p.body?.freshness === 'expired') return { color:'#ff5555', label:`freshness=${p.body.freshness}` };
-    if (p.body?.freshness === 'stale')   return { color:'#ffd700', label:`freshness=${p.body.freshness}` };
-    // Computed-at-request endpoints (seed-grid lookups, per-location
-    // passthroughs) have no meaningful "age" — a 200 is healthy.
-    if (p.ageSec == null && p.spec.freshnessExempt) return { color:'#4eff91', label:'healthy' };
-    if (p.ageSec == null)    return { color:'#ffd700', label:'no freshness info' };
-    if (p.ageSec > p.spec.critAgeS) return { color:'#ff5555', label:'critical (stale)' };
-    if (p.ageSec > p.spec.warnAgeS) return { color:'#ffd700', label:'warning (stale)' };
-    return { color:'#4eff91', label:'healthy' };
-}
-
-function _rtFmtAgeSec(s) {
-    if (s == null) return '—';
-    if (s < 60)    return `${s}s ago`;
-    if (s < 3600)  return `${Math.round(s / 60)}m ago`;
-    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-    return `${Math.round(s / 86400)}d ago`;
+    return { spec, status, body, netErr, latencyMs, ageSec: probeAgeSeconds(body, Date.now()) };
 }
 
 function _prewarmBadge(tier) {
@@ -569,70 +603,66 @@ function _prewarmBadge(tier) {
               font-weight:700;text-transform:uppercase">prewarm·${tier}</span>`;
 }
 
-function _renderProbeRow(p) {
-    const h = _rtProxyHealth(p);
+function _renderProbeRow(p, h) {
     const body = p.body || {};
-    const missingEnv = Array.isArray(body.missing) && body.missing.length
-        ? ` <span style="color:#ff5555;font-size:.62rem">missing env: ${_rtEsc(body.missing.join(', '))}</span>`
-        : '';
+    // What is actually being served: the route's own source tag, and — for
+    // our own archives — which run (a data engine's row should name its run).
     const source = body.source || body.heartbeat?.last_source || p.spec.upstream || '—';
+    const run = typeof body.run === 'string' || typeof body.run === 'number' ? ` · run ${body.run}` : '';
     const statusCell = p.status != null
         ? `<span style="color:${p.status < 400 ? '#aab' : '#ff5555'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
         : `<span style="color:#ff5555;font-weight:700">—</span>`;
 
-    return `<tr>`
-         +  `<td><strong>${_rtEsc(p.spec.label)}</strong>${_prewarmBadge(p.spec.prewarm)}`
-         +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(p.spec.endpoint)}</div></td>`
+    return `<tr data-level="${h.level}" data-feed="endpoint:${_rtEsc(p.spec.key)}">`
+         +  `<td><strong${p.spec.notes ? ` title="${_rtEsc(p.spec.notes)}"` : ''}>${_rtEsc(p.spec.label)}</strong>${_prewarmBadge(p.spec.prewarm)}`
+         +      `<div><a class="rt-path" href="${_rtEsc(p.spec.probePath)}" target="_blank" rel="noopener">${_rtEsc(p.spec.endpoint)}</a></div></td>`
          +  `<td>${statusCell}</td>`
-         +  `<td style="color:#aab">${_rtFmtAgeSec(p.ageSec)}</td>`
-         +  `<td style="font-family:ui-monospace,monospace;font-size:.7rem;color:#9ad">${_rtEsc(String(source))}${missingEnv}</td>`
+         +  `<td style="color:#aab">${fmtAgeSec(p.ageSec)}</td>`
+         +  `<td style="font-family:ui-monospace,monospace;font-size:.7rem;color:#9ad">${_rtEsc(String(source) + run)}</td>`
          +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
-         +  `<td style="color:${h.color};font-weight:600">● ${_rtEsc(h.label)}</td>`
+         +  _statusCell(h)
          +  `</tr>`;
 }
 
 async function loadProxyFreshnessCard() {
     const el = document.getElementById('rt-proxies');
     el.innerHTML = `<div class="rt-empty">Probing ${PROXY_PROBES.length} endpoints…</div>`;
+    FEEDS.endpoint = null; renderOverview();
 
-    const probes = await Promise.all(PROXY_PROBES.map(_probeProxy));
-    const probeBySpec = new Map(probes.map(p => [p.spec.endpoint, p]));
+    const probes = await mapLimit(PROXY_PROBES, PROBE_CONCURRENCY, _probeProxy, (done, total) => {
+        const note = el.querySelector('.rt-empty');
+        if (note) note.textContent = `Probing endpoints… ${done}/${total}`;
+    });
+    const scored = probes.map(p => ({ p, h: endpointHealth(p) }));
+    const byEndpoint = new Map(scored.map(x => [x.p.spec.endpoint, x]));
 
-    // Per-category mini-tables — keeps the expanded probe list scannable.
+    // Per-category tables keep the list scannable. A registry entry whose
+    // category is not in CATEGORIES would otherwise vanish from the page
+    // while still being probed — it lands in "Uncategorised" instead.
+    const cats = [...CATEGORIES.map(c => ({ ...c, rows: pipelinesByCategory(c.id) })),
+        { id: '_none', label: 'Uncategorised (add the category to CATEGORIES)',
+          rows: PIPELINES.filter(p => !CATEGORIES.some(c => c.id === p.category)) }];
     let html = '';
-    let healthy = 0;
-    for (const cat of CATEGORIES) {
-        const catProbes = pipelinesByCategory(cat.id)
-            .map(spec => probeBySpec.get(spec.endpoint))
-            .filter(Boolean);
-        if (catProbes.length === 0) continue;
-
-        const catHealthy = catProbes.filter(p =>
-            _rtProxyHealth(p).label === 'healthy').length;
-        healthy += catHealthy;
-
-        html += `<div style="margin-top:14px;display:flex;align-items:baseline;
-                  gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding-bottom:4px">
-                  <h3 style="font-size:.78rem;color:#bcd;font-weight:700;
-                            letter-spacing:.04em;text-transform:uppercase;margin:0">
-                    ${_rtEsc(cat.label)}
-                  </h3>
-                  <span style="color:#556;font-size:.66rem">
-                    ${catHealthy}/${catProbes.length} healthy
-                  </span>
-                </div>`;
-        html += '<table style="margin-top:6px"><thead><tr>'
-              + '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
-              + '<th>Source</th><th>Latency</th><th>Status</th>'
-              + '</tr></thead><tbody>';
-        for (const p of catProbes) html += _renderProbeRow(p);
-        html += '</tbody></table>';
+    for (const cat of cats) {
+        const rows = cat.rows.map(spec => byEndpoint.get(spec.endpoint)).filter(Boolean);
+        if (!rows.length) continue;
+        const ok = rows.filter(x => x.h.level === 'ok').length;
+        const issues = rows.filter(x => x.h.level === 'crit' || x.h.level === 'warn').length;
+        html += `<section class="rt-cat" data-cat="${_rtEsc(cat.id)}" data-issues="${issues}">`
+             +  `<div class="rt-cat-head"><h4>${_rtEsc(cat.label)}</h4><span>${ok}/${rows.length} healthy</span></div>`
+             +  '<table><thead><tr>'
+             +  '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
+             +  '<th>Source</th><th>Latency</th><th>Status</th>'
+             +  '</tr></thead><tbody>'
+             +  rows.map(x => _renderProbeRow(x.p, x.h)).join('')
+             +  '</tbody></table></section>';
     }
-
     el.innerHTML = html;
 
+    const healthy = scored.filter(x => x.h.level === 'ok').length;
     document.getElementById('k-api').textContent = `${healthy}/${probes.length}`;
     document.getElementById('k-api').className = 'kpi-val ' + (healthy === probes.length ? 'green' : 'red');
+    setGroup('endpoint', scored.map(x => ({ id: x.p.spec.key, label: x.p.spec.label, path: x.p.spec.endpoint, health: x.h })));
     return { healthy, total: probes.length };
 }
 
@@ -677,50 +707,29 @@ async function _probeGibs(layer) {
             res = await fetch(url, { cache: 'no-store',
                                      signal: AbortSignal.timeout(8000) });
         }
-        return {
-            layer,
-            url,
-            status:    res.status,
-            ok:        res.ok,
-            latencyMs: Math.round(performance.now() - t0),
-        };
+        return { layer, url, status: res.status, ok: res.ok, latencyMs: Math.round(performance.now() - t0) };
     } catch (e) {
-        return {
-            layer,
-            url,
-            status:    null,
-            ok:        false,
-            latencyMs: Math.round(performance.now() - t0),
-            netErr:    e?.message || String(e),
-        };
+        return { layer, url, status: null, ok: false, latencyMs: Math.round(performance.now() - t0),
+                 netErr: e?.message || String(e) };
     }
 }
 
 async function loadGibsCard() {
     const el = document.getElementById('rt-gibs');
     el.innerHTML = `<div class="rt-empty">Probing ${EARTH_OBS_LAYERS.length} GIBS layers…</div>`;
+    FEEDS.gibs = null; renderOverview();
 
-    const probes  = await Promise.all(EARTH_OBS_LAYERS.map(_probeGibs));
+    const probes  = await mapLimit(EARTH_OBS_LAYERS, PROBE_CONCURRENCY, _probeGibs);
     const healthy = probes.filter(p => p.ok).length;
 
     let html = '<table><thead><tr>'
              + '<th>Layer</th><th>GIBS ID</th><th>HTTP</th>'
              + '<th>Latency</th><th>Default</th><th>Status</th>'
              + '</tr></thead><tbody>';
-
+    const items = [];
     for (const p of probes) {
-        const colour =
-            p.ok                 ? '#4eff91' :
-            p.status === 404     ? '#ff5555' :
-            p.netErr             ? '#ffd700' :  // network/CORS — usually transient
-            p.status >= 500      ? '#ff5555' :
-                                   '#ffd700';
-        const label =
-            p.ok                 ? 'live' :
-            p.status === 404     ? 'retired/renamed (404)' :
-            p.netErr             ? `network: ${p.netErr}` :
-            p.status             ? `HTTP ${p.status}` :
-                                   'no response';
+        const h = gibsHealth(p);
+        items.push({ id: p.layer.gibs, label: p.layer.name, path: p.layer.gibs, health: h });
         const statusCell = p.status != null
             ? `<span style="color:${p.ok ? '#aab' : '#ff5555'};font-weight:${p.ok ? 400 : 700}">${p.status}</span>`
             : `<span style="color:#ff5555;font-weight:700">—</span>`;
@@ -728,14 +737,14 @@ async function loadGibsCard() {
             ? `<span style="color:#4fc3f7">on</span>`
             : `<span style="color:#667">opt-in</span>`;
 
-        html += `<tr>`
+        html += `<tr data-level="${h.level}" data-feed="gibs:${_rtEsc(p.layer.gibs)}">`
              +  `<td><strong>${_rtEsc(p.layer.name)}</strong>`
              +      `<div style="color:#556;font-size:.65rem">${_rtEsc(p.layer.category)} · ${_rtEsc(p.layer.latency ?? '—')}</div></td>`
              +  `<td style="color:#9ad;font-family:ui-monospace,monospace;font-size:.66rem">${_rtEsc(p.layer.gibs)}</td>`
              +  `<td>${statusCell}</td>`
              +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
              +  `<td style="font-size:.7rem">${defaultBadge}</td>`
-             +  `<td style="color:${colour};font-weight:600">● ${_rtEsc(label)}</td>`
+             +  _statusCell(h)
              +  `</tr>`;
     }
     html += '</tbody></table>';
@@ -744,10 +753,11 @@ async function loadGibsCard() {
     const k = document.getElementById('k-gibs');
     k.textContent = `${healthy}/${probes.length}`;
     k.className   = 'kpi-val ' + (healthy === probes.length ? 'green' : healthy === 0 ? 'red' : 'gold');
+    setGroup('gibs', items);
     return { healthy, total: probes.length };
 }
 
-// ── Credentials & edge-authoritative upstreams (/api/health) ────────────────
+// ── Credentials + upstream hosts (/api/health) ──────────────────────────────
 // Presence booleans only — the endpoint never returns key material. This is
 // the one card that catches the silent-DEMO_KEY failure mode: DONKI proxies
 // keep "working" on the shared 30 req/hr quota, so nothing else goes red.
@@ -764,13 +774,22 @@ const CRED_LABELS = {
 };
 const CRED_COLORS = { ok: '#4eff91', degraded: '#ffd700', off: '#889' };
 
-async function loadCredentialsCard() {
+let _healthFetch = null;
+/** One /api/health request feeds both cards; `fresh` forces a new one. */
+function fetchHealth(fresh = false) {
+    if (!_healthFetch || fresh) {
+        _healthFetch = fetch('/api/health', { cache: 'no-store' }).then(r => r.json());
+        _healthFetch.catch(() => { _healthFetch = null; });
+    }
+    return _healthFetch;
+}
+
+async function loadCredentialsCard({ fresh = false } = {}) {
     const el = document.getElementById('rt-creds');
     el.innerHTML = `<div class="rt-empty">Fetching /api/health…</div>`;
     let payload;
     try {
-        const res = await fetch('/api/health', { cache: 'no-store' });
-        payload = await res.json();
+        payload = await fetchHealth(fresh);
     } catch (err) {
         el.innerHTML = `<div class="rt-error">/api/health unreachable: ${_rtEsc(err.message || err)}</div>`;
         return;
@@ -782,28 +801,82 @@ async function loadCredentialsCard() {
              +  `<td style="color:${color};font-weight:600">● ${_rtEsc(cred.status)}</td>`
              +  `<td style="color:#aab">${_rtEsc(cred.note)}</td></tr>`;
     }
-    html += '</tbody></table>';
-    const auth = (payload.upstreams ?? []).filter(u => u.edge_authoritative);
-    if (auth.length) {
-        html += '<table style="margin-top:8px"><thead><tr><th>Edge upstream</th><th>Status</th><th>Latency</th></tr></thead><tbody>';
-        for (const u of auth) {
-            html += `<tr><td>${_rtEsc(u.source)}</td>`
-                 +  `<td style="color:${u.ok ? '#4eff91' : '#ff5555'};font-weight:600">● ${u.ok ? 'up' : _rtEsc(u.error ?? `HTTP ${u.http_status}`)}</td>`
-                 +  `<td style="color:#aab">${u.latency_ms} ms</td></tr>`;
-        }
-        html += '</tbody></table>';
-    }
-    el.innerHTML = html;
+    el.innerHTML = html + '</tbody></table>';
 }
 
-document.getElementById('rt-refresh-creds').addEventListener('click', loadCredentialsCard);
+/** THIS browser's own fetch of a browser-direct feed — the check that speaks for users. */
+async function _probeFromBrowser(url) {
+    const t0 = performance.now();
+    try {
+        const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+        res.body?.cancel?.();
+        return { ok: res.ok, status: res.status, latencyMs: Math.round(performance.now() - t0) };
+    } catch (e) {
+        return { ok: false, status: null, latencyMs: Math.round(performance.now() - t0),
+                 error: e?.name === 'TimeoutError' ? 'timeout' : 'blocked or unreachable' };
+    }
+}
+
+async function loadUpstreamsCard({ fresh = false } = {}) {
+    const el = document.getElementById('rt-upstreams');
+    el.innerHTML = `<div class="rt-empty">Fetching /api/health…</div>`;
+    FEEDS.upstream = null; renderOverview();
+    let payload;
+    try {
+        payload = await fetchHealth(fresh);
+    } catch (err) {
+        const msg = `/api/health unreachable: ${err.message || err}`;
+        el.innerHTML = `<div class="rt-error">${_rtEsc(msg)}</div>`;
+        setGroup('upstream', [{ id: 'api-health', label: '/api/health', path: '/api/health',
+            health: { level: 'crit', label: 'unreachable', detail: msg } }]);
+        return;
+    }
+    const ups = payload.upstreams ?? [];
+    const browser = await mapLimit(ups, PROBE_CONCURRENCY, u => (u.browser_url ? _probeFromBrowser(u.browser_url) : null));
+    let html = '<table><thead><tr><th>Upstream</th><th>Reached via</th><th>Latency</th><th>Status</th></tr></thead><tbody>';
+    const items = [];
+    ups.forEach((u, i) => {
+        const b = browser[i];
+        const h = upstreamHealth(u, b);
+        items.push({ id: u.source, label: u.source, health: h });
+        const ms = b ? b.latencyMs : u.latency_ms;
+        html += `<tr data-level="${h.level}" data-feed="upstream:${_rtEsc(u.source)}">`
+             +  `<td><strong>${_rtEsc(u.source)}</strong></td>`
+             +  `<td class="rt-kind">${u.edge_authoritative ? 'our edge' : b ? 'this browser' : 'browser (not checked)'}</td>`
+             +  `<td style="color:#aab">${Number.isFinite(ms) ? ms + ' ms' : '—'}</td>`
+             +  _statusCell(h)
+             +  `</tr>`;
+    });
+    el.innerHTML = html + '</tbody></table>';
+    setGroup('upstream', items);
+}
+
+function loadAllFeeds({ fresh = false } = {}) {
+    return Promise.all([
+        loadPipelineHeartbeatCard(),
+        loadCredentialsCard({ fresh }),
+        loadUpstreamsCard({ fresh }),
+        loadProxyFreshnessCard(),
+        loadGibsCard(),
+    ]);
+}
+
+document.getElementById('rt-refresh-creds').addEventListener('click', () => loadCredentialsCard({ fresh: true }));
+document.getElementById('rt-refresh-upstreams').addEventListener('click', () => loadUpstreamsCard({ fresh: true }));
 document.getElementById('rt-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeatCard);
 document.getElementById('rt-refresh-proxies').addEventListener('click', loadProxyFreshnessCard);
 document.getElementById('rt-refresh-gibs').addEventListener('click', loadGibsCard);
-loadPipelineHeartbeatCard();
-loadCredentialsCard();
-loadProxyFreshnessCard();
-loadGibsCard();
+document.getElementById('rt-refresh-all').addEventListener('click', () => loadAllFeeds({ fresh: true }));
+// "Issues only" hides every healthy row (and every category with none) in
+// all four tables — CSS on one class, so a refresh keeps the filter.
+document.getElementById('rt-filter').addEventListener('click', (ev) => {
+    const on = document.getElementById('status-main').classList.toggle('rt-issues-only');
+    ev.currentTarget.setAttribute('aria-pressed', String(on));
+    ev.currentTarget.textContent = on ? 'Show: issues only' : 'Show: all feeds';
+});
+renderOverview();
+// Test + console hook (inert unless read).
+window.__status = { get feeds() { return FEEDS; }, done: loadAllFeeds() };
 
 let filterMode = 'all';
 let lastResults = null;

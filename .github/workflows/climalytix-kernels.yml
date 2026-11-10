@@ -60,6 +60,9 @@
 #   climalytix-contours.mjs  isotherms: exact on a planar field, closed loops,
 #                            saddles never cross, gaps cut the line, levels round
 #                            in the reader's unit, the freezing line flagged
+#   climalytix-layer-state.mjs  what the Temperature controls may claim: archive
+#                            down ⇒ ticked but sub-toggles / slider / key off,
+#                            a notice + Retry; off is never a failure
 #   climalytix-nwp-route.mjs /api/climalytix/nwp on a fake R2 bucket: two range
 #                            reads per site, every degraded path 200 + freshness
 #   climalytix_ingest_test.py  the ingest worker (python): real .idx parsing,
@@ -69,7 +72,8 @@
 #                            modules — the lab's gate must keep passing UNCHANGED
 #
 # Browser gates (tests/climalytix-smoke.spec.js with its all-feeds-down
-# negative control; tests/climalytix-map.spec.js with its heat-off control)
+# negative control; tests/climalytix-map.spec.js with its heat-off control;
+# tests/climalytix-temp-toggles.spec.js with its archive-up control)
 # run with the Playwright suite.
 name: climalytix-kernels
 
@@ -157,6 +161,20 @@ jobs:
         run: node tests/climalytix-convection.mjs
       - name: isotherms
         run: node tests/climalytix-contours.mjs
+      - name: layer control state (Temperature toggles follow the data)
+        run: node tests/climalytix-layer-state.mjs
+      - name: heat colour scale (fit to view vs the shared absolute ramp)
+        run: node tests/climalytix-heat-scale.mjs
+      - name: temperature on the real ground (model height, fitted lapse rate)
+        run: node tests/climalytix-terrain-temp.mjs
+      - name: cast shadows, terrain horizon, the day's Sun path
+        run: node tests/climalytix-sun-terrain.mjs
+      - name: sun and shade feed back into the temperature
+        run: node tests/climalytix-sun-temp.mjs
+      - name: night cold-air pooling
+        run: node tests/climalytix-cold-pool.mjs
+      - name: the Sun to arcseconds (Meeus 25.b, NREL SPA)
+        run: node tests/sun-precise.mjs
       - name: nwp route (fake R2)
         run: node tests/climalytix-nwp-route.mjs
       - name: Climate Lab (unchanged by the lift)
