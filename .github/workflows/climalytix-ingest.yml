@@ -96,12 +96,16 @@ jobs:
       - name: Ingest
         id: ingest
         env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || vars.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || vars.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || vars.R2_BUCKET }}
+          # `|| vars.X`: an account id or bucket name saved under the Variables
+          # tab instead of Secrets is still read. ENVIRONMENT-scoped secrets are
+          # NOT visible here (this job declares no `environment:`) — they must be
+          # REPOSITORY secrets. The worker names whichever arrive empty.
           # Optional: only if the Vercel project sets it too (e.g. an EU-jurisdiction bucket).
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || vars.R2_ENDPOINT }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
           # A manual dispatch is a request to (re)publish; only the schedule skips.
           SKIP_FLAG: ${{ github.event_name == 'schedule' && '--skip-if-current' || '' }}
@@ -128,7 +132,7 @@ jobs:
             0) ;;
             2) echo "::error title=Climalytix ingest refused to publish::Too much of the run was unreadable; the previous run stays as latest. See the log for the missing leads." ;;
             3) echo "::error title=Climalytix ingest found no GFS run::No complete run on noaa-gfs-bdp-pds in the last 48 h — NOAA's side, or the bucket layout changed." ;;
-            4) echo "::error title=Climalytix ingest cannot write to R2::Set the repository secrets R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET (Settings → Secrets and variables → Actions) to the values the Vercel project uses, with a token that may write objects. Nothing was published; /api/climalytix/nwp keeps answering freshness:expired." ;;
+            4) echo "::error title=Climalytix ingest cannot write to R2::$(grep -oE 'EMPTY in this job: [^(]*\([0-9] of 4 received\)|store_preflight_failed: .{0,200}' "$RUNNER_TEMP/ingest.log" | tail -1) — Set the repository secrets R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET (Settings → Secrets and variables → Actions) to the values the Vercel project uses, with a token that may write objects. Nothing was published; /api/climalytix/nwp keeps answering freshness:expired." ;;
             5) echo "::error title=Climalytix ingest could not read its run back::The upload finished but the pointer, manifest or a tile did not read back. The previous run was not pruned." ;;
             *) echo "::error title=Climalytix ingest crashed::exit $code — see the log." ;;
           esac

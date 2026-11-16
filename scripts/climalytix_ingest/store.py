@@ -19,9 +19,20 @@ import os
 import pathlib
 
 
+R2_KEYS = ('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET')
+
+
+def r2_missing():
+    """Which of the four are empty here — NAMES only, never a value. 'They are
+    set' and 'the job can see them' are different facts (an environment-scoped
+    secret, a Variable, a misspelt name all read as empty), so the refusal
+    names the ones this process did not receive."""
+    return [k for k in R2_KEYS if not os.environ.get(k, '').strip()]
+
+
 def r2_env():
-    keys = ('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET')
-    env = {k: os.environ.get(k, '') for k in keys}
+    keys = R2_KEYS
+    env = {k: os.environ.get(k, '').strip() for k in keys}
     if not all(env.values()):
         return None
     env['R2_ENDPOINT'] = os.environ.get('R2_ENDPOINT') or f"https://{env['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
