@@ -48,6 +48,16 @@ on:
     # GFS 00z / 12z are complete on AWS ~4.5–5 h after run time; off the hour on purpose.
     - cron: '23 5 * * *'
     - cron: '23 17 * * *'
+  # A change to the worker is proved by RUNNING it: a pull request that touches
+  # the ingest (same-repository branches only — a fork gets no secrets and is
+  # skipped by the job's `if`) ingests and publishes the newest run, then the
+  # production probe below checks the site serves it. Nothing else can test the
+  # R2 write path, and a manual dispatch from the branch does exactly the same.
+  pull_request:
+    paths:
+      - 'scripts/climalytix_ingest/**'
+      - 'scripts/check-climalytix-nwp.mjs'
+      - '.github/workflows/climalytix-ingest.yml'
   workflow_dispatch:
     inputs:
       run:
@@ -82,6 +92,7 @@ concurrency:
 jobs:
   ingest:
     name: GFS → R2 point tiles
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
