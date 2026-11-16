@@ -1,0 +1,67 @@
+name: launch-visual-regression
+
+on:
+  pull_request:
+    paths:
+      - 'launch-planner.html'
+      - 'js/launch-*.js'
+      - 'js/vendor/three-0.160.0/**'
+      - 'js/nav*'
+      - 'js/*.css'
+      - 'tests/launch-*'
+      - 'tests/helpers/launch-capture.js'
+      - 'tests/__visual__/launch-planner/**'
+      - 'scripts/check-launch-visual-faults.mjs'
+      - 'playwright*.config.js'
+      - 'package*.json'
+      - 'dev-server.mjs'
+      - '.github/workflows/launch-visual-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Launch vehicles/textures are procedural; avoid unrelated large data.
+          sparse-checkout: |
+            js
+            tests
+            scripts
+            icons
+            api
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify reference fonts before comparing pixels
+        run: |
+          sudo apt-get install -y fonts-dejavu-core
+          test "$(fc-match -f '%{family}' system-ui)" = 'DejaVu Sans'
+          test "$(fc-match -f '%{family}' monospace)" = 'DejaVu Sans Mono'
+      - name: Existing deterministic kernel checks
+        run: |
+          node tests/launch-smoke-sim.mjs
+          node tests/launch-camera-layout.mjs
+      - name: Existing structural and interaction checks
+        run: npx playwright test tests/launch-planner-visuals.spec.js tests/launch-planner-camera.spec.js --project=chromium --workers=1 --retries=0
+      - name: Compare reviewed screenshots twice from fresh contexts
+        run: npx playwright test --config=playwright.launch-visual.config.js --repeat-each=2
+      - name: Verify smoke, floodlight and bloom negative controls
+        run: node scripts/check-launch-visual-faults.mjs
+      - name: Upload images, diffs, state and traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-visual-evidence
+          path: |
+            validation-output/launch-visual/
+            test-results/
+          retention-days: 14
