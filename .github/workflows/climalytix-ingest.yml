@@ -16,16 +16,38 @@ name: climalytix-ingest
 # order tiles → manifest → latest pointer → prune (scripts/climalytix_ingest/
 # store.py). It never commits, never pushes, never touches Supabase or main.
 #
-# SECRETS (Settings → Secrets and variables → Actions), the same four the
-# Vercel project already uses: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
-# R2_SECRET_ACCESS_KEY, R2_BUCKET. Without them the job still runs the gate
-# and a full ingest into the runner's temp dir, then WARNS that nothing was
-# published — /api/climalytix/nwp keeps answering freshness:'expired'.
+# SECRETS (Settings → Secrets and variables → Actions → Repository secrets),
+# the same four VALUES the Vercel project already uses: R2_ACCOUNT_ID,
+# R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET. Vercel's environment
+# variables are NOT visible to Actions — they have to be entered here too, and
+# the token must be allowed to write objects.
+#
+# A RUN THAT PUBLISHED NOTHING IS RED (2026-11-16). The first seven scheduled
+# runs were green while writing every tile to the runner's temp dir: the
+# secrets were never set here, the worker fell back to a local dry run, and
+# the only trace was a warning annotation nobody was sent. Now:
+#   · the worker runs with --require-r2 (exit 4 without the secrets) and
+#     round-trips one object BEFORE downloading anything, so a bad key or
+#     bucket fails in seconds; a dry run exists only as the manual `dry_run`
+#     input;
+#   · after publishing it reads the pointer, manifest and two tiles back;
+#   · then scripts/check-climalytix-nwp.mjs asks PRODUCTION for a site and
+#     fails unless it is serving that run — the worker's bucket and the site's
+#     bucket are two configurations and only this step compares them.
+# GitHub emails the repository owner when a scheduled run fails; that email is
+# the alert. status.html's "Climalytix GFS archive" row is the second one.
+#
+# TWO SCHEDULES, ONE IDEMPOTENT WORKER. 05:23 UT takes the 00z run, 17:23 UT
+# the 12z. Each picks the NEWEST COMPLETE run and passes --skip-if-current, so
+# a schedule GitHub drops or delays (it does, under load) is caught up by the
+# next one instead of ageing the archive past the route's 30 h "fresh" limit,
+# and a re-run of an already-published run costs seconds.
 
 on:
   schedule:
-    # GFS 00z is complete on AWS ~04:30–05:00 UTC; off the hour on purpose.
+    # GFS 00z / 12z are complete on AWS ~4.5–5 h after run time; off the hour on purpose.
     - cron: '23 5 * * *'
+    - cron: '23 17 * * *'
   workflow_dispatch:
     inputs:
       run:
@@ -44,6 +66,11 @@ on:
         description: 'Published runs to keep in R2'
         required: false
         default: '2'
+      dry_run:
+        description: 'Decode and tile into the runner temp dir only — publish nothing'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -67,19 +94,62 @@ jobs:
       - name: Gate first (real GFS fixtures, every scan mode, tile round trip)
         run: python3 tests/climalytix_ingest_test.py
       - name: Ingest
+        id: ingest
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          # Optional: only if the Vercel project sets it too (e.g. an EU-jurisdiction bucket).
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+          # A manual dispatch is a request to (re)publish; only the schedule skips.
+          SKIP_FLAG: ${{ github.event_name == 'schedule' && '--skip-if-current' || '' }}
         run: |
           set -o pipefail
+          if [ -n "$DRY_RUN" ]; then
+            # A dry run must not publish even where the secrets exist.
+            unset R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_ENDPOINT
+            REQUIRE=""
+          else
+            REQUIRE="--require-r2"
+          fi
+          set +e
           python3 scripts/climalytix_ingest/gfs.py \
             --grid "${{ inputs.grid || '0p25' }}" \
             --max-lead "${{ inputs.max_lead || '240' }}" \
             --keep "${{ inputs.keep || '2' }}" \
             ${{ inputs.run && format('--run {0}', inputs.run) || '' }} \
-            --out "$RUNNER_TEMP/climalytix" | tee "$RUNNER_TEMP/ingest.log"
-          if grep -q 'r2_not_configured' "$RUNNER_TEMP/ingest.log"; then
-            echo "::warning title=Climalytix ingest not published::R2 secrets are not set for Actions; the run was decoded and tiled into the runner temp dir only. /api/climalytix/nwp will keep answering freshness:expired."
-          fi
+            $REQUIRE $SKIP_FLAG \
+            --out "$RUNNER_TEMP/climalytix" 2>&1 | tee "$RUNNER_TEMP/ingest.log"
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            2) echo "::error title=Climalytix ingest refused to publish::Too much of the run was unreadable; the previous run stays as latest. See the log for the missing leads." ;;
+            3) echo "::error title=Climalytix ingest found no GFS run::No complete run on noaa-gfs-bdp-pds in the last 48 h — NOAA's side, or the bucket layout changed." ;;
+            4) echo "::error title=Climalytix ingest cannot write to R2::Set the repository secrets R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET (Settings → Secrets and variables → Actions) to the values the Vercel project uses, with a token that may write objects. Nothing was published; /api/climalytix/nwp keeps answering freshness:expired." ;;
+            5) echo "::error title=Climalytix ingest could not read its run back::The upload finished but the pointer, manifest or a tile did not read back. The previous run was not pruned." ;;
+            *) echo "::error title=Climalytix ingest crashed::exit $code — see the log." ;;
+          esac
+          [ "$code" -eq 0 ] || exit "$code"
+          last="$(grep -E '^\{"status"' "$RUNNER_TEMP/ingest.log" | tail -1)"
+          status="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["status"])' "$last")"
+          run="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["run"])' "$last")"
+          store="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["store"])' "$last")"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "store=$store" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Climalytix GFS ingest"
+            echo "- run: \`$run\`"
+            echo "- result: **$status** → $store"
+            [ "$store" = "r2" ] || echo "- DRY RUN: nothing was published"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        if: steps.ingest.outputs.store == 'r2'
+        with:
+          node-version: '22'
+      - name: Production is serving this run
+        if: steps.ingest.outputs.store == 'r2'
+        run: node scripts/check-climalytix-nwp.mjs --expect-run "${{ steps.ingest.outputs.run }}"
