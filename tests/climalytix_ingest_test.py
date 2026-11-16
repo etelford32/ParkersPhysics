@@ -511,6 +511,11 @@ def _():
             args.require_r2 = True
             code, _, err = quiet(args)
             assert code == 4 and 'R2_BUCKET' in err and 'r2_not_configured' in err, (code, err)
+            assert '(0 of 4 received)' in err, err
+            os.environ['R2_BUCKET'] = 'b'                     # three missing: named, and the set one is not
+            code, _, err = quiet(args)
+            del os.environ['R2_BUCKET']
+            assert code == 4 and '(1 of 4 received)' in err and 'EMPTY in this job: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (' in err, err
             args.require_r2 = False
 
             # 2. the run is already `latest`: skipped, and NOTHING upstream is read

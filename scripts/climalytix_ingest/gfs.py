@@ -172,8 +172,10 @@ def run_ingest(args):
     print(f'GFS {run_iso} {args.grid} leads 0..{args.max_lead} step {args.step} → {store.kind}'
           + (f' ({why_local}: dry run into {args.out})' if why_local else ''))
     if why_local and getattr(args, 'require_r2', False):
+        miss = S.r2_missing()
         print(f'{why_local}: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET must all be set '
-              '— refusing to call a dry run an ingest', file=sys.stderr)
+              f'— refusing to call a dry run an ingest. EMPTY in this job: {", ".join(miss)} '
+              f'({4 - len(miss)} of 4 received)', file=sys.stderr)
         return 4
     pointer_key = f'{ARCHIVE_ROOT}/{args.grid}/latest.json.gz'
     try:

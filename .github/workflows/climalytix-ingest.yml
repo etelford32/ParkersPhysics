@@ -48,6 +48,16 @@ on:
     # GFS 00z / 12z are complete on AWS ~4.5–5 h after run time; off the hour on purpose.
     - cron: '23 5 * * *'
     - cron: '23 17 * * *'
+  # A change to the worker is proved by RUNNING it: a pull request that touches
+  # the ingest (same-repository branches only — a fork gets no secrets and is
+  # skipped by the job's `if`) ingests and publishes the newest run, then the
+  # production probe below checks the site serves it. Nothing else can test the
+  # R2 write path, and a manual dispatch from the branch does exactly the same.
+  pull_request:
+    paths:
+      - 'scripts/climalytix_ingest/**'
+      - 'scripts/check-climalytix-nwp.mjs'
+      - '.github/workflows/climalytix-ingest.yml'
   workflow_dispatch:
     inputs:
       run:
@@ -82,6 +92,7 @@ concurrency:
 jobs:
   ingest:
     name: GFS → R2 point tiles
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -96,12 +107,16 @@ jobs:
       - name: Ingest
         id: ingest
         env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || vars.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || vars.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || vars.R2_BUCKET }}
+          # `|| vars.X`: an account id or bucket name saved under the Variables
+          # tab instead of Secrets is still read. ENVIRONMENT-scoped secrets are
+          # NOT visible here (this job declares no `environment:`) — they must be
+          # REPOSITORY secrets. The worker names whichever arrive empty.
           # Optional: only if the Vercel project sets it too (e.g. an EU-jurisdiction bucket).
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || vars.R2_ENDPOINT }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
           # A manual dispatch is a request to (re)publish; only the schedule skips.
           SKIP_FLAG: ${{ github.event_name == 'schedule' && '--skip-if-current' || '' }}
@@ -128,7 +143,7 @@ jobs:
             0) ;;
             2) echo "::error title=Climalytix ingest refused to publish::Too much of the run was unreadable; the previous run stays as latest. See the log for the missing leads." ;;
             3) echo "::error title=Climalytix ingest found no GFS run::No complete run on noaa-gfs-bdp-pds in the last 48 h — NOAA's side, or the bucket layout changed." ;;
-            4) echo "::error title=Climalytix ingest cannot write to R2::Set the repository secrets R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET (Settings → Secrets and variables → Actions) to the values the Vercel project uses, with a token that may write objects. Nothing was published; /api/climalytix/nwp keeps answering freshness:expired." ;;
+            4) echo "::error title=Climalytix ingest cannot write to R2::$(grep -oE 'EMPTY in this job: [^(]*\([0-9] of 4 received\)|store_preflight_failed: .{0,200}' "$RUNNER_TEMP/ingest.log" | tail -1) — Set the repository secrets R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET (Settings → Secrets and variables → Actions) to the values the Vercel project uses, with a token that may write objects. Nothing was published; /api/climalytix/nwp keeps answering freshness:expired." ;;
             5) echo "::error title=Climalytix ingest could not read its run back::The upload finished but the pointer, manifest or a tile did not read back. The previous run was not pruned." ;;
             *) echo "::error title=Climalytix ingest crashed::exit $code — see the log." ;;
           esac
