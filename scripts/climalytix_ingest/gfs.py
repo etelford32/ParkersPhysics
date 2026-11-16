@@ -18,6 +18,28 @@ A lead that cannot be read is a GAP recorded in the manifest's `missing`,
 never a zero and never a repeated frame. More than --max-missing-frac of the
 cube missing refuses to publish (exit 2): a run that is mostly holes must not
 replace a good one as `latest`.
+
+A RUN THAT PUBLISHED NOTHING MUST NOT LOOK LIKE ONE THAT DID (2026-11-16: the
+scheduled job was green for its first seven days while writing every tile to
+the runner's temp dir, because the R2 secrets were never set for Actions).
+Four guards, all in this file:
+  --require-r2       no R2 credentials is exit 4, not a dry run. The schedule
+                     passes it; a dry run is something you ask for by hand.
+  preflight          one put / get / delete round trip BEFORE any download, so
+                     a wrong key or bucket fails in seconds (exit 4), not after
+                     3 GB of tiles.
+  --skip-if-current  the chosen run is already `latest` and its manifest is
+                     readable ⇒ exit 0 without re-uploading. This is what makes
+                     a second daily schedule a cheap catch-up.
+  read-back          after the pointer is written, the pointer, the manifest
+                     and the first and last tile are read back from the store
+                     and checked (exit 5 on a mismatch).
+The last stdout line is always one JSON object with `status`
+(published | skipped) — the workflow reads the run from it.
+
+EXIT CODES: 0 published or skipped · 2 refused (too many holes / nothing
+decoded) · 3 no complete run upstream · 4 store not usable · 5 read-back
+failed.
 """
 
 from __future__ import annotations
@@ -25,6 +47,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import datetime as dt
+import gzip
 import json
 import sys
 import time
@@ -148,6 +171,22 @@ def run_ingest(args):
     store, why_local = S.open_store(args.out)
     print(f'GFS {run_iso} {args.grid} leads 0..{args.max_lead} step {args.step} → {store.kind}'
           + (f' ({why_local}: dry run into {args.out})' if why_local else ''))
+    if why_local and getattr(args, 'require_r2', False):
+        print(f'{why_local}: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET must all be set '
+              '— refusing to call a dry run an ingest', file=sys.stderr)
+        return 4
+    pointer_key = f'{ARCHIVE_ROOT}/{args.grid}/latest.json.gz'
+    try:
+        preflight(store, f'{ARCHIVE_ROOT}/{args.grid}/_preflight/')
+    except Exception as e:                                   # noqa: BLE001 — any store error is the same answer
+        print(f'store_preflight_failed: {type(e).__name__}: {str(e)[:300]}', file=sys.stderr)
+        return 4
+    if getattr(args, 'skip_if_current', False):
+        cur = read_pointer(store, pointer_key)
+        if cur and cur.get('runMs') == run_ms and store.get(cur.get('manifest', '')) is not None:
+            print(f'  {run_iso} is already published as latest — nothing to do')
+            print(json.dumps({'status': 'skipped', 'run': run_iso, 'store': store.kind}))
+            return 0
 
     nvar, ntime = len(T.GFS_VARS), len(leads)
     cube = meta = None
@@ -252,14 +291,62 @@ def run_ingest(args):
     store.put(f'{prefix}/manifest.json.gz', S.gz(T.dumps(man)), 'application/gzip')
     pointer = {'schema': 'climalytix.latest.v1', 'run': run_iso, 'runMs': run_ms,
                'manifest': f'{prefix}/manifest.json.gz', 'writtenAt': man['createdAt']}
-    store.put(f'{ARCHIVE_ROOT}/{args.grid}/latest.json.gz', S.gz(T.dumps(pointer)), 'application/gzip')
+    store.put(pointer_key, S.gz(T.dumps(pointer)), 'application/gzip')
     print(f'  published {prefix} as latest')
 
+    problems = read_back(store, pointer_key, pointer, [T.tile_key(prefix, *jobs[0]), T.tile_key(prefix, *jobs[-1])],
+                         len(T.tile_bytes(cube, *jobs[0], n)), len(T.tile_bytes(cube, *jobs[-1], n)))
+    if problems:
+        for p in problems:
+            print(f'read_back_failed: {p}', file=sys.stderr)
+        return 5      # before prune: a store we cannot read back must not cost us the previous run
+    print('  read back: pointer, manifest, first and last tile')
+
     prune(store, f'{ARCHIVE_ROOT}/{args.grid}/', prefix + '/', args.keep)
-    print(json.dumps({'run': run_iso, 'store': store.kind, 'tiles': len(jobs), 'bytes': total,
+    print(json.dumps({'status': 'published', 'run': run_iso, 'store': store.kind, 'tiles': len(jobs), 'bytes': total,
                       'missing': len(missing), 'clipped': sum(clipped.values()),
                       'seconds': round(time.time() - t0)}))
     return 0
+
+
+def preflight(store, prefix):
+    """Write, read and delete one small object. Raises on any failure, so a
+    wrong key / bucket / endpoint is found before the downloads start."""
+    key, body = f'{prefix}probe', b'climalytix ingest preflight'
+    store.put(key, body, 'text/plain')
+    if store.get(key) != body:
+        raise RuntimeError('wrote a probe object and read something else back')
+    store.delete_prefix(prefix)
+
+
+def read_pointer(store, key):
+    """The `latest` pointer as a dict, or None (absent or unreadable)."""
+    try:
+        raw = store.get(key)
+        return json.loads(gzip.decompress(raw)) if raw else None
+    except (OSError, ValueError):
+        return None
+
+
+def read_back(store, pointer_key, pointer, tile_keys, *tile_sizes):
+    """What a READER would find, checked against what was just written.
+    Returns a list of problems (empty = the run is really there)."""
+    problems = []
+    got = read_pointer(store, pointer_key)
+    if not got or got.get('runMs') != pointer['runMs'] or got.get('manifest') != pointer['manifest']:
+        return [f'latest pointer reads {got!r}, expected run {pointer["run"]}']
+    raw = store.get(pointer['manifest'])
+    try:
+        man = json.loads(gzip.decompress(raw)) if raw else None
+    except (OSError, ValueError):
+        man = None
+    if not man or man.get('runMs') != pointer['runMs']:
+        problems.append(f'manifest {pointer["manifest"]} missing or for another run')
+    for key, size in zip(tile_keys, tile_sizes):
+        b = store.get(key)
+        if b is None or len(b) != size:
+            problems.append(f'tile {key}: {"missing" if b is None else f"{len(b)} bytes"}, expected {size}')
+    return problems
 
 
 def prune(store, root, current, keep):
@@ -288,6 +375,10 @@ def main(argv=None):
     ap.add_argument('--upload-workers', type=int, default=32)
     ap.add_argument('--max-missing-frac', type=float, default=0.05)
     ap.add_argument('--out', default='climalytix-out', help='local dir when R2 is not configured')
+    ap.add_argument('--require-r2', action='store_true',
+                    help='exit 4 instead of a local dry run when the R2_* secrets are not set')
+    ap.add_argument('--skip-if-current', action='store_true',
+                    help='exit 0 without uploading when the chosen run is already published as latest')
     return run_ingest(ap.parse_args(argv))
 
 

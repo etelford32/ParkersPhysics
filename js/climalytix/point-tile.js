@@ -202,6 +202,38 @@ export function degradedNwp(site, grid, reason, nowMs) {
     };
 }
 
+/**
+ * Is the archive really SERVING what the ingest just wrote? The production
+ * probe's rule (scripts/check-climalytix-nwp.mjs, run by the ingest workflow
+ * after every publish). Returns { problems, retry }:
+ *   · any degraded answer is a problem, quoted with the route's own reason;
+ *   · a `series` with no finite temperature is a problem (tiles unreadable);
+ *   · with `expectRun`, an OLDER run is a problem that is worth RETRYING —
+ *     an isolate caches the manifest for 10 minutes — while r2_not_configured
+ *     and no_run_published are not (waiting cannot fix a missing secret or a
+ *     worker that wrote to a different bucket than the site reads).
+ */
+export function checkNwpProbe(body, { expectRun = null } = {}) {
+    const problems = [];
+    let retry = false;
+    if (!body || typeof body !== 'object') return { problems: ['the route did not answer JSON'], retry: true };
+    const reason = body.reasons?.[0] ?? null;
+    if (body.series == null) {
+        const hint = /^r2_not_configured/.test(reason ?? '') ? ' — the R2_* variables are not set on the Vercel deployment'
+            : /^no_run_published/.test(reason ?? '') ? ' — the site reads a bucket with no run in it (do the Actions and Vercel R2_BUCKET / R2_ACCOUNT_ID match?)'
+            : '';
+        retry = /^(manifest_read_failed|tile_read_failed)/.test(reason ?? '');
+        return { problems: [`no series: ${reason ?? 'no reason given'}${hint}`], retry };
+    }
+    if (body.freshness !== 'fresh') problems.push(`freshness is ${body.freshness} (run ${body.run}, ${Math.round((body.age_seconds ?? 0) / 3600)} h old)`);
+    if (!body.series.tempC?.some((x) => Number.isFinite(x))) problems.push('the series has no finite temperature');
+    if (expectRun && body.run !== expectRun) {
+        problems.push(`serving run ${body.run}, the ingest published ${expectRun}`);
+        retry = true;
+    }
+    return { problems, retry };
+}
+
 // ── Area reads: the heat-map field around a site ───────────────────────────
 //
 // The same tiles, read for a WINDOW of grid nodes instead of a 2×2 stencil.

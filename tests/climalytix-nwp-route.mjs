@@ -222,4 +222,26 @@ await ok('the field route degrades like the point route, and refuses a bad windo
     assert.equal((await call('lat=x&lon=0', 'nwp-field')).status, 400);
 });
 
+await ok('the production probe: a served run passes; every way of not serving one is named', async () => {
+    const { checkNwpProbe } = await import('../js/climalytix/point-tile.js');
+    resetBucket();
+    const good = (await call('lat=40.00&lon=-105.25&grid=1p00')).body;
+    assert.ok(good.series, 'the fixture run is served');
+    const fresh = { ...good, freshness: 'fresh', age_seconds: 3600 };
+    assert.deepEqual(checkNwpProbe(fresh, { expectRun: good.run }), { problems: [], retry: false });
+    // an older run than the one just published: a problem, and worth waiting out (manifest cache)
+    const older = checkNwpProbe(fresh, { expectRun: '2099-01-01T00:00Z' });
+    assert.match(older.problems[0], /serving run .* published 2099/);
+    assert.equal(older.retry, true);
+    // the state production was in for its first week
+    resetBucket({ publish: false });
+    const none = checkNwpProbe((await call('lat=40&lon=-105&grid=1p00')).body, { expectRun: good.run });
+    assert.match(none.problems[0], /no_run_published.*R2_BUCKET/);
+    assert.equal(none.retry, false, 'waiting does not publish a run');
+    resetBucket();
+    assert.match(checkNwpProbe({ ...fresh, freshness: 'expired', age_seconds: 60 * 3600 }).problems[0], /expired .*60 h old/);
+    assert.match(checkNwpProbe({ ...fresh, series: { tempC: [null, null] } }).problems[0], /no finite temperature/);
+    assert.equal(checkNwpProbe(null).problems.length, 1);
+});
+
 console.log(`\n${passed} passed`);

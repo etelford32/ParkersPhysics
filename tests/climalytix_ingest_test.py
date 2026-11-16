@@ -494,6 +494,73 @@ def _():
             assert np.allclose(series('cinJkg'), [-5.0 * L for L in leads], atol=0.05), series('cinJkg')
             assert np.allclose(series('liK'), [3.0 - 0.5 * L for L in leads], atol=0.005), series('liK')
             assert all(man['clipped'][k] == 0 for k in ('capeJkg', 'cinJkg', 'liK'))
+
+            # ── publish guards (2026-11-16: seven green scheduled runs that
+            # wrote every tile to the runner's temp dir and published nothing) ──
+            import contextlib
+            import io
+            import store as S
+
+            def quiet(a):
+                buf, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+                    code = W.run_ingest(a)
+                return code, buf.getvalue(), err.getvalue()
+
+            # 1. no R2 credentials + --require-r2 is exit 4, and it says which secrets
+            args.require_r2 = True
+            code, _, err = quiet(args)
+            assert code == 4 and 'R2_BUCKET' in err and 'r2_not_configured' in err, (code, err)
+            args.require_r2 = False
+
+            # 2. the run is already `latest`: skipped, and NOTHING upstream is read
+            def no_network(*a, **k):
+                raise AssertionError('skip-if-current must not fetch')
+            W.http_get, args.skip_if_current = no_network, True
+            code, out_text, _ = quiet(args)
+            last = json.loads(out_text.strip().splitlines()[-1])
+            assert code == 0 and last == {'status': 'skipped', 'run': '2026-11-07T00:00Z', 'store': 'local'}, last
+            # negative control: a DIFFERENT run is not skipped (it reaches the network stub)
+            args.run = '2026110706'
+            try:
+                quiet(args)
+                raise SystemExit('a new run was skipped as current')
+            except AssertionError as e:
+                assert 'must not fetch' in str(e)
+            args.run, args.skip_if_current, W.http_get = '2026110700', False, http_get
+
+            # 3. read-back sees what a reader would: intact → no problems;
+            #    a missing tile, a short tile and a pointer for another run each fail
+            st = S.LocalStore(out)
+            pkey = f'{W.ARCHIVE_ROOT}/0p25/latest.json.gz'
+            ptr = W.read_pointer(st, pkey)
+            first = root / 't' / 'r00-c00.i16'
+            tkey, size = f'{W.ARCHIVE_ROOT}/0p25/20261107T00Z/t/r00-c00.i16', first.stat().st_size
+            assert W.read_back(st, pkey, ptr, [tkey], size) == []
+            keep_bytes = first.read_bytes()
+            first.write_bytes(keep_bytes[:-2])
+            assert 'expected' in W.read_back(st, pkey, ptr, [tkey], size)[0]
+            first.unlink()
+            assert 'missing' in W.read_back(st, pkey, ptr, [tkey], size)[0]
+            first.write_bytes(keep_bytes)
+            other = dict(ptr, runMs=ptr['runMs'] + 1)
+            assert 'latest pointer reads' in W.read_back(st, pkey, other, [tkey], size)[0]
+
+            # 4. a store that cannot round-trip an object fails the preflight
+            #    BEFORE any download (exit 4), and leaves no probe behind
+            W.preflight(st, f'{W.ARCHIVE_ROOT}/0p25/_preflight/')
+            assert not (pathlib.Path(out) / W.ARCHIVE_ROOT / '0p25' / '_preflight').exists()
+
+            class Denied(S.LocalStore):
+                def put(self, *a, **k):
+                    raise PermissionError('AccessDenied')
+            real_open, W.http_get = S.open_store, no_network
+            S.open_store = lambda d: (Denied(d), None)
+            try:
+                code, _, err = quiet(args)
+            finally:
+                S.open_store = real_open
+            assert code == 4 and 'store_preflight_failed' in err and 'AccessDenied' in err, (code, err)
     finally:
         W.http_get, W.decode = saved[0], saved[1]
         os.environ.update(saved[2])
