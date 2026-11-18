@@ -74,9 +74,24 @@
   Gate `tests/earth-interior-amplitude.mjs` (6): energy conserved at every interface type to 2e-15 incl. 189
   post-critical cases, normal-incidence/identical-media/free-surface closed forms, spreading ≡ 1/L to 4e-6,
   t*_P 1.11 s / t*_S 5.02 s at 60° (empirical ≈ 1 / 4–5), PKiKP −45 dB below P at 40°, the PKP caustic and
-  Pdiff refused, and the raised-receiver chord to 0.6 % (h/v control misses by 700 %). NOT yet: the focal
-  mechanism (USGS moment tensors from the event detail feed), free-surface receiver amplification, site
-  response, absolute ground motion from Mw.
+  Pdiff refused, and the raised-receiver chord to 0.6 % (h/v control misses by 700 %). NOT yet: free-surface
+  receiver amplification, site response, absolute ground motion from Mw.
+- **Moment-tensor radiation SHIPPED (2026-11-18)** — `js/earth-interior/radiation.js` (PURE): the selected
+  event's USGS detail record (`properties.detail`, browser-direct) → the preferred `moment-tensor` product (USE
+  → NED: Mzz=Mrr, Mxx=Mtt, Myy=Mpp, Mxz=Mrt, Myz=−Mrp, Mxy=−Mtp), else a `focal-mechanism` (one nodal plane ⇒
+  a double couple), every key from a candidate list and the misses self-reported. Decomposed by Jacobi into
+  T/N/P, both nodal planes, M0, Mw, %DC. Each arrival's source term becomes |R| for the direction ITS ray
+  leaves the focus (take-off from p and PREM at the hypocentre, up-going for p/s/pP/sS; the long way round
+  leaves along azimuth + π) in its recorded polarisation; the signed R_P gives the direct P's first motion;
+  |R| < 0.2 × RMS is flagged 'near-nodal' (a few degrees of take-off error swing it far in dB). No mechanism ⇒
+  the RMS fallback, now exactly √(4/15) and √(1/5) per S polarisation (the old 0.52 / 0.63 were rounded), and
+  the panel says which. The panel draws the beachball (lower hemisphere, equal area) with every arrival's
+  take-off point. Gate `tests/earth-interior-radiation.mjs` (10): Box 4.4 ≡ M0(n dᵀ + d nᵀ); the tensor
+  contraction ≡ A&R (4.89) closed forms to 1e-13 at every direction (mirrored-strike control); ⟨R_P²⟩ = 4/15
+  and ⟨R_SV² + R_SH²⟩ = 2/5 by quadrature — the SV/SH SPLIT is mechanism-dependent (1 : 5 for a vertical
+  strike-slip), so the even split of the fallback is itself an average; R_P = ±1 on T/P and 0 on both nodal
+  planes; planes round-trip; USE→NED with a naive-mapping control; and end to end each arrival scales by
+  exactly |R|/RMS. NOT claimed: finite rupture/directivity, 3-D take-offs (slabs).
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that

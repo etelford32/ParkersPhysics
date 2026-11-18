@@ -28,6 +28,9 @@
 #   earth-interior-amplitude.mjs phase strengths: Zoeppritz energy conservation at every
 #                             interface type, closed forms, 1/L spreading in a uniform medium,
 #                             PREM t*, structure; station elevation vs the exact raised chord
+#   earth-interior-radiation.mjs the moment-tensor radiation pattern: Box 4.4 vs the fault
+#                             vectors, A&R closed forms, focal-sphere means, nodal planes,
+#                             USE→NED, USGS product parsing, end-to-end |R|/RMS scaling
 #   earth-interior-quakes.mjs the live view: USGS parsing, the default pick, the slice, the
 #                             arrivals at the viewer, rays that end AT the viewer, wavefronts
 name: earth-interior-kernels
@@ -92,3 +95,5 @@ jobs:
         run: node tests/earth-interior-quakes.mjs
       - name: amplitudes + station elevation
         run: node tests/earth-interior-amplitude.mjs
+      - name: moment-tensor radiation
+        run: node tests/earth-interior-radiation.mjs

@@ -33,6 +33,14 @@
  *     frequency per recorded wave: 1 Hz for P, 0.2 Hz for S (the bands they
  *     are usually read in). Disclosed; a different band changes the ratio.
  *
+ * RADIATION. With an event's moment tensor (`mechanism`, radiation.js —
+ * NED, normalised by M0) and the source→station azimuth, the source term is
+ * |R| for the direction THIS ray leaves the focus (its take-off angle from p
+ * and PREM's speed at the hypocentre; up-going for p, s, pP, sS …) in the
+ * recorded polarisation; the result carries the signed R (first-motion
+ * polarity) and a 'near-nodal' flag. Without one it is the focal-sphere RMS
+ * and the result says `radiationSource: 'rms'`.
+ *
  * NOT CLAIMED: the receiver's free-surface amplification (incident amplitude
  * is reported), site response, scattering, 3-D focusing, diffracted phases
  * (Pdiff/Sdiff have no ray-theory amplitude — null, with the reason), and
@@ -50,9 +58,11 @@
 
 import { R_EARTH_KM, premAt, discontinuities } from './prem.js';
 import { premPhaseModel, PHASE_INFO, DIFFRACTION_MAX_DEG } from './phases.js';
+import { RMS_RADIATION, takeoffAngle, rayRadiation } from './radiation.js';
 
 const DEG = Math.PI / 180;
-export const RADIATION = Object.freeze({ P: 0.52, SV: 0.63 / Math.SQRT2, SH: 0.63 / Math.SQRT2 });
+/** The source term when no mechanism is known: the focal-sphere RMS (radiation.js). */
+export const RADIATION = RMS_RADIATION;
 export const REF_FREQ_HZ = Object.freeze({ P: 1, S: 0.2 });
 export const SH_PHASES = Object.freeze(new Set(['S', 's', 'sS', 'SS', 'ScS']));
 /** Visibility classes (dB relative to the event's strongest arrival at this station). */
@@ -248,7 +258,7 @@ export function spreading(p, deltaRad, dDeltaDp, { rs, vs, vr, R = R_EARTH_KM })
  * { amp, parts: { source, spreading, interfaces, attenuation }, events, tStar, flags[] }
  * or { amp: null, reason } where ray theory does not give one.
  */
-export function phaseAmplitude(ray, { model = premPhaseModel(), sourceDepthKm = 0 } = {}) {
+export function phaseAmplitude(ray, { model = premPhaseModel(), sourceDepthKm = 0, mechanism = null, azimuthRad = null } = {}) {
     const info = PHASE_INFO[ray.name];
     if (!info) return { amp: null, reason: 'unknown phase' };
     if (info.kind === 'diffracted') return { amp: null, reason: 'diffracted — no ray-theory amplitude; it decays fast with distance past the core shadow' };
@@ -276,7 +286,16 @@ export function phaseAmplitude(ray, { model = premPhaseModel(), sourceDepthKm = 
             ? 'at a caustic — ray theory predicts a focus (strong, but its size is not finite in ray theory)'
             : 'at the epicentre or antipode — a focus ray theory cannot size', events, flags: [...flags, 'focus'] };
     }
-    const source = RADIATION[wS === 'P' ? 'P' : polarization] / (4 * Math.PI * mS.rho * vS ** 3);
+    let rad = RADIATION[wS === 'P' ? 'P' : polarization], radiation = null;
+    if (mechanism && Number.isFinite(azimuthRad)) {
+        const takeoffRad = takeoffAngle(ray.p, vS, rs, first.dir < 0);
+        if (takeoffRad !== null) {
+            radiation = { ...rayRadiation(mechanism, { takeoffRad, azimuthRad, wave: wS, polarization }), takeoffRad, azimuthRad };
+            rad = radiation.magnitude;
+            if (radiation.nearNodal) flags.push('near-nodal');
+        }
+    }
+    const source = rad / (4 * Math.PI * mS.rho * vS ** 3);
     const impedance = Math.sqrt((mS.rho * vS) / (mR.rho * vR));
     const transmission = Math.sqrt(events.reduce((s, e) => s * Math.max(0, e.E), 1));
     const ts = tStar(ray, { model });
@@ -286,6 +305,7 @@ export function phaseAmplitude(ray, { model = premPhaseModel(), sourceDepthKm = 
         amp: source * impedance * sp * transmission * atten,
         parts: { source, impedance, spreading: sp, interfaces: transmission, attenuation: atten },
         events, tStar: ts, recordedAs: wR === 'P' ? 'P' : polarization, flags,
+        radiation, radiationSource: radiation ? 'mechanism' : 'rms',
     };
 }
 

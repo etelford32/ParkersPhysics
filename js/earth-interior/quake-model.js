@@ -61,6 +61,7 @@ export function parseUsgsFeed(json) {
             mag, magType: pr.magType ?? null, place: pr.place ?? null, timeMs,
             updatedMs: Number.isFinite(num(pr.updated)) ? num(pr.updated) : null,
             url: typeof pr.url === 'string' ? pr.url : null,
+            detail: typeof pr.detail === 'string' && /^https:\/\/earthquake\.usgs\.gov\//.test(pr.detail) ? pr.detail : null,
             tsunami: pr.tsunami === 1, alert: pr.alert ?? null, status: pr.status ?? null,
         });
     }
@@ -109,6 +110,8 @@ export function siteFromLocation(loc) {
  */
 export function arrivalsAt(quake, site, table, { model = premPhaseModel(), correct = true, amplitudes = true } = {}) {
     const geo = pathGeometry(quake.lat, quake.lon, site.lat, site.lon);
+    // The event's own mechanism (radiation.js decompose) when published; else the RMS fallback.
+    const mechanism = quake.mechanism?.mHat ? quake.mechanism : null;
     const all = arrivals(geo.deltaDeg, table);
     // Station elevation (km above PREM's sea-level surface); unknown ⇒ no correction, and the row says so.
     const hKm = Number.isFinite(site.elevationM) ? site.elevationM / 1000 : null;
@@ -117,23 +120,25 @@ export function arrivalsAt(quake, site, table, { model = premPhaseModel(), corre
         if (seen.has(a.phase)) { seen.get(a.phase).laterBranches++; continue; }
         const info = PHASE_INFO[a.phase];
         const ray = correct || amplitudes ? rayFor(a, quake.depthKm, model) : null;
-        let corrS = null, elevS = null, amp = null, ampReason = null;
-        if (correct && ray) {
-            // A ray that went the LONG way round (Δ_ray > 180°) leaves along the opposite azimuth.
-            corrS = ellipticityCorrection(ray, model, { thetaS: geo.thetaS, azimuthRad: a.deltaRay > 180 ? geo.azimuthRad + Math.PI : geo.azimuthRad });
-        }
+        let corrS = null, elevS = null, amp = null, ampReason = null, radiation = null, nearNodal = false;
+        // A ray that went the LONG way round (Δ_ray > 180°) leaves along the opposite azimuth.
+        const azimuthRad = a.deltaRay > 180 ? geo.azimuthRad + Math.PI : geo.azimuthRad;
+        if (correct && ray) corrS = ellipticityCorrection(ray, model, { thetaS: geo.thetaS, azimuthRad });
         // The wave the station RECORDS is the last leg's (SKS arrives as S, ScP as P).
         const lastSet = ray?.legs.at(-1)?.set;
         const recorded = lastSet ? (lastSet === 'P' ? 'P' : 'S') : (a.phase.endsWith('diff') ? a.phase[0] : info.wave);
         if (correct && hKm !== null) elevS = elevationCorrection(a.p, recorded, hKm);
         if (amplitudes && ray) {
-            const r = phaseAmplitude(ray, { model, sourceDepthKm: quake.depthKm });
+            const r = phaseAmplitude(ray, { model, sourceDepthKm: quake.depthKm, mechanism: mechanism?.mHat ?? null, azimuthRad });
             amp = r.amp; ampReason = r.reason ?? null;
+            radiation = r.radiation ?? null; nearNodal = !!r.flags?.includes('near-nodal');
         } else if (amplitudes) ampReason = 'no ray';
         const totalS = a.timeS + (corrS ?? 0) + (elevS ?? 0);
         const row = { phase: a.phase, kind: info.kind, family: info.family, wave: info.wave, recorded, p: a.p, slownessSDeg: a.p * DEG,
             deltaRay: a.deltaRay, timeS: a.timeS, corrS, elevS, totalS, arriveMs: quake.timeMs + totalS * 1000, laterBranches: 0,
-            amp, ampReason, db: null, strength: null };
+            amp, ampReason, db: null, strength: null, radiation, nearNodal,
+            // First motion is only read on the DIRECT P (no reflection or conversion in between to flip it).
+            polarity: radiation && (a.phase === 'P' || a.phase === 'p') ? (radiation.signed >= 0 ? 'up' : 'down') : null };
         seen.set(a.phase, row); rows.push(row);
     }
     rows.sort((x, y) => x.totalS - y.totalS);
@@ -144,7 +149,7 @@ export function arrivalsAt(quake, site, table, { model = premPhaseModel(), corre
         const ref = Math.max(0, ...inBand.map((r) => r.amp));
         for (const r of inBand) { const v = visibility(r.amp, ref); r.db = v.db; r.strength = v.label; }
     }
-    return { geometry: geo, rows, elevationKm: hKm };
+    return { geometry: geo, rows, elevationKm: hKm, radiationSource: mechanism ? 'mechanism' : 'rms' };
 }
 
 /** The ray behind an interpolated arrival (diffracted phases carry their arc). */

@@ -11,7 +11,12 @@
  *   · the stage opens on the viewer: the slice through epicentre, viewer and
  *     centre, seen from above the viewer's side; the Earth never spins;
  *   · the clock is the WALL clock (waves drawn where they are right now) or a
- *     replay from the origin at ×1 / ×10 / ×60. Scrubbing pauses it.
+ *     replay from the origin at ×1 / ×10 / ×60. Scrubbing pauses it;
+ *   · the selected event's MECHANISM comes from its USGS detail record
+ *     (properties.detail, browser-direct): the moment-tensor product, else a
+ *     focal mechanism (radiation.js parseMechanism). When it lands the event is
+ *     re-traced with its own radiation pattern; none published ⇒ the
+ *     focal-sphere average, and the panel says which.
  * A dead feed draws NO quake and says so — never a demo dressed as live.
  */
 
@@ -19,6 +24,8 @@ import { USGS_FEEDS, parseUsgsFeed, mergeQuakes, pickDefaultQuake, siteFromLocat
 import { tileXY, tileSampler, demPath, TILE_PX } from '../climalytix/terrain.js';
 import { seismicSliceTable } from './page-model.js';
 import { loadUserLocation, saveUserLocation, geocodeQuery } from '../user-location.js';
+import { parseMechanism } from './radiation.js';
+import { drawBeachball } from './beachball-view.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -30,6 +37,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         quakes: [], feeds: { day: null, week: null }, errors: {}, selected: null, reason: null, userPicked: false,
         site: siteFromLocation(loadUserLocation()), payload: null, list: new Map(), active: false,
         clock: { mode: 'live', speed: 1, anchorWall: 0, anchorT: 0, paused: false }, reqId: 0,
+        mechs: new Map(),                      // event id → { state: 'loading'|'ok'|'none'|'error', mech, note }
     };
     const worker = new Worker(new URL('./quake-worker.js', import.meta.url), { type: 'module' });
     let layer = null;
@@ -78,6 +86,30 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         worker.postMessage({ type: 'list', id: 0, quakes: qs, site: S.site });
     }
 
+    // The quake the worker traces carries its mechanism (only the decomposed numbers it needs).
+    function trace() {
+        const q = S.selected; if (!q) return;
+        const m = S.mechs.get(q.id);
+        const mechanism = m?.state === 'ok' ? { mHat: m.mech.mHat } : null;
+        S.reqId++;
+        worker.postMessage({ type: 'select', id: S.reqId, quake: { ...q, mechanism }, site: S.site });
+    }
+    async function loadMechanism(q) {
+        if (!q?.detail || S.mechs.has(q.id)) { if (!q?.detail && q && !S.mechs.has(q.id)) S.mechs.set(q.id, { state: 'none', note: 'no USGS detail record' }); return; }
+        S.mechs.set(q.id, { state: 'loading' });
+        let entry;
+        try {
+            const r = await fetch(q.detail, { signal: AbortSignal.timeout(20_000) });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const mech = parseMechanism(await r.json());
+            entry = mech.kind ? { state: 'ok', mech } : { state: 'none', note: mech.reason };
+        } catch (err) { entry = { state: 'error', note: err.message || String(err) }; }
+        S.mechs.set(q.id, entry);
+        if (S.selected?.id !== q.id) return;
+        renderArrivals();
+        if (entry.state === 'ok') trace();
+    }
+
     function select(quake, reason = 'picked', byUser = true) {
         S.selected = quake ?? null; S.reason = reason; S.userPicked = byUser || S.userPicked; S.payload = null;
         S.clock = { mode: 'live', speed: 1, anchorWall: 0, anchorT: 0, paused: false };
@@ -85,8 +117,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         if (quake && (Date.now() - quake.timeMs) / 1000 > WAVE_WINDOW_S) S.clock = { mode: 'replay', speed: 10, anchorWall: Date.now(), anchorT: 0, paused: false };
         renderArrivals(); renderList(); renderTimebar();
         if (!quake) { apply(); return; }
-        S.reqId++;
-        worker.postMessage({ type: 'select', id: S.reqId, quake, site: S.site });
+        trace(); loadMechanism(quake);
         if (S.active) aim();
     }
 
@@ -126,7 +157,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         if (S.site !== want) return;                         // the viewer moved meanwhile
         S.site = siteWithElevation(want, h);
         renderSite();
-        if (S.selected) { S.reqId++; worker.postMessage({ type: 'select', id: S.reqId, quake: S.selected, site: S.site }); }
+        if (S.selected) trace();
     }
     elevate();
 
@@ -209,9 +240,11 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         if (!q) { host.innerHTML = '<p class="ei-muted">No earthquake selected.</p>'; return; }
         const head = `<div class="ei-colhead"><div><b>M${q.mag.toFixed(1)} ${esc(q.place ?? '')}</b> <span class="ei-muted">${new Date(q.timeMs).toISOString().replace('T', ' ').slice(0, 19)} UTC · ${q.depthKm.toFixed(1)} km deep${q.status ? ` · ${esc(q.status)}` : ''}</span></div>${q.url ? `<a class="ei-btn" href="${esc(q.url)}" target="_blank" rel="noopener">USGS event page</a>` : ''}</div>`;
         if (!S.payload) { host.innerHTML = `${head}<p class="ei-muted">Tracing rays through PREM…</p>`; return; }
-        const { geometry, rows } = S.payload.arrivals, now = Date.now();
+        const { geometry, rows, radiationSource } = S.payload.arrivals, now = Date.now();
+        const byMech = radiationSource === 'mechanism';
         host.innerHTML = `${head}
-            <p class="ei-muted">${geometry.deltaDeg.toFixed(2)}° (${(geometry.deltaRad * 6371).toFixed(0)} km) from ${esc(S.site.name)} · times from the origin with ellipticity${S.payload.arrivals.elevationKm != null ? ` and station elevation (${Math.round(S.payload.arrivals.elevationKm * 1000).toLocaleString('en-US')} m)` : ''} corrected · strength = ray-theory amplitude against the strongest arrival in the same band</p>
+            ${mechanismBlock(q, rows, byMech)}
+            <p class="ei-muted">${geometry.deltaDeg.toFixed(2)}° (${(geometry.deltaRad * 6371).toFixed(0)} km) from ${esc(S.site.name)} · times from the origin with ellipticity${S.payload.arrivals.elevationKm != null ? ` and station elevation (${Math.round(S.payload.arrivals.elevationKm * 1000).toLocaleString('en-US')} m)` : ''} corrected · strength = ray-theory amplitude against the strongest arrival in the same band, ${byMech ? 'with <b>this event’s radiation pattern</b>' : 'with the focal-sphere <b>average</b> radiation (no mechanism yet)'}</p>
             <div class="ei-table-wrap"><table class="ei-table"><thead><tr><th>Phase</th><th>Path</th><th>Strength</th><th class="ei-num">Travel time</th><th class="ei-num" title="Ellipticity + station elevation">Corrections</th><th class="ei-num">Arrives (local)</th><th class="ei-num">Status</th></tr></thead><tbody>
             ${rows.map((r) => `<tr class="${r.strength === 'very weak' ? 'ei-faint' : ''}"><td><i class="ei-wave" style="background:${r.recorded === 'S' ? '#d95926' : '#3987e5'}" title="Recorded as ${r.recorded === 'S' ? 'S (horizontal)' : 'P (vertical)'}"></i><b>${esc(r.phase)}</b>${r.laterBranches ? ` <span class="ei-flag" title="A triplication: ${r.laterBranches} later branch arrival(s) of this phase">+${r.laterBranches}</span>` : ''}</td>
                 <td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td>
@@ -221,13 +254,54 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
                 <td class="ei-num">${localTime(r.arriveMs)}</td>
                 <td class="ei-num">${r.arriveMs <= now ? '<span class="ei-muted">arrived</span>' : `in ${fmtDuration((r.arriveMs - now) / 1000)}`}</td></tr>`).join('')}
             </tbody></table></div>`;
+        const cv = host.querySelector('#ei-beachball');
+        const m = S.mechs.get(q.id);
+        if (cv && m?.state === 'ok') {
+            const marks = byMech ? rows.filter((r) => r.radiation).map((r) => ({ phase: r.phase, recorded: r.recorded, takeoffRad: r.radiation.takeoffRad, azimuthRad: r.radiation.azimuthRad })) : [];
+            drawBeachball(cv, m.mech.mHat, marks);
+        }
+    }
+
+    const f0 = (x) => `${Math.round(x)}°`;
+    function mechanismBlock(q, rows, byMech) {
+        const m = S.mechs.get(q.id);
+        if (!m || m.state === 'loading') return '<p class="ei-muted ei-mech-note">Fetching this event’s focal mechanism from USGS…</p>';
+        if (m.state !== 'ok') {
+            const why = m.state === 'error' ? `USGS detail unavailable (${esc(m.note)})` : 'No moment tensor or focal mechanism published for this event yet (USGS usually publishes one for larger events, roughly M5 and up, within hours)';
+            return `<p class="ei-muted ei-mech-note">${why} — strengths use the focal-sphere average, so a station near a nodal plane may see far less than listed.</p>`;
+        }
+        const x = m.mech, [a, b] = x.planes;
+        const P = rows.find((r) => r.phase === 'P' || r.phase === 'p');
+        const pol = P?.polarity ? `<li>First motion of <b>${esc(P.phase)}</b> here: <b>${P.polarity === 'up' ? 'up (compression)' : 'down (dilatation)'}</b>${P.nearNodal ? ' — near a nodal plane, so it may read either way' : ''}</li>` : '';
+        const nodal = rows.filter((r) => r.nearNodal).map((r) => r.phase);
+        return `<div class="ei-mech">
+            <canvas id="ei-beachball" role="img" aria-label="Focal mechanism: nodal planes ${f0(a.strike)}/${f0(a.dip)}/${f0(a.rake)} and ${f0(b.strike)}/${f0(b.dip)}/${f0(b.rake)}"></canvas>
+            <div><b>${esc(mechType(a))}</b> <span class="ei-muted">· ${x.kind === 'tensor' ? 'moment tensor' : 'focal mechanism (double couple)'}${x.source ? ` · ${esc(x.source)}` : ''}${x.method ? ` · ${esc(x.method)}` : ''}</span>
+            <ul class="ei-mech-list">
+                <li>Nodal planes (strike/dip/rake) <b>${f0(a.strike)}/${f0(a.dip)}/${f0(a.rake)}</b> and <b>${f0(b.strike)}/${f0(b.dip)}/${f0(b.rake)}</b></li>
+                ${x.mw ? `<li>M0 ${x.m0.toExponential(2)} N·m · Mw ${x.mw.toFixed(2)}${x.kind === 'tensor' ? ` · ${Math.round(Math.max(0, x.percentDC))} % double couple` : ''}</li>` : ''}
+                ${pol}
+                ${nodal.length ? `<li class="ei-warn">Near a nodal plane at this station: <b>${nodal.map(esc).join(', ')}</b> — predicted weak, but a few degrees of take-off error swings it far in dB</li>` : ''}
+            </ul>
+            <span class="ei-muted">Lower hemisphere, equal area, north up; shaded = compression. Dots: where each arrival’s ray leaves the focus (<span style="color:#3987e5">●</span> recorded as P, <span style="color:#d95926">○</span> as S; up-going rays at their antipode). Point source, PREM take-offs.</span></div>
+        </div>`;
+    }
+    // A plain-language class from the rake (Frohlich-style bins on one plane — a label, not a measurement).
+    function mechType(pl) {
+        const r = ((pl.rake + 180) % 360 + 360) % 360 - 180;
+        if (Math.abs(r) <= 30 || Math.abs(r) >= 150) return 'Strike-slip fault';
+        if (r >= 60 && r <= 120) return 'Thrust (reverse) fault';
+        if (r <= -60 && r >= -120) return 'Normal fault';
+        return r > 0 ? 'Oblique thrust' : 'Oblique normal fault';
     }
 
     function strengthCell(r) {
         if (r.db == null) return `<span class="ei-muted" title="${esc(r.ampReason ?? '')}">${/caustic|focus/.test(r.ampReason ?? '') ? 'focused — not sized' : /diffract/.test(r.ampReason ?? '') ? 'diffracted — fades' : '—'}</span>`;
         const w = Math.max(4, Math.min(100, (r.db + 60) / 60 * 100)), dbTxt = `${Math.round(r.db) || 0} dB`;
         const band = r.recorded === 'S' ? 'S band · 0.2 Hz' : 'P band · 1 Hz';
-        return `<span class="ei-strength" title="${dbTxt} against the strongest ${band} arrival"><span class="ei-sbar"><span style="width:${w.toFixed(0)}%;background:${r.recorded === 'S' ? '#d95926' : '#3987e5'}"></span></span>${esc(r.strength)} <span class="ei-muted">${dbTxt}</span></span>`;
+        const extra = (r.nearNodal ? ' <span class="ei-flag" title="Near a nodal plane of this event: predicted weak, but sensitive to the take-off angle">nodal</span>' : '')
+            + (r.polarity ? ` <span class="ei-pol" title="First motion: ${r.polarity === 'up' ? 'up (compression)' : 'down (dilatation)'}">${r.polarity === 'up' ? '↑' : '↓'}</span>` : '');
+        return `<span class="ei-strength" title="${dbTxt} against the strongest ${band} arrival"><span class="ei-sbar"><span style="width:${w.toFixed(0)}%;background:${r.recorded === 'S' ? '#d95926' : '#3987e5'}"></span></span>${esc(r.strength)} <span class="ei-muted">${dbTxt}</span>${extra}</span>`;
     }
     const sgn = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(2)}`;
     function corrCell(r) {
