@@ -8,17 +8,33 @@
 #                             jump list; Grayver 2017 σ(r) vs the pinned
 #                             ChaosMagPy file; the 1-D plane-wave impedance vs
 #                             closed forms (half-space, split layer, thin sheet)
+#   earth-interior-geoelectric.mjs  the baked 1-D ground columns (builder --check,
+#                             pins, Quebec vs TPL-007 Table 4), the exact causal
+#                             kernel (half-space closed form + Stehfest on layered
+#                             columns), sign by Poynting flux, sinusoid error
+#                             budget, warm-up, gaps, TPL-007 β ranking, the
+#                             nowcast, and the relay's `y` passthrough
 name: earth-interior-kernels
 
 on:
   push:
     paths:
+      - 'data/earth-interior/**'
+      - 'scripts/build-ground-models.mjs'
+      - 'api/geomag/observatories.js'
+      - 'js/geomag/**'
+      - 'js/frequency-analysis.js'
       - 'js/earth-interior/**'
       - 'tests/earth-interior-*.mjs'
       - 'tests/fixtures/earth-interior/**'
       - '.github/workflows/earth-interior-kernels.yml'
   pull_request:
     paths:
+      - 'data/earth-interior/**'
+      - 'scripts/build-ground-models.mjs'
+      - 'api/geomag/observatories.js'
+      - 'js/geomag/**'
+      - 'js/frequency-analysis.js'
       - 'js/earth-interior/**'
       - 'tests/earth-interior-*.mjs'
       - 'tests/fixtures/earth-interior/**'
@@ -34,9 +50,9 @@ concurrency:
 
 jobs:
   kernels:
-    name: PREM + conductivity kernels (node)
+    name: PREM, conductivity, geoelectric kernels (node)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,3 +60,7 @@ jobs:
           node-version: '22'
       - name: PREM + conductivity
         run: node tests/earth-interior-prem.mjs
+      - name: ground-model bake is current
+        run: node scripts/build-ground-models.mjs --check
+      - name: geoelectric kernel + nowcast
+        run: node tests/earth-interior-geoelectric.mjs
