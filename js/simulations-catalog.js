@@ -154,7 +154,7 @@ export const SIMULATIONS = [
     { id: 'earth-interior', href: 'earth-interior.html', title: 'Inner Earth',
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'dynamo', badge: 'NEW',
-      blurb: 'A true-radius cutaway from PREM, mantle conductivity, and the live geoelectric field at USGS observatories.' },
+      blurb: 'Live earthquakes: seismic waves crossing a true-radius Earth to you, plus PREM structure and geoelectrics.' },
     { id: 'upper-atmosphere', href: 'upper-atmosphere.html', title: 'Upper Atmosphere',
       category: 'earth-orbit', group: 'earth-systems',
       tier: 'public', icon: 'atmosphere',

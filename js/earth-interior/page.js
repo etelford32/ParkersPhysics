@@ -56,7 +56,7 @@ function renderQuantityChips() {
 
 function renderProbe(hit) {
     const box = $('#ei-probe');
-    if (!hit) { box.innerHTML = '<span class="ei-muted">Hover the cut faces for the column at any depth · click a station</span>'; setProbeDepth(null); return; }
+    if (!hit) { box.innerHTML = `<span class="ei-muted">${$('#ei-stage')?.classList.contains('is-quakes') ? 'Hover the slice for the structure at any depth · click a dot to show that earthquake' : 'Hover the cut faces for the column at any depth · click a station'}</span>`; setProbeDepth(null); return; }
     if (hit.kind === 'interior') {
         const p = probeAt(hit.rKm);
         setProbeDepth(p.depthKm);
@@ -459,12 +459,22 @@ async function boot() {
         });
         renderLegend();
         state.stage.loadMap('assets/earth/day-2k.webp').catch(() => { $('#ei-mapnote').textContent = 'Surface map unavailable — plain ocean colour.'; });
-        document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => state.stage.setView(b.dataset.view)));
-        window.__earthInterior = { state, stage: state.stage };
     } catch (err) {
         $('#ei-stage').classList.add('is-failed');
         $('#ei-stage-msg').textContent = `3D view unavailable (${err.message}). The charts below still work.`;
     }
+    // The LIVE earthquake view is the stage's default mode; its panels work without WebGL too.
+    const { mountLiveQuakes } = await import('./live-quakes.js');
+    state.live = mountLiveQuakes({ stage: state.stage });
+    const setMode = (view) => {
+        document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+        $('#ei-stage').classList.toggle('is-quakes', view === 'quakes');
+        state.live.setActive(view === 'quakes');
+        if (view !== 'quakes') state.stage?.setView(view);
+    };
+    document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.view)));
+    setMode('quakes');
+    window.__earthInterior = { state, stage: state.stage, live: state.live };
     let rt = null;
     new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(renderProfile, 150); }).observe($('#ei-profile'));
     await refreshNowcast();

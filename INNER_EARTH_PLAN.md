@@ -35,6 +35,32 @@
   external oracle — needs pip on a runner), reflections/Pdiff/up-going rays from deep sources,
   ellipticity. Scar: the page's layout wrapper and the charts' gridlines shared `.ei-grid`, and the
   wrapper's `stroke` was INHERITED by every SVG label, washing them out — gridlines are `.ei-gridline`.
+- **T1b + the LIVE EARTHQUAKE VIEW SHIPPED (2026-11-18, owner: "a real time 3D model of the Earth, no rotation, defaults to user location")** —
+  `js/earth-interior/phases.js` (PURE) composes every phase from radially monotone LEGS on the same Bullen
+  shells (same p = Snell's law at every boundary): P/S, up-going p/s, PKP/PKIKP, SKS/SKIKS (S mantle, P core),
+  PcP/ScS/ScP/PcS/PKiKP, pP/sP/sS, PP/SS, Pdiff/Sdiff (grazing ray + an arc at the CMB's slowness, drawn to 160°),
+  branch ends BISECTED to the exact edge (ScP ended 1° early on a fixed sweep), Δ folded past 180°. Shell η is
+  cached and legs binary-search their shells (5 s → 0.9 s per depth, measured); acos(p/η) is written as
+  atan2(√((η−p)(η+p)), p) in BOTH kernels — acos lost half its digits at the turning shell and the τ-p identity
+  read 4e-3 instead of 1e-7. `js/earth-interior/ellipticity.js` (PURE): Clairaut on PREM's density (hydrostatic
+  surface 1/300.0, CMB 1/392.8; steps ≤ r/20 near the centre — at r/5 a spurious dip survived) and the
+  first-order correction δT = −∫g dt − ∫σ√(η²−p²) dg along each phase's own path (map level surfaces to spheres:
+  only the metric changes, no boundary terms, no coefficient table); Clairaut's SHAPE scaled to the observed
+  WGS84 surface (disclosed). Gate `tests/earth-interior-phases.mjs` (10): Fermat mirror paths in a uniform
+  medium (pP is a SADDLE/MAXIMUM off the inside of a sphere — the oracle finds every stationary bounce),
+  ScP ≡ PcS reciprocity with a deep-source control, PP = 2P(Δ/2), Pdiff continuity, τ-p to 1e-7, SKS overtakes S
+  at 83°, Maclaurin/Roche exact, the exact ellipsoid chord (slope-term control misses 47 %), two-point RK4
+  shooting through a flattened model, the p = 0 polar/equatorial ratio exactly −2. The LIVE view
+  (`quake-model.js` PURE + `quake-worker.js` + `seismic-layer.js` + `live-quakes.js`, the stage's DEFAULT mode):
+  USGS real-time GeoJSON browser-direct (day feed /60 s, M4.5+ week /10 min), the viewer from the site's ONE
+  location store (`ppx_user_location`; none ⇒ the flagged NEIC fallback), the great-circle SLICE through
+  epicentre, viewer and centre (`stage.setSlice`, the half on +n discarded, one disk closes it; neutral layer
+  tints so blue P / orange S fronts read), the camera opening above the viewer, NO spin, a wall clock (waves
+  where they are now) or a replay ×1/×10/×60, every phase's arrival at the viewer with its ellipticity
+  correction and local clock time, and the list's ≈ first P (depth-INTERPOLATED between 14 bins — nearest-bin
+  missed by 3.8 s; now 0.15 s). Ray tracing runs in a module Worker (1.6 s per selection froze the stage). A dead
+  feed draws NO quake and says so. Gate `tests/earth-interior-quakes.mjs` (9). NOT yet: amplitudes, station
+  elevation, 3-D structure, a browser smoke spec (the sandbox has no `@playwright/test`).
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that

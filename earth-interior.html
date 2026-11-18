@@ -132,6 +132,29 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ei-layerlab { fill: #c3c2b7; font-size: 11px; opacity: .8; }
 .ei-seis-foot { font-size: 12px; margin: 8px 0 0; }
 .ei-seis-foot code { font-size: 11px; }
+#ei-stage.is-quakes #ei-qbox, #ei-stage.is-quakes #ei-legend { display: none; }
+#ei-stage:not(.is-quakes) .ei-qonly { display: none; }
+#ei-views .ei-btn[aria-pressed="true"] { color: #fff; background: #1c5cab; border-color: #3987e5; }
+#ei-quakehud { top: 12px; left: 12px; width: min(420px, calc(100% - 24px)); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+#ei-quakehud span { color: var(--ei-text-2); }
+.ei-live { color: #ff8a5c; } .ei-replay { color: #9ec5f4; }
+#ei-timebar { left: 12px; bottom: 12px; width: min(560px, calc(100% - 420px)); min-width: 300px; display: flex; flex-direction: column; gap: 6px; }
+.ei-tb-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.ei-tlabel { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ei-text-2); }
+#ei-tscrub { width: 100%; accent-color: #3987e5; }
+.ei-qlegend { display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: 11px; color: var(--ei-text-2); }
+.ei-qlegend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.ei-qlegend i.ei-dash { background: repeating-linear-gradient(90deg, #c3c2b7 0 4px, transparent 4px 7px); }
+.ei-mlabel--epi { color: #ffb08a; } .ei-mlabel--site { color: #fff; }
+.ei-site { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 13px; margin: 0 0 10px; }
+.ei-site input { background: var(--ei-surface-2); color: var(--ei-text); border: 1px solid var(--ei-line); border-radius: 6px; padding: 6px 8px; min-width: 0; width: 200px; }
+.ei-live-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 1100px) { .ei-live-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); } }
+.ei-h3 { font-size: 14px; margin: 4px 0 6px; }
+.ei-qlist-wrap { max-height: 460px; overflow-y: auto; }
+.ei-table tr[data-qid] { cursor: pointer; } .ei-table tr[data-qid]:hover { background: #13203a; }
+.ei-wave { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+.ei-small { font-size: 12px; }
 .ei-notes { font-size: 13px; color: var(--ei-text-2); margin: 0; padding-left: 18px; } .ei-notes li { margin: 4px 0; }
 .ei-notes b { color: var(--ei-text); }
 @media (max-width: 640px) {
@@ -143,6 +166,13 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     #ei-views { top: auto; right: 8px; bottom: 104px; padding: 4px; }
     #ei-legend { left: 8px; right: 8px; bottom: 8px; width: auto; padding: 6px 8px; }
     #ei-probe { display: none; }
+    #ei-stage.is-quakes { height: 600px; }
+    #ei-quakehud { left: 8px; right: 8px; top: 8px; width: auto; padding: 6px 8px; font-size: 12px; }
+    #ei-quakehud span:last-child:empty { display: none; }
+    #ei-timebar { left: 8px; right: 8px; bottom: 8px; width: auto; min-width: 0; padding: 6px 8px; gap: 4px; }
+    #ei-timebar .ei-qlegend .ei-muted { display: none; }
+    #ei-stage.is-quakes #ei-views { bottom: auto; top: auto; left: 8px; right: 8px; bottom: 132px; justify-content: center; }
+    #ei-views .ei-btn { padding: 6px 8px; font-size: 12px; }
 }
 </style>
 </head>
@@ -154,24 +184,50 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 <header class="ei-wrap ei-hero">
     <h1>Inner Earth</h1>
-    <span class="ei-badge">Structure · conductivity · live geoelectric field</span>
-    <p>Earth at true radii: seismic structure from PREM, mantle conductivity from Grayver et al. (2017), and the surface
-       electric field that geomagnetic activity drives through the ground at USGS observatories — computed minute by minute.</p>
+    <span class="ei-badge">Live earthquakes · structure · geoelectric field</span>
+    <p>Earth at true radii, in real time: today's earthquakes from USGS with their seismic waves crossing the planet toward
+       your location — traced through PREM, ellipticity corrected — plus mantle conductivity from Grayver et al. (2017) and the
+       surface electric field geomagnetic activity drives through the ground at USGS observatories.</p>
 </header>
 
 <main id="main-content" class="ei-wrap">
-    <section id="ei-stage" aria-label="Cutaway Earth">
+    <section id="ei-stage" class="is-quakes" aria-label="Earth's interior, live">
         <canvas id="ei-canvas" aria-label="3D cutaway of Earth's interior. Drag to rotate, scroll to zoom."></canvas>
         <div id="ei-labels" aria-hidden="true"></div>
         <div class="ei-overlay" id="ei-qbox"><span class="ei-olabel">Cut faces show</span><div id="ei-qchips" role="group" aria-label="Quantity on the cut faces"></div></div>
-        <div class="ei-overlay" id="ei-views"><button type="button" class="ei-btn" data-view="cutaway">Cutaway</button><button type="button" class="ei-btn" data-view="observatories">Observatories</button></div>
+        <div class="ei-overlay" id="ei-views" role="group" aria-label="Stage view"><button type="button" class="ei-btn" data-view="quakes" aria-pressed="true">Earthquakes · live</button><button type="button" class="ei-btn" data-view="cutaway" aria-pressed="false">Structure</button><button type="button" class="ei-btn" data-view="observatories" aria-pressed="false">Observatories</button></div>
+        <div class="ei-overlay ei-qonly" id="ei-quakehud" aria-live="polite"><b>Earthquakes</b><span>Waiting for the USGS feed…</span></div>
+        <div class="ei-overlay ei-qonly" id="ei-timebar">
+            <div class="ei-tb-row" role="group" aria-label="Clock"><button type="button" class="ei-chip" data-clock="live" aria-pressed="true">Live</button><button type="button" class="ei-chip" data-clock="1">Replay ×1</button><button type="button" class="ei-chip" data-clock="10">×10</button><button type="button" class="ei-chip" data-clock="60">×60</button><span id="ei-tlabel" class="ei-tlabel">—</span></div>
+            <input id="ei-tscrub" type="range" min="0" max="3600" step="1" value="0" aria-label="Seconds after the origin">
+            <div class="ei-qlegend"><span><i style="background:#3987e5"></i>P wave</span><span><i style="background:#d95926"></i>S wave</span><span><i class="ei-dash"></i>reflected / bounced</span><span class="ei-muted">dots = wavefronts · bright dots = the waves heading to you</span></div>
+        </div>
         <div class="ei-overlay" id="ei-legend"></div>
         <div class="ei-overlay" id="ei-probe" aria-live="polite"></div>
         <div id="ei-stage-msg"></div>
     </section>
-    <p class="ei-stage-foot">True radii (crust and ocean are thinner than a pixel at this scale). PREM is a 1-D reference: the cut faces are the same in every direction. Static lighting; surface map NASA Blue Marble (archival). <span id="ei-mapnote"></span></p>
+    <p class="ei-stage-foot"><b>Earthquakes · live</b>: the cut is the great-circle plane through the epicentre, your location and Earth's centre — every ray between them lies in it. The planet does not spin; it is Earth-fixed. <b>Structure</b>: true radii (crust and ocean are thinner than a pixel at this scale). PREM is a 1-D reference: the cut faces are the same in every direction. Static lighting; surface map NASA Blue Marble (archival). <span id="ei-mapnote"></span></p>
 
     <div class="ei-grid">
+        <section class="ei-panel ei-span" aria-labelledby="ei-live-h">
+            <h2 id="ei-live-h">Earthquakes, live — when the waves reach you</h2>
+            <p><span id="ei-qfeed" class="ei-status">Connecting to USGS…</span></p>
+            <form id="ei-site-form" class="ei-site">
+                <span>Your location: <b id="ei-site-name">—</b></span>
+                <input id="ei-site-q" type="search" placeholder="Search a place" aria-label="Search a place">
+                <button class="ei-btn" type="submit">Set</button>
+                <button class="ei-btn" type="button" id="ei-site-gps">Use my device location</button>
+                <span id="ei-site-msg" class="ei-muted"></span>
+            </form>
+            <div class="ei-live-grid">
+                <div><h3 class="ei-h3">Recent M4+ earthquakes</h3>
+                    <div class="ei-table-wrap ei-qlist-wrap"><table class="ei-table"><thead><tr><th class="ei-num">M</th><th>Where · when</th><th class="ei-num">Δ</th><th class="ei-num">First P at you</th></tr></thead><tbody id="ei-qlist"></tbody></table></div>
+                    <p class="ei-muted ei-small">The list's first-arrival times are interpolated between the two nearest of 14 tabulated depths (≈, within ~0.5 s); the selected event is traced at its own depth.</p></div>
+                <div><h3 class="ei-h3">Every phase at your location</h3><div id="ei-arrivals-live"></div></div>
+            </div>
+            <p class="ei-muted ei-small">Source: USGS real-time GeoJSON (M2.5+ past day every minute, M4.5+ past week every 10 min), the catalogue's own location and depth — revised as events are reviewed. Times are ray theory in PREM with ellipticity corrected; no amplitudes (a listed phase may be too weak to see), no 3-D structure, no station elevation. Not an alert service.</p>
+        </section>
+
         <section class="ei-panel" aria-labelledby="ei-nc-h">
             <h2 id="ei-nc-h">Live geoelectric field at USGS observatories</h2>
             <p><span id="ei-feed" class="ei-status">Connecting…</span></p>
@@ -200,7 +256,7 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
             </div>
             <div class="ei-seis-grid"><div id="ei-fan"></div><div><div id="ei-tt"></div><div id="ei-arrivals" aria-live="polite"></div></div></div>
             <div class="ei-legend-row" id="ei-seis-legend"></div>
-            <p class="ei-muted ei-seis-foot">Ray theory in PREM (isotropic, no ocean — as TauP), 5 km shells with exact in-shell integrals; gated against closed forms, RK4 eikonal shooting and quadrature on PREM's polynomials (<code>tests/earth-interior-raytrace.mjs</code>). Rays leave the source downward only, so a deep source's nearest distances (reached by up-going rays) are not drawn. Direct and core phases only — no reflections at the surface or CMB yet, no amplitudes. This is step T1 of our own tomography model: the forward operator a tomographic inversion is built on.</p>
+            <p class="ei-muted ei-seis-foot">Ray theory in PREM (isotropic, no ocean — as TauP), 5 km shells with exact in-shell integrals; gated against closed forms, RK4 eikonal shooting and quadrature on PREM's polynomials (<code>tests/earth-interior-raytrace.mjs</code>). Rays leave the source downward only, so a deep source's nearest distances (reached by up-going rays) are not drawn. This fan draws the direct and core phases; the reflected, converted, depth, multiple and diffracted phases (PcP, ScS, ScP, pP, sP, PP, SS, SKS, Pdiff…) are traced in the live view above with ellipticity corrected (<code>tests/earth-interior-phases.mjs</code>). No amplitudes. This is step T1 of our own tomography model: the forward operator a tomographic inversion is built on.</p>
         </section>
 
         <section class="ei-panel ei-span" aria-labelledby="ei-prof-h">

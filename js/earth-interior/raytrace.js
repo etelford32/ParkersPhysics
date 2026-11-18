@@ -20,9 +20,11 @@
  * polynomials themselves.
  *
  * ── WHAT IT IS NOT ───────────────────────────────────────────────────────
- * High-frequency geometric rays: no amplitudes, no diffraction (Pdiff along
- * the core is absent — the shadow zone is exactly where ray theory says
- * nothing arrives), no attenuation, no ellipticity, no 3-D structure. The
+ * High-frequency geometric rays: no amplitudes, no attenuation, no 3-D
+ * structure. This module traces the DIRECT and core-transmitted phases of one
+ * wave type; reflections, depth phases, multiples, SKS, up-going rays and
+ * core diffraction are composed from these same shells in phases.js, and
+ * the ellipticity correction is ellipticity.js. The
  * surface is PREM's crust with NO OCEAN (the 3 km ocean has Vs = 0, so no S
  * could leave a surface source — TauP's prem.nd makes the same choice).
  * S stops at the core (the liquid outer core carries no shear: SKS/ScS
@@ -75,20 +77,23 @@ export function premShells(wave = 'P', stepKm = DEFAULT_SHELL_KM) {
     return shells;
 }
 
-const etaOf = (s, r) => (s.b === 0 && s.r1 === 0 ? r / s.a : r ** (1 - s.b) / s.a);
+export const etaOf = (s, r) => (s.b === 0 && s.r1 === 0 ? r / s.a : r ** (1 - s.b) / s.a);
 
 /** One shell's [Δ, T] between radii lo < hi with η ≥ p throughout. */
-function shellDT(s, p, lo, hi) {
+export function shellDT(s, p, lo, hi) {
     const e1 = etaOf(s, lo), e2 = etaOf(s, hi), k = 1 / (1 - s.b);
     // At the turning point η = p, acos(p/η) = 0 — including the vertical ray (p = 0)
     // turning at the centre, where p/η is 0/0 (the p = 0 NaN, measured on the first run).
-    const ac = (e) => (e <= p ? 0 : Math.acos(p / e));
-    const sq = (e) => Math.sqrt(Math.max(0, e * e - p * p));
+    // acos(p/η) written as atan2(√((η−p)(η+p)), p): the same angle, but acos loses
+    // half its digits as p/η → 1 — exactly at the turning shell, where it made the
+    // τ-p identity read 4e-3 instead of 1e-8 (measured).
+    const sq = (e) => (e <= p ? 0 : Math.sqrt((e - p) * (e + p)));
+    const ac = (e) => (e <= p ? 0 : Math.atan2(sq(e), p));
     return [(ac(e2) - ac(e1)) * k, (sq(e2) - sq(e1)) * k];
 }
 
 /** Radius inside shell s where η = p (Bullen inversion). */
-function turningRadius(s, p) {
+export function turningRadius(s, p) {
     if (s.r1 === 0 && s.b === 0) return p * s.a;
     return (p * s.a) ** (1 / (1 - s.b));
 }

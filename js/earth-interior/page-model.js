@@ -330,3 +330,21 @@ export function fmtMinSec(s) {
     const m = Math.floor(s / 60), r = Math.round(s - 60 * m);
     return r === 60 ? `${m + 1} min 00 s` : `${m} min ${String(r).padStart(2, '0')} s`;
 }
+
+// ── The live-earthquake slice ──────────────────────────────────────────────
+// The slice draws NEUTRAL layers, not a quantity: the wavefronts on it are the
+// two categorical slots (P blue, S orange), and a blue Vp ramp underneath would
+// swallow the P fronts. Three dark tints, one per layer, boundaries from the shader.
+export const SLICE_LAYER_COLORS = Object.freeze({ mantle: '#1c2538', outer: '#2e2622', inner: '#24302b' });
+export function seismicSliceTable(n = 1024) {
+    const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const cmb = PREM_REGIONS.find((g) => g.name === 'Outer core').rOuterKm / R_EARTH_KM;
+    const icb = PREM_REGIONS.find((g) => g.name === 'Inner core').rOuterKm / R_EARTH_KM;
+    const rgb = new Uint8Array(3 * n);
+    for (let i = 0; i < n; i++) {
+        const r = (i + 0.5) / n;
+        const c = hex(r < icb ? SLICE_LAYER_COLORS.inner : r < cmb ? SLICE_LAYER_COLORS.outer : SLICE_LAYER_COLORS.mantle);
+        rgb.set(c, 3 * i);
+    }
+    return { n, rgb };
+}

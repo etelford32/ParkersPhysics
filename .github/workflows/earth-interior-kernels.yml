@@ -21,6 +21,12 @@
 #   earth-interior-raytrace.mjs  PREM ray tracer (tomography T1): uniform-sphere closed
 #                             form, RK4 eikonal shooting, quadrature on PREM's polynomials,
 #                             dT/dΔ = p, shadow zones + a no-core negative control
+#   earth-interior-phases.mjs every phase from legs (reflections / conversions / depth
+#                             phases / multiples / SKS / Pdiff) vs Fermat mirror paths and
+#                             reciprocity; Clairaut (Maclaurin, Roche); the ellipticity
+#                             correction vs the exact ellipsoid chord and 2-point RK4 shooting
+#   earth-interior-quakes.mjs the live view: USGS parsing, the default pick, the slice, the
+#                             arrivals at the viewer, rays that end AT the viewer, wavefronts
 name: earth-interior-kernels
 
 on:
@@ -77,3 +83,7 @@ jobs:
         run: node tests/earth-interior-page.mjs
       - name: seismic ray tracer (tomography T1)
         run: node tests/earth-interior-raytrace.mjs
+      - name: phases + ellipticity
+        run: node tests/earth-interior-phases.mjs
+      - name: live earthquake model
+        run: node tests/earth-interior-quakes.mjs

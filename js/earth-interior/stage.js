@@ -15,6 +15,12 @@
  * from the fragment's own direction — never a mesh UV (three's sphere UVs
  * name the antipode in this frame: the EarthView scar).
  *
+ * SLICE. For a live earthquake the cut is the great-circle PLANE through the
+ * epicentre, the viewer and the centre (every ray between them lies in it):
+ * the surface shader discards the +n half and one disk closes the solid
+ * (`setSlice`). The planet never spins: the frame is Earth-fixed and only the
+ * user moves the camera.
+ *
  * CAMERA. The TIGA rule: the page may START a flight (presets), never HOLD
  * the camera — a preset is a one-shot tween any drag/wheel cancels. camera.up
  * stays +Y, so OrbitControls is built once and never rebuilt.
@@ -59,12 +65,18 @@ uniform float uHasMap;
 uniform vec3 uLight;
 uniform float uCutLon0;
 uniform float uCutSpan;
+uniform float uCutMode;     // 0: the octant; 1: a great-circle SLICE (the half on the +uCutN side removed)
+uniform vec3 uCutN;
 varying vec3 vDir;
 void main() {
     vec3 n = normalize(vDir);
     vec2 ll = normalToLatLon(n);
-    float d = mod(ll.y - uCutLon0 + 4.0 * GEO_TAU, GEO_TAU);
-    if (ll.x >= 0.0 && d <= uCutSpan) discard;
+    if (uCutMode > 0.5) {
+        if (dot(n, uCutN) > 0.0) discard;
+    } else {
+        float d = mod(ll.y - uCutLon0 + 4.0 * GEO_TAU, GEO_TAU);
+        if (ll.x >= 0.0 && d <= uCutSpan) discard;
+    }
     vec3 base = uHasMap > 0.5 ? texture2D(uMap, normalToUVMip(n)).rgb : vec3(0.09, 0.16, 0.26);
     float lit = 0.62 + 0.38 * max(dot(n, uLight), 0.0);
     gl_FragColor = vec4(base * lit, 1.0);
@@ -81,6 +93,7 @@ uniform sampler2D uRadial;
 uniform float uBounds[${BOUNDARY_RADII_KM.length}];
 uniform float uProbeR;
 uniform float uShade;
+uniform float uLine;
 varying vec3 vPos;
 void main() {
     float r = length(vPos);
@@ -90,7 +103,7 @@ void main() {
     for (int i = 0; i < ${BOUNDARY_RADII_KM.length}; i++) {
         line = max(line, 1.0 - smoothstep(0.5 * w, 1.6 * w, abs(r - uBounds[i])));
     }
-    c = mix(c, vec3(0.94, 0.94, 0.92), 0.55 * line);
+    c = mix(c, vec3(0.94, 0.94, 0.92), uLine * line);
     if (uProbeR >= 0.0) {
         float pr = 1.0 - smoothstep(0.6 * w, 2.0 * w, abs(r - uProbeR));
         c = mix(c, vec3(0.851, 0.349, 0.149), pr);
@@ -142,6 +155,7 @@ export class InteriorStage {
             uniforms: {
                 uMap: { value: null }, uHasMap: { value: 0 }, uLight: { value: light },
                 uCutLon0: { value: CUT_LON0_DEG * Math.PI / 180 }, uCutSpan: { value: CUT_SPAN_DEG * Math.PI / 180 },
+                uCutMode: { value: 0 }, uCutN: { value: new THREE.Vector3(0, 0, 1) },
             },
         });
         this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 192, 128), this.surfaceMat);
@@ -149,6 +163,8 @@ export class InteriorStage {
 
         this.radialTex = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
         const bounds = BOUNDARY_RADII_KM.map((r) => r / R_EARTH_KM);
+        const SLICE_KEEP = [R_EARTH_KM - 400, R_EARTH_KM - 670, 3480, 1221.5];
+        const sliceBounds = BOUNDARY_RADII_KM.map((r) => (SLICE_KEEP.some((k) => Math.abs(k - r) < 2) ? r / R_EARTH_KM : -1));
         const e0 = latLonToVec(0, CUT_LON0_DEG), e1 = latLonToVec(0, CUT_LON0_DEG + CUT_SPAN_DEG), up = new THREE.Vector3(0, 1, 0);
         this.faces = [
             { g: quarterDisk(e0, up), shade: 0.90 },
@@ -157,12 +173,28 @@ export class InteriorStage {
         ].map(({ g, shade }) => {
             const m = new THREE.Mesh(g, new THREE.ShaderMaterial({
                 vertexShader: FACE_VS, fragmentShader: FACE_FS, side: THREE.DoubleSide,
-                uniforms: { uRadial: { value: this.radialTex }, uBounds: { value: bounds }, uProbeR: { value: -1 }, uShade: { value: shade } },
+                uniforms: { uRadial: { value: this.radialTex }, uBounds: { value: bounds }, uProbeR: { value: -1 }, uShade: { value: shade }, uLine: { value: 0.55 } },
                 extensions: { derivatives: true },
             }));
             this.scene.add(m);
             return m;
         });
+
+        // The great-circle slice (live earthquakes): one full disk in the plane, the
+        // same face shader, its OWN radial table (the seismic view draws neutral layers
+        // so blue/orange wavefronts read against them).
+        this.slice = null;
+        this.sliceTex = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
+        this.sliceDisk = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.ShaderMaterial({
+            vertexShader: FACE_VS, fragmentShader: FACE_FS, side: THREE.DoubleSide,
+            // Only the boundaries a seismologist reads a ray fan against (400, 670, CMB, ICB), and
+            // fainter: all eleven of PREM's crowd the rim into a white band at this scale (measured).
+            uniforms: { uRadial: { value: this.sliceTex }, uBounds: { value: sliceBounds }, uProbeR: { value: -1 }, uShade: { value: 1 }, uLine: { value: 0.32 } },
+            extensions: { derivatives: true },
+        }));
+        this.sliceDisk.visible = false;
+        this.scene.add(this.sliceDisk);
+        this._frameHooks = [];
 
         this.markerTex = markerTexture();
         this.markers = new Map();           // code → { sprite, label, lat, lon }
@@ -192,6 +224,54 @@ export class InteriorStage {
         this.resize();
         this.setView('cutaway', { instant: true });   // again, now the aspect is real
         this._raf = requestAnimationFrame((t) => this._frame(t));
+    }
+
+    /** Run fn(nowMs) every rendered frame (the live layer's clock). Returns an unsubscribe. */
+    onFrame(fn) { this._frameHooks.push(fn); return () => { this._frameHooks = this._frameHooks.filter((f) => f !== fn); }; }
+
+    /**
+     * Cut along a great-circle plane { e1, e2, n } (unit vectors, canonical frame):
+     * the half on the +n side is removed and a disk closes the solid. null restores the octant.
+     */
+    setSlice(plane, radialTable = null) {
+        this.slice = plane;
+        const on = !!plane;
+        this.surfaceMat.uniforms.uCutMode.value = on ? 1 : 0;
+        for (const f of this.faces) f.visible = !on;
+        this.sliceDisk.visible = on;
+        if (!on) return;
+        this.surfaceMat.uniforms.uCutN.value.set(...plane.n);
+        const e1 = new THREE.Vector3(...plane.e1), e2 = new THREE.Vector3(...plane.e2), seg = 360;
+        const pos = [0, 0, 0], idx = [];
+        for (let i = 0; i <= seg; i++) {
+            const t = i / seg * Math.PI * 2, q = e1.clone().multiplyScalar(Math.cos(t)).add(e2.clone().multiplyScalar(Math.sin(t)));
+            pos.push(q.x, q.y, q.z);
+            if (i > 0) idx.push(0, i, i + 1);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+        this.sliceDisk.geometry.dispose(); this.sliceDisk.geometry = g;
+        if (radialTable) {
+            const rgba = new Uint8Array(4 * radialTable.n);
+            for (let i = 0; i < radialTable.n; i++) rgba.set([radialTable.rgb[3 * i], radialTable.rgb[3 * i + 1], radialTable.rgb[3 * i + 2], 255], 4 * i);
+            const t = new THREE.DataTexture(rgba, radialTable.n, 1, THREE.RGBAFormat);
+            t.magFilter = t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.NoColorSpace; t.needsUpdate = true;
+            this.sliceTex.dispose(); this.sliceTex = t; this.sliceDisk.material.uniforms.uRadial.value = t;
+        }
+    }
+
+    /** Is a unit surface point removed by the current cut? */
+    isCut(q) {
+        if (this.slice) return q.x * this.slice.n[0] + q.y * this.slice.n[1] + q.z * this.slice.n[2] > 0;
+        const lat = Math.asin(Math.max(-1, Math.min(1, q.y))) * 180 / Math.PI, lon = Math.atan2(-q.z, q.x) * 180 / Math.PI;
+        return inCut(lat, lon);
+    }
+
+    /** One-shot flight to look along a direction at a given fill (the TIGA rule: started, never held). */
+    flyToDirection(dir, { fill = 0.9, instant = false } = {}) {
+        const to = (Array.isArray(dir) ? new THREE.Vector3(...dir) : dir.clone()).normalize().multiplyScalar(this._fitDistance(fill));
+        if (instant) { this.camera.position.copy(to); this.controls.target.set(0, 0, 0); this.controls.update(); return; }
+        this._flight = { from: this.camera.position.clone(), to, t0: performance.now(), dur: 1300 };
     }
 
     async loadMap(url) {
@@ -302,7 +382,7 @@ export class InteriorStage {
         if (best) return best;
         this.raycaster.setFromCamera(new THREE.Vector2(p.x, p.y), this.camera);
         const ray = this.raycaster.ray;
-        const faceHit = this.raycaster.intersectObjects(this.faces, false)[0] ?? null;
+        const faceHit = this.raycaster.intersectObjects(this.slice ? [this.sliceDisk] : this.faces, false)[0] ?? null;
         // Analytic sphere: nearest intersection that is NOT inside the cut.
         let sphere = null;
         const b = ray.origin.dot(ray.direction), c = ray.origin.lengthSq() - 1, disc = b * b - c;
@@ -312,7 +392,7 @@ export class InteriorStage {
                 const q = ray.at(t, new THREE.Vector3());
                 const lat = Math.asin(Math.max(-1, Math.min(1, q.y))) * 180 / Math.PI;
                 const lon = Math.atan2(-q.z, q.x) * 180 / Math.PI;
-                if (!inCut(lat, lon)) { sphere = { t, lat, lon }; break; }
+                if (!this.isCut(q)) { sphere = { t, lat, lon }; break; }
             }
         }
         if (faceHit && (!sphere || faceHit.distance < sphere.t)) return { kind: 'interior', rKm: faceHit.point.length() * R_EARTH_KM };
@@ -333,6 +413,7 @@ export class InteriorStage {
         }
         this.controls.update();
         if (!this._visible) return;
+        for (const fn of this._frameHooks) fn(Date.now());
         if (this._hoverDirty) { this._hoverDirty = false; this.onHover(this.pick(this._pointer)); }
         this.renderer.render(this.scene, this.camera);
         this._placeLabels();
