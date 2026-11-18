@@ -9,7 +9,8 @@
  *     type ON each stretch (SKS turns blue in the liquid core), as dots
  *     joined where neighbouring rays are both still in the Earth;
  *   · every ray that reaches the viewer (dashed: reflected / multiple /
- *     depth phases), and a bright packet riding each one at the clock;
+ *     depth phases; opacity = the phase's strength in its band), and a bright
+ *     packet riding each one at the clock;
  *   · the epicentre (orange burst), the viewer (white ring) and every other
  *     catalogue quake on the surface (white dots, sized by magnitude).
  * The clock is supplied by the page (live wall clock or a replay); the
@@ -87,6 +88,10 @@ export class SeismicLayer {
         // Rays to the site: one line each, coloured per stretch by its wave.
         for (const c of [...this.rayGroup.children]) { this.rayGroup.remove(c); c.geometry.dispose(); c.material.dispose(); }
         const kindOf = new Map(arrivals.map((a) => [a.phase, a.kind]));
+        // A ray's opacity is its phase's STRENGTH in its own band (amplitude.js): a −50 dB
+        // partial reflection should not be drawn as boldly as the direct P.
+        const dbOf = new Map(arrivals.map((a) => [a.phase, a.db]));
+        const alphaOf = (ph) => { const d = dbOf.get(ph); return d == null ? 0.3 : 0.12 + 0.63 * Math.max(0, Math.min(1, (d + 50) / 50)); };
         for (const r of rays) {
             if (!r.path) continue;
             const pos = [], col = [];
@@ -100,8 +105,8 @@ export class SeismicLayer {
             g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
             const dashed = DASHED_KINDS.has(kindOf.get(r.phase));
             const m = dashed
-                ? new THREE.LineDashedMaterial({ vertexColors: true, dashSize: 0.012, gapSize: 0.01, transparent: true, opacity: 0.55, depthTest: false })
-                : new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.6, depthTest: false });
+                ? new THREE.LineDashedMaterial({ vertexColors: true, dashSize: 0.012, gapSize: 0.01, transparent: true, opacity: alphaOf(r.phase), depthTest: false })
+                : new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: alphaOf(r.phase), depthTest: false });
             const line = new THREE.LineSegments(g, m);
             if (dashed) line.computeLineDistances();
             line.userData.phase = r.phase;

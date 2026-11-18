@@ -15,13 +15,14 @@
  * A dead feed draws NO quake and says so — never a demo dressed as live.
  */
 
-import { USGS_FEEDS, parseUsgsFeed, mergeQuakes, pickDefaultQuake, siteFromLocation, slicePlane, liveState, fmtDuration, WAVE_WINDOW_S, geoVec } from './quake-model.js';
+import { USGS_FEEDS, parseUsgsFeed, mergeQuakes, pickDefaultQuake, siteFromLocation, slicePlane, liveState, fmtDuration, WAVE_WINDOW_S, geoVec, siteWithElevation } from './quake-model.js';
+import { tileXY, tileSampler, demPath, TILE_PX } from '../climalytix/terrain.js';
 import { seismicSliceTable } from './page-model.js';
 import { loadUserLocation, saveUserLocation, geocodeQuery } from '../user-location.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const KIND_LABEL = { direct: 'direct', upgoing: 'direct (up-going)', core: 'through the core', reflected: 'reflected', diffracted: 'diffracted along the core', depth: 'surface reflection near the source', multiple: 'surface bounce' };
+const KIND_LABEL = { direct: 'direct', upgoing: 'direct, up-going', core: 'through the core', reflected: 'reflected', diffracted: 'along the core', depth: 'near-source bounce', multiple: 'surface bounce' };
 const POLL_DAY_MS = 60_000, POLL_WEEK_MS = 600_000;
 
 export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
@@ -93,7 +94,41 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
     window.addEventListener('user-location-changed', (e) => {
         S.site = siteFromLocation(e.detail); renderSite(); requestList();
         if (S.selected) select(S.selected, S.reason, S.userPicked);
+        elevate();
     });
+
+    // The station's elevation, from the SAME Terrain Tiles route Climalytix reads
+    // (/api/climalytix/dem, one z-11 tile, ~80 m pixels). When it lands, the selected
+    // event is re-traced with the elevation correction; when it cannot be read the
+    // site says "elevation unknown" and no correction is applied — never 0.
+    async function readTile(z, x, y) {
+        const r = await fetch(demPath({ z, x, y }), { signal: AbortSignal.timeout(15_000) });
+        if (!r.ok) throw new Error(`DEM HTTP ${r.status}`);
+        const bmp = await createImageBitmap(await r.blob());
+        const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(TILE_PX, TILE_PX) : Object.assign(document.createElement('canvas'), { width: TILE_PX, height: TILE_PX });
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(bmp, 0, 0, TILE_PX, TILE_PX);
+        return g.getImageData(0, 0, TILE_PX, TILE_PX).data;
+    }
+    async function elevate() {
+        const want = S.site, z = 11;
+        let h = null;
+        try {
+            const t = tileXY(want.lat, want.lon, z), tiles = new Map();
+            const need = new Set();
+            for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) {
+                const px = t.x * TILE_PX + dx, py = t.y * TILE_PX + dy;
+                need.add(`${Math.floor(px / TILE_PX) % (2 ** z)},${Math.floor(py / TILE_PX)}`);
+            }
+            await Promise.all([...need].map(async (k) => { const [x, y] = k.split(',').map(Number); tiles.set(k, await readTile(z, x, y)); }));
+            h = tileSampler(z, (zz, x, y) => tiles.get(`${x},${y}`) ?? null)(want.lat, want.lon);
+        } catch { h = null; }
+        if (S.site !== want) return;                         // the viewer moved meanwhile
+        S.site = siteWithElevation(want, h);
+        renderSite();
+        if (S.selected) { S.reqId++; worker.postMessage({ type: 'select', id: S.reqId, quake: S.selected, site: S.site }); }
+    }
+    elevate();
 
     // ── Clock ──
     const tNow = (now) => {
@@ -143,6 +178,8 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
     function renderSite() {
         $('#ei-site-name').textContent = S.site.name;
         $('#ei-site-name').classList.toggle('ei-flagged', !!S.site.fallback);
+        const el = $('#ei-site-elev');
+        if (el) el.textContent = S.site.elevationNote ? `· ${S.site.elevationNote}` : '· elevation loading…';
     }
     function localTime(ms) { return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
     function localDateTime(ms) { return new Date(ms).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
@@ -174,15 +211,30 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         if (!S.payload) { host.innerHTML = `${head}<p class="ei-muted">Tracing rays through PREM…</p>`; return; }
         const { geometry, rows } = S.payload.arrivals, now = Date.now();
         host.innerHTML = `${head}
-            <p class="ei-muted">${geometry.deltaDeg.toFixed(2)}° (${(geometry.deltaRad * 6371).toFixed(0)} km) from ${esc(S.site.name)} · times from the origin, with each phase's ellipticity correction</p>
-            <div class="ei-table-wrap"><table class="ei-table"><thead><tr><th>Phase</th><th>Path</th><th class="ei-num">Travel time</th><th class="ei-num">Ellipticity</th><th class="ei-num">Arrives (local)</th><th class="ei-num">Status</th></tr></thead><tbody>
-            ${rows.map((r) => `<tr><td><i class="ei-wave" style="background:${r.wave === 'S' ? '#d95926' : '#3987e5'}"></i><b>${esc(r.phase)}</b>${r.laterBranches ? ` <span class="ei-flag" title="A triplication: ${r.laterBranches} later branch arrival(s) of this phase">+${r.laterBranches}</span>` : ''}</td>
+            <p class="ei-muted">${geometry.deltaDeg.toFixed(2)}° (${(geometry.deltaRad * 6371).toFixed(0)} km) from ${esc(S.site.name)} · times from the origin with ellipticity${S.payload.arrivals.elevationKm != null ? ` and station elevation (${Math.round(S.payload.arrivals.elevationKm * 1000).toLocaleString('en-US')} m)` : ''} corrected · strength = ray-theory amplitude against the strongest arrival in the same band</p>
+            <div class="ei-table-wrap"><table class="ei-table"><thead><tr><th>Phase</th><th>Path</th><th>Strength</th><th class="ei-num">Travel time</th><th class="ei-num" title="Ellipticity + station elevation">Corrections</th><th class="ei-num">Arrives (local)</th><th class="ei-num">Status</th></tr></thead><tbody>
+            ${rows.map((r) => `<tr class="${r.strength === 'very weak' ? 'ei-faint' : ''}"><td><i class="ei-wave" style="background:${r.recorded === 'S' ? '#d95926' : '#3987e5'}" title="Recorded as ${r.recorded === 'S' ? 'S (horizontal)' : 'P (vertical)'}"></i><b>${esc(r.phase)}</b>${r.laterBranches ? ` <span class="ei-flag" title="A triplication: ${r.laterBranches} later branch arrival(s) of this phase">+${r.laterBranches}</span>` : ''}</td>
                 <td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td>
+                <td>${strengthCell(r)}</td>
                 <td class="ei-num">${fmtDuration(r.totalS)}</td>
-                <td class="ei-num">${r.corrS == null ? '—' : `${r.corrS >= 0 ? '+' : '−'}${Math.abs(r.corrS).toFixed(2)} s`}</td>
+                <td class="ei-num">${corrCell(r)}</td>
                 <td class="ei-num">${localTime(r.arriveMs)}</td>
                 <td class="ei-num">${r.arriveMs <= now ? '<span class="ei-muted">arrived</span>' : `in ${fmtDuration((r.arriveMs - now) / 1000)}`}</td></tr>`).join('')}
             </tbody></table></div>`;
+    }
+
+    function strengthCell(r) {
+        if (r.db == null) return `<span class="ei-muted" title="${esc(r.ampReason ?? '')}">${/caustic|focus/.test(r.ampReason ?? '') ? 'focused — not sized' : /diffract/.test(r.ampReason ?? '') ? 'diffracted — fades' : '—'}</span>`;
+        const w = Math.max(4, Math.min(100, (r.db + 60) / 60 * 100)), dbTxt = `${Math.round(r.db) || 0} dB`;
+        const band = r.recorded === 'S' ? 'S band · 0.2 Hz' : 'P band · 1 Hz';
+        return `<span class="ei-strength" title="${dbTxt} against the strongest ${band} arrival"><span class="ei-sbar"><span style="width:${w.toFixed(0)}%;background:${r.recorded === 'S' ? '#d95926' : '#3987e5'}"></span></span>${esc(r.strength)} <span class="ei-muted">${dbTxt}</span></span>`;
+    }
+    const sgn = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(2)}`;
+    function corrCell(r) {
+        const parts = [];
+        if (r.corrS != null) parts.push(`<span title="Ellipticity">${sgn(r.corrS)}</span>`);
+        if (r.elevS != null) parts.push(`<span title="Station elevation">${sgn(r.elevS)}</span>`);
+        return parts.length ? `${parts.join(' ')} s` : '—';
     }
 
     function renderHud(t, now) {

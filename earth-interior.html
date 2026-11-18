@@ -149,12 +149,17 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ei-site { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 13px; margin: 0 0 10px; }
 .ei-site input { background: var(--ei-surface-2); color: var(--ei-text); border: 1px solid var(--ei-line); border-radius: 6px; padding: 6px 8px; min-width: 0; width: 200px; }
 .ei-live-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-@media (min-width: 1100px) { .ei-live-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); } }
+@media (min-width: 1100px) { .ei-live-grid { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.3fr); } }
 .ei-h3 { font-size: 14px; margin: 4px 0 6px; }
 .ei-qlist-wrap { max-height: 460px; overflow-y: auto; }
 .ei-table tr[data-qid] { cursor: pointer; } .ei-table tr[data-qid]:hover { background: #13203a; }
 .ei-wave { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
 .ei-small { font-size: 12px; }
+.ei-strength { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.ei-sbar { display: inline-block; width: 46px; height: 6px; border-radius: 3px; background: #1c2840; overflow: hidden; }
+.ei-sbar span { display: block; height: 100%; border-radius: 3px; }
+.ei-table tr.ei-faint td { opacity: .62; }
+#ei-arrivals-live td:first-child { white-space: nowrap; }
 .ei-notes { font-size: 13px; color: var(--ei-text-2); margin: 0; padding-left: 18px; } .ei-notes li { margin: 4px 0; }
 .ei-notes b { color: var(--ei-text); }
 @media (max-width: 640px) {
@@ -213,7 +218,7 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
             <h2 id="ei-live-h">Earthquakes, live — when the waves reach you</h2>
             <p><span id="ei-qfeed" class="ei-status">Connecting to USGS…</span></p>
             <form id="ei-site-form" class="ei-site">
-                <span>Your location: <b id="ei-site-name">—</b></span>
+                <span>Your location: <b id="ei-site-name">—</b> <span id="ei-site-elev" class="ei-muted"></span></span>
                 <input id="ei-site-q" type="search" placeholder="Search a place" aria-label="Search a place">
                 <button class="ei-btn" type="submit">Set</button>
                 <button class="ei-btn" type="button" id="ei-site-gps">Use my device location</button>
@@ -225,7 +230,7 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
                     <p class="ei-muted ei-small">The list's first-arrival times are interpolated between the two nearest of 14 tabulated depths (≈, within ~0.5 s); the selected event is traced at its own depth.</p></div>
                 <div><h3 class="ei-h3">Every phase at your location</h3><div id="ei-arrivals-live"></div></div>
             </div>
-            <p class="ei-muted ei-small">Source: USGS real-time GeoJSON (M2.5+ past day every minute, M4.5+ past week every 10 min), the catalogue's own location and depth — revised as events are reviewed. Times are ray theory in PREM with ellipticity corrected; no amplitudes (a listed phase may be too weak to see), no 3-D structure, no station elevation. Not an alert service.</p>
+            <p class="ei-muted ei-small">Source: USGS real-time GeoJSON (M2.5+ past day every minute, M4.5+ past week every 10 min), the catalogue's own location and depth — revised as events are reviewed. Times are ray theory in PREM with ellipticity and station elevation corrected (elevation from Terrain Tiles via our DEM route; the extra layer is PREM's upper crust, 5.8 / 3.2 km/s). Strength is the ray-theory displacement amplitude — geometric spreading, every interface's Zoeppritz energy coefficient, PREM's own attenuation (P at 1 Hz, S at 0.2 Hz) and the focal sphere's average radiation — ranked within each band. The real event's focal mechanism is not used (a station near a nodal plane sees less), and there is no site response or 3-D structure. Not an alert service.</p>
         </section>
 
         <section class="ei-panel" aria-labelledby="ei-nc-h">

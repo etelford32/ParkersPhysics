@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import {
     parseUsgsFeed, mergeQuakes, pickDefaultQuake, siteFromLocation, FALLBACK_SITE, slicePlane, planePoint, arrivalsAt,
     rayToSite, buildFan, wavefronts, positionAt, packPath, liveState, fmtDuration, quickFirstArrival, WAVE_WINDOW_S, geoVec,
+    siteWithElevation,
 } from '../js/earth-interior/quake-model.js';
 import { travelTimeTable, arrivals } from '../js/earth-interior/phases.js';
 import { pathGeometry } from '../js/earth-interior/ellipticity.js';
@@ -149,6 +150,27 @@ const A = arrivalsAt(quake, site, table);
     assert.deepEqual([...t.rgb.slice(0, 3)], hex(SLICE_LAYER_COLORS.inner));
     assert.deepEqual([...t.rgb.slice(3 * 63)], hex(SLICE_LAYER_COLORS.mantle));
     ok(`the list's depth-interpolated first arrival is within ${worst.toFixed(2)} s of the exact depth (stated: ≈, ~0.5 s); the slice table is the three neutral layers`);
+}
+
+{
+    // Station elevation + strengths: a 1.65 km site adds each phase's own vertical-slowness delay.
+    const high = arrivalsAt(quake, { ...site, elevationM: 1650 }, table);
+    for (const r of high.rows) {
+        assert.ok(Math.abs(r.totalS - (r.timeS + r.corrS + r.elevS)) < 1e-9);
+        assert.ok(r.elevS > 0 && r.elevS < 1650 / 1000 / (r.recorded === 'S' ? 3.2 : 5.8) + 1e-9, `${r.phase} elevation ${r.elevS}`);
+    }
+    assert.ok(A.rows.every((r) => r.elevS === null), 'unknown elevation ⇒ no correction, said per row');
+    for (const band of ['P', 'S']) {
+        const dbs = high.rows.filter((r) => r.recorded === band && r.db !== null).map((r) => r.db);
+        assert.ok(dbs.length && Math.abs(Math.max(...dbs)) < 1e-9, `${band} band peaks at 0 dB`);
+    }
+    const sks = high.rows.find((r) => r.phase === 'SKS'), scp = high.rows.find((r) => r.phase === 'ScP');
+    assert.equal(sks.recorded, 'S'); if (scp) assert.equal(scp.recorded, 'P');
+    const pP = high.rows.find((r) => r.phase === 'P');
+    assert.equal(siteWithElevation(site, null).elevationM, null, 'unknown stays unknown, never 0');
+    assert.equal(siteWithElevation(site, -40).elevationM, 0);
+    assert.equal(siteWithElevation(site, 1655.4).elevationM, 1655.4);
+    ok(`station elevation: +${(pP.elevS * 1000).toFixed(0)} ms on P at 1.65 km (each phase at its own slowness, S slower); strengths ranked within each recorded band (SKS is read as S)`);
 }
 
 console.log(`\nearth-interior-quakes: ${passed} checks passed`);

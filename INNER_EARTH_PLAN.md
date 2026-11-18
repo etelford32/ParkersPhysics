@@ -61,6 +61,22 @@
   missed by 3.8 s; now 0.15 s). Ray tracing runs in a module Worker (1.6 s per selection froze the stage). A dead
   feed draws NO quake and says so. Gate `tests/earth-interior-quakes.mjs` (9). NOT yet: amplitudes, station
   elevation, 3-D structure, a browser smoke spec (the sandbox has no `@playwright/test`).
+- **Amplitudes + station elevation SHIPPED (2026-11-18)** — `js/earth-interior/amplitude.js` (PURE): each
+  arrival's ray-theory DISPLACEMENT amplitude = far-field point source (RMS focal-sphere radiation, Boore &
+  Boatwright: P 0.52, S 0.63 split SV/SH — the real mechanism is not used, disclosed) × ray-tube spreading from
+  energy conservation (√(dΩ/(dS cos i_r)); exactly 1/L in a uniform medium) × √Π of every interface's ENERGY
+  coefficient (full complex P-SV Zoeppritz for solid–solid / solid–liquid / liquid–solid / free surface, SH
+  closed form; S-only phases are SH, converting ones SV) × e^(−π f t*) with t* from PREM's own Q_μ/Q_κ (P at
+  1 Hz, S at 0.2 Hz). Ranked WITHIN each recorded band (strong ≥ −12, clear ≥ −26, weak ≥ −40 dB); caustics,
+  epicentral/antipodal foci and diffracted phases are REFUSED with the reason, never sized. Station elevation:
+  δT = h·√(1/v_c² − (p/R)²) through PREM's upper crust, the site's height from the SAME Terrain Tiles route
+  Climalytix reads (one z-11 tile; unknown ⇒ no correction, below sea level ⇒ taken at sea level, both said).
+  Gate `tests/earth-interior-amplitude.mjs` (6): energy conserved at every interface type to 2e-15 incl. 189
+  post-critical cases, normal-incidence/identical-media/free-surface closed forms, spreading ≡ 1/L to 4e-6,
+  t*_P 1.11 s / t*_S 5.02 s at 60° (empirical ≈ 1 / 4–5), PKiKP −45 dB below P at 40°, the PKP caustic and
+  Pdiff refused, and the raised-receiver chord to 0.6 % (h/v control misses by 700 %). NOT yet: the focal
+  mechanism (USGS moment tensors from the event detail feed), free-surface receiver amplification, site
+  response, absolute ground motion from Mw.
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that

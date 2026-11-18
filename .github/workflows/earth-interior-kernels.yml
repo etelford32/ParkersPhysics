@@ -25,6 +25,9 @@
 #                             phases / multiples / SKS / Pdiff) vs Fermat mirror paths and
 #                             reciprocity; Clairaut (Maclaurin, Roche); the ellipticity
 #                             correction vs the exact ellipsoid chord and 2-point RK4 shooting
+#   earth-interior-amplitude.mjs phase strengths: Zoeppritz energy conservation at every
+#                             interface type, closed forms, 1/L spreading in a uniform medium,
+#                             PREM t*, structure; station elevation vs the exact raised chord
 #   earth-interior-quakes.mjs the live view: USGS parsing, the default pick, the slice, the
 #                             arrivals at the viewer, rays that end AT the viewer, wavefronts
 name: earth-interior-kernels
@@ -87,3 +90,5 @@ jobs:
         run: node tests/earth-interior-phases.mjs
       - name: live earthquake model
         run: node tests/earth-interior-quakes.mjs
+      - name: amplitudes + station elevation
+        run: node tests/earth-interior-amplitude.mjs

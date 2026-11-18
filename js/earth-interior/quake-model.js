@@ -11,7 +11,10 @@
  *   · picks the quake to show — one whose waves are STILL CROSSING THE EARTH
  *     wins (that is what "live" means here), else the newest large one;
  *   · arrival times at the viewer for every phase phases.js traces, each with
- *     its ellipticity correction (ellipticity.js) and a wall-clock instant;
+ *     its ellipticity correction (ellipticity.js), the station-elevation
+ *     correction when the site's elevation is known, a wall-clock instant, and
+ *     its ray-theory STRENGTH relative to the strongest arrival in its own
+ *     recorded band (amplitude.js);
  *   · the great-circle SLICE through the epicentre, the viewer and the centre
  *     — the one plane every ray between them lies in — and the wavefronts
  *     in it at any instant, from the rays' own sampled paths.
@@ -26,6 +29,7 @@
 import { R_EARTH_KM } from './prem.js';
 import { travelTimeTable, arrivals, premPhaseModel, PHASE_INFO } from './phases.js';
 import { ellipticityCorrection, pathGeometry, geocentricLatDeg } from './ellipticity.js';
+import { phaseAmplitude, visibility, elevationCorrection } from './amplitude.js';
 
 export const USGS_FEEDS = Object.freeze({
     day: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson',     // updated every minute
@@ -103,26 +107,44 @@ export function siteFromLocation(loc) {
  * triplication are counted, not listed), spherical time + ellipticity
  * correction, and the wall-clock instant. `table` is travelTimeTable(depth).
  */
-export function arrivalsAt(quake, site, table, { model = premPhaseModel(), correct = true } = {}) {
+export function arrivalsAt(quake, site, table, { model = premPhaseModel(), correct = true, amplitudes = true } = {}) {
     const geo = pathGeometry(quake.lat, quake.lon, site.lat, site.lon);
     const all = arrivals(geo.deltaDeg, table);
+    // Station elevation (km above PREM's sea-level surface); unknown ⇒ no correction, and the row says so.
+    const hKm = Number.isFinite(site.elevationM) ? site.elevationM / 1000 : null;
     const rows = [], seen = new Map();
     for (const a of all) {
         if (seen.has(a.phase)) { seen.get(a.phase).laterBranches++; continue; }
         const info = PHASE_INFO[a.phase];
-        let corrS = null;
-        if (correct) {
-            const ray = rayFor(a, quake.depthKm, model);
+        const ray = correct || amplitudes ? rayFor(a, quake.depthKm, model) : null;
+        let corrS = null, elevS = null, amp = null, ampReason = null;
+        if (correct && ray) {
             // A ray that went the LONG way round (Δ_ray > 180°) leaves along the opposite azimuth.
-            if (ray) corrS = ellipticityCorrection(ray, model, { thetaS: geo.thetaS, azimuthRad: a.deltaRay > 180 ? geo.azimuthRad + Math.PI : geo.azimuthRad });
+            corrS = ellipticityCorrection(ray, model, { thetaS: geo.thetaS, azimuthRad: a.deltaRay > 180 ? geo.azimuthRad + Math.PI : geo.azimuthRad });
         }
-        const totalS = a.timeS + (corrS ?? 0);
-        const row = { phase: a.phase, kind: info.kind, family: info.family, wave: info.wave, p: a.p, slownessSDeg: a.p * DEG,
-            deltaRay: a.deltaRay, timeS: a.timeS, corrS, totalS, arriveMs: quake.timeMs + totalS * 1000, laterBranches: 0 };
+        // The wave the station RECORDS is the last leg's (SKS arrives as S, ScP as P).
+        const lastSet = ray?.legs.at(-1)?.set;
+        const recorded = lastSet ? (lastSet === 'P' ? 'P' : 'S') : (a.phase.endsWith('diff') ? a.phase[0] : info.wave);
+        if (correct && hKm !== null) elevS = elevationCorrection(a.p, recorded, hKm);
+        if (amplitudes && ray) {
+            const r = phaseAmplitude(ray, { model, sourceDepthKm: quake.depthKm });
+            amp = r.amp; ampReason = r.reason ?? null;
+        } else if (amplitudes) ampReason = 'no ray';
+        const totalS = a.timeS + (corrS ?? 0) + (elevS ?? 0);
+        const row = { phase: a.phase, kind: info.kind, family: info.family, wave: info.wave, recorded, p: a.p, slownessSDeg: a.p * DEG,
+            deltaRay: a.deltaRay, timeS: a.timeS, corrS, elevS, totalS, arriveMs: quake.timeMs + totalS * 1000, laterBranches: 0,
+            amp, ampReason, db: null, strength: null };
         seen.set(a.phase, row); rows.push(row);
     }
     rows.sort((x, y) => x.totalS - y.totalS);
-    return { geometry: geo, rows };
+    // Strength is ranked WITHIN each recorded band (P read at 1 Hz on the vertical, S at 0.2 Hz on
+    // the horizontals) — comparing across bands would compare two different instruments' readings.
+    for (const band of ['P', 'S']) {
+        const inBand = rows.filter((r) => r.recorded === band && r.amp > 0);
+        const ref = Math.max(0, ...inBand.map((r) => r.amp));
+        for (const r of inBand) { const v = visibility(r.amp, ref); r.db = v.db; r.strength = v.label; }
+    }
+    return { geometry: geo, rows, elevationKm: hKm };
 }
 
 /** The ray behind an interpolated arrival (diffracted phases carry their arc). */
@@ -300,4 +322,16 @@ export function quickFirstArrival(quake, site, { tableAt = (d) => travelTimeTabl
     const a0 = arrivals(geo.deltaDeg, tableAt(d0))[0] ?? null, a1 = arrivals(geo.deltaDeg, tableAt(d1))[0] ?? null;
     const a = a0 && a1 ? { phase: w < 0.5 ? a0.phase : a1.phase, timeS: a0.timeS + w * (a1.timeS - a0.timeS) } : (a0 ?? a1);
     return { deltaDeg: geo.deltaDeg, phase: a?.phase ?? null, timeS: a?.timeS ?? null, arriveMs: a ? quake.timeMs + a.timeS * 1000 : null, depthsKm: [d0, d1] };
+}
+
+/**
+ * Attach a DEM elevation (metres, Terrarium; null when the tiles could not be
+ * read) to a site. Below sea level (open ocean, a basin) the station is taken
+ * AT sea level — PREM's surface — and the note says so; an unknown elevation
+ * is left unknown (no correction), never 0.
+ */
+export function siteWithElevation(site, hM, source = 'Terrain Tiles (AWS Open Data)') {
+    if (!Number.isFinite(hM)) return { ...site, elevationM: null, elevationNote: 'elevation unknown — no station correction' };
+    if (hM < 0) return { ...site, elevationM: 0, elevationNote: `ground ${Math.round(hM)} m (below sea level / water) — station taken at sea level` };
+    return { ...site, elevationM: hM, elevationNote: `${Math.round(hM).toLocaleString('en-US')} m above sea level (${source})` };
 }

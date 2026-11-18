@@ -259,7 +259,7 @@ export function createPhaseModel({ shellsP = premShells('P'), shellsS = premShel
                 if (first) { push(l.r); first = false; }
                 for (let j = 1; j <= m; j++) {
                     const dd = l.dRad / m, dt = ray.p * dd;
-                    intervals.push({ dr: 0, q: 0, dirSign: 0, dDelta: dd, dT: dt });
+                    intervals.push({ dr: 0, q: 0, dirSign: 0, dDelta: dd, dT: dt, set: l.set, rMid: l.r });
                     d += dd; t += dt; push(l.r);
                 }
                 continue;
@@ -281,7 +281,7 @@ export function createPhaseModel({ shellsP = premShells('P'), shellsS = premShel
                     const r0 = rr[j - 1], r1 = rr[j], x = Math.min(r0, r1), y = Math.max(r0, r1);
                     const [dd, dt] = shellDT(s, ray.p, x, y);
                     const rm = 0.5 * (x + y), em = etaOf(s, rm);
-                    intervals.push({ dr: r1 - r0, q: Math.sqrt(Math.max(0, em * em - ray.p * ray.p)), dirSign: l.dir, dDelta: dd, dT: dt });
+                    intervals.push({ dr: r1 - r0, q: Math.sqrt(Math.max(0, em * em - ray.p * ray.p)), dirSign: l.dir, dDelta: dd, dT: dt, set: l.set, rMid: rm });
                     d += dd; t += dt; push(r1);
                 }
             }
