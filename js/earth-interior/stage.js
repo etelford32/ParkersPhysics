@@ -135,8 +135,9 @@ void main() {
 // radial table's texel (page-model.js seismicSliceTable — the legend); on top
 // of it, DISPLAY shading only, so the cut reads as a solid face and not a
 // flat plate: each layer is lit a little more at its top than its base (a
-// bevel, ±9 %), the outer core warms toward depth (it IS hotter at depth —
-// qualitative, not a temperature scale), and a thin rim light sits on the crust.
+// bevel, ±9 %) and a thin rim light sits on the crust. The table itself is
+// PREM DENSITY (page-model.js seismicSliceTable), so the layers' material
+// difference is the colour — nothing here tints a layer by hand.
 const SLICE_FS = /* glsl */`
 uniform sampler2D uRadial;
 uniform float uBounds[${BOUNDARY_RADII_KM.length}];
@@ -153,8 +154,6 @@ void main() {
     float hi = r < uIcb ? uIcb : r < uCmb ? uCmb : r < u670 ? u670 : 1.0;
     float t = clamp((r - lo) / max(hi - lo, 1e-4), 0.0, 1.0);
     c *= 0.91 + 0.18 * t;
-    if (r >= uIcb && r < uCmb) c += vec3(0.11, 0.045, 0.012) * (1.0 - t);          // outer core: warmer with depth
-    if (r < uIcb) c += vec3(0.07, 0.065, 0.045) * (1.0 - r / uIcb);                 // inner core: a faint glow at the centre
     float w = fwidth(r);
     float line = 0.0;
     for (int i = 0; i < ${BOUNDARY_RADII_KM.length}; i++) {
@@ -220,6 +219,9 @@ const GHOST_FS = /* glsl */`
 #define GEO_SEAMLESS
 ${GEO_GLSL}
 uniform vec3 uCutN;
+uniform vec3 uTint;
+uniform float uRim;
+uniform float uGrid;
 varying vec3 vDir;
 varying vec3 vView;
 void main() {
@@ -232,7 +234,7 @@ void main() {
     vec2 g = abs(fract(ll / 30.0 + 0.5) - 0.5) * 30.0;
     vec2 px = fwidth(ll);
     float grid = 1.0 - smoothstep(0.0, 1.2, min(g.x / max(px.x, 1e-4), g.y / max(px.y, 1e-4)));
-    vec3 col = vec3(0.30, 0.50, 0.85) * (0.16 * rim + 0.04 * grid * (0.4 + rim));
+    vec3 col = uTint * (uRim * rim + uGrid * grid * (0.4 + rim) + 0.005);
     gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -336,13 +338,28 @@ export class InteriorStage {
         this.atmo.renderOrder = 3; this.atmo.frustumCulled = false; this._atmoD = -1;
         this.scene.add(this.atmo);
 
-        this.ghost = new THREE.Mesh(new THREE.SphereGeometry(1.0005, 128, 96), new THREE.ShaderMaterial({
-            vertexShader: GHOST_VS, fragmentShader: GHOST_FS, uniforms: { uCutN: this.surfaceMat.uniforms.uCutN },
-            transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-            extensions: { derivatives: true },
-        }));
-        this.ghost.renderOrder = 4; this.ghost.visible = false;
-        this.scene.add(this.ghost);
+        // Glass in the removed half: the planet's outline, and the CORE and INNER CORE as nested
+        // domes standing on the cut (the same spheres are there — PREM is spherically
+        // symmetric), tinted by the slice's density ramp at their own radius so a dome and
+        // the face it rises from are one colour. depthTest off: they are glass, drawn over the face.
+        const glass = (radius, tint, rim, grid) => {
+            const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 128, 96), new THREE.ShaderMaterial({
+                vertexShader: GHOST_VS, fragmentShader: GHOST_FS,
+                uniforms: { uCutN: this.surfaceMat.uniforms.uCutN, uTint: { value: new THREE.Vector3(...tint) }, uRim: { value: rim }, uGrid: { value: grid } },
+                transparent: true, depthTest: false, depthWrite: false,
+                blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+                extensions: { derivatives: true },
+            }));
+            m.renderOrder = 4; m.visible = false; this.scene.add(m);
+            return m;
+        };
+        this.ghost = glass(1.0005, [0.30, 0.50, 0.85], 0.16, 0.04);
+        this.domes = [];
+        this.setDomeTints = (list) => {          // [{ rKm, rgb: [0..255]×3 }] — the page supplies the ramp colours
+            for (const d of this.domes) { this.scene.remove(d); d.geometry.dispose(); d.material.dispose(); }
+            this.domes = list.map(({ rKm, rgb }) => glass(rKm / R_EARTH_KM, rgb.map((v) => Math.min(1, v / 255 * 1.7)), 0.22, 0.0));
+            for (const d of this.domes) d.visible = !!this.slice;
+        };
         this._resizeHooks = [];
 
         this.radialTex = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
@@ -463,6 +480,7 @@ export class InteriorStage {
         for (const f of this.faces) f.visible = !on;
         this.sliceDisk.visible = on;
         this.ghost.visible = on;
+        for (const d of this.domes) d.visible = on;
         if (!on) return;
         this.surfaceMat.uniforms.uCutN.value.set(...plane.n);
         const e1 = new THREE.Vector3(...plane.e1), e2 = new THREE.Vector3(...plane.e2), seg = 360;

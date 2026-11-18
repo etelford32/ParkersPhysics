@@ -19,7 +19,8 @@ import {
 } from '../js/earth-interior/quake-model.js';
 import { travelTimeTable, arrivals } from '../js/earth-interior/phases.js';
 import { pathGeometry } from '../js/earth-interior/ellipticity.js';
-import { seismicSliceTable, SLICE_LAYER_COLORS } from '../js/earth-interior/page-model.js';
+import { seismicSliceTable, sliceDensityColor, SLICE_DENSITY_RAMP } from '../js/earth-interior/page-model.js';
+import { premAt } from '../js/earth-interior/prem.js';
 import { R_EARTH_KM } from '../js/earth-interior/prem.js';
 
 let passed = 0;
@@ -145,11 +146,26 @@ const A = arrivalsAt(quake, site, table);
         worst = Math.max(worst, Math.abs(quick.timeS - exact.timeS));
     }
     assert.ok(worst < 0.5, `binned ${worst}`);
-    const t = seismicSliceTable(64);
-    const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-    assert.deepEqual([...t.rgb.slice(0, 3)], hex(SLICE_LAYER_COLORS.inner));
-    assert.deepEqual([...t.rgb.slice(3 * 63)], hex(SLICE_LAYER_COLORS.mantle));
-    ok(`the list's depth-interpolated first arrival is within ${worst.toFixed(2)} s of the exact depth (stated: ≈, ~0.5 s); the slice table is the three neutral layers`);
+    // The slice is PREM density through a lightness ramp: every texel is ρ at its own radius,
+    // lightness is monotone in ρ (so denser is always lighter), and the CMB is a visible STEP.
+    const n = 1024, t = seismicSliceTable(n);
+    const lum = (i) => 0.2126 * t.rgb[3 * i] + 0.7152 * t.rgb[3 * i + 1] + 0.0722 * t.rgb[3 * i + 2];
+    for (const i of [3, 200, 500, 640, 1000]) {
+        assert.deepEqual([...t.rgb.slice(3 * i, 3 * i + 3)], sliceDensityColor(premAt((i + 0.5) / n * 6371).rhoKgM3 / 1000), `texel ${i}`);
+    }
+    const order = [...Array(n).keys()].sort((a, b) => premAt((a + 0.5) / n * 6371).rhoKgM3 - premAt((b + 0.5) / n * 6371).rhoKgM3);
+    for (let k = 1; k < n; k++) assert.ok(lum(order[k]) >= lum(order[k - 1]) - 1.0, 'lightness monotone in density');
+    const iCmb = Math.floor(3480 / 6371 * n);
+    assert.ok(lum(iCmb - 2) - lum(iCmb + 2) > 25, `the CMB step reads (${(lum(iCmb - 2) - lum(iCmb + 2)).toFixed(1)} luma)`);
+    // No ramp stop may sit in the P (blue) or S (orange) hue band: the waves must own those hues.
+    for (const [, h] of SLICE_DENSITY_RAMP) {
+        const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        if (mx - mn < 0.06) continue;
+        const hue = (mx === r ? ((g - b) / (mx - mn)) % 6 : mx === g ? (b - r) / (mx - mn) + 2 : (r - g) / (mx - mn) + 4) * 60;
+        const H = (hue + 360) % 360;
+        assert.ok(!(H > 195 && H < 235) && !(H > 10 && H < 40), `ramp stop ${h} hue ${H.toFixed(0)}° collides with a wave`);
+    }
+    ok(`the list's depth-interpolated first arrival is within ${worst.toFixed(2)} s of the exact depth (stated: ≈, ~0.5 s); the slice is PREM ρ on a monotone lightness ramp with a visible CMB step`);
 }
 
 {
@@ -171,6 +187,36 @@ const A = arrivalsAt(quake, site, table);
     assert.equal(siteWithElevation(site, -40).elevationM, 0);
     assert.equal(siteWithElevation(site, 1655.4).elevationM, 1655.4);
     ok(`station elevation: +${(pP.elevS * 1000).toFixed(0)} ms on P at 1.65 km (each phase at its own slowness, S slower); strengths ranked within each recorded band (SKS is read as S)`);
+}
+
+{
+    // The 3-D wavefront sweep: ψ = 0 is the slice point, ψ = π its mirror, and every ψ keeps the
+    // point's radius AND its angle from the epicentre axis (the symmetry that makes the swept
+    // surface THE wavefront); 0 < ψ < π lies on the removed (+n) side; φ past π folds back.
+    const { sweepPoint, planePoint, slicePlane } = await import('../js/earth-interior/quake-model.js');
+    const pl = slicePlane({ lat: 38.3, lon: 142.4 }, { lat: 40.0, lon: -105.3 });
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let worst = 0;
+    for (const [r, phi] of [[6371, 0.3], [4000, 1.4], [3000, 2.9], [1000, 0.05]]) {
+        const p0 = planePoint(pl, r, phi);
+        const a = sweepPoint(pl, r, phi, 0), m = sweepPoint(pl, r, phi, Math.PI), mirror = planePoint(pl, r, -phi);
+        for (let k = 0; k < 3; k++) worst = Math.max(worst, Math.abs(a[k] - p0[k]), Math.abs(m[k] - mirror[k]));
+        for (let j = 1; j < 12; j++) {
+            const q = sweepPoint(pl, r, phi, j / 12 * Math.PI);
+            worst = Math.max(worst, Math.abs(Math.hypot(...q) - r / 6371), Math.abs(dot(q, pl.e1) - dot(p0, pl.e1)));
+            assert.ok(dot(q, pl.n) > 0, 'the sweep lies in the removed half');
+        }
+    }
+    assert.ok(worst < 1e-12, `sweep invariants ${worst}`);
+    const fold = sweepPoint(pl, 5000, 2 * Math.PI - 0.7, 0.4), base = sweepPoint(pl, 5000, 0.7, 0.4);
+    assert.ok(Math.max(...fold.map((x, k) => Math.abs(x - base[k]))) < 1e-12, 'φ past π folds back');
+    // NEGATIVE CONTROL: sweeping about the wrong axis (ê₂) does not keep the epicentral angle.
+    const wrong = planePoint(pl, 4000, 0.5);
+    const turned = (() => { const p = planePoint(pl, 4000, 0.5), c = Math.cos(1), s2 = Math.sin(1), u = pl.e2; const k = dot(p, u);
+        const cr = [u[1] * p[2] - u[2] * p[1], u[2] * p[0] - u[0] * p[2], u[0] * p[1] - u[1] * p[0]];
+        return [0, 1, 2].map((i) => p[i] * c + cr[i] * s2 + u[i] * k * (1 - c)); })();
+    assert.ok(Math.abs(dot(turned, pl.e1) - dot(wrong, pl.e1)) > 0.05, 'a sweep about the wrong axis must be detectable');
+    ok('3-D fronts: the sweep keeps radius and epicentral angle (the axial symmetry), ψ=0/π are the slice curve and its mirror, it fills the removed half, φ>π folds back');
 }
 
 console.log(`\nearth-interior-quakes: ${passed} checks passed`);

@@ -109,6 +109,18 @@
   element, so `height:auto` between top/bottom kept its intrinsic height (the phone globe filled a third of
   the stage). Measured on SwiftShader 1440×900: ~108 ms/frame vs ~75 before (ribbon fill; the front
   rebuild itself is ~5 ms) — negligible on a GPU, unverified on one.
+- **Density and depth on the stage (2026-11-18)** — the cut is coloured by PREM ρ (page-model.js
+  `seismicSliceTable` → `sliceDensityColor`): a LIGHTNESS ramp slate → violet → mauve on a LOG scale in ρ
+  (linear left the whole mantle in the bottom fifth: upper and lower mantle read the same), with no stop
+  in the P-blue or S-orange hue band — gated, along with lightness monotone in ρ and a visible CMB step
+  (on screen: core ~115 luma, lower mantle ~57, upper ~45). The wavefronts are drawn as 3-D SURFACES
+  (`front-surfaces.js` over the PURE `sweepPoint`): PREM is spherically symmetric, so the front at time t
+  IS the slice curve revolved about the epicentre axis; swept through the removed half only (the other is
+  solid), φ > π folded back by the symmetry; the gate checks the sweep keeps radius and epicentral angle,
+  ψ = 0/π are the curve and its mirror, with a wrong-axis negative control. NOT drawn on the surfaces: the
+  radiation pattern's variation around the axis. The core and inner core stand on the cut as glass domes
+  tinted by the ramp at their own radius. "3D fronts" chip / `?fronts3d=0`. SwiftShader cost: ~126 ms vs
+  ~108 ms per frame without the surfaces.
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that

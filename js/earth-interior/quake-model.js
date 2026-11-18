@@ -196,6 +196,19 @@ export function planePoint(plane, rKm, phi) {
 }
 
 /**
+ * The slice point (r, φ) turned by ψ about the EPICENTRE AXIS ê₁: the 3-D wavefront is the
+ * front curve swept this way, because PREM is spherically symmetric about the centre and a
+ * point source is symmetric about its own axis. ψ = 0 is the slice point, ψ = π its mirror
+ * (r, −φ), and 0 < ψ < π is the +n̂ half (the half the stage removes). φ past π is folded
+ * back (2π − φ), the same surface by the symmetry. Unit-sphere coordinates.
+ */
+export function sweepPoint(plane, rKm, phi, psi) {
+    const f = phi > Math.PI ? 2 * Math.PI - phi : phi;
+    const s = rKm / R_EARTH_KM, c = Math.cos(f), d = Math.sin(f), cp = Math.cos(psi), sp = Math.sin(psi);
+    return [0, 1, 2].map((i) => s * (c * plane.e1[i] + d * (cp * plane.e2[i] + sp * plane.n[i])));
+}
+
+/**
  * The ray FAN for the wavefronts: rays of every FRONT_PHASES branch, thinned to
  * ~`perSegment` per branch, each sampled along its path and PACKED as a
  * Float64Array of [rKm, deltaRad, tS, wave(0 = P, 1 = S)] per node — so a

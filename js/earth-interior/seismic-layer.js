@@ -19,6 +19,9 @@
  *     not a wave), the viewer (a ring + a beacon along the local vertical),
  *     and every other catalogue quake on the visible surface, sized by
  *     magnitude;
+ *   · the fronts as 3-D SURFACES (front-surfaces.js): the slice curve revolved
+ *     about the epicentre axis through the removed half — PREM is spherically
+ *     symmetric, so that IS the wavefront; toggle with `setSurfaces`;
  *   · the layer names on the cut, placed on the side away from the rays.
  * The clock is supplied by the page (live wall clock or a replay); the
  * stage never spins. The globe is lit by the Sun at the instant shown.
@@ -28,6 +31,7 @@ import * as THREE from 'three';
 import { planePoint, wavefronts, positionAt, geoVec } from './quake-model.js';
 import { R_EARTH_KM } from './prem.js';
 import { GlowLines, GlowPoints } from './glow-lines.js';
+import { FrontSurfaces } from './front-surfaces.js';
 
 export const WAVE_COLORS = Object.freeze({ P: '#3987e5', S: '#d95926' });
 const DASHED_KINDS = new Set(['reflected', 'multiple', 'depth']);
@@ -94,6 +98,10 @@ export class SeismicLayer {
         this.trails = new GlowLines({ width: 3, gain: 0.8, core: 1.3 });
         this.marks = new GlowLines({ width: 2.4, gain: 1.0, core: 1.3 });
         this.packets = new GlowPoints();
+        this.surfaces = new FrontSurfaces({ gain: 0.55 });
+        this.surfaces.mesh.renderOrder = 4.5;
+        this.group.add(this.surfaces.mesh);
+        this.surfacesOn = !/[?&]fronts3d=0\b/.test(location.search);
         this.others = new GlowPoints();
         const objs = [this.rays.mesh, this.raysDashed.mesh, this.fronts.mesh, this.trails.mesh, this.marks.mesh, this.packets.points, this.others.points];
         objs.forEach((o, i) => { o.renderOrder = 5 + i * 0.01; this.group.add(o); });
@@ -207,6 +215,13 @@ export class SeismicLayer {
             }
         }
         this.fronts.set(lines);
+        // The 3-D fronts: the +φ side of the CURRENT fronts, swept through the removed half.
+        if (this.surfacesOn) {
+            const now = [];
+            for (const f of wavefronts(fan, tS)) if (f.points[0].phi >= 0) now.push(f);
+            this.surfaces.set(now, plane, GLOW);
+        }
+        this.surfaces.mesh.visible = this.surfacesOn;
 
         // Packets riding each ray to the site, with a trail over the last TRAIL_S seconds.
         const heads = [], trails = [];
@@ -226,6 +241,9 @@ export class SeismicLayer {
         }
         this.packets.set(heads); this.trails.set(trails);
     }
+
+    /** Show / hide the 3-D front surfaces. */
+    setSurfaces(on) { this.surfacesOn = !!on; this.surfaces.mesh.visible = this.surfacesOn; this._lastT = null; }
 
     /** Pixel pick of a surface quake dot; returns its id or null. */
     pickQuake(p) {

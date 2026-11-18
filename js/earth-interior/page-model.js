@@ -332,19 +332,40 @@ export function fmtMinSec(s) {
 }
 
 // ── The live-earthquake slice ──────────────────────────────────────────────
-// The slice draws NEUTRAL layers, not a quantity: the wavefronts on it are the
-// two categorical slots (P blue, S orange), and a blue Vp ramp underneath would
-// swallow the P fronts. Three dark tints, one per layer, boundaries from the shader.
-export const SLICE_LAYER_COLORS = Object.freeze({ mantle: '#1c2538', outer: '#2e2622', inner: '#24302b' });
+// The slice is coloured by PREM DENSITY (2026-11-18; it was three flat neutral
+// tints, which read as a flat plate). The ramp is a LIGHTNESS ramp in a slate →
+// violet → mauve family on purpose: the wavefronts on it are the two
+// categorical slots (P blue, S orange) and must stay the brightest, most
+// saturated thing on the face — a blue ramp swallowed the P fronts, an
+// orange/copper one would swallow S. Lightness is monotone in ρ, so the
+// real jumps read as steps: Moho, the 410/660, and the core–mantle boundary
+// (5.57 → 9.90 g/cm³, the biggest step inside the planet). The scale is
+// LOGARITHMIC in ρ: on a linear one the whole mantle (3.3–5.6) sat in the
+// bottom fifth of the ramp and the upper and lower mantle read the same
+// (measured on the first render); log puts the mantle across half of it.
+export const SLICE_DENSITY_RANGE = Object.freeze({ min: 2.5, max: 13.2 });      // g/cm³, the ramp's ends
+export const SLICE_DENSITY_RAMP = Object.freeze([
+    [0.00, '#18162a'], [0.25, '#2c2850'], [0.50, '#45376a'], [0.75, '#655078'], [1.00, '#8a7397'],
+]);
+/** sRGB bytes of the slice ramp at a density (g/cm³). */
+export function sliceDensityColor(rhoGcc) {
+    const { min, max } = SLICE_DENSITY_RANGE;
+    const t = Math.min(1, Math.max(0, Math.log(rhoGcc / min) / Math.log(max / min)));
+    const R = SLICE_DENSITY_RAMP;
+    let k = 1;
+    while (k < R.length - 1 && t > R[k][0]) k++;
+    const [t0, h0] = R[k - 1], [t1, h1] = R[k], f = (t - t0) / (t1 - t0);
+    const a = hexRgb(h0), b = hexRgb(h1);
+    return a.map((v, i) => Math.round(v + f * (b[i] - v)));
+}
+/** CSS gradient of the same ramp, for the on-stage key (one copy of the stops). */
+export const sliceDensityGradientCss = () => `linear-gradient(90deg, ${SLICE_DENSITY_RAMP.map(([t, h]) => `${h} ${Math.round(100 * t)}%`).join(', ')})`;
+/** The slice's radial table: texel i is PREM ρ at the bin's centre radius through the ramp. */
 export function seismicSliceTable(n = 1024) {
-    const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-    const cmb = PREM_REGIONS.find((g) => g.name === 'Outer core').rOuterKm / R_EARTH_KM;
-    const icb = PREM_REGIONS.find((g) => g.name === 'Inner core').rOuterKm / R_EARTH_KM;
     const rgb = new Uint8Array(3 * n);
     for (let i = 0; i < n; i++) {
         const r = (i + 0.5) / n;
-        const c = hex(r < icb ? SLICE_LAYER_COLORS.inner : r < cmb ? SLICE_LAYER_COLORS.outer : SLICE_LAYER_COLORS.mantle);
-        rgb.set(c, 3 * i);
+        rgb.set(sliceDensityColor(premAt(r * R_EARTH_KM).rhoKgM3 / 1000), 3 * i);
     }
     return { n, rgb };
 }

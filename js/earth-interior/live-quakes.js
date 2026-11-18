@@ -22,7 +22,8 @@
 
 import { USGS_FEEDS, parseUsgsFeed, mergeQuakes, pickDefaultQuake, siteFromLocation, slicePlane, liveState, fmtDuration, WAVE_WINDOW_S, geoVec, siteWithElevation } from './quake-model.js';
 import { tileXY, tileSampler, demPath, TILE_PX } from '../climalytix/terrain.js';
-import { seismicSliceTable } from './page-model.js';
+import { seismicSliceTable, sliceDensityColor, sliceDensityGradientCss, SLICE_DENSITY_RANGE } from './page-model.js';
+import { premAt } from './prem.js';
 import { loadUserLocation, saveUserLocation, geocodeQuery } from '../user-location.js';
 import { parseMechanism } from './radiation.js';
 import { drawBeachball } from './beachball-view.js';
@@ -198,6 +199,8 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         if (!S.active) { stage.setSlice(null); return; }
         const p = plane();
         stage.setSlice(p, seismicSliceTable());
+        // The core and inner-core glass domes take the slice ramp's colour just inside their own surface.
+        stage.setDomeTints?.([3480, 1221.5].map((rKm) => ({ rKm, rgb: sliceDensityColor(premAt(rKm - 1).rhoKgM3 / 1000) })));
         if (p && S.payload) layer.setScene({ quake: S.selected, site: S.site, plane: p, rays: S.payload.rays, fan: S.payload.fan, arrivals: S.payload.arrivals.rows });
         layer.setOthers(S.quakes.filter((q) => q.id !== S.selected?.id));
     }
@@ -351,6 +354,16 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         }
         renderTimebar();
     });
+    // The density key is drawn from the SAME ramp stops the slice uses (page-model.js, one copy).
+    const dk = $('#ei-dens-key');
+    if (dk) dk.style.background = sliceDensityGradientCss();
+    const dl = $('#ei-dens-label');
+    if (dl) dl.textContent = `cut colour = density, ${SLICE_DENSITY_RANGE.min}–${SLICE_DENSITY_RANGE.max} g/cm³, log scale (PREM)`;
+    const b3 = $('#ei-3d');
+    if (b3) {
+        b3.setAttribute('aria-pressed', String(!/[?&]fronts3d=0\b/.test(location.search)));
+        b3.addEventListener('click', () => { const on = b3.getAttribute('aria-pressed') !== 'true'; b3.setAttribute('aria-pressed', String(on)); layer?.setSurfaces(on); });
+    }
     $('#ei-tscrub')?.addEventListener('input', (e) => {
         S.clock = { mode: 'replay', speed: S.clock.speed > 1 ? S.clock.speed : 10, anchorWall: Date.now(), anchorT: Number(e.target.value), paused: true };
         renderTimebar();
