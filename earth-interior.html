@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="js/preview-mode.js"></script>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inner Earth · Structure, Conductivity & Live Geoelectric Field · Parkers Physics</title>
+<link rel="canonical" href="https://parkersphysics.com/earth-interior.html">
+<meta name="description" content="Earth's interior at true radii — PREM seismic structure, mantle conductivity, and the live geoelectric field at USGS observatories computed through published 1-D ground columns, with NERC TPL-007 context.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Parkers Physics">
+<meta property="og:url" content="https://parkersphysics.com/earth-interior.html">
+<meta property="og:title" content="Inner Earth — structure, conductivity and the live geoelectric field">
+<meta property="og:description" content="A cutaway Earth drawn from PREM and Grayver 2017, and the surface electric field geomagnetic storms induce at USGS observatories, minute by minute.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Inner Earth — Parkers Physics">
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "/js/vendor/three-0.160.0/three.module.js",
+        "three/addons/": "/js/vendor/three-0.160.0/jsm/"
+    }
+}
+</script>
+<link rel="modulepreload" href="/js/vendor/three-0.160.0/three.module.js">
+
+<!-- Canonical nav: structure + styling owned by js/nav.js + js/nav-styles.css.
+     All page CSS below is ei- prefixed; there is intentionally NO nav styling here. -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+:root {
+    --ei-surface: #0b1322; --ei-surface-2: #111b2e; --ei-line: #22304a;
+    --ei-text: #f0efec; --ei-text-2: #c3c2b7; --ei-muted: #8a91a1;
+    --ei-s1: #3987e5; --ei-s2: #d95926;
+    --ei-ok: #0ca30c; --ei-warn: #c98500; --ei-down: #e66767;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #05080f; color: var(--ei-text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-x: clip; }
+.skip-link { position: absolute; left: -9999px; } .skip-link:focus { left: 8px; top: 8px; z-index: 100; background: #fff; color: #000; padding: 6px 10px; }
+.ei-wrap { max-width: 1400px; margin: 0 auto; padding: 0 16px; }
+.ei-hero { padding: 18px 16px 12px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.ei-hero h1 { margin: 0; font-size: 28px; letter-spacing: .01em; }
+.ei-badge { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ei-text-2); border: 1px solid var(--ei-line); border-radius: 999px; padding: 2px 10px; }
+.ei-hero p { flex-basis: 100%; margin: 0; color: var(--ei-text-2); max-width: 90ch; }
+
+/* ── The stage ── */
+#ei-stage { position: relative; height: clamp(420px, 64vh, 780px); border: 1px solid var(--ei-line); border-radius: 12px; overflow: hidden; background: #05080f; }
+#ei-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#ei-canvas:active { cursor: grabbing; }
+#ei-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.ei-mlabel { position: absolute; left: 0; top: 0; font: 600 11px/1 system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 6px #000; white-space: nowrap; }
+.ei-mlabel.is-sel { color: var(--ei-s2); }
+.ei-overlay { position: absolute; background: rgba(11, 19, 34, .86); border: 1px solid var(--ei-line); border-radius: 10px; padding: 8px 10px; backdrop-filter: blur(4px); }
+#ei-qbox { top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; }
+.ei-olabel { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ei-muted); }
+#ei-qchips { display: flex; gap: 4px; flex-wrap: wrap; }
+.ei-chip, .ei-btn { font: 600 13px/1 system-ui, sans-serif; color: var(--ei-text-2); background: transparent; border: 1px solid var(--ei-line); border-radius: 7px; padding: 7px 10px; cursor: pointer; min-width: 40px; }
+.ei-chip[aria-pressed="true"] { color: #fff; background: #1c5cab; border-color: #3987e5; }
+.ei-chip:hover, .ei-btn:hover { border-color: #6da7ec; color: #fff; }
+#ei-views { top: 12px; right: 12px; display: flex; gap: 6px; }
+#ei-legend { left: 12px; bottom: 12px; width: min(340px, calc(100% - 24px)); }
+.ei-legend-title { font-weight: 600; font-size: 13px; } .ei-unit { color: var(--ei-muted); font-weight: 400; }
+.ei-legend-bar { height: 12px; border-radius: 3px; margin: 6px 0 2px; }
+.ei-legend-ticks { position: relative; height: 15px; font-size: 11px; color: var(--ei-text-2); }
+.ei-legend-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.ei-legend-ticks span:first-child { transform: none; } .ei-legend-ticks span:last-child { transform: translateX(-100%); }
+.ei-legend-src { font-size: 11px; color: var(--ei-muted); margin-top: 2px; }
+#ei-probe { right: 12px; bottom: 12px; width: min(380px, calc(100% - 24px)); font-size: 13px; display: flex; flex-direction: column; gap: 1px; }
+#ei-probe span { color: var(--ei-text-2); }
+#ei-stage-msg { position: absolute; inset: 0; display: none; place-items: center; color: var(--ei-text-2); padding: 20px; text-align: center; }
+#ei-stage.is-failed #ei-stage-msg { display: grid; }
+.ei-stage-foot { font-size: 12px; color: var(--ei-muted); margin: 6px 2px 0; }
+
+/* ── Panels ── */
+.ei-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin: 18px auto 40px; }
+@media (min-width: 1100px) { .ei-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); } .ei-span { grid-column: 1 / -1; } }
+.ei-panel { background: var(--ei-surface); border: 1px solid var(--ei-line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.ei-panel h2 { margin: 0 0 2px; font-size: 17px; } .ei-panel > p { margin: 0 0 10px; color: var(--ei-text-2); font-size: 13px; }
+.ei-muted { color: var(--ei-muted); } .ei-sub { display: block; font-size: 11px; color: var(--ei-muted); }
+#ei-profile { display: flex; overflow-x: auto; gap: 2px; padding-bottom: 4px; }
+.ei-mult { flex: 0 0 auto; touch-action: none; } .ei-axis { flex: 0 0 auto; }
+.ei-band { fill: #ffffff; opacity: .035; }
+.ei-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.ei-tick { stroke: var(--ei-muted); } .ei-grid line, .ei-grid { stroke: #1c2840; }
+.ei-ticklab { fill: var(--ei-muted); font-size: 10px; } .ei-axlab { fill: var(--ei-text-2); font-size: 11px; }
+.ei-ptitle { fill: var(--ei-text); font-size: 12px; font-weight: 600; } .ei-punit { fill: var(--ei-muted); font-size: 10px; }
+.ei-dlab { fill: var(--ei-text); font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--ei-surface); stroke-width: 3px; }
+.ei-cross { stroke: var(--ei-s2); stroke-width: 1; } .ei-xread { fill: var(--ei-text); font-size: 10px; paint-order: stroke; stroke: var(--ei-surface); stroke-width: 3px; }
+.ei-status { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--ei-line); color: var(--ei-text); }
+.ei-status--ok span { color: var(--ei-ok); } .ei-status--warn span { color: var(--ei-warn); } .ei-status--down span { color: var(--ei-down); }
+.ei-table-wrap { overflow-x: auto; margin-top: 10px; }
+table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ei-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ei-muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--ei-line); white-space: nowrap; }
+.ei-table td { padding: 7px 8px; border-bottom: 1px solid #172238; vertical-align: middle; }
+.ei-table tr[data-code] { cursor: pointer; } .ei-table tr[data-code]:hover { background: #13203a; }
+.ei-table tr.is-sel { background: #1a2742; box-shadow: inset 3px 0 0 var(--ei-s2); }
+.ei-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ei-spark path { fill: none; stroke: var(--ei-s1); stroke-width: 1.5; }
+.ei-flag { font-size: 10px; color: var(--ei-warn); border: 1px solid #3b3220; border-radius: 4px; padding: 0 4px; }
+.ei-flagged { color: var(--ei-warn); }
+.ei-colhead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }
+.ei-colpick { font-size: 12px; color: var(--ei-text-2); display: flex; gap: 6px; align-items: center; min-width: 0; max-width: 100%; }
+#ei-colsel { background: var(--ei-surface-2); color: var(--ei-text); border: 1px solid var(--ei-line); border-radius: 6px; padding: 5px 6px; width: 100%; max-width: 320px; min-width: 0; font-size: 12px; }
+.ei-colpick { flex: 1 1 220px; justify-content: flex-end; }
+.ei-colinfo { font-size: 12px; margin: 4px 0 8px; }
+.ei-colcharts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.ei-chart { display: block; }
+.ei-legend-row { display: flex; gap: 14px; font-size: 12px; color: var(--ei-text-2); margin-top: 4px; }
+.ei-legend-row i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.ei-notes { font-size: 13px; color: var(--ei-text-2); margin: 0; padding-left: 18px; } .ei-notes li { margin: 4px 0; }
+.ei-notes b { color: var(--ei-text); }
+@media (max-width: 640px) {
+    .ei-hero h1 { font-size: 22px; }
+    #ei-stage { height: 520px; }
+    #ei-qbox { left: 8px; right: 8px; top: 8px; padding: 6px 8px; }
+    #ei-qchips { flex-wrap: nowrap; overflow-x: auto; }
+    #ei-qbox .ei-olabel { display: none; }
+    #ei-views { top: auto; right: 8px; bottom: 104px; padding: 4px; }
+    #ei-legend { left: 8px; right: 8px; bottom: 8px; width: auto; padding: 6px 8px; }
+    #ei-probe { display: none; }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<!-- Canonical nav SHELL: js/nav.js initNav() populates this element in place. -->
+<nav></nav>
+
+<header class="ei-wrap ei-hero">
+    <h1>Inner Earth</h1>
+    <span class="ei-badge">Structure · conductivity · live geoelectric field</span>
+    <p>Earth at true radii: seismic structure from PREM, mantle conductivity from Grayver et al. (2017), and the surface
+       electric field that geomagnetic activity drives through the ground at USGS observatories — computed minute by minute.</p>
+</header>
+
+<main id="main-content" class="ei-wrap">
+    <section id="ei-stage" aria-label="Cutaway Earth">
+        <canvas id="ei-canvas" aria-label="3D cutaway of Earth's interior. Drag to rotate, scroll to zoom."></canvas>
+        <div id="ei-labels" aria-hidden="true"></div>
+        <div class="ei-overlay" id="ei-qbox"><span class="ei-olabel">Cut faces show</span><div id="ei-qchips" role="group" aria-label="Quantity on the cut faces"></div></div>
+        <div class="ei-overlay" id="ei-views"><button type="button" class="ei-btn" data-view="cutaway">Cutaway</button><button type="button" class="ei-btn" data-view="observatories">Observatories</button></div>
+        <div class="ei-overlay" id="ei-legend"></div>
+        <div class="ei-overlay" id="ei-probe" aria-live="polite"></div>
+        <div id="ei-stage-msg"></div>
+    </section>
+    <p class="ei-stage-foot">True radii (crust and ocean are thinner than a pixel at this scale). PREM is a 1-D reference: the cut faces are the same in every direction. Static lighting; surface map NASA Blue Marble (archival). <span id="ei-mapnote"></span></p>
+
+    <div class="ei-grid">
+        <section class="ei-panel" aria-labelledby="ei-nc-h">
+            <h2 id="ei-nc-h">Live geoelectric field at USGS observatories</h2>
+            <p><span id="ei-feed" class="ei-status">Connecting…</span></p>
+            <p id="ei-label" class="ei-muted"></p>
+            <div class="ei-table-wrap">
+                <table class="ei-table">
+                    <thead><tr><th>Observatory</th><th class="ei-num">|E| now<br>mV/km</th><th class="ei-num">Peak 1 h<br>mV/km</th><th>Last 12 h</th><th>Ground column</th><th class="ei-num">TPL-007<br>benchmark</th></tr></thead>
+                    <tbody id="ei-nowcast-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="ei-panel" aria-labelledby="ei-col-h">
+            <h2 id="ei-col-h">Ground column</h2>
+            <p>The 1-D conductivity column the selected observatory's field is computed through, and how strongly that ground answers each period of magnetic variation.</p>
+            <div id="ei-column"></div>
+            <div class="ei-legend-row" id="ei-resp-legend"></div>
+        </section>
+
+        <section class="ei-panel ei-span" aria-labelledby="ei-prof-h">
+            <h2 id="ei-prof-h">Radial profile</h2>
+            <p>Five quantities on one depth axis. Hover a panel (or the cut faces) to read every quantity at that depth; the orange ring marks it in 3D.</p>
+            <div id="ei-profile"></div>
+        </section>
+
+        <section class="ei-panel ei-span" aria-labelledby="ei-notes-h">
+            <h2 id="ei-notes-h">What this is — and is not</h2>
+            <ul class="ei-notes">
+                <li><b>Structure is a reference model.</b> PREM (Dziewonski &amp; Anderson 1981) is spherically averaged: no slabs, plumes or continents. Lateral structure (CRUST1.0, Slab2, our own tomography) is planned — see the roadmap.</li>
+                <li><b>Conductivity is a global average.</b> Grayver et al. (2017), inverted from satellite and observatory data. Real ground near the surface varies by orders of magnitude.</li>
+                <li><b>The electric field is modelled, not measured.</b> A plane-wave source over a 1-D layered ground (the NERC TPL-007 method). No coasts or 3-D structure; E is computed at the observatory where B is measured, not along a power line.</li>
+                <li><b>Ground columns are chosen by id.</b> USGS v1.3 regions, NRCan observatory models, the NERC Quebec reference, or the flagged global default. USGS's region map is not yet baked, so nothing infers a column from a location.</li>
+                <li><b>Benchmarks are context.</b> TPL-007's 8·α·β V/km is a 1-in-100-year planning field, shown only where NERC tabulates β for the column.</li>
+            </ul>
+        </section>
+    </div>
+</main>
+
+<script type="module" src="js/earth-interior/page.js"></script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260714"; initNav("earth-interior");</script>
+</body>
+</html>

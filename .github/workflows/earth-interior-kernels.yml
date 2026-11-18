@@ -14,11 +14,16 @@
 #                             columns), sign by Poynting flux, sinusoid error
 #                             budget, warm-up, gaps, TPL-007 β ranking, the
 #                             nowcast, and the relay's `y` passthrough
+#   earth-interior-page.mjs   the page model: cutaway texels = the kernels, legend =
+#                             the faces' ramp, profile steps at PREM's jumps, column
+#                             charts = the nowcast's impedance; stage.js source pins
+#                             (map flipY, frame mirror, cut test)
 name: earth-interior-kernels
 
 on:
   push:
     paths:
+      - 'earth-interior.html'
       - 'data/earth-interior/**'
       - 'scripts/build-ground-models.mjs'
       - 'api/geomag/observatories.js'
@@ -30,6 +35,7 @@ on:
       - '.github/workflows/earth-interior-kernels.yml'
   pull_request:
     paths:
+      - 'earth-interior.html'
       - 'data/earth-interior/**'
       - 'scripts/build-ground-models.mjs'
       - 'api/geomag/observatories.js'
@@ -64,3 +70,5 @@ jobs:
         run: node scripts/build-ground-models.mjs --check
       - name: geoelectric kernel + nowcast
         run: node tests/earth-interior-geoelectric.mjs
+      - name: page model (earth-interior.html draws only these numbers)
+        run: node tests/earth-interior-page.mjs

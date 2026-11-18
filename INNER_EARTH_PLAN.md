@@ -8,6 +8,17 @@
   `scripts/build-ground-models.mjs`), `geoelectric.js` (exact causal kernel), `geoelectric-nowcast.js`
   (TIGA's own observatory payload → E per station), relay `y` passthrough. Gate
   `node tests/earth-interior-geoelectric.mjs` (23 checks). Both gates in CI `earth-interior-kernels.yml`.
+- **P4 first slice SHIPPED (2026-11-18)** — `earth-interior.html` (Earth & Orbit hub, catalogue id
+  `earth-interior`; not in the capped menu): header, then the 3D stage (`js/earth-interior/stage.js`,
+  true-radius octant cutaway over lon −40…50°N — no USGS observatory falls in the hole — cut faces
+  coloured per fragment from `page-model.js` `radialTable` for Vp/Vs/ρ/p/g/σ, layer hairlines, hover
+  probe ring, observatory markers from the FEED's coordinates, Cutaway/Observatories one-shot flights),
+  then the live nowcast table, the ground-column panel (picker over all 40 columns, σ step chart, |E|
+  per 100 nT vs period against the NERC Quebec reference), the five-panel radial profile on one depth
+  axis, and the disclosures. Gate `node tests/earth-interior-page.mjs` (9 checks). Scar: the first
+  render drew the Blue Marble UPSIDE DOWN under correctly placed markers (TextureLoader flipY vs GEO's
+  v = 0 at north) — pinned by source text. Browser smoke spec not yet written (the sandbox has no
+  `@playwright/test`); screenshots were taken with the global Playwright against a mocked relay.
 - **Tomography: we build our own** (owner, 2026-11-18) — §10, replacing the licence-blocked published models.
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
