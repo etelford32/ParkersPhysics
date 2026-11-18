@@ -168,7 +168,11 @@ ok(`every texel of all ${QUANTITY_KEYS.length} cutaway tables = the kernel at it
     assert.match(stage, /subSolarPoint/, 'the globe is lit by the site\'s existing sub-solar function, not a new one');
     assert.match(fx, /import \{ SANITIZE_GLSL, sanitizeBloomInput, roundBloomKernels \} from '\.\.\/launch-scene-fx\.js'/, 'ONE copy of the NaN sanitizer (the black-stage scar)');
     assert.match(html, /#ei-canvas, #ei-stage\.is-quakes #ei-labels \{ height: calc\(100% - var\(--ei-bar-h/, 'a <canvas> is a replaced element: height:auto between top/bottom takes its intrinsic height');
-    ok('stage renderer: ribbons double-sided, atmosphere in world space, one sanitizer, sub-solar light, canvas height explicit');
+    assert.match(stage, /if \(dot\(n, uCutN\) > 0\.0 && dot\(n, uCutM\) > 0\.0\) discard;/, 'the live cut is a WEDGE (both half-spaces)');
+    assert.match(stage, /return d\(this\.slice\.n\) > 0 && d\(this\.slice\.e2\) > 0;/, 'isCut mirrors the shader wedge (picking and the surface-quake filter depend on it)');
+    assert.match(stage, /this\.surfaceMat\.uniforms\.uCutM\.value\.copy\(e2\)/, 'the wedge\'s second wall is the plane through the epicentre axis (normal ê₂)');
+    assert.match(readFileSync(join(ROOT, 'js/earth-interior/front-surfaces.js'), 'utf8'), /SWEEP_MAX = Math\.PI \/ 2/, 'the 3-D fronts fill the wedge, wall A to wall B');
+    ok('stage renderer: ribbons double-sided, atmosphere in world space, one sanitizer, sub-solar light, canvas height explicit, wedge cut ≡ JS cut test, fronts fill the wedge');
 }
 
 // ── Seismic panel: every drawn ray IS a kernel ray ─────────────────────────

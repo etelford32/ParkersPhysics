@@ -22,13 +22,17 @@
  *   · the fronts as 3-D SURFACES (front-surfaces.js): the slice curve revolved
  *     about the epicentre axis through the removed half — PREM is spherically
  *     symmetric, so that IS the wavefront; toggle with `setSurfaces`;
- *   · the layer names on the cut, placed on the side away from the rays.
+ *   · the layer names on wall B (the stage cuts a WEDGE: wall A is the slice
+ *     to the viewer, wall B the perpendicular plane through the epicentre axis,
+ *     where — by the axial symmetry — the same fronts are drawn again).
+ *   · fronts are taken from the +φ side and FOLDED (φ > π → 2π − φ): the −φ
+ *     half of the slice is inside the solid now, and it is the same curve.
  * The clock is supplied by the page (live wall clock or a replay); the
  * stage never spins. The globe is lit by the Sun at the instant shown.
  */
 
 import * as THREE from 'three';
-import { planePoint, wavefronts, positionAt, geoVec } from './quake-model.js';
+import { planePoint, sweepPoint, wavefronts, positionAt, geoVec } from './quake-model.js';
 import { R_EARTH_KM } from './prem.js';
 import { GlowLines, GlowPoints } from './glow-lines.js';
 import { FrontSurfaces } from './front-surfaces.js';
@@ -167,9 +171,8 @@ export class SeismicLayer {
             { points: [hypo, epiP], color: [1.0, 0.5, 0.25], alpha: 0.55 },
             { points: beacon, colors: [[0.9, 0.95, 1.0], [0.05, 0.07, 0.1]], alpha: 1 },
         ]);
-        // Layer names on the side of the cut AWAY from the arc the rays fill.
-        const away = Math.PI + (plane.siteAngleRad ?? 0) / 2;
-        for (const L of this.layerLabels) L.pos = new THREE.Vector3(...P(L.rKm, away));
+        // Layer names on wall B (the plane through the epicentre axis and n̂), clear of the rays on wall A.
+        for (const L of this.layerLabels) L.pos = new THREE.Vector3(...sweepPoint(plane, L.rKm, 0.62 * Math.PI, Math.PI / 2));
         this._lastT = null;
     }
 
@@ -199,19 +202,24 @@ export class SeismicLayer {
         if (Math.abs(inst - this._lastSun) > 60_000) { this._lastSun = inst; this.stage.setSunDate(new Date(inst)); }
 
         const lines = [];
+        const fold = (phi) => (phi > Math.PI ? 2 * Math.PI - phi : phi);
+        const WALLS = [(r, phi) => P(r, fold(phi)), (r, phi) => sweepPoint(plane, r, phi, Math.PI / 2)];
         for (const e of ECHOES) {
             const t = tS - e.dt;
             if (t <= 0) continue;
             for (const f of wavefronts(fan, t)) {
-                // Split where neighbouring rays left in very different directions (not one front).
-                let pts = [], cols = [];
-                const flush = () => { if (pts.length > 1) { const s = smooth(pts, cols); lines.push({ points: s.pts, colors: s.cols, alpha: e.alpha }); } pts = []; cols = []; };
-                for (let i = 0; i < f.points.length; i++) {
-                    const a = f.points[i];
-                    if (i > 0 && Math.abs(a.phi - f.points[i - 1].phi) > 0.35) flush();
-                    pts.push(P(a.rKm, a.phi)); cols.push(GLOW[a.wave]);
+                if (f.points[0].phi < 0) continue;            // the −φ side is the same curve (and inside the solid now)
+                for (const W of WALLS) {
+                    // Split where neighbouring rays left in very different directions (not one front).
+                    let pts = [], cols = [];
+                    const flush = () => { if (pts.length > 1) { const s = smooth(pts, cols); lines.push({ points: s.pts, colors: s.cols, alpha: e.alpha }); } pts = []; cols = []; };
+                    for (let i = 0; i < f.points.length; i++) {
+                        const a = f.points[i];
+                        if (i > 0 && Math.abs(fold(a.phi) - fold(f.points[i - 1].phi)) > 0.35) flush();
+                        pts.push(W(a.rKm, a.phi)); cols.push(GLOW[a.wave]);
+                    }
+                    flush();
                 }
-                flush();
             }
         }
         this.fronts.set(lines);
@@ -284,7 +292,7 @@ export class SeismicLayer {
         put(this.labels.site, this.site.position, 12, -8, this.site.position.clone().normalize().dot(camDir) < -0.2);
         if (this.hypoPos) put(this.labels.hypo, this.hypoPos, 10, 6);
         // Layer names only while the cut faces the camera (edge-on they would pile up).
-        const plane = this.state.plane, faceOn = Math.abs(camDir.dot(new THREE.Vector3(...plane.n))) > 0.35;
+        const plane = this.state.plane, faceOn = camDir.dot(new THREE.Vector3(...plane.e2)) > 0.25;     // wall B faces +ê₂
         for (const L of this.layerLabels) if (L.pos) put(L.el, L.pos, -36, -6, !faceOn);
     }
 }

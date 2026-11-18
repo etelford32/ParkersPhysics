@@ -29,6 +29,7 @@ attribute float aAlpha;
 attribute float aDist;
 uniform vec2 uRes;
 uniform float uWidth;
+uniform float uDepthBias;
 varying float vSide;
 varying vec3 vColor;
 varying float vAlpha;
@@ -47,6 +48,9 @@ void main() {
     float miter = 1.0 / max(dot(nrm, vec2(-d1.y, d1.x)), 0.4);
     vec2 off = nrm * uWidth * aSide * miter;
     c.xy += off / (0.5 * uRes) * c.w;
+    // Depth-tested against the solid planet, pulled a hair toward the camera so a line lying ON a
+    // wall never z-fights it (the wedge made "behind the planet" a real place).
+    c.z -= uDepthBias * c.w;
     gl_Position = c;
     vSide = aSide; vColor = aColor; vAlpha = aAlpha; vDist = aDist;
 }`;
@@ -80,11 +84,11 @@ export class GlowLines {
         this.width = width;
         this.material = new THREE.ShaderMaterial({
             vertexShader: VS, fragmentShader: FS,
-            uniforms: { uRes: { value: new THREE.Vector2(1, 1) }, uWidth: { value: width }, uGain: { value: gain }, uCore: { value: core }, uDash: { value: dash } },
+            uniforms: { uRes: { value: new THREE.Vector2(1, 1) }, uWidth: { value: width }, uGain: { value: gain }, uCore: { value: core }, uDash: { value: dash }, uDepthBias: { value: 0.0015 } },
             // DoubleSide: a strip's winding is fixed relative to its direction of travel, so with
             // back-face culling EVERY ribbon was culled (measured: geometry present, nothing drawn).
             side: THREE.DoubleSide,
-            transparent: true, depthTest: false, depthWrite: false,
+            transparent: true, depthWrite: false,
             blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
         });
         this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
@@ -151,6 +155,7 @@ varying vec3 vColor;
 void main() {
     vColor = aColor;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position.z -= 0.003 * gl_Position.w;
     gl_PointSize = aSize * uDpr;
 }`;
 const PT_FS = /* glsl */`
@@ -167,7 +172,7 @@ export class GlowPoints {
     constructor() {
         this.material = new THREE.ShaderMaterial({
             vertexShader: PT_VS, fragmentShader: PT_FS, uniforms: { uDpr: { value: 1 } },
-            transparent: true, depthTest: false, depthWrite: false,
+            transparent: true, depthWrite: false,
             blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
         });
         this.points = new THREE.Points(new THREE.BufferGeometry(), this.material);

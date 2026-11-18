@@ -121,6 +121,18 @@
   radiation pattern's variation around the axis. The core and inner core stand on the cut as glass domes
   tinted by the ramp at their own radius. "3D fronts" chip / `?fronts3d=0`. SwiftShader cost: ~126 ms vs
   ~108 ms per frame without the surfaces.
+- **The live cut is a WEDGE (2026-11-18)** — the owner's verdict on the half-cut was "it's 2D": one flat disc
+  fills the view however it is lit. The stage now removes the quarter {x·n̂ > 0, x·ê₂ > 0}: wall A is the
+  slice (its ê₂ half holds every minor-arc ray to the viewer), wall B the plane through the EPICENTRE AXIS and
+  n̂, and the crease between them IS that axis (the hypocentre sits on it). Physics makes this free: PREM is
+  spherically symmetric, so a front meets any plane through the axis in the same curve — wall B carries the
+  same fronts (`sweepPoint` at ψ = π/2), the 3-D surfaces sweep ψ ∈ [0, π/2] and fill the notch, and the −φ
+  half is folded (it is the same curve and now inside the solid). The walls take a camera-relative key light
+  by their own normals (one wall lit, one in shade), the crease is darkened, the default camera looks into
+  the notch a little off its bisector (on it both walls took the same light; far off it wall B goes
+  edge-on — both tried), and lines/points are now DEPTH-TESTED with a small bias toward the camera
+  (they lie on the walls), so swinging behind the planet hides them. Long-way rays (Δ > 180°) run partly
+  inside the solid and show only where they surface. SwiftShader ~115 ms/frame.
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that

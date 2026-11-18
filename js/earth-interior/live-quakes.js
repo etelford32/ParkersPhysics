@@ -185,10 +185,10 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
     function plane() { return S.selected ? slicePlane(S.selected, S.site) : null; }
     function aim() {
         const p = plane(); if (!p || !stage) return;
-        // Open on the VIEWER: above the viewer's side of the slice, tilted so the cut face shows.
-        const u = siteVec(), n = p.n;
-        // 0.62 / 0.78: the cut face still reads, and the lit globe behind it shows as a body, not a sliver.
-        const dir = u.map((x, i) => 0.62 * x + 0.78 * n[i]);
+        // Look INTO the wedge: from its opening (ê₂ + n̂), lifted toward the epicentre so both walls
+        // are seen obliquely and the crease runs across the frame — a notch in a solid globe.
+        // A little off the bisector toward n̂ (wall A, the rays to you); far off it wall B goes edge-on.
+        const dir = [0, 1, 2].map((i) => 0.56 * p.e2[i] + 0.70 * p.n[i] + 0.46 * p.e1[i]);
         stage.flyToDirection(dir, { fill: 0.9 });
     }
     const siteVec = () => geoVec(S.site.lat, S.site.lon);

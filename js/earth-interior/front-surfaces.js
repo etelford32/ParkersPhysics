@@ -48,13 +48,15 @@ void main() {
     gl_FragColor = vec4(vColor * k, 1.0);
 }`;
 
-export const SWEEP_STEPS = 48;
+export const SWEEP_STEPS = 32;
+/** The sweep spans the removed WEDGE: ψ ∈ [0, π/2] (wall A at 0, wall B at π/2). */
+export const SWEEP_MAX = Math.PI / 2;
 
 export class FrontSurfaces {
     constructor({ gain = 1 } = {}) {
         this.material = new THREE.ShaderMaterial({
             vertexShader: VS, fragmentShader: FS, uniforms: { uGain: { value: gain } },
-            side: THREE.DoubleSide, transparent: true, depthTest: false, depthWrite: false,
+            side: THREE.DoubleSide, transparent: true, depthWrite: false,
             blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
             extensions: { derivatives: true },
         });
@@ -80,7 +82,7 @@ export class FrontSurfaces {
                 // quake-model.js sweepPoint: the ONE copy of the sweep (node-gated), φ past π folded back.
                 const rgb = colors[p.wave];
                 for (let j = 0; j <= S; j++) {
-                    pos.set(sweepPoint(plane, p.rKm, p.phi, (j / S) * Math.PI), 3 * v);
+                    pos.set(sweepPoint(plane, p.rKm, p.phi, (j / S) * SWEEP_MAX), 3 * v);
                     col.set(rgb, 3 * v);
                     v++;
                 }
