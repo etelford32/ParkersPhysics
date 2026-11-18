@@ -92,6 +92,23 @@
   strike-slip), so the even split of the fallback is itself an average; R_P = ±1 on T/P and 0 on both nodal
   planes; planes round-trip; USE→NED with a naive-mapping control; and end to end each arrival scales by
   exactly |R|/RMS. NOT claimed: finite rupture/directivity, 3-D take-offs (slabs).
+- **The 3D stage, rebuilt (2026-11-18)** — renderer only; no number changed. Rays and wavefronts are
+  constant-screen-width GLOWING RIBBONS (`glow-lines.js`, mitred so segments never overlap under additive
+  blending — the old 1-px GL lines needed a dot per vertex and read as bead chains); each front carries three
+  fading ECHOES (10/20/30 s earlier) and is Catmull–Rom-interpolated ×4 BETWEEN the kernel's own ray positions
+  (display only); packets are comets with a 60 s trail; the hypocentre sits at its catalogue depth. The globe
+  is lit by the REAL Sun at the instant shown (sun-altitude.js `subSolarPoint`), with NASA Earth-at-Night city
+  lights on the night side; an atmosphere rim (analytic impact parameter on a camera-facing annulus) and a
+  glass outline of the removed half are DRAWN, not to scale, and the footnote says so. The cut face keeps the
+  legend's layer colours with display-only bevel shading. Post: bloom + one final pass
+  (`stage-fx.js`, the launch planner's NaN sanitizer REUSED; identity below 0.85; `?eifx=high|low|off`,
+  software GL ⇒ low). The clock is DOCKED under the canvas (it covered the globe) and the stage frames the
+  globe in the band left clear by measured chrome (`setSafeInsets` → `setViewOffset`). Three silent bugs,
+  pinned in `tests/earth-interior-page.mjs`: ribbons need DoubleSide (back-face culling hid every one);
+  the rotated annulus needs the WORLD position (local drew a straight streak); a `<canvas>` is a replaced
+  element, so `height:auto` between top/bottom kept its intrinsic height (the phone globe filled a third of
+  the stage). Measured on SwiftShader 1440×900: ~108 ms/frame vs ~75 before (ribbon fill; the front
+  rebuild itself is ~5 ms) — negligible on a GPU, unverified on one.
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that

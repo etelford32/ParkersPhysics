@@ -5,40 +5,81 @@
  *
  * What it draws, in the great-circle slice through the epicentre, the
  * viewer and the centre:
- *   · the wavefronts at the layer's clock — P blue, S orange, by the wave
- *     type ON each stretch (SKS turns blue in the liquid core), as dots
- *     joined where neighbouring rays are both still in the Earth;
+ *   · the WAVEFRONTS at the layer's clock as continuous glowing curves —
+ *     P blue, S orange, by the wave type ON each stretch (SKS turns blue in
+ *     the liquid core) — with three fading ECHOES of where each front was
+ *     10, 20 and 30 s earlier, so the motion reads in a still frame. The
+ *     curve passes through the kernel's own ray positions; between them it
+ *     is a Catmull–Rom display interpolation (×4), never new physics;
  *   · every ray that reaches the viewer (dashed: reflected / multiple /
- *     depth phases; opacity = the phase's strength in its band), and a bright
- *     packet riding each one at the clock;
- *   · the epicentre (orange burst), the viewer (white ring) and every other
- *     catalogue quake on the surface (white dots, sized by magnitude).
+ *     depth phases; brightness = the phase's strength in its band), with a
+ *     glowing PACKET riding it at the clock and a short trail behind it;
+ *   · the HYPOCENTRE at its catalogue depth inside the slice (joined to the
+ *     epicentre), the epicentre (a pulsing marker — the pulse is a marker,
+ *     not a wave), the viewer (a ring + a beacon along the local vertical),
+ *     and every other catalogue quake on the visible surface, sized by
+ *     magnitude;
+ *   · the layer names on the cut, placed on the side away from the rays.
  * The clock is supplied by the page (live wall clock or a replay); the
- * stage never spins.
+ * stage never spins. The globe is lit by the Sun at the instant shown.
  */
 
 import * as THREE from 'three';
 import { planePoint, wavefronts, positionAt, geoVec } from './quake-model.js';
+import { R_EARTH_KM } from './prem.js';
+import { GlowLines, GlowPoints } from './glow-lines.js';
 
 export const WAVE_COLORS = Object.freeze({ P: '#3987e5', S: '#d95926' });
 const DASHED_KINDS = new Set(['reflected', 'multiple', 'depth']);
 const LIFT = 1.002;
+const ECHOES = [{ dt: 0, alpha: 1 }, { dt: 10, alpha: 0.30 }, { dt: 20, alpha: 0.14 }, { dt: 30, alpha: 0.06 }];
+const TRAIL_S = 60, TRAIL_N = 14;
+const PULSE_MS = 2400;
+const LAYER_LABELS = [
+    { text: 'Mantle', rKm: (R_EARTH_KM + 3480) / 2 + 600 },
+    { text: 'Outer core · liquid', rKm: (3480 + 1221.5) / 2 },
+    { text: 'Inner core', rKm: 560 },
+];
 
-function dotTexture() {
-    const c = document.createElement('canvas'); c.width = c.height = 32;
-    const x = c.getContext('2d'), g = x.createRadialGradient(16, 16, 0, 16, 16, 15);
-    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.55, 'rgba(255,255,255,0.9)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+// Display colours, LIFTED above the legend swatch so the glow reads on the dark cut
+// (the core of the line is the swatch hue, brightened; the halo blooms).
+const GLOW = { P: hexRgb('#4f9bff'), S: hexRgb('#ff6a2b') };
+
+function ringTexture() {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const x = c.getContext('2d');
+    x.beginPath(); x.arc(64, 64, 52, 0, Math.PI * 2); x.lineWidth = 10; x.strokeStyle = 'rgba(255,255,255,1)'; x.stroke();
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace; return t;
 }
 function burstTexture() {
     const c = document.createElement('canvas'); c.width = c.height = 64;
     const x = c.getContext('2d');
-    x.translate(32, 32); x.fillStyle = '#d95926'; x.strokeStyle = '#05080f'; x.lineWidth = 4;
+    x.translate(32, 32); x.fillStyle = '#ff7a3d'; x.strokeStyle = '#05080f'; x.lineWidth = 3;
     x.beginPath();
-    for (let i = 0; i < 16; i++) { const r = i % 2 ? 13 : 28, a = i * Math.PI / 8; x.lineTo(r * Math.cos(a), r * Math.sin(a)); }
+    for (let i = 0; i < 16; i++) { const r = i % 2 ? 11 : 27, a = i * Math.PI / 8; x.lineTo(r * Math.cos(a), r * Math.sin(a)); }
     x.closePath(); x.stroke(); x.fill();
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace; return t;
+}
+const additiveSprite = (map, hex) => new THREE.Sprite(new THREE.SpriteMaterial({
+    map, sizeAttenuation: false, depthTest: false, transparent: true, blending: THREE.AdditiveBlending,
+    color: new THREE.Color().setHex(hex, THREE.NoColorSpace),
+}));
+
+/** Catmull–Rom through the points (display only), with per-point colours carried along. */
+function smooth(pts, cols, k = 4) {
+    if (pts.length < 3) return { pts, cols };
+    const P = [], C = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+        for (let j = 0; j < k; j++) {
+            const t = j / k, t2 = t * t, t3 = t2 * t;
+            P.push([0, 1, 2].map((a) => 0.5 * (2 * p1[a] + (-p0[a] + p2[a]) * t + (2 * p0[a] - 5 * p1[a] + 4 * p2[a] - p3[a]) * t2 + (-p0[a] + 3 * p1[a] - 3 * p2[a] + p3[a]) * t3)));
+            C.push(t < 0.5 ? cols[i] : cols[i + 1]);
+        }
+    }
+    P.push(pts.at(-1)); C.push(cols.at(-1));
+    return { pts: P, cols: C };
 }
 
 export class SeismicLayer {
@@ -46,115 +87,144 @@ export class SeismicLayer {
         this.stage = stage; this.labelLayer = labelLayer; this.onPickQuake = onPickQuake;
         this.group = new THREE.Group(); this.group.visible = false;
         stage.scene.add(this.group);
-        this.dotTex = dotTexture();
-        this.colors = { P: new THREE.Color(WAVE_COLORS.P), S: new THREE.Color(WAVE_COLORS.S) };
 
-        // Wavefronts: one LineSegments + one Points, rebuilt per clock tick.
-        this.frontLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85, depthTest: false }));
-        this.frontDots = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ vertexColors: true, size: 5, sizeAttenuation: false, map: this.dotTex, transparent: true, depthTest: false }));
-        this.packets = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ vertexColors: true, size: 11, sizeAttenuation: false, map: this.dotTex, transparent: true, depthTest: false }));
-        this.rayGroup = new THREE.Group();
-        for (const o of [this.rayGroup, this.frontLines, this.frontDots, this.packets]) { o.renderOrder = 5; this.group.add(o); }
+        this.fronts = new GlowLines({ width: 3, gain: 0.62, core: 1.3 });
+        this.rays = new GlowLines({ width: 1.8, gain: 0.55, core: 1.2 });
+        this.raysDashed = new GlowLines({ width: 1.8, gain: 0.5, core: 1.2, dash: 0.03 });
+        this.trails = new GlowLines({ width: 3, gain: 0.8, core: 1.3 });
+        this.marks = new GlowLines({ width: 2.4, gain: 1.0, core: 1.3 });
+        this.packets = new GlowPoints();
+        this.others = new GlowPoints();
+        const objs = [this.rays.mesh, this.raysDashed.mesh, this.fronts.mesh, this.trails.mesh, this.marks.mesh, this.packets.points, this.others.points];
+        objs.forEach((o, i) => { o.renderOrder = 5 + i * 0.01; this.group.add(o); });
+        this._unsize = stage.onResize(({ w, h, dpr }) => {
+            for (const g of [this.fronts, this.rays, this.raysDashed, this.trails, this.marks]) g.setResolution(w, h, dpr);
+            this.packets.setDpr(dpr); this.others.setDpr(dpr);
+        });
 
-        this.epi = new THREE.Sprite(new THREE.SpriteMaterial({ map: burstTexture(), sizeAttenuation: false, depthTest: false, transparent: true }));
-        this.site = new THREE.Sprite(new THREE.SpriteMaterial({ map: stage.markerTex, sizeAttenuation: false, depthTest: false, transparent: true }));
-        this.epi.renderOrder = this.site.renderOrder = 6;
-        this.group.add(this.epi, this.site);
-        this.others = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ color: 0xf0efec, size: 6, sizeAttenuation: false, map: this.dotTex, transparent: true, opacity: 0.8 }));
-        this.group.add(this.others);
+        this.epi = additiveSprite(burstTexture(), 0xffffff);
+        this.pulse = additiveSprite(ringTexture(), 0xff7a3d);
+        this.site = additiveSprite(ringTexture(), 0xffffff);
+        for (const s of [this.epi, this.pulse, this.site]) { s.renderOrder = 6; this.group.add(s); }
         this.otherList = [];
 
         this.labels = {};
-        if (labelLayer) for (const k of ['epi', 'site']) { const s = document.createElement('span'); s.className = `ei-mlabel ei-mlabel--${k}`; labelLayer.appendChild(s); this.labels[k] = s; }
+        if (labelLayer) {
+            for (const k of ['epi', 'site', 'hypo']) { const s = document.createElement('span'); s.className = `ei-mlabel ei-mlabel--${k}`; labelLayer.appendChild(s); this.labels[k] = s; }
+            this.layerLabels = LAYER_LABELS.map((L) => { const s = document.createElement('span'); s.className = 'ei-mlabel ei-mlabel--layer'; s.textContent = L.text; labelLayer.appendChild(s); return { ...L, el: s }; });
+        } else this.layerLabels = [];
 
         this.state = null;            // { quake, site, plane, fan, rays }
-        this._lastT = null;
-        this._unhook = stage.onFrame(() => this._place());
+        this._lastT = null; this._lastSun = 0;
+        this._unhook = stage.onFrame((now) => this._place(now));
     }
 
     setVisible(on) {
         this.group.visible = on;
         for (const l of Object.values(this.labels)) l.style.display = on ? '' : 'none';
+        for (const l of this.layerLabels) l.el.style.display = on ? '' : 'none';
     }
 
     /** The quake, the site, its slice plane and the Worker's payload (rays to the site, the fan). */
     setScene({ quake, site, plane, rays = [], fan = [], arrivals = [] }) {
         this.state = { quake, site, plane, rays, fan, arrivals };
-        const v = (r, phi) => new THREE.Vector3(...planePoint(plane, r, phi));
-        this.epi.position.copy(new THREE.Vector3(...geoVec(quake.lat, quake.lon)).multiplyScalar(LIFT));
-        this.site.position.copy(new THREE.Vector3(...geoVec(site.lat, site.lon)).multiplyScalar(LIFT));
+        const P = (r, phi) => planePoint(plane, r, phi);
+        this.epi.position.set(...geoVec(quake.lat, quake.lon)).multiplyScalar(LIFT);
+        this.pulse.position.copy(this.epi.position);
+        const siteV = new THREE.Vector3(...geoVec(site.lat, site.lon));
+        this.site.position.copy(siteV).multiplyScalar(LIFT);
         if (this.labels.epi) this.labels.epi.textContent = `M${quake.mag.toFixed(1)}`;
         if (this.labels.site) this.labels.site.textContent = site.fallback ? 'NEIC' : 'You';
-        // Rays to the site: one line each, coloured per stretch by its wave.
-        for (const c of [...this.rayGroup.children]) { this.rayGroup.remove(c); c.geometry.dispose(); c.material.dispose(); }
+        if (this.labels.hypo) this.labels.hypo.textContent = `${Math.round(quake.depthKm)} km deep`;
+
+        // Rays to the site, coloured per stretch by their wave; brightness = the phase's
+        // STRENGTH in its band (amplitude.js) — a −50 dB partial reflection is drawn faint.
         const kindOf = new Map(arrivals.map((a) => [a.phase, a.kind]));
-        // A ray's opacity is its phase's STRENGTH in its own band (amplitude.js): a −50 dB
-        // partial reflection should not be drawn as boldly as the direct P.
         const dbOf = new Map(arrivals.map((a) => [a.phase, a.db]));
-        const alphaOf = (ph) => { const d = dbOf.get(ph); return d == null ? 0.3 : 0.12 + 0.63 * Math.max(0, Math.min(1, (d + 50) / 50)); };
+        const alphaOf = (ph) => { const d = dbOf.get(ph); return d == null ? 0.25 : 0.12 + 0.78 * Math.max(0, Math.min(1, (d + 50) / 50)); };
+        const solid = [], dashed = [];
         for (const r of rays) {
             if (!r.path) continue;
-            const pos = [], col = [];
-            for (let i = 1; i < r.path.length; i++) {
-                const a = r.path[i - 1], b = r.path[i], c = this.colors[b.wave];
-                pos.push(...v(a.rKm, a.phi).toArray(), ...v(b.rKm, b.phi).toArray());
-                col.push(c.r, c.g, c.b, c.r, c.g, c.b);
-            }
-            const g = new THREE.BufferGeometry();
-            g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-            g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-            const dashed = DASHED_KINDS.has(kindOf.get(r.phase));
-            const m = dashed
-                ? new THREE.LineDashedMaterial({ vertexColors: true, dashSize: 0.012, gapSize: 0.01, transparent: true, opacity: alphaOf(r.phase), depthTest: false })
-                : new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: alphaOf(r.phase), depthTest: false });
-            const line = new THREE.LineSegments(g, m);
-            if (dashed) line.computeLineDistances();
-            line.userData.phase = r.phase;
-            this.rayGroup.add(line);
+            const line = { points: r.path.map((n) => P(n.rKm, n.phi)), colors: r.path.map((n) => GLOW[n.wave]), alpha: alphaOf(r.phase) };
+            (DASHED_KINDS.has(kindOf.get(r.phase)) ? dashed : solid).push(line);
+            r.packed = packed(r.path);
         }
+        this.rays.set(solid); this.raysDashed.set(dashed);
+
+        // The hypocentre at depth, joined to the epicentre; the viewer's beacon on the local vertical.
+        const hypo = P(R_EARTH_KM - quake.depthKm, 0), epiP = P(R_EARTH_KM, 0);
+        const beacon = [siteV.clone().multiplyScalar(1.004).toArray(), siteV.clone().multiplyScalar(1.10).toArray()];
+        this.hypoPos = new THREE.Vector3(...hypo);
+        this.marks.set([
+            { points: [hypo, epiP], color: [1.0, 0.5, 0.25], alpha: 0.55 },
+            { points: beacon, colors: [[0.9, 0.95, 1.0], [0.05, 0.07, 0.1]], alpha: 1 },
+        ]);
+        // Layer names on the side of the cut AWAY from the arc the rays fill.
+        const away = Math.PI + (plane.siteAngleRad ?? 0) / 2;
+        for (const L of this.layerLabels) L.pos = new THREE.Vector3(...P(L.rKm, away));
         this._lastT = null;
-        this._sizeSprites();
     }
 
     /** Other catalogue quakes as surface dots: [{ id, lat, lon, mag }]. */
     setOthers(list) {
         // Dots on the half the slice removes would float in empty space: they are not drawn (or picked).
         this.otherList = list.filter((q) => !this.stage.isCut(new THREE.Vector3(...geoVec(q.lat, q.lon))));
-        const pos = [];
-        for (const q of this.otherList) pos.push(...new THREE.Vector3(...geoVec(q.lat, q.lon)).multiplyScalar(LIFT).toArray());
-        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-        this.others.geometry.dispose(); this.others.geometry = g;
+        this.others.set(this.otherList.map((q) => ({
+            p: new THREE.Vector3(...geoVec(q.lat, q.lon)).multiplyScalar(LIFT).toArray(),
+            size: 5 + 2.4 * Math.max(0, (q.mag ?? 3) - 2.5),
+            color: [0.95, 0.82, 0.62].map((v) => v * 0.8),
+        })));
     }
 
     /** Draw the fronts and packets at t seconds after the origin. */
     setTime(tS) {
         if (!this.state || (this._lastT !== null && Math.abs(tS - this._lastT) < 0.05)) return;
         this._lastT = tS;
-        const { plane, fan, rays } = this.state;
+        const t0 = performance.now();
+        try { this._setTime(tS); } finally { this.lastBuildMs = performance.now() - t0; }
+    }
+    _setTime(tS) {
+        const { plane, fan, rays, quake } = this.state;
         const P = (r, phi) => planePoint(plane, r, phi);
-        const lp = [], lc = [], dp = [], dc = [];
-        for (const f of wavefronts(fan, tS)) {
-            for (let i = 0; i < f.points.length; i++) {
-                const a = f.points[i], c = this.colors[a.wave];
-                dp.push(...P(a.rKm, a.phi)); dc.push(c.r, c.g, c.b);
-                if (i === 0) continue;
-                const b = f.points[i - 1];
-                // Do not bridge across a big jump in angle (two rays that left in different directions).
-                if (Math.abs(a.phi - b.phi) > 0.35) continue;
-                lp.push(...P(b.rKm, b.phi), ...P(a.rKm, a.phi)); lc.push(c.r, c.g, c.b, c.r, c.g, c.b);
+        // The globe is lit by the Sun at the instant shown (throttled: it moves 0.25° a minute).
+        const inst = quake.timeMs + tS * 1000;
+        if (Math.abs(inst - this._lastSun) > 60_000) { this._lastSun = inst; this.stage.setSunDate(new Date(inst)); }
+
+        const lines = [];
+        for (const e of ECHOES) {
+            const t = tS - e.dt;
+            if (t <= 0) continue;
+            for (const f of wavefronts(fan, t)) {
+                // Split where neighbouring rays left in very different directions (not one front).
+                let pts = [], cols = [];
+                const flush = () => { if (pts.length > 1) { const s = smooth(pts, cols); lines.push({ points: s.pts, colors: s.cols, alpha: e.alpha }); } pts = []; cols = []; };
+                for (let i = 0; i < f.points.length; i++) {
+                    const a = f.points[i];
+                    if (i > 0 && Math.abs(a.phi - f.points[i - 1].phi) > 0.35) flush();
+                    pts.push(P(a.rKm, a.phi)); cols.push(GLOW[a.wave]);
+                }
+                flush();
             }
         }
-        set(this.frontLines, lp, lc); set(this.frontDots, dp, dc);
-        // Packets riding each ray to the site.
-        const pp = [], pc = [];
+        this.fronts.set(lines);
+
+        // Packets riding each ray to the site, with a trail over the last TRAIL_S seconds.
+        const heads = [], trails = [];
         for (const r of rays) {
-            if (!r.packed) r.packed = packed(r.path);
+            if (!r.packed) continue;
+            const side = r.path.at(-1).phi < 0 ? -1 : 1;
             const q = positionAt(r.packed, tS);
             if (!q) continue;
-            const c = this.colors[q.wave];
-            pp.push(...P(q.rKm, (r.path.at(-1).phi < 0 ? -1 : 1) * q.deltaRad)); pc.push(c.r, c.g, c.b);
+            heads.push({ p: P(q.rKm, side * q.deltaRad), size: 13, color: GLOW[q.wave].map((v) => v * 1.1) });
+            const pts = [], cols = [], al = [];
+            for (let k = TRAIL_N; k >= 0; k--) {
+                const s = positionAt(r.packed, tS - (k / TRAIL_N) * TRAIL_S);
+                if (!s) continue;
+                pts.push(P(s.rKm, side * s.deltaRad)); cols.push(GLOW[s.wave]); al.push(Math.pow(1 - k / TRAIL_N, 1.6));
+            }
+            if (pts.length > 1) trails.push({ points: pts, colors: cols, alphas: al.slice(-pts.length) });
         }
-        set(this.packets, pp, pc);
+        this.packets.set(heads); this.trails.set(trails);
     }
 
     /** Pixel pick of a surface quake dot; returns its id or null. */
@@ -171,31 +241,36 @@ export class SeismicLayer {
         return best;
     }
 
-    _sizeSprites() {
+    _sizeSprites(now) {
         const hpx = this.stage.canvas.clientHeight || 1, k = 2 * Math.tan(this.stage.camera.fov * Math.PI / 360) / hpx;
-        this.epi.scale.setScalar(22 * k); this.site.scale.setScalar(15 * k);
+        const u = ((now ?? 0) % PULSE_MS) / PULSE_MS;
+        this.epi.scale.setScalar(24 * k);
+        this.pulse.scale.setScalar((18 + 46 * u) * k);
+        this.pulse.material.opacity = 0.9 * (1 - u) * (1 - u);
+        this.site.scale.setScalar(17 * k);
     }
 
-    _place() {
+    _place(now) {
         if (!this.group.visible || !this.state) return;
-        this._sizeSprites();
+        this._sizeSprites(now);
         const cam = this.stage.camera, w = this.stage.canvas.clientWidth, h = this.stage.canvas.clientHeight;
-        for (const [k, sprite] of [['epi', this.epi], ['site', this.site]]) {
-            const lab = this.labels[k]; if (!lab) continue;
-            const s = sprite.position.clone().project(cam);
-            const behind = sprite.position.clone().normalize().dot(cam.position.clone().normalize()) < -0.2;
-            lab.style.display = behind ? 'none' : '';
-            lab.style.transform = `translate(${((s.x + 1) / 2 * w + 12).toFixed(1)}px, ${((1 - s.y) / 2 * h - 8).toFixed(1)}px)`;
-        }
+        const camDir = cam.position.clone().normalize();
+        const put = (el, v, dx = 12, dy = -8, hide = false) => {
+            if (!el) return;
+            el.style.display = hide ? 'none' : '';
+            if (hide) return;
+            const s = v.clone().project(cam);
+            el.style.transform = `translate(${((s.x + 1) / 2 * w + dx).toFixed(1)}px, ${((1 - s.y) / 2 * h + dy).toFixed(1)}px)`;
+        };
+        put(this.labels.epi, this.epi.position, 12, -8, this.epi.position.clone().normalize().dot(camDir) < -0.2);
+        put(this.labels.site, this.site.position, 12, -8, this.site.position.clone().normalize().dot(camDir) < -0.2);
+        if (this.hypoPos) put(this.labels.hypo, this.hypoPos, 10, 6);
+        // Layer names only while the cut faces the camera (edge-on they would pile up).
+        const plane = this.state.plane, faceOn = Math.abs(camDir.dot(new THREE.Vector3(...plane.n))) > 0.35;
+        for (const L of this.layerLabels) if (L.pos) put(L.el, L.pos, -36, -6, !faceOn);
     }
 }
 
-function set(obj, pos, col) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    obj.geometry.dispose(); obj.geometry = g;
-}
 function packed(path) {
     const a = new Float64Array(4 * path.length);
     // Rays to the site are { rKm, phi, wave }; positionAt reads [r, δ, t, wave] — δ is |φ| and t comes from the node.

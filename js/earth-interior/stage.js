@@ -27,7 +27,16 @@
  *
  * COLOUR. Raw ShaderMaterials write sRGB bytes straight through (no tone
  * mapping, textures read as NoColorSpace), so a face pixel IS the legend's
- * colour and the map is the file's colour.
+ * colour and the map is the file's colour. The post chain (stage-fx.js) is
+ * the identity below 0.85 and only rolls off the glows; sprites get
+ * NoColorSpace colours so they pass through the half-float target raw too.
+ *
+ * LIGHT (2026-11-18). The globe is lit by the REAL Sun at the instant shown
+ * (`setSunDate` → js/sun-altitude.js subSolarPoint — the site's existing
+ * sub-solar function, not a new one): day map by day, a dimmed map plus NASA
+ * city lights by night, a twilight band at the terminator. The atmosphere rim
+ * and the ghost outline of the removed half are DRAWN (not to scale) so the
+ * cut reads as a cut through a whole planet; the page footnote says so.
  */
 
 import * as THREE from 'three';
@@ -35,6 +44,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GEO_GLSL } from '../geo/coords.glsl.js';
 import { R_EARTH_KM } from './prem.js';
 import { BOUNDARY_RADII_KM } from './page-model.js';
+import { subSolarPoint } from '../sun-altitude.js';
+import { createStagePost, detectStageQuality } from './stage-fx.js';
 
 export const CUT_LON0_DEG = -40;
 export const CUT_SPAN_DEG = 90;
@@ -62,7 +73,9 @@ const SURFACE_FS = /* glsl */`
 ${GEO_GLSL}
 uniform sampler2D uMap;
 uniform float uHasMap;
-uniform vec3 uLight;
+uniform sampler2D uLights;
+uniform float uHasLights;
+uniform vec3 uLight;          // the Sun, canonical frame
 uniform float uCutLon0;
 uniform float uCutSpan;
 uniform float uCutMode;     // 0: the octant; 1: a great-circle SLICE (the half on the +uCutN side removed)
@@ -77,9 +90,16 @@ void main() {
         float d = mod(ll.y - uCutLon0 + 4.0 * GEO_TAU, GEO_TAU);
         if (ll.x >= 0.0 && d <= uCutSpan) discard;
     }
-    vec3 base = uHasMap > 0.5 ? texture2D(uMap, normalToUVMip(n)).rgb : vec3(0.09, 0.16, 0.26);
-    float lit = 0.62 + 0.38 * max(dot(n, uLight), 0.0);
-    gl_FragColor = vec4(base * lit, 1.0);
+    vec2 uv = normalToUVMip(n);
+    vec3 base = uHasMap > 0.5 ? texture2D(uMap, uv).rgb : vec3(0.09, 0.16, 0.26);
+    float mu = dot(n, uLight);
+    float day = smoothstep(-0.10, 0.20, mu);
+    vec3 dayC = base * (0.55 + 0.55 * max(mu, 0.0));
+    vec3 nightC = base * 0.24 + vec3(0.012, 0.020, 0.036);      // night: the map dimmed (still readable), plus city lights
+    if (uHasLights > 0.5) nightC += texture2D(uLights, uv).rgb * vec3(1.0, 0.78, 0.48) * 0.85;
+    vec3 c = mix(nightC, dayC, day);
+    c += vec3(0.30, 0.12, 0.04) * exp(-mu * mu * 90.0) * 0.35;      // twilight band at the terminator
+    gl_FragColor = vec4(c, 1.0);
 }`;
 
 const FACE_VS = /* glsl */`
@@ -110,6 +130,144 @@ void main() {
     }
     gl_FragColor = vec4(c, 1.0);
 }`;
+
+// The great-circle SLICE (live earthquakes). The layer colour is still the
+// radial table's texel (page-model.js seismicSliceTable — the legend); on top
+// of it, DISPLAY shading only, so the cut reads as a solid face and not a
+// flat plate: each layer is lit a little more at its top than its base (a
+// bevel, ±9 %), the outer core warms toward depth (it IS hotter at depth —
+// qualitative, not a temperature scale), and a thin rim light sits on the crust.
+const SLICE_FS = /* glsl */`
+uniform sampler2D uRadial;
+uniform float uBounds[${BOUNDARY_RADII_KM.length}];
+uniform float uLine;
+uniform float uCmb;
+uniform float uIcb;
+uniform float u670;
+uniform float uProbeR;
+varying vec3 vPos;
+void main() {
+    float r = length(vPos);
+    vec3 c = texture2D(uRadial, vec2(clamp(r, 0.0, 1.0), 0.5)).rgb;
+    float lo = r < uIcb ? 0.0 : r < uCmb ? uIcb : r < u670 ? uCmb : u670;
+    float hi = r < uIcb ? uIcb : r < uCmb ? uCmb : r < u670 ? u670 : 1.0;
+    float t = clamp((r - lo) / max(hi - lo, 1e-4), 0.0, 1.0);
+    c *= 0.91 + 0.18 * t;
+    if (r >= uIcb && r < uCmb) c += vec3(0.11, 0.045, 0.012) * (1.0 - t);          // outer core: warmer with depth
+    if (r < uIcb) c += vec3(0.07, 0.065, 0.045) * (1.0 - r / uIcb);                 // inner core: a faint glow at the centre
+    float w = fwidth(r);
+    float line = 0.0;
+    for (int i = 0; i < ${BOUNDARY_RADII_KM.length}; i++) {
+        if (uBounds[i] < 0.0) continue;
+        line = max(line, 1.0 - smoothstep(0.5 * w, 1.8 * w, abs(r - uBounds[i])));
+    }
+    c = mix(c, vec3(0.80, 0.86, 0.95), uLine * line);
+    c += vec3(0.16, 0.22, 0.32) * (1.0 - smoothstep(0.0, 6.0 * w, 1.0 - r));     // rim light on the crust
+    if (uProbeR >= 0.0) {
+        float pr = 1.0 - smoothstep(0.6 * w, 2.0 * w, abs(r - uProbeR));
+        c = mix(c, vec3(0.851, 0.349, 0.149), pr);
+    }
+    gl_FragColor = vec4(c, 1.0);
+}`;
+
+// The atmosphere: brightness from the view ray's IMPACT PARAMETER b about
+// the centre, computed analytically per fragment (never pow(rim, n) on a back
+// face — identically 1 there, the orrery's S3 scar). The geometry is only a
+// camera-facing ANNULUS through the centre that covers b ∈ [0.95, 1.08]
+// (`_fitAtmo`), because the shader needs nothing but the view ray: a full
+// shell shaded the whole disc for a glow that lives at the limb (measured
+// ~8 ms a frame on SwiftShader). b slightly above 1 is the limb glow, b just below 1 a
+// thin haze over the disc's edge; lit by the same Sun, faded on the half the
+// slice removes. Drawn, not to scale (a ~190 km glow).
+const ATMO_VS = /* glsl */`
+varying vec3 vW;
+// WORLD position: the annulus is rotated to face the camera (local position is not world — measured as a streak).
+void main() { vW = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.0); }`;
+const ATMO_FS = /* glsl */`
+uniform vec3 uCam;
+uniform vec3 uLight;
+uniform float uCutMode;
+uniform vec3 uCutN;
+varying vec3 vW;
+void main() {
+    vec3 d = vW - uCam;
+    float dl = length(d);
+    if (dl < 1e-6) discard;
+    d /= dl;
+    vec3 foot = uCam - dot(uCam, d) * d;       // closest approach of the view ray to the centre
+    float b = length(foot);
+    vec3 q = b > 1e-5 ? foot / b : vec3(0.0, 1.0, 0.0);
+    float glow = b >= 1.0 ? exp(-(b - 1.0) / 0.010) : exp(-(1.0 - b) / 0.006) * 0.45;
+    float sun = 0.18 + 0.82 * smoothstep(-0.25, 0.35, dot(q, uLight));
+    float keep = uCutMode > 0.5 ? 1.0 - smoothstep(-0.05, 0.10, dot(q, uCutN)) : 1.0;
+    vec3 col = vec3(0.32, 0.56, 1.0) * glow * sun * keep * 0.5;
+    gl_FragColor = vec4(col, 1.0);
+}`;
+
+// The removed half, as glass: a Fresnel rim on its FRONT faces (the normal
+// varies there, unlike a back face) plus a faint 30° graticule, so the slice
+// reads as a cut through a whole planet. It carries no data.
+const GHOST_VS = /* glsl */`
+varying vec3 vDir;
+varying vec3 vView;
+void main() {
+    vDir = normalize(position);
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vView = normalize(-mv.xyz);
+    gl_Position = projectionMatrix * mv;
+}`;
+const GHOST_FS = /* glsl */`
+#define GEO_SEAMLESS
+${GEO_GLSL}
+uniform vec3 uCutN;
+varying vec3 vDir;
+varying vec3 vView;
+void main() {
+    vec3 n = normalize(vDir);
+    if (dot(n, uCutN) <= 0.0) discard;
+    vec3 nv = normalize((viewMatrix * vec4(n, 0.0)).xyz);
+    float f = 1.0 - clamp(abs(dot(nv, normalize(vView))), 0.0, 1.0);
+    float rim = f * f * f;
+    vec2 ll = normalToLatLon(n) * 57.29578;
+    vec2 g = abs(fract(ll / 30.0 + 0.5) - 0.5) * 30.0;
+    vec2 px = fwidth(ll);
+    float grid = 1.0 - smoothstep(0.0, 1.2, min(g.x / max(px.x, 1e-4), g.y / max(px.y, 1e-4)));
+    vec3 col = vec3(0.30, 0.50, 0.85) * (0.16 * rim + 0.04 * grid * (0.4 + rim));
+    gl_FragColor = vec4(col, 1.0);
+}`;
+
+const STAR_VS = /* glsl */`
+attribute float aMag;
+uniform float uDpr;
+varying float vB;
+void main() {
+    vB = aMag;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = (0.9 + 1.6 * aMag) * uDpr;
+}`;
+const STAR_FS = /* glsl */`
+varying float vB;
+void main() {
+    vec2 q = gl_PointCoord * 2.0 - 1.0;
+    float k = max(0.0, 1.0 - dot(q, q));
+    gl_FragColor = vec4(vec3(0.62, 0.68, 0.80) * (0.18 + 0.5 * vB) * k, 1.0);
+}`;
+
+/** A seeded star field on a far sphere (decoration; no catalogue). */
+function starField(count = 1800, radius = 30) {
+    let seed = 1234567;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+    const pos = new Float32Array(3 * count), mag = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+        const z = 2 * rnd() - 1, a = 2 * Math.PI * rnd(), r = Math.sqrt(1 - z * z);
+        pos.set([radius * r * Math.cos(a), radius * z, radius * r * Math.sin(a)], 3 * i);
+        mag[i] = Math.pow(rnd(), 4);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aMag', new THREE.BufferAttribute(mag, 1));
+    return g;
+}
 
 /** A quarter-disk spanned by unit vectors u (θ = 0) and v (θ = 90°). */
 function quarterDisk(u, v, seg = 128) {
@@ -142,24 +300,50 @@ export class InteriorStage {
         this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this.renderer.toneMapping = THREE.NoToneMapping;
-        this.renderer.setClearColor(0x05080f, 1);
+        this.renderer.setClearColor(0x03060c, 1);
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(30, 1, 0.05, 50);
         this.camera.up.set(0, 1, 0);
 
-        // A fixed key light from the camera's upper left at the default view.
-        const light = latLonToVec(38, CUT_LON0_DEG + 20).normalize();
+        // The Sun: today's sub-solar point until a layer sets the instant it shows.
+        const light = new THREE.Vector3(1, 0, 0);
 
         this.surfaceMat = new THREE.ShaderMaterial({
             vertexShader: SURFACE_VS, fragmentShader: SURFACE_FS,
             uniforms: {
-                uMap: { value: null }, uHasMap: { value: 0 }, uLight: { value: light },
+                uMap: { value: null }, uHasMap: { value: 0 }, uLights: { value: null }, uHasLights: { value: 0 }, uLight: { value: light },
                 uCutLon0: { value: CUT_LON0_DEG * Math.PI / 180 }, uCutSpan: { value: CUT_SPAN_DEG * Math.PI / 180 },
                 uCutMode: { value: 0 }, uCutN: { value: new THREE.Vector3(0, 0, 1) },
             },
         });
         this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 192, 128), this.surfaceMat);
         this.scene.add(this.earth);
+
+        this.stars = new THREE.Points(starField(), new THREE.ShaderMaterial({
+            vertexShader: STAR_VS, fragmentShader: STAR_FS, uniforms: { uDpr: { value: 1 } },
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        this.stars.renderOrder = -1;
+        this.scene.add(this.stars);
+
+        this.atmoMat = new THREE.ShaderMaterial({
+            vertexShader: ATMO_VS, fragmentShader: ATMO_FS,
+            uniforms: { uCam: { value: new THREE.Vector3() }, uLight: { value: light }, uCutMode: this.surfaceMat.uniforms.uCutMode, uCutN: this.surfaceMat.uniforms.uCutN },
+            transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+        });
+        this.atmoMat.depthTest = false;
+        this.atmo = new THREE.Mesh(new THREE.BufferGeometry(), this.atmoMat);
+        this.atmo.renderOrder = 3; this.atmo.frustumCulled = false; this._atmoD = -1;
+        this.scene.add(this.atmo);
+
+        this.ghost = new THREE.Mesh(new THREE.SphereGeometry(1.0005, 128, 96), new THREE.ShaderMaterial({
+            vertexShader: GHOST_VS, fragmentShader: GHOST_FS, uniforms: { uCutN: this.surfaceMat.uniforms.uCutN },
+            transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+            extensions: { derivatives: true },
+        }));
+        this.ghost.renderOrder = 4; this.ghost.visible = false;
+        this.scene.add(this.ghost);
+        this._resizeHooks = [];
 
         this.radialTex = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
         const bounds = BOUNDARY_RADII_KM.map((r) => r / R_EARTH_KM);
@@ -186,10 +370,13 @@ export class InteriorStage {
         this.slice = null;
         this.sliceTex = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
         this.sliceDisk = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.ShaderMaterial({
-            vertexShader: FACE_VS, fragmentShader: FACE_FS, side: THREE.DoubleSide,
+            vertexShader: FACE_VS, fragmentShader: SLICE_FS, side: THREE.DoubleSide,
             // Only the boundaries a seismologist reads a ray fan against (400, 670, CMB, ICB), and
             // fainter: all eleven of PREM's crowd the rim into a white band at this scale (measured).
-            uniforms: { uRadial: { value: this.sliceTex }, uBounds: { value: sliceBounds }, uProbeR: { value: -1 }, uShade: { value: 1 }, uLine: { value: 0.32 } },
+            uniforms: {
+                uRadial: { value: this.sliceTex }, uBounds: { value: sliceBounds }, uProbeR: { value: -1 }, uLine: { value: 0.30 },
+                uCmb: { value: 3480 / R_EARTH_KM }, uIcb: { value: 1221.5 / R_EARTH_KM }, u670: { value: (R_EARTH_KM - 670) / R_EARTH_KM },
+            },
             extensions: { derivatives: true },
         }));
         this.sliceDisk.visible = false;
@@ -218,12 +405,48 @@ export class InteriorStage {
             if (hit) this.onPick(hit);
         });
 
+        this.quality = detectStageQuality(this.renderer, location.search);
+        try { this.post = createStagePost(this.renderer, this.scene, this.camera, { quality: this.quality }); }
+        catch (err) { console.warn('[earth-interior] post chain unavailable, drawing direct:', err); this.post = createStagePost(this.renderer, this.scene, this.camera, { quality: 'off' }); }
+        this.setSunDate(new Date());
+
         this._visible = true;
         new IntersectionObserver((es) => { this._visible = es[0].isIntersecting; }).observe(canvas);
-        new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
+        // Observe the CANVAS: its box changes when the page re-docks the clock bar under it.
+        new ResizeObserver(() => this.resize()).observe(canvas);
         this.resize();
         this.setView('cutaway', { instant: true });   // again, now the aspect is real
         this._raf = requestAnimationFrame((t) => this._frame(t));
+    }
+
+    /** Run fn({ w, h, dpr }) on every resize (glow lines need the drawing-buffer size). */
+    onResize(fn) { this._resizeHooks.push(fn); fn(this._size ?? { w: 1, h: 1, dpr: 1 }); return () => { this._resizeHooks = this._resizeHooks.filter((f) => f !== fn); }; }
+
+    /**
+     * Pixels of the canvas covered by chrome at the top / bottom (MEASURED by the page). The
+     * projection's principal point moves into the clear band (setViewOffset) and every fit uses
+     * the clear band's height, so the globe is never framed under a panel.
+     */
+    setSafeInsets({ top = 0, bottom = 0 } = {}) {
+        const t = Math.max(0, Math.round(top)), b = Math.max(0, Math.round(bottom));
+        if (this._insets && this._insets.top === t && this._insets.bottom === b) return;
+        this._insets = { top: t, bottom: b };
+        this._applyView();
+    }
+    _applyView() {
+        const w = this.canvas.clientWidth, h = this.canvas.clientHeight, ins = this._insets ?? { top: 0, bottom: 0 };
+        if (!w || !h) return;
+        this.camera.aspect = w / h;
+        if (ins.top || ins.bottom) this.camera.setViewOffset(w, h, 0, -(ins.top - ins.bottom) / 2, w, h);
+        else this.camera.clearViewOffset();
+        this.camera.updateProjectionMatrix();
+    }
+
+    /** Light the globe by the real Sun at `date` (sun-altitude.js subSolarPoint). */
+    setSunDate(date) {
+        const ss = subSolarPoint(date);
+        this.surfaceMat.uniforms.uLight.value.copy(latLonToVec(ss.lat, ss.lon).normalize());
+        this.sunDate = date;
     }
 
     /** Run fn(nowMs) every rendered frame (the live layer's clock). Returns an unsubscribe. */
@@ -239,6 +462,7 @@ export class InteriorStage {
         this.surfaceMat.uniforms.uCutMode.value = on ? 1 : 0;
         for (const f of this.faces) f.visible = !on;
         this.sliceDisk.visible = on;
+        this.ghost.visible = on;
         if (!on) return;
         this.surfaceMat.uniforms.uCutN.value.set(...plane.n);
         const e1 = new THREE.Vector3(...plane.e1), e2 = new THREE.Vector3(...plane.e2), seg = 360;
@@ -287,6 +511,16 @@ export class InteriorStage {
         this.surfaceMat.uniforms.uHasMap.value = 1;
     }
 
+    /** NASA Black Marble city lights for the night side (optional; same orientation rules as the map). */
+    async loadLights(url) {
+        const tex = await new THREE.TextureLoader().loadAsync(url);
+        tex.colorSpace = THREE.NoColorSpace;
+        tex.flipY = false;
+        tex.wrapS = THREE.RepeatWrapping;
+        this.surfaceMat.uniforms.uLights.value = tex;
+        this.surfaceMat.uniforms.uHasLights.value = 1;
+    }
+
     /** Draw a radialTable on the faces. */
     setRadialTable(table) {
         const rgba = new Uint8Array(4 * table.n);
@@ -321,7 +555,7 @@ export class InteriorStage {
             m.sprite.position.copy(latLonToVec(s.lat, s.lon).multiplyScalar(1.004));
             const px = 9 + 9 * Math.min(1, s.emphasis ?? 0);
             m.px = px;
-            m.sprite.material.color.set(s.code === selected ? 0xd95926 : 0xffffff);
+            m.sprite.material.color.setHex(s.code === selected ? 0xd95926 : 0xffffff, THREE.NoColorSpace);
             m.label?.classList.toggle('is-sel', s.code === selected);
         }
         this._sizeMarkers();
@@ -349,16 +583,24 @@ export class InteriorStage {
 
     /** Camera distance at which the unit sphere fills `fill` of the BINDING half-angle (the smaller of vertical/horizontal). */
     _fitDistance(fill) {
-        const v = this.camera.fov * Math.PI / 360;
-        const h = Math.atan(Math.tan(v) * (this.camera.aspect || 1));
+        const ins = this._insets ?? { top: 0, bottom: 0 }, h0 = this.canvas.clientHeight || 1;
+        const clear = Math.max(0.3, (h0 - ins.top - ins.bottom) / h0);
+        const v0 = this.camera.fov * Math.PI / 360;
+        const v = Math.atan(Math.tan(v0) * clear);                       // the clear band's vertical half-angle
+        const h = Math.atan(Math.tan(v0) * (this.camera.aspect || 1));   // horizontal: the full width
         return 1 / Math.sin(Math.min(v, h) * fill);
     }
 
     resize() {
         const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
         if (!w || !h) return;
+        const dpr = this.renderer.getPixelRatio();
         this.renderer.setSize(w, h, false);
-        this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+        this.post?.setSize(w, h, dpr);
+        this._applyView();
+        this.stars.material.uniforms.uDpr.value = dpr;
+        this._size = { w: w * dpr, h: h * dpr, dpr };
+        for (const fn of this._resizeHooks) fn(this._size);
         this._sizeMarkers();
     }
 
@@ -415,8 +657,22 @@ export class InteriorStage {
         if (!this._visible) return;
         for (const fn of this._frameHooks) fn(Date.now());
         if (this._hoverDirty) { this._hoverDirty = false; this.onHover(this.pick(this._pointer)); }
-        this.renderer.render(this.scene, this.camera);
+        this.atmoMat.uniforms.uCam.value.copy(this.camera.position);
+        this._fitAtmo();
+        this.post.render();
         this._placeLabels();
+    }
+
+    /** The atmosphere annulus: in the plane through the centre facing the camera, spanning b ∈ [0.95, 1.08]. */
+    _fitAtmo() {
+        const D = this.camera.position.length();
+        this.atmo.lookAt(this.camera.position);
+        if (Math.abs(D - this._atmoD) < 1e-3) return;
+        this._atmoD = D;
+        // A ray at impact parameter b crosses this plane at ρ = D·b / √(D² − b²).
+        const rho = (b) => { const bb = Math.min(b, 0.999 * D); return D * bb / Math.sqrt(D * D - bb * bb); };
+        this.atmo.geometry.dispose();
+        this.atmo.geometry = new THREE.RingGeometry(rho(0.95), rho(1.08), 256, 1);
     }
 
     _placeLabels() {

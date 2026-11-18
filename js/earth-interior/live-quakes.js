@@ -47,6 +47,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
     if (stage) {
         import('./seismic-layer.js').then(({ SeismicLayer }) => {
             layer = new SeismicLayer(stage, { labelLayer: $('#ei-labels') });
+            S.layer = layer;   // the browser gate and the perf probe read lastBuildMs
             stage.onFrame((now) => tick(now));
             if (S.active) apply();
         });
@@ -185,8 +186,9 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         const p = plane(); if (!p || !stage) return;
         // Open on the VIEWER: above the viewer's side of the slice, tilted so the cut face shows.
         const u = siteVec(), n = p.n;
-        const dir = u.map((x, i) => 0.45 * x + 0.89 * n[i]);
-        stage.flyToDirection(dir, { fill: 0.92 });
+        // 0.62 / 0.78: the cut face still reads, and the lit globe behind it shows as a body, not a sliver.
+        const dir = u.map((x, i) => 0.62 * x + 0.78 * n[i]);
+        stage.flyToDirection(dir, { fill: 0.9 });
     }
     const siteVec = () => geoVec(S.site.lat, S.site.lon);
 

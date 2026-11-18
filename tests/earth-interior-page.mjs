@@ -157,6 +157,20 @@ ok(`every texel of all ${QUANTITY_KEYS.length} cutaway tables = the kernel at it
     ok('stage: flipY off, direction-sampled map, latLonToVec ≡ GEO latLonToNormal, JS cut test ≡ shader cut test');
 }
 
+// ── the 2026-11-18 stage renderer's silent bugs, each measured once ────────
+{
+    const stage = readFileSync(join(ROOT, 'js/earth-interior/stage.js'), 'utf8');
+    const lines = readFileSync(join(ROOT, 'js/earth-interior/glow-lines.js'), 'utf8');
+    const fx = readFileSync(join(ROOT, 'js/earth-interior/stage-fx.js'), 'utf8');
+    const html = readFileSync(join(ROOT, 'earth-interior.html'), 'utf8');
+    assert.match(lines, /side: THREE\.DoubleSide/, 'ribbon strips wind one way relative to travel: back-face culling hid EVERY ray and front');
+    assert.match(stage, /vW = \(modelMatrix \* vec4\(position, 1\.0\)\)\.xyz/, 'the atmosphere annulus is rotated: its impact parameter needs the WORLD position (local drew a straight streak)');
+    assert.match(stage, /subSolarPoint/, 'the globe is lit by the site\'s existing sub-solar function, not a new one');
+    assert.match(fx, /import \{ SANITIZE_GLSL, sanitizeBloomInput, roundBloomKernels \} from '\.\.\/launch-scene-fx\.js'/, 'ONE copy of the NaN sanitizer (the black-stage scar)');
+    assert.match(html, /#ei-canvas, #ei-stage\.is-quakes #ei-labels \{ height: calc\(100% - var\(--ei-bar-h/, 'a <canvas> is a replaced element: height:auto between top/bottom takes its intrinsic height');
+    ok('stage renderer: ribbons double-sided, atmosphere in world space, one sanitizer, sub-solar light, canvas height explicit');
+}
+
 // ── Seismic panel: every drawn ray IS a kernel ray ─────────────────────────
 {
     for (const [wave, depth] of [['P', 0], ['S', 600]]) {

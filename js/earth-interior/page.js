@@ -459,6 +459,7 @@ async function boot() {
         });
         renderLegend();
         state.stage.loadMap('assets/earth/day-2k.webp').catch(() => { $('#ei-mapnote').textContent = 'Surface map unavailable — plain ocean colour.'; });
+        state.stage.loadLights('assets/earth/lights-2k.webp').catch(() => {});
     } catch (err) {
         $('#ei-stage').classList.add('is-failed');
         $('#ei-stage-msg').textContent = `3D view unavailable (${err.message}). The charts below still work.`;
@@ -473,6 +474,26 @@ async function boot() {
         if (view !== 'quakes') state.stage?.setView(view);
     };
     document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.view)));
+    // The clock dock's MEASURED height is what the canvas clears (never a constant: it wraps).
+    const bar = $('#ei-timebar');
+    if (bar) new ResizeObserver(() => $('#ei-stage').style.setProperty('--ei-bar-h', `${Math.ceil(bar.getBoundingClientRect().height)}px`)).observe(bar);
+    // Safe insets: chrome that crosses the CENTRAL 40–60 % of the canvas width covers the globe's
+    // column, so its height is cleared (a phone's full-width HUD); corner panels do not count.
+    const measureInsets = () => {
+        const cv = $('#ei-canvas'); if (!cv || !state.stage) return;
+        const c = cv.getBoundingClientRect(), x0 = c.left + 0.4 * c.width, x1 = c.left + 0.6 * c.width;
+        let top = 0, bottom = 0;
+        for (const el of document.querySelectorAll('#ei-stage .ei-overlay')) {
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height || r.right < x0 || r.left > x1 || el.id === 'ei-timebar') continue;
+            const mid = (r.top + r.bottom) / 2;
+            if (mid < c.top + c.height / 2) top = Math.max(top, r.bottom - c.top + 6);
+            else bottom = Math.max(bottom, c.bottom - r.top + 6);
+        }
+        state.stage.setSafeInsets({ top, bottom });
+    };
+    const ro = new ResizeObserver(measureInsets);
+    document.querySelectorAll('#ei-stage .ei-overlay, #ei-canvas').forEach((el) => ro.observe(el));
     setMode('quakes');
     window.__earthInterior = { state, stage: state.stage, live: state.live };
     let rt = null;

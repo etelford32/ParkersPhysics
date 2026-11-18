@@ -50,8 +50,15 @@ body { margin: 0; background: #05080f; color: var(--ei-text); font: 15px/1.5 sys
 .ei-hero p { flex-basis: 100%; margin: 0; color: var(--ei-text-2); max-width: 90ch; }
 
 /* ── The stage ── */
-#ei-stage { position: relative; height: clamp(420px, 64vh, 780px); border: 1px solid var(--ei-line); border-radius: 12px; overflow: hidden; background: #05080f; }
+#ei-stage { position: relative; height: clamp(420px, 64vh, 780px); border: 1px solid var(--ei-line); border-radius: 12px; overflow: hidden; background: radial-gradient(120% 90% at 50% 45%, #0a1426 0%, #03060c 70%); }
 #ei-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+/* Live view: a taller stage, and the clock DOCKED under the canvas (it used to sit over the globe).
+   --ei-bar-h is MEASURED from the dock by page.js; the canvas and the probe clear it by that number. */
+#ei-stage.is-quakes { height: clamp(600px, 82vh, 940px); }
+/* An explicit height: a <canvas> is a REPLACED element, so height:auto between top and bottom gives its
+   intrinsic height (measured on a phone: the globe filled the top third of the stage). */
+#ei-stage.is-quakes #ei-canvas, #ei-stage.is-quakes #ei-labels { height: calc(100% - var(--ei-bar-h, 64px)); }
+#ei-stage.is-quakes #ei-probe { bottom: calc(var(--ei-bar-h, 64px) + 12px); width: min(300px, calc(100% - 24px)); font-size: 12px; opacity: .92; }
 #ei-canvas:active { cursor: grabbing; }
 #ei-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ei-mlabel { position: absolute; left: 0; top: 0; font: 600 11px/1 system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 6px #000; white-space: nowrap; }
@@ -145,14 +152,16 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 #ei-quakehud { top: 12px; left: 12px; width: min(420px, calc(100% - 24px)); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 #ei-quakehud span { color: var(--ei-text-2); }
 .ei-live { color: #ff8a5c; } .ei-replay { color: #9ec5f4; }
-#ei-timebar { left: 12px; bottom: 12px; width: min(560px, calc(100% - 420px)); min-width: 300px; display: flex; flex-direction: column; gap: 6px; }
-.ei-tb-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.ei-tlabel { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ei-text-2); }
-#ei-tscrub { width: 100%; accent-color: #3987e5; }
+#ei-timebar { left: 0; right: 0; bottom: 0; border-radius: 0; border-width: 1px 0 0; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; background: rgba(8, 14, 26, .96); backdrop-filter: none; }
+.ei-tb-row { display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+.ei-tlabel { min-width: 74px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; color: var(--ei-text); }
+#ei-tscrub { flex: 1 1 260px; min-width: 200px; accent-color: #3987e5; }
 .ei-qlegend { display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: 11px; color: var(--ei-text-2); }
 .ei-qlegend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
 .ei-qlegend i.ei-dash { background: repeating-linear-gradient(90deg, #c3c2b7 0 4px, transparent 4px 7px); }
 .ei-mlabel--epi { color: #ffb08a; } .ei-mlabel--site { color: #fff; }
+.ei-mlabel--hypo { color: #ffc6a8; font-weight: 500; font-size: 10.5px; }
+.ei-mlabel--layer { color: #9fb2cf; font-weight: 500; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .85; }
 .ei-site { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 13px; margin: 0 0 10px; }
 .ei-site input { background: var(--ei-surface-2); color: var(--ei-text); border: 1px solid var(--ei-line); border-radius: 6px; padding: 6px 8px; min-width: 0; width: 200px; }
 .ei-live-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -181,9 +190,10 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     #ei-stage.is-quakes { height: 600px; }
     #ei-quakehud { left: 8px; right: 8px; top: 8px; width: auto; padding: 6px 8px; font-size: 12px; }
     #ei-quakehud span:last-child:empty { display: none; }
-    #ei-timebar { left: 8px; right: 8px; bottom: 8px; width: auto; min-width: 0; padding: 6px 8px; gap: 4px; }
+    #ei-timebar { padding: 8px 10px; gap: 6px 10px; }
     #ei-timebar .ei-qlegend .ei-muted { display: none; }
-    #ei-stage.is-quakes #ei-views { bottom: auto; top: auto; left: 8px; right: 8px; bottom: 132px; justify-content: center; }
+    #ei-stage.is-quakes #ei-views { top: auto; left: 8px; right: 8px; bottom: calc(var(--ei-bar-h, 64px) + 8px); justify-content: center; }
+    .ei-mlabel--layer { display: none !important; }
     #ei-views .ei-btn { padding: 6px 8px; font-size: 12px; }
 }
 </style>
@@ -212,13 +222,13 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         <div class="ei-overlay ei-qonly" id="ei-timebar">
             <div class="ei-tb-row" role="group" aria-label="Clock"><button type="button" class="ei-chip" data-clock="live" aria-pressed="true">Live</button><button type="button" class="ei-chip" data-clock="1">Replay ×1</button><button type="button" class="ei-chip" data-clock="10">×10</button><button type="button" class="ei-chip" data-clock="60">×60</button><span id="ei-tlabel" class="ei-tlabel">—</span></div>
             <input id="ei-tscrub" type="range" min="0" max="3600" step="1" value="0" aria-label="Seconds after the origin">
-            <div class="ei-qlegend"><span><i style="background:#3987e5"></i>P wave</span><span><i style="background:#d95926"></i>S wave</span><span><i class="ei-dash"></i>reflected / bounced</span><span class="ei-muted">dots = wavefronts · bright dots = the waves heading to you</span></div>
+            <div class="ei-qlegend"><span><i style="background:#3987e5"></i>P wave</span><span><i style="background:#d95926"></i>S wave</span><span><i class="ei-dash"></i>reflected / bounced</span><span class="ei-muted">bright curves = where each wave is now, fading = 10/20/30 s ago · comets = the waves heading to you</span></div>
         </div>
         <div class="ei-overlay" id="ei-legend"></div>
         <div class="ei-overlay" id="ei-probe" aria-live="polite"></div>
         <div id="ei-stage-msg"></div>
     </section>
-    <p class="ei-stage-foot"><b>Earthquakes · live</b>: the cut is the great-circle plane through the epicentre, your location and Earth's centre — every ray between them lies in it. The planet does not spin; it is Earth-fixed. <b>Structure</b>: true radii (crust and ocean are thinner than a pixel at this scale). PREM is a 1-D reference: the cut faces are the same in every direction. Static lighting; surface map NASA Blue Marble (archival). <span id="ei-mapnote"></span></p>
+    <p class="ei-stage-foot"><b>Earthquakes · live</b>: the cut is the great-circle plane through the epicentre, your location and Earth's centre — every ray between them lies in it. The planet does not spin; it is Earth-fixed. <b>Structure</b>: true radii (crust and ocean are thinner than a pixel at this scale). PREM is a 1-D reference: the cut faces are the same in every direction. The globe is lit by the Sun at the instant shown; surface map NASA Blue Marble and Earth at Night city lights (archival). The atmosphere glow and the glass outline of the removed half are drawn, not to scale. <span id="ei-mapnote"></span></p>
 
     <div class="ei-grid">
         <section class="ei-panel ei-span" aria-labelledby="ei-live-h">
