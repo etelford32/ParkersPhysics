@@ -4,7 +4,7 @@
  * No DOM, no three.js, no fetch. Gate: `tests/earth-interior-page.mjs`.
  * The stage (js/earth-interior/stage.js) and the panels (page.js) compute
  * nothing; every value they show comes from here, and everything here comes
- * from the kernels (prem.js, conductivity.js, geoelectric.js) — never a
+ * from the kernels (prem.js, conductivity.js, geoelectric.js, raytrace.js) — never a
  * retyped number. Layer radii are READ from PREM_REGIONS; the cutaway's
  * colour table is SAMPLED from premAt; the column charts are the same
  * layeredImpedance the nowcast uses.
@@ -18,6 +18,7 @@
 import { R_EARTH_KM, PREM_REGIONS, premAt, gravityMS2, pressureGPa } from './prem.js';
 import { sigmaAt, impedanceSummary, MU0 } from './conductivity.js';
 import { groundColumn, groundColumnInfo, GROUND_COLUMN_IDS, TPL007_BETA } from './geoelectric.js';
+import { travelTimeBranches, rayPath, maxRayParameter, arrivalsAt as rtArrivals } from './raytrace.js';
 
 // ── Colour ─────────────────────────────────────────────────────────────────
 
@@ -240,4 +241,92 @@ export function fmt(v, digits = 3) {
         return `${m}×10${sup}`;
     }
     return Number(v.toPrecision(digits)).toLocaleString('en-US', { maximumSignificantDigits: digits });
+}
+
+// ── Seismic rays (INNER_EARTH_PLAN.md §10 T1) ──────────────────────────────
+// The ray tracer is the one in raytrace.js; this only lays its output out.
+// Phase colours are categorical slots 1–3 (blue / orange / aqua), validated
+// all-pairs on #0b1322: CVD ΔE 9.4 worst, normal-vision 20.9 — every curve is
+// also direct-labelled, so colour is never the only key.
+
+
+export const PHASE_FAMILY = Object.freeze({ P: 'mantle', S: 'mantle', PKP: 'outer', PKiKP: 'outer', PKIKP: 'inner' });
+export const FAMILY_COLORS = Object.freeze({ mantle: '#3987e5', outer: '#d95926', inner: '#199e70' });
+export const FAMILY_LABELS = Object.freeze({
+    mantle: 'Turns in the mantle', outer: 'Through the liquid outer core', inner: 'Through the solid inner core',
+});
+export const SOURCE_DEPTHS_KM = Object.freeze([0, 100, 300, 600]);
+
+const FAN_CACHE = new Map(), TT_CACHE = new Map();
+
+/**
+ * A ray fan from one source: rays at equal steps of TAKEOFF ANGLE (from the
+ * downward vertical), drawn source-up. points are [x, y] km with the source at
+ * (0, r_s): x = r sin θ, y = r cos θ.
+ */
+export function seismicFan({ wave = 'P', sourceDepthKm = 0, nRays = 46 } = {}) {
+    const key = `${wave}|${sourceDepthKm}|${nRays}`;
+    if (FAN_CACHE.has(key)) return FAN_CACHE.get(key);
+    const pMax = maxRayParameter({ wave, sourceDepthKm });
+    const rays = [];
+    for (let i = 0; i < nRays; i++) {
+        const takeoff = (i + 0.5) / nRays * (Math.PI / 2);
+        const path = rayPath(pMax * Math.sin(takeoff), { wave, sourceDepthKm, maxPoints: 260 });
+        if (!path) continue;
+        const stopped = path.phase === 'S→core';
+        // A stopped S ray is drawn only DOWN to the core: there is no way back.
+        const pts = stopped ? path.points.slice(0, Math.ceil(path.points.length / 2)) : path.points;
+        rays.push({
+            p: path.p, takeoffDeg: takeoff / (Math.PI / 180), phase: path.phase, stopped,
+            family: stopped ? 'mantle' : PHASE_FAMILY[path.phase], deltaDeg: stopped ? null : path.deltaDeg,
+            timeS: stopped ? null : path.timeS,
+            points: pts.map((q) => [q.rKm * Math.sin(q.thetaRad), q.rKm * Math.cos(q.thetaRad)]),
+        });
+    }
+    const out = { wave, sourceDepthKm, rays };
+    FAN_CACHE.set(key, out);
+    return out;
+}
+
+/**
+ * Travel-time curves T(Δ) per phase, in sweep order (caustics stay as cusps —
+ * that is the triplication, not a drawing artefact), plus the SHADOW: the
+ * distances no ray of this wave type reaches as the direct mantle phase.
+ */
+export function travelTimeCurves({ wave = 'P', sourceDepthKm = 0 } = {}) {
+    const key = `${wave}|${sourceDepthKm}`;
+    if (TT_CACHE.has(key)) return TT_CACHE.get(key);
+    const branches = travelTimeBranches({ wave, sourceDepthKm, n: 1800 });
+    const curves = Object.entries(branches).map(([phase, rays]) => ({
+        phase, family: PHASE_FAMILY[phase],
+        points: rays.map((r) => [r.deltaDeg, r.timeS]),
+    }));
+    const span = (ph) => { const c = curves.find((x) => x.phase === ph); if (!c) return null; const d = c.points.map((q) => q[0]); return [Math.min(...d), Math.max(...d)]; };
+    const direct = span(wave);
+    // P: the mantle phase ends and nothing arrives strongly until PKP's caustic.
+    // S: no shear wave crosses the liquid core, so the shadow runs to 180°.
+    const shadow = direct ? (wave === 'P' ? [direct[1], span('PKP')?.[0] ?? 180] : [direct[1], 180]) : null;
+    const out = { wave, sourceDepthKm, branches, curves, shadow, maxTimeS: Math.max(...curves.flatMap((c) => c.points.map((q) => q[1]))) };
+    TT_CACHE.set(key, out);
+    return out;
+}
+
+/** Every arrival at a distance, earliest first: [{ phase, family, timeS, p }]. */
+export function arrivalsAtDistance(deltaDeg, tt) {
+    // Two crossings of the SAME phase within a second are one arrival seen on
+    // either side of a micro-cusp in the sweep — reading them as two would
+    // claim a triplication the ray density cannot resolve.
+    const out = [];
+    for (const a of rtArrivals(deltaDeg, tt.branches)) {
+        if (out.some((b) => b.phase === a.phase && Math.abs(b.timeS - a.timeS) < 1)) continue;
+        out.push({ ...a, family: PHASE_FAMILY[a.phase] });
+    }
+    return out;
+}
+
+/** "12 min 07 s" from seconds. */
+export function fmtMinSec(s) {
+    if (s === null || !Number.isFinite(s)) return '—';
+    const m = Math.floor(s / 60), r = Math.round(s - 60 * m);
+    return r === 60 ? `${m + 1} min 00 s` : `${m} min ${String(r).padStart(2, '0')} s`;
 }

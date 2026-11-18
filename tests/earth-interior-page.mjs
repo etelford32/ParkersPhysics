@@ -24,7 +24,9 @@ import {
     SEQ_RAMP, rampColor, QUANTITIES, QUANTITY_KEYS, quantityAt, radialTable, legendTicks,
     LAYER_BANDS, BOUNDARY_RADII_KM, bandAt, probeAt, profileSeries, nowcastRows, sparkline,
     columnSteps, responseCurve, columnOptions, fmt,
+    seismicFan, travelTimeCurves, arrivalsAtDistance, fmtMinSec, PHASE_FAMILY, FAMILY_COLORS,
 } from '../js/earth-interior/page-model.js';
+import { traceRay, maxRayParameter } from '../js/earth-interior/raytrace.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -153,6 +155,45 @@ ok(`every texel of all ${QUANTITY_KEYS.length} cutaway tables = the kernel at it
     assert.match(src, /if \(ll\.x >= 0\.0 && d <= uCutSpan\) discard;/);
     assert.match(src, /if \(latDeg < 0\) return false;[\s\S]*return d <= CUT_SPAN_DEG;/, 'inCut mirrors the shader cut test');
     ok('stage: flipY off, direction-sampled map, latLonToVec ≡ GEO latLonToNormal, JS cut test ≡ shader cut test');
+}
+
+// ── Seismic panel: every drawn ray IS a kernel ray ─────────────────────────
+{
+    for (const [wave, depth] of [['P', 0], ['S', 600]]) {
+        const fan = seismicFan({ wave, sourceDepthKm: depth });
+        const pMax = maxRayParameter({ wave, sourceDepthKm: depth });
+        for (const r of fan.rays) {
+            const k = traceRay(r.p, { wave, sourceDepthKm: depth });
+            assert.ok(Math.abs(r.p - pMax * Math.sin(r.takeoffDeg * Math.PI / 180)) < 1e-9);
+            assert.equal(r.phase, k.phase);
+            const [x0, y0] = r.points[0];
+            assert.ok(Math.abs(x0) < 1e-9 && Math.abs(y0 - (R_EARTH_KM - depth)) < 1e-9, 'fan starts at the source');
+            if (r.stopped) { assert.equal(wave, 'S'); continue; }
+            const [x, y] = r.points.at(-1);
+            assert.ok(Math.abs(Math.hypot(x, y) - R_EARTH_KM) < 1e-6 && Math.abs(Math.atan2(x, y) - k.deltaRad) < 1e-9, 'fan ends at the kernel Δ');
+            assert.ok(FAMILY_COLORS[r.family]);
+        }
+        if (wave === 'S') assert.ok(fan.rays.some((r) => r.stopped), 'steep S rays stop at the core');
+    }
+    const tt = travelTimeCurves({ wave: 'P' });
+    assert.ok(tt.shadow[0] > 96 && tt.shadow[0] < 100 && tt.shadow[1] > 142 && tt.shadow[1] < 147, `shadow ${tt.shadow}`);
+    for (const c of tt.curves) assert.ok(PHASE_FAMILY[c.phase], c.phase);
+    assert.equal(arrivalsAtDistance(120, tt).filter((a) => a.phase === 'PKIKP').length, 1, 'one PKIKP at 120°');
+    assert.equal(arrivalsAtDistance(120, travelTimeCurves({ wave: 'S' })).length, 0, 'no S at 120° (S shadow)');
+    const a60 = arrivalsAtDistance(60, tt);
+    assert.equal(a60[0].phase, 'P'); assert.equal(a60[0].timeS, traceRayAt60(tt));
+    assert.equal(fmtMinSec(607.1), '10 min 07 s'); assert.equal(fmtMinSec(59.6), '1 min 00 s'); assert.equal(fmtMinSec(null), '—');
+    const src = readFileSync(join(ROOT, 'earth-interior.html'), 'utf8');
+    assert.ok(!/\.ei-grid line/.test(src), 'gridlines must not share the layout container class (its stroke was inherited by every SVG label)');
+    ok('seismic panel: fan rays = kernel rays (p from takeoff, phase, start at source, end at kernel Δ), P shadow 98–145°, S shadow, one arrival per phase');
+}
+function traceRayAt60(tt) {   // the same interpolation, independently: the bracketing P rays
+    const rays = tt.branches.P;
+    for (let i = 1; i < rays.length; i++) {
+        const a = rays[i - 1], b = rays[i];
+        if ((a.deltaDeg - 60) * (b.deltaDeg - 60) <= 0 && a.deltaDeg !== b.deltaDeg) return a.timeS + (60 - a.deltaDeg) / (b.deltaDeg - a.deltaDeg) * (b.timeS - a.timeS);
+    }
+    return null;
 }
 
 console.log(`\nearth-interior-page: ${passed} checks passed`);

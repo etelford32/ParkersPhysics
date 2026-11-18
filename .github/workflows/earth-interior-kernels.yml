@@ -17,7 +17,10 @@
 #   earth-interior-page.mjs   the page model: cutaway texels = the kernels, legend =
 #                             the faces' ramp, profile steps at PREM's jumps, column
 #                             charts = the nowcast's impedance; stage.js source pins
-#                             (map flipY, frame mirror, cut test)
+#                             (map flipY, frame mirror, cut test), the seismic panel
+#   earth-interior-raytrace.mjs  PREM ray tracer (tomography T1): uniform-sphere closed
+#                             form, RK4 eikonal shooting, quadrature on PREM's polynomials,
+#                             dT/dΔ = p, shadow zones + a no-core negative control
 name: earth-interior-kernels
 
 on:
@@ -72,3 +75,5 @@ jobs:
         run: node tests/earth-interior-geoelectric.mjs
       - name: page model (earth-interior.html draws only these numbers)
         run: node tests/earth-interior-page.mjs
+      - name: seismic ray tracer (tomography T1)
+        run: node tests/earth-interior-raytrace.mjs

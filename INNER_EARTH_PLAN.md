@@ -1,6 +1,6 @@
 # Inner Earth — dataset scope and plan
 
-**Status:** SCOPED + DECIDED (2026-11-18, §0). **P0 + P1 kernels SHIPPED** (no page yet).
+**Status:** SCOPED + DECIDED (2026-11-18, §0). **P0 + P1 kernels, P4 first slice and tomography T1 SHIPPED.**
 - **P0** — `js/earth-interior/prem.js` + `conductivity.js`, gate `node tests/earth-interior-prem.mjs`
   (25 checks). C/MR² 0.33080 (DA81 0.3308); M 5.9732×10²⁴ kg (0.017 % from GM⊕/G); g/p a
   uniform 0.065 % above DA81's print (a G-convention offset, pinned).
@@ -20,6 +20,21 @@
   v = 0 at north) — pinned by source text. Browser smoke spec not yet written (the sandbox has no
   `@playwright/test`); screenshots were taken with the global Playwright against a mocked relay.
 - **Tomography: we build our own** (owner, 2026-11-18) — §10, replacing the licence-blocked published models.
+- **T1 SHIPPED (2026-11-18)** — `js/earth-interior/raytrace.js` (pure): PREM cut into 5 km Bullen
+  shells (v = a·r^b, fitted to each shell's own end values from the region's OWN polynomial, so a jump
+  is never straddled) with the shell's Δ and T integrated EXACTLY; phases P, PKP, PKiKP, PKIKP, S (S
+  stops at the liquid core). Gate `node tests/earth-interior-raytrace.mjs` (8 checks): uniform sphere
+  closed form (1e-15), RK4 eikonal shooting through a smooth model (1e-5 — a different formulation),
+  direct quadrature on PREM's polynomials (Δ 0.0006°, T 0.003 s), dT/dΔ = p on every branch away from
+  caustics (7e-4), and the structure: P ends 98.2°, PKP caustic 145.1°, PKIKP 116.5–180° (T(180°)
+  1210.4 s), S ends 102.6°, with a NO-CORE negative control in which direct P reaches 180°. The plan's
+  "~103°" in §10.5 was the textbook diffracted-P figure; ray-theory P in PREM ends at 98.2°. Page:
+  "Seismic rays through PREM" panel (ray fan + travel-time chart + arrival readout, P/S × 4 source
+  depths), drawn from `page-model.js` `seismicFan`/`travelTimeCurves`, gated in
+  `tests/earth-interior-page.mjs` (fan rays ≡ kernel rays). NOT yet: the TauP fixture (gate 1's
+  external oracle — needs pip on a runner), reflections/Pdiff/up-going rays from deep sources,
+  ellipticity. Scar: the page's layout wrapper and the charts' gridlines shared `.ei-grid`, and the
+  wrapper's `stroke` was INHERITED by every SVG label, washing them out — gridlines are `.ei-gridline`.
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that
