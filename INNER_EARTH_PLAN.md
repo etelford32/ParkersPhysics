@@ -1,9 +1,34 @@
 # Inner Earth — dataset scope and plan
 
-**Status:** SCOPING (2026-11-18). Nothing built. Every source below was
+**Status:** SCOPED + DECIDED (2026-11-18, §0). **P0 SHIPPED** (kernels only,
+no page): `js/earth-interior/prem.js` + `conductivity.js`, gate
+`node tests/earth-interior-prem.mjs` (25 checks, CI `earth-interior-kernels.yml`).
+P0 measured: C/MR² 0.33080 (DA81 0.3308), M 5.9732×10²⁴ kg (0.017 % from
+GM⊕/G); every G-scaled g/p value sits a uniform 0.065 % above DA81's print
+(a G-convention offset, pinned); TauP's isotropic equivalent differs from DA81's
+isotropic polynomials by ≤ 1.2×10⁻³ km/s in the anisotropic 24.4–220 km band.
+100 nT at 600 s gives 0.011 V/km (ocean, 7 kS) vs 0.19 (global land) vs 0.027
+(10 km of 0.3 S/m sediment): the first P1 numbers. `core-model.js` is NOT yet
+switched to these kernels (TIGA unchanged). Every source below was
 **probed from the build sandbox on 2026-11-18**: what is reachable, which
 copy, which version, how big. Numbers marked *measured* were computed here.
-**Proposed page:** `earth-interior.html` (Earth & Orbit section) — see §8 Q1.
+**Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that
+shares kernels with TIGA but not its stage.
+
+## 0. Decisions (owner, 2026-11-18)
+
+1. **A new Earth-interior simulation** (`earth-interior.html`). It shares
+   kernels with TIGA (`igrf.js` stays the one field evaluator) and has its own
+   stage.
+2. **Both audiences, focused on OPERATORS.** The phase order is set by
+   operational value (§9). The cutaway and the column probe are the shared
+   surface.
+3. **3-D mantle tomography: scoped** (§10).
+4. **CHAOS-8.1 from the ESA mirror is the starting point**; refresh to DTU's
+   current 8.x later.
+5. **Show CFM's preliminary northern faults (flagged), and add as much data
+   as commercial-use terms allow.** The licence inventory is §11, and its
+   tiers are BINDING: nothing in tier C or D ships without the action listed.
 
 The ask: start an interactive Earth-interior model from five datasets that
 together give the structural and magnetic foundation —
@@ -178,38 +203,107 @@ list. Past the last data epoch: the `_extrapolated` file, labelled as such.
 
 ---
 
-## 7. Phasing (proposed)
+## 7. Phasing
 
-- **P0 — PREM + conductivity kernels.** No network needed. Gates above;
-  `core-model.js` reads radii and σ from them, and **all existing TIGA gates
-  must pass unchanged** except where the σ swap moves a printed number. Any
-  such move is listed in the PR, not quietly re-baselined.
-- **P1 — CRUST1.0** bake + `crust1.js` + the column probe (PREM + crust).
-- **P2 — Slab2** bake + kernel; quake labelling + the arc-depth gate.
-- **P3 — CHAOS-8** — extend `igrf.js` to variable nmax + the time spline;
-  ChaosMagPy oracle; TIGA can then offer CHAOS as an alternative core field.
-- **P4 — the page**: cutaway globe at true radii, the column probe, slab
-  surfaces under the trenches, CMB field. Tiered layers, OFF until enabled.
-- **P5 — CFM** California inset (regional camera, its own disclosure).
-
-Each phase ships with its refresher run on a networked machine, or with the
-page saying the mirror is unverified.
+See §8: the order is now set by operator value.
 
 ---
 
-## 8. Decisions for the owner
 
-1. **Where does it live?** (a) a new `earth-interior.html` with its own stage
-   that *shares the kernels* with TIGA (recommended: TIGA is a geomagnetic
-   estimator, and the interior is broader than magnetism); or (b) new layers
-   on TIGA's existing Core stage.
-2. **Audience first?** A B2G / operator angle (slab + fault context for live
-   quakes) or an education / exploration angle (the cutaway + column). It
-   changes P2-vs-P4 order.
-3. **3-D mantle tomography** (e.g. S40RTS, SEMUCB-WM1, GLAD-M25) is the
-   obvious next dataset: PREM alone makes the mantle a set of featureless
-   onion shells. Out of scope for now, unless you want it scoped too.
-4. **CHAOS version:** accept 8.1 from the ESA mirror now and refresh to
-   DTU's current 8.x from a networked machine, or wait for the canonical file?
-5. **CFM's preliminary northern faults:** show them, flagged, or Southern
-   California only?
+## 8. Phasing — operator order (supersedes the first draft's order)
+
+| Phase | Ships | Operator it serves | Licence tier (§11) |
+|---|---|---|---|
+| **P0** | `prem.js` + `conductivity.js` kernels, gated (no network, no page) | foundation for every phase below | A |
+| **P1** | **Geoelectric hazard (GIC)**: 1-D conductivity column per site (Grayver mantle under CRUST1.0/ocean conductance) → plane-wave impedance Z(ω) → E(t) from TIGA's live USGS observatory B(t) | power-grid / pipeline operators | A (mantle σ) + C (CRUST1.0 thickness, see §11) |
+| **P2** | **Field at orbit**: CHAOS-8 through an extended `igrf.js` (variable nmax + time spline); |B| at altitude, SAA position/drift, SV | satellite operators (magnetorquers, SAA radiation exposure) | B |
+| **P3** | **Quake context**: Slab2 + GEM Global Active Faults + USGS Quaternary Faults + CFM 7.0 → each live USGS event labelled (interface / intraslab / upper plate / near mapped fault) with distances | infrastructure + insurers | A + B |
+| **P4** | **The page**: cutaway globe at true radii, the column probe (`column.js`), slab surfaces, faults, CMB field; layers OFF until enabled | both | — |
+| **P5** | **Gravity**: EGM2008 geoid + gravity anomaly; degree ≤ 36 to the stage, full grids baked | satellite OD context, surveying | A |
+| **P6** | **Tomography** (§10), only after permission | context | C |
+
+P1 comes first because it is the one place where **the interior changes a
+space-weather number an operator acts on**: the same storm makes 10× more
+geoelectric field over resistive shield than over conductive sediments.
+That joins the interior model to the platform's core (TIGA, live geomag,
+the storm forecasts) and is not a museum exhibit. **Honest label:** 1-D layered
+Earth under a plane-wave source, which is the NERC TPL-007 benchmark method.
+It is NOT a 3-D magnetotelluric (MT) inversion. Coast effects and 3-D
+structure are absent, and the page says so. Gate: the analytic impedance of a
+uniform half-space, Z = √(iωμ₀/σ), exactly, plus a two-layer analytic case.
+
+## 9. Why operators (what each operator actually gets)
+
+- **Grid / pipeline:** E-field (V/km) now and during a forecast storm at
+  their location, with the ground model that produced it shown as a column.
+  This is the product wedge.
+- **Satellite:** CHAOS field at their altitude and the SAA boundary drifting
+  west. `igrf.js` `findSAA` already exists; CHAOS adds the secular variation
+  and degree 14–20.
+- **Infrastructure / insurance:** "what is this quake": the slab and fault
+  context in seconds, with no label outside data coverage.
+- **Everyone:** the column probe, the one picture that ties it together.
+
+## 10. Tomography — scope
+
+**What it adds:** lateral structure in the mantle. The two LLSVPs (large
+low-shear-velocity provinces) under Africa and the Pacific, slabs as fast
+curtains into the lower mantle, plumes. PREM alone draws onion shells.
+
+**Candidates found (all reachable, measured 2026-11-18):**
+
+| Model | Copy | Format | Licence status |
+|---|---|---|---|
+| SEMUCB-WM1 (French & Romanowicz 2014) | `bsl-group/SEMUCB-WM1-Model` @ `870eb96` (the authors' own repo) | A3d splines + reader | **no licence file** |
+| S40RTS (Ritsema et al. 2011) | `romaguir/sph_models` @ `a2bbef1` (`S40.*.sph`, plus S20RTS, GAP_P4, GypSum_S) | SH degree 40 × 21 radial splines (easy to evaluate in a shader) | **no licence file**, third-party copy |
+| SAVANI (Auer et al. 2014) | `auerl/savani` @ `9348e27` (authors) | 1° ASCII grids | **no licence file** |
+| GLAD-M25 (Lei et al. 2020) | `caiociardelli/gladm25` @ `16d1ec8` | SphGLL blocks | **GPL-3.0** |
+
+**Verdict: no tomography model is cleanly licensed for commercial use.** No
+licence means all rights reserved. GPL on a data file served to browsers is a
+copyleft question nobody should answer by accident. **Action: written
+permission from the authors** (one email each; a short letter naming the
+commercial use and the attribution). Start with S40RTS (cheapest to
+evaluate: SH × splines) and SEMUCB-WM1 (authors' repo, highest resolution).
+
+**Gates once permitted:** the LLSVPs emerge as dVs < −1 % at the CMB under
+Africa and the Pacific (positions measured, not typed); fast anomalies sit
+beneath Slab2 slabs at 400–660 km more often than a shuffled-slab control;
+two models agree on the large scale (correlation by degree, reported) and
+disagree on the small scale. That disagreement is shown as a feature,
+the "vote map" idea.
+
+## 11. Data inventory under commercial-use terms
+
+Tiers: **A** public domain / permissive, ship it · **B** attribution or
+share-alike, ship with the obligation · **C** no licence or ambiguous, **ask
+the authors in writing first** · **D** non-commercial, never ship (the
+INTERMAGNET precedent in TIGA). Licences marked † were read from the
+reachable copy; the others are recalled and must be confirmed against the
+canonical page before shipping.
+
+| Dataset | Use | Copy | Tier | Licence / obligation |
+|---|---|---|---|---|
+| PREM | radial structure | published table | A | cite DA81 |
+| Grayver et al. 2017 σ(r) | mantle conductivity (P1) | ChaosMagPy 0.16 wheel `lib/Earth_conductivity.dat` (sha256 `d3c59317…56ed`) | A | package MIT †; cite the paper |
+| Slab2 | slabs | `ndb38/arc-metals` | A | USGS public domain |
+| USGS ComCat | live quakes (already used) | USGS feed | A | public domain |
+| USGS Quaternary Faults, NSHM23 fault sections | US faults beyond CA | USGS (blocked here; reachability TBD) | A | public domain |
+| NOAA EMAG2v3 | crustal magnetic anomaly, 2 arc-min | NOAA (blocked) | A | public domain; cross-checks CHAOS n ≤ 185 |
+| NOAA ETOPO 2022 / GEBCO | relief and bathymetry for the column top | (blocked) | A / B | public domain / GEBCO attribution |
+| EGM2008 | geoid + gravity (P5) | NGA (blocked); `flightaware/egm2008` BSD-3 † derived grid as a stopgap | A | NGA unlimited distribution |
+| SCEC CFM 7.0 (incl. preliminary N/central CA, flagged) | CA faults | `harvardvizlab/cfm7-fault-explorer` | B | BSD-3 † — keep the notice |
+| CHAOS-8.1 | field | ESA-VirES mirror | B | DTU: free with citation (confirm terms page) |
+| GEM Global Active Faults | world faults | `cossatot/gem-global-active-faults` @ `5681650` (10.6 MB geojson) | B | **CC BY-SA 4.0** † — our baked derivative must be published CC BY-SA too (fine; the app code is unaffected) |
+| PB2002 plates (Bird 2003) | plate boundaries | `liveatlasearth/tectonic-plates-and-faults` (CC BY-SA 4.0 †, a derivative) | B | prefer Bird's original file; cite |
+| Seafloor age (Seton et al. 2020) | lithosphere age → thickness | EarthByte (blocked) | B | CC BY 4.0 |
+| Global Heat Flow Database (IHFC) | surface heat flow | GFZ (blocked); `ihfc-iugg/ghfdb-portal` is CODE (MIT) | B | CC BY 4.0 (release data) |
+| CRUST1.0 | crust | `jrleeman/Crust1.0` (MIT applies to the PYTHON; the model files carry no licence) | **C** | **ask Laske et al.** — blocks P1's crust term until answered (P1 can run with a stated generic crust meanwhile) |
+| LITHO1.0 | lithosphere thickness | `underworldcode/litho1pt0` GPL-3.0 † | C | ask Pasyanos / LLNL for the original terms |
+| Tomography (§10) | mantle | various | C | ask authors |
+| Global CMT | focal mechanisms | (blocked) | C | free, no licence; ask or link only |
+| GEM hazard/risk maps | — | — | **D** | CC BY-NC-SA — never ship |
+
+**Permission letters to send (owner):** Laske (CRUST1.0) · Ritsema (S40RTS) ·
+Romanowicz (SEMUCB-WM1) · Pasyanos (LITHO1.0) · DTU (confirm the CHAOS terms in
+writing). Keep the replies in `data/earth-interior/PERMISSIONS.md`.

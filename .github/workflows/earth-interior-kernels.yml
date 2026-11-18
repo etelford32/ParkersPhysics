@@ -1,0 +1,46 @@
+# earth-interior-kernels — the Inner Earth model's pure kernels (INNER_EARTH_PLAN.md)
+#
+#   earth-interior-prem.mjs   PREM vs ObsPy's TauP node table (both sides of
+#                             every jump, transcription-slip negative control),
+#                             mass / C/MR² re-integrated independently and
+#                             against the measured Earth (mantle-density-core
+#                             negative control), DA81's printed g and p, the
+#                             jump list; Grayver 2017 σ(r) vs the pinned
+#                             ChaosMagPy file; the 1-D plane-wave impedance vs
+#                             closed forms (half-space, split layer, thin sheet)
+name: earth-interior-kernels
+
+on:
+  push:
+    paths:
+      - 'js/earth-interior/**'
+      - 'tests/earth-interior-*.mjs'
+      - 'tests/fixtures/earth-interior/**'
+      - '.github/workflows/earth-interior-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/earth-interior/**'
+      - 'tests/earth-interior-*.mjs'
+      - 'tests/fixtures/earth-interior/**'
+      - '.github/workflows/earth-interior-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: earth-interior-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: PREM + conductivity kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: PREM + conductivity
+        run: node tests/earth-interior-prem.mjs
