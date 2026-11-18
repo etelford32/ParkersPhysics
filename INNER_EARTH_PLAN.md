@@ -62,8 +62,8 @@
   feed draws NO quake and says so. Gate `tests/earth-interior-quakes.mjs` (9). NOT yet: amplitudes, station
   elevation, 3-D structure, a browser smoke spec (the sandbox has no `@playwright/test`).
 - **Amplitudes + station elevation SHIPPED (2026-11-18)** — `js/earth-interior/amplitude.js` (PURE): each
-  arrival's ray-theory DISPLACEMENT amplitude = far-field point source (RMS focal-sphere radiation, Boore &
-  Boatwright: P 0.52, S 0.63 split SV/SH — the real mechanism is not used, disclosed) × ray-tube spreading from
+  arrival's ray-theory DISPLACEMENT amplitude = far-field point source (the focal-sphere RMS radiation at first;
+  superseded by the event's own moment tensor — see the next entry) × ray-tube spreading from
   energy conservation (√(dΩ/(dS cos i_r)); exactly 1/L in a uniform medium) × √Π of every interface's ENERGY
   coefficient (full complex P-SV Zoeppritz for solid–solid / solid–liquid / liquid–solid / free surface, SH
   closed form; S-only phases are SH, converting ones SV) × e^(−π f t*) with t* from PREM's own Q_μ/Q_κ (P at

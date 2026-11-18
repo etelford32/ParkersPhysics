@@ -31,6 +31,9 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KIND_LABEL = { direct: 'direct', upgoing: 'direct, up-going', core: 'through the core', reflected: 'reflected', diffracted: 'along the core', depth: 'near-source bounce', multiple: 'surface bounce' };
 const POLL_DAY_MS = 60_000, POLL_WEEK_MS = 600_000;
+// On an exact nodal plane the point-source amplitude is a numerical zero (−320 dB); a few degrees of
+// take-off error put it tens of dB higher, so anything below this floor is shown as a bound, never a number.
+const DB_FLOOR = -60;
 
 export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
     const S = {
@@ -297,7 +300,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
 
     function strengthCell(r) {
         if (r.db == null) return `<span class="ei-muted" title="${esc(r.ampReason ?? '')}">${/caustic|focus/.test(r.ampReason ?? '') ? 'focused — not sized' : /diffract/.test(r.ampReason ?? '') ? 'diffracted — fades' : '—'}</span>`;
-        const w = Math.max(4, Math.min(100, (r.db + 60) / 60 * 100)), dbTxt = `${Math.round(r.db) || 0} dB`;
+        const w = Math.max(4, Math.min(100, (r.db + 60) / 60 * 100)), dbTxt = r.db < DB_FLOOR ? `< ${DB_FLOOR} dB` : `${Math.round(r.db) || 0} dB`;
         const band = r.recorded === 'S' ? 'S band · 0.2 Hz' : 'P band · 1 Hz';
         const extra = (r.nearNodal ? ' <span class="ei-flag" title="Near a nodal plane of this event: predicted weak, but sensitive to the take-off angle">nodal</span>' : '')
             + (r.polarity ? ` <span class="ei-pol" title="First motion: ${r.polarity === 'up' ? 'up (compression)' : 'down (dilatation)'}">${r.polarity === 'up' ? '↑' : '↓'}</span>` : '');
