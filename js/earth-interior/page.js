@@ -59,7 +59,7 @@ function renderProbe(hit) {
     // The field / plates views read their own quantities under the pointer.
     const own = state.layer?.probe?.(hit);
     if (own) { box.innerHTML = own; setProbeDepth(null); return; }
-    if (!hit && state.layer) { box.innerHTML = `<span class="ei-muted">${state.layer === state.field ? 'Hover the core or the globe to read the field' : 'Hover the globe: plate, velocity, nearest boundary'}</span>`; setProbeDepth(null); return; }
+    if (!hit && state.layer) { box.innerHTML = `<span class="ei-muted">${state.layer === state.field ? 'Hover the core or the globe to read the field' : 'Hover the globe: plate, velocity, nearest boundary, the slab below · hover a dot: an earthquake at its true depth'}</span>`; setProbeDepth(null); return; }
     if (!hit) { box.innerHTML = `<span class="ei-muted">${$('#ei-stage')?.classList.contains('is-quakes') ? 'Hover the slice for the structure at any depth · click a dot to show that earthquake' : 'Hover the cut faces for the column at any depth · click a station'}</span>`; setProbeDepth(null); return; }
     if (hit.kind === 'interior') {
         const p = probeAt(hit.rKm);
@@ -477,7 +477,7 @@ async function boot() {
     // The magnetic field (CHAOS-8.1) and plate (PB2002) views: each loads its data on first open.
     const [{ mountField }, { mountPlates }] = await Promise.all([import('./field-layer.js'), import('./plates-layer.js')]);
     state.field = mountField({ stage: state.stage });
-    state.plates = mountPlates({ stage: state.stage });
+    state.plates = mountPlates({ stage: state.stage, getQuakes: () => state.live?.state?.quakes ?? [] });
     const setMode = (view) => {
         document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
         const st = $('#ei-stage');

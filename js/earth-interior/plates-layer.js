@@ -10,12 +10,19 @@
  * (default; the frame with no average spin of the lithosphere) or
  * PACIFIC-FIXED (Bird's own). Relative motion across a boundary is the same in
  * both — only the arrows change — and the probe says so.
+ *
+ * INSIDE (default on): the crust turns to glass and the plates are followed
+ * DOWN — USGS Slab2's 27 subducting slabs at true depth, the 660 km
+ * transition zone, and the live feed's hypocentres where they really are
+ * (slab-layer.js over the PURE slabs.js). The probe then names the slab under
+ * the pointer and, for an earthquake, where it sits relative to that slab.
  */
 import * as THREE from 'three';
 import { decodePlates, plateAt, plateVelocity, stepMotions, boundarySummary, STEP_CLASSES } from './plates.js';
 import { FAMILY_STYLE, stepFamily, velocityArrows, nearestStep, depthAge, plateCentroids, plateRGBA, ARROW_DEG_PER_MM_YR } from './plates-model.js';
 import { GlowLines } from './glow-lines.js';
 import { latLonToVec } from './stage.js';
+import { mountSlabLayer, DEPTH_RAMP, DEPTH_MAX_KM } from './slab-layer.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -39,8 +46,15 @@ export async function loadPlates(fetchFn = fetch, url = 'data/earth-interior/pla
     return decodePlates(JSON.parse(text));
 }
 
-export function mountPlates({ stage }) {
-    const S = { active: false, model: null, error: null, frame: 'nnr', colorBy: 'kind', arrows: true, labels: [] };
+export function mountPlates({ stage, getQuakes = () => [] }) {
+    const S = { active: false, model: null, error: null, frame: 'nnr', colorBy: 'kind', arrows: true, inside: !/[?&]slabs=0\b/.test(location.search), labels: [] };
+    let slabs = null;
+    const ensureSlabs = () => {
+        if (!stage || slabs) return slabs;
+        slabs = mountSlabLayer({ stage, getQuakes });
+        slabs.state.onLoad = () => { renderHud(); renderSlabPanel(); fillSections(); };
+        return slabs;
+    };
     let bounds = null, arrows = null;
     if (stage) {
         bounds = new GlowLines({ width: 2.2, gain: 1.05 });
@@ -49,6 +63,20 @@ export function mountPlates({ stage }) {
         stage.onFrame(() => { if (S.active) placeLabels(); });
     }
     const P = (lat, lon, lift = 1.0035) => latLonToVec(lat, lon).multiplyScalar(lift).toArray();
+    // With a cross-section open, a surface line must not hang over the removed quarter: split it there.
+    const clipLines = (lines) => {
+        if (!slabs?.state?.section) return lines;
+        const out = [];
+        for (const l of lines) {
+            let cur = null;
+            l.points.forEach((p, i) => {
+                if (slabs.isRemoved(p)) { cur = null; return; }
+                if (!cur) { cur = { ...l, points: [], colors: l.colors ? [] : undefined }; out.push(cur); }
+                cur.points.push(p); if (l.colors) cur.colors.push(l.colors[i]);
+            });
+        }
+        return out;
+    };
 
     function drawBoundaries() {
         if (!stage || !S.model) return;
@@ -61,7 +89,7 @@ export function mountPlates({ stage }) {
             cur.points.push(P(s.lat2, s.lon2)); cur.colors.push(col);
             cur.end = [s.lat2, s.lon2];
         }
-        bounds.set(lines);
+        bounds.set(clipLines(lines));
     }
     function drawArrows() {
         if (!stage || !S.model) return;
@@ -73,7 +101,7 @@ export function mountPlates({ stage }) {
             lines.push({ points: a.shaft.map((p) => P(p.lat, p.lon, 1.006)), color: c, alpha: al });
             for (const h of a.head) lines.push({ points: h.map((p) => P(p.lat, p.lon, 1.006)), color: c, alpha: al });
         }
-        arrows.set(lines);
+        arrows.set(clipLines(lines));
     }
     function makeLabels() {
         const layer = stage?.labelLayer; if (!layer) return;
@@ -103,14 +131,37 @@ export function mountPlates({ stage }) {
         if (!S.model) { hud.innerHTML = '<b>Tectonic plates</b><span>Loading Bird (2003)…</span>'; return; }
         const pa = S.model.byId.get('PA').nnrPole;
         hud.innerHTML = `<b>Tectonic plates · PB2002</b><span>${S.model.plates.length} plates · arrows: ${S.frame === 'nnr' ? 'no-net-rotation frame' : 'Pacific held fixed'}</span>
-            <span class="ei-muted">Pacific plate, NNR: ${pa.rateDegMa.toFixed(3)}°/Myr about ${Math.abs(pa.lat).toFixed(1)}°S ${pa.lon.toFixed(1)}°E</span>`;
+            <span class="ei-muted">Pacific plate, NNR: ${pa.rateDegMa.toFixed(3)}°/Myr about ${Math.abs(pa.lat).toFixed(1)}°S ${pa.lon.toFixed(1)}°E</span>${insideLine()}`;
         const key = $('#ei-pkeys');
         if (key) key.innerHTML = S.colorBy === 'age'
             ? `<div class="ei-fkey"><span>Seafloor age at the boundary (Müller et al. 1997, via Bird)</span><i style="background:linear-gradient(90deg,${AGE_RAMP.join(',')})"></i><span class="ei-fkey-ends"><span>0</span><span>180 Ma</span></span></div>`
             : `<div class="ei-pfam">${Object.values(FAMILY_STYLE).map((f) => `<span><i style="background:${f.hex}"></i>${esc(f.label)}</span>`).join('')}</div>`;
+        if (key && S.inside) key.innerHTML += `<div class="ei-fkey"><span>Slab surface and earthquake depth (Slab2 · USGS)</span><i style="background:linear-gradient(90deg,${DEPTH_RAMP.join(',')})"></i><span class="ei-fkey-ends"><span>0</span><span>${DEPTH_MAX_KM} km</span></span></div>`;
         const ak = $('#ei-parrowkey');
         if (ak) ak.textContent = S.arrows ? `Arrows: plate velocity (${S.frame === 'nnr' ? 'no-net-rotation' : 'Pacific-fixed'} frame), length ${ARROW_DEG_PER_MM_YR}° of arc per mm/yr — a display scale.` : '';
     }
+
+    function insideLine() {
+        if (!S.inside) return '';
+        const st = slabs?.state;
+        if (st?.error) return `<span>Slabs unavailable (${esc(st.error)}).</span>`;
+        if (!st?.model) return '<span>Loading Slab2…</span>';
+        if (st.section) {
+            const x = st.section;
+            return `<span>Cut across the <b>${esc(x.slab.name)}</b> slab along its own dip direction (toward ${x.azimuthDeg.toFixed(0)}°, ${x.dipDeg.toFixed(0)}° dip at ${x.anchor.depthKm.toFixed(0)} km): the wall shows its top surface down to ${Math.max(...x.profile.filter((p) => p.depthKm != null).map((p) => p.depthKm)).toFixed(0)} km on PREM density, the faint arc is the 660 km boundary.</span>`;
+        }
+        return `<span>Inside: ${st.model.slabs.length} subducting slabs (Slab2) · ${st.quakes.length} earthquakes at their true depth · crust drawn as glass</span>`;
+    }
+
+    // The slabs, as a table: how deep each goes, and what is above them.
+    function renderSlabPanel() {
+        const host = $('#ei-pslabs'), m = slabs?.state?.model; if (!host || !m) return;
+        const rows = [...m.slabs].sort((a, b) => b.maxDepthKm - a.maxDepthKm).map((s) => `<tr><td><i class="ei-sw" style="background:${depthCss(s.maxDepthKm)}"></i>${esc(s.name)}</td><td class="ei-num">${s.maxDepthKm.toFixed(0)} km</td></tr>`).join('');
+        host.innerHTML = `<h3 class="ei-h3">Where the plates go down</h3>
+            <div class="ei-table-wrap ei-qlist-wrap"><table class="ei-table"><thead><tr><th>Slab (Slab2)</th><th class="ei-num">Deepest mapped</th></tr></thead><tbody>${rows}</tbody></table></div>
+            <p class="ei-muted ei-small">USGS Slab2 (Hayes et al. 2018): the depth of the top of each subducting plate under 27 zones, mapped from earthquakes, seismic surveys and tomography, with a 1σ uncertainty per point (shown in the probe). We keep Slab2's own values on a 0.2° grid; they reproduce Slab2's published depth contours to a median 0.2 km. Slabs stop at or near the 660 km transition zone, drawn as a glass shell; four of them (Izu–Bonin, Kermadec, Manila, Solomon) fold back on themselves at depth, and those overturned parts are not drawn. Measured against the GVP volcano catalogue: under the 776 Holocene volcanoes that stand above a slab, its surface is a median 104 km down (half of them between 88 and 123 km) — the depth at which the sinking plate releases the water that melts the mantle above it. That is the classic arc result, and it falls out of two independent datasets here.</p>`;
+    }
+    const depthCss = (d) => { const t = Math.min(1, d / DEPTH_MAX_KM) * (DEPTH_RAMP.length - 1), i = Math.round(t); return DEPTH_RAMP[i]; };
 
     function renderPanel() {
         const host = $('#ei-ppanel'); if (!host || !S.model) return;
@@ -149,15 +200,40 @@ export function mountPlates({ stage }) {
             <p class="ei-muted ei-small">Dots: depth (ETOPO5) and seafloor age (Müller et al. 1997) at each of Bird's ${d.points.length} oceanic-transform boundary steps; rings: medians. Line: the plate-cooling depth of Parsons &amp; Sclater (1977), d = 2.5 km + 0.35 km·√(age/Myr) to 70 Myr, flattening after. New seafloor is made hot and buoyant at the ridges and contracts as it cools. Transforms sit in fracture-zone troughs and are not a random sample of the seafloor, so read this as a comparison, not a fit. A global seafloor-age map (Seton et al. 2020, CC BY 4.0) is planned; its host is not reachable from our build machines yet.</p>`;
     }
 
+    function fillSections() {
+        const sel = $('#ei-psection'), m = slabs?.state?.model; if (!sel || !m) return;
+        const opts = [...m.slabs].filter((x) => x.maxDepthKm >= 120).sort((a, b) => a.name.localeCompare(b.name));
+        sel.innerHTML = '<option value="">Cut across a slab…</option>' + opts.map((x) => `<option value="${x.code}">${esc(x.name)} (to ${x.maxDepthKm.toFixed(0)} km)</option>`).join('');
+        sel.disabled = false;
+    }
+    function openSection(code) {
+        if (!stage) return;
+        ensureSlabs();
+        if (code && !S.inside) { S.inside = true; slabs.setVisible(true, { glass: false }); chips(); }
+        const sec = slabs.setSection(code || null);
+        const sel = $('#ei-psection'); if (sel) sel.value = sec ? code : '';
+        S.section = sec;
+        drawBoundaries(); drawArrows(); renderHud();
+        if (!sec) { stage.flyToDirection(latLonToVec(8, 160), { fill: 0.92 }); slabs.setVisible(S.inside); }
+    }
+
     function chips() {
         for (const b of document.querySelectorAll('[data-pframe]')) b.setAttribute('aria-pressed', String(b.dataset.pframe === S.frame));
         for (const b of document.querySelectorAll('[data-pcolor]')) b.setAttribute('aria-pressed', String(b.dataset.pcolor === S.colorBy));
         $('#ei-parrows')?.setAttribute('aria-pressed', String(S.arrows));
+        $('#ei-pinside')?.setAttribute('aria-pressed', String(S.inside));
     }
     function wire() {
         for (const b of document.querySelectorAll('[data-pframe]')) b.addEventListener('click', () => { S.frame = b.dataset.pframe; chips(); drawArrows(); renderHud(); });
         for (const b of document.querySelectorAll('[data-pcolor]')) b.addEventListener('click', () => { S.colorBy = b.dataset.pcolor; chips(); drawBoundaries(); renderHud(); });
         $('#ei-parrows')?.addEventListener('click', () => { S.arrows = !S.arrows; chips(); drawArrows(); renderHud(); });
+        $('#ei-pinside')?.addEventListener('click', () => {
+            S.inside = !S.inside; chips();
+            if (!S.inside && S.section) openSection(null);
+            if (S.active && stage) { ensureSlabs(); slabs.setVisible(S.inside); }
+            renderHud();
+        });
+        $('#ei-psection')?.addEventListener('change', (e) => openSection(e.target.value));
         chips();
     }
 
@@ -166,7 +242,7 @@ export function mountPlates({ stage }) {
         S.loading = loadPlates().then((m) => {
             S.model = m;
             $('#ei-pstatus') && ($('#ei-pstatus').textContent = `PB2002 (Bird 2003): ${m.plates.length} plates, ${m.steps.length.toLocaleString()} boundary steps.`);
-            drawBoundaries(); drawArrows(); makeLabels(); renderHud(); renderPanel();
+            drawBoundaries(); drawArrows(); makeLabels(); renderHud(); renderPanel(); renderSlabPanel();
             if (stage && S.active) stage.setSurfaceOverlay(plateRGBA(m), m.raster.nLon, m.raster.nLat);
             for (const l of S.labels) l.el.style.display = S.active ? '' : 'none';
         }).catch((err) => { S.error = err.message; renderHud(); $('#ei-pstatus') && ($('#ei-pstatus').textContent = `PB2002 unavailable: ${err.message}`); });
@@ -181,8 +257,12 @@ export function mountPlates({ stage }) {
             if (on) {
                 stage.setCut('none');
                 if (S.model) stage.setSurfaceOverlay(plateRGBA(S.model), S.model.raster.nLon, S.model.raster.nLat);
-                stage.flyToDirection(latLonToVec(-5, -120), { fill: 0.92 });          // the Pacific and the East Pacific Rise
+                // The western Pacific: the Ring of Fire's deepest slabs (Tonga, Izu–Bonin, Kuril) and the Pacific plate feeding them.
+                stage.flyToDirection(latLonToVec(8, 160), { fill: 0.92 });
+                if (S.inside) { ensureSlabs(); slabs.setVisible(true); }
             } else {
+                if (S.section) { slabs.setSection(null); S.section = null; const sel = $('#ei-psection'); if (sel) sel.value = ''; }
+                slabs?.setVisible(false);
                 stage.setSurfaceOverlay(null);
                 stage.setCut('octant');
             }
@@ -191,7 +271,9 @@ export function mountPlates({ stage }) {
     }
 
     function probe(hit) {
-        if (!S.active || !S.model || !hit || hit.kind !== 'surface') return null;
+        if (!S.active || !S.model || !hit) return null;
+        if (hit.kind === 'hypocentre') return quakeProbe(hit);
+        if (hit.kind !== 'surface') return null;
         const k = plateAt(S.model.raster, hit.lat, hit.lon), plate = S.model.plates[k];
         const v = plateVelocity(S.frame === 'nnr' ? plate.wNnr : plate.w, hit.lat, hit.lon);
         const near = nearestStep(S.model, hit.lat, hit.lon);
@@ -205,11 +287,23 @@ export function mountPlates({ stage }) {
             const sea = near.step.ageMa != null ? ` · seafloor ${near.step.ageMa} Myr old, ${(-near.step.elevationM / 1000).toFixed(1)} km deep` : '';
             b = `<span>${near.km.toFixed(0)} km from the ${esc(near.step.left.name)}–${esc(near.step.right.name)} boundary: ${esc(near.className)}, ${what}${down}${sea}</span>`;
         }
+        let under = '';
+        const d = S.inside ? slabs?.describe(hit) : null;
+        if (d?.beneath?.length) under = d.beneath.map((u) => `<span>Below: the ${esc(u.slab.name)} slab, its top ${u.depthKm.toFixed(0)} km down${Number.isFinite(u.uncKm) ? ` (±${u.uncKm.toFixed(0)} km)` : ''}</span>`).join('');
         return `<b>${esc(plate.name)} plate · ${Math.abs(hit.lat).toFixed(1)}°${hit.lat < 0 ? 'S' : 'N'} ${Math.abs(hit.lon).toFixed(1)}°${hit.lon < 0 ? 'W' : 'E'}</b>
-            <span>Moving ${v.speed.toFixed(0)} mm/yr toward ${compass(v.azimuth)} (${v.azimuth.toFixed(0)}°) — ${S.frame === 'nnr' ? 'no-net-rotation frame' : 'relative to the Pacific plate'}</span>${b}`;
+            <span>Moving ${v.speed.toFixed(0)} mm/yr toward ${compass(v.azimuth)} (${v.azimuth.toFixed(0)}°) — ${S.frame === 'nnr' ? 'no-net-rotation frame' : 'relative to the Pacific plate'}</span>${b}${under}`;
+    }
+
+    function quakeProbe(hit) {
+        const q = hit.quake, d = slabs?.describe(hit), c = d?.ctx;
+        const when = Number.isFinite(q.timeMs) ? new Date(q.timeMs).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '';
+        const rel = !c ? '<span>No Slab2 slab beneath it.</span>'
+            : `<span>The ${esc(c.slab.name)} slab's top is ${c.slabDepthKm.toFixed(0)} km down here (±${Math.max(c.tolKm, 0).toFixed(0)} km): this hypocentre is ${c.relation === 'near' ? '<b>on the slab surface</b>, within that' : c.relation === 'above' ? `<b>${Math.abs(c.dzKm).toFixed(0)} km above it</b> (the plate above / mantle wedge)` : `<b>${c.dzKm.toFixed(0)} km below its top</b> (inside or under the slab)`}.</span>
+               <span class="ei-muted">A comparison of depths, not a fault-type call — that needs the mechanism.</span>`;
+        return `<b>M${(q.mag ?? 0).toFixed(1)} · ${esc(q.place ?? '')}</b><span>${q.depthKm.toFixed(0)} km deep · ${when}</span>${rel}`;
     }
 
     wire();
     renderHud();
-    return { setActive, probe, get state() { return S; } };
+    return { setActive, probe, openSection, get state() { return S; } };
 }

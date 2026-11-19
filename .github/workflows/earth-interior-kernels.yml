@@ -36,6 +36,9 @@
 #                             his Euler poles (flipped-sign + swapped-plate controls), the 0.5°
 #                             plate raster partitions the sphere, the NNR frame vs NNR-NUVEL-1A
 #                             (unweighted-mean control), page helpers (arrows, cooling curve)
+#   earth-interior-slabs.mjs USGS Slab2: the 0.2° bake vs Slab2's OWN depth contours (row-flip
+#                             control) and dip grid (no-cos φ control), arc volcanoes ~100 km above
+#                             the slab, quake-vs-slab context, the section plane and mesh
 #   geomag-chaos.mjs          CHAOS-8.1 through igrf.js vs ChaosMagPy (coefficients, SV, B at the
 #                             surface / 500 km / CMB, the baked crustal grid), the forecast vs
 #                             DTU's own extrapolated file, a linear-interpolation SV control
@@ -51,6 +54,8 @@ on:
       - 'scripts/build-ground-models.mjs'
       - 'scripts/build-chaos.mjs'
       - 'scripts/build-plates.mjs'
+      - 'scripts/build-slab2.mjs'
+      - 'scripts/slab2-pins.json'
       - 'tests/geomag-chaos.mjs'
       - 'tests/fixtures/geomag/**'
       - 'api/geomag/observatories.js'
@@ -70,6 +75,8 @@ on:
       - 'scripts/build-ground-models.mjs'
       - 'scripts/build-chaos.mjs'
       - 'scripts/build-plates.mjs'
+      - 'scripts/build-slab2.mjs'
+      - 'scripts/slab2-pins.json'
       - 'tests/geomag-chaos.mjs'
       - 'tests/fixtures/geomag/**'
       - 'api/geomag/observatories.js'
@@ -129,3 +136,7 @@ jobs:
         run: |
           node tests/earth-interior-plates.mjs
           node scripts/build-plates.mjs --check
+      - name: Slab2 slabs (vs Slab2's own contours + dips, arc volcanoes) + bake is current
+        run: |
+          node tests/earth-interior-slabs.mjs
+          node scripts/build-slab2.mjs --check

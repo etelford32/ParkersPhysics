@@ -455,6 +455,25 @@ cooling curve — a comparison, not a fit (fracture zones are not a random
 sample). **Seafloor-age GRID (Seton 2020) is still blocked**: EarthByte,
 NOAA, Zenodo all unreachable; no licence-clean GitHub copy found.
 
+**Slabs — USGS Slab2, the plates going DOWN (2026-11-19).** `scripts/build-slab2.mjs`
+bakes all 27 slabs' depth + 1σ uncertainty, SUBSAMPLED (never averaged) to 0.2°
+(57 644 nodes, 221 KB; sign flipped once to positive-down; most grids are 0.05°, a
+few 0.02°). `js/earth-interior/slabs.js` (PURE): bilinear depth inside the mask only,
+quake-vs-slab context (a depth comparison within max(σ, 10 km) — never a fault-type
+call), `downDip` from the baked depths alone, and `slabSection` — a cut along the
+slab's own down-dip azimuth, anchored at its 100 km band, starting seaward of the
+trench. Gate `tests/earth-interior-slabs.mjs` against TWO Slab2 products we did not
+bake: its own GMT depth contours (p50 0.18 km, p99 2.1 km; a row-flip control reads
+106 km) and its own dip grid (p50 0.11°, p90 0.45°; a no-cos φ control 5.8°); and one
+independent catalogue: under the 776 Holocene GVP volcanoes above a slab its top is a
+median **104 km** down, IQR 36 km vs 203 km over all slab nodes — the classic arc
+depth, from two datasets that know nothing of each other. The plates view draws the
+slabs inside a glass crust with the 660 km shell and the live hypocentres at true
+depth, and "Cut across a slab" opens the live view's wedge along a section (only a
+~760 km RIBBON of the slab is drawn beside the wall — the whole half-slab hid the wall).
+NOT drawn: Slab2's thickness (so "below the slab surface" means inside OR under it)
+and the four overturned slabs' supplementary nodes.
+
 ## 9. Why operators (what each operator actually gets)
 
 - **Grid / pipeline:** E-field (V/km) now and during a forecast storm at
@@ -589,7 +608,7 @@ canonical page before shipping.
 | GSC Open File 8115 (15 Canadian observatory columns) | P1 ground columns | same | B | Open Government Licence – Canada (confirm) |
 | NERC TPL-007 Table 3 β + Table 4 Quebec model | P1 planning context | bezpy `tpl007.py` | A | published standard values |
 | Grayver et al. 2017 σ(r) | mantle conductivity (P1) | ChaosMagPy 0.16 wheel `lib/Earth_conductivity.dat` (sha256 `d3c59317…56ed`) | A | package MIT †; cite the paper |
-| Slab2 | slabs | `ndb38/arc-metals` | A | USGS public domain |
+| Slab2 | slabs — BAKED (§8b) | `ndb38/arc-metals` @ 543bf32 | A | USGS public domain |
 | USGS ComCat | live quakes (already used) | USGS feed | A | public domain |
 | USGS Quaternary Faults, NSHM23 fault sections | US faults beyond CA | USGS (blocked here; reachability TBD) | A | public domain |
 | NOAA EMAG2v3 | crustal magnetic anomaly, 2 arc-min | NOAA (blocked) | A | public domain; cross-checks CHAOS n ≤ 185 |

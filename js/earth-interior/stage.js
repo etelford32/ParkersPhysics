@@ -87,6 +87,7 @@ uniform float uCutSpan;
 uniform float uCutMode;     // 0: the octant; 1: the live WEDGE (x·uCutN > 0 AND x·uCutM > 0 removed); 2: no cut
 uniform sampler2D uOverlay;  // a layer's DATA map (equirect, row 0 = north), alpha = its weight
 uniform float uHasOverlay;
+uniform float uAlpha;        // < 1: the crust drawn as glass so a layer underneath (slabs) shows through
 uniform vec3 uCutN;
 uniform vec3 uCutM;
 varying vec3 vDir;
@@ -116,7 +117,7 @@ void main() {
         vec4 o = texture2D(uOverlay, normalToUV(n));
         c = mix(c, o.rgb * (0.88 + 0.12 * day), o.a);
     }
-    gl_FragColor = vec4(c, 1.0);
+    gl_FragColor = vec4(c, uAlpha);
 }`;
 
 const FACE_VS = /* glsl */`
@@ -345,7 +346,7 @@ export class InteriorStage {
                 uMap: { value: null }, uHasMap: { value: 0 }, uLights: { value: null }, uHasLights: { value: 0 }, uLight: { value: light },
                 uCutLon0: { value: CUT_LON0_DEG * Math.PI / 180 }, uCutSpan: { value: CUT_SPAN_DEG * Math.PI / 180 },
                 uCutMode: { value: 0 }, uCutN: { value: new THREE.Vector3(0, 0, 1) }, uCutM: { value: new THREE.Vector3(1, 0, 0) },
-                uOverlay: { value: null }, uHasOverlay: { value: 0 },
+                uOverlay: { value: null }, uHasOverlay: { value: 0 }, uAlpha: { value: 1 },
             },
         });
         this._cutNone = false;
@@ -570,6 +571,18 @@ export class InteriorStage {
         for (const f of this.faces) f.visible = !this._cutNone;
     }
 
+    /**
+     * The crust as glass (alpha < 1) so what lies beneath it — the plates view's slabs and
+     * hypocentres — can be seen; 1 restores the opaque globe. A transparent surface writes no
+     * depth and draws after every opaque object (renderOrder −0.5: before the other glass).
+     */
+    setSurfaceAlpha(a) {
+        const m = this.surfaceMat, glass = a < 1;
+        m.uniforms.uAlpha.value = a;
+        if (m.transparent !== glass) { m.transparent = glass; m.depthWrite = !glass; m.needsUpdate = true; }
+        this.earth.renderOrder = glass ? -0.5 : 0;
+    }
+
     /** Dim the octant's faces (1 = as the legend; a layer that draws inside the cut lowers it). */
     setFaceDim(k) {
         for (const f of this.faces) f.material.uniforms.uShade.value = (f.userData.shade ??= f.material.uniforms.uShade.value) * k;
@@ -598,8 +611,21 @@ export class InteriorStage {
     /** One-shot flight to look along a direction at a given fill (the TIGA rule: started, never held). */
     flyToDirection(dir, { fill = 0.9, instant = false } = {}) {
         const to = (Array.isArray(dir) ? new THREE.Vector3(...dir) : dir.clone()).normalize().multiplyScalar(this._fitDistance(fill));
+        this.controls.minDistance = 1.35;
         if (instant) { this.camera.position.copy(to); this.controls.target.set(0, 0, 0); this.controls.update(); return; }
-        this._flight = { from: this.camera.position.clone(), to, t0: performance.now(), dur: 1300 };
+        this._flight = { from: this.camera.position.clone(), to, fromT: this.controls.target.clone(), toT: new THREE.Vector3(), t0: performance.now(), dur: 1300 };
+    }
+
+    /**
+     * One-shot flight to a camera POSITION looking at a TARGET that need not be the centre (a
+     * cross-section's notch). `minDistance` loosens the zoom floor for close work; every
+     * whole-globe flight restores it. Started, never held — any drag cancels it.
+     */
+    flyToPose(position, target, { minDistance = 0.12, dur = 1500 } = {}) {
+        const to = Array.isArray(position) ? new THREE.Vector3(...position) : position.clone();
+        const toT = Array.isArray(target) ? new THREE.Vector3(...target) : target.clone();
+        this.controls.minDistance = minDistance;
+        this._flight = { from: this.camera.position.clone(), to, fromT: this.controls.target.clone(), toT, t0: performance.now(), dur };
     }
 
     async loadMap(url) {
@@ -681,8 +707,9 @@ export class InteriorStage {
         } else dir = latLonToVec(30, CUT_LON0_DEG + CUT_SPAN_DEG / 2 - 8);
         const dist = this._fitDistance(fill);
         const to = dir.multiplyScalar(dist);
+        this.controls.minDistance = 1.35;
         if (instant) { this.camera.position.copy(to); this.controls.target.set(0, 0, 0); this.controls.update(); return; }
-        this._flight = { from: this.camera.position.clone(), to, t0: performance.now(), dur: 1100 };
+        this._flight = { from: this.camera.position.clone(), to, fromT: this.controls.target.clone(), toT: new THREE.Vector3(), t0: performance.now(), dur: 1100 };
     }
 
     /** Camera distance at which the unit sphere fills `fill` of the BINDING half-angle (the smaller of vertical/horizontal). */
@@ -752,11 +779,15 @@ export class InteriorStage {
         this._raf = requestAnimationFrame((t) => this._frame(t));
         if (this._flight) {
             const f = this._flight, u = Math.min(1, (now - f.t0) / f.dur), e = u * u * (3 - 2 * u);
-            // Interpolate DIRECTION and log-distance (a straight chord dives through the planet).
-            const a = f.from.clone().normalize(), z = f.to.clone().normalize();
-            const dir = a.lerp(z, e).normalize();
-            const dist = Math.exp(Math.log(f.from.length()) * (1 - e) + Math.log(f.to.length()) * e);
-            this.camera.position.copy(dir.multiplyScalar(dist));
+            // The target moves linearly; the camera's OFFSET from it interpolates DIRECTION and
+            // log-distance (a straight chord dives through the planet).
+            const fromT = f.fromT ?? new THREE.Vector3(), toT = f.toT ?? new THREE.Vector3();
+            const tgt = fromT.clone().lerp(toT, e);
+            const oa = f.from.clone().sub(fromT), oz = f.to.clone().sub(toT);
+            const dir = oa.clone().normalize().lerp(oz.clone().normalize(), e).normalize();
+            const dist = Math.exp(Math.log(oa.length()) * (1 - e) + Math.log(oz.length()) * e);
+            this.controls.target.copy(tgt);
+            this.camera.position.copy(tgt).add(dir.multiplyScalar(dist));
             if (u >= 1) this._flight = null;
         }
         this.controls.update();

@@ -167,6 +167,8 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ei-fkey-ends { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; color: var(--ei-muted); }
 .ei-fnote { flex-basis: 100%; font-size: 11px; color: var(--ei-muted); margin: 0; }
 .ei-pfam { display: flex; gap: 4px 12px; flex-wrap: wrap; } .ei-pfam i, .ei-sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.ei-select { font: 600 13px/1 system-ui, sans-serif; color: var(--ei-text); background: #0f1a2e; border: 1px solid var(--ei-line); border-radius: 7px; padding: 7px 8px; max-width: 100%; }
+.ei-slabel { color: #f2c6ff; font-weight: 500; font-size: 10.5px; letter-spacing: .04em; opacity: .85; }
 .ei-plabel { color: #e6ecf5; font-weight: 600; font-size: 11.5px; letter-spacing: .03em; opacity: .9; }
 .ei-fchart, .ei-dachart { width: 100%; max-width: 640px; height: auto; display: block; margin: 4px 0; }
 .ei-fc-line { fill: none; stroke: #6aa9f0; stroke-width: 2; } .ei-fc-line.is-forecast { stroke: #f2c14e; stroke-dasharray: 5 4; }
@@ -272,8 +274,9 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         </div>
         <div class="ei-overlay ei-ponly" id="ei-platehud" aria-live="polite"><b>Tectonic plates</b><span>Loading…</span></div>
         <div class="ei-overlay ei-dock ei-ponly" id="ei-platebar">
-            <div class="ei-tb-row" role="group" aria-label="Velocity frame"><span class="ei-olabel">Arrows</span><button type="button" class="ei-chip" data-pframe="nnr" title="No-net-rotation: the frame in which the lithosphere as a whole does not spin">No net rotation</button><button type="button" class="ei-chip" data-pframe="pacific" title="Bird's own frame: the Pacific plate held still">Pacific fixed</button><button type="button" class="ei-chip" id="ei-parrows" aria-pressed="true">Show</button></div>
+            <div class="ei-tb-row" role="group" aria-label="Velocity frame"><span class="ei-olabel">Arrows</span><button type="button" class="ei-chip" data-pframe="nnr" title="No-net-rotation: the frame in which the lithosphere as a whole does not spin">No net rotation</button><button type="button" class="ei-chip" data-pframe="pacific" title="Bird's own frame: the Pacific plate held still">Pacific fixed</button><button type="button" class="ei-chip" id="ei-parrows" aria-pressed="true">Show</button><button type="button" class="ei-chip" id="ei-pinside" aria-pressed="true" title="Turn the crust to glass and follow the plates down: USGS Slab2's subducting slabs, the 660 km transition zone, and today's earthquakes at their true depth">Inside: slabs + quakes</button></div>
             <div class="ei-tb-row" role="group" aria-label="Boundary colour"><span class="ei-olabel">Boundaries by</span><button type="button" class="ei-chip" data-pcolor="kind">What they do</button><button type="button" class="ei-chip" data-pcolor="age">Seafloor age</button></div>
+            <div class="ei-tb-row"><select id="ei-psection" class="ei-select" disabled aria-label="Cut the globe across a subducting slab"><option value="">Loading Slab2…</option></select></div>
             <div class="ei-fkeys" id="ei-pkeys"></div>
             <p class="ei-fnote" id="ei-parrowkey"></p>
         </div>
@@ -321,7 +324,8 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
             <h2 id="ei-plates-h">Tectonic plates and the ocean floor</h2>
             <p><span id="ei-pstatus" class="ei-status">Open the Plates view to load PB2002.</span></p>
             <div id="ei-ppanel"></div>
-            <p class="ei-muted ei-small">Plates and boundaries: Bird (2003), <i>An updated digital model of plate boundaries</i>, G³ 4(3) 1027 — 52 plates, each moving as a rigid cap about its Euler pole (relative to the Pacific in the paper). We reproduce Bird's published relative velocity at all 5,819 boundary steps from those poles. The no-net-rotation frame is computed here as the area-weighted mean rotation of the plates (its Pacific pole agrees with the published NNR-NUVEL-1A to 0.2°). Rigid plates are a model: the orogens (Himalaya–Tibet, the Andes, the Aegean…) deform inside, and Bird flags them. Seafloor ages and depths along the boundaries are Müller et al. (1997) and ETOPO5 as tabulated by Bird. Data via fraxen/tectonicplates (ODC-By 1.0; credit Peter Bird, Hugo Ahlenius / Nordpil).</p>
+            <div id="ei-pslabs"></div>
+            <p class="ei-muted ei-small">Plates and boundaries: Bird (2003), <i>An updated digital model of plate boundaries</i>, G³ 4(3) 1027 — 52 plates, each moving as a rigid cap about its Euler pole (relative to the Pacific in the paper). We reproduce Bird's published relative velocity at all 5,819 boundary steps from those poles. The no-net-rotation frame is computed here as the area-weighted mean rotation of the plates (its Pacific pole agrees with the published NNR-NUVEL-1A to 0.2°). Rigid plates are a model: the orogens (Himalaya–Tibet, the Andes, the Aegean…) deform inside, and Bird flags them. Seafloor ages and depths along the boundaries are Müller et al. (1997) and ETOPO5 as tabulated by Bird. Data via fraxen/tectonicplates (ODC-By 1.0; credit Peter Bird, Hugo Ahlenius / Nordpil). Slabs: USGS Slab2 (Hayes et al. 2018, public domain), release 03/01/2018. Earthquakes: the same USGS real-time feed as the live view, drawn at their catalogue depth; true scale, so a 100 km-deep slab sits 1.6 % of the way to the centre.</p>
         </section>
 
         <section class="ei-panel" aria-labelledby="ei-nc-h">
