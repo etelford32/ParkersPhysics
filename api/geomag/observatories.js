@@ -113,6 +113,11 @@ function normalise(payload, id) {
         elevationM: coords && Number.isFinite(Number(coords[2])) ? Number(coords[2]) : null,
         times,
         x: X.map((v) => (Number.isFinite(v) ? v : null)),
+        // Geographic EAST. TIGA uses only x; the geoelectric nowcast
+        // (js/earth-interior/geoelectric-nowcast.js) needs BOTH horizontal
+        // components (E_north ∝ B_east). null when the site sends no Y —
+        // never synthesised from X.
+        y: Array.isArray(pick('Y')) ? pick('Y').map((v) => (Number.isFinite(v) ? v : null)) : null,
     };
 }
 

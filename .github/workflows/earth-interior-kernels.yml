@@ -1,0 +1,142 @@
+# earth-interior-kernels — the Inner Earth model's pure kernels (INNER_EARTH_PLAN.md)
+#
+#   earth-interior-prem.mjs   PREM vs ObsPy's TauP node table (both sides of
+#                             every jump, transcription-slip negative control),
+#                             mass / C/MR² re-integrated independently and
+#                             against the measured Earth (mantle-density-core
+#                             negative control), DA81's printed g and p, the
+#                             jump list; Grayver 2017 σ(r) vs the pinned
+#                             ChaosMagPy file; the 1-D plane-wave impedance vs
+#                             closed forms (half-space, split layer, thin sheet)
+#   earth-interior-geoelectric.mjs  the baked 1-D ground columns (builder --check,
+#                             pins, Quebec vs TPL-007 Table 4), the exact causal
+#                             kernel (half-space closed form + Stehfest on layered
+#                             columns), sign by Poynting flux, sinusoid error
+#                             budget, warm-up, gaps, TPL-007 β ranking, the
+#                             nowcast, and the relay's `y` passthrough
+#   earth-interior-page.mjs   the page model: cutaway texels = the kernels, legend =
+#                             the faces' ramp, profile steps at PREM's jumps, column
+#                             charts = the nowcast's impedance; stage.js source pins
+#                             (map flipY, frame mirror, cut test), the seismic panel
+#   earth-interior-raytrace.mjs  PREM ray tracer (tomography T1): uniform-sphere closed
+#                             form, RK4 eikonal shooting, quadrature on PREM's polynomials,
+#                             dT/dΔ = p, shadow zones + a no-core negative control
+#   earth-interior-phases.mjs every phase from legs (reflections / conversions / depth
+#                             phases / multiples / SKS / Pdiff) vs Fermat mirror paths and
+#                             reciprocity; Clairaut (Maclaurin, Roche); the ellipticity
+#                             correction vs the exact ellipsoid chord and 2-point RK4 shooting
+#   earth-interior-amplitude.mjs phase strengths: Zoeppritz energy conservation at every
+#                             interface type, closed forms, 1/L spreading in a uniform medium,
+#                             PREM t*, structure; station elevation vs the exact raised chord
+#   earth-interior-volcanoes.mjs the quake ↔ volcano proximity join on the REAL GVP catalogue
+#   earth-interior-radiation.mjs the moment-tensor radiation pattern: Box 4.4 vs the fault
+#                             vectors, A&R closed forms, focal-sphere means, nodal planes,
+#                             USE→NED, USGS product parsing, end-to-end |R|/RMS scaling
+#   earth-interior-plates.mjs PB2002: Bird's 5,819 per-step relative velocities reproduced from
+#                             his Euler poles (flipped-sign + swapped-plate controls), the 0.5°
+#                             plate raster partitions the sphere, the NNR frame vs NNR-NUVEL-1A
+#                             (unweighted-mean control), page helpers (arrows, cooling curve)
+#   earth-interior-slabs.mjs USGS Slab2: the 0.2° bake vs Slab2's OWN depth contours (row-flip
+#                             control) and dip grid (no-cos φ control), arc volcanoes ~100 km above
+#                             the slab, quake-vs-slab context, the section plane and mesh
+#   geomag-chaos.mjs          CHAOS-8.1 through igrf.js vs ChaosMagPy (coefficients, SV, B at the
+#                             surface / 500 km / CMB, the baked crustal grid), the forecast vs
+#                             DTU's own extrapolated file, a linear-interpolation SV control
+#   earth-interior-quakes.mjs the live view: USGS parsing, the default pick, the slice, the
+#                             arrivals at the viewer, rays that end AT the viewer, wavefronts
+name: earth-interior-kernels
+
+on:
+  push:
+    paths:
+      - 'earth-interior.html'
+      - 'data/earth-interior/**'
+      - 'scripts/build-ground-models.mjs'
+      - 'scripts/build-chaos.mjs'
+      - 'scripts/build-plates.mjs'
+      - 'scripts/build-slab2.mjs'
+      - 'scripts/slab2-pins.json'
+      - 'tests/geomag-chaos.mjs'
+      - 'tests/fixtures/geomag/**'
+      - 'api/geomag/observatories.js'
+      - 'js/geomag/**'
+      - 'js/frequency-analysis.js'
+      - 'js/earth-interior/**'
+      - 'js/volcano-engine.js'
+      - 'js/earth-volcano-layer.js'
+      - 'data/volcanoes/**'
+      - 'tests/earth-interior-*.mjs'
+      - 'tests/fixtures/earth-interior/**'
+      - '.github/workflows/earth-interior-kernels.yml'
+  pull_request:
+    paths:
+      - 'earth-interior.html'
+      - 'data/earth-interior/**'
+      - 'scripts/build-ground-models.mjs'
+      - 'scripts/build-chaos.mjs'
+      - 'scripts/build-plates.mjs'
+      - 'scripts/build-slab2.mjs'
+      - 'scripts/slab2-pins.json'
+      - 'tests/geomag-chaos.mjs'
+      - 'tests/fixtures/geomag/**'
+      - 'api/geomag/observatories.js'
+      - 'js/geomag/**'
+      - 'js/frequency-analysis.js'
+      - 'js/earth-interior/**'
+      - 'js/volcano-engine.js'
+      - 'js/earth-volcano-layer.js'
+      - 'data/volcanoes/**'
+      - 'tests/earth-interior-*.mjs'
+      - 'tests/fixtures/earth-interior/**'
+      - '.github/workflows/earth-interior-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: earth-interior-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: PREM, conductivity, geoelectric kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: PREM + conductivity
+        run: node tests/earth-interior-prem.mjs
+      - name: ground-model bake is current
+        run: node scripts/build-ground-models.mjs --check
+      - name: geoelectric kernel + nowcast
+        run: node tests/earth-interior-geoelectric.mjs
+      - name: page model (earth-interior.html draws only these numbers)
+        run: node tests/earth-interior-page.mjs
+      - name: seismic ray tracer (tomography T1)
+        run: node tests/earth-interior-raytrace.mjs
+      - name: phases + ellipticity
+        run: node tests/earth-interior-phases.mjs
+      - name: live earthquake model
+        run: node tests/earth-interior-quakes.mjs
+      - name: amplitudes + station elevation
+        run: node tests/earth-interior-amplitude.mjs
+      - name: moment-tensor radiation
+        run: node tests/earth-interior-radiation.mjs
+      - name: quakes near volcanoes
+        run: node tests/earth-interior-volcanoes.mjs
+      - name: CHAOS-8.1 field (vs ChaosMagPy) + bake is current
+        run: |
+          node tests/geomag-chaos.mjs
+          node scripts/build-chaos.mjs --check
+      - name: PB2002 plates (vs Bird's steps) + bake is current
+        run: |
+          node tests/earth-interior-plates.mjs
+          node scripts/build-plates.mjs --check
+      - name: Slab2 slabs (vs Slab2's own contours + dips, arc volcanoes) + bake is current
+        run: |
+          node tests/earth-interior-slabs.mjs
+          node scripts/build-slab2.mjs --check
