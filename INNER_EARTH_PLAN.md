@@ -474,6 +474,66 @@ depth, and "Cut across a slab" opens the live view's wedge along a section (only
 NOT drawn: Slab2's thickness (so "below the slab surface" means inside OR under it)
 and the four overturned slabs' supplementary nodes.
 
+### 8b.1 Limitations (as of 2026-11-19) and next steps
+
+**Not yet verified.** Every frame of the field, plates and slab views was judged on
+SwiftShader (headless Chromium). The shaders are simple (no march, no bloom on these
+layers), but glass-crust blending, the slab strip discard and the hairline iso-depth
+lines have **never been seen on a real GPU** — that is the first check, at 1440 and 390
+px, in Chrome + Safari + Firefox. Watch for: z-fighting between the 660 km shell and
+deep slab tips, the glass crust's alpha order against the slabs, and whether the
+iso-depth hairlines alias at high DPR.
+
+**Field (CHAOS-8.1).**
+- Past 2025.10 the field is a LINEAR forecast along the end-point SV; it drifts from
+  reality at roughly the size of the secular acceleration (a few nT/yr² at the
+  surface). The page says "forecast", but the error grows with every month — a
+  refresh to the next CHAOS release (or a switch to IGRF-14's SV past it) is needed
+  about yearly.
+- The core-surface maps are truncated at n ≤ 13. That is the honest resolution, not
+  the core's: small-scale CMB structure is hidden under the crust and cannot be drawn.
+- The lithosphere is static and only Z, on a 1° grid (n ≤ 185 is ~ 108 km scale) — no
+  B_h, no 0.25° detail.
+- External fields (magnetosphere, ionosphere, induced) are not drawn; TIGA owns those.
+
+**Plates (PB2002).**
+- Bird 2003 is a 2003 model: relative motions are NUVEL-1A-era geological averages
+  (~3 Myr), not today's GNSS velocities. MORVEL (DeMets 2010) / GSRM would be the
+  present-day comparison — licence check first.
+- Bird marks 13 OROGENS where rigid rotation fails; the boundary steps inside them
+  carry the flag (baked), but the velocity arrows there are drawn like any rigid
+  plate's. They should be dimmed or labelled.
+- Seafloor age is only Bird's per-STEP Müller-1997 value at boundaries. The AGE GRID
+  (Seton 2020 / Müller 2016) is still blocked (EarthByte, NOAA, Zenodo unreachable at
+  build time) — the ocean floor away from boundaries is undrawn, not modelled.
+- The Parsons–Sclater curve is a comparison; no plate-cooling fit to our own data.
+
+**Slabs (Slab2).**
+- 0.2° subsample (~22 km): fine for the globe, coarse for a 30 km-wide trench cut.
+  A section could read the native 0.05° grid lazily per slab (~5 MB each).
+- Single-valued surface: Izu–Bonin, Kermadec, Mariana-type overturned tips (dip > 90°)
+  are clipped. Slab thickness is not baked, so "below the slab" means inside OR under.
+- No slab beyond Slab2's coverage (e.g. stagnant slabs in the transition zone, the
+  Farallon remnants) — that is tomography's job (§10), and must not be drawn from Slab2.
+- The section view's camera framing is chosen per slab from its profile; steep
+  slabs (Tonga) still open slightly edge-on — the user can orbit, but it's not ideal.
+
+**Next steps, in the order I'd do them.**
+1. Real-GPU pass on the three views (above) + a `@gpu`-style screenshot baseline.
+2. Browser gate for the plates/slab views (`tests/earth-interior-plates.spec.js`):
+   section open/close round trip, removed-quarter clipping, hypocentre picking, with a
+   negative control (strip discard off ⇒ the wall is hidden).
+3. Present-day plate motion: MORVEL/GSRM comparison arrows beside PB2002, and a
+   GNSS-station layer if a licence-clean feed exists (UNAVCO/EarthScope is CC BY).
+4. Seafloor-age grid: keep trying a licence-clean mirror of Seton 2020; nothing is
+   drawn until one is reachable.
+5. Slab × quake statistics: Wadati–Benioff zone fit per slab from the USGS catalogue
+   (σ of hypocentres about the slab surface) — a second independent check on Slab2.
+6. Native-resolution slab sections, loaded per slab on demand.
+7. CHAOS refresh tooling: `build-chaos.mjs --check` against the next DTU release, and
+   a page banner once the forecast is > 12 months past the data.
+8. Then tomography (§10) — the first thing that can draw what Slab2 cannot.
+
 ## 9. Why operators (what each operator actually gets)
 
 - **Grid / pipeline:** E-field (V/km) now and during a forecast storm at
