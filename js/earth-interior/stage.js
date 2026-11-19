@@ -84,14 +84,18 @@ uniform float uHasLights;
 uniform vec3 uLight;          // the Sun, canonical frame
 uniform float uCutLon0;
 uniform float uCutSpan;
-uniform float uCutMode;     // 0: the octant; 1: the live WEDGE (x·uCutN > 0 AND x·uCutM > 0 removed)
+uniform float uCutMode;     // 0: the octant; 1: the live WEDGE (x·uCutN > 0 AND x·uCutM > 0 removed); 2: no cut
+uniform sampler2D uOverlay;  // a layer's DATA map (equirect, row 0 = north), alpha = its weight
+uniform float uHasOverlay;
 uniform vec3 uCutN;
 uniform vec3 uCutM;
 varying vec3 vDir;
 void main() {
     vec3 n = normalize(vDir);
     vec2 ll = normalToLatLon(n);
-    if (uCutMode > 0.5) {
+    if (uCutMode > 1.5) {
+        // whole globe
+    } else if (uCutMode > 0.5) {
         if (dot(n, uCutN) > 0.0 && dot(n, uCutM) > 0.0) discard;
     } else {
         float d = mod(ll.y - uCutLon0 + 4.0 * GEO_TAU, GEO_TAU);
@@ -106,6 +110,12 @@ void main() {
     if (uHasLights > 0.5) nightC += texture2D(uLights, uv).rgb * vec3(1.0, 0.78, 0.48) * 0.85;
     vec3 c = mix(nightC, dayC, day);
     c += vec3(0.30, 0.12, 0.04) * exp(-mu * mu * 90.0) * 0.35;      // twilight band at the terminator
+    if (uHasOverlay > 0.5) {
+        // A data layer is read, not lit: its colour IS its legend's, with only a gentle day/night
+        // cue (±12 %) so the terminator still tells you where the Sun is.
+        vec4 o = texture2D(uOverlay, normalToUV(n));
+        c = mix(c, o.rgb * (0.88 + 0.12 * day), o.a);
+    }
     gl_FragColor = vec4(c, 1.0);
 }`;
 
@@ -121,9 +131,11 @@ uniform float uBounds[${BOUNDARY_RADII_KM.length}];
 uniform float uProbeR;
 uniform float uShade;
 uniform float uLine;
+uniform float uHole;        // > 0: the faces stop at this radius (a layer draws its own ball inside)
 varying vec3 vPos;
 void main() {
     float r = length(vPos);
+    if (r < uHole) discard;
     vec3 c = texture2D(uRadial, vec2(clamp(r, 0.0, 1.0), 0.5)).rgb * uShade;
     float w = fwidth(r);
     float line = 0.0;
@@ -333,8 +345,10 @@ export class InteriorStage {
                 uMap: { value: null }, uHasMap: { value: 0 }, uLights: { value: null }, uHasLights: { value: 0 }, uLight: { value: light },
                 uCutLon0: { value: CUT_LON0_DEG * Math.PI / 180 }, uCutSpan: { value: CUT_SPAN_DEG * Math.PI / 180 },
                 uCutMode: { value: 0 }, uCutN: { value: new THREE.Vector3(0, 0, 1) }, uCutM: { value: new THREE.Vector3(1, 0, 0) },
+                uOverlay: { value: null }, uHasOverlay: { value: 0 },
             },
         });
+        this._cutNone = false;
         this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 192, 128), this.surfaceMat);
         this.scene.add(this.earth);
 
@@ -391,7 +405,7 @@ export class InteriorStage {
         ].map(({ g, shade }) => {
             const m = new THREE.Mesh(g, new THREE.ShaderMaterial({
                 vertexShader: FACE_VS, fragmentShader: FACE_FS, side: THREE.DoubleSide,
-                uniforms: { uRadial: { value: this.radialTex }, uBounds: { value: bounds }, uProbeR: { value: -1 }, uShade: { value: shade }, uLine: { value: 0.55 } },
+                uniforms: { uRadial: { value: this.radialTex }, uBounds: { value: bounds }, uProbeR: { value: -1 }, uShade: { value: shade }, uLine: { value: 0.55 }, uHole: { value: -1 } },
                 extensions: { derivatives: true },
             }));
             this.scene.add(m);
@@ -500,8 +514,8 @@ export class InteriorStage {
     setSlice(plane, radialTable = null) {
         this.slice = plane;
         const on = !!plane;
-        this.surfaceMat.uniforms.uCutMode.value = on ? 1 : 0;
-        for (const f of this.faces) f.visible = !on;
+        this.surfaceMat.uniforms.uCutMode.value = on ? 1 : this._cutNone ? 2 : 0;
+        for (const f of this.faces) f.visible = !on && !this._cutNone;
         for (const w of this.walls) w.visible = on;
         this.ghost.visible = on;
         for (const d of this.domes) d.visible = on;
@@ -543,8 +557,42 @@ export class InteriorStage {
             const d = (v) => q.x * v[0] + q.y * v[1] + q.z * v[2];
             return d(this.slice.n) > 0 && d(this.slice.e2) > 0;     // the wedge (mirrors SURFACE_FS)
         }
+        if (this._cutNone) return false;
         const lat = Math.asin(Math.max(-1, Math.min(1, q.y))) * 180 / Math.PI, lon = Math.atan2(-q.z, q.x) * 180 / Math.PI;
         return inCut(lat, lon);
+    }
+
+    /** Unsliced: 'octant' (the structure cut) or 'none' (the whole globe — the plates view). */
+    setCut(mode) {
+        this._cutNone = mode === 'none';
+        if (this.slice) return;
+        this.surfaceMat.uniforms.uCutMode.value = this._cutNone ? 2 : 0;
+        for (const f of this.faces) f.visible = !this._cutNone;
+    }
+
+    /** Dim the octant's faces (1 = as the legend; a layer that draws inside the cut lowers it). */
+    setFaceDim(k) {
+        for (const f of this.faces) f.material.uniforms.uShade.value = (f.userData.shade ??= f.material.uniforms.uShade.value) * k;
+    }
+
+    /** The octant's faces stop at radius rKm (null: they run to the centre) — a layer's own ball fills the rest. */
+    setFaceHole(rKm) {
+        const v = Number.isFinite(rKm) ? rKm / R_EARTH_KM : -1;
+        for (const f of this.faces) f.material.uniforms.uHole.value = v;
+    }
+
+    /**
+     * A DATA map on the globe: RGBA bytes, width × height equirect, row 0 = north
+     * (the GEO orientation; flipY false), alpha = how much it covers the map. null removes it.
+     */
+    setSurfaceOverlay(rgba, width, height) {
+        const u = this.surfaceMat.uniforms;
+        u.uOverlay.value?.dispose?.();
+        if (!rgba) { u.uOverlay.value = null; u.uHasOverlay.value = 0; return; }
+        const t = new THREE.DataTexture(rgba, width, height, THREE.RGBAFormat);
+        t.colorSpace = THREE.NoColorSpace; t.flipY = false; t.wrapS = THREE.RepeatWrapping;
+        t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.needsUpdate = true;
+        u.uOverlay.value = t; u.uHasOverlay.value = 1;
     }
 
     /** One-shot flight to look along a direction at a given fill (the TIGA rule: started, never held). */

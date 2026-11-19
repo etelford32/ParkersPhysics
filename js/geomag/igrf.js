@@ -1,5 +1,6 @@
 /**
- * igrf.js — IGRF-14 main-field evaluator, degree 13.
+ * igrf.js — IGRF-14 main-field evaluator, degree 13 (and any higher-degree
+ * coefficient set, e.g. CHAOS-8.1 via js/geomag/chaos.js, at its own stride).
  * ═══════════════════════════════════════════════════════════════════════════
  * THE SINGLE SOURCE OF TRUTH for field evaluation on this page. Every other
  * geomag module imports it. Three separate bugs in the research code that
@@ -88,11 +89,14 @@ export function coeffsAt(year) {
  *
  * ALWAYS allocated at stride NMAX+1 — see trap 1 in the file header. `nmax`
  * only bounds how far the recursion runs, never how much is allocated.
+ * A coefficient set of higher degree (CHAOS: 20 core, 185 lithosphere) passes
+ * its OWN full stride (`strideOf(c)`) — still the full size of the SET, never
+ * the truncation, so trap 1 holds at every degree.
  */
-export function schmidtP(nmax, theta) {
+export function schmidtP(nmax, theta, stride = NMAX + 1) {
     const ct = Math.cos(theta);
     const st = Math.sin(theta);
-    const S = NMAX + 1;                       // ← stride, NOT nmax + 1
+    const S = Math.max(stride, nmax + 1);     // ← stride, NOT nmax + 1
     const P = [];
     const dP = [];
     for (let n = 0; n < S; n++) {
@@ -120,6 +124,15 @@ export function schmidtP(nmax, theta) {
 }
 
 /**
+ * The Legendre stride for a coefficient set: its full size (c.g.length), never
+ * below IGRF's NMAX+1. IGRF sets are exactly NMAX+1, so every IGRF evaluation
+ * is bit-identical to the fixed-stride evaluator this extends.
+ */
+export function strideOf(c) {
+    return Math.max(NMAX + 1, c?.g?.length ?? 0);
+}
+
+/**
  * Field in geocentric spherical components.
  * @param {{g:Array,h:Array}} c   coefficients from coeffsAt()
  * @param {number} nmax           truncation degree (1…13)
@@ -129,10 +142,11 @@ export function schmidtP(nmax, theta) {
  * @returns {{br:number, btheta:number, bphi:number}} nT
  */
 export function fieldGeocentric(c, nmax, r, theta, phi) {
-    const { P, dP } = schmidtP(nmax, theta);
+    const S = strideOf(c);
+    const { P, dP } = schmidtP(nmax, theta, S);
     const st = Math.sin(theta);
-    const cm = new Float64Array(NMAX + 1);
-    const sm = new Float64Array(NMAX + 1);
+    const cm = new Float64Array(S);
+    const sm = new Float64Array(S);
     for (let m = 0; m <= nmax; m++) { cm[m] = Math.cos(m * phi); sm[m] = Math.sin(m * phi); }
 
     let br = 0, bt = 0, bp = 0;
@@ -217,13 +231,14 @@ export function fieldGrid(c, nmax, { nLat = 91, nLon = 181, heightKm = 0 } = {})
         y: new Float64Array(n), z: new Float64Array(n),
     };
 
-    const cm = new Float64Array(NMAX + 1);
-    const sm = new Float64Array(NMAX + 1);
+    const S = strideOf(c);
+    const cm = new Float64Array(S);
+    const sm = new Float64Array(S);
 
     for (let i = 0; i < nLat; i++) {
         const { r, latGc, psi } = geodeticToGeocentric(lats[i], heightKm);
         const theta = (90 - latGc) * DEG;
-        const { P, dP } = schmidtP(nmax, theta);
+        const { P, dP } = schmidtP(nmax, theta, S);
         const st = Math.sin(theta);
         const onAxis = Math.abs(st) <= 1e-10;
         const cp = Math.cos(psi * DEG);
@@ -250,6 +265,51 @@ export function fieldGrid(c, nmax, { nLat = 91, nLon = 181, heightKm = 0 } = {})
             const k = i * nLon + j;
             out.x[k] = x; out.y[k] = bp; out.z[k] = z;
             out.f[k] = Math.sqrt(x * x + bp * bp + z * z);
+        }
+    }
+    return out;
+}
+
+/**
+ * Field on a CELL-CENTRED geocentric grid at one radius (spherical reference,
+ * no ellipsoid): rows from the north, lat = 90 − (i + ½)·180/nLat, lon =
+ * −180 + (j + ½)·360/nLon. Same sums as fieldGeocentric (Legendre reused per
+ * row, at the set's own stride); tests/geomag-chaos.mjs pins it point by point.
+ * The shape a texture wants (texel centres), and the one for the CMB.
+ *
+ * @returns {{br:Float32Array, btheta:Float32Array, bphi:Float32Array, nLat:number, nLon:number}}
+ */
+export function fieldGridGeocentric(c, nmax, { rKm = REF_RADIUS_KM, nLat = 90, nLon = 180 } = {}) {
+    const S = strideOf(c);
+    const n = nLat * nLon;
+    const out = { nLat, nLon, rKm, br: new Float32Array(n), btheta: new Float32Array(n), bphi: new Float32Array(n) };
+    const cmT = [], smT = [];
+    for (let j = 0; j < nLon; j++) {
+        const phi = (-180 + (j + 0.5) * 360 / nLon) * DEG;
+        const cm = new Float64Array(S), sm = new Float64Array(S);
+        for (let m = 0; m <= nmax; m++) { cm[m] = Math.cos(m * phi); sm[m] = Math.sin(m * phi); }
+        cmT.push(cm); smT.push(sm);
+    }
+    const fr = new Float64Array(nmax + 1);
+    for (let d = 1; d <= nmax; d++) fr[d] = Math.pow(REF_RADIUS_KM / rKm, d + 2);
+    for (let i = 0; i < nLat; i++) {
+        const theta = ((i + 0.5) * 180 / nLat) * DEG;          // colatitude of the row centre
+        const { P, dP } = schmidtP(nmax, theta, S);
+        const st = Math.sin(theta);
+        for (let j = 0; j < nLon; j++) {
+            const cm = cmT[j], sm = smT[j];
+            let br = 0, bt = 0, bp = 0;
+            for (let d = 1; d <= nmax; d++) {
+                const f = fr[d];
+                for (let m = 0; m <= d; m++) {
+                    const cc = c.g[d][m] * cm[m] + c.h[d][m] * sm[m];
+                    br += (d + 1) * f * cc * P[d][m];
+                    bt += -f * cc * dP[d][m];
+                    bp += (f * m * (c.g[d][m] * sm[m] - c.h[d][m] * cm[m]) * P[d][m]) / st;
+                }
+            }
+            const k = i * nLon + j;
+            out.br[k] = br; out.btheta[k] = bt; out.bphi[k] = bp;
         }
     }
     return out;

@@ -412,6 +412,49 @@ observatories); (c) 1-second USGS data for the < 10-min band where 1-min samplin
 (d) a UI (the page is P4; a TIGA card is the cheaper first surface — owner's call);
 (e) storm replays (Gannon 2024, Halloween 2003) through the same kernel for the hindcast lab.
 
+## 8b. P2 (field) and the plates, as built (2026-11-19)
+
+**Field — CHAOS-8.1, 1997 → now.** `js/geomag/igrf.js` was EXTENDED, not
+forked: every evaluator takes the coefficient set's own Legendre stride
+(`strideOf(c)` — still the full size of the SET, never the truncation, so trap 1
+holds at degree 20 and 185; IGRF is bit-identical), plus a cell-centred
+geocentric grid (`fieldGridGeocentric`, pinned point-for-point to
+`fieldGeocentric`). `js/geomag/chaos.js` (PURE) turns the SHC samples into
+coefficients: on each break interval the order-6 spline IS one degree-5
+polynomial through exactly 6 samples, so per-interval Lagrange reproduces it;
+SV is its derivative; past the data (2025.10 = early **February** 2025) it is
+the linear forecast along the end-point SV. Gate `tests/geomag-chaos.mjs`
+against ChaosMagPy 0.16 on the same pinned files (fixture by
+`scripts/chaos_oracle.py`; ChaosMagPy's time is MJD2000 and its SV already
+nT/yr — both nearly went in wrong): coefficients 1e-6 nT, SV 6e-5 nT/yr, B at
+the surface 4.5e-3 nT, CMB 6e-6 relative; a linear-interpolation control misses
+SV by 0.21 nT/yr; the forecast equals DTU's own `_extrapolated.shc` to 3e-5 nT.
+The static lithosphere (n 21–185) is baked as a 1° Z grid BY OUR EVALUATOR at
+stride 186 and checked against ChaosMagPy (0.05 nT). Measured: dipole −1.4 %
+1998 → 2025; SAA minimum 54.4° → 59.9° W and 22.9 → 22.1 µT. The page draws B_r
+and ∂B_r/∂t at the CMB at n ≤ 13 (the Lowes crossover; at n ≤ 20 the CMB SV is
+noise-amplified — 4.3 % between the two spline fits, gated at 5 %). It is the
+observed field, NOT a dynamo simulation.
+
+**Plates — Bird PB2002.** Reachable as Bird's ORIGINAL supplement files in
+`fraxen/tectonicplates` @ 339b0c5 `original/` (ODC-By 1.0) — better than the
+CC BY-SA derivative §11 listed. `scripts/build-plates.mjs` bakes the 52 Euler
+poles (relative to the Pacific), a 0.5° plate raster by SPHERICAL WINDING in
+the closed CCW outlines (0 overlaps, 0 orphans), and all 5,819 boundary steps
+with Bird's tabulated Müller-1997 seafloor age and ETOPO5 depth.
+`js/earth-interior/plates.js` (PURE): rigid rotation, relative motion split
+into opening / right-lateral against the step azimuth, and the NO-NET-ROTATION
+frame solved on the raster's own moment (residual 0). Gate
+`tests/earth-interior-plates.mjs`: Bird's own per-step velocities for all 5,819
+steps (speed ≤ 0.07 mm/a, azimuth ≤ 0.51°; the right-lateral SIGN was written
+backwards first and the gate caught it; flipped-sign and swapped-plate controls
+fail); NNR Pacific pole −63.23° 107.69° 0.649°/Ma vs NNR-NUVEL-1A −63.04°
+107.33° 0.6411 (an unweighted-mean control fails). The ocean-floor panel
+compares Bird's transform-fault depths with the Parsons & Sclater (1977)
+cooling curve — a comparison, not a fit (fracture zones are not a random
+sample). **Seafloor-age GRID (Seton 2020) is still blocked**: EarthByte,
+NOAA, Zenodo all unreachable; no licence-clean GitHub copy found.
+
 ## 9. Why operators (what each operator actually gets)
 
 - **Grid / pipeline:** E-field (V/km) now and during a forecast storm at
@@ -553,9 +596,9 @@ canonical page before shipping.
 | NOAA ETOPO 2022 / GEBCO | relief and bathymetry for the column top | (blocked) | A / B | public domain / GEBCO attribution |
 | EGM2008 | geoid + gravity (P5) | NGA (blocked); `flightaware/egm2008` BSD-3 † derived grid as a stopgap | A | NGA unlimited distribution |
 | SCEC CFM 7.0 (incl. preliminary N/central CA, flagged) | CA faults | `harvardvizlab/cfm7-fault-explorer` | B | BSD-3 † — keep the notice |
-| CHAOS-8.1 | field | ESA-VirES mirror | B | DTU: free with citation (confirm terms page) |
+| CHAOS-8.1 | field — BAKED (§8b) | ESA-VirES mirror @ 6aa2d4f | B | DTU: free with citation (confirm terms page) |
 | GEM Global Active Faults | world faults | `cossatot/gem-global-active-faults` @ `5681650` (10.6 MB geojson) | B | **CC BY-SA 4.0** † — our baked derivative must be published CC BY-SA too (fine; the app code is unaffected) |
-| PB2002 plates (Bird 2003) | plate boundaries | `liveatlasearth/tectonic-plates-and-faults` (CC BY-SA 4.0 †, a derivative) | B | prefer Bird's original file; cite |
+| PB2002 plates (Bird 2003) | plate boundaries, poles, steps — BAKED (§8b) | Bird's original supplement files in `fraxen/tectonicplates` @ 339b0c5 `original/` (ODC-By 1.0 †) | B | credit Peter Bird and Hugo Ahlenius / Nordpil; cite Bird 2003 |
 | Seafloor age (Seton et al. 2020) | lithosphere age → thickness | EarthByte (blocked) | B | CC BY 4.0 |
 | Global Heat Flow Database (IHFC) | surface heat flow | GFZ (blocked); `ihfc-iugg/ghfdb-portal` is CODE (MIT) | B | CC BY 4.0 (release data) |
 | CRUST1.0 | crust | `jrleeman/Crust1.0` (MIT applies to the PYTHON; the model files carry no licence) | **C** | **ask Laske et al.** — blocks P1's crust term until answered (P1 can run with a stated generic crust meanwhile) |

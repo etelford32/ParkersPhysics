@@ -54,11 +54,11 @@ body { margin: 0; background: #05080f; color: var(--ei-text); font: 15px/1.5 sys
 #ei-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 /* Live view: a taller stage, and the clock DOCKED under the canvas (it used to sit over the globe).
    --ei-bar-h is MEASURED from the dock by page.js; the canvas and the probe clear it by that number. */
-#ei-stage.is-quakes { height: clamp(600px, 82vh, 940px); }
+#ei-stage.is-docked { height: clamp(600px, 82vh, 940px); }
 /* An explicit height: a <canvas> is a REPLACED element, so height:auto between top and bottom gives its
    intrinsic height (measured on a phone: the globe filled the top third of the stage). */
-#ei-stage.is-quakes #ei-canvas, #ei-stage.is-quakes #ei-labels { height: calc(100% - var(--ei-bar-h, 64px)); }
-#ei-stage.is-quakes #ei-probe { bottom: calc(var(--ei-bar-h, 64px) + 12px); width: min(300px, calc(100% - 24px)); font-size: 12px; opacity: .92; }
+#ei-stage.is-docked #ei-canvas, #ei-stage.is-docked #ei-labels { height: calc(100% - var(--ei-bar-h, 64px)); }
+#ei-stage.is-docked #ei-probe { bottom: calc(var(--ei-bar-h, 64px) + 12px); width: min(300px, calc(100% - 24px)); font-size: 12px; opacity: .92; }
 #ei-canvas:active { cursor: grabbing; }
 #ei-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ei-mlabel { position: absolute; left: 0; top: 0; font: 600 11px/1 system-ui, sans-serif; color: #fff; text-shadow: 0 0 3px #000, 0 0 6px #000; white-space: nowrap; }
@@ -152,8 +152,28 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ei-layerlab { fill: #c3c2b7; font-size: 11px; opacity: .8; }
 .ei-seis-foot { font-size: 12px; margin: 8px 0 0; }
 .ei-seis-foot code { font-size: 11px; }
-#ei-stage.is-quakes #ei-qbox, #ei-stage.is-quakes #ei-legend { display: none; }
-#ei-stage:not(.is-quakes) .ei-qonly { display: none; }
+#ei-stage.is-docked #ei-qbox, #ei-stage.is-docked #ei-legend { display: none; }
+#ei-stage:not(.is-quakes) .ei-qonly, #ei-stage:not(.is-field) .ei-fonly, #ei-stage:not(.is-plates) .ei-ponly { display: none; }
+/* The magnetic-field and plates views: a HUD top-left (the quake HUD's place) and a dock like the clock's. */
+#ei-fieldhud, #ei-platehud { top: 12px; left: 12px; width: min(440px, calc(100% - 24px)); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+#ei-fieldhud span, #ei-platehud span { color: var(--ei-text-2); }
+.ei-ftag { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #9ec5f4 !important; }
+.ei-ftag.is-forecast { color: #f2c14e !important; }
+.ei-dock { left: 0; right: 0; bottom: 0; border-radius: 0; border-width: 1px 0 0; padding: 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; background: rgba(8, 14, 26, .96); backdrop-filter: none; }
+#ei-fyear { flex: 1 1 260px; min-width: 200px; accent-color: #3987e5; }
+.ei-fkeys { display: flex; gap: 8px 18px; flex-wrap: wrap; font-size: 11px; color: var(--ei-text-2); }
+.ei-fkey { display: grid; grid-template-columns: auto; gap: 2px; min-width: 190px; }
+.ei-fkey i { display: block; height: 8px; border-radius: 2px; border: 1px solid #2c3a55; }
+.ei-fkey-ends { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; color: var(--ei-muted); }
+.ei-fnote { flex-basis: 100%; font-size: 11px; color: var(--ei-muted); margin: 0; }
+.ei-pfam { display: flex; gap: 4px 12px; flex-wrap: wrap; } .ei-pfam i, .ei-sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.ei-plabel { color: #e6ecf5; font-weight: 600; font-size: 11.5px; letter-spacing: .03em; opacity: .9; }
+.ei-fchart, .ei-dachart { width: 100%; max-width: 640px; height: auto; display: block; margin: 4px 0; }
+.ei-fc-line { fill: none; stroke: #6aa9f0; stroke-width: 2; } .ei-fc-line.is-forecast { stroke: #f2c14e; stroke-dasharray: 5 4; }
+.ei-fc-band { fill: #f2c14e; opacity: .07; }
+.ei-da-pt { fill: #7fd1b9; opacity: .35; } .ei-da-bin { fill: none; stroke: #ffffff; stroke-width: 1.6; } .ei-da-curve { fill: none; stroke: #f2c14e; stroke-width: 2; }
+.ei-pgrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 1100px) { .ei-pgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 #ei-views .ei-btn[aria-pressed="true"] { color: #fff; background: #1c5cab; border-color: #3987e5; }
 #ei-quakehud { top: 12px; left: 12px; width: min(420px, calc(100% - 24px)); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 #ei-quakehud span { color: var(--ei-text-2); }
@@ -195,16 +215,23 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     #ei-views { top: auto; right: 8px; bottom: 104px; padding: 4px; }
     #ei-legend { left: 8px; right: 8px; bottom: 8px; width: auto; padding: 6px 8px; }
     #ei-probe { display: none; }
-    #ei-stage.is-quakes { height: 600px; }
+    #ei-stage.is-docked { height: 600px; }
     #ei-quakehud { left: 8px; right: 8px; top: 8px; width: auto; padding: 6px 8px; font-size: 12px; }
     #ei-quakehud span:last-child:empty { display: none; }
     #ei-timebar { padding: 8px 10px; gap: 6px 10px; }
     #ei-timebar .ei-chip { padding: 6px 8px; font-size: 12px; min-width: 0; }
     .ei-tlabel { min-width: 0; }
     #ei-timebar .ei-qlegend .ei-muted { display: none; }
-    #ei-stage.is-quakes #ei-views { top: auto; left: 8px; right: 8px; bottom: calc(var(--ei-bar-h, 64px) + 8px); justify-content: center; }
+    #ei-stage.is-docked #ei-views { top: auto; left: 8px; right: 8px; bottom: calc(var(--ei-bar-h, 64px) + 8px); justify-content: center; }
     .ei-mlabel--layer { display: none !important; }
     #ei-views .ei-btn { padding: 6px 8px; font-size: 12px; }
+    #ei-views { flex-wrap: wrap; justify-content: center; }
+    #ei-stage.is-field, #ei-stage.is-plates { height: 720px; }
+    #ei-fieldhud, #ei-platehud { left: 8px; right: 8px; top: 8px; width: auto; font-size: 12px; padding: 6px 8px; }
+    .ei-dock { padding: 8px 10px; gap: 6px 10px; }
+    .ei-dock .ei-chip { padding: 6px 8px; font-size: 12px; min-width: 0; }
+    .ei-fnote { display: none; }
+    .ei-fkey { min-width: 140px; }
 }
 </style>
 </head>
@@ -216,23 +243,39 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 <header class="ei-wrap ei-hero">
     <h1>Inner Earth</h1>
-    <span class="ei-badge">Live earthquakes · structure · geoelectric field</span>
+    <span class="ei-badge">Live earthquakes · structure · magnetic field · plates · geoelectric field</span>
     <p>Earth at true radii, in real time: today's earthquakes from USGS with their seismic waves crossing the planet toward
        your location — traced through PREM, ellipticity corrected — plus mantle conductivity from Grayver et al. (2017) and the
        surface electric field geomagnetic activity drives through the ground at USGS observatories.</p>
 </header>
 
 <main id="main-content" class="ei-wrap">
-    <section id="ei-stage" class="is-quakes" aria-label="Earth's interior, live">
+    <section id="ei-stage" class="is-quakes is-docked" aria-label="Earth's interior, live">
         <canvas id="ei-canvas" aria-label="3D cutaway of Earth's interior. Drag to rotate, scroll to zoom."></canvas>
         <div id="ei-labels" aria-hidden="true"></div>
         <div class="ei-overlay" id="ei-qbox"><span class="ei-olabel">Cut faces show</span><div id="ei-qchips" role="group" aria-label="Quantity on the cut faces"></div></div>
-        <div class="ei-overlay" id="ei-views" role="group" aria-label="Stage view"><button type="button" class="ei-btn" data-view="quakes" aria-pressed="true">Earthquakes · live</button><button type="button" class="ei-btn" data-view="cutaway" aria-pressed="false">Structure</button><button type="button" class="ei-btn" data-view="observatories" aria-pressed="false">Observatories</button></div>
+        <div class="ei-overlay" id="ei-views" role="group" aria-label="Stage view"><button type="button" class="ei-btn" data-view="quakes" aria-pressed="true">Earthquakes · live</button><button type="button" class="ei-btn" data-view="cutaway" aria-pressed="false">Structure</button><button type="button" class="ei-btn" data-view="field" aria-pressed="false">Magnetic field</button><button type="button" class="ei-btn" data-view="plates" aria-pressed="false">Plates</button><button type="button" class="ei-btn" data-view="observatories" aria-pressed="false">Observatories</button></div>
         <div class="ei-overlay ei-qonly" id="ei-quakehud" aria-live="polite"><b>Earthquakes</b><span>Waiting for the USGS feed…</span></div>
         <div class="ei-overlay ei-qonly" id="ei-timebar">
             <div class="ei-tb-row" role="group" aria-label="Clock"><button type="button" class="ei-chip" data-clock="live" aria-pressed="true">Live</button><button type="button" class="ei-chip" data-clock="1">Replay ×1</button><button type="button" class="ei-chip" data-clock="10">×10</button><button type="button" class="ei-chip" data-clock="60">×60</button><span id="ei-tlabel" class="ei-tlabel">—</span><button type="button" class="ei-chip" id="ei-3d" aria-pressed="true" title="Show each wavefront as the 3-D surface it is: the slice curve revolved about the epicentre axis (PREM is spherically symmetric)">3D fronts</button><button type="button" class="ei-chip" id="ei-vtoggle" aria-pressed="true" title="The world's active volcanoes on the globe (GVP catalogue, live status from USGS + NASA EONET)">▲ Volcanoes</button></div>
             <input id="ei-tscrub" type="range" min="0" max="3600" step="1" value="0" aria-label="Seconds after the origin">
             <div class="ei-qlegend"><span><i style="background:#3987e5"></i>P wave</span><span><i style="background:#d95926"></i>S wave</span><span><i class="ei-dash"></i>reflected / bounced</span><span><i id="ei-dens-key" class="ei-dens"></i><span id="ei-dens-label">cut colour = density (PREM)</span></span><span class="ei-muted">bright curves = where each wave is now, fading = 10/20/30 s ago · comets = the waves heading to you</span></div>
+        </div>
+        <div class="ei-overlay ei-fonly" id="ei-fieldhud" aria-live="polite"><b>Magnetic field</b><span>Loading CHAOS-8.1…</span></div>
+        <div class="ei-overlay ei-dock ei-fonly" id="ei-fieldbar">
+            <div class="ei-tb-row" role="group" aria-label="Field time"><button type="button" class="ei-chip" id="ei-fplay" aria-pressed="false" title="Play 1997 → today">▶ 1997 → now</button><button type="button" class="ei-chip" id="ei-fnow">Today</button><span id="ei-flabel" class="ei-tlabel">—</span></div>
+            <input id="ei-fyear" type="range" min="1997.1" max="2026.9" step="0.01" value="2026.9" aria-label="Year">
+            <div class="ei-tb-row" role="group" aria-label="Core shows"><span class="ei-olabel">Core</span><button type="button" class="ei-chip" data-fcore="cmb-br">B_r</button><button type="button" class="ei-chip" data-fcore="cmb-sv">Change / yr</button>
+                <span class="ei-olabel">&nbsp;Surface</span><button type="button" class="ei-chip" data-fsurf="surf-f">|B|</button><button type="button" class="ei-chip" data-fsurf="surf-crust">Crust</button><button type="button" class="ei-chip" data-fsurf="none">Map</button></div>
+            <div class="ei-fkeys" id="ei-fkeys"></div>
+            <p class="ei-fnote" id="ei-fnote"></p>
+        </div>
+        <div class="ei-overlay ei-ponly" id="ei-platehud" aria-live="polite"><b>Tectonic plates</b><span>Loading…</span></div>
+        <div class="ei-overlay ei-dock ei-ponly" id="ei-platebar">
+            <div class="ei-tb-row" role="group" aria-label="Velocity frame"><span class="ei-olabel">Arrows</span><button type="button" class="ei-chip" data-pframe="nnr" title="No-net-rotation: the frame in which the lithosphere as a whole does not spin">No net rotation</button><button type="button" class="ei-chip" data-pframe="pacific" title="Bird's own frame: the Pacific plate held still">Pacific fixed</button><button type="button" class="ei-chip" id="ei-parrows" aria-pressed="true">Show</button></div>
+            <div class="ei-tb-row" role="group" aria-label="Boundary colour"><span class="ei-olabel">Boundaries by</span><button type="button" class="ei-chip" data-pcolor="kind">What they do</button><button type="button" class="ei-chip" data-pcolor="age">Seafloor age</button></div>
+            <div class="ei-fkeys" id="ei-pkeys"></div>
+            <p class="ei-fnote" id="ei-parrowkey"></p>
         </div>
         <div class="ei-overlay" id="ei-legend"></div>
         <div class="ei-overlay" id="ei-probe" aria-live="polite"></div>
@@ -265,6 +308,20 @@ table.ei-table { width: 100%; border-collapse: collapse; font-size: 13px; }
             </div>
             <p class="ei-muted ei-small">Volcanoes: the Smithsonian GVP catalogue (status classes and eruption odds from the same engine as Earth Volcanoes) with today's status from USGS HANS aviation colour codes and NASA EONET open events, refreshed every 30 min. An earthquake is tagged ▲ near a volcano when its epicentre is within 30 km of a Holocene volcano and it is shallower than 40 km — a proximity flag, not a finding that the earthquake is volcanic. The globe shows the active group; the wedge cut for the selected earthquake hides the volcanoes over it.</p>
             <p class="ei-muted ei-small">Source: USGS real-time GeoJSON (M2.5+ past day every minute, M4.5+ past week every 10 min), the catalogue's own location and depth — revised as events are reviewed. Times are ray theory in PREM with ellipticity and station elevation corrected (elevation from Terrain Tiles via our DEM route; the extra layer is PREM's upper crust, 5.8 / 3.2 km/s). Strength is the ray-theory displacement amplitude — geometric spreading, every interface's Zoeppritz energy coefficient, PREM's own attenuation (P at 1 Hz, S at 0.2 Hz) and the event's own radiation pattern — its USGS moment tensor (or focal mechanism) evaluated where each ray leaves the focus, as a point source — ranked within each band. Until USGS publishes a mechanism the focal sphere's average is used and the panel says so. There is no site response, directivity or 3-D structure. Not an alert service.</p>
+        </section>
+
+        <section class="ei-panel ei-span" aria-labelledby="ei-field-h">
+            <h2 id="ei-field-h">The magnetic field, 1997 → now</h2>
+            <p><span id="ei-fstatus" class="ei-status">Open the Magnetic field view to load CHAOS-8.1.</span></p>
+            <div id="ei-fcharts"></div>
+            <p class="ei-muted ei-small">CHAOS-8.1 (Finlay, Kloss, Olsen et al., DTU Space): a spherical-harmonic model of the field built from the Swarm, CHAMP and Ørsted satellites and the ground observatories, with the core field up to degree 20 as a spline in time. We evaluate it with the same field code as TIGA, checked against DTU's own ChaosMagPy to 10⁻⁶ nT. On the core it is continued down to 3,480 km at degree ≤ 13 — exact for a potential field through an insulating mantle, but it amplifies small scales so much that, past degree 13, the crust's signal and the model's noise take over. Past the last data (early February 2025, decimal year 2025.10) the model's own linear forecast is drawn, dashed and labelled. This is the observed field, not a dynamo simulation: nothing here models the flow that makes it.</p>
+        </section>
+
+        <section class="ei-panel ei-span" aria-labelledby="ei-plates-h">
+            <h2 id="ei-plates-h">Tectonic plates and the ocean floor</h2>
+            <p><span id="ei-pstatus" class="ei-status">Open the Plates view to load PB2002.</span></p>
+            <div id="ei-ppanel"></div>
+            <p class="ei-muted ei-small">Plates and boundaries: Bird (2003), <i>An updated digital model of plate boundaries</i>, G³ 4(3) 1027 — 52 plates, each moving as a rigid cap about its Euler pole (relative to the Pacific in the paper). We reproduce Bird's published relative velocity at all 5,819 boundary steps from those poles. The no-net-rotation frame is computed here as the area-weighted mean rotation of the plates (its Pacific pole agrees with the published NNR-NUVEL-1A to 0.2°). Rigid plates are a model: the orogens (Himalaya–Tibet, the Andes, the Aegean…) deform inside, and Bird flags them. Seafloor ages and depths along the boundaries are Müller et al. (1997) and ETOPO5 as tabulated by Bird. Data via fraxen/tectonicplates (ODC-By 1.0; credit Peter Bird, Hugo Ahlenius / Nordpil).</p>
         </section>
 
         <section class="ei-panel" aria-labelledby="ei-nc-h">

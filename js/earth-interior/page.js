@@ -56,6 +56,10 @@ function renderQuantityChips() {
 
 function renderProbe(hit) {
     const box = $('#ei-probe');
+    // The field / plates views read their own quantities under the pointer.
+    const own = state.layer?.probe?.(hit);
+    if (own) { box.innerHTML = own; setProbeDepth(null); return; }
+    if (!hit && state.layer) { box.innerHTML = `<span class="ei-muted">${state.layer === state.field ? 'Hover the core or the globe to read the field' : 'Hover the globe: plate, velocity, nearest boundary'}</span>`; setProbeDepth(null); return; }
     if (!hit) { box.innerHTML = `<span class="ei-muted">${$('#ei-stage')?.classList.contains('is-quakes') ? 'Hover the slice for the structure at any depth · click a dot to show that earthquake' : 'Hover the cut faces for the column at any depth · click a station'}</span>`; setProbeDepth(null); return; }
     if (hit.kind === 'interior') {
         const p = probeAt(hit.rKm);
@@ -470,16 +474,37 @@ async function boot() {
     // The LIVE earthquake view is the stage's default mode; its panels work without WebGL too.
     const { mountLiveQuakes } = await import('./live-quakes.js');
     state.live = mountLiveQuakes({ stage: state.stage });
+    // The magnetic field (CHAOS-8.1) and plate (PB2002) views: each loads its data on first open.
+    const [{ mountField }, { mountPlates }] = await Promise.all([import('./field-layer.js'), import('./plates-layer.js')]);
+    state.field = mountField({ stage: state.stage });
+    state.plates = mountPlates({ stage: state.stage });
     const setMode = (view) => {
         document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
-        $('#ei-stage').classList.toggle('is-quakes', view === 'quakes');
+        const st = $('#ei-stage');
+        st.classList.toggle('is-quakes', view === 'quakes');
+        st.classList.toggle('is-field', view === 'field');
+        st.classList.toggle('is-plates', view === 'plates');
+        st.classList.toggle('is-docked', view === 'quakes' || view === 'field' || view === 'plates');
+        // Leave the old view first (each restores the cut it changed), then enter the new one.
+        if (view !== 'field') state.field.setActive(false);
+        if (view !== 'plates') state.plates.setActive(false);
         state.live.setActive(view === 'quakes');
-        if (view !== 'quakes') state.stage?.setView(view);
+        state.layer = view === 'field' ? state.field : view === 'plates' ? state.plates : null;
+        if (view === 'field') state.field.setActive(true);
+        else if (view === 'plates') state.plates.setActive(true);
+        else if (view !== 'quakes') state.stage?.setView(view);
+        syncBar();
+        renderProbe(null);
     };
     document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.view)));
     // The clock dock's MEASURED height is what the canvas clears (never a constant: it wraps).
-    const bar = $('#ei-timebar');
-    if (bar) new ResizeObserver(() => $('#ei-stage').style.setProperty('--ei-bar-h', `${Math.ceil(bar.getBoundingClientRect().height)}px`)).observe(bar);
+    const docks = ['#ei-timebar', '#ei-fieldbar', '#ei-platebar'].map((q) => $(q)).filter(Boolean);
+    function syncBar() {
+        const h = Math.max(0, ...docks.map((d) => d.getBoundingClientRect().height));     // only the shown dock has a height
+        $('#ei-stage').style.setProperty('--ei-bar-h', `${Math.ceil(h)}px`);
+    }
+    const dockRo = new ResizeObserver(syncBar);
+    for (const d of docks) dockRo.observe(d);
     // Safe insets: chrome that crosses the CENTRAL 40–60 % of the canvas width covers the globe's
     // column, so its height is cleared (a phone's full-width HUD); corner panels do not count.
     const measureInsets = () => {
@@ -488,7 +513,7 @@ async function boot() {
         let top = 0, bottom = 0;
         for (const el of document.querySelectorAll('#ei-stage .ei-overlay')) {
             const r = el.getBoundingClientRect();
-            if (!r.width || !r.height || r.right < x0 || r.left > x1 || el.id === 'ei-timebar') continue;
+            if (!r.width || !r.height || r.right < x0 || r.left > x1 || el.classList.contains('ei-dock') || el.id === 'ei-timebar') continue;
             const mid = (r.top + r.bottom) / 2;
             if (mid < c.top + c.height / 2) top = Math.max(top, r.bottom - c.top + 6);
             else bottom = Math.max(bottom, c.bottom - r.top + 6);
@@ -498,7 +523,7 @@ async function boot() {
     const ro = new ResizeObserver(measureInsets);
     document.querySelectorAll('#ei-stage .ei-overlay, #ei-canvas').forEach((el) => ro.observe(el));
     setMode('quakes');
-    window.__earthInterior = { state, stage: state.stage, live: state.live };
+    window.__earthInterior = { state, stage: state.stage, live: state.live, field: state.field, plates: state.plates, setMode };
     let rt = null;
     new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(renderProfile, 150); }).observe($('#ei-profile'));
     await refreshNowcast();

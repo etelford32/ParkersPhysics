@@ -167,7 +167,7 @@ ok(`every texel of all ${QUANTITY_KEYS.length} cutaway tables = the kernel at it
     assert.match(stage, /vW = \(modelMatrix \* vec4\(position, 1\.0\)\)\.xyz/, 'the atmosphere annulus is rotated: its impact parameter needs the WORLD position (local drew a straight streak)');
     assert.match(stage, /subSolarPoint/, 'the globe is lit by the site\'s existing sub-solar function, not a new one');
     assert.match(fx, /import \{ SANITIZE_GLSL, sanitizeBloomInput, roundBloomKernels \} from '\.\.\/launch-scene-fx\.js'/, 'ONE copy of the NaN sanitizer (the black-stage scar)');
-    assert.match(html, /#ei-canvas, #ei-stage\.is-quakes #ei-labels \{ height: calc\(100% - var\(--ei-bar-h/, 'a <canvas> is a replaced element: height:auto between top/bottom takes its intrinsic height');
+    assert.match(html, /#ei-canvas, #ei-stage\.is-docked #ei-labels \{ height: calc\(100% - var\(--ei-bar-h/, 'a <canvas> is a replaced element: height:auto between top/bottom takes its intrinsic height (every DOCKED view: quakes, field, plates)');
     assert.match(stage, /if \(dot\(n, uCutN\) > 0\.0 && dot\(n, uCutM\) > 0\.0\) discard;/, 'the live cut is a WEDGE (both half-spaces)');
     assert.match(stage, /return d\(this\.slice\.n\) > 0 && d\(this\.slice\.e2\) > 0;/, 'isCut mirrors the shader wedge (picking and the surface-quake filter depend on it)');
     assert.match(stage, /this\.surfaceMat\.uniforms\.uCutM\.value\.copy\(e2\)/, 'the wedge\'s second wall is the plane through the epicentre axis (normal ê₂)');

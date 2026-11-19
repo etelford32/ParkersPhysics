@@ -117,7 +117,10 @@ export class SeismicLayer {
         this.epi = additiveSprite(burstTexture(), 0xffffff);
         this.pulse = additiveSprite(ringTexture(), 0xff7a3d);
         this.site = additiveSprite(ringTexture(), 0xffffff);
-        for (const s of [this.epi, this.pulse, this.site]) { s.renderOrder = 6; this.group.add(s); }
+        // Hidden until a quake is set: the sprites start at the ORIGIN, which the cut exposes at the
+        // crease, and an additive burst there bloomed into a star over the whole stage whenever the
+        // feed had no earthquake to show (measured 2026-11-19, the empty-feed state).
+        for (const s of [this.epi, this.pulse, this.site]) { s.renderOrder = 6; s.visible = false; this.group.add(s); }
         this.otherList = [];
 
         this.labels = {};
@@ -133,13 +136,17 @@ export class SeismicLayer {
 
     setVisible(on) {
         this.group.visible = on;
-        for (const l of Object.values(this.labels)) l.style.display = on ? '' : 'none';
-        for (const l of this.layerLabels) l.el.style.display = on ? '' : 'none';
+        // Labels only once a quake is placed: unplaced, they all sat at the stage's top-left corner.
+        const show = on && !!this.state;
+        for (const l of Object.values(this.labels)) l.style.display = show ? '' : 'none';
+        for (const l of this.layerLabels) l.el.style.display = show ? '' : 'none';
     }
 
     /** The quake, the site, its slice plane and the Worker's payload (rays to the site, the fan). */
     setScene({ quake, site, plane, rays = [], fan = [], arrivals = [] }) {
         this.state = { quake, site, plane, rays, fan, arrivals };
+        for (const s of [this.epi, this.pulse, this.site]) s.visible = true;
+        this.setVisible(this.group.visible);
         const P = (r, phi) => planePoint(plane, r, phi);
         this.epi.position.set(...geoVec(quake.lat, quake.lon)).multiplyScalar(LIFT);
         this.pulse.position.copy(this.epi.position);

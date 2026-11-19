@@ -32,6 +32,13 @@
 #   earth-interior-radiation.mjs the moment-tensor radiation pattern: Box 4.4 vs the fault
 #                             vectors, A&R closed forms, focal-sphere means, nodal planes,
 #                             USE→NED, USGS product parsing, end-to-end |R|/RMS scaling
+#   earth-interior-plates.mjs PB2002: Bird's 5,819 per-step relative velocities reproduced from
+#                             his Euler poles (flipped-sign + swapped-plate controls), the 0.5°
+#                             plate raster partitions the sphere, the NNR frame vs NNR-NUVEL-1A
+#                             (unweighted-mean control), page helpers (arrows, cooling curve)
+#   geomag-chaos.mjs          CHAOS-8.1 through igrf.js vs ChaosMagPy (coefficients, SV, B at the
+#                             surface / 500 km / CMB, the baked crustal grid), the forecast vs
+#                             DTU's own extrapolated file, a linear-interpolation SV control
 #   earth-interior-quakes.mjs the live view: USGS parsing, the default pick, the slice, the
 #                             arrivals at the viewer, rays that end AT the viewer, wavefronts
 name: earth-interior-kernels
@@ -42,6 +49,10 @@ on:
       - 'earth-interior.html'
       - 'data/earth-interior/**'
       - 'scripts/build-ground-models.mjs'
+      - 'scripts/build-chaos.mjs'
+      - 'scripts/build-plates.mjs'
+      - 'tests/geomag-chaos.mjs'
+      - 'tests/fixtures/geomag/**'
       - 'api/geomag/observatories.js'
       - 'js/geomag/**'
       - 'js/frequency-analysis.js'
@@ -57,6 +68,10 @@ on:
       - 'earth-interior.html'
       - 'data/earth-interior/**'
       - 'scripts/build-ground-models.mjs'
+      - 'scripts/build-chaos.mjs'
+      - 'scripts/build-plates.mjs'
+      - 'tests/geomag-chaos.mjs'
+      - 'tests/fixtures/geomag/**'
       - 'api/geomag/observatories.js'
       - 'js/geomag/**'
       - 'js/frequency-analysis.js'
@@ -106,3 +121,11 @@ jobs:
         run: node tests/earth-interior-radiation.mjs
       - name: quakes near volcanoes
         run: node tests/earth-interior-volcanoes.mjs
+      - name: CHAOS-8.1 field (vs ChaosMagPy) + bake is current
+        run: |
+          node tests/geomag-chaos.mjs
+          node scripts/build-chaos.mjs --check
+      - name: PB2002 plates (vs Bird's steps) + bake is current
+        run: |
+          node tests/earth-interior-plates.mjs
+          node scripts/build-plates.mjs --check
