@@ -133,6 +133,19 @@
   edge-on — both tried), and lines/points are now DEPTH-TESTED with a small bias toward the camera
   (they lie on the walls), so swinging behind the planet hides them. Long-way rays (Δ > 180°) run partly
   inside the solid and show only where they surface. SwiftShader ~115 ms/frame.
+- **Volcanoes in sync with the live view (2026-11-19)** — the stage hosts `js/earth-volcano-layer.js`, the SAME
+  layer EarthView draws (status classes, colours, the live HANS/EONET join and the eruption odds are
+  `js/volcano-engine.js`'s numbers, never re-derived), via `js/earth-interior/live-volcanoes.js`. Active group
+  only by default (▲ Volcanoes chip / `?volcanoes=0`). The layer gained an OPT-IN wedge clip (`setClip`,
+  vertex shader + `_isShown` mirror; EarthView never calls it and is unchanged — checked: 2 661 glyphs, clip
+  off, no errors) and the stage a picker hook (`addPicker`). The join is the PURE
+  `js/earth-interior/volcano-quakes.js`: a quake is tagged NEAR a Holocene volcano within 30 km and shallower
+  than 40 km — a PROXIMITY flag, never "volcanic"; gated on the real catalogue with an independent distance,
+  brute-force nearest and a depth-rule control (`tests/earth-interior-volcanoes.mjs`). The panel lists
+  today's elevated/erupting volcanoes (RED > ORANGE > YELLOW > open event) with their nearby-quake counts; a
+  card gives status, today's alert, the 10-yr onset base rate and the quakes near it (click → that quake).
+  Layer-name and hypocentre labels inside the planet now hide unless the sightline enters through the wedge.
+  Timing: quakes refresh every minute, volcano status every 30 min, the catalogue is GVP's March 2026 lists.
 - `core-model.js` (TIGA) is NOT yet switched to the P0 kernels; TIGA is unchanged except the relay's additive `y`.
 
 **Page:** `earth-interior.html` (Earth & Orbit section), a NEW simulation that

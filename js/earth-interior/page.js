@@ -67,6 +67,9 @@ function renderProbe(hit) {
     } else if (hit.kind === 'surface') {
         setProbeDepth(null);
         box.innerHTML = `<b>${fmt(hit.lat, 3)}°, ${fmt(hit.lon, 4)}°</b> <span class="ei-muted">surface — PREM has no lateral structure; the column below any point is the same until CRUST1.0 / tomography land</span>`;
+    } else if (hit.kind === 'volcano') {
+        setProbeDepth(null);
+        box.innerHTML = hit.html;           // live-volcanoes.js builds it from the volcano engine's own description
     } else if (hit.kind === 'station') {
         const r = nowcastRows(state.nowcast).find((x) => x.code === hit.code);
         box.innerHTML = r ? `<b>${esc(r.code)}</b> ${esc(r.name)} · |E| ${fmt(r.eLatestVkm * 1000)} mV/km` : esc(hit.code);

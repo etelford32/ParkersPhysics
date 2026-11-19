@@ -28,6 +28,7 @@
 #   earth-interior-amplitude.mjs phase strengths: Zoeppritz energy conservation at every
 #                             interface type, closed forms, 1/L spreading in a uniform medium,
 #                             PREM t*, structure; station elevation vs the exact raised chord
+#   earth-interior-volcanoes.mjs the quake ↔ volcano proximity join on the REAL GVP catalogue
 #   earth-interior-radiation.mjs the moment-tensor radiation pattern: Box 4.4 vs the fault
 #                             vectors, A&R closed forms, focal-sphere means, nodal planes,
 #                             USE→NED, USGS product parsing, end-to-end |R|/RMS scaling
@@ -45,6 +46,9 @@ on:
       - 'js/geomag/**'
       - 'js/frequency-analysis.js'
       - 'js/earth-interior/**'
+      - 'js/volcano-engine.js'
+      - 'js/earth-volcano-layer.js'
+      - 'data/volcanoes/**'
       - 'tests/earth-interior-*.mjs'
       - 'tests/fixtures/earth-interior/**'
       - '.github/workflows/earth-interior-kernels.yml'
@@ -57,6 +61,9 @@ on:
       - 'js/geomag/**'
       - 'js/frequency-analysis.js'
       - 'js/earth-interior/**'
+      - 'js/volcano-engine.js'
+      - 'js/earth-volcano-layer.js'
+      - 'data/volcanoes/**'
       - 'tests/earth-interior-*.mjs'
       - 'tests/fixtures/earth-interior/**'
       - '.github/workflows/earth-interior-kernels.yml'
@@ -97,3 +104,5 @@ jobs:
         run: node tests/earth-interior-amplitude.mjs
       - name: moment-tensor radiation
         run: node tests/earth-interior-radiation.mjs
+      - name: quakes near volcanoes
+        run: node tests/earth-interior-volcanoes.mjs

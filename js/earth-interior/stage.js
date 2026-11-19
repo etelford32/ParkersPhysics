@@ -457,6 +457,9 @@ export class InteriorStage {
         this._raf = requestAnimationFrame((t) => this._frame(t));
     }
 
+    /** A layer that can claim a pick: fn(raycaster, pointer) → hit | null, consulted before markers and faces. */
+    addPicker(fn) { (this._pickers ??= []).push(fn); }
+
     /** Run fn({ w, h, dpr }) on every resize (glow lines need the drawing-buffer size). */
     onResize(fn) { this._resizeHooks.push(fn); fn(this._size ?? { w: 1, h: 1, dpr: 1 }); return () => { this._resizeHooks = this._resizeHooks.filter((f) => f !== fn); }; }
 
@@ -665,6 +668,8 @@ export class InteriorStage {
     /** What is under a pointer: a marker (pixel test), a cut face (radius) or the surface (lat/lon). */
     pick(p) {
         if (!p) return null;
+        this.raycaster.setFromCamera(new THREE.Vector2(p.x, p.y), this.camera);
+        for (const fn of this._pickers ?? []) { const hit = fn(this.raycaster, p); if (hit) return hit; }
         const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
         let best = null, bestD = 14;
         const camDir = this.camera.position.clone().normalize();

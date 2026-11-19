@@ -290,10 +290,20 @@ export class SeismicLayer {
         };
         put(this.labels.epi, this.epi.position, 12, -8, this.epi.position.clone().normalize().dot(camDir) < -0.2);
         put(this.labels.site, this.site.position, 12, -8, this.site.position.clone().normalize().dot(camDir) < -0.2);
-        if (this.hypoPos) put(this.labels.hypo, this.hypoPos, 10, 6);
+        // A point INSIDE the planet is seen only if the sightline enters the sphere through the
+        // removed wedge; otherwise the solid globe is in front of it (DOM labels are not depth-tested).
+        const seen = (v) => {
+            const o = cam.position, d = v.clone().sub(o), L = d.length(); d.divideScalar(L);
+            const b = o.dot(d), c = o.lengthSq() - 1, disc = b * b - c;
+            if (disc < 0) return true;
+            const t = -b - Math.sqrt(disc);
+            if (t < 0 || t > L) return true;
+            return this.stage.isCut(o.clone().addScaledVector(d, t));
+        };
+        if (this.hypoPos) put(this.labels.hypo, this.hypoPos, 10, 6, !seen(this.hypoPos));
         // Layer names only while the cut faces the camera (edge-on they would pile up).
         const plane = this.state.plane, faceOn = camDir.dot(new THREE.Vector3(...plane.e2)) > 0.25;     // wall B faces +ê₂
-        for (const L of this.layerLabels) if (L.pos) put(L.el, L.pos, -36, -6, !faceOn);
+        for (const L of this.layerLabels) if (L.pos) put(L.el, L.pos, -36, -6, !faceOn || !seen(L.pos));
     }
 }
 

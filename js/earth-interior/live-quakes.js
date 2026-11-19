@@ -27,6 +27,7 @@ import { premAt } from './prem.js';
 import { loadUserLocation, saveUserLocation, geocodeQuery } from '../user-location.js';
 import { parseMechanism } from './radiation.js';
 import { drawBeachball } from './beachball-view.js';
+import { mountLiveVolcanoes } from './live-volcanoes.js';
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -44,6 +45,13 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         mechs: new Map(),                      // event id → { state: 'loading'|'ok'|'none'|'error', mech, note }
     };
     const worker = new Worker(new URL('./quake-worker.js', import.meta.url), { type: 'module' });
+    // The world's volcanoes on the same globe, cut by the same wedge, joined to the same feed.
+    const volcanoes = mountLiveVolcanoes({
+        stage, getQuakes: () => S.quakes,
+        selectQuake: (id) => select(S.quakes.find((q) => q.id === id)),
+        onChange: () => { renderList(); if (S.payload) renderArrivals(); },
+    });
+    S.volcanoes = volcanoes;
     let layer = null;
     if (stage) {
         import('./seismic-layer.js').then(({ SeismicLayer }) => {
@@ -78,7 +86,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
             const pick = pickDefaultQuake(S.quakes, Date.now());
             if (pick.quake?.id !== S.selected?.id) select(pick.quake, pick.reason, false);
         } else S.selected = S.quakes.find((q) => q.id === S.selected.id);   // a revision (location/depth/mag) replaces it
-        requestList(); renderFeed(); renderList();
+        requestList(); renderFeed(); renderList(); volcanoes.render();
         if (!S.selected) renderHud(0, Date.now());       // the frame tick only runs with a quake; a dead feed must still say so
         layer?.setOthers(S.quakes.filter((q) => q.id !== S.selected?.id));
     }
@@ -196,8 +204,10 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
     function apply() {
         if (!stage || !layer) return;
         layer.setVisible(S.active);
-        if (!S.active) { stage.setSlice(null); return; }
+        volcanoes.setActive(S.active);
+        if (!S.active) { stage.setSlice(null); volcanoes.setSlice(null); return; }
         const p = plane();
+        volcanoes.setSlice(p);
         stage.setSlice(p, seismicSliceTable());
         // The core and inner-core glass domes take the slice ramp's colour just inside their own surface.
         stage.setDomeTints?.([3480, 1221.5].map((rKm) => ({ rKm, rgb: sliceDensityColor(premAt(rKm - 1).rhoKgM3 / 1000) })));
@@ -233,7 +243,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
             const live = age >= 0 && age < WAVE_WINDOW_S && q.mag >= 4.5;
             return `<tr data-qid="${esc(q.id)}" class="${q.id === S.selected?.id ? 'is-sel' : ''}" tabindex="0">
                 <td class="ei-num"><b>${q.mag.toFixed(1)}</b></td>
-                <td>${esc(q.place ?? '—')}<span class="ei-sub">${localDateTime(q.timeMs)} · ${fmtDuration(age)} ago · ${q.depthKm.toFixed(0)} km deep${live ? ' · <b class="ei-live">waves in the Earth</b>' : ''}</span></td>
+                <td>${esc(q.place ?? '—')}<span class="ei-sub">${localDateTime(q.timeMs)} · ${fmtDuration(age)} ago · ${q.depthKm.toFixed(0)} km deep${live ? ' · <b class="ei-live">waves in the Earth</b>' : ''}</span>${volcanoes.nearTag(q)}</td>
                 <td class="ei-num">${f ? `${f.deltaDeg.toFixed(1)}°` : '…'}</td>
                 <td class="ei-num">${f?.timeS != null ? `≈ ${fmtDuration(f.timeS)}<span class="ei-sub">${esc(f.phase)} at ${localTime(f.arriveMs)}</span>` : f ? '<span class="ei-muted">—</span>' : '…'}</td>
             </tr>`;
@@ -246,7 +256,7 @@ export function mountLiveQuakes({ stage, onActive = () => {} } = {}) {
         const host = $('#ei-arrivals-live'); if (!host) return;
         const q = S.selected;
         if (!q) { host.innerHTML = '<p class="ei-muted">No earthquake selected.</p>'; return; }
-        const head = `<div class="ei-colhead"><div><b>M${q.mag.toFixed(1)} ${esc(q.place ?? '')}</b> <span class="ei-muted">${new Date(q.timeMs).toISOString().replace('T', ' ').slice(0, 19)} UTC · ${q.depthKm.toFixed(1)} km deep${q.status ? ` · ${esc(q.status)}` : ''}</span></div>${q.url ? `<a class="ei-btn" href="${esc(q.url)}" target="_blank" rel="noopener">USGS event page</a>` : ''}</div>`;
+        const head = `<div class="ei-colhead"><div><b>M${q.mag.toFixed(1)} ${esc(q.place ?? '')}</b> <span class="ei-muted">${new Date(q.timeMs).toISOString().replace('T', ' ').slice(0, 19)} UTC · ${q.depthKm.toFixed(1)} km deep${q.status ? ` · ${esc(q.status)}` : ''}</span> ${volcanoes.nearTag(q, { long: true })}</div>${q.url ? `<a class="ei-btn" href="${esc(q.url)}" target="_blank" rel="noopener">USGS event page</a>` : ''}</div>`;
         if (!S.payload) { host.innerHTML = `${head}<p class="ei-muted">Tracing rays through PREM…</p>`; return; }
         const { geometry, rows, radiationSource } = S.payload.arrivals, now = Date.now();
         const byMech = radiationSource === 'mechanism';
