@@ -17,6 +17,12 @@
  *   setHighlight(index | -1)
  *   setGroupVisible('active' | 'dormant' | 'inactive', bool)
  *
+ * Optional WEDGE CLIP (earth-interior.html, 2026-11-19): `setClip(n, m)` hides
+ * every glyph with x·n > 0 AND x·m > 0 — the quarter that stage cuts out — in
+ * the vertex shader and in getHovered alike, so a volcano over the removed
+ * wedge neither floats in space nor answers a pick. Off by default; EarthView
+ * never calls it and renders exactly as before.
+ *
  * Lifecycle: the 98 KB (gzip) catalogue loads on the FIRST setVisible(true),
  * never at page boot; the live feed loads with it and refreshes every 30 min
  * while visible. A dead live feed leaves the catalogue layer drawn and says
@@ -77,6 +83,9 @@ export class EarthVolcanoLayer {
                 uScale:  { value: 600 },
                 uColors: { value: colors },
                 uShow:   { value: STATUS_ORDER.map(() => 1) },
+                uClipOn: { value: 0 },
+                uClipN:  { value: new THREE.Vector3(0, 0, 1) },
+                uClipM:  { value: new THREE.Vector3(1, 0, 0) },
             },
             vertexShader: `
                 attribute float aStatus;
@@ -86,6 +95,9 @@ export class EarthVolcanoLayer {
                 uniform float uTime;
                 uniform float uScale;
                 uniform float uShow[6];
+                uniform float uClipOn;
+                uniform vec3 uClipN;
+                uniform vec3 uClipM;
                 varying float vStatus;
                 varying float vLive;
                 varying float vHi;
@@ -98,6 +110,7 @@ export class EarthVolcanoLayer {
                 void main() {
                     vec4 mv = modelViewMatrix * vec4(position, 1.0);
                     float show = showOf(aStatus);
+                    if (uClipOn > 0.5 && dot(position, uClipN) > 0.0 && dot(position, uClipM) > 0.0) show = 0.0;
                     vStatus = aStatus; vLive = aLive; vHi = aHi;
                     vPulse = 0.5 + 0.5 * sin(uTime * 3.2 + position.x * 40.0);
                     float halo = aLive > 0.5 ? 1.9 : 1.0;
@@ -175,9 +188,24 @@ export class EarthVolcanoLayer {
     }
     groupVisible(group) { return !!this._groupOn[group]; }
 
+    /** Hide the wedge {x·n > 0, x·m > 0} (arrays or Vector3s), or null to show everything. */
+    setClip(n, m) {
+        const u = this._mat.uniforms;
+        this._clip = n && m ? { n: [...(n.toArray ? n.toArray() : n)], m: [...(m.toArray ? m.toArray() : m)] } : null;
+        u.uClipOn.value = this._clip ? 1 : 0;
+        if (this._clip) { u.uClipN.value.set(...this._clip.n); u.uClipM.value.set(...this._clip.m); }
+        if (this._hiIndex >= 0 && !this._isShown(this._hiIndex)) this.setHighlight(-1);
+    }
+
     _isShown(i) {
         const v = this.cat?.volcanoes[i];
-        return !!v && this._groupOn[STATUS[v.status].group];
+        if (!v || !this._groupOn[STATUS[v.status].group]) return false;
+        if (this._clip && this._points) {
+            const p = this._points.geometry.getAttribute('position');
+            const x = p.getX(i), y = p.getY(i), z = p.getZ(i), { n, m } = this._clip;
+            if (x * n[0] + y * n[1] + z * n[2] > 0 && x * m[0] + y * m[1] + z * m[2] > 0) return false;      // mirrors the vertex shader
+        }
+        return true;
     }
 
     async _ensureLoaded() {
