@@ -1,10 +1,12 @@
 # BZ_ENGINE_PLAN.md — the Bz analysis engine
 
-> **Status: PLAN ONLY (2026-11-20). Nothing here is built.** Every feed marked
-> UNVERIFIED was egress-blocked from the build sandbox (services.swpc.noaa.gov
-> and geomag.usgs.gov both refused); each needs one production request before
-> its phase starts. Owner decisions are collected in §10.
-
+> **Status (2026-11-20): B0 BUILT, feeds NOT YET SETTLED.** The feed
+> catalogue + normalisers (`js/bz/feeds.js`, PURE), the relay
+> (`/api/bz/feeds?feed=…[&meta=1]`), the probe (`scripts/probe-bz-feeds.mjs`)
+> and the gate (`node tests/bz-feeds.mjs`, CI `bz-kernels.yml`) exist. Every
+> upstream is still UNVERIFIED — services.swpc.noaa.gov and geomag.usgs.gov are
+> egress-blocked from the build sandbox — so §11 lists the exact requests that
+> settle them and what to record. B1+ are not built. Owner decisions: §10.
 ---
 
 ## 0. The one-paragraph version
@@ -403,3 +405,54 @@ unverified feed that an earlier phase did not settle.
 - **D6 — Audience.** Operator-first (dB/dt, GIC precursors, GEO environment
   for satellite operators — fits the B2G wedge) or research-first (the
   ladder and spectra). It changes what `bz.html` leads with, not the kernels.
+
+---
+
+## 11. B0 — settling the feeds (what is built, what is still open)
+
+**Built.** `js/bz/feeds.js` holds five feeds, each an ordered candidate list:
+
+| Feed id | Rung | Question it answers |
+|---|---|---|
+| `l1-mag` | 0 | Do ACE and DSCOVR both appear in the 1-min file, in which frames, with how many overlapping minutes? |
+| `l1-mag-fast` | 0 | Does ANY sub-minute real-time L1 magnetometer product exist? (candidate names are guesses; a total miss is an answer) |
+| `l1-ephem` | 0 | Where are the spacecraft, in what unit, and how far apart? |
+| `geo-mag` | 3 | Do primary + secondary GOES magnetometers answer, at what cadence, with an arcjet flag? |
+| `ground-1s` | 7 | Does USGS serve 1-second variation data in real time, and how late is it? |
+
+**To settle (one of these, from anywhere with open network):**
+
+```bash
+node scripts/probe-bz-feeds.mjs --save
+```
+
+```bash
+curl -s 'https://parkersphysics.com/api/bz/feeds?feed=l1-mag&meta=1' | jq '.source_id, .candidates'
+```
+
+The first runs direct to the upstreams and writes the raw bodies to
+`tests/fixtures/bz/` (REAL data — never hand-edit). The second asks the
+deployed route; NOAA's WAF often 403s the Vercel edge, in which case every
+swpc candidate reports `http_status: 403` and the script (or a browser
+console running the same module) is the authority.
+
+**Then record, per feed:** the winning candidate id, the measured cadence,
+the `field_map`, the spacecraft/satellites seen, and for `l1-mag` the
+`overlap_minutes` — in the feed's `verified` field in `js/bz/feeds.js`, and
+trim the candidate list. Add a real-data section to `tests/bz-feeds.mjs`
+reading the saved fixtures.
+
+**What each answer decides:**
+
+- `l1-mag.overlap_minutes == 0` → the file carries one spacecraft at a time;
+  the second instrument must come from another candidate (ACE-only product)
+  and §4.2 needs two requests instead of one.
+- `l1-mag-fast` total miss → §4.1's L1 cadence gain is zero; B1 proceeds on
+  the 1-minute floor (the plan's stated fallback).
+- `l1-ephem` total miss → positions come from JPL Horizons via the existing
+  `js/horizons.js` builder.
+- `ground-1s` latency > ~5 min → 1-second ground data is a hindcast input,
+  not a live one, and the timing ledger (§6) runs delayed.
+- swpc feeds 403 from the edge → those feeds are browser-direct in
+  production (the existing `swpc-feed.js` pattern) and the route is the
+  status-page probe only.

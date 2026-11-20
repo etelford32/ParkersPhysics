@@ -1,0 +1,46 @@
+# Node gate for the Bz analysis engine (BZ_ENGINE_PLAN.md).
+#
+#   bz-feeds.mjs   js/bz/feeds.js + api/bz/feeds.js — the feed catalogue and
+#                  normalisers: gaps are null, spacecraft stay separate, cadence
+#                  is measured, candidates walk in order, a dead upstream is
+#                  200 + freshness:expired (never a 5xx), no passthrough URL
+name: bz-kernels
+
+on:
+  push:
+    paths:
+      - 'js/bz/**'
+      - 'api/bz/**'
+      - 'tests/bz-*.mjs'
+      - 'tests/fixtures/bz/**'
+      - 'scripts/probe-bz-feeds.mjs'
+      - '.github/workflows/bz-kernels.yml'
+  pull_request:
+    paths:
+      - 'js/bz/**'
+      - 'api/bz/**'
+      - 'tests/bz-*.mjs'
+      - 'tests/fixtures/bz/**'
+      - 'scripts/probe-bz-feeds.mjs'
+      - '.github/workflows/bz-kernels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bz-kernels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernels:
+    name: Bz engine kernels (node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: feed catalogue + normalisers + route
+        run: node tests/bz-feeds.mjs

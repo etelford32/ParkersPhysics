@@ -176,6 +176,25 @@ export const PIPELINES = [
       cadence_s: 60,    prewarm: 'hot',
       warnAgeS:  10 * 60, critAgeS: 30 * 60 },
 
+    // ── Bz engine · raw observations (BZ_ENGINE_PLAN.md phase B0) ──────────
+    // Not pre-warmed: no page consumes these yet. Both rows read `expired`
+    // until the feed is settled — that is the honest state, not a bug.
+    { id: 'bz-l1-mag',          label: 'Bz engine · L1 IMF (ACE + DSCOVR)',
+      endpoint: '/api/bz/feeds?feed=l1-mag',
+      probePath: '/api/bz/feeds?feed=l1-mag&meta=1',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'Rung 0 of the Bz engine: the 1-minute L1 magnetometer rows of EVERY spacecraft in the file, kept per spacecraft (the two-point fusion needs ACE and DSCOVR as two instruments). UNVERIFIED upstream — resolves from the candidate lists in js/bz/feeds.js and meta=1 reports every candidate (status, cadence, spacecraft, field_map, unmapped). NOAA\'s WAF often 403s the Vercel edge: then this row answers 200 + freshness:expired + reasons:[no_candidate_answered] with HTTP 403 per candidate, and the browser-direct path (same module) is the primary one. Settle with scripts/probe-bz-feeds.mjs.' },
+
+    { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
+      endpoint: '/api/bz/feeds?feed=geo-mag',
+      probePath: '/api/bz/feeds?feed=geo-mag&meta=1',
+      category: 'space-weather', upstream: 'NOAA GOES MAG',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'Rung 3 of the Bz engine: GOES-East + GOES-West magnetometers, the only real-time field measurement inside the magnetosphere; primary and secondary are MERGED by satellite. UNVERIFIED upstream, same candidate-list + meta=1 pattern and the same edge-403 caveat as bz-l1-mag (answers freshness:expired, never a 5xx). Arcjet-flagged samples are kept and flagged — consumers must exclude them from any score.' },
+
     // ── DONKI · NASA event feeds ───────────────────────────────────────────
     // probeTimeoutMs 16000 on all five: api.nasa.gov regularly takes 8-15 s
     // on a cold edge cache. The default 8 s probe abort was reporting
