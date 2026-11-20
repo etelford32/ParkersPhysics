@@ -120,6 +120,34 @@ function l1Payload() {
     ok('normalizeL1Mag: header-table product, unmapped keys reported');
 }
 
+// ── 2b. three spacecraft, one off the minute (the MEASURED 2026-11-20 shape) ─
+{
+    const rows = [];
+    for (let i = 0; i < 10; i++) {
+        const base = T0 - (9 - i) * 60e3;
+        rows.push({ time_tag: iso(base).replace('Z', ''), active: true, source: 'SOLAR1', bz_gsm: -0.2, bz_gse: -0.3, bt: 5.4 });
+        rows.push({ time_tag: iso(base).replace('Z', ''), active: false, source: 'ACE', bz_gsm: -1.1, bz_gse: -1.5, bt: 6.5 });
+        rows.push({ time_tag: iso(base + 2000).replace('Z', ''), active: false, source: 'IMAP', bz_gsm: 0.02, bz_gse: 0.28, bt: 5.2 });
+    }
+    const m = normalizeL1Mag(rows, { nowMs: T0 });
+    assert.deepEqual(Object.keys(m.spacecraft).sort(), ['ACE', 'IMAP', 'SOLAR1']);
+    assert.equal(m.active_spacecraft, 'SOLAR1');
+    assert.equal(m.spacecraft.IMAP.cadence_s, 60);
+    assert.equal(m.spacecraft.IMAP.samples[0].t % 60000, 2000, 'an off-minute time tag is kept as published');
+    assert.equal(m.overlap_minutes, 10, 'overlap is by minute BUCKET, so the 2 s offset still overlaps');
+    const e = normalizeEphem([
+        { time_tag: '2026-11-20T14:00:00Z', source: 'ACE', x_gse: 1466940, y_gse: 261498, z_gse: 140316 },
+        { time_tag: '2026-11-20T14:00:00Z', source: 'IMAP', x_gse: 1450498, y_gse: -234369, z_gse: -36380 },
+        { time_tag: '2026-11-20T14:00:00Z', source: 'SOLAR1', x_gse: 1433591, y_gse: -306182, z_gse: -116505 },
+    ], { nowMs: T0 });
+    assert.equal(e.separations_re.length, 3, 'every pair, not just the first two');
+    const pair = (a, b) => e.separations_re.find((s) => s.pair.includes(a) && s.pair.includes(b)).r;
+    assert.ok(Math.abs(pair('ACE', 'IMAP') - 82.66) < 0.05, 'matches the production report');
+    assert.ok(pair('ACE', 'SOLAR1') > 95 && pair('ACE', 'SOLAR1') < 100);
+    assert.ok(pair('IMAP', 'SOLAR1') > 15 && pair('IMAP', 'SOLAR1') < 20);
+    ok('three spacecraft: off-minute tags kept, all pairwise separations reported');
+}
+
 // ── 3. GOES magnetometer ──────────────────────────────────────────────────
 function goes(sat, minutes, arcjetAt = -1) {
     return Array.from({ length: minutes }, (_, i) => ({
@@ -172,6 +200,8 @@ function goes(sat, minutes, arcjetAt = -1) {
     assert.equal(g.cadence_s, 1);
     assert.equal(g.rows, 600);
     assert.equal(g.elements.X.valid, 479, 'nulls and the 99999 fill are gaps');
+    assert.equal(g.elements.X.latency_s, 120);
+    assert.equal(g.elements.Y.latency_s, null);
     assert.equal(g.elements.Y.valid, 0);
     assert.equal(g.latency_s, 120, 'latency ignores the null padding up to now');
     assert.equal(g.completeness, 0.798);
@@ -189,7 +219,11 @@ function goes(sat, minutes, arcjetAt = -1) {
 // ── 6. the catalogue ──────────────────────────────────────────────────────
 for (const id of FEED_IDS) {
     const f = FEEDS[id];
-    assert.ok(f.candidates.length >= 2, `${id}: more than one candidate while unverified`);
+    if (!f.verified) assert.ok(f.candidates.length >= 2, `${id}: more than one candidate while unverified`);
+    else {
+        assert.match(f.verified.on, /^\d{4}-\d{2}-\d{2}$/, `${id}: verified carries its date`);
+        for (const part of f.verified.candidate.split('+')) assert.ok(f.candidates.some((c) => c.id === part), `${id}: verified candidate ${part} is still listed`);
+    }
     const ids = new Set();
     for (const c of f.candidates) {
         assert.ok(!ids.has(c.id), `${id}: duplicate candidate ${c.id}`); ids.add(c.id);
@@ -215,8 +249,8 @@ function fakeFetch(table, calls) {
 {
     // First candidate 404s, second answers: the data path stops there.
     const calls = [];
-    const out = await runFeed('l1-mag', { fetchJson: fakeFetch({ 'mag-2-hour': l1Payload() }, calls), nowMs: T0 + 60e3 });
-    assert.equal(out.source_id, 'products-mag-2h');
+    const out = await runFeed('l1-mag-fast', { fetchJson: fakeFetch({ 'rtsw_mag.json': l1Payload() }, calls), nowMs: T0 + 60e3 });
+    assert.equal(out.source_id, 'rtsw-mag');
     assert.equal(calls.length, 2, 'stops at the first candidate that yields rows');
     assert.equal(out.candidates[0].ok, false);
     assert.equal(out.candidates[0].http_status, 404);
@@ -227,21 +261,21 @@ function fakeFetch(table, calls) {
 
     // meta probes ALL of them, even after a hit.
     const calls2 = [];
-    const meta = await runFeed('l1-mag', { fetchJson: fakeFetch({ 'rtsw_mag_1m': l1Payload(), 'mag-1-day': 'html', 'ace_mag': 'throw' }, calls2), nowMs: T0, meta: true });
-    assert.equal(calls2.length, FEEDS['l1-mag'].candidates.length);
-    assert.equal(meta.source_id, 'rtsw-mag-1m');
-    assert.equal(meta.candidates.find((c) => c.id === 'products-mag-1d').error, 'not JSON', 'a 200 error page is a miss');
-    assert.equal(meta.candidates.find((c) => c.id === 'ace-mag-1h').error, 'boom', 'a throwing fetch is a miss, not a crash');
+    const meta = await runFeed('l1-mag-fast', { fetchJson: fakeFetch({ 'rtsw_mag_1s': l1Payload(), 'dscovr_mag_1s': 'html', 'mag-5-minute': 'throw' }, calls2), nowMs: T0, meta: true });
+    assert.equal(calls2.length, FEEDS['l1-mag-fast'].candidates.length);
+    assert.equal(meta.source_id, 'rtsw-mag-1s');
+    assert.equal(meta.candidates.find((c) => c.id === 'dscovr-mag-1s').error, 'not JSON', 'a 200 error page is a miss');
+    assert.equal(meta.candidates.find((c) => c.id === 'products-mag-5m').error, 'boom', 'a throwing fetch is a miss, not a crash');
     assert.equal(meta.candidates[0].summary.spacecraft.DSCOVR.samples, undefined, 'the report carries no sample arrays');
     assert.ok(meta.candidates[0].summary.spacecraft.DSCOVR.latest);
     ok('runFeed meta: every candidate probed; error pages and throws are misses');
 }
 {
     const out = await runFeed('geo-mag', {
-        fetchJson: fakeFetch({ 'primary/magnetometers-6-hour': goes(19, 360), 'secondary/magnetometers-6-hour': goes(18, 360) }),
+        fetchJson: fakeFetch({ 'primary/magnetometers-1-day': goes(19, 360), 'secondary/magnetometers-1-day': goes(18, 360) }),
         nowMs: T0 });
     assert.deepEqual(Object.keys(out.data.satellites).sort(), ['GOES-18', 'GOES-19']);
-    assert.equal(out.source_id, 'goes-primary-6h+goes-secondary-6h');
+    assert.equal(out.source_id, 'goes-primary-1d+goes-secondary-1d');
     ok('runFeed geo-mag: primary and secondary are MERGED, not first-hit');
 }
 {
@@ -294,7 +328,7 @@ function fakeFetch(table, calls) {
         assert.equal(live.source_id, 'rtsw-mag-1m');
         assert.equal(live.data.spacecraft.DSCOVR.samples.length, 5, 'samples= trims each spacecraft');
         assert.ok(live.age_seconds >= 0 && live.age_seconds < 120);
-        assert.equal(live.verified, null, 'says it is unverified until someone records it');
+        assert.equal(live.verified.candidate, 'rtsw-mag-1m', 'carries what was verified, and when');
     } finally { globalThis.fetch = real; }
     ok('route: 400 on an unknown feed; WAF 403 ⇒ 200 + expired; live path trims samples');
 }

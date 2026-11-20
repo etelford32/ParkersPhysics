@@ -177,15 +177,15 @@ export const PIPELINES = [
       warnAgeS:  10 * 60, critAgeS: 30 * 60 },
 
     // ── Bz engine · raw observations (BZ_ENGINE_PLAN.md phase B0) ──────────
-    // Not pre-warmed: no page consumes these yet. Both rows read `expired`
-    // until the feed is settled — that is the honest state, not a bug.
-    { id: 'bz-l1-mag',          label: 'Bz engine · L1 IMF (ACE + DSCOVR)',
+    // Not pre-warmed: no page consumes these yet. Both feeds were settled
+    // against production on 2026-11-20 (js/bz/feeds.js `verified`).
+    { id: 'bz-l1-mag',          label: 'Bz engine · L1 IMF (3 spacecraft)',
       endpoint: '/api/bz/feeds?feed=l1-mag',
       probePath: '/api/bz/feeds?feed=l1-mag&meta=1',
       category: 'space-weather', upstream: 'NOAA SWPC RTSW',
       cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
-      notes: 'Rung 0 of the Bz engine: the 1-minute L1 magnetometer rows of EVERY spacecraft in the file, kept per spacecraft (the two-point fusion needs ACE and DSCOVR as two instruments). UNVERIFIED upstream — resolves from the candidate lists in js/bz/feeds.js and meta=1 reports every candidate (status, cadence, spacecraft, field_map, unmapped). NOAA\'s WAF often 403s the Vercel edge: then this row answers 200 + freshness:expired + reasons:[no_candidate_answered] with HTTP 403 per candidate, and the browser-direct path (same module) is the primary one. Settle with scripts/probe-bz-feeds.mjs.' },
+      notes: 'Rung 0 of the Bz engine: the 1-minute L1 magnetometer rows of EVERY spacecraft in rtsw_mag_1m.json, kept per spacecraft — measured 2026-11-20 as SOLAR1 (active), IMAP and ACE; DSCOVR is not in the file. meta=1 reports the candidate status, cadence, spacecraft, field_map and unmapped keys. A dead upstream (or a WAF 403 at the edge) answers 200 + freshness:expired + reasons:[no_candidate_answered], never a 5xx; the same module (js/bz/feeds.js) runs browser-direct as the fallback.' },
 
     { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
       endpoint: '/api/bz/feeds?feed=geo-mag',
@@ -193,7 +193,7 @@ export const PIPELINES = [
       category: 'space-weather', upstream: 'NOAA GOES MAG',
       cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
-      notes: 'Rung 3 of the Bz engine: GOES-East + GOES-West magnetometers, the only real-time field measurement inside the magnetosphere; primary and secondary are MERGED by satellite. UNVERIFIED upstream, same candidate-list + meta=1 pattern and the same edge-403 caveat as bz-l1-mag (answers freshness:expired, never a 5xx). Arcjet-flagged samples are kept and flagged — consumers must exclude them from any score.' },
+      notes: 'Rung 3 of the Bz engine: the only real-time field measurement inside the magnetosphere. Primary (GOES-19) and secondary (GOES-18) 1-day files are MERGED by satellite — measured 2026-11-20. Arcjet-flagged samples are routine (74 minutes of GOES-19 in 24 h); they are kept and flagged, and consumers must exclude them from any score. Same freshness:expired-never-5xx contract as bz-l1-mag.' },
 
     // ── DONKI · NASA event feeds ───────────────────────────────────────────
     // probeTimeoutMs 16000 on all five: api.nasa.gov regularly takes 8-15 s

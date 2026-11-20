@@ -13,8 +13,8 @@
  *
  * ── WHY EVERYTHING IS A CANDIDATE LIST ───────────────────────────────────
  * services.swpc.noaa.gov and geomag.usgs.gov are both egress-blocked at build
- * time, so every URL and every field spelling below is UNVERIFIED until one
- * production request has been made. The house pattern (api/_lib/noaa-regions,
+ * time, so every URL and every field spelling was UNVERIFIED until one
+ * production request had been made. The house pattern (api/_lib/noaa-regions,
  * the SUVI source list) applies:
  *
  *   • each feed has an ordered list of candidate URLs — the data path stops
@@ -27,7 +27,8 @@
  *     candidates exist at all.
  *
  * When production has answered: record the winners in the `verified` field
- * of FEEDS, then trim the lists. Do not trim before.
+ * of FEEDS, then trim the lists. Do not trim before. (Done 2026-11-20 for
+ * four of the five feeds — see each entry; `l1-mag-fast` is still open.)
  *
  * ── RULES THE NORMALISERS ENFORCE ────────────────────────────────────────
  *   • A gap is null, never 0. `num()` is the only number reader:
@@ -52,23 +53,35 @@ export const FILL_ABS = 9990;
  * production response has been recorded for that feed.
  */
 export const FEEDS = Object.freeze({
-    // Rung 0 — L1 magnetometer, 1-minute, every spacecraft in the file.
+    // Rung 0 — L1 magnetometer, 1-minute, every spacecraft in the file (three, measured).
     'l1-mag': {
         kind: 'l1-mag',
-        label: 'L1 IMF (ACE + DSCOVR), 1-min',
+        label: 'L1 IMF, every spacecraft, 1-min',
         upstream: 'NOAA SWPC RTSW',
         cadence_s: 60,
-        verified: null,
+        // MEASURED 2026-11-20 on a Vercel preview (edge, iad1 — NOT 403'd):
+        // the file carries THREE spacecraft, and DSCOVR is not one of them.
+        // IMAP's time tags are NOT on the minute (…:16:02, …:20:03) — align
+        // by instant, never by array position or by string equality.
+        // products/solar-wind/mag-{2-hour,1-day}.json answered 404 and
+        // json/ace/mag/ace_mag_1h.json is HOURLY with gse_bz/gsm_bz spellings
+        // — all three were dropped from the list.
+        verified: {
+            on: '2026-11-20', candidate: 'rtsw-mag-1m', cadence_s: 60, window_h: 24,
+            spacecraft: ['SOLAR1', 'IMAP', 'ACE'], active: 'SOLAR1',
+            frames: ['gsm', 'gse'], overlap_minutes: 1383,
+            unclaimed: ['range', 'scale', 'sensitivity', 'manual_mode', 'sample_size',
+                'theta_gse', 'phi_gse', 'theta_gsm', 'phi_gsm', 'max_telemetry_flag', 'max_data_flag'],
+        },
         candidates: [
-            { id: 'rtsw-mag-1m',     url: `${SWPC}/json/rtsw/rtsw_mag_1m.json` },
-            { id: 'products-mag-2h', url: `${SWPC}/products/solar-wind/mag-2-hour.json` },
-            { id: 'products-mag-1d', url: `${SWPC}/products/solar-wind/mag-1-day.json` },
-            { id: 'ace-mag-1h',      url: `${SWPC}/json/ace/mag/ace_mag_1h.json` },
+            { id: 'rtsw-mag-1m', url: `${SWPC}/json/rtsw/rtsw_mag_1m.json` },
         ],
     },
     // Rung 0 — is there a sub-minute real-time L1 magnetometer product at all?
-    // These names are GUESSES (plan §4.1); a total miss here is an expected,
-    // informative answer and the engine then stays on the 1-minute floor.
+    // These names are GUESSES (plan §4.1). MEASURED 2026-11-20: all four are
+    // 404. That rules out these four names, NOT the existence of a sub-minute
+    // product elsewhere (NCEI, the IMAP I-ALiRT service) — `verified` stays
+    // null and the engine runs on the 1-minute floor until one is found.
     'l1-mag-fast': {
         kind: 'l1-mag',
         label: 'L1 IMF, sub-minute (existence check)',
@@ -88,11 +101,17 @@ export const FEEDS = Object.freeze({
         label: 'L1 spacecraft ephemerides',
         upstream: 'NOAA SWPC RTSW',
         cadence_s: 3600,
-        verified: null,
+        // MEASURED 2026-11-20: hourly, KILOMETRES, GSE + GSM + GCI positions
+        // AND velocities, ~31 days, the same three spacecraft. The other two
+        // candidates answered 404 and were dropped.
+        verified: {
+            on: '2026-11-20', candidate: 'rtsw-ephem-1h', cadence_s: 3600, unit: 'km',
+            spacecraft: ['ACE', 'IMAP', 'SOLAR1'], frames: ['gse', 'gsm', 'gci'],
+            unclaimed: ['active', 'cadence', 'x_gci', 'y_gci', 'z_gci', 'vx_gci', 'vy_gci', 'vz_gci',
+                'vx_gse', 'vy_gse', 'vz_gse', 'vx_gsm', 'vy_gsm', 'vz_gsm'],
+        },
         candidates: [
-            { id: 'rtsw-ephem-1h',  url: `${SWPC}/json/rtsw/rtsw_ephemerides_1h.json` },
-            { id: 'products-ephem', url: `${SWPC}/products/solar-wind/ephemerides.json` },
-            { id: 'ace-ephem',      url: `${SWPC}/json/ace/ephemeris/ace_ephemeris_1h.json` },
+            { id: 'rtsw-ephem-1h', url: `${SWPC}/json/rtsw/rtsw_ephemerides_1h.json` },
         ],
     },
     // Rung 3 — GOES magnetometers at geosynchronous orbit, both longitudes.
@@ -101,13 +120,19 @@ export const FEEDS = Object.freeze({
         label: 'GOES magnetometers (East + West)',
         upstream: 'NOAA GOES MAG',
         cadence_s: 60,
-        verified: null,
+        // MEASURED 2026-11-20: all four files answer; primary = GOES-19,
+        // secondary = GOES-18, 1-minute, He/Hp/Hn/total + arcjet_flag, no
+        // unclaimed keys. GOES-19 had 74 arcjet-flagged minutes in 24 h —
+        // the flag is not a rarity. The 1-day files are supersets of the
+        // 6-hour ones, so only they are requested.
+        verified: {
+            on: '2026-11-20', candidate: 'goes-primary-1d+goes-secondary-1d', cadence_s: 60,
+            satellites: { primary: 'GOES-19', secondary: 'GOES-18' }, arcjet_flag: true,
+        },
         // Primary AND secondary are both wanted (two longitudes), so this
         // feed MERGES every candidate that answers instead of stopping.
         merge: true,
         candidates: [
-            { id: 'goes-primary-6h',   url: `${SWPC}/json/goes/primary/magnetometers-6-hour.json` },
-            { id: 'goes-secondary-6h', url: `${SWPC}/json/goes/secondary/magnetometers-6-hour.json` },
             { id: 'goes-primary-1d',   url: `${SWPC}/json/goes/primary/magnetometers-1-day.json` },
             { id: 'goes-secondary-1d', url: `${SWPC}/json/goes/secondary/magnetometers-1-day.json` },
         ],
@@ -120,7 +145,15 @@ export const FEEDS = Object.freeze({
         label: 'USGS 1-second variation (existence + latency)',
         upstream: 'USGS Geomagnetism Program',
         cadence_s: 1,
-        verified: null,
+        // MEASURED 2026-11-20: 1-second variation data IS served in real
+        // time. X/Y arrived 129 s behind the clock and Z 73 s, identically at
+        // BOU and FRD (a batch cadence upstream, not a station property); the
+        // 60 s product was 147 s behind. So 1-second ground data is a LIVE
+        // input with a ~2 min horizon.
+        verified: {
+            on: '2026-11-20', candidate: 'usgs-bou-1s', cadence_s: 1,
+            latency_s: { horizontal: 129, vertical: 73, minute_product: 147 },
+        },
         candidates: [
             { id: 'usgs-bou-1s',  station: 'BOU', samplingPeriod: 1 },
             { id: 'usgs-frd-1s',  station: 'FRD', samplingPeriod: 1 },
@@ -475,20 +508,27 @@ export function normalizeEphem(raw, opts = {}) {
         };
         if (newest == null || last.t > newest) newest = last.t;
     }
-    // Separation between the first two spacecraft, R_E — what makes the
-    // two-point phase-front lag well or badly conditioned (plan §9).
-    let separation_re = null;
-    const withPos = Object.values(spacecraft).filter((s) => s.last_re);
-    if (withPos.length >= 2) {
-        const a = withPos[0].last_re, b = withPos[1].last_re;
-        separation_re = {
-            dx: round(a.x - b.x, 100), dy: round(a.y - b.y, 100), dz: round(a.z - b.z, 100),
-            r: round(Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z), 100),
-        };
+    // Pairwise separations at each spacecraft's latest position, R_E, in the
+    // file's frame — what makes a multi-point phase-front fit well or badly
+    // conditioned (plan §9). EVERY pair: with three spacecraft the baselines
+    // are very unequal (measured 2026-11-20: ACE–SOLAR1 ~98 R_E, mostly
+    // across the Sun–Earth line; IMAP–SOLAR1 ~17 R_E).
+    const withPos = Object.entries(spacecraft).filter(([, s]) => s.last_re);
+    const separations_re = [];
+    for (let i = 0; i < withPos.length; i++) {
+        for (let j = i + 1; j < withPos.length; j++) {
+            const a = withPos[i][1].last_re, c = withPos[j][1].last_re;
+            separations_re.push({
+                pair: [withPos[i][0], withPos[j][0]],
+                dx: round(a.x - c.x, 100), dy: round(a.y - c.y, 100), dz: round(a.z - c.z, 100),
+                r: round(Math.hypot(a.x - c.x, a.y - c.y, a.z - c.z), 100),
+            });
+        }
     }
+    const separation_re = separations_re[0] ?? null;
     return {
         rows: [...bySc.values()].reduce((a, l) => a + l.length, 0),
-        spacecraft, frame, separation_re, field_map: map, unmapped,
+        spacecraft, frame, separation_re, separations_re, field_map: map, unmapped,
         age_s: newest != null && Number.isFinite(opts.nowMs) ? Math.round((opts.nowMs - newest) / 1000) : null,
     };
 }
@@ -541,7 +581,9 @@ export function normalizeGround(payload, opts = {}) {
             const v = num0(vals[i]);
             if (v != null && Math.abs(v) < 88888) { valid++; lastIdx = i; }
         }
-        elements[id] = { n: vals.length, valid };
+        elements[id] = { n: vals.length, valid,
+            latency_s: lastIdx >= 0 && times[lastIdx] != null && Number.isFinite(opts.nowMs)
+                ? Math.round((opts.nowMs - times[lastIdx]) / 1000) : null };
         if (lastIdx >= 0 && times[lastIdx] != null && (newestValid == null || times[lastIdx] > newestValid)) newestValid = times[lastIdx];
     }
     const n = times.length;
@@ -553,7 +595,9 @@ export function normalizeGround(payload, opts = {}) {
         elements,
         completeness: x && x.n ? round(x.valid / x.n, 1000) : null,
         newest_valid: newestValid != null ? new Date(newestValid).toISOString() : null,
-        latency_s: newestValid != null && Number.isFinite(opts.nowMs) ? Math.round((opts.nowMs - newestValid) / 1000) : null,
+        // The HORIZONTAL component's latency: X/Y and Z arrive on different
+        // delays (measured), and dB/dt and the equivalent currents need X/Y.
+        latency_s: x?.latency_s ?? null,
         age_s: newestValid != null && Number.isFinite(opts.nowMs) ? Math.round((opts.nowMs - newestValid) / 1000) : null,
     };
 }

@@ -21,10 +21,10 @@
  * freshness:'expired' + reasons, so status.html scores it red instead of
  * reading a dead feed as a broken route.
  *
- * NOTE: NOAA's WAF 403s many server-side calls to services.swpc.noaa.gov
- * (api/health.js). If the swpc feeds 403 here, that is the expected answer and
- * the candidate report says so per URL; the same js/bz/feeds.js runs
- * browser-direct, which is then the primary path for those feeds.
+ * NOTE: NOAA's WAF 403s some server-side calls to services.swpc.noaa.gov
+ * (api/health.js). On 2026-11-20 these JSON files answered the edge normally;
+ * if they ever 403, the candidate report says so per URL and the same
+ * js/bz/feeds.js runs browser-direct as the fallback.
  */
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
 import { FEEDS, FEED_IDS, runFeed, summarize } from '../../js/bz/feeds.js';

@@ -1,12 +1,14 @@
 # BZ_ENGINE_PLAN.md — the Bz analysis engine
 
-> **Status (2026-11-20): B0 BUILT, feeds NOT YET SETTLED.** The feed
-> catalogue + normalisers (`js/bz/feeds.js`, PURE), the relay
+> **Status (2026-11-20): B0 DONE — feeds SETTLED against production.** The
+> feed catalogue + normalisers (`js/bz/feeds.js`, PURE), the relay
 > (`/api/bz/feeds?feed=…[&meta=1]`), the probe (`scripts/probe-bz-feeds.mjs`)
-> and the gate (`node tests/bz-feeds.mjs`, CI `bz-kernels.yml`) exist. Every
-> upstream is still UNVERIFIED — services.swpc.noaa.gov and geomag.usgs.gov are
-> egress-blocked from the build sandbox — so §11 lists the exact requests that
-> settle them and what to record. B1+ are not built. Owner decisions: §10.
+> and the gate (`node tests/bz-feeds.mjs`, CI `bz-kernels.yml`) exist, and four
+> of the five feeds were measured on a Vercel preview the same day — **§11 has
+> the results, and they change the plan: L1 has THREE spacecraft, not two, and
+> DSCOVR is not one of them.** Sections 1–9 below are the original plan and
+> still say "ACE + DSCOVR" in places; where they disagree with §11, §11 wins.
+> B1+ are not built. Owner decisions: §10.
 ---
 
 ## 0. The one-paragraph version
@@ -408,51 +410,77 @@ unverified feed that an earlier phase did not settle.
 
 ---
 
-## 11. B0 — settling the feeds (what is built, what is still open)
+## 11. B0 — what the feeds actually are (MEASURED 2026-11-20)
 
-**Built.** `js/bz/feeds.js` holds five feeds, each an ordered candidate list:
+One `meta=1` request per feed against a Vercel preview of this branch (edge
+region iad1). The swpc JSON files were NOT 403'd from the edge on this
+occasion; the WAF caveat in `api/health.js` still stands, so the browser-direct
+path through the same module remains the fallback.
 
-| Feed id | Rung | Question it answers |
-|---|---|---|
-| `l1-mag` | 0 | Do ACE and DSCOVR both appear in the 1-min file, in which frames, with how many overlapping minutes? |
-| `l1-mag-fast` | 0 | Does ANY sub-minute real-time L1 magnetometer product exist? (candidate names are guesses; a total miss is an answer) |
-| `l1-ephem` | 0 | Where are the spacecraft, in what unit, and how far apart? |
-| `geo-mag` | 3 | Do primary + secondary GOES magnetometers answer, at what cadence, with an arcjet flag? |
-| `ground-1s` | 7 | Does USGS serve 1-second variation data in real time, and how late is it? |
+| Feed | Result |
+|---|---|
+| `l1-mag` | `json/rtsw/rtsw_mag_1m.json` — **three spacecraft: `SOLAR1` (active), `IMAP`, `ACE`. No DSCOVR.** 1-minute, 24 h, GSM and GSE both published. 1383 of ~1437 minutes have a valid Bz on at least two spacecraft. IMAP's time tags are off the minute (…:02, …:03). |
+| `l1-ephem` | `json/rtsw/rtsw_ephemerides_1h.json` — hourly, **km**, GSE + GSM + GCI positions and velocities, ~31 days, the same three spacecraft. |
+| `geo-mag` | primary = **GOES-19**, secondary = **GOES-18**, 1-minute, He/Hp/Hn/total + `arcjet_flag`. GOES-19 carried **74 arcjet-flagged minutes in 24 h**. |
+| `ground-1s` | USGS serves `sampling_period=1` variation data in real time. X/Y were **129 s** behind the clock and Z **73 s**, identically at BOU and FRD; the 60 s product was 147 s behind. |
+| `l1-mag-fast` | All four guessed names are **404**. That rules out those names only. Still open. |
 
-**To settle (one of these, from anywhere with open network):**
+Dropped candidates: `products/solar-wind/mag-2-hour.json`, `mag-1-day.json`
+and `ephemerides.json` (404); `json/ace/mag/ace_mag_1h.json` (hourly — no use
+at this cadence).
 
-```bash
-node scripts/probe-bz-feeds.mjs --save
-```
+Spacecraft positions at 14:00 UT that day (GSE, R_E):
 
-```bash
-curl -s 'https://parkersphysics.com/api/bz/feeds?feed=l1-mag&meta=1' | jq '.source_id, .candidates'
-```
+| | x | y | z |
+|---|---|---|---|
+| ACE | 230.3 | +41.0 | +22.0 |
+| IMAP | 227.7 | −36.8 | −5.7 |
+| SOLAR1 | 225.0 | −48.1 | −18.3 |
 
-The first runs direct to the upstreams and writes the raw bodies to
-`tests/fixtures/bz/` (REAL data — never hand-edit). The second asks the
-deployed route; NOAA's WAF often 403s the Vercel edge, in which case every
-swpc candidate reports `http_status: 403` and the script (or a browser
-console running the same module) is the authority.
+Pairwise: ACE–IMAP 82.7 R_E, ACE–SOLAR1 ~98 R_E, IMAP–SOLAR1 ~17 R_E. All
+three sit within ~5 R_E of each other ALONG the Sun–Earth line and are spread
+almost entirely ACROSS it.
 
-**Then record, per feed:** the winning candidate id, the measured cadence,
-the `field_map`, the spacecraft/satellites seen, and for `l1-mag` the
-`overlap_minutes` — in the feed's `verified` field in `js/bz/feeds.js`, and
-trim the candidate list. Add a real-data section to `tests/bz-feeds.mjs`
-reading the saved fixtures.
+`SOLAR1` is SWPC's own tag. It is presumably SWFO-L1 under its operational
+name — NOT confirmed here; confirm before any page prints a mission name.
 
-**What each answer decides:**
+### What this changes
 
-- `l1-mag.overlap_minutes == 0` → the file carries one spacecraft at a time;
-  the second instrument must come from another candidate (ACE-only product)
-  and §4.2 needs two requests instead of one.
-- `l1-mag-fast` total miss → §4.1's L1 cadence gain is zero; B1 proceeds on
-  the 1-minute floor (the plan's stated fallback).
-- `l1-ephem` total miss → positions come from JPL Horizons via the existing
-  `js/horizons.js` builder.
-- `ground-1s` latency > ~5 min → 1-second ground data is a hindcast input,
-  not a live one, and the timing ledger (§6) runs delayed.
-- swpc feeds 403 from the edge → those feeds are browser-direct in
-  production (the existing `swpc-feed.js` pattern) and the route is the
-  status-page probe only.
+1. **§4.2 is a three-point problem, and a better one.** Three spacecraft
+   spread across the flow form a triangle whose plane is nearly perpendicular
+   to the Sun–Earth line. Two independent arrival-time lags give the
+   phase-front normal's two transverse components directly — a measurement,
+   where two spacecraft gave only one component and MVAB had to supply the
+   rest. MVAB becomes the cross-check instead of the primary (§4.3).
+2. **The baselines are very unequal** (17 vs 83–98 R_E). The short one
+   measures small-scale structure and instrument agreement; the long ones
+   measure front tilt. `fuse-l1.js` must weight by baseline, not treat the
+   three as interchangeable.
+3. **DSCOVR is gone from the feed.** Every "ACE + DSCOVR" in §1–§9 reads
+   "the spacecraft in the file". The N-spacecraft interface (§9) was the
+   right call; nothing may hard-code a spacecraft name.
+4. **The withheld-spacecraft score (§6) gets stronger**: withhold one, fuse
+   the other two, score against the third — for each of the three.
+5. **Align by instant.** IMAP's off-minute tags mean no code may join the
+   three streams by array index or by time-tag string.
+6. **Arcjet flags are routine**, not rare (5 % of GOES-19's day). The GEO
+   ledger must exclude them from the start, and the engine should expect
+   to lose one longitude for an hour at a time.
+7. **1-second ground data is live** with a ~2-minute horizon. The timing
+   score against sudden impulses (§4.3, §6) can run in near real time, and
+   §10 D3 (keep 1-second history?) is now a real decision, not a
+   hypothetical.
+8. **No sub-minute L1 product found.** §4.1's L1 cadence gain stays zero
+   for now; the L1 detail comes from three spacecraft instead of from
+   seconds. Places still worth one look: the IMAP I-ALiRT service and NCEI.
+
+### Still open from B0
+
+- Real fixtures. `node scripts/probe-bz-feeds.mjs --save` (from a machine
+  with open network) writes the raw upstream bodies to `tests/fixtures/bz/`;
+  the gate's payloads are still SYNTHETIC, shaped on the measured schema.
+- The plasma file (`rtsw_wind_1m.json`) per spacecraft — B2 needs speed and
+  density for each of the three, and nothing has checked whether that file
+  carries all three as well.
+- GOES satellite longitudes (needed to rotate E/P/N into GSM in B3) are not
+  in the magnetometer file.
