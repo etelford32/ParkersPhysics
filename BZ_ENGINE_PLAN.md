@@ -1060,3 +1060,21 @@ a measurement.
 days, so weeks of accumulation, not days. The geosynchronous filter can be
 re-scored as soon as a few weeks exist. Nothing reads the archive yet.
 
+## 22. The first live test after merge (2026-11-20 20:22 UT)
+
+Read from the PR's preview deployment, quiet day. Ladder complete (4 measured,
+4 estimated, 1 not built, 1 delegated); 14 of 14 ground stations at 1 s with no
+failures; routes agree on the same minute. Scorecard: 0 ahead, 1 level,
+5 behind, 2 not scored — L1 fusion −0.05 / −0.08 / 0.00 (it read +0.05 two
+hours earlier: it is hovering at zero), GEO filter −0.20 / −0.18, single-window
+Dst −0.50. DONKI: 25 CMEs in a week, none Earth-directed, so the join said so.
+
+**Defect found:** FRN owned the network dB/dt peak again (2.544 nT/s against
+0.06–0.15) with a NORMAL level (+12.3 nT), so the level-based neighbour test
+passed it. Fixed by `flagDbdtOutliers` (ground.js): the same robust rule on
+each low/mid station's peak rate, floor 0.5 nT/s. It sets `dbdtSuspect` only —
+the station leaves the network peak and the under-read statistics and keeps
+its level-based numbers. Gated on the real 20:22 UT peaks, with the level test
+as the negative control. Same limits as §19's rule: it cannot tell a record
+spike from a real change at one station, and is untested on a real storm.
+

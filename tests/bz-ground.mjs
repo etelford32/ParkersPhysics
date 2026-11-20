@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dipoleLatitude, dbdt, equivalentCurrent, electrojetProxy, detectSuddenImpulses, detectPressureJumps, matchImpulses, stationSummary, flagNeighbourOutliers, GROUND_DEFAULTS } from '../js/bz/ground.js';
+import { dipoleLatitude, dbdt, equivalentCurrent, electrojetProxy, detectSuddenImpulses, detectPressureJumps, matchImpulses, stationSummary, flagNeighbourOutliers, flagDbdtOutliers, GROUND_DEFAULTS } from '../js/bz/ground.js';
 import { analyzeGround, analyzeRing } from '../js/bz/ground-analysis.js';
 import { normalizeGroundSeries, groundCoordinates, describeGroundPayload, normalizeDst, groundSeriesUrl, normalizeL1Mag, normalizeEphem, normalizeL1Plasma, DST_URL } from '../js/bz/feeds.js';
 import { analyzeFlux } from '../js/bz/flux-analysis.js';
@@ -253,6 +253,43 @@ const PRED = (() => {
     assert.match(b3.stations.find((q) => q.iaga === 'FRN').suspect_reason, /above the other low\/mid-latitude stations/);
     assert.equal(b3.stations.find((q) => q.iaga === 'FRN').equivalent_current, null);
     ok(`neighbour test: FRN (${Math.round(f.neighbour.excess_nt)} nT above its neighbours, limit 100) flagged on the real 18:33 UT values; a storm, an auroral bay and a thin network are not`);
+
+    // The same test on dB/dt, on the REAL peaks of 2026-11-20 20:22 UT (production /api/bz/ground): FRN's LEVEL
+    // was normal (+12.3 nT) so the level test passed it — and its one-second spike owned the network peak.
+    const realRate = [['BOU', 47.6, 0.096, -6], ['BSL', 39.1, 0.082, 1.8], ['FRD', 47.3, 0.15, -0.7], ['FRN', 43, 2.544, 12.3], ['GUA', 6.3, 0.061, 6],
+        ['HON', 21.8, 0.069, 17.7], ['SJG', 27.2, 0.08, -4.8], ['TUC', 39.2, 0.069, 1.1], ['NEW', 54.3, 0.09, -14], ['SHU', 54.7, 0.128, 0.8],
+        ['BRW', 70.2, 0.85, -8.2], ['CMO', 65.7, 0.357, -4.7], ['DED', 70.5, 0.861, -14.4], ['SIT', 60.3, 0.147, -9.1]];
+    const mkRate = (rows) => rows.map(([iaga, dipLat, peak, dx]) => ({ iaga, dipLat, dx, dy: 0, suspect: false, dbdt: { peak_nt_s: peak }, zone: dipLat >= 60 ? 'auroral' : (dipLat <= 50 ? 'low-mid' : 'sub-auroral') }));
+    const rr = mkRate(realRate);
+    assert.deepEqual(flagNeighbourOutliers(rr), [], 'negative control: the LEVEL test alone does not see this fault');
+    assert.deepEqual(flagDbdtOutliers(rr), ['FRN'], 'only FRN — not DED or BRW at 0.86, which are auroral stations');
+    const fr = rr.find((q) => q.iaga === 'FRN');
+    assert.equal(fr.dbdtSuspect, true); assert.equal(fr.suspect, false, 'a spike says nothing against the station\'s level');
+    assert.equal(fr.dbdtNeighbour.limit_nt_s, 0.5); assert.ok(fr.dbdtNeighbour.excess_nt_s > 2.4);
+    // A sudden impulse reaches every low/mid station together: 1.5–4 nT/s everywhere flags nobody.
+    assert.deepEqual(flagDbdtOutliers(mkRate(realRate.map(([id, lat, , dx], i) => [id, lat, lat <= 50 ? 1.5 + 0.4 * (i % 7) : 5, dx]))), []);
+    // …but 40 nT/s at one station inside that impulse is still a spike.
+    assert.deepEqual(flagDbdtOutliers(mkRate(realRate.map(([id, lat, , dx], i) => [id, lat, id === 'HON' ? 40 : (lat <= 50 ? 1.5 + 0.4 * (i % 7) : 5), dx]))), ['HON']);
+    // An auroral or sub-auroral station is never judged; fewer than four comparable stations is no test;
+    // a station with no 1-second data has no rate to judge; a station already flagged is not a neighbour.
+    assert.deepEqual(flagDbdtOutliers(mkRate(realRate.map((r) => (r[0] === 'CMO' || r[0] === 'SHU' ? [r[0], r[1], 30, r[3]] : (r[0] === 'FRN' ? [r[0], r[1], 0.1, r[3]] : r))))), []);
+    assert.deepEqual(flagDbdtOutliers(mkRate(realRate.filter((r) => ['FRN', 'BOU', 'TUC', 'CMO'].includes(r[0])))), []);
+    const noFast = mkRate(realRate); noFast.find((q) => q.iaga === 'FRN').dbdt = null;
+    assert.deepEqual(flagDbdtOutliers(noFast), []);
+    // End to end: a planted one-second spike at FRN (level untouched) no longer owns the network peak,
+    // while FRN stays in every level-based number.
+    const sp = seriesOf(planted), spSlow = seriesOf(planted, 'slow');
+    sp.FRN.x[2000] += 30;
+    const b4 = analyzeGround({ fast: sp, slow: spSlow, wind: null, nowMs: NOW });
+    assert.deepEqual(b4.suspect_stations, []); assert.deepEqual(b4.dbdt_suspect_stations, ['FRN']);
+    assert.notEqual(b4.dbdt.at_station, 'FRN'); assert.equal(b4.dbdt.at_station, a.dbdt.at_station);
+    assert.equal(b4.dbdt.peak_nt_s, a.dbdt.peak_nt_s, 'the network peak is what it was without the spike');
+    const f4 = b4.stations.find((q) => q.iaga === 'FRN');
+    assert.equal(f4.dbdt_suspect, true); assert.ok(f4.dbdt_peak_nt_s > 25, 'its number is still shown');
+    assert.match(f4.dbdt_suspect_reason, /kept out of the network peak/);
+    assert.ok(f4.equivalent_current, 'and its level-based current is kept');
+    assert.deepEqual(a.dbdt_suspect_stations, [], 'the unspiked network flags nobody');
+    ok(`dB/dt neighbour test: FRN's ${fr.dbdt.peak_nt_s} nT/s spike flagged on the real 20:22 UT peaks (others' median ${fr.dbdtNeighbour.others_median_nt_s.toFixed(3)}); an impulse and auroral rates are not`);
 
     // Quiet: nothing to time, and the score says so rather than claiming a pass.
     const quiet = analyzeGround({ fast: seriesOf(plantedGround({ nowMs: NOW })), slow: {}, wind: null, nowMs: NOW });
