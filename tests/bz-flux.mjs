@@ -133,11 +133,17 @@ const ang = (u, n) => Math.acos(Math.min(1, Math.abs(u[0] * n.x + u[1] * n.y + u
     const lags = exactLags(unitNormal(35), 400);
     const c1 = chooseSlowness({ positions: POS, lags, V: V400, mvabResult: mv });
     assert.equal(c1.method, 'multi-spacecraft-lags', 'measured lags outrank MVAB');
-    const c2 = chooseSlowness({ positions: POS, lags: lags.map((l) => ({ ...l, source: 'advective' })), V: V400, mvabResult: mv });
+    const noLags = lags.map((l) => ({ ...l, source: 'advective' }));
+    // MVAB is OFF by default (it has not beaten the flat delay on real data): available, named, not used.
+    const c0 = chooseSlowness({ positions: POS, lags: noLags, V: V400, mvabResult: mv });
+    assert.equal(c0.method, 'flat');
+    assert.deepEqual(c0.notes, ['too_few_measured_lags', 'mvab_available_but_not_trusted_yet']);
+    assert.equal(PROP_DEFAULTS.useMvab, false);
+    const c2 = chooseSlowness({ positions: POS, lags: noLags, V: V400, mvabResult: mv }, { useMvab: true });
     assert.equal(c2.method, 'mvab');
     assert.deepEqual(c2.notes, ['too_few_measured_lags']);
     close(c2.tiltDeg, Math.acos(n.x) * DEG, 1);
-    const c3 = chooseSlowness({ positions: POS, lags: [], V: V400, mvabResult: mvab(iso, 0, 60) });
+    const c3 = chooseSlowness({ positions: POS, lags: [], V: V400, mvabResult: mvab(iso, 0, 60) }, { useMvab: true });
     assert.equal(c3.method, 'flat');
     assert.deepEqual(c3.notes, ['mvab_eigenvalues_not_separated']);
     const steep = chooseSlowness({ positions: POS, lags: exactLags(unitNormal(80), 400), V: V400 });
@@ -146,7 +152,7 @@ const ang = (u, n) => Math.acos(Math.min(1, Math.abs(u[0] * n.x + u[1] * n.y + u
     assert.equal(PROP_DEFAULTS.maxTiltDeg, 70);
     assert.equal(slownessFromNormal([0, 1, 0], V400), null, 'a front parallel to the flow never arrives');
     assert.equal(describeSlowness(flatSlowness(V400), V400).tiltDeg, 0);
-    ok('chooseSlowness: lags → MVAB → flat, each labelled; a normal past 70° is refused with the reason');
+    ok('chooseSlowness: lags → (MVAB, opt-in) → flat, each labelled; a normal past 70° is refused with the reason');
 }
 
 // ── 3. arrival order ──────────────────────────────────────────────────────

@@ -1,14 +1,14 @@
 # BZ_ENGINE_PLAN.md — the Bz analysis engine
 
-> **Status (2026-11-20): B0 DONE — feeds SETTLED against production.** The
-> feed catalogue + normalisers (`js/bz/feeds.js`, PURE), the relay
-> (`/api/bz/feeds?feed=…[&meta=1]`), the probe (`scripts/probe-bz-feeds.mjs`)
-> and the gate (`node tests/bz-feeds.mjs`, CI `bz-kernels.yml`) exist, and four
-> of the five feeds were measured on a Vercel preview the same day — **§11 has
-> the results, and they change the plan: L1 has THREE spacecraft, not two, and
-> DSCOVR is not one of them.** Sections 1–9 below are the original plan and
-> still say "ACE + DSCOVR" in places; where they disagree with §11, §11 wins.
-> B1+ are not built. Owner decisions: §10.
+> **Status (2026-11-20): B0, B1 and B2 BUILT and run on real data.** Feeds are
+> settled (§11), the three-spacecraft L1 fusion is live at `/api/bz/l1` (§12)
+> and the phase-front propagation + reconnection rate at `/api/bz/flux` (§13).
+> **Read §12–§13 before §4: the first real day did NOT show the gains §4
+> promises** — it was a quiet day, and on a quiet day the spacecraft are too
+> far apart for their fields to be the same structure. That is a measurement,
+> recorded with its numbers, not a tuning problem. Sections 1–9 are the
+> original plan; where they disagree with §11–§13, the later sections win.
+> B3+ are not built. Owner decisions: §10.
 ---
 
 ## 0. The one-paragraph version
@@ -484,3 +484,136 @@ name — NOT confirmed here; confirm before any page prints a mission name.
   carries all three as well.
 - GOES satellite longitudes (needed to rotate E/P/N into GSM in B3) are not
   in the magnetometer file.
+
+---
+
+## 12. B1 — the L1 rung (BUILT; first real day MEASURED 2026-11-20)
+
+`js/bz/frames.js` · `fuse-l1.js` · `spectrum.js` · `l1-analysis.js` ·
+`/api/bz/l1[?summary=1]` · gate `node tests/bz-l1.mjs` (22 checks, against a
+planted tilted solar wind).
+
+**What it does.** Puts every spacecraft on one minute axis by instant;
+measures the arrival-time lag of each pair by cross-correlating all three
+field components over a trailing 180 min, re-estimated every 30 min from past
+data only; reconstructs each spacecraft from the others (the withheld score);
+fuses them in the active spacecraft's frame with 1/σ² weights; flags and
+excludes a spacecraft the others contradict.
+
+**On the planted wind it works** (36° front, 0.25 nT noise): lags recovered to
+< 0.6 min, the far spacecraft predicted to 0.64 nT against 3.97 nT for the
+unshifted mean, fused error 0.17 nT against 0.25 nT for one spacecraft, a
+12 nT single-spacecraft glitch flagged on 19 of 20 minutes and attributed to
+the right spacecraft.
+
+**On the first real day it did not beat the naive mean.** 24 h ending
+2026-11-20 14:54 UT — quiet: σ_bg 0.74 nT, Bz median −0.9 nT, 378 km/s.
+
+| Spacecraft withheld | n | RMSE aligned | RMSE unshifted | skill | 1σ coverage |
+|---|---|---|---|---|---|
+| SOLAR1 | 1349 | 1.16 nT | 1.15 nT | −0.02 | 66 % |
+| IMAP | 1172 | 0.99 nT | 0.98 nT | −0.03 | 64 % |
+| ACE | 1327 | 1.38 nT | 1.36 nT | −0.02 | 66 % |
+
+- A lag passed the correlation floor on only **35 %** of steps for the 17 R_E
+  pair and **4–13 %** for the two ~80–98 R_E pairs. Peak correlations sat at
+  0.47–0.56 — inside or barely above what two unrelated red-noise series
+  reach (the floor, 0.65, was set from that null distribution).
+- So for most of the day the three spacecraft were NOT seeing the same
+  structure at different times; they were seeing different fluctuations.
+  Predicting one from the others misses by ~1.0–1.4 nT, more than the day's
+  own background scatter.
+- **The error bar is honest**: the stated 1σ covered 64–66 % of residuals
+  (68 % is the target), on real data, out of sample.
+- 32 minutes were flagged "one contradicted", spread over all three
+  spacecraft (10/13/9) — on a day this incoherent that is transverse
+  structure, not instrument faults. The flag cannot tell them apart when the
+  spacecraft are decorrelated, and must not be read as a fault count.
+- Frame check: our GSE→GSM angle is 0.47–0.55° from the one the feed uses,
+  consistently the same sign across three runs. Small (0.9 % of By leaking
+  into Bz); probably a different dipole epoch upstream. Not resolved.
+
+**What this means for the plan.** §4.2's claim holds for COHERENT structure —
+shocks, CME sheaths and ejecta, sector boundaries, the events that matter —
+and has yet to be seen on real data because none occurred. On a quiet day the
+honest product of three spacecraft is (a) a measured transverse decorrelation,
+which is itself a number nobody publishes, and (b) a calibrated error bar on
+"Bz at L1" that is ~1 nT, not the instrument's 0.1 nT. The engine reports
+both. **The withheld score must be re-read on the first disturbed day before
+B1 is called a success.**
+
+Two defects the gate caught before anything shipped, both now pinned:
+the lag search read up to 45 min past its window (a look-ahead that made the
+"causal" track non-causal), and the first contradiction test could not
+attribute a glitch because the bad spacecraft dragged every other residual to
+half its own size.
+
+Not built in B1: no page. The plan's "visible" trace is `/api/bz/l1`'s
+`trace` (JSON) until B6.
+
+## 13. B2 — propagation and flux (BUILT; first real day MEASURED 2026-11-20)
+
+`js/bz/propagate.js` · `flux.js` · `flux-analysis.js` · the `l1-plasma` feed ·
+`/api/bz/flux[?summary=1]` · gate `node tests/bz-flux.mjs` (17 checks).
+
+**What it does.** Every delay is r·m for a slowness vector m with V·m = 1.
+m comes from the measured multi-spacecraft lags when at least two pairs
+passed; otherwise the flat delay. The target is the bow-shock nose from
+`geospace.js` at the parcel's own dynamic pressure. The reconnection rate is
+Milan et al. 2012 in kV, with Newell et al. 2007 beside it and a Siscoe–Hill
+saturated potential. Rows are ordered by arrival time and tagged ESTIMATED
+(arrived) or FORECAST (still in transit).
+
+**On the planted wind:** a 36° front is delivered to the nose in 46 min
+against a true 45.9; the flat delay says 56.
+
+**A finding about the real geometry.** Across the flow the three spacecraft
+form a triangle 97.8 R_E long and 6.8 R_E high, so one component of the front
+normal is poorly fixed (0.5-min lag noise → 6.7° median error). But the
+Sun–Earth line passes 3.1 R_E from the line through the spacecraft, so the
+delay to Earth depends almost only on the well-fixed component: the same
+noise moves it 0.22 min rms. Trust the delay; read the tilt as rough. This is
+a property of where the halo orbits are THIS season — `condition` is reported
+so it can be watched.
+
+**On the first real day** (same 24 h):
+
+- Plasma feed settled: all three spacecraft at 1 min; velocity COMPONENTS for
+  SOLAR1 only.
+- Wind: 378 km/s, 1.2–1.4 cm⁻³ (very thin), P_dyn 0.3 nPa → bow-shock nose at
+  18.1–18.5 R_E, 4–5 R_E further out than nominal.
+- Reconnection rate at the bow shock: **5.8 ± 4.5 kV** (Milan); Newell-scaled
+  11.5 kV — the two functional forms differ by 2× at this weak, near-zero-Bz
+  driving, which is exactly why both are shown. 0.024 GWb opened in the hour.
+- Delay L1 → nose 58 min; the forecast horizon (delay minus data age) 54 min.
+- Method: multi-spacecraft lags for only **133** minutes of the day (see §12:
+  the lags were rarely measurable).
+- **MVAB did not earn its place.** In the first run it was chosen for 600–800
+  minutes with nothing checking it, so a check was added: wherever a pair lag
+  WAS measured, what would the MVAB normal have predicted for that pair?
+  Median error 5.52 min, against 5.72 min for the flat delay (n = 11). No
+  demonstrated gain, so **MVAB is now off by default** (`useMvab`), still
+  computed and still scored on every request.
+- The same check says something else: when a lag IS measurable, the flat
+  delay misses it by a median ~6 minutes. Fronts are tilted; the flat delay
+  is not a safe default, it is just the only one available most of this day.
+
+**Not verified / not built in B2 — do not lose these:**
+
+1. **Siscoe–Hill coefficients are from memory.** The form was confirmed; the
+   numbers (57.6, 0.0125, ξ = 4.45 − 1.08 log Σ) could not be checked against
+   the paper from the sandbox. `SISCOE_HILL.verified` is false and every
+   payload carries `coefficients_verified: false`. Check before any page
+   prints a transpolar potential.
+2. **Newell 2007 has no agreed conversion to volts.** The "scaled" column is
+   normalised to Milan at 400 km/s, −5 nT; it shows functional form only.
+3. **The timing score against ground sudden impulses (§6 row 1) is NOT
+   built.** It needs the 1-second ground stream and a sharp pressure jump to
+   occur; it belongs with B5. Until then the only real-data check on
+   propagation is the pair-lag check above.
+4. **The sheath is not modelled.** The rate uses the upstream field and the
+   delay stops at the shock nose; B4.
+5. 96 minutes were dropped as "overtaken". Some are real (speed changes);
+   some are an artefact of the method switching at 30-minute step boundaries
+   and moving the delay discontinuously. Not separated yet.
+6. Only one production day has been looked at, and it was quiet.

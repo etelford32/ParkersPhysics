@@ -26,6 +26,7 @@
  *      across a window is the normal of a planar structure (∇·B = 0 makes
  *      the normal component constant). Accepted only when the two smallest
  *      eigenvalues are well separated; otherwise the direction is noise.
+ *      COMPUTED AND SCORED, BUT NOT USED BY DEFAULT — see `useMvab`.
  *   3. the flat delay, n ∥ V. Always available, always the BASELINE the
  *      other two are scored against, and labelled whenever it is used.
  *
@@ -55,6 +56,14 @@ export const PROP_DEFAULTS = Object.freeze({
     mvabMinRatio: 5,      // λ_intermediate / λ_min needed to trust an MVAB normal
     mvabMinSamples: 20,
     minLagR: 0.65,        // a pair lag must be MEASURED (fuse-l1 rMin) to enter the fit
+    // MVAB IS OFF BY DEFAULT, on the evidence. First real-data check
+    // (2026-11-20, a quiet day): on the 11 pair lags that were measured while
+    // an MVAB normal passed its eigenvalue test, MVAB predicted the lag with a
+    // median error of 5.52 min and the FLAT delay with 5.72 min — no
+    // demonstrated gain (n = 11 is far too few to conclude it is useless,
+    // too). `mvab_check` keeps scoring it on every request; turn this on only
+    // when that score, over many days, shows MVAB clearly ahead.
+    useMvab: false,
 });
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -224,7 +233,8 @@ export function chooseSlowness({ positions, lags, V, mvabResult = null }, opts =
         if (fromLags.tiltDeg <= o.maxTiltDeg) return { method: 'multi-spacecraft-lags', m: fromLags.m, ...pick(fromLags), notes };
         notes.push(`lag_normal_refused_tilt_${Math.round(fromLags.tiltDeg)}deg`);
     } else if (lags?.length) notes.push('too_few_measured_lags');
-    if (mvabResult?.ok) {
+    if (mvabResult?.ok && !o.useMvab) notes.push('mvab_available_but_not_trusted_yet');
+    else if (mvabResult?.ok) {
         const m = slownessFromNormal(mvabResult.normal, V);
         const d = m ? describeSlowness(m, V) : null;
         if (d && d.tiltDeg <= o.maxTiltDeg) return { method: 'mvab', m, normal: d.normal, tiltDeg: d.tiltDeg, mvab_ratio: mvabResult.ratio, notes };
