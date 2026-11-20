@@ -7,6 +7,8 @@
 #                           box-filtered shell vs quadrature, energy kept at any
 #                           pixel size, and the old pow(rim, n) flat band as the
 #                           NEGATIVE CONTROL
+#   sun-disc.mjs            the disc's limb colour (Eddington-Barbier, luminance
+#                           preserved), palette decode, sub-frame detail weight
 #   sun-camera.mjs          framing (fitDistance, safeFrame, hero), spherical
 #                           flights that never enter the Sun (a Cartesian lerp
 #                           is the negative control), one-shot runner, shots
@@ -87,6 +89,8 @@ jobs:
           node-version: '22'
       - name: limb + camera + flare director
         run: node tests/sun-limb.mjs && node tests/sun-camera.mjs && node tests/sun-flare-director.mjs
+      - name: disc colour + flare geometry
+        run: node tests/sun-disc.mjs && node tests/flare-geometry.mjs
       - name: coronagraph (kernel + route)
         run: node tests/sun-coronagraph.mjs && node tests/coronagraph-route.mjs
       - name: observed disc + off-limb ring + SUVI

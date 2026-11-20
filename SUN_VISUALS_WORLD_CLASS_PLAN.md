@@ -921,6 +921,64 @@ owner.*
     continuum frame, but not striking), model field lines drawn over observed
     pixels, the evenly spaced flare arcade, and Phases 4 and 6.
 
+- **2026-11-20 (third pass) — the disc and the flare (owner: "keep going on
+  the disc and the flare look").** Judged on the real frames throughout.
+  - **The disc has a limb COLOUR** (`js/sun-disc.js`, PURE,
+    `tests/sun-disc.mjs`). Limb darkening was one grey factor on one
+    colour, so the disc was the same hue from centre to edge. It is now
+    Eddington–Barbier per channel (the limb shows cooler layers, so it
+    reddens), applied LUMINANCE-PRESERVING: the level is still the model's
+    own limb law — and on the observed hemisphere still the frame's — and
+    only the hue moves. Measured on the real HMI frame: centre
+    (255, 228, 62), 0.98 R☉ (178, 119, 14). The palette's colour picks are
+    decoded sRGB → linear before the light sum (`discDecode`). KNOWN: at
+    disc centre R clips, so the centre reads slightly lemon.
+  - **Below the frame's own pixel the page synthesises granulation and says
+    so.** A 1024 px browse frame is 2.6 Mm per pixel; a granule is ~1.4 Mm.
+    Inside that scale the observed hemisphere gets a low-contrast
+    (`GRANULE_CONTRAST`) model granulation term that fades in only where
+    the screen resolves finer than the frame (`u_obsDetail`,
+    `detailWeight`), and the provenance chip gains "+ synthesised
+    granulation" while it is drawn. `?detail=0` turns it off. The frame's
+    own structure is never altered at or above its pixel scale.
+  - **The arcade is every generation of loops at once**
+    (`arcadeShells` in `js/flare-geometry.js`): reconnection climbs, each
+    new loop is rooted further from the inversion line and stands higher,
+    and the loops under it are older. Stations along the PIL are jittered
+    (seeded by the site, so a flare keeps its arcade), brightening zips
+    outward from the centre, and each loop carries its own `age`.
+    `js/flare-arcade.js` (`style: 'ribbon'`) colours and dims each loop by
+    THAT age — 131 Å teal when new and outermost, 171 Å gold as it cools,
+    then out of the EUV bands — where it used to draw one generation of
+    identical loops in one colour that faded as a block. `arcadeLoops` and
+    the orrery's `'line'` style are untouched.
+  - **Ribbons are flare-sized.** The along-PIL envelope was ONE constant for
+    every class, σ = √0.10 rad: ribbons 440 Mm from 1/e point to 1/e point
+    (0.63 R☉) standing 28 Mm apart — a 16:1 spine, which is what made every
+    arcade read as a row of ribs. `ribbonLength0(cls)` scales it with the
+    class factor the arcade height already uses (X 152 Mm, M 112 Mm,
+    C 79 Mm — an order-of-magnitude law, not a fit); sunFS reads it as
+    `u_flare_len`. The gate keeps the old constant as its negative control.
+  - **One strand stays under display white.** At gain 2.2 every loop
+    clipped to a white tube and its colour — its temperature — was lost.
+    At 1.15 a strand keeps its hue and the arcade's brightness is strands
+    adding.
+  - **The flare event is drawn in the EUV views too.** Kernel, ribbons and
+    wave were overlaid in white light only; in the channel views — where
+    the flare director sends the viewer — the 3D arcade stood over an
+    undisturbed surface. They are now overlaid in the channel's own colour
+    (`flareEvt`, which excludes the standing active-region glow an observed
+    EUV frame already contains).
+  - **The flare shot is framed to the flare.** `flareShot({ length })`
+    derives the camera distance so the ribbons' 1/e length fills
+    `FLARE_FILL` of the frame; the typed per-class distances left a
+    real-size arcade a sixth of the picture (the gate's negative control).
+  - **Still open:** all of it is verified on a software rasteriser only.
+    The loops are still too regular up close (a comb); the flash's lifetime
+    is in sim time and could not be judged at 1–2 fps; Sun Watch's flare
+    rows still start a flare by hand (a seventh path, not yet through
+    `playFlare`); model field lines still draw over observed pixels.
+
 ---
 
 ## 1. Scope & locked decisions
@@ -1293,7 +1351,7 @@ owner's GPU, and *identical* screenshots on the Phase 0 baseline scenes
 | 2 | `js/sun-post.js`, `tests/sun-post.mjs` | `sun.html` (composer wiring: UnrealBloom ×2 + radialDiffuse → `SunPostPass`; Doppler save/restore; resize; animate drive; `flareAdd` overlay in sunFS), `tests/sun-smoke.spec.js` |
 | 3 | `js/corona-loop-density.js`, `js/corona-accumulate.js`, `tests/corona-volumetric.mjs` | `js/corona-volumetric.js` (loop sampler, two-scale jittered march, `u_marchLegacy`), `js/corona-volumetric-mount.js` (layer 1, `setLoopDensity`, `setJitter`), `js/field-atlas.js` (WASM path fix), `sun.html` (lazy default mount, accumulation pass, loop rebuild, K/F corona in coronaFS), `tests/sun-smoke.spec.js` |
 | 4 | `tests/solar-fluid.mjs` | `js/solar-fluid.js`, `sun.html` `sunFS` |
-| 5 (2026-11-20) | `js/sun-camera.js`, `js/sun-flare-director.js`, `js/sun-limb.js`, `js/sun-coronagraph.js`, `js/lasco-sources.js`, `tests/sun-{camera,flare-director,limb,coronagraph}.mjs`, `tests/coronagraph-route.mjs`, `tests/sun-cinematic.spec.js`, `.github/workflows/sun-kernels.yml` | `sun.html`, `js/sun-offlimb.js` (edge feather, `limbWeight`), `js/flare-arcade.js` (`style: 'ribbon'`), `api/solar/aia.js` (c2/c3), `api/health.js`, `js/pipeline-registry.js`, `tests/sun-offlimb.mjs`, the SDO fixture scripts. `js/preview-mode.js` NOT yet wired |
+| 5 (2026-11-20) | `js/sun-camera.js`, `js/sun-flare-director.js`, `js/sun-limb.js`, `js/sun-coronagraph.js`, `js/lasco-sources.js`, `tests/sun-{camera,flare-director,limb,coronagraph}.mjs`, `tests/coronagraph-route.mjs`, `tests/sun-cinematic.spec.js`, `js/sun-disc.js`, `tests/sun-disc.mjs`, `tests/sun-real-frames.spec.js`, `.github/workflows/sun-kernels.yml` | `sun.html`, `js/sun-offlimb.js` (edge feather, `limbWeight`), `js/flare-arcade.js` (`style: 'ribbon'`), `api/solar/aia.js` (c2/c3), `api/health.js`, `js/pipeline-registry.js`, `tests/sun-offlimb.mjs`, the SDO fixture scripts. `js/preview-mode.js` NOT yet wired |
 | 6 | `js/vendor/three-0.17x/`, `js/sun-render.js`, `tests/sunfield-kernel-smoke.mjs`, `scripts/lint-three-vendor.mjs` | `sun.html` import map |
 
 Extraction rule: shader code that Phase 2/6 needs to compile for two
@@ -1389,8 +1447,11 @@ log. Re-read CLAUDE.md §5 before opening it.
   is off; check `pylonPaDeg` on C3 after the next roll manoeuvre.
 - ~~Make GOES/SUVI the default off-limb source~~ — DONE 2026-11-20 (upstream
   settled on production, SDO fallback kept).
-- **Cinematic mode in `?preview=1`**, depth of field, and per-loop variation
-  in the flare arcade — the three Phase 5 items not built on 2026-11-20.
+- **Cinematic mode in `?preview=1`** and depth of field — the Phase 5 items
+  not built on 2026-11-20. (Per-loop variation in the arcade shipped the same
+  day: `arcadeShells`.)
+- **Route Sun Watch's flare rows through `playFlare`** — `onFlareSelect` in
+  sun.html still calls `setFlareSite` + friends by hand.
 
 - **GONG far-side plage seeding** (`/api/solar/farside?format=series` →
   the strongest detections modulate a far-hemisphere plage term; no
