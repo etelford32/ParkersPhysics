@@ -176,6 +176,71 @@ export const PIPELINES = [
       cadence_s: 60,    prewarm: 'hot',
       warnAgeS:  10 * 60, critAgeS: 30 * 60 },
 
+    // ── Bz engine · raw observations (BZ_ENGINE_PLAN.md phase B0) ──────────
+    // Not pre-warmed: no page consumes these yet. Both feeds were settled
+    // against production on 2026-11-20 (js/bz/feeds.js `verified`).
+    { id: 'bz-l1-mag',          label: 'Bz engine · L1 IMF (3 spacecraft)',
+      endpoint: '/api/bz/feeds?feed=l1-mag',
+      probePath: '/api/bz/feeds?feed=l1-mag&meta=1',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'Rung 0 of the Bz engine: the 1-minute L1 magnetometer rows of EVERY spacecraft in rtsw_mag_1m.json, kept per spacecraft — measured 2026-11-20 as SOLAR1 (active), IMAP and ACE; DSCOVR is not in the file. meta=1 reports the candidate status, cadence, spacecraft, field_map and unmapped keys. A dead upstream (or a WAF 403 at the edge) answers 200 + freshness:expired + reasons:[no_candidate_answered], never a 5xx; the same module (js/bz/feeds.js) runs browser-direct as the fallback.' },
+
+    { id: 'bz-l1-fused',        label: 'Bz engine · fused L1 field',
+      endpoint: '/api/bz/l1',
+      probePath: '/api/bz/l1?summary=1',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW (fused)',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B1 of the Bz engine: Bz at the active L1 spacecraft, fused from every spacecraft in the file after MEASURED arrival-time alignment (js/bz/fuse-l1.js), with sigma, flags, the lags beside their flat-delay baselines, the withheld-spacecraft score and a GSE/GSM frame check. Computed per request from two feeds. Degrades without 5xx: magnetometers down = freshness:expired + reasons:[l1_mag_unavailable]; ephemerides down or only one spacecraft = freshness:stale with the reason named.' },
+
+    { id: 'bz-flux',            label: 'Bz engine · reconnection rate at the bow shock',
+      endpoint: '/api/bz/flux',
+      probePath: '/api/bz/flux?summary=1',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW (propagated)',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B2 of the Bz engine: the fused L1 field carried to the bow-shock nose by a phase-front delay (multi-spacecraft lags, else minimum-variance, else the flat delay — the method is named per row) and the dayside reconnection rate it implies (Milan 2012 in kV; Newell 2007 beside it; Siscoe-Hill saturation with UNVERIFIED coefficients, flagged in the payload). Rows are ordered by ARRIVAL time and tagged ESTIMATED / FORECAST. Degrades without 5xx: magnetometers down = freshness:expired; plasma or ephemerides down = freshness:stale with reasons [no_plasma] / [ephemerides_unavailable] and flux:null — a nominal speed is never substituted. The l1-plasma feed is still UNVERIFIED; its schema report rides in plasma_feed.' },
+
+    { id: 'bz-geo',             label: 'Bz engine · GOES residual + ledger',
+      endpoint: '/api/bz/geo',
+      probePath: '/api/bz/geo?summary=1',
+      category: 'space-weather', upstream: 'NOAA GOES MAG + SWPC RTSW',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B3 of the Bz engine: GOES-East/West magnetometers as a residual against IGRF in the satellites\' own E/P/N frame (js/bz/geo-residual.js — frame and nominal slots confirmed against production), plus the first interior LEDGER: the Hp residual\'s variation predicted from the wind that has arrived, scored against the magnetometer beside the same prediction on a nominal wind. Arcjet minutes + a 10-min guard are excluded. Degrades without 5xx: GOES down = freshness:expired + reasons:[goes_mag_unavailable]; L1 chain down = freshness:stale, the measured residual still returned, ledger empty. The magnetopause-current coefficients are UNVERIFIED and flagged in the payload.' },
+
+    { id: 'bz-column',          label: 'Bz engine · altitude ladder',
+      endpoint: '/api/bz/column',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW + GOES MAG',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B4 of the Bz engine and the endpoint pages read (through js/bz-engine-provider.js): every rung from L1 to the ground in one object, each tagged MEASURED / ESTIMATED / FORECAST / NOT_BUILT / NOT_AVAILABLE with sigma, basis and caveats (js/bz/column.js). Five lower rungs are NOT_BUILT on purpose and say so. Degrades by rung without 5xx: one measured end down (L1 or GOES) = freshness:stale with reasons and that rung NOT_AVAILABLE; both down = freshness:expired with the ladder still returned. Tries the 7-day GOES files first (unverified) and falls back to the 1-day ones; `feeds` reports which answered.' },
+
+    { id: 'bz-archive',         label: 'Bz engine · minute archive (index)',
+      endpoint: '/api/bz/archive',
+      category: 'space-weather', upstream: 'R2 (written by /api/cron/bz-archive)',
+      cadence_s: 6 * 3600, prewarm: null, probeTimeoutMs: 12_000,
+      warnAgeS:  7.5 * 3600, critAgeS: 13 * 3600,
+      notes: 'The Bz engine\'s own record (BZ_ENGINE_PLAN.md §21): every L1 spacecraft separately (field, plasma, position) and each GOES magnetometer, one R2 object per UTC day, so the fusion, the tilted-front delay and the geosynchronous filter can be hindcast the way the Dst model was. No ?day= returns the index. Degrades without 5xx: R2 secrets unset = freshness:expired + reasons:[r2_not_configured]; no run yet = [no_archive_yet]; a day not held = data:null + [day_not_archived]. No passthrough: the only input is a validated UTC day.' },
+
+    { id: 'bz-ground',          label: 'Bz engine · ground at 1 s + ring current',
+      endpoint: '/api/bz/ground',
+      probePath: '/api/bz/ground?summary=1',
+      category: 'space-weather', upstream: 'USGS Geomagnetism Program + NOAA SWPC',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 25_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B5 of the Bz engine: the 14 USGS observatories at ONE SECOND (dB/dt with what a minute product would have read, Pc3-5 bands, per-station equivalent current, a REGIONAL electrojet proxy that is not AL/AU, sudden impulses and the timing score against predicted pressure-jump arrivals) plus the ring-current rung (hourly Dst beside js/ring-current-model.js driven by the arrived wind). Fans out 28 USGS requests; a station that fails is a dropout named in reasons (stations_down:…) and the row reads stale, not broken. No station at all = freshness:expired. No query parameter selects a station or URL.' },
+
+    { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
+      endpoint: '/api/bz/feeds?feed=geo-mag',
+      probePath: '/api/bz/feeds?feed=geo-mag&meta=1',
+      category: 'space-weather', upstream: 'NOAA GOES MAG',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'Rung 3 of the Bz engine: the only real-time field measurement inside the magnetosphere. Primary (GOES-19) and secondary (GOES-18) 1-day files are MERGED by satellite — measured 2026-11-20. Arcjet-flagged samples are routine (74 minutes of GOES-19 in 24 h); they are kept and flagged, and consumers must exclude them from any score. Same freshness:expired-never-5xx contract as bz-l1-mag.' },
+
     // ── DONKI · NASA event feeds ───────────────────────────────────────────
     // probeTimeoutMs 16000 on all five: api.nasa.gov regularly takes 8-15 s
     // on a cold edge cache. The default 8 s probe abort was reporting
@@ -708,6 +773,10 @@ export const HEARTBEAT_PIPELINES = [
     // with 'r2_not_configured' means the R2_* secrets are missing on Vercel —
     // the site is unaffected, Postgres simply does not shrink.
     { key: 'r2_archive',              label: 'R2 Archive Sweep',        warnMin: 130,    critMin: 360 },
+    // vercel.json: 20 */6 * * * — api/cron/bz-archive.js: per-spacecraft L1 + GOES
+    // magnetometer minutes to R2, one object per UTC day. A PARTIAL run (one feed
+    // down) records a failure then a success, so the reason is kept.
+    { key: 'bz_archive',              label: 'Bz Minute Archive (R2)',  warnMin: 7.5 * 60, critMin: 13 * 60 },
     // vercel.json: 5 3 * * * (daily) — the 30-day percentile pass from R2
     // (Phase A2). 'skipped:coverage n/N' is expected until the archive holds
     // a full window; the pg_cron SQL pass covers the stats until then.

@@ -25,6 +25,8 @@ export const config = { runtime: 'edge' };
 const UPSTREAMS = [
     { source: 'swpc-plasma',  url: 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json',          edge_authoritative: false },
     { source: 'swpc-mag',     url: 'https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json',           edge_authoritative: false },
+    // GOES magnetometers — the Bz engine's geosynchronous anchor (js/bz/feeds.js).
+    { source: 'swpc-goes-mag', url: 'https://services.swpc.noaa.gov/json/goes/primary/magnetometers-6-hour.json', edge_authoritative: false },
     { source: 'swpc-kp',      url: 'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json',       edge_authoritative: false },
     { source: 'swpc-xray',    url: 'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json',   edge_authoritative: false },
     { source: 'swpc-alerts',  url: 'https://services.swpc.noaa.gov/products/alerts.json',                 edge_authoritative: false },

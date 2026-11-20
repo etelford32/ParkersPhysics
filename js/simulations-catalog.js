@@ -123,6 +123,10 @@ export const SIMULATIONS = [
       category: 'space-weather', group: 'geospace',
       tier: 'public', icon: 'dynamo', badge: 'NEW',
       blurb: 'Core field to IGRF-14 to a live estimate that publishes its own uncertainty.' },
+    { id: 'bz', href: 'bz.html', title: 'Bz Column',
+      category: 'space-weather', group: 'geospace',
+      tier: 'public', icon: 'magnet', badge: 'NEW',
+      blurb: 'The interplanetary field from L1 to the ground — measured, estimated or forecast at each altitude, and scored.' },
     // ── Solar physics ─────────────────────────────────────────────────────
     { id: 'solar-fluid', href: 'solar-fluid.html', title: 'Solar Fluid',
       category: 'space-weather', group: 'solar-physics',
