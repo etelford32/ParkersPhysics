@@ -195,6 +195,14 @@ export const PIPELINES = [
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
       notes: 'B1 of the Bz engine: Bz at the active L1 spacecraft, fused from every spacecraft in the file after MEASURED arrival-time alignment (js/bz/fuse-l1.js), with sigma, flags, the lags beside their flat-delay baselines, the withheld-spacecraft score and a GSE/GSM frame check. Computed per request from two feeds. Degrades without 5xx: magnetometers down = freshness:expired + reasons:[l1_mag_unavailable]; ephemerides down or only one spacecraft = freshness:stale with the reason named.' },
 
+    { id: 'bz-flux',            label: 'Bz engine · reconnection rate at the bow shock',
+      endpoint: '/api/bz/flux',
+      probePath: '/api/bz/flux?summary=1',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW (propagated)',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B2 of the Bz engine: the fused L1 field carried to the bow-shock nose by a phase-front delay (multi-spacecraft lags, else minimum-variance, else the flat delay — the method is named per row) and the dayside reconnection rate it implies (Milan 2012 in kV; Newell 2007 beside it; Siscoe-Hill saturation with UNVERIFIED coefficients, flagged in the payload). Rows are ordered by ARRIVAL time and tagged ESTIMATED / FORECAST. Degrades without 5xx: magnetometers down = freshness:expired; plasma or ephemerides down = freshness:stale with reasons [no_plasma] / [ephemerides_unavailable] and flux:null — a nominal speed is never substituted. The l1-plasma feed is still UNVERIFIED; its schema report rides in plasma_feed.' },
+
     { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
       endpoint: '/api/bz/feeds?feed=geo-mag',
       probePath: '/api/bz/feeds?feed=geo-mag&meta=1',

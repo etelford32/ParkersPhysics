@@ -17,6 +17,8 @@ on:
     paths:
       - 'js/bz/**'
       - 'js/geomag/dipole.js'
+      - 'js/geomag/geospace.js'
+      - 'tests/helpers/bz-planted-wind.mjs'
       - 'js/flux-rope-noise.js'
       - 'api/_lib/bz-fetch.js'
       - 'api/bz/**'
@@ -28,6 +30,8 @@ on:
     paths:
       - 'js/bz/**'
       - 'js/geomag/dipole.js'
+      - 'js/geomag/geospace.js'
+      - 'tests/helpers/bz-planted-wind.mjs'
       - 'js/flux-rope-noise.js'
       - 'api/_lib/bz-fetch.js'
       - 'api/bz/**'
@@ -58,3 +62,5 @@ jobs:
         run: node tests/bz-feeds.mjs
       - name: L1 rung — frames, multi-spacecraft fusion, spectrum, route
         run: node tests/bz-l1.mjs
+      - name: propagation + flux — phase-front delay, coupling functions, route
+        run: node tests/bz-flux.mjs

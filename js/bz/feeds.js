@@ -77,6 +77,22 @@ export const FEEDS = Object.freeze({
             { id: 'rtsw-mag-1m', url: `${SWPC}/json/rtsw/rtsw_mag_1m.json` },
         ],
     },
+    // Rung 0 — L1 plasma (speed, density, velocity vector), per spacecraft.
+    // B2 needs the speed for every delay and the density for the bow-shock
+    // standoff. UNVERIFIED: whether the file carries all three spacecraft and
+    // whether it publishes velocity COMPONENTS is what the first production
+    // request settles.
+    'l1-plasma': {
+        kind: 'l1-plasma',
+        label: 'L1 plasma, every spacecraft, 1-min',
+        upstream: 'NOAA SWPC RTSW',
+        cadence_s: 60,
+        verified: null,
+        candidates: [
+            { id: 'rtsw-wind-1m',       url: `${SWPC}/json/rtsw/rtsw_wind_1m.json` },
+            { id: 'products-plasma-1d', url: `${SWPC}/products/solar-wind/plasma-1-day.json` },
+        ],
+    },
     // Rung 0 — is there a sub-minute real-time L1 magnetometer product at all?
     // These names are GUESSES (plan §4.1). MEASURED 2026-11-20: all four are
     // 404. That rules out these four names, NOT the existence of a sub-minute
@@ -361,6 +377,97 @@ export function normalizeL1Mag(raw, opts = {}) {
     };
 }
 
+// ── L1 plasma ─────────────────────────────────────────────────────────────
+
+export const L1_PLASMA_FIELDS = Object.freeze({
+    time:        ['time_tag', 'time'],
+    source:      ['source', 'spacecraft', 'satellite'],
+    active:      ['active'],
+    speed:       ['proton_speed', 'speed', 'bulk_speed'],
+    density:     ['proton_density', 'density'],
+    temperature: ['proton_temperature', 'temperature'],
+    vx_gse:      ['proton_vx_gse', 'vx_gse'],
+    vy_gse:      ['proton_vy_gse', 'vy_gse'],
+    vz_gse:      ['proton_vz_gse', 'vz_gse'],
+    vx_gsm:      ['proton_vx_gsm', 'vx_gsm'],
+    vy_gsm:      ['proton_vy_gsm', 'vy_gsm'],
+    vz_gsm:      ['proton_vz_gsm', 'vz_gsm'],
+    quality:     ['overall_quality', 'quality', 'dsflag'],
+});
+
+/** A positive physical quantity: gaps, fills, zeros and negatives are null. */
+function pos(v, max) {
+    const n = num0(v);
+    return n != null && n > 0 && n < max ? n : null;
+}
+
+/**
+ * Per-spacecraft plasma moments. Speed and density must be POSITIVE to count
+ * (SWPC writes 0 and negative fills as well as -9999); temperature has its own
+ * ceiling because a real 3e5 K is far above FILL_ABS.
+ */
+export function normalizeL1Plasma(raw, opts = {}) {
+    const recs = toRecords(raw);
+    const keys = unionKeys(recs);
+    const { map, unmapped } = resolveFields(keys, L1_PLASMA_FIELDS);
+    const bySc = new Map();
+    for (const r of recs) {
+        const t = timeMs(map.time ? r[map.time] : null);
+        if (t == null) continue;
+        const sc = map.source && r[map.source] != null && r[map.source] !== ''
+            ? String(r[map.source]).toUpperCase() : (opts.defaultSource ?? 'unknown');
+        const comp = (k) => { const v = map[k] ? num(r[map[k]]) : null; return v; };
+        const s = {
+            t,
+            speed: map.speed ? pos(r[map.speed], 5000) : null,
+            density: map.density ? pos(r[map.density], 1000) : null,
+            temperature: map.temperature ? pos(r[map.temperature], 1e8) : null,
+            vx_gse: comp('vx_gse'), vy_gse: comp('vy_gse'), vz_gse: comp('vz_gse'),
+            vx_gsm: comp('vx_gsm'), vy_gsm: comp('vy_gsm'), vz_gsm: comp('vz_gsm'),
+            active: map.active ? truthy(r[map.active]) : null,
+        };
+        if (!bySc.has(sc)) bySc.set(sc, []);
+        bySc.get(sc).push(s);
+    }
+    const spacecraft = {};
+    let newest = null, activeSc = null, activeT = -Infinity;
+    for (const [sc, list] of bySc) {
+        list.sort((a, b) => a.t - b.t);
+        const dedup = [];
+        for (const s of list) {
+            if (dedup.length && dedup[dedup.length - 1].t === s.t) dedup[dedup.length - 1] = s;
+            else dedup.push(s);
+        }
+        const last = dedup[dedup.length - 1];
+        spacecraft[sc] = {
+            n: dedup.length,
+            cadence_s: measureCadenceS(dedup.map((s) => s.t)),
+            first: new Date(dedup[0].t).toISOString(),
+            last: new Date(last.t).toISOString(),
+            speed_valid: dedup.filter((s) => s.speed != null).length,
+            density_valid: dedup.filter((s) => s.density != null).length,
+            vector_valid: dedup.filter((s) => s.vx_gse != null || s.vx_gsm != null).length,
+            samples: dedup,
+        };
+        // newest VALID speed decides the age: a file can run on with empty rows
+        for (let i = dedup.length - 1; i >= 0; i--) {
+            if (dedup[i].speed != null) { if (newest == null || dedup[i].t > newest) newest = dedup[i].t; break; }
+        }
+        for (let i = dedup.length - 1; i >= 0; i--) {
+            if (dedup[i].active) { if (dedup[i].t > activeT) { activeT = dedup[i].t; activeSc = sc; } break; }
+        }
+    }
+    return {
+        rows: [...bySc.values()].reduce((a, l) => a + l.length, 0),
+        spacecraft,
+        active_spacecraft: activeSc,
+        vectors: { gse: !!map.vx_gse, gsm: !!map.vx_gsm },
+        field_map: map,
+        unmapped,
+        age_s: newest != null && Number.isFinite(opts.nowMs) ? Math.round((opts.nowMs - newest) / 1000) : null,
+    };
+}
+
 // ── GOES magnetometer ─────────────────────────────────────────────────────
 
 export const GEO_MAG_FIELDS = Object.freeze({
@@ -608,6 +715,7 @@ export function normalizeGround(payload, opts = {}) {
 export function normalizeFeed(kind, raw, opts = {}) {
     switch (kind) {
         case 'l1-mag':  return normalizeL1Mag(raw, opts);
+        case 'l1-plasma': return normalizeL1Plasma(raw, opts);
         case 'geo-mag': return normalizeGeoMag(raw, opts);
         case 'ephem':   return normalizeEphem(raw, opts);
         case 'ground':  return normalizeGround(raw, opts);
