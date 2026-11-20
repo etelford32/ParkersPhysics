@@ -442,6 +442,7 @@ export function createFlareArcade({
                 // The kernel's envelope at the last rebuild: every nested loop stands within HEIGHT_JITTER of an
                 // arcadeHeight(τ ≤ t). For a single generation this IS apexR.
                 envelopeApexR: site && Number.isFinite(lastBuiltT) ? 1 + FG.arcadeHeight(Math.max(lastBuiltT, 0), site.cls) : null,
+                builtT: Number.isFinite(lastBuiltT) ? lastBuiltT : null,   // the flare time the drawn loops were built at
                 nested,
                 generations: nested ? new Set(lastLoops.map(L => L.generation)).size : 1,
                 ages: nested && lastLoops.length ? { min: Math.min(...lastLoops.map(L => L.age)), max: Math.max(...lastLoops.map(L => L.age)) } : null,

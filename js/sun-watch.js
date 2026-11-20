@@ -267,7 +267,10 @@ export function initSunWatch(deps = {}) {
         const lat = Number(row.dataset.lat), lon = Number(row.dataset.lon);
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
         if (row.dataset.kind === 'flare' && typeof onFlareSelect === 'function') {
-            onFlareSelect(lat, lon, row.dataset.cls || 'C');
+            // The full class and the event time ride along so the page can run it
+            // through its ONE flare entry point (an X2.0 is not just an 'X').
+            onFlareSelect(lat, lon, row.dataset.cls || 'C',
+                { cls: row.dataset.clsFull || row.dataset.cls || 'C', timeMs: Number(row.dataset.t) || null });
         } else if (typeof flyToRegion === 'function') {
             flyToRegion(lat, lon);
         }
@@ -306,7 +309,7 @@ export function initSunWatch(deps = {}) {
         $body.innerHTML = state.timeline.slice(0, 40).map(ev => {
             const clickable = Number.isFinite(ev.lat) && Number.isFinite(ev.lon) && ev.kind === 'flare';
             return `<div class="snw-row${clickable ? ' snw-click' : ''}"
-                ${clickable ? `data-lat="${ev.lat}" data-lon="${ev.lon}" data-kind="flare" data-cls="${esc((ev.cls || 'C')[0])}"` : ''}
+                ${clickable ? `data-lat="${ev.lat}" data-lon="${ev.lon}" data-kind="flare" data-cls="${esc((ev.cls || 'C')[0])}" data-cls-full="${esc(ev.cls || 'C')}" data-t="${Number(ev.t) || ''}"` : ''}
                 title="${esc(new Date(ev.t).toUTCString())}">
                 <span class="snw-badge" style="color:${ev.color}">${esc(ev.badge)}</span>
                 <span>

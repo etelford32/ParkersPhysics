@@ -99,7 +99,8 @@ async function bootWithSource(page, source) {
     const record = (t) => { if (!isExpectedNoise(t)) errors.push(t); };
     page.on('console', (m) => { if (m.type() === 'error') record(m.text()); });
     page.on('pageerror', (e) => record(e.message));
-    await page.goto(PAGE + (source === 'suvi' ? '?offlimbSource=suvi' : ''));
+    // The page's DEFAULT became GOES/SUVI on 2026-11-20, so SDO is asked for by name.
+    await page.goto(PAGE + (source === 'suvi' ? '?offlimbSource=suvi' : '?offlimbSource=sdo'));
     await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
     await page.waitForFunction(
         () => (window.__sun.offLimb?.channels || []).filter(c => c.ok).length === 2,
@@ -244,7 +245,7 @@ test.describe('off-limb: the GOES/SUVI source', () => {
         expect(errors).toEqual([]);
     });
 
-    test('the UI row states the coverage it computes, and the default stays SDO', async ({ page }) => {
+    test('the UI row states the coverage it computes — on SDO (asked for; SUVI is the default) and on SUVI', async ({ page }) => {
         await bootWithSource(page, 'sdo');
         const row = await page.evaluate(() => ({
             checked: document.getElementById('tog-offlimb-suvi')?.checked,
@@ -254,7 +255,7 @@ test.describe('off-limb: the GOES/SUVI source', () => {
         }));
         expect(row.sourceId).toBe('sdo');
         expect(row.checked).toBe(false);
-        // The disclosure is the point: the default source does NOT cover the ring.
+        // The disclosure is the point: SDO/AIA does NOT cover the ring.
         expect(row.meta).toMatch(/66% of the ring/);
         expect(row.title).toMatch(/1\.28 R☉ on axis/);
 

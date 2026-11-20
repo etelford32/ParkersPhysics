@@ -12282,10 +12282,10 @@ function showRegionAnalysis(regData) {
             const flat = +el.dataset.lat, flon = +el.dataset.lon;
             if (!isNaN(flat) && !isNaN(flon)) {
                 flyToRegion(flat, flon);
-                // Flare-list entries were parsed at load: epoch coordinates.
-                setFlareSite(flat * Math.PI / 180, flon * Math.PI / 180, { epoch: true, cls: el.dataset.cls || 'C' });
-                uniforms.u_flare_t.value   = 50;   // show ribbons at a partially-aged state
-                triggerPositionFlare(flat, flon, el.dataset.cls || 'C');
+                // Flare-list entries were parsed at load: epoch coordinates. A past
+                // flare, re-run from onset through the ONE entry point (REPLAY).
+                playFlare(DIRECTOR.normalizeFlare({ cls: el.dataset.cls || 'C', latDeg: flat, lonDeg: flon },
+                    { nowMs: Date.now(), source: 'region' }), { lonIsEpoch: true, fromOnset: true, rate: FLARE_REPLAY_RATE });
             }
         });
     });
@@ -13154,11 +13154,15 @@ try {
     initSunWatch({
         THREE, scene,
         flyToRegion,
-        onFlareSelect: (lat, lon, cls) => {
+        // A row of the 7-day ledger is a PAST flare: it goes through the ONE
+        // entry point and is re-run from onset, captioned REPLAY with its rate.
+        // (It used to set the site and jump the ribbon clock to 50 by hand —
+        // the seventh way a flare could start, with no cooling track or caption.)
+        onFlareSelect: (lat, lon, cls, more = {}) => {
             flyToRegion(lat, lon);
-            setFlareSite(lat * Math.PI / 180, lon * Math.PI / 180, { epoch: true, cls: (cls || 'C')[0] });   // ledger entry: epoch
-            uniforms.u_flare_t.value   = 50;
-            triggerPositionFlare(lat, lon, (cls || 'C')[0].toUpperCase());
+            const evt = DIRECTOR.normalizeFlare({ cls: more.cls || cls || 'C', latDeg: lat, lonDeg: lon, time: more.timeMs ?? undefined },
+                { nowMs: Date.now(), source: 'sun-watch' });
+            playFlare(evt, { lonIsEpoch: true, fromOnset: true, rate: FLARE_REPLAY_RATE });   // ledger entry: epoch longitude
         },
         getLiveFlares: () => liveFlares,
         registerRotatingGroup: (g) => { scene.add(g); _sunWatchGroups.push(g); },

@@ -111,7 +111,14 @@ test.describe('sun.html flare-site geometry', () => {
         expect(g0.arcade.loops).toBeGreaterThan(0);
         expect(g0.arcade.pil).toBe('prior');
         expect(g0.arcade.apexR).toBeGreaterThan(1.02);
-        expect(g0.arcade.apexR).toBeCloseTo(1 + FG.arcadeHeight(g0.arcade.t, 'X'), 6);
+        // The arcade is NESTED (FG.arcadeShells): every loop is a generation that
+        // formed at some τ ≤ t, at arcadeHeight(τ) × (1 ± HEIGHT_JITTER). So the
+        // kernel's envelope is the bound, not an equality on the tallest loop.
+        expect(g0.arcade.nested).toBe(true);
+        const hEnv = FG.arcadeHeight(g0.arcade.builtT, 'X');
+        expect(g0.arcade.envelopeApexR).toBeCloseTo(1 + hEnv, 9);
+        expect(g0.arcade.apexR - 1).toBeLessThanOrEqual(hEnv * (1 + FG.ARCADE.HEIGHT_JITTER) + 1e-9);
+        expect(g0.arcade.apexR - 1).toBeGreaterThanOrEqual(FG.arcadeHeight(0, 'X') * (1 - FG.ARCADE.HEIGHT_JITTER) - 1e-9);
         expect(g0.arcadeSite.cls).toBe('X');
 
         // Let the frame turn, fast.
