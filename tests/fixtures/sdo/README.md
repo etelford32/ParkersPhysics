@@ -44,3 +44,41 @@ services.swpc.noaa.gov is egress-blocked from the build sandbox, which is why
 browse frame is 1280² where these are 512², so the disk is measured here to
 ~0.7 % rather than the ~0.1 % the AIA fixtures reach; that is the fixture's
 resolution, not the model's accuracy.
+
+
+## SOHO/LASCO coronagraph frames (`synthetic_c2.png`, `synthetic_c3.png`)
+
+Added with the observed outer-corona layer (`js/sun-coronagraph.js`). These are
+a DIFFERENT PRODUCT from everything above — white-light coronagraph browse
+frames, not full-disk images — and they have their own renderer
+(`renderSyntheticCoronagraph` in `scripts/lib/sdo-synth.mjs`):
+
+- **One synthetic corona, two instruments.** `PLANTED_CORONA` (three streamers
+  and two CME fronts, in plane-of-sky position angle and R☉) is rendered through
+  C2's geometry (11.9″/px) and C3's (56.0″/px). It has to be one sky: the layer
+  level-matches C3 to C2 on the shell both see, which only means something if
+  both frames show the same corona. Each is byte-scaled differently on purpose
+  so that match has work to do.
+- **The browse product's furniture**, as this build understands it: the Sun is
+  NOT at the frame centre (`PLANTED_CORONAGRAPH.*.cx/cy`), the occulted region
+  is a flat-colour disc with a white circle at the solar limb, C3 carries the
+  occulter pylon to the south-east (PA 135°), and a timestamp-like block sits in
+  the bottom-left corner. The occulter radii (2.12 and 3.95 R☉) are deliberately
+  not the kernel's nominal 2.0 / 3.7, so the test can tell a measured mask edge
+  from a typed one.
+- **`CME-NE` is the coverage probe**: planted at 13.5 R☉, more than twice C2's
+  reach, so it exists in the C3 frame only — the coronagraph analogue of
+  `PROM-FAR-W`. `CME-NW` (4.4 R☉) is inside C2's field.
+
+`tests/sun-coronagraph.mjs` re-renders both and fails if the committed PNGs have
+drifted from the generator. Regenerate just these two, leaving every other file
+and manifest entry untouched, with:
+
+    node scripts/make-sdo-synthetic-fixtures.mjs --only=c2,c3
+
+**None of the furniture is verified against a real frame** — nasa.gov is
+egress-blocked from the build sandbox. `node scripts/fetch-sdo-fixtures.mjs`
+writes `real_c2.jpg` / `real_c3.jpg` on a machine with egress; one look at those
+settles the list in `js/sun-coronagraph.js`'s header. Position angles follow the
+solar convention: 0° = north, counter-clockwise through EAST, and east is image
+LEFT.

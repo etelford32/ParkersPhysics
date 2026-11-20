@@ -15,6 +15,7 @@
 import { deflateSync } from 'node:zlib';
 import { heliographicToVec, projectDiskUV, DISK_FRACTION, CHANNELS } from '../../js/sun-observed.js';
 import { parseSuviChannel } from '../../js/suvi-geometry.js';
+import { coronagraph, expectedRsunFrac, positionAngleDeg } from '../../js/sun-coronagraph.js';
 
 /** Planted features shared by every synthetic channel: heliographic degrees. */
 export const PLANTED = Object.freeze([
@@ -198,6 +199,141 @@ export function renderSyntheticDisk(channel, { size = 512, b0Deg = -4.0 } = {}) 
                 .map(f => ({ id: f.id, x: f.x, y: f.y, sigma: f.sigma })),
         },
     };
+}
+
+// ── SOHO/LASCO coronagraph frames (js/sun-coronagraph.js) ──────────────────
+
+/**
+ * ONE synthetic corona, in PLANE-OF-SKY coordinates, seen by both coronagraphs.
+ * It has to be one corona: js/sun-coronagraph.js level-matches C3 to C2 on the
+ * shell they share, which only means something if both frames were rendered
+ * from the same sky. Position angles are the solar convention — 0 = north,
+ * counter-clockwise through EAST (image left).
+ *
+ *   streamers — angular Gaussians riding the radial falloff
+ *   cmes      — bright fronts at a known PA and radius. CME-NW sits inside
+ *               C2's field (and at C3's inner edge); CME-NE is far outside
+ *               C2's 6 R☉ reach, so it exists in the C3 frame only — the
+ *               coronagraph analogue of the off-limb layer's PROM-FAR-W probe.
+ */
+export const PLANTED_CORONA = Object.freeze({
+    streamers: Object.freeze([
+        { id: 'STREAMER-E',  paDeg: 82,  halfWidthDeg: 7,  amp: 1.6 },
+        { id: 'STREAMER-W',  paDeg: 263, halfWidthDeg: 9,  amp: 1.9 },
+        { id: 'STREAMER-SW', paDeg: 215, halfWidthDeg: 5,  amp: 1.1 },
+    ]),
+    cmes: Object.freeze([
+        { id: 'CME-NW', paDeg: 318, rho: 4.4,  sigmaRho: 0.22, halfWidthDeg: 24, amp: 2.4 },
+        { id: 'CME-NE', paDeg: 48,  rho: 13.5, sigmaRho: 0.9,  halfWidthDeg: 30, amp: 3.0 },
+    ]),
+});
+
+/**
+ * What NASA's pipeline paints on a realtime browse frame, as this build
+ * understands it (UNVERIFIED — see js/sun-coronagraph.js's header): the Sun is
+ * NOT at the frame centre, the occulted region is a flat-colour disc with a
+ * white circle at the solar limb, C3 has the occulter pylon to the south-east,
+ * and a timestamp sits in the bottom-left corner. The occulter radii are
+ * deliberately NOT the kernel's nominal 2.0 / 3.7 so the test can tell a
+ * measured mask edge from a typed one.
+ */
+export const PLANTED_CORONAGRAPH = Object.freeze({
+    c2: Object.freeze({ cx: 0.5046, cy: 0.5071, occulterRsun: 2.12, pylonPaDeg: null,
+                        maskRgb: [118, 38, 16], ped: 0.10, span: 0.80, gamma: 0.55, refRho: 2.5 }),
+    c3: Object.freeze({ cx: 0.5063, cy: 0.5189, occulterRsun: 3.95, pylonPaDeg: 135, pylonHalfWidthRsun: 0.55,
+                        maskRgb: [28, 58, 138], ped: 0.07, span: 0.85, gamma: 0.50, refRho: 4.5 }),
+});
+
+/** Timestamp block, frame fractions (y down): bottom-left corner. */
+export const CORONAGRAPH_TIMESTAMP_BOX = Object.freeze({ x0: 0.012, y0: 0.962, x1: 0.300, y1: 0.990 });
+
+function angDiffDeg(a, b) { return Math.abs(((a - b + 540) % 360) - 180); }
+
+/** The synthetic corona's brightness at a plane-of-sky point, arbitrary units. */
+export function syntheticCoronaAt(x, y) {
+    const rho = Math.hypot(x, y);
+    const pa = positionAngleDeg(x, y);
+    let b = Math.pow(Math.max(rho, 1.2), -2.6);
+    let s = 1;
+    for (const st of PLANTED_CORONA.streamers) {
+        const d = angDiffDeg(pa, st.paDeg) / st.halfWidthDeg;
+        s += st.amp * Math.exp(-d * d);
+    }
+    b *= s;
+    for (const c of PLANTED_CORONA.cmes) {
+        const dr = (rho - c.rho) / c.sigmaRho, da = angDiffDeg(pa, c.paDeg) / c.halfWidthDeg;
+        b += c.amp * Math.pow(c.rho, -2.6) * Math.exp(-0.5 * dr * dr) * Math.exp(-da * da);
+    }
+    return b;
+}
+
+/**
+ * Render one coronagraph browse frame. Returns { width, height, rgb, meta }.
+ * meta.geom is in frame fractions (y down); meta carries every planted truth.
+ */
+export function renderSyntheticCoronagraph(id, { size = 512, epoch = FIXTURE_EPOCH_ISO } = {}) {
+    const inst = coronagraph(id);
+    const P = PLANTED_CORONAGRAPH[inst.id];
+    const r = expectedRsunFrac(inst.id, new Date(epoch));        // R☉ as a fraction of the frame
+    const rgb = new Uint8Array(size * size * 3);
+    const lineHalf = Math.max(0.55, 0.8 * size / 1024);          // limb circle half-width, px
+    const refB = Math.pow(P.refRho, -2.6);
+    const tb = CORONAGRAPH_TIMESTAMP_BOX;
+    const blue = inst.id === 'c3';
+    for (let py = 0; py < size; py++) {
+        for (let px = 0; px < size; px++) {
+            const u = (px + 0.5) / size, v = (py + 0.5) / size;
+            const x = (u - P.cx) / r, y = (P.cy - v) / r;           // plane of sky, R☉, north up
+            const rho = Math.hypot(x, y);
+            let R, G, B;
+            if (rho < P.occulterRsun) {
+                [R, G, B] = P.maskRgb;
+                // White limb circle, antialiased.
+                const dPx = Math.abs(rho - 1) * r * size;
+                const cov = Math.min(1, Math.max(0, lineHalf + 0.5 - dPx));
+                R += (255 - R) * cov; G += (255 - G) * cov; B += (255 - B) * cov;
+            } else {
+                let I = P.ped + P.span * Math.min(1, Math.pow(syntheticCoronaAt(x, y) / refB, P.gamma) * 0.9);
+                I *= 0.985 + 0.03 * vnoise(px * 0.21 * 512 / size, py * 0.21 * 512 / size);
+                if (P.pylonPaDeg != null) {
+                    // The pylon: a dark band of constant half-width along one PA.
+                    const a = (positionAngleDeg(x, y) - P.pylonPaDeg) * Math.PI / 180;
+                    const along = rho * Math.cos(a), across = Math.abs(rho * Math.sin(a));
+                    if (along > 0 && across < P.pylonHalfWidthRsun) I = P.ped * 0.35;
+                }
+                I = Math.min(1, Math.max(0, I));
+                if (blue) { R = 255 * Math.pow(I, 1.8) * 0.75; G = 255 * Math.pow(I, 1.2) * 0.85; B = 255 * Math.pow(I, 0.55); }
+                else      { R = 255 * Math.pow(I, 0.60);       G = 255 * Math.pow(I, 1.1) * 0.85; B = 255 * Math.pow(I, 2.2) * 0.60; }
+                // A few stars in the wide field (C3 really does show them).
+                if (blue && hash2(px * 1.7 + 3.1, py * 2.3 + 9.7) > 0.9994 * (1 - 0.0002 * 512 / size)) { R = G = B = 235; }
+            }
+            // Timestamp-like block: white glyph bars on the frame, bottom-left.
+            if (u >= tb.x0 && u <= tb.x1 && v >= tb.y0 && v <= tb.y1) {
+                const col = Math.floor((u - tb.x0) / (tb.x1 - tb.x0) * 48);
+                if (col % 3 !== 2 && hash2(col, 7.0) > 0.25) { R = G = B = 250; }
+            }
+            const o = (py * size + px) * 3;
+            rgb[o] = Math.round(R); rgb[o + 1] = Math.round(G); rgb[o + 2] = Math.round(B);
+        }
+    }
+    return {
+        width: size, height: size, rgb,
+        meta: {
+            synthetic: true, channel: inst.id, instrument: 'lasco', label: inst.label,
+            epoch, geom: { cx: P.cx, cy: P.cy, r },
+            occulterRsun: P.occulterRsun, pylonPaDeg: P.pylonPaDeg,
+            timestampBox: { ...tb },
+            streamers: PLANTED_CORONA.streamers.map(s => ({ ...s })),
+            cmes: PLANTED_CORONA.cmes.map(c => ({ ...c })),
+        },
+    };
+}
+
+/** RGB (3 bytes/px) → RGBA (4 bytes/px), the layout the kernels read. */
+export function toRgba(rgb, w, h) {
+    const out = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0, j = 0; j < w * h; i += 3, j++) { out[j * 4] = rgb[i]; out[j * 4 + 1] = rgb[i + 1]; out[j * 4 + 2] = rgb[i + 2]; out[j * 4 + 3] = 255; }
+    return out;
 }
 
 /** Luminance array from an rgb buffer (Rec.601). */

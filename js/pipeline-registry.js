@@ -147,6 +147,14 @@ export const PIPELINES = [
       warnAgeS:  30 * 60, critAgeS: 90 * 60,
       notes: 'The SECOND source for sun.html\'s observed off-limb annulus (SUN_VISUALS_WORLD_CLASS_PLAN.md Phase 3e). An SDO/AIA frame supplies only 65.9% of the 1.0-1.6 R☉ ring the layer draws — its half-frame stops at 1.280 R☉ on axis — while SUVI reaches 1.667 R☉ and supplies all of it; see js/suvi-geometry.js. THE UPSTREAM PATH IS UNVERIFIED (services.swpc.noaa.gov is egress-blocked at build time), so it resolves from an ordered candidate list and meta=1 reports source_id + every candidate\'s status. ONE production request settles it — record the winner in js/suvi-geometry.js SOURCE_CANDIDATES and trim the list. A total miss answers 200 + freshness:expired + error:suvi_unresolved so the row reads DOWN rather than broken, and the off-limb layer stays on SDO. Probe timeout is generous because the diagnostic call probes every candidate.' },
 
+    { id: 'solar-lasco',        label: 'SOHO/LASCO coronagraph frames',
+      endpoint: '/api/solar/aia?channel=c3',
+      probePath: '/api/solar/aia?channel=c3&meta=1',   // JSON provenance; the endpoint itself streams a JPEG
+      category: 'space-weather', upstream: 'NASA/ESA SOHO (LASCO realtime browse frames)',
+      cadence_s: 1200,  prewarm: 'medium', probeTimeoutMs: 12_000,
+      warnAgeS:  3 * 3600, critAgeS: 24 * 3600,
+      notes: 'The OBSERVED outer corona on sun.html: LASCO C2 (2.2-6 R☉) and C3 (4-27 R☉) white-light frames drawn on the plane of sky beyond the EUV annulus (js/sun-coronagraph.js). Same upstream files the SDO Live drawer loads as <img> sources; js/lasco-sources.js is the one copy of the path. Thresholds are 3 h / 24 h ON PURPOSE - SOHO is a 1995 spacecraft on shared DSN time and its realtime frames routinely trail by an hour or two (longer in the quarterly keyhole weeks); AIA\'s 30 / 90 min would keep this row amber and teach everyone to ignore it. The route applies the same thresholds to its own freshness field. meta=1 answers 200 + freshness:expired when SOHO is unreachable so the row reads DOWN, not broken. The frame CONTENT (limb circle, occulter disc, roll, timestamp position) is UNVERIFIED at build time - see the header of js/sun-coronagraph.js for how one look at production settles each.' },
+
     { id: 'hek-coronal-holes',  label: 'HEK coronal holes',
       endpoint: '/api/hek/coronal-holes',
       category: 'events', upstream: 'LMSAL HEK',

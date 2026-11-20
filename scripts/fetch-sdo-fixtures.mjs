@@ -6,6 +6,9 @@
  *
  *   node scripts/fetch-sdo-fixtures.mjs [--res 1024]
  *
+ * Also fetches the two SOHO/LASCO coronagraph frames (c2, c3) from
+ * soho.nascom.nasa.gov.
+ *
  * Writes tests/fixtures/sdo/real_<channel>.jpg + real-manifest.json (fetch
  * time, upstream URL, Last-Modified). tests/sun-visual.spec.js prefers the
  * real set when present; tests/sun-observed.mjs keeps using the synthetic
@@ -32,5 +35,22 @@ for (const [ch, code] of Object.entries(CODE)) {
     writeFileSync(join(OUT, name), buf);
     manifest.frames[ch] = { file: name, url, lastModified: r.headers.get('last-modified'), bytes: buf.length };
     console.log(`wrote ${name} (${buf.length} B)`);
+}
+// SOHO/LASCO C2 + C3 — the coronagraph frames js/sun-coronagraph.js draws.
+// A different host and only 512 / 1024, hence their own loop. A REAL pair is
+// what settles that module's UNVERIFIED list (limb circle, occulter disc,
+// roll, timestamp position): look at the two files this writes.
+const { lascoUrl } = await import('../js/lasco-sources.js');
+for (const id of ['c2', 'c3']) {
+    const url = lascoUrl(id, res);
+    try {
+        const r = await fetch(url);
+        if (!r.ok || !/^image\//i.test(r.headers.get('content-type') || '')) { console.error(`${id}: HTTP ${r.status}`); continue; }
+        const buf = Buffer.from(await r.arrayBuffer());
+        const name = `real_${id}.jpg`;
+        writeFileSync(join(OUT, name), buf);
+        manifest.frames[id] = { file: name, url, lastModified: r.headers.get('last-modified'), bytes: buf.length };
+        console.log(`wrote ${name} (${buf.length} B)`);
+    } catch (e) { console.error(`${id}: ${e?.message ?? e}`); }
 }
 writeFileSync(join(OUT, 'real-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');

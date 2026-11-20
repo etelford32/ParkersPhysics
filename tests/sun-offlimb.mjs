@@ -33,8 +33,9 @@ import {
     calibrateOffLimb, offLimbLabel, OFFLIMB_FRAG, OFFLIMB_VERT,
     displayStretch, STRETCH_GAMMA, DEFAULT_GAIN,
     OFFLIMB_SOURCES, DEFAULT_SOURCE, offLimbSource, sourceCoverage,
+    EDGE_FEATHER, frameEdgeWeight,
 } from '../js/sun-offlimb.js';
-import { linearToSrgb, solarEphemeris } from '../js/sun-observed.js';
+import { linearToSrgb, solarEphemeris, DISK_FRACTION } from '../js/sun-observed.js';
 
 let passed = 0;
 function ok(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -398,6 +399,34 @@ ok('the chip prints the BAND, not the proxy channel name', () => {
     });
     assert.ok(!label.includes('suvi304'), `leaked the proxy name: ${label}`);
     assert.match(label, /304\+131/);
+});
+
+ok('THE DETECTOR EDGE IS FEATHERED: the layer never ends on a line where the frame ends', () => {
+    // AIA's frame stops at 1.28 R☉ on axis, inside the 1.0–1.6 ring.
+    const geom = { cx: 0.5, cy: 0.5, r: DISK_FRACTION.aia };      // R☉ as a fraction of the frame width
+    const reach = (1 - geom.cx) / geom.r;                       // R☉ to the frame edge along +x
+    assert.ok(reach > 1.27 && reach < 1.29, `on-axis reach ${reach}`);
+    assert.equal(frameEdgeWeight(reach, 0, geom), 0, 'zero AT the edge');
+    assert.equal(frameEdgeWeight(reach + 0.01, 0, geom), 0, 'nothing outside the frame (no clamp-extend)');
+    assert.equal(frameEdgeWeight(reach - EDGE_FEATHER, 0, geom), 1, 'full weight one feather inside');
+    assert.equal(frameEdgeWeight(1.02, 0, geom), 1, 'the low corona is untouched');
+    // Monotone and continuous across the feather — no step anywhere.
+    let prev = 0, maxStep = 0;
+    for (let i = 0; i <= 200; i++) {
+        const w = frameEdgeWeight(reach - EDGE_FEATHER * (i / 200), 0, geom);
+        assert.ok(w >= prev - 1e-12, 'monotone');
+        maxStep = Math.max(maxStep, w - prev); prev = w;
+    }
+    assert.ok(maxStep < 0.02, `largest step across the feather ${maxStep}`);
+    // NEGATIVE CONTROL — what it replaced: a hard cut is a full-weight step at the edge.
+    const hard = (x) => (planeOfSkyUV(x, 0, geom).u <= 1 ? 1 : 0);
+    assert.equal(hard(reach - 1e-6) - hard(reach + 1e-6), 1);
+    // On the diagonal the frame reaches further, and the weight follows the FRAME, not the radius.
+    const d = 1.5 / Math.SQRT2;
+    assert.equal(frameEdgeWeight(d, d, geom), 1, '1.5 R☉ on the diagonal is well inside the frame');
+    // The shader carries the same number.
+    assert.ok(OFFLIMB_FRAG.includes(EDGE_FEATHER.toFixed(4)), 'GLSL feather is interpolated from EDGE_FEATHER');
+    assert.equal(EDGE_FEATHER, FEATHER_OUT, 'the frame edge and the ring edge fade alike');
 });
 
 console.log(`\n${passed} checks passed (off-limb)`);

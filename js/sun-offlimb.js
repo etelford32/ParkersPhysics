@@ -232,6 +232,31 @@ export function sourceCoverage(id, rIn = R_INNER, rOut = R_OUTER) {
 export const FEATHER_IN  = 0.015;
 export const FEATHER_OUT = 0.14;
 
+/**
+ * THE DETECTOR EDGE IS FEATHERED, R☉ (2026-11). The shader refuses to
+ * clamp-extend a border texel — correct — but that left the layer ending on a
+ * hard line wherever the frame ends inside the annulus. For SDO/AIA that is
+ * 1.280 R☉ on axis against a 1.6 R☉ ring, so the default view drew a SQUARE
+ * around the Sun: the noise floor of a √-stretched frame is not black, and a
+ * step from it to nothing is a visible edge four times around the disc. The
+ * weight now falls to zero over the last EDGE_FEATHER of the frame, measured
+ * from the nearest frame edge in the frame's own plate scale (so SUVI and AIA
+ * each fade in THEIR units). It is a fade of the layer's alpha toward a
+ * boundary of the data, disclosed in the chip tooltip; no pixel is moved,
+ * extended or recoloured, and the coverage figures (sourceCoverage) still
+ * count every pixel the frame holds.
+ */
+export const EDGE_FEATHER = 0.14;   // = FEATHER_OUT: the frame's edge and the ring's own outer edge fade alike
+
+/** JS mirror of the shader's frame-edge weight. (x, y) plane-of-sky R☉; geom = {cx, cy, r} in frame fractions. */
+export function frameEdgeWeight(x, y, geom, feather = EDGE_FEATHER) {
+    const uv = planeOfSkyUV(x, y, geom);
+    const u = uv.u, v = uv.v;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+    const edge = Math.min(u, 1 - u, v, 1 - v) / Math.max(geom.r, 1e-4);
+    return smoothstep(0, feather, edge);
+}
+
 /** The shell whose median sets the layer's brightness unit (see the header). */
 export const REF_SHELL = Object.freeze({ lo: 1.05, hi: 1.15 });
 
@@ -452,6 +477,10 @@ export const OFFLIMB_FRAG = /* glsl */`
         // Outside the frame there is no measurement. Never clamp-extend a
         // border texel across the sky.
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec3(0.0);
+        // ...and do not END on a line either: fade over the last EDGE_FEATHER
+        // (R_sun, in this frame's own plate scale) before the detector edge.
+        float edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)) / max(geom.z, 1e-4);
+        float ew   = smoothstep(0.0, ${EDGE_FEATHER.toFixed(4)}, edge);
         vec3 cur = texture2D(tex, uv).rgb / max(ref, 1e-4);
         if (u_diff < 0.5) {
             // DISPLAY STRETCH (module header): the normalised field spans ~70:1
@@ -461,7 +490,7 @@ export const OFFLIMB_FRAG = /* glsl */`
             // colour ratio survives it — stretching R, G and B separately
             // would desaturate every bright feature toward white.
             float L = max(dot(cur, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
-            return cur * (pow(L, u_stretch) / L);
+            return cur * (pow(L, u_stretch) / L) * ew;
         }
         vec3 old = texture2D(prev, uv).rgb / max(ref, 1e-4);
         float d  = dot(cur - old, vec3(0.2126, 0.7152, 0.0722));
@@ -470,7 +499,7 @@ export const OFFLIMB_FRAG = /* glsl */`
         // Additive blending cannot darken, so the sign rides the hue: the
         // channel's own colour for a brightening, u_dimColor for a dimming.
         vec3 hue = normalize(max(cur, vec3(1e-3)));
-        return d >= 0.0 ? hue * m : u_dimColor * m;
+        return (d >= 0.0 ? hue * m : u_dimColor * m) * ew;
     }
 
     void main() {
@@ -667,6 +696,19 @@ export class SunOffLimb {
         }
         this.uniforms.u_axis.value = w;
         this.mesh.visible = this.enabled && this._anyOk() && w > 0.001;
+    }
+
+    /**
+     * 0..1 — how strongly the OBSERVED He II limb is on screen this frame.
+     * sun.html fades its model chromosphere/TR fringe by this (js/sun-limb.js):
+     * where the live 304 limb is drawn, that is the limb. Zero unless the cool
+     * channel itself calibrated — a 131-only layer shows flare plasma, not the
+     * chromosphere, and must not silence the model's.
+     */
+    get limbWeight() {
+        if (!this.mesh || !this.mesh.visible) return 0;
+        const cool = this.frames.get(this.channels[0]);
+        return (cool && cool.ok && cool.tex) ? this.axisWeight : 0;
     }
 
     /** Fetch both channels. Each fails independently — one dead channel must not blank the other. */

@@ -8,8 +8,10 @@
 > `SUN_CONVECTION_UPGRADE_PLAN.md` for the convection work this plan sits on
 > top of and does NOT redo.
 
-*Status: Phases 0–3 IMPLEMENTED (2026-09-06); Phases 4–6 planned. Decisions
-in §1 are locked by the repo owner.*
+*Status: Phases 0–3 IMPLEMENTED (2026-09-06); Phase 5 (cinematography) and
+the limb / flare / coronagraph work IMPLEMENTED 2026-11-20 — see the last
+progress entry; Phases 4 and 6 planned. Decisions in §1 are locked by the repo
+owner.*
 
 ### Progress log
 
@@ -707,6 +709,159 @@ in §1 are locked by the repo owner.*
      magnetic dips" therefore cannot be built on this atlas as it stands** —
      it would be empty. Open, with the options written up in §9.
 
+- **2026-11-20 — the cinematic pass (owner request: "redo the visuals, bring
+  in the flare work and all the NASA real-time data, make it cinematic").**
+  Scope confirmed with the owner before any edit: full package; the page opens
+  on a HERO FRAME with a Cinematic button (never fully cinematic on load, and
+  a live flare OFFERS the shot rather than taking the camera); sun.html stays
+  STRICT — no exaggeration table here, unlike the homepage hero. Everything
+  below was judged on SwiftShader captures and pixel measurements; **the
+  `@gpu` baseline (Phase 0) is still not captured and none of the LOOK is
+  verified on real hardware.**
+  - **THE LIMB WAS A FLAT BAND TWENTY TIMES TOO THICK.** The chromosphere and
+    transition-region shells drew their limb as `pow(rim, n)` on DoubleSide
+    spheres at r = 1.06 / 1.04. On a back face `max(n·v, 0)` is 0, so `rim`
+    is identically 1 across the whole visible annulus: a flat plate at the
+    clamped alpha, 0.06 R☉ = 42 Mm wide, over an observed disc (the orrery's
+    S3 scar, on this page since the shells were written). `js/sun-limb.js`
+    (PURE, `tests/sun-limb.mjs`, 8 checks) replaces it: each fragment
+    reconstructs its own SIGHTLINE and reads the fringe off the impact
+    parameter at TRUE scale (1.5 Mm chromosphere, spicules e-folding in 4 Mm,
+    a 2.5 Mm transition sheath), box-filtered over the pixel's footprint so a
+    sub-pixel shell dims to a hairline carrying the right energy instead of
+    sparkling. Measured on pixels (`tests/sun-cinematic.spec.js`, long lens on
+    the +x limb, only the two shells on): fringe 230, 1.030 R☉ 5.5, 1.045 R☉
+    1.9, sky 0.9 of 255. Three things fell out of the same rewrite:
+    - the shells took latitude/longitude from the VIEW-space normal, so every
+      plage halo and flare ribbon on them was pinned to the screen and slid
+      off its active region as the camera orbited — they now use the point ON
+      THE SUN the ray is about (photosphere hit on the disc, closest approach
+      off it);
+    - on the observed hemisphere their on-disc procedural terms stand down
+      (honesty rule 2 — they had been tinting observed pixels);
+    - while the observed off-limb ring is drawing the real He II 304 limb the
+      MODEL fringe fades by that layer's own weight (`u_limbObs` ←
+      `SunOffLimb.limbWeight`): where the observation is on screen it IS the
+      limb; orbit off the Sun–Earth line and the model takes over.
+  - **The off-limb ring ended on a line.** The shader refuses to clamp-extend
+    a border texel (correct), which left the layer stopping hard at the AIA
+    frame edge — 1.28 R☉ on axis inside a 1.6 R☉ ring — so the default view
+    had a SQUARE around the Sun. `EDGE_FEATHER` (= `FEATHER_OUT`, 0.14 R☉)
+    fades the layer's weight toward the nearest frame edge in the frame's own
+    plate scale; no pixel is moved or extended and `sourceCoverage` still
+    counts every pixel the frame holds. **NOT solved, deliberately:** the
+    faded shape is still the detector's (a soft rounded square), most visible
+    in the limb-pan shot. A circular crop at 1.28 R☉ would hide it but would
+    make the SDO and SUVI rings two different annuli, which Phase 3e ruled out
+    on purpose. The remedy is the one already planned — settle the SUVI
+    upstream (§9) and make it the default off-limb source.
+  - **Flare visuals.** (a) The flash was an untextured white `RingGeometry`
+    growing to 0.28 R☉ at opacity 0.5 — the largest thing in every flare frame
+    and a flat pale plate. It is now a radial falloff written above 1.0 into
+    the HDR buffer (the post chain does the glowing), on an impulsive
+    rise / exponential tail instead of a linear fade; mesh, pool and per-frame
+    placement are unchanged, so the flare-geometry gate still reads it.
+    (b) `js/flare-arcade.js` gains `style: 'ribbon'` (sun.html only — the
+    orrery keeps `'line'`, its Sun is 30 px): each loop is a camera-facing
+    strand of PHYSICAL width (1.6 Mm) with a pixel floor below which it is
+    dimmed in proportion, a soft halo, an along-loop profile that follows the
+    cooling (looptop source while hot, legs after), and an HDR spine. A
+    `MeshBasicMaterial` + `onBeforeCompile`, never a raw shader. 31 loops.
+    Positions, heights, shear and timing are still the kernel's.
+  - **ONE WAY A FLARE STARTS.** The page could start a flare from six places
+    (two live-SWPC branches, the load-time replay, the flare list, the
+    analysis popup, the test hook), each doing its own subset of site / class
+    / ribbon clock / cooling clock / ribbons / flash / prominence / plume.
+    `js/sun-flare-director.js` (PURE, `tests/sun-flare-director.mjs`, 8
+    checks) is the one event shape from DONKI, SWPC and the page list, and
+    sun.html has one `playFlare()`. What that fixed: a flare reported late now
+    starts late on BOTH clocks (the cooling track used to restart at zero
+    while the ribbon clock was aged — twenty minutes in, the plasma is in
+    171, not 131); the class passed to the cooling track is the full class
+    (X2.3), not the letter (X1); an unlocated flare is never placed; a re-run
+    from onset is captioned REPLAY with its time compression printed. The
+    phases (impulsive → hot loops → cooling → arcade) are NOT typed: they are
+    when 131 Å and 171 Å peak along that flare's own cooling track.
+    **Measured, and the opposite of what the first comment claimed:** an X5
+    holds its hot phase longer than an M1 (131 peaks at ~216 s vs ~60 s) but
+    reaches its 171 arcade SOONER (~1290 s vs ~1510 s) — the RTV loop it
+    starts in is denser and radiates faster. `#flare-caption` prints the
+    director's sentence and offers the channel the plasma is brightest in.
+  - **Phase 5 — the camera.** `js/sun-camera.js` (PURE,
+    `tests/sun-camera.mjs`, 12 checks).
+    - **The lens is 30°, not 50°.** The same disc from further back: at the
+      hero distance (~6.7 R☉) the sphere's silhouette hides 1.4 % of the
+      plane-of-sky ring instead of the 4.6 % it hid at the 50° equivalent —
+      i.e. the base of every prominence. Old-lens distances (presets,
+      `flyToRegion`'s `distR`, the tour) go through `equivalentDistance`.
+    - **Hero framing is measured.** The canvas is full-bleed under floating
+      panels; `safeFrame` finds the unobstructed rectangle, `setViewOffset`
+      moves the principal point into it, and the distance is derived from the
+      lens and that rectangle (disc = 60 % of its shorter side). A re-measure
+      never overwrites the user's own zoom.
+    - **Flights are spherical, one-shot, time-based.** `flyToRegion` lerped
+      Cartesian positions, so any far-side hop took the camera THROUGH the Sun
+      (the gate keeps that as its negative control). Any touch of the controls
+      ends a flight and nothing eases the camera back.
+    - **`spaceOcclusion` followed the frame, not the Sun.** Its dimming zones
+      were a fixed 0.14 / 0.50 of the frame about the frame's centre — the
+      same thing as "around the Sun" only at the old default camera. They now
+      ride the Sun's projected centre and radius (0.773 / 2.76 R☉ are those
+      two numbers at that camera, so the default is unchanged).
+    - **Cinematic mode** (`#btn-cine`, `C`, `?cine=1`): theatre stage, chrome
+      hidden, two thin bars with one caption line, the Phase 2 lens on, and a
+      running order built from what is actually on screen (Approach → Flare →
+      Limb pan → Orbit → Pull-back; a shot whose subject is absent is
+      skipped). THE PROVENANCE CHIP IS NEVER HIDDEN. In a flare shot the VIEW
+      follows the plasma down the cooling track (131 → 193 → 171) until the
+      user touches the channel picker, and the shot holds until the arcade
+      phase or 75 s. `?cine=1` waits for the exposure controller to lock on
+      the hero view first — a fly-in from 34 R☉ locked it on black sky and
+      every later shot came out ~1 EV dark (measured).
+    - **Wind particles were 7 px blobs.** Their size was (1.6–2.5)·160/z
+      clamped to 7 px, i.e. 43–67 px before the clamp at every distance the
+      camera can reach — every particle drew at exactly 7 px. Now ~1.2–2.4
+      CSS px at the hero distance, and faded where their own sightline meets
+      the disc (a model mote must not sit on an observed pixel).
+  - **Phase 3's coronagraph plane: SOHO/LASCO C2 + C3, observed.**
+    `js/sun-coronagraph.js` + `js/lasco-sources.js` (`tests/sun-coronagraph.mjs`
+    29 checks, `tests/coronagraph-route.mjs` 8), `channel=c2|c3` on
+    `/api/solar/aia`, `solar-lasco` in the pipeline registry, `soho-lasco` in
+    `api/health.js`, synthetic fixtures with the real browse geometry. Same
+    plane of sky and vantage as the off-limb ring (SOHO is at L1); centre
+    MEASURED from the white limb circle, scale DERIVED from plate scale × the
+    Sun's apparent radius on the frame's date; nothing inside the measured
+    occulter, nothing over the timestamp corner, nothing outside the frame;
+    C3 level-matched to C2 on their overlap. Three things the page does
+    around it: **(1) it is a different exposure** — the outer corona is
+    10⁻⁶–10⁻¹⁰ of the disc, so the layer is drawn at zero gain at the hero
+    framing and fades in as the camera pulls back (at full gain there it rang
+    the Sun with a dark hole and an orange wall); **(2)** the zoom range
+    extends to 140 R☉ only while a frame is actually drawn; **(3)** the
+    exposure ceiling is +1.5 EV with the whole Sun in view (+4 is for flights
+    inside the corona; far out it blew the disc and C2 to white). The client
+    REQUIRES the `X-SOHO-Instrument` response header, because an unknown
+    channel on this proxy has always fallen back to the HMI disc — the
+    browser gate's negative control withholds it and the layer draws nothing.
+    **UNVERIFIED (nasa.gov is egress-blocked here):** that the realtime frames
+    carry the limb circle, their roll (SOHO flies inverted about half the
+    year — `__sun.coronagraph.instruments[1].pylonPaDeg` near 135 is upright,
+    near 315 needs `rollDeg: 180`), the plate scales, and the cadence
+    thresholds. One production load settles all four; `node
+    scripts/fetch-sdo-fixtures.mjs` on a machine with egress writes real
+    c2/c3 frames for the gates.
+  - **Gates.** New: `tests/sun-limb.mjs`, `tests/sun-camera.mjs`,
+    `tests/sun-flare-director.mjs`, `tests/sun-coronagraph.mjs`,
+    `tests/coronagraph-route.mjs`, `tests/sun-cinematic.spec.js` (4 browser
+    tests, incl. the no-header negative control), an edge-feather check in
+    `tests/sun-offlimb.mjs`, and `.github/workflows/sun-kernels.yml` — the
+    Sun node gates had no workflow at all until now.
+  - **Not done.** Phase 4 (cube-sphere fluid, granule relief, limb faculae)
+    and Phase 6 (WebGPU) are untouched. Depth of field (Phase 5's bokeh pass)
+    was not built. `?preview=1` does not yet play the cinematic loop. The
+    arcade's loops are evenly spaced and equal in size, which at close range
+    reads as mechanical; the kernel's `weight` is the hook for varying them.
+
 ---
 
 ## 1. Scope & locked decisions
@@ -1079,7 +1234,7 @@ owner's GPU, and *identical* screenshots on the Phase 0 baseline scenes
 | 2 | `js/sun-post.js`, `tests/sun-post.mjs` | `sun.html` (composer wiring: UnrealBloom ×2 + radialDiffuse → `SunPostPass`; Doppler save/restore; resize; animate drive; `flareAdd` overlay in sunFS), `tests/sun-smoke.spec.js` |
 | 3 | `js/corona-loop-density.js`, `js/corona-accumulate.js`, `tests/corona-volumetric.mjs` | `js/corona-volumetric.js` (loop sampler, two-scale jittered march, `u_marchLegacy`), `js/corona-volumetric-mount.js` (layer 1, `setLoopDensity`, `setJitter`), `js/field-atlas.js` (WASM path fix), `sun.html` (lazy default mount, accumulation pass, loop rebuild, K/F corona in coronaFS), `tests/sun-smoke.spec.js` |
 | 4 | `tests/solar-fluid.mjs` | `js/solar-fluid.js`, `sun.html` `sunFS` |
-| 5 | `js/sun-camera.js`, `tests/sun-camera.mjs` | `sun.html`, `js/preview-mode.js` |
+| 5 (2026-11-20) | `js/sun-camera.js`, `js/sun-flare-director.js`, `js/sun-limb.js`, `js/sun-coronagraph.js`, `js/lasco-sources.js`, `tests/sun-{camera,flare-director,limb,coronagraph}.mjs`, `tests/coronagraph-route.mjs`, `tests/sun-cinematic.spec.js`, `.github/workflows/sun-kernels.yml` | `sun.html`, `js/sun-offlimb.js` (edge feather, `limbWeight`), `js/flare-arcade.js` (`style: 'ribbon'`), `api/solar/aia.js` (c2/c3), `api/health.js`, `js/pipeline-registry.js`, `tests/sun-offlimb.mjs`, the SDO fixture scripts. `js/preview-mode.js` NOT yet wired |
 | 6 | `js/vendor/three-0.17x/`, `js/sun-render.js`, `tests/sunfield-kernel-smoke.mjs`, `scripts/lint-three-vendor.mjs` | `sun.html` import map |
 
 Extraction rule: shader code that Phase 2/6 needs to compile for two
@@ -1168,6 +1323,16 @@ log. Re-read CLAUDE.md §5 before opening it.
 ---
 
 ## 9. Deferred / open
+
+- **Settle the LASCO frames on production** (2026-11-20). Load sun.html, zoom
+  out, and read `__sun.coronagraph.instruments`: `geometry` (`measured` means
+  the limb circle was found), `ringRatio` (≈ 1 confirms the plate scale),
+  `pylonPaDeg` on C3 (≈ 135 upright, ≈ 315 inverted). Record what it says in
+  `js/sun-coronagraph.js` and, if SOHO is inverted, turn `autoRoll` on.
+- **Make GOES/SUVI the default off-limb source** once its upstream is settled
+  (next item). It is what removes the detector-shaped edge of the ring.
+- **Cinematic mode in `?preview=1`**, depth of field, and per-loop variation
+  in the flare arcade — the three Phase 5 items not built on 2026-11-20.
 
 - **GONG far-side plage seeding** (`/api/solar/farside?format=series` →
   the strongest detections modulate a far-hemisphere plage term; no
