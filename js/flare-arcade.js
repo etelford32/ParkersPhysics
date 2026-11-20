@@ -278,12 +278,20 @@ export function createFlareArcade({
     let lastPlume = { front: 1, tail: 1, radius: 0, alpha: 0, rMax: 1 };
     let lastT = 0;
     let shown = true;
+    let plumeOn = true;
     const colOut = new THREE.Color();
     // Per-loop thermal look (sim units — the ribbon clock). COOL_T is sunFS's own
     // arcadeCol timescale; the rest are when a cooled loop dims and leaves the EUV bands.
     const COOL_T = 250, AGE_DIM = 150, AGE_OUT0 = 420, AGE_OUT1 = 720, NEST_LIFE = 420;
+    // A loop's weight by age: new 0.55, long-cooled 0.30. It was 1.00 → 0.30, and with the brighter hot
+    // pick a young arcade was 64 % clipped white; at 0.72 it was still 44 % (both measured by the look gate).
+    const YOUNG_FLOOR = 0.30, YOUNG_GAIN = 0.25;
     const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-    const HOT  = new THREE.Color(0.55, 1.30, 1.20);   // AIA 131 teal — the shader's arcadeCol at onset
+    // Line style keeps the shader's own arcadeCol picks. In RIBBON style the hot colour is brought to the
+    // SAME LUMINANCE as the cool one (0.806): a hot strand is a different colour, not 40 % more light —
+    // with the brighter pick, a young arcade (every loop new, every loop at full weight) clipped 64 % of
+    // its pixels to white and its temperature was unreadable (measured, tests/sun-flare-look.spec.js).
+    const HOT  = ribbon ? new THREE.Color(0.39, 0.92, 0.85) : new THREE.Color(0.55, 1.30, 1.20);   // AIA 131 teal
     const COOL = new THREE.Color(1.00, 0.80, 0.30);   // AIA 171 gold as the arcade cools
 
     function setSite(next) {
@@ -420,11 +428,11 @@ export function createFlareArcade({
             const w = 0.35 + 0.65 * (line.userData.weight ?? 1);
             line.material.opacity = nested
                 // newest brightest; each loop dims as it cools and leaves the EUV bands
-                ? Math.min(1, showFlares * (L?.alpha ?? 1) * w * (0.30 + 0.70 * Math.exp(-age / AGE_DIM)) * (1 - smooth(AGE_OUT0, AGE_OUT1, age)) * (0.6 + 0.4 * flash))
+                ? Math.min(1, showFlares * (L?.alpha ?? 1) * w * (YOUNG_FLOOR + YOUNG_GAIN * Math.exp(-age / AGE_DIM)) * (1 - smooth(AGE_OUT0, AGE_OUT1, age)) * (0.6 + 0.4 * flash))
                 : Math.min(1, loopAlpha * flash * w);
         }
 
-        if (ps.alpha * showFlares > 0.005) {
+        if (plumeOn && ps.alpha * showFlares > 0.005) {
             writePlume(ps);
             plumeMat.opacity = Math.min(1, ps.alpha * showFlares);
             plume.visible = true;
@@ -434,6 +442,8 @@ export function createFlareArcade({
     }
 
     function setVisible(v) { shown = !!v; if (!shown) group.visible = false; }
+    /** Draw the loops without the eruptive plume (the look gate isolates the arcade with it). */
+    function setPlumeEnabled(v) { plumeOn = !!v; if (!plumeOn) plume.visible = false; }
 
     function dispose() {
         for (const l of loops) { l.geometry.dispose(); l.material.dispose(); }
@@ -442,7 +452,7 @@ export function createFlareArcade({
     }
 
     return {
-        group, setSite, update, setVisible, dispose, setModel, setGain,
+        group, setSite, update, setVisible, dispose, setModel, setGain, setPlumeEnabled,
         get site() { return site ? { ...site, pairs: site.pairs ? site.pairs.length : 0 } : null; },
         get state() {
             const apexR = lastLoops.length ? Math.max(...lastLoops.map(L => L.apexR)) : null;

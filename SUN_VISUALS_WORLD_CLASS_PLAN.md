@@ -990,6 +990,55 @@ owner.*
     is in sim time and could not be judged at 1–2 fps; model field lines
     still draw over observed pixels.
 
+
+- **2026-11-21 — the flare's shape becomes a model you can iterate on (owner:
+  "make the flare geometry iterative and improveable, so we can add testing
+  to improve the realism and visuals over time").** Until now a shape change
+  meant editing constants in the kernel AND a mirrored literal in the shader,
+  and "better" was whoever was looking.
+  - **One parameter set.** `makeFlareModel(overrides)` in
+    `js/flare-geometry.js` builds every shape law from plain numbers. The
+    shader holds none: separation, width, length and decay are uniforms the
+    page writes from the model each frame (`_syncFlareShape`), and the 3D
+    arcade and the flare shot read the same model. `?flaremodel=v1`,
+    `__sun.setFlareModel({…})` and `__sun.holdFlareAt(t)` are the A/B and
+    capture hooks; a non-shipped model is named in the flare caption.
+  - **A scorecard.** `js/flare-realism.js` measures a model in Mm, km/s and
+    degrees and scores 17 rows against ranges from the flare literature. The
+    laws shipped until today (`FLARE_SHAPE_V1`, kept exactly) score 74.4;
+    the set chosen with the scorecard (`FLARE_SHAPE_V2`) scores 100.0. What
+    moved, and why: ribbons appeared 28 Mm apart and parted at a constant
+    6 km/s — now 11 Mm, parting at 33 km/s and slowing ninefold by half an
+    hour, further for bigger flares; loops started 30° sheared and relaxed
+    to 9° — now 62° → 28° (the strong-to-weak shear change); loops stood
+    2.7× taller than their half footpoint span — now 0.96× (near
+    semicircular); the brightening ran along the inversion line at
+    277 km/s — now 138.
+  - **Honest limits of the score.** 100 means every row is inside its range,
+    i.e. PLAUSIBLE on these axes. The ranges are wide, were written from
+    memory of the cited papers (no access to them here), and every row says
+    `verified: false`. `OPEN_TARGETS` lists what the model cannot produce at
+    all: J-shaped ribbon hooks, cusp-shaped new loops, asymmetric ribbon
+    motion, moving hard-X-ray kernels, supra-arcade downflows, loop
+    shrinkage.
+  - **A ratchet.** `tests/flare-realism.mjs` requires the shipped model to
+    score exactly the committed baseline: lower fails, higher fails until
+    `node scripts/flare-realism.mjs --update` locks it in, and no row may
+    slip behind a gain elsewhere. `--try '{…}'` scores a candidate row by
+    row; `--sweep path=lo:hi:n` walks one parameter.
+  - **The rendered half.** `tests/sun-flare-look.spec.js` isolates the 3D
+    arcade by differencing frames with it shown and hidden and takes the
+    largest connected lit region. Measured: the drawn arcade sits within
+    2 px of the active model's projection (v1 swapped in is 44 px off v2's —
+    the negative control); the light it adds is teal when hot and gold when
+    cooled. It also caught a real defect on its first run — a young arcade
+    was 64 % clipped white — which is now fixed (hot strands at the cool
+    strands' luminance, new-loop weight 0.55) with the old gain kept as the
+    control. `FLARE_SHOTS=<dir>` writes every frame it measured.
+  - **Next, in this order:** verify the scorecard's ranges against their
+    papers; turn `OPEN_TARGETS` into rows one at a time (J-hooks and the
+    cusp first — both are shape-only); break up the arcade's regularity
+    (still a comb up close) with a measured target for strand spacing.
 ---
 
 ## 1. Scope & locked decisions

@@ -13663,6 +13663,7 @@ window.__sun = {
     /** The flare-shape model being drawn, and how to swap it (null → shipped, 'v1', or overrides). */
     get flareModel() { return flareModel; },
     setFlareModel,
+    FG,                                   // the flare-geometry module (the look gate builds reference models with it)
     /** Hold both flare clocks at one age in sim units (null releases) — captures and the look gate. */
     holdFlareAt: (t) => { _flareHoldT = (t == null) ? null : Math.max(0, +t || 0); },
     flareArcade,
