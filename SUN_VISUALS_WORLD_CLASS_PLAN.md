@@ -1039,6 +1039,44 @@ owner.*
     papers; turn `OPEN_TARGETS` into rows one at a time (J-hooks and the
     cusp first — both are shape-only); break up the arcade's regularity
     (still a comb up close) with a measured target for strand spacing.
+
+- **2026-11-21 (later) — J-shaped ribbons and cusp-shaped loops (owner:
+  "let's add the J-hooks and cusp loops next").** The first use of the
+  workflow above, done in its order.
+  - **Targets first.** Six rows went onto the scorecard with the features
+    switched off: how far each ribbon's end turns, the double-J (hooks at
+    opposite ends, opening away from the inversion line), the hook's size,
+    how pointed a just-formed loop is, how round a relaxed one is, and how
+    much a loop shrinks as it relaxes. The shipped model fell from 100 to
+    76.6.
+  - **Then the model.** Each ribbon now runs straight along the inversion
+    line and turns away from it on a 170° arc, the two hooks at opposite
+    ends; a loop forms with a pointed top, 1.28× its relaxed height, and
+    relaxes to the round arc. Score back to 100 over 23 rows; the old laws
+    now score 58.1. One function, `ribbonJ`, gives the distance to the
+    curve in both JS and GLSL — the gate transliterates the shader text
+    back to JS and runs it against the kernel.
+  - **Handedness.** Which ends hook and which way the arcade is sheared are
+    ONE quantity (the sign of the region's helicity). The page uses the
+    hemispheric rule as a prior, like Joy's law for the inversion line. Its
+    geometric sense (which end, for which sign) was derived by hand and has
+    NOT been checked against a published figure — the first thing to verify.
+  - **Two things the workflow caught.** (1) The first "cusp" row was the
+    angle at the loop's top, and the negative control showed it scoring the
+    OLD loops as cusps: they were round but 2.7× taller than their span,
+    which makes any arc's top angle sharp. The row is now the loop's width
+    near its top relative to a round arc on the same feet — independent of
+    height. (2) A missing feature was earning half marks (a straight ribbon
+    scored 0.50 on the hook row); feature-presence rows now carry their own
+    tolerance and an absent feature scores 0.
+  - **On pixels.** With the arcade hidden, the light the flare adds at the
+    projected hook points is 51 (of 255) against 3 at the same points
+    mirrored along the inversion line; under the old model, 6.6 and 6.2.
+  - **Still open:** the hook and cusp ranges are our encoding of "a hook"
+    and "pointed", not published measurements, and say so; hooks do not yet
+    grow or drift during the flare; the erupting rope whose feet the hooks
+    wrap is not drawn; asymmetric ribbon motion, moving hard-X-ray kernels
+    and supra-arcade downflows remain in the backlog.
 ---
 
 ## 1. Scope & locked decisions
