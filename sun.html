@@ -2474,7 +2474,12 @@ const uniforms = {
     // north (js/flare-geometry.js pilAngleRad — the Joy's-law PRIOR; the
     // atlas polylines override it when t_flare_ribbons is active).
     u_flare_pil:         { value: 0.0  },
-    u_flare_len:         { value: FG.ribbonLength0('M') },   // along-PIL 1/e half-length of the ribbons at onset, rad — class-scaled (js/flare-geometry.js)
+    // The ribbons' SHAPE at this instant — written every frame from the flare model
+    // (js/flare-geometry.js, _syncFlareShape). The shader holds no law of its own.
+    u_flare_sep:         { value: 0.02 },    // half-separation across the PIL, rad
+    u_flare_wid:         { value: 0.005 },   // ribbon width (Gaussian scale), rad
+    u_flare_alongVar:    { value: 0.01 },    // along-PIL envelope variance σ², rad²
+    u_flare_decay:       { value: 0.0 },     // ribbon brightness envelope, 0..1
     // THE ONE ROTATION ACCUMULATOR. Equatorial angle (radians) the sim frame
     // has turned since page load, advanced in animate() at
     // FG.SIM_ROT_RATE · u_rot per sim unit and mirrored into `solarRotAngle`.
@@ -2941,7 +2946,11 @@ const sunFS = /* glsl */`
     uniform float u_flare_lon;       // heliographic longitude (radians) — CURRENT frame (JS rotates it each frame)
     uniform float u_flare_t;         // simulation-time elapsed since flare onset (0 = just fired)
     uniform float u_flare_pil;       // PIL angle at the flare site, from local east toward north (radians)
-    uniform float u_flare_len;       // along-PIL 1/e half-length of the ribbons at onset (radians) — FG.ribbonLength0(cls)
+    // The ribbon's shape NOW, from the flare model (no law is typed in this shader):
+    uniform float u_flare_sep;       // half-separation across the PIL (radians)
+    uniform float u_flare_wid;       // ribbon width, Gaussian scale (radians)
+    uniform float u_flare_alongVar;  // along-PIL envelope variance (radians squared)
+    uniform float u_flare_decay;     // ribbon brightness envelope, 0..1
     uniform float u_rotAngle;        // equatorial rotation of the sim frame since load (radians) — THE accumulator
 
     // Phase 4.4 — per-AR sunspot slots. xyz = rotated unit-sphere AR
@@ -3736,15 +3745,18 @@ const sunFS = /* glsl */`
         //  u_flare_t → ∞ : ribbons widen, fade, and the post-flare arcade cools
         //
         // Angular scale: 1 R_sun ≈ 696 000 km → 0.001 rad ≈ 696 km (1 Mm)
-        // Ribbon separation starts at ~15 Mm (0.022 rad), grows to ~50 Mm.
-        // e-folding decay ≈ 175 sim-time units (~5 min at 60fps / dt=0.010).
+        // HOW FAR APART, HOW WIDE, HOW LONG and HOW BRIGHT the ribbons are at
+        // this instant are UNIFORMS, written each frame from the flare model
+        // (js/flare-geometry.js makeFlareModel → _syncFlareShape). This shader
+        // draws them; it does not decide them. tests/flare-geometry.mjs fails
+        // if a law is typed back in here.
         {
             float cos_df = sin(lat) * sin(u_flare_lat)
                          + cos(lat) * cos(u_flare_lat) * cos(lon - u_flare_lon);
             float df = acos(clamp(cos_df, -1.0, 1.0));
 
             // Decay envelope — fast for UV continuum, slower for Hα cooling
-            float fDecay = exp(-u_flare_t / 175.0);
+            float fDecay = u_flare_decay;
 
             // ── UV/EUV hard kernel (AIA 1600/1700 Å proxy) ─────────────────
             // Compact bright kernel at the reconnection site itself.
@@ -3797,10 +3809,10 @@ const sunFS = /* glsl */`
                 vec3  pF     = normalize(vPosition);
                 float along  = dot(pF, pilAx);
                 float across = dot(pF, loopAx);
-                float alongVar = u_flare_len * u_flare_len * (1.0 + u_flare_t / 2500.0);   // along-PIL envelope variance — class-scaled (FG.ribbonAlongSigma)
+                float alongVar = u_flare_alongVar;
                 float lonEnv = exp(-along * along / alongVar);
-                float sep    = 0.020 + u_flare_t * 2.5e-5;    // separation grows with reconnection
-                float rWid   = 0.005 + u_flare_t * 6.0e-6;    // ribbon width grows
+                float sep    = u_flare_sep;
+                float rWid   = u_flare_wid;
                 rib1 = exp(-pow((across - sep) / rWid, 2.0)) * lonEnv;
                 rib2 = exp(-pow((across + sep) / rWid, 2.0)) * lonEnv;
             }
@@ -7383,6 +7395,35 @@ function triggerPositionFlare(lat_deg, lon_deg, cls) {
 //   Returns { latDeg, lonDeg0 } for triggerPositionFlare / flyToRegion.
 const _Z_UP = new THREE.Vector3(0, 0, 1);
 const flareSite = { latRad: 0, lonRad0: 0, pilAngle: 0, cls: 'M', complex: false, set: false };
+// ── THE FLARE'S SHAPE IS A MODEL (js/flare-geometry.js makeFlareModel) ──────
+// Every shape number on this page — the shader's ribbons, the 3D arcade, the
+// flare shot's framing — comes from `flareModel`. It is the shipped set unless
+// someone asks for another: `?flaremodel=v1` draws the laws shipped until
+// 2026-11-21 (the A/B, and the look gate's negative control), and
+// `__sun.setFlareModel({ shear: { onsetDeg: 70 } })` draws a candidate. How
+// good a model is, is measured by js/flare-realism.js — never judged here.
+let flareModel = FG.FLARE_MODEL;
+/** Upload the ribbons' shape at the flare's current age. The shader has no law of its own. */
+function _syncFlareShape() {
+    const t = uniforms.u_flare_t.value, cls = flareSite.cls;
+    uniforms.u_flare_sep.value      = flareModel.ribbonSeparation(t, cls);
+    uniforms.u_flare_wid.value      = flareModel.ribbonWidth(t);
+    uniforms.u_flare_alongVar.value = Math.pow(flareModel.ribbonAlongSigma(t, cls), 2);
+    uniforms.u_flare_decay.value    = flareModel.ribbonDecay(t);
+}
+/** Swap the shape model: null → shipped, 'v1' / 'v2' → a named set, an object → overrides on the shipped set. */
+function setFlareModel(spec) {
+    flareModel = spec == null ? FG.FLARE_MODEL
+        : spec === 'v1' ? FG.makeFlareModel(null, FG.FLARE_SHAPE_V1)
+        : spec === 'v2' ? FG.makeFlareModel(null, FG.FLARE_SHAPE_V2)
+        : typeof spec.arcadeShells === 'function' ? spec
+        : FG.makeFlareModel({ id: 'candidate', ...spec });
+    flareArcade.setModel(flareModel);      // only ever called after the arcade exists (boot block below, or by hand)
+    _syncFlareShape();
+    return flareModel.id;
+}
+// A test / capture hook: hold BOTH flare clocks at one age (sim units), or null to release.
+let _flareHoldT = null;
 // Epoch-frame group for the site-anchored 3D layers (arcade, plume, HXR
 // kernels): animate() rotates it by FG.siteRotation(solarRotAngle, latRad).
 const _flareSiteGroup = new THREE.Group();
@@ -7395,6 +7436,10 @@ scene.add(_flareSiteGroup);
 const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.0, heightScale: 1.0,
     style: 'ribbon', maxLoops: 23, plumeParticles: 420 });   // 23 stations along the PIL × the kernel's generations (nested arcade)
 _flareSiteGroup.add(flareArcade.group);
+{   // `?flaremodel=v1|v2` — the shape model A/B (see flareModel above).
+    const want = (new URLSearchParams(location.search).get('flaremodel') || '').toLowerCase();
+    if (want === 'v1' || want === 'v2') setFlareModel(want);
+}
 
 // ── THE FLARE CLOCK (js/flare-dem.js) ─────────────────────────────────────
 //
@@ -7436,7 +7481,7 @@ function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {
     uniforms.u_flare_lat.value = latRad;
     uniforms.u_flare_lon.value = FG.siteLonAt(flareSite.lonRad0, solarRotAngle, latRad);
     uniforms.u_flare_pil.value = flareSite.pilAngle;
-    uniforms.u_flare_len.value = FG.ribbonLength0(flareSite.cls);
+    _syncFlareShape();
     flareArcade.setSite({
         latRad, lonRad0: flareSite.lonRad0, pilAngle: flareSite.pilAngle,
         cls: flareSite.cls, complex: flareSite.complex, pairs: pairs ?? null,
@@ -7505,7 +7550,9 @@ function _tickFlareCaption(nowMs) {
         if (!el.hidden) el.hidden = true;
         return;
     }
-    const txt = DIRECTOR.caption(_flareEvent, ph, _flareElapsedS, { replay: _flareReplay, simSpeed: +(simSpeed * _flareRate).toFixed(2) });
+    // A non-shipped shape model is an A/B view: the caption says which one is drawn.
+    const txt = DIRECTOR.caption(_flareEvent, ph, _flareElapsedS, { replay: _flareReplay, simSpeed: +(simSpeed * _flareRate).toFixed(2) })
+        + (flareModel === FG.FLARE_MODEL ? '' : ` · shape model: ${flareModel.id}`);
     const label = el.querySelector('.fc-text');
     if (label.textContent !== txt) label.textContent = txt;
     const btn = el.querySelector('#fc-view');
@@ -7530,6 +7577,11 @@ function _setViewMode(mode) {
 
 /** Per-frame: carry the site to the current frame and drive the arcade. */
 function _tickFlareSite() {
+    if (_flareHoldT != null) {
+        uniforms.u_flare_t.value = _flareHoldT;
+        _flareElapsedS = _flareHoldT / DIRECTOR.SIM_UNITS_PER_S;
+    }
+    _syncFlareShape();
     if (!flareSite.set) return;
     uniforms.u_flare_lon.value = FG.siteLonAt(flareSite.lonRad0, solarRotAngle, flareSite.latRad);
     _flareSiteGroup.rotation.y = FG.siteRotation(solarRotAngle, flareSite.latRad);
@@ -13314,7 +13366,7 @@ var sunCam = (() => {
             const site = FG.sitePositionAt(flareSite.latRad, flareSite.lonRad0, solarRotAngle);
             // Framed to THIS flare's size: the ribbons' 1/e length, from the kernel.
             return CAM.flareShot(from, { site, earth: basis.normal, cls: flareSite.cls,
-                length: 2 * FG.ribbonLength0(flareSite.cls) });
+                length: 2 * flareModel.ribbonLength0(flareSite.cls) });
         }
         if (name === 'corona') {
             // Frame each instrument to the field it is actually DRAWING (rOut is
@@ -13608,6 +13660,12 @@ window.__sun = {
             : null;
     },
     setFlareElapsed: (s) => { _flareElapsedS = Math.max(0, +s || 0); },
+    /** The flare-shape model being drawn, and how to swap it (null → shipped, 'v1', or overrides). */
+    get flareModel() { return flareModel; },
+    setFlareModel,
+    /** Hold both flare clocks at one age in sim units (null releases) — captures and the look gate. */
+    holdFlareAt: (t) => { _flareHoldT = (t == null) ? null : Math.max(0, +t || 0); },
+    flareArcade,
     startFlareClock: (cls) => _startFlareClock(cls),
     // Observed cool material (HEK filaments/prominences → the volume's B channel).
     // Prominence bundles: the rung the governor is on, and a pin for tests —

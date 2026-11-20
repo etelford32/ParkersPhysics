@@ -65,13 +65,15 @@
  *   footpoint pairs from `js/flare-ribbons.js` override it loop by loop.
  *
  * ── Ribbon / arcade laws ───────────────────────────────────────────────────
- *   The ribbon separation, width, along-PIL envelope and decay MIRROR the
- *   legacy fallback in sunFS (RIBBON below); `tests/flare-geometry.mjs`
- *   reads sun.html and fails if the shader's literals drift from these. The
- *   arcade is the 3D counterpart of those ribbons: loops straddle the PIL at
- *   the ribbon separation, sheared strong-to-weak as reconnection proceeds
- *   (Aulanier et al. 2012), apex over the PIL. Heights are in R☉ and are
- *   the DRAWN heights — sized to read on a 1-R☉ sphere, not radiometry.
+ *   ONE overridable parameter set (FLARE_SHAPE_*, makeFlareModel) — see the
+ *   laws section. sunFS holds NO shape law: the page uploads this model's
+ *   separation / width / length / decay each frame, and
+ *   `tests/flare-geometry.mjs` fails if a literal law reappears in the
+ *   shader. The arcade is the 3D counterpart of those ribbons: loops
+ *   straddle the PIL at the ribbon separation, sheared strong-to-weak as
+ *   reconnection proceeds (Aulanier et al. 2012), apex over the PIL. How
+ *   close the shape is to observed flares is MEASURED, by
+ *   js/flare-realism.js.
  */
 
 import { diffRotFactor, solarEphemeris } from './sun-observed.js';
@@ -244,267 +246,336 @@ export function tangentFrame(latRad, lonRad, pilAngle = pilAngleRad(latRad)) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Ribbon / arcade / plume laws
+//  Ribbon / arcade / plume laws — ONE parameter set, overridable
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Legacy-fallback ribbon constants, MIRRORED from sunFS (sun.html, the
- * "Legacy fallback" branch of the flare-ribbon section). `t` is u_flare_t,
- * sim units since onset. Units: radians of arc on the unit sphere.
- */
-export const RIBBON = Object.freeze({
-    SEP0: 0.020, SEP_RATE: 2.5e-5,          // half-separation across the PIL
-    WID0: 0.005, WID_RATE: 6.0e-6,          // ribbon width
-    // Along-PIL envelope exp(-x²/σ²): σ at onset per unit classFactor, and the
-    // time over which σ² grows by its onset value (the ribbons elongate).
-    LEN0: 0.095, LEN_GROW_T: 2500.0,
-    DECAY_T: 175.0,                         // e-folding of the ribbon brightness
-});
-/** The onset value this replaced: one σ for every class, √0.10 rad (see ribbonLength0). */
-export const RIBBON_LEN_LEGACY = Math.sqrt(0.10);
-export const ribbonSeparation = (t) => RIBBON.SEP0 + t * RIBBON.SEP_RATE;
-export const ribbonWidth      = (t) => RIBBON.WID0 + t * RIBBON.WID_RATE;
-/**
- * Along-PIL 1/e half-length of the ribbons at onset, radians — SCALED BY CLASS.
+ * THE FLARE'S SHAPE IS A MODEL WITH PARAMETERS, AND THE PARAMETERS ARE DATA.
  *
- * It was one constant for every flare, √0.10 = 0.316 rad: a ribbon 440 Mm from
- * 1/e point to 1/e point (0.63 R☉, 36° of heliographic arc — longer than the
- * largest active region ever recorded) standing 28 Mm apart, so every arcade
- * the page drew was a 9:1 spine of ribs. Two-ribbon flares of M and X class
- * have ribbons of order 50–200 Mm long a few tens of Mm apart (the ribbon
- * surveys: Kazachenko et al. 2017; Toriumi et al. 2017), and a C-class event
- * is smaller than an X-class one. With LEN0 = 0.095 the 1/e length is
- * 152 Mm for X, 112 Mm for M and 79 Mm for C — an ORDER-OF-MAGNITUDE law in
- * the same class factor the arcade height already uses, not a fit.
+ * Every law below — how far apart the ribbons stand and how fast they part,
+ * how sheared the loops are, how tall, how long the arcade is, how the
+ * brightening runs along the inversion line — reads ONE parameter set. A set
+ * is plain numbers, so it can be:
+ *
+ *   scored     js/flare-realism.js measures a model against published
+ *              observational ranges and returns a scorecard; the committed
+ *              baseline can only ratchet up (tests/flare-realism.mjs);
+ *   compared   `makeFlareModel(overrides)` builds a candidate without editing
+ *              this file; `node scripts/flare-realism.mjs --try '{…}'` scores
+ *              it against the shipped one, `--sweep path=lo:hi:n` walks one
+ *              parameter;
+ *   swapped    sun.html draws whatever model it is handed
+ *              (`__sun.setFlareModel`, `?flaremodel=v1`), and its shader holds
+ *              NO shape law of its own — the page feeds it this model's
+ *              numbers every frame. One copy.
+ *
+ * `FLARE_SHAPE_V1` is the set of laws shipped until 2026-11-21, kept EXACTLY
+ * (the gate re-derives its closed forms) so there is always a reference to
+ * score against: linear ribbon separation from 28 Mm apart, loops 2–3× taller
+ * than their footpoint span, shear 30° → 7°. `FLARE_SHAPE_V2` is the first set
+ * chosen WITH the scorecard. Units: radians of arc on the unit sphere (1 rad =
+ * 695.7 Mm), `t` in sim units since onset (sun.html: 0.35 per second).
  */
-export const ribbonLength0    = (cls = 'M') => RIBBON.LEN0 * classFactor(cls);
-export const ribbonAlongSigma = (t, cls = 'M') => ribbonLength0(cls) * Math.sqrt(1 + Math.max(t, 0) / RIBBON.LEN_GROW_T);
-export const ribbonDecay      = (t) => Math.exp(-t / RIBBON.DECAY_T);
-
-/** GOES class → drawn-size factor. Ordered A < B < C < M < X; unknown reads as M. */
-export const CLASS_FACTOR = Object.freeze({ A: 0.35, B: 0.45, C: 0.60, M: 0.85, X: 1.15 });
-export function classFactor(cls) {
-    const k = String(cls ?? 'M').trim()[0]?.toUpperCase();
-    return CLASS_FACTOR[k] ?? CLASS_FACTOR.M;
+function deepFreeze(o) {
+    for (const v of Object.values(o)) if (v && typeof v === 'object') deepFreeze(v);
+    return Object.freeze(o);
 }
+
+export const FLARE_SHAPE_V2 = deepFreeze({
+    id: 'flare-shape-v2',
+    /** GOES class → size factor. Ordered A < B < C < M < X; unknown reads as M. */
+    classFactor: { A: 0.35, B: 0.45, C: 0.60, M: 0.85, X: 1.15 },
+    ribbon: {
+        sep0: 0.008,        // half-separation across the PIL at onset — ribbons start close to the inversion line
+        sepRate: 0,         // linear term, rad per sim unit (the v1 law; off)
+        sepGain: 0.032,     // reach of the saturating term per unit classFactor: sep → sep0 + sepGain·cf
+        sepTau: 250,        // its e-folding, sim units — ribbons part fast, then slow
+        wid0: 0.005, widRate: 6.0e-6,           // ribbon width (Gaussian scale) and its growth
+        len0: 0.095, lenGrowT: 2500.0,          // along-PIL 1/e half-length per unit classFactor; σ² doubles in lenGrowT
+        decayT: 175.0,                          // e-folding of the ribbon brightness
+    },
+    /** Shear angle: between the line joining a loop's feet and the normal to the PIL. Relaxes in tan-space. */
+    shear: { onsetDeg: 62, onsetComplexDeg: 72, finalDeg: 22, relaxT: 250 },
+    /** Apex height = (a + b·cf) × the half footpoint CHORD (onChord 1) or the half separation (0). */
+    height: { a: 0.85, b: 0.10, onChord: 1 },
+    arcade: {
+        spanSigma: 0.6,     // loops are laid over ±spanSigma·σ of the ribbon envelope
+        formT0: 30,         // sim units — formation-time scale
+        formGrowth: 1.5,    // each generation waits this much longer than the last
+        zipT: 90,           // sim units for the brightening to reach the arcade's ends
+        zipCore: 0.22,      // the central fraction of the arcade that lights AT onset
+        fadeIn: 9,          // sim units for a new loop to come up
+        alongJitter: 0.38,  // station spacing irregularity, fraction of the mean spacing
+        heightJitter: 0.14, // loop-to-loop height scatter, fraction
+        timeJitter: 0.35,   // formation-time scatter, fraction of the gap to the next generation
+        maxGenerations: 7,
+    },
+    plume: { speed: 0.06, reach: 2.4 },
+});
+
+/** The laws shipped until 2026-11-21 — the reference every later set is scored against. Never edit. */
+export const FLARE_SHAPE_V1 = deepFreeze({
+    id: 'flare-shape-v1',
+    classFactor: { A: 0.35, B: 0.45, C: 0.60, M: 0.85, X: 1.15 },
+    ribbon: { sep0: 0.020, sepRate: 2.5e-5, sepGain: 0, sepTau: 250,
+              wid0: 0.005, widRate: 6.0e-6, len0: 0.095, lenGrowT: 2500.0, decayT: 175.0 },
+    // tan(shear) was 0.45·e^(−t/250) + 0.12 (0.75 for δ regions): the same form, in angles.
+    shear: { onsetDeg: Math.atan(0.57) / DEG, onsetComplexDeg: Math.atan(0.87) / DEG, finalDeg: Math.atan(0.12) / DEG, relaxT: 250 },
+    // height was 2·sep·(0.6 + 0.7·cf), on the separation — not the footpoint chord.
+    height: { a: 1.2, b: 1.4, onChord: 0 },
+    arcade: { spanSigma: 0.6, formT0: 30, formGrowth: 1.5, zipT: 45, zipCore: 0.22, fadeIn: 9,
+              alongJitter: 0.38, heightJitter: 0.14, timeJitter: 0.35, maxGenerations: 7 },
+    plume: { speed: 0.06, reach: 2.4 },
+});
+
+/** The set the site ships. Change it only with a scorecard that did not go down. */
+export const FLARE_SHAPE_DEFAULT = FLARE_SHAPE_V2;
 
 /**
- * Arcade shear (radians of footpoint offset along the PIL per unit
- * separation): strong at onset, relaxing toward near-potential as the
- * post-flare arcade cools. Complex (δ) regions start more sheared.
+ * Deep-merge overrides onto a base set. An unknown key THROWS: a typo in an
+ * override must not silently score (or draw) the base model.
  */
-export function arcadeShear(t, complex = false) {
-    return (complex ? 0.75 : 0.45) * Math.exp(-t / 250) + 0.12;
-}
-
-/** Drawn apex height above the photosphere, R☉. Grows with the ribbon separation and the class. */
-export function arcadeHeight(t, cls = 'M') {
-    return 2 * ribbonSeparation(t) * (0.6 + 0.7 * classFactor(cls));
-}
-
-/**
- * Post-flare arcade loops as polylines in the SUN FRAME (epoch coordinates —
- * the caller rotates by `siteRotation`). Without `pairs`, `n` loops are laid
- * along the PIL over ±0.6σ of the ribbon envelope, footpoints at
- * ±ribbonSeparation(t) across it and sheared along it; with `pairs` (the
- * atlas's conjugate footpoints, `{ a, b, apexR? }`) each pair is one loop.
- * Each loop: { pts: [[x,y,z]…], footA, footB, apexR, along, weight } with
- * footA on the +loopAxis side and `weight` the ribbon envelope at `along`.
- */
-export function arcadeLoops({
-    latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 9, complex = false,
-    pairs = null, samples = 24,
-} = {}) {
-    const frame = tangentFrame(latRad, lonRad, pilAngle);
-    const h = arcadeHeight(t, cls);
-    const out = [];
-    const loopFrom = (fa, fb, apexR, along, weight) => {
-        const a = unit(fa), b = unit(fb);
-        const cosw = Math.max(-1, Math.min(1, dot(a, b)));
-        const w = Math.acos(cosw);
-        const sw = Math.sin(w);
-        const pts = [];
-        for (let i = 0; i <= samples; i++) {
-            const u = i / samples;
-            // Great-circle interpolation between the footpoints…
-            const p = sw < 1e-9
-                ? a
-                : add(scale(a, Math.sin((1 - u) * w) / sw), scale(b, Math.sin(u * w) / sw));
-            // …lifted by a sine profile so the apex sits over the midpoint.
-            const r = 1 + (apexR - 1) * Math.sin(Math.PI * u);
-            pts.push(scale(unit(p), r));
+export function mergeFlareShape(base, over, path = '') {
+    if (over == null) return base;
+    if (typeof over !== 'object' || Array.isArray(over)) throw new Error(`flare shape: ${path || 'overrides'} must be an object`);
+    const out = { ...base };
+    for (const [k, v] of Object.entries(over)) {
+        if (!(k in base)) throw new Error(`flare shape: unknown parameter "${path}${k}"`);
+        if (base[k] && typeof base[k] === 'object') out[k] = mergeFlareShape(base[k], v, `${path}${k}.`);
+        else if (k === 'id') out[k] = String(v);
+        else {
+            if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`flare shape: "${path}${k}" must be a finite number`);
+            out[k] = v;
         }
-        return { pts, footA: a, footB: b, apexR, along, weight };
-    };
+    }
+    return out;
+}
 
-    if (pairs && pairs.length) {
-        for (const pr of pairs) {
-            if (!pr?.a || !pr?.b) continue;
-            const apexR = Number.isFinite(pr.apexR) && pr.apexR > 1 ? pr.apexR : 1 + h;
-            const mid = unit(add(pr.a, pr.b));
-            const along = dot(add(mid, scale(frame.radial, -1)), frame.pilAxis);
-            // Keep footA on the +loopAxis side so consumers can tell the sides apart.
-            const sideA = dot(pr.a, frame.loopAxis) >= dot(pr.b, frame.loopAxis);
-            out.push(loopFrom(sideA ? pr.a : pr.b, sideA ? pr.b : pr.a, apexR, along, 1));
+/** Deterministic hash → [0, 1). (station, generation, salt) under a site seed. */
+export function arcadeHash(seed, i, k, salt = 0) {
+    let h = (seed ^ Math.imul(i + 1, 0x9E3779B1) ^ Math.imul(k + 1, 0x85EBCA6B) ^ Math.imul(salt + 1, 0xC2B2AE35)) >>> 0;
+    h = Math.imul(h ^ (h >>> 16), 0x7FEB352D); h = Math.imul(h ^ (h >>> 15), 0x846CA68B);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+/** Site → seed, quantised to a degree so float jitter never re-rolls a flare's arcade. */
+export function arcadeSeed(latRad, lonRad) {
+    return (Math.imul(Math.round(latRad / DEG) + 91, 73856093) ^ Math.imul(Math.round(lonRad / DEG) + 181, 19349663)) >>> 0;
+}
+
+/** One loop: a great-circle arc between two feet, lifted by a sine so the apex sits over their midpoint. */
+function liftedLoop(fa, fb, h, samples) {
+    const cosw = Math.max(-1, Math.min(1, dot(fa, fb)));
+    const w = Math.acos(cosw), sw = Math.sin(w);
+    const pts = [];
+    for (let j = 0; j <= samples; j++) {
+        const u = j / samples;
+        const p = sw < 1e-9 ? fa : add(scale(fa, Math.sin((1 - u) * w) / sw), scale(fb, Math.sin(u * w) / sw));
+        pts.push(scale(unit(p), 1 + h * Math.sin(Math.PI * u)));
+    }
+    return pts;
+}
+
+/**
+ * Build a flare-shape model from a parameter set. `overrides` is deep-merged
+ * onto `base` (unknown keys throw). The returned object carries every law the
+ * consumers call, bound to those parameters, plus `params` itself.
+ */
+export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
+    const P = deepFreeze(mergeFlareShape(base, overrides));
+    const { ribbon: R, shear: S, height: H, arcade: A, plume: PL } = P;
+    const tanOnset = Math.tan(S.onsetDeg * DEG), tanOnsetC = Math.tan(S.onsetComplexDeg * DEG), tanFinal = Math.tan(S.finalDeg * DEG);
+
+    function classFactor(cls) {
+        const k = String(cls ?? 'M').trim()[0]?.toUpperCase();
+        return P.classFactor[k] ?? P.classFactor.M;
+    }
+    /** Half-separation of the ribbons across the PIL: a fast start that saturates (bigger flares part further). */
+    const ribbonSeparation = (t, cls = 'M') =>
+        R.sep0 + t * R.sepRate + R.sepGain * classFactor(cls) * (1 - Math.exp(-Math.max(t, 0) / R.sepTau));
+    const ribbonWidth = (t) => R.wid0 + t * R.widRate;
+    /**
+     * Along-PIL 1/e half-length of the ribbons at onset, radians — SCALED BY CLASS.
+     * It was one constant for every flare until 2026-11-20, √0.10 = 0.316 rad: a
+     * ribbon 440 Mm from 1/e point to 1/e point (0.63 R☉) standing 28 Mm apart.
+     * With len0 = 0.095 the 1/e length is 152 Mm for X, 112 Mm for M, 79 Mm for C.
+     */
+    const ribbonLength0 = (cls = 'M') => R.len0 * classFactor(cls);
+    const ribbonAlongSigma = (t, cls = 'M') => ribbonLength0(cls) * Math.sqrt(1 + Math.max(t, 0) / R.lenGrowT);
+    const ribbonDecay = (t) => Math.exp(-t / R.decayT);
+
+    /**
+     * Arcade shear as tan(θ): footpoint offset along the PIL per unit separation.
+     * Strong at onset, relaxing toward near-potential (the strong-to-weak shear
+     * change of two-ribbon flares). δ regions start more sheared.
+     */
+    const arcadeShear = (t, complex = false) => tanFinal + ((complex ? tanOnsetC : tanOnset) - tanFinal) * Math.exp(-t / S.relaxT);
+    const arcadeShearAngle = (t, complex = false) => Math.atan(arcadeShear(t, complex));
+    /** Apex height above the photosphere, R☉ — a fixed multiple of the loop's own footpoint span. */
+    const arcadeHeight = (t, cls = 'M', complex = false) => {
+        const sh = arcadeShear(t, complex);
+        return (H.a + H.b * classFactor(cls)) * ribbonSeparation(t, cls) * (H.onChord ? Math.sqrt(1 + sh * sh) : 1);
+    };
+    /** When generation k forms, sim units after its station lights (unjittered). */
+    const arcadeFormTime = (k) => A.formT0 * (Math.pow(A.formGrowth, k) - 1);
+
+    /**
+     * Post-flare arcade loops as polylines in the SUN FRAME (epoch coordinates —
+     * the caller rotates by `siteRotation`): ONE generation, the arcade at the
+     * current ribbon separation. Without `pairs`, `n` loops are laid along the
+     * PIL over ±spanSigma·σ of the ribbon envelope; with `pairs` (the atlas's
+     * conjugate footpoints, `{ a, b, apexR? }`) each pair is one loop.
+     * Each loop: { pts, footA, footB, apexR, along, weight }, footA on the
+     * +loopAxis side, `weight` the ribbon envelope at `along`.
+     */
+    function arcadeLoops({ latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 9, complex = false, pairs = null, samples = 24 } = {}) {
+        const frame = tangentFrame(latRad, lonRad, pilAngle);
+        const h = arcadeHeight(t, cls, complex);
+        const out = [];
+        const loopFrom = (fa, fb, apexR, along, weight) => {
+            const a = unit(fa), b = unit(fb);
+            return { pts: liftedLoop(a, b, apexR - 1, samples), footA: a, footB: b, apexR, along, weight };
+        };
+        if (pairs && pairs.length) {
+            for (const pr of pairs) {
+                if (!pr?.a || !pr?.b) continue;
+                const apexR = Number.isFinite(pr.apexR) && pr.apexR > 1 ? pr.apexR : 1 + h;
+                const mid = unit(add(pr.a, pr.b));
+                const along = dot(add(mid, scale(frame.radial, -1)), frame.pilAxis);
+                // Keep footA on the +loopAxis side so consumers can tell the sides apart.
+                const sideA = dot(pr.a, frame.loopAxis) >= dot(pr.b, frame.loopAxis);
+                out.push(loopFrom(sideA ? pr.a : pr.b, sideA ? pr.b : pr.a, apexR, along, 1));
+            }
+            return out;
+        }
+        const sep = ribbonSeparation(t, cls);
+        const sigma = ribbonAlongSigma(t, cls);
+        const shear = arcadeShear(t, complex);
+        const span = A.spanSigma * sigma;
+        for (let i = 0; i < n; i++) {
+            const along = n === 1 ? 0 : -span + (2 * span * i) / (n - 1);
+            // Each loop's feet are equal-and-opposite offsets from ITS OWN
+            // midpoint on the PIL, in the tangent frame at that midpoint — so the
+            // two feet normalise identically and the apex (their bisector) sits
+            // on the PIL exactly, not to first order.
+            const mid   = unit(add(frame.radial, scale(frame.pilAxis, along)));
+            const pilM  = unit(add(frame.pilAxis, scale(mid, -dot(mid, frame.pilAxis))));
+            const loopM = cross(mid, pilM);              // radial × pil = loop (right-handed)
+            const fa = add(add(mid, scale(loopM,  sep)), scale(pilM,  shear * sep));
+            const fb = add(add(mid, scale(loopM, -sep)), scale(pilM, -shear * sep));
+            out.push(loopFrom(fa, fb, 1 + h, along, Math.exp(-(along * along) / (sigma * sigma))));
         }
         return out;
     }
 
-    const sep = ribbonSeparation(t);
-    const sigma = ribbonAlongSigma(t, cls);
-    const shear = arcadeShear(t, complex);
-    const span = 0.6 * sigma;
-    for (let i = 0; i < n; i++) {
-        const along = n === 1 ? 0 : -span + (2 * span * i) / (n - 1);
-        // Each loop's feet are equal-and-opposite offsets from ITS OWN
-        // midpoint on the PIL, in the tangent frame at that midpoint — so the
-        // two feet normalise identically and the apex (their bisector) sits
-        // on the PIL exactly, not to first order.
-        const mid   = unit(add(frame.radial, scale(frame.pilAxis, along)));
-        const pilM  = unit(add(frame.pilAxis, scale(mid, -dot(mid, frame.pilAxis))));
-        const loopM = cross(mid, pilM);              // radial × pil = loop (right-handed)
-        const fa = add(add(mid, scale(loopM,  sep)), scale(pilM,  shear * sep));
-        const fb = add(add(mid, scale(loopM, -sep)), scale(pilM, -shear * sep));
-        const weight = Math.exp(-(along * along) / (sigma * sigma));
-        out.push(loopFrom(fa, fb, 1 + h, along, weight));
-    }
-    return out;
-}
-
-// ── A growing arcade: nested shells with ages (sun.html, 2026-11-20) ───────
-/**
- * `arcadeLoops` draws ONE generation of loops, all the same size, all the same
- * age — the arcade at the current ribbon separation. A real post-flare arcade
- * is every generation at once (the CSHKP picture): reconnection climbs, each
- * new loop is rooted further from the inversion line than the last and stands
- * higher, and the loops under it are older and have cooled. So at any moment
- * the arcade is NESTED — hot and newly formed on the outside, cool inside —
- * and the earliest (inner) loops are the most sheared.
- *
- * `arcadeShells` is that, from the SAME laws: a loop that formed at local
- * time τ has `ribbonSeparation(τ)`, `arcadeHeight(τ)` and `arcadeShear(τ)` —
- * no new geometry, only the existing laws evaluated at the loop's own
- * formation time and kept. Three things are added, all stated here:
- *
- *   formation   — generation k forms at FORM_T0·(FORM_GROWTH^k − 1) sim units
- *                 after its station lights: 0, 15, 38, 71, 122, 198, 312 —
- *                 quickly at first and ever more slowly, as the reconnection
- *                 rate of a real flare decays. (A fixed cadence was tried
- *                 first: seven generations were all formed by t ≈ 150 and the
- *                 arcade then stopped growing while the kernel's own ribbons
- *                 kept separating — measured, max apex 0.073 against an
- *                 envelope of 0.077 at t = 300.)
- *   ZIP_T       — the brightening runs ALONG the inversion line: a station at
- *                 the end of the arcade starts ZIP_T later than the centre
- *                 (ribbons are observed to "zip" along the PIL at tens of
- *                 km/s; this is that, schematically);
- *   irregularity — stations are unevenly spaced and loops differ a little in
- *                 height and timing. SEEDED by the site (quantised to a
- *                 degree) and by the loop's own (station, generation) index,
- *                 so a loop never changes shape from frame to frame and the
- *                 same flare always draws the same arcade.
- *
- * Each loop also reports its AGE (sim units since it formed). What colour an
- * age is, is the view's business — it has the cooling clock.
- */
-export const ARCADE = Object.freeze({
-    FORM_T0: 30,             // sim units — formation-time scale
-    FORM_GROWTH: 1.5,        // each generation waits this much longer than the last
-    ZIP_T: 45,               // sim units for the brightening to reach the arcade's ends
-    FADE_IN: 9,              // sim units for a new loop to come up
-    ZIP_CORE: 0.22,          // the central fraction of the arcade that lights AT onset (the zip starts from its edge)
-    ALONG_JITTER: 0.38,      // station spacing irregularity, fraction of the mean spacing
-    HEIGHT_JITTER: 0.14,     // loop-to-loop height scatter, fraction
-    TIME_JITTER: 0.35,       // formation-time scatter, fraction of the gap to the next generation
-    MAX_GENERATIONS: 7,
-});
-
-/** Deterministic hash → [0, 1). (station, generation, salt) under a site seed. */
-/** When generation k forms, sim units after its station lights (unjittered). */
-export function arcadeFormTime(k) { return ARCADE.FORM_T0 * (Math.pow(ARCADE.FORM_GROWTH, k) - 1); }
-export function arcadeHash(seed, i, k, salt = 0) {
-    let h = (seed ^ Math.imul(i + 1, 0x9E3779B1) ^ Math.imul(k + 1, 0x85EBCA6B) ^ Math.imul(salt + 1, 0xC2B2AE35)) >>> 0;
-    h ^= h >>> 16; h = Math.imul(h, 0x7FEB352D) >>> 0; h ^= h >>> 15; h = Math.imul(h, 0x846CA68B) >>> 0; h ^= h >>> 16;
-    return (h >>> 0) / 4294967296;
-}
-/** Site → seed, quantised to whole degrees so float jitter cannot re-roll an arcade. */
-export function arcadeSeed(latRad, lonRad) {
-    const la = Math.round(latRad / DEG) + 90, lo = Math.round(lonRad / DEG) + 720;
-    return (Math.imul(la, 73856093) ^ Math.imul(lo, 19349663)) >>> 0;
-}
-
-/**
- * @returns {Array<{pts, footA, footB, apexR, along, weight, age, tForm, station, generation, alpha}>}
- *   newest loops last within a station. `alpha` is the fade-in envelope
- *   (0..1); a loop that has not formed yet is not returned.
- */
-export function arcadeShells({
-    latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 11, complex = false, samples = 24,
-    generations = ARCADE.MAX_GENERATIONS, seed = arcadeSeed(latRad, lonRad),
-} = {}) {
-    const frame = tangentFrame(latRad, lonRad, pilAngle);
-    const sigma = ribbonAlongSigma(t, cls);
-    const span = 0.6 * sigma;
-    const out = [];
-    const G = Math.min(generations, ARCADE.MAX_GENERATIONS);
-    for (let i = 0; i < n; i++) {
-        const u0 = n === 1 ? 0.5 : i / (n - 1);
-        const jit = n === 1 ? 0 : (arcadeHash(seed, i, 0, 1) - 0.5) * ARCADE.ALONG_JITTER / (n - 1);
-        const along = -span + 2 * span * Math.min(1, Math.max(0, u0 + jit));
-        // The brightening zips outward along the PIL: this station's own clock.
-        // The central ZIP_CORE of the arcade lights AT onset — with the zip
-        // starting from the exact centre there was no loop at all at t = 0
-        // (no station sits exactly on it), so a flare began with an empty arcade.
-        const off = Math.max(0, Math.abs(along) / Math.max(span, 1e-9) - ARCADE.ZIP_CORE) / (1 - ARCADE.ZIP_CORE);
-        const tl = t - ARCADE.ZIP_T * off;
-        if (!(tl >= 0)) continue;
-        const mid   = unit(add(frame.radial, scale(frame.pilAxis, along)));
-        const pilM  = unit(add(frame.pilAxis, scale(mid, -dot(mid, frame.pilAxis))));
-        const loopM = cross(mid, pilM);
-        const weight = Math.exp(-(along * along) / (sigma * sigma));
-        for (let k = 0; k < G; k++) {
-            const gap = arcadeFormTime(k + 1) - arcadeFormTime(k);
-            const tForm = k === 0 ? 0 : arcadeFormTime(k) + (arcadeHash(seed, i, k, 2) - 0.5) * ARCADE.TIME_JITTER * gap;
-            const age = tl - tForm;
-            if (!(age >= 0)) break;                              // later generations have not formed
-            const tau = Math.max(tForm, 0);
-            const sep = ribbonSeparation(tau);
-            const shear = arcadeShear(tau, complex);
-            const h = arcadeHeight(tau, cls) * (1 + (arcadeHash(seed, i, k, 3) - 0.5) * 2 * ARCADE.HEIGHT_JITTER);
-            const fa = unit(add(add(mid, scale(loopM,  sep)), scale(pilM,  shear * sep)));
-            const fb = unit(add(add(mid, scale(loopM, -sep)), scale(pilM, -shear * sep)));
-            const cosw = Math.max(-1, Math.min(1, dot(fa, fb)));
-            const w = Math.acos(cosw), sw = Math.sin(w);
-            const pts = [];
-            for (let j = 0; j <= samples; j++) {
-                const u = j / samples;
-                const p = sw < 1e-9 ? fa : add(scale(fa, Math.sin((1 - u) * w) / sw), scale(fb, Math.sin(u * w) / sw));
-                pts.push(scale(unit(p), 1 + h * Math.sin(Math.PI * u)));
+    /**
+     * A GROWING arcade: every generation of loops at once (the CSHKP picture).
+     * Reconnection climbs, each new loop is rooted further from the inversion
+     * line than the last and stands higher, and the loops under it are older
+     * and have cooled — so the arcade is NESTED, hot and new outside, cool
+     * inside, and the earliest (inner) loops are the most sheared.
+     *
+     * No new geometry: a loop that formed at local time τ has
+     * `ribbonSeparation(τ)`, `arcadeHeight(τ)` and `arcadeShear(τ)` — the laws
+     * above at the loop's own formation time, and kept. Three things are added:
+     *
+     *   formation   — generation k forms formT0·(formGrowth^k − 1) sim units
+     *                 after its station lights: 0, 15, 38, 71, 122, 198, 312 —
+     *                 quickly at first and ever more slowly. (A fixed cadence
+     *                 was tried first: all seven had formed by t ≈ 150 and the
+     *                 arcade stopped growing while the ribbons kept parting.)
+     *   zip         — the brightening runs ALONG the inversion line: the
+     *                 central zipCore lights at onset, the ends zipT later.
+     *                 (With the zip starting from the exact centre no station
+     *                 had formed at t = 0 and a flare began with an empty
+     *                 arcade.)
+     *   irregularity — stations are unevenly spaced and loops differ a little
+     *                 in height and timing, SEEDED by the site (quantised to a
+     *                 degree) and the loop's own (station, generation), so a
+     *                 loop never changes shape between frames and a flare
+     *                 always draws the same arcade.
+     *
+     * @returns {Array<{pts, footA, footB, apexR, along, weight, age, tForm, station, generation, alpha}>}
+     *   `age` is sim units since the loop formed (what colour an age is, is the
+     *   view's business); `alpha` the fade-in envelope. A loop that has not
+     *   formed is not returned.
+     */
+    function arcadeShells({ latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 11, complex = false, samples = 24,
+                            generations = A.maxGenerations, seed = arcadeSeed(latRad, lonRad) } = {}) {
+        const frame = tangentFrame(latRad, lonRad, pilAngle);
+        const sigma = ribbonAlongSigma(t, cls);
+        const span = A.spanSigma * sigma;
+        const out = [];
+        const G = Math.min(generations, A.maxGenerations);
+        for (let i = 0; i < n; i++) {
+            const u0 = n === 1 ? 0.5 : i / (n - 1);
+            const jit = n === 1 ? 0 : (arcadeHash(seed, i, 0, 1) - 0.5) * A.alongJitter / (n - 1);
+            const along = -span + 2 * span * Math.min(1, Math.max(0, u0 + jit));
+            const off = Math.max(0, Math.abs(along) / Math.max(span, 1e-9) - A.zipCore) / (1 - A.zipCore);
+            const tl = t - A.zipT * off;                          // this station's own clock
+            if (!(tl >= 0)) continue;
+            const mid   = unit(add(frame.radial, scale(frame.pilAxis, along)));
+            const pilM  = unit(add(frame.pilAxis, scale(mid, -dot(mid, frame.pilAxis))));
+            const loopM = cross(mid, pilM);
+            const weight = Math.exp(-(along * along) / (sigma * sigma));
+            for (let k = 0; k < G; k++) {
+                const gap = arcadeFormTime(k + 1) - arcadeFormTime(k);
+                const tForm = k === 0 ? 0 : arcadeFormTime(k) + (arcadeHash(seed, i, k, 2) - 0.5) * A.timeJitter * gap;
+                const age = tl - tForm;
+                if (!(age >= 0)) break;                           // later generations have not formed
+                const tau = Math.max(tForm, 0);
+                const sep = ribbonSeparation(tau, cls);
+                const shear = arcadeShear(tau, complex);
+                const h = arcadeHeight(tau, cls, complex) * (1 + (arcadeHash(seed, i, k, 3) - 0.5) * 2 * A.heightJitter);
+                const fa = unit(add(add(mid, scale(loopM,  sep)), scale(pilM,  shear * sep)));
+                const fb = unit(add(add(mid, scale(loopM, -sep)), scale(pilM, -shear * sep)));
+                out.push({ pts: liftedLoop(fa, fb, h, samples), footA: fa, footB: fb, apexR: 1 + h, along, weight, age, tForm,
+                           station: i, generation: k, alpha: Math.min(1, age / A.fadeIn) });
             }
-            out.push({ pts, footA: fa, footB: fb, apexR: 1 + h, along, weight, age, tForm, station: i, generation: k,
-                       alpha: Math.min(1, age / ARCADE.FADE_IN) });
         }
+        return out;
     }
-    return out;
+
+    /**
+     * The eruptive plume: a jet along the site's radial that rises from the
+     * photosphere, widens, and fades. Radii in R☉, opacity in [0, 1]. Faster
+     * and farther for bigger classes; the front caps at `rMax` so a stale
+     * flare cannot fill the whole scene.
+     */
+    function plumeState(t, cls = 'M') {
+        const cf = classFactor(cls);
+        const v = PL.speed * cf;                  // R☉ per sim unit
+        const rMax = 1 + PL.reach * cf;
+        const front = Math.min(rMax, 1 + v * Math.max(0, t));
+        const length = 0.35 + 0.6 * cf * Math.min(1, Math.max(0, t) / 30);
+        const tail = Math.max(1, front - length);
+        const radius = 0.03 + 0.05 * cf * Math.min(1, Math.max(0, t) / 40);
+        const alpha = t <= 0 ? 0 : (1 - Math.exp(-t / 3)) * Math.exp(-t / (60 * cf));
+        return { front, tail, radius, alpha, rMax };
+    }
+
+    return Object.freeze({
+        id: P.id, params: P,
+        classFactor, ribbonSeparation, ribbonWidth, ribbonLength0, ribbonAlongSigma, ribbonDecay,
+        arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
+        // The parameter set under the names the consumers and gates already read.
+        CLASS_FACTOR: P.classFactor,
+        RIBBON: Object.freeze({ SEP0: R.sep0, SEP_RATE: R.sepRate, SEP_GAIN: R.sepGain, SEP_TAU: R.sepTau,
+            WID0: R.wid0, WID_RATE: R.widRate, LEN0: R.len0, LEN_GROW_T: R.lenGrowT, DECAY_T: R.decayT }),
+        ARCADE: Object.freeze({ SPAN_SIGMA: A.spanSigma, FORM_T0: A.formT0, FORM_GROWTH: A.formGrowth, ZIP_T: A.zipT,
+            ZIP_CORE: A.zipCore, FADE_IN: A.fadeIn, ALONG_JITTER: A.alongJitter, HEIGHT_JITTER: A.heightJitter,
+            TIME_JITTER: A.timeJitter, MAX_GENERATIONS: A.maxGenerations }),
+    });
 }
 
-/**
- * The eruptive plume: a jet along the site's radial that rises from the
- * photosphere, widens, and fades. Returns radii in R☉ and an opacity
- * envelope in [0, 1]. Faster and farther for bigger classes; the front
- * caps at `rMax` so a stale flare cannot fill the whole scene.
- */
-export function plumeState(t, cls = 'M') {
-    const cf = classFactor(cls);
-    const v = 0.06 * cf;                      // R☉ per sim unit
-    const rMax = 1 + 2.4 * cf;
-    const front = Math.min(rMax, 1 + v * Math.max(0, t));
-    const length = 0.35 + 0.6 * cf * Math.min(1, Math.max(0, t) / 30);
-    const tail = Math.max(1, front - length);
-    const radius = 0.03 + 0.05 * cf * Math.min(1, Math.max(0, t) / 40);
-    const alpha = t <= 0 ? 0 : (1 - Math.exp(-t / 3)) * Math.exp(-t / (60 * cf));
-    return { front, tail, radius, alpha, rMax };
-}
+/** The shipped model. The named exports below are ITS laws — every importer keeps working unchanged. */
+export const FLARE_MODEL = makeFlareModel();
+export const {
+    classFactor, ribbonSeparation, ribbonWidth, ribbonLength0, ribbonAlongSigma, ribbonDecay,
+    arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
+    CLASS_FACTOR, RIBBON, ARCADE,
+} = FLARE_MODEL;
+/** The along-PIL σ every class used until 2026-11-20 (see ribbonLength0). */
+export const RIBBON_LEN_LEGACY = Math.sqrt(0.10);
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Earth view — how the activity is ANGLED to the observer

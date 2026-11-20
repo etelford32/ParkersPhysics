@@ -159,37 +159,100 @@ await ok('tangentFrame: pilAxis ⟂ bipole axis, loopAxis ⟂ pilAxis, both tang
     vclose(ew.pilAxis, localFrame(0.3, 0.1).east, 1e-12); vclose(ew.loopAxis, localFrame(0.3, 0.1).north, 1e-12);
 });
 
-// ── Ribbon laws mirror sunFS ─────────────────────────────────────────────
-await ok('RIBBON constants mirror the sunFS legacy-fallback literals (read from sun.html)', async () => {
+// ── The shape laws are ONE parameter set; the shader holds none ───────────
+await ok('sunFS holds NO ribbon law: the page uploads the model\'s numbers every frame (read from sun.html)', async () => {
     const src = await readFile(fileURLToPath(new URL('../sun.html', import.meta.url)), 'utf8');
-    const sep  = src.match(/float sep\s*=\s*([0-9.]+)\s*\+\s*u_flare_t\s*\*\s*([0-9.e-]+)/);
-    const wid  = src.match(/float rWid\s*=\s*([0-9.]+)\s*\+\s*u_flare_t\s*\*\s*([0-9.e-]+)/);
-    const varr = src.match(/float alongVar\s*=\s*u_flare_len \* u_flare_len \* \(1\.0 \+ u_flare_t \/ ([0-9.]+)\)/);
-    const dec  = src.match(/float fDecay\s*=\s*exp\(\s*-u_flare_t\s*\/\s*([0-9.]+)\s*\)/);
-    assert.ok(sep && wid && varr && dec, 'all four literals found in sunFS');
-    close(+sep[1], RIBBON.SEP0); close(+sep[2], RIBBON.SEP_RATE);
-    close(+wid[1], RIBBON.WID0); close(+wid[2], RIBBON.WID_RATE);
-    close(+varr[1], RIBBON.LEN_GROW_T);
-    assert.match(src, /u_flare_len\.value = FG\.ribbonLength0\(flareSite\.cls\)/, 'the page sets the ribbon length from the kernel, per class');
-    assert.match(src, /u_flare_len:\s*\{ value: FG\.ribbonLength0\('M'\) \}/, 'and initialises it from the kernel');
-    close(+dec[1], RIBBON.DECAY_T);
-    close(ribbonSeparation(100), 0.020 + 100 * 2.5e-5); close(ribbonWidth(100), 0.005 + 100 * 6e-6);
-    close(ribbonAlongSigma(0, 'X'), RIBBON.LEN0 * CLASS_FACTOR.X); close(ribbonDecay(175), Math.exp(-1));
-    close(ribbonAlongSigma(RIBBON.LEN_GROW_T, 'M') ** 2, 2 * ribbonLength0('M') ** 2, 1e-12, 'σ² doubles in LEN_GROW_T');
+    // The four laws that used to be typed into the shader and mirrored here.
+    for (const [name, re] of [
+        ['separation', /float sep\s*=\s*[0-9.]+\s*\+\s*u_flare_t/],
+        ['width', /float rWid\s*=\s*[0-9.]+\s*\+\s*u_flare_t/],
+        ['along-PIL variance', /float alongVar\s*=\s*[^;]*u_flare_t/],
+        ['decay', /float fDecay\s*=\s*exp\(\s*-u_flare_t/],
+    ]) assert.ok(!re.test(src), `the shader still carries its own ${name} law`);
+    // …and what replaced them: uniforms, written from the model in one place.
+    for (const u of ['u_flare_sep', 'u_flare_wid', 'u_flare_alongVar', 'u_flare_decay']) {
+        assert.match(src, new RegExp(`uniform float ${u};`), `${u} declared in sunFS`);
+        assert.match(src, new RegExp(`uniforms\\.${u}\\.value\\s*=\\s*[^;]*flareModel\\.`), `${u} is fed from the model`);
+    }
+    assert.match(src, /float sep\s*=\s*u_flare_sep;/); assert.match(src, /float rWid\s*=\s*u_flare_wid;/);
+    assert.match(src, /float alongVar\s*=\s*u_flare_alongVar;/); assert.match(src, /float fDecay\s*=\s*u_flare_decay;/);
 });
 
-await ok('ribbon length is class-scaled and of flare size (the legacy constant was 440 Mm for every class)', () => {
+await ok('makeFlareModel: the shipped exports ARE the default model; overrides are deep-merged; a typo throws', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    assert.deepEqual(FG.FLARE_MODEL.params, FG.FLARE_SHAPE_DEFAULT);
+    for (const k of ['ribbonSeparation', 'ribbonWidth', 'ribbonLength0', 'ribbonAlongSigma', 'ribbonDecay', 'arcadeShear', 'arcadeHeight', 'arcadeLoops', 'arcadeShells', 'plumeState', 'classFactor'])
+        assert.equal(FG[k], FG.FLARE_MODEL[k], `${k} is the default model's`);
+    const m = FG.makeFlareModel({ shear: { onsetDeg: 40 } });
+    assert.equal(m.params.shear.onsetDeg, 40);
+    assert.equal(m.params.shear.finalDeg, FG.FLARE_SHAPE_DEFAULT.shear.finalDeg, 'the rest of the group is kept');
+    assert.deepEqual(m.params.ribbon, FG.FLARE_SHAPE_DEFAULT.ribbon);
+    close(Math.atan(m.arcadeShear(0)) / DEG, 40, 1e-9);
+    assert.ok(Object.isFrozen(m.params) && Object.isFrozen(m.params.shear) && Object.isFrozen(FG.FLARE_SHAPE_DEFAULT.ribbon));
+    assert.throws(() => FG.makeFlareModel({ shear: { onsetDegg: 40 } }), /unknown parameter "shear\.onsetDegg"/);
+    assert.throws(() => FG.makeFlareModel({ shear: { onsetDeg: '40' } }), /finite number/);
+    assert.throws(() => FG.makeFlareModel({ shear: 40 }), /must be an object/);
+    // A model's own tables are views of ITS parameters, not of the default's.
+    assert.equal(FG.makeFlareModel({ arcade: { zipT: 11 } }).ARCADE.ZIP_T, 11);
+});
+
+await ok('FLARE_SHAPE_V1 reproduces the laws shipped until 2026-11-21 (their closed forms, re-derived here)', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const v1 = FG.makeFlareModel(null, FG.FLARE_SHAPE_V1);
+    const cf = { C: 0.60, M: 0.85, X: 1.15 };
+    for (const t of [0, 1, 60, 175, 300, 630, 800]) {
+        for (const c of ['C', 'M', 'X']) {
+            close(v1.ribbonSeparation(t, c), 0.020 + t * 2.5e-5, 1e-15, 'separation: linear, the same for every class');
+            close(v1.arcadeHeight(t, c), 2 * (0.020 + t * 2.5e-5) * (0.6 + 0.7 * cf[c]), 1e-12, 'height: 2·sep·(0.6 + 0.7·cf)');
+            close(v1.ribbonAlongSigma(t, c), 0.095 * cf[c] * Math.sqrt(1 + t / 2500), 1e-15);
+        }
+        close(v1.ribbonWidth(t), 0.005 + t * 6e-6, 1e-15);
+        close(v1.ribbonDecay(t), Math.exp(-t / 175), 1e-15);
+        close(v1.arcadeShear(t), 0.45 * Math.exp(-t / 250) + 0.12, 1e-12, 'shear');
+        close(v1.arcadeShear(t, true), 0.75 * Math.exp(-t / 250) + 0.12, 1e-12, 'shear, δ region');
+    }
+    assert.equal(v1.ARCADE.ZIP_T, 45);
+    assert.equal(v1.id, 'flare-shape-v1');
+});
+
+await ok('the shipped laws: ribbons part fast then slow, bigger flares further; shear relaxes in angle; loops span their feet', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const M = FG.FLARE_MODEL, R = M.params.ribbon;
+    close(M.ribbonSeparation(0, 'X'), R.sep0, 1e-15);
+    close(M.ribbonSeparation(1e6, 'X'), R.sep0 + R.sepGain * M.classFactor('X'), 1e-12, 'saturates at sep0 + sepGain·cf');
+    const v = (t) => M.ribbonSeparation(t + 1, 'X') - M.ribbonSeparation(t, 'X');
+    assert.ok(v(0) > 5 * v(600) && v(600) > 0, 'decelerating, never reversing');
+    assert.ok(M.ribbonSeparation(600, 'C') < M.ribbonSeparation(600, 'M') && M.ribbonSeparation(600, 'M') < M.ribbonSeparation(600, 'X'));
+    close(M.arcadeShearAngle(0) / DEG, M.params.shear.onsetDeg, 1e-9);
+    close(M.arcadeShearAngle(0, true) / DEG, M.params.shear.onsetComplexDeg, 1e-9);
+    close(M.arcadeShearAngle(1e6) / DEG, M.params.shear.finalDeg, 1e-9);
+    // Height is a fixed multiple of the loop's own half footpoint chord…
+    for (const t of [0, 100, 600]) {
+        const chord = M.ribbonSeparation(t, 'X') * Math.hypot(1, M.arcadeShear(t));
+        close(M.arcadeHeight(t, 'X') / chord, M.params.height.a + M.params.height.b * M.classFactor('X'), 1e-12);
+    }
+    // …and still grows monotonically although the shear (and so the chord factor) falls.
+    let prev = 0;
+    for (let t = 0; t <= 800; t += 10) { const h = M.arcadeHeight(t, 'X'); assert.ok(h > prev, `height falls at t=${t}`); prev = h; }
+    for (let t = 0; t <= 800; t += 10) assert.ok(M.arcadeHeight(t, 'X', true) >= M.arcadeHeight(t, 'X') - 1e-15, 'a δ region\'s loops span a longer chord');
+});
+
+await ok('ribbon length is class-scaled and of flare size (the legacy constant was 440 Mm for every class)', async () => {
+    const FG = await import('../js/flare-geometry.js');
     const RSUN_MM = 695.7, len = (s) => 2 * s * RSUN_MM;          // 1/e point to 1/e point, Mm
     const X = len(ribbonLength0('X')), M = len(ribbonLength0('M')), C = len(ribbonLength0('C'));
     assert.ok(C < M && M < X, 'a bigger flare has longer ribbons');
     assert.ok(X > 100 && X < 250, `X-class ribbons ${X.toFixed(0)} Mm`);
     assert.ok(C > 40 && C < 120, `C-class ribbons ${C.toFixed(0)} Mm`);
-    // aspect: length over the full onset separation
-    const aspect = (s) => 2 * s / (2 * ribbonSeparation(0));
-    assert.ok(aspect(ribbonLength0('X')) < 6.5, 'an X arcade is a few times longer than it is wide');
-    // NEGATIVE CONTROL — the constant it replaced fails both.
+    close(ribbonAlongSigma(RIBBON.LEN_GROW_T, 'M') ** 2, 2 * ribbonLength0('M') ** 2, 1e-12, 'σ² doubles in LEN_GROW_T');
+    close(ribbonDecay(RIBBON.DECAY_T), Math.exp(-1)); close(ribbonWidth(100), RIBBON.WID0 + 100 * RIBBON.WID_RATE);
+    // aspect: length over the full separation half an hour in (630 sim units)
+    const aspect = (s, model) => 2 * s / (2 * model.ribbonSeparation(630, 'X'));
+    assert.ok(aspect(ribbonLength0('X'), FG.FLARE_MODEL) < 6, 'an X arcade is a few times longer than it is wide');
+    // NEGATIVE CONTROL — the constant it replaced, on the laws it shipped with, fails both.
+    const v1 = FG.makeFlareModel(null, FG.FLARE_SHAPE_V1);
     assert.ok(len(RIBBON_LEN_LEGACY) > 400, 'legacy: 440 Mm ribbons');
-    assert.ok(aspect(RIBBON_LEN_LEGACY) > 15, 'legacy: a 16:1 spine');
+    assert.ok(aspect(RIBBON_LEN_LEGACY, v1) > 8, `legacy: a ${aspect(RIBBON_LEN_LEGACY, v1).toFixed(1)}:1 spine`);
 });
 
 // ── Arcade + plume ───────────────────────────────────────────────────────
@@ -203,7 +266,7 @@ await ok('arcade: loops straddle the PIL at the ribbon separation, apex over the
     const tf = tangentFrame(lat, lon);
     const loops = arcadeLoops({ latRad: lat, lonRad: lon, t, cls: 'X', n: 7 });
     assert.equal(loops.length, 7);
-    const sep = ribbonSeparation(t), h = arcadeHeight(t, 'X');
+    const sep = ribbonSeparation(t, 'X'), h = arcadeHeight(t, 'X');
     for (const L of loops) {
         const a = vec.dot(L.footA, tf.loopAxis), b = vec.dot(L.footB, tf.loopAxis);
         assert.ok(a > 0 && b < 0, 'feet on opposite sides of the PIL');
@@ -372,7 +435,7 @@ await ok('arcadeShells: a NESTED arcade from the same laws — newest loops oute
     for (const L of at(300)) {
         // Each loop is the kernel's own laws at ITS formation time — nothing new.
         const tau = Math.max(L.tForm, 0);
-        const sep = FG.ribbonSeparation(tau);
+        const sep = FG.ribbonSeparation(tau, 'X');
         const half = Math.acos(Math.max(-1, Math.min(1, vec.dot(L.footA, L.footB)))) / 2;
         const want = Math.atan(sep * Math.hypot(1, FG.arcadeShear(tau, false)));
         close(half, want, 2e-3, 'footpoint half-separation = ribbonSeparation × √(1 + shear²)');

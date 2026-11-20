@@ -1,0 +1,225 @@
+/**
+ * flare-realism.js — how close is the drawn flare to an observed one? (PURE)
+ * ═══════════════════════════════════════════════════════════════════════════
+ * js/flare-geometry.js builds a flare-shape MODEL from a parameter set. This
+ * module MEASURES a model — in megametres, km/s and degrees — and scores each
+ * measurement against a range taken from the observational literature. The
+ * result is a scorecard: one row per measurement, a 0–1 score per row, and a
+ * weighted total.
+ *
+ * WHAT IT IS FOR. The flare's look is meant to be improved over time, and
+ * "better" needs a definition that does not live in someone's eye:
+ *
+ *   • tests/flare-realism.mjs holds a committed BASELINE
+ *     (tests/fixtures/flare/realism-baseline.json). The shipped model may not
+ *     score below it — the baseline only ratchets up.
+ *   • `node scripts/flare-realism.mjs` prints the scorecard;
+ *     `--try '{"shear":{"onsetDeg":70}}'` scores a candidate against the
+ *     shipped model row by row; `--sweep shear.onsetDeg=40:80:9` walks one
+ *     parameter; `--update` moves the baseline (it refuses to lower it).
+ *   • A NEW IDEA STARTS AS A TARGET. Add a row to TARGETS with its range and
+ *     source, watch the score fall, then change the model until it recovers.
+ *     OPEN_TARGETS lists the morphology that is known to be missing and is not
+ *     scored yet, so the backlog is in the code and not in a chat log.
+ *
+ * WHAT IT IS NOT. A score of 1.0 means every row sits inside its range — the
+ * shape is PLAUSIBLE on these axes. It does not mean the model is a flare:
+ * the ranges are broad, the rows are few, and OPEN_TARGETS is not empty.
+ *
+ * THE RANGES ARE DATA, AND THEY ARE NOT YET VERIFIED. Every row carries its
+ * source and `verified: false`: the numbers were written from memory of the
+ * cited papers in a sandbox with no access to them (the repo has been bitten
+ * by recalled constants before — CLAUDE.md, the Inner Earth and Star Collider
+ * rows). They are deliberately wide for that reason. Checking a row against
+ * its paper and flipping `verified` is real work that improves the scorecard
+ * as much as any parameter change; a row's range is as open to correction as
+ * the model is.
+ *
+ * Time: the kernel's `t` is sim units; sun.html runs 0.35 sim units per
+ * second (js/sun-flare-director.js SIM_UNITS_PER_S — the ONE copy), so every
+ * rate here is converted through it. A model driven by another clock must
+ * pass its own `simUnitsPerS`.
+ */
+
+import { FLARE_MODEL, DEG } from './flare-geometry.js';
+import { SIM_UNITS_PER_S } from './sun-flare-director.js';
+
+/** Solar radius, Mm — IAU 2015 nominal (Resolution B3). */
+export const RSUN_MM = 695.7;
+
+/** When each measurement is taken, seconds after onset. */
+export const EPOCH = Object.freeze({
+    onset: 0,
+    impulsiveEnd: 120,      // the first two minutes: the impulsive phase
+    early: 300,
+    mid: 600,
+    lateFrom: 1500,         // 25–30 min: the gradual phase
+    late: 1800,
+});
+
+/**
+ * Measure a model. Returns plain numbers in physical units; nothing here is a
+ * score. X-class and non-complex unless the name says otherwise.
+ */
+export function measure(model = FLARE_MODEL, { simUnitsPerS = SIM_UNITS_PER_S } = {}) {
+    const sim = (s) => s * simUnitsPerS;
+    const Mm = (rad) => rad * RSUN_MM;
+    const A = model.params.arcade;
+    const sepMm = (s, cls) => Mm(model.ribbonSeparation(sim(s), cls));
+    const speed = (s0, s1, cls) => (sepMm(s1, cls) - sepMm(s0, cls)) * 1000 / (s1 - s0);     // km/s, ONE ribbon from the PIL
+    const shearDeg = (s, complex = false) => Math.atan(model.arcadeShear(sim(s), complex)) / DEG;
+    const apexMm = (s, cls) => Mm(model.arcadeHeight(sim(s), cls));
+    const halfChordMm = (s, cls) => sepMm(s, cls) * Math.hypot(1, model.arcadeShear(sim(s)));
+    const lenMm = (cls) => 2 * Mm(model.ribbonLength0(cls));
+
+    const vImp = speed(EPOCH.onset, EPOCH.impulsiveEnd, 'X');
+    const vLate = speed(EPOCH.lateFrom, EPOCH.late, 'X');
+    // The zip covers the arcade's half-span outside its lit core in zipT sim units.
+    const zipMm = Mm((1 - A.zipCore) * A.spanSigma * model.ribbonAlongSigma(0, 'X'));
+    const zipS = A.zipT / simUnitsPerS;
+    const ordered = (f) => f('C') < f('M') && f('M') < f('X');
+
+    return {
+        sepOnsetFullMm: 2 * sepMm(EPOCH.onset, 'X'),
+        sepLateFullMm: 2 * sepMm(EPOCH.late, 'X'),
+        sepSpeedImpulsiveKms: vImp,
+        sepSpeedLateKms: vLate,
+        sepDeceleration: vLate > 0 ? vImp / vLate : Infinity,
+        shearOnsetDeg: shearDeg(EPOCH.onset),
+        shearLateDeg: shearDeg(EPOCH.late),
+        shearOnsetComplexDeg: shearDeg(EPOCH.onset, true),
+        loopAspect: apexMm(EPOCH.mid, 'X') / halfChordMm(EPOCH.mid, 'X'),
+        apexOnsetMm: apexMm(EPOCH.onset, 'X'),
+        apexLateMm: apexMm(EPOCH.late, 'X'),
+        apexRiseLateKms: (apexMm(EPOCH.late, 'X') - apexMm(EPOCH.lateFrom, 'X')) * 1000 / (EPOCH.late - EPOCH.lateFrom),
+        nestedSpread: apexMm(EPOCH.late, 'X') / apexMm(EPOCH.onset, 'X'),
+        ribbonLengthXMm: lenMm('X'),
+        ribbonLengthCMm: lenMm('C'),
+        arcadeAspect: lenMm('X') / (2 * sepMm(EPOCH.late, 'X')),
+        ribbonFwhmMm: Mm(model.ribbonWidth(sim(EPOCH.early))) * 2 * Math.sqrt(Math.LN2),
+        ribbonDecayS: model.params.ribbon.decayT / simUnitsPerS,
+        zipSpeedKms: zipS > 0 ? zipMm * 1000 / zipS : Infinity,
+        classOrdered: (ordered((c) => lenMm(c)) && ordered((c) => sepMm(EPOCH.late, c)) && ordered((c) => apexMm(EPOCH.late, c))) ? 1 : 0,
+    };
+}
+
+const UNVERIFIED = false;
+/**
+ * The scored rows. `lo`–`hi` is the accepted range; `scale` says how a miss is
+ * measured ('log' for quantities that span decades). `weight` is the row's
+ * share of the total. Sources are as recalled and NOT yet checked against the
+ * papers — see the header.
+ */
+export const TARGETS = Object.freeze([
+    { id: 'sep_onset', key: 'sepOnsetFullMm', label: 'Ribbon separation at onset', unit: 'Mm', lo: 4, hi: 20, scale: 'log', weight: 1,
+      source: 'Ribbons first brighten close to the inversion line and then part (Fletcher et al. 2011, Space Sci. Rev. 159, review).', verified: UNVERIFIED },
+    { id: 'sep_late', key: 'sepLateFullMm', label: 'Ribbon separation at 30 min (X)', unit: 'Mm', lo: 30, hi: 100, scale: 'log', weight: 1,
+      source: 'Ribbon distance of ≥M5 two-ribbon flares, tens of Mm (Toriumi et al. 2017, ApJ 834, 56).', verified: UNVERIFIED },
+    { id: 'sep_speed', key: 'sepSpeedImpulsiveKms', label: 'Ribbon speed from the PIL, first 2 min', unit: 'km/s', lo: 5, hi: 60, scale: 'log', weight: 1,
+      source: 'Tens of km/s in the impulsive phase (Asai et al. 2004, ApJ 611, 557; Fletcher et al. 2011).', verified: UNVERIFIED },
+    { id: 'sep_decel', key: 'sepDeceleration', label: 'Ribbon speed, impulsive ÷ 25–30 min', unit: '×', lo: 3, hi: 100, scale: 'log', weight: 1.5,
+      source: 'Separation slows from tens of km/s to a few km/s or less in the gradual phase (Fletcher et al. 2011).', verified: UNVERIFIED },
+    { id: 'shear_onset', key: 'shearOnsetDeg', label: 'Shear angle at onset', unit: '°', lo: 50, hi: 80, scale: 'lin', weight: 1.5,
+      source: 'Initial shear angle of 50 X/M two-ribbon flares (Su, Golub & Van Ballegooijen 2007, ApJ 655, 606).', verified: UNVERIFIED },
+    { id: 'shear_late', key: 'shearLateDeg', label: 'Shear angle at 30 min', unit: '°', lo: 15, hi: 55, scale: 'lin', weight: 1.5,
+      source: 'Final shear angle, same survey: strong-to-weak in 86 % of events (Su et al. 2007).', verified: UNVERIFIED },
+    { id: 'loop_aspect', key: 'loopAspect', label: 'Loop height ÷ half footpoint span, 10 min', unit: '', lo: 0.6, hi: 1.5, scale: 'log', weight: 1.5,
+      source: 'Flare loops are close to semicircular — the standard loop-length estimate L = π·d/2 (e.g. Reale 2014, Living Rev. Sol. Phys. 11, 4).', verified: UNVERIFIED },
+    { id: 'apex_onset', key: 'apexOnsetMm', label: 'First loops: apex height', unit: 'Mm', lo: 5, hi: 25, scale: 'log', weight: 1,
+      source: 'Post-flare loops first appear low, ~10⁴ km, and the system grows (Švestka 1976, Solar Flares).', verified: UNVERIFIED },
+    { id: 'apex_late', key: 'apexLateMm', label: 'Arcade apex at 30 min (X)', unit: 'Mm', lo: 20, hi: 80, scale: 'log', weight: 1,
+      source: 'Loop systems of large flares reach several ×10⁴ km within the first hour (Švestka 1976).', verified: UNVERIFIED },
+    { id: 'apex_rise_late', key: 'apexRiseLateKms', label: 'Arcade growth at 25–30 min', unit: 'km/s', lo: 0.5, hi: 10, scale: 'log', weight: 0.5,
+      source: 'Apparent rise of the loop system slows to a few km/s (Švestka 1976).', verified: UNVERIFIED },
+    { id: 'nested', key: 'nestedSpread', label: 'Outer ÷ inner loop height at 30 min', unit: '×', lo: 1.5, hi: 8, scale: 'log', weight: 0.5,
+      source: 'The arcade is nested: older, lower loops under newer, taller ones (the CSHKP picture).', verified: UNVERIFIED },
+    { id: 'length_x', key: 'ribbonLengthXMm', label: 'Ribbon length, X class', unit: 'Mm', lo: 80, hi: 250, scale: 'log', weight: 1,
+      source: 'Order of magnitude from ribbon areas of X-class flares (Kazachenko et al. 2017, ApJ 845, 49).', verified: UNVERIFIED },
+    { id: 'length_c', key: 'ribbonLengthCMm', label: 'Ribbon length, C class', unit: 'Mm', lo: 20, hi: 120, scale: 'log', weight: 0.5,
+      source: 'Same survey: ribbon area falls with GOES class (Kazachenko et al. 2017).', verified: UNVERIFIED },
+    { id: 'arcade_aspect', key: 'arcadeAspect', label: 'Arcade length ÷ width at 30 min', unit: '', lo: 1.2, hi: 6, scale: 'log', weight: 1,
+      source: 'A two-ribbon arcade is a few times longer than it is wide (Toriumi et al. 2017; Kazachenko et al. 2017).', verified: UNVERIFIED },
+    { id: 'ribbon_width', key: 'ribbonFwhmMm', label: 'Ribbon width (FWHM), 5 min', unit: 'Mm', lo: 1, hi: 10, scale: 'log', weight: 0.5,
+      source: 'UV ribbons are a few Mm wide at AIA 1600 Å resolution (Fletcher et al. 2011).', verified: UNVERIFIED },
+    { id: 'zip', key: 'zipSpeedKms', label: 'Brightening along the PIL (zipper)', unit: 'km/s', lo: 10, hi: 200, scale: 'log', weight: 1,
+      source: 'Ribbon elongation at tens to ~100 km/s (Qiu et al. 2017, ApJ 838, 17).', verified: UNVERIFIED },
+    { id: 'class_order', key: 'classOrdered', label: 'C < M < X in length, separation and height', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1,
+      source: 'Ribbon area, reconnected flux and flare size rise with GOES class (Kazachenko et al. 2017).', verified: UNVERIFIED },
+]);
+
+/**
+ * Morphology known to be missing from the model. NOT scored — there is nothing
+ * to measure yet. Each becomes a TARGETS row when the kernel can produce it.
+ */
+export const OPEN_TARGETS = Object.freeze([
+    { id: 'j_hooks', what: 'Ribbons end in J-shaped hooks around the erupting flux rope\'s feet; ours are straight.',
+      source: 'Aulanier, Janvier & Schmieder 2012, A&A 543, A110; Janvier et al. 2014, ApJ 788, 60.' },
+    { id: 'cusp', what: 'The newest, hottest loops are cusp-shaped at the top; every loop here is a sine-lifted arc.',
+      source: 'Tsuneta et al. 1992, PASJ 44, L63 (the Yohkoh cusp).' },
+    { id: 'asymmetry', what: 'The two ribbons move at different speeds — the one in the stronger field moves less; ours are mirror images.',
+      source: 'Reconnected flux balance: v·B is what matches, not v (Fletcher et al. 2011).' },
+    { id: 'kernels', what: 'Hard X-ray footpoint kernels run along the ribbons during the impulsive phase; the page has two fixed kernels.',
+      source: 'Krucker, Hurford & Lin 2003, ApJ 595, L103; Qiu et al. 2017.' },
+    { id: 'downflows', what: 'Supra-arcade downflows above the loop tops in the hot channels are not drawn.',
+      source: 'McKenzie & Hudson 1999, ApJ 519, L93.' },
+    { id: 'loop_shrinkage', what: 'A newly reconnected loop retracts as it relaxes; a loop here keeps the height it formed at.',
+      source: 'Forbes & Acton 1996, ApJ 459, 330.' },
+]);
+
+/** 0–1: 1 inside [lo, hi], falling linearly to 0 one range-width outside it (in log space for scale 'log'). */
+export function scoreValue(v, { lo, hi, scale = 'lin' }) {
+    if (!Number.isFinite(v)) return 0;
+    if (v >= lo && v <= hi) return 1;
+    if (scale === 'log') {
+        if (!(v > 0) || !(lo > 0)) return 0;
+        const tol = Math.max(Math.log(hi / lo), Math.LN2);            // at least a factor of two of grace
+        const d = v < lo ? Math.log(lo / v) : Math.log(v / hi);
+        return Math.max(0, 1 - d / tol);
+    }
+    const tol = Math.max(hi - lo, 1e-9 + 0.25 * Math.abs(hi));        // a point range still has a slope
+    const d = v < lo ? lo - v : v - hi;
+    return Math.max(0, 1 - d / tol);
+}
+
+/** Score a model. `score` is the weighted mean of the rows' scores. */
+export function scorecard(model = FLARE_MODEL, { targets = TARGETS, simUnitsPerS = SIM_UNITS_PER_S } = {}) {
+    const m = measure(model, { simUnitsPerS });
+    let sw = 0, s = 0;
+    const metrics = targets.map((t) => {
+        const value = m[t.key];
+        const sc = scoreValue(value, t);
+        sw += t.weight; s += t.weight * sc;
+        return { id: t.id, label: t.label, unit: t.unit, value, lo: t.lo, hi: t.hi, score: sc, pass: sc === 1, weight: t.weight, verified: t.verified, source: t.source };
+    });
+    return {
+        modelId: model.id, score: sw ? s / sw : 0,
+        passed: metrics.filter((x) => x.pass).length, rows: metrics.length,
+        verifiedRows: metrics.filter((x) => x.verified).length,
+        metrics, measurements: m,
+    };
+}
+
+/** Row-by-row difference between two scorecards (b − a). */
+export function compareScorecards(a, b) {
+    const A = new Map(a.metrics.map((x) => [x.id, x]));
+    return {
+        delta: b.score - a.score,
+        rows: b.metrics.map((y) => { const x = A.get(y.id); return { id: y.id, label: y.label, unit: y.unit, from: x?.value, to: y.value, scoreFrom: x?.score ?? null, scoreTo: y.score, delta: y.score - (x?.score ?? 0) }; }),
+    };
+}
+
+/** The baseline record tests/flare-realism.mjs compares against. */
+export function baselineOf(card) {
+    return { modelId: card.modelId, score: +card.score.toFixed(6), metrics: Object.fromEntries(card.metrics.map((x) => [x.id, +x.score.toFixed(6)])) };
+}
+
+const num = (v) => !Number.isFinite(v) ? String(v) : Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+/** A plain-text table of a scorecard (the script and the gate both print it). */
+export function formatScorecard(card) {
+    const lines = [`flare realism — ${card.modelId}: ${(card.score * 100).toFixed(1)} / 100  (${card.passed} of ${card.rows} rows in range; ${card.verifiedRows} of ${card.rows} ranges verified against their source)`];
+    for (const x of card.metrics) {
+        const mark = x.pass ? ' ok ' : x.score > 0 ? 'near' : 'MISS';
+        lines.push(`  ${mark}  ${x.label.padEnd(44)} ${num(x.value).padStart(8)} ${x.unit.padEnd(5)} [${num(x.lo)} – ${num(x.hi)}]  ${x.score.toFixed(2)}`);
+    }
+    return lines.join('\n');
+}

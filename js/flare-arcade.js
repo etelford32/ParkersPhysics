@@ -205,6 +205,10 @@ export function createFlareArcade({
 } = {}) {
     if (!THREE || !geometry) throw new Error('createFlareArcade: THREE and geometry are required');
     const FG = geometry;
+    // The SHAPE LAWS come from a flare model (js/flare-geometry.js makeFlareModel)
+    // and can be swapped at run time with setModel(); FG stays the module, for the
+    // frame helpers. Defaults to the module's shipped model.
+    let LAW = geometry.FLARE_MODEL ?? geometry;
     const R = sunRadius;
     const group = new THREE.Group();
     group.name = 'flare-arcade';
@@ -216,7 +220,7 @@ export function createFlareArcade({
     const SAMPLES = ribbon ? RIBBON_SAMPLES : LOOP_SAMPLES;
     const kit = ribbon ? ribbonKit(THREE, { strandMm, minPx, gain, R }) : null;
     // Nested arcade: `maxLoops` stations along the PIL × the kernel's generations.
-    const GENS = ribbon && FG.arcadeShells ? FG.ARCADE.MAX_GENERATIONS : 1;
+    const GENS = ribbon && LAW.arcadeShells ? LAW.ARCADE.MAX_GENERATIONS : 1;   // the pool is sized once; a model may use fewer generations, not more
     const POOL = maxLoops * GENS;
     for (let i = 0; ribbon && i < POOL; i++) {
         const mesh = new THREE.Mesh(ribbonGeometry(THREE), kit.material());
@@ -296,12 +300,21 @@ export function createFlareArcade({
         lastBuiltT = -Infinity;
     }
 
+    /** Draw another flare-shape model (null → the module's shipped one). The next update rebuilds. */
+    function setModel(m) {
+        LAW = m ?? (FG.FLARE_MODEL ?? FG);
+        siteVersion++;
+        lastBuiltT = -Infinity;
+    }
+    /** Ribbon style: the strands' HDR gain (the look gate's negative control drives it). */
+    function setGain(g) { if (kit && Number.isFinite(g)) kit.uniforms.u_gain.value = g; }
+
     function rebuildLoops(t) {
         const nested = GENS > 1 && !site.pairs;
         lastLoops = nested
-            ? FG.arcadeShells({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
-                t, cls: site.cls, n: maxLoops, complex: site.complex, samples: SAMPLES })
-            : FG.arcadeLoops({
+            ? LAW.arcadeShells({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
+                t, cls: site.cls, n: maxLoops, complex: site.complex, samples: SAMPLES, generations: GENS })
+            : LAW.arcadeLoops({
                 latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
                 t, cls: site.cls, n: maxLoops, complex: site.complex,
                 pairs: site.pairs ? site.pairs.slice(0, POOL) : null, samples: SAMPLES,
@@ -382,8 +395,8 @@ export function createFlareArcade({
     function update({ tFlare, intensity = 0, showFlares = 1, rebuildEvery = 0.5 } = {}) {
         lastT = tFlare;
         if (!site || !shown || !(tFlare >= 0) || tFlare > 900) { group.visible = false; return; }
-        const decay = FG.ribbonDecay(tFlare);
-        const ps = FG.plumeState(tFlare, site.cls);
+        const decay = LAW.ribbonDecay(tFlare);
+        const ps = LAW.plumeState(tFlare, site.cls);
         lastPlume = ps;
         const nested = GENS > 1 && !site.pairs;
         // One generation fades as a block with the ribbons; a nested arcade
@@ -429,7 +442,7 @@ export function createFlareArcade({
     }
 
     return {
-        group, setSite, update, setVisible, dispose,
+        group, setSite, update, setVisible, dispose, setModel, setGain,
         get site() { return site ? { ...site, pairs: site.pairs ? site.pairs.length : 0 } : null; },
         get state() {
             const apexR = lastLoops.length ? Math.max(...lastLoops.map(L => L.apexR)) : null;
@@ -441,7 +454,8 @@ export function createFlareArcade({
                 apexR,                                   // tallest drawn loop, kernel R☉ (before heightScale)
                 // The kernel's envelope at the last rebuild: every nested loop stands within HEIGHT_JITTER of an
                 // arcadeHeight(τ ≤ t). For a single generation this IS apexR.
-                envelopeApexR: site && Number.isFinite(lastBuiltT) ? 1 + FG.arcadeHeight(Math.max(lastBuiltT, 0), site.cls) : null,
+                envelopeApexR: site && Number.isFinite(lastBuiltT) ? 1 + LAW.arcadeHeight(Math.max(lastBuiltT, 0), site.cls, site.complex) : null,
+                model: LAW.id ?? null,                                     // which shape model drew this
                 builtT: Number.isFinite(lastBuiltT) ? lastBuiltT : null,   // the flare time the drawn loops were built at
                 nested,
                 generations: nested ? new Set(lastLoops.map(L => L.generation)).size : 1,

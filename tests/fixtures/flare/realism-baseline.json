@@ -1,0 +1,24 @@
+{
+  "modelId": "flare-shape-v2",
+  "score": 1,
+  "metrics": {
+    "sep_onset": 1,
+    "sep_late": 1,
+    "sep_speed": 1,
+    "sep_decel": 1,
+    "shear_onset": 1,
+    "shear_late": 1,
+    "loop_aspect": 1,
+    "apex_onset": 1,
+    "apex_late": 1,
+    "apex_rise_late": 1,
+    "nested": 1,
+    "length_x": 1,
+    "length_c": 1,
+    "arcade_aspect": 1,
+    "ribbon_width": 1,
+    "zip": 1,
+    "class_order": 1
+  },
+  "recorded": "2026-11-20"
+}
