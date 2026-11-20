@@ -296,6 +296,8 @@ const PRED = (() => {
         assert.equal(two.data.ground.stations_total, 12);
         assert.equal(two.freshness, 'stale');
         assert.ok(two.reasons.includes('stations_down:GUA,SJG'));
+        assert.deepEqual(two.upstream.usgs.failures, { 'fast:http_404': 2, 'slow:http_404': 2 }, 'each failure is described, not just counted');
+        assert.equal(two.upstream.usgs.concurrency, 6);
 
         globalThis.fetch = serve(planted, ['l1', 'dst']);
         const noL1 = await (await handler(new Request('https://x.test/api/bz/ground?summary=1'))).json();
@@ -310,8 +312,16 @@ const PRED = (() => {
         const db = await dead.json();
         assert.equal(db.freshness, 'expired');
         assert.equal(db.reasons[0], 'no_ground_station');
+        assert.deepEqual(db.upstream.usgs.failures, { 'fast:http_503': 14, 'slow:http_503': 14 });
         assert.ok(db.data.ring_current.measured, 'Dst is still reported when the magnetometers are down');
     } finally { globalThis.fetch = real; Date.now = realNow; }
+    {
+        const { mapLimit } = await import('../api/_lib/bz-ground-fetch.js');
+        let live = 0, peak = 0;
+        const tasks = Array.from({ length: 28 }, (_, i) => async () => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 2)); live--; return i; });
+        assert.deepEqual(await mapLimit(tasks, 6), Array.from({ length: 28 }, (_, i) => i), 'results stay in order');
+        assert.equal(peak, 6, 'never more than six requests in flight');
+    }
     ok('route: 14 stations at two cadences; dropouts named; L1 down keeps the measurement; USGS down ⇒ expired');
 }
 

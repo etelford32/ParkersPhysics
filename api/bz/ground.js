@@ -55,10 +55,12 @@ export default async function handler(req) {
         return jsonError('internal', `analysis: ${String(e?.message ?? e).slice(0, 140)}`, { status: 500 });
     }
     if (g.failed.length) reasons.push(`stations_down:${g.failed.join(',')}`);
+    const upstream = Object.keys(g.diagnostics?.failures ?? {}).length ? { usgs: g.diagnostics } : null;
 
     const base = { source: 'USGS Geomagnetism Program + NOAA SWPC via Vercel Edge · js/bz/ground-analysis.js', model: 'bz-ground-v0' };
     if (!ground) {
-        return jsonOk({ ...base, freshness: 'expired', reasons: ['no_ground_station', ...reasons], age_seconds: null, data: { ring_current: ring } }, { maxAge: 60, swr: 60 });
+        return jsonOk({ ...base, freshness: 'expired', reasons: ['no_ground_station', ...reasons], age_seconds: null,
+            ...(upstream ? { upstream } : {}), data: { ring_current: ring } }, { maxAge: 60, swr: 60 });
     }
     let freshness = ground.latency_s != null && ground.latency_s <= 900 ? 'fresh' : (ground.latency_s <= 6 * 3600 ? 'stale' : 'expired');
     if (freshness === 'fresh' && (ground.stations_1s === 0 || reasons.length)) freshness = 'stale';
@@ -68,6 +70,7 @@ export default async function handler(req) {
     return jsonOk({
         ...base, freshness, ...(reasons.length ? { reasons } : {}),
         age_seconds: ground.latency_s,
+        ...(upstream ? { upstream } : {}),
         data: { updated: new Date(nowMs - (ground.latency_s ?? 0) * 1000).toISOString(), ground, ring_current: ring },
     }, { maxAge: 60, swr: 60 });
 }

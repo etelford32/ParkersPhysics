@@ -37,7 +37,7 @@ export default async function handler() {
             runFeed('l1-mag', { fetchJson, nowMs }),
             runFeed('l1-ephem', { fetchJson, nowMs }),
             runFeed('l1-plasma', { fetchJson, nowMs }),
-            fetchGround(nowMs).catch(() => ({ fast: {}, slow: {}, failed: [] })),
+            fetchGround(nowMs).catch(() => ({ fast: {}, slow: {}, failed: [], diagnostics: null })),
             fetchJson(DST_URL),
         ]);
     } catch (e) {
@@ -77,7 +77,8 @@ export default async function handler() {
         ...(reasons.length ? { reasons } : {}),
         age_seconds: flux?.age_s ?? geo.data?.age_s ?? null,
         feeds: { l1_mag: mag.source_id, l1_plasma: plasma.source_id, l1_ephem: ephem.source_id, geo_mag: geo.source_id,
-            ground_stations: ground ? ground.stations_total : 0, ground_1s: ground ? ground.stations_1s : 0, dst: !!ring },
+            ground_stations: ground ? ground.stations_total : 0, ground_1s: ground ? ground.stations_1s : 0, dst: !!ring,
+            ...(g.diagnostics && Object.keys(g.diagnostics.failures).length ? { ground_failures: g.diagnostics.failures } : {}) },
         data: { updated: flux?.latest?.time ?? column.time, ...column },
     }, { maxAge: 60, swr: 60 });
 }
