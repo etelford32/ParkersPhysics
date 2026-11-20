@@ -63,9 +63,11 @@ export default async function handler(req) {
             ...(upstream ? { upstream } : {}), data: { ring_current: ring } }, { maxAge: 60, swr: 60 });
     }
     let freshness = ground.latency_s != null && ground.latency_s <= 900 ? 'fresh' : (ground.latency_s <= 6 * 3600 ? 'stale' : 'expired');
-    if (freshness === 'fresh' && (ground.stations_1s === 0 || reasons.length)) freshness = 'stale';
+    // A suspect station is named but does not degrade the rung: the other stations carry it.
+    if (freshness === 'fresh' && (ground.stations_1s === 0 || reasons.some((r) => !r.startsWith('stations_suspect')))) freshness = 'stale';
     if (ground.stations_1s === 0) reasons.push('no_1s_data');
-    if (summary) ground.stations = ground.stations.map(({ iaga, dipole_lat, zone, delta_nt, dbdt_peak_nt_s, dbdt_underread }) => ({ iaga, dipole_lat, zone, north_nt: delta_nt.north, dbdt_peak_nt_s, dbdt_underread }));
+    if (ground.suspect_stations.length) reasons.push(`stations_suspect:${ground.suspect_stations.join(',')}`);
+    if (summary) ground.stations = ground.stations.map(({ iaga, dipole_lat, zone, suspect, delta_nt, dbdt_peak_nt_s, dbdt_underread }) => ({ iaga, dipole_lat, zone, suspect, north_nt: delta_nt.north, dbdt_peak_nt_s, dbdt_underread }));
 
     return jsonOk({
         ...base, freshness, ...(reasons.length ? { reasons } : {}),

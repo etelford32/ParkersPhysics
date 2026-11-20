@@ -185,7 +185,7 @@ export function buildColumn({ flux, geo, ground = null, ring = null, nowMs }) {
                 sudden_impulses: ground.sudden_impulses.length, latency_s: ground.latency_s },
             timing_score: ground.timing_score,
             basis: 'USGS variation data at one second; dB/dt differenced only across consecutive seconds',
-            caveats: ['one continent\'s network', ...(ground.stations_1s < ground.stations_total ? [`${ground.stations_total - ground.stations_1s} station(s) without 1-second data`] : [])] });
+            caveats: ['one continent\'s network', ...(ground.suspect_stations?.length ? [`left out as a bad record: ${ground.suspect_stations.join(', ')}`] : []), ...(ground.stations_1s < ground.stations_total ? [`${ground.stations_total - ground.stations_1s} station(s) without 1-second data`] : [])] });
     } else {
         rungs.push({ id: 'e_region', label: 'E-region currents', where: '~110 km', kind: 'NOT_AVAILABLE', values: null, basis: 'no ground magnetometer data', caveats: [] });
         rungs.push({ id: 'ground', label: 'Ground', where: '0 km', kind: 'NOT_AVAILABLE', values: null, basis: 'no ground magnetometer data', caveats: [] });

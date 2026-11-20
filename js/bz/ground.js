@@ -50,6 +50,11 @@ export const GROUND_DEFAULTS = Object.freeze({
     siWindowS: 180,              // …within this long…
     siMinStations: 3,            // …at this many stations at once
     spectrumNfft: 2048,          // 34 min at 1 s: resolves Pc5 down to 0.5 mHz
+    // A perturbation larger than this is not geophysics at these latitudes, it is a baseline step or a
+    // bad record (measured 2026-11-20: FRN read −2766 nT against its 24 h median on a quiet day, and
+    // owned the network's peak dB/dt). Such a station is reported, flagged, and kept OUT of every
+    // network-level number.
+    suspectDeltaNt: 1500,
 });
 
 const MU0 = 4e-7 * Math.PI;
@@ -241,8 +246,9 @@ export function stationSummary(fast, slow, nowMs, opts = {}) {
     for (let i = src.t.length - 1; i >= 0; i--) if (src.x[i] === src.x[i] && src.y[i] === src.y[i]) { dx = src.x[i] - baseX; dy = src.y[i] - baseY; tLatest = src.t[i]; break; }
     const rate = fast ? dbdt(fast) : null;
     const spec = fast && fast.t.length >= o.spectrumNfft ? bandPowers(fast.x, fast.cadence_s ?? 1, { nfft: o.spectrumNfft }) : null;
+    const suspect = Math.abs(dx) > o.suspectDeltaNt || Math.abs(dy) > o.suspectDeltaNt;
     return {
-        iaga: any.iaga, lat: any.lat, lon: any.lon, dipLat,
+        iaga: any.iaga, lat: any.lat, lon: any.lon, dipLat, suspect,
         zone: Math.abs(dipLat) >= o.auroralMinDipoleLat ? 'auroral' : (Math.abs(dipLat) <= o.lowMidMaxDipoleLat ? 'low-mid' : 'sub-auroral'),
         latest: tLatest, latency_s: fast?.latency_s ?? slow?.latency_s ?? null,
         dx, dy, baseline: slow ? { kind: 'trailing median, provisional', minutes: slow.valid } : null,

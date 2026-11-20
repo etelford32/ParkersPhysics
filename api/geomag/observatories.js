@@ -34,6 +34,7 @@
  * memory once cost 9.35° of dipole latitude and presented as a model error.
  */
 import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { groundCoordinates } from '../../js/bz/feeds.js';
 
 export const config = { runtime: 'edge' };
 
@@ -89,12 +90,19 @@ function normalise(payload, id) {
     const times = payload?.times;
     if (!Array.isArray(times) || !times.length) return null;
 
-    const meta = payload?.metadata?.station ?? {};
-    const coords = meta.geometry?.coordinates ?? null;
-    // GeoJSON order is [longitude, latitude, elevation].
-    const lonRaw = coords ? Number(coords[0]) : Number(meta.longitude);
-    const lat = coords ? Number(coords[1]) : Number(meta.latitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lonRaw)) return null;
+    // WHERE THE COORDINATES ARE IS NOT ONE LAYOUT. Measured on a Vercel preview
+    // 2026-11-20: USGS sends them at metadata.intermagnet.imo.coordinates, and
+    // this function read only metadata.station.geometry.coordinates — so EVERY
+    // station normalised to null and the route answered 503 "No USGS
+    // observatory returned data" while the service was healthy. The position
+    // now resolves from the candidate list in js/bz/feeds.js (the Bz engine's
+    // ground rung reads the same payloads); still [longitude, latitude, elevation].
+    const where = groundCoordinates(payload);
+    if (!where) return null;
+    const imo = payload?.metadata?.intermagnet?.imo ?? null;
+    const meta = payload?.metadata?.station ?? { name: imo?.name };
+    const coords = imo?.coordinates ?? meta.geometry?.coordinates ?? null;
+    const lonRaw = where.lonRaw, lat = where.lat;
     // Normalise to east longitude in [0, 360).
     const lon = ((lonRaw % 360) + 360) % 360;
 

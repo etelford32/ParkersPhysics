@@ -1,18 +1,21 @@
 # BZ_ENGINE_PLAN.md — the Bz analysis engine
 
-> **Status (2026-11-20): B0–B4 BUILT and run on real data.** Feeds settled
-> (§11); three-spacecraft L1 fusion `/api/bz/l1` (§12); propagation + flux
-> `/api/bz/flux` (§13); GOES residual + ledger `/api/bz/geo` (§14); the
-> altitude ladder `/api/bz/column` and the shared provider (§15).
-> **Read §12–§15 before §4. On the one real day looked at — a quiet one —
-> every PREDICTIVE claim in §4 scored at or below its control**: lag alignment
-> did not beat the naive mean, the fixed GEO formula lost to a nominal wind,
-> and the learning GEO filter lost to 30-minute persistence. What held up on
-> real data is the MEASUREMENT side (frames, slots, residuals, flags) and the
-> honesty of the error bars (61–69 % coverage of a stated 1σ). Those are
-> measurements with their numbers recorded, not tuning problems, and nothing
-> below has been tuned to hide them. Sections 1–9 are the original plan; where
-> they disagree with §11–§15, the later sections win. B5+ are not built.
+> **Status (2026-11-20): B0–B6 BUILT and run on real data.** Feeds settled
+> (§11); L1 fusion `/api/bz/l1` (§12); propagation + flux `/api/bz/flux`
+> (§13); GOES residual + ledger `/api/bz/geo` (§14); the altitude ladder
+> `/api/bz/column` + provider (§15); ground at 1 s + ring current
+> `/api/bz/ground` (§16); the page `bz.html` (§17).
+> **Read §12–§17 before §4. On the one real day looked at — a quiet one —
+> most PREDICTIVE claims in §4 scored at or below their controls**: lag
+> alignment did not beat the naive mean, the fixed GEO formula lost to a
+> nominal wind, the learning GEO filter lost to 30-minute persistence. ONE
+> prediction is ahead: Dst from the arrived wind (skill +0.18 to +0.29). What
+> held up everywhere is the MEASUREMENT side and the honesty of the error bars
+> (61–69 % coverage of a stated 1σ). Those are measurements with their numbers
+> recorded, not tuning problems, and nothing below has been tuned to hide
+> them — the page prints the same verdicts. Sections 1–9 are the original
+> plan; where they disagree with §11–§17, the later sections win. Open
+> decisions and what is still not built: §18.
 ---
 
 ## 0. The one-paragraph version
@@ -750,3 +753,131 @@ only the gap rule differs and the gate pins that).
 column: one poll loop per page, `window.__bzColumn` + a `bz-column` event, a
 failed fetch published as DOWN with the last good column marked stale. No
 page consumes it yet (B6).
+
+---
+
+## 16. B5 — ground at one second, and the ring current (BUILT; MEASURED 2026-11-20)
+
+`js/bz/ground.js` · `ground-analysis.js` · `api/_lib/bz-ground-fetch.js` ·
+`/api/bz/ground[?summary=1]` · gate `node tests/bz-ground.mjs` (12 checks).
+
+**Two production failures before it read a single sample — both now pinned.**
+
+1. *28 requests at once, no reason attached.* The first run reported every
+   station down and could not say why. The fan-out is now capped at 6 in
+   flight and every failure is DESCRIBED (HTTP status / timeout / not JSON /
+   no usable samples) in `upstream.usgs`.
+2. *The payload was readable; our reader was not.* With diagnostics on, all
+   28 responses were well-formed JSON that normalised to nothing. USGS puts
+   station coordinates at **`metadata.intermagnet.imo.coordinates`**, and the
+   reader looked only at `metadata.station.geometry.coordinates`.
+   `groundCoordinates` now resolves from a candidate list and the route
+   reports which one answered; an unreadable payload is described by
+   STRUCTURE (keys only).
+
+**The same bug was live in an existing route.** `/api/geomag/observatories`
+— TIGA's live nowcast and the Inner Earth geoelectric panel — made the same
+single-layout assumption and answered **503 "No USGS observatory returned
+data"** on the preview while USGS was healthy. It now uses the same
+`groundCoordinates`. How long it had been failing in production is NOT known
+from here; `tiga.html` and `earth-interior.html` should be looked at once
+this is deployed.
+
+**First real hour (14 stations, all at 1 s, 167 s behind the clock):**
+
+- **dB/dt.** Network peak 0.63 nT/s. Read as a one-minute product the same
+  record gives 0.029 nT/s. Per station the minute product under-reads the
+  1-second rate by a **median factor of 8** (range 4–21) — on a quiet day,
+  where much of the 1-second rate is small fast fluctuation. The plan's
+  "several-fold" claim holds as a measurement; what it will be in a storm is
+  not yet known.
+- **A bad record.** FRN read −2766 nT against its 24 h median — a baseline
+  step, not geophysics — and owned the network peak. A station past
+  `suspectDeltaNt` (1500 nT) is now flagged, shown, and kept out of every
+  network-level number.
+- **Electrojet proxy** (BRW, CMO, DED, SIT ≥ 60° dipole latitude): −8 / +3 nT.
+  Quiet. Labelled a regional proxy, not AL/AU.
+- **Sudden impulses: none. Predicted pressure jumps: none.** So the timing
+  score — the one real check on propagation (§6 row 1) — has still never
+  scored. It reports `no_events_in_window` rather than a pass.
+- **Ring current: the engine's first prediction to beat its control.** The
+  site's own Dst model (O'Brien–McPherron, `integrateDst`) driven by the
+  ARRIVED wind, anchored once and free-run for 22 hours: 6.8–7.4 nT rms
+  against 8.1 for persistence (skill +0.18 to +0.29 across three runs an
+  hour apart). One quiet day, 22 hourly points — encouraging, not proven.
+
+**Bugs the gate caught:** the pressure-jump detector timed every jump 3 min
+early (first threshold crossing), then 2 min early (a difference of medians
+is a plateau, not a peak); it now takes the apex of a difference of means.
+
+**Not built, against the plan's B5:**
+
+- **F_PC (open polar-cap flux).** Needs a nightside closure rate; no
+  verified formula was available and none was invented.
+- **A FAC / Poynting model at LEO.** Not chosen: the candidate empirical
+  models carry licence terms that could not be checked from here.
+- **Equivalent currents as a map.** Per-station vectors only (infinite-sheet,
+  sign checked against a Biot–Savart integration). Fourteen stations on one
+  continent do not support a map and none is drawn.
+- **The geoelectric field at 1 s.** The existing kernel is validated at
+  1-minute cadence with a 4-hour warm-up; it was NOT run on the 1-second
+  series. The ladder's bottom rung is DELEGATED to the existing nowcast.
+- **1-second history.** Nothing is stored (§10 D3 is still open).
+
+## 17. B6 — the page (BUILT 2026-11-20)
+
+`bz.html` · `js/bz-page.js` · `js/bz/page-model.js` (PURE) · gate
+`node tests/bz-page.mjs` (5 checks). Filed in `js/simulations-catalog.js`
+(Space Weather → Geospace response), so it is on the hub and the catalogue;
+it is NOT in the nav menu (the menu is at its cap).
+
+- **The ladder is the hero**: ten rungs, each with a DRAWN mark and a word
+  (measured / estimated / forecast — the half-circle glyph is missing from
+  common system fonts, so the marks are CSS), a headline with its error bar,
+  and a fold-out that says where the number comes from and what it omits.
+  Fold-outs keep their open state across the once-a-minute re-render.
+- **Three small multiples on one time axis** (3 h back, 1¼ h ahead) with one
+  crosshair: Bz at L1 (each spacecraft + the fused line and its 1σ band),
+  flux opening by arrival time (solid arrived, dashed in transit), the GOES
+  residual beside its 30-minute-ahead prediction. Never a second y scale.
+  Charts are drawn at the column's real pixel width (a scaled viewBox made
+  ticks ~3 px on a phone); the categorical colours are the three validated
+  all-pairs slots, identity only.
+- **The scorecard** prints every scored prediction beside its control with
+  ahead / level / behind / not scored. Skill within ±0.05 is "level". On the
+  real first day that reads: L1 fusion level, GEO filter behind, Dst ahead,
+  timing not scored.
+- The renderer computes NO physics (gated by source text); the column comes
+  only through `js/bz-engine-provider.js`.
+
+**Verified how:** driven in Chromium at 1440 px and 390 px against planted
+data — ten rungs, three charts, hover readout, no horizontal overflow.
+**Not verified:** no Playwright spec is committed (the repo's test runner is
+not installed in the build sandbox), and the page has not been looked at on
+real feeds in a browser.
+
+**Not built, against the plan's B6:** the space-weather.html panel, the
+status-band row, and the propagated Bz as a `SolarWindDriver` (deliberately
+withheld — the ledger has not shown skill).
+
+## 18. Where this stands, and what decides the next step
+
+Built: feeds, L1 fusion, propagation, flux, GEO residual + filter, the
+ladder, ground at 1 s, ring current, the page. All gated (103 node checks in
+eight files).
+
+**Still unverified — do not print as fact:** Siscoe–Hill saturation
+coefficients; Mead magnetopause-current coefficients; `SOLAR1` = SWFO-L1.
+
+**Still open from §10:** D1 (does "flux" include particles), D3 (keep
+1-second history), D4 (ledger storage — nothing is stored today; every score
+is recomputed from the feeds' own windows), D6 (operator- or research-first).
+New: the licence check for a FAC model at LEO.
+
+**The recommendation from §15 stands and is now the main thing.** Every
+verdict above comes from ONE quiet day. Our own archive (`sw_geomag_dataset`
+through `api/_lib/sw-geomag-store.js`) holds about four months of minute L1
+data and certainly contains disturbed days. Running the GEO filter, the Dst
+model and the propagation against that record is what turns "level on a
+quiet day" into an answer — and it needs D4, because scores over months
+cannot be recomputed per request.

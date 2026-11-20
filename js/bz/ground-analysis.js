@@ -38,8 +38,9 @@ export function analyzeGround({ fast = {}, slow = {}, wind = null, nowMs }) {
     }
     if (!stations.length) return null;
 
-    const proxy = electrojetProxy(stations);
-    const fastList = stations.filter((s) => s.has_1s).map((s) => ({ iaga: s.iaga, dipLat: s.dipLat, t: fast[s.iaga].t, x: fast[s.iaga].x }));
+    const sound = stations.filter((s) => !s.suspect);
+    const proxy = electrojetProxy(sound);
+    const fastList = sound.filter((s) => s.has_1s).map((s) => ({ iaga: s.iaga, dipLat: s.dipLat, t: fast[s.iaga].t, x: fast[s.iaga].x }));
     const impulses = detectSuddenImpulses(fastList);
 
     // The timing score: predicted pressure-jump arrivals vs sudden impulses at the ground.
@@ -63,7 +64,7 @@ export function analyzeGround({ fast = {}, slow = {}, wind = null, nowMs }) {
         };
     }
 
-    const withRate = stations.filter((s) => s.dbdt);
+    const withRate = sound.filter((s) => s.dbdt);
     const worst = withRate.slice().sort((a, b) => b.dbdt.peak_nt_s - a.dbdt.peak_nt_s)[0] ?? null;
     const ratios = withRate.map((s) => s.dbdt.underread).filter((v) => v != null).sort((a, b) => a - b);
     const band = (s, id) => s.spectrum?.bands.find((b) => b.id === id);
@@ -71,6 +72,7 @@ export function analyzeGround({ fast = {}, slow = {}, wind = null, nowMs }) {
     return {
         network: 'USGS Geomagnetism Program', stations_total: stations.length,
         stations_1s: stations.filter((s) => s.has_1s).length,
+        suspect_stations: stations.filter((s) => s.suspect).map((s) => s.iaga),
         latency_s: r1(Math.max(...stations.map((s) => s.latency_s ?? 0))),
         dbdt: worst ? {
             kind: 'MEASURED', peak_nt_s: r3(worst.dbdt.peak_nt_s), at_station: worst.iaga, at_time: iso(worst.dbdt.peak_time),
@@ -88,10 +90,10 @@ export function analyzeGround({ fast = {}, slow = {}, wind = null, nowMs }) {
         sudden_impulses: impulses.map((s) => ({ time: iso(s.time), step_nt: r1(s.step_nt), stations: s.stations, spread_s: Math.round(s.spread_s) })),
         timing_score: timing,
         stations: stations.map((s) => ({
-            iaga: s.iaga, lat: r2(s.lat), lon: r2(s.lon), dipole_lat: r1(s.dipLat), zone: s.zone,
+            iaga: s.iaga, lat: r2(s.lat), lon: r2(s.lon), dipole_lat: r1(s.dipLat), zone: s.zone, suspect: s.suspect,
             latest: iso(s.latest), latency_s: s.latency_s, has_1s: s.has_1s,
             delta_nt: { north: r1(s.dx), east: r1(s.dy), baseline: s.baseline?.kind ?? null },
-            equivalent_current: s.current ? { kind: 'ESTIMATED', a_per_km: r1(s.current.magnitudeAkm), toward_deg: r1(s.current.directionDeg) } : null,
+            equivalent_current: s.current && !s.suspect ? { kind: 'ESTIMATED', a_per_km: r1(s.current.magnitudeAkm), toward_deg: r1(s.current.directionDeg) } : null,
             dbdt_peak_nt_s: r3(s.dbdt?.peak_nt_s), dbdt_underread: r1(s.dbdt?.underread),
             pulsation_rms_nt: s.spectrum ? { pc5: r3(band(s, 'pc5')?.rms), pc4: r3(band(s, 'pc4')?.rms), pc3: r3(band(s, 'pc3')?.rms), segments: s.spectrum.segments } : null,
         })),

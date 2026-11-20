@@ -208,6 +208,19 @@ const PRED = (() => {
     assert.ok(a.latency_s >= 120 && a.latency_s <= 135);
     ok(`assembly: timing error ${a.timing_score.median_error_s} s (planted 360), CMO burst 2 nT/s read as ${a.dbdt.minute_product_would_read_nt_s} by a minute product, bay −300 nT, Pc5 ${st.BOU.pulsation_rms_nt.pc5} nT`);
 
+    // A station whose record has stepped by thousands of nT (measured: FRN, −2766 nT on a quiet day)
+    // is flagged and kept out of every network number — it must not own the peak or the proxy.
+    const bad = seriesOf(planted), badSlow = seriesOf(planted, 'slow');
+    for (let i = 0; i < bad.FRN.x.length; i++) bad.FRN.x[i] -= 2766;
+    for (let i = 1500; i < bad.FRN.x.length; i++) bad.FRN.x[i] += 40 * (i % 2);      // and a noisy tail: 40 nT/s
+    const b2 = analyzeGround({ fast: bad, slow: badSlow, wind: null, nowMs: NOW });
+    assert.deepEqual(b2.suspect_stations, ['FRN']);
+    assert.equal(b2.dbdt.at_station, 'CMO', 'the bad record does not own the network peak');
+    const frn = b2.stations.find((q) => q.iaga === 'FRN');
+    assert.equal(frn.suspect, true); assert.equal(frn.equivalent_current, null);
+    assert.ok(frn.delta_nt.north < -2700, 'its number is still shown, flagged — not hidden');
+    assert.deepEqual(a.suspect_stations, []);
+
     // Quiet: nothing to time, and the score says so rather than claiming a pass.
     const quiet = analyzeGround({ fast: seriesOf(plantedGround({ nowMs: NOW })), slow: {}, wind: null, nowMs: NOW });
     assert.equal(quiet.timing_score.status, 'no_wind');
