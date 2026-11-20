@@ -408,6 +408,44 @@ const PRED = (() => {
         assert.equal(db.reasons[0], 'no_ground_station');
         assert.deepEqual(db.upstream.usgs.failures, { 'fast:http_503': 14, 'slow:http_503': 14 });
         assert.ok(db.data.ring_current.measured, 'Dst is still reported when the magnetometers are down');
+
+        // USGS SLOW: the fan-out has ONE deadline. Requests that never answer are cut at it, the
+        // ones that could not start are never sent, and the route answers 200 — never a 504.
+        {
+            const { fetchGround, DEADLINE_MS } = await import('../api/_lib/bz-ground-fetch.js');
+            assert.ok(DEADLINE_MS <= 20000, 'the budget leaves room inside the edge limit');
+            let sent = 0;
+            const base = usgsResponder(planted);
+            const hang = (u, init) => new Promise((_, rej) => { init?.signal?.addEventListener('abort', () => rej(init.signal.reason ?? new DOMException('t', 'TimeoutError'))); });
+            // The 1-second requests answer; every 24-hour request hangs for ever.
+            globalThis.fetch = async (u, init) => { sent++; const s = String(u); return /sampling_period=60/.test(s) ? hang(u, init) : base(s); };
+            const t0 = performance.now();
+            const keep = setInterval(() => {}, 50); // AbortSignal.timeout's timer is unref'd: alone it lets node exit
+            const g = await fetchGround(NOW, { deadlineMs: 600 });
+            clearInterval(keep);
+            const took = performance.now() - t0;
+            assert.ok(took < 2500, `returned at the deadline, not after 5 × 14 s (took ${took.toFixed(0)} ms)`);
+            assert.equal(Object.keys(g.fast).length, 14, `the 1-second product was fetched FIRST and is whole: ${JSON.stringify(g.diagnostics.failures)} in ${took.toFixed(0)} ms`);
+            assert.equal(Object.keys(g.slow).length, 0);
+            assert.equal(g.deadlineHit, true);
+            const f = g.diagnostics.failures;
+            assert.equal((f['slow:timeout'] ?? 0) + (f['slow:deadline'] ?? 0), 14, JSON.stringify(f));
+            assert.ok(f['slow:deadline'] >= 8, 'requests that could not start in time were never sent');
+            assert.equal(sent, 28 - f['slow:deadline']);
+            // Through the route: a 200 that says why.
+            sent = 0;
+            const realPerf = performance.now.bind(performance); let skew = 0;
+            globalThis.fetch = async (u, init) => { const s = String(u); if (/sampling_period=60/.test(s)) { skew += 20000; return new Response('late', { status: 599 }); } return serve(planted)(s); };
+            performance.now = () => realPerf() + skew;
+            try {
+                const r = await handler(new Request('https://x.test/api/bz/ground?summary=1'));
+                assert.equal(r.status, 200);
+                const b = await r.json();
+                assert.ok(b.reasons.includes('usgs_slow'), JSON.stringify(b.reasons));
+                assert.equal(b.freshness, 'stale');
+                assert.equal(b.data.ground.stations_1s, 14, 'the measurement survives a slow baseline');
+            } finally { performance.now = realPerf; }
+        }
     } finally { globalThis.fetch = real; Date.now = realNow; }
     {
         const { mapLimit } = await import('../api/_lib/bz-ground-fetch.js');

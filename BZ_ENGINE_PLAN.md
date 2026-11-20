@@ -1078,3 +1078,14 @@ its level-based numbers. Gated on the real 20:22 UT peaks, with the level test
 as the negative control. Same limits as §19's rule: it cannot tell a record
 spike from a real change at one station, and is untested on a real storm.
 
+### 22.1 The ground fan-out has a deadline (2026-11-20, 22:05 UT)
+
+Measured on two deployments at once: USGS was slow and `/api/bz/ground` answered
+HTTP 504 (function timeout) — and so would `/api/bz/column`, which runs the same
+fan-out. 28 requests, 6 in flight, 14 s each is up to 70 s. `fetchGround` now has
+one 15 s budget: per-request timeout = min(14 s, time left); requests that cannot
+start are recorded as `deadline` and never sent; the 1-second requests all go
+first, so a short budget is spent on the measurement and the baseline is what is
+lost. The routes answer 200 with `usgs_slow`. Gated in `tests/bz-ground.mjs`
+(baselines that never answer: returns at the deadline with all 14 one-second
+series).

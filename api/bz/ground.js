@@ -55,6 +55,7 @@ export default async function handler(req) {
         return jsonError('internal', `analysis: ${String(e?.message ?? e).slice(0, 140)}`, { status: 500 });
     }
     if (g.failed.length) reasons.push(`stations_down:${g.failed.join(',')}`);
+    if (g.deadlineHit) reasons.push('usgs_slow');
     const upstream = g.diagnostics ? { usgs: g.diagnostics } : null;
 
     const base = { source: 'USGS Geomagnetism Program + NOAA SWPC via Vercel Edge · js/bz/ground-analysis.js', model: 'bz-ground-v0' };
