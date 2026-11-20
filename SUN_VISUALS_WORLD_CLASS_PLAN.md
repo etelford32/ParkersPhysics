@@ -862,6 +862,65 @@ owner.*
     arcade's loops are evenly spaced and equal in size, which at close range
     reads as mechanical; the kernel's `weight` is the hook for varying them.
 
+- **2026-11-20 (later) — THE FIRST REAL FRAMES, and what they broke.** The
+  owner's verdict on the pass above was "we have a long ways to go". To stop
+  judging on synthetic stand-ins I proposed, and the owner approved, a cloud
+  environment (`ParkersPhysics`) that allows exactly three hosts:
+  `sdo.gsfc.nasa.gov`, `soho.nascom.nasa.gov`, `services.swpc.noaa.gov`.
+  `scripts/fetch-sdo-fixtures.mjs` then wrote the first REAL frames this
+  project has ever tested against (`tests/fixtures/sdo/real_*`, 13 files,
+  plus 256² lossless copies for the node gates), and three production defects
+  that no gate could have seen were on screen immediately:
+  - **The off-limb ring was blown out, and had been since Phase 3b shipped in
+    September.** Its level was normalised by the median of the 1.05–1.15 R☉
+    shell. On a real AIA 304 frame that shell is at 0–2 code values (linear
+    7e-4, against 0.075 at the limb): the reference sat a hair above
+    `REF_FLOOR`, the frame "calibrated", and the limb was drawn 30–100× over
+    — a saturated white-and-pink band with JPEG noise amplified into speckle.
+    The synthetic frames carry a broad bright haze real frames do not have (a
+    real profile falls ~100× between 1.03 and 1.10 R☉). And the √ stretch was
+    a SECOND stretch: a browse JPEG is already display-stretched by the
+    instrument team. Now: reference = the frame's own LIMB GLOW (1.00–1.05
+    R☉, where every real channel has signal), a two-code-value black point
+    subtracted first, `STRETCH_GAMMA` = 1 (as published). Measured on the real
+    frames, limb zone: new rule median 0.42 (the gain) / p95 0.9; old rule 304
+    median 1.28 before 131 is added, and a noise haze of 0.068 in 131's sky
+    where the new rule draws 0.0005. On screen (`tests/sun-real-frames.spec.js`):
+    limb 157/255, 8 % of limb probes white, sky under 1.
+  - **AIA's burned-in caption was drawn as white text under the Sun** ("131
+    2026-11-20 14:58:56 UT" — rows 987–1009 of 1024, at ρ ≈ 1.2 R☉, inside
+    the ring). `CAPTION_V` masks the bottom strip of the frame; the node gate
+    re-finds the caption in the real frames and fails if a product moves it.
+  - **The first real LASCO C3 frame was half-missing** — a telemetry dropout,
+    11 % of the field exactly black beside a band of garbage. `frameIntegrity`
+    (a LASCO field always carries a coloured pedestal, so black is absent
+    data) refuses it BEFORE it replaces the last complete frame; the chip says
+    "LASCO C2 (C3 frame incomplete)". That frame is kept as
+    `real_c3_dropout.jpg`, the gate's negative control.
+  - **What the real frames CONFIRMED** (all listed as unverified above): the
+    LASCO limb circle exists and is measured; the derived plate scale is right
+    (C2 ring ratio 0.995); the frames are north-up (C3 pylon lower-left); the
+    coronagraph `STRETCH_GAMMA` wanted 1 as well (√ merged C2's streamers into
+    a red wash); the whole-Sun exposure ceiling had to come down to +0.4 EV
+    (+1.5 still burned the observed disc white at 20 R☉).
+  - **GOES/SUVI is settled, and is now the default off-limb source.** One
+    production request (`…/api/solar/aia?channel=suvi304&meta=1`, the check
+    this file has asked for since September) answered:
+    `swpc-animation-primary-png` 200, the secondary slot 200, the three other
+    spellings 404 — the list is trimmed to the two that exist. The real frame
+    is a 1280² "GOES-19 SUVI Composite" whose corona runs smoothly to the
+    frame edge, which is the picture the ring was always meant to show: on it
+    the limb reads 148, 1.25 R☉ 11, 1.5 R☉ 1, sky 0. sun.html now selects
+    SUVI, falls back to SDO/AIA once if SUVI does not answer, and
+    `?offlimbSource=sdo` forces AIA. The disc stays SDO.
+  - **A harness scar.** Opening the network let the TEST BROWSER reach live
+    NOAA feeds, and specs that depend on those hosts failing fast timed out.
+    Browser gates must run with the proxy variables unset (CLAUDE.md).
+  - **Still not done, and still the owner's call on a real GPU:** the look of
+    the observed disc itself (pale, flat at hero scale — true to a 1024 px
+    continuum frame, but not striking), model field lines drawn over observed
+    pixels, the evenly spaced flare arcade, and Phases 4 and 6.
+
 ---
 
 ## 1. Scope & locked decisions
@@ -1324,13 +1383,12 @@ log. Re-read CLAUDE.md §5 before opening it.
 
 ## 9. Deferred / open
 
-- **Settle the LASCO frames on production** (2026-11-20). Load sun.html, zoom
-  out, and read `__sun.coronagraph.instruments`: `geometry` (`measured` means
-  the limb circle was found), `ringRatio` (≈ 1 confirms the plate scale),
-  `pylonPaDeg` on C3 (≈ 135 upright, ≈ 315 inverted). Record what it says in
-  `js/sun-coronagraph.js` and, if SOHO is inverted, turn `autoRoll` on.
-- **Make GOES/SUVI the default off-limb source** once its upstream is settled
-  (next item). It is what removes the detector-shaped edge of the ring.
+- ~~Settle the LASCO frames~~ — DONE 2026-11-20 on real frames: limb circle
+  measured, ring ratio 0.995, north-up. STILL OPEN: SOHO flies inverted for
+  about half the year, and only one orientation has been seen — `autoRoll`
+  is off; check `pylonPaDeg` on C3 after the next roll manoeuvre.
+- ~~Make GOES/SUVI the default off-limb source~~ — DONE 2026-11-20 (upstream
+  settled on production, SDO fallback kept).
 - **Cinematic mode in `?preview=1`**, depth of field, and per-loop variation
   in the flare arcade — the three Phase 5 items not built on 2026-11-20.
 

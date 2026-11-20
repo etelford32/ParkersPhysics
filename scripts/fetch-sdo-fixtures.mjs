@@ -15,7 +15,7 @@
  * set because only the generator knows where it planted its features.
  * Nothing here is imported by the site.
  */
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,4 +53,30 @@ for (const id of ['c2', 'c3']) {
         console.log(`wrote ${name} (${buf.length} B)`);
     } catch (e) { console.error(`${id}: ${e?.message ?? e}`); }
 }
+// GOES/SUVI — the wide-field source for the off-limb ring. Resolved from the
+// same ordered candidate list the proxy uses (js/suvi-geometry.js), first hit
+// wins, and the manifest records WHICH candidate answered.
+const { candidateUrls } = await import('../js/suvi-geometry.js');
+for (const band of ['304', '131']) {
+    for (const c of candidateUrls(band)) {
+        try {
+            const r = await fetch(c.url);
+            const type = r.headers.get('content-type') || '';
+            if (!r.ok || !/^image\//i.test(type)) continue;
+            const buf = Buffer.from(await r.arrayBuffer());
+            const name = `real_suvi${band}.${/png/i.test(type) ? 'png' : 'jpg'}`;
+            writeFileSync(join(OUT, name), buf);
+            manifest.frames[`suvi${band}`] = { file: name, url: c.url, source_id: c.id, lastModified: r.headers.get('last-modified'), bytes: buf.length };
+            console.log(`wrote ${name} (${buf.length} B) via ${c.id}`);
+            break;
+        } catch (e) { /* next candidate */ }
+    }
+}
+// KEPT frames: real frames saved for what they show (a telemetry dropout, a
+// flare) rather than for being the latest. A re-fetch must not lose them.
+try {
+    const prev = JSON.parse(readFileSync(join(OUT, 'real-manifest.json'), 'utf8'));
+    for (const [k, f] of Object.entries(prev.frames || {})) if (f.kept && !manifest.frames[k]) manifest.frames[k] = f;
+} catch (_) { /* first run */ }
 writeFileSync(join(OUT, 'real-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+console.log('now run: python3 scripts/bake-sdo-real-thumbs.py   (256² PNG copies the node gates read)');

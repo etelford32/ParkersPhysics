@@ -174,7 +174,7 @@ test.describe('sun.html cinematic pass', () => {
                 visible: window.__sun.coronagraphMesh.visible, occl: window.__sun.spaceOcclusion }));
             expect(far.gain).toBeGreaterThan(0.1);
             expect(far.visible).toBe(true);
-            expect(far.evMax, 'whole Sun in view ⇒ the exposure ceiling is +1.5 EV, not +4').toBeCloseTo(1.5, 5);
+            expect(far.evMax, 'whole Sun in view ⇒ the exposure ceiling is +0.4 EV, not +4').toBeCloseTo(0.4, 5);
             expect(far.occl.sunR, 'the vignette\'s zones follow the Sun\'s projected radius').toBeCloseTo(
                 Math.tan(Math.asin(1 / 24)) / (2 * Math.tan(CAM.HERO_FOV_DEG * CAM.DEG / 2)), 4);
         });

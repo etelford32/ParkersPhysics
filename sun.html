@@ -1158,7 +1158,7 @@ import './js/telemetry.js';
                         <label for="tog-offlimb">
                             <span class="layer-dot tr"></span>
                             <span class="layer-name">Off-limb (observed)</span>
-                            <span class="layer-meta">SDO 304 + 131 · plane of sky</span>
+                            <span class="layer-meta">304 + 131 Å · plane of sky</span>
                         </label>
                     </div>
                     <!-- SOURCE. Both entries draw the same two lines from the
@@ -1169,8 +1169,8 @@ import './js/telemetry.js';
                          supplies all of it, at 2.5"/px instead of 0.6". The
                          meta text is written from the LIVE coverage figure, not
                          typed. js/suvi-geometry.js. -->
-                    <div class="toggle-row layer-row" id="lr-offlimb-suvi">
-                        <input type="checkbox" id="tog-offlimb-suvi">
+                    <div class="toggle-row layer-row on" id="lr-offlimb-suvi">
+                        <input type="checkbox" id="tog-offlimb-suvi" checked>
                         <label for="tog-offlimb-suvi">
                             <span class="layer-dot tr"></span>
                             <span class="layer-name">· GOES/SUVI source</span>
@@ -2714,6 +2714,7 @@ let _occlRelax = 0;     // set by the coronagraph layer's drawn weight
     _spaceOcclPass = new ShaderPass(spaceOcclusionShader);
     composer.addPass(_spaceOcclPass);
 }
+const EV_MAX_WHOLE_SUN = 0.4;   // exposure ceiling (EV) while the whole disc is in frame
 let _coroWasDrawn = false;
 let _coroGain0 = null;       // the layer's own gain, read once
 let _coroReveal = -1;        // 0 at the disc's exposure, 1 once the camera has pulled back (−1: not applied yet — the first tick must set the gain)
@@ -2755,11 +2756,14 @@ function _tickCoronagraph() {
     //     would open up to its +4 EV ceiling (×16) — which blows the disc and
     //     the inner corona to white (measured on the first render). The ceiling
     //     is for flights INSIDE the corona, where the disc has left the frame;
-    //     with the whole Sun in view it is held at +1.5 EV.
+    //     with the whole Sun in view it is held at +0.4 EV. (It was +1.5 for
+    //     a few hours; on real frames that still burned the observed disc to
+    //     white at 20 R☉. The outer corona has its own gain — it does not need
+    //     the disc's exposure raised to be seen.)
     if (sunPost?.exposure) {
         const d = camera.position.length();
         const k = THREE.MathUtils.smoothstep(d, 1.8, 3.2);
-        sunPost.exposure.p.evMax = THREE.MathUtils.lerp(4.0, 1.5, k);
+        sunPost.exposure.p.evMax = THREE.MathUtils.lerp(4.0, EV_MAX_WHOLE_SUN, k);
     }
 }
 const _occlV = new THREE.Vector3();
@@ -4187,7 +4191,7 @@ function _renderProvChip() {
             : ` ${olSrc}'s frame reaches only ${olCov.reach.axis.toFixed(2)} R☉ on axis, so it supplies ${(olCov.fraction * 100).toFixed(0)}% of this annulus — the rest is outside the frame and is drawn as nothing, never invented; the layer fades over the last ${EDGE_FEATHER.toFixed(2)} R☉ before the detector edge so the frame's boundary is not read as a feature.`)
         : '';
     const ol = _offLimbState && _offLimbState.enabled
-        ? ` Off-limb: the 1.0–1.6 R☉ annulus of the live ${olSrc} 304 + 131 frames, drawn on the plane through Sun centre normal to the Sun–Earth line (optically thin EUV is plane-of-sky by nature) and occluded by the photosphere.${olCovTxt} Level is normalised by each frame's own 1.05–1.15 R☉ shell, then square-root stretched for display (the field spans ~70:1 — no linear mapping shows both the quiet corona and a prominence); colour is the browse product's own. Fades as the camera leaves the Sun–Earth line (${Math.round((_offLimbState.axisWeight ?? 0) * 100)}% now).`
+        ? ` Off-limb: the 1.0–1.6 R☉ annulus of the live ${olSrc} 304 + 131 frames, drawn on the plane through Sun centre normal to the Sun–Earth line (optically thin EUV is plane-of-sky by nature) and occluded by the photosphere.${olCovTxt} Level is normalised to each frame's own limb glow (the 1.00–1.05 R☉ shell) after subtracting the product's two-code-value black point; above the limb the profile and the colour are the browse product's own, as published. The frame's burned-in caption strip is not drawn. Fades as the camera leaves the Sun–Earth line (${Math.round((_offLimbState.axisWeight ?? 0) * 100)}% now).`
         : '';
     el.title = state.mode === 'observed'
         ? `Observed: SDO frame on the Earth-facing hemisphere (disk geometry ${state.geometry}, B0 ${state.b0Deg.toFixed(2)}°, P ${state.pDeg.toFixed(1)}° not applied — frames are north-up). Far side is procedural (15° grid).${ol}${_coroState?.enabled ? ' ' + (_coroState.note ?? '') : ''} Click for Model.`
@@ -4281,12 +4285,39 @@ function _renderProvChip() {
             }
             document.getElementById('lr-offlimb-suvi')?.classList.toggle('on', id === 'suvi');
         };
-        togSuvi.checked = qp.get('offlimbSource') === 'suvi';
+        // GOES/SUVI IS THE DEFAULT SOURCE FOR THE RING (2026-11-20). Its upstream
+        // was settled by one production request (swpc-animation-primary-png →
+        // 200; js/suvi-geometry.js SOURCE_CANDIDATES), and on real frames it is
+        // the one that shows a corona: the SUVI composite carries signal to its
+        // frame edge at 1.67 R☉, where an AIA browse frame is black past ~1.1 R☉
+        // and stops at 1.28 on axis. The DISC stays SDO. `?offlimbSource=sdo`
+        // (or the row) forces AIA; and if SUVI does not answer, the ring FALLS
+        // BACK to AIA once and the row says so — a dead SWPC image host must
+        // not take the limb's atmosphere with it.
+        const want = qp.get('offlimbSource');
+        let userChose = want === 'sdo' || want === 'suvi';
+        togSuvi.checked = want !== 'sdo';
         togSuvi.addEventListener('change', (e) => {
+            userChose = true;
             paint(sunOffLimb.setSource(e.target.checked ? 'suvi' : 'sdo'));
         });
         if (togSuvi.checked) sunOffLimb.setSource('suvi');
         paint(togSuvi.checked ? 'suvi' : 'sdo');
+        // One-way, once: SUVI was the page's choice (not the user's) and both of
+        // its channels failed their first two refreshes.
+        let suviMisses = 0;
+        sunOffLimb.onState = ((prev) => (st) => {
+            prev(st);
+            if (userChose || st.sourceId !== 'suvi' || !st.enabled) return;
+            const any = (st.channels || []).some(c => c.ok);
+            if (any) { suviMisses = 0; return; }
+            if (st.feedDown && ++suviMisses >= 2) {
+                userChose = true;                      // do not flap back
+                togSuvi.checked = false;
+                paint(sunOffLimb.setSource('sdo'));
+                if (meta) { meta.textContent = 'GOES/SUVI did not answer — using SDO/AIA'; }
+            }
+        })(sunOffLimb.onState);
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sunOffLimb?.refresh(); });
     sunOffLimb.setEnabled(_offLimbUserOn && _obsShouldBeOn());

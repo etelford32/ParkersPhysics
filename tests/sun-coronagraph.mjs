@@ -46,12 +46,13 @@ import {
     STRETCH_GAMMA, DEFAULT_GAIN, DISCARD_EPS, VALUE_EPS, pixelValue,
     CORONAGRAPH_FRAG, CORONAGRAPH_VERT, MESH_R_INNER, MESH_R_OUTER, INSTRUMENT_HEADER,
 } from '../js/sun-coronagraph.js';
+import * as CORO from '../js/sun-coronagraph.js';
 import { observerBasis, offAxisWeight, displayStretch, REF_FLOOR } from '../js/sun-offlimb.js';
 import { srgbToLinear, luminance } from '../js/sun-observed.js';
 
 import { lascoFreshness, LASCO_WARN_S, LASCO_CRIT_S } from '../js/lasco-sources.js';
 import {
-    renderSyntheticCoronagraph, toRgba, encodePng, FIXTURE_EPOCH_ISO,
+    renderSyntheticCoronagraph, toRgba, encodePng, decodePng, FIXTURE_EPOCH_ISO,
     PLANTED_CORONA, PLANTED_CORONAGRAPH, CORONAGRAPH_TIMESTAMP_BOX,
 } from '../scripts/lib/sdo-synth.mjs';
 
@@ -310,7 +311,7 @@ ok('calibration measures the frame\'s own pedestal and reference shell', () => {
         // table's dark end, and it is what an additive layer must not paint.
         assert.ok(cal.floor > srgbToLinear(4), `${id}: pedestal ${cal.floor} should be well above black`);
         assert.ok(cal.ref > cal.floor && near(cal.level, cal.ref - cal.floor, 1e-12));
-        // By construction the reference shell draws at 1 → √1 = 1.
+        // By construction the reference shell draws at 1 (a fixed point of any exponent).
         assert.ok(near(displayValue(cal.ref, cal.floor, cal.level), 1, 1e-9));
         // …and the frame's dark sky draws at exactly nothing.
         assert.equal(displayValue(cal.floor, cal.floor, cal.level), 0);
@@ -331,7 +332,8 @@ ok('the pedestal is the product\'s darkest sky, NOT the drawn field\'s own rim',
     const rimMedian = rim[rim.length >> 1], rimLow = rim[Math.floor(rim.length * 0.1)];
     assert.ok(cal.floor < rimLow, `pedestal ${cal.floor} is not below the rim's own low end ${rimLow}`);
     // So the rim still DRAWS — there is corona there, and C3 continues it.
-    assert.ok(displayValue(rimMedian, cal.floor, cal.level) > 0.25, `the rim displays ${displayValue(rimMedian, cal.floor, cal.level)}`);
+    // (0.25 under the fixture-era √; drawn as published it is 0.18 — still plainly there.)
+    assert.ok(displayValue(rimMedian, cal.floor, cal.level) > 0.10, `the rim displays ${displayValue(rimMedian, cal.floor, cal.level)}`);
     // Negative control: the rim's own low percentile as the pedestal zeroes it.
     assert.ok(displayValue(rimLow, rimLow, cal.ref - rimLow) === 0);
     // The pedestal is found in the CORNERS (outside the drawn circle), where
@@ -544,7 +546,9 @@ ok('the pylon probe finds the C3 pylon where it was planted, and flags an invert
 // ── Stretch, label, GLSL ───────────────────────────────────────────────────
 
 ok('the display stretch is monotone, pedestal-anchored and the off-limb layer\'s own function', () => {
-    assert.equal(STRETCH_GAMMA, 0.5);
+    // 1 = as published above the pedestal (it was 0.5 until the first real C2
+    // frame showed the √ merging the streamers — see STRETCH_GAMMA's comment).
+    assert.equal(STRETCH_GAMMA, 1);
     let prev = -1;
     for (let L = 0; L <= 1; L += 0.01) {
         const v = displayValue(L, 0.05, 0.2);
@@ -578,7 +582,7 @@ ok('the chip names what is actually drawn, and a dead feed says so', () => {
     assert.match(coronagraphLabel(st([inst('c2'), inst('c3')], { axisWeight: 0 })), /\(off-axis\)$/);
     assert.equal(coronagraphLabel(st([inst('c2', { drawn: false, freshness: 'expired' }), inst('c3', { drawn: false, freshness: 'expired' })])), ' · LASCO frames expired');
     const note = coronagraphNote(st([inst('c2'), inst('c3', { rIn: 4.2, rOut: 26.9, levelBasis: 'c2-overlap' })]));
-    for (const must of ['plane of sky', 'occulter', '√', 'level matched to C2', 'hands over to C3', 'north-up', 'L1']) {
+    for (const must of ['plane of sky', 'occulter', 'as published', 'level matched to C2', 'hands over to C3', 'north-up', 'L1']) {
         assert.ok(note.includes(must), `note is missing "${must}"`);
     }
     assert.match(coronagraphNote(st([inst('c2', { drawn: false }), inst('c3', { drawn: false })])), /nothing is drawn/);
@@ -640,6 +644,40 @@ ok('the GLSL field function agrees with the JS one (transliterated and run)', ()
     for (let rho = 0; rho < 32; rho += 0.173) {
         assert.ok(near(fieldW(rho, vec, smoothstep), fieldWeight(rho, field), 1e-12), `ρ=${rho}`);
     }
+});
+
+ok('REAL FRAMES: a complete frame passes the integrity check, a telemetry dropout is refused', () => {
+    // 256² lossless copies of real SOHO/LASCO browse frames (scripts/fetch-sdo-fixtures.mjs
+    // + bake-sdo-real-thumbs.py). real_c3_dropout is the frame served on 2026-11-20 with
+    // the right half of the field missing — KEPT for exactly this check. Never hand-edit.
+    const M = CORO;
+    const real = JSON.parse(readFileSync(join(ROOT, 'tests', 'fixtures', 'sdo', 'real-manifest.json'), 'utf8'));
+    const load = (k) => decodePng(readFileSync(join(ROOT, 'tests', 'fixtures', 'sdo', real.frames[k].thumb)));
+    const check = (k, id) => {
+        const { width: w, height: h, rgba } = load(k);
+        const geom = M.resolveCoronagraphGeometry(rgba, w, h, id, new Date(real.fetched));
+        const field = M.fieldFor(id, geom, M.measureOcculter(rgba, w, h, geom, id));
+        return { ...M.frameIntegrity(rgba, w, h, geom, field), field };
+    };
+    const c2 = check('c2', 'c2'), bad = check('c3_dropout', 'c3');
+    console.log(`    C2 void ${(c2.voidFraction * 100).toFixed(2)}% of ${c2.samples} px · C3 dropout void ${(bad.voidFraction * 100).toFixed(1)}% of ${bad.samples} px`);
+    assert.equal(c2.ok, true, 'a complete C2 frame is accepted');
+    assert.ok(c2.voidFraction < 0.002, `a real field is never black (${c2.voidFraction})`);
+    assert.equal(bad.ok, false, 'the dropout frame is refused');
+    assert.ok(bad.voidFraction > 4 * M.VOID_FRACTION_MAX, `well clear of the threshold (${bad.voidFraction})`);
+    // The synthetic frames are complete too — the check must not fire on them.
+    for (const id of ['c2', 'c3']) {
+        const size = 512, rgbaS = toRgba(renderSyntheticCoronagraph(id, { size }).rgb, size, size);
+        const g = M.resolveCoronagraphGeometry(rgbaS, size, size, id, new Date(FIXTURE_EPOCH_ISO));
+        const f = M.fieldFor(id, g, M.measureOcculter(rgbaS, size, size, g, id));
+        assert.equal(M.frameIntegrity(rgbaS, size, size, g, f).ok, true, `synthetic ${id} is complete`);
+    }
+    // …and the chip says what happened rather than "down".
+    const label = M.coronagraphLabel({ enabled: true, axisWeight: 1, instruments: [
+        { id: 'c2', short: 'C2', drawn: true, freshness: 'live', geometry: 'measured' },
+        { id: 'c3', short: 'C3', drawn: false, incomplete: true, freshness: 'expired' } ] });
+    assert.match(label, /LASCO C2 \(C3 frame incomplete\)/);
+    assert.equal(M.coronagraphLabel({ enabled: true, feedDown: false, instruments: [{ id: 'c3', short: 'C3', drawn: false, incomplete: true }] }), ' · LASCO frame incomplete');
 });
 
 ok('the committed fixtures are what the generator renders today', () => {

@@ -12,7 +12,7 @@
  *
  * Pure: no DOM, no three. Exports a renderer + a minimal PNG encoder (zlib).
  */
-import { deflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { heliographicToVec, projectDiskUV, DISK_FRACTION, CHANNELS } from '../../js/sun-observed.js';
 import { parseSuviChannel } from '../../js/suvi-geometry.js';
 import { coronagraph, expectedRsunFrac, positionAngleDeg } from '../../js/sun-coronagraph.js';
@@ -379,4 +379,47 @@ export function encodePng({ width, height, rgb }) {
         chunk('IDAT', deflateSync(raw, { level: 9 })),
         chunk('IEND', Buffer.alloc(0)),
     ]);
+}
+
+/**
+ * Minimal PNG reader (8-bit RGB or RGBA, non-interlaced) — zlib only, no
+ * dependencies. For the 256² thumbnails of the REAL browse frames that
+ * scripts/bake-sdo-real-thumbs.py writes: node has no JPEG decoder, and the
+ * page measures a frame on a 256² readback anyway.
+ * @returns {{width:number, height:number, rgba:Uint8Array}}
+ */
+export function decodePng(buf) {
+    const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+    if (b.readUInt32BE(0) !== 0x89504e47) throw new Error('decodePng: not a PNG');
+    let off = 8, width = 0, height = 0, depth = 0, type = 0, interlace = 0;
+    const idat = [];
+    while (off < b.length) {
+        const len = b.readUInt32BE(off), tag = b.toString('latin1', off + 4, off + 8);
+        const data = b.subarray(off + 8, off + 8 + len);
+        if (tag === 'IHDR') { width = data.readUInt32BE(0); height = data.readUInt32BE(4); depth = data[8]; type = data[9]; interlace = data[12]; }
+        else if (tag === 'IDAT') idat.push(data);
+        else if (tag === 'IEND') break;
+        off += 12 + len;
+    }
+    if (depth !== 8 || (type !== 2 && type !== 6) || interlace) throw new Error(`decodePng: unsupported PNG (depth ${depth}, type ${type}, interlace ${interlace})`);
+    const bpp = type === 6 ? 4 : 3, stride = width * bpp;
+    const raw = inflateSync(Buffer.concat(idat));
+    const out = new Uint8Array(width * height * 4);
+    let prev = new Uint8Array(stride), cur = new Uint8Array(stride);
+    for (let y = 0; y < height; y++) {
+        const f = raw[y * (stride + 1)], row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+        for (let i = 0; i < stride; i++) {
+            const a = i >= bpp ? cur[i - bpp] : 0, up = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+            let p = 0;
+            if (f === 1) p = a; else if (f === 2) p = up; else if (f === 3) p = (a + up) >> 1;
+            else if (f === 4) { const pa = Math.abs(up - c), pb = Math.abs(a - c), pc = Math.abs(a + up - 2 * c); p = (pa <= pb && pa <= pc) ? a : (pb <= pc ? up : c); }
+            cur[i] = (row[i] + p) & 255;
+        }
+        for (let x = 0; x < width; x++) {
+            const o = (y * width + x) * 4, i = x * bpp;
+            out[o] = cur[i]; out[o + 1] = cur[i + 1]; out[o + 2] = cur[i + 2]; out[o + 3] = bpp === 4 ? cur[i + 3] : 255;
+        }
+        const t = prev; prev = cur; cur = t;
+    }
+    return { width, height, rgba: out };
 }

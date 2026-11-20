@@ -491,6 +491,44 @@ export function fieldFor(id, geom, occulterMeasured = null) {
     };
 }
 
+// ── Frame integrity ────────────────────────────────────────────────────────
+/**
+ * A REAL FRAME CAN ARRIVE HALF-MISSING. The first real C3 frame this module
+ * ever saw (2026-11-20 11:30 UT, kept as tests/fixtures/sdo/real_c3_dropout.jpg)
+ * was a telemetry dropout: the right half of the field was missing image
+ * blocks — exactly black — beside a band of garbage, with a hard vertical
+ * seam. Drawn as it came it put a black wedge and a false bright arc across
+ * the outer corona.
+ *
+ * A LASCO browse frame is never black inside its field: the product has a
+ * coloured pedestal (C2 dark red, C3 blue) even where the corona is faint. So
+ * a pixel whose brightest channel is at or below VOID_MAX is not faint corona,
+ * it is absent data. Measured: 0.000 of the field on a good C2 frame, 0.104 on
+ * the dropout. More than VOID_FRACTION_MAX and the WHOLE frame is refused —
+ * the garbage beside the hole cannot be told from corona pixel by pixel — and
+ * the layer keeps the last complete frame, and says so.
+ */
+export const VOID_MAX = 8;
+export const VOID_FRACTION_MAX = 0.02;
+export function frameIntegrity(rgba, w, h, geom, field) {
+    if (!rgba || !geom || !field) return { ok: false, voidFraction: 1, samples: 0 };
+    const R = geom.r * w, cx = geom.cx * w, cy = geom.cy * h;
+    const lo2 = (field.rIn * R) ** 2, hi2 = (field.rOut * R) ** 2;
+    let n = 0, voidN = 0;
+    for (let y = 0; y < h; y++) {
+        const dy = y - cy;
+        for (let x = 0; x < w; x++) {
+            const dx = x - cx, d2 = dx * dx + dy * dy;
+            if (d2 < lo2 || d2 > hi2) continue;
+            const o = (y * w + x) * 4;
+            n++;
+            if (Math.max(rgba[o], rgba[o + 1], rgba[o + 2]) <= VOID_MAX) voidN++;
+        }
+    }
+    const voidFraction = n ? voidN / n : 1;
+    return { ok: n > 0 && voidFraction <= VOID_FRACTION_MAX, voidFraction, samples: n };
+}
+
 /** Radial weight of a field, 0 outside [rIn, rOut]. Mirrored in the GLSL. */
 export function fieldWeight(rho, f) {
     if (!f || !(rho >= f.rIn) || rho >= f.rOut) return 0;
@@ -539,8 +577,16 @@ export function pixelValue(r8, g8, b8) {
  * handful of dead-black pixels (a JPEG block, a border line) must not set it.
  */
 export const PEDESTAL_PERCENTILE = 0.02;
-/** Display stretch exponent (√). A rendering choice, disclosed in `note`. */
-export const STRETCH_GAMMA = 0.5;
+/**
+ * Display stretch exponent. 1 = AS PUBLISHED above the frame's own pedestal.
+ * It was 0.5 (√) for this module's first hours, chosen on synthetic frames; on
+ * the first real C2 frame (tests/fixtures/sdo/real_c2.jpg, 2026-11-20) the √
+ * merged the streamers into one saturated red wash, because a LASCO browse
+ * frame is ALREADY a display-stretched, background-ratioed product — the same
+ * double stretch js/sun-offlimb.js made on AIA frames ("REAL FRAMES" there).
+ * Still a uniform, and still monotone at any value.
+ */
+export const STRETCH_GAMMA = 1.0;
 /** Display gain: the additive level of the reference shell after the stretch. */
 export const DEFAULT_GAIN = 0.4;
 
@@ -717,12 +763,16 @@ export function coronagraphLabel(state) {
     const insts = state.instruments || [];
     const drawn = insts.filter(i => i.drawn);
     if (!drawn.length) {
+        if (insts.some(i => i.incomplete)) return ' · LASCO frame incomplete';
         if (insts.some(i => i.freshness === 'expired' && i.ok)) return ' · LASCO frames expired';
         return state.feedDown ? ' · LASCO feed down' : ' · LASCO loading';
     }
     let tag = `LASCO ${drawn.map(i => i.short).join('+')}`;
-    const missing = insts.filter(i => !i.drawn).map(i => i.short);
-    if (missing.length) tag += ` (${missing.join('+')} down)`;
+    const missing = insts.filter(i => !i.drawn);
+    const broken = missing.filter(i => i.incomplete).map(i => i.short);
+    const down = missing.filter(i => !i.incomplete).map(i => i.short);
+    if (broken.length) tag += ` (${broken.join('+')} frame incomplete)`;
+    if (down.length) tag += ` (${down.join('+')} down)`;
     const stale = drawn.filter(i => i.freshness === 'stale');
     if (stale.length) tag += ` · ${ageText(Math.max(...stale.map(i => i.ageS)))}`;
     if (drawn.some(i => i.geometry === 'nominal')) tag += ' · nominal geometry';
@@ -742,7 +792,7 @@ export function coronagraphNote(state) {
     const seam = c2 && c3 ? ` C2 is used wherever it has data and hands over to C3 across ${c2.featherOut.toFixed(1)} R☉.` : '';
     return ` Outer corona: ${parts.join(' and ')}, white-light coronagraph frames drawn on the plane of sky `
         + `(optically thin scattered light is a line-of-sight integral; it fades as you orbit away from the Sun–Earth line).${seam} `
-        + 'Each frame is levelled against its own reference shell after subtracting its own dark level, then √-stretched for display; '
+        + 'Each frame is levelled against its own reference shell after subtracting its own dark level and is otherwise drawn as published; '
         + 'colours are the published product\'s. Nothing is drawn inside the occulter, over the pylon, or beyond the frame. '
         + `Scale is derived from the plate scale and the Sun's apparent radius from L1; roll is assumed north-up${state.rollDeg ? ` + ${state.rollDeg}°` : ''}.`;
 }
@@ -1028,6 +1078,14 @@ export class SunCoronagraph {
             const when = new Date(observedAt ?? this.now());
             const geom = resolveCoronagraphGeometry(read.rgba, read.w, read.h, id, when);
             const occ  = read.rgba ? measureOcculter(read.rgba, read.w, read.h, geom, id) : null;
+            // Refuse a frame with missing blocks BEFORE it replaces the last
+            // complete one (frameIntegrity). The catch below keeps `prev`.
+            const integrity = read.rgba ? frameIntegrity(read.rgba, read.w, read.h, geom, fieldFor(id, geom, occ)) : null;
+            if (integrity && !integrity.ok) {
+                const e = new Error(`incomplete_frame (${(integrity.voidFraction * 100).toFixed(1)}% of the field is missing)`);
+                e.incomplete = true;
+                throw e;
+            }
             const tex  = new this.THREE.Texture(img);
             tex.colorSpace = this.THREE.SRGBColorSpace;
             tex.minFilter = this.THREE.LinearFilter;   // no mips: a mipped frame bleeds the occulter disc outward
@@ -1045,8 +1103,8 @@ export class SunCoronagraph {
             return frame;
         } catch (e) {
             // Keep the last good frame; an instrument that never loaded stays off.
-            if (prev && prev.tex) { prev.error = String(e?.message || e); prev.bucket = bucket; return prev; }
-            this.frames.set(id, { id, tex: null, ok: false, error: String(e?.message || e), bucket, freshness: 'expired', ageS: NaN });
+            if (prev && prev.tex) { prev.error = String(e?.message || e); prev.incomplete = !!e?.incomplete; prev.bucket = bucket; return prev; }
+            this.frames.set(id, { id, tex: null, ok: false, error: String(e?.message || e), incomplete: !!e?.incomplete, bucket, freshness: 'expired', ageS: NaN });
             return null;
         }
     }
@@ -1109,6 +1167,8 @@ export class SunCoronagraph {
                 id, label: inst.label, short: inst.short,
                 ok: !!(f && f.ok),
                 drawn: this._drawable(f),
+                // The NEWEST frame had missing blocks; `drawn` then means the last complete one is still up.
+                incomplete: !!(f && f.incomplete),
                 observedAt: f?.observedAt ?? null,
                 ageS: f?.ageS ?? NaN,
                 freshness: f?.tex ? f.freshness : 'expired',

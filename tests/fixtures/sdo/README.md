@@ -82,3 +82,25 @@ writes `real_c2.jpg` / `real_c3.jpg` on a machine with egress; one look at those
 settles the list in `js/sun-coronagraph.js`'s header. Position angles follow the
 solar convention: 0° = north, counter-clockwise through EAST, and east is image
 LEFT.
+
+## The REAL set (`real_*`, fetched 2026-11-20)
+
+`real_<channel>.jpg|png` are real browse frames as served by NASA SDO, SOHO
+and NOAA SWPC, written by `scripts/fetch-sdo-fixtures.mjs` on a machine that
+can reach those hosts; `real-manifest.json` records each upstream URL,
+Last-Modified, byte count and sha256. `real_<channel>_256.png` are 256²
+lossless copies made by `python3 scripts/bake-sdo-real-thumbs.py` — node has
+no JPEG decoder, and 256² is the readback the page itself calibrates on, so
+these are what the node gates read (`--check` fails on a stale copy).
+
+**Never hand-edit these.** Re-fetch, re-bake, commit together.
+
+`real_c3_dropout.jpg` is KEPT on purpose (`"kept": true` in the manifest, so a
+re-fetch preserves it): the SOHO/LASCO C3 frame served on 2026-11-20 with the
+right half of its field missing. It is the negative control for
+`frameIntegrity` in `js/sun-coronagraph.js`.
+
+What reads them: `tests/sun-offlimb.mjs` (the limb-glow reference vs the old
+rule; the caption mask), `tests/sun-coronagraph.mjs` (frame integrity),
+`tests/sun-real-frames.spec.js` (the page, on pixels), and
+`tests/sun-visual.spec.js` (the opt-in GPU baseline prefers this set).

@@ -43,6 +43,8 @@ on:
       - 'tests/coronagraph-route.mjs'
       - 'tests/hek-filaments.mjs'
       - 'tests/fixtures/sdo/**'
+      - 'scripts/lib/sdo-synth.mjs'
+      - 'scripts/bake-sdo-real-thumbs.py'
       - '.github/workflows/sun-kernels.yml'
   pull_request:
     paths:
@@ -61,6 +63,8 @@ on:
       - 'tests/coronagraph-route.mjs'
       - 'tests/hek-filaments.mjs'
       - 'tests/fixtures/sdo/**'
+      - 'scripts/lib/sdo-synth.mjs'
+      - 'scripts/bake-sdo-real-thumbs.py'
       - '.github/workflows/sun-kernels.yml'
   workflow_dispatch:
 
@@ -93,3 +97,7 @@ jobs:
         run: node tests/flare-dem.mjs && node tests/flare-geometry.mjs && node tests/hek-filaments.mjs
       - name: pipeline registry
         run: node tests/pipeline-registry.mjs
+      - name: real-frame thumbnails are current
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 scripts/bake-sdo-real-thumbs.py --check
