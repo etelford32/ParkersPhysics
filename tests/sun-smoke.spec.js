@@ -493,10 +493,16 @@ test.describe('sun.html smoke', () => {
     // in the OBSERVER's frame, it fades when the viewer leaves that frame, and
     // the chip never claims a layer that is not drawing.
 
+    // THE OFF-LIMB TESTS BELOW ARE ABOUT THE SDO/AIA RING (its fixture geometry,
+    // its planted features, its chip wording). Since 2026-11-20 the page's
+    // DEFAULT ring source is GOES/SUVI, so they ask for SDO by name; the default
+    // is gated in tests/sun-real-frames.spec.js and tests/sun-suvi-layer.spec.js.
+    const PAGE_SDO_RING = PAGE + '?offlimbSource=sdo';
+
     test('off-limb: both channels load, the plane is normal to the Sun-Earth line, and the chip names them', async ({ page }) => {
         const errors = attachConsoleRecorder(page);
         const hits = await routeAiaToFixtures(page);
-        await page.goto(PAGE);
+        await page.goto(PAGE_SDO_RING);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForFunction(
             () => (window.__sun.offLimb?.channels || []).filter(c => c.ok).length === 2,
@@ -560,7 +566,7 @@ test.describe('sun.html smoke', () => {
 
     test('off-limb: fades out as the camera leaves the Sun-Earth line, and the chip says so', async ({ page }) => {
         await routeAiaToFixtures(page);
-        await page.goto(PAGE);
+        await page.goto(PAGE_SDO_RING);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForFunction(
             () => (window.__sun.offLimb?.channels || []).some(c => c.ok), { timeout: BOOT_TIMEOUT_MS });
@@ -601,7 +607,7 @@ test.describe('sun.html smoke', () => {
 
     test('off-limb: running difference needs two distinct observations and says so until it has them', async ({ page }) => {
         await routeAiaToFixtures(page);
-        await page.goto(PAGE + '?offlimb=diff');
+        await page.goto(PAGE + '?offlimb=diff&offlimbSource=sdo');
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForFunction(
             () => (window.__sun.offLimb?.channels || []).some(c => c.ok), { timeout: BOOT_TIMEOUT_MS });
@@ -634,7 +640,7 @@ test.describe('sun.html smoke', () => {
         // the contrast must collapse. A gate that has stopped seeing the layer
         // fails instead of passing.
         await routeAiaToFixtures(page);
-        await page.goto(PAGE);
+        await page.goto(PAGE_SDO_RING);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForFunction(
             () => (window.__sun.offLimb?.channels || []).filter(c => c.ok).length === 2,
@@ -968,7 +974,7 @@ test.describe('sun.html smoke', () => {
 
     test('off-limb: MODEL mode and a dead feed both remove the layer AND its claim', async ({ page }) => {
         await routeAiaToFixtures(page);
-        await page.goto(PAGE);
+        await page.goto(PAGE_SDO_RING);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForFunction(() => window.__sun.offLimbMesh?.visible === true, { timeout: BOOT_TIMEOUT_MS });
         // Chip click → Model. The annulus is the same observation as the disk,
@@ -988,7 +994,7 @@ test.describe('sun.html smoke', () => {
 
     test('off-limb: a dead feed draws nothing and does not claim a corona', async ({ page }) => {
         await routeAiaDown(page);
-        await page.goto(PAGE);
+        await page.goto(PAGE_SDO_RING);
         await page.waitForFunction(() => window.__sun?.ready, { timeout: BOOT_TIMEOUT_MS });
         await page.waitForFunction(() => window.__sun.observed?.mode === 'model', { timeout: BOOT_TIMEOUT_MS });
         const st = await page.evaluate(() => ({
