@@ -13,7 +13,8 @@
  * js/geomag/geospace.js, the wind is flux-analysis.js.
  */
 import { GOES_SLOTS, GEO_DEFAULTS, MEAD, igrfEpn, meadEpn, residualSeries, scoreVariation, arrivedValue, localTimeH, diurnalPeakUtH } from './geo-residual.js';
-import { boundaryModel, NOMINAL_WIND } from '../geomag/geospace.js';
+import { boundaryModel, NOMINAL_WIND, dynamicPressureNPa } from '../geomag/geospace.js';
+import { runFilter, scoreFilter, regressors, COEFF_NAMES, FILTER_DEFAULTS } from './geo-filter.js';
 
 const r1 = (v) => (v == null || v !== v ? null : Math.round(v * 10) / 10);
 const r2 = (v) => (v == null || v !== v ? null : Math.round(v * 100) / 100);
@@ -41,6 +42,12 @@ export function analyzeGeo({ geo, wind = null, nowMs, minutes = 180 }) {
     const nominalR0 = boundaryModel(NOMINAL_WIND).r0Re;
 
     // The standoff the arrived wind implies, once, on the wind's own arrival axis.
+    const sqrtPNominal = Math.sqrt(dynamicPressureNPa(NOMINAL_WIND.densityCc, NOMINAL_WIND.speedKms));
+    // The filter's driver: √P_dyn of the arrived wind minus the nominal wind's.
+    const driverSeries = wind?.arrivalMs?.length ? wind.arrivalMs.map((_, i) => {
+        const p = wind.speed[i] > 0 && wind.density[i] > 0 ? dynamicPressureNPa(wind.density[i], wind.speed[i]) : null;
+        return p == null ? NaN : Math.sqrt(p) - sqrtPNominal;
+    }) : null;
     let r0Series = null;
     if (wind?.arrivalMs?.length) {
         r0Series = wind.arrivalMs.map((_, i) => {
@@ -95,6 +102,35 @@ export function analyzeGeo({ geo, wind = null, nowMs, minutes = 180 }) {
                 : { lag_min: GEO_DEFAULTS.responseLagMin, r: best ? r3(best.r) : null, status: 'not_measurable_assumed' };
         }
 
+        // ── the learning filter (geo-filter.js) ─────────────────────────
+        const lt = new Float64Array(n), drv = new Float64Array(n).fill(NaN);
+        const cur2 = { i: 0 };
+        for (let i = 0; i < n; i++) {
+            lt[i] = localTimeH(slot.lonEastDeg, new Date(res.t[i]));
+            if (driverSeries) drv[i] = arrivedValue(wind.arrivalMs, driverSeries, res.t[i], lagMs, holdMs, cur2);
+        }
+        const series = { t: res.t, y: res.hp, localTimeH: lt, driver: drv };
+        const full = runFilter(series), ctrl = runFilter(series, { pinGain: true });
+        const fs = scoreFilter(series, full, ctrl);
+        let driven = 0; for (let i = 0; i < n; i++) if (drv[i] === drv[i] && res.hp[i] === res.hp[i]) driven++;
+        // The next value, leadMin ahead of the newest sample: FORECAST.
+        const tNext = res.t[n - 1] + FILTER_DEFAULTS.leadMin * 60e3;
+        const dNext = driverSeries ? arrivedValue(wind.arrivalMs, driverSeries, tNext, lagMs, holdMs, { i: 0 }) : NaN;
+        const hNext = regressors(localTimeH(slot.lonEastDeg, new Date(tNext)), dNext);
+        const filter = {
+            model: 'Hp residual = local-time harmonics (2) + gain × (√P_dyn arrived − nominal); coefficients are a Kalman state',
+            lead_min: FILTER_DEFAULTS.leadMin, record_minutes: n, driven_minutes: driven,
+            coefficients: Object.fromEntries(COEFF_NAMES.map((k, i) => [k, { value: r2(full.x[i]), sigma: r2(full.sigmaX[i]) }])),
+            gain_unit: 'nT per √nPa',
+            score: { n: fs.n, rmse_nt: r2(fs.rmse), rmse_harmonics_only_nt: r2(fs.rmse_harmonics_only), rmse_persistence_nt: r2(fs.rmse_persistence),
+                skill_vs_harmonics_only: r3(fs.skill_vs_harmonics_only), skill_vs_persistence: r3(fs.skill_vs_persistence), coverage68: r3(fs.coverage68) },
+            next: { kind: 'FORECAST', time: new Date(tNext).toISOString(),
+                hp_residual_nt: r2(hNext.reduce((a, h, i) => a + h * full.x[i], 0)),
+                sigma_nt: r2(Math.sqrt(hNext.reduce((a, h, i) => a + (h * full.sigmaX[i]) ** 2, 0) + full.obsVar)),
+                sigma_note: 'diagonal approximation of the state covariance + observation variance; see coverage68 for how honest it is',
+                driver_known: dNext === dNext },
+        };
+
         // ── checks ──────────────────────────────────────────────────────
         const absMed = (a) => { const v = Array.from(a).filter((x) => x === x).map(Math.abs).sort((x, y) => x - y); return v.length ? v[v.length >> 1] : null; };
         const peak = diurnalPeakUtH(res.t, res.hp);
@@ -131,8 +167,10 @@ export function analyzeGeo({ geo, wind = null, nowMs, minutes = 180 }) {
                 response,
                 coefficients_verified: MEAD.verified,
             },
+            filter,
             trace: { t0: new Date(res.t[i0]).toISOString(), step_s: sat.cadence_s ?? 60,
-                hp_residual: Array.from(res.hp.subarray(i0), r2), predicted: Array.from(live.subarray(i0), r2) },
+                hp_residual: Array.from(res.hp.subarray(i0), r2), predicted: Array.from(live.subarray(i0), r2),
+                filter_pred: Array.from(full.pred.subarray(i0), r2), filter_sigma: Array.from(full.predSigma.subarray(i0), r2) },
         };
     }
     return out;

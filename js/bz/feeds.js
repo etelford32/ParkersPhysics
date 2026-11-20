@@ -156,7 +156,14 @@ export const FEEDS = Object.freeze({
         // Primary AND secondary are both wanted (two longitudes), so this
         // feed MERGES every candidate that answers instead of stopping.
         merge: true,
+        // B4 added the 7-day files: the geo-filter learns a local-time
+        // baseline and one day is too short for it. UNVERIFIED at the time of
+        // writing — the merge keeps the LONGER record per satellite, so if
+        // they 404 the 1-day files carry on and the route's candidate report
+        // says which answered.
         candidates: [
+            { id: 'goes-primary-7d',   url: `${SWPC}/json/goes/primary/magnetometers-7-day.json` },
+            { id: 'goes-secondary-7d', url: `${SWPC}/json/goes/secondary/magnetometers-7-day.json` },
             { id: 'goes-primary-1d',   url: `${SWPC}/json/goes/primary/magnetometers-1-day.json` },
             { id: 'goes-secondary-1d', url: `${SWPC}/json/goes/secondary/magnetometers-1-day.json` },
         ],

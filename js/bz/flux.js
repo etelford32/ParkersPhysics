@@ -35,6 +35,7 @@
  * opening), π = due south.
  */
 import { RE_KM } from './frames.js';
+import { newellCoupling } from '../ring-current-model.js';
 
 export const MILAN = Object.freeze({ L0_RE: 3.8, V0_MS: 4e5, clockExp: 4.5 });
 export const NEWELL = Object.freeze({ vExp: 4 / 3, bExp: 2 / 3, clockExp: 8 / 3 });
@@ -71,13 +72,15 @@ export function milanRateKv(speedKms, byNt, bzNt) {
     return leff * v * byz * Math.pow(Math.abs(Math.sin(th / 2)), MILAN.clockExp) / 1e3;
 }
 
-/** Newell et al. 2007 coupling function in its NATIVE units (km/s, nT). */
+/**
+ * Newell et al. 2007 coupling function in its NATIVE units (km/s, nT). The
+ * arithmetic is js/ring-current-model.js `newellCoupling` — the site's ONE
+ * copy. This wrapper adds only the engine's gap rule: a missing By is a GAP
+ * here (null), where that function reads it as 0.
+ */
 export function newellNative(speedKms, byNt, bzNt) {
-    const th = clockAngle(byNt, bzNt);
-    if (!(speedKms > 0)) return null;
-    if (th == null) return byNt === 0 && bzNt === 0 ? 0 : null;
-    return Math.pow(speedKms, NEWELL.vExp) * Math.pow(Math.hypot(byNt, bzNt), NEWELL.bExp)
-        * Math.pow(Math.abs(Math.sin(th / 2)), NEWELL.clockExp);
+    if (!(speedKms > 0) || !(byNt === byNt) || !(bzNt === bzNt) || byNt == null || bzNt == null) return null;
+    return newellCoupling(speedKms, byNt, bzNt);
 }
 
 const NEWELL_SCALE = milanRateKv(REFERENCE_WIND.speedKms, REFERENCE_WIND.byNt, REFERENCE_WIND.bzNt)

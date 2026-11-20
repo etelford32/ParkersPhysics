@@ -34,13 +34,14 @@ const r3 = (v) => (v == null || v !== v ? null : Math.round(v * 1000) / 1000);
 
 /** Plasma on the magnetometer grid: per-minute speed / density / velocity (GSE), NaN gaps. */
 function plasmaGrid(samples, t0, n) {
-    const g = { speed: new Float64Array(n).fill(NaN), density: new Float64Array(n).fill(NaN),
+    const g = { speed: new Float64Array(n).fill(NaN), density: new Float64Array(n).fill(NaN), temp: new Float64Array(n).fill(NaN),
         vx: new Float64Array(n).fill(NaN), vy: new Float64Array(n).fill(NaN), vz: new Float64Array(n).fill(NaN) };
     for (const s of samples ?? []) {
         const i = Math.round((s.t - t0) / STEP_MS);
         if (i < 0 || i >= n) continue;
         if (s.speed != null) g.speed[i] = s.speed;
         if (s.density != null) g.density[i] = s.density;
+        if (s.temperature != null) g.temp[i] = s.temperature;
         if (s.vx_gse != null && s.vy_gse != null && s.vz_gse != null) { g.vx[i] = s.vx_gse; g.vy[i] = s.vy_gse; g.vz[i] = s.vz_gse; }
     }
     return g;
@@ -226,7 +227,8 @@ export function analyzeFlux({ mag, ephem = null, plasma = null, nowMs, minutes =
     // The arrived wind, unrounded, for the rungs below (geo-analysis.js). Routes strip it.
     const _series = { arrivalMs: rows.map((i) => order.arrivalMs[i]), speed: rows.map((i) => speedUsed[i]),
         density: rows.map((i) => densUsed[i]), bz: rows.map((i) => fused.bz[i]), by: rows.map((i) => fused.by[i]),
-        milanKv: rows.map((i) => milan[i]) };
+        bx: rows.map((i) => fused.bx[i]), sigmaBz: rows.map((i) => fused.sigma[i]), temp: rows.map((i) => pg.temp[i]),
+        observedMs: rows.map((i) => tMs[i]), delayS: rows.map((i) => delays[i]), milanKv: rows.map((i) => milan[i]) };
 
     return {
         ...l1,

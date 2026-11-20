@@ -16,6 +16,8 @@ on:
   push:
     paths:
       - 'js/bz/**'
+      - 'js/bz-engine-provider.js'
+      - 'js/ring-current-model.js'
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
       - 'js/geomag/igrf.js'
@@ -30,6 +32,8 @@ on:
   pull_request:
     paths:
       - 'js/bz/**'
+      - 'js/bz-engine-provider.js'
+      - 'js/ring-current-model.js'
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
       - 'js/geomag/igrf.js'
@@ -68,3 +72,5 @@ jobs:
         run: node tests/bz-flux.mjs
       - name: geosynchronous rung — GOES residual, arcjets, ledger, route
         run: node tests/bz-geo.mjs
+      - name: column — shock jump, learning filter (OSSE), ladder, provider, route
+        run: node tests/bz-column.mjs

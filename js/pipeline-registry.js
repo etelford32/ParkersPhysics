@@ -211,6 +211,13 @@ export const PIPELINES = [
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
       notes: 'B3 of the Bz engine: GOES-East/West magnetometers as a residual against IGRF in the satellites\' own E/P/N frame (js/bz/geo-residual.js — frame and nominal slots confirmed against production), plus the first interior LEDGER: the Hp residual\'s variation predicted from the wind that has arrived, scored against the magnetometer beside the same prediction on a nominal wind. Arcjet minutes + a 10-min guard are excluded. Degrades without 5xx: GOES down = freshness:expired + reasons:[goes_mag_unavailable]; L1 chain down = freshness:stale, the measured residual still returned, ledger empty. The magnetopause-current coefficients are UNVERIFIED and flagged in the payload.' },
 
+    { id: 'bz-column',          label: 'Bz engine · altitude ladder',
+      endpoint: '/api/bz/column',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW + GOES MAG',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B4 of the Bz engine and the endpoint pages read (through js/bz-engine-provider.js): every rung from L1 to the ground in one object, each tagged MEASURED / ESTIMATED / FORECAST / NOT_BUILT / NOT_AVAILABLE with sigma, basis and caveats (js/bz/column.js). Five lower rungs are NOT_BUILT on purpose and say so. Degrades by rung without 5xx: one measured end down (L1 or GOES) = freshness:stale with reasons and that rung NOT_AVAILABLE; both down = freshness:expired with the ladder still returned. Tries the 7-day GOES files first (unverified) and falls back to the 1-day ones; `feeds` reports which answered.' },
+
     { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
       endpoint: '/api/bz/feeds?feed=geo-mag',
       probePath: '/api/bz/feeds?feed=geo-mag&meta=1',
