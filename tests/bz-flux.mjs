@@ -225,7 +225,7 @@ const ang = (u, n) => Math.acos(Math.min(1, Math.abs(u[0] * n.x + u[1] * n.y + u
     assert.equal(p.active_spacecraft, 'SOLAR1');
     const table = normalizeL1Plasma([['time_tag', 'density', 'speed', 'temperature'], ['2026-11-20 12:00:00.000', '5.1', '398.2', '81234']], {});
     assert.equal(table.spacecraft.unknown.samples[0].speed, 398.2);
-    assert.equal(FEEDS['l1-plasma'].verified, null, 'still unverified until production answers');
+    assert.deepEqual(FEEDS['l1-plasma'].verified.vector_velocity, ['SOLAR1'], 'measured: only one spacecraft publishes velocity components');
     ok('normalizeL1Plasma: per spacecraft, fills/zeros are gaps, temperature kept, age from the newest valid speed');
 }
 
@@ -340,6 +340,7 @@ function build(opts = {}) {
         assert.deepEqual(noWind.reasons, ['no_plasma']);
         assert.equal(noWind.data.flux, null);
         assert.ok(noWind.plasma_feed.candidates.every((c) => !c.ok), 'the plasma candidates are reported when none answers');
+        assert.equal(sum.data.propagation.mvab_check === null || sum.data.propagation.mvab_check.n > 0, true);
 
         globalThis.fetch = serve(['eph']);
         const noEph = await (await handler(new Request('https://x.test/api/bz/flux?summary=1'))).json();

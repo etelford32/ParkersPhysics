@@ -24,7 +24,7 @@
 import { analyzeL1 } from './l1-analysis.js';
 import { positionAt, RE_KM } from './frames.js';
 import { toGrid, lagTrack, fuse, STEP_MS, FUSE_DEFAULTS } from './fuse-l1.js';
-import { chooseSlowness, flatSlowness, mvab, delayS, arrivalOrder, PROP_DEFAULTS } from './propagate.js';
+import { chooseSlowness, flatSlowness, mvab, delayS, arrivalOrder, slownessFromNormal, describeSlowness, PROP_DEFAULTS } from './propagate.js';
 import { milanRateKv, milanSigmaKv, newellNative, newellMilanEquivalentKv, siscoeHillKv, openedFluxGWb, REFERENCE_WIND, SISCOE_HILL } from './flux.js';
 import { boundaryModel, dynamicPressureNPa } from '../geomag/geospace.js';
 
@@ -45,6 +45,8 @@ function plasmaGrid(samples, t0, n) {
     }
     return g;
 }
+
+function med(a) { const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : 0.5 * (s[m - 1] + s[m]); }
 
 /** Median of the valid values in [i − window, i]; NaN if fewer than `min`. */
 function trailingMedian(a, i, window, min = 3) {
@@ -99,6 +101,7 @@ export function analyzeFlux({ mag, ephem = null, plasma = null, nowMs, minutes =
     const speedUsed = new Float64Array(N).fill(NaN), densUsed = new Float64Array(N).fill(NaN);
     const noseRe = new Float64Array(N).fill(NaN);
     let heldSpeed = 0;
+    const chk = { mvab: [], flat: [] };   // |predicted − measured| pair lag, minutes
     for (let k = 0; k < steps; k++) {
         const i0 = k * track.step, i1 = Math.min(N, i0 + track.step);
         const vMed = trailingMedian(pg.speed, Math.max(0, i0 - 1), 30);
@@ -119,6 +122,20 @@ export function analyzeFlux({ mag, ephem = null, plasma = null, nowMs, minutes =
             // MVAB on the reference spacecraft's own trailing 30 minutes (causal).
             const mv = mvab(grid.sc[ref], Math.max(0, i0 - 30), i0);
             info = chooseSlowness({ positions, lags, V, mvabResult: mv });
+            // THE ONLY TRUTH AVAILABLE FOR A SINGLE-SPACECRAFT NORMAL: wherever a
+            // pair lag was MEASURED this step, ask what the MVAB normal and the
+            // flat delay would each have predicted for that same pair.
+            if (mv?.ok) {
+                const mm = slownessFromNormal(mv.normal, V), fm = flatSlowness(V);
+                const dm = mm ? describeSlowness(mm, V) : null;
+                if (dm && dm.tiltDeg <= PROP_DEFAULTS.maxTiltDeg) {
+                    for (const l of lags) {
+                        if (l.source !== 'measured' || !positions[l.pair[0]] || !positions[l.pair[1]]) continue;
+                        chk.mvab.push(Math.abs(delayS(mm, positions[l.pair[0]], positions[l.pair[1]]) / 60 - l.lagMin));
+                        chk.flat.push(Math.abs(delayS(fm, positions[l.pair[0]], positions[l.pair[1]]) / 60 - l.lagMin));
+                    }
+                }
+            }
             if (info) info.vectorVelocity = haveVec;
         }
         stepInfo.push(info);
@@ -222,6 +239,13 @@ export function analyzeFlux({ mag, ephem = null, plasma = null, nowMs, minutes =
             method_minutes: methods,
             departure_from_flat_min: dn ? { mean: r2(dsum / dn), max: r2(dmax) } : null,
             overtaken_minutes: order.overtaken,
+            // How well a single-spacecraft MVAB normal predicts the lags that
+            // were actually measured between spacecraft, beside the flat
+            // delay's error on the same pairs. If `mvab` is not clearly the
+            // smaller, MVAB has not earned its place above the flat delay.
+            mvab_check: chk.mvab.length ? { n: chk.mvab.length,
+                mvab_median_err_min: r2(med(chk.mvab)), flat_median_err_min: r2(med(chk.flat)),
+                mvab_better_fraction: r3(chk.mvab.filter((e, i) => e < chk.flat[i]).length / chk.mvab.length) } : null,
             max_tilt_deg: PROP_DEFAULTS.maxTiltDeg,
         },
         flux: {

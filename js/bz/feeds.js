@@ -79,18 +79,26 @@ export const FEEDS = Object.freeze({
     },
     // Rung 0 — L1 plasma (speed, density, velocity vector), per spacecraft.
     // B2 needs the speed for every delay and the density for the bow-shock
-    // standoff. UNVERIFIED: whether the file carries all three spacecraft and
-    // whether it publishes velocity COMPONENTS is what the first production
-    // request settles.
+    // standoff. MEASURED 2026-11-20 on a Vercel preview: the file carries all
+    // THREE spacecraft at 1 minute, but velocity COMPONENTS (GSE and GSM) are
+    // published for SOLAR1 only — ACE and IMAP give scalar speed. Alpha
+    // moments exist (alpha_*) and are not read yet. The second candidate was
+    // never reached and was dropped.
     'l1-plasma': {
         kind: 'l1-plasma',
         label: 'L1 plasma, every spacecraft, 1-min',
         upstream: 'NOAA SWPC RTSW',
         cadence_s: 60,
-        verified: null,
+        verified: {
+            on: '2026-11-20', candidate: 'rtsw-wind-1m', cadence_s: 60,
+            spacecraft: ['ACE', 'SOLAR1', 'IMAP'], vector_velocity: ['SOLAR1'], frames: ['gse', 'gsm'],
+            unclaimed: ['proton_sample_size', 'alpha_speed', 'alpha_temperature', 'alpha_density',
+                'alpha_vx_gse', 'alpha_vy_gse', 'alpha_vz_gse', 'alpha_vx_gsm', 'alpha_vy_gsm', 'alpha_vz_gsm',
+                'alpha_sample_size', 'max_convergence_flag', 'max_data_flag', 'max_error_count_flag',
+                'max_processing_flag', 'max_range_flag', 'max_sample_count_flag', 'max_telemetry_flag'],
+        },
         candidates: [
-            { id: 'rtsw-wind-1m',       url: `${SWPC}/json/rtsw/rtsw_wind_1m.json` },
-            { id: 'products-plasma-1d', url: `${SWPC}/products/solar-wind/plasma-1-day.json` },
+            { id: 'rtsw-wind-1m', url: `${SWPC}/json/rtsw/rtsw_wind_1m.json` },
         ],
     },
     // Rung 0 — is there a sub-minute real-time L1 magnetometer product at all?
