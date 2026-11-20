@@ -623,5 +623,96 @@ await ok('ribbonCurves: a double-J — hooks at opposite ends, opening away from
     assert.ok(v1.plus.every((q) => q.c === v1.sep) && v1.minus.every((q) => q.c === -v1.sep));
 });
 
+// ── The erupting flux rope ───────────────────────────────────────────────
+await ok('rope kinematics: h0 at onset, a slow rise, an acceleration peaking at t0, a coast at speed × class; height is the integral of speed', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const M = FG.FLARE_MODEL, P = M.params.rope, V = P.speed * M.classFactor('X');
+    close(M.ropeApexHeight(0, 'X'), P.h0, 1e-15); close(M.ropeApexHeight(-50, 'X'), P.h0, 1e-15, 'nothing happens before onset');
+    close(M.ropeSpeed(P.t0, 'X'), V / 2, 1e-12, 'half the final speed at t0');
+    close(M.ropeSpeed(1e5, 'X'), V, 1e-9, 'coasts at speed × classFactor');
+    assert.ok(M.ropeSpeed(0, 'X') < 0.1 * V, 'slow at onset');
+    assert.ok(M.ropeSpeed(600, 'C') < M.ropeSpeed(600, 'M') && M.ropeSpeed(600, 'M') < M.ropeSpeed(600, 'X'));
+    // dh/dt = v, by central differences, across the whole rise.
+    for (const t of [1, 60, 180, 400, 900]) close((M.ropeApexHeight(t + 0.01, 'X') - M.ropeApexHeight(t - 0.01, 'X')) / 0.02, M.ropeSpeed(t, 'X'), 1e-8 + 1e-6 * V);
+    // The acceleration is largest at t0 and equals V/(4·tau) there.
+    const st0 = M.ropeState(P.t0, 'X');
+    close(st0.accel, V / (4 * P.tau), 1e-12);
+    assert.ok(M.ropeState(P.t0 - 60, 'X').accel < st0.accel && M.ropeState(P.t0 + 60, 'X').accel < st0.accel);
+    // State: present from onset, self-similar, gone by fadeR.
+    const s1 = M.ropeState(120, 'X');
+    assert.ok(s1.active && s1.alpha === 1); close(s1.apexR, 1 + s1.apexH, 1e-15); close(s1.minorR, P.radius * s1.apexH, 1e-15);
+    assert.equal(M.ropeState(0, 'X').alpha, 0, 'fades in');
+    let tFade = 0; while (M.ropeState(tFade, 'X').apexR < P.fadeR && tFade < 5000) tFade += 5;
+    assert.equal(M.ropeState(tFade + 5, 'X').alpha, 0, 'it has faded out by fadeR');
+    let prev = 2;
+    for (let t = 10; t <= tFade; t += 10) { const a = M.ropeState(t, 'X').alpha; assert.ok(a <= prev + 1e-12, 'presence never comes back'); prev = a; }
+    // v1 has no rope at all.
+    const v1 = FG.makeFlareModel(null, FG.FLARE_SHAPE_V1);
+    assert.ok(!v1.ropeState(100, 'X').active && v1.ropeState(100, 'X').alpha === 0 && v1.ropeSpeed(100, 'X') === 0);
+});
+
+await ok('rope geometry: feet at the hooks\' centres, an orthonormal frame, a sigmoid that straightens, twist of the stated turns and hand', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const M = FG.FLARE_MODEL, P = M.params.rope, lat = 14 * DEG, lon = 28 * DEG, t = 60, N = 96;
+    const tf = FG.tangentFrame(lat, lon);
+    const ax = M.ropeAxis({ latRad: lat, lonRad: lon, t, cls: 'X', chirality: 1, samples: N });
+    const hk = M.ribbonHook(t, 'X'), sep = M.ribbonSeparation(t, 'X');
+    // Feet: on the photosphere, at the centre of each ribbon's hook arc — the + foot under the +across ribbon's hook.
+    close(ax.footAC[1][0], P.footAlong * hk.s0, 1e-15); close(ax.footAC[1][1], sep + hk.rho, 1e-15);
+    assert.equal(P.footAlong, 1, 'the shipped rope stands at the centre of each hook');
+    close(ax.footAC[0][0], -hk.s0, 1e-15); close(ax.footAC[0][1], -(sep + hk.rho), 1e-15);
+    for (const f of ax.feet) close(vec.norm(f), 1, 1e-12);
+    close(vec.norm(vec.add(ax.pts[0], vec.scale(ax.feet[0], -1))), 0, 1e-12); close(vec.norm(vec.add(ax.pts[N], vec.scale(ax.feet[1], -1))), 0, 1e-12);
+    for (const [a, c] of [ax.footAC[1]]) { const [d] = FG.ribbonJ(a, c, sep, hk.s0, hk.rho, hk.sweep); close(d, hk.rho, 1e-12, 'the hook arc passes one radius from the foot: it wraps it'); }
+    // Apex: the middle of the axis stands apexH up.
+    close(Math.max(...ax.pts.map(vec.norm)), 1 + ax.state.apexH, 2e-4);
+    for (const { T, N: Nn, B } of ax.frames) {
+        close(vec.norm(T), 1, 1e-12); close(vec.norm(Nn), 1, 1e-12); close(vec.norm(B), 1, 1e-12);
+        close(vec.dot(T, Nn), 0, 1e-12); close(vec.dot(vec.cross(Nn, B), T), 1, 1e-12, 'N × B = T');
+    }
+    close(ax.radius[0], ax.footRadius, 1e-15); close(ax.radius[N], ax.footRadius, 1e-12); close(ax.footRadius, P.footRadius * hk.rho, 1e-15);
+    close(Math.max(...ax.radius), Math.max(ax.state.minorR, ax.footRadius), 1e-12);
+    // SIGMOID: low in the atmosphere the middle of the axis runs closer to the inversion line than the feet's chord does…
+    const ang = (p, q) => Math.abs(Math.atan2(vec.dot(vec.add(q, vec.scale(p, -1)), tf.loopAxis), vec.dot(vec.add(q, vec.scale(p, -1)), tf.pilAxis)));
+    const low = M.ropeAxis({ latRad: lat, lonRad: lon, t: 1, cls: 'X', samples: N });
+    const chord = ang(low.feet[0], low.feet[1]), mid = ang(low.pts[N / 2 - 2], low.pts[N / 2 + 2]);
+    assert.ok(mid < chord - 5 * DEG, `the rope's middle is ${(mid / DEG).toFixed(1)}° from the PIL, its chord ${(chord / DEG).toFixed(1)}°`);
+    assert.ok(Math.abs(mid - (1 - P.sigmoid) * chord) < 2.5 * DEG, 'turned back by the stated fraction of the chord\'s angle — not past the inversion line');
+    // …and the bend fades as it rises (÷ apex height).
+    const bendOf = (tt) => { const a = M.ropeAxis({ latRad: lat, lonRad: lon, t: tt, cls: 'X', samples: N }); const q = a.pts[N / 4]; const p0 = vec.unit(q);
+        const f0 = a.feet[0], f1 = a.feet[1]; const lin = vec.unit(vec.add(vec.scale(f0, 0.75), vec.scale(f1, 0.25))); return vec.norm(vec.add(p0, vec.scale(lin, -1))); };
+    assert.ok(bendOf(400) < 0.5 * bendOf(1), 'the S straightens as the rope rises');
+    // Chirality mirrors the feet along the PIL.
+    const axm = M.ropeAxis({ latRad: lat, lonRad: lon, t, cls: 'X', chirality: -1, samples: N });
+    close(axm.footAC[1][0], -ax.footAC[1][0], 1e-15); close(axm.footAC[1][1], ax.footAC[1][1], 1e-15);
+
+    // STRANDS: on the tube, above the photosphere, winding `twist` turns — left-handed for χ = +1.
+    const strands = M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', chirality: 1, n: 18, samples: N });
+    const ax2 = M.ropeAxis({ latRad: lat, lonRad: lon, t: 200, cls: 'X', chirality: 1, samples: N });
+    assert.equal(strands.length, 18);
+    assert.ok(strands.some((s) => s.cool) && strands.some((s) => !s.cool));
+    const winding = (S, axis) => {
+        let total = 0, prevTh = null;
+        for (let i = 4; i <= N - 4; i++) {
+            const dvec = vec.add(S.pts[i], vec.scale(axis.pts[i], -1));
+            const th = Math.atan2(vec.dot(dvec, axis.frames[i].B), vec.dot(dvec, axis.frames[i].N));
+            if (prevTh != null) { let d = th - prevTh; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; total += d; }
+            prevTh = th;
+        }
+        return total / (2 * Math.PI) * N / (N - 8);        // turns, scaled to the whole length
+    };
+    for (const S of strands) {
+        assert.ok(S.pts.every((p) => vec.norm(p) >= 1.0005 - 1e-12), 'no strand dips below the photosphere');
+        const i = N / 2, dvec = vec.add(S.pts[i], vec.scale(ax2.pts[i], -1));
+        close(vec.norm(dvec), ax2.radius[i] * S.shell, 1e-9, 'on its shell of the tube at the apex');
+        close(winding(S, ax2), -P.twist, 0.02, 'χ = +1 winds LEFT-handed (negative helicity), `twist` turns');
+    }
+    const right = M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', chirality: -1, n: 6, samples: N });
+    const axr = M.ropeAxis({ latRad: lat, lonRad: lon, t: 200, cls: 'X', chirality: -1, samples: N });
+    close(winding(right[0], axr), P.twist, 0.02, 'χ = −1 winds right-handed');
+    // Deterministic: the same flare draws the same rope.
+    assert.deepEqual(M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', n: 6 })[3].pts[40], M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', n: 6 })[3].pts[40]);
+});
+
 console.log(`\n${passes} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);

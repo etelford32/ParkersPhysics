@@ -14,7 +14,7 @@ import {
     fitDistance, fillAt, equivalentDistance, safeFrame, heroFraming,
     sphToVec, vecToSph, shortAngle, makePose, poseFromCamera, posePosition, ease, lerpPose,
     sampleFlight, flightDuration, Flight, hop, hopSeconds,
-    heroPose, approachShot, limbPanShot, flareShot, FLARE_FILL, FLARE_MIN_R, coronaShot, orbitShot, cinematicOrder, SHOT_TITLES,
+    heroPose, approachShot, limbPanShot, flareShot, FLARE_FILL, FLARE_MIN_R, eruptionShot, ERUPTION_FILL, coronaShot, orbitShot, cinematicOrder, SHOT_TITLES,
 } from '../js/sun-camera.js';
 import { observerBasis, OFF_AXIS_FULL_DEG } from '../js/sun-offlimb.js';
 
@@ -219,6 +219,41 @@ ok('the corona pull-back distances are derived from the lens and the instruments
 ok('the running order skips shots whose subject is absent', () => {
     assert.deepEqual(cinematicOrder({}), ['approach', 'orbit']);
     assert.deepEqual(cinematicOrder({ offLimb: true, coronagraph: true, flare: true }), ['approach', 'flare', 'limb', 'orbit', 'corona']);
+});
+
+ok('the eruption shot pulls back WITH the rope: the surface-to-apex span holds ERUPTION_FILL, never runs ahead, then returns', () => {
+    const earth = observerBasis(0.05).normal, site = sphToVec(30 * DEG, 12 * DEG, 1), from = makePose({ r: 6 });
+    const length = 0.2185, fadeR = 2.5;
+    // A rope that sits for 6 s, then climbs at 0.12 R☉ per second.
+    const apexAt = (s) => 1.045 + Math.max(0, s - 6) * 0.12;
+    const keys = eruptionShot(from, { site, earth, cls: 'X', length, apexAt, maxApexR: fadeR });
+    const close0 = flareShot(from, { site, earth, cls: 'X', length });
+    assert.deepEqual(keys[0].pose, from); assert.deepEqual(keys[1].pose, close0[1].pose, 'it arrives on the flare close-up');
+    for (let i = 1; i < keys.length; i++) assert.ok(keys[i].t > keys[i - 1].t, `key ${i} time`);
+    const follow = keys.slice(3, -1);          // after: where it was, the close-up, the hold
+    assert.ok(follow.length > 8, `${follow.length} follow keys`);
+    const dist = (p) => { const c = posePosition(p); return Math.hypot(c[0] - p.target[0], c[1] - p.target[1], c[2] - p.target[2]); };
+    let rPrev = 0, held = 0;
+    for (const k of follow) {
+        assert.ok(k.pose.r >= rPrev - 1e-12, 'the camera never moves IN during the eruption'); rPrev = k.pose.r;
+        const h = Math.min(fadeR, apexAt(k.t)) - 1;
+        const fill = h / (2 * dist(k.pose) * Math.tan(k.pose.fov * DEG / 2));
+        assert.ok(fill <= ERUPTION_FILL + 1e-9, `the rope never outgrows the frame (fill ${fill.toFixed(3)} at t=${k.t.toFixed(1)})`);
+        // Once the rope is taller than the close-up can hold, the camera–target distance is exactly the one that keeps the fill.
+        if (dist(k.pose) > dist(keys[1].pose) + 1e-6) { assert.ok(near(fill, ERUPTION_FILL, 1e-9), `while pulling back the span is held at ERUPTION_FILL (${fill})`); held++; }
+        assert.ok(near(Math.hypot(...k.pose.target), 1.012 + 0.5 * h, 1e-9), 'it looks at the middle of the span');
+        assert.ok(k.pose.r <= MAX_DISTANCE_CORONAGRAPH);
+    }
+    assert.ok(held > 5, 'the pull-back is actually exercised');
+    // It stops following where the rope has faded, and comes back down to the arcade.
+    assert.ok(apexAt(follow[follow.length - 1].t) >= fadeR - 1e-9, 'the follow ends when the apex reaches maxApexR');
+    assert.deepEqual(keys[keys.length - 1].pose, flareShot(from, { site, earth, cls: 'X', length, seconds: 3 })[2].pose, 'it ends on the flare shot\'s settled close-up');
+    // The whole flight stays outside the Sun.
+    const T = flightDuration(keys);
+    for (let i = 0; i <= 300; i++) { const p = sampleFlight(keys, T * i / 300); assert.ok(p.r >= MIN_DISTANCE - 1e-9 && Number.isFinite(p.r + p.az + p.el)); }
+    // NEGATIVE CONTROL: a rope that never rises is never followed out — the camera stays at the close-up distance.
+    const still = eruptionShot(from, { site, earth, cls: 'X', length, apexAt: () => 1.045, maxApexR: fadeR, seconds: 20 });
+    assert.ok(still.slice(3, -1).every((k) => near(dist(k.pose), dist(still[1].pose), 1e-9)), 'no rise, no pull-back: the camera stays the close-up\'s distance from what it looks at');
 });
 
 console.log(`${passed} checks passed (sun-camera)`);

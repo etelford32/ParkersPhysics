@@ -368,6 +368,48 @@ export function flareShot(from, { site, earth, cls = 'M', tilt = 52 * DEG, secon
  * half-height, then to `c3Reach`. Reaches are passed in (js/sun-coronagraph.js
  * owns them); the distances are DERIVED from the lens, not typed.
  */
+/** The surface-to-apex span of an erupting rope as a fraction of the frame height in the eruption shot. */
+export const ERUPTION_FILL = 0.62;
+/**
+ * THE ERUPTION SHOT: arrive on the flare close-up, hold, then PULL BACK WITH
+ * THE ROPE — the camera keeps the span from the photosphere to the rope's
+ * apex at ERUPTION_FILL of the frame, looking at its middle — and, once the
+ * rope has gone, come back down to the arcade it left behind.
+ *
+ * `apexAt(s)` is the rope's apex radius (R☉ from Sun centre) `s` wall-clock
+ * seconds after the shot starts — the page supplies it from the flare model
+ * and the flare clock's current rate, so the keys are the model's own rise,
+ * never a typed dolly. The pull-back never runs ahead of the rope and never
+ * moves in during the eruption; it stops following at `maxApexR` (where the
+ * rope has faded) and the whole follow is capped at `seconds`.
+ */
+export function eruptionShot(from, { site, earth, cls = 'M', length = null, apexAt, tilt = 52 * DEG, holdS = 3, seconds = 40, step = 1.25, maxApexR = 2.5, returnS = 5 } = {}) {
+    const base = flareShot(from, { site, earth, cls, length, tilt, seconds: holdS });
+    const arrive = base[1].pose, settle = base[2].pose;
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const cam = sphToVec(arrive.az, arrive.el, 1);
+    const cosPsi = clamp(dot(cam, site), -1, 1), sinPsi = Math.sqrt(Math.max(0, 1 - cosPsi * cosPsi));
+    const tanHalf = Math.tan(arrive.fov * DEG / 2);
+    const dist0 = Math.hypot(...posePosition(arrive).map((v, i) => v - arrive.target[i]));
+    const keys = [base[0], base[1]];
+    let t = base[1].t + holdS, rPrev = arrive.r, reached = false;
+    keys.push({ t, pose: arrive, linear: true });
+    for (let s = step; s <= seconds && !reached; s += step) {
+        const apexR = Math.min(maxApexR, Math.max(1, apexAt(t + s)));
+        reached = apexR >= maxApexR;
+        const h = apexR - 1;
+        const RT = 1.012 + 0.5 * h;                                   // look at the middle of the span
+        const D = Math.max(dist0, h / (ERUPTION_FILL * 2 * tanHalf));
+        const sp = RT * sinPsi;
+        const r = Math.max(rPrev, RT * cosPsi + Math.sqrt(Math.max(D * D - sp * sp, 0)));
+        rPrev = r;
+        keys.push({ t: t + s, pose: makePose({ az: arrive.az, el: arrive.el, r, target: site.map((x) => x * RT), fov: arrive.fov }), linear: true });
+    }
+    const tEnd = keys[keys.length - 1].t;
+    keys.push({ t: tEnd + returnS, pose: settle });
+    return keys;
+}
+
 export function coronaShot(from, { b0Rad = 0, fov = HERO_FOV_DEG, c2Reach = 6, c3Reach = 30, fill = 0.86,
     seconds = 22, hold = 5 } = {}) {
     const dC2 = fitDistance({ fovDeg: fov, fill, radius: c2Reach });

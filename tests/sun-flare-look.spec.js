@@ -29,6 +29,11 @@
  *      none at the mirror. NEGATIVE CONTROL: under the v1 laws (straight
  *      ribbons) the two are equal.
  *
+ *   4. THE ERUPTING ROPE. With the arcade hidden, rope shown minus rope
+ *      hidden: the lit region is the model's strands, projected. NEGATIVE
+ *      CONTROL: the same flare stated CONFINED draws no rope at all, and the
+ *      caption says "confined".
+ *
  * FLARE_SHOTS=<dir> also writes every frame it measured (model × age) and a
  * measurements.json — the pictures to judge a change by eye, taken the same
  * way every time. Software GL: this gates placement and colour, not beauty.
@@ -205,7 +210,8 @@ const PLACE_TOL = (p) => 6 + 0.03 * Math.max(p.w, p.h);
 const boxMiss = (m, p) => Math.max(Math.abs(m.x0 - p.x0), Math.abs(m.x1 - p.x1), Math.abs(m.y0 - p.y0), Math.abs(m.y1 - p.y1));
 
 test.describe('sun.html: the flare as drawn', () => {
-    test.describe.configure({ timeout: 420_000 });
+    // A dozen settled screenshots on a software rasteriser: 5.8 min run alone (measured), longer beside another worker.
+    test.describe.configure({ timeout: 900_000 });
 
     test('the arcade is drawn where the active shape model puts it, in the colour of its age', async ({ page }) => {
         const errs = [];
@@ -224,6 +230,7 @@ test.describe('sun.html: the flare as drawn', () => {
             s.testFlare(SITE.cls, SITE.latDeg, SITE.lonDeg, { flash: false });
             s.holdFlareAt(HOT_T);
             s.flareArcade.setPlumeEnabled(false);
+            s.flareRope.setVisible(false);              // parts 1–3 measure the arcade and the ribbons; the rope is part 4
             s.cam.playShot('flare');
             return s.flareModel.id;
         }, { SITE, HOT_T });
@@ -323,6 +330,53 @@ test.describe('sun.html: the flare as drawn', () => {
         // NEGATIVE CONTROL: straight ribbons light the two sets of points alike (the site-centred glows are symmetric).
         expect(Math.abs(j1.hook - j1.mirror), 'under v1 there is no hook: the same light at both').toBeLessThan(0.25 * j2.hook);
         expect(j1.hook, 'and it is the faint symmetric glow, not a ribbon').toBeLessThan(0.5 * j2.hook);
+
+        // ── 4. THE ERUPTING ROPE ────────────────────────────────────────────
+        const ROPE_T = 60;                         // 2.9 min: the slow rise, the rope still low over the arcade
+        const call = await page.evaluate(() => window.__sun.flareEruption);
+        expect(call.eruptive, 'an X2 with no CME report is drawn eruptive on the class prior').toBe(true);
+        expect(call.basis).toBe('class-prior');
+        await page.evaluate((t) => { const s = window.__sun; s.holdFlareAt(t); s.flareArcade.setVisible(false); s.flareRope.setVisible(true); }, ROPE_T);
+        await page.waitForFunction(() => window.__sun.flareGeometry.rope.active && window.__sun.flareGeometry.rope.strands > 0, null, { timeout: 30_000 });
+        const ropeOn = await grab(page);
+        if (SHOTS) writeFileSync(join(SHOTS, 'v2-rope.png'), await page.screenshot());
+        const ropeProj = await page.evaluate(({ t }) => {
+            const s = window.__sun, T = s.THREE, site = s.flareRope.site;
+            const strands = s.flareModel.ropeStrands({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle, t, cls: site.cls, chirality: site.chirality, n: 18, samples: 96 });
+            const el = s.renderer.domElement, r = el.getBoundingClientRect(), M = s.flareRope.group.matrixWorld, v = new T.Vector3();
+            let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+            for (const S of strands) for (const p of S.pts) {
+                v.set(p[0], p[1], p[2]).applyMatrix4(M).project(s.camera);
+                const x = r.left + (v.x * 0.5 + 0.5) * r.width, y = r.top + (-v.y * 0.5 + 0.5) * r.height;
+                if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+            }
+            return { x0, x1, y0, y1, w: x1 - x0, h: y1 - y0, state: s.flareGeometry.rope };
+        }, { t: ROPE_T });
+        await page.evaluate(() => window.__sun.flareRope.setVisible(false));
+        await page.waitForFunction(() => !window.__sun.flareGeometry.rope.active, null, { timeout: 30_000 });
+        const ropeOff = await grab(page);
+        const ropePx = arcadePixels(ropeOn, ropeOff, { thresh: 14 });
+        out.rope = { pixels: ropePx, projected: ropeProj };
+        console.log('flare look, rope:', JSON.stringify({ box: ropePx.box, proj: { x0: Math.round(ropeProj.x0), x1: Math.round(ropeProj.x1), y0: Math.round(ropeProj.y0), y1: Math.round(ropeProj.y1) },
+            n: ropePx.n, added: ropePx.added && ropePx.added.map((v) => +v.toFixed(1)), apexR: ropeProj.state.apexR }));
+        expect(ropePx.n, 'the rope lights pixels').toBeGreaterThan(600);
+        // Strands thin out and dim toward the feet, so the lit box may fall a little INSIDE the projection — never outside it.
+        const rtol = PLACE_TOL(ropeProj) + 0.10 * Math.max(ropeProj.w, ropeProj.h);
+        expect(boxMiss(ropePx.box, ropeProj), `the lit region is the model's strands (worst edge ${boxMiss(ropePx.box, ropeProj).toFixed(0)} px, tolerance ${rtol.toFixed(0)})`).toBeLessThan(rtol);
+        expect(ropePx.box.x0).toBeGreaterThan(ropeProj.x0 - PLACE_TOL(ropeProj)); expect(ropePx.box.x1).toBeLessThan(ropeProj.x1 + PLACE_TOL(ropeProj));
+        expect(ropePx.box.y0).toBeGreaterThan(ropeProj.y0 - PLACE_TOL(ropeProj)); expect(ropePx.box.y1).toBeLessThan(ropeProj.y1 + PLACE_TOL(ropeProj));
+        expect(ropeProj.state.apexR, 'it stands above the arcade').toBeGreaterThan(cool.projected ? 1.05 : 1.05);
+        // NEGATIVE CONTROL: the same flare, stated confined — no rope, and the caption says so.
+        const confined = await page.evaluate(({ SITE, t }) => {
+            const s = window.__sun;
+            s.testFlare(SITE.cls, SITE.latDeg, SITE.lonDeg, { flash: false, eruptive: false });
+            s.holdFlareAt(t); s.flareRope.setVisible(true);
+            return s.flareEruption;
+        }, { SITE, t: ROPE_T });
+        expect(confined).toMatchObject({ eruptive: false, basis: 'stated' });
+        await page.evaluate(() => new Promise((ok) => { let n = 0; const f = () => (++n >= 4 ? ok() : requestAnimationFrame(f)); requestAnimationFrame(f); }));
+        expect((await page.evaluate(() => window.__sun.flareGeometry.rope)).active, 'a confined flare draws no rope').toBe(false);
+        await expect.poll(() => page.evaluate(() => document.querySelector('#flare-caption .fc-text')?.textContent || ''), { timeout: 15_000 }).toContain('confined');
 
         if (SHOTS) writeFileSync(join(SHOTS, 'measurements.json'), JSON.stringify(out, null, 1));
         expect(errs, errs.join('\n')).toEqual([]);

@@ -111,9 +111,70 @@ export function normalizeFlare(raw, { nowMs, source } = {}) {
         nearSide: located ? Math.abs(lonDeg) <= 90 : null,
         locationText: located ? (typeof locStr === 'string' && locStr.trim() ? locStr.trim() : null) : null,
         beginMs, peakMs, endMs, onsetMs, ageS,
+        // Did the source link a CME to this flare? true / false when it says (DONKI's linkedEvents, or the
+        // relay's linked_cme), null when the source carries no such field (SWPC's list, a test flare).
+        linkedCme: typeof raw.linked_cme === 'boolean' ? raw.linked_cme
+            : Array.isArray(raw.linkedEvents) ? raw.linkedEvents.some((e) => /CME/.test(String(e?.activityID ?? e ?? '')))
+            : typeof raw.linkedCme === 'boolean' ? raw.linkedCme : null,
+        // An explicit statement (a test, a replay of a known event) beats everything.
+        eruptiveStated: typeof raw.eruptive === 'boolean' ? raw.eruptive : null,
         region: regionStr,
         source: source ?? raw.source ?? (raw.flrID ? 'NASA DONKI' : 'NOAA SWPC'),
     };
+}
+
+// ── Is this flare ERUPTIVE? ─────────────────────────────────────────────────
+/**
+ * Not every flare launches a CME — confined flares exist at every class. The
+ * page draws an erupting flux rope only when it has a reason to, and SAYS which:
+ *
+ *   'stated'           the caller said so (a test flare, a replay of a known event);
+ *   'cme-reported'     the flare's source linked a CME to it (DONKI linkedEvents);
+ *   'no-cme-reported'  the source links CMEs, has had CME_REPORT_LAG_S to do so, and
+ *                      has not — the flare is drawn CONFINED, whatever its class;
+ *   'class-prior'      nothing is known: the CME association rate of flares this
+ *                      size decides, and the rope is drawn only when a CME is more
+ *                      likely than not by a margin (ERUPTIVE_PRIOR_MIN).
+ *
+ * CME_ASSOCIATION is the association rate against peak soft-X-ray flux as
+ * recalled from Yashiro et al. (2005, JGR 110, A12S05; 2006, ApJ 650, L143):
+ * about 20 % for C-class, 50 % for M, 90 % for X, all of them above ~X3.
+ * UNVERIFIED — written from memory in a sandbox without the papers, like the
+ * ranges in js/flare-realism.js. It is a prior and is captioned as one.
+ */
+export const CME_ASSOCIATION = Object.freeze([[1e-6, 0.20], [1e-5, 0.50], [1e-4, 0.90], [3e-4, 1.00]]);
+export const ERUPTIVE_PRIOR_MIN = 0.60;
+export const CME_REPORT_LAG_S = 3 * 3600;
+
+/** P(a CME accompanies a flare of this peak flux): piecewise-linear in log10(flux), clamped at both ends. */
+export function cmeAssociation(flux) {
+    if (!(flux > 0)) return 0;
+    const T = CME_ASSOCIATION, x = Math.log10(flux);
+    if (x <= Math.log10(T[0][0])) return T[0][1];
+    for (let i = 1; i < T.length; i++) {
+        const x0 = Math.log10(T[i - 1][0]), x1 = Math.log10(T[i][0]);
+        if (x <= x1) return T[i - 1][1] + (T[i][1] - T[i - 1][1]) * (x - x0) / (x1 - x0);
+    }
+    return T[T.length - 1][1];
+}
+
+/** @returns {{ eruptive: boolean, basis: string, p: number }} — see the block comment above. */
+export function eruptionCall(ev) {
+    const p = ev ? cmeAssociation(ev.flux) : 0;
+    if (!ev) return { eruptive: false, basis: 'class-prior', p };
+    if (ev.eruptiveStated != null) return { eruptive: ev.eruptiveStated, basis: 'stated', p };
+    if (ev.linkedCme === true) return { eruptive: true, basis: 'cme-reported', p };
+    if (ev.linkedCme === false && ev.ageS != null && ev.ageS >= CME_REPORT_LAG_S) return { eruptive: false, basis: 'no-cme-reported', p };
+    return { eruptive: p >= ERUPTIVE_PRIOR_MIN, basis: 'class-prior', p };
+}
+
+/** The caption's clause for an eruption call ('' when there is nothing to say). */
+export function eruptionClause(call) {
+    if (!call) return '';
+    if (call.basis === 'cme-reported') return 'CME reported · rope modelled';
+    if (call.basis === 'no-cme-reported') return 'no CME reported · confined';
+    if (call.basis === 'stated') return call.eruptive ? 'eruptive · rope modelled' : 'confined';
+    return call.eruptive ? `eruption modelled · no CME report yet (CME in ~${Math.round(call.p * 100)} % of flares this size)` : '';
 }
 
 /** Bigger and fresher first. A decade of flux outweighs ~2.3 h of age. */
@@ -231,7 +292,7 @@ export function fmtElapsed(s) {
  * The caption the page prints while a flare plays. Every clause is a fact the
  * modules above computed; nothing here is decoration.
  */
-export function caption(ev, phase, elapsedS, { replay = false, simSpeed = 1 } = {}) {
+export function caption(ev, phase, elapsedS, { replay = false, simSpeed = 1, eruption = null } = {}) {
     if (!ev) return '';
     const where = ev.located
         ? (ev.locationText ?? `${ev.latDeg >= 0 ? 'N' : 'S'}${Math.abs(Math.round(ev.latDeg))}${ev.lonDeg >= 0 ? 'W' : 'E'}${Math.abs(Math.round(ev.lonDeg))}`)
@@ -242,6 +303,8 @@ export function caption(ev, phase, elapsedS, { replay = false, simSpeed = 1 } = 
     const head = (replay ? 'REPLAY · ' : '') + parts.join(' · ');
     const tail = [`T+${fmtElapsed(elapsedS)}`, PHASE_LABEL[phase.id] ?? phase.id];
     if (phase.channel && phase.id !== 'faded') tail.push(`brightest in ${phase.channel} Å (model)`);
+    const er = eruptionClause(eruption);
+    if (er) tail.push(er);
     if (simSpeed && Math.abs(simSpeed - 1) > 1e-6) tail.push(`×${simSpeed} time`);
     return `${head} — ${tail.join(' · ')}`;
 }

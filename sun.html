@@ -1881,6 +1881,7 @@ import * as CAM from './js/sun-camera.js';                 // framing, one-shot 
 import * as DIRECTOR from './js/sun-flare-director.js';   // ONE flare event from any feed, and where it is in its life (PURE)
 import * as FG from './js/flare-geometry.js';
 import { createFlareArcade } from './js/flare-arcade.js';
+import { createFlareRope } from './js/flare-rope.js';
 // The flare's COOLING DEM (js/flare-dem.js, node-gated): GOES class → peak T
 // → RTV density → conduction+radiation cooling, so 131/94 light first and the
 // 171 post-flare arcade tens of minutes later. Read that header before touching
@@ -7436,6 +7437,8 @@ function setFlareModel(spec) {
         : typeof spec.arcadeShells === 'function' ? spec
         : FG.makeFlareModel({ id: 'candidate', ...spec });
     flareArcade.setModel(flareModel);      // only ever called after the arcade exists (boot block below, or by hand)
+    flareRope.setModel(flareModel);
+    _ropePlumeOff = null;
     _syncFlareShape();
     return flareModel.id;
 }
@@ -7453,6 +7456,23 @@ scene.add(_flareSiteGroup);
 const flareArcade = createFlareArcade({ THREE, geometry: FG, sunRadius: 1.0, heightScale: 1.0,
     style: 'ribbon', maxLoops: 23, plumeParticles: 420 });   // 23 stations along the PIL × the kernel's generations (nested arcade)
 _flareSiteGroup.add(flareArcade.group);
+// THE ERUPTING FLUX ROPE (js/flare-rope.js) — strands of the model's own field, feet inside the
+// ribbons' hooks, rising on the model's kinematics. Drawn only for a flare the director calls
+// eruptive (_flareEruption). NOT the owner-disabled spawnFluxRope tube / spawnEruptingProminence
+// bubble further down: those stay disabled; this was asked for on 2026-11-21.
+const flareRope = createFlareRope({ THREE, geometry: FG, sunRadius: 1.0, strands: 18, samples: 96 });
+_flareSiteGroup.add(flareRope.group);
+let _flareEruption = null;       // DIRECTOR.eruptionCall() for the flare on screen: { eruptive, basis, p }
+let _ropePlumeOff = null;        // last plume state this block set (it only writes on a change)
+/** How much of the rope's hot channel and of its filament material the current view shows. */
+function _ropeWeights() {
+    const vm = uniforms.u_viewMode.value;
+    if (vm < 0.5) return { hot: 0.35, cool: 1.0 };      // white light: the filament, in emission off the limb
+    if (vm < 1.5) return { hot: 0.15, cool: 1.0 };      // 304 Å: cool material
+    if (vm < 4.5) return { hot: 0.60, cool: 0.35 };     // 171 / 193 / 211 Å
+    if (vm < 5.5) return { hot: 1.00, cool: 0.10 };     // 131 Å: the hot channel
+    return { hot: 0, cool: 0 };                          // magnetogram: no emission to draw
+}
 {   // `?flaremodel=v1|v2` — the shape model A/B (see flareModel above).
     const want = (new URLSearchParams(location.search).get('flaremodel') || '').toLowerCase();
     if (want === 'v1' || want === 'v2') setFlareModel(want);
@@ -7505,6 +7525,7 @@ function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {
         latRad, lonRad0: flareSite.lonRad0, pilAngle: flareSite.pilAngle,
         cls: flareSite.cls, complex: flareSite.complex, chirality: flareSite.chirality, pairs: pairs ?? null,
     });
+    flareRope.setSite({ latRad, lonRad0: flareSite.lonRad0, pilAngle: flareSite.pilAngle, cls: flareSite.cls, chirality: flareSite.chirality });
     return { latDeg: latRad * 180 / Math.PI, lonDeg0: flareSite.lonRad0 * 180 / Math.PI };
 }
 
@@ -7544,6 +7565,7 @@ function playFlare(ev, { lonIsEpoch = false, fromOnset = false, flash = true, fl
         try { spawnEruptingProminence(latRad, flareSite.lonRad0, ev.letter); } catch (e) {}
     }
     _flareEvent  = ev;
+    _flareEruption = DIRECTOR.eruptionCall(ev);      // is there a reason to draw an erupting rope? (and which)
     _flareReplay = fromOnset && (ev.ageS ?? 0) > 120;
     _flareClock  = DIRECTOR.channelClock(ev.flux, EUV_CHANNELS, channelResponseAt);
     _flareCaptionAt = 0;
@@ -7570,7 +7592,7 @@ function _tickFlareCaption(nowMs) {
         return;
     }
     // A non-shipped shape model is an A/B view: the caption says which one is drawn.
-    const txt = DIRECTOR.caption(_flareEvent, ph, _flareElapsedS, { replay: _flareReplay, simSpeed: +(simSpeed * _flareRate).toFixed(2) })
+    const txt = DIRECTOR.caption(_flareEvent, ph, _flareElapsedS, { replay: _flareReplay, simSpeed: +(simSpeed * _flareRate).toFixed(2), eruption: _flareEruption })
         + (flareModel === FG.FLARE_MODEL ? '' : ` · shape model: ${flareModel.id}`);
     const label = el.querySelector('.fc-text');
     if (label.textContent !== txt) label.textContent = txt;
@@ -7599,6 +7621,11 @@ function _tickFlareSite() {
     if (_flareHoldT != null) {
         uniforms.u_flare_t.value = _flareHoldT;
         _flareElapsedS = _flareHoldT / DIRECTOR.SIM_UNITS_PER_S;
+    } else if (_flareOnsetMs != null) {
+        // ONE FLARE CLOCK. The ribbon clock IS the cooling clock, in sim units. It used to advance by a fixed
+        // amount per FRAME (0.6 units/s at 60 fps, 0.02 at 2 fps) beside a cooling clock in wall seconds, so
+        // the two agreed at exactly one frame rate and a camera could not be timed against either.
+        uniforms.u_flare_t.value = Math.min(999, _flareElapsedS * DIRECTOR.SIM_UNITS_PER_S);
     }
     _syncFlareShape();
     if (!flareSite.set) return;
@@ -7609,6 +7636,10 @@ function _tickFlareSite() {
         intensity: uniforms.u_flare_intensity.value,
         showFlares: uniforms.u_showFlares.value,
     });
+    const ropeOn = !!(_flareEruption && _flareEruption.eruptive) && flareModel.params.rope.speed > 0;
+    flareRope.update({ tFlare: uniforms.u_flare_t.value, showFlares: uniforms.u_showFlares.value, eruptive: ropeOn, weights: _ropeWeights() });
+    // The particle plume stood in for the eruption before there was a rope; with a rope drawn it stands down.
+    if (_ropePlumeOff !== ropeOn) { _ropePlumeOff = ropeOn; flareArcade.setPlumeEnabled(!ropeOn); }
 }
 
 // ─── CORONAL LOOPS ────────────────────────────────────────────────────────────
@@ -10311,8 +10342,7 @@ function animate() {
         fr.mesh.scale.setScalar(growFactor);
     }
 
-    // Flare ribbon timer — increments each frame; capped at 999
-    if (uniforms.u_flare_t.value < 999) uniforms.u_flare_t.value += dt * _flareRate;
+    // (The ribbon clock is no longer advanced per frame here: _tickFlareSite slaves it to the cooling clock.)
     _tickFlareCaption(nowMs);
 
     // Flare flashes — position-accurate bloom following photosphere rotation
@@ -13384,8 +13414,16 @@ var sunCam = (() => {
         if (name === 'flare') {
             const site = FG.sitePositionAt(flareSite.latRad, flareSite.lonRad0, solarRotAngle);
             // Framed to THIS flare's size: the ribbons' 1/e length, from the kernel.
-            return CAM.flareShot(from, { site, earth: basis.normal, cls: flareSite.cls,
-                length: 2 * flareModel.ribbonLength0(flareSite.cls) });
+            const length = 2 * flareModel.ribbonLength0(flareSite.cls);
+            // AN ERUPTIVE FLARE: pull back with the rope. Only when the rope will actually climb while the
+            // shot runs (a replay, or a wound-up sim speed) — at real time it rises for ten minutes, and a
+            // camera drifting out for ten minutes is not a shot.
+            const perWallS = DIRECTOR.SIM_UNITS_PER_S * simSpeed * _flareRate;          // sim units per wall second
+            const apexAt = (s) => 1 + flareModel.ropeApexHeight(uniforms.u_flare_t.value + s * perWallS, flareSite.cls);
+            const ropeOn = !!(_flareEruption && _flareEruption.eruptive) && flareModel.params.rope.speed > 0 && _flareHoldT == null;
+            if (ropeOn && apexAt(0) < flareModel.params.rope.fadeR - 0.2 && apexAt(40) > 1.35)
+                return CAM.eruptionShot(from, { site, earth: basis.normal, cls: flareSite.cls, length, apexAt, maxApexR: flareModel.params.rope.fadeR });
+            return CAM.flareShot(from, { site, earth: basis.normal, cls: flareSite.cls, length });
         }
         if (name === 'corona') {
             // Frame each instrument to the field it is actually DRAWING (rOut is
@@ -13596,7 +13634,7 @@ window.__sun = {
     rebuildMarkers: () => buildRegionMarkers(),       // debug/test: rebuild AR markers
     get regionCount() { return liveRegions.length; },
     testFlare: (cls, latDeg, lonDeg, opts = {}) => {   // debug/test: fire a flare NOW at a Stonyhurst location
-        const evt = DIRECTOR.normalizeFlare({ cls: cls || 'X', latDeg: latDeg ?? 14, lonDeg: lonDeg ?? 15 }, { nowMs: Date.now(), source: 'test' });
+        const evt = DIRECTOR.normalizeFlare({ cls: cls || 'X', latDeg: latDeg ?? 14, lonDeg: lonDeg ?? 15, eruptive: opts.eruptive }, { nowMs: Date.now(), source: 'test' });
         const site = playFlare(evt, { fromOnset: true, ...opts });
         uniforms.u_flare_intensity.value = 1.0;
         return site;
@@ -13630,6 +13668,7 @@ window.__sun = {
             flashes: flareFlashes.filter(f => f.userData.active).map(f => ({ lat: f.userData.lat, lon: f.userData.lon, pos: f.position.clone().normalize().toArray() })),
             siteGroupRotY: _flareSiteGroup.rotation.y,
             arcade: flareArcade.state,
+            rope: flareRope.state,
             arcadeSite: flareArcade.site,
             loopRotations: (loopGroup?.children ?? []).slice(0, 4).map(l => ({ latRad: l.material.userData.latRad, rotY: l.rotation.y })),
         };
@@ -13686,6 +13725,9 @@ window.__sun = {
     /** Hold both flare clocks at one age in sim units (null releases) — captures and the look gate. */
     holdFlareAt: (t) => { _flareHoldT = (t == null) ? null : Math.max(0, +t || 0); },
     flareArcade,
+    flareRope,
+    /** The director's call for the flare on screen: is it eruptive, and on what basis. */
+    get flareEruption() { return _flareEruption; },
     startFlareClock: (cls) => _startFlareClock(cls),
     // Observed cool material (HEK filaments/prominences → the volume's B channel).
     // Prominence bundles: the rung the governor is on, and a pin for tests —

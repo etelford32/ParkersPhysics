@@ -24,6 +24,14 @@
     "cusp_new": 1,
     "round_old": 1,
     "shrinkage": 1,
+    "rope_feet": 1,
+    "rope_above": 1,
+    "rope_slow": 1,
+    "rope_accel": 1,
+    "rope_accel_t": 1,
+    "rope_speed": 1,
+    "rope_twist": 1,
+    "rope_aspect": 1,
     "class_order": 1
   },
   "recorded": "2026-11-20"

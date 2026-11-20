@@ -175,7 +175,48 @@ export function measure(model = FLARE_MODEL, { simUnitsPerS = SIM_UNITS_PER_S } 
     // Shrinkage: the SAME loop (station, generation) just after it forms and half an hour on.
     const twin = fresh ? lateLoops.find((L) => L.station === fresh.station && L.generation === fresh.generation) : null;
 
+    // ── The erupting rope ─────────────────────────────────────────────────
+    const KMS = RSUN_MM * 1000 * simUnitsPerS;                      // R☉ per sim unit → km/s
+    const RP = model.params.rope;
+    const hasRope = RP.speed > 0;
+    const vFinal = hasRope ? RP.speed * model.classFactor('X') * KMS : 0;
+    const vOnset = hasRope ? model.ropeSpeed(0, 'X') * KMS : 0;
+    // Peak acceleration, km/s²: the largest speed gain per second over the first 40 minutes.
+    let aPeak = 0, tPeak = NaN;
+    if (hasRope) for (let s = 0; s < 2400; s += 5) {
+        const a = (model.ropeSpeed(sim(s + 5), 'X') - model.ropeSpeed(sim(s), 'X')) * KMS / 5;
+        if (a > aPeak) { aPeak = a; tPeak = s + 2.5; }
+    }
+    // Feet in the hooks: each foot within its hook arc's radius of the arc's centre (on the sphere).
+    let feetInHooks = 0, ropeAbove = 0;
+    if (hasRope) {
+        const tq = sim(EPOCH.early);
+        const ax = model.ropeAxis({ ...MEASURE_SITE, t: tq, cls: 'X', chirality: 1 });
+        const rcq = model.ribbonCurves({ ...MEASURE_SITE, t: tq, cls: 'X', chirality: 1 });
+        const inHook = (foot, sign) => {
+            const [a, c] = foot;
+            const d = Math.hypot(a - sign * rcq.hook.s0, c - sign * (rcq.sep + rcq.hook.rho));
+            return rcq.hook.rho > 0 && rcq.hook.sweep > 0 && d <= rcq.hook.rho * 0.999 && sign * c > rcq.sep;
+        };
+        feetInHooks = (inHook(ax.footAC[1], +1) && inHook(ax.footAC[0], -1)) ? 1 : 0;
+        // Above the arcade: the rope's underside over the site clears the tallest loop, at every checked age.
+        ropeAbove = 1;
+        for (const s of [0, 60, 180, 420, 900]) {
+            const st = model.ropeState(sim(s), 'X');
+            const top = Math.max(0, ...model.arcadeShells({ ...MEASURE_SITE, t: sim(s), cls: 'X', n: 11, samples: 24 }).map((L) => L.apexR - 1));
+            if (!(st.apexH - st.minorR > top)) ropeAbove = 0;
+        }
+    }
+
     return {
+        ropeFeetInHooks: feetInHooks,
+        ropeAboveArcade: ropeAbove,
+        ropeSpeedFinalKms: vFinal,
+        ropeSpeedOnsetKms: vOnset,
+        ropeAccelPeakKms2: aPeak,
+        ropeAccelPeakMin: tPeak / 60,
+        ropeTwistTurns: hasRope ? RP.twist : 0,
+        ropeAspect: hasRope ? RP.radius : 0,
         sepOnsetFullMm: 2 * sepMm(EPOCH.onset, 'X'),
         sepLateFullMm: 2 * sepMm(EPOCH.late, 'X'),
         sepSpeedImpulsiveKms: vImp,
@@ -260,6 +301,22 @@ export const TARGETS = Object.freeze([
       source: 'Cooled post-flare loops are round (Forbes & Acton 1996, ApJ 459, 330: cusp-to-round relaxation). Range: our encoding of "round".', verified: UNVERIFIED },
     { id: 'shrinkage', key: 'loopShrinkage', label: 'Loop shrinkage, formation → 30 min', unit: '', lo: 0.15, hi: 0.40, scale: 'lin', tol: 0.15, weight: 1,
       source: 'Loops shrink by 20 % and 32 % in the two flares measured (Forbes & Acton 1996).', verified: UNVERIFIED },
+    { id: 'rope_feet', key: 'ropeFeetInHooks', label: 'Rope: both feet inside the ribbons\' hooks', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1.5,
+      source: 'The hooks of the J-shaped ribbons outline the footprints of the erupting flux rope (Aulanier, Janvier & Schmieder 2012; Janvier et al. 2014).', verified: UNVERIFIED },
+    { id: 'rope_above', key: 'ropeAboveArcade', label: 'Rope: always above the flare loops', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1,
+      source: 'The flare loops form by reconnection BELOW the rising rope (the CSHKP picture).', verified: UNVERIFIED },
+    { id: 'rope_slow', key: 'ropeSpeedOnsetKms', label: 'Rope: rise speed at flare onset', unit: 'km/s', lo: 5, hi: 150, scale: 'log', tol: 2.3, weight: 1,
+      source: 'A slow-rise phase of tens of km/s precedes the main acceleration (Zhang et al. 2001, ApJ 559, 452).', verified: UNVERIFIED },
+    { id: 'rope_accel', key: 'ropeAccelPeakKms2', label: 'Rope: peak acceleration (X)', unit: 'km/s²', lo: 0.1, hi: 5, scale: 'log', tol: 2.3, weight: 1,
+      source: 'Main-phase accelerations from ~0.01 to several km/s², a few tenths typical, the largest in impulsive events (Zhang & Dere 2006, ApJ 649, 1100; Bein et al. 2011, ApJ 738, 191).', verified: UNVERIFIED },
+    { id: 'rope_accel_t', key: 'ropeAccelPeakMin', label: 'Rope: peak acceleration, minutes after onset', unit: 'min', lo: 1, hi: 15, scale: 'log', tol: 1.6, weight: 1,
+      source: 'The acceleration phase coincides with the flare\'s rise phase (Zhang et al. 2001; Temmer et al. 2008, ApJ 673, L95).', verified: UNVERIFIED },
+    { id: 'rope_speed', key: 'ropeSpeedFinalKms', label: 'Rope: speed after the acceleration (X)', unit: 'km/s', lo: 800, hi: 2500, scale: 'log', tol: 1.4, weight: 1,
+      source: 'CMEs of X-class flares are fast, of order 1000–2000 km/s (Yashiro et al. 2005, JGR 110, A12S05).', verified: UNVERIFIED },
+    { id: 'rope_twist', key: 'ropeTwistTurns', label: 'Rope: field twist, turns foot to foot', unit: '', lo: 1, hi: 3, scale: 'lin', tol: 1, weight: 0.5,
+      source: 'Erupting ropes carry of order one to a few turns; ~1.25 turns is the kink threshold of a line-tied rope (Hood & Priest 1981; Török & Kliem 2005, ApJ 630, L97). Range: our encoding of "a few turns".', verified: UNVERIFIED },
+    { id: 'rope_aspect', key: 'ropeAspect', label: 'Rope: minor radius ÷ apex height', unit: '', lo: 0.15, hi: 0.5, scale: 'log', tol: 0.7, weight: 0.5,
+      source: 'Self-similar expansion with a fixed aspect, as in graduated-cylindrical-shell fits (Thernisien et al. 2006, ApJ 652, 763). Range: our encoding.', verified: UNVERIFIED },
     { id: 'class_order', key: 'classOrdered', label: 'C < M < X in length, separation and height', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1,
       source: 'Ribbon area, reconnected flux and flare size rise with GOES class (Kazachenko et al. 2017).', verified: UNVERIFIED },
 ]);
@@ -269,6 +326,10 @@ export const TARGETS = Object.freeze([
  * to measure yet. Each becomes a TARGETS row when the kernel can produce it.
  */
 export const OPEN_TARGETS = Object.freeze([
+    { id: 'dimmings', what: 'Twin coronal dimmings open at the rope\'s feet as it leaves; the page does not darken observed pixels, so they are not drawn on the observed hemisphere at all.',
+      source: 'Sterling & Hudson 1997, ApJ 491, L55; Webb et al. 2000, JGR 105, 7491.' },
+    { id: 'cme_speed', what: 'The rope\'s speed is a law of the flare class; a reported CME\'s measured speed (DONKI) is not used yet.',
+      source: 'DONKI CME analyses (the page already loads them for Sun Watch).' },
     { id: 'asymmetry', what: 'The two ribbons move at different speeds — the one in the stronger field moves less; ours are mirror images.',
       source: 'Reconnected flux balance: v·B is what matches, not v (Fletcher et al. 2011).' },
     { id: 'kernels', what: 'Hard X-ray footpoint kernels run along the ribbons during the impulsive phase; the page has two fixed kernels.',

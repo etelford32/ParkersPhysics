@@ -1077,6 +1077,56 @@ owner.*
     grow or drift during the flare; the erupting rope whose feet the hooks
     wrap is not drawn; asymmetric ribbon motion, moving hard-X-ray kernels
     and supra-arcade downflows remain in the backlog.
+
+- **2026-11-21 (third) — the erupting flux rope (owner: "let's draw the
+  erupting flux rope next, keep working on cinematic, buffed up realism").**
+  The page has carried two owner-disabled eruption visuals since the summer (a
+  torus mesh and a bubble). They stay disabled. This is a new object, built
+  the same way as the arcade: kernel numbers, scored, drawn by a view that
+  decides nothing.
+  - **Targets first.** Eight rows went in with no rope in the model: the
+    feet stand inside the ribbons' hooks; the rope is always above the flare
+    loops; it rises slowly at onset; its acceleration peaks at a plausible
+    value and a plausible time; it coasts at a CME-like speed; its field has
+    a few turns; its width follows its height. Score 100 → 75.8.
+  - **The model.** The rope's apex follows a logistic speed curve — 92 km/s
+    at onset, a peak acceleration of 1.6 km/s² 8.5 minutes in, then
+    1 300 km/s for an X-class flare — and its height is that curve's
+    integral. Its axis runs from the centre of one hook to the centre of the
+    other, S-shaped while low and straightening as it rises; its field lines
+    wind 1.75 turns about the axis, left-handed in the north. Score back to
+    100 over 31 rows; the old laws score 44.0.
+  - **Two more things the gates caught.** The S-bend was first an
+    amplitude, and at the value I chose it turned the rope's middle 37° —
+    past the inversion line and out the other side. It is now defined as the
+    fraction of the chord's angle to turn back. And "feet inside the hooks"
+    was true by construction, which the no-decorative-rows check refused;
+    the foot position is now a parameter the row can fail.
+  - **Is this flare eruptive?** Not every flare launches a CME. The page
+    draws a rope only with a reason, and the caption says which: a linked
+    CME report (DONKI), the absence of one after three hours (drawn
+    confined, whatever the class), or — when nothing is known — the CME
+    association rate for flares that size, drawn only above 60 % and
+    captioned "eruption modelled · no CME report yet". That rate table is
+    recalled from Yashiro et al. and is unverified.
+  - **Drawn.** Strands of the model's field in the arcade's own strand
+    material, in two families — the hot channel (131 Å teal) and the
+    filament material it carries (304 Å / Hα red) — weighted by the view.
+    Brightness falls with height on a disclosed display law; the rope is
+    gone by 2.5 R☉, because beyond that this page's corona is observed and
+    a modelled CME is not painted over an observation. The particle plume
+    stands down while a rope is drawn.
+  - **Cinematic.** One flare clock: the ribbon clock used to advance a fixed
+    amount per frame beside a cooling clock in wall seconds, so they agreed
+    at one frame rate only and no camera could be timed against them. With
+    that fixed, an eruptive replay gets a shot that arrives on the flare,
+    holds, then pulls back WITH the rope — the photosphere-to-apex span held
+    at 62 % of the frame from the model's own rise — and comes back down to
+    the arcade once the rope has gone.
+  - **Still open:** twin dimmings at the rope's feet are not drawn (they
+    would darken observed pixels); a reported CME's measured speed is not
+    used — the speed is a law of the flare class; the rope has no leading
+    edge or sheath; verified on a software rasteriser only.
 ---
 
 ## 1. Scope & locked decisions

@@ -58,7 +58,7 @@ const RSUN_MM = 695.7;
 const HALO_K = 4;
 
 /** Shared uniforms + material factory for `style: 'ribbon'`. */
-function ribbonKit(THREE, { strandMm, minPx, gain, R }) {
+export function ribbonKit(THREE, { strandMm, minPx, gain, R }) {
     const uniforms = {
         u_viewport:  { value: new THREE.Vector2(1280, 720) },    // drawing buffer, device px
         u_dpr:       { value: 1 },
@@ -146,16 +146,16 @@ function ribbonKit(THREE, { strandMm, minPx, gain, R }) {
     return { uniforms, material, onBeforeRender };
 }
 
-function ribbonGeometry(THREE) {
-    const n = RIBBON_SAMPLES + 1;
+export function ribbonGeometry(THREE, samples = RIBBON_SAMPLES) {
+    const n = samples + 1;
     const g = new THREE.BufferGeometry();
     const side = new Float32Array(n * 2), arc = new Float32Array(n * 2);
     for (let i = 0; i < n; i++) {
         side[i * 2] = -1; side[i * 2 + 1] = 1;
-        arc[i * 2] = arc[i * 2 + 1] = i / RIBBON_SAMPLES;
+        arc[i * 2] = arc[i * 2 + 1] = i / samples;
     }
     const index = [];
-    for (let i = 0; i < RIBBON_SAMPLES; i++) {
+    for (let i = 0; i < samples; i++) {
         const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
         index.push(a, b, c, b, d, c);
     }

@@ -136,6 +136,24 @@ ok('shape measurements: a known triangle reads 90°, a round loop ~140°; a hook
     assert.ok(MEASURE_SITE.latRad > 0);
 });
 
+ok('rope measurements: speeds and the acceleration peak in km/s from the model\'s own curve; feet-in-hooks and above-the-arcade are geometry', () => {
+    const m = measure(M), P = M.params.rope, KMS = RSUN_MM * 1000 * SIM_UNITS_PER_S, V = P.speed * M.classFactor('X') * KMS;
+    assert.ok(near(m.ropeSpeedFinalKms, V, 1e-9));
+    assert.ok(near(m.ropeSpeedOnsetKms, V / (1 + Math.exp(P.t0 / P.tau)), 1e-9), 'the logistic at t = 0');
+    // Peak acceleration of a logistic: V/(4·tau), at t0 — recovered from 5 s differences to a per cent.
+    const tauS = P.tau / SIM_UNITS_PER_S;
+    assert.ok(Math.abs(m.ropeAccelPeakKms2 / (V / (4 * tauS)) - 1) < 0.01, `peak acceleration ${m.ropeAccelPeakKms2}`);
+    assert.ok(Math.abs(m.ropeAccelPeakMin * 60 - P.t0 / SIM_UNITS_PER_S) < 6, `at ${m.ropeAccelPeakMin.toFixed(2)} min`);
+    assert.equal(m.ropeFeetInHooks, 1); assert.equal(m.ropeAboveArcade, 1);
+    assert.equal(m.ropeTwistTurns, P.twist); assert.equal(m.ropeAspect, P.radius);
+    // The geometric rows respond to geometry: a rope starting INSIDE the arcade, or with no hooks to stand in, fails them.
+    assert.equal(measure(FG.makeFlareModel({ rope: { h0: 0.012 } })).ropeAboveArcade, 0, 'a rope that starts below the first loops is not above the arcade');
+    assert.equal(measure(FG.makeFlareModel({ hook: { sweepDeg: 0 } })).ropeFeetInHooks, 0, 'no hooks, nothing for the feet to stand in');
+    // v1: no rope — every rope measurement is zero, not NaN.
+    const a = measure(V1);
+    for (const k of ['ropeFeetInHooks', 'ropeAboveArcade', 'ropeSpeedFinalKms', 'ropeSpeedOnsetKms', 'ropeAccelPeakKms2', 'ropeTwistTurns', 'ropeAspect']) assert.equal(a[k], 0, k);
+});
+
 ok('every scored row moves when some parameter moves (no decorative rows)', () => {
     const base = measure(M);
     const leaves = [];
@@ -156,6 +174,8 @@ ok('every scored row moves when some parameter moves (no decorative rows)', () =
     assert.ok(moved.get('shear_onset').includes('shear.onsetDeg') && !moved.get('shear_onset').includes('ribbon.sep0'));
     assert.ok(moved.get('zip').includes('arcade.zipT') && moved.get('sep_decel').includes('ribbon.sepTau'));
     assert.ok(moved.get('j_hook').includes('hook.sweepDeg') && moved.get('cusp_new').includes('cusp.onset') && moved.get('shrinkage').includes('cusp.shrink'));
+    assert.ok(moved.get('rope_speed').includes('rope.speed') && moved.get('rope_accel').includes('rope.tau') && moved.get('rope_accel_t').includes('rope.t0')
+        && moved.get('rope_above').includes('rope.h0') && moved.get('rope_twist').includes('rope.twist'));
 });
 
 ok('scorecard: a weighted mean of the rows; compare and baseline records agree with it', () => {
@@ -195,7 +215,8 @@ ok('NEGATIVE CONTROL: the laws shipped until 2026-11-21 score lower, on the rows
     const v1 = scorecard(V1), now = scorecard(M);
     assert.ok(v1.score < now.score - 0.1, `v1 ${(v1.score * 100).toFixed(1)} vs shipped ${(now.score * 100).toFixed(1)}`);
     const row = (c, id) => c.metrics.find((x) => x.id === id);
-    for (const id of ['shear_onset', 'shear_late', 'loop_aspect', 'sep_decel', 'sep_onset', 'apex_onset', 'class_order', 'j_hook', 'j_double', 'j_size', 'cusp_new', 'shrinkage'])
+    for (const id of ['shear_onset', 'shear_late', 'loop_aspect', 'sep_decel', 'sep_onset', 'apex_onset', 'class_order', 'j_hook', 'j_double', 'j_size', 'cusp_new', 'shrinkage',
+        'rope_feet', 'rope_above', 'rope_slow', 'rope_accel', 'rope_accel_t', 'rope_speed', 'rope_twist', 'rope_aspect'])
         assert.ok(!row(v1, id).pass, `v1 should miss "${id}" (it reads ${row(v1, id).value})`);
     // The measured values that are the reason for each change, pinned.
     assert.ok(near(row(v1, 'shear_onset').value, 29.68, 0.01), 'v1 loops started 30° sheared — the surveys say 50–80°');

@@ -322,6 +322,18 @@ export const FLARE_SHAPE_V2 = deepFreeze({
      * arc; while it relaxes it also SHRINKS — it forms (1 + `shrink`) × its relaxed height.
      */
     cusp: { onset: 0.45, power: 0.7, relaxT: 120, shrink: 0.28 },
+    /**
+     * THE ERUPTING FLUX ROPE. Its feet stand inside the ribbons' hooks; its apex starts `h0` above the
+     * photosphere and rises on a logistic speed curve — slow at first, accelerating around `t0` over a
+     * width `tau` (sim units), then coasting at `speed` × classFactor (R☉ per sim unit). The field winds
+     * `twist` turns about the axis from foot to foot; the minor radius is `radius` × the apex height
+     * (self-similar), tapering to `footRadius` × the hook's radius at the feet, which stand `footAlong` ×
+     * the hook's own distance along the PIL (1 = at the centre of the hook's arc); `sigmoid` is how far the
+     * low rope's middle is turned back toward the inversion line (0 straight chord, 1 along the PIL) — the
+     * S-shape, which straightens as it rises; it has faded out by an apex radius of
+     * `fadeR` R☉ from Sun centre. speed 0 = no rope.
+     */
+    rope: { speed: 4.64e-3, t0: 180, tau: 70, h0: 0.045, twist: 1.75, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0.7, fadeR: 2.5 },
     plume: { speed: 0.06, reach: 2.4 },
 });
 
@@ -339,6 +351,7 @@ export const FLARE_SHAPE_V1 = deepFreeze({
               alongJitter: 0.38, heightJitter: 0.14, timeJitter: 0.35, maxGenerations: 7 },
     hook: { at: 0.75, radius: 0.18, sweepDeg: 0 },            // straight ribbons
     cusp: { onset: 0, power: 0.7, relaxT: 120, shrink: 0 },   // round loops that keep their height
+    rope: { speed: 0, t0: 180, tau: 70, h0: 0.045, twist: 0, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0, fadeR: 2.5 },   // no rope (a particle plume stood in for it)
     plume: { speed: 0.06, reach: 2.4 },
 });
 
@@ -468,7 +481,7 @@ export const RIBBON_J_GLSL = /* glsl */`
  */
 export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
     const P = deepFreeze(mergeFlareShape(base, overrides));
-    const { ribbon: R, shear: S, height: H, arcade: A, plume: PL, hook: HK, cusp: CU } = P;
+    const { ribbon: R, shear: S, height: H, arcade: A, plume: PL, hook: HK, cusp: CU, rope: RP } = P;
     const tanOnset = Math.tan(S.onsetDeg * DEG), tanOnsetC = Math.tan(S.onsetComplexDeg * DEG), tanFinal = Math.tan(S.finalDeg * DEG);
 
     function classFactor(cls) {
@@ -669,6 +682,106 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         return out;
     }
 
+    // ── The erupting flux rope ───────────────────────────────────────────────
+    const softplus = (x) => (x > 30 ? x : Math.log1p(Math.exp(x)));
+    /** Apex speed, R☉ per sim unit: a logistic — slow rise, acceleration centred on t0, coast. */
+    const ropeSpeed = (t, cls = 'M') => RP.speed * classFactor(cls) / (1 + Math.exp(-(Math.max(t, 0) - RP.t0) / RP.tau));
+    /** Apex height above the photosphere, R☉: the integral of ropeSpeed from onset, on top of h0. */
+    const ropeApexHeight = (t, cls = 'M') =>
+        RP.h0 + RP.speed * classFactor(cls) * RP.tau * (softplus((Math.max(t, 0) - RP.t0) / RP.tau) - softplus(-RP.t0 / RP.tau));
+    /**
+     * The rope at time t: { active, h0, apexH, apexR, speed, accel, minorR, alpha }. `alpha` is its
+     * presence (fades in over the first sim units, out as the apex nears fadeR) — NOT its brightness
+     * dilution, which is the view's disclosed choice.
+     */
+    function ropeState(t, cls = 'M') {
+        const active = RP.speed > 0 && t >= 0;
+        const apexH = ropeApexHeight(t, cls), apexR = 1 + apexH;
+        const v = ropeSpeed(t, cls);
+        const fadeFrom = 1 + 0.5 * (RP.fadeR - 1);
+        const f = Math.min(1, Math.max(0, (apexR - fadeFrom) / Math.max(RP.fadeR - fadeFrom, 1e-9)));
+        const alpha = active ? Math.min(1, Math.max(t, 0) / 6) * (1 - f * f * (3 - 2 * f)) : 0;
+        return { active, h0: RP.h0, apexH, apexR, speed: v, accel: v * (1 - v / (RP.speed * classFactor(cls) || 1)) / RP.tau,
+                 minorR: RP.radius * apexH, alpha };
+    }
+    /**
+     * The rope's AXIS: points in the sun frame (epoch coordinates) from the foot inside the −across
+     * ribbon's hook to the foot inside the +across one, with an orthonormal frame (T along the axis,
+     * N, B across it; N × B = T) and the minor radius at each point. Low in the atmosphere the axis is
+     * a sigmoid — its middle runs along the inversion line and its ends turn in to the feet; the bend
+     * fades as the rope rises. Returns { pts, frames: [{T, N, B}], radius: [], feet: [minus, plus],
+     * footAC: [[a, c], [a, c]], state }.
+     */
+    function ropeAxis({ latRad, lonRad, pilAngle, t = 0, cls = 'M', chirality = 1, samples = 96 } = {}) {
+        const frame = tangentFrame(latRad, lonRad, pilAngle);
+        const st = ropeState(t, cls), hk = ribbonHook(t, cls), sep = ribbonSeparation(t, cls);
+        const chi = chirality < 0 ? -1 : 1;
+        // Each foot stands where its ribbon's hook is: footAlong = 1 is the centre of the hook's arc (see
+        // ribbonJ) — what the hook wraps. It is a PARAMETER so that "the feet are inside the hooks" is a
+        // property a model can fail, and the scorecard row for it is not true by construction.
+        const fp = [chi * RP.footAlong * hk.s0, sep + hk.rho], fm = [-chi * RP.footAlong * hk.s0, -(sep + hk.rho)];
+        const d = [fp[0] - fm[0], fp[1] - fm[1]], len = Math.hypot(d[0], d[1]) || 1e-9;
+        const nrm = [chi * -d[1] / len, chi * d[0] / len];             // turns the rope's middle TOWARD the inversion line
+        // SIGMOID: `sigmoid` is the fraction of the chord's angle to the inversion line by which the rope's
+        // MIDDLE is turned back toward it (1 = the middle runs along the PIL). The amplitude follows from
+        // that — sin(2πu) turns the middle by atan(2π·bend/len) — and it straightens as the rope rises.
+        // (The first version took the amplitude as a fraction of the chord: 0.12 turned the middle 37°, PAST
+        // the inversion line and out the other side of a chord that is only 19° from it — measured.)
+        const chordAng = Math.atan2(Math.abs(d[1]), Math.abs(d[0]));
+        const bend = len * Math.tan(Math.min(1, RP.sigmoid * (st.h0 / st.apexH)) * chordAng) / (2 * Math.PI);
+        const pts = [];
+        for (let i = 0; i <= samples; i++) {
+            const u = i / samples, sgm = bend * Math.sin(2 * Math.PI * u);
+            const a = fm[0] + d[0] * u + nrm[0] * sgm, c = fm[1] + d[1] * u + nrm[1] * sgm;
+            const z = Math.sqrt(Math.max(0, 1 - a * a - c * c));
+            const p0 = add(add(scale(frame.pilAxis, a), scale(frame.loopAxis, c)), scale(frame.radial, z));
+            pts.push(scale(p0, 1 + st.apexH * Math.sin(Math.PI * u)));
+        }
+        const aFoot = RP.footRadius * (hk.rho > 0 ? hk.rho : 0.25 * sep);
+        const frames = [], radius = [];
+        for (let i = 0; i <= samples; i++) {
+            const a = pts[Math.max(i - 1, 0)], b = pts[Math.min(i + 1, samples)];
+            const T = unit(add(b, scale(a, -1)));
+            const up = unit(pts[i]);
+            let N = add(up, scale(T, -dot(up, T)));
+            if (norm(N) < 1e-6) N = add(frame.loopAxis, scale(T, -dot(frame.loopAxis, T)));   // a leg standing exactly radial
+            N = unit(N);
+            frames.push({ T, N, B: cross(T, N) });
+            radius.push(aFoot + (Math.max(st.minorR, aFoot) - aFoot) * Math.sin(Math.PI * i / samples));
+        }
+        const lift = ([a, c]) => add(add(scale(frame.pilAxis, a), scale(frame.loopAxis, c)), scale(frame.radial, Math.sqrt(Math.max(0, 1 - a * a - c * c))));
+        return { pts, frames, radius, feet: [lift(fm), lift(fp)], footAC: [fm, fp], footRadius: aFoot, state: st, chirality: chi };
+    }
+    /**
+     * The rope's field lines: `n` helices about the axis, in two shells, winding `twist` turns from foot
+     * to foot. HANDEDNESS: θ = φ − χ·2π·twist·u in the (N, B) plane with N × B = T, so χ = +1 is a
+     * LEFT-handed rope — negative helicity, the northern-hemisphere sense helicityChirality assigns —
+     * and χ = −1 a right-handed one. (That a right-handed twist is positive helicity is a definition;
+     * which hemisphere and which hook end go with it is the prior documented at helicityChirality.)
+     * Every third strand is flagged `cool`: the filament material the rope carries. Nothing dips below
+     * the photosphere. Returns [{ pts, cool, shell, weight }].
+     */
+    function ropeStrands({ latRad, lonRad, pilAngle, t = 0, cls = 'M', chirality = 1, n = 18, samples = 96,
+                           seed = arcadeSeed(latRad, lonRad) } = {}) {
+        const ax = ropeAxis({ latRad, lonRad, pilAngle, t, cls, chirality, samples });
+        const out = [];
+        for (let j = 0; j < n; j++) {
+            const shell = j % 2 === 0 ? 1 : 0.55;
+            const phi0 = 2 * Math.PI * (j + 0.35 * (arcadeHash(seed, j, 0, 7) - 0.5)) / n;
+            const pts = [];
+            for (let i = 0; i <= samples; i++) {
+                const u = i / samples, th = phi0 - ax.chirality * 2 * Math.PI * RP.twist * u;
+                const { N, B } = ax.frames[i], r = ax.radius[i] * shell;
+                let p = add(ax.pts[i], add(scale(N, r * Math.cos(th)), scale(B, r * Math.sin(th))));
+                const pl = norm(p);
+                if (pl < 1.0005) p = scale(p, 1.0005 / pl);
+                pts.push(p);
+            }
+            out.push({ pts, cool: j % 3 === 2, shell, weight: shell === 1 ? 1 : 0.7 });
+        }
+        return out;
+    }
+
     /**
      * The eruptive plume: a jet along the site's radial that rises from the
      * photosphere, widens, and fades. Radii in R☉, opacity in [0, 1]. Faster
@@ -692,6 +805,7 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         classFactor, ribbonSeparation, ribbonWidth, ribbonLength0, ribbonAlongSigma, ribbonDecay,
         arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
         loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
+        ropeSpeed, ropeApexHeight, ropeState, ropeAxis, ropeStrands,
         // The parameter set under the names the consumers and gates already read.
         CLASS_FACTOR: P.classFactor,
         RIBBON: Object.freeze({ SEP0: R.sep0, SEP_RATE: R.sepRate, SEP_GAIN: R.sepGain, SEP_TAU: R.sepTau,
@@ -708,6 +822,7 @@ export const {
     classFactor, ribbonSeparation, ribbonWidth, ribbonLength0, ribbonAlongSigma, ribbonDecay,
     arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
     loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
+    ropeSpeed, ropeApexHeight, ropeState, ropeAxis, ropeStrands,
     CLASS_FACTOR, RIBBON, ARCADE,
 } = FLARE_MODEL;
 /** The along-PIL σ every class used until 2026-11-20 (see ribbonLength0). */

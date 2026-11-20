@@ -12,7 +12,9 @@ import {
     SIM_UNITS_PER_S, SIM_AGE_CAP, simAgeFor, LIVE_WINDOW_S, parseClass, normalizeFlare, flareScore, rankFlares,
     mergeFlares, shouldCutTo, channelClock, phaseAt, PHASE_LABEL, fmtElapsed, caption, trackFor,
 } from '../js/sun-flare-director.js';
+import { CME_ASSOCIATION, ERUPTIVE_PRIOR_MIN, CME_REPORT_LAG_S, cmeAssociation, eruptionCall, eruptionClause } from '../js/sun-flare-director.js';
 import { goesFluxOf, flareDemState } from '../js/flare-dem.js';
+const pick = ({ eruptive, basis }) => ({ eruptive, basis });
 import { EUV_CHANNELS, channelResponseAt } from '../js/corona-volumetric.js';
 import { readFileSync } from 'node:fs';
 
@@ -132,6 +134,43 @@ ok('the caption says what is known — and says REPLAY when it is one', () => {
     assert.ok(!caption(ev, { id: 'faded', channel: '171' }, 9000).includes('brightest'));
     assert.equal(fmtElapsed(59.6), '1:00');
     assert.equal(caption(null, { id: 'hot' }, 0), '');
+});
+
+ok('is it eruptive? a statement beats a CME report, a report beats the class prior — and a confined X flare draws no rope', () => {
+    const now = Date.parse('2026-11-21T12:00:00Z');
+    const ev = (raw) => normalizeFlare({ classType: 'X2.0', sourceLocation: 'N12W30', beginTime: '2026-11-21T06:00Z', ...raw }, { nowMs: now });
+    // The association prior: rises with class, pinned at its table, clamped at both ends.
+    for (const [f, p] of CME_ASSOCIATION) assert.ok(Math.abs(cmeAssociation(f) - p) < 1e-12);
+    assert.equal(cmeAssociation(1e-8), CME_ASSOCIATION[0][1]); assert.equal(cmeAssociation(1e-2), 1);
+    let prev = 0; for (let x = -7; x <= -3; x += 0.1) { const p = cmeAssociation(10 ** x); assert.ok(p >= prev - 1e-12); prev = p; }
+    assert.equal(cmeAssociation(0), 0); assert.equal(cmeAssociation(NaN), 0);
+    // DONKI linked a CME (either spelling of the field): eruptive, and the basis says so.
+    assert.deepEqual(pick(eruptionCall(ev({ linkedEvents: [{ activityID: '2026-11-21T06:36:00-CME-001' }] }))), { eruptive: true, basis: 'cme-reported' });
+    assert.deepEqual(pick(eruptionCall(ev({ linked_cme: true }))), { eruptive: true, basis: 'cme-reported' });
+    // The source links CMEs, has had six hours, and linked none: CONFINED — even at X2.
+    assert.deepEqual(pick(eruptionCall(ev({ linkedEvents: [{ activityID: '2026-11-21T06:10:00-SEP-001' }] }))), { eruptive: false, basis: 'no-cme-reported' });
+    assert.deepEqual(pick(eruptionCall(ev({ linked_cme: false }))), { eruptive: false, basis: 'no-cme-reported' });
+    // …but twenty minutes after onset its silence is not evidence yet: the class prior decides.
+    const young = normalizeFlare({ classType: 'X2.0', sourceLocation: 'N12W30', beginTime: '2026-11-21T11:40Z', linked_cme: false }, { nowMs: now });
+    assert.ok(young.ageS < CME_REPORT_LAG_S);
+    assert.deepEqual(pick(eruptionCall(young)), { eruptive: true, basis: 'class-prior' });
+    // No link field at all (SWPC's list): the prior, by class. C and M1 are not drawn; M5 and X are.
+    const sw = (cls) => eruptionCall(normalizeFlare({ cls, latDeg: 10, lonDeg: 20 }, { nowMs: now }));
+    assert.equal(sw('C5.0').eruptive, false); assert.equal(sw('M1.0').eruptive, false);
+    assert.equal(sw('M5.0').eruptive, true); assert.equal(sw('X1.0').eruptive, true);
+    for (const c of ['C5.0', 'M1.0', 'M5.0', 'X1.0']) { const r = sw(c); assert.equal(r.basis, 'class-prior'); assert.equal(r.eruptive, r.p >= ERUPTIVE_PRIOR_MIN); }
+    // A statement beats everything, both ways.
+    assert.deepEqual(pick(eruptionCall(ev({ linked_cme: true, eruptive: false }))), { eruptive: false, basis: 'stated' });
+    assert.deepEqual(pick(eruptionCall(normalizeFlare({ cls: 'C1.0', latDeg: 0, lonDeg: 0, eruptive: true }, { nowMs: now }))), { eruptive: true, basis: 'stated' });
+    assert.equal(eruptionCall(null).eruptive, false);
+    // The caption says which basis the rope stands on — and says nothing when there is no rope and no report.
+    assert.match(eruptionClause(eruptionCall(ev({ linked_cme: true }))), /CME reported/);
+    assert.match(eruptionClause(eruptionCall(ev({ linked_cme: false }))), /no CME reported · confined/);
+    assert.match(eruptionClause(sw('X1.0')), /eruption modelled · no CME report yet \(CME in ~90 % of flares this size\)/);
+    assert.equal(eruptionClause(sw('C5.0')), '');
+    const ph = { id: 'impulsive', channel: '131' };
+    assert.match(caption(ev({ linked_cme: true }), ph, 30, { eruption: eruptionCall(ev({ linked_cme: true })) }), /CME reported · rope modelled/);
+    assert.ok(!/rope|CME/.test(caption(ev({}), ph, 30, {})), 'no eruption passed, nothing claimed');
 });
 
 console.log(`${passed} checks passed (sun-flare-director)`);
