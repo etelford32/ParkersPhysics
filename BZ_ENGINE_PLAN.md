@@ -8,8 +8,9 @@
 > **Read §12–§17 before §4. On the one real day looked at — a quiet one —
 > most PREDICTIVE claims in §4 scored at or below their controls**: lag
 > alignment did not beat the naive mean, the fixed GEO formula lost to a
-> nominal wind, the learning GEO filter lost to 30-minute persistence. ONE
-> prediction is ahead: Dst from the arrived wind (skill +0.18 to +0.29). What
+> nominal wind, the learning GEO filter lost to 30-minute persistence. The
+> one that looked ahead — Dst from the arrived wind — is NOT robustly so:
+> +0.29, +0.27, +0.18 and then −0.06 across four runs the same afternoon. What
 > held up everywhere is the MEASUREMENT side and the honesty of the error bars
 > (61–69 % coverage of a stated 1σ). Those are measurements with their numbers
 > recorded, not tuning problems, and nothing below has been tuned to hide
@@ -800,11 +801,27 @@ this is deployed.
 - **Sudden impulses: none. Predicted pressure jumps: none.** So the timing
   score — the one real check on propagation (§6 row 1) — has still never
   scored. It reports `no_events_in_window` rather than a pass.
-- **Ring current: the engine's first prediction to beat its control.** The
-  site's own Dst model (O'Brien–McPherron, `integrateDst`) driven by the
-  ARRIVED wind, anchored once and free-run for 22 hours: 6.8–7.4 nT rms
-  against 8.1 for persistence (skill +0.18 to +0.29 across three runs an
-  hour apart). One quiet day, 22 hourly points — encouraging, not proven.
+- **Ring current: ahead on three runs, level on the fourth — so, not shown.**
+  The site's own Dst model (O'Brien–McPherron, `integrateDst`) driven by the
+  ARRIVED wind, anchored once and free-run for ~22 hours, against
+  persistence:
+
+  | run (UT) | anchored | hours | model rmse | persistence | skill |
+  |---|---|---|---|---|---|
+  | 15:42 | 17:00 | 22 | 6.83 nT | 8.09 nT | +0.29 |
+  | 15:51 | 17:00 | 22 | 6.91 nT | 8.09 nT | +0.27 |
+  | 16:01 | 17:00 | 22 | 7.35 nT | 8.09 nT | +0.18 |
+  | 16:14 | 18:00 | 21 | 6.55 nT | — | **−0.06** |
+
+  When the 24-hour L1 window rolled forward one hour the anchor moved, and
+  the advantage vanished. With ~21 hourly points and ONE anchor, the score
+  is dominated by where the anchor happens to fall. This is not a result in
+  either direction; it needs many anchors over many days (§18).
+- **After the fixes, on real data:** `/api/geomag/observatories` returns 14
+  of 14 stations; the column's ground rung reads 14 stations (13 at 1 s — one
+  1-second request timed out and is named), leaves FRN out as a bad record,
+  and reports a network dB/dt peak of 0.505 nT/s at CMO against 0.099 nT/s
+  as a minute product.
 
 **Bugs the gate caught:** the pressure-jump detector timed every jump 3 min
 early (first threshold crossing), then 2 min early (a difference of medians
