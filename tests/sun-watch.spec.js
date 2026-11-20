@@ -101,6 +101,15 @@ async function boot(page) {
 }
 
 test.describe('sun watch dock', () => {
+    // PER-TEST BUDGET. Since the 2026-11-20 hero framing the page opens with the
+    // Sun ~2.8x larger on screen (30° lens, 60 % fill; it was 36 %), and a
+    // software rasteriser pays for that in fill rate. Measured on SwiftShader at
+    // 1280x720: 495 ms/frame on the old framing, 620-672 ms on the new one — and
+    // 799 ms on the OLD code with the Sun drawn at the new size, so per pixel the
+    // page is cheaper, not dearer. The multi-step tests ran at 57.7 s of the
+    // default 60 s alone and over it beside a second worker. The limit follows
+    // the measurement; no step was removed.
+    test.describe.configure({ timeout: 150_000 });
 
     test.beforeEach(async ({ page }) => {
         await page.addInitScript(() => {

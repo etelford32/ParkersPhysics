@@ -912,6 +912,9 @@ export const INSTRUMENT_HEADER = 'X-SOHO-Instrument';
  * @param {number} [opts.gain]
  * @param {string[]} [opts.instruments] subset of ['c2','c3']
  */
+/** Below this gain the plane is not drawn (it would add nothing and cost a full-screen pass). */
+export const GAIN_DRAW_MIN = 1e-4;
+
 export class SunCoronagraph {
     constructor(opts) {
         this.THREE     = opts.THREE;
@@ -988,12 +991,18 @@ export class SunCoronagraph {
 
     setEnabled(on) {
         this.enabled = !!on;
-        if (this.mesh) this.mesh.visible = this.enabled && this._anyDrawn() && this.axisWeight > 0.001;
+        if (this.mesh) this.mesh.visible = this.enabled && this._anyDrawn() && this.axisWeight > 0.001 && this.gain > GAIN_DRAW_MIN;
         this._emit();
         if (this.enabled) this.refresh();
     }
 
-    setGain(g) { this.gain = Math.max(0, +g || 0); if (this.uniforms) this.uniforms.u_gain.value = this.gain; }
+    setGain(g) {
+        this.gain = Math.max(0, +g || 0);
+        if (this.uniforms) this.uniforms.u_gain.value = this.gain;
+        // A plane at zero gain adds nothing and still costs a full-screen pass:
+        // at the hero framing (gain 0 by design) it is not drawn at all.
+        if (this.mesh && this.gain <= GAIN_DRAW_MIN) this.mesh.visible = false;
+    }
 
     /** Override the sky-to-frame roll (see the UNVERIFIED list in the header). */
     setRoll(deg) { this.rollDeg = Number.isFinite(+deg) ? +deg : 0; this._applyAll(); }
@@ -1028,7 +1037,7 @@ export class SunCoronagraph {
             this._emit();
         }
         this.uniforms.u_axis.value = w;
-        this.mesh.visible = this.enabled && this._anyDrawn() && w > 0.001;
+        this.mesh.visible = this.enabled && this._anyDrawn() && w > 0.001 && this.gain > GAIN_DRAW_MIN;
     }
 
     /** Recompute each frame's age + freshness. Returns true if any freshness class changed. */
@@ -1156,7 +1165,7 @@ export class SunCoronagraph {
         this.b0Rad = eph.b0Deg * DEG;
         this.state.b0Deg = eph.b0Deg;
         this._orient();
-        if (this.mesh) this.mesh.visible = this.enabled && this._anyDrawn() && this.axisWeight > 0.001;
+        if (this.mesh) this.mesh.visible = this.enabled && this._anyDrawn() && this.axisWeight > 0.001 && this.gain > GAIN_DRAW_MIN;
         this._emit();
     }
 
