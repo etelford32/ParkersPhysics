@@ -41,7 +41,7 @@
  * pass its own `simUnitsPerS`.
  */
 
-import { FLARE_MODEL, DEG } from './flare-geometry.js';
+import { FLARE_MODEL, DEG, vec } from './flare-geometry.js';
 import { SIM_UNITS_PER_S } from './sun-flare-director.js';
 
 /** Solar radius, Mm — IAU 2015 nominal (Resolution B3). */
@@ -56,6 +56,78 @@ export const EPOCH = Object.freeze({
     lateFrom: 1500,         // 25–30 min: the gradual phase
     late: 1800,
 });
+
+/** The site every shape measurement is taken at (N15, central meridian; the Joy's-law PIL prior). */
+export const MEASURE_SITE = Object.freeze({ latRad: 15 * DEG, lonRad: 0 });
+
+/**
+ * The interior angle at a loop's top, degrees — measured on the DRAWN
+ * polyline, in the loop's own plane: from the apex to the two points where
+ * the loop is at `frac` of its apex height. A round (sine-lifted or
+ * semicircular) loop reads ~135–150°; a pointed one reads less.
+ */
+export function apexAngleDeg(pts, frac = 0.85) {
+    const fa = pts[0], fb = pts[pts.length - 1];
+    const e = vec.unit(vec.add(fb, vec.scale(fa, -1)));
+    const mid = vec.unit(vec.add(fa, fb));
+    const xz = pts.map((p) => [vec.dot(vec.add(p, vec.scale(mid, -1)), e), vec.norm(p) - 1]);
+    let k = 0;
+    for (let i = 1; i < xz.length; i++) if (xz[i][1] > xz[k][1]) k = i;
+    const zt = frac * xz[k][1];
+    const cross = (from, step) => {
+        for (let i = from; i + step >= 0 && i + step < xz.length; i += step) {
+            const [x0, z0] = xz[i], [x1, z1] = xz[i + step];
+            if ((z0 - zt) * (z1 - zt) <= 0 && z0 !== z1) return x0 + (x1 - x0) * (z0 - zt) / (z0 - z1);
+        }
+        return NaN;
+    };
+    const xl = cross(k, -1), xr = cross(k, 1);
+    const [xa, za] = xz[k];
+    const u = [xl - xa, zt - za], v = [xr - xa, zt - za];
+    const c = (u[0] * v[0] + u[1] * v[1]) / (Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]));
+    return Math.acos(Math.max(-1, Math.min(1, c))) / DEG;
+}
+
+/**
+ * CUSP INDEX: how wide a loop is near its top, relative to a ROUND arc on the
+ * same feet with the same apex height — its width at `frac` of the apex
+ * height ÷ the sine-lifted arc's width there. 1 is round; below 1 the top is
+ * narrower, i.e. pointed. Unlike the top angle this does not depend on how
+ * tall the loop is: the v1 loops, 2.7× taller than their half-span, read as
+ * "pointed" (85°) by angle while being perfectly round arcs — the first
+ * version of this row scored them as cusps (measured; kept in the gate).
+ */
+export function cuspIndex(pts, frac = 0.85) {
+    const fa = pts[0], fb = pts[pts.length - 1];
+    const e = vec.unit(vec.add(fb, vec.scale(fa, -1)));
+    const mid = vec.unit(vec.add(fa, fb));
+    const xz = pts.map((p) => [vec.dot(vec.add(p, vec.scale(mid, -1)), e), vec.norm(p) - 1]);
+    let k = 0;
+    for (let i = 1; i < xz.length; i++) if (xz[i][1] > xz[k][1]) k = i;
+    const zt = frac * xz[k][1];
+    const cross = (step) => {
+        for (let i = k; i + step >= 0 && i + step < xz.length; i += step) {
+            const [x0, z0] = xz[i], [x1, z1] = xz[i + step];
+            if ((z0 - zt) * (z1 - zt) <= 0 && z0 !== z1) return x0 + (x1 - x0) * (z0 - zt) / (z0 - z1);
+        }
+        return NaN;
+    };
+    const half = (cross(1) - cross(-1)) / 2;
+    const d = (xz[xz.length - 1][0] - xz[0][0]) / 2;                  // half the footpoint chord
+    const roundHalf = (1 - 2 * Math.asin(frac) / Math.PI) * d;        // sin(πu) = frac
+    return half / roundHalf;
+}
+
+/** Total turning of a tangent-plane polyline [{a, c}…], degrees (0 for a straight ribbon). */
+export function turningDeg(curve) {
+    let total = 0, prev = null;
+    for (let i = 1; i < curve.length; i++) {
+        const h = Math.atan2(curve[i].c - curve[i - 1].c, curve[i].a - curve[i - 1].a);
+        if (prev != null) { let d = h - prev; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; total += d; }
+        prev = h;
+    }
+    return Math.abs(total) / DEG;
+}
 
 /**
  * Measure a model. Returns plain numbers in physical units; nothing here is a
@@ -79,6 +151,30 @@ export function measure(model = FLARE_MODEL, { simUnitsPerS = SIM_UNITS_PER_S } 
     const zipS = A.zipT / simUnitsPerS;
     const ordered = (f) => f('C') < f('M') && f('M') < f('X');
 
+    // ── Ribbon ends: measured on the ribbons' own centrelines ─────────────
+    const rc = model.ribbonCurves({ ...MEASURE_SITE, t: sim(EPOCH.mid), cls: 'X', chirality: 1, samples: 192 });
+    const hookTurn = turningDeg(rc.plus);
+    // A hook is where a ribbon leaves the line c = ±sep. The DOUBLE-J: each ribbon has one, both curl
+    // AWAY from the inversion line, and they are at opposite ends.
+    const off = (curve, sign) => curve.filter((q) => sign * q.c > rc.sep * 1.02 + 1e-9);
+    const hp = off(rc.plus, +1), hm = off(rc.minus, -1);
+    const meanA = (qs) => qs.reduce((x, q) => x + q.a, 0) / qs.length;
+    const doubleJ = (hp.length && hm.length && meanA(hp) * meanA(hm) < 0
+        && !rc.plus.some((q) => q.c < rc.sep - 1e-9) && !rc.minus.some((q) => -q.c < rc.sep - 1e-9)) ? 1 : 0;
+    const hookWidthMm = hp.length ? Mm(Math.max(...hp.map((q) => q.c)) - rc.sep) : 0;
+
+    // ── Loop shape by age: measured on drawn loops ────────────────────────
+    const shells = (s) => model.arcadeShells({ ...MEASURE_SITE, t: sim(s), cls: 'X', n: 11, samples: 96 });
+    const youngest = (ls) => ls.reduce((b, L) => (b == null || L.age < b.age ? L : b), null);
+    const oldest = (ls) => ls.reduce((b, L) => (b == null || L.age > b.age ? L : b), null);
+    // A loop a few sim units old, with a formed (faded-in) companion set: scan the first 10 minutes for the freshest one.
+    let fresh = null;
+    for (let s = 30; s <= 600; s += 6) { const L = youngest(shells(s).filter((x) => x.generation >= 2)); if (L && (fresh == null || L.age < fresh.age)) fresh = L; }
+    const lateLoops = shells(EPOCH.late);
+    const relaxed = oldest(lateLoops);
+    // Shrinkage: the SAME loop (station, generation) just after it forms and half an hour on.
+    const twin = fresh ? lateLoops.find((L) => L.station === fresh.station && L.generation === fresh.generation) : null;
+
     return {
         sepOnsetFullMm: 2 * sepMm(EPOCH.onset, 'X'),
         sepLateFullMm: 2 * sepMm(EPOCH.late, 'X'),
@@ -100,6 +196,15 @@ export function measure(model = FLARE_MODEL, { simUnitsPerS = SIM_UNITS_PER_S } 
         ribbonDecayS: model.params.ribbon.decayT / simUnitsPerS,
         zipSpeedKms: zipS > 0 ? zipMm * 1000 / zipS : Infinity,
         classOrdered: (ordered((c) => lenMm(c)) && ordered((c) => sepMm(EPOCH.late, c)) && ordered((c) => apexMm(EPOCH.late, c))) ? 1 : 0,
+        hookTurnDeg: hookTurn,
+        hookDoubleJ: doubleJ,
+        hookWidthOverLength: hookWidthMm / lenMm('X'),
+        cuspIndexNew: fresh ? cuspIndex(fresh.pts) : NaN,
+        cuspIndexRelaxed: relaxed ? cuspIndex(relaxed.pts) : NaN,
+        apexAngleNewDeg: fresh ? apexAngleDeg(fresh.pts) : NaN,
+        apexAngleRelaxedDeg: relaxed ? apexAngleDeg(relaxed.pts) : NaN,
+        loopShrinkage: (fresh && twin) ? 1 - (twin.apexR - 1) / (fresh.apexR - 1) : NaN,
+        freshLoopAgeS: fresh ? fresh.age / simUnitsPerS : NaN,
     };
 }
 
@@ -143,6 +248,18 @@ export const TARGETS = Object.freeze([
       source: 'UV ribbons are a few Mm wide at AIA 1600 Å resolution (Fletcher et al. 2011).', verified: UNVERIFIED },
     { id: 'zip', key: 'zipSpeedKms', label: 'Brightening along the PIL (zipper)', unit: 'km/s', lo: 10, hi: 200, scale: 'log', weight: 1,
       source: 'Ribbon elongation at tens to ~100 km/s (Qiu et al. 2017, ApJ 838, 17).', verified: UNVERIFIED },
+    { id: 'j_hook', key: 'hookTurnDeg', label: 'Ribbon end: how far the hook turns', unit: '°', lo: 90, hi: 270, scale: 'lin', tol: 90, weight: 1.5,
+      source: 'Ribbons of eruptive flares are J-shaped, each hook wrapping a leg of the erupting rope (Aulanier, Janvier & Schmieder 2012, A&A 543, A110; Janvier et al. 2014, ApJ 788, 60). The range is OUR encoding of "a hook" — a quarter turn to three quarters — not a published measurement.', verified: UNVERIFIED },
+    { id: 'j_double', key: 'hookDoubleJ', label: 'Double-J: hooks at opposite ends, curling outward', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1,
+      source: 'The two J\'s are a 180° rotation of each other; the hooks open away from the inversion line (Aulanier et al. 2012).', verified: UNVERIFIED },
+    { id: 'j_size', key: 'hookWidthOverLength', label: 'Hook width ÷ ribbon length', unit: '', lo: 0.08, hi: 0.5, scale: 'log', weight: 0.5,
+      source: 'A hook is a minor part of its ribbon (Janvier et al. 2014). The range is our encoding of that, not a published measurement.', verified: UNVERIFIED },
+    { id: 'cusp_new', key: 'cuspIndexNew', label: 'Just-formed loop: top width ÷ a round arc\'s', unit: '', lo: 0.30, hi: 0.75, scale: 'lin', tol: 0.25, weight: 1.5,
+      source: 'Newly reconnected loops are cusp-shaped at the top (Tsuneta et al. 1992, PASJ 44, L63; Tsuneta 1996, ApJ 456, 840). The range is OUR encoding of "pointed" — clearly narrower near the top than a round arc on the same feet (which reads 1) — not a published measurement.', verified: UNVERIFIED },
+    { id: 'round_old', key: 'cuspIndexRelaxed', label: 'Relaxed loop (30 min): top width ÷ a round arc\'s', unit: '', lo: 0.90, hi: 1.10, scale: 'lin', tol: 0.25, weight: 1,
+      source: 'Cooled post-flare loops are round (Forbes & Acton 1996, ApJ 459, 330: cusp-to-round relaxation). Range: our encoding of "round".', verified: UNVERIFIED },
+    { id: 'shrinkage', key: 'loopShrinkage', label: 'Loop shrinkage, formation → 30 min', unit: '', lo: 0.15, hi: 0.40, scale: 'lin', tol: 0.15, weight: 1,
+      source: 'Loops shrink by 20 % and 32 % in the two flares measured (Forbes & Acton 1996).', verified: UNVERIFIED },
     { id: 'class_order', key: 'classOrdered', label: 'C < M < X in length, separation and height', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1,
       source: 'Ribbon area, reconnected flux and flare size rise with GOES class (Kazachenko et al. 2017).', verified: UNVERIFIED },
 ]);
@@ -152,33 +269,34 @@ export const TARGETS = Object.freeze([
  * to measure yet. Each becomes a TARGETS row when the kernel can produce it.
  */
 export const OPEN_TARGETS = Object.freeze([
-    { id: 'j_hooks', what: 'Ribbons end in J-shaped hooks around the erupting flux rope\'s feet; ours are straight.',
-      source: 'Aulanier, Janvier & Schmieder 2012, A&A 543, A110; Janvier et al. 2014, ApJ 788, 60.' },
-    { id: 'cusp', what: 'The newest, hottest loops are cusp-shaped at the top; every loop here is a sine-lifted arc.',
-      source: 'Tsuneta et al. 1992, PASJ 44, L63 (the Yohkoh cusp).' },
     { id: 'asymmetry', what: 'The two ribbons move at different speeds — the one in the stronger field moves less; ours are mirror images.',
       source: 'Reconnected flux balance: v·B is what matches, not v (Fletcher et al. 2011).' },
     { id: 'kernels', what: 'Hard X-ray footpoint kernels run along the ribbons during the impulsive phase; the page has two fixed kernels.',
       source: 'Krucker, Hurford & Lin 2003, ApJ 595, L103; Qiu et al. 2017.' },
     { id: 'downflows', what: 'Supra-arcade downflows above the loop tops in the hot channels are not drawn.',
       source: 'McKenzie & Hudson 1999, ApJ 519, L93.' },
-    { id: 'loop_shrinkage', what: 'A newly reconnected loop retracts as it relaxes; a loop here keeps the height it formed at.',
-      source: 'Forbes & Acton 1996, ApJ 459, 330.' },
 ]);
 
-/** 0–1: 1 inside [lo, hi], falling linearly to 0 one range-width outside it (in log space for scale 'log'). */
-export function scoreValue(v, { lo, hi, scale = 'lin' }) {
+/**
+ * 0–1: 1 inside [lo, hi], falling linearly to 0 one range-width outside it
+ * (in log space for scale 'log'). A row may set `tol` — the distance outside
+ * the range at which the score reaches 0 (a ratio's log for scale 'log') — and
+ * the rows that ask "is this feature there at all" do, so that a model
+ * WITHOUT the feature scores 0 on it, not half marks for being a range-width
+ * away (a straight ribbon scored 0.50 on the hook row before this).
+ */
+export function scoreValue(v, { lo, hi, scale = 'lin', tol = null }) {
     if (!Number.isFinite(v)) return 0;
     if (v >= lo && v <= hi) return 1;
     if (scale === 'log') {
         if (!(v > 0) || !(lo > 0)) return 0;
-        const tol = Math.max(Math.log(hi / lo), Math.LN2);            // at least a factor of two of grace
+        const w = tol ?? Math.max(Math.log(hi / lo), Math.LN2);       // at least a factor of two of grace
         const d = v < lo ? Math.log(lo / v) : Math.log(v / hi);
-        return Math.max(0, 1 - d / tol);
+        return Math.max(0, 1 - d / w);
     }
-    const tol = Math.max(hi - lo, 1e-9 + 0.25 * Math.abs(hi));        // a point range still has a slope
+    const w = tol ?? Math.max(hi - lo, 1e-9 + 0.25 * Math.abs(hi));    // a point range still has a slope
     const d = v < lo ? lo - v : v - hi;
-    return Math.max(0, 1 - d / tol);
+    return Math.max(0, 1 - d / w);
 }
 
 /** Score a model. `score` is the weighted mean of the rows' scores. */

@@ -2480,6 +2480,8 @@ const uniforms = {
     u_flare_wid:         { value: 0.005 },   // ribbon width (Gaussian scale), rad
     u_flare_alongVar:    { value: 0.01 },    // along-PIL envelope variance σ², rad²
     u_flare_decay:       { value: 0.0 },     // ribbon brightness envelope, 0..1
+    u_flare_hook:        { value: new THREE.Vector3(0, 0, 0) },   // J hook: (straight-part end, radius, sweep), rad
+    u_flare_chi:         { value: 1.0 },     // the flare's handedness (which ribbon ends hook, and the shear's sense)
     // THE ONE ROTATION ACCUMULATOR. Equatorial angle (radians) the sim frame
     // has turned since page load, advanced in animate() at
     // FG.SIM_ROT_RATE · u_rot per sim unit and mirrored into `solarRotAngle`.
@@ -2951,6 +2953,8 @@ const sunFS = /* glsl */`
     uniform float u_flare_wid;       // ribbon width, Gaussian scale (radians)
     uniform float u_flare_alongVar;  // along-PIL envelope variance (radians squared)
     uniform float u_flare_decay;     // ribbon brightness envelope, 0..1
+    uniform vec3  u_flare_hook;      // the ribbons' J hook: (where the straight part ends, arc radius, sweep) — radians
+    uniform float u_flare_chi;       // +1 / -1: which way the flare is handed (js/flare-geometry.js helicityChirality)
     uniform float u_rotAngle;        // equatorial rotation of the sim frame since load (radians) — THE accumulator
 
     // Phase 4.4 — per-AR sunspot slots. xyz = rotated unit-sphere AR
@@ -2972,6 +2976,8 @@ const sunFS = /* glsl */`
     // to the polyline encoded in row 'rowI' of t_flare_ribbons. Each
     // segment treated as a 3D chord; cheap and visually indistinguishable
     // from a true great-circle arc at the small angular widths we use.
+    // Distance to / arc length along a J-shaped ribbon — the kernel's own function (js/flare-geometry.js ribbonJ).
+    ${FG.RIBBON_J_GLSL}
     float ribbonDist(vec3 p, float rowI) {
         float minD = 1e6;
         int N = int(u_flare_ribbons_count);
@@ -3810,11 +3816,19 @@ const sunFS = /* glsl */`
                 float along  = dot(pF, pilAx);
                 float across = dot(pF, loopAx);
                 float alongVar = u_flare_alongVar;
-                float lonEnv = exp(-along * along / alongVar);
                 float sep    = u_flare_sep;
                 float rWid   = u_flare_wid;
-                rib1 = exp(-pow((across - sep) / rWid, 2.0)) * lonEnv;
-                rib2 = exp(-pow((across + sep) / rWid, 2.0)) * lonEnv;
+                // Each ribbon is a J: straight along the PIL, then a hook that turns away from it. The two are a
+                // 180-degree rotation of each other; u_flare_chi (the region's handedness) picks which ends hook.
+                // .x is the distance to the curve, .y the arc length along it — the envelope dims the hook as it
+                // does the ribbon's end. A sweep of 0 is the straight pair exactly.
+                vec2 j1 = ribbonJ( u_flare_chi * along,  across, sep, u_flare_hook.x, u_flare_hook.y, u_flare_hook.z);
+                vec2 j2 = ribbonJ(-u_flare_chi * along, -across, sep, u_flare_hook.x, u_flare_hook.y, u_flare_hook.z);
+                float q1 = j1.x / rWid, q2 = j2.x / rWid;
+                // The tangent-plane coordinates repeat on the far hemisphere; a ribbon is on the flare's own side.
+                float nearSide = smoothstep(0.0, 0.3, dot(pF, cross(fEast, fNorth)));
+                rib1 = exp(-q1 * q1) * exp(-j1.y * j1.y / alongVar) * nearSide;
+                rib2 = exp(-q2 * q2) * exp(-j2.y * j2.y / alongVar) * nearSide;
             }
             float ribMask = (rib1 + rib2) * fDecay * 1.25;   // brighter, more defined two-ribbon arcs
             // Colour: UV white at onset → Hα red as it cools
@@ -7394,7 +7408,7 @@ function triggerPositionFlare(lat_deg, lon_deg, cls) {
 //       live-region / flare-list entry parsed at load).
 //   Returns { latDeg, lonDeg0 } for triggerPositionFlare / flyToRegion.
 const _Z_UP = new THREE.Vector3(0, 0, 1);
-const flareSite = { latRad: 0, lonRad0: 0, pilAngle: 0, cls: 'M', complex: false, set: false };
+const flareSite = { latRad: 0, lonRad0: 0, pilAngle: 0, cls: 'M', complex: false, chirality: 1, set: false };
 // ── THE FLARE'S SHAPE IS A MODEL (js/flare-geometry.js makeFlareModel) ──────
 // Every shape number on this page — the shader's ribbons, the 3D arcade, the
 // flare shot's framing — comes from `flareModel`. It is the shipped set unless
@@ -7410,6 +7424,9 @@ function _syncFlareShape() {
     uniforms.u_flare_wid.value      = flareModel.ribbonWidth(t);
     uniforms.u_flare_alongVar.value = Math.pow(flareModel.ribbonAlongSigma(t, cls), 2);
     uniforms.u_flare_decay.value    = flareModel.ribbonDecay(t);
+    const hk = flareModel.ribbonHook(t, cls);
+    uniforms.u_flare_hook.value.set(hk.s0, hk.rho, hk.sweep);
+    uniforms.u_flare_chi.value      = flareSite.chirality;
 }
 /** Swap the shape model: null → shipped, 'v1' / 'v2' → a named set, an object → overrides on the shipped set. */
 function setFlareModel(spec) {
@@ -7473,6 +7490,8 @@ function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {
     flareSite.latRad  = latRad;
     flareSite.lonRad0 = epoch ? lonRad : FG.epochLonFor(lonRad, solarRotAngle, latRad);
     flareSite.pilAngle = FG.pilAngleRad(latRad);
+    // Which way the flare is handed — the hemispheric helicity rule, a PRIOR like the PIL angle above.
+    flareSite.chirality = FG.helicityChirality(latRad);
     // A new site with a class is a new event: restart the cooling track.
     if (cls) _startFlareClock(cls);
     if (cls) flareSite.cls = String(cls)[0].toUpperCase();
@@ -7484,7 +7503,7 @@ function setFlareSite(latRad, lonRad, { epoch = false, cls, complex, pairs } = {
     _syncFlareShape();
     flareArcade.setSite({
         latRad, lonRad0: flareSite.lonRad0, pilAngle: flareSite.pilAngle,
-        cls: flareSite.cls, complex: flareSite.complex, pairs: pairs ?? null,
+        cls: flareSite.cls, complex: flareSite.complex, chirality: flareSite.chirality, pairs: pairs ?? null,
     });
     return { latDeg: latRad * 180 / Math.PI, lonDeg0: flareSite.lonRad0 * 180 / Math.PI };
 }

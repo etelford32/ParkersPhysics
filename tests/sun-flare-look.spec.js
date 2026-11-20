@@ -21,6 +21,14 @@
  *      that are clipped white is bounded. NEGATIVE CONTROL: the strand gain
  *      this page shipped with for a day (2.2) clips several times as many.
  *
+ *   3. THE RIBBONS ARE J-SHAPED. With the arcade hidden, the flare's surface
+ *      light (flares on − flares off) is sampled along each ribbon's hook, as
+ *      the model's own centreline projects it, and at the MIRRORED positions
+ *      — where the hooks would be for the opposite handedness, and where the
+ *      site-centred glows contribute exactly as much. Light at the hooks,
+ *      none at the mirror. NEGATIVE CONTROL: under the v1 laws (straight
+ *      ribbons) the two are equal.
+ *
  * FLARE_SHOTS=<dir> also writes every frame it measured (model × age) and a
  * measurements.json — the pictures to judge a change by eye, taken the same
  * way every time. Software GL: this gates placement and colour, not beauty.
@@ -37,6 +45,7 @@ const MANIFEST = JSON.parse(readFileSync(join(FIXTURE_DIR, 'manifest.json'), 'ut
 const SHOTS = process.env.FLARE_SHOTS || null;
 const SITE = { cls: 'X2.0', latDeg: 12, lonDeg: 30 };
 const HOT_T = 120, COOL_T = 630;          // sim units: 5.7 min and 30 min after onset
+const EARLY_T = 40;                       // 1.9 min: the ribbons are at their brightest
 
 async function routeFeeds(page) {
     await page.route('**/api/solar/aia*', (route) => {
@@ -136,7 +145,7 @@ function projectedBox(page, modelSpec) {
         const s = window.__sun, T = s.THREE, FG = s.FG;
         const model = modelSpec === 'active' ? s.flareModel : FG.makeFlareModel(null, modelSpec === 'v1' ? FG.FLARE_SHAPE_V1 : FG.FLARE_SHAPE_V2);
         const site = s.flareArcade.site, t = s.flareGeometry.arcade.builtT;
-        const loops = model.arcadeShells({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle, t, cls: site.cls, n, complex: site.complex, samples: 48 })
+        const loops = model.arcadeShells({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle, t, cls: site.cls, n, complex: site.complex, chirality: site.chirality, samples: 48 })
             .filter((L) => L.alpha > 0.5);
         const el = s.renderer.domElement, r = el.getBoundingClientRect(), M = s.flareArcade.group.matrixWorld;
         let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
@@ -148,6 +157,46 @@ function projectedBox(page, modelSpec) {
         }
         return { x0, x1, y0, y1, w: x1 - x0, h: y1 - y0, loops: loops.length, model: model.id, t };
     }, { modelSpec, n: 23 });
+}
+
+/**
+ * Screen positions along both ribbons' HOOKS as the v2 model places them, and of the same points mirrored
+ * along the inversion line (a → −a) — equally far from the flare site, on the un-hooked ends.
+ */
+function hookProbes(page, t) {
+    return page.evaluate(({ t }) => {
+        const s = window.__sun, T = s.THREE, FG = s.FG;
+        const model = FG.makeFlareModel(null, FG.FLARE_SHAPE_V2);
+        const site = s.flareArcade.site;
+        const rc = model.ribbonCurves({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle, t, cls: site.cls, chirality: site.chirality, samples: 60 });
+        const tf = FG.tangentFrame(site.latRad, site.lonRad0, site.pilAngle);
+        const el = s.renderer.domElement, r = el.getBoundingClientRect(), M = s.flareArcade.group.matrixWorld, v = new T.Vector3();
+        const screen = (a, c) => {
+            const z = Math.sqrt(Math.max(0, 1 - a * a - c * c));
+            v.set(tf.pilAxis[0] * a + tf.loopAxis[0] * c + tf.radial[0] * z, tf.pilAxis[1] * a + tf.loopAxis[1] * c + tf.radial[1] * z, tf.pilAxis[2] * a + tf.loopAxis[2] * c + tf.radial[2] * z)
+                .applyMatrix4(M).project(s.camera);
+            return [Math.round(r.left + (v.x * 0.5 + 0.5) * r.width), Math.round(r.top + (-v.y * 0.5 + 0.5) * r.height)];
+        };
+        const hook = [], mirror = [];
+        for (const side of [rc.plus, rc.minus]) {
+            // The part of the hook that has clearly left the straight ribbon: beyond a third of the arc's reach.
+            const out = side.filter((q) => Math.abs(q.c) > rc.sep + 0.6 * rc.hook.rho);
+            for (let i = 0; i < out.length; i += 3) { hook.push(screen(out[i].a, out[i].c)); mirror.push(screen(-out[i].a, out[i].c)); }
+        }
+        return { hook, mirror, hookDef: rc.hook, sep: rc.sep };
+    }, { t });
+}
+
+/** Mean luminance the flare's surface layer added (on − off) over 3×3 patches at the given pixels. */
+function addedAt(on, off, pts) {
+    const { width: W, height: H } = on;
+    let sum = 0, n = 0;
+    for (const [x0, y0] of pts) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const x = x0 + dx, y = y0 + dy; if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        const i = (y * W + x) * 4;
+        sum += 0.2126 * (on.rgba[i] - off.rgba[i]) + 0.7152 * (on.rgba[i + 1] - off.rgba[i + 1]) + 0.0722 * (on.rgba[i + 2] - off.rgba[i + 2]); n++;
+    }
+    return n ? sum / n : NaN;
 }
 
 /** Placement tolerance for a projected box, px. */
@@ -249,6 +298,31 @@ test.describe('sun.html: the flare as drawn', () => {
         expect(before.pixels.white, 'the hot arcade is not a white slab').toBeLessThan(0.45);
         expect(cool.pixels.white, 'the cooled arcade keeps its colour').toBeLessThan(0.20);
         expect(loud.pixels.white, 'gain 2.2 clips far more of it').toBeGreaterThan(before.pixels.white + 0.10);
+
+        // ── 3. THE RIBBONS ARE J-SHAPED ─────────────────────────────────────
+        /** The flare's SURFACE light at one age under one model: arcade hidden, flares shown minus flares off. */
+        async function surfaceAt(t, model, tag) {
+            await page.evaluate(({ t, model }) => { const s = window.__sun; s.setFlareModel(model); s.holdFlareAt(t); s.flareArcade.setVisible(false); s.uniforms.u_showFlares.value = 1; }, { t, model });
+            await page.waitForFunction((t) => Math.abs(window.__sun.uniforms.u_flare_t.value - t) < 1e-6 && !window.__sun.flareGeometry.arcade.active, t, { timeout: 30_000 });
+            const on = await grab(page);
+            if (SHOTS) writeFileSync(join(SHOTS, `${tag}.png`), await page.screenshot());
+            await page.evaluate(() => { window.__sun.uniforms.u_showFlares.value = 0; });
+            const off = await grab(page);
+            await page.evaluate(() => { window.__sun.uniforms.u_showFlares.value = 1; });
+            const pr = await hookProbes(page, t);
+            return { hook: addedAt(on, off, pr.hook), mirror: addedAt(on, off, pr.mirror), probes: pr.hook.length, sweepDeg: pr.hookDef.sweep * 180 / Math.PI };
+        }
+        const j2 = await surfaceAt(EARLY_T, null, 'v2-ribbons');
+        const j1 = await surfaceAt(EARLY_T, 'v1', 'v1-ribbons');
+        await page.evaluate(() => { const s = window.__sun; s.setFlareModel(null); s.flareArcade.setVisible(true); });
+        out.hooks = { v2: j2, v1: j1 };
+        console.log('flare look, J hooks (light added at the hooks vs at their mirror):', JSON.stringify({ v2: j2, v1: j1 }));
+        expect(j2.probes, 'the model has hook points to probe').toBeGreaterThan(12);
+        expect(j2.hook, 'the hooks are lit').toBeGreaterThan(12);
+        expect(j2.hook, 'and the mirrored ends are not: the ribbons are J-shaped, one hook each').toBeGreaterThan(3 * Math.max(j2.mirror, 1));
+        // NEGATIVE CONTROL: straight ribbons light the two sets of points alike (the site-centred glows are symmetric).
+        expect(Math.abs(j1.hook - j1.mirror), 'under v1 there is no hook: the same light at both').toBeLessThan(0.25 * j2.hook);
+        expect(j1.hook, 'and it is the faint symmetric glow, not a ribbon').toBeLessThan(0.5 * j2.hook);
 
         if (SHOTS) writeFileSync(join(SHOTS, 'measurements.json'), JSON.stringify(out, null, 1));
         expect(errs, errs.join('\n')).toEqual([]);

@@ -20,7 +20,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as FG from '../js/flare-geometry.js';
 import {
-    RSUN_MM, EPOCH, TARGETS, OPEN_TARGETS, measure, scoreValue, scorecard, compareScorecards, baselineOf, formatScorecard,
+    RSUN_MM, EPOCH, TARGETS, OPEN_TARGETS, MEASURE_SITE, measure, scoreValue, scorecard, compareScorecards, baselineOf, formatScorecard,
+    apexAngleDeg, cuspIndex, turningDeg,
 } from '../js/flare-realism.js';
 import { SIM_UNITS_PER_S } from '../js/sun-flare-director.js';
 
@@ -46,6 +47,11 @@ ok('scoreValue: 1 inside the range, falling monotonically outside it, 0 a range-
     for (let v = 20; v <= 80; v += 2) { const s = scoreValue(v, log); assert.ok(s <= prev + 1e-12, `not monotone at ${v}`); prev = s; }
     for (const bad of [NaN, Infinity, -Infinity, undefined]) assert.equal(scoreValue(bad, log), 0, `${bad} scores 0`);
     assert.equal(scoreValue(0, log), 0); assert.equal(scoreValue(-3, log), 0);
+    // A row may set its own tolerance: "is the feature there at all" rows score 0 when it is absent.
+    const hook = { lo: 90, hi: 270, scale: 'lin', tol: 90 };
+    assert.equal(scoreValue(0, hook), 0, 'a straight ribbon earns nothing on the hook row');
+    assert.ok(near(scoreValue(45, hook), 0.5) && scoreValue(90, hook) === 1);
+    assert.ok(near(scoreValue(0, { lo: 90, hi: 270, scale: 'lin' }), 0.5), 'without tol it would have earned half marks');
     // A point range (lo = hi) still has a slope, so a near miss is not a cliff.
     assert.equal(scoreValue(1, { lo: 1, hi: 1 }), 1); assert.ok(scoreValue(0.9, { lo: 1, hi: 1 }) > 0 && scoreValue(0, { lo: 1, hi: 1 }) === 0);
 });
@@ -94,6 +100,42 @@ ok('measure(): every number re-derived from the model\'s own laws, in physical u
     assert.ok(near(measure(M, { simUnitsPerS: 0.7 }).sepSpeedImpulsiveKms / 1, (M.ribbonSeparation(84, 'X') - M.ribbonSeparation(0, 'X')) * RSUN_MM * 1000 / 120, 1e-9));
 });
 
+ok('shape measurements: a known triangle reads 90°, a round loop ~140°; a hook\'s turn is its sweep; shrinkage is its closed form', () => {
+    // apexAngleDeg on shapes with a known answer, built as loops over a 0.02 rad chord.
+    const mk = (profile) => { const n = 400, pts = []; for (let i = 0; i <= n; i++) { const u = i / n, x = (u - 0.5) * 0.04; pts.push([x, 0, 0].map((v, k) => k === 0 ? x : 0)); pts[i] = [(1 + 0.02 * profile(u)) * Math.sin(x), 0, (1 + 0.02 * profile(u)) * Math.cos(x)]; } return pts; };
+    assert.ok(Math.abs(apexAngleDeg(mk((u) => 1 - Math.abs(2 * u - 1))) - 90) < 1.5, 'a tent as tall as its half-span is a right angle at the top');
+    const round = apexAngleDeg(mk((u) => Math.sin(Math.PI * u)));
+    assert.ok(round > 132 && round < 142, `a sine-lifted loop as tall as its half-span reads ${round.toFixed(1)}°`);
+    // cuspIndex: 1 for a round arc WHATEVER its height; below 1 for a pointed one; a tent is 0.15/0.353.
+    const tall = (k, profile) => { const n = 400, pts = []; for (let i = 0; i <= n; i++) { const u = i / n, x = (u - 0.5) * 0.04; const r = 1 + k * 0.02 * profile(u); pts.push([r * Math.sin(x), 0, r * Math.cos(x)]); } return pts; };
+    // (to within the radial lift's own spreading: a point lifted by h sits (1 + h)× further out, 5 % at 0.06 R☉)
+    for (const k of [0.5, 1, 3]) { const ci = cuspIndex(tall(k, (u) => Math.sin(Math.PI * u))); assert.ok(Math.abs(ci - 1) < 0.06, `a round arc ${k}× as tall as its half-span still reads 1 (${ci.toFixed(3)})`); }
+    assert.ok(Math.abs(cuspIndex(tall(1, (u) => 1 - Math.abs(2 * u - 1))) - 0.15 / (1 - 2 * Math.asin(0.85) / Math.PI)) < 0.02, 'a tent');
+    // The top ANGLE is not such a measure: the same round arc reads "pointed" once it is tall. That is why it is not the row.
+    assert.ok(apexAngleDeg(tall(3, (u) => Math.sin(Math.PI * u))) < 100, 'a tall round arc has a sharp top angle');
+    // turningDeg: a straight line turns 0; a quarter circle turns 90.
+    assert.equal(turningDeg([{ a: 0, c: 1 }, { a: 1, c: 1 }, { a: 2, c: 1 }]), 0);
+    const q = []; for (let i = 0; i <= 200; i++) { const f = (Math.PI / 2) * i / 200; q.push({ a: Math.sin(f), c: 1 - Math.cos(f) }); }
+    assert.ok(Math.abs(turningDeg(q) - 90) < 0.5);
+    // On the model: the hook's measured turn is its sweep (less one polyline step), its width is rho·(1 − cos sweep).
+    const m = measure(M), H = M.params.hook, C = M.params.cusp;
+    assert.ok(Math.abs(m.hookTurnDeg - H.sweepDeg) < 1.5, `hook turn ${m.hookTurnDeg}`);
+    const hk = M.ribbonHook(sim(EPOCH.mid), 'X');
+    assert.ok(near(m.hookWidthOverLength, hk.rho * (1 - Math.cos(hk.sweep)) / (2 * M.ribbonLength0('X')), 1e-3));
+    assert.equal(m.hookDoubleJ, 1);
+    // Shrinkage: the same loop at its two ages — 1 − factor(old)/factor(new).
+    assert.ok(m.freshLoopAgeS > 0 && m.freshLoopAgeS < 30, `the "just-formed" loop is ${m.freshLoopAgeS.toFixed(1)} s old`);
+    const f = (ageS) => 1 + C.shrink * Math.exp(-sim(ageS) / C.relaxT);
+    assert.ok(m.loopShrinkage > 0.15 && m.loopShrinkage <= 1 - 1 / f(0) + 1e-9, 'bounded by the shrink parameter');
+    assert.ok(m.cuspIndexNew < 0.75 && Math.abs(m.cuspIndexRelaxed - 1) < 0.05, `a new loop is pointed (${m.cuspIndexNew.toFixed(2)}), a relaxed one round (${m.cuspIndexRelaxed.toFixed(2)})`);
+    // v1 has neither: straight ribbons, round loops that keep their height.
+    const a = measure(V1);
+    assert.equal(a.hookTurnDeg, 0); assert.equal(a.hookDoubleJ, 0); assert.equal(a.hookWidthOverLength, 0);
+    assert.ok(near(a.loopShrinkage, 0, 1e-12) && a.cuspIndexNew > 0.97 && a.cuspIndexNew < 1.12 && a.cuspIndexRelaxed > 0.97 && a.cuspIndexRelaxed < 1.12, `v1 loops are round at every age (${a.cuspIndexNew.toFixed(3)}, ${a.cuspIndexRelaxed.toFixed(3)} — above 1 by the radial lift's spreading on a tall loop)`);
+    assert.ok(a.apexAngleNewDeg < 100, 'although their top ANGLE is sharp (they are tall) — the confound the index removes');
+    assert.ok(MEASURE_SITE.latRad > 0);
+});
+
 ok('every scored row moves when some parameter moves (no decorative rows)', () => {
     const base = measure(M);
     const leaves = [];
@@ -113,6 +155,7 @@ ok('every scored row moves when some parameter moves (no decorative rows)', () =
     // …and the parameters that matter are the ones you would expect.
     assert.ok(moved.get('shear_onset').includes('shear.onsetDeg') && !moved.get('shear_onset').includes('ribbon.sep0'));
     assert.ok(moved.get('zip').includes('arcade.zipT') && moved.get('sep_decel').includes('ribbon.sepTau'));
+    assert.ok(moved.get('j_hook').includes('hook.sweepDeg') && moved.get('cusp_new').includes('cusp.onset') && moved.get('shrinkage').includes('cusp.shrink'));
 });
 
 ok('scorecard: a weighted mean of the rows; compare and baseline records agree with it', () => {
@@ -152,7 +195,7 @@ ok('NEGATIVE CONTROL: the laws shipped until 2026-11-21 score lower, on the rows
     const v1 = scorecard(V1), now = scorecard(M);
     assert.ok(v1.score < now.score - 0.1, `v1 ${(v1.score * 100).toFixed(1)} vs shipped ${(now.score * 100).toFixed(1)}`);
     const row = (c, id) => c.metrics.find((x) => x.id === id);
-    for (const id of ['shear_onset', 'shear_late', 'loop_aspect', 'sep_decel', 'sep_onset', 'apex_onset', 'class_order'])
+    for (const id of ['shear_onset', 'shear_late', 'loop_aspect', 'sep_decel', 'sep_onset', 'apex_onset', 'class_order', 'j_hook', 'j_double', 'j_size', 'cusp_new', 'shrinkage'])
         assert.ok(!row(v1, id).pass, `v1 should miss "${id}" (it reads ${row(v1, id).value})`);
     // The measured values that are the reason for each change, pinned.
     assert.ok(near(row(v1, 'shear_onset').value, 29.68, 0.01), 'v1 loops started 30° sheared — the surveys say 50–80°');

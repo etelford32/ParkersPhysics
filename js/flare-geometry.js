@@ -310,6 +310,18 @@ export const FLARE_SHAPE_V2 = deepFreeze({
         timeJitter: 0.35,   // formation-time scatter, fraction of the gap to the next generation
         maxGenerations: 7,
     },
+    /**
+     * J-SHAPED RIBBON ENDS. Each ribbon runs straight along the PIL to `at`·σ and then turns AWAY from the
+     * inversion line on an arc of radius `radius`·σ through `sweepDeg` — the hook that wraps the erupting
+     * rope's foot. The two hooks are at OPPOSITE ends (a 180° rotation of each other). sweepDeg 0 = straight.
+     */
+    hook: { at: 0.75, radius: 0.18, sweepDeg: 170 },
+    /**
+     * CUSP-SHAPED NEW LOOPS THAT RELAX. A loop's lift profile is (1 − c)·sin(πu) + c·(1 − |2u−1|^power):
+     * c = `onset` when it forms (a pointed top), decaying with e-folding `relaxT` sim units to the round
+     * arc; while it relaxes it also SHRINKS — it forms (1 + `shrink`) × its relaxed height.
+     */
+    cusp: { onset: 0.45, power: 0.7, relaxT: 120, shrink: 0.28 },
     plume: { speed: 0.06, reach: 2.4 },
 });
 
@@ -325,6 +337,8 @@ export const FLARE_SHAPE_V1 = deepFreeze({
     height: { a: 1.2, b: 1.4, onChord: 0 },
     arcade: { spanSigma: 0.6, formT0: 30, formGrowth: 1.5, zipT: 45, zipCore: 0.22, fadeIn: 9,
               alongJitter: 0.38, heightJitter: 0.14, timeJitter: 0.35, maxGenerations: 7 },
+    hook: { at: 0.75, radius: 0.18, sweepDeg: 0 },            // straight ribbons
+    cusp: { onset: 0, power: 0.7, relaxT: 120, shrink: 0 },   // round loops that keep their height
     plume: { speed: 0.06, reach: 2.4 },
 });
 
@@ -362,18 +376,90 @@ export function arcadeSeed(latRad, lonRad) {
     return (Math.imul(Math.round(latRad / DEG) + 91, 73856093) ^ Math.imul(Math.round(lonRad / DEG) + 181, 19349663)) >>> 0;
 }
 
-/** One loop: a great-circle arc between two feet, lifted by a sine so the apex sits over their midpoint. */
-function liftedLoop(fa, fb, h, samples) {
+/**
+ * One loop: a great-circle arc between two feet, lifted by `profile(u)` (0 at
+ * the feet, 1 at the apex) so the apex sits over their midpoint. The default
+ * profile is the round one, sin(πu).
+ */
+function liftedLoop(fa, fb, h, samples, profile = null) {
     const cosw = Math.max(-1, Math.min(1, dot(fa, fb)));
     const w = Math.acos(cosw), sw = Math.sin(w);
     const pts = [];
     for (let j = 0; j <= samples; j++) {
         const u = j / samples;
         const p = sw < 1e-9 ? fa : add(scale(fa, Math.sin((1 - u) * w) / sw), scale(fb, Math.sin(u * w) / sw));
-        pts.push(scale(unit(p), 1 + h * Math.sin(Math.PI * u)));
+        pts.push(scale(unit(p), 1 + h * (profile ? profile(u) : Math.sin(Math.PI * u))));
     }
     return pts;
 }
+
+/**
+ * WHICH WAY A FLARE IS HANDED — a prior, like Joy's law. χ = +1 or −1 sets two
+ * things together, because one quantity (the sign of the region's magnetic
+ * helicity) sets both: the sense of the arcade's shear, and which end of each
+ * ribbon carries its hook. Helicity is predominantly NEGATIVE in the northern
+ * hemisphere and positive in the south (Pevtsov, Canfield & Metcalf 1995), a
+ * rule that holds for roughly two regions in three — so this is a prior, and
+ * a consumer with an observed chirality (a filament's, a sigmoid's) should
+ * pass that instead.
+ *
+ * The geometric sense, derived here and NOT yet checked against a figure: in
+ * the (along-PIL, across-PIL) frame seen from above, χ = +1 puts the hook of
+ * the +across ribbon at its +along end and shifts that ribbon's loop feet
+ * toward +along (sheared loops lie nearly parallel to the erupting rope, whose
+ * feet are inside the hooks). The rope then runs from the lower-left hook to
+ * the upper-right one — an inverse S, i.e. negative helicity, i.e. NORTH.
+ */
+export function helicityChirality(latRad) { return latRad >= 0 ? 1 : -1; }
+
+/**
+ * Distance to, and position along, a J-shaped ribbon — in the flare's tangent
+ * plane, `a` along the PIL and `c` across it. The ribbon is the line c = sep
+ * for a ≤ s0, then an arc of radius rho that turns through `sweep` radians
+ * away from the inversion line. Returns [d, s]: d the distance to the curve,
+ * s the arc length of the nearest point measured from a = 0 (the brightness
+ * envelope is a function of s, so the hook dims as the ribbon's end does).
+ * sweep ≤ 0 is the straight ribbon EXACTLY: [|c − sep|, a].
+ *
+ * This is the +across ribbon with its hook at the +along end. The other
+ * ribbon is the same curve turned 180°: ribbonJ(−a, −c, …). The opposite
+ * handedness is ribbonJ(−a, c, …) and ribbonJ(a, −c, …).
+ *
+ * RIBBON_J_GLSL below is the SAME function for the shader; the node gate
+ * transliterates the GLSL back to JS and runs it against this one, and
+ * checks both against brute force on the polyline. Change them together.
+ */
+export function ribbonJ(a, c, sep, s0, rho, sweep) {
+    if (sweep <= 0 || rho <= 0) return [Math.abs(c - sep), a];
+    const dLine = a <= s0 ? Math.abs(c - sep) : Math.hypot(a - s0, c - sep);
+    const da = a - s0, dc = c - sep - rho;
+    let phi = (Math.abs(da) + Math.abs(dc) < 1e-9) ? 0 : Math.atan2(da, -dc);
+    if (phi < 0) phi += TWO_PI;
+    const dEnd = Math.hypot(da - rho * Math.sin(sweep), dc + rho * Math.cos(sweep));
+    const dStart = Math.hypot(da, dc + rho);
+    const onArc = phi <= sweep;
+    const dArc = onArc ? Math.abs(Math.hypot(da, dc) - rho) : Math.min(dEnd, dStart);
+    const sArc = s0 + rho * (onArc ? phi : (dEnd < dStart ? sweep : 0));
+    return dArc < dLine ? [dArc, sArc] : [dLine, Math.min(a, s0)];
+}
+
+/** GLSL twin of ribbonJ (returns vec2(d, s)). Scalar-only on purpose: the gate transliterates it. No backticks. */
+export const RIBBON_J_GLSL = /* glsl */`
+    vec2 ribbonJ(float a, float c, float sep, float s0, float rho, float sweep) {
+        if (sweep <= 0.0 || rho <= 0.0) return vec2(abs(c - sep), a);
+        float dLine = a <= s0 ? abs(c - sep) : length(vec2(a - s0, c - sep));
+        float da = a - s0;
+        float dc = c - sep - rho;
+        float phi = (abs(da) + abs(dc) < 1e-9) ? 0.0 : atan(da, -dc);
+        if (phi < 0.0) phi += 6.283185307179586;
+        float dEnd = length(vec2(da - rho * sin(sweep), dc + rho * cos(sweep)));
+        float dStart = length(vec2(da, dc + rho));
+        bool onArc = phi <= sweep;
+        float dArc = onArc ? abs(length(vec2(da, dc)) - rho) : min(dEnd, dStart);
+        float sArc = s0 + rho * (onArc ? phi : (dEnd < dStart ? sweep : 0.0));
+        return dArc < dLine ? vec2(dArc, sArc) : vec2(dLine, min(a, s0));
+    }
+`;
 
 /**
  * Build a flare-shape model from a parameter set. `overrides` is deep-merged
@@ -382,7 +468,7 @@ function liftedLoop(fa, fb, h, samples) {
  */
 export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
     const P = deepFreeze(mergeFlareShape(base, overrides));
-    const { ribbon: R, shear: S, height: H, arcade: A, plume: PL } = P;
+    const { ribbon: R, shear: S, height: H, arcade: A, plume: PL, hook: HK, cusp: CU } = P;
     const tanOnset = Math.tan(S.onsetDeg * DEG), tanOnsetC = Math.tan(S.onsetComplexDeg * DEG), tanFinal = Math.tan(S.finalDeg * DEG);
 
     function classFactor(cls) {
@@ -418,6 +504,49 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
     /** When generation k forms, sim units after its station lights (unjittered). */
     const arcadeFormTime = (k) => A.formT0 * (Math.pow(A.formGrowth, k) - 1);
 
+    /** How un-relaxed a loop of this age still is: 1 as it forms, → 0. */
+    const loopRelax = (age) => Math.exp(-Math.max(age, 0) / CU.relaxT);
+    /** Lift profile of a loop of this age (0 at the feet, 1 at the apex): cusped when new, round when relaxed. */
+    const loopProfile = (u, age = Infinity) => {
+        const c = CU.onset * loopRelax(age);
+        return (1 - c) * Math.sin(Math.PI * u) + c * (1 - Math.pow(Math.abs(2 * u - 1), CU.power));
+    };
+    /** A loop forms taller than it ends up: its height ÷ its relaxed height at this age. */
+    const loopHeightFactor = (age = Infinity) => 1 + CU.shrink * loopRelax(age);
+    /** The ribbons' hook at time t: where the straight part ends (s0), the arc's radius and sweep. Radians. */
+    const ribbonHook = (t, cls = 'M') => {
+        const sg = ribbonAlongSigma(t, cls);
+        return { s0: HK.at * sg, rho: HK.radius * sg, sweep: HK.sweepDeg * DEG };
+    };
+    /**
+     * Both ribbons' centrelines as points on the unit sphere (sun frame, epoch
+     * coordinates), each with its tangent-plane coordinates: `a` along the PIL,
+     * `c` across it, `s` the arc length from the ribbon's middle. `plus` is the
+     * +across ribbon. Straight from −`reach`·σ, then the hook.
+     */
+    function ribbonCurves({ latRad, lonRad, pilAngle, t = 0, cls = 'M', chirality = 1, samples = 96, reach = 1.6 } = {}) {
+        const frame = tangentFrame(latRad, lonRad, pilAngle);
+        const sep = ribbonSeparation(t, cls), sg = ribbonAlongSigma(t, cls), hk = ribbonHook(t, cls);
+        const chi = chirality < 0 ? -1 : 1;
+        const base = [];                                        // the +across ribbon with its hook at +along
+        const hooked = hk.sweep > 0 && hk.rho > 0;
+        const end = hooked ? hk.s0 : reach * sg;
+        for (let i = 0; i <= samples; i++) { const a = -reach * sg + (end + reach * sg) * i / samples; base.push({ a, c: sep, s: a }); }
+        if (hooked) for (let i = 1; i <= samples; i++) {
+            const phi = hk.sweep * i / samples;
+            base.push({ a: hk.s0 + hk.rho * Math.sin(phi), c: sep + hk.rho * (1 - Math.cos(phi)), s: hk.s0 + hk.rho * phi });
+        }
+        const lift = ({ a, c, s }) => {
+            const z = Math.sqrt(Math.max(0, 1 - a * a - c * c));    // so that dot(p, pilAxis) = a exactly, as the shader reads it
+            return { p: add(add(scale(frame.pilAxis, a), scale(frame.loopAxis, c)), scale(frame.radial, z)), a, c, s };
+        };
+        return {
+            plus:  base.map(({ a, c, s }) => lift({ a:  chi * a, c,     s })),
+            minus: base.map(({ a, c, s }) => lift({ a: -chi * a, c: -c, s })),
+            hook: hk, sep, sigma: sg, chirality: chi,
+        };
+    }
+
     /**
      * Post-flare arcade loops as polylines in the SUN FRAME (epoch coordinates —
      * the caller rotates by `siteRotation`): ONE generation, the arcade at the
@@ -427,7 +556,7 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
      * Each loop: { pts, footA, footB, apexR, along, weight }, footA on the
      * +loopAxis side, `weight` the ribbon envelope at `along`.
      */
-    function arcadeLoops({ latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 9, complex = false, pairs = null, samples = 24 } = {}) {
+    function arcadeLoops({ latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 9, complex = false, pairs = null, samples = 24, chirality = 1 } = {}) {
         const frame = tangentFrame(latRad, lonRad, pilAngle);
         const h = arcadeHeight(t, cls, complex);
         const out = [];
@@ -449,7 +578,7 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         }
         const sep = ribbonSeparation(t, cls);
         const sigma = ribbonAlongSigma(t, cls);
-        const shear = arcadeShear(t, complex);
+        const shear = (chirality < 0 ? -1 : 1) * arcadeShear(t, complex);
         const span = A.spanSigma * sigma;
         for (let i = 0; i < n; i++) {
             const along = n === 1 ? 0 : -span + (2 * span * i) / (n - 1);
@@ -500,8 +629,9 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
      *   formed is not returned.
      */
     function arcadeShells({ latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 11, complex = false, samples = 24,
-                            generations = A.maxGenerations, seed = arcadeSeed(latRad, lonRad) } = {}) {
+                            generations = A.maxGenerations, seed = arcadeSeed(latRad, lonRad), chirality = 1 } = {}) {
         const frame = tangentFrame(latRad, lonRad, pilAngle);
+        const chi = chirality < 0 ? -1 : 1;
         const sigma = ribbonAlongSigma(t, cls);
         const span = A.spanSigma * sigma;
         const out = [];
@@ -524,11 +654,15 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
                 if (!(age >= 0)) break;                           // later generations have not formed
                 const tau = Math.max(tForm, 0);
                 const sep = ribbonSeparation(tau, cls);
-                const shear = arcadeShear(tau, complex);
-                const h = arcadeHeight(tau, cls, complex) * (1 + (arcadeHash(seed, i, k, 3) - 0.5) * 2 * A.heightJitter);
+                const shear = chi * arcadeShear(tau, complex);
+                // The loop's RELAXED height is the law at its formation time (and its own scatter); while it is
+                // young it stands taller by the cusp that has not yet retracted, and its top is pointed.
+                const hRelaxed = arcadeHeight(tau, cls, complex) * (1 + (arcadeHash(seed, i, k, 3) - 0.5) * 2 * A.heightJitter);
+                const h = hRelaxed * loopHeightFactor(age);
                 const fa = unit(add(add(mid, scale(loopM,  sep)), scale(pilM,  shear * sep)));
                 const fb = unit(add(add(mid, scale(loopM, -sep)), scale(pilM, -shear * sep)));
-                out.push({ pts: liftedLoop(fa, fb, h, samples), footA: fa, footB: fb, apexR: 1 + h, along, weight, age, tForm,
+                out.push({ pts: liftedLoop(fa, fb, h, samples, (u) => loopProfile(u, age)), footA: fa, footB: fb, apexR: 1 + h,
+                           relaxedApexR: 1 + hRelaxed, cusp: CU.onset * loopRelax(age), along, weight, age, tForm,
                            station: i, generation: k, alpha: Math.min(1, age / A.fadeIn) });
             }
         }
@@ -557,6 +691,7 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         id: P.id, params: P,
         classFactor, ribbonSeparation, ribbonWidth, ribbonLength0, ribbonAlongSigma, ribbonDecay,
         arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
+        loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
         // The parameter set under the names the consumers and gates already read.
         CLASS_FACTOR: P.classFactor,
         RIBBON: Object.freeze({ SEP0: R.sep0, SEP_RATE: R.sepRate, SEP_GAIN: R.sepGain, SEP_TAU: R.sepTau,
@@ -572,6 +707,7 @@ export const FLARE_MODEL = makeFlareModel();
 export const {
     classFactor, ribbonSeparation, ribbonWidth, ribbonLength0, ribbonAlongSigma, ribbonDecay,
     arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
+    loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
     CLASS_FACTOR, RIBBON, ARCADE,
 } = FLARE_MODEL;
 /** The along-PIL σ every class used until 2026-11-20 (see ribbonLength0). */

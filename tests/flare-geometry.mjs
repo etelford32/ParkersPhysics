@@ -175,6 +175,12 @@ await ok('sunFS holds NO ribbon law: the page uploads the model\'s numbers every
         assert.match(src, new RegExp(`uniforms\\.${u}\\.value\\s*=\\s*[^;]*flareModel\\.`), `${u} is fed from the model`);
     }
     assert.match(src, /float sep\s*=\s*u_flare_sep;/); assert.match(src, /float rWid\s*=\s*u_flare_wid;/);
+    // The J hook and the handedness too — and the distance function is the kernel's text, interpolated, not retyped.
+    assert.match(src, /\$\{FG\.RIBBON_J_GLSL\}/, 'sunFS interpolates the kernel\'s ribbonJ');
+    assert.equal((src.match(/vec2 ribbonJ\(/g) || []).length, 0, 'no second, hand-typed ribbonJ in the page');
+    assert.match(src, /uniforms\.u_flare_hook\.value\.set\(hk\.s0, hk\.rho, hk\.sweep\)/); assert.match(src, /const hk = flareModel\.ribbonHook\(/);
+    assert.match(src, /uniforms\.u_flare_chi\.value\s*=\s*flareSite\.chirality/); assert.match(src, /flareSite\.chirality = FG\.helicityChirality\(latRad\)/);
+    assert.ok(!/pow\(\(across [-+] sep\) \/ rWid, 2\.0\)/.test(src), 'pow() of a negative base is undefined in GLSL — the ribbon profile is a product now');
     assert.match(src, /float alongVar\s*=\s*u_flare_alongVar;/); assert.match(src, /float fDecay\s*=\s*u_flare_decay;/);
 });
 
@@ -439,8 +445,12 @@ await ok('arcadeShells: a NESTED arcade from the same laws — newest loops oute
         const half = Math.acos(Math.max(-1, Math.min(1, vec.dot(L.footA, L.footB)))) / 2;
         const want = Math.atan(sep * Math.hypot(1, FG.arcadeShear(tau, false)));
         close(half, want, 2e-3, 'footpoint half-separation = ribbonSeparation × √(1 + shear²)');
-        const h = L.apexR - 1, h0 = FG.arcadeHeight(tau, 'X');
-        assert.ok(Math.abs(h / h0 - 1) <= FG.ARCADE.HEIGHT_JITTER + 1e-9, `height ${h} vs ${h0}`);
+        // RELAXED height: the law at the loop's formation time, within its own scatter. The loop itself
+        // stands taller by exactly the cusp it has not yet retracted — never lower.
+        const hr = L.relaxedApexR - 1, h0 = FG.arcadeHeight(tau, 'X');
+        assert.ok(Math.abs(hr / h0 - 1) <= FG.ARCADE.HEIGHT_JITTER + 1e-9, `relaxed height ${hr} vs ${h0}`);
+        close((L.apexR - 1) / hr, FG.loopHeightFactor(L.age), 1e-12, 'height = relaxed height × the loop\'s own relax factor');
+        assert.ok(L.apexR >= L.relaxedApexR - 1e-15);
         assert.ok(L.age > 0 && L.alpha > 0 && L.alpha <= 1);
         for (const p of L.pts) assert.ok(vec.norm(p) >= 1 - 1e-12, 'no point below the photosphere');
         close(vec.norm(L.pts[0]), 1, 1e-12); close(vec.norm(L.pts[L.pts.length - 1]), 1, 1e-12);
@@ -464,7 +474,9 @@ await ok('arcadeShells: a NESTED arcade from the same laws — newest loops oute
     assert.deepEqual(at(200).map((L) => L.pts[12]), at(200).map((L) => L.pts[12]));
     const a = at(200).find((L) => L.station === 4 && L.generation === 2), b = at(260).find((L) => L.station === 4 && L.generation === 2);
     // (its feet do not move; only the along-PIL envelope σ(t) rescales the station spacing slightly)
-    close(a.apexR, b.apexR, 1e-12, 'a formed loop keeps its height');
+    close(a.relaxedApexR, b.relaxedApexR, 1e-12, 'a formed loop keeps its RELAXED height');
+    assert.ok(b.apexR < a.apexR && b.apexR > b.relaxedApexR, 'and shrinks toward it as it ages, never past it');
+    assert.ok(b.cusp < a.cusp, 'its top rounds off');
     close(a.tForm, b.tForm, 1e-12);
     // A different site is a different arcade; float noise in the same site is not.
     assert.equal(FG.arcadeSeed(14 * DEG, 28 * DEG), FG.arcadeSeed(14 * DEG + 1e-9, 28 * DEG - 1e-9));
@@ -473,6 +485,142 @@ await ok('arcadeShells: a NESTED arcade from the same laws — newest loops oute
     const flat = FG.arcadeLoops({ ...base, t: 300 });
     assert.ok(new Set(flat.map((L) => L.apexR.toFixed(9))).size === 1, 'the single-generation arcade is one height');
     assert.ok(new Set(at(300).map((L) => L.apexR.toFixed(4))).size > 20, 'the nested arcade is not');
+});
+
+// ── Cusp-shaped new loops that relax ─────────────────────────────────────
+await ok('loop shape by age: pointed and taller when it forms, the round arc when relaxed; v1 loops are the sine lift exactly', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const M = FG.FLARE_MODEL, C = M.params.cusp;
+    for (const age of [0, 30, 120, 600, Infinity]) {
+        close(M.loopProfile(0, age), 0, 1e-12); close(M.loopProfile(1, age), 0, 1e-12); close(M.loopProfile(0.5, age), 1, 1e-12);
+        let prev = -1;
+        for (let u = 0; u <= 0.5 + 1e-12; u += 0.01) { const v = M.loopProfile(u, age); assert.ok(v > prev - 1e-12, `profile not rising at u=${u}, age ${age}`); prev = v; }
+        close(M.loopProfile(0.3, age), M.loopProfile(0.7, age), 1e-12, 'symmetric');
+    }
+    for (const u of [0.1, 0.25, 0.4]) {
+        close(M.loopProfile(u, Infinity), Math.sin(Math.PI * u), 1e-12, 'a relaxed loop is the round arc');
+        assert.ok(M.loopProfile(u, 0) < Math.sin(Math.PI * u), 'a new loop is narrower below its tip: a cusp');
+    }
+    close(M.loopRelax(0), 1); close(M.loopRelax(C.relaxT), Math.exp(-1), 1e-12); assert.equal(M.loopRelax(-5), 1, 'never above 1');
+    close(M.loopHeightFactor(0), 1 + C.shrink, 1e-12); close(M.loopHeightFactor(Infinity), 1, 1e-12);
+    // One loop followed through time: monotonically shorter and rounder, on fixed feet.
+    const base = { latRad: 14 * DEG, lonRad: 28 * DEG, cls: 'X', n: 13, samples: 48 };
+    const find = (t) => M.arcadeShells({ ...base, t }).find((L) => L.station === 6 && L.generation === 1);
+    let last = null;
+    for (const t of [30, 60, 120, 300, 700]) {
+        const L = find(t); assert.ok(L, `station 6 generation 1 exists at t=${t}`);
+        if (last) { assert.ok(L.apexR < last.apexR && L.cusp < last.cusp); close(vec.dot(L.footA, last.footA), 1, 1e-8, 'its feet stay put (the slow growth of the along-PIL envelope shifts a station by tens of km — measured 45 km over the flare)'); }
+        last = L;
+    }
+    close(last.apexR, last.relaxedApexR, 3e-3 * (last.relaxedApexR - 1), 'by t = 700 it has relaxed');
+    // v1: no cusp, no shrinkage — its loops are the pre-change geometry bit for bit.
+    const v1 = FG.makeFlareModel(null, FG.FLARE_SHAPE_V1);
+    for (const L of v1.arcadeShells({ ...base, t: 200 })) {
+        assert.equal(L.apexR, L.relaxedApexR); assert.equal(L.cusp, 0);
+        const j = 12, u = j / 48, r = vec.norm(L.pts[j]);
+        close(r, 1 + (L.apexR - 1) * Math.sin(Math.PI * u), 1e-15, 'sine lift');
+    }
+});
+
+// ── J-shaped ribbon ends ─────────────────────────────────────────────────
+await ok('ribbonJ: the straight ribbon exactly at sweep 0; distance and arc length agree with brute force on the curve', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const sep = 0.03, s0 = 0.08, rho = 0.02;
+    for (const [a, c] of [[0, 0.03], [0.05, 0.01], [-0.2, 0.06], [0.3, -0.02]]) {
+        const [d, s] = FG.ribbonJ(a, c, sep, s0, rho, 0);
+        assert.equal(d, Math.abs(c - sep)); assert.equal(s, a);
+    }
+    for (const sweepDeg of [60, 120, 170, 250]) {
+        const sweep = sweepDeg * DEG;
+        // The curve, densely: the line from far left to s0, then the arc.
+        const curve = [];
+        for (let i = 0; i <= 4000; i++) { const a = -0.5 + (s0 + 0.5) * i / 4000; curve.push([a, sep, a]); }
+        for (let i = 1; i <= 4000; i++) { const phi = sweep * i / 4000; curve.push([s0 + rho * Math.sin(phi), sep + rho * (1 - Math.cos(phi)), s0 + rho * phi]); }
+        let rnd = 12345;
+        const rand = () => ((rnd = Math.imul(rnd, 1103515245) + 12345 >>> 0) / 4294967296);
+        for (let k = 0; k < 400; k++) {
+            const a = -0.1 + 0.3 * rand(), c = -0.02 + 0.12 * rand();
+            // Exact point-to-SEGMENT distance over the polyline (a point-to-vertex search is coarser than the thing it checks).
+            let best = Infinity, bs = 0;
+            for (let i = 1; i < curve.length; i++) {
+                const [x0, y0, t0] = curve[i - 1], [x1, y1, t1] = curve[i];
+                const ex = x1 - x0, ey = y1 - y0, L2 = ex * ex + ey * ey;
+                const u = L2 > 0 ? Math.min(1, Math.max(0, ((a - x0) * ex + (c - y0) * ey) / L2)) : 0;
+                const d = Math.hypot(a - (x0 + u * ex), c - (y0 + u * ey));
+                if (d < best) { best = d; bs = t0 + u * (t1 - t0); }
+            }
+            const [d, s] = FG.ribbonJ(a, c, sep, s0, rho, sweep);
+            // The arc is a 4000-gon here: its sagitta (rho·(sweep/4000)²/8) bounds the disagreement.
+            close(d, best, 1e-8, `distance at (${a.toFixed(3)}, ${c.toFixed(3)}), sweep ${sweepDeg}`);
+            // s is only compared where the nearest point is unambiguous (not near the medial axis between line and arc).
+            if (Math.abs(s - bs) > 1e-3) {
+                let second = Infinity;
+                for (const [x, y, s2] of curve) { if (Math.abs(s2 - bs) < 0.01) continue; const dd = Math.hypot(a - x, c - y); if (dd < second) second = dd; }
+                assert.ok(second - best < 1e-3, `arc length at (${a.toFixed(3)}, ${c.toFixed(3)}): ${s} vs ${bs}`);
+            }
+        }
+    }
+    // On the curve the distance is 0 and s is the arc length; the hook's tip is at s0 + rho·sweep.
+    const sw = 170 * DEG;
+    const tip = [s0 + rho * Math.sin(sw), sep + rho * (1 - Math.cos(sw))];
+    const [dt, st] = FG.ribbonJ(tip[0], tip[1], sep, s0, rho, sw);
+    close(dt, 0, 1e-12); close(st, s0 + rho * sw, 1e-9);
+});
+
+await ok('RIBBON_J_GLSL is ribbonJ: the shader text, transliterated to JS, gives the same numbers', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const m = /vec2 ribbonJ\(([^)]*)\)\s*\{([\s\S]*?)\n    \}/.exec(FG.RIBBON_J_GLSL);
+    assert.ok(m, 'found the GLSL function');
+    assert.ok(!FG.RIBBON_J_GLSL.includes('`'), 'no backtick inside the GLSL (it would end the template literal)');
+    const args = m[1].split(',').map((x) => x.trim().replace(/^float\s+/, ''));
+    let body = m[2]
+        .replace(/length\(vec2\(([^()]*(?:\([^()]*\)[^()]*)*)\)\)/g, 'Math.hypot($1)')
+        .replace(/\bvec2\(/g, 'V2(')
+        .replace(/\b(float|bool)\s+/g, 'let ')
+        .replace(/\batan\(/g, 'Math.atan2(').replace(/\b(abs|sin|cos|min|max)\(/g, 'Math.$1(');
+    const glsl = new Function(...args, 'const V2 = (x, y) => [x, y];\n' + body);
+    let rnd = 777;
+    const rand = () => ((rnd = Math.imul(rnd, 1103515245) + 12345 >>> 0) / 4294967296);
+    for (let k = 0; k < 2000; k++) {
+        const a = -0.3 + 0.6 * rand(), c = -0.1 + 0.25 * rand(), sep = 0.005 + 0.05 * rand(), s0 = 0.02 + 0.1 * rand();
+        const rho = k % 7 === 0 ? 0 : 0.005 + 0.03 * rand(), sweep = k % 5 === 0 ? 0 : 4.5 * rand();
+        const j = FG.ribbonJ(a, c, sep, s0, rho, sweep), g = glsl(a, c, sep, s0, rho, sweep);
+        close(g[0], j[0], 1e-12); close(g[1], j[1], 1e-12);
+    }
+});
+
+await ok('ribbonCurves: a double-J — hooks at opposite ends, opening away from the PIL; chirality mirrors it; v1 is straight', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const M = FG.FLARE_MODEL, lat = 14 * DEG, lon = 28 * DEG, t = 210;
+    const tf = FG.tangentFrame(lat, lon);
+    const rc = M.ribbonCurves({ latRad: lat, lonRad: lon, t, cls: 'X', chirality: 1, samples: 64 });
+    const hk = M.ribbonHook(t, 'X'), sg = M.ribbonAlongSigma(t, 'X'), H = M.params.hook;
+    close(hk.s0, H.at * sg, 1e-15); close(hk.rho, H.radius * sg, 1e-15); close(hk.sweep, H.sweepDeg * DEG, 1e-15);
+    assert.ok(hk.s0 > M.params.arcade.spanSigma * sg, 'the hooks begin beyond the arcade\'s last loop');
+    for (const side of ['plus', 'minus']) for (const q of rc[side]) {
+        close(vec.norm(q.p), 1, 1e-12, 'on the photosphere');
+        close(vec.dot(q.p, tf.pilAxis), q.a, 1e-12, 'a IS the along-PIL coordinate the shader reads');
+        close(vec.dot(q.p, tf.loopAxis), q.c, 1e-12);
+        // Every centreline point is ON the analytic curve the shader measures distance to.
+        const [d, s] = side === 'plus' ? FG.ribbonJ(q.a, q.c, rc.sep, hk.s0, hk.rho, hk.sweep) : FG.ribbonJ(-q.a, -q.c, rc.sep, hk.s0, hk.rho, hk.sweep);
+        close(d, 0, 1e-12); close(s, q.s, 1e-9);
+    }
+    // The minus ribbon is the plus ribbon turned 180°.
+    rc.plus.forEach((q, i) => { close(rc.minus[i].a, -q.a, 1e-15); close(rc.minus[i].c, -q.c, 1e-15); });
+    // Hooks: + ribbon's at the +along end and beyond +sep; nothing ever crosses toward the PIL.
+    const tipP = rc.plus[rc.plus.length - 1], tipM = rc.minus[rc.minus.length - 1];
+    assert.ok(tipP.a > 0 && tipP.c > rc.sep + hk.rho && tipM.a < 0 && tipM.c < -rc.sep - hk.rho);
+    assert.ok(rc.plus.every((q) => q.c >= rc.sep - 1e-15) && rc.minus.every((q) => q.c <= -rc.sep + 1e-15), 'a hook opens AWAY from the inversion line');
+    // Chirality mirrors along the PIL, and the arcade's shear with it.
+    const rm = M.ribbonCurves({ latRad: lat, lonRad: lon, t, cls: 'X', chirality: -1, samples: 64 });
+    rc.plus.forEach((q, i) => { close(rm.plus[i].a, -q.a, 1e-15); close(rm.plus[i].c, q.c, 1e-15); });
+    const foot = (chi) => { const L = M.arcadeShells({ latRad: lat, lonRad: lon, t, cls: 'X', n: 13, chirality: chi }).find((x) => x.station === 6 && x.generation === 0); return vec.dot(L.footA, tf.pilAxis) - vec.dot(L.footB, tf.pilAxis); };
+    assert.ok(foot(1) > 0 && foot(-1) < 0, 'the + ribbon\'s feet are displaced toward ITS hook');
+    close(foot(1), -foot(-1), 1e-12);
+    assert.equal(FG.helicityChirality(10 * DEG), 1); assert.equal(FG.helicityChirality(-10 * DEG), -1);
+    // v1: straight ribbons — no point leaves c = ±sep.
+    const v1 = FG.makeFlareModel(null, FG.FLARE_SHAPE_V1).ribbonCurves({ latRad: lat, lonRad: lon, t, cls: 'X' });
+    assert.ok(v1.plus.every((q) => q.c === v1.sep) && v1.minus.every((q) => q.c === -v1.sep));
 });
 
 console.log(`\n${passes} passed, ${failures} failed`);

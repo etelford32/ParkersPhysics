@@ -18,6 +18,12 @@
     "arcade_aspect": 1,
     "ribbon_width": 1,
     "zip": 1,
+    "j_hook": 1,
+    "j_double": 1,
+    "j_size": 1,
+    "cusp_new": 1,
+    "round_old": 1,
+    "shrinkage": 1,
     "class_order": 1
   },
   "recorded": "2026-11-20"

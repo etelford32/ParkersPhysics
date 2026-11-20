@@ -302,6 +302,7 @@ export function createFlareArcade({
             pilAngle: Number.isFinite(next.pilAngle) ? next.pilAngle : FG.pilAngleRad(next.latRad),
             cls: next.cls ?? 'M',
             complex: !!next.complex,
+            chirality: next.chirality < 0 ? -1 : 1,        // the flare's handedness (shear sense); +1 unless told
             pairs: Array.isArray(next.pairs) && next.pairs.length ? next.pairs : null,
         };
         siteVersion++;
@@ -321,11 +322,11 @@ export function createFlareArcade({
         const nested = GENS > 1 && !site.pairs;
         lastLoops = nested
             ? LAW.arcadeShells({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
-                t, cls: site.cls, n: maxLoops, complex: site.complex, samples: SAMPLES, generations: GENS })
+                t, cls: site.cls, n: maxLoops, complex: site.complex, samples: SAMPLES, generations: GENS, chirality: site.chirality })
             : LAW.arcadeLoops({
                 latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
                 t, cls: site.cls, n: maxLoops, complex: site.complex,
-                pairs: site.pairs ? site.pairs.slice(0, POOL) : null, samples: SAMPLES,
+                pairs: site.pairs ? site.pairs.slice(0, POOL) : null, samples: SAMPLES, chirality: site.chirality,
             });
         // A nested loop's mesh is keyed by (station, generation): it keeps its strand.
         const slot = new Array(loops.length).fill(null);
