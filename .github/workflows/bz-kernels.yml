@@ -19,6 +19,9 @@ on:
       - 'js/bz-engine-provider.js'
       - 'js/bz-page.js'
       - 'data/bz/**'
+      - 'api/cron/bz-archive.js'
+      - 'api/bz/**'
+      - 'vercel.json'
       - 'scripts/bz-hindcast.mjs'
       - 'js/bz-planet-canvas.js'
       - 'js/flux-rope-forecast.js'
@@ -44,6 +47,9 @@ on:
       - 'js/bz-engine-provider.js'
       - 'js/bz-page.js'
       - 'data/bz/**'
+      - 'api/cron/bz-archive.js'
+      - 'api/bz/**'
+      - 'vercel.json'
       - 'scripts/bz-hindcast.mjs'
       - 'js/bz-planet-canvas.js'
       - 'js/flux-rope-forecast.js'
@@ -102,3 +108,5 @@ jobs:
         run: node tests/bz-forecast-join.mjs
       - name: the archive hindcast — kernel on a planted world, and the committed result on the real archive
         run: node tests/bz-hindcast.mjs
+      - name: the minute archive — format, merge, the cron with an in-memory store, the reader
+        run: node tests/bz-archive.mjs

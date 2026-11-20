@@ -1023,3 +1023,40 @@ live engine's rule (509 windows).
 period to fit the quiet-time offset on; archiving GOES magnetometer minutes
 and the per-spacecraft L1 streams so the other two claims can be tested.
 
+## 21. The engine's own minute archive (BUILT 2026-11-20, not yet run)
+
+§20 could hindcast only the Dst model because the site keeps one merged L1
+stream and no GOES magnetometer history. This is the record the other two
+claims need.
+
+- **What is kept, per UTC day, in ONE R2 object** (`datasets/bz/days/YYYY/
+  YYYY-MM-DD.json.gz`, format in `js/bz/archive.js`, PURE): `l1_mag` (every
+  spacecraft SEPARATELY, GSM + GSE + the active flag), `l1_plasma`,
+  `l1_ephem`, `geo_mag` (each GOES in E/P/N, arcjet flag kept). Values are the
+  normaliser's, unrounded; a null is a gap; rows are keyed by whole seconds
+  from 00:00 UT (IMAP is off the minute).
+- **Writer:** `api/cron/bz-archive.js`, every 6 h at :20. SWPC's 1-minute L1
+  files hold ~24 h, so a daily run would lose the minutes around its own
+  hour; four overlapping runs mean one failed run loses nothing. GOES comes
+  from the 7-day files, so the first run back-fills a week of GOES. Per day:
+  GET → merge → PUT, and a PUT only when something was added or changed.
+- **Merge never loses a measurement:** a new non-null value replaces the old
+  (SWPC re-issues); a new NULL never erases a stored value; a store that
+  cannot be READ throws before any PUT.
+- **No Postgres table and no migration.** The only database write is the
+  `bz_archive` heartbeat. The index is an R2 object.
+- **Reader:** `/api/bz/archive` (index) and `?day=YYYY-MM-DD`. Never a 5xx.
+- **Gate:** `tests/bz-archive.mjs` (8 checks, in-memory store, synthetic
+  payloads in SWPC's shapes).
+
+**Not verified:** the cron has never run — crons fire only on production, and
+it needs the `R2_*` secrets the existing archive sweep already uses. After
+this merges, the first production run should show on status.html as
+"Bz Minute Archive (R2)" and `/api/bz/archive` should list about eight days
+(a week of GOES, two of L1). Size is an estimate (~150 KB/day gzipped), not
+a measurement.
+
+**What it unlocks, and when:** the fusion and delay hindcast needs disturbed
+days, so weeks of accumulation, not days. The geosynchronous filter can be
+re-scored as soon as a few weeks exist. Nothing reads the archive yet.
+

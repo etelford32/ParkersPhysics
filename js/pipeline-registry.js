@@ -218,6 +218,13 @@ export const PIPELINES = [
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
       notes: 'B4 of the Bz engine and the endpoint pages read (through js/bz-engine-provider.js): every rung from L1 to the ground in one object, each tagged MEASURED / ESTIMATED / FORECAST / NOT_BUILT / NOT_AVAILABLE with sigma, basis and caveats (js/bz/column.js). Five lower rungs are NOT_BUILT on purpose and say so. Degrades by rung without 5xx: one measured end down (L1 or GOES) = freshness:stale with reasons and that rung NOT_AVAILABLE; both down = freshness:expired with the ladder still returned. Tries the 7-day GOES files first (unverified) and falls back to the 1-day ones; `feeds` reports which answered.' },
 
+    { id: 'bz-archive',         label: 'Bz engine · minute archive (index)',
+      endpoint: '/api/bz/archive',
+      category: 'space-weather', upstream: 'R2 (written by /api/cron/bz-archive)',
+      cadence_s: 6 * 3600, prewarm: null, probeTimeoutMs: 12_000,
+      warnAgeS:  7.5 * 3600, critAgeS: 13 * 3600,
+      notes: 'The Bz engine\'s own record (BZ_ENGINE_PLAN.md §21): every L1 spacecraft separately (field, plasma, position) and each GOES magnetometer, one R2 object per UTC day, so the fusion, the tilted-front delay and the geosynchronous filter can be hindcast the way the Dst model was. No ?day= returns the index. Degrades without 5xx: R2 secrets unset = freshness:expired + reasons:[r2_not_configured]; no run yet = [no_archive_yet]; a day not held = data:null + [day_not_archived]. No passthrough: the only input is a validated UTC day.' },
+
     { id: 'bz-ground',          label: 'Bz engine · ground at 1 s + ring current',
       endpoint: '/api/bz/ground',
       probePath: '/api/bz/ground?summary=1',
@@ -766,6 +773,10 @@ export const HEARTBEAT_PIPELINES = [
     // with 'r2_not_configured' means the R2_* secrets are missing on Vercel —
     // the site is unaffected, Postgres simply does not shrink.
     { key: 'r2_archive',              label: 'R2 Archive Sweep',        warnMin: 130,    critMin: 360 },
+    // vercel.json: 20 */6 * * * — api/cron/bz-archive.js: per-spacecraft L1 + GOES
+    // magnetometer minutes to R2, one object per UTC day. A PARTIAL run (one feed
+    // down) records a failure then a success, so the reason is kept.
+    { key: 'bz_archive',              label: 'Bz Minute Archive (R2)',  warnMin: 7.5 * 60, critMin: 13 * 60 },
     // vercel.json: 5 3 * * * (daily) — the 30-day percentile pass from R2
     // (Phase A2). 'skipped:coverage n/N' is expected until the archive holds
     // a full window; the pg_cron SQL pass covers the stats until then.
