@@ -680,7 +680,10 @@ await ok('rope geometry: feet at the hooks\' centres, an orthonormal frame, a si
     assert.ok(Math.abs(mid - (1 - P.sigmoid) * chord) < 2.5 * DEG, 'turned back by the stated fraction of the chord\'s angle — not past the inversion line');
     // …and the bend fades as it rises (÷ apex height).
     const bendOf = (tt) => { const a = M.ropeAxis({ latRad: lat, lonRad: lon, t: tt, cls: 'X', samples: N }); const q = a.pts[N / 4]; const p0 = vec.unit(q);
-        const f0 = a.feet[0], f1 = a.feet[1]; const lin = vec.unit(vec.add(vec.scale(f0, 0.75), vec.scale(f1, 0.25))); return vec.norm(vec.add(p0, vec.scale(lin, -1))); };
+        const f0 = a.feet[0], f1 = a.feet[1]; const lin = vec.unit(vec.add(vec.scale(f0, 0.75), vec.scale(f1, 0.25)));
+        // ACROSS the foot-to-foot line only: along it the leg also leans out as the rope rises (the spread), which is not the S.
+        const across = vec.unit(vec.cross(tf.radial, vec.add(f1, vec.scale(f0, -1))));
+        return Math.abs(vec.dot(vec.add(p0, vec.scale(lin, -1)), across)); };
     assert.ok(bendOf(400) < 0.5 * bendOf(1), 'the S straightens as the rope rises');
     // Chirality mirrors the feet along the PIL.
     const axm = M.ropeAxis({ latRad: lat, lonRad: lon, t, cls: 'X', chirality: -1, samples: N });
@@ -694,7 +697,8 @@ await ok('rope geometry: feet at the hooks\' centres, an orthonormal frame, a si
     const winding = (S, axis) => {
         let total = 0, prevTh = null;
         for (let i = 4; i <= N - 4; i++) {
-            const dvec = vec.add(S.pts[i], vec.scale(axis.pts[i], -1));
+            // About the strand's OWN centre line: the axis for a field line, the axis lowered by `offset` of the tube radius for the filament.
+            const dvec = vec.add(vec.add(S.pts[i], vec.scale(axis.pts[i], -1)), vec.scale(axis.frames[i].N, S.offset * axis.radius[i]));
             const th = Math.atan2(vec.dot(dvec, axis.frames[i].B), vec.dot(dvec, axis.frames[i].N));
             if (prevTh != null) { let d = th - prevTh; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; total += d; }
             prevTh = th;
@@ -703,10 +707,53 @@ await ok('rope geometry: feet at the hooks\' centres, an orthonormal frame, a si
     };
     for (const S of strands) {
         assert.ok(S.pts.every((p) => vec.norm(p) >= 1.0005 - 1e-12), 'no strand dips below the photosphere');
-        const i = N / 2, dvec = vec.add(S.pts[i], vec.scale(ax2.pts[i], -1));
+        const i = N / 2, dvec = vec.add(vec.add(S.pts[i], vec.scale(ax2.pts[i], -1)), vec.scale(ax2.frames[i].N, S.offset * ax2.radius[i]));
         close(vec.norm(dvec), ax2.radius[i] * S.shell, 1e-9, 'on its shell of the tube at the apex');
+        assert.ok(S.offset + S.shell <= 1 + 1e-12, 'inside the tube');
+        assert.ok(S.weight > 0 && S.weight <= 1);
         close(winding(S, ax2), -P.twist, 0.02, 'χ = +1 winds LEFT-handed (negative helicity), `twist` turns');
     }
+    // NOT A SPIROGRAPH: the field lines lie on many shells, not two, and are not equally bright.
+    const hot = strands.filter((s) => !s.cool), coolS = strands.filter((s) => s.cool);
+    assert.ok(new Set(hot.map((s) => s.shell.toFixed(3))).size === hot.length, 'every field line on its own shell');
+    assert.ok(Math.max(...hot.map((s) => s.shell)) > 0.9 && Math.min(...hot.map((s) => s.shell)) < 0.5, 'from the core to the skin');
+    assert.ok(Math.max(...hot.map((s) => s.weight)) > 1.8 * Math.min(...hot.map((s) => s.weight)), 'uneven brightness');
+    // THE FILAMENT RIDES IN THE ROPE'S UNDERSIDE: at the apex every cool strand is BELOW the axis, in a thin bundle.
+    for (const S of coolS) {
+        assert.equal(S.offset, P.filament);
+        assert.ok(vec.norm(S.pts[N / 2]) < vec.norm(ax2.pts[N / 2]) - 0.15 * ax2.radius[N / 2], 'below the axis at the apex');
+        assert.ok(S.shell < 0.3, 'a thin bundle');
+    }
+    // NEGATIVE CONTROL: with `filament` 0 the cool strands are ordinary field lines again, half of them above the axis.
+    const noFil = FG.makeFlareModel({ rope: { filament: 0 } }).ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', chirality: 1, n: 18, samples: N }).filter((s) => s.cool);
+    assert.ok(noFil.every((s) => s.offset === 0 && s.shell >= 0.38) && noFil.some((s) => vec.norm(s.pts[N / 2]) > vec.norm(ax2.pts[N / 2])));
+
+    // THE ROPE WIDENS AS IT RISES, AND ITS FRAME SURVIVES THAT. High up, the legs lean out beyond the feet…
+    const angFromSite = (p) => Math.acos(Math.min(1, vec.dot(vec.unit(p), tf.radial)));
+    const high = M.ropeAxis({ latRad: lat, lonRad: lon, t: 340, cls: 'X', chirality: 1, samples: N });
+    const footAng = Math.max(angFromSite(high.feet[0]), angFromSite(high.feet[1])), legAng = Math.max(...high.pts.map(angFromSite));
+    assert.ok(high.state.apexH > 0.7, 'the check is of a risen rope');
+    assert.ok(legAng > footAng + 0.6 * P.spread * (high.state.apexH - P.h0) / (high.state.apexH - P.h0 + P.spreadH), `legs lean out: ${(legAng / DEG).toFixed(1)}° vs feet ${(footAng / DEG).toFixed(1)}°`);
+    close(vec.norm(high.pts[0]), 1, 1e-12); close(vec.norm(vec.add(high.pts[0], vec.scale(high.feet[0], -1))), 0, 1e-12, 'the feet do not move');
+    close(angFromSite(low.pts[N / 4]), angFromSite(FG.makeFlareModel({ rope: { spread: 0 } }).ropeAxis({ latRad: lat, lonRad: lon, t: 1, cls: 'X', samples: N }).pts[N / 4]), 2e-3, 'low down it is still the sigmoid over the inversion line');
+    // …and (NEGATIVE CONTROL) with `spread` 0 they never do: the hairpin, whose tube outgrows the gap between its own legs.
+    const pin = FG.makeFlareModel({ rope: { spread: 0 } }).ropeAxis({ latRad: lat, lonRad: lon, t: 340, cls: 'X', chirality: 1, samples: N });
+    assert.ok(Math.max(...pin.pts.map(angFromSite)) < footAng + 1e-9);
+    const gap = (a) => vec.norm(vec.add(a.pts[N / 4], vec.scale(a.pts[3 * N / 4], -1))) - a.radius[N / 4] - a.radius[3 * N / 4];
+    assert.ok(gap(high) > 0 && gap(pin) < 0, `legs clear by ${gap(high).toFixed(3)} R☉ (hairpin: ${gap(pin).toFixed(3)})`);
+    // The frame turns smoothly all the way down both legs…
+    const turn = (a, b) => Math.acos(Math.max(-1, Math.min(1, vec.dot(a, b)))) / DEG;
+    let worst = 0; for (let i = 1; i <= N; i++) worst = Math.max(worst, turn(high.frames[i - 1].N, high.frames[i].N));
+    assert.ok(worst < 12, `the frame's worst turn between samples is ${worst.toFixed(1)}°`);
+    close(vec.dot(high.frames[N / 2].N, vec.unit(high.pts[N / 2])), 1, 1e-6, 'at the apex N is the vertical: −N is the rope\'s underside');
+    // …where (NEGATIVE CONTROL) the frame as first written — the vertical made perpendicular to T at every point — FLIPS on a leg that leans out.
+    let flip = 0;
+    for (let i = 1; i <= N; i++) {
+        const nOld = (k) => { const T = high.frames[k].T, up = vec.unit(high.pts[k]); return vec.unit(vec.add(up, vec.scale(T, -vec.dot(up, T)))); };
+        flip = Math.max(flip, turn(nOld(i - 1), nOld(i)));
+    }
+    assert.ok(flip > 90, `the per-point frame turns ${flip.toFixed(0)}° between two samples`);
+
     const right = M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', chirality: -1, n: 6, samples: N });
     const axr = M.ropeAxis({ latRad: lat, lonRad: lon, t: 200, cls: 'X', chirality: -1, samples: N });
     close(winding(right[0], axr), P.twist, 0.02, 'χ = −1 winds right-handed');

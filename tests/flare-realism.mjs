@@ -151,7 +151,15 @@ ok('rope measurements: speeds and the acceleration peak in km/s from the model\'
     assert.equal(measure(FG.makeFlareModel({ hook: { sweepDeg: 0 } })).ropeFeetInHooks, 0, 'no hooks, nothing for the feet to stand in');
     // v1: no rope — every rope measurement is zero, not NaN.
     const a = measure(V1);
-    for (const k of ['ropeFeetInHooks', 'ropeAboveArcade', 'ropeSpeedFinalKms', 'ropeSpeedOnsetKms', 'ropeAccelPeakKms2', 'ropeTwistTurns', 'ropeAspect']) assert.equal(a[k], 0, k);
+    for (const k of ['ropeFeetInHooks', 'ropeAboveArcade', 'ropeSpeedFinalKms', 'ropeSpeedOnsetKms', 'ropeAccelPeakKms2', 'ropeTwistTurns', 'ropeAspect', 'ropeFanDeg', 'ropeLegGap']) assert.equal(a[k], 0, k);
+    // THE ROPE'S WIDTH: it over-expands sideways as it rises. With the apex at 2 R☉ its axis spans tens of degrees at Sun
+    // centre and the gap between its legs is clear; with `spread` 0 (the rope as first drawn) it is a hairpin as wide as
+    // its own feet, whose tube has outgrown the gap between its legs.
+    assert.ok(m.ropeFanDeg > 25 && m.ropeFanDeg < 80, `fan ${m.ropeFanDeg.toFixed(1)}°`);
+    assert.ok(m.ropeLegGap > 0.05, `leg gap ${m.ropeLegGap.toFixed(3)} of the apex height`);
+    const pin = measure(FG.makeFlareModel({ rope: { spread: 0 } }));
+    assert.ok(pin.ropeFanDeg < 15 && pin.ropeLegGap < 0, `hairpin: fan ${pin.ropeFanDeg.toFixed(1)}°, leg gap ${pin.ropeLegGap.toFixed(3)}`);
+    assert.ok(measure(FG.makeFlareModel({ rope: { spread: 0.6 } })).ropeFanDeg > m.ropeFanDeg + 5, 'more spread, a wider fan');
 });
 
 ok('every scored row moves when some parameter moves (no decorative rows)', () => {
@@ -216,7 +224,7 @@ ok('NEGATIVE CONTROL: the laws shipped until 2026-11-21 score lower, on the rows
     assert.ok(v1.score < now.score - 0.1, `v1 ${(v1.score * 100).toFixed(1)} vs shipped ${(now.score * 100).toFixed(1)}`);
     const row = (c, id) => c.metrics.find((x) => x.id === id);
     for (const id of ['shear_onset', 'shear_late', 'loop_aspect', 'sep_decel', 'sep_onset', 'apex_onset', 'class_order', 'j_hook', 'j_double', 'j_size', 'cusp_new', 'shrinkage',
-        'rope_feet', 'rope_above', 'rope_slow', 'rope_accel', 'rope_accel_t', 'rope_speed', 'rope_twist', 'rope_aspect'])
+        'rope_feet', 'rope_above', 'rope_slow', 'rope_accel', 'rope_accel_t', 'rope_speed', 'rope_twist', 'rope_aspect', 'rope_fan', 'rope_legs'])
         assert.ok(!row(v1, id).pass, `v1 should miss "${id}" (it reads ${row(v1, id).value})`);
     // The measured values that are the reason for each change, pinned.
     assert.ok(near(row(v1, 'shear_onset').value, 29.68, 0.01), 'v1 loops started 30° sheared — the surveys say 50–80°');

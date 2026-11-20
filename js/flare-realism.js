@@ -208,7 +208,29 @@ export function measure(model = FLARE_MODEL, { simUnitsPerS = SIM_UNITS_PER_S } 
         }
     }
 
+    // THE ROPE'S WIDTH. An erupting rope does not stay the width of its feet: it expands sideways as it
+    // rises, into the broad loop a coronagraph sees. Measured with the apex 1 R☉ above the surface: the full
+    // angle the rope's AXIS subtends at Sun centre (the graduated-cylindrical-shell model's 2α). And at three
+    // heights: the clear gap between the two legs' tubes, as a fraction of the apex height (the smallest of
+    // the three). Negative = the tube has grown fatter than the gap between its own legs.
+    let ropeFanDeg = 0, ropeLegGap = 0;
+    if (hasRope) {
+        const tAtHeight = (h) => { let lo = 0, hi = sim(7200); for (let k = 0; k < 60; k++) { const mid = 0.5 * (lo + hi); if (model.ropeApexHeight(mid, 'X') < h) lo = mid; else hi = mid; } return 0.5 * (lo + hi); };
+        const N = 96, dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], len3 = (a) => Math.hypot(a[0], a[1], a[2]);
+        const axisAt = (h) => model.ropeAxis({ ...MEASURE_SITE, t: tAtHeight(h), cls: 'X', chirality: 1, samples: N });
+        const ax1 = axisAt(1.0), apex = ax1.pts[N / 2];
+        let widest = 0;
+        for (const p of ax1.pts) widest = Math.max(widest, Math.acos(Math.max(-1, Math.min(1, dot3(p, apex) / (len3(p) * len3(apex))))));
+        ropeFanDeg = 2 * widest * 180 / Math.PI;
+        ropeLegGap = Infinity;
+        for (const h of [0.25, 0.5, 1.0]) {
+            const ax = axisAt(h), a = ax.pts[N / 4], b = ax.pts[3 * N / 4];
+            ropeLegGap = Math.min(ropeLegGap, (len3([a[0] - b[0], a[1] - b[1], a[2] - b[2]]) - ax.radius[N / 4] - ax.radius[3 * N / 4]) / ax.state.apexH);
+        }
+    }
+
     return {
+        ropeFanDeg, ropeLegGap,
         ropeFeetInHooks: feetInHooks,
         ropeAboveArcade: ropeAbove,
         ropeSpeedFinalKms: vFinal,
@@ -317,6 +339,10 @@ export const TARGETS = Object.freeze([
       source: 'Erupting ropes carry of order one to a few turns; ~1.25 turns is the kink threshold of a line-tied rope (Hood & Priest 1981; Török & Kliem 2005, ApJ 630, L97). Range: our encoding of "a few turns".', verified: UNVERIFIED },
     { id: 'rope_aspect', key: 'ropeAspect', label: 'Rope: minor radius ÷ apex height', unit: '', lo: 0.15, hi: 0.5, scale: 'log', tol: 0.7, weight: 0.5,
       source: 'Self-similar expansion with a fixed aspect, as in graduated-cylindrical-shell fits (Thernisien et al. 2006, ApJ 652, 763). Range: our encoding.', verified: UNVERIFIED },
+    { id: 'rope_fan', key: 'ropeFanDeg', label: 'Rope: angular width of its axis from Sun centre, apex at 2 R☉', unit: '°', lo: 25, hi: 80, scale: 'lin', tol: 15, weight: 1,
+      source: 'An erupting rope over-expands sideways into a broad loop; graduated-cylindrical-shell fits to CMEs give half-angles α of roughly 10–40°, and the axis spans 2α (Thernisien, Vourlidas & Howard 2009, Sol. Phys. 256, 111). Range: our encoding, from memory.', verified: UNVERIFIED },
+    { id: 'rope_legs', key: 'ropeLegGap', label: 'Rope: clear gap between its legs ÷ apex height', unit: '', lo: 0.05, hi: 1.5, scale: 'lin', tol: 0.1, weight: 1,
+      source: 'A flux rope is one tube anchored at two feet, with the cavity between its legs (the three-part CME: Illing & Hundhausen 1985, JGR 90, 275). A tube fatter than the gap between its own legs is not a shape a field can take.', verified: UNVERIFIED },
     { id: 'class_order', key: 'classOrdered', label: 'C < M < X in length, separation and height', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1,
       source: 'Ribbon area, reconnected flux and flare size rise with GOES class (Kazachenko et al. 2017).', verified: UNVERIFIED },
 ]);

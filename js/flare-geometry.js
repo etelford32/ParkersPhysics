@@ -333,7 +333,8 @@ export const FLARE_SHAPE_V2 = deepFreeze({
      * S-shape, which straightens as it rises; it has faded out by an apex radius of
      * `fadeR` R☉ from Sun centre. speed 0 = no rope.
      */
-    rope: { speed: 4.64e-3, t0: 180, tau: 70, h0: 0.045, twist: 1.75, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0.7, fadeR: 2.5 },
+    rope: { speed: 4.64e-3, t0: 180, tau: 70, h0: 0.045, twist: 1.75, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0.7, fadeR: 2.5,
+            spread: 0.40, spreadH: 0.5, filament: 0.45 },
     plume: { speed: 0.06, reach: 2.4 },
 });
 
@@ -351,7 +352,8 @@ export const FLARE_SHAPE_V1 = deepFreeze({
               alongJitter: 0.38, heightJitter: 0.14, timeJitter: 0.35, maxGenerations: 7 },
     hook: { at: 0.75, radius: 0.18, sweepDeg: 0 },            // straight ribbons
     cusp: { onset: 0, power: 0.7, relaxT: 120, shrink: 0 },   // round loops that keep their height
-    rope: { speed: 0, t0: 180, tau: 70, h0: 0.045, twist: 0, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0, fadeR: 2.5 },   // no rope (a particle plume stood in for it)
+    rope: { speed: 0, t0: 180, tau: 70, h0: 0.045, twist: 0, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0, fadeR: 2.5,
+            spread: 0, spreadH: 0.5, filament: 0 },   // no rope (a particle plume stood in for it)
     plume: { speed: 0.06, reach: 2.4 },
 });
 
@@ -729,25 +731,52 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         // the inversion line and out the other side of a chord that is only 19° from it — measured.)
         const chordAng = Math.atan2(Math.abs(d[1]), Math.abs(d[0]));
         const bend = len * Math.tan(Math.min(1, RP.sigmoid * (st.h0 / st.apexH)) * chordAng) / (2 * Math.PI);
+        // SPREAD: the rope OVER-EXPANDS SIDEWAYS as it rises. Its feet stay where they are; its legs lean
+        // out along the foot-to-foot line, so the axis becomes the broad loop a coronagraph sees and not a
+        // hairpin the width of its own feet. `spread` is the angle (rad, at Sun centre) each leg leans out
+        // by once the rope is high; it comes in with height on the scale `spreadH` (R☉), so the low rope is
+        // still the sigmoid over the inversion line. (Without it the tube — which DOES grow with height —
+        // became fatter than the gap between its own legs by ~0.5 R☉: measured, and scored as `rope_legs`.)
+        const lean = RP.spread * (st.apexH - st.h0) / Math.max(st.apexH - st.h0 + RP.spreadH, 1e-9);
         const pts = [];
         for (let i = 0; i <= samples; i++) {
-            const u = i / samples, sgm = bend * Math.sin(2 * Math.PI * u);
-            const a = fm[0] + d[0] * u + nrm[0] * sgm, c = fm[1] + d[1] * u + nrm[1] * sgm;
+            const u = i / samples, s2 = Math.sin(2 * Math.PI * u), sgm = bend * s2;
+            const xi = u - (lean / len) * s2;                          // along the chord: < 0 and > 1 are beyond the feet
+            const a = fm[0] + d[0] * xi + nrm[0] * sgm, c = fm[1] + d[1] * xi + nrm[1] * sgm;
             const z = Math.sqrt(Math.max(0, 1 - a * a - c * c));
             const p0 = add(add(scale(frame.pilAxis, a), scale(frame.loopAxis, c)), scale(frame.radial, z));
             pts.push(scale(p0, 1 + st.apexH * Math.sin(Math.PI * u)));
         }
         const aFoot = RP.footRadius * (hk.rho > 0 ? hk.rho : 0.25 * sep);
-        const frames = [], radius = [];
+        // THE FRAME IS PARALLEL-TRANSPORTED FROM THE APEX. At the apex N is the local vertical (so "−N" is
+        // DOWN there — the rope's underside, where the filament rides); from there it is carried along the
+        // axis with as little rotation about it as the curve allows. The first version rebuilt N at every
+        // point as "the vertical, made perpendicular to T": that is undefined where the axis is itself
+        // vertical, and a leg that leans OUT passes through vertical on its way to the top — N flipped
+        // through zero there and every strand was pinched onto one line at each shoulder (seen in the first
+        // widened rope; a rope whose legs lean in never crosses vertical, which is why the hairpin hid it).
+        const tangents = [], radius = [];
         for (let i = 0; i <= samples; i++) {
             const a = pts[Math.max(i - 1, 0)], b = pts[Math.min(i + 1, samples)];
-            const T = unit(add(b, scale(a, -1)));
-            const up = unit(pts[i]);
-            let N = add(up, scale(T, -dot(up, T)));
-            if (norm(N) < 1e-6) N = add(frame.loopAxis, scale(T, -dot(frame.loopAxis, T)));   // a leg standing exactly radial
-            N = unit(N);
-            frames.push({ T, N, B: cross(T, N) });
+            tangents.push(unit(add(b, scale(a, -1))));
             radius.push(aFoot + (Math.max(st.minorR, aFoot) - aFoot) * Math.sin(Math.PI * i / samples));
+        }
+        const frames = new Array(samples + 1), mid = Math.round(samples / 2);
+        const perp = (v, T) => add(v, scale(T, -dot(v, T)));
+        {
+            let N = perp(unit(pts[mid]), tangents[mid]);
+            if (norm(N) < 1e-6) N = perp(frame.loopAxis, tangents[mid]);
+            N = unit(N);
+            frames[mid] = { T: tangents[mid], N, B: cross(tangents[mid], N) };
+        }
+        for (const dir of [1, -1]) {
+            for (let i = mid + dir; i >= 0 && i <= samples; i += dir) {
+                const T = tangents[i];
+                let N = perp(frames[i - dir].N, T);
+                if (norm(N) < 1e-9) N = perp(frames[i - dir].T, T);     // a right-angle corner between samples: cannot happen on this curve
+                N = unit(N);
+                frames[i] = { T, N, B: cross(T, N) };
+            }
         }
         const lift = ([a, c]) => add(add(scale(frame.pilAxis, a), scale(frame.loopAxis, c)), scale(frame.radial, Math.sqrt(Math.max(0, 1 - a * a - c * c))));
         return { pts, frames, radius, feet: [lift(fm), lift(fp)], footAC: [fm, fp], footRadius: aFoot, state: st, chirality: chi };
@@ -765,19 +794,30 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
                            seed = arcadeSeed(latRad, lonRad) } = {}) {
         const ax = ropeAxis({ latRad, lonRad, pilAngle, t, cls, chirality, samples });
         const out = [];
+        const fil = Math.max(0, Math.min(0.8, RP.filament));
         for (let j = 0; j < n; j++) {
-            const shell = j % 2 === 0 ? 1 : 0.55;
-            const phi0 = 2 * Math.PI * (j + 0.35 * (arcadeHash(seed, j, 0, 7) - 0.5)) / n;
+            const h1 = arcadeHash(seed, j, 0, 7), h2 = arcadeHash(seed, j, 1, 7), h3 = arcadeHash(seed, j, 2, 7);
+            const cool = j % 3 === 2;
+            // FIELD LINES of the rope lie on nested shells — not on two (the first version drew every line on
+            // shell 1 or 0.55 at even phases, and it read as a spirograph). Shell radii are spread by the golden
+            // ratio (no two alike, no clumps), phases and brightness are irregular, the outer shells brightest.
+            // THE FILAMENT is different matter: cool plasma collects in the DIPS of the helical field, which are
+            // on the rope's underside, so it is a thin bundle offset toward −N by `filament` of the tube radius
+            // (at the apex −N is straight down). With `filament` 0 it is just more field lines, as before.
+            const shell = cool && fil > 0 ? 0.10 + 0.16 * h2 : 0.38 + 0.62 * ((0.31 + j * 0.6180339887) % 1);
+            const off = cool ? fil : 0;
+            const phi0 = 2 * Math.PI * (j + 0.7 * (h1 - 0.5)) / n;
+            const weight = cool ? 0.75 + 0.25 * h3 : (0.35 + 0.65 * h3) * (0.55 + 0.45 * shell);
             const pts = [];
             for (let i = 0; i <= samples; i++) {
                 const u = i / samples, th = phi0 - ax.chirality * 2 * Math.PI * RP.twist * u;
-                const { N, B } = ax.frames[i], r = ax.radius[i] * shell;
-                let p = add(ax.pts[i], add(scale(N, r * Math.cos(th)), scale(B, r * Math.sin(th))));
+                const { N, B } = ax.frames[i], R0 = ax.radius[i], r = R0 * shell;
+                let p = add(ax.pts[i], add(scale(N, r * Math.cos(th) - off * R0), scale(B, r * Math.sin(th))));
                 const pl = norm(p);
                 if (pl < 1.0005) p = scale(p, 1.0005 / pl);
                 pts.push(p);
             }
-            out.push({ pts, cool: j % 3 === 2, shell, weight: shell === 1 ? 1 : 0.7 });
+            out.push({ pts, cool, shell, offset: off, weight });
         }
         return out;
     }

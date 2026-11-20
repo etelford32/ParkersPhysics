@@ -7460,7 +7460,7 @@ _flareSiteGroup.add(flareArcade.group);
 // ribbons' hooks, rising on the model's kinematics. Drawn only for a flare the director calls
 // eruptive (_flareEruption). NOT the owner-disabled spawnFluxRope tube / spawnEruptingProminence
 // bubble further down: those stay disabled; this was asked for on 2026-11-21.
-const flareRope = createFlareRope({ THREE, geometry: FG, sunRadius: 1.0, strands: 18, samples: 96 });
+const flareRope = createFlareRope({ THREE, geometry: FG, sunRadius: 1.0, strands: 24, samples: 96 });
 _flareSiteGroup.add(flareRope.group);
 let _flareEruption = null;       // DIRECTOR.eruptionCall() for the flare on screen: { eruptive, basis, p }
 let _ropePlumeOff = null;        // last plume state this block set (it only writes on a change)
@@ -13322,7 +13322,7 @@ var sunCam = (() => {
     const nowS = () => performance.now() / 1000;
     const CHROME = ['#hud', '#sun-watch-dock', '#sun-provenance', '#btn-panel-open', '#btn-sdo', '#btn-sw', '#btn-cine',
                     '#panel.open', '#sdo-drawer.open', '#smart-tour-overlay.show', '#flare-caption', '#cine-hud', '.cine-bar'];
-    let flight = null, flightDone = null, flightName = null;
+    let flight = null, flightDone = null, flightName = null, flightClock = nowS;
     let b0 = 0, heroDistance = camera.position.length(), safe = null;
     let userMoved = false;                 // the user has zoomed/orbited since the last fit
     const cine = { on: false, paused: false, order: [], idx: -1, limbSide: 0, savedView: null, savedLens: false,
@@ -13365,9 +13365,14 @@ var sunCam = (() => {
     function restoreLens() {
         if (Math.abs(camera.fov - CAM.HERO_FOV_DEG) > 1e-4) { camera.fov = CAM.HERO_FOV_DEG; camera.updateProjectionMatrix(); }
     }
-    function fly(keys, { name = 'flight', done = null } = {}) {
+    // `clock` is what the flight's key times are measured on. Wall seconds for every shot but one: a shot
+    // that FOLLOWS the model (the eruption) reads the flare clock (CAM.followClock), because that clock is
+    // deliberately not the wall clock (it caps a long frame at 1 s) and a camera on the wall ran ahead of
+    // the rope on a slow renderer. Either way the controls' 'start' event cancels it.
+    function fly(keys, { name = 'flight', done = null, clock = null } = {}) {
         if (flight) flight.cancel();
-        flight = new CAM.Flight(keys, { name, startS: nowS() });
+        flightClock = clock || nowS;
+        flight = new CAM.Flight(keys, { name, startS: flightClock() });
         flightDone = done; flightName = name;
     }
     function cancel(why = 'user') {
@@ -13378,7 +13383,7 @@ var sunCam = (() => {
     }
     function tick() {
         if (!flight) return;
-        const sample = flight.sample(nowS());
+        const sample = flight.sample(flightClock());
         if (sample.pose) applyPose(sample.pose);
         if (sample.done) { const cb = flightDone; flight = null; flightDone = null; if (cb) cb(); }
     }
@@ -13421,8 +13426,16 @@ var sunCam = (() => {
             const perWallS = DIRECTOR.SIM_UNITS_PER_S * simSpeed * _flareRate;          // sim units per wall second
             const apexAt = (s) => 1 + flareModel.ropeApexHeight(uniforms.u_flare_t.value + s * perWallS, flareSite.cls);
             const ropeOn = !!(_flareEruption && _flareEruption.eruptive) && flareModel.params.rope.speed > 0 && _flareHoldT == null;
-            if (ropeOn && apexAt(0) < flareModel.params.rope.fadeR - 0.2 && apexAt(40) > 1.35)
-                return CAM.eruptionShot(from, { site, earth: basis.normal, cls: flareSite.cls, length, apexAt, maxApexR: flareModel.params.rope.fadeR });
+            // The follow runs until the rope reaches its fade radius or ERUPTION_FOLLOW_S, whichever is first
+            // (it was a fixed 40 s with a 1.35 R☉ test: a ×14 replay, whose rope is at 1.31 R☉ after 40 s and
+            // gone by 95 s, got the static close-up and erupted out of the top of the frame — measured).
+            const ERUPTION_FOLLOW_S = 100;
+            if (ropeOn && apexAt(0) < flareModel.params.rope.fadeR - 0.2 && apexAt(ERUPTION_FOLLOW_S) > 1.6) {
+                const keys = CAM.eruptionShot(from, { site, earth: basis.normal, cls: flareSite.cls, length, apexAt, maxApexR: flareModel.params.rope.fadeR, seconds: ERUPTION_FOLLOW_S });
+                // The keys are the rope's heights at FLARE-clock times; the flight reads that clock (playShot).
+                keys.clock = CAM.followClock({ model: () => uniforms.u_flare_t.value, wall: nowS, perShotS: perWallS });
+                return keys;
+            }
             return CAM.flareShot(from, { site, earth: basis.normal, cls: flareSite.cls, length });
         }
         if (name === 'corona') {
@@ -13445,7 +13458,7 @@ var sunCam = (() => {
     function playShot(name, { done = null } = {}) {
         const keys = shotKeys(name);
         if (name === 'corona') controls.maxDistance = CAM.MAX_DISTANCE_CORONAGRAPH;
-        fly(keys, { name, done });
+        fly(keys, { name, done, clock: keys.clock || null });
         const st = document.getElementById('cine-shot'), nt = document.getElementById('cine-note');
         if (st) st.textContent = CAM.SHOT_TITLES[name] ?? name;
         if (nt) nt.textContent = shotNote(name);

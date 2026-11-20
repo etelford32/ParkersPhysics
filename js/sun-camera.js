@@ -410,6 +410,44 @@ export function eruptionShot(from, { site, earth, cls = 'M', length = null, apex
     return keys;
 }
 
+/**
+ * THE CLOCK A SHOT THAT FOLLOWS A MODEL RUNS ON.
+ *
+ * `eruptionShot`'s keys are written at the times the rope WILL be at each height, assuming the flare
+ * clock runs at `perShotS` model units per shot second. A flight sampled on the wall clock keeps that
+ * promise only while the page really advances its model at that rate — and it does not: the flare clock
+ * caps a long frame at one second (a tab that stalls must not skip the flare), so on a slow renderer the
+ * model falls behind the wall and the camera ran AHEAD of the rope (measured on a software rasteriser at
+ * 2 s/frame: the camera had pulled back to 7.6 R☉ with the rope at 1.75, and was home again before the
+ * rope had faded). So the shot reads the MODEL's clock: shot seconds = (model time − model time at the
+ * start) / perShotS, and the camera is where the rope is at any frame rate, by construction.
+ *
+ * A flight must still END: if the model clock stops (the sim is paused, the flare is over, its clock has
+ * hit its cap) for longer than `stallS` of wall time, the shot carries on on the wall clock. The page may
+ * start a flight; it may not hold the camera — not even by pausing.
+ *
+ * PURE: the two clocks are injected.
+ *
+ * @param {object} o
+ * @param {() => number} o.model     the model clock (any units)
+ * @param {() => number} o.wall      wall seconds
+ * @param {number} o.perShotS        model units per shot second the keys were written at (> 0)
+ * @param {number} [o.stallS=1.5]
+ * @returns {() => number} shot seconds, monotonic, starting at 0
+ */
+export function followClock({ model, wall, perShotS, stallS = 1.5 } = {}) {
+    if (!(perShotS > 0) || !Number.isFinite(perShotS)) { const w0 = wall(); return () => wall() - w0; }
+    let s = 0, lastM = model(), lastW = wall(), stalled = 0;
+    return () => {
+        const m = model(), w = wall();
+        const dM = (m - lastM) / perShotS, dW = Math.max(0, w - lastW);
+        lastM = m; lastW = w;
+        if (dM > 0 && Number.isFinite(dM)) { s += dM; stalled = 0; }
+        else { stalled += dW; if (stalled > stallS) s += dW; }
+        return s;
+    };
+}
+
 export function coronaShot(from, { b0Rad = 0, fov = HERO_FOV_DEG, c2Reach = 6, c3Reach = 30, fill = 0.86,
     seconds = 22, hold = 5 } = {}) {
     const dC2 = fitDistance({ fovDeg: fov, fill, radius: c2Reach });

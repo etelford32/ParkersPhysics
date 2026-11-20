@@ -342,7 +342,7 @@ test.describe('sun.html: the flare as drawn', () => {
         if (SHOTS) writeFileSync(join(SHOTS, 'v2-rope.png'), await page.screenshot());
         const ropeProj = await page.evaluate(({ t }) => {
             const s = window.__sun, T = s.THREE, site = s.flareRope.site;
-            const strands = s.flareModel.ropeStrands({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle, t, cls: site.cls, chirality: site.chirality, n: 18, samples: 96 });
+            const strands = s.flareModel.ropeStrands({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle, t, cls: site.cls, chirality: site.chirality, n: s.flareRope.state.count, samples: s.flareRope.state.samples });
             const el = s.renderer.domElement, r = el.getBoundingClientRect(), M = s.flareRope.group.matrixWorld, v = new T.Vector3();
             let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
             for (const S of strands) for (const p of S.pts) {

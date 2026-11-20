@@ -14,7 +14,7 @@ import {
     fitDistance, fillAt, equivalentDistance, safeFrame, heroFraming,
     sphToVec, vecToSph, shortAngle, makePose, poseFromCamera, posePosition, ease, lerpPose,
     sampleFlight, flightDuration, Flight, hop, hopSeconds,
-    heroPose, approachShot, limbPanShot, flareShot, FLARE_FILL, FLARE_MIN_R, eruptionShot, ERUPTION_FILL, coronaShot, orbitShot, cinematicOrder, SHOT_TITLES,
+    heroPose, approachShot, limbPanShot, flareShot, FLARE_FILL, FLARE_MIN_R, eruptionShot, ERUPTION_FILL, followClock, coronaShot, orbitShot, cinematicOrder, SHOT_TITLES,
 } from '../js/sun-camera.js';
 import { observerBasis, OFF_AXIS_FULL_DEG } from '../js/sun-offlimb.js';
 
@@ -254,6 +254,71 @@ ok('the eruption shot pulls back WITH the rope: the surface-to-apex span holds E
     // NEGATIVE CONTROL: a rope that never rises is never followed out — the camera stays at the close-up distance.
     const still = eruptionShot(from, { site, earth, cls: 'X', length, apexAt: () => 1.045, maxApexR: fadeR, seconds: 20 });
     assert.ok(still.slice(3, -1).every((k) => near(dist(k.pose), dist(still[1].pose), 1e-9)), 'no rise, no pull-back: the camera stays the close-up\'s distance from what it looks at');
+});
+
+ok('a shot that follows the model reads the MODEL clock: the rope stays framed at any frame rate (wall clock = the control)', () => {
+    const earth = observerBasis(0.05).normal, site = sphToVec(30 * DEG, 12 * DEG, 1), from = makePose({ r: 6 });
+    const length = 0.2185, fadeR = 2.5;
+    // The page's arrangement: a model clock in "sim units", perShotS of them per shot second at the nominal
+    // rate, advanced per frame by min(1 s, frame time) — the flare clock's own cap on a long frame.
+    const perShotS = 8;
+    const apexOfModel = (m) => 1.045 + Math.max(0, m / perShotS - 6) * 0.12;
+    const run = (frameS, useModelClock) => {
+        let wallT = 100, modelT = 40;
+        const m0 = modelT;
+        const keys = eruptionShot(from, { site, earth, cls: 'X', length, apexAt: (s) => apexOfModel(m0 - m0 + s * perShotS), maxApexR: fadeR });
+        const clock = useModelClock ? followClock({ model: () => modelT - m0, wall: () => wallT, perShotS }) : (() => wallT);
+        const startS = clock();
+        const flight = new Flight(keys, { startS });
+        const dist = (p) => { const c = posePosition(p); return Math.hypot(c[0] - p.target[0], c[1] - p.target[1], c[2] - p.target[2]); };
+        const close = dist(keys[1].pose);
+        let worstOver = 0, worstUnder = Infinity, pulled = 0, apexAtEnd = 0, frames = 0;
+        for (; frames < 4000; frames++) {
+            wallT += frameS; modelT += Math.min(1, frameS) * perShotS;
+            const nowShot = clock();
+            const smp = flight.sample(nowShot);
+            const apex = Math.min(fadeR, apexOfModel(modelT - m0));
+            if (smp.done) { apexAtEnd = apex; break; }
+            const fill = (apex - 1) / (2 * dist(smp.pose) * Math.tan(smp.pose.fov * DEG / 2));
+            // (Past the fade radius the rope is no longer drawn, and the camera is on its way back to the arcade.)
+            if (apex < fadeR - 1e-9) worstOver = Math.max(worstOver, fill);
+            // The follow leg only: before keys[2] the camera is still arriving from wherever it was.
+            // Well into the pull-back (×1.3 the close-up distance): between the last close-up key and the first
+            // pulled-back one the fill is still climbing to ERUPTION_FILL.
+            if (nowShot - startS > keys[2].t && dist(smp.pose) > close * 1.3 && apex < fadeR - 1e-9) { worstUnder = Math.min(worstUnder, fill); pulled++; }
+        }
+        return { worstOver, worstUnder, pulled, apexAtEnd, frames };
+    };
+    for (const frameS of [1 / 60, 0.25, 2.0, 3.5]) {
+        const r = run(frameS, true);
+        assert.ok(r.frames < 4000, `the flight ends (${frameS} s/frame)`);
+        assert.ok(r.worstOver <= ERUPTION_FILL * 1.03, `${frameS} s/frame: the rope never outgrows the frame (fill ${r.worstOver.toFixed(3)})`);
+        if (r.pulled) assert.ok(r.worstUnder >= ERUPTION_FILL * 0.80, `${frameS} s/frame: the camera never runs ahead of the rope (fill ${r.worstUnder.toFixed(3)})`);
+        assert.ok(r.apexAtEnd >= fadeR - 1e-9, `${frameS} s/frame: the shot ends after the rope has reached its fade radius, not before (${r.apexAtEnd.toFixed(2)})`);
+    }
+    assert.ok(run(0.25, true).pulled > 20, 'the pull-back is exercised');
+    // NEGATIVE CONTROL — the shot as first shipped, on the wall clock. At 60 fps the two clocks agree and it
+    // is fine, which is why nothing looked wrong on paper; at 2 s/frame the camera runs ahead and goes home early.
+    const fast = run(1 / 60, false), slow = run(2.0, false);
+    assert.ok(fast.worstUnder >= ERUPTION_FILL * 0.80 && fast.apexAtEnd >= fadeR - 1e-9, 'wall clock, 60 fps: fine');
+    assert.ok(slow.worstUnder < ERUPTION_FILL * 0.62, `wall clock, 2 s/frame: the camera is ahead of the rope (fill ${slow.worstUnder.toFixed(3)})`);
+    assert.ok(slow.apexAtEnd < fadeR - 0.3, `wall clock, 2 s/frame: home again with the rope still at ${slow.apexAtEnd.toFixed(2)} R☉`);
+});
+
+ok('the follow clock never holds the camera: a stopped model clock hands the shot to the wall clock', () => {
+    let wallT = 0, modelT = 0;
+    const clock = followClock({ model: () => modelT, wall: () => wallT, perShotS: 4, stallS: 1.5 });
+    assert.equal(clock(), 0);
+    wallT += 0.5; modelT += 2;  assert.ok(near(clock(), 0.5, 1e-12), 'model running: shot seconds = model / rate');
+    wallT += 3.0; modelT += 4;  assert.ok(near(clock(), 1.5, 1e-12), 'a long frame: the model\'s second, not the wall\'s three');
+    wallT += 1.0;               assert.ok(near(clock(), 1.5, 1e-12), 'a short pause is waited out');
+    wallT += 1.0;               assert.ok(near(clock(), 2.5, 1e-12), 'past stallS the wall clock carries the shot');
+    wallT += 2.0;               assert.ok(near(clock(), 4.5, 1e-12));
+    wallT += 0.5; modelT += 2;  assert.ok(near(clock(), 5.0, 1e-12), 'the model resumes and takes the clock back');
+    modelT = 0; wallT += 0.25;  const before = clock(); wallT += 0.25; assert.ok(clock() >= before, 'a restarted model never runs the shot backwards');
+    // No usable rate: plain wall seconds from the start.
+    let w = 10; const plain = followClock({ model: () => 0, wall: () => w, perShotS: 0 });
+    w += 2.5; assert.ok(near(plain(), 2.5, 1e-12));
 });
 
 console.log(`${passed} checks passed (sun-camera)`);

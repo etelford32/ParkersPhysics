@@ -29,30 +29,52 @@
  * brightness goes as n²·depth; self-similar expansion by a factor s dilutes
  * that by s⁻⁵. Drawn that way the rope would vanish within one frame of the
  * acceleration, so the drawn law is a DISCLOSED display compression,
- * (h0 / h)^DILUTION with DILUTION = 1 (the model's `dilution`), and the rope
- * is gone by the radius the model says (`fadeR`): past that the corona on
- * this page is OBSERVED (LASCO), and a modelled CME is not painted over an
- * observation.
+ * (h0 / h)^DILUTION, and the rope is gone by the radius the model says
+ * (`fadeR`): past that the corona on this page is OBSERVED (LASCO), and a
+ * modelled CME is not painted over an observation.
+ *
+ * DILUTION is 0.6. It was 1 until the camera learned to follow the rope out
+ * (CAM.eruptionShot): at 1 the rope was down to 5 % of its starting
+ * brightness with its apex at 1.9 R☉ — the shot pulled back to frame
+ * something that could no longer be seen (measured on the first capture).
+ * At 0.6 it is 17 % there. Neither number is physics; both are far gentler
+ * than the s⁻⁵ they stand in for, and the legend's wording is "brightness
+ * compressed".
+ *
+ * THE THREADS WIDEN WITH THE ROPE. A strand is a bundle of field; when the
+ * rope expands, so does it. Self-similar expansion would widen it in step
+ * with the apex height; the drawn law is (h / h0)^STRAND_EXPANSION with 0.7 —
+ * sub-linear, so the rope keeps its threaded look. At a fixed 1.6 Mm the
+ * strands were sub-pixel hairlines by the time the camera had pulled back,
+ * and the strand shader (rightly) dims a sub-pixel strand by its true width:
+ * the rope went out twice over.
+ *
+ * TWO KINDS OF STRAND, from the kernel: field lines on nested shells
+ * (`cool: false`) and the filament bundle in the rope's underside
+ * (`cool: true`, see ropeStrands). Each carries its own `weight`; this file
+ * multiplies, it does not choose.
  */
 
 import { ribbonKit, ribbonGeometry } from './flare-arcade.js';
 
 /** How the rope's surface brightness is drawn to fall with its apex height: (h0/h)^DILUTION. A display choice. */
-export const DILUTION = 1.0;
+export const DILUTION = 0.6;
+/** How a strand's drawn WIDTH grows with the apex height: (h/h0)^STRAND_EXPANSION (1 = self-similar). A display choice. */
+export const STRAND_EXPANSION = 0.7;
 
 /**
  * @param {object} o
  * @param {object} o.THREE
  * @param {object} o.geometry        js/flare-geometry.js (module) — its FLARE_MODEL is the default law
  * @param {number} [o.sunRadius=1]
- * @param {number} [o.strands=18]    field lines drawn
+ * @param {number} [o.strands=24]    strands drawn (two in three are field lines, one in three the filament)
  * @param {number} [o.samples=96]    points per strand
  * @param {number} [o.strandMm=1.6]  physical strand width, Mm
  * @param {number} [o.minPx=1.4]     pixel floor on the drawn width (CSS px)
  * @param {number} [o.gain=1.0]      HDR emission gain
  */
 export function createFlareRope({
-    THREE, geometry, sunRadius = 1, strands = 18, samples = 96, strandMm = 1.6, minPx = 1.4, gain = 1.0,
+    THREE, geometry, sunRadius = 1, strands = 24, samples = 96, strandMm = 1.6, minPx = 1.4, gain = 1.0,
 } = {}) {
     if (!THREE || !geometry) throw new Error('createFlareRope: THREE and geometry are required');
     const FG = geometry;
@@ -63,6 +85,7 @@ export function createFlareRope({
     group.visible = false;
 
     const kit = ribbonKit(THREE, { strandMm, minPx, gain, R });
+    const halfW0 = kit.uniforms.u_halfW.value;
     const HOT  = new THREE.Color(0.39, 0.92, 0.85);    // the arcade's hot strand colour (131 Å teal), same luminance
     const COOL = new THREE.Color(1.00, 0.42, 0.16);    // 304 Å / Hα: filament material
     const meshes = [];
@@ -104,6 +127,7 @@ export function createFlareRope({
         const lines = LAW.ropeStrands({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle, t: tFlare, cls: site.cls,
             chirality: site.chirality, n: strands, samples });
         const dim = Math.pow(st.h0 / st.apexH, DILUTION);
+        kit.uniforms.u_halfW.value = halfW0 * Math.pow(Math.max(1, st.apexH / st.h0), STRAND_EXPANSION);
         for (let i = 0; i < meshes.length; i++) {
             const mesh = meshes[i], L = lines[i];
             const w = L ? (L.cool ? weights.cool : weights.hot) : 0;
@@ -145,8 +169,9 @@ export function createFlareRope({
                 active: group.visible, t: lastT, eruptive: eruptiveNow,
                 apexR: last ? last.apexR : null, apexH: last ? last.apexH : null, minorR: last ? last.minorR : null,
                 speed: last ? last.speed : null, alpha: last ? last.alpha : null,
-                strands: meshes.filter((m) => m.visible).length,
-                model: LAW.id ?? null, dilution: DILUTION,
+                strands: meshes.filter((m) => m.visible).length, count: meshes.length, samples,
+                strandMm: strandMm * (kit.uniforms.u_halfW.value / halfW0),
+                model: LAW.id ?? null, dilution: DILUTION, strandExpansion: STRAND_EXPANSION,
             };
         },
     };

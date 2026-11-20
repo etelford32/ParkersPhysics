@@ -32,6 +32,8 @@
     "rope_speed": 1,
     "rope_twist": 1,
     "rope_aspect": 1,
+    "rope_fan": 1,
+    "rope_legs": 1,
     "class_order": 1
   },
   "recorded": "2026-11-20"
