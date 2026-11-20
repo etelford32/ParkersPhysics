@@ -59,7 +59,7 @@ async function boot(page, query = '') {
 }
 
 /** Median luminance (0–255) of small patches at plane-of-sky points (R☉), through the page's own camera. */
-async function probe(page, points) {
+async function probe(page, points, testInfo = null) {
     const px = await page.evaluate((points) => {
         const s = window.__sun, T = s.THREE, el = s.renderer.domElement, r = el.getBoundingClientRect(), q = s.offLimbMesh.quaternion;
         return Object.fromEntries(Object.entries(points).map(([k, [x, y]]) => {
@@ -69,7 +69,21 @@ async function probe(page, points) {
     }, points);
     await page.addStyleTag({ content: '#canvas-wrap > *:not(canvas), nav, #lsb-bar { visibility: hidden !important; }' });
     await page.waitForTimeout(600);
-    const b64 = (await page.screenshot()).toString('base64');
+    const shot = await page.screenshot();
+    // Keep the picture that was actually MEASURED (and what the page thought it
+    // was drawing): a failure here is intermittent under load, and the
+    // screenshot Playwright takes at failure time is a later frame.
+    if (testInfo) {
+        await testInfo.attach('probed-frame.png', { body: shot, contentType: 'image/png' });
+        const state = await page.evaluate(() => { const s = window.__sun; return {
+            layers: Object.fromEntries(Object.entries(s.layers).map(([k, m]) => [k, !!m?.visible])),
+            togs: Object.fromEntries(['tog-wind', 'tog-loops', 'tog-corona', 'tog-fieldlines', 'tog-prom', 'tog-cmetrain', 'tog-nanoflares'].map(id => [id, document.getElementById(id)?.checked])),
+            offLimb: s.offLimb, coronaVol: !!s.coronaVol?.mesh?.visible, view: document.getElementById('view-mode')?.value,
+            flare: s.flareEvent, cam: s.camera.position.toArray(), px,
+        }; }, px).catch((e) => ({ error: e.message }));
+        await testInfo.attach('probed-state.json', { body: JSON.stringify(state, null, 1), contentType: 'application/json' });
+    }
+    const b64 = shot.toString('base64');
     return page.evaluate(async ({ b64, px }) => {
         const img = new Image();
         await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = 'data:image/png;base64,' + b64; });
@@ -95,7 +109,7 @@ test.describe('sun.html on real browse frames', () => {
     test.skip(!HAVE, 'tests/fixtures/sdo/real-manifest.json is absent — run scripts/fetch-sdo-fixtures.mjs on a machine with egress');
     test.describe.configure({ timeout: 240_000 });
 
-    test('SDO/AIA ring: a limb glow on black sky, no caption text, not a white band', async ({ page }) => {
+    test('SDO/AIA ring: a limb glow on black sky, no caption text, not a white band', async ({ page }, testInfo) => {
         const errs = await boot(page, '?offlimbSource=sdo&coronagraph=0');
         const off = await page.evaluate(() => window.__sun.offLimb);
         expect(off.sourceId).toBe('sdo');
@@ -105,7 +119,7 @@ test.describe('sun.html on real browse frames', () => {
             ...ring(1.03, 24, 'limb'), ...ring(1.42, 16, 'sky'),
             // AIA's caption: rows 987–1009 of 1024, columns 10–492 → ρ ≈ 1.19–1.75 below-left of the Sun.
             capA: [-0.35, -1.215], capB: [-0.70, -1.215], capC: [-1.05, -1.215],
-        });
+        }, testInfo);
         const limb = stats(lum, 'limb'), sky = stats(lum, 'sky');
         console.log('AIA ring luminance:', JSON.stringify({ limb, sky, cap: [lum.capA, lum.capB, lum.capC] }));
         expect(limb.med, 'the limb glow is drawn').toBeGreaterThan(sky.med + 12);
