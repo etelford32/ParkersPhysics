@@ -55,6 +55,15 @@ export const GROUND_DEFAULTS = Object.freeze({
     // owned the network's peak dB/dt). Such a station is reported, flagged, and kept OUT of every
     // network-level number.
     suspectDeltaNt: 1500,
+    // …and the absolute test alone is not enough (measured 2026-11-20 18:33 UT: FRN read −245 nT and
+    // 2.645 nT/s while the nine other low/mid-latitude stations read 0–15 nT, and again owned the
+    // network peak). At LOW AND MIDDLE latitudes the horizontal disturbance is large-scale — ring
+    // current, magnetopause current, sudden impulses — so one station far from all the others is a
+    // record problem. `flagNeighbourOutliers` applies that test there and ONLY there: an auroral or
+    // sub-auroral station legitimately differs from its neighbours by hundreds of nT.
+    neighbourFloorNt: 100,       // never flag a departure smaller than this
+    neighbourMadFactor: 8,       // …or smaller than this many robust σ of the other stations
+    neighbourMinOthers: 4,       // with fewer comparable stations there is no test, and no flag
 });
 
 const MU0 = 4e-7 * Math.PI;
@@ -230,6 +239,34 @@ export function matchImpulses(impulses, jumps, maxMs = 20 * 60e3) {
 }
 
 /**
+ * The neighbour test (see GROUND_DEFAULTS). Marks, in place, any LOW/MID-latitude station whose
+ * horizontal perturbation |ΔH| stands above the median of the OTHER sound low/mid stations by more
+ * than max(floor, factor × 1.4826 × their MAD). The scale grows with activity (a storm's real
+ * station-to-station spread raises the MAD), so it does not flag a storm. Returns the flagged codes.
+ *
+ * WHAT IT CANNOT TELL APART: a genuine disturbance confined to one low-latitude station from a bad
+ * record. Such a station is flagged, still listed with its numbers, and only kept out of the
+ * network-level ones. During an extreme storm the auroral oval reaches these latitudes; the MAD
+ * scaling is the only protection there and it has not been tested on one.
+ */
+export function flagNeighbourOutliers(stations, opts = {}) {
+    const o = { ...GROUND_DEFAULTS, ...opts };
+    const mag = (s) => Math.hypot(s.dx, s.dy);
+    const pool = stations.filter((s) => s.zone === 'low-mid' && !s.suspect && mag(s) === mag(s));
+    const flagged = [];
+    for (const s of pool) {
+        const others = pool.filter((q) => q !== s).map(mag);
+        if (others.length < o.neighbourMinOthers) continue;
+        const med = median(others), mad = median(others.map((v) => Math.abs(v - med)));
+        const limit = Math.max(o.neighbourFloorNt, o.neighbourMadFactor * 1.4826 * mad);
+        if (mag(s) - med > limit) flagged.push({ s, excess: mag(s) - med, limit, median: med });
+    }
+    // Flag after the loop: every station is judged against the same pool.
+    for (const f of flagged) { f.s.suspect = true; f.s.suspectReason = 'neighbour'; f.s.neighbour = { excess_nt: f.excess, limit_nt: f.limit, others_median_nt: f.median }; }
+    return flagged.map((f) => f.s.iaga);
+}
+
+/**
  * One station's ground-rung summary.
  * @param {object} fast  1-second series (normalizeGroundSeries) or null
  * @param {object} slow  1-minute series over ~24 h, for the baseline; or null
@@ -248,7 +285,7 @@ export function stationSummary(fast, slow, nowMs, opts = {}) {
     const spec = fast && fast.t.length >= o.spectrumNfft ? bandPowers(fast.x, fast.cadence_s ?? 1, { nfft: o.spectrumNfft }) : null;
     const suspect = Math.abs(dx) > o.suspectDeltaNt || Math.abs(dy) > o.suspectDeltaNt;
     return {
-        iaga: any.iaga, lat: any.lat, lon: any.lon, dipLat, suspect,
+        iaga: any.iaga, lat: any.lat, lon: any.lon, dipLat, suspect, suspectReason: suspect ? 'absolute' : null,
         zone: Math.abs(dipLat) >= o.auroralMinDipoleLat ? 'auroral' : (Math.abs(dipLat) <= o.lowMidMaxDipoleLat ? 'low-mid' : 'sub-auroral'),
         latest: tLatest, latency_s: fast?.latency_s ?? slow?.latency_s ?? null,
         dx, dy, baseline: slow ? { kind: 'trailing median, provisional', minutes: slow.valid } : null,

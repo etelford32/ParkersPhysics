@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dipoleLatitude, dbdt, equivalentCurrent, electrojetProxy, detectSuddenImpulses, detectPressureJumps, matchImpulses, stationSummary, GROUND_DEFAULTS } from '../js/bz/ground.js';
+import { dipoleLatitude, dbdt, equivalentCurrent, electrojetProxy, detectSuddenImpulses, detectPressureJumps, matchImpulses, stationSummary, flagNeighbourOutliers, GROUND_DEFAULTS } from '../js/bz/ground.js';
 import { analyzeGround, analyzeRing } from '../js/bz/ground-analysis.js';
 import { normalizeGroundSeries, groundCoordinates, describeGroundPayload, normalizeDst, groundSeriesUrl, normalizeL1Mag, normalizeEphem, normalizeL1Plasma, DST_URL } from '../js/bz/feeds.js';
 import { analyzeFlux } from '../js/bz/flux-analysis.js';
@@ -220,6 +220,39 @@ const PRED = (() => {
     assert.equal(frn.suspect, true); assert.equal(frn.equivalent_current, null);
     assert.ok(frn.delta_nt.north < -2700, 'its number is still shown, flagged — not hidden');
     assert.deepEqual(a.suspect_stations, []);
+
+    // The neighbour test, on the REAL station values of 2026-11-20 18:33 UT (production /api/bz/ground):
+    // FRN −245 nT among low/mid stations reading 0–15 nT. Under the absolute threshold; it owned the peak.
+    const real = [['BOU', 47.6, -3.2, -3.5], ['BSL', 39.1, 6.2, -14], ['FRD', 47.3, 0.8, -12.8], ['FRN', 43, -244.7, -49.4], ['GUA', 6.3, 0.1, 0.1],
+        ['HON', 21.8, 11.6, 6.5], ['SJG', 27.2, 3.7, -5.4], ['TUC', 39.2, -0.7, -0.9], ['NEW', 54.3, -8.7, -0.3], ['SHU', 54.7, 1.6, 7.9],
+        ['BRW', 70.2, -57.5, 5.6], ['CMO', 65.7, -9.6, 4.6], ['DED', 70.5, -22.8, 6.5], ['SIT', 60.3, -7.7, 4.7]];
+    const mkSt = (rows) => rows.map(([iaga, dipLat, dx, dy]) => ({ iaga, dipLat, dx, dy, suspect: false, zone: dipLat >= 60 ? 'auroral' : (dipLat <= 50 ? 'low-mid' : 'sub-auroral') }));
+    const rs = mkSt(real);
+    assert.deepEqual(flagNeighbourOutliers(rs), ['FRN'], 'only FRN — and not BRW at −57 nT, which is an auroral station doing its job');
+    const f = rs.find((q) => q.iaga === 'FRN');
+    assert.equal(f.suspectReason, 'neighbour'); assert.ok(f.neighbour.excess_nt > 200 && f.neighbour.limit_nt === 100);
+    // A storm is not a bad record: every low/mid station depressed 250–420 nT ⇒ nobody is flagged, including the deepest.
+    const storm = mkSt(real.map(([id, lat, , dy], i) => [id, lat, lat <= 50 ? -250 - 28 * (i % 7) : -900, dy]));
+    assert.deepEqual(flagNeighbourOutliers(storm), [], 'the limit grows with the spread of the others');
+    // …but one station 2000 nT away from a storm-time network still is (and the 1500 nT absolute rule is separate).
+    const stormBad = mkSt(real.map(([id, lat, , dy], i) => [id, lat, id === 'TUC' ? -1400 : (lat <= 50 ? -250 - 28 * (i % 7) : -900), dy]));
+    assert.deepEqual(flagNeighbourOutliers(stormBad), ['TUC']);
+    // An auroral or sub-auroral station is never judged by this test, whatever it reads.
+    assert.deepEqual(flagNeighbourOutliers(mkSt(real.map((r) => (r[0] === 'CMO' || r[0] === 'NEW' ? [r[0], r[1], -1200, 0] : (r[0] === 'FRN' ? [r[0], r[1], -3, 1] : r))))), []);
+    // Too few comparable stations ⇒ no test and no flag (negative control: the same FRN value passes untested).
+    assert.deepEqual(flagNeighbourOutliers(mkSt(real.filter((r) => ['FRN', 'BOU', 'TUC', 'CMO'].includes(r[0])))), []);
+    // Already-flagged stations are neither judged again nor used as anyone's neighbour.
+    const pre = mkSt(real); pre.find((q) => q.iaga === 'BSL').suspect = true;
+    assert.deepEqual(flagNeighbourOutliers(pre), ['FRN']);
+    // End to end: a planted −245 nT offset at FRN leaves the network peak and the E-region maximum to sound stations.
+    const off = seriesOf(planted), offSlow = seriesOf(planted, 'slow');
+    for (let i = 0; i < off.FRN.x.length; i++) off.FRN.x[i] -= 245;
+    for (let i = 1500; i < off.FRN.x.length; i++) off.FRN.x[i] += 9 * (i % 2);
+    const b3 = analyzeGround({ fast: off, slow: offSlow, wind: null, nowMs: NOW });
+    assert.deepEqual(b3.suspect_stations, ['FRN']); assert.notEqual(b3.dbdt.at_station, 'FRN');
+    assert.match(b3.stations.find((q) => q.iaga === 'FRN').suspect_reason, /above the other low\/mid-latitude stations/);
+    assert.equal(b3.stations.find((q) => q.iaga === 'FRN').equivalent_current, null);
+    ok(`neighbour test: FRN (${Math.round(f.neighbour.excess_nt)} nT above its neighbours, limit 100) flagged on the real 18:33 UT values; a storm, an auroral bay and a thin network are not`);
 
     // Quiet: nothing to time, and the score says so rather than claiming a pass.
     const quiet = analyzeGround({ fast: seriesOf(plantedGround({ nowMs: NOW })), slow: {}, wind: null, nowMs: NOW });

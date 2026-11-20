@@ -951,11 +951,18 @@ the column; no CME in flight, so today the fourth readout says so and the
 outlook chart is hidden. The joined state has only been seen with a PLANTED
 CME (a test fixture, not an event).
 
-**Found while looking, not fixed:** FRN read −245 nT and 2.645 nT/s while
-its neighbours read a few nT. That is under the 1500 nT suspect threshold,
-so it became the network's headline dB/dt and the strongest E-region
-current. The rule needs a neighbour-consistency test, not only an absolute
-one. The Dst model's fifth run scored −0.67.
+**Found while looking, fixed the same day:** FRN read −245 nT and 2.645 nT/s
+while the nine other low/mid-latitude stations read 0–15 nT. That is under
+the 1500 nT absolute threshold, so it became the network's headline dB/dt
+and the strongest E-region current. `flagNeighbourOutliers` (ground.js) now
+flags a LOW/MID-latitude station standing above the median of the others by
+more than max(100 nT, 8 robust σ of the others); it needs ≥ 4 comparable
+stations and never judges an auroral or sub-auroral one. Gated on the real
+18:33 UT values (only FRN is flagged; a planted storm and an auroral bay are
+not). It cannot tell a bad record from a real disturbance confined to one
+low-latitude station, and it has NOT been tested on a real extreme storm,
+when the oval reaches these latitudes. Not yet confirmed on the preview.
+The Dst model's fifth run scored −0.67.
 
 **Not built:** a Playwright spec; the space-weather.html panel; the stored
 ledger. The join has never been scored on a real CME.

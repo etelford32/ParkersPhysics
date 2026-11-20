@@ -16,7 +16,7 @@
  *                  ARRIVED wind, anchored once and free-run, scored against
  *                  the hours that follow with persistence as the control.
  */
-import { stationSummary, electrojetProxy, detectSuddenImpulses, detectPressureJumps, matchImpulses, dipoleLatitude, GROUND_DEFAULTS } from './ground.js';
+import { stationSummary, electrojetProxy, detectSuddenImpulses, detectPressureJumps, matchImpulses, dipoleLatitude, flagNeighbourOutliers, GROUND_DEFAULTS } from './ground.js';
 import { integrateDst } from '../ring-current-model.js';
 import { dynamicPressureNPa } from '../geomag/geospace.js';
 
@@ -38,6 +38,7 @@ export function analyzeGround({ fast = {}, slow = {}, wind = null, nowMs }) {
     }
     if (!stations.length) return null;
 
+    flagNeighbourOutliers(stations);
     const sound = stations.filter((s) => !s.suspect);
     const proxy = electrojetProxy(sound);
     const fastList = sound.filter((s) => s.has_1s).map((s) => ({ iaga: s.iaga, dipLat: s.dipLat, t: fast[s.iaga].t, x: fast[s.iaga].x }));
@@ -91,6 +92,7 @@ export function analyzeGround({ fast = {}, slow = {}, wind = null, nowMs }) {
         timing_score: timing,
         stations: stations.map((s) => ({
             iaga: s.iaga, lat: r2(s.lat), lon: r2(s.lon), dipole_lat: r1(s.dipLat), zone: s.zone, suspect: s.suspect,
+            ...(s.suspect ? { suspect_reason: s.suspectReason === 'neighbour' ? `stands ${Math.round(s.neighbour.excess_nt)} nT above the other low/mid-latitude stations (limit ${Math.round(s.neighbour.limit_nt)} nT)` : 'perturbation beyond anything geophysical at this latitude' } : {}),
             latest: iso(s.latest), latency_s: s.latency_s, has_1s: s.has_1s,
             delta_nt: { north: r1(s.dx), east: r1(s.dy), baseline: s.baseline?.kind ?? null },
             equivalent_current: s.current && !s.suspect ? { kind: 'ESTIMATED', a_per_km: r1(s.current.magnitudeAkm), toward_deg: r1(s.current.directionDeg) } : null,
