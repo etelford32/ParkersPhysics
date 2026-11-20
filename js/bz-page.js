@@ -23,7 +23,7 @@ import { startBzProvider, BZ_COLUMN_EVENT } from './bz-engine-provider.js';
 import { sceneModel } from './bz/planet-view.js';
 import { mountPlanet, PLANET_COLORS } from './bz-planet-canvas.js';
 import { ropeSeries, joinForecast, scoreRope } from './bz/forecast-join.js';
-import { KINDS, VERDICTS, SERIES_COLORS, INK, UNVERIFIED_NAMES, ladderRows, scorecard, chartDomain, traceSeries, fluxSeries, yExtent, ticks, linePath, nearest, num, relTime } from './bz/page-model.js';
+import { KINDS, VERDICTS, SERIES_COLORS, INK, UNVERIFIED_NAMES, ladderRows, scorecard, chartDomain, traceSeries, fluxSeries, yExtent, ticks, linePath, nearest, num, relTime, hindcastTable } from './bz/page-model.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -290,6 +290,29 @@ async function onRope(fc) {
 window.addEventListener('flux-rope-forecast', (e) => onRope(e.detail));
 import('./sun-flux-rope.js').then((m) => { if (window.__fluxRopeForecast) onRope(window.__fluxRopeForecast); m.startFluxRopeProvider({ delayMs: 600 }); })
     .catch((e) => onRope({ idle: true, failed: true, reason: `forecast module failed to load: ${e?.message ?? e}` }));
+
+
+// ── the archive hindcast: a baked result (scripts/bz-hindcast.mjs), drawn as it is ───────────
+async function renderHindcast() {
+    const body = $('bz-hind-body');
+    let h = null;
+    try { const r = await fetch('./data/bz/hindcast-dst.json'); if (r.ok) h = await r.json(); } catch { /* shown below */ }
+    const t = hindcastTable(h);
+    if (!t.rows.length) { body.innerHTML = '<tr><td colspan="4" class="bz-empty">The archive result could not be loaded.</td></tr>'; return; }
+    const cell = (c) => (c.skill == null ? '<td data-verdict="unscored">—</td>'
+        : `<td data-verdict="${c.verdict}"><span class="bz-glyph" aria-hidden="true">${VERDICTS[c.verdict].glyph}</span>${esc(num(c.skill, 2, { sign: true }))}<small>${c.lo == null ? '' : `${esc(num(c.lo, 2, { sign: true }))} to ${esc(num(c.hi, 2, { sign: true }))}`} · ${esc(c.verdict)}</small></td>`);
+    body.innerHTML = t.rows.map((r) => `<tr><th scope="row">${r.lead_h} h</th>${cell(r.given)}${cell(r.storm)}${cell(r.forecast)}</tr>`).join('');
+    const one = t.rows.find((r) => r.lead_h === 1), day = t.rows[t.rows.length - 1];
+    const d = (iso) => (iso ? iso.slice(0, 10) : '');
+    $('bz-hind-note').textContent = [
+        `${t.windows} 24-hour windows over ${t.days} days (${d(t.from)} to ${d(t.to)}), ${t.disturbed} of them disturbed (Dst below ${num(t.disturbedBelow, 0)} nT; the deepest hour in the record is ${num(t.deepest, 0)} nT, so no severe storm is in it).`,
+        `The first two columns drive the model with wind measured after the start time, so they test the model, not a forecast. The third column is the forecast.`,
+        day?.given?.bias != null ? `The model runs low: its mean error grows to ${num(day.given.bias, 1, { sign: true })} nT by ${day.lead_h} hours.` : '',
+        one?.given_centre?.skill != null ? `At one hour the answer depends on how an hourly index is time-stamped: ${num(one.given.skill, 2, { sign: true })} comparing at the hour mark, ${num(one.given_centre.skill, 2, { sign: true })} comparing with the hour's mean.` : '',
+        t.notHindcast.length ? `Not tested here: ${t.notHindcast.join('; ')}.` : '',
+    ].filter(Boolean).join(' ');
+}
+renderHindcast();
 
 // ── data ──────────────────────────────────────────────────────────────────
 async function load(key, url) {

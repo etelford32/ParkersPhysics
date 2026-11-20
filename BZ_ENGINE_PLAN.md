@@ -967,3 +967,59 @@ The Dst model's fifth run scored −0.67.
 **Not built:** a Playwright spec; the space-weather.html panel; the stored
 ledger. The join has never been scored on a real CME.
 
+## 20. The archive hindcast (RUN 2026-11-20)
+
+**Storage decision (D4), taken by doing:** no table. The archive is pulled
+once, committed as `data/bz/l1-dst-archive.json.gz` (1.4 MB, sha256 in the
+result), and the result is a BAKE — `node scripts/bz-hindcast.mjs` writes
+`data/bz/hindcast-dst.json`, `--check` recomputes it exactly (seeded
+bootstrap), and `tests/bz-hindcast.mjs` fails when it is stale. Re-pull and
+re-bake to extend it; never hand-edit either file.
+
+**What the archive can test.** `sw_geomag_dataset` is ONE L1 stream plus
+hourly Dst: 131 days (2026-07-12 → 11-20), 188 824 minutes, 3 098 Dst hours,
+deepest hour −95 nT (no severe storm). So the Dst model can be hindcast; the
+L1 fusion, the tilted-front delay and the GEO filter CANNOT (one spacecraft,
+no GOES magnetometer history). They stay scored on the live day only.
+
+**Method** (`js/bz/hindcast.js`, PURE): the live rung's own call
+(`integrateDst`, O'Brien–McPherron, anchored once, 24 h free-run) from an
+anchor every 6 h — 509 windows, 107 disturbed (observed Dst ≤ −30 nT).
+Skill = 1 − Σerr²/Σerr²_persistence POOLED; 95 % interval by bootstrap over
+whole UTC days; ahead/behind only when the whole interval is on one side.
+
+**Result.**
+
+| lead | given measured wind, all | …disturbed only | as a forecast (wind frozen) |
+|---|---|---|---|
+| 1 h | −0.22 behind | −0.15 level | +0.11 level |
+| 2 h | +0.22 ahead | +0.39 ahead | +0.16 level |
+| 3 h | +0.25 ahead | +0.43 ahead | −0.04 level |
+| 6 h | +0.12 level | +0.32 ahead | −0.68 behind |
+| 12 h | +0.12 level | +0.46 ahead | −1.30 behind |
+| 24 h | −0.09 level | +0.44 ahead | −1.99 behind |
+
+Read it as three separate statements:
+
+1. **Given the wind, the model tracks storms.** In disturbed windows it
+   removes 32–46 % of persistence's squared error from 2 h to 24 h, with
+   intervals clear of zero. This is the first claim in the engine that holds.
+2. **It is not a forecast past the L1 hour.** With only the wind L1 had
+   already seen, it is level to 3 h and worse than persistence from 6 h.
+   Nothing here supports quoting a Dst forecast beyond ~1 h.
+3. **It runs low in quiet time.** Mean error grows to −12.8 nT by 24 h, and
+   quiet windows are behind at 24 h (−0.79). That is a systematic bias of the
+   model against quicklook Dst, not noise. It is NOT corrected here — fitting
+   an offset on the same 131 days it is scored on would be tuning to the test.
+
+**Two scoring facts.** (a) At 1 h the sign depends on the time-stamp
+convention: −0.22 comparing at the hour mark (what the live rung does),
++0.19 against the hour's mean. Neither is a result. (b) Per-minute speed
+noise made a third of all minutes "overtake" their neighbours and be dropped
+(45 usable windows); the delay now uses a causal 15-min median speed, the
+live engine's rule (509 windows).
+
+**What would change these answers:** a severe storm in the record; a held-out
+period to fit the quiet-time offset on; archiving GOES magnetometer minutes
+and the per-spacecraft L1 streams so the other two claims can be tested.
+

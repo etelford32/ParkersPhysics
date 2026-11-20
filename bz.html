@@ -115,6 +115,10 @@ tr[data-verdict="behind"] .bz-verdict .bz-glyph { color:#ec835a; }
 .bz-about p { font-size:.86rem; max-width:78ch; margin-bottom:8px; }
 .bz-about a { color:#3987e5; }
 .bz-table-wrap { overflow-x:auto; }
+.bz-hind td { font-variant-numeric:tabular-nums; color:#f0efec; white-space:nowrap; }
+.bz-hind td small { color:#898781; margin-left:6px; }
+.bz-hind td[data-verdict="ahead"] .bz-glyph { color:#0ca30c; }
+.bz-hind td[data-verdict="behind"] .bz-glyph { color:#ec835a; }
 
 /* ── the stage: Bz at the planet ──────────────────────────────────────── */
 .bz-stage { margin-bottom:18px; }
@@ -226,6 +230,19 @@ tr[data-verdict="behind"] .bz-verdict .bz-glyph { color:#ec835a; }
         </table>
         </div>
         <p id="bz-score-tally"></p>
+    </section>
+
+
+    <section class="bz-card bz-about" aria-labelledby="bz-h-hind">
+        <h2 id="bz-h-hind">Over the archive: the Dst prediction, by how far ahead</h2>
+        <p class="bz-lede" id="bz-hind-lede">The live score above comes from one day. This table re-runs the same prediction across our whole stored record. Skill is the share of persistence's squared error removed: above zero is better than assuming Dst stays put, below zero is worse. A result counts as ahead or behind only when its whole 95 % interval is on one side of zero.</p>
+        <div class="bz-table-wrap">
+        <table class="bz-score bz-hind">
+            <thead><tr><th scope="col">Hours ahead</th><th scope="col">Given the wind as later measured<span class="bz-note">all windows</span></th><th scope="col">Given the wind as later measured<span class="bz-note">disturbed windows only</span></th><th scope="col">As a forecast<span class="bz-note">only wind L1 had already seen, then held</span></th></tr></thead>
+            <tbody id="bz-hind-body"><tr><td colspan="4" class="bz-empty">Loading the archive result…</td></tr></tbody>
+        </table>
+        </div>
+        <p id="bz-hind-note" class="bz-fine"></p>
     </section>
 
     <section class="bz-card bz-about" aria-labelledby="bz-h-about">

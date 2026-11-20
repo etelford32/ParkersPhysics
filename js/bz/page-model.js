@@ -126,7 +126,7 @@ export function scorecard({ l1 = null, geo = null, ground = null, ring = null, r
     }
     const rm = ring?.model?.score ?? null;
     if (ring) rows.push({ id: 'ring', claim: 'Dst over the following hours, from the arrived wind',
-        ours: rm?.rmse_nt ?? null, control: rm?.rmse_persistence_nt ?? null, controlName: 'Dst stays where it was', unit: 'nT rms', n: rm?.hours ?? 0,
+        ours: rm?.rmse_nt ?? null, control: rm?.rmse_persistence_nt ?? null, controlName: 'Dst stays where it was', unit: 'nT rms', n: rm?.hours ?? 0, note: 'one window, one anchor — this number moves from run to run; the archive table below is the real test',
         skill: rm?.skill_vs_persistence ?? null, coverage: null, verdict: verdictOf(rm?.skill_vs_persistence) });
     const t = ground?.timing_score ?? null;
     if (t) rows.push({ id: 'timing', claim: 'Arrival time of a solar-wind pressure jump at the ground',
@@ -216,3 +216,18 @@ export function nearest(points, t, maxMs = 3 * 60e3) {
     for (const p of points) { const d = Math.abs(p.t - t); if (p.v != null && d < bd) { bd = d; best = p; } }
     return bd <= maxMs ? best : null;
 }
+
+/**
+ * The archive hindcast (data/bz/hindcast-dst.json, written by scripts/bz-hindcast.mjs) → table rows.
+ * Three columns per lead, each a different claim: given the wind as later measured (all windows, and
+ * disturbed ones), and as a real forecast (wind frozen at what L1 had seen). No number is computed here.
+ */
+export function hindcastTable(h) {
+    const m = h?.drivers?.['measured/stamp'], f = h?.drivers?.['frozen/stamp'], c = h?.drivers?.['measured/centre'];
+    if (!m || !f) return { rows: [], windows: 0, days: 0 };
+    const cell = (s) => ({ skill: s?.skill ?? null, lo: s?.skill_ci95?.[0] ?? null, hi: s?.skill_ci95?.[1] ?? null, n: s?.n ?? 0, verdict: s?.verdict ?? 'unscored', rmse: s?.rmse_nt ?? null, control: s?.rmse_persistence_nt ?? null, bias: s?.bias_nt ?? null });
+    const rows = Object.keys(m.all).map(Number).sort((a, b) => a - b).map((L) => ({ lead_h: L, given: cell(m.all[L]), storm: cell(m.disturbed[L]), forecast: cell(f.all[L]), given_centre: cell(c?.all?.[L]) }));
+    return { rows, windows: m.windows, disturbed: m.disturbed_windows, days: h.archive?.days ?? 0, from: h.archive?.from ?? null, to: h.archive?.to ?? null,
+        disturbedBelow: h.settings?.disturbed_dst_nt ?? null, deepest: h.dst?.min_nt ?? null, notHindcast: h.not_hindcast ?? [] };
+}
+

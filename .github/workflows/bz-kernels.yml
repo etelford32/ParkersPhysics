@@ -18,6 +18,8 @@ on:
       - 'js/bz/**'
       - 'js/bz-engine-provider.js'
       - 'js/bz-page.js'
+      - 'data/bz/**'
+      - 'scripts/bz-hindcast.mjs'
       - 'js/bz-planet-canvas.js'
       - 'js/flux-rope-forecast.js'
       - 'bz.html'
@@ -41,6 +43,8 @@ on:
       - 'js/bz/**'
       - 'js/bz-engine-provider.js'
       - 'js/bz-page.js'
+      - 'data/bz/**'
+      - 'scripts/bz-hindcast.mjs'
       - 'js/bz-planet-canvas.js'
       - 'js/flux-rope-forecast.js'
       - 'bz.html'
@@ -96,3 +100,5 @@ jobs:
         run: node tests/bz-planet.mjs
       - name: B7 — the forecast join past the L1 horizon, on the real flux-rope WASM
         run: node tests/bz-forecast-join.mjs
+      - name: the archive hindcast — kernel on a planted world, and the committed result on the real archive
+        run: node tests/bz-hindcast.mjs
