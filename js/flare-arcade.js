@@ -36,6 +36,16 @@
  * shader — the js/screen-line.js construction, for the same reason.
  * Positions, heights, shear and timing are the kernel's in BOTH styles.
  *
+ * In 'ribbon' style (and with no atlas pairs) the loops are the kernel's
+ * NESTED arcade, `arcadeShells`: every generation of loops at once, newest and
+ * outermost last. Each loop is coloured and dimmed by ITS OWN age — hot
+ * (131 Å teal) when it has just formed, cooling to 171 Å gold, then fading as
+ * it leaves the EUV bands — so the arcade has a hot outer edge over a cooler
+ * interior and lights up along the inversion line from its centre, instead of
+ * being one generation of identical loops in one colour that fades as a block.
+ * A loop's mesh is keyed by (station, generation), so a formed loop keeps its
+ * strand from frame to frame.
+ *
  * Node-gated through the kernel (tests/flare-geometry.mjs); browser gates
  * tests/sun-flare-geometry.spec.js and tests/solar-system-flare.spec.js
  * assert the drawn loops and plume against the kernel's own answers.
@@ -69,8 +79,11 @@ function ribbonKit(THREE, { strandMm, minPx, gain, R }) {
             color: 0xffffff, transparent: true, opacity: 0,
             blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
         });
+        // u_cool is PER LOOP (each has its own age); everything else is shared.
+        const own = { u_cool: { value: 0 } };
+        m.userData.cool = own.u_cool;
         m.onBeforeCompile = (shader) => {
-            Object.assign(shader.uniforms, uniforms);
+            Object.assign(shader.uniforms, uniforms, own);
             shader.vertexShader = shader.vertexShader
                 .replace('#include <common>', `#include <common>
     attribute vec3 aTangent;
@@ -123,7 +136,7 @@ function ribbonKit(THREE, { strandMm, minPx, gain, R }) {
         float top   = pow(sA, 1.5);                     // looptop source while hot
         float legs  = 0.50 + 0.50 * (1.0 - sA * sA);    // legs + feet once it cools
         float along = mix(top, legs, u_cool);
-        diffuseColor.a   *= (core * mix(0.30, 1.0, vFloor) + 0.20 * halo) * (0.30 + 0.70 * along);
+        diffuseColor.a   *= (core * mix(0.30, 1.0, vFloor) + 0.11 * halo) * (0.30 + 0.70 * along);
         diffuseColor.rgb *= u_gain * (1.0 + 0.8 * core);
     }`);
         };
@@ -181,12 +194,14 @@ function softDotTexture(THREE) {
  * @param {number} [o.seed=1]
  * @param {'line'|'ribbon'} [o.style='line']  how a loop is drawn (header)
  * @param {number} [o.strandMm=1.6]  ribbon: physical strand width, Mm
- * @param {number} [o.minPx=1.8]     ribbon: pixel floor on the drawn width (CSS px)
- * @param {number} [o.gain=2.2]      ribbon: HDR emission gain (values above 1 bloom)
+ * @param {number} [o.minPx=1.4]     ribbon: pixel floor on the drawn width (CSS px)
+ * @param {number} [o.gain=1.15]     ribbon: HDR emission gain. ONE strand stays under display white so its
+ *                                   colour (its temperature) survives the tone curve; the arcade's brightness
+ *                                   is many strands ADDING — at 2.2 every loop clipped to a white tube (measured)
  */
 export function createFlareArcade({
     THREE, geometry, sunRadius = 1, heightScale = 1, maxLoops = 11, plumeParticles = 220, seed = 1,
-    style = 'line', strandMm = 1.6, minPx = 1.8, gain = 2.2,
+    style = 'line', strandMm = 1.6, minPx = 1.4, gain = 1.15,
 } = {}) {
     if (!THREE || !geometry) throw new Error('createFlareArcade: THREE and geometry are required');
     const FG = geometry;
@@ -200,7 +215,10 @@ export function createFlareArcade({
     const ribbon = style === 'ribbon';
     const SAMPLES = ribbon ? RIBBON_SAMPLES : LOOP_SAMPLES;
     const kit = ribbon ? ribbonKit(THREE, { strandMm, minPx, gain, R }) : null;
-    for (let i = 0; ribbon && i < maxLoops; i++) {
+    // Nested arcade: `maxLoops` stations along the PIL × the kernel's generations.
+    const GENS = ribbon && FG.arcadeShells ? FG.ARCADE.MAX_GENERATIONS : 1;
+    const POOL = maxLoops * GENS;
+    for (let i = 0; ribbon && i < POOL; i++) {
         const mesh = new THREE.Mesh(ribbonGeometry(THREE), kit.material());
         mesh.visible = false;
         mesh.frustumCulled = false;
@@ -256,7 +274,11 @@ export function createFlareArcade({
     let lastPlume = { front: 1, tail: 1, radius: 0, alpha: 0, rMax: 1 };
     let lastT = 0;
     let shown = true;
-    const colA = new THREE.Color(), colB = new THREE.Color(), colOut = new THREE.Color();
+    const colOut = new THREE.Color();
+    // Per-loop thermal look (sim units — the ribbon clock). COOL_T is sunFS's own
+    // arcadeCol timescale; the rest are when a cooled loop dims and leaves the EUV bands.
+    const COOL_T = 250, AGE_DIM = 150, AGE_OUT0 = 420, AGE_OUT1 = 720, NEST_LIFE = 420;
+    const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     const HOT  = new THREE.Color(0.55, 1.30, 1.20);   // AIA 131 teal — the shader's arcadeCol at onset
     const COOL = new THREE.Color(1.00, 0.80, 0.30);   // AIA 171 gold as the arcade cools
 
@@ -275,14 +297,22 @@ export function createFlareArcade({
     }
 
     function rebuildLoops(t) {
-        lastLoops = FG.arcadeLoops({
-            latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
-            t, cls: site.cls, n: maxLoops, complex: site.complex,
-            pairs: site.pairs ? site.pairs.slice(0, maxLoops) : null, samples: SAMPLES,
-        });
+        const nested = GENS > 1 && !site.pairs;
+        lastLoops = nested
+            ? FG.arcadeShells({ latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
+                t, cls: site.cls, n: maxLoops, complex: site.complex, samples: SAMPLES })
+            : FG.arcadeLoops({
+                latRad: site.latRad, lonRad: site.lonRad0, pilAngle: site.pilAngle,
+                t, cls: site.cls, n: maxLoops, complex: site.complex,
+                pairs: site.pairs ? site.pairs.slice(0, POOL) : null, samples: SAMPLES,
+            });
+        // A nested loop's mesh is keyed by (station, generation): it keeps its strand.
+        const slot = new Array(loops.length).fill(null);
+        lastLoops.forEach((L, i) => { const k = nested ? L.station * GENS + L.generation : i; if (k < slot.length) slot[k] = L; });
         for (let i = 0; i < loops.length; i++) {
-            const L = lastLoops[i];
+            const L = slot[i];
             const line = loops[i];
+            line.userData.loop = L;
             if (!L) { line.visible = false; continue; }
             const arr = line.geometry.attributes.position.array;
             const stride = ribbon ? 6 : 3;      // a ribbon carries each sample twice (one per edge)
@@ -355,20 +385,30 @@ export function createFlareArcade({
         const decay = FG.ribbonDecay(tFlare);
         const ps = FG.plumeState(tFlare, site.cls);
         lastPlume = ps;
-        const loopAlpha = decay * showFlares;
+        const nested = GENS > 1 && !site.pairs;
+        // One generation fades as a block with the ribbons; a nested arcade
+        // outlives them — its loops fade one by one as each cools (below).
+        const loopAlpha = (nested ? Math.max(decay, Math.exp(-tFlare / NEST_LIFE)) : decay) * showFlares;
         if (loopAlpha < 0.01 && ps.alpha * showFlares < 0.005) { group.visible = false; return; }
         group.visible = true;
 
         if (builtVersion !== siteVersion || Math.abs(tFlare - lastBuiltT) >= rebuildEvery) rebuildLoops(tFlare);
-        // Colour cools teal → gold on the shader's own timescale (arcadeCol, t/250).
-        colA.copy(HOT); colB.copy(COOL);
-        colOut.copy(colA).lerp(colB, Math.min(1, tFlare / 250));
         const flash = 0.35 + 0.65 * Math.min(1, intensity + decay);
-        if (kit) kit.uniforms.u_cool.value = Math.min(1, tFlare / 250);   // the shader's own arcadeCol timescale
         for (const line of loops) {
             if (!line.visible) continue;
+            const L = line.userData.loop;
+            // The loop's OWN age (advanced between rebuilds), or the arcade's for a single generation.
+            const age = nested && L ? L.age + (tFlare - lastBuiltT) : tFlare;
+            // Colour cools teal → gold on the shader's own timescale (arcadeCol, t/250).
+            const cool = Math.min(1, age / COOL_T);
+            colOut.copy(HOT).lerp(COOL, cool);
             line.material.color.copy(colOut);
-            line.material.opacity = Math.min(1, loopAlpha * flash * (0.35 + 0.65 * (line.userData.weight ?? 1)));
+            if (line.material.userData.cool) line.material.userData.cool.value = cool;
+            const w = 0.35 + 0.65 * (line.userData.weight ?? 1);
+            line.material.opacity = nested
+                // newest brightest; each loop dims as it cools and leaves the EUV bands
+                ? Math.min(1, showFlares * (L?.alpha ?? 1) * w * (0.30 + 0.70 * Math.exp(-age / AGE_DIM)) * (1 - smooth(AGE_OUT0, AGE_OUT1, age)) * (0.6 + 0.4 * flash))
+                : Math.min(1, loopAlpha * flash * w);
         }
 
         if (ps.alpha * showFlares > 0.005) {
@@ -393,11 +433,18 @@ export function createFlareArcade({
         get site() { return site ? { ...site, pairs: site.pairs ? site.pairs.length : 0 } : null; },
         get state() {
             const apexR = lastLoops.length ? Math.max(...lastLoops.map(L => L.apexR)) : null;
+            const nested = GENS > 1 && !!site && !site.pairs;
             return {
                 active: group.visible,
                 t: lastT,
                 loops: lastLoops.length,
-                apexR,                                   // kernel R☉ (before heightScale)
+                apexR,                                   // tallest drawn loop, kernel R☉ (before heightScale)
+                // The kernel's envelope at the last rebuild: every nested loop stands within HEIGHT_JITTER of an
+                // arcadeHeight(τ ≤ t). For a single generation this IS apexR.
+                envelopeApexR: site && Number.isFinite(lastBuiltT) ? 1 + FG.arcadeHeight(Math.max(lastBuiltT, 0), site.cls) : null,
+                nested,
+                generations: nested ? new Set(lastLoops.map(L => L.generation)).size : 1,
+                ages: nested && lastLoops.length ? { min: Math.min(...lastLoops.map(L => L.age)), max: Math.max(...lastLoops.map(L => L.age)) } : null,
                 drawnApexR: apexR == null ? null : 1 + (apexR - 1) * heightScale,
                 plume: { ...lastPlume, visible: plume.visible },
                 pil: site ? (site.pairs ? 'atlas' : 'prior') : null,

@@ -255,12 +255,30 @@ export function tangentFrame(latRad, lonRad, pilAngle = pilAngleRad(latRad)) {
 export const RIBBON = Object.freeze({
     SEP0: 0.020, SEP_RATE: 2.5e-5,          // half-separation across the PIL
     WID0: 0.005, WID_RATE: 6.0e-6,          // ribbon width
-    ALONG_VAR0: 0.10, ALONG_VAR_RATE: 4.0e-5, // variance of the along-PIL envelope
+    // Along-PIL envelope exp(-x²/σ²): σ at onset per unit classFactor, and the
+    // time over which σ² grows by its onset value (the ribbons elongate).
+    LEN0: 0.095, LEN_GROW_T: 2500.0,
     DECAY_T: 175.0,                         // e-folding of the ribbon brightness
 });
+/** The onset value this replaced: one σ for every class, √0.10 rad (see ribbonLength0). */
+export const RIBBON_LEN_LEGACY = Math.sqrt(0.10);
 export const ribbonSeparation = (t) => RIBBON.SEP0 + t * RIBBON.SEP_RATE;
 export const ribbonWidth      = (t) => RIBBON.WID0 + t * RIBBON.WID_RATE;
-export const ribbonAlongSigma = (t) => Math.sqrt(RIBBON.ALONG_VAR0 + t * RIBBON.ALONG_VAR_RATE);
+/**
+ * Along-PIL 1/e half-length of the ribbons at onset, radians — SCALED BY CLASS.
+ *
+ * It was one constant for every flare, √0.10 = 0.316 rad: a ribbon 440 Mm from
+ * 1/e point to 1/e point (0.63 R☉, 36° of heliographic arc — longer than the
+ * largest active region ever recorded) standing 28 Mm apart, so every arcade
+ * the page drew was a 9:1 spine of ribs. Two-ribbon flares of M and X class
+ * have ribbons of order 50–200 Mm long a few tens of Mm apart (the ribbon
+ * surveys: Kazachenko et al. 2017; Toriumi et al. 2017), and a C-class event
+ * is smaller than an X-class one. With LEN0 = 0.095 the 1/e length is
+ * 152 Mm for X, 112 Mm for M and 79 Mm for C — an ORDER-OF-MAGNITUDE law in
+ * the same class factor the arcade height already uses, not a fit.
+ */
+export const ribbonLength0    = (cls = 'M') => RIBBON.LEN0 * classFactor(cls);
+export const ribbonAlongSigma = (t, cls = 'M') => ribbonLength0(cls) * Math.sqrt(1 + Math.max(t, 0) / RIBBON.LEN_GROW_T);
 export const ribbonDecay      = (t) => Math.exp(-t / RIBBON.DECAY_T);
 
 /** GOES class → drawn-size factor. Ordered A < B < C < M < X; unknown reads as M. */
@@ -333,7 +351,7 @@ export function arcadeLoops({
     }
 
     const sep = ribbonSeparation(t);
-    const sigma = ribbonAlongSigma(t);
+    const sigma = ribbonAlongSigma(t, cls);
     const shear = arcadeShear(t, complex);
     const span = 0.6 * sigma;
     for (let i = 0; i < n; i++) {
@@ -349,6 +367,118 @@ export function arcadeLoops({
         const fb = add(add(mid, scale(loopM, -sep)), scale(pilM, -shear * sep));
         const weight = Math.exp(-(along * along) / (sigma * sigma));
         out.push(loopFrom(fa, fb, 1 + h, along, weight));
+    }
+    return out;
+}
+
+// ── A growing arcade: nested shells with ages (sun.html, 2026-11-20) ───────
+/**
+ * `arcadeLoops` draws ONE generation of loops, all the same size, all the same
+ * age — the arcade at the current ribbon separation. A real post-flare arcade
+ * is every generation at once (the CSHKP picture): reconnection climbs, each
+ * new loop is rooted further from the inversion line than the last and stands
+ * higher, and the loops under it are older and have cooled. So at any moment
+ * the arcade is NESTED — hot and newly formed on the outside, cool inside —
+ * and the earliest (inner) loops are the most sheared.
+ *
+ * `arcadeShells` is that, from the SAME laws: a loop that formed at local
+ * time τ has `ribbonSeparation(τ)`, `arcadeHeight(τ)` and `arcadeShear(τ)` —
+ * no new geometry, only the existing laws evaluated at the loop's own
+ * formation time and kept. Three things are added, all stated here:
+ *
+ *   formation   — generation k forms at FORM_T0·(FORM_GROWTH^k − 1) sim units
+ *                 after its station lights: 0, 15, 38, 71, 122, 198, 312 —
+ *                 quickly at first and ever more slowly, as the reconnection
+ *                 rate of a real flare decays. (A fixed cadence was tried
+ *                 first: seven generations were all formed by t ≈ 150 and the
+ *                 arcade then stopped growing while the kernel's own ribbons
+ *                 kept separating — measured, max apex 0.073 against an
+ *                 envelope of 0.077 at t = 300.)
+ *   ZIP_T       — the brightening runs ALONG the inversion line: a station at
+ *                 the end of the arcade starts ZIP_T later than the centre
+ *                 (ribbons are observed to "zip" along the PIL at tens of
+ *                 km/s; this is that, schematically);
+ *   irregularity — stations are unevenly spaced and loops differ a little in
+ *                 height and timing. SEEDED by the site (quantised to a
+ *                 degree) and by the loop's own (station, generation) index,
+ *                 so a loop never changes shape from frame to frame and the
+ *                 same flare always draws the same arcade.
+ *
+ * Each loop also reports its AGE (sim units since it formed). What colour an
+ * age is, is the view's business — it has the cooling clock.
+ */
+export const ARCADE = Object.freeze({
+    FORM_T0: 30,             // sim units — formation-time scale
+    FORM_GROWTH: 1.5,        // each generation waits this much longer than the last
+    ZIP_T: 45,               // sim units for the brightening to reach the arcade's ends
+    FADE_IN: 9,              // sim units for a new loop to come up
+    ALONG_JITTER: 0.38,      // station spacing irregularity, fraction of the mean spacing
+    HEIGHT_JITTER: 0.14,     // loop-to-loop height scatter, fraction
+    TIME_JITTER: 0.35,       // formation-time scatter, fraction of the gap to the next generation
+    MAX_GENERATIONS: 7,
+});
+
+/** Deterministic hash → [0, 1). (station, generation, salt) under a site seed. */
+/** When generation k forms, sim units after its station lights (unjittered). */
+export function arcadeFormTime(k) { return ARCADE.FORM_T0 * (Math.pow(ARCADE.FORM_GROWTH, k) - 1); }
+export function arcadeHash(seed, i, k, salt = 0) {
+    let h = (seed ^ Math.imul(i + 1, 0x9E3779B1) ^ Math.imul(k + 1, 0x85EBCA6B) ^ Math.imul(salt + 1, 0xC2B2AE35)) >>> 0;
+    h ^= h >>> 16; h = Math.imul(h, 0x7FEB352D) >>> 0; h ^= h >>> 15; h = Math.imul(h, 0x846CA68B) >>> 0; h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+}
+/** Site → seed, quantised to whole degrees so float jitter cannot re-roll an arcade. */
+export function arcadeSeed(latRad, lonRad) {
+    const la = Math.round(latRad / DEG) + 90, lo = Math.round(lonRad / DEG) + 720;
+    return (Math.imul(la, 73856093) ^ Math.imul(lo, 19349663)) >>> 0;
+}
+
+/**
+ * @returns {Array<{pts, footA, footB, apexR, along, weight, age, tForm, station, generation, alpha}>}
+ *   newest loops last within a station. `alpha` is the fade-in envelope
+ *   (0..1); a loop that has not formed yet is not returned.
+ */
+export function arcadeShells({
+    latRad, lonRad, pilAngle, t = 0, cls = 'M', n = 11, complex = false, samples = 24,
+    generations = ARCADE.MAX_GENERATIONS, seed = arcadeSeed(latRad, lonRad),
+} = {}) {
+    const frame = tangentFrame(latRad, lonRad, pilAngle);
+    const sigma = ribbonAlongSigma(t, cls);
+    const span = 0.6 * sigma;
+    const out = [];
+    const G = Math.min(generations, ARCADE.MAX_GENERATIONS);
+    for (let i = 0; i < n; i++) {
+        const u0 = n === 1 ? 0.5 : i / (n - 1);
+        const jit = n === 1 ? 0 : (arcadeHash(seed, i, 0, 1) - 0.5) * ARCADE.ALONG_JITTER / (n - 1);
+        const along = -span + 2 * span * Math.min(1, Math.max(0, u0 + jit));
+        // The brightening zips outward along the PIL: this station's own clock.
+        const tl = t - ARCADE.ZIP_T * Math.abs(along) / Math.max(span, 1e-9);
+        if (!(tl > 0)) continue;
+        const mid   = unit(add(frame.radial, scale(frame.pilAxis, along)));
+        const pilM  = unit(add(frame.pilAxis, scale(mid, -dot(mid, frame.pilAxis))));
+        const loopM = cross(mid, pilM);
+        const weight = Math.exp(-(along * along) / (sigma * sigma));
+        for (let k = 0; k < G; k++) {
+            const gap = arcadeFormTime(k + 1) - arcadeFormTime(k);
+            const tForm = k === 0 ? 0 : arcadeFormTime(k) + (arcadeHash(seed, i, k, 2) - 0.5) * ARCADE.TIME_JITTER * gap;
+            const age = tl - tForm;
+            if (!(age > 0)) break;                               // later generations have not formed
+            const tau = Math.max(tForm, 0);
+            const sep = ribbonSeparation(tau);
+            const shear = arcadeShear(tau, complex);
+            const h = arcadeHeight(tau, cls) * (1 + (arcadeHash(seed, i, k, 3) - 0.5) * 2 * ARCADE.HEIGHT_JITTER);
+            const fa = unit(add(add(mid, scale(loopM,  sep)), scale(pilM,  shear * sep)));
+            const fb = unit(add(add(mid, scale(loopM, -sep)), scale(pilM, -shear * sep)));
+            const cosw = Math.max(-1, Math.min(1, dot(fa, fb)));
+            const w = Math.acos(cosw), sw = Math.sin(w);
+            const pts = [];
+            for (let j = 0; j <= samples; j++) {
+                const u = j / samples;
+                const p = sw < 1e-9 ? fa : add(scale(fa, Math.sin((1 - u) * w) / sw), scale(fb, Math.sin(u * w) / sw));
+                pts.push(scale(unit(p), 1 + h * Math.sin(Math.PI * u)));
+            }
+            out.push({ pts, footA: fa, footB: fb, apexR: 1 + h, along, weight, age, tForm, station: i, generation: k,
+                       alpha: Math.min(1, age / ARCADE.FADE_IN) });
+        }
     }
     return out;
 }

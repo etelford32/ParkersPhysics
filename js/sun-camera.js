@@ -315,7 +315,19 @@ export function limbPanShot(from, { basis, pa0 = 60 * DEG, pa1 = 130 * DEG, dist
  * @param {number[]} earth  unit vector of the Sun–Earth line (observerBasis.normal)
  * @param {string} cls      GOES class letter — bigger flares are framed wider
  */
-export function flareShot(from, { site, earth, cls = 'M', tilt = 52 * DEG, seconds = 18 } = {}) {
+/** The flare's ribbons (their 1/e length) as a fraction of the frame height in the flare shot. */
+export const FLARE_FILL = 0.42;
+/** The flare shot never comes closer to Sun centre than this (R☉): the arcade stands up to ~0.1 R☉ tall. */
+export const FLARE_MIN_R = 1.45;
+/**
+ * The flare close-up. With `length` (the ribbons' 1/e length, radians of arc —
+ * js/flare-geometry.js ribbonLength0 × 2) the camera distance is DERIVED so
+ * that length fills FLARE_FILL of the frame: a C-class event is framed as
+ * tightly as an X-class one, each at its own size. Without it the typed
+ * per-class distances are the fallback (they framed every flare at ~0.7 R☉
+ * of frame height, in which a real-size arcade was a sixth of the picture).
+ */
+export function flareShot(from, { site, earth, cls = 'M', tilt = 52 * DEG, seconds = 18, length = null } = {}) {
     const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     const sep = Math.acos(clamp(dot(site, earth), -1, 1));
     // Tangent at the site pointing toward Earth (or north at disc centre).
@@ -329,11 +341,19 @@ export function flareShot(from, { site, earth, cls = 'M', tilt = 52 * DEG, secon
     const dir = [0, 1, 2].map((i) => site[i] * Math.cos(psi) + t[i] * Math.sin(psi));
     const s = vecToSph(dir);
     const L = String(cls || 'M')[0].toUpperCase();
-    const r0 = L === 'X' ? 2.9 : L === 'M' ? 2.6 : 2.4;
+    let r0 = L === 'X' ? 2.9 : L === 'M' ? 2.6 : 2.4;
     const fov = L === 'X' ? 20 : 17;
-    const tgt = site.map((x) => x * 1.012);
+    const RT = 1.012;                                   // the target sits just above the site
+    if (length > 0) {
+        // Camera–target distance that makes `length` fill FLARE_FILL of the frame,
+        // then the radius on the tilted ray that is that far from the target.
+        const D = length / (FLARE_FILL * 2 * Math.tan(fov * DEG / 2));
+        const sp = RT * Math.sin(psi);
+        r0 = Math.max(FLARE_MIN_R, RT * Math.cos(psi) + Math.sqrt(Math.max(D * D - sp * sp, 0)));
+    }
+    const tgt = site.map((x) => x * RT);
     const arrive = makePose({ az: s.az, el: s.el, r: r0, target: tgt, fov });
-    const settle = makePose({ az: s.az + 0.05, el: s.el, r: r0 * 0.86, target: tgt, fov });
+    const settle = makePose({ az: s.az + 0.05, el: s.el, r: Math.max(MIN_DISTANCE + 0.05, r0 * 0.86), target: tgt, fov });
     const cut = hopSeconds(from, arrive, { min: 1.4, max: 3.6 });
     return [
         { t: 0, pose: from },

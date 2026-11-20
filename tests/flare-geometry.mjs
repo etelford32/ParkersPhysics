@@ -20,7 +20,7 @@ import {
     stonyhurstToUnit, unitToStonyhurst, rotateY, rotationAngle, siteRotation,
     siteLonAt, epochLonFor, sitePositionAt,
     localFrame, joyTiltRad, bipoleAxis, pilAngleRad, tangentFrame,
-    RIBBON, ribbonSeparation, ribbonWidth, ribbonAlongSigma, ribbonDecay,
+    RIBBON, RIBBON_LEN_LEGACY, ribbonLength0, ribbonSeparation, ribbonWidth, ribbonAlongSigma, ribbonDecay,
     CLASS_FACTOR, classFactor, arcadeShear, arcadeHeight, arcadeLoops, plumeState,
     earthViewGeometry,
     heliocentricSiteDirection, heliocentricAzimuth, objectAzimuthForWorld,
@@ -164,15 +164,32 @@ await ok('RIBBON constants mirror the sunFS legacy-fallback literals (read from 
     const src = await readFile(fileURLToPath(new URL('../sun.html', import.meta.url)), 'utf8');
     const sep  = src.match(/float sep\s*=\s*([0-9.]+)\s*\+\s*u_flare_t\s*\*\s*([0-9.e-]+)/);
     const wid  = src.match(/float rWid\s*=\s*([0-9.]+)\s*\+\s*u_flare_t\s*\*\s*([0-9.e-]+)/);
-    const varr = src.match(/float alongVar\s*=\s*([0-9.]+)\s*\+\s*u_flare_t\s*\*\s*([0-9.e-]+)/);
+    const varr = src.match(/float alongVar\s*=\s*u_flare_len \* u_flare_len \* \(1\.0 \+ u_flare_t \/ ([0-9.]+)\)/);
     const dec  = src.match(/float fDecay\s*=\s*exp\(\s*-u_flare_t\s*\/\s*([0-9.]+)\s*\)/);
     assert.ok(sep && wid && varr && dec, 'all four literals found in sunFS');
     close(+sep[1], RIBBON.SEP0); close(+sep[2], RIBBON.SEP_RATE);
     close(+wid[1], RIBBON.WID0); close(+wid[2], RIBBON.WID_RATE);
-    close(+varr[1], RIBBON.ALONG_VAR0); close(+varr[2], RIBBON.ALONG_VAR_RATE);
+    close(+varr[1], RIBBON.LEN_GROW_T);
+    assert.match(src, /u_flare_len\.value = FG\.ribbonLength0\(flareSite\.cls\)/, 'the page sets the ribbon length from the kernel, per class');
+    assert.match(src, /u_flare_len:\s*\{ value: FG\.ribbonLength0\('M'\) \}/, 'and initialises it from the kernel');
     close(+dec[1], RIBBON.DECAY_T);
     close(ribbonSeparation(100), 0.020 + 100 * 2.5e-5); close(ribbonWidth(100), 0.005 + 100 * 6e-6);
-    close(ribbonAlongSigma(0), Math.sqrt(0.10)); close(ribbonDecay(175), Math.exp(-1));
+    close(ribbonAlongSigma(0, 'X'), RIBBON.LEN0 * CLASS_FACTOR.X); close(ribbonDecay(175), Math.exp(-1));
+    close(ribbonAlongSigma(RIBBON.LEN_GROW_T, 'M') ** 2, 2 * ribbonLength0('M') ** 2, 1e-12, 'σ² doubles in LEN_GROW_T');
+});
+
+await ok('ribbon length is class-scaled and of flare size (the legacy constant was 440 Mm for every class)', () => {
+    const RSUN_MM = 695.7, len = (s) => 2 * s * RSUN_MM;          // 1/e point to 1/e point, Mm
+    const X = len(ribbonLength0('X')), M = len(ribbonLength0('M')), C = len(ribbonLength0('C'));
+    assert.ok(C < M && M < X, 'a bigger flare has longer ribbons');
+    assert.ok(X > 100 && X < 250, `X-class ribbons ${X.toFixed(0)} Mm`);
+    assert.ok(C > 40 && C < 120, `C-class ribbons ${C.toFixed(0)} Mm`);
+    // aspect: length over the full onset separation
+    const aspect = (s) => 2 * s / (2 * ribbonSeparation(0));
+    assert.ok(aspect(ribbonLength0('X')) < 6.5, 'an X arcade is a few times longer than it is wide');
+    // NEGATIVE CONTROL — the constant it replaced fails both.
+    assert.ok(len(RIBBON_LEN_LEGACY) > 400, 'legacy: 440 Mm ribbons');
+    assert.ok(aspect(RIBBON_LEN_LEGACY) > 15, 'legacy: a 16:1 spine');
 });
 
 // ── Arcade + plume ───────────────────────────────────────────────────────
@@ -336,6 +353,58 @@ await ok('siteOnDisk2D: north up, west right, canvas y down; far side invisible;
     const n = siteOnDisk2D(90 * DEG, 0); close(n.y, -1, 1e-12); close(n.angle, -Math.PI / 2, 1e-12);
     const ne = siteOnDisk2D(45 * DEG, 45 * DEG); assert.ok(ne.x > 0 && ne.y < 0 && ne.angle < 0 && ne.angle > -Math.PI / 2, 'upper-right quadrant');
     assert.ok(!siteOnDisk2D(0, 180 * DEG).visible);
+});
+
+await ok('arcadeShells: a NESTED arcade from the same laws — newest loops outermost, earliest most sheared', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const base = { latRad: 14 * DEG, lonRad: 28 * DEG, pilAngle: FG.pilAngleRad(14 * DEG), cls: 'X', n: 13 };
+    const at = (t) => FG.arcadeShells({ ...base, t });
+    // Nothing before onset; one generation at first; more with time; never more than stations × generations.
+    assert.equal(at(0).length, 0);
+    const n5 = at(5).length, n60 = at(60).length, n300 = at(300).length;
+    assert.ok(n5 >= 1 && n5 < n60 && n60 < n300, `${n5} ${n60} ${n300}`);
+    assert.ok(n300 <= 13 * FG.ARCADE.MAX_GENERATIONS);
+    for (const L of at(300)) {
+        // Each loop is the kernel's own laws at ITS formation time — nothing new.
+        const tau = Math.max(L.tForm, 0);
+        const sep = FG.ribbonSeparation(tau);
+        const half = Math.acos(Math.max(-1, Math.min(1, vec.dot(L.footA, L.footB)))) / 2;
+        const want = Math.atan(sep * Math.hypot(1, FG.arcadeShear(tau, false)));
+        close(half, want, 2e-3, 'footpoint half-separation = ribbonSeparation × √(1 + shear²)');
+        const h = L.apexR - 1, h0 = FG.arcadeHeight(tau, 'X');
+        assert.ok(Math.abs(h / h0 - 1) <= FG.ARCADE.HEIGHT_JITTER + 1e-9, `height ${h} vs ${h0}`);
+        assert.ok(L.age > 0 && L.alpha > 0 && L.alpha <= 1);
+        for (const p of L.pts) assert.ok(vec.norm(p) >= 1 - 1e-12, 'no point below the photosphere');
+        close(vec.norm(L.pts[0]), 1, 1e-12); close(vec.norm(L.pts[L.pts.length - 1]), 1, 1e-12);
+    }
+    // Within a station: later generations are younger, rooted further apart, and less sheared.
+    const st = at(300).filter((L) => L.station === 6).sort((a, b) => a.generation - b.generation);
+    assert.ok(st.length >= 4);
+    for (let k = 1; k < st.length; k++) {
+        assert.ok(st[k].age < st[k - 1].age, 'younger outward');
+        assert.ok(vec.dot(st[k].footA, st[k].footB) < vec.dot(st[k - 1].footA, st[k - 1].footB), 'feet further apart');
+    }
+    assert.ok(FG.arcadeShear(st[0].tForm) > FG.arcadeShear(st[st.length - 1].tForm));
+    // The brightening ZIPS along the PIL: the centre lights before the ends.
+    const early = at(20), stations = new Set(early.map((L) => L.station));
+    assert.ok(stations.has(6) && !stations.has(0) && !stations.has(12), `stations lit at t=20: ${[...stations]}`);
+    // The arcade keeps growing as long as the ribbons do (the fixed-cadence version stopped at t ≈ 150).
+    const top = (t) => Math.max(...at(t).map((L) => L.apexR - 1));
+    assert.ok(top(320) > top(150) * 1.03, `${top(150)} → ${top(320)}`);
+    assert.ok(FG.arcadeFormTime(0) === 0 && FG.arcadeFormTime(6) > 300 && FG.arcadeFormTime(6) < 320);
+    // DETERMINISTIC: the same flare draws the same arcade, and a loop never changes shape between frames.
+    assert.deepEqual(at(200).map((L) => L.pts[12]), at(200).map((L) => L.pts[12]));
+    const a = at(200).find((L) => L.station === 4 && L.generation === 2), b = at(260).find((L) => L.station === 4 && L.generation === 2);
+    // (its feet do not move; only the along-PIL envelope σ(t) rescales the station spacing slightly)
+    close(a.apexR, b.apexR, 1e-12, 'a formed loop keeps its height');
+    close(a.tForm, b.tForm, 1e-12);
+    // A different site is a different arcade; float noise in the same site is not.
+    assert.equal(FG.arcadeSeed(14 * DEG, 28 * DEG), FG.arcadeSeed(14 * DEG + 1e-9, 28 * DEG - 1e-9));
+    assert.notEqual(FG.arcadeSeed(14 * DEG, 28 * DEG), FG.arcadeSeed(15 * DEG, 28 * DEG));
+    // NEGATIVE CONTROL: arcadeLoops (one generation) has no spread of heights or ages at all.
+    const flat = FG.arcadeLoops({ ...base, t: 300 });
+    assert.ok(new Set(flat.map((L) => L.apexR.toFixed(9))).size === 1, 'the single-generation arcade is one height');
+    assert.ok(new Set(at(300).map((L) => L.apexR.toFixed(4))).size > 20, 'the nested arcade is not');
 });
 
 console.log(`\n${passes} passed, ${failures} failed`);

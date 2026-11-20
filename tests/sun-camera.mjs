@@ -14,7 +14,7 @@ import {
     fitDistance, fillAt, equivalentDistance, safeFrame, heroFraming,
     sphToVec, vecToSph, shortAngle, makePose, poseFromCamera, posePosition, ease, lerpPose,
     sampleFlight, flightDuration, Flight, hop, hopSeconds,
-    heroPose, approachShot, limbPanShot, flareShot, coronaShot, orbitShot, cinematicOrder, SHOT_TITLES,
+    heroPose, approachShot, limbPanShot, flareShot, FLARE_FILL, FLARE_MIN_R, coronaShot, orbitShot, cinematicOrder, SHOT_TITLES,
 } from '../js/sun-camera.js';
 import { observerBasis, OFF_AXIS_FULL_DEG } from '../js/sun-offlimb.js';
 
@@ -186,6 +186,26 @@ ok('the flare shot looks at the site from the Earth side, never past the Earth l
     const x = flareShot(makePose({ r: 6 }), { site: sphToVec(0.5, 0.2, 1), earth, cls: 'X' })[1].pose;
     const c = flareShot(makePose({ r: 6 }), { site: sphToVec(0.5, 0.2, 1), earth, cls: 'C' })[1].pose;
     assert.ok(x.r > c.r, 'a bigger flare is framed wider');
+});
+
+ok('with the flare\'s own length the shot is DERIVED: that length fills FLARE_FILL of the frame', () => {
+    const earth = observerBasis(0.05).normal;
+    const site = sphToVec(30 * DEG, 12 * DEG, 1);
+    const frac = (pose, len) => {
+        const cam = posePosition(pose);
+        const D = Math.hypot(cam[0] - pose.target[0], cam[1] - pose.target[1], cam[2] - pose.target[2]);
+        return len / (2 * D * Math.tan(pose.fov * DEG / 2));
+    };
+    for (const [cls, len] of [['X', 0.2185], ['M', 0.1615]]) {
+        const p = flareShot(makePose({ r: 6 }), { site, earth, cls, length: len })[1].pose;
+        assert.ok(near(frac(p, len), FLARE_FILL, 1e-9), `${cls}: ${frac(p, len)}`);
+        // NEGATIVE CONTROL — the typed distance framed a real-size flare at a fraction of that.
+        const legacy = flareShot(makePose({ r: 6 }), { site, earth, cls })[1].pose;
+        assert.ok(frac(legacy, len) < 0.75 * FLARE_FILL, `${cls} legacy fill ${frac(legacy, len)}`);
+    }
+    // A small flare at the limb would put the camera in the arcade: it is held off.
+    const limb = flareShot(makePose({ r: 6 }), { site: sphToVec(85 * DEG, 5 * DEG, 1), earth, cls: 'C', length: 0.114 });
+    assert.ok(limb[1].pose.r >= FLARE_MIN_R - 1e-12 && limb[2].pose.r >= MIN_DISTANCE);
 });
 
 ok('the corona pull-back distances are derived from the lens and the instruments\' reach', () => {
