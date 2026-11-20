@@ -203,6 +203,14 @@ export const PIPELINES = [
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
       notes: 'B2 of the Bz engine: the fused L1 field carried to the bow-shock nose by a phase-front delay (multi-spacecraft lags, else minimum-variance, else the flat delay — the method is named per row) and the dayside reconnection rate it implies (Milan 2012 in kV; Newell 2007 beside it; Siscoe-Hill saturation with UNVERIFIED coefficients, flagged in the payload). Rows are ordered by ARRIVAL time and tagged ESTIMATED / FORECAST. Degrades without 5xx: magnetometers down = freshness:expired; plasma or ephemerides down = freshness:stale with reasons [no_plasma] / [ephemerides_unavailable] and flux:null — a nominal speed is never substituted. The l1-plasma feed is still UNVERIFIED; its schema report rides in plasma_feed.' },
 
+    { id: 'bz-geo',             label: 'Bz engine · GOES residual + ledger',
+      endpoint: '/api/bz/geo',
+      probePath: '/api/bz/geo?summary=1',
+      category: 'space-weather', upstream: 'NOAA GOES MAG + SWPC RTSW',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B3 of the Bz engine: GOES-East/West magnetometers as a residual against IGRF in the satellites\' own E/P/N frame (js/bz/geo-residual.js — frame and nominal slots confirmed against production), plus the first interior LEDGER: the Hp residual\'s variation predicted from the wind that has arrived, scored against the magnetometer beside the same prediction on a nominal wind. Arcjet minutes + a 10-min guard are excluded. Degrades without 5xx: GOES down = freshness:expired + reasons:[goes_mag_unavailable]; L1 chain down = freshness:stale, the measured residual still returned, ledger empty. The magnetopause-current coefficients are UNVERIFIED and flagged in the payload.' },
+
     { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
       endpoint: '/api/bz/feeds?feed=geo-mag',
       probePath: '/api/bz/feeds?feed=geo-mag&meta=1',

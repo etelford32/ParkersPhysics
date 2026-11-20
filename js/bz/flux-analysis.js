@@ -223,8 +223,14 @@ export function analyzeFlux({ mag, ephem = null, plasma = null, nowMs, minutes =
         rows: tr.map((i) => [new Date(order.arrivalMs[i]).toISOString(), kindOf(i) === 'FORECAST' ? 'F' : 'E',
             r1(milan[i]), r1(sig[i]), r1(newell[i]), r2(fused.bz[i]), r1(delays[i] / 60)]) };
 
+    // The arrived wind, unrounded, for the rungs below (geo-analysis.js). Routes strip it.
+    const _series = { arrivalMs: rows.map((i) => order.arrivalMs[i]), speed: rows.map((i) => speedUsed[i]),
+        density: rows.map((i) => densUsed[i]), bz: rows.map((i) => fused.bz[i]), by: rows.map((i) => fused.by[i]),
+        milanKv: rows.map((i) => milan[i]) };
+
     return {
         ...l1,
+        _series,
         plasma: { spacecraft: plasmaSc, is_reference: plasmaSc === ref, speed_held_minutes: heldSpeed,
             vector_velocity: !!lastInfo?.vectorVelocity },
         propagation: {

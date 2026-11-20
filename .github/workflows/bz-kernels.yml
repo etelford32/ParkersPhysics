@@ -18,6 +18,7 @@ on:
       - 'js/bz/**'
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
+      - 'js/geomag/igrf.js'
       - 'tests/helpers/bz-planted-wind.mjs'
       - 'js/flux-rope-noise.js'
       - 'api/_lib/bz-fetch.js'
@@ -31,6 +32,7 @@ on:
       - 'js/bz/**'
       - 'js/geomag/dipole.js'
       - 'js/geomag/geospace.js'
+      - 'js/geomag/igrf.js'
       - 'tests/helpers/bz-planted-wind.mjs'
       - 'js/flux-rope-noise.js'
       - 'api/_lib/bz-fetch.js'
@@ -64,3 +66,5 @@ jobs:
         run: node tests/bz-l1.mjs
       - name: propagation + flux — phase-front delay, coupling functions, route
         run: node tests/bz-flux.mjs
+      - name: geosynchronous rung — GOES residual, arcjets, ledger, route
+        run: node tests/bz-geo.mjs

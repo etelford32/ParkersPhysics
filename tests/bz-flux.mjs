@@ -279,7 +279,8 @@ function build(opts = {}) {
     assert.equal(fx.siscoe_hill_verified, false);
     assert.ok(fx.opened_last_hour.gwb > 0 && fx.opened_last_hour.covered_min > 50);
     assert.equal(a.plasma.is_reference, true);
-    assert.ok(JSON.stringify({ ...a, trace: null, spectrum: null, flux: { ...fx, trace: null } }).length < 8000);
+    assert.ok(JSON.stringify({ ...a, _series: null, trace: null, spectrum: null, flux: { ...fx, trace: null } }).length < 8000);
+    assert.ok(a._series.arrivalMs.length > 1000 && a._series.arrivalMs.every((t, i, arr) => i === 0 || t > arr[i - 1]), "the hand-off series is arrival-ordered");
     ok('kinds split by arrival time (E…F), horizon = delay − age, rate = Milan of the row\'s own inputs');
 }
 {

@@ -65,7 +65,7 @@ export function plantedFeeds({ field, normal, speedKms = 400, densityCc = 5, min
                 bx_gsm: b[0], by_gsm: b[1], bz_gsm: b[2], bx_gse: e[0], by_gse: e[1], bz_gse: e[2], bt: Math.hypot(...b), overall_quality: 0 });
             if (!plasmaFor || plasmaFor.includes(sc)) {
                 wind.push({ time_tag: new Date(t).toISOString().replace('Z', ''), source: sc, active: sc === active,
-                    proton_speed: speedKms + R.g(), proton_density: densityCc + 0.05 * R.g(), proton_temperature: 2.4e5,
+                    proton_speed: speedKms + R.g(), proton_density: (typeof densityCc === 'function' ? densityCc(i) : densityCc) + 0.05 * R.g(), proton_temperature: 2.4e5,
                     ...(vector ? { proton_vx_gse: -speedKms, proton_vy_gse: 0, proton_vz_gse: 0 } : {}) });
             }
         }

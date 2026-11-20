@@ -79,6 +79,7 @@ export default async function handler(req) {
     } : { candidates: plasma.candidates };
 
     delete data.trace;                       // the L1 trace lives on /api/bz/l1
+    delete data._series;                     // internal hand-off to the rungs below
     if (summary) { if (data.flux) delete data.flux.trace; delete data.spectrum; }
     return jsonOk({
         ...base,
