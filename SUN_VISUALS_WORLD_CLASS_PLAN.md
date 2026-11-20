@@ -1186,6 +1186,41 @@ owner.*
     into the continuous bright ridge a real arcade shows — a spine through
     the newest loops' tops is the next step there; the rope has no leading
     edge or sheath; everything above is a software-rasteriser result.
+- **2026-11-22 — plasma moves along the field (owner: "how can we show more
+  flux and plasma behaviors that are realistic?").** Until now every strand
+  was lit end to end the moment it existed: the arcade changed shape and
+  colour, but nothing FLOWED, and nothing connected the arcade to the rope
+  above it. Three behaviours went in, targets first (six rows; the shipped
+  model scored 88.4 with them off, 100 over 39 rows with them on; the old
+  laws 38.2).
+  - **Evaporation.** A new loop fills from both feet at 300 km/s, with a
+    brighter front at the edge of what has filled. An X-class loop takes
+    about 1.4 minutes. Each loop fills on its own age and its own length, so
+    the arcade lights up loop by loop from the ribbons upward.
+  - **Coronal rain.** Nine minutes after a loop forms, when it has cooled,
+    clumps begin to run down both legs at 80 km/s — 0.58 of free fall from
+    the arcade's top, as rain is observed to be slower than gravity allows.
+    The erupting rope's filament drains down its legs the same way.
+  - **The current sheet.** Between the arcade's top and the rope's underside
+    the page now draws the layer the field reconnects in: a fan of faint hot
+    lines, with blobs leaving the reconnection point both ways at 450 km/s —
+    down onto the arcade, up into the rope.
+  - **How it is built.** One function (`strandFlowGain`) in JS and in GLSL,
+    interpolated into the strand shader and transliterated back by the gate,
+    the way the J-shaped ribbons are. With the flows off it returns exactly
+    1, so the old picture is one switch away (`?flow=0`).
+  - **Two things the first frames showed.** The clump pattern was too sharp
+    — every loop and sheet line drew as a string of beads — and is now soft
+    (about half brightness between clumps, about double at them). And a
+    pattern's travel along something being STRETCHED has to be an integral:
+    written as speed × time ÷ length it runs backwards while the rope's legs
+    lengthen faster than the plasma moves.
+  - **Not done:** the reconnection rate is not tied to the rope's
+    acceleration (the ribbons part fastest at onset; the rope accelerates
+    8.5 minutes later) — real flares have them rise and fall together, and
+    fixing it means changing the ribbon law, so it is on the backlog with
+    its source. Supra-arcade downflows are not drawn. All six ranges are
+    from memory and unverified, like the rest. Software rasteriser only.
 ---
 
 ## 1. Scope & locked decisions

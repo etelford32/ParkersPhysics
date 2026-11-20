@@ -41,7 +41,7 @@
  * pass its own `simUnitsPerS`.
  */
 
-import { FLARE_MODEL, DEG, vec } from './flare-geometry.js';
+import { FLARE_MODEL, DEG, vec, polylineLength } from './flare-geometry.js';
 import { SIM_UNITS_PER_S } from './sun-flare-director.js';
 
 /** Solar radius, Mm — IAU 2015 nominal (Resolution B3). */
@@ -133,6 +133,11 @@ export function turningDeg(curve) {
  * Measure a model. Returns plain numbers in physical units; nothing here is a
  * score. X-class and non-complex unless the name says otherwise.
  */
+
+/** The early arcade's loops, for the fill time (the newest of them is the one still filling). */
+function earlyLoopsForFlow(model, sim) {
+    return model.arcadeShells({ ...MEASURE_SITE, t: sim(EPOCH.early), cls: 'X', n: 11, samples: 48 });
+}
 export function measure(model = FLARE_MODEL, { simUnitsPerS = SIM_UNITS_PER_S } = {}) {
     const sim = (s) => s * simUnitsPerS;
     const Mm = (rad) => rad * RSUN_MM;
@@ -229,7 +234,23 @@ export function measure(model = FLARE_MODEL, { simUnitsPerS = SIM_UNITS_PER_S } 
         }
     }
 
+    // ── Plasma along the field ────────────────────────────────────────────
+    // Speeds in km/s from the model's own parameters; the fill time is for the newest loop of the early
+    // arcade (its own half-length); the rain speed is also given as a fraction of free fall from the top
+    // of the late arcade (g☉ = 274 m/s²) — coronal rain is observed to fall SLOWER than that.
+    const FLW = model.params.flow;
+    const newest = [...earlyLoopsForFlow(model, sim)].sort((a, b) => a.age - b.age)[0];
+    const halfLen = newest ? 0.5 * polylineLength(newest.pts) : 0;
+    const lateTopM = Math.max(0, ...lateLoops.map((L) => L.apexR - 1)) * RSUN_MM * 1e6;
+    const freeFallKms = Math.sqrt(2 * 274 * lateTopM) / 1000;
+
     return {
+        flowEvapKms: FLW.evap * KMS,
+        flowFillMin: FLW.evap > 0 && halfLen > 0 ? halfLen / FLW.evap / simUnitsPerS / 60 : 0,
+        flowRainKms: FLW.rain * KMS,
+        flowRainFreeFall: freeFallKms > 0 ? FLW.rain * KMS / freeFallKms : 0,
+        flowRainOnsetMin: FLW.rain > 0 ? FLW.rainOnset / simUnitsPerS / 60 : 0,
+        sheetOutKms: hasRope ? FLW.sheetOut * KMS : 0,
         ropeFanDeg, ropeLegGap,
         ropeFeetInHooks: feetInHooks,
         ropeAboveArcade: ropeAbove,
@@ -343,6 +364,18 @@ export const TARGETS = Object.freeze([
       source: 'An erupting rope over-expands sideways into a broad loop; graduated-cylindrical-shell fits to CMEs give half-angles α of roughly 10–40°, and the axis spans 2α (Thernisien, Vourlidas & Howard 2009, Sol. Phys. 256, 111). Range: our encoding, from memory.', verified: UNVERIFIED },
     { id: 'rope_legs', key: 'ropeLegGap', label: 'Rope: clear gap between its legs ÷ apex height', unit: '', lo: 0.05, hi: 1.5, scale: 'lin', tol: 0.1, weight: 1,
       source: 'A flux rope is one tube anchored at two feet, with the cavity between its legs (the three-part CME: Illing & Hundhausen 1985, JGR 90, 275). A tube fatter than the gap between its own legs is not a shape a field can take.', verified: UNVERIFIED },
+    { id: 'flow_evap', key: 'flowEvapKms', label: 'Flow: evaporation speed up a new loop', unit: 'km/s', lo: 100, hi: 500, scale: 'log', tol: 1.2, weight: 1,
+      source: 'Chromospheric evaporation: hot (10 MK) upflows of roughly 100–400 km/s in the impulsive phase (Milligan & Dennis 2009, ApJ 699, 968; Young et al. 2015, ApJ 799, 218). Range from memory.', verified: UNVERIFIED },
+    { id: 'flow_fill', key: 'flowFillMin', label: 'Flow: time for a new X-class loop to fill', unit: 'min', lo: 0.5, hi: 6, scale: 'log', tol: 1.0, weight: 0.5,
+      source: 'A loop half-length divided by the evaporation speed; loops brighten in the hot channels within minutes of their footpoints (the Neupert timing). Range: our encoding.', verified: UNVERIFIED },
+    { id: 'flow_rain', key: 'flowRainKms', label: 'Flow: coronal rain speed down a cooled loop', unit: 'km/s', lo: 30, hi: 150, scale: 'log', tol: 1.0, weight: 1,
+      source: 'Coronal rain clumps fall at tens to ~150 km/s, mean near 70 km/s (Antolin & Rouppe van der Voort 2012, ApJ 745, 152; flare rain: Scullion et al. 2016, ApJ 833, 184). From memory.', verified: UNVERIFIED },
+    { id: 'flow_rain_ff', key: 'flowRainFreeFall', label: 'Flow: rain speed ÷ free fall from the arcade top', unit: '', lo: 0.2, hi: 0.85, scale: 'lin', tol: 0.2, weight: 0.5,
+      source: 'Rain is sub-ballistic: it falls with less than the Sun\'s gravitational acceleration (Antolin & Rouppe van der Voort 2012).', verified: UNVERIFIED },
+    { id: 'flow_rain_onset', key: 'flowRainOnsetMin', label: 'Flow: rain begins this long after a loop forms', unit: 'min', lo: 3, hi: 30, scale: 'log', tol: 1.0, weight: 0.5,
+      source: 'Rain appears once a flare loop has cooled through the EUV channels, minutes to tens of minutes after it formed (Scullion et al. 2016). Range: our encoding.', verified: UNVERIFIED },
+    { id: 'sheet_out', key: 'sheetOutKms', label: 'Current sheet: outflow speed from the reconnection point', unit: 'km/s', lo: 150, hi: 1200, scale: 'log', tol: 1.2, weight: 1,
+      source: 'Blobs and plasmoids move along post-eruption current sheets at a few hundred to ~1000 km/s, up and down from a reversal point (Ko et al. 2003, ApJ 594, 1068; Savage et al. 2010, ApJ 722, 329; Takasao et al. 2012, ApJ 745, L6). From memory.', verified: UNVERIFIED },
     { id: 'class_order', key: 'classOrdered', label: 'C < M < X in length, separation and height', unit: '', lo: 1, hi: 1, scale: 'lin', weight: 1,
       source: 'Ribbon area, reconnected flux and flare size rise with GOES class (Kazachenko et al. 2017).', verified: UNVERIFIED },
 ]);
@@ -364,6 +397,10 @@ export const OPEN_TARGETS = Object.freeze([
       source: 'McKenzie & Hudson 1999, ApJ 519, L93.' },
     { id: 'looptop_ridge', what: 'The tops of a real arcade\'s hot loops merge into one continuous bright ridge (thousands of unresolved loops); ours are a few dozen drawn loops whose tops are separate. A spine through the newest loops\' tops is the candidate.',
       source: 'Bright looptop sources and the ridge they form along a flare arcade in soft X-rays and the hot EUV channels (e.g. Masuda et al. 1994; Warren et al. 2011, on the 131 Å arcade). From memory.' },
+    { id: 'recon_rate', what: 'The ribbons sweep magnetic flux, and the rate of that sweep (the reconnection rate) rises and falls WITH the rope\'s acceleration. In this model the ribbons part fastest at onset while the rope accelerates 8.5 minutes later: the two laws are not yet tied. Tying them changes the ribbon-separation law and several rows now in range, so it is its own pass.',
+      source: 'Reconnection rate from ribbon motion is temporally correlated with CME / filament acceleration (Qiu et al. 2004, ApJ 604, 900; Temmer et al. 2008). From memory.' },
+    { id: 'sheet_downflows', what: 'The current sheet is a fan of lines with blobs; the dark tadpole-shaped voids that descend through the hot plasma above an arcade are not drawn.',
+      source: 'McKenzie & Hudson 1999, ApJ 519, L93; Savage et al. 2012.' },
     { id: 'rope_front', what: 'An erupting rope drives a bright leading edge and sheath ahead of it (the three-part CME: front, cavity, core); only the cavity\'s field lines and the core filament are drawn.',
       source: 'Illing & Hundhausen 1985, JGR 90, 275 (three-part structure). From memory.' },
 ]);

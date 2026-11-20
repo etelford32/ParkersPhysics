@@ -7473,6 +7473,9 @@ function _ropeWeights() {
     if (vm < 5.5) return { hot: 1.00, cool: 0.10 };     // 131 Å: the hot channel
     return { hot: 0, cool: 0 };                          // magnetogram: no emission to draw
 }
+// `?flow=0` — the A/B for plasma moving along the strands (loops filling and raining, the filament draining,
+// the current sheet under the rope): off = every strand lit end to end, as before 2026-11-22.
+if (new URLSearchParams(location.search).get('flow') === '0') { flareArcade.setFlowEnabled(false); flareRope.setFlowEnabled(false); }
 {   // `?flaremodel=v1|v2` — the shape model A/B (see flareModel above).
     const want = (new URLSearchParams(location.search).get('flaremodel') || '').toLowerCase();
     if (want === 'v1' || want === 'v2') setFlareModel(want);

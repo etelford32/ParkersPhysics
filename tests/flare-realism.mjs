@@ -160,6 +160,15 @@ ok('rope measurements: speeds and the acceleration peak in km/s from the model\'
     const pin = measure(FG.makeFlareModel({ rope: { spread: 0 } }));
     assert.ok(pin.ropeFanDeg < 15 && pin.ropeLegGap < 0, `hairpin: fan ${pin.ropeFanDeg.toFixed(1)}°, leg gap ${pin.ropeLegGap.toFixed(3)}`);
     assert.ok(measure(FG.makeFlareModel({ rope: { spread: 0.6 } })).ropeFanDeg > m.ropeFanDeg + 5, 'more spread, a wider fan');
+    // PLASMA ALONG THE FIELD: speeds are the model's own parameters in km/s; the fill time is a loop's half-length over the
+    // evaporation speed; the rain is slower than free fall from the arcade's top. With no flows (v1) every one of them is 0.
+    const FLW = M.params.flow;
+    assert.ok(near(m.flowEvapKms, FLW.evap * KMS, 1e-9) && near(m.flowRainKms, FLW.rain * KMS, 1e-9) && near(m.sheetOutKms, FLW.sheetOut * KMS, 1e-9));
+    assert.ok(m.flowFillMin > 0.5 && m.flowFillMin < 6 && m.flowRainFreeFall > 0.2 && m.flowRainFreeFall < 0.85, `fill ${m.flowFillMin.toFixed(2)} min, rain at ${m.flowRainFreeFall.toFixed(2)} of free fall`);
+    assert.ok(near(measure(FG.makeFlareModel({ flow: { evap: 2 * FLW.evap } })).flowFillMin, m.flowFillMin / 2, 1e-9), 'twice the speed, half the fill time');
+    assert.ok(near(m.flowRainOnsetMin, FLW.rainOnset / SIM_UNITS_PER_S / 60, 1e-12));
+    for (const k of ['flowEvapKms', 'flowFillMin', 'flowRainKms', 'flowRainFreeFall', 'flowRainOnsetMin', 'sheetOutKms']) assert.equal(a[k], 0, k);
+    assert.equal(measure(FG.makeFlareModel({ rope: { speed: 0 } })).sheetOutKms, 0, 'no rope, no sheet to flow along');
 });
 
 ok('every scored row moves when some parameter moves (no decorative rows)', () => {
@@ -224,7 +233,8 @@ ok('NEGATIVE CONTROL: the laws shipped until 2026-11-21 score lower, on the rows
     assert.ok(v1.score < now.score - 0.1, `v1 ${(v1.score * 100).toFixed(1)} vs shipped ${(now.score * 100).toFixed(1)}`);
     const row = (c, id) => c.metrics.find((x) => x.id === id);
     for (const id of ['shear_onset', 'shear_late', 'loop_aspect', 'sep_decel', 'sep_onset', 'apex_onset', 'class_order', 'j_hook', 'j_double', 'j_size', 'cusp_new', 'shrinkage',
-        'rope_feet', 'rope_above', 'rope_slow', 'rope_accel', 'rope_accel_t', 'rope_speed', 'rope_twist', 'rope_aspect', 'rope_fan', 'rope_legs'])
+        'rope_feet', 'rope_above', 'rope_slow', 'rope_accel', 'rope_accel_t', 'rope_speed', 'rope_twist', 'rope_aspect', 'rope_fan', 'rope_legs',
+        'flow_evap', 'flow_fill', 'flow_rain', 'flow_rain_ff', 'flow_rain_onset', 'sheet_out'])
         assert.ok(!row(v1, id).pass, `v1 should miss "${id}" (it reads ${row(v1, id).value})`);
     // The measured values that are the reason for each change, pinned.
     assert.ok(near(row(v1, 'shear_onset').value, 29.68, 0.01), 'v1 loops started 30° sheared — the surveys say 50–80°');

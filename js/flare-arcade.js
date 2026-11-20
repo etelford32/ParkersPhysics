@@ -53,6 +53,14 @@
  * arcades look (soft in 131 / 94 Å, threaded in 171 Å), and it is what stops
  * a young arcade reading as a comb of identical hairlines.
  *
+ * PLASMA MOVES ALONG THE STRANDS. A strand's brightness is multiplied by the
+ * kernel's `strandFlowGain` (js/flare-geometry.js — ONE function in JS and in
+ * GLSL; this file interpolates the GLSL and never retypes it), driven per
+ * strand by `u_flow` = (mode, p1, p2, p3) and `u_flowK`: a new loop FILLS from
+ * its feet (evaporation, a brighter front at the edge), a cooled loop RAINS
+ * (clumps running down both legs). The numbers are the kernel's `loopFlow` for
+ * the loop's own age and length; with mode 0 the gain is exactly 1.
+ *
  * THE ARCADE HAS ITS OWN EXPOSURE CONTROL (`arcadeExposure`, PURE). Strands
  * ADD, so an arcade seen from close, or along its loops, piles tens of
  * strands on each pixel and the whole thing clips to flat white — colour
@@ -114,7 +122,7 @@ export function arcadeExposure(items, { gain = 1, target = AEC_TARGET, floor = A
 }
 
 /** Shared uniforms + material factory for `style: 'ribbon'`. */
-export function ribbonKit(THREE, { strandMm, minPx, gain, R, hotFuzz = 1 }) {
+export function ribbonKit(THREE, { strandMm, minPx, gain, R, hotFuzz = 1, flowGlsl = '' }) {
     const uniforms = {
         u_viewport:  { value: new THREE.Vector2(1280, 720) },    // drawing buffer, device px
         u_dpr:       { value: 1 },
@@ -136,8 +144,10 @@ export function ribbonKit(THREE, { strandMm, minPx, gain, R, hotFuzz = 1 }) {
             blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
         });
         // u_cool is PER LOOP (each has its own age); everything else is shared.
-        const own = { u_cool: { value: 0 } };
+        const own = { u_cool: { value: 0 }, u_flow: { value: new THREE.Vector4(0, 2, 0, 0) }, u_flowK: { value: 1 } };
         m.userData.cool = own.u_cool;
+        m.userData.flow = own.u_flow;       // (mode, p1, p2, p3) — the kernel's strandFlowGain arguments
+        m.userData.flowK = own.u_flowK;
         m.onBeforeCompile = (shader) => {
             Object.assign(shader.uniforms, uniforms, own);
             shader.vertexShader = shader.vertexShader
@@ -196,6 +206,9 @@ export function ribbonKit(THREE, { strandMm, minPx, gain, R, hotFuzz = 1 }) {
                 .replace('#include <common>', `#include <common>
     uniform float u_gain;
     uniform float u_cool;
+    uniform vec4 u_flow;
+    uniform float u_flowK;
+    ${flowGlsl}
     varying float vSide;
     varying float vArc;
     varying float vFloor;
@@ -220,11 +233,12 @@ export function ribbonKit(THREE, { strandMm, minPx, gain, R, hotFuzz = 1 }) {
         // the fold into a cap as wide as the ribbon — a blob at every looptop of a young arcade, brighter
         // than the loop it caps (measured). The strand fades into the fold instead.
         diffuseColor.a   *= 1.0 - smoothstep(0.25, 1.0, vTurn);
+        ${flowGlsl ? 'diffuseColor.a *= strandFlowGain(clamp(vArc, 0.0, 1.0), u_flow.x, u_flow.y, u_flow.z, u_flow.w, u_flowK);' : ''}
         diffuseColor.rgb *= u_gain * (1.0 + 0.8 * core);
     }`);
         };
         // The fuzz is baked into the program text, so it is part of the program's identity (the rope's kit has none).
-        m.customProgramCacheKey = () => 'flare-arcade-ribbon-v5-fuzz' + hotFuzz.toFixed(2);
+        m.customProgramCacheKey = () => 'flare-arcade-ribbon-v6-fuzz' + hotFuzz.toFixed(2) + (flowGlsl ? '-flow' : '');
         return m;
     }
     return { uniforms, material, onBeforeRender };
@@ -303,7 +317,8 @@ export function createFlareArcade({
     const loops = [];
     const ribbon = style === 'ribbon';
     const SAMPLES = ribbon ? RIBBON_SAMPLES : LOOP_SAMPLES;
-    const kit = ribbon ? ribbonKit(THREE, { strandMm, minPx, gain, R, hotFuzz: HOT_FUZZ }) : null;
+    const kit = ribbon ? ribbonKit(THREE, { strandMm, minPx, gain, R, hotFuzz: HOT_FUZZ, flowGlsl: FG.STRAND_FLOW_GLSL ?? '' }) : null;
+    let flowOn = true, lastFlow = { filling: 0, raining: 0 };
     // ── The exposure control (header). Runs once per rendered frame, from the first loop drawn. ──
     let baseGain = gain, aecOn = true, exposure = 1, lastAec = { stack: 0, exposure: 1, light: 0, areaPx: 0 }, aecFrame = -1;
     const _v = new THREE.Vector3(), _size = new THREE.Vector2();
@@ -440,6 +455,8 @@ export function createFlareArcade({
     /** Ribbon style: the strands' HDR gain (the look gate's negative control drives it). */
     function setGain(g) { if (kit && Number.isFinite(g)) { baseGain = g; kit.uniforms.u_gain.value = g * exposure; } }
     /** The exposure control on/off (off = the gain as set, whatever the stacking): the A/B and the gate's negative control. */
+    /** The flows along the loops on/off (off = every loop lit end to end, as before 2026-11-22): the A/B and the gates' control. */
+    function setFlowEnabled(on) { flowOn = !!on; }
     function setAutoExposure(on) { aecOn = !!on; if (!aecOn && kit) { exposure = 1; kit.uniforms.u_gain.value = baseGain; } }
 
     function rebuildLoops(t) {
@@ -501,6 +518,9 @@ export function createFlareArcade({
             line.geometry.attributes.position.needsUpdate = true;
             line.geometry.computeBoundingSphere();
             line.userData.weight = L.weight;
+            // Half the loop's own length (kernel units), and a fixed offset so no two loops rain in step.
+            line.userData.halfLength = FG.polylineLength ? 0.5 * FG.polylineLength(L.pts) : 0.05;
+            line.userData.flowSeed = ((i * 0.6180339887) % 1) * 5.0;
             line.visible = true;
         }
         lastBuiltT = t;
@@ -554,6 +574,7 @@ export function createFlareArcade({
 
         if (builtVersion !== siteVersion || Math.abs(tFlare - lastBuiltT) >= rebuildEvery) rebuildLoops(tFlare);
         const flash = 0.35 + 0.65 * Math.min(1, intensity + decay);
+        let filling = 0, raining = 0;
         for (const line of loops) {
             if (!line.visible) continue;
             const L = line.userData.loop;
@@ -564,12 +585,24 @@ export function createFlareArcade({
             colOut.copy(HOT).lerp(COOL, cool);
             line.material.color.copy(colOut);
             if (line.material.userData.cool) line.material.userData.cool.value = cool;
+            if (line.material.userData.flow) {
+                // What is moving along this loop, from the kernel: filling from its feet, then raining.
+                const fl = flowOn && nested && L && LAW.loopFlow ? LAW.loopFlow({ age, halfLength: line.userData.halfLength }) : null;
+                if (fl) {
+                    line.material.userData.flow.value.set(1, fl.fill, fl.rain, fl.rainPhase + line.userData.flowSeed);
+                    line.material.userData.flowK.value = fl.clumps;
+                    if (fl.fill < 1.15) filling++;
+                    if (fl.rain > 0.02) raining++;
+                } else line.material.userData.flow.value.set(0, 2, 0, 0);
+            }
             const w = 0.35 + 0.65 * (line.userData.weight ?? 1);
             line.material.opacity = nested
                 // newest brightest; each loop dims as it cools and leaves the EUV bands
                 ? Math.min(1, showFlares * (L?.alpha ?? 1) * w * (YOUNG_FLOOR + YOUNG_GAIN * Math.exp(-age / AGE_DIM)) * (1 - smooth(AGE_OUT0, AGE_OUT1, age)) * (0.6 + 0.4 * flash))
                 : Math.min(1, loopAlpha * flash * w);
         }
+
+        lastFlow = { filling, raining };
 
         if (plumeOn && ps.alpha * showFlares > 0.005) {
             writePlume(ps);
@@ -591,7 +624,7 @@ export function createFlareArcade({
     }
 
     return {
-        group, setSite, update, setVisible, dispose, setModel, setGain, setPlumeEnabled, setAutoExposure,
+        group, setSite, update, setVisible, dispose, setModel, setGain, setPlumeEnabled, setAutoExposure, setFlowEnabled,
         get site() { return site ? { ...site, pairs: site.pairs ? site.pairs.length : 0 } : null; },
         get state() {
             const apexR = lastLoops.length ? Math.max(...lastLoops.map(L => L.apexR)) : null;
@@ -619,6 +652,8 @@ export function createFlareArcade({
                 // The exposure control: the gain actually drawn = gain × exposure; `stack` is the mean stacking it measured.
                 gain: ribbon ? baseGain : null, exposure: ribbon ? exposure : null, autoExposure: ribbon ? aecOn : null,
                 stack: ribbon ? lastAec.stack : null, hotFuzz: ribbon ? HOT_FUZZ : null,
+                // Plasma along the loops: how many are still filling from their feet, how many are raining.
+                flow: ribbon ? { on: flowOn, ...lastFlow } : null,
                 sunRadius: R,
             };
         },

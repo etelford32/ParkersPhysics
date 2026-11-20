@@ -236,12 +236,17 @@ test.describe('off-limb: the GOES/SUVI source', () => {
         expect(after.coverage).toBeGreaterThan(0.999);
 
         // Back again: the SDO frames were kept, so this must not re-fetch.
-        const before = hits.length;
+        // Counted on the two SDO off-limb channels only. `hits` is every /api/solar/aia request the page makes, and
+        // beside other workers an unrelated one (the coronagraph's c2/c3, a disc refresh) lands in this window: the
+        // whole-page count read 9 for 7 on the first attempt of two consecutive suite runs, then passed on retry.
+        const sdoFetches = () => hits.filter((h) => h === '304' || h === '131').length;
+        const before = sdoFetches();
         await page.evaluate(() => window.__sun.setOffLimbSource('sdo'));
         await page.waitForFunction(() => window.__sun.offLimb.sourceId === 'sdo', { timeout: BOOT_TIMEOUT_MS });
         const back = await page.evaluate(() => window.__sun.offLimbMesh.material.uniforms.u_geomA.value.z);
         expect(Math.abs(back - AIA_DISK_FRACTION) / AIA_DISK_FRACTION).toBeLessThan(0.03);
-        expect(hits.length).toBe(before);
+        expect(sdoFetches(), 'switching back re-uses the kept SDO frames').toBe(before);
+        expect(before, 'and they were fetched in the first place (else this check proves nothing)').toBeGreaterThanOrEqual(2);
         expect(errors).toEqual([]);
     });
 

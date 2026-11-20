@@ -336,6 +336,14 @@ export const FLARE_SHAPE_V2 = deepFreeze({
     rope: { speed: 4.64e-3, t0: 180, tau: 70, h0: 0.045, twist: 1.75, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0.7, fadeR: 2.5,
             spread: 0.40, spreadH: 0.5, filament: 0.45 },
     plume: { speed: 0.06, reach: 2.4 },
+    // PLASMA ALONG THE FIELD (R☉ per sim unit; 1 = 243 495 km/s at the page's 0.35 units per second).
+    //   evap      chromospheric evaporation: a new loop fills from both feet at this speed (300 km/s)
+    //   rain      coronal rain: once a loop has cooled, clumps drain down its legs at this speed (80 km/s)
+    //   rainOnset / rainRamp   loop age (sim units) at which rain begins, and how long it takes to set in
+    //   clumps    rain clumps per leg
+    //   sheetOut  outflow speed along the current sheet under the rope, both ways from the X-point (450 km/s)
+    //   sheetX    where along the sheet (0 arcade top … 1 rope underside) the flows part
+    flow: { evap: 1.232e-3, rain: 3.285e-4, rainOnset: 190, rainRamp: 60, clumps: 2.5, sheetOut: 1.848e-3, sheetX: 0.3, sheetClumps: 2 },
 });
 
 /** The laws shipped until 2026-11-21 — the reference every later set is scored against. Never edit. */
@@ -355,6 +363,7 @@ export const FLARE_SHAPE_V1 = deepFreeze({
     rope: { speed: 0, t0: 180, tau: 70, h0: 0.045, twist: 0, radius: 0.30, footAlong: 1, footRadius: 0.8, sigmoid: 0, fadeR: 2.5,
             spread: 0, spreadH: 0.5, filament: 0 },   // no rope (a particle plume stood in for it)
     plume: { speed: 0.06, reach: 2.4 },
+    flow: { evap: 0, rain: 0, rainOnset: 190, rainRamp: 60, clumps: 3.5, sheetOut: 0, sheetX: 0.3, sheetClumps: 4 },   // no flows: every loop lit end to end, always
 });
 
 /** The set the site ships. Change it only with a scorecard that did not go down. */
@@ -459,6 +468,80 @@ export function ribbonJ(a, c, sep, s0, rho, sweep) {
 }
 
 /** GLSL twin of ribbonJ (returns vec2(d, s)). Scalar-only on purpose: the gate transliterates it. No backticks. */
+/** Length of a polyline of 3-vectors. */
+export function polylineLength(pts) {
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]);
+    return L;
+}
+
+/**
+ * HOW A STRAND'S BRIGHTNESS MOVES ALONG IT — one function in two languages (this, and STRAND_FLOW_GLSL
+ * below, which the strand shader interpolates; tests/flare-geometry.mjs transliterates the GLSL back and
+ * runs it against this). `arc` is 0…1 along the strand. It returns a GAIN on the strand's own brightness.
+ *
+ * The clump pattern is deliberately SOFT (a floor of ~half the strand's brightness between clumps, peaks ~2×):
+ * the first version (floor 0.2, peaks 4×, 3.5–4 clumps) drew every loop and sheet line as a string of beads.
+ *
+ *   mode 0   nothing moves: 1.
+ *   mode 1   a LOOP (arc 0 and 1 are its feet). p1 = fill: each leg is lit from its foot up to p1 of the
+ *            way to the top, with a brighter front at the edge (the evaporation front); ≥ 1.15 is a full
+ *            loop and the gain is exactly 1. p2 = rain (0…1): clumps, `k` to a leg, moving toward the feet
+ *            as p3 (their travel, in clumps) grows.
+ *   mode 2   a SHEET (arc 0 its lower end). p1 = where the flows part; p2 = how much of the pattern shows;
+ *            p3 = travel: blobs move AWAY from p1 on both sides as it grows.
+ */
+export function strandFlowClump(x) {
+    const a = 0.5 + 0.5 * Math.sin(6.2831853 * x);
+    const b = 0.5 + 0.5 * Math.sin(6.2831853 * 2.37 * x + 1.3);
+    const c = a * b;
+    return 1.6 * c * (0.4 + 0.6 * c);
+}
+export function strandFlowGain(arc, mode, p1, p2, p3, k) {
+    const mix = (x, y, a) => x * (1 - a) + y * a;
+    const smoothstep = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    let g = 1.0;
+    const s = 2.0 * Math.min(arc, 1.0 - arc);
+    if (mode > 0.5 && mode < 1.5) {
+        const leg = arc < 0.5 ? 0.0 : 0.37;
+        const lit = 1.0 - smoothstep(p1 - 0.02, p1 + 0.06, s);
+        const d = (s - p1) / 0.07;
+        const front = p1 < 1.15 ? Math.exp(-d * d) : 0.0;
+        g = (lit + 1.6 * front) * mix(1.0, 0.5 + 1.0 * strandFlowClump(s * k + p3 + leg), p2);
+    }
+    if (mode > 1.5) {
+        const d2 = arc - p1;
+        const side = d2 < 0.0 ? 0.41 : 0.0;
+        g = mix(1.0, 0.45 + 1.1 * strandFlowClump(Math.abs(d2) * k - p3 + side), p2);
+    }
+    return g;
+}
+export const STRAND_FLOW_GLSL = /* glsl */`
+    float strandFlowClump(float x) {
+        float a = 0.5 + 0.5 * sin(6.2831853 * x);
+        float b = 0.5 + 0.5 * sin(6.2831853 * 2.37 * x + 1.3);
+        float c = a * b;
+        return 1.6 * c * (0.4 + 0.6 * c);
+    }
+    float strandFlowGain(float arc, float mode, float p1, float p2, float p3, float k) {
+        float g = 1.0;
+        float s = 2.0 * min(arc, 1.0 - arc);
+        if (mode > 0.5 && mode < 1.5) {
+            float leg = arc < 0.5 ? 0.0 : 0.37;
+            float lit = 1.0 - smoothstep(p1 - 0.02, p1 + 0.06, s);
+            float d = (s - p1) / 0.07;
+            float front = p1 < 1.15 ? exp(-d * d) : 0.0;
+            g = (lit + 1.6 * front) * mix(1.0, 0.5 + 1.0 * strandFlowClump(s * k + p3 + leg), p2);
+        }
+        if (mode > 1.5) {
+            float d2 = arc - p1;
+            float side = d2 < 0.0 ? 0.41 : 0.0;
+            g = mix(1.0, 0.45 + 1.1 * strandFlowClump(abs(d2) * k - p3 + side), p2);
+        }
+        return g;
+    }
+`;
+
 export const RIBBON_J_GLSL = /* glsl */`
     vec2 ribbonJ(float a, float c, float sep, float s0, float rho, float sweep) {
         if (sweep <= 0.0 || rho <= 0.0) return vec2(abs(c - sep), a);
@@ -483,7 +566,7 @@ export const RIBBON_J_GLSL = /* glsl */`
  */
 export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
     const P = deepFreeze(mergeFlareShape(base, overrides));
-    const { ribbon: R, shear: S, height: H, arcade: A, plume: PL, hook: HK, cusp: CU, rope: RP } = P;
+    const { ribbon: R, shear: S, height: H, arcade: A, plume: PL, hook: HK, cusp: CU, rope: RP, flow: FL } = P;
     const tanOnset = Math.tan(S.onsetDeg * DEG), tanOnsetC = Math.tan(S.onsetComplexDeg * DEG), tanFinal = Math.tan(S.finalDeg * DEG);
 
     function classFactor(cls) {
@@ -840,12 +923,91 @@ export function makeFlareModel(overrides = null, base = FLARE_SHAPE_DEFAULT) {
         return { front, tail, radius, alpha, rMax };
     }
 
+    // ── Plasma moving along the field ─────────────────────────────────────
+    const smooth01 = (x) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c); };
+    /**
+     * What is moving along ONE flare loop of a given age. A loop is not lit end to end the moment it
+     * forms: heated chromosphere EVAPORATES up both legs and fills it (`fill` = the fraction of each leg
+     * the front has reached, ≥ 1.15 = full), and once it has cooled, condensations RAIN back down the legs
+     * (`rain` = how far that has set in, `rainPhase` = how far the clump pattern has travelled, in clumps).
+     * With `flow.evap` 0 every loop is full from the start and with `flow.rain` 0 nothing drains — the
+     * loops as drawn before 2026-11-22.
+     */
+    function loopFlow({ age = 0, halfLength = 0.05 } = {}) {
+        const hl = Math.max(halfLength, 1e-9), a = Math.max(age, 0), since = a - FL.rainOnset;
+        return {
+            fill: FL.evap > 0 ? Math.min(2, FL.evap * a / hl) : 2,
+            rain: FL.rain > 0 ? smooth01(since / Math.max(FL.rainRamp, 1e-9)) : 0,
+            rainPhase: FL.rain > 0 && since > 0 ? FL.clumps * FL.rain * since / hl : 0,
+            clumps: FL.clumps,
+        };
+    }
+    /** ∫ rate(t′)/length(t′) dt′ from 0 to t — how far a pattern has travelled along something whose length changes. */
+    const travel = (rate, lengthAt, t, steps = 32) => {
+        if (!(t > 0) || !(rate > 0)) return 0;
+        let sum = 0;
+        for (let k = 0; k <= steps; k++) sum += (k === 0 || k === steps ? 0.5 : 1) / Math.max(lengthAt(t * k / steps), 1e-9);
+        return rate * sum * t / steps;
+    };
+    /**
+     * THE CURRENT SHEET under an erupting rope: the thin hot layer between the top of the flare arcade
+     * (where the newest, still-pointed loops end) and the rope's underside, in which the field reconnects.
+     * Plasma leaves the reconnection point both ways along it — down onto the arcade, up into the rope.
+     * Heights are above the photosphere, R☉; `x` is where the flows part (0 arcade top … 1 rope);
+     * `phase` is how far the blob pattern has travelled outward, in blobs.
+     */
+    function sheetState(t, cls = 'M', complex = false) {
+        const st = ropeState(t, cls);
+        const lowAt = (tt) => arcadeHeight(Math.max(tt, 0), cls, complex) * (1 + CU.shrink);
+        const lenAt = (tt) => { const s2 = ropeState(tt, cls); return s2.apexH - s2.minorR - lowAt(tt); };
+        const lowH = lowAt(t), highH = st.apexH - st.minorR, length = highH - lowH;
+        const active = st.active && FL.sheetOut > 0 && length > 0;
+        return {
+            active, lowH, highH, length: Math.max(length, 0), x: FL.sheetX, clumps: FL.sheetClumps,
+            alpha: active ? st.alpha * smooth01((length - 0.01) / 0.05) : 0,
+            phase: active ? FL.sheetClumps * travel(FL.sheetOut, lenAt, t) : 0,
+        };
+    }
+    /** The sheet as lines: from the arcade's top, at stations along the inversion line, up to the rope's underside. */
+    function sheetStrands({ latRad, lonRad, pilAngle, t = 0, cls = 'M', chirality = 1, complex = false, n = 7, samples = 24 } = {}) {
+        const ss = sheetState(t, cls, complex);
+        if (!ss.active) return [];
+        const frame = tangentFrame(latRad, lonRad, pilAngle), N = 96;
+        const ax = ropeAxis({ latRad, lonRad, pilAngle, t, cls, chirality, samples: N });
+        const half = 0.7 * ribbonLength0(cls), out = [];
+        for (let i = 0; i < n; i++) {
+            const f = n > 1 ? i / (n - 1) : 0.5, a = (f - 0.5) * 2 * half;
+            const foot = add(scale(frame.pilAxis, a), scale(frame.radial, Math.sqrt(Math.max(0, 1 - a * a))));
+            const lo = scale(foot, 1 + ss.lowH);
+            // The rope runs from −χ·s0 to +χ·s0 along the inversion line, so a station on the +PIL side meets the +χ half of it.
+            const k = Math.round(N * (0.5 + ax.chirality * (f - 0.5) * 0.36));
+            const hi = add(ax.pts[k], scale(ax.frames[k].N, -ax.radius[k]));
+            if (!(norm(hi) > norm(lo) + 1e-4)) continue;
+            const pts = [];
+            for (let j = 0; j <= samples; j++) { const u = j / samples; pts.push(add(scale(lo, 1 - u), scale(hi, u))); }
+            out.push({ pts, station: i, weight: 0.55 + 0.45 * arcadeHash(arcadeSeed(latRad, lonRad), i, 3, 11) });
+        }
+        return out;
+    }
+    /**
+     * The filament DRAINING as the rope erupts: its cool material runs back down the rope's legs.
+     * `rain` sets in as the rope leaves its starting height; `rainPhase` is the clump pattern's travel on a
+     * strand whose half-length is the rope axis's own at each instant (it grows — hence an integral).
+     */
+    function ropeDrain({ latRad, lonRad, pilAngle, t = 0, cls = 'M', chirality = 1 } = {}) {
+        const st = ropeState(t, cls);
+        if (!(FL.rain > 0) || !st.active) return { rain: 0, rainPhase: 0, clumps: FL.clumps };
+        const halfAt = (tt) => 0.5 * polylineLength(ropeAxis({ latRad, lonRad, pilAngle, t: tt, cls, chirality, samples: 24 }).pts);
+        return { rain: smooth01((st.apexH / st.h0 - 1.5) / 2), rainPhase: FL.clumps * travel(FL.rain, halfAt, t, 12), clumps: FL.clumps };
+    }
+
     return Object.freeze({
         id: P.id, params: P,
         classFactor, ribbonSeparation, ribbonWidth, ribbonLength0, ribbonAlongSigma, ribbonDecay,
         arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
         loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
         ropeSpeed, ropeApexHeight, ropeState, ropeAxis, ropeStrands,
+        loopFlow, sheetState, sheetStrands, ropeDrain,
         // The parameter set under the names the consumers and gates already read.
         CLASS_FACTOR: P.classFactor,
         RIBBON: Object.freeze({ SEP0: R.sep0, SEP_RATE: R.sepRate, SEP_GAIN: R.sepGain, SEP_TAU: R.sepTau,
@@ -863,6 +1025,7 @@ export const {
     arcadeShear, arcadeShearAngle, arcadeHeight, arcadeFormTime, arcadeLoops, arcadeShells, plumeState,
     loopRelax, loopProfile, loopHeightFactor, ribbonHook, ribbonCurves,
     ropeSpeed, ropeApexHeight, ropeState, ropeAxis, ropeStrands,
+    loopFlow, sheetState, sheetStrands, ropeDrain,
     CLASS_FACTOR, RIBBON, ARCADE,
 } = FLARE_MODEL;
 /** The along-PIL σ every class used until 2026-11-20 (see ribbonLength0). */

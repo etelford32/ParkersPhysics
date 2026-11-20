@@ -763,6 +763,103 @@ await ok('rope geometry: feet at the hooks\' centres, an orthonormal frame, a si
     assert.deepEqual(M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', n: 6 })[3].pts[40], M.ropeStrands({ latRad: lat, lonRad: lon, t: 200, cls: 'X', n: 6 })[3].pts[40]);
 });
 
+await ok('plasma along a loop: it fills from its feet at the evaporation speed, then rains at the rain speed; v1 loops are always full', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const M = FG.FLARE_MODEL, F = M.params.flow, V1 = FG.makeFlareModel(null, FG.FLARE_SHAPE_V1);
+    // FILL: the front is at evap × age along a leg of the loop's own half-length; twice the length takes twice as long.
+    close(M.loopFlow({ age: 10, halfLength: 0.05 }).fill, F.evap * 10 / 0.05, 1e-15);
+    close(M.loopFlow({ age: 10, halfLength: 0.10 }).fill, 0.5 * M.loopFlow({ age: 10, halfLength: 0.05 }).fill, 1e-15);
+    assert.equal(M.loopFlow({ age: 0, halfLength: 0.05 }).fill, 0, 'a loop that has just formed is lit only at its feet');
+    assert.equal(M.loopFlow({ age: 1e6, halfLength: 0.05 }).fill, 2, 'and stays full once filled');
+    // RAIN: none before the onset age, all of it one ramp later, and the clumps then travel at the rain speed.
+    assert.equal(M.loopFlow({ age: F.rainOnset - 1, halfLength: 0.05 }).rain, 0);
+    assert.equal(M.loopFlow({ age: F.rainOnset + F.rainRamp, halfLength: 0.05 }).rain, 1);
+    const p0 = M.loopFlow({ age: F.rainOnset + 100, halfLength: 0.05 }), p1 = M.loopFlow({ age: F.rainOnset + 101, halfLength: 0.05 });
+    close((p1.rainPhase - p0.rainPhase) / F.clumps * 0.05, F.rain, 1e-12, 'a clump moves rain × Δt along the leg');
+    // NEGATIVE CONTROL (v1, the loops as drawn before): always full, never raining — and the gain is then exactly 1.
+    for (const age of [0, 5, 300, 900]) { const f = V1.loopFlow({ age, halfLength: 0.05 }); assert.equal(f.fill, 2); assert.equal(f.rain, 0);
+        for (const arc of [0, 0.13, 0.5, 0.91, 1]) assert.equal(FG.strandFlowGain(arc, 1, f.fill, f.rain, f.rainPhase, f.clumps), 1); }
+    assert.equal(FG.polylineLength([[0, 0, 0], [3, 4, 0], [3, 4, 12]]), 17);
+
+    // THE GAIN (strandFlowGain): mode 0 is 1; a half-filled loop is lit below its front and dark above it, with the front brightest…
+    assert.equal(FG.strandFlowGain(0.3, 0, 0.4, 1, 3, 3.5), 1);
+    const g = (arc, fill) => FG.strandFlowGain(arc, 1, fill, 0, 0, 3.5);
+    close(g(0.05, 0.5), 1, 1e-6, 'lit near the foot'); assert.ok(g(0.5, 0.5) < 1e-6, 'dark at the top');
+    assert.ok(g(0.25, 0.5) > 1.5 && g(0.75, 0.5) > 1.5, 'the evaporation front, on both legs');
+    close(g(0.2, 0.5), g(0.8, 0.5), 1e-12, 'the two legs fill alike');
+    // …and rain clumps move TOWARD THE FEET as the travel grows: the brightest point of a leg is lower later.
+    const peak = (phase) => { let best = 0, at = 0; for (let i = 20; i <= 480; i++) { const arc = i / 1000; const v = FG.strandFlowGain(arc, 1, 2, 1, phase, 3.5); if (v > best) { best = v; at = arc; } } return at; };
+    assert.ok(peak(0.10) < peak(0.0) && peak(0.20) < peak(0.10), `rain falls: ${peak(0).toFixed(3)} → ${peak(0.1).toFixed(3)} → ${peak(0.2).toFixed(3)}`);
+    // The two legs do not rain in step.
+    assert.ok(Math.abs(FG.strandFlowGain(0.3, 1, 2, 1, 0.4, 3.5) - FG.strandFlowGain(0.7, 1, 2, 1, 0.4, 3.5)) > 0.05);
+    // A sheet (mode 2): blobs move AWAY from the parting point on both sides.
+    const peakIn = (phase, lo, hi) => { let best = 0, at = 0; for (let i = 0; i <= 400; i++) { const arc = lo + (hi - lo) * i / 400; const v = FG.strandFlowGain(arc, 2, 0.3, 1, phase, 4); if (v > best) { best = v; at = arc; } } return at; };
+    assert.ok(peakIn(0.30, 0.45, 0.70) > peakIn(0.20, 0.45, 0.70), 'above the parting point they move up');
+    assert.ok(peakIn(0.30, 0.05, 0.28) < peakIn(0.22, 0.05, 0.28), 'below it they move down');
+});
+
+await ok('STRAND_FLOW_GLSL is strandFlowGain: the shader text, transliterated to JS, gives the same numbers', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    assert.ok(!FG.STRAND_FLOW_GLSL.includes('`'), 'no backtick inside the GLSL');
+    const fn = (name) => {
+        const m = new RegExp('float ' + name + '\\(([^)]*)\\)\\s*\\{([\\s\\S]*?)\\n    \\}').exec(FG.STRAND_FLOW_GLSL);
+        assert.ok(m, 'found ' + name);
+        const args = m[1].split(',').map((x) => x.trim().replace(/^float\s+/, ''));
+        const body = m[2].replace(/\bfloat\s+/g, 'let ').replace(/\b(abs|sin|exp|min|max)\(/g, 'Math.$1(');
+        return [args, body];
+    };
+    const [ca, cb] = fn('strandFlowClump'), [ga, gb] = fn('strandFlowGain');
+    const prelude = 'const mix = (x, y, a) => x * (1 - a) + y * a; const smoothstep = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };\n';
+    const clump = new Function(...ca, cb);
+    const gain = new Function('strandFlowClump', ...ga, prelude + gb);
+    let rnd = 4242; const rand = () => ((rnd = Math.imul(rnd, 1103515245) + 12345 >>> 0) / 4294967296);
+    for (let k = 0; k < 3000; k++) {
+        const arc = rand(), mode = k % 3, p1 = mode === 2 ? rand() : 2.2 * rand(), p2 = rand(), p3 = 20 * rand(), kk = 2 + 4 * rand();
+        close(gain(clump, arc, mode, p1, p2, p3, kk), FG.strandFlowGain(arc, mode, p1, p2, p3, kk), 1e-12);
+        close(clump(p3), FG.strandFlowClump(p3), 1e-15);
+    }
+    // The strand shader interpolates it and never retypes it.
+    const arc = _readArcade(new URL('../js/flare-arcade.js', import.meta.url), 'utf8');
+    assert.ok(arc.includes('${flowGlsl}') && arc.includes('FG.STRAND_FLOW_GLSL') && !arc.includes('float strandFlowGain('));
+});
+
+await ok('the current sheet: from the arcade\'s top to the rope\'s underside, outflow at the stated speed; none without a rope', async () => {
+    const FG = await import('../js/flare-geometry.js');
+    const M = FG.FLARE_MODEL, F = M.params.flow, lat = 14 * DEG, lon = 20 * DEG, N = 24;
+    for (const t of [120, 200, 300]) {
+        const ss = M.sheetState(t, 'X'), st = M.ropeState(t, 'X');
+        assert.ok(ss.active && ss.length > 0);
+        close(ss.highH, st.apexH - st.minorR, 1e-15, 'its top is the rope\'s underside');
+        close(ss.lowH, M.arcadeHeight(t, 'X') * (1 + M.params.cusp.shrink), 1e-15, 'its foot is where the newest, still-pointed loops end');
+        const lines = M.sheetStrands({ latRad: lat, lonRad: lon, t, cls: 'X', chirality: 1, n: 7, samples: N });
+        assert.equal(lines.length, 7);
+        const ax = M.ropeAxis({ latRad: lat, lonRad: lon, t, cls: 'X', chirality: 1, samples: 96 });
+        for (const S of lines) {
+            close(vec.norm(S.pts[0]), 1 + ss.lowH, 1e-9, 'starts on the arcade\'s top');
+            for (let i = 1; i <= N; i++) assert.ok(vec.norm(S.pts[i]) > vec.norm(S.pts[i - 1]), 'rises all the way');
+            // It ends ON the rope's tube, on its underside: one tube radius from the axis, toward the Sun.
+            let miss = Infinity, bi = 0;
+            ax.pts.forEach((p, i) => { const d = Math.abs(vec.norm(vec.add(S.pts[N], vec.scale(p, -1))) - ax.radius[i]); if (d < miss) { miss = d; bi = i; } });
+            assert.ok(miss < 1e-9, `ends on the tube (off by ${miss.toExponential(2)})`);
+            const off = vec.unit(vec.add(S.pts[N], vec.scale(ax.pts[bi], -1)));
+            close(vec.dot(off, ax.frames[bi].N), -1, 1e-9, 'on the underside: straight along −N from the axis');
+            assert.ok(bi > 96 * 0.3 && bi < 96 * 0.7, 'under the rope\'s middle, not its legs');
+        }
+    }
+    // Outflow: the pattern's travel × the sheet's length ÷ blobs advances at sheetOut (the integral's own derivative).
+    const a = M.sheetState(240, 'X'), b = M.sheetState(240.5, 'X');
+    close((b.phase - a.phase) / 0.5 / F.sheetClumps * 0.5 * (a.length + b.length), F.sheetOut, 0.02 * F.sheetOut, 'blobs leave at the stated speed');
+    assert.ok(b.phase > a.phase, 'and never run backwards, though the sheet is being stretched');
+    // The filament drains: nothing while the rope sits, all of it once it has risen; the travel only grows.
+    const d0 = M.ropeDrain({ latRad: lat, lonRad: lon, t: 5, cls: 'X' }), d1 = M.ropeDrain({ latRad: lat, lonRad: lon, t: 260, cls: 'X' }), d2 = M.ropeDrain({ latRad: lat, lonRad: lon, t: 300, cls: 'X' });
+    assert.ok(d0.rain < 0.01 && d1.rain === 1 && d2.rainPhase > d1.rainPhase && d1.rainPhase > d0.rainPhase);
+    // NEGATIVE CONTROLS: no rope (v1), or no sheet speed — no sheet, no lines, no drainage.
+    const V1 = FG.makeFlareModel(null, FG.FLARE_SHAPE_V1);
+    assert.equal(V1.sheetState(240, 'X').active, false); assert.equal(V1.sheetStrands({ latRad: lat, lonRad: lon, t: 240, cls: 'X' }).length, 0);
+    assert.equal(V1.ropeDrain({ latRad: lat, lonRad: lon, t: 240, cls: 'X' }).rain, 0);
+    assert.equal(FG.makeFlareModel({ flow: { sheetOut: 0 } }).sheetState(240, 'X').active, false);
+});
+
 await ok('the arcade\'s exposure control: untouched below its target, holds the target above it, never below its floor, never up', async () => {
     const loop = (o) => ({ opacity: 0.5, lenPx: 300, halfPx: 2, x0: 100, x1: 400, y0: 100, y1: 300, ...o });
     // One loop over a big box: far below the target, exposure exactly 1.
