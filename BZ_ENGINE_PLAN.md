@@ -1,14 +1,18 @@
 # BZ_ENGINE_PLAN.md — the Bz analysis engine
 
-> **Status (2026-11-20): B0, B1 and B2 BUILT and run on real data.** Feeds are
-> settled (§11), the three-spacecraft L1 fusion is live at `/api/bz/l1` (§12)
-> and the phase-front propagation + reconnection rate at `/api/bz/flux` (§13).
-> **Read §12–§13 before §4: the first real day did NOT show the gains §4
-> promises** — it was a quiet day, and on a quiet day the spacecraft are too
-> far apart for their fields to be the same structure. That is a measurement,
-> recorded with its numbers, not a tuning problem. Sections 1–9 are the
-> original plan; where they disagree with §11–§13, the later sections win.
-> B3+ are not built. Owner decisions: §10.
+> **Status (2026-11-20): B0–B4 BUILT and run on real data.** Feeds settled
+> (§11); three-spacecraft L1 fusion `/api/bz/l1` (§12); propagation + flux
+> `/api/bz/flux` (§13); GOES residual + ledger `/api/bz/geo` (§14); the
+> altitude ladder `/api/bz/column` and the shared provider (§15).
+> **Read §12–§15 before §4. On the one real day looked at — a quiet one —
+> every PREDICTIVE claim in §4 scored at or below its control**: lag alignment
+> did not beat the naive mean, the fixed GEO formula lost to a nominal wind,
+> and the learning GEO filter lost to 30-minute persistence. What held up on
+> real data is the MEASUREMENT side (frames, slots, residuals, flags) and the
+> honesty of the error bars (61–69 % coverage of a stated 1σ). Those are
+> measurements with their numbers recorded, not tuning problems, and nothing
+> below has been tuned to hide them. Sections 1–9 are the original plan; where
+> they disagree with §11–§15, the later sections win. B5+ are not built.
 ---
 
 ## 0. The one-paragraph version
@@ -617,3 +621,132 @@ so it can be watched.
    some are an artefact of the method switching at 30-minute step boundaries
    and moving the delay discontinuously. Not separated yet.
 6. Only one production day has been looked at, and it was quiet.
+
+---
+
+## 14. B3 — the geosynchronous rung (BUILT; first real day MEASURED 2026-11-20)
+
+`js/bz/geo-residual.js` · `geo-analysis.js` · `/api/bz/geo[?summary=1]` ·
+gate `node tests/bz-geo.mjs` (10 checks).
+
+**The measurement works, and the data confirm the frame.** GOES publishes
+E (earthward) / P (spin axis) / N (east). IGRF at the two NOMINAL slots, in
+that frame, against the magnetometers:
+
+| | He meas / IGRF | Hn meas / IGRF | Hp meas / IGRF |
+|---|---|---|---|
+| GOES-19, 75.2°W | 32.6 / 31.9 | 0.4 / −0.8 | 100.4 / 98.1 |
+| GOES-18, 137.2°W | 14.4 / 13.2 | 14.1 / 16.1 | 91.4 / 101.3 |
+
+He and Hn agree to 1–2 nT; swapping the two slots misses He by ~18 nT and
+flipping E's sign by > 50 nT — so the convention and the longitudes are
+settled by the instrument, with no position in the file. Over 7 days the
+median |residual| of He and Hn is 1.0–2.5 nT. No GSE/GSM chain is involved.
+
+- The Hp residual (measured − IGRF) is the signal: over 7 days it has a mean
+  level of about **−11 nT** and a **±21 nT** local-time swing (noon high,
+  midnight low) on BOTH satellites.
+- Arcjets: GOES-19 had 148 flagged minutes in 7 days (188 excluded with the
+  10-minute guard); GOES-18 none.
+- The Hp daily maximum falls 0.5–0.6 h before local noon on both satellites.
+
+**The first ledger FAILED.** Prediction: the magnetopause-current field
+(uniform + sunward-gradient terms) at the Shue standoff of the wind that has
+arrived. Control: the same formula at a nominal wind.
+
+| | RMSE live wind | RMSE nominal wind | skill | r |
+|---|---|---|---|---|
+| GOES-19 | 9.8 nT | 7.2 nT | **−0.85** | 0.79 |
+| GOES-18 | 9.5 nT | 6.9 nT | **−0.89** | 0.87 |
+
+Why: the wind that day was very thin (0.3 nPa), so the live standoff was
+~13.6 R_E and the formula predicted a SMALL daily swing — while the observed
+swing was ±21 nT, because most of the day–night asymmetry at 6.6 R_E is the
+TAIL current, which the formula omits. The nominal wind "wins" by accident: a
+closer magnetopause gives a larger swing that happens to resemble the tail's.
+The correlation (0.8) is the shared local-time shape, not skill. The response
+lag could not be measured (the driven part anti-correlates, −0.45 to −0.69,
+which is the same confound). **A fixed magnetopause-current term is not a
+model of the field at geosynchronous orbit**, and typing in more coefficients
+from memory (the two used here are already UNVERIFIED) is not the fix.
+
+## 15. B4 — shock jump, learning filter, the ladder (BUILT; MEASURED 2026-11-20)
+
+`js/bz/sheath.js` · `geo-filter.js` · `column.js` ·
+`js/bz-engine-provider.js` · `/api/bz/column` · gate
+`node tests/bz-column.mjs` (9 checks, incl. an OSSE).
+
+**The ladder exists.** One object, ten rungs, each tagged MEASURED /
+ESTIMATED / FORECAST / NOT_BUILT / NOT_AVAILABLE with σ, basis and caveats.
+On the real day at 15:22 UT:
+
+| Rung | Kind | Bz (GSM) / value |
+|---|---|---|
+| L1 (SOLAR1, 3 of 3 spacecraft) | MEASURED | −0.66 ± 0.36 nT |
+| Bow-shock nose, 18.4 R_E | ESTIMATED | −0.30 ± 0.43 nT (seen at L1 58 min earlier) |
+| …same, newest arrival | FORECAST | −0.66 nT, 54 min ahead |
+| Magnetosheath at the shock | ESTIMATED | −0.86 nT (×2.9; M_fast 3.1, β 0.36) |
+| Subsolar magnetopause, 13.6 R_E | ESTIMATED | 2.6 ± 3.2 kV opening (Newell-scaled 6.8) |
+| Geosynchronous, GOES-19 / -18 | MEASURED | Hp residual +9.5 / −2.5 nT |
+| Ring current · LEO · E-region · ground · below ground | NOT_BUILT | — |
+
+**What is NOT in B4, against the plan:**
+
+1. **The SWMF-fitted sheath transfer is not built.** The repository holds no
+   MHD magnetosheath output to fit (`swmf/fixtures` carries polar-cap
+   potential and hemispheric power only). `sheath.js` is the EXACT
+   perpendicular-shock jump at the nose — no fitted number — and is a LOWER
+   bound on the field at the magnetopause. Pile-up, sheath transit time and
+   everything off the nose are missing and named in its header. To build the
+   real thing: export B, ρ, v along the stagnation line from a BATS-R-US run.
+2. **The "one posterior for the whole column" of §4.8 is not built.** With
+   the interior transfer functions failing their first test (§14), a joint
+   filter would have been built on kernels known not to predict. What exists
+   is `column.js` (an ASSEMBLY — it computes nothing) plus one real
+   sequential estimator at the one interior rung that has an instrument.
+
+**The learning filter, and its real-data score.** `geo-filter.js` is a Kalman
+filter whose STATE is six coefficients: a level, two local-time harmonics,
+and one gain on √P_dyn of the arrived wind. It predicts 30 minutes ahead and
+is scored against persistence and against itself with the gain pinned at 0.
+
+In the OSSE it recovers a planted gain (12.2 vs 12) with skill 0.93 over the
+harmonics-only control, a scrambled driver earns nothing, and it is causal to
+the bit. On 7 days of real GOES data:
+
+| | RMSE filter | RMSE harmonics-only | RMSE persistence (30 min) | 1σ coverage |
+|---|---|---|---|---|
+| GOES-19 (n 9460) | 4.74 nT | 4.45 nT | 4.34 nT | 66 % |
+| GOES-18 (n 9709) | 4.69 nT | 4.49 nT | 4.33 nT | 61 % |
+
+- **It loses to 30-minute persistence** (skill −0.19, −0.17) and to its own
+  no-wind control (−0.13, −0.09).
+- The learned gain is −0.3 ± 2.0 and −0.7 ± 2.0 nT/√nPa — **consistent with
+  zero**. Only ~1300 of the 10 000 minutes had a driver at all (the L1 files
+  are 24 h; the GOES files are 7 days), and on that day the driver barely
+  moved. The gain cannot be learned from one quiet day.
+- The level and swing it learned (−11 nT, ±21 nT) are real and stable, and
+  its stated 1σ covered 61–66 %.
+
+So at geosynchronous orbit the engine currently MEASURES well and forecasts
+no better than "it will be what it was half an hour ago". That is the honest
+state. What would change it, in order of expected value:
+  (a) more than 24 h of L1 history to learn the gain over — our own
+      `sw_geomag_dataset` holds ~4 months of minute L1 data (read through
+      `api/_lib/sw-geomag-store.js`), which a ROUTE can join to the 7-day
+      GOES record; the 24 h limit is the SWPC file's, not ours;
+  (b) a disturbed day — a pressure pulse or a southward turning is when a
+      wind-driven term can beat persistence at all;
+  (c) a tail-current driver (the midnight sector responds to loading and
+      unloading, not to √P_dyn);
+  (d) scoring at 60–90 minutes, where persistence weakens and the L1 lead
+      still covers the forecast.
+
+**Reused, not forked:** `flux.js` now delegates Newell to
+`js/ring-current-model.js` `newellCoupling` (B2 had written a second copy;
+only the gap rule differs and the gate pins that).
+
+**The provider** (`js/bz-engine-provider.js`) is the one way a page gets the
+column: one poll loop per page, `window.__bzColumn` + a `bz-column` event, a
+failed fetch published as DOWN with the last good column marked stale. No
+page consumes it yet (B6).

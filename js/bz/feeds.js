@@ -150,17 +150,17 @@ export const FEEDS = Object.freeze({
         // the flag is not a rarity. The 1-day files are supersets of the
         // 6-hour ones, so only they are requested.
         verified: {
-            on: '2026-11-20', candidate: 'goes-primary-1d+goes-secondary-1d', cadence_s: 60,
+            on: '2026-11-20', candidate: 'goes-primary-7d+goes-secondary-7d', cadence_s: 60, window_days: 7,
             satellites: { primary: 'GOES-19', secondary: 'GOES-18' }, arcjet_flag: true,
         },
         // Primary AND secondary are both wanted (two longitudes), so this
         // feed MERGES every candidate that answers instead of stopping.
         merge: true,
         // B4 added the 7-day files: the geo-filter learns a local-time
-        // baseline and one day is too short for it. UNVERIFIED at the time of
-        // writing — the merge keeps the LONGER record per satellite, so if
-        // they 404 the 1-day files carry on and the route's candidate report
-        // says which answered.
+        // baseline and one day is too short for it. MEASURED 2026-11-20: both
+        // 7-day files answer (10 070 one-minute rows each). The merge keeps
+        // the LONGER record per satellite, so if they ever 404 the 1-day
+        // files carry on and the route's `feeds` says which answered.
         candidates: [
             { id: 'goes-primary-7d',   url: `${SWPC}/json/goes/primary/magnetometers-7-day.json` },
             { id: 'goes-secondary-7d', url: `${SWPC}/json/goes/secondary/magnetometers-7-day.json` },
