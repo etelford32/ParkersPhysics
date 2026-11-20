@@ -187,6 +187,14 @@ export const PIPELINES = [
       warnAgeS:  15 * 60, critAgeS: 60 * 60,
       notes: 'Rung 0 of the Bz engine: the 1-minute L1 magnetometer rows of EVERY spacecraft in rtsw_mag_1m.json, kept per spacecraft — measured 2026-11-20 as SOLAR1 (active), IMAP and ACE; DSCOVR is not in the file. meta=1 reports the candidate status, cadence, spacecraft, field_map and unmapped keys. A dead upstream (or a WAF 403 at the edge) answers 200 + freshness:expired + reasons:[no_candidate_answered], never a 5xx; the same module (js/bz/feeds.js) runs browser-direct as the fallback.' },
 
+    { id: 'bz-l1-fused',        label: 'Bz engine · fused L1 field',
+      endpoint: '/api/bz/l1',
+      probePath: '/api/bz/l1?summary=1',
+      category: 'space-weather', upstream: 'NOAA SWPC RTSW (fused)',
+      cadence_s: 60,    prewarm: null, probeTimeoutMs: 20_000,
+      warnAgeS:  15 * 60, critAgeS: 60 * 60,
+      notes: 'B1 of the Bz engine: Bz at the active L1 spacecraft, fused from every spacecraft in the file after MEASURED arrival-time alignment (js/bz/fuse-l1.js), with sigma, flags, the lags beside their flat-delay baselines, the withheld-spacecraft score and a GSE/GSM frame check. Computed per request from two feeds. Degrades without 5xx: magnetometers down = freshness:expired + reasons:[l1_mag_unavailable]; ephemerides down or only one spacecraft = freshness:stale with the reason named.' },
+
     { id: 'bz-geo-mag',         label: 'Bz engine · GOES magnetometers',
       endpoint: '/api/bz/feeds?feed=geo-mag',
       probePath: '/api/bz/feeds?feed=geo-mag&meta=1',

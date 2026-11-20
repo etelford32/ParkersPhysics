@@ -4,12 +4,21 @@
 #                  normalisers: gaps are null, spacecraft stay separate, cadence
 #                  is measured, candidates walk in order, a dead upstream is
 #                  200 + freshness:expired (never a 5xx), no passthrough URL
+#   bz-l1.mjs      js/bz/{frames,fuse-l1,spectrum,l1-analysis}.js + api/bz/l1.js —
+#                  against a PLANTED tilted solar wind: lags recovered, the lag
+#                  track is causal, the fused field beats one spacecraft and the
+#                  naive mean is the negative control, a glitching spacecraft is
+#                  blamed and excluded, Parseval holds, the GSE→GSM angle
+#                  reproduces production
 name: bz-kernels
 
 on:
   push:
     paths:
       - 'js/bz/**'
+      - 'js/geomag/dipole.js'
+      - 'js/flux-rope-noise.js'
+      - 'api/_lib/bz-fetch.js'
       - 'api/bz/**'
       - 'tests/bz-*.mjs'
       - 'tests/fixtures/bz/**'
@@ -18,6 +27,9 @@ on:
   pull_request:
     paths:
       - 'js/bz/**'
+      - 'js/geomag/dipole.js'
+      - 'js/flux-rope-noise.js'
+      - 'api/_lib/bz-fetch.js'
       - 'api/bz/**'
       - 'tests/bz-*.mjs'
       - 'tests/fixtures/bz/**'
@@ -44,3 +56,5 @@ jobs:
           node-version: '22'
       - name: feed catalogue + normalisers + route
         run: node tests/bz-feeds.mjs
+      - name: L1 rung — frames, multi-spacecraft fusion, spectrum, route
+        run: node tests/bz-l1.mjs

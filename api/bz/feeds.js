@@ -26,29 +26,14 @@
  * if they ever 403, the candidate report says so per URL and the same
  * js/bz/feeds.js runs browser-direct as the fallback.
  */
-import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+import { jsonOk, jsonError } from '../_lib/responses.js';
+import { fetchJson } from '../_lib/bz-fetch.js';
 import { FEEDS, FEED_IDS, runFeed, summarize } from '../../js/bz/feeds.js';
 
 export const config = { runtime: 'edge' };
 
 const DEFAULT_SAMPLES = 180;
 const MAX_SAMPLES = 1440;
-
-async function fetchJson(url) {
-    let res;
-    try {
-        res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' }, timeoutMs: 9000 });
-    } catch (e) {
-        return { ok: false, status: null, error: String(e?.name === 'TimeoutError' ? 'timeout' : (e?.message ?? e)).slice(0, 120) };
-    }
-    const contentType = res.headers.get('content-type');
-    if (!res.ok) return { ok: false, status: res.status, contentType, error: `HTTP ${res.status}` };
-    // A 200 that is not JSON is an error page (the DONKI lesson) — say so.
-    let body;
-    try { body = await res.json(); }
-    catch { return { ok: false, status: res.status, contentType, error: 'not JSON' }; }
-    return { ok: true, status: res.status, contentType, body };
-}
 
 /** Keep only the trailing `n` samples of each spacecraft / satellite. */
 function trimSamples(data, n) {
