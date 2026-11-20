@@ -59,7 +59,37 @@ async function boot(page, query = '') {
 }
 
 /** Median luminance (0–255) of small patches at plane-of-sky points (R☉), through the page's own camera. */
+/**
+ * THE FRAME ON SCREEN MUST BE THE ONE THE CAMERA DESCRIBES. The page settles its
+ * framing after boot (the safe frame is re-measured as docks mount, and the
+ * principal point moves with it), and on a starved software rasteriser a frame
+ * takes seconds — so a screenshot can show a frame drawn BEFORE the camera state
+ * the probe projects through. Measured 2026-11-20: run beside two other workers
+ * this spec failed 5 times in 6, every time with the same numbers (a limb point
+ * black, a sky point at 95) — the picture and the probe positions were one
+ * framing apart. Wait until the camera has stopped changing, then until frames
+ * have been drawn with it.
+ */
+async function settle(page) {
+    const sig = () => page.evaluate(() => {
+        const s = window.__sun, c = s.camera, el = s.renderer.domElement;
+        return JSON.stringify([c.position.toArray().map((x) => +x.toFixed(5)), c.fov, c.aspect,
+            c.view && c.view.enabled ? [c.view.offsetX, c.view.offsetY, c.view.fullWidth, c.view.fullHeight] : null, el.width, el.height]);
+    });
+    let prev = await sig(), same = 0;
+    for (let i = 0; i < 80 && same < 4; i++) {
+        await page.waitForTimeout(500);
+        const cur = await sig();
+        same = cur === prev ? same + 1 : 0; prev = cur;
+    }
+    // …and three animation frames rendered with that camera.
+    await page.evaluate(() => new Promise((ok) => { let n = 0; const f = () => (++n >= 3 ? ok() : requestAnimationFrame(f)); requestAnimationFrame(f); }));
+    return prev;
+}
+
 async function probe(page, points, testInfo = null) {
+    await page.addStyleTag({ content: '#canvas-wrap > *:not(canvas), nav, #lsb-bar { visibility: hidden !important; }' });
+    const before = await settle(page);
     const px = await page.evaluate((points) => {
         const s = window.__sun, T = s.THREE, el = s.renderer.domElement, r = el.getBoundingClientRect(), q = s.offLimbMesh.quaternion;
         return Object.fromEntries(Object.entries(points).map(([k, [x, y]]) => {
@@ -67,14 +97,16 @@ async function probe(page, points, testInfo = null) {
             return [k, [Math.round(r.left + (v.x * 0.5 + 0.5) * r.width), Math.round(r.top + (-v.y * 0.5 + 0.5) * r.height)]];
         }));
     }, points);
-    await page.addStyleTag({ content: '#canvas-wrap > *:not(canvas), nav, #lsb-bar { visibility: hidden !important; }' });
-    await page.waitForTimeout(600);
     const shot = await page.screenshot();
+    expect(await settle(page), 'the camera did not move while the frame was being measured').toBe(before);
     // Keep the picture that was actually MEASURED (and what the page thought it
     // was drawing): a failure here is intermittent under load, and the
     // screenshot Playwright takes at failure time is a later frame.
     if (testInfo) {
-        await testInfo.attach('probed-frame.png', { body: shot, contentType: 'image/png' });
+        const { writeFileSync } = await import('node:fs');
+        const file = testInfo.outputPath('probed-frame.png');
+        writeFileSync(file, shot);
+        await testInfo.attach('probed-frame.png', { path: file, contentType: 'image/png' });
         const state = await page.evaluate(() => { const s = window.__sun; return {
             layers: Object.fromEntries(Object.entries(s.layers).map(([k, m]) => [k, !!m?.visible])),
             togs: Object.fromEntries(['tog-wind', 'tog-loops', 'tog-corona', 'tog-fieldlines', 'tog-prom', 'tog-cmetrain', 'tog-nanoflares'].map(id => [id, document.getElementById(id)?.checked])),
